@@ -17,10 +17,10 @@ struct JetCLIDecisions {
 // The optimizer's options at `level` with `build`'s (the build options)
 // `small` (inlining kept to the O1 limits) and `inline` (which callees
 // inlining takes), plus the environment's pass knobs: JET_OPT_DISABLE (pass
-// names to skip), JET_OPT_SSA_VERIFY, JET_OPT_SSA_STRESS and JET_OPT_DUMP
+// names to skip), JET_OPT_VERIFY, JET_OPT_SSA_STRESS and JET_OPT_DUMP
 // (Opt.jet IROptOptions).
 fn jet_cli_opt_options(level: Int, build: BuildOptions) -> IROptOptions {
-    ir_opt_options_from(level, build_options_value(build, "small") == "true", ir_opt_inline_of(build_options_value(build, "inline")), decisions_sys.get("JET_OPT_DISABLE"), decisions_sys.get("JET_OPT_SSA_VERIFY"), decisions_sys.get("JET_OPT_SSA_STRESS"), decisions_sys.get("JET_OPT_DUMP"))
+    ir_opt_options_from(level, build_options_value(build, "small") == "true", ir_opt_inline_of(build_options_value(build, "inline")), decisions_sys.get("JET_OPT_DISABLE"), decisions_sys.get("JET_OPT_VERIFY"), decisions_sys.get("JET_OPT_SSA_STRESS"), decisions_sys.get("JET_OPT_DUMP"))
 }
 
 // Builds `inputs` into one IR module from its entry and optimizes it as

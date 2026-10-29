@@ -233,7 +233,7 @@ fn task_run(child: I64) {
     jet_scheduler_shield_enter()
     release_cleanup :: jet_rt_session_cleanup_enter(jet_scheduler_native_status())
     coll_call1_unit(sync_load(child + I64{80}), sync_load(child + I64{64}))
-    jet_scheduler_shield_leave()
+    scheduler_shield_leave_finished()
     jet_rt_session_cleanup_leave(release_cleanup)
     scheduler_task_completion_end(frame)
     if (sync_load(child + I64{144}) != I64{0}) -> task_group_release(sync_load(child + I64{136}))
@@ -244,7 +244,7 @@ fn task_run(child: I64) {
         result_cleanup :: jet_rt_session_cleanup_enter(jet_scheduler_native_status())
         coll_slot_drop(sync_load(child + I64{48}), sync_load(child + I64{40}))
         sync_store(child + I64{56}, I64{0})
-        jet_scheduler_shield_leave()
+        scheduler_shield_leave_finished()
         jet_rt_session_cleanup_leave(result_cleanup)
     }
     sync_store(child + I64{32}, jet_scheduler_native_status())

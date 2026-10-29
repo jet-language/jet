@@ -46,10 +46,14 @@ fn ir_string_format(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, forma
     if ir_failed(b) || argument < 0 -> return -1
     operands := [Int]{argument}
     string_row :: ir_string_row(&m)
+    // The selector's constant (a count or width) has the helper's second
+    // parameter's type.
+    count_row := -1
+    if expected > 1 -> count_row = ir_value_type(&m, p, params[1].ty) ?? return ir_type_fail(&b, span, params[1].ty)
     if format == {
-        .Fixed(count) | .Grouped(count) | .Hex(count) | .Sci(count) | .Percent(count) -> &operands.push(ir_word_const(&m, &b, count))
+        .Fixed(count) | .Grouped(count) | .Hex(count) | .Sci(count) | .Percent(count) -> &operands.push(ir_int_constant(&m, &b, count_row, count))
         .Pad(width, fill) | .PadLeft(width, fill) -> {
-            &operands.push(ir_word_const(&m, &b, width))
+            &operands.push(ir_int_constant(&m, &b, count_row, width))
             text :: ir_temp(&m, &b, string_row)
             ir_emit(&b.f, IROp.ConstText, text, ir_intern_text(&m, fill), -1, -1, b.line)
             &operands.push(text)

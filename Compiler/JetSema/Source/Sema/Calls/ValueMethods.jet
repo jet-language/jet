@@ -124,7 +124,33 @@ fn sema_value_method_kind(row: BuiltinMethodRow, method: String, receiver_value:
         .Euclidean(remainder) -> TExprKind.NumericBinaryMethod{receiver: receiver_value, operation: if remainder -> TNumericOp.EuclideanRem else -> TNumericOp.EuclideanDiv, argument: typed[0]}
         .Overflow(prefix, operation) -> TExprKind.OverflowOpt{prefix: prefix, operation: operation, line: line, lhs: receiver_value, rhs: typed[0]}
         .Atomic -> TExprKind.BuiltinMethod{receiver: receiver_value, operation: TBuiltinOp.AtomicMethod{method: method}, args: typed}
+        // sema_call_try_value_method checks these rows as their source call.
+        .RegexSource(member) -> panic("the RegexSource row `{member}` is checked as its core.regex call")
     }
+}
+
+// String's `.matches(pattern)`/`.match(pattern)` call their `core.regex`
+// source helper with the receiver first (D-STR-DECLINE1=C: one regex
+// engine), typed by the helper's declared result; the loader loads
+// core.regex for either spelling.
+fn sema_value_method_regex_source(member: String, receiver_value: TExpr, typed: [TExpr], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    unavailable :: sema_error("E0906", span, "the source `core.regex.{member}` declaration is unavailable", "String's pattern methods run the core.regex engine", "restore the `core.regex` source module")
+    identity :: sema_call_core_module_identity(environment, program, "core.regex") ?? {
+        &diagnostics.push(unavailable)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    target :: sema_call_core_source_target(environment, program, identity, member, [Type]{}, span, true, &diagnostics) ?? {
+        &diagnostics.push(unavailable)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    callee :: sema_call_callee_decl(program, target.symbol.id, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    result :: sema_call_signature_return(target.signature) ?? {
+        &diagnostics.push(unavailable)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    args :: [TCallArg]{sema_value_method_source_arg(receiver_value), sema_value_method_source_arg(typed[0])}
+    value :: sema_tir_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: args}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics)}
 }
 
 // `opt.map(f: T -> R) -> R?`; the callback's own failure carrier
@@ -265,9 +291,18 @@ fn sema_call_try_value_method(receiver: Expr, receiver_value: TExpr, method: Str
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     effect_row := if row.access == AccessConvention.Write -> [EffectRowEntry]{EffectRowEntry{name: "Mem", span: span}} else -> [EffectRowEntry]{}
     if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "{owner}.{method}", span, effect_row, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if row.lowering == .RegexSource(member) -> return sema_value_method_regex_source(member, receiver_value, typed, span, expected, environment, program, &context, &diagnostics)
     result := builtin_method_bind(row.result, receiver_value.ty)
-    if method == "pow" && receiver_value.ty == Type.Int && args.len() == 1 && sema_expr_written_negative_integer(args[0].expr) -> result = Type.Named{name: "Fraction"}
     line :: sema_source_line_at(environment.source_segments, span) ?? 0
+    if method == "pow" && receiver_value.ty == Type.Int && args.len() == 1 && sema_expr_written_negative_integer(args[0].expr) {
+        // `x.pow(-n)` is the exact Fraction 1 / x^n (from_parts normalizes
+        // the sign and reduces; x == 0 stops "divided by zero").
+        exponent :: sema_tir_node(Type.Int, TExprKind.Unary{op: TUnaryOp.Neg, operand: typed[0].copy()}, span)
+        power :: sema_tir_expr(Type.Int, sema_value_method_kind(row, method, receiver_value, [TExpr]{exponent}, Type.Int, line, span, environment, program, scopes), span)
+        one :: sema_tir_node(Type.Int, TExprKind.IntLit{value: 1, width: None}, span)
+        exact :: sema_tir_node(Type.Named{name: "Fraction"}, TExprKind.PreciseBuiltin{type_name: "Fraction", function: "from_parts", args: [TExpr]{one, power}}, span)
+        return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(exact, expected, environment, program, &diagnostics)}
+    }
     value := sema_tir_expr(result, sema_value_method_kind(row, method, receiver_value, typed, result, line, span, environment, program, scopes), span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }

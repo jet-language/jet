@@ -2519,6 +2519,9 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     // Each `protocol` becomes its generated `.Client`/`.Server` handle types
     // and transition methods before any declaration is registered.
     sema_protocols_expand(&module_row.program.items, &diagnostics)
+    // External `fn Type.method` headers become one-method impls
+    // (FunctionHeaders.jet sema_function_header_normalize_external_methods).
+    sema_function_header_normalize_external_methods(&module_row.program, sema_registration_package_is_namespace(module_row.package_identity), &diagnostics)
     // Reject reserved type declarations before automatic capability expansion:
     // an invalid nominal must not produce methods that cascade from E0106.
     item_index := 0
@@ -2542,6 +2545,9 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     // Explicit and structurally selected codecs
     // enter as ordinary generated `impl T.Encode`/`impl T.Decode` items.
     sema_serde_expand_builtin_items(&module_row.program.items)
+    // S62 delegation and D-LIB2 default bodies become written impl methods
+    // before registration (TraitImpls.jet).
+    sema_trait_impls_synthesize(&module_row.program.items)
     row_source_file :: module_row.source_file.copy()
     row_source_origin :: module_row.source_origin.copy()
     row_source_segments :: module_row.source_segments.copy()

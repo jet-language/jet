@@ -540,24 +540,38 @@ fn sema_call_check_ambient_print(call: Call, environment: SemaScopeEnvironment, 
     SemaDirectSpecialCheck{handled: true, value: Val(sema_tir_node(unit, TExprKind.InlineBlock{body: body}, call.name_span))}
 }
 
-// `input(prompt?)` reads one line: `Result<String, IOError>`, like `io.input`.
+// `input(prompt?)` reads one line: `Result<String, IOError>`. It calls the
+// source `core.term.input` declaration (I9: one meaning with `term.input`),
+// with the ambient I/O check; the bare name loads core.term
+// (CORE_BARE_SOURCE_MODULES).
 fn sema_call_check_ambient_input(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     complete := true
     if call.args.len() > 1 {
         &diagnostics.push(sema_error("E0104", call.name_span, "`input` expects 1 argument, got {call.args.len()}", "every argument must match a standard library function parameter", "check the call to `input`"))
         complete = false
     }
-    prompt := TExpr?{None}
+    values := [TExpr]{}
     if call.args.len() > 0 {
-        checked := sema_check_expression(call.args[0].expr, Val(Type.String), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        if checked == None -> complete = false
-        prompt = checked
+        checked :: sema_check_expression(call.args[0].expr, Val(Type.String), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        if checked == .Val(value) -> &values.push(value) else -> complete = false
     }
     if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
     result :: Type.Result{ok: Type.String, err: Type.Named{name: "IOError"}}
     if !sema_call_ambient_record_io("input", result, call.name_span, environment, program, &scopes, &context, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
-    value := sema_tir_node(result, TExprKind.AmbientInput{prompt: prompt}, call.name_span)
-    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+    unavailable :: sema_error("E0906", call.name_span, "the source `core.term.input` declaration for `input` is unavailable", "an ambient `input` reads through the Core terminal source", "restore the `core.term` source module")
+    identity :: sema_call_core_module_identity(environment, program, "core.term") ?? {
+        &diagnostics.push(unavailable)
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    target :: sema_call_core_source_target(environment, program, identity, "input", [Type]{}, call.name_span, false, &diagnostics) ?? {
+        &diagnostics.push(unavailable)
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    callee :: sema_call_callee_decl(program, target.symbol.id, call.name_span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    prompt :: if values.len() > 0 -> values[0].copy() else -> sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{}}, call.name_span)
+    argument :: TCallArg{value: prompt, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+    value :: sema_tir_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{argument}}, call.name_span)
+    SemaDirectSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics)}
 }
 
 // Rust core_call.rs `("core.term", "eprint")` / `("core.term", "input")`:
@@ -1229,13 +1243,17 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
     }
     abi :: sema_call_direct_target_abi(candidate, environment, program)
     (lowered, pins) := sema_call_check_bound_arguments_owned(&state, call.name, params, abi, true, resolved_binding, &args, environment, program, &scopes, &tail_store, &context, call.name_span, &diagnostics) ?? return None
+    callee_facts :: sema_contract_function_facts(environment, program, candidate.symbol.id)
+    if callee_facts == .Val(facts) {
+        if facts.param_view_from.len() > 0 && !sema_call_check_param_view_from(facts, resolved_binding.slots, source_args, scopes, &state, &diagnostics) -> return None
+    }
     result_type_raw :: sema_call_signature_return(candidate.signature) ?? return None
     result_type :: sema_call_resolved_type(result_type_raw, environment, program)
     contract_bindings := [TStmt]{}
     contract_nodes := [TContract]{}
     // The callee's declaration is copied only when it has `pre` clauses.
     contract_callee := Func?{None}
-    if sema_contract_function_has_pre(environment, program, candidate.symbol.id) -> contract_callee = sema_contract_function_for_symbol(environment, program, candidate.symbol.id)
+    if callee_facts == .Val(facts) && facts.pre_count > 0 -> contract_callee = sema_contract_function_for_symbol(environment, program, candidate.symbol.id)
     if contract_callee == .Val(contract) {
         slots :: loop slot in 0..<params.len() -> slot
         checked_contract :: sema_contract_check_call(contract, &lowered, slots, call.name_span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
@@ -1265,6 +1283,54 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
     facts :: sema_call_facts(candidate.signature, candidate.type_args, resolved_binding) ?? return None
     return_view_facts :: sema_call_return_view_facts(candidate.signature, None, args, resolved_binding, scopes, &state, call.name_span)
     Val(SemaCallChecked{value: checked, binding: resolved_binding, facts: facts, return_view_facts: return_view_facts})
+}
+
+// D-MEMPROVENANCE3=A (Rust `check_param_view_from_requirements`): a
+// parameter `word: View<str> from corpus` takes only an argument whose view
+// owners stay inside the places of the arguments passed for the named sibling
+// parameters (E2305). `slots` maps each written argument to its parameter.
+fn sema_call_check_param_view_from(callee: SemaContractCalleeFacts, slots: [Int], args: [CallArg], scopes: SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> Bool {
+    valid := true
+    loop (index, required) in callee.param_view_from {
+        names :: required ?? next
+        written :: sema_call_written_arg_for_slot(slots, index) ?? next
+        argument_span :: expr_span(args[written].expr)
+        actual :: sema_ownership_places_from_expr_in_state(args[written].expr, scopes, &state)
+        if actual.len() == 0 -> next
+        allowed := [SemaOwnershipPlace]{}
+        loop name in names {
+            source_index :: loop (position, param_name) in callee.param_names {
+                if param_name == name -> break Val(position)
+            } ?? None
+            source :: source_index ?? {
+                &diagnostics.push(sema_error("E2305", argument_span, "`from {name}` does not name a parameter", "a parameter `from` clause names sibling parameters (or `self`) that own the view", "use a parameter name from this function's signature"))
+                valid = false
+                next
+            }
+            source_written :: sema_call_written_arg_for_slot(slots, source) ?? next
+            loop place in sema_ownership_places_from_expr_in_state(args[source_written].expr, scopes, &state) -> &allowed.push(place)
+        }
+        if allowed.len() == 0 -> next
+        inside :: loop place in actual {
+            covered :: loop owner in allowed {
+                if place.root_key != "" && place.root_key == owner.root_key && sema_ownership_path_starts(place.projections, owner.projections) -> break true
+            } ?? false
+            if !covered -> break false
+        } ?? true
+        if !inside {
+            &diagnostics.push(sema_error("E2305", argument_span, "`{callee.param_names[index]}` must borrow from its declared `from` sources", "this argument's view owners are outside the sources named after `from`", "pass a view derived from those sources, or widen the `from` clause"))
+            valid = false
+        }
+    }
+    valid
+}
+
+// The written argument bound to parameter `slot`, or None for a default.
+fn sema_call_written_arg_for_slot(slots: [Int], slot: Int) -> Int? Never! {
+    loop (written, bound) in slots {
+        if bound == slot -> return Val(written)
+    }
+    None
 }
 
 fn sema_call_check_direct_target_owned(state: &SemaOwnershipState, target: SemaCallDirectTarget, call: Call, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {

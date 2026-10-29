@@ -52,6 +52,10 @@ struct SemaTestFunctionCheckResult {
     exact_int_reachable: Bool
     copy_events: [SemaCopyEvent]
     complete: Bool
+    // Body comptime sites awaiting their values (SemaFunctionResult rows).
+    comptime_body_sources: [SemaComptimeBodySource]
+    // Why an incomplete result has no diagnostic.
+    incomplete_reasons: [String]
 }
 
 fn sema_check_test_function(test: TestDef, environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: SemaScopeTable, host_hooks: SemaHostHookAccess?) -> SemaTestFunctionCheckResult {
@@ -78,6 +82,8 @@ fn sema_check_test_function(test: TestDef, environment: SemaScopeEnvironment, pr
                 exact_int_reachable: false,
                 copy_events: [SemaCopyEvent]{},
                 complete: false,
+                comptime_body_sources: [SemaComptimeBodySource]{},
+                incomplete_reasons: [String]{"its synthetic function symbol could not be formed"},
             }
         }
         symbol.id = owner_id
@@ -112,6 +118,8 @@ fn sema_check_test_function(test: TestDef, environment: SemaScopeEnvironment, pr
         exact_int_reachable: checked.exact_int_reachable,
         copy_events: checked.copy_events.copy(),
         complete: checked.complete,
+        comptime_body_sources: checked.comptime_body_sources.copy(),
+        incomplete_reasons: checked.incomplete_reasons.copy(),
     }
 }
 

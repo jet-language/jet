@@ -26,7 +26,7 @@
 //   `JET_NATIVE_TEST <id>\n<wire>\n`, streaming each serially or joining all
 //   after spawning; then, unfiltered, run each Check Output once.
 
-use jet_foundation.[DeclTable, Span, TConstantDef, FnBody, TImplDef, TPanicLoc, TPanicLocal, TTypeDef, Type, measure_literal_value, name_rows_set]
+use jet_foundation.[BodyScopeMemberKind, DeclTable, Span, TConstantDef, FnBody, TImplDef, TPanicLoc, TPanicLocal, TTypeDef, Type, measure_literal_value, name_rows_set]
 use jet_sema.[SemaCheckedForeignFunction]
 
 // One test the harness runs: its checked function `key`, the identity `id`
@@ -219,7 +219,8 @@ fn ir_test_invoke(m: &IRModule, p: IRProgram, body: Int, failures: &[IRBuildFail
                     // The returned message outlives the dropped carrier.
                     owned :: if text >= 0 && b.fresh[text] -> text else -> ir_runtime(&m, &b, "jet_rt_string_clone", [Int]{text}, string_row)
                     ir_test_drop(&m, &b, result)
-                    ir_emit(&b.f, IROp.Return, -1, owned, -1, -1, b.line)
+                    owned_word :: ir_test_message_word(&m, &b, owned)
+                    ir_emit(&b.f, IROp.Return, -1, owned_word, -1, -1, b.line)
                     ir_end(&b.f, b.line)
                 }
             }
@@ -230,7 +231,8 @@ fn ir_test_invoke(m: &IRModule, p: IRProgram, body: Int, failures: &[IRBuildFail
                     absent :: ir_is_null(&m, &b, result)
                     ir_open_if(&b.f, absent, b.line)
                     message :: ir_test_text(&m, &b, "test returned no value")
-                    ir_emit(&b.f, IROp.Return, -1, message, -1, -1, b.line)
+                    message_word :: ir_test_message_word(&m, &b, message)
+                    ir_emit(&b.f, IROp.Return, -1, message_word, -1, -1, b.line)
                     ir_end(&b.f, b.line)
                 }
             }
@@ -241,6 +243,15 @@ fn ir_test_invoke(m: &IRModule, p: IRProgram, body: Int, failures: &[IRBuildFail
     ir_emit(&b.f, IROp.Return, -1, null, -1, -1, b.line)
     ir_test_finish(&m, p, ^b, id, &failures)
     id
+}
+
+// The pointer word test.invoke returns for the owned failure message `text`:
+// the String moves out as its header pointer, which the test runtime takes.
+fn ir_test_message_word(m: &IRModule, b: &IRBuilder, text: Int) -> Int Never! {
+    pointer_row :: ir_pointer_row(&m)
+    word :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.Move, word, text, -1, -1, b.line)
+    word
 }
 
 // The call of property body `body` on parameters generated from the property
@@ -590,4 +601,83 @@ fn ir_test_main(m: &IRModule, p: IRProgram, harness: IRTestHarness, bodies: [Int
     ir_emit(&b.f, IROp.Return, -1, -1, -1, -1, b.line)
     ir_test_finish(&m, p, ^b, id, &failures)
     id
+}
+
+// A test's scope members (JetRuntime TestScope.jet), each region scoped by
+// a frame address of its own as its scope id:
+//   `.setup { … }`        runs in the enclosing scope (its bindings stay);
+//   `.measure { … }`      the runtime's measurement loop (ir_measure_scope);
+//   `.expect_fail(code?, message:?) { … }`  enter_scope(scope, code, message),
+//                         the body, whose stop edges first try
+//                         catch_for_scope (ir_stop_catches) and on a catch
+//                         leave to the region's end; there catch_boundary,
+//                         then leave_scope: no stop code is the unmet
+//                         expectation (expect_fail_unmet stops);
+//   `.timeout(d) { … }`   timeout_enter(scope, d.ns), the body, then
+//                         timeout_leave: past its limit, timeout_failure;
+//   `.skip { … }`         the body never runs; skip_scope(whole test: the
+//                         member is the body's first statement).
+fn ir_scope_member(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int, kind: BodyScopeMemberKind, body: [Int], span: Span) Never! {
+    if kind == {
+        .Setup -> {
+            loop inner in body {
+                if ir_failed(b) -> break
+                ir_stmt(&m, p, &b, inner)
+            }
+        }
+        .Measure -> ir_measure_scope(&m, p, &b, body)
+        .Skip -> {
+            whole :: b.row >= 0 && p.functions[b.row].body.len() > 0 && p.functions[b.row].body[0] == statement
+            bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+            flag :: ir_temp(&m, &b, bool_row)
+            ir_emit(&b.f, IROp.Const, flag, if whole -> 1 else -> 0, -1, -1, b.line)
+            _ :: ir_runtime(&m, &b, "jet_rt_test_skip_scope", [Int]{flag}, -1)
+        }
+        .Timeout(duration) -> {
+            word_row :: ir_word_row(&m)
+            int_row :: ir_type_row(&m, Type.Int) ?? 0
+            value :: ir_expr(&m, p, &b, duration)
+            if ir_failed(b) || value < 0 -> return
+            ns :: ir_runtime(&m, &b, "jet_rt_record_get_duration_ns", [Int]{value}, int_row)
+            limit :: ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{ns}, word_row)
+            ir_release(&m, &b, ns)
+            ir_release(&m, &b, value)
+            scope :: ir_out_slot(&m, &b, 1)
+            _ :: ir_runtime(&m, &b, "jet_rt_test_timeout_enter", [Int]{scope, limit}, -1)
+            ir_stmts(&m, p, &b, body)
+            if ir_failed(b) -> return
+            timer :: ir_out_slot(&m, &b, 2)
+            bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+            timed :: ir_runtime(&m, &b, "jet_rt_test_timeout_leave", [Int]{scope, timer}, bool_row)
+            ir_open_if(&b.f, timed, b.line)
+            elapsed :: ir_load_word(&m, &b, timer, 0)
+            bound :: ir_load_word(&m, &b, timer, 8)
+            late :: ir_bool_op(&m, &b, IROp.Gt, elapsed, bound)
+            ir_open_if(&b.f, late, b.line)
+            _ :: ir_runtime(&m, &b, "jet_rt_test_timeout_failure", [Int]{elapsed, bound}, -1)
+            ir_end(&b.f, b.line)
+            ir_end(&b.f, b.line)
+        }
+        .ExpectFail(code, message) -> {
+            word_row :: ir_word_row(&m)
+            expected :: if code == .Val(text) -> ir_dyn_text(&m, &b, text) else -> ir_word_const(&m, &b, 0)
+            expected_message :: if message == .Val(text) -> ir_dyn_text(&m, &b, text) else -> ir_word_const(&m, &b, 0)
+            scope :: ir_out_slot(&m, &b, 1)
+            _ :: ir_runtime(&m, &b, "jet_rt_test_expect_fail_enter_scope", [Int]{scope, expected, expected_message}, -1)
+            exit :: ir_open(&b.f, IROp.Block, b.line)
+            &b.catches.push(IRCatchFrame{scope: scope, exit: exit, mark: b.bindings.len(), transactions: b.transactions.len()})
+            ir_stmts(&m, p, &b, body)
+            _ :: &b.catches.pop()
+            ir_end(&b.f, b.line)
+            if ir_failed(b) -> return
+            _ :: ir_runtime(&m, &b, "jet_rt_test_catch_boundary", [Int]{scope}, -1)
+            stopped :: ir_runtime(&m, &b, "jet_rt_test_expect_fail_leave_scope", [Int]{scope}, word_row)
+            zero :: ir_word_const(&m, &b, 0)
+            unmet :: ir_bool_op(&m, &b, IROp.Eq, stopped, zero)
+            ir_open_if(&b.f, unmet, b.line)
+            _ :: ir_runtime(&m, &b, "jet_rt_test_expect_fail_unmet", [Int]{expected, expected_message}, -1)
+            ir_end(&b.f, b.line)
+            _ :: ir_runtime(&m, &b, "jet_rt_string_drop", [Int]{stopped}, -1)
+        }
+    }
 }

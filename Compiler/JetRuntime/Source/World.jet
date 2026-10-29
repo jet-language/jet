@@ -421,7 +421,8 @@ fn world_wait(world: I64, accept_timer: Bool) {
     }
     scheduler_fatal(message)
 }
-// Callback ABI matches task callbacks: borrowed env, caller-owned result slot.
+// Callback ABI matches lazy.callback: borrowed env, the world handle lent
+// through one borrowed input slot, caller-owned result slot.
 #Export(c) fn jet_testing_world(env: I64, invoke: I64, out: I64) {
     if (world_current() != I64{0}) {
         scheduler_fatal(services_msg_world_nested())
@@ -435,7 +436,10 @@ fn world_wait(world: I64, accept_timer: Bool) {
     provider :: rt_time_monotonic_provider_set(rt_world_monotonic_provider_address())
     sync_store(base + I64{112}, I64{0})
     sync_store(base + I64{120}, I64{0})
-    _ := coll_call3(invoke, env, world, out)
+    lent :: jet_rt_alloc(I64{8}, I64{8})
+    sync_store(lent, world)
+    _ := coll_call3(invoke, env, lent, out)
+    jet_rt_free(lent, I64{8}, I64{8})
     if (jet_scheduler_native_propagate() == I64{0}) {
         jet_world_wait_idle(world)
         jet_rt_world_ensure_closed(world)

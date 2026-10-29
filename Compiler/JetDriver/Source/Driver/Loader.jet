@@ -3123,8 +3123,10 @@ struct JetDriverCoreIdentifierDemand {
     bare_names: [String]
     option_or_err: Bool
     math_abs_receiver: Bool
-    // A `Regex{…}` checked literal: its producer is `core.regex.compile`.
-    regex_literal: Bool
+    // A `Regex{…}` checked literal (produced by `core.regex.compile`) or a
+    // `.matches(…)`/`.match(…)` receiver call (String's pattern methods run
+    // the `core.regex` engine, D-STR-DECLINE1=C): core.regex loads.
+    regex_source: Bool
     // An interpolation selector (`{x:Fixed(3)}`): it lowers to its
     // `Core/Text/Fmt.jet` formatter, so that source module loads.
     format_selector: Bool{false}
@@ -3150,7 +3152,7 @@ struct JetDriverParsedUnit {
 }
 
 fn jet_driver_empty_core_identifier_demand() -> JetDriverCoreIdentifierDemand Never! {
-    JetDriverCoreIdentifierDemand{bare_names: [String]{}, option_or_err: false, math_abs_receiver: false, regex_literal: false, core_paths: [String]{}}
+    JetDriverCoreIdentifierDemand{bare_names: [String]{}, option_or_err: false, math_abs_receiver: false, regex_source: false, core_paths: [String]{}}
 }
 
 // The spellings the demand scan looks for, as ids of one lexed source's
@@ -3164,6 +3166,8 @@ struct JetDriverCoreDemandNames {
     or_err_name: Int
     abs_name: Int
     regex_name: Int
+    pattern_matches_name: Int
+    pattern_match_name: Int
     bare: [Int]
     bare_alias: [Int]
     // Per name id of the table: the CORE_BARE_SOURCE_MODULES row whose name
@@ -3202,7 +3206,7 @@ fn jet_driver_core_demand_names(tables: TokenTables) -> JetDriverCoreDemandNames
         id :: jet_driver_core_demand_name(tables, parts[1])
         if id >= 0 && !core_segments.contains(id) -> &core_segments.push(id)
     }
-    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), regex_name: jet_driver_core_demand_name(tables, "Regex"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments}
+    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), regex_name: jet_driver_core_demand_name(tables, "Regex"), pattern_matches_name: jet_driver_core_demand_name(tables, "matches"), pattern_match_name: jet_driver_core_demand_name(tables, "match"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments}
 }
 
 fn jet_driver_core_demand_bare_row(rows: &[Int], id: Int, at: Int) Never! {
@@ -3231,7 +3235,8 @@ fn jet_driver_collect_core_identifier_demand_ids(tokens: [Token], tables: TokenT
                 loop previous >= from && (tokens[previous].kind == TOKEN_LINE_COMMENT || tokens[previous].kind == TOKEN_BLOCK_COMMENT) -> previous -= 1
                 if previous >= from && (tokens[previous].kind == TOKEN_DOT || tokens[previous].kind == TOKEN_QUESTION_DOT) -> demand.math_abs_receiver = true
             }
-            if name == names.regex_name && index + 1 < to && tokens[index + 1].kind == TOKEN_LBRACE -> demand.regex_literal = true
+            if name == names.regex_name && index + 1 < to && tokens[index + 1].kind == TOKEN_LBRACE -> demand.regex_source = true
+            if (name == names.pattern_matches_name || name == names.pattern_match_name) && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.regex_source = true
             if index + 4 < to && tokens[index + 1].kind == TOKEN_DOT && tokens[index + 2].kind == TOKEN_IDENT && tokens[index + 3].kind == TOKEN_DOT && tokens[index + 4].kind == TOKEN_IDENT && (index == from || tokens[index - 1].kind != TOKEN_DOT) && names.core_segments.contains(name_index(tokens[index + 2].decoded)) {
                 path :: "{token_decoded(tables, tokens[index])}.{token_decoded(tables, tokens[index + 2])}"
                 if !demand.core_paths.contains(path) -> &demand.core_paths.push(path)
@@ -3332,7 +3337,7 @@ fn jet_driver_collect_core_identifier_demand_threads(input: ^Lexed, runs: [Int],
         output := jet_driver_demand_part_take(part)
         if output.option_or_err -> demand.option_or_err = true
         if output.math_abs_receiver -> demand.math_abs_receiver = true
-        if output.regex_literal -> demand.regex_literal = true
+        if output.regex_source -> demand.regex_source = true
         if output.format_selector -> demand.format_selector = true
         loop bare in output.bare_names {
             if !demand.bare_names.contains(bare) -> &demand.bare_names.push(bare)
@@ -4166,8 +4171,9 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
             }
         }
         // A checked `Regex{…}` literal is produced by the `core.regex.compile`
-        // source, even when the caller has no explicit core.regex import.
-        if demand.regex_literal {
+        // source and String's `.matches`/`.match` run the core.regex engine,
+        // even when the caller has no explicit core.regex import.
+        if demand.regex_source {
             if !bare_modules.contains("core.regex") -> &bare_modules.push("core.regex")
             regex_index :: jet_driver_core_unit(&source_units, &queued, &pending, &generated_records, request.core_sources, "core.regex", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, &diagnostics)
             if regex_index == .Val(index) {

@@ -57,6 +57,9 @@ enum BuiltinMethodLowering {
     // Fixed-width overflow policy (`checked_add`, `wrapping_mul`, `rotate_left`, …).
     Overflow(prefix: String, operation: String)
     Atomic
+    // A call of the `core.regex` source helper `member(receiver, args…)`:
+    // String's pattern methods run the one regex engine (D-STR-DECLINE1=C).
+    RegexSource(member: String)
 }
 
 struct BuiltinMethodRow {
@@ -173,9 +176,10 @@ BUILTIN_METHOD_ROWS :: comptime { [BuiltinMethodRow]{
     {receiver: BuiltinMethodReceiver.String, name: "parse", parameters: [Type]{}, result: Type.Result{ok: Type.Int, err: Type.Named{name: "ParseError"}}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.ParseInt}},
     {receiver: BuiltinMethodReceiver.String, name: "to_int", parameters: [Type]{}, result: Type.Result{ok: Type.Int, err: Type.Named{name: "ParseError"}}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.ParseInt}},
     {receiver: BuiltinMethodReceiver.String, name: "to_float", parameters: [Type]{}, result: Type.Result{ok: Type.Float, err: Type.Named{name: "ParseError"}}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.ParseFloat}},
-    // One core.regex engine; a bad pattern is the `!String` failure.
-    {receiver: BuiltinMethodReceiver.String, name: "matches", parameters: [Type]{Type.String}, result: Type.Result{ok: Type.Bool, err: Type.String}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StringMethod{method: "matches"}}},
-    {receiver: BuiltinMethodReceiver.String, name: "match", parameters: [Type]{Type.String}, result: Type.Result{ok: Type.Option{inner: Type.String}, err: Type.String}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StringMethod{method: "match"}}},
+    // One core.regex engine; a bad pattern is compile's RegexError. The
+    // checked call has its source helper's declared result.
+    {receiver: BuiltinMethodReceiver.String, name: "matches", parameters: [Type]{Type.String}, result: Type.Result{ok: Type.Bool, err: Type.Named{name: "RegexError"}}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.RegexSource{member: "__string_matches"}},
+    {receiver: BuiltinMethodReceiver.String, name: "match", parameters: [Type]{Type.String}, result: Type.Result{ok: Type.Option{inner: Type.String}, err: Type.Named{name: "RegexError"}}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.RegexSource{member: "__string_match"}},
 
     // Bytes: builder, read cursor and string-like reads (#1467).
     {receiver: BuiltinMethodReceiver.Bytes, name: "len", parameters: [Type]{}, result: Type.Int, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.ByteBufferMethod{method: "len"}}},

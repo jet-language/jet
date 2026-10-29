@@ -211,7 +211,6 @@ fn sema_stream_handle_spec(owner: String, method: String, receiver_type: Type) -
         if method == "normalize" -> return Val(SemaStreamHandleSpec{operation: THandleOp.PathNormalize, result_type: Type.Named{name: "Path"}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
         if method == "is_within" -> return Val(SemaStreamHandleSpec{operation: THandleOp.PathIsWithin, result_type: Type.Bool, params: [SemaCallParam]{sema_stream_handle_param("other", Type.Named{name: "Path"}, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: ""})
         if method == "to_string" -> return Val(SemaStreamHandleSpec{operation: THandleOp.PathToString, result_type: string, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
-        if method == "write_atomic" -> return Val(SemaStreamHandleSpec{operation: THandleOp.PathWriteAtomic, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("bytes", bytes, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: ""})
         if method == "walk" -> return Val(SemaStreamHandleSpec{operation: THandleOp.PathWalk, result_type: Type.List{element: Type.Named{name: "Path"}}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
     }
     // Rust `text_cursor_method_return` / `binary_reader_method_return`: the
@@ -381,7 +380,7 @@ fn sema_call_try_stream_handle_method(receiver: Expr, receiver_value: TExpr, met
         owner = sema_stream_handle_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
         if !sema_stream_handle_is_canonical(receiver_value.ty, owner, environment, program) -> return SemaMethodSpecialCheck{handled: false, value: None}
     }
-    source_member := if owner == "FileScope" && method == "read" -> "scoped_read" else if owner == "FileReader" && method == "read_line" -> "__reader_read_line" else -> ""
+    source_member := if owner == "FileScope" && method == "read" -> "scoped_read" else if owner == "FileReader" && method == "read_line" -> "__reader_read_line" else if owner == "Path" && method == "write_atomic" -> "write_atomic" else -> ""
     if source_member != "" {
         identity :: sema_call_core_module_identity(environment, program, "core.files") ?? {
             &diagnostics.push(sema_error("E0003", span, "filesystem source module is not loaded", "receiver policy requires Core/Files/Files.jet", "load the registered Core source module"))

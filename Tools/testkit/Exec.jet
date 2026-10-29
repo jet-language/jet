@@ -46,7 +46,8 @@ fn kit_exec_base_value(name: String, env: KitEnv, scratch: String) -> String? {
     if env.env_clear -> return None
     if {
         name == "JET_COMPILER_EXTENSION" -> None
-        name == "NO_COLOR" || name == "JET_RECEIPT_BYPASS" -> Val("1")
+        // Every build under test runs IR Lint after each optimizer pass.
+        name == "NO_COLOR" || name == "JET_RECEIPT_BYPASS" || name == "JET_OPT_VERIFY" -> Val("1")
         name == "CLICOLOR" -> Val("0")
         name == "TERM" -> Val("dumb")
         name == "JET_REPL_HISTORY" -> Val("off")
@@ -79,6 +80,7 @@ fn kit_exec_spec(env: KitEnv, argv: [String], cwd: String, scratch: String, over
             .env("CLICOLOR", kit_exec_base_value("CLICOLOR", env, scratch) ?? "")
             .env("TERM", kit_exec_base_value("TERM", env, scratch) ?? "")
             .env("JET_RECEIPT_BYPASS", kit_exec_base_value("JET_RECEIPT_BYPASS", env, scratch) ?? "")
+            .env("JET_OPT_VERIFY", kit_exec_base_value("JET_OPT_VERIFY", env, scratch) ?? "")
             .env("JET_REPL_HISTORY", kit_exec_base_value("JET_REPL_HISTORY", env, scratch) ?? "")
             .env("JET_STORE_DIR", kit_exec_base_value("JET_STORE_DIR", env, scratch) ?? "")
             .env("JET_FFI_CACHE_DIR", kit_exec_base_value("JET_FFI_CACHE_DIR", env, scratch) ?? "")

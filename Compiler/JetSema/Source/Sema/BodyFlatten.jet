@@ -419,7 +419,6 @@ fn body_flat_expr_kind(value: TExprKind, flat: &BodyFlat) -> NodeKind Never! {
         .Drop(f_value) -> NodeKind.Drop{value: body_flat_expr(f_value, &flat)}
         .Close(f_value) -> NodeKind.Close{value: body_flat_expr(f_value, &flat)}
         .Move(f_value) -> NodeKind.Move{value: body_flat_expr(f_value, &flat)}
-        .AmbientInput(f_prompt) -> NodeKind.AmbientInput{prompt: body_flat_opt_expr(f_prompt, &flat)}
         .RequireStop(f_kind, f_location, f_always_stops) -> NodeKind.RequireStop{kind: body_flat_require_kind(f_kind, &flat), location: f_location, always_stops: f_always_stops}
         .Binary(f_op, f_overflow, f_line, f_lhs, f_rhs) -> NodeKind.Binary{op: f_op, overflow: f_overflow, line: f_line, lhs: body_flat_expr(f_lhs, &flat), rhs: body_flat_expr(f_rhs, &flat)}
         .CompareChain(f_operands, f_operators, f_hooks) -> NodeKind.CompareChain{operands: body_flat_list_expr(f_operands, &flat), operators: f_operators, hooks: f_hooks}
@@ -539,6 +538,7 @@ fn body_flat_host_call(value: THostCall, flat: &BodyFlat) -> BodyHostCall Never!
         .YieldSend(f_value) -> BodyHostCall.YieldSend{value: body_flat_expr(f_value, &flat)}
         .NumericBounds(f_ty, f_member) -> BodyHostCall.NumericBounds{ty: f_ty, member: f_member}
         .ComptimeInput(f_builtin, f_path) -> BodyHostCall.ComptimeInput{builtin: f_builtin, path: f_path}
+        .MemoStats(f_function, f_bound) -> BodyHostCall.MemoStats{function: f_function, bound: f_bound}
     }
 }
 
@@ -810,7 +810,6 @@ fn body_flat_handle_op_2(value: THandleOp, flat: &BodyFlat) -> BodyHandleOp Neve
         .PathNormalize -> BodyHandleOp.PathNormalize
         .PathIsWithin -> BodyHandleOp.PathIsWithin
         .PathToString -> BodyHandleOp.PathToString
-        .PathWriteAtomic -> BodyHandleOp.PathWriteAtomic
         .PathWalk -> BodyHandleOp.PathWalk
         .UIBackendMethod(f_method) -> BodyHandleOp.UIBackendMethod{method: f_method}
         .AppMethod(f_method, f_args_len) -> BodyHandleOp.AppMethod{method: f_method, args_len: f_args_len}
@@ -1288,7 +1287,6 @@ fn body_copy_expr_kind(value: NodeKind, flat: &BodyFlat) -> NodeKind Never! {
         .Drop(f_value) -> NodeKind.Drop{value: body_copy_expr(f_value, &flat)}
         .Close(f_value) -> NodeKind.Close{value: body_copy_expr(f_value, &flat)}
         .Move(f_value) -> NodeKind.Move{value: body_copy_expr(f_value, &flat)}
-        .AmbientInput(f_prompt) -> NodeKind.AmbientInput{prompt: body_copy_opt_expr(f_prompt, &flat)}
         .RequireStop(f_kind, f_location, f_always_stops) -> NodeKind.RequireStop{kind: body_copy_require_kind(f_kind, &flat), location: f_location, always_stops: f_always_stops}
         .Binary(f_op, f_overflow, f_line, f_lhs, f_rhs) -> NodeKind.Binary{op: f_op, overflow: f_overflow, line: f_line, lhs: body_copy_expr(f_lhs, &flat), rhs: body_copy_expr(f_rhs, &flat)}
         .CompareChain(f_operands, f_operators, f_hooks) -> NodeKind.CompareChain{operands: body_copy_list_expr(f_operands, &flat), operators: f_operators, hooks: f_hooks}
@@ -1420,6 +1418,7 @@ fn body_copy_host_call(value: BodyHostCall, flat: &BodyFlat) -> BodyHostCall Nev
         .YieldSend(f_value) -> BodyHostCall.YieldSend{value: body_copy_expr(f_value, &flat)}
         .NumericBounds(f_ty, f_member) -> BodyHostCall.NumericBounds{ty: f_ty, member: f_member}
         .ComptimeInput(f_builtin, f_path) -> BodyHostCall.ComptimeInput{builtin: f_builtin, path: f_path}
+        .MemoStats(f_function, f_bound) -> BodyHostCall.MemoStats{function: f_function, bound: f_bound}
     }
 }
 

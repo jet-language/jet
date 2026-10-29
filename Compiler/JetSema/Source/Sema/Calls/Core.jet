@@ -190,7 +190,7 @@ fn sema_call_core_source_target(environment: SemaScopeEnvironment, program: Sema
     // core_call.rs: a `URL` or String target, sema_call_http_transport), and
     // that checked row then executes the source `request` declaration.
     if !registered_source_target && source_name == "core.http.client" && member == "request" -> return None
-    if source_name == "core.encoding.json" && member == "decode" && type_args.len() != 0 -> return None
+    if sema_call_core_typed_decode_module(source_name) && member == "decode" && type_args.len() != 0 -> return None
     caller_index :: sema_scope_caller_index(environment, graph) ?? return None
     // Same-owner native providers keep their host row. A source-only function
     // has no such row and still resolves to its declaration from this module.
@@ -246,8 +246,9 @@ fn sema_call_export_function_target(environment: SemaScopeEnvironment, program: 
 // Rust `infer_import_call`: `slots.wrap(..)` through a whole-module alias of a
 // source module calls the function that module (or its
 // package) exports, checked like a direct call. A private function is E0605
-// and any other name E0102. Core aliases keep their own route.
-fn sema_call_try_source_module_call(alias: String, alias_span: Span, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
+// and any other name E0102. Core aliases keep their own route. `shown` is the
+// member as written (`internal.secret` for a lifted inline-module member).
+fn sema_call_try_source_module_call(alias: String, alias_span: Span, member: String, shown: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
     unhandled :: SemaMethodSpecialCheck{handled: false, value: None}
     imported :: sema_call_source_import_target(environment, program, alias) ?? return unhandled
     if !sema_call_core_record_import_reference(environment, program, scopes, imported, alias_span, &context) -> return unhandled
@@ -256,9 +257,9 @@ fn sema_call_try_source_module_call(alias: String, alias_span: Span, member: Str
     failed :: SemaMethodSpecialCheck{handled: true, value: None}
     export :: sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{}) ?? {
         if sema_registration_direct_symbol(graph.modules[module_index], member) != None {
-            &diagnostics.push(sema_error("E0605", span, "`{member}` is private to its module", "a `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module", "use `{member}` from inside its module, or remove `priv` from its module or field"))
+            &diagnostics.push(sema_error("E0605", span, "`{shown}` is private to its module", "a `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module", "use `{shown}` from inside its module, or remove `priv` from its module or field"))
         } else {
-            &diagnostics.push(sema_call_import_member_unknown(member, alias_span))
+            &diagnostics.push(sema_call_import_member_unknown(shown, alias_span))
         }
         loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return failed
@@ -277,17 +278,33 @@ fn sema_call_try_source_module_call(alias: String, alias_span: Span, member: Str
         direct = Val(foreign)
     }
     target :: direct ?? {
-        &diagnostics.push(sema_call_import_member_unknown(member, span))
+        &diagnostics.push(sema_call_import_member_unknown(shown, span))
         loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return failed
     }
     scopes.ownership_call_depth += 1
-    value := sema_call_core_check_source_owned(target, "{alias}.{member}", type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    value := sema_call_core_check_source_owned(target, "{alias}.{shown}", type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     scopes.ownership_call_depth -= 1
     return SemaMethodSpecialCheck{handled: true, value: value}
     } else {
         return unhandled
     }
+}
+
+// Whether the file module `alias` imports declares the inline module
+// `name` (`module internal {…}`), whose members are lifted beside it.
+fn sema_call_source_import_inline_module(environment: SemaScopeEnvironment, program: SemaProgramTables, alias: String, name: String) -> Bool Never! {
+    imported :: sema_call_source_import_target(environment, program, alias) ?? return false
+    if program.registration_graph == .Val(graph) {
+        module_index :: sema_registration_module_index(graph, imported.module_identity) ?? return false
+        loop surface in graph.modules[module_index].inline_bindings.modules {
+            if surface.name == name -> return true
+        }
+        loop item in graph.modules[module_index].program.items {
+            if item == .CodeModule(definition) && definition.name == name && definition.body != None -> return true
+        }
+    }
+    false
 }
 
 // The direct-call target for an exported foreign (`#Import module c.lib`)
@@ -626,10 +643,11 @@ fn sema_call_try_core_math_float_class(module_name: String, member: String, type
 
 // Width selection is the existing checked mathematical normalization; it is
 // separate from source forwarding and never widens F32 values. A typed
-// `json.decode<T>` runs its typed source (Json.jet `__decode_typed`).
+// `json.decode<T>` / `toml.decode<T>` / `yaml.decode<T>` runs its module's
+// typed source (`__decode_typed`).
 fn sema_call_core_normalized_source_record(record: CoreCallRecord, args: [TExpr], type_args: [Type]) -> CoreCallRecord Never! {
     normalized := record
-    if record.symbol == CoreCallSymbol.SourceOwned && record.module_name == "core.encoding.json" && record.member == "decode" && type_args.len() != 0 {
+    if record.symbol == CoreCallSymbol.SourceOwned && sema_call_core_typed_decode_module(record.module_name) && record.member == "decode" && type_args.len() != 0 {
         normalized.source_target = Val("__decode_typed")
     }
     if record.symbol == CoreCallSymbol.SourceOwned && record.module_name == "core.math" && (record.member == "cmp" || record.member == "is_finite") && args.len() > 0 && args[0].ty == Type.Float32 {
@@ -645,6 +663,12 @@ fn sema_call_core_normalized_source_record(record: CoreCallRecord, args: [TExpr]
         else -> normalized.source_target = Val("client")
     }
     normalized
+}
+
+// The text codecs whose `decode<T>(text)` decodes the parsed tree through
+// their source `__decode_typed`, while untyped `decode(text)` stays the tree.
+fn sema_call_core_typed_decode_module(module_name: String) -> Bool Never! {
+    module_name == "core.encoding.json" || module_name == "core.encoding.toml" || module_name == "core.encoding.yaml"
 }
 
 fn sema_call_core_source_arguments(record: CoreCallRecord, args: [TExpr], params: [SemaCallParam], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> [TCallArg] Never! {
@@ -675,13 +699,28 @@ fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, type_ar
         value :: sema_expression_measurement_source_call("__measurement_sqrt", args, result_type, span, environment, program) ?? return None
         return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
-    if record.module_name == "core.math" && record.member == "sqrt" && args.len() == 1 && args[0].ty == Type.Float {
-        identity :: sema_call_core_module_identity(environment, program, "core.math") ?? return None
-        if sema_call_core_source_target(environment, program, identity, "sqrt", type_args, span, false, &diagnostics) == .Val(target) {
-            argument :: TCallArg{value: args[0], template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
-            callee :: sema_call_callee_decl(program, target.symbol.id, span, &diagnostics) ?? return None
-            value :: sema_tir_node(result_type, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{argument}}, span)
-            return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
+    if record.module_name == "core.math" && record.member == "sqrt" && args.len() == 1 {
+        // D-FLOATW1: sqrt is width-generic. The Core source `sqrt(Float)`
+        // computes it: an F32 argument widens and the root narrows back (the
+        // double root rounded to F32 is the correctly rounded F32 root), and
+        // an exact Fraction or Decimal crosses to Float once.
+        source :: args[0].ty.copy()
+        widened := TExpr?{None}
+        nominal := ""
+        if source == .Named(name) -> nominal = name.copy()
+        if {
+            source == Type.Float -> widened = Val(args[0].copy())
+            source == Type.Float32 -> widened = sema_expr_numeric_conversion(args[0].copy(), Type.Float, span, 0)
+            nominal == "Fraction" || nominal.ends_with("::Fraction") -> widened = sema_call_core_math_source("__fraction_to_float", args[0].copy(), true, span, environment, program, &diagnostics)
+            nominal == "Decimal" || nominal.ends_with("::Decimal") -> widened = sema_call_core_math_source("__decimal_to_float", args[0].copy(), true, span, environment, program, &diagnostics)
+            else -> widened = None
+        }
+        if widened == .Val(argument) {
+            if sema_call_core_math_source("sqrt", argument, false, span, environment, program, &diagnostics) == .Val(root) {
+                value := root.copy()
+                if source == Type.Float32 -> value = sema_expr_numeric_conversion(root, Type.Float32, span, 0) ?? return None
+                return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
+            }
         }
     }
     normalized :: sema_call_core_normalized_source_record(record, args, type_args)
@@ -717,6 +756,17 @@ fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, type_ar
     // value, and the enclosing `??` or branch accepts its divergence.
     if result_type == (Type.Named{name: "Never"}) -> return Val(value)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
+}
+
+// A call of the core.math source function `member` on one argument, typed
+// Float (sqrt's Float root and the exact types' crossing to Float).
+// `registered` resolves a module-private member such as `__fraction_to_float`.
+fn sema_call_core_math_source(member: String, value: TExpr, registered: Bool, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
+    identity :: sema_call_core_module_identity(environment, program, "core.math") ?? return None
+    target :: sema_call_core_source_target(environment, program, identity, member, [Type]{}, span, registered, &diagnostics) ?? return None
+    callee :: sema_call_callee_decl(program, target.symbol.id, span, &diagnostics) ?? return None
+    argument :: TCallArg{value: value, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+    Val(sema_tir_node(Type.Float, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{argument}}, span))
 }
 
 fn sema_call_core_effect_name(effect_kind: Effect) -> String Never! {
@@ -995,9 +1045,9 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
             return None
         }
     }
-    if record.module_name == "core.encoding" && (record.member == "__query_read_bounded" || record.member == "__query_validate_fields") {
+    if record.module_name == "core.encoding" && (record.member == "__query_read_bounded" || record.member == "__query_validate_fields" || record.member == "__text_cells_enter" || record.member == "__text_cells_leave") {
         if !environment.source_file.starts_with("<corelib>/") || environment.module_name != "core.encoding.csv" {
-            &diagnostics.push(sema_error("E0510", span, "CSV query leaves are compiler-private", "raw CSV query mechanics are restricted to Core CSV source", "use csv.query<T>"))
+            &diagnostics.push(sema_error("E0510", span, "CSV query and text-cell leaves are compiler-private", "raw CSV query and text-cell decode mechanics are restricted to Core CSV source", "use csv.query<T> or csv.decode<T>"))
             return None
         }
     }

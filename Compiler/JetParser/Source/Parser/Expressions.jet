@@ -224,7 +224,7 @@ fn parser_parse_expression_restricted(state: &JetParserState, minimum: Int, dept
     }
 
     left := parser_parse_prefix(&state, depth + 1, allow_struct_lit, stop_before_comparison)
-    left = parser_parse_postfix(&state, ^left, depth + 1, allow_struct_lit)
+    left = parser_parse_postfix(&state, ^left, depth + 1, allow_struct_lit, false)
     loop {
         operator := parser_current_kind(&state)
         precedence := parser_expression_precedence(operator)
@@ -865,7 +865,11 @@ fn parser_parse_marker_value(state: &JetParserState, depth: Int, allow_struct_li
         applied = if kind_name.len() == 0 -> "Input" else -> kind_name
         parser_add_error_code(&state, "E0927", head_span, "`#Tainted` is retired", "taint kinds are ordinary declared fact tags", "write `#{applied} value`")
     }
-    inner :: parser_parse_prefix(&state, depth + 1, allow_struct_lit, stop_before_comparison)
+    named :: parser_current_kind(&state) == TOKEN_IDENT
+    inner := parser_parse_prefix(&state, depth + 1, allow_struct_lit, stop_before_comparison)
+    // Rust `expr_primary` reads a bare name's call or member call with the
+    // name, so `#Checked Die.from_int(1)` tags the call's value.
+    if named && inner.expr == .Ident(_, _, _) -> inner = parser_parse_postfix(&state, ^inner, depth + 1, allow_struct_lit, true)
     span :: parser_cover(head_span, inner.span)
     ParsedExpr{expr: Expr.Tainted{value: inner.expr, tag: Val(applied), span: span, id: parser_node_id(&state)}, span: span}
 }
@@ -1531,14 +1535,24 @@ fn parser_is_adjacent_call_result(expr: Expr) -> Bool Never! {
     }
 }
 
-fn parser_parse_postfix(state: &JetParserState, initial: ^ParsedExpr, depth: Int, allow_struct_lit: Bool) -> ParsedExpr {
+fn parser_parse_postfix(state: &JetParserState, initial: ^ParsedExpr, depth: Int, allow_struct_lit: Bool, primary_tail: Bool) -> ParsedExpr {
     expression := ^initial
     // Rust `expr_primary`: a capitalized name's own `<…>` (`Pool<T>.new()`)
     // and call-site arguments (`decode<Order>(raw)`).
     owner_type_args := [Type]{}
     call_type_args := [Type]{}
+    // `primary_tail` reads only what Rust `expr_primary` read after a bare
+    // name: one call (`name(…)`), or one member with its call
+    // (`name.member(…)`), with their `<…>` lists and a literal head.
+    tail_member := false
+    tail_done := false
     loop {
         kind :: parser_current_kind(&state)
+        if primary_tail {
+            if tail_done -> break
+            if kind == TOKEN_LBRACKET || kind == TOKEN_QUESTION || kind == TOKEN_QUESTION_DOT -> break
+            if tail_member && kind != TOKEN_LPAREN && kind != TOKEN_LT && kind != TOKEN_LBRACE -> break
+        }
         if kind == TOKEN_LT {
             // Rust `ptr_from_addr`: `alias.Ptr<T>.from_addr(addr)` reads its
             // `<…>` as the element type, not a comparison.
@@ -1637,6 +1651,7 @@ fn parser_parse_postfix(state: &JetParserState, initial: ^ParsedExpr, depth: Int
             }
             owner_type_args = [Type]{}
             call_type_args = [Type]{}
+            tail_done = true
             next
         }
         // A bare `{ }` after a field chain is a struct literal only on an
@@ -1671,6 +1686,7 @@ fn parser_parse_postfix(state: &JetParserState, initial: ^ParsedExpr, depth: Int
             literal :: if upper -> Expr.StructLit{type_name: "{alias}.{type_name}", type_args: owner_type_args, import_ns: None, as_trait: None, fields: parsed.fields, inferred: false, span: span, id: parser_node_id(&state)} else -> Expr.StructLit{type_name: type_name, type_args: owner_type_args, import_ns: Val(alias), as_trait: None, fields: parsed.fields, inferred: false, span: span, id: parser_node_id(&state)}
             expression = ParsedExpr{expr: literal, span: span}
             owner_type_args = [Type]{}
+            tail_done = true
             next
         }
         if kind == TOKEN_LBRACKET {
@@ -1714,6 +1730,7 @@ fn parser_parse_postfix(state: &JetParserState, initial: ^ParsedExpr, depth: Int
         }
         if kind == TOKEN_DOT || kind == TOKEN_QUESTION_DOT {
             operator :: parser_bump(&state)
+            tail_member = true
             // A capitalized name's `<…>` belongs only to the member it names.
             owner_head :: parser_literal_head_path(expression.expr)
             if owner_head == "" || owner_head.contains(".") -> owner_type_args = [Type]{}

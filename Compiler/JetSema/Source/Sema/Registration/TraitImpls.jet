@@ -1,0 +1,105 @@
+// Rust `synthesize_impls` (Registration.rs, S62 + D-LIB2): a written trait
+// impl answers every method of a trait its module declares, as written
+// methods registered and checked like any other. A `using` delegation impl
+// gets one forwarding method per trait method, `self.<field>.<m>(args…)`,
+// when the field's type implements the trait in this module (E2401 reports
+// the rest); any other impl gets the trait's default body for each method
+// it doesn't write.
+use jet_foundation.[AST_NODE_GENERATED, CallArg, Expr, Func, ImplDef, Item, Span, Stmt, TraitMethodSig, Type, ast_empty_call_arg_flags, ast_func, type_name]
+
+fn sema_trait_impls_synthesize(items: &[Item]) Never! {
+    traits := [String:[TraitMethodSig]]{}
+    // `Type|Trait` for each impl the module writes itself.
+    pairs := [String:Bool]{}
+    // `Type|field` to the field's type name.
+    fields := [String:String]{}
+    loop item in items {
+        if item == {
+            .Trait(definition) -> traits[definition.name.copy()] = definition.methods.copy()
+            .Impl(definition) -> {
+                if definition.trait_name == .Val(trait_name) {
+                    if definition.delegation_field == None -> pairs["{definition.type_name}|{trait_name}"] = true
+                }
+            }
+            .Struct(definition) -> {
+                loop block in definition.trait_impls -> pairs["{definition.name}|{block.trait_name}"] = true
+                loop field in definition.fields -> fields["{definition.name}|{field.name}"] = type_name(field.ty)
+            }
+            else -> {}
+        }
+    }
+    if traits.len() == 0 -> return
+    loop index in 0..<items.len() {
+        filled := ImplDef?{None}
+        if items[index] == .Impl(definition) -> filled = sema_trait_impl_filled(definition, traits, pairs, fields)
+        updated :: filled ?? next
+        items[index] = Item.Impl{value: updated}
+    }
+}
+
+// `definition` with its synthesized methods, None when it gains none.
+fn sema_trait_impl_filled(definition: ImplDef, traits: [String:[TraitMethodSig]], pairs: [String:Bool], fields: [String:String]) -> ImplDef? Never! {
+    trait_name :: definition.trait_name ?? return None
+    sigs :: traits.get(trait_name) ?? return None
+    if definition.delegation_field == .Val(field_name) {
+        field_type :: fields.get("{definition.type_name}|{field_name}") ?? return None
+        if !(pairs.get("{field_type}|{trait_name}") ?? false) -> return None
+        updated := definition.copy()
+        updated.methods = loop sig in sigs -> sema_trait_impl_forward(sig, field_name)
+        return Val(updated)
+    }
+    extras := [Func]{}
+    loop sig in sigs {
+        body :: sig.default_body ?? next
+        written := false
+        loop method in definition.methods {
+            if method.name == sig.name -> written = true
+        }
+        if written -> next
+        function := sema_trait_impl_method(sig)
+        function.body = body.copy()
+        &extras.push(function)
+    }
+    if extras.len() == 0 -> return None
+    updated := definition.copy()
+    loop extra in extras -> &updated.methods.push(extra)
+    Val(updated)
+}
+
+// The trait method's header as an impl method.
+fn sema_trait_impl_method(sig: TraitMethodSig) -> Func Never! {
+    function := ast_func(sig.name.copy(), sig.name_span, sig.name_span)
+    function.params = sig.params.copy()
+    function.return_type = sig.return_type.copy()
+    function.is_pure = sig.is_pure
+    function.declared_effects = sig.declared_effects.copy()
+    function.return_view_provenance = sig.return_view_provenance.copy()
+    function.declared_return_view_provenance = sig.declared_return_view_provenance.copy()
+    function
+}
+
+// The delegation method: `self.<field>.<m>(args…)`, each argument passed
+// with its parameter's convention. Ownership facts are keyed by exact span,
+// so every built node takes its own span from the trait signature: `self`
+// and each argument their parameter names, the field read `m(self`.
+fn sema_trait_impl_forward(sig: TraitMethodSig, field_name: String) -> Func Never! {
+    span :: sig.name_span
+    self_span := span
+    args := [CallArg]{}
+    loop param in sig.params {
+        if param.name == "self" {
+            self_span = param.name_span
+            next
+        }
+        &args.push(CallArg{convention: param.convention, expr: Expr.Ident{name: param.name.copy(), span: param.name_span, id: AST_NODE_GENERATED}, span: param.name_span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
+    }
+    receiver :: Expr.Field{base: Expr.Ident{name: "self", span: self_span, id: AST_NODE_GENERATED}, member: field_name.copy(), span: Span{start: span.start, end: self_span.end}, id: AST_NODE_GENERATED}
+    call :: Expr.MethodCall{receiver: receiver, method: sig.name.copy(), method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: args, id: AST_NODE_GENERATED}
+    function := sema_trait_impl_method(sig)
+    if sig.return_type != None {
+        function.body = [Stmt]{Stmt.Return{value: Val(call), span: sig.span}}
+    } else {
+        function.body = [Stmt]{Stmt.Expr{expr: call}}
+    }
+    function
+}

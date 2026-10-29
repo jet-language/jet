@@ -10,11 +10,16 @@ use jet_foundation.[
     Expr,
     Func,
     ImplDef,
+    ImportKind,
     Item,
     Marker,
     NamedType,
+    Program,
     Span,
     Stmt,
+    SymbolID,
+    SymbolKind,
+    Type,
 ]
 
 struct SemaFunctionHeaderMarkerGate {
@@ -40,6 +45,59 @@ fn sema_function_header_normalize_external_method(function: Func) -> Item Never!
         is_generated_serde: false,
         os_target: None,
     }}
+}
+
+// `fn Type.method(...)` registers as its one-method impl of `Type` (Rust
+// parser `normalize_external_method_item`); the formatter keeps the written
+// header, so the rewrite happens before any registration. A second
+// `fn Type.method` of the same pair is E0105 in the module namespace, as an
+// external method is a module declaration. A header whose bare type no
+// declaration or import of the module can name stays a function: its body
+// is checked first, so the body's own name errors report before the target
+// (the Rust checker's order), and a clean body reports the target, E0301
+// (sema_function_header_external_target).
+fn sema_function_header_normalize_external_methods(program: &Program, in_package: Bool, diagnostics: &[Diagnostic]) Never! {
+    external := false
+    loop item in program.items {
+        if item == .Func(function) && function.external_type != None -> external = true
+    }
+    if !external -> return
+    imported := false
+    loop import in program.imports {
+        if import.kind == .Unqualified(_, _, _, _, _) -> imported = true
+    }
+    declared := [String:Bool]{}
+    loop item in program.items {
+        if item == .Func(_) -> next
+        name :: sema_registration_root_name(item)
+        if name != "" -> declared[name] = true
+    }
+    seen := [String:Bool]{}
+    items := [Item]{}
+    loop item in program.items {
+        if item == .Func(function) && function.external_type == .Val(target) {
+            key :: "{target.name}.{function.name}"
+            if seen.get(key) != None {
+                &diagnostics.push(sema_defined_twice(function.name, "module declarations share one namespace", function.name_span))
+                next
+            }
+            seen[key] = true
+            if in_package || imported || target.name.contains(".") || declared.get(target.name) != None {
+                &items.push(sema_function_header_normalize_external_method(function))
+                next
+            }
+        }
+        &items.push(item)
+    }
+    program.items = items
+}
+
+// E0301 for an external method header left a function (its type named by
+// nothing the module declares or imports) whose body reported no error.
+fn sema_function_header_external_target(function: Func, diagnostics: &[Diagnostic], start: Int) Never! {
+    target :: function.external_type ?? return
+    if sema_has_error_since(diagnostics, start) -> return
+    &diagnostics.push(sema_error("E0301", target.span, "the impl target `{target.name}` is not a registered type", "an implementation needs one nominal declaration in the resolved module graph", "declare or import the target type before its impl"))
 }
 
 fn sema_function_header_check_root_params(function: Func, is_method: Bool, diagnostics: &[Diagnostic]) -> Bool {
@@ -72,6 +130,74 @@ fn sema_function_header_lint_err_params(function: Func, diagnostics: &[Diagnosti
     loop parameter in function.params {
         if parameter.name == "err" -> &diagnostics.push(sema_err_shadow_lint(parameter.name_span))
     }
+}
+
+// D-MEMO1=A (Rust `memo_bound_from_markers`): the one result-cache
+// configuration every execution tier reads. Without `#Memo` the function is
+// not memoized; `#Memo(bound: none)` is the explicit unbounded store; any
+// other `#Memo` keeps the default bound of 128 entries.
+SEMA_DEFAULT_MEMO_BOUND :: 128
+
+struct SemaMemoConfig {
+    bound: Int?
+    unbounded: Bool
+}
+
+fn sema_function_header_memo_config(function: Func) -> SemaMemoConfig Never! {
+    loop marker in function.markers {
+        if marker.name != "Memo" -> next
+        unbounded := false
+        if marker.args.len() == 1 && marker.arg_labels.len() > 0 {
+            if marker.arg_labels[0] == .Val(label) {
+                if marker.args[0] == .Expr(value) {
+                    if value == .Ident(name, _, _) -> unbounded = label.name == "bound" && name == "none"
+                }
+            }
+        }
+        if unbounded -> return SemaMemoConfig{bound: None, unbounded: true}
+        return SemaMemoConfig{bound: Val(SEMA_DEFAULT_MEMO_BOUND), unbounded: false}
+    }
+    SemaMemoConfig{bound: None, unbounded: false}
+}
+
+// The memo configuration of the function `target` names, read from its
+// declaration in place; None for a generic function (one store per
+// instance, so no single store to report) or a non-function.
+fn sema_function_header_memo_target(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SymbolID) -> SemaMemoConfig? {
+    if program.registration_graph == .Val(graph) {
+        row :: sema_registration_callable_row(graph, target.key) ?? return None
+        if row == .Function(module_index, index) {
+            if graph.modules[module_index].functions[index].declaration.type_params.len() > 0 -> return None
+            return Val(sema_function_header_memo_config(graph.modules[module_index].functions[index].declaration))
+        }
+        return None
+    }
+    item :: sema_scope_resolve_declaration(environment, program, target) ?? return None
+    if item == .Func(function) && function.type_params.len() == 0 -> return Val(sema_function_header_memo_config(function))
+    None
+}
+
+// D-MEMO1=A (Rust `infer_method_call`): `name.cache()` naming a memoized
+// function is the read-only `MemoStats` of its result store, resolved
+// before the ordinary receiver lookup.
+fn sema_function_header_memo_stats(receiver: Expr, method: String, args: [CallArg], method_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    unhandled :: SemaDirectSpecialCheck{handled: false, value: None}
+    if method != "cache" || args.len() > 0 -> return unhandled
+    name := ""
+    if receiver == .Ident(receiver_name, _, _) -> name = receiver_name
+    if name == "" -> return unhandled
+    nearest :: sema_scope_resolve_index(scopes, name) ?? return unhandled
+    symbol :: sema_scope_binding_symbol(environment, scopes, nearest)
+    if symbol.kind != SymbolKind.Function -> return unhandled
+    config :: sema_function_header_memo_target(environment, program, symbol.id) ?? return unhandled
+    bound := "none"
+    if config.bound == .Val(limit) {
+        bound = "{limit}"
+    } else if !config.unbounded {
+        return unhandled
+    }
+    function :: sema_call_callee_decl(program, symbol.id, method_span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    SemaDirectSpecialCheck{handled: true, value: Val(sema_tir_node(Type.Named{name: "MemoStats"}, TExprKind.HostCall{call: THostCall.MemoStats{function: function, bound: bound}}, method_span))}
 }
 
 // E0126: a default expression may name only parameters written
@@ -225,10 +351,6 @@ fn sema_function_header_supported(function: Func, context: &SemaCheckContext) ->
         sema_check_unsupported(&context, "the multi-head pattern function `{function.name}` reached body checking without being desugared")
         supported = false
     }
-    if function.external_type != None {
-        sema_check_unsupported(&context, "the external method header `fn Type.{function.name}` is not normalized into an impl by the self-hosted checker yet")
-        supported = false
-    }
     // (Rust `check_fn`): an `#FFI(<lang>)` body is foreign
     // source, never Jet statements. The registration foreign stage validates
     // it (E3220/E3215/E3222/E3102/E3223) and calls bind to its checked foreign
@@ -246,7 +368,16 @@ fn sema_function_header_supported(function: Func, context: &SemaCheckContext) ->
         // Rust Guest.rs `is_guest_export_marker`: an `#Export(c)` function is an
         // ordinary Jet body; the export row is read after checking
         // (jet_driver_c_exports), so the marker adds nothing to the body check.
-        if sema_function_header_marker_projected(marker.name) || (marker.name == "Reactive" && function.is_reactive) || sema_marker_is_guest_export(marker) -> next
+        // A `#Kernel(.parallel)` marker is the parsed `function.kernel`, whose
+        // proof obligations Kernel.jet checks. `#Memo` is checked by
+        // sema_check_memoized_function (E0939/E0940) and the effect pass
+        // (E0938); its result cache is the body's memo facts
+        // (sema_function_header_memo_config). A `#Target(JS|Wasm)` or
+        // `#WasmExport` marker is the parsed `function.web_marker`, which
+        // WebPartition.jet checks. A `#State`/`#Transition` marker is the
+        // parsed `function.state_requires`/`state_transition`, which
+        // StateFacts.jet validates and Typestate.jet checks at each call.
+        if sema_function_header_marker_projected(marker.name) || (marker.name == "Reactive" && function.is_reactive) || (marker.name == "Kernel" && function.kernel != None) || marker.name == "Memo" || ((marker.name == "Target" || marker.name == "WasmExport") && function.web_marker != None) || (marker.name == "State" && function.state_requires != None) || (marker.name == "Transition" && function.state_transition != None) || sema_marker_is_guest_export(marker) -> next
         // A user-declared marker is metadata its declaration describes; it
         // has no compiler meaning for the body check or lowering to read.
         if marker.declaration_module != None -> next
@@ -254,22 +385,8 @@ fn sema_function_header_supported(function: Func, context: &SemaCheckContext) ->
         supported = false
     }
     loop parameter_index in 0..<function.params.len() {
-        if function.params[parameter_index].root {
-            sema_check_unsupported(&context, "the `#Root` parameter `{function.params[parameter_index].name}` (reversible dot call) is not supported by the self-hosted checker yet")
-            supported = false
-        }
         if function.params[parameter_index].variadic_bound_list != None {
             sema_check_unsupported(&context, "the variadic bound list on parameter `{function.params[parameter_index].name}` is not supported by the self-hosted checker yet")
-            supported = false
-        }
-        if function.params[parameter_index].declared_view_from_names != None {
-            sema_check_unsupported(&context, "the declared `from` view sources on parameter `{function.params[parameter_index].name}` are not supported by the self-hosted checker yet")
-            supported = false
-        }
-        // The Rust checker owns the E0231 body check
-        // and API publication of a stated receiver footprint.
-        if function.params[parameter_index].declared_footprint != None {
-            sema_check_unsupported(&context, "the stated receiver footprint on `{function.name}` is not supported by the self-hosted checker yet")
             supported = false
         }
     }

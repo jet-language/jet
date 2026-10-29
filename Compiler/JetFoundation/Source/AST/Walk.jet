@@ -135,13 +135,18 @@ fn ast_visit_statement(statement: Stmt, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, T
                 ast_visit_fallback(fallback, visitor)
             }
         }
+        // An assigned field or local is visited as the place expression it
+        // names (the ownership checker's LValue-to-Expr reading), so a walk
+        // sees `self.hits = 0` as the field `hits` of `self`.
         .Assign(target, _, _, value) -> {
             if target == {
                 .Index(base, index, _, _) -> {
                     ast_visit_expr(base, visitor)
                     ast_visit_expr(index, visitor)
                 }
-                .Field(base, _, _) -> ast_visit_expr(base, visitor)
+                // copy: `base`, `field` and `name` are payloads of read parameter `statement`; the visited place owns these
+                .Field(base, field, span) -> ast_visit_expr(Expr.Field{base: base.copy(), member: field.copy(), span: span, id: AST_NODE_GENERATED}, visitor)
+                .Local(name, name_span) -> visitor(Expr.Ident{name: name.copy(), span: name_span, id: AST_NODE_GENERATED})
                 else -> {}
             }
             ast_visit_expr(value, visitor)

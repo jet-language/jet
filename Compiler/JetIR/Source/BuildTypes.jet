@@ -54,6 +54,34 @@ fn ir_shared_guard_editable(ty: Type) -> Bool? Never! {
     None
 }
 
+// The value type of a local `Cell<T>` (Sema SharedOwner.jet), a native
+// Shared cell; None for any other type.
+fn ir_local_cell_inner(ty: Type) -> Type? Never! {
+    if ir_untag(ty) == .Apply(name, args) {
+        if name == "Cell" && args.len() == 1 -> return Val(args[0])
+    }
+    None
+}
+
+// Whether `ty` is a `CellEditGuard<T>` (true) or `CellReadGuard<T>` (false),
+// a local cell guard token (JetRuntime Shared.jet jet_rt_native_cell_guard);
+// None for any other type.
+fn ir_cell_guard_editable(ty: Type) -> Bool? Never! {
+    if ir_untag(ty) == .Apply(name, args) {
+        if args.len() != 1 -> return None
+        if name == "CellReadGuard" -> return Val(false)
+        if name == "CellEditGuard" -> return Val(true)
+    }
+    None
+}
+
+// The value type a Cell or a Cell guard lends.
+fn ir_cell_value_type(ty: Type) -> Type? Never! {
+    if ir_cell_guard_editable(ty) == None -> return ir_local_cell_inner(ty)
+    if ir_untag(ty) == .Apply(_, args) -> return Val(args[0])
+    None
+}
+
 // The success of a `T Never!` carrier.
 fn ir_never_carrier_success(ty: Type) -> Type? Never! {
     if ir_untag(ty) == .Result(ok, err) {
@@ -175,6 +203,15 @@ fn ir_value_type_laid(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) ->
     }
     if ty == .Tagged(_, inner) -> return ir_value_type_in(&m, p, inner, laying)
     if ty == .InlineRange(base, _, _) -> return ir_value_type_in(&m, p, base, laying)
+    if ir_local_cell_inner(ty) != None {
+        // A local Cell is an owned native Shared cell: every copy of the
+        // handle aliases the one cell.
+        return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_owned_layout(IRTypeKind.Pointer, ty, "jet_rt_native_shared_drop", "jet_rt_native_shared_clone")))
+    }
+    if ir_cell_guard_editable(ty) != None {
+        // An owned cell guard token with no Clone.
+        return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_owned_layout(IRTypeKind.Pointer, ty, "jet_rt_native_cell_guard_drop", "")))
+    }
     if ty == .Option(inner) {
         if !ir_pointee_lays_out(&m, p, inner, laying) -> return None
         if ir_option_int_payload(&m, p, inner, laying) {
@@ -429,7 +466,9 @@ fn ir_instance_identity(key: String, args: [Type]) -> String Never! {
 
 // The runtime type behind a handle of nominal type `name`: the default Err is
 // the runtime's JetErr; a Core declaration the handle table does not name by
-// its key is named by its own name.
+// its key is named by its own name, unless the table pins that runtime to
+// another Core declaration's key (a bare `Reader` is core.term's JetReader,
+// not the private __core_crypto_jetc Reader struct).
 fn ir_handle_runtime(p: IRProgram, name: String) -> IRRuntimeHandle? Never! {
     runtime := ir_runtime_handle(name)
     if ir_type_def(p, name) == .Val(row) {
@@ -437,10 +476,19 @@ fn ir_handle_runtime(p: IRProgram, name: String) -> IRRuntimeHandle? Never! {
         if definition.compiler_builtin == (Val(TCompilerBuiltin.DefaultErr)) {
             runtime = ir_runtime_handle("Err")
         } else if runtime == None && definition.key.starts_with("<corelib>/") {
-            runtime = ir_runtime_handle(definition.name)
+            runtime = ir_core_bare_handle(definition.key, definition.name)
         }
     }
     runtime
+}
+
+fn ir_core_bare_handle(key: String, name: String) -> IRRuntimeHandle? Never! {
+    bare :: ir_runtime_handle(name) ?? return None
+    loop index in 0..<IR_RUNTIME_HANDLES.len() {
+        pinned :: IR_RUNTIME_HANDLES[index].jet_name.starts_with("<corelib>/") && IR_RUNTIME_HANDLES[index].jet_name != key
+        if pinned && IR_RUNTIME_HANDLES[index].runtime == bare.runtime -> return None
+    }
+    Val(bare)
 }
 
 // The row of a runtime-owned value behind an owned handle of nominal type
@@ -636,6 +684,7 @@ fn ir_handle_field(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: In
         "Text" -> kind == .String
         "Float" -> kind == .Float
         "Flag" -> kind == .Bool
+        "List.Byte" -> kind == .Aggregate && lent.header_bytes > 0
         else -> lent.kind.starts_with("Handle.")
     }
     if !matches -> return -2
@@ -3196,8 +3245,10 @@ fn ir_numeric_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
     if operation == {
         .CastAs(_) -> return ir_numeric_cast(&m, p, &b, value, target, span)
         .ToShow -> return ir_render(&m, p, &b, receiver_ty, value, IRRender.Display, span)
-        .InlineRange(_, _, checked) -> {
-            if checked -> return ir_fail_slot(&b, span, "checked inline-range conversion")
+        .InlineRange(lo, hi, checked) -> {
+            // A runtime value is Ok in lo..hi, else Err (the route
+            // jet_inline_range_from_int, as a ranged distinct's conversion).
+            if checked -> return ir_distinct_in_range(&m, p, &b, ty, value, lo, hi, span)
             return ir_copy_value(&m, p, &b, value, span)
         }
         .CheckedIntToFixed(host_kind, line) -> {

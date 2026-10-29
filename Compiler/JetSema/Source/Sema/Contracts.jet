@@ -740,14 +740,32 @@ fn sema_contract_function_for_symbol(environment: SemaScopeEnvironment, program:
 
 // What a call needs to know about its callee's contract, read from the
 // declaration in place: a call checks `pre` clauses only when there are any,
-// so it copies the callee's declaration (and its body) only then.
+// so it copies the callee's declaration (and its body) only then. A callee
+// with a parameter `from` clause (D-MEMPROVENANCE3=A) carries its parameter
+// names and each parameter's `from` names; both are empty otherwise.
+// `root_receiver`: the first parameter is `#Root`, so the callee also takes
+// the receiver-first spelling (RootCalls.jet).
 struct SemaContractCalleeFacts {
     pre_count: Int
     is_pure: Bool
+    root_receiver: Bool
+    param_names: [String]
+    param_view_from: [[String]?]
 }
 
 fn sema_contract_callee_facts(func: Func) -> SemaContractCalleeFacts Never! {
-    SemaContractCalleeFacts{pre_count: func.pre.len(), is_pure: func.is_pure}
+    view_from := loop param in func.params {
+        if param.declared_view_from_names != None -> break true
+    } ?? false
+    param_names := [String]{}
+    param_view_from := [[String]?]{}
+    if view_from {
+        loop param in func.params {
+            &param_names.push(param.name)
+            &param_view_from.push(param.declared_view_from_names)
+        }
+    }
+    SemaContractCalleeFacts{pre_count: func.pre.len(), is_pure: func.is_pure, root_receiver: func.params.len() > 0 && func.params[0].root, param_names: param_names, param_view_from: param_view_from}
 }
 
 fn sema_contract_registered_facts(graph: SemaRegistrationGraph, target: SymbolID) -> SemaContractCalleeFacts? {

@@ -661,7 +661,9 @@ fn iter_repeat(source: I64, count: I64, loops: Bool) -> I64 {
     state := U64{3237998146}
     at := trap_word(header) - I64{1}
     loop at > (I64{0}) {
-        state = wrapping(state * U64{6364136223846793005} + U64{1})
+        // `wrapping` governs its one operator: the LCG's multiply and add
+        // each wrap (Rust wrapping_mul(..).wrapping_add(1)).
+        state = wrapping(wrapping(state * U64{6364136223846793005}) + U64{1})
         other :: I64{(state >> U64{33}) % U64{at + I64{1}}}
         coll_copy(data + at * stride, scratch, coll_payload(meta))
         coll_copy(data + other * stride, data + at * stride, coll_payload(meta))

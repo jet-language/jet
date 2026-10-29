@@ -350,10 +350,12 @@ fn ir_tx_unwind(m: &IRModule, p: IRProgram, b: &IRBuilder, loops: Int, span: Spa
 }
 
 // A return of `slot` (-1: nothing): the open contract scope's `post` clauses
-// check it, then it leaves the open transactions, taken before their
-// snapshots are restored.
+// check it, a memoized body files it (ir_memo_file), then it leaves the open
+// transactions, taken before their snapshots are restored.
 fn ir_return_slot(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span: Span) Never! {
     ir_contract_return(&m, p, &b, slot, span)
+    if ir_failed(b) -> return
+    ir_memo_file(&m, p, &b, slot, span)
     if ir_failed(b) -> return
     kept := slot
     if b.transactions.len() > 0 && slot >= 0 && !b.fresh[slot] && ir_kind_of(m, b, slot) != .Aggregate {

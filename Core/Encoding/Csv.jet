@@ -71,12 +71,16 @@ fn rows(text: String, delimiter: String{","}, header: Bool{false}, skip_blank: B
 
 /// Header-named typed rows. Missing cells become empty text; extra cells are
 /// ignored, and failures from every data record are accumulated in row order.
+/// Cells decode inside the runtime's text-cell scope (Rust
+/// `jet_decode_text_cells`): a Text cell parses as an Int, Float or Bool
+/// target, and the previous scope is restored before returning.
 fn decode<T: Decode>(text: String) -> [T] [FieldError]! {
     rows :: typed_records(text) ?? return Err([FieldError]{FieldError{path: "", reason: err.reason}})
     if rows.len() == 0 -> return Ok([T]{})
     header :: rows[0]
     values := [T]{}
     errors := [FieldError]{}
+    previous :: encoding.__text_cells_enter()
     loop index in 1..<rows.len() {
         row :: rows[index]
         entries := [(key: String, value: Dyn)]{}
@@ -96,6 +100,7 @@ fn decode<T: Decode>(text: String) -> [T] [FieldError]! {
             }
         }
     }
+    encoding.__text_cells_leave(previous)
     if errors.len() == 0 -> Ok(values) else -> Err(errors)
 }
 

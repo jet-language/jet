@@ -52,14 +52,16 @@ fn ir_handle_task_route(receiver: Type, carrier: TFailureCarrier) -> IRHandleRou
     }
 }
 
-fn ir_handle_allocator_name(receiver: Type) -> String Never! {
-    if ir_handle_type_without_tags(receiver) == {
-        .Named(name) -> {
-            if name == "Arena" || name == "Bump" || name == "Pool" || name == "Fixed" -> return name
+// The core.mem allocator family a checked allocator method's receiver names
+// (`Arena`, `Bump`, `Pool` or `Fixed`, bare or `<corelib>/core.mem::`).
+fn ir_handle_allocator_name(receiver: Type) -> String? Never! {
+    if ir_handle_type_without_tags(receiver) == .Named(name) {
+        families :: [String]{"Arena", "Bump", "Pool", "Fixed"}
+        loop family in families {
+            if name == family || name == ("<corelib>/core.mem::{family}") -> return Val(family)
         }
-        else -> {}
     }
-    panic("checked allocator method has no allocator receiver")
+    None
 }
 
 fn ir_handle_nominal_name(ty: Type) -> String Never! {
@@ -723,25 +725,6 @@ fn ir_handle_dynamic_route(operation: BodyHandleOp, receiver: Type, argument_cou
         else -> {}
     }
     if operation == {
-        .AllocAlloc | .AllocTryAlloc | .AllocReset -> {
-            allocator := ir_handle_allocator_name(receiver)
-            member := "alloc"
-            symbol := "jet_mem::Jet{allocator}::alloc"
-            mask := [Bool]{true, false}
-            if operation == {
-                .AllocTryAlloc -> {
-                    member = "try_alloc"
-                    symbol = "jet_mem::Jet{allocator}::try_alloc"
-                }
-                .AllocReset -> {
-                    member = "reset"
-                    symbol = "jet_mem::Jet{allocator}::reset"
-                    mask = [Bool]{true}
-                }
-                else -> {}
-            }
-            return Val(ir_handle_h("{allocator}.{member}", symbol, mask, Val(Effect.Mem)))
-        }
         .ReactiveGet -> return ir_handle_reactive_route(receiver, "get")
         .ReactiveSet -> return ir_handle_reactive_route(receiver, "set")
         .TaskJoin -> return Val(ir_handle_task_route(receiver, carrier))
@@ -987,7 +970,6 @@ fn ir_general_handle_route(operation: BodyHandleOp, receiver: Type, argument_cou
         .PathStem -> return Val(ir_handle_h("path.stem", "jet_path_stem", [Bool]{true}, None))
         .PathNormalize -> return Val(ir_handle_h("path.normalize", "jet_path_normalize", [Bool]{true}, None))
         .PathIsWithin -> return Val(ir_handle_h("path.is_within", "jet_path_is_within", [Bool]{true, true}, None))
-        .PathWriteAtomic -> return Val(ir_handle_h("path.write_atomic", "jet_path_write_atomic", [Bool]{true, true}, Val(Effect.FS)))
         .PathWalk -> return Val(ir_handle_h("path.walk", "jet_path_walk", [Bool]{true}, Val(Effect.FS)))
         .ReaderOver(owned) -> {
             symbol := if owned -> "jet_reader_over_owned" else -> "jet_reader_over"

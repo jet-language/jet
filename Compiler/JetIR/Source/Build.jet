@@ -49,6 +49,18 @@ struct IRWriteBack { cell: Int, slot: Int }
 // `value` (-1: a statement loop).
 struct IRLoopFrame { label: String?, exit: Int, next: Int, mark: Int, value: Int{-1} }
 
+// An open `.expect_fail` region (BuildTests.jet ir_scope_member): `scope`
+// the slot holding its scope id, `exit` the Block a caught stop leaves,
+// `mark` the bindings and `transactions` the open #Transact blocks when it
+// opened.
+struct IRCatchFrame { scope: Int, exit: Int, mark: Int, transactions: Int }
+
+// A `#Memo` function's store (BuildMemo.jet): `cell` the slot holding its
+// static cell's address, `entry` the slot holding the entry a miss opened
+// (the arguments' copies at `offsets`, typed `rows`; the result at
+// `value_offset`; `size` bytes in all), `bound` its entry bound (-1: none).
+struct IRMemo { cell: Int, entry: Int, rows: [Int], offsets: [Int], value_offset: Int, size: Int, bound: Int }
+
 // Per-function build state. `fresh[slot]` marks a temporary that holds a
 // value nobody else owns yet (a call result, a built String): a borrowing
 // consumer drops it after use.
@@ -108,6 +120,12 @@ struct IRBuilder {
     lambdas: [String:Int]
     // Building a stop edge (ir_stop_return): its cleanup checks for no stop.
     stopping: Bool{false}
+    // The open `.expect_fail` regions (innermost last) whose catch a stop
+    // edge tries first (ir_stop_catches).
+    catches: [IRCatchFrame]{[IRCatchFrame]{}}
+    // A `#Memo` function's result store: each return files its result
+    // (ir_memo_file).
+    memo: IRMemo?{None}
     // Building the program entry itself (IRProgram.entry, not a lambda or a
     // generic instance in it): its end and each return first report the
     // entry returning (ir_entry_ending), so its drops can leave the heap to
@@ -1757,7 +1775,7 @@ fn ir_runtime(m: &IRModule, b: &IRBuilder, symbol: String, args: [Int], ty: Int)
 // fatal), and the stop rail's own calls.
 fn ir_route_can_stop(symbol: String) -> Bool Never! {
     if symbol.ends_with("_drop") || symbol.starts_with("jet_rt_handle_drop_") || symbol.contains("_clone") -> return false
-    if symbol.starts_with("jet_rt_string_builder_") || symbol.starts_with("jet_rt_block_") -> return false
+    if symbol.starts_with("jet_rt_string_builder_") || symbol.starts_with("jet_rt_block_") || symbol.starts_with("jet_rt_memo_") -> return false
     if symbol == {
         "jet_rt_alloc" | "jet_rt_free" | "jet_rt_mem_move" | "jet_int_owned_to_i64" | "jet_int_owned_from_i64" -> false
         "jet_rt_string_from_static" | "jet_rt_string_byte_len" | "jet_rt_string_compare" | "jet_journey_reset" -> false
@@ -1815,8 +1833,41 @@ fn ir_stop_point(m: &IRModule, b: &IRBuilder, key: String) Never! {
     start :: ir_args(&b.f, [Int]{})
     ir_emit(&b.f, IROp.Call, stopped, poll, start, 0, b.line)
     ir_open_if(&b.f, stopped, b.line)
+    ir_stop_catches(&m, &b)
     ir_stop_return(&m, &b)
     ir_end(&b.f, b.line)
+}
+
+// In an `.expect_fail` region, a stop edge first offers the stop to each
+// open region, innermost first (jet_rt_test_catch_for_scope): a caught stop
+// drops the variables the region declared, under one runtime cleanup scope
+// (the stop stays pending until the region's catch_boundary), and leaves the
+// region.
+fn ir_stop_catches(m: &IRModule, b: &IRBuilder) Never! {
+    if b.catches.len() == 0 -> return
+    b.stopping = true
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    word_row :: ir_word_row(&m)
+    index := b.catches.len() - 1
+    loop index >= 0 {
+        frame :: b.catches[index]
+        index -= 1
+        if b.transactions.len() > frame.transactions {
+            ir_fail(&b, Span{start: 0, end: 0}, "an `.expect_fail` stop edge out of a #Transact block")
+            break
+        }
+        caught :: ir_runtime(&m, &b, "jet_rt_test_catch_for_scope", [Int]{frame.scope}, bool_row)
+        ir_open_if(&b.f, caught, b.line)
+        saved :: ir_runtime(&m, &b, "jet_rt_cleanup_enter", [Int]{}, word_row)
+        states :: ir_own_states(b, b.bindings.len())
+        ir_drop_bindings(&m, &b, frame.mark)
+        ir_set_own_states(&b, states)
+        _ :: ir_runtime(&m, &b, "jet_rt_cleanup_leave", [Int]{saved}, -1)
+        depth :: ir_depth(b.f, frame.exit)
+        ir_emit(&b.f, IROp.Br, -1, depth, -1, -1, b.line)
+        ir_end(&b.f, b.line)
+    }
+    b.stopping = false
 }
 
 // A stop poll: true when the thread's task control holds a stop and

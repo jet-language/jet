@@ -564,3 +564,48 @@ fn shared_physical_guard_release(guard: I64, commit: Bool) {
     jet_rt_free(guard, I64{40}, I64{8})
     shared_borrow_unpin(cell)
 }
+
+// Local `Cell<T>` guards. A Cell is a native Shared cell; its guard is a
+// Cell16 token: a Guard40 projection ref at 0 and the address of the value
+// the guard lends at 8. `map`/`split` project new tokens that share the one
+// Guard40 permit, which releases with the last of them.
+fn cell_guard_token(guard: I64, address: I64) -> I64 {
+    token :: jet_rt_alloc(I64{16}, I64{8})
+    sync_store(token, guard)
+    sync_store(token + I64{8}, address)
+    token
+}
+
+#Export(c) fn jet_rt_native_cell_guard(cell: I64, editable: I64) -> I64 {
+    guard :: jet_rt_shared_guard_acquire(cell, editable)
+    if guard == (I64{0}) {
+        shared_guard_invalid()
+        return I64{0}
+    }
+    cell_guard_token(guard, sync_load(cell + I64{64}))
+}
+
+#Export(c) fn jet_rt_native_cell_guard_address(token: I64) -> I64 {
+    if !jet_rt_shared_guard_held(sync_load(token)) {
+        shared_guard_invalid()
+        return I64{0}
+    }
+    sync_load(token + I64{8})
+}
+
+#Export(c) fn jet_rt_native_cell_guard_project(token: I64, address: I64) -> I64 {
+    cell_guard_token(jet_rt_shared_guard_clone(sync_load(token)), address)
+}
+
+// `guard.read(f)` / `guard.edit(f)`: the callback over the lent value.
+#Export(c) fn jet_rt_native_cell_guard_with(token: I64, env: I64, invoke: I64, out: I64) {
+    address :: jet_rt_native_cell_guard_address(token)
+    if address == (I64{0}) -> return
+    _ := coll_call3(invoke, env, address, out)
+}
+
+#Export(c) fn jet_rt_native_cell_guard_drop(token: I64) {
+    if token == (I64{0}) -> return
+    jet_rt_shared_guard_drop(sync_load(token))
+    jet_rt_free(token, I64{16}, I64{8})
+}

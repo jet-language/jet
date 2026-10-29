@@ -89,6 +89,9 @@ struct SemaEffectFunctionSource {
     assume_det_spans: [Span]{[Span]{}}
     // The first `#Memo` marker of a non-comptime function (E0938).
     memo_span: Span?{None}
+    // A top-level `#Kernel(.parallel)` whose declaration obligations hold
+    // (sema_kernel_pending): E1102 judges its effect and body obligations.
+    kernel: SemaKernelPending?{None}
 }
 
 // One `#FX(…)` region: its parsed caps, the head span E0712 points at, and
@@ -223,6 +226,7 @@ struct SemaEffectNode {
     // This pure body made a non-deterministic Core call (E3403 reported).
     nondeterministic_call: Bool{false}
     memo_span: Span?{None}
+    kernel: SemaKernelPending?{None}
     // `module::name` in call paths and the source file name in reports.
     display_key: String{""}
     source_display: String{""}
@@ -906,6 +910,7 @@ fn sema_effect_node_from_source(function: FnBody, sources: [SemaEffectFunctionSo
     // copy: as above.
     node.assume_det_spans = actual.assume_det_spans.copy()
     node.memo_span = actual.memo_span
+    node.kernel = actual.kernel
     if actual.is_unsafe && !sema_effect_check_unsafe_function(actual, &diagnostics) {
         // The diagnostic is already source-backed; retain the node so the graph
         // remains inspectable after a failed gate check.
@@ -1204,7 +1209,6 @@ fn sema_effect_is_call(kind: NodeKind) -> Bool Never! {
         | .Print(_)
         | .Drop(_)
         | .Close(_)
-        | .AmbientInput(_)
         | .HostCall(_)
         | .AllocNew(_, _)
         | .BuiltinMethod(_, _, _)
@@ -2164,6 +2168,7 @@ fn sema_effect_check_node(node: SemaEffectNode, solved: [String], secret_reached
             valid = false
         }
     }
+    if node.kernel == .Val(pending) && !sema_kernel_check_effects(pending, node.direct, node.call_edges, node.maximal, &diagnostics) -> valid = false
     secret_granted :: loop bound in node.declared {
         if sema_effect_root(bound) == "Secret" -> break true
     } ?? false
@@ -2951,9 +2956,6 @@ fn sema_effect_walk_expr_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode]
         }
         .MathBuiltin(_, _, args) | .PreciseBuiltin(_, _, args) -> loop value in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, value)
         .Print(value) | .Drop(value) | .Close(value) | .Move(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, value)
-        .AmbientInput(prompt) -> {
-            if prompt == .Val(prompt_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, prompt_value)
-        }
         .RequireStop(kind, _, _) -> sema_effect_walk_require_children(walk, &nodes, facts, &diagnostics, caller, tree, kind)
         .Binary(_, _, _, lhs, rhs) -> {
             sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, lhs)
@@ -3362,7 +3364,7 @@ fn sema_effect_walk_host_call_children(walk: SemaEffectWalk, nodes: &[SemaEffect
         .OptionProbe(inner, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, inner)
         .TupleIndex(base, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, base)
         .YieldSend(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, value)
-        .SwitchSubjectValue | .NumericBounds(_, _) | .ComptimeInput(_, _) -> {}
+        .SwitchSubjectValue | .NumericBounds(_, _) | .ComptimeInput(_, _) | .MemoStats(_, _) -> {}
     }
 }
 

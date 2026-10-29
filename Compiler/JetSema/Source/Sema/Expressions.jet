@@ -884,7 +884,12 @@ fn sema_expr_binary_type(op: BinOp, lhs: Type, rhs: Type, span: Span, diagnostic
     if op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div || op == BinOp.FloorDiv || op == BinOp.Pow {
         if type_identity_equal(lhs, rhs) && sema_expr_is_numeric(lhs) -> return Val(lhs)
         if sema_expr_precise_name(lhs) != None && type_identity_equal(lhs, rhs) -> return Val(lhs)
-        if sema_expr_is_numeric(lhs) && sema_expr_is_numeric(rhs) -> return None
+        // Two numbers with no widening join (`U8` and `I8`): neither side
+        // holds every value of the other, so no result type is implied.
+        if sema_expr_is_numeric(lhs) && sema_expr_is_numeric(rhs) {
+            &diagnostics.push(sema_error("E0109", span, "{sema_expr_operator_label(op)} can't compare or combine {sema_type_show(lhs)} and {sema_type_show(rhs)}", "Neither {type_name(lhs)} contains every value of {type_name(rhs)}, nor {type_name(rhs)} every value of {type_name(lhs)}", "Choose the result type and convert the other side into it"))
+            return None
+        }
         if op == BinOp.FloorDiv || (op == BinOp.Add && lhs == Type.String) {
             &diagnostics.push(sema_error("E0109", span, "arithmetic needs matching number types", "arithmetic operands must share a supported numeric type", "make both operands the same number type"))
             return None
@@ -3166,7 +3171,14 @@ fn sema_expr_try_method_static_routes(receiver: Expr, method: String, method_spa
     core := sema_expr_try_core_module_method(receiver, method, method_span, type_args, args, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if core.handled -> return core
     if receiver == .Ident(alias_name, alias_span, _) {
-        if sema_expr_core_module_alias_visible(alias_name, scopes) -> return sema_call_try_source_module_call(alias_name, alias_span, method, type_args, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        if sema_expr_core_module_alias_visible(alias_name, scopes) -> return sema_call_try_source_module_call(alias_name, alias_span, method, method, type_args, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
+    // `helper.internal.secret()`: a member of an inline module of an imported
+    // file module, lifted beside it under its member identity.
+    if receiver == .Field(base, submodule, _, _) && base == .Ident(alias_name, alias_span, _) {
+        if sema_expr_core_module_alias_visible(alias_name, scopes) && sema_call_source_import_inline_module(environment, program, alias_name, submodule) {
+            return sema_call_try_source_module_call(alias_name, alias_span, sema_inline_member_name(submodule, method), "{submodule}.{method}", type_args, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        }
     }
     SemaMethodSpecialCheck{handled: false, value: None}
 }
@@ -3400,6 +3412,10 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
     if pre_receiver.handled -> return pre_receiver.value
     hardware_pre_receiver := sema_expr_try_hardware_pre_receiver(receiver, method, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if hardware_pre_receiver.handled -> return hardware_pre_receiver.value
+    memo_stats :: sema_function_header_memo_stats(receiver, method, args, method_span, environment, program, scopes, &diagnostics)
+    if memo_stats.handled -> return memo_stats.value
+    root_call := sema_root_call_try(receiver, method, method_span, type_args, args, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if root_call.handled -> return root_call.value
     scopes.ownership_call_depth += 1
     // Chaining `.trim()`/`.after()`/`.before()` onto a string view
     // reads it as the `&str` those methods take, so the view read is allowed.

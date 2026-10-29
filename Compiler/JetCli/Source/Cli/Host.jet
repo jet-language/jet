@@ -113,6 +113,7 @@ use jet_ir.[
     ir_module_new,
     ir_program_new,
     ir_build_tests,
+    ir_lint_module,
     ir_optimize_module,
     ir_x64_compile_module,
     ir_x64_hot_order,
@@ -802,10 +803,23 @@ fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLower
     }
     // The memory term is read now: the compile before this holds most of it.
     threads :: CompilerThreads{cap: result.compiler_threads.cap, cores: result.compiler_threads.cores, memory_available: jet_cli_memory_available()}
+    // IR Lint over the built module (Lint.jet): each finding is an ICE row
+    // and traps its function.
+    if trace_sink == .Val(sink) -> sink.begin("ir.lint", "", -1, -1)
+    built_lint :: ir_lint_module(&built.program, "ir.build", threads)
+    loop finding in built_lint -> jet_cli_ice_trap(&census, &built.program, finding.key, finding.pass, finding.rule, finding.message)
+    if trace_sink == .Val(sink) -> sink.end("ir.lint", function_count)
     if level > 0 {
         if trace_sink == .Val(sink) -> sink.begin("ir.opt", "", -1, -1)
-        _ := ir_optimize_module(&built.program, jet_cli_opt_options(level, options), threads)
+        report :: ir_optimize_module(&built.program, jet_cli_opt_options(level, options), threads)
+        // With JET_OPT_VERIFY, the lint after each pass (`ir.opt.<pass>`).
+        loop finding in report.lint -> jet_cli_ice_trap(&census, &built.program, finding.key, finding.pass, finding.rule, finding.message)
         if trace_sink == .Val(sink) -> sink.end("ir.opt", function_count)
+        // IR Lint over the optimized module, before x86-64 selection.
+        if trace_sink == .Val(sink) -> sink.begin("ir.lint", "", -1, -1)
+        optimized_lint :: ir_lint_module(&built.program, "ir.opt", threads)
+        loop finding in optimized_lint -> jet_cli_ice_trap(&census, &built.program, finding.key, finding.pass, finding.rule, finding.message)
+        if trace_sink == .Val(sink) -> sink.end("ir.lint", function_count)
     }
     built.program.debug_directory = jet_cli_debug_directory(file, entry_source)
     if trace_sink == .Val(sink) -> sink.begin("ir.x64", "", -1, -1)

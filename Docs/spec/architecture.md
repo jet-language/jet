@@ -295,107 +295,107 @@ when a rechecked package kept its interface digest. The JSON form is
 `jet.explain-build/v1`; text output contains one node per line. The compiler
 owns node identity and dependencies, while the store owns run evidence.
 
-### Single slot IR (middle end)
+### The IR and IR Lint (middle end)
 
-D-ARCH-IR1=A gives the middle end one IR per function:
+D-ARCH-IR1=A: the middle end has one typed IR, called IR, and one checker
+for it, IR Lint. There is no other intermediate representation.
 
 ```text
-checked program (checked bodies + sema facts) -> IR (slots, structured control) -> x86-64 selection
+checked program (checked bodies + sema facts) -> IR build -> IR Lint
+  -> O1/O2 passes (IR Lint after each with verify) -> IR Lint -> x86-64 selection
   -> encoder, object writer, DWARF, static linker, runtime pack
 ```
 
-**Frozen boundaries.** Changing either end of the middle needs the owner's
-explicit approval.
+**Frozen boundaries.** Changing either end needs the owner's explicit approval.
 
-- *Front-end boundary:* the IR builder consumes the checked program: the
-  checked function rows and the sema facts they carry. A data-oriented front
-  end (flat AST, facts in tables keyed by node id) is a later, separate step;
-  when it lands, it changes the builder's input reader and nothing below it.
-- *Emission boundary:* the IR path produces `X64CompiledFunction` and
-  `X64FunctionDebug` rows and an `X64ObjectModule` (data objects, debug files
-  and types, per-function source facts), all declared in
-  `Image/Emission.jet`, for the existing encoder (`X64/Encoder.jet`), object
-  writer (`Image/Object.jet`), DWARF writer (`Image/Dwarf.jet`) and static
-  linker (`Image/StaticLink.jet`). It calls the runtime symbols with the
-  System V ABI and links the runtime pack.
+- *Front end:* the IR builder reads the checked program: the checked function
+  rows and the sema facts they carry. The facts are sema's output, not an IR.
+  They carry every binder's type and every generic call's instantiated type
+  arguments. The builder reads those types; it never re-derives or substitutes
+  them, and it never falls back to an unchecked emitter.
+- *Emission:* x86-64 selection produces the `X64CompiledFunction`,
+  `X64FunctionDebug` and `X64ObjectModule` rows of `Image/Emission.jet` for
+  the encoder, object writer, DWARF writer and static linker. It calls the
+  runtime pack's symbols with the System V ABI.
 
-**Data model** ([`Compiler/JetIR/Source/IR.jet`](../../Compiler/JetIR/Source/IR.jet)).
-An `IRModule` holds interned type rows (the checked `Type`, its kind, size,
-alignment, ABI class and drop symbol), interned names, read-only data rows and
-the functions, keyed by their stable function key. An `IRFunction` is one flat
-arena in struct-of-arrays form: slot columns (type, kind, name, line) and
-instruction columns (`op`, `dst`, `a`, `b`, `c`, line), plus one shared
-operand pool for calls. Slots `0..<param_count` are the parameters. There is
-no per-instruction or per-slot heap allocation, and every reference is an
-integer id.
+**Data model** ([`IR.jet`](../../Compiler/JetIR/Source/IR.jet)). An
+`IRModule` holds interned type rows (the checked `Type`, its kind, size,
+alignment, ABI class, drop and clone routes), names, read-only data and the
+functions, keyed by function key. An `IRFunction` is one flat arena of slot
+columns (type row, kind, name, line) and instruction columns (`op`, `dst`,
+`a`, `b`, `c`, line) with one operand pool for calls; slots `0..<param_count`
+are the parameters, and every reference is an integer id.
 
-- **Not SSA.** A slot is a mutable typed variable. An instruction reads slots
-  and writes at most one. Loops need no block parameters or back-edge copies.
-- **Structured control.** `Block`, `Loop`, `If`/`Else`, `End`, `Br depth`,
-  `BrIf`, `Return` and `Unreachable`; there are no arbitrary jumps. Every
-  opener records the index of its `End`, so a walker skips a region in O(1).
-  The form maps one-to-one onto Wasm blocks and locals.
-- **Explicit ownership.** `Copy`, `Move`, `Drop` and `Close` are instructions.
-  The builder emits them from the checked ownership facts, and only for types
-  that have a drop.
-- **Semantic operations where Jet semantics live.** For example, `Add` on an
-  exact `Int` slot means inline arithmetic with a big-integer spill, and
-  `Concat` means String concatenation. The slot's type row selects the
-  meaning, and the machine layer chooses the instruction sequence. The
-  runtime routes are the runtime pack's symbols.
-- **Content hash.** A function's key is the SHA-256 of its text form, in which
-  every interned id is spelled out by content. That key is the unit for the
-  store, caching and per-function hot swap.
+- A slot is a mutable typed variable; an instruction reads slots and writes
+  at most one. The IR is not SSA.
+- Control is structured: `Block`, `Loop`, `If`/`Else`, `End`, `Br depth`,
+  `BrIf`, `Return`, `Unreachable`. Every opener records its `End`.
+- `Copy`, `Move`, `Drop` and `Close` make ownership explicit; the builder
+  emits them from the checked ownership facts.
+- An operation means what Jet means for its slot's type row (`Add` on an
+  exact `Int` spills to a big integer, `Concat` concatenates Strings); a
+  `CallRuntime` names a runtime route
+  ([`RuntimeRoutes.jet`](../../Compiler/JetIR/Source/RuntimeRoutes.jet)).
+- `ir_function_hash` is the SHA-256 of a function's text form, in which every
+  interned id is spelled out by content.
 
-**SSA only on demand.** A pass that needs SSA (value numbering, constant
-propagation across joins) builds an SSA view of one function, uses it and
-discards it. A view is never stored, never spans functions and never becomes
-the program's representation. O0 builds never construct one.
+An O2 pass may build an SSA form of one function, use it and discard it
+(`Ssa.jet`). It is never stored and never spans functions; O0 builds none.
 
-**Consumers.**
+**IR Lint** ([`Lint.jet`](../../Compiler/JetIR/Source/Lint.jet)) checks a
+module against the IR's contract. It shares no code with the builder or the
+passes. Per function it checks the arena, each instruction's operands against
+its opcode's row in `IR_LINT_OPS` (roles, slot kinds, typing), every `Call`
+against the callee's parameter and result rows, every `CallRuntime` against
+its route's carriers, the structured-control nesting, and `Return` against
+the result. Per module it checks each type row's kind and layout against its
+checked `Type`. `ir_lint_core_routes` checks each Core call registry row
+with a runtime route against that route's arity. The route lint,
+`ir_lint_route_gaps`, lists in one run every gap a runtime leaves: each Core
+call row and Prelude static (`Pool.new()`) whose symbol no route carries,
+and each route export and runtime handle helper missing from that runtime's
+`runtime.exports`
+(`jet run Compiler/JetIR/Tests/Lint/LintPlanted.jet -- --route-gaps <path>`).
+
+The contract the lint checks also admits a few word-level forms. A general
+word `Move`/`Copy` may change its slot's type row (the word is
+reinterpreted), and `Compare` may compare raw words. A valueless `Return` is
+the stop edge. A runtime route's Word carrier takes an `Int` or a word. A
+`ConstText` may yield the raw static-text address the runtime library's
+`rt_static_text` reads as a Word.
+
+It runs after the IR build (`ir.build`) on every native build, and again
+before x86-64 selection (`ir.opt`) when the optimizer ran; the functions
+split across the compiler threads. With `IROptOptions.verify` (tests, CI,
+`JET_OPT_VERIFY=1`) it also runs after each optimizer pass
+(`ir.opt.<pass>`) and verifies each SSA form (`ssa.form`). A finding is a
+compiler bug, never a user diagnostic (AGENTS.md I2, I3): it becomes an ICE
+census row naming the function, the pass and the rule. The build collects
+every row, traps each function that has one, and exits 101. The runtime
+library build (`Request.jet` `jet_cli_runtime_library`) runs the same two
+checks, and each finding is one of its issue rows.
 
 | Consumer | Reads |
 |---|---|
-| IR builder (`JetIR/Source/Build*.jet`) | the checked program |
-| O1/O2 passes (`JetIR/Source/Opt*.jet`; inlining splices slot arenas, loop work uses the structured loops, SSA views where needed) | IR |
+| IR builder (`JetIR/Source/Build*.jet`) | the checked program and its sema facts |
+| IR Lint (`JetIR/Source/Lint.jet`) | IR |
+| O1/O2 passes (`JetIR/Source/Opt*.jet`) | IR |
 | x86-64 selection with linear scan over slot live ranges (`JetIR/Source/X64*.jet`) | IR |
-| Encoder, object writer, DWARF, static linker | x64 rows; DWARF variables are slots |
-| Comptime (`JetEval/Source/IR`): in-memory O0 machine code from the same selector, one meaning for comptime and run time | IR |
-| Phase trace: `ir.build`, `ir.opt`, `ir.x64`, `ir.object` | IR |
+| Comptime (`JetEval/Source/IR`): O0 machine code from the same selector | IR |
+| Phase trace: `ir.build`, `ir.lint`, `ir.opt`, `ir.x64`, `ir.object` | IR |
 
-There is no web emitter on the IR yet: `jet build --target=web` is not part of
-the Jet-hosted CLI (E2104). The IR's structured control maps one-to-one onto
-Wasm blocks and locals for when it is rebuilt.
+There is no web emitter on the IR: `jet build --target=web` is not part of
+the Jet-hosted CLI (E2104).
 
-### Checked program — the IR builder seam
+#### The read-only fact channel
 
-The [IR builder](../../Compiler/JetIR/Source/) accepts the checked bundle,
-carries sema-approved types, access conventions and effects from the checked
-program into
-the [IR](../../Compiler/JetIR/Source/IR.jet), and gives those facts canonical
-type, function, slot and artifact identities there. The resulting IR is
-validated and optimized before execution or emission. The builder infers no
-new language permissions and never falls back to an unchecked AST emitter.
-
-The checked program is a semantic contract, not a commitment to one permanent
-representation. A port may change the representation, but it may not move
-semantic choices into an executable lens or create a second meaning.
-
-#### Totality and the read-only fact channel
-
-The checked program is post-sema and total: every fact the IR builder needs is
-carried concretely on the checked row, never re-inferred through a fallback.
-Surface sugar expands during sema into core forms every lens already handles,
-and a coverage miss is an internal compiler error, never a fallback. The IR
-builder and the back ends read the facts sema selected; they do not re-run
-semantic decisions such as expression typing or overflow classification. A
-missing fact means "not proven" and never authorizes a lens to re-derive sema
-policy. An optimized pass may build a private SSA view (see *SSA only on
-demand*), but that view is not a semantic representation or a source of truth.
+The checked program is post-sema and total: each function is complete or has
+a diagnostic. The builder and the back end read the facts sema selected and
+re-run no semantic decision; a builder or back-end failure on a checked
+program is an ICE. A missing optimization fact means "not proven":
 
 | Fact | Missing fact |
 |---|---|
-| Type: expression, local, parameter and return types | Keep the conservative typed operation. |
 | Integer bounds: integer ranges, exact integer literals, inline-range numeric operations, fixed-list proofs | Keep the checked range or index operation. |
 | Exclusivity: sema access conventions, lowered to call-argument borrow flags and borrows | Keep shared or unknown memory dependencies and wrappers. |
 | Purity: sema function purity and effect-free bodies | Do not apply a reorder or vector hint. |

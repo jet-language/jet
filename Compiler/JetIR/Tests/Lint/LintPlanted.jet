@@ -1,0 +1,374 @@
+// IR Lint (Source/Lint.jet) against planted bugs: one hand-built module per
+// rule, each valid but for one planted bug, must give that rule's row and
+// no other; the valid module gives none. Also: the operand table has one row
+// per IROp in ir_op_code order, a function a pass broke is reported under
+// that pass's name (the check ir_opt_function runs after each pass), and the
+// Core call registry names only routes the route table has.
+//
+//     cd Compiler/JetIR/Tests/Lint && jet run LintPlanted.jet
+//
+// With `-- --route-gaps <runtime.exports>` it prints the route lint's rows
+// instead (ir_lint_route_gaps): every R4 gap against that runtime's exports.
+use jet_ir.[
+    IRClass, IRFunction, IRLintFinding, IRModule, IROp, IRSlotKind, IRType, IRTypeKind, IR_LINT_OPS, IR_OVERFLOW_TRAP,
+    ir_args, ir_emit, ir_end, ir_function_new, ir_intern_name, ir_intern_type, ir_lint_context, ir_lint_core_routes, ir_lint_module, ir_lint_route_gaps,
+    ir_lint_text, ir_module_new, ir_op_code, ir_open, ir_open_if, ir_opt_lint, ir_opt_report, ir_slot,
+]
+use jet_foundation.[Type, compiler_threads_single, name_rows_set]
+use core.process as process
+use core.files as files
+
+struct LPTypes {
+    int: Int
+    bool: Int
+    float: Int
+    word: Int
+    pointer: Int
+    owned: Int
+}
+
+fn lp_types(m: &IRModule) -> LPTypes {
+    LPTypes{
+        int: ir_intern_type(&m, "Int", IRType{ty: Type.Int, kind: IRTypeKind.Int, size: 8, align: 8, class: IRClass.Integer, signed: true, bits: 64, drop: "jet_rt_int_drop"}),
+        bool: ir_intern_type(&m, "Bool", IRType{ty: Type.Bool, kind: IRTypeKind.Bool, size: 1, align: 1, class: IRClass.Integer, signed: false, bits: 8, drop: ""}),
+        float: ir_intern_type(&m, "Float", IRType{ty: Type.Float, kind: IRTypeKind.Float, size: 8, align: 8, class: IRClass.Float, signed: true, bits: 64, drop: ""}),
+        word: ir_intern_type(&m, "U64", IRType{ty: Type.IntN{signed: false, bits: 64}, kind: IRTypeKind.Word, size: 8, align: 8, class: IRClass.Integer, signed: false, bits: 64, drop: ""}),
+        pointer: ir_intern_type(&m, "Pointer", IRType{ty: Type.Named{name: "Pointer"}, kind: IRTypeKind.Pointer, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: ""}),
+        // An owned handle with a drop and no clone: a Copy of it is a second owner.
+        owned: ir_intern_type(&m, "Handle", IRType{ty: Type.Named{name: "Handle"}, kind: IRTypeKind.Pointer, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "jet_handle_drop"}),
+    }
+}
+
+fn lp_add(m: &IRModule, f: IRFunction) -> Int {
+    row :: m.functions.len()
+    name_rows_set(&m.function_rows, f.key, row)
+    &m.functions.push(f)
+    row
+}
+
+fn lp_fn(name: String) -> IRFunction {
+    ir_function_new(name, "test:lint.jet::{name}", "", "lint.jet", 1)
+}
+
+fn lp_temp(f: &IRFunction, ty: Int) -> Int {
+    ir_slot(&f, ty, IRSlotKind.Temp, -1, 0)
+}
+
+fn lp_const(f: &IRFunction, ty: Int, value: Int) -> Int {
+    slot :: lp_temp(&f, ty)
+    _ := ir_emit(&f, IROp.Const, slot, value, -1, -1, 0)
+    slot
+}
+
+fn lp_return(f: &IRFunction, slot: Int) {
+    _ := ir_emit(&f, IROp.Return, -1, slot, -1, -1, 0)
+}
+
+// A module with `twice(n: Int) -> Int` (function 0) and a `run` that is
+// valid but for the bug planted for `rule` ("" for none).
+fn lp_module(rule: String) -> IRModule {
+    m := ir_module_new()
+    t :: lp_types(&m)
+    twice := lp_fn("twice")
+    n :: ir_slot(&twice, t.int, IRSlotKind.Param, ir_intern_name(&m, "n"), 1)
+    twice.param_count = 1
+    twice.result = t.int
+    sum :: lp_temp(&twice, t.int)
+    _ := ir_emit(&twice, IROp.Add, sum, n, n, IR_OVERFLOW_TRAP, 1)
+    lp_return(&twice, sum)
+    _ := lp_add(&m, twice)
+    f := lp_fn("run")
+    lp_plant(rule, &m, t, &f)
+    m.entry = lp_add(&m, f)
+    m
+}
+
+// The valid run: a loop over a Bool, an If with an Else, a call, a print.
+fn lp_valid(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    three :: lp_const(&f, t.int, 3)
+    six :: lp_temp(&f, t.int)
+    call_args :: ir_args(&f, [Int]{three})
+    _ := ir_emit(&f, IROp.Call, six, 0, call_args, 1, 1)
+    flag :: lp_temp(&f, t.bool)
+    _ := ir_emit(&f, IROp.Lt, flag, three, six, -1, 1)
+    _ := ir_open(&f, IROp.Block, 1)
+    _ := ir_emit(&f, IROp.BrIf, -1, flag, 0, -1, 1)
+    _ := ir_open_if(&f, flag, 1)
+    otherwise :: ir_emit(&f, IROp.Else, -1, -1, -1, -1, 1)
+    opener :: f.open[f.open.len() - 1]
+    f.b[opener] = otherwise
+    ir_end(&f, 1)
+    ir_end(&f, 1)
+    text :: ir_slot(&f, ir_intern_type(&m, "String", IRType{ty: Type.String, kind: IRTypeKind.String, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "jet_rt_string_drop"}), IRSlotKind.Temp, -1, 0)
+    show_args :: ir_args(&f, [Int]{six})
+    _ := ir_emit(&f, IROp.CallRuntime, text, ir_intern_name(&m, "jet_rt_int_to_string"), show_args, 1, 1)
+    flush :: lp_const(&f, t.bool, 1)
+    line_args :: ir_args(&f, [Int]{text, flush})
+    _ := ir_emit(&f, IROp.CallRuntime, -1, ir_intern_name(&m, "jet_term_write_stdout_line"), line_args, 2, 1)
+    _ := ir_emit(&f, IROp.Drop, -1, text, -1, -1, 1)
+    lp_return(&f, -1)
+}
+
+fn lp_slot_range(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    sum :: lp_temp(&f, t.int)
+    _ := ir_emit(&f, IROp.Add, sum, sum, 99, IR_OVERFLOW_TRAP, 1)
+    lp_return(&f, -1)
+}
+
+fn lp_dst_range(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    _ := ir_emit(&f, IROp.Const, 77, 1, -1, -1, 1)
+    lp_return(&f, -1)
+}
+
+fn lp_name_range(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    none :: ir_args(&f, [Int]{})
+    _ := ir_emit(&f, IROp.CallRuntime, -1, 500, none, 0, 1)
+    lp_return(&f, -1)
+}
+
+fn lp_kind(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    three :: lp_const(&f, t.int, 3)
+    _ := ir_open_if(&f, three, 1)
+    ir_end(&f, 1)
+    lp_return(&f, -1)
+}
+
+fn lp_imm(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    _ := lp_const(&f, t.bool, 2)
+    lp_return(&f, -1)
+}
+
+fn lp_layout(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    three :: lp_const(&f, t.int, 3)
+    half :: lp_temp(&f, t.float)
+    sum :: lp_temp(&f, t.int)
+    _ := ir_emit(&f, IROp.Add, sum, three, half, IR_OVERFLOW_TRAP, 1)
+    lp_return(&f, -1)
+}
+
+fn lp_convert(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    word :: lp_temp(&f, t.word)
+    other :: lp_temp(&f, t.word)
+    _ := ir_emit(&f, IROp.Convert, other, word, -1, -1, 1)
+    lp_return(&f, -1)
+}
+
+fn lp_clone(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    handle :: lp_temp(&f, t.owned)
+    second :: lp_temp(&f, t.owned)
+    _ := ir_emit(&f, IROp.Copy, second, handle, -1, -1, 1)
+    lp_return(&f, -1)
+}
+
+fn lp_arity(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    six :: lp_temp(&f, t.int)
+    none :: ir_args(&f, [Int]{})
+    _ := ir_emit(&f, IROp.Call, six, 0, none, 0, 1)
+    lp_return(&f, -1)
+}
+
+fn lp_arg(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    half :: lp_temp(&f, t.float)
+    six :: lp_temp(&f, t.int)
+    call_args :: ir_args(&f, [Int]{half})
+    _ := ir_emit(&f, IROp.Call, six, 0, call_args, 1, 1)
+    lp_return(&f, -1)
+}
+
+fn lp_result(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    three :: lp_const(&f, t.int, 3)
+    flag :: lp_temp(&f, t.bool)
+    call_args :: ir_args(&f, [Int]{three})
+    _ := ir_emit(&f, IROp.Call, flag, 0, call_args, 1, 1)
+    lp_return(&f, -1)
+}
+
+// The route jet_std_io_stdout_is_tty takes the stdout handle (one word),
+// here called with none.
+fn lp_route(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    tty :: lp_temp(&f, t.bool)
+    none :: ir_args(&f, [Int]{})
+    _ := ir_emit(&f, IROp.CallRuntime, tty, ir_intern_name(&m, "jet_std_io_stdout_is_tty"), none, 0, 1)
+    lp_return(&f, -1)
+}
+
+fn lp_nesting(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    _ := ir_emit(&f, IROp.Block, -1, 2, -1, -1, 1)
+    lp_return(&f, -1)
+    _ := ir_emit(&f, IROp.End, -1, 1, -1, -1, 1)
+}
+
+fn lp_depth(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    _ := ir_open(&f, IROp.Block, 1)
+    _ := ir_emit(&f, IROp.Br, -1, 3, -1, -1, 1)
+    ir_end(&f, 1)
+    lp_return(&f, -1)
+}
+
+fn lp_return_value(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    three :: lp_const(&f, t.int, 3)
+    lp_return(&f, three)
+}
+
+fn lp_arena(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    _ := ir_slot(&f, 4000, IRSlotKind.Temp, -1, 0)
+    lp_return(&f, -1)
+}
+
+fn lp_type_kind(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    _ := ir_intern_type(&m, "Wrong", IRType{ty: Type.Int, kind: IRTypeKind.Bool, size: 1, align: 1, class: IRClass.Integer, signed: false, bits: 8, drop: ""})
+    lp_return(&f, -1)
+}
+
+fn lp_type_layout(m: &IRModule, t: LPTypes, f: &IRFunction) {
+    _ := ir_intern_type(&m, "U24", IRType{ty: Type.IntN{signed: false, bits: 24}, kind: IRTypeKind.Word, size: 3, align: 1, class: IRClass.Integer, signed: false, bits: 24, drop: ""})
+    lp_return(&f, -1)
+}
+
+// The rules a planted bug breaks, one module each.
+LP_RULES :: [String]{
+    "arena", "operand.slot", "operand.dst", "operand.ref", "operand.kind", "operand.imm", "typing.layout", "typing.convert",
+    "typing.clone", "call.arity", "call.arg", "call.result", "route.call", "control.nesting", "control.depth", "return",
+    "type.kind", "type.layout",
+}
+
+fn lp_plant(rule: String, m: &IRModule, t: LPTypes, f: &IRFunction) {
+    if rule == {
+        "arena" -> lp_arena(&m, t, &f)
+        "operand.slot" -> lp_slot_range(&m, t, &f)
+        "operand.dst" -> lp_dst_range(&m, t, &f)
+        "operand.ref" -> lp_name_range(&m, t, &f)
+        "operand.kind" -> lp_kind(&m, t, &f)
+        "operand.imm" -> lp_imm(&m, t, &f)
+        "typing.layout" -> lp_layout(&m, t, &f)
+        "typing.convert" -> lp_convert(&m, t, &f)
+        "typing.clone" -> lp_clone(&m, t, &f)
+        "call.arity" -> lp_arity(&m, t, &f)
+        "call.arg" -> lp_arg(&m, t, &f)
+        "call.result" -> lp_result(&m, t, &f)
+        "route.call" -> lp_route(&m, t, &f)
+        "control.nesting" -> lp_nesting(&m, t, &f)
+        "control.depth" -> lp_depth(&m, t, &f)
+        "return" -> lp_return_value(&m, t, &f)
+        "type.kind" -> lp_type_kind(&m, t, &f)
+        "type.layout" -> lp_type_layout(&m, t, &f)
+        else -> lp_valid(&m, t, &f)
+    }
+}
+
+// Whether every finding has rule `rule` (and there is one).
+fn lp_only(findings: [IRLintFinding], rule: String) -> Bool {
+    if findings.len() == 0 -> return false
+    loop finding in findings {
+        if finding.rule != rule -> return false
+    }
+    true
+}
+
+// The rows of the module planted with `rule`, linted as after the build.
+fn lp_lint(rule: String) -> [IRLintFinding] {
+    m := lp_module(rule)
+    ir_lint_module(&m, "ir.build", compiler_threads_single())
+}
+
+// The Core rows whose arity disagrees with their runtime route (IR Lint
+// rule core.arity). core.data.loader.authority is a Core source function
+// (Core/Data/Loader.jet `authority<T>(loader)`); its registry row names
+// jet_data_loader_authority, the two-Text runtime route of another
+// operation. The list is exact, so a new row or a fixed one fails here
+// until it is updated.
+LP_CORE_ARITY :: comptime { [String]{"core.data.loader.authority"} }
+
+// The registry rows that differ from LP_CORE_ARITY, each printed.
+fn lp_core_failures(core: [IRLintFinding]) -> Int {
+    failures := 0
+    seen := [String]{}
+    loop finding in core {
+        if LP_CORE_ARITY.contains(finding.function) {
+            &seen.push(finding.function)
+        } else {
+            print("core row not listed: {finding.function}: {finding.message}")
+            failures += 1
+        }
+    }
+    loop known in LP_CORE_ARITY {
+        if !seen.contains(known) {
+            print("listed core row fixed: {known}")
+            failures += 1
+        }
+    }
+    failures
+}
+
+fn lp_status() -> Int {
+    failures := 0
+    loop (code, row) in IR_LINT_OPS {
+        if ir_op_code(row.op) != code {
+            print("FAIL table: row {code} is {row.op}")
+            failures += 1
+        }
+    }
+    valid :: lp_lint("")
+    if valid.len() > 0 {
+        print("FAIL valid module:\n{ir_lint_text(valid)}")
+        failures += 1
+    } else {
+        print("ok valid")
+    }
+    loop rule in LP_RULES {
+        found :: lp_lint(rule)
+        if lp_only(found, rule) {
+            print("ok {rule}")
+        } else {
+            print("FAIL {rule}:\n{ir_lint_text(found)}")
+            failures += 1
+        }
+    }
+    // A pass that breaks a function is named in its rows: the check
+    // ir_opt_function runs after each pass, here after a planted "simplify".
+    m := lp_module("")
+    context :: ir_lint_context(m)
+    report := ir_opt_report(2)
+    broken := m.functions[m.entry].copy()
+    broken.dst[0] = 99
+    clean :: ir_opt_lint(m, context, m.functions[m.entry], "inline", &report)
+    caught :: !ir_opt_lint(m, context, broken, "simplify", &report)
+    if clean && caught && report.lint.len() > 0 && report.lint[0].pass == "ir.opt.simplify" {
+        print("ok pass name")
+    } else {
+        print("FAIL pass name:\n{ir_lint_text(report.lint)}")
+        failures += 1
+    }
+    core :: ir_lint_core_routes()
+    core_failures :: lp_core_failures(core)
+    if core_failures > 0 {
+        print("FAIL core routes ({core_failures} rows above)")
+        failures += 1
+    } else {
+        print("ok core routes ({core.len()} listed)")
+    }
+    print(if failures == 0 -> "LINT PLANTED PASS" else -> "LINT PLANTED FAIL ({failures})")
+    if failures == 0 -> 0 else -> 1
+}
+
+// The route lint's report: every R4 gap against the runtime export list at
+// `path`, one ir_lint_text row each, then the count per rule.
+fn lp_route_gaps(path: String) -> Int {
+    text :: files.read(path) ?? {
+        print("FAIL read {path}: {err}")
+        return 1
+    }
+    exports :: loop line in text.split("\n") -> line.trim().copy()
+    gaps :: ir_lint_route_gaps(exports)
+    print(ir_lint_text(gaps))
+    counts := [String:Int]{}
+    loop gap in gaps -> counts[gap.rule.copy()] = (counts.get(gap.rule) ?? 0) + 1
+    loop (rule, count) in counts -> print("{rule}\t{count}")
+    0
+}
+
+fn run() {
+    args :: process.argv()
+    if (args.get(1) ?? "") == "--route-gaps" -> process.exit(lp_route_gaps(args.get(2) ?? ""))
+    process.exit(lp_status())
+}

@@ -263,6 +263,20 @@ fn find(pattern: Regex, text: String) -> String? Never! {
     Val(slice(raw, runs[0].start, runs[0].end))
 }
 
+// String's pattern methods (D-STR-DECLINE1=C): `text.matches(pattern)` and
+// `text.match(pattern)` compile `pattern` with this engine and run
+// `is_match`/`find`; a pattern that does not compile fails with compile's
+// RegexError.
+fn __string_matches(text: String, pattern: String) -> Bool RegexError! {
+    compiled :: compile(pattern)
+    is_match(compiled, text)
+}
+
+fn __string_match(text: String, pattern: String) -> String? RegexError! {
+    compiled :: compile(pattern)
+    find(compiled, text)
+}
+
 fn find_all(pattern: Regex, text: String) -> [String] Never! {
     raw :: text.bytes()
     out := [String]{}

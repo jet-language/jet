@@ -2572,7 +2572,7 @@ fn sema_stmt_record_binding_views(binding: Binding, init_ty: Type, scopes: SemaS
     // type: a scalar or struct place is not carried by a `ViewMut`.
     view_access :: sema_stmt_view_access(init_ty)
     if sema_stmt_binding_is_place_view(binding.init) && (view_access != None || sema_stmt_binding_is_write_place(binding.init)) {
-        if view_access == None && sema_expr_place_root_ident(binding.init) == None {
+        if sema_expr_place_root_ident(binding.init) == None {
             &diagnostics.push(sema_error("E0213", expr_span(binding.init), "a window must start from a place", "only a name followed by fields, indexes, or one range has stable storage to read or edit without copying", "bind the call or temporary to a name first, then take a window into that name"))
             return false
         }

@@ -109,13 +109,14 @@ codec_text_cells_key := I64{0}
 }
 
 // jet_decode_text_cells: enter returns the previous state, which leave
-// restores, exactly as JetTextCellsScope's drop does.
-#Export(c) fn jet_rt_codec_text_cells_enter() -> I64 {
-    previous :: jet_rt_tls_get(codec_text_cells_key)
+// restores, exactly as JetTextCellsScope's drop does. Core CSV source calls
+// both through `core.encoding.__text_cells_enter`/`__text_cells_leave`.
+#Export(c) fn jet_rt_codec_text_cells_enter() -> Bool {
+    previous :: jet_rt_tls_get(codec_text_cells_key) != I64{0}
     jet_rt_tls_set(codec_text_cells_key, I64{1})
     previous
 }
-#Export(c) fn jet_rt_codec_text_cells_leave(previous: I64) { jet_rt_tls_set(codec_text_cells_key, previous) }
+#Export(c) fn jet_rt_codec_text_cells_leave(previous: Bool) { jet_rt_tls_set(codec_text_cells_key, if previous -> I64{1} else -> I64{0}) }
 
 fn codec_text_cells() -> Bool { jet_rt_tls_get(codec_text_cells_key) != I64{0} }
 

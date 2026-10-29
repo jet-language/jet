@@ -30,9 +30,6 @@ fn ir_build_function(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody
         if ir_param_slot(&m, p, &b, param_ty, param.convention == .Write, param.convention == .Move, param.local.name) == None -> return ir_fail(&b, param.span, "parameter type {ir_type_name(param_ty)}")
     }
     ir_arm_params(&m, p, &b, function)
-    captured :: ir_mutable_captures(p, b, function.body)
-    b.cells = ir_window_cells(&m, p, b, captured)
-    ir_cell_params(&m, &b)
     b.plain = ir_plain_return(function) != None
     declared :: if function.ret == .Val(written) -> Val(ir_fact(p, &b, written, function.source_span)) else -> Type?{None}
     if ir_failed(b) -> return
@@ -44,6 +41,11 @@ fn ir_build_function(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody
         }
     }
     b.ret = executable
+    ir_memo_enter(&m, p, &b, function)
+    if ir_failed(b) -> return
+    captured :: ir_mutable_captures(p, b, function.body)
+    b.cells = ir_window_cells(&m, p, b, captured)
+    ir_cell_params(&m, &b)
     ir_stmts(&m, p, &b, function.body)
     if ir_failed(b) || b.failures.len() > 0 -> return
     ir_return_fallthrough(&m, p, &b)
@@ -152,14 +154,20 @@ fn ir_nodes_have_cells(nodes: [BodyNode]) -> Bool Never! {
     false
 }
 
-// `captured` and the variables a write window (`if &x == .Val(n) -> n = ..`)
-// opens on as an inline Int?: the word is the payload's storage, so such a
-// variable lives in a frame cell from its declaration (ir_borrow), as a
-// closure's written capture does. Most bodies have no write borrow.
+// `captured` and the variables a write window opens on: as an inline Int?
+// (`if &x == .Val(n) -> n = ..`) the word is the payload's storage, and as a
+// named scalar window (`w := &x`) the binding is the variable's address, so
+// such a variable lives in a frame cell from its declaration (ir_borrow,
+// ir_bind_pin), as a closure's written capture does. Most bodies have no
+// write borrow.
 fn ir_window_cells(m: &IRModule, p: IRProgram, b: IRBuilder, captured: [String]) -> [String] Never! {
     names := captured
-    if b.row >= 0 -> ir_window_cells_in(&m, p, b, p.functions[b.row].tree.nodes, &names)
+    if b.row >= 0 {
+        ir_window_cells_in(&m, p, b, p.functions[b.row].tree.nodes, &names)
+        ir_window_cells_named(&m, p, b, p.functions[b.row].tree.stmts, &names)
+    }
     ir_window_cells_in(&m, p, b, b.made.nodes, &names)
+    ir_window_cells_named(&m, p, b, b.made.stmts, &names)
     names
 }
 
@@ -173,6 +181,29 @@ fn ir_window_cells_in(m: &IRModule, p: IRProgram, b: IRBuilder, nodes: [BodyNode
             }
         }
     }
+}
+
+// The variables a named write window binds the address of: `w := &x` over a
+// scalar `x` (ir_scalar_window).
+fn ir_window_cells_named(m: &IRModule, p: IRProgram, b: IRBuilder, stmts: [StmtKind], names: &[String]) Never! {
+    loop statement in stmts {
+        if statement == .Let(_, _, init, _, _, _) {
+            if ir_body_node(p, b, init).kind == .Borrow(inner, access) {
+                if access == .Write && ir_body_node(p, b, inner).kind == .Local(local) {
+                    if ir_value_type(&m, p, ir_ty(p, b, inner)) == .Val(row) {
+                        if ir_scalar_row(m, row) && !names.contains(local.name) -> &names.push(local.name)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Whether the value row `row` is a plain scalar: neither an aggregate's
+// storage nor a pointer (a box, handle or text).
+fn ir_scalar_row(m: IRModule, row: Int) -> Bool Never! {
+    kind :: m.types[row].kind
+    kind != .Aggregate && kind != .Pointer
 }
 
 // A top-level infallible function whose written failure set is empty (`T
@@ -600,22 +631,7 @@ fn ir_stmt_body(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never
         .Layout(_, _, _, span) -> ir_fail(&b, span, "statement Layout")
         .ContextBlock(guards, body, _) -> ir_context_block(&m, p, &b, guards, body)
         .Shield(body, _) -> ir_shield(&m, p, &b, body)
-        // Test scope members: a `.setup` body runs in the enclosing scope, so
-        // its bindings stay visible after it; a `.measure` body runs in the
-        // runtime's measurement loop (ir_measure_scope). `.expect_fail`,
-        // `.timeout` and `.skip` need the runtime's test scope rail.
-        .ScopeMember(kind, body, span) -> {
-            if kind == {
-                .Setup -> {
-                    loop inner in body {
-                        if ir_failed(b) -> break
-                        ir_stmt(&m, p, &b, inner)
-                    }
-                }
-                .Measure -> ir_measure_scope(&m, p, &b, body)
-                else -> ir_fail(&b, span, "statement ScopeMember")
-            }
-        }
+        .ScopeMember(kind, body, span) -> ir_scope_member(&m, p, &b, statement, kind, body, span)
         .Transact(handle, snapshots, stm, body, span) -> ir_transact(&m, p, &b, handle, snapshots, stm, body, span)
         .GCEdit(_, _, _, _, _, _, span) -> ir_fail(&b, span, "statement GCEdit")
     }
@@ -747,10 +763,19 @@ fn ir_assign_aggregate(m: &IRModule, b: &IRBuilder, slot: Int, value: Int, owns:
 
 // A pinned borrowed argument or receiver (`pin = &place`, sema's
 // evaluation-order pin): an alias of the place, which never owns the value. A
-// read aliases the place's value; a write aliases an aggregate's storage.
+// read aliases the place's value; a write aliases an aggregate's storage or a
+// scalar's address (ir_scalar_window).
 fn ir_bind_pin(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, init: Int, span: Span) Never! {
     init_ty :: ir_ty(p, b, init)
     access :: if ir_body_node(p, b, init).kind == .Borrow(_, borrowed) -> borrowed else -> AccessConvention.Read
+    if access == .Write && !local.deref && ir_body_node(p, b, init).kind == .Borrow(place, _) {
+        place_ty :: ir_ty(p, b, place)
+        row :: ir_value_type(&m, p, place_ty) ?? {
+            _ :: ir_type_fail(&b, span, place_ty)
+            return
+        }
+        if ir_scalar_row(m, row) && !ir_option_inline(m, row) -> return ir_scalar_window(&m, p, &b, local, place, row, span)
+    }
     value :: ir_expr(&m, p, &b, init)
     if ir_failed(b) || value < 0 -> return
     // A borrow of a temporary owns that temporary: the pin keeps it.
@@ -774,6 +799,19 @@ fn ir_bind_pin(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, init: I
     }
     symbol :: if local.symbol_id == .Val(id) -> id.key else -> ""
     &b.bindings.push(IRBinding{name: local.name, slot: value, symbol: symbol, write: access != .Read})
+}
+
+// `w := &place` over a scalar place: the binding is the place's address, so
+// a read of `w` loads through it and a write stores through it, as through a
+// scalar write parameter. A variable place lives in a frame cell
+// (ir_window_cells_named), whose address is its storage.
+fn ir_scalar_window(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, place: Int, row: Int, span: Span) Never! {
+    backs := [IRWriteBack]{}
+    address :: ir_place_address(&m, p, &b, place, &backs, span)
+    if ir_failed(b) || address < 0 -> return
+    if backs.len() > 0 -> return ir_fail(&b, span, "write window into a {ir_type_name(m.types[row].ty)} place outside a frame cell")
+    symbol :: if local.symbol_id == .Val(id) -> id.key else -> ""
+    &b.bindings.push(IRBinding{name: local.name, slot: address, indirect: row, symbol: symbol})
 }
 
 // `task.group(group) { .. }`: `group` owns the runtime JetTaskGroup from
@@ -1008,6 +1046,17 @@ fn ir_assign_place(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, op: TB
     }
     if ir_body_node(p, b, place).kind == .Local(local) {
         if local.persist_key == .Val(key) -> return ir_storage_assign(&m, p, &b, key, op, value, span)
+    }
+    if ir_body_node(p, b, place).kind == .SharedGuardValue(guard) {
+        // `guard.value (op)= value`: the value first, then the cell's slot
+        // (the write place `&guard.value`), written in place.
+        place_ty :: ir_ty(p, b, place)
+        row :: ir_value_type(&m, p, place_ty) ?? return ir_fail(&b, span, "assignment to a Shared guard value of {ir_type_name(place_ty)}")
+        slot :: ir_value_as(&m, p, &b, value, row, span)
+        if ir_failed(b) -> return
+        payload :: ir_shared_guard_payload(&m, p, &b, guard, span)
+        if ir_failed(b) || payload < 0 || slot < 0 -> return
+        return ir_assign_at(&m, p, &b, payload, row, op, slot, value_ty, false, span)
     }
     place_kind :: ir_expr_kind_name(ir_body_node(p, b, place).kind)
     ir_fail(&b, span, "assignment to {place_kind} place")
@@ -1484,6 +1533,7 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
                 if subject < 0 -> return ir_fail_slot(&b, span, "switch subject outside a switch")
                 return subject
             }
+            if call == .MemoStats(function, bound) -> return ir_memo_stats(&m, p, &b, expression_ty, function, bound, span)
             if call == .ComptimeInput(builtin, path) {
                 // A comptime input (embed_file, embed_bytes, find) the checked
                 // program names by its literal; the compiler answers it
@@ -1515,15 +1565,17 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
             if call == .Method(receiver, method, args) {
                 if ir_untag(ir_ty(p, b, receiver)) == .Shared(_) {
                     if (method == "guard_read" || method == "guard_edit") && args.len() == 0 -> return ir_shared_guard(&m, p, &b, expression_ty, receiver, method == "guard_edit", span)
-                    if method == "shared.read" || method == "shared.edit" -> return ir_shared_read(&m, p, &b, expression_ty, receiver, args, method == "shared.edit", span)
+                    if method == "shared.read" || method == "shared.edit" -> return ir_shared_read(&m, p, &b, expression_ty, receiver, args, method, if method == "shared.edit" -> "jet_rt_native_shared_edit" else -> "jet_rt_native_shared_read", span)
                     if method == "same" && args.len() == 1 -> return ir_shared_same(&m, p, &b, receiver, args[0], span)
                     if (method == "downgrade" || method == "strong_count") && args.len() == 0 -> return ir_shared_owner_word(&m, p, &b, expression_ty, receiver, method, span)
                 }
                 if ir_shared_weak(ir_ty(p, b, receiver)) && method == "upgrade" && args.len() == 0 -> return ir_shared_upgrade(&m, p, &b, expression_ty, receiver, span)
+                if ir_cell_value_type(ir_ty(p, b, receiver)) != None -> return ir_cell_method(&m, p, &b, expression_ty, receiver, method, args, span)
                 host_receiver_ty :: ir_ty(p, b, receiver)
                 receiver_row :: ir_value_type(&m, p, host_receiver_ty) ?? return ir_type_fail(&b, span, host_receiver_ty)
                 if ir_host_value_row(m, p, receiver_row) == .Val(owner) -> return ir_host_method(&m, p, &b, expression_ty, owner, method, receiver, args, span)
             }
+            if call == .CellGuardProject(receiver, paths, _, _, _) -> return ir_cell_guard_project(&m, p, &b, expression_ty, receiver, paths, span)
             return ir_fail_slot(&b, span, "host call {ir_host_call_name(call)}")
         }
         .PreciseBuiltin(type_name, function, args) -> return ir_precise_builtin(&m, p, &b, expression_ty, type_name, function, args, span)
@@ -1636,6 +1688,7 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
         // extraction are the value itself (a Transparent convert).
         .DistinctCtor(argument) | .DistinctRaw(argument) -> return ir_expr(&m, p, &b, argument)
         .DistinctConvert(_, argument, operation, range, fallible) -> return ir_distinct_convert(&m, p, &b, expression_ty, argument, operation, range, fallible, span)
+        .AllocNew(ctor, args) -> return ir_alloc_new(&m, p, &b, expression_ty, ctor, args, span)
         .RawOf(value) -> return ir_raw_of(&m, p, &b, expression_ty, value, span)
         .Deref(value) -> return ir_raw_deref(&m, p, &b, expression_ty, value, span)
         else -> {
@@ -1767,6 +1820,8 @@ fn ir_defer_close(m: &IRModule, p: IRProgram, b: &IRBuilder, close: Int, span: S
 fn ir_handle_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int Never! {
     if operation == .TaskDetach -> return ir_task_detach(&m, p, &b, receiver, span)
     if operation == .TaskJoin -> return ir_task_join(&m, p, &b, ty, receiver, span)
+    if operation == .TaskPause || operation == .TaskResume || operation == .TaskCancel -> return ir_task_control(&m, p, &b, receiver, operation, args, span)
+    if operation == .AllocAlloc || operation == .AllocTryAlloc || operation == .AllocReset -> return ir_allocator_method(&m, p, &b, ty, receiver, operation, args, span)
     if operation == .DynLen(site, location) -> return ir_dyn_len(&m, p, &b, ty, receiver, site, location, span)
     if ir_dyn_method(&m, p, &b, ty, receiver, operation, args, span) == .Val(result) -> return result
     if ir_channel_method(&m, p, &b, ty, receiver, operation, args, span) == .Val(result) -> return result
@@ -2798,8 +2853,11 @@ fn ir_place_address(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, backs
         ir_make_unique(&m, p, &b, list)
         row :: ir_list_element(&m, p, b, list) ?? return ir_fail_slot(&b, span, "write of an index of {ir_type_name(base_ty)}")
         element :: ir_checked_element(&m, p, &b, list, index, row, span)
-        if ir_failed(b) || m.types[row].kind != .Aggregate -> return element
-        address :: ir_temp(&m, &b, row)
+        if ir_failed(b) -> return element
+        // A scalar element's address is a Pointer (a callee's `&` parameter
+        // row); an Aggregate element's slot holds its address.
+        address_row :: if m.types[row].kind == .Aggregate -> row else -> ir_pointer_row(&m)
+        address :: ir_temp(&m, &b, address_row)
         ir_emit(&b.f, IROp.Offset, address, element, 0, -1, b.line)
         return address
     }
@@ -2812,6 +2870,15 @@ fn ir_place_address(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, backs
         address :: if m.types[row].kind == .Aggregate -> ir_temp(&m, &b, row) else -> ir_temp(&m, &b, pointer_row)
         ir_emit(&b.f, IROp.Offset, address, payload, 0, -1, b.line)
         return address
+    }
+    // `&total` of a `#Persist` binding: its module storage cell, written in
+    // place (sema admits only `#Persist` module state as a write place).
+    if ir_body_node(p, b, place).kind == .ConstRef(symbol) {
+        at :: p.constants.get(symbol.key) ?? return ir_fail_slot(&b, span, "constant {symbol.key} without a declaration")
+        if p.constant_defs[at].is_storage && p.constant_defs[at].init == None {
+            definition :: p.constant_defs[at]
+            return ir_storage_address(&m, p, &b, definition, span)
+        }
     }
     // `f(make())` into a write parameter: the call's fresh aggregate result is
     // its own place, which the call releases after the callee wrote it; a
@@ -4213,6 +4280,14 @@ fn ir_list_index_assign(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, in
     if ir_failed(b) || list < 0 -> return
     address :: ir_checked_element(&m, p, &b, list, index, row, span)
     if ir_failed(b) || slot < 0 -> return
+    ir_assign_at(&m, p, &b, address, row, op, slot, value_ty, initializing, span)
+}
+
+// `place (op)= slot` into the storage of type row `row` at `address`: the
+// operation reads the current value, an overwritten value with drop glue
+// drops (unless `initializing`), then the result is stored.
+fn ir_assign_at(m: &IRModule, p: IRProgram, b: &IRBuilder, address: Int, row: Int, op: TBinaryOp?, value: Int, value_ty: Type, initializing: Bool, span: Span) Never! {
+    slot := value
     current := -1
     if op == .Val(binary) {
         current = ir_load_at(&m, &b, address, 0, row)
@@ -4714,11 +4789,15 @@ fn ir_build_lambda(m: &IRModule, p: IRProgram, b: &IRBuilder, job: IRLambdaJob) 
     b.line = job.line
     span :: lambda.source_span
     env :: ir_new_slot(&b, ir_pointer_row(&m), IRSlotKind.Param, ir_intern_name(&m, "closure"))
+    conventions :: lambda.host_param_conventions ?? [AccessConvention]{}
     loop (index, written) in lambda.param_types {
         name :: if index < lambda.source_params.len() -> lambda.source_params[index] else -> "_{index}"
         ty :: ir_fact(p, &b, written, span)
         if ir_failed(b) -> return
-        if ir_param_slot(&m, p, &b, ty, false, false, name) == None -> return ir_fail(&b, span, "lambda parameter type {ir_type_name(ty)}")
+        // A host write callback (`cell.edit(value -> value += 1)`) edits
+        // the lent value in place: its parameter is a write parameter.
+        write :: index < conventions.len() && conventions[index] == .Write
+        if ir_param_slot(&m, p, &b, ty, write, false, name) == None -> return ir_fail(&b, span, "lambda parameter type {ir_type_name(ty)}")
     }
     loop capture in job.captures {
         aggregate :: m.types[capture.row].kind == .Aggregate

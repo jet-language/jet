@@ -112,6 +112,8 @@ fn eprint(text: String) Never! -[IO, Time.Wait]> {
     &out.write("{text}\n").drop("stderr write")
 }
 
+// IoLineStream.rs jet_std_io_input: the prompt is written and flushed, then
+// one line is read without its line ending; a closed stream reads as "".
 fn input(prompt: String{""}) -[IO, Time.Wait]> String IOError! {
     terminal_prompt(prompt, false)
     readline()

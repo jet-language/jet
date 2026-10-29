@@ -2,7 +2,7 @@
 // every function value is, `task` spawns and `core.mem.scope.guard`, with the
 // owned runtime Task handle and the ScopeGuard carrier they produce.
 
-use jet_foundation.[Span, BodyCoreClosureKind, BodyLambda, Type, name_rows_set, name_rows_value, type_carrier_identity]
+use jet_foundation.[Span, BodyCallArg, BodyCoreClosureKind, BodyHandleOp, BodyLambda, TAllocCtor, Type, name_rows_set, name_rows_value, type_carrier_identity]
 
 // The element of a `Task<T>`.
 fn ir_task_element(ty: Type) -> Type? Never! {
@@ -296,6 +296,60 @@ fn ir_scope_guard(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, executabl
     guard
 }
 
+// `mem.Arena.new(capacity:)`, `mem.Bump.new(capacity:)`, `mem.Pool.new(slots:)`,
+// `mem.Fixed.new(size:)` and `mem.Fixed.over(&buffer)`: the owned runtime
+// allocator handle (JetRuntime MemStorage.jet). A size argument crosses as
+// its native word. `Fixed.new` backs the allocator with `size` bytes of this
+// frame; `Fixed.over` with the written `[U8#N]` buffer's elements.
+fn ir_alloc_new(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, ctor: TAllocCtor, args: [BodyCallArg], span: Span) -> Int Never! {
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    word_row :: ir_word_row(&m)
+    if ctor == .Fixed(size) {
+        pointer_row :: ir_pointer_row(&m)
+        data :: ir_temp(&m, &b, pointer_row)
+        ir_emit(&b.f, IROp.StackAddress, data, ir_align8(size), 8, -1, b.line)
+        length :: ir_word_const(&m, &b, size)
+        return ir_runtime(&m, &b, "jet_rt_mem_fixed_storage_over", [Int]{data, length}, row)
+    }
+    if ctor == .FixedOver {
+        if args.len() != 1 -> return ir_fail_slot(&b, span, "Fixed.over with {args.len()} arguments")
+        buffer_ty :: ir_ty(p, b, args[0].value)
+        element_ty :: if ir_untag(buffer_ty) == .FixedList(element, _) -> element else -> { return ir_fail_slot(&b, span, "Fixed.over buffer of type {ir_type_name(buffer_ty)}") }
+        element_row :: ir_value_type(&m, p, element_ty) ?? return ir_type_fail(&b, span, element_ty)
+        buffer :: ir_expr(&m, p, &b, args[0].value)
+        if ir_failed(b) || buffer < 0 -> return -1
+        count :: ir_load_word(&m, &b, buffer, 0)
+        stride_bytes :: ir_list_stride(m, element_row)
+        stride :: ir_word_const(&m, &b, stride_bytes)
+        length :: ir_temp(&m, &b, word_row)
+        ir_emit(&b.f, IROp.Mul, length, count, stride, IR_OVERFLOW_WRAP, b.line)
+        data :: ir_load_word(&m, &b, buffer, 16)
+        return ir_runtime(&m, &b, "jet_rt_mem_fixed_storage_over", [Int]{data, length}, row)
+    }
+    if args.len() > 1 -> return ir_fail_slot(&b, span, "allocator constructor with {args.len()} arguments")
+    if args.len() == 0 {
+        symbol :: if ctor == {
+            .Arena -> "jet_arena_new"
+            .Bump -> "jet_bump_new"
+            else -> "jet_rt_mem_pool_storage_new"
+        }
+        return ir_runtime(&m, &b, symbol, [Int]{}, row)
+    }
+    size :: ir_expr(&m, p, &b, args[0].value)
+    if ir_failed(b) || size < 0 -> return -1
+    native := size
+    if ir_kind_of(m, b, size) == .Int {
+        native = ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{size}, word_row)
+        ir_release(&m, &b, size)
+    }
+    symbol :: if ctor == {
+        .Arena -> "jet_arena_with_capacity"
+        .Bump -> "jet_bump_with_capacity"
+        else -> "jet_pool_with_slots"
+    }
+    ir_runtime(&m, &b, symbol, [Int]{native}, row)
+}
+
 // `^task.detach()`: the runtime takes the handle over and lets the task run
 // on unsupervised.
 fn ir_task_detach(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, span: Span) -> Int Never! {
@@ -303,6 +357,35 @@ fn ir_task_detach(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, span
     if ir_failed(b) || handle < 0 -> return -1
     _ :: ir_runtime(&m, &b, "jet_rt_native_task_detach", [Int]{handle}, -1)
     ir_lazy_consumed(&m, &b, handle)
+    return -1
+}
+
+// `task.pause()`, `task.pause(mode)`, `task.resume()` and `task.cancel()`:
+// control-plane hooks over the borrowed handle (JetRuntime Task.jet
+// jet_rt_native_task_pause / _pause_with_mode / _resume / _cancel). They
+// return nothing and the caller keeps the handle.
+fn ir_task_control(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int Never! {
+    handle :: ir_expr(&m, p, &b, receiver)
+    if ir_failed(b) || handle < 0 -> return -1
+    operands := [Int]{handle}
+    symbol := if operation == {
+        .TaskPause -> "jet_rt_native_task_pause"
+        .TaskResume -> "jet_rt_native_task_resume"
+        else -> "jet_rt_native_task_cancel"
+    }
+    if args.len() == 1 {
+        mode_ty :: ir_ty(p, b, args[0])
+        if ir_untag(mode_ty) != .Int -> return ir_fail_slot(&b, span, "Task.pause mode of type {ir_type_name(mode_ty)}")
+        mode :: ir_expr(&m, p, &b, args[0])
+        if ir_failed(b) || mode < 0 -> return -1
+        word_row :: ir_word_row(&m)
+        raw :: ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{mode}, word_row)
+        ir_release(&m, &b, mode)
+        &operands.push(raw)
+        symbol = "jet_rt_native_task_pause_with_mode"
+    }
+    _ :: ir_runtime(&m, &b, symbol, operands, -1)
+    ir_release(&m, &b, handle)
     return -1
 }
 

@@ -56,7 +56,7 @@ use jet_eval.[
     jet_eval_native_session,
 ]
 use jet_backend.[x64_link_runtime_image, x64_link_runtime_pack]
-use jet_ir.[IRLibraryExportRow, ir_build_library, ir_export_abi_json, ir_opt_options, ir_optimize_module, ir_x64_compile_module, ir_x64_library_object]
+use jet_ir.[IRLibraryExportRow, IRLintFinding, ir_build_library, ir_export_abi_json, ir_lint_module, ir_opt_options, ir_optimize_module, ir_x64_compile_module, ir_x64_library_object]
 use jet_pkg_model.[BuildStamp, DepSpec, PackageFacts, pkg_lock_load, pkg_manifest_parse, pkg_to_manifest]
 
 // The production CLI's compile, under the driver's all-phases collector when
@@ -122,8 +122,9 @@ fn jet_cli_keep_going_append(rows: [String]) -> String Never! {
 
 // Packaging uses the ordinary hosted source loader: the checked
 // NativeLibrary program (the compile stopped before lowering, without an
-// entry) built as IR from its `#Export(c)` rows (ir_build_library) at O1
-// and written as `{prefix}.o` with its export list and ABI receipt.
+// entry) built as IR from its `#Export(c)` rows (ir_build_library) at O1,
+// checked by IR Lint after the build and after the optimizer, and written
+// as `{prefix}.o` with its export list and ABI receipt.
 fn jet_cli_runtime_library(front: ^JetDriverLoweringInputsResult, prefix: String, compiler_threads: CompilerThreads) -> JetDriverCompileResult {
     owned := ^front
     result := ^owned.compile
@@ -137,10 +138,16 @@ fn jet_cli_runtime_library(front: ^JetDriverLoweringInputsResult, prefix: String
     library := ir_build_library(^checked.functions, checked.decls, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, rows, lifecycle_text.split("\n").to_list())
     issues := compiler_take_rows<String>(&library.errors)
     loop failure in library.failures -> &issues.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
+    // The memory term is read now: the front end before this holds most of it.
+    threads :: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
     if issues.len() == 0 {
-        // The memory term is read now: the front end before this holds most of it.
-        threads :: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
+        loop finding in ir_lint_module(&library.program, "ir.build", threads) -> &issues.push(jet_cli_runtime_lint_issue(finding))
+    }
+    if issues.len() == 0 {
         _ := ir_optimize_module(&library.program, ir_opt_options(1), threads)
+        loop finding in ir_lint_module(&library.program, "ir.opt", threads) -> &issues.push(jet_cli_runtime_lint_issue(finding))
+    }
+    if issues.len() == 0 {
         compiled := ir_x64_compile_module(^library.program, threads)
         object := ir_x64_library_object(^compiled, library.exports, true)
         if object.errors.len() == 0 {
@@ -156,6 +163,12 @@ fn jet_cli_runtime_library(front: ^JetDriverLoweringInputsResult, prefix: String
     }
     cli_files.write("{prefix}.issues", issues.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime library findings: {err}")
     jet_driver_compile_escaped_failure("runtime library lowering failed; see {prefix}.issues")
+}
+
+// An IR Lint finding (Lint.jet) over the runtime library: a compiler bug,
+// one issue row naming the function, the pass and the rule.
+fn jet_cli_runtime_lint_issue(finding: IRLintFinding) -> String Never! {
+    "{finding.function}: IR Lint after {finding.pass}, {finding.rule}: {finding.message}"
 }
 
 // JET_FRONT_RUNTIME_PACK_OUTPUT: links the runtime library object `object`

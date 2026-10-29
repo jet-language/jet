@@ -27,9 +27,14 @@ NET_UDP_PACKET_BYTES :: I64{96}
     jet_rt_string_builder_push(result, rt_static_text(")"))
     result
 }
-// Field projections borrow the packet's inline storage.
-#Export(c) fn jet_rt_handle_field_jet_udp_packet_addr(value: I64) -> I64 { value }
+// Field projections borrow the packet's inline storage. A header field
+// writes its lent copy into the caller's `out` slot: the 56-byte socket
+// address, or the data List's [length, capacity, data] header.
+#Export(c) fn jet_rt_handle_field_jet_udp_packet_addr(value: I64, out: I64) { coll_copy(value, out, I64{56}) }
 #Export(c) fn jet_rt_handle_field_jet_udp_packet_truncated(value: I64) -> I64 { value + I64{56} }
+#Export(c) fn jet_rt_handle_field_jet_udp_packet_data(value: I64, out: I64) { coll_copy(value + I64{64}, out, I64{24}) }
+// original_len is at most 65535, so the word is its own inline Int.
+#Export(c) fn jet_rt_handle_field_jet_udp_packet_original_len(value: I64) -> I64 { net_word(value, I64{88}) }
 
 // NetHTTP.rs:2853 packet.addr.clone()
 #Export(c) fn jet_net_raw_udp_packet_addr(packet: I64) -> I64 { net_copy(packet, I64{56}) }

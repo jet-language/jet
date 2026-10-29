@@ -1900,6 +1900,7 @@ fn sema_function_declares_span(methods: [Func], span: Span) -> Bool Never! {
 // One check of `func` (sema_function_check_passes). `updated` already carries
 // the function's merged generic parameters (`generics.merged`) and name.
 fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFuncKind, raw_protocol_return: Bool, updated: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, generics: SemaFunctionCheckGenerics, host_hooks: SemaHostHookAccess?, share_known: [Span], share_found: &[SemaOwnershipShareSite], diagnostics: &[Diagnostic], call_facts: &[SemaCallSiteFact], comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact]) -> SemaFunctionResult {
+    diagnostics_start :: diagnostics.len()
     module_identity := updated.module_identity
     module_name := updated.module_name
     fallback_source_file := updated.source_file
@@ -1958,6 +1959,11 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         unsafe_gate_valid = sema_effect_check_unsafe_function(unsafe_source, &diagnostics)
         if !unsafe_gate_valid -> complete = false
     }
+    is_method :: if function_kind == {
+        .Method(_, _) | .TraitMethod(_, _, _, _, _) -> true
+        else -> false
+    }
+    if !sema_function_header_check_root_params(func, is_method, &diagnostics) -> complete = false
     if !sema_function_header_supported(func, &context) -> complete = false
     if func.is_reactive {
         if func.is_pure {
@@ -2060,6 +2066,12 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         resolved_return = sema_function_resolve_declared(updated, program, declared_return, module_identity, generic_params)
         if !sema_type_check_declared_map_keys(updated, program, resolved_return, func.return_type_span ?? func.name_span, &diagnostics) -> complete = false
     }
+    // Rust CheckerKernel.rs `check_kernel_marker`: the declaration and
+    // worker-boundary obligations of `#Kernel(.parallel)` (E1102); its
+    // effect and body obligations wait for the effect rows (Kernel.jet).
+    if func.kernel == .Val(kernel) {
+        if !sema_kernel_check_declaration(func, kernel, is_method, params, effective_return, updated, program, scopes, context, &diagnostics) -> complete = false
+    }
     if func.is_unsafe && unsafe_gate_valid -> context.unsafe_depth = 1
     contract :: sema_contract_check_function(func, updated, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if !contract.complete -> complete = false
@@ -2091,6 +2103,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     loop site in state.share_found -> &share_found.push(site)
     if !statements.complete -> complete = false
     if !sema_check_never_fallthrough(func, updated, program, scopes, &diagnostics) -> complete = false
+    sema_function_header_external_target(func, &diagnostics, diagnostics_start)
     // Rust `check_value_block` over the body (Registration.rs:937-938): a
     // value body reports E0114 when it can reach its end without a value.
     if returns_value && !sema_stmt_check_value_block_end(func.body, statements.value, Val(effective_return), func.span, context.function_name, &diagnostics) -> complete = false
@@ -2128,6 +2141,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     }
     sema_place_borrow_function(&body, params, place_borrow_receiver, context.arena.tree)
     target :: sema_function_target_applicability(func)
+    memo :: sema_function_header_memo_config(func)
     tir := TFunc{
         name: func.name,
         module_name: module_name,
@@ -2155,8 +2169,8 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         is_unsafe: func.is_unsafe,
         unsafe_gate: unsafe_gate,
         is_pure: func.is_pure,
-        memo_bound: None,
-        memo_unbounded: false,
+        memo_bound: memo.bound,
+        memo_unbounded: memo.unbounded,
         is_reactive: func.is_reactive,
         reactive_upgrades: context.reactive_upgrades,
         body: ^body,
@@ -3164,6 +3178,9 @@ fn sema_check_registration_module_program(environment: SemaScopeEnvironment, pro
         }
         // Rust ScopeMembers.rs `check`: structural `.member { … }` checks in every mode.
         loop diagnostic in sema_scope_members_check(graph.modules[module_index].program.items) -> &module_result.diagnostics.push(diagnostic)
+        // Rust Footprint.rs `infer_module_footprints`: a stated receiver
+        // footprint names stored fields and covers its body (E0231).
+        loop diagnostic in sema_footprint_check(graph.modules[module_index].program.items) -> &module_result.diagnostics.push(diagnostic)
         // Typestate declarations are bundle-wide; collect that view only for
         // a module that declares a state section or a typestate marker.
         if !sema_module_is_core_source(graph.modules[module_index].module_identity) && sema_state_items_use_typestate(graph.modules[module_index].program.items) {
@@ -3202,6 +3219,13 @@ fn sema_check_registration_module_program(environment: SemaScopeEnvironment, pro
                         module_result.complete = false
                         &module_result.incomplete_reasons.push("inline module `{definition.name}` is not lowered")
                     }
+                }
+                // A ratified `fact` declaration has no Jet implementation
+                // yet: E2104 at the declaration, card #6079.
+                .FactDecl(definition) -> {
+                    module_result.complete = false
+                    &module_result.diagnostics.push(sema_error("E2104", definition.name_span, "`fact {definition.name}` is not built yet", "This `jet` has no implementation of `fact` declarations yet, and no other `jet` can check or run them.", "Remove the `fact` declaration for now; `fact` declarations need their Jet implementation first (card #6079)."))
+                    &module_result.incomplete_reasons.push("`fact {definition.name}` is not built yet (card #6079)")
                 }
                 else -> {
                     module_result.complete = false
@@ -3280,9 +3304,11 @@ fn sema_check_registration_module_test(environment: SemaScopeEnvironment, progra
                 loop reference in checked_test.name_references -> &module_result.name_references.push(reference)
                 loop event in checked_test.copy_events -> &module_result.copy_events.push(event)
                 module_result.exact_int_reachable = module_result.exact_int_reachable || checked_test.exact_int_reachable
+                loop source in checked_test.comptime_body_sources -> &module_result.comptime_body_sources.push(source)
                 if !checked_test.complete {
                     module_result.complete = false
-                    &module_result.incomplete_reasons.push("test `{test.name ?? ""}`: body check is incomplete")
+                    if checked_test.incomplete_reasons.len() == 0 -> &module_result.incomplete_reasons.push("test `{test.name ?? ""}`: body check is incomplete")
+                    loop reason in checked_test.incomplete_reasons -> &module_result.incomplete_reasons.push("test `{test.name ?? ""}`: {reason}")
                 }
                 if checked_test.function == .Val(function) {
                     &module_result.injected_function_keys.push(function.key)
@@ -3625,11 +3651,12 @@ fn sema_check_foreign_handle_adapter_key(module_row: SemaRegistrationModule, pro
 // The Program-level forms the module checker does not support yet, by name.
 // Fenced statements are formatter metadata: sema checks their ordinary
 // expanded statements in `items`, as the Rust checker does. A script body is
-// not one of them: finalization rejects it with E0620/E0621.
+// not one of them: finalization rejects it with E0620/E0621. `#HTML(page)`
+// (html_path) is not one either: it names the web output's companion page
+// (D-HTMLPAIR1), which a native build has no use for.
 fn sema_check_unsupported_program_forms(program: Program) -> [String] Never! {
     forms := [String]{}
     if program.web_target_ceiling != None -> &forms.push("web target ceiling")
-    if program.html_path != None -> &forms.push("html path")
     if sema_function_memory_has_unsupported_policies(program.policy_declarations) -> &forms.push("memory policy")
     if sema_policy_has_unsupported_applications(program) -> &forms.push("applied rules")
     forms
@@ -7454,7 +7481,12 @@ fn sema_comptime_dependency_cycle_diagnostic(name: String, span: Span) -> Diagno
 
 fn sema_comptime_effect_sources(source_module: SemaRegistrationModule) -> [SemaEffectFunctionSource] Never! {
     sources := [SemaEffectFunctionSource]{}
-    loop function in source_module.functions -> &sources.push(sema_effect_source_from_function_key(function.declaration, source_module.module_identity, function.symbol.id.key))
+    compute_aliases :: sema_kernel_compute_aliases(source_module)
+    loop function in source_module.functions {
+        source := sema_effect_source_from_function_key(function.declaration, source_module.module_identity, function.symbol.id.key)
+        source.kernel = sema_kernel_pending(function.declaration, compute_aliases)
+        &sources.push(source)
+    }
     loop nominal in source_module.nominals {
         loop function in nominal.methods -> &sources.push(sema_effect_source_from_function_key(function.declaration, source_module.module_identity, function.symbol.id.key))
     }
@@ -8467,6 +8499,10 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
     loop diagnostic in effects.diagnostics -> &diagnostics.push(diagnostic)
     if !effects.complete -> complete = false
+    // The web partition reads the solved effect rows and call edges.
+    sema_web_partition_check(&modules, final_graph, &diagnostics)
+    // Typestate flow reads each body's checked receiver types.
+    sema_typestate_check(modules, final_graph, &diagnostics)
     outputs := sema_output_publish_solved_effects(&final_graph, &modules)
     compute_work := SemaComputeValidationWork{}
     compute_diagnostics := sema_compute_validate_autodiff_purity(modules, &compute_work)

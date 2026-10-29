@@ -26,6 +26,13 @@ fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, pat
 fn parse(text: String) -> Dyn EncodingError! { parse_toml(text) }
 
 fn decode(text: String) -> Dyn EncodingError! { parse_toml(text) }
+// Compiler-private typed entry for `toml.decode<T>(text)`: the document's
+// tree decodes into the target, a parse failure as one root FieldError.
+fn __decode_typed<Target: Decode>(text: String) -> Target [FieldError]! {
+    tree :: parse_toml(text) ?? return Err([FieldError]{FieldError{path: "", reason: "invalid TOML: {err.reason}"}})
+    value :: tree.decode<Target>() ?? return Err(err)
+    Ok(value)
+}
 fn loads(text: String) -> Dyn EncodingError! { parse(text) }
 fn load(text: String) -> Dyn EncodingError! { parse(text) }
 

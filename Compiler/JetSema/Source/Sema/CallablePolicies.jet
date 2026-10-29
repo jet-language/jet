@@ -221,19 +221,27 @@ fn sema_policy_try_apply(call: Call, expected: Type?, environment: SemaScopeEnvi
 // which the statement checker checks or refuses; only another applied rule
 // is a policy application the self-hosted checker does not support.
 fn sema_policy_has_unsupported_applications(program: Program) -> Bool Never! {
+    sema_policy_unsupported_applications(program).len() > 0
+}
+
+// The applied rules of `program` the checker has no route for, in source
+// order (sema_marker_module_check reports each one).
+fn sema_policy_unsupported_applications(program: Program) -> [AppliedRuleApplication] Never! {
+    unsupported := [AppliedRuleApplication]{}
     loop application in program.applied_rules {
         if sema_policy_statement_form(application) -> next
-        if application.marker.name != "allow" -> return true
+        if application.marker.name != "allow" -> &unsupported.push(application)
     }
     loop application in program.rule_facts {
-        // A file `#Target` or `#NoPrelude` is lowered by the parser into the
-        // Program's target fields or its no_prelude flag, which are checked on
+        // A file `#Target`, `#NoPrelude` or `#HTML(page)` is lowered by the
+        // parser into the Program's target fields, its no_prelude flag or its
+        // html_path (the web output's companion page), which are checked on
         // their own.
-        if application.site == .Val(site) && site == RuleSite.File && (application.marker.name == "Target" || application.marker.name == "NoPrelude") -> next
+        if application.site == .Val(site) && site == RuleSite.File && (application.marker.name == "Target" || application.marker.name == "NoPrelude" || application.marker.name == "HTML") -> next
         if sema_policy_statement_form(application) -> next
-        if application.marker.name != "allow" -> return true
+        if application.marker.name != "allow" -> &unsupported.push(application)
     }
-    false
+    unsupported
 }
 
 fn sema_policy_statement_form(application: AppliedRuleApplication) -> Bool Never! {

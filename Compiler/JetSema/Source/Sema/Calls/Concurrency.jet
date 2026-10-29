@@ -201,7 +201,11 @@ fn sema_call_concurrency_parallel(receiver: Expr, receiver_value: TExpr, method:
         callback :: sema_call_concurrency_infer_callback(args[0], map_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         _ := sema_call_concurrency_check_parallel_callback(callback, args[0].expr, environment, program, &scopes, &state, &context, &diagnostics)
         callback_result := Type.Named{name: "Unit"}
-        if sema_call_signature_return(callback.ty) == .Val(ret) -> callback_result = sema_call_concurrency_success_type(ret)
+        callback_error := Type?{None}
+        if sema_call_signature_return(callback.ty) == .Val(ret) {
+            callback_result = sema_call_concurrency_success_type(ret)
+            if sema_expr_unwrap_tag(ret) == .Result(_, error) && error != (Type.Named{name: "Never"}) -> callback_error = Val(error)
+        }
         &typed.push(callback)
         result_type = Type.List{element: callback_result}
         sema_call_concurrency_reject_parallel_type("item", element, span, environment, program, scopes, context, &diagnostics)
@@ -211,8 +215,13 @@ fn sema_call_concurrency_parallel(receiver: Expr, receiver_value: TExpr, method:
             &typed.push(limit)
         }
         operation := TClosureOp.ParaMap
-        tir := sema_tir_node(result_type, TExprKind.ClosureMethod{receiver: receiver_value, operation: operation, args: typed}, span)
-        checked := sema_expr_expected(tir, expected, environment, program, &diagnostics)
+        // D-PARCAPTURE1: a fallible callback's failure leaves the call. The
+        // call is the Result of the mapped List (the lowest-index Err when
+        // any item fails), and the dispatcher's auto-propagation inserts its
+        // Try, as for a fallible `map` (TryMap).
+        call_type := if callback_error == .Val(error) -> Type.Result{ok: result_type, err: error} else -> result_type
+        tir := sema_tir_node(call_type, TExprKind.ClosureMethod{receiver: receiver_value, operation: operation, args: typed}, span)
+        checked := sema_expression_call_expected(tir, expected, environment, program, context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: checked}
     }
 
