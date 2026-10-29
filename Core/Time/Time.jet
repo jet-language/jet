@@ -836,6 +836,10 @@ fn civil_checked_epoch(value: Int, unit: String) -> Int RangeError! {
 }
 impl DateTime {
     fn date(self) -> LocalDate Never! { civil_from_day(719162 + civil_floor(self.secs, 86400)) }
+    fn year(self) -> Int Never! { self.date().date_y }
+    fn month(self) -> Int Never! { self.date().date_m }
+    fn day(self) -> Int Never! { self.date().date_d }
+    fn weekday(self) -> Int Never! { self.date().weekday() }
     fn time(self) -> LocalTime Never! {
         seconds :: civil_mod(self.secs, 86400)
         t := civil_time(seconds /% 3600, (seconds /% 60) %% 60, seconds %% 60, self.nanos)

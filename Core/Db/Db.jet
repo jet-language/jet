@@ -662,8 +662,12 @@ fn __policy_apply(sql: SQL, policy: RowPolicy, user: String, allow_schema: Bool)
 // ---- connections and scopes ----------------------------------------------
 
 // One SQLite connection shared by a DBConnection and every scope derived from
-// it. `close` shuts the driver down in place for all of them.
-struct __DBState { driver: __Driver }
+// it. `close` shuts the driver down in place for all of them. `path` is the
+// location it was opened at, for display.
+struct __DBState {
+    driver: __Driver
+    path: String
+}
 
 struct DBConnection { state: Shared<__DBState> }
 struct DBScope {
@@ -674,7 +678,7 @@ struct DBScope {
 
 fn __db_open(path: String, failure: String) -> DBConnection Never! {
     driver := __driver_open(path) ?? panic(failure)
-    DBConnection{state: shared __DBState{driver: ^driver}}
+    DBConnection{state: shared __DBState{driver: ^driver, path: path.copy()}}
 }
 fn open(path: String) -[DB]> DBConnection Never! { __db_open(path, "database open failed") }
 fn open_memory() -[DB]> DBConnection Never! { __db_open(":memory:", "in-memory database open failed") }
@@ -708,6 +712,15 @@ impl DBConnection {
     fn commit(self) -[DB]> Bool Never! { __db_commit(self.state) }
     fn rollback(self) -[DB]> Bool Never! { __db_rollback(self.state) }
     fn close(self) -[DB]> Bool Never! { __db_shutdown(self.state) }
+}
+
+// One line: where the database lives and whether it is still open.
+impl DBConnection.Display {
+    fn display(self) -> String {
+        guard :: self.state.guard_edit()
+        status :: if raw(guard.value.driver) == (U64{0}) -> "closed" else -> "open"
+        "DBConnection({guard.value.path}, {status})"
+    }
 }
 
 fn __scope_execute(scope: DBScope, sql: SQL, allow_schema: Bool) -> Int DBError! {
