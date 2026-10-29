@@ -32,7 +32,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, recordin
 | `#Align` | retired standalone alignment marker | `D-PLACE1=A` |
 | `Atomic<T>` | safe lock-free scalar cell | `D-PLACE1=A; D-ATOMIC-WIDTH1=A` |
 | `@` | live link (D-MEMREF1); retired compile-time `@NAME :: value` constant teaches E0388 with `NAME :: comptime { value }`; retired `@` template name splices teach E0388 with `$`; retired `@` fact spellings teach E0003 with `$` | `D-MEMREF1=A; D-AT-INFIX1=A; D-PREP-SURFACE2=A; D-COMPILER-NS1=A; D-NAME-SPLICE1=B` |
-| `comptime` | compile-time block `comptime { … }`; `NAME :: comptime { value }` is the only compile-time binding; `@ { … }` and `prep` are retired | `D-PREP-SURFACE2=A` |
+| `comptime` | compile-time block `comptime { … }`; `NAME :: comptime { value }` is the only binding that forces compile time (a plain `NAME :: value` folds while building when it can); `@ { … }` and `prep` are retired | `D-PREP-SURFACE2=A` |
 | `comptime if` | build-time branch; unchosen arms are name-checked only | `D-PREP-BRANCH1=A` |
 | `comptime loop` | build-time loop over statements or declarations | `D-PREP-BRANCH1=A; D-STRUCT-ONCE1=A` |
 | `comptime fn` | build-time literal-hook method | `D-PREP-FN1=A; D-FOUND-LITERAL1=A` |
@@ -8191,6 +8191,20 @@ that erased `@if` in favor of plain `if`, and is linked back from the earlier
 S57/D-WHEN1 entry above. The reverse-amendment links are
 [line 2561](#L2561) and [line 2588](#L2588).
 
+**2026-10-29 — `::` folds as an optimization; `comptime` forces it** *(card
+#6125; owner direction 2026-10-29, consistent with D-VERDICT-1308-1)*: an
+immutable `::` binding asks for build-time evaluation as an optimization, and
+`comptime` forces it. A module-level `NAME :: value` folds while building when
+its evaluation is pure and succeeds; otherwise the program computes it at
+startup, before `fn run`, with no build error. In a block, an immutable
+`name :: value` of Int arithmetic (`+`, `-`, `*`, negation) over literals and
+other folded bindings holds its value from the build on, at every optimization
+level; any other block value computes at run time, where O1 and O2 may still
+fold it. `name :: comptime { value }` that fails stops the build with E3010.
+This corrects the 2026-09-30 entry below, which called an ALL_CAPS
+`NAME :: value` an ordinary runtime constant. Example:
+`Examples/features/comptime/fold_constants.jet`.
+
 **2026-10-23 — `prep` retired; `comptime` is the one compile-time word**:
 every form that `prep` led (`prep { … }`, `NAME :: prep { value }`,
 `prep if`, `prep loop`, `prep fn`, `<prep N: Int>`) is now spelled with the
@@ -8212,11 +8226,13 @@ either compiler yet, so it is rejected with E0391 rather than accepted
 silently. Other `@` uses are unchanged.
 
 **2026-09-30 — D-PREP-SURFACE2=A constants shipped** *(card #3662; amended
-the same day by the owner ruling under D-SHAPE-CASE1)*: compile time is always
-explicit. A build-time constant is `NAME :: comptime { value }` at module scope and
-`name :: comptime { value }` in a block (a block holding one final expression);
-casing never implies compile time, so an ALL_CAPS `NAME :: value` is an
-ordinary runtime constant. `#Static NAME :: comptime { value }` and
+the same day by the owner ruling under D-SHAPE-CASE1, and on 2026-10-29 by
+card #6125)*: `comptime` forces compile time. A forced build-time constant is
+`NAME :: comptime { value }` at module scope and `name :: comptime { value }`
+in a block (a block holding one final expression); casing never implies
+compile time. A plain `NAME :: value` is not a runtime-only constant: `::`
+folds it while building when it can, as an optimization (the 2026-10-29 entry
+above). `#Static NAME :: comptime { value }` and
 `#Inline NAME :: comptime { value }` keep D-CONSTMARK1. The retired `@NAME :: value`
 declaration teaches E0388 with the behavior-preserving edit
 `NAME :: comptime { value }`, and a retired `@NAME` read teaches `NAME` (retirement

@@ -67,6 +67,7 @@ use jet_foundation.[
     diagnostic_registry_row,
     expr_source_span,
     expr_span,
+    integer_bounds_exact,
     measure_literal_value,
     symbol_id,
     checked_generated_local,
@@ -3585,7 +3586,10 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     owner := sema_scope_local_owner_key(scopes)
     id :: symbol_id(kind, environment.module_identity, owner, binding.name)
     symbol := Symbol{id: id, kind: kind, name: binding.name, module_name: environment.module_identity, owner: Val(owner), span: binding.name_span, ty: Val(init.ty), visibility: 0}
-    bounds :: if binding.mutable -> None else -> checked_cost_integer_bounds(init)
+    // An immutable binding of foldable Int arithmetic holds its value from
+    // the build on, at every tier (tree_expr_fold_int).
+    folded :: if binding.mutable -> None else -> tree_expr_fold_int(init)
+    bounds :: if folded == .Val(number) -> Val(integer_bounds_exact(number)) else if binding.mutable -> None else -> checked_cost_integer_bounds(init)
     if !sema_scope_declare_local(&scopes, symbol, binding.mutable, AccessConvention.Read, bounds, string_view) {
         &diagnostics.push(sema_already_defined(binding.name, binding.name_span))
         return None
@@ -3629,7 +3633,9 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     // The view is a borrowed `&str` place; its source type stays `String`.
     if string_view -> let_ty = TLetTy.StrView
     gc_promotion := if binding.gc_promotion == .Val(promotion) -> Val(sema_function_memory_tree_promotion(promotion)) else -> None
-    Val(TStmt.Let{local: local, let_ty: let_ty, init: view_init ?? init, gc_promotion: gc_promotion, gc_transferred: binding.gc_transferred, span: Span{start: binding.name_span.start, end: expr_span(binding.init).end}})
+    stored := view_init ?? init
+    if folded == .Val(number) -> stored = sema_tree_node(init.ty, TExprKind.IntLit{value: number, width: None}, init.span)
+    Val(TStmt.Let{local: local, let_ty: let_ty, init: stored, gc_promotion: gc_promotion, gc_transferred: binding.gc_transferred, span: Span{start: binding.name_span.start, end: expr_span(binding.init).end}})
 }
 
 // Rust `infer_owning_value` (`implicit_copy_target` over

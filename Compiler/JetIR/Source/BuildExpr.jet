@@ -402,6 +402,9 @@ fn ir_stmt_body(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never
                 &b.bindings.push(IRBinding{name: local.name, slot: value, symbol: symbol})
                 return
             }
+            // An integer literal's constant is the binding's own value (a
+            // folded `name :: 8 * 4`, #6125): it moves in instead of cloning.
+            if ir_body_node(p, b, init).kind == .IntLit(_, _) -> b.fresh[value] = true
             ir_bind_local(&m, p, &b, local, value, span)
             bound :: b.bindings[b.bindings.len() - 1].slot
             ir_close_arm(&m, p, &b, bound, false, span)

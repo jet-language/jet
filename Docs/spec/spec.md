@@ -437,14 +437,22 @@ parentheses: `value ?? (next)`.
 
 ## Compile-time names and staged syntax
 
-A compile-time constant is an ordinary ALL_CAPS name: an immutable module-level
-`::` binding such as `MAX_RETRIES :: 3` is evaluated while building and read as
-`MAX_RETRIES`; failure to compute it stops the build (D-PREP-SURFACE2=A). In a
-block, names stay snake_case (D-SHAPE-CASE1): `lanes :: comptime { calculate() }`
-evaluates its single final expression while building, and names bound inside a
-`comptime { … }` statement block stay readable after it. Ordinary foldable expressions need no constant. At file
-scope, other `name :: value` and `name := value` bindings remain runtime module
-globals; they do not require `#Persist`. `#Static NAME :: value` requests a
+An immutable `::` binding asks for build-time evaluation as an optimization,
+and `comptime` forces it (#6125). A module-level `MAX_RETRIES :: 3` or
+`LIMIT :: 6 * 7 + 1` is evaluated while building when its evaluation is pure
+and succeeds, and is read as `MAX_RETRIES` like a literal. A value that reads
+the outside world, or fails while building, is computed once at startup,
+before `fn run`, with no build error; a trap there is the program's own. In a
+block, an immutable `name :: value` of Int arithmetic (`+`, `-`, `*`,
+negation) over literals and other folded bindings holds its value from the
+build on, at every optimization level; any other block value computes at run
+time, where O1 and O2 may still fold it. `NAME :: comptime { value }` at file
+scope, and `lanes :: comptime { calculate() }` in a block, where names stay
+snake_case (D-SHAPE-CASE1), force evaluation of the single final expression
+while building: a failure stops the build with E3010 (D-PREP-SURFACE2=A).
+Names bound inside a `comptime { … }` statement block stay readable after it.
+At file scope, `name := value` bindings remain runtime module globals; they do
+not require `#Persist`. `#Static NAME :: value` requests a
 stable-address Rust static when the contract needs one, and `#Inline NAME ::
 value` copies the value into use sites (D-CONSTMARK1). Without a marker, an
 immutable constant whose value is a number, text, or a small record or enum
