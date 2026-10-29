@@ -1,0 +1,11 @@
+# tests/web_partition.rs::imported_same_leaf_helpers_keep_distinct_buckets at tests/web_partition.rs:265; hand-port
+# Claim: Same-named helpers from two imported modules land in distinct buckets: left helper/value JS, right helper/value Wasm, run JS (tests/web_partition.rs:289-295)
+# Fixture migrated: Rust file imports (use "./left" as left, use "./right" as right) -> inline `module left { ... }` and `module right { ... }` in one file, because `use "file"` between files of one package is E0623
+# Not ported: Rust compares the JSON manifest partitions map exactly; no CLI-visible manifest path or format is known for the web build, so only the build outcome is checked
+fixture: imported_same_leaf_helpers_keep_distinct_buckets.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build --target=web main.jet
+exit: 0 # tests/web_partition.rs:283-296 compile succeeds and buckets are distinct
+stderr: !~ "E-WEB-CROSS-PARTITION" # tests/web_partition.rs:283-296 compile succeeds and buckets are distinct

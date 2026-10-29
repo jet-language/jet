@@ -22,6 +22,7 @@ use jet_foundation.[
     failure_contract_from_return_type,
     failure_contract_source,
     type_with_effective_fn_returns,
+    ViewProvenanceMap,
 ]
 
 fn sema_effective_return_type(return_type: Type?) -> Type Never! {
@@ -60,6 +61,13 @@ fn sema_checked_return_type(return_type: Type?, raw_protocol_return: Bool) -> Ty
 fn sema_failure_contract_source(return_type: Type?) -> String Never! {
     failure_contract_source(failure_contract_from_return_type(return_type))
 }
+
+// Whether `return_type` keeps the implicit default failure route (its
+// sema_failure_contract_source is "implicit default !Err"), read without
+// rendering the contract.
+fn sema_failure_contract_is_default(return_type: Type?) -> Bool Never! {
+    failure_contract_from_return_type(return_type) == .Default(_, _)
+}
 // Guest.rs `export_signature`: failure inference's infallible rail is not
 // a second Component value. Keep genuinely fallible and diverging returns.
 fn sema_guest_export_value_type(return_type: Type?) -> Type? Never! {
@@ -86,14 +94,14 @@ fn sema_callable_policy_call_text(call: Call) -> String Never! {
 
 fn sema_callable_policy_argument_text(expr: Expr) -> String Never! {
     if expr == {
-        .Str(parts, _) -> sema_callable_policy_string_text(parts)
-        .Int(value, _, _, raw) -> raw ?? "{value}"
-        .Float(value, _, _, raw) -> raw ?? "{value}"
-        .Bool(value, _) -> "{value}"
-        .Char(value, _) -> "'{value}'"
-        .Ident(name, _) -> name
-        .Field(base, member, _) -> "{sema_callable_policy_argument_text(base)}.{member}"
-        .Call(call) -> sema_callable_policy_call_text(call)
+        .Str(parts, _, _) -> sema_callable_policy_string_text(parts)
+        .Int(value, _, _, raw, _) -> raw ?? "{value}"
+        .Float(value, _, _, raw, _) -> raw ?? "{value}"
+        .Bool(value, _, _) -> "{value}"
+        .Char(value, _, _) -> "'{value}'"
+        .Ident(name, _, _) -> name
+        .Field(base, member, _, _) -> "{sema_callable_policy_argument_text(base)}.{member}"
+        .Call(call, _) -> sema_callable_policy_call_text(call)
         else -> "<expression>"
     }
 }
@@ -104,7 +112,7 @@ fn sema_callable_policies(func: Func) -> CallablePolicyChain Never! {
         if marker.name == "Policy" {
             loop argument in marker.args {
                 if argument == .Expr(value) {
-                    if value == .Call(call) {
+                    if value == .Call(call, _) {
                         arguments :: loop call_argument in call.args -> sema_callable_policy_argument_text(call_argument.expr)
                         &policies.push(CallablePolicy{name: call.name, arguments: arguments})
                     }

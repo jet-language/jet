@@ -1,0 +1,61 @@
+// Real initialized runtime plus DynNative.jet. A synthetic checked descriptor
+// deliberately permutes native tags, moves payloads, boxes recursive members,
+// packs bytes and pads object entries. List payloads are inline 24-byte
+// [len, cap, data] headers, as the native backend lays them out.
+fn compiler_dyn_fixture_schema() -> I64 {
+    schema :: jet_rt_alloc(I64{656}, I64{8})
+    coll_zero(schema, I64{656})
+    data_tree_store(schema, I64{40})
+    data_tree_store(schema + I64{8}, I64{10})
+    kind := I64{0}
+    loop kind < (I64{10}) {
+        row :: compiler_dyn_row(schema, kind)
+        data_tree_store(row, I64{100} + (I64{9} - kind) * I64{3})
+        data_tree_store(row + I64{8}, I64{16})
+        data_tree_store(row + I64{16}, if (kind == DATA_TREE_NUMBER || kind == DATA_TREE_ARRAY) -> I64{1} else -> I64{0})
+        data_tree_store(row + I64{24}, if (kind == DATA_TREE_BYTE_LIST || kind >= DATA_TREE_ARRAY) -> DATA_SEQUENCE_BYTES else -> I64{8})
+        data_tree_store(row + I64{32}, if (kind == DATA_TREE_BYTE_LIST) -> I64{1} else if (kind == DATA_TREE_OBJECT) -> I64{32} else -> I64{8})
+        data_tree_store(row + I64{40}, I64{8})
+        data_tree_store(row + I64{48}, I64{24})
+        data_tree_store(row + I64{56}, if (kind == DATA_TREE_OBJECT) -> I64{32} else -> I64{8})
+        kind += I64{1}
+    }
+    schema
+}
+fn compiler_dyn_fixture_roundtrip(schema: I64, tree: I64) -> Bool {
+    native :: jet_rt_dyn_to_native(schema, tree)
+    cloned :: jet_rt_dyn_from_native(schema, native)
+    compiler_dyn_native_drop(schema, native)
+    // Both raw outputs are still valid after freeing every native owner.
+    same :: jet_rt_handle_eq_dyn(tree, cloned)
+    jet_rt_handle_drop_dyn(cloned)
+    jet_rt_handle_drop_dyn(tree)
+    same
+}
+#Export(c) fn jet_rt_dyn_native_fixture() -> I64 {
+    schema :: compiler_dyn_fixture_schema()
+    slots :: jet_rt_alloc(I64{16}, I64{8})
+    if (jet_std_json_parse(rt_static_text("{{\"s\":\"é\",\"n\":1.500e+2,\"a\":[true,null,{{\"x\":-0}}]}}"), slots, slots + I64{8}) != I64{1}) -> return I64{1}
+    tree :: data_tree_word(slots)
+    jet_rt_free(slots, I64{16}, I64{8})
+    if !compiler_dyn_fixture_roundtrip(schema, tree) -> return I64{2}
+    exact :: jet_int_owned_from_i64(I64{-9223372036854775808})
+    int_tree :: jet_rt_record_new_dyn_int(exact)
+    jet_rt_int_drop(exact)
+    if !compiler_dyn_fixture_roundtrip(schema, int_tree) -> return I64{3}
+    if !compiler_dyn_fixture_roundtrip(schema, jet_rt_record_new_dyn_float(Float{-0.0})) -> return I64{4}
+    bytes :: data_sequence_new(I64{3}, RT_HOST_U8_STRIDE)
+    data :: data_tree_word(bytes + DATA_SEQUENCE_DATA)
+    host_u8_put(data, I64{0}, I64{0})
+    host_u8_put(data, I64{1}, I64{128})
+    host_u8_put(data, I64{2}, I64{255})
+    data_tree_store(bytes + DATA_SEQUENCE_LENGTH, I64{3})
+    if !compiler_dyn_fixture_roundtrip(schema, jet_rt_record_new_dyn_bytes(bytes)) -> return I64{5}
+    jet_rt_free(schema, I64{656}, I64{8})
+    I64{0}
+}
+// Separate trap case: the process/session must report registered E3001 and
+// this exact message; it must never return a reinterpreted ZonedDateTime.
+#Export(c) fn jet_rt_dyn_native_datetime_trap_fixture() {
+    compiler_dyn_datetime_unbridged()
+}

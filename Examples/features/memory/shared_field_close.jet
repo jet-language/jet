@@ -1,0 +1,32 @@
+package {
+    name: "memory_shared_field_close"
+    version: "0.1.0"
+    authority: { allow: [IO, Mem.Alloc, Mem.Rc, Time.Wait] }
+}
+// A field read through a `Shared<T>` handle reads the value the cell holds,
+// and the cell runs the value's user Close exactly once, when its last
+// handle goes away at the end of the scope (#4883).
+struct Res {
+    id: Int
+    name: String
+}
+
+impl Res.Close {
+    fn close(^self) { print("close shared {self.id} {self.name}") }
+}
+
+fn label(state: Shared<Res>) -> String {
+    "{state.name}#{state.id}"
+}
+
+fn scoped() {
+    state :: shared Res{id: 7, name: "seven"}
+    print("made {state.id}")
+    print("label {label(state)}")
+    print("leaving scope")
+}
+
+fn run() {
+    scoped()
+    print("after scope")
+}

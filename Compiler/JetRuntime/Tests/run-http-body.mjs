@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // ABI-only L9 proof: actual Jet body kernels from an explicit Jet-only runtime
 // object/archive (KEY/jet_runtime_jet.o, not startup-bearing jet_runtime.pack.o).
-// The delivered-only rail follows check-stop-points.c. This does not prove Core
+// The delivered-only rail is scripted in check-http-body.c. This does not prove Core
 // head/transport integration; that belongs to the cutover.
 import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";

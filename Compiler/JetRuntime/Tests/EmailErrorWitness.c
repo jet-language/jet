@@ -7,7 +7,9 @@
 #include <stdio.h>
 #include <string.h>
 typedef struct { const char *data; int64_t len, capacity; } Text;
-typedef struct { int64_t tag; Text *operation; Text **server; int64_t *code; Text *reason; } Error;
+// code is an inline Int? word: CODE_NONE (2^62) when absent, else its Int.
+typedef struct { int64_t tag; Text *operation; Text **server; int64_t code; Text *reason; } Error;
+#define CODE_NONE (INT64_C(1) << 62)
 _Static_assert(sizeof(Error) == 40 && offsetof(Error, operation) == 8 &&
                offsetof(Error, server) == 16 && offsetof(Error, code) == 24 &&
                offsetof(Error, reason) == 32, "canonical native EmailError enum");
@@ -46,7 +48,6 @@ static void track_text(const Text *text) {
 static void watch(const Error *value) {
     track(value, 40, 8); track_text(value->operation);
     if (value->server) { track(value->server, 8, 8); track_text(*value->server); }
-    if (value->code) track(value->code, 8, 8);
     track_text(value->reason);
 }
 static void done(void) {
@@ -58,8 +59,7 @@ static Error *literal(int64_t tag, const Text *operation, const Text *server,
     Error *value = jet_rt_alloc(40, 8); value->tag = tag;
     value->operation = jet_rt_string_clone(operation); value->server = NULL;
     if (server) { value->server = jet_rt_alloc(8, 8); *value->server = jet_rt_string_clone(server); }
-    value->code = NULL;
-    if (has_code) { value->code = jet_rt_alloc(8, 8); *value->code = jet_rt_int_clone(code); }
+    value->code = has_code ? jet_rt_int_clone(code) : CODE_NONE;
     value->reason = jet_rt_string_clone(reason); return value;
 }
 static void text(const Text *value, const Text *expected) {
@@ -81,10 +81,10 @@ static void different_fields(Error *a, Error *b, int64_t zero, int64_t one) {
         assert(!jet_rt_handle_eq_error(a, b)); jet_rt_string_drop(*saved_server);
         *saved_server = saved_payload;
     }
-    int64_t *saved_code = b->code; int64_t altered = one;
-    if (saved_code) { b->code = NULL; assert(!jet_rt_handle_eq_error(a, b)); b->code = saved_code; }
-    if (saved_code && jet_int_compare(*saved_code, one) == 0) altered = zero;
-    b->code = &altered; assert(!jet_rt_handle_eq_error(a, b)); b->code = saved_code;
+    int64_t saved_code = b->code, altered = one;
+    if (saved_code != CODE_NONE) { b->code = CODE_NONE; assert(!jet_rt_handle_eq_error(a, b)); b->code = saved_code; }
+    if (saved_code != CODE_NONE && jet_int_compare(saved_code, one) == 0) altered = zero;
+    b->code = altered; assert(!jet_rt_handle_eq_error(a, b)); b->code = saved_code;
     saved_text = b->reason; b->reason = jet_rt_string_clone(&changed);
     assert(!jet_rt_handle_eq_error(a, b)); jet_rt_string_drop(b->reason); b->reason = saved_text;
     assert(jet_rt_handle_eq_error(a, b));
@@ -114,13 +114,14 @@ int main(int argc, char **argv) {
         assert(a != b && b->tag == tag && jet_rt_handle_eq_error(a, b));
         assert(a->operation != b->operation && a->reason != b->reason);
         if (srv) assert(a->server != b->server && *a->server != *b->server);
-        if (mode & 2) assert(a->code != b->code && jet_int_compare(*b->code, code) == 0);
+        if (mode & 2) assert(b->code != CODE_NONE && jet_int_compare(b->code, code) == 0);
+        else assert(b->code == CODE_NONE);
         b->tag = (tag + 1) % 11; assert(!jet_rt_handle_eq_error(a, b)); b->tag = tag;
         different_fields(a, b, zero, one);
         watch(a); jet_rt_handle_drop_error(a); done();
         text(b->operation, &raw); text(b->reason, &reason);
         if (srv) text(*b->server, srv);
-        if (mode & 2) assert(jet_int_compare(*b->code, code) == 0);
+        if (mode & 2) assert(jet_int_compare(b->code, code) == 0);
         watch(b); jet_rt_handle_drop_error(b); done();
     }
     // Identical arbitrary-precision codes in distinct real Int allocations compare by value.

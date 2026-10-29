@@ -1,9 +1,22 @@
 // Source/Compiler.rs checked_value + status_ct_value. A check is a source query,
 // not check_file: its filename is metadata and imports use the eval source root.
 use core.files as cli_files
-use jet_foundation.[TComptimeValue, TComptimeKey, TComptimeKeyField, TComptimeField, Diagnostic]
-use jet_driver.[JetDriverVerbOutput, JetDriverCompileMode, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot, JetDriverCompilerCheckInput, jet_driver_compiler_check, JET_DRIVER_EXIT_OK]
-use jet_eval.[JetCompilerServicesSourceInput, JetCompilerServicesSourcePreparation, jet_eval_compiler_services_parse]
+use jet_foundation.[
+    TComptimeValue,
+    TComptimeKey,
+    TComptimeField,
+    ast_comptime_memo_storage_name,
+]
+use jet_driver.[
+    JetDriverVerbOutput, JetDriverCompileMode, JetDriverAuthorizedSourceFile,
+    JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot, JetDriverCompilerCheckInput,
+    jet_driver_compiler_check, JET_DRIVER_EXIT_OK, jet_driver_inline_package,
+    jet_driver_mask_inline_package,
+]
+use jet_eval.[
+    JetCompilerServicesSourceInput, JetCompilerServicesSourcePreparation,
+    jet_eval_compiler_services_parse, jet_eval_format_char_text,
+]
 
 fn jet_cli_compiler_key_value(key: TComptimeKey) -> TComptimeValue Never! {
     if key == {
@@ -62,12 +75,12 @@ fn jet_cli_compiler_checked_value(value: TComptimeValue) -> JetCLIStatusValue Ne
             .Clean(_) -> JetCLIStatusValue.Null
             .Told(inner) -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("err", jet_cli_compiler_checked_value(inner))})
         }
-        .Unit | .Closure(_) -> JetCLIStatusValue.Null
+        .Unit -> JetCLIStatusValue.Null
     }
 }
 
 fn jet_cli_inspect_compiler_check(file: String, source: String) -> JetDriverVerbOutput Never! {
-    core_sources :: if jet_cli_core_sources() == {
+    core_sources :: if jet_cli_core_sources(false) == {
         .Loaded(sources) -> sources
         .Missing(what, fix) -> {
             return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", what, jet_cli_why("E2105"), fix, false), exit_code: 1}

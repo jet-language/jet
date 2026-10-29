@@ -1,0 +1,16 @@
+# tests/dev_parts/routine.rs::multi_head_payload_range_checks_each_slot_across_runtime_tiers at tests/dev_parts/routine.rs:5241; hand-port (the forced-interpreter tier is carried by `jet run`; the Jet CLI has no interpreter flag)
+fixture: multi_head_payload_range_checks_each_slot_across_runtime_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step dev: jet run multi_head_payload_range.jet
+exit: 0
+stdout: = multi_head_payload_range_checks_each_slot_across_runtime_tiers.1.out
+stderr: empty
+step: jet build multi_head_payload_range.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = multi_head_payload_range_checks_each_slot_across_runtime_tiers.1.out
+stderr: empty

@@ -3,6 +3,11 @@
 // helpers). Every store write goes through a temporary file, an fsync, a
 // rename, and a directory sync; every read verifies that the file it opened is
 // still the file at the path.
+use jet_pkg_model.[pkg_bytes_starts_with, pkg_bytes_text]
+use core.files as files
+use core.sys as sys
+use core.crypto.random as random
+use core.process as process
 
 // Why an action or artifact envelope was refused (the Rust `String` error).
 #Error
@@ -190,15 +195,27 @@ fn store_artifact_same_file(left: files.Stat, right: files.Stat) -> Bool Never! 
 
 // Replace `path` atomically: a new temporary sibling, written and synced,
 // renamed over the target, then the directory synced. The temporary file is
-// removed when any step fails.
+// removed when any step fails (Rust lib.rs:2101 `atomic_write`).
 fn store_artifact_atomic_write(path: String, bytes: [U8]) ArtifactStoreError! -[FS, Env, Rand]> {
+    store_artifact_replace_file(path, bytes, true)
+}
+
+// `store_artifact_atomic_write` without the disk syncs: readers still see the
+// old file or the whole new one, but a crash may lose the new one (Rust
+// lib.rs:2107 `replace_unsynced`).
+fn store_artifact_replace_unsynced(path: String, bytes: [U8]) ArtifactStoreError! -[FS, Env, Rand]> {
+    store_artifact_replace_file(path, bytes, false)
+}
+
+// Rust lib.rs:2111 `replace_file`.
+fn store_artifact_replace_file(path: String, bytes: [U8], durable: Bool) ArtifactStoreError! -[FS, Env, Rand]> {
     parent :: files.dirname(path)
     file_name :: files.basename(path)
     if path == "" || path == "/" -> return Err(ArtifactStoreError.Config("store path has no parent: {path}"))
     if file_name == "" -> return Err(ArtifactStoreError.InvalidKey(path))
     store_artifact_ensure_dir(parent)
     temporary :: files.join(parent, ".{file_name}.tmp-{sys.pid()}-{store_artifact_unique_token()}")
-    if store_artifact_replace_with(temporary, path, parent, bytes) == {
+    if store_artifact_replace_with(temporary, path, parent, bytes, durable) == {
         .Ok(_) -> {}
         .Err(error) -> {
             files.remove(temporary).drop("the failed write is reported; the temporary file may already be gone")
@@ -208,13 +225,13 @@ fn store_artifact_atomic_write(path: String, bytes: [U8]) ArtifactStoreError! -[
 }
 
 // #3593: exclusive create Refuse and FileWriter.write_all/fsync are provider gates.
-fn store_artifact_replace_with(temporary: String, path: String, parent: String, bytes: [U8]) ArtifactStoreError! -[FS]> {
+fn store_artifact_replace_with(temporary: String, path: String, parent: String, bytes: [U8], durable: Bool) ArtifactStoreError! -[FS]> {
     writer :: files.create(temporary, if_exists: .Refuse)
     writer.write_all(bytes)
-    writer.fsync()
+    if durable -> writer.fsync()
     close(^writer)
     files.rename(temporary, path)
-    store_artifact_sync_dir(parent)
+    if durable -> store_artifact_sync_dir(parent)
 }
 
 fn store_artifact_set_executable(path: String, executable: Bool) ArtifactStoreError! -[FS]> {

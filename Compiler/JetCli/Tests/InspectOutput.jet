@@ -1,4 +1,12 @@
 // Production sema Output selection and CLI report, not CLI text resolution.
+use jet_driver.[
+    JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, JetDriverAuthorizedSourceFile,
+    JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode,
+    JetDriverCompileRequest, jet_driver_output_query,
+]
+use jet_cli.[jet_cli_driver_request, jet_cli_output_host, jet_cli_output_report]
+use jet_sema.[SchemaSnapshot]
+
 fn inspect_output_require(ok: Bool, message: String) Never! {
     if !ok -> panic("InspectOutput: {message}")
 }
@@ -9,7 +17,7 @@ fn inspect_output_request(source: String) -> JetDriverCompileRequest {
     request.schema_snapshots = Val([String:SchemaSnapshot]{})
     request
 }
-fn run() {
+#Test("inspect_output") {
     source :: "APP :: Output.Executable{{name: \"demo\", entry: start}}\nfn start() Never! {{}}"
     request :: inspect_output_request(source)
     query :: jet_driver_output_query(^request, None)

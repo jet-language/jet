@@ -25,7 +25,7 @@ fn rational(numerator: Int, denominator: Int) -> Rational? {
 
 impl Rational.Literal.Int {
     // D-FOUND-LITERAL1=A: context can construct an exact Rational directly.
-    prep fn from_literal(value: Int) -> Rational { Rational{numerator: value, denominator: 1} }
+    comptime fn from_literal(value: Int) -> Rational { Rational{numerator: value, denominator: 1} }
 }
 
 impl Rational.Add {
@@ -147,7 +147,7 @@ struct ScaledDecimal {
 impl ScaledDecimal.Literal.Float {
     // The compiler passes the source digits as text, preserving trailing zeroes
     // and avoiding an approximate Float round trip.
-    prep fn from_literal(digits: String) -> ScaledDecimal {
+    comptime fn from_literal(digits: String) -> ScaledDecimal {
         scientific :: if digits.contains("e") -> digits.split("e").to_list() else -> digits.split("E").to_list()
         mantissa :: scientific[0]
         exponent :: if scientific.len() > 1 -> Int.parse(scientific[1]) ?? 0 else -> 0
@@ -326,7 +326,7 @@ struct Money {
 }
 
 impl Money.Literal.Int {
-    prep fn from_literal(value: Int) -> Money { Money{cents: value} }
+    comptime fn from_literal(value: Int) -> Money { Money{cents: value} }
 }
 
 impl Money.Add {

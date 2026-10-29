@@ -218,12 +218,10 @@ uncovered() {
 
 JET="${JET:-}"
 [ -n "$JET" ] && [ -x "$JET" ] || uncovered "JET must name an executable jet binary"
-TESTKIT="$ROOT/Tools/testkit/run.mjs"
-[ -f "$TESTKIT" ] || uncovered "native testkit launcher Tools/testkit/run.mjs is absent; agent_workloads cases cannot run"
-results="$run_dir/results"
 set +e
-node "$TESTKIT" cases --jet "$JET" --filter agent_workloads --scratch "$SCRATCH_ROOT" --results "$results"
+JET="$JET" TESTKIT_ARGS="--filter agent_workloads" JET_TEST_SCRATCH_DIR="$SCRATCH_ROOT" JET_CI_EVIDENCE_DIR="$run_dir" \
+  "$JET" test "$ROOT/Tools/testkit" "suite cases" --capture=all --color=never
 run_exit=$?
 set -e
-[ "$run_exit" -eq 0 ] || uncovered "testkit cases agent_workloads exited $run_exit"
+[ "$run_exit" -eq 0 ] || uncovered "jet test Tools/testkit (suite cases, agent_workloads) exited $run_exit"
 uncovered "testkit results have no mapping to the per-task agent workload report; $REPORT preserved"

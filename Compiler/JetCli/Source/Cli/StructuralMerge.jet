@@ -3,8 +3,8 @@ use core.files as cli_files
 use core.process as cli_process
 use core.text as cli_struct_text
 use jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
-use jet_foundation.[Diagnostic, mir_sha256_hex]
-use jet_parser.jet_format_source
+use jet_foundation.[Diagnostic, sha256_hex]
+use jet_parser.[jet_format_source]
 
 struct JetCLIStructUnit {
     fact: JetCLISemDefinitionFact
@@ -74,7 +74,7 @@ fn jet_cli_struct_index_error(context: String, diagnostics: [Diagnostic]) -> Jet
 
 fn jet_cli_struct_load(path: String) -> JetCLIStructLoaded {
     source :: cli_files.read(path) ?? return JetCLIStructLoaded.Failed{output: jet_cli_struct_fail("could not read `{path}`: {jet_cli_io_error_text(err)}", "pass a readable Jet source file")}
-    if jet_cli_compile_file(path, false, false, None, JetDriverCompileMode.Doc) == {
+    if jet_cli_compile_file(path, false, None, JetDriverCompileMode.Doc) == {
         .Refused(refusal) -> return JetCLIStructLoaded.Failed{output: refusal}
         .Compiled(result, _) -> {
             if jet_cli_errors(result.diagnostics).len() > 0 {
@@ -99,7 +99,7 @@ fn jet_cli_struct_load(path: String) -> JetCLIStructLoaded {
                 units[row].leading = if cursor <= units[row].fact.span.start -> jet_cli_doc_text(source.bytes(), cursor, units[row].fact.span.start) else -> ""
                 cursor = units[row].fact.span.end
             }
-            hash :: mir_sha256_hex(source)
+            hash :: sha256_hex(source)
             return JetCLIStructLoaded.Document{document: JetCLIStructDocument{path: absolute, units: units, suffix: jet_cli_doc_text(source.bytes(), cursor, source.bytes().len()), source_hash: hash, operations: jet_cli_sem_ops_for_file(path, hash)}}
         }
     }
@@ -234,7 +234,7 @@ fn jet_cli_struct_merge_text(kind: String, stable: String, identity: String, bas
     // copy: `ours` stays with the caller (`ours` is a read parameter: no move out of it, E0201) and
     // the new value owns its own.
     if theirs == base -> return ours.copy()
-    &conflicts.push(JetCLIStructConflict{kind: kind, stable_id: stable, identity: identity, ours: "sha256:{mir_sha256_hex(ours)}", theirs: "sha256:{mir_sha256_hex(theirs)}"})
+    &conflicts.push(JetCLIStructConflict{kind: kind, stable_id: stable, identity: identity, ours: "sha256:{sha256_hex(ours)}", theirs: "sha256:{sha256_hex(theirs)}"})
     // copy: `base` stays with the caller (`base` is a read parameter: no move out of it, E0201) and
     // the returned value owns its own.
     base.copy()
@@ -492,7 +492,7 @@ fn jet_cli_structural(argv: [String], command: String, json: Bool) -> JetDriverV
         return jet_cli_struct_fail("structural merge produced source that does not parse", "resolve edits manually; no output was written")
     }
     output :: jet_cli_report_path(jet_cli_report_cwd(), jet_cli_option_value(argv, "--out") ?? paths[1])
-    compiled :: jet_cli_compile_overlays(paths[1], output, [JetCLIOverlay]{JetCLIOverlay{path: output, source: formatted.text}}, false, false, None, JetDriverCompileMode.Doc, None)
+    compiled :: jet_cli_compile_overlays(paths[1], output, [JetCLIOverlay]{JetCLIOverlay{path: output, source: formatted.text}}, false, None, JetDriverCompileMode.Doc, None)
     if compiled == {
         .Refused(refusal) -> return ^refusal
         .Compiled(result, _) -> {

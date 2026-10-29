@@ -1,0 +1,54 @@
+// Core records: compiler-defined Core types (the general `Err`, `IOError`,
+// `IOContext`) that runtime routes carry as a handle to the runtime's own
+// value. The native value keeps its IR layout, so constructors, matches
+// and field reads stay native; a route boundary converts it member by member
+// through the runtime's record exports:
+//
+//   jet_rt_record_tag_<R>(h) -> variant index          payload enum
+//   jet_rt_record_get_<R>_<field>(h) -> carrier        struct field
+//   jet_rt_record_get_<R>_<Variant>(h) -> carrier      Single payload
+//   jet_rt_record_new_<R>(fields...) -> h              struct, schema order
+//   jet_rt_record_new_<R>_<Variant>(payload) -> h      enum variant
+//
+// <R> is the runtime type of the type's handle row (RuntimeRoutes.jet). A
+// getter borrows `h` and returns an owned carrier; an Option getter returns
+// its tag and writes the payload through one out pointer. A constructor
+// borrows String handles and Option boxes of a String or Int (null is None;
+// the payload is the box's first word) and takes nested record handles. A
+// fieldless Core enum inside a record crosses as its variant index. The rows
+// below have hand exports in CAbi.rs; every other record's schema is a
+// RuntimeRoutes.jet IR_GENERATED_RECORDS row.
+
+// The shape the runtime's exports were written for. A Core definition of the
+// same name with any other shape is not a record, so a changed Core type is
+// reported at its route instead of being marshaled with stale offsets.
+struct IRRecordSchema {
+    jet_name: String
+    // An enum's variant names in the runtime's order ("" for a struct).
+    variants: String
+    // A struct's stored field names in constructor order ("" for an enum).
+    fields: String
+}
+
+IR_RECORD_SCHEMAS :: comptime { [IRRecordSchema]{
+    {jet_name: "Err", variants: "", fields: "message,code,cause"},
+    {jet_name: "IOContext", variants: "", fields: "operation,resource,os_code,cause"},
+    {jet_name: "IOError", variants: "InvalidInput,NotFound,PermissionDenied,TimedOut,Cancelled,Closed,Protocol,Other,ResourceLimit,AlreadyExists,Unsupported", fields: ""},
+    {jet_name: "IOOperation", variants: "Read,Write,Flush,Connect,Accept,Close,Resolve,Codec", fields: ""},
+    {jet_name: "ProcessResourceLimit", variants: "WallTime,CpuTime,Memory,OpenFiles,Output", fields: ""},
+    {jet_name: "TaskFailure", variants: "Cancelled,DeadlineBlown,Panicked", fields: ""},
+} }
+
+// A schema entry is `name` or, for a generated row, `name=kind`: the carrier
+// the runtime's export reads or writes for that member.
+fn ir_record_entry_name(entry: String) -> String Never! {
+    entry.split("=").to_list()[0]
+}
+
+// The runtime ordinal of the schema variant `name` (its schema position).
+fn ir_record_variant_position(schema: IRRecordSchema, name: String) -> Int? Never! {
+    loop (position, entry) in schema.variants.split(",").to_list() {
+        if ir_record_entry_name(entry) == name -> return Val(position)
+    }
+    None
+}

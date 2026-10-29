@@ -1,0 +1,37 @@
+use core.http as http
+use core.http.server as server
+fn asset(path: String) -> HTTPResponse HTTPError! {
+    return Ok(server.response(200, "{path}"))
+}
+fn literal(req: HTTPRequest) -> HTTPResponse HTTPError! {
+    return Ok(server.response(200, "literal"))
+}
+fn catch(rest: String) -> HTTPResponse HTTPError! {
+    return Ok(server.response(200, "catch"))
+}
+fn param_catch(id: String, rest: String) -> HTTPResponse HTTPError! {
+    return Ok(server.response(200, "param-catch"))
+}
+fn param_first(first: String) -> HTTPResponse HTTPError! {
+    return Ok(server.response(200, "param-first"))
+}
+fn static_first(last: String) -> HTTPResponse HTTPError! {
+    return Ok(server.response(200, "static-first"))
+}
+fn run() {
+    router :: http.router()
+    router.get("/assets/*path", asset)
+    router.get("/literal/%3Aadmin/%2Astar", literal)
+    router.get("/a/*rest", catch)
+    router.get("/a/:id/*rest", param_catch)
+    router.get("/tie/:first/static", param_first)
+    router.get("/tie/static/:last", static_first)
+    first :: http.dispatch(router, http.parse("GET /assets/css/site.css HTTP/1.1\nHost: localhost")) ?? panic("dispatch")
+    second :: http.dispatch(router, http.parse("GET /literal/%3Aadmin/%2Astar HTTP/1.1\nHost: localhost")) ?? panic("dispatch")
+    third :: http.dispatch(router, http.parse("GET /a/x/y HTTP/1.1\nHost: localhost")) ?? panic("dispatch")
+    fourth :: http.dispatch(router, http.parse("GET /tie/static/static HTTP/1.1\nHost: localhost")) ?? panic("dispatch")
+    print(first.body().text(1024) ?? panic("body"))
+    print(second.body().text(1024) ?? panic("body"))
+    print(third.body().text(1024) ?? panic("body"))
+    print(fourth.body().text(1024) ?? panic("body"))
+}

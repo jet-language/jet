@@ -7,19 +7,19 @@
 // folds a long history into one snapshot. Every public operation holds the
 // Hangar lock for its whole read-modify-write.
 
-STORE_LIFECYCLE_DB_DIR :: prep { "lifecycle-db" }
-STORE_LIFECYCLE_JOURNAL_DIR :: prep { "journal" }
-STORE_LIFECYCLE_PARTIAL_SUFFIX :: prep { ".partial" }
-STORE_LIFECYCLE_TXN_SUFFIX :: prep { ".txn" }
-STORE_LIFECYCLE_SNAPSHOT_FILE :: prep { "snapshot" }
-STORE_LIFECYCLE_SNAPSHOT_PARTIAL :: prep { "snapshot.partial" }
-STORE_LIFECYCLE_MAX_TRANSACTION_BYTES :: prep { 2097152 }
-STORE_LIFECYCLE_MAX_SNAPSHOT_BYTES :: prep { 16777216 }
-STORE_LIFECYCLE_MAX_RECOVERY_BYTES :: prep { 33554432 }
-STORE_LIFECYCLE_MAX_JOURNAL_MEMBERS :: prep { 512 }
-STORE_LIFECYCLE_COMPACT_AFTER_TRANSACTIONS :: prep { 128 }
+STORE_LIFECYCLE_DB_DIR :: "lifecycle-db"
+STORE_LIFECYCLE_JOURNAL_DIR :: "journal"
+STORE_LIFECYCLE_PARTIAL_SUFFIX :: ".partial"
+STORE_LIFECYCLE_TXN_SUFFIX :: ".txn"
+STORE_LIFECYCLE_SNAPSHOT_FILE :: "snapshot"
+STORE_LIFECYCLE_SNAPSHOT_PARTIAL :: "snapshot.partial"
+STORE_LIFECYCLE_MAX_TRANSACTION_BYTES :: 2097152
+STORE_LIFECYCLE_MAX_SNAPSHOT_BYTES :: 16777216
+STORE_LIFECYCLE_MAX_RECOVERY_BYTES :: 33554432
+STORE_LIFECYCLE_MAX_JOURNAL_MEMBERS :: 512
+STORE_LIFECYCLE_COMPACT_AFTER_TRANSACTIONS :: 128
 // The longest `u64` sequence spelling; snapshot admission sizes with it.
-STORE_LIFECYCLE_MAX_SEQUENCE_TEXT :: prep { "18446744073709551615" }
+STORE_LIFECYCLE_MAX_SEQUENCE_TEXT :: "18446744073709551615"
 
 // The durable publication steps a write passes, for fault injection.
 enum LifecycleWritePhase {
@@ -119,14 +119,14 @@ fn store_lifecycle_apply_or_compact(roots: HangarRoots, state: &[String: Lifecyc
         store_lifecycle_compact_if_needed(roots, state)
         return
     }
-    store_lifecycle_apply_entry(state, entry)
+    store_lifecycle_apply_entry(&state, entry)
     store_lifecycle_persist_entry(roots, entry, state, control)
 }
 
 // Apply and persist `entry` unless it is already durable.
 fn store_lifecycle_apply_if_new(roots: HangarRoots, state: &[String: LifecycleRoot], entry: LifecycleJournalEntry) StoreError! -[FS, Env]> {
     if store_lifecycle_entry_already_applied(state, entry) -> return
-    store_lifecycle_apply_entry(state, entry)
+    store_lifecycle_apply_entry(&state, entry)
     store_lifecycle_persist_entry(roots, entry, state, LifecycleWriteControl.none())
 }
 
@@ -452,7 +452,7 @@ fn store_lifecycle_require_known_target(target: String, known: [String]) StoreEr
 // Rust `apply_entry`: one state transition with its invariants.
 fn store_lifecycle_apply_entry(state: &[String: LifecycleRoot], entry: LifecycleJournalEntry) StoreError! {
     if entry == {
-        .Prepare(identity, proposed, protected, metadata, revision, at) -> store_lifecycle_apply_prepare(state, identity, proposed, protected, metadata, revision, at)
+        .Prepare(identity, proposed, protected, metadata, revision, at) -> store_lifecycle_apply_prepare(&state, identity, proposed, protected, metadata, revision, at)
         .Commit(id, incarnation, witness, at) -> {
             key :: id.as_str()
             if !state.has_key(key) -> return Err(StoreError.InvalidData("commit references an unknown lifecycle root"))

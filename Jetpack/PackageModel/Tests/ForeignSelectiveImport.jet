@@ -1,0 +1,37 @@
+// Claims ported from tests/lib_use.rs: every active namespace binder root takes the ordinary
+// selective-import and single-alias forms, and the import names its foreign library and local alias.
+use jet_pkg_model.[BinderStatus, BinderSurface, ForeignLanguage, pkg_foreign_binders]
+use jet_parser.[parse_source]
+
+fn pkg_test_selective_import(language: ForeignLanguage) {
+    root :: language.root()
+    list :: parse_source("use {root}.[lib1 as first, lib2]\nfn run() {{ }}\n".bytes())
+    assert(list.diagnostics.is_empty(), "{root}: {list.diagnostics:Debug}")
+    list.program.imports[0].kind == .Unqualified(module_alias, _, items, _, _) ?? panic("{root} list took a foreign-only parser branch")
+    assert_eq(module_alias, root)
+    assert(ForeignLanguage.from_root(module_alias) == Val((language)), root)
+    assert_eq(items.len(), 2)
+    assert_eq(items[0].original, "lib1")
+    assert(items[0].alias == Val("first"), root)
+    assert_eq(items[1].original, "lib2")
+    assert(items[1].alias == None, root)
+
+    single :: parse_source("use {root}.single as alias\nfn run() {{ }}\n".bytes())
+    assert(single.diagnostics.is_empty(), "{root}: {single.diagnostics:Debug}")
+    import :: single.program.imports[0]
+    import.kind == .Module(path, _) ?? panic("{root} single import changed parser shape")
+    assert_eq(path, "{root}.single")
+    assert_eq(import.alias, "alias")
+}
+
+// Rust: tests/lib_use.rs:34
+#Test("ffi selective import aliases resolve") {
+    checked := 0
+    loop binder in pkg_foreign_binders() {
+        if binder.status == BinderStatus.Active && binder.surface == BinderSurface.Namespace {
+            pkg_test_selective_import(binder.language)
+            checked += 1
+        }
+    }
+    assert(checked > 0, "no active namespace binder")
+}

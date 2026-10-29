@@ -1,0 +1,115 @@
+package {
+    name: "files_store_primitives"
+    authority: { allow: [FS, FS.Read, FS.Write, IO, Mem.Alloc] }
+}
+
+// Store-grade core.files primitives (#3593): exclusive create with a mode,
+// no-follow opens, file identity, held directories, refusing and swapping
+// renames, and extended attributes. Each failure prints its IOError kind.
+
+use core.files as files
+
+fn kind(error: IOError) -> String {
+    if error == {
+        .AlreadyExists(_) -> "AlreadyExists"
+        .Unsupported(_) -> "Unsupported"
+        .InvalidInput(_) -> "InvalidInput"
+        .NotFound(_) -> "NotFound"
+        else -> "Other"
+    }
+}
+
+fn run() {
+    scratch :: files.temp_dir("store-primitives")
+    root :: scratch.path
+    partial :: files.join(root, "pkg.partial.1")
+
+    // D-CORE-FILEOPEN1 + D-CORE-FILEERROR1: exclusive create, then a refusal.
+    out :: files.create(partial, if_exists: .Refuse, mode: Val(0o600))
+    out.write_line("payload")
+    out.flush()
+    if files.create(partial, if_exists: .Refuse) == {
+        .Ok(_) -> print("second create: replaced")
+        .Err(error) -> print("second create: {kind(error)}")
+    }
+
+    // D-CORE-FILEOPEN1: a final link is refused when asked.
+    files.symlink("pkg.partial.1", files.join(root, "alias"))
+    if files.open(files.join(root, "alias"), links: .Refuse) == {
+        .Ok(_) -> print("open through link: followed")
+        .Err(error) -> print("open through link: {kind(error)}")
+    }
+
+    // D-CORE-FILESTAT1: mode, kind, identity, and link count.
+    info :: files.stat(partial)
+    print("mode {info.mode} kind {info.kind} links {info.links}")
+    files.hard_link(partial, files.join(root, "twin"))
+    twin :: files.stat(files.join(root, "twin"))
+    print("twin shares identity: {twin.id.inode == info.id.inode && twin.id.device == info.id.device}")
+    print("samefile: {files.samefile(partial, files.join(root, "twin"))}")
+    print("links after hard link: {twin.links}")
+    link_info :: files.stat(files.join(root, "alias"))
+    print("stat never follows: {link_info.is_symlink}")
+
+    // D-CORE-FILEDIR1 + D-CORE-HANDLEFD1: a held directory and its names.
+    store :: files.open_directory(root)
+    stage :: store.create_directory("stage", mode: Val(0o700))
+    sealed :: stage.create("payload", if_exists: .Refuse, mode: Val(0o444))
+    sealed.write_line("sealed")
+    sealed.flush()
+    stage.fsync()
+    if store.create_directory("stage") == {
+        .Ok(_) -> print("create_directory twice: created")
+        .Err(error) -> print("create_directory twice: {kind(error)}")
+    }
+    if store.open("../escape") == {
+        .Ok(_) -> print("open ..: opened")
+        .Err(error) -> print("open ..: {kind(error)}")
+    }
+    if store.open("alias") == {
+        .Ok(_) -> print("held open of a link: opened")
+        .Err(error) -> print("held open of a link: {kind(error)}")
+    }
+    reader := store.open("stage/payload")
+    line :: &reader.read_line()
+    print("held read: {line ?? "<end>"}")
+    print("read_link: {store.read_link("alias")}")
+    print("entry_stat link: {store.entry_stat("alias").is_symlink}")
+    loop entry in store.list() -> print("entry {entry.name} dir={entry.is_dir}")
+
+    // D-CORE-FILERENAME1: refuse, swap, and swap with a missing name.
+    store.rename("stage", "pkg", if_exists: .Refuse)
+    _other :: store.create_directory("other")
+    if store.rename("other", "pkg", if_exists: .Refuse) == {
+        .Ok(_) -> print("refusing rename: replaced")
+        .Err(error) -> print("refusing rename: {kind(error)}")
+    }
+    if store.rename("missing", "pkg", if_exists: .Swap) == {
+        .Ok(_) -> print("swap with missing: swapped")
+        .Err(error) -> print("swap with missing: {kind(error)}")
+    }
+    if store.rename("pkg", "other", if_exists: .Swap) == {
+        .Ok(_) -> print("swap: {store.entry_stat("other/payload").is_file}")
+        .Err(error) -> print("swap: {kind(error) == "Unsupported"}")
+    }
+    store.fsync()
+    if files.rename(partial, files.join(root, "twin"), if_exists: .Refuse) == {
+        .Ok(_) -> print("path rename refuse: replaced")
+        .Err(error) -> print("path rename refuse: {kind(error)}")
+    }
+    store.remove("alias")
+    print("alias removed: {!files.lexists(files.join(root, "alias"))}")
+
+    // D-CORE-FILEXATTR1: names are listed without following links; a file
+    // system without attributes reports none and refuses writes.
+    missing :: files.extended_attribute(partial, "user.missing")
+    print("absent attribute: {missing == None}")
+    if files.set_extended_attribute(partial, "user.origin", "jet".bytes()) == {
+        .Ok(_) -> {
+            stored :: files.extended_attribute(partial, "user.origin")
+            bytes :: stored ?? [U8]{}
+            print("attribute written: {bytes == "jet".bytes()}")
+        }
+        .Err(error) -> print("attribute written: {kind(error) == "Unsupported"}")
+    }
+}

@@ -60,7 +60,7 @@ fn publication_metadata_test_refusal(text: String, detail: String) Never! {
     if publication_parse_registry_package_metadata(text, "rolekit", "1.0.0") == {
         .Ok(_) -> panic("invalid metadata accepted")
         .Err(error) -> if error == {
-            .InvalidData(context) -> assert_eq(context.cause, Val(detail))
+            .InvalidInput(context) -> assert_eq(context.cause, Val(detail))
             else -> panic("wrong metadata error kind")
         }
     }
@@ -207,7 +207,7 @@ fn publication_metadata_test_root(label: String) -[FS, Env]> String Never! {
     if publication_read_registry_package_metadata(root, "rolekit", "1.0.0") == {
         .Ok(_) -> panic("oversized metadata accepted")
         .Err(error) -> if error == {
-            .InvalidData(context) -> assert_eq(context.cause, Val("registry.json exceeds its size limit"))
+            .InvalidInput(context) -> assert_eq(context.cause, Val("registry.json exceeds its size limit"))
             else -> panic("wrong bound error kind")
         }
     }
@@ -215,7 +215,7 @@ fn publication_metadata_test_root(label: String) -[FS, Env]> String Never! {
     if publication_read_registry_package_metadata(root, "rolekit", "1.0.0") == {
         .Ok(_) -> panic("invalid UTF8 accepted")
         .Err(error) -> if error == {
-            .InvalidData(context) -> assert_eq(context.cause, Val("stream did not contain valid UTF-8"))
+            .InvalidInput(context) -> assert_eq(context.cause, Val("stream did not contain valid UTF-8"))
             else -> panic("wrong UTF8 error kind")
         }
     }
@@ -228,7 +228,7 @@ fn publication_metadata_test_root(label: String) -[FS, Env]> String Never! {
     if publication_read_registry_package_metadata(root, "rolekit", "1.0.0") == {
         .Ok(_) -> panic("directory accepted")
         .Err(error) -> if error == {
-            .InvalidData(context) -> assert_eq(context.cause, Val("registry.json is not a regular file"))
+            .InvalidInput(context) -> assert_eq(context.cause, Val("registry.json is not a regular file"))
             else -> panic("wrong directory error kind")
         }
     }
@@ -265,7 +265,7 @@ fn publication_metadata_test_root(label: String) -[FS, Env]> String Never! {
     if publication_publish_artifact(repo, source, "cycle-kit", "1.0.0", "") == {
         .Ok(_) -> panic("cyclic default feature closure published")
         .Err(error) -> if error == {
-            .InvalidData(context) -> assert_eq(context.cause, Val("registry feature closure contains a cycle"))
+            .InvalidInput(context) -> assert_eq(context.cause, Val("registry feature closure contains a cycle"))
             else -> panic("wrong publish refusal")
         }
     }
@@ -283,7 +283,7 @@ fn publication_metadata_test_root(label: String) -[FS, Env]> String Never! {
     entry := publication_index_test_entry("corruptkit", "1.0.0", false)
     entry.content_hash = "sha256-not-the-tree"
     if publication_verify_artifact(repo, entry) == {
-        .Err(.InvalidData(context)) -> assert((context.cause ?? "").contains("failed its content hash"))
+        .Err(.InvalidInput(context)) -> assert((context.cause ?? "").contains("failed its content hash"))
         else -> panic("corrupt artifact accepted or wrong refusal")
     }
     files.remove_all(root) ?? panic("cleanup")
@@ -300,7 +300,7 @@ fn publication_metadata_test_root(label: String) -[FS, Env]> String Never! {
     expected :: publication_registry_artifact_hash(source) ?? panic("hash")
     files.write(files.join(source, "embedded.bin"), "tampered asset") ?? panic("tamper")
     if publication_publish_artifact(repo, source, "asset-kit", "1.0.0", expected) == {
-        .Err(.InvalidData(context)) -> assert((context.cause ?? "").contains("source hash changed"))
+        .Err(.InvalidInput(context)) -> assert((context.cause ?? "").contains("source hash changed"))
         else -> panic("changed auxiliary artifact accepted or wrong refusal")
     }
     assert(!files.exists(publication_artifact_path(repo, "asset-kit", "1.0.0") ?? panic("path")))
@@ -318,7 +318,7 @@ fn publication_metadata_test_root(label: String) -[FS, Env]> String Never! {
         entry := publication_index_test_entry("escape-kit", "1.0.0", false)
         entry.content_hash = "sha256-unchecked"
         if publication_verify_artifact(repo, entry) == {
-            .Err(.InvalidData(context)) -> assert((context.cause ?? "").contains("not a real directory"))
+            .Err(.InvalidInput(context)) -> assert((context.cause ?? "").contains("not a real directory"))
             else -> panic("artifact ancestor link accepted or wrong refusal")
         }
         assert(files.is_file(files.join(outside, "escape-kit/1.0.0/package.jet")))

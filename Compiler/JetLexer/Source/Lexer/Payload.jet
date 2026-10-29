@@ -7,13 +7,13 @@ use jet_foundation.[
     DiagnosticLabel,
     Name,
     Span,
-    TextEdit,
     diagnostic_from_registry,
     diagnostic_registry_row,
-    diagnostic_with_edit,
     name_empty,
+    name_index,
     name_intern,
     name_intern_bytes,
+    name_start,
 ]
 use core.text as unicode
 
@@ -32,6 +32,24 @@ fn intern_source(tables: &TokenTables, source: [U8], start: Int, end: Int) -> Na
     bounded_end :: if end > source.len() -> source.len() else -> end
     if start >= bounded_end -> return name_empty()
     name_intern_bytes(&tables.names, source, start, bounded_end)
+}
+
+// A keyword or punctuation kind: the scanner gives every token of the kind
+// the same bytes (literals, names, comments, fences and EOF excluded).
+fn fixed_spelling_kind(kind: Int) -> Bool Never! {
+    (kind >= K_TRUE && kind <= K_SHR) || (kind >= K_DOT && kind <= K_LBRACKET) || kind == K_BANG || kind == K_UNIFIED_ARROW || kind == K_EQ || (kind >= K_FN && kind <= K_MODULE) || (kind >= K_COLON && kind <= K_DOLLAR)
+}
+
+// `intern_source` of a token of `kind`: a fixed-spelling kind reuses the id
+// its first token interned (the same id the probe returns), checked against
+// the spelling's length.
+fn intern_token_source(tables: &TokenTables, kind: Int, source: [U8], start: Int, end: Int) -> Name Never! {
+    if !fixed_spelling_kind(kind) -> return intern_source(&tables, source, start, end)
+    cached :: tables.spellings[kind]
+    if cached > 0 && tables.names.ends[cached] - name_start(tables.names, cached) == end - start && end <= source.len() -> return Name{id: U32{cached}}
+    text :: intern_source(&tables, source, start, end)
+    tables.spellings[kind] = name_index(text)
+    text
 }
 
 fn literal_row(tables: &TokenTables, literal: TokenLiteral) -> Int Never! {
@@ -102,31 +120,40 @@ fn parse_integer_literal(text: String) -> Int? {
     clean :: strip_underscores(text)
     raw := clean.bytes()
     if raw.len() == 0 -> return None
+    // value * radix + digit <= I64 max (2^63 - 1) exactly when value < limit,
+    // or value == limit and digit <= rest, with limit = max /% radix and rest
+    // its remainder. Spelled out per radix: max itself is past the runtime's
+    // inline Int range, so computing them per literal costs a big Int
+    // division; every limit below is inline.
     radix := 10
+    limit := 922337203685477580
+    rest := 7
     i := 0
     if raw.len() > 1 && Int.from_u8(raw[0]) == 48 {
         marker :: Int.from_u8(raw[1])
         if marker == {
             120 | 88 -> {
                 radix = 16
+                limit = 576460752303423487
+                rest = 15
                 i = 2
             }
             111 | 79 -> {
                 radix = 8
+                limit = 1152921504606846975
+                rest = 7
                 i = 2
             }
             98 | 66 -> {
                 radix = 2
+                limit = 4611686018427387903
+                rest = 1
                 i = 2
             }
             else -> {}
         }
     }
     if i >= raw.len() -> return None
-    // value * radix + digit <= max exactly when value < limit, or value ==
-    // limit and digit <= rest: one exact division per literal, not per digit.
-    limit :: 9223372036854775807 /% radix
-    rest :: 9223372036854775807 - limit * radix
     value := 0
     loop i < raw.len() {
         digit :: digit_value(Int.from_u8(raw[i]))
@@ -147,6 +174,7 @@ fn parse_float_literal(text: String) -> Float? {
 fn escape_value(value: Int) -> Int Never! {
     if value == {
         110 -> 10
+        114 -> 13
         116 -> 9
         34 -> 34
         92 -> 92
@@ -181,7 +209,9 @@ fn string_head_modes(source: [U8], facts: [Int], index: Int) -> (raw_head: Bool,
     raw := before_open >= 0 && kind_at(facts, before_open) == K_DOT
     // A typed head is a name whose first character is an
     // ASCII capital, as Rust's lexer reads it; non-ASCII capitals do not count.
-    if before_open >= 0 && kind_at(facts, before_open) == K_IDENT {
+    // A function's return type before its body (`-> String {`, `-> a.B {`)
+    // is none.
+    if before_open >= 0 && kind_at(facts, before_open) == K_IDENT && !returned_type_at(facts, qualified_start(facts, before_open)) {
         first :: byte_at(source, facts[before_open * 4 + 1])
         if first >= 65 && first <= 90 -> raw = true
     }
@@ -191,7 +221,7 @@ fn string_head_modes(source: [U8], facts: [Int], index: Int) -> (raw_head: Bool,
         if {
             before_close >= 0 && kind_at(facts, before_close) == K_IDENT && fact_text(source, facts, before_close) == "U8" -> {
                 before_type :: previous_code_index(facts, before_close)
-                byte = before_type >= 0 && kind_at(facts, before_type) == K_LBRACKET
+                byte = before_type >= 0 && kind_at(facts, before_type) == K_LBRACKET && !returned_type_at(facts, before_type)
             }
             else -> {
                 if before_close >= 0 {
@@ -200,7 +230,7 @@ fn string_head_modes(source: [U8], facts: [Int], index: Int) -> (raw_head: Bool,
                         u8 :: previous_code_index(facts, hash)
                         if u8 >= 0 && kind_at(facts, u8) == K_IDENT && fact_text(source, facts, u8) == "U8" {
                             bracket :: previous_code_index(facts, u8)
-                            byte = bracket >= 0 && kind_at(facts, bracket) == K_LBRACKET
+                            byte = bracket >= 0 && kind_at(facts, bracket) == K_LBRACKET && !returned_type_at(facts, bracket)
                         }
                     }
                 }
@@ -208,6 +238,37 @@ fn string_head_modes(source: [U8], facts: [Int], index: Int) -> (raw_head: Bool,
         }
     }
     (byte_head: byte, raw_head: raw)
+}
+
+// Whether the type whose first token is at `first` is a function's return
+// type: `fn name(...) -> ` (or `fn name<...>(...) -> `, `fn Owner.name(...) -> `,
+// `fn(...) -> `) before it.
+fn returned_type_at(facts: [Int], first: Int) -> Bool Never! {
+    arrow :: previous_code_index(facts, first)
+    if arrow < 0 || kind_at(facts, arrow) != K_UNIFIED_ARROW -> return false
+    close :: previous_code_index(facts, arrow)
+    if close < 0 || kind_at(facts, close) != K_RPAREN -> return false
+    paren :: matching_open(facts, close, K_LPAREN, K_RPAREN)
+    if paren < 0 -> return false
+    cursor := previous_code_index(facts, paren)
+    if cursor >= 0 && kind_at(facts, cursor) == K_GT {
+        angle :: matching_open(facts, cursor, K_LT, K_GT)
+        cursor = if angle < 0 -> -1 else -> previous_code_index(facts, angle)
+    }
+    if cursor >= 0 && kind_at(facts, cursor) == K_IDENT -> cursor = previous_code_index(facts, qualified_start(facts, cursor))
+    cursor >= 0 && kind_at(facts, cursor) == K_FN
+}
+
+// The first name of the dotted path `a.b.c` ending at the name at `last`.
+fn qualified_start(facts: [Int], last: Int) -> Int Never! {
+    start := last
+    loop {
+        dot :: previous_code_index(facts, start)
+        name :: if dot >= 0 && kind_at(facts, dot) == K_DOT -> previous_code_index(facts, dot) else -> -1
+        if name < 0 || kind_at(facts, name) != K_IDENT -> break
+        start = name
+    }
+    start
 }
 
 fn group_has_ffi_marker(source: [U8], facts: [Int], hash_index: Int, limit: Int) -> Bool Never! {
@@ -348,31 +409,38 @@ fn shifted_diagnostic(diagnostic: &Diagnostic, offset: Int) Never! {
 
 // The tokens of `facts`, which cover `source[from..<to]`: the gaps between
 // facts are checked from `from` to `to` (the whole source for a one-range
-// lex; a range of a chunked lex ends between tokens).
-fn lex_payload_from_facts(source: [U8], facts: [Int], config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, from: Int, to: Int, tables: &TokenTables) -> LexedTokens {
+// lex; a range of a chunked lex ends between tokens). The terminator
+// `events` of the same facts apply in the same walk: each event's `;`
+// lands before its fact's token, and its diagnostics go to
+// `terminator_diagnostics`.
+fn lex_payload_from_facts(source: [U8], facts: [Int], events: [Int], config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, from: Int, to: Int, tables: &TokenTables, terminator_diagnostics: &[Diagnostic]) -> LexedTokens {
     tokens := [Token]{}
     diagnostics := [Diagnostic]{}
     cursor := from
     index := 0
+    event_index := 0
     fact_count :: facts.len() /% 4
     loop index < fact_count {
+        event_index = terminator_events_apply(facts, events, event_index, index, &tokens, &terminator_diagnostics)
         kind :: kind_at(facts, index)
         start :: facts[index * 4 + 1]
         end :: facts[index * 4 + 2]
         gap_diagnostic(source, facts, cursor, start, config_surface, allow_reserved_identifiers, depth, &tables, &diagnostics)
-        text :: intern_source(&tables, source, start, end)
+        text :: intern_token_source(&tables, kind, source, start, end)
         built :: payload_for(kind, source, facts, index, text, config_surface, allow_reserved_identifiers, depth, &tables, &diagnostics)
         if built.keep -> &tokens.push(Token{kind: kind, span: Span{start: start, end: end}, text: text, decoded: built.decoded, literal: built.literal})
         cursor = end
         index += 1
     }
     gap_diagnostic(source, facts, cursor, to, config_surface, allow_reserved_identifiers, depth, &tables, &diagnostics)
-    LexedTokens{tokens: tokens, diagnostics: diagnostics}
+    LexedTokens{tokens: ^tokens, diagnostics: ^diagnostics}
 }
 
+// An interpolation's nested source: payload only, no terminator pass.
 fn lex_payload_at_depth(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, tables: &TokenTables) -> LexedTokens {
     facts :: raw_token_facts(source, config_surface)
-    lex_payload_from_facts(source, facts, config_surface, allow_reserved_identifiers, depth, 0, source.len(), &tables)
+    unused := [Diagnostic]{}
+    lex_payload_from_facts(source, facts, [Int]{}, config_surface, allow_reserved_identifiers, depth, 0, source.len(), &tables, &unused)
 }
 
 fn lex_expression(source: [U8], start: Int, end: Int, config_surface: Bool, allow_reserved_identifiers: Bool, depth: Int, span: Span, tables: &TokenTables, diagnostics: &[Diagnostic]) -> [Token] {
@@ -586,7 +654,7 @@ fn decode_string_content(source: [U8], start: Int, end: Int, triple: Bool, inden
                 escaped < 0 -> {
                     escape_text :: bytes_text(source, cursor + 1, escape_end)
                     what := "`\\{escape_text}` isn't an escape Jet knows"
-                    why :: "inside quoted text, `\\` starts an escape: `\\n` (new line), `\\t` (tab), `\\\"` (quote), `\\\\` (backslash)"
+                    why :: "inside quoted text, `\\` starts an escape: `\\n` (new line), `\\r` (carriage return), `\\t` (tab), `\\\"` (quote), `\\\\` (backslash)"
                     add_diagnostic(&diagnostics, "E0001", cursor, escape_end, what, why, "write `\\\\` for a real backslash")
                 }
                 else -> {
@@ -781,7 +849,7 @@ fn decode_char(text: String, source_start: Int, diagnostics: &[Diagnostic]) -> S
     if escaped < 0 {
         escape_text :: bytes_text(raw, 2, escape_end)
         what := "`\\{escape_text}` isn't an escape Jet knows"
-        why :: "inside a character literal, `\\` starts an escape: `\\n`, `\\t`, `\\'`, `\\\\`"
+        why :: "inside a character literal, `\\` starts an escape: `\\n`, `\\r`, `\\t`, `\\'`, `\\\\`"
         add_diagnostic(&diagnostics, "E0001", source_start + 1, source_start + escape_end, what, why, "use a supported escape or a plain character")
     }
     if byte_at(raw, escape_end) != 39 {

@@ -1,0 +1,129 @@
+// The emission boundary: what a code generator hands the object writer
+// (Object.jet), its DWARF (Dwarf.jet) and the linkers. Compiled functions
+// carry their machine code, relocations and debug facts; the module carries
+// its read-only data objects, its debug files and types, and each function's
+// source facts.
+
+struct X64FunctionID { value: Int }
+
+struct X64DataID { value: Int }
+
+enum X64RelocTarget {
+    Function(id: X64FunctionID)
+    Runtime(symbol: String)
+    Data(id: X64DataID)
+}
+
+// A rel32 field at `at` (offset in the function's code) that must hold the
+// distance from the end of the field to the target.
+struct X64Reloc { at: Int, target: X64RelocTarget }
+
+struct X64CompiledFunction {
+    id: X64FunctionID
+    name: String
+    code: [U8]
+    relocs: [X64Reloc]
+}
+
+// Debug facts of one compiled function for Image/Dwarf.jet: a line row
+// where each run of code from one source line starts, the end of the
+// prologue, the call frame instructions of its FDE, and where each debug
+// variable lives over which code range.
+struct X64LineRow { at: Int, line: Int }
+
+// A register (hardware number), a frame slot at `offset` from rbp, or the
+// frame address rbp + `offset` itself (a StackSlot's address).
+enum X64DebugLocation {
+    Register(reg: Int)
+    Frame(offset: Int)
+    FrameAddress(offset: Int)
+}
+
+// X64FunctionSource.variables[variable] is at `location` for code offsets
+// start..<end.
+struct X64VariableRange { variable: Int, start: Int, end: Int, location: X64DebugLocation }
+
+struct X64FunctionDebug {
+    lines: [X64LineRow]
+    body: Int
+    cfi: [U8]
+    ranges: [X64VariableRange]
+}
+
+// The source types of the debug variables, described by their machine
+// layout.
+enum X64DebugEncoding { Signed Unsigned Float Bool Char }
+
+struct X64DebugMember { name: String, offset: Int, ty: Int }
+
+struct X64DebugEnumerator { name: String, value: Int }
+
+// Type references are rows of X64ModuleDebug.types; -1 is no type (an
+// untyped pointer). `Opaque` has a name and size but no known contents.
+enum X64DebugTypeKind {
+    Base(encoding: X64DebugEncoding)
+    Pointer(target: Int)
+    Struct(members: [X64DebugMember])
+    Union(members: [X64DebugMember])
+    Enum(enumerators: [X64DebugEnumerator])
+    Typedef(target: Int)
+    Opaque
+}
+
+struct X64DebugType { name: String, size: Int, kind: X64DebugTypeKind }
+
+// A source variable: a parameter or a named local. `indirect` when the
+// carried value is the address of the variable's bytes (an inline aggregate)
+// rather than the variable itself.
+struct X64DebugVariable {
+    name: String
+    ty: Int
+    line: Int
+    parameter: Bool
+    indirect: Bool
+}
+
+// `directory` is the compilation directory relative `files` resolve
+// against; "" leaves that to the debugger (its working directory).
+struct X64ModuleDebug {
+    directory: String
+    files: [String]
+    types: [X64DebugType]
+}
+
+// Read-only module objects, including immutable aggregate constant trees.
+struct X64DataReloc {
+    offset: Int
+    target: X64DataID
+    addend: Int
+}
+
+struct X64Data {
+    id: X64DataID
+    bytes: [U8]
+    align: Int
+    relocs: [X64DataReloc]
+}
+
+// The source facts of one compiled function: `file` is a row of
+// X64ModuleDebug.files, -1 for generated code (glue, helpers, the generated
+// entry), which has no source name or variables.
+struct X64FunctionSource {
+    name: String
+    file: Int
+    line: Int
+    variables: [X64DebugVariable]
+}
+
+fn x64_function_source_none() -> X64FunctionSource Never! {
+    X64FunctionSource{name: "", file: -1, line: 0, variables: [X64DebugVariable]{}}
+}
+
+// What the object writer reads besides the compiled functions: the data
+// objects (`data[i].id.value == i`), the debug files and types, and the
+// source facts of the function with id `i` at `functions[i]`.
+struct X64ObjectModule {
+    data: [X64Data]
+    debug: X64ModuleDebug
+    functions: [X64FunctionSource]
+}

@@ -73,11 +73,15 @@ struct BuiltinMethodRow {
 // execution host. A `TBuiltinOp.StringMethod` row's route name is the method
 // spelling; an overflow row's checked form returns `Self?`.
 
-BUILTIN_METHOD_ROWS :: prep { [BuiltinMethodRow]{
+BUILTIN_METHOD_ROWS :: comptime { [BuiltinMethodRow]{
     // String: measures and predicates. `len` counts characters, as the
     // bootstrap's `LenString` does; `count_bytes` counts UTF-8 bytes.
     {receiver: BuiltinMethodReceiver.String, name: "len", parameters: [Type]{}, result: Type.Int, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.LenString}},
     {receiver: BuiltinMethodReceiver.String, name: "count_bytes", parameters: [Type]{}, result: Type.Int, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StringMethod{method: "count_bytes"}}},
+    // `hash` is a non-cryptographic U64 of the UTF-8 bytes, read in place:
+    // equal strings hash equal, and values are stable within one process run
+    // only, never across runs or compiler versions.
+    {receiver: BuiltinMethodReceiver.String, name: "hash", parameters: [Type]{}, result: Type.IntN{signed: false, bits: 64}, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StringMethod{method: "hash"}}},
     {receiver: BuiltinMethodReceiver.String, name: "is_empty", parameters: [Type]{}, result: Type.Bool, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.IsEmpty}},
     {receiver: BuiltinMethodReceiver.String, name: "try_push", parameters: [Type]{Type.String}, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "AllocError"}}, access: AccessConvention.Write, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.TryStringPush}},
     {receiver: BuiltinMethodReceiver.String, name: "contains", parameters: [Type]{Type.String}, result: Type.Bool, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.Contains}},
@@ -126,6 +130,8 @@ BUILTIN_METHOD_ROWS :: prep { [BuiltinMethodRow]{
     {receiver: BuiltinMethodReceiver.String, name: "normalize", parameters: [Type]{}, result: Type.String, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StringMethod{method: "normalize"}}},
     {receiver: BuiltinMethodReceiver.String, name: "removeprefix", parameters: [Type]{Type.String}, result: Type.String, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StringMethod{method: "removeprefix"}}},
     {receiver: BuiltinMethodReceiver.String, name: "removesuffix", parameters: [Type]{Type.String}, result: Type.String, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StringMethod{method: "removesuffix"}}},
+    {receiver: BuiltinMethodReceiver.String, name: "remove_prefix", parameters: [Type]{Type.String}, result: Type.String, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StringMethod{method: "remove_prefix"}}},
+    {receiver: BuiltinMethodReceiver.String, name: "remove_suffix", parameters: [Type]{Type.String}, result: Type.String, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StringMethod{method: "remove_suffix"}}},
     {receiver: BuiltinMethodReceiver.String, name: "center", parameters: [Type]{Type.Int, Type.String}, result: Type.String, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StringMethod{method: "center"}}},
     {receiver: BuiltinMethodReceiver.String, name: "ljust", parameters: [Type]{Type.Int, Type.String}, result: Type.String, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StringMethod{method: "ljust"}}},
     {receiver: BuiltinMethodReceiver.String, name: "rjust", parameters: [Type]{Type.Int, Type.String}, result: Type.String, access: AccessConvention.Read, lowering: BuiltinMethodLowering.Builtin{operation: TBuiltinOp.StringMethod{method: "rjust"}}},

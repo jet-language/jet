@@ -12,7 +12,7 @@
 // plain Ints in, so nothing borrowed can outlive the helper's frame.
 package {
     name: "task_group_parameter"
-    authority: { holds: { allow: [IO, Time.Wait] } }
+    authority: { allow: [IO, Time.Wait] }
 }
 
 struct Counter {
@@ -21,13 +21,13 @@ struct Counter {
     fn print_stepped(self, group: Group, value: Int) {
         step :: self.step
         handle :: task value + step
-        print(^^handle.join() ?? 0)
+        print(^handle.join() ?? 0)
     }
 }
 
 fn print_next(group: Group, value: Int) {
     handle :: task value + 1
-    print(^^handle.join() ?? panic("task failed"))
+    print(^handle.join() ?? panic("task failed"))
 }
 
 fn run() {
@@ -38,6 +38,6 @@ fn run() {
     }
 }
 
-FOLDED :: prep { 40 + 2 }
+FOLDED :: comptime { 40 + 2 }
 
 fn show() { print(FOLDED) }

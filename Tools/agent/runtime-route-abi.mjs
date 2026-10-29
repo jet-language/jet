@@ -184,14 +184,15 @@ export function validateRuntimeRoute(adapter, definition) {
   }
 }
 
-// Lower/CForeign.jet: lower_c_import_call calls these raw helpers directly,
-// not through a Core route or a fabricated Rust kernel. This table checks the
-// actual C ABI of the existing calls (pack/len 126/128, unpack 156, free 173).
+// JetIR/Source/BuildForeign.jet: ir_foreign_call calls these raw helpers
+// directly, not through a Core route or a fabricated Rust kernel. This table
+// checks the actual C ABI of the existing calls (pack/len 57/58, unpack 91,
+// free 96).
 export const loweringRuntimeAbi = [
-  { name: "jet_rt_c_string_pack", params: ["i64"], ret: "i64", site: "Compiler/JetBackend/Source/Lower/CForeign.jet:126" },
-  { name: "jet_rt_string_byte_len", params: ["i64"], ret: "i64", site: "Compiler/JetBackend/Source/Lower/CForeign.jet:128" },
-  { name: "jet_rt_c_string_unpack", params: ["i64"], ret: "i64", site: "Compiler/JetBackend/Source/Lower/CForeign.jet:156" },
-  { name: "jet_rt_c_string_free", params: ["i64", "i64"], ret: null, site: "Compiler/JetBackend/Source/Lower/CForeign.jet:173" },
+  { name: "jet_rt_c_string_pack", params: ["i64"], ret: "i64", site: "Compiler/JetIR/Source/BuildForeign.jet:57" },
+  { name: "jet_rt_string_byte_len", params: ["i64"], ret: "i64", site: "Compiler/JetIR/Source/BuildForeign.jet:58" },
+  { name: "jet_rt_c_string_unpack", params: ["i64"], ret: "i64", site: "Compiler/JetIR/Source/BuildForeign.jet:91" },
+  { name: "jet_rt_c_string_free", params: ["i64", "i64"], ret: null, site: "Compiler/JetIR/Source/BuildForeign.jet:96" },
 ];
 
 export function validateLoweringRuntimeAbi(definitions) {
@@ -206,7 +207,7 @@ export function validateLoweringRuntimeAbi(definitions) {
 
 // Native opaque providers have no Rust record declaration. Admit their
 // ownership metadata only from the canonical physical ABI, never a marker
-// struct or a guessed Rust type. Pipe24 is shared by these two nominals.
+// struct or a guessed Rust type. Pipe40 is shared by these two nominals.
 export function nativeProviderHandles(definitions) {
   const types = ["ProcessStdoutStream", "ProcessStderrStream"];
   const lifecycle = types.flatMap((type) => [`jet_rt_handle_clone_${runtimeAbiAtom(type)}`, `jet_rt_handle_drop_${runtimeAbiAtom(type)}`]);
@@ -221,11 +222,11 @@ export function nativeProviderHandles(definitions) {
   ];
   for (const { name, params, ret } of required) {
     const definition = definitions.get(name);
-    if (!definition) throw new Error(`native Pipe24 provider requires ${name}`);
+    if (!definition) throw new Error(`native Pipe40 provider requires ${name}`);
     validateRuntimeRoute({ symbol: name, name, params: params.map((cty) => ({ ctys: [cty] })), result: { ret, outs: [] } }, definition);
   }
   return types.flatMap((runtime) => [
-    { jetName: `<corelib>/Core/process::Core/process/process.jet::${runtime}`, runtime },
+    { jetName: `<corelib>/core.process::${runtime}`, runtime },
     { jetName: runtime, runtime },
   ]);
 }

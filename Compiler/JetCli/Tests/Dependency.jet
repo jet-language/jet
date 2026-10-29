@@ -1,6 +1,11 @@
 // CmdPkg observable bytes plus checked carrier edit/publication acceptance.
 // Provider-dependent fetch execution is a separate admitted runtime proof.
-fn run() {
+use jet_pkg_model.[DepSpec, GitSelector, LockFile, LockedPackage]
+use jetpack_foundation.[FoundationPublicationError, FoundationPublicationPhase]
+use jet_driver.[JET_DRIVER_EXIT_USER_ERROR]
+use jet_foundation.[diagnostic_from_registry]
+
+#Test("dependency") {
     lock := LockFile.empty()
     lock.packages = [LockedPackage]{
         {name: "root", version: "1.0.0", source: .Root},

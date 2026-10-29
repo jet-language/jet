@@ -1,0 +1,11 @@
+
+use core.process as process
+tag Stored { from: [Store.read], deny: [Exec] }
+struct Store {
+    value: String
+    fn read(self) -> String { self.value }
+}
+fn run() {
+    store := Store{ value: "Ada" }
+    process.run(["echo", store.read()]) ?? return Err("test")
+}

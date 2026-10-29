@@ -272,3 +272,26 @@ fn cli_schema_wasm_sections(bytes: View<U8>, maximum: U64) -> [View<U8>] Metadat
     }
     Ok(found)
 }
+fn cli_schema_put_wasm_leb(out: &[U8], input: Int) Never! {
+    value := input
+    loop {
+        byte := value.bit_and(127)
+        value = value >> 7
+        if value != 0 -> byte = byte.bit_or(128)
+        &out.push(U8.from_int(byte) ?? panic("a LEB group is one byte"))
+        if value == 0 -> break
+    }
+}
+// Add the canonical Wasm custom section before the artifact is published; the
+// framing is checked before the artifact changes.
+fn cli_schema_embed_wasm_record(wasm: &[U8], record: [U8], usize_max: U64) MetadataError! {
+    _ :: cli_schema_wasm_sections(wasm[0..<wasm.len()], usize_max)
+    name :: WASM_SECTION.bytes()
+    payload := [U8]{}
+    cli_schema_put_wasm_leb(&payload, name.len())
+    loop byte in name -> &payload.push(byte)
+    loop byte in record -> &payload.push(byte)
+    &wasm.push(U8{0})
+    cli_schema_put_wasm_leb(&wasm, payload.len())
+    loop byte in payload -> &wasm.push(byte)
+}

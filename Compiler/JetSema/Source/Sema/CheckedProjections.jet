@@ -1,5 +1,5 @@
 // Read-only projections of canonical checked reflection and prepared values.
-use jet_foundation.[Item, Span, TargetLayoutEngine, TComptimeValue, TComptimeReport, TComptimeField, TOriginProjection, Expr, Type]
+use jet_foundation.[Item, Span, TargetLayoutEngine, TComptimeValue, TComptimeReport, TComptimeField, TOriginProjection, Expr, FactRead, Type]
 struct SemaLayoutProjectionRow {
     name: String
     span: Span
@@ -38,7 +38,7 @@ fn sema_fact_local_origin(origin: SemaOriginFact?) -> TComptimeValue Never! {
 }
 fn sema_origin_unwrap(expression: Expr) -> Expr Never! {
     if expression == {
-        .Paren(inner, _) | .Copy(inner, _) | .Place(inner, _, _) -> sema_origin_unwrap(inner)
+        .Paren(inner, _, _) | .Copy(inner, _, _) | .Place(inner, _, _, _) -> sema_origin_unwrap(inner)
         else -> expression
     }
 }
@@ -46,12 +46,12 @@ fn sema_origin_prepared_projection(expression: Expr, ty: Type, value: TComptimeV
     if ty != (Type.Option{inner: Type.Named{name: "OriginInfo"}}) -> return
     init :: sema_origin_unwrap(expression)
     if init == {
-        .Field(base, member, span) -> {
-            if sema_fact_read_kind(member) != Val("Origin") -> return
-            receiver :: if sema_origin_unwrap(base) == .Ident(name, _) -> name else -> "value"
+        .Field(base, member, span, _) -> {
+            if sema_fact_read_kind(member) != Val(FactRead.Origin) -> return
+            receiver :: if sema_origin_unwrap(base) == .Ident(name, _, _) -> name else -> "value"
             &context.origin_facts.push(TOriginProjection{receiver: Val(receiver), span: span, value: value})
         }
-        .ComptimeName(_, span, _) -> &context.origin_facts.push(TOriginProjection{receiver: None, span: span, value: value})
+        .ComptimeName(_, span, _, _) -> &context.origin_facts.push(TOriginProjection{receiver: None, span: span, value: value})
         else -> {}
     }
 }

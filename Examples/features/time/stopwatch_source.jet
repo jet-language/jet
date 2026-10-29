@@ -1,17 +1,19 @@
-// core.time owns Stopwatch as a source struct: `start` samples the host wall
-// clock as Unix nanoseconds into the real `start_ns` field, and `elapsed` /
-// `elapsed_millis` subtract it from a fresh sample. Duration exposes its
-// checked `ns` count as a field on every tier.
+// core.time owns Stopwatch as a source struct: `start` samples the host
+// monotonic clock (no epoch) into the real `start_ns` field, and `elapsed` /
+// `elapsed_millis` subtract it from a fresh sample, so a later stopwatch never
+// starts before an earlier one. Duration exposes its checked `ns` count as a
+// field on every tier.
 package {
     name: "stopwatch_source"
-    authority: { holds: { allow: [IO, Time] } }
+    authority: { allow: [IO, Time] }
 }
 
 use core.time as time
 
 fn run() {
     watch :: time.start()
-    print(watch.start_ns > 1700000000000000000)
+    later :: time.start()
+    print(later.start_ns >= watch.start_ns)
     print(watch.elapsed_millis() >= 0)
     print(time.elapsed(watch).ns >= 0)
     print(time.duration_ms(3).ns)

@@ -1,0 +1,40 @@
+
+#Error
+enum LookupError {
+    Retired
+    Missing
+}
+fn select(value: Int?, retired: Int?) -> Int LookupError! {
+    found :: value ?? {
+        if retired == {
+            .Val(_) -> return Err(LookupError.Retired)
+            .None -> return Err(LookupError.Missing)
+        }
+    }
+    Ok(found)
+}
+fn select_if(value: Int?, kind: Int) -> Int LookupError! {
+    found :: value ?? {
+        if {
+            kind == 1 -> {
+                return Err(LookupError.Retired)
+            }
+            kind == 2 -> {
+                return Err(LookupError.Missing)
+            }
+            else -> {
+                return Err(LookupError.Retired)
+            }
+        }
+    }
+    Ok(found)
+}
+fn run() {
+    print(select(Val(7), None) ?? 0)
+    print(select(None, Val(1)) ?? 8)
+    print(select(None, None) ?? 9)
+    print(select_if(Val(4), 1) ?? 0)
+    print(select_if(None, 1) ?? 10)
+    print(select_if(None, 2) ?? 11)
+    print(select_if(None, 3) ?? 12)
+}

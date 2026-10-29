@@ -1,0 +1,17 @@
+fn inspect(handle: Task<Int>, group: Group, rx: Receiver<Int>, tx: Sender<Int>) -> TaskFailure {
+    joined :: handle.join()
+    cancelled :: .Cancelled
+    deadline :: .DeadlineBlown
+    loop value in rx -> tx.send(value)
+    return .Panicked("boom")
+}
+
+fn open() {
+    pair :: channel<Int>(capacity: 8)
+    plain :: task { 1 }
+    frozen :: freeze(1)
+    task.group g {
+        child :: task ^frozen { frozen }
+        child.join() ?? 0
+    }
+}

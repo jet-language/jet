@@ -3668,21 +3668,19 @@ function publicationState({ fullScope, loaded, skipped, matrix, manifest, source
   };
 }
 
-// The run and dev tiers execute inside the compiler process (Cranelift hosts,
-// interpreter ambient), so a debug-profile compiler measures unoptimized
-// Prelude hosts rather than Jet. The default binary is therefore the release
-// build; a missing one is an error, never a silent fallback to target/debug.
-async function copyJetBinary(options, runDir) {
+// The compiler under measurement: --jet-bin, else $JET (what `Tools/agent/jet-env jet`
+// runs), else `jet` on PATH. It runs in place, never copied: a Jet-built compiler reads
+// its runtime pack beside itself (jet-runtime/), and the run records its SHA-256. A
+// missing compiler is an error.
+async function resolveJetBinary(options) {
   if (options.jetBin) return path.resolve(process.cwd(), options.jetBin);
-  const source = path.join(repoDir, "target/release/jet");
-  if (!(await exists(source))) {
-    throw new Error(`missing default Jet binary: ${source} (build it with \`Tools/agent/jet-env cargo build --release --bin jet\` or pass --jet-bin)`);
+  const candidates = process.env.JET
+    ? [path.resolve(process.cwd(), process.env.JET)]
+    : (process.env.PATH ?? "").split(path.delimiter).filter(Boolean).map((directory) => path.join(directory, "jet"));
+  for (const candidate of candidates) {
+    if (await exists(candidate)) return await fs.realpath(candidate);
   }
-  const destination = path.join(runDir, "jet-bin", "jet");
-  await fs.mkdir(path.dirname(destination), { recursive: true });
-  await fs.copyFile(source, destination);
-  await fs.chmod(destination, 0o755);
-  return destination;
+  throw new Error(`missing Jet compiler: ${process.env.JET ? `JET=${process.env.JET} does not exist` : "JET is unset and no jet is on PATH"} (set JET, put jet on PATH, or pass --jet-bin)`);
 }
 
 async function devAvailable(jetBin, runDir) {
@@ -3736,7 +3734,7 @@ async function main() {
   const runId = `${dateStamp().replaceAll("-", "")}-${process.pid}-${Date.now().toString(36)}`;
   const runDir = path.join(process.env.HOME ?? ".", ".cache/jet-dev/gauntlet/work", runId);
   await fs.mkdir(runDir, { recursive: true });
-  const jetBin = await copyJetBinary(options, runDir);
+  const jetBin = await resolveJetBinary(options);
   const toolchains = await toolchainFingerprint(runDir, jetBin);
   const dev = await devAvailable(jetBin, runDir);
   if (!dev) console.warn("WARN jet dev unavailable; skipping Jet dev tier");

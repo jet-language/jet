@@ -44,7 +44,13 @@ fn cli_cmd_add(verification: &StoreVerification, theme: Theme, parsed: CLIParsed
         }
     }
     // The lease keeps the verified entry consumable until the command ends.
-    defer close(^lease)
+    code :: cli_add_record_ref(&cache, theme, parsed, dir, spec)
+    ^lease.release()
+    code
+}
+
+// Record the resolved ref in the env file and pin its source channels.
+fn cli_add_record_ref(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, dir: String, spec: RefSpec) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     edited :: EnvFile.add(dir, spec) ?? {
         theme.error("could not edit the env file", err.message(), "check write permissions here.")
         return EXIT_USER_ERROR

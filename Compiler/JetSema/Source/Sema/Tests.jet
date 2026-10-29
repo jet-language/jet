@@ -1,13 +1,14 @@
 use jet_foundation.[
     Diagnostic,
+    FnBody,
+    Func,
     Item,
     SymbolID,
-    TFunc,
     TFuncKind,
     TestDef,
     Type,
     ast_func,
-    tir_test_artifact_key,
+    checked_test_artifact_key,
     type_name,
 ]
 
@@ -43,7 +44,7 @@ fn sema_property_param_diagnostics(test: TestDef) -> [Diagnostic] Never! {
 }
 
 struct SemaTestFunctionCheckResult {
-    function: TFunc?
+    function: FnBody?
     call_facts: [SemaCallSiteFact]
     comptime_requests: [SemaComptimeRequest]
     name_references: [SemaNameReferenceFact]
@@ -54,12 +55,12 @@ struct SemaTestFunctionCheckResult {
 }
 
 fn sema_check_test_function(test: TestDef, environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: SemaScopeTable, host_hooks: SemaHostHookAccess?) -> SemaTestFunctionCheckResult {
-    key := tir_test_artifact_key(environment.module_identity, test)
+    key := checked_test_artifact_key(environment.module_identity, test)
     owner_id := SymbolID{key: key}
     scopes := sema_scope_snapshot(module_scopes)
     // Rust Validation.rs names the synthetic body `__test_<name>`; a runtime
     // stop inside the test reports that name (`in __test_<name>`).
-    temporary_name := "__test_{test.name ?? "anonymous"}"
+    temporary_name := "{sema_test_synthetic_prefix()}{test.name ?? "anonymous"}"
     synthetic := ast_func(temporary_name, test.name_span, test.span)
     synthetic.params = test.params
     synthetic.body = test.body
@@ -91,7 +92,7 @@ fn sema_check_test_function(test: TestDef, environment: SemaScopeEnvironment, pr
     // The synthetic has no own generic parameters: its merged environment is
     // unchanged. The canonical read checker scopes and restores its name.
     checked := sema_function_check_shared(synthetic, owner_id, TFuncKind.TopLevel, false, environment, program, &scopes, host_hooks, &diagnostics, &call_facts, &comptime_requests, &name_references)
-    function := TFunc?{None}
+    function := FnBody?{None}
     if checked.value == .Val(value) {
         updated_value := value
         updated_value.name = key
@@ -112,4 +113,12 @@ fn sema_check_test_function(test: TestDef, environment: SemaScopeEnvironment, pr
         copy_events: checked.copy_events.copy(),
         complete: checked.complete,
     }
+}
+
+fn sema_test_synthetic_prefix() -> String Never! { "__test_" }
+
+// The synthetic function of a `#Test` block. It is marked compiler-generated,
+// but its body is the user's test code.
+fn sema_test_synthetic_function(func: Func) -> Bool Never! {
+    func.compiler_generated && func.name.starts_with(sema_test_synthetic_prefix())
 }

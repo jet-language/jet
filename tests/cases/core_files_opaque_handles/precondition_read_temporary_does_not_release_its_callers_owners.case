@@ -1,0 +1,13 @@
+# tests/core_files_opaque_handles.rs::precondition_read_temporary_does_not_release_its_callers_owners at tests/core_files_opaque_handles.rs:543; hand-port
+# The original also inspected MIR locals/places in-process; MIR is deleted (A6 cutover). The tier run is kept.
+fixture: precondition_read_temporary_does_not_release_its_callers_owners.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step run: jet run main.jet
+exit: 0
+stdout: = "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"
+step build: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"

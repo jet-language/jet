@@ -9,8 +9,8 @@ struct Packet {
     payload: [U8]
 }
 
-ROOT :: prep { hex.encode(cbor.to_bytes_canonical([U8]{222, 173}) ?? panic("root")) }
-PACKET :: prep { hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("packet")) }
+ROOT :: comptime { hex.encode(cbor.to_bytes_canonical([U8]{222, 173}) ?? panic("root")) }
+PACKET :: comptime { hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("packet")) }
 
 fn gap() -[]> String {
     folded := text.casefold("Straße")

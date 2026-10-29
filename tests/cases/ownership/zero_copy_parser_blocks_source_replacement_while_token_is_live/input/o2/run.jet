@@ -1,0 +1,30 @@
+
+struct Token {
+    text: View<str>,
+    rest: View<str>
+}
+
+fn scan(source: String) -[]> Token {
+    text :: source.before(":")
+    rest :: source.after(":")
+    return Token{ text: text, rest: rest }
+}
+
+fn parse(source: String) -[]> Token {
+    return scan(source)
+}
+
+fn parse_text(source: String) -[]> View<str> {
+    return parse(source).text
+}
+
+fn parse_rest(source: String) -[]> View<str> {
+    return parse(source).rest
+}
+
+fn run() {
+    source := "name:value"
+    selected :: parse_rest(source)
+    source = "other:data"
+    print(selected)
+}

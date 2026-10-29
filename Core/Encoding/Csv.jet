@@ -1,0 +1,963 @@
+use core as core
+use core.encoding.[Dyn, EncodingCause, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
+use core.encoding.json as json
+use __core_encoding_stream as stream
+use core.encoding as encoding
+use core.files.[FileReader, FileWriter]
+use core.mem as mem
+use core.data.[Query]
+use core.db.[SQL]
+
+fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError Never! {
+    {
+        format: format,
+        kind: EncodingErrorKind.Syntax,
+        byte_offset: offset,
+        line: Val(line),
+        column: Val(column),
+        path: path,
+        reason: reason,
+        cause: None,
+    }
+}
+
+fn unsupported_error(format: EncodingFormat, offset: Int, reason: String) -> EncodingError Never! {
+    {
+        format: format,
+        kind: EncodingErrorKind.Unsupported,
+        byte_offset: offset,
+        line: None,
+        column: None,
+        path: "",
+        reason: reason,
+        cause: None,
+    }
+}
+
+// core.encoding.csv — RFC 4180 tables as field rows.
+//
+// `rows` is the physical codec: it does not guess types. Every cell stays
+// text. Quotes wrap a field; `""` is a literal quote. `parse` / `to_string`
+// lift those rows into `Dyn` arrays so CSV participates in the shared
+// tree without a second table type.
+//
+// Typed `decode<T>` owns native header-to-record and row-error policy here;
+// its parser has a typed failure carrier and maps diagnostic text to FieldError.
+// Streaming reads distinguish optional EOF from typed IO failures, and writes
+// borrow bounded byte windows over existing registered file leaves.
+// `query<T>` reads a bounded UTF-8 table, validates its header, decodes all
+// typed rows and reuses the same SQL query door as an in-memory list.
+struct CSVRow {
+    line: Int
+    fields: [String]
+}
+
+/// Physical rows. `delimiter` is one character other than a quote
+/// or a line ending; `header: true` drops the first record (the header) and
+/// returns only data records; `skip_blank` drops records with no field
+/// content. Every `CSVRow.line` is the one-based physical line where that
+/// record opens.
+fn rows(text: String, delimiter: String{","}, header: Bool{false}, skip_blank: Bool{true}) -> [CSVRow] EncodingError! {
+    delimiter_bytes :: delimiter.bytes()
+    if delimiter.len() != 1 || delimiter_bytes[0] == (U8{34}) || delimiter_bytes[0] == (U8{10}) || delimiter_bytes[0] == (U8{13}) {
+        return Err(unsupported_error(EncodingFormat.CSV, 0, "a CSV delimiter is one character other than a quote or a line ending"))
+    }
+    physical :: parse_rows_with(text, delimiter_bytes, skip_blank)
+    if !header || physical.len() == 0 -> return Ok(physical)
+    data := [CSVRow]{}
+    loop i in 1..<physical.len() -> &data.push(physical[i])
+    Ok(data)
+}
+
+/// Header-named typed rows. Missing cells become empty text; extra cells are
+/// ignored, and failures from every data record are accumulated in row order.
+fn decode<T: Decode>(text: String) -> [T] [FieldError]! {
+    rows :: typed_records(text) ?? return Err([FieldError]{FieldError{path: "", reason: err.reason}})
+    if rows.len() == 0 -> return Ok([T]{})
+    header :: rows[0]
+    values := [T]{}
+    errors := [FieldError]{}
+    loop index in 1..<rows.len() {
+        row :: rows[index]
+        entries := [(key: String, value: Dyn)]{}
+        loop column in 0..<header.len() {
+            cell :: if column < row.len() -> row[column] else -> ""
+            &entries.push((key: header[column].copy(), value: Dyn.Text(cell)))
+        }
+        tree :: stream.object_from_entries(^entries)
+        if tree.decode<T>() == {
+            .Ok(value) -> &values.push(value)
+            .Err(failures) -> {
+                loop failure in failures {
+                    out := failure
+                    out.path = if out.path == "" -> "row {index}" else if out.path.starts_with("[") -> "row {index}{out.path}" else -> "row {index}.{out.path}"
+                    &errors.push(out)
+                }
+            }
+        }
+    }
+    if errors.len() == 0 -> Ok(values) else -> Err(errors)
+}
+
+// Whole-value typed CSV uses the same native CsvKernel state transitions but
+// no streaming EncodingLimits: the shipped whole-value decoder is unbounded.
+#Error
+struct TypedCSVError { reason: String }
+
+struct TypedCSV {
+    field: [U8]
+    fields: [String]
+    rows: [[String]]
+    quoted: Bool
+    after_quote: Bool
+    pending_cr: Bool
+    pending_line: Int
+    pending_column: Int
+    record: Int
+    line: Int
+    column: Int
+    ended_record: Bool
+    saw_input: Bool
+
+    fn error(self, line: Int, column: Int, reason: String) -> TypedCSVError Never! {
+        TypedCSVError{reason: "E2701: CSV row {self.record}, line {line}, column {column} — {reason}"}
+    }
+
+    fn close_field(&self) Never! {
+        text := ""
+        #Unsafe("input is a String; original complete UTF-8 scalars and ASCII quote escapes entered the field") {
+            text = encoding.__bytes_into_text(^self.field)
+        }
+        self.field = [U8]{}
+        &self.fields.push(text)
+    }
+
+    fn close_record(&self) Never! {
+        &self.close_field()
+        &self.rows.push(^self.fields)
+        self.fields = [String]{}
+        self.record += 1
+        self.ended_record = true
+    }
+
+    fn push(&self, bytes: [U8]) TypedCSVError! {
+        self.saw_input = true
+        byte :: Int.from_u8(bytes[0])
+        if self.pending_cr {
+            if byte != 10 -> return Err(self.error(self.pending_line, self.pending_column, "bare CR is not a record ending"))
+            self.pending_cr = false
+            self.line += 1
+            self.column = 0
+            if self.quoted {
+                &self.field.push(U8{13})
+                &self.field.push(U8{10})
+            } else {
+                &self.close_record()
+            }
+            return
+        }
+        self.ended_record = false
+        self.column += 1
+        if self.quoted {
+            if self.after_quote {
+                if byte == 34 {
+                    &self.field.push(U8{34})
+                    self.after_quote = false
+                    return
+                }
+                if byte == 44 {
+                    &self.close_field()
+                    self.quoted = false
+                    self.after_quote = false
+                    return
+                }
+                if byte != 13 && byte != 10 -> return Err(self.error(self.line, self.column, "only quote, comma, CRLF, LF, or EOF may follow a closing quote"))
+                self.quoted = false
+                self.after_quote = false
+            } else {
+                if byte == 34 {
+                    self.after_quote = true
+                } else {
+                    loop item in bytes -> &self.field.push(item)
+                    if byte == 10 {
+                        self.line += 1
+                        self.column = 0
+                    }
+                }
+                return
+            }
+        }
+        if byte == 34 {
+            if self.field.len() != 0 -> return Err(self.error(self.line, self.column, "quote inside an unquoted field"))
+            self.quoted = true
+        } else if byte == 44 {
+            &self.close_field()
+        } else if byte == 13 {
+            self.pending_cr = true
+            self.pending_line = self.line
+            self.pending_column = self.column
+        } else if byte == 10 {
+            self.line += 1
+            self.column = 0
+            &self.close_record()
+        } else {
+            loop item in bytes -> &self.field.push(item)
+        }
+    }
+
+    fn finish(&self) TypedCSVError! {
+        if self.pending_cr -> return Err(self.error(self.pending_line, self.pending_column, "bare CR is not a record ending"))
+        if self.quoted && !self.after_quote -> return Err(self.error(self.line, self.column + 1, "quoted field ended before its closing quote"))
+        if self.ended_record || !self.saw_input -> return
+        self.quoted = false
+        self.after_quote = false
+        &self.close_record()
+    }
+}
+
+fn typed_records(text: String) -> [[String]] TypedCSVError! {
+    parser := TypedCSV{field: [U8]{}, fields: [String]{}, rows: [[String]]{}, quoted: false, after_quote: false, pending_cr: false, pending_line: 1, pending_column: 1, record: 1, line: 1, column: 0, ended_record: false, saw_input: false}
+    index := 0
+    loop index < text.count_bytes() {
+        lead :: Int.from_u8(stream.byte_at(text, index))
+        width :: if lead < 128 -> 1 else if lead < 224 -> 2 else if lead < 240 -> 3 else -> 4
+        scalar := [U8#4]{0, 0, 0, 0}
+        loop position in 0..<width -> scalar[position] = stream.byte_at(text, index + position)
+        &parser.push(scalar[0..<width]) ?? return Err(err)
+        index += width
+    }
+    &parser.finish() ?? return Err(err)
+    Ok(^parser.rows)
+}
+
+fn parse(text: String) -> Dyn EncodingError! {
+    physical :: parse_rows(text, true)
+    items := [Dyn]{}
+    loop row in physical {
+        fields := [Dyn]{}
+        loop field in row.fields -> &fields.push(Dyn.Text(field))
+        &items.push(Dyn.Array(fields))
+    }
+    Ok(Dyn.Array(items))
+}
+
+fn to_string<T: Encode>(rows: [T]) -> String Never! {
+    if rows.len() == 0 -> return ""
+    first :: rows[0].encode()
+    out := ""
+    if first == .Object(_) {
+        header := [String]{}
+        loop entry in stream.object_entries(first) -> &header.push(entry.key)
+        out = encode_row(header)
+        loop i in 0..<rows.len() {
+            tree :: if i == 0 -> first else -> rows[i].encode()
+            if !(tree == .Object(_)) -> panic("csv.to_string needs rows or records")
+            fields := [String]{}
+            loop key in header {
+                cell := ""
+                loop entry in stream.object_entries(tree) {
+                    if entry.key == key {
+                        cell = csv_cell(entry.value)
+                        break
+                    }
+                }
+                &fields.push(cell)
+            }
+            out = "{out}\n{encode_row(fields)}"
+        }
+    } else {
+        loop i in 0..<rows.len() {
+            tree :: if i == 0 -> first else -> rows[i].encode()
+            if tree == {
+                .Array(cells) -> {
+                    fields := [String]{}
+                    loop cell in cells -> &fields.push(csv_cell(cell))
+                    if i > 0 -> out = "{out}\n"
+                    out = "{out}{encode_row(fields)}"
+                }
+                else -> panic("csv.to_string needs rows or records")
+            }
+        }
+    }
+    out
+}
+
+fn csv_cell(value: Dyn) -> String Never! {
+    if value == {
+        .Text(text) -> text
+        .Int(n) -> "{n}"
+        .Float(n) -> "{n:Debug}"
+        .Bool(b) -> "{b}"
+        .Null -> ""
+        else -> json.to_string(value) ?? panic("CSV cell cannot be represented as JSON")
+    }
+}
+
+
+/// Typed CSV query with the same SQL grammar and result carrier as rows.query.
+fn query<T: [Decode, Encode]>(path: String, sql: SQL) -[FS]> Query<T> [FieldError]! {
+    text :: query_text(path) ?? return Err(err)
+    physical :: typed_records(text) ?? return Err([FieldError]{FieldError{path: "", reason: err.reason}})
+    header :: if physical.len() == 0 -> [String]{} else -> physical[0]
+    encoding.__query_validate_fields(header, sql) ?? return Err([FieldError]{FieldError{path: "", reason: err}})
+    values :: decode<T>(text) ?? return Err(err)
+    values.query(sql)
+}
+
+// A private plain record on the existing raw record rails, not a file handle.
+struct __QueryRead {
+    size: U64
+    bytes: [U8]
+}
+
+fn query_read_error(path: String, reason: String) -> [FieldError] Never! {
+    [FieldError]{FieldError{path: "", reason: "could not read `{path}`: {reason}"}}
+}
+
+fn query_text(path: String) -[FS]> String [FieldError]! {
+    max :: 536870912
+    sample := encoding.__query_read_bounded(path, max) ?? return Err(query_read_error(path, err))
+    if sample.size > (U64{max}) -> return Err(query_read_error(path, "input exceeds the {max}-byte query bound"))
+    if sample.bytes.len() > max -> return Err(query_read_error(path, "input grew beyond the {max}-byte query bound"))
+    encoding.__utf8_validate(sample.bytes) ?? return Err(query_read_error(path, err))
+    #Unsafe("the exact owned query bytes passed the shared strict UTF-8 validator") {
+        return Ok(encoding.__bytes_into_text(^sample.bytes))
+    }
+}
+
+
+fn parse_rows(text: String, skip_blank: Bool) -> [CSVRow] EncodingError! {
+    parse_rows_with(text, [U8]{44}, skip_blank)
+}
+
+fn delimiter_at(raw: [U8], i: Int, delimiter: [U8]) -> Bool {
+    if i + delimiter.len() > raw.len() -> return false
+    loop k in 0..<delimiter.len() {
+        if raw[i + k] != delimiter[k] -> return false
+    }
+    true
+}
+
+fn parse_rows_with(text: String, delimiter: [U8], skip_blank: Bool) -> [CSVRow] EncodingError! {
+    raw :: text.bytes()
+    rows := [CSVRow]{}
+    fields := [String]{}
+    field := [U8]{}
+    line := 1
+    row_line := 1
+    column := 1
+    i := 0
+    quoted := false
+    closed := false
+    loop i < raw.len() {
+        b :: raw[i]
+        n :: b
+        if fields.len() == 0 && field.len() == 0 && !quoted && !closed -> row_line = line
+        if quoted {
+            if n == 34 {
+                if i + 1 < raw.len() && raw[i + 1] == (U8{34}) {
+                    &field.push(U8{34})
+                    i += 2
+                    column += 2
+                    next
+                }
+                quoted = false
+                closed = true
+                i += 1
+                column += 1
+                next
+            }
+            &field.push(b)
+            i += 1
+            if n == 10 {
+                line += 1
+                column = 1
+            } else {
+                column += 1
+            }
+            next
+        }
+        if closed {
+            if delimiter_at(raw, i, delimiter) {
+                &fields.push(String.from_bytes(field.copy()) ?? return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "invalid UTF-8 in CSV field")))
+                field = [U8]{}
+                closed = false
+                i += delimiter.len()
+                column += 1
+                next
+            }
+            if n == 10 || n == 13 {
+                &fields.push(String.from_bytes(field.copy()) ?? return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "invalid UTF-8 in CSV field")))
+                field = [U8]{}
+                blank :: fields.len() == 1 && fields[0].len() == 0
+                if !(skip_blank && blank) -> &rows.push(CSVRow{line: row_line, fields: fields})
+                fields = [String]{}
+                closed = false
+                if n == 13 && i + 1 < raw.len() && raw[i + 1] == (U8{10}) -> i += 1
+                line += 1
+                column = 1
+                i += 1
+                next
+            }
+            return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "characters after a closing CSV quote must be a delimiter or line break"))
+        }
+        if n == 34 {
+            if field.len() != 0 -> return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "a quoted CSV field must begin with a quote"))
+            quoted = true
+            i += 1
+            column += 1
+            next
+        }
+        if delimiter_at(raw, i, delimiter) {
+            &fields.push(String.from_bytes(field.copy()) ?? return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "invalid UTF-8 in CSV field")))
+            field = [U8]{}
+            i += delimiter.len()
+            column += 1
+            next
+        }
+        if n == 10 || n == 13 {
+            &fields.push(String.from_bytes(field.copy()) ?? return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "invalid UTF-8 in CSV field")))
+            field = [U8]{}
+            blank :: fields.len() == 1 && fields[0].len() == 0
+            if !(skip_blank && blank) -> &rows.push(CSVRow{line: row_line, fields: fields})
+            fields = [String]{}
+            if n == 13 && i + 1 < raw.len() && raw[i + 1] == (U8{10}) -> i += 1
+            line += 1
+            column = 1
+            i += 1
+            next
+        }
+        &field.push(b)
+        i += 1
+        column += 1
+    }
+    if quoted -> return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "unterminated quoted CSV field"))
+    if field.len() > 0 || fields.len() > 0 || closed {
+        &fields.push(String.from_bytes(field.copy()) ?? return Err(syntax_error(EncodingFormat.CSV, i, line, column, "", "invalid UTF-8 in CSV field")))
+        blank :: fields.len() == 1 && fields[0].len() == 0
+        if !(skip_blank && blank) -> &rows.push(CSVRow{line: row_line, fields: fields})
+    }
+    Ok(rows)
+}
+
+fn encode_row(fields: [String]) -> String {
+    out := ""
+    loop i in 0..<fields.len() {
+        if i > 0 -> out = "{out},"
+        out = "{out}{encode_field(fields[i])}"
+    }
+    out
+}
+
+fn encode_field(field: String) -> String {
+    needs := false
+    loop b in field.bytes() {
+        n :: b
+        if n == 44 || n == 34 || n == 10 || n == 13 -> needs = true
+    }
+    if !needs -> return field.copy()
+    out := [U8]{34}
+    loop b in field.bytes() {
+        if b == (U8{34}) {
+            &out.push(U8{34})
+            &out.push(U8{34})
+        } else { &out.push(b) }
+    }
+    &out.push(U8{34})
+    String.from_bytes(out) ?? field
+}
+
+struct DictRow {
+    fields: [String]
+    values: [String]
+}
+
+fn dict_rows(text: String) -> [DictRow] EncodingError! {
+    physical :: parse_rows(text, true)
+    if physical.len() == 0 -> return Ok([DictRow]{})
+    header :: physical[0].fields
+    out := [DictRow]{}
+    i := 1
+    loop i < physical.len() {
+        fields := [String]{}
+        values := [String]{}
+        k := 0
+        loop k < header.len() {
+            &fields.push(header[k])
+            if k < physical[i].fields.len() -> &values.push(physical[i].fields[k]) else {
+                &values.push("")
+            }
+            k = k + 1
+        }
+        &out.push(DictRow{fields: fields, values: values})
+        i = i + 1
+    }
+    Ok(out)
+}
+
+fn dict_get(row: DictRow, key: String) -> String? Never! {
+    i := 0
+    loop i < row.fields.len() {
+        if row.fields[i] == key -> return Val(row.values[i])
+        i = i + 1
+    }
+    None
+}
+
+fn dict_get_or(row: DictRow, key: String, fallback: String) -> String Never! {
+    dict_get(row, key) ?? fallback
+}
+
+fn write_dict(rows: [DictRow]) -> String Never! {
+    if rows.len() == 0 -> return ""
+    out := "{encode_row(rows[0].fields)}\n"
+    loop row in rows -> out = "{out}{encode_row(row.values)}\n"
+    out
+}
+
+fn fieldnames(rows: [DictRow]) -> [String] Never! {
+    if rows.len() == 0 -> return [String]{}
+    rows[0].fields
+}
+
+#Test("CSV typed renderer retains whole-value wire layout") {
+    assert(to_string([[String]{"a", "b"}, [String]{"c,d", "e"}]) == "a,b\n\"c,d\",e")
+    assert(to_string([[String]{}]) == "")
+}
+
+fn codec_error(kind: EncodingErrorKind, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError Never! {
+    EncodingError{format: .CSV, kind: kind, byte_offset: offset, line: Val(line), column: Val(column), path: path, reason: reason, cause: None}
+}
+
+fn csv_limits(limits: EncodingLimits) EncodingError! {
+    stream.validate_limits(limits) ?? {
+        error := err
+        error.format = .CSV
+        return Err(error)
+    }
+}
+
+struct CSVWriter {
+    output: FileWriter
+    limits: EncodingLimits
+    terminal: EncodingError?
+    total: Int
+    record_index: Int
+    finished: Bool
+    pending_crlf: Bool
+    buffer: [U8]
+
+    fn error(self, kind: EncodingErrorKind, field: Int, reason: String) -> EncodingError Never! {
+        codec_error(kind, self.total, self.record_index + 1, 1, "$[{self.record_index}][{field}]", reason)
+    }
+
+    fn io_error(self, cause: EncodingCause) -> EncodingError Never! {
+        error := self.error(.IO, 0, "file IO failed")
+        error.cause = Val(cause)
+        error
+    }
+
+    fn byte(&self, value: U8, count: Int) EncodingError! -[IO]> {
+        self.buffer[0] = value
+        self.buffer[1] = value
+        window :: self.buffer[0..<count]
+        encoding.__write_bytes(&self.output, window) ?? return Err(self.io_error(err))
+    }
+
+    fn close_record(&self) EncodingError! -[IO]> {
+        if !self.pending_crlf -> return
+        if self.limits.max_total_bytes == .Val(limit) {
+            if self.total > limit - 2 -> return Err(self.error(.Limit, 0, "max_total_bytes {limit} exceeded"))
+        }
+        self.buffer[0] = U8{13}
+        self.buffer[1] = U8{10}
+        window :: self.buffer[0..<2]
+        encoding.__write_bytes(&self.output, window) ?? return Err(self.io_error(err))
+        self.total += 2
+        self.pending_crlf = false
+    }
+
+    fn write_inner(&self, row: [String]) EncodingError! -[IO]> {
+        if self.finished -> return Err(self.error(.State, 0, "write called after finish"))
+        &self.close_record() ?? return Err(err)
+        decoded := 0
+        wire := 0
+        loop i in 0..<row.len() {
+            field :: row[i]
+            decoded += field.count_bytes()
+            if decoded > self.limits.max_item_bytes -> return Err(self.error(.Limit, i, "max_item_bytes {self.limits.max_item_bytes} exceeded"))
+            quoted := false
+            quotes := 0
+            loop at in 0..<field.count_bytes() {
+                byte :: stream.byte_at(field, at)
+                if byte == (U8{34}) -> quotes += 1
+                if byte == (U8{44}) || byte == (U8{34}) || byte == (U8{13}) || byte == (U8{10}) -> quoted = true
+            }
+            wire += field.count_bytes() + (if quoted -> 2 + quotes else -> 0) + (if i > 0 -> 1 else -> 0)
+        }
+        if self.limits.max_total_bytes == .Val(limit) {
+            if wire > limit - self.total - 2 {
+                last :: if row.len() > 0 -> row.len() - 1 else -> 0
+                return Err(self.error(.Limit, last, "max_total_bytes {limit} exceeded"))
+            }
+        }
+        loop i in 0..<row.len() {
+            if i > 0 -> &self.byte(U8{44}, 1) ?? return Err(err)
+            field :: row[i]
+            quoted := false
+            loop at in 0..<field.count_bytes() {
+                byte :: stream.byte_at(field, at)
+                if byte == (U8{44}) || byte == (U8{34}) || byte == (U8{13}) || byte == (U8{10}) -> quoted = true
+            }
+            if quoted {
+                &self.byte(U8{34}, 1) ?? return Err(err)
+                loop at in 0..<field.count_bytes() {
+                    byte :: stream.byte_at(field, at)
+                    &self.byte(byte, if byte == (U8{34}) -> 2 else -> 1) ?? return Err(err)
+                }
+                &self.byte(U8{34}, 1) ?? return Err(err)
+            } else { encoding.__write_text(&self.output, field) ?? return Err(self.io_error(err)) }
+        }
+        self.total += wire
+        self.pending_crlf = true
+        self.record_index += 1
+    }
+
+    fn write(&self, row: ^[String]) EncodingError! -[IO]> {
+        if self.terminal == .Val(error) -> return Err(error)
+        &self.write_inner(row) ?? {
+            self.terminal = Val(err)
+            return Err(err)
+        }
+    }
+
+    fn flush(&self) EncodingError! -[IO]> {
+        if self.terminal == .Val(error) -> return Err(error)
+        encoding.__flush(&self.output) ?? {
+            error :: self.io_error(err)
+            self.terminal = Val(error)
+            return Err(error)
+        }
+    }
+
+    fn finish(&self) EncodingError! -[IO]> {
+        if self.terminal == .Val(error) -> return Err(error)
+        if self.finished -> return
+        &self.close_record() ?? {
+            self.terminal = Val(err)
+            return Err(err)
+        }
+        &self.flush() ?? return Err(err)
+        self.finished = true
+    }
+}
+
+fn writer(target: ^FileWriter, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> CSVWriter EncodingError! {
+    csv_limits(limits) ?? return Err(err)
+    Ok(CSVWriter{output: ^target, limits: limits, terminal: None, total: 0, record_index: 0, finished: false, pending_crlf: false, buffer: [U8]{0, 0}})
+}
+
+struct CSVReader {
+    input: FileReader
+    limits: EncodingLimits
+    delimiter: Int
+    header: Bool
+    skip_blank: Bool
+    field: [U8]
+    fields: [String]
+    fields_heap: Int
+    allocation: stream.AllocationBudget
+    quoted: Bool
+    after_quote: Bool
+    pending_cr: Bool
+    pending_cr_line: Int
+    pending_cr_column: Int
+    record: Int
+    parser_line: Int
+    parser_column: Int
+    record_line: Int
+    record_has_content: Bool
+    ended_record: Bool
+    saw_input: Bool
+    total: Int
+    offset: Int
+    line: Int
+    column: Int
+    eof: Bool
+    terminal: EncodingError?
+    char0: U8
+    char1: U8
+    char2: U8
+    char3: U8
+    char_width: Int
+
+    fn path(self) -> String Never! { "$[{self.record - 1}][{self.fields.len()}]" }
+
+    fn parser_error(self, kind: EncodingErrorKind, line: Int, column: Int, reason: String) -> EncodingError Never! {
+        offset :: if self.offset > 0 -> self.offset - 1 else -> 0
+        codec_error(kind, offset, line, column, self.path(), reason)
+    }
+
+    fn capacity_error(self) -> EncodingError Never! {
+        codec_error(.Limit, self.offset, self.parser_line, self.parser_column, self.path(), "CSV record heap exceeded the bounded codec heap ceiling")
+    }
+
+    fn byte(&self) -[IO]> U8? EncodingError! {
+        byte :: if encoding.__read_byte(&self.input) == {
+            .Ok(value) -> value
+            .Err(cause) -> {
+                error := codec_error(.IO, self.offset, self.line, self.column, self.path(), "file IO failed")
+                error.cause = Val(cause)
+                return Err(error)
+            }
+        }
+        if byte == None -> return Ok(None)
+        if self.limits.max_total_bytes == .Val(limit) {
+            if self.total >= limit -> return Err(codec_error(.Limit, self.offset, self.line, self.column, self.path(), "max_total_bytes {limit} exceeded"))
+        }
+        self.total += 1
+        self.offset += 1
+        if byte == (Val(U8{10})) {
+            self.line += 1
+            self.column = 1
+        } else { self.column += 1 }
+        Ok(byte)
+    }
+
+    fn utf8_error(self, offset: Int) -> EncodingError Never! {
+        codec_error(.Syntax, offset, self.line, self.column, self.path(), "CSV input is not valid UTF-8")
+    }
+
+    fn character(&self) -[IO]> Int? EncodingError! {
+        first :: if &self.byte() == {
+            .Ok(value) -> value
+            .Err(error) -> { return Err(error) }
+        }
+        self.char0 = first ?? return Ok(None)
+        n :: Int.from_u8(self.char0)
+        width :: if n <= 127 -> 1 else if n >= 194 && n <= 223 -> 2 else if n >= 224 && n <= 239 -> 3 else if n >= 240 && n <= 244 -> 4 else -> 0
+        if width == 0 -> return Err(self.utf8_error(self.offset - 1))
+        self.char_width = width
+        loop i in 1..<width {
+            byte :: if &self.byte() == {
+                .Ok(value) -> value
+                .Err(error) -> { return Err(error) }
+            }
+            continuation :: byte ?? return Err(self.utf8_error(self.offset))
+            if i == 1 -> self.char1 = continuation
+            else if i == 2 -> self.char2 = continuation
+            else -> self.char3 = continuation
+        }
+        loop i in 1..<width {
+            b :: Int.from_u8(self.character_byte(i))
+            if b < 128 || b > 191 -> return Err(self.utf8_error(self.offset - width))
+        }
+        second :: Int.from_u8(self.char1)
+        if (n == 224 && second < 160) || (n == 237 && second > 159) || (n == 240 && second < 144) || (n == 244 && second > 143) -> return Err(self.utf8_error(self.offset - width))
+        value := n.bit_and((if width == 1 -> 127 else if width == 2 -> 31 else if width == 3 -> 15 else -> 7))
+        loop i in 1..<width -> value = (value << 6).bit_or((Int.from_u8(self.character_byte(i)).bit_and(63)))
+        Ok(Val(value))
+    }
+
+    fn character_byte(self, index: Int) -> U8 Never! {
+        if index == 0 -> self.char0 else if index == 1 -> self.char1 else if index == 2 -> self.char2 else -> self.char3
+    }
+
+    fn append(&self, byte: U8) EncodingError! {
+        capacity :: mem.__list_capacity<U8>(self.field)
+        if self.field.len() == capacity {
+            grown :: if capacity < 8 -> 8 else -> capacity * 2
+            additional :: grown - self.field.len()
+            if !stream.reserve<U8>(self.allocation, &self.field, additional) -> return Err(self.capacity_error())
+        }
+        &self.field.push(byte)
+    }
+
+    fn finish_field(&self) EncodingError! {
+        capacity :: mem.__list_capacity<String>(self.fields)
+        if self.fields.len() == capacity {
+            grown :: if capacity < 4 -> 4 else -> capacity * 2
+            additional :: grown - self.fields.len()
+            if !stream.reserve<String>(self.allocation, &self.fields, additional) -> return Err(self.capacity_error())
+        }
+        self.fields_heap += mem.__list_capacity<U8>(self.field)
+        text := ""
+        #Unsafe("each completed UTF-8 scalar was validated before its original bytes entered this field") {
+            text = encoding.__bytes_into_text(^self.field)
+        }
+        self.field = [U8]{}
+        &self.fields.push(text)
+    }
+
+    fn finish_record(&self) -> CSVRow? EncodingError! {
+        &self.finish_field() ?? return Err(err)
+        number :: self.record
+        line :: self.record_line
+        content :: self.record_has_content
+        self.record += 1
+        self.record_line = self.parser_line
+        self.record_has_content = false
+        self.ended_record = true
+        if (self.header && number == 1) || (self.skip_blank && !content) {
+            loop self.fields.len() > 0 -> _ :: &self.fields.pop()
+            self.allocation.release(self.fields_heap)
+            self.fields_heap = 0
+            return Ok(None)
+        }
+        heap :: mem.__list_capacity<String>(self.fields) * mem.__type_size<String>() + self.fields_heap
+        fields :: self.fields.copy()
+        self.fields = [String]{}
+        self.fields_heap = 0
+        self.allocation.release(heap)
+        Ok(Val(CSVRow{line: line, fields: ^fields}))
+    }
+
+    fn push(&self, character: Int) -> CSVRow? EncodingError! {
+        appended := 0
+        if self.pending_cr {
+            if self.quoted && character == 10 -> appended = 2
+        } else if self.quoted {
+            if self.after_quote {
+                if character == 34 -> appended = 1
+            } else if character != 34 -> appended = self.char_width
+        } else if character != 34 && character != 13 && character != 10 && character != self.delimiter -> appended = self.char_width
+        if self.field.len() + appended > self.limits.max_item_bytes {
+            return Err(self.parser_error(.Limit, self.parser_line, self.parser_column, "max_item_bytes {self.limits.max_item_bytes} exceeded"))
+        }
+        self.saw_input = true
+        if self.pending_cr {
+            if character != 10 -> return Err(self.parser_error(.Syntax, self.pending_cr_line, self.pending_cr_column, "bare CR is not a record ending"))
+            self.pending_cr = false
+            self.parser_line += 1
+            self.parser_column = 0
+            if self.quoted {
+                &self.append(U8{13}) ?? return Err(err)
+                &self.append(U8{10}) ?? return Err(err)
+                return Ok(None)
+            }
+            return &self.finish_record()
+        }
+        self.ended_record = false
+        self.parser_column += 1
+        if self.quoted {
+            if self.after_quote {
+                if character == 34 {
+                    &self.append(U8{34}) ?? return Err(err)
+                    self.after_quote = false
+                    return Ok(None)
+                }
+                if character == self.delimiter {
+                    &self.finish_field() ?? return Err(err)
+                    self.quoted = false
+                    self.after_quote = false
+                    return Ok(None)
+                }
+                if character == 13 || character == 10 {
+                    self.quoted = false
+                    self.after_quote = false
+                } else {
+                    name :: if self.delimiter == 44 -> "comma" else -> "delimiter"
+                    return Err(self.parser_error(.Syntax, self.parser_line, self.parser_column, "only quote, {name}, CRLF, LF, or EOF may follow a closing quote"))
+                }
+            } else {
+                if character == 34 -> self.after_quote = true
+                else {
+                    loop i in 0..<self.char_width -> &self.append(self.character_byte(i)) ?? return Err(err)
+                    if character == 10 {
+                        self.parser_line += 1
+                        self.parser_column = 0
+                    }
+                }
+                return Ok(None)
+            }
+        }
+        if character == 34 {
+            if self.field.len() != 0 -> return Err(self.parser_error(.Syntax, self.parser_line, self.parser_column, "quote inside an unquoted field"))
+            self.quoted = true
+            self.record_has_content = true
+        } else if character == self.delimiter -> &self.finish_field() ?? return Err(err)
+        else if character == 13 {
+            self.pending_cr = true
+            self.pending_cr_line = self.parser_line
+            self.pending_cr_column = self.parser_column
+        } else if character == 10 {
+            self.parser_line += 1
+            self.parser_column = 0
+            return &self.finish_record()
+        } else {
+            loop i in 0..<self.char_width -> &self.append(self.character_byte(i)) ?? return Err(err)
+            self.record_has_content = true
+        }
+        Ok(None)
+    }
+
+    fn next_inner(&self) -[IO]> CSVRow? EncodingError! {
+        if self.eof -> return Ok(None)
+        loop {
+            character :: if &self.character() == {
+                .Ok(value) -> value
+                .Err(error) -> { return Err(error) }
+            }
+            if character == .Val(value) {
+                row :: if &self.push(value) == {
+                    .Ok(record) -> record
+                    .Err(error) -> { return Err(error) }
+                }
+                if row != None -> return Ok(Val(row))
+            } else {
+                self.eof = true
+                if self.pending_cr -> return Err(self.parser_error(.Syntax, self.pending_cr_line, self.pending_cr_column, "bare CR is not a record ending"))
+                if self.quoted && !self.after_quote -> return Err(self.parser_error(.Truncated, self.parser_line, self.parser_column + 1, "quoted field ended before its closing quote"))
+                if self.ended_record || !self.saw_input -> return Ok(None)
+                self.quoted = false
+                self.after_quote = false
+                return &self.finish_record()
+            }
+        }
+    }
+
+    fn next(&self) -[IO]> CSVRow? EncodingError! {
+        if self.terminal == .Val(error) -> return Err(error)
+        result :: if &self.next_inner() == {
+            .Ok(row) -> row
+            .Err(error) -> {
+                self.terminal = Val(error)
+                return Err(error)
+            }
+        }
+        Ok(result)
+    }
+}
+
+fn reader(source: ^FileReader, limits: EncodingLimits{EncodingLimits.safe()}, delimiter: String{","}, header: Bool{false}, skip_blank: Bool{false}) -[FS]> CSVReader EncodingError! {
+    csv_limits(limits) ?? return Err(err)
+    raw :: delimiter.bytes()
+    reason :: "E2701: CSV delimiter must be exactly one character other than quote or line ending"
+    if raw.len() == 0 || raw.len() > 4 -> return Err(codec_error(.Syntax, 0, 1, 1, "", reason))
+    n :: Int.from_u8(raw[0])
+    width :: if n < 128 -> 1 else if n < 224 -> 2 else if n < 240 -> 3 else -> 4
+    if raw.len() != width || n == 34 || n == 13 || n == 10 -> return Err(codec_error(.Syntax, 0, 1, 1, "", reason))
+    code := n.bit_and((if width == 1 -> 127 else if width == 2 -> 31 else if width == 3 -> 15 else -> 7))
+    loop i in 1..<width -> code = (code << 6).bit_or((Int.from_u8(raw[i]).bit_and(63)))
+    Ok(CSVReader{input: ^source, limits: limits, delimiter: code, header: header, skip_blank: skip_blank, field: [U8]{}, fields: [String]{}, fields_heap: 0, allocation: stream.budget(limits), quoted: false, after_quote: false, pending_cr: false, pending_cr_line: 1, pending_cr_column: 1, record: 1, parser_line: 1, parser_column: 0, record_line: 1, record_has_content: false, ended_record: false, saw_input: false, total: 0, offset: 0, line: 1, column: 1, eof: false, terminal: None, char0: U8{0}, char1: U8{0}, char2: U8{0}, char3: U8{0}, char_width: 0})
+}
+
+#Test("typed CSV whole records preserve blank rows, doubled quotes and Unicode columns") {
+    input :: stream.text_from_bytes([U8]{97, 44, 98, 13, 10, 34, 120, 34, 34, 121, 34, 44, 122, 13, 10, 10}) ?? panic("UTF-8")
+    records :: typed_records(input) ?? panic("CSV")
+    assert_eq(records.len(), 3)
+    assert_eq(records[1][0], "x\"y")
+    assert_eq(records[2], [String]{""})
+    if typed_records("é\"") == {
+        .Err(error) -> assert_eq(error.reason, "E2701: CSV row 1, line 1, column 2 — quote inside an unquoted field")
+        else -> panic("unquoted quote must fail")
+    }
+    if typed_records("\"x") == {
+        .Err(error) -> assert_eq(error.reason, "E2701: CSV row 1, line 1, column 3 — quoted field ended before its closing quote")
+        else -> panic("unfinished quoted field must fail")
+    }
+}
+
+#Test("CSV structured cells retain compact JSON text") {
+    assert_eq(csv_cell(Dyn.Array([Dyn]{Dyn.Int(1), Dyn.Bool(true)})), "[1,true]")
+}

@@ -3,7 +3,7 @@ fn wrapped(value: U8) -> U8 { return value + U8{1} }
 fn run() {}
 
 REFLECTION_APP :: Output.Executable{ name: "reflection", entry: reflection_probe }
-fn build(b: BuildContext) -> BuildPlan {
+fn build(b: Build) {
     loop function in b.program.functions {
         if function.name == "wrapped" {
             operation :: function.arithmetic[0].operation
@@ -24,7 +24,7 @@ fn build(b: BuildContext) -> BuildPlan {
         }
     }
     app :: b.add_executable("reflection", ["main.jet", ".jet/generated/reflection/reflection_values.jet"], [])
-    return b.plan(app)
+    b.default(app)
 }
 fn reflection_probe() {
     

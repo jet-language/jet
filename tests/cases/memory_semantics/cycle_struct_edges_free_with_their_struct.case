@@ -1,0 +1,27 @@
+# #5917: a struct field on a recursive type cycle (a recursive edge) keeps its
+# value in a wrapper box the struct owns; a copy gets its own and the struct's
+# drop frees it with the value. The program churns every cycle shape (list
+# payload, Option, Map values, tuple, mutually recursive enums, edge-only
+# struct, and that struct captured by a closure) and panics when its peak RSS
+# grows with the round count; the compile-time checksum runs the same shapes
+# in the compiler (comptime tier).
+# The web target is not Jet-hosted yet (E2104), so no web step.
+fixture: cycle_struct_edges_free_with_their_struct.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet build main.jet
+exit: 0
+step aot: built
+stdin: null
+limit: time=120
+exit: 0
+stdout: = cycle_struct_edges_free_with_their_struct.stdout.expected
+stderr: empty
+step: jet run main.jet
+stdin: null
+limit: time=120
+exit: 0
+stdout: = cycle_struct_edges_free_with_their_struct.stdout.expected
+stderr: empty

@@ -1,0 +1,534 @@
+// SSA over the slot IR (O2, stage A of the optimizing pipeline): every
+// slot write defines a new value, and a construct's join (a Loop's header,
+// the point after a Block's or an If's End) has one phi per slot written
+// inside the construct. The instructions stay where they are: IRSsa maps
+// each instruction's slot operands to the values they read and its result
+// to the value it defines, so a pass rewrites values and SsaOut.jet turns
+// the result back into slot IR.
+//
+// The renaming walks the structured code once. A construct's written
+// slots are known before it opens (ir_ssa_written), so a Loop's header phis
+// exist before its body reads them and every edge into a join records the
+// current value of each slot the join merges: a Loop's entry (before the
+// Loop) and each Br or BrIf to it; a Block's or an If's fall-through End or
+// Else, each Br or BrIf leaving it, and an If without an Else's false
+// branch. Code after a Br, Return or Unreachable up to the next Else or End
+// is unreachable: it gets no block and no values. A slot read before any
+// write reads its Undef value. Phis whose arguments are one value (or the
+// phi itself) are replaced by that value (Braun et al. 2013).
+//
+// Blocks are straight-line runs, created in instruction order, which is a
+// topological order of the forward edges (every back edge enters a Loop
+// header), so one pass of Cooper-Harvey-Kennedy finds the immediate
+// dominators.
+
+enum IRSsaKind { Param Def Phi Undef }
+
+// Where an edge into a join leaves: falling through (a Loop's entry, an
+// Else, an End), a Br, a BrIf, or an If without an Else's false branch.
+enum IRSsaEdgeKind { Fall Br BrIf IfFalse }
+
+struct IRSsa {
+    // Per value: its slot (and so its type row), kind, and the parameter
+    // slot, defining instruction or phi index; `repl` the value it was
+    // replaced by (itself when none: ir_ssa_find).
+    val_slot: [Int]
+    val_kind: [IRSsaKind]
+    val_at: [Int]
+    repl: [Int]
+    // Per slot: its Undef value, -1 until one is read.
+    undef: [Int]
+    // Per instruction: the value it defines, the values its operands a, b
+    // and c read (-1 when the operand is not a slot read), and its block
+    // (-1 in unreachable code).
+    def: [Int]
+    use_a: [Int]
+    use_b: [Int]
+    use_c: [Int]
+    block: [Int]
+    // Per args-pool entry: the value the call operand reads (-1: none).
+    use_args: [Int]
+    // Per block: predecessors (for a join, in its edges' order), immediate
+    // dominator, and preorder/postorder numbers of the dominator tree.
+    preds: [[Int]]
+    idom: [Int]
+    pre: [Int]
+    post: [Int]
+    // Per instruction: the join of the construct it opens (-1).
+    join_of: [Int]
+    // Per join: its opener, merged slots, phis (by slot position), edges,
+    // and the block its phis start (-1 until reached).
+    join_opener: [Int]
+    join_slots: [[Int]]
+    join_phis: [[Int]]
+    join_edges: [[Int]]
+    join_block: [Int]
+    // Per edge: kind, the instruction its copies go before (an IfFalse
+    // edge's: the If's End), the block it leaves, its join, and where its
+    // values (one per merged slot) start in `edge_vals`.
+    edge_kind: [IRSsaEdgeKind]
+    edge_at: [Int]
+    edge_block: [Int]
+    edge_join: [Int]
+    edge_start: [Int]
+    edge_vals: [Int]
+    // Per edge: its position among its join's edges.
+    edge_pos: [Int]
+    // Per phi: its join, its slot position there, and its value.
+    phi_join: [Int]
+    phi_index: [Int]
+    phi_val: [Int]
+}
+
+fn ir_ssa_find(s: IRSsa, value: Int) -> Int Never! {
+    at := value
+    loop at >= 0 && s.repl[at] != at -> at = s.repl[at]
+    at
+}
+
+fn ir_ssa_value(s: &IRSsa, slot: Int, kind: IRSsaKind, at: Int) -> Int Never! {
+    id :: s.val_slot.len()
+    &s.val_slot.push(slot)
+    &s.val_kind.push(kind)
+    &s.val_at.push(at)
+    &s.repl.push(id)
+    id
+}
+
+fn ir_ssa_undef(s: &IRSsa, slot: Int) -> Int Never! {
+    if s.undef[slot] < 0 -> s.undef[slot] = ir_ssa_value(&s, slot, .Undef, -1)
+    s.undef[slot]
+}
+
+// The value `slot` holds now (its Undef value before any write).
+fn ir_ssa_read(s: &IRSsa, current: [Int], slot: Int) -> Int Never! {
+    if current[slot] >= 0 -> return current[slot]
+    ir_ssa_undef(&s, slot)
+}
+
+fn ir_ssa_block(s: &IRSsa, preds: ^[Int]) -> Int Never! {
+    id :: s.preds.len()
+    &s.preds.push(^preds)
+    id
+}
+
+// An edge from `from` into join `join`, carrying the current value of each
+// slot the join merges.
+fn ir_ssa_edge(s: &IRSsa, join: Int, kind: IRSsaEdgeKind, at: Int, from: Int, current: [Int]) Never! {
+    id :: s.edge_kind.len()
+    &s.edge_kind.push(kind)
+    &s.edge_at.push(at)
+    &s.edge_block.push(from)
+    &s.edge_join.push(join)
+    &s.edge_start.push(s.edge_vals.len())
+    &s.edge_pos.push(s.join_edges[join].len())
+    loop k in 0..<s.join_slots[join].len() {
+        slot :: s.join_slots[join][k]
+        value :: ir_ssa_read(&s, current, slot)
+        &s.edge_vals.push(value)
+    }
+    &s.join_edges[join].push(id)
+    // A Loop header exists before its back edges.
+    if s.join_block[join] >= 0 -> &s.preds[s.join_block[join]].push(from)
+}
+
+// The phis of join `join` at its block; each merged slot now holds its phi.
+fn ir_ssa_phis(s: &IRSsa, join: Int, current: &[Int]) Never! {
+    loop k in 0..<s.join_slots[join].len() {
+        slot :: s.join_slots[join][k]
+        phi :: s.phi_join.len()
+        value :: ir_ssa_value(&s, slot, .Phi, phi)
+        &s.phi_join.push(join)
+        &s.phi_index.push(k)
+        &s.phi_val.push(value)
+        &s.join_phis[join].push(value)
+        current[slot] = value
+    }
+}
+
+// The argument of phi `phi` on its join's `k`-th edge.
+fn ir_ssa_phi_arg(s: IRSsa, phi: Int, k: Int) -> Int Never! {
+    edge :: s.join_edges[s.phi_join[phi]][k]
+    s.edge_vals[s.edge_start[edge] + s.phi_index[phi]]
+}
+
+// The slots each construct writes (its join's merged slots), in first-write
+// order. `depth[slot]` is the depth of the innermost open construct known to
+// write it: a construct that writes a slot makes every enclosing open one
+// write it too.
+fn ir_ssa_written(s: &IRSsa, f: IRFunction) Never! {
+    depth := [Int]{}
+    loop _ in 0..<f.slot_type.len() -> &depth.push(0)
+    open := [Int]{}
+    loop at in 0..<f.op.len() {
+        op :: f.op[at]
+        if op == .Block || op == .Loop || op == .If {
+            join :: s.join_opener.len()
+            &s.join_opener.push(at)
+            &s.join_slots.push([Int]{})
+            &s.join_phis.push([Int]{})
+            &s.join_edges.push([Int]{})
+            &s.join_block.push(-1)
+            s.join_of[at] = join
+            &open.push(join)
+            next
+        }
+        if op == .End {
+            join :: &open.pop() ?? panic("ir_ssa_written: End without an open construct")
+            outer :: open.len()
+            loop slot in s.join_slots[join] {
+                if depth[slot] > outer -> depth[slot] = outer
+            }
+            next
+        }
+        written :: ir_x64_write(f, at)
+        if written < 0 || written >= depth.len() -> next
+        level :: open.len()
+        if depth[written] >= level -> next
+        loop k in depth[written]..<level -> &s.join_slots[open[k]].push(written)
+        depth[written] = level
+    }
+}
+
+fn ir_ssa_new(f: IRFunction) -> IRSsa Never! {
+    s := IRSsa{
+        val_slot: [Int]{}, val_kind: [IRSsaKind]{}, val_at: [Int]{}, repl: [Int]{}, undef: [Int]{},
+        def: [Int]{}, use_a: [Int]{}, use_b: [Int]{}, use_c: [Int]{}, block: [Int]{}, use_args: [Int]{},
+        preds: [[Int]]{}, idom: [Int]{}, pre: [Int]{}, post: [Int]{},
+        join_of: [Int]{}, join_opener: [Int]{}, join_slots: [[Int]]{}, join_phis: [[Int]]{}, join_edges: [[Int]]{}, join_block: [Int]{},
+        edge_kind: [IRSsaEdgeKind]{}, edge_at: [Int]{}, edge_block: [Int]{}, edge_join: [Int]{}, edge_start: [Int]{}, edge_vals: [Int]{}, edge_pos: [Int]{},
+        phi_join: [Int]{}, phi_index: [Int]{}, phi_val: [Int]{},
+    }
+    loop _ in 0..<f.slot_type.len() -> &s.undef.push(-1)
+    loop _ in 0..<f.op.len() {
+        &s.def.push(-1)
+        &s.use_a.push(-1)
+        &s.use_b.push(-1)
+        &s.use_c.push(-1)
+        &s.block.push(-1)
+        &s.join_of.push(-1)
+    }
+    loop _ in 0..<f.args.len() -> &s.use_args.push(-1)
+    s
+}
+
+// Records the values instruction `at`'s slot operands read.
+fn ir_ssa_reads(s: &IRSsa, f: IRFunction, at: Int, current: [Int]) Never! {
+    op :: f.op[at]
+    a :: f.a[at]
+    if op == {
+        .Copy | .Move | .Drop | .Close | .Neg | .Not | .Convert | .Load | .Offset | .If | .BrIf -> s.use_a[at] = ir_ssa_read(&s, current, a)
+        .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Concat | .CopyBytes -> {
+            s.use_a[at] = ir_ssa_read(&s, current, a)
+            s.use_b[at] = ir_ssa_read(&s, current, f.b[at])
+        }
+        .Store -> {
+            s.use_a[at] = ir_ssa_read(&s, current, a)
+            s.use_c[at] = ir_ssa_read(&s, current, f.c[at])
+        }
+        .Call | .CallRuntime | .CallIndirect -> {
+            if op == .CallIndirect -> s.use_a[at] = ir_ssa_read(&s, current, a)
+            loop index in f.b[at]..<(f.b[at] + f.c[at]) -> s.use_args[index] = ir_ssa_read(&s, current, f.args[index])
+        }
+        .Return -> { if a >= 0 -> s.use_a[at] = ir_ssa_read(&s, current, a) }
+        else -> {}
+    }
+}
+
+fn ir_ssa_build(f: IRFunction) -> IRSsa Never! {
+    s := ir_ssa_new(f)
+    ir_ssa_written(&s, f)
+    current := [Int]{}
+    loop _ in 0..<f.slot_type.len() -> &current.push(-1)
+    loop slot in 0..<f.param_count -> current[slot] = ir_ssa_value(&s, slot, .Param, slot)
+    block := ir_ssa_block(&s, [Int]{})
+    live := true
+    // Per open construct: its opener, the block an If branches from (-1
+    // when unreachable or not an If), and an If's merged slots' values at
+    // the If (restored at its Else).
+    open := [Int]{}
+    branch := [Int]{}
+    saved := [[Int]]{}
+    loop at in 0..<f.op.len() {
+        op :: f.op[at]
+        if live -> s.block[at] = block
+        if op == {
+            .Block -> {
+                &open.push(at)
+                &branch.push(-1)
+                &saved.push([Int]{})
+                if live -> block = ir_ssa_block(&s, [Int]{block})
+            }
+            .Loop -> {
+                join :: s.join_of[at]
+                &open.push(at)
+                &branch.push(-1)
+                &saved.push([Int]{})
+                if live {
+                    ir_ssa_edge(&s, join, .Fall, at, block, current)
+                    block = ir_ssa_block(&s, [Int]{block})
+                    s.join_block[join] = block
+                    ir_ssa_phis(&s, join, &current)
+                }
+            }
+            .If -> {
+                join :: s.join_of[at]
+                values := [Int]{}
+                if live {
+                    ir_ssa_reads(&s, f, at, current)
+                    loop slot in s.join_slots[join] -> &values.push(current[slot])
+                    if f.b[at] < 0 -> ir_ssa_edge(&s, join, .IfFalse, f.c[at], block, current)
+                }
+                &open.push(at)
+                &branch.push(if live -> block else -> -1)
+                &saved.push(^values)
+                if live -> block = ir_ssa_block(&s, [Int]{block})
+            }
+            .Else -> {
+                top :: open.len() - 1
+                join :: s.join_of[open[top]]
+                if live -> ir_ssa_edge(&s, join, .Fall, at, block, current)
+                if branch[top] >= 0 {
+                    loop (k, slot) in s.join_slots[join] -> current[slot] = saved[top][k]
+                    block = ir_ssa_block(&s, [Int]{branch[top]})
+                    live = true
+                } else {
+                    live = false
+                }
+            }
+            .End -> {
+                opener :: &open.pop() ?? panic("ir_ssa_build: End without an open construct")
+                _ := &branch.pop()
+                _ := &saved.pop()
+                join :: s.join_of[opener]
+                if f.op[opener] == .Loop {
+                    if live -> block = ir_ssa_block(&s, [Int]{block})
+                    next
+                }
+                if live -> ir_ssa_edge(&s, join, .Fall, at, block, current)
+                if s.join_edges[join].len() == 0 {
+                    live = false
+                    next
+                }
+                preds := [Int]{}
+                loop edge in s.join_edges[join] -> &preds.push(s.edge_block[edge])
+                block = ir_ssa_block(&s, ^preds)
+                s.join_block[join] = block
+                ir_ssa_phis(&s, join, &current)
+                live = true
+            }
+            .Br -> {
+                if live {
+                    target :: open[open.len() - 1 - f.a[at]]
+                    join :: s.join_of[target]
+                    ir_ssa_edge(&s, join, .Br, at, block, current)
+                }
+                live = false
+            }
+            .BrIf -> {
+                if live {
+                    ir_ssa_reads(&s, f, at, current)
+                    target :: open[open.len() - 1 - f.b[at]]
+                    join :: s.join_of[target]
+                    ir_ssa_edge(&s, join, .BrIf, at, block, current)
+                    block = ir_ssa_block(&s, [Int]{block})
+                }
+            }
+            .Return | .Unreachable -> {
+                if live -> ir_ssa_reads(&s, f, at, current)
+                live = false
+            }
+            else -> {
+                if !live -> next
+                ir_ssa_reads(&s, f, at, current)
+                written :: ir_x64_write(f, at)
+                if written >= 0 {
+                    value :: ir_ssa_value(&s, written, .Def, at)
+                    s.def[at] = value
+                    current[written] = value
+                }
+            }
+        }
+    }
+    ir_ssa_prune(&s)
+    ir_ssa_dominators(&s)
+    s
+}
+
+// Replaces each phi whose arguments are one value (or itself) by that
+// value, until none is left.
+fn ir_ssa_prune(s: &IRSsa) Never! {
+    changed := true
+    loop changed {
+        changed = false
+        loop phi in 0..<s.phi_val.len() {
+            value :: s.phi_val[phi]
+            if s.repl[value] != value -> next
+            same := -1
+            trivial := true
+            loop k in 0..<s.join_edges[s.phi_join[phi]].len() {
+                arg :: ir_ssa_find(s, ir_ssa_phi_arg(s, phi, k))
+                if arg == value || arg == same -> next
+                if same >= 0 {
+                    trivial = false
+                    break
+                }
+                same = arg
+            }
+            if !trivial -> next
+            slot :: s.val_slot[value]
+            s.repl[value] = if same >= 0 -> same else -> ir_ssa_undef(&s, slot)
+            changed = true
+        }
+    }
+}
+
+// Immediate dominators (one Cooper-Harvey-Kennedy pass: blocks are numbered
+// in a topological order of the forward edges and a back edge's source is
+// numbered after its header) and the dominator tree's pre/post numbers.
+fn ir_ssa_dominators(s: &IRSsa) Never! {
+    count :: s.preds.len()
+    loop _ in 0..<count {
+        &s.idom.push(-1)
+        &s.pre.push(0)
+        &s.post.push(0)
+    }
+    if count == 0 -> return
+    s.idom[0] = 0
+    loop block in 1..<count {
+        dom := -1
+        loop pred in s.preds[block] {
+            if pred >= block || s.idom[pred] < 0 -> next
+            if dom < 0 {
+                dom = pred
+                next
+            }
+            x := pred
+            y := dom
+            loop x != y {
+                loop x > y -> x = s.idom[x]
+                loop y > x -> y = s.idom[y]
+            }
+            dom = x
+        }
+        s.idom[block] = dom
+    }
+    children := [[Int]]{}
+    loop _ in 0..<count -> &children.push([Int]{})
+    loop block in 1..<count {
+        if s.idom[block] >= 0 -> &children[s.idom[block]].push(block)
+    }
+    clock := 0
+    work := [Int]{0}
+    next_child := [Int]{0}
+    s.pre[0] = clock
+    clock += 1
+    loop work.len() > 0 {
+        top :: work.len() - 1
+        node :: work[top]
+        if next_child[top] < children[node].len() {
+            child :: children[node][next_child[top]]
+            next_child[top] = next_child[top] + 1
+            s.pre[child] = clock
+            clock += 1
+            &work.push(child)
+            &next_child.push(0)
+            next
+        }
+        s.post[node] = clock
+        clock += 1
+        _ := &work.pop()
+        _ := &next_child.pop()
+    }
+}
+
+// Whether block `a` dominates block `b`.
+fn ir_ssa_dominates(s: IRSsa, a: Int, b: Int) -> Bool Never! {
+    s.pre[a] <= s.pre[b] && s.post[b] <= s.post[a]
+}
+
+// Whether `value` is available at instruction `at` in block `block`.
+fn ir_ssa_available(s: IRSsa, value: Int, block: Int, at: Int) -> Bool Never! {
+    if s.val_kind[value] == {
+        .Param | .Undef -> true
+        .Phi -> ir_ssa_dominates(s, s.join_block[s.phi_join[s.val_at[value]]], block)
+        .Def -> {
+            home :: s.block[s.val_at[value]]
+            if home == block -> s.val_at[value] < at else -> home >= 0 && ir_ssa_dominates(s, home, block)
+        }
+    }
+}
+
+// Every value a reachable instruction reads, and every argument of a phi
+// that is read, transitively (a phi read by nothing is dead).
+fn ir_ssa_live(s: IRSsa, f: IRFunction) -> [Bool] Never! {
+    live := [Bool]{}
+    loop _ in 0..<s.val_slot.len() -> &live.push(false)
+    work := [Int]{}
+    loop at in 0..<f.op.len() {
+        if s.block[at] < 0 -> next
+        ir_ssa_mark(s, &live, &work, s.use_a[at])
+        ir_ssa_mark(s, &live, &work, s.use_b[at])
+        ir_ssa_mark(s, &live, &work, s.use_c[at])
+        op :: f.op[at]
+        if op == .Call || op == .CallRuntime || op == .CallIndirect {
+            loop index in f.b[at]..<(f.b[at] + f.c[at]) -> ir_ssa_mark(s, &live, &work, s.use_args[index])
+        }
+    }
+    loop work.len() > 0 {
+        value :: &work.pop() ?? break
+        phi :: s.val_at[value]
+        loop k in 0..<s.join_edges[s.phi_join[phi]].len() -> ir_ssa_mark(s, &live, &work, ir_ssa_phi_arg(s, phi, k))
+    }
+    live
+}
+
+fn ir_ssa_mark(s: IRSsa, live: &[Bool], work: &[Int], used: Int) Never! {
+    if used < 0 -> return
+    value :: ir_ssa_find(s, used)
+    if live[value] -> return
+    live[value] = true
+    if s.val_kind[value] == .Phi -> &work.push(value)
+}
+
+// The verifier: every value read is available where it is read (a phi's
+// argument at the end of its edge's block) and has the type of the slot
+// operand it stands for. Returns one line per violation.
+fn ir_ssa_verify(f: IRFunction, s: IRSsa) -> [String] Never! {
+    errors := [String]{}
+    loop at in 0..<f.op.len() {
+        block :: s.block[at]
+        if block < 0 -> next
+        op :: f.op[at]
+        ir_ssa_check(f, s, &errors, s.use_a[at], f.a[at], block, at)
+        ir_ssa_check(f, s, &errors, s.use_b[at], f.b[at], block, at)
+        ir_ssa_check(f, s, &errors, s.use_c[at], f.c[at], block, at)
+        if op == .Call || op == .CallRuntime || op == .CallIndirect {
+            loop index in f.b[at]..<(f.b[at] + f.c[at]) -> ir_ssa_check(f, s, &errors, s.use_args[index], f.args[index], block, at)
+        }
+        if s.def[at] >= 0 && s.val_slot[s.def[at]] != ir_x64_write(f, at) -> &errors.push("{f.key}: instruction {at} defines a value of slot {s.val_slot[s.def[at]]}")
+    }
+    loop phi in 0..<s.phi_val.len() {
+        value :: s.phi_val[phi]
+        if s.repl[value] != value -> next
+        join :: s.phi_join[phi]
+        if s.join_block[join] < 0 || s.preds[s.join_block[join]].len() != s.join_edges[join].len() {
+            &errors.push("{f.key}: phi {value} has {s.join_edges[join].len()} edges for its block's predecessors")
+            next
+        }
+        loop k in 0..<s.join_edges[join].len() {
+            edge :: s.join_edges[join][k]
+            arg :: ir_ssa_find(s, ir_ssa_phi_arg(s, phi, k))
+            if !ir_ssa_available(s, arg, s.edge_block[edge], s.edge_at[edge]) -> &errors.push("{f.key}: phi {value} argument {arg} is not available on edge {edge}")
+            if f.slot_type[s.val_slot[arg]] != f.slot_type[s.val_slot[value]] -> &errors.push("{f.key}: phi {value} argument {arg} has another type")
+        }
+    }
+    errors
+}
+
+fn ir_ssa_check(f: IRFunction, s: IRSsa, errors: &[String], used: Int, slot: Int, block: Int, at: Int) Never! {
+    if used < 0 -> return
+    value :: ir_ssa_find(s, used)
+    if !ir_ssa_available(s, value, block, at) -> &errors.push("{f.key}: value {value} read at {at} is not available there")
+    if f.slot_type[s.val_slot[value]] != f.slot_type[slot] -> &errors.push("{f.key}: value {value} read at {at} has another type than slot {slot}")
+}

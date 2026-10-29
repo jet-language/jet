@@ -1,0 +1,13 @@
+fn port_of(scheme: String) -> Int {
+    if scheme == "http" -> return 80
+    panic("unknown scheme `{scheme}`")
+}
+
+// Computing it at build time stops, so the program computes it at startup.
+GOPHER :: port_of("gopher")
+
+TABLE :: comptime { [Int]{GOPHER, 1} }
+
+fn run() {
+    print(TABLE)
+}

@@ -1,0 +1,172 @@
+// Compiler record kinds, receipts and workspace stamps (Rust jet_store
+// records.rs, receipt.rs and project_state.rs tests).
+
+fn store_records_test_root(label: String) -[Env, Rand]> String {
+    token :: random.token_hex(8) ?? panic("draw a test store name")
+    files.join(sys.temp_dir(), "jet-store-records-{label}-{sys.pid()}-{token}")
+}
+
+fn store_records_test_record(schema: String, text: String) -> [U8] {
+    encoded :: record_encode(schema, [RecordSection]{RecordSection{id: 1, elements: [RecordValue]{RecordValue.Str{value: text}}}})
+    encoded.bytes ?? panic("encode test record")
+}
+
+// One record lookup; a store failure fails the test, a miss is `None`.
+fn store_records_test_read(store: ArtifactStore, kind: ArtifactRecordKind, key: String, touch: Bool) -[FS, Env, Exec, Time, Rand]> [U8]? {
+    if touch {
+        if store.record(kind, key) == {
+            .Ok(bytes) -> { return bytes }
+            .Err(error) -> panic("read record {key}: {error}")
+        }
+    }
+    if store.record_untouched(kind, key) == {
+        .Ok(bytes) -> bytes
+        .Err(error) -> panic("read record {key}: {error}")
+    }
+}
+
+fn store_records_test_refused(published: Bool) {
+    assert(!published)
+}
+
+// Rust records.rs:173 `records_round_trip_by_kind_and_key`.
+#Test("records round trip by kind and key") {
+    root :: store_records_test_root("round-trip")
+    store :: ArtifactStore.new(root) ?? panic("store opens")
+    iface :: store_records_test_record(ArtifactRecordKind.Iface.schema(), "pkg:.")
+    expected_iface :: Val(iface)
+    digest :: record_blob_key(iface[0..<iface.len()])
+    store.put_record(ArtifactRecordKind.Iface, digest, iface) ?? panic("publish iface")
+    assert(store_records_test_read(store, ArtifactRecordKind.Iface, digest, true) == expected_iface)
+    // A blob is only reachable under its own kind.
+    assert(store_records_test_read(store, ArtifactRecordKind.Diags, digest, true) == None)
+    zeros :: "0".repeat(64)
+    store_records_test_refused(store.put_record(ArtifactRecordKind.Iface, zeros, iface) == .Ok(_))
+
+    check :: store_records_test_record(ArtifactRecordKind.PkgCheck.schema(), digest)
+    expected_check :: Val(check)
+    store.put_record(ArtifactRecordKind.PkgCheck, "key-a", check) ?? panic("publish check")
+    assert(store_records_test_read(store, ArtifactRecordKind.PkgCheck, "key-a", true) == expected_check)
+    assert(store_records_test_read(store, ArtifactRecordKind.Program, "key-a", true) == None)
+    assert(store_records_test_read(store, ArtifactRecordKind.PkgCheck, "key-b", true) == None)
+    // Wrong schema for the kind is refused.
+    store_records_test_refused(store.put_record(ArtifactRecordKind.Program, "key-a", check) == .Ok(_))
+    assert(ArtifactRecordKind.from_schema("jet.items/v1") == Val(ArtifactRecordKind.Items))
+    files.remove_all(root).drop("test scratch")
+}
+
+#Test("batched action records land once and leave a conflicting key as it is") {
+    root :: store_records_test_root("batch")
+    store :: ArtifactStore.new(root) ?? panic("store opens")
+    first :: store_records_test_record(ArtifactRecordKind.ItemCheck.schema(), "one")
+    second :: store_records_test_record(ArtifactRecordKind.ItemCheck.schema(), "two")
+    expected_first :: Val(first)
+    expected_second :: Val(second)
+    store.put_records(ArtifactRecordKind.ItemCheck, [ArtifactRecordPublication]{
+        ArtifactRecordPublication{key: "a", bytes: first},
+        ArtifactRecordPublication{key: "b", bytes: second},
+        ArtifactRecordPublication{key: "c", bytes: store_records_test_record(ArtifactRecordKind.Program.schema(), "wrong kind")},
+    }) ?? panic("publish batch")
+    assert(store_records_test_read(store, ArtifactRecordKind.ItemCheck, "a", false) == expected_first)
+    assert(store_records_test_read(store, ArtifactRecordKind.ItemCheck, "b", false) == expected_second)
+    assert(store_records_test_read(store, ArtifactRecordKind.ItemCheck, "c", false) == None)
+    // A recomputed different record under a taken key keeps the first one.
+    store.put_records(ArtifactRecordKind.ItemCheck, [ArtifactRecordPublication]{ArtifactRecordPublication{key: "a", bytes: second}}) ?? panic("republish batch")
+    assert(store_records_test_read(store, ArtifactRecordKind.ItemCheck, "a", true) == expected_first)
+    store.touch_records(ArtifactRecordKind.ItemCheck, [String]{"a", "b"})
+    store_records_test_refused(store.put_records(ArtifactRecordKind.Iface, [ArtifactRecordPublication]{}) == .Ok(_))
+    files.remove_all(root).drop("test scratch")
+}
+
+fn store_records_test_origin(display: String, path: String, source: String) -> DiagnosticOrigin {
+    DiagnosticOrigin{display: display, path: path, source: source, revision: sha256_hex(source)}
+}
+
+// Rust receipt.rs:267 `rich_diagnostic`.
+fn store_records_test_diagnostic(origin: DiagnosticOrigin, core: DiagnosticOrigin) -> Diagnostic {
+    Diagnostic{
+        moment: DiagnosticMoment.Compile,
+        severity: DIAGNOSTIC_LINT,
+        code: "L2510",
+        what: "this implicit clone repeats \"inside\" a loop\n",
+        why: "why",
+        fix: "fix",
+        span: Val(Span{start: 3, end: 9}),
+        origin: Val(origin),
+        labels: [DiagnosticLabel]{DiagnosticLabel{span: Span{start: 1, end: 2}, message: "first use"}},
+        cause: [DiagnosticCause]{DiagnosticCause{code: "E0301", span: None, origin: Val(core)}},
+        edit: Val(TextEdit{span: Span{start: 3, end: 9}, new_text: "x.clone()"}),
+        applicability: Val(DiagnosticFixApplicability.Suggested),
+        safety: Val(DiagnosticFixSafety.BehaviorPreserving),
+        detail: Val("detail\twith tab"),
+        structured: Val(DiagnosticStructured.CryptoMisuse{reason: DiagnosticCryptoMisuseReason.NonceLength, operation: "seal", expected: Val("12"), actual: Val(-9223372036854775807 - 1)}),
+        denial_kind: Val("effect"),
+        call_chain: [String]{"run", "helper"},
+    }
+}
+
+// Rust receipt.rs:312 `receipt_round_trips_typed_diagnostics_through_the_store`.
+#Test("receipt round trips typed diagnostics through the store") {
+    root :: store_records_test_root("receipt")
+    store :: ArtifactStore.new(root) ?? panic("store opens")
+    module_source :: "fn run() {{\n    x := 1\n}}\n"
+    origin :: store_records_test_origin("main.jet", "/p/main.jet", module_source)
+    core :: store_records_test_origin("math", "<corelib>/math", "fn one() {{}}\n")
+    record :: ReceiptRecord.new("check", "a".repeat(64), [ReceiptInput]{ReceiptInput{path: "main.jet", digest: origin.revision}}, [ReceiptInput]{}, [Diagnostic]{store_records_test_diagnostic(origin, core)}, [ReceiptFact]{ReceiptFact{name: "goal_report", value: "goal: main.jet:2\n"}})
+    workspace :: store_records_test_root("receipt-workspace")
+    store.publish_receipt(workspace, record) ?? panic("publish receipt")
+
+    resolve :: (revision: String) -> { if revision == origin.revision -> Val(module_source) else -> None }
+    loaded :: if store.receipt(workspace, record.closure, resolve) == {
+        .Ok(found) -> found ?? panic("receipt hit")
+        .Err(error) -> panic("read receipt: {error}")
+    }
+    assert((loaded.to_bytes() ?? panic("encode loaded")) == (record.to_bytes() ?? panic("encode record")))
+    expected_origin :: Val(origin)
+    expected_core :: Val(core)
+    assert(loaded.diagnostics[0].origin == expected_origin)
+    assert(loaded.diagnostics[0].cause[0].origin == expected_core)
+    // The module source is stored by revision only; the Core origin is embedded.
+    payload :: record.to_bytes() ?? panic("encode record")
+    json :: record_json(payload).value ?? panic("record json")
+    assert(json.starts_with("{{\"schema\":\"jet.receipt/v1\""))
+    assert(!json.contains("x := 1"))
+    assert(json.contains("fn one() {{}}"))
+
+    // A closure whose module bytes changed cannot resolve the stored origin:
+    // a miss, never a replay against different bytes.
+    unresolved :: (revision: String) -> { String?{None} }
+    missed :: if store.receipt(workspace, record.closure, unresolved) == {
+        .Ok(found) -> found == None
+        .Err(error) -> panic("read unresolved: {error}")
+    }
+    assert(missed)
+    files.remove_all(workspace).drop("test scratch")
+    files.remove_all(root).drop("test scratch")
+}
+
+// Rust project_state.rs:215 `priors_and_stamps_round_trip_and_rehash_changed_files`.
+#Test("stamps round trip and rehash changed files") {
+    root :: store_records_test_root("stamps")
+    files.create_dir_all(root) ?? panic("create root")
+    file :: files.join(root, "input.txt")
+    files.write(file, "one") ?? panic("write input")
+    table := StampTable.load(root)
+    first :: &table.file_digest(file) ?? panic("digest input")
+    assert(first == sha256_hex("one"))
+    table.save(root) ?? panic("save stamps")
+    assert(store_project_file_stamp(file) != None)
+
+    reloaded := StampTable.load(root)
+    expected_first :: Val(first)
+    cached :: &reloaded.file_digest(file)
+    assert(cached == expected_first)
+    // A rewrite changes size and change time, so the digest is recomputed.
+    files.write(file, "changed") ?? panic("rewrite input")
+    expected_changed :: Val(sha256_hex("changed"))
+    rehashed :: &reloaded.file_digest(file)
+    assert(rehashed == expected_changed)
+    absent :: &reloaded.file_digest(files.join(root, "absent"))
+    assert(absent == None)
+    files.remove_all(root).drop("test scratch")
+}

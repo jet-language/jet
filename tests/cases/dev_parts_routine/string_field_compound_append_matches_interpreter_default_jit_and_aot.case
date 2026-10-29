@@ -1,0 +1,16 @@
+# tests/dev_parts/routine.rs::string_field_compound_append_matches_interpreter_default_jit_and_aot at tests/dev_parts/routine.rs:698; hand-port (the forced-interpreter tier is carried by `jet run`; the Jet CLI has no interpreter flag)
+fixture: string_field_compound_append_matches_interpreter_default_jit_and_aot.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step dev: jet run string_field_compound.jet
+exit: 0
+stdout: = string_field_compound_append_matches_interpreter_default_jit_and_aot.1.out
+stderr: empty
+step: jet build string_field_compound.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = string_field_compound_append_matches_interpreter_default_jit_and_aot.1.out
+stderr: empty

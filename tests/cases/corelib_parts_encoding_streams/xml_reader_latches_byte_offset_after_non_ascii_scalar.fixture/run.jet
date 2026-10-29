@@ -1,0 +1,26 @@
+
+use core.encoding.xml as xml
+use core.encoding as encoding
+use core.files as files
+fn run() {
+    input :: files.open("input.xml") ?? panic("open")
+    reader := xml.reader(^input, encoding.EncodingLimits.safe()) ?? panic("reader")
+    loop {
+        if &reader.next() == {
+            .Ok(value) -> {
+                if value == None -> panic("mismatched XML accepted")
+            }
+            .Err(error) -> {
+                print(error.byte_offset)
+                print(error.line ?? 0)
+                print(error.column ?? 0)
+                print(error.path)
+                if &reader.next() == {
+                    .Err(again) -> print(again == error)
+                    else -> panic("terminal XML error not latched")
+                }
+                break
+            }
+        }
+    }
+}

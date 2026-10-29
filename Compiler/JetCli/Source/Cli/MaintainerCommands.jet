@@ -1,13 +1,13 @@
-// Source/CmdDevTools.rs: reduce, ice-report, and bless. Compilation and
-// diagnostics stay with the driver; these leaves own only command policy,
-// line minimization, opened child receipts, and sequential file publication.
+// Source/CmdDevTools.rs: reduce and ice-report. Compilation and diagnostics
+// stay with the driver; these leaves own only command policy, line
+// minimization, and sequential file publication.
 use core.files as cli_files
 use core.process as cli_process
 use core.sys as cli_sys
 use core.term as cli_term
 use core.time as cli_time
-use jet_driver.[JetDriverCompileMode, JetDriverCompileResult, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, jet_driver_present_diagnostics]
-use jet_foundation.diagnostic_render_all
+use jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, jet_driver_present_diagnostics]
+use jet_foundation.[diagnostic_render_all]
 
 fn jet_cli_maintainer_error(code: String, what: String, why: String?, fix: String?, color: Bool, json: Bool, status: Int) -> JetDriverVerbOutput Never! {
     diagnostic_copy :: jet_cli_diagnostic_copy(code)
@@ -53,54 +53,16 @@ fn jet_cli_reduced_path(file: String) -> String Never! {
     jet_cli_authority_path(parent, replacement)
 }
 
-struct JetCLIMaintainerProbe {
-    accepted: Bool
-    errors: String
-}
-// A missing/unlaunchable rustc is accepted by this oracle, never an I2 repro.
-fn jet_cli_maintainer_rustc_probe(rust: String) -> JetCLIMaintainerProbe {
-    directory :: jet_cli_authority_path(cli_sys.temp_dir(), "jet_devtools_rustc_{cli_process.current_pid()}")
-    cli_files.create_dir_all(directory) ?? return JetCLIMaintainerProbe{accepted: true, errors: ""}
-    source :: "{directory}/check.rs"
-    if cli_files.write(source, rust) == .Err(_) {
-        cli_files.rmtree(directory).drop("the reference ignores probe cleanup failures")
-        return JetCLIMaintainerProbe{accepted: true, errors: ""}
-    }
-    outcome := JetCLIMaintainerProbe{accepted: true, errors: ""}
-    if cli_process.cmd([String]{"rustc", "--edition", "2021", "--crate-name", "jet_devtools_check", "--emit=metadata", source, "-o", "{directory}/check.rmeta"}).run() == .Ok(receipt) {
-        outcome = JetCLIMaintainerProbe{accepted: receipt.success, errors: receipt.errors}
-    }
-    cli_files.rmtree(directory).drop("the reference ignores probe cleanup failures")
-    outcome
-}
-
-// Emit the same development runtime/program composition as jet emit --rust,
-// without printing compiler lints (the oracle consumes those as facts).
-fn jet_cli_maintainer_rust(file: String, result: JetDriverCompileResult) -> String? {
-    if result.internal_problem != None || !result.complete -> return None
-    items :: result.emitted_source ?? return None
-    program :: result.mir ?? return None
-    if jet_cli_runtime_text(file, program, false, true) == {
-        .Text(prefix) -> return Val("{prefix}{items}")
-        .Failed(_) -> return None
-    }
-    None
-}
-
-fn jet_cli_reduce_oracle(scratch: String, source: String, code: String?) -> Bool {
+// The reducer's oracle: the reduced source still reports diagnostic `code`.
+fn jet_cli_reduce_oracle(scratch: String, source: String, code: String) -> Bool {
     cli_files.write(scratch, source) ?? return false
-    if jet_cli_compile_file(scratch, false, true, None, JetDriverCompileMode.Program) == {
+    if jet_cli_compile_file(scratch, false, None, JetDriverCompileMode.Program) == {
         .Refused(_) -> return false
         .Compiled(result, _) -> {
-            if code == .Val(wanted) {
-                loop diagnostic in result.diagnostics {
-                    if diagnostic.code == wanted -> return true
-                }
-                return false
+            loop diagnostic in result.diagnostics {
+                if diagnostic.code == code -> return true
             }
-            if jet_cli_errors(result.diagnostics).len() > 0 -> return false
-            rust :: jet_cli_maintainer_rust(scratch, result) ?? return false
-            return !jet_cli_maintainer_rustc_probe(rust).accepted
+            return false
         }
     }
     false
@@ -115,7 +77,7 @@ fn jet_cli_reduce_candidate(lines: &[String], start: Int, end: Int) -> [String] 
     candidate
 }
 // The reducer owns its line buffer; candidates borrow it until accepted.
-fn jet_cli_reduce_lines(lines: ^[String], scratch: String, code: String?) -> [String] {
+fn jet_cli_reduce_lines(lines: ^[String], scratch: String, code: String) -> [String] {
     current := ^lines
     chunks := 2
     loop current.len() >= 2 {
@@ -144,7 +106,8 @@ fn jet_cli_reduce_lines(lines: ^[String], scratch: String, code: String?) -> [St
 }
 
 fn jet_cli_devtools_reduce(args: [String], color: Bool, json: Bool) -> JetDriverVerbOutput {
-    if args.len() == 0 -> return JetDriverVerbOutput{stdout: "", stderr: "usage: jet devtools reduce <file.jet> [--code EXXXX]\n", exit_code: JET_DRIVER_EXIT_USAGE}
+    usage :: "usage: jet devtools reduce <file.jet> --code EXXXX\n"
+    if args.len() == 0 -> return JetDriverVerbOutput{stdout: "", stderr: usage, exit_code: JET_DRIVER_EXIT_USAGE}
     file :: args[0]
     code := String?{None}
     index := 1
@@ -153,17 +116,17 @@ fn jet_cli_devtools_reduce(args: [String], color: Bool, json: Bool) -> JetDriver
         code = if index + 1 < args.len() -> Val(args[index + 1]) else -> None
         index += 2
     }
+    wanted :: code ?? return JetDriverVerbOutput{stdout: "", stderr: usage, exit_code: JET_DRIVER_EXIT_USAGE}
     source :: cli_files.read(file) ?? return jet_cli_maintainer_error("E2105", "couldn't read `{file}`: {jet_cli_io_error_text(err)}", None, None, color, json, JET_DRIVER_EXIT_USER_ERROR)
     name :: jet_cli_maintainer_name(file)
     extension :: if jet_cli_maintainer_dot(name) == .Val(dot) -> name.slice(dot + 1..<name.len()) else -> "jet"
     scratch :: jet_cli_authority_path(cli_sys.temp_dir(), "jet_devtools_reduce_{cli_process.current_pid()}.{extension}")
-    if !jet_cli_reduce_oracle(scratch, source, code) {
-        why :: if code == .Val(wanted) -> "the front end never emits `{wanted}` for this file" else -> "either the front end already rejects it, or rustc accepts the generated Rust"
-        return jet_cli_maintainer_error("E2104", "`{file}` doesn't reproduce the target oracle as given", Val(why), Val("confirm the case fails the way you expect, then reduce it"), color, json, JET_DRIVER_EXIT_USER_ERROR)
+    if !jet_cli_reduce_oracle(scratch, source, wanted) {
+        return jet_cli_maintainer_error("E2104", "`{file}` doesn't reproduce the target oracle as given", Val("the front end never emits `{wanted}` for this file"), Val("confirm the case fails the way you expect, then reduce it"), color, json, JET_DRIVER_EXIT_USER_ERROR)
     }
     lines :: source.lines()
     cli_term.print("reduce: starting at {lines.len()} line(s)")
-    reduced :: jet_cli_reduce_lines(^lines, scratch, code)
+    reduced :: jet_cli_reduce_lines(^lines, scratch, wanted)
     cli_term.print("reduce: finished at {reduced.len()} line(s)")
     text :: reduced.join("\n")
     output :: jet_cli_reduced_path(file)
@@ -172,35 +135,30 @@ fn jet_cli_devtools_reduce(args: [String], color: Bool, json: Bool) -> JetDriver
     JetDriverVerbOutput{stdout: "wrote {output}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
+// `jet devtools ice-report <file.jet>`: bundle a case the compiler accepts but
+// cannot finish (an internal compiler error) with the compiler version.
 fn jet_cli_devtools_ice_report(args: [String], color: Bool, json: Bool) -> JetDriverVerbOutput {
     if args.len() == 0 -> return JetDriverVerbOutput{stdout: "", stderr: "usage: jet devtools ice-report <file.jet>\n", exit_code: JET_DRIVER_EXIT_USAGE}
     file :: args[0]
     source :: cli_files.read(file) ?? return jet_cli_maintainer_error("E2105", "couldn't read `{file}`: {jet_cli_io_error_text(err)}", None, None, color, json, JET_DRIVER_EXIT_USER_ERROR)
-    rust := ""
     root := ""
-    if jet_cli_compile_file(file, false, true, None, JetDriverCompileMode.Program) == {
+    if jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program) == {
         .Refused(output) -> return output
         .Compiled(result, snapshot) -> {
             errors :: jet_cli_errors(jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files))
             if errors.len() > 0 {
-                output := jet_cli_maintainer_error("E2105", "`{file}` doesn't reach codegen — the front end already rejects it", Val("ice-report bundles a case that compiles to Rust (an I2 repro)"), Val("fix the front-end errors first, or use `jet devtools reduce --code <CODE>` to shrink a front-end diagnostic instead"), color, json, JET_DRIVER_EXIT_USER_ERROR)
+                output := jet_cli_maintainer_error("E2105", "`{file}` doesn't reach codegen — the front end already rejects it", Val("ice-report bundles a case the front end accepts"), Val("fix the front-end errors first, or use `jet devtools reduce --code <CODE>` to shrink a front-end diagnostic instead"), color, json, JET_DRIVER_EXIT_USER_ERROR)
                 output.stderr = "{output.stderr}{diagnostic_render_all(file, source, errors, color)}"
                 return output
             }
-            if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
-            rust = jet_cli_maintainer_rust(file, result) ?? return jet_cli_ice("the Jet compiler finished `{file}` without its development Rust source")
             root = snapshot.roots[0].canonical_path
         }
     }
-    probe :: jet_cli_maintainer_rustc_probe(rust)
-    if probe.accepted -> cli_term.print("note: rustc accepted the generated Rust for `{file}` — bundling anyway, but this isn't an I2 repro")
-    version := "rustc: not found"
-    if cli_process.cmd([String]{"rustc", "--version"}).run() == .Ok(receipt) -> version = receipt.output.trim()
     stamp :: cli_time.unix_ns() / 1000000000
     bundle :: "{root}/.jet/ice-report/{jet_cli_maintainer_stem(file)}-{stamp}"
     cli_files.create_dir_all(bundle) ?? return jet_cli_maintainer_error("E2105", "couldn't create `{bundle}`: {jet_cli_io_error_text(err)}", None, None, color, json, JET_DRIVER_EXIT_USER_ERROR)
-    names :: [String]{"source.jet", "generated.rs", "rustc.stderr", "versions.txt"}
-    contents :: [String]{source, rust, probe.errors, "jet {JET_CLI_VERSION}\n{version}\n"}
+    names :: [String]{"source.jet", "versions.txt"}
+    contents :: [String]{source, "jet {JET_CLI_VERSION}\n"}
     loop index in 0..<names.len() {
         name :: names[index]
         cli_files.write("{bundle}/{name}", contents[index]) ?? return jet_cli_maintainer_error("E2105", "couldn't write `{name}`: {jet_cli_io_error_text(err)}", None, None, color, json, JET_DRIVER_EXIT_USER_ERROR)
@@ -208,61 +166,3 @@ fn jet_cli_devtools_ice_report(args: [String], color: Bool, json: Bool) -> JetDr
     JetDriverVerbOutput{stdout: "wrote ICE report bundle to {bundle}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
-JET_CLI_BLESS_TARGETS :: [String]{"cli", "cross", "diagnostic_snapshots", "diagnostics_coverage", "ice_report_codegen_rejection", "release_gates"}
-
-fn jet_cli_bless_targets(requested: [String]) -> (targets: [String], unknown: [String]) Never! {
-    if requested.len() == 0 -> return (targets: JET_CLI_BLESS_TARGETS, unknown: [String]{})
-    targets := [String]{}
-    unknown := [String]{}
-    loop target in requested {
-        if JET_CLI_BLESS_TARGETS.contains(target) -> &targets.push(target) else -> &unknown.push(target)
-    }
-    (targets: targets, unknown: unknown)
-}
-
-
-fn jet_cli_devtools_bless(args: [String], color: Bool, json: Bool) -> JetDriverVerbOutput {
-    dry := false
-    requested := [String]{}
-    loop argument in args {
-        if argument == "--dry-run" -> dry = true else -> &requested.push(argument)
-    }
-    selected :: jet_cli_bless_targets(requested)
-    if selected.unknown.len() > 0 {
-        output := jet_cli_maintainer_error("E2104", "unknown bless target(s): {selected.unknown.join(", ")}", None, None, color, json, JET_DRIVER_EXIT_USAGE)
-        output.stderr = "{output.stderr}usage: jet devtools bless [target...] [--dry-run]\nknown targets: {JET_CLI_BLESS_TARGETS.join(", ")}\n"
-        return output
-    }
-    if dry {
-        stdout :: (loop target in selected.targets -> "would run: UPDATE_EXPECT=1 cargo test --test {target}\n").join("")
-        return JetDriverVerbOutput{stdout: stdout, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    }
-    reason :: (cli_sys.get("UPDATE_EXPECT_REASON") ?? "").trim()
-    // Rust String::len counts UTF-8 bytes, not Unicode scalars.
-    if reason.bytes().len() < 8 {
-        output := jet_cli_maintainer_error("E2104", "a blanket bless must name the compiler change it records", None, None, color, json, JET_DRIVER_EXIT_USAGE)
-        output.stderr = "{output.stderr}set the reason, then re-run:\n    UPDATE_EXPECT_REASON=\"<commit or ratified decision>\" jet self devtools bless\nto bless one reviewed fixture instead: JET_UI_FILTER=<fixture> UPDATE_EXPECT=<same fixture> cargo test --test diagnostic_snapshots\n"
-        return output
-    }
-    cli_term.print("bless: reason recorded — {reason}")
-    failed := false
-    loop target in selected.targets {
-        cli_term.print("bless: UPDATE_EXPECT=1 cargo test --test {target}")
-        spec :: cli_process.cmd([String]{"cargo", "test", "--test", target}).env("UPDATE_EXPECT", "1").stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
-        if spec.run() == {
-            .Ok(receipt) -> {
-                if !receipt.success {
-                    failed = true
-                    jet_cli_write_notice("bless: `{target}` exited with {jet_cli_bless_child_status(receipt)}\n")
-                }
-            }
-            .Err(error) -> {
-                failed = true
-                jet_cli_write_notice("bless: couldn't run `cargo test --test {target}`: {jet_cli_io_error_text(error)}\n")
-            }
-        }
-    }
-    if failed -> return JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
-    suffix :: if selected.targets.len() == 1 -> "" else -> "s"
-    JetDriverVerbOutput{stdout: "bless: done ({selected.targets.len()} target{suffix})\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-}

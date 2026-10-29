@@ -146,18 +146,15 @@ jet test         # runs the project's #Test blocks
 The compiler front end — lexer, parser, and semantic checker — owns every
 language rule. Code generation only lowers facts the checker has already
 established, so a backend failure is always a compiler bug, never a user
-error. Native builds emit Rust and compile it with rustc and LLVM; `jet run`
-and `jet dev` use that same build path. Shared runtime meaning
-lives in the Prelude and the Jet-authored core library, which every tier
-calls rather than re-implementing.
+error. Native builds go through Jet's own back end
+([`Compiler/JetBackend`](Compiler/JetBackend/)); `jet run` and `jet dev` use
+that same build path. Shared runtime meaning lives in the Prelude and the
+Jet-authored core library, which every tier calls rather than
+re-implementing.
 
-**Self-hosting is in progress.** The production compiler is written in Rust
-(`Source/` and `crates/`) and remains the reference implementation. New
-compiler work happens in a staged port of the compiler to Jet itself, under
-`Compiler/`: one pass at a time, each Jet-authored pass proven against the
-Rust reference before it is trusted. The Rust-emission and rustc/LLVM
-backends stay. Jet counts as self-hosted only once the Jet
-compiler reproducibly builds itself and becomes the default compiler.
+**Jet is self-hosted.** The compiler is written in Jet, under `Compiler/`,
+and builds itself: a candidate compiler must rebuild its own sources to a
+byte-identical fixed point before it becomes the next seed.
 
 The Jet parser's token entry points carry `TokenTables` alongside tokens:
 spelling names and literal facts belong to the originating lexer tables, not
@@ -179,7 +176,7 @@ Tools/agent/jet-env "$JET" run Examples/features/basics/hello.jet
 Tools/agent/jet-env "$JET" check Examples/features/basics/functions.jet
 
 # Check one example against its golden output
-Tools/agent/jet-env node tests/golden.mjs --filter Examples/features/basics/hello.jet
+TESTKIT_ARGS="--filter Examples/features/basics/hello.jet" Tools/agent/jet-env "$JET" test Tools/testkit "suite golden"
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and
@@ -189,18 +186,16 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and
 
 | Path | Contents |
 |---|---|
-| [`Source/`](Source/) | The `jet` command-line tool (Rust reference implementation) |
-| [`crates/`](crates/) | Rust crates: front end, code generation, evaluator host, runtime, and Jetpack |
-| [`Compiler/`](Compiler/) | The staged Jet-authored compiler port |
+| [`Compiler/`](Compiler/) | The Jet compiler, written in Jet |
 | [`Core/`](Core/) | The core library's Jet sources |
-| [`Jetpack/`](Jetpack/) | The staged Jet-authored port of the Jetpack package manager |
+| [`Jetpack/`](Jetpack/) | Jetpack, the package manager, written in Jet |
 | [`Examples/`](Examples/) | Executable examples and their golden output |
-| [`tests/`](tests/) | Behavior, diagnostic-snapshot, regression, and compiler-proof tests |
+| [`tests/`](tests/) | Behavior, diagnostic-snapshot, and regression tests |
 | [`Docs/`](Docs/README.md) | Specifications, guides, dated evidence, and the project website |
 | [`Tools/`](Tools/) | Contributor tooling: the agent environment, CI and performance scripts, the performance gauntlet, editor integrations, and Tower, the project board |
 
-`crates/` and `tests/` keep Cargo's lowercase names; every other top-level
-folder is capitalized.
+`tests/` keeps its lowercase name; every other top-level folder is
+capitalized.
 
 ## License
 

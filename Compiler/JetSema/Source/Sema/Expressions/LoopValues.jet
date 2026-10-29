@@ -4,14 +4,11 @@ use jet_foundation.[
     Expr,
     Span,
     TBuiltinOp,
-    TExpr,
-    TExprKind,
     TLetTy,
     TLetWrapper,
     TLocal,
-    TStmt,
     Type,
-    tir_generated_local,
+    checked_generated_local,
     type_identity_equal,
     type_name,
 ]
@@ -252,7 +249,7 @@ fn sema_loop_value_rewrite_collecting_statements(statements: &[TStmt], local: TL
 
 fn sema_loop_value_lower_collecting_body(body: [TStmt], item_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> [TStmt]? {
     collector_type := Type.List{element: item_type}
-    local := tir_generated_local("__jet_collect_{span.start}", span)
+    local := checked_generated_local("__jet_collect_{span.start}", span)
     local.mutable = true
     empty := sema_tir_node(collector_type, TExprKind.List{values: [TExpr]{}, trait_coercion: None}, span)
     lowered := [TStmt]{TStmt.Let{local: local, let_ty: TLetTy.Annotated{ty: collector_type, wrapper: TLetWrapper.Plain}, init: empty, gc_promotion: None, gc_transferred: false, span: span}}

@@ -1,0 +1,33 @@
+
+use core.web.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("ws://127.0.0.1:{free-port:locators}/session?token=LOCATOR_SECRET", profile, timeout) ?? panic("connect")
+    context :: session.context() ?? panic("context")
+    page :: context.page() ?? panic("page")
+    page.goto("https://example.test/form") ?? panic("goto")
+
+    save :: page.get_by_role("button", "Save")
+    save.wait(timeout) ?? panic("wait")
+    save.hover() ?? panic("hover")
+    save.click() ?? panic("click")
+
+    name :: page.get_by_label("Name")
+    name.fill("Ada") ?? panic("fill")
+    name.press("Tab") ?? panic("press")
+
+    page.get_by_text("Save").wait(timeout) ?? panic("text wait")
+    page.get_by_placeholder("email").wait(timeout) ?? panic("placeholder wait")
+    page.get_by_test_id("save").wait(timeout) ?? panic("test id wait")
+    page.get_by_css("button.save").wait(timeout) ?? panic("css wait")
+
+    gone :: page.get_by_role("status", "Saving")
+    gone.wait_gone(timeout) ?? panic("wait_gone")
+
+    print("locators:ok")
+    page.close() ?? panic("page close")
+    context.close() ?? panic("context close")
+    session.close() ?? panic("session close")
+}

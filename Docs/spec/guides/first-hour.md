@@ -5,9 +5,9 @@ It walks through `new`, `run`, `check`, `test`, a manual correction, and
 `explain`. The executable teaching source is
 [`Examples/features/basics/onboarding/run.jet`](../../../Examples/features/basics/onboarding/run.jet);
 the CLI recovery behavior is exercised by
-[`tests/onboarding_recovery.rs`](../../../tests/onboarding_recovery.rs) and the
+[`tests/cases/onboarding_recovery`](../../../tests/cases/onboarding_recovery/) and the
 terminal/editor matrix by
-[`tests/onboarding_matrix.rs`](../../../tests/onboarding_matrix.rs).
+[`tests/cases/onboarding_matrix`](../../../tests/cases/onboarding_matrix/).
 
 ## 1. Check the supported host
 

@@ -44,8 +44,11 @@ fn pkg_fetch_lock_error(error: LockError) -> PackageFetchError Never! {
     pkg_fetch_error("E1206", error.message(), "the project lock must retain exact package facts", "run `jet fetch` and commit `.jet/lock`")
 }
 fn pkg_fetch_load_manifest(directory: String, name: String) -[FS, Env]> Manifest PackageFetchError! {
-    found :: pkg_manifest_load(directory) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
-    found ?? return Err(pkg_fetch_error("E1206", "dependency `{name}` has no `{PACKAGE_FILE}`", "every Jet package must have a manifest", "add `{PACKAGE_FILE}` to `{directory}`"))
+    if pkg_manifest_load(directory) == {
+        .Val(found) -> Ok(found)
+        .None -> Err(pkg_fetch_error("E1206", "dependency `{name}` has no `{PACKAGE_FILE}`", "every Jet package must have a manifest", "add `{PACKAGE_FILE}` to `{directory}`"))
+        .Err(error) -> Err(PackageFetchError{diagnostic: error.diagnostic})
+    }
 }
 fn pkg_fetch_closure(lock: LockFile, target: String) -> [String] Never! {
     seen := [String]{}
@@ -125,7 +128,7 @@ fn pkg_fetch_resolve(verification: &StoreVerification, roots: HangarRoots, conte
             snapshot :: pkg_source_snapshot_tree(absolute) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
             result :: pkg_fetch_source_node(&verification, roots, context, &resolver, name, LockSource.Path(path), None, snapshot, chain)
             close(^snapshot)
-            result ?? return Err(err)
+            result
         }
         .Git(url, selector) -> pkg_fetch_git_node(&verification, roots, context, &resolver, name, url, selector, chain)
         .Registry(requirement) -> pkg_fetch_registry_node(&verification, roots, context, &resolver, name, requirement, chain)
@@ -134,7 +137,7 @@ fn pkg_fetch_resolve(verification: &StoreVerification, roots: HangarRoots, conte
             if realization.language != language || realization.reference != reference -> return Err(pkg_fetch_error("E1256", "foreign dependency `{name}` has no valid provider projection", "provider identity disagrees with package.jet", "regenerate the pinned provider projection"))
             pkg_fetch_record_version(&resolver, name, realization.entry.version, chain)
             entry :: realization.entry
-            PackageFetchNode{package: LockedPackage{name: name, version: entry.version, source: .Foreign(language, reference, entry.out), fingerprint: entry.envelope.output_hash, content_hash: Val(entry.envelope.output_hash), envelope: Val(LockEnvelope{output_hash: entry.envelope.output_hash, platform: entry.envelope.platform, signature: entry.envelope.signature, provenance: entry.envelope.provenance}), receipt: if entry.receipt == "" -> None else -> Val(entry.receipt)}, directory: entry.out}
+            PackageFetchNode{package: LockedPackage{name: name, version: entry.version, source: .Foreign{language: language, reference: reference, output: entry.out}, fingerprint: entry.envelope.output_hash, content_hash: Val(entry.envelope.output_hash), envelope: Val(LockEnvelope{output_hash: entry.envelope.output_hash, platform: entry.envelope.platform, signature: entry.envelope.signature, provenance: entry.envelope.provenance}), receipt: if entry.receipt == "" -> None else -> Val(entry.receipt)}, directory: entry.out}
         }
     }
     resolver.nodes[name] = node

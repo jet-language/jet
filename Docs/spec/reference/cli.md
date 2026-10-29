@@ -5,14 +5,12 @@ for users choosing a command and for scripts that need the stable spelling of a
 flag. The executable truth is the generated output of
 
 ```sh
-target/debug/jet help
+jet help
 ```
 
 and the command table in
 [`Compiler/JetFoundation/Source/Registry/CLICommands.jet`](../../../Compiler/JetFoundation/Source/Registry/CLICommands.jet).
-The Rust host keeps commands in
-[`crates/jet-foundation/src/CLICommands.rs`](../../../crates/jet-foundation/src/CLICommands.rs)
-and flags in `crates/jet-cli/src/CLI.rs`; `node Compiler/Bootstrap/check-command-table.mjs` compares the assembled tables.
+It is the one command table: handlers, commands, nested actions, and flags.
 The compiler aggregate includes that Foundation registry exactly once; the CLI
 imports its command, handler, and flag rows rather than maintaining a second
 Jet copy. The bootstrap inventory contract checks their sole authored owner.
@@ -21,26 +19,18 @@ option from an older guide.
 
 Help and version are human renderables, not machine records: `jet help --json`
 and `jet version --json` succeed with no output. Diagnostic essays instead
-use the `jet.status/v1` `explain` action under `--json`. `jet emit --rust --json`
-still writes the generated Rust verbatim; its machine mode affects diagnostic
-failures, not the emitted program. C and C++ driver aliases own their raw
+use the `jet.status/v1` `explain` action under `--json`. C and C++ driver aliases own their raw
 arguments (including `--help` and `--version`) before Jet parses global flags.
 
-`jet emit --ast|--mir|--lir <file>` prints one compiler tier of a file:
-`--ast` the parsed syntax tree (parsing only), `--mir` the checked MIR of the
-entry package's functions, and `--lir` the LIR `jet build` lowers for them,
-before the LIR passes of its optimization level. `--fn NAME` keeps one
-function. Each tier is one tree. The text form
-indents each child two spaces. `--json` writes the same tree as the `emit`
-status, a `{kind, text, children}` node per line. MIR numbers each function's
-values, blocks, places, locals and scopes from zero (`v0`, `b0`, `p0`, `l0`,
-`s0`) and shows every value's type and ownership mode. LIR renumbers
-module-wide functions, signatures and data in order of first use and lists
-a called function it does not show as `declare fN name`. When `jet build`
-fails to lower a function, it writes that function's MIR and LIR as `<n>.mir`
-and `<n>.lir` beside the build output in `.jet/build/<stem>.ice/`; when it
-fails to compile a function to machine code, it writes that function's final
-LIR as `<n>.lir` there. The report names that directory.
+`jet emit --ast|--ir <file>` prints one compiler tier of a file:
+`--ast` the parsed syntax tree (parsing only), and `--ir` the slot IR `jet build`
+builds from the checked functions of the entry package (every checked function
+for a program without an entry). `--ir` checks the file in Run mode: errors stop
+it and visible lints go to stderr. `--fn NAME` keeps one function. Each tier is
+one tree. The text form indents each child two spaces. `--json` writes the same
+tree as the `emit` status, a `{kind, text, children}` node per line. A function
+the IR builder cannot build is reported as E2104 with its name, key and source
+span.
 
 `jet self devtools new-ui <name>` writes `tests/ui/<name>.jet` and its
 diagnostic snapshot using the same compiler and renderer as the UI harness.
@@ -143,10 +133,11 @@ and `FileReader`/`IOError` carriers. The terminal-context and waited-child facts
 likewise retain the existing `jet_term_is_terminal_raw` and
 `jet_process_exit_status_raw` runtime spellings, rather than reserved
 double-underscore member aliases or alternate host APIs.
-Checked-build DNS and pinned byte transport likewise use the existing
-`jet_http_build_resolve` and `jet_http_build_get` raw spellings. Driver retains
-address authorization, bounds, digest verification, and error classification;
-these leaves do not supply a second public HTTP or generic host policy.
+Checked-build DNS and pinned byte transport likewise keep the
+`jet_http_build_resolve` (runtime) and `jet_http_build_get` (Jet source over
+`core.net` and `core.net.tls`) spellings. Driver retains address
+authorization, bounds, digest verification, and error classification; these
+leaves do not supply a second public HTTP or generic host policy.
 Compiler-backed inspection and fix planning declare the execution host's actual
 `Exec`, `IO`, `FFI.C`, and `FFI.Asm` ceilings. Fix semantic checks also declare
 `Net` for the checked build-input HTTP provider already admitted by the CLI
@@ -188,7 +179,7 @@ order, positional ordering, and duplicate visible job names; internal jobs do
 not become argv-reachable.
 ## Root command index
 
-The root index below mirrors `target/debug/jet help` in this checkout. It lists
+The root index below mirrors `jet help` from this checkout's compiler. It lists
 the most used commands first, in the order `node Tools/cli-census/census.mjs`
 measures from the guides, examples, and tests; `jet help --sort az` lists the
 same commands A to Z and `jet help --sort za` Z to A:
@@ -283,12 +274,6 @@ receipt. Publication uses the held codemod transaction and its durable undo
 journal. Rename provenance comes from uniquely matched checked before/after
 definition facts; when those checks cannot establish a rename, the receipt
 records the exact changed byte region instead.
-
-Focused compiler fixtures can be assembled with
-`node Compiler/Bootstrap/assemble.mjs --fixture Compiler/JetCli/Tests/FrontDoor.jet`
-under an isolated `HOME`. The fixture is appended to the full canonical unit
-using its ordinary import and source-provenance rules; this does not make a
-per-file compiler check valid or substitute for running the fixture.
 
 `fix memory` uses exercised runtime witnesses, not whole-program memory proof.
 It applies only a single repair whose original byte span still matches the
@@ -413,7 +398,7 @@ The generated help groups subcommands as follows:
 - **Registry:** `publish`, `yank`, `keygen`, `key backup`, and `vendor`.
 - **Db:** bounded SQL plus `migrate new`, `preview`, `status`, `target`,
   `apply`, `step`, `rollback`, and `resume`.
-- **Inspect:** `types`, `rights`, `claims`, `shapes`, `accel`, `decisions`,
+- **Inspect:** `types`, `rights`, `claims`, `shapes`, `decisions`,
   `structure`, `build`, `gates`, `graph`, `query build`, `explain-build`,
   `compiler`, `impact`, `provenance`, `digest`, `env`, `semindex`, `output`,
   `expand`, `schema`, `codemod`, `audit`, `sbom`, `bind`, `logs`, `info`,
@@ -502,12 +487,13 @@ changes. A later write failure does not undo earlier successful writes.
 
 ## Shared option spellings
 
-The options below are intentionally named exactly as in `target/debug/jet help`:
+The options below are intentionally named exactly as in `jet help`:
 
 - `--target` selects a triple, `board.<name>`, or named database target;
   `--profile` selects `release`, `debug`, `ci`, `hardened`, or a named bundle.
 - `--allow=RIGHTS` and `--deny=RIGHTS` set effect roots or leaves for
-  `run`, `build`, `jobs`, `repl`, and `db`; `--offline` reuses only cached
+  `run`, `build`, `jobs`, `repl`, and `db`; `-A` (`--allow-all`) allows every
+  right on `run` and `build`; `--offline` reuses only cached
   signed toolchain and package data.
 - `--locked` requires locked dependency and provenance facts; `--fixtures`
   selects an explicit fixture bundle.
@@ -520,9 +506,12 @@ The options below are intentionally named exactly as in `target/debug/jet help`:
   WebAssembly assignment.
 - `--threads N` caps the compiler at N threads on `build`, `run`, `check`,
   `test`, `dev`, and `inspect` (D-JOBS1=A); without it the compiler admits
-  threads automatically up to the reported cores. It never limits the threads
-  of the program jet builds or runs, every value gives the same diagnostics
-  and output bytes, and `build --verbose` reports the cap it used. No
+  threads automatically up to one per physical core it may run on (SMT
+  siblings count once), fewer when other processes already keep its CPUs
+  busy at start (`/proc/stat`'s `procs_running` count). It never limits the
+  threads of the program jet
+  builds or runs, every value gives the same diagnostics and output bytes,
+  and `build --verbose` reports the cap it used. No
   environment variable sets it. `--jobs` and `-j` are usage errors (E2102)
   that point to `--threads`, because `jobs` names project jobs.
 
@@ -565,29 +554,42 @@ namespace semantics; retired manifests, symlinks, and other authority errors
 are not treated as missing. Existing manifests and source files retain their
 checked handles and are revalidated before invoking the compiler.
 
-`jet build` writes `.jet/build/<stem>` in that source root. The default and
-`--profile debug` builds use the Jet-native backend: `lir_lower_entry` lowers
-the functions `fn run` reaches to a relocatable object, and the in-process
+`jet build` writes `.jet/build/<stem>` in that source root. Every profile uses
+the Jet-native backend: the IR builder builds the functions `fn run` reaches,
+x86-64 selection compiles them to a relocatable object, and the in-process
 linker binds it to the runtime pack shipped beside `jet` into a static x86-64
-executable. A program that backend cannot lower yet is refused
-with E2104. `--release` (or `--profile release`) compiles the emitted Rust with
-rustc and the release profile flags. The Rust file starts with the same
-runtime/Core prefix the Rust compiler emits (MIRRust `emit_mir_runtime_text`):
-[`Emit/RuntimePrefix.jet`](../../../Compiler/JetCodegen/Source/Emit/RuntimePrefix.jet)
-assembles it from the Prelude and Foundation `.rs` sources under
-`JET_TOOLCHAIN_ROOT` (which must therefore also hold `crates/`), with the
-artifact's runtime parts, the test-harness gate, and the release devtools
-policy (`local` inspection for `--release`, development for a test harness).
+executable. The default build is O1; `--release` (or `--profile release`) is
+O2. A program that backend cannot build yet is refused with E2104.
 Other build flags and profiles are refused with E2104 until they are ported.
 
 `jet run <file>` (and the `jet <file>` shorthand) builds the same executable
 with the same profile rules, then runs it on the caller's stdin, stdout, and
 stderr and exits with its status (1 when a signal ended it). The program's
 arguments are the words after the first standalone `--`, or else the
-positional words after the file. Advisory lints stay hidden unless `--verbose`
+positional words after the file; under the shorthand every word after the
+file is the program's (a `--` right after it only separates), so a
+`#!/usr/bin/env jet` file runs as `./file.jet args`. Advisory lints stay hidden unless `--verbose`
 or `-v` comes before `--`; a verbose run reports them before the program
 starts. Run flags other than `--release`, `--profile`, `--verbose`, `--quiet`,
-`--color`, `--threads`, `--trace`, `--allow`, and `--deny` are refused with E2104 until they are ported.
+`--color`, `--threads`, `--trace`, `--allow`, `-A`, and `--deny` are refused with E2104 until they are ported.
+
+A script is a standalone program wherever it lives: its source snapshot is the
+script alone, and the source walk of a package leaves every script out.
+
+`jet run` keeps the program it built in the user cache directory
+(`$XDG_CACHE_HOME/jet/scripts`, else `~/.cache/jet/scripts`;
+[`ScriptCache.jet`](../../../Compiler/JetCli/Source/Cli/ScriptCache.jet)). This
+applies to scripts and to any other file. There is one program per entry file
+and profile. Its record names the toolchain it was built with (the compiler,
+runtime pack and Core source file identities) and a hash of its source
+snapshot: the source files and the tree's directories. Other files in the
+tree, such as one the program writes beside its source, are not compile
+inputs and don't change the hash. A rerun with the same toolchain and sources
+runs the kept program without compiling. Any change, including a different
+compiler, compiles again and replaces the kept program. The cache holds at
+most 64 programs; keeping another removes the least recently run one. A
+compile that read a comptime input file keeps nothing, and a `--verbose` or
+traced run always compiles.
 
 `jet build`, `run`, `check`, `test`, and `emit` take `--trace` to watch the
 compiler work: one line per event on stderr as it happens, with the elapsed
@@ -595,8 +597,8 @@ time, each phase's start and end (with its duration, item count, and resident
 and peak memory), the item being processed (a module or, with
 `JET_TRACE_DETAIL=functions`, a function), throttled progress counts, and the
 scaling counters. `--trace=FILE` writes the same events to FILE as Chrome
-trace-event lines, flushed per event, in the format of the Rust host's
-`JET_TRACE_FILE` trace (`Tools/perf/jetc-trace/summarize.mjs FILE --watch`
+trace-event lines, flushed per event, in the `JET_TRACE_FILE` trace format
+(`Tools/perf/jetc-trace/summarize.mjs FILE --watch`
 follows a running compile; Perfetto loads the file); timestamps have
 millisecond resolution. `JET_TRACE_FILE=FILE` is the environment form for
 the same five commands (`-` or `stderr` selects the readable stream), and
@@ -609,22 +611,25 @@ counter as a `JET_PHASE_COUNTERS` line on stderr. The phases are the CLI's
 intermediate state drops, and under `JET_KEEP_GOING=1` `keepgoing.final` and
 `keepgoing.report`), the host's checks of the result (`cli.diagnostics`,
 `cli.authority`) and the native backend's (`native.sources`,
-`native.rust_foreign`, `native.lower`, `native.object` (per function: the LIR
-passes of the level, the one LIR check, x86-64 selection and encoding; then the
-object), `native.foreign`, `native.link`; one `native.build` for a test
-harness). The readable stream is written through
+`native.rust_foreign`, `ir.build`, `ir.opt`, `ir.x64`, `ir.object`,
+`native.foreign` (the wait for the program's C closure and the runtime's
+bytes, which its own thread realizes and reads while the object builds),
+`native.link`; one `native.build` around
+them for a test harness). The readable stream is written through
 `/dev/stderr`, so redirect stderr to a file with `2>>`, or use
 `--trace=FILE`. A trace that cannot be written stops; the compile does not.
 
 Before `jet build` or `jet run` writes anything, the Jet host checks the
 application authority ([`Authority.jet`](../../../Compiler/JetCli/Source/Cli/Authority.jet)):
 the checked entry's solved effect row against the beginner floor (`IO`,
-`Mem.Alloc`, `Exec.Args`), the entry package's `authority.holds` (from
+`Mem.Alloc`, `Exec.Args`), the entry package's `authority` (from
 `package.jet` or the entry's leading inline `package { … }` block, which the
 Jet loader reads with the same field parser and masks before parsing), and the
-`--allow=`/`--deny=` rows of the invocation. A denied or undecided right is
+`--allow=`/`--deny=` rows of the invocation, where `-A` allows every right and
+a script (a file whose first line is a `#!/...` launch line) answers as `-A`
+does. A denied or undecided right is
 E1803, exit 1; a file with no package manifest leads the Fix with the exact
-`--allow` command. The interactive confirmation (D-SCRIPT-CONFIRM1), authority
+`--allow` command and its `-A` form. The interactive confirmation (D-SCRIPT-CONFIRM1), authority
 receipts, and lint-policy enforcement are not ported yet: the Jet host always
 answers as a non-interactive run.
 
@@ -638,7 +643,9 @@ keeps the emitted harness path. Native property generation is refused. Both
 paths preserve `JET_TEST_CAPTURE`, `JET_TEST_FILTER`, `JET_TEST_SHUFFLE_SEED`,
 `JET_TEST_SERIAL`, `JET_TEST_TRACE_TIERS`, `JET_UPDATE_SNAPSHOTS`, and
 `JET_PROJECT_ROOT`. Native outcomes use process-private framed record files,
-never stdout; after a fatal trap only unreported tests rerun individually.
+never stdout; after a fatal trap only unreported tests rerun individually,
+one child per core at a time (fewer when free memory can't hold 1 GiB per
+child; one at a time under `--serial`), reported in test order.
 Output checks run after joins in the same batch process. If that process
 traps, each unrun check fails with E3015 rather than running against fresh
 state in the final reporter. Its
@@ -651,11 +658,11 @@ Directory and package targets, doctests, a `fn test` override, a bare
 `--shuffle`, and the other test flags are refused with E2104 until they are
 ported. The test-result cache, the evidence report, and the package claims
 floor are not ported yet: every run compiles fresh, and the outcome is the
-harness exit (the Rust host's outcome for a package without a claims floor).
+harness exit (the outcome for a package without a claims floor).
 
-`jet new <name> [--template cli|ui|web|overrides] [--annotated]` writes the
-same project the Rust host writes (CmdCompile.rs `run_new`): `package.jet`
-with the template's authority holds, `.jet/lock` with the running toolchain
+`jet new <name> [--template cli|ui|web|overrides] [--annotated]` writes a
+project: `package.jet`
+with the template's `authority: { allow: [...] }` row, `.jet/lock` with the running toolchain
 pin and the build stamp (the git revision when the folder is inside a
 repository), the template's `run.jet`, the four comment-only `@*.jet` command
 homes for `overrides`, and `.gitignore`, then the status lines on stderr
@@ -663,9 +670,8 @@ homes for `overrides`, and `.gitignore`, then the status lines on stderr
 The backend scaffolds (`jet new service|route|job|migration`) are refused with
 E2104 until they are ported.
 
-`jet fmt [paths…] [-]` formats `.jet` sources with the Jet port of the
-formatter ([`Compiler/JetParser/Source/Formatter`](../../../Compiler/JetParser/Source/Formatter),
-one module per Rust `Formatter` module) the way CmdCompile.rs `run_fmt` does:
+`jet fmt [paths…] [-]` formats `.jet` sources with the Jet formatter
+([`Compiler/JetParser/Source/Formatter`](../../../Compiler/JetParser/Source/Formatter)):
 no paths walk the project root (the nearest `package.jet` directory, else the
 working directory), a directory is walked sorted with the ignored directories
 and snapshot trees skipped, every file is formatted before any is written, and
@@ -714,7 +720,7 @@ architecture advice and check provenance. Shared-callee and consumer-agreement
 candidates retain definition/call-site spans, effects, behavioral-check
 statuses, and uncertainty; they neither execute user code nor apply a refactor.
 
-The frozen TIR fact channel classifies view materialization, collection
+The checked program's fact channel classifies view materialization, collection
 copy-on-write, exact-integer spill, retained outcome construction, and
 representation fallback. Inline-integer removal is a proof from typed
 operand intervals, not an assumption about the runtime value. The cost query
@@ -818,7 +824,7 @@ function in an otherwise parseable file does not prevent a policy essay.
 `jet self devtools new-example <topic>/<name>` writes the feature example and
 its expected output using the golden harness's existing directory layout.
 Existing example source is an error; existing expected output is replaced.
-The two writes are sequential, as in the maintainer command's Rust host.
+The two writes are sequential.
 Its write confirmations are emitted even under `--json` or `--quiet`.
 
 Load-only gate queries use the same authorized source loader as schema and
@@ -833,28 +839,15 @@ fail a semantic compile.
 ## Maintainer workflows
 
 `jet self devtools reduce <file> --code <CODE>` minimizes line chunks while
-the compiler still emits the requested error or lint. Without `--code`, the
-oracle requires frontend acceptance and rejection of the generated Rust by
-the hidden backend's metadata-only probe. An unavailable backend is not a
-reproduction. The sibling output is `<stem>.reduced.<extension>`; files
+the compiler still emits the requested error or lint; `--code` is required. The sibling output is `<stem>.reduced.<extension>`; files
 without an extension use `.jet`. Candidates are compiled from their actual
 temporary files, never by treating diagnostic display text as source input.
 
-`jet self devtools ice-report <file>` writes the original source, generated
-Rust, backend stderr, and both tool versions into a timestamped
-`.jet/ice-report/` directory in the source project. Frontend errors prevent
-publication. Backend acceptance is reported as a note but still permits a
-bundle. Files are published sequentially, so an I/O failure can leave a
-partial bundle.
-
-`jet self devtools bless [target...] --dry-run` lists the selected snapshot
-test commands without launching them or requiring a reason. A real sweep
-requires at least eight UTF-8 bytes in the trimmed `UPDATE_EXPECT_REASON`;
-it sets `UPDATE_EXPECT=1` for each child and inherits its standard streams.
-Requested order and duplicate targets are preserved, and every selected
-target is attempted even if an earlier one fails. These maintainer commands
-own their raw arguments: `reduce` accepts the two-word `--code` form, and
-`bless` treats options other than `--dry-run` as target names.
+`jet self devtools ice-report <file>` writes the original source and the
+compiler version into a timestamped `.jet/ice-report/` directory in the
+source project. Frontend errors prevent publication. Files are published
+sequentially, so an I/O failure can leave a partial bundle. These maintainer
+commands own their raw arguments: `reduce` accepts the two-word `--code` form.
 
 `jet inspect gates [<entry.jet>] [--kind <kind>] [--scope <scope>]`
 uses the canonical load-only gate query, not semantic body checking or emission.
@@ -881,7 +874,7 @@ build`) shares the driver's checked plan projection. Its `files` and
 `affected_files` fields both list the static file universe; this is distinct
 from `core.build.receipt_diff`'s change-impact closure. Without an execution
 record, action cache status remains `unknown`. Build vector rows retain the
-compiler MIR's declaration order rather than acceleration inspection's
+checked program's declaration order rather than acceleration inspection's
 key-sorted function view.
 
 Compiler check/compile/link node identities come from the final checked bundle,
@@ -896,14 +889,12 @@ the graph key: target, profile, and runtime-pack identity are not encoded in tha
 static key, so it cannot serve as a native artifact cache identity. A compile
 observation never stamps an unexecuted check or link action.
 
-Acceleration inspection projects the optimizer's actual loop, vector, and
-acceleration proof rows for the selected profile and machine layout. It does
-not convert a source proof into a runtime measurement. Decision inspection
-materializes the canonical ledger from those MIR producers and semantic
-diagnostic rows. The same authenticated `jet.mir.decisions.v1` payload carries
-the complete source/configuration/profile/target/implementation/artifact/run
-identity and checked derivation references for live snapshots and replay;
-readers reject altered identities, row IDs, derivations, and noncanonical bytes.
+Decision inspection builds the checked program into the slot IR from its
+`fn run` and runs the IR optimizer at the level `jet build` uses: O1, or O2
+under `--release` or the `release`/`hardened` profiles. It reports what the
+passes changed (instructions before and after, inlined and direct calls, folds,
+fused compares, coalesced copies, removed dead and unreachable code, scalar
+replaced aggregates) and names each function the IR builder could not build.
 
 Live inspection consumes only the runtime's private `jet.live.v1` snapshot.
 Its no-follow read retains one file descriptor, checks its regular-file type,
@@ -913,28 +904,14 @@ snapshot schema bounds values, tasks and channels to 4096 rows; event observatio
 retain exactly fifteen payload-free fields, at most 256 records, strictly
 increasing sequences, and the runtime's closed enums and unavailable-count sentinel.
 Text and JSON share this validated snapshot, including published rendered values
-and sorted shape identities. Optional decision ledgers use the optimizer's existing
-authenticated codec with a 512 KiB transport bound; absence is explicitly
-`unavailable`, not evidence of a compiler decision. No process memory is read.
+and sorted shape identities. The snapshot's `decisions` slot carries no compiler
+decision and is not read. No process memory is read.
 Duplicate keys anywhere in a snapshot are rejected as corrupt or forged runtime
 transport by the strict Core JSON parser. This intentionally does not preserve
 the retired host's first-scalar/last-container duplicate-key behavior.
 
-The CLI's `inspect.accel` status projects typed authenticated runtime receipt
-rows separately from static vector and gate facts. Missing measurements stay
-null; a source proof alone never marks an acceleration selected. The shared
-D-ACCEL1 evaluator retains the release, parity, proof, measurement, and gain
-checks in their canonical order. `inspect.decisions` projects numeric row IDs,
-flat derivation references, per-kind counts, and the actual compiler journal's
-canonical routes; transport-ledger JSON is not a CLI status envelope.
-
-Runtime rows are read from authenticated current receipts through the held
-RecordIndex. Selection rederives the canonical target input identity, filters
-the current tool version, then chooses recorded sequence and receipt ID in
-descending order. A valid newest receipt with no acceleration rows does not
-reuse older measurements. Typed sections retain full-width integer values and
-reject unknown fields, invalid variants, duplicate numeric row sequences,
-reversed ranges, and values exceeding the compiled target's pointer width.
+The CLI's `inspect.decisions` status carries the optimizer report's counts as
+fields and the unbuilt functions as text rows.
 
 The shared WatchGraph starts from the compiler loader's actual physical input
 paths, adds checked project sidecars, recursively referenced HTML/CSS/JS assets,
@@ -944,11 +921,10 @@ receipt discovery refuses with `#4736`, rather than presenting an approximate
 input identity as authenticated. Directory-target collection uses the separate
 canonical tree policy.
 
-Explicit canonical-pass selections may report `canonical_route_gaps` alongside
-actual `canonical_routes`: these producer-owned operation IDs say `no Jet pass`
-only for absent Jet boundaries. They are availability rows, not execution
-receipts. Ordinary invocations preserve the reference status schema and omit
-the extension when there are no gaps.
+Explicit canonical-pass selections report `canonical_route_gaps`: no Jet pass
+records a canonical boundary, so every selected operation ID says `no Jet pass`.
+They are availability rows, not execution receipts. Ordinary invocations omit
+the extension.
 
 Output inspection consumes sema's checked callable links and selection facts,
 including the original source/semantic/machine names, typed parameters, inferred
@@ -956,7 +932,7 @@ failure contract, solved effects, and reference/declaration spans. The driver
 selects a singular runnable Output (or an explicit address) before lowering;
 inspection does not rename a function or reinterpret a text entry. Layout rows
 come from the compiler's target-aware reflection engine, not the inspecting
-host's pointer width. Inspection stops after canonical MIR production and does
+host's pointer width. Inspection stops at the checked program and does
 not emit or execute the selected callable.
 
 `inspect.output` reports the selected binding, callable identity, effective

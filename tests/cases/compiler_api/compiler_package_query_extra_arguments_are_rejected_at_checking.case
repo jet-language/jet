@@ -1,0 +1,22 @@
+# tests/compiler_api.rs::compiler_package_query_extra_arguments_are_rejected_at_checking at tests/compiler_api.rs:524; hand-port
+# Fixture migrated: prep {...} -> comptime {...}
+fixture: compiler_package_query_extra_arguments_are_rejected_at_checking.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check --json manifest/main.jet
+env: NO_COLOR=1
+exit: 1 # tests/compiler_api.rs:524 manifest
+stdout: ~ "\"code\":\"E0104\"" # tests/compiler_api.rs:524 manifest
+step: jet check --json package/main.jet
+env: NO_COLOR=1
+exit: 1 # tests/compiler_api.rs:524 package
+stdout: ~ "\"code\":\"E0104\"" # tests/compiler_api.rs:524 package
+step: jet check --json lock/main.jet
+env: NO_COLOR=1
+exit: 1 # tests/compiler_api.rs:524 lock
+stdout: ~ "\"code\":\"E0104\"" # tests/compiler_api.rs:524 lock
+step: jet check --json profiles/main.jet
+env: NO_COLOR=1
+exit: 1 # tests/compiler_api.rs:524 profiles
+stdout: ~ "\"code\":\"E0104\"" # tests/compiler_api.rs:524 profiles

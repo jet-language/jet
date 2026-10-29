@@ -12,7 +12,7 @@ BINARY_NAME :: "jet"
 ENV_ORG_UNSAFE_POLICY :: "JET_ORG_UNSAFE_POLICY"
 
 /// Typed compile-time unsafe proof statement and its
-/// parser-only call sentinel (removed by sema before TIR).
+/// parser-only call sentinel (removed by sema before lowering).
 KW_ASSERT :: "assert"
 
 INTERNAL_UNSAFE_ASSERT :: "__jet_unsafe_assert"
@@ -594,7 +594,7 @@ TARGET_OS_MACOS :: "MacOS"
 TARGET_OS_WINDOWS :: "Windows"
 
 /// (ratified 2026-07-03): the compiler-known comptime value
-/// `$build` and its `.os` field — the subject of an `prep if $build.os == { }`
+/// `$build` and its `.os` field — the subject of an `comptime if $build.os == { }`
 /// switch that folds to the arm matching the build's active OS. `build` is not
 /// a reserved keyword: it is recognized only in that syntactic position (an
 /// ordinary local named `build` is still fine); a `$build.os` anywhere else has
@@ -962,7 +962,7 @@ TYPE_AUTHORITY :: "Authority"
 /// Typed build-program values.
 /// These names are compiler-known only while the selected root `fn build`
 /// runs; build entry is removed before runtime codegen.
-TYPE_BUILD_CONTEXT :: "BuildContext"
+TYPE_BUILD_CONTEXT :: "Build"
 
 TYPE_BUILD_PLAN :: "BuildPlan"
 

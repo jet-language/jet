@@ -1,0 +1,15 @@
+# tests/core_math_numeric.rs::core_math_constants_and_rounding_match_across_tiers at tests/core_math_numeric.rs:7; hand-port
+fixture: core_math_constants_and_rounding_match_across_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step run: jet run run.jet
+exit: 0
+stdout: = core_math_constants_and_rounding_match_across_tiers.1.out
+step build: jet build run.jet
+exit: 0
+step aot: built
+exit: == run
+stdout: == run
+stderr: == run

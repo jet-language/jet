@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Focused #1414 proof for the native peer boundary. This is intentionally a
-// standalone test: it compiles the launcher with the host rustc, then probes
-// the exact filesystem, network, process-tree, and result contracts.
+// standalone test: it builds the Jet launcher with JET (the admitted native
+// compiler; JET_COMPILED_WORKLOAD_JET_BIN or `jet` on PATH also work), then
+// probes the exact filesystem, network, process-tree, and result contracts.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -9,7 +10,16 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const source = path.join(root, "Tools", "ci", "compiled-workload-peer-launcher.rs");
+const source = path.join(root, "Tools", "ci", "CompiledWorkloadPeerLauncher.jet");
+// `jet build` writes the binary to `.jet/build/<stem>` beside the source.
+const built = path.join(
+  root,
+  "Tools",
+  "ci",
+  ".jet",
+  "build",
+  process.platform === "win32" ? "CompiledWorkloadPeerLauncher.exe" : "CompiledWorkloadPeerLauncher",
+);
 const scratchBase = path.join(os.homedir(), ".cache", "jet-dev", "scratch");
 fs.mkdirSync(scratchBase, { recursive: true });
 const runRoot = fs.mkdtempSync(path.join(scratchBase, "compiled-workload-peer-launcher-"));
@@ -76,13 +86,15 @@ try {
   fs.mkdirSync(scratchBase, { recursive: true });
   fs.rmSync(outside, { recursive: true, force: true });
   fs.mkdirSync(outside);
-  const rustc = command("rustc");
-  if (!rustc) fail("rustc is not available to build the launcher");
-  const build = run(rustc, ["--edition=2021", "-O", source, "-o", launcher], {
+  const jet = process.env.JET || process.env.JET_COMPILED_WORKLOAD_JET_BIN || command("jet");
+  if (!jet) fail("JET is not set and no jet is on PATH to build the launcher");
+  const build = run(jet, ["build", "--quiet", source], {
     cwd: root,
     stdio: "inherit",
   });
-  if (build.status !== 0) fail(`launcher compilation failed with ${build.status}`);
+  if (build.status !== 0) fail(`launcher build failed with ${build.status}`);
+  fs.copyFileSync(built, launcher);
+  fs.chmodSync(launcher, 0o755);
 
   const contract = spawnSync(launcher, ["--contract"], {
     cwd: root,
@@ -92,9 +104,9 @@ try {
   const primitiveAvailable = contract.status === 0
     && (contract.stdout || "").trim() === "compiled-workload-peer-isolation-v1";
   if (!primitiveAvailable) {
-    // An unavailable host must still prove the fail-closed contract. Linux and
-    // Windows hide their discovered primitive behind PATH; this catches a
-    // missing bwrap/netsh without ever launching an unisolated child.
+    // An unavailable host must still prove the fail-closed contract. Linux
+    // hides its discovered primitive behind PATH; this catches a missing bwrap
+    // without ever launching an unisolated child. Other hosts always refuse.
     const missingPath = spawnSync(launcher, ["--contract"], {
       cwd: root,
       env: { ...process.env, PATH: "" },
@@ -102,7 +114,7 @@ try {
       maxBuffer: 1024 * 1024,
     });
     if (process.platform === "linux") assertRejected(missingPath, "bubblewrap");
-    if (process.platform === "win32") assertRejected(missingPath, "unavailable");
+    if (process.platform !== "linux") assertRejected(missingPath, "unavailable");
     const escapeArgs = args("disabled", process.execPath, [workload]);
     escapeArgs[6] = outside;
     const escape = run(launcher, escapeArgs, {
@@ -245,7 +257,7 @@ if (mode === "write") {
     maxBuffer: 1024 * 1024,
   });
   if (process.platform === "linux") assertRejected(missing, "bubblewrap");
-  if (process.platform === "win32") assertRejected(missing, "unavailable");
+  if (process.platform !== "linux") assertRejected(missing, "unavailable");
   console.log("peer launcher self-test: filesystem, network, path, authority, result, signal, and descendant checks passed");
 } finally {
   fs.rmSync(runRoot, { recursive: true, force: true });

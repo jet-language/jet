@@ -34,8 +34,9 @@
     // at those widths is exactly the corresponding maximum finite value.
     maximum_bits :: if target_f32 -> I64{128} else -> I64{1024}
     if (significant > maximum_bits || (significant > precision && trailing < significant - precision)) {
+        // The stop is published: the caller's stop point takes it.
         numeric_widen_stop(file, line)
-        loop { jet_rt_unreachable(I64{0}, I64{0}) }
+        return 0.0
     }
     // Only an exact <=24/53-bit significand crosses the machine conversion.
     // Binary scaling is exact and stays finite, so F32's returned f64 value

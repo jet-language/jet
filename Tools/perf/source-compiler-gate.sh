@@ -101,7 +101,7 @@ static_contract() {
       *) fail "Source compiler target/tier/profile/optimization/artifact mismatch: $cell" ;;
     esac
     safe_path "$input" && safe_path "$entry" && safe_path "$source_manifest" || fail "unsafe Source compiler contract path: $cell"
-    [[ "$entry" == Compiler/Bootstrap/Host/Entry.jet && "$source_manifest" == Compiler/Bootstrap/sources.list ]] || fail "Source compiler entry/source-manifest identity drifted: $cell"
+    [[ "$entry" == Compiler/JetCli/run.jet && "$source_manifest" == Compiler/package.jet ]] || fail "Source compiler entry/source-manifest identity drifted: $cell"
     [[ -f "$ROOT/$input" && -f "$ROOT/$entry" && -f "$ROOT/$source_manifest" ]] || fail "Source compiler contract input/source is missing: $cell"
     if [[ "$case_name" == selfcompile ]]; then
       [[ "$expected" == canonical-stage2-probes ]] || fail "selfcompile must use canonical stage2 probes, not an inventory echo: $cell"
@@ -194,7 +194,7 @@ check_identity() {
   [[ "${identity_seen[run_id]}" =~ ^[A-Za-z0-9_.:-]+$ ]] || fail "Source compiler run identity is invalid"
   [[ "${identity_seen[environment]}" == os=linux\;target=x86_64-unknown-linux-gnu,web\;locale=C\;network=disabled ]] || fail "Source compiler environment identity is invalid"
   is_nonzero_sha "${identity_seen[source_manifest_sha256]}" || fail "Source compiler source manifest identity is invalid"
-  [[ "${identity_seen[source_manifest_sha256]}" == "$(sha256_file "$ROOT/Compiler/Bootstrap/sources.list")" ]] || fail "Source compiler source manifest is stale"
+  [[ "${identity_seen[source_manifest_sha256]}" == "$(sha256_file "$ROOT/Compiler/package.jet")" ]] || fail "Source compiler source manifest is stale"
 }
 
 check_report() {

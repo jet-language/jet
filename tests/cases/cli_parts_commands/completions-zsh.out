@@ -104,7 +104,6 @@ flags=(
         '--explicit-copies[With fmt\: Materialize implicit read-view copies as `.copy()`]'
         '--skipped[With project parts\: Show modules omitted from automatic discovery]'
         '--stdin-path[With fmt -\: Path label used in diagnostics when reading from stdin]'
-        '--small[With build/run/jobs\: Favor a smaller binary]'
         '--lib[With build\: Emit the native Library and C header]'
         '--output[With build/run/dev/jobs/package\: Select a named output (build --lib selects a Library; Canvas uses it as the initial selection)]'
         '--locked[With build/fetch/jobs/run\: Require locked dependency and provenance facts]'
@@ -257,11 +256,22 @@ flags=(
         '--update[With import\: Merge generated Jet into an existing target]'
         '--coverage[With test/inspect build\: Show function or diagnostic coverage]'
         '--verify[With build\: Rebuild and compare one indexed receipt artifact]'
-        '--rust[With emit\: Print generated Rust source]'
-        '--emit-generated[With build\: Copy generated Jet sources into `.jet/generated/`]'
         '-u[Short form of --update-snapshots]'
         '--release[With build/run/dev/jobs/test\: Optimize for release]'
         '--profile[With build/run/dev/jobs/package/test\: How hard to optimize\: release, debug, ci, hardened, or a named optimization bundle]'
+        '--optimize[With build/run/dev/test\: How hard to optimize\: none, basic or full]'
+        '--bounds[With build/run/dev/test\: What a failed bounds check does\: fatal, report or off]'
+        '--debug-info[With build/run/dev/test\: Whether the image carries DWARF debug info\: true or false]'
+        '--small[With build/run/dev/test\: Favor a smaller binary by keeping inlining to the O1 limits\: true or false]'
+        '--inline[With build/run/dev/test\: Which calls the optimizer inlines\: auto, always_marked or off]'
+        '--backtrace[With build/run/dev/test\: What a fault report shows of the stack\: full, brief or off]'
+        '--dead-code[With build/run/dev/test\: Whether the image keeps the package'\''s unreached functions\: remove or keep]'
+        '--write-generated[With build/run/dev/test\: Whether fn build'\''s generated sources are written to .jet/generated/\: off or on]'
+        '--output-dir[With build/run/dev/test\: The directory jet build writes its executables to ("" is .jet/build)]'
+        '--libs[With build/run/dev/test\: More C libraries the native link resolves foreign symbols against]'
+        '--link-args[With build/run/dev/test\: More native link inputs\: -L<dir>, -l<name> or a .a archive path]'
+        '--os[With build/run/dev/test\: The operating system the image runs on\: linux, macos, windows, web or freestanding]'
+        '--min-os[With build/run/dev/test\: The oldest OS version the image runs on ("" is none)]'
         '--set[With build/run/dev/jobs/test\: Set one declared package setting as key=value]'
         '--threads[With build/run/check/test/dev/inspect\: Use at most N compiler threads (1 = one thread); without it jet picks a safe number of compiler threads]'
         '--trace[With build/run/check/test/emit\: Stream the compiler'\''s phases and progress to stderr, or to FILE with --trace=FILE]'
@@ -311,7 +321,7 @@ if (( CURRENT == 3 )); then
 case $words[2] in
             registry) _values 'action' 'publish:Publish the current package' 'yank:Stop new installs of a published version' 'keygen:Create a package-signing key' 'key:Manage the package-signing key' 'vendor:Copy dependencies into vendor/' ;;
             db) _values 'action' 'migrate:Create, preview, inspect, apply, resume, and roll back versioned database migrations' ;;
-            inspect) _values 'action' 'types:Show registered type and operator facts' 'rights:Show required and granted rights' 'claims:Show receipt-backed claims' 'shapes:Show semantic shapes and projections' 'accel:Show vector proof and acceleration gate decisions' 'decisions:Show compiler decisions and their evidence' 'structure:Show structure and lifecycle facts' 'build:Show build identity, provenance, and coverage' 'gates:Show the complete compile-time gate ledger' 'graph:Show the build graph' 'query:Search code and build information' 'explain-build:Explain why a target, action, or file is rebuilt' 'compiler:Read compiler facts as versioned JSON' 'impact:Show code affected by a symbol' 'provenance:Read dependency provenance' 'digest:Write the one-file LLM surface digest' 'env:List typed environment reads in a config surface' 'semindex:Search the code index' 'output:Inspect one selected Output' 'expand:Show expanded meaning of Jet code (use --json for canonical facts)' 'schema:Inspect saved data schema versions' 'codemod:Preview or apply code changes' 'audit:Inspect implicit copies, exercised memory witnesses, or dependencies' 'sbom:Create a software bill of materials' 'bind:Generate Jet bindings from a foreign header' 'logs:Show recent package build logs' 'info:Show package details' 'outdated:List dependencies with available updates' 'reserved:List reserved words and sigils' ;;
+            inspect) _values 'action' 'types:Show registered type and operator facts' 'rights:Show required and granted rights' 'claims:Show receipt-backed claims' 'shapes:Show semantic shapes and projections' 'decisions:Show compiler decisions and their evidence' 'structure:Show structure and lifecycle facts' 'build:Show build identity, provenance, and coverage' 'gates:Show the complete compile-time gate ledger' 'graph:Show the build graph' 'query:Search code and build information' 'explain-build:Explain why a target, action, or file is rebuilt' 'compiler:Read compiler facts as versioned JSON' 'impact:Show code affected by a symbol' 'provenance:Read dependency provenance' 'digest:Write the one-file LLM surface digest' 'env:List typed environment reads in a config surface' 'semindex:Search the code index' 'output:Inspect one selected Output' 'expand:Show expanded meaning of Jet code (use --json for canonical facts)' 'schema:Inspect saved data schema versions' 'codemod:Preview or apply code changes' 'audit:Inspect implicit copies, exercised memory witnesses, or dependencies' 'sbom:Create a software bill of materials' 'bind:Generate Jet bindings from a foreign header' 'logs:Show recent package build logs' 'info:Show package details' 'outdated:List dependencies with available updates' 'reserved:List reserved words and sigils' ;;
             project) _values 'action' 'parts:List loaded and skipped project modules' ;;
             self) _values 'action' 'toolchain:Show the Jet version selected for this project' 'update:Verify or install a signed Jet toolchain release' 'doctor:Find and fix toolchain problems' 'completions:Print shell completions' 'man:Print the Jet manual' 'devtools:Run Jet maintenance tools' 'lsp:Start the language server' 'exec:Execute one command in an authority-bound workspace' ;;
             env) _values 'action' 'test:Run environment checks in a clean environment' 'hook:Print the shell auto-activation hook' 'sync:Apply typed managed environment files' 'info:Show the typed environment plan' ;;

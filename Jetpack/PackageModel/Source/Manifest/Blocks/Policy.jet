@@ -2,6 +2,18 @@
 // ) and the standalone
 // organization policy document (Package/Blocks.rs).
 use core.math as policy_core_math
+use jet_foundation.[
+    POLICY_RULES, PolicyDeclaration, PolicyKey, PolicyScope, Span, authority_parse_right,
+    lint_auto_derive_name, lint_parse_policy_lints, policy_key_name, policy_key_parse,
+    policy_parse_value, policy_resolve,
+]
+use jetpack_foundation.[
+    MANIFEST_BLOCK_POLICY, POLICY_EXCEPTION_FIELD_EXPIRES, POLICY_EXCEPTION_FIELD_ID,
+    POLICY_EXCEPTION_FIELD_REASON, POLICY_EXCEPTION_FIELD_SCOPE, POLICY_EXCEPTION_TYPE,
+    POLICY_FIELD_CLAIMS, POLICY_FIELD_CONTAIN, POLICY_FIELD_DEPS, POLICY_FIELD_EFFECTS,
+    POLICY_FIELD_EXCEPTIONS, POLICY_FIELD_EXPERT, POLICY_FIELD_HARDEN, POLICY_FIELD_LICENSES,
+    POLICY_FIELD_LINTS, POLICY_FIELD_SOURCES, POLICY_FIELD_UNSAFE,
+]
 
 fn pkg_bad_mem(detail: String) -> PackageParseError Never! {
     PackageParseError.BadMemoryPolicy{detail: detail}
@@ -62,10 +74,10 @@ fn pkg_parse_policy(body: String, package_only_fields: Bool) -> [PolicyDeclarati
 // auto-derive switch, or an unregistered policy.
 fn pkg_policy_unknown_key(name: String, raw: String, package_only_fields: Bool) PackageParseError! {
     replacement :: if name == {
-        "no_alloc" -> Val("`authority: {{ holds: {{ deny: [Mem.Alloc] }} }}`")
-        "zero_rc" -> Val("`authority: {{ holds: {{ deny: [Mem.Rc] }} }}`")
+        "no_alloc" -> Val("`authority: {{ deny: [Mem.Alloc] }}`")
+        "zero_rc" -> Val("`authority: {{ deny: [Mem.Rc] }}`")
         "arena_bounded" -> {
-            if pkg_parse_u64(raw) == .Val(bytes) && bytes > 0 -> Val("`authority: {{ holds: {{ deny: [Mem.Alloc(above: {bytes})] }} }}`") else -> None
+            if pkg_parse_u64(raw) == .Val(bytes) && bytes > 0 -> Val("`authority: {{ deny: [Mem.Alloc(above: {bytes})] }}`") else -> None
         }
         else -> None
     }
@@ -74,7 +86,7 @@ fn pkg_policy_unknown_key(name: String, raw: String, package_only_fields: Bool) 
     if package_only_fields && (name == POLICY_FIELD_CONTAIN || name == POLICY_FIELD_HARDEN || name == POLICY_FIELD_LICENSES || name == POLICY_FIELD_SOURCES || name == POLICY_FIELD_EXCEPTIONS || name == POLICY_FIELD_CLAIMS) -> return
     auto_derive :: lint_auto_derive_name()
     if name == auto_derive -> return Err(PackageParseError.RetiredPolicyField{field: "policy.{name}", replacement: "policy: {{ lints: {{ deny: [{auto_derive}] }} }}"})
-    return Err(pkg_bad_mem("`{name}` is not a registered package policy; memory floors belong in `authority.holds.deny`"))
+    return Err(pkg_bad_mem("`{name}` is not a registered package policy; memory floors belong in `authority.deny`"))
 }
 
 // One `policy.sources` rule: a package pattern and its allowed sources.

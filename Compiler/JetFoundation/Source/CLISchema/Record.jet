@@ -1,13 +1,12 @@
 // The canonical v8 JetCommandSchema record (CLISchema.rs 1151-1645).
 // Readers own decoded fields, while executable section slices remain borrowed.
-use jet_foundation.[mir_sha256_bytes, JobScope, JobSkip, JobCachePolicy, ParamZone, StringMapEntry]
 
 RECORD_VERSION :: U16{8}
 ELF_SECTION :: ".jet_command"
 PE_SECTION :: ".jetcmd"
 MACH_SECTION :: "__jetcmd"
 WASM_SECTION :: "jet.command"
-CLI_SCHEMA_MAGIC :: prep { [U8]{74, 69, 84, 67, 77, 68, 0, 0} }
+CLI_SCHEMA_MAGIC :: [U8]{74, 69, 84, 67, 77, 68, 0, 0}
 CLI_SCHEMA_MAX_RECORD_BYTES :: 1048576
 CLI_SCHEMA_MAX_INPUTS :: 4096
 CLI_SCHEMA_MAX_JOBS :: 4096
@@ -78,7 +77,7 @@ fn decode_record(record: View<U8>) -> CLICommandSchema MetadataError! {
     loop index in 0..<4 -> length = length.bit_or((Int.from_u8(record[10 + index]) << (8 * index)))
     if length > CLI_SCHEMA_MAX_RECORD_BYTES || record.len() - 46 != length -> return Err(MetadataError.Malformed{why: "invalid record length"})
     payload :: record[46..<record.len()]
-    digest :: mir_sha256_bytes(payload)
+    digest :: sha256_bytes(payload)
     loop index in 0..<32 {
         if digest[index] != record[14 + index] -> return Err(MetadataError.Malformed{why: "digest mismatch"})
     }
@@ -365,7 +364,7 @@ fn encode_record(schema: CLICommandSchema) -> [U8] Never! {
     &record.push(U8{Int.from_u16(RECORD_VERSION).bit_and(255)})
     &record.push(U8{Int.from_u16(RECORD_VERSION) >> 8})
     cli_schema_put_u32(&record, payload.len())
-    &record.extend(mir_sha256_bytes(payload[0..<payload.len()]))
+    &record.extend(sha256_bytes(payload[0..<payload.len()]))
     &record.extend(^payload)
     record
 }

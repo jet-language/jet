@@ -1,0 +1,16 @@
+# tests/fmt.rs::fmt_canonicalizes_anonymous_union_types at tests/fmt.rs:1616; hand-port
+# Claim: param/return union `String | Int` prints as `Int | String` (tests/fmt.rs:1626-1629)
+# Claim: fallible error-side union prints as `Int !(Bool | String)` (tests/fmt.rs:1630-1633)
+# Claim: second pass identical (tests/fmt.rs:1634-1635)
+fixture: fmt_canonicalizes_anonymous_union_types.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt run.jet
+exit: 0 # tests/fmt.rs:1625 formats
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:1626-1633 canonical union spellings
+stdout: ~ "Int | String" # tests/fmt.rs:1626-1633 canonical union spellings
+stdout: ~ "Int (String | Bool)!" # tests/fmt.rs:1626-1633 canonical union spellings
+step: jet fmt --check run.jet
+exit: 0 # tests/fmt.rs:1634-1635 stable

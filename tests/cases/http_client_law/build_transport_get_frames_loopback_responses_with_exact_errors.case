@@ -1,0 +1,13 @@
+# #5484 step 1: core.http.client.jet_http_build_get, the checked-build GET leaf, is Jet source over core.net.
+# Loopback Jet peers answer fixed bytes; the rows (header lines, body, status) and every framing, bound,
+# deadline and argument error text are the contract BuildHTTPTransport and the Driver policy rely on.
+# Replaces the GET half of the runtime's HostBuildHTTPWitness.c.
+fixture: build_transport_get_frames_loopback_responses_with_exact_errors.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+write: main.jet build_transport_get_frames_loopback_responses_with_exact_errors.fixture/main.template
+step build: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = build_transport_get_frames_loopback_responses_with_exact_errors.stdout.expected

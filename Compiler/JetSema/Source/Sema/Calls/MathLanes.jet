@@ -1,0 +1,194 @@
+// The built-in math value types no Core declaration names (Rust
+// math_layout.rs and the D-SIMD2 / D-LINALG1 arms of method_calls.rs): SIMD
+// lane reductions and `reduce(.Op)`, the `[T#N]` `to_array` bridge, the vector
+// and matrix products, the `splat` / `from_array` statics, and `v[i]` lane reads.
+// A math type Core declares (`F64x4`, `Vec3`) keeps its own source methods.
+use jet_foundation.[
+    AccessConvention,
+    CallArg,
+    Diagnostic,
+    Expr,
+    Measure,
+    NodeKind,
+    Span,
+    Type,
+    expr_span,
+    type_identity_equal,
+    type_name,
+    type_simd_lane_arity,
+]
+
+SEMA_MATH_REDUCE_OP_TYPE :: "ReduceOp"
+SEMA_MATH_REDUCE_OP_VALUES :: [String]{"Add", "Mul", "Min", "Max", "Avg"}
+
+fn sema_call_math_is_lane(name: String) -> Bool Never! {
+    type_simd_lane_arity(name) != None
+}
+
+// The compiler-provided math type `ty` names: a math family member with no
+// registered declaration (Rust `is_math_type && !registry.contains`).
+fn sema_call_math_builtin_name(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
+    name :: if ty == {
+        .Named(found) -> found
+        else -> { return None }
+    }
+    if !sema_core_is_math_type(name) -> return None
+    if program.registration_graph == .Val(graph) {
+        if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) != None -> return None
+    }
+    Val(name)
+}
+
+// Rust `math_array_bridge_ty`: `[T#N]` of the scalar, N the component count.
+fn sema_call_math_array_bridge(name: String) -> Type Never! {
+    Type.FixedList{elem: sema_call_math_scalar_type(name), len: Measure.Literal{kind: "length", value: sema_call_math_arity(name)}}
+}
+
+// Rust `math_method_return`.
+fn sema_call_math_method_return(name: String, method: String, argument_count: Int) -> Type? {
+    if sema_call_math_is_lane(name) {
+        if (method == "sum" || method == "product" || method == "min" || method == "max") && argument_count == 0 -> return Val(sema_call_math_scalar_type(name))
+        if method == "reduce" && argument_count == 1 -> return Val(sema_call_math_scalar_type(name))
+        if method == "to_array" && argument_count == 0 -> return Val(sema_call_math_array_bridge(name))
+        return None
+    }
+    self_type :: Type.Named{name: name}
+    if name == "Vec2" || name == "Vec3" || name == "Vec4" {
+        if method == "dot" && argument_count == 1 -> return Val(Type.Float)
+        if method == "cross" && argument_count == 1 && name == "Vec3" -> return Val(self_type)
+        if method == "length" && argument_count == 0 -> return Val(Type.Float)
+        if method == "normalize" && argument_count == 0 -> return Val(self_type)
+        if method == "to_array" && argument_count == 0 -> return Val(sema_call_math_array_bridge(name))
+        return None
+    }
+    if name == "Mat3" || name == "Mat4" {
+        if method == "matmul" && argument_count == 1 -> return Val(self_type)
+        if method == "transpose" && argument_count == 0 -> return Val(self_type)
+        if method == "transform" && argument_count == 1 -> return Val(Type.Named{name: if name == "Mat3" -> "Vec3" else -> "Vec4"})
+        if method == "to_array" && argument_count == 0 -> return Val(sema_call_math_array_bridge(name))
+    }
+    None
+}
+
+// Rust `math_method_arg_ty`.
+fn sema_call_math_method_argument(name: String, method: String) -> Type? {
+    if method == "dot" || method == "cross" || method == "matmul" -> return Val(Type.Named{name: name})
+    if name == "Mat3" && method == "transform" -> return Val(Type.Named{name: "Vec3"})
+    if name == "Mat4" && method == "transform" -> return Val(Type.Named{name: "Vec4"})
+    None
+}
+
+fn sema_call_math_reduce_error(span: Span, what: String, why: String, fix: String) -> Diagnostic Never! {
+    sema_error("E2510", span, what, why, fix)
+}
+
+// Rust D-REDUCE-VALUE1: `v.reduce(.Op)` takes one Core `ReduceOp` value; the
+// operation is carried on the method, so the TIR call has no value arguments.
+fn sema_call_math_lane_reduce(receiver: Expr, receiver_value: TExpr, name: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    failed :: SemaMethodSpecialCheck{handled: true, value: None}
+    if args.len() != 1 {
+        &diagnostics.push(sema_call_math_reduce_error(span, "`reduce` takes one `ReduceOp` value, got {args.len()}", "a lane reduction uses the closed Core `ReduceOp` enum", "write `v.reduce(.Add)`, `.Mul`, `.Min`, `.Max`, or `.Avg`"))
+        sema_call_memory_discard_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return failed
+    }
+    argument :: args[0].expr
+    operation := ""
+    if argument == {
+        .ReduceMarker(marker, marker_span, _) -> {
+            &diagnostics.push(sema_call_math_reduce_error(marker_span, "`#{marker}` is retired as a reduce selector", "reduce operations are ordinary Core `ReduceOp` enum values", "write `v.reduce(.Add)`"))
+            return failed
+        }
+        .EnumLit(enum_type, variant, _, payload, _, value_span, _) -> {
+            valid :: (enum_type == "" || enum_type == SEMA_MATH_REDUCE_OP_TYPE) && payload.len() == 0 && SEMA_MATH_REDUCE_OP_VALUES.contains(variant)
+            if !valid {
+                &diagnostics.push(sema_call_math_reduce_error(value_span, "this value is not a `ReduceOp`", "`reduce` accepts `.Add`, `.Mul`, `.Min`, `.Max`, or `.Avg`", "use a Core `ReduceOp` value"))
+                return failed
+            }
+            _ := sema_check_expression(argument, Val(Type.Named{name: SEMA_MATH_REDUCE_OP_TYPE}), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return failed
+            operation = variant
+        }
+        else -> {
+            &diagnostics.push(sema_call_math_reduce_error(expr_span(argument), "`reduce` takes a `ReduceOp` value", "the operation is an ordinary closed Core enum value", "write `v.reduce(.Add)`, `.Mul`, `.Min`, `.Max`, or `.Avg`"))
+            _ := sema_check_expression(argument, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            return failed
+        }
+    }
+    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return failed
+    result :: sema_call_math_scalar_type(name)
+    value :: sema_tir_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.MathMethod{type_name: name, method: "reduce", reduce_op: Val(operation)}, args: [TExpr]{}}, span)
+    if !sema_effect_record_intrinsic_fact(environment, program, &scopes, &context, "{name}.reduce", span, sema_call_geometry_call_facts(result), &diagnostics) -> return failed
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+}
+
+// An instance method on a compiler-provided math value. A method the table
+// does not name falls through to the ordinary missing-method diagnostic.
+fn sema_call_try_math_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    name :: sema_call_math_builtin_name(receiver_value.ty, environment, program) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    if method == "reduce" && sema_call_math_is_lane(name) -> return sema_call_math_lane_reduce(receiver, receiver_value, name, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    result :: sema_call_math_method_return(name, method, args.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    failed :: SemaMethodSpecialCheck{handled: true, value: None}
+    wanted :: sema_call_math_method_argument(name, method)
+    values := [TExpr]{}
+    complete := true
+    loop argument in args {
+        checked :: sema_check_expression(argument.expr, wanted, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
+            complete = false
+            next
+        }
+        if wanted == .Val(required) && !type_identity_equal(checked.ty, required) {
+            &diagnostics.push(sema_error("E0128", expr_span(argument.expr), "`.{method}()` on `{name}` expects a `{type_name(required)}`, got `{type_name(checked.ty)}`", "`{name}.{method}(…)` operates on a `{type_name(required)}`", "pass a `{type_name(required)}` value"))
+            complete = false
+            next
+        }
+        &values.push(checked)
+    }
+    if !complete -> return failed
+    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return failed
+    value :: sema_tir_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.MathMethod{type_name: name, method: method, reduce_op: None}, args: values}, span)
+    if !sema_effect_record_intrinsic_fact(environment, program, &scopes, &context, "{name}.{method}", span, sema_call_geometry_call_facts(result), &diagnostics) -> return failed
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+}
+
+// Rust `math_static_return` / `math_static_arg_ty`: `T.splat(scalar)` and
+// `T.from_array([T#N])` build the value through the `jet_math_<T>_<method>`
+// builtin; the argument is checked against its expected type first.
+fn sema_call_try_math_static(owner: String, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    unhandled :: SemaMethodSpecialCheck{handled: false, value: None}
+    self_type :: Type.Named{name: owner}
+    name :: sema_call_math_builtin_name(self_type, environment, program) ?? return unhandled
+    if (method != "splat" && method != "from_array") || args.len() != 1 -> return unhandled
+    failed :: SemaMethodSpecialCheck{handled: true, value: None}
+    wanted :: if method == "splat" -> sema_call_math_scalar_type(name) else -> sema_call_math_array_bridge(name)
+    checked :: sema_check_expression(args[0].expr, Val(wanted), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return failed
+    if !type_identity_equal(checked.ty, wanted) {
+        &diagnostics.push(sema_error("E0128", expr_span(args[0].expr), "`{name}.{method}()` expects a `{type_name(wanted)}`, got `{type_name(checked.ty)}`", "`{name}.{method}` builds a `{name}` from a `{type_name(wanted)}`", "pass a `{type_name(wanted)}` value"))
+        return failed
+    }
+    value :: sema_tir_node(self_type, TExprKind.MathBuiltin{type_name: name, function: method, args: [TExpr]{checked}}, span)
+    if !sema_effect_record_intrinsic_fact(environment, program, &scopes, &context, "{name}.{method}", span, sema_call_geometry_call_facts(self_type), &diagnostics) -> return failed
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+}
+
+// Rust `infer_index` lane arm: `v[i]` on a compiler-provided SIMD lane reads
+// one lane scalar. The index is an Int; a written literal must name a lane.
+fn sema_call_math_lane_index(name: String, base: TExpr, index: Expr, checked_index: TExpr, span: Span, environment: SemaScopeEnvironment, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    integer :: if checked_index.ty == {
+        .Int | .InlineRange(_, _, _) -> true
+        else -> false
+    }
+    if !integer {
+        &diagnostics.push(sema_error("E0505", expr_span(index), "lane indexes must be Int (a whole number), not {sema_type_show(checked_index.ty)}", "a SIMD lane is read by position with a whole-number index starting at 0", "use an Int index, like `v[0]`"))
+        return None
+    }
+    lanes :: sema_call_math_arity(name)
+    if index == .Int(number, _, _, _, _) {
+        if number < 0 || number >= lanes {
+            &diagnostics.push(sema_error("E0965", expr_span(index), "lane {number} is out of range for `{name}` ({lanes} lanes)", "the valid lanes for `{name}` are 0 through {lanes - 1}", "use a lane index between 0 and {lanes - 1}"))
+            return None
+        }
+    }
+    line :: sema_source_line_at(environment.source_segments, span) ?? 0
+    base_row :: sema_arena_adopt(&context, base)
+    index_row :: sema_arena_adopt(&context, checked_index)
+    Val(sema_node(&context, sema_call_math_scalar_type(name), NodeKind.MathLaneIndex{lane_type: name, base: base_row, index: index_row, line: line}, span))
+}

@@ -1,0 +1,51 @@
+
+use core.files as files
+
+fn replace_closed_temp() -> String {
+    owner :: files.temp_file("opaque-close-replacement") ?? panic("temp")
+    path :: owner.path
+    close(^owner)
+    files.write(path, "replacement") ?? panic("replace temp")
+    path
+}
+
+fn replace_closed_lock(path: String) {
+    owner :: files.lock(path) ?? panic("lock")
+    close(^owner)
+    files.write(path, "replacement") ?? panic("replace lock")
+}
+
+fn run() {
+    temp :: files.temp_file("opaque-manual-close") ?? panic("temp")
+    temp_path :: temp.path
+    print(files.exists(temp_path))
+    close(^temp)
+    print(!files.exists(temp_path))
+
+    path :: files.join(".", "reader.txt")
+    writer :: files.create(path) ?? panic("create")
+    writer.write_line("payload") ?? panic("write")
+    &writer.flush() ?? panic("flush")
+    close(^writer)
+    reader :: files.open(path) ?? panic("open")
+    print(reader.path == path)
+    line :: reader.read_line() ?? panic("read")
+    close(^reader)
+    print(line == "payload")
+
+    lock_path :: files.join(".", "owner.lock")
+    lock :: files.lock(lock_path) ?? panic("lock")
+    print(files.exists(lock_path))
+    close(^lock)
+    print(files.exists(lock_path))
+
+    // The old owner's lexical exit must not delete a new ordinary file at
+    // the same path after its consuming close.
+    replaced_temp :: replace_closed_temp()
+    print((files.read(replaced_temp) ?? panic("read replaced temp")) == "replacement")
+    files.remove(replaced_temp) ?? panic("remove replaced temp")
+    replaced_lock :: files.join(".", "replacement.lock")
+    replace_closed_lock(replaced_lock)
+    print((files.read(replaced_lock) ?? panic("read replaced lock")) == "replacement")
+    files.remove(replaced_lock) ?? panic("remove replaced lock")
+}

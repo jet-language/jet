@@ -1,8 +1,8 @@
-fn build(b: BuildContext) -> BuildPlan {
+fn build(b: Build) {
     b.generate("made") {
         fn generated_value() -> String { "hi" }
     }
     app :: b.add_executable("app", ["main.jet", ".jet/generated/main/made.jet"], [])
-    return b.plan(app)
+    b.default(app)
 }
 fn run() { print(generated_value()) }

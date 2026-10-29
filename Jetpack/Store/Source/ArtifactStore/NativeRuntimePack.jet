@@ -2,6 +2,9 @@
 // A digest verifies bytes; only the explicit post-rail authorization admits a
 // subject. Remaining Rust archives are temporary bridge artifacts, not a claim
 // that the Rust/LLVM-free toolchain cutover is complete.
+use core.encoding as encoding
+use core.encoding.json as json
+
 
 #Error
 enum NativeRuntimePackError {
@@ -44,8 +47,8 @@ struct NativeRuntimePackSubject {
     fn to_tree(self) -> Dyn Never! {
         Dyn.Object([String: Dyn]{
             "schema": Dyn.Text("jet.native-runtime-pack-subject/v1"),
-            "runtime_source_revision": Dyn.Text(self.runtime_source_revision),
-            "runtime_source_tree": Dyn.Text(self.runtime_source_tree),
+            "runtime_source_revision": Dyn.Text(self.runtime_source_revision.copy()),
+            "runtime_source_tree": Dyn.Text(self.runtime_source_tree.copy()),
             "pack_object": native_pack_handle_tree(self.pack_object),
             "jet_object": native_pack_handle_tree(self.jet_object),
             "remaining_native_archive": native_pack_handle_tree(self.remaining_native_archive),
@@ -456,11 +459,33 @@ fn native_pack_decode(bytes: [U8]) -> Dyn NativeRuntimePackError! {
     Ok(tree)
 }
 
+// An object's ordered members as a map; a repeated name is invalid.
+fn native_pack_member_map(members: [(key: String, value: Dyn)]) -> [String: Dyn] NativeRuntimePackError! {
+    values := [String: Dyn]{}
+    loop member in members {
+        if values.get(member.key) == .Val(_) -> return Err(NativeRuntimePackError.Invalid("publication record repeats {member.key}"))
+        values[member.key] = member.value
+    }
+    Ok(values)
+}
+
+// Whether field `name` is exactly the boolean `true`.
+fn native_pack_true_field(fields: [String: Dyn], name: String) -> Bool Never! {
+    if fields.get(name) == {
+        .Val(value) -> if value == {
+            .Bool(flag) -> flag
+            else -> false
+        }
+        .None -> false
+    }
+}
+
 fn native_pack_fields(tree: Dyn, names: [String]) -> [String: Dyn] NativeRuntimePackError! {
-    values :: if tree == {
+    members :: if tree == {
         .Object(fields) -> fields
         else -> { return Err(NativeRuntimePackError.Invalid("publication record must be an object")) }
     }
+    values :: native_pack_member_map(members) ?? return Err(err)
     if values.len() != names.len() -> return Err(NativeRuntimePackError.Invalid("publication record has missing or unknown fields"))
     loop name in names {
         if values.get(name) == None -> return Err(NativeRuntimePackError.Invalid("publication record is missing {name}"))
@@ -527,7 +552,6 @@ fn native_pack_array_field(fields: [String: Dyn], name: String) -> [Dyn] NativeR
     }
 }
 
-
 fn native_pack_unique(seen: &[String: Bool], role: String) NativeRuntimePackError! {
     if role == "" || seen.get(role) != None -> return Err(NativeRuntimePackError.Invalid("empty or duplicate publication role/step {role}"))
     &seen.add(role, true).drop("checked absent")
@@ -580,7 +604,7 @@ fn native_pack_rail_inputs(fields: [String: Dyn], name: String, produced: [Strin
         native_pack_unique(&seen, role)
         source_tree :: row.get("source") ?? return Err(NativeRuntimePackError.Invalid("missing input source"))
         source_fields :: if source_tree == {
-            .Object(values) -> values
+            .Object(values) -> native_pack_member_map(values) ?? return Err(err)
             else -> { return Err(NativeRuntimePackError.Invalid("input source must be an object")) }
         }
         kind :: native_pack_text_field(source_fields, "kind")
@@ -595,8 +619,8 @@ fn native_pack_rail_inputs(fields: [String: Dyn], name: String, produced: [Strin
                 output :: native_pack_text_field(checked, "output")
                 available :: produced.get(step) ?? return Err(NativeRuntimePackError.Invalid("input producer is missing, cyclic or not an earlier step"))
                 found := false
-                loop name in available {
-                    if name == output -> found = true
+                loop produced_name in available {
+                    if produced_name == output -> found = true
                 }
                 if !found -> return Err(NativeRuntimePackError.Invalid("input names an undeclared producer output"))
                 NativeRuntimeRailInputSource.Produced{step, output}
@@ -729,10 +753,10 @@ fn native_pack_check_generation(bytes: [U8], subject: NativeRuntimePackSubject) 
     text :: String.from_bytes(bytes) ?? return Err(NativeRuntimePackError.Invalid("generation receipt is not UTF-8"))
     tree :: json.parse(text)
     fields :: if tree == {
-        .Object(values) -> values
+        .Object(values) -> native_pack_member_map(values) ?? return Err(err)
         else -> { return Err(NativeRuntimePackError.Invalid("generation receipt must be an object")) }
     }
-    if native_pack_text_field(fields, "final") != subject.runtime_source_revision || fields.get("deterministic") != Val(Dyn.Bool(true)) {
+    if native_pack_text_field(fields, "final") != subject.runtime_source_revision || !native_pack_true_field(fields, "deterministic") {
         return Err(NativeRuntimePackError.Invalid("generation receipt is not deterministic at runtime FINAL"))
     }
 }

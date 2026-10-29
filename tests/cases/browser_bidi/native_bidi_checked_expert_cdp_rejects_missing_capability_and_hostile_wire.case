@@ -1,0 +1,25 @@
+# tests/browser_bidi.rs::native_bidi_checked_expert_cdp_rejects_missing_capability_and_hostile_wire at tests/browser_bidi.rs:2387; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port})
+fixture: native_bidi_checked_expert_cdp_rejects_missing_capability_and_hostile_wire.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+requires: tool:node
+write: browser_bidi_cdp_hostile.jet native_bidi_checked_expert_cdp_rejects_missing_capability_and_hostile_wire.fixture/run.template
+step: jet build browser_bidi_cdp_hostile.jet
+exit: 0
+session no_cdp raw: node {root}/tests/fixtures/browser_bidi_mock.mjs hostile-no-cdp {free-port:no_cdp}
+session cdp_hostile raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:cdp_hostile} cdp_hostile.json
+sleep: 500ms
+step run: built
+exit: 0
+stdout: = native_bidi_checked_expert_cdp_rejects_missing_capability_and_hostile_wire.1.out
+stdout: !~ "CDP_HOSTILE_SECRET" # original predicate: !stdout.contains
+stderr: !~ "CDP_HOSTILE_SECRET" # original predicate: !stderr.contains
+stdout: !~ "SECRET STACK" # original predicate: !stdout.contains
+stderr: !~ "SECRET STACK" # original predicate: !stderr.contains
+close no_cdp
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+close cdp_hostile
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+stdout: = native_bidi_checked_expert_cdp_rejects_missing_capability_and_hostile_wire.2.out # original assert_eq!(server.join().unwrap(), [..])

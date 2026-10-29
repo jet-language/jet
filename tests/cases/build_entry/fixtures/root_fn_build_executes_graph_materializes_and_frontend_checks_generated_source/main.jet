@@ -1,5 +1,5 @@
 
-fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+fn build(b: Build) -[Exec, FS]> {
     b.generate("generated_message") {
         fn generated_message() -> String { return "built" }
     }
@@ -12,9 +12,8 @@ fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
             ["Exec", "FS"]
         )
         app :: b.add_executable("app", ["main.jet", ".jet/generated/main/generated_message.jet"], [stamp])
-        return b.plan(app)
+        b.default(app)
     }
-    return b.plan()
 }
 
 fn run() { print("ok") }

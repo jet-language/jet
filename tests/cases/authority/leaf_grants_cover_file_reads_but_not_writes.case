@@ -1,0 +1,38 @@
+# Claim: --allow=FS.Read covers files.read but refuses a write (E1803 FS.Write); --allow=FS covers the write
+# Fixture migrated: readfile path argument made dir-relative (argv/argv.jet); writes target fixture-relative written.txt
+# Fixture migrated: core.process items imported as use core.process.[args, cmd] (seed rejects process.args() in this position, E1004); calls changed to args()/cmd()
+# Not ported: Rust asserts stdout "wrote"-free for default write; spec asserts wrote\n only where Rust checks file contents (not stdout); observed decides
+fixture: leaf_grants_cover_file_reads_but_not_writes.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run --allow=FS.Read readfile/readfile.jet
+exit: 0 # default: FS.Read covers files.read
+stdout: = "read=true\n" # default: FS.Read covers files.read
+step: jet run --allow=FS.Read writefile/writefile.jet written.txt
+exit: 1 # default: write refused E1803 FS.Write
+stdout: = "" # default: write refused E1803 FS.Write
+stderr: ~ "E1803" # default: write refused E1803 FS.Write
+stderr: ~ "`FS.Write`" # default: write refused E1803 FS.Write
+step: sh {work}/step-3.sh
+exit: 0 # refused write never ran (default)
+step: jet run --allow=FS writefile/writefile.jet written.txt
+exit: 0 # default: FS root covers write
+stdout: = "wrote\n" # default: FS root covers write
+step: sh {work}/step-5.sh
+exit: 0 # written content = written (default)
+step: jet run --release --allow=FS.Read readfile/readfile.jet
+exit: 0 # release: FS.Read covers files.read
+stdout: = "read=true\n" # release: FS.Read covers files.read
+step: jet run --release --allow=FS.Read writefile/writefile.jet written.txt
+exit: 1 # release: write refused E1803 FS.Write
+stdout: = "" # release: write refused E1803 FS.Write
+stderr: ~ "E1803" # release: write refused E1803 FS.Write
+stderr: ~ "`FS.Write`" # release: write refused E1803 FS.Write
+step: sh {work}/step-8.sh
+exit: 0 # refused write never ran (release)
+step: jet run --release --allow=FS writefile/writefile.jet written.txt
+exit: 0 # release: FS root covers write
+stdout: = "wrote\n" # release: FS root covers write
+step: sh {work}/step-10.sh
+exit: 0 # written content = written (release)

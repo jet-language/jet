@@ -4,6 +4,16 @@
 // is answered by the sibling `jet` through `jet __jetpack <op>` (one
 // evaluator, one checker; I8). Jetpack-only: inside `jet` the environment
 // model's `comptime_evaluate` is the in-process one (JetCli ConfigEval.jet).
+use jetpack_foundation.[BINARY_NAME]
+use jet_foundation.[
+    ComptimeEvalError, CtValue, Expr, Func, JET_COMPILER_SERVICE_COMPTIME_EVALUATE,
+    JET_COMPILER_SERVICE_VERB, compiler_service_comptime_outcome, compiler_service_comptime_request,
+    foundation_parse_protocol_json, jet_config_eval_error, jet_config_eval_placed,
+    jet_config_plain_literal, jet_config_program,
+]
+use core.sys as sys
+use core.files as files
+use core.process as process
 
 // The service could not answer: the compiler was not found or failed, or its
 // response was not one the protocol defines.
@@ -30,7 +40,7 @@ fn envmodel_compiler_service(op: String, request: String) -[FS, Env, Exec, Time.
     jet :: envmodel_find_jet_binary()
     child :: process.cmd([String]{jet, JET_COMPILER_SERVICE_VERB, op}).stdin(.Stream).stdout(.Capture).stderr(.Capture).spawn() ?? return Err(CompilerServiceError{detail: "`{jet}` could not be started: {err}"})
     child.stdin.write(request) ?? return Err(CompilerServiceError{detail: "the request could not be sent to `{jet}`: {err}"})
-    child.stdin.close() ?? return Err(CompilerServiceError{detail: "the request could not be sent to `{jet}`: {err}"})
+    child.stdin.close()
     receipt :: child.wait() ?? return Err(CompilerServiceError{detail: "`{jet}` could not be awaited: {err}"})
     if receipt.signal != None || receipt.code != 0 {
         status :: if receipt.signal != None -> "ended by a signal" else -> "exited with status {receipt.code}"

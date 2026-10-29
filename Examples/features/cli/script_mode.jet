@@ -1,0 +1,20 @@
+#!/usr/bin/env jet
+// A file whose first line is a `#!/...` launch line is a script. It runs with
+// the invoking user's authority, as a shell script does, so it writes and
+// reads a file without any package or authority block, and it is still fully
+// checked.
+//
+// Run:  chmod +x Examples/features/cli/script_mode.jet
+//       Examples/features/cli/script_mode.jet alpha beta
+use core.files as files
+use core.process as process
+use core.sys as sys
+
+fn run() {
+    print("args: {process.args().join(" ")}")
+    path :: files.join(sys.temp_dir(), "jet-script-mode-{sys.pid()}.txt")
+    files.write(path, "written and read back\n") ?? panic("can't write {path}")
+    text :: files.read(path) ?? panic("can't read {path}")
+    files.remove(path) ?? panic("can't remove {path}")
+    print("file: {text.trim()}")
+}

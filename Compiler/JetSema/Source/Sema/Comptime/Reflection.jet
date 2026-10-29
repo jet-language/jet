@@ -37,6 +37,7 @@ use jet_foundation.[
     TAppliedRuleCatalog,
     TComptimeEnumArg,
     TComptimeField,
+    TComptimeReport,
     TComptimeValue,
     TargetLayoutEngine,
     TargetLayoutNameResolution,
@@ -60,6 +61,7 @@ use jet_foundation.[
     measure_expression,
     measure_kind,
     measure_signed_value,
+    core_record_field,
     type_identity,
     type_name,
 ]
@@ -116,8 +118,8 @@ fn sema_comptime_reflection_state_info(owner: String, name: String, graph: SemaS
         reachable = value.reachable
     }
     reachability :: if reachable == {
-        .Val(value) -> TComptimeValue.Present{value: TComptimeValue.Bool{value: value}}
-        .None -> TComptimeValue.Enum{type_name: "Option", variant: "None", args: [TComptimeEnumArg]{}}
+        .Val(value) -> sema_comptime_reflection_some(TComptimeValue.Bool{value: value})
+        .None -> sema_comptime_reflection_none(Type.Bool)
     }
     sema_comptime_reflection_struct("StateInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: name}},
@@ -227,12 +229,12 @@ fn sema_comptime_reflection_marker_parameter(rule: SemaComptimeReflectionMarkerR
 
 fn sema_comptime_reflection_marker_path(expression: Expr) -> String? {
     if expression == {
-        .Ident(name, _) -> return Val(if name.starts_with(".") -> name.slice(1, name.len()) else -> name)
-        .Field(base, member, _) -> {
+        .Ident(name, _, _) -> return Val(if name.starts_with(".") -> name.slice(1, name.len()) else -> name)
+        .Field(base, member, _, _) -> {
             prefix :: sema_comptime_reflection_marker_path(base) ?? return None
             return Val("{prefix}.{member}")
         }
-        .EnumLit(_, variant, _, _, _, _) -> return Val(variant)
+        .EnumLit(_, variant, _, _, _, _, _) -> return Val(variant)
         else -> return None
     }
 }
@@ -277,7 +279,7 @@ fn sema_comptime_reflection_marker_argument_value(argument: MarkerCallArg, sourc
         .Expr(expression) -> {
             if source_type == "[Effect]" {
                 if expression == {
-                    .ListLit(values, _) -> {
+                    .ListLit(values, _, _) -> {
                         rows := [TComptimeValue]{}
                         loop value in values {
                             path :: sema_comptime_reflection_marker_path(value) ?? return TComptimeValue.Unit
@@ -292,11 +294,11 @@ fn sema_comptime_reflection_marker_argument_value(argument: MarkerCallArg, sourc
                 if sema_comptime_reflection_marker_menu_value(registry, source_type, path) == .Val(menu_value) -> return menu_value
             }
             if expression == {
-                .Str(parts, _) -> return sema_comptime_reflection_marker_string(parts)
-                .Int(value, _, _, _) -> return TComptimeValue.Int{value: value}
-                .Float(value, _, is_f32, _) -> return TComptimeValue.Float{value: value, bits: if is_f32 -> 32 else -> 64}
-                .Bool(value, _) -> return TComptimeValue.Bool{value: value}
-                .Char(value, _) -> {
+                .Str(parts, _, _) -> return sema_comptime_reflection_marker_string(parts)
+                .Int(value, _, _, _, _) -> return TComptimeValue.Int{value: value}
+                .Float(value, _, is_f32, _, _) -> return TComptimeValue.Float{value: value, bits: if is_f32 -> 32 else -> 64}
+                .Bool(value, _, _) -> return TComptimeValue.Bool{value: value}
+                .Char(value, _, _) -> {
                     code :: sema_checked_const_char(value) ?? return TComptimeValue.Unit
                     return TComptimeValue.Char{value: code}
                 }
@@ -375,8 +377,17 @@ fn sema_comptime_reflection_marker_views_for_program(
     Val(sema_comptime_reflection_marker_views(type_markers, serde_markers, derives, registry))
 }
 
-fn sema_comptime_reflection_none() -> TComptimeValue Never! {
-    TComptimeValue.Enum{type_name: "Option", variant: "None", args: [TComptimeEnumArg]{}}
+// An absent `?inner` reflection member: the clean failure every compile-time
+// Option None is (the comptime child decodes a null Option the same way), so
+// lowering, static data and host transport read one spelling.
+fn sema_comptime_reflection_none(inner: Type) -> TComptimeValue Never! {
+    TComptimeValue.Failed{report: TComptimeReport.Clean{ty: inner}}
+}
+
+// An absent member of reflection record `owner`, typed by its Core record row.
+fn sema_comptime_reflection_none_field(owner: String, field: String) -> TComptimeValue Never! {
+    declared :: core_record_field(owner, field) ?? Type.Named{name: "Unit"}
+    sema_comptime_reflection_none(if declared == .Option(inner) -> inner else -> declared)
 }
 
 fn sema_comptime_reflection_some(value: TComptimeValue) -> TComptimeValue Never! {
@@ -429,14 +440,14 @@ fn sema_comptime_reflection_measure(value: Measure) -> TComptimeValue Never! {
     if literal == .Val(number) -> detail = Val(TComptimeValue.Int{value: number}) else -> symbol = Val(TComptimeValue.String{value: measure_expression(value)})
     sema_comptime_reflection_struct("MeasureInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "kind", value: TComptimeValue.String{value: kind}},
-        SemaComptimeReflectionField{name: "value", value: if detail == .Val(item) -> sema_comptime_reflection_some(item) else -> sema_comptime_reflection_none()},
-        SemaComptimeReflectionField{name: "symbol", value: if symbol == .Val(item) -> sema_comptime_reflection_some(item) else -> sema_comptime_reflection_none()},
+        SemaComptimeReflectionField{name: "value", value: if detail == .Val(item) -> sema_comptime_reflection_some(item) else -> sema_comptime_reflection_none(Type.Int)},
+        SemaComptimeReflectionField{name: "symbol", value: if symbol == .Val(item) -> sema_comptime_reflection_some(item) else -> sema_comptime_reflection_none(Type.String)},
     })
 }
 
 fn sema_comptime_reflection_exactness(value: Exactness) -> TComptimeValue Never! {
     kind := "Exact"
-    precision := sema_comptime_reflection_none()
+    precision := sema_comptime_reflection_none(Type.Int)
     if value == {
         .Exact -> {}
         .Approximate(digits) -> {
@@ -473,8 +484,8 @@ fn sema_comptime_reflection_obligation(value: FunctionObligations) -> TComptimeV
 
 fn sema_comptime_reflection_fact_value(kind: String, name: String, members: [String], range: TComptimeValue?, dimension: TComptimeValue?, detail_name: String, detail: TComptimeValue?) -> TComptimeValue Never! {
     fact_kind :: TComptimeValue.Enum{type_name: "FactKind", variant: kind, args: [TComptimeEnumArg]{}}
-    range_value :: if range == .Val(value) -> sema_comptime_reflection_some(value) else -> sema_comptime_reflection_none()
-    dimension_value :: if dimension == .Val(value) -> sema_comptime_reflection_some(value) else -> sema_comptime_reflection_none()
+    range_value :: if range == .Val(value) -> sema_comptime_reflection_some(value) else -> sema_comptime_reflection_none_field("FactValue", "range")
+    dimension_value :: if dimension == .Val(value) -> sema_comptime_reflection_some(value) else -> sema_comptime_reflection_none_field("FactValue", "dimension")
     fields := [SemaComptimeReflectionField]{
         {name: "kind", value: fact_kind},
         {name: "name", value: TComptimeValue.String{value: name}},
@@ -484,7 +495,7 @@ fn sema_comptime_reflection_fact_value(kind: String, name: String, members: [Str
     }
     option_names :: ["measure", "exactness", "layout", "classification", "nominal", "obligation", "state", "sendability", "view_provenance", "movedness", "attribution", "origin", "unit_scale_provenance", "maturity"]
     loop option_name in option_names {
-        value := sema_comptime_reflection_none()
+        value := sema_comptime_reflection_none_field("FactValue", option_name)
         if option_name == detail_name && detail == .Val(item) -> value = sema_comptime_reflection_some(item)
         &fields.push(SemaComptimeReflectionField{name: option_name, value: value})
     }
@@ -558,7 +569,7 @@ fn sema_comptime_reflection_type_fact_rows(path: String, ty: Type) -> [TComptime
 }
 
 fn sema_comptime_reflection_layout_optional(value: Int?) -> TComptimeValue Never! {
-    if value == .Val(number) -> sema_comptime_reflection_some(TComptimeValue.Int{value: number}) else -> sema_comptime_reflection_none()
+    if value == .Val(number) -> sema_comptime_reflection_some(TComptimeValue.Int{value: number}) else -> sema_comptime_reflection_none(Type.Int)
 }
 
 fn sema_comptime_reflection_layout_item_name(item: Item) -> String? {
@@ -906,53 +917,53 @@ fn sema_comptime_reflection_arithmetic_fact(fact: ArithmeticPolicyFact) -> TComp
 
 fn sema_comptime_reflection_append_arithmetic_expr(expr: Expr, values: &[TComptimeValue]) {
     if expr == {
-        .Call(call) -> {
+        .Call(call, _) -> {
             loop argument in call.args {
                 if argument.flags.arithmetic_policy == .Val(fact) && fact.operation != None -> &values.push(sema_comptime_reflection_arithmetic_fact(fact))
                 sema_comptime_reflection_append_arithmetic_expr(argument.expr, &values)
             }
         }
-        .Str(parts, _) -> {
+        .Str(parts, _, _) -> {
             loop part in parts {
                 if part == .Interp(value, _) -> sema_comptime_reflection_append_arithmetic_expr(value, &values)
             }
         }
-        .ListLit(elements, _) | .CompareChain(elements, _, _, _) -> {
+        .ListLit(elements, _, _) | .CompareChain(elements, _, _, _, _) -> {
             loop value in elements {
                 sema_comptime_reflection_append_arithmetic_expr(value, &values)
             }
         }
-        .MemberSpread(base, _, _) | .Spread(base, _) | .Unary(_, base, _) | .Deref(base, _) | .RawOf(base, _) | .Copy(base, _) | .Field(base, _, _) | .OptField(base, _, _, _, _) | .Tainted(base, _, _) | .Present(base, _) | .Ok(base, _) | .Err(base, _) | .Try(base, _, _, _) | .Paren(base, _) -> sema_comptime_reflection_append_arithmetic_expr(base, &values)
-        .MapLit(entries, _) -> {
+        .MemberSpread(base, _, _, _) | .Spread(base, _, _) | .Unary(_, base, _, _) | .Deref(base, _, _) | .RawOf(base, _, _) | .Copy(base, _, _) | .Field(base, _, _, _) | .OptField(base, _, _, _, _, _) | .Tainted(base, _, _, _) | .Present(base, _, _) | .Ok(base, _, _) | .Err(base, _, _) | .Try(base, _, _, _, _) | .Paren(base, _, _) -> sema_comptime_reflection_append_arithmetic_expr(base, &values)
+        .MapLit(entries, _, _) -> {
             loop entry in entries {
                 sema_comptime_reflection_append_arithmetic_expr(entry.key, &values)
                 sema_comptime_reflection_append_arithmetic_expr(entry.value, &values)
             }
         }
-        .Index(base, index, _, _) -> {
+        .Index(base, index, _, _, _) -> {
             sema_comptime_reflection_append_arithmetic_expr(base, &values)
             sema_comptime_reflection_append_arithmetic_expr(index, &values)
         }
-        .Slice(base, start, end, range, _) -> {
+        .Slice(base, start, end, range, _, _) -> {
             sema_comptime_reflection_append_arithmetic_expr(base, &values)
             sema_comptime_reflection_append_arithmetic_expr(start, &values)
             sema_comptime_reflection_append_arithmetic_expr(end, &values)
             if range == .Val(value) -> sema_comptime_reflection_append_arithmetic_expr(value, &values)
         }
-        .Range(start, end, _, _) | .Binary(_, start, end, _) -> {
+        .Range(start, end, _, _, _) | .Binary(_, start, end, _, _) -> {
             sema_comptime_reflection_append_arithmetic_expr(start, &values)
             sema_comptime_reflection_append_arithmetic_expr(end, &values)
         }
-        .MethodCall(receiver, _, _, _, _, args, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args, _) | .OptMethodCall(receiver, _, _, _, args, _, _) -> {
             sema_comptime_reflection_append_arithmetic_expr(receiver, &values)
             loop argument in args -> sema_comptime_reflection_append_arithmetic_expr(argument.expr, &values)
         }
-        .StructLit(_, _, _, _, fields, _, _) -> {
+        .StructLit(_, _, _, _, fields, _, _, _) -> {
             loop field in fields {
                 sema_comptime_reflection_append_arithmetic_expr(field.value, &values)
             }
         }
-        .TypedLit(_, body, _) -> {
+        .TypedLit(_, body, _, _) -> {
             if body == {
                 .Fields(fields) -> {
                     loop field in fields {
@@ -974,7 +985,7 @@ fn sema_comptime_reflection_append_arithmetic_expr(expr: Expr, values: &[TCompti
                 else -> {}
             }
         }
-        .EnumLit(_, _, _, args, _, _) -> {
+        .EnumLit(_, _, _, args, _, _, _) -> {
             loop argument in args {
                 if argument == {
                     .Positional(value) -> sema_comptime_reflection_append_arithmetic_expr(value, &values)
@@ -982,30 +993,30 @@ fn sema_comptime_reflection_append_arithmetic_expr(expr: Expr, values: &[TCompti
                 }
             }
         }
-        .OrFallback(value, _, _, _) -> sema_comptime_reflection_append_arithmetic_expr(value, &values)
-        .If(condition, then_body, then_value, else_body, else_value, _) -> {
+        .OrFallback(value, _, _, _, _) -> sema_comptime_reflection_append_arithmetic_expr(value, &values)
+        .If(condition, then_body, then_value, else_body, else_value, _, _) -> {
             sema_comptime_reflection_append_arithmetic_expr(condition, &values)
             sema_comptime_reflection_append_arithmetic_stmts(then_body, &values)
             sema_comptime_reflection_append_arithmetic_expr(then_value, &values)
             sema_comptime_reflection_append_arithmetic_stmts(else_body, &values)
             sema_comptime_reflection_append_arithmetic_expr(else_value, &values)
         }
-        .TupleLit(fields, _, _) -> {
+        .TupleLit(fields, _, _, _) -> {
             loop field in fields {
                 sema_comptime_reflection_append_arithmetic_expr(field.value, &values)
             }
         }
-        .Lambda(lambda) -> {
+        .Lambda(lambda, _) -> {
             if lambda.body == {
                 .Expr(value) -> sema_comptime_reflection_append_arithmetic_expr(value, &values)
                 .Block(body) -> sema_comptime_reflection_append_arithmetic_stmts(body, &values)
             }
         }
-        .CallValue(callee, args, _) -> {
+        .CallValue(callee, args, _, _) -> {
             sema_comptime_reflection_append_arithmetic_expr(callee, &values)
             loop argument in args -> sema_comptime_reflection_append_arithmetic_expr(argument.expr, &values)
         }
-        .PtrFromAddr(_, _, _, address, _) -> sema_comptime_reflection_append_arithmetic_expr(address, &values)
+        .PtrFromAddr(_, _, _, address, _, _) -> sema_comptime_reflection_append_arithmetic_expr(address, &values)
         else -> {}
     }
 }
@@ -1081,7 +1092,6 @@ fn sema_comptime_reflection_arithmetic_facts(body: [Stmt]) -> [TComptimeValue] {
     values
 }
 
-
 fn sema_comptime_reflection_maturity(method: Func) -> TComptimeValue Never! {
     maturity :: method.maturity ?? MaturityTag.Experimental
     level :: if maturity == {
@@ -1125,9 +1135,9 @@ fn sema_comptime_reflection_declared_function_facts(method: Func, path: String) 
     })
     origin :: sema_comptime_reflection_struct("OriginInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "tracked", value: TComptimeValue.Bool{value: false}},
-        SemaComptimeReflectionField{name: "source", value: sema_comptime_reflection_none()},
-        SemaComptimeReflectionField{name: "line", value: sema_comptime_reflection_none()},
-        SemaComptimeReflectionField{name: "column", value: sema_comptime_reflection_none()},
+        SemaComptimeReflectionField{name: "source", value: sema_comptime_reflection_none(Type.String)},
+        SemaComptimeReflectionField{name: "line", value: sema_comptime_reflection_none(Type.Int)},
+        SemaComptimeReflectionField{name: "column", value: sema_comptime_reflection_none(Type.Int)},
         SemaComptimeReflectionField{name: "ambiguity", value: TComptimeValue.Bool{value: false}},
     })
     &facts.push(sema_comptime_reflection_fact_info("Sendability", "sendability", "{path}.$sendability", sema_comptime_reflection_fact_value("Sendability", "sendability", [String]{}, None, None, "sendability", Val(sendability))))
@@ -1152,7 +1162,6 @@ fn sema_comptime_reflection_declared_function_facts(method: Func, path: String) 
     }
     facts
 }
-
 
 fn sema_comptime_reflection_method_failure_type(method: Func) -> TComptimeValue Never! {
     TComptimeValue.String{value: type_name(sema_effective_return_type(method.return_type))}

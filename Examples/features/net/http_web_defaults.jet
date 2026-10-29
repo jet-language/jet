@@ -3,7 +3,7 @@
 // mount, and one explicit CORS policy.
 package {
     name: "http_web_defaults"
-    authority: { holds: { allow: [FS.Write, IO, Mem.Alloc, Net, Time.Wait] } }
+    authority: { allow: [FS.Read, FS.Write, IO, Mem.Alloc, Net, Time, Time.Wait] }
 }
 
 use core.http.client as http_client
@@ -46,18 +46,18 @@ fn run() (HTTPError | IOError | NetError | TaskFailure)! {
         http_server.serve_once_listener(listener, mux) ?? panic("serve")
     }
     post :: http_client.request("POST", "http://{addr}/readings")
-    sent :: &post.header("origin", "https://app.example").json(Reading{city: "Reno", degrees: 31})
+    sent :: post.header("origin", "https://app.example").json(Reading{city: "Reno", degrees: 31})
     answer :: sent.send() ?? panic("reading request")
     print(answer.status())
-    print(&answer.header("content-type") ?? "missing")
-    print(&answer.header("access-control-allow-origin") ?? "missing")
+    print(answer.header("content-type") ?? "missing")
+    print(answer.header("access-control-allow-origin") ?? "missing")
     reading :: answer.json<Reading>() ?? panic("reading response")
     print("{reading.city}|{reading.degrees}")
     index :: http_client.get("http://{addr}/assets/") ?? panic("index request")
     print(index.status())
     print(index.body().text(8 * 1024 * 1024) ?? "invalid body")
     asset :: http_client.get("http://{addr}/assets/index.html") ?? panic("asset request")
-    print(&asset.header("content-type") ?? "missing")
+    print(asset.header("content-type") ?? "missing")
     hidden :: http_client.get("http://{addr}/assets/.env") ?? panic("hidden request")
     print(hidden.status())
     ^t.join() ?? panic("server")

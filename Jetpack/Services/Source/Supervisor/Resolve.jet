@@ -3,8 +3,8 @@
 // the ports, and the on-disk layout, plus the port and socket reservations
 // held until the service spawns.
 
-SERVICES_MAX_RESTARTS :: prep { 100 }
-SERVICES_MAX_BACKOFF_MS :: prep { 60000 }
+SERVICES_MAX_RESTARTS :: 100
+SERVICES_MAX_BACKOFF_MS :: 60000
 
 // A `services:` entry resolved to what actually runs.
 struct ServiceResolved {
@@ -64,7 +64,7 @@ fn services_published_ports(dir: String, declared: [Int]) -[FS]> [Int] Never! {
         port :: Int.parse(line.trim()) ?? next
         &published.push(port)
     }
-    if published.len() != declared.len() -> return declared
+    if published.len() != declared.len() -> return declared.copy()
     published
 }
 
@@ -251,7 +251,7 @@ struct ServiceSocketReservation {
     }
 
     // Rust `Drop`: remove every reserved path.
-    fn abandon(^self) -[FS]> {
+    fn abandon(^self) Never! -[FS]> {
         loop path in self.paths -> services_remove_quiet(path)
     }
 }
@@ -261,7 +261,7 @@ fn services_prepare_sockets(project_dir: String, sockets: [String]) -[FS, Env, N
     reservation := ServiceSocketReservation{paths: [String]{}, listeners: [UnixListener]{}}
     loop socket in sockets {
         if services_reserve_socket(project_dir, socket, &reservation) == .Err(error) {
-            reservation.abandon()
+            ^reservation.abandon()
             return Err(error)
         }
     }

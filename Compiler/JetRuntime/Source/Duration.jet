@@ -1,4 +1,4 @@
-// Restore the constructor policy from 7c42badbb^ Core/time/runtime/
+// Restore the constructor policy from 7c42badbb^ Core/Time/runtime/
 // top_math_random_time.jet and kernel_duration.jet at the native C ABI.
 // Narrow exact Int without a trap,
 // checked positive-unit multiplication, and an owned RangeError on failure.
@@ -88,4 +88,223 @@ fn runtime_duration_unit_ns(unit: I64) -> I64 {
     scale :: runtime_duration_unit_ns(unit)
     if (scale == I64{0}) -> return Float{0.0}
     Float{ns} / Float{scale}
+}
+
+// Duration.rs jet_duration_kernel_in through the C adapter: the whole count of
+// `unit` in the duration, truncated towards zero. The read cannot fail, so the
+// Result is always Ok; `error` is the adapter's unused Err slot.
+#Export(c) fn jet_duration_in(value: I64, unit: I64, output: I64, _error: I64) -> I64 {
+    ns :: host_native_int(value)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    scale :: runtime_duration_scale(unit)
+    if (scale == I64{0}) -> return I64{0}
+    time_glue_store(output, jet_int_owned_from_i64(ns / scale))
+    I64{1}
+}
+
+// Duration.rs jet_duration_kernel_total_seconds: whole seconds, truncated
+// towards zero, as an owned exact-Int word.
+#Export(c) fn jet_duration_total_seconds(value: I64) -> I64 {
+    ns :: host_native_int(value)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    jet_int_owned_from_i64(ns / I64{1000000000})
+}
+
+// An integral Float inside [-2^63, 2^63) as its I64.
+fn runtime_duration_float_word(whole: Float) -> I64 {
+    if (whole <= Float{-9223372036854775808.0}) -> return I64{-9223372036854775807 - 1}
+    bits :: rt_f64_bits(whole)
+    magnitude :: bits.bit_and(I64{9223372036854775807})
+    if (magnitude == I64{0}) -> return I64{0}
+    shift :: (magnitude >> I64{52}) - I64{1075}
+    significand :: (magnitude.bit_and(I64{4503599627370495})).bit_or(I64{4503599627370496})
+    word :: if (shift >= I64{0}) -> significand << shift else -> significand >> (-shift)
+    if (bits < I64{0}) -> -word else -> word
+}
+
+// Duration.rs jet_duration_kernel_from_float: value * unit nanoseconds,
+// truncated towards zero; a non-finite or out-of-range product is the owned
+// RangeError.
+#Export(c) fn jet_duration_from_float(value: Float, unit: I64, output: I64, error: I64) -> I64 {
+    scale :: runtime_duration_scale(unit)
+    if (scale == I64{0}) -> return I64{0}
+    ns :: value * Float{scale}
+    if !(ns >= Float{-9223372036854775808.0} && ns < Float{9223372036854775808.0}) {
+        reason :: rt_static_text("duration must be finite and inside the supported range")
+        time_glue_store(error, jet_rt_record_new_range_error(reason))
+        return I64{0}
+    }
+    time_glue_store(output, jet_int_owned_from_i64(runtime_duration_float_word(compiler_math_trunc(ns))))
+    I64{1}
+}
+
+// Duration.rs jet_duration_kernel_is_zero.
+#Export(c) fn jet_duration_is_zero(value: I64) -> Bool {
+    ns :: host_native_int(value)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return false
+    ns == I64{0}
+}
+
+// Duration.rs jet_duration_kernel_seconds_value: ns as Float over 1e9.
+#Export(c) fn jet_duration_seconds_value(value: I64) -> Float {
+    ns :: host_native_int(value)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return Float{0.0}
+    Float{ns} / Float{1000000000.0}
+}
+
+// Duration.rs jet_duration_kernel_abs: i64 saturating_abs.
+#Export(c) fn jet_duration_abs(value: I64) -> I64 {
+    ns :: host_native_int(value)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (ns == I64{-9223372036854775807 - 1}) -> return jet_int_owned_from_i64(I64{9223372036854775807})
+    jet_int_owned_from_i64(if (ns < I64{0}) -> -ns else -> ns)
+}
+
+// Duration.rs jet_duration_kernel_negated: i64 saturating_neg.
+#Export(c) fn jet_duration_negated(value: I64) -> I64 {
+    ns :: host_native_int(value)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (ns == I64{-9223372036854775807 - 1}) -> return jet_int_owned_from_i64(I64{9223372036854775807})
+    jet_int_owned_from_i64(-ns)
+}
+
+// Duration.rs jet_duration_kernel_sign: i64 signum as an owned Int word.
+#Export(c) fn jet_duration_sign(value: I64) -> I64 {
+    ns :: host_native_int(value)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (ns < I64{0}) -> return jet_int_owned_from_i64(I64{-1})
+    if (ns > I64{0}) -> return jet_int_owned_from_i64(I64{1})
+    jet_int_owned_from_i64(I64{0})
+}
+
+// MathRandomTime.rs:212-223: a failed checked scale or divide panics with
+// Duration.rs jet_duration_kernel_scale_error_reason. Compiled code passes
+// the call site (the `_at` exports), so the stop names the user's line; the
+// route form has none and reports <core.prelude>:0 (`file` 0).
+fn runtime_duration_scale_stop(file: I64, file_len: I64, line: I64) -> I64 {
+    message :: rt_static_text("duration scaling overflowed or divided by zero")
+    if (file == I64{0}) {
+        jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
+    } else {
+        trap_simple(I64{0}, file, file_len, line, rt_text_data(message), rt_text_len(message))
+    }
+    I64{0}
+}
+
+// Duration.rs jet_duration_kernel_scale: i64 checked_mul of ns by the factor.
+// Compiled `d * n` and `n * d` (JetIR ir_duration_scale) pass the call site.
+#Export(c) fn jet_duration_scale_at(value: I64, factor: I64, file: I64, file_len: I64, line: I64) -> I64 {
+    a :: host_native_int(value)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    b :: host_native_int(factor)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    minimum :: I64{-9223372036854775807 - 1}
+    maximum :: I64{9223372036854775807}
+    overflow := false
+    if (a > I64{0}) {
+        overflow = if (b > I64{0}) -> a > maximum / b else -> b < minimum / a
+    } else if (b > I64{0}) {
+        overflow = a < minimum / b
+    } else {
+        overflow = a != I64{0} && b < maximum / a
+    }
+    if overflow -> return runtime_duration_scale_stop(file, file_len, line)
+    jet_int_owned_from_i64(a * b)
+}
+
+// Duration.rs jet_duration_kernel_divide: i64 checked_div, truncating.
+// Compiled `d / n` (JetIR ir_duration_scale) passes the call site.
+#Export(c) fn jet_duration_divide_at(value: I64, factor: I64, file: I64, file_len: I64, line: I64) -> I64 {
+    a :: host_native_int(value)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    b :: host_native_int(factor)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (b == I64{0} || (b == I64{-1} && a == I64{-9223372036854775807 - 1})) -> return runtime_duration_scale_stop(file, file_len, line)
+    jet_int_owned_from_i64(a / b)
+}
+
+// The route forms (RuntimeRoutes duration.scale/divide), without a site.
+#Export(c) fn jet_duration_scale(value: I64, factor: I64) -> I64 {
+    jet_duration_scale_at(value, factor, I64{0}, I64{0}, I64{0})
+}
+
+#Export(c) fn jet_duration_divide(value: I64, factor: I64) -> I64 {
+    jet_duration_divide_at(value, factor, I64{0}, I64{0}, I64{0})
+}
+
+// Duration.rs jet_duration_kernel_round_quotient's mode names: 0 trunc,
+// 1 expand, 2 floor, 3 ceil, 4 half_trunc, 5 half_expand, 6 half_even,
+// 7 half_ceil, 8 half_floor; -1 for an unknown mode.
+fn runtime_duration_round_mode(mode: I64) -> I64 {
+    if (jet_rt_string_eq(mode, rt_static_text("trunc")) || jet_rt_string_eq(mode, rt_static_text("toward_zero"))) -> return I64{0}
+    if (jet_rt_string_eq(mode, rt_static_text("expand")) || jet_rt_string_eq(mode, rt_static_text("away_from_zero"))) -> return I64{1}
+    if jet_rt_string_eq(mode, rt_static_text("floor")) -> return I64{2}
+    if jet_rt_string_eq(mode, rt_static_text("ceil")) -> return I64{3}
+    if (jet_rt_string_eq(mode, rt_static_text("half_trunc")) || jet_rt_string_eq(mode, rt_static_text("halfTrunc")) || jet_rt_string_eq(mode, rt_static_text("half-toward-zero"))) -> return I64{4}
+    if (jet_rt_string_eq(mode, rt_static_text("half_expand")) || jet_rt_string_eq(mode, rt_static_text("halfExpand")) || jet_rt_string_eq(mode, rt_static_text("half-away-from-zero"))) -> return I64{5}
+    if (jet_rt_string_eq(mode, rt_static_text("half_even")) || jet_rt_string_eq(mode, rt_static_text("halfEven"))) -> return I64{6}
+    if (jet_rt_string_eq(mode, rt_static_text("half_ceil")) || jet_rt_string_eq(mode, rt_static_text("halfCeil")) || jet_rt_string_eq(mode, rt_static_text("half-toward-positive"))) -> return I64{7}
+    if (jet_rt_string_eq(mode, rt_static_text("half_floor")) || jet_rt_string_eq(mode, rt_static_text("halfFloor")) || jet_rt_string_eq(mode, rt_static_text("half-toward-negative"))) -> return I64{8}
+    I64{-1}
+}
+
+// Duration.rs jet_duration_kernel_round (i128 there) in sign and U64
+// magnitude: ns rounded to a multiple of `step` units by `mode`. An unknown
+// unit or mode, a step below 1 or a result outside i64 keeps ns
+// (MathRandomTime.rs:209 `unwrap_or(d.ns)`).
+fn runtime_duration_round(ns: I64, unit: I64, step: I64, mode: I64) -> I64 {
+    unit_ns :: runtime_duration_unit_ns(unit)
+    rule :: runtime_duration_round_mode(mode)
+    if (unit_ns == I64{0} || step <= I64{0} || rule < I64{0}) -> return ns
+    if (ns == I64{0}) -> return ns
+    negative :: ns < I64{0}
+    magnitude :: if negative -> U64{-(ns + I64{1})} + U64{1} else -> U64{ns}
+    // A quantum past U64 is more than twice any magnitude (|ns| <= 2^63):
+    // the whole part is 0, the rest is below half, and a step up overflows.
+    huge :: U64{step} > U64{18446744073709551615} / U64{unit_ns}
+    quantum := U64{0}
+    whole := U64{0}
+    rest := magnitude
+    if !huge {
+        quantum = U64{unit_ns} * U64{step}
+        whole = magnitude / quantum
+        rest = magnitude % quantum
+    }
+    // -1 below half, 0 exactly half, 1 above half.
+    half := I64{-1}
+    if (!huge && rest >= quantum - rest) {
+        half = if (rest == quantum - rest) -> I64{0} else -> I64{1}
+    }
+    up := false
+    if (rest != U64{0}) {
+        if (rule == I64{1}) -> up = true
+        if (rule == I64{2}) -> up = negative
+        if (rule == I64{3}) -> up = !negative
+        if (rule == I64{4}) -> up = half > I64{0}
+        if (rule == I64{5}) -> up = half >= I64{0}
+        if (rule == I64{6}) -> up = half > I64{0} || (half == I64{0} && whole % U64{2} == U64{1})
+        if (rule == I64{7}) -> up = half > I64{0} || (half == I64{0} && !negative)
+        if (rule == I64{8}) -> up = half > I64{0} || (half == I64{0} && negative)
+    }
+    if huge -> return if up -> ns else -> I64{0}
+    count :: if up -> whole + U64{1} else -> whole
+    if (count != U64{0} && quantum > U64{18446744073709551615} / count) -> return ns
+    rounded :: count * quantum
+    if negative {
+        if (rounded > U64{9223372036854775808}) -> return ns
+        if (rounded == U64{9223372036854775808}) -> return I64{-9223372036854775807 - 1}
+        return -I64{rounded}
+    }
+    if (rounded > U64{9223372036854775807}) -> return ns
+    I64{rounded}
+}
+
+// MathRandomTime.rs:207 jet_duration_round through the C adapter: the
+// duration and increment cross as exact-Int words, unit and mode as text.
+#Export(c) fn jet_duration_round(value: I64, unit: I64, increment: I64, mode: I64) -> I64 {
+    ns :: host_native_int(value)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    step :: host_native_int(increment)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    jet_int_owned_from_i64(runtime_duration_round(ns, unit, step, mode))
 }

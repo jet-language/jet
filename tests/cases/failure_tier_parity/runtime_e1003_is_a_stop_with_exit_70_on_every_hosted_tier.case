@@ -1,0 +1,27 @@
+# tests/failure_tier_parity.rs::runtime_e1003_is_a_stop_with_exit_70_on_every_hosted_tier at tests/failure_tier_parity.rs:106; hand-port
+# Source migration: `rng.int(…)` writes `rng`, so the call carries the `&` mark (E0224).
+# The forced-interpreter run retires: jet has no interpreter tier (`jet run --interpret` is E2102).
+# Also covers runtime_e1003_report_matches_the_registered_snapshot: the rendered report equals the registered snapshot.
+fixture: runtime_e1003_is_a_stop_with_exit_70_on_every_hosted_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 70 # tests/failure_tier_parity.rs:115 exit 70
+stdout: empty
+stderr.filter(!^= "  --> "): = runtime_e1003.report # tests/failure_tier_parity.rs:120 registered report, default run
+stderr: count "Stop [E1003]" = 1 # tests/failure_tier_parity.rs:121 one stop
+step: jet build main.jet
+exit: 0
+step: built
+exit: 70 # tests/failure_tier_parity.rs:115 exit 70
+stdout: empty
+stderr.filter(!^= "  --> "): = runtime_e1003.report # tests/failure_tier_parity.rs:120 registered report, debug AOT
+stderr: count "Stop [E1003]" = 1 # tests/failure_tier_parity.rs:121 one stop
+step: jet build --release main.jet
+exit: 0
+step: built
+exit: 70 # tests/failure_tier_parity.rs:115 exit 70
+stdout: empty
+stderr.filter(!^= "  --> "): = runtime_e1003.report # tests/failure_tier_parity.rs:120 registered report, release AOT
+stderr: count "Stop [E1003]" = 1 # tests/failure_tier_parity.rs:121 one stop

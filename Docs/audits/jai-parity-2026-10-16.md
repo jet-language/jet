@@ -209,7 +209,7 @@ Parent card: #5021. Every ballot recommends option A, the full-power form. The b
 | D23 | plugin hooks (`before_intercept` … `shutdown`) | typed stages | ratified / ballot | #4760, D-JAI-EVENTS1 |
 | D24 | bundled plugins (Check, Polymorph_Report, Program_Print, IProf, Autorun, Icon) | none | ballot | D-JAI-EVENTS1 (first-party hook packages) |
 | D25 | replace the default metaprogram | `fn build`, `@build.jet` override | groundwork | D-BUILDENTRY1 |
-| D26 | metaprogram arguments | typed `--set key=value` | shipped / ballot | D-JAI-BUILDOPT1 (`b.args`) |
+| D26 | metaprogram arguments | typed `--set key=value`; `b.args()` returns the words after `--` on `jet build` (#5829) | shipped | D-JAI-BUILDOPT1 (`b.args`) |
 | D27 | `compiler_set_command_line_arguments` | none | ballot | D-JAI-BUILDOPT1 (`b.args`) |
 | D28 | compiler version gates | package toolchain requirement (E1208) | shipped | — |
 | D29 | fail a workspace | build entry failure (D-BUILD-FAIL1) | ratified | — |
@@ -227,34 +227,34 @@ Parent card: #5021. Every ballot recommends option A, the full-power form. The b
 | # | Jai | Jet today | State | Closes it |
 |---|---|---|---|---|
 | E01 | `output_type` (5 kinds) | package output kinds; no object or check-only output | ballot | D-JAI-BUILDOPT1 (`kind`) |
-| E02 | output, intermediate path | `--output` (unported in JetCli) | ballot | D-JAI-BUILDOPT1 (`output_dir`, `work_dir`) |
+| E02 | output, intermediate path | `output_dir` build option for `jet build` (#5828); no intermediate-path row | shipped / ballot | D-JAI-BUILDOPT1 (`work_dir`) |
 | E03 | `entry_point_name` | `output.entry`; freestanding target profile facts (D-TARGET-SURFACE1) | ratified | — |
-| E04 | `os_target` | `--target=web`, wasm targets | ballot | D-JAI-BUILDOPT1 (`os`) |
+| E04 | `os_target` | `os` build option (#5828): `linux` builds; `macos`, `windows`, `web` and `freestanding` are refused (E2104) until a backend writes them | shipped (linux) | D-JAI-BUILDOPT1 (`os`) |
 | E05 | `cpu_target`, machine options | none | ballot | D-JAI-BUILDOPT1 (`cpu`, `cpu_features`) |
-| E06 | `minimum_os_version` | none | ballot | D-JAI-BUILDOPT1 (`min_os`) |
+| E06 | `minimum_os_version` | `min_os` build option (#5828), refused (E2104): a Linux ELF image has no versioned ABI floor | shipped (refusal) | D-JAI-BUILDOPT1 (`min_os`) |
 | E07 | `backend` | implied by profile (`Compiler/JetCli/Source/Cli/Front.jet:342-346`) | ballot | D-JAI-BUILDOPT1 (`backend`) |
 | E08 | `Optimization_Type` (6 presets) | `optimize: none\|basic\|full`, `small` | groundwork / ballot | D-JAI-BUILDOPT1 (`.Size`, `.MinSize`) |
-| E09 | bytecode inliner | `#Inline` per function | ballot | D-JAI-BUILDOPT1 (`inline`) |
-| E10 | dead-code elimination policy | none | ballot | D-JAI-BUILDOPT1 (`dead_code`) |
+| E09 | bytecode inliner | `#Inline` per function; `inline` build option (auto, always_marked, off; #5829) | shipped | D-JAI-BUILDOPT1 (`inline`) |
+| E10 | dead-code elimination policy | `dead_code` build option (remove, keep; #5829) | shipped | D-JAI-BUILDOPT1 (`dead_code`) |
 | E11 | `maximum_polymorph_depth` | none | ballot | D-JAI-BUILDOPT1 (`max_instance_depth`) |
 | E12-E15 | bounds, cast, math, null checks | always on; no options | ballot | D-JAI-BUILDOPT1, D-JAI-EXPERT1 (`unchecked_bounds`, `unchecked_null`, `unchecked_casts`) |
 | E16 | overflow checks | `#Arithmetic(.Checked\|.Wrapping\|.Saturating)` per scope (`Examples/features/lowlevel/fixed_overflow_modes.jet`) | shipped / ballot | D-JAI-BUILDOPT1 (build default) |
 | E17 | `#no_abc` per scope | none (`#Unsafe` keeps checks) | ballot | D-JAI-BUILDOPT1 (`#Unchecked`) |
 | E18 | `emit_debug_info` | `debug_info: Bool` | groundwork / ballot | D-JAI-BUILDOPT1 (`debug_info`, `debug_format`) |
-| E19-E20 | stack traces, backtrace on crash | debugger `backtrace` verb only | ballot | D-JAI-BUILDOPT1 |
+| E19-E20 | stack traces, backtrace on crash | `backtrace` build option (full, brief, off; #5829): what a native fault report prints | shipped | D-JAI-BUILDOPT1 |
 | E21 | frame pointers, red zone | none | ballot | D-JAI-BUILDOPT1 |
 | E22 | `llvm_options` | none | ballot | D-JAI-BUILDOPT1 (typed fields + `backend_args`) |
 | E23 | `x64_options` | none | ballot | D-JAI-BUILDOPT1 (`backend_args`) |
 | E24 | `temporary_storage_size` | none | ballot | D-JAI-BUILDOPT1 (`scratch_size`), D-JAI-CONTEXT1 |
-| E25 | linker arguments | `-l`/`-L` for `jet cc` only | ballot | D-JAI-BUILDOPT1 (`link_args`, `libs`) |
+| E25 | linker arguments | `libs` and `link_args` build options (#5828): `-L<dir>`, `-l<name>`, `.a` archives; a `link_override` gate | shipped | D-JAI-BUILDOPT1 (`link_args`, `libs`) |
 | E26 | `use_custom_link_command` | none | ballot | D-JAI-EVENTS1 (`build.link`) |
 | E27 | `import_path` | package identity resolution | by design | — |
 | E28 | diagnostics format options | `--color`, `--quiet` | ballot | D-JAI-BUILDOPT1 (`diagnostics`, `short_paths`, `timings`) |
 | E29 | natvis type names | none | ballot | D-JAI-BUILDOPT1 (`debugger_names`) |
-| E30 | `lazy_foreign_function_lookups` | none | ballot | D-JAI-BUILDOPT1 (`lazy_foreign`) |
+| E30 | `lazy_foreign_function_lookups` | none: images link their C closure statically, so no symbol is bound at load to defer | by design | D-JAI-BUILDOPT1 (`lazy_foreign`); revisit with dynamic or in-memory C binding |
 | E31 | `user_data_*` | typed settings (D-CONF-KEY1) | groundwork | — |
 | E32 | `do_output = false` | register no outputs in `fn build` | by design | — |
-| E33 | `write_added_strings` | `--emit-generated` | groundwork / ballot | D-JAI-BUILDOPT1 (`write_generated`) |
+| E33 | `write_added_strings` | `write_generated` build option (off, on; #5829), which replaces `--emit-generated` | shipped | D-JAI-BUILDOPT1 (`write_generated`) |
 | E34 | `-context_size` | not needed: Jet sizes context statically | by design | — |
 | E35 | per-function optimization hints | `#Inline`, `#Scalar` | not proposed | Jai has only planned it; revisit if Jai ships it |
 | E36 | command-line flags (26) | `--release`, `--quiet`, `--version`, `--threads`, `--profile` exist; the rest map in D-JAI-BUILDOPT1's flag list | ballot | D-JAI-BUILDOPT1 |

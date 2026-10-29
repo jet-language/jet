@@ -8,25 +8,29 @@ use jet_foundation.[
     MeasureRule,
     ParamZone,
     Span,
+    TagMarker,
     TextEdit,
     Type,
     TypeTupleField,
     diagnostic_from_registry,
     diagnostic_with_edit,
     type_tuple_fields_canonical,
+    type_name,
+    foundation_named_type,
 ]
 use jet_lexer.[
     TOKEN_BANG,
     TOKEN_COLON,
     TOKEN_COMMA,
     TOKEN_DOT,
+    TOKEN_DOT_DOT,
     TOKEN_EOF,
-    TOKEN_EQ,
     TOKEN_GT,
     TOKEN_HASH,
     TOKEN_IDENT,
     TOKEN_INT,
     TOKEN_KW_FN,
+    TOKEN_KW_TAG,
     TOKEN_LBRACE,
     TOKEN_LBRACKET,
     TOKEN_LPAREN,
@@ -44,7 +48,6 @@ use jet_lexer.[
     TOKEN_SHR,
     TOKEN_SLASH,
     TOKEN_STAR,
-    TOKEN_UNIFIED_ARROW,
 ]
 
 struct ParsedType {
@@ -181,6 +184,12 @@ fn parser_type_starts(kind: Int) -> Bool Never! {
     kind == TOKEN_IDENT || kind == TOKEN_SELF || kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_STAR || kind == TOKEN_KW_FN
 }
 
+// `#TagName Type`: a value-tag prefix on a type. The tag is a PascalCase name.
+fn parser_type_tag_ahead(state: &JetParserState) -> Bool Never! {
+    if parser_current_kind(&state) != TOKEN_HASH || parser_kind_at(&state, 1) != TOKEN_IDENT -> return false
+    parser_pascal_name(parser_value_at(&state, 1))
+}
+
 fn parser_tokens_text(state: JetParserState, first: Int, end: Int) -> String Never! {
     out := ""
     previous_end := -1
@@ -234,7 +243,8 @@ fn parser_parse_type_union_tail(state: &JetParserState, first: ParsedType, depth
 // `?` follows the type it marks and binds tightly, so
 // `[Int?]`, `[Int]?`, `Box<Int?>`, and `Box<Int>?` all differ. `T??` is E0309.
 fn parser_parse_type_atom(state: &JetParserState, depth: Int) -> ParsedType {
-    base :: parser_parse_type_base(&state, depth + 1)
+    parsed :: parser_parse_type_base(&state, depth + 1)
+    base :: parser_parse_inline_range(&state, parsed) ?? parsed
     kind :: parser_current_kind(&state)
     if kind != TOKEN_QUESTION && kind != TOKEN_QUESTION_QUESTION -> return base
     mark :: parser_bump(&state)
@@ -250,10 +260,39 @@ fn parser_parse_type_atom(state: &JetParserState, depth: Int) -> ParsedType {
     ParsedType{ty: Type.Option{inner: base.ty}, span: ^span}
 }
 
+// An inline range `Int(lo..hi)` may follow a type in every type position;
+// its carrier is always `Int`. A consumed `>>` leaves one virtual outer `>`
+// pending, and the `(` after it belongs to the enclosing call. None when no
+// range follows `base`.
+fn parser_parse_inline_range(state: &JetParserState, base: ParsedType) -> ParsedType? {
+    if state.pending_type_gt || parser_current_kind(&state) != TOKEN_LPAREN -> return None
+    if parser_kind_at(&state, 1) != TOKEN_INT && parser_kind_at(&state, 1) != TOKEN_MINUS -> return None
+    open :: parser_bump(&state)
+    lower :: parser_distinct_range_bound(&state, "as the range's lower bound")
+    parser_expect(&state, TOKEN_DOT_DOT, "between the range's bounds")
+    upper :: parser_distinct_range_bound(&state, "as the range's upper bound")
+    close :: parser_expect(&state, TOKEN_RPAREN, "to close the range constraint")
+    span :: parser_cover(base.span, close.span)
+    if lower.value > upper.value {
+        parser_add_error_code(&state, "E0137", parser_cover(lower.span, upper.span), "this range is empty — {lower.value} is after {upper.value}", "a range's low bound must not be greater than its high bound", "write `{upper.value}..{lower.value}` (swap the bounds), or fix the values")
+    }
+    if base.ty != Type.Int {
+        parser_add_error_code(&state, "E0137", parser_cover(open.span, close.span), "inline value ranges apply to `Int`, not `{type_name(base.ty)}`", "an inline range carries an interval on the default integer carrier", "write `Int(lo..hi)` here, or declare a named distinct type for another carrier")
+        return Val(ParsedType{ty: base.ty, span: span})
+    }
+    Val(ParsedType{ty: Type.InlineRange{base: base.ty, lo: lower.value, hi: upper.value}, span: span})
+}
+
 fn parser_parse_type_base(state: &JetParserState, depth: Int) -> ParsedType {
     start :: parser_current(&state)
     kind :: start.kind
 
+    if parser_type_tag_ahead(&state) {
+        parser_bump(&state)
+        marker_token :: parser_bump(&state)
+        inner :: parser_parse_type(&state, depth + 1)
+        return ParsedType{ty: Type.Tagged{marker: TagMarker.User{name: parser_value(state, marker_token)}, inner: inner.ty}, span: parser_cover(start.span, inner.span)}
+    }
     if kind == {
         TOKEN_STAR -> {
             parser_bump(&state)
@@ -329,9 +368,12 @@ fn parser_parse_tuple_type(state: &JetParserState, depth: Int) -> ParsedType {
     }
     fields := [TypeTupleField]{}
     loop {
+        // A member name is an identifier or the `tag` keyword, which also
+        // spells an ordinary name (parser_expect_name).
+        kind :: parser_current_kind(&state)
         if {
-            parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON -> {
-                name :: parser_bump(&state)
+            (kind == TOKEN_IDENT || kind == TOKEN_KW_TAG) && parser_kind_at(&state, 1) == TOKEN_COLON -> {
+                name :: parser_expect_name(&state, "for a tuple member name")
                 parser_bump(&state)
                 ty :: parser_parse_type(&state, depth + 1)
                 &fields.push(TypeTupleField{name: parser_value(state, name), ty: ty.ty})
@@ -564,7 +606,6 @@ fn parser_parse_measure(state: &JetParserState, kind: String, depth: Int) -> Mea
         }
     }
 }
-
 
 fn parser_apply_named_type(name: String, args: [Type]) -> Type Never! {
     if {

@@ -15,25 +15,27 @@ fn cli_run_project_job_with_mode(verification: &StoreVerification, cache: &Works
         loop diagnostic in err.diagnostics -> theme.error_coded(diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix)
         return EXIT_USAGE
     }
-    root_fact :: registry.find(job) ?? {
-        theme.error_coded(
-            "E1294",
-            "no job named `{job}`",
-            "lifecycle job names must refer to a checked top-level #Job function.",
-            "declare the job with #Job, or remove it from the environment lifecycle."
-        )
-        declared := [String]{}
-        loop fact in registry.jobs() -> &declared.push(fact.name)
-        if declared.len() > 0 -> theme.detail("declared jobs: {declared.join(", ")}")
-        return EXIT_USAGE
+    metadata := if registry.find(job) == {
+        .Val(root_fact) -> root_fact[0].metadata()
+        .None -> {
+            theme.error_coded(
+                "E1294",
+                "no job named `{job}`",
+                "lifecycle job names must refer to a checked top-level #Job function.",
+                "declare the job with #Job, or remove it from the environment lifecycle."
+            )
+            declared := [String]{}
+            loop fact in registry.jobs() -> &declared.push(fact.name)
+            if declared.len() > 0 -> theme.detail("declared jobs: {declared.join(", ")}")
+            return EXIT_USAGE
+        }
     }
     closure :: registry.dependency_closure(job) ?? {
         theme.error_coded("E1331", "job `{job}` has an invalid dependency graph", err.message, "correct the #Job `after` declarations, then rerun the job.")
         return EXIT_USAGE
     }
-    metadata := root_fact.metadata()
     loop fact in closure {
-        loop package in fact.packages {
+        loop package in fact[0].packages {
             if !metadata.packages.contains(package) -> &metadata.packages.push(package)
         }
     }
@@ -157,10 +159,15 @@ fn cli_run_project_job_leaf(verification: &StoreVerification, cache: &WorkspaceD
     }
     if cache_key == .Val(key) {
         if access_trace == .Val(trace_path) {
-            undeclared :: cli_task_undeclared_accesses(project_dir, job_cwd, entry, metadata, trace_path)
+            accesses := [String]{}
+            failure := String?{None}
+            if cli_task_undeclared_accesses(project_dir, job_cwd, entry, metadata, trace_path) == {
+                .Ok(found) -> accesses = found
+                .Err(error) -> failure = Val(error.message())
+            }
             files.remove(trace_path).drop("the trace is consumed by the access proof")
-            accesses :: undeclared ?? {
-                theme.error_coded("E1330", "job `{job}` access proof failed", err.message(), "fix the trace file or use `cache: .Uncached` for jobs that cannot be proven.")
+            if failure == .Val(message) {
+                theme.error_coded("E1330", "job `{job}` access proof failed", message, "fix the trace file or use `cache: .Uncached` for jobs that cannot be proven.")
                 return EXIT_USER_ERROR
             }
             if accesses.len() > 0 {
@@ -191,8 +198,11 @@ fn cli_run_project_job_leaf(verification: &StoreVerification, cache: &WorkspaceD
 fn cli_resolve_job_jet_binary(env: ShellEnv) -[FS, Env]> String CLIError! {
     requested :: envmodel_find_jet_binary()
     loop lease in env.cache_leases {
-        found :: lease.executable_for_command(requested) ?? return Err(CLIError.Other("{err}"))
-        if found == .Val(stable) -> return Ok(stable)
+        if lease.executable_for_command(requested) == {
+            .Val(stable) -> return Ok(stable)
+            .None -> {}
+            .Err(error) -> return Err(CLIError.Other("{error}"))
+        }
     }
     cli_resolve_executable_path(requested)
 }

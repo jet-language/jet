@@ -1,0 +1,13 @@
+# Claim: Authority is a named prelude rights carrier usable as a struct field type
+# Fixture migrated: Rust codegen text assertions (pub struct JetAuthority, FS.Read:repo) dropped: not a Jet CLI-observable behavior
+# Not ported: generated Rust text assertions
+fixture: authority_is_a_named_prelude_rights_carrier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # compiles the named prelude carrier
+stderr: !~ "Error" # compiles the named prelude carrier
+step: jet run main.jet
+exit: 0
+stdout: = "authority\n"

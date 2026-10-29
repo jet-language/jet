@@ -1,0 +1,147 @@
+// Persisted compiler record kinds (Rust crates/jet-store/src/records.rs).
+// Every record uses the one binary record codec. Action kinds are addressed
+// by a caller-computed key (the package check key, the program key, or the
+// compiled-output key). Blob kinds are content addressed: their key is the
+// lowercase SHA-256 hex of their bytes, so a check record names its
+// interface, diagnostics, and item graph by digest. Both directions verify
+// that the bytes decode as a record of the kind's schema; a stored record
+// that no longer decodes is a miss, never an error.
+use jet_foundation.[record_open_schema]
+
+enum ArtifactRecordKind {
+    // Action record under the package check key.
+    PkgCheck
+    // Package interface record (content addressed).
+    Iface
+    // Typed diagnostics of one package check (content addressed).
+    Diags
+    // Item graph of one package check (content addressed).
+    Items
+    // Lowered bodies for build lenses (content addressed).
+    Body
+    // Action record under the program key.
+    Program
+    // Action record for one package's compiled output.
+    PkgObject
+    // Action record under one item's check key.
+    ItemCheck
+    // Action record under one compile-time constant's evaluation key.
+    ComptimeValue
+
+    // Rust records.rs:50.
+    fn schema(self) -> String Never! {
+        if self == {
+            .PkgCheck -> "jet.pkg-check/v1"
+            .Iface -> "jet.iface/v1"
+            .Diags -> "jet.diags/v1"
+            .Items -> "jet.items/v1"
+            .Body -> "jet.body/v1"
+            .Program -> "jet.program/v1"
+            .PkgObject -> "jet.pkg-object/v1"
+            .ItemCheck -> "jet.item-check/v1"
+            .ComptimeValue -> "jet.comptime-value/v1"
+        }
+    }
+
+    // Rust records.rs:64.
+    fn from_schema(schema: String) -> ArtifactRecordKind? Never! {
+        loop kind in STORE_ARTIFACT_RECORD_KINDS {
+            if kind.schema() == schema -> return Val(kind)
+        }
+        None
+    }
+
+    // True for kinds addressed by a caller key; false for content-addressed
+    // blobs (Rust records.rs:70).
+    fn is_action(self) -> Bool Never! {
+        if self == {
+            .PkgCheck | .Program | .PkgObject | .ItemCheck | .ComptimeValue -> true
+            else -> false
+        }
+    }
+
+    // The action handle of `key` under this kind: SHA-256 of `schema \0 key`
+    // (Rust records.rs:77).
+    fn action(self, key: String) -> ActionHandle Never! {
+        framed := self.schema().bytes()
+        &framed.push(U8{0})
+        &framed.extend(key.bytes())
+        ActionHandle.from_bytes(framed)
+    }
+}
+
+// Rust `RecordKind::ALL` (records.rs:38).
+STORE_ARTIFACT_RECORD_KINDS :: comptime { [ArtifactRecordKind]{
+    ArtifactRecordKind.PkgCheck, ArtifactRecordKind.Iface, ArtifactRecordKind.Diags, ArtifactRecordKind.Items,
+    ArtifactRecordKind.Body, ArtifactRecordKind.Program, ArtifactRecordKind.PkgObject, ArtifactRecordKind.ItemCheck,
+    ArtifactRecordKind.ComptimeValue,
+} }
+
+// One record of a batch publication (Rust `(String, Vec<u8>)`).
+struct ArtifactRecordPublication {
+    key: String
+    bytes: [U8]
+}
+
+impl ArtifactStore {
+    // Publish one record. For a blob kind `key` must be the SHA-256 hex of
+    // `bytes`. An action key that already holds different bytes is a
+    // `Conflict`: the same inputs recomputed to a different record
+    // (Rust records.rs:90).
+    fn put_record(self, kind: ArtifactRecordKind, key: String, bytes: [U8]) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
+        if record_open_schema(bytes, kind.schema()).problem == .Val(problem) {
+            return Err(ArtifactStoreError.Config("{kind.schema()} record is not publishable: {problem}"))
+        }
+        if kind.is_action() -> return self.publish_action(kind.action(key), bytes)
+        object :: self.publish_blob(bytes)
+        if object.key() != key {
+            return Err(ArtifactStoreError.Config("{kind.schema()} record key `{key}` is not its content digest `{object.key()}`"))
+        }
+    }
+
+    // Load one record. A missing, corrupt, or undecodable record is `None`
+    // (Rust records.rs:109).
+    fn record(self, kind: ArtifactRecordKind, key: String) -[FS, Env, Exec, Time, Rand]> [U8]? ArtifactStoreError! {
+        bytes :: if kind.is_action() -> self.get_action(kind.action(key)) else -> {
+            digest :: if ArtifactDigest.from_hex(key) == {
+                .Ok(value) -> value
+                .Err(_) -> { return Ok(None) }
+            }
+            self.blob_by_digest(digest)
+        }
+        payload :: bytes ?? return Ok(None)
+        if record_open_schema(payload, kind.schema()).problem != None -> return Ok(None)
+        Ok(Val(payload))
+    }
+
+    // Load one action record without recording its use; a run that reads
+    // many records records their uses together with `touch_records`
+    // (Rust records.rs:123).
+    fn record_untouched(self, kind: ArtifactRecordKind, key: String) -[FS, Env, Exec, Time, Rand]> [U8]? ArtifactStoreError! {
+        if !kind.is_action() -> return self.record(kind, key)
+        bytes :: self.get_action_untouched(kind.action(key)) ?? return Ok(None)
+        if record_open_schema(bytes, kind.schema()).problem != None -> return Ok(None)
+        Ok(Val(bytes))
+    }
+
+    // Record one use of each action record `keys` names, in one journal
+    // write (Rust records.rs:133).
+    fn touch_records(self, kind: ArtifactRecordKind, keys: [String]) Never! -[FS, Env, Time, Rand]> {
+        if !kind.is_action() -> return
+        actions := [ActionHandle]{}
+        loop key in keys -> &actions.push(kind.action(key))
+        self.touch_actions(actions)
+    }
+
+    // Publish many action records of one kind in one store transaction.
+    // Bytes that do not decode as the kind's schema are skipped
+    // (Rust records.rs:142).
+    fn put_records(self, kind: ArtifactRecordKind, records: [ArtifactRecordPublication]) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
+        if !kind.is_action() -> return Err(ArtifactStoreError.Config("{kind.schema()} records are content addressed; publish them one by one"))
+        actions := [ArtifactActionPublication]{}
+        loop record in records {
+            if record_open_schema(record.bytes, kind.schema()).problem == None -> &actions.push(ArtifactActionPublication{action: kind.action(record.key), bytes: record.bytes})
+        }
+        self.publish_actions(actions)
+    }
+}

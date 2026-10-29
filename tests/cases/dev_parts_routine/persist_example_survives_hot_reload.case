@@ -4,11 +4,11 @@ refused: read_bytes
 fixture: persist_example_survives_hot_reload.fixture
 env: NO_COLOR=1
 session app line: jet dev persist.jet --swap
-recv app until line = "1" within 30s
+recv app line until = "1" within 30s
 write: persist.jet persist_example_survives_hot_reload.compatible.template
-recv app until line = "count=2" within 30s
+recv app line until = "count=2" within 30s
 write: persist.jet persist_example_survives_hot_reload.shape.template
-recv app until line = "count=1.0" within 30s
+recv app line until = "count=1.0" within 30s
 signal app: KILL
 close app
 exit: any # original status unasserted after intentional child.kill

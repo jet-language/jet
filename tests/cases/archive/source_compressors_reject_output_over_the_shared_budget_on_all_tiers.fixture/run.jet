@@ -1,0 +1,21 @@
+
+use core.archive as archive
+use core.archive.gzip as gzip
+use core.archive.zstd as zstd
+use core.files as files
+
+fn run() {
+    gzip_bytes :: files.read_bytes("oversized.gz") ?? panic("gzip fixture")
+    print(gzip.decompress(gzip_bytes) == .Err(_))
+    zstd_bytes :: files.read_bytes("oversized.zst") ?? panic("zstd fixture")
+    print(zstd.decompress(zstd_bytes) == .Err(_))
+    // Encoders over the budget return a typed error, never an empty or
+    // unchanged buffer.
+    plain :: files.read_bytes("oversized.bin") ?? panic("plain fixture")
+    print(archive.deflate(plain) == .Err(_))
+    print(archive.compress(plain) == .Err(_))
+    print(archive.create("big.bin", plain) == .Err(_))
+    print(archive.tar_add([U8]{}, "big.bin", plain) == .Err(_))
+    print(gzip.compress(plain) == .Err(_))
+    print(zstd.compress(plain) == .Err(_))
+}

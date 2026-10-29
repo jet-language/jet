@@ -1,0 +1,16 @@
+fn counted_measurement(hits: &Int) -> Measurement<Float> {
+    hits += 1
+    return measurement(1.0, uncertainty: 0.0)
+}
+fn add_argument_once_view() -> String {
+    hits := 0
+    measured :: measurement(2.0, uncertainty: 0.0)
+    sum :: measured + counted_measurement(&hits)
+    return "{sum.value()}|{hits}"
+}
+
+TRANSCRIPT_0 :: comptime { add_argument_once_view() }
+
+fn run() {
+    print("{TRANSCRIPT_0}")
+}

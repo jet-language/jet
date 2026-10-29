@@ -1,0 +1,1588 @@
+use core as core
+use core.net as net
+use core.mem as tls_mem
+use core.crypto as crypto
+use c.[mbedtls]
+
+// core.net.tls — TLS 1.2/1.3 byte streams over the vendored Mbed TLS 3.6
+// (Core/Vendor/Mbedtls, pinned in its VERSION file).
+//
+// jet_tls.c only wires Mbed TLS to a socket and returns raw Mbed TLS status
+// codes. Everything else is Jet policy and lives here: system and custom
+// trust, hostname verification, version bounds, ALPN, readiness waits and
+// deadlines, WANT_READ/WANT_WRITE retries, close_notify, the verified peer
+// identity, and every error message. The TCPStream keeps owning the socket.
+
+struct ClientConfig {
+    host: String{""}
+    alpn: [String]{[]}
+    trust: TLSClientTrust{TLSClientTrust.System}
+    identity: ClientIdentity?{None}
+    min_version: TLSVersion{TLSVersion.TLS12}
+    max_version: TLSVersion{TLSVersion.TLS13}
+}
+// `from_pem` stores the validated PEM text; `identity(cert, key)` is a plain
+// carrier that the handshake validates.
+struct ClientIdentity {
+    cert: String{""}
+    key: String{""}
+}
+// `from_pem` stores validated PEM roots; `roots(path)` names a bundle file.
+struct RootCertificates {
+    path: String{""}
+    pem: String{""}
+}
+enum TLSClientTrust {
+    System
+    SystemPlus(RootCertificates)
+    CustomOnly(RootCertificates)
+}
+struct TLSCertificate {
+    der: [U8]
+    sha256: [U8]
+    spki_sha256: [U8]
+    dns_names: [String]
+    valid_from_unix_ms: Int
+    valid_until_unix_ms: Int
+    subject: String
+    issuer: String
+}
+struct TLSPeerIdentity {
+    verified_server_name: String
+    leaf: TLSCertificate
+    certificate_chain: [TLSCertificate]
+    cipher_suite: String
+    tls_version: TLSVersion
+}
+enum TLSVersion {
+    TLS12
+    TLS13
+}
+
+// A stream made by `client` or `__server`. `TLSStream{}` is a closed stream.
+struct TLSStream { state: Shared<__TLSState>?{None} }
+
+struct __TLSContext { raw: U64 }
+impl __TLSContext.Close {
+    fn close(^self) {
+        #Unsafe("this consuming Close owns the sole jet_tls context; jet_tls_free accepts 0 and never closes the socket") {
+            mbedtls.free(self.raw)
+        }
+    }
+}
+
+struct __TLSState {
+    context: __TLSContext
+    tcp: TCPStream
+    peer: TLSPeerIdentity?
+    pending: [U8]
+    read_eof: Bool
+    write_closed: Bool
+    closed: Bool
+}
+
+#Error
+struct __TLSFailure { message: String }
+impl __TLSFailure.Display { fn display(self) -> String { self.message.copy() } }
+impl __TLSFailure.Debug { fn debug(^self) -> String { self.message } }
+fn __fail(message: String) -> __TLSFailure Never! { __TLSFailure{message: message} }
+
+// Mbed TLS 3.6 status codes this policy acts on.
+C_WANT_READ :: -26880 // MBEDTLS_ERR_SSL_WANT_READ -0x6900
+C_WANT_WRITE :: -26752 // MBEDTLS_ERR_SSL_WANT_WRITE -0x6880
+C_NEW_SESSION_TICKET :: -31488 // MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET -0x7B00
+C_PEER_CLOSE_NOTIFY :: -30848 // MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY -0x7880
+C_NO_DEADLINE :: 9223372036854775807
+C_WAIT_SLICE_NS :: 3600000000000
+C_RECORD_BYTES :: 16384
+C_TRUNCATION :: "TLS protocol truncation: peer closed connection without sending TLS close_notify"
+
+// The two-argument native leaf consumes a connected TCPStream and a server
+// name. Do not manufacture a descriptor or call the leaf with host/port text:
+// the transport and TLS capabilities are separate typed boundaries.
+fn client(host: String, port: Int) -[Net, Time.Wait]> TLSStream IOError! {
+    if !valid_host(host) -> return Err(tls_error("client", host, "host is empty or contains invalid endpoint syntax"))
+    if port <= 0 || port > 65535 -> return Err(tls_error("client", host, "port must be in 1..=65535"))
+    tcp := if net.tcp_connect(format_host_port(host, port)) == {
+        .Ok(stream) -> stream
+        .Err(_) -> { return Err(tls_error("client", host, "transport connect failed")) }
+    }
+    __client_stream_entry(^tcp, host)
+}
+
+// Checked Core call rows keep the moved-stream and labelled handshake forms
+// of `client`; Sema selects one of these by argument count.
+fn __client_stream_entry(stream: ^TCPStream, server_name: String) -[Net, Time.Wait]> TLSStream IOError! {
+    tls := __client_connect(^stream, server_name, ClientConfig{}, __forever()) ?? return Err(__net_to_io(err))
+    Ok(^tls)
+}
+
+fn __client_deadline_entry(stream: ^TCPStream, server_name: String, deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
+    __client_connect(^stream, server_name, ClientConfig{}, deadline)
+}
+
+fn __client_config_deadline_entry(stream: ^TCPStream, server_name: String, config: ClientConfig, deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
+    __client_connect(^stream, server_name, config, deadline)
+}
+
+fn __client_connect(stream: ^TCPStream, server_name: String, config: ClientConfig, deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
+    tcp := ^stream
+    end_ns :: __deadline_end(deadline, "tls handshake") ?? return Err(err)
+    context := __client_context(server_name, config) ?? return Err(__net_error("tls handshake", err.message))
+    status :: __c_setup(context.raw, core.net.__tcp_fd(tcp), server_name)
+    if status != 0 -> return Err(__net_error("tls handshake", "TLS handshake with `{server_name}` failed: {__mbedtls_text(status)}"))
+    _ :: __handshake(context, tcp, server_name, end_ns) ?? return Err(err)
+    peer :: __peer_identity(context.raw, server_name) ?? return Err(NetError.TLS(__detail("tls peer identity", err.message)))
+    Ok(TLSStream{state: Val(shared __TLSState{context: ^context, tcp: ^tcp, peer: Val(peer), pending: [U8]{}, read_eof: false, write_closed: false, closed: false})})
+}
+
+// Internal server handshake for Core's own TLS servers and loopback proofs.
+// The client certificate is not requested, so the stream has no peer identity.
+fn __server(stream: ^TCPStream, cert_pem: String, key_pem: String, alpn: [String], deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
+    tcp := ^stream
+    end_ns :: __deadline_end(deadline, "tls accept") ?? return Err(err)
+    context := __context_new(1) ?? return Err(__net_error("tls accept", err.message))
+    raw :: context.raw
+    if __has_nul(cert_pem) || __has_nul(key_pem) -> return Err(__net_error("tls accept", "TLS server identity is invalid: PEM text contains a NUL byte"))
+    identity :: __c_own_pem(raw, cert_pem, key_pem)
+    if identity != 0 -> return Err(__net_error("tls accept", "TLS server identity is invalid: {__mbedtls_text(identity)}"))
+    _ :: __add_alpn(raw, alpn) ?? return Err(__net_error("tls accept", err.message))
+    __c_authmode(raw, 0)
+    status :: __c_setup(raw, core.net.__tcp_fd(tcp), "")
+    if status != 0 -> return Err(__net_error("tls accept", "TLS handshake failed: {__mbedtls_text(status)}"))
+    _ :: __handshake(context, tcp, "", end_ns) ?? return Err(err)
+    Ok(TLSStream{state: Val(shared __TLSState{context: ^context, tcp: ^tcp, peer: None, pending: [U8]{}, read_eof: false, write_closed: false, closed: false})})
+}
+
+impl TLSStream {
+    fn read(self, max_bytes: Int, /, *, deadline: Duration) -[Net, Time.Wait]> [U8] IOError! {
+        if max_bytes <= 0 -> return Err(IOError.InvalidInput(__io_context(.Read, "tls read limit must be positive")))
+        end_ns :: __deadline_end(deadline, "tls read") ?? return Err(__net_to_io(err))
+        state :: __state(self) ?? return Err(__io_error(.Read, "TLS stream is closed"))
+        guard := state.guard_edit()
+        __read(&guard.value, max_bytes, end_ns)
+    }
+
+    fn write_all(self, bytes: [U8], /, *, deadline: Duration) IOError! -[Net, Time.Wait]> {
+        end_ns :: __deadline_end(deadline, "tls write all") ?? return Err(__net_to_io(err))
+        state :: __state(self) ?? return Err(__io_error(.Write, "TLS stream is closed"))
+        guard := state.guard_edit()
+        __write_all(&guard.value, bytes, end_ns)
+    }
+
+    fn ready(self, interest: NetReadyInterest, /, *, deadline: Duration) -[Net, Time.Wait]> NetReady IOError! {
+        operation :: if __wants_write_only(interest) -> IOOperation.Write else -> IOOperation.Read
+        end_ns :: __deadline_end(deadline, "tls ready") ?? return Err(__net_to_io(err))
+        if end_ns <= core.time.__clock_mono_ns() -> return Err(__net_to_io(__deadline_error("tls ready")))
+        state :: __state(self) ?? return Err(__io_error(operation, "TLS stream is closed"))
+        guard := state.guard_edit()
+        if guard.value.closed -> return Err(__io_error(operation, "TLS stream is closed"))
+        want_read :: !__wants_write_only(interest)
+        want_write :: __wants_write(interest)
+        loop {
+            if want_read {
+                buffered :: __fill_pending(&guard.value, operation) ?? return Err(err)
+                if buffered -> return Ok(NetReady{readable: true, writable: false})
+            }
+            raw :: __wait(guard.value.tcp, interest, end_ns, "tls ready") ?? return Err(__net_to_io(err))
+            readable := false
+            if want_read && raw.readable {
+                readable = __fill_pending(&guard.value, operation) ?? return Err(err)
+            }
+            writable :: want_write && raw.writable
+            if readable || writable -> return Ok(NetReady{readable: readable, writable: writable})
+        }
+    }
+
+    // Sends close_notify, shuts down the socket's write side and closes the
+    // stream. Closing a closed stream succeeds.
+    fn close(self) IOError! -[Net, Time.Wait]> {
+        state :: __state(self) ?? return Err(__io_error(.Close, "TLS stream is closed"))
+        guard := state.guard_edit()
+        if guard.value.closed -> return Ok(())
+        _ :: __close_write(&guard.value, C_NO_DEADLINE, "tls close") ?? return Err(err)
+        guard.value.closed = true
+        Ok(())
+    }
+
+    // Sends close_notify and shuts down the write side; reads stay open.
+    fn close_write(self, /, *, deadline: Duration) IOError! -[Net, Time.Wait]> {
+        end_ns :: __deadline_end(deadline, "tls close write") ?? return Err(__net_to_io(err))
+        state :: __state(self) ?? return Err(__io_error(.Close, "TLS stream is closed"))
+        guard := state.guard_edit()
+        if guard.value.closed -> return Err(__io_error(.Close, "TLS stream is closed"))
+        __close_write(&guard.value, end_ns, "tls close write")
+    }
+
+    // The verified server identity. Server-side and closed streams have none
+    // and report an empty identity.
+    fn peer_identity(self) -> TLSPeerIdentity Never! {
+        state :: __state(self) ?? return __empty_identity()
+        guard := state.guard_edit()
+        if guard.value.peer == .Val(peer) -> return peer.copy()
+        __empty_identity()
+    }
+}
+
+fn read(&stream: TLSStream, n: Int) -[Net, Time.Wait]> [U8] IOError! {
+    if n <= 0 -> return Err(tls_error("read", "", "read limit must be positive"))
+    stream.read(n, deadline: __forever())
+}
+
+fn read_text(&stream: TLSStream, n: Int) -[Net, Time.Wait]> String IOError! {
+    if n <= 0 -> return Err(tls_error("read_text", "", "read limit must be positive"))
+    bytes :: read(&stream, n)
+    Ok(String.from_bytes(bytes) ?? return Err(tls_error("read_text", "", "read bytes are not UTF-8")))
+}
+
+fn write(&stream: TLSStream, bytes: [U8]) -[Net, Time.Wait]> Int IOError! {
+    _ :: stream.write_all(bytes, deadline: __forever()) ?? return Err(err)
+    Ok(bytes.len())
+}
+
+fn write_all(&stream: TLSStream, bytes: [U8]) IOError! -[Net, Time.Wait]> {
+    stream.write_all(bytes, deadline: __forever())
+}
+
+fn write_text(&stream: TLSStream, text: String) IOError! -[Net, Time.Wait]> {
+    write_all(&stream, text.bytes())
+}
+
+fn close(stream: TLSStream) IOError! -[Net, Time.Wait]> {
+    stream.close()
+}
+
+fn sni(&stream: TLSStream) -[Net]> String Never! {
+    peer :: stream.peer_identity()
+    peer.verified_server_name
+}
+
+// TLSStream deliberately does not expose a transport socket address. Keeping
+// a source-level port field would be an invalid nominal identity for the native
+// provider, so report the missing capability instead of fabricating a value.
+fn peer_port(&stream: TLSStream) -[Net]> Int IOError! {
+    Err(tls_error("peer_port", "", "TLS provider does not expose the peer port"))
+}
+
+// A TLS stream deliberately cannot be downgraded: doing so would make the
+// caller believe plaintext bytes are protected by the old connection state.
+fn unwrap(&stream: TLSStream) -[Net]> TCPStream IOError! {
+    Err(tls_error("unwrap", "", "TLS stream cannot be downgraded"))
+}
+fn version_name(v: TLSVersion) -> String Never! {
+    if v == TLSVersion.TLS12 -> return "TLSv1.2"
+    return "TLSv1.3"
+}
+
+fn parse_version(name: String) -> TLSVersion? Never! {
+    n := ascii_lower(trim_ascii(name))
+    if n == {
+        "tlsv1.2" | "tls1.2" | "1.2" | "tls12" -> Val(TLSVersion.TLS12)
+        "tlsv1.3" | "tls1.3" | "1.3" | "tls13" -> Val(TLSVersion.TLS13)
+        else -> None
+    }
+}
+
+fn is_tls13(v: TLSVersion) -> Bool Never! { v == TLSVersion.TLS13 }
+
+fn is_tls12(v: TLSVersion) -> Bool Never! { v == TLSVersion.TLS12 }
+
+// ---- client configuration ---------------------------------------------------
+
+impl ClientConfig {
+    // System roots, no client certificate, TLS 1.2 through 1.3, no ALPN.
+    fn default() -> ClientConfig Never! { ClientConfig{} }
+
+    fn with_alpn(self, protocols: [String]) -> ClientConfig IOError! {
+        message :: __alpn_problem(protocols)
+        if message != "" -> return Err(__config_error("ClientConfig.with_alpn", message))
+        Ok(__config_with(self, protocols.copy(), self.trust.copy(), self.identity.copy(), self.min_version, self.max_version))
+    }
+
+    fn with_trust(self, trust: TLSClientTrust) -> ClientConfig IOError! {
+        Ok(__config_with(self, self.alpn.copy(), trust.copy(), self.identity.copy(), self.min_version, self.max_version))
+    }
+
+    fn with_client_identity(self, identity: ClientIdentity) -> ClientConfig IOError! {
+        Ok(__config_with(self, self.alpn.copy(), self.trust.copy(), Val(identity.copy()), self.min_version, self.max_version))
+    }
+
+    fn with_version_bounds(self, /, *, min: TLSVersion, max: TLSVersion) -> ClientConfig IOError! {
+        if __version_rank(min) > __version_rank(max) -> return Err(__config_error("ClientConfig.with_version_bounds", "minimum TLS version exceeds maximum"))
+        Ok(__config_with(self, self.alpn.copy(), self.trust.copy(), self.identity.copy(), min, max))
+    }
+}
+
+impl RootCertificates {
+    // Validates one or more PEM CERTIFICATE blocks and nothing else.
+    fn from_pem(pem: [U8]) -> RootCertificates IOError! {
+        text :: __roots_validate(pem) ?? return Err(__config_error("RootCertificates.from_pem", err.message))
+        Ok(RootCertificates{pem: text})
+    }
+}
+
+impl ClientIdentity {
+    // Validates a PEM certificate chain and the leaf's PEM private key.
+    fn from_pem(cert_chain: [U8], private_key: [U8]) -> ClientIdentity IOError! {
+        identity :: __identity_validate(cert_chain, private_key) ?? return Err(__config_error("ClientIdentity.from_pem", err.message))
+        Ok(identity)
+    }
+}
+
+fn __config_with(config: ClientConfig, alpn: [String], trust: TLSClientTrust, identity: ClientIdentity?, min: TLSVersion, max: TLSVersion) -> ClientConfig Never! {
+    ClientConfig{host: config.host.copy(), alpn: alpn, trust: trust, identity: identity, min_version: min, max_version: max}
+}
+
+fn __config_error(operation: String, message: String) -> IOError Never! {
+    IOError.InvalidInput(IOContext{operation: .Connect, resource: Val("tls client configuration"), os_code: None, cause: Val("{operation} failed: {message}")})
+}
+
+fn __version_rank(version: TLSVersion) -> Int Never! { if version == TLSVersion.TLS12 -> 12 else -> 13 }
+fn __version_code(version: TLSVersion) -> Int Never! { if version == TLSVersion.TLS12 -> 771 else -> 772 }
+
+// jet_tls.c offers at most 16 protocols.
+fn __alpn_problem(protocols: [String]) -> String Never! {
+    if protocols.len() > 16 -> return "TLS ALPN offers at most 16 protocols"
+    loop protocol in protocols {
+        length :: protocol.bytes().len()
+        if length == 0 || length > 255 || __has_nul(protocol) -> return "TLS ALPN protocols must contain 1 to 255 bytes"
+    }
+    ""
+}
+
+// Constructors are pure carriers. Endpoint, ALPN, identity, and root policy
+// is checked at the operation boundary instead of being silently dropped.
+fn config(host: String) -> ClientConfig Never! { ClientConfig{host: host} }
+
+fn with_alpn(cfg: ClientConfig, proto: String) -> ClientConfig Never! {
+    alpn := [String]{}
+    loop p in cfg.alpn -> &alpn.push(p)
+    // Keep the requested value visible. connect_host validates the complete
+    // list before crossing into the provider, so invalid input cannot become a
+    // successful handshake or disappear as a no-op.
+    &alpn.push(proto)
+    __config_with(cfg, alpn, cfg.trust.copy(), cfg.identity.copy(), cfg.min_version, cfg.max_version)
+}
+
+fn alpn_h2(cfg: ClientConfig) -> ClientConfig Never! {
+    with_alpn(with_alpn(cfg, "h2"), "http/1.1")
+}
+
+fn identity(cert: String, key: String) -> ClientIdentity Never! {
+    ClientIdentity{cert: cert, key: key}
+}
+
+fn roots(path: String) -> RootCertificates Never! {
+    RootCertificates{path: path}
+}
+
+// The legacy host carrier connects with its ALPN list and default trust.
+fn connect_host(cfg: ClientConfig, port: Int) -[Net, Time.Wait]> TLSStream IOError! {
+    if !valid_host(cfg.host) -> return Err(tls_error("connect_host", cfg.host, "host is empty or contains invalid endpoint syntax"))
+    if port <= 0 || port > 65535 -> return Err(tls_error("connect_host", cfg.host, "port must be in 1..=65535"))
+    if !valid_alpn_list(cfg.alpn) -> return Err(tls_error("connect_host", cfg.host, "ALPN protocol must contain 1..255 non-control bytes"))
+    tcp := if net.tcp_connect(format_host_port(cfg.host, port)) == {
+        .Ok(stream) -> stream
+        .Err(_) -> { return Err(tls_error("connect_host", cfg.host, "transport connect failed")) }
+    }
+    tls := __client_connect(^tcp, cfg.host, cfg, __forever()) ?? return Err(__net_to_io(err))
+    Ok(^tls)
+}
+
+fn flags(cfg: ClientConfig) -> [String] Never! { cfg.alpn }
+
+fn has_alpn(cfg: ClientConfig, proto: String) -> Bool Never! {
+    loop p in cfg.alpn {
+        if p == proto -> return true
+    }
+    false
+}
+
+fn tls_error(operation: String, address: String, message: String) -> IOError Never! {
+    is_unsupported := operation == "peer_port" || operation == "unwrap"
+    if operation == "read" || operation == "read_text" {
+        context := IOContext{operation: .Read, resource: Val(address.copy()), os_code: None, cause: Val(message.copy())}
+        if is_unsupported -> return IOError.Other(context)
+        return IOError.InvalidInput(context)
+    }
+    if operation == "write" || operation == "write_all" || operation == "write_text" {
+        context := IOContext{operation: .Write, resource: Val(address.copy()), os_code: None, cause: Val(message.copy())}
+        if is_unsupported -> return IOError.Other(context)
+        return IOError.InvalidInput(context)
+    }
+    if operation == "close" {
+        context := IOContext{operation: .Close, resource: Val(address.copy()), os_code: None, cause: Val(message.copy())}
+        if is_unsupported -> return IOError.Other(context)
+        return IOError.InvalidInput(context)
+    }
+    if operation == "client" || operation == "connect_host" {
+        context := IOContext{operation: .Connect, resource: Val(address.copy()), os_code: None, cause: Val(message.copy())}
+        if is_unsupported -> return IOError.Other(context)
+        return IOError.InvalidInput(context)
+    }
+    context := IOContext{operation: .Resolve, resource: Val(address.copy()), os_code: None, cause: Val(message.copy())}
+    if is_unsupported -> return IOError.Other(context)
+    IOError.InvalidInput(context)
+}
+
+fn valid_host(host: String) -> Bool Never! {
+    raw :: host.bytes()
+    if raw.len() == 0 || raw.len() > 253 -> return false
+    if raw[0] == (U8{91}) && (raw.len() < 3 || raw[raw.len() - 1] != (U8{93})) -> return false
+    colons := 0
+    i := 0
+    loop i < raw.len() {
+        n :: Int.from_u8(raw[i])
+        if n <= 32 || n == 127 || n == 47 || n == 63 || n == 35 || n == 64 -> return false
+        if n == 58 -> colons = colons + 1
+        if n == 91 && i != 0 -> return false
+        if n == 93 && (i == 0 || raw[0] != (U8{91}) || i != raw.len() - 1) -> return false
+        i = i + 1
+    }
+    if colons == 1 -> return false
+    if colons == 0 -> return valid_dns_name(raw)
+    true
+}
+
+fn valid_dns_name(raw: [U8]) -> Bool Never! {
+    label_start := 0
+    loop i in 0..<raw.len() {
+        n :: Int.from_u8(raw[i])
+        if {
+            n == 46 -> {
+                label_len := i - label_start
+                if label_len == 0 {
+                    return i == raw.len() - 1 && i > 0 && raw[i - 1] != (U8{46})
+                }
+                if raw[label_start] == (U8{45}) || raw[i - 1] == (U8{45}) -> return false
+                label_start = i + 1
+            }
+            else -> {
+                if !((n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 45 || n >= 128) -> return false
+                if i - label_start >= 63 -> return false
+            }
+        }
+    }
+    label_len := raw.len() - label_start
+    if label_len == 0 {
+        if raw.len() < 2 -> return false
+        return raw[raw.len() - 2] != (U8{46})
+    }
+    if raw[label_start] == (U8{45}) || raw[raw.len() - 1] == (U8{45}) -> return false
+    true
+}
+
+fn format_host_port(host: String, port: Int) -> String Never! {
+    raw :: host.bytes()
+    if raw.len() > 0 && raw[0] == (U8{91}) -> return "{host}:{port}"
+    if contains_byte(host, 58) -> return "[{host}]:{port}"
+    "{host}:{port}"
+}
+
+fn contains_byte(text: String, needle: Int) -> Bool Never! {
+    loop b in text.bytes() {
+        if Int.from_u8(b) == needle -> return true
+    }
+    false
+}
+
+fn valid_alpn_list(protocols: [String]) -> Bool Never! {
+    loop protocol in protocols {
+        raw :: protocol.bytes()
+        if raw.len() == 0 || raw.len() > 255 -> return false
+        loop b in raw {
+            n :: Int.from_u8(b)
+            if n <= 32 || n == 127 -> return false
+        }
+    }
+    true
+}
+
+fn trim_ascii(text: String) -> String Never! {
+    raw :: text.bytes()
+    start := 0
+    end := raw.len()
+    loop start < end {
+        n :: Int.from_u8(raw[start])
+        if n == 32 || n == 9 || n == 13 || n == 10 -> start = start + 1 else -> break
+    }
+    loop end > start {
+        n :: Int.from_u8(raw[end - 1])
+        if n == 32 || n == 9 || n == 13 || n == 10 -> end = end - 1 else -> break
+    }
+    if end <= start -> return ""
+    result :: String.from_bytes(raw[start..(end - 1)]) ?? ""
+    return result
+}
+fn ascii_lower(text: String) -> String Never! {
+    out := [U8]{}
+    loop b in text.bytes() {
+        n :: Int.from_u8(b)
+        if n >= 65 && n <= 90 -> &out.push(U8{n + 32}) else -> &out.push(b)
+    }
+    decoded :: String.from_bytes(out) ?? return text.copy()
+    return decoded
+}
+
+// ---- contexts, trust and identity -------------------------------------------
+
+fn __context_new(endpoint: Int) -> __TLSContext __TLSFailure! {
+    raw := U64{0}
+    status := I32{0}
+    #Unsafe("the output slot belongs to this frame; jet_tls_new stores 0 or a fresh context that __TLSContext owns") {
+        status = mbedtls.new(&raw, I32{endpoint})
+    }
+    context := __TLSContext{raw: raw}
+    if status != (I32{0}) -> return Err(__fail("TLS could not create a context: {__mbedtls_text(Int.from_i32(status))}"))
+    Ok(^context)
+}
+
+fn __client_context(server_name: String, config: ClientConfig) -> __TLSContext __TLSFailure! {
+    if !__valid_server_name(server_name) -> return Err(__fail("invalid TLS server name `{server_name}`"))
+    context := __context_new(0) ?? return Err(err)
+    raw :: context.raw
+    _ :: __load_trust(raw, config.trust) ?? return Err(err)
+    if config.identity == .Val(identity) {
+        if __has_nul(identity.cert) || __has_nul(identity.key) -> return Err(__fail("TLS client identity is invalid: PEM text contains a NUL byte"))
+        status :: __c_own_pem(raw, identity.cert, identity.key)
+        if status != 0 -> return Err(__fail(__identity_message(status)))
+    }
+    if __version_rank(config.min_version) > __version_rank(config.max_version) {
+        return Err(__fail("TLS version bounds must be between TLS12 and TLS13 with min <= max"))
+    }
+    __c_versions(raw, __version_code(config.min_version), __version_code(config.max_version))
+    _ :: __add_alpn(raw, config.alpn) ?? return Err(err)
+    // MBEDTLS_SSL_VERIFY_REQUIRED: the chain and the server name must verify.
+    __c_authmode(raw, 2)
+    Ok(^context)
+}
+
+fn __add_alpn(raw: U64, protocols: [String]) __TLSFailure! {
+    message :: __alpn_problem(protocols)
+    if message != "" -> return Err(__fail(message))
+    loop protocol in protocols {
+        status :: __c_alpn_add(raw, protocol)
+        if status != 0 -> return Err(__fail("TLS could not offer ALPN protocol `{protocol}`: {__mbedtls_text(status)}"))
+    }
+    Ok(())
+}
+
+fn __load_trust(raw: U64, trust: TLSClientTrust) __TLSFailure! {
+    if trust == {
+        .System -> { _ :: __load_system_roots(raw, true) ?? return Err(err) }
+        .SystemPlus(roots) -> {
+            _ :: __load_system_roots(raw, false) ?? return Err(err)
+            _ :: __load_custom_roots(raw, roots) ?? return Err(err)
+        }
+        .CustomOnly(roots) -> { _ :: __load_custom_roots(raw, roots) ?? return Err(err) }
+    }
+    Ok(())
+}
+
+fn __load_custom_roots(raw: U64, roots: RootCertificates) __TLSFailure! {
+    before :: __c_ca_count(raw)
+    if {
+        roots.pem != "" -> {
+            if __has_nul(roots.pem) -> return Err(__fail("TLS custom CA PEM must contain only certificate blocks"))
+            status :: __c_ca_pem(raw, roots.pem)
+            if status != 0 -> return Err(__fail("TLS could not use a custom certificate root: {__ca_status_text(status)}"))
+        }
+        roots.path != "" -> {
+            if __has_nul(roots.path) -> return Err(__fail("TLS could not load custom certificate roots from `{roots.path}`: the path contains a NUL byte"))
+            status :: __c_ca_file(raw, roots.path)
+            if status != 0 -> return Err(__fail("TLS could not load custom certificate roots from `{roots.path}`: {__ca_status_text(status)}"))
+        }
+    }
+    if __c_ca_count(raw) == before -> return Err(__fail("TLS custom CA PEM did not contain a certificate"))
+    Ok(())
+}
+
+fn __ca_status_text(status: Int) -> String Never! {
+    if status > 0 -> return "{status} certificate(s) could not be parsed"
+    __mbedtls_text(status)
+}
+
+// System roots follow the OpenSSL convention rustls-native-certs used:
+// SSL_CERT_FILE / SSL_CERT_DIR when either is set, otherwise the first
+// distribution bundle that loads, then the hashed /etc/ssl/certs directory.
+// The variables are read as process facts of the trust store, not as program
+// configuration, so they add no Env effect to the handshake.
+fn __load_system_roots(raw: U64, required: Bool) __TLSFailure! {
+    file :: __getenv("SSL_CERT_FILE")
+    dirs :: __getenv("SSL_CERT_DIR")
+    if {
+        file != "" || dirs != "" -> {
+            if file != "" && !__has_nul(file) -> _ :: __c_ca_file(raw, file)
+            loop dir in __split_colon(dirs) {
+                if dir != "" && !__has_nul(dir) -> _ :: __c_ca_dir(raw, dir)
+            }
+        }
+        else -> {
+            loop path in __system_root_files() {
+                if __c_ca_count(raw) > 0 -> break
+                _ :: __c_ca_file(raw, path)
+            }
+            if __c_ca_count(raw) == 0 -> _ :: __c_ca_dir(raw, "/etc/ssl/certs")
+        }
+    }
+    if required && __c_ca_count(raw) == 0 -> return Err(__fail("TLS could not find system certificate roots"))
+    Ok(())
+}
+
+fn __system_root_files() -> [String] Never! {
+    [String]{
+        "/etc/ssl/certs/ca-certificates.crt",
+        "/etc/pki/tls/certs/ca-bundle.crt",
+        "/etc/ssl/ca-bundle.pem",
+        "/etc/pki/tls/cacert.pem",
+        "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+        "/etc/ssl/cert.pem",
+    }
+}
+
+fn __split_colon(text: String) -> [String] Never! {
+    parts := [String]{}
+    raw :: text.bytes()
+    start := 0
+    loop at in 0..<raw.len() {
+        if raw[at] == (U8{58}) {
+            &parts.push(String.from_bytes(__slice(raw, start, at)) ?? "")
+            start = at + 1
+        }
+    }
+    &parts.push(String.from_bytes(__slice(raw, start, raw.len())) ?? "")
+    parts
+}
+
+fn __roots_validate(pem: [U8]) -> String __TLSFailure! {
+    text :: String.from_bytes(pem) ?? return Err(__fail("TLS custom CA PEM must be UTF-8 text"))
+    _ :: __pem_certificates(text.bytes()) ?? return Err(err)
+    if __has_nul(text) -> return Err(__fail("TLS custom CA PEM must contain only certificate blocks"))
+    context := __context_new(0) ?? return Err(err)
+    status :: __c_ca_pem(context.raw, text)
+    if status != 0 -> return Err(__fail("TLS could not use a custom certificate root: {__ca_status_text(status)}"))
+    Ok(text)
+}
+
+fn __identity_validate(cert_chain: [U8], private_key: [U8]) -> ClientIdentity __TLSFailure! {
+    cert :: String.from_bytes(cert_chain) ?? return Err(__fail("TLS custom CA PEM must be UTF-8 text"))
+    _ :: __pem_certificates(cert.bytes()) ?? return Err(err)
+    key :: String.from_bytes(private_key) ?? return Err(__fail("TLS private key PEM must be UTF-8 text"))
+    _ :: __private_key_check(key.bytes()) ?? return Err(err)
+    if __has_nul(cert) || __has_nul(key) -> return Err(__fail("TLS client identity is invalid: PEM text contains a NUL byte"))
+    context := __context_new(0) ?? return Err(err)
+    status :: __c_own_pem(context.raw, cert, key)
+    if status != 0 -> return Err(__fail(__identity_message(status)))
+    Ok(ClientIdentity{cert: cert, key: key})
+}
+
+// mbedtls_pk_check_pair reports a mismatched key through the PK, RSA or ECP
+// layer depending on the key type.
+fn __identity_message(status: Int) -> String Never! {
+    high :: __mbedtls_high(status)
+    if high == 16128 || high == 16000 || high == 16896 || high == 20352 || status == -16128 || status == -16000 {
+        return "TLS client certificate does not match the private key"
+    }
+    "TLS client identity is invalid: {__mbedtls_text(status)}"
+}
+
+// ---- PEM ----------------------------------------------------------------------
+
+// The number of CERTIFICATE blocks; nothing but whitespace may surround them.
+fn __pem_certificates(raw: [U8]) -> Int __TLSFailure! {
+    begin :: "-----BEGIN CERTIFICATE-----".bytes()
+    end :: "-----END CERTIFICATE-----".bytes()
+    count := 0
+    at := 0
+    loop {
+        start :: __find(raw, begin, at)
+        if start < 0 -> break
+        if !__blank(raw, at, start) -> return Err(__fail("TLS custom CA PEM contains data outside certificate blocks"))
+        body :: start + begin.len()
+        stop :: __find(raw, end, body)
+        if stop < 0 -> return Err(__fail("TLS custom CA PEM has an unterminated certificate"))
+        _ :: __pem_base64(raw, body, stop) ?? return Err(err)
+        count += 1
+        at = stop + end.len()
+    }
+    if count == 0 || !__blank(raw, at, raw.len()) -> return Err(__fail("TLS custom CA PEM must contain only certificate blocks"))
+    Ok(count)
+}
+
+fn __private_key_check(raw: [U8]) __TLSFailure! {
+    first := 0
+    last := raw.len()
+    loop first < last && __space(Int.from_u8(raw[first]), true) { first += 1 }
+    loop last > first && __space(Int.from_u8(raw[last - 1]), true) { last -= 1 }
+    labels :: [String]{"PRIVATE KEY", "RSA PRIVATE KEY", "EC PRIVATE KEY"}
+    loop label in labels {
+        begin :: "-----BEGIN {label}-----".bytes()
+        end :: "-----END {label}-----".bytes()
+        if last - first >= begin.len() + end.len() && __find(raw, begin, first) == first && __find(raw, end, last - end.len()) == last - end.len() {
+            _ :: __pem_base64(raw, first + begin.len(), last - end.len()) ?? return Err(err)
+            return Ok(())
+        }
+    }
+    Err(__fail("TLS private key PEM must contain exactly one PKCS#8, PKCS#1, or SEC1 key"))
+}
+
+// Strict base64 for one PEM body; returns the decoded byte count.
+fn __pem_base64(raw: [U8], start: Int, end: Int) -> Int __TLSFailure! {
+    decoded := 0
+    used := 0
+    pads := 0
+    padded := false
+    at := start
+    loop at < end {
+        byte :: Int.from_u8(raw[at])
+        at += 1
+        if __space(byte, false) -> next
+        if padded -> return Err(__fail("TLS custom CA PEM has data after base64 padding"))
+        if {
+            byte == 61 -> {
+                pads += 1
+            }
+            else -> {
+                if pads != 0 -> return Err(__fail("TLS custom CA PEM has invalid base64 padding"))
+                if !((byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || (byte >= 48 && byte <= 57) || byte == 43 || byte == 47) {
+                    return Err(__fail("TLS custom CA PEM contains invalid base64"))
+                }
+            }
+        }
+        used += 1
+        if used == 4 {
+            if pads > 2 -> return Err(__fail("TLS custom CA PEM has invalid base64 padding"))
+            decoded += 3 - pads
+            padded = pads != 0
+            used = 0
+            pads = 0
+        }
+    }
+    if used != 0 || decoded == 0 -> return Err(__fail("TLS custom CA PEM contains incomplete base64"))
+    Ok(decoded)
+}
+
+// ASCII whitespace; `trim` adds the vertical tab str::trim also strips.
+fn __space(byte: Int, trim: Bool) -> Bool Never! {
+    byte == 32 || byte == 9 || byte == 10 || byte == 12 || byte == 13 || (trim && byte == 11)
+}
+
+fn __blank(raw: [U8], start: Int, end: Int) -> Bool Never! {
+    loop at in start..<end { if !__space(Int.from_u8(raw[at]), true) -> return false }
+    true
+}
+
+fn __find(raw: [U8], needle: [U8], from: Int) -> Int Never! {
+    at := from
+    loop at + needle.len() <= raw.len() {
+        matched := true
+        loop k in 0..<needle.len() {
+            if raw[at + k] != needle[k] {
+                matched = false
+                break
+            }
+        }
+        if matched -> return at
+        at += 1
+    }
+    -1
+}
+
+fn __slice(raw: [U8], start: Int, end: Int) -> [U8] Never! {
+    out := [U8]{}
+    loop at in start..<end -> &out.push(raw[at])
+    out
+}
+
+fn __has_nul(text: String) -> Bool Never! {
+    loop byte in text.bytes() { if byte == (U8{0}) -> return true }
+    false
+}
+
+fn __valid_server_name(name: String) -> Bool Never! {
+    raw :: name.bytes()
+    if raw.len() == 0 || raw.len() > 253 -> return false
+    colons := 0
+    loop byte in raw {
+        n :: Int.from_u8(byte)
+        if n == 58 -> colons += 1
+    }
+    if colons == 0 -> return valid_dns_name(raw)
+    if colons < 2 -> return false
+    loop byte in raw {
+        n :: Int.from_u8(byte)
+        if !((n >= 48 && n <= 58) || (n >= 65 && n <= 70) || (n >= 97 && n <= 102) || n == 46) -> return false
+    }
+    true
+}
+
+// ---- handshake and I/O --------------------------------------------------------
+
+fn __handshake(context: __TLSContext, tcp: TCPStream, server_name: String, end_ns: Int) NetError! -[Net, Time.Wait]> {
+    loop {
+        status :: __c_handshake(context.raw)
+        if status == 0 -> return Ok(())
+        if status == C_NEW_SESSION_TICKET -> next
+        if status == C_WANT_READ || status == C_WANT_WRITE {
+            _ :: __wait(tcp, __want(status), end_ns, "tls handshake") ?? return Err(err)
+            next
+        }
+        return Err(__net_error("tls handshake", __handshake_message(context.raw, server_name, status)))
+    }
+}
+
+fn __handshake_message(raw: U64, server_name: String, status: Int) -> String Never! {
+    prefix :: if server_name == "" -> "TLS handshake failed" else -> "TLS handshake with `{server_name}` failed"
+    flags :: __c_verify_result(raw)
+    if flags != 0 && flags != 4294967295 -> return "{prefix}: invalid peer certificate: {__verify_reason(flags)}"
+    "{prefix}: {__mbedtls_text(status)}"
+}
+
+// MBEDTLS_X509_BADCERT_* flags in the order a path-building verifier reports
+// them, spelled like rustls' CertificateError.
+fn __verify_reason(flags: Int) -> String Never! {
+    if flags.bit_and(8) != 0 -> return "UnknownIssuer"
+    if flags.bit_and(1) != 0 -> return "Expired"
+    if flags.bit_and(512) != 0 -> return "NotValidYet"
+    if flags.bit_and(2) != 0 -> return "Revoked"
+    if flags.bit_and(4) != 0 -> return "NotValidForName"
+    "Other"
+}
+
+fn __want(status: Int) -> NetReadyInterest Never! {
+    if status == C_WANT_WRITE -> return NetReadyInterest.Write
+    NetReadyInterest.Read
+}
+
+fn __wants_write_only(interest: NetReadyInterest) -> Bool Never! {
+    if interest == {
+        .Write -> true
+        else -> false
+    }
+}
+
+fn __wants_write(interest: NetReadyInterest) -> Bool Never! {
+    if interest == {
+        .Read -> false
+        else -> true
+    }
+}
+
+fn __read(&tls: __TLSState, max_bytes: Int, end_ns: Int) -[Net, Time.Wait]> [U8] IOError! {
+    if tls.closed -> return Err(__io_error(.Read, "TLS stream is closed"))
+    if tls.pending.len() > 0 {
+        count :: if max_bytes < tls.pending.len() -> max_bytes else -> tls.pending.len()
+        head :: __slice(tls.pending, 0, count)
+        tls.pending = __slice(tls.pending, count, tls.pending.len())
+        return Ok(head)
+    }
+    if tls.read_eof -> return Ok([U8]{})
+    loop {
+        status :: __c_read(tls.context.raw, max_bytes)
+        if status > 0 -> return Ok(__c_buffer_bytes(tls.context.raw, status))
+        if status == C_PEER_CLOSE_NOTIFY {
+            tls.read_eof = true
+            return Ok([U8]{})
+        }
+        // mbedtls_ssl_read reports a transport EOF without close_notify as 0.
+        if status == 0 -> return Err(__io_error(.Read, C_TRUNCATION))
+        if status == C_NEW_SESSION_TICKET -> next
+        if status == C_WANT_READ || status == C_WANT_WRITE {
+            _ :: __wait(tls.tcp, __want(status), end_ns, "tls read") ?? return Err(__net_to_io(err))
+            next
+        }
+        return Err(__io_error(.Read, "TLS read failed: {__mbedtls_text(status)}"))
+    }
+}
+
+// Buffers decrypted bytes for `ready`; true once a read would not block.
+fn __fill_pending(&tls: __TLSState, operation: IOOperation) -> Bool IOError! {
+    if tls.pending.len() > 0 || tls.read_eof -> return Ok(true)
+    loop {
+        status :: __c_read(tls.context.raw, C_RECORD_BYTES)
+        if status > 0 {
+            tls.pending = __c_buffer_bytes(tls.context.raw, status)
+            return Ok(true)
+        }
+        if status == C_PEER_CLOSE_NOTIFY {
+            tls.read_eof = true
+            return Ok(true)
+        }
+        if status == 0 -> return Err(__io_error(operation, C_TRUNCATION))
+        if status == C_NEW_SESSION_TICKET -> next
+        if status == C_WANT_READ || status == C_WANT_WRITE -> return Ok(false)
+        return Err(__io_error(operation, "TLS read readiness failed: {__mbedtls_text(status)}"))
+    }
+}
+
+fn __write_all(&tls: __TLSState, bytes: [U8], end_ns: Int) IOError! -[Net, Time.Wait]> {
+    if tls.closed || tls.write_closed -> return Err(__io_error(.Write, "TLS stream is closed"))
+    offset := 0
+    loop offset < bytes.len() {
+        size :: if bytes.len() - offset > C_RECORD_BYTES -> C_RECORD_BYTES else -> bytes.len() - offset
+        chunk :: __slice(bytes, offset, offset + size)
+        address := U64{0}
+        #Unsafe("the packed copy lives until the matching free below; Mbed TLS only reads it during jet_tls_write") {
+            address = tls_mem.__bytes_pack(chunk)
+        }
+        count :: if __write_packed(&tls, address, size, end_ns) == {
+            .Ok(written) -> written
+            .Err(err) -> {
+                #Unsafe("frees the packed chunk exactly once after its last jet_tls_write") {
+                    tls_mem.__bytes_free(address, size)
+                }
+                return Err(err)
+            }
+        }
+        #Unsafe("frees the packed chunk exactly once after its last jet_tls_write") {
+            tls_mem.__bytes_free(address, size)
+        }
+        if count == 0 -> return Err(IOError.Other(__io_context(.Write, "tls write all failed: zero bytes written")))
+        offset += count
+    }
+    Ok(())
+}
+
+// Mbed TLS requires a WANT_* write to be repeated with the same buffer.
+fn __write_packed(&tls: __TLSState, address: U64, length: Int, end_ns: Int) -[Net, Time.Wait]> Int IOError! {
+    loop {
+        status :: __c_write(tls.context.raw, address, length)
+        if status >= 0 -> return Ok(status)
+        if status == C_NEW_SESSION_TICKET -> next
+        if status == C_WANT_READ || status == C_WANT_WRITE {
+            _ :: __wait(tls.tcp, __want(status), end_ns, "tls write") ?? return Err(__net_to_io(err))
+            next
+        }
+        return Err(__io_error(.Write, "TLS write failed: {__mbedtls_text(status)}"))
+    }
+}
+
+fn __close_write(&tls: __TLSState, end_ns: Int, operation: String) IOError! -[Net, Time.Wait]> {
+    if tls.write_closed -> return Ok(())
+    loop {
+        status :: __c_close_notify(tls.context.raw)
+        if status == 0 -> break
+        if status == C_WANT_READ || status == C_WANT_WRITE {
+            _ :: __wait(tls.tcp, __want(status), end_ns, operation) ?? return Err(__net_to_io(err))
+            next
+        }
+        return Err(__io_error(.Close, "TLS close-notify flush failed: {__mbedtls_text(status)}"))
+    }
+    shutdown_failure :: if tls.tcp.shutdown(NetShutdown.Write) == {
+        .Ok(_) -> ""
+        .Err(err) -> if __not_connected(err) -> "" else -> "{err}"
+    }
+    if shutdown_failure != "" -> return Err(__io_error(.Close, "TLS socket write shutdown failed: {shutdown_failure}"))
+    tls.write_closed = true
+    Ok(())
+}
+
+fn __not_connected(err: NetError) -> Bool Never! {
+    if err == {
+        .NotConnected(_) -> true
+        else -> false
+    }
+}
+
+// One socket readiness wait bounded by the operation deadline. Long waits are
+// sliced so the runtime never sees an unbounded duration; a timeout that comes
+// before the slice ends (an ambient deadline) is the caller's error as is.
+fn __wait(tcp: TCPStream, interest: NetReadyInterest, end_ns: Int, operation: String) -[Net, Time.Wait]> NetReady NetError! {
+    started :: core.time.__clock_mono_ns()
+    remaining :: end_ns - started
+    if remaining <= 0 -> return Err(__deadline_error(operation))
+    slice :: if remaining > C_WAIT_SLICE_NS -> C_WAIT_SLICE_NS else -> remaining
+    if tcp.ready(interest, deadline: Duration{ns: slice}) == {
+        .Ok(ready) -> Ok(ready)
+        .Err(err) -> {
+            if __timed_out(err) {
+                now :: core.time.__clock_mono_ns()
+                if now >= end_ns -> return Err(__deadline_error(operation))
+                if slice < remaining && now - started >= slice -> return Ok(NetReady{readable: false, writable: false})
+            }
+            Err(err)
+        }
+    }
+}
+
+fn __timed_out(err: NetError) -> Bool Never! {
+    if err == {
+        .Timeout(_) -> true
+        else -> false
+    }
+}
+
+fn __forever() -> Duration Never! { Duration{ns: C_NO_DEADLINE} }
+
+fn __deadline_end(deadline: Duration, operation: String) -> Int NetError! {
+    if deadline.ns < 0 -> return Err(NetError.InvalidInput(__detail(operation, "network timeout must be non-negative")))
+    now :: core.time.__clock_mono_ns()
+    if deadline.ns > C_NO_DEADLINE - now -> return Ok(C_NO_DEADLINE)
+    Ok(now + deadline.ns)
+}
+
+fn __state(stream: TLSStream) -> Shared<__TLSState>? Never! {
+    if stream.state == .Val(state) -> return Val(state.copy())
+    None
+}
+
+// ---- errors -------------------------------------------------------------------
+
+fn __detail(operation: String, message: String) -> NetErrorDetail Never! {
+    NetErrorDetail{operation: operation, address: None, name: None, message: message, os_code: None}
+}
+
+fn __deadline_error(operation: String) -> NetError Never! {
+    NetError.Timeout(__detail(operation, "deadline exceeded while waiting in {operation}"))
+}
+
+fn __net_error(operation: String, message: String) -> NetError Never! {
+    if message.starts_with("TLS protocol truncation:") -> return NetError.Protocol(__detail(operation, message))
+    if message.contains("closed") -> return NetError.Closed(__detail(operation, message))
+    if message.contains("timed out") || message.contains("deadline") -> return NetError.Timeout(__detail(operation, message))
+    NetError.TLS(__detail(operation, message))
+}
+
+fn __io_context(operation: IOOperation, message: String) -> IOContext Never! {
+    IOContext{operation: operation, resource: Val("TLS stream"), os_code: None, cause: Val(message)}
+}
+
+fn __io_error(operation: IOOperation, message: String) -> IOError Never! {
+    if message.starts_with("TLS protocol truncation:") || message.starts_with("TLS protocol error:") -> return IOError.Protocol(__io_context(operation, message))
+    if message.contains("closed") -> return IOError.Closed(__io_context(operation, message))
+    if message.contains("timed out") || message.contains("deadline") -> return IOError.TimedOut(__io_context(operation, message))
+    if message.contains("cancelled") -> return IOError.Cancelled(__io_context(operation, message))
+    IOError.Other(__io_context(operation, message))
+}
+
+fn __net_io_context(detail: NetErrorDetail) -> IOContext Never! {
+    operation :: if {
+        detail.operation.contains("read") -> IOOperation.Read
+        detail.operation.contains("write") || detail.operation.contains("send") -> IOOperation.Write
+        detail.operation.contains("connect") -> IOOperation.Connect
+        detail.operation.contains("accept") -> IOOperation.Accept
+        detail.operation.contains("close") || detail.operation.contains("shutdown") -> IOOperation.Close
+        detail.operation.contains("resolve") || detail.operation.contains("dns") -> IOOperation.Resolve
+        else -> IOOperation.Codec
+    }
+    resource :: if detail.address == .Val(address) -> Val(address.copy()) else -> detail.name.copy()
+    IOContext{operation: operation, resource: resource, os_code: detail.os_code, cause: Val(detail.message.copy())}
+}
+
+fn __net_to_io(err: NetError) -> IOError Never! {
+    if err == {
+        .InvalidInput(detail) -> IOError.InvalidInput(__net_io_context(detail))
+        .PermissionDenied(detail) -> IOError.PermissionDenied(__net_io_context(detail))
+        .Timeout(detail) -> IOError.TimedOut(__net_io_context(detail))
+        .Cancelled(detail) -> IOError.Cancelled(__net_io_context(detail))
+        .Closed(detail) -> IOError.Closed(__net_io_context(detail))
+        .NotConnected(detail) -> IOError.Closed(__net_io_context(detail))
+        .Protocol(detail) -> IOError.Protocol(__net_io_context(detail))
+        .AddressInUse(detail) -> IOError.Other(__net_io_context(detail))
+        .AddressUnavailable(detail) -> IOError.Other(__net_io_context(detail))
+        .ConnectionRefused(detail) -> IOError.Other(__net_io_context(detail))
+        .ConnectionReset(detail) -> IOError.Other(__net_io_context(detail))
+        .Unsupported(detail) -> IOError.Other(__net_io_context(detail))
+        .TLS(detail) -> IOError.Other(__net_io_context(detail))
+        .Other(detail) -> IOError.Other(__net_io_context(detail))
+        .DNS(_) -> IOError.Other(IOContext{operation: .Resolve, resource: None, os_code: None, cause: Val("{err}")})
+    }
+}
+
+// The high-level part of a composite Mbed TLS status (negative), or 0.
+fn __mbedtls_high(status: Int) -> Int Never! { 0 - (0 - status).bit_and(32640) }
+
+fn __mbedtls_text(status: Int) -> String Never! {
+    positive :: 0 - status
+    high :: positive.bit_and(32640)
+    low :: positive.bit_and(127)
+    text :: __mbedtls_known(if high != 0 -> high else -> low)
+    if text != "" -> return text
+    "Mbed TLS error -0x{__hex(positive, 4)}"
+}
+
+fn __mbedtls_known(code: Int) -> String Never! {
+    if code == {
+        0x7780 -> "received a fatal alert from the peer"
+        0x7A00 -> "the peer certificate could not be processed"
+        0x6E00 -> "the handshake negotiation failed"
+        0x6E80 -> "no TLS version in common with the peer"
+        0x7700 -> "received an unexpected message"
+        0x7300 -> "received a message that could not be decoded"
+        0x7200 -> "received an invalid record"
+        0x7180 -> "a record failed its integrity check"
+        0x7580 -> "no application protocol in common with the peer"
+        0x7800 -> "the peer did not recognize the server name"
+        0x7F00 -> "memory allocation failed"
+        0x6C00 -> "internal error"
+        0x6800 -> "the operation timed out"
+        0x5E80 -> "the TLS configuration is invalid"
+        0x7280 -> "the peer ended the connection during the exchange"
+        0x7100 -> "invalid input"
+        0x2700 -> "the peer certificate could not be verified"
+        0x2180 -> "the certificate format is invalid"
+        0x2900 -> "the certificate file could not be read"
+        0x2800 -> "invalid certificate input"
+        0x3D00 -> "the private key format is invalid"
+        0x3C80 -> "the private key algorithm is not supported"
+        0x3B00 -> "the private key is encrypted"
+        0x3F00 -> "the key types do not match"
+        0x3E80 -> "invalid key input"
+        0x0050 -> "connection reset by peer"
+        0x004C -> "receiving from the socket failed"
+        0x004E -> "sending to the socket failed"
+        else -> ""
+    }
+}
+
+fn __hex(value: Int, width: Int) -> String Never! {
+    digits := [U8]{}
+    rest := value
+    loop rest > 0 || digits.len() < width {
+        digit :: rest %% 16
+        &digits.push(U8{if digit < 10 -> 48 + digit else -> 55 + digit})
+        rest = rest /% 16
+    }
+    out := [U8]{}
+    at := digits.len()
+    loop at > 0 {
+        at -= 1
+        &out.push(digits[at])
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn __hex_lower(value: Int) -> String Never! { "0x{ascii_lower(__hex(value, 1))}" }
+
+// ---- verified peer identity ---------------------------------------------------
+
+fn __empty_certificate() -> TLSCertificate Never! {
+    TLSCertificate{der: [U8]{}, sha256: [U8]{}, spki_sha256: [U8]{}, dns_names: [String]{}, valid_from_unix_ms: 0, valid_until_unix_ms: 0, subject: "", issuer: ""}
+}
+
+fn __empty_identity() -> TLSPeerIdentity Never! {
+    TLSPeerIdentity{verified_server_name: "", leaf: __empty_certificate(), certificate_chain: [TLSCertificate]{}, cipher_suite: "", tls_version: TLSVersion.TLS12}
+}
+
+fn __peer_identity(raw: U64, server_name: String) -> TLSPeerIdentity __TLSFailure! {
+    chain := [TLSCertificate]{}
+    index := 0
+    loop {
+        der :: __c_peer_cert(raw, index)
+        if der.len() == 0 -> break
+        parts :: __certificate_parts(der) ?? return Err(err)
+        &chain.push(TLSCertificate{
+            der: der.copy(),
+            sha256: crypto.sha256(der).bytes,
+            spki_sha256: crypto.sha256(parts.spki).bytes,
+            dns_names: parts.dns_names.copy(),
+            valid_from_unix_ms: parts.valid_from,
+            valid_until_unix_ms: parts.valid_until,
+            subject: parts.subject.copy(),
+            issuer: parts.issuer.copy(),
+        })
+        index += 1
+    }
+    if chain.len() == 0 -> return Err(__fail("TLS verified peer did not provide a certificate chain"))
+    suite :: __c_string_ciphersuite(raw)
+    if suite == "" -> return Err(__fail("TLS verified peer did not expose a negotiated cipher suite"))
+    version :: __c_version(raw)
+    tls_version :: if version == {
+        771 -> TLSVersion.TLS12
+        772 -> TLSVersion.TLS13
+        else -> { return Err(__fail("TLS verified peer negotiated unsupported protocol version: {version}")) }
+    }
+    leaf :: chain[0].copy()
+    Ok(TLSPeerIdentity{verified_server_name: server_name.copy(), leaf: leaf, certificate_chain: chain, cipher_suite: __suite_name(suite), tls_version: tls_version})
+}
+
+// Mbed TLS names suites like "TLS1-3-AES-128-GCM-SHA256"; report the IANA
+// spelling rustls used ("TLS13_AES_128_GCM_SHA256").
+fn __suite_name(name: String) -> String Never! {
+    if name.starts_with("TLS1-3-") -> return "TLS13_{name.slice(7, name.len()).replace("-", "_")}"
+    name.replace("-", "_")
+}
+
+struct __DER {
+    kind: Int
+    start: Int
+    content: Int
+    end: Int
+}
+
+struct __CertParts {
+    spki: [U8]
+    dns_names: [String]
+    valid_from: Int
+    valid_until: Int
+    subject: String
+    issuer: String
+}
+
+fn __der_element(input: [U8], pos: Int) -> __DER __TLSFailure! {
+    if pos >= input.len() -> return Err(__fail("TLS certificate DER is truncated"))
+    kind :: Int.from_u8(input[pos])
+    if pos + 1 >= input.len() -> return Err(__fail("TLS certificate DER length is truncated"))
+    first :: Int.from_u8(input[pos + 1])
+    at := pos + 2
+    length := first
+    if first >= 128 {
+        count := first - 128
+        if count == 0 || count > 8 -> return Err(__fail("TLS certificate DER has an invalid length"))
+        length = 0
+        loop count > 0 {
+            if at >= input.len() || length > 36028797018963967 -> return Err(__fail("TLS certificate DER length overflow"))
+            length = length * 256 + Int.from_u8(input[at])
+            at += 1
+            count -= 1
+        }
+    }
+    if length > input.len() - at -> return Err(__fail("TLS certificate DER value is truncated"))
+    Ok(__DER{kind: kind, start: pos, content: at, end: at + length})
+}
+
+fn __der_expect(input: [U8], pos: Int, expected: Int) -> __DER __TLSFailure! {
+    element :: __der_element(input, pos) ?? return Err(err)
+    if element.kind != expected -> return Err(__fail("TLS certificate DER expected tag {__hex_lower(expected)}, found {__hex_lower(element.kind)}"))
+    Ok(element)
+}
+
+fn __certificate_parts(der: [U8]) -> __CertParts __TLSFailure! {
+    outer :: __der_expect(der, 0, 48) ?? return Err(err)
+    if outer.end != der.len() -> return Err(__fail("TLS certificate DER has trailing data"))
+    tbs :: __der_expect(der, outer.content, 48) ?? return Err(err)
+    p := tbs.content
+    if p < der.len() && Int.from_u8(der[p]) == 160 {
+        version :: __der_element(der, p) ?? return Err(err)
+        p = version.end
+    }
+    serial :: __der_element(der, p) ?? return Err(err)
+    p = serial.end
+    signature :: __der_element(der, p) ?? return Err(err)
+    p = signature.end
+    issuer_name :: __der_expect(der, p, 48) ?? return Err(err)
+    p = issuer_name.end
+    issuer :: __der_name(der, issuer_name.content, issuer_name.end) ?? return Err(err)
+    validity :: __der_expect(der, p, 48) ?? return Err(err)
+    p = validity.end
+    not_before :: __der_element(der, validity.content) ?? return Err(err)
+    not_after :: __der_element(der, not_before.end) ?? return Err(err)
+    if not_after.end != validity.end -> return Err(__fail("TLS certificate validity has extra fields"))
+    valid_from :: __der_time(not_before.kind, __slice(der, not_before.content, not_before.end)) ?? return Err(err)
+    valid_until :: __der_time(not_after.kind, __slice(der, not_after.content, not_after.end)) ?? return Err(err)
+    subject_name :: __der_expect(der, p, 48) ?? return Err(err)
+    p = subject_name.end
+    subject :: __der_name(der, subject_name.content, subject_name.end) ?? return Err(err)
+    spki :: __der_expect(der, p, 48) ?? return Err(err)
+    p = spki.end
+    dns_names := [String]{}
+    loop p < tbs.end {
+        element :: __der_element(der, p) ?? return Err(err)
+        p = element.end
+        if element.kind == 163 {
+            extensions :: __der_expect(der, element.content, 48) ?? return Err(err)
+            ext := extensions.content
+            loop ext < extensions.end {
+                one :: __der_expect(der, ext, 48) ?? return Err(err)
+                ext = one.end
+                oid :: __der_expect(der, one.content, 6) ?? return Err(err)
+                at := oid.end
+                if at < der.len() && Int.from_u8(der[at]) == 1 {
+                    critical :: __der_element(der, at) ?? return Err(err)
+                    at = critical.end
+                }
+                value :: __der_expect(der, at, 4) ?? return Err(err)
+                at = value.end
+                subject_alt_name :: [U8]{85, 29, 17}
+                if __slice(der, oid.content, oid.end) == subject_alt_name {
+                    dns_names = __der_dns_names(__slice(der, value.content, value.end)) ?? return Err(err)
+                }
+                if at != one.end -> return Err(__fail("TLS certificate extension has trailing fields"))
+            }
+            if extensions.end != element.end -> return Err(__fail("TLS certificate extensions have trailing data"))
+        }
+    }
+    Ok(__CertParts{spki: __slice(der, spki.start, spki.end), dns_names: dns_names, valid_from: valid_from, valid_until: valid_until, subject: subject, issuer: issuer})
+}
+
+fn __der_dns_names(value: [U8]) -> [String] __TLSFailure! {
+    names_seq :: __der_expect(value, 0, 48) ?? return Err(err)
+    if names_seq.end != value.len() -> return Err(__fail("TLS subjectAltName has trailing data"))
+    names := [String]{}
+    p := names_seq.content
+    loop p < names_seq.end {
+        item :: __der_element(value, p) ?? return Err(err)
+        p = item.end
+        if item.kind == 130 {
+            name :: String.from_bytes(__slice(value, item.content, item.end)) ?? return Err(__fail("TLS DNS name is not valid ASCII"))
+            &names.push(name)
+        }
+    }
+    Ok(names)
+}
+
+fn __der_name(der: [U8], start: Int, end: Int) -> String __TLSFailure! {
+    parts := [String]{}
+    p := start
+    loop p < end {
+        set :: __der_expect(der, p, 49) ?? return Err(err)
+        p = set.end
+        q := set.content
+        loop q < set.end {
+            attr :: __der_expect(der, q, 48) ?? return Err(err)
+            q = attr.end
+            oid :: __der_expect(der, attr.content, 6) ?? return Err(err)
+            value :: __der_element(der, oid.end) ?? return Err(err)
+            if value.end != attr.end -> return Err(__fail("TLS certificate name has trailing fields"))
+            bytes :: __slice(der, value.content, value.end)
+            // Non-UTF8 DirectoryStrings, including Teletex and BMP/Universal,
+            // stay as escaped source bytes: audit text is lossless and cannot
+            // fail an already-verified handshake.
+            text := __escaped(bytes)
+            if value.kind == 12 -> text = String.from_bytes(bytes) ?? text
+            &parts.push("{__name_label(__slice(der, oid.content, oid.end))}={text}")
+        }
+    }
+    Ok(parts.join(","))
+}
+
+fn __name_label(oid: [U8]) -> String Never! {
+    if oid.len() != 3 || oid[0] != (U8{85}) || oid[1] != (U8{4}) -> return "OID"
+    if Int.from_u8(oid[2]) == {
+        3 -> "CN"
+        6 -> "C"
+        7 -> "L"
+        8 -> "ST"
+        10 -> "O"
+        11 -> "OU"
+        else -> "OID"
+    }
+}
+
+fn __escaped(bytes: [U8]) -> String Never! {
+    out := [U8]{}
+    loop byte in bytes {
+        n :: Int.from_u8(byte)
+        if {
+            n == 92 || n == 44 || n == 61 -> {
+                &out.push(U8{92})
+                &out.push(byte)
+            }
+            n >= 32 && n <= 126 -> {
+                &out.push(byte)
+            }
+            else -> {
+                loop b in "\\x{ascii_lower(__hex(n, 2))}".bytes() -> &out.push(b)
+            }
+        }
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn __digits(bytes: [U8], start: Int, count: Int) -> Int? Never! {
+    value := 0
+    loop at in start..<(start + count) {
+        n :: Int.from_u8(bytes[at])
+        if n < 48 || n > 57 -> return None
+        value = value * 10 + n - 48
+    }
+    Val(value)
+}
+
+// UTCTime / GeneralizedTime "...Z" to Unix milliseconds (days_from_civil).
+fn __der_time(kind: Int, bytes: [U8]) -> Int __TLSFailure! {
+    _ :: String.from_bytes(bytes) ?? return Err(__fail("TLS certificate time is not ASCII"))
+    year := 0
+    rest := 0
+    zulu :: bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{90})
+    if {
+        kind == 23 && bytes.len() == 13 && zulu -> {
+            yy :: __digits(bytes, 0, 2) ?? return Err(__fail("TLS certificate UTC time is invalid"))
+            year = if yy >= 50 -> 1900 + yy else -> 2000 + yy
+            rest = 2
+        }
+        kind == 24 && bytes.len() == 15 && zulu -> {
+            year = __digits(bytes, 0, 4) ?? return Err(__fail("TLS certificate generalized time is invalid"))
+            rest = 4
+        }
+        else -> {
+            return Err(__fail("TLS certificate time uses an unsupported encoding"))
+        }
+    }
+    month :: __digits(bytes, rest, 2) ?? return Err(__fail("TLS certificate time contains invalid digits"))
+    day :: __digits(bytes, rest + 2, 2) ?? return Err(__fail("TLS certificate time contains invalid digits"))
+    hour :: __digits(bytes, rest + 4, 2) ?? return Err(__fail("TLS certificate time contains invalid digits"))
+    minute :: __digits(bytes, rest + 6, 2) ?? return Err(__fail("TLS certificate time contains invalid digits"))
+    second :: __digits(bytes, rest + 8, 2) ?? return Err(__fail("TLS certificate time contains invalid digits"))
+    if month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 60 {
+        return Err(__fail("TLS certificate time is out of range"))
+    }
+    y :: if month <= 2 -> year - 1 else -> year
+    era :: y /% 400
+    yoe :: y - era * 400
+    mp :: if month > 2 -> month - 3 else -> month + 9
+    doy :: (153 * mp + 2) /% 5 + day - 1
+    doe :: yoe * 365 + yoe /% 4 - yoe /% 100 + doy
+    days :: era * 146097 + doe - 719468
+    Ok((days * 86400 + hour * 3600 + minute * 60 + second) * 1000)
+}
+
+// ---- Mbed TLS calls -------------------------------------------------------------
+
+// Actual jet_tls.c / libc signatures. Every U64 handle is a live context owned
+// by a __TLSContext; strings are borrowed for the one call.
+#Import module c.mbedtls {
+    fn new(out: &U64, endpoint: I32) -> I32 = "jet_tls_new"
+    fn free(handle: U64) = "jet_tls_free"
+    fn authmode(handle: U64, mode: I32) -> I32 = "jet_tls_authmode"
+    fn versions(handle: U64, min: I32, max: I32) -> I32 = "jet_tls_versions"
+    fn ca_pem(handle: U64, pem: String) -> I32 = "jet_tls_ca_pem"
+    fn ca_file(handle: U64, path: String) -> I32 = "jet_tls_ca_file"
+    fn ca_dir(handle: U64, path: String) -> I32 = "jet_tls_ca_dir"
+    fn ca_count(handle: U64) -> I64 = "jet_tls_ca_count"
+    fn own_pem(handle: U64, cert: String, key: String) -> I32 = "jet_tls_own_pem"
+    fn alpn_add(handle: U64, protocol: String) -> I32 = "jet_tls_alpn_add"
+    fn setup(handle: U64, fd: I64, hostname: String) -> I32 = "jet_tls_setup"
+    fn handshake(handle: U64) -> I32 = "jet_tls_handshake"
+    fn read(handle: U64, limit: I64) -> I32 = "jet_tls_read"
+    fn buffer(handle: U64) -> U64 = "jet_tls_buffer"
+    fn write(handle: U64, data: U64, length: I64) -> I32 = "jet_tls_write"
+    fn close_notify(handle: U64) -> I32 = "jet_tls_close_notify"
+    fn verify_result(handle: U64) -> I64 = "jet_tls_verify_result"
+    fn version(handle: U64) -> I32 = "jet_tls_version"
+    fn ciphersuite(handle: U64) -> U64 = "jet_tls_ciphersuite"
+    fn peer_cert(handle: U64, index: I64, data: &U64, length: &U64) -> I32 = "jet_tls_peer_cert"
+    fn getenv(name: String) -> U64 = "getenv"
+    fn cstr_len(text: U64) -> U64 = "jet_tls_cstr_len"
+}
+
+fn __c_authmode(raw: U64, mode: Int) {
+    #Unsafe("configures the live context before setup") { _ :: mbedtls.authmode(raw, I32{mode}) }
+}
+
+fn __c_versions(raw: U64, min: Int, max: Int) {
+    #Unsafe("configures the live context before setup") { _ :: mbedtls.versions(raw, I32{min}, I32{max}) }
+}
+
+fn __c_ca_pem(raw: U64, pem: String) -> Int Never! {
+    status := I32{0}
+    #Unsafe("NUL-free PEM text is borrowed for this parse; Mbed TLS copies the certificates") { status = mbedtls.ca_pem(raw, pem) }
+    Int.from_i32(status)
+}
+
+fn __c_ca_file(raw: U64, path: String) -> Int Never! {
+    status := I32{0}
+    #Unsafe("the NUL-free path is borrowed for this parse; Mbed TLS copies the certificates") { status = mbedtls.ca_file(raw, path) }
+    Int.from_i32(status)
+}
+
+fn __c_ca_dir(raw: U64, path: String) -> Int Never! {
+    status := I32{0}
+    #Unsafe("the NUL-free path is borrowed for this parse; Mbed TLS copies the certificates") { status = mbedtls.ca_dir(raw, path) }
+    Int.from_i32(status)
+}
+
+fn __c_ca_count(raw: U64) -> Int Never! {
+    count := I64{0}
+    #Unsafe("reads the live context's root list") { count = mbedtls.ca_count(raw) }
+    Int.from_i64(count)
+}
+
+fn __c_own_pem(raw: U64, cert: String, key: String) -> Int Never! {
+    status := I32{0}
+    #Unsafe("NUL-free PEM texts are borrowed for this parse; Mbed TLS copies the chain and the key") { status = mbedtls.own_pem(raw, cert, key) }
+    Int.from_i32(status)
+}
+
+fn __c_alpn_add(raw: U64, protocol: String) -> Int Never! {
+    status := I32{0}
+    #Unsafe("the NUL-free protocol is copied by jet_tls_alpn_add") { status = mbedtls.alpn_add(raw, protocol) }
+    Int.from_i32(status)
+}
+
+fn __c_setup(raw: U64, fd: Int, hostname: String) -> Int Never! {
+    status := I32{0}
+    #Unsafe("binds the live context to the TCPStream's descriptor, which the stream state keeps open for the context's lifetime") { status = mbedtls.setup(raw, I64{fd}, hostname) }
+    Int.from_i32(status)
+}
+
+fn __c_handshake(raw: U64) -> Int Never! {
+    status := I32{0}
+    #Unsafe("one nonblocking handshake step on the live context") { status = mbedtls.handshake(raw) }
+    Int.from_i32(status)
+}
+
+fn __c_read(raw: U64, limit: Int) -> Int Never! {
+    status := I32{0}
+    #Unsafe("one nonblocking read into the live context's own buffer") { status = mbedtls.read(raw, I64{limit}) }
+    Int.from_i32(status)
+}
+
+fn __c_buffer_bytes(raw: U64, length: Int) -> [U8] Never! {
+    bytes := [U8]{}
+    #Unsafe("jet_tls_read just filled `length` bytes of the context's buffer; they are copied before the next engine call") {
+        bytes = tls_mem.__bytes_unpack(mbedtls.buffer(raw), length)
+    }
+    bytes
+}
+
+fn __c_write(raw: U64, address: U64, length: Int) -> Int Never! {
+    status := I32{0}
+    #Unsafe("the caller's packed chunk holds `length` readable bytes for this call") { status = mbedtls.write(raw, address, I64{length}) }
+    Int.from_i32(status)
+}
+
+fn __c_close_notify(raw: U64) -> Int Never! {
+    status := I32{0}
+    #Unsafe("one nonblocking close_notify step on the live context") { status = mbedtls.close_notify(raw) }
+    Int.from_i32(status)
+}
+
+fn __c_verify_result(raw: U64) -> Int Never! {
+    flags := I64{0}
+    #Unsafe("reads the live context's verification flags") { flags = mbedtls.verify_result(raw) }
+    Int.from_i64(flags)
+}
+
+fn __c_version(raw: U64) -> Int Never! {
+    version := I32{0}
+    #Unsafe("reads the live context's negotiated version") { version = mbedtls.version(raw) }
+    Int.from_i32(version)
+}
+
+fn __c_string_ciphersuite(raw: U64) -> String Never! {
+    text := ""
+    #Unsafe("the suite name is a static NUL-terminated string; its length and unpack finish before the next engine call") {
+        text = __c_text(mbedtls.ciphersuite(raw))
+    }
+    text
+}
+
+// The DER of peer certificate `index`, or no bytes past the chain's end.
+fn __c_peer_cert(raw: U64, index: Int) -> [U8] Never! {
+    data := U64{0}
+    length := U64{0}
+    bytes := [U8]{}
+    #Unsafe("the live context keeps its verified peer chain while the DER is copied out; the output slots belong to this frame") {
+        if mbedtls.peer_cert(raw, I64{index}, &data, &length) == (I32{0}) && length != (U64{0}) {
+            bytes = tls_mem.__bytes_unpack(data, Int.from_u64(length))
+        }
+    }
+    bytes
+}
+
+fn __getenv(name: String) -> String Never! {
+    text := ""
+    #Unsafe("getenv returns a NUL-terminated string or NULL; it is copied before any environment change") {
+        address :: mbedtls.getenv(name)
+        if address != (U64{0}) -> text = __c_text(address)
+    }
+    text
+}
+
+#Unsafe("the caller guarantees a live NUL-terminated string at `address`")
+fn __c_text(address: U64) -> String Never! {
+    length :: Int.from_u64(mbedtls.cstr_len(address))
+    if length == 0 -> return ""
+    String.from_bytes(tls_mem.__bytes_unpack(address, length)) ?? ""
+}

@@ -1,4 +1,8 @@
-// @dev_interpreter
+// @run_cli
+package {
+    name: "env_config_decode_error"
+    authority: { allow: [Env] }
+}
 use core.sys as env
 
 #Decode
@@ -8,10 +12,6 @@ struct Settings {
 
 fn run() {
     env.set("APP_PORT", "not-an-int")
-    failed :: env.decode<Settings>(prefix: "APP_", file: "", allow: ["APP_PORT"])
-    if failed == {
-        .Ok(_) -> { panic("invalid config unexpectedly accepted") }
-        .Err(errors) -> { panic("config: {errors}") }
-    }
-    (env.unset("APP_PORT") ?? false).drop("cleanup only")
+    settings :: env.decode<Settings>(prefix: "APP_", file: "", allow: ["APP_PORT"]) ?? panic("config: {err}")
+    panic("invalid config unexpectedly accepted: {settings.port}")
 }

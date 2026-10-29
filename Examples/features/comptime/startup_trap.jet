@@ -1,0 +1,18 @@
+// A constant whose build-time try stops (here a `panic`) is not a build
+// error: the program computes it at startup instead, and the same stop then
+// ends the program before `fn run`, with the normal report, on every tier.
+fn port_of(scheme: String) -> Int {
+    if scheme == "http" -> return 80
+    if scheme == "https" -> return 443
+    panic("unknown scheme `{scheme}`")
+}
+
+// Folds at build time.
+HTTP :: port_of("http")
+// Stops at build time, so it is computed at startup, where it stops again.
+GOPHER :: port_of("gopher")
+
+fn run() {
+    print(HTTP)
+    print(GOPHER)
+}

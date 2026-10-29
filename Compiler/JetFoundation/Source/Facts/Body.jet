@@ -1,0 +1,1763 @@
+// Maintained by hand. The first version was generated from the JetSema checker
+// tree (Sema/Tree.jet), so every variant mirrors a checker tree variant.
+//
+// The flat checked body sema publishes per function (Cutover B). A function's
+// expressions are rows of its BodyTree, keyed by node id: an expression's AST
+// NodeId (>= 0), or a function-local id (<= TEXPR_FIRST_LOCAL_ID) for a node
+// no source expression produced. Expression fields are node ids into the same
+// tree; statement fields are indices into BodyTree.stmts. Every variant keeps
+// its TExprKind name and payload order.
+
+// One function's (or one standalone expression's) flat rows: nodes and the
+// expression-type column sorted by id, statements in post order. The
+// expression-type rows name their types by index into `types`, which holds
+// each distinct type once (type_table_intern).
+struct BodyTree {
+    nodes: [BodyNode]
+    stmts: [StmtKind]
+    expr_types: [TExprType]
+    types: TypeTable{TypeTable{}}
+    // A nested check's arena continues its enclosing check's rows: its first
+    // node row is index `node_base` and its first statement row `stmt_base`,
+    // and every row index into it subtracts them. Every other tree starts at 0.
+    node_base: Int{0}
+    stmt_base: Int{0}
+}
+
+// One expression: its node id, its checked form and its source span. Its type
+// is the tree's expression-type row (body_type).
+struct BodyNode {
+    id: Int
+    kind: NodeKind
+    span: Span
+}
+
+// A standalone checked expression (a comptime request) and its tree.
+struct BodyExpr {
+    root: Int
+    tree: BodyTree
+}
+
+fn body_tree_new() -> BodyTree Never! {
+    BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}
+}
+
+// The row of node `id`.
+fn body_node(tree: BodyTree, id: Int) -> BodyNode Never! {
+    low := 0
+    high := tree.nodes.len()
+    loop low < high {
+        middle :: (low + high) /% 2
+        if tree.nodes[middle].id < id -> low = middle + 1 else -> high = middle
+    }
+    if low < tree.nodes.len() && tree.nodes[low].id == id -> return tree.nodes[low]
+    panic("body tree has no node {id}")
+}
+
+// The checked type of node `id`.
+fn body_type(tree: BodyTree, id: Int) -> Type Never! {
+    tree.types.types[body_type_id(tree, id)]
+}
+
+// The index in `tree.types` of node `id`'s checked type.
+fn body_type_id(tree: BodyTree, id: Int) -> Int Never! {
+    checked_expr_type_id(tree.expr_types, id) ?? panic("body tree has no expression-type row for node {id}")
+}
+
+// Statement `index`.
+fn body_stmt(tree: BodyTree, index: Int) -> StmtKind Never! {
+    tree.stmts[index - tree.stmt_base]
+}
+
+enum BodyStrPart {
+    Literal(text: String)
+    Interpolation(value: Int, format: TStrFormat)
+}
+
+// A unit conversion's rounding: its mode and the digits expression's node.
+struct BodyUnitRounding {
+    mode: TUnitRoundingMode
+    digits: Int
+}
+
+struct BodyCallArg {
+    value: Int
+    template_items: [SymbolID]
+    borrow: Bool
+    mut_borrow: Bool
+    fn_coerce: TFnCoerce?
+    widen_to_vec: Bool
+    widen_to_union: Type?
+    box_as_trait: Type?
+    label: String?
+    spread: Bool
+}
+
+struct BodyEnumArg {
+    value: Int
+}
+
+enum BodyEnumPayload {
+    Unit
+    Positional(args: [BodyEnumArg])
+    Named(fields: [BodyNamedEnumArg])
+}
+
+struct BodyNamedEnumArg {
+    name: String
+    value: BodyEnumArg
+}
+
+enum BodyPatternShape {
+    Variant(variant: String, bindings: [BodyPatternBinding], leading_dot: Bool, span: Span)
+    // S31: `inner` is a nested payload pattern (`.Val(.Rect(w, h))`).
+    Present(binding: String, binding_span: Span, inner: BodyNestedPattern?, span: Span)
+    Absent(span: Span)
+    Ok(binding: String, binding_span: Span, inner: BodyNestedPattern?, span: Span)
+    Err(binding: String, binding_span: Span, inner: BodyNestedPattern?, span: Span)
+    Range(lo: Int, hi: Int, span: Span)
+    Or(alternatives: [BodyPatternShape], span: Span)
+    Struct(fields: [BodyPatternField], span: Span)
+    List(items: [BodyPatternBinding], rest: TListPatternRest?, span: Span)
+    Map(entries: [BodyMapPatternEntry], rest: Bool, span: Span)
+    Text(parts: [TTextPatternPart], span: Span)
+    Binary(parts: [TBinaryPatternPart], span: Span)
+}
+
+// S31: a checked nested payload pattern with the payload type's owner.
+struct BodyNestedPattern {
+    shape: BodyPatternShape
+    enum_type: SymbolID?
+}
+
+struct BodyPattern {
+    shape: BodyPatternShape
+    bindings: [TPatternBindingFact]
+    enum_type: SymbolID?
+    position: TPatternPosition
+    mutable: Bool
+    boxed: Bool
+}
+
+enum BodyPatternBinding {
+    Wildcard
+    Bind(name: String, span: Span)
+    Range(lo: Int, hi: Int)
+    Nested(pattern: BodyNestedPattern)
+    Value(value: Int)
+}
+
+enum BodyPatternField {
+    Bind(field: String, local: String, span: Span)
+    Value(field: String, value: Int, span: Span)
+    Nested(field: String, pattern: BodyNestedPattern, span: Span)
+}
+
+struct BodyMapPatternEntry {
+    key: Int
+    optional: Bool
+    slot: BodyPatternBinding
+    span: Span
+}
+
+struct BodyMatchArm {
+    pattern: BodyPattern
+    body: [Int]
+}
+
+enum BodyIfCond {
+    Plain(value: Int)
+    And(left: BodyIfCond, right: BodyIfCond)
+    IfLet(pattern: BodyPattern, subj: Int)
+}
+
+struct BodyContract {
+    kind: TContractKind
+    condition: Int
+    message: Int
+    file: String
+    line: Int
+    span: Span
+    disposition: TContractDisposition
+}
+
+enum StmtKind {
+    Contract(contract: BodyContract)
+    ContractScope(pre: [BodyContract], body: [Int], post: [BodyContract], result: TContractResult, span: Span)
+    Let(local: TLocal, let_ty: TLetTy, init: Int, gc_promotion: TGCPromotion?, gc_transferred: Bool, span: Span)
+    RefutableBind(pattern: BodyPattern, init: Int, fallback: [Int], span: Span)
+    TupleDestructure(temp: TLocal, init: Int, move_fields: Bool, binds: [TDestructureBinding], span: Span)
+    StructDestructure(temp: TLocal, init: Int, move_fields: Bool, binds: [TDestructureBinding], span: Span)
+    ListDestructure(temp: TLocal, init: Int, count: Int, line: Int, elements: [TLocal], span: Span)
+    Assign(place: BodyPlace, op: TBinaryOp?, value: Int, line: Int, span: Span)
+    CountedLoop(label: String?, init: Int, condition: Int, step: Int?, vectorization: AutoVectorizationFacts?, body: [Int], span: Span)
+    ForRange(label: String?, local: TLocal, start: Int, end: Int, step: Int?, exclusive: Bool, body: [Int], vectorization: AutoVectorizationFacts?, span: Span)
+    Range(label: String?, variable: TLocal, source: Int?, start: Int, end: Int, step: Int?, exclusive: Bool, vectorization: AutoVectorizationFacts?, body: [Int], span: Span)
+    ExprStmt(value: Int, span: Span)
+    Return(value: Int?, span: Span)
+    TaskGroup(group: TLocal, limit: Int?, body: [Int], span: Span)
+    DeferClose(close: Int, resource: SymbolID, span: Span)
+    If(condition: BodyIfCond, then_body: [Int], else_body: [Int]?, else_is_elseif: Bool, span: Span)
+    Loop(label: String?, body: [Int], span: Span)
+    While(label: String?, condition: Int, body: [Int], span: Span)
+    Break(label: String?, span: Span)
+    BreakValue(label: String?, value: Int, span: Span)
+    Continue(label: String?, span: Span)
+    Match(subject: Int, arms: [BodyMatchArm], exhaustive: Bool, span: Span)
+    EnumMatch(scrutinee: Int, arms: [BodyMatchArm], else_body: [Int]?, fallthrough: Bool, span: Span)
+    RangeSwitch(subject: Int, arms: [BodyRangeArm], else_body: [Int], span: Span)
+    ForIn(label: String?, variable: TLocal, variable_two: TLocal?, source: Int, collection: Int, step: Int?, method_kind: TForInMethod?, columnar: Bool, by_value: Bool, source_stable: Bool, body: [Int], span: Span)
+    Inline(body: [Int], span: Span)
+    DebugOnly(body: [Int], span: Span)
+    MixedSwitch(subject: Int, class: TBranchClass, arms: [BodyMixedArm], else_body: [Int]?, span: Span)
+    Unsafe(gate: TUnsafeGate, body: [Int])
+    UnsafeBlock(gate: TUnsafeGate, body: [Int], span: Span)
+    SentryPolicy(enabled: Bool, body: [Int], span: Span)
+    Impure(body: [Int], span: Span)
+    Reactive(executable: BodyLambda, span: Span)
+    Region(body: [Int], span: Span)
+    Layout(handle: TLocal, label: String, body: [Int], span: Span)
+    ContextBlock(guards: [BodyContextGuard], body: [Int], span: Span)
+    Live(body: [Int], span: Span)
+    Shield(body: [Int], span: Span)
+    ScopeMember(kind: BodyScopeMemberKind, body: [Int], span: Span)
+    Transact(handle: TLocal?, snapshots: [TTransactionSnapshot], stm: TLocal?, body: [Int], span: Span)
+    GCEdit(root: String, slot: String, edges: [String], replace_all: Bool, index_temp: Int?, statement: Int, span: Span)
+}
+
+struct BodyRangeArm {
+    lo: Int
+    hi: Int
+    body: [Int]
+}
+
+struct BodyMixedArm {
+    condition: Int
+    body: [Int]
+}
+
+struct BodyContextGuard {
+    field: String
+    value: Int
+}
+
+enum NodeKind {
+    IntLit(value: Int, width: TIntegerWidth?)
+    FloatLit(value: Float)
+    BoolLit(value: Bool)
+    CharLit(value: Int)
+    StrLit(parts: [BodyStrPart])
+    Local(local: TLocal)
+    Unit
+    InlineBlock(body: [Int])
+    Uninit
+    CtLit(value: TComptimeValue)
+    ConstRef(symbol: SymbolID)
+    GlobalShared(initializer: DeclID, lifetime: SharedLifetime)
+    Call(callee: DeclID, type_args: [Type], args: [BodyCallArg])
+    IndirectCall(callee: Int, type_args: [Type], args: [BodyCallArg], signature: Type)
+    MethodCall(receiver: Int, method: TMethodRef, type_args: [Type], args: [BodyCallArg])
+    DistinctCtor(argument: Int)
+    DistinctConvert(owner: SymbolID, argument: Int, operation: TNumericOp, range: TIntegerBounds?, fallible: Bool)
+    TraitBox(value: Int, target: Type)
+    UnitConvert(argument: Int, scale: String, offset: String, rounding: BodyUnitRounding?, fallible: Bool, relative_uncertainty: Float?, file: String, line: Int)
+    MathBuiltin(type_name: String, function: String, args: [Int])
+    PreciseBuiltin(type_name: String, function: String, args: [Int])
+    Print(value: Int)
+    Drop(value: Int)
+    Close(value: Int)
+    Move(value: Int)
+    AmbientInput(prompt: Int?)
+    RequireStop(kind: BodyRequireKind, location: TPanicLoc, always_stops: Bool)
+    Binary(op: TBinaryOp, overflow: Bool, line: Int, lhs: Int, rhs: Int)
+    CompareChain(operands: [Int], operators: [TBinaryOp], hooks: [Bool])
+    Unary(op: TUnaryOp, operand: Int)
+    StructLit(fields: [BodyStructFieldValue])
+    Field(receiver: Int, field: TFieldRef)
+    Index(base: Int, index: Int, kind: TIndexKind, access: AccessConvention, checked_call: SymbolID?, location: TPanicLoc)
+    Slice(base: Int, start: Int, end: Int, range: Int?, location: TPanicLoc)
+    Range(start: Int, end: Int, exclusive: Bool)
+    Tuple(values: [Int])
+    List(values: [Int], trait_coercion: Type?)
+    Map(entries: [BodyMapEntry])
+    EnumCtor(owner: SymbolID, variant: SymbolID, payload: BodyEnumPayload)
+    Try(value: Int, conversion: TTryConvert, failure: TFailureCarrier)
+    TryWithContext(inner: Int, note: Int?, convert: TTryConvert, file: String, line: Int, function: String)
+    Lambda(value: BodyLambda)
+    Borrow(place: Int, access: AccessConvention)
+    RawAddressOf(place: BodyPlace)
+    Deref(value: Int)
+    PtrFromAddr(address: Int, element: Type)
+    LayoutLiteral(value: Int)
+    LayoutCompare(op: TBinaryOp, lhs: Int, rhs: Int)
+    SharedGuardValue(guard: Int)
+    SharedGuardMap(guard: Int, path: [TFieldRef], editable: Bool)
+    SharedGuardSplit(guard: Int, first: [TFieldRef], second: [TFieldRef], editable: Bool)
+    SharedGuardWait(guard: Int, condition: Int, predicate: BodyLambda)
+    ConditionNotify(condition: Int, all: Bool)
+    CoreCall(record: CoreCallRecord, args: [Int], source_span: Span, type_args: [Type], widen_to_vec: [Bool], fallibility: TFailureCarrier)
+    HostCall(call: BodyHostCall)
+    AllocNew(ctor: TAllocCtor, args: [BodyCallArg])
+    EnumLit(enum_type: String, variant: String, payload: BodyEnumPayload)
+    JSONLit(variant: String, arg: Int?, clone_arg: Bool)
+    ListLit(values: [Int])
+    ListSpread(parts: [BodyListSpreadPart])
+    MapLit(entries: [BodyMapEntry])
+    PoolSlot(pool: Int, id: Int, mutable: Bool, field: String?, line: Int, source_line: String)
+    MathLaneIndex(lane_type: String, base: Int, index: Int, line: Int)
+    MathSwizzleRead(type_name: String, receiver: Int, lanes: [Int])
+    // #4318: `fact` is the sema decision behind the copy.
+    Clone(value: Int, fact: CopyFact)
+    ExplicitCopy(value: Int)
+    MaterializeView(value: Int)
+    StaticCall(owner: TStaticOwner, owner_type: Type?, method: TMethodRef, type_args: [Type], args: [BodyCallArg])
+    DecodeUnder(segment: Int, inner: Int)
+    BuiltinMethod(receiver: Int, operation: TBuiltinOp, args: [Int])
+    IfExpr(cond: BodyIfCond, then_body: [Int], then_value: Int, else_body: [Int], else_value: Int)
+    ResultHandler(subject: Int, ok_pattern: BodyPattern, ok_body: [Int], ok_value: Int, err_pattern: BodyPattern, err_body: [Int], err_value: Int, terminal: Int)
+    RawOf(value: Int)
+    InvariantViolation(construct: String, span: Span)
+    DistinctRaw(value: Int)
+    Present(value: Int)
+    Absent
+    Ok(value: Int)
+    Err(value: Int)
+    OrFallback(value: Int, fallback: BodyOrFallback, ambient_err: TLocal?)
+    OptField(base: Int, member: String, flatten: Bool)
+    OptMethodCall(base: Int, binding: TLocal, call: Int, flatten: Bool)
+    PatternMatches(subject: Int, pattern: BodyPattern)
+    OptionLift2(function: Int, left: Int, right: Int)
+    ClosureMethod(receiver: Int, operation: TClosureOp, args: [Int])
+    HostBorrowCallback(callable: Int, params: [Type])
+    NumericMethod(receiver: Int, operation: TNumericOp)
+    NumericBinaryMethod(receiver: Int, operation: TNumericOp, argument: Int)
+    OverflowOpt(prefix: String, operation: String, line: Int, lhs: Int, rhs: Int)
+    HandleMethod(receiver: Int, operation: BodyHandleOp, args: [Int])
+    CoreClosureCall(kind: BodyCoreClosureKind)
+    TaskGroupAll(tasks: Int)
+    TaskGroupRace(tasks: Int)
+    TaskGroupAny(tasks: Int)
+    SelectStart
+    SelectRecv(builder: Int, channel: Int)
+    SelectAfter(builder: Int, duration: Int, value: Int?)
+    SelectWait(builder: Int, nonblocking: Bool)
+    FnValue(kind: BodyFnValueKind)
+    Never(reason: String)
+}
+
+struct BodyStructFieldValue {
+    field: TFieldRef
+    value: Int
+    boxed: Bool
+}
+
+struct BodyMapEntry {
+    key: Int
+    value: Int
+}
+
+enum BodyListSpreadPart {
+    Element(value: Int)
+    Spread(value: Int)
+}
+
+enum BodyScopeMemberKind {
+    Setup
+    ExpectFail(code: String?, message: String?)
+    Timeout(duration: Int)
+    Measure
+    Skip
+}
+
+enum BodyOrFallback {
+    Value(value: Int)
+    Return(value: Int?)
+    Panic(message: Int, location: TPanicLoc)
+    Break
+    Continue
+    BreakLabel(label: String)
+    ContinueLabel(label: String)
+}
+
+enum BodyHostCall {
+    Method(receiver: Int, method: String, args: [Int])
+    CellGuardProject(receiver: Int, paths: [[String]], result_type: Type, editable: Bool, edit_paths_disjoint: Bool)
+    OptionProbe(inner: Int, kind: TOptionProbe)
+    TupleIndex(base: Int, index: Int)
+    SwitchSubjectValue
+    YieldSend(value: Int)
+    NumericBounds(ty: Type, member: String)
+    // A Tier-1 comptime input (`embed_file`, `embed_bytes`, `find`): the
+    // checked literal path or glob, relative to the source file being
+    // compiled. The compiler reads and records it; it never runs at runtime.
+    ComptimeInput(builtin: String, path: String)
+}
+
+enum BodyCoreClosureKind {
+    Spawn(group: Int?, site: Int, label: String?, executable: BodyLambda)
+    Realtime(rate: Int, frames: Int, executable: BodyLambda)
+    Guard(executable: BodyLambda)
+    OnCommit(handle_name: String, executable: BodyLambda)
+    OnRollback(handle_name: String, executable: BodyLambda)
+    UIButtonOnClick(label: Int, shortcut: Int, accessible_label: Int, executable: BodyLambda)
+    UITextInputOnDrop(state: Int, ime: Int, executable: BodyLambda)
+    ReactiveDerived(executable: BodyLambda)
+    ReactiveEffect(executable: BodyLambda)
+    UIReactiveRender(executable: BodyLambda)
+}
+
+enum BodyFnValueKind {
+    NamedFn(function: DeclID?, lambda: BodyLambda?)
+    Policy(fn_type: Type, policy_args: [BodyCallArg], policy_conventions: [AccessConvention], wrapper: DeclID?, captures: [TCapture], callee: Int)
+    Call(callee: Int, args: [BodyCallArg])
+    Send(value: Int)
+}
+
+enum BodyHandleOp {
+    Hardware(operation: THardwareCall)
+    DurationNew(unit: String, float: Bool)
+    FileReaderReadLine
+    FileReaderRead
+    FileReaderSeek
+    FileReaderPath
+    MappedFileWindow
+    MappedFileWindowLen
+    MappedFileLines
+    MappedFileLen
+    MappedFileIsEmpty
+    FileWriterWriteLine
+    FileWriterFlush
+    FileWriterWriteAll
+    FileWriterFsync
+    FileWriterPath
+    JSONReaderNext
+    JSONWriterWrite
+    JSONWriterFlush
+    JSONWriterFinish
+    JSONLReaderNext
+    JSONLWriterWrite
+    JSONLWriterFlush
+    JSONLWriterFinish
+    DataStreamNext
+    XMLReaderNext
+    XMLWriterWrite
+    XMLWriterFlush
+    XMLWriterFinish
+    CBORReaderNext
+    CBORWriterWrite
+    CBORWriterFlush
+    CBORWriterFinish
+    StdinReadLine
+    StdoutWrite
+    StdoutWriteLine
+    StdoutWriteBytes
+    StdoutFlush
+    StdoutIsTTY
+    StderrWrite
+    StderrWriteLine
+    StderrWriteBytes
+    StderrFlush
+    StderrIsTTY
+    WorldNow
+    WorldAdvance
+    WorldWaitIdle
+    WorldHistory
+    RealtimeNextDeadline
+    RealtimeReceipt
+    RealtimeCancel
+    RealtimeIsCancelled
+    HistoryRNGNextU64
+    HistoryRNGBelow
+    GameSceneNew
+    GameReplayRecord
+    GameBackendHeadless
+    GameBackendShouldContinue
+    GameBackendPresent
+    GameSceneOnFrame(schedule: FrameSchedule?, derivation: DerivationRef?)
+    GameSceneComponent
+    GameSceneQuery
+    GameAssetsImage
+    GameAssetsSound
+    GameInputBind
+    GameInputPressed
+    RNGInt
+    RNGFloat
+    RNGFloatRange
+    RNGBool
+    RNGBoolP
+    RNGNormal
+    RNGExponential
+    RNGBytes
+    RNGSplit
+    RNGPick
+    RNGWeightedPick
+    RNGSample
+    RNGShuffle
+    DurationIn
+    DurationIsZero
+    DurationTotalSeconds
+    DurationDifference
+    TestSuiteRun
+    DurationAbs
+    DurationNegated
+    DurationSign
+    DurationTotalIn
+    DurationRound
+    DurationNsValue
+    DurationScale
+    DurationDivide
+    AllocAlloc
+    AllocTryAlloc
+    AllocReset
+    PreciseMethod(type_name: String, method: String)
+    TCPListenerAccept
+    TCPListenerAcceptDeadline
+    TCPListenerLocalAddr
+    TCPStreamRead
+    TCPStreamPeerAddr
+    TCPStreamLocalAddr
+    TCPStreamClose
+    TCPStreamReadBytes
+    TCPStreamReadBytesDeadline
+    TCPStreamReadText
+    TCPStreamReadTextDeadline
+    TCPStreamWriteBytes
+    TCPStreamWriteBytesDeadline
+    TCPStreamWriteAllBytes
+    TCPStreamWriteAllBytesDeadline
+    TCPStreamWriteText
+    TCPStreamWriteTextDeadline
+    TCPStreamShutdown
+    TCPStreamReady
+    UDPSocketReady
+    UDPSocketClose
+    UDPSocketReceiveDeadline
+    UDPSocketSendToDeadline
+    UnixListenerAcceptDeadline
+    UnixStreamReadDeadline
+    UnixStreamWriteAllDeadline
+    UnixStreamReady
+    UnixStreamClose
+    UnixStreamSetTimeout
+    HTTPClientNew
+    ArgsSpecFlag
+    ArgsSpecFlagShort
+    ArgsSpecOption
+    ArgsSpecOptionShort
+    ArgsSpecOptionDefault
+    ArgsSpecOptionEnv
+    ArgsSpecOptionInt
+    ArgsSpecOptionFloat
+    ArgsSpecOptionChoice
+    ArgsSpecRepeat
+    ArgsSpecRequiredOption
+    ArgsSpecPositional
+    ArgsSpecDescription
+    ArgsSpecSubcommand
+    ArgsSpecVersion
+    ArgsSpecCompletion
+    ArgsSpecHelp
+    ArgsSpecParse
+    ArgsSpecParseOrExit
+    ParsedArgsFlag
+    ParsedArgsOption
+    ParsedArgsOptionInt
+    ParsedArgsOptionFloat
+    ParsedArgsOptions
+    ParsedArgsSubcommand
+    ParsedArgsPositional
+    ProcessSpecMethod(method: String, args_len: Int)
+    ProcessChildMethod(method: String)
+    TerminalSessionResize
+    ProcessStdinWrite
+    ProcessStdinClose
+    ProcessStdinWriteAll
+    ProcessStdoutRead
+    ProcessStderrRead
+    ReflectValueTypeName
+    ReflectValuePath
+    ReflectValueDisplay
+    ReflectValueFields
+    ReflectFieldName
+    ReflectFieldValue
+    TaskJoin
+    TaskDetach
+    TaskPause
+    TaskResume
+    TaskCancel
+    ChannelReceive
+    ChannelTryReceive
+    ChannelIsTimer
+    ChannelIsInterval
+    ChannelIsCancelled
+    ChannelIsReady
+    ChannelDelayMs
+    ChannelClose
+    SenderSend
+    HTTPRouterRegister(verb: HTTPRouteMethod, handler: Int, file: String, line: Int, handler_param_names: [String], contract_json: String)
+    MathMethod(type_name: String, method: String, reduce_op: String?)
+    ReactiveGet
+    ReactiveSet
+    ReactiveEffectMethod
+    EventMethod(method: String)
+    LayoutMethod(method: String)
+    LoadableMethod(method: String)
+    CivilTimeMethod(kind: String, method: String)
+    EmailMethod(method: String)
+    HTTPClientMethod(kind: String, method: String)
+    HTTPServerMethod(kind: String, method: String)
+    DynField
+    DynAt
+    DynInt
+    DynText
+    DynBool
+    DynFloat
+    DynToText
+    DynEqualUnordered
+    DynDecode(ty: Type)
+    DynIndexKey(site: String, location: TPanicLoc)
+    DynIndexAt(site: String, location: TPanicLoc)
+    DynGetKey
+    DynGetAt
+    DynHas
+    DynKeys
+    DynLen(site: String, location: TPanicLoc)
+    DynRemove
+    DynBinary(op: String, site: String, location: TPanicLoc)
+    DynCompare(op: String, site: String, location: TPanicLoc)
+    DynSetPath(keys: [Bool], site: String, location: TPanicLoc)
+    SerdeEncode
+    JSONField
+    JSONAt
+    JSONInt
+    JSONText
+    JSONBool
+    JSONFloat
+    JSONToText
+    JSONEqualUnordered
+    PathFrom
+    PathHome
+    PathJoin
+    PathParent
+    PathExtension
+    PathStem
+    PathNormalize
+    PathIsWithin
+    PathToString
+    PathWriteAtomic
+    PathWalk
+    UIBackendMethod(method: String)
+    AppMethod(method: String, args_len: Int)
+    ServiceRuntimeSend
+    ServiceRuntimeRetry
+    ServiceRuntimeDeadLetter
+    ServiceRuntimeRetain
+    ServiceRuntimeCommit
+    PluginInvoke(export_name: String, signature: ComponentSignatureDescriptor)
+    ReaderOver(owned: Bool)
+    ReaderReadU8
+    ReaderReadI8
+    ReaderReadU16Le
+    ReaderReadU16Be
+    ReaderReadI16Le
+    ReaderReadI16Be
+    ReaderReadU32Le
+    ReaderReadU32Be
+    ReaderReadI32Le
+    ReaderReadI32Be
+    ReaderReadU64Le
+    ReaderReadU64Be
+    ReaderReadI64Le
+    ReaderReadI64Be
+    ReaderReadF32Le
+    ReaderReadF32Be
+    ReaderReadF64Le
+    ReaderReadF64Be
+    ReaderPeek
+    ReaderSeek
+    ReaderSkip
+    ReaderTake
+    ReaderRemaining
+    ReaderAtEnd
+    CursorOver
+    CursorTakeUntil
+    CursorSkipWs
+    CursorTakePattern(parts: [StrMatchPart], canonical: [TCanonicalField])
+    ReaderTakePattern(parts: [BinMatchPart], canonical: [TCanonicalField])
+    ProcessLines
+}
+
+enum BodyRequireKind {
+    Require(cond: Int, msg: Int?)
+    RequireEq(left: Int, right: Int)
+    Panic(msg: Int)
+}
+
+struct BodyLambda {
+    executable: BodyLambdaBody
+    source_span: Span
+    frame_schedule: FrameSchedule?
+    frame_schedule_derivation: DerivationRef?
+    capture_facts: TCaptureFacts
+    failure_carrier: TFailureCarrier
+    effects: TEffectFacts
+    host_param_conventions: [AccessConvention]?
+    source_params: [String]
+    source_param_symbols: [SymbolID]
+    param_types: [Type]
+    ret: Type?
+    is_move: Bool
+    boxed: Bool
+    rc: Bool
+    captures: [TCapture]
+    materialized_captures: [String]
+    frozen_captures: [String]
+    uses_stack_sentry: Bool
+}
+
+enum BodyLambdaBody {
+    Expr(value: Int)
+    Block(body: [Int])
+}
+
+struct FnBody {
+    name: String
+    module_name: String
+    module_identity: String
+    key: String
+    source_file: String
+    source_span: Span
+    failure_carrier: TFailureCarrier
+    effects: TEffectFacts
+    target_applicability: TTargetApplicability
+    web_bucket: WebBucket?
+    web_marker: WebPartitionMarker?
+    visibility: TVisibility
+    foreign: TForeignProvenance?
+    params: [BodyParameter]
+    web_param_reconstructions: [TWebParamReconstruction]
+    ret: Type?
+    gc_return: Bool
+    gc_scope: Bool
+    return_view_provenance: ViewProvenanceMap?
+    generic_params: [TGenericParam]
+    is_main: Bool
+    line: Int
+    synthetic: Bool
+    is_unsafe: Bool
+    unsafe_gate: TUnsafeGate?
+    is_pure: Bool
+    memo_bound: Int?
+    memo_unbounded: Bool
+    is_reactive: Bool
+    reactive_upgrades: [String]
+    is_inline: Bool
+    is_inline_always: Bool
+    is_scalar: Bool
+    kernel_proof: KernelProof?
+    uses_stack_sentry: Bool
+    body: [Int]
+    kind: TFuncKind
+    origin_facts: [TOriginProjection]{[TOriginProjection]{}}
+    typed_goals: [TTypedGoal]{[TTypedGoal]{}}
+    // The function's nodes, statements and expression-type column.
+    tree: BodyTree
+}
+
+struct BodyParameter {
+    local: TLocal
+    name: String
+    span: Span
+    ty: Type
+    convention: AccessConvention
+    public_label: String
+    zone: ParamZone
+    default: Int?
+    variadic: Bool
+}
+
+enum BodyPlace {
+    Local(local: TLocal)
+    Expr(value: Int)
+}
+
+// Child walkers: each visits the node id of every expression reachable from
+// the value without passing through another expression (statement blocks are
+// entered), in field order, as sema's Tree.jet walkers visit child TExprs.
+fn body_each_str_part_child(tree: BodyTree, value: BodyStrPart, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if value == {
+        .Interpolation(f0, _) -> {
+            visit(f0)
+        }
+        else -> {}
+    }
+}
+
+fn body_each_call_arg_child(tree: BodyTree, value: BodyCallArg, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    visit(value.value)
+}
+
+fn body_each_enum_arg_child(tree: BodyTree, value: BodyEnumArg, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    visit(value.value)
+}
+
+fn body_each_enum_payload_child(tree: BodyTree, value: BodyEnumPayload, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if value == {
+        .Positional(f0) -> {
+            loop item in f0 {
+                body_each_enum_arg_child(tree, item, visit)
+            }
+        }
+        .Named(f0) -> {
+            loop item in f0 {
+                body_each_named_enum_arg_child(tree, item, visit)
+            }
+        }
+        else -> {}
+    }
+}
+
+fn body_each_named_enum_arg_child(tree: BodyTree, value: BodyNamedEnumArg, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    body_each_enum_arg_child(tree, value.value, visit)
+}
+
+fn body_each_pattern_shape_child(tree: BodyTree, value: BodyPatternShape, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if value == {
+        .Variant(_, f1, _, _) -> {
+            loop item in f1 {
+                body_each_pattern_binding_child(tree, item, visit)
+            }
+        }
+        .Present(_, _, f2, _) -> {
+            if f2 == .Val(inner) {
+                body_each_nested_pattern_child(tree, inner, visit)
+            }
+        }
+        .Ok(_, _, f2, _) -> {
+            if f2 == .Val(inner) {
+                body_each_nested_pattern_child(tree, inner, visit)
+            }
+        }
+        .Err(_, _, f2, _) -> {
+            if f2 == .Val(inner) {
+                body_each_nested_pattern_child(tree, inner, visit)
+            }
+        }
+        .Or(f0, _) -> {
+            loop item in f0 {
+                body_each_pattern_shape_child(tree, item, visit)
+            }
+        }
+        .Struct(f0, _) -> {
+            loop item in f0 {
+                body_each_pattern_field_child(tree, item, visit)
+            }
+        }
+        .List(f0, _, _) -> {
+            loop item in f0 {
+                body_each_pattern_binding_child(tree, item, visit)
+            }
+        }
+        .Map(f0, _, _) -> {
+            loop item in f0 {
+                body_each_map_pattern_entry_child(tree, item, visit)
+            }
+        }
+        else -> {}
+    }
+}
+
+fn body_each_nested_pattern_child(tree: BodyTree, value: BodyNestedPattern, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    body_each_pattern_shape_child(tree, value.shape, visit)
+}
+
+fn body_each_pattern_child(tree: BodyTree, value: BodyPattern, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    body_each_pattern_shape_child(tree, value.shape, visit)
+}
+
+fn body_each_pattern_binding_child(tree: BodyTree, value: BodyPatternBinding, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if value == {
+        .Nested(f0) -> {
+            body_each_nested_pattern_child(tree, f0, visit)
+        }
+        .Value(f0) -> {
+            visit(f0)
+        }
+        else -> {}
+    }
+}
+
+fn body_each_pattern_field_child(tree: BodyTree, value: BodyPatternField, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if value == {
+        .Value(_, f1, _) -> {
+            visit(f1)
+        }
+        .Nested(_, f1, _) -> {
+            body_each_nested_pattern_child(tree, f1, visit)
+        }
+        else -> {}
+    }
+}
+
+fn body_each_map_pattern_entry_child(tree: BodyTree, value: BodyMapPatternEntry, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    visit(value.key)
+    body_each_pattern_binding_child(tree, value.slot, visit)
+}
+
+fn body_each_match_arm_child(tree: BodyTree, value: BodyMatchArm, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    body_each_pattern_child(tree, value.pattern, visit)
+    loop item in value.body {
+        body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+    }
+}
+
+fn body_each_if_cond_child(tree: BodyTree, value: BodyIfCond, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if value == {
+        .Plain(f0) -> {
+            visit(f0)
+        }
+        .And(f0, f1) -> {
+            body_each_if_cond_child(tree, f0, visit)
+            body_each_if_cond_child(tree, f1, visit)
+        }
+        .IfLet(f0, f1) -> {
+            body_each_pattern_child(tree, f0, visit)
+            visit(f1)
+        }
+        else -> {}
+    }
+}
+
+fn body_each_contract_child(tree: BodyTree, value: BodyContract, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    visit(value.condition)
+    visit(value.message)
+}
+
+fn body_each_stmt_child(tree: BodyTree, value: StmtKind, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if value == {
+        .Contract(f0) -> {
+            body_each_contract_child(tree, f0, visit)
+        }
+        .ContractScope(f0, f1, f2, _, _) -> {
+            loop item in f0 {
+                body_each_contract_child(tree, item, visit)
+            }
+            loop item in f1 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+            loop item in f2 {
+                body_each_contract_child(tree, item, visit)
+            }
+        }
+        .Let(_, _, f2, _, _, _) -> {
+            visit(f2)
+        }
+        .RefutableBind(f0, f1, f2, _) -> {
+            body_each_pattern_child(tree, f0, visit)
+            visit(f1)
+            loop item in f2 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+        }
+        .TupleDestructure(_, f1, _, _, _) -> {
+            visit(f1)
+        }
+        .StructDestructure(_, f1, _, _, _) -> {
+            visit(f1)
+        }
+        .ListDestructure(_, f1, _, _, _, _) -> {
+            visit(f1)
+        }
+        .Assign(f0, _, f2, _, _) -> {
+            body_each_place_child(tree, f0, visit)
+            visit(f2)
+        }
+        .CountedLoop(_, f1, f2, f3, _, f5, _) -> {
+            body_each_stmt_child(tree, tree.stmts[f1 - tree.stmt_base], visit)
+            visit(f2)
+            if f3 == .Val(inner) {
+                body_each_stmt_child(tree, tree.stmts[inner - tree.stmt_base], visit)
+            }
+            loop item in f5 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+        }
+        .ForRange(_, _, f2, f3, f4, _, f6, _, _) -> {
+            visit(f2)
+            visit(f3)
+            if f4 == .Val(inner) {
+                visit(inner)
+            }
+            loop item in f6 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+        }
+        .Range(_, _, f2, f3, f4, f5, _, _, f8, _) -> {
+            if f2 == .Val(inner) {
+                visit(inner)
+            }
+            visit(f3)
+            visit(f4)
+            if f5 == .Val(inner) {
+                visit(inner)
+            }
+            loop item in f8 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+        }
+        .ExprStmt(f0, _) -> {
+            visit(f0)
+        }
+        .Return(f0, _) -> {
+            if f0 == .Val(inner) {
+                visit(inner)
+            }
+        }
+        .TaskGroup(_, f1, f2, _) -> {
+            if f1 == .Val(inner) {
+                visit(inner)
+            }
+            loop item in f2 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+        }
+        .DeferClose(f0, _, _) -> {
+            visit(f0)
+        }
+        .If(f0, f1, f2, _, _) -> {
+            body_each_if_cond_child(tree, f0, visit)
+            loop item in f1 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+            if f2 == .Val(inner) {
+                loop item in inner {
+                    body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+                }
+            }
+        }
+        .Loop(_, f1, _) -> {
+            loop item in f1 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+        }
+        .While(_, f1, f2, _) -> {
+            visit(f1)
+            loop item in f2 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+        }
+        .BreakValue(_, f1, _) -> {
+            visit(f1)
+        }
+        .Match(f0, f1, _, _) -> {
+            visit(f0)
+            loop item in f1 {
+                body_each_match_arm_child(tree, item, visit)
+            }
+        }
+        .EnumMatch(f0, f1, f2, _, _) -> {
+            visit(f0)
+            loop item in f1 {
+                body_each_match_arm_child(tree, item, visit)
+            }
+            if f2 == .Val(inner) {
+                loop item in inner {
+                    body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+                }
+            }
+        }
+        .RangeSwitch(f0, f1, f2, _) -> {
+            visit(f0)
+            loop item in f1 {
+                body_each_range_arm_child(tree, item, visit)
+            }
+            loop item in f2 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+        }
+        .ForIn(_, _, _, f3, f4, f5, _, _, _, _, f10, _) -> {
+            visit(f3)
+            visit(f4)
+            if f5 == .Val(inner) {
+                visit(inner)
+            }
+            loop item in f10 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+        }
+        .Inline(f0, _) -> {
+            loop item in f0 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+        }
+        .DebugOnly(f0, _) -> {
+            loop item in f0 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+        }
+        .MixedSwitch(f0, _, f2, f3, _) -> {
+            visit(f0)
+            loop item in f2 {
+                body_each_mixed_arm_child(tree, item, visit)
+            }
+            if f3 == .Val(inner) {
+                loop item in inner {
+                    body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+                }
+            }
+        }
+        .Unsafe(_, f1) -> {
+            loop item in f1 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+        }
+        .UnsafeBlock(_, f1, _) -> {
+            loop item in f1 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+        }
+        .SentryPolicy(_, f1, _) -> {
+            loop item in f1 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+        }
+        .Impure(f0, _) -> {
+            loop item in f0 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+        }
+        .Reactive(f0, _) -> {
+            body_each_lambda_child(tree, f0, visit)
+        }
+        .Region(f0, _) -> {
+            loop item in f0 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+        }
+        .Layout(_, _, f2, _) -> {
+            loop item in f2 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+        }
+        .ContextBlock(f0, f1, _) -> {
+            loop item in f0 {
+                body_each_context_guard_child(tree, item, visit)
+            }
+            loop item in f1 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+        }
+        .Live(f0, _) -> {
+            loop item in f0 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+        }
+        .Shield(f0, _) -> {
+            loop item in f0 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+        }
+        .ScopeMember(f0, f1, _) -> {
+            body_each_scope_member_kind_child(tree, f0, visit)
+            loop item in f1 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+        }
+        .Transact(_, _, _, f3, _) -> {
+            loop item in f3 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+        }
+        .GCEdit(_, _, _, _, f4, f5, _) -> {
+            if f4 == .Val(inner) {
+                visit(inner)
+            }
+            body_each_stmt_child(tree, tree.stmts[f5 - tree.stmt_base], visit)
+        }
+        else -> {}
+    }
+}
+
+fn body_each_range_arm_child(tree: BodyTree, value: BodyRangeArm, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    loop item in value.body {
+        body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+    }
+}
+
+fn body_each_mixed_arm_child(tree: BodyTree, value: BodyMixedArm, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    visit(value.condition)
+    loop item in value.body {
+        body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+    }
+}
+
+fn body_each_context_guard_child(tree: BodyTree, value: BodyContextGuard, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    visit(value.value)
+}
+
+fn body_each_node_kind_child(tree: BodyTree, value: NodeKind, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if value == {
+        .StrLit(f0) -> {
+            loop item in f0 {
+                body_each_str_part_child(tree, item, visit)
+            }
+        }
+        .InlineBlock(f0) -> {
+            loop item in f0 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+        }
+        .Call(_, _, f2) -> {
+            loop item in f2 {
+                body_each_call_arg_child(tree, item, visit)
+            }
+        }
+        .IndirectCall(f0, _, f2, _) -> {
+            visit(f0)
+            loop item in f2 {
+                body_each_call_arg_child(tree, item, visit)
+            }
+        }
+        .MethodCall(f0, _, _, f3) -> {
+            visit(f0)
+            loop item in f3 {
+                body_each_call_arg_child(tree, item, visit)
+            }
+        }
+        .DistinctCtor(f0) -> {
+            visit(f0)
+        }
+        .DistinctConvert(_, f1, _, _, _) -> {
+            visit(f1)
+        }
+        .TraitBox(f0, _) -> {
+            visit(f0)
+        }
+        .UnitConvert(f0, _, _, f3, _, _, _, _) -> {
+            visit(f0)
+            if f3 == .Val(rounding) -> visit(rounding.digits)
+        }
+        .MathBuiltin(_, _, f2) -> {
+            loop item in f2 {
+                visit(item)
+            }
+        }
+        .PreciseBuiltin(_, _, f2) -> {
+            loop item in f2 {
+                visit(item)
+            }
+        }
+        .Print(f0) -> {
+            visit(f0)
+        }
+        .Drop(f0) -> {
+            visit(f0)
+        }
+        .Close(f0) -> {
+            visit(f0)
+        }
+        .Move(f0) -> {
+            visit(f0)
+        }
+        .AmbientInput(f0) -> {
+            if f0 == .Val(inner) {
+                visit(inner)
+            }
+        }
+        .RequireStop(f0, _, _) -> {
+            body_each_require_kind_child(tree, f0, visit)
+        }
+        .Binary(_, _, _, f3, f4) -> {
+            visit(f3)
+            visit(f4)
+        }
+        .CompareChain(f0, _, _) -> {
+            loop item in f0 {
+                visit(item)
+            }
+        }
+        .Unary(_, f1) -> {
+            visit(f1)
+        }
+        .StructLit(f0) -> {
+            loop item in f0 {
+                body_each_struct_field_value_child(tree, item, visit)
+            }
+        }
+        .Field(f0, _) -> {
+            visit(f0)
+        }
+        .Index(f0, f1, _, _, _, _) -> {
+            visit(f0)
+            visit(f1)
+        }
+        .Slice(f0, f1, f2, f3, _) -> {
+            visit(f0)
+            visit(f1)
+            visit(f2)
+            if f3 == .Val(inner) {
+                visit(inner)
+            }
+        }
+        .Range(f0, f1, _) -> {
+            visit(f0)
+            visit(f1)
+        }
+        .Tuple(f0) -> {
+            loop item in f0 {
+                visit(item)
+            }
+        }
+        .List(f0, _) -> {
+            loop item in f0 {
+                visit(item)
+            }
+        }
+        .Map(f0) -> {
+            loop item in f0 {
+                body_each_map_entry_child(tree, item, visit)
+            }
+        }
+        .EnumCtor(_, _, f2) -> {
+            body_each_enum_payload_child(tree, f2, visit)
+        }
+        .Try(f0, _, _) -> {
+            visit(f0)
+        }
+        .TryWithContext(f0, f1, _, _, _, _) -> {
+            visit(f0)
+            if f1 == .Val(inner) {
+                visit(inner)
+            }
+        }
+        .Lambda(f0) -> {
+            body_each_lambda_child(tree, f0, visit)
+        }
+        .Borrow(f0, _) -> {
+            visit(f0)
+        }
+        .RawAddressOf(f0) -> {
+            body_each_place_child(tree, f0, visit)
+        }
+        .Deref(f0) -> {
+            visit(f0)
+        }
+        .PtrFromAddr(f0, _) -> {
+            visit(f0)
+        }
+        .LayoutLiteral(f0) -> {
+            visit(f0)
+        }
+        .LayoutCompare(_, f1, f2) -> {
+            visit(f1)
+            visit(f2)
+        }
+        .SharedGuardValue(f0) -> {
+            visit(f0)
+        }
+        .SharedGuardMap(f0, _, _) -> {
+            visit(f0)
+        }
+        .SharedGuardSplit(f0, _, _, _) -> {
+            visit(f0)
+        }
+        .SharedGuardWait(f0, f1, f2) -> {
+            visit(f0)
+            visit(f1)
+            body_each_lambda_child(tree, f2, visit)
+        }
+        .ConditionNotify(f0, _) -> {
+            visit(f0)
+        }
+        .CoreCall(_, f1, _, _, _, _) -> {
+            loop item in f1 {
+                visit(item)
+            }
+        }
+        .HostCall(f0) -> {
+            body_each_host_call_child(tree, f0, visit)
+        }
+        .AllocNew(_, f1) -> {
+            loop item in f1 {
+                body_each_call_arg_child(tree, item, visit)
+            }
+        }
+        .EnumLit(_, _, f2) -> {
+            body_each_enum_payload_child(tree, f2, visit)
+        }
+        .JSONLit(_, f1, _) -> {
+            if f1 == .Val(inner) {
+                visit(inner)
+            }
+        }
+        .ListLit(f0) -> {
+            loop item in f0 {
+                visit(item)
+            }
+        }
+        .ListSpread(f0) -> {
+            loop item in f0 {
+                body_each_list_spread_part_child(tree, item, visit)
+            }
+        }
+        .MapLit(f0) -> {
+            loop item in f0 {
+                body_each_map_entry_child(tree, item, visit)
+            }
+        }
+        .PoolSlot(f0, f1, _, _, _, _) -> {
+            visit(f0)
+            visit(f1)
+        }
+        .MathLaneIndex(_, f1, f2, _) -> {
+            visit(f1)
+            visit(f2)
+        }
+        .MathSwizzleRead(_, f1, _) -> {
+            visit(f1)
+        }
+        .Clone(f0, _) -> {
+            visit(f0)
+        }
+        .ExplicitCopy(f0) -> {
+            visit(f0)
+        }
+        .MaterializeView(f0) -> {
+            visit(f0)
+        }
+        .StaticCall(_, _, _, _, f4) -> {
+            loop item in f4 {
+                body_each_call_arg_child(tree, item, visit)
+            }
+        }
+        .DecodeUnder(f0, f1) -> {
+            visit(f0)
+            visit(f1)
+        }
+        .BuiltinMethod(f0, _, f2) -> {
+            visit(f0)
+            loop item in f2 {
+                visit(item)
+            }
+        }
+        .IfExpr(f0, f1, f2, f3, f4) -> {
+            body_each_if_cond_child(tree, f0, visit)
+            loop item in f1 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+            visit(f2)
+            loop item in f3 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+            visit(f4)
+        }
+        .ResultHandler(f0, f1, f2, f3, f4, f5, f6, f7) -> {
+            visit(f0)
+            body_each_pattern_child(tree, f1, visit)
+            loop item in f2 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+            visit(f3)
+            body_each_pattern_child(tree, f4, visit)
+            loop item in f5 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+            visit(f6)
+            visit(f7)
+        }
+        .RawOf(f0) -> {
+            visit(f0)
+        }
+        .DistinctRaw(f0) -> {
+            visit(f0)
+        }
+        .Present(f0) -> {
+            visit(f0)
+        }
+        .Ok(f0) -> {
+            visit(f0)
+        }
+        .Err(f0) -> {
+            visit(f0)
+        }
+        .OrFallback(f0, f1, _) -> {
+            visit(f0)
+            body_each_or_fallback_child(tree, f1, visit)
+        }
+        .OptField(f0, _, _) -> {
+            visit(f0)
+        }
+        .OptMethodCall(f0, _, f2, _) -> {
+            visit(f0)
+            visit(f2)
+        }
+        .PatternMatches(f0, f1) -> {
+            visit(f0)
+            body_each_pattern_child(tree, f1, visit)
+        }
+        .OptionLift2(f0, f1, f2) -> {
+            visit(f0)
+            visit(f1)
+            visit(f2)
+        }
+        .ClosureMethod(f0, _, f2) -> {
+            visit(f0)
+            loop item in f2 {
+                visit(item)
+            }
+        }
+        .HostBorrowCallback(f0, _) -> {
+            visit(f0)
+        }
+        .NumericMethod(f0, _) -> {
+            visit(f0)
+        }
+        .NumericBinaryMethod(f0, _, f2) -> {
+            visit(f0)
+            visit(f2)
+        }
+        .OverflowOpt(_, _, _, f3, f4) -> {
+            visit(f3)
+            visit(f4)
+        }
+        .HandleMethod(f0, f1, f2) -> {
+            visit(f0)
+            body_each_handle_op_child(tree, f1, visit)
+            loop item in f2 {
+                visit(item)
+            }
+        }
+        .CoreClosureCall(f0) -> {
+            body_each_core_closure_kind_child(tree, f0, visit)
+        }
+        .TaskGroupAll(f0) -> {
+            visit(f0)
+        }
+        .TaskGroupRace(f0) -> {
+            visit(f0)
+        }
+        .TaskGroupAny(f0) -> {
+            visit(f0)
+        }
+        .SelectRecv(f0, f1) -> {
+            visit(f0)
+            visit(f1)
+        }
+        .SelectAfter(f0, f1, f2) -> {
+            visit(f0)
+            visit(f1)
+            if f2 == .Val(inner) {
+                visit(inner)
+            }
+        }
+        .SelectWait(f0, _) -> {
+            visit(f0)
+        }
+        .FnValue(f0) -> {
+            body_each_fn_value_kind_child(tree, f0, visit)
+        }
+        else -> {}
+    }
+}
+
+fn body_each_expr_child(tree: BodyTree, value: BodyNode, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    body_each_node_kind_child(tree, value.kind, visit)
+}
+
+fn body_each_struct_field_value_child(tree: BodyTree, value: BodyStructFieldValue, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    visit(value.value)
+}
+
+fn body_each_map_entry_child(tree: BodyTree, value: BodyMapEntry, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    visit(value.key)
+    visit(value.value)
+}
+
+fn body_each_list_spread_part_child(tree: BodyTree, value: BodyListSpreadPart, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if value == {
+        .Element(f0) -> {
+            visit(f0)
+        }
+        .Spread(f0) -> {
+            visit(f0)
+        }
+        else -> {}
+    }
+}
+
+fn body_each_scope_member_kind_child(tree: BodyTree, value: BodyScopeMemberKind, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if value == {
+        .Timeout(f0) -> {
+            visit(f0)
+        }
+        else -> {}
+    }
+}
+
+fn body_each_or_fallback_child(tree: BodyTree, value: BodyOrFallback, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if value == {
+        .Value(f0) -> {
+            visit(f0)
+        }
+        .Return(f0) -> {
+            if f0 == .Val(inner) {
+                visit(inner)
+            }
+        }
+        .Panic(f0, _) -> {
+            visit(f0)
+        }
+        else -> {}
+    }
+}
+
+fn body_each_host_call_child(tree: BodyTree, value: BodyHostCall, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if value == {
+        .Method(f0, _, f2) -> {
+            visit(f0)
+            loop item in f2 {
+                visit(item)
+            }
+        }
+        .CellGuardProject(f0, _, _, _, _) -> {
+            visit(f0)
+        }
+        .OptionProbe(f0, _) -> {
+            visit(f0)
+        }
+        .TupleIndex(f0, _) -> {
+            visit(f0)
+        }
+        .YieldSend(f0) -> {
+            visit(f0)
+        }
+        else -> {}
+    }
+}
+
+fn body_each_core_closure_kind_child(tree: BodyTree, value: BodyCoreClosureKind, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if value == {
+        .Spawn(f0, _, _, f3) -> {
+            if f0 == .Val(inner) {
+                visit(inner)
+            }
+            body_each_lambda_child(tree, f3, visit)
+        }
+        .Realtime(f0, f1, f2) -> {
+            visit(f0)
+            visit(f1)
+            body_each_lambda_child(tree, f2, visit)
+        }
+        .Guard(f0) -> {
+            body_each_lambda_child(tree, f0, visit)
+        }
+        .OnCommit(_, f1) -> {
+            body_each_lambda_child(tree, f1, visit)
+        }
+        .OnRollback(_, f1) -> {
+            body_each_lambda_child(tree, f1, visit)
+        }
+        .UIButtonOnClick(f0, f1, f2, f3) -> {
+            visit(f0)
+            visit(f1)
+            visit(f2)
+            body_each_lambda_child(tree, f3, visit)
+        }
+        .UITextInputOnDrop(f0, f1, f2) -> {
+            visit(f0)
+            visit(f1)
+            body_each_lambda_child(tree, f2, visit)
+        }
+        .ReactiveDerived(f0) -> {
+            body_each_lambda_child(tree, f0, visit)
+        }
+        .ReactiveEffect(f0) -> {
+            body_each_lambda_child(tree, f0, visit)
+        }
+        .UIReactiveRender(f0) -> {
+            body_each_lambda_child(tree, f0, visit)
+        }
+        else -> {}
+    }
+}
+
+fn body_each_fn_value_kind_child(tree: BodyTree, value: BodyFnValueKind, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if value == {
+        .NamedFn(_, f1) -> {
+            if f1 == .Val(inner) {
+                body_each_lambda_child(tree, inner, visit)
+            }
+        }
+        .Policy(_, f1, _, _, _, f5) -> {
+            loop item in f1 {
+                body_each_call_arg_child(tree, item, visit)
+            }
+            visit(f5)
+        }
+        .Call(f0, f1) -> {
+            visit(f0)
+            loop item in f1 {
+                body_each_call_arg_child(tree, item, visit)
+            }
+        }
+        .Send(f0) -> {
+            visit(f0)
+        }
+        else -> {}
+    }
+}
+
+fn body_each_handle_op_child(tree: BodyTree, value: BodyHandleOp, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if value == {
+        .HTTPRouterRegister(_, f1, _, _, _, _) -> {
+            visit(f1)
+        }
+        else -> {}
+    }
+}
+
+fn body_each_require_kind_child(tree: BodyTree, value: BodyRequireKind, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if value == {
+        .Require(f0, f1) -> {
+            visit(f0)
+            if f1 == .Val(inner) {
+                visit(inner)
+            }
+        }
+        .RequireEq(f0, f1) -> {
+            visit(f0)
+            visit(f1)
+        }
+        .Panic(f0) -> {
+            visit(f0)
+        }
+        else -> {}
+    }
+}
+
+fn body_each_lambda_child(tree: BodyTree, value: BodyLambda, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    body_each_lambda_body_child(tree, value.executable, visit)
+}
+
+fn body_each_lambda_body_child(tree: BodyTree, value: BodyLambdaBody, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if value == {
+        .Expr(f0) -> {
+            visit(f0)
+        }
+        .Block(f0) -> {
+            loop item in f0 {
+                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
+            }
+        }
+        else -> {}
+    }
+}
+
+fn body_each_place_child(tree: BodyTree, value: BodyPlace, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if value == {
+        .Expr(f0) -> {
+            visit(f0)
+        }
+        else -> {}
+    }
+}

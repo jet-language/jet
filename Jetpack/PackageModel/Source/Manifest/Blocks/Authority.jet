@@ -1,21 +1,21 @@
-// `authority: { holds, needs, grants, trust, providers }`
+// `authority: { allow, deny, needs, grants, trust, providers }`
 // ) and the effect-list readers they share with
 // `build.allow` (Package/Blocks.rs).
+use jetpack_foundation.[
+    AUTHORITY_FIELD_ALLOW, AUTHORITY_FIELD_DENY, AUTHORITY_FIELD_GRANTS, AUTHORITY_FIELD_NEEDS,
+    AUTHORITY_FIELD_PROVIDERS, AUTHORITY_FIELD_TRUST,
+    AUTHORITY_TRUST_DECISION_ALLOW, AUTHORITY_TRUST_DECISION_DENY, AUTHORITY_TRUST_DECISION_PROMPT,
+    AUTHORITY_TRUST_FIELD_CI, AUTHORITY_TRUST_FIELD_DEFAULT, AUTHORITY_TRUST_FIELD_PROMPT,
+    AUTHORITY_TRUST_FIELD_REQUIRE, AUTHORITY_TRUST_FIELD_SERVICES, AUTHORITY_TRUST_REQUIRE_ATTESTED,
+    AUTHORITY_TRUST_REQUIRE_LOGGED, AUTHORITY_TRUST_REQUIRE_NONE, PROVIDER_FIELD_ALLOW,
+    PROVIDER_FIELD_DENY, PROVIDER_FIELD_REGISTRY, syntax_is_ui_capability,
+]
+use jet_foundation.[EFFECT_VOCABULARY_ROOTS, authority_root]
 
 enum TrustDecision {
     Allow
     Prompt
     Deny
-}
-
-// The package's own authority bound.
-struct AuthorityHolds {
-    allow: [String]?
-    deny: [String]?
-
-    fn default() -> AuthorityHolds Never! {
-        AuthorityHolds{allow: None, deny: None}
-    }
 }
 
 // One audited per-dependency grant: `grants: { "dep": [DB, Net] }`.
@@ -62,28 +62,26 @@ struct ProviderAuthority {
     deny: [String]
 }
 
-// One parsed authority block; `needs` is a guest declaration, not a second
-// grant store.
+// One parsed authority block. `allow`/`deny` are the package's own bound
+// (`None` = not written); `needs` is a guest declaration, not a second grant
+// store.
 struct AuthorityBlock {
-    holds: AuthorityHolds
+    allow: [String]?
+    deny: [String]?
     needs: [String]
     grants: [PackageGrant]
     trust: TrustPolicy?
     providers: [ProviderAuthority]
 
     fn default() -> AuthorityBlock Never! {
-        AuthorityBlock{holds: AuthorityHolds.default(), needs: [String]{}, grants: [PackageGrant]{}, trust: None, providers: [ProviderAuthority]{}}
+        AuthorityBlock{allow: None, deny: None, needs: [String]{}, grants: [PackageGrant]{}, trust: None, providers: [ProviderAuthority]{}}
     }
 }
 
-// `Sema::Effect::parse(root).is_some()`: `root` is one canonical closed
-// effect root.
+// `Sema::Effect::parse(root).is_some()`: `root` is one root of
+// Prelude/Effects.jet, spelled canonically.
 fn pkg_effect_root_known(root: String) -> Bool Never! {
-    if (authority_parse_root(root) ?? "") != root -> return false
-    if root == {
-        "Net" | "FS" | "IO" | "DB" | "Time" | "Rand" | "Env" | "Exec" | "Log" | "GPU" | "Panic" | "FFI" | "Browser" | "Secret" | "Mem" -> true
-        else -> false
-    }
+    EFFECT_VOCABULARY_ROOTS.contains(root)
 }
 
 // `Sema::memory_allocation_bound(name).is_some()`: `Mem.Alloc` or
@@ -126,21 +124,6 @@ fn pkg_authority_object_body(input: String, field: String) -> String PackagePars
     Ok(pkg_binder_slice(value, open + 1, close))
 }
 
-fn pkg_parse_authority_holds(body: String) -> AuthorityHolds PackageParseError! {
-    holds := AuthorityHolds.default()
-    seen := [String]{}
-    loop entry in pkg_authority_entries(body) {
-        if seen.contains(entry.key) -> return Err(pkg_authority_bad("authority.holds.{entry.key} is declared more than once"))
-        &seen.push(entry.key)
-        if entry.key == {
-            AUTHORITY_HOLDS_FIELD_ALLOW -> holds.allow = Val(pkg_authority_effect_list("authority.holds.allow", entry.value.trim()))
-            AUTHORITY_HOLDS_FIELD_DENY -> holds.deny = Val(pkg_authority_effect_list("authority.holds.deny", entry.value.trim()))
-            else -> return Err(pkg_authority_bad("unknown `authority.holds` field `{entry.key}` — allowed: `{AUTHORITY_HOLDS_FIELD_ALLOW}`, `{AUTHORITY_HOLDS_FIELD_DENY}`"))
-        }
-    }
-    Ok(holds)
-}
-
 fn pkg_authority_effect_list(field: String, value: String) -> [String] PackageParseError! {
     if pkg_parse_effect_list(field, value) == {
         .Ok(names) -> Ok(names)
@@ -156,7 +139,8 @@ fn pkg_parse_authority(body: String) -> AuthorityBlock PackageParseError! {
         if seen.contains(entry.key) -> return Err(pkg_authority_bad("authority.{entry.key} is declared more than once"))
         &seen.push(entry.key)
         if entry.key == {
-            AUTHORITY_FIELD_HOLDS -> authority.holds = pkg_parse_authority_holds(pkg_authority_object_body(entry.value, "holds"))
+            AUTHORITY_FIELD_ALLOW -> authority.allow = Val(pkg_authority_effect_list("authority.allow", entry.value.trim()))
+            AUTHORITY_FIELD_DENY -> authority.deny = Val(pkg_authority_effect_list("authority.deny", entry.value.trim()))
             AUTHORITY_FIELD_NEEDS -> {
                 if pkg_parse_authority_needs(entry.value) == {
                     .Ok(needs) -> authority.needs = needs
@@ -171,7 +155,7 @@ fn pkg_parse_authority(body: String) -> AuthorityBlock PackageParseError! {
             }
             AUTHORITY_FIELD_TRUST -> authority.trust = Val(pkg_parse_authority_trust_body(pkg_authority_object_body(entry.value, "trust")))
             AUTHORITY_FIELD_PROVIDERS -> authority.providers = pkg_parse_provider_authority_body(pkg_authority_object_body(entry.value, "providers"))
-            else -> return Err(pkg_authority_bad("unknown `authority` field `{entry.key}` — allowed: `{AUTHORITY_FIELD_HOLDS}`, `{AUTHORITY_FIELD_NEEDS}`, `{AUTHORITY_FIELD_GRANTS}`, `{AUTHORITY_FIELD_TRUST}`, `{AUTHORITY_FIELD_PROVIDERS}`"))
+            else -> return Err(pkg_authority_bad("unknown `authority` field `{entry.key}` — allowed: `{AUTHORITY_FIELD_ALLOW}`, `{AUTHORITY_FIELD_DENY}`, `{AUTHORITY_FIELD_NEEDS}`, `{AUTHORITY_FIELD_GRANTS}`, `{AUTHORITY_FIELD_TRUST}`, `{AUTHORITY_FIELD_PROVIDERS}`"))
         }
     }
     Ok(authority)
@@ -322,7 +306,7 @@ fn pkg_parse_effect_list(field: String, value: String) -> [String] PackageParseE
     loop name in names {
         if !pkg_effect_root_known(authority_root(name)) -> return Err(PackageParseError.BadEffectsBlock("`{name}` isn't a known effect (see the closed vocabulary in Prelude/Effects.jet)"))
         if name.contains("(") {
-            if !field.ends_with("deny") -> return Err(PackageParseError.BadEffectsBlock("`{name}` is a parameterized memory denial and belongs only in an `authority.holds.deny` list — use `Mem.Alloc(above: 65536)` there"))
+            if !field.ends_with("deny") -> return Err(PackageParseError.BadEffectsBlock("`{name}` is a parameterized memory denial and belongs only in an `authority.deny` list — use `Mem.Alloc(above: 65536)` there"))
             if !pkg_memory_allocation_bound_valid(name) -> return Err(PackageParseError.BadEffectsBlock("`{name}` has an invalid parameterized rights entry — use `Mem.Alloc(above: 65536)`"))
         }
     }

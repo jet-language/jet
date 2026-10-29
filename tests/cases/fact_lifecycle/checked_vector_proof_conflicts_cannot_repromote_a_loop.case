@@ -1,0 +1,16 @@
+# tests/mir_fact_lifecycle.rs::checked_vector_proof_conflicts_cannot_repromote_a_loop at tests/mir_fact_lifecycle.rs:605; hand-port
+# Claim: a loop over 0..<4 with a conflicting checked proof stays scalar (tests/mir_fact_lifecycle.rs:634)
+# Claim: the index check survives: the 4th index stops the program (tests/mir_fact_lifecycle.rs:609)
+# Fixture migrated: Float#4 list fn replaced by a [1, 2, 3] Int list reading index 3 (surrogate for the bounds-check observable)
+# Not ported: checked_vector_facts and pass_ids removal/duplication are MIR-internal; no CLI surface
+fixture: checked_vector_proof_conflicts_cannot_repromote_a_loop.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 70 # tests/mir_fact_lifecycle.rs:609 index loop keeps its bounds check
+stdout: ~ "1" # tests/mir_fact_lifecycle.rs:609 index loop keeps its bounds check
+stdout: ~ "2" # tests/mir_fact_lifecycle.rs:609 index loop keeps its bounds check
+stdout: ~ "3" # tests/mir_fact_lifecycle.rs:609 index loop keeps its bounds check
+stdout: !~ "Error" # tests/mir_fact_lifecycle.rs:609 index loop keeps its bounds check
+stderr: ~ "E3010" # tests/mir_fact_lifecycle.rs:609 index loop keeps its bounds check

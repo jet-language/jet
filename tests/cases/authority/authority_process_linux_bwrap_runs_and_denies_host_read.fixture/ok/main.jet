@@ -1,0 +1,21 @@
+
+use core.process as process
+
+fn run() {
+    policy :: process.workspace()
+    spec :: process.cmd(["printf", "sandboxed"]).cwd("/tmp").under(policy)
+    if spec.plan() == {
+        .Ok(plan) -> {
+            if {
+                plan.backend == "linux-bwrap" -> {
+                    if spec.run_checked() == {
+                        .Ok(value) -> print(value.output)
+                        .Err(_) -> print("denied")
+                    }
+                }
+                else -> print("wrong-backend")
+            }
+        }
+        .Err(_) -> print("refused")
+    }
+}

@@ -1,0 +1,24 @@
+# tests/dev_parts/routine.rs::persist_binding_survives_hot_swap_and_resets_on_shape_change at tests/dev_parts/routine.rs:5872; hand-port (the Rust interpreter backend run / hot_swap / restart is carried by `jet dev --swap` sessions on one file; restart is a fresh session on v2)
+fixture: persist_binding_survives_hot_swap_and_resets_on_shape_change.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+session app line: jet dev persist.jet --swap
+recv app line until = "1" within 30s
+write: persist.jet persist_binding_survives_hot_swap_and_resets_on_shape_change.fixture/v2.template
+# original: a compatible reload keeps the mutated Int, not 99
+recv app line until = "2" within 30s
+write: persist.jet persist_binding_survives_hot_swap_and_resets_on_shape_change.fixture/v3.template
+# original: the shape change reinitialises from the Bool initializer
+recv app line until = "true" within 30s
+signal app: KILL
+close app
+exit: any # original status unasserted: the session is killed
+write: persist.jet persist_binding_survives_hot_swap_and_resets_on_shape_change.fixture/v2.template
+session again line: jet dev persist.jet --swap
+# original: restart clears persist and uses the new initializer
+recv again line until = "100" within 30s
+signal again: KILL
+close again
+exit: any # original status unasserted: the session is killed

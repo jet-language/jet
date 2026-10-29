@@ -195,7 +195,7 @@ use std.path.[PathBuf]
     doc_path :: PathBuf.from(env.manifest_dir()).join("Docs/spec/reference/canvas-protocol.md")
     doc :: fs.read_to_string(doc_path).expect("Canvas protocol reference")
     loop term in [
-        "jet.canvas.project", "jet.canvas.project.edit", "project_revision", "project_root", "add_dependency", "remove_dependency", "edit_pkg_field", "add_target", "add_env_service", "create_package", "add_workspace_member", "member_path", "package_path", "missing", "touched", "preview_only", "source_transaction", "state_policy", "env.jet", "services", "single_file", "package", "workspace", "jet.canvas.graph", "jet.canvas.edit", "schema_version", "source_id", "revision", "fmt_fingerprint", "graphs", "archetype", "diagnostics", "facts", "facts.blueprint", "runtime_events", "event_dispatchers", "executed, payload-free", "interfaces", "task_flows", "rails", "source_text", "jet.canvas.debug", "debug_overlay", "breakpoint_spans", "watches", "comment_boxes", "staged_nodes", "jet.canvas.query", "project_search", "result_limit", "truncated", "source_to_graph", "preview_rename", "actions", "palette_entries", "project_functions", "jet.canvas.action", "preview_canvas_action", "canvas.action", "checked-tir+jit", "source_transaction_only", "external adapter", "jet.canvas.source_control", "Review Lens M3", "text diff first", "semantic sidecars", "dirty", "dirty_files", "files", "history", "canvas:comment", "noop", "rename_binding", "edit_inline_expr", "create_comment_region", "edit_comment_region", "delete_comment_region", "replace_source", "insert_branch", "insert_switch", "insert_loop", "insert_fallible_rail", "canvas:collapse", "create_collapsed_region", "preview_extract_inline_expr", "extract_inline_expr", "inline_helper_call", "insert_call", "create_trait_impl", "conflict"
+        "jet.canvas.project", "jet.canvas.project.edit", "project_revision", "project_root", "add_dependency", "remove_dependency", "edit_pkg_field", "add_target", "add_env_service", "create_package", "add_workspace_member", "member_path", "package_path", "missing", "touched", "preview_only", "source_transaction", "state_policy", "env.jet", "services", "single_file", "package", "workspace", "jet.canvas.graph", "jet.canvas.edit", "schema_version", "source_id", "revision", "fmt_fingerprint", "graphs", "archetype", "diagnostics", "facts", "facts.blueprint", "runtime_events", "event_dispatchers", "executed, payload-free", "interfaces", "task_flows", "rails", "source_text", "jet.canvas.debug", "debug_overlay", "breakpoint_spans", "watches", "comment_boxes", "staged_nodes", "jet.canvas.query", "project_search", "result_limit", "truncated", "source_to_graph", "preview_rename", "actions", "palette_entries", "project_functions", "jet.canvas.action", "preview_canvas_action", "canvas.action", "checked+jit", "source_transaction_only", "external adapter", "jet.canvas.source_control", "Review Lens M3", "text diff first", "semantic sidecars", "dirty", "dirty_files", "files", "history", "canvas:comment", "noop", "rename_binding", "edit_inline_expr", "create_comment_region", "edit_comment_region", "delete_comment_region", "replace_source", "insert_branch", "insert_switch", "insert_loop", "insert_fallible_rail", "canvas:collapse", "create_collapsed_region", "preview_extract_inline_expr", "extract_inline_expr", "inline_helper_call", "insert_call", "create_trait_impl", "conflict"
     ] -> assert(doc.contains(term), "protocol doc missing `{term}`")
     path :: write_fixture("protocol", CANVAS_FIXTURE)
     graph :: Canvas.graph_json_for_file(path).expect("canvas graph")
@@ -242,9 +242,9 @@ use std.path.[PathBuf]
 // Rust: tests/canvas.rs:5987
 #Test("canvas_details_are_descriptor_driven_and_dom_safe") {
     repo :: PathBuf.from(env.manifest_dir())
-    inspector :: fs.read_to_string(repo.join("crates/jet-canvas/src/js/inspector-connections.js")).expect("read inspector JavaScript")
-    diagnostics :: fs.read_to_string(repo.join("crates/jet-canvas/src/js/diagnostics-query.js")).expect("read diagnostics JavaScript")
-    project :: fs.read_to_string(repo.join("crates/jet-canvas/src/js/project-navigation.js")).expect("read project JavaScript")
+    inspector :: fs.read_to_string(repo.join("Compiler/JetCanvas/Source/CanvasAssets/js/inspector-connections.js")).expect("read inspector JavaScript")
+    diagnostics :: fs.read_to_string(repo.join("Compiler/JetCanvas/Source/CanvasAssets/js/diagnostics-query.js")).expect("read diagnostics JavaScript")
+    project :: fs.read_to_string(repo.join("Compiler/JetCanvas/Source/CanvasAssets/js/project-navigation.js")).expect("read project JavaScript")
     loop term in ["function renderFieldDescriptors", "function validatedFieldDescriptors", "function appendSafeDescriptorAttributes", "function detailsEditorSelectionIsCurrent", "if (state.phase === \"applying\") return false", "apply_op", "function variableDetailDescriptors", "function functionDetailDescriptors", "function nodeDetailDescriptors"] -> assert(inspector.contains(term), inspector)
     assert(inspector.contains("const operationCache = new WeakMap()"), "descriptor operations must be normalized once per render: {inspector}")
     assert(inspector.contains("operationCache.has(operation)"), "descriptor operations must share one live control group: {inspector}")
@@ -264,7 +264,7 @@ use std.path.[PathBuf]
 #Test("canvas_javascript_assets_are_independently_syntax_checked_and_ordered") {
     ASSETS :: ["runtime-state.js", "session-workbench.js", "editing-history.js", "diagnostics-query.js", "drawing-palette.js", "project-navigation.js", "graph-rendering.js", "inspector-connections.js", "input-events.js", "transactions-catalog.js", "review.js", "bootstrap.js"]
     repo :: PathBuf.from(env.manifest_dir())
-    asset_dir :: repo.join("crates/jet-canvas/src/js")
+    asset_dir :: repo.join("Compiler/JetCanvas/Source/CanvasAssets/js")
     discovered := fs.read_dir(asset_dir).unwrap_or_else(err -> panic("read {asset_dir.display()}: {err}"))
         .filter_map(entry -> {
             path :: entry.expect("read Canvas JS asset entry").path()
@@ -291,8 +291,8 @@ use std.path.[PathBuf]
         assert(output.status.success(), "node --check failed for {path.display()}:\n{String.from_utf8_lossy(output.stderr)}")
     }
     assert_eq(previous_end + "}})();\n".len(), runtime.len())
-    glue :: fs.read_to_string(repo.join("crates/jet-canvas/src/js.rs")).expect("read Canvas JS glue")
-    assert(glue.lines().count() < 40, "js.rs must remain assembly glue")
+    glue :: fs.read_to_string(repo.join("Compiler/JetCanvas/Source/CanvasAssets/Javascript.jet")).expect("read Canvas JS glue")
+    assert(glue.lines().count() < 60, "Javascript.jet must remain assembly glue")
 }
 
 // Rust: tests/canvas.rs:6160

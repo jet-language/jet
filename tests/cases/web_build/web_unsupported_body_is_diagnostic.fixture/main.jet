@@ -1,0 +1,14 @@
+#Target(Web)
+
+// @web_target
+// D-WEBTIR1: web output has no lowering for a structured `task.group` — the
+// browser artifact is single-threaded, so the group statement never reaches
+// the JS or Wasm emitter. This fixture is the only rendering of
+// E-WEB-UNSUPPORTED, so it must stay on a construct web TIR refuses.
+fn run() {
+    task.group workers {
+        child :: task { 7 }
+        value :: child.join() ?? 0
+        print("{value}")
+    }
+}

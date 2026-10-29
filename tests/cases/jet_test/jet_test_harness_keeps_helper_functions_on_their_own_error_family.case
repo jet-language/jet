@@ -1,0 +1,10 @@
+# tests/jet_test.rs::jet_test_harness_keeps_helper_functions_on_their_own_error_family at tests/jet_test.rs:2095; hand-port
+# Fixture migrated: tir_support::write_test_package -> package "tir" fixture; #Error struct fixture copied verbatim from jet_test.rs:2117-2166
+fixture: jet_test_harness_keeps_helper_functions_on_their_own_error_family.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet test --show-default --serial helpers.jet
+exit: 1 # tests/jet_test.rs:2095-2193
+stdout: ~ "helpers with assert and ?? panic build inside a test harness: pass" # tests/jet_test.rs:2095-2193
+stdout: ~ "a failing harness assertion is still a caught failure: FAIL" # tests/jet_test.rs:2095-2193

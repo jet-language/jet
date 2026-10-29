@@ -1,0 +1,279 @@
+// A struct field on a recursive type cycle is a recursive edge: its value
+// lives in a wrapper box the struct owns, freed with the struct. Each
+// scenario runs `warm` rounds, reads the peak resident set (VmHWM), runs
+// 8 * `warm` more rounds and reads it again: a wrapper (or the value in it)
+// that outlives its struct grows the peak with the round count. The
+// checksums catch a wrapper freed while a copy still reads it. The same
+// scenarios run at compile time (CT_CHECKSUM).
+package {
+    name: "cycle_struct_edges_free_with_their_struct"
+    authority: { allow: [FS.Read, IO] }
+}
+
+use core.files as files
+
+// Grows more than this (kB) over the measured rounds: a leak.
+GROWTH_KB :: 8192
+
+// A struct in an enum's list payload (Field -> Ty -> [Field]).
+struct Field {
+    name: String
+    ty: Ty
+}
+
+enum Ty {
+    Int
+    Named(name: String)
+    Tuple(fields: [Field])
+}
+
+// A struct reaching itself through an Option field.
+struct Node {
+    name: String
+    next: Node?
+}
+
+// A struct reaching itself through Map values.
+struct Tree {
+    name: String
+    kids: [String:Tree]
+}
+
+// A struct reaching itself through a tuple field and an enum.
+struct Pairing {
+    name: String
+    pair: (label: String, link: Link)
+}
+
+enum Link {
+    End
+    To(pairing: Pairing)
+}
+
+// A struct reaching itself through a struct field and a list: writes
+// through one copy's edge must not show in the others.
+struct Outer {
+    name: String
+    inner: Inner
+}
+
+struct Inner {
+    n: Int
+    tag: String
+    back: [Outer]
+}
+
+// Mutually recursive enums with a struct on the cycle (Left -> Middle -> Right -> Left).
+enum Left {
+    Leaf(n: String)
+    Wrap(middle: Middle)
+}
+
+struct Middle {
+    name: String
+    right: Right
+}
+
+enum Right {
+    Leaf(n: String)
+    Wrap(left: Left)
+}
+
+// A struct whose only field is the recursive edge, also captured by a closure.
+struct CycleOnly {
+    ty: Shape
+}
+
+enum Shape {
+    Int
+    Named(name: String)
+    Other(items: [CycleOnly])
+}
+
+fn peak_kb() -> Int {
+    status :: files.read("/proc/self/status") ?? panic("read /proc/self/status")
+    loop line in status.split("\n") {
+        if !line.starts_with("VmHWM:") -> next
+        loop field in line.slice(6, line.len()).trim().split(" ") {
+            if field.len() > 0 -> return Int.parse(field.copy()) ?? panic("VmHWM field")
+        }
+    }
+    panic("no VmHWM line")
+}
+
+fn measure(name: String, scenario: fn(Int, Int) -> Int, warm: Int) {
+    first :: scenario(0, warm)
+    before :: peak_kb()
+    second :: scenario(warm, 9 * warm)
+    grown :: peak_kb() - before
+    if grown > GROWTH_KB -> panic("{name}: peak RSS grew {grown} kB over {8 * warm} rounds")
+    print("{name}: flat, checksum {first + second}")
+}
+
+fn ty_size(ty: Ty) -> Int {
+    if ty == {
+        .Int -> 1
+        .Named(name) -> name.len()
+        .Tuple(fields) -> {
+            n := 1
+            loop field in fields {
+                n += ty_size(field.ty) + field.name.len()
+            }
+            n
+        }
+    }
+}
+
+fn in_list(from: Int, to: Int) -> Int {
+    total := 0
+    loop i in from..<to {
+        t :: Ty.Tuple{fields: [Field{name: "a{i}", ty: Ty.Int}, Field{name: "b", ty: Ty.Tuple{fields: [Field{name: "c", ty: Ty.Named{name: "n{i}"}}]}}]}
+        u :: t.copy()
+        total += ty_size(t) + ty_size(u)
+    }
+    total
+}
+
+fn depth(node: Node) -> Int {
+    if node.next == .Val(inner) -> 1 + depth(inner) else -> 1
+}
+
+fn cut(node: &Node) {
+    node.next = None
+}
+
+fn via_option(from: Int, to: Int) -> Int {
+    total := 0
+    loop i in from..<to {
+        x :: Node{name: "a{i}", next: Val(Node{name: "b{i}", next: None})}
+        y := x.copy()
+        y.name = "z{i}"
+        y.next = Val(Node{name: "c{i}", next: Val(Node{name: "d", next: None})})
+        total += depth(x) + depth(y)
+        cut(&y)
+        total += depth(y) + y.name.len()
+    }
+    total
+}
+
+fn count(tree: Tree) -> Int {
+    n := tree.name.len()
+    loop (_, kid) in tree.kids {
+        n += count(kid)
+    }
+    n
+}
+
+fn via_map(from: Int, to: Int) -> Int {
+    total := 0
+    loop i in from..<to {
+        kids := [String:Tree]{}
+        kids["x"] = Tree{name: "x{i}", kids: [String:Tree]{}}
+        kids["y"] = Tree{name: "y", kids: [String:Tree]{}}
+        t :: Tree{name: "r{i}", kids: kids}
+        u := t.copy()
+        u.name = "u"
+        total += count(t) + count(u)
+    }
+    total
+}
+
+fn pairing_size(pairing: Pairing) -> Int {
+    if pairing.pair.link == .To(inner) -> 1 + pairing_size(inner) else -> pairing.pair.label.len()
+}
+
+fn via_tuple(from: Int, to: Int) -> Int {
+    total := 0
+    loop i in from..<to {
+        inner :: Pairing{name: "i{i}", pair: (label: "l{i}", link: Link.End)}
+        w :: Pairing{name: "o", pair: (label: "m", link: Link.To{pairing: inner})}
+        v := w.copy()
+        v.pair = (label: "n{i}", link: Link.End)
+        total += pairing_size(w) + pairing_size(v)
+    }
+    total
+}
+
+fn left_size(left: Left) -> Int {
+    if left == {
+        .Leaf(n) -> n.len()
+        .Wrap(middle) -> middle.name.len() + right_size(middle.right)
+    }
+}
+
+fn right_size(right: Right) -> Int {
+    if right == {
+        .Leaf(n) -> n.len()
+        .Wrap(left) -> 1 + left_size(left)
+    }
+}
+
+fn mutual(from: Int, to: Int) -> Int {
+    total := 0
+    loop i in from..<to {
+        a :: Left.Wrap{middle: Middle{name: "s{i}", right: Right.Wrap{left: Left.Wrap{middle: Middle{name: "t", right: Right.Leaf{n: "l{i}"}}}}}}
+        c :: a.copy()
+        total += left_size(a) + left_size(c)
+    }
+    total
+}
+
+fn shape_weight(shape: Shape) -> Int {
+    if shape == {
+        .Int -> 1
+        .Named(name) -> name.len()
+        .Other(items) -> items.len()
+    }
+}
+
+fn only_edge(from: Int, to: Int) -> Int {
+    total := 0
+    loop i in from..<to {
+        x :: CycleOnly{ty: Shape.Named{name: "n{i}"}}
+        y := x.copy()
+        y.ty = Shape.Other{items: [CycleOnly{ty: Shape.Named{name: "m{i}"}}]}
+        f :: (n: Int) -> n + shape_weight(x.ty)
+        total += f(shape_weight(y.ty))
+    }
+    total
+}
+
+fn bump(inner: &Inner) {
+    inner.n += 10
+    inner.tag = "bumped"
+}
+
+fn write_through(from: Int, to: Int) -> Int {
+    total := 0
+    loop i in from..<to {
+        x :: Outer{name: "x{i}", inner: Inner{n: 1, tag: "t{i}", back: []}}
+        y := x.copy()
+        y.inner.n = 5
+        z := y.copy()
+        bump(&z.inner)
+        w := z.copy()
+        &w.inner.back.push(Outer{name: "b", inner: Inner{n: 2, tag: "u", back: []}})
+        if x.inner.n != 1 || y.inner.n != 5 || z.inner.n != 15 || w.inner.n != 15 -> panic("a write through a copy's edge showed in another copy")
+        if x.inner.tag != "t{i}" || y.inner.tag != "t{i}" || z.inner.tag != "bumped" -> panic("a tag write showed in another copy")
+        if z.inner.back.len() != 0 || w.inner.back.len() != 1 -> panic("a list write showed in another copy")
+        total += x.inner.n + y.inner.n + z.inner.n + w.inner.n + w.inner.back[0].inner.n
+    }
+    total
+}
+
+fn all_shapes(rounds: Int) -> Int {
+    in_list(0, rounds) + via_option(0, rounds) + via_map(0, rounds) + via_tuple(0, rounds) + mutual(0, rounds) + only_edge(0, rounds) + write_through(0, rounds)
+}
+
+CT_CHECKSUM :: comptime { all_shapes(20000) }
+
+fn run() {
+    measure("struct in an enum's list payload", in_list, 100000)
+    measure("struct through an Option field", via_option, 100000)
+    measure("struct through Map values", via_map, 50000)
+    measure("struct through a tuple field", via_tuple, 100000)
+    measure("mutually recursive enums", mutual, 100000)
+    measure("recursive edge as the only field", only_edge, 100000)
+    measure("writes through a copy's edge", write_through, 100000)
+    print("compile time: checksum {CT_CHECKSUM}, run time: checksum {all_shapes(20000)}")
+}

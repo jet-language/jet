@@ -1,8 +1,8 @@
-Error [E-ERR-PROPAGATE]: Bare `?` propagation is retired.
-  --> tests/ui/analytics_query_unknown_column.jet:10:88
+Error [E2420]: Unknown analytics column `quntity`
+  --> tests/ui/analytics_query_unknown_column.jet:10:43
     |
- 10 |     sales :: csv.query<Sale>("sales.csv", SQL{"SELECT * FROM sales WHERE quntity > 1"})?
-    |                                                                                        ^
- Why: Fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
- Fix: Remove the trailing `?`, or write `?(text)` to add one context frame.
-More: jet-lang.dev/e/E-ERR-PROPAGATE
+ 10 |     query :: csv.query<Sale>("sales.csv", SQL{"SELECT * FROM sales WHERE quntity > 1"})
+    |                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: `quntity` is not a field on `Sale`; the analytics engine would fail at runtime, but Jet checks this schema at compile time
+ Fix: Write one of: item, qty
+More: jet-lang.dev/e/E2420

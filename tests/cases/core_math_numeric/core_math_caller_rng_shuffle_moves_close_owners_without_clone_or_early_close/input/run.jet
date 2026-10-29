@@ -1,0 +1,21 @@
+
+use core.math.random as random
+
+struct Ticket { id: Int, payload: [U8] }
+impl Ticket.Close {
+    fn close(^self) { print("close token {self.payload.len()}") }
+}
+fn shuffled() {
+    stream := random.rng(42)
+    owners := [Ticket]{
+        Ticket{id: 1, payload: [U8]{11}},
+        Ticket{id: 2, payload: [U8]{22}},
+        Ticket{id: 3, payload: [U8]{33}},
+    }
+    &stream.shuffle(&owners)
+    loop owner in owners -> print("{owner.id}:{owner.payload[0]}")
+}
+fn run() {
+    shuffled()
+    print("released")
+}

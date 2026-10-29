@@ -1,0 +1,18 @@
+# HAND-PORT tests/tir_control_and_data.rs:2510-2524 card_2841_labeled_loop_value_tier_parity
+# PENDING-SAME-HEAD runtimeGap=build/admission; PENDING-GRAMMAR; original assertions, no historical failing captures.
+# ORACLE-LITERAL; exact original default/interpreter/AOT stderr+stdout+exit parity.
+fixture: card_2841_labeled_loop_value_tier_parity.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+env: JET_STORE_DIR={work}/cache-default
+env: JETPACK_ROOT={work}/jetpack-default
+exit: 0
+stdout: = card_2841_labeled_loop_value_tier_parity.stdout.expected
+step: jet build --profile=debug main.jet
+env: JET_STORE_DIR={work}/cache-aot
+env: JETPACK_ROOT={work}/jetpack-aot
+exit: 0
+step aot: built
+exit: 0
+stdout: = card_2841_labeled_loop_value_tier_parity.stdout.expected
+stderr: == default

@@ -1,0 +1,17 @@
+# tests/ownership.rs::unmarked_take_keeps_mark_for_cleanup_generic_and_capture at tests/ownership.rs:2734; hand-port
+# Claim: a value holding a Close field keeps ^ and is refused with E0209 or E0201 (tests/ownership.rs:2756-2760)
+# Claim: a type parameter keeps ^ and is refused with E0209 (tests/ownership.rs:2773-2774)
+# Claim: a captured name keeps ^ and is refused with E0209 (tests/ownership.rs:2785-2786)
+# Fixture migrated: the three Rust sub-cases become fixture dirs close/, generic/, capture/ (package none, so each dir is its own namespace)
+fixture: unmarked_take_keeps_mark_for_cleanup_generic_and_capture.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check close/main.jet
+exit: 1 # tests/ownership.rs:2756-2760 expects E0209 or E0201
+step: jet check generic/main.jet
+exit: 1 # tests/ownership.rs:2773-2774
+stderr: ~ "E0209" # tests/ownership.rs:2773-2774
+step: jet check capture/main.jet
+exit: 1 # tests/ownership.rs:2785-2786
+stderr: ~ "E0209" # tests/ownership.rs:2785-2786

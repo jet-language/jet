@@ -11,14 +11,12 @@ use jet_foundation.[
     ParamZone,
     Span,
     SymbolID,
-    TCallArg,
-    TExpr,
-    TExprKind,
     TFailureCarrier,
-    THandleOp,
     Type,
     type_identity_equal,
     type_name,
+    core_source_owns_type,
+    core_identity_is,
 ]
 
 enum SemaExpressionLayoutAxis {
@@ -225,7 +223,7 @@ fn sema_expression_measurement_inner(ty: Type, environment: SemaScopeEnvironment
         }
         else -> ""
     }
-    if name != "Measurement" && name != "core.units::Measurement" && !(core_source_owns_type(name) && name.ends_with("::Core/units/units.jet::Measurement")) -> return None
+    if name != "Measurement" && name != "core.units::Measurement" && !(core_source_owns_type(name) && core_identity_is(name, "core.units", "Measurement")) -> return None
     nominal_row :: sema_type_resolve_nominal_row(graph, resolved, environment.module_identity)
     if nominal_row == .Val(row) {
         owner :: graph.modules[row.module_index].nominals[row.row]
@@ -247,10 +245,11 @@ fn sema_expression_measurement_source_call(function: String, values: [TExpr], re
     if program.registration_graph == .Val(graph) {
     source_index :: sema_registration_module_index(graph, source_identity) ?? return None
     callee :: sema_registration_direct_symbol(graph.modules[source_index], function) ?? return None
+    callee_id :: sema_registration_callable_id(graph, callee.symbol.id.key) ?? return None
     arguments :: loop value in values -> TCallArg{value: value, template_items: [SymbolID]{}, borrow: !sema_call_is_scalar(value.ty), mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
     // copy: `error` is a payload of read parameter `result_type`, which keeps the original; the list literal owns this one
     type_args :: if function == "__measurement_result" && result_type == .Result(_, error) -> [Type]{error.copy()} else -> [Type]{}
-    return Val(sema_tir_node(result_type, TExprKind.Call{callee: callee.symbol.id, type_args: type_args, args: arguments}, span))
+    return Val(sema_tir_node(result_type, TExprKind.Call{callee: callee_id, type_args: type_args, args: arguments}, span))
     }
     None
 }

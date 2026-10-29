@@ -1,8 +1,10 @@
 // Source/main.rs run_toolchain/require_manifest_root. Root selection is the
 // checked package authority, not receipt/repository selection or a text scan.
 use core.files as cli_files
-use jet_foundation.diagnostic_render_all
-
+use jet_foundation.[diagnostic_render_all]
+use jet_pkg_model.[WorkspaceDeclarationCache]
+use jet_driver.[JET_DRIVER_EXIT_USER_ERROR]
+use jetpack_trust.[trust_pin_report]
 
 fn jet_cli_self_toolchain(json: Bool) -[FS, Env]> JetCLIPlan Never! {
     cwd :: cli_files.cwd() ?? "."

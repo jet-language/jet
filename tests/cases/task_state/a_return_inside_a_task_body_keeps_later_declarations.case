@@ -1,0 +1,15 @@
+# tests/task_state.rs::a_return_inside_a_task_body_keeps_later_declarations at tests/task_state.rs:114; hand-port
+fixture: a_return_inside_a_task_body_keeps_later_declarations.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet check valueless/run.jet
+exit: any # the original asserts only the codes
+stderr: !~ "[E0107]" # tests/task_state.rs:124 a task-body return must not erase later declarations
+stderr: !~ "[E0102]" # tests/task_state.rs:124
+step: jet check mistaken/run.jet
+exit: any # the original asserts only the codes
+stderr: ~any "Error [" "Warning [" # tests/task_state.rs:144 the value-returning task body is still reported
+stderr: !~ "[E0107]" # tests/task_state.rs:140 no phantom name cascade behind the real error
+stderr: !~ "[E0102]" # tests/task_state.rs:140

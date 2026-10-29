@@ -27,13 +27,16 @@ Compiler/JetFoundation/Source/Diagnostics/Render.jet
 Compiler/JetFoundation/Source/Registry/Explain.jet
 Compiler/JetFoundation/Source/Types/Types.jet
 Compiler/JetFoundation/Source/Types/IntegerKinds.jet
-Compiler/JetFoundation/Source/Types/TupleNames.jet
-Compiler/JetFoundation/Source/MIR/MIR.jet
-Compiler/JetFoundation/Source/MIR/Digest/Digest.jet
+Compiler/JetFoundation/Source/Hash/StableID.jet
+Compiler/JetFoundation/Source/Facts/SourceFile.jet
+Compiler/JetFoundation/Source/Facts/Checked.jet
+Compiler/JetFoundation/Source/Names/NameFacts.jet
+Compiler/JetFoundation/Source/Target/TargetFacts.jet
 Compiler/JetFoundation/Source/Derivations.jet
-Compiler/JetFoundation/Source/TIR/TIR.jet
-Compiler/JetFoundation/Source/TIR/InlineAssembly.jet
-Compiler/JetFoundation/Source/TIR/TestArtifacts.jet
+Compiler/JetFoundation/Source/Facts/Comptime.jet
+Compiler/JetFoundation/Source/Facts/Declarations.jet
+Compiler/JetFoundation/Source/Facts/InlineAssembly.jet
+Compiler/JetFoundation/Source/Facts/TestArtifacts.jet
 Compiler/JetFoundation/Source/Record/RecordCodec.jet
 Compiler/JetFoundation/Source/Record/JetLib.jet
 Compiler/JetFoundation/Source/Rings/RingLayer.jet
@@ -41,7 +44,6 @@ Compiler/JetFoundation/Source/Target/Layout.jet
 Compiler/JetFoundation/Source/Target/TargetMachine.jet
 Compiler/JetFoundation/Source/Target/ReleaseDevtools.jet
 Compiler/JetFoundation/Source/Collections.jet
-Compiler/JetFoundation/Source/RegexSyntax.jet
 Compiler/JetFoundation/Source/Registry/CoreHostSignatures.jet
 Compiler/JetFoundation/Source/Registry/CorePlatformSignatures.jet
 Compiler/JetFoundation/Source/Registry/CoreValueSignatures.jet
@@ -51,6 +53,8 @@ Compiler/JetFoundation/Source/Policy/CoreMenus.jet
 Compiler/JetFoundation/Source/Policy/AppliedRules.jet
 Compiler/JetFoundation/Source/Policy/Policy.jet
 Compiler/JetFoundation/Source/Policy/LintPolicy.jet
+Compiler/JetFoundation/Source/Policy/PreludeMarkers.jet
+Compiler/JetFoundation/Source/Policy/MarkerSource.jet
 Compiler/JetFoundation/Source/Evidence/Evidence.jet
 Compiler/JetFoundation/Source/Evidence/TestingComparison.jet
 Compiler/JetFoundation/Source/AST/Expressions.jet
@@ -84,7 +88,7 @@ Compiler/JetParser/Source/Parser/Declarations/Policies.jet
 Compiler/JetParser/Source/Parser/AuthorityScopes.jet
 Compiler/JetFoundation/Source/AST/Names.jet
 Compiler/JetFoundation/Source/DerivationTypes.jet
-Compiler/JetFoundation/Source/TIR/CostFacts.jet
+Compiler/JetFoundation/Source/Facts/CostFacts.jet
 Compiler/JetFoundation/Source/Text/Read.jet
 Compiler/JetFoundation/Source/Encoding/ProtocolJson.jet
 Compiler/JetFoundation/Source/Encoding/CompilerService.jet
@@ -97,6 +101,15 @@ Compiler/JetParser/Source/Parser/NamedMarkerGroups.jet
 Compiler/JetParser/Source/Parser/Declarations/Outputs.jet
 Compiler/JetFoundation/Source/CLISchema/Schema.jet
 Compiler/JetFoundation/Source/Names/Casing.jet
+Compiler/JetFoundation/Source/Facts/Body.jet
+Compiler/JetFoundation/Source/Outcome/ErrorReport.jet
+Compiler/JetFoundation/Source/Registry/BuildOptions.jet
+Compiler/JetFoundation/Source/Registry/CoreSourceOwned.jet
+Compiler/JetFoundation/Source/Threads.jet
+Compiler/JetParser/Source/Formatter/Expressions.jet
+Compiler/JetParser/Source/Formatter/Formatter.jet
+Compiler/JetParser/Source/Formatter/Items.jet
+Compiler/JetParser/Source/Formatter/Statements.jet
 
 # == Foundation ==
 Jetpack/Foundation/Source/CoreImports.jet
@@ -108,7 +121,8 @@ Jetpack/Foundation/Source/GeneratedNames.jet
 Jetpack/Foundation/Source/ProjectLock.jet
 Jetpack/Foundation/Source/Report.jet
 Jetpack/Foundation/Source/TreeHash.jet
-Jetpack/Foundation/Source/Authority.jet
+Compiler/JetFoundation/Source/Registry/EffectVocabulary.jet
+Compiler/JetFoundation/Source/Policy/Authority.jet
 Jetpack/Foundation/Source/NativeSandbox.jet
 Jetpack/Foundation/Source/SandboxPolicy.jet
 Jetpack/Foundation/Source/DevelopmentReceipt.jet
@@ -122,7 +136,6 @@ Jetpack/PackageModel/Source/Text/Digest.jet
 Jetpack/PackageModel/Source/Text/JsonTree.jet
 Jetpack/PackageModel/Source/Text/JsonBounded.jet
 Jetpack/PackageModel/Source/Platform/Platform.jet
-Jetpack/PackageModel/Source/CompilerExtension/CompilerExtension.jet
 Jetpack/PackageModel/Source/Refs/RefSpec.jet
 Jetpack/PackageModel/Source/Refs/RefMigration.jet
 Jetpack/PackageModel/Source/Merge/FactLaw.jet
@@ -136,8 +149,6 @@ Jetpack/PackageModel/Source/Variant/Variant.jet
 Jetpack/PackageModel/Source/Provider/ProviderSelector.jet
 Jetpack/PackageModel/Source/Provider/ProviderFacts.jet
 Jetpack/PackageModel/Source/Provider/ProviderFactsJson.jet
-Jetpack/PackageModel/Source/Mcp/McpProtocol.jet
-Jetpack/PackageModel/Source/Mcp/McpMessages.jet
 Jetpack/PackageModel/Source/Bundle/BundlePlan.jet
 Jetpack/PackageModel/Source/Foreign/OpaqueHandleBinder.jet
 Jetpack/PackageModel/Source/Foreign/Bridge/BinderDescriptor.jet
@@ -145,19 +156,7 @@ Jetpack/PackageModel/Source/Foreign/Bridge/BridgeIdentity.jet
 Jetpack/PackageModel/Source/Foreign/Bridge/BoundaryContract.jet
 Jetpack/PackageModel/Source/Foreign/Bridge/BridgeProvenance.jet
 Jetpack/PackageModel/Source/Foreign/Bridge/ScalarSidecar.jet
-Jetpack/PackageModel/Source/Foreign/RustBridge/Externs.jet
-Jetpack/PackageModel/Source/Foreign/RustBridge/NativeToolchain.jet
-Jetpack/PackageModel/Source/Foreign/RustBridge/RuntimeProviders.jet
-Jetpack/PackageModel/Source/Foreign/RustBridge/WrapperEmit.jet
-Jetpack/PackageModel/Source/Foreign/RustBridge/BridgeCache.jet
-Jetpack/PackageModel/Source/Foreign/RustBridge/BuildBridge.jet
-Jetpack/PackageModel/Source/Foreign/RustBridge/Prepare.jet
-Jetpack/PackageModel/Source/Foreign/C/BindingMetadata.jet
-Jetpack/PackageModel/Source/Foreign/C/LinkResolution.jet
-Jetpack/PackageModel/Source/Foreign/C/ArtifactValidation.jet
-Jetpack/PackageModel/Source/Foreign/C/ImportAssembly.jet
 Jetpack/PackageModel/Source/Foreign/BindingPlan.jet
-Jetpack/PackageModel/Source/Foreign/RendererRegistry.jet
 Jetpack/PackageModel/Source/Foreign/C/HeaderParser.jet
 Jetpack/PackageModel/Source/Foreign/C/BindingRender.jet
 Jetpack/PackageModel/Source/Foreign/C/HeaderBinder.jet
@@ -170,13 +169,6 @@ Jetpack/PackageModel/Source/Foreign/Data/ProtoSchemaBinder.jet
 Jetpack/PackageModel/Source/Foreign/Binders/BinderTools.jet
 Jetpack/PackageModel/Source/Foreign/Binders/BinderRender.jet
 Jetpack/PackageModel/Source/Foreign/WorkerSupervisor.jet
-Jetpack/PackageModel/Source/Foreign/Binders/PowerShell.jet
-Jetpack/PackageModel/Source/Foreign/Binders/Perl.jet
-Jetpack/PackageModel/Source/Foreign/Binders/Ruby.jet
-Jetpack/PackageModel/Source/Foreign/Binders/Php.jet
-Jetpack/PackageModel/Source/Foreign/Binders/R.jet
-Jetpack/PackageModel/Source/Foreign/Binders/Octave.jet
-Jetpack/PackageModel/Source/Foreign/Binders/Lua.jet
 Jetpack/PackageModel/Source/Foreign/Binders/Tcl.jet
 Jetpack/PackageModel/Source/Foreign/Binders/Go.jet
 Jetpack/PackageModel/Source/Foreign/Binders/Python.jet
@@ -186,11 +178,7 @@ Jetpack/PackageModel/Source/Foreign/Binders/Pascal.jet
 Jetpack/PackageModel/Source/Foreign/Binders/Ada.jet
 Jetpack/PackageModel/Source/Foreign/Binders/Cobol.jet
 Jetpack/PackageModel/Source/Foreign/Binders/Fortran.jet
-Jetpack/PackageModel/Source/Foreign/Binders/CppClangSurface.jet
-Jetpack/PackageModel/Source/Foreign/Binders/CppShimRender.jet
-Jetpack/PackageModel/Source/Foreign/Binders/Cpp.jet
 Jetpack/PackageModel/Source/Foreign/Binders/DotNet.jet
-Jetpack/PackageModel/Source/Foreign/Binders/Dart.jet
 Jetpack/PackageModel/Source/Foreign/Binders/ComRuntime.jet
 Jetpack/PackageModel/Source/Foreign/Binders/Com.jet
 Jetpack/PackageModel/Source/Bundle/BundleSpec.jet
@@ -245,6 +233,7 @@ Jetpack/PackageModel/Source/Policy/EffectBudget.jet
 Jetpack/PackageModel/Source/Public/PackageViews.jet
 Jetpack/PackageModel/Source/Manifest/EntryCarrier.jet
 Jetpack/PackageModel/Source/Bundle/Materialize.jet
+Jetpack/PackageModel/Source/Registry/RegistryIdentity.jet
 
 # == Publication ==
 Jetpack/Publication/Source/SemVer.jet
@@ -339,7 +328,8 @@ Jetpack/TrustRoot/Source/Metadata.jet
 Jetpack/TrustRoot/Source/Canonical.jet
 Jetpack/TrustRoot/Source/TrustEngine.jet
 
-# == Store ==
+# == Engine (folders: Store, Trust, Provider, Environment, Recipe) ==
+# Store, Trust, Recipe, Provider and Environment use each other in a cycle; one area until #4589 breaks it.
 Jetpack/Store/Source/Hangar/StoreError.jet
 Jetpack/Store/Source/Hangar/StoreText.jet
 Jetpack/Store/Source/Lease/ExecutableLeaseProtocol.jet
@@ -369,6 +359,10 @@ Jetpack/Store/Source/ArtifactStore/BuildRecord.jet
 Jetpack/Store/Source/ArtifactStore/Codec.jet
 Jetpack/Store/Source/ArtifactStore/Leases.jet
 Jetpack/Store/Source/ArtifactStore/Store.jet
+Jetpack/Store/Source/ArtifactStore/Records.jet
+Jetpack/Store/Source/ArtifactStore/ProjectState.jet
+Jetpack/Store/Source/ArtifactStore/DiagnosticRecord.jet
+Jetpack/Store/Source/ArtifactStore/Receipt.jet
 Jetpack/Store/Source/ArtifactStore/RuntimeSourceExport.jet
 Jetpack/Store/Source/ArtifactStore/NativeRuntimeCache.jet
 Jetpack/Store/Source/Lifecycle/PinnedDirectory.jet
@@ -407,7 +401,6 @@ Jetpack/Store/Source/Explain/ExplainProfiles.jet
 Jetpack/Store/Source/Explain/PackageWhy.jet
 Jetpack/Store/Source/ArtifactStore/NativeRuntimePack.jet
 
-# == Trust ==
 Jetpack/Trust/Source/Text/TrustText.jet
 Jetpack/Trust/Source/SemanticLock/LockRecord.jet
 Jetpack/Trust/Source/SemanticLock/LockCodec.jet
@@ -425,10 +418,8 @@ Jetpack/Trust/Source/Gate/EnvironmentHash.jet
 Jetpack/Trust/Source/Gate/TrustGate.jet
 Jetpack/Trust/Source/Pin/PinRead.jet
 Jetpack/Trust/Source/Pin/JetPin.jet
-Jetpack/Trust/Source/Secrets/RepoSecrets.jet
 Jetpack/Trust/Source/TrustError.jet
 
-# == Provider ==
 Jetpack/Provider/Source/Core/Realized.jet
 Jetpack/Provider/Source/Core/HardenedCommands.jet
 Jetpack/Provider/Source/Core/ProviderJson.jet
@@ -475,7 +466,6 @@ Jetpack/Provider/Source/Registries/CpanRegistry.jet
 Jetpack/Provider/Source/Registries/PackagistRegistry.jet
 Jetpack/Provider/Source/Nix/NixBuilder.jet
 
-# == Environment ==
 Jetpack/Environment/Source/EnvironmentError.jet
 Jetpack/Environment/Source/Shell/BrandedShell.jet
 Jetpack/Environment/Source/Shell/NixProjection.jet
@@ -496,6 +486,19 @@ Jetpack/Environment/Source/Overlay/OverlayLockRecords.jet
 Jetpack/Environment/Source/Transition/PackageSourceEdit.jet
 Jetpack/Environment/Source/Transition/TransitionJournal.jet
 Jetpack/Environment/Source/Transition/TransitionPlan.jet
+Jetpack/Recipe/Source/Build/RecipeDiagnostics.jet
+Jetpack/Recipe/Source/Build/ConfinedFs.jet
+Jetpack/Recipe/Source/Build/Fetch.jet
+Jetpack/Recipe/Source/Build/RecipeValidate.jet
+Jetpack/Recipe/Source/Build/StagedPlanRun.jet
+Jetpack/Recipe/Source/Build/RecipeRun.jet
+Jetpack/Recipe/Source/Toolchain/BuildToolchain.jet
+Jetpack/Recipe/Source/Toolchain/ChannelManifest.jet
+Jetpack/Recipe/Source/Toolchain/UpdateTransport.jet
+Jetpack/Recipe/Source/Toolchain/UpdateInstall.jet
+
+# == Secrets ==
+Jetpack/Secrets/Source/RepoSecrets.jet
 
 # == Services ==
 Jetpack/Services/Source/Catalog/ServiceCatalog.jet
@@ -513,23 +516,39 @@ Jetpack/Image/Source/Oci/Tar.jet
 Jetpack/Image/Source/Oci/Projection.jet
 Jetpack/Image/Source/Oci/Registry.jet
 
-# == Recipe ==
-Jetpack/Recipe/Source/Build/RecipeDiagnostics.jet
-Jetpack/Recipe/Source/Build/ConfinedFs.jet
-Jetpack/Recipe/Source/Build/Fetch.jet
-Jetpack/Recipe/Source/Build/RecipeValidate.jet
-Jetpack/Recipe/Source/Build/StagedPlanRun.jet
-Jetpack/Recipe/Source/Build/RecipeRun.jet
-Jetpack/Recipe/Source/Toolchain/BuildToolchain.jet
-Jetpack/Recipe/Source/Toolchain/ChannelManifest.jet
-Jetpack/Recipe/Source/Toolchain/UpdateTransport.jet
-Jetpack/Recipe/Source/Toolchain/UpdateInstall.jet
-
 # == JetOS ==
 Jetpack/JetOS/Source/Types.jet
 Jetpack/JetOS/Source/OptionsRendering.jet
 Jetpack/JetOS/Source/Identity.jet
 Jetpack/JetOS/Source/EtcBootFacts.jet
+
+# == Integrations ==
+Jetpack/Integrations/Source/CompilerExtension/CompilerExtension.jet
+Jetpack/Integrations/Source/Mcp/McpProtocol.jet
+Jetpack/Integrations/Source/Mcp/McpMessages.jet
+Jetpack/Integrations/Source/Foreign/RustBridge/Externs.jet
+Jetpack/Integrations/Source/Foreign/RustBridge/NativeToolchain.jet
+Jetpack/Integrations/Source/Foreign/RustBridge/RuntimeProviders.jet
+Jetpack/Integrations/Source/Foreign/RustBridge/WrapperEmit.jet
+Jetpack/Integrations/Source/Foreign/RustBridge/BridgeCache.jet
+Jetpack/Integrations/Source/Foreign/RustBridge/BuildBridge.jet
+Jetpack/Integrations/Source/Foreign/RustBridge/Prepare.jet
+Jetpack/Integrations/Source/Foreign/C/BindingMetadata.jet
+Jetpack/Integrations/Source/Foreign/C/LinkResolution.jet
+Jetpack/Integrations/Source/Foreign/C/ArtifactValidation.jet
+Jetpack/Integrations/Source/Foreign/C/ImportAssembly.jet
+Jetpack/Integrations/Source/Foreign/RendererRegistry.jet
+Jetpack/Integrations/Source/Foreign/Binders/PowerShell.jet
+Jetpack/Integrations/Source/Foreign/Binders/Perl.jet
+Jetpack/Integrations/Source/Foreign/Binders/Ruby.jet
+Jetpack/Integrations/Source/Foreign/Binders/Php.jet
+Jetpack/Integrations/Source/Foreign/Binders/R.jet
+Jetpack/Integrations/Source/Foreign/Binders/Octave.jet
+Jetpack/Integrations/Source/Foreign/Binders/Lua.jet
+Jetpack/Integrations/Source/Foreign/Binders/CppClangSurface.jet
+Jetpack/Integrations/Source/Foreign/Binders/CppShimRender.jet
+Jetpack/Integrations/Source/Foreign/Binders/Cpp.jet
+Jetpack/Integrations/Source/Foreign/Binders/Dart.jet
 
 # == CLI ==
 # The canonical selected project root (Rust jet_driver Loader

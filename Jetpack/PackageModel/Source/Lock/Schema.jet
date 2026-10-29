@@ -2,18 +2,19 @@
 // lives at `UNIFIED_LOCK_FILE` inside the project's `.jet/` managed folder
 // (U2) and is the single lockfile. Canonical text lives in Write.jet, the
 // strict reader in Parse.jet, and the on-disk recorders in Record.jet.
+use jet_foundation.[Diagnostic, RuntimeLayer]
 
-PKG_LOCK_VERSION :: prep { 1 }
+PKG_LOCK_VERSION :: 1
 // `provenance.build` prefix that marks a package record as projected from a
 // Rust FFI bridge build; `pkg_lock_record_rust_bridge` replaces every such
 // record.
-PKG_RUST_BRIDGE_PROVENANCE_PREFIX :: prep { "jet-ffi-bridge:" }
+PKG_RUST_BRIDGE_PROVENANCE_PREFIX :: "jet-ffi-bridge:"
 // Hard upper bound for one committed lockfile. A lock is a human-reviewed
 // artifact; exceeding this limit indicates a serializer invariant failure.
-PKG_MAX_LOCK_BYTES :: prep { 1048576 }
-PKG_MAX_LOCK_VALUE_BYTES :: prep { 1048576 }
+PKG_MAX_LOCK_BYTES :: 1048576
+PKG_MAX_LOCK_VALUE_BYTES :: 1048576
 // The largest accepted `nix-size`: 16 GiB.
-PKG_MAX_NIX_NAR_SIZE :: prep { 17179869184 }
+PKG_MAX_NIX_NAR_SIZE :: 17179869184
 
 // The Lock model's one error carrier. Parse and validation failures keep the
 // exact Rust message text; an unsupported format version stays typed so
@@ -81,9 +82,9 @@ struct LockedPackage {
     // Direct dependency names.
     dependencies: [String]{[String]{}}
     // Optional `runtime:` ceiling from the package payload.
-    layer: MIRRuntimeLayer?{None}
+    layer: RuntimeLayer?{None}
     // M2: minimum runtime profile inferred at last build.
-    inferred_layer: MIRRuntimeLayer?{None}
+    inferred_layer: RuntimeLayer?{None}
     // The effect names this dependency's code used at the last
     // build, and the effects granted to it through `grants: { … }`.
     effects: [String]{[String]{}}

@@ -8,12 +8,12 @@ import { runtimeAbiAtom } from './runtime-abi-symbols.mjs';
 
 export function classifyNativeInventory(inventory, routes, source) {
   const types = new Map();
-  for (const match of routes.matchAll(/LowerRuntimeHandle\{jet_name: "([^"]+)", runtime: "([^"]+)"/g)) {
+  for (const match of routes.matchAll(/IRRuntimeHandle\{jet_name: "([^"]+)", runtime: "([^"]+)"/g)) {
     const list = types.get(match[2]) ?? [];
     list.push(match[1]);
     types.set(match[2], list);
   }
-  const schemas = new Set([...routes.matchAll(/LowerRecordSchema\{jet_name: "([^"]+)"/g)].map((match) => match[1]));
+  const schemas = new Set([...routes.matchAll(/IRRecordSchema\{jet_name: "([^"]+)"/g)].map((match) => match[1]));
   const names = [...types.keys()].sort((a, b) => runtimeAbiAtom(b).length - runtimeAbiAtom(a).length || a.localeCompare(b));
   const rows = new Map();
   const unclassified = [];

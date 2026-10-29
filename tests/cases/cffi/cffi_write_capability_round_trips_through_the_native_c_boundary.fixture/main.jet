@@ -1,0 +1,18 @@
+use c.[cap as c]
+#Layout(c)
+struct Pair {
+    x: I64
+    y: I64
+}
+#Import module c.cap {
+    fn increment(value: &I64) = "jet_cap_increment"
+    fn make() -> Pair = "jet_cap_make"
+    fn consume(value: ^Pair) -> I64 = "jet_cap_consume"
+}
+fn run() {
+    value := I64{41}
+    c.increment(&value)
+    print(value)
+    pair :: c.make()
+    print(c.consume(^pair))
+}

@@ -1,6 +1,6 @@
 // Checked package settings become ordinary wrapper
 // functions and the existing TFnValueKind.Policy carrier. No backend policy.
-use jet_foundation.[AccessConvention, Call, CallArg, Diagnostic, Expr, Func, Item, MarkerCallArg, Param, ParamZone, Program, Span, SymbolID, SymbolKind, TCallArg, TCapture, TExpr, TExprKind, TFnValueKind, Type, UserPolicyDecl, ast_func, ast_visit_statement, symbol_id]
+use jet_foundation.[AccessConvention, Call, Diagnostic, Expr, Func, Item, Param, ParamZone, Program, RuleSite, Span, SymbolID, SymbolKind, TCapture, Type, UserPolicyDecl, ast_func, ast_visit_statement, symbol_id]
 
 fn sema_policy_builtin(name: String) -> Bool Never! {
     name == "cache" || name == "retry" || name == "trace" || name == "registration" || name == "route"
@@ -10,12 +10,19 @@ fn sema_policy_wrapper_name(policy: String, target: String) -> String Never! {
     "__jet_policy_{policy}_{target}"
 }
 
+// A generated wrapper's body is the policy's `wrap(call)` block, user code:
+// it is checked as user code (calls propagate automatically), as a `#Test`
+// body is (#5514).
+fn sema_policy_wrapper_function(func: Func) -> Bool Never! {
+    func.compiler_generated && func.name.starts_with("__jet_policy_")
+}
+
 fn sema_policy_calls(function: Func) -> [Call] Never! {
     calls := [Call]{}
     loop marker in function.markers {
         if marker.name != "Policy" -> next
         loop argument in marker.args {
-            if argument == .Expr(value) && value == .Call(call) && !sema_policy_builtin(call.name) -> &calls.push(call)
+            if argument == .Expr(value) && value == .Call(call, _) && !sema_policy_builtin(call.name) -> &calls.push(call)
         }
     }
     calls
@@ -25,11 +32,11 @@ struct SemaPolicyUses {
     uses: [String:[String]]
 
     fn visit(&self, expression: Expr) Never! {
-        if expression == .Call(call) && call.name == "apply" && call.args.len() > 0 {
-            if call.args[call.args.len() - 1].expr == .Ident(target, _) {
+        if expression == .Call(call, _) && call.name == "apply" && call.args.len() > 0 {
+            if call.args[call.args.len() - 1].expr == .Ident(target, _, _) {
                 names := self.uses.get(target) ?? [String]{}
                 loop index in 0..<(call.args.len() - 1) {
-                    if call.args[index].expr == .Call(policy) && !sema_policy_builtin(policy.name) && !names.contains(policy.name) -> &names.push(policy.name)
+                    if call.args[index].expr == .Call(policy, _) && !sema_policy_builtin(policy.name) && !names.contains(policy.name) -> &names.push(policy.name)
                 }
                 self.uses[target] = names
             }
@@ -142,15 +149,17 @@ fn sema_policy_wrap(callee: TExpr, target: SemaCallDirectTarget, policy: Call, e
     }
     (lowered, pins) := sema_call_check_bound_arguments_owned(&state, policy.name, params, None, true, binding, &arguments, environment, program, &scopes, &tail_store, &context, policy.name_span, &diagnostics) ?? return None
     captured := callee
-    captured.ty = all_params[count].ty ?? return None
+    captured_ty :: all_params[count].ty ?? return None
+    tir_expr_retype(&captured, captured_ty)
     conventions := (loop parameter in params -> parameter.convention)
-    value :: sema_tir_node(callee.ty, TExprKind.FnValue{kind: TFnValueKind.Policy{fn_type: callee.ty, policy_args: lowered, policy_conventions: conventions, wrapper_name: Val(wrapper.symbol.id.key), captures: [TCapture]{}, callee: captured}}, policy.name_span)
+    wrapper_decl :: sema_call_callee_decl(program, wrapper.symbol.id, policy.name_span, &diagnostics) ?? return None
+    value :: sema_tir_node(callee.ty, TExprKind.FnValue{kind: TFnValueKind.Policy{fn_type: callee.ty, policy_args: lowered, policy_conventions: conventions, wrapper: Val(wrapper_decl), captures: [TCapture]{}, callee: captured}}, policy.name_span)
     Val(sema_call_with_binder_pins(^pins, value, policy.name_span))
 }
 
 // The policy calls of a registered callable, read from its row in place.
 fn sema_policy_registered_calls(graph: SemaRegistrationGraph, target: SymbolID) -> [Call]? Never! {
-    row :: graph.callable_rows.get(target.key) ?? return None
+    row :: sema_registration_callable_row(graph, target.key) ?? return None
     if row == {
         .Function(module_index, index) -> Val(sema_policy_calls(graph.modules[module_index].functions[index].declaration))
         .Foreign(_, _) -> None
@@ -172,7 +181,8 @@ fn sema_policy_direct_value(target: SemaCallDirectTarget, span: Span, environmen
     // included, on every direct call.
     policies :: if program.registration_graph == .Val(graph) -> sema_policy_registered_calls(graph, target.symbol.id) ?? return None else -> sema_policy_local_calls(environment, program, target.symbol.id) ?? return None
     if policies.len() == 0 -> return None
-    callee := sema_tir_node(target.signature, TExprKind.FnValue{kind: TFnValueKind.NamedFn{name: Val(target.symbol.id.key), lambda: None}}, span)
+    function :: sema_call_callee_decl(program, target.symbol.id, span, &diagnostics) ?? return None
+    callee := sema_tir_node(target.signature, TExprKind.FnValue{kind: TFnValueKind.NamedFn{function: Val(function), lambda: None}}, span)
     index := policies.len()
     loop index > 0 {
         index -= 1
@@ -188,13 +198,14 @@ fn sema_policy_try_apply(call: Call, expected: Type?, environment: SemaScopeEnvi
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     last :: call.args[call.args.len() - 1]
-    target_name :: if last.expr == .Ident(name, _) -> name else -> ""
+    target_name :: if last.expr == .Ident(name, _, _) -> name else -> ""
     target :: sema_call_resolve_direct(target_name, [Type]{}, environment, program, &scopes, last.span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    callee := sema_tir_node(target.signature, TExprKind.FnValue{kind: TFnValueKind.NamedFn{name: Val(target.symbol.id.key), lambda: None}}, last.span)
+    function :: sema_call_callee_decl(program, target.symbol.id, last.span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    callee := sema_tir_node(target.signature, TExprKind.FnValue{kind: TFnValueKind.NamedFn{function: Val(function), lambda: None}}, last.span)
     index := call.args.len() - 1
     loop index > 0 {
         index -= 1
-        if call.args[index].expr == .Call(policy) {
+        if call.args[index].expr == .Call(policy, _) {
             if sema_policy_builtin(policy.name) -> next
             callee = sema_policy_wrap(callee, target, policy, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         } else {
@@ -205,12 +216,27 @@ fn sema_policy_try_apply(call: Call, expected: Type?, environment: SemaScopeEnvi
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(callee, expected, environment, program, &diagnostics)}
 }
 
+// A marked block or switched statement (parser_parse_marked_statement) is
+// also its own statement form (Unsafe, Live, Context, ScopeMember, ...),
+// which the statement checker checks or refuses; only another applied rule
+// is a policy application the self-hosted checker does not support.
 fn sema_policy_has_unsupported_applications(program: Program) -> Bool Never! {
     loop application in program.applied_rules {
+        if sema_policy_statement_form(application) -> next
         if application.marker.name != "allow" -> return true
     }
     loop application in program.rule_facts {
+        // A file `#Target` or `#NoPrelude` is lowered by the parser into the
+        // Program's target fields or its no_prelude flag, which are checked on
+        // their own.
+        if application.site == .Val(site) && site == RuleSite.File && (application.marker.name == "Target" || application.marker.name == "NoPrelude") -> next
+        if sema_policy_statement_form(application) -> next
         if application.marker.name != "allow" -> return true
     }
+    false
+}
+
+fn sema_policy_statement_form(application: AppliedRuleApplication) -> Bool Never! {
+    if application.site == .Val(site) -> return site == RuleSite.Block || site == RuleSite.Statement
     false
 }

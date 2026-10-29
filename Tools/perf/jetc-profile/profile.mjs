@@ -26,10 +26,10 @@ export function decodeJet(identifier) {
 
 export function jetName(symbol, declarations = new Map()) {
   return symbol.replace(/::h[0-9a-f]{16}\b/g, '')
-    .replace(/\bjetc_(jetfoundation|jetsema|jetcomptime|jetcodegen|jetmir|jetparser|jetlexer|jetdriver|jeteval|jetoptimizer|jetbackend|jetcli)\b/g,
+    .replace(/\bjetc_(jetfoundation|jetsema|jetcomptime|jetparser|jetlexer|jetdriver|jeteval|jetbackend|jetcli)\b/g,
       (_, module) => ({ jetfoundation: 'JetFoundation', jetsema: 'JetSema', jetcomptime: 'JetComptime',
-        jetcodegen: 'JetCodegen', jetmir: 'JetMIR', jetparser: 'JetParser', jetlexer: 'JetLexer', jetdriver: 'JetDriver',
-        jeteval: 'JetEval', jetoptimizer: 'JetOptimizer', jetbackend: 'JetBackend', jetcli: 'JetCli' })[module])
+        jetparser: 'JetParser', jetlexer: 'JetLexer', jetdriver: 'JetDriver',
+        jeteval: 'JetEval', jetbackend: 'JetBackend', jetcli: 'JetCli' })[module])
     .replace(/__jet_[A-Za-z0-9_]+/g, value => {
       // Names::mangle leaves a flat name unchanged; canonical paths use the
       // byte-escape lane. Known source declarations disambiguate flat names.
@@ -84,12 +84,13 @@ function framePhase(symbol, weak = false) {
   const head = symbol.split('<')[0].toLowerCase();
   if (/\b(?:jetcomptime|jeteval|jet_eval_|comptime_|ct_|sema_comptime|sema_expr_comptime|sema_check_comptime)/.test(head)) return 'comptime';
   if (/\b(?:sema_registration_|sema_register_|registration_|register_)/.test(head)) return 'registration';
-  if (/\b(?:jet_rust_emit_|rust_emit_|emit_)/.test(head)) return 'emission';
-  if (/\b(?:mir_opt|mir_optimization|mir_pass_|mir_lint_|optimize_|optimization_|jetoptimizer)/.test(head)) return 'optimization';
-  if (/\b(?:jet_codegen_|tir_to_mir|lower_|lowering_|mir_lower|jetlower)/.test(head)) return 'lowering';
+  if (/\b(?:ir_x64_|x64_|emit_)/.test(head)) return 'emission';
+  if (/\b(?:ir_opt_|optimize_|optimization_)/.test(head)) return 'optimization';
+  if (/\b(?:ir_|lower_|lowering_)/.test(head)) return 'lowering';
   if (/\b(?:sema_check_|sema_function_check|sema_expr_|sema_statement_|check_expression|check_program)/.test(head)) return 'sema check';
   if (weak && /\b(?:jetsema::|sema_)/.test(head)) return 'sema check';
-  if (weak && /\bjetcodegen::/.test(head)) return 'emission';
+  if (weak && /\bjetbackend::/.test(head)) return 'emission';
+  if (weak && /\bjetir::/.test(head)) return 'lowering';
   return null;
 }
 

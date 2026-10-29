@@ -3,7 +3,7 @@ use core.reactive as reactive
 use core.tasks as tasks
 fn run() {
     pending := reactive.signal(0)
-    (tx, rx) :: channel<Signal<Int>>()
+    { sender: tx, receiver: rx } :: channel<Signal<Int>>()
     tx.send(pending.copy())
     got :: rx.receive() ?? panic("recv")
     print(got.get())

@@ -1,0 +1,25 @@
+// #4602: decoding is strict. JSON `"8080"` is text, so it does not decode
+// into an `Int` field; the number 8080 does. Only text-native sources
+// (environment variables, CSV cells, route parameters) parse text into
+// scalars.
+use core.encoding.json as json
+
+// D-FAIL-CONV1: retain the codec's error type instead of converting to default Err.
+fn run() EncodingError! {
+    // "port" is a string in the JSON source but coerces to a number.
+    // "enabled" is a string "true" that coerces to a boolean.
+    raw :: "{{\"port\":\"8080\",\"enabled\":\"true\",\"name\":\"api\"}}"
+    data :: json.decode(raw)
+    if data == .Object(_) {
+        port :: &data.field("port") ?? Dyn.Null
+        name :: &data.field("name") ?? Dyn.Null
+        enabled :: &data.field("enabled") ?? Dyn.Null
+        if port == .Float(n) {
+            // Lenient JSON's canonical numeric coercion uses Float; project
+            // this integral test value back to Int before adding one.
+            print((Int.from_float(n) ?? 0) + 1)
+        }
+        if name == .Text(s) -> print(s)
+        if enabled == .Bool(b) -> print(b)
+    }
+}

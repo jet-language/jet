@@ -1,0 +1,161 @@
+// The IR builder's environment routes: the logical environment's getters,
+// mutations, column snapshots, key comparator and seed, whose checked
+// carriers differ from ordinary route calls. Every argument is borrowed.
+
+use jet_foundation.[Span, Type]
+
+// Whether `row` is a compact byte List (`[U8]`, stride 1).
+fn ir_environment_bytes(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
+    ty :: m.types[row].ty.copy()
+    if ir_untag(ty) == .List(element) {
+        element_row :: ir_value_type(&m, p, element) ?? return false
+        element_type :: m.types[element_row]
+        return element_type.kind == .Word && !element_type.signed && element_type.bits == 8 && ir_list_stride(m, element_row) == 1
+    }
+    false
+}
+
+fn ir_environment_call(m: &IRModule, p: IRProgram, b: &IRBuilder, route: IREnvironmentRoute, inputs: [Int], result: Type, span: Span) -> Int Never! {
+    if inputs.len() != route.arity -> return ir_fail_slot(&b, span, "environment route has incorrect arity")
+    loop slot in inputs {
+        if slot < 0 -> return ir_fail_slot(&b, span, "environment argument has no checked type")
+        if route.op == .Compare {
+            slot_row :: b.f.slot_type[slot]
+            if !ir_environment_bytes(&m, p, slot_row) -> return ir_fail_slot(&b, span, "environment comparator requires compact byte Lists")
+        } else {
+            if ir_kind_of(m, b, slot) != .String -> return ir_fail_slot(&b, span, "environment argument requires String")
+        }
+    }
+    value :: ir_environment_value(&m, p, &b, route, inputs, result, span)
+    if ir_failed(b) -> return -1
+    loop slot in inputs -> ir_release(&m, &b, slot)
+    value
+}
+
+fn ir_environment_value(m: &IRModule, p: IRProgram, b: &IRBuilder, route: IREnvironmentRoute, inputs: [Int], result: Type, span: Span) -> Int Never! {
+    if route.op == .Seed {
+        if !ir_unit_type(result) -> return ir_fail_slot(&b, span, "environment seed requires Unit")
+        _ :: ir_runtime(&m, &b, route.export, inputs, -1)
+        return -1
+    }
+    row :: ir_value_type(&m, p, result) ?? return ir_type_fail(&b, span, result)
+    if route.op == .Compare {
+        if m.types[row].kind != .Int -> return ir_fail_slot(&b, span, "environment comparator requires exact Int")
+        word_row :: ir_word_row(&m)
+        raw :: ir_runtime(&m, &b, route.export, inputs, word_row)
+        return ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{raw}, row)
+    }
+    if route.op == .Columns {
+        inner :: if ir_untag(result) == .List(element) -> element else -> { return ir_fail_slot(&b, span, "environment columns require List<List<U8>>") }
+        inner_row :: ir_value_type(&m, p, inner) ?? return ir_type_fail(&b, span, inner)
+        if !ir_environment_bytes(&m, p, inner_row) || ir_list_stride(m, inner_row) != 24 -> return ir_fail_slot(&b, span, "environment columns require canonical compact nested Lists")
+        header :: ir_fresh_temp(&m, &b, row)
+        ir_emit(&b.f, IROp.StackAddress, header, 24, 8, -1, b.line)
+        _ :: ir_runtime(&m, &b, route.export, [Int]{header}, -1)
+        return header
+    }
+    if route.op == .Set || route.op == .Remove -> return ir_environment_status(&m, p, &b, route, inputs, result, span)
+    inner :: if ir_untag(result) == .Option(payload) -> payload else -> { return ir_fail_slot(&b, span, "environment getter requires Option") }
+    inner_row :: ir_value_type(&m, p, inner) ?? return ir_type_fail(&b, span, inner)
+    if route.op == .Bytes {
+        if !ir_environment_bytes(&m, p, inner_row) -> return ir_fail_slot(&b, span, "environment value requires Option<List<U8>>")
+    } else {
+        if m.types[inner_row].kind != .String -> return ir_fail_slot(&b, span, "strict environment getter requires Option<String>")
+    }
+    out :: ir_out_slot(&m, &b, 2)
+    call_args := inputs
+    if route.op == .Bytes {
+        &call_args.push(out)
+        length_out :: ir_address_at(&m, &b, out, 8)
+        &call_args.push(length_out)
+    }
+    word_row :: ir_word_row(&m)
+    raw :: ir_runtime(&m, &b, route.export, call_args, word_row)
+    boxed :: ir_fresh_temp(&m, &b, row)
+    ir_emit(&b.f, IROp.Const, boxed, 0, -1, -1, b.line)
+    zero :: ir_word_const(&m, &b, 0)
+    present :: ir_bool_op(&m, &b, IROp.Ne, raw, zero)
+    ir_open_if(&b.f, present, b.line)
+    payload_bytes :: if route.op == .Bytes -> 24 else -> m.types[inner_row].size
+    some :: ir_box_alloc(&m, &b, payload_bytes, row)
+    if route.op == .Bytes {
+        ir_environment_byte_payload(&m, &b, some, out)
+    } else {
+        ir_emit(&b.f, IROp.Store, -1, some, 0, raw, b.line)
+    }
+    ir_emit(&b.f, IROp.Copy, boxed, some, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    boxed
+}
+
+// get_os owns an align-1 raw buffer (data at 0, length at 8 of `out`); a
+// List<U8> owns align-8 storage. The compact bytes are copied into a buffer
+// of their own, then the raw allocation is released once.
+fn ir_environment_byte_payload(m: &IRModule, b: &IRBuilder, boxed: Int, out: Int) Never! {
+    data :: ir_load_word(&m, &b, out, 0)
+    length :: ir_load_word(&m, &b, out, 8)
+    zero :: ir_word_const(&m, &b, 0)
+    word_row :: ir_word_row(&m)
+    buffer :: ir_temp(&m, &b, word_row)
+    ir_emit(&b.f, IROp.Const, buffer, 0, -1, -1, b.line)
+    filled :: ir_bool_op(&m, &b, IROp.Ne, length, zero)
+    ir_open_if(&b.f, filled, b.line)
+    align :: ir_word_const(&m, &b, 8)
+    storage :: ir_runtime(&m, &b, "jet_rt_alloc", [Int]{length, align}, word_row)
+    ir_emit(&b.f, IROp.Copy, buffer, storage, -1, -1, b.line)
+    _ :: ir_runtime(&m, &b, "jet_rt_mem_move", [Int]{buffer, data, length}, -1)
+    raw_align :: ir_word_const(&m, &b, 1)
+    _ :: ir_runtime(&m, &b, "jet_rt_free", [Int]{data, length, raw_align}, -1)
+    ir_end(&b.f, b.line)
+    ir_route_list_header(&m, &b, boxed, 0, buffer, length)
+}
+
+// A mutation's status word: >= 0 is Ok (for unset, whether a key was
+// removed), -1 is EnvError.InvalidName, any other negative status
+// EnvError.InvalidValue.
+fn ir_environment_status(m: &IRModule, p: IRProgram, b: &IRBuilder, route: IREnvironmentRoute, inputs: [Int], result: Type, span: Span) -> Int Never! {
+    ok_ty := Type.Int
+    err_ty := Type.Int
+    if ir_untag(result) == .Result(success, failure) {
+        ok_ty = success
+        err_ty = failure
+    } else {
+        return ir_fail_slot(&b, span, "environment mutation requires Result")
+    }
+    carriers :: "environment mutation has incorrect checked carriers"
+    if route.op == .Set {
+        if !ir_unit_type(ok_ty) -> return ir_fail_slot(&b, span, carriers)
+    } else {
+        if ir_untag(ok_ty) != Type.Bool -> return ir_fail_slot(&b, span, carriers)
+    }
+    err_row :: ir_value_type(&m, p, err_ty) ?? return ir_type_fail(&b, span, err_ty)
+    if m.types[err_row].kind != .Word -> return ir_fail_slot(&b, span, carriers)
+    definition :: ir_enum_def(m, p, err_row) ?? return ir_fail_slot(&b, span, "environment error has no definition")
+    name :: p.types[definition].name
+    if name != "EnvError" && !name.ends_with("::EnvError") -> return ir_fail_slot(&b, span, "environment mutation requires checked EnvError")
+    invalid_name :: ir_variant_index(p, definition, "InvalidName") ?? return ir_fail_slot(&b, span, "environment error lacks InvalidName")
+    invalid_value :: ir_variant_index(p, definition, "InvalidValue") ?? return ir_fail_slot(&b, span, "environment error lacks InvalidValue")
+    boxed :: ir_result_box(&m, p, &b, result, true, -1)
+    word_row :: ir_word_row(&m)
+    status :: ir_runtime(&m, &b, route.export, inputs, word_row)
+    zero :: ir_word_const(&m, &b, 0)
+    succeeded :: ir_bool_op(&m, &b, IROp.Ge, status, zero)
+    ir_open_if(&b.f, succeeded, b.line)
+    if route.op == .Remove {
+        removed :: ir_bool_op(&m, &b, IROp.Ne, status, zero)
+        ir_store_at(&m, p, &b, boxed, 8, removed)
+    }
+    ir_else(&b.f, b.line)
+    failure_selector :: ir_word_const(&m, &b, 0)
+    ir_emit(&b.f, IROp.Store, -1, boxed, 0, failure_selector, b.line)
+    name_status :: ir_word_const(&m, &b, -1)
+    is_name :: ir_bool_op(&m, &b, IROp.Eq, status, name_status)
+    discriminant :: ir_word_const(&m, &b, invalid_value)
+    ir_open_if(&b.f, is_name, b.line)
+    ir_emit(&b.f, IROp.Const, discriminant, invalid_name, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_emit(&b.f, IROp.Store, -1, boxed, 8, discriminant, b.line)
+    ir_end(&b.f, b.line)
+    b.fresh[boxed] = true
+    boxed
+}

@@ -1,0 +1,13 @@
+# tests/pure.rs::ctvalue_render_pretty_struct at tests/pure.rs:619; hand-port
+# Claim: a struct value renders with its type name and field labels (tests/pure.rs:629-631)
+# Fixture migrated: Rust fn returns Point; no value return in jet eval, so the value is printed from fn run under jet run
+# Not ported: CtValue::Struct Rust construction and render_pretty multi-line layout (tests/pure.rs:621-628): jet eval prints the single-line debug spelling; the Rust assertions are substring checks only
+fixture: ctvalue_render_pretty_struct.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0 # tests/pure.rs:629-633
+stdout: ~ "Point" # tests/pure.rs:629-633
+stdout: ~ "x:" # tests/pure.rs:629-633
+stdout: ~ "y:" # tests/pure.rs:629-633

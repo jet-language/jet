@@ -1,0 +1,19 @@
+use core.encoding.xml as xml
+fn xml_edges() -> String {
+    document :: xml.parse("<catalog><book id=\"7\"><title>Hi</title></book></catalog>") ?? panic("parse")
+    root :: xml.root(document) ?? panic("root")
+    root_name :: xml.expanded_name(root) ?? panic("root name")
+    children :: xml.content(root) ?? panic("content")
+    book_name :: xml.expanded_name(children[0]) ?? panic("book name")
+    attribute :: xml.attribute(children[0], "id")
+    id :: attribute ?? "missing"
+    rendered :: xml.to_string(document) ?? panic("xml render")
+    return "{root_name.local}|{children.len()}|{book_name.local}|{id}|{rendered}"
+}
+EXPECTED :: comptime { xml_edges() }
+
+fn run() {
+    actual :: xml_edges()
+    print("{EXPECTED}")
+    print("{actual}")
+}

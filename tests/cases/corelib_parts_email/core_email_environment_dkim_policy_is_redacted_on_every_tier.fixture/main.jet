@@ -1,0 +1,47 @@
+
+use core.email as email
+use core.sys as sys
+
+fn run() {
+    loop name in ["SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_CA_PEM", "SMTP_DKIM_DOMAIN", "SMTP_DKIM_SELECTOR", "SMTP_DKIM_PRIVATE_KEY_BASE64", "SMTP_DKIM_SIGNED_HEADERS"] {
+        sys.unset(name)
+    }
+    sys.set("SMTP_HOST", "localhost")
+    sys.set("SMTP_SECURITY", "tls")
+    sys.set("SMTP_PORT", "465")
+    sys.set("SMTP_USERNAME", "login-user")
+    sys.set("SMTP_PASSWORD", "smtp-secret-never-print")
+    sys.set("SMTP_DKIM_DOMAIN", "example.com")
+    if email.smtp_from_env() == {
+        .Ok(_) -> panic("partial DKIM environment accepted")
+        .Err(error) -> if error == {
+            .Configuration{operation, server: _, code: _, reason} -> {
+                assert_eq(operation, "smtp_from_env")
+                assert(reason.contains("must be set together"))
+            }
+            else -> panic("wrong partial configuration error")
+        }
+    }
+    sys.set("SMTP_DKIM_SELECTOR", "login-2026")
+    loop encoded in ["private-key-not-base64", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB="] {
+        sys.set("SMTP_DKIM_PRIVATE_KEY_BASE64", encoded)
+        if email.smtp_from_env() == {
+            .Ok(_) -> panic("malformed DKIM environment accepted")
+            .Err(error) -> if error == {
+                .Configuration{operation, server: _, code: _, reason} -> {
+                    assert_eq(operation, "smtp_from_env")
+                    assert(!reason.contains(encoded))
+                    assert(!reason.contains("smtp-secret-never-print"))
+                    assert(reason.contains("valid base64"))
+                }
+                else -> panic("wrong base64 configuration error")
+            }
+        }
+    }
+    sys.set("SMTP_DKIM_PRIVATE_KEY_BASE64", "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=")
+    mailer :: email.smtp_from_env() ?? panic("valid DKIM configuration rejected")
+    print("env-policy-ok")
+    loop name in ["SMTP_HOST", "SMTP_SECURITY", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_DKIM_DOMAIN", "SMTP_DKIM_SELECTOR", "SMTP_DKIM_PRIVATE_KEY_BASE64", "SMTP_DKIM_SIGNED_HEADERS"] {
+        sys.unset(name)
+    }
+}

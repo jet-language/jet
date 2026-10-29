@@ -1,0 +1,17 @@
+use core.tasks as tasks
+fn run() {
+    { sender, receiver: ch } :: channel<Int>()
+    { sender: ack_sender, receiver: ack } :: channel<Int>()
+    slow :: task {
+               #Shield {
+                   value :: ch.receive() ?? panic("closed")
+                   print(value)
+                   ack_sender.send(1)
+               }
+               print(99)
+       }
+    slow.cancel()
+    slow.detach()
+    sender.send(42)
+    ack.receive() ?? panic("closed")
+}

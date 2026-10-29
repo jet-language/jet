@@ -1,0 +1,17 @@
+use core.regex as re
+fn run() {
+    pattern :: Regex{"(?<word>\w+)"}
+    runtime :: re.compile("(?<word>\\w+)") ?? panic("compile")
+    print(re.find(pattern, "é") == runtime.find("é"))
+    matched :: re.match(pattern, "a é") ?? panic("match")
+    print(matched.name("word") ?? "none")
+    print(re.expand(matched, "${{word}}/$1/$$"))
+    print(re.join(pattern))
+    replaced :: re.subn(pattern, "a é", "[$1]")
+    print(replaced.text)
+    print(replaced.count)
+    re.purge() ?? print("no cache to purge")
+    print(pattern.is_match("é"))
+    recompiled :: re.compile("\\w+") ?? panic("recompile")
+    print(recompiled.is_match("é"))
+}

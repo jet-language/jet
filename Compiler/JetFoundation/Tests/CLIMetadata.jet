@@ -1,4 +1,10 @@
 // Assemble with the canonical Compiler unit; PortInteg owns execution/proof.
+use jet_foundation.[
+    CLICommandSchema, CLIInputSchema, CLIInputShape, CLISubcommandSchema, CLIValueKind,
+    JET_COMPILER_TARGET_USIZE_MAX, JobArgumentSchema, JobCachePolicy, JobFact, JobScope, JobSkip,
+    MetadataError, StringMapEntry, decode_record, encode_record, read_executable,
+]
+
 fn cli_metadata_require(ok: Bool, why: String) Never! { if !ok -> panic("CLI metadata: {why}") }
 fn cli_metadata_zeros(length: Int) -> [U8] Never! { loop _ in 0..<length -> U8{0} }
 fn cli_metadata_copy(out: &[U8], at: Int, bytes: [U8]) Never! {
@@ -117,25 +123,24 @@ fn cli_metadata_wasm(record: [U8], count: Int) -> [U8] Never! {
     out
 }
 fn cli_metadata_accept(bytes: [U8], expected: CLICommandSchema) Never! {
-    actual :: read_executable(bytes.view(0..<bytes.len()), JET_COMPILER_TARGET_USIZE_MAX) ?? panic("read fixture")
+    actual :: read_executable(bytes[0..<bytes.len()], JET_COMPILER_TARGET_USIZE_MAX) ?? panic("read fixture")
     cli_metadata_require(actual == expected, "cross-format record round trip")
 }
 fn cli_metadata_refuse(bytes: [U8], expected: MetadataError, maximum: U64) Never! {
-    actual :: read_executable(bytes.view(0..<bytes.len()), maximum)
-    refused :: if actual == {
+    refused :: if read_executable(bytes[0..<bytes.len()], maximum) == {
         .Err(error) -> error == expected
         .Ok(_) -> false
     }
     cli_metadata_require(refused, "canonical failure classification")
 }
-fn run() {
+#Test("cli_metadata") {
     input :: CLIInputSchema{field: "output_file", flag: "output-file", short: Val("o"), env: Val("OUTPUT_FILE"), help: "destination", metavar: Val("OUTPUT_FILE"), shape: CLIInputShape.Value{kind: CLIValueKind.Path, optional: false, default: None}, positional: Val(U16{0})}
     job :: JobFact{name: "release", scope: JobScope.Ship, doc: Val("ship"), arguments: [JobArgumentSchema]{}, after: [String]{}, packages: [String]{"."}, cwd: None, inputs: [String]{"a"}, outputs: [String]{"b"}, skip: Val(JobSkip.UnlessPlatform{platform: "linux"}), cache: JobCachePolicy.Shared, parallel: 2, limits: [StringMapEntry]{StringMapEntry{key: "cpu", value: "2"}}, schedule: Val("daily")}
     hidden := job.copy()
     hidden.scope = JobScope.Internal
     schema :: CLICommandSchema{entry_type: "Options", description: Val("example"), inputs: [CLIInputSchema]{input}, commands: [CLISubcommandSchema]{CLISubcommandSchema{name: "send", description: None, inputs: [CLIInputSchema]{}}}, jobs: [JobFact]{job, job, hidden}, standard: true, version: Val("1.2.3")}
     record :: encode_record(schema)
-    decoded :: decode_record(record.view(0..<record.len())) ?? panic("decode fixture")
+    decoded :: decode_record(record[0..<record.len()]) ?? panic("decode fixture")
     cli_metadata_require(decoded == schema, "all v8 fields round trip")
     cli_metadata_require(decoded.root_completion_words() == [String]{"--help", "--verbose", "-v", "--quiet", "-q", "--color", "--version", "output-file", "--output-file", "-o"}, "root completion order")
     cli_metadata_require(decoded.job_completion_words() == [String]{"release", "release"}, "visible duplicate jobs retained")

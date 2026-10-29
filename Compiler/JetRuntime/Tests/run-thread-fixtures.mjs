@@ -28,7 +28,7 @@ const sources = [
   "Compiler/JetBackend/Source/OS/Linux.jet",
   "Compiler/JetRuntime/Source/Alloc.jet", "Compiler/JetRuntime/Source/TrapMessages.jet", "Compiler/JetRuntime/Source/TrapDefectMessages.jet",
   "Compiler/JetRuntime/Source/Trap.jet", "Compiler/JetRuntime/Source/Sync.jet",
-  "Compiler/JetRuntime/Source/Thread.jet", "Compiler/JetRuntime/Tests/ThreadTests.jet",
+  "Compiler/JetRuntime/Source/Thread.jet", "Compiler/JetRuntime/Tests/Fragments.fixture/ThreadTests.jet",
 ];
 function command(bin, args, options = {}) {
   const result = spawnSync(bin, args, { encoding: "utf8", maxBuffer: 1 << 27, ...options });
@@ -63,7 +63,7 @@ if (mode === "assemble") {
   const unit = complete.replace(sharedBlock, "");
   const shared = read("Compiler/JetRuntime/sources.list").split("\n").map(path => path.trim())
     .filter(path => path && !path.startsWith("#")).map(read).join("\n")
-    + "\n" + read("Compiler/JetRuntime/Tests/SharedThreadTests.jet");
+    + "\n" + read("Compiler/JetRuntime/Tests/Fragments.fixture/SharedThreadTests.jet");
   // Duplicate #Export(c) names are fatal in the good and shared fixture units.
   for (const text of [unit, shared]) {
     const names = [...text.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gm)].map((match) => match[1]);

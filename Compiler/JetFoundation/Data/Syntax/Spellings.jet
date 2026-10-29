@@ -1,69 +1,68 @@
 // Canonical owner-controlled syntax registry (I7).
-// The reference comparison is temporary and is not a generator dependency.
+// Tools/agent/lexical-ledger.mjs renders LEXICAL_LEDGER (with each spelling's
+// ratified decision ID, empty when none exists) into Docs/spec/syntax-decisions.md.
 
 struct LexicalEntry {
     spelling: String
     meaning: String
+    decision: String
 }
 
 LEXICAL_LEDGER :: [LexicalEntry]{
-    { spelling: "::", meaning: "immutable binding" },
-    { spelling: ":=", meaning: "mutable binding" },
-    { spelling: "x.copy()", meaning: "the one deliberate copy: a compiler-owned method returning an independent owned value; the retired prefix `~x` teaches E0941 and the retired `copy x` word E0991" },
-    { spelling: "#", meaning: "attached marker; #[A, B] stacks" },
-    { spelling: ".expect_fail(message: \"text\")", meaning: "test region requires a stop with an optional E30xx code and non-empty case-sensitive raw-message substring" },
-    { spelling: "marker Name = #[A, B]", meaning: "fixed named marker-group declaration; expands at each use without hiding gates or refusals" },
-    { spelling: "#module.Marker / #[module.Marker, Other]", meaning: "library marker through the import's local name; pub exports its declaration" },
-    { spelling: "#Inline / #Scalar / #Kernel / #Static", meaning: "separate callable promise, scalar hint, kernel proof and constant storage rules" },
-    { spelling: "#DevPanel", meaning: "exported typed devtools panel marker" },
-    { spelling: "web.form(Model, action: handler)", meaning: "struct-derived headless form with progressive action" },
-    { spelling: "#Layout(c, align(N)) / #Layout(c, align(target, N))", meaning: "C layout with portable or target-supported explicit alignment" },
-    { spelling: "#Align", meaning: "retired standalone alignment marker" },
-    { spelling: "Atomic<T>", meaning: "safe lock-free scalar cell" },
-    { spelling: "@", meaning: "live link (D-MEMREF1); retired compile-time `@NAME :: value` constant teaches E0388 with `NAME :: prep {{ value }}`; retired `@` template name splices teach E0388 with `$`; retired `@` fact spellings teach E0003 with `$`" },
-    { spelling: KW_PREP, meaning: "explicit shared-preparation block `prep {{ … }}`; `NAME :: prep {{ value }}` is the only compile-time binding; `@ {{ … }}` is retired" },
-    { spelling: "prep if", meaning: "build-time branch; unchosen arms are name-checked only" },
-    { spelling: "prep loop", meaning: "build-time loop over statements or declarations" },
-    { spelling: "prep fn", meaning: "build-time literal-hook method" },
-    { spelling: "<prep N: Int>", meaning: "compile-time number parameter declaration" },
-    { spelling: "$", meaning: "compiler fact: `T.$layout`, `f.$effects`, `value.$origin`; marker/fact declaration metadata `$sites:`; template name splice `fn $method`, `self.$field`, `.$left`; `@` spellings teach E0003 or E0388" },
-    { spelling: "$build", meaning: "build fact root: `$build.os`, `.profile`, `.settings.*`, `.stamp.*`" },
-    { spelling: "$package", meaning: "package fact root: `$package.name`, `.version`" },
-    { spelling: "$phase", meaning: "total evaluation-site phase fact" },
-    { spelling: "$program", meaning: "authorized checked-program fact root" },
-    { spelling: META_QUERY_SOURCE, meaning: "lexical source-snapshot metadata query (no ratified `$` root yet)" },
-    { spelling: META_QUERY_TYPES, meaning: "retained runtime type-catalog query (no ratified `$` root yet)" },
-    { spelling: COMPILER_GENERATE, meaning: "explicit shared-preparation publication of Generated items" },
-    { spelling: COMPILER_ADVANCED_REGISTER, meaning: "explicit opt-in provider registration for declared targets" },
-    { spelling: COMPILER_ADVANCED_REGISTER_EXPANSION, meaning: "explicit opt-in call-expansion provider registration" },
-    { spelling: COMPILER_ADVANCED_REGISTER_SPECIALIZATION, meaning: "explicit opt-in specialization provider registration" },
-    { spelling: COMPILER_ADVANCED_SESSION, meaning: "authorized session within a registered provider" },
-    { spelling: "-[…]", meaning: "effect row on a callable" },
-    { spelling: "!", meaning: "error-contract mark after its error type (`E!`, `(A | B)!`); deny-only root in an effect row" },
-    { spelling: "?", meaning: "optional type mark after its type (`T?`)" },
-    { spelling: "??", meaning: "fallback" },
-    { spelling: "&place.method(…) / ^place.method(…)", meaning: "receiver place mark: `&`/`^` on the maximal named place a method call writes or takes; fresh receivers stay unmarked; a line starting `&name`/`^name` begins a statement" },
-    { spelling: "&self.field / &self.[a, b]", meaning: "stated receiver field footprint: the record fields a method may read or change, checked against its body (E0231) and published in the API snapshot; reuses member spread `.[`" },
-    { spelling: "T{{expr}}", meaning: "field default" },
-    { spelling: "Name{{\"…\"}}", meaning: "checked text head" },
-    { spelling: "{{ … }}", meaning: "typed anonymous value" },
-    { spelling: "`", meaning: "raw ordinary String fence" },
-    { spelling: "\"\"\"", meaning: "multi-line string; only spaces or tabs on the delimiter lines (raw foreign bodies excepted)" },
-    { spelling: ",", meaning: "separator with optional trailing item in every comma list" },
-    { spelling: "Type{{field: pattern, ..}}", meaning: "named struct pattern; fields bind or test nested shapes" },
-    { spelling: "[first, ..rest]", meaning: "list pattern with a read-only zero-copy rest window; exact without the rest marker" },
-    { spelling: "[key: pattern, key?: optional, ..]", meaning: "map pattern; required and optional keys, exact unless it ends with rest" },
-    { spelling: "r\"…\", raw\"…\", $\"…\"", meaning: "unclaimed raw-string prefixes" },
-    { spelling: ";", meaning: "retired explicit statement terminator" },
-    { spelling: "_name", meaning: "ordinary identifier" },
-    { spelling: "__core_intrinsic", meaning: "compiler-only namespace" },
-    { spelling: "<:", meaning: "open a lock-step statement-expansion fence" },
-    { spelling: ":>", meaning: "close a lock-step statement-expansion fence" },
-    { spelling: "@[ … ]@", meaning: "retired fence spelling; E-FENCE-SPELLING teaches `<: … :>`" },
+    { spelling: "::", meaning: "immutable binding", decision: "D-BIND1" },
+    { spelling: ":=", meaning: "mutable binding", decision: "D-BIND1" },
+    { spelling: "x.copy()", meaning: "the one deliberate copy: a compiler-owned method returning an independent owned value; the retired prefix `~x` teaches E0941 and the retired `copy x` word E0991", decision: "D-COPY-WORD1=A" },
+    { spelling: "#", meaning: "attached marker; #[A, B] stacks", decision: "D-VERDICT-732-1; D-MARK-STACK1" },
+    { spelling: ".expect_fail(message: \"text\")", meaning: "test region requires a stop with an optional E30xx code and non-empty case-sensitive raw-message substring", decision: "D-TEST-STOPMSG1=A" },
+    { spelling: "marker Name = #[A, B]", meaning: "fixed named marker-group declaration; expands at each use without hiding gates or refusals", decision: "D-MARKER-GROUP1=A" },
+    { spelling: "#module.Marker / #[module.Marker, Other]", meaning: "library marker through the import's local name; pub exports its declaration", decision: "D-MARKER-MODULE1=A" },
+    { spelling: "#Inline / #Scalar / #Kernel / #Static", meaning: "separate callable promise, scalar hint, kernel proof and constant storage rules", decision: "D-CODEGEN-HINTS1=A" },
+    { spelling: "#DevPanel", meaning: "exported typed devtools panel marker", decision: "D-DX-PLUGIN1=D" },
+    { spelling: "web.form(Model, action: handler)", meaning: "struct-derived headless form with progressive action", decision: "D-DX-FORM1" },
+    { spelling: "#Layout(c, align(N)) / #Layout(c, align(target, N))", meaning: "C layout with portable or target-supported explicit alignment", decision: "D-PLACE1=A; D-LAYOUT-ALIGN1=A" },
+    { spelling: "#Align", meaning: "retired standalone alignment marker", decision: "D-PLACE1=A" },
+    { spelling: "Atomic<T>", meaning: "safe lock-free scalar cell", decision: "D-PLACE1=A; D-ATOMIC-WIDTH1=A" },
+    { spelling: "@", meaning: "live link (D-MEMREF1); retired compile-time `@NAME :: value` constant teaches E0388 with `NAME :: comptime {{ value }}`; retired `@` template name splices teach E0388 with `$`; retired `@` fact spellings teach E0003 with `$`", decision: "D-MEMREF1=A; D-AT-INFIX1=A; D-PREP-SURFACE2=A; D-COMPILER-NS1=A; D-NAME-SPLICE1=B" },
+    { spelling: KW_COMPTIME, meaning: "compile-time block `comptime {{ … }}`; `NAME :: comptime {{ value }}` is the only compile-time binding; `@ {{ … }}` and `prep` are retired", decision: "D-PREP-SURFACE2=A" },
+    { spelling: "comptime if", meaning: "build-time branch; unchosen arms are name-checked only", decision: "D-PREP-BRANCH1=A" },
+    { spelling: "comptime loop", meaning: "build-time loop over statements or declarations", decision: "D-PREP-BRANCH1=A; D-STRUCT-ONCE1=A" },
+    { spelling: "comptime fn", meaning: "build-time literal-hook method", decision: "D-PREP-FN1=A; D-FOUND-LITERAL1=A" },
+    { spelling: "<comptime N: Int>", meaning: "compile-time number parameter declaration", decision: "D-CONSTGEN2=A" },
+    { spelling: "$", meaning: "compiler fact: `T.$layout`, `f.$effects`, `value.$origin`; marker/fact declaration metadata `$sites:`; template name splice `fn $method`, `self.$field`, `.$left`; `@` spellings teach E0003 or E0388", decision: "D-COMPILER-NS1=A; D-META-ROOT3=A; D-DECL-META1=A; D-NAME-SPLICE1=B" },
+    { spelling: "$build", meaning: "build fact root: `$build.os`, `.profile`, `.settings.*`, `.stamp.*`", decision: "D-BUILD-FACT3=A" },
+    { spelling: "$package", meaning: "package fact root: `$package.name`, `.version`", decision: "D-BUILD-FACT3=A; D-META-REFLECT2=A" },
+    { spelling: "$phase", meaning: "total evaluation-site phase fact", decision: "D-PREP-SURFACE2=A; D-META-ROOT3=A" },
+    { spelling: "$program", meaning: "authorized checked-program fact root", decision: "D-META-REFLECT2=A; D-META-ROOT3=A" },
+    { spelling: META_QUERY_SOURCE, meaning: "lexical source-snapshot metadata query (no ratified `$` root yet)", decision: "D-META-REFLECT2=A" },
+    { spelling: META_QUERY_TYPES, meaning: "retained runtime type-catalog query (no ratified `$` root yet)", decision: "D-META-REFLECT2=A" },
+    { spelling: COMPILER_GENERATE, meaning: "explicit shared-preparation publication of Generated items", decision: "D-META-PUBLISH2=A" },
+    { spelling: COMPILER_ADVANCED_REGISTER, meaning: "explicit opt-in provider registration for declared targets", decision: "D-META-CONTROL2=A; D-META-OPTIN2=A" },
+    { spelling: COMPILER_ADVANCED_REGISTER_EXPANSION, meaning: "explicit opt-in call-expansion provider registration", decision: "D-META-CONTROL2=A; D-META-OPTIN2=A" },
+    { spelling: COMPILER_ADVANCED_REGISTER_SPECIALIZATION, meaning: "explicit opt-in specialization provider registration", decision: "D-META-CONTROL2=A; D-META-OPTIN2=A" },
+    { spelling: COMPILER_ADVANCED_SESSION, meaning: "authorized session within a registered provider", decision: "D-META-CONTROL2=A; D-META-OPTIN2=A" },
+    { spelling: "-[…]", meaning: "effect row on a callable", decision: "D-EFF1" },
+    { spelling: "!", meaning: "error-contract mark after its error type (`E!`, `(A | B)!`); deny-only root in an effect row", decision: "D-TYPE-SUFFIX1=A; D-EFF4" },
+    { spelling: "?", meaning: "optional type mark after its type (`T?`)", decision: "D-TYPE-SUFFIX1=A" },
+    { spelling: "??", meaning: "fallback", decision: "D-RESULT-DECON2" },
+    { spelling: "&place.method(…) / ^place.method(…)", meaning: "receiver place mark: `&`/`^` on the maximal named place a method call writes or takes; fresh receivers stay unmarked; a line starting `&name`/`^name` begins a statement", decision: "D-CAP-RECEIVER1=D" },
+    { spelling: "&self.field / &self.[a, b]", meaning: "stated receiver field footprint: the record fields a method may read or change, checked against its body (E0231) and published in the API snapshot; reuses member spread `.[`", decision: "D-METHOD-FOOTPRINT1=A; D-SPREAD1=A" },
+    { spelling: "T{{expr}}", meaning: "field default", decision: "D-DEFAULT-SHAPE1" },
+    { spelling: "Name{{\"…\"}}", meaning: "checked text head", decision: "S8; D-CHECKED-TEXT1" },
+    { spelling: "{{ … }}", meaning: "typed anonymous value", decision: "D-POLICY-WORD1" },
+    { spelling: "`", meaning: "raw ordinary String fence", decision: "D-RAWSTR1" },
+    { spelling: "\"\"\"", meaning: "multi-line string; only spaces or tabs on the delimiter lines (raw foreign bodies excepted)", decision: "D-SG5; D-TRIPLE-DELIM1=A; D-FFI-RAWBODY1=A" },
+    { spelling: ",", meaning: "separator with optional trailing item in every comma list", decision: "D-TRAILCOMMA1" },
+    { spelling: "Type{{field: pattern, ..}}", meaning: "named struct pattern; fields bind or test nested shapes", decision: "D-PAT-RECORD1=A" },
+    { spelling: "[first, ..rest]", meaning: "list pattern with a read-only zero-copy rest window; exact without the rest marker", decision: "D-PAT-RECORD1=A" },
+    { spelling: "[key: pattern, key?: optional, ..]", meaning: "map pattern; required and optional keys, exact unless it ends with rest", decision: "D-PAT-MAP1=A" },
+    { spelling: "r\"…\", raw\"…\", $\"…\"", meaning: "unclaimed raw-string prefixes", decision: "" },
+    { spelling: ";", meaning: "retired explicit statement terminator", decision: "D-SEMI1" },
+    { spelling: "_name", meaning: "ordinary identifier", decision: "" },
+    { spelling: "__core_intrinsic", meaning: "compiler-only namespace", decision: "D-CORE-CALL1" },
+    { spelling: "<:", meaning: "open a lock-step statement-expansion fence", decision: "D-EACH1=C; D-FENCE2=A; D-FENCE-RANGE1=A" },
+    { spelling: ":>", meaning: "close a lock-step statement-expansion fence", decision: "D-EACH1=C; D-FENCE2=A; D-FENCE-RANGE1=A" },
+    { spelling: "@[ … ]@", meaning: "retired fence spelling; E-FENCE-SPELLING teaches `<: … :>`", decision: "D-FENCE2=A" },
 }
-
-/// A shared preparation block always has an explicit body.
-KW_PREP :: "prep"
 
 /// Checked compiler metadata queries that
 /// has not yet given a `$` root. `$phase`, `$program` and `$package` are the
@@ -176,20 +175,6 @@ TASK_FAILURE_PANICKED :: "Panicked"
 HTTP_ROUTE_PARAM_PREFIX :: ":"
 
 HTTP_ROUTE_CATCH_ALL_PREFIX :: "*"
-
-/// Sema-only metadata carried on `Expr::MethodCall` until TIR
-/// lowers a resolved `#Root` call to the ordinary free-function/module-call
-/// shape. These strings are never source syntax.
-INTERNAL_ROOT_CALL_LOCAL :: "__jet_root_call_local"
-
-INTERNAL_ROOT_CALL_IMPORT_PREFIX :: "__jet_root_call_import:"
-
-INTERNAL_ROOT_CALL_CORE_PREFIX :: "__jet_root_call_core:"
-
-/// Sema-only marker for the builtin function-value `.call(...)`
-/// projection. It is never a source spelling; TIR lowers it to the same
-/// function-value call node as `Expr::CallValue`.
-INTERNAL_CALL_VALUE :: "__jet_call_value"
 
 // (ratified 2026-07-20): every explicit parallel collection
 // adapter uses the owner-selected `para_` prefix. These are a clean break from

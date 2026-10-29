@@ -1,5 +1,5 @@
 // Independent Linux x86-64 heap for boxes/storage emitted by native lowering.
-// No Core allocation API, libc, Rust allocator, sentry, or exact-Int operation
+// No Core allocation API, libc allocator, sentry, or exact-Int operation
 // participates. The ABI is three machine words, matching the lowering's calls.
 //
 // State layout: word 0 of the state page is the detached-thread GS target
@@ -9,12 +9,16 @@
 // [lock 0][8 available-slab heads 8..64][8 retained-empty-slab counts
 // 72..128][8 live totals 136..192][scratch row 200..208 for uncached takes]);
 // the large-block cache owns lock 216, cached bytes 224 and 59 class heads
-// from 256.
+// from 256; the slab regions own lock 736, cursor 744, end 752 and the
+// free-slab stack 760 (alloc_slab_map).
 // The state page also reserves word 4080 for the execution-end flush lock
 // and word 4088 for ignored raw stdio outputs (the I64/Bool outputs alias).
 // Each 64 KiB slab belongs to one arena and one power-of-two class
-// (32..4096). Slab layout: [next][prev][free][live][head-cell][arena]
-// followed by padding to max(64, class-size), then intrusive free blocks.
+// (32..4096). Slab layout: [next][prev][free][live][head-cell][arena][carve]
+// followed by padding to max(64, class-size), then the blocks. A block that
+// was never handed out is not on the free list: `carve` is the next such
+// block (zero once none is left), so a page is first touched when one of its
+// blocks is first taken. Returned blocks go on the intrusive free list.
 // A live block stores [slab][block-start] immediately before its aligned payload.
 // Large/over-aligned mappings instead store [mapping-base][mapping-length].
 // A block allocated with align >= 8 also carries one reference-count word
@@ -23,8 +27,9 @@
 // owner can share it (Refcount.jet jet_rt_block_retain/release/unique) no
 // matter which runtime route or lowering site allocated it. Byte buffers
 // (align < 8, text data) keep the two-word header and have no count.
-// Only slabs with free blocks are linked. An attached thread allocates and
-// frees small blocks through its own cache first (TCB @320, Thread.jet):
+// Only slabs with a block to give (free or still to carve) are linked. An
+// attached thread allocates and frees small blocks through its own cache
+// first (TCB @320, Thread.jet):
 // eight [head][count] rows, one per class, of blocks threaded through their
 // first two words as [next][slab]. The cache needs no atomic: only its owner
 // touches it. It refills with up to 32 blocks of one slab under the arena
@@ -41,9 +46,10 @@
 // (alloc_lock: a short spin, then a kernel sleep), so threads on different
 // stacks rarely contend and a waiter never burns a core. Payloads belong exclusively to
 // their callers. At most ALLOC_RETAINED_EMPTY_SLABS empty slabs per class and
-// arena stay linked to avoid mmap/munmap on every temporary; additional empty
-// slabs are unmapped
-// immediately. Large mappings are rounded to a size class (at most 25% over
+// arena stay linked to avoid relinking on every temporary; additional empty
+// slabs go on the process's free-slab stack, still mapped, for the next new
+// slab of any class (alloc_slab_map: slabs are carved from slab regions and
+// their pages never fault twice). Large mappings are rounded to a size class (at most 25% over
 // the page-rounded need) and a freed one is kept on its class list while the
 // cache holds at most 64 MiB in all (resident pages a compiler keeps, so the
 // bound stays small), for the next allocation of that class instead of
@@ -51,7 +57,7 @@
 // are. The state page, the arena table, the retained empty slabs and the
 // cached large mappings are bounded allocator-owned process-lifetime
 // metadata/cache, not live payload allocations.
-// ProgramAllocator.rs169-202/242-256/416-445 policy shares this heap: independent
+// The program allocator policy (jet_rt_program_allocator_*) shares this heap: independent
 // lock136, mode144 (0 system/1 counting), cap152, allocations160, requested168,
 // live176, high-water184. Counters saturate; successful reservations count even
 // when a later mmap fails, but that failure cancels live bytes before returning.
@@ -59,10 +65,21 @@
 // Head192 and count200 share the policy lock; system-mode block layout and
 // allocation cost are unchanged. Free skips lookup while tracked count is zero.
 //
+// Checked mode (alloc_class_limit, the "Checked mode" section below) is
+// chosen once here, from the process environment, before the first allocation.
+//
 // The runtime object puts jet_rt_alloc_init in .init_array, so initialization
 // precedes all user code in both programs and entryless libraries. There is no
 // lazy initialization or separate jet_rt_main initialization mechanism.
 alloc_root := I64{0}
+
+// The largest payload a size class serves on the ordinary path. Checked mode
+// (JET_CHECKED_ALLOC=1 at start, see alloc_check_take) sets it to 0, so every
+// allocation and free takes the direct-mapping branch, which then hands it to
+// the checked heap: off, checked mode adds no branch to the class path, only
+// this word's load. Written only by jet_rt_alloc_init, before any allocation.
+ALLOC_CLASS_LIMIT :: I64{4096}
+alloc_class_limit := I64{4096}
 
 // Layout::from_size_align(size.max(1), align): alignment must be a nonzero
 // power of two, and rounding the size to alignment must fit isize::MAX.
@@ -73,15 +90,16 @@ fn alloc_layout_valid(size: I64, align: I64) -> Bool Never! {
     effective <= wrapping(I64{9223372036854775807} - wrapping(align - I64{1}))
 }
 
-// Returns the block class, or zero for a direct mapping. The conservative
+// Returns the block class, or zero for a direct mapping (every payload above
+// `limit`: ALLOC_CLASS_LIMIT, or alloc_class_limit). The conservative
 // alignment slack includes every metadata word, so payload alignment never
 // consumes a byte belonging to a neighbouring block. The power-of-two class
 // is chosen by at most four comparisons: this runs on every allocation and
 // every free. Small blocks start 32-aligned (slab offsets are multiples of
 // the class), so an align-8 payload at block+24 needs no slack.
-fn alloc_class(size: I64, align: I64) -> I64 Never! {
+fn alloc_class(size: I64, align: I64, limit: I64) -> I64 Never! {
     effective :: if (size == I64{0}) -> I64{1} else -> size
-    if (effective > I64{4096} || align > I64{4096}) { return I64{0} }
+    if (effective > limit || align > I64{4096}) { return I64{0} }
     slack :: if (align == I64{8}) -> I64{0} else -> wrapping(align - I64{1})
     needed :: wrapping(effective + alloc_header(align) + slack)
     if (needed <= I64{256}) {
@@ -151,11 +169,12 @@ fn alloc_unmap(address: I64, bytes: I64) {
     // mmap is zero-filled: the locks, every free-list head, every live total
     // and the large cache start at zero.
     alloc_root = alloc_map(I64{4096}, I64{4096})
-    // The 32 arenas: 32 * 200 bytes in one zero-filled mapping.
+    // The 32 arenas: 32 * 216 bytes in one zero-filled mapping.
     table :: alloc_map(I64{8192}, I64{8192})
     #Unsafe("the fresh state page is private to initialization, which precedes every allocation") {
         os_store_i64(wrapping(alloc_root + I64{208}), table)
     }
+    if alloc_check_requested() { alloc_check_start() }
     // The initializing thread has no TCB yet; point its GS at the zero word
     // so thread_base() reads 0 instead of faulting on the kernel's GS base 0.
     thread_set_base(thread_detached_base())
@@ -267,31 +286,101 @@ fn alloc_link(slab: I64, head: I64) {
     }
 }
 
+// Slabs come from slab regions, not one mapping each: a region is
+// ALLOC_REGION of 4 KiB pages, mapped once and carved 64 KiB at a time, so a
+// program touches only the pages its blocks use and a growing heap makes one
+// mmap per 512 slabs. A slab that is no longer needed (more empty slabs than
+// ALLOC_RETAINED_EMPTY_SLABS) goes on the process's free-slab stack and serves
+// the next new slab of any class and arena. Its pages are never returned, so
+// they never fault again.
+// State page words: lock 736, region cursor 744, region end 752, free-slab
+// stack 760 (a stacked slab's first word links the next).
+ALLOC_SLAB_BYTES :: I64{65536}
+ALLOC_REGION :: I64{33554432}
+
+// A slab's 64 KiB: a stacked slab, else the next of the current region,
+// mapping a new region when it is used up. Zero when no region can be
+// mapped. A stacked slab's bytes are stale: alloc_new_slab rewrites its header.
+fn alloc_slab_map() -> I64 {
+    lock :: wrapping(alloc_root + I64{736})
+    slab := I64{0}
+    alloc_lock(lock)
+    #Unsafe("the slab-region lock owns the cursor, end and free-slab stack words and every stacked slab's link word") {
+        stack :: wrapping(alloc_root + I64{760})
+        slab = os_load_i64(stack)
+        if (slab != I64{0}) {
+            os_store_i64(stack, os_load_i64(slab))
+        } else {
+            cursor :: wrapping(alloc_root + I64{744})
+            end :: wrapping(alloc_root + I64{752})
+            if (os_load_i64(cursor) == os_load_i64(end)) {
+                region :: alloc_region_map()
+                if (region != I64{0}) {
+                    os_store_i64(cursor, region)
+                    os_store_i64(end, wrapping(region + ALLOC_REGION))
+                }
+            }
+            at :: os_load_i64(cursor)
+            if (at != os_load_i64(end)) {
+                slab = at
+                os_store_i64(cursor, wrapping(at + ALLOC_SLAB_BYTES))
+            }
+        }
+    }
+    alloc_unlock(lock)
+    slab
+}
+
+// Puts a slab no class holds on the free-slab stack, mapped.
+fn alloc_slab_retire(slab: I64) {
+    lock :: wrapping(alloc_root + I64{736})
+    alloc_lock(lock)
+    #Unsafe("the slab-region lock owns the free-slab stack; the slab is unlinked from every class list and holds no live or cached block") {
+        stack :: wrapping(alloc_root + I64{760})
+        os_store_i64(slab, os_load_i64(stack))
+        os_store_i64(stack, slab)
+    }
+    alloc_unlock(lock)
+}
+
+// A new slab region, or zero. It keeps 4 KiB pages (MADV_NOHUGEPAGE): where
+// the system makes huge pages unasked, a first touch would zero 2 MiB, and an
+// advised huge region compacts memory synchronously on fault, which stalls
+// every thread allocating under a loaded host. A refused advice only costs
+// page size.
+fn alloc_region_map() -> I64 {
+    region :: alloc_map_try(ALLOC_REGION)
+    if (region == I64{0}) { return I64{0} }
+    #Unsafe("madvise only changes the page size of the fresh private region") {
+        _ := os_syscall_i64(I64{28}, region, ALLOC_REGION, I64{15}, I64{0}, I64{0}, I64{0})
+    }
+    region
+}
+
+// A slab for class `slot` of arena `root`, linked on the class list `head`.
+// Its header: [next 0][prev 8][free 16][live 24][head 32][arena 40][carve 48].
 fn alloc_new_slab(root: I64, head: I64, slot: I64) -> I64 {
-    slab :: alloc_map_try(I64{65536})
+    slab :: alloc_slab_map()
     if (slab == I64{0}) { return I64{0} }
     first :: wrapping(slab + (if (slot > I64{64}) -> slot else -> I64{64}))
-    end :: wrapping(slab + I64{65536})
-    block := first
-    free := I64{0}
-    #Unsafe("the fresh 64KiB mapping holds every aligned free-block link; the heap lock excludes all list readers") {
-        loop wrapping(block + slot) <= end {
-            os_store_i64(block, free)
-            free = block
-            block = wrapping(block + slot)
-        }
-        os_store_i64(wrapping(slab + I64{16}), free)
+    #Unsafe("the slab is this arena's alone: fresh from its region or off the free-slab stack; the held arena lock excludes all list readers") {
+        os_store_i64(slab, I64{0})
+        os_store_i64(wrapping(slab + I64{8}), I64{0})
+        os_store_i64(wrapping(slab + I64{16}), I64{0})
+        os_store_i64(wrapping(slab + I64{24}), I64{0})
         os_store_i64(wrapping(slab + I64{32}), head)
         os_store_i64(wrapping(slab + I64{40}), root)
+        os_store_i64(wrapping(slab + I64{48}), if (wrapping(first + slot) <= wrapping(slab + ALLOC_SLAB_BYTES)) -> first else -> I64{0})
     }
     alloc_link(slab, head)
     slab
 }
 
 // Empty slabs a class keeps linked per arena, so a burst of temporaries
-// (a thread's cache drains 32 blocks at a time) does not unmap a slab it
-// maps again moments later: at most 8 x 64 KiB per class and arena.
-ALLOC_RETAINED_EMPTY_SLABS :: prep { I64{8} }
+// (a thread's cache drains 32 blocks at a time) does not give up a slab it
+// takes again moments later: at most 8 x 64 KiB per class and arena. Any
+// further empty slab goes on the free-slab stack (alloc_slab_retire).
+ALLOC_RETAINED_EMPTY_SLABS :: I64{8}
 
 // Take up to `limit` free blocks of the class's head slab under the held
 // arena lock and thread them, as [next][slab], onto the cache row `row`
@@ -300,7 +389,7 @@ ALLOC_RETAINED_EMPTY_SLABS :: prep { I64{8} }
 // grows with them; a retained-empty slab leaves the class's retained count
 // (a fresh slab was never counted); an emptied slab is unlinked.
 fn alloc_slab_take(root: I64, head: I64, slot: I64, row: I64, limit: I64) -> I64 {
-    #Unsafe("the held arena lock protects the class list, the slab's free links and live count, the retained count and the arena live total; row is the caller's exclusive cache row; the blocks leave the free list before any caller sees them") {
+    #Unsafe("the held arena lock protects the class list, the slab's free links, carve word and live count, the retained count and the arena live total; row is the caller's exclusive cache row; the blocks leave the slab before any caller sees them") {
         slab := os_load_i64(head)
         fresh := false
         if (slab == I64{0}) {
@@ -309,11 +398,20 @@ fn alloc_slab_take(root: I64, head: I64, slot: I64, row: I64, limit: I64) -> I64
         }
         if (slab == I64{0}) { return I64{0} }
         free := os_load_i64(wrapping(slab + I64{16}))
+        carve := os_load_i64(wrapping(slab + I64{48}))
+        end :: wrapping(slab + I64{65536})
         list := os_load_i64(row)
         taken := I64{0}
-        loop free != (I64{0}) && taken < limit {
-            block :: free
-            free = os_load_i64(block)
+        loop taken < limit {
+            block := free
+            if (block != I64{0}) {
+                free = os_load_i64(block)
+            } else {
+                if (carve == I64{0}) -> break
+                block = carve
+                carve = wrapping(carve + slot)
+                if (wrapping(carve + slot) > end) -> carve = I64{0}
+            }
             os_store_i64(block, list)
             os_store_i64(wrapping(block + I64{8}), slab)
             list = block
@@ -322,6 +420,7 @@ fn alloc_slab_take(root: I64, head: I64, slot: I64, row: I64, limit: I64) -> I64
         os_store_i64(row, list)
         os_store_i64(wrapping(row + I64{8}), wrapping(os_load_i64(wrapping(row + I64{8})) + taken))
         os_store_i64(wrapping(slab + I64{16}), free)
+        os_store_i64(wrapping(slab + I64{48}), carve)
         live :: os_load_i64(wrapping(slab + I64{24}))
         if (live == I64{0} && !fresh) {
             retained :: wrapping(head + I64{64})
@@ -330,17 +429,18 @@ fn alloc_slab_take(root: I64, head: I64, slot: I64, row: I64, limit: I64) -> I64
         os_store_i64(wrapping(slab + I64{24}), wrapping(live + taken))
         total :: wrapping(head + I64{128})
         os_store_i64(total, wrapping(os_load_i64(total) + taken))
-        if (free == I64{0}) { alloc_unlink(slab) }
+        if (free == I64{0} && carve == I64{0}) { alloc_unlink(slab) }
         return taken
     }
 }
 
 // Return one block to its slab. Caller holds the slab's arena lock. The slab
-// is linked again when its free list was empty; a slab whose last block
+// is linked again when it had no block left to give (an empty free list and
+// nothing left to carve); a slab whose last block
 // returns stays linked as one of the class's retained empty slabs
-// (ALLOC_RETAINED_EMPTY_SLABS) or is unmapped.
+// (ALLOC_RETAINED_EMPTY_SLABS) or goes on the free-slab stack.
 fn alloc_slab_return(slab: I64, block: I64) {
-    #Unsafe("the held arena lock protects the slab's free links, live count, class list, retained count and live total; the block is no longer any payload or cache entry") {
+    #Unsafe("the held arena lock protects the slab's free links, carve word, live count, class list, retained count and live total; the block is no longer any payload or cache entry") {
         free :: os_load_i64(wrapping(slab + I64{16}))
         live :: wrapping(os_load_i64(wrapping(slab + I64{24})) - I64{1})
         os_store_i64(block, free)
@@ -349,13 +449,13 @@ fn alloc_slab_return(slab: I64, block: I64) {
         head :: os_load_i64(wrapping(slab + I64{32}))
         total :: wrapping(head + I64{128})
         os_store_i64(total, wrapping(os_load_i64(total) - I64{1}))
-        if (free == I64{0}) { alloc_link(slab, head) }
+        if (free == I64{0} && os_load_i64(wrapping(slab + I64{48})) == I64{0}) { alloc_link(slab, head) }
         if (live == I64{0}) {
             retained :: wrapping(head + I64{64})
             count :: os_load_i64(retained)
             if (count < ALLOC_RETAINED_EMPTY_SLABS) { os_store_i64(retained, wrapping(count + I64{1})) } else {
                 alloc_unlink(slab)
-                alloc_unmap(slab, I64{65536})
+                alloc_slab_retire(slab)
             }
         }
     }
@@ -552,9 +652,11 @@ fn alloc_large(size: I64, align: I64) -> I64 {
 
 // Session reserve is nullable on bad layout/OOM; every successful allocation
 // still uses the same heap and exact-layout free as ordinary native storage.
+// Checked mode (alloc_class_limit 0) sends every request to alloc_check_take.
 fn alloc_try_validated(size: I64, align: I64) -> I64 {
-    slot :: alloc_class(size, align)
+    slot :: alloc_class(size, align, alloc_class_limit)
     if (slot == I64{0}) {
+        if (alloc_class_limit == I64{0}) { return alloc_check_take(size, align) }
         pointer :: alloc_large(size, align)
         alloc_count_init(pointer, align)
         return pointer
@@ -633,8 +735,8 @@ fn alloc_release(requested: I64) {
     alloc_unlock(lock)
 }
 
-// Explicit host policy edge: serialize runs outside this call, as the Rust
-// config guard does. Save fact5 (mode) and fact4 (cap) before configuring, and
+// Explicit host policy edge: the caller serializes runs around this call.
+// Save fact5 (mode) and fact4 (cap) before configuring, and
 // restore them with the distinct restore edge below, retaining run counters.
 #Export(c) fn jet_rt_program_allocator_configure(mode: I64, cap: I64) {
     lock :: wrapping(alloc_root + I64{136})
@@ -651,7 +753,7 @@ fn alloc_release(requested: I64) {
     alloc_unlock(lock)
 }
 
-// ProgramAllocator.rs126-130: restoration changes policy, never historical
+// Restoration changes policy, never historical
 // counters, even after the final counted allocation has been freed.
 #Export(c) fn jet_rt_program_allocator_restore(mode: I64, cap: I64) {
     lock :: wrapping(alloc_root + I64{136})
@@ -677,7 +779,7 @@ fn alloc_release(requested: I64) {
     value
 }
 
-// ProgramAllocator.rs333-394: tracker allocation bypasses selected policy,
+// Tracker allocation bypasses the selected policy,
 // cannot recurse, and exists only for counted payloads. Allocation failures
 // release the reservation and free the payload before returning zero.
 fn alloc_track(pointer: I64, requested: I64) -> Bool {
@@ -751,12 +853,61 @@ fn alloc_try(size: I64, align: I64) -> I64 {
 
 #Export(c) fn jet_rt_alloc_try(size: I64, align: I64) -> I64 { alloc_try(size, align) }
 
+// The allocation fast path (#5476): jet_rt_alloc and jet_rt_free serve a
+// small request of a plainly valid layout (size below alloc_class_limit,
+// align 1, 2, 4 or 8) on the calling thread's cache row, calling nothing
+// but an empty row's refill (the runtime is not inlined, and a call costs
+// more than the work): the block, header and count word alloc_try_validated
+// writes, and the push alloc_free_validated makes. The class row (0..7,
+// class 32 << row) is alloc_class's comparisons spelled out. The checks
+// that stay on it:
+// - the layout: a size and power-of-two align in the range, so the full
+//   path's alloc_layout_valid accepts it and its trap is never skipped;
+// - checked mode: alloc_class_limit 0 admits no size, so every request takes
+//   the full path, which hands it to the checked heap;
+// - a TCB: a thread without one (GS names a zero word) has no row;
+// - the counting policy: the mode word is 0 on allocation, and no counted
+//   payload is tracked on free (so alloc_untrack has nothing to find), so
+//   the ProgramAllocator facts stay exact;
+// - an ending process frees nothing (#5478, Main.jet).
+// Anything else (a direct mapping, over-alignment, an empty row whose refill
+// finds no slab, a row holding 64 blocks) takes the full path, unchanged.
 #Export(c) fn jet_rt_alloc(size: I64, align: I64) -> I64 {
+    if (size >= I64{0} && size < alloc_class_limit && align > I64{0} && align <= I64{8} && align.bit_and(wrapping(align - I64{1})) == I64{0}) {
+        header :: if (align == I64{8}) -> I64{24} else -> I64{16}
+        needed :: wrapping((if (size == I64{0}) -> I64{1} else -> size) + header + (if (align == I64{8}) -> I64{0} else -> wrapping(align - I64{1})))
+        index := I64{-1}
+        if (needed <= I64{256}) {
+            if (needed <= I64{64}) { index = if (needed <= I64{32}) -> I64{0} else -> I64{1} } else { index = if (needed <= I64{128}) -> I64{2} else -> I64{3} }
+        } else if (needed <= I64{1024}) { index = if (needed <= I64{512}) -> I64{4} else -> I64{5} } else if (needed <= I64{2048}) { index = I64{6} } else if (needed <= I64{4096}) { index = I64{7} }
+        if (index >= I64{0}) {
+            #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row (TCB @320 + 16 per class, alloc_cache_row) and block its cached head, whose two cached words are read before the payload header overwrites them; an align <= 8 payload at block + header is aligned because blocks start 32-aligned") {
+                base :: os_tls_base_i64()
+                if (base != I64{0} && os_load_i64(wrapping(alloc_root + I64{144})) == I64{0}) {
+                    row :: wrapping(base + wrapping(I64{320} + wrapping(index * I64{16})))
+                    block := os_load_i64(row)
+                    if (block == I64{0} && alloc_cache_refill(row, I64{32} << index)) { block = os_load_i64(row) }
+                    if (block != I64{0}) {
+                        pointer :: wrapping(block + header)
+                        os_store_i64(row, os_load_i64(block))
+                        os_store_i64(wrapping(row + I64{8}), wrapping(os_load_i64(wrapping(row + I64{8})) - I64{1}))
+                        os_store_i64(wrapping(pointer - I64{16}), os_load_i64(wrapping(block + I64{8})))
+                        os_store_i64(wrapping(pointer - I64{8}), block)
+                        if (align == I64{8}) { os_store_i64(block, I64{1}) }
+                        return pointer
+                    }
+                }
+            }
+        }
+    }
     if !alloc_layout_valid(size, align) {
         rt_trap_invalid_box_layout()
         return I64{0}
     }
-    alloc_required_valid(size, align)
+    // Allocation failure is terminal SIGABRT.
+    pointer :: alloc_try_reserved(size, align)
+    if (pointer == I64{0}) { alloc_out_of_memory(if (size == I64{0}) -> I64{1} else -> size) }
+    pointer
 }
 
 #Export(c) fn jet_rt_free(pointer: I64, size: I64, align: I64) {
@@ -764,36 +915,126 @@ fn alloc_try(size: I64, align: I64) -> I64 {
     if (pointer == I64{0}) {
         return
     }
+    if (size >= I64{0} && size < alloc_class_limit && align > I64{0} && align <= I64{8} && align.bit_and(wrapping(align - I64{1})) == I64{0}) {
+        // An ending process leaves its heap to the kernel (#5478, Main.jet).
+        if (main_process_ending != I64{0}) -> return
+        needed :: wrapping((if (size == I64{0}) -> I64{1} else -> size) + (if (align == I64{8}) -> I64{24} else -> wrapping(I64{15} + align)))
+        index := I64{-1}
+        if (needed <= I64{256}) {
+            if (needed <= I64{64}) { index = if (needed <= I64{32}) -> I64{0} else -> I64{1} } else { index = if (needed <= I64{128}) -> I64{2} else -> I64{3} }
+        } else if (needed <= I64{1024}) { index = if (needed <= I64{512}) -> I64{4} else -> I64{5} } else if (needed <= I64{2048}) { index = I64{6} } else if (needed <= I64{4096}) { index = I64{7} }
+        if (index >= I64{0}) {
+            #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count is an aligned word read atomically, as alloc_untrack reads it; row is this thread's private cache row; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's cached words overwrite it") {
+                base :: os_tls_base_i64()
+                if (base != I64{0} && os_load_i64(wrapping(alloc_root + I64{200})) == I64{0}) {
+                    row :: wrapping(base + wrapping(I64{320} + wrapping(index * I64{16})))
+                    count :: os_load_i64(wrapping(row + I64{8}))
+                    if (count < I64{64}) {
+                        block :: os_load_i64(wrapping(pointer - I64{8}))
+                        slab :: os_load_i64(wrapping(pointer - I64{16}))
+                        os_store_i64(block, os_load_i64(row))
+                        os_store_i64(wrapping(block + I64{8}), slab)
+                        os_store_i64(row, block)
+                        os_store_i64(wrapping(row + I64{8}), wrapping(count + I64{1}))
+                        return
+                    }
+                }
+            }
+        }
+    }
     if !alloc_layout_valid(size, align) {
         rt_trap_invalid_box_layout()
         return
     }
+    // An ending process leaves its heap to the kernel (#5478, Main.jet).
+    if (main_process_ending != I64{0}) -> return
     alloc_release(alloc_untrack(pointer))
     alloc_free_validated(pointer, size, align)
 }
 
-// Private callers prove the layout from literal sizes and exact live-owner
-// layouts. This is the same heap/policy/tracker; only redundant Layout
-// validation is absent. Allocation failure remains terminal SIGABRT.
-fn alloc_required_valid(size: I64, align: I64) -> I64 {
-    pointer :: alloc_try_reserved(size, align)
-    if (pointer == I64{0}) { alloc_out_of_memory(if (size == I64{0}) -> I64{1} else -> size) }
-    pointer
-}
-fn alloc_release_valid(pointer: I64, size: I64, align: I64) {
-    if (pointer == I64{0}) -> return
-    alloc_release(alloc_untrack(pointer))
-    alloc_free_validated(pointer, size, align)
-}
-
-fn alloc_free_validated(pointer: I64, size: I64, align: I64) {
-    slot :: alloc_class(size, align)
-    if (slot == I64{0}) {
-        #Unsafe("the lowering returns this still-live direct allocation with exactly its original size and alignment") {
-            mapping :: os_load_i64(wrapping(pointer - I64{16}))
-            bytes :: os_load_i64(wrapping(pointer - I64{8}))
-            alloc_large_free(mapping, bytes)
+// The align-8 entries (#5925): jet_rt_alloc_8(size) is jet_rt_alloc(size, 8)
+// and jet_rt_free_8(pointer, size) is jet_rt_free(pointer, size, 8). A code
+// generator calls them for a constant align 8 (JetIR X64Select
+// ir_x64_alloc_entry), the align every box, record and word buffer has.
+// With the align known, the fast path needs no layout validation but the
+// size's range and no header choice, and the entry has a small frame. The
+// class row is alloc_class's comparisons for align 8 (size + 24 bytes, so
+// row k of class 32 << k serves the sizes above (16 << k) - 24 and at most
+// (32 << k) - 24, row 0 from 0), as the TCB offset of the row
+// (alloc_cache_row). Everything else takes the general entry.
+#Export(c) fn jet_rt_alloc_8(size: I64) -> I64 {
+    if (size >= I64{0}) {
+        if (size < alloc_class_limit) {
+            offset := I64{0}
+            if (size <= I64{232}) {
+                if (size <= I64{40}) { offset = if (size <= I64{8}) -> I64{320} else -> I64{336} } else { offset = if (size <= I64{104}) -> I64{352} else -> I64{368} }
+            } else if (size <= I64{1000}) { offset = if (size <= I64{488}) -> I64{384} else -> I64{400} } else if (size <= I64{2024}) { offset = I64{416} } else if (size <= I64{4072}) { offset = I64{432} }
+            if (offset != I64{0}) {
+                #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the aligned mode word is read atomically on x86, as alloc_reserve reads it; row is this thread's private cache row of the size's class and block its cached head, whose next word is read before the count overwrites it; the block's second word is its slab word, the payload header's; the payload at block + 24 is 8-aligned because blocks start 32-aligned") {
+                    base :: os_tls_base_i64()
+                    if (base != I64{0}) {
+                        if (os_load_i64(wrapping(alloc_root + I64{144})) == I64{0}) {
+                            row :: wrapping(base + offset)
+                            block :: os_load_i64(row)
+                            if (block != I64{0}) {
+                                os_store_i64(row, os_load_i64(block))
+                                os_store_i64(wrapping(row + I64{8}), wrapping(os_load_i64(wrapping(row + I64{8})) - I64{1}))
+                                os_store_i64(wrapping(block + I64{16}), block)
+                                os_store_i64(block, I64{1})
+                                return wrapping(block + I64{24})
+                            }
+                        }
+                    }
+                }
+            }
         }
+    }
+    jet_rt_alloc(size, I64{8})
+}
+
+#Export(c) fn jet_rt_free_8(pointer: I64, size: I64) {
+    if (pointer != I64{0}) {
+        if (size >= I64{0}) {
+            if (size < alloc_class_limit) {
+                // An ending process leaves its heap to the kernel (#5478, Main.jet).
+                if (main_process_ending != I64{0}) -> return
+                offset := I64{0}
+                if (size <= I64{232}) {
+                    if (size <= I64{40}) { offset = if (size <= I64{8}) -> I64{320} else -> I64{336} } else { offset = if (size <= I64{104}) -> I64{352} else -> I64{368} }
+                } else if (size <= I64{1000}) { offset = if (size <= I64{488}) -> I64{384} else -> I64{400} } else if (size <= I64{2024}) { offset = I64{416} } else if (size <= I64{4072}) { offset = I64{432} }
+                if (offset != I64{0}) {
+                    #Unsafe("GS:0 is the attached thread's TCB or, unattached, the readable zero word (thread_base); the tracked count is an aligned word read atomically, as alloc_untrack reads it; row is this thread's private cache row of the size's class; the lowering frees exactly once with the allocation's original layout, so the payload header is read before the block's next word overwrites it; the block's second word stays its slab word") {
+                        base :: os_tls_base_i64()
+                        if (base != I64{0}) {
+                            if (os_load_i64(wrapping(alloc_root + I64{200})) == I64{0}) {
+                                row :: wrapping(base + offset)
+                                count :: os_load_i64(wrapping(row + I64{8}))
+                                if (count < I64{64}) {
+                                    block :: os_load_i64(wrapping(pointer - I64{8}))
+                                    os_store_i64(block, os_load_i64(row))
+                                    os_store_i64(row, block)
+                                    os_store_i64(wrapping(row + I64{8}), wrapping(count + I64{1}))
+                                    return
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    jet_rt_free(pointer, size, I64{8})
+}
+
+// Checked mode (alloc_class_limit 0) sends every free to alloc_check_give.
+fn alloc_free_validated(pointer: I64, size: I64, align: I64) {
+    slot :: alloc_class(size, align, alloc_class_limit)
+    if (slot == I64{0}) {
+        if (alloc_class_limit == I64{0}) {
+            alloc_check_give(pointer, size, align)
+            return
+        }
+        alloc_large_give(pointer)
         return
     }
     row :: alloc_cache_row(slot)
@@ -811,6 +1052,21 @@ fn alloc_free_validated(pointer: I64, size: I64, align: I64) {
         }
         return
     }
+    alloc_arena_give(pointer)
+}
+
+// Return a direct allocation's mapping.
+fn alloc_large_give(pointer: I64) {
+    #Unsafe("the lowering returns this still-live direct allocation with exactly its original size and alignment") {
+        mapping :: os_load_i64(wrapping(pointer - I64{16}))
+        bytes :: os_load_i64(wrapping(pointer - I64{8}))
+        alloc_large_free(mapping, bytes)
+    }
+}
+
+// Return a class payload straight to its slab under its arena's lock (a
+// thread without a cache row, and a checked block's own heap block).
+fn alloc_arena_give(pointer: I64) {
     slab := I64{0}
     root := I64{0}
     #Unsafe("the caller's live payload header names its slab, whose arena word is fixed when the slab is created") {
@@ -822,6 +1078,517 @@ fn alloc_free_validated(pointer: I64, size: I64, align: I64) {
         alloc_slab_return(slab, os_load_i64(wrapping(pointer - I64{8})))
     }
     alloc_unlock(root)
+}
+
+// Checked mode (#5095): JET_CHECKED_ALLOC=1 in the environment at process
+// start turns a bad free from silent heap corruption into a trap that names
+// its call site. It is a debugging aid with no flag or syntax; off, the
+// class path is unchanged but for reading the class limit from the global
+// alloc_class_limit: checked mode sets it to 0, so every allocation and free
+// reaches the direct-mapping branch, which alone tests for checked mode.
+// A checked payload p of (size, align) lives inside one ordinary heap block
+// q of (prefix + size + 8, max(align, 8)), p = q + prefix, where the prefix
+// is 200 bytes rounded up to align:
+//   p-8     canary: ALLOC_CHECK_LIVE ^ p while live, ALLOC_CHECK_FREED ^ p freed
+//   p-16    q
+//   p-24    the reference count (Refcount.jet reads payload-24), 1 for align >= 8
+//   p-32    size, p-40 align
+//   p-120.. ten return addresses of the allocating chain (ascending to p-48)
+//   p-200.. ten return addresses of the freeing chain (ascending to p-128)
+//   p+size  an unaligned tail canary ALLOC_CHECK_TAIL ^ p
+// Each chain starts inside the allocator: the backend may inline its
+// helpers, so a fixed skip count could drop the caller's own frame.
+// A free checks the canary (a second free, or a pointer this heap never
+// handed out or whose header was overwritten), the layout (the allocation's
+// size and alignment) and the tail canary (a write past the end); it then
+// poisons the payload with 0xDF bytes and parks the block in a FIFO
+// quarantine of ALLOC_CHECK_SLOTS blocks and at most ALLOC_CHECK_BUDGET
+// payload bytes, so a stale pointer cannot reach a reused block. A block
+// leaving the quarantine, and every parked block when main returns
+// (alloc_check_sweep), must still carry its freed canary, its poison and its
+// tail: otherwise something wrote after the free. A trap prints the block,
+// the current call chain and the recorded chains (return addresses walked
+// up the rbp frame chain, symbolized from /proc/self/exe's .symtab, relocated
+// by the AT_PHDR load bias for a PIE; runtime-internal functions have no
+// symbol and print as ??), then aborts.
+// State page words: quarantine lock 16, ring 24, pushes 32, parked count 40,
+// parked bytes 48, frame-pointer stub 56 (alloc_check_start).
+ALLOC_CHECK_LIVE :: I64{2397417249457849674}
+ALLOC_CHECK_FREED :: I64{2397398596314219850}
+ALLOC_CHECK_TAIL :: I64{2399373246418142538}
+ALLOC_CHECK_POISON :: I64{-2314885530818453537}
+ALLOC_CHECK_SLOTS :: I64{4096}
+ALLOC_CHECK_BUDGET :: I64{67108864}
+
+// Whether the environment holds exactly JET_CHECKED_ALLOC=1. Initialization
+// runs before any allocation and before the startup environment exists, so
+// this reads /proc/self/environ through the state page's unused tail (path
+// and pattern words at 1024 and 1048, a 2016-byte buffer at 2048), cleared
+// again afterwards. Without /proc the mode stays off.
+fn alloc_check_requested() -> Bool {
+    path :: wrapping(alloc_root + I64{1024})
+    pattern :: wrapping(alloc_root + I64{1048})
+    buffer :: wrapping(alloc_root + I64{2048})
+    found := false
+    #Unsafe("initialization owns the fresh state page; the path, pattern and read buffer lie in its unused tail below word 4064 and read writes only the buffer") {
+        // "/proc/self/environ\0" and "JET_CHECKED_ALLOC=1\0", little-endian.
+        os_store_i64(path, I64{7310238724270485551})
+        os_store_i64(wrapping(path + I64{8}), I64{8244250809394488940})
+        os_store_i64(wrapping(path + I64{16}), I64{28271})
+        os_store_i64(pattern, I64{4847360028133573962})
+        os_store_i64(wrapping(pattern + I64{8}), I64{5714025870881211723})
+        os_store_i64(wrapping(pattern + I64{16}), I64{3226947})
+        fd :: os_syscall_i64(I64{257}, I64{-100}, path, I64{524288}, I64{0}, I64{0}, I64{0})
+        if (fd >= I64{0}) {
+            // matched: bytes of the pattern matched since an entry start, or
+            // -1 while skipping to the next entry's NUL.
+            matched := I64{0}
+            loop {
+                count :: os_syscall_i64(I64{0}, fd, buffer, I64{2016}, I64{0}, I64{0}, I64{0})
+                if (count == I64{-4}) { next }
+                if (count <= I64{0}) { break }
+                at := I64{0}
+                loop at < count {
+                    byte :: os_load_u8(wrapping(buffer + at))
+                    if (matched >= I64{0} && byte == os_load_u8(wrapping(pattern + matched))) {
+                        matched = wrapping(matched + I64{1})
+                        if (matched == I64{20}) {
+                            found = true
+                            break
+                        }
+                    } else {
+                        matched = if (byte == I64{0}) -> I64{0} else -> I64{-1}
+                    }
+                    at = wrapping(at + I64{1})
+                }
+                if found { break }
+            }
+            _ := os_syscall_i64(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        }
+        at := I64{1024}
+        loop at < (I64{4064}) {
+            os_store_i64(wrapping(alloc_root + at), I64{0})
+            at = wrapping(at + I64{8})
+        }
+    }
+    found
+}
+
+// The frame walk needs rbp, which no admitted asm leaf reads (and a new leaf
+// would not assemble with a seed that predates it), so checked mode maps a
+// four-byte read-only executable stub `mov rax, rbp; ret` called through
+// os_call_address_i64: rbp is unchanged across the call, so it returns the
+// calling function's frame pointer.
+fn alloc_check_start() {
+    ring :: alloc_map(wrapping(ALLOC_CHECK_SLOTS * I64{8}), wrapping(ALLOC_CHECK_SLOTS * I64{8}))
+    stub :: alloc_map(I64{4096}, I64{4096})
+    #Unsafe("the fresh state page and stub page are private to initialization, which precedes every allocation; the stub page becomes read+execute before any call") {
+        os_store_i64(stub, I64{3286796616})
+        if (os_syscall_i64(I64{10}, stub, I64{4096}, I64{5}, I64{0}, I64{0}, I64{0}) == I64{0}) {
+            os_store_i64(wrapping(alloc_root + I64{56}), stub)
+        }
+        os_store_i64(wrapping(alloc_root + I64{24}), ring)
+    }
+    alloc_class_limit = I64{0}
+}
+
+fn alloc_check_prefix(align: I64) -> I64 Never! {
+    if (align <= I64{8}) -> I64{200} else -> alloc_align(I64{200}, align)
+}
+
+// Store `count` return addresses of the calling chain at out, out+8, ...;
+// 0 past the chain's end. The walk stops at a null or misaligned link or one
+// that does not ascend within 16 MiB, so it never leaves the current stack.
+fn alloc_check_frames(out: I64, count: I64) {
+    frame := I64{0}
+    #Unsafe("the checked-mode stub only copies rbp to rax and returns; a missing stub leaves no chain") {
+        stub :: os_load_i64(wrapping(alloc_root + I64{56}))
+        if (stub != I64{0}) { frame = os_call_address_i64(stub, I64{0}) }
+    }
+    index := I64{0}
+    loop index < count {
+        address := I64{0}
+        if (frame != I64{0} && frame.bit_and(I64{7}) == I64{0}) {
+            #Unsafe("frame is an active caller's [saved rbp][return address] pair on this thread's stack: every followed link ascends by less than 16 MiB") {
+                address = os_load_i64(wrapping(frame + I64{8}))
+                above :: os_load_i64(frame)
+                frame = if (above > frame && wrapping(above - frame) < I64{16777216}) -> above else -> I64{0}
+            }
+        }
+        #Unsafe("out lends count writable words: a checked block's chain words or a trap's scratch page") {
+            os_store_i64(wrapping(out + wrapping(index * I64{8})), address)
+        }
+        index = wrapping(index + I64{1})
+    }
+}
+
+fn alloc_check_take(size: I64, align: I64) -> I64 {
+    prefix :: alloc_check_prefix(align)
+    inner_align :: if (align < I64{8}) -> I64{8} else -> align
+    if (size > wrapping(wrapping(I64{9223372036854775807} - prefix) - wrapping(inner_align + I64{8}))) { return I64{0} }
+    block :: alloc_check_block_take(wrapping(wrapping(prefix + size) + I64{8}), inner_align)
+    if (block == I64{0}) { return I64{0} }
+    pointer :: wrapping(block + prefix)
+    #Unsafe("block is this caller's fresh heap block of prefix + size + 8 bytes; every word written lies in block .. pointer + size + 8") {
+        os_store_i64(wrapping(pointer - I64{8}), pointer.bit_xor(ALLOC_CHECK_LIVE))
+        os_store_i64(wrapping(pointer - I64{16}), block)
+        os_store_i64(wrapping(pointer - I64{24}), if (align >= I64{8}) -> I64{1} else -> I64{0})
+        os_store_i64(wrapping(pointer - I64{32}), size)
+        os_store_i64(wrapping(pointer - I64{40}), align)
+        at := I64{128}
+        loop at <= (I64{200}) {
+            os_store_i64(wrapping(pointer - at), I64{0})
+            at = wrapping(at + I64{8})
+        }
+        os_store_i64(wrapping(pointer + size), pointer.bit_xor(ALLOC_CHECK_TAIL))
+    }
+    alloc_check_frames(wrapping(pointer - I64{120}), I64{10})
+    pointer
+}
+
+fn alloc_check_give(pointer: I64, size: I64, align: I64) {
+    if (pointer < I64{4096} || pointer.bit_and(I64{7}) != I64{0}) { alloc_check_fail(I64{2}, pointer, size, align, I64{0}) }
+    lock :: wrapping(alloc_root + I64{16})
+    canary := I64{0}
+    alloc_lock(lock)
+    #Unsafe("a checked payload's canary word precedes it; the quarantine lock orders racing frees of one block") {
+        canary = os_load_i64(wrapping(pointer - I64{8}))
+        if (canary == pointer.bit_xor(ALLOC_CHECK_LIVE)) {
+            os_store_i64(wrapping(pointer - I64{8}), pointer.bit_xor(ALLOC_CHECK_FREED))
+        }
+    }
+    alloc_unlock(lock)
+    if (canary == pointer.bit_xor(ALLOC_CHECK_FREED)) { alloc_check_fail(I64{1}, pointer, size, align, I64{0}) }
+    if (canary != pointer.bit_xor(ALLOC_CHECK_LIVE)) { alloc_check_fail(I64{2}, pointer, size, align, I64{0}) }
+    #Unsafe("the live canary proves pointer is a checked payload whose header and tail this free now owns") {
+        if (os_load_i64(wrapping(pointer - I64{32})) != size || os_load_i64(wrapping(pointer - I64{40})) != align) {
+            alloc_check_fail(I64{3}, pointer, size, align, I64{0})
+        }
+        if (os_load_i64(wrapping(pointer + size)) != pointer.bit_xor(ALLOC_CHECK_TAIL)) {
+            alloc_check_fail(I64{4}, pointer, size, align, size)
+        }
+    }
+    alloc_check_frames(wrapping(pointer - I64{200}), I64{10})
+    alloc_check_fill(pointer, size)
+    alloc_lock(lock)
+    #Unsafe("the quarantine lock owns the ring and its counters; every parked block is freed and owned by the quarantine") {
+        ring :: os_load_i64(wrapping(alloc_root + I64{24}))
+        pushes :: os_load_i64(wrapping(alloc_root + I64{32}))
+        parked := os_load_i64(wrapping(alloc_root + I64{40}))
+        bytes := os_load_i64(wrapping(alloc_root + I64{48}))
+        loop parked > (I64{0}) && (parked == ALLOC_CHECK_SLOTS || wrapping(bytes + size) > ALLOC_CHECK_BUDGET) {
+            oldest :: os_load_i64(wrapping(ring + wrapping(wrapping(pushes - parked).bit_and(wrapping(ALLOC_CHECK_SLOTS - I64{1})) * I64{8})))
+            alloc_check_inspect(lock, oldest)
+            bytes = wrapping(bytes - os_load_i64(wrapping(oldest - I64{32})))
+            parked = wrapping(parked - I64{1})
+            alloc_check_retire(oldest)
+        }
+        os_store_i64(wrapping(ring + wrapping(pushes.bit_and(wrapping(ALLOC_CHECK_SLOTS - I64{1})) * I64{8})), pointer)
+        os_store_i64(wrapping(alloc_root + I64{32}), wrapping(pushes + I64{1}))
+        os_store_i64(wrapping(alloc_root + I64{40}), wrapping(parked + I64{1}))
+        os_store_i64(wrapping(alloc_root + I64{48}), wrapping(bytes + size))
+    }
+    alloc_unlock(lock)
+}
+
+fn alloc_check_fill(pointer: I64, size: I64) {
+    at := I64{0}
+    #Unsafe("the freeing caller owns size payload bytes at pointer") {
+        loop wrapping(at + I64{8}) <= size {
+            os_store_i64(wrapping(pointer + at), ALLOC_CHECK_POISON)
+            at = wrapping(at + I64{8})
+        }
+        loop at < size {
+            os_store_u8(wrapping(pointer + at), I64{223})
+            at = wrapping(at + I64{1})
+        }
+    }
+}
+
+// A parked block must be exactly as its free left it; any change is a write
+// after free. Returns the first changed byte's offset (-8: the canary), or -1.
+fn alloc_check_damage(pointer: I64) -> I64 {
+    #Unsafe("pointer is a parked checked payload owned by the quarantine; its header, payload and tail stay mapped until retired") {
+        if (os_load_i64(wrapping(pointer - I64{8})) != pointer.bit_xor(ALLOC_CHECK_FREED)) { return I64{-8} }
+        size :: os_load_i64(wrapping(pointer - I64{32}))
+        at := I64{0}
+        loop wrapping(at + I64{8}) <= size && os_load_i64(wrapping(pointer + at)) == ALLOC_CHECK_POISON {
+            at = wrapping(at + I64{8})
+        }
+        loop at < size {
+            if (os_load_u8(wrapping(pointer + at)) != I64{223}) { return at }
+            at = wrapping(at + I64{1})
+        }
+        if (os_load_i64(wrapping(pointer + size)) != pointer.bit_xor(ALLOC_CHECK_TAIL)) { return size }
+    }
+    I64{-1}
+}
+
+// Trap on a damaged parked block; the caller holds the quarantine lock,
+// released first so the report may flush stdout (which may allocate and free).
+fn alloc_check_inspect(lock: I64, pointer: I64) {
+    damage :: alloc_check_damage(pointer)
+    if (damage == I64{-1}) -> return
+    alloc_unlock(lock)
+    if (damage == I64{-8}) { alloc_check_fail(I64{6}, pointer, I64{0}, I64{0}, damage) }
+    #Unsafe("the freed canary proved the checked header") {
+        alloc_check_fail(I64{5}, pointer, os_load_i64(wrapping(pointer - I64{32})), os_load_i64(wrapping(pointer - I64{40})), damage)
+    }
+}
+
+fn alloc_check_retire(pointer: I64) {
+    block := I64{0}
+    size := I64{0}
+    align := I64{0}
+    #Unsafe("pointer is an inspected parked checked payload; its header still names the enclosing block and layout") {
+        block = os_load_i64(wrapping(pointer - I64{16}))
+        size = os_load_i64(wrapping(pointer - I64{32}))
+        align = os_load_i64(wrapping(pointer - I64{40}))
+    }
+    bytes :: wrapping(wrapping(alloc_check_prefix(align) + size) + I64{8})
+    if (alloc_class(bytes, if (align < I64{8}) -> I64{8} else -> align, ALLOC_CLASS_LIMIT) == I64{0}) { alloc_large_give(block) } else { alloc_arena_give(block) }
+}
+
+// A checked payload's own heap block: an ordinary class block straight from
+// an arena (no cache row), or a direct mapping.
+fn alloc_check_block_take(bytes: I64, align: I64) -> I64 {
+    slot :: alloc_class(bytes, align, ALLOC_CLASS_LIMIT)
+    if (slot == I64{0}) -> alloc_large(bytes, align) else -> alloc_small(alloc_arena(), bytes, align, slot)
+}
+
+// Main's normal return (Main.jet jet_rt_main) inspects every block still
+// parked, so a write after one of the last frees is not missed.
+fn alloc_check_sweep() {
+    if (alloc_class_limit != I64{0}) -> return
+    lock :: wrapping(alloc_root + I64{16})
+    alloc_lock(lock)
+    #Unsafe("the quarantine lock owns the ring and its counters") {
+        ring :: os_load_i64(wrapping(alloc_root + I64{24}))
+        pushes :: os_load_i64(wrapping(alloc_root + I64{32}))
+        parked :: os_load_i64(wrapping(alloc_root + I64{40}))
+        index := I64{0}
+        loop index < parked {
+            alloc_check_inspect(lock, os_load_i64(wrapping(ring + wrapping(wrapping(wrapping(pushes - parked) + index).bit_and(wrapping(ALLOC_CHECK_SLOTS - I64{1})) * I64{8}))))
+            index = wrapping(index + I64{1})
+        }
+    }
+    alloc_unlock(lock)
+}
+
+fn alloc_check_write(data: I64, length: I64) {
+    at := I64{0}
+    #Unsafe("data lends length readable bytes; write retains no pointer") {
+        loop at < length {
+            written :: os_syscall_i64(I64{1}, I64{2}, wrapping(data + at), wrapping(length - at), I64{0}, I64{0}, I64{0})
+            if (written == I64{-4}) { next }
+            if (written <= I64{0}) { return }
+            at = wrapping(at + written)
+        }
+    }
+}
+
+fn alloc_check_say(text: I64) {
+    alloc_check_write(rt_text_data(text), rt_text_len(text))
+}
+
+fn alloc_check_hex(value: I64) {
+    alloc_write_word(I64{30768}, I64{2})
+    shift := I64{60}
+    loop shift > (I64{0}) && (value >> shift).bit_and(I64{15}) == (I64{0}) {
+        shift = wrapping(shift - I64{4})
+    }
+    loop shift >= (I64{0}) {
+        digit :: (value >> shift).bit_and(I64{15})
+        alloc_write_word(if (digit < I64{10}) -> wrapping(I64{48} + digit) else -> wrapping(I64{87} + digit), I64{1})
+        shift = wrapping(shift - I64{4})
+    }
+}
+
+// A read-only private mapping of this executable's ELF file for symbol
+// names, or 0: the loader's view of an image run from memory
+// (HOST_AT_IMAGE), else /proc/self/exe mapped here.
+fn alloc_check_image() -> I64 {
+    loaded :: host_getauxval(HOST_AT_IMAGE)
+    if (loaded != I64{0}) { return loaded }
+    path :: alloc_map_try(I64{4096})
+    if (path == I64{0}) { return I64{0} }
+    image := I64{0}
+    #Unsafe("path is a fresh private page; the image is mapped read-only and only read") {
+        // "/proc/self/exe\0", little-endian.
+        os_store_i64(path, I64{7310238724270485551})
+        os_store_i64(wrapping(path + I64{8}), I64{111567768086124})
+        fd :: os_syscall_i64(I64{257}, I64{-100}, path, I64{524288}, I64{0}, I64{0}, I64{0})
+        if (fd >= I64{0}) {
+            length :: os_syscall_i64(I64{8}, fd, I64{0}, I64{2}, I64{0}, I64{0}, I64{0})
+            if (length > I64{64}) {
+                mapped :: os_syscall_i64(I64{9}, I64{0}, length, I64{1}, I64{2}, fd, I64{0})
+                if (mapped > I64{0}) { image = mapped }
+            }
+            _ := os_syscall_i64(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        }
+    }
+    alloc_unmap(path, I64{4096})
+    image
+}
+
+// The load bias of a position-independent executable (ET_DYN): the
+// start stack's AT_PHDR minus the program headers' link-time address.
+// A fixed-address executable (every Jet program) has bias 0.
+fn alloc_check_bias(image: I64) -> I64 {
+    if (image == I64{0}) { return I64{0} }
+    phdr_address := I64{0}
+    #Unsafe("image is a read-only private mapping of this executable's ELF64 file; its program header table lies inside it") {
+        if (os_load_i64(wrapping(image + I64{16})).bit_and(I64{65535}) != I64{3}) { return I64{0} }
+        table :: os_load_i64(wrapping(image + I64{32}))
+        entry :: os_load_i64(wrapping(image + I64{54})).bit_and(I64{65535})
+        count :: os_load_i64(wrapping(image + I64{56})).bit_and(I64{65535})
+        index := I64{0}
+        loop index < count {
+            header :: wrapping(image + wrapping(table + wrapping(index * entry)))
+            kind :: os_load_i64(header).bit_and(I64{4294967295})
+            if (kind == I64{6}) {
+                phdr_address = os_load_i64(wrapping(header + I64{16}))
+                break
+            }
+            if (kind == I64{1} && os_load_i64(wrapping(header + I64{8})) == I64{0}) {
+                phdr_address = wrapping(os_load_i64(wrapping(header + I64{16})) + table)
+            }
+            index = wrapping(index + I64{1})
+        }
+    }
+    // AT_PHDR
+    wrapping(host_getauxval(I64{3}) - phdr_address)
+}
+
+// Print the .symtab symbol whose range holds address (less the load bias), as
+// name+0xoffset, or ?? when the image has none (a stripped binary or a
+// runtime-internal function).
+fn alloc_check_symbol(image: I64, bias: I64, address: I64) {
+    target :: wrapping(address - bias)
+    if (image != I64{0}) {
+        #Unsafe("image is a read-only private mapping of this executable's ELF64 file; every offset read comes from its own section and symbol tables") {
+            sections :: wrapping(image + os_load_i64(wrapping(image + I64{40})))
+            entry :: os_load_i64(wrapping(image + I64{58})).bit_and(I64{65535})
+            count :: os_load_i64(wrapping(image + I64{60})).bit_and(I64{65535})
+            index := I64{0}
+            loop index < count {
+                section :: wrapping(sections + wrapping(index * entry))
+                if (os_load_i64(wrapping(section + I64{4})).bit_and(I64{4294967295}) == I64{2}) {
+                    link :: os_load_i64(wrapping(section + I64{40})).bit_and(I64{4294967295})
+                    names :: wrapping(image + os_load_i64(wrapping(wrapping(sections + wrapping(link * entry)) + I64{24})))
+                    symbols :: wrapping(image + os_load_i64(wrapping(section + I64{24})))
+                    total :: os_load_i64(wrapping(section + I64{32})) /% I64{24}
+                    at := I64{0}
+                    loop at < total {
+                        symbol :: wrapping(symbols + wrapping(at * I64{24}))
+                        start :: os_load_i64(wrapping(symbol + I64{8}))
+                        extent :: os_load_i64(wrapping(symbol + I64{16}))
+                        if (extent > I64{0} && target >= start && target < wrapping(start + extent)) {
+                            name :: wrapping(names + os_load_i64(symbol).bit_and(I64{4294967295}))
+                            length := I64{0}
+                            loop os_load_u8(wrapping(name + length)) != (I64{0}) {
+                                length = wrapping(length + I64{1})
+                            }
+                            alloc_check_write(name, length)
+                            alloc_write_word(I64{43}, I64{1})
+                            alloc_check_hex(wrapping(target - start))
+                            return
+                        }
+                        at = wrapping(at + I64{1})
+                    }
+                }
+                index = wrapping(index + I64{1})
+            }
+        }
+    }
+    alloc_write_word(I64{16191}, I64{2})
+}
+
+// One line per nonzero return address of a recorded chain of `count` words.
+fn alloc_check_chain(image: I64, bias: I64, words: I64, count: I64) {
+    index := I64{0}
+    loop index < count {
+        address := I64{0}
+        #Unsafe("words lends count readable chain words") {
+            address = os_load_i64(wrapping(words + wrapping(index * I64{8})))
+        }
+        if (address == I64{0}) { return }
+        alloc_write_word(I64{538976288}, I64{4})
+        alloc_check_hex(address)
+        alloc_write_word(I64{32}, I64{1})
+        alloc_check_symbol(image, bias, address)
+        alloc_write_word(I64{10}, I64{1})
+        index = wrapping(index + I64{1})
+    }
+}
+
+fn alloc_check_layout(size: I64, align: I64) {
+    alloc_check_say(rt_static_text(" ("))
+    alloc_write_size(size)
+    alloc_check_say(rt_static_text(" bytes, align "))
+    alloc_write_size(align)
+    alloc_check_say(rt_static_text(")"))
+}
+
+// Report a checked-heap violation and abort. kind: 1 double free, 2 free of
+// a pointer this heap never handed out (or whose header was overwritten),
+// 3 free with another layout, 4 write past the end, 5 write after free into
+// the payload or tail (at byte `offset`), 6 write after free over the header.
+fn alloc_check_fail(kind: I64, pointer: I64, size: I64, align: I64, offset: I64) {
+    jet_rt_stdout_flush()
+    image :: alloc_check_image()
+    bias :: alloc_check_bias(image)
+    alloc_check_say(rt_static_text("jet checked allocator (JET_CHECKED_ALLOC=1): "))
+    if (kind == I64{1}) {
+        alloc_check_say(rt_static_text("double free of "))
+        alloc_check_hex(pointer)
+        alloc_check_layout(size, align)
+    } else if (kind == I64{2}) {
+        alloc_check_say(rt_static_text("free of "))
+        alloc_check_hex(pointer)
+        alloc_check_layout(size, align)
+        alloc_check_say(rt_static_text(", which this heap never handed out or whose header was overwritten"))
+    } else if (kind == I64{3}) {
+        alloc_check_say(rt_static_text("free of "))
+        alloc_check_hex(pointer)
+        alloc_check_layout(size, align)
+        alloc_check_say(rt_static_text(", allocated as"))
+        #Unsafe("the live canary proved the checked header") {
+            alloc_check_layout(os_load_i64(wrapping(pointer - I64{32})), os_load_i64(wrapping(pointer - I64{40})))
+        }
+    } else if (kind == I64{4}) {
+        alloc_check_say(rt_static_text("write past the end of "))
+        alloc_check_hex(pointer)
+        alloc_check_layout(size, align)
+        alloc_check_say(rt_static_text(", found at its free"))
+    } else if (kind == I64{5}) {
+        alloc_check_say(rt_static_text("write after free into "))
+        alloc_check_hex(pointer)
+        alloc_check_layout(size, align)
+        alloc_check_say(rt_static_text(" at byte offset "))
+        alloc_write_size(offset)
+    } else {
+        alloc_check_say(rt_static_text("write after free over the header of "))
+        alloc_check_hex(pointer)
+    }
+    alloc_check_say(rt_static_text("\n  at:\n"))
+    scratch :: alloc_map_try(I64{4096})
+    if (scratch != I64{0}) {
+        alloc_check_frames(scratch, I64{24})
+        alloc_check_chain(image, bias, scratch, I64{24})
+    }
+    if (kind != I64{2} && kind != I64{6}) {
+        if (kind == I64{1}) {
+            alloc_check_say(rt_static_text("  first freed at:\n"))
+            alloc_check_chain(image, bias, wrapping(pointer - I64{200}), I64{10})
+        } else if (kind == I64{5}) {
+            alloc_check_say(rt_static_text("  freed at:\n"))
+            alloc_check_chain(image, bias, wrapping(pointer - I64{200}), I64{10})
+        }
+        alloc_check_say(rt_static_text("  allocated at:\n"))
+        alloc_check_chain(image, bias, wrapping(pointer - I64{120}), I64{10})
+    }
+    alloc_abort()
 }
 
 // Write a little-endian packed literal without a String/list carrier or a
@@ -871,7 +1638,9 @@ fn alloc_out_of_memory(size: I64) {
 }
 
 // One process-abort mechanism for allocation failure and panic in cleanup.
+// The live Secrets are scrubbed first: a core dump must not hold them.
 fn alloc_abort() {
+    secret_scrub()
     #Unsafe("the stack-word syscalls unblock SIGABRT and, if necessary, restore its default disposition before raising it again; no heap pointer is needed") {
         pid :: os_syscall_i64(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
         _ := os_syscall_stack4_i64(I64{14}, I64{1}, I64{32}, I64{0}, I64{0}, I64{0}, I64{8})

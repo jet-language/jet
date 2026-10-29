@@ -1,0 +1,14 @@
+// Application authority, a written deny: a deny wins over every grant,
+// including `-A`. This program reads an environment variable, which its own
+// package block denies, so the check stops with E0749 naming the denied effect
+// before the program starts.
+package {
+    name: "authority_denied"
+    authority: { allow: [Env, IO], deny: [Env] }
+}
+
+use core.sys as sys
+
+fn run() {
+    print("HOME set: {sys.get("HOME") != None}")
+}

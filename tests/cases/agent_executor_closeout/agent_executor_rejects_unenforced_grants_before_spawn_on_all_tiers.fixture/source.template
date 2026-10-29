@@ -1,0 +1,11 @@
+
+use core.process as process
+
+fn run() {
+    policy :: Authority.from_rights(["FS.Read:home"])
+    spec :: process.cmd(["sh", "-c", "printf escaped > '{tmp}/jet-agent-executor-unenforced-{pid}'"]).cwd("/tmp").under(policy)
+    if spec.plan() == {
+        .Ok(_) -> print("escaped")
+        .Err(_) -> print("refused")
+    }
+}

@@ -2,6 +2,20 @@
 // write/parse round trips, strict reader failures, the registered lock
 // diagnostics, and the on-disk recorders and bounded reader/writer.
 // Helpers live in LockEnvelope.jet.
+use jet_pkg_model.[
+    BuildGrant, BuildStamp, ComptimeInput, DependencyProvenance, ForeignLanguage,
+    LockEnvelope, LockError, LockSource, LockedBrowser, LockedBuildContribution, LockedPackage,
+    LockedRevision, LockedSourceChannel, LockedToolchain, LockedWorkspaceMember, NixClosureRecord,
+    OverlayPolicy, OverlaySet, OverrideEnv, PKG_MAX_LOCK_BYTES, PKG_MAX_LOCK_VALUE_BYTES,
+    PKG_RUST_BRIDGE_PROVENANCE_PREFIX, PackageAuthority, PackageGrant, PackageOverride,
+    PartialNixClosure, PartialPackage, ProvenanceRequirement, ProviderAuthority, ProviderOverride,
+    ServiceTrust, TrustDecision, TrustPolicy, pkg_lock_load, pkg_lock_parse,
+    pkg_lock_parse_with_path, pkg_lock_read_text, pkg_lock_record_nix_realization,
+    pkg_lock_record_rust_bridge, pkg_lock_record_source_channel, pkg_lock_validate_package_nix,
+    pkg_lock_write, pkg_lock_write_atomically,
+]
+use jet_foundation.[Diagnostic, RuntimeLayer]
+use jetpack_foundation.[UNIFIED_LOCK_FILE]
 
 fn pkg_lock_test_tricky(label: String) -> String Never! {
     "{label} \"quoted\" \\ slash"
@@ -183,8 +197,8 @@ fn pkg_lock_test_finish_error(partial: PartialPackage) -> String Never! {
     partial.fingerprint = Val("fingerprint")
     partial.content_hash = Val("content")
     partial.dependencies = [String]{"dep"}
-    partial.layer = Val(MIRRuntimeLayer.Std)
-    partial.inferred_layer = Val(MIRRuntimeLayer.Alloc)
+    partial.layer = Val(RuntimeLayer.Std)
+    partial.inferred_layer = Val(RuntimeLayer.Alloc)
     partial.effects = [String]{"FS.Read"}
     partial.effect_grants = [String]{"FS"}
     partial.required_effects = [String]{"Net.Connect"}
@@ -202,7 +216,7 @@ fn pkg_lock_test_finish_error(partial: PartialPackage) -> String Never! {
         locked: Val(LockedRevision{rev: "revision", tree_hash: "tree", last_modified: 42}),
         fingerprint: "fingerprint", content_hash: Val("content"),
         dependencies: [String]{"dep"},
-        layer: Val(MIRRuntimeLayer.Std), inferred_layer: Val(MIRRuntimeLayer.Alloc),
+        layer: Val(RuntimeLayer.Std), inferred_layer: Val(RuntimeLayer.Alloc),
         effects: [String]{"FS.Read"}, effect_grants: [String]{"FS"},
         required_effects: [String]{"Net.Connect"}, granted_effects: [String]{"Net"},
         denied_effects: [String]{"Exec"}, effect_authority: Val("manifest"),
@@ -323,7 +337,8 @@ fn pkg_lock_test_validation_error(source: LockSource, closure: NixClosureRecord?
 
 #Test("lock roundtrips the manifest authority shape") {
     authority :: PackageAuthority{
-        holds: AuthorityHolds{allow: Val([String]{"Net"}), deny: Val([String]{"Exec"})},
+        allow: Val([String]{"Net"}),
+        deny: Val([String]{"Exec"}),
         needs: [String]{"FS.Read", "Net.Connect"},
         grants: [PackageGrant]{PackageGrant{package: "image-codec", rights: [String]{"FS.Read"}}},
         trust: Val(TrustPolicy{
@@ -338,7 +353,8 @@ fn pkg_lock_test_validation_error(source: LockSource, closure: NixClosureRecord?
     lock.authority = Val(authority)
     raw :: pkg_lock_write(lock)
     assert(raw.contains("authority = {{"))
-    assert(raw.contains("holds: {{"))
+    assert(raw.contains("allow: [\"Net\"]"))
+    assert(!raw.contains("holds"))
     assert(raw.contains("needs:"))
     assert(raw.contains("grants: {{"))
     assert(raw.contains("trust: {{"))

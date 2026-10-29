@@ -1,0 +1,12 @@
+# tests/auto_derive_policy.rs::checked_shell_text_uses_argv_carrier_with_any_root_prefix at tests/auto_derive_policy.rs:104; hand-port
+# The Vec<String>/jet_std::Sh predicates read generated Rust text and left with the Rust backend; this keeps the AOT run.
+fixture: checked_shell_text_uses_argv_carrier_with_any_root_prefix.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0 # tests/auto_derive_policy.rs:124
+stdout: = checked_shell_text_uses_argv_carrier_with_any_root_prefix.out # tests/auto_derive_policy.rs:125

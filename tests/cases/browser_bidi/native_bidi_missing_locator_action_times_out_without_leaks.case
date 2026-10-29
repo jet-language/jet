@@ -1,0 +1,21 @@
+# tests/browser_bidi.rs::native_bidi_missing_locator_action_times_out_without_leaks at tests/browser_bidi.rs:1494; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port})
+fixture: native_bidi_missing_locator_action_times_out_without_leaks.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+requires: tool:node
+write: browser_bidi_missing_locator.jet native_bidi_missing_locator_action_times_out_without_leaks.fixture/run.template
+step: jet build browser_bidi_missing_locator.jet
+exit: 0
+session missing_locator raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:missing_locator} missing_locator.json
+sleep: 500ms
+step run: built
+exit: 0
+stdout: = native_bidi_missing_locator_action_times_out_without_leaks.1.out
+stdout: !~ "SECRET" # original predicate: !stdout.contains
+stderr: !~ "SECRET" # original predicate: !stderr.contains
+close missing_locator
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+stdout: has-line "browsingContext.locateNodes" # original predicate: methods.iter().any(|m| m == ..)
+stdout: !~ "input.performActions" # original predicate: no method equals or starts with it

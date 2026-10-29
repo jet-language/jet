@@ -1,6 +1,22 @@
 // Real checked/effect-solved functions feed the validation boundary. Proof facts
 // are produced explicitly with the canonical fact producers; this unit does not
 // pretend it checked a Core autodiff callback. Expected diagnostics are explicit.
+use jet_sema.[
+    SemaBuildFacts, SemaComptimeFunctionResult, SemaComptimeItemValue, SemaComputeCallFact,
+    SemaComputeValidationWork, SemaForeignProviderInput, SemaGraphModuleResult,
+    SemaRegistrationForeignHandleFacts, SemaRegistrationHostHooks, SemaRegistrationImportEdge,
+    SemaRegistrationModuleInput, SemaRegistrationPackagePolicy, SemaSourceOrigin, SemaSourceSegment,
+    sema_check_context_init, sema_collect_comptime_declarations, sema_compute_note_panic,
+    sema_compute_record_autodiff_obligation, sema_compute_validate_autodiff_purity, sema_error,
+    sema_finalize_registration_graph, sema_function_compute_facts, sema_has_error_since,
+    sema_registration_prepare_graph,
+]
+use jet_parser.[parse_source]
+use jet_driver.[jet_driver_canonical_effect_module]
+use jet_foundation.[
+    Diagnostic, Span, SymbolKind, compiler_threads_single, jet_target_machine_hosted, symbol_id,
+]
+
 fn compute_fixture_modules(label: String, source: String, failures: &[String]) -> [SemaGraphModuleResult]? {
     parsed := parse_source(source.bytes())
     if sema_has_error_since(parsed.diagnostics, 0) {
@@ -13,9 +29,9 @@ fn compute_fixture_modules(label: String, source: String, failures: &[String]) -
     }
     facts :: SemaBuildFacts{package_name: "compute-fixture", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
     input :: SemaRegistrationModuleInput{package_identity: "compute-fixture", module_identity: "compute-fixture::main", module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{}, source_origin: SemaSourceOrigin.Snapshot, program: ^parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source.copy()}
-    graph :: sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, effects}, [SemaRegistrationImportEdge]{}, "compute-fixture", "compute-fixture::main", effects.module_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false)
-    hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
-    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, None)
+    graph :: sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, effects}, [SemaRegistrationImportEdge]{}, "compute-fixture", "compute-fixture::main", effects.module_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single())
+    hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}
+    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None)
     checked := sema_finalize_registration_graph(graph, None, ^stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None, None)
     if !checked.complete {
         &failures.push("{label}: real body/effect check failed; dependent validator cases BLOCKED {checked.diagnostics:Debug}")
@@ -48,7 +64,6 @@ fn compute_fixture_obligation(modules: &[SemaGraphModuleResult], target: String)
     sema_compute_record_autodiff_obligation("grad", target, Span{start: 17, end: 23}, &context)
     &modules[0].compute_facts.push(sema_function_compute_facts("compute-fixture::proof", context))
 }
-
 
 fn compute_fixture_forbidden(target: String, effect_name: String) -> Diagnostic {
     sema_error("E0112", Span{start: 17, end: 23}, "`compute.grad` needs a pure Tensor function", "`{target}` reaches {effect_name}; autodiff records only pure Tensor operations", "remove the effectful operation from `{target}`, or differentiate a pure Tensor function")
@@ -137,7 +152,7 @@ fn compute_fixture_size(size: Int, failures: &[String]) {
     compute_fixture_compare("{size} indexed functions", modules, [Diagnostic]{}, true, &failures)
 }
 
-fn run() {
+#Test("compute_validation_fixtures") {
     failures := [String]{}
     compute_fixture_cases(&failures)
     compute_fixture_size(64, &failures)

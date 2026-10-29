@@ -1,0 +1,86 @@
+struct Pair { left: View<Int>, right: View<Int> }
+struct Envelope<T> { value: T, marker: Int }
+
+trait Select {
+    fn select(self, left: [Int], right: [Int]) -> Pair
+    fn optional(self, left: [Int], right: [Int]) -> (Pair?)
+    fn fallible(self, left: [Int], right: [Int]) -> Pair String!
+    fn tupled(self, left: [Int], right: [Int]) -> (pair: Pair, count: Int)
+    fn generic(self, left: [Int], right: [Int]) -> Envelope<Pair>
+}
+
+fn wrapper(selector: First, left: [Int], right: [Int]) -> Pair {
+    return selector.select(left, right)
+}
+
+struct First { marker: Int }
+impl First.Select {
+    fn select(self, left: [Int], right: [Int]) -> Pair {
+        left_view :: left[0..1]
+        right_view :: right[0..1]
+        return Pair{ left: left_view, right: right_view }
+    }
+    fn optional(self, left: [Int], right: [Int]) -> (Pair?) {
+        left_view :: left[0..1]
+        right_view :: right[0..1]
+        return Val(Pair{ left: left_view, right: right_view })
+    }
+    fn fallible(self, left: [Int], right: [Int]) -> Pair String! {
+        left_view :: left[0..1]
+        right_view :: right[0..1]
+        return Ok(Pair{ left: left_view, right: right_view })
+    }
+    fn tupled(self, left: [Int], right: [Int]) -> (pair: Pair, count: Int) {
+        left_view :: left[0..1]
+        right_view :: right[0..1]
+        return (pair: Pair{ left: left_view, right: right_view }, count: 1)
+    }
+    fn generic(self, left: [Int], right: [Int]) -> Envelope<Pair> {
+        left_view :: left[0..1]
+        right_view :: right[0..1]
+        return Envelope<Pair>{
+            value: Pair{ left: left_view, right: right_view },
+            marker: 0,
+        }
+    }
+}
+struct Last { marker: Int }
+impl Last.Select {
+    fn select(self, left: [Int], right: [Int]) -> Pair {
+        left_view :: left[0..1]
+        right_view :: right[0..1]
+        return Pair{ left: left_view, right: right_view }
+    }
+    fn optional(self, left: [Int], right: [Int]) -> (Pair?) {
+        left_view :: left[0..1]
+        right_view :: right[0..1]
+        return Val(Pair{ left: left_view, right: right_view })
+    }
+    fn fallible(self, left: [Int], right: [Int]) -> Pair String! {
+        left_view :: left[0..1]
+        right_view :: right[0..1]
+        return Ok(Pair{ left: left_view, right: right_view })
+    }
+    fn tupled(self, left: [Int], right: [Int]) -> (pair: Pair, count: Int) {
+        left_view :: left[0..1]
+        right_view :: right[0..1]
+        return (pair: Pair{ left: left_view, right: right_view }, count: 1)
+    }
+    fn generic(self, left: [Int], right: [Int]) -> Envelope<Pair> {
+        left_view :: left[0..1]
+        right_view :: right[0..1]
+        return Envelope<Pair>{
+            value: Pair{ left: left_view, right: right_view },
+            marker: 0,
+        }
+    }
+}
+
+
+fn run() {
+    left := [7, 8]
+    right := [9, 10]
+    pair :: wrapper(First{ marker: 0 }, left, right)
+    print(pair.left[0])
+    print(pair.right[0])
+}

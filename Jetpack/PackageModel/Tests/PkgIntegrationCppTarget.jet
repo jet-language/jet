@@ -1,4 +1,9 @@
 // Exact tests/polyglot_systems.rs:204-368; fake host tools are ORIGINAL test inputs.
+use jetpack_integrations.[
+    CppBindOptions, CppTemplateInstantiation, pkg_cffi_resolve_link_for_target, pkg_cpp_bind,
+    pkg_cpp_cache_identity_for_test,
+]
+
 fn pkg_integration_cpp_clang(log: String, canonical: String) -> String {
     ast :: "{{\"kind\":\"TranslationUnitDecl\",\"inner\":[{{\"kind\":\"FunctionDecl\",\"name\":\"probe\",\"loc\":{{\"file\":\"{canonical}\"}},\"type\":{{\"qualType\":\"long (long)\"}},\"inner\":[{{\"kind\":\"ParmVarDecl\",\"name\":\"value\",\"type\":{{\"qualType\":\"long\"}}}}]}}]}}"
     "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{log}'\nif [ \"$1\" = \"--version\" ]; then printf '%s\\n' 'fake clang 1'; exit 0; fi\ncase \"$*\" in\n  *-ast-dump=json*) printf '%s\\n' '{ast}'; exit 0 ;;\nesac\nprevious=''\noutput=''\nfor argument in \"$@\"; do\n  if [ \"$previous\" = \"-o\" ]; then output=\"$argument\"; fi\n  previous=\"$argument\"\ndone\n: > \"$output\"\n"

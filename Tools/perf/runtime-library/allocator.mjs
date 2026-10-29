@@ -28,8 +28,8 @@ function run(name, binary, args) {
     return result.status === 0 && result.signal === null && !result.error;
 }
 let ready = true;
-ready = run('o0-exports', 'Tools/agent/jet-env', ['node', 'Tools/packaging/check-runtime-exports.mjs', o0, remaining]) && ready;
-ready = run('o1-exports', 'Tools/agent/jet-env', ['node', 'Tools/packaging/check-runtime-exports.mjs', o1, remaining]) && ready;
+ready = run('o0-exports', 'Tools/agent/jet-env', ['jet', 'run', 'Tools/packaging/CheckRuntimeExports.jet', '--', o0, remaining]) && ready;
+ready = run('o1-exports', 'Tools/agent/jet-env', ['jet', 'run', 'Tools/packaging/CheckRuntimeExports.jet', '--', o1, remaining]) && ready;
 const driver = join(out, 'allocator-driver.o'), rust = join(out, 'allocator-rust.a');
 ready = run('driver', 'cc', ['-std=c11', '-O2', '-fno-lto', '-c', join(source, 'allocator.c'), '-o', driver]) && ready;
 ready = run('rust', 'Tools/agent/jet-env', ['rustc', '--edition=2024', '-C', 'opt-level=3', '--crate-type=staticlib', join(source, 'allocator.rs'), '-o', rust]) && ready;

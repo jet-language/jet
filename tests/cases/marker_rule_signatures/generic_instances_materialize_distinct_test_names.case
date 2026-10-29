@@ -1,0 +1,15 @@
+# tests/marker_rule_signatures.rs::generic_instances_materialize_distinct_test_names at tests/marker_rule_signatures.rs:768; hand-port
+# Claim: generic module suite(label) with #Test(label) instantiated as first and second produces no E0105/E0930 (tests/marker_rule_signatures.rs:780-785)
+# Claim: materialized test names are first_case and second_other (tests/marker_rule_signatures.rs:795)
+fixture: generic_instances_materialize_distinct_test_names.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # tests/marker_rule_signatures.rs:781 no E0105/E0930
+stderr: !~ "E0105" # tests/marker_rule_signatures.rs:781 no E0105/E0930
+stderr: !~ "E0930" # tests/marker_rule_signatures.rs:781 no E0105/E0930
+step: jet test main.jet
+exit: 0 # tests/marker_rule_signatures.rs:795 [INFERENCE] test names printed by jet test
+stdout: ~ "first_case" # tests/marker_rule_signatures.rs:795 [INFERENCE] test names printed by jet test
+stdout: ~ "second_other" # tests/marker_rule_signatures.rs:795 [INFERENCE] test names printed by jet test

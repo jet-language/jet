@@ -1,0 +1,11 @@
+# tests/grammar.rs::parse_option_fn at tests/grammar.rs:639; hand-port
+# Claim: source lexes and parses (tests/grammar.rs:651-652)
+# Claim: program has 2 items (tests/grammar.rs:653)
+# Not ported: prog.items.len()==2 count: AST internal; jet check acceptance of the same two-function file is the observable equivalent
+fixture: parse_option_fn.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # tests/grammar.rs:652 parse succeeds
+stderr: !~ "E0" # tests/grammar.rs:652 parse succeeds

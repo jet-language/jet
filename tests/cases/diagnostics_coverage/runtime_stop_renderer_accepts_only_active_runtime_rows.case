@@ -1,0 +1,14 @@
+# tests/diagnostics_coverage.rs::runtime_stop_renderer_accepts_only_active_runtime_rows at tests/diagnostics_coverage.rs:382; hand-port
+# Claim: Every active runtime-stage registry row renders as a runtime stop with exit 70 (tests/diagnostics_coverage.rs:396-414); observed end-to-end via jet run on a panic, which stops with Stop [E3001] and exit 70
+# Claim: Non-runtime and unknown rows render as host faults with exit 101 (tests/diagnostics_coverage.rs:416-445)
+# Not ported: Per-row renderer loop over every active runtime row and the exit-101 host-fault renders: Rust-only API Outcome::jet_render_runtime_stop with a synthetic probe; no CLI path exposes a host-fault render, so only the end-to-end runtime stop is ported
+fixture: runtime_stop_renderer_accepts_only_active_runtime_rows.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+env: NO_COLOR=1
+exit: 70 # tests/diagnostics_coverage.rs:409-410 active runtime row (E3001 panic) exits 70 and renders Stop [code]
+stderr: ~ "Stop [E3001]" # tests/diagnostics_coverage.rs:409-410 active runtime row (E3001 panic) exits 70 and renders Stop [code]
+stderr: ~ "panic: probe" # tests/diagnostics_coverage.rs:409-410 active runtime row (E3001 panic) exits 70 and renders Stop [code]
+stderr: !~ "rustc" # tests/diagnostics_coverage.rs:409-410 active runtime row (E3001 panic) exits 70 and renders Stop [code]

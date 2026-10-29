@@ -1,0 +1,36 @@
+
+use core.web.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("ws://127.0.0.1:{free-port:matrix}/session?token=MATRIX_SUCCESS_SECRET", profile, timeout) ?? panic("connect")
+
+    privacy :: session.privacy()
+    abilities :: session.abilities()
+    print("privacy:{privacy.isolated_profiles()}:{privacy.shared_profiles()}:{privacy.redact_receipts()}")
+    print("abilities:{abilities.bidi()}:{abilities.cdp()}:{abilities.profile()}")
+
+    context :: session.context() ?? panic("context")
+    print("isolated:{context.isolated()}")
+    page :: context.page() ?? panic("page")
+    tab :: context.tab() ?? panic("tab")
+    page.goto("https://example.test/agent") ?? panic("goto")
+
+    save :: page.get_by_role("button", "Save")
+    save.wait(timeout) ?? panic("wait")
+    save.click() ?? panic("click")
+    page.set_cookie("session", "agent-token", "example.test") ?? panic("cookie")
+
+    cdp :: session.protocol("cdp") ?? panic("cdp")
+    print(cdp.send("Page.enable", "{{}}") ?? panic("cdp send"))
+
+    tab.close() ?? panic("tab close")
+    page.close() ?? panic("page close")
+    context.close() ?? panic("context close")
+    session.close() ?? panic("session close")
+
+    receipt :: session.receipt()
+    leak :: receipt.summary().contains("MATRIX_SUCCESS_SECRET")
+    print("receipt:{receipt.cleaned()}:{receipt.redacted()}:{receipt.isolated()}:{leak}")
+}

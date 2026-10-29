@@ -1,0 +1,13 @@
+# tests/sema_nested_error_domains.rs::nested_error_domains_agree_across_execution_tiers at tests/sema_nested_error_domains.rs:131; hand-port
+# main.jet is the original NESTED_ERROR_DOMAINS source, verbatim. tir_support::assert_release_tiers_agree: release AOT and
+# the default `jet run` print the original's literal stdout. package.jet is tir_support::TIR_TEST_PACKAGE.
+fixture: nested_error_domains_agree_across_execution_tiers.fixture
+env: NO_COLOR=1
+step: jet build --release main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "matching value\nmatching nested\nnever\nimplicit value\nhandled default\nconversion value\nconverted\n"
+step: jet run main.jet
+exit: 0
+stdout: = "matching value\nmatching nested\nnever\nimplicit value\nhandled default\nconversion value\nconverted\n"

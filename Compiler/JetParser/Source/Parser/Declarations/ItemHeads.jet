@@ -4,6 +4,7 @@
 use jet_lexer.[
     TOKEN_COLON_COLON,
     TOKEN_DOT,
+    TOKEN_EQ,
     TOKEN_HASH,
     TOKEN_IDENT,
     TOKEN_KW_EXTERN,
@@ -50,7 +51,9 @@ fn parser_item_declaration_ahead_at(state: &JetParserState, offset: Int) -> Bool
             if name == {
                 "state" -> parser_kind_at(&state, offset + 1) == TOKEN_IDENT || parser_kind_at(&state, offset + 1) == TOKEN_LBRACE
                 "protocol" -> parser_kind_at(&state, offset + 1) == TOKEN_IDENT && parser_kind_at(&state, offset + 2) == TOKEN_LBRACE
-                "marker" -> parser_kind_at(&state, offset + 1) == TOKEN_IDENT && (parser_kind_at(&state, offset + 2) == TOKEN_LPAREN || parser_kind_at(&state, offset + 2) == TOKEN_IDENT)
+                // `marker Name(…)`, `marker Name = #[…]` (a fixed group) and
+                // the retired `marker Name on …` (parser_marker_decl_ahead).
+                "marker" -> parser_kind_at(&state, offset + 1) == TOKEN_IDENT && (parser_kind_at(&state, offset + 2) == TOKEN_LPAREN || parser_kind_at(&state, offset + 2) == TOKEN_EQ || parser_kind_at(&state, offset + 2) == TOKEN_IDENT)
                 "fact" -> parser_kind_at(&state, offset + 1) == TOKEN_IDENT && parser_kind_at(&state, offset + 2) == TOKEN_LPAREN
                 else -> false
             }

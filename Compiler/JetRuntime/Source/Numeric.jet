@@ -38,12 +38,88 @@ fn numeric_widen_stop(file: I64, line: I64) {
     }
     precision :: if target_f32 -> I64{24} else -> I64{53}
     if (significant > precision && trailing < significant - precision) {
+        // The stop is published: the caller's stop point takes it.
         numeric_widen_stop(file, line)
-        loop { jet_rt_unreachable(I64{0}, I64{0}) }
+        return 0.0
     }
     if (signed || raw >= I64{0}) -> return Float{raw}
     // Split unsigned conversion at bit63 without a U64->I64 checked cast.
     // Acceptance above guarantees exact conversion, including this split.
     half :: (raw >> I64{1}).bit_and(I64{9223372036854775807})
     return Float{half} * Float{2} + Float{raw.bit_and(I64{1})}
+}
+
+// NumericConversion.rs:59-82 jet_numeric_bit_count. `value` is the raw
+// fixed-width word; `operation`/`width` are the lowering's constant Int words.
+// Operations: 0 ones, 1 zeros, 2 leading zeros, 3 trailing zeros (within
+// width), 4 ones of |value|, 5 bit length of |value|.
+fn numeric_bit_set(word: I64, at: I64) -> Bool { ((word >> at).bit_and(I64{1})) != I64{0} }
+#Export(c) fn jet_numeric_bit_count(value: I64, operation: I64, width: I64) -> I64 {
+    op :: jet_int_owned_to_i64(operation)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    bits :: jet_int_owned_to_i64(width)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (bits < I64{1} || bits > I64{64}) {
+        message :: rt_static_text("checked integer width")
+        jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
+        return I64{0}
+    }
+    if (op < I64{0} || op > I64{5}) {
+        message :: rt_static_text("checked integer population operation")
+        jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
+        return I64{0}
+    }
+    if (op >= I64{4}) {
+        magnitude :: if (value < I64{0}) -> wrapping(I64{0} - value) else -> value
+        ones := I64{0}
+        length := I64{0}
+        at := I64{0}
+        loop at < (I64{64}) {
+            if numeric_bit_set(magnitude, at) {
+                ones += I64{1}
+                length = at + I64{1}
+            }
+            at += I64{1}
+        }
+        return if (op == I64{4}) -> ones else -> length
+    }
+    ones := I64{0}
+    at := I64{0}
+    loop at < bits {
+        if numeric_bit_set(value, at) -> ones += I64{1}
+        at += I64{1}
+    }
+    if (op == I64{0}) -> return ones
+    if (op == I64{1}) -> return bits - ones
+    if (op == I64{2}) {
+        leading := I64{0}
+        at = bits - I64{1}
+        loop at >= (I64{0}) && !numeric_bit_set(value, at) {
+            leading += I64{1}
+            at -= I64{1}
+        }
+        return leading
+    }
+    trailing := I64{0}
+    loop trailing < bits && !numeric_bit_set(value, trailing) -> trailing += I64{1}
+    trailing
+}
+
+// MIREval.rs jet_numeric_int_bit_count over JetBigInt::bit_count: the
+// jet_numeric_bit_count operations on a borrowed exact Int. Operations 0-3
+// read its two's complement within `width` bits; 4 and 5 read its
+// magnitude, past 64 bits by halving a copy.
+#Export(c) fn jet_numeric_int_bit_count(value: I64, operation: I64, width: I64) -> I64 {
+    if int_inline(value) -> return jet_numeric_bit_count(value, operation, width)
+    bound :: if int_negative(value) -> U64{9223372036854775808} else -> U64{9223372036854775807}
+    if ((operation != I64{4} && operation != I64{5}) || int_fits(value, bound)) -> return jet_numeric_bit_count(int_word(value), operation, width)
+    node :: int_copy(value, I64{0})
+    ones := I64{0}
+    length := I64{0}
+    loop !(int_load(node + I64{32}) == I64{1} && int_get(node, I64{0}) == I64{0}) {
+        ones += int_div_small(node, I64{2})
+        length += I64{1}
+    }
+    int_free_node(node)
+    if (operation == I64{4}) -> ones else -> length
 }

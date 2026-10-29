@@ -1,0 +1,18 @@
+# tests/fmt.rs::fmt_simplify_drops_a_redundant_val_only_in_optional_returns at tests/fmt.rs:1442; hand-port
+# Claim: redundant `Val(n)` return wrapper dropped, `return n` present (tests/fmt.rs:1452-1455)
+# Claim: call wrapper `Val(count())` and lambda wrapper `(x) -> Val(x)` kept (tests/fmt.rs:1456-1459)
+# Claim: second simplify pass identical (tests/fmt.rs:1460-1464)
+fixture: fmt_simplify_drops_a_redundant_val_only_in_optional_returns.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt --simplify val/run.jet
+exit: 0 # tests/fmt.rs:1450 simplify succeeds
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:1452-1459
+stdout: ~ "return n" # tests/fmt.rs:1452-1459
+stdout: ~ "Val(count())" # tests/fmt.rs:1452-1459
+stdout: ~ "(x) -> Val(x)" # tests/fmt.rs:1452-1459
+stdout: !~ "Val(n)" # tests/fmt.rs:1452-1459
+step: jet fmt --simplify --check val/run.jet
+exit: 0 # tests/fmt.rs:1460-1464 stable

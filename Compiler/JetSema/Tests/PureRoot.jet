@@ -1,5 +1,8 @@
 // Runtime-root E3401 diagnostic contract; assemble with Compiler and run.
-fn run() {
+use jet_sema.[sema_pure_root_diagnostic]
+use jet_foundation.[Span]
+
+#Test("pure_root") {
     direct :: sema_pure_root_diagnostic("evaluate", "print", [String]{}, Span{start: 4, end: 9})
     direct_chain :: [String]{"evaluate", "print"}
     if direct.code != "E3401" || direct.call_chain != direct_chain {

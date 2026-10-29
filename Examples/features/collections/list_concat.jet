@@ -1,0 +1,26 @@
+// `concat` joins two Lists into a new one, leaving both inputs usable, and a
+// lambda parameter may name a type from another module.
+use core.time as time
+
+struct Entry {
+    id: String
+    size: Int
+}
+
+fn total(existing: [Entry], additional: [Entry]) -> Int {
+    sum := 0
+    loop entry in existing.concat(additional) -> sum += entry.size
+    sum
+}
+
+fn run() {
+    left :: [Entry]{Entry{id: "a", size: 1}, Entry{id: "b", size: 2}}
+    right :: [Entry]{Entry{id: "c", size: 4}}
+    print("total: {total(left, right)}")
+    print("inputs kept: {left.len()} {right.len()}")
+    numbers :: [Int]{1, 2}.concat([Int]{3})
+    print("numbers: {numbers}")
+    spans := [time.Duration]{3s, 1s, 2s}
+    &spans.sort_by((span: time.Duration) -> span.in(.Milliseconds))
+    print("first span ms: {spans[0].in(.Milliseconds)}")
+}

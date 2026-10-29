@@ -1,0 +1,12 @@
+# tests/shared_transaction.rs::shared_compound_places_match_web at tests/shared_transaction.rs:68; hand-port
+fixture: shared_compound_places_match_web.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+requires: tool:node
+step: jet build --target web run.jet
+exit: 0 # tir_support assert_awaited_web_tier web pass
+step web: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = ../../../Examples/features/expected/memory/shared_compound_places.out # tir_support assert_awaited_web_tier awaited web stdout

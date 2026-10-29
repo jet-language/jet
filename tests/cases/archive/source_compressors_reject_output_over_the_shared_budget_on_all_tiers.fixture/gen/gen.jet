@@ -1,0 +1,275 @@
+// Fixture generator ported from the byte builders in tests/archive.rs:127-254 and 302-522.
+use core.files as files
+use core.process as process
+
+struct BitWriter {
+    bytes: [U8]
+    bit: Int
+}
+
+fn byte(n: Int) -> U8 Never! {
+    v :: n.bit_and(255)
+    U8{v}
+}
+
+fn int(b: U8) -> Int Never! { Int.from_u8(b) }
+
+fn put16(out: &[U8], n: Int) Never! {
+    &out.push(byte(n))
+    &out.push(byte(n >> 8))
+}
+
+fn put32(out: &[U8], n: Int) Never! {
+    &out.push(byte(n))
+    &out.push(byte(n >> 8))
+    &out.push(byte(n >> 16))
+    &out.push(byte(n >> 24))
+}
+
+fn repeated(b: Int, count: Int) -> [U8] Never! {
+    out := [U8]{}
+    loop _ in 0..<count -> &out.push(byte(b))
+    out
+}
+
+fn bits_write(bits: &BitWriter, value: Int, count: Int) Never! {
+    loop offset in 0..<count {
+        if bits.bit == 0 -> &bits.bytes.push(U8{0})
+        if (value >> offset).bit_and(1) != 0 {
+            last :: bits.bytes.len() - 1
+            bits.bytes[last] = byte(int(bits.bytes[last]).bit_or(1 << bits.bit))
+        }
+        bits.bit = (bits.bit + 1) % 8
+    }
+}
+
+fn reverse_bits(code: Int, count: Int) -> Int Never! {
+    c := code
+    reversed := 0
+    loop _ in 0..<count {
+        reversed = (reversed << 1).bit_or(c.bit_and(1))
+        c = c >> 1
+    }
+    reversed
+}
+
+// [code, bits] of a fixed-Huffman DEFLATE symbol.
+fn fixed_code(symbol: Int) -> [Int] Never! {
+    if symbol <= 143 -> return [Int]{reverse_bits(48 + symbol, 8), 8}
+    if symbol <= 255 -> return [Int]{reverse_bits(400 + symbol - 144, 9), 9}
+    if symbol <= 279 -> return [Int]{reverse_bits(symbol - 256, 7), 7}
+    if symbol <= 287 -> return [Int]{reverse_bits(192 + symbol - 280, 8), 8}
+    panic("fixed DEFLATE symbol")
+}
+
+// [symbol, extra value, extra bits] of a DEFLATE match length.
+fn length_code(length: Int) -> [Int] Never! {
+    base :: [Int]{3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258}
+    extra :: [Int]{0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0}
+    loop index in 0..<29 {
+        max :: base[index] + ((1 << extra[index]) - 1)
+        if length <= max -> return [Int]{257 + index, length - base[index], extra[index]}
+    }
+    panic("DEFLATE match length")
+}
+
+fn crc32_repeated(b: Int, length: Int) -> Int Never! {
+    table := [Int]{}
+    loop index in 0..<256 {
+        crc := index
+        loop _ in 0..<8 {
+            if crc.bit_and(1) != 0 {
+                crc = (crc >> 1).bit_xor(0xedb88320)
+            } else {
+                crc = crc >> 1
+            }
+        }
+        &table.push(crc)
+    }
+    crc := 0xffffffff
+    loop _ in 0..<length -> crc = (crc >> 8).bit_xor(table[crc.bit_and(255).bit_xor(b)])
+    crc.bit_xor(0xffffffff)
+}
+
+// A compact fixed-DEFLATE stream that expands through the shared codec cap.
+fn gzip_fixed_repeat_bomb(output_len: Int, b: Int) -> [U8] Never! {
+    frame := [U8]{U8{31}, U8{139}, U8{8}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{255}}
+    bits := BitWriter{bytes: [U8]{}, bit: 0}
+    bits_write(&bits, 1, 1)
+    bits_write(&bits, 1, 2)
+    literal :: fixed_code(b)
+    bits_write(&bits, literal[0], literal[1])
+    remaining := output_len - 1
+    loop remaining >= 3 {
+        length :: if remaining < 258 -> remaining else -> 258
+        symbol :: length_code(length)
+        code :: fixed_code(symbol[0])
+        bits_write(&bits, code[0], code[1])
+        bits_write(&bits, symbol[1], symbol[2])
+        bits_write(&bits, 0, 5)
+        remaining = remaining - length
+    }
+    loop _ in 0..<remaining -> bits_write(&bits, literal[0], literal[1])
+    end :: fixed_code(256)
+    bits_write(&bits, end[0], end[1])
+    loop item in bits.bytes -> &frame.push(item)
+    put32(&frame, crc32_repeated(b, output_len))
+    put32(&frame, output_len)
+    frame
+}
+
+fn zstd_rle_frame(output_len: Int, b: Int) -> [U8] Never! {
+    frame := [U8]{U8{40}, U8{181}, U8{47}, U8{253}, U8{224}}
+    loop k in 0..<8 -> &frame.push(byte(output_len >> (8 * k)))
+    remaining := output_len
+    loop remaining > 0 {
+        block :: if remaining < 131072 -> remaining else -> 131072
+        last :: if block == remaining -> 1 else -> 0
+        header :: (block << 3).bit_or(2).bit_or(last)
+        &frame.push(byte(header))
+        &frame.push(byte(header >> 8))
+        &frame.push(byte(header >> 16))
+        &frame.push(byte(b))
+        remaining = remaining - block
+    }
+    frame
+}
+
+fn zip_limit_bomb(name: [U8], entry_count: Int, method: Int, compressed: [U8], uncompressed_len: Int, checksum: Int) -> [U8] Never! {
+    archive := [U8]{}
+    central := [U8]{}
+    loop _ in 0..<entry_count {
+        local_offset :: archive.len()
+        put32(&archive, 0x04034b50)
+        put16(&archive, 20)
+        put16(&archive, 0)
+        put16(&archive, method)
+        put16(&archive, 0)
+        put16(&archive, 0)
+        put32(&archive, checksum)
+        put32(&archive, compressed.len())
+        put32(&archive, uncompressed_len)
+        put16(&archive, name.len())
+        put16(&archive, 0)
+        loop item in name -> &archive.push(item)
+        loop item in compressed -> &archive.push(item)
+
+        put32(&central, 0x02014b50)
+        put16(&central, 20)
+        put16(&central, 20)
+        put16(&central, 0)
+        put16(&central, method)
+        put16(&central, 0)
+        put16(&central, 0)
+        put32(&central, checksum)
+        put32(&central, compressed.len())
+        put32(&central, uncompressed_len)
+        put16(&central, name.len())
+        put16(&central, 0)
+        put16(&central, 0)
+        put16(&central, 0)
+        put16(&central, 0)
+        put32(&central, 0)
+        put32(&central, local_offset)
+        loop item in name -> &central.push(item)
+    }
+    central_offset :: archive.len()
+    central_size :: central.len()
+    loop item in central -> &archive.push(item)
+    put32(&archive, 0x06054b50)
+    put16(&archive, 0)
+    put16(&archive, 0)
+    put16(&archive, entry_count)
+    put16(&archive, entry_count)
+    put32(&archive, central_size)
+    put32(&archive, central_offset)
+    put16(&archive, 0)
+    archive
+}
+
+// The deflate body of a gzip member: no 10-byte header, no 8-byte trailer.
+fn gzip_body(gzip: [U8]) -> [U8] Never! {
+    out := [U8]{}
+    loop index in 10..<(gzip.len() - 8) -> &out.push(gzip[index])
+    out
+}
+
+fn gzip_crc(gzip: [U8]) -> Int Never! {
+    n :: gzip.len()
+    int(gzip[n - 8]).bit_or(int(gzip[n - 7]) << 8).bit_or(int(gzip[n - 6]) << 16).bit_or(int(gzip[n - 5]) << 24)
+}
+
+fn tar_bomb_octal(header: &[U8], start: Int, width: Int, value: Int) Never! {
+    n := value
+    loop index in start..<(start + width - 1) -> header[index] = U8{48}
+    header[start + width - 1] = U8{0}
+    index := start + width - 2
+    loop n > 0 {
+        header[index] = byte(48 + n.bit_and(7))
+        n = n >> 3
+        index = index - 1
+    }
+}
+
+fn append_tar_bomb_record(output: &[U8], name: [U8], payload: [U8], kind: Int) Never! {
+    header := repeated(0, 512)
+    loop index in 0..<name.len() -> header[index] = name[index]
+    tar_bomb_octal(&header, 100, 8, 420)
+    tar_bomb_octal(&header, 124, 12, payload.len())
+    loop index in 148..<156 -> header[index] = U8{32}
+    header[156] = byte(kind)
+    magic :: "ustar".bytes()
+    loop index in 0..<5 -> header[257 + index] = magic[index]
+    header[262] = U8{0}
+    header[263] = U8{48}
+    header[264] = U8{48}
+    checksum := 0
+    loop item in header -> checksum = checksum + int(item)
+    // format!("{checksum:06o}"), last six digits.
+    loop k in 0..<6 {
+        header[153 - k] = byte(48 + (checksum >> (3 * k)).bit_and(7))
+    }
+    header[154] = U8{0}
+    loop item in header -> &output.push(item)
+    loop item in payload -> &output.push(item)
+    loop output.len() % 512 != 0 -> &output.push(U8{0})
+}
+
+fn tar_end(output: &[U8]) Never! {
+    loop _ in 0..<1024 -> &output.push(U8{0})
+}
+
+fn write(path: String, bytes: [U8]) Never! {
+    files.write_bytes(path, bytes) ?? panic("write {path}")
+}
+
+fn run() {
+    output_limit :: 64 * 1024 * 1024
+    mode :: process.args()
+    if mode.contains("codec") {
+        write("oversized.gz", gzip_fixed_repeat_bomb(output_limit + 1, 120))
+        write("oversized.zst", zstd_rle_frame(output_limit + 1, 120))
+        write("oversized.bin", repeated(120, output_limit + 1))
+    }
+    if mode.contains("hostile") {
+        write("zip_names.bin", zip_limit_bomb(repeated(1, 4096), 4096, 0, [U8]{}, 0, 0))
+        write("zip_entries.bin", zip_limit_bomb("x".bytes(), 4097, 0, [U8]{}, 0, 0))
+        declared :: gzip_fixed_repeat_bomb(output_limit + 1, 120)
+        write("zip_output.bin", zip_limit_bomb("x".bytes(), 1, 8, gzip_body(declared), output_limit + 1, gzip_crc(declared)))
+        materialized :: gzip_fixed_repeat_bomb(output_limit - 512 + 1, 120)
+        write("zip_materialization.bin", zip_limit_bomb(repeated(110, 512), 1, 8, gzip_body(materialized), output_limit - 512 + 1, gzip_crc(materialized)))
+        tar_names := [U8]{}
+        long_name := repeated(1, 8192)
+        &long_name.push(U8{0})
+        loop _ in 0..<2048 {
+            append_tar_bomb_record(&tar_names, "././#LongLink".bytes(), long_name, 76)
+            append_tar_bomb_record(&tar_names, "x".bytes(), "x".bytes(), 48)
+        }
+        tar_end(&tar_names)
+        write("tar_names.bin", tar_names)
+        tar_entries := [U8]{}
+        loop index in 0..<4097 -> append_tar_bomb_record(&tar_entries, "entry-{index}".bytes(), "x".bytes(), 48)
+        tar_end(&tar_entries)
+        write("tar_entries.bin", tar_entries)
+    }
+}

@@ -15,6 +15,7 @@ use jet_foundation.[
     StrMatchPart,
     StructPatField,
     Type,
+    type_name,
 ]
 use jet_lexer.[
     STRING_PART_BYTE,
@@ -352,34 +353,36 @@ fn parser_parse_take_pattern_literal(state: &JetParserState, depth: Int) -> Pars
     if typed == .Val(body) {
         if body.binary {
             parts := parser_take_pattern_binary_parts(&state, body.parts, body.span)
-            return ParsedExpr{expr: Expr.BinMatchLit{parts: parts, span: body.span}, span: body.span}
+            return ParsedExpr{expr: Expr.BinMatchLit{parts: parts, span: body.span, id: parser_node_id(&state)}, span: body.span}
         }
         loop part in body.parts {
             if part.kind != STRING_PART_INTERPOLATION || parser_pattern_hole_shape_ok(part) -> next
             bad_span :: if part.tokens.len() > 0 -> part.tokens[0].span else -> body.span
             parser_add_error(&state, bad_span, "a `take_pattern` hole must be a bare name, optionally typed", "each hole binds a name or a typed, fallibly-parsed name, the same grammar an `if ==` pattern hole uses", "write `{{name}}` or `{{name:Type}}`")
-            return ParsedExpr{expr: Expr.Unit{span: body.span}, span: body.span}
+            return ParsedExpr{expr: Expr.Unit{span: body.span, id: parser_node_id(&state)}, span: body.span}
         }
         parts := parser_take_pattern_text_parts(&state, body.parts)
-        return ParsedExpr{expr: Expr.StrMatchLit{parts: parts, span: body.span}, span: body.span}
+        return ParsedExpr{expr: Expr.StrMatchLit{parts: parts, span: body.span, id: parser_node_id(&state)}, span: body.span}
     }
     token :: parser_current(&state)
     if token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING {
         parser_bump(&state)
         token_parts :: parser_string_parts(state, token)
         parts := parser_take_pattern_text_parts(&state, token_parts)
-        return ParsedExpr{expr: Expr.StrMatchLit{parts: parts, span: token.span}, span: token.span}
+        return ParsedExpr{expr: Expr.StrMatchLit{parts: parts, span: token.span, id: parser_node_id(&state)}, span: token.span}
     }
     parser_add_error_code(&state, "E0003", token.span, "`take_pattern` needs a literal text or binary pattern", "the pattern is matched at compile time and cannot be computed", "write a string literal, or use `[U8]{{\"…\"}}` for bytes")
-    ParsedExpr{expr: Expr.Unit{span: token.span}, span: token.span}
+    ParsedExpr{expr: Expr.Unit{span: token.span, id: parser_node_id(&state)}, span: token.span}
 }
 // S31 only equality against `Val(name)` introduces a binding.
-// Other payload expressions construct a value. This restriction belongs to
-// comparison RHS parsing, not dispatch-arm or nested leading-dot patterns.
+// Other payload expressions construct a value, and so does an ALL_CAPS
+// constant name: `x == Val(LIMIT)` compares with the constant.
+// This restriction belongs to comparison RHS parsing, not dispatch-arm or
+// nested leading-dot patterns.
 fn parser_comparison_pattern_rhs_ahead(state: &JetParserState) -> Bool Never! {
     token :: parser_current(&state)
     if token.kind == TOKEN_IDENT && parser_value(state, token) == "Val" {
-        return parser_kind_at(&state, 1) == TOKEN_LPAREN && parser_kind_at(&state, 2) == TOKEN_IDENT && parser_kind_at(&state, 3) == TOKEN_RPAREN
+        return parser_kind_at(&state, 1) == TOKEN_LPAREN && parser_kind_at(&state, 2) == TOKEN_IDENT && parser_kind_at(&state, 3) == TOKEN_RPAREN && !parser_constant_name(parser_value_at(&state, 2))
     }
     parser_pattern_rhs_ahead(&state)
 }
@@ -696,6 +699,9 @@ fn parser_parse_struct_pattern(state: &JetParserState, type_span: Span, depth: I
                     if parser_current_kind(&state) == TOKEN_IDENT && (parser_kind_at(&state, 1) == TOKEN_COMMA || parser_kind_at(&state, 1) == TOKEN_RBRACE) {
                         local :: parser_bump(&state)
                         &fields.push(StructPatField.Bind{field: parser_value(state, field), field_span: field.span, local: parser_value(state, local), local_span: local.span})
+                    } else if parser_struct_field_nested_pattern_ahead(&state) {
+                        nested :: parser_parse_struct_field_nested_pattern(&state, depth + 1)
+                        &fields.push(StructPatField.Nested{field: parser_value(state, field), field_span: field.span, pattern: nested.pattern})
                     } else {
                         value :: parser_parse_expression_no_struct_lit(&state, depth + 1)
                         &fields.push(StructPatField.Value{field: parser_value(state, field), field_span: field.span, value: value.expr})
@@ -714,6 +720,39 @@ fn parser_parse_struct_pattern(state: &JetParserState, type_span: Span, depth: I
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after struct pattern fields")
     span :: parser_cover(type_span, close.span)
     ParsedPattern{pattern: Pattern.Struct{fields: ^fields, rest: ^rest, span: span, type_name: type_name}, span: span}
+}
+
+// Rust `nested_pattern_ahead(false)`: a struct field holds a nested pattern
+// rather than a compared value. A bare unit case `.Red` stays a value.
+fn parser_struct_field_nested_pattern_ahead(state: &JetParserState) -> Bool Never! {
+    if parser_current_kind(&state) == {
+        TOKEN_DOT -> {
+            next :: parser_lookahead(&state, 1)
+            variant :: next.kind == TOKEN_NULL || (next.kind == TOKEN_IDENT && (parser_pascal_name(parser_value(state, next)) || parser_value(state, next).starts_with("$")))
+            after :: parser_kind_at(&state, 2)
+            variant && (after == TOKEN_LPAREN || after == TOKEN_LBRACE || after == TOKEN_PIPE)
+        }
+        TOKEN_LBRACE -> parser_literal_fields_ahead(&state)
+        TOKEN_LBRACKET -> !parser_typed_literal_head_ahead(&state)
+        TOKEN_IDENT -> parser_named_struct_pattern_ahead(&state)
+        else -> false
+    }
+}
+
+// Rust `nested_pattern`: the nested pattern
+// `parser_struct_field_nested_pattern_ahead` found.
+fn parser_parse_struct_field_nested_pattern(state: &JetParserState, depth: Int) -> ParsedPattern {
+    start :: parser_current(&state)
+    if start.kind == {
+        TOKEN_LBRACE -> parser_parse_struct_pattern(&state, start.span, depth + 1, None)
+        TOKEN_LBRACKET -> parser_parse_bracket_pattern(&state, depth + 1)
+        TOKEN_IDENT -> {
+            parser_bump(&state)
+            head :: PatternTypeHead{name: parser_value(state, start), span: start.span}
+            parser_parse_struct_pattern(&state, start.span, depth + 1, Val(head))
+        }
+        else -> parser_parse_pattern(&state, depth + 1, true)
+    }
 }
 
 fn parser_parse_string_pattern(state: &JetParserState) -> ParsedPattern {
@@ -781,7 +820,7 @@ fn parser_parse_map_pattern_key(state: &JetParserState, depth: Int) -> ParsedExp
     loop parser_current_kind(&state) == TOKEN_DOT && parser_kind_at(&state, 1) == TOKEN_IDENT {
         parser_bump(&state)
         member :: parser_bump(&state)
-        key = ParsedExpr{expr: Expr.Field{base: key.expr, member: parser_value(state, member), span: member.span}, span: parser_cover(key.span, member.span)}
+        key = ParsedExpr{expr: Expr.Field{base: key.expr, member: parser_value(state, member), span: member.span, id: parser_node_id(&state)}, span: parser_cover(key.span, member.span)}
     }
     key
 }

@@ -4,8 +4,10 @@ use core.encoding.[Dyn]
 use core.files.runtime.kernel_path_components as lsp_request_path
 use core.files.runtime.kernel_path_components.[OSPath]
 use core.term as lsp_request_term
-use jet_devserver.[EDITOR_WORKBENCH_METHOD, EDITOR_RECONNECT_METHOD, EDITOR_NAVIGATE_METHOD, EDITOR_SELECT_METHOD, EDITOR_COMMAND_METHOD]
-use jet_driver.[jet_driver_query_path]
+use jet_devserver.[
+    EDITOR_WORKBENCH_METHOD, EDITOR_RECONNECT_METHOD, EDITOR_NAVIGATE_METHOD, EDITOR_SELECT_METHOD,
+    EDITOR_COMMAND_METHOD, number, supported,
+]
 
 // Rust353–414: known methods always reach their sole feature provider.
 fn lsp_handle_request(server: &LSPServer, method: String, params: Dyn?, id: Dyn) -[FS, Env, Exec, IO, Time.Wait]> String? Never! {
@@ -71,8 +73,8 @@ fn lsp_build_graph_response(server: LSPServer, params: Dyn?, id: Dyn) -> String?
     if uri == .Text(text) {
         doc :: server.diagnostic_state.docs.get(text) ?? return None
         if lsp_build_graph_json(server.snapshot, doc.path, doc.text) == {
-            .Ok(.Val(graph)) -> { return Val(lsp_response(id, graph)) }
-            .Ok(.None) | .Err(_) -> { return Val(lsp_response(id, "null")) }
+            .Val(graph) -> { return Val(lsp_response(id, graph)) }
+            .None | .Err(_) -> { return Val(lsp_response(id, "null")) }
         }
     }
     None

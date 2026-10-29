@@ -206,7 +206,7 @@ fn build_execute_one_action(plan: HermeticBuildPlan, action: HermeticBuildAction
     restore_failure := CacheMissReason?{None}
     if action.cache == ActionCache.Cached {
         if build_read_action_record(artifact_store, key) == {
-            .Ok(.Val(record)) -> {
+            .Val(record) -> {
                 if record.failure_report == .Val(report) {
                     build_record_cache_event(action.name, key, ActionCacheStatus.Hit(.LocalActionRecordMatched), "terminal", Val(record.outcome))
                     return Err(BuildExecutionError.Reported{report})
@@ -219,7 +219,7 @@ fn build_execute_one_action(plan: HermeticBuildPlan, action: HermeticBuildAction
                     .Err(error) -> restore_failure = Val(build_cache_restore_miss_reason(error))
                 }
             }
-            .Ok(.None) -> {}
+            .None -> {}
             .Err(error) -> restore_failure = Val(build_cache_restore_miss_reason(error))
         }
     }
@@ -257,13 +257,13 @@ fn build_execute_one_action(plan: HermeticBuildPlan, action: HermeticBuildAction
     share_network :: build_action_shares_network(grants, action.caps)
     timeout :: time.duration_ms(NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS)
     ran :: foundation_run_native_sandboxed_with_timeout_and_mounts(executable, runtime_args, sandbox, None, runtime_env, share_network, mounts, Val(timeout)) ?? {
-        _ := files.remove_all(sandbox)
+        files.remove_all(sandbox).drop("the action sandbox is removed best-effort; the sandbox error is reported")
         return Err(build_native_sandbox_error(action, err))
     }
     receipt :: ran.receipt
     code :: if receipt.signal != None -> 1 else -> receipt.code
     if !receipt.success {
-        _ := files.remove_all(sandbox)
+        files.remove_all(sandbox).drop("the action sandbox is removed best-effort; the action failure is reported")
         report :: build_action_failure_report(action.name, code, receipt.errors.trim())
         if action.cache == ActionCache.Cached {
             record :: ActionResultRecord{key, outcome: ActionOutcome.Failed{exit_code: code}, outputs: [ActionOutputRecord]{}, failure_report: Val(report), status: ActionCacheStatus.Miss(build_rebuild_status_reason(rebuild_status))}
@@ -352,23 +352,27 @@ fn build_run_probe_sandboxed(executable: String, args: [String], source: (path: 
     nonce :: random.bytes(8) ?? return Err(BuildExecutionError.IO{action: "build probe sandbox", detail: "{err}"})
     root :: files.join(sys.temp_dir(), "jet-build-probe-{sys.pid()}-{build_hex_encode(nonce)}")
     if files.create_dir_all(root) == .Err(error) {
-        _ := files.remove_all(root)
+        files.remove_all(root).drop("the probe root is removed best-effort; the create error is reported")
         return Err(BuildExecutionError.IO{action: "build probe sandbox", detail: "{error}"})
     }
     if source == .Val(probe_source) {
         if files.write(files.join(root, probe_source.path), probe_source.contents) == .Err(error) {
-            _ := files.remove_all(root)
+            files.remove_all(root).drop("the probe root is removed best-effort; the write error is reported")
             return Err(BuildExecutionError.IO{action: "build probe input", detail: "{error}"})
         }
     }
-    result :: foundation_run_native_sandboxed_with_timeout_and_mounts(executable, args, root, None, [String: String]{}, false, [NativeSandboxMount]{}, Val(timeout))
-    _ := files.remove_all(root)
-    if result == {
-        .Ok(output) -> Ok(output.receipt)
-        .Err(error) -> Err(if error == {
-            .Unsupported(_) -> BuildExecutionError.SandboxUnavailable
-            .IO(detail) -> BuildExecutionError.IO{action: "build probe sandbox", detail}
-        })
+    if foundation_run_native_sandboxed_with_timeout_and_mounts(executable, args, root, None, [String: String]{}, false, [NativeSandboxMount]{}, Val(timeout)) == {
+        .Ok(output) -> {
+            files.remove_all(root).drop("the probe root is removed best-effort after the run")
+            Ok(output.receipt)
+        }
+        .Err(error) -> {
+            files.remove_all(root).drop("the probe root is removed best-effort after the run")
+            Err(if error == {
+                .Unsupported(_) -> BuildExecutionError.SandboxUnavailable
+                .IO(detail) -> BuildExecutionError.IO{action: "build probe sandbox", detail}
+            })
+        }
     }
 }
 
@@ -402,7 +406,8 @@ fn build_path_component_count(path: String) -> Int Never! {
 
 fn build_canonical_executable_path(program: String) -[FS, Env]> String? Never! {
     if !files.is_file(program) -> return None
-    files.canonicalize(program) ?? None
+    resolved :: files.canonicalize(program) ?? return None
+    Val(resolved)
 }
 
 // Rust `find_program_path`: a path with several components directly, else
@@ -411,7 +416,10 @@ fn build_canonical_executable_path(program: String) -[FS, Env]> String? Never! {
 // so the working directory never supplies a tool, and the result must be
 // absolute.
 fn build_find_program_path(program: String) -[FS, Env]> String? Never! {
-    if build_path_component_count(program) > 1 && files.is_file(program) -> return files.canonicalize(program) ?? None
+    if build_path_component_count(program) > 1 && files.is_file(program) {
+        resolved :: files.canonicalize(program) ?? return None
+        return Val(resolved)
+    }
     paths :: sys.get("PATH") ?? return None
     loop directory in paths.split(":") {
         if !directory.starts_with("/") -> next
@@ -500,13 +508,13 @@ fn build_strip_path_prefix(path: String, prefix: String) -> [String]? Never! {
 // (the sandbox projects the mounts); macOS and Windows translate only the
 // declared mount paths at the adapter boundary.
 fn build_runtime_toolchain_arguments(plan: HermeticBuildPlan, handle: ToolchainHandle, args: [String]) -[Env]> [String] Never! {
-    if sys.is_linux() -> return args
+    if sys.is_linux() -> return args.copy()
     toolchain :: plan.toolchain(handle) ?? return args
     loop argument in args -> build_runtime_toolchain_argument(toolchain, argument)
 }
 
 fn build_runtime_toolchain_environment(plan: HermeticBuildPlan, handle: ToolchainHandle, env: [String: String]) -[Env]> [String: String] Never! {
-    if sys.is_linux() -> return env
+    if sys.is_linux() -> return env.copy()
     toolchain :: plan.toolchain(handle) ?? return env
     out := [String: String]{}
     loop key in env.keys() -> out[key] = build_runtime_toolchain_argument(toolchain, env[key])
@@ -520,7 +528,7 @@ fn build_runtime_toolchain_argument(toolchain: HermeticBuildToolchain, argument:
         if !argument.starts_with(prefix) -> next
         if build_runtime_mount_path(toolchain, argument.removeprefix(prefix)) == .Val(path) -> return "{prefix}{path}"
     }
-    argument
+    argument.copy()
 }
 
 fn build_runtime_mount_path(toolchain: HermeticBuildToolchain, value: String) -> String? Never! {
@@ -530,7 +538,8 @@ fn build_runtime_mount_path(toolchain: HermeticBuildToolchain, value: String) ->
         if value == destination -> return Val(mount.source)
         if !value.starts_with(destination) -> next
         suffix :: value.removeprefix(destination)
-        relative :: if suffix.starts_with("/") -> suffix.removeprefix("/") else if suffix.starts_with("\\") -> suffix.removeprefix("\\") else -> next
+        if !suffix.starts_with("/") && !suffix.starts_with("\\") -> next
+        relative :: suffix.removeprefix(if suffix.starts_with("/") -> "/" else -> "\\")
         return Val(files.join(mount.source, relative))
     }
     None

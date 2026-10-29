@@ -1,0 +1,17 @@
+
+use core.process as process
+
+fn run() {
+    policy :: process.workspace()
+    spec :: process.cmd(["/bin/sh", "-c", "printf '%s' \"$SECRET_TOKEN\""])
+        .env_clear()
+        .env("SECRET_TOKEN", "stream-secret")
+        .stdout(.Stream)
+        .stderr(.Capture)
+        .cwd("/tmp")
+        .under(policy)
+    if spec.run() == {
+        .Ok(_) -> print("accepted")
+        .Err(_) -> print("refused")
+    }
+}

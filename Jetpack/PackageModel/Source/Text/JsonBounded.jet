@@ -1,12 +1,14 @@
-// Bounded JSON parsing through Core's caller-chosen limits
-// . Split from JsonTree.jet so the Compiler unit's shared
-// Jetpack block (accessors only) does not need `json.parse(limits:)` until
-// Core implements it (#3593); Jetpack's own build lists both files.
+// Bounded JSON parsing: the protocol decode every package model carrier and
+// integration reads. Core's whole-value parser bounds nesting at 256; the
+// protocol's tighter 64-level bound is checked on the parsed tree.
+use core.encoding.json as json
+use core.encoding as encoding
+
 
 // jet_foundation::JSON protocol bounds: nesting depth and default message
 // size (`MAX_JSON_DEPTH`, `MAX_PROTOCOL_MESSAGE_BYTES`).
-PKG_JSON_MAX_DEPTH :: prep { 64 }
-PKG_JSON_MAX_PROTOCOL_BYTES :: prep { 1048576 }
+PKG_JSON_MAX_DEPTH :: 64
+PKG_JSON_MAX_PROTOCOL_BYTES :: 1048576
 
 // A bounded parse: the tree, or the reference's failure text.
 enum PkgJSONDocument {
@@ -21,16 +23,38 @@ fn pkg_json_parse_protocol(text: String) -> PkgJSONDocument Never! {
 }
 
 // Rust `JSON::parse_json_with_limit`: at most `max_bytes` and 64 nesting
-// levels, through Core's caller-chosen limits.
+// levels.
 fn pkg_json_parse_bounded(text: String, max_bytes: Int) -> PkgJSONDocument Never! {
-    limits := encoding.EncodingLimits.safe()
-    limits.max_total_bytes = Val(max_bytes)
-    limits.max_depth = PKG_JSON_MAX_DEPTH
-    if json.parse(text, limits: limits) == {
-        .Ok(tree) -> PkgJSONDocument.Parsed(tree)
+    if text.bytes().len() > max_bytes -> return PkgJSONDocument.Failed("JSON input exceeds the {max_bytes}-byte limit")
+    if json.parse(text) == {
+        .Ok(tree) -> {
+            if !pkg_json_within_depth(tree, 0) -> return PkgJSONDocument.Failed("JSON exceeds maximum nesting depth")
+            PkgJSONDocument.Parsed(tree)
+        }
         .Err(error) -> {
             if error.kind == encoding.EncodingErrorKind.Limit -> return PkgJSONDocument.Failed("JSON exceeds maximum nesting depth")
             PkgJSONDocument.Failed(error.reason)
         }
     }
+}
+
+// A container opened at `depth` (the root is 0) is within the protocol bound
+// when depth < PKG_JSON_MAX_DEPTH, as the reference parser checks on entry.
+fn pkg_json_within_depth(tree: Dyn, depth: Int) -> Bool Never! {
+    if tree == {
+        .Array(items) -> {
+            if depth >= PKG_JSON_MAX_DEPTH -> return false
+            loop item in items {
+                if !pkg_json_within_depth(item, depth + 1) -> return false
+            }
+        }
+        .Object(fields) -> {
+            if depth >= PKG_JSON_MAX_DEPTH -> return false
+            loop field in fields {
+                if !pkg_json_within_depth(field.value, depth + 1) -> return false
+            }
+        }
+        else -> {}
+    }
+    true
 }

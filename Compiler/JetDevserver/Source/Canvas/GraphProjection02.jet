@@ -3,9 +3,8 @@
 use std.fmt.[format]
 use jet_parser.AST as AST
 use jet_parser.AST.[Expr, Stmt]
-use jet_foundation.[Span]
-use jet_parser.Syntax.[INTERNAL_TASK_SURFACE_TYPE, INTERNAL_TASK_GROUP_SURFACE_TYPE]
-use jet_semindex.[SemIndex, SourceSpan, CallableEffectsFact]
+use jet_foundation.[Span, Expr, Stmt]
+use jet_semindex.[SemIndex, SourceSpan]
 use jet_devserver.Canvas.GraphProjection.[GraphBuilder, game_assets_receiver]
 use jet_devserver.Canvas.GraphHelpers.[assignment_title, binding_type, call_has_effects, call_ret, effect_badges, expr_title, expr_type, lvalue_type, pure_leaf, snippet, span_through_closing_parens, starts_uppercase, wire_ident_refs]
 use jet_devserver.Canvas.GraphJson.[add_arm_pin, add_authority_region, add_inline, add_node, add_pin, add_region, add_wire, add_wire_with_span, meta_attr_json, set_pin_append, set_pin_source_span]
@@ -34,7 +33,7 @@ fn stmt_row_step(stmt: Stmt) -> I32 {
 
 // Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1823
 fn multi_input_item_count(expr: Expr) -> USize {
-    if expr is { .ListLit(items, _) -> items.len(); _ -> 0 }
+    if expr is { .ListLit(items, _, _) -> items.len(); _ -> 0 }
 }
 
 // Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:1830
@@ -238,9 +237,9 @@ fn project_stmt(g: &GraphBuilder, index: &SemIndex, src: String, stmt: &Stmt, or
             project_stmt_block(g, index, src, body, ordinal * 100 + 160, x + 230, y + 70)
         }
         .ComptimeIf(cond: cond, then_body: then_body, else_body: else_body, span: span, ..) -> {
-            add_region(g, ordinal, "comptime_if", "prep if", span)
+            add_region(g, ordinal, "comptime_if", "comptime if", span)
             node_id :: "{g.graph_id}:stmt:{ordinal}:comptime_if"
-            add_node(g, node_id, "branch", "prep if", span.into(), x, y, ["comptime"], ["edit_inline_expr", "source_jump"])
+            add_node(g, node_id, "branch", "comptime if", span.into(), x, y, ["comptime"], ["edit_inline_expr", "source_jump"])
             add_inline(g, node_id, ordinal, "cond", src, cond.span())
             project_stmt_block(g, index, src, then_body, ordinal * 100 + 170, x + 230, y + 70)
             if else_body == .Val(body) { project_stmt_block(g, index, src, body, ordinal * 100 + 180, x + 460, y + 70) }
@@ -438,7 +437,7 @@ fn connect_expr_to_input_with_span(g: &GraphBuilder, index: &SemIndex, src: Stri
 // Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2833
 fn details_composite_expr(expr: Expr) -> Bool {
     if expr is {
-        .ListLit(_, _) | .MapLit(_, _) | .StructLit(..) | .TypedLit(..) | .TupleLit(_, _, _) | .Present(_, _) | .Ok(_, _) | .Err(_, _) -> true
+        .ListLit(_, _, _) | .MapLit(_, _, _) | .StructLit(..) | .TypedLit(..) | .TupleLit(_, _, _, _) | .Present(_, _, _) | .Ok(_, _, _) | .Err(_, _, _) -> true
         _ -> false
     }
 }
@@ -448,8 +447,8 @@ fn data_provider_y(y: I32, ordinal: USize) -> I32 { y + 96 + (I32{(ordinal % 2)}
 
 // Rust: crates/jet-devserver/src/Canvas/graph_projection.rs:2851
 fn project_value_node(g: GraphBuilder, index: SemIndex, src: String, expr: Expr, ordinal: USize, role: String, x: I32, y: I32) -> String? {
-    if expr == .Place(inner, _, _) -> return project_value_node(g, index, src, inner, ordinal, role, x, y)
-    if expr == .Ident(name, span) {
+    if expr == .Place(inner, _, _, _) -> return project_value_node(g, index, src, inner, ordinal, role, x, y)
+    if expr == .Ident(name, span, _) {
         source_span :: SourceSpan{span.into()}
         key :: getter_key(index, name, source_span)
         if g.getter_pins.get(key).cloned() == .Val(pin) -> return .Some(pin)
@@ -462,7 +461,7 @@ fn project_value_node(g: GraphBuilder, index: SemIndex, src: String, expr: Expr,
         return .Some(pin)
     }
     (title, badges) :: if expr is {
-        .Int(_, _, _, _) | .Float(_, _, _, _) | .Bool(_, _) | .Str(_, _) | .Char(_, _) | .Absent(_) | .Todo(..) -> (snippet(src, expr.span()), ["const"])
+        .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Str(_, _, _) | .Char(_, _, _) | .Absent(_, _) | .Todo(..) -> (snippet(src, expr.span()), ["const"])
         _ -> return .None
     }
     span :: SourceSpan{expr.span().into()}
@@ -508,7 +507,7 @@ fn project_expr_node(g: GraphBuilder, index: SemIndex, src: String, expr: Expr, 
             result_ty :: expr_type(g, index, expr)
             .Some(add_pin(g, node_id, "result", "output", result_ty, "", false))
         }
-        .Call(c) -> {
+        .Call(c, _) -> {
             node_id :: "{g.graph_id}:expr:{ordinal}:call:{c.name}"
             archetype :: if exec_context || call_has_effects(index, c.name) -> "function_exec" else -> "function_pure"
             add_node(g, node_id, archetype, c.name, c.name_span.into(), x, y, effect_badges(index, c.name), ["insert_call", "source_jump"])
@@ -520,16 +519,12 @@ fn project_expr_node(g: GraphBuilder, index: SemIndex, src: String, expr: Expr, 
             ret :: call_ret(index, c.name).unwrap_or("Void")
             .Some(add_pin(g, node_id, "result", "output", ret, "", ret.ends_with('?')))
         }
-        .MethodCall(receiver: receiver, method: method, method_span: method_span, args: args, recv_type: recv_type, resolved_ret: resolved_ret, ..) -> {
+        .MethodCall(receiver: receiver, method: method, method_span: method_span, args: args, ..) -> {
             node_id :: "{g.graph_id}:expr:{ordinal}:method:{method}"
             variant_like :: starts_uppercase(method)
             pure :: method_is_pure(index, method_span.into())
             archetype :: if variant_like || pure -> "function_pure" else -> "function_exec"
-            // Checked task desugaring may replace the internal receiver with
-            // the lexical group name. The private recv_type tags survive that
-            // rewrite and distinguish authored task syntax from ordinary methods.
-            is_task_surface :: recv_type.as_ref() == .Some(INTERNAL_TASK_SURFACE_TYPE) || recv_type.as_ref() == .Some(INTERNAL_TASK_GROUP_SURFACE_TYPE)
-            title :: if is_task_surface { if method == "spawn" -> "task" else -> "task.{method}" } else if variant_like { method.clone() } else { ".{method}" }
+            title :: if variant_like { method.clone() } else { ".{method}" }
             is_game_asset :: (method == "image" || method == "sound") && game_assets_receiver(receiver)
             is_game_component :: method == "component"
             affordances := [String]{["insert_call", "source_jump"]}
@@ -543,10 +538,10 @@ fn project_expr_node(g: GraphBuilder, index: SemIndex, src: String, expr: Expr, 
                 input :: add_pin(g, node_id, "arg{i + 1}", "input", ty, arg.convention.sigil(), false)
                 connect_expr_to_input(g, index, src, arg.expr, ordinal * 1000 + i + 2, "arg{i + 1}", node_id, input, x - 220, y + (I32{i} + 1) * 74)
             }
-            ret :: resolved_ret.as_ref().map((ty) -> ty.name()).unwrap_or("unknown")
+            ret :: "unknown"
             .Some(add_pin(g, node_id, "result", "output", ret, "", ret.ends_with('?')))
         }
-        .Try(inner, span, _, _) -> {
+        .Try(inner, span, _, _, _) -> {
             node_id :: "{g.graph_id}:expr:{ordinal}:fallible"
             add_node(g, node_id, "fallible", "?", span.into(), x, y, ["fallible"], ["add_fallback_rail", "source_jump"])
             input :: add_pin(g, node_id, "value", "input", expr_type(g, index, inner), "", true)
@@ -554,7 +549,7 @@ fn project_expr_node(g: GraphBuilder, index: SemIndex, src: String, expr: Expr, 
             .Some(add_pin(g, node_id, "ok", "output", "unknown", "", false))
         }
         .OrFallback(value: value, ..) -> project_expr_node(g, index, src, value, ordinal, x, y, exec_context)
-        .ListLit(items, span) -> {
+        .ListLit(items, span, _) -> {
             node_id :: "{g.graph_id}:expr:{ordinal}:list"
             add_node(g, node_id, "expression", "list", span.into(), x, y, ["multi-input"], ["append_multi_input", "edit_inline_expr", "source_jump"])
             loop (i, item) in items.iter().enumerate() {

@@ -1,4 +1,10 @@
 // The real front door keeps opaque engine arguments and renderable channels.
+use jet_cli.[
+    JET_CLI_JETPACK_BINARY, JetCLIPlan, jet_cli_command_help, jet_cli_engine_commands, jet_cli_help,
+    jet_cli_plan, jet_cli_renderable, jet_cli_structural_help,
+]
+use jet_driver.[JET_DRIVER_EXIT_USAGE]
+
 fn cli_front_fixture_done(plan: JetCLIPlan, stdout: String, stderr: String, code: Int) Never! {
     if plan == {
         .Done(output) -> {
@@ -17,7 +23,7 @@ fn cli_front_fixture_engine(plan: JetCLIPlan, verb: String, argv: [String]) Neve
     }
 }
 
-fn run() {
+#Test("front_door") {
     loop verb in ([String]{"cc", "c++"}) {
         argv :: [String]{verb, "--version", "--help", "--unknown-compiler-option", "--", "source with spaces.c", "-Werror"}
         cli_front_fixture_engine(jet_cli_plan(argv), verb, argv)

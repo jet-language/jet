@@ -19,7 +19,6 @@ use jet_foundation.[
     Expr,
     Span,
     Symbol,
-    TExprKind,
     Type,
     expr_span,
 ]
@@ -78,7 +77,7 @@ fn sema_single_use_key(state: SemaOwnershipState, key: String) -> Bool Never! {
 
 // The name of a bare identifier argument whose binding owns a consume duty.
 fn sema_single_use_argument(state: SemaOwnershipState, expr: Expr, scopes: SemaScopeTable) -> String? {
-    if expr == .Ident(name, span) {
+    if expr == .Ident(name, span, _) {
         index :: sema_scope_resolve_index_at(scopes, name, span) ?? return None
         if sema_single_use_key(state, scopes.bindings[index].symbol.id.key) -> return Val(name)
     }
@@ -113,7 +112,7 @@ fn sema_single_use_check_scope_end(state: SemaOwnershipState, diagnostics: &[Dia
         fact :: state.declarations[row]
         if fact.active && fact.scope_depth >= state.scope_depth && !sema_single_use_moved(state, fact.key) {
             if fact.owes_join {
-                &diagnostics.push(sema_single_use_diag_unjoined("`{fact.name}`", "the program may end before this task finishes", fact.span))
+                &diagnostics.push(sema_single_use_diag_unjoined(fact.name, "the program may end before this task finishes", fact.span))
             } else {
                 &diagnostics.push(sema_single_use_diag_unconsumed(fact.name, fact.span))
             }
@@ -161,7 +160,7 @@ fn sema_single_use_check_consume(call: Call, environment: SemaScopeEnvironment, 
     }
     argument :: call.args[0]
     value :: sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    if argument.expr == .Ident(name, span) {
+    if argument.expr == .Ident(name, span, _) {
         if context.unsafe_depth == 0 && sema_single_use_argument(state, argument.expr, scopes) != None {
             &diagnostics.push(sema_single_use_diag_unaudited(name, span))
         }

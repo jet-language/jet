@@ -1,0 +1,19 @@
+# tests/multi_file_package.rs::package_members_have_all_tier_parity at tests/multi_file_package.rs:27; hand-port
+# Claim: package_members example stdout equals GOLDEN "package members\n10\n10" on all tiers (tests/multi_file_package.rs:28)
+# Claim: built binary prints the same golden (tests/multi_file_package.rs:30-49)
+# Not ported: interpreter tier: no CLI route on the seed (`jet run --interpret` is E2102)
+fixture: package_members_have_all_tier_parity.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run run.jet
+exit: 0 # tests/multi_file_package.rs:28 default tier golden
+stdout: = package_members_have_all_tier_parity-1.out # tests/multi_file_package.rs:28 default tier golden
+step: jet run --release run.jet
+exit: 0 # tests/multi_file_package.rs:28 AOT tier golden
+stdout: = package_members_have_all_tier_parity-2.out # tests/multi_file_package.rs:28 AOT tier golden
+step: jet build run.jet
+exit: 0 # tests/multi_file_package.rs:30-40 O1 scratch build
+step: built
+exit: 0 # tests/multi_file_package.rs:40-49 exec of built binary
+stdout: = package_members_have_all_tier_parity-4.out # tests/multi_file_package.rs:40-49 exec of built binary

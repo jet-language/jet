@@ -1,0 +1,154 @@
+// The per-workspace state kept in the workspace-root `.jet/` (Rust
+// crates/jet-store/src/project_state.rs). The shared content-addressed store
+// stays in the machine cache; everything that belongs to one workspace lives
+// in ONE `.jet/` at the workspace root, never one per package:
+//
+// - `.jet/last-run/<program digest>`: the last run of a program
+//   (BuildRecord.jet `store_build_write_last_run` / `store_build_last_run`);
+// - `.jet/receipts/<closure digest>`: the newest Receipt blob for one
+//   invocation closure (Receipt.jet);
+// - `.jet/stamps`: file stamps (size, modification and change time, inode)
+//   with the digest last computed for each file. A matching stamp skips
+//   rehashing; it never decides freshness on its own, because the digest it
+//   returns was computed from the same bytes.
+//
+// Deleting `.jet/` costs speed, never correctness: a missing or undecodable
+// file reads as empty.
+use jet_foundation.[
+    RecordField, RecordSection, RecordValue, record_blob_key, record_elements, record_encode,
+    record_open_schema, record_value_as_int, record_value_as_str, record_value_field,
+]
+use core.files as files
+use core.sys as sys
+
+STORE_PROJECT_STAMPS_SCHEMA :: "jet.stamps/v1"
+STORE_PROJECT_SECTION_ENTRIES :: 1
+
+// The workspace-root `.jet/` folder (Rust project_state.rs:34 `state_dir`).
+fn store_project_state_dir(workspace_root: String) -> String Never! {
+    files.join(workspace_root, ".jet")
+}
+
+// Replace a workspace state file without disk syncs, creating its parents
+// (Rust project_state.rs:38 `write_atomic`).
+fn store_project_write_atomic(path: String, bytes: [U8]) ArtifactStoreError! -[FS, Env, Rand]> {
+    files.create_dir_all(files.dirname(path))
+    store_artifact_replace_unsynced(path, bytes)
+}
+
+// Identity of one file's current bytes on disk, short of reading them
+// (Rust project_state.rs:82 `Stamp`).
+struct ProjectFileStamp {
+    size: Int
+    modified_ns: Int
+    changed_ns: Int
+    inode: Int
+}
+
+// Rust project_state.rs:91 `Stamp::of`. Without change time and inode a stamp
+// cannot rule out an in-place rewrite, so non-Unix hosts always hash. Core's
+// `files.stat` describes a final link itself, not its target, so a linked
+// input is never stamped and is always rehashed.
+fn store_project_stamp(path: String) -[FS, Env]> ProjectFileStamp? Never! {
+    if !sys.is_unix() -> return None
+    info :: files.stat(path) ?? return None
+    if !info.is_file || info.is_symlink -> return None
+    modified_ns :: info.modified.to_unix_ns() ?? return None
+    changed_ns :: info.changed.to_unix_ns() ?? return None
+    Val(ProjectFileStamp{size: info.size, modified_ns: modified_ns, changed_ns: changed_ns, inode: info.id.inode})
+}
+
+// Text form `size:mtime_ns:ctime_ns:inode` of a regular file's stamp, for
+// hosts that hand stamps to the self-hosted compiler. `None` when the path is
+// missing or not a regular file (Rust project_state.rs:113 `file_stamp`).
+fn store_project_file_stamp(path: String) -[FS, Env]> String? Never! {
+    stamp :: store_project_stamp(path) ?? return None
+    Val("{stamp.size}:{stamp.modified_ns}:{stamp.changed_ns}:{stamp.inode}")
+}
+
+// One recorded stamp and the digest computed under it.
+struct ProjectStampedDigest {
+    stamp: ProjectFileStamp
+    digest: String
+}
+
+fn store_project_entry_int(entry: RecordValue, name: String) -> Int? Never! {
+    value :: record_value_field(entry, name).value ?? return None
+    record_value_as_int(value).value
+}
+
+fn store_project_entry_text(entry: RecordValue, name: String) -> String? Never! {
+    value :: record_value_field(entry, name).value ?? return None
+    record_value_as_str(value).value
+}
+
+// The `.jet/stamps` table (Rust project_state.rs:123 `StampTable`).
+struct StampTable {
+    priv entries: [String: ProjectStampedDigest]
+    priv changed: Bool
+
+    // Rust project_state.rs:129 `StampTable::load`.
+    fn load(workspace_root: String) -[FS]> StampTable Never! {
+        table := StampTable{entries: [String: ProjectStampedDigest]{}, changed: false}
+        bytes :: files.read_bytes(files.join(store_project_state_dir(workspace_root), "stamps")) ?? return table
+        reader :: record_open_schema(bytes, STORE_PROJECT_STAMPS_SCHEMA).reader ?? return table
+        entries :: record_elements(reader, STORE_PROJECT_SECTION_ENTRIES).value ?? return table
+        loop entry in entries {
+            path :: store_project_entry_text(entry, "path") ?? next
+            digest :: store_project_entry_text(entry, "digest") ?? next
+            size :: store_project_entry_int(entry, "size") ?? next
+            modified_ns :: store_project_entry_int(entry, "modified_ns") ?? next
+            changed_ns :: store_project_entry_int(entry, "changed_ns") ?? next
+            inode :: store_project_entry_int(entry, "inode") ?? next
+            table.entries[path] = ProjectStampedDigest{stamp: ProjectFileStamp{size: size, modified_ns: modified_ns, changed_ns: changed_ns, inode: inode}, digest: digest}
+        }
+        table
+    }
+
+    // SHA-256 hex of the file at `path`, reusing the recorded digest when the
+    // file's stamp is unchanged. `None` when the file cannot be read
+    // (Rust project_state.rs:166 `file_digest`).
+    fn file_digest(&self, path: String) -[FS, Env]> String? Never! {
+        stamp :: store_project_stamp(path)
+        if stamp == .Val(current) {
+            if self.entries.get(path) == .Val(recorded) {
+                if recorded.stamp == current -> return Val(recorded.digest)
+            }
+        }
+        bytes :: files.read_bytes(path) ?? return None
+        digest :: record_blob_key(bytes[0..<bytes.len()])
+        // Only a stamp taken before the read and still equal after it may be
+        // stored, so a write racing the read is never remembered.
+        if stamp == .Val(before) {
+            after :: store_project_stamp(path)
+            if after == stamp {
+                self.entries[path] = ProjectStampedDigest{stamp: before, digest: digest}
+                self.changed = true
+            }
+        }
+        Val(digest)
+    }
+
+    // Persist the table when a lookup added or refreshed an entry
+    // (Rust project_state.rs:186 `save`).
+    fn save(self, workspace_root: String) ArtifactStoreError! -[FS, Env, Rand]> {
+        if !self.changed -> return
+        paths := self.entries.keys().to_list()
+        &paths.sort()
+        entries := [RecordValue]{}
+        loop path in paths {
+            entry :: self.entries[path]
+            &entries.push(RecordValue.Map{fields: [RecordField]{
+                {name: "path", value: RecordValue.Str{value: path}},
+                {name: "digest", value: RecordValue.Str{value: entry.digest}},
+                {name: "size", value: RecordValue.Int{value: entry.stamp.size}},
+                {name: "modified_ns", value: RecordValue.Int{value: entry.stamp.modified_ns}},
+                {name: "changed_ns", value: RecordValue.Int{value: entry.stamp.changed_ns}},
+                {name: "inode", value: RecordValue.Int{value: entry.stamp.inode}},
+            }})
+        }
+        encoded :: record_encode(STORE_PROJECT_STAMPS_SCHEMA, [RecordSection]{RecordSection{id: STORE_PROJECT_SECTION_ENTRIES, elements: entries}})
+        bytes :: encoded.bytes ?? return Err(ArtifactStoreError.Config(encoded.problem ?? "stamp table encoding failed"))
+        store_project_write_atomic(files.join(store_project_state_dir(workspace_root), "stamps"), bytes)
+    }
+}

@@ -121,7 +121,7 @@ fn pkg_integration_package_error(raw: String) -> PackageParseError Never! {
 
 // Ported from pkg.rs:2091-2105.
 #Test("pkg integration manifest_parse_effects_block") {
-    raw :: pkg_integration_min_manifest("app", "0.1.0") + "\nauthority: {{\n    holds: {{ allow: [FS, Time], deny: [Net, Panic] }},\n}}\n"
+    raw :: pkg_integration_min_manifest("app", "0.1.0") + "\nauthority: {{\n    allow: [FS, Time], deny: [Net, Panic],\n}}\n"
     pm :: PackageFacts.parse(raw, "test") ?? panic("authority holds should parse")
     assert(pm.effects_enabled)
     assert_eq(pm.effects_allow, Val([String]{"FS", "Time"}))
@@ -130,7 +130,7 @@ fn pkg_integration_package_error(raw: String) -> PackageParseError Never! {
 
 // Ported from pkg.rs:2108-2130; no weaker reuse of the existing budget test.
 #Test("pkg integration manifest_panic_budget_names_the_dependency_stop_site") {
-    raw :: pkg_integration_min_manifest("app", "0.1.0") + "\nauthority: {{ holds: {{ deny: [Panic] }} }}\n"
+    raw :: pkg_integration_min_manifest("app", "0.1.0") + "\nauthority: {{ deny: [Panic] }}\n"
     manifest :: PackageFacts.parse(raw, "test") ?? panic("Panic should be a manifest effect root")
     entries :: [PackageEffects]{PackageEffects{name: "panicdep", effects: [String]{"Panic"}, effect_sites: [String: String]{}, effect_witnesses: [String: EffectBudgetWitness]{}, panic_sites: [String]{"panicdep::parse_port"}, boundary_span: Val(Span{start: 4, end: 12})}}
     diagnostics :: pkg_effect_enforce(entries, manifest)
@@ -152,14 +152,14 @@ fn pkg_integration_package_error(raw: String) -> PackageParseError Never! {
 
 // Ported from pkg.rs:2144-2179.
 #Test("pkg integration manifest_parse_authority_block_holds_grants_trust_and_providers") {
-    raw :: pkg_integration_min_manifest("app", "0.1.0") + "\nauthority: {{\n    holds: {{ allow: [Net, DB.Read], deny: [Exec] }},\n    grants: {{ \"image-codec\": [FS.Read] }},\n    trust: {{ default: prompt, ci: {{ prompt: deny }}, services: {{ stripe: allow }} }},\n    providers: {{ nix: {{ registry: \"nixpkgs\", deny: [\"openssl-1.0\"] }} }},\n}}\n"
+    raw :: pkg_integration_min_manifest("app", "0.1.0") + "\nauthority: {{\n    allow: [Net, DB.Read], deny: [Exec],\n    grants: {{ \"image-codec\": [FS.Read] }},\n    trust: {{ default: prompt, ci: {{ prompt: deny }}, services: {{ stripe: allow }} }},\n    providers: {{ nix: {{ registry: \"nixpkgs\", deny: [\"openssl-1.0\"] }} }},\n}}\n"
     pm :: PackageFacts.parse(raw, "test") ?? panic("one authority block should parse")
-    assert_eq(pm.authority.holds.allow, Val([String]{"Net", "DB.Read"}))
-    assert_eq(pm.authority.holds.deny, Val([String]{"Exec"}))
+    assert_eq(pm.authority.allow, Val([String]{"Net", "DB.Read"}))
+    assert_eq(pm.authority.deny, Val([String]{"Exec"}))
     assert_eq(pm.authority.grants, [PackageGrant]{PackageGrant{package: "image-codec", rights: [String]{"FS.Read"}}})
     assert_eq(pm.grants, pm.authority.grants)
-    assert_eq(pm.effects_allow, pm.authority.holds.allow)
-    assert_eq(pm.effects_deny, pm.authority.holds.deny)
+    assert_eq(pm.effects_allow, pm.authority.allow)
+    assert_eq(pm.effects_deny, pm.authority.deny)
     trust :: pm.authority.trust ?? panic("expected prompt trust")
     assert_eq(trust.default, Val(TrustDecision.Prompt))
     assert_eq(pm.authority.providers.len(), 1)
@@ -198,7 +198,7 @@ fn pkg_integration_package_error(raw: String) -> PackageParseError Never! {
 
 // Ported from pkg.rs:2233-2244.
 #Test("pkg integration manifest_parse_effects_e1221_unknown_effect") {
-    raw :: pkg_integration_min_manifest("app", "0.1.0") + "\nauthority: {{ holds: {{ allow: [NotAnEffect] }} }}\n"
+    raw :: pkg_integration_min_manifest("app", "0.1.0") + "\nauthority: {{ allow: [NotAnEffect] }}\n"
     error :: pkg_integration_package_error(raw)
     assert_eq(pkg_integration_manifest_error(raw).diagnostic.code, "E1221")
     bad :: if error == {
@@ -210,7 +210,7 @@ fn pkg_integration_package_error(raw: String) -> PackageParseError Never! {
 
 // Ported from pkg.rs:2247-2252.
 #Test("pkg integration manifest_parse_effects_e1221_unknown_field") {
-    raw :: pkg_integration_min_manifest("app", "0.1.0") + "\nauthority: {{ holds: {{ nope: [FS] }} }}\n"
+    raw :: pkg_integration_min_manifest("app", "0.1.0") + "\nauthority: {{ nope: [FS] }}\n"
     assert_eq(pkg_integration_manifest_error(raw).diagnostic.code, "E1221")
 }
 

@@ -5,7 +5,7 @@
 // arithmetic_hover_at/inlay_hints_for plus definition_matches_target.
 // One checked walk over Sema's checked graph, never a second checker: facts come
 // from SemaRegistrationGraph (checked/expanded items), SemaGraphResult
-// (checked modules and the sole MIRNameFacts name ledger), the caller's
+// (checked modules and the sole NameFacts name ledger), the caller's
 // SemaCompilerModuleSource rows and PackageModel's explicit effect projection.
 use jet_foundation.[
     AccessConvention,
@@ -13,7 +13,7 @@ use jet_foundation.[
     EffectRowEntry,
     FailureContract,
     Item,
-    MIRDerivationMethod,
+    DerivationMethod,
     NamedSpan,
     ParamZone,
     Span,
@@ -25,10 +25,10 @@ use jet_foundation.[
     derivation_record,
     failure_contract_effective_type,
     failure_contract_source,
-    mir_sha256_hex_bytes,
-    name_facts_exported,
-    foundation_member_name,
+    sha256_hex_bytes,
     type_name,
+    Field,
+    Param,
 ]
 use jet_sema.[
     SemaCompilerModuleSource,
@@ -149,7 +149,7 @@ struct CallerFrame {
 }
 
 // Rust WalkCtx (156–168). Jet threads the writable `db: &SymbolDB` and the read
-// `names: MIRNameFacts` / `module: SemaRegistrationModule` as explicit
+// `names: NameFacts` / `module: SemaRegistrationModule` as explicit
 // parameters of every walker (`(db, ctx, names, module, ...)`); the context owns
 // only walk state. `block_spans` is the per-module sorted copy Rust also makes.
 struct WalkCtx {
@@ -160,10 +160,13 @@ struct WalkCtx {
     structural_slot: String
     structural_slot_kind: StructuralSlotKind
     block_spans: [Span]
-    claimed_block_spans: [SourceSpan:Bool]
+    // Union-find successor over `block_spans` (claims are by start and end): `block_next[i] == i`
+    // while span i is unclaimed; a claimed span points past itself. One sentinel slot at the end.
+    block_next: [Int]
 
     // Rust build_symbol_db WalkCtx literal (1343–1355).
     fn new(module_idx: Int, scope_identity: ^String, block_spans: ^[Span]) -> WalkCtx Never! {
+        block_next :: loop index in 0..<block_spans.len() + 1 -> index
         WalkCtx{
             module_idx: module_idx,
             caller: None,
@@ -172,7 +175,7 @@ struct WalkCtx {
             structural_slot: "root",
             structural_slot_kind: StructuralSlotKind.List,
             block_spans: ^block_spans,
-            claimed_block_spans: [SourceSpan:Bool]{},
+            block_next: block_next,
         }
     }
 }
@@ -250,7 +253,7 @@ impl SymbolDB {
                 fact.stable_id.copy(),
                 fact.human_identity.copy(),
                 "jet-sema",
-                MIRDerivationMethod.StaticDerivation,
+                DerivationMethod.StaticDerivation,
                 "checked-definition",
                 [String]{fact.signature_id.copy(), fact.content_id.copy()},
                 derivation_identity(fact.content_id.copy(), fact.signature_id.copy(), "", fact.module_path.copy()),
@@ -384,7 +387,6 @@ fn semindex_arithmetic_hover_index(arithmetic: [ArithmeticOperationFact], hover:
     None
 }
 
-
 // Rust definition_matches_target (493–512): same module and exact span, and a
 // checked anchor kind that names this definition's semantic kind.
 fn semindex_definition_matches_target(definition: SymDef, target: DefinitionAnchor) -> Bool Never! {
@@ -426,7 +428,7 @@ fn semindex_instance_facts(registration: SemaRegistrationGraph, checked: SemaGra
             if item == .CodeModule(instance) {
                 if instance.instance_identity == .Val(identity) {
                     arguments := [String]{}
-                    loop key in identity.argument_keys -> &arguments.push(mir_sha256_hex_bytes(key))
+                    loop key in identity.argument_keys -> &arguments.push(sha256_hex_bytes(key))
                     applications := [InstanceApplicationFact]{}
                     loop application in identity.applications {
                         &applications.push(InstanceApplicationFact{
@@ -451,7 +453,7 @@ fn semindex_instance_facts(registration: SemaRegistrationGraph, checked: SemaGra
                         name: instance.name.copy(),
                         module_path: source.display,
                         fingerprint: identity.fingerprint.copy(),
-                        full_key_hex: mir_sha256_hex_bytes(identity.full_key),
+                        full_key_hex: sha256_hex_bytes(identity.full_key),
                         template_definition_id: identity.definition_id.copy(),
                         template_span: semindex_source_span(identity.template_span),
                         arguments: ^arguments,

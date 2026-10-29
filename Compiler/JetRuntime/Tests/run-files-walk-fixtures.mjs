@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Native Core/files walk lane (FilesWalk/FilesIgnore/FilesPathOps): the
+// Native Core/Files walk lane (FilesWalk/FilesIgnore/FilesPathOps): the
 // runtime sources plus FilesWalkTests.jet compile to fixture.o; the C witness
 // walks a real directory, checks gitignore matching and the registry lifetime
 // (close during an operation, repeated close).
@@ -24,7 +24,7 @@ function command(bin, args, options = {}) {
 if (mode === 'assemble') {
   mkdirSync(join(dir, 'Source'), { recursive: true });
   const paths = readFileSync(join(root, 'Compiler/JetRuntime/sources.list'), 'utf8').split('\n').map(x => x.trim()).filter(x => x && !x.startsWith('#'));
-  paths.push('Compiler/JetRuntime/Tests/FilesWalkTests.jet');
+  paths.push('Compiler/JetRuntime/Tests/Fragments.fixture/FilesWalkTests.jet');
   const unit = paths.map(path => readFileSync(join(root, path), 'utf8')).join('\n');
   writeFileSync(join(dir, 'Source/Fixture.jet'), unit);
   writeFileSync(join(dir, 'package.jet'), readFileSync(join(root, 'Compiler/JetRuntime/package.jet')));

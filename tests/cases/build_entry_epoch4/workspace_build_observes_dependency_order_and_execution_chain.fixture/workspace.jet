@@ -1,0 +1,20 @@
+
+use b
+
+module workspace {
+    members: ["./packages/a", "./packages/b"]
+}
+
+fn build(b: Build) -[Exec]> {
+    #Impure("workspace must observe member b") {
+        action :: b.action(
+            "workspace-order",
+            [],
+            ["workspace-stamp"],
+            ["sh", "-c", "printf workspace > workspace-stamp"],
+            ["Exec"]
+        )
+        app :: b.add_executable("workspace", ["workspace.jet"], [action])
+        b.default(app)
+    }
+}

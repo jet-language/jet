@@ -1,0 +1,18 @@
+# tests/jetpack_hangar_store_v2.rs::hangar_dump_restore_streams_one_archive_and_preserves_live_data_on_corruption at tests/jetpack_hangar_store_v2.rs:871; hand-port
+# Claim: dump stdout starts with jet-hangar-archive-v1 (rs:910-913)
+# Claim: dump creates the source signer trust/hangar.key (rs:915)
+# Fixture migrated: restore needs the dump stdout as its stdin; steps cannot pipe one step into the next, so the restore stage is not ported
+# Not ported: restore --key via stdin (rs:917-942) and repeated restore (rs:954-958): not ported (see migrations)
+# Not ported: corrupted restore expecting exit 2 and unchanged payload (rs:961-968): needs byte mutation
+# Not ported: Store::find_by_reference/list_checked asserts (rs:947,959): Rust API
+fixture: hangar_dump_restore_streams_one_archive_and_preserves_live_data_on_corruption.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jetpack hangar ingest source --name streamed --ref streamed@fixture --no-color
+exit: 0 # rs:879-887 exit 0
+step: jet hangar dump streamed@fixture --no-color
+exit: 0 # rs:899-913 exit 0 and magic bytes
+stdout: ~ "jet-hangar-archive-v1" # rs:899-913 exit 0 and magic bytes
+step: sh {work}/step-3.sh
+exit: 0 # rs:915 signer created

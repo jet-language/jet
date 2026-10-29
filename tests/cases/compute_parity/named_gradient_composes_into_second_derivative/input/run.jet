@@ -1,0 +1,16 @@
+
+use core.compute as compute
+
+fn loss(w: Tensor, x: Tensor) -> Tensor { compute.mul(w, x) ?? panic("loss") }
+
+fn run() {
+    w :: compute.from_list([2.0]) ?? panic("w")
+    x :: compute.from_list([4.0]) ?? panic("x")
+    derivative :: compute.gradient(loss)
+    curvature :: compute.gradient(derivative)
+    result :: curvature(w, x)
+    print("ww:{compute.to_list(result.w.w)}")
+    print("wx:{compute.to_list(result.w.x)}")
+    print("xw:{compute.to_list(result.x.w)}")
+    print("xx:{compute.to_list(result.x.x)}")
+}

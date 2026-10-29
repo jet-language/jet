@@ -2,9 +2,13 @@
 // never a diagnostic rendering's byte equality.
 use core.math as math
 use core.encoding.json as json
+use jet_foundation.[
+    ComparisonIdentity, ComparisonObservation, ComparisonSample, ComparisonStatus,
+    ObservationRelation, testing_compare_samples_with_discarded,
+]
 
 fn comparison_equality_observation(value: Dyn) -> ComparisonObservation Never! {
-    ComparisonObservation{raw: value.show(), typed_failure: None, mutation: None, ordered_effects: [String]{}, cleanup: [String]{}}
+    ComparisonObservation{raw: "{value}", typed_failure: None, mutation: None, ordered_effects: [String]{}, cleanup: [String]{}}
 }
 
 fn comparison_equality_sample(reference: Dyn, candidate: Dyn) -> ComparisonSample Never! {
@@ -27,7 +31,7 @@ fn comparison_equality_status(reference: Dyn, candidate: Dyn) -> ComparisonStatu
     testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{sample}, 0).status
 }
 
-fn run() {
+#Test("comparison_equality") {
     comparison_equality_require(comparison_equality_status(Dyn.Float(math.nan()), Dyn.Float(math.nan())) == ComparisonStatus.Mismatch, "NaN never equals NaN")
     comparison_equality_require(comparison_equality_status(Dyn.Float(-0.0), Dyn.Float(0.0)) == ComparisonStatus.Matched, "signed zeros compare equal")
     left :: json.parse("{{\"a\":1,\"b\":2}}") ?? panic("left object")
@@ -38,6 +42,6 @@ fn run() {
     missing.declared_equal = None
     missing_record :: testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{missing}, 0)
     comparison_equality_require(missing_record.status == ComparisonStatus.InvalidOracle, "missing fact cannot pass")
-    custom_record :: testing_compare_samples_with_discarded(ObservationRelation.Custom("domain"), [ComparisonSample]{missing}, 0)
+    custom_record :: testing_compare_samples_with_discarded(ObservationRelation.Custom{name: "domain"}, [ComparisonSample]{missing}, 0)
     comparison_equality_require(custom_record.status == ComparisonStatus.InvalidOracle, "custom oracle remains explicit")
 }

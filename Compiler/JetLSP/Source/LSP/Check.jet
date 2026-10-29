@@ -5,9 +5,10 @@
 // pending canonical Driver build-plan ABI publication (no local graph model).
 use core.files.runtime.kernel_path_components as lsp_check_path
 use core.files.runtime.kernel_path_components.[OSPath]
-use jet_driver.[JetDriverCompilerQueries, JetDriverQuerySnapshot, JetDriverCheckedQuery, JetDriverCompilerCheckResult, jet_driver_present_checked_diagnostics, query_build_plan_with_overlay, build_plan_json, apply_edits]
-use jet_foundation.[Diagnostic, TextEdit, FixApplicability, FixSafety, ApplicationAuthority, names_normalize_path]
+use jet_driver.[JetDriverCompilerQueries, JetDriverCompilerCheckResult]
+use jet_foundation.[Diagnostic, TextEdit, ApplicationAuthority]
 use jet_pkg_model.[pkg_extract_inline_package, pkg_project_program_effects, pkg_application_policy_diagnostic, ScriptEntry]
+use jetpack_foundation.[FixApplicability, FixSafety]
 // apply_edits uses Wave-0611b's canonical View<TextEdit> / ApplyError ABI.
 
 // Caller-held native cwd is the sole Server/Driver snapshot's actual cwd. The
@@ -45,7 +46,7 @@ fn lsp_build_graph_json(snapshot: JetDriverQuerySnapshot, path: OSPath, text: St
 fn lsp_script_authority_repair(path: OSPath, text: String, checked: JetDriverCompilerCheckResult, authority: ApplicationAuthority) -> Diagnostic? Never! {
     if checked.graph == None || checked.registration == None -> return None
     if !authority.is_application_default() -> return None
-    if pkg_extract_inline_package(text) != .Ok(.None) -> return None
+    if pkg_extract_inline_package(text) != .None -> return None
     program :: checked.effect_budget_program ?? return None
     summaries :: checked.effect_budget_summaries ?? return None
     projection :: pkg_project_program_effects(program, summaries, "run", None)

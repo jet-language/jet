@@ -319,7 +319,7 @@ const cells = table(contractPath, contractHeader, 15).map(row => ({
   version: row[0], cell_id: row[1], case: row[2], workflow: row[3], execution_tier: row[4], input: row[5], expected: row[6], source_entry: row[7], source_manifest: row[8], outcome: row[9], target: row[10], profile: row[11], optimization: row[12], artifact_kind: row[13], metrics: row[14],
 }));
 if (cells.length !== 20) fail(`Source compiler contract has ${cells.length} cells; expected 20`);
-const sourceManifestPath = path.join(root, "Compiler", "Bootstrap", "sources.list");
+const sourceManifestPath = path.join(root, "Compiler", "package.jet");
 const sourceManifestSha = sha256File(sourceManifestPath);
 const canonicalProbeSpecs = [
   { probe_id: "valid-hello", case: "valid", expected_kind: "stdout", input: "Examples/features/basics/hello.jet", expected: "Examples/features/expected/basics/hello.out" },

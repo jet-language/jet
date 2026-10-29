@@ -1,0 +1,17 @@
+
+use core.process as process
+
+fn run() {
+    policy :: process.workspace()
+    spec :: process.cmd(["/usr/bin/printf", "sandboxed"]).cwd("/tmp").under(policy)
+    if spec.plan() == {
+        .Ok(plan) -> {
+            print(plan.backend)
+            if spec.run_checked() == {
+                .Ok(value) -> print(value.output)
+                .Err(_) -> print("denied")
+            }
+            }
+        .Err(_) -> print("refused")
+    }
+}

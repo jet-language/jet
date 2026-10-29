@@ -8,47 +8,26 @@ Vocabulary: [Jet vocabulary](vocabulary.md).
 Jet source
   -> lexer -> tokens with byte spans
   -> parser -> AST
-  -> sema -> checked bundle and semantic facts
-  -> TIR -> canonical, validated and optimized MIR
-  -> Jet code generator (Compiler/JetBackend), one runtime
-       O0: machine code in memory (`jet run`, `jet dev`, comptime, REPL)
+  -> sema -> checked program (checked bodies and semantic facts)
+  -> IR builder -> slot IR, optimized in place
+  -> x86-64 selection and object emission (Compiler/JetIR, Compiler/JetBackend), one runtime
+       O0: machine code in memory (`jet run`, `jet dev`, comptime)
        O1: executable file (`jet build` default)
        O2: executable file (`--release`)
 ```
 
-This is the ratified shape (D-EXEC1, D-TIER-FORM1, D-BACKEND-OWN1). Every
-level reads the same Jet-owned MIR and calls one runtime: the Prelude and Core,
-compiled once per Jet version and shipped with Jet. O0, O1 and O2 are all the
-Jet back end; LLVM survives only as an explicit, measured `--backend=llvm`
+This is the ratified shape (D-EXEC1, D-TIER-FORM1, D-BACKEND-OWN1, D-ARCH-IR1).
+Every level reads the same Jet-owned IR and calls one runtime: the Prelude and
+Core, compiled once per Jet version and shipped with Jet. O0, O1 and O2 are all
+the Jet back end; LLVM survives only as an explicit, measured `--backend=llvm`
 fallback until Jet O2 beats it on every required cell and covers every
 supported target (card #4013). The Cranelift JIT is retired (D-EXEC2).
 
-Rust emission (MIRRust -> rustc) and the MIR evaluator are transitional
-bootstrap paths, not consumers of the design. Until the native back end covers
-every program, `jet build`, `jet run` and `jet dev` compile through the Rust
-path and execute its result; the evaluator serves comptime only until native
-O0 comptime lands. Both are removed with the rest of Rust (owner directive 19).
-
-Bootstrap MIR optimization verifies legality in both development and release
-builds. `JET_DEBUG_LOWER_ALL=1` additionally reports all global identity
-collisions and independent legality checks for each function. An invalid input
-still stops the pipeline. If a pass introduces invalid MIR, measurement mode
-reports its operation/pass and structured violations, discards its entire
-output, and runs the following passes from the last valid program. It retains
-only one snapshot at a time and ultimately returns the original first failure;
-no rejected pipeline is sealed or emitted. Normal mode remains fail-fast and
-takes no snapshots. Checks that require valid component prerequisites still
-reject that component rather than reading invalid references. With `JET_DUMP_MIR`
-also set, the checked lowering pipeline saves the pre-verification program at
-`<dump-path>.before-legality`; the usual post-optimization dump remains unchanged.
-
-The native compiler's `JET_MIR_LINT_EVERY_PASS=1` (the bootstrap host's
-`JET_BOOTSTRAP_MIR_LINT_EVERY_PASS`) turns on full verification: legality and
-MIR Lint run on the entry program and after every optimizer pass. A failure
-then names the pass whose output was rejected and carries the rejected
-function's MIR as text (locals, place rows, blocks, operations and their
-value and place operands). A rejected move names the moved root and both move
-positions in every mode.
+Rust emission left with the Rust implementation (owner directive 19):
+`jet build`, `jet run` and `jet dev` compile through the native back end.
+Comptime uses the same route: each comptime batch is compiled to x86-64 at O0,
+bound in memory to the runtime image `jet build` links, and run in a child
+process (`Compiler/JetEval/Source/IR/Native.jet`).
 
 The native runtime object's `jet_rt_alloc` and `jet_rt_free` own C-carrier
 allocation. Generated Rust adapters allocate List result buffers through that
@@ -131,14 +110,14 @@ Native runtime exit corpora accept `--results` pointing to the one Jet-front
 golden union's `results.tsv`; symbol, raw ABI, ownership and process-edge
 witnesses still execute independently. Shared results reject duplicate rows.
 Trap proofs compare the native status, signal and exact stdout/stderr against
-the committed golden, not a retired MIR/Rust execution. The freestanding
+the committed golden, not a retired Rust execution. The freestanding
 display witness links the sealed C-client object and its provenance-listed C
 platform archives, rather than the program pack's startup.
 Native fixture and registry feeds share
 [`compiler-native-transport`](../../Tools/agent/compiler-native-transport.mjs):
 the production CLI's `check FILE` library-object seam and `build FILE` program
 path. Library feeds require fresh object, export and ABI files; command
-completion alone is not a native pass. Checked-MIR observers are explicit Jet
+completion alone is not a native pass. Checked-program observers are explicit Jet
 drivers compiled from the canonical compiler aggregate, cached per pinned
 toolchain, rather than a bootstrap factory or a retired Rust observer.
 The [S5 drivers](../../Tools/agent/s5/make-jobs.sh) execute from the immutable
@@ -166,14 +145,8 @@ The bootstrap completion owner may initiate Source resource retirement after
 its caller consumes the factory result and grants retirement permission; a
 prior request is not required. Callback jobs and retained roots still block
 retirement. The hosted runtime library-object feed instead consumes the
-driver's checked MIR directly; it has no factory frontend receipt dependency.
+driver's checked program directly; it has no factory frontend receipt dependency.
 Lowering and linking failures refuse the pack rather than publishing an artifact.
-
-The Rust-debug MIR conversion feed preserves the bootstrap codec's field-name
-mapping for all NameLedger rows, including display paths: the checked Rust
-`MIRNameDisplayPath.module` becomes Jet `module_index`. Internal and display
-paths remain distinct checked strings; conversion must not infer or discard
-either path.
 
 The native C-ABI fixtures declare each allocator export once and link the
 same checked Jet runtime object that packaging uses. Actual lowered signature
@@ -197,28 +170,35 @@ library entry, and lowers its checked exports plus `lifecycle.list` into one
 native object. Jet's linker resolves its permitted musl/libgcc C dependencies;
 no Rust runtime, standard-library rlibs, rustc or system linker participates.
 Packaging writes `jet-runtime/native.key` beside the compiler and installs
-`jet-runtime/<key>/jet_runtime.pack.o`. The key hashes the source inventory,
-checked ABI, lifecycle, backend inputs and C platform archives. The accompanying
-`provenance.json` records each input digest, the pack digest and zero Rust or
-LLVM-generated Jet objects, with permitted C platform archives listed separately.
+`jet-runtime/<key>/jet_runtime.pack.o` and `jet_runtime.image`: the pack linked
+once at the run base (`LINK_RUN_BASE`), with its symbol table, a
+`.jet.bind` section naming where it calls `main`, and a `.jet.exports` hash
+index of its defined global symbols. Binding a program object to that image
+(`Image/MemoryLink.jet` `x64_link_with_runtime_image`) does not relink the
+runtime and looks up only the program's imports in that index; the bound
+bytes are a complete static executable at the
+run base. `jet run` reads only the image's first page and the bytes after its
+loaded segments for that bind, and maps the segments from the file
+(`Image/Loader.jet`). The key hashes the source inventory, checked ABI, lifecycle, backend
+inputs and C platform archives. The accompanying `provenance.json` records each
+input digest, the pack and image digests and zero Rust or LLVM-generated Jet
+objects, with permitted C platform archives listed separately.
 Packaging first checks a separate recipe digest of the runtime sources, backend,
 lifecycle, C archive bytes and compiler executable. Neither the consumer program
 nor its build profile enters that recipe. A matching recipe reuses the produced
 pack without checking or compiling the runtime again; changed producer inputs
-rebuild it. Reuse requires held regular-file reads, matching object/pack/ABI
+rebuild it. Reuse requires held regular-file reads, matching object/pack/image/ABI
 digests, the checked export inventory, the content-addressed identity and the
 existing no-Rust-symbol check. Native compiler staging uses the same receipt
 reader. This cache does not bypass semantic checks on user programs.
 
-Runtime route regeneration consumes the raw all-parts Rust emission plus the
-current provider manifest and route registries. Generated `CAbiRoutes.rs` is
-not part of that emission; native runtime preparation appends it afterward.
-`RuntimeRoutes.jet` is the generated native lowering table, not a generator
-input. Therefore an unchanged runtime ABI and registry need one regeneration,
-not a table-feedback loop. After provider admission changes, regenerate both
-outputs together and run `Tools/agent/gen-runtime.mjs <allparts.rs> --check`.
+`RuntimeRoutes.jet` is the native lowering table of runtime C-ABI routes and
+its only home: its route, record and import rows are edited by hand, sorted,
+together with the runtime `#Export(c)` they name. After provider admission
+changes, run `Tools/agent/lane-check.sh --runtime-generators` to check the
+generated runtime message tables.
 
-Native `List<U8>` payloads are packed one-byte elements, matching checked
+Native `[U8]` payloads are packed one-byte elements, matching checked
 `StorageLayout(U8)` and the C ABI's `u8` buffer. The runtime's
 `RT_HOST_U8_STRIDE` is 1; byte-list allocation, indexing, copying and freeing
 share that fact across Dyn, files, networking, text, crypto and codecs.
@@ -227,18 +207,17 @@ HTTP Body chunk buffers use the same layout, including borrowed input windows.
 that checks all 256 byte values through List pack/unpack and multi-chunk HTTP
 Body transfer; it rejects an object whose pinned source declares another stride.
 
-A nested `List<List<U8>>` crosses a route only to a Jet runtime provider: the
+A nested `[[U8]]` crosses a route only to a Jet runtime provider: the
 outer data pointer and length address native 24-byte `[len, cap, data]` headers
 over packed bytes, and a result returns such a buffer with exact capacities.
 `&mut Vec<u8>` kernels likewise lend the caller's own data and length for an
-in-place write. Seed Rust adapters have no nested-slot or write-back codec, so
-`gen-c-abi-routes.mjs` emits these rows without a Rust body, keeps the old skip
-for non-Jet routes, and Lower refuses a nested carrier without `native_lists`.
-The checked-build transport (`HostBuildHTTP.jet`, HTTP.rs:5536-5712) uses this
-carrier for its DNS answers and response rows; plain `http://` runs over the
-native socket and readiness providers, while the `https://` branch connects and
-then returns the runtime's canonical TLS refusal text (D-NATIVE-TLS1=B) as its
-String error without sending a request.
+in-place write. These rows name Jet runtime providers only, and Lower refuses
+a nested carrier without `native_lists`.
+The checked-build DNS answer (`HostBuildHTTP.jet`, ported from the deleted Rust bridge `HTTP.rs`) uses this
+carrier for its resolved addresses. The pinned GET over them is Jet source,
+`core.http.client.jet_http_build_get` (Core/Http/Client.jet): it connects to the
+checked addresses with `core.net`, wraps `https://` in `core.net.tls` with the
+default client trust, and returns the header lines, body and status as `[[U8]]`.
 
 Held-directory listing reuses the one FD72-backed held-directory table. Each
 call reads a fresh stream, returns packed raw filename rows with a no-follow
@@ -257,22 +236,23 @@ other hardening and the parent environment remain unchanged. Glibc's fortified
 The archive-symbol census regression compiles the real process/TCP C witnesses
 and requires every platform import to resolve in the exact musl/libgcc archives.
 
-The Jet-hosted native CLI uses checked MIR directly for build, run and test in
-both profiles. Dev remains LIR O0, including the native compiler fixed-point
-chain; release uses the existing LIR O2 passes and the same runtime pack. Native
+The Jet-hosted native CLI builds the IR from the checked program for build, run
+and test in both profiles. Dev is O0, including the native compiler fixed-point
+chain; release uses the IR O2 passes and the same runtime pack. Native
 release does not emit a Rust program, compile an inline runtime or invoke rustc.
 Release tests use the same selected native harness, framed outcome transport,
 fatal-child handling and capture policy as dev tests.
 
-The all-parts runtime includes `CAbiTest.rs` once through Codegen's canonical
-prelude; the compiler-call preparation step must not append a second copy.
+The all-parts runtime includes the native test harness
+([`TestHarness.jet`](../../Compiler/JetRuntime/Source/TestHarness.jet)) once;
+the compiler-call preparation step must not append a second copy.
 Test callbacks transfer owned E4 text errors through the shared carrier `take`
 operation, outcome wire output uses `handle`, and finish-wire parsing borrows
 the caller-owned carrier through `view`. No Rust `Box<String>` layout crosses
 these C doors.
 
 The front end owns language checks and user-facing compiler diagnostics.
-Backends consume checked facts; a back end that rejects checked MIR has hit an
+Backends consume checked facts; a back end that rejects the checked program has hit an
 internal compiler error, not another language checker.
 Checked compile-time `reject(code:, what:, why:, fix:)` calls use the canonical
 `core.compiler.__reject` intrinsic row, declared in `Prelude/Core.jet` and
@@ -296,9 +276,6 @@ runtime-owned statics before the loader unmaps code and data. Initialization
 and finalization share a live flag, so repeated calls reuse the same statics
 without duplicating owners. Calls through the x86-64 assembly host boundary
 declare all System V caller-saved vector registers as clobbered.
-The callable lifetime witness in `Compiler/JetBackend/Tests/CallableStatics.jet`
-starts with MIR and uses the admitted runtime's actual constructors and drops,
-observing reuse, live-flag clearing, and reinitialization before loader unload.
 
 ### Build graph and compiler nodes
 
@@ -318,14 +295,281 @@ when a rechecked package kept its interface digest. The JSON form is
 `jet.explain-build/v1`; text output contains one node per line. The compiler
 owns node identity and dependencies, while the store owns run evidence.
 
-### Typed IR (TIR) — the codegen seam
+### Single slot IR (middle end)
 
-The [TIR lowering](../../crates/jet-codegen/src/Codegen/TIR/mod.rs) accepts the
-checked bundle and carries sema-approved types, access conventions and effects.
-[MIR lowering](../../crates/jet-codegen/src/Codegen/TIR/mir.rs) gives those facts
-canonical type, function, place and artifact identities. The resulting MIR is
-validated and optimized before execution or emission. Neither lowering infers
-new language permissions or falls back to an unchecked AST emitter.
+D-ARCH-IR1=A gives the middle end one IR per function:
+
+```text
+checked program (checked bodies + sema facts) -> IR (slots, structured control) -> x86-64 selection
+  -> encoder, object writer, DWARF, static linker, runtime pack
+```
+
+**Frozen boundaries.** Changing either end of the middle needs the owner's
+explicit approval.
+
+- *Front-end boundary:* the IR builder consumes the checked program: the
+  checked function rows and the sema facts they carry. A data-oriented front
+  end (flat AST, facts in tables keyed by node id) is a later, separate step;
+  when it lands, it changes the builder's input reader and nothing below it.
+- *Emission boundary:* the IR path produces `X64CompiledFunction` and
+  `X64FunctionDebug` rows and an `X64ObjectModule` (data objects, debug files
+  and types, per-function source facts), all declared in
+  `Image/Emission.jet`, for the existing encoder (`X64/Encoder.jet`), object
+  writer (`Image/Object.jet`), DWARF writer (`Image/Dwarf.jet`) and static
+  linker (`Image/StaticLink.jet`). It calls the runtime symbols with the
+  System V ABI and links the runtime pack.
+
+**Data model** ([`Compiler/JetIR/Source/IR.jet`](../../Compiler/JetIR/Source/IR.jet)).
+An `IRModule` holds interned type rows (the checked `Type`, its kind, size,
+alignment, ABI class and drop symbol), interned names, read-only data rows and
+the functions, keyed by their stable function key. An `IRFunction` is one flat
+arena in struct-of-arrays form: slot columns (type, kind, name, line) and
+instruction columns (`op`, `dst`, `a`, `b`, `c`, line), plus one shared
+operand pool for calls. Slots `0..<param_count` are the parameters. There is
+no per-instruction or per-slot heap allocation, and every reference is an
+integer id.
+
+- **Not SSA.** A slot is a mutable typed variable. An instruction reads slots
+  and writes at most one. Loops need no block parameters or back-edge copies.
+- **Structured control.** `Block`, `Loop`, `If`/`Else`, `End`, `Br depth`,
+  `BrIf`, `Return` and `Unreachable`; there are no arbitrary jumps. Every
+  opener records the index of its `End`, so a walker skips a region in O(1).
+  The form maps one-to-one onto Wasm blocks and locals.
+- **Explicit ownership.** `Copy`, `Move`, `Drop` and `Close` are instructions.
+  The builder emits them from the checked ownership facts, and only for types
+  that have a drop.
+- **Semantic operations where Jet semantics live.** For example, `Add` on an
+  exact `Int` slot means inline arithmetic with a big-integer spill, and
+  `Concat` means String concatenation. The slot's type row selects the
+  meaning, and the machine layer chooses the instruction sequence. The
+  runtime routes are the runtime pack's symbols.
+- **Content hash.** A function's key is the SHA-256 of its text form, in which
+  every interned id is spelled out by content. That key is the unit for the
+  store, caching and per-function hot swap.
+
+**SSA only on demand.** A pass that needs SSA (value numbering, constant
+propagation across joins) builds an SSA view of one function, uses it and
+discards it. A view is never stored, never spans functions and never becomes
+the program's representation. O0 builds never construct one.
+
+**Consumers.**
+
+| Consumer | Reads |
+|---|---|
+| IR builder (`JetIR/Source/Build*.jet`) | the checked program |
+| O1/O2 passes (`JetIR/Source/Opt*.jet`; inlining splices slot arenas, loop work uses the structured loops, SSA views where needed) | IR |
+| x86-64 selection with linear scan over slot live ranges (`JetIR/Source/X64*.jet`) | IR |
+| Encoder, object writer, DWARF, static linker | x64 rows; DWARF variables are slots |
+| Comptime (`JetEval/Source/IR`): in-memory O0 machine code from the same selector, one meaning for comptime and run time | IR |
+| Phase trace: `ir.build`, `ir.opt`, `ir.x64`, `ir.object` | IR |
+
+There is no web emitter on the IR yet: `jet build --target=web` is not part of
+the Jet-hosted CLI (E2104). The IR's structured control maps one-to-one onto
+Wasm blocks and locals for when it is rebuilt.
+
+### Checked program — the IR builder seam
+
+The [IR builder](../../Compiler/JetIR/Source/) accepts the checked bundle,
+carries sema-approved types, access conventions and effects from the checked
+program into
+the [IR](../../Compiler/JetIR/Source/IR.jet), and gives those facts canonical
+type, function, slot and artifact identities there. The resulting IR is
+validated and optimized before execution or emission. The builder infers no
+new language permissions and never falls back to an unchecked AST emitter.
+
+The checked program is a semantic contract, not a commitment to one permanent
+representation. A port may change the representation, but it may not move
+semantic choices into an executable lens or create a second meaning.
+
+#### Totality and the read-only fact channel
+
+The checked program is post-sema and total: every fact the IR builder needs is
+carried concretely on the checked row, never re-inferred through a fallback.
+Surface sugar expands during sema into core forms every lens already handles,
+and a coverage miss is an internal compiler error, never a fallback. The IR
+builder and the back ends read the facts sema selected; they do not re-run
+semantic decisions such as expression typing or overflow classification. A
+missing fact means "not proven" and never authorizes a lens to re-derive sema
+policy. An optimized pass may build a private SSA view (see *SSA only on
+demand*), but that view is not a semantic representation or a source of truth.
+
+| Fact | Missing fact |
+|---|---|
+| Type: expression, local, parameter and return types | Keep the conservative typed operation. |
+| Integer bounds: integer ranges, exact integer literals, inline-range numeric operations, fixed-list proofs | Keep the checked range or index operation. |
+| Exclusivity: sema access conventions, lowered to call-argument borrow flags and borrows | Keep shared or unknown memory dependencies and wrappers. |
+| Purity: sema function purity and effect-free bodies | Do not apply a reorder or vector hint. |
+| Comptime value: sema comptime bindings, lowered to compile-time literals | Keep runtime evaluation or serialization. |
+
+#### Lowering contracts
+
+Engines must not special-case these surface forms:
+
+| Surface | Core form | Authority |
+|---|---|---|
+| `freeze(x)` | A clone, view materialization or explicit copy, selected by the sema-approved source type; frozen provenance stays in capture metadata. | D-CONC-FREEZE1=A |
+| `^place` in a value position | A move of the checked place; a non-Copy field projection moves that field out, leaving it empty for remainder cleanup. The checker must not materialize a copy of the operand or erase its take provenance. | D-COPY-DEFAULT1=A |
+| `task ^name { … }` | The existing task lambda with an explicit consuming capture; the task-crossing prover owns legality. | D-CONC-FREEZE1=A |
+
+The freeze form is a lowering rule, not an engine-side capture check; web has
+no separate freeze policy. [`freeze_capture.jet`](../../Examples/features/concurrency/freeze_capture.jet)
+is its cross-lens fixture.
+
+Generic call evidence belongs to the caller's lexical scope, not the callee's
+registration row. Both local and cross-module calls must carry that scope's
+type parameters and canonical trait bounds into inference, including explicit
+type arguments. Lowering consumes the checked substitutions and bound evidence;
+it must not reconstruct a forwarded parameter's bounds from its spelling.
+
+Compile-time fragment lowering binds direct nominal `$layout`, `$name`, and
+`$fields` reads before ordinary field lowering, including reads inside reached
+helper functions. These values use the fragment caller's selected target and
+the checked nominal declarations through the shared target-aware reflection
+builder; a type name is never an evaluator local. Lexical reflected-value
+bindings still shadow nominal subjects. Sema folds the same reads to typed
+compile-time literals before the IR is built.
+Raw-pointer fields carry one address in the selected target's layout: their
+size and stride use its pointer width, and alignment uses its pointer
+alignment. The shared layout producer never needs the pointee's physical
+layout to project these facts.
+
+Fixed-array-to-list widening is a checked call-argument fact. Lowering retains
+it even when the argument comes from a place, so native emission widens the
+array before lending the callee its growable-list borrow.
+
+Cross-file generic calls lower in the declaring file's context, with canonical
+nominal identities at their boundary. Callable parameter coercions use the
+checked concrete signature and effective callable-return carrier, never an
+unspecialized `fn(T)` template or a raw source return type. A generic target
+without a complete checked instance is a lowering invariant failure;
+it cannot fall back to the template's ordinary function name. The executable
+example is [`package_members`](../../Examples/features/modules/package_members/run.jet).
+
+Core runtime-carrier type imports follow the authoritative Core export ledger
+even when no source nominal declaration exists. Import aliases preserve the
+carrier's builtin identity, and checked constructors publish that identity
+as their lowering receiver. A user module cannot acquire Core ownership merely
+by using a Core-like name.
+
+Compiler-created reflection values retain ordinary checked nominal declarations,
+including their enum tags and payloads. A compiler-owned name does not imply a
+native runtime carrier: reflection enums without one are declared by the artifact
+through the same enum emission path as source declarations.
+Typed variant comparisons resolve their owner from the checked subject's enum
+declaration and require membership in that declaration's canonical variant menu.
+This includes compiler-created reflection enums, not only source and runtime enums.
+
+Checked function parameters and explicit nominal construction type arguments
+publish their resolved identities on the AST consumed by lowering. Body locals,
+patterns, and specialization keys must not reinterpret the same declaration
+through different source spellings.
+
+A projected owning move supplies a root-name hint for leaf cleanup. Name
+matches without their own `Close` split stored struct/tuple ownership into live
+flags; ordinary roots retain atomic cleanup, and containers, dynamic owners and
+nominal `Close` leaves remain indivisible. Shadowed same-name `Close` roots
+remain atomic too. A move clears every covered leaf flag; reinitialization sets
+those same flags. A move below a split root that covers no registered leaf is
+explicitly refused, including a move inside an atomic leaf.
+An owned nominal record whose stored fields are all Copy still registers one
+atomic ownership leaf. Structural cleanup becoming empty must not erase its
+move/live flag or make moving that whole field look like an unsupported move.
+Cleanup consumes only the live remainder, including on early returns. An actual
+projected move from an atomic root with its own `Close` is refused at the move
+with a type-named internal error, not at registration. The consuming receiver
+inside its own `Close` body instead gets structural remainder cleanup, never
+another call to its own `Close`.
+
+Inline blocks lower their statement tails through the canonical statement
+lowerer. A tail that terminates control flow, including an exhaustive match
+whose arms return, has no reachable value; its inert placeholder value is Unit.
+A reachable non-expression tail is valid only for a checked Unit block.
+If and exhaustive-match joins with no incoming continuation edge are sealed
+as unreachable, not exposed as an open continuation after all arms terminate.
+
+Native reference carriers (`View`, `ViewMut`, `Pin`, and the internal
+allocator-view tag) do not own their referents. Their synthetic scope cleanup
+must not read or move the reference after its last checked use: doing so would
+extend the native borrow and reject a legal later reset or owner borrow. The
+allocator or collection remains responsible for dropping its owned payload.
+A discarded root-place read likewise needs no owned copy; projected
+accesses and retained context operands still keep their checked evaluation.
+
+Canonical source-owned regex, web-table, and HTTP message records retain their
+declared field layouts and generated local traits. A same-leaf native carrier
+is not an ABI alias for such a record; all type projections use the
+source-owner decision.
+Checked-text interpolation carries each hole's checked generic encoder arguments
+through compile-time validation and runtime lowering. Its dynamic `from`
+boundary invokes the declared checker once and preserves the original error;
+only a successful outcome wraps the original text in the nominal type.
+Imported function signatures retain each declared record's lexical owner through
+nested list and generic types, while function-generic parameters keep their
+lexical bindings. Generated C handle and glyph records use that same nominal
+identity; equally shaped caller records are not interchangeable.
+Arrow import preserves the checked batch owner and row type, and query consumes
+that owner. Canonical Core-data query heads select the existing native Query
+operation rows: collection remains the checked `[T] !DataError` materialization
+boundary, not a source-record method shim.
+Builtin `ParseError` is a valid typed failure domain for parsing operations.
+Locally matching its outcome preserves the carrier and binds success/error
+payloads; recognizing that domain does not declare a conversion into default
+`Err`. Ordinary fallible bindings still propagate, so diagnostic-policy probes
+handle a decoder call directly instead of first binding only its success value.
+
+Synthesized integer literals use the same native-carrier boundary as parsed
+literals. A checked integer literal and the IR's `Int` constant carry only
+signed 64-bit values; an exact `Int` outside that range uses a BigInt
+compile-time literal and the IR's BigInt constant with its exact decimal
+spelling and integer bounds. This includes embedded comptime integers, prepared
+facts, Fraction numerators, unit values and scales, and reconstructed
+fixed-allocation sizes. Fixed-width destinations retain the checked numeric
+conversion. An out-of-range `Int` is never truncated or silently changed to
+another constant kind.
+
+Pattern payload and field types instantiate the checked subject's owner
+parameters before binding locals; a declaration's bare `T`/`E` does not escape
+into its concrete match. Associated types in a trait declaration use `Self::X`.
+Pattern-generated structural capture tuples use the canonical tuple type
+instance and field label, exactly like ordinary tuple field reads; they do not
+require a nominal declaration. Literal-field tests, bound fields (including
+read/write windows), capture tuples, and dispatch-subject projections share
+that field-identity path.
+Indexed and optional payload projections use that same resolver. It strips
+checked tags and the single-argument `SharedGuard`, `CellReadGuard`,
+`CellEditGuard`, and `Pin` window carriers, but not arbitrary generic wrappers,
+`Shared`, `Option`, or `Result`. Tuple labels and unsigned decimal positions
+identify canonical tuple-instance fields; applied record fields identify their
+nominal declaration, not their generic instance. Named enum payloads retain
+the variant's field owner key. Numeric math-lane projections resolve only for
+`F32x4`, `F64x2`, `Vec2`, `Vec3`, and `Vec4`, preserving the stored `x/y/z/w`
+field order. Alias, distinct, and unit-family rows do not acquire stored fields.
+An unsupported checked owner reports the member, function, original owner
+kind/rendering, and normalized owner kind/rendering rather than hiding the
+missing semantic row.
+
+An eager collection adapter retains the checked failure contract of a callable
+value, just like a direct call to that value. A sequence's `map` or `filter`,
+and a list's one-argument sort key, therefore count a `fn(T) -> U` parameter's
+default `Err` route as a failure source for the enclosing function. Lowering
+uses the corresponding fallible kernel rather than declaring the enclosing
+function infallible while emitting a fallible call. Literal lambdas keep their
+own inferred propagation; explicitly written optional or typed failure
+contracts retain their existing carrier projections.
+An eager adapter inside a lambda propagates through that lambda's carrier to
+the enclosing owner; nesting does not erase the callable value's failure route.
+
+The `Iterable.iter` protocol retains its declared raw iterator return, rather
+than adding an implicit `Err` wrapper that its protocol ABI cannot accept.
+A user Iterable enters the same runtime loop cursor as other checked sources:
+the loop consumes its source once, `iter` runs once, and `Iterator.next`
+absence ends iteration. Native emission supplies the owner's loop-source bridge.
+
+A callable returning a view names the checked relationship between its
+borrowed owner arguments and that return with a higher-ranked lifetime.
+Returned static views remain static. The callable metadata and the ordinary
+function-value type use the same provenance facts; neither guesses a lifetime
+from the order of argument types.
 
 Registered source-owned record declarations are retained even when a native
 runtime carrier shares their leaf name.
@@ -349,20 +593,15 @@ Concrete closure inference preserves an existing `Result` or `Option` by its
 shape, not by whether its error set is inhabited. A nested pure closure's
 `Result<T, Never>` must not acquire a second `Never` rail around that carrier.
 
-Bootstrap Rust's final slot-name compaction covers native `Int` shadow
-declarations and their uses together. Shadow storage stays outside the ordinary
-slot-localization passes, but not outside the final function-wide renaming.
-
 Close lowering distinguishes boxed/handle pointer identity from scalar presence
 with an ordered representation arm table. Non-inline scalar receivers use a
 presence sentinel; pointer receivers retain their actual identity. The
 representation is evaluated once, only after ruling out inline receivers.
 
-The [driver's source compilation path](../../crates/jet-driver/src/Driver/mod.rs)
-lowers the checked bundle once and passes its selected artifact to the back
-end: the Jet code generator, or the transitional
-[`MIRRust`](../../crates/jet-codegen/src/Codegen/MIRRust.rs) emission. These are
-consumers of one checked meaning, not separate front ends.
+The [driver's source compilation path](../../Compiler/JetDriver/Source/Driver/Pipeline.jet)
+builds the IR from the checked bundle once and passes its selected artifact to
+the native back end (`Compiler/JetIR` selection, `Compiler/JetBackend` image).
+Every consumer reads one checked meaning; none is a separate front end.
 
 Trait declaration projection retains the original checked Prelude owner for an
 implicit default error domain. Its effective return type and failure carrier
@@ -373,23 +612,19 @@ identity rather than accepting matching display names.
 
 ### Native representation boundaries
 
-The [Jet x86-64 selector](../../Compiler/JetBackend/Source/X64/Select.jet)
+The [Jet x86-64 selector](../../Compiler/JetIR/Source/X64Select.jet)
 normalizes incoming and returned `Bool` values from the low System V ABI byte;
 unspecified upper register or stack-slot bits must not change Jet truth.
 Image origins preserve the linker's relative alignment: relocatable read-only
 sections advertise and use their maximum datum alignment, and static ELF text
 starts after header padding to the maximum function/data alignment.
-The [ABI fixtures](../../Compiler/JetBackend/Tests/AbiFixtures.jet) exercise
-dirty upper bits and aligned data addresses, including a system-linked object.
 
 Hosted program and runtime objects share the [section-table writer](../../Compiler/JetBackend/Source/Image/Object.jet).
 Its content rows also determine section names, offsets, links and header count;
 DWARF and unwind relocations use those same indices. Each compiled function has
 one matching debug row, including handwritten entry adapters. Lifecycle exports
 append priority-named init/fini sections and their relocations, with equal
-priorities ordered by export symbol. The [object regression adapter](../../Compiler/JetBackend/Tests/test-runtime-object.mjs)
-emits current program/runtime objects and independently checks their ELF tables;
-it does not use a historical compiler as an oracle.
+priorities ordered by export symbol.
 
 Runtime fixed-width negation uses `wrapping(I64{0} - value)`: the per-operation
 overflow opt-in admits a binary integer operation (D-NUMOPS1), not unary
@@ -398,7 +633,7 @@ ordinary errno and magnitude conversions without broadening arithmetic policy.
 
 Runtime representation is not the checked field type. In particular, default
 `Err.cause` value and place reads use the shared
-[cause projection](../../crates/jet-foundation/src/Outcome.rs) to expose
+cause projection to expose
 `Err?`, not the runtime's boxed recursive storage. The
 [default error example](../../Examples/features/errors/default_err_value.jet)
 covers present, absent and repeated cause reads.
@@ -422,11 +657,11 @@ view to those parameters still materializes it.
 ### One reflection model
 
 `StructDef::reflection_fields()` is the declaration-owned stored-field-row source for
-comptime `TypeInfo`, runtime `reflect.of`, TIR evaluation, and generated field
-projection. Comptime reads facts from those rows; runtime wraps each projected
-field in a typed `Value` and adds display text only as a view. Every back end
-and the transitional evaluator therefore preserve the same names, types, and nested value
-shape instead of maintaining a second string-field model.
+comptime `TypeInfo`, runtime `reflect.of`, and generated field projection.
+Comptime reads facts from those rows; runtime wraps each projected field in a
+typed `Value` and adds display text only as a view. Every back end therefore
+preserves the same names, types, and nested value shape instead of maintaining
+a second string-field model.
 
 The runtime-retained subset is exact: stored field names and order, typed field
 values, the leaf type name, the canonical type path, and display text. Runtime
@@ -447,52 +682,51 @@ each gate-bearing fact once with its source span and provenance. The CLI command
 that ledger. Its JSON form has the same data; it does not create an inspection
 ledger of its own.
 
-The structure plane ends before TIR. AOT emit, the interpreter, and
-web codegen receive the checked program after structure facts and gates have
-been erased. This preserves I2 and I3 (back ends and engines do not decide policy),
+The structure plane ends before the IR builder, which receives the checked
+program after structure facts and gates have been erased. This preserves I2
+and I3 (back ends and engines do not decide policy),
 I8 (one registry and one gate mechanism), and I9 (one meaning across applicable
 tiers). The decision adds no user-typeable spelling and no lint plane or
 external analyzer.
 
-## Compiler crate map
+## Compiler package map
 
-D-COMPILERSEAMS1/2 define workspace seam crates. The root `jet` crate is a
-facade and binary host over these internal APIs.
+D-COMPILERSEAMS1/2 define the compiler's seams as packages under `Compiler/`.
+`Compiler/JetCli` builds the `jet` executable over their APIs; Jetpack's
+packages live under `Jetpack/`.
 
-| Crate | Job | May emit diagnostics? |
-|-------|-----|-----------------------|
-| `jet-foundation` | shared leaf types and policies: `Syntax`, `Diagnostics`, `AST`, `Span`, `Generics`, `JitBackend`, stable exit codes, std-only JSON | renders diagnostics |
-| `jet-lexer` | text to tokens | yes (E00xx) |
-| `jet-parser` | tokens to AST, formatter | yes (E00xx) |
-| `jet-comptime` | comptime values and interpreter support | no user-facing surface by itself |
-| `jet-sema` | all semantic checks, collects all front-end diagnostics | yes (E01xx+) |
-| `jet-codegen` | checked bundle to TIR and canonical MIR; transitional Rust emission and MIR evaluation | **never** |
-| `jet-pkg-model` | **L1**, shared read-only package/config data model: `package.jet` manifest parsing and the optional leading inline `package { … }` carrier, lock, hangar store listing, ref classification, FFI bridge construction, inline script deps, §6 structural `Merge`, the `BuildRecipe` data shape, plus pure effect-budget/lint-policy computation over that data (no network/provider/shell) | package/FFI diagnostics |
-| `jet-env-model` | **L2**, shared pure environment plan model: `ModuleEval` and its typed plan outputs (`EnvPlan`/`SystemPlan`/`ImagePlan`/`FleetPlan`/…). Depends on `jet-pkg-model` (L1) + `jet-codegen`; no provider/store/network/shell | plan-evaluation diagnostics |
-| `jetpack` | **L3**, package manager engine: provider/network/shell realization, JetOS, CLI — depends on `jet-pkg-model` (L1) for read-only data and `jet-env-model` (L2) for the plan model it realizes; native Nix cache admission uses the inward `jet-net` streaming transport | package/JetOS diagnostics |
-| `jetos` | `jetos` binary front door for OS workflows; dispatches into `jetpack`'s `os` verb, whose JetOS realization lives in `jetpack::JetOS` | package/JetOS diagnostics (via `jetpack`) |
-| `jet-driver` | front-end orchestration and compile outputs; depends on `jet-pkg-model` (never `jetpack`'s engine) for manifest/lock/FFI preparation; owns the shared pure dev/debug interpreter-boundary classifier, fix application, and compatible budget-report projection | front-end and interpreter-boundary diagnostics |
-| `jet-queries` | std-only demand cache for incremental inputs and derived query values | no |
-| `jet-semindex` | stable semantic index over checked programs for tooling | no new diagnostics |
-| `jet-impact` | blast-radius reports over `jet-semindex` | no |
-| `jet-repl` | complete interactive shell product over `jet-driver`, `jet-semindex`, and leaf policy | no new diagnostics |
-| `jet-debug` | complete source debugger and DAP product over `jet-driver` plus leaf JSON/exit policy | debugger diagnostics only |
-| `jet-cli` | canonical command/flag registry, completions, man page, diagnostic reference, and hybrid help UI over leaf syntax policy plus `jet-repl` terminal/symbol support | renders existing diagnostics only |
-| `jet-canvas` | Canvas browser HTML/JS projection assets over leaf JSON escaping | no |
-| `jet-devserver` | watch/HTTP/static policy, Canvas routes and semantic/edit service, browser-client leases, terminal/browser status parity, live reload, and atomic last-good artifact swapping; the root retains only the R5 compile/rustc executor and process watch loop | renders existing diagnostics only |
-| `jet-rt` | runtime helpers shared by generated code and the evaluator | no |
-| `jet-evalhost` | ambient host services for the in-process evaluator (comptime, Canvas dev host), Source bootstrap execution transport, migrations and the job selector | no |
-| `jet-net` | runtime/comptime fetch helper with TLS diagnostics | yes, for fetch failures |
+| Package | Job | May emit diagnostics? |
+|---------|-----|-----------------------|
+| `JetFoundation` | shared leaf types and policies: syntax registry (`Data/Syntax`), `Diagnostics`, `AST`, checked-program `Facts`, `Span`, target machines, stable exit codes, JSON | renders diagnostics |
+| `JetLexer` | text to tokens | yes (E00xx) |
+| `JetParser` | tokens to AST, formatter | yes (E00xx) |
+| `JetSema` | all semantic checks, collects all front-end diagnostics | yes (E01xx+) |
+| `JetIR` | the slot IR: builder from the checked program, optimizer, x86-64 selection | **never** |
+| `JetBackend` | native code generation, object and image writing | **never** (a failure is an ICE, R5) |
+| `JetEval` | in-process evaluator for comptime and the REPL | no user-facing surface by itself |
+| `JetRuntime` | the native runtime linked into every program | no |
+| `JetDriver` | front-end orchestration and compile outputs; depends on `Jetpack/PackageModel` (never Jetpack's engine) for manifest/lock/FFI preparation | front-end and interpreter-boundary diagnostics |
+| `JetBuildSession` | build sessions over the driver | no new diagnostics |
+| `JetQueries` | demand cache for incremental inputs and derived query values | no |
+| `JetSemIndex` | stable semantic index over checked programs for tooling | no new diagnostics |
+| `JetImpact` | blast-radius reports over `JetSemIndex` | no |
+| `JetRepl` | interactive shell and notebook over `JetDriver`, `JetSemIndex`, and leaf policy | no new diagnostics |
+| `JetDebug` | source debugger and DAP over `JetDriver` plus leaf JSON/exit policy | debugger diagnostics only |
+| `JetLSP` | language server over the same front end (D-LSP1) | renders existing diagnostics only |
+| `JetCli` | the `jet` executable: canonical command/flag registry, completions, man page, diagnostic reference, and help UI | renders existing diagnostics only |
+| `JetCanvas` | Canvas browser HTML/JS projection assets | no |
+| `JetDevserver` | watch/HTTP/static policy, Canvas routes and semantic/edit service, browser-client leases, terminal/browser status parity, live reload, and atomic last-good artifact swapping | renders existing diagnostics only |
+| `Jetpack/PackageModel` | **L1**, shared read-only package/config data model: `package.jet` manifests and the inline `package { … }` carrier, lock, store listing, ref classification, FFI bridge construction, structural `Merge`, the `BuildRecipe` data shape, plus pure effect-budget/lint-policy computation (no network/provider/shell) | package/FFI diagnostics |
+| `Jetpack/EnvModel` | **L2**, shared pure environment plan model: `ModuleEval` and its typed plan outputs; no provider/store/network/shell | plan-evaluation diagnostics |
+| Jetpack engine (`Jetpack/CLI`, `Store`, `Environment`, …) | **L3**, package manager engine: provider/network/shell realization, JetOS, CLI; reads L1 data and realizes L2 plans | package/JetOS diagnostics |
 
-### Retained compiler host boundary
+### Compiler implementation boundary
 
-The compiler port changes the implementation language of policy, not the
-ownership of language meaning. A Jet pass must replace its Rust policy at the
-existing seam, with the same inputs, identities, ordering and diagnostics.
-It must not introduce a third front end, a second query verdict, or a new
-execution lens. The Rust host is a bootstrap seed: it is frozen once the Jet
-compiler ships with parity and removed once the native back end is complete
-(D-EXEC2, owner directive 19).
+The compiler is written in Jet. The Rust host that bootstrapped it is gone
+(D-EXEC2, owner directive 19); its last implementation is frozen on the `rust`
+branch. A pass changes at its existing seam, with the same inputs, identities,
+ordering and diagnostics. It must not introduce a third front end, a second
+query verdict, or a new execution lens.
 
 The compiler-owned native child has a bounded transport contract:
 `JetDriverExecutionHost.execute` and its CLI implementation declare
@@ -558,19 +792,15 @@ an omitted argument can be inferred from the expected success value, including
 through the constructor's failure rail. Context never replaces an explicitly
 written element type.
 
-The compiler and runtime aggregates have separate explicit source inventories:
-[`Compiler/Bootstrap/sources.list`](../../Compiler/Bootstrap/sources.list) and
-[`Compiler/JetRuntime/sources.list`](../../Compiler/JetRuntime/sources.list).
-Compiler assembly excludes runtime-only units, while a source listed in both
-(for example `OS/Linux.jet` or `ErrLayout.jet`) is deliberately shared. An
-unlisted compiler source still fails assembly. Partial compiler trees must carry
-the runtime manifest and MIR observation generator metadata as well as their
-own source manifest. The
-[`bootstrap source inventory guard`](../../Tools/agent/bootstrap-source-inventory.test.mjs)
-checks that boundary; the
-[`MIR schema grammar guard`](../../Compiler/JetBackend/Tests/mir-schema.test.mjs)
-keeps observation aligned with public-by-default declarations and private fields.
-The compiler's private `Core/build` kernel uses the same declared enum payload
+The compiler is the package graph `jet build Compiler` builds: the CLI package
+and every package its `package.jet` path dependencies reach, each package's
+members found by the driver's source walk. The runtime aggregate keeps its own
+explicit inventory,
+[`Compiler/JetRuntime/sources.list`](../../Compiler/JetRuntime/sources.list):
+the compiler leaves runtime-only units out, while a source that is both a
+compiler package member and listed there (for example `OS/Linux.jet` or
+`ErrLayout.jet`) is deliberately shared.
+The compiler's private `Core/Build` kernel uses the same declared enum payload
 labels and write-access calls as ordinary Jet. Stable plan keys use integer
 quotients and sorted, collected map keys. Legacy declaration validation copies
 its transactional trial before opening the final state write window.
@@ -581,7 +811,7 @@ native carrier, or retired helper; source receiver impls may still extend native
 nominals. Generated Core tables preserve that distinction rather than inventing
 source shadows for compiler-provided operations.
 
-Source-owned Core value hooks are also checked capability providers. MIR resolves
+Source-owned Core value hooks are also checked capability providers. The IR builder resolves
 each private hook by the exact nominal identity and read-access method, never a
 short name. Native emission selects those manual Clone/Debug implementations
 before considering structural derives; enclosing rows inherit their real
@@ -620,10 +850,10 @@ its receiver.
 
 Precise operations may also be synthesized after authored-call reachability,
 including implicit `Int / Int` arithmetic inside a string interpolation.
-Bootstrap lowering roots the exact canonical Core/math helpers registered for
+Bootstrap lowering roots the exact canonical Core/Math helpers registered for
 those operations, and their checked callee closure, even without an explicit
 Fraction type in the caller. An arbitrary private helper sharing a prefix is
-not a provider. The Jet MIR reachability walk retains the same registered
+not a provider. The IR builder's reachability walk retains the same registered
 helpers from its checked `PreciseBuiltin` operations.
 
 Collection callbacks returning `T Never!` select the non-fallible operation:
@@ -640,9 +870,7 @@ elements. Last uses the ordinary checked List-get clone and optional carrier.
 Fallible reserve retains the original header and element owners on failure and
 consults the allocation fault rail exactly once for each nonnegative request,
 including requests satisfied by existing capacity. Its error is the canonical
-`AllocError`, not a backend-private layout. The pack-free `--list-routes`
-fixture mode executes production lowering and LIR lint for all four witnesses;
-native image execution remains part of the admitted-pack fixture census.
+`AllocError`, not a backend-private layout.
 
 Runtime-route rejection queries borrow their handle-table rows. Repeated
 queries, including short-circuit expressions, must not consume that table.
@@ -671,27 +899,7 @@ producer, never a fall-through to the callable's end. A checked scalar head
 (`F32{x}`, `U8{y}`) lowers to the conversion its source and target name:
 integer-to-float widening, checked `Int`-to-fixed, `F64`-to-`F32` narrowing,
 or the fixed-width carrier cast. Native Core enums such as `EnvError` are
-cataloged enum leaves, so their checked MIR owner rows always exist.
-
-Only `JET_DEBUG_LOWER_ALL=1` enables the bootstrap Rust emission census.
-Each selected type, trait, implementation, top-level function, constant,
-foreign item, callback/export provider, C-ABI physical type or signature
-discovery, or synthesized support batch is an attempted item. A failure
-records its kind, stable ID, name, source byte span,
-and original reason; absent source spans are `0..0`. Names and reasons use
-JSON string escaping. Failed item text becomes a clearly marked, escaped
-line comment rather than invented code, and later items are attempted.
-Failed traits and impls also own their skipped method bodies.
-The final `emission failures N of M` counts failed and attempted items,
-independently of MIR's function census. Collect mode also writes a separate
-diagnostic-only partial Rust monolith: `JET_DUMP_RUST` selects its path,
-otherwise a process/sequence-named file in the temporary directory is used.
-The log announces its JSON-quoted path. Its banner says it is not an admitted
-build artifact; it lets the same failing emission run type-check all surviving
-items with `rustc --emit=metadata` without claiming complete emission proof.
-Any emission failure still discards the normal returned Rust fragment and
-propagates the first original panic through the existing ICE/exit-101 path.
-Normal emission remains fail-fast and never writes that diagnostic file.
+cataloged enum leaves, so their checked owner rows always exist.
 
 A bare registered Core-carrier trait reference resolves through that carrier's
 one source-module owner and the exact trait/method identity. It cannot match an
@@ -750,16 +958,12 @@ Core or String APIs or eliminate the copy made by String.bytes(). Declaring thes
 values and including their source files does not activate the host startup path
 or qualify a native supplier.
 
-The bootstrap host initializes every `JetDriverCompileRequest` field, including
-declared defaults, through checked field-symbol metadata. Compilation keeps
-`comptime_stop_points` false: compile-time code runs in the in-process
-evaluator, which refuses stop points, until native in-memory O0 lands. The focused
-[`bootstrap host field guard`](../../Tools/agent/bootstrap-host-fields.test.mjs)
-checks that new request fields have both an emitted initializer row and its
-metadata binding before the generated producer is built.
+Compilation keeps the `JetDriverCompileRequest` field `comptime_stop_points`
+false: compile-time code runs in the in-process evaluator, which refuses stop
+points, until native in-memory O0 lands.
 
 Build-plan queries move their invocation request into one query and return that
-same owner beside the query facts. Staged MIR checks borrow it; only the small
+same owner beside the query facts. Staged checks borrow it; only the small
 entry/selection strings and scalar capture settings are saved and restored,
 including on an escaped stage error. The final checked bundle removes only the
 generated-source and output-selection metadata temporarily added by that query.
@@ -771,79 +975,22 @@ borrows the provider under its cell's read guard and keeps the existing exact
 effect row, destination checks and explicit missing-provider refusals.
 
 The native Shared constructor adopts a fresh or explicitly moved payload under
-the canonical MIR ownership-transfer rules. It must not clone an opaque
+the canonical ownership-transfer rules. It must not clone an opaque
 provider merely to put it into the cell; copying a handle never copies that
 provider. Borrowed copyable payloads retain their checked materialization.
 
-The table describes crossing responsibilities, not a list of completed ports.
-Its source links own the executable contracts. The proof-home references are
-Tower acceptance boundaries, not evidence supplied by this inventory.
-
-| Crossing and executable contract | Policy that can live in Jet | Responsibility retained by the Rust host |
-|---|---|---|
-| [Foundation types and syntax](../../crates/jet-foundation/src/lib.rs) → [lexer](../../crates/jet-lexer/src/Lexer/Terminators.rs) | Token/terminator decisions over source facts; foundation and syntax proof home #808 | Source bytes, byte-span validity, raw token payloads and the existing Unicode primitive; no reinterpretation of Jet records as Rust memory |
-| [Parser](../../crates/jet-parser/src/lib.rs) → canonical AST | Grammar and AST construction, #809 | Own and marshal token/AST storage at a private crossing; preserve original spans and diagnostic records rather than parse a second time for the host |
-| [Sema](../../crates/jet-sema/src/lib.rs) → checked bundle/effect facts | Types, effects, ownership and semantic verdicts, #810 | Keep the checked bundle and its facts together; unchecked or mismatched facts must not enter lowering |
-| [TIR/MIR lowering](../../crates/jet-codegen/src/Codegen/TIR/mod.rs) → [MIR consumers](../../crates/jet-foundation/src/JitBackend.rs) | Semantic lowering over already-checked facts, #811 | Canonical MIR validation, artifact selection and retained Rust emission/evaluator adapters; backends cannot invent a source-level rule |
-| [Comptime ambient bridge](../../crates/jet-comptime/src/Comptime/AmbientRuntime.rs) ↔ [compiler Core evaluator](../../Source/Compiler.rs) | Compiler queries and compile-time/build policy, #812 | Scoped evaluator installation, host capabilities and value/error transport; compiler authority is not a process-global callback |
-| [Loader and Driver](../../crates/jet-driver/src/Driver/mod.rs) ↔ [root entry](../../Source/lib.rs) | Front-end orchestration, #813 | Filesystem/process access, worker lifetime and stack, toolchain invocation and panic transport; no Cargo dependency from an inward seam back to the facade |
-| [Query service](../../crates/jet-driver/src/QueryService.rs) ↔ [query cache](../../crates/jet-queries/src/lib.rs) | Tooling projections of the checked result, #813 | Revision/dependency invalidation and cache storage; cached values retain the checked bundle and effect-fact association, not an independent analysis |
-| [Diagnostics](../../crates/jet-foundation/src/Diagnostics.rs) ↔ [CLI](../../crates/jet-cli/src/lib.rs) | Diagnostic construction and user-facing compiler/tooling policy, #813 | Render registered diagnostics and apply existing exit policy; an internal backend failure must not become a new user-language diagnostic |
-
-Compiler seams depend inward through local path dependencies, as in the
-[driver manifest](../../crates/jet-driver/Cargo.toml); the
-[foundation](../../crates/jet-foundation/Cargo.toml) and
-[query cache](../../crates/jet-queries/Cargo.toml) are leaves. A private Jet pass
-does not justify a new external compiler dependency or a cycle back to the
-root. The [evaluator host dependencies](../../crates/jet-evalhost/Cargo.toml)
-have their own approved bridge contracts; they are not permission to add
-dependencies to compiler policy.
-
-#### Scoped entry and failure containment
-
-[`Source/lib.rs::run_compiler_work`](../../Source/lib.rs) installs the root's
-`Compiler::eval_core_call_with_type` callback around work. The inward
-[`jet_driver::run_compiler_work`](../../crates/jet-driver/src/lib.rs) carries
-the ambient callbacks and scoped terminator driver onto the
-[`CompilerStack`](../../crates/jet-foundation/src/CompilerStack.rs) worker and
-installs the MIR evaluator. Nested entries reuse that worker. The root callback
-provides the read-only `core.compiler` queries and checked `core.build` queries;
-the lower worker primitive alone does not install this root-owned authority.
-`Comptime::with_ambient` restores the previous callbacks on return and unwind.
-Nothing in this crossing grants runtime code a compile-time compiler API.
-
-Checked comptime fragments retain per-context nominal/import facts, but share
-each reachable module's immutable function-body projection. The Rust host's
-`checked_comptime_nominals_for_modules` opens one loaded-module memo scope
-around the whole context collection, both before body checking and after its
-checked items are published. Opening the scope only for later body evaluation
-would already have copied every reachable AST once per context. The scope
-closes before module-state mutation, so sharing does not retain stale rows.
-Build-time constant evaluation and ordinary registration do not retain deep
-module-item snapshots concurrently. Checker rows initially contain metadata
-only; their item snapshots are materialized for every module after the
-comptime rows are released, before registration can inspect sibling nominals.
+Compiler packages depend inward through their `package.jet` path dependencies:
+`JetFoundation` and `JetQueries` are leaves, and the front end (`JetLexer`,
+`JetParser`, `JetSema`) does not depend on driver, codegen or tooling
+packages. A private Jet pass does not justify a new external compiler
+dependency or a cycle back to `JetCli`.
 
 Typed error propagation retains the canonical conversion symbol recorded by
-Sema. TIR materializes checked conversion bodies from imported modules as well
-as the entry module; repeated shipped conversions share one source/target
-definition. Dropping an imported conversion creates a missing checked MIR
-target, an internal compiler failure rather than a source diagnostic.
-
-The MIR interpreter indexes nominal declarations once per immutable program
-and memoizes source-value-hook reachability by operation and instantiated type.
-Shared nominal subgraphs are visited once within a query. Complete negative
-queries can publish their visited rows; a successful cyclic query publishes
-only its root, because an intermediate negative may depend on an ancestor
-cycle cut. Generic cycles with changing arguments retain the nominal recursion
-guard without publishing context-dependent intermediate negatives.
-
-The transitional MIR evaluator's field writeback mirrors field reads through
-successful carriers: it updates the struct payload and preserves the carrier,
-including nested field writes on an owned local moved from a parameter.
-Runtime aggregates retain field IDs and their runtime payload representation;
-materialized `Present` values retain their wrapper. Failed results do not
-expose success fields, and opaque native handles remain non-projectable.
+Sema. The IR builder materializes checked conversion bodies from imported
+modules as well as the entry module; repeated shipped conversions share one
+source/target definition. Dropping an imported conversion creates a missing
+checked conversion target, an internal compiler failure rather than a source
+diagnostic.
 
 Lowering shares a checked nominal-key index across the frozen program's
 functions and lambdas. Exact-key ambiguity, anonymous-union carriers, Core
@@ -859,57 +1006,16 @@ markers and target-bearing marker groups with the registered marker parser.
 It does not construct an AST for function, module or type bodies; the actual
 front end remains responsible for their diagnostics.
 
-This is a scoped Rust call boundary, not a C ABI or a promise about Rust
-`Vec`, enum or pointer layout. The worker transports a Rust panic payload
-unchanged back to its Rust caller; it does not relabel an ICE as a successful
-pass. A new private compiler adapter must preserve this containment rule.
+#### Terminator pass
 
-The host, pass and private value contract are source-coupled in one build, with
-no independently versioned public ABI or compatibility negotiation; changing
-the crossing migrates both sides and its behavioral witness in one cutover.
-
-The behavioral boundary witness is
-[`selfhost_host_boundary`](../../tests/selfhost_host_boundary.rs): real
-ambient parser queries return parsed items and malformed-source diagnostics,
-nested calls reuse the worker, and unwinding preserves the payload without
-leaking compiler authority. Bypassing the root wrapper while retaining only
-the lower Driver worker removes the evaluator and makes that witness fail.
-This tests the host boundary, not a Jet implementation of a compiler pass.
-
-#### Terminator-pass crossing
-
-The staged replacement in
 [`Lexer/Terminators.jet`](../../Compiler/JetLexer/Source/Lexer/Terminators.jet)
 owns `insert_terminators` policy and all its decision helpers (Tower #3581).
-The [Rust adapter](../../crates/jet-lexer/src/Lexer/Terminators.rs) is reached
-by `lex`, `lex_config` and `lex_generated` after raw scanning.
-Its private input is source bytes plus
-exhaustive indexed raw-token facts, including the existing Unicode-uppercase
-primitive. Its output is ordered `InsertSemi`/`SplitHeader` events. Jet owns
-the insertion and split-header decisions; the host validates bounds/order,
-moves the original payload-bearing tokens and formats the existing diagnostic.
-The raw scanner and parser are outside that pass. Keeping payload ownership
-on the host avoids encoding a second token model or copying compiler objects
-across a supposed stable ABI.
-The Jet lexer's terminator pass moves the `LexedTokens` payload carrier.
+Its input is source bytes plus exhaustive indexed raw-token facts, including
+the Unicode-uppercase primitive. Its output is ordered
+`InsertSemi`/`SplitHeader` events. The raw scanner and parser are outside that
+pass. The terminator pass moves the `LexedTokens` payload carrier.
 `lex_with_terminators` attaches its scanner's `TokenTables` to produce `Lexed`;
 the terminator pass does not create or copy those tables.
-
-The private bootstrap adapter in
-[`selfhost_terminators`](../../tests/selfhost_terminators.rs) produces checked,
-optimized MIR through the Rust reference before installing the candidate.
-Inside that explicit scope, the actual Loader/parser/compiler path invokes
-`evaluate_mir_function_with_config`; the Driver and Loader carry the callback
-across their worker-thread boundaries and restore the previous driver on
-return or unwind. Evaluator, callback or event-ABI failure is an internal
-failure, never permission to retry through Rust policy.
-
-Outside the scope, the default compiler still uses the retained Rust reference.
-This is a Jet-authored terminator pass interpreted by the retained host, not a
-complete Jet lexer, a default CLI cutover, or a self-hosting/performance claim.
-The bounded manifest, own-source comparison, six mutation witnesses and
-same-pass AOT/default/interpreter/awaited-web golden live with that adapter;
-their executable results, not this explanation, establish parity.
 
 The subsequent self-host proof homes remain separate obligations: #814 is the
 pinned stage0-to-stage1 build, #815 is byte-identical stage1-to-stage2 output,
@@ -917,15 +1023,11 @@ and #816 is the Jet-built compiler full-suite closeout. The policy-family
 homes #808–#813 and the boundary inventory #218 cannot substitute for those
 bootstrap and fixed-point proofs.
 
-The fixed-point output includes both the emitted source and its embedded
-compiler MIR image. [`BuildIdentity`](../../Compiler/Bootstrap/BuildIdentity.rs)
-separates `JET_COMPILER_SOURCE_ID` (canonical compiler source bytes, independent
-of the backend build profile) from `JET_COMPILER_BUILD_ID` (source bytes plus
-build facts and, for generated compiler binaries, generated inputs). The
-private HostFacts supplied to JetDriver use the source identity so changing
-the compiler binary's optimization profile does not change compiler-authored
-MIR. Build receipts and physical artifact/cache identities retain the build
-identity; source identity is not proof that two compiler binaries are identical.
+The fixed point is byte identity of the compiler executable: the compiler
+that the stage-2 compiler builds equals the stage-2 compiler. A chain stage's
+compiler identity (`JET_COMPILER_IDENTITY`, read in
+[`Request.jet`](../../Compiler/JetCli/Source/Cli/Request.jet)) keys its receipts;
+an identity string is not proof that two compiler binaries are identical.
 
 Behavioral parity between any two compiler binaries (#670) is a separate,
 reusable proof: [`Tools/agent/compiler-diff.mjs`](../../Tools/agent/compiler-diff.mjs)
@@ -946,7 +1048,7 @@ claims behavior only; artifact identity stays with
 
 ### Machine-wide artifact store
 
-D-BUILD-STORE1=E defines `crates/jet-store` as the one machine-wide artifact
+D-BUILD-STORE1=E defines [`Jetpack/Store/Source/ArtifactStore`](../../Jetpack/Store/Source/ArtifactStore/) as the one machine-wide artifact
 store for compiler and runtime reuse. It owns content-addressed blobs, action
 records, ThinLTO entries,
 checksummed last-use metadata, atomic publication, digest verification, live
@@ -1072,8 +1174,8 @@ snapshots):
   that form). Crossing sites are recorded for the upgrade report.
 
 `freeze` does not add a backend policy rail. Its `Frozen` flow fact is lowered
-to the existing owned clone/materialization TIR nodes, so AOT, the
-interpreter, and any applicable web path consume one checked meaning. The
+to the existing owned clone/materialization in the checked program, so every
+back end consumes one checked meaning. The
 REPL remains an interpreter-only surface and rejects task execution with E1802;
 pure `freeze(x)` evaluation is still a value operation.
 
@@ -1097,18 +1199,17 @@ vetted runtime internal must also uphold its boundary contract.
 
 ### Private traced collector substrate
 
-D-DEP-GC1=A has one dependency-free collector implementation in
-`crates/jet-rt/src/__gc.rs`. `jet-rt` exposes that module directly to the in-process evaluator;
-codegen embeds the exact same source inside private `jet_gc` for AOT. Generated
-startup initializes trace output even when no allocation is promoted. The
-collector has no source-facing wrapper, constructor, or module; only sema-proven
+D-DEP-GC1=A has one dependency-free collector. Its Rust-tier implementation
+left with Rust; the native runtime does not carry it yet, and the Web target's
+routes are in [`Gc.js`](../../Compiler/Prelude/Web/Core/Gc.js). The collector
+has no source-facing wrapper, constructor, or module; only sema-proven
 automatic promotions call its traced allocation entry.
 
 Sema closes each escaping payload over the promoted bindings stored inside it.
 Codegen translates those proven source relations to collector object IDs at
 creation and updates the same graph on bare assignments and mutations. Cycles
 therefore live in the collector-owned graph without changing Jet's bare value
-syntax. Collector failures cross one E2110 runtime boundary; generated Rust
+syntax. Collector failures cross one E2110 runtime boundary; generated code
 never exposes `Fault` through `expect` or a raw panic.
 
 Object identities are monotonic and never reused. RAII root handles keep an
@@ -1130,38 +1231,22 @@ or impossible state fails closed through the private `Fault` result.
 This substrate defines no Jet source type. D-OPTGC1's shared policy ladder owns
 scoped promotion; #659 owns tracing and reports.
 
-I6 is machine-checked by `tests/truthfulness.rs`: the root compiler and named
-compiler seams may use only workspace path dependencies. Runtime/tool siblings
-such as `jet-net` are separate workspace members with their own
-owner-approved dependency posture; that does not permit an external dependency
-to leak into a checked compiler manifest.
+I6: compiler packages under `Compiler/` depend only on repository path
+packages. Runtime and tool packages keep their own owner-approved dependency
+posture; that does not permit an external dependency to leak into a compiler
+package.
 
-
-`tests/workspace_crates.rs` pins the dependency direction. Compiler front-end crates
-may not grow back-edges into driver/codegen clients; tooling and runtime crates
-stay outside the compiler seam unless their dependency row changes here and in
-the test. The package, environment-plan, and JetOS layers are described in the
-crate map above. On the transitional Rust path (until the Jet back end covers
-every program, D-EXEC2), the root binary owns native build execution:
-`Source/CmdCompile.rs` invokes rustc, classifies linker/tool failures, renders
-the I2 ICE banner, and links prepared FFI artifacts.
-D-ARCH-SOURCE1=A also puts command and interactive product ownership behind
-real workspace seams. `crates/jet-cli` owns the command/flag registry,
-completion/man generation, diagnostic reference, and hybrid help UI;
-`crates/jet-repl` owns the REPL and terminal implementation;
-`crates/jet-debug` owns the source debugger, native adapter, line map, and DAP
-server. The root host wires command execution and re-exports `jet::CLI`,
-`jet::Help`, `jet::Explain`, `jet::REPL`, and `jet::Debug`. These products
-depend inward on compiler seams. Their shared
-interpreter eligibility walk lives in `jet-driver`; stable exit codes and the
-std-only JSON codec live in dependency-free `jet-foundation`. Neither product
-depends on the root package, splices root source with `include!`, or owns rustc
-invocation and ICE classification; on the transitional Rust path R5 remains in
-`Source/CmdCompile.rs`.
-`crates/jet-devserver` likewise owns the web server, Canvas routes, status
-surfaces, client leases, live reload, and last-good swap. `CmdCompile.rs`
-drives its build-state API while retaining the transitional compile/codegen/rustc
-execution; there is no callback or dependency edge from the seam back to the root.
+Compiler front-end packages may not grow back-edges into driver/codegen
+clients; tooling and runtime packages stay outside the compiler seam unless
+their dependency row changes here. The package, environment-plan, and JetOS
+layers are described in the package map above. D-ARCH-SOURCE1=A puts command
+and interactive product ownership behind real package seams. `JetCli` owns the
+command/flag registry, completion/man generation, diagnostic reference, and
+help UI; `JetRepl` owns the REPL and terminal implementation; `JetDebug` owns
+the source debugger, native adapter, line map, and DAP server; `JetDevserver`
+owns the web server, Canvas routes, status surfaces, client leases, live
+reload, and last-good swap. These products depend inward on compiler packages.
+Stable exit codes and the JSON codec live in dependency-free `JetFoundation`.
 
 ### Browser automation protocol core
 
@@ -1226,16 +1311,17 @@ audit receipt — the same redacted fact stream as the trace, plus `isolated` an
 `BrowserContext.isolated()` is always true for BiDi user contexts;
 `user_hash()` exposes only a hashed context id for correlation.
 
-The AOT emitter and default development tier use the same `Browser.rs`,
-strict-JSON behavior, and extracted RFC6455 client source. Browser session
-handles are thread-confined. Programs that use them select the canonical TIR
+The AOT back end and default development tier use the same
+[`Browser.jet`](../../Core/Web/Browser.jet), strict-JSON behavior, and
+extracted RFC6455 client source. Browser session
+handles are thread-confined. Programs that use them select the canonical
 tier-0 network host; the tier trace reports that choice and no AOT fallback is
 hidden behind `jet dev`.
 
 Browser automation coverage includes provision, lifecycle, locators, network,
 artifacts, checked CDP, and privacy, with examples under
 `Examples/features/net/browser_*.jet` and hostile proofs in
-`tests/browser_bidi.rs` / `tests/browser_lock.rs`. Live browser binaries remain
+`tests/cases/browser_bidi/` / `tests/cases/browser_lock/`. Live browser binaries remain
 host-supplied; the product path always speaks BiDi over the existing WebSocket
 transport.
 
@@ -1261,10 +1347,11 @@ and boot, lifecycle, I9 execution meaning and matched-performance gates remain
 obligations of the concrete implementation cards, not evidence supplied by this
 policy.
 
-`crates/jet-pkg-model/src/FFI.rs` (or `CFFI.rs` for C) prepares a generated,
-content-addressed bridge. Its generated `Cargo.toml` owns foreign dependencies,
-and `FfiLink` records the crate, rlib, selected-target runtime directory, and
-host proc-macro directory. Inline `#FFI(c|cpp|asm)` bodies use the same bridge
+[`Jetpack/PackageModel/Source/Foreign/Bridge`](../../Jetpack/PackageModel/Source/Foreign/Bridge/)
+prepares a generated, content-addressed bridge; a user Rust bridge's generated
+`Cargo.toml` owns its foreign dependencies
+([`RustBridge`](../../Jetpack/Integrations/Source/Foreign/RustBridge/)).
+Inline `#FFI(c|cpp|asm)` bodies use the same bridge
 and include their checked signature, target, raw body, and schema in the cache
 identity. C/C++ wrappers and asm lower only after sema proves their boundary
 contracts.
@@ -1275,7 +1362,7 @@ the closure contains C++. Shared globals may resolve from a sibling body;
 references missing from the full closure still fail. Only a successful proof
 is archived. The cache identity includes the build script itself, so changing
 this proof invalidates stale bridge artifacts without changing the ABI schema.
-`Compiler/JetCodegen/Tests/run-inline-foreign-link.mjs` executes all three
+`Compiler/JetIR/Tests/run-inline-foreign-link.mjs` executes all three
 production build-script templates, including shared mutex state, mixed C/C++
 state and rejection of an actually missing definition.
 
@@ -1292,7 +1379,7 @@ The Jet Driver retains checked user-Rust signature facts in source order,
 without retaining default-expression ASTs in helper realization.
 Its pure planner emits the manifest, safe wrappers, descriptor slot adapters,
 and ordered length-delimited bridge key; the CLI realizes that helper before
-native lowering and attaches its exact static archive to the checked MIR link
+native lowering and attaches its exact static archive to the checked link
 unit without rewriting the foreign symbol; native lowering calls the helper's
 `jet_ffi_<declared name>_cabi` descriptor adapter. The 24-byte slot ABI,
 caught-panic markers, UTF-8 String lengths, and returned-buffer free operation
@@ -1349,10 +1436,17 @@ their declared widths and floating-point register classes, and writable scalar
 arguments use C-width temporary slots followed by native writeback.
 
 SQLite uses the sanctioned 3.45.0 amalgamation from `libsqlite3-sys` 0.28.0 in
-`Core/vendor/sqlite3`, with its license and the seed's bundled feature flags,
+`Core/Vendor/Sqlite3`, with its license and the seed's bundled feature flags,
 never a system SQLite. The upstream `sqlite3.c` SHA-256 is
 `7956a38f236a6be6c0bb30c96ba4f85f19e5a69f6beb6d2c62c9d246972a6775`.
-Packaging ships those sources beside the runtime. User foreign
+Core's vendored C (`Core/Vendor/Sqlite3`, `Core/Vendor/Mbedtls`) is compiled
+once when the toolchain is packaged: `prebuild-runtime.mjs` builds each library
+under the native C policy and installs `jet-runtime/<key>/foreign/<lib>/lib<lib>.a`
+(with its LICENSE and VERSION) beside the pack. The archive digests are part of
+the runtime key and the vendored sources, flags and C compiler identity part of
+the pack recipe. A Core `c.<lib>` import links that archive, so neither jet's
+self-compile nor a `core.db` or `core.net.tls` program needs a C compiler; only
+C a package declares itself is compiled at link time. User foreign
 dependencies are program link inputs; a runtime pack includes only the foreign
 closure reached by its own declared sources, keeping the shared pack independent
 of user projects.
@@ -1375,22 +1469,21 @@ one packed byte buffer (empty sentinel 1), `__bytes_unpack` makes an independent
 owned copy, and `__bytes_free` releases the pack once with its original length.
 C String parameters instead use per-call NUL-terminated copies; their String
 results are copied before those temporaries are released.
-`Core/mem/mem.jet` keeps private-loan and packed-byte tests in the trusted
+`Core/Mem/Mem.jet` keeps private-loan and packed-byte tests in the trusted
 embedded Core lane; ordinary source cannot spell reserved `__` identifiers.
-`Compiler/JetCli/Tests/run-c-ffi.mjs` covers declared-source scalar ABI and the
+`Compiler/JetCli/Tests/RunCFfi.jet` covers declared-source scalar ABI and the
 bundled SQLite open/prepare/select/finalize path against exact tier-parity output.
 
-`jet inspect bind cpp` is owned by `CppBind.rs`: clang AST discovery produces a
-deterministic Jet module and C-linkage shim/archive under
-`.jet/bindings/cpp/`, with provenance for the declaration, toolchain, target,
-generated sources, and schema. `FfiLink` is threaded through
-`crates/jet-driver/src/Driver/mod.rs` and `CompileOutput`; the native link edge
-is `Source/CmdCompile.rs::build`.
+`jet inspect bind cpp` is owned by
+[`Cpp.jet`](../../Jetpack/Integrations/Source/Foreign/Binders/Cpp.jet): clang
+AST discovery produces a deterministic Jet module and C-linkage shim/archive
+under `.jet/bindings/cpp/`, with provenance for the declaration, toolchain,
+target, generated sources, and schema.
 
 Generated wrappers keep ownership, errors, layout, callbacks, and task crossings
 explicit. Safe Jet cannot acquire an ungated unsafe operation through a bridge.
 Executable bridge proof is in `tests/cffi.rs`, the scoped C++ system proof, and
-`tests/golden.rs`.
+the feature goldens run by `Tools/testkit/Golden.jet`.
 
 ### Jet as guest: embedding contract
 
@@ -1405,8 +1498,7 @@ the host must obey that declaration rather than infer ownership from a header.
 The native Library surface maps each parameter and the result of an export,
 independently, to one C primitive: `Int` (`int64_t`), `Float` (`double`),
 `Bool`, `Text` (JetText), `I8`–`I64`, `U8`–`U64`, or `F32`; a unit result is
-`void`. The Jet compiler implements this law; the frozen Rust compiler still
-admits only one homogeneous `Int`, `Float`, `Bool`, or `Text` shape.
+`void`. The Jet compiler implements this law.
 Function-valued exports and a Library-wide `init`/`shutdown` protocol are not
 part of this surface. The loader owns mapping and unmapping. The host owns
 process signals, thread creation, and isolation for a failing call.
@@ -1521,11 +1613,10 @@ items checked and reused, and records decoded. Timings are observations
 under the compiler-speed method below.
 
 **Editor tooling.** D-LSP1 makes editor tooling a client of the same front
-end, not a second checker. `crates/jet-queries` is a std-only demand cache
+end, not a second checker. `Compiler/JetQueries` is a demand cache
 for file inputs and derived query values. The bounded loader prepares open or
 discovered sources with at most eight workers and consumes them in stable
-order. The Rust checker's in-process item cache (`IncrementalSemaCache`)
-serves editor sessions. The server records cancellation concurrently with
+order. The server records cancellation concurrently with
 request execution and replaces a cancelled in-flight result with JSON-RPC
 `-32800`. D-LSP2 requires every advertised LSP feature to have named coverage
 in `tests/lsp.rs`; the server must not advertise speculative features.
@@ -1544,8 +1635,8 @@ The timing path uses `PhaseTiming` and the typed `CompilerProbe` provider. A
 checked corpus pins source and expected-output digests. A measurement records
 compiler/Core identities, target, profile, backend, linker, host, cache state,
 fixed warmups and samples, process CPU-time variance, peak RSS, and phase totals. The
-`dev` and optimized `release` profiles both invoke the transitional rustc AOT
-build (D-EXEC2=A) until the Jet back end covers every program. Clean, no-change, and representative-
+`dev` and optimized `release` profiles both build through the native back
+end (D-EXEC2=A). Clean, no-change, and representative-
 edit runs are distinct. Partial timing, changed inputs, incompatible
 identities, nondeterminism, pathological inputs, and unstable samples are
 unavailable/failure; they cannot be made green by changing the workload or
@@ -1583,8 +1674,8 @@ for reads, writes, takes, and returned values.
 
 ## Application plugin host boundary (D-PLUGIN1 / D-PLUGIN-EXPORT1 / D-DEP-WASM1)
 
-An application `target: sandbox` is a WASM Component Model guest in the
-existing `jet-pkg-model::Prelude::Plugin` host. The native library boundary is
+An application sandbox is a prebuilt WASM Component Model guest loaded by the
+`core.plugin` host; the compiler has no sandbox build target. The native library boundary is
 different: a native library is trusted code and has no Wasmtime sandbox or
 implicit capability reduction. Both surfaces keep the same checked export
 shape, but only the Component path makes an isolation guarantee.
@@ -1615,10 +1706,10 @@ frames. A failed load leaves a handle whose first call returns the load fault
 with export `load`, without stopping unrelated host work. A propagated failure
 records the host call site in the ordinary failure journey.
 
-The authority, guest-failure, and resource-budget witnesses run on all hosted
-execution routes: default `jet run`, forced `--interpret`, and release/AOT
-`--release`. Each route is required; unavailable release tooling is not a
-passing or skipped authority witness.
+The authority, guest-failure, and resource-budget witnesses run on both hosted
+execution routes: default `jet run` and release/AOT `--release`. Each route is
+required; unavailable release tooling is not a passing or skipped authority
+witness.
 
 Handles and Wasmtime stores are owner-thread state. Cross-thread use and
 unload of an active call are rejected by the existing handle boundary, and
@@ -1642,12 +1733,10 @@ send it to an isolated WASM Component Model guest. The guest returns structured
 findings and edit proposals; the host validates every response and remains the
 only semantic authority (I2/I3).
 
-The boundary owner is `crates/jet-pkg-model::CompilerExtension`, which owns the
-versioned snapshot, response validation, and lifecycle. Its
-`Prelude/CompilerExtension.rs` substrate compiles only into the `jetpack`
-binary, using the same wasmtime Component Model pin as application
-`core.plugin` (`WASMTIME_CRATE_SPEC` / D-DEP-WASM1). Ordinary `jet` processes
-never link or initialize Wasmtime.
+The boundary owner is
+[`CompilerExtension.jet`](../../Jetpack/Integrations/Source/CompilerExtension/CompilerExtension.jet),
+which owns the versioned snapshot, response validation, and lifecycle.
+Ordinary `jet` processes never link or initialize Wasmtime.
 
 The WIT world is `compiler-extension-v1`
 (`package jet:compiler-extension@0.1.0`, export `analyze`), distinct from
@@ -1708,10 +1797,10 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   Stderr is capped at `64 KiB`; the outer process deadline is `5000ms` and
   kills a stuck/crashed host. Nonzero exit, malformed output, timeout, and
   missing sibling all map to Jet-owned E1402.
-- **E2E harness (C4 technical):** `crates/jetpack-bin/tests/compiler_extension_e2e.rs`
+- **E2E harness (C4 technical):** `Jetpack/CLI/Tests/CompilerExtensionHost.jet`
   loads real `compiler-extension-v1` component fixtures under
-  `crates/jet-pkg-model/fixtures/compiler_extension/` through the same
-  `Prelude/CompilerExtension.rs` host. Proves one custom-lint finding
+  `tests/fixtures/compiler_extension/` through the compiled compiler-extension
+  host. Proves one custom-lint finding
   round-trip, fail-closed crash / malformed / incompatible / fuel-exhaust /
   WASI-random-import guests, wall-clock epoch `timeout_ms` interrupt, and
   byte-identical re-analyze of a pure guest (Jet-owned `E:` wires; no rustc
@@ -1735,25 +1824,23 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   `#Unsafe("reason") fn` contract, both
   unlocked by `use core.mem` — plus vetted std/mem internals. Ordinary,
   memory-safe Jet still emits **zero** `unsafe`; the boundary is enforced by
-  sema (E3101/E3102/E3103) and tested in `tests/golden.rs` (every example but
-  the audited `48_lowlevel` must contain no `unsafe`, and even there every
-  `unsafe` must be a gated `unsafe {`/`unsafe fn` form). Codegen stays dumb:
-  it lowers an already-checked `#Unsafe` region straight to a Rust `unsafe`
-  region and makes no safety decision of its own.
+  sema (E3101/E3102/E3103), and every gated region is counted, positioned and
+  reasoned in the unsafe ratchet (`Tools/agent/check-unsafe-ratchet.mjs`).
+  Codegen stays dumb: it lowers an already-checked `#Unsafe` region straight to
+  an unsafe region and makes no safety decision of its own.
 - **R2 — Sema is the gatekeeper.** Any program that passes sema must lower to
-  MIR that every back end accepts. New language features land as: spec →
+  IR that every back end accepts. New language features land as: spec →
   parser → sema checks → codegen → tests, in that order.
 - **R3 — Single surface.** User-typeable strings live in
-  `crates/jet-foundation/src/Syntax.rs` only. Renaming a keyword starts there;
+  the syntax registry under `Compiler/JetFoundation/Data/Syntax/` only. Renaming a keyword starts there;
   parser/formatter tests, generated grammars, snapshots, and docs must move with
   it.
 - **R4 — Spans everywhere.** Any AST node an error might point at carries
   its span. Adding a node without a span is a review-blocker.
-- **R5 — ICE policy.** A back end failing on checked MIR is an internal
+- **R5 — ICE policy.** A back end failing on the checked program is an internal
   compiler error: it prints the internal-compiler-error banner, exits 101, and
-  is treated as a P0 bug. On the transitional Rust path that banner is owned by
-  `Source/CmdCompile.rs` and rustc's stderr is shown only inside it. A missing
-  linker or C library is a tool/user diagnostic, not an ICE.
+  is treated as a P0 bug. A missing linker or C library is a tool/user
+  diagnostic, not an ICE.
 - **R6 — Name mangling.** In generated Rust (the transitional path), user
   identifiers are emitted as `__jet_<name>` (`main` excepted) so user code can
   never collide with Rust keywords, macros, or std items. The sema-owned `NameLedger` is the single source for
@@ -1765,74 +1852,41 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   reserved catalog name even when the namespace import uses a different local
   alias. Rust emission consumes that ledger edge, rather than resolving the
   catalog again. The Jet driver carries the same canonical target through
-  `SemaRegistrationImportEdge` and lowers checked member identities into MIR.
-- **R7 — Backend is swappable.** Every back end reads the same MIR
-  (D-TIER-FORM1): the Jet code generator in `Compiler/JetBackend`, and, until
-  it covers every program, the transitional Rust emission in
-  `crates/jet-codegen/src/` with rustc invocation and ICE classification in
-  `Source/CmdCompile.rs`. The lexer, parser, and sema do not depend on any back
-  end; replacing one changes only the codegen and binary-build edges.
-- **R8 — Small, self-contained binaries.** While the transitional Rust path
-  builds programs, `Source/CmdCompile.rs` calls `rustc` directly with explicit profile flags and
-  `strip=symbols` for optimized AOT: the default `jet build` profile is
-  opt-level 2 with `lto=off`, and release profiles add ThinLTO across the
-  program and its runtime rlib. Its shared native-linker
-  selector honors explicit `RUSTC_LINKER`/`CC`, then chooses mold or lld through
-  the C driver before falling back to the system linker. The selected
-  driver/backend identity is part of native cache and timing evidence.
-  It links one content-addressed `jet_runtime` rlib built from the fixed
-  runtime block plus the runtime-part-selected Core block (the two blocks
-  reference each other, so they are one crate), so rustc does not re-check or
-  re-codegen the embedded runtime for each program; generic runtime items stay
-  in the rlib and are monomorphized in the program crate. The rlib key covers
-  the exact emitted/exported source (which carries the edition, OS, test
-  harness, runtime parts and devtools policy, never user source), rustc
-  identity (plus the host CPU's `--print cfg` features when the flags select
-  `target-cpu=native`), target and profile flags, and explicit profile
-  environment, so all programs with the same build facts share one rlib.
-  Packaging (`Tools/packaging/prebuild-runtime.sh`, run by the flake) ships the
-  default and release rlibs for the default build facts as
-  `jet-runtime/<key>/libjet_runtime.rlib` beside the `jet` executable; a key
-  found there is linked directly, so a fresh machine with an empty store
-  compiles only the user crate. Other keys build on demand into the store.
-  The final native key
-  carries the same relevant runtime/Core digests; it does not read or hash the
-  compiler binary. A verified warm object is reused; a malformed, corrupt, or
-  rejected object falls back to the complete inline program, and the shared
-  cache remains bounded. LTO profiles (release ThinLTO, `--small` fat LTO)
-  still optimize the reachable runtime bitcode at the final link; the rlib
-  removes the per-program front-end and runtime codegen cost.
-  The linker keeps only what the program uses ("only link what's needed"). The
-  output is one self-contained native binary. While programs link Rust's std,
-  it adds a baseline (low-hundreds-of-KB) that leaves with Rust (directive 19).
-  A size-minimal profile (`opt-level="z"`, possibly `panic=abort`) is
-  decision S15 and is available as `jet build --small`; the default leans toward
-  speed.
+  `SemaRegistrationImportEdge` and lowers checked member identities into the IR.
+- **R7 — Backend is swappable.** Every back end reads the same IR
+  (D-TIER-FORM1): today that is the native code generator (`Compiler/JetIR`
+  selection, `Compiler/JetBackend` image). The lexer, parser, and
+  sema do not depend on any back end; replacing one changes only the codegen
+  and binary-build edges.
+- **R8 — Small, self-contained binaries.** The native back end links each
+  program's objects against the content-addressed native runtime pack
+  (`jet-runtime/<key>/jet_runtime.pack.o`, see the Pipeline section); no Rust
+  runtime, Rust std or rustc participates. The linker keeps only what the
+  program uses ("only link what's needed"). The output is one self-contained
+  native binary. A size-minimal profile is decision S15; the Jet CLI does not
+  yet accept `jet build --small` (`JET_CLI_BUILD_UNPORTED_FLAGS` in
+  `Compiler/JetCli/Source/Cli/Front.jet`). The default leans toward speed.
 - **R9 — A file is a complete program.** `jet run foo.jet` compiles and
   runs a single file with no manifest, no project folder, and no config.
   Inside a package, a bare `jet run` resolves the same complete program from
   `run.jet`, `src/run.jet`, or `<package>.jet`; `jet dev`, `jet check`,
   `jet build`, and `jet test` share that resolver, while an explicit source
   path stays explicit.
-  The generated `.rs` file remains a complete standalone program for audits.
-  Native builds can split its marked fixed-runtime block into Jet's hidden
-  cached `rlib`, then compile and link the generated user program. This process
-  does not create or require a Cargo project for user code. Users may supply
-  package structure when their package contract requires it; the compiler does
-  not impose one.
+  The build does not create or require a project for user code. Users may
+  supply package structure when their package contract requires it; the
+  compiler does not impose one.
 - **R10 — Std is pay-for-what-you-call.** Core standard-library modules are
   compiler-known namespaces, but importing them is free. Sema records the
   core helpers that a checked program can call, and codegen emits only those
   helper templates. A program that imports every core module but calls none
   should stay in hello-world size territory.
 
-  Embedded Core runtime templates under `crates/jet-codegen/src/Prelude/` (and,
-  for parts a comptime-reachable seam crate must also call, `crates/jet-foundation`
-  prelude modules) are the canonical source for compiler-known Core behavior;
-  rebuild `jet` before smoke-testing any change because `include_str!` snapshots
-  them into the binary. A source-owned Core module such as `core.archive` is
+  Compiler-known Core behavior lives in the source-owned Core modules under
+  `Core/` and the prelude the compiler embeds from `Compiler/Prelude/` (through
+  the generated registry files); rebuild `jet` before smoke-testing a change to
+  an embedded part. A source-owned Core module such as `core.archive` is
   compiled from its canonical `.jet` module through the ordinary frontend; it
-  does not keep a copied fallback template or a hidden Rust semantic bridge.
+  does not keep a copied fallback template or a hidden semantic bridge.
 - **R11 — Generated code enters the front end.** Every typed build-time
   generation step — a derive body, a comptime splice, or a metaprogram — parses
   its item template with the ordinary grammar, fills typed holes at expansion,
@@ -1848,19 +1902,18 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   follows this shape for derives and build-time steps (S56 user derives,
   comptime).
   (D-META-CODE1/D-META-BODY1 supersede the old source-reparse route.)
-- **R12 — One semantic core, every engine a dumb exhaustive consumer.** TIR is
-  the single structured IR after sema. Every executable variant carries semantic
-  facts (places, types, patterns, method identities) — never pre-rendered Rust
+- **R12 — One semantic core, every engine a dumb exhaustive consumer.** The
+  checked program is the single structured form after sema, and the IR is built
+  only from it. Every executable variant carries semantic
+  facts (places, types, patterns, method identities) — never pre-rendered target
   source text. **Core/runtime meaning lives only in the embedded Prelude parts /
-  CoreLib** (`crates/jet-foundation` prelude modules and
-  `crates/jet-codegen/src/Prelude/**`; a part sits in `jet-foundation` when a
-  comptime-reachable seam crate must call it, per I6). Rust spelling lives
-  only in the AOT emit
-  layer as calls into that Prelude. Interpreter ambient bindings are the same
+  CoreLib** (`Compiler/Prelude/`, `Core/` and `Compiler/JetRuntime/`). Target
+  spelling lives only in each back end as calls into that Prelude. Interpreter
+  ambient bindings are the same
   kind of layer: marshal args, call the identical `jet_*` / Prelude function
   AOT would call, marshal results. They must not fork defaults, CORS/policy
-  checks, error meaning, or other Core behavior. Every engine (Rust emitter, the
-  canonical interpreter, and web when the surface applies) must consume TIR
+  checks, error meaning, or other Core behavior. Every engine (the native back
+  end, the canonical interpreter, and web when the surface applies) must consume the IR
   exhaustively with real lowering that preserves one meaning (AGENTS.md
   invariant I9 / `claim.tier-parity`). Every supported construct needs that
   lowering; an unsupported fall-through is a compiler defect, not a closed
@@ -1870,7 +1923,7 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   2026-07-24; I9 owner-directed 2026-07-29; dumb-adapter rule owner-directed
   2026-07-29; D-EXEC2=A retired the Cranelift JIT.)
 
-  Rust and Jet sema preserve borrowed pattern payload aliases in both ordinary
+  Sema preserves borrowed pattern payload aliases in both ordinary
   `if` conditions and dispatch tables, while owned or taken subjects keep their
   payload ownership. Payload-derived views retain the matched parameter's
   projection origin; local owners and consumed parameters still cannot export
@@ -1885,11 +1938,12 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   A descriptor record or fieldless source struct is not a substitute for an
   opaque native handle. Native optional payloads are converted once at the Core
   call boundary to Jet's owned absence carrier; callers must not reinterpret that
-  carrier as a Rust `Option`. Scheduler-gated host steps remain in the local
+  carrier as a foreign optional. Scheduler-gated host steps remain in the local
   runtime rather than being dispatched into a crypto-only FFI bridge.
 
   The comptime Core registry uses the following namespace classification. The
-  table covers the `core_calls.rs` namespaces.
+  table covers the namespaces of the generated
+  [`CoreCallRows.jet`](../../Compiler/JetFoundation/Source/Registry/CoreCallRows.jet).
   `Kernel` means that comptime marshals `CtValue` into the exact Prelude part.
   `Intrinsic` means that the evaluator implements a language value operation,
   not a second Core policy. `Host` means that the call crosses an effect or
@@ -1899,62 +1953,62 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | Namespace | Class | Semantic home |
   |---|---|---|
   | `core.archive` | Host | Package bridge; comptime rejects unsupported host work. |
-  | `core.args` | Kernel | `Prelude/CoreLib/Top/Args.rs`; `ArgsLite` marshals values. |
-  | `core.auth` | Kernel | `AuthSession.rs` and `CryptoEntropy.rs`; `AuthLite` marshals values. |
+  | `core.args` | Kernel | `Core/Args/Args.jet`; comptime marshals values. |
+  | `core.auth` | Kernel | `Core/Auth/Auth.jet` and the crypto entropy kernel; comptime marshals values. |
   | `core.archive.gzip` | Host | Native compression boundary; comptime rejects unavailable calls. |
   | `core.archive.zstd` | Host | Native compression boundary; comptime rejects unavailable calls. |
-  | `core.compute` | Kernel | `Prelude/CoreLib/Top/Compute.rs`; `ComputeLite` marshals values. |
-  | `core.crypto` | Kernel | `Prelude/CoreLib/Top/CryptoEntropy.rs` and the shared crypto Prelude own typed crypto rules; every engine marshals values. |
+  | `core.compute` | Kernel | `Core/Compute/Compute.jet`; comptime marshals values. |
+  | `core.crypto` | Kernel | `Core/Crypto/` owns typed crypto rules; every engine marshals values. |
   | `core.crypto.expert` | Kernel | The audited raw-byte route shares the crypto Prelude symbols; the `#Unsafe` gate is policy, not a second engine implementation. |
-  | `core.data` | Kernel | `DataStats.rs` and `DataPlot.rs`; comptime marshals values. |
-  | `core.data line renderers need groups` | Kernel | `DataPlot.rs` owns line-renderer argument validation. |
-  | `core.data line renderers need options` | Kernel | `DataPlot.rs` owns line-renderer option validation. |
-  | `core.data: argument must be `[DataGroup]`` | Kernel | `DataPlot.rs` owns `DataGroup` validation. |
-  | `core.data: argument must be `[Float]`` | Kernel | `DataStats.rs` owns numeric input validation. |
-  | `core.email` | Kernel | `Prelude/CoreLib/Email.rs`; `EmailAdapter` marshals values. |
+  | `core.data` | Kernel | `Core/Math/Stats.jet` and `Core/Data/Plot.jet`; comptime marshals values. |
+  | `core.data line renderers need groups` | Kernel | `Core/Data/Plot.jet` owns line-renderer argument validation. |
+  | `core.data line renderers need options` | Kernel | `Core/Data/Plot.jet` owns line-renderer option validation. |
+  | `core.data: argument must be `[DataGroup]`` | Kernel | `Core/Data/Plot.jet` owns `DataGroup` validation. |
+  | `core.data: argument must be `[Float]`` | Kernel | `Core/Math/Stats.jet` owns numeric input validation. |
+  | `core.email` | Kernel | `Core/Email/Email.jet`; comptime marshals values. |
   | `core.encoding` | Kernel | Encoding dispatch and value validation use the shared encoding Prelude/Core kernels. |
   | `core.encoding.jsonl.to_string: expected a list` | Kernel | JSONL value validation stays with the encoding kernel. |
-  | `core.encoding.base32` | Kernel | `Prelude/Core/EncodingBase.rs` owns encode; `BaseEncodingDispatch.rs` owns edition-aware decode; comptime marshals values. |
-  | `core.encoding.base64` | Kernel | `Prelude/Core/EncodingBase.rs` owns encode; `BaseEncodingDispatch.rs` owns edition-aware decode; comptime marshals values. |
+  | `core.encoding.base32` | Kernel | `Core/Encoding/Base32.jet` owns encode and edition-aware decode; comptime marshals values. |
+  | `core.encoding.base64` | Kernel | `Core/Encoding/Base64.jet` owns encode and edition-aware decode; comptime marshals values. |
   | `core.encoding.cbor` | Kernel | Typed CBOR marshals through the shared Dyn/codec kernel. |
   | `core.encoding.csv` | Kernel | Typed CSV marshals through the shared codec kernel. |
-  | `core.encoding.hex` | Kernel | `Prelude/Core/EncodingBase.rs` owns encode/decode; comptime marshals values. |
+  | `core.encoding.hex` | Kernel | `Core/Encoding/Hex.jet` owns encode/decode; comptime marshals values. |
   | `core.encoding.json` | Kernel | Typed JSON uses the shared Dyn/codec kernel. |
   | `core.encoding.jsonl` | Kernel | JSONL uses the shared typed JSON kernel. |
   | `core.encoding.toml` | Kernel | Typed TOML uses the shared codec kernel. |
-  | `core.encoding.xml` | Kernel | `jet-foundation/XmlKernel.rs`; AOT embeds it and comptime marshals `Dyn` values. |
+  | `core.encoding.xml` | Kernel | `Core/Encoding/XmlKernel.jet`; comptime marshals `Dyn` values. |
   | `core.encoding.yaml` | Kernel | Typed YAML uses the shared codec kernel. |
   | `core.builtin` | Intrinsic | String length and map projections marshal through the shared builtin value operations. |
   | `core.sys` | Host | Explicit comptime environment authority and policy boundary. |
   | `core.event` | Host | Callback registration crosses the runtime closure boundary; the host only marshals shared event values. |
   | `core.files` | Host | Explicit comptime filesystem authority and policy boundary. |
-  | `core.text.fmt` | Kernel | `Prelude/Core/Fmt.rs` owns number, decimal, grouping, byte, duration, ordinal, plural, and padding rules; adapters marshal values. |
-  | `core.term` | Host | I/O authority boundary; pure progress values use `Core/Progress.rs`. |
+  | `core.text.fmt` | Kernel | `Core/Text/Fmt.jet` owns number, decimal, grouping, byte, duration, ordinal, plural, and padding rules; adapters marshal values. |
+  | `core.term` | Host | I/O authority boundary (`Core/Term/Term.jet`). |
   | `core.math.abs: non-numeric argument` | Mixed | Numeric argument validation stays with the shared math rules. |
-  | `core.math` | Mixed | `MathLibPure.rs` owns residual integer, gcd/lcm, factorial, and erf-family rules; true numeric intrinsics remain intrinsic. |
-  | `core.net.mime` | Kernel | `Prelude/CoreLib/JetStd/Mime.rs`; comptime marshals values. |
-  | `core.net` | Mixed | `Prelude/Core/NetPure.rs` owns IP/socket parse and field rules; sockets and DNS stay authority-bound. |
-  | `Path` / `core.files` | Kernel + Host | `Prelude/Core/Path.rs` owns lexical join/parent/extension/stem/normalize rules; filesystem work stays host-bound and accepts `String | Path`. |
+  | `core.math` | Mixed | `Core/Math/` owns residual integer, gcd/lcm, factorial, and erf-family rules; true numeric intrinsics remain intrinsic. |
+  | `core.net.mime` | Kernel | `Core/Net/Mime.jet`; comptime marshals values. |
+  | `core.net` | Mixed | `Core/Net/Ip.jet` owns IP/socket parse and field rules; sockets and DNS stay authority-bound. |
+  | `Path` / `core.files` | Kernel + Host | `Core/Files/Path.jet` owns lexical join/parent/extension/stem/normalize rules; filesystem work stays host-bound and accepts `String | Path`. |
   | `core.perf` | Host | Runtime performance authority; comptime rejects unavailable calls. |
   | `core.process` | Host | Process authority boundary and REPL host adapter. |
-  | `core.math.random` | Mixed | `Prelude/Core/SeededRandom.rs` owns deterministic seeded RNG rules; ambient RNG stays host-bound. |
+  | `core.math.random` | Mixed | `Core/Math/Random.jet` owns deterministic seeded RNG rules; ambient RNG stays host-bound. |
   | `core.game.raylib` | Intrinsic | `CtValue` constructor only; runtime graphics work stays host-bound. |
-  | `core.reactive.loadable` | Kernel | `Prelude/Core/Loadable.rs` owns tag/presence rules; typed payloads and handles remain adapters. |
+  | `core.reactive.loadable` | Kernel | `Core/Reactive/Loadable.jet` owns tag/presence rules; typed payloads and handles remain adapters. |
   | `core.reflect` | Intrinsic | Compiler-owned type metadata construction. |
   | `core.regex` | Kernel | The generated regex engine exposes one shared matching and validation kernel. |
-  | `core.units` | Kernel | `Prelude/Core/Measurement.rs`; all tiers marshal `(value, uncertainty)`. |
-  | `core.service` | Kernel | Typed tree declarations and the shipped mailbox, lifecycle, authenticated directory/routing, handoff, rollback, partition, reconciliation, and typed observability paths use `ServiceAuthority.rs` and `Services.rs`; structured export uses the existing `core.log` sink, and `ServicesLite` marshals the service calls. |
-  | `core.data.sketch.cms` | Jet | `Core/data/sketch/cms.jet` owns seeded hash selection, unit saturation and additive source merge over plain value storage. |
-  | `core.data.sketch.hll` | Jet | `Core/data/sketch/hll.jet` owns the 256-register estimator over plain value storage; seeded FNV lives in `Core/data/sketch.jet`. |
-  | `core.data.sketch.reservoir` | Jet | `Core/data/sketch/reservoir.jet` owns the shipped xorshift seed, Algorithm R and slot order over plain value storage. |
-  | `core.data.sketch.tdigest` | Jet | `Core/data/sketch/tdigest.jet` owns unit-weight insertion, compression and step quantiles over plain value centroid storage. |
-  | `core.compute.solve` | Kernel | `Prelude/CoreLib/Top/Solver.rs`; comptime marshals state. |
-  | `core.sync` | Kernel | `Prelude/CoreLib/Top/Sync.rs`; `SyncLite` marshals values. |
+  | `core.units` | Kernel | `Core/Units/Units.jet`; all tiers marshal `(value, uncertainty)`. |
+  | `core.service` | Kernel | Typed tree declarations and the shipped mailbox, lifecycle, authenticated directory/routing, handoff, rollback, partition, reconciliation, and typed observability paths use `Core/Service/Service.jet`; structured export uses the existing `core.log` sink. |
+  | `core.data.sketch.cms` | Jet | `Core/Data/Sketch/Cms.jet` owns seeded hash selection, unit saturation and additive source merge over plain value storage. |
+  | `core.data.sketch.hll` | Jet | `Core/Data/Sketch/Hll.jet` owns the 256-register estimator over plain value storage; seeded FNV lives in `Core/Data/Sketch.jet`. |
+  | `core.data.sketch.reservoir` | Jet | `Core/Data/Sketch/Reservoir.jet` owns the shipped xorshift seed, Algorithm R and slot order over plain value storage. |
+  | `core.data.sketch.tdigest` | Jet | `Core/Data/Sketch/Tdigest.jet` owns unit-weight insertion, compression and step quantiles over plain value centroid storage. |
+  | `core.compute.solve` | Kernel | `Core/Compute/Solve.jet`; comptime marshals state. |
+  | `core.sync` | Kernel | `Core/Sync/Sync.jet`; comptime marshals values. |
   | `core.testing` | Mixed | Shared deterministic helpers call Prelude; harness and host work stay adapters. |
-  | `core.text` | Kernel | `Prelude/CoreLib/Top/Text.rs` plus Unicode tables owns text/Unicode rules, including scalar names; `TextLite` marshals values. |
+  | `core.text` | Kernel | `Core/Text/` plus the Unicode tables under `Core/Text/Runtime/` owns text/Unicode rules, including scalar names; comptime marshals values. |
   | `core.text.ends_any: non-list argument` | Kernel | Text argument validation stays with the text kernel. |
   | `core.text.starts_any: non-list argument` | Kernel | Text argument validation stays with the text kernel. |
-  | `core.time` | Mixed | `Prelude/Core/Time.rs` owns civil, duration, and zone rules; clock reads remain host effects and every engine marshals the same Prelude symbols. |
+  | `core.time` | Mixed | `Core/Time/` owns civil, duration, and zone rules; clock reads remain host effects and every engine marshals the same Prelude symbols. |
   | `core.net.tls` | Host | Native TLS boundary; comptime rejects unavailable calls. |
   | `core.ui` | Intrinsic | `CtValue` constructors and field projection only. |
   | `core.ui.box() needs UINode children` | Intrinsic | UI node-shape validation stays with the intrinsic constructor path. |
@@ -1963,15 +2017,15 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.net.url.data: first argument must be a Mime` | Kernel | URL data validation stays with the shared URL/MIME kernel. |
   | `core.net.url.data: mime.sub` | Kernel | URL MIME field validation stays with the shared kernel. |
   | `core.net.url.data: mime.top` | Kernel | URL MIME field validation stays with the shared kernel. |
-  | `core.net.url` | Kernel | `Prelude/CoreLib/JetStd/UrlMime.rs` owns URL parse/render/percent rules; `UrlLite` marshals `JetURL`. |
+  | `core.net.url` | Kernel | `Core/Net/Url.jet` owns URL parse/render/percent rules; comptime marshals values. |
 
 - **R13 — An abort is never an outcome.** A host seam that runs inside an
-  execution engine converts a Rust panic into the tier's **existing** status
+  execution engine converts a runtime panic into the tier's **existing** status
   channel before returning: a cancel or a blown deadline lands on the
   pending-interrupt channel `#Shield` already uses, a program stop renders
   through the shared report boundary and exits `70`, and an engine defect takes
   the branded ICE rail and exits `101` (I2). No second error channel is
-  introduced (I8), and `Prelude/Scheduler.rs` stays the only place a caught
+  introduced (I8), and the runtime [`Scheduler.jet`](../../Compiler/JetRuntime/Source/Scheduler.jet) stays the only place a caught
   payload is read as a status (I9). A process signal handler must be
   panic-free: its whole body notes one relaxed atomic.
 
@@ -1989,7 +2043,7 @@ contract — codes are never repurposed.
 | `1`   | An unhandled entry error report, or a driver-reported user problem such as a failed `check`, missing file, or failed `test`. | fallible-by-default entry boundary or driver |
 | `2`   | Usage error: unknown subcommand (E2101), unknown/ambiguous flag (E2102), or a missing required argument. | driver |
 | `70`  | A built program breached or stopped at runtime (`panic`/`require`, `#Todo`, a raw Prelude panic, S36, or another program-side fault). Every producer enters the shared report and cleanup boundary; `jet run` forwards the result. | the user's program / Prelude boundary |
-| `101` | Jet's own compiler defect (I2/R5): rustc rejected generated code or the compiler reached an impossible state. Never a user-program exit. | compiler |
+| `101` | Jet's own compiler defect (I2/R5): a back end failed on the checked program or the compiler reached an impossible state. Never a user-program exit. | compiler |
 
 The final boundary keeps the same report and changes only its transport.
 Native command-line output prints the frame and uses code 1. A Web target
@@ -2013,9 +2067,11 @@ deterministic, ANSI-free bytes — scripts never parse escape sequences.
 
 The canonical [Jet testkit](../../Tools/testkit/run.jet) owns diagnostic
 snapshots (`ui`), executable examples and runtime fixtures (`golden`), and CLI
-scenarios (`cases`). Run it with `JET=/absolute/path/to/jet node Tools/testkit/run.mjs`;
-the launcher builds testkit in disk-backed external scratch, never the checkout.
-`tests/golden.mjs` selects the golden suite. O0, O1 and O2 compare the real exit
+scenarios (`cases`). Its package test entry is the fixture gate:
+`JET=/absolute/path/to/jet jet test Tools/testkit` runs each suite as one test
+(`suite golden`, `suite ui`, `suite cases`; a positional filter selects them),
+and a failing test names every failing case. `TESTKIT_ARGS` passes testkit flags such as `--filter` or
+`--tier`; scratch stays disk-backed outside the checkout. O0, O1 and O2 compare the real exit
 and exact streams; diagnostic text remains a product surface, not a blessable
 implementation accident.
 
@@ -2023,7 +2079,7 @@ implementation accident.
 suite inventory and source-pinned compiler registries, collecting independent
 failures. Missing, refused, skipped and non-PASS verdicts do not close the gate.
 It uses an already-built compiler, never Cargo to build Jet's compiler/tests,
-and never a Rust MIR producer. `Tools/agent/native-suite.mjs` exposes the shared,
+and never a Rust producer. `Tools/agent/native-suite.mjs` exposes the shared,
 pure post-closeout command descriptors and strict receipt validator; it has no
 CLI or closeout-bypass flag. Under owner directive #59, native cutover executes
 those runners directly and reports formal qualification/closeout separately as

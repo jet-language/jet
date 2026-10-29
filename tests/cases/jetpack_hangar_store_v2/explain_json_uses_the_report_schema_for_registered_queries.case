@@ -1,0 +1,19 @@
+# tests/jetpack_hangar_store_v2.rs::explain_json_uses_the_report_schema_for_registered_queries at tests/jetpack_hangar_store_v2.rs:1682; hand-port
+# Claim: explain @ --json for jet and for jetpack exits 0 with schema jet.report/v1, moment tool, action explain, status ok, and no schema_version (rs:1684-1709)
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet explain @ --json --no-color
+exit: 0 # rs:1686-1709 jet
+stdout: ~ "\"schema\":\"jet.report/v1\"" # rs:1686-1709 jet
+stdout: ~ "\"moment\":\"tool\"" # rs:1686-1709 jet
+stdout: ~ "\"action\":\"explain\"" # rs:1686-1709 jet
+stdout: ~ "\"status\":\"ok\"" # rs:1686-1709 jet
+stderr: !~ "schema_version" # rs:1686-1709 jet
+step: jetpack explain @ --json --no-color
+exit: 0 # rs:1686-1709 jetpack
+stdout: ~ "\"schema\":\"jet.report/v1\"" # rs:1686-1709 jetpack
+stdout: ~ "\"moment\":\"tool\"" # rs:1686-1709 jetpack
+stdout: ~ "\"action\":\"explain\"" # rs:1686-1709 jetpack
+stdout: ~ "\"status\":\"ok\"" # rs:1686-1709 jetpack
+stderr: !~ "schema_version" # rs:1686-1709 jetpack

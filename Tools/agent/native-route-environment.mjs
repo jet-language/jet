@@ -35,13 +35,13 @@ export function nativeEnvironmentRoutes(routes, exports, signatures) {
 
 export function emitNativeEnvironmentRoutes(rows) {
   return [
-    'enum LowerEnvironmentOp { Bytes Set Remove Columns Compare Seed Text }',
-    'struct LowerEnvironmentRoute { symbol: String, export: String, op: LowerEnvironmentOp, arity: Int }',
-    'LOWER_ENVIRONMENT_ROUTES :: prep { [LowerEnvironmentRoute]{',
-    ...rows.map(row => `    LowerEnvironmentRoute{symbol: "${row.symbol}", export: "${row.name}", op: LowerEnvironmentOp.${row.op}, arity: ${row.arity}},`),
+    'enum IREnvironmentOp { Bytes Set Remove Columns Compare Seed Text }',
+    'struct IREnvironmentRoute { symbol: String, export: String, op: IREnvironmentOp, arity: Int }',
+    'IR_ENVIRONMENT_ROUTES :: comptime { [IREnvironmentRoute]{',
+    ...rows.map(row => `    IREnvironmentRoute{symbol: "${row.symbol}", export: "${row.name}", op: IREnvironmentOp.${row.op}, arity: ${row.arity}},`),
     '} }',
-    'fn lower_environment_route(symbol: String) -> LowerEnvironmentRoute? {',
-    '    loop route in LOWER_ENVIRONMENT_ROUTES { if route.symbol == symbol -> return Val(route.copy()) }',
+    'fn ir_environment_route(symbol: String) -> IREnvironmentRoute? {',
+    '    loop route in IR_ENVIRONMENT_ROUTES { if route.symbol == symbol -> return Val(route.copy()) }',
     '    None',
     '}',
   ];

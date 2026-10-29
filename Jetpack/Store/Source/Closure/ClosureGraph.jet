@@ -3,7 +3,7 @@
 // canonical action key, legacy migration, and the one registration boundary
 // that appends a durable closure transaction.
 
-STORE_RECEIPTS_DIR :: prep { "receipts" }
+STORE_RECEIPTS_DIR :: "receipts"
 
 struct ClosureObject {
     digest: String
@@ -510,7 +510,7 @@ fn store_migrate_closure_graph_unlocked_ignoring(verification: &StoreVerificatio
     graph := store_closure_graph_structure_read_only(&verification, roots)
     deleted := graph.deleted_records.copy()
     loop id in ignored {
-        graph.records.remove(id).drop("an ignored id may have no record")
+        &graph.records.remove(id).drop("an ignored id may have no record")
         &deleted.push(id)
     }
     graph.deleted_records = store_sorted_unique(deleted)
@@ -768,16 +768,14 @@ fn store_test_backdate_last_used_at(verification: &StoreVerification, roots: Han
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
     _ :: store_recover_closure_journal_unlocked(&verification, roots)
     found :: store_list_unlocked(roots)
-    entry := StoreEntry.empty()
-    matched := false
+    matched := StoreEntry?{None}
     loop candidate in found {
         if candidate.id == id {
-            entry = candidate
-            matched = true
+            matched = Val(candidate)
             break
         }
     }
-    if !matched -> return Err(StoreError.Other("no hangar entry `{id}`"))
+    entry := matched ?? return Err(StoreError.Other("no hangar entry `{id}`"))
     entry.last_used_at = last_used_at
     _ :: store_register_entry_unlocked(&verification, roots, entry)
 }

@@ -1,0 +1,12 @@
+# tests/decimal_fast_path.rs::decimal_small_and_big_paths_keep_exact_tier_behavior at tests/decimal_fast_path.rs:33; hand-port
+fixture: decimal_small_and_big_paths_keep_exact_tier_behavior.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step run: jet run main.jet
+exit: 0
+stdout: = "3.50\n1.10\n-1.00\n19.0\ntrue\ntrue\n3\n0.125\n170141183460469231731687303715884105728\n340282366920938463463374607431768211454\n12345678901234567890123456789012345678901234567890.00\ntrue\n"
+step build: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "3.50\n1.10\n-1.00\n19.0\ntrue\ntrue\n3\n0.125\n170141183460469231731687303715884105728\n340282366920938463463374607431768211454\n12345678901234567890123456789012345678901234567890.00\ntrue\n"

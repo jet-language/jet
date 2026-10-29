@@ -1,9 +1,14 @@
 // Immutable per-build node evidence for `explain-build` (Rust
 // `jet_store::BuildRecord`). The CAS payload is JSON so tools can inspect it
 // without a second codec.
-use jet_foundation.[RecordField, RecordSection, RecordValue, record_encode, record_decode]
+use jet_foundation.[
+    RecordField, RecordSection, RecordValue, record_encode, record_decode, foundation_json_quote,
+    foundation_parse_protocol_json,
+]
+use core.files as files
+use core.process as process
 
-STORE_BUILD_RECORD_SCHEMA :: prep { "jet.build-record/v1" }
+STORE_BUILD_RECORD_SCHEMA :: "jet.build-record/v1"
 
 // One compiler-owned node execution recorded for `explain-build`.
 struct BuildNodeRecord {

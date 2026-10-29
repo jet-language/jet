@@ -1,6 +1,6 @@
 // User Rust helpers retain the hosted bridge's ordered identity record and
 // cache layout. Native static-musl artifacts occupy an explicit separate mode.
-use jet_foundation.[Type, ExternFn, Item, Field, StructLayout, AccessConvention, TagMarker, ast_comptime_generated_path, dimension_identity, measure_expression, measure_signed_value, type_internal_tag_name, mir_sha256_bytes, mir_sha256_hex_bytes]
+use jet_foundation.[Type, ExternFn, Item, Field, AccessConvention, ast_comptime_generated_path, dimension_identity, measure_expression, measure_signed_value, type_internal_tag_name, sha256_bytes, sha256_hex_bytes]
 use jet_sema.[SemaRegistrationGraph, SemaRegistrationForeignOwner]
 
 JET_DRIVER_RUST_FOREIGN_ARTIFACT_MODE :: "jet-native-rust-staticlib-v1"
@@ -58,7 +58,7 @@ fn jet_driver_rust_foreign_field(bytes: &[U8], name: String, value: [U8]) Never!
     loop byte in value -> &bytes.push(byte)
 }
 fn jet_driver_rust_foreign_digest(bytes: [U8]) -> String Never! {
-    mir_sha256_hex_bytes(mir_sha256_bytes(bytes[0..<bytes.len()]))
+    sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))
 }
 fn jet_driver_rust_foreign_type_key(ty: Type) -> String Never! {
     if ty == {
@@ -146,7 +146,7 @@ fn jet_driver_rust_foreign_plan(facts: JetDriverRustForeignFacts, rust_toolchain
     jet_driver_rust_foreign_field(&identity, "c-record-source", facts.record_source.bytes())
     jet_driver_rust_foreign_field(&identity, "selected_target", target.bytes())
     jet_driver_rust_foreign_field(&identity, "rust_toolchain", rust_toolchain.bytes())
-    loop flag in ([String]{"needs_regex", "needs_archive", "needs_db", "needs_parquet", "needs_http_client", "needs_http_server_tls", "needs_net_tls", "needs_crypto", "needs_compress", "needs_plugin", "needs_secrets"}) -> jet_driver_rust_foreign_field(&identity, flag, [U8]{0})
+    loop flag in ([String]{"needs_regex", "needs_archive", "needs_db", "needs_parquet", "needs_crypto", "needs_compress", "needs_plugin", "needs_secrets"}) -> jet_driver_rust_foreign_field(&identity, flag, [U8]{0})
     loop dependency in dependencies {
         jet_driver_rust_foreign_field(&identity, "dependency", dependency.name.bytes())
         jet_driver_rust_foreign_field(&identity, "dependency_version", dependency.version.bytes())

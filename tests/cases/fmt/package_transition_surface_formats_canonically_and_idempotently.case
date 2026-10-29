@@ -1,0 +1,36 @@
+# tests/fmt.rs::package_transition_surface_formats_canonically_and_idempotently at tests/fmt.rs:9; hand-port
+# Claim: three canonical package sources format, reformat identically, keep Executable/Config contribution (tests/fmt.rs:9-26)
+# Claim: package field spacing `name : "demo"` becomes `name: "demo"` (tests/fmt.rs:28-31)
+# Fixture migrated: package sources given as package.jet files in subdirs (Rust used in-memory format_source); pkg2/pkg3 gained `name: "demo"` because jet fmt rejects a nameless package.jet (E1206, observed)
+# Not ported: Package::format_source Result/expect wiring is Rust API; CLI exit code covers it
+fixture: package_transition_surface_formats_canonically_and_idempotently.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt pkg1/package.jet
+exit: 0 # tests/fmt.rs:10-21 first pass exits 0
+step: jet fmt --check pkg1/package.jet
+exit: 0 # tests/fmt.rs:21 second pass is identical
+step: sh {work}/step-3.sh
+exit: 0 # tests/fmt.rs:23-24 contribution kept
+stdout: ~ "Executable" # tests/fmt.rs:23-24 contribution kept
+step: jet fmt pkg2/package.jet
+exit: 0 # tests/fmt.rs:10-21 second source
+step: jet fmt --check pkg2/package.jet
+exit: 0 # tests/fmt.rs:21 stable
+step: sh {work}/step-6.sh
+exit: 0 # tests/fmt.rs:23-24 contribution kept
+stdout: ~ "Config" # tests/fmt.rs:23-24 contribution kept
+step: jet fmt pkg3/package.jet
+exit: 0 # tests/fmt.rs:10-21 third source
+step: jet fmt --check pkg3/package.jet
+exit: 0 # tests/fmt.rs:21 stable
+step: sh {work}/step-9.sh
+exit: 0 # tests/fmt.rs:23-24 contribution kept
+stdout: ~ "Config" # tests/fmt.rs:23-24 contribution kept
+step: jet fmt pkg4/package.jet
+exit: 0 # tests/fmt.rs:28 spacing source formats
+step: sh {work}/step-11.sh
+exit: 0 # tests/fmt.rs:30-31 canonical spacing
+stdout: ~ "name: \"demo\"" # tests/fmt.rs:30-31 canonical spacing
+stdout: !~ "name :" # tests/fmt.rs:30-31 canonical spacing

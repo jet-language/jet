@@ -1,9 +1,9 @@
 // Source/CmdCompile.rs run_fix: the shared diagnostic edit engine, not a
 // second formatter. Publication uses the canonical held codemod transaction.
 use core.files as cli_files
-use jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, jet_driver_present_diagnostics, jet_driver_inline_package, jet_driver_inline_trivia_end, jet_driver_inline_space, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
+use jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, jet_driver_present_diagnostics, jet_driver_inline_package, jet_driver_inline_trivia_end, jet_driver_inline_space, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
 use jet_foundation.[Diagnostic, Span, TextEdit, DiagnosticFixApplicability, DiagnosticFixSafety, diagnostic_with_edit_grade]
-use jet_parser.jet_format_unified_diff
+use jet_parser.[jet_format_unified_diff]
 
 enum JetCLIFixQuery {
     Fixes(fixes: [JetCLIFix])
@@ -12,7 +12,7 @@ enum JetCLIFixQuery {
 
 fn jet_cli_fix_collect(file: String, source: String, all: Bool) -> JetCLIFixQuery {
     diagnostics := [Diagnostic]{}
-    if jet_cli_compile_entry(file, false, false, None, JetDriverCompileMode.Doc, Val(source), None) == {
+    if jet_cli_compile_entry(file, false, None, JetDriverCompileMode.Doc, Val(source), None) == {
         .Refused(output) -> return JetCLIFixQuery.Refused{output: output}
         .Compiled(result, snapshot) -> {
             if result.internal_problem == .Val(problem) -> return JetCLIFixQuery.Refused{output: jet_cli_ice(problem)}
@@ -23,7 +23,8 @@ fn jet_cli_fix_collect(file: String, source: String, all: Bool) -> JetCLIFixQuer
                 }
                 &diagnostics.push(diagnostic)
             }
-            authority :: jet_cli_application_authority(result, None)
+            // A script runs with every right, so it needs no authority block.
+            authority :: jet_cli_application_authority(result, jet_cli_source_invocation(source, None))
             if jet_cli_is_application_default(authority) && !jet_driver_inline_package(source).found && jet_cli_undecided(authority).len() > 0 {
                 if jet_cli_authority_refusal(authority, file, "run") == .Val(report) {
                     at :: jet_cli_fix_inline_insertion(source)
@@ -45,7 +46,7 @@ fn jet_cli_fix_inline_authority(file: String, allow: [String]) -> String Never! 
         if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 || code == 45 || code == 46) -> valid = false
     }
     name :: if valid -> stem else -> "script"
-    "package {{\n    name: \"{name}\"\n    authority: {{ holds: {{ allow: [{allow.join(", ")}] }} }}\n}}\n\n"
+    "package {{\n    name: \"{name}\"\n    authority: {{ allow: [{allow.join(", ")}] }}\n}}\n\n"
 }
 
 // Package::inline_package_insertion_offset: share the Driver trivia scanner;

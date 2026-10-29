@@ -1,0 +1,220 @@
+// Source/CmdPkg.rs: package dependency commands share the existing checked
+// Package carrier, source editor, Foundation publisher and Publication fetch.
+// The front owns root discovery and the distinct script-lock/toolchain routes.
+// Success is plain stdout even in machine mode; source-owned parse/fetch errors
+// remain direct, uncolored diagnostics, unlike spanless CLI input/IO errors.
+use jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, JetDriverVerbOutput]
+use jet_pkg_model.[
+    AuthorityResolver, DepSpec, GitSelector, InlinePackageBlock, LockFile, Manifest, PackageFacts,
+    WorkspaceDeclarationCache, pkg_add_dependency, pkg_binder_slice, pkg_extract_inline_package,
+    pkg_lock_load, pkg_manifest_path_checked, pkg_package_facts_for_entry, pkg_remove_dependency,
+    pkg_to_manifest,
+]
+use jetpack_foundation.[
+    FoundationFileAuthority, FoundationPublicationError, MAX_TREE_FILE_BYTES,
+    foundation_open_file_authority, foundation_write_file_nofollow_at_root,
+]
+use jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_render_all]
+
+#Error
+struct JetCLIDependencyError { output: JetDriverVerbOutput }
+struct JetCLIPackageInput {
+    path: String
+    raw: String
+    inline: InlinePackageBlock?
+    manifest: Manifest
+    notice: String{""}
+    authority: FoundationFileAuthority
+}
+
+fn jet_cli_dependency_cli_error(code: String, what: String, fix: String?, color: Bool, json: Bool) -[FS, Env]> JetCLIDependencyError Never! {
+    shared :: jet_cli_diagnostic_copy(code)
+    report :: diagnostic_from_registry(code, None, what, shared.why, fix ?? shared.fix)
+    if json -> return JetCLIDependencyError{output: JetDriverVerbOutput{stdout: jet_cli_reports_status_json("cli", false, jet_cli_report_cwd(), "", "", [Diagnostic]{report}), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}}
+    JetCLIDependencyError{output: JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all("", "", [Diagnostic]{report}, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
+}
+fn jet_cli_dependency_source_error(path: String, raw: String, report: Diagnostic) -> JetCLIDependencyError Never! {
+    JetCLIDependencyError{output: JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(path, raw, [Diagnostic]{report}, false), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
+}
+
+// main.rs flag_value accepts only the separate-token spelling and returns the
+// next token verbatim, even a flag. Keep this distinct from frontend options.
+fn jet_cli_dependency_flag(raw: [String], flag: String) -> String? Never! {
+    loop (index, word) in raw {
+        if word == flag -> return raw.get(index + 1)
+    }
+    None
+}
+fn jet_cli_dependency_add_spec(raw: [String], color: Bool, json: Bool) -[FS, Env]> (name: String, spec: DepSpec) JetCLIDependencyError! {
+    words := [String]{}
+    loop word in raw { if !word.starts_with("--") -> &words.push(word) }
+    name :: words.get(1) ?? return Err(jet_cli_dependency_cli_error("E2104", "`jet add` needs a dependency name", Val("try `jet add mylib --path ../mylib`"), color, json))
+    if jet_cli_dependency_flag(raw, "--path") == .Val(path) -> return Ok((name: name, spec: DepSpec.Path{path: path}))
+    if jet_cli_dependency_flag(raw, "--git") == .Val(url) {
+        selector := GitSelector?{None}
+        if {
+            jet_cli_dependency_flag(raw, "--tag") == .Val(selected_tag) -> selector = Val(GitSelector.Tag(selected_tag))
+            jet_cli_dependency_flag(raw, "--branch") == .Val(branch) -> selector = Val(GitSelector.Branch(branch))
+            jet_cli_dependency_flag(raw, "--rev") == .Val(rev) -> selector = Val(GitSelector.Rev(rev))
+            else -> {}
+        }
+        selected :: selector ?? return Err(jet_cli_dependency_cli_error("E2104", "git dependency `{name}` needs one of: --tag, --branch, --rev", None, color, json))
+        return Ok((name: name, spec: DepSpec.Git{url: url, selector: selected}))
+    }
+    Err(jet_cli_dependency_cli_error("E2104", "`jet add {name}` needs --path or --git", Val("try `jet add {name} --path ../{name}` or `jet add {name} --git <url> --tag <tag>`"), color, json))
+}
+
+fn jet_cli_dependency_read(path: String, color: Bool, json: Bool) -[FS, Env]> (raw: String, authority: FoundationFileAuthority) JetCLIDependencyError! {
+    authority :: foundation_open_file_authority(cli_files.dirname(path), cli_files.basename(path)) ?? return Err(jet_cli_dependency_cli_error("E2105", "couldn't read {path}: {jet_cli_io_error_text(err)}", None, color, json))
+    bytes :: authority.read_bounded(MAX_TREE_FILE_BYTES) ?? return Err(jet_cli_dependency_cli_error("E2105", "couldn't read {path}: {jet_cli_io_error_text(err)}", None, color, json))
+    raw :: String.from_bytes(bytes) ?? return Err(jet_cli_dependency_cli_error("E2105", "couldn't read {path}: stream did not contain valid UTF-8", None, color, json))
+    Ok((raw: raw, authority: authority))
+}
+fn jet_cli_dependency_with_notice(error: JetCLIDependencyError, notice: String) -> JetCLIDependencyError Never! {
+    JetCLIDependencyError{output: JetDriverVerbOutput{stdout: error.output.stdout, stderr: "{notice}{error.output.stderr}", exit_code: error.output.exit_code}}
+}
+fn jet_cli_package_input_entry(root: String, color: Bool, json: Bool) -[FS, Env]> (path: String, notice: String) JetCLIDependencyError! {
+    notices := [String]{}
+    entry :: if jet_cli_find_project_entry(root, "fetch", color, &notices) == {
+        .Entry(found) -> found.path
+        .Refused(plan) -> {
+            if plan == {
+                .Refused(report, plan_color, code, notice) -> {
+                    if json -> return Err(JetCLIDependencyError{output: JetDriverVerbOutput{stdout: jet_cli_reports_status_json("cli", false, jet_cli_report_cwd(), "", "", [Diagnostic]{report}), stderr: "{notices.join("")}{notice}", exit_code: code}})
+                    return Err(JetCLIDependencyError{output: JetDriverVerbOutput{stdout: "", stderr: "{notices.join("")}{notice}{diagnostic_render_all("", "", [Diagnostic]{report}, plan_color)}", exit_code: code}})
+                }
+                .Done(output) -> return Err(jet_cli_dependency_with_notice(JetCLIDependencyError{output: output}, notices.join("")))
+                else -> panic("project entry refusal must be a CLI report or completed output")
+            }
+        }
+        .Absent -> jet_cli_entry_join(root, JET_CLI_DEFAULT_ENTRY_FILE)
+    }
+    Ok((path: entry, notice: notices.join("")))
+}
+
+fn jet_cli_dependency_input(root: String, color: Bool, json: Bool) -[FS, Env]> JetCLIPackageInput JetCLIDependencyError! {
+    entry :: jet_cli_package_input_entry(root, color, json)
+    input := jet_cli_dependency_input_at_entry(root, entry.path, color, json) ?? return Err(jet_cli_dependency_with_notice(err, entry.notice))
+    input.notice = entry.notice
+    Ok(input)
+}
+
+fn jet_cli_dependency_input_at_entry(root: String, entry: String, color: Bool, json: Bool) -[FS, Env]> JetCLIPackageInput JetCLIDependencyError! {
+    source :: jet_cli_dependency_read(entry, color, json)
+    inline :: if pkg_extract_inline_package(source.raw) == {
+        .Ok(value) -> value
+        .Err(error) -> { return Err(jet_cli_dependency_source_error(entry, source.raw, error.diagnostic())) }
+    }
+    cache := WorkspaceDeclarationCache.new()
+    found :: if pkg_package_facts_for_entry(&cache, entry) == {
+        .Ok(value) -> value
+        .Err(error) -> { return Err(jet_cli_dependency_source_error(entry, source.raw, error.diagnostic)) }
+    }
+    facts :: found ?? return Err(jet_cli_dependency_cli_error("E2105", "couldn't resolve package facts for {entry}", None, color, json))
+    if inline == .Val(block) {
+        manifest :: pkg_to_manifest(facts, block.body(source.raw)) ?? return Err(jet_cli_dependency_source_error(entry, block.body(source.raw), err.diagnostic))
+        return Ok(JetCLIPackageInput{path: entry, raw: source.raw, inline: inline, manifest: manifest, authority: source.authority})
+    }
+    jet_cli_package_input_from_facts(root, facts, color, json)
+}
+
+fn jet_cli_package_input_from_facts(root: String, facts: PackageFacts, color: Bool, json: Bool) -[FS, Env]> JetCLIPackageInput JetCLIDependencyError! {
+    located :: if pkg_manifest_path_checked(root) == {
+        .Ok(value) -> value
+        .Err(error) -> { return Err(jet_cli_dependency_source_error(JET_CLI_PACKAGE_FILE, "", error.diagnostic)) }
+    }
+    path :: located ?? return Err(jet_cli_dependency_cli_error("E2105", "couldn't locate {JET_CLI_PACKAGE_FILE}", None, color, json))
+    carrier :: jet_cli_dependency_read(path, color, json)
+    manifest :: pkg_to_manifest(facts, carrier.raw) ?? return Err(jet_cli_dependency_source_error(path, carrier.raw, err.diagnostic))
+    Ok(JetCLIPackageInput{path: path, raw: carrier.raw, inline: None, manifest: manifest, authority: carrier.authority})
+}
+
+fn jet_cli_dependency_edit(input: JetCLIPackageInput, name: String, spec: DepSpec?) -> String Never! {
+    body :: if input.inline == .Val(block) -> block.body(input.raw) else -> input.raw
+    updated :: if spec == .Val(value) -> pkg_add_dependency(body, name, value) else -> pkg_remove_dependency(body, name)
+    if input.inline == .Val(block) -> return "{pkg_binder_slice(input.raw, 0, block.body_span.start)}{updated}{pkg_binder_slice(input.raw, block.body_span.end, input.raw.bytes().len())}"
+    updated
+}
+// Retain the ORIGINAL source authority through stage/fsync/rename. Re-read the
+// source before staging, as CmdPkg does; a concurrent edit is never overwritten.
+fn jet_cli_dependency_publish(input: JetCLIPackageInput, updated: String) JetCLIReadError! -[FS, Env, Time]> {
+    parent :: cli_files.dirname(input.path)
+    name :: cli_files.basename(input.path)
+    resolver :: AuthorityResolver.open(parent) ?? return Err(jet_cli_read_error("could not open package source authority: {err.message()}"))
+    current :: resolver.checked_file(name) ?? return Err(jet_cli_read_error("could not check {input.path}: {err.message()}"))
+    raw :: current.text() ?? return Err(jet_cli_read_error("could not read {input.path}: {err.message()}"))
+    if raw != input.raw -> return Err(jet_cli_read_error("{input.path} changed while the package edit was prepared"))
+    resolver.revalidate_file(current) ?? return Err(jet_cli_read_error("package source changed before writing: {err.message()}"))
+    input.authority.revalidate() ?? return Err(jet_cli_read_error("package source changed before writing: {jet_cli_io_error_text(err)}"))
+    foundation_write_file_nofollow_at_root(parent, name, updated.bytes(), Val(() -> input.authority.revalidate())) ?? return Err(jet_cli_read_error(jet_cli_dependency_publication_error(input.path, err)))
+}
+
+fn jet_cli_dependency_publication_error(path: String, failure: FoundationPublicationError) -> String Never! {
+    detail :: jet_cli_io_error_text(failure.error)
+    if failure.phase == {
+        .PreparePath -> "could not check {path}: {detail}"
+        .OpenRoot | .OpenParent -> "could not open package source authority: {detail}"
+        .CreateStage | .WriteStage | .SetMode | .InspectStage -> "could not stage {path}: {detail}"
+        .SyncStage | .SyncParent -> "could not sync {path}: {detail}"
+        .ValidateSource -> "package source changed before publishing: {detail}"
+        .InspectDestination | .ValidateAuthority | .Rename | .ValidatePublished -> "could not publish {path}: {detail}"
+    }
+}
+
+fn jet_cli_dependency_registry_tiers(lock: LockFile) -> String Never! {
+    output := ""
+    loop package in lock.packages {
+        if package.source == .Registry(registry, _, _, _, _, _, tier, gate_status) -> output = "{output}resolved `{package.name}` {package.version} from registry `{registry}` (tier: {tier}; gate status: {gate_status})\n"
+    }
+    output
+}
+fn jet_cli_dependency_success(lock: LockFile, options: PackageFetchOptions) -> String Never! {
+    message :: if {
+        options.update && options.update_dep == .Val(name) -> "updated `{name}`"
+        options.update -> "updated all moving selectors"
+        options.locked -> "lock verified"
+        else -> "fetched all dependencies"
+    }
+    "{jet_cli_dependency_registry_tiers(lock)}{message}\n"
+}
+fn jet_cli_dependency_fetch(verification: &StoreVerification, root: String, options: PackageFetchOptions, color: Bool, json: Bool) -[FS, Env, Exec, Net, Time, Time.Wait]> JetDriverVerbOutput JetCLIDependencyError! {
+    input :: jet_cli_dependency_input(root, color, json)
+    fetched :: pkg_fetch(&verification, root, input.manifest, pkg_lock_load(root), options) ?? return Err(jet_cli_dependency_with_notice(jet_cli_dependency_source_error(input.path, input.raw, err.diagnostic), input.notice))
+    Ok(JetDriverVerbOutput{stdout: jet_cli_dependency_success(fetched.lock, options), stderr: input.notice, exit_code: JET_DRIVER_EXIT_OK})
+}
+
+fn jet_cli_dependency_edit_success(command: String, name: String, path: String) -> String Never! {
+    if command == "add" -> return "added `{name}` to {path}\n"
+    "removed `{name}` from {path}\n"
+}
+
+// Root is selected by the front's EXISTING manifest-required resolver. args is
+// its canonical positional argv; raw starts at the command and keeps flags.
+fn jet_cli_package_dependency(root: String, command: String, args: [String], raw: [String], color: Bool, json: Bool) -[FS, Env, Exec, Net, Time, Time.Wait]> JetDriverVerbOutput Never! {
+    prefix := ""
+    notice := ""
+    if command == "add" || command == "remove" {
+        name := ""
+        spec := DepSpec?{None}
+        if command == "add" {
+            selected :: jet_cli_dependency_add_spec(raw, color, json) ?? return err.output
+            name = selected.name
+            spec = Val(selected.spec)
+        } else {
+            name = args.get(1) ?? panic("remove's required target is checked by the front")
+        }
+        input :: jet_cli_dependency_input(root, color, json) ?? return err.output
+        if command == "remove" && input.manifest.dependencies.get(name) == None -> return jet_cli_dependency_with_notice(jet_cli_dependency_cli_error("E2104", "dependency `{name}` is not present in {JET_CLI_PACKAGE_FILE}", Val("remove a dependency listed in {JET_CLI_PACKAGE_FILE}, or add `{name}` first"), color, json), input.notice).output
+        updated :: jet_cli_dependency_edit(input, name, spec)
+        jet_cli_dependency_publish(input, updated) ?? return jet_cli_dependency_with_notice(jet_cli_dependency_cli_error("E2105", "couldn't write {input.path}: {err.message}", None, color, json), input.notice).output
+        notice = input.notice
+        prefix = jet_cli_dependency_edit_success(command, name, input.path)
+    }
+    options :: PackageFetchOptions{locked: command == "fetch" && (raw.contains("--locked") || raw.contains("--offline")), update: command == "update", update_dep: if command == "update" -> args.get(1) else -> None}
+    verification := StoreVerification.new()
+    output :: jet_cli_dependency_fetch(&verification, root, options, color, json) ?? {
+        failed :: err.output
+        return JetDriverVerbOutput{stdout: "{prefix}{failed.stdout}", stderr: "{notice}{failed.stderr}", exit_code: failed.exit_code}
+    }
+    JetDriverVerbOutput{stdout: "{prefix}{output.stdout}", stderr: "{notice}{output.stderr}", exit_code: JET_DRIVER_EXIT_OK}
+}

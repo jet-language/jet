@@ -1,0 +1,13 @@
+# tests/core_runtime_units.rs::grouped_format_is_source_owned_without_a_dispatcher_row at tests/core_runtime_units.rs:57; hand-port
+# The two Rust table asserts (core_source_owns_call / core_call) are crate internals; the tier run is kept.
+fixture: grouped_format_is_source_owned_without_a_dispatcher_row.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step run: jet run main.jet
+exit: 0
+stdout: = "1,234.57\n123,456,789,012,345,678,901,234,567,890.00\n00ff 11111111 377\n1.25e+00 125.0%\ngo.. 00go\nNaN\ninf\n-inf\n"
+step build: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "1,234.57\n123,456,789,012,345,678,901,234,567,890.00\n00ff 11111111 377\n1.25e+00 125.0%\ngo.. 00go\nNaN\ninf\n-inf\n"

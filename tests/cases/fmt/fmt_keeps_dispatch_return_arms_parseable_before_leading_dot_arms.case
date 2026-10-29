@@ -1,0 +1,16 @@
+# tests/fmt.rs::fmt_keeps_dispatch_return_arms_parseable_before_leading_dot_arms at tests/fmt.rs:678; hand-port
+# Claim: direct return arm stays canonical (tests/fmt.rs:694-698)
+# Claim: formatted output re-lexes and re-parses (tests/fmt.rs:700-704)
+# Claim: second pass identical (tests/fmt.rs:706-710)
+# Not ported: Lexer::lex / Parser::parse_for_fmt direct calls (tests/fmt.rs:700-704): Rust API; reparse covered by jet fmt --check reading the output
+fixture: fmt_keeps_dispatch_return_arms_parseable_before_leading_dot_arms.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt dispatch/run.jet
+exit: 0 # tests/fmt.rs:682-694 formats
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:695-698
+stdout: ~ ".Err(error) -> return error_result(error.message)" # tests/fmt.rs:695-698
+step: jet fmt --check dispatch/run.jet
+exit: 0 # tests/fmt.rs:700-710 output reparses and is idempotent

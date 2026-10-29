@@ -1,6 +1,6 @@
 // Source/ReceiptStore.rs wire codec and ReceiptSections.rs validation.
 // This is the same content-addressed receipt, not a CLI-specific store.
-use jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_parse, canonical_json_object, mir_sha256_hex]
+use jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_parse, canonical_json_object, sha256_hex]
 use core.text as receipt_text
 use core.crypto as receipt_crypto
 
@@ -40,22 +40,21 @@ struct JetCLIReceipt {
 }
 
 // The wire markers include their final NUL, which is not a Jet string escape.
-JET_CLI_RECEIPT_MAGIC :: prep { "jet-receipt-v2" }
+JET_CLI_RECEIPT_MAGIC :: "jet-receipt-v2"
 
-JET_CLI_RECEIPT_SECTION_MAGIC :: prep { "jet-receipt-sections-v1" }
+JET_CLI_RECEIPT_SECTION_MAGIC :: "jet-receipt-sections-v1"
 
-JET_CLI_RECEIPT_LINK_MAGIC :: prep { "jet-receipt-links-v1" }
+JET_CLI_RECEIPT_LINK_MAGIC :: "jet-receipt-links-v1"
 
-JET_CLI_RECEIPT_MAX_FIELD :: prep { 67108864 }
+JET_CLI_RECEIPT_MAX_FIELD :: 67108864
 
-JET_CLI_RECEIPT_MAX_BYTES :: prep { 138412032 }
+JET_CLI_RECEIPT_MAX_BYTES :: 138412032
 // Persistence failures use JetCLIReadError throughout; render text at CLI boundaries.
 fn jet_cli_receipt_section_marker(name: String) -> [U8] Never! {
     bytes := name.bytes()
     &bytes.push(U8{0})
     bytes
 }
-
 
 fn jet_cli_receipt_is_digest(value: String) -> Bool Never! {
     if value.bytes().len() != 64 -> return false
@@ -67,7 +66,7 @@ fn jet_cli_receipt_is_digest(value: String) -> Bool Never! {
 }
 
 fn jet_cli_receipt_section_new(name: String, type_name: String, bytes: [U8]) -> JetCLIReceiptSection JetCLIReadError! {
-    section :: JetCLIReceiptSection{name: name, type_name: type_name, schema_digest: mir_sha256_hex(type_name), payload_digest: receipt_crypto.sha256(bytes).hex(), bytes: bytes}
+    section :: JetCLIReceiptSection{name: name, type_name: type_name, schema_digest: sha256_hex(type_name), payload_digest: receipt_crypto.sha256(bytes).hex(), bytes: bytes}
     jet_cli_receipt_section_validate(section)
     Ok(section)
 }

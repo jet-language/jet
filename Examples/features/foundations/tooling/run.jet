@@ -1,21 +1,21 @@
-use core.build as build
+use core.build as build_api
 use core.compiler as compiler
 
-SOURCE :: prep { "fn old_name(value: Int) -> Int {{ 41 }}\nfn run() -> Int {{ 2 }}\n" }
+SOURCE :: comptime { "fn old_name(value: Int) -> Int {{ 41 }}\nfn run() -> Int {{ 2 }}\n" }
 
-LEXED :: prep { compiler.lex(SOURCE) ?? panic("compiler lex failed") }
+LEXED :: comptime { compiler.lex(SOURCE) ?? panic("compiler lex failed") }
 
-PARSED :: prep { compiler.parse(SOURCE) ?? panic("compiler parse failed") }
+PARSED :: comptime { compiler.parse(SOURCE) ?? panic("compiler parse failed") }
 
-CHECKED :: prep { compiler.check(PARSED) ?? panic("compiler check failed") }
+CHECKED :: comptime { compiler.check(PARSED) ?? panic("compiler check failed") }
 
-TOKENS :: prep { LEXED.tokens().len() }
+TOKENS :: comptime { LEXED.tokens().len() }
 
-ITEMS :: prep { PARSED.items().len() }
+ITEMS :: comptime { PARSED.items().len() }
 
-FUNCTIONS :: prep { CHECKED.functions().len() }
+FUNCTIONS :: comptime { CHECKED.functions().len() }
 
-fn build(b: BuildContext) -> BuildPlan {
+fn build(b: Build) {
     b.generate("facts") {
         fn tooling_facts() -> String { "tokens={TOKENS}; items={ITEMS}; functions={FUNCTIONS}" }
     }
@@ -26,7 +26,7 @@ fn build(b: BuildContext) -> BuildPlan {
     [],
     )
     before_plan :: b.plan(before)
-    before_graph :: build.graph(before_plan)
+    before_graph :: build_api.graph(before_plan)
 
     after :: b.add_executable(
     "tooling_after",
@@ -34,8 +34,8 @@ fn build(b: BuildContext) -> BuildPlan {
     [],
     )
     after_plan :: b.plan(after)
-    after_graph :: build.graph(after_plan)
-    diff :: build.receipt_diff(before_graph, after_graph)
+    after_graph :: build_api.graph(after_plan)
+    diff :: build_api.receipt_diff(before_graph, after_graph)
 
     if before_graph.targets.len() == 0 -> panic("build graph query returned no target")
     if after_graph.files.len() <= before_graph.files.len() {
@@ -45,7 +45,7 @@ fn build(b: BuildContext) -> BuildPlan {
         panic("build graph diff was empty")
     }
 
-    return b.plan(after)
+    b.default(after)
 }
 
 fn run() {

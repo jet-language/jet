@@ -5,13 +5,13 @@
 // Unsigned order is World's existing world_unsigned_before over raw I64 bits;
 // subtraction is wrapping only AFTER that unsigned bounds check. No exact Int.
 // TCB frame/scope ownership is documented in Thread.jet (65ba90e97).
-COMPTIME_ROOT_BYTES :: prep { I64{48} }
+COMPTIME_ROOT_BYTES :: I64{48}
 comptime_root := I64{0}
 
 // runtime-init: 3
 #Export(c) fn jet_rt_comptime_init() {
     if (comptime_root != I64{0}) -> return
-    comptime_root = alloc_required_valid(COMPTIME_ROOT_BYTES, I64{8})
+    comptime_root = jet_rt_alloc(COMPTIME_ROOT_BYTES, I64{8})
     thread_zero(comptime_root, COMPTIME_ROOT_BYTES)
     sync_store(comptime_root + I64{40}, I64{1})
 }
@@ -332,7 +332,7 @@ fn comptime_frame_write(frame: I64) {
 // Borrow actual stop metadata; Root consumption uses precisely this channel
 // frame too, without depending on a separate comptime request's first stop.
 fn comptime_stop_frame_write(status: I64, owner: I64, start: I64, end: I64) -> U32 {
-    scratch :: alloc_required_valid(I64{192}, I64{8})
+    scratch :: jet_rt_alloc(I64{192}, I64{8})
     sync_store(scratch, I64{4189021028785791611})
     at := I64{0}
     if (status == I64{2}) {
@@ -375,7 +375,7 @@ fn comptime_stop_frame_write(status: I64, owner: I64, start: I64, end: I64) -> U
         comptime_channel_write(fd, scratch, at)
         _ := trap_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
-    alloc_release_valid(scratch, I64{192}, I64{8})
+    jet_rt_free(scratch, I64{192}, I64{8})
     U32{status}
 }
 

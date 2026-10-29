@@ -384,7 +384,7 @@ use jet.SHA256.[sha256_hex]
 #Test("lsp_definition_uses_build_graph_generated_source") {
     jet :: jet_bin()
     if !jet.exists() -> return
-    source :: "fn build(b: BuildContext) -> BuildPlan {{\n    b.generate(\"made\") {{\n        fn generated_value() -> String {{ \"hi\" }}\n    }}\n    app :: b.add_executable(\"app\", [\"main.jet\", \".jet/generated/main/made.jet\"], [])\n    return b.plan(app)\n}}\nfn run() {{ print(generated_value()) }}\n"
+    source :: "fn build(b: Build) {{\n    b.generate(\"made\") {{\n        fn generated_value() -> String {{ \"hi\" }}\n    }}\n    app :: b.add_executable(\"app\", [\"main.jet\", \".jet/generated/main/made.jet\"], [])\n    b.default(app)\n}}\nfn run() {{ print(generated_value()) }}\n"
     root :: Scratch.new("lsp-generated-def")
     fs.write(root.join("package.jet"), "name: \"main\"\nversion: \"0.1.0\"\n").expect("write generated definition package manifest")
     fs.write(root.join("main.jet"), source).expect("write generated definition source")
@@ -405,7 +405,7 @@ use jet.SHA256.[sha256_hex]
     root :: Scratch.new("lsp-generated-definition-identity")
     fs.write(root.join("package.jet"), "name: \"main\"\nversion: \"0.1.0\"\n").expect("write generated identity package manifest")
     fs.write(root.join("workspace.jet"), "module workspace {{ members: [] }}\n").expect("write generated identity workspace authority")
-    source_for :: (first: String, second: String, selected: String) -> "fn build(b: BuildContext) -> BuildPlan {{\n    b.generate(\"{first}\") {{\n        fn generated_value() -> String {{ \"{first}\" }}\n    }}\n    b.generate(\"{second}\") {{\n        fn generated_value() -> String {{ \"{second}\" }}\n    }}\n    app :: b.add_executable(\"app\", [\"main.jet\", \".jet/generated/main/{selected}.jet\"], [])\n    return b.plan(app)\n}}\nfn run() {{\n    generated_value()\n}}\n"
+    source_for :: (first: String, second: String, selected: String) -> "fn build(b: Build) {{\n    b.generate(\"{first}\") {{\n        fn generated_value() -> String {{ \"{first}\" }}\n    }}\n    b.generate(\"{second}\") {{\n        fn generated_value() -> String {{ \"{second}\" }}\n    }}\n    app :: b.add_executable(\"app\", [\"main.jet\", \".jet/generated/main/{selected}.jet\"], [])\n    b.default(app)\n}}\nfn run() {{\n    generated_value()\n}}\n"
     run_case :: (source: String, selected: String) -> {
         fs.write(root.join("main.jet"), source).expect("write selected generated source")
         uri :: "file://{root.join("main.jet").display()}"

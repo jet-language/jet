@@ -50,7 +50,7 @@ flash signature true active 100 rollback 1
 ## Friction
 
 - The author wrote four register records with 12 fields, four peripheral base constants, and all access wrappers by hand. This is library boilerplate, not a missing ability to represent data.
-- A package using host I/O and allocation needs `authority: { holds: { allow: [IO, Mem.Alloc] } }`; without it the first host run stopped at E1803. Adding the manifest entry made the run and build proceed.
+- A package using host I/O and allocation needs `authority: { allow: [IO, Mem.Alloc] }`; without it the first host run stopped at E1803. Adding the manifest entry made the run and build proceed.
 - `jet check` and default `jet run` produce 52 warnings for this small package, including repeated `L0505 (heap_growth_in_loop)` at plain type declarations and `L2510` hidden-cost warnings. They do not block the successful host result, but they obscure the timing signal.
 - Default interpreted `jet run .../module_replay.jet` reached `E0956` for the exported crypto helper, while `jet run --release .../module_replay.jet` printed `module verified true`. The diagnostic is accurate about that evaluator tier; the release/build workaround is available.
 - No speed claim is made. No physical board, flash probe, hardware debugger, or emulator run was possible after E3302 target admission failed.

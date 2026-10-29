@@ -2,7 +2,7 @@
 // declares types with the same names. `core.font` declares `enum FontStyle
 // { Body Title Monospace }` and `struct FontFace { family size style }`; the
 // declarations below reuse both names with a different variant order and a
-// different field order. Folded `prep` constants, field reads and matches must
+// different field order. Folded `comptime` constants, field reads and matches must
 // all resolve to these declarations, never to Core's (#4003).
 use core.font
 
@@ -18,7 +18,7 @@ struct FontFace {
     family: String
 }
 
-FACES :: prep {
+FACES :: comptime {
     [FontFace]{
         FontFace{family: "Serif", size: 12, style: Val(FontStyle.Body)},
         FontFace{family: "Code", size: 10, style: Val(FontStyle.Monospace)},
@@ -26,7 +26,7 @@ FACES :: prep {
     }
 }
 
-ORDER :: prep { [FontStyle]{FontStyle.Title, FontStyle.Body} }
+ORDER :: comptime { [FontStyle]{FontStyle.Title, FontStyle.Body} }
 
 fn describe(style: FontStyle) -> String {
     if style == {

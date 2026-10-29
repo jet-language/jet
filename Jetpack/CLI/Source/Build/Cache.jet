@@ -9,9 +9,9 @@
 // outputs) are bounded: one file at most 512 MiB and one action's files at
 // most 1 GiB together, checked against the opened file's size before any
 // byte is read and enforced again while reading.
-BUILD_MAX_ACTION_FILE_BYTES :: prep { 536870912 }
-BUILD_MAX_ACTION_TOTAL_BYTES :: prep { 1073741824 }
-BUILD_READ_CHUNK_BYTES :: prep { 1048576 }
+BUILD_MAX_ACTION_FILE_BYTES :: 536870912
+BUILD_MAX_ACTION_TOTAL_BYTES :: 1073741824
+BUILD_READ_CHUNK_BYTES :: 1048576
 
 // Rust `io::Error`: the kind the cache decisions branch on, and the message
 // `io_action` reports.
@@ -42,7 +42,6 @@ struct BuildIOError {
             .AlreadyExists(_) -> BuildIOKind.AlreadyExists
             .PermissionDenied(_) -> BuildIOKind.PermissionDenied
             .InvalidInput(_) -> BuildIOKind.InvalidInput
-            .InvalidData(_) -> BuildIOKind.InvalidData
             else -> BuildIOKind.Other
         }
         BuildIOError{kind, message: "{error}"}
@@ -155,8 +154,11 @@ fn build_restore_action_outputs(store: BuildArtifactStoreHandle, base: String, a
     if !matches -> return Err(BuildIOError.new(.InvalidData, "cached output record does not exactly match action declarations"))
     loop output in record.outputs {
         path :: build_resolve_under(base, output.path)
-        bytes :: store.get_blob(output.digest) ?? return Err(err)
-        found :: bytes ?? return Err(BuildIOError.new(.NotFound, "CAS blob is missing"))
+        found :: if store.get_blob(output.digest) == {
+            .Val(blob) -> blob
+            .None -> { return Err(BuildIOError.new(.NotFound, "CAS blob is missing")) }
+            .Err(error) -> { return Err(error) }
+        }
         build_atomic_restore_file(base, path, found)
     }
 }
@@ -227,10 +229,10 @@ fn build_atomic_restore_file(base: String, path: String, bytes: [U8]) BuildIOErr
         if directory.open_directory(part) == {
             .Ok(child) -> directory = child
             .Err(error) -> {
-                if error != .NotFound(_) -> return Err(BuildIOError.from(error))
+                if !(error == .NotFound(_)) -> return Err(BuildIOError.from(error))
                 if directory.create_directory(part, mode: Val(0o755)) == {
                     .Ok(_) -> {}
-                    .Err(created) -> if created != .AlreadyExists(_) -> return Err(BuildIOError.from(created))
+                    .Err(created) -> if !(created == .AlreadyExists(_)) -> return Err(BuildIOError.from(created))
                 }
                 directory = directory.open_directory(part) ?? return Err(BuildIOError.from(err))
             }
@@ -248,12 +250,12 @@ fn build_atomic_restore_file(base: String, path: String, bytes: [U8]) BuildIOErr
                 if directory.rename(temp_name, final_name) == {
                     .Ok(_) -> return
                     .Err(error) -> {
-                        _ :: directory.remove(temp_name)
+                        directory.remove(temp_name).drop("the restore stage is removed best-effort; the rename error is reported")
                         return Err(BuildIOError.from(error))
                     }
                 }
             }
-            .Err(error) -> if error != .AlreadyExists(_) -> return Err(BuildIOError.from(error))
+            .Err(error) -> if !(error == .AlreadyExists(_)) -> return Err(BuildIOError.from(error))
         }
     }
 }
@@ -280,11 +282,11 @@ fn build_ensure_real_directory_step(current: String, symlink: String, not_direct
             if !info.is_dir -> return Err(BuildIOError.new(.NotADirectory, not_directory))
         }
         .Err(error) -> {
-            if error != .NotFound(_) -> return Err(BuildIOError.from(error))
+            if !(error == .NotFound(_)) -> return Err(BuildIOError.from(error))
             if files.create_dir(current) == {
                 .Ok(_) -> {}
                 .Err(created) -> {
-                    if created != .AlreadyExists(_) -> return Err(BuildIOError.from(created))
+                    if !(created == .AlreadyExists(_)) -> return Err(BuildIOError.from(created))
                     again :: files.stat(current) ?? return Err(BuildIOError.from(err))
                     if again.is_symlink || !again.is_dir -> return Err(BuildIOError.new(.PermissionDenied, not_real))
                 }
@@ -322,14 +324,14 @@ fn build_hex_encode(bytes: [U8]) -> String Never! {
 }
 
 // Rust `hex_decode` (`RemoteCacheError::InvalidRecord` messages).
-fn build_hex_decode(value: String) -> [U8] String! {
+fn build_hex_decode(value: String) -> [U8] BuildIOError! {
     raw :: value.bytes()
-    if raw.len() % 2 != 0 -> return Err("hex field has odd length")
+    if raw.len() % 2 != 0 -> return Err(BuildIOError.new(.InvalidData, "hex field has odd length"))
     out := [U8]{}
     index := 0
     loop index < raw.len() {
-        high :: build_hex_digit(raw[index]) ?? return Err("hex field contains a non-hex digit")
-        low :: build_hex_digit(raw[index + 1]) ?? return Err("hex field contains a non-hex digit")
+        high :: build_hex_digit(raw[index]) ?? return Err(BuildIOError.new(.InvalidData, "hex field contains a non-hex digit"))
+        low :: build_hex_digit(raw[index + 1]) ?? return Err(BuildIOError.new(.InvalidData, "hex field contains a non-hex digit"))
         &out.push(U8{high * 16 + low})
         index += 2
     }
@@ -428,9 +430,9 @@ fn build_read_action_record(store: BuildArtifactStoreHandle, key: String) -[FS, 
         if line.starts_with("failure=") {
             value :: line.removeprefix("failure=")
             if failure_report != None || value == "" -> return Err(BuildIOError.new(.InvalidData, "action record has an invalid failure report"))
-            decoded :: build_hex_decode(value) ?? return Err(BuildIOError.new(.InvalidData, err))
+            decoded :: build_hex_decode(value)
             report_text :: String.from_bytes(decoded) ?? return Err(BuildIOError.new(.InvalidData, "action failure report is not UTF-8"))
-            report :: build_report_from_json(report_text) ?? return Err(BuildIOError.new(.InvalidData, "action failure report is invalid: {err}"))
+            report :: build_report_from_json(report_text) ?? return Err(BuildIOError.new(.InvalidData, "action failure report is invalid: {err.message}"))
             failure_report = Val(report)
             next
         }
@@ -497,10 +499,10 @@ fn build_record_cache_event(action: String, key: String, status: ActionCacheStat
     operation_id :: sys.get("JET_COMPTIME_OPERATION_ID") ?? "unknown"
     payload :: "{{\"schema\":\"jet.comptime-cache-event.v1\",\"mode\":{foundation_json_quote(mode)},\"operation_id\":{foundation_json_quote(operation_id)},\"action\":{foundation_json_quote(action)},\"key\":{foundation_json_quote(key)},\"phase\":{foundation_json_quote(phase)},\"status\":{foundation_json_quote(labels.status)},\"reason\":{foundation_json_quote(labels.reason)},\"outcome\":{rendered_outcome}}}\n"
     parent :: files.dirname(path)
-    if parent != "" -> _ := files.create_dir_all(parent)
+    if parent != "" -> files.create_dir_all(parent).drop("cache observation evidence is best-effort")
     writer :: files.append(path, links: .Refuse) ?? return
-    _ := writer.write_all(payload.bytes())
-    _ := writer.flush()
+    writer.write_all(payload.bytes()).drop("cache observation evidence is best-effort")
+    writer.flush().drop("cache observation evidence is best-effort")
 }
 
 // The `jet.err/v1` wire of one structured report (Rust
@@ -544,35 +546,39 @@ fn build_report_to_json(report: DiagnosticBuildError) -> String Never! {
 
 // Rust `JetErrorReport::from_json`: decode the canonical wire and refuse any
 // spelling `build_report_to_json` would not write back byte for byte.
-fn build_report_from_json(text: String) -> DiagnosticBuildError String! {
-    tree :: json.parse(text) ?? return Err("invalid error report: {err.reason}")
+fn build_report_from_json(text: String) -> DiagnosticBuildError BuildIOError! {
+    tree :: json.parse(text) ?? return Err(build_report_invalid("invalid error report: {err.reason}"))
     report :: build_report_from_tree(tree)
-    if build_report_to_json(report) != text -> return Err("error report is not canonical")
+    if build_report_to_json(report) != text -> return Err(build_report_invalid("error report is not canonical"))
     Ok(report)
 }
 
-fn build_report_object(value: Dyn, name: String) -> [String: Dyn] String! {
-    pkg_json_object(value) ?? return Err("error report {name} is not an object")
+fn build_report_invalid(message: String) -> BuildIOError Never! {
+    BuildIOError.new(.InvalidData, message)
 }
 
-fn build_report_text(value: Dyn, name: String) -> String String! {
-    pkg_json_text(value) ?? return Err("error report {name} is not text")
+fn build_report_object(value: Dyn, name: String) -> [String: Dyn] BuildIOError! {
+    pkg_json_object(value) ?? return Err(build_report_invalid("error report {name} is not an object"))
 }
 
-fn build_report_field(fields: [String: Dyn], name: String) -> Dyn String! {
-    fields.get(name) ?? return Err("error report lacks {name}")
+fn build_report_text(value: Dyn, name: String) -> String BuildIOError! {
+    pkg_json_text(value) ?? return Err(build_report_invalid("error report {name} is not text"))
 }
 
-fn build_report_u32(value: Dyn, name: String) -> Int String! {
+fn build_report_field(fields: [String: Dyn], name: String) -> Dyn BuildIOError! {
+    fields.get(name) ?? return Err(build_report_invalid("error report lacks {name}"))
+}
+
+fn build_report_u32(value: Dyn, name: String) -> Int BuildIOError! {
     if value == {
-        .Int(number) -> if number >= 0 && number <= 4294967295 -> Ok(number) else -> Err("error report {name} is not a u32")
-        else -> Err("error report {name} is not an integer")
+        .Int(number) -> if number >= 0 && number <= 4294967295 -> Ok(number) else -> Err(build_report_invalid("error report {name} is not a u32"))
+        else -> Err(build_report_invalid("error report {name} is not an integer"))
     }
 }
 
-fn build_report_from_tree(value: Dyn) -> DiagnosticBuildError String! {
+fn build_report_from_tree(value: Dyn) -> DiagnosticBuildError BuildIOError! {
     fields :: build_report_object(value, "report")
-    if build_report_text(build_report_field(fields, "schema"), "schema") != "jet.err/v1" -> return Err("unsupported error report schema")
+    if build_report_text(build_report_field(fields, "schema"), "schema") != "jet.err/v1" -> return Err(build_report_invalid("unsupported error report schema"))
     message :: build_report_text(build_report_field(fields, "message"), "message")
     code_value :: build_report_field(fields, "code")
     code :: if code_value == {
@@ -585,13 +591,13 @@ fn build_report_from_tree(value: Dyn) -> DiagnosticBuildError String! {
         .Null -> {}
         .Object(_) -> &causes.push(build_report_from_tree(cause_value))
         .Array(items) -> loop item in items -> &causes.push(build_report_from_tree(item))
-        else -> return Err("error report cause is not null, an object, or an array")
+        else -> return Err(build_report_invalid("error report cause is not null, an object, or an array"))
     }
     typed_identity := String?{None}
     if fields.get("typed_identity") == .Val(identity) -> typed_identity = Val(build_report_text(identity, "typed_identity"))
     context_frames := [DiagnosticErrorContextFrame]{}
     if fields.get("context_frames") == .Val(raw) {
-        items :: pkg_json_array(raw) ?? return Err("error report context_frames is not an array")
+        items :: pkg_json_array(raw) ?? return Err(build_report_invalid("error report context_frames is not an array"))
         loop item in items {
             frame :: build_report_object(item, "context frame")
             &context_frames.push(DiagnosticErrorContextFrame{
@@ -603,10 +609,10 @@ fn build_report_from_tree(value: Dyn) -> DiagnosticBuildError String! {
     }
     // The executor's reports carry no origin or journey; a report that does
     // cannot be written back canonically and is refused.
-    if fields.get("origin") != None || fields.get("source_journey") != None -> return Err("error report is not canonical")
+    if fields.has_key("origin") || fields.has_key("source_journey") -> return Err(build_report_invalid("error report is not canonical"))
     conversion_history := [DiagnosticErrorConversion]{}
     if fields.get("conversion_history") == .Val(raw) {
-        items :: pkg_json_array(raw) ?? return Err("error report conversion_history is not an array")
+        items :: pkg_json_array(raw) ?? return Err(build_report_invalid("error report conversion_history is not an array"))
         loop item in items {
             conversion :: build_report_object(item, "conversion")
             &conversion_history.push(DiagnosticErrorConversion{
@@ -621,7 +627,7 @@ fn build_report_from_tree(value: Dyn) -> DiagnosticBuildError String! {
         values :: build_report_field(detail, "fields")
         pairs :: if values == {
             .Object(entries) -> entries
-            else -> { return Err("error report detail fields is not an object") }
+            else -> { return Err(build_report_invalid("error report detail fields is not an object")) }
         }
         detail_fields :: loop pair in pairs -> DiagnosticErrorField{name: pair.key, value: build_report_encode_value(pair.value)}
         span_value :: build_report_field(detail, "source_span")
@@ -737,7 +743,7 @@ fn build_hex4(value: Int) -> String Never! {
     rest := value
     loop rest > 0 {
         out = "{digits.slice(rest % 16, rest % 16 + 1)}{out}"
-        rest = rest / 16
+        rest = rest /% 16
     }
     loop out.len() < 4 -> out = "0{out}"
     out

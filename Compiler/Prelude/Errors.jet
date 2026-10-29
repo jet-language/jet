@@ -1,0 +1,218 @@
+// (ratified 2026-08-17, card #2018): the standard library declares
+// the conversion for its own error family. A program can write `fn run()` and
+// pass a Core failure up automatically without declaring anything, because
+// these declarations already sit on the existing rail. One source;
+// every tier lowers the same `impl <CoreError> -> Err` block, the same way
+// `Prelude/Units.jet` ships one dimension catalog.
+//
+// Sema injects only the conversions a module actually exercises — fallible
+// calls whose error type is a family member converting into the default `Err`.
+// Unused members are not copied into the module, so a defect in one conversion
+// cannot break a program that never produces that error.
+//
+// An author who wants the failure named still writes the named form
+// (`fn run() !EncodingError`), and that stays correct: this file only makes the
+// unnamed form work.
+//
+// This rule keeps the rest of the rule intact. A user error type still
+// needs its own `impl MyError -> Err { … }`; nothing here weakens that. A module
+// that declares its own conversion for one of these pairs wins over the shipped
+// one, so a package can still say how its program reports a Core failure.
+//
+// Family membership is derived, not chosen by taste. A Core error type belongs
+// here when all three hold:
+//   1. the Prelude registers it printable — `auto_printable` in
+//      `TraitRegistry::register_synthetic_display_debug`, so the Prelude already
+//      owns its failure text;
+//   2. a Core signature returns it in the error position of a `T !E` result, so
+//      a program can actually receive one; and
+//   3. showing it is not prohibited.
+//
+// `CryptoError` and `FileCryptoError` are members. Both
+// are payload-free enums that name only which check failed, so reporting the
+// case carries no secret. The secret-bearing types (`Secret`, `SigningKey`,
+// `X25519SecretKey`, `SharedSecret`) keep their E0915 print ban.
+//
+// Deliberately outside the family:
+// * `TaskFailure` — gives cancellation and deadline their own
+//     carrier and report; it is not a library error family member.
+//   * `[FieldError]` — the Core decode surface returns a list, and a conversion
+//     source is one named type.
+//   * component types (`DataErrorKind`, `EncodingCause`, `IOContext`,
+//     `NetErrorDetail`, `NetDNSError`, …) — no Core call fails with one.
+
+// Original compiler-owned declarations. These private records are ordinary
+// checked nominal types; only Err carries the existing default-error role.
+// Fresh construction evaluates the declared metadata default in this owner.
+// Copy, context and conversion retain the existing stored metadata instead.
+struct __jet_ErrorContextFrame {
+    text: String
+    file: String
+    line: Int
+}
+struct __jet_ErrorConversion {
+    source: String
+    target: String
+}
+struct __jet_ErrorField {
+    name: String
+    value: String
+}
+struct __jet_ErrorSpan {
+    start: Int
+    end: Int
+}
+struct __jet_ErrorDetails {
+    variant: String
+    fields: [__jet_ErrorField]
+    source_span: __jet_ErrorSpan?
+}
+struct __jet_ErrorMetadata {
+    typed_identity: String?
+    context_frames: [__jet_ErrorContextFrame]
+    conversion_history: [__jet_ErrorConversion]
+    details: __jet_ErrorDetails?
+}
+struct Err {
+    message: String
+    code: String?
+    cause: Err?
+    __jet___memo_error_metadata: __jet_ErrorMetadata{__jet_ErrorMetadata{
+        typed_identity: None,
+        context_frames: [__jet_ErrorContextFrame]{},
+        conversion_history: [__jet_ErrorConversion]{},
+        details: None,
+    }}
+}
+
+impl AppError -> Err {
+    return Err("{self}")
+}
+
+impl ArchiveError -> Err {
+    return Err("{self}")
+}
+
+impl Base32Error -> Err {
+    return Err("{self}")
+}
+
+impl Base64Error -> Err {
+    return Err("{self}")
+}
+
+impl BuildError -> Err {
+    return Err("{self}")
+}
+
+impl BrowserError -> Err {
+    return Err("{self}")
+}
+impl CBORError -> Err {
+    return Err("{self}")
+}
+
+impl ComputeError -> Err {
+    return Err("{self}")
+}
+
+impl CryptoError -> Err {
+    return Err("{self}")
+}
+
+impl DBError -> Err {
+    return Err("{self}")
+}
+
+impl PluginError -> Err {
+    return Err("{self}")
+}
+
+impl DataError -> Err {
+    return Err("{self}")
+}
+
+impl EncodingError -> Err {
+    return Err("{self}")
+}
+
+impl EmailError -> Err {
+    return Err("{self}")
+}
+
+impl EnvError -> Err {
+    return Err("{self}")
+}
+
+impl FileCryptoError -> Err {
+    return Err("{self}")
+}
+
+impl HTTPError -> Err {
+    return Err("{self}")
+}
+
+impl HexError -> Err {
+    return Err("{self}")
+}
+
+impl IOError -> Err {
+    return Err("{self}")
+}
+
+impl MIMEError -> Err {
+    return Err("{self}")
+}
+
+impl ModError -> Err {
+    return Err("{self}")
+}
+
+impl NetError -> Err {
+    return Err("{self}")
+}
+
+impl PerfError -> Err {
+    return Err("{self}")
+}
+
+impl RangeError -> Err {
+    return Err("{self}")
+}
+
+impl RegexError -> Err {
+    return Err("{self}")
+}
+
+impl TextError -> Err {
+    return Err("{self}")
+}
+
+impl TimeError -> Err {
+    return Err("{self}")
+}
+
+impl UIHostError -> Err {
+    return Err("{self}")
+}
+
+impl URLError -> Err {
+    return Err("{self}")
+}
+
+impl UTF8Error -> Err {
+    return Err("{self}")
+}
+
+impl UUIDError -> Err {
+    return Err("{self}")
+}
+impl XMLError -> Err {
+    return Err("{self}")
+}
+
+
+impl WsError -> Err {
+    return Err("{self}")
+}
+

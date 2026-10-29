@@ -5,18 +5,15 @@
 // Rust `impl Fmt` methods are free `jfmt_<name>(f: &JetFmt, …)` functions;
 // Expressions.jet, Statements.jet and Items.jet hold the other Rust modules.
 use jet_foundation.[
-    AppliedRuleApplication,
+    AST_NODE_GENERATED,
     BinOp,
     Diagnostic,
     DIAGNOSTIC_ERROR,
     DIAGNOSTIC_LINT,
-    EnumLitArg,
     Expr,
     FencedStatement,
     Func,
-    ImportDecl,
     Item,
-    LValue,
     Marker,
     PolicyDeclaration,
     Program,
@@ -27,35 +24,27 @@ use jet_foundation.[
     Type,
     WebBucket,
     expr_span,
+    name_start,
+    type_name,
 ]
 use jet_lexer.[
-    STRING_PART_INTERPOLATION,
     TOKEN_BLOCK_COMMENT,
     TOKEN_COMMA,
-    TOKEN_DOT,
     TOKEN_EOF,
     TOKEN_GT,
-    TOKEN_HASH,
-    TOKEN_IDENT,
     TOKEN_LBRACE,
     TOKEN_LBRACKET,
     TOKEN_LINE_COMMENT,
     TOKEN_LPAREN,
     TOKEN_LT,
     TOKEN_MINUS,
-    TOKEN_QUESTION_DOT,
-    TOKEN_RAW_STRING,
     TOKEN_RBRACE,
     TOKEN_RBRACKET,
     TOKEN_RPAREN,
     TOKEN_SEMI,
     TOKEN_SHR,
-    TOKEN_STRING,
     TOKEN_UNIFIED_ARROW,
     Token,
-    TokenTables,
-    token_decoded,
-    token_string_parts,
     lex,
 ]
 
@@ -373,8 +362,8 @@ fn jfmt_is_simple_stmt(stmt: Stmt) -> Bool Never! {
 }
 
 fn jfmt_is_simple_expr(expr: Expr) -> Bool Never! {
-    if expr == .CallValue(callee, _, _) {
-        if callee == .Lambda(lambda) {
+    if expr == .CallValue(callee, _, _, _) {
+        if callee == .Lambda(lambda, _) {
             return !(lambda.meta.collecting_loop || lambda.meta.result_loop)
         }
     }
@@ -1277,14 +1266,14 @@ fn jfmt_fmt_control_body(f: &JetFmt, body: [Stmt]) {
 // path, or a `Bool`/`Char` literal.
 fn jfmt_self_typed(expr: Expr) -> Bool Never! {
     if expr == {
-        .Ident(_, _) | .Bool(_, _) | .Char(_, _) -> true
-        .Field(base, _, _) -> jfmt_self_typed(base)
+        .Ident(_, _, _) | .Bool(_, _, _) | .Char(_, _, _) -> true
+        .Field(base, _, _, _) -> jfmt_self_typed(base)
         else -> false
     }
 }
 
 fn jfmt_unwrap_redundant_optional_value(value: Expr) -> Expr Never! {
-    if value == .EnumLit(type_name, variant, _, args, _, _) {
+    if value == .EnumLit(type_name, variant, _, args, _, _, _) {
         // copy: a read-parameter rewriter returns a value that is not a redundant `Val(..)`
         // unchanged as a new tree (owner: the result) while the caller keeps the input (owner: the
         // read parameter, a payload view of the caller's tree); taking the input would need a
@@ -1302,8 +1291,8 @@ fn jfmt_unwrap_redundant_optional_value(value: Expr) -> Expr Never! {
 }
 
 fn jfmt_strip_optional_returns_in_if(expr: Expr) -> Expr Never! {
-    if expr == .If(cond, then_body, then_value, else_body, else_value, span) {
-        return Expr.If{cond: cond, then_body: jfmt_strip_optional_returns_in_body(then_body), then_value: then_value, else_body: jfmt_strip_optional_returns_in_body(else_body), else_value: jfmt_strip_optional_returns_in_if(else_value), span: span}
+    if expr == .If(cond, then_body, then_value, else_body, else_value, span, _) {
+        return Expr.If{cond: cond, then_body: jfmt_strip_optional_returns_in_body(then_body), then_value: then_value, else_body: jfmt_strip_optional_returns_in_body(else_body), else_value: jfmt_strip_optional_returns_in_if(else_value), span: span, id: AST_NODE_GENERATED}
     }
     // copy: a read-parameter rewriter returns an expression that is not an `if` unchanged as a new
     // tree (owner: the result) while the caller keeps the input (owner: the read parameter, a

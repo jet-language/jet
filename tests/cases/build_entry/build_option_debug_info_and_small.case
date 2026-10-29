@@ -1,0 +1,58 @@
+# #5005: the Bool rows `debug_info` (stock true) and `small` (stock false),
+# written `true`/`false` in a profile, a flag and `fn build`; a bare Bool flag
+# is `true`. `debug_info: false` leaves the DWARF sections out, so the crash
+# report prints addresses; `small: true` keeps inlining to the O1 limits.
+fixture: fixtures/build_debug_info
+env: NO_COLOR=1
+step: jet run main.jet
+cwd: open
+exit: 70
+stdout: = "depth: 3\n"
+stderr: ~ "Stop [E3012]: Stack overflow in `depth`" # with debug info the stop names the function
+stderr: ~ "--> main.jet:" # and its line
+step: jet run --debug-info=false main.jet
+cwd: open
+exit: 70
+stdout: = "depth: 3\n"
+stderr: ~ "Stop [E3012]: Stack overflow in `??` at 0x" # without debug info the stop prints the address
+stderr: !~ "--> main.jet:" # and no line
+step: jet run --profile=lean main.jet
+cwd: open
+exit: 70
+stderr: ~ "Stop [E3012]: Stack overflow in `??` at 0x" # the profile field turns debug info off
+step: jet build main.jet
+cwd: open
+exit: 0
+rename: open/.jet/build/main open/.jet/build/main_debug
+capture: debug_size = size file open/.jet/build/main_debug
+step: jet build --debug-info=false main.jet
+cwd: open
+exit: 0
+file: open/.jet/build/main size < {cap:debug_size}
+step: jet build --small main.jet
+cwd: open
+exit: 0
+step: jet build --optimize=full --small=true --debug-info main.jet
+cwd: open
+exit: 0
+step: jet build --debug-info=maybe main.jet
+cwd: open
+exit: 2
+stderr: ~ "Error [E2104]: `--debug-info=maybe` isn't a value of `debug_info`" # a Bool row takes true or false
+step: jet build --small=false --small main.jet
+cwd: open
+exit: 2
+stderr: ~ "Error [E2104]: `--small=false` and `--small` disagree" # the bare flag is true
+step: jet build
+cwd: code
+exit: 0
+stderr: !~ "note:" # no flag replaces a written value
+step: jet build --debug-info=true
+cwd: code
+exit: 0
+stderr: ~ "note: --debug-info=true replaces b.debug_info(false) at @build.jet:2 for this run" # the replace note spells the Bool call
+step: jet build
+cwd: refused_code
+exit: 1
+stderr: ~ "Error [E3502]: This isn't a value of build option `debug_info`" # a Bool row takes a Bool literal
+stderr: ~ "Fix: Write `b.debug_info(false)`" # the fix spells the row's value

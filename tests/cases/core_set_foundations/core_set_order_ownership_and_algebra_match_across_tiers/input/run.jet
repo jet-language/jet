@@ -1,0 +1,34 @@
+
+use core.collections.set as api
+
+fn run() {
+    seeded :: api.from_list([String]{"b", "a", "b", "c"})
+    print(api.to_list(seeded))
+    print(api.len(seeded))
+    print(api.is_empty(api.new()))
+
+    print(api.to_list(api.add(seeded, "a")))
+    print(api.to_list(api.add(seeded, "d")))
+    print(api.to_list(seeded))
+    print(api.to_list(api.discard(seeded, "a")))
+    print(api.to_list(api.remove(seeded, "b") ?? api.new()))
+    print(api.to_list(api.remove(seeded, "missing") ?? api.new()))
+
+    other :: api.from_list([String]{"c", "e", "b"})
+    print(api.to_list(api.union(seeded, other)))
+    print(api.to_list(api.intersection(seeded, other)))
+    print(api.to_list(api.difference(seeded, other)))
+    print(api.to_list(api.symmetric_difference(seeded, other)))
+    print(api.issubset(seeded, api.union(seeded, other)))
+    print(api.issuperset(api.union(seeded, other), seeded))
+    print(api.isdisjoint(seeded, api.from_list([String]{"z"})))
+
+    cloned_list := api.to_list(api.clone_set(seeded))
+    &cloned_list.push("tail")
+    print(api.to_list(seeded))
+    print(cloned_list)
+    exported_list := api.to_list(seeded)
+    &exported_list.push("tail")
+    print(api.to_list(seeded))
+    print(exported_list)
+}

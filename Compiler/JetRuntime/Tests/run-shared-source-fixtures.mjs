@@ -26,7 +26,7 @@ function command(bin,args,options={}) {
 if (mode === 'assemble') {
   mkdirSync(join(fixture,'Source'),{recursive:true});
   const paths = read('Compiler/JetRuntime/sources.list').split('\n').map(s=>s.trim()).filter(s=>s&&!s.startsWith('#'));
-  paths.push('Compiler/JetRuntime/Tests/SharedSourceTests.jet');
+  paths.push('Compiler/JetRuntime/Tests/Fragments.fixture/SharedSourceTests.jet');
   const unit = paths.map(read).join('\n');
   const names = [...unit.matchAll(/^#Export\(c\)\s+fn\s+(\w+)\(/gm)].map(m=>m[1]);
   if (new Set(names).size !== names.length) throw Error('duplicate fixture exports');

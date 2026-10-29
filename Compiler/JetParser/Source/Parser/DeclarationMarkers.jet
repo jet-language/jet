@@ -2,6 +2,7 @@
 // marker list on each AST node and return its newly computed typed projections.
 use jet_foundation.[
     Call,
+    CallLabel,
     EnumDef,
     EveryArg,
     EveryMarker,
@@ -12,6 +13,9 @@ use jet_foundation.[
     JobScope,
     JobSkip,
     Marker,
+    MaturityTag,
+    MetaAttr,
+    MetaField,
     NamedSpan,
     Span,
     StringMapEntry,
@@ -20,6 +24,7 @@ use jet_foundation.[
     UnOp,
     ast_job_metadata,
     expr_span,
+    marker_registered_signature,
 ]
 
 fn parser_marker_is_signed_auto_derive(name: String) -> Bool Never! {
@@ -72,8 +77,11 @@ fn parser_apply_enum_type_markers(value: &EnumDef, markers: [Marker]) Never! {
     }
 }
 
+// Policy.rs `marker_argument_shape_error`: E0930 names the rule's registered
+// signature.
 fn parser_marker_shape_error(state: &JetParserState, marker: Marker) {
-    parser_add_error_code(&state, "E0930", marker.span, "`#{marker.name}` arguments do not match its registered signature", "marker arguments use the same call grammar and typed signature as function arguments", "match the registered marker signature")
+    expected :: "{marker.name}{marker_registered_signature(marker.name)}"
+    parser_add_error_code(&state, "E0930", marker.span, "`#{marker.name}` arguments do not match `{expected}`", "marker arguments use the same call grammar and typed signature as function arguments", "match the registered signature `{expected}`")
 }
 
 // The layout fact of a
@@ -95,23 +103,23 @@ fn parser_layout_marker_fact(state: &JetParserState, markers: [Marker], grouped:
         return None
     }
     kind_expr :: values[0] ?? return None
-    if kind_expr == .Ident(variant, variant_span) {
+    if kind_expr == .Ident(variant, variant_span, _) {
         tag_width := false
         alignment := Int?{None}
         alignment_span := Span?{None}
         alignment_target := false
         has_alignment := false
         if values[1] == .Val(value) {
-            if value == .Ident(_, _) {
+            if value == .Ident(_, _, _) {
                 tag_width = true
             } else if parser_layout_align_call(value) == .Val(call) {
                 has_alignment = true
                 alignment_target = call.args.len() == 2
                 argument :: call.args[if alignment_target -> 1 else -> 0].expr
-                if argument == .Int(number, number_span, _, _) && number >= 0 {
+                if argument == .Int(number, number_span, _, _, _) && number >= 0 {
                     alignment = Val(number)
                     alignment_span = Val(number_span)
-                } else if argument == .Unary(op, operand, _) && op == UnOp.Neg && operand == .Int(_, _, _, _) {
+                } else if argument == .Unary(op, operand, _, _) && op == UnOp.Neg && operand == .Int(_, _, _, _, _) {
                     alignment_span = Val(expr_span(argument))
                 } else {
                     parser_add_fatal_code(&state, "E1105", expr_span(argument), "`align` requires one integer byte value (or `target, N`)", "`#Layout(c, align(N))` is compiler-owned ABI metadata", "write `align(64)` or `align(target, 2097152)`")
@@ -170,7 +178,7 @@ fn parser_layout_grouped_fact(state: &JetParserState, marker: Marker, is_enum: B
         return None
     }
     first :: parser_marker_expression(marker, 0) ?? return None
-    if first == .Ident(variant, _) {
+    if first == .Ident(variant, _, _) {
         has_alignment := false
         alignment_target := false
         alignment := Int?{None}
@@ -179,9 +187,9 @@ fn parser_layout_grouped_fact(state: &JetParserState, marker: Marker, is_enum: B
                 has_alignment = true
                 alignment_target = call.args.len() == 2
                 argument :: call.args[if alignment_target -> 1 else -> 0].expr
-                if argument == .Int(number, _, _, _) && number >= 0 {
+                if argument == .Int(number, _, _, _, _) && number >= 0 {
                     alignment = Val(number)
-                } else if argument == .Unary(op, operand, _) && op == UnOp.Neg && operand == .Int(_, _, _, _) {
+                } else if argument == .Unary(op, operand, _, _) && op == UnOp.Neg && operand == .Int(_, _, _, _, _) {
                 } else {
                     parser_add_error_code(&state, "E1105", expr_span(argument), "`align` requires one integer byte value (or `align(target, N)`)", "`#Layout(c, align(N))` is compiler-owned ABI metadata", "write `align(64)` or `align(target, 2097152)`")
                 }
@@ -203,11 +211,11 @@ fn parser_layout_grouped_fact(state: &JetParserState, marker: Marker, is_enum: B
 
 // `align(N)` or `align(target, N)`.
 fn parser_layout_align_call(value: Expr) -> Call? {
-    if value == .Call(call) && call.name == "align" {
+    if value == .Call(call, _) && call.name == "align" {
         if call.args.len() == 1 -> return Val(call)
         if call.args.len() == 2 {
             // copy: `call` is a payload of read parameter `value`, which keeps the original; the Val carrier owns this one
-            if call.args[0].expr == .Ident(name, _) && name == "target" -> return Val(call.copy())
+            if call.args[0].expr == .Ident(name, _, _) && name == "target" -> return Val(call.copy())
         }
     }
     None
@@ -220,48 +228,52 @@ fn parser_layout_marker_span(markers: [Marker], grouped: Bool, layout: StructLay
         if candidate.name == "Layout" -> break candidate
     } ?? return None
     if layout != None -> return Val(marker.span)
-    if grouped && parser_marker_expression(marker, 0) == .Val(first) && first == .Ident(_, _) -> return Val(marker.span)
+    if grouped && parser_marker_expression(marker, 0) == .Val(first) && first == .Ident(_, _, _) -> return Val(marker.span)
     None
 }
 
-// Rust `marker_argument_bindings`: the argument bound to each named
-// parameter, positional ones first and labeled ones by name. None when the
-// arguments do not fit the parameter list; no diagnostic is reported here.
-fn parser_marker_bindings(marker: Marker, names: [String]) -> [Expr?]? {
-    values := [Expr?]{}
-    loop _ in 0..<names.len() -> &values.push(None)
+// Rust `BoundRuleArguments::parameter_for_source`: the parameter each written
+// argument binds, positional ones first and labeled ones by name. None when
+// the arguments do not fit the parameter list; no diagnostic is reported here.
+fn parser_marker_binding_slots(marker: Marker, names: [String]) -> [Int]? {
+    taken := [Bool]{}
+    loop _ in 0..<names.len() -> &taken.push(false)
+    slots := [Int]{}
     positional := 0
     saw_named := false
-    index := 0
-    loop index < marker.args.len() {
-        label := parser_marker_label(marker, index)
+    loop index in 0..<marker.args.len() {
+        label :: parser_marker_label(marker, index)
         parameter := -1
-        if {
-            label != "" -> {
-                saw_named = true
-                parameter_index := 0
-                loop parameter_index < names.len() {
-                    if names[parameter_index] == label {
-                        parameter = parameter_index
-                        break
-                    }
-                    parameter_index += 1
+        if label != "" {
+            saw_named = true
+            loop (parameter_index, name) in names {
+                if name == label {
+                    parameter = parameter_index
+                    break
                 }
-                if parameter < 0 -> return None
             }
-            else -> {
-                if saw_named -> return None
-                loop positional < values.len() && values[positional] != None -> positional += 1
-                if positional >= values.len() -> return None
-                parameter = positional
-                positional += 1
-            }
+            if parameter < 0 -> return None
+        } else {
+            if saw_named -> return None
+            loop positional < names.len() && taken[positional] -> positional += 1
+            if positional >= names.len() -> return None
+            parameter = positional
+            positional += 1
         }
-        if values[parameter] != None -> return None
-        argument :: parser_marker_expression(marker, index) ?? return None
-        values[parameter] = Val(argument)
-        index += 1
+        if taken[parameter] || parser_marker_expression(marker, index) == None -> return None
+        taken[parameter] = true
+        &slots.push(parameter)
     }
+    Val(slots)
+}
+
+// Rust `marker_argument_bindings`: the argument bound to each named
+// parameter. None when the arguments do not fit the parameter list.
+fn parser_marker_bindings(marker: Marker, names: [String]) -> [Expr?]? {
+    slots :: parser_marker_binding_slots(marker, names) ?? return None
+    values := [Expr?]{}
+    loop _ in 0..<names.len() -> &values.push(None)
+    loop (index, parameter) in slots -> values[parameter] = parser_marker_expression(marker, index)
     Val(values)
 }
 
@@ -285,9 +297,9 @@ fn parser_bind_marker_arguments(state: &JetParserState, marker: Marker, names: [
 // `Name`, `Type.Name`, or `.Name`; empty for any other expression.
 fn parser_marker_enum_variant(value: Expr) -> String {
     if value == {
-        .Ident(name, _) -> name
-        .Field(_, member, _) -> member
-        .EnumLit(_, variant, _, _, _, _) -> variant
+        .Ident(name, _, _) -> name
+        .Field(_, member, _, _) -> member
+        .EnumLit(_, variant, _, _, _, _, _) -> variant
         else -> ""
     }
 }
@@ -295,13 +307,87 @@ fn parser_marker_enum_variant(value: Expr) -> String {
 // Rust `marker_ident_path`: `A.B.C` as written; None for any other shape.
 fn parser_marker_ident_path(value: Expr) -> String? {
     if value == {
-        .Ident(name, _) -> Val(name)
-        .Field(base, member, _) -> {
+        .Ident(name, _, _) -> Val(name)
+        .Field(base, member, _, _) -> {
             prefix :: parser_marker_ident_path(base) ?? return None
             Val("{prefix}.{member}")
         }
         else -> None
     }
+}
+
+// Rust `marker_enum_path(target, "Target")`: a `#Target` argument as written,
+// without a leading `Target.` segment when another segment follows it.
+fn parser_marker_target_path(target: Expr) -> String? {
+    written :: parser_marker_ident_path(target) ?? return None
+    segments :: written.split(".").to_list()
+    kept := [String]{}
+    stripped := false
+    loop (index, segment) in segments {
+        if !stripped && segment == "Target" && index + 1 < segments.len() {
+            stripped = true
+            kept = [String]{}
+            next
+        }
+        &kept.push(segment)
+    }
+    Val(kept.join("."))
+}
+
+// A marker whose arguments do not bind ends its declaration (Rust returns the
+// `marker_argument_shape_error` from the applicator).
+fn parser_marker_shape_fatal(state: &JetParserState, marker: Marker) {
+    expected :: "{marker.name}{marker_registered_signature(marker.name)}"
+    parser_add_fatal_code(&state, "E0930", marker.span, "`#{marker.name}` arguments do not match `{expected}`", "marker arguments use the same call grammar and typed signature as function arguments", "match the registered signature `{expected}`")
+}
+
+// Rust `MetaAttr::maturity`: the closed maturity scale a `maturity:` value names.
+fn parser_maturity_tag(value: Expr) -> MaturityTag? Never! {
+    if value == .EnumLit(type_name, variant, _, args, _, _, _) && type_name == "" && args.len() == 0 {
+        if variant == "Experimental" -> return Val(MaturityTag.Experimental)
+        if variant == "Tested" -> return Val(MaturityTag.Tested)
+        if variant == "Hardened" -> return Val(MaturityTag.Hardened)
+    }
+    None
+}
+
+// Rust `meta_attr_from_marker`: `#Meta(category:, tunable:, maturity:)` as typed
+// fields. A bare `tunable` is the flag; a maturity outside the closed scale is
+// E0352. None after arguments that do not bind (fatal E0930).
+fn parser_meta_attr_from_marker(state: &JetParserState, marker: Marker) -> MetaAttr? {
+    names :: [String]{"category", "tunable", "maturity"}
+    slots :: parser_marker_binding_slots(marker, names) ?? {
+        parser_marker_shape_fatal(&state, marker)
+        return None
+    }
+    fields := [MetaField]{}
+    loop (index, parameter) in slots {
+        value :: parser_marker_expression(marker, index) ?? next
+        value_span :: expr_span(value)
+        written :: if index < marker.arg_labels.len() -> marker.arg_labels[index] else -> CallLabel?{None}
+        if written == None && value == .Ident(word, _, _) && word == "tunable" {
+            &fields.push(MetaField.Tunable{span: value_span})
+            next
+        }
+        name := names[parameter]
+        field_span := value_span
+        if written == .Val(label) {
+            name = label.name
+            field_span = label.span
+        }
+        span :: Span{start: field_span.start, end: value_span.end}
+        if name == "category" {
+            &fields.push(MetaField.Category{value: value, span: span})
+        } else if name == "maturity" {
+            if parser_maturity_tag(value) == None -> parser_add_error_code(&state, "E0352", value_span, "`#Meta` maturity needs a known maturity value", "maturity metadata is a closed documentation scale", "write `maturity: .Experimental`, `.Tested`, or `.Hardened`")
+            &fields.push(MetaField.Maturity{value: value, span: span})
+        } else if name == "tunable" && value == .Bool(flag, _, _) {
+            if flag -> &fields.push(MetaField.Tunable{span: span})
+        } else {
+            &fields.push(MetaField.Unknown{name: name, value: Val(value), span: field_span})
+        }
+    }
+    Val(MetaAttr{fields: fields, span: marker.span})
 }
 
 fn parser_job_metadata_error(state: &JetParserState, field: String, expected: String, span: Span) {
@@ -310,15 +396,15 @@ fn parser_job_metadata_error(state: &JetParserState, field: String, expected: St
 
 fn parser_job_word(value: Expr) -> String? {
     if value == {
-        .Ident(name, _) -> {
+        .Ident(name, _, _) -> {
             return Val(name)
         }
-        .EnumLit(_, variant, _, args, _, _) -> {
+        .EnumLit(_, variant, _, args, _, _, _) -> {
             if args.len() == 0 {
                 return Val(variant)
             }
         }
-        .Str(parts, _) -> {
+        .Str(parts, _, _) -> {
             if parts.len() == 1 {
                 if parts[0] == {
                     .Lit(text) -> {
@@ -341,8 +427,8 @@ fn parser_job_static_word(value: Expr) -> String? {
     word := parser_job_word(value)
     if word != None -> return word
     if value == {
-        .Int(number, _, _, _) -> return Val("{number}")
-        .Bool(boolean, _) -> return Val("{boolean}")
+        .Int(number, _, _, _, _) -> return Val("{number}")
+        .Bool(boolean, _, _) -> return Val("{boolean}")
         else -> return None
     }
 }
@@ -350,7 +436,7 @@ fn parser_job_static_word(value: Expr) -> String? {
 fn parser_job_string_list(state: &JetParserState, marker: Marker, field: String, value: Expr?) -> [String]? {
     expression :: value ?? return Val([String]{})
     if expression == {
-        .ListLit(values, _) -> {
+        .ListLit(values, _, _) -> {
             result := [String]{}
             loop item in values {
                 word :: parser_job_word(item) ?? {
@@ -379,7 +465,7 @@ fn parser_job_skip(state: &JetParserState, marker: Marker, expression: Expr) -> 
         return Val(JobSkip.Always{reason: reason})
     }
     if expression == {
-        .EnumLit(_, variant, _, args, _, _) -> {
+        .EnumLit(_, variant, _, args, _, _, _) -> {
             if variant != "Unless" || args.len() != 1 {
                 parser_job_metadata_error(&state, "skip", "a reason string or .Unless(.Platform(.Linux))", marker.span)
                 return None
@@ -394,7 +480,7 @@ fn parser_job_skip(state: &JetParserState, marker: Marker, expression: Expr) -> 
                 return None
             }
             if value == {
-                .EnumLit(_, platform_constructor, _, platform_args, _, _) -> {
+                .EnumLit(_, platform_constructor, _, platform_args, _, _, _) -> {
                     if platform_constructor != "Platform" || platform_args.len() != 1 {
                         parser_job_metadata_error(&state, "skip", ".Unless(.Platform(.Linux))", marker.span)
                         return None
@@ -433,7 +519,7 @@ fn parser_job_skip(state: &JetParserState, marker: Marker, expression: Expr) -> 
 
 fn parser_job_limits(state: &JetParserState, marker: Marker, expression: Expr) -> [StringMapEntry]? {
     if expression == {
-        .MapLit(entries, _) -> {
+        .MapLit(entries, _, _) -> {
             limits := [StringMapEntry]{}
             loop entry in entries {
                 key :: parser_job_word(entry.key) ?? {
@@ -479,7 +565,7 @@ fn parser_job_parallel(state: &JetParserState, marker: Marker, expression: Expr)
         if reason == "none" || reason == "None" -> return None
     }
     if expression == {
-        .Int(value, _, _, _) -> {
+        .Int(value, _, _, _, _) -> {
             if value > 0 -> return Val(value)
         }
         else -> {}
@@ -554,8 +640,8 @@ fn parser_every_marker_from_marker(state: &JetParserState, marker: Marker) -> Ev
     values :: parser_bind_marker_arguments(&state, marker, [String]{"schedule"}, 1) ?? return None
     schedule :: values[0] ?? return None
     arg := if schedule == {
-        .UnitLit(_, int, float, suffix, suffix_span, _) -> EveryArg.Duration{int: int, float: float, suffix: suffix, suffix_span: suffix_span}
-        .Str(parts, span) -> if {
+        .UnitLit(_, int, float, suffix, suffix_span, _, _) -> EveryArg.Duration{int: int, float: float, suffix: suffix, suffix_span: suffix_span}
+        .Str(parts, span, _) -> if {
             parts.len() == 1 -> {
                 if parts[0] == {
                     .Lit(text) -> EveryArg.WallClock{text: text, text_span: span}

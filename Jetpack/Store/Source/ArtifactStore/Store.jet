@@ -5,6 +5,28 @@
 // admission against a cap and a free-disk reserve, and deterministic LRU
 // pruning. Corrupt entries are moved to `quarantine/` before a miss is
 // reported, so a later publish repairs them.
+use core.files as files
+use core.time as time
+
+// One action record of a batch publication (Rust `(ActionHandle, Vec<u8>)`).
+struct ArtifactActionPublication {
+    action: ActionHandle
+    bytes: [U8]
+}
+
+// One journal line to append (Rust `(&str, &EntryKey, u64)`).
+struct ArtifactJournalAppend {
+    operation: String
+    key: ArtifactEntryKey
+    length: Int
+}
+
+// One encoded action record a batch writes (Rust `(PathBuf, EntryKey, Vec<u8>)`).
+struct ArtifactPendingWrite {
+    path: String
+    key: ArtifactEntryKey
+    encoded: [U8]
+}
 
 // A deterministic store listing entry.
 struct ArtifactEntryStatus {
@@ -326,6 +348,15 @@ struct ArtifactStore {
     }
 
     fn get_action(self, action: ActionHandle) -[FS, Env, Exec, Time, Rand]> [U8]? ArtifactStoreError! {
+        record :: self.get_action_untouched(action)
+        if record != None -> self.touch_actions([ActionHandle]{action})
+        Ok(record)
+    }
+
+    // Read one action record without recording the use in the journal. A
+    // caller that reads many records in one run records the uses together
+    // with `touch_actions` (Rust lib.rs:876).
+    fn get_action_untouched(self, action: ActionHandle) -[FS, Env, Exec, Time, Rand]> [U8]? ArtifactStoreError! {
         key :: ArtifactEntryKey.Action(action.key())
         path :: self.action_path(action)
         if store_artifact_read_file(path) == {
@@ -336,10 +367,7 @@ struct ArtifactStore {
             }
             .Bytes(bytes) -> {
                 if store_artifact_decode_action(action, bytes) == {
-                    .Ok(record) -> {
-                        self.touch_after_read(key, bytes.len())
-                        Ok(Val(record))
-                    }
+                    .Ok(record) -> Ok(Val(record))
                     .Err(error) -> {
                         if store_artifact_is_unsupported_version(bytes) -> return Ok(None)
                         self.quarantine_after_read(key, path, error.reason)
@@ -348,6 +376,73 @@ struct ArtifactStore {
                 }
             }
         }
+    }
+
+    // Record one use of each stored action record under one lock and one
+    // journal write. A failure only costs eviction order (Rust lib.rs:898).
+    fn touch_actions(self, actions: [ActionHandle]) Never! -[FS, Env, Time, Rand]> {
+        if actions.len() == 0 -> return
+        lock :: self.acquire_lock() ?? return
+        defer close(^lock)
+        entries := [ArtifactJournalAppend]{}
+        loop action in actions {
+            info :: files.stat(self.action_path(action)) ?? next
+            &entries.push(ArtifactJournalAppend{operation: "touch", key: ArtifactEntryKey.Action(action.key()), length: info.size})
+        }
+        self.append_journal_entries_locked(entries).drop("recency is advisory; a failed touch only costs eviction order")
+    }
+
+    // Publish many action records under one lock, one capacity check and one
+    // journal write. A key that already holds different bytes is left as it
+    // is (the `Conflict` of `publish_action`); the others still land.
+    fn publish_actions(self, records: [ArtifactActionPublication]) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
+        self.publish_action_batch(records, true)
+    }
+
+    // `publish_actions` for records that only cache recomputable results:
+    // each record is written without its own disk syncs. A read verifies
+    // every record against its digest, so a record a crash lost or tore reads
+    // as missing and its result is recomputed (Rust lib.rs:931).
+    fn publish_cache_actions(self, records: [ArtifactActionPublication]) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
+        self.publish_action_batch(records, false)
+    }
+
+    // Rust lib.rs:935 `publish_action_batch`.
+    fn publish_action_batch(self, records: [ArtifactActionPublication], durable: Bool) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
+        if records.len() == 0 -> return
+        self.ensure_layout()
+        lock :: self.acquire_lock() ?? return Err(err)
+        defer close(^lock)
+        journal := [ArtifactJournalAppend]{}
+        pending := [ArtifactPendingWrite]{}
+        loop record in records {
+            path :: self.action_path(record.action)
+            key :: ArtifactEntryKey.Action(record.action.key())
+            if store_artifact_read_file(path) == {
+                .Missing -> {}
+                .Corrupt(reason) -> self.quarantine_locked(key, path, reason)
+                .Bytes(existing) -> {
+                    if store_artifact_decode_action(record.action, existing) == {
+                        .Ok(value) -> {
+                            if value == record.bytes -> &journal.push(ArtifactJournalAppend{operation: "touch", key: key, length: existing.len()})
+                            next
+                        }
+                        .Err(error) -> self.quarantine_locked(key, path, error.reason)
+                    }
+                }
+            }
+            &pending.push(ArtifactPendingWrite{path: path, key: key, encoded: store_artifact_encode_action(record.action, record.bytes)})
+        }
+        if pending.len() > 0 {
+            incoming := 0
+            loop write in pending -> incoming = store_artifact_saturating_add(incoming, write.encoded.len())
+            self.ensure_capacity_locked(incoming, pending[0].path)
+        }
+        loop write in pending {
+            if durable -> store_artifact_atomic_write(write.path, write.encoded) else -> store_artifact_replace_unsynced(write.path, write.encoded)
+            &journal.push(ArtifactJournalAppend{operation: "put", key: write.key, length: write.encoded.len()})
+        }
+        self.append_journal_entries_locked(journal)
     }
 
     fn action(self, key: String) -> ActionHandle Never! { ActionHandle.from_key(key) }
@@ -783,10 +878,15 @@ struct ArtifactStore {
         }
     }
 
-    // Rust append_journal_entries_locked for one entry: one read of the
-    // journal's final line and one synced write. Only a torn or corrupt tail
-    // compacts; full readers (status, prune, compaction) verify every line.
     fn append_journal_locked(self, operation: String, key: ArtifactEntryKey, length: Int) ArtifactStoreError! -[FS, Env, Rand]> {
+        self.append_journal_entries_locked([ArtifactJournalAppend]{ArtifactJournalAppend{operation: operation, key: key, length: length}})
+    }
+
+    // One journal line per entry after one read of the journal's final line
+    // and one synced write (Rust lib.rs:1464). Only a torn or corrupt tail
+    // compacts; full readers (status, prune, compaction) verify every line.
+    fn append_journal_entries_locked(self, entries: [ArtifactJournalAppend]) ArtifactStoreError! -[FS, Env, Rand]> {
+        if entries.len() == 0 -> return
         journal_path :: files.join(self.root(), "journal")
         last_sequence := store_artifact_journal_tail_sequence(journal_path)
         if last_sequence == None {
@@ -794,8 +894,12 @@ struct ArtifactStore {
             compacted :: store_artifact_read_journal(journal_path)
             last_sequence = Val(compacted.last_sequence)
         }
-        sequence :: store_artifact_saturating_add(last_sequence ?? 0, 1)
-        store_artifact_append_synced(journal_path, store_artifact_journal_line(operation, key, length, sequence).bytes())
+        base :: last_sequence ?? 0
+        lines := [String]{}
+        loop (index, entry) in entries {
+            &lines.push(store_artifact_journal_line(entry.operation, entry.key, entry.length, store_artifact_saturating_add(base, index + 1)))
+        }
+        store_artifact_append_synced(journal_path, lines.join("").bytes())
     }
 
     // Rewrite the journal as one `put` per present entry, oldest use first

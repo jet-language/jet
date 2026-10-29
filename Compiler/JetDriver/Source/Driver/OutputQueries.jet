@@ -1,6 +1,6 @@
 // Inspection projects sema-selected callable facts and target layout facts;
 // it never resolves an entry name or reconstructs layout from source text.
-use jet_foundation.[Item, ResolvedOutput, JetTargetLayout]
+use jet_foundation.[ResolvedOutput, JetTargetLayout]
 use jet_sema.[SemaOutputIntent, SemaLayoutProjectionRow]
 
 struct JetDriverOutputLayoutRow {
@@ -20,7 +20,7 @@ fn jet_driver_output_query(request: ^JetDriverCompileRequest, address: String?) 
     selected.mode = JetDriverCompileMode.Doc
     selected.output_intent = SemaOutputIntent.Run
     selected.output_address = address
-    compile :: jet_driver_compile_mir(^selected)
+    compile :: jet_driver_compile(^selected)
     outputs := [ResolvedOutput]{}
     layouts := [JetDriverOutputLayoutRow]{}
     target_triple := ""

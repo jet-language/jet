@@ -1,0 +1,36 @@
+
+use core.encoding.xml as xml
+use core.encoding as encoding
+use core.files as files
+
+fn run() {
+    input :: files.open("input.xml") ?? panic("open")
+    output :: files.create("output.xml") ?? panic("create")
+    reader :: xml.reader(^input) ?? panic("reader")
+    writer :: xml.writer(^output) ?? panic("writer")
+    loop true {
+        maybe :: reader.next() ?? panic("next")
+        if maybe == {
+            Val(event) -> { writer.write(event) ?? panic("write") }
+            None -> { break }
+        }
+    }
+    writer.finish() ?? panic("finish")
+    writer.finish() ?? panic("idempotent finish")
+    input16 :: files.open("input.xml") ?? panic("open utf16 source")
+    output16 :: files.create("output-utf16.xml") ?? panic("create utf16")
+    reader16 :: xml.reader(^input16) ?? panic("reader utf16")
+    render16 := xml.XMLRenderOptions{ encoding: .UTF16LE, lexical: .Deterministic }
+    writer16 :: xml.writer(^output16, encoding.EncodingLimits.safe(), render16) ?? panic("writer utf16")
+    loop true {
+        maybe :: reader16.next() ?? panic("next utf16")
+        if maybe == {
+            Val(event) -> { writer16.write(event) ?? panic("write utf16") }
+            None -> { break }
+        }
+    }
+    writer16.finish() ?? panic("finish utf16")
+    tree :: xml.parse("<r xmlns:q='urn:q' q:z='2' a='1'><e/></r>") ?? panic("parse")
+    options := xml.XMLCanonical{ mode: .Exclusive10, comments: false, inclusive_prefixes: ["q"] }
+    print(xml.canonical(tree, options) ?? panic("canonical"))
+}

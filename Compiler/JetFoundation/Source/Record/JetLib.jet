@@ -8,14 +8,14 @@
 // header before it writes or maps the payload. Moved from PackageModel's
 // Artifacts/JetLibStamp.jet + JetLibTrust.jet; no second wire owner.
 
-JETLIB_MAGIC :: prep { "jet-jetlib-v3" }
-JETLIB_ABI_VERSION :: prep { 2 }
-JETLIB_ABI_IDENTITY :: prep { "jet.library.abi.v2;call=extern-c;scalar=homogeneous;access=read-write-move;text=jet-text-v1;ptr-len=checked-utf8" }
-JETLIB_MAX_HEADER_ITEMS :: prep { 4096 }
-JETLIB_MAX_HEADER_FIELD_BYTES :: prep { 1048576 }
-JETLIB_MAX_EXPORT_PARAMS :: prep { 4096 }
+JETLIB_MAGIC :: "jet-jetlib-v3"
+JETLIB_ABI_VERSION :: 2
+JETLIB_ABI_IDENTITY :: "jet.library.abi.v2;call=extern-c;scalar=homogeneous;access=read-write-move;text=jet-text-v1;ptr-len=checked-utf8"
+JETLIB_MAX_HEADER_ITEMS :: 4096
+JETLIB_MAX_HEADER_FIELD_BYTES :: 1048576
+JETLIB_MAX_EXPORT_PARAMS :: 4096
 // Jet text has no NUL escape; the hostless fold lands this byte spelling.
-JETLIB_NUL :: prep { String.from_bytes([U8]{U8{0}}) ?? "" }
+JETLIB_NUL :: comptime { String.from_bytes([U8]{U8{0}}) ?? "" }
 
 // Actual compiler/host facts are passed by the existing identity provider.
 struct JetLibIdentity {

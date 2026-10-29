@@ -1,0 +1,16 @@
+# tests/fmt.rs::layout_compiler_fact_rejects_unknown_and_user_owned_at_members at tests/fmt.rs:2728; hand-port
+# Claim: derive T.LayoutFacts with `T.$unknown` yields E0302 whose message contains `$unknown` (tests/fmt.rs:2730-2736)
+# Claim: the E0302 fix text mentions `$layout` (tests/fmt.rs:2737) [visible only if jet check prints fixes]
+# Claim: user `struct Bad { @layout: Int }` yields E0003 (tests/fmt.rs:2739-2747)
+# Not ported: Rust reads the diagnostic fix field through Compiler::parse_source; the CLI check port asserts the message only if the fix text is printed (see steps)
+fixture: layout_compiler_fact_rejects_unknown_and_user_owned_at_members.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check a.jet
+exit: 1 # tests/fmt.rs:2730-2736 E0302 with $unknown
+stderr: ~ "E0302" # tests/fmt.rs:2730-2736 E0302 with $unknown
+stderr: ~ "$unknown" # tests/fmt.rs:2730-2736 E0302 with $unknown
+step: jet check b.jet
+exit: 1 # tests/fmt.rs:2739-2747 E0003 for user @layout member
+stderr: ~ "E0003" # tests/fmt.rs:2739-2747 E0003 for user @layout member

@@ -1,0 +1,333 @@
+// The IR builder's parallel List methods: para_map, para_filter,
+// para_partition and para_fold. The runtime's joined range scheduler
+// (jet_rt_native_para_walk) calls a helper over 64-item ranges; the helper
+// reads its inputs through a frame env the caller lends until every worker
+// has joined, and writes disjoint output slots.
+
+use jet_foundation.[Span, Type, TClosureOp, TypeTupleField, name_rows_set, name_rows_value, type_carrier_identity]
+
+// A callback's parameter types and result type.
+struct IRParaSignature {
+    params: [Type]
+    result: Type
+}
+
+fn ir_para_signature(ty: Type) -> IRParaSignature? Never! {
+    if ir_untag(ty) == .Fn(params, ret, _, _, _, _) {
+        result :: ret ?? return None
+        return Val(IRParaSignature{params: params.copy(), result: result.copy()})
+    }
+    None
+}
+
+// The id of parallel helper `role` for `ty`, built on first use; -1 with `b`
+// failed when its body cannot be built.
+fn ir_para_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, role: String, ty: Type, span: Span) -> Int Never! {
+    key :: "para.{role}<{type_carrier_identity(ty)}>"
+    if name_rows_value(m.function_rows, key) == .Val(known) {
+        if known < 0 -> return ir_fail_slot(&b, span, "para.{role} of {ir_type_name(ty)}")
+        return known
+    }
+    id :: m.functions.len()
+    &m.functions.push(ir_hashed_function("para.{role}", key, "jet_ir_para_{role}_", "", 0))
+    name_rows_set(&m.function_rows, key, id)
+    a := ir_builder_new(m.functions[id].copy())
+    if role == "map" {
+        ir_para_map_body(&m, p, &a, ty, span)
+    } else {
+        ir_para_fold_body(&m, p, &a, ty, span)
+    }
+    failed :: ir_failed(a)
+    message :: a.error.copy()
+    m.functions[id] = ^a.f
+    if failed {
+        name_rows_set(&m.function_rows, key, -1)
+        return ir_fail_slot(&b, span, message)
+    }
+    id
+}
+
+// Opens a loop over the native words begin..<end; ir_walk_close advances
+// and closes it.
+fn ir_para_range_open(m: &IRModule, a: &IRBuilder, begin: Int, end: Int) -> Int Never! {
+    word_row :: ir_word_row(&m)
+    index :: ir_temp(&m, &a, word_row)
+    ir_emit(&a.f, IROp.Copy, index, begin, -1, -1, a.line)
+    exit :: ir_open(&a.f, IROp.Block, a.line)
+    _ :: ir_open(&a.f, IROp.Loop, a.line)
+    more :: ir_bool_op(&m, &a, IROp.Lt, index, end)
+    ir_exit_unless(&m, &a, more, exit)
+    index
+}
+
+// para.map(env, begin, end): env lends the closure at 0, the input buffer at
+// 8 and the output buffer at 16. Each item in the range is lent to the
+// closure and its result moves into the item's own output slot.
+fn ir_para_map_body(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: Span) Never! {
+    signature :: ir_para_signature(ty) ?? return ir_fail(&a, span, "parallel callback through {ir_type_name(ty)}")
+    if signature.params.len() != 1 -> return ir_fail(&a, span, "parallel callback through {ir_type_name(ty)}")
+    in_row :: ir_value_type(&m, p, signature.params[0]) ?? return ir_fail(&a, span, "type {ir_type_name(signature.params[0])}")
+    out_row :: ir_value_type(&m, p, signature.result) ?? return ir_fail(&a, span, "type {ir_type_name(signature.result)}")
+    if m.types[in_row].kind == .Unit || m.types[out_row].kind == .Unit -> return ir_fail(&a, span, "parallel callback over Unit")
+    pointer_row :: ir_pointer_row(&m)
+    word_row :: ir_word_row(&m)
+    env :: ir_new_slot(&a, pointer_row, IRSlotKind.Param, ir_intern_name(&m, "env"))
+    begin :: ir_new_slot(&a, word_row, IRSlotKind.Param, ir_intern_name(&m, "begin"))
+    end :: ir_new_slot(&a, word_row, IRSlotKind.Param, ir_intern_name(&m, "end"))
+    closure :: ir_load_word(&m, &a, env, 0)
+    input :: ir_load_word(&m, &a, env, 8)
+    output :: ir_load_word(&m, &a, env, 16)
+    in_stride :: ir_list_stride(m, in_row)
+    out_stride :: ir_list_stride(m, out_row)
+    index :: ir_para_range_open(&m, &a, begin, end)
+    source :: ir_element_address(&m, &a, input, index, in_stride)
+    target :: ir_element_address(&m, &a, output, index, out_stride)
+    item :: ir_load_at(&m, &a, source, 0, in_row)
+    value :: ir_call_closure(&m, &a, closure, [Int]{item}, out_row)
+    // A narrower scalar (a Bool) leaves its slot's padding deterministic.
+    if m.types[out_row].kind != .Aggregate && m.types[out_row].size < out_stride {
+        zero :: ir_word_const(&m, &a, 0)
+        ir_emit(&a.f, IROp.Store, -1, target, 0, zero, a.line)
+    }
+    ir_store_at(&m, p, &a, target, 0, value)
+    ir_walk_close(&m, &a, IRWalk{index: index, item: item})
+    ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
+}
+
+// para.fold(env, begin, end): env lends the seed closure at 0, the step
+// closure at 8, the input buffer at 16 and the accumulator buffer at 24. The
+// range is one 64-item chunk: its accumulator starts from a fresh seed and
+// steps over the chunk's items in source order into slot begin / 64.
+fn ir_para_fold_body(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: Span) Never! {
+    fields :: if ir_untag(ty) == .Tuple(rows) -> rows else -> { return ir_fail(&a, span, "parallel fold through {ir_type_name(ty)}") }
+    if fields.len() != 2 -> return ir_fail(&a, span, "parallel fold through {ir_type_name(ty)}")
+    seed_signature :: ir_para_signature(fields[0].ty) ?? return ir_fail(&a, span, "parallel fold seed {ir_type_name(fields[0].ty)}")
+    step_signature :: ir_para_signature(fields[1].ty) ?? return ir_fail(&a, span, "parallel fold step {ir_type_name(fields[1].ty)}")
+    if step_signature.params.len() != 2 -> return ir_fail(&a, span, "parallel fold step {ir_type_name(fields[1].ty)}")
+    acc_row :: ir_value_type(&m, p, seed_signature.result) ?? return ir_fail(&a, span, "type {ir_type_name(seed_signature.result)}")
+    elem_row :: ir_value_type(&m, p, step_signature.params[1]) ?? return ir_fail(&a, span, "type {ir_type_name(step_signature.params[1])}")
+    if m.types[acc_row].kind == .Unit || m.types[elem_row].kind == .Unit -> return ir_fail(&a, span, "parallel fold over Unit")
+    pointer_row :: ir_pointer_row(&m)
+    word_row :: ir_word_row(&m)
+    env :: ir_new_slot(&a, pointer_row, IRSlotKind.Param, ir_intern_name(&m, "env"))
+    begin :: ir_new_slot(&a, word_row, IRSlotKind.Param, ir_intern_name(&m, "begin"))
+    end :: ir_new_slot(&a, word_row, IRSlotKind.Param, ir_intern_name(&m, "end"))
+    seed :: ir_load_word(&m, &a, env, 0)
+    step :: ir_load_word(&m, &a, env, 8)
+    input :: ir_load_word(&m, &a, env, 16)
+    accumulators :: ir_load_word(&m, &a, env, 24)
+    six :: ir_word_const(&m, &a, 6)
+    chunk :: ir_word_op(&m, &a, IROp.Shr, begin, six)
+    acc_stride :: ir_list_stride(m, acc_row)
+    elem_stride :: ir_list_stride(m, elem_row)
+    target :: ir_element_address(&m, &a, accumulators, chunk, acc_stride)
+    first :: ir_call_closure(&m, &a, seed, [Int]{}, acc_row)
+    ir_store_at(&m, p, &a, target, 0, first)
+    index :: ir_para_range_open(&m, &a, begin, end)
+    source :: ir_element_address(&m, &a, input, index, elem_stride)
+    item :: ir_load_at(&m, &a, source, 0, elem_row)
+    current :: ir_load_at(&m, &a, target, 0, acc_row)
+    next_value :: ir_call_closure(&m, &a, step, [Int]{current, item}, acc_row)
+    // The step's value replaces the accumulator's, whose old value ends.
+    if ir_has_drop(m, a, current) -> ir_emit(&a.f, IROp.Drop, -1, current, -1, -1, a.line)
+    ir_store_at(&m, p, &a, target, 0, next_value)
+    ir_walk_close(&m, &a, IRWalk{index: index, item: item})
+    ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
+}
+
+// Moves `value` of type row `row` into `result`'s own storage.
+fn ir_para_move_into(m: &IRModule, b: &IRBuilder, result: Int, value: Int, row: Int) Never! {
+    if m.types[row].kind == .Aggregate {
+        ir_emit(&b.f, IROp.CopyBytes, -1, result, value, m.types[row].size, b.line)
+    } else {
+        op :: if m.types[row].drop != "" -> IROp.Move else -> IROp.Copy
+        ir_emit(&b.f, op, result, value, -1, -1, b.line)
+    }
+    b.fresh[value] = false
+}
+
+// Zeroes the List header at `list`.
+fn ir_para_list_clear(m: &IRModule, b: &IRBuilder, list: Int) Never! {
+    zero :: ir_word_const(&m, &b, 0)
+    loop offset in ([Int]{0, 8, 16}) -> ir_emit(&b.f, IROp.Store, -1, list, offset, zero, b.line)
+}
+
+// `xs.para_map(f[, limit])`, `xs.para_filter(f)`, `xs.para_partition(f)` and
+// `xs.para_fold(seed, step, merge)` over the List at `list`. `operands` are
+// the built arguments in order.
+fn ir_closure_parallel(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int, element: Int, operation: TClosureOp, operands: [Int], span: Span) -> Int Never! {
+    if m.types[element].kind == .Unit -> return ir_fail_slot(&b, span, "closure method {ir_closure_op_name(operation)} over Unit items")
+    length :: ir_load_word(&m, &b, list, 0)
+    data :: ir_load_word(&m, &b, list, 16)
+    if operation == .ParaFold -> return ir_para_fold(&m, p, &b, ty, length, data, operands, span)
+    word_row :: ir_word_row(&m)
+    pointer_row :: ir_pointer_row(&m)
+    int_row :: ir_type_row(&m, Type.Int) ?? 0
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    callback :: operands[0]
+    callback_ty :: m.types[b.f.slot_type[callback]].ty.copy()
+    signature :: ir_para_signature(callback_ty) ?? return ir_fail_slot(&b, span, "closure method {ir_closure_op_name(operation)} through {ir_type_name(callback_ty)}")
+    out_row :: ir_value_type(&m, p, signature.result) ?? return ir_type_fail(&b, span, signature.result)
+    id :: ir_para_helper(&m, p, &b, "map", callback_ty, span)
+    if id < 0 -> return -1
+    invoke :: ir_lazy_address(&m, &b, id)
+    // One output slot per item: the mapped values, or a Bool per item.
+    out_stride :: ir_list_stride(m, out_row)
+    width :: ir_word_const(&m, &b, out_stride)
+    bytes :: ir_word_op(&m, &b, IROp.Mul, length, width)
+    align :: ir_word_const(&m, &b, 8)
+    zero :: ir_word_const(&m, &b, 0)
+    output :: ir_temp(&m, &b, word_row)
+    ir_emit(&b.f, IROp.Const, output, 0, -1, -1, b.line)
+    some :: ir_bool_op(&m, &b, IROp.Gt, length, zero)
+    ir_open_if(&b.f, some, b.line)
+    allocated :: ir_runtime(&m, &b, "jet_rt_alloc", [Int]{bytes, align}, word_row)
+    ir_emit(&b.f, IROp.Copy, output, allocated, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    env :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.StackAddress, env, 24, 8, -1, b.line)
+    ir_emit(&b.f, IROp.Store, -1, env, 0, callback, b.line)
+    ir_emit(&b.f, IROp.Store, -1, env, 8, data, b.line)
+    ir_emit(&b.f, IROp.Store, -1, env, 16, output, b.line)
+    // A negative limit takes every available worker.
+    limited :: operation == .ParaMap && operands.len() == 2
+    limit :: if limited -> operands[1] else -> ir_int_constant(&m, &b, int_row, -1)
+    _ :: ir_runtime(&m, &b, "jet_rt_native_para_walk", [Int]{length, limit, env, invoke}, -1)
+    if limited -> ir_release(&m, &b, limit)
+    if operation == .ParaMap {
+        mapped_row :: ir_list_element_of(&m, p, result_row) ?? return ir_type_fail(&b, span, ty)
+        if mapped_row != out_row -> return ir_fail_slot(&b, span, "para_map to {ir_type_name(ty)} through {ir_type_name(callback_ty)}")
+        result :: ir_list_empty(&m, &b, result_row)
+        ir_emit(&b.f, IROp.Store, -1, result, 0, length, b.line)
+        ir_emit(&b.f, IROp.Store, -1, result, 8, length, b.line)
+        ir_emit(&b.f, IROp.Store, -1, result, 16, output, b.line)
+        return result
+    }
+    if out_row != bool_row -> return ir_fail_slot(&b, span, "closure method {ir_closure_op_name(operation)} through {ir_type_name(callback_ty)}")
+    partition :: operation == .ParaPartition
+    result := -1
+    true_list := -1
+    false_list := -1
+    if partition {
+        fields :: if ir_untag(ir_subst(m, ty)) == .Tuple(tuple_fields) -> tuple_fields else -> { return ir_type_fail(&b, span, ty) }
+        members :: ir_tuple_members(&m, p, fields) ?? return ir_type_fail(&b, span, ty)
+        false_offset := -1
+        true_offset := -1
+        loop member in members {
+            if member.name == "false_" -> false_offset = member.offset
+            if member.name == "true_" -> true_offset = member.offset
+        }
+        if false_offset < 0 || true_offset < 0 -> return ir_type_fail(&b, span, ty)
+        result = ir_fresh_temp(&m, &b, result_row)
+        ir_emit(&b.f, IROp.StackAddress, result, m.types[result_row].size, m.types[result_row].align, -1, b.line)
+        false_list = ir_address_at(&m, &b, result, false_offset)
+        true_list = ir_address_at(&m, &b, result, true_offset)
+        ir_para_list_clear(&m, &b, false_list)
+        ir_para_list_clear(&m, &b, true_list)
+    } else {
+        result = ir_list_empty(&m, &b, result_row)
+        true_list = result
+    }
+    // Each item goes, in source order, to the List its Bool picked.
+    walk :: ir_walk_open(&m, &b, list, element)
+    flag_at :: ir_element_address(&m, &b, output, walk.index, out_stride)
+    keep :: ir_load_at(&m, &b, flag_at, 0, bool_row)
+    ir_open_if(&b.f, keep, b.line)
+    ir_list_push(&m, p, &b, true_list, element, walk.item)
+    if partition {
+        ir_else(&b.f, b.line)
+        ir_list_push(&m, p, &b, false_list, element, walk.item)
+    }
+    ir_end(&b.f, b.line)
+    ir_walk_close(&m, &b, walk)
+    ir_open_if(&b.f, some, b.line)
+    _ :: ir_runtime(&m, &b, "jet_rt_free", [Int]{output, bytes, align}, -1)
+    ir_end(&b.f, b.line)
+    result
+}
+
+// `xs.para_fold(seed, step, merge)`: each 64-item chunk folds from its own
+// seed in source order (para.fold), then adjacent chunk results merge up a
+// fixed tree, [[c0|c1]|[c2|c3]]; the grouping is part of the contract. An
+// empty List folds to one seed.
+fn ir_para_fold(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, length: Int, data: Int, operands: [Int], span: Span) -> Int Never! {
+    if operands.len() != 3 -> return ir_fail_slot(&b, span, "para_fold without seed, step and merge callbacks")
+    word_row :: ir_word_row(&m)
+    pointer_row :: ir_pointer_row(&m)
+    int_row :: ir_type_row(&m, Type.Int) ?? 0
+    result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    if m.types[result_row].kind == .Unit -> return ir_fail_slot(&b, span, "para_fold to Unit")
+    seed :: operands[0]
+    step :: operands[1]
+    merge :: operands[2]
+    fields := [TypeTupleField]{TypeTupleField{name: "seed", ty: m.types[b.f.slot_type[seed]].ty.copy()}, TypeTupleField{name: "step", ty: m.types[b.f.slot_type[step]].ty.copy()}}
+    id :: ir_para_helper(&m, p, &b, "fold", Type.Tuple{fields: fields}, span)
+    if id < 0 -> return -1
+    chunk_fold :: ir_lazy_address(&m, &b, id)
+    stride :: ir_list_stride(m, result_row)
+    result :: ir_fresh_temp(&m, &b, result_row)
+    if m.types[result_row].kind == .Aggregate -> ir_emit(&b.f, IROp.StackAddress, result, m.types[result_row].size, m.types[result_row].align, -1, b.line)
+    zero :: ir_word_const(&m, &b, 0)
+    empty :: ir_bool_op(&m, &b, IROp.Eq, length, zero)
+    ir_open_if(&b.f, empty, b.line)
+    seeded :: ir_call_closure(&m, &b, seed, [Int]{}, result_row)
+    ir_para_move_into(&m, &b, result, seeded, result_row)
+    ir_else(&b.f, b.line)
+    sixty_three :: ir_word_const(&m, &b, 63)
+    six :: ir_word_const(&m, &b, 6)
+    rounded :: ir_word_op(&m, &b, IROp.Add, length, sixty_three)
+    chunks :: ir_word_op(&m, &b, IROp.Shr, rounded, six)
+    width :: ir_word_const(&m, &b, stride)
+    bytes :: ir_word_op(&m, &b, IROp.Mul, chunks, width)
+    align :: ir_word_const(&m, &b, 8)
+    accumulators :: ir_runtime(&m, &b, "jet_rt_alloc", [Int]{bytes, align}, word_row)
+    env :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.StackAddress, env, 32, 8, -1, b.line)
+    ir_emit(&b.f, IROp.Store, -1, env, 0, seed, b.line)
+    ir_emit(&b.f, IROp.Store, -1, env, 8, step, b.line)
+    ir_emit(&b.f, IROp.Store, -1, env, 16, data, b.line)
+    ir_emit(&b.f, IROp.Store, -1, env, 24, accumulators, b.line)
+    unlimited :: ir_int_constant(&m, &b, int_row, -1)
+    _ :: ir_runtime(&m, &b, "jet_rt_native_para_walk", [Int]{length, unlimited, env, chunk_fold}, -1)
+    // gap 1 merges chunk pairs (0,1), (2,3), ...; gap 2 merges (0,2), ...
+    gap :: ir_temp(&m, &b, word_row)
+    ir_emit(&b.f, IROp.Const, gap, 1, -1, -1, b.line)
+    levels :: ir_open(&b.f, IROp.Block, b.line)
+    _ :: ir_open(&b.f, IROp.Loop, b.line)
+    more_levels :: ir_bool_op(&m, &b, IROp.Lt, gap, chunks)
+    ir_exit_unless(&m, &b, more_levels, levels)
+    pair_step :: ir_word_op(&m, &b, IROp.Add, gap, gap)
+    left_at :: ir_temp(&m, &b, word_row)
+    ir_emit(&b.f, IROp.Const, left_at, 0, -1, -1, b.line)
+    pairs :: ir_open(&b.f, IROp.Block, b.line)
+    _ :: ir_open(&b.f, IROp.Loop, b.line)
+    right_at :: ir_word_op(&m, &b, IROp.Add, left_at, gap)
+    more_pairs :: ir_bool_op(&m, &b, IROp.Lt, right_at, chunks)
+    ir_exit_unless(&m, &b, more_pairs, pairs)
+    left_address :: ir_element_address(&m, &b, accumulators, left_at, stride)
+    right_address :: ir_element_address(&m, &b, accumulators, right_at, stride)
+    left :: ir_load_at(&m, &b, left_address, 0, result_row)
+    right :: ir_load_at(&m, &b, right_address, 0, result_row)
+    merged :: ir_call_closure(&m, &b, merge, [Int]{left, right}, result_row)
+    if ir_has_drop(m, b, left) {
+        ir_emit(&b.f, IROp.Drop, -1, left, -1, -1, b.line)
+        ir_emit(&b.f, IROp.Drop, -1, right, -1, -1, b.line)
+    }
+    ir_store_at(&m, p, &b, left_address, 0, merged)
+    ir_emit(&b.f, IROp.Add, left_at, left_at, pair_step, IR_OVERFLOW_WRAP, b.line)
+    ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+    ir_emit(&b.f, IROp.Copy, gap, pair_step, -1, -1, b.line)
+    ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+    // The folded value moves out of slot 0; the buffer is freed without
+    // dropping it.
+    folded :: ir_load_at(&m, &b, accumulators, 0, result_row)
+    ir_para_move_into(&m, &b, result, folded, result_row)
+    _ :: ir_runtime(&m, &b, "jet_rt_free", [Int]{accumulators, bytes, align}, -1)
+    ir_end(&b.f, b.line)
+    result
+}

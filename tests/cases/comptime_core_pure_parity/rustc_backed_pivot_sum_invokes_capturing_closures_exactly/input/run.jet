@@ -1,0 +1,15 @@
+use core.data as data
+struct PivotRow { team: String bucket: String score: Float }
+fn pivot_view() -> String {
+    prefix :: "p"
+    rows :: [PivotRow{ team: "B", bucket: "y", score: 5.0 }, PivotRow{ team: "A", bucket: "x", score: 1.5 }, PivotRow{ team: "A", bucket: "x", score: 2.5 }]
+    groups :: data.pivot_sum(rows, (row) -> "{prefix}{row.team}", (row) -> row.bucket, (row) -> row.score) ?? panic("pivot")
+    return "{groups[0].row_key}|{groups[0].column_key}:{groups[0].count}:{groups[0].sum}:{groups[0].mean}|{groups[1].row_key}|{groups[1].column_key}:{groups[1].count}:{groups[1].sum}:{groups[1].mean}"
+}
+EXPECTED :: comptime { pivot_view() }
+
+fn run() {
+    actual :: pivot_view()
+    print("{EXPECTED}")
+    print("{actual}")
+}

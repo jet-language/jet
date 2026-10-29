@@ -1,17 +1,21 @@
 // Machine-wide artifact store configuration (Rust `jet_store::StoreConfig`):
 // the store root, an optional explicit capacity cap, the free-disk reserve
 // kept for the host, and the bound on waiting for a live lock owner.
+use jet_pkg_model.[pkg_bytes_text]
+use core.time as time
+use core.sys as sys
+use core.files as files
 
-STORE_ARTIFACT_VERSION :: prep { "jet.store.v1" }
-STORE_ARTIFACT_ENV :: prep { "JET_STORE_DIR" }
-STORE_ARTIFACT_DEFAULT_CAP_BYTES :: prep { 21474836480 }
-STORE_ARTIFACT_DEFAULT_RESERVE_BYTES :: prep { 2147483648 }
+STORE_ARTIFACT_VERSION :: "jet.store.v1"
+STORE_ARTIFACT_ENV :: "JET_STORE_DIR"
+STORE_ARTIFACT_DEFAULT_CAP_BYTES :: 21474836480
+STORE_ARTIFACT_DEFAULT_RESERVE_BYTES :: 2147483648
 // Maximum time a store operation waits for a live lock owner by default.
-STORE_ARTIFACT_DEFAULT_LOCK_WAIT_MS :: prep { 120000 }
-STORE_ARTIFACT_LOCK_RETRY_MS :: prep { 10 }
-STORE_ARTIFACT_LOCK_RETRY_MAX_MS :: prep { 250 }
-STORE_ARTIFACT_MAX_JOURNAL_BYTES :: prep { 67108864 }
-STORE_ARTIFACT_U64_MAX :: prep { 18446744073709551615 }
+STORE_ARTIFACT_DEFAULT_LOCK_WAIT_MS :: 120000
+STORE_ARTIFACT_LOCK_RETRY_MS :: 10
+STORE_ARTIFACT_LOCK_RETRY_MAX_MS :: 250
+STORE_ARTIFACT_MAX_JOURNAL_BYTES :: 67108864
+STORE_ARTIFACT_U64_MAX :: 18446744073709551615
 
 // The machine-wide store configuration. The optional cap is an explicit host
 // override; without it the effective limit is adaptive. Lock acquisition

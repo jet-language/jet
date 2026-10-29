@@ -1,0 +1,28 @@
+# tests/unit_family.rs::exactness_uses_rational_math_beyond_f64_integer_precision at tests/unit_family.rs:578; hand-port
+# Claim: implicit 1almost rejected E0127 (tests/unit_family.rs:588)
+# Claim: unrepresentable Almost Float rejected E0127 (tests/unit_family.rs:593)
+# Claim: explicit from_almost falls back to -1.0 (tests/unit_family.rs:601)
+# Claim: rounding edges print -1.0 0.0 1.0 -2.0 0.0 1.0 -1.0 (tests/unit_family.rs:631)
+# Claim: rounded Double overflow prints -1.0 with empty stderr (tests/unit_family.rs:647)
+# Fixture migrated: takes_meter uses print(value) instead of value.raw() (E0311 on seed)
+# Not ported: direct jet_foundation API asserts (tests/unit_family.rs:651-tests/unit_family.rs:674): Rust API, covered by CLI overflow step
+fixture: exactness_uses_rational_math_beyond_f64_integer_precision.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check implicit/main.jet
+exit: 1 # implicit 1almost rejected E0127 (tests/unit_family.rs:588)
+stderr: ~ "E0127" # implicit 1almost rejected E0127 (tests/unit_family.rs:588)
+step: jet check unrep/main.jet
+exit: 1 # implicit 1almost rejected E0127 (tests/unit_family.rs:588)
+stderr: ~ "E0127" # implicit 1almost rejected E0127 (tests/unit_family.rs:588)
+step: jet run explicit/main.jet
+exit: 0 # implicit 1almost rejected E0127 (tests/unit_family.rs:588)
+stdout: = "-1.0\n" # implicit 1almost rejected E0127 (tests/unit_family.rs:588)
+step: jet run rounding/main.jet
+exit: 0 # implicit 1almost rejected E0127 (tests/unit_family.rs:588)
+stdout: = "-1.0 0.0 1.0 -2.0 0.0 1.0 -1.0\n" # implicit 1almost rejected E0127 (tests/unit_family.rs:588)
+step: jet run overflow/main.jet
+exit: 0 # implicit 1almost rejected E0127 (tests/unit_family.rs:588)
+stdout: = "-1.0\n" # implicit 1almost rejected E0127 (tests/unit_family.rs:588)
+stderr: !~ "Error" # implicit 1almost rejected E0127 (tests/unit_family.rs:588)

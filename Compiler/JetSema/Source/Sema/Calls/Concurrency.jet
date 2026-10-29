@@ -12,13 +12,9 @@ use jet_foundation.[
     Span,
     TClosureOp,
     TDeclarationOwnership,
-    TExpr,
-    TExprKind,
-    THandleOp,
     Type,
     TypeTupleField,
     type_identity_equal,
-    type_tuple_struct_name,
 ]
 
 fn sema_call_concurrency_label(argument: CallArg) -> String? {
@@ -66,7 +62,7 @@ fn sema_call_concurrency_is_canonical_sender(ty: Type, environment: SemaScopeEnv
 }
 
 fn sema_call_concurrency_check_value(argument: CallArg, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    expected :: if argument.expr == {.Lambda(_) -> Val(required) else -> None}
+    expected :: if argument.expr == {.Lambda(_, _) -> Val(required) else -> None}
     checked :: sema_check_expression(argument.expr, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if type_identity_equal(checked.ty, required) -> return Val(checked)
     compatible :: sema_call_type_assignable(required, checked.ty, environment, program) ?? return None
@@ -115,7 +111,7 @@ fn sema_call_concurrency_check_parallel_callback(value: TExpr, source: Expr, env
         }
         else -> {}
     }
-    named_function := if source == {.Ident(name, _) -> sema_scope_resolve_index(scopes, name) == None else -> false}
+    named_function := if source == {.Ident(name, _, _) -> sema_scope_resolve_index(scopes, name) == None else -> false}
     if !named_function {
         problem := SemaSendabilityProblem{root: None, path: [String]{}, kind: SemaSendProblemKind.ClosureCaptures}
         &diagnostics.push(sema_ownership_crossing_diagnostic("parallel callback", Type.Named{name: "callback"}, problem, SemaSendCrossing.ParallelWorker, value.span))
@@ -124,11 +120,22 @@ fn sema_call_concurrency_check_parallel_callback(value: TExpr, source: Expr, env
     true
 }
 
+// A callback slot whose result is open (`ret: None`: `para_map`'s mapper,
+// `para_fold`'s seed) adopts the callback's own result, as a collection
+// callback does; its parameters still have to fit.
 fn sema_call_concurrency_infer_callback(argument: CallArg, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    checked :: sema_check_expression_with_lambda_escapes(argument.expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, Val(false), &diagnostics) ?? return None
-    compatible :: sema_call_host_callback_assignable(required, checked.ty, environment, program) ?? return None
+    open_result := false
+    if required == .Fn(_, ret, _, _, _, _) && ret == None -> open_result = true
+    result :: if open_result -> sema_expression_lambda_collection_callback(argument.expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression_with_lambda_escapes(argument.expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, Val(false), &diagnostics)
+    checked :: result ?? return None
+    contract := required
+    if open_result && required == .Fn(params, _, effect_bound, param_contract, call_metadata, return_view_provenance) && checked.ty == .Fn(_, adopted, _, _, _, _) {
+        // copy: the contract is a new owned Type built from the required slot and the callback's adopted result
+        contract = Type.Fn{params: params.copy(), ret: adopted.copy(), effect_bound: effect_bound.copy(), param_contract: param_contract.copy(), call_metadata: call_metadata.copy(), return_view_provenance: return_view_provenance.copy()}
+    }
+    compatible :: sema_call_host_callback_assignable(contract, checked.ty, environment, program) ?? return None
     if !compatible {
-        &diagnostics.push(sema_type_mismatch(required, checked.ty, argument.span))
+        &diagnostics.push(sema_type_mismatch(contract, checked.ty, argument.span))
         return None
     }
     Val(checked)
@@ -147,7 +154,7 @@ fn sema_call_concurrency_check_sender(receiver: Expr, receiver_value: TExpr, arg
     payload :: sema_call_concurrency_check_value(updated_args[0], payload_ty, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     crossing_problem := sema_ownership_crossing_problem_for_expr(updated_args[0].expr, payload_ty, SemaSendCrossing.ChannelSend, updated_args[0].convention == AccessConvention.Move, environment, program, scopes, state, context)
     if crossing_problem == .Val(problem) {
-        value_name := if updated_args[0].expr == {.Ident(name, _) -> name else -> "this value"}
+        value_name := if updated_args[0].expr == {.Ident(name, _, _) -> name else -> "this value"}
         &diagnostics.push(sema_ownership_crossing_diagnostic(value_name, payload_ty, problem, SemaSendCrossing.ChannelSend, updated_args[0].span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -227,7 +234,7 @@ fn sema_call_concurrency_parallel(receiver: Expr, receiver_value: TExpr, method:
         result_type = Type.Tuple{fields: fields}
         sema_call_concurrency_reject_parallel_type("item", element, span, environment, program, scopes, context, &diagnostics)
         sema_call_concurrency_reject_parallel_type("result", result_type, span, environment, program, scopes, context, &diagnostics)
-        operation := TClosureOp.ParaPartition{tuple_struct: type_tuple_struct_name(fields)}
+        operation := TClosureOp.ParaPartition
         tir := sema_tir_node(result_type, TExprKind.ClosureMethod{receiver: receiver_value, operation: operation, args: typed}, span)
         checked := sema_expr_expected(tir, expected, environment, program, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: checked}

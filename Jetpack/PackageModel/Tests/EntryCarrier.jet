@@ -1,6 +1,14 @@
 // Loader.rs carrier/discovery regressions; tests/inline_package.rs:53-115,
 // 118-193,345-435,547-563. Compiler execution/graph checks remain in their
 // compiler lane; these assertions exercise the canonical composed facts API.
+use jetpack_foundation.[WORKSPACE_FILE]
+use jet_pkg_model.[
+    AuthorityResolver, PackageFacts, WorkspaceDeclarationCache, pkg_authority_effective_root,
+    pkg_extract_inline_package, pkg_find_inline_package_root_checked,
+    pkg_find_manifest_root_checked, pkg_manifest_path_checked, pkg_package_facts_for_entry,
+    pkg_package_facts_for_root, pkg_package_facts_from_checked_entry, pkg_path_parent,
+]
+use jet_foundation.[Diagnostic]
 
 fn pkg_entry_test_root(label: String) -[FS, Env]> String Never! {
     root :: files.join(sys.temp_dir(), "jet-entry-carrier-{label}-{process.current_pid()}")
@@ -34,7 +42,7 @@ fn pkg_entry_test_failure(cache: &WorkspaceDeclarationCache, entry: String) -[FS
 #Test("conventional and inline entry carriers have identical composed facts") {
     cache := WorkspaceDeclarationCache.new()
     root :: pkg_entry_test_root("composed-parity")
-    body :: "name: \"inline-parity\"\nversion: \"1.2.3\"\njet: \">=0.1.0\"\nedition: \"2026\"\ndescription: \"one source of package facts\"\nlicense: \"MIT\"\nrepository: \"https://example.test/inline-parity\"\ndeps: {{ dep: ./deps/dep }}\nconfigs: [dev, \"release.jet\"]\ndefaults: {{ run: app }}\nauthority: {{ holds: {{ allow: [IO] }} }}\npolicy: {{ unsafe: .Deny }}\ndev :: Config{{ services: {{ db: {{}} }} }}\n"
+    body :: "name: \"inline-parity\"\nversion: \"1.2.3\"\njet: \">=0.1.0\"\nedition: \"2026\"\ndescription: \"one source of package facts\"\nlicense: \"MIT\"\nrepository: \"https://example.test/inline-parity\"\ndeps: {{ dep: ./deps/dep }}\nconfigs: [dev, \"release.jet\"]\ndefaults: {{ run: app }}\nauthority: {{ allow: [IO] }}\npolicy: {{ unsafe: .Deny }}\ndev :: Config{{ services: {{ db: {{}} }} }}\n"
     entry_names :: [String]{"inline", "extracted"}
     loop name in entry_names {
         dir :: files.join(root, name)
@@ -333,7 +341,7 @@ fn pkg_entry_test_failure(cache: &WorkspaceDeclarationCache, entry: String) -[FS
     if !sys.is_unix() -> return
     cache := WorkspaceDeclarationCache.new()
     root :: pkg_entry_test_root("shared-package")
-    pkg_entry_test_write(root, "package.jet", "name: \"fixture\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ allow: [IO] }}, needs: [UI.FontShaping] }}\n")
+    pkg_entry_test_write(root, "package.jet", "name: \"fixture\"\nversion: \"0.1.0\"\nauthority: {{ allow: [IO], needs: [UI.FontShaping] }}\n")
     pkg_entry_test_write(root, "run.jet", "fn run() {{}}\n")
     files.set_mode(root, 0o777) ?? panic("chmod shared")
     expected :: files.canonicalize(root) ?? panic("canonical root")

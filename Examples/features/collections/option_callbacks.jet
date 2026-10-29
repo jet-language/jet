@@ -1,0 +1,83 @@
+// Collection methods whose callback returns an Option, with Int? and String?
+// payloads. A map keeps the Option as the item, on eager, view, lazy and Set
+// receivers; filter_map keeps the present payload of an Option and the Ok
+// payload of a Result, and that payload may itself be an Option. flat_map,
+// fold, reduce, scan, group_by and dedup_by take the Option as it is.
+
+fn big(x: Int) -> Int? {
+    if x > 6 -> return Val(x)
+    None
+}
+
+fn word(x: Int) -> String? {
+    if x > 6 -> return Val("w{x}")
+    None
+}
+
+// None for 1, Val(None) for 3, Val(Val(x)) above 6.
+fn nested(x: Int) -> Option<Int?> {
+    if x > 6 -> return Val(Val(x))
+    if x > 1 -> return Val(None)
+    None
+}
+
+// Err for 1, Ok(None) for 3, Ok(Val(x)) above 6.
+fn tried(x: Int) -> Int? Err! {
+    if x > 6 -> return Val(x)
+    if x > 1 -> return None
+    Err("small")
+}
+
+fn show(o: Int?) -> String {
+    if o == .Val(v) -> return "Some({v})"
+    "None"
+}
+
+fn label(o: String?) -> String {
+    if o == .Val(text) -> return text
+    "none"
+}
+
+// The first present value: the running one if there is one, else big(x).
+fn first_big(acc: Int?, x: Int) -> Int? {
+    if acc != None -> return acc
+    big(x)
+}
+
+fn shows(items: [Int?]) -> String {
+    items.map((o) -> show(o)).join(" ")
+}
+
+fn labels(items: [String?]) -> String {
+    items.map((o) -> label(o)).join(" ")
+}
+
+fn run() {
+    xs :: [Int]{1, 3, 4611686018427387904, 9}
+    // map: the callback's Option is the item.
+    print("map list: {shows(xs.map((x) -> big(x)))} | {labels(xs.map((x) -> word(x)))}")
+    print("map view: {shows(xs[1..<4].map((x) -> big(x)))} | {labels(xs[1..<4].map((x) -> word(x)))}")
+    print("map lazy: {shows(xs.lazy().map((x) -> big(x)).collect())} | {labels(xs.lazy().map((x) -> word(x)).collect())}")
+    print("map set: {Set.from(xs).map((x) -> big(x)).len()} {Set.from(xs).map((x) -> word(x)).len()}")
+    kept :: xs.lazy().map((x) -> big(x)).filter((o) -> o != None).collect()
+    print("map then filter: {shows(kept)}")
+    head :: xs.lazy().map((x) -> word(x)).first()
+    if head == .Val(first) -> print("map first: {label(first)}")
+    // filter_map: the present (or Ok) payload, which may be an Option.
+    print("filter_map list: {xs.filter_map((x) -> big(x)).collect()} | {xs.filter_map((x) -> word(x)).collect()}")
+    print("filter_map lazy: {xs.lazy().filter_map((x) -> big(x)).collect()} | {xs.lazy().filter_map((x) -> word(x)).collect()}")
+    print("filter_map nested: {shows(xs.lazy().filter_map((x) -> nested(x)).collect())}")
+    print("filter_map result: {shows(xs.lazy().filter_map((x) -> tried(x)).collect())}")
+    // flat_map over lists of Options.
+    print("flat_map: {shows(xs.flat_map((x) -> [Int?]{big(x)}))} | {labels(xs.flat_map((x) -> [String?]{word(x)}))}")
+    // fold / reduce / scan with an Option state.
+    print("fold: {show(xs.fold(Int?{None}, (acc, x) -> if big(x) != None -> big(x) else -> acc))} | {label(xs.fold(String?{None}, (acc, x) -> if word(x) != None -> word(x) else -> acc))}")
+    print("reduce: {show(xs.reduce(Int?{None}, (acc, x) -> first_big(acc, x)))}")
+    print("scan: {shows(xs.lazy().scan(Int?{None}, (acc, x) -> if big(x) != None -> big(x) else -> acc).collect())}")
+    // group_by and dedup_by with an Option key.
+    print("group_by: {xs.group_by((x) -> big(x)).len()} {xs.group_by((x) -> word(x)).len()}")
+    print("dedup_by: {xs.lazy().dedup_by((x) -> big(x)).collect()} {xs.lazy().dedup_by((x) -> word(x)).collect()}")
+    // find / position over Option items.
+    opts :: xs.map((x) -> big(x))
+    print("find: {show(opts.find((o) -> o != None) ?? None)} position: {opts.position((o) -> o != None) ?? -1}")
+}

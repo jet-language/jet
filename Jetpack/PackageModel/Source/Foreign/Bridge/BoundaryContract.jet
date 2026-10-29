@@ -6,8 +6,16 @@
 // (jet_foundation::TestingComparison) are referenced by their Rust-derived
 // names: EvidenceIdentity, EvidenceRecord, EvidenceOutcome, ComparisonRecord,
 // TEST_COMPARISON_SCHEMA_VERSION.
+use jet_foundation.[
+    ComparisonRecord, DerivationRecord, EvidenceIdentity, EvidenceOutcome, EvidenceRecord,
+    DerivationRef, TEST_COMPARISON_SCHEMA_VERSION, comparison_assertion_error_text,
+    comparison_record_artifact_id, comparison_record_assert_equal, comparison_status_as_str,
+    derivation_record_reference, derivation_record_validate, evidence_expectation_error_text,
+    evidence_outcome_is_failure, evidence_outcome_is_incomplete, evidence_outcome_name,
+    evidence_record_validate, observation_relation_as_str,
+]
 
-FOREIGN_SOURCE_RECEIPT_SCHEMA :: prep { "jet-ffi-source-receipt-v1" }
+FOREIGN_SOURCE_RECEIPT_SCHEMA :: "jet-ffi-source-receipt-v1"
 
 // Whether a foreign family has a checked replacement path or only a binder.
 enum ForeignBoundaryDisposition {
@@ -39,7 +47,7 @@ enum ForeignSourceAuthority {
 }
 
 // The comparison API's outcome vocabulary.
-FOREIGN_BOUNDARY_COMPARISON_OUTCOMES :: prep { [String]{"matched", "mismatch", "empty", "unsupported", "unavailable", "timeout", "cancelled", "invalid_oracle", "contaminated", "unknown"} }
+FOREIGN_BOUNDARY_COMPARISON_OUTCOMES :: [String]{"matched", "mismatch", "empty", "unsupported", "unavailable", "timeout", "cancelled", "invalid_oracle", "contaminated", "unknown"}
 
 // One raw case from the comparison/evidence machinery. The boundary keeps the
 // input and both raw observations; it runs no relation of its own.
@@ -133,7 +141,7 @@ fn pkg_foreign_boundary_capability(language: ForeignLanguage) -> ForeignBoundary
 // The complete family matrix used by foreign inspection and comparison views.
 fn pkg_foreign_boundary_capabilities() -> [ForeignBoundaryCapability] Never! {
     rows := [ForeignBoundaryCapability]{}
-    loop language in ForeignLanguage.registered() -> &rows.push(pkg_foreign_boundary_capability(language))
+    loop language in ForeignLanguage.all() -> &rows.push(pkg_foreign_boundary_capability(language))
     rows
 }
 
@@ -162,7 +170,7 @@ struct ForeignSourceReceipt {
     source_identity: String
     replacement_identity: String
     source_authority: ForeignSourceAuthority
-    derivation: MIRDerivationRef
+    derivation: DerivationRef
     evidence: [EvidenceIdentity]
     comparison_artifact_id: String
     comparison_schema_version: U16
@@ -281,7 +289,7 @@ struct ForeignBoundaryContract {
     source_authority: ForeignSourceAuthority
     // Receipt of the checked comparison that made a replacement selectable.
     source_receipt: ForeignSourceReceipt?
-    derivation: MIRDerivationRef?
+    derivation: DerivationRef?
     evidence: [EvidenceIdentity]
     assumptions: [String]
     observations: [ForeignBoundaryObservation]

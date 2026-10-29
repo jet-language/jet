@@ -1,0 +1,51 @@
+# tests/browser_bidi.rs::native_bidi_rejects_hostile_frames_profiles_and_timeouts_without_leaks at tests/browser_bidi.rs:984; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port})
+fixture: native_bidi_rejects_hostile_frames_profiles_and_timeouts_without_leaks.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+requires: tool:node
+write: browser_bidi_hostile.jet native_bidi_rejects_hostile_frames_profiles_and_timeouts_without_leaks.fixture/run.template
+step: jet build browser_bidi_hostile.jet
+exit: 0
+session malformed raw: node {root}/tests/fixtures/browser_bidi_mock.mjs hostile-malformed {free-port:malformed}
+session mismatched raw: node {root}/tests/fixtures/browser_bidi_mock.mjs hostile-mismatched-id {free-port:mismatched}
+session protocol raw: node {root}/tests/fixtures/browser_bidi_mock.mjs hostile-protocol-error {free-port:protocol}
+session timeout raw: node {root}/tests/fixtures/browser_bidi_mock.mjs hostile-timeout {free-port:timeout}
+session no_cdp raw: node {root}/tests/fixtures/browser_bidi_mock.mjs hostile-no-cdp {free-port:no_cdp}
+session invalid_number raw: node {root}/tests/fixtures/browser_bidi_mock.mjs handshake {free-port:invalid_number} invalid_number.json
+session not_ready raw: node {root}/tests/fixtures/browser_bidi_mock.mjs handshake {free-port:not_ready} not_ready.json
+session surrogate raw: node {root}/tests/fixtures/browser_bidi_mock.mjs handshake {free-port:surrogate} surrogate.json
+session closed_protocol raw: node {root}/tests/fixtures/browser_bidi_mock.mjs handshake {free-port:closed_protocol} closed_protocol.json
+session malformed_session raw: node {root}/tests/fixtures/browser_bidi_mock.mjs malformed-session {free-port:malformed_session}
+sleep: 500ms
+step run: built
+exit: 0
+stdout: = native_bidi_rejects_hostile_frames_profiles_and_timeouts_without_leaks.1.out
+stdout: !~ "SECRET" # original predicate: !stdout.contains
+stderr: !~ "SECRET" # original predicate: !stderr.contains
+close malformed
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+close mismatched
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+close protocol
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+close timeout
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+close no_cdp
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+close invalid_number
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+stdout: = native_bidi_rejects_hostile_frames_profiles_and_timeouts_without_leaks.2.out # original assert_eq!(invalid_number_server.join().unwrap(), ["session.status"])
+close not_ready
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+stdout: = native_bidi_rejects_hostile_frames_profiles_and_timeouts_without_leaks.2.out # original assert_eq!(not_ready_server.join().unwrap(), ["session.status"])
+close surrogate
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+stdout: = native_bidi_rejects_hostile_frames_profiles_and_timeouts_without_leaks.3.out # original assert_eq!(surrogate_server.join().unwrap(), [..])
+close closed_protocol
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+stdout: = native_bidi_rejects_hostile_frames_profiles_and_timeouts_without_leaks.3.out # original assert_eq!(closed_protocol_server.join().unwrap(), [..])
+close malformed_session
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+stdout: = native_bidi_rejects_hostile_frames_profiles_and_timeouts_without_leaks.3.out # original assert_eq!(malformed_session_server.join().unwrap(), [..])

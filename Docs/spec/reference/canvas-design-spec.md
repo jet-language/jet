@@ -4,11 +4,11 @@ This document defines the visual and interaction contract for the Canvas graph:
 node archetypes, type colors, pin anatomy, layout, palette behavior, and
 source-backed editing. It is for Canvas UI contributors and clients that render
 the graph protocol. Executable projection facts come from
-[`graph_projection.rs`](../../../crates/jet-devserver/src/Canvas/graph_projection.rs),
+[`GraphProjection.jet`](../../../Compiler/JetDevserver/Source/Canvas/GraphProjection.jet),
 node metadata from
-[`node_catalog.rs`](../../../crates/jet-devserver/src/Canvas/node_catalog.rs),
+[`NodeCatalog.jet`](../../../Compiler/JetDevserver/Source/Canvas/NodeCatalog.jet),
 and browser behavior from the Canvas JavaScript under
-[`crates/jet-canvas/src`](../../../crates/jet-canvas/src). The wire fields and
+[`Compiler/JetCanvas/Source/CanvasAssets/js`](../../../Compiler/JetCanvas/Source/CanvasAssets/js). The wire fields and
 transaction rules are in [`canvas-protocol.md`](canvas-protocol.md).
 
 ## Node archetypes

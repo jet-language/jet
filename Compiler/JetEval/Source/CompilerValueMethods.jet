@@ -2,14 +2,9 @@
 // These methods consume immutable TComptimeValue packets produced by the
 // compiler service; they never re-run a checker or call native Builtins.
 use jet_foundation.[
-    MIRCallFallibility,
-    MIRPreludeABI,
-    MIRPreludeCall,
-    MIRPreludeFamily,
-    Span,
     TComptimeField,
     TComptimeValue,
-    mir_symbol_name,
+    type_name,
 ]
 
 fn jet_eval_compiler_value_method_owner(member: String) -> [String]? {
@@ -47,113 +42,54 @@ fn jet_eval_compiler_value_method_supported(owner: String, method: String, arg_c
     false
 }
 
-fn jet_eval_compiler_value_method_borrow_mask(arity: Int) -> [Bool] Never! {
-    mask := [Bool]{}
-    loop index in 0..<arity -> &mask.push(index == 0)
-    mask
+// What a compiler value or reflection method answers on its checked
+// receiver: the projected value, or the defect (`Fault`) that keeps the
+// receiver from one.
+enum JetEvalCompilerValueAnswer {
+    Value(value: TComptimeValue)
+    Fault(message: String)
 }
 
+fn jet_eval_compiler_value_fault(message: String) -> JetEvalCompilerValueAnswer Never! {
+    JetEvalCompilerValueAnswer.Fault{message: message}
+}
 
-fn jet_eval_compiler_value_method_field(fields: [TComptimeField], owner: String, method: String, machine: &JetEvalMachine, span: Span) -> TComptimeValue? {
+fn jet_eval_compiler_value_field(fields: [TComptimeField], name: String) -> TComptimeValue? Never! {
     loop field in fields {
-        if field.name == method -> return Val(field.value)
+        if field.name == name -> return Val(field.value)
     }
-    jet_eval_compiler_fail(&machine, span, "{owner}.{method} projection is missing from its checked value")
     None
 }
 
-
-fn jet_eval_compiler_value_method_struct(value: TComptimeValue, owner: String, machine: &JetEvalMachine, span: Span) -> [TComptimeField]? {
-    if value == {
-        .Struct(type_name, fields) -> {
-            if type_name != owner {
-                jet_eval_compiler_fail(&machine, span, "compiler value route received {type_name}, expected {owner}")
-                return None
-            }
-            return Val(fields)
-        }
-        else -> {}
+// The fields of `value` when it is the checked record `owner`.
+fn jet_eval_compiler_value_fields(value: TComptimeValue, owner: String) -> [TComptimeField]? Never! {
+    if value == .Struct(type_name, fields) {
+        if type_name == owner -> return Val(fields)
     }
-    jet_eval_compiler_fail(&machine, span, "compiler value route receiver is not {owner}")
     None
 }
 
-fn jet_eval_compiler_value_method_list_contains(fields: [TComptimeField], field_name: String, wanted: String, owner: String, method: String, machine: &JetEvalMachine, span: Span) -> Bool? {
-    list :: jet_eval_compiler_value_method_field(fields, owner, field_name, &machine, span) ?? return None
-    if list == {
-        .List(values) -> {
+// Compiler value method `owner.method` (one jet_eval_compiler_value_method_supported
+// accepts) on `args`, the receiver first.
+fn jet_eval_compiler_value_answer(owner: String, method: String, args: [TComptimeValue]) -> JetEvalCompilerValueAnswer Never! {
+    if args.len() == 0 -> return jet_eval_compiler_value_fault("compiler value route has no receiver")
+    fields :: jet_eval_compiler_value_fields(args[0], owner) ?? return jet_eval_compiler_value_fault("compiler value route receiver is not {owner}")
+    if owner == "EffectInfo" && method == "has" {
+        wanted :: if args.len() == 2 && args[1] == .String(text) -> text else -> { return jet_eval_compiler_value_fault("EffectInfo.has requires a String argument") }
+        list :: jet_eval_compiler_value_field(fields, "values") ?? return jet_eval_compiler_value_fault("EffectInfo.values projection is missing from its checked value")
+        if list == .List(values) {
             loop value in values {
-                if value == {
-                    .String(text) -> {
-                        if text == wanted -> return Val(true)
-                    }
-                    else -> {
-                        jet_eval_compiler_fail(&machine, span, "{owner}.{method} projection field {field_name} must contain only Strings")
-                        return None
-                    }
+                if value == .String(text) {
+                    if text == wanted -> return JetEvalCompilerValueAnswer.Value{value: TComptimeValue.Bool{value: true}}
+                } else {
+                    return jet_eval_compiler_value_fault("EffectInfo.has projection field values must contain only Strings")
                 }
             }
-            return Val(false)
+            return JetEvalCompilerValueAnswer.Value{value: TComptimeValue.Bool{value: false}}
         }
-        else -> {
-            jet_eval_compiler_fail(&machine, span, "{owner}.{method} projection field {field_name} is not a list")
-            return None
-        }
+        return jet_eval_compiler_value_fault("EffectInfo.has projection field values is not a list")
     }
-}
-fn jet_eval_compiler_value_method_list_projection(value: TComptimeValue, owner: String, method: String, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
-    fields :: jet_eval_compiler_value_method_struct(value, owner, &machine, span) ?? return None
-    projected :: jet_eval_compiler_value_method_field(fields, owner, method, &machine, span) ?? return None
-    if projected == .List(_) -> return Val(JetEvalRuntimeValue.Data{value: projected})
-    jet_eval_compiler_fail(&machine, span, "{owner}.{method} projection is not a list")
-    None
-}
-
-fn jet_eval_compiler_value_method_projection(value: TComptimeValue, owner: String, method: String, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
-    fields :: jet_eval_compiler_value_method_struct(value, owner, &machine, span) ?? return None
-    projected :: jet_eval_compiler_value_method_field(fields, owner, method, &machine, span) ?? return None
-    Val(JetEvalRuntimeValue.Data{value: projected})
-}
-
-fn jet_eval_route_compiler_value_host(row: MIRPreludeCall, args: [TComptimeValue], machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
-    if row.family != MIRPreludeFamily.StaticPrelude || row.module_name != "core.host" || mir_symbol_name(row.symbol) != "jet_comptime_host_method" {
-        jet_eval_compiler_fail(&machine, span, "invalid compiler value Prelude route")
-        return None
-    }
-    if args.len() == 0 {
-        jet_eval_compiler_fail(&machine, span, "compiler value route has no receiver")
-        return None
-    }
-    member_parts :: jet_eval_compiler_value_method_owner(row.member) ?? {
-        jet_eval_compiler_fail(&machine, span, "compiler value route member is not nominal")
-        return None
-    }
-    owner := member_parts[0]
-    method := member_parts[1]
-    if !jet_eval_compiler_value_method_supported(owner, method, args.len() - 1) {
-        jet_eval_compiler_fail(&machine, span, "unsupported compiler value method {row.member}")
-        return None
-    }
-    expected_arity := args.len()
-    if row.abi != MIRPreludeABI.Value || row.fallibility != MIRCallFallibility.Infallible || row.signature.arity != expected_arity || row.signature.max_arity != expected_arity || row.signature.borrow_mask != jet_eval_compiler_value_method_borrow_mask(expected_arity) {
-        jet_eval_compiler_fail(&machine, span, "compiler value Prelude route has an invalid ABI")
-        return None
-    }
-    receiver := args[0]
-    if owner == "EffectInfo" && method == "has" {
-        fields :: jet_eval_compiler_value_method_struct(receiver, owner, &machine, span) ?? return None
-        wanted :: jet_eval_route_string(args[1]) ?? {
-            jet_eval_compiler_fail(&machine, span, "EffectInfo.has requires a String argument")
-            return None
-        }
-        found :: jet_eval_compiler_value_method_list_contains(fields, "values", wanted, owner, method, &machine, span) ?? return None
-        return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: found}})
-    }
-    if owner == "FunctionInfo" && method == "reaches_panic" {
-        return jet_eval_compiler_value_method_projection(receiver, owner, method, &machine, span)
-    }
-    if owner == "ProgramInfo" -> return jet_eval_compiler_value_method_list_projection(receiver, owner, method, &machine, span)
-    if jet_eval_compiler_value_method_record(owner, method) -> return jet_eval_compiler_value_method_projection(receiver, owner, method, &machine, span)
-    jet_eval_compiler_fail(&machine, span, "compiler value route has no implementation for {row.member}")
-    None
+    projected :: jet_eval_compiler_value_field(fields, method) ?? return jet_eval_compiler_value_fault("{owner}.{method} projection is missing from its checked value")
+    if owner != "ProgramInfo" || projected == .List(_) -> return JetEvalCompilerValueAnswer.Value{value: projected}
+    jet_eval_compiler_value_fault("{owner}.{method} projection is not a list")
 }

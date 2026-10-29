@@ -23,13 +23,3 @@ when os-name linux|macos: when sandbox.stdout+stderr ~ "sandbox: Strong via": st
 when os-name linux|macos: when sandbox.stdout+stderr !~ "sandbox: Strong via": stdout: = agent_executor_example_matches_all_hosted_tiers.unsupported.out
 when os-name !linux: when os-name !macos: stdout: = agent_executor_example_matches_all_hosted_tiers.unsupported.out
 stdout: == release # original tier baseline equality
-step interpret: jet run --interpret main.jet
-env: JET_STORE_DIR={work}/interpret/cache
-env: JETPACK_ROOT={work}/interpret/jetpack
-env: NO_COLOR=1
-env: JETPACK_ENV=1
-exit: 0
-when os-name linux|macos: when sandbox.stdout+stderr ~ "sandbox: Strong via": stdout: = agent_executor_example_matches_all_hosted_tiers.native.out
-when os-name linux|macos: when sandbox.stdout+stderr !~ "sandbox: Strong via": stdout: = agent_executor_example_matches_all_hosted_tiers.unsupported.out
-when os-name !linux: when os-name !macos: stdout: = agent_executor_example_matches_all_hosted_tiers.unsupported.out
-stdout: == release # original tier baseline equality

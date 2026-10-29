@@ -21,12 +21,7 @@ step release_merged: sh -c "exec {jet} run --quiet --release terminal.jet > {wor
 stdin: piped.stdin
 exit: 0
 file: release.merged = terminal_parity_matches_non_tty_golden_and_stream_order.merged
-step interpret: jet run --quiet --interpret terminal.jet
+step interpret_merged: sh -c "exec {jet} run --quiet terminal.jet > {work}/interpret.merged 2>&1"
 stdin: piped.stdin
 exit: 0
-stdout: = terminal_parity_matches_non_tty_golden_and_stream_order.stdout
-stderr: = terminal_parity_matches_non_tty_golden_and_stream_order.stderr
-step interpret_merged: sh -c "exec {jet} run --quiet --interpret terminal.jet > {work}/interpret.merged 2>&1"
-stdin: piped.stdin
-exit: 0
-file: interpret.merged = terminal_parity_matches_non_tty_golden_and_stream_order.merged
+file: default.merged = terminal_parity_matches_non_tty_golden_and_stream_order.merged

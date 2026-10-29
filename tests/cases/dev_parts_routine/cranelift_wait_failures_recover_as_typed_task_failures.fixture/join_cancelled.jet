@@ -1,0 +1,19 @@
+use core.time as time
+fn failure_label(error: TaskFailure) -> String {
+    if error == {
+        .Cancelled -> { return "cancelled" }
+        .DeadlineBlown -> { return "deadline" }
+        .Panicked(_) -> { return "panicked" }
+    }
+}
+fn run() {
+    child :: task {
+        time.sleep(200ms)
+    }
+    child.cancel()
+    result :: child.join()
+    if result == {
+        .Err(error) -> { print(failure_label(error)) }
+        .Ok(_) -> { print("wrong cancellation") }
+    }
+}

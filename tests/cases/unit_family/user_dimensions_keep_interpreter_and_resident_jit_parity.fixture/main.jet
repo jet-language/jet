@@ -1,0 +1,14 @@
+
+#UnitFamily(Mass, dimension, base: kilogram) { kilogram }
+#UnitFamily(Length, dimension, base: meter) { meter }
+#UnitFamily(Force, dimension: Mass * Length / Time / Time, base: newton) { newton }
+
+fn accept(force: Newton) { print(force) }
+fn preserve<Q: Quantity<Force, .Linear>>(value: ^Q) -> Q { return value }
+fn run() {
+    momentum :: 4kilogram * 3meter
+    acceleration_step :: momentum / 2s
+    force :: acceleration_step / 2s
+    preserve(^force)
+    accept(force)
+}

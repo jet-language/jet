@@ -1,0 +1,16 @@
+# tests/marker_groups_modules.rs::grouped_file_visibility_does_not_export_another_modules_private_member at tests/marker_groups_modules.rs:402; hand-port
+# Claim: a library's pub group applying a private member of another module (rules.Hidden) is rejected with E0605 (tests/marker_groups_modules.rs:403-407)
+# Claim: a single-file file group with Policy(copies: .Explicit) as a member (a retired policy setting in a group) is rejected with E0355 (tests/marker_groups_modules.rs:408-412)
+# Fixture migrated: removed `pub` from fixtures: seed rejects it (E0411 `pub` was removed); DEV Examples/features/modules/marker_groups uses no pub
+fixture: grouped_file_visibility_does_not_export_another_modules_private_member.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+cwd: v1
+exit: 1 # tests/marker_groups_modules.rs:403-407 private member via library -> E0605
+stderr: ~ "E0605" # tests/marker_groups_modules.rs:403-407 private member via library -> E0605
+step: jet check main.jet
+cwd: v2
+exit: 1 # tests/marker_groups_modules.rs:408-412 Policy(copies: .Explicit) in group -> E0355
+stderr: ~ "E0355" # tests/marker_groups_modules.rs:408-412 Policy(copies: .Explicit) in group -> E0355

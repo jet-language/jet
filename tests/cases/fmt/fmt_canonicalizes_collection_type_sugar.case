@@ -1,0 +1,20 @@
+# tests/fmt.rs::fmt_canonicalizes_collection_type_sugar at tests/fmt.rs:1129; hand-port
+# Claim: list return shorthand `fn shell() -> [JSON]` (tests/fmt.rs:1139-1142)
+# Claim: bracket collection params `items: [String], counts: [String:Int]` (tests/fmt.rs:1143-1146)
+# Claim: `JSON.Null` and `return [` present (tests/fmt.rs:1147-1150)
+# Claim: second pass identical (tests/fmt.rs:1151-1155)
+# Fixture migrated: explicit `;` inside a list literal is retired: removed (E0373, D-SEMI1=A, Docs/spec/syntax-decisions.md:10070); the element needs no terminator
+fixture: fmt_canonicalizes_collection_type_sugar.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt run.jet
+exit: 0 # tests/fmt.rs:1138 formats
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:1139-1150
+stdout: ~ "fn shell() -> [JSON]" # tests/fmt.rs:1139-1150
+stdout: ~ "items: [String], counts: [String:Int]" # tests/fmt.rs:1139-1150
+stdout: ~ "JSON.Null" # tests/fmt.rs:1139-1150
+stdout: ~ "return [" # tests/fmt.rs:1139-1150
+step: jet fmt --check run.jet
+exit: 0 # tests/fmt.rs:1151-1155 stable

@@ -1,0 +1,21 @@
+# tests/authority_receipts.rs::authority_process_receipt_redacts_failed_output_on_all_hosted_tiers at tests/authority_receipts.rs:57; hand-port
+# Run file copied verbatim from the original.
+fixture: authority_process_receipt_redacts_failed_output_on_all_hosted_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step sbx: jet os config sandbox status
+exit: 0
+step default: jet run run.jet
+exit: 0
+when sbx.stdout ~ "sandbox: Strong": stdout: = authority_process_receipt_redacts_failed_output_on_all_hosted_tiers.native.out # tests/authority_receipts.rs:80 native_backend_available branch
+when sbx.stdout !~ "sandbox: Strong": stdout: = authority_process_receipt_redacts_failed_output_on_all_hosted_tiers.unsupported.out # tests/authority_receipts.rs:80 fallback branch
+step: jet build run.jet
+exit: 0
+step aot: built
+exit: 0
+when sbx.stdout ~ "sandbox: Strong": stdout: = authority_process_receipt_redacts_failed_output_on_all_hosted_tiers.native.out # tests/authority_receipts.rs:80 native_backend_available branch
+when sbx.stdout !~ "sandbox: Strong": stdout: = authority_process_receipt_redacts_failed_output_on_all_hosted_tiers.unsupported.out # tests/authority_receipts.rs:80 fallback branch
+stdout: == default # tir_support assert_tiers_agree AOT/run agreement
+stderr: == default # tir_support assert_tiers_agree AOT/run agreement

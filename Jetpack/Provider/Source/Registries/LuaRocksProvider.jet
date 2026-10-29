@@ -7,8 +7,8 @@
 // Rockspecs and manifests are Lua data files. The readers here accept only
 // the quoted scalar and table fields the provider needs; no Lua code runs.
 
-LUAROCKS_RECIPE_ID :: prep { "luarocks-provider-v1" }
-LUAROCKS_DEFAULT_REPOSITORY :: prep { "https://luarocks.org" }
+LUAROCKS_RECIPE_ID :: "luarocks-provider-v1"
+LUAROCKS_DEFAULT_REPOSITORY :: "https://luarocks.org"
 
 // One rockspec dependency: a rock and its `(operator, version)` constraints.
 struct LuaRocksDependency {
@@ -686,19 +686,22 @@ fn provider_luarocks_manifest_versions(raw: String, name: String) -> [String] Re
     versions := [String]{}
     cursor := package
     loop {
-        open :: provider_registry_find(cursor, "[\"", 0) ?? provider_registry_find(cursor, "['", 0) ?? break
+        // workaround #5940(b): no `a ?? b ?? break` chain.
+        open := provider_registry_find(cursor, "[\"", 0) ?? -1
+        if open < 0 -> open = provider_registry_find(cursor, "['", 0) ?? -1
+        if open < 0 -> break
         cursor = provider_registry_tail(cursor, open + 1)
         quoted :: provider_luarocks_parse_quoted(cursor)
         cursor = provider_registry_tail(cursor, quoted.used)
         if provider_luarocks_valid_component(quoted.value) -> &versions.push(quoted.value)
     }
     &versions.sort_by((left: String, right: String) -> provider_luarocks_compare_versions(left, right))
-    unique := [String]{}
+    distinct := [String]{}
     loop version in versions {
-        if unique.len() == 0 || unique[unique.len() - 1] != version -> &unique.push(version)
+        if distinct.len() == 0 || distinct[distinct.len() - 1] != version -> &distinct.push(version)
     }
-    if unique.len() == 0 -> return Err(RegistryError.Reason("LuaRocks manifest has no versions for `{name}`"))
-    Ok(unique)
+    if distinct.len() == 0 -> return Err(RegistryError.Reason("LuaRocks manifest has no versions for `{name}`"))
+    Ok(distinct)
 }
 
 fn provider_luarocks_require_manifest_version(raw: String, name: String, version: String) RegistryError! {

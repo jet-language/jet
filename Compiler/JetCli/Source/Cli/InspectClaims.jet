@@ -1,5 +1,9 @@
 // Source/CmdInspect.rs capability_relation_projection and run_claims. The
 // canonical manifest supplies release truth; observations never create claims.
+use jet_foundation.[sha256_hex]
+use jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
+use core.files as cli_files
+
 JET_CLI_CLAIM_DISPOSITIONS :: [String]{"planned", "implemented-unqualified", "passed", "failed", "stale", "unavailable", "unsupported", "owner-ratified-not-applicable"}
 
 fn jet_cli_claim_digest(value: JetCLIStatusValue?) -> String? Never! {
@@ -46,7 +50,7 @@ fn jet_cli_claim_canonical(value: JetCLIStatusValue, root: Bool) -> String JetCL
 fn jet_cli_claim_validate_digest(value: JetCLIStatusValue, label: String) -> String? Never! {
     actual :: jet_cli_claim_digest(jet_cli_status_get(value, "content_digest")) ?? return Val("{label} content_digest is missing or invalid")
     canonical :: jet_cli_claim_canonical(value, true) ?? return Val(err.message)
-    expected :: "sha256:{mir_sha256_hex(canonical)}"
+    expected :: "sha256:{sha256_hex(canonical)}"
     if actual != expected -> return Val("{label} content_digest does not match canonical content")
     None
 }

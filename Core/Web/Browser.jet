@@ -1,0 +1,799 @@
+use core as core
+use core.text as text
+use core.text.parse as parse
+use core.net.ws.[WsError]
+use core.encoding.[Dyn]
+use __core_encoding_stream as tree
+
+// core.web.browser — headed/headless browser control for tests.
+//
+// Connect talks to the host WebSocket transport using versioned BiDi.
+// Profiles and timeout validation remain offline-checkable.
+
+C_MAX_SOURCE_BYTES :: 1048576
+
+C_MAX_SOURCE_NAME :: 256
+
+#Error
+struct BrowserError {
+    kind: String
+
+    impl Display {
+        fn display(self) -> String {
+            if self.kind == {
+                "invalid profile" -> "browser profile is not supported"
+                "invalid timeout" -> "browser timeout must be between 1 and 600000 milliseconds"
+                "unsupported protocol" -> "browser protocol is not available in this session"
+                "timeout" -> "browser operation timed out"
+                "closed" -> "browser session is closed"
+                "transport" -> "browser transport failed"
+                "missing lock" -> "no locked browser for this engine in .jet/lock"
+                "unknown engine" -> "browser engine is not supported"
+                "missing binary" -> "locked browser binary was not found"
+                "size mismatch" -> "locked browser binary size drifted"
+                "invalid lock" -> "browser lock entry is incomplete"
+                else -> "browser protocol failed"
+            }
+        }
+    }
+}
+
+enum BrowserPrivacy {
+    Default
+    Isolated
+}
+
+enum BrowserProtocol {
+    CDP
+    WebDriver
+}
+
+struct BrowserTimeout {
+    milliseconds: Int
+}
+
+struct BrowserProfile {
+    name: String
+    version: String
+}
+
+struct BrowserAbilities {
+    javascript: Bool
+    screenshots: Bool
+}
+
+struct Browser {
+    id: Int
+    browser_profile: BrowserProfile
+    url: String
+    closed: Bool
+}
+
+struct BrowserContext {
+    id: Int
+    browser: Int
+}
+
+struct BrowserPage {
+    id: Int
+    url: String
+    title: String
+}
+
+struct BrowserFrame {
+    id: Int
+    page_id: Int
+    url: String
+}
+
+struct BrowserLocator {
+    selector: String
+    page_id: Int
+}
+
+struct BrowserLocked {
+    engine: String
+    version: String
+    binary: String
+    protocol: String
+    size: Int
+    output_hash: String
+
+    fn engine(self) -> String Never! { self.engine }
+    fn version(self) -> String Never! { self.version }
+    fn binary(self) -> String Never! { self.binary }
+    fn protocol(self) -> String Never! { self.protocol }
+    fn verify(self) BrowserError! -[FS]> {
+        if !core.web.browser.__is_file(self.binary) -> return Err(BrowserError{kind: "missing binary"})
+        size :: core.web.browser.__file_size(self.binary) ?? return Err(BrowserError{kind: "missing binary"})
+        if size != self.size -> return Err(BrowserError{kind: "size mismatch"})
+        Ok()
+    }
+}
+
+struct BrowserIntercept {
+    url: String
+    status: Int
+}
+
+struct BrowserEvent {
+    kind: String
+    target: String
+}
+
+struct BrowserReceipt {
+    ok: Bool
+    detail: String
+}
+
+struct BrowserTrace {
+    events: [String]
+}
+
+struct BrowserTestConfig {
+    engines: [String]
+    retries: Int
+    timeout: BrowserTimeout
+    filter: String
+    reporter: String
+    ui: Bool
+    visual: Bool
+    watch: Bool
+    trace_on_retry: Bool
+    trace_all: Bool
+    server_url: String
+    server_command: [String]
+    server_reuse: Bool
+    server_cwd: String
+    artifact_dir: String
+    report_path: String
+    source_root: String
+
+    fn engines(self) -> [String] Never! { self.engines }
+    fn retries(self) -> Int Never! { self.retries }
+    fn filter(self) -> String Never! { self.filter }
+    fn reporter(self) -> String Never! { self.reporter }
+    fn ui(self) -> Bool Never! { self.ui }
+    fn visual(self) -> Bool Never! { self.visual }
+    fn watch(self) -> Bool Never! { self.watch }
+    fn server_url(self) -> String Never! { self.server_url }
+    fn artifact_dir(self) -> String Never! { self.artifact_dir }
+    fn report_path(self) -> String Never! { self.report_path }
+}
+
+struct BrowserTestCase {
+    name: String
+    ok: Bool
+    detail: String
+}
+
+struct BrowserReport {
+    title: String
+    cases: [BrowserTestCase]
+}
+
+// The retained child and pipe capture are the canonical host carrier, not a DTO.
+
+fn config() -> BrowserTestConfig BrowserError! { config_from_env() }
+
+fn config_from_env() -[Env, FS]> BrowserTestConfig BrowserError! {
+    env :: core.sys.__startup_env()
+    root :: env_value(env, "JET_PROJECT_ROOT") ?? "."
+    config_from_snapshot(root, env)
+}
+
+
+fn make_profile(name: String) -> BrowserProfile BrowserError! { profile(name) }
+
+// Browser.rs:578-594: no trimming, case folding, timeout clamping, or fallback.
+// Profile refusal uses the BrowserError kind carrier, not protocol enum variants.
+fn profile(name: String) -> BrowserProfile BrowserError! {
+    version :: if name == {
+        "bidi-2025.5" -> "2025.5"
+        "bidi-2024.11" -> "2024.11"
+        else -> { return Err(BrowserError{kind: "invalid profile"}) }
+    }
+    Ok(BrowserProfile{name: name, version: version})
+}
+
+fn timeout(ms: Int) -> BrowserTimeout BrowserError! {
+    if ms < 1 || ms > 600000 -> return Err(BrowserError{kind: "invalid timeout"})
+    Ok(BrowserTimeout{milliseconds: ms})
+}
+
+fn locked(engine: String) -[FS, IO, Env]> BrowserLocked BrowserError! {
+    if engine != "chromium" && engine != "firefox" && engine != "webkit" -> return Err(BrowserError{kind: "unknown engine"})
+    env :: core.sys.__startup_env()
+    root :: env_value(env, "JET_PROJECT_ROOT") ?? "."
+    lock_path :: core.web.browser.__path_join(root, ".jet/lock")
+    raw :: core.web.browser.__read_text(lock_path) ?? return Err(BrowserError{kind: "missing lock"})
+    entry :: parse_locked(raw, engine)
+    if !core.web.browser.__is_file(entry.binary) -> return Err(BrowserError{kind: "missing binary"})
+    size :: core.web.browser.__file_size(entry.binary) ?? return Err(BrowserError{kind: "missing binary"})
+    if size != entry.size -> return Err(BrowserError{kind: "size mismatch"})
+    Ok(entry)
+}
+
+fn connect(endpoint: String) -[Net]> Browser BrowserError! {
+    connect_profile(endpoint, profile("bidi-2025.5"), BrowserTimeout{milliseconds: 30000})
+}
+
+fn connect_profile(endpoint: String, p: BrowserProfile, t: BrowserTimeout) -[Net]> Browser BrowserError! {
+    conn :: core.net.ws.__connect(endpoint) ? value -> value ! error -> return Err(browser_ws_error(error))
+    core.web.browser.__ws_set_timeout(conn, t.milliseconds) ?? return Err(browser_ws_error(err))
+    browser :: core.web.browser.__from_connection(^conn, p, t.copy())
+    empty :: tree.object_from_entries(^[(key: String, value: Dyn)]{})
+    status :: core.web.browser.__command(browser, "session.status", ^empty) ? value -> value ! error -> return Err(error)
+    if !browser_true_field(status, "ready") || !browser_text_field(status, "message") ->
+        return Err(BrowserError{kind: "protocol"})
+    params :: tree.object_from_entries(^[(key: String, value: Dyn)]{
+        (key: "capabilities", value: tree.object_from_entries(^[(key: String, value: Dyn)]{
+            (key: "alwaysMatch", value: tree.object_from_entries(^[(key: String, value: Dyn)]{}))
+        }))
+    })
+    session :: core.web.browser.__command(browser, "session.new", ^params) ? value -> value ! error -> return Err(error)
+    // This mutation precedes reply validation in the native truth: failed
+    // sessionId/capability validation must still clean up a started session.
+    core.web.browser.__session_started(browser)
+    cdp :: browser_session_cdp(session) ? value -> value ! error -> return Err(error)
+    core.web.browser.__cdp(browser, cdp)
+    Ok(browser)
+}
+
+fn browser_ws_error(error: WsError) -> BrowserError Never! {
+    if error == {
+        .Timeout -> BrowserError{kind: "timeout"}
+        .Closed -> BrowserError{kind: "closed"}
+        else -> BrowserError{kind: "transport"}
+    }
+}
+
+fn browser_true_field(value: Dyn, key: String) -> Bool Never! {
+    if !(value == .Object(_)) -> return false
+    loop entry in tree.object_entries(value) {
+        if entry.key == key {
+            if entry.value == .Bool(flag) -> return flag
+            return false
+        }
+    }
+    false
+}
+
+fn browser_text_field(value: Dyn, key: String) -> Bool Never! {
+    if !(value == .Object(_)) -> return false
+    loop entry in tree.object_entries(value) {
+        if entry.key == key -> return entry.value == .Text(_)
+    }
+    false
+}
+
+fn browser_session_cdp(session: Dyn) -> Bool BrowserError! {
+    if !browser_text_field(session, "sessionId") -> return Err(BrowserError{kind: "protocol"})
+    loop entry in tree.object_entries(session) {
+        if entry.key == "capabilities" {
+            if !(entry.value == .Object(_)) -> return Err(BrowserError{kind: "protocol"})
+            return Ok(browser_true_field(entry.value, "goog:cdp"))
+        }
+    }
+    Err(BrowserError{kind: "protocol"})
+}
+
+fn connect_browser_profile(p: BrowserProfile, t: BrowserTimeout) -[Net]> Browser BrowserError! {
+    connect_profile(p.name, p, t)
+}
+
+
+
+fn selected(page: BrowserPage, selector: String) -> BrowserLocator Never! {
+    BrowserLocator{selector: selector, page_id: page.id}
+}
+fn begin_named(config: BrowserTestConfig, test: String, engine: String, attempt: Int, source_path: String, line: Int, column: Int) -[Net]> BrowserTestFixture BrowserError! {
+    // Source positions clamp to u32 exactly; the retained fixture owns actions,
+    // subscriptions and cleanup when context/page creation fails.
+    core.web.browser.__begin_fixture(config, test, engine, attempt, source_path, source_position(line), source_position(column))
+}
+
+fn fixture_context(browser: Browser) -> BrowserContext Never! { BrowserContext{id: browser.id, browser: browser.id} }
+
+fn fixture_page(ctx: BrowserContext, url: String) -> BrowserPage Never! {
+    BrowserPage{id: ctx.id, url: url, title: ""}
+}
+
+
+fn fixture_source(name: String, body: String) -> String BrowserError! {
+    generate_source(name, body, "")
+}
+
+fn generate_source(name: String, body: String, base_url: String) -> String BrowserError! {
+    if name.len() == 0 || name.len() > C_MAX_SOURCE_NAME || body.len() > C_MAX_SOURCE_BYTES || base_url.len() > C_MAX_SOURCE_BYTES {
+        return Err(BrowserError{kind: "protocol"})
+    }
+    url := base_url
+    if url.len() == 0 -> url = "/"
+    test_name := source_name(name)
+    escaped :: esc_source(url)
+    out := "// generated browser test\nfn {test_name}() {{\n    _ :: \"{escaped}\"\n    {body}\n}}\n"
+    if out.len() > C_MAX_SOURCE_BYTES -> return Err(BrowserError{kind: "protocol"})
+    Ok(out)
+}
+
+fn report_new(title: String) -> BrowserReport Never! { BrowserReport{title: title, cases: [BrowserTestCase]{}} }
+
+fn report_add_case(report: BrowserReport, name: String, ok: Bool) -> BrowserReport Never! {
+    cases := [BrowserTestCase]{}
+    loop c in report.cases -> &cases.push(c)
+    &cases.push(BrowserTestCase{name: name, ok: ok, detail: ""})
+    BrowserReport{title: report.title, cases: cases}
+}
+
+fn report_html(report: BrowserReport) -> String Never! {
+    out := "<!doctype html><html><head><title>{esc(report.title)}</title></head><body><h1>{esc(report.title)}</h1><ol>"
+    loop c in report.cases {
+        cls := "pass"
+        if !c.ok -> cls = "fail"
+        out = "{out}<li class=\"{cls}\">{esc(c.name)}</li>"
+    }
+    out = "{out}</ol></body></html>"
+    out
+}
+
+fn report_json(report: BrowserReport) -> String Never! {
+    out := "{{\"title\":\"{esc_json(report.title)}\",\"passed\":{passed(report)},\"failed\":{failed(report)},\"cases\":["
+    loop i in 0..<report.cases.len() {
+        c :: report.cases[i]
+        if i > 0 -> out = "{out},"
+        ok := "true"
+        if !c.ok -> ok = "false"
+        out = "{out}{{\"name\":\"{esc_json(c.name)}\",\"ok\":{ok}}}"
+    }
+    "{out}]}}"
+}
+
+fn report_text(report: BrowserReport) -> String Never! {
+    out := "{report.title}\n"
+    loop c in report.cases {
+        mark := "ok"
+        if !c.ok -> mark = "FAIL"
+        out = "{out}[{mark}] {c.name}\n"
+    }
+    out = "{out}{passed(report)} passed, {failed(report)} failed\n"
+    out
+}
+
+fn report_exit_code(report: BrowserReport) -> Int Never! {
+    if failed(report) > 0 -> return 1
+    0
+}
+
+fn write_report(report: BrowserTestReport, path: String) BrowserError! {
+    // BrowserTest.rs:1136-1155: report choice precedes the first write; the
+    // HTML companion is written afterwards, including when target is HTML.
+    options :: core.web.browser.__report_options(report)
+    rendered :: if options.reporter == {
+        "json" -> core.web.browser.__report_json(report)
+        "html" -> core.web.browser.__report_html(report)
+        else -> core.web.browser.__report_text(report)
+    }
+    write_report_text(path, rendered)
+    if options.ui || options.reporter == "html" {
+        viewer :: core.web.browser.__html_path(path)
+        write_report_text(viewer, core.web.browser.__report_html(report))
+    }
+    Ok()
+}
+
+fn server_start(config: BrowserTestConfig) -[Net]> BrowserTestServer BrowserError! {
+    core.web.browser.__server_start(config)
+}
+
+fn watch_changed(path: String, last_modified_ms: Int) -[FS, Net]> Bool BrowserError! {
+    if core.web.browser.__modified_ms(path) == .Val(fact) -> return Ok(fact > last_modified_ms)
+    Ok(last_modified_ms >= 0)
+}
+
+fn server_stop(server: BrowserTestServer) Never! {
+    // The handle copy shares the one host server; stopping it stops that server.
+    shared := server.copy()
+    core.web.browser.__server_stop(&shared)
+}
+
+fn server_url(server: BrowserTestServer) -> String Never! { server.url() }
+
+fn server_logs(server: BrowserTestServer) -> String Never! { server.logs() }
+
+
+
+fn passed(report: BrowserReport) -> Int Never! {
+    n := 0
+    loop c in report.cases {
+        if c.ok -> n = n + 1
+    }
+    n
+}
+
+fn failed(report: BrowserReport) -> Int Never! { report.cases.len() - passed(report) }
+
+fn esc(text: String) -> String {
+    raw :: text.bytes()
+    out := [U8]{}
+    loop b in raw {
+        n :: b
+        if n == 38 {
+            push_str(&out, "&amp;")
+        } else {
+            if n == 60 {
+                push_str(&out, "&lt;")
+            } else {
+                if n == 62 {
+                    push_str(&out, "&gt;")
+                } else {
+                    if n == 34 {
+                        push_str(&out, "&quot;")
+                    } else {
+                        if n == 39 -> push_str(&out, "&#39;") else -> &out.push(b)
+                    }
+                }
+            }
+        }
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn esc_json(text: String) -> String {
+    raw :: text.bytes()
+    out := [U8]{}
+    loop b in raw {
+        n :: b
+        if n == 34 || n == 92 {
+            &out.push(U8{92})
+            &out.push(b)
+        } else {
+            if n == 10 {
+                push_str(&out, "\\n")
+            } else {
+                if n == 13 {
+                    push_str(&out, "\\r")
+                } else {
+                    if n == 9 -> push_str(&out, "\\t") else -> &out.push(b)
+                }
+            }
+        }
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn push_str(out: &[U8], s: String) Never! {
+    loop b in s.bytes() -> &out.push(b)
+}
+fn source_name(text: String) -> String Never! {
+    raw :: text.bytes()
+    out := [U8]{}
+    loop i in 0..<raw.len() {
+        n :: raw[i]
+        ok := (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95
+        if ok {
+            if i == 0 && n >= 48 && n <= 57 -> &out.push(U8{95})
+            &out.push(n)
+        } else {
+            &out.push(U8{95})
+        }
+    }
+    if out.len() == 0 -> return "generated_browser_test"
+    String.from_bytes(out) ?? "generated_browser_test"
+}
+
+fn esc_source(text: String) -> String Never! {
+    raw :: text.bytes()
+    out := [U8]{}
+    loop b in raw {
+        if b == (U8{92}) || b == (U8{34}) {
+            &out.push(U8{92})
+            &out.push(b)
+        } else {
+            if b == (U8{10}) {
+                push_str(&out, "\\n")
+            } else {
+                if b == (U8{13}) -> push_str(&out, "\\r") else -> &out.push(b)
+            }
+        }
+    }
+    String.from_bytes(out) ?? ""
+}
+
+
+#Test("browser profiles keep exact version pins") {
+    current :: profile("bidi-2025.5") ?? panic("current profile rejected")
+    previous :: profile("bidi-2024.11") ?? panic("previous profile rejected")
+    assert_eq(current.name, "bidi-2025.5")
+    assert_eq(current.version, "2025.5")
+    assert_eq(previous.version, "2024.11")
+    loop invalid in ([String]{"", "default", "BIDI-2025.5", " bidi-2025.5", "bidi-2025.5 "}) {
+        if profile(invalid) == {
+            .Ok(_) -> panic("invalid profile accepted")
+            .Err(error) -> {
+                assert_eq(error.kind, "invalid profile")
+                assert_eq("{error}", "browser profile is not supported")
+            }
+        }
+    }
+}
+
+#Test("browser timeout preserves both bounds and exact refusal text") {
+    minimum :: timeout(1) ?? panic("minimum timeout rejected")
+    maximum :: timeout(600000) ?? panic("maximum timeout rejected")
+    assert_eq(minimum.milliseconds, 1)
+    assert_eq(maximum.milliseconds, 600000)
+    loop invalid in ([Int]{-1, 0, 600001, 9223372036854775807}) {
+        if timeout(invalid) == {
+            .Ok(_) -> panic("invalid timeout accepted")
+            .Err(error) -> assert_eq("{error}", "browser timeout must be between 1 and 600000 milliseconds")
+        }
+    }
+}
+
+#Test("browser errors use the shipped display vocabulary") {
+    assert_eq("{BrowserError{kind: "unsupported protocol"}}", "browser protocol is not available in this session")
+    assert_eq("{BrowserError{kind: "timeout"}}", "browser operation timed out")
+    assert_eq("{BrowserError{kind: "closed"}}", "browser session is closed")
+    assert_eq("{BrowserError{kind: "transport"}}", "browser transport failed")
+    assert_eq("{BrowserError{kind: "missing lock"}}", "no locked browser for this engine in .jet/lock")
+    assert_eq("{BrowserError{kind: "unknown engine"}}", "browser engine is not supported")
+    assert_eq("{BrowserError{kind: "missing binary"}}", "locked browser binary was not found")
+    assert_eq("{BrowserError{kind: "size mismatch"}}", "locked browser binary size drifted")
+    assert_eq("{BrowserError{kind: "invalid lock"}}", "browser lock entry is incomplete")
+    assert_eq("{BrowserError{kind: "protocol"}}", "browser protocol failed")
+}
+
+fn source_position(value: Int) -> Int Never! {
+    if value < 0 -> return 0
+    if value > 4294967295 -> return 4294967295
+    value
+}
+
+// A negative accumulator accepts i64::MIN without an overflowing magnitude.
+fn parse_i64(value: String) -> Int? Never! {
+    raw :: value.bytes()
+    if raw.len() == 0 -> return None
+    negative :: raw[0] == (U8{45})
+    i := if negative || raw[0] == (U8{43}) -> 1 else -> 0
+    if i == raw.len() -> return None
+    limit :: if negative -> -9223372036854775808 else -> -9223372036854775807
+    n := 0
+    loop i < raw.len() {
+        d :: Int{raw[i]} - 48
+        if d < 0 || d > 9 -> return None
+        if n < limit /% 10 -> return None
+        n = n * 10
+        if n < limit + d -> return None
+        n = n - d
+        i += 1
+    }
+    Val(if negative -> n else -> -n)
+}
+
+fn config_value(root: String, key: String) -[FS]> String? Never! {
+    path :: core.web.browser.__path_join(root, "browser-tests.conf")
+    raw :: core.web.browser.__read_text(path) ?? return None
+    loop line in parse.split(raw, "\n") {
+        pair :: parse.split_once(text.trim(line), "=")
+        if pair.found && parse.lower(text.trim(pair.head)) == parse.lower(key) -> return Val(text.trim(pair.tail))
+    }
+    None
+}
+
+fn env_value(env: [(name: [U8], value: [U8])], variable: String) -> String? Never! {
+    key :: variable.bytes()
+    loop entry in env {
+        if entry.name == key {
+            text :: String.from_bytes(entry.value) ?? return None
+            return Val(text)
+        }
+    }
+    None
+}
+
+fn setting(root: String, env: [(name: [U8], value: [U8])], variable: String, key: String) -[FS]> String? Never! {
+    if env_value(env, variable) == Val(value) -> return Val(value)
+    config_value(root, key)
+}
+
+fn env_bool(env: [(name: [U8], value: [U8])], variable: String, default: Bool) -> Bool Never! {
+    value :: env_value(env, variable) ?? return default
+    normalized :: parse.lower(text.trim(value))
+    if normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on" -> return true
+    if normalized == "0" || normalized == "false" || normalized == "no" || normalized == "off" -> return false
+    default
+}
+
+fn ascii_space(value: U8) -> Bool Never! {
+    value == U8{32} || value == U8{9} || value == U8{10} || value == U8{11} || value == U8{12} || value == U8{13}
+}
+
+fn test_engines(raw: String) -> [String] BrowserError! {
+    requested := [String]{}
+    token := [U8]{}
+    bytes :: raw.bytes()
+    loop i in 0..(bytes.len() + 1) {
+        separator :: i == bytes.len() || bytes[i] == (U8{44}) || ascii_space(bytes[i])
+        if !separator {
+            &token.push(bytes[i])
+            next
+        }
+        value :: parse.lower(text.trim(String.from_bytes(token) ?? ""))
+        token = [U8]{}
+        if value == "" -> next
+        if value != "chromium" && value != "firefox" && value != "webkit" -> return Err(BrowserError{kind: "unknown engine"})
+        &requested.push(value)
+    }
+    engines := [String]{}
+    loop engine in ([String]{"chromium", "firefox", "webkit"}) {
+        loop value in requested {
+            if value == engine {
+                &engines.push(engine)
+                break
+            }
+        }
+    }
+    if engines.len() == 0 -> return Err(BrowserError{kind: "unknown engine"})
+    Ok(engines)
+}
+
+fn split_command(raw: String) -> [String] Never! {
+    command := [String]{}
+    value := [U8]{}
+    quote := U8{0}
+    loop b in raw.bytes() {
+        if quote != (U8{0}) {
+            if b == quote -> quote = U8{0} else -> &value.push(b)
+        } else if b == (U8{39}) || b == (U8{34}) {
+            quote = b
+        } else if ascii_space(b) {
+            if value.len() > 0 {
+                &command.push(String.from_bytes(value) ?? "")
+                value = [U8]{}
+            }
+        } else {
+            &value.push(b)
+        }
+    }
+    if value.len() > 0 -> &command.push(String.from_bytes(value) ?? "")
+    command
+}
+
+fn config_from_snapshot(root: String, env: [(name: [U8], value: [U8])]) -[FS]> BrowserTestConfig BrowserError! {
+    browser_text :: env_value(env, "JET_TEST_BROWSERS") ?? setting(root, env, "JET_TEST_BROWSER", "browsers") ?? "chromium"
+    engines :: test_engines(browser_text)
+    retries :: parse_i64(setting(root, env, "JET_TEST_RETRIES", "retries") ?? "") ?? 0
+    if retries < 0 || retries > 5 -> return Err(BrowserError{kind: "protocol"})
+    timeout_ms :: parse_i64(setting(root, env, "JET_TEST_TIMEOUT_MS", "timeout-ms") ?? "") ?? 30000
+    validated_timeout :: timeout(timeout_ms)
+    reporter :: parse.lower(setting(root, env, "JET_TEST_REPORTER", "reporter") ?? "text")
+    if reporter != "text" && reporter != "json" && reporter != "html" -> return Err(BrowserError{kind: "protocol"})
+    artifacts :: setting(root, env, "JET_TEST_ARTIFACTS", "artifacts") ?? core.web.browser.__path_join(root, ".jet/browser-tests/artifacts")
+    report_path :: setting(root, env, "JET_TEST_REPORT", "report") ?? core.web.browser.__path_join(root, ".jet/browser-tests/report.json")
+    server_url :: env_value(env, "JET_TEST_WEB_SERVER_URL") ?? setting(root, env, "JET_BROWSER_TEST_SERVER_URL", "server-url") ?? ""
+    command :: env_value(env, "JET_TEST_WEB_SERVER_CMD") ?? env_value(env, "JET_BROWSER_TEST_SERVER_CMD") ?? config_value(root, "webServer") ?? config_value(root, "web_server") ?? ""
+    reuse :: if env_value(env, "JET_TEST_WEB_SERVER_REUSE") != None -> env_bool(env, "JET_TEST_WEB_SERVER_REUSE", false) else -> parse.lower(config_value(root, "server") ?? "") == "reuse"
+    cwd :: setting(root, env, "JET_TEST_WEB_SERVER_CWD", "server-cwd") ?? root
+    filter :: setting(root, env, "JET_TEST_FILTER", "filter") ?? ""
+    Ok(BrowserTestConfig{
+        engines: engines, retries: retries, timeout: validated_timeout,
+        filter: filter, reporter: reporter, server_reuse: reuse,
+        ui: env_bool(env, "JET_TEST_BROWSER_UI", false),
+        visual: env_bool(env, "JET_TEST_BROWSER_VISUAL", false),
+        watch: env_bool(env, "JET_TEST_WATCH", false),
+        trace_on_retry: env_bool(env, "JET_TEST_TRACE_ON_RETRY", true),
+        trace_all: env_bool(env, "JET_TEST_TRACE", false),
+        server_url: server_url, server_command: split_command(command),
+        server_cwd: cwd, artifact_dir: artifacts, report_path: report_path, source_root: root
+    })
+}
+
+fn parse_locked(raw: String, engine: String) -> BrowserLocked BrowserError! {
+    current := BrowserLocked{engine: "", version: "", binary: "", protocol: "", size: 0, output_hash: ""}
+    in_browser := false
+    found := BrowserLocked?{None}
+    loop raw_line in parse.split(raw, "\n") {
+        line :: text.trim(raw_line)
+        bytes :: line.bytes()
+        if bytes.len() == 0 || bytes[0] == (U8{35}) -> next
+        if bytes[0] == (U8{91}) {
+            if in_browser && current.engine == engine -> found = Val(current)
+            in_browser = line == "[[browser]]"
+            current = BrowserLocked{engine: "", version: "", binary: "", protocol: "", size: 0, output_hash: ""}
+            next
+        }
+        if !in_browser -> next
+        pair :: parse.split_once(line, "=")
+        if !pair.found -> next
+        key :: text.trim(pair.head)
+        value :: strip_quotes(text.trim(pair.tail))
+        if key == {
+            "engine" -> current.engine = value
+            "version" -> current.version = value
+            "binary" -> current.binary = value
+            "protocol" -> current.protocol = value
+            "size" -> current.size = parse_i64(value) ?? return Err(BrowserError{kind: "invalid lock"})
+            "output-hash" -> current.output_hash = value
+            else -> {}
+        }
+    }
+    if in_browser && current.engine == engine -> found = Val(current)
+    entry :: found ?? return Err(BrowserError{kind: "missing lock"})
+    if entry.engine == "" || entry.binary == "" || entry.protocol == "" || entry.output_hash == "" -> return Err(BrowserError{kind: "invalid lock"})
+    Ok(entry)
+}
+
+fn strip_quotes(raw: String) -> String Never! {
+    bytes :: raw.bytes()
+    start := 0
+    end := bytes.len()
+    loop start < end && bytes[start] == (U8{34}) -> start += 1
+    loop end > start && bytes[end - 1] == (U8{34}) -> end -= 1
+    out := [U8]{}
+    loop i in start..<end -> &out.push(bytes[i])
+    String.from_bytes(out) ?? ""
+}
+
+#Test("browser configuration helpers preserve Rust numeric and command rules") {
+    assert_eq(parse_i64("-9223372036854775808"), Val(-9223372036854775808))
+    assert_eq(parse_i64("9223372036854775807"), Val(9223372036854775807))
+    assert_eq(parse_i64("9223372036854775808"), None)
+    assert_eq(parse_i64(" 1"), None)
+    assert_eq(parse_i64("+5"), Val(5))
+    assert_eq(test_engines(" WEBKIT,chromium,webkit firefox "), [String]{"chromium", "firefox", "webkit"})
+    assert_eq(split_command("run '' \"a b\" 'unterminated"), [String]{"run", "a b", "unterminated"})
+    assert_eq(source_position(-1), 0)
+    assert_eq(source_position(4294967296), 4294967295)
+}
+
+#Test("locked browser entries use last match and validate all size fields") {
+    raw :: "[[browser]]\nengine=firefox\nbinary=first\nprotocol=bidi\noutput-hash=a\n[[browser]]\nengine=firefox\nbinary=\"\"last\"\"\nprotocol=bidi\noutput-hash=b\nsize=-1\n"
+    entry :: parse_locked(raw, "firefox")
+    assert_eq(entry.binary(), "last")
+    assert_eq(entry.size, -1)
+    if parse_locked("{raw}[[browser]]\nengine=chromium\nsize=overflow\n", "firefox") == {
+        .Ok(_) -> panic("invalid size accepted")
+        .Err(error) -> assert_eq(error.kind, "invalid lock")
+    }
+}
+
+fn write_report_text(path: String, rendered: String) BrowserError! {
+    if rendered.bytes().len() > 16777216 -> return Err(BrowserError{kind: "protocol"})
+    core.web.browser.__write_report_bytes(path, rendered.bytes())
+}
+
+#Test("browser handshake checks preserve native first-match and protocol rules") {
+    ready :: tree.object_from_entries(^[(key: String, value: Dyn)]{
+        (key: "ready", value: Dyn.Bool(true)),
+        (key: "message", value: Dyn.Text("ready"))
+    })
+    assert(browser_true_field(ready, "ready"))
+    assert(browser_text_field(ready, "message"))
+    assert(!browser_true_field(Dyn.Null, "ready"))
+    assert(!browser_text_field(Dyn.Null, "message"))
+    duplicate_ready :: tree.object_from_entries(^[(key: String, value: Dyn)]{
+        (key: "ready", value: Dyn.Bool(false)),
+        (key: "ready", value: Dyn.Bool(true))
+    })
+    assert(!browser_true_field(duplicate_ready, "ready"))
+    caps :: tree.object_from_entries(^[(key: String, value: Dyn)]{
+        (key: "goog:cdp", value: Dyn.Bool(false)),
+        (key: "goog:cdp", value: Dyn.Bool(true))
+    })
+    session :: tree.object_from_entries(^[(key: String, value: Dyn)]{
+        (key: "sessionId", value: Dyn.Text("")),
+        (key: "capabilities", value: ^caps)
+    })
+    assert_eq(browser_session_cdp(session), Ok(false))
+    typed_text :: tree.typed_string(^"typed")
+    typed_session :: tree.object_from_entries(^[(key: String, value: Dyn)]{
+        (key: "sessionId", value: ^typed_text),
+        (key: "capabilities", value: tree.object_from_entries(^[(key: String, value: Dyn)]{}))
+    })
+    assert_eq(browser_session_cdp(typed_session), Ok(false))
+    if browser_session_cdp(Dyn.Null) == {
+        .Ok(_) -> panic("non-object session accepted")
+        .Err(error) -> assert_eq(error.kind, "protocol")
+    }
+}

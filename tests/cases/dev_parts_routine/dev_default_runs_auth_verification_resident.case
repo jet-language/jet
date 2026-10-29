@@ -1,0 +1,15 @@
+# tests/dev_parts/routine.rs::dev_default_runs_auth_verification_resident at tests/dev_parts/routine.rs:897; hand-port (the forced-interpreter tier is carried by `jet run`; the Jet CLI has no interpreter flag)
+fixture: dev_default_runs_auth_verification_resident.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step dev: jet run auth_resident.jet
+exit: 0
+stdout.trim: = dev_default_runs_auth_verification_resident.1.out # original compares the trimmed stdout
+stderr: empty
+step: jet build auth_resident.jet
+exit: 0
+step aot: built
+exit: any # original asserts only the trimmed stdout
+stdout.trim: = dev_default_runs_auth_verification_resident.1.out # original compares the trimmed stdout

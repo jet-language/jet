@@ -6,7 +6,7 @@
 // compile time. This is a small fixed catalog, not a package registry.
 
 // The directory components are copied into, relative to a project root.
-COMPONENTS_DIR :: prep { "components" }
+COMPONENTS_DIR :: "components"
 
 // One starter component: its catalog name (matched case-sensitively against
 // `jetpack add <name>`) and its embedded `.jet` source.
@@ -15,12 +15,18 @@ struct StarterComponent {
     source: String
 }
 
+// workaround #5940(g): module-level constants, not inline `comptime {}` values.
+ENV_STARTER_BUTTON :: comptime { embed_file("../../Components/Button.jet") }
+ENV_STARTER_LABEL :: comptime { embed_file("../../Components/Label.jet") }
+ENV_STARTER_INPUT :: comptime { embed_file("../../Components/Input.jet") }
+ENV_STARTER_CONTAINER :: comptime { embed_file("../../Components/Container.jet") }
+
 fn env_starter_components() -> [StarterComponent] Never! {
     [StarterComponent]{
-        {name: "Button", source: embed_file("../../../../crates/jetpack/src/components/Button.jet")},
-        {name: "Label", source: embed_file("../../../../crates/jetpack/src/components/Label.jet")},
-        {name: "Input", source: embed_file("../../../../crates/jetpack/src/components/Input.jet")},
-        {name: "Container", source: embed_file("../../../../crates/jetpack/src/components/Container.jet")},
+        {name: "Button", source: ENV_STARTER_BUTTON},
+        {name: "Label", source: ENV_STARTER_LABEL},
+        {name: "Input", source: ENV_STARTER_INPUT},
+        {name: "Container", source: ENV_STARTER_CONTAINER},
     }
 }
 

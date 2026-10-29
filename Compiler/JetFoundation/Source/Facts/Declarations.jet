@@ -1,0 +1,288 @@
+// Declaration facts the checker records for effects, types, traits, impls and
+// constants. They hold no checked-tree nodes.
+
+struct TEffectSpan {
+    name: String
+    span: Span
+}
+
+struct TEffectFacts {
+    direct: [String]
+    solved: [String]
+    call_edges: [String]
+    maximal: Bool
+    direct_spans: [TEffectSpan]
+    // Where this function's own body made its row maximal (a call with no
+    // known body), when it did.
+    maximal_span: Span?{None}
+}
+
+struct TTargetApplicability {
+    rust_aot: Bool
+    interpreter: Bool
+    web: Bool
+}
+
+enum TVisibility {
+    Private
+    Package
+    Public
+}
+
+struct TForeignProvenance {
+    language: String
+    abi: String
+    symbol: String
+    span: Span
+}
+
+struct TGenericParam {
+    name: String
+    bounds: [SymbolID]
+}
+struct TDeclarationFacts {
+    type_defs: [TTypeDef]
+    traits: [TTraitDef]
+    impls: [TImplDef]
+    constants: [TConstantDef]
+    core_builtin_owners: [TCoreBuiltinOwner]
+}
+
+enum TDeclarationOwnership {
+    Owned
+    ReadBorrow
+    WriteBorrow
+    Move
+}
+struct TCoreBuiltinOwner {
+    symbol: SymbolID
+    module_identity: String?
+    name: String
+    ownership: TDeclarationOwnership
+}
+
+enum TStructLayout {
+    C
+    CAligned(alignment: Int, target: Bool)
+    Columnar
+}
+
+enum TCEnumTag {
+    CInt
+    U8
+    I8
+    U16
+    I16
+    U32
+    I32
+    U64
+    I64
+}
+
+struct TLayoutAlignmentFact {
+    requested_alignment: Int
+    effective_alignment: Int
+    target_mode: Bool
+    target_profile: String
+    fact_identity: String
+}
+
+struct TShapeFieldNames {
+    text: String
+    json: String?
+    cbor: String?
+    csv: String?
+    toml: String?
+    yaml: String?
+    xml: String?
+    args: String
+    env: String
+    db: String?
+    layout: String?
+}
+
+struct TIntegerRange {
+    lo: Int
+    hi: Int
+}
+
+enum TSerdeAttributeKind {
+    RenameAll
+    Tag
+    Untagged
+    DenyUnknownFields
+}
+
+struct TSerdeAttribute {
+    kind: TSerdeAttributeKind
+    value: String?
+    span: Span
+}
+
+struct TFunctionRef {
+    key: String
+    module_identity: String
+    name: String
+    span: Span
+    visibility: TVisibility
+}
+struct TCLIBinding {
+    name: String
+    span: Span
+    function_key: String
+    markers: [String]
+}
+
+struct TField {
+    name: String
+    shape_names: TShapeFieldNames
+    skip: Bool
+    ty: Type
+    span: Span
+    public: Bool
+    package_public: Bool
+    computed: Bool
+    has_default: Bool
+    redact: Bool
+}
+
+enum TVariantPayload {
+    Unit
+    Single(value: Type)
+    Named(fields: [TField])
+}
+
+struct TVariant {
+    name: String
+    wire_name: String
+    span: Span
+    payload: TVariantPayload
+    discriminant: Int?
+}
+
+enum TTypeDefKind {
+    Struct(fields: [TField], methods: [String])
+    Enum(variants: [TVariant], methods: [String])
+    Distinct(base: Type, range: TIntegerRange?)
+    Alias(target: Type)
+    UnitFamily(members: [String])
+}
+enum TCompilerBuiltin { DefaultErr }
+
+struct TTypeDef {
+    module_identity: String
+    key: String
+    name: String
+    span: Span
+    public: Bool
+    package_public: Bool
+    generic_params: [TGenericParam]
+    derives: [String]
+    auto_derive_default: Bool
+    auto_printable: Bool
+    published_schema: Bool
+    single_use: Bool
+    must_use: Bool
+    layout: TStructLayout?
+    c_layout_tag: TCEnumTag?
+    enum_layout: LayoutFacts?
+    layout_alignment: TLayoutAlignmentFact?
+    serde: [TSerdeAttribute]
+    cli_bindings: [TCLIBinding]
+    ownership: TDeclarationOwnership
+    boxed_edges: [String]
+    compiler_builtin: TCompilerBuiltin?
+    kind: TTypeDefKind
+}
+
+struct TAssociatedTypeDecl {
+    name: String
+    span: Span
+}
+
+struct TAssociatedTypeValue {
+    name: String
+    ty: Type
+    span: Span
+}
+
+struct TDeclarationParam {
+    index: Int
+    name: String
+    span: Span
+    ty: Type
+    access: AccessConvention
+    ownership: TDeclarationOwnership
+    public_label: String
+    variadic: Bool
+    default_present: Bool
+}
+
+struct TTraitMethod {
+    key: String
+    name: String
+    span: Span
+    self_access: AccessConvention?
+    params: [TDeclarationParam]
+    declared_return: Type?
+    return_type: Type
+    failure: TFailureCarrier
+    is_pure: Bool
+    declared_effects: [TEffectSpan]?
+    return_view_provenance: ViewProvenanceMap?
+    declared_return_view_provenance: ViewProvenanceMap?
+    default_function_key: String?
+}
+
+struct TTraitDef {
+    module_identity: String
+    key: String
+    name: String
+    span: Span
+    visibility: TVisibility
+    associated_types: [TAssociatedTypeDecl]
+    methods: [TTraitMethod]
+}
+
+enum TTargetOS {
+    Linux
+    MacOS
+    Windows
+}
+
+enum TOperatorMarker {
+    Commutative
+}
+
+struct TImplDef {
+    module_identity: String
+    key: String
+    span: Span
+    self_type: Type
+    trait_name: String?
+    trait_ref: String?
+    associated_types: [TAssociatedTypeValue]
+    methods: [String]
+    delegation_field: String?
+    compiler_generated: Bool
+    serde: TSerdeCodec?
+    operator_rhs: Type?
+    operator_marker: TOperatorMarker?
+    target_os: TTargetOS?
+}
+
+struct TConstantDef {
+    module_identity: String
+    key: String
+    name: String
+    span: Span
+    visibility: TVisibility
+    ty: Type
+    is_comptime: Bool
+    is_storage: Bool
+    value: TComptimeValue
+    // A constant computed at startup: the key of the function that computes
+    // it (its `value` is then Unit). The program initializes every such
+    // constant before `run`, and a read waits for its own on first use.
+    init: String?{None}
+}

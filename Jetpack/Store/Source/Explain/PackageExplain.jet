@@ -103,15 +103,15 @@ struct ExplainEntry {
 
     fn to_tree(self) -> Dyn Never! {
         object := [String: Dyn]{}
-        object["id"] = Dyn.Text(self.id)
-        object["name"] = Dyn.Text(self.name)
-        object["version"] = Dyn.Text(self.version)
-        object["reference"] = Dyn.Text(self.reference)
-        object["output_hash"] = Dyn.Text(self.output_hash)
-        object["output_path"] = Dyn.Text(self.output_path)
-        object["bin_path"] = Dyn.Text(self.bin_path)
-        object["rlib_path"] = Dyn.Text(self.rlib_path)
-        object["receipt"] = Dyn.Text(self.receipt)
+        object["id"] = Dyn.Text(self.id.copy())
+        object["name"] = Dyn.Text(self.name.copy())
+        object["version"] = Dyn.Text(self.version.copy())
+        object["reference"] = Dyn.Text(self.reference.copy())
+        object["output_hash"] = Dyn.Text(self.output_hash.copy())
+        object["output_path"] = Dyn.Text(self.output_path.copy())
+        object["bin_path"] = Dyn.Text(self.bin_path.copy())
+        object["rlib_path"] = Dyn.Text(self.rlib_path.copy())
+        object["receipt"] = Dyn.Text(self.receipt.copy())
         object["realized_at"] = Dyn.Int(self.realized_at)
         object["last_used_at"] = Dyn.Int(self.last_used_at)
         Dyn.Object(object)
@@ -127,8 +127,8 @@ struct ExplainObject {
 
     fn to_tree(self) -> Dyn Never! {
         object := [String: Dyn]{}
-        object["digest"] = Dyn.Text(self.digest)
-        object["path"] = Dyn.Text(self.path)
+        object["digest"] = Dyn.Text(self.digest.copy())
+        object["path"] = Dyn.Text(self.path.copy())
         object["external"] = Dyn.Bool(self.external)
         object["known"] = Dyn.Bool(self.known)
         object["owners"] = pkg_json_texts(self.owners)
@@ -172,9 +172,9 @@ struct ExplainProfile {
 
     fn to_tree(self) -> Dyn Never! {
         object := [String: Dyn]{}
-        object["profile"] = Dyn.Text(self.profile)
+        object["profile"] = Dyn.Text(self.profile.copy())
         object["generation"] = Dyn.Int(self.generation)
-        object["output_hash"] = Dyn.Text(self.output_hash)
+        object["output_hash"] = Dyn.Text(self.output_hash.copy())
         object["provider_facts"] = self.provider_facts.to_json_tree()
         Dyn.Object(object)
     }
@@ -195,20 +195,20 @@ struct ExplainProvider {
     fn to_tree(self) -> Dyn Never! {
         facts := [String: Dyn]{}
         fact_keys :: store_sorted_keys(self.producer_facts)
-        loop key in fact_keys -> facts[key] = Dyn.Text(self.producer_facts[key])
+        loop key in fact_keys -> facts[key] = Dyn.Text(self.producer_facts[key].copy())
         profiles := [Dyn]{}
         loop profile in self.profile_facts -> &profiles.push(profile.to_tree())
         object := [String: Dyn]{}
-        object["provider"] = Dyn.Text(self.provider)
-        object["immutable_source"] = Dyn.Text(self.immutable_source)
-        object["source_digest"] = Dyn.Text(self.source_digest)
-        object["toolchain_facts"] = Dyn.Text(self.toolchain_facts)
-        object["policy_facts"] = Dyn.Text(self.policy_facts)
+        object["provider"] = Dyn.Text(self.provider.copy())
+        object["immutable_source"] = Dyn.Text(self.immutable_source.copy())
+        object["source_digest"] = Dyn.Text(self.source_digest.copy())
+        object["toolchain_facts"] = Dyn.Text(self.toolchain_facts.copy())
+        object["policy_facts"] = Dyn.Text(self.policy_facts.copy())
         object["producer_facts"] = Dyn.Object(facts)
         object["provider_facts"] = store_explain_facts_tree(self.provider_facts)
         object["locked_provider_facts"] = store_explain_facts_tree(self.locked_provider_facts)
         object["profile_facts"] = Dyn.Array(profiles)
-        object["native_document"] = Dyn.Text(self.native_document)
+        object["native_document"] = Dyn.Text(self.native_document.copy())
         Dyn.Object(object)
     }
 }
@@ -232,14 +232,14 @@ struct ExplainRoot {
 
     fn to_tree(self) -> Dyn Never! {
         object := [String: Dyn]{}
-        object["kind"] = Dyn.Text(self.kind)
-        object["id"] = Dyn.Text(self.id)
-        object["producer"] = Dyn.Text(self.producer)
-        object["phase"] = Dyn.Text(self.phase)
-        object["label"] = Dyn.Text(self.label)
-        object["reference"] = Dyn.Text(self.reference)
+        object["kind"] = Dyn.Text(self.kind.copy())
+        object["id"] = Dyn.Text(self.id.copy())
+        object["producer"] = Dyn.Text(self.producer.copy())
+        object["phase"] = Dyn.Text(self.phase.copy())
+        object["label"] = Dyn.Text(self.label.copy())
+        object["reference"] = Dyn.Text(self.reference.copy())
         object["targets"] = pkg_json_texts(self.targets)
-        object["reason"] = Dyn.Text(self.reason)
+        object["reason"] = Dyn.Text(self.reason.copy())
         Dyn.Object(object)
     }
 }
@@ -258,7 +258,7 @@ struct ExplainLiveness {
         loop root in self.roots -> &roots.push(root.to_tree())
         object := [String: Dyn]{}
         object["live"] = Dyn.Bool(self.live)
-        object["reason"] = Dyn.Text(self.reason)
+        object["reason"] = Dyn.Text(self.reason.copy())
         object["roots"] = Dyn.Array(roots)
         Dyn.Object(object)
     }
@@ -280,14 +280,14 @@ struct ExplainAttempt {
 
     fn to_tree(self) -> Dyn Never! {
         object := [String: Dyn]{}
-        object["id"] = Dyn.Text(self.id)
-        object["package"] = Dyn.Text(self.package)
-        object["reference"] = Dyn.Text(self.reference)
-        object["provider"] = Dyn.Text(self.provider)
-        object["status"] = Dyn.Text(self.status)
+        object["id"] = Dyn.Text(self.id.copy())
+        object["package"] = Dyn.Text(self.package.copy())
+        object["reference"] = Dyn.Text(self.reference.copy())
+        object["provider"] = Dyn.Text(self.provider.copy())
+        object["status"] = Dyn.Text(self.status.copy())
         object["failed_step"] = Dyn.Int(self.failed_step)
-        object["scratch_dir"] = Dyn.Text(self.scratch_dir)
-        object["log_dir"] = Dyn.Text(self.log_dir)
+        object["scratch_dir"] = Dyn.Text(self.scratch_dir.copy())
+        object["log_dir"] = Dyn.Text(self.log_dir.copy())
         Dyn.Object(object)
     }
 }
@@ -303,13 +303,13 @@ struct ExplainCacheAdmission {
 
     fn to_tree(self) -> Dyn Never! {
         object := [String: Dyn]{}
-        object["role"] = Dyn.Text(self.role)
-        object["decision"] = Dyn.Text(self.decision)
-        object["builder"] = Dyn.Text(self.builder)
-        object["provenance"] = Dyn.Text(self.provenance)
+        object["role"] = Dyn.Text(self.role.copy())
+        object["decision"] = Dyn.Text(self.decision.copy())
+        object["builder"] = Dyn.Text(self.builder.copy())
+        object["provenance"] = Dyn.Text(self.provenance.copy())
         object["receipt_version"] = store_explain_optional_int(self.receipt_version)
         object["receipt_expires_unix"] = store_explain_optional_int(self.receipt_expires_unix)
-        object["reason"] = Dyn.Text(self.reason)
+        object["reason"] = Dyn.Text(self.reason.copy())
         Dyn.Object(object)
     }
 }
@@ -346,9 +346,9 @@ struct ExplainRebuild {
         admissions := [Dyn]{}
         loop admission in self.cache_admissions -> &admissions.push(admission.to_tree())
         object := [String: Dyn]{}
-        object["decision"] = Dyn.Text(self.decision)
-        object["reason"] = Dyn.Text(self.reason)
-        object["action_key"] = Dyn.Text(self.action_key)
+        object["decision"] = Dyn.Text(self.decision.copy())
+        object["reason"] = Dyn.Text(self.reason.copy())
+        object["action_key"] = Dyn.Text(self.action_key.copy())
         object["cache_identity"] = store_explain_sorted_text_map(self.cache_identity)
         object["cache_admissions"] = Dyn.Array(admissions)
         object["checks"] = store_explain_sorted_text_map(self.checks)
@@ -364,7 +364,7 @@ struct ExplainRebuild {
 fn store_explain_sorted_text_map(map: [String: String]) -> Dyn Never! {
     object := [String: Dyn]{}
     keys :: store_sorted_keys(map)
-    loop key in keys -> object[key] = Dyn.Text(map[key])
+    loop key in keys -> object[key] = Dyn.Text(map[key].copy())
     Dyn.Object(object)
 }
 
@@ -388,8 +388,8 @@ struct PackageExplain {
             &reports.push(report.to_tree())
         }
         payload := [String: Dyn]{}
-        payload["query"] = Dyn.Text(self.query)
-        payload["lens"] = Dyn.Text(self.lens)
+        payload["query"] = Dyn.Text(self.query.copy())
+        payload["lens"] = Dyn.Text(self.lens.copy())
         payload["entry"] = if self.entry == {
             .Val(entry) -> entry.to_tree()
             .None -> Dyn.Null
@@ -504,7 +504,7 @@ fn store_explain_rebuild_text(rebuild: ExplainRebuild) -> String Never! {
 
 fn store_explain_empty_dash(value: String) -> String Never! {
     if value == "" -> return "-"
-    value
+    value.copy()
 }
 
 // Explain one package through the Store, closure, lifecycle, and build-debug
@@ -517,7 +517,7 @@ fn store_explain_package(verification: &StoreVerification, roots: HangarRoots, q
     found :: store_explain_find_entry(entries, query)
     entry :: found ?? return store_explain_without_entry(roots, query, lens)
     reports := [ExplainReport]{}
-    graph :: store_explain_load_graph(roots, &reports)
+    graph :: store_explain_load_graph(&verification, roots, &reports)
     receipt_ok :: store_explain_receipt_projection(roots, entry, graph, &reports)
     provider := store_explain_provider_projection(entry, &reports)
     if provider == {
@@ -547,8 +547,10 @@ fn store_explain_package(verification: &StoreVerification, roots: HangarRoots, q
 // The explanation of a package with only a recorded build attempt.
 fn store_explain_without_entry(roots: HangarRoots, query: String, lens: ExplainLens) -> PackageExplain? StoreError! {
     package :: store_explain_package_name(query)
-    latest :: recipe_debug_latest(roots.hangar_dir(), package) ?? return Err(StoreError.Other("could not read build attempt for `{query}`: {err}"))
-    attempt :: latest ?? return Ok(None)
+    attempt :: if recipe_debug_latest(roots.hangar_dir(), package) == {
+        .Ok(latest) -> latest ?? return Ok(None)
+        .Err(error) -> { return Err(StoreError.Other("could not read build attempt for `{query}`: {error}")) }
+    }
     rebuild :: store_explain_rebuild_without_entry(attempt)
     reports :: [ExplainReport]{
         ExplainReport.loss("no realized StoreEntry exists for `{query}`; dependency, closure, and liveness facts are unavailable"),
@@ -598,7 +600,7 @@ fn store_explain_package_name(query: String) -> String Never! {
         .Val(parts) -> return parts.after
         .None -> {}
     }
-    query
+    query.copy()
 }
 
 fn store_explain_entry_projection(entry: StoreEntry) -> ExplainEntry Never! {
@@ -607,14 +609,14 @@ fn store_explain_entry_projection(entry: StoreEntry) -> ExplainEntry Never! {
 
 // The closure proof, or at least its structure; each unavailable view is a
 // loss.
-fn store_explain_load_graph(roots: HangarRoots, reports: &[ExplainReport]) -> ClosureGraph? Never! {
-    if store_closure_graph_read_only(roots) == {
+fn store_explain_load_graph(verification: &StoreVerification, roots: HangarRoots, reports: &[ExplainReport]) -> ClosureGraph? Never! {
+    if store_closure_graph_read_only(&verification, roots) == {
         .Ok(graph) -> return Val(graph)
         .Err(error) -> {
             &reports.push(ExplainReport.loss("closure proof is unavailable: {error.message()}"))
         }
     }
-    if store_closure_graph_structure_read_only(roots) == {
+    if store_closure_graph_structure_read_only(&verification, roots) == {
         .Ok(graph) -> Val(graph)
         .Err(error) -> {
             &reports.push(ExplainReport.loss("closure structure is unavailable: {error.message()}"))
@@ -1038,7 +1040,8 @@ fn store_explain_root_phase(phase: RootPhase) -> String Never! {
 
 fn store_explain_nearest_lock() -> String? Never! {
     cwd :: sys.current_dir() ?? return None
-    store_nearest_lock_path(cwd) ?? None
+    path :: store_nearest_lock_path(cwd) ?? return None
+    Val(path)
 }
 
 // Whether the nearest project lock names this package by output hash (or

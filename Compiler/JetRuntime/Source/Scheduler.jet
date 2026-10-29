@@ -7,12 +7,12 @@
 // 1 rendered diagnostic); -1 denotes absent optional comptime metadata.
 
 // #4890: role facts belong to the real current control, never Rust TLS.
-SCHEDULER_SCOPE_ROOT :: prep { I64{1} }
-SCHEDULER_SCOPE_TASK :: prep { I64{2} }
-SCHEDULER_SCOPE_CLEANUP :: prep { I64{4} }
-SCHEDULER_SCOPE_INHERITED_STOP :: prep { I64{8} }
-SCHEDULER_SCOPE_TASK_CLEANUP_ORIGIN :: prep { I64{16} }
-SCHEDULER_SCOPE_MASK_KIND :: prep { I64{1792} }
+SCHEDULER_SCOPE_ROOT :: I64{1}
+SCHEDULER_SCOPE_TASK :: I64{2}
+SCHEDULER_SCOPE_CLEANUP :: I64{4}
+SCHEDULER_SCOPE_INHERITED_STOP :: I64{8}
+SCHEDULER_SCOPE_TASK_CLEANUP_ORIGIN :: I64{16}
+SCHEDULER_SCOPE_MASK_KIND :: I64{1792}
 
 // Exact E4 carrier; rounded byte capacity allows generated literal word stores.
 fn scheduler_text_new(length: I64) -> I64 {
@@ -49,11 +49,11 @@ fn scheduler_words_push(header: I64, word: I64) {
 fn scheduler_words_drop(header: I64) {
     capacity :: sync_load(header + I64{8})
     if (capacity != I64{0}) -> jet_rt_free(sync_load(header + I64{16}), capacity * I64{8}, I64{8})
-    alloc_release_valid(header, I64{24}, I64{8})
+    jet_rt_free(header, I64{24}, I64{8})
 }
 
 fn scheduler_control_new() -> I64 {
-    control :: alloc_required_valid(I64{128}, I64{8})
+    control :: jet_rt_alloc(I64{128}, I64{8})
     thread_zero(control, I64{128})
     sync_store(control, I64{1})
     sync_store(control + I64{64}, sync_park_new())
@@ -67,7 +67,7 @@ fn scheduler_control_retain(control: I64) {
 fn scheduler_stop_drop(record: I64) {
     if (record == I64{0}) -> return
     jet_rt_string_drop(sync_load(record + I64{40}))
-    alloc_release_valid(record, I64{56}, I64{8})
+    jet_rt_free(record, I64{56}, I64{8})
 }
 
 fn scheduler_stop_take_message(record: I64) -> I64 {
@@ -82,7 +82,7 @@ fn scheduler_control_drop(control: I64) {
     sync_park_drop(sync_load(control + I64{64}))
     // Scoped waiter/callback guards retain the control and unregister first.
     if (sync_load(control + I64{80}) != I64{0} || sync_load(control + I64{88}) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
-    alloc_release_valid(control, I64{128}, I64{8})
+    jet_rt_free(control, I64{128}, I64{8})
 }
 
 fn scheduler_control_current() -> I64 { sync_load(thread_base() + I64{16}) }
@@ -137,18 +137,74 @@ fn scheduler_control_leave(save: I64) {
 // A process/test/doc root is not a Task frame. Keep the parent's control,
 // shield, wait depth and body provenance untouched in the caller's save slot.
 #Export(c) fn jet_rt_root_begin(save: I64) -> I64 {
-    parent_flags :: scheduler_scope_flags(scheduler_control_current())
+    parent :: scheduler_control_current()
+    parent_flags :: scheduler_scope_flags(parent)
     inherited :: (parent_flags.bit_and(SCHEDULER_SCOPE_INHERITED_STOP)) != I64{0} ||
         ((parent_flags.bit_and(SCHEDULER_SCOPE_CLEANUP)) != I64{0} && scheduler_scope_delivered_kind(parent_flags) != I64{0})
     control :: scheduler_control_new()
     sync_store(control + I64{104}, SCHEDULER_SCOPE_ROOT.bit_or((if inherited -> SCHEDULER_SCOPE_INHERITED_STOP else -> I64{0})))
+    // Scheduler.rs:1776 jet_scheduler_with_root_control: an entry with no
+    // current control runs under the process root task control.
+    if (parent == I64{0}) -> scheduler_process_root_install(control)
     scheduler_control_enter(control, save)
     sync_store(thread_base() + I64{64}, I64{0})
     control
 }
 #Export(c) fn jet_rt_root_leave(control: I64, save: I64) {
     scheduler_control_leave(save)
+    scheduler_process_root_release(control)
     scheduler_control_drop(control)
+}
+
+// Scheduler.rs:1743-1759: the process root task control. Process signals
+// cancel it; a cancelled (or absent) root is replaced by a fresh root control
+// at the next lookup, which the running entry does not adopt. The slot owns
+// one reference and is guarded by the scheduler root mutex.
+scheduler_process_root := I64{0}
+
+fn scheduler_process_root_install(control: I64) {
+    scheduler_control_retain(control)
+    sync_mutex_lock(scheduler_root)
+    previous :: scheduler_process_root
+    scheduler_process_root = control
+    sync_mutex_unlock(scheduler_root)
+    scheduler_control_drop(previous)
+}
+
+fn scheduler_process_root_release(control: I64) {
+    sync_mutex_lock(scheduler_root)
+    owned :: scheduler_process_root == control
+    if owned -> scheduler_process_root = I64{0}
+    sync_mutex_unlock(scheduler_root)
+    if owned -> scheduler_control_drop(control)
+}
+
+// Returns a retained reference the caller drops.
+fn scheduler_root_task_control() -> I64 {
+    sync_mutex_lock(scheduler_root)
+    previous :: scheduler_process_root
+    replaced := I64{0}
+    if (previous == I64{0} || sync_load(previous + I64{16}) != I64{0}) {
+        fresh :: scheduler_control_new()
+        sync_store(fresh + I64{104}, SCHEDULER_SCOPE_ROOT)
+        scheduler_process_root = fresh
+        replaced = previous
+    }
+    control :: scheduler_process_root
+    scheduler_control_retain(control)
+    sync_mutex_unlock(scheduler_root)
+    scheduler_control_drop(replaced)
+    control
+}
+
+fn scheduler_control_is_root(control: I64) -> Bool { (scheduler_scope_flags(control).bit_and(SCHEDULER_SCOPE_ROOT)) != I64{0} }
+
+// Scheduler.rs:521 jet_task_deliver_cancel: only a task unwinds a delivered
+// cancellation. A cancelled root has no catch frame: its wait points observe
+// the flag and return their cooperative fallback without publishing a stop.
+fn scheduler_root_cancel_observed() -> Bool {
+    control :: scheduler_control_current()
+    control != I64{0} && scheduler_control_is_root(control) && sync_load(control + I64{16}) != I64{0} && !scheduler_shielded()
 }
 
 // Only scheduler_text_new's owned, eight-aligned 24B E4 header is tagged.
@@ -254,7 +310,7 @@ fn scheduler_control_take_stop(control: I64) -> I64 {
 fn scheduler_control_discard_stop(control: I64) { scheduler_stop_drop(scheduler_control_take_stop(control)) }
 
 fn scheduler_stop_new(kind: I64, message: I64) -> I64 {
-    record :: alloc_required_valid(I64{56}, I64{8})
+    record :: jet_rt_alloc(I64{56}, I64{8})
     sync_store(record, kind)
     sync_store(record + I64{8}, I64{-1})
     sync_store(record + I64{16}, I64{-1})
@@ -269,8 +325,8 @@ fn scheduler_stop_new(kind: I64, message: I64) -> I64 {
 // supersedes Cancelled (Scheduler.rs:929-938). Record precedes release status.
 fn scheduler_control_publish(control: I64, record: I64) -> Bool {
     kind :: sync_load(record)
-    if (kind == I64{1}) -> scheduler_assert_not_root_cancel(control)
-    if (control == I64{0} || kind < I64{1} || kind > I64{5} || (kind == I64{5} && jet_rt_stop_domain() == I64{0})) {
+    // A root never unwinds a cancellation (scheduler_root_cancel_observed).
+    if (control == I64{0} || kind < I64{1} || kind > I64{5} || (kind == I64{5} && jet_rt_stop_domain() == I64{0}) || (kind == I64{1} && scheduler_control_is_root(control))) {
         scheduler_stop_drop(record)
         return false
     }
@@ -288,6 +344,9 @@ fn scheduler_control_publish(control: I64, record: I64) -> Bool {
     }
     sync_mutex_unlock(control + I64{72})
     if accepted -> scheduler_stop_drop(previous) else -> scheduler_stop_drop(record)
+    // jet_rt_main's root takes every stop it accepts and ends the process,
+    // so the frames unwinding to it leave their heap to the kernel (#5478).
+    if accepted && control == main_root_control -> main_process_end()
     accepted
 }
 
@@ -298,12 +357,6 @@ fn scheduler_scope_flags(control: I64) -> I64 {
     if (control == I64{0}) -> I64{0} else -> sync_load(control + I64{104})
 }
 fn scheduler_scope_delivered_kind(flags: I64) -> I64 { (flags.bit_and(SCHEDULER_SCOPE_MASK_KIND)) >> I64{8} }
-
-// Root controls are private and never cancel/interrupt targets. Cancellation
-// remains cooperative outside Task; violating this producer law is a defect.
-fn scheduler_assert_not_root_cancel(control: I64) {
-    if ((scheduler_scope_flags(control).bit_and(SCHEDULER_SCOPE_ROOT)) != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
-}
 
 // Origin16 is dynamic: only an actual native Task frame can mint it.
 // The saved scalar is owned; zero is a valid token and must also be restored.
@@ -373,7 +426,6 @@ fn scheduler_delivered_status() -> I64 {
     if scheduler_shielded() -> return scheduler_delivered_status()
     control :: scheduler_control_current()
     if (control == I64{0}) -> return I64{0}
-    if (sync_load(control + I64{48}) != I64{0}) -> scheduler_assert_not_root_cancel(control)
     if (sync_swap(control + I64{48}, I64{0}) != I64{0}) {
         _ := scheduler_control_publish(control, scheduler_stop_new(I64{1}, scheduler_text_empty()))
     }
@@ -431,14 +483,14 @@ fn scheduler_task_cancelled() -> Bool {
     control != I64{0} && sync_load(control + I64{16}) != I64{0}
 }
 fn scheduler_deliver_cancel() {
-    scheduler_assert_not_root_cancel(scheduler_control_current())
+    if scheduler_root_cancel_observed() -> return
     _ := scheduler_native_publish(scheduler_stop_new(I64{1}, scheduler_text_empty()))
 }
 
 // Nodes32B: next0, slot/code8, env16, id24. Guards retain the control.
 fn scheduler_cancel_waiter_register(control: I64, slot: I64) -> I64 {
     if (control == I64{0}) -> return I64{0}
-    node :: alloc_required_valid(I64{32}, I64{8})
+    node :: jet_rt_alloc(I64{32}, I64{8})
     thread_zero(node, I64{32})
     sync_store(node + I64{8}, slot)
     scheduler_control_retain(control)
@@ -467,12 +519,12 @@ fn scheduler_cancel_waiter_remove(control: I64, node: I64) {
     sync_mutex_lock(control + I64{72})
     scheduler_node_unlink(control + I64{80}, node)
     sync_mutex_unlock(control + I64{72})
-    alloc_release_valid(node, I64{32}, I64{8})
+    jet_rt_free(node, I64{32}, I64{8})
     scheduler_control_drop(control)
 }
 
 fn scheduler_cancel_callback_register(control: I64, code: I64, env: I64) -> I64 {
-    node :: alloc_required_valid(I64{40}, I64{8})
+    node :: jet_rt_alloc(I64{40}, I64{8})
     thread_zero(node, I64{40})
     sync_store(node + I64{8}, code)
     sync_store(node + I64{16}, env)
@@ -501,7 +553,7 @@ fn scheduler_cancel_callback_remove(control: I64, node: I64) {
     loop {
         sync_mutex_lock(control + I64{72})
         if (sync_load(node + I64{32}) != I64{1}) {
-            alloc_release_valid(node, I64{40}, I64{8})
+            jet_rt_free(node, I64{40}, I64{8})
             sync_mutex_unlock(control + I64{72})
             break
         }
@@ -512,7 +564,6 @@ fn scheduler_cancel_callback_remove(control: I64, node: I64) {
 }
 
 fn scheduler_control_cancel(control: I64) {
-    scheduler_assert_not_root_cancel(control)
     sync_store(control + I64{16}, I64{1})
     jet_rt_observe_task_control(sync_load(control + I64{56}), I64{-1}, I64{1})
     sync_park_wake(sync_load(control + I64{64}))
@@ -549,7 +600,6 @@ fn scheduler_control_cancel(control: I64) {
 #Export(c) fn jet_rt_scheduler_control_drop(control: I64) { scheduler_control_drop(control) }
 
 fn scheduler_control_interrupt(control: I64) {
-    scheduler_assert_not_root_cancel(control)
     sync_store(control + I64{48}, I64{1})
     scheduler_control_cancel(control)
 }
@@ -598,6 +648,8 @@ fn scheduler_observe_update(state: I64, wait: I64) {
 
 // Mirrors Scheduler.rs:1879-1967, including its per-site interrupt order.
 fn scheduler_yield(wait_kind: I64, slot: I64, timeout_ns: I64) -> I64 {
+    // A cancelled root wait point returns its fallback without parking.
+    if scheduler_root_cancel_observed() -> return I64{0}
     world :: world_current()
     if (world != I64{0} && scheduler_control_current() != I64{0}) -> world_begin_wait(world, slot)
     control :: scheduler_control_current()
@@ -651,16 +703,37 @@ fn scheduler_yield(wait_kind: I64, slot: I64, timeout_ns: I64) -> I64 {
     jet_scheduler_native_propagate()
 }
 
-// Scheduler128: mutex0 FIFOhead8/tail16 workSeq24 compensationSeq32 live40
+// Scheduler168: mutex0 FIFOhead8/tail16 workSeq24 compensationSeq32 live40
 // waits48 compensationThreads56 peak64 reserve72 completionLo80/Hi88
-// nextTask96 timerRoot104 workerCount112 parked120.
+// nextTask96 timerRoot104 poolSize112 idle120 threads128 finished136
+// stop144 started152 woken160. threads/finished are word lists
+// (scheduler_words) of Worker16 records {argument0 handle8}, changed only
+// under the mutex. Every pool thread stays joinable so
+// jet_rt_scheduler_shutdown can join it; a compensation worker that retires
+// itself moves its record to finished, and the next worker start (or
+// shutdown) joins it. The pool's poolSize ordinary workers start one at a
+// time, on demand: a submit starts one only when no idle worker is left to
+// wake (idle - woken), so a process that submits a few jobs starts a few
+// threads, not the whole pool. idle counts ordinary workers waiting on
+// workSeq; woken counts the wakes a submit sent them that no worker has
+// taken yet; started counts the ordinary workers started.
 scheduler_root := I64{0}
 
 // runtime-init: 3
 #Export(c) fn jet_rt_scheduler_init() {
     if (scheduler_root != I64{0}) -> return
-    scheduler_root = alloc_required_valid(I64{128}, I64{8})
-    thread_zero(scheduler_root, I64{128})
+    scheduler_root = jet_rt_alloc(I64{168}, I64{8})
+    thread_zero(scheduler_root, I64{168})
+}
+
+// The initialized root without starting the pool. Only scheduler_submit (via
+// scheduler_get) starts workers, so a program that never submits a job (hello,
+// a plain sleep) never creates a pool thread; draining, timers and statistics
+// observe the same FIFO, live count and counters either way.
+fn scheduler_root_required() -> I64 {
+    root :: scheduler_root
+    if (root == I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+    root
 }
 
 fn rt_scheduler_worker_address() -> I64 {
@@ -716,15 +789,80 @@ fn scheduler_available_parallelism(fallback: I64) -> I64 {
     fallback
 }
 
-fn scheduler_start_worker(root: I64, flags: I64) {
-    handle :: thread_spawn(rt_scheduler_worker_address(), root.bit_or(flags))
-    if (handle < I64{0}) {
-        message :: scheduler_msg_start_failed()
-        scheduler_fatal(message)
+// The root's lazily created thread list at `offset` (128 live, 136 finished).
+// Callers hold the root mutex.
+fn scheduler_thread_list(root: I64, offset: I64) -> I64 {
+    list := sync_load(root + offset)
+    if (list == I64{0}) {
+        list = jet_rt_alloc(I64{24}, I64{8})
+        thread_zero(list, I64{24})
+        sync_store(root + offset, list)
     }
-    _ := thread_detach(handle)
+    list
 }
 
+// Unordered removal of one record word; callers hold the root mutex.
+fn scheduler_thread_list_remove(list: I64, record: I64) {
+    length :: sync_load(list)
+    data :: sync_load(list + I64{16})
+    at := I64{0}
+    loop at < length {
+        if (sync_load(data + at * I64{8}) == record) {
+            sync_store(data + at * I64{8}, sync_load(data + (length - I64{1}) * I64{8}))
+            sync_store(list, length - I64{1})
+            return
+        }
+        at += I64{1}
+    }
+}
+
+// Joins every thread of a list taken out from under the root mutex, then
+// frees the records and the list. Returns the number of joined threads.
+fn scheduler_thread_list_join(list: I64) -> I64 {
+    if (list == I64{0}) -> return I64{0}
+    length :: sync_load(list)
+    data :: sync_load(list + I64{16})
+    at := I64{0}
+    loop at < length {
+        record :: sync_load(data + at * I64{8})
+        _ := thread_join(sync_load(record + I64{8}), I64{0})
+        jet_rt_free(record, I64{16}, I64{8})
+        at += I64{1}
+    }
+    scheduler_words_drop(list)
+    length
+}
+
+fn scheduler_reap_finished(root: I64) {
+    sync_mutex_lock(root)
+    finished :: sync_swap(root + I64{136}, I64{0})
+    sync_mutex_unlock(root)
+    _ := scheduler_thread_list_join(finished)
+}
+
+// The spawn and the handle's publication share one critical section, so a
+// worker (which locks the root before it reads its handle) and shutdown both
+// see a complete record.
+fn scheduler_start_worker(root: I64, flags: I64) {
+    scheduler_reap_finished(root)
+    record :: jet_rt_alloc(I64{16}, I64{8})
+    sync_store(record, root.bit_or(flags))
+    sync_store(record + I64{8}, I64{0})
+    sync_mutex_lock(root)
+    handle :: thread_spawn(rt_scheduler_worker_address(), record)
+    if (handle < I64{0}) {
+        sync_mutex_unlock(root)
+        jet_rt_free(record, I64{16}, I64{8})
+        scheduler_start_failed()
+        return
+    }
+    sync_store(record + I64{8}, handle)
+    scheduler_words_push(scheduler_thread_list(root, I64{128}), record)
+    sync_mutex_unlock(root)
+}
+
+// Settles the pool size on first use; workers start on demand
+// (scheduler_submit).
 fn scheduler_get() -> I64 {
     root :: scheduler_root
     // .init_array owns the root; first use owns only pool initialization.
@@ -733,13 +871,6 @@ fn scheduler_get() -> I64 {
         (sync_cas(root + I64{112}, I64{0}, I64{-1}) == I64{0}) -> {
             count :: scheduler_worker_count()
             jet_rt_observe_pool(count, I64{0})
-            at := I64{0}
-            // Unsigned usize values above i64::MAX cannot be serviced on Linux;
-            // attempt worker creation just as Rust does, failing at pthread_create.
-            loop at != count {
-                scheduler_start_worker(root, I64{0})
-                at = wrapping(at + I64{1})
-            }
             _ := sync_swap(root + I64{112}, count)
             sync_wake(root + I64{112}, I64{2147483647})
         }
@@ -751,9 +882,12 @@ fn scheduler_get() -> I64 {
 }
 
 // Job32B: next0 code8 arg16 blocking24. code0 is a native Task callback.
+// The job wakes an idle worker, else starts one more while fewer than the
+// pool size run. Unsigned pool sizes above i64::MAX are attempted just as
+// Rust does, failing at pthread_create.
 fn scheduler_submit(code: I64, argument: I64, blocking: Bool) {
     root :: scheduler_get()
-    job :: alloc_required_valid(I64{32}, I64{8})
+    job :: jet_rt_alloc(I64{32}, I64{8})
     sync_store(job, I64{0})
     sync_store(job + I64{8}, code)
     sync_store(job + I64{16}, argument)
@@ -763,9 +897,21 @@ fn scheduler_submit(code: I64, argument: I64, blocking: Bool) {
     if (tail == I64{0}) -> sync_store(root + I64{8}, job) else -> sync_store(tail, job)
     sync_store(root + I64{16}, job)
     jet_rt_observe_pool(I64{-1}, I64{1})
-    sync_cond_notify_one(root + I64{24})
+    start := false
+    if {
+        sync_load(root + I64{120}) > sync_load(root + I64{160}) -> {
+            sync_store(root + I64{160}, sync_load(root + I64{160}) + I64{1})
+            sync_cond_notify_one(root + I64{24})
+        }
+        sync_load(root + I64{152}) != sync_load(root + I64{112}) -> {
+            sync_store(root + I64{152}, wrapping(sync_load(root + I64{152}) + I64{1}))
+            start = true
+        }
+        else -> {}
+    }
     sync_cond_notify_one(root + I64{32})
     sync_mutex_unlock(root)
+    if start -> scheduler_start_worker(root, I64{0})
 }
 
 fn scheduler_pop(root: I64, allow_blocking: Bool) -> I64 {
@@ -785,21 +931,36 @@ fn scheduler_pop(root: I64, allow_blocking: Bool) -> I64 {
     I64{0}
 }
 
-#Export(c) fn jet_rt_scheduler_worker(argument: I64) -> I64 {
+#Export(c) fn jet_rt_scheduler_worker(record: I64) -> I64 {
+    argument :: sync_load(record)
     root :: argument.bit_and(I64{-8})
     compensation :: (argument.bit_and(I64{1})) != I64{0}
     reserve :: (argument.bit_and(I64{2})) != I64{0}
     loop {
         sync_mutex_lock(root)
+        if (sync_load(root + I64{144}) != I64{0}) {
+            // jet_rt_scheduler_shutdown owns this record and joins this thread.
+            sync_mutex_unlock(root)
+            return I64{0}
+        }
         if compensation && ((reserve && sync_load(root + I64{48}) <= I64{8}) || (!reserve && sync_load(root + I64{48}) == I64{0})) {
             sync_store(root + I64{56}, sync_load(root + I64{56}) - I64{1})
             if reserve -> sync_store(root + I64{72}, I64{0})
+            scheduler_thread_list_remove(scheduler_thread_list(root, I64{128}), record)
+            scheduler_words_push(scheduler_thread_list(root, I64{136}), record)
             sync_mutex_unlock(root)
             return I64{0}
         }
         job :: scheduler_pop(root, !reserve)
         if (job == I64{0}) {
-            if compensation -> _ := sync_cond_wait(root + I64{32}, root, sync_deadline(I64{2000000})) else -> _ := sync_cond_wait(root + I64{24}, root, I64{-1})
+            if compensation {
+                _ := sync_cond_wait(root + I64{32}, root, sync_deadline(I64{2000000}))
+            } else {
+                sync_store(root + I64{120}, sync_load(root + I64{120}) + I64{1})
+                _ := sync_cond_wait(root + I64{24}, root, I64{-1})
+                sync_store(root + I64{120}, sync_load(root + I64{120}) - I64{1})
+                if (sync_load(root + I64{160}) > I64{0}) -> sync_store(root + I64{160}, sync_load(root + I64{160}) - I64{1})
+            }
             sync_mutex_unlock(root)
             next
         }
@@ -807,7 +968,7 @@ fn scheduler_pop(root: I64, allow_blocking: Bool) -> I64 {
         jet_rt_observe_pool(I64{-1}, I64{-1})
         code :: sync_load(job + I64{8})
         arg :: sync_load(job + I64{16})
-        alloc_release_valid(job, I64{32}, I64{8})
+        jet_rt_free(job, I64{32}, I64{8})
         if (code == I64{0}) -> task_run(arg) else -> _ := coll_call1(code, arg)
         sync_mutex_lock(root)
         sync_store(root + I64{40}, sync_load(root + I64{40}) - I64{1})
@@ -820,7 +981,7 @@ fn scheduler_blocking_wait_enter() {
     active :: scheduler_control_current() != I64{0}
     stack := sync_load(thread_base() + I64{88})
     if (stack == I64{0}) {
-        stack = alloc_required_valid(I64{24}, I64{8})
+        stack = jet_rt_alloc(I64{24}, I64{8})
         thread_zero(stack, I64{24})
         sync_store(thread_base() + I64{88}, stack)
     }
@@ -864,7 +1025,7 @@ fn scheduler_blocking_wait_leave() {
 }
 
 #Export(c) fn jet_scheduler_blocking_wait_stats(out: I64) {
-    root :: scheduler_get()
+    root :: scheduler_root_required()
     sync_mutex_lock(root)
     sync_store(out, sync_load(root + I64{48}))
     sync_store(out + I64{8}, sync_load(root + I64{56}))
@@ -892,7 +1053,7 @@ fn scheduler_completion_order(out: I64) {
 }
 
 #Export(c) fn jet_scheduler_drain() {
-    root :: scheduler_get()
+    root :: scheduler_root_required()
     at := I64{0}
     slot :: sync_park_new()
     loop at < (I64{5000}) {
@@ -907,46 +1068,53 @@ fn scheduler_completion_order(out: I64) {
     sync_park_drop(slot)
 }
 
+// Whether no task is queued or running (the root's counts at 8 and 40).
+fn scheduler_idle() -> Bool {
+    root :: scheduler_root_required()
+    sync_mutex_lock(root)
+    idle :: sync_load(root + I64{8}) == I64{0} && sync_load(root + I64{40}) == I64{0}
+    sync_mutex_unlock(root)
+    idle
+}
+
 #Export(c) fn jet_scheduler_drain_after_exit() {
-    root :: scheduler_get()
     loop {
-        sync_mutex_lock(root)
-        idle :: sync_load(root + I64{8}) == I64{0} && sync_load(root + I64{40}) == I64{0}
-        sync_mutex_unlock(root)
-        if idle && jet_rt_observe_io_quiescent() -> return
+        if scheduler_idle() && jet_rt_observe_io_quiescent() -> return
         #Unsafe("sched_yield retains no memory and yields this OS worker") {
             _ := os_syscall_i64(I64{24}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
         }
     }
 }
 
-// Timer root40B mutex0 sequence8 head16 ready24 stop32. Timer node40B
+// Timer root48B mutex0 sequence8 head16 ready24 stop32 thread40. Timer node40B
 // next0 absoluteMonotonicNs8 borrowedPark16 active24 refs32. Queue and caller
 // each own a ref; cancel synchronizes with wake before the caller frees Park.
+// The timer thread needs the root only, never the worker pool.
 fn scheduler_timer_root() -> I64 {
-    root :: scheduler_get()
+    root :: scheduler_root_required()
     value := sync_load(root + I64{104})
     if (value != I64{0}) -> return value
-    candidate :: alloc_required_valid(I64{40}, I64{8})
-    thread_zero(candidate, I64{40})
+    candidate :: jet_rt_alloc(I64{48}, I64{8})
+    thread_zero(candidate, I64{48})
     previous :: sync_cas(root + I64{104}, I64{0}, candidate)
     if (previous != I64{0}) {
-        alloc_release_valid(candidate, I64{40}, I64{8})
+        jet_rt_free(candidate, I64{48}, I64{8})
         return previous
     }
     handle :: thread_spawn(rt_scheduler_timer_address(), candidate)
-    if (handle < I64{0}) -> scheduler_fatal(scheduler_msg_start_failed())
-    _ := thread_detach(handle)
+    if (handle < I64{0}) -> scheduler_start_failed()
+    // Joinable: jet_rt_scheduler_shutdown joins it.
+    sync_store(candidate + I64{40}, handle)
     candidate
 }
 
 fn scheduler_timer_node_drop(node: I64) {
-    if (sync_add(node + I64{32}, I64{-1}) == I64{1}) -> alloc_release_valid(node, I64{40}, I64{8})
+    if (sync_add(node + I64{32}, I64{-1}) == I64{1}) -> jet_rt_free(node, I64{40}, I64{8})
 }
 
 fn scheduler_timer_schedule(deadline_ns: I64, slot: I64) -> I64 {
     wheel :: scheduler_timer_root()
-    node :: alloc_required_valid(I64{40}, I64{8})
+    node :: jet_rt_alloc(I64{40}, I64{8})
     sync_store(node + I64{8}, deadline_ns)
     sync_store(node + I64{16}, slot)
     sync_store(node + I64{24}, I64{1})
@@ -974,6 +1142,10 @@ fn scheduler_timer_cancel(node: I64) {
 #Export(c) fn jet_rt_scheduler_timer(wheel: I64) -> I64 {
     loop {
         sync_mutex_lock(wheel)
+        if (sync_load(wheel + I64{32}) != I64{0}) {
+            sync_mutex_unlock(wheel)
+            return I64{0}
+        }
         now :: sync_now_ns()
         earliest := sync_deadline(I64{50000000})
         link := wheel + I64{16}
@@ -997,6 +1169,72 @@ fn scheduler_timer_cancel(node: I64) {
         _ := sync_cond_wait(wheel + I64{8}, wheel, earliest)
         sync_mutex_unlock(wheel)
     }
+}
+
+// Stops and joins the timer thread of an idle wheel. Returns the joined
+// thread count, or -1 (nothing stopped) while a timer is pending.
+fn scheduler_timer_shutdown(root: I64) -> I64 {
+    wheel :: sync_load(root + I64{104})
+    if (wheel == I64{0}) -> return I64{0}
+    sync_mutex_lock(wheel)
+    if (sync_load(wheel + I64{16}) != I64{0}) {
+        sync_mutex_unlock(wheel)
+        return I64{-1}
+    }
+    sync_store(wheel + I64{32}, I64{1})
+    sync_cond_notify_all(wheel + I64{8})
+    sync_mutex_unlock(wheel)
+    // scheduler_timer_root publishes the handle right after the spawn.
+    loop sync_load(wheel + (I64{40})) == (I64{0}) {
+        #Unsafe("sched_yield retains no memory and yields this OS thread") {
+            _ := os_syscall_i64(I64{24}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        }
+    }
+    _ := thread_join(sync_load(wheel + I64{40}), I64{0})
+    sync_store(root + I64{104}, I64{0})
+    jet_rt_free(wheel, I64{48}, I64{8})
+    I64{1}
+}
+
+// Quiesce for a userland exec (JetBackend Image/Loader.jet): stop and join
+// every scheduler thread this process started (pool workers, compensation
+// workers, the timer thread), so the caller is the process's only scheduler
+// thread. 0 when none was ever started; otherwise the joined thread count.
+// -1, with nothing stopped, while a job is queued or running or a timer is
+// pending. The caller guarantees no other thread submits work concurrently.
+// The pool and the timer restart lazily on the next use.
+#Export(c) fn jet_rt_scheduler_shutdown() -> I64 {
+    root :: scheduler_root
+    if (root == I64{0}) -> return I64{0}
+    loop sync_load(root + (I64{112})) == (I64{-1}) -> _ := sync_wait(root + I64{112}, I64{-1}, I64{-1})
+    sync_mutex_lock(root)
+    if (sync_load(root + I64{8}) != I64{0} || sync_load(root + I64{40}) != I64{0}) {
+        sync_mutex_unlock(root)
+        return I64{-1}
+    }
+    timer :: scheduler_timer_shutdown(root)
+    if (timer < I64{0}) {
+        sync_mutex_unlock(root)
+        return I64{-1}
+    }
+    sync_store(root + I64{144}, I64{1})
+    live :: sync_swap(root + I64{128}, I64{0})
+    finished :: sync_swap(root + I64{136}, I64{0})
+    sync_cond_notify_all(root + I64{24})
+    sync_cond_notify_all(root + I64{32})
+    sync_mutex_unlock(root)
+    joined :: timer + scheduler_thread_list_join(live) + scheduler_thread_list_join(finished)
+    sync_mutex_lock(root)
+    sync_store(root + I64{56}, I64{0})
+    sync_store(root + I64{72}, I64{0})
+    sync_store(root + I64{120}, I64{0})
+    sync_store(root + I64{144}, I64{0})
+    sync_store(root + I64{152}, I64{0})
+    sync_store(root + I64{160}, I64{0})
+    _ := sync_swap(root + I64{112}, I64{0})
+    sync_mutex_unlock(root)
+    jet_rt_observe_pool(I64{0}, I64{0})
+    joined
 }
 
 fn scheduler_park_duration(wait_kind: I64, duration_ns: I64) -> I64 {
@@ -1075,7 +1313,7 @@ fn scheduler_park_duration(wait_kind: I64, duration_ns: I64) -> I64 {
 fn scheduler_owner_deadline_queue() -> I64 {
     queue := sync_load(thread_base() + I64{96})
     if (queue == I64{0}) {
-        queue = alloc_required_valid(I64{24}, I64{8})
+        queue = jet_rt_alloc(I64{24}, I64{8})
         thread_zero(queue, I64{24})
         sync_store(queue + I64{8}, I64{1})
         sync_store(thread_base() + I64{96}, queue)
@@ -1086,7 +1324,7 @@ fn scheduler_owner_deadline_queue() -> I64 {
     queue :: scheduler_owner_deadline_queue()
     id :: sync_load(queue + I64{8})
     sync_store(queue + I64{8}, wrapping(id + I64{1}))
-    node :: alloc_required_valid(I64{24}, I64{8})
+    node :: jet_rt_alloc(I64{24}, I64{8})
     sync_store(node, I64{0})
     sync_store(node + I64{8}, deadline_ns)
     sync_store(node + I64{16}, id)
@@ -1102,7 +1340,7 @@ fn scheduler_owner_deadline_queue() -> I64 {
         node :: sync_load(link)
         if sync_load(node + I64{16}) == id {
             sync_store(link, sync_load(node))
-            alloc_release_valid(node, I64{24}, I64{8})
+            jet_rt_free(node, I64{24}, I64{8})
             return
         }
         link = node
@@ -1121,7 +1359,7 @@ fn scheduler_owner_deadline_queue() -> I64 {
     node :: sync_load(earliest)
     id :: sync_load(node + I64{16})
     sync_store(earliest, sync_load(node))
-    alloc_release_valid(node, I64{24}, I64{8})
+    jet_rt_free(node, I64{24}, I64{8})
     id
 }
 
@@ -1131,6 +1369,16 @@ fn scheduler_fatal(message: I64) {
     length :: sync_load(message + I64{8})
     if !rt_task_panic_publish(bytes, length, I64{0}) -> trap_simple(I64{0}, I64{0}, I64{0}, I64{0}, bytes, length)
     jet_rt_string_drop(message)
+}
+
+// A runtime thread that could not start (pthread_create EAGAIN: RLIMIT_AS,
+// pids limit, memory) stops the process with E3001, also inside a task or
+// root. Native code has no stop edge out of a runtime-internal failure: an
+// in-task stop would return into its caller, which would run on with the error
+// code as a thread handle or a stopped helper's 0 result.
+fn scheduler_start_failed() {
+    message :: scheduler_msg_start_failed()
+    trap_process_stop(I64{0}, sync_load(message), sync_load(message + I64{8}))
 }
 
 fn scheduler_abort_double_panic() {
@@ -1152,7 +1400,7 @@ fn scheduler_panic_check() -> Bool {
     true
 }
 // `code` is the registered stop row the root report would carry (0 E3001,
-// 1 E3010, 2 E3011; trap_header's numbering). Core.rs jet_runtime_stop
+// 1 E3010, 2 E3011, 3 the host stop E2805; trap_header's numbering). Core.rs jet_runtime_stop
 // records the raw stop on every active expectation frame before it unwinds,
 // so the native catch probe sees the same first stop as the Rust reference.
 // The published record stays the raw message (form 0).
@@ -1193,10 +1441,10 @@ fn scheduler_thread_detach() {
         node := sync_load(queue)
         loop node != (I64{0}) {
             next_node :: sync_load(node)
-            alloc_release_valid(node, I64{24}, I64{8})
+            jet_rt_free(node, I64{24}, I64{8})
             node = next_node
         }
-        alloc_release_valid(queue, I64{24}, I64{8})
+        jet_rt_free(queue, I64{24}, I64{8})
         sync_store(base + I64{96}, I64{0})
     }
 }
@@ -1219,7 +1467,6 @@ fn scheduler_thread_detach() {
 #Export(c) fn jet_rt_stop_take_message(record: I64) -> I64 { scheduler_stop_take_message(record) }
 #Export(c) fn jet_rt_stop_drop(record: I64) { scheduler_stop_drop(record) }
 #Export(c) fn jet_rt_control_publish_stop(kind: I64, jct_status: I64, owner: I64, start: I64, end: I64, message: I64, length: I64, form: I64) -> Bool {
-    if (kind == I64{1}) -> scheduler_assert_not_root_cancel(scheduler_control_current())
     if (kind == I64{5} && !scheduler_panic_check()) -> return false
     text :: scheduler_text_new(length)
     if (text == I64{0} && jet_rt_session_propagate() != I64{0}) -> return false

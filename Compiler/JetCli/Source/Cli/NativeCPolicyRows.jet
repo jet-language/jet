@@ -1,0 +1,18 @@
+// The native C policy's row rules (native-c-policy.tsv beside this file), the
+// same rules Tools/packaging/native-c-compiler.mjs `parseNativeCPolicy`
+// applies: each row is `kind<TAB>value`, blank lines and `#` comments carry no
+// row, and a malformed row or an unknown kind stops. NativeCPolicy.jet
+// computes its constants with this function while the compiler builds.
+
+// The values of one policy kind, in file order.
+fn jet_cli_native_c_policy_values(policy: String, kind: String) -> [String] {
+    values := [String]{}
+    loop line in policy.split("\n") {
+        if line == "" || line.starts_with("#") -> next
+        fields :: line.split("\t").to_list()
+        if fields.len() != 2 || fields[1] == "" -> panic("native-c-policy.tsv: expected `kind<TAB>value`, found `{line}`")
+        if fields[0] != "flag" && fields[0] != "hardening-remove" -> panic("native-c-policy.tsv: unknown policy kind `{fields[0]}`")
+        if fields[0] == kind -> &values.push(fields[1])
+    }
+    values
+}

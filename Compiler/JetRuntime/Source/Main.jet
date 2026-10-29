@@ -1,8 +1,7 @@
-// Native process entry: CAbi.rs:178-184, EnvInit.rs:24-27 and
-// Core.rs:1182-1194. Object's libc main captures host arguments first; the
+// Native process entry. Object's libc main captures host arguments first; the
 // logical Env seed validates that ONE captured cell, never creates another.
 
-// Core.rs:1177-1178 ignores both flush results; raw facts avoid creating an
+// Both flush results are ignored; raw facts avoid creating an
 // unused IOError owner. Scratch is one live 16-byte runtime allocation.
 fn main_flush(scratch: I64) {
     jet_stdio_stdout_flush_raw(scratch, scratch + I64{8})
@@ -23,6 +22,39 @@ main_exit_root := I64{0}
     if (main_exit_root != I64{0}) -> return
     main_exit_root = jet_rt_alloc(I64{32}, I64{8})
     thread_zero(main_exit_root, I64{32})
+}
+
+// #5478: nonzero once this process is ending: process.exit's winning claim,
+// a stop the process root (jet_rt_main's, main_root_control) accepts, or
+// the program entry returning with no task in flight. From then on the heap
+// is the kernel's to reclaim: jet_rt_free returns at once and
+// jet_rt_rc_release gives up no owner, so no drop walks or frees a counted
+// block on any tier, while user cleanup (closes, guards, defers, exit
+// handlers, rollback hooks) still runs. A stop or exit ends the process;
+// only jet_rt_main's normal return clears it, for a loaded-image host that
+// runs another entry.
+main_process_ending := I64{0}
+main_root_control := I64{0}
+
+fn main_process_end() { main_process_ending = I64{1} }
+
+// core.perf's raw fidelity word, zero until written
+// (Core/Perf reads zero as the default). A loaded-image host's next entry
+// starts from zero again, as a fresh process would.
+main_perf_bits := I64{0}
+
+#Export(c) fn jet_perf_read_bits() -> I64 { jet_int_owned_from_i64(main_perf_bits) }
+
+#Export(c) fn jet_perf_write_bits(bits: I64) {
+    word :: host_native_int(bits)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    main_perf_bits = word
+}
+
+// The program entry returning, before its drops (JetIR ir_emit_return). A
+// task still in flight keeps the heap reclaimed: it may run long after.
+#Export(c) fn jet_rt_process_entry_return() {
+    if (main_root_control != I64{0} && scheduler_idle()) -> main_process_end()
 }
 
 fn main_exit_claim(code: I64) {
@@ -47,7 +79,7 @@ fn main_exit_claim(code: I64) {
 }
 
 fn main_exit_cleanup() -> I64 {
-    // Core.rs:1171-1175 / 1188-1190: callbacks precede the observer's report.
+    // Exit callbacks run before the observer's report.
     jet_rt_task_exit_handlers()
     scratch :: main_exit_root + I64{16}
     present :: jet_rt_observe_parked_tasks_report(scratch, scratch + I64{8})
@@ -60,9 +92,11 @@ fn main_exit_cleanup() -> I64 {
 }
 
 // Called BEFORE the first fatal diagnostic byte, so callback/parked output
-// precedes the original stop report (Core.rs:1171-1175), rather than follows it.
+// precedes the original stop report, rather than follows it.
 #Export(c) fn jet_rt_process_exit_begin(code: I64) {
     main_exit_claim(code)
+    // Only the winner gets here, and it always ends the process.
+    main_process_end()
     _ := main_exit_cleanup()
     // Fatal/explicit process::exit does not join other threads. Never drain
     // here: the winner may be a live scheduler worker counted as in-flight.
@@ -81,7 +115,7 @@ fn main_exit_cleanup() -> I64 {
 }
 
 // SysV int32 callers observe eax only: Image/Object.jet:70-80 returns it to
-// libc main; Image/Loader.jet:130-133 explicitly truncates/sign-normalizes it.
+// libc main; Image/Loader.jet x64_image_exec explicitly truncates/sign-normalizes it.
 // Returning an I64 low word needs no ABI thunk or new I32 export admission.
 #Export(c) fn jet_rt_main(entry: I64) -> I64 {
     jet_rt_logical_env_seed()
@@ -92,26 +126,62 @@ fn main_exit_cleanup() -> I64 {
     jet_rt_task_exit_init()
     jet_rt_observe_init()
     jet_rt_process_exit_init()
-    // EnvInit.rs:27: exactly once, after TLS/registry initialization and before
+    // Fatal signals print the fault report (Fault.jet), stack overflow too.
+    fault_start()
+    // Exactly once, after TLS/registry initialization and before
     // the checked no-argument entry. Object main must not start Observe itself.
     jet_rt_observe_runtime_start_from_env()
+    // The entry runs under the process root control: a stop (a panic, a
+    // numeric stop, process.exit, os.stop) is published there and every
+    // generated frame leaves by its stop edge, running its closes, drops
+    // and guards (JetIR Build.jet ir_stop_check). The root then takes it:
+    // exit handlers run, then the captured report is written, then the
+    // process exits with the stop's code (D-FAIL-EXIT1).
+    save :: jet_rt_alloc(I64{40}, I64{8})
+    root :: jet_rt_root_begin(save)
+    main_root_control = root
     #Unsafe("entry is the loader/object's checked executable System V void(void) address, not a closure header") {
         os_call0_unit(entry)
     }
+    record :: jet_rt_root_take_stop(root, save + I64{32})
+    jet_rt_root_leave(root, save)
+    main_root_control = I64{0}
+    if (record != I64{0}) {
+        code :: trap_word(save + I64{32})
+        report :: scheduler_stop_take_message(record)
+        scheduler_stop_drop(record)
+        jet_rt_free(save, I64{40}, I64{8})
+        main_exit_claim(code)
+        _ := main_exit_cleanup()
+        main_flush(main_exit_root + I64{16})
+        if (report != I64{0}) {
+            trap_write_handle(report)
+            jet_rt_string_drop(report)
+        }
+        jet_rt_process_exit_finish()
+    }
+    jet_rt_free(save, I64{40}, I64{8})
     main_exit_claim(I64{0})
     parked_code :: main_exit_cleanup()
     // ONLY normal main-thread return drains. Fatal/explicit exit never joins
     // the worker executing the process boundary and cannot self-wait.
     jet_scheduler_drain_after_exit()
+    // JET_CHECKED_ALLOC=1 (Alloc.jet): a write after one of the last frees
+    // traps here rather than going unseen.
+    alloc_check_sweep()
     main_flush(main_exit_root + I64{16})
     if (parked_code != I64{0}) {
-        // Core.rs:1192 exits rather than returning to a loaded-image host.
+        // A parked-task stop exits rather than returning to a loaded-image host.
         sync_store(main_exit_root + I64{8}, parked_code)
         jet_rt_process_exit_finish()
     }
-    // Loaded-image hosts can run another normal entry in this same process.
-    // Fatal/explicit claims never reach this release.
+    // Loaded-image hosts can run another normal entry in this same process,
+    // which frees again. Fatal/explicit claims never reach this release. An
+    // ending process dropped nothing, so its live Secrets are scrubbed here.
+    if (main_process_ending != I64{0}) -> secret_scrub()
+    main_process_ending = I64{0}
+    main_perf_bits = I64{0}
     sync_store(main_exit_root, I64{0})
-    // CAbi.rs:182: normal entry returns zero, not the entry's unused register.
+    // Normal entry returns zero, not the entry's unused register.
     I64{0}
 }

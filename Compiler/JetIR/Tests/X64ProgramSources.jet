@@ -1,0 +1,349 @@
+// The Jet source of every hand-built IR program in X64Programs.jet, which
+// the old backend builds for the comparison. Braces are doubled (string
+// literal escapes); line numbers matter where a program stops at a line.
+
+fn xp_source(name: String) -> String {
+    if name == {
+        "calls" -> xp_source_calls()
+        "control" -> xp_source_control()
+        "div_zero" -> xp_source_div_zero()
+        "exact_int" -> xp_source_exact_int()
+        "exact_ops" -> xp_source_exact_ops()
+        "floats" -> xp_source_floats()
+        "hello" -> xp_source_hello()
+        "ownership" -> xp_source_ownership()
+        "strings" -> xp_source_strings()
+        "structs" -> xp_source_structs()
+        "word_trap" -> xp_source_word_trap()
+        "words" -> xp_source_words()
+        else -> ""
+    }
+}
+
+fn xp_source_exact_ops() -> String {
+    [String]{
+        "fn show(n: Int) {{",
+        "    print(\"{{n}}\")",
+        "}}",
+        "",
+        "fn run() {{",
+        "    least := -4611686018427387904",
+        "    big := least * 4",
+        "    show(1000003 /% -77)",
+        "    show(1000003 % -77)",
+        "    show(1000003 %% -77)",
+        "    show(-1000003 /% 10)",
+        "    show(-1000003 % 10)",
+        "    show(-1000003 %% 10)",
+        "    show(999 /% 3)",
+        "    show(least /% -1)",
+        "    show(least % -1)",
+        "    show(big /% 7)",
+        "    show(1000003.bit_and(15790320))",
+        "    show(1000003.bit_or(-77))",
+        "    show(1000003.bit_xor(-77))",
+        "    show(big.bit_and(15790320))",
+        "    show(1000003 << 20)",
+        "    show(1000003 << 61)",
+        "    show(-77 << 3)",
+        "    show(1 << 62)",
+        "    show(-77 >> 3)",
+        "    show(-77 >> 100)",
+        "    show(1000003 >> 63)",
+        "    show(big >> 3)",
+        "    show(-1000003 /% 8)",
+        "    show(-1000003 % 8)",
+        "    show(-1000003 %% 8)",
+        "    show(1000003 %% 8)",
+        "    show(-1000003 /% 1099511627776)",
+        "    show(-1000003 % 1099511627776)",
+        "    show(-1000003 %% 1099511627776)",
+        "    show(-7 %% 2)",
+        "    show(-7 % 2)",
+        "    show(big /% 2)",
+        "    show(big % 1024)",
+        "    show(big %% 1024)",
+        "}}",
+        "",
+    }.join("\n")
+}
+
+fn xp_source_calls() -> String {
+    [String]{
+        "fn sum8(a: Int, b: Int, c: Int, d: Int, e: Int, f: Int, g: Int, h: Int) -> Int {{",
+        "    a + b * 2 + c * 3 + d * 4 + e * 5 + f * 6 + g * 7 + h * 8",
+        "}}",
+        "",
+        "fn fib(n: Int) -> Int {{",
+        "    if n < 2 {{",
+        "        return n",
+        "    }}",
+        "    fib(n - 1) + fib(n - 2)",
+        "}}",
+        "",
+        "fn even(n: Int) -> Bool {{",
+        "    n % 2 == 0",
+        "}}",
+        "",
+        "fn half(x: Float) -> Float {{",
+        "    x / 2.0",
+        "}}",
+        "",
+        "fn run() {{",
+        "    print(\"{{sum8(1, 2, 3, 4, 5, 6, 7, 8)}}\")",
+        "    print(\"{{fib(20)}}\")",
+        "    if even(10) {{",
+        "        print(\"even\")",
+        "    }}",
+        "    if !even(7) {{",
+        "        print(\"odd\")",
+        "    }}",
+        "    print(\"{{half(5.0)}}\")",
+        "}}",
+        "",
+    }.join("\n")
+}
+
+fn xp_source_control() -> String {
+    [String]{
+        "fn classify(n: Int) -> Int {{",
+        "    if n < 0 {{",
+        "        return -1",
+        "    }}",
+        "    if n == 0 {{",
+        "        return 0",
+        "    }}",
+        "    1",
+        "}}",
+        "",
+        "fn run() {{",
+        "    total := 0",
+        "    i := 0",
+        "    loop i < 20 {{",
+        "        i += 1",
+        "        if i == 5 {{",
+        "            next",
+        "        }}",
+        "        if i > 12 {{",
+        "            break",
+        "        }}",
+        "        total += i",
+        "    }}",
+        "    print(\"{{total}}\")",
+        "    print(\"{{classify(-5)}}\")",
+        "    print(\"{{classify(0)}}\")",
+        "    print(\"{{classify(7)}}\")",
+        "}}",
+        "",
+    }.join("\n")
+}
+
+fn xp_source_div_zero() -> String {
+    [String]{
+        "fn divide(a: Int, b: Int) -> Int {{",
+        "    a /% b",
+        "}}",
+        "",
+        "fn run() {{",
+        "    print(\"{{divide(84, 2)}}\")",
+        "    print(\"{{divide(7, 0)}}\")",
+        "}}",
+        "",
+    }.join("\n")
+}
+
+fn xp_source_exact_int() -> String {
+    [String]{
+        "fn show(n: Int) {{",
+        "    print(\"{{n}}\")",
+        "}}",
+        "",
+        "fn run() {{",
+        "    a := 4611686018427387903",
+        "    b := a + a",
+        "    show(b)",
+        "    h := b",
+        "    show(h)",
+        "    c := b * 3",
+        "    show(c)",
+        "    d := c - b",
+        "    show(d)",
+        "    e := -d",
+        "    show(e)",
+        "    f := 6 * 7",
+        "    show(f)",
+        "    g := f - 100",
+        "    show(g)",
+        "    if e < a {{",
+        "        print(\"less\")",
+        "    }} else {{",
+        "        print(\"not less\")",
+        "    }}",
+        "    if d > a {{",
+        "        print(\"big\")",
+        "    }}",
+        "    if f == 42 {{",
+        "        print(\"answer\")",
+        "    }}",
+        "}}",
+        "",
+    }.join("\n")
+}
+
+fn xp_source_floats() -> String {
+    [String]{
+        "fn show(a: Float, b: Float) {{",
+        "    print(\"{{a + b}}\")",
+        "    print(\"{{a * b}}\")",
+        "    print(\"{{a / b}}\")",
+        "    print(\"{{a - b * 8.0}}\")",
+        "    print(\"{{-a}}\")",
+        "    if a > b {{",
+        "        print(\"greater\")",
+        "    }}",
+        "    if a == b {{",
+        "        print(\"equal\")",
+        "    }}",
+        "}}",
+        "",
+        "fn run() {{",
+        "    show(1.5, 0.25)",
+        "    show(2.0, 2.0)",
+        "}}",
+        "",
+    }.join("\n")
+}
+
+fn xp_source_hello() -> String {
+    [String]{
+        "fn run() {{",
+        "    print(\"hi\")",
+        "}}",
+        "",
+    }.join("\n")
+}
+
+fn xp_source_ownership() -> String {
+    [String]{
+        "fn run() {{",
+        "    big := 9223372036854775807",
+        "    x := big + 1",
+        "    y := x",
+        "    print(\"{{y}}\")",
+        "    s := \"{{\"moved\"}}!\"",
+        "    t := s",
+        "    print(t)",
+        "    print(\"{{big}}\")",
+        "}}",
+        "",
+    }.join("\n")
+}
+
+fn xp_source_strings() -> String {
+    [String]{
+        "fn greet(name: String) -> String {{",
+        "    \"hello, {{name}}\"",
+        "}}",
+        "",
+        "fn run() {{",
+        "    a := \"jet\"",
+        "    b := greet(a)",
+        "    print(b)",
+        "    c := \"{{b}}!\"",
+        "    print(c)",
+        "    print(c)",
+        "    expected :: \"hello, jet!\"",
+        "    if c == expected {{",
+        "        print(\"same\")",
+        "    }}",
+        "    if b < a {{",
+        "        print(\"ordered\")",
+        "    }}",
+        "    n := 42",
+        "    print(\"n = {{n}}, a = {{a}}\")",
+        "}}",
+        "",
+    }.join("\n")
+}
+
+fn xp_source_word_trap() -> String {
+    [String]{
+        "fn grow(a: U8, b: U8) -> U8 {{",
+        "    a + b",
+        "}}",
+        "",
+        "fn run() {{",
+        "    print(grow(U8{{100}}, U8{{100}}))",
+        "    print(grow(U8{{200}}, U8{{100}}))",
+        "}}",
+        "",
+    }.join("\n")
+}
+
+fn xp_source_words() -> String {
+    [String]{
+        "fn mix(a: I32, b: I32) -> I32 {{",
+        "    a * b - a",
+        "}}",
+        "",
+        "fn run() {{",
+        "    x :: I32{{1000}}",
+        "    y :: I32{{-7}}",
+        "    print(mix(x, y))",
+        "    print(x /% y)",
+        "    print(x % y)",
+        "    b :: U8{{200}}",
+        "    c :: U8{{50}}",
+        "    print(b + c)",
+        "    print(b - c)",
+        "    w :: U64{{0xffffffffffff}}",
+        "    print(w * U64{{4096}})",
+        "    print(w >> U64{{8}})",
+        "    zero :: I32{{0}}",
+        "    if y < zero -> print(\"negative\")",
+        "    if b > c -> print(\"unsigned order\")",
+        "    print(y /% I32{{4}})",
+        "    print(y % I32{{4}})",
+        "    print(y %% I32{{4}})",
+        "    print(w /% U64{{4096}})",
+        "    print(w % U64{{4096}})",
+        "    print(w * U64{{8}})",
+        "    print(U8{{4}} * c)",
+        "    fx :: Float{{x}}",
+        "    print(\"{{fx}}\")",
+        "    print(y)",
+        "}}",
+        "",
+    }.join("\n")
+}
+
+fn xp_source_structs() -> String {
+    [String]{
+        "struct Point {{",
+        "    x: Int",
+        "    y: Int",
+        "}}",
+        "",
+        "fn make(x: Int, y: Int) -> Point {{",
+        "    Point{{x: x, y: y}}",
+        "}}",
+        "",
+        "fn total(p: Point) -> Int {{",
+        "    p.x + p.y",
+        "}}",
+        "",
+        "fn run() {{",
+        "    p :: make(3, 4)",
+        "    print(\"{{total(p)}}\")",
+        "    q := p",
+        "    print(\"{{q.x}}\")",
+        "    print(\"{{p.y}}\")",
+        "    print(\"{{total(q)}}\")",
+        "    r := q",
+        "    print(\"{{r.y}}\")",
+        "    print(\"{{r.x}}\")",
+        "    print(\"{{total(r)}}\")",
+        "}}",
+        "",
+    }.join("\n")
+}

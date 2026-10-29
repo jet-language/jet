@@ -1,5 +1,8 @@
 // Bytes is an ordinary public Dyn payload variant.
-fn run() {
+use jet_parser.[parse_generated_source]
+use jet_sema.[SemaSourceSegment, check_program]
+
+#Test("dyn_bytes_pattern_fixtures") {
     source :: "fn run() {{ value :: Dyn.Bytes([U8]{{1}})\n if value == .Bytes(bytes) {{ print(bytes.len()) }}\n }}"
     parsed :: parse_generated_source(source.bytes())
     if parsed.diagnostics.len() != 0 -> panic("public Dyn.Bytes fixture did not parse")

@@ -1,0 +1,13 @@
+# tests/core_files_foundations.rs::core_files_golden_files at tests/core_files_foundations.rs:189; hand-port
+# Claim: example io/files.jet default run stdout equals expected/io/files.out (tests/core_files_foundations.rs:185)
+# Claim: example io/files.jet --release run stdout equals the same golden (tests/core_files_foundations.rs:185, tir_support 378-414)
+fixture: core_files_golden_files.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run files.jet
+exit: 0 # tests/core_files_foundations.rs:189 default run equals golden
+stdout: = core_files_golden_files-1.out # tests/core_files_foundations.rs:189 default run equals golden
+step: jet run --release files.jet
+exit: 0 # tests/core_files_foundations.rs:189 release run equals golden
+stdout: = core_files_golden_files-2.out # tests/core_files_foundations.rs:189 release run equals golden

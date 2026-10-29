@@ -14,7 +14,6 @@ fn jet_cli_expand_checked_json(value: TComptimeValue) -> JetCLIStatusValue Never
         .String(text) -> jet_cli_status_text(text)
         .Present(inner) -> jet_cli_expand_checked_json(inner)
         .Failed(.Clean(_)) -> JetCLIStatusValue.Null
-        .Enum(owner, variant, _) -> if owner == "Option" && variant == "None" -> JetCLIStatusValue.Null else -> jet_cli_status_text(jet_cli_expand_checked_show(value))
         .List(values) -> jet_cli_status_array(loop entry in values -> jet_cli_expand_checked_json(entry))
         .Struct(_, fields) -> jet_cli_status_object(loop field in fields -> jet_cli_status_field(field.name, jet_cli_expand_checked_json(field.value)))
         else -> jet_cli_status_text(jet_cli_expand_checked_show(value))
@@ -32,7 +31,6 @@ fn jet_cli_expand_checked_display(value: TComptimeValue?) -> String Never! {
         .String(text) -> text
         .Int(number) -> "{number}"
         .Failed(.Clean(_)) -> "unknown"
-        .Enum(owner, variant, _) -> if owner == "Option" && variant == "None" -> "unknown" else -> jet_cli_expand_checked_show(checked)
         else -> jet_cli_expand_checked_show(checked)
     }
 }
@@ -80,7 +78,6 @@ fn jet_cli_expand_layout_missing(value: TComptimeValue, names: [String]) -> Bool
     loop name in names {
         field :: jet_cli_expand_checked_field(value, name) ?? return true
         if field == .Failed(.Clean(_)) -> return true
-        if field == .Enum(owner, variant, _) && owner == "Option" && variant == "None" -> return true
     }
     false
 }

@@ -3,7 +3,6 @@
 // no CLI reader re-scans source text to discover an unsafe operation.
 use jet_foundation.[GateLedger, Diagnostic, Program, diagnostic_with_source_path, gate_ledger_sort]
 use jet_sema.[SemaGateModule, SemaGraphResult, SemaRegistrationGraph, sema_gate_ledger_collect, sema_gate_checked_text_names, sema_gate_policy_diagnostics]
-use jet_driver.[JetDriverDocModule, JetDriverCompileRequest]
 
 fn jet_driver_doc_gate_projection(docs: &[JetDriverDocModule], graph: SemaGraphResult, registration: SemaRegistrationGraph, request: JetDriverCompileRequest, packages: [JetDriverPackageInfo]) Never! {
     modules := [SemaGateModule]{}
@@ -27,7 +26,7 @@ fn jet_driver_doc_gate_projection(docs: &[JetDriverDocModule], graph: SemaGraphR
         }
         &modules.push(row)
     }
-    // MIR name facts are the checked compiler's sole structure-fact owner.
+    // Checked name facts are the compiler's sole structure-fact owner.
     if docs.len() == 0 {
         return
     }
@@ -45,9 +44,9 @@ struct JetDriverGateQueryResult {
 }
 
 // Inspect uses exactly the authorized source-query loader. No registration,
-// body checking, comptime execution, MIR lowering, or emission happens here.
+// body checking, comptime execution, IR lowering, or emission happens here.
 fn jet_driver_gate_query(request: JetDriverCompileRequest) -> JetDriverGateQueryResult {
-    load :: jet_driver_load(request)
+    load :: jet_driver_load_with_names(request)
     source :: jet_driver_source_query_loaded(load, request)
     if !source.complete -> return JetDriverGateQueryResult{source: source, ledger: GateLedger{}, diagnostics: source.diagnostics, complete: false}
     modules := [SemaGateModule]{}

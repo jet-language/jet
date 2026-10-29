@@ -1,0 +1,36 @@
+
+use core.encoding.base64 as api
+
+fn report_standard(text: String, expected: U8) {
+    if api.decode(text) == {
+        .Ok(bytes) -> {
+            print(bytes.len())
+            print(bytes[0])
+            print(bytes[0] == expected)
+        }
+        .Err(error) -> print(error.reason)
+    }
+}
+
+fn report_url(text: String, expected: U8) {
+    if api.decode_url(text) == {
+        .Ok(bytes) -> {
+            print(bytes.len())
+            print(bytes[0])
+            print(bytes[0] == expected)
+        }
+        .Err(error) -> print(error.reason)
+    }
+}
+
+fn run() {
+    print(api.is_base64("jet"))
+    print(api.is_base64("Zg=="))
+    report_standard("Zg==", U8{102})
+    report_standard("Zg=", U8{102})
+    report_standard("a?==", U8{102})
+    report_standard("Zh==", U8{102})
+    report_standard("-w", U8{251})
+    report_url("-w", U8{251})
+    report_url("-w==", U8{251})
+}

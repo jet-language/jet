@@ -1,0 +1,23 @@
+# Claim: an unhandled guest trap propagates out of run with the guest operation, the host plugin call line and an E3002 trail, on every tier
+# Fixture migrated: the guest path and read root are fixture-relative (failure_guest.wat, FS.Read:.); WAT kept as text (component text accepted); package authority without `holds`
+# Not ported: the Rust harness's separate interpreter tier; default and release tiers are asserted. Rust asserted a nonzero exit; the case pins the runtime-stop exit 70
+fixture: plugin_failure_propagation_records_the_host_call_line_on_all_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 70 # default: the guest failure stops the program
+stdout: = "" # default: the success path never ran
+stderr: ~ "guest trapped" # default: the guest operation is named
+stderr: ~ "failed here: fail" # default: the host plugin call is named
+stderr: ~ "main.jet:6" # default: the host plugin call line
+stderr: ~ "Trail [E3002]" # default: the host failure journey
+stderr: ~ "run (" # default: the journey reaches run
+step: jet run --release main.jet
+exit: 70 # release: the guest failure stops the program
+stdout: = "" # release: the success path never ran
+stderr: ~ "guest trapped" # release: the guest operation is named
+stderr: ~ "failed here: fail" # release: the host plugin call is named
+stderr: ~ "main.jet:6" # release: the host plugin call line
+stderr: ~ "Trail [E3002]" # release: the host failure journey
+stderr: ~ "run (" # release: the journey reaches run

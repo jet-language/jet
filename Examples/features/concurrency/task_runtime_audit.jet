@@ -2,14 +2,14 @@
 // all consume the canonical Duration literal.
 package {
     name: "task_runtime_audit"
-    authority: { holds: { allow: [IO, Time, Time.Wait] } }
+    authority: { allow: [IO, Time, Time.Wait] }
 }
 
 use core.tasks as tasks
 
 fn run() {
     task.group g {
-        (sender, ch) :: channel<Int>(1)
+        { sender, receiver: ch } :: channel<Int>(1)
         sender.send(1)
         blocked :: task ^sender {
             sender.send(2)

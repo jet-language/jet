@@ -1,5 +1,12 @@
 // Pure provider witnesses. Transport permission/pid/race checks need the composed
 // CLI + Core native FS provider; these tests make no hosted parity claim.
+use jet_cli.[
+    JetCLIPerfObservation, jet_cli_perf_browser_decode, jet_cli_perf_capture_bytes,
+    jet_cli_perf_capture_source, jet_cli_perf_live_decode, jet_cli_perf_source,
+    jet_cli_perf_source_position, jet_cli_perf_source_profile,
+]
+use jet_foundation.[TraceHardware, TraceToolchain, sha256_hex, verify_jettrace]
+
 fn jet_cli_perf_test_snapshot() -> String Never! {
     "{{\"protocol\":\"jet.live.v1\",\"session_id\":\"session\",\"source_id\":\"source\",\"build_id\":\"build\",\"revision\":\"revision\",\"world_id\":\"world\",\"values\":[],\"schema_version\":1,\"pid\":12,\"start_id\":\"123\",\"captured_ms\":100,\"tasks\":[{{\"id\":1,\"parent\":0,\"state\":\"blocked\",\"wait\":\"tcp receive\",\"deadline_ms\":null,\"cancelled\":false}}],\"channels\":[{{\"id\":2,\"depth\":0,\"capacity\":1,\"send_waiters\":0,\"recv_waiters\":1,\"closed\":false}}],\"effects\":{{\"compute\":0,\"waiting\":1,\"channel\":0,\"time\":0,\"io\":1}},\"resources\":{{\"workers\":1,\"running\":0,\"queued\":0,\"cancelled\":0,\"arenas\":1,\"arena_allocations\":2,\"arena_bytes\":64}},\"runtime\":{{\"elapsed_ns\":50,\"cpu_ns\":25,\"exit\":false}}}}"
 }
@@ -78,7 +85,7 @@ fn jet_cli_perf_test_snapshot() -> String Never! {
     }
 }
 #Test("perf browser decode uses compiler source carrier and refuses unknown symbols") {
-    digest :: mir_sha256_hex("fn run() -> Int { 1 }")
+    digest :: sha256_hex("fn run() -> Int { 1 }")
     table :: "source\t{perf_hex.encode("app.jet".bytes())}\t{digest}\nsymbol\t{perf_hex.encode("app.jet".bytes())}\t{perf_hex.encode("run".bytes())}\tfn\n"
     header :: "{{\"schema\":\"jet.status/v1\",\"action\":\"browser.relay\",\"ok\":true,\"reports\":[],\"nonce\":\"n\",\"pid\":12,\"started\":\"123\",\"sources\":\"{perf_hex.encode(table.bytes())}\"}}"
     row :: "{{\"schema\":\"jet.status/v1\",\"action\":\"browser.relay.row\",\"ok\":true,\"reports\":[],\"class\":\"wasm\",\"duration_ns\":4,\"start_ns\":5,\"symbol\":\"run\"}}"

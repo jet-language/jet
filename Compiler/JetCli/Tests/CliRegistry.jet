@@ -4,6 +4,15 @@
 // self_update_keyless_override_is_registered_for_help_and_completions) and the
 // retired-marker explanation (Explain.rs marker_explain_reports_typed_signature_and_retirement),
 // run on the Jet-built CLI.
+use jet_cli.[
+    JET_CLI_SYNTAX_ROWS, JetCLISyntaxKind, jet_cli_closest_command, jet_cli_command_index,
+    jet_cli_completions_bash, jet_cli_completions_fish, jet_cli_completions_powershell,
+    jet_cli_completions_zsh, jet_cli_group_usage, jet_cli_handler_index,
+    jet_cli_is_canonical_top_level, jet_cli_is_known_flag, jet_cli_man_page, jet_cli_moved_command,
+    jet_cli_nested_command, jet_cli_rule_explanation, jet_cli_rule_named, jet_cli_syntax_lookup,
+]
+use jet_foundation.[JET_CLI_COMMANDS, JET_CLI_FLAGS, JET_CLI_HANDLERS, marker_source_read]
+
 fn cli_registry_require(ok: Bool, what: String) Never! {
     if !ok -> panic(what)
 }
@@ -123,7 +132,7 @@ fn cli_registry_explain_markers() Never! {
     }
 }
 
-fn run() Never! {
+#Test("cli_registry") {
     cli_registry_tables()
     cli_registry_moved_commands()
     cli_registry_typo_suggestions()

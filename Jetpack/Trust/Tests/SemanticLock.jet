@@ -2,6 +2,14 @@
 // merge, revalidation, selective update, and overlay invalidation behavior.
 // File writes, the machine `Lock` module, and the Overlay.rs projections are
 // outside this unit; their claims keep only the semantic lock half.
+use jetpack_trust.[
+    LockIdentity, LockInput, LockRationale, LockRecordKind, OverlayFingerprint, SemanticLockFile,
+    SemanticRecord, SourceMapEntry, ValidationIssue, trust_apply_overlay_invalidations,
+    trust_explain_semantic_lock, trust_merge_for_commit, trust_merge_semantic_locks,
+    trust_overlay_invalidations, trust_parse_semantic_lock, trust_semantic_lock_issues,
+    trust_strip_semantic_sections, trust_text_find, trust_write_semantic_lock,
+]
+use jet_pkg_model.[pkg_bytes_text]
 
 fn trust_test_pkg(owner: String, key: String, exact: String, hash: String) -> SemanticRecord {
     rationale := LockRationale.empty()
@@ -49,7 +57,7 @@ fn trust_test_has_issue(issues: [ValidationIssue], expected: String) -> Bool {
     false
 }
 
-TRUST_TEST_MACHINE_LOCK :: prep { `version = 1
+TRUST_TEST_MACHINE_LOCK :: comptime { `version = 1
 
 [[package]]
 name = "app"

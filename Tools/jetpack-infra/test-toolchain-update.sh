@@ -4,8 +4,7 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-jet=$(printenv JET_BIN 2>/dev/null || true)
-if [ -z "$jet" ]; then jet="$repo/target/debug/jet"; fi
+jet=${JET:?JET must name the admitted native jet compiler}
 scratch=$(printenv JET_TEST_SCRATCH 2>/dev/null || true)
 if [ -z "$scratch" ]; then scratch="$HOME/.cache/jet-dev/scratch"; fi
 work="$scratch/toolchain-update-$$"

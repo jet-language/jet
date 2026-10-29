@@ -278,3 +278,23 @@ fn marker_source_read(source: String) -> [TAppliedRule] Never! {
     }
     rows
 }
+
+// Policy.rs `RuleSignature::render`: `(name: Type{default}, …, Variadic...)`.
+fn applied_rule_signature_render(signature: TAppliedRuleSignature) -> String Never! {
+    parts := [String]{}
+    loop param in signature.params {
+        default :: if param.default_source == .Val(value) -> "{{{value}}}" else -> ""
+        &parts.push("{param.name}: {param.source_type}{default}")
+    }
+    if signature.variadic_source_type == .Val(source_type) -> &parts.push("{source_type}...")
+    "({parts.join(", ")})"
+}
+
+// The registered signature `marker_argument_shape_error` (Policy.rs) names:
+// the rule row's rendered signature, `()` when no row has that name.
+fn marker_registered_signature(name: String) -> String Never! {
+    loop rule in marker_source_read(MARKER_SOURCE) {
+        if rule.name == name -> return applied_rule_signature_render(rule.signature)
+    }
+    "()"
+}

@@ -6,6 +6,7 @@
 // root with no declared leaves stays open. Every module except the canonical
 // Prelude effect module is validated, and every module contributes leaves.
 use jet_foundation.[
+    EFFECT_VOCABULARY_LEAVES,
     Diagnostic,
     EffectRowEntry,
     Func,
@@ -23,10 +24,24 @@ struct SemaEffectLeaf {
     member: String
 }
 
-// Prelude effect leaves: the supported foreign-language binders and the
-// canonical Core leaves, typo-checked without user declarations.
-fn sema_effect_builtin_leaves() -> [String] Never! {
-    [String]{"DB.Read", "DB.Write", "FS.Read", "FS.Write", "Rand.Draw", "Exec.Exit", "Exec.Args", "Time.Wait", "FFI.Go", "FFI.Java", "FFI.DotNet", "FFI.Fortran", "FFI.Cobol", "FFI.Tcl", "FFI.Lua", "FFI.Ada", "FFI.Pascal", "FFI.Dart", "FFI.PowerShell", "FFI.Perl", "FFI.Ruby", "FFI.Php", "FFI.R", "FFI.Com", "FFI.C", "FFI.Cpp", "FFI.Asm", "FFI.Py", "FFI.Octave"}
+// The name a leaf check reads: parameters (`Mem.Alloc(above: N)`) and a
+// resource qualifier (`FS.Read:/data`) are not part of the leaf name.
+fn sema_effect_leaf_name(name: String) -> String Never! {
+    name.split("(").to_list()[0].split(":").to_list()[0].trim()
+}
+
+// A dotted right under a root whose leaves Prelude/Effects.jet closes
+// (`FS.Bogus`) names no declared leaf (D-EFF2).
+fn sema_effect_builtin_leaf_unknown(name: String) -> Bool Never! {
+    bare :: sema_effect_leaf_name(name)
+    member :: sema_effect_leaf_member(bare) ?? return false
+    root :: sema_effect_root(bare)
+    closed := false
+    loop leaf in EFFECT_VOCABULARY_LEAVES {
+        if leaf == bare -> return false
+        if sema_effect_root(leaf) == root -> closed = true
+    }
+    closed && member != ""
 }
 
 fn sema_effect_leaf_member(name: String) -> String? {
@@ -56,8 +71,9 @@ fn sema_effect_leaf_collect(leaves: &[SemaEffectLeaf], items: [Item]) Never! {
 
 fn sema_effect_leaf_check_name(leaves: [SemaEffectLeaf], name: String, span: Span, diagnostics: &[Diagnostic]) {
     if sema_effect_parse_name(name) == None -> return
-    member :: sema_effect_leaf_member(name) ?? return
-    root :: sema_effect_root(name)
+    bare :: sema_effect_leaf_name(name)
+    member :: sema_effect_leaf_member(bare) ?? return
+    root :: sema_effect_root(bare)
     members := [String]{}
     loop leaf in leaves {
         if leaf.root == root -> &members.push(leaf.member)
@@ -228,7 +244,7 @@ fn sema_effect_leaf_check_items(leaves: [SemaEffectLeaf], items: [Item], diagnos
 // declared leaves of its root. Returns true when a diagnostic was reported.
 fn sema_effect_check_declared_leaves(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
     leaves := [SemaEffectLeaf]{}
-    loop name in sema_effect_builtin_leaves() -> sema_effect_leaf_add(&leaves, name)
+    loop name in EFFECT_VOCABULARY_LEAVES -> sema_effect_leaf_add(&leaves, name)
     loop source_module_index in 0..<graph.modules.len() {
         if graph.modules[source_module_index].module_identity == graph.canonical_effect_module_identity -> next
         sema_effect_leaf_collect(&leaves, graph.modules[source_module_index].program.items)

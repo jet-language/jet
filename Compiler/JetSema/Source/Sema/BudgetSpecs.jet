@@ -1,0 +1,1006 @@
+// The canonical typed form of every `module perf.<role> { budgets: [...] }`
+// contribution (crates/jet-sema/src/Sema/BudgetSpecs.rs). The graph check
+// reports the elaborator's diagnostics; budget commands read the same specs
+// after the ordinary front-end check, so command execution never grows a
+// second parser or semantic interpretation.
+use jet_foundation.[
+    BudgetDecl,
+    CompileWorkloadDecl,
+    Diagnostic,
+    EnumLitArg,
+    Expr,
+    ExprField,
+    Item,
+    ModuleDecl,
+    Program,
+    Span,
+    Stmt,
+    expr_span,
+    type_name,
+]
+
+// The registered performance-budget vocabulary (Syntax PERF_BUDGET_*,
+// SCOPE_TEST_MEASURE and perf_budget_unit_scale).
+BUDGET_METRICS :: [String]{
+    "BinarySize", "ArtifactSize", "GeneratedUnsafe", "PublicApiItems", "DependencyCount", "EffectCount",
+    "AllocationCount", "AllocationBytes", "StartupTime", "FrameTime", "Latency", "Throughput",
+    "MemoryHighWater", "BenchTime", "ServiceReadiness", "SceneAssetBytes", "DrawCalls", "CompileTime",
+}
+BUDGET_PERCENTILES :: [String]{"P50", "P90", "P95", "P99", "P999"}
+BUDGET_TARGET_CLASSES :: [String]{"Native", "Web", "Freestanding", "Plugin", "OSImage"}
+BUDGET_SCOPE_TEST_MEASURE :: "measure"
+
+fn sema_budget_unit_scale(suffix: String) -> Int? Never! {
+    if suffix == {
+        "ns" | "B" -> Val(1)
+        "us" -> Val(1000)
+        "ms" -> Val(1000000)
+        "s" -> Val(1000000000)
+        "KiB" -> Val(1024)
+        "MiB" -> Val(1048576)
+        "GiB" -> Val(1073741824)
+        else -> None
+    }
+}
+
+struct BudgetSpec {
+    role: String
+    name: String
+    metric: String
+    scope: String
+    provider: String
+    applicability: BudgetApplicability
+    enforcement: String
+    comparison: String
+    limit: String
+    comparison_fact: BudgetComparisonFact
+    limit_fact: BudgetLimitFact
+    // The exact named workload behind a compiler probe. Clean and NoChange
+    // carry no patch; Edit resolves here, once, against the role's typed
+    // workload map.
+    compile_workload: CompileWorkloadFact?
+    span: Span
+    field_spans: [String: Span]
+}
+
+struct CompileWorkloadFact { mode: String, name: String?, target: String, patch: String? }
+
+// A spec with the position in `graph.modules` of the module that owns its
+// source span.
+struct LocatedBudgetSpec { spec: BudgetSpec, module_index: Int }
+
+struct BudgetComparisonFact { kind: String, baseline: String? }
+
+struct BudgetLimitFact { kind: String, quantity: BudgetQuantity, raw: BudgetRawQuantity }
+
+// Normalized limit values; each stays within the unsigned 128-bit range.
+enum BudgetQuantity {
+    DurationNs(value: Int)
+    Bytes(value: Int)
+    Count(value: Int)
+    Rate(numerator: Int, denominator_ns: Int)
+    PercentBasisPoints(value: Int)
+}
+
+enum BudgetRawQuantity {
+    Scalar(digits: String, suffix: String?)
+    Rate(count_digits: String, per_digits: String, per_suffix: String)
+}
+
+struct BudgetApplicability { targets: BudgetAxis, profiles: BudgetAxis }
+
+// `Only` holds its selectors sorted and unique.
+enum BudgetAxis {
+    Current
+    All
+    Only(selectors: [String])
+}
+
+#Error
+struct BudgetSpecError { diagnostics: [Diagnostic] }
+
+// The attachments budgets may name, collected per owning package.
+struct BudgetAttachmentCatalog {
+    envs: [String]
+    services: [String]
+    targets: [String]
+    scenes: [String]
+    tests: [String]
+}
+
+// One written Budget field: its value and the span of its name.
+struct BudgetFieldEntry { value: Expr, span: Span }
+
+// Rust `collect_budget_specs`: elaborate every performance role of one
+// program into the canonical typed budget form.
+fn sema_budget_specs(program: Program) -> [BudgetSpec] BudgetSpecError! {
+    diagnostics := [Diagnostic]{}
+    specs :: sema_budget_elaborate_items(program.items, &diagnostics)
+    located :: loop spec in specs -> LocatedBudgetSpec{spec: spec, module_index: 0}
+    findings := [BudgetLocatedDiagnostic]{}
+    sema_budget_validate_resolution(located, sema_budget_attachment_catalog(program.items), &findings)
+    sema_budget_validate_collisions(located, &findings)
+    loop finding in findings -> &diagnostics.push(finding.diagnostic)
+    if diagnostics.len() > 0 -> return Err(BudgetSpecError{diagnostics: diagnostics})
+    Ok(specs)
+}
+
+// Rust `collect_budget_specs_bundle`: the specs of a fully loaded graph.
+fn sema_budget_specs_graph(graph: SemaRegistrationGraph) -> [BudgetSpec] BudgetSpecError! {
+    located :: sema_budget_located_specs_graph(graph)
+    Ok(loop entry in located -> entry.spec)
+}
+
+// Rust `collect_located_budget_specs_bundle`: collect budgets while
+// retaining the module that owns each source span. Each diagnostic carries
+// its module's source location.
+fn sema_budget_located_specs_graph(graph: SemaRegistrationGraph) -> [LocatedBudgetSpec] BudgetSpecError! {
+    specs := [LocatedBudgetSpec]{}
+    findings :: sema_budget_graph_findings(graph, &specs)
+    if findings.len() > 0 {
+        diagnostics :: loop finding in findings -> sema_diagnostic_with_source_location(finding.diagnostic, graph.modules[finding.module_index].source_segments)
+        return Err(BudgetSpecError{diagnostics: diagnostics})
+    }
+    Ok(specs)
+}
+
+// Rust `validate_bundle`: the diagnostics the graph check reports, each with
+// the position of the module its span belongs to.
+fn sema_budget_validate_graph(graph: SemaRegistrationGraph) -> [BudgetLocatedDiagnostic] Never! {
+    specs := [LocatedBudgetSpec]{}
+    sema_budget_graph_findings(graph, &specs)
+}
+
+// One budget diagnostic and the `graph.modules` position of its source.
+struct BudgetLocatedDiagnostic { module_index: Int, diagnostic: Diagnostic }
+
+// Every module's budgets in module order, then each owning package's
+// resolution and collision findings. Core sources declare no budgets.
+fn sema_budget_graph_findings(graph: SemaRegistrationGraph, specs: &[LocatedBudgetSpec]) -> [BudgetLocatedDiagnostic] Never! {
+    findings := [BudgetLocatedDiagnostic]{}
+    packages := [String]{}
+    group_specs := [String: [LocatedBudgetSpec]]{}
+    group_catalogs := [String: BudgetAttachmentCatalog]{}
+    loop (module_index, row) in graph.modules {
+        if sema_module_is_core_source(row.module_identity) -> next
+        module_diagnostics := [Diagnostic]{}
+        module_specs :: sema_budget_elaborate_items(row.program.items, &module_diagnostics)
+        loop diagnostic in module_diagnostics -> &findings.push(BudgetLocatedDiagnostic{module_index: module_index, diagnostic: diagnostic})
+        package :: row.package_identity
+        if !packages.contains(package) {
+            &packages.push(package)
+            group_specs[package] = [LocatedBudgetSpec]{}
+            group_catalogs[package] = sema_budget_empty_catalog()
+        }
+        grouped := group_specs.get(package) ?? [LocatedBudgetSpec]{}
+        loop spec in module_specs {
+            &grouped.push(LocatedBudgetSpec{spec: spec.copy(), module_index: module_index})
+            &specs.push(LocatedBudgetSpec{spec: spec, module_index: module_index})
+        }
+        group_specs[package] = grouped
+        catalog := group_catalogs.get(package) ?? sema_budget_empty_catalog()
+        sema_budget_catalog_extend(&catalog, sema_budget_attachment_catalog(row.program.items))
+        group_catalogs[package] = catalog
+    }
+    &packages.sort()
+    loop package in packages {
+        grouped :: group_specs.get(package) ?? [LocatedBudgetSpec]{}
+        sema_budget_validate_resolution(grouped, group_catalogs.get(package) ?? sema_budget_empty_catalog(), &findings)
+        sema_budget_validate_collisions(grouped, &findings)
+    }
+    findings
+}
+
+fn sema_budget_elaborate_items(items: [Item], diagnostics: &[Diagnostic]) -> [BudgetSpec] Never! {
+    specs := [BudgetSpec]{}
+    loop item in items {
+        if item == .Module(declaration) -> sema_budget_validate_module(declaration, &specs, &diagnostics)
+    }
+    specs
+}
+
+fn sema_budget_empty_catalog() -> BudgetAttachmentCatalog Never! {
+    BudgetAttachmentCatalog{envs: [String]{}, services: [String]{}, targets: [String]{}, scenes: [String]{}, tests: [String]{}}
+}
+
+fn sema_budget_set_insert(set: &[String], value: String) Never! {
+    if !set.contains(value) -> &set.push(value)
+}
+
+fn sema_budget_catalog_extend(catalog: &BudgetAttachmentCatalog, other: BudgetAttachmentCatalog) Never! {
+    loop value in other.envs -> sema_budget_set_insert(&catalog.envs, value)
+    loop value in other.services -> sema_budget_set_insert(&catalog.services, value)
+    loop value in other.targets -> sema_budget_set_insert(&catalog.targets, value)
+    loop value in other.scenes -> sema_budget_set_insert(&catalog.scenes, value)
+    loop value in other.tests -> sema_budget_set_insert(&catalog.tests, value)
+}
+
+fn sema_budget_attachment_catalog(items: [Item]) -> BudgetAttachmentCatalog Never! {
+    catalog := sema_budget_empty_catalog()
+    loop item in items {
+        if item == {
+            .Test(definition) -> {
+                measured := false
+                loop statement in definition.body {
+                    if statement == .ScopeMember(name, _, _, _, _, _, _, _) && name == BUDGET_SCOPE_TEST_MEASURE -> measured = true
+                }
+                if measured && definition.name == .Val(name) -> sema_budget_set_insert(&catalog.tests, name)
+            }
+            .Func(function) -> sema_budget_scene_attachments(function.body, &catalog.scenes)
+            .Module(declaration) -> {
+                loop contribution in declaration.contributions {
+                    if contribution.namespace == {
+                        .Env -> sema_budget_set_insert(&catalog.envs, contribution.path)
+                        .System | .Image -> sema_budget_set_insert(&catalog.targets, contribution.path)
+                        else -> {}
+                    }
+                    if contribution.value == {
+                        .Env(env) -> {
+                            loop service in env.services -> sema_budget_set_insert(&catalog.services, service.name)
+                        }
+                        .System(system) -> {
+                            loop field in system.fields {
+                                if field.value == .Services(services) {
+                                    loop service in services -> sema_budget_set_insert(&catalog.services, service.name)
+                                }
+                            }
+                        }
+                        else -> {}
+                    }
+                }
+            }
+            else -> {}
+        }
+    }
+    catalog
+}
+
+fn sema_budget_scene_attachments(stmts: [Stmt], scenes: &[String]) Never! {
+    loop stmt in stmts {
+        if stmt == {
+            .Val(binding) -> sema_budget_scene_expr(binding.init, &scenes)
+            .Expr(expr) -> sema_budget_scene_expr(expr, &scenes)
+            .DeferClose(close, _) -> sema_budget_scene_expr(close, &scenes)
+            .Return(value, _) -> {
+                if value == .Val(expr) -> sema_budget_scene_expr(expr, &scenes)
+            }
+            .Assign(_, _, _, value) -> sema_budget_scene_expr(value, &scenes)
+            .While(cond, body, _, _, _) -> {
+                sema_budget_scene_expr(cond, &scenes)
+                sema_budget_scene_attachments(body, &scenes)
+            }
+            .Loop(body, _, _, _) -> sema_budget_scene_attachments(body, &scenes)
+            .Unsafe(_, _, body, _) -> sema_budget_scene_attachments(body, &scenes)
+            .Impure(_, _, body, _) -> sema_budget_scene_attachments(body, &scenes)
+            .Reactive(body, _) -> sema_budget_scene_attachments(body, &scenes)
+            .Shield(body, _) -> sema_budget_scene_attachments(body, &scenes)
+            .Switched(_, body, _) -> sema_budget_scene_attachments(body, &scenes)
+            .Region(_, _, body, _) -> sema_budget_scene_attachments(body, &scenes)
+            .Policy(_, body, _) -> sema_budget_scene_attachments(body, &scenes)
+            .TaskGroup(_, _, _, body, _) -> sema_budget_scene_attachments(body, &scenes)
+            .Layout(_, _, body, _) -> sema_budget_scene_attachments(body, &scenes)
+            .AuthorityScope(_, _, _, body, _) -> sema_budget_scene_attachments(body, &scenes)
+            else -> {}
+        }
+    }
+}
+
+fn sema_budget_scene_expr(expr: Expr, scenes: &[String]) Never! {
+    if expr == {
+        .MethodCall(receiver, method, _, _, _, args, _) -> {
+            scene_receiver :: if receiver == {
+                .Field(_, member, _, _) -> member == "Scene"
+                else -> false
+            }
+            if method == "new" && scene_receiver && args.len() == 1 {
+                if sema_budget_string_value(args[0].expr) == .Val(name) -> sema_budget_set_insert(&scenes, name)
+            }
+            sema_budget_scene_expr(receiver, &scenes)
+            loop arg in args -> sema_budget_scene_expr(arg.expr, &scenes)
+        }
+        .Call(call, _) -> {
+            loop arg in call.args -> sema_budget_scene_expr(arg.expr, &scenes)
+        }
+        .Field(base, _, _, _) -> sema_budget_scene_expr(base, &scenes)
+        .Unary(_, operand, _, _) -> sema_budget_scene_expr(operand, &scenes)
+        .Binary(_, left, right, _, _) -> {
+            sema_budget_scene_expr(left, &scenes)
+            sema_budget_scene_expr(right, &scenes)
+        }
+        else -> {}
+    }
+}
+
+fn sema_budget_validate_resolution(specs: [LocatedBudgetSpec], catalog: BudgetAttachmentCatalog, findings: &[BudgetLocatedDiagnostic]) Never! {
+    loop located in specs {
+        spec :: located.spec.copy()
+        if sema_budget_named_key(spec.scope) == .Val(scope) {
+            found :: if scope.kind == {
+                "Env" -> catalog.envs.contains(scope.name)
+                "Service" -> catalog.services.contains(scope.name)
+                "Scene" -> catalog.scenes.contains(scope.name)
+                "Test" -> catalog.tests.contains(scope.name)
+                "Target" -> catalog.targets.contains(scope.name) || (spec.metric.starts_with("CompileTime(") && sema_budget_provider_kind(spec.provider) == "CompilerProbe")
+                else -> true
+            }
+            if !found {
+                &findings.push(BudgetLocatedDiagnostic{module_index: located.module_index, diagnostic: sema_budget_unresolved(spec, "scope", "no canonical {scope.kind} attachment named `{scope.name}` exists in the containing package", "declare that attachment or use its canonical package-qualified identity")})
+                next
+            }
+        }
+        if sema_budget_named_key(spec.provider) == .Val(provider) {
+            found :: if provider.kind == {
+                "BuildArtifact" -> catalog.targets.contains(provider.name) || provider.name == "Package"
+                "AllocationProbe" -> catalog.services.contains(provider.name) || catalog.scenes.contains(provider.name) || catalog.tests.contains(provider.name)
+                "BenchMeasurement" -> catalog.tests.contains(provider.name)
+                "ServiceProbe" -> catalog.services.contains(provider.name)
+                "SceneProbe" -> catalog.scenes.contains(provider.name)
+                else -> true
+            }
+            if !found -> &findings.push(BudgetLocatedDiagnostic{module_index: located.module_index, diagnostic: sema_budget_unresolved(spec, "provider", "no canonical {provider.kind} provider named `{provider.name}` exists in the containing package", "name a provider attached to a resolved scope")})
+        }
+    }
+}
+
+fn sema_budget_unresolved(spec: BudgetSpec, attachment: String, why: String, fix: String) -> Diagnostic Never! {
+    span :: spec.field_spans.get(attachment) ?? spec.span
+    sema_error("E2905", span, "performance budget {spec.name} cannot resolve {attachment}", why, fix)
+}
+
+struct BudgetNamedKey { kind: String, name: String }
+
+// The bytes of `text` in `start..<end`.
+fn sema_budget_bytes_slice(text: String, start: Int, end: Int) -> String Never! {
+    String.from_bytes_lossy(text.bytes()[start..<end])
+}
+
+// `Kind(name)` split into its kind and name.
+fn sema_budget_named_key(value: String) -> BudgetNamedKey? Never! {
+    open :: value.find("(")
+    if open < 0 || !value.ends_with(")") -> return None
+    length :: value.bytes().len()
+    Val(BudgetNamedKey{kind: sema_budget_bytes_slice(value, 0, open), name: sema_budget_bytes_slice(value, open + 1, length - 1)})
+}
+
+fn sema_budget_validate_collisions(specs: [LocatedBudgetSpec], findings: &[BudgetLocatedDiagnostic]) Never! {
+    loop (index, located) in specs {
+        right :: located.spec.copy()
+        loop left_index in 0..<index {
+            left :: specs[left_index].spec.copy()
+            if left.role == right.role && left.name == right.name {
+                &findings.push(BudgetLocatedDiagnostic{module_index: located.module_index, diagnostic: sema_budget_overlap(left, right, "their containing package, perf role, and name form the same budget identity")})
+                break
+            }
+            if left.scope == right.scope && left.metric == right.metric && left.provider == right.provider && sema_budget_applicability_overlaps(left.applicability, right.applicability) {
+                &findings.push(BudgetLocatedDiagnostic{module_index: located.module_index, diagnostic: sema_budget_overlap(left, right, "their scope, metric, provider, and intersecting applicability form the same effective key")})
+                break
+            }
+        }
+    }
+}
+
+fn sema_budget_overlap(left: BudgetSpec, right: BudgetSpec, why: String) -> Diagnostic Never! {
+    sema_error("E2904", right.span, "performance budgets {left.name} and {right.name} overlap", why, "remove one budget or make their target/profile applicability disjoint")
+}
+
+fn sema_budget_applicability_overlaps(left: BudgetApplicability, right: BudgetApplicability) -> Bool Never! {
+    sema_budget_axis_overlaps(left.targets, right.targets) && sema_budget_axis_overlaps(left.profiles, right.profiles)
+}
+
+fn sema_budget_axis_overlaps(left: BudgetAxis, right: BudgetAxis) -> Bool Never! {
+    if left == .Only(left_values) && right == .Only(right_values) {
+        loop value in left_values {
+            if right_values.contains(value) -> return true
+        }
+        return false
+    }
+    true
+}
+
+fn sema_budget_invalid(name: String, why: String, fix: String, span: Span) -> Diagnostic Never! {
+    sema_error("E2903", span, "performance budget {name} is not valid", why, fix)
+}
+
+fn sema_budget_validate_module(declaration: ModuleDecl, specs: &[BudgetSpec], diagnostics: &[Diagnostic]) Never! {
+    loop contribution in declaration.contributions {
+        perf :: if contribution.value == {
+            .Perf(value) -> value
+            else -> { next }
+        }
+        if !sema_budget_snake_case(contribution.path) {
+            &diagnostics.push(sema_budget_invalid("role `{contribution.path}`", "performance role names are nonempty lowercase snake_case", "rename the role using lowercase words joined by `_`", contribution.path_span))
+            next
+        }
+        workloads :: sema_budget_compile_workload_catalog(contribution.path, perf.compile_workloads, &diagnostics)
+        loop entry in perf.budgets {
+            if sema_budget_elaborate(contribution.path, entry, workloads) == {
+                .Ok(spec) -> &specs.push(spec)
+                .Err(error) -> &diagnostics.push(error.diagnostics[0])
+            }
+        }
+    }
+}
+
+BUDGET_SPEC_FIELDS :: [String]{"name", "scope", "metric", "provider", "comparison", "limit", "enforcement", "applies"}
+
+fn sema_budget_fail(diagnostic: Diagnostic) -> BudgetSpecError Never! {
+    BudgetSpecError{diagnostics: [Diagnostic]{diagnostic}}
+}
+
+fn sema_budget_elaborate(role: String, entry: BudgetDecl, workloads: [String: CompileWorkloadFact]) -> BudgetSpec BudgetSpecError! {
+    span :: entry.span
+    map := [String: BudgetFieldEntry]{}
+    loop field in entry.fields {
+        if !BUDGET_SPEC_FIELDS.contains(field.name) {
+            return Err(sema_budget_fail(sema_budget_invalid("entry", "`{field.name}` is not a Budget field", "use one of: {BUDGET_SPEC_FIELDS.join(", ")}", field.name_span)))
+        }
+        if map.get(field.name) != None {
+            return Err(sema_budget_fail(sema_budget_invalid("entry", "`{field.name}` is written more than once", "keep one value for this field", field.name_span)))
+        }
+        map[field.name] = BudgetFieldEntry{value: field.value, span: field.name_span}
+    }
+    name_entry :: sema_budget_required(map, "name", span)
+    name :: sema_budget_string_value(name_entry.value) ?? return Err(sema_budget_fail(sema_budget_invalid("entry", "`name` must be constant quoted text", "write `name: \"lowercase-kebab-name\"`", expr_span(name_entry.value))))
+    if name == "" -> return Err(sema_budget_fail(sema_budget_invalid("entry", "`name` cannot be empty", "give this budget a stable name", expr_span(name_entry.value))))
+    metric_expr :: sema_budget_required(map, "metric", span).value
+    metric_pair :: sema_budget_closed_metric(name, metric_expr)
+    metric :: metric_pair.metric
+    metric_variant :: metric_pair.variant
+    limit_expr :: sema_budget_required(map, "limit", span).value
+    limit :: sema_budget_enum_variant(limit_expr) ?? return Err(sema_budget_fail(sema_budget_invalid(name, "`limit` must be a typed comparison limit", "use `.AtMost(value)`, `.AtLeast(value)`, `.RegressionAtMost(percent)`, or `.ImprovementAtLeast(percent)`", expr_span(limit_expr))))
+    deterministic :: metric_variant == "BinarySize" || metric_variant == "ArtifactSize" || metric_variant == "GeneratedUnsafe" || metric_variant == "PublicApiItems" || metric_variant == "DependencyCount" || metric_variant == "EffectCount"
+    comparison_fact :: if map.get("comparison") == {
+        .Val(written) -> sema_budget_closed_comparison(name, written.value)
+        .None -> if deterministic -> BudgetComparisonFact{kind: "Absolute", baseline: None} else -> BudgetComparisonFact{kind: "", baseline: None}
+    }
+    comparison :: comparison_fact.kind
+    if comparison == "" -> return Err(sema_budget_fail(sema_budget_invalid(name, "statistical metrics require `.AbsoluteFrom(baseline)` or `.RelativeTo(baseline)`", "add a pinned statistical comparison", expr_span(metric_expr))))
+    higher :: metric_variant == "Throughput"
+    direction_ok :: if {
+        comparison == "RelativeTo" -> if higher -> limit == "ImprovementAtLeast" else -> limit == "RegressionAtMost"
+        higher -> limit == "AtLeast"
+        else -> limit == "AtMost"
+    }
+    if !direction_ok {
+        fix :: if higher -> "use `.AtLeast(...)` or relative `.ImprovementAtLeast(...)`" else -> "use `.AtMost(...)` or relative `.RegressionAtMost(...)`"
+        return Err(sema_budget_fail(sema_budget_invalid(name, "`{metric_variant}` and `{comparison}` cannot use `.{limit}`", fix, expr_span(limit_expr))))
+    }
+    if deterministic && comparison != "Absolute" -> return Err(sema_budget_fail(sema_budget_invalid(name, "deterministic metrics use `.Absolute`", "remove the baseline comparison", expr_span(metric_expr))))
+    if !deterministic && comparison == "Absolute" -> return Err(sema_budget_fail(sema_budget_invalid(name, "statistical metrics cannot use `.Absolute`", "use `.AbsoluteFrom(baseline)` or `.RelativeTo(baseline)`", expr_span(metric_expr))))
+    limit_fact :: sema_budget_normalize_limit(name, metric_variant, limit, limit_expr)
+    scope :: if map.get("scope") == {
+        .Val(written) -> sema_budget_closed_scope(name, written.value)
+        .None -> "Package"
+    }
+    provider_written :: map.get("provider")
+    provider := ""
+    if provider_written == .Val(written) {
+        provider = sema_budget_closed_provider(name, written.value)
+    } else if metric_variant == "GeneratedUnsafe" || metric_variant == "PublicApiItems" || metric_variant == "DependencyCount" || metric_variant == "EffectCount" {
+        provider = "CompilerFacts"
+    } else if metric_variant == "BinarySize" || metric_variant == "ArtifactSize" {
+        provider = if sema_budget_named_key(scope) == .Val(key) && key.kind == "Target" -> "BuildArtifact({key.name})" else -> "BuildArtifact(Package)"
+    }
+    if provider == "" -> return Err(sema_budget_fail(sema_budget_invalid(name, "`{metric_variant}` has no unambiguous measurement provider", "add the metric's explicit typed `provider`", expr_span(metric_expr))))
+    provider_span :: if provider_written == .Val(written) -> expr_span(written.value) else -> expr_span(metric_expr)
+    compile_workload := CompileWorkloadFact?{None}
+    if metric_variant == "CompileTime" {
+        target :: if sema_budget_named_key(scope) == .Val(key) && key.kind == "Target" -> key.name else -> "Package"
+        identity :: sema_budget_provider_identity(provider) ?? return Err(sema_budget_fail(sema_budget_invalid(name, "`CompileTime` requires a typed `CompilerProbe` workload value", "use `.CompilerProbe(.Clean)`, `.CompilerProbe(.NoChange)`, or `.CompilerProbe(.Edit(\"name\"))`", provider_span)))
+        if identity == "Clean" || identity == "NoChange" {
+            compile_workload = Val(CompileWorkloadFact{mode: identity, name: None, target: target, patch: None})
+        } else if identity.starts_with("Edit(") && identity.ends_with(")") {
+            workload_name :: sema_budget_bytes_slice(identity, 5, identity.bytes().len() - 1)
+            workload :: workloads.get(workload_name) ?? return Err(sema_budget_fail(sema_budget_invalid(name, "compile edit workload `{workload_name}` is not declared", "add the named `CompilerWorkload.Edit` entry to `compile_workloads`", provider_span)))
+            if workload.target != target -> return Err(sema_budget_fail(sema_budget_invalid(name, "compile edit workload `{workload_name}` targets `{workload.target}` but the budget scope targets `{target}`", "make the workload target and `.Target(...)` scope name identical", provider_span)))
+            compile_workload = Val(workload)
+        } else {
+            return Err(sema_budget_fail(sema_budget_invalid(name, "`CompilerProbe` has an unsupported workload value", "use `.Clean`, `.NoChange`, or `.Edit(\"declared_workload\")`", provider_span)))
+        }
+    }
+    applicability :: if map.get("applies") == {
+        .Val(written) -> sema_budget_parse_applicability(name, written.value)
+        .None -> BudgetApplicability{targets: BudgetAxis.Current, profiles: BudgetAxis.Current}
+    }
+    enforcement := "Fail"
+    if map.get("enforcement") == .Val(written) {
+        variant_name :: sema_budget_enum_variant(written.value) ?? ""
+        if variant_name == "Fail" {
+            enforcement = "Fail"
+        } else if variant_name == "Warn" && !deterministic {
+            enforcement = "Warn"
+        } else if variant_name == "Warn" {
+            return Err(sema_budget_fail(sema_budget_invalid(name, "deterministic budgets must use `.Fail` enforcement", "remove `enforcement` or write `.Fail`", expr_span(written.value))))
+        } else {
+            return Err(sema_budget_fail(sema_budget_invalid(name, "`enforcement` must be `.Fail` or `.Warn`", "use `.Fail`, or `.Warn` for a statistical budget", expr_span(written.value))))
+        }
+    }
+    sema_budget_validate_scope_provider_pair(name, metric_variant, scope, provider, span)
+    field_spans := [String: Span]{}
+    loop key in map.keys() -> field_spans[key] = (map.get(key) ?? panic("written budget field")).span
+    Ok(BudgetSpec{
+        role: role,
+        name: name,
+        metric: metric,
+        scope: scope,
+        provider: provider,
+        applicability: applicability,
+        enforcement: enforcement,
+        comparison: comparison,
+        limit: limit,
+        comparison_fact: comparison_fact,
+        limit_fact: limit_fact,
+        compile_workload: compile_workload,
+        span: span,
+        field_spans: field_spans,
+    })
+}
+
+fn sema_budget_closed_scope(name: String, expr: Expr) -> String BudgetSpecError! {
+    key :: sema_budget_enum_key(expr) ?? return Err(sema_budget_fail(sema_budget_invalid(name, "`scope` must be one closed scope value", "use `.Package`, `.Target(name)`, `.Env(name)`, `.Service(name)`, `.Scene(name)`, or `.Test(name)`", expr_span(expr))))
+    variant :: sema_budget_enum_variant(expr) ?? ""
+    named :: sema_budget_named_key(key)
+    if variant == "Package" && named == None -> return Ok(key)
+    if (variant == "Env" || variant == "Service" || variant == "Scene" || variant == "Test" || variant == "Target") && named == .Val(value) && value.name != "" -> return Ok(key)
+    Err(sema_budget_fail(sema_budget_invalid(name, "`scope` must be one closed scope value with the required name", "use `.Package` or a named scope such as `.Service(\"api\")`", expr_span(expr))))
+}
+
+fn sema_budget_closed_provider(name: String, expr: Expr) -> String BudgetSpecError! {
+    key :: sema_budget_enum_key(expr) ?? return Err(sema_budget_fail(sema_budget_invalid(name, "`provider` must be one closed provider value", "use a typed provider such as `.CompilerFacts` or `.BuildArtifact(name)`", expr_span(expr))))
+    variant :: sema_budget_enum_variant(expr) ?? ""
+    named :: sema_budget_named_key(key)
+    if variant == "CompilerFacts" && named == None -> return Ok(key)
+    if named == .Val(value) {
+        if (variant == "BuildArtifact" || variant == "AllocationProbe" || variant == "BenchMeasurement" || variant == "ServiceProbe" || variant == "SceneProbe") && value.name != "" -> return Ok(key)
+        if variant == "CompilerProbe" {
+            inner :: value.name
+            edit :: inner.starts_with("Edit(") && inner.ends_with(")") && sema_budget_snake_case(sema_budget_bytes_slice(inner, 5, inner.bytes().len() - 1))
+            if inner == "Clean" || inner == "NoChange" || edit -> return Ok(key)
+        }
+    }
+    Err(sema_budget_fail(sema_budget_invalid(name, "`provider` must be one closed provider value with the required name", "use `.CompilerFacts`, `.CompilerProbe(.Clean)`, or a named provider such as `.ServiceProbe(\"api\")`", expr_span(expr))))
+}
+
+struct BudgetMetricPair { metric: String, variant: String }
+
+// The value of one enum-literal argument, positional or named.
+fn sema_budget_arg_value(arg: EnumLitArg) -> Expr Never! {
+    if arg == {
+        .Positional(value) -> value
+        .Named(_, expr) -> expr
+    }
+}
+
+fn sema_budget_closed_metric(name: String, expr: Expr) -> BudgetMetricPair BudgetSpecError! {
+    if expr == {
+        .EnumLit(_, variant, _, args, _, _, _) -> {
+            if !BUDGET_METRICS.contains(variant) -> return Err(sema_budget_fail(sema_budget_invalid(name, "`.{variant}` is not a performance metric", "use one metric from the registered performance-budget vocabulary", expr_span(expr))))
+            percentile_metric :: variant == "FrameTime" || variant == "Latency" || variant == "BenchTime" || variant == "DrawCalls" || variant == "CompileTime"
+            if percentile_metric {
+                if args.len() != 1 -> return Err(sema_budget_fail(sema_budget_invalid(name, "`.{variant}` requires exactly one percentile", "use `.P50`, `.P90`, `.P95`, `.P99`, or `.P999`", expr_span(expr))))
+                value :: sema_budget_arg_value(args[0])
+                percentile :: sema_budget_enum_variant(value) ?? return Err(sema_budget_fail(sema_budget_invalid(name, "`.{variant}` requires a typed percentile", "use `.P50`, `.P90`, `.P95`, `.P99`, or `.P999`", expr_span(value))))
+                if !BUDGET_PERCENTILES.contains(percentile) || sema_budget_enum_args(value).len() > 0 {
+                    return Err(sema_budget_fail(sema_budget_invalid(name, "`.{percentile}` is not a supported percentile", "use `.P50`, `.P90`, `.P95`, `.P99`, or `.P999`", expr_span(value))))
+                }
+                return Ok(BudgetMetricPair{metric: "{variant}({percentile})", variant: variant})
+            }
+            if args.len() > 0 -> return Err(sema_budget_fail(sema_budget_invalid(name, "`.{variant}` does not take a percentile or argument", "write `.{variant}`", expr_span(expr))))
+            return Ok(BudgetMetricPair{metric: variant, variant: variant})
+        }
+        else -> { return Err(sema_budget_fail(sema_budget_invalid(name, "`metric` must be one closed performance metric", "use a metric such as `.BinarySize` or `.Latency(.P99)`", expr_span(expr)))) }
+    }
+}
+
+fn sema_budget_closed_comparison(name: String, expr: Expr) -> BudgetComparisonFact BudgetSpecError! {
+    if expr == .EnumLit(_, variant, _, args, _, _, _) {
+        if variant == "Absolute" && args.len() == 0 -> return Ok(BudgetComparisonFact{kind: variant, baseline: None})
+        if (variant == "AbsoluteFrom" || variant == "RelativeTo") && args.len() == 1 && args[0] == .Positional(value) {
+            baseline :: sema_budget_string_value(value) ?? return Err(sema_budget_fail(sema_budget_invalid(name, "`.{variant}` requires one constant baseline name", "write a lowercase slash-separated name such as `\"ci/linux-x64\"`", expr_span(value))))
+            if !sema_budget_baseline_name(baseline) -> return Err(sema_budget_fail(sema_budget_invalid(name, "`{baseline}` is not a valid baseline name", "use nonempty slash-separated lowercase kebab-case segments", expr_span(value))))
+            return Ok(BudgetComparisonFact{kind: variant, baseline: Val(baseline)})
+        }
+        return Err(sema_budget_fail(sema_budget_invalid(name, "`comparison` must be `.Absolute`, `.AbsoluteFrom(name)`, or `.RelativeTo(name)`", "use one closed comparison variant with its exact arguments", expr_span(expr))))
+    }
+    Err(sema_budget_fail(sema_budget_invalid(name, "`comparison` must be `.Absolute`, `.AbsoluteFrom(name)`, or `.RelativeTo(name)`", "use one closed comparison variant", expr_span(expr))))
+}
+
+fn sema_budget_enum_args(expr: Expr) -> [EnumLitArg] Never! {
+    if expr == {
+        .EnumLit(_, _, _, args, _, _, _) -> args
+        else -> [EnumLitArg]{}
+    }
+}
+
+fn sema_budget_is_lower(byte: Int) -> Bool Never! { byte >= 97 && byte <= 122 }
+fn sema_budget_is_digit(byte: Int) -> Bool Never! { byte >= 48 && byte <= 57 }
+
+fn sema_budget_baseline_name(value: String) -> Bool Never! {
+    if value == "" -> return false
+    loop segment in value.split("/") {
+        if segment == "" || segment == "." || segment == ".." || segment.starts_with("-") || segment.ends_with("-") || segment.contains("--") -> return false
+        loop byte in segment.bytes() {
+            code :: Int.from_u8(byte)
+            if !(sema_budget_is_lower(code) || sema_budget_is_digit(code) || code == 45) -> return false
+        }
+    }
+    true
+}
+
+fn sema_budget_validate_scope_provider_pair(name: String, metric: String, scope: String, provider: String, span: Span) BudgetSpecError! {
+    valid :: if metric == {
+        "BinarySize" | "ArtifactSize" -> (scope == "Package" || scope.starts_with("Target(")) && provider.starts_with("BuildArtifact(")
+        "GeneratedUnsafe" | "PublicApiItems" | "DependencyCount" | "EffectCount" -> (scope == "Package" || scope.starts_with("Target(")) && provider == "CompilerFacts"
+        "CompileTime" -> scope.starts_with("Target(") && sema_budget_provider_kind(provider) == "CompilerProbe"
+        "ServiceReadiness" -> {
+            scope_key :: sema_budget_named_key(scope)
+            provider_key :: sema_budget_named_key(provider)
+            if scope_key == .Val(scope_value) && provider_key == .Val(provider_value) -> scope_value.kind == "Service" && provider_value.kind == "ServiceProbe" && scope_value.name == provider_value.name else -> false
+        }
+        else -> true
+    }
+    if !valid -> return Err(sema_budget_fail(sema_budget_invalid(name, "`{metric}` cannot use scope `{scope}` with provider `{provider}`", "choose the metric's ratified scope/provider pair", span)))
+}
+
+fn sema_budget_compile_workload_catalog(role: String, declarations: [CompileWorkloadDecl], diagnostics: &[Diagnostic]) -> [String: CompileWorkloadFact] Never! {
+    catalog := [String: CompileWorkloadFact]{}
+    loop declaration in declarations {
+        target_value :: sema_budget_string_value(declaration.target)
+        if target_value == None || !sema_budget_snake_or_kebab(target_value ?? "") {
+            &diagnostics.push(sema_budget_invalid(role, "compile workload `{declaration.name}` has an invalid target", "write a constant lowercase target name such as `target: \"cli\"`", expr_span(declaration.target)))
+            next
+        }
+        target :: target_value ?? ""
+        patch_value :: sema_budget_string_value(declaration.patch)
+        if patch_value == None || !sema_budget_safe_relative_path(patch_value ?? "") {
+            &diagnostics.push(sema_budget_invalid(role, "compile workload `{declaration.name}` has an invalid patch path", "write a project-relative patch path without `..`, a root, or a backslash", expr_span(declaration.patch)))
+            next
+        }
+        if !sema_budget_snake_case(declaration.name) {
+            &diagnostics.push(sema_budget_invalid(role, "compile workload name `{declaration.name}` is not lowercase snake_case", "name workloads with lowercase words joined by underscores", declaration.name_span))
+            next
+        }
+        duplicate :: catalog.get(declaration.name) != None
+        catalog[declaration.name] = CompileWorkloadFact{mode: "Edit", name: Val(declaration.name), target: target, patch: patch_value}
+        if duplicate -> &diagnostics.push(sema_budget_invalid(role, "compile workload `{declaration.name}` is declared more than once", "keep one declaration for each workload name", declaration.name_span))
+    }
+    catalog
+}
+
+fn sema_budget_safe_relative_path(value: String) -> Bool Never! {
+    if value == "" || value.starts_with("/") || value.contains("\\") -> return false
+    loop part in value.split("/") {
+        if part == "" || part == "." || part == ".." -> return false
+    }
+    true
+}
+
+fn sema_budget_snake_or_kebab(value: String) -> Bool Never! {
+    if value == "" -> return false
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        if !(sema_budget_is_lower(code) || sema_budget_is_digit(code) || code == 95 || code == 45) -> return false
+    }
+    true
+}
+
+fn sema_budget_provider_kind(provider: String) -> String Never! {
+    open :: provider.find("(")
+    if open < 0 -> return provider.copy()
+    sema_budget_bytes_slice(provider, 0, open)
+}
+
+fn sema_budget_provider_identity(provider: String) -> String? Never! {
+    open :: provider.find("(")
+    if open < 0 || !provider.ends_with(")") -> return None
+    Val(sema_budget_bytes_slice(provider, open + 1, provider.bytes().len() - 1))
+}
+
+struct BudgetStructLit { type_name: String, fields: [ExprField] }
+
+// A typed record literal (`BudgetApplies{...}`, `Rate{...}`): its type name
+// and written fields.
+fn sema_budget_struct_lit(expr: Expr) -> BudgetStructLit? Never! {
+    if expr == {
+        .StructLit(written_name, _, _, _, fields, _, _, _) -> { return Val(BudgetStructLit{type_name: written_name, fields: fields}) }
+        .TypedLit(head, body, _, _) -> {
+            ty :: head ?? return None
+            if body == {
+                .Fields(fields) -> { return Val(BudgetStructLit{type_name: type_name(ty), fields: fields}) }
+                .Empty -> { return Val(BudgetStructLit{type_name: type_name(ty), fields: [ExprField]{}}) }
+                else -> { return None }
+            }
+        }
+        else -> { return None }
+    }
+}
+
+fn sema_budget_parse_applicability(name: String, expr: Expr) -> BudgetApplicability BudgetSpecError! {
+    literal :: sema_budget_struct_lit(expr) ?? return Err(sema_budget_fail(sema_budget_invalid(name, "`applies` must be a typed `BudgetApplies` value", "write `applies: BudgetApplies{{ targets: ..., profiles: ... }}`", expr_span(expr))))
+    if literal.type_name != "BudgetApplies" -> return Err(sema_budget_fail(sema_budget_invalid(name, "`applies` has type `BudgetApplies`", "write `BudgetApplies{{ targets: ..., profiles: ... }}`", expr_span(expr))))
+    targets := BudgetAxis?{None}
+    profiles := BudgetAxis?{None}
+    loop field in literal.fields {
+        if field.name != "targets" && field.name != "profiles" -> return Err(sema_budget_fail(sema_budget_invalid(name, "`{field.name}` is not a BudgetApplies field", "use only `targets` and `profiles`", expr_span(field.value))))
+        axis :: sema_budget_parse_axis(name, field.name, field.value)
+        previous :: if field.name == "targets" -> targets else -> profiles
+        if field.name == "targets" -> targets = Val(axis) else -> profiles = Val(axis)
+        if previous != None -> return Err(sema_budget_fail(sema_budget_invalid(name, "`{field.name}` is written more than once", "keep one applicability value for this axis", expr_span(field.value))))
+    }
+    Ok(BudgetApplicability{targets: targets ?? BudgetAxis.Current, profiles: profiles ?? BudgetAxis.Current})
+}
+
+fn sema_budget_parse_axis(name: String, axis: String, expr: Expr) -> BudgetAxis BudgetSpecError! {
+    shape_error :: sema_budget_fail(sema_budget_invalid(name, "applicability `{axis}` must be `.Current`, `.All`, or `.Only([...])`", "use one closed applicability variant", expr_span(expr)))
+    if expr == .EnumLit(_, variant, _, args, _, _, _) {
+        if variant == "Current" && args.len() == 0 -> return Ok(BudgetAxis.Current)
+        if variant == "All" && args.len() == 0 -> return Ok(BudgetAxis.All)
+        if variant == "Only" && args.len() == 1 {
+            value :: sema_budget_arg_value(args[0])
+            values :: if value == {
+                .ListLit(elements, _, _) -> elements
+                else -> { return Err(sema_budget_fail(sema_budget_invalid(name, "applicability `{axis}` Only requires a list", "write `.Only([selector, ...])`", expr_span(value)))) }
+            }
+            if values.len() == 0 -> return Err(sema_budget_fail(sema_budget_invalid(name, "applicability `{axis}` Only list cannot be empty", "add at least one selector", expr_span(value))))
+            selectors := [String]{}
+            loop selector in values {
+                key :: if axis == "targets" -> sema_budget_target_selector(name, selector) else -> sema_budget_profile_selector(name, selector)
+                sema_budget_set_insert(&selectors, key)
+            }
+            &selectors.sort()
+            return Ok(BudgetAxis.Only{selectors: selectors})
+        }
+    }
+    Err(shape_error)
+}
+
+fn sema_budget_target_selector(name: String, expr: Expr) -> String BudgetSpecError! {
+    if expr == .EnumLit(_, variant, _, args, _, _, _) {
+        if variant == "Class" && args.len() == 1 {
+            value :: sema_budget_arg_value(args[0])
+            class :: sema_budget_enum_variant(value) ?? return Err(sema_budget_fail(sema_budget_invalid(name, "target class must be one typed class", "use `.Native`, `.Web`, `.Freestanding`, `.Plugin`, or `.OSImage`", expr_span(value))))
+            if !BUDGET_TARGET_CLASSES.contains(class) || sema_budget_enum_args(value).len() > 0 {
+                return Err(sema_budget_fail(sema_budget_invalid(name, "`.{class}` is not a target class", "use `.Native`, `.Web`, `.Freestanding`, `.Plugin`, or `.OSImage`", expr_span(value))))
+            }
+            return Ok("Class({class})")
+        }
+        if variant == "Triple" && args.len() == 1 {
+            value :: sema_budget_arg_value(args[0])
+            triple :: sema_budget_string_value(value) ?? return Err(sema_budget_fail(sema_budget_invalid(name, "target triple selector requires constant quoted text", "write `.Triple(\"x86_64-unknown-linux-gnu\")`", expr_span(value))))
+            if !sema_budget_canonical_triple(triple) -> return Err(sema_budget_fail(sema_budget_invalid(name, "`{triple}` is not a canonical target triple", "use the canonical lowercase target triple", expr_span(value))))
+            return Ok("Triple({triple})")
+        }
+    }
+    Err(sema_budget_fail(sema_budget_invalid(name, "target applicability contains a non-target selector", "use `.Class(.Native)` or `.Triple(\"canonical-triple\")`", expr_span(expr))))
+}
+
+BUDGET_BUILT_IN_PROFILES :: [String]{"dev", "release", "small", "test", "bench"}
+
+fn sema_budget_profile_selector(name: String, expr: Expr) -> String BudgetSpecError! {
+    selector_error :: sema_budget_fail(sema_budget_invalid(name, "profile applicability contains a non-profile selector", "use `.Dev`, `.Release`, `.Small`, `.Test`, `.Bench`, or `.Named(\"profile\")`", expr_span(expr)))
+    if expr == .EnumLit(_, variant, _, args, _, _, _) {
+        if (variant == "Dev" || variant == "Release" || variant == "Small" || variant == "Test" || variant == "Bench") && args.len() == 0 -> return Ok(variant)
+        if variant == "Named" && args.len() == 1 {
+            value :: sema_budget_arg_value(args[0])
+            profile :: sema_budget_string_value(value) ?? return Err(sema_budget_fail(sema_budget_invalid(name, "named profile selector requires constant quoted text", "write `.Named(\"lowercase_snake_case\")`", expr_span(value))))
+            built_in := false
+            loop item in BUDGET_BUILT_IN_PROFILES {
+                if sema_budget_ascii_lower(profile) == item -> built_in = true
+            }
+            if !sema_budget_snake_case(profile) || built_in -> return Err(sema_budget_fail(sema_budget_invalid(name, "`{profile}` is not a legal named profile", "use a declared lowercase_snake_case profile distinct from built-ins", expr_span(value))))
+            return Ok("Named({profile})")
+        }
+    }
+    Err(selector_error)
+}
+
+// ASCII lowercase of `value` (Rust `eq_ignore_ascii_case` against a
+// lowercase literal).
+fn sema_budget_ascii_lower(value: String) -> String Never! {
+    bytes := [U8]{}
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        &bytes.push(if code >= 65 && code <= 90 -> U8{code + 32} else -> byte)
+    }
+    String.from_bytes_lossy(bytes)
+}
+
+fn sema_budget_canonical_triple(value: String) -> Bool Never! {
+    parts :: value.split("-").to_list()
+    if parts.len() < 3 -> return false
+    loop part in parts {
+        if part == "" -> return false
+    }
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        if !(sema_budget_is_lower(code) || sema_budget_is_digit(code) || code == 95 || code == 45) -> return false
+    }
+    true
+}
+
+fn sema_budget_required(map: [String: BudgetFieldEntry], field: String, span: Span) -> BudgetFieldEntry BudgetSpecError! {
+    entry :: map.get(field) ?? return Err(sema_budget_fail(sema_budget_invalid("entry", "every Budget requires `{field}`", "add `{field}: ...`", span)))
+    Ok(entry)
+}
+
+fn sema_budget_enum_variant(expr: Expr) -> String? Never! {
+    if expr == {
+        .EnumLit(_, variant, _, _, _, _, _) -> Val(variant)
+        else -> None
+    }
+}
+
+// The canonical key of a closed enum value: `Variant` or
+// `Variant(arg,...)` with quoted text unquoted and nested enums keyed.
+fn sema_budget_enum_key(expr: Expr) -> String? Never! {
+    if expr == .EnumLit(_, variant, _, args, _, _, _) {
+        if args.len() == 0 -> return Val(variant)
+        rendered := [String]{}
+        loop arg in args {
+            value :: sema_budget_arg_value(arg)
+            if value == {
+                .Str(_, _, _) -> &rendered.push(sema_budget_string_value(value) ?? return None)
+                .EnumLit(_, _, _, _, _, _, _) -> &rendered.push(sema_budget_enum_key(value) ?? return None)
+                else -> { return None }
+            }
+        }
+        return Val("{variant}({rendered.join(",")})")
+    }
+    None
+}
+
+// The largest unsigned 128-bit value, the range of every normalized limit.
+fn sema_budget_u128_max() -> Int Never! {
+    max := 1
+    loop _ in 0..<128 -> max = max * 2
+    max - 1
+}
+
+// A nonnegative decimal digit string within the unsigned 128-bit range.
+fn sema_budget_parse_u128(text: String) -> Int? Never! {
+    if text == "" -> return None
+    loop byte in text.bytes() {
+        if !sema_budget_is_digit(Int.from_u8(byte)) -> return None
+    }
+    value :: Int.parse(text) ?? return None
+    if value > sema_budget_u128_max() -> return None
+    Val(value)
+}
+
+// `left * right` within the unsigned 128-bit range.
+fn sema_budget_checked_mul(left: Int, right: Int) -> Int? Never! {
+    product :: left * right
+    if product > sema_budget_u128_max() -> return None
+    Val(product)
+}
+
+fn sema_budget_normalize_limit(name: String, metric: String, limit: String, expr: Expr) -> BudgetLimitFact BudgetSpecError! {
+    args :: sema_budget_enum_args(expr)
+    value :: if args.len() == 1 && args[0] == .Positional(written) -> written else -> { return Err(sema_budget_fail(sema_budget_invalid(name, "`.{limit}` requires exactly one positional value", "write `.{limit}(value)`", expr_span(expr)))) }
+    if limit == "RegressionAtMost" || limit == "ImprovementAtLeast" {
+        percent :: sema_budget_normalize_percent(value) ?? return Err(sema_budget_fail(sema_budget_invalid(name, "relative limits use the `pct` unit with at most two decimal places", "write a percent such as `3pct` or `0.25pct`", expr_span(value))))
+        return Ok(BudgetLimitFact{kind: limit, quantity: BudgetQuantity.PercentBasisPoints{value: percent.basis_points}, raw: percent.raw})
+    }
+    if metric == "Throughput" {
+        rate :: sema_budget_normalize_rate(name, value)
+        return Ok(BudgetLimitFact{kind: limit, quantity: rate.quantity, raw: rate.raw})
+    }
+    allowed :: if {
+        metric == "BinarySize" || metric == "ArtifactSize" || metric == "AllocationBytes" || metric == "MemoryHighWater" || metric == "SceneAssetBytes" -> [String]{"B", "KiB", "MiB", "GiB"}
+        metric == "StartupTime" || metric == "FrameTime" || metric == "Latency" || metric == "BenchTime" || metric == "ServiceReadiness" || metric == "CompileTime" -> [String]{"ns", "us", "ms", "s"}
+        else -> [String]{}
+    }
+    if allowed.len() == 0 {
+        count_error :: sema_budget_fail(sema_budget_invalid(name, "this metric uses a nonnegative Count value", "write a nonnegative integer", expr_span(value)))
+        if value == .Int(count, _, _, _, _) {
+            if count < 0 || count > sema_budget_u128_max() -> return Err(count_error)
+            return Ok(BudgetLimitFact{kind: limit, quantity: BudgetQuantity.Count{value: count}, raw: BudgetRawQuantity.Scalar{digits: "{count}", suffix: None}})
+        }
+        return Err(count_error)
+    }
+    unit_error :: sema_budget_fail(sema_budget_invalid(name, "`{metric}` requires one of these units: {allowed.join(", ")}", "write the limit with a {allowed[0]} suffix", expr_span(value)))
+    if value == .UnitLit(raw, _, _, suffix, _, _, _) {
+        if !allowed.contains(suffix) -> return Err(unit_error)
+        multiplier :: sema_budget_unit_scale(suffix) ?? panic("allowed normalized unit")
+        range_error :: sema_budget_fail(sema_budget_invalid(name, "limit value is not a nonnegative integer in range", "write a nonnegative whole value that fits the normalized unit", expr_span(value)))
+        whole :: sema_budget_parse_u128(raw) ?? return Err(range_error)
+        base :: sema_budget_checked_mul(whole, multiplier) ?? return Err(range_error)
+        bytes :: suffix == "B" || suffix == "KiB" || suffix == "MiB" || suffix == "GiB"
+        quantity :: if bytes -> BudgetQuantity.Bytes{value: base} else -> BudgetQuantity.DurationNs{value: base}
+        return Ok(BudgetLimitFact{kind: limit, quantity: quantity, raw: BudgetRawQuantity.Scalar{digits: raw, suffix: Val(suffix)}})
+    }
+    Err(unit_error)
+}
+
+struct BudgetPercent { basis_points: Int, raw: BudgetRawQuantity }
+
+fn sema_budget_digits(text: String) -> Bool Never! {
+    loop byte in text.bytes() {
+        if !sema_budget_is_digit(Int.from_u8(byte)) -> return false
+    }
+    true
+}
+
+fn sema_budget_normalize_percent(value: Expr) -> BudgetPercent? Never! {
+    if value == .UnitLit(raw, _, _, suffix, _, _, _) {
+        if suffix != "pct" -> return None
+        parts :: raw.split(".").to_list()
+        if parts.len() > 2 -> return None
+        whole_text :: parts[0].copy()
+        fraction :: if parts.len() == 2 -> parts[1].copy() else -> ""
+        if fraction.bytes().len() > 2 || whole_text == "" || !sema_budget_digits(whole_text) || !sema_budget_digits(fraction) -> return None
+        whole :: sema_budget_checked_mul(sema_budget_parse_u128(whole_text) ?? return None, 100) ?? return None
+        fraction_points :: if fraction.bytes().len() == {
+            0 -> 0
+            1 -> sema_budget_checked_mul(sema_budget_parse_u128(fraction) ?? return None, 10) ?? return None
+            else -> sema_budget_parse_u128(fraction) ?? return None
+        }
+        total :: whole + fraction_points
+        if total > sema_budget_u128_max() -> return None
+        return Val(BudgetPercent{basis_points: total, raw: BudgetRawQuantity.Scalar{digits: raw, suffix: Val(suffix)}})
+    }
+    None
+}
+
+struct BudgetRate { quantity: BudgetQuantity, raw: BudgetRawQuantity }
+
+fn sema_budget_normalize_rate(name: String, value: Expr) -> BudgetRate BudgetSpecError! {
+    literal :: sema_budget_struct_lit(value) ?? return Err(sema_budget_fail(sema_budget_invalid(name, "Throughput limits use `Rate{{ count: Int, per: Duration }}`", "write a rate such as `Rate{{ count: 100, per: 1s }}`", expr_span(value))))
+    if literal.type_name != "Rate" -> return Err(sema_budget_fail(sema_budget_invalid(name, "Throughput limits use the `Rate` value family", "write `Rate{{ count: 100, per: 1s }}`", expr_span(value))))
+    count := Expr?{None}
+    per := Expr?{None}
+    loop field in literal.fields {
+        if field.name != "count" && field.name != "per" -> return Err(sema_budget_fail(sema_budget_invalid(name, "`{field.name}` is not a Rate field", "use exactly `count` and `per`", expr_span(field.value))))
+        previous :: if field.name == "count" -> count else -> per
+        if field.name == "count" -> count = Val(field.value) else -> per = Val(field.value)
+        if previous != None -> return Err(sema_budget_fail(sema_budget_invalid(name, "Rate `{field.name}` is written more than once", "keep one value for each Rate field", expr_span(field.value))))
+    }
+    count_expr :: count ?? return Err(sema_budget_fail(sema_budget_invalid(name, "Rate requires `count`", "add `count: <nonnegative integer>`", expr_span(value))))
+    per_expr :: per ?? return Err(sema_budget_fail(sema_budget_invalid(name, "Rate requires `per`", "add `per: <positive duration>`", expr_span(value))))
+    count_error :: sema_budget_fail(sema_budget_invalid(name, "Rate count must be a nonnegative integer", "write `count: 100`", expr_span(count_expr)))
+    count_value := 0
+    count_raw := ""
+    if count_expr == .Int(written, _, _, raw, _) && raw == .Val(text) {
+        if written < 0 || written > sema_budget_u128_max() -> return Err(count_error)
+        count_value = written
+        count_raw = text
+    } else {
+        return Err(count_error)
+    }
+    if per_expr == .UnitLit(per_raw, _, _, suffix, _, _, _) {
+        duration_unit :: suffix == "ns" || suffix == "us" || suffix == "ms" || suffix == "s"
+        unit_error :: sema_budget_fail(sema_budget_invalid(name, "Rate per must use ns, us, ms, or s", "write `per: 1s`", expr_span(per_expr)))
+        multiplier :: if duration_unit -> sema_budget_unit_scale(suffix) ?? return Err(unit_error) else -> { return Err(unit_error) }
+        positive_error :: sema_budget_fail(sema_budget_invalid(name, "Rate per must normalize to a positive Duration", "write a positive whole duration", expr_span(per_expr)))
+        per_ns :: sema_budget_checked_mul(sema_budget_parse_u128(per_raw) ?? return Err(positive_error), multiplier) ?? return Err(positive_error)
+        if per_ns <= 0 -> return Err(positive_error)
+        divisor :: sema_budget_gcd(count_value, per_ns)
+        return Ok(BudgetRate{quantity: BudgetQuantity.Rate{numerator: count_value /% divisor, denominator_ns: per_ns /% divisor}, raw: BudgetRawQuantity.Rate{count_digits: count_raw, per_digits: per_raw, per_suffix: suffix}})
+    }
+    Err(sema_budget_fail(sema_budget_invalid(name, "Rate per must be a positive Duration", "write `per: 1s`", expr_span(per_expr))))
+}
+
+fn sema_budget_gcd(left: Int, right: Int) -> Int Never! {
+    a := left
+    b := right
+    loop b != 0 {
+        remainder :: a % b
+        a = b
+        b = remainder
+    }
+    if a > 1 -> a else -> 1
+}
+
+fn sema_budget_string_value(expr: Expr) -> String? Never! {
+    if expr == .Str(parts, _, _) && parts.len() == 1 && parts[0] == .Lit(value) -> return Val(value)
+    None
+}
+
+fn sema_budget_snake_case(value: String) -> Bool Never! {
+    if value == "" || value.ends_with("_") || value.contains("__") -> return false
+    loop (index, byte) in value.bytes() {
+        code :: Int.from_u8(byte)
+        if !(sema_budget_is_lower(code) || (sema_budget_is_digit(code) && index > 0) || (code == 95 && index > 0)) -> return false
+    }
+    true
+}

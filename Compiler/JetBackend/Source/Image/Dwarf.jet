@@ -1,10 +1,10 @@
 // DWARF 5 debug information and `.eh_frame` call frame information for the
 // relocatable object (Image/Object.jet), so gdb and lldb can break on a
 // source line, step, show source, unwind and print a native program's
-// parameters and locals. Lowering records the source facts (LIR.jet "Debug
-// facts"); instruction selection records where each line's code starts,
-// the frame's call frame instructions and each variable's location ranges
-// (Select.jet X64FunctionDebug). This file only encodes them:
+// parameters and locals. The code generator records the source facts and,
+// per compiled function, where each line's code starts, the frame's call
+// frame instructions and each variable's location ranges (Emission.jet
+// X64ObjectModule, X64FunctionDebug). This file only encodes them:
 //
 // - `.eh_frame`: one CIE (CFA = rsp + 8, return address at CFA - 8) and one
 //   FDE per function with the function's call frame instructions. The
@@ -12,7 +12,7 @@
 //   the startup object registers the table, so the runtime's unwinder and
 //   debuggers both walk through Jet frames.
 // - `.debug_abbrev`, `.debug_info`: one compile unit covering `.text`; the
-//   types of LIRModuleDebug.types; one subprogram per function (frame base
+//   types of X64ModuleDebug.types; one subprogram per function (frame base
 //   rbp) with its parameters and variables, each located by a location list.
 //   Generated functions (glue, helpers, `main`) are artificial subprograms.
 // - `.debug_line`: one sequence per function with source lines; the row at
@@ -23,12 +23,12 @@
 // Addresses and section offsets in the other sections are relocations
 // against section symbols, so any ELF linker can place the sections.
 
-use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition]
+use jet_foundation.[CompilerThreads, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition]
 
-ELF64_R_X86_64_32 :: prep { 10 }
+ELF64_R_X86_64_32 :: 10
 
 // x86-64 DWARF register numbers by hardware register number.
-X64_DWARF_REGISTERS :: prep { [Int]{0, 2, 1, 3, 7, 6, 4, 5, 8, 9, 10, 11, 12, 13, 14, 15} }
+X64_DWARF_REGISTERS :: [Int]{0, 2, 1, 3, 7, 6, 4, 5, 8, 9, 10, 11, 12, 13, 14, 15}
 
 fn x64_dwarf_register(reg: Int) -> Int Never! {
     if reg >= 16 -> return reg + 1
@@ -88,7 +88,10 @@ fn dwarf_string(bytes: &[U8], text: String) Never! {
 }
 
 fn dwarf_patch_u32(bytes: &[U8], at: Int, value: Int) Never! {
-    loop k in 0..<4 -> bytes[at + k] = U8{(value >> (8 * k)).bit_and(255)}
+    bytes[at] = U8{value.bit_and(255)}
+    bytes[at + 1] = U8{(value >> 8).bit_and(255)}
+    bytes[at + 2] = U8{(value >> 16).bit_and(255)}
+    bytes[at + 3] = U8{(value >> 24).bit_and(255)}
 }
 
 // The 4-byte length field at `at`: the bytes after it, to the end.
@@ -196,56 +199,56 @@ fn dwarf_eh_frame(sections: &X64DwarfSections, functions: [X64CompiledFunction],
 // ---------------------------------------------------------------------------
 // Abbreviations.
 
-DWARF_ABBREV_UNIT :: prep { 1 }
-DWARF_ABBREV_BASE :: prep { 2 }
-DWARF_ABBREV_POINTER :: prep { 3 }
-DWARF_ABBREV_VOID_POINTER :: prep { 4 }
-DWARF_ABBREV_STRUCT :: prep { 5 }
-DWARF_ABBREV_MEMBER :: prep { 6 }
-DWARF_ABBREV_UNION :: prep { 7 }
-DWARF_ABBREV_ENUM :: prep { 8 }
-DWARF_ABBREV_ENUMERATOR :: prep { 9 }
-DWARF_ABBREV_TYPEDEF :: prep { 10 }
-DWARF_ABBREV_OPAQUE :: prep { 11 }
-DWARF_ABBREV_SUBPROGRAM :: prep { 12 }
-DWARF_ABBREV_GENERATED :: prep { 13 }
-DWARF_ABBREV_PARAMETER :: prep { 14 }
-DWARF_ABBREV_VARIABLE :: prep { 15 }
-DWARF_ABBREV_PARAMETER_UNLOCATED :: prep { 16 }
-DWARF_ABBREV_VARIABLE_UNLOCATED :: prep { 17 }
-DWARF_ABBREV_ANONYMOUS_UNION :: prep { 18 }
+DWARF_ABBREV_UNIT :: 1
+DWARF_ABBREV_BASE :: 2
+DWARF_ABBREV_POINTER :: 3
+DWARF_ABBREV_VOID_POINTER :: 4
+DWARF_ABBREV_STRUCT :: 5
+DWARF_ABBREV_MEMBER :: 6
+DWARF_ABBREV_UNION :: 7
+DWARF_ABBREV_ENUM :: 8
+DWARF_ABBREV_ENUMERATOR :: 9
+DWARF_ABBREV_TYPEDEF :: 10
+DWARF_ABBREV_OPAQUE :: 11
+DWARF_ABBREV_SUBPROGRAM :: 12
+DWARF_ABBREV_GENERATED :: 13
+DWARF_ABBREV_PARAMETER :: 14
+DWARF_ABBREV_VARIABLE :: 15
+DWARF_ABBREV_PARAMETER_UNLOCATED :: 16
+DWARF_ABBREV_VARIABLE_UNLOCATED :: 17
+DWARF_ABBREV_ANONYMOUS_UNION :: 18
 
 // Attribute names and forms.
-DW_AT_LOCATION :: prep { 0x02 }
-DW_AT_NAME :: prep { 0x03 }
-DW_AT_BYTE_SIZE :: prep { 0x0b }
-DW_AT_STMT_LIST :: prep { 0x10 }
-DW_AT_LOW_PC :: prep { 0x11 }
-DW_AT_HIGH_PC :: prep { 0x12 }
-DW_AT_LANGUAGE :: prep { 0x13 }
-DW_AT_COMP_DIR :: prep { 0x1b }
-DW_AT_CONST_VALUE :: prep { 0x1c }
-DW_AT_PRODUCER :: prep { 0x25 }
-DW_AT_ARTIFICIAL :: prep { 0x34 }
-DW_AT_DATA_MEMBER_LOCATION :: prep { 0x38 }
-DW_AT_DECL_FILE :: prep { 0x3a }
-DW_AT_DECL_LINE :: prep { 0x3b }
-DW_AT_DECLARATION :: prep { 0x3c }
-DW_AT_ENCODING :: prep { 0x3e }
-DW_AT_EXTERNAL :: prep { 0x3f }
-DW_AT_FRAME_BASE :: prep { 0x40 }
-DW_AT_TYPE :: prep { 0x49 }
-DW_FORM_ADDR :: prep { 0x01 }
-DW_FORM_DATA2 :: prep { 0x05 }
-DW_FORM_DATA8 :: prep { 0x07 }
-DW_FORM_STRING :: prep { 0x08 }
-DW_FORM_DATA1 :: prep { 0x0b }
-DW_FORM_SDATA :: prep { 0x0d }
-DW_FORM_UDATA :: prep { 0x0f }
-DW_FORM_REF4 :: prep { 0x13 }
-DW_FORM_SEC_OFFSET :: prep { 0x17 }
-DW_FORM_EXPRLOC :: prep { 0x18 }
-DW_FORM_FLAG_PRESENT :: prep { 0x19 }
+DW_AT_LOCATION :: 0x02
+DW_AT_NAME :: 0x03
+DW_AT_BYTE_SIZE :: 0x0b
+DW_AT_STMT_LIST :: 0x10
+DW_AT_LOW_PC :: 0x11
+DW_AT_HIGH_PC :: 0x12
+DW_AT_LANGUAGE :: 0x13
+DW_AT_COMP_DIR :: 0x1b
+DW_AT_CONST_VALUE :: 0x1c
+DW_AT_PRODUCER :: 0x25
+DW_AT_ARTIFICIAL :: 0x34
+DW_AT_DATA_MEMBER_LOCATION :: 0x38
+DW_AT_DECL_FILE :: 0x3a
+DW_AT_DECL_LINE :: 0x3b
+DW_AT_DECLARATION :: 0x3c
+DW_AT_ENCODING :: 0x3e
+DW_AT_EXTERNAL :: 0x3f
+DW_AT_FRAME_BASE :: 0x40
+DW_AT_TYPE :: 0x49
+DW_FORM_ADDR :: 0x01
+DW_FORM_DATA2 :: 0x05
+DW_FORM_DATA8 :: 0x07
+DW_FORM_STRING :: 0x08
+DW_FORM_DATA1 :: 0x0b
+DW_FORM_SDATA :: 0x0d
+DW_FORM_UDATA :: 0x0f
+DW_FORM_REF4 :: 0x13
+DW_FORM_SEC_OFFSET :: 0x17
+DW_FORM_EXPRLOC :: 0x18
+DW_FORM_FLAG_PRESENT :: 0x19
 
 // One abbreviation: code, DIE tag, whether it has children, then
 // (attribute, form) pairs.
@@ -297,7 +300,7 @@ fn dwarf_abbrevs() -> [U8] Never! {
 // ---------------------------------------------------------------------------
 // Types.
 
-fn dwarf_encoding(encoding: LIRDebugEncoding) -> Int Never! {
+fn dwarf_encoding(encoding: X64DebugEncoding) -> Int Never! {
     if encoding == {
         .Signed -> 0x05
         .Unsigned -> 0x07
@@ -314,7 +317,7 @@ fn dwarf_type_ref(info: &[U8], refs: &[Int], rows: &[Int], row: Int) Never! {
     elf64_u32(&info, 0)
 }
 
-fn dwarf_members(info: &[U8], refs: &[Int], rows: &[Int], members: [LIRDebugMember]) Never! {
+fn dwarf_members(info: &[U8], refs: &[Int], rows: &[Int], members: [X64DebugMember]) Never! {
     loop member in members {
         if member.ty < 0 -> next
         dwarf_uleb(&info, DWARF_ABBREV_MEMBER)
@@ -326,7 +329,7 @@ fn dwarf_members(info: &[U8], refs: &[Int], rows: &[Int], members: [LIRDebugMemb
 }
 
 // Every type DIE, in row order; returns each row's DIE offset.
-fn dwarf_types(info: &[U8], types: [LIRDebugType]) -> [Int] Never! {
+fn dwarf_types(info: &[U8], types: [X64DebugType]) -> [Int] Never! {
     offsets := [Int]{}
     refs := [Int]{}
     rows := [Int]{}
@@ -529,10 +532,10 @@ fn dwarf_section_offset(bytes: &[U8], relas: &[X64ObjectRela], symbol: Int, adde
 }
 
 // The source facts of compiled function `function` (`main` has none).
-fn dwarf_function_debug(program: LIRModule, function: X64CompiledFunction) -> LIRFunctionDebug Never! {
+fn dwarf_function_debug(program: X64ObjectModule, function: X64CompiledFunction) -> X64FunctionSource Never! {
     id :: function.id.value
-    if id < 0 || id >= program.functions.len() -> return lir_function_debug_none()
-    program.functions[id].debug
+    if id < 0 || id >= program.functions.len() -> return x64_function_source_none()
+    program.functions[id]
 }
 
 // The compile unit of `.debug_info` and the `.debug_loclists` it refers to:
@@ -545,7 +548,7 @@ fn dwarf_function_debug(program: LIRModule, function: X64CompiledFunction) -> LI
 // relocation's offset by the info bytes before its part and the loclists
 // offsets (the relocations against `symbols.loclists`) by the loclists
 // bytes before it, so the sections are those of the one-thread loop.
-fn dwarf_info(sections: &X64DwarfSections, program: LIRModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], text_size: Int, symbols: X64DwarfSymbols, threads: CompilerThreads) Never! {
+fn dwarf_info(sections: &X64DwarfSections, program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], text_size: Int, symbols: X64DwarfSymbols, threads: CompilerThreads) Never! {
     info := [U8]{}
     relas := [X64ObjectRela]{}
     lists := [U8]{}
@@ -591,15 +594,17 @@ fn dwarf_info(sections: &X64DwarfSections, program: LIRModule, functions: [X64Co
         loop part in 0..<(bounds.len() - 1) -> &parts.push(shared DwarfInfoPart{start: bounds[part], end: bounds[part + 1], outputs: [DwarfInfoRows]{}})
         _ := dwarf_info_parts(inputs, parts, 0) ?? panic("the DWARF info threads failed")
         loop part in parts {
-            rows := dwarf_info_part_take(part)
+            rows :: dwarf_info_part_take(part)
             info_base :: info.len()
             lists_base :: lists.len()
             loop rela in rows.relas {
                 addend :: if rela.symbol == symbols.loclists -> rela.addend + lists_base else -> rela.addend
                 &relas.push(X64ObjectRela{at: rela.at + info_base, symbol: rela.symbol, kind: rela.kind, addend: addend})
             }
-            &info.extend(compiler_take_rows<U8>(&rows.info))
-            &lists.extend(compiler_take_rows<U8>(&rows.lists))
+            // Bytes append as one block copy; popping them out one by one
+            // (compiler_take_rows) grew the target per byte.
+            &info.extend(rows.info)
+            &lists.extend(rows.lists)
         }
     }
     dwarf_uleb(&info, 0)
@@ -619,7 +624,7 @@ DWARF_INFO_MIN_WEIGHT_PER_THREAD :: 400
 // the compiled functions, their debug rows and offsets, the type DIE
 // offsets and the section symbols; read only.
 struct DwarfInfoShared {
-    program: LIRModule
+    program: X64ObjectModule
     functions: [X64CompiledFunction]
     debug: [X64FunctionDebug]
     offsets: [Int]
@@ -684,7 +689,7 @@ fn dwarf_info_part_take(part: Shared<DwarfInfoPart>) -> DwarfInfoRows {
 // located variable, its location list in `lists` referred to by a
 // relocation against `symbols.loclists` whose addend is the list's offset
 // in `lists`.
-fn dwarf_info_function(info: &[U8], relas: &[X64ObjectRela], lists: &[U8], program: LIRModule, function: X64CompiledFunction, debug: X64FunctionDebug, offset: Int, type_offsets: [Int], symbols: X64DwarfSymbols) Never! {
+fn dwarf_info_function(info: &[U8], relas: &[X64ObjectRela], lists: &[U8], program: X64ObjectModule, function: X64CompiledFunction, debug: X64FunctionDebug, offset: Int, type_offsets: [Int], symbols: X64DwarfSymbols) Never! {
     facts :: dwarf_function_debug(program, function)
     if facts.file < 0 {
         dwarf_uleb(&info, DWARF_ABBREV_GENERATED)
@@ -734,7 +739,7 @@ fn dwarf_info_function(info: &[U8], relas: &[X64ObjectRela], lists: &[U8], progr
     dwarf_uleb(&info, 0)
 }
 
-fn dwarf_line(sections: &X64DwarfSections, program: LIRModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], symbols: X64DwarfSymbols) Never! {
+fn dwarf_line(sections: &X64DwarfSections, program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], symbols: X64DwarfSymbols) Never! {
     line := [U8]{}
     relas := [X64ObjectRela]{}
     elf64_u32(&line, 0)
@@ -754,7 +759,7 @@ fn dwarf_line(sections: &X64DwarfSections, program: LIRModule, functions: [X64Co
     dwarf_uleb(&line, 1)
     dwarf_string(&line, if program.debug.directory == "" -> "." else -> program.debug.directory)
     // Files: (path, string), (directory index, udata). File 0 is the
-    // primary source file; file i + 1 is LIRModuleDebug.files[i].
+    // primary source file; file i + 1 is X64ModuleDebug.files[i].
     paths :: program.debug.files
     dwarf_u8(&line, 2)
     dwarf_uleb(&line, 1)
@@ -815,13 +820,16 @@ fn dwarf_line(sections: &X64DwarfSections, program: LIRModule, functions: [X64Co
 
 // The debug and unwind sections for `functions` (placed at `offsets` in a
 // `.text` of `text_size` bytes; debug[i] belongs to functions[i]); the
-// subprograms of `.debug_info` on the threads `threads` admits.
-fn x64_dwarf_sections(program: LIRModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], text_size: Int, symbols: X64DwarfSymbols, threads: CompilerThreads) -> X64DwarfSections Never! {
+// subprograms of `.debug_info` on the threads `threads` admits. With
+// `debug_info` false only `.eh_frame` is built; the DWARF sections stay empty.
+fn x64_dwarf_sections(program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], text_size: Int, symbols: X64DwarfSymbols, threads: CompilerThreads, debug_info: Bool) -> X64DwarfSections Never! {
     sections := X64DwarfSections{
-        eh_frame: [U8]{}, eh_relas: [X64ObjectRela]{}, abbrev: dwarf_abbrevs(), info: [U8]{}, info_relas: [X64ObjectRela]{},
+        eh_frame: [U8]{}, eh_relas: [X64ObjectRela]{}, abbrev: [U8]{}, info: [U8]{}, info_relas: [X64ObjectRela]{},
         line: [U8]{}, line_relas: [X64ObjectRela]{}, loclists: [U8]{},
     }
     dwarf_eh_frame(&sections, functions, debug, offsets, symbols)
+    if !debug_info -> return sections
+    sections.abbrev = dwarf_abbrevs()
     dwarf_info(&sections, program, functions, debug, offsets, text_size, symbols, threads)
     dwarf_line(&sections, program, functions, debug, offsets, symbols)
     sections

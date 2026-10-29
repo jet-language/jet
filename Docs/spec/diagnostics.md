@@ -3,13 +3,13 @@
 This page is the contract for user-facing diagnostics and their projections. It
 covers registry ownership, terminal/LSP/machine rendering, the no-OS E3301
 contract, and the checks for changing a diagnostic. The canonical source is
-`crates/jet-codegen/src/Prelude/Diagnostics.jet`; executable checks include
+`Compiler/Prelude/Diagnostics.jet`; executable checks include
 `tests/cross.rs`, `tests/ui/`, and `tests/diagnostics_coverage.rs`.
 
 ## One registry, many projections
 
 Each row in
-[`Diagnostics.jet`](../../crates/jet-codegen/src/Prelude/Diagnostics.jet) owns
+[`Diagnostics.jet`](../../Compiler/Prelude/Diagnostics.jet) owns
 its stable code, stage, severity, timing, What/Why/Fix templates, named holes,
 and structured-fix metadata. Preserve the code and its meaning when changing a
 row. The Foundation embeds this source as `Registry::DIAGNOSTIC_SOURCE` and
@@ -107,6 +107,17 @@ boundaries deliver that report and preserve its status; they do not classify
 the fault from its prose. An unresolved diagnostic row remains a host defect
 with status 101.
 
+A native program's fatal signal is reported the same way under `jet run` and
+`jet build`. The handler runs on a per-thread alternate stack, so an exhausted
+stack is reported too. A SIGSEGV within the guard region below the stack
+pointer is a stack overflow: `Stop [E3012]` names the Jet function and its
+source line and exits 70. Any other SIGSEGV, SIGBUS, SIGILL or SIGFPE prints
+`Fault [SIGNAME]: invalid memory access at address 0x…` (or the signal's own
+reason) and a backtrace of the Jet frames (`name at file:line`, from the
+image's DWARF). It then re-raises the signal with its default action, so the
+status is the signal's (128 + number in a shell). Addresses other than the
+faulting one are not printed, because they differ between the two tiers.
+
 ## Machine reports and causes
 
 The canonical machine envelope is `jet.report/v3`. Its `cause` array is
@@ -155,21 +166,22 @@ More: jet-lang.dev/e/E3301
 `tests/cross.rs` compiles the same `fs.read` fixture with
 `compile_no_os`, checks E3301 and the `no-OS` wording, and compares the
 byte-exact rendered output. The registry row is E3301 in
-`crates/jet-codegen/src/Prelude/Diagnostics.jet`; the no-OS compilation path is
-`Source/lib.rs::compile_no_os`. Hosted and no-OS behavior therefore share the
-same diagnostic renderer while the target rule remains explicit.
+`Compiler/Prelude/Diagnostics.jet`; the checker raises it from the no-OS target
+environment in `Compiler/JetSema/Source/Sema/Calls/Core.jet`. Hosted and no-OS
+behavior therefore share the same diagnostic renderer while the target rule
+remains explicit.
 
 ## Explain and website output
 
 `jet explain <CODE>` resolves the same registry rows offline through
-[`Explain`](../../crates/jet-cli/src/Explain.rs). The website is another
+[`Explain.jet`](../../Compiler/JetCli/Source/Cli/Explain.jet). The website is another
 projection of that data: [`Docs/site/generate.jet`](../site/generate.jet) writes
 the error index and [`tests/diagnostic_pages.rs`](../../tests/diagnostic_pages.rs)
 renders each code page from registry rows and snapshots. Neither CLI help nor a
 website page is an alternate diagnostic catalog.
 
 `jet explain <token>` answers a sigil or operator from the syntax dictionary
-([`dictionary.rs`](../../crates/jet-foundation/src/Syntax/dictionary.rs)) in
+([`SyntaxDictionaryData.jet`](../../Compiler/JetCli/Source/Cli/SyntaxDictionaryData.jet)) in
 plain words: every meaning by position (`^` before a name moves it; between two
 numbers it raises to a power), an example for each, what happens afterwards, and
 related codes. The REPL `?` and LSP hover show the same text. The registry
@@ -201,11 +213,10 @@ new diagnostic or change compiler semantics.
 
 ### Running and blessing snapshots
 
-Build the Jet test runner once with `jet build --release Tools/testkit/run.jet`. From
-the checkout root, run the reported artifact as `testkit ui --jet <compiler>`
-to compare UI and lint snapshots; use `--filter <repo-relative-name>` for a
-focused selection, and `--results <file>` for machine-readable verdicts.
-`testkit ui --coverage --jet <compiler>` checks independently derived emitted
+From the checkout root, `JET=<compiler> jet test Tools/testkit "suite ui"` compares
+UI and lint snapshots; `TESTKIT_ARGS="--filter <repo-relative-name>"` focuses the
+selection, and `JET_CI_EVIDENCE_DIR=<dir>` writes machine-readable verdicts to
+`<dir>/ui.json`. `TESTKIT_ARGS=--coverage` checks independently derived emitted
 and rendered code sets, owned exclusions in
 `tests/diagnostics_coverage_allowlist.tsv` (lowering-only ceiling: 152), and
 the exact per-plane repair counts in `tests/diagnostics_coverage_baseline.txt`.
@@ -227,7 +238,7 @@ capability are `REFUSED`, never silently converted to ordinary checks.
 After reviewing a compiler change, bless only the affected fixture:
 
 ```sh
-testkit ui --jet <compiler> --bless tests/ui/example.jet
+TESTKIT_ARGS="--bless tests/ui/example.jet" JET=<compiler> jet test Tools/testkit "suite ui"
 ```
 
 Blessing creates or updates that fixture's snapshot from actual tool output.
@@ -240,7 +251,7 @@ Expected files are read-only in ordinary runs.
 ## Latency and runtime-query boundaries
 
 D-DEV3 is a wall-clock promise: a save gives diagnostic feedback in well under
-200ms. `tests/dev_latency.rs` measures `Examples/features/collections/wordcount.jet`
+200ms. `Compiler/JetLSP/Tests/Integration/DevLatencyTests.jet` measures `Examples/features/collections/wordcount.jet`
 with `BUDGET_MS: u128 = 200`, uses five timed rounds after warm-up, and keeps
 watch coalescing below 5ms with idle polling at most 10ms. This is the user
 latency contract, not a claim that every machine has one fixed runtime.
@@ -280,7 +291,7 @@ block switching within the existing read/write loan contract.
 Compiler comparisons against an already-bound optional ID or interpolated
 symbol use parenthesized value expressions, not capture patterns. Decision
 hashing passes byte ranges as `View<U8>` and projects only runtime-part variants
-present in the canonical MIR inventory.
+present in the canonical runtime inventory.
 
 Prepared host Shared transfers validate the borrowed tree before committing
 the owner alias. After that commit, adoption updates the original carrier
@@ -294,19 +305,10 @@ into a separate program owner restore their empty moved fields before the
 remaining carrier is borrowed again.
 
 Boolean values returned by `Never!` helpers consume their checked failure
-carrier before entering logical joins. MIR Phi inputs must retain matching
-drop obligations; recursive write views of trait-owning enum/list values do
-not relax that invariant. `compiler_host_owner_write_view.jet` is lowered and
-validated by the bootstrap regression, which checks plain Bool Phi inputs.
+carrier before entering logical joins.
 
-An internal checked-TIR lowering failure preserves its underlying reason and
+An internal IR build failure preserves its underlying reason and
 source-byte span in the existing ICE report and exits 101 under I2.
-
-Borrowed enum payload bindings over checked list indexes remain rooted in
-their stable collection owner. Rust emission references the selected element's
-payload instead of cloning it; the existing owner-invalidation rules still
-govern the view. The recursive noncopy-owner regression compiles and executes
-the generated Rust in addition to validating MIR.
 
 An exhaustive value-form Result dispatch checks its subject once, including
 when coverage visits an `.Err` arm before an `.Ok` arm. The ordinary condition
@@ -344,7 +346,7 @@ retired DataTree Rust type is not restored as an alias.
 
 Source-hook capability queries snapshot only the type identity, key and span
 before a write-access call on the owning emission context. The hook lookup does
-not require copying a full MIR type definition or its field/variant lists, and
+not require copying a full type definition or its field/variant lists, and
 the checked program rows remain unchanged.
 
 Manifestless script binding searches keep first-match root, entry-file and

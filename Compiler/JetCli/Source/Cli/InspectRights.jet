@@ -14,44 +14,14 @@ use jet_driver.[
     JET_DRIVER_EXIT_OK,
 ]
 use jet_foundation.[
+    AUTHORITY_AMBIENT_BASIC_EFFECTS,
+    EFFECT_VOCABULARY_LEAVES,
+    EFFECT_VOCABULARY_ROWS,
     EffectRowEntry,
     Func,
     Item,
     Span,
 ]
-
-// Effects.rs `EFFECT_DECLARATIONS`: the Prelude effect declarations in
-// source order, with their irreversibility.
-struct JetCLIEffectDeclaration {
-    name: String
-    irreversible: Bool
-}
-
-JET_CLI_EFFECT_DECLARATIONS :: [JetCLIEffectDeclaration]{
-    {name: "Net", irreversible: true},
-    {name: "FS", irreversible: false},
-    {name: "FS.Read", irreversible: false},
-    {name: "FS.Write", irreversible: true},
-    {name: "IO", irreversible: false},
-    {name: "DB", irreversible: false},
-    {name: "Time", irreversible: false},
-    {name: "Rand", irreversible: false},
-    {name: "Env", irreversible: false},
-    {name: "Exec", irreversible: true},
-    {name: "Log", irreversible: false},
-    {name: "GPU", irreversible: false},
-    {name: "FFI", irreversible: true},
-    {name: "Browser", irreversible: false},
-    {name: "Secret", irreversible: false},
-}
-
-// Syntax.rs `BUILTIN_EFFECT_LEAVES`.
-JET_CLI_BUILTIN_EFFECT_LEAVES :: [String]{
-    "DB.Read", "DB.Write", "FS.Read", "FS.Write", "Rand.Draw", "Exec.Exit", "Exec.Args", "Time.Wait",
-    "FFI.Go", "FFI.Java", "FFI.DotNet", "FFI.Fortran", "FFI.Cobol", "FFI.Tcl", "FFI.Lua", "FFI.Ada",
-    "FFI.Pascal", "FFI.Dart", "FFI.PowerShell", "FFI.Perl", "FFI.Ruby", "FFI.Php", "FFI.R", "FFI.Com",
-    "FFI.C", "FFI.Cpp", "FFI.Asm", "FFI.Py", "FFI.Octave",
-}
 
 // sema.rs `RightsProvenance`.
 struct JetCLIRightsProvenance {
@@ -105,15 +75,11 @@ fn jet_cli_rights_normalize(rights: [String]) -> [String] Never! {
 
 // sema.rs `expand_leaves`: each right with every known leaf it covers.
 fn jet_cli_rights_expand(rights: [String]) -> [String] Never! {
-    leaves := JET_CLI_BUILTIN_EFFECT_LEAVES
-    loop declaration in JET_CLI_EFFECT_DECLARATIONS {
-        if declaration.name.contains(".") -> &leaves.push(declaration.name)
-    }
     expanded := [String]{}
     loop right in rights {
         canonical :: jet_cli_parse_right(right) ?? right.trim()
         &expanded.push(canonical)
-        loop leaf in leaves {
+        loop leaf in EFFECT_VOCABULARY_LEAVES {
             if jet_cli_right_covers(canonical, leaf) -> &expanded.push(leaf)
         }
     }
@@ -248,16 +214,19 @@ fn jet_cli_rights_declared(view: JetCLICallableView) -> JetCLIRightsRow Never! {
 
 // The bundle's `package_guarantees.application_authority` (Loader.rs
 // `package_guarantees_for_manifest` over Authority.rs `from_policy`): a
-// manifest's written `authority.holds` rows under `<manifest> authority.holds`
-// (no beginner floor), else the application default; `required` is the
-// entry's solved effect row.
+// manifest's written `authority` rows under `<manifest> authority`, its allow
+// row added to the beginner floor (D-AUTH-AMBIENT3=A), else the application
+// default; `required` is the entry's solved effect row.
 fn jet_cli_rights_authority(result: JetDriverCompileResult) -> JetCLIAuthority Never! {
     authority := jet_cli_application_authority(result, None)
-    policy :: result.authority_policy ?? JetDriverAuthorityPolicy{manifest_path: None, allow: None, deny: None}
+    policy :: result.authority_policy ?? JetDriverAuthorityPolicy{manifest_path: None, inline_package: false, allow: None, deny: None}
     if policy.manifest_path == .Val(manifest) {
-        authority.granted = jet_cli_policy_effects(policy.allow ?? [String]{})
+        granted := [String]{}
+        loop right in AUTHORITY_AMBIENT_BASIC_EFFECTS -> &granted.push(right)
+        loop right in jet_cli_policy_effects(policy.allow ?? [String]{}) -> &granted.push(right)
+        authority.granted = jet_cli_sorted_set(granted)
         authority.denied = jet_cli_policy_effects(policy.deny ?? [String]{})
-        authority.authority = "{manifest} authority.holds"
+        authority.authority = "{manifest} authority"
     }
     authority
 }
@@ -356,7 +325,7 @@ fn jet_cli_inspect_rights(result: JetDriverCompileResult, project: Bool, target:
     text := "rights\nscope: {scope_name}\ntarget: {target}\nevidence: checked_static\nruntime observation: not_run\nprovenance scope: checked_semantic_index\n"
     text = "{text}authority: {application.authority}\ngranted: {jet_cli_rights_text(application.granted)}\ndenied: {jet_cli_rights_text(application.denied)}\nauthority facts:\n"
     facts := [JetCLIStatusValue]{}
-    loop declaration in JET_CLI_EFFECT_DECLARATIONS {
+    loop declaration in EFFECT_VOCABULARY_ROWS {
         marker :: if declaration.irreversible -> " (irreversible)" else -> ""
         text = "{text}  {declaration.name}{marker}\n"
         &facts.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(declaration.name)), jet_cli_status_field("irreversible", jet_cli_status_bool(declaration.irreversible))}))

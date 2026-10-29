@@ -11,7 +11,7 @@ import { dirname, join } from 'node:path';
 import { collectDigest, decisionState, parseNameStatus, parseWorktrees, queryMatcher, renderText,
   subjectRows, workingFingerprint } from './jet-state.mjs';
 import { normalize } from '../tower/app/store.mjs';
-import { readLedger } from './lexical-ledger.mjs';
+import { readLedger, SYNTAX } from './lexical-ledger.mjs';
 import { render, transcript } from '../../.agents/skills/mine-for-jet-v2/scripts/transcript.mjs';
 
 const sha = value => createHash('sha256').update(value).digest('hex');
@@ -31,13 +31,13 @@ function fixture(t) {
   git('init', '-b', 'master'); git('config', 'user.name', 'Fixture'); git('config', 'user.email', 'fixture@example.invalid');
   file('memory.jet', '// memory model initial\n'); file('delete-memory.jet', '// memory deleted\n');
   file('neutral.jet', '// unrelated initial\n');
-  file('crates/jet-foundation/src/Syntax.rs', 'pub const LEXICAL_LEDGER: &[LexicalEntry] = &[\n    LexicalEntry { spelling: "borrow", meaning: "memory model borrow", decision: "D-MEM" },\n];\n');
+  file(SYNTAX, 'LEXICAL_LEDGER :: [LexicalEntry]{\n    { spelling: "borrow", meaning: "memory model borrow", decision: "D-MEM" },\n}\n');
   file('Docs/research/memory.md', '# Memory model\n\nMechanism: https://example.org/paper?edition=2#evaluation\n');
   file('Docs/proposals/build.md', '# Build system\n\nUnratified packaging proposal.\n');
   const state = stateOf([card(1, 'ready')], [decision('D-MEM', 'c1')]);
   file('.tower/tower.json', JSON.stringify(state));
   // Only enumerated fixture files are staged, never broad user checkout operations.
-  git('add', 'memory.jet', 'delete-memory.jet', 'neutral.jet', 'crates/jet-foundation/src/Syntax.rs',
+  git('add', 'memory.jet', 'delete-memory.jet', 'neutral.jet', SYNTAX,
     'Docs/research/memory.md', 'Docs/proposals/build.md', '.tower/tower.json');
   git('commit', '-m', 'fixture'); git('branch', 'dev');
   return { root, file, git, state };
@@ -170,7 +170,7 @@ test('dirty file content changes alter freshness fingerprint even when XY status
 });
 test('missing dev and unsupported registry form are unknown, not empty current facts', t => {
   const f = fixture(t); f.git('branch', '-D', 'dev');
-  f.file('crates/jet-foundation/src/Syntax.rs', 'pub const LEXICAL_LEDGER: &[LexicalEntry] = &[\n LexicalEntry { spelling: computed(), meaning: "memory", decision: "D-MEM" },\n];\n');
+  f.file(SYNTAX, 'LEXICAL_LEDGER :: [LexicalEntry]{\n    { spelling: computed(), meaning: "memory", decision: "D-MEM" },\n}\n');
   const digest = collectDigest({ root: f.root, subject: 'memory' });
   assert.equal(digest.providers.development_branch.status, 'unknown');
   assert.equal(digest.providers.syntax.status, 'unknown'); assert.deepEqual(digest.idioms, []);

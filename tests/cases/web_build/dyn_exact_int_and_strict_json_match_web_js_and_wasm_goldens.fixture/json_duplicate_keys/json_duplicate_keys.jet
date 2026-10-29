@@ -1,0 +1,73 @@
+// Duplicate JSON object names (D-CORE-JSON-DUP1=A). `parse`, typed `decode`,
+// and `reader` reject a repeated name with its path and position.
+// `parse_allow_duplicates` is the named opt-in that keeps the later value, and
+// `reader_allow_duplicates` reports every occurrence as its own events.
+use core.encoding as encoding
+use core.encoding.json as json
+
+struct CountRecord {
+    count: Int
+}
+
+fn kind_name(kind: encoding.EncodingErrorKind) -> String {
+    if kind == encoding.EncodingErrorKind.Syntax -> return "Syntax"
+    "other"
+}
+
+fn event_name(event: DataEvent) -> String {
+    if event == {
+        .ObjectStart -> return "object start"
+        .ObjectEnd -> return "object end"
+        .Key(name) -> return "key {name}"
+        .Int(n) -> return "int {n}"
+        else -> return "other"
+    }
+    "other"
+}
+
+fn strict_parse(text: String) {
+    tree :: json.parse(text) ?? {
+        line :: err.line ?? 0
+        column :: err.column ?? 0
+        print("parse: {kind_name(err.kind)} at `{err.path}` line {line} column {column}: {err.reason}")
+        return
+    }
+    print("parse: unexpectedly accepted {json.canonical(tree) ?? panic("canonical")}")
+}
+
+fn strict_decode(text: String) {
+    record :: json.decode<CountRecord>(text) ?? {
+        print("decode<CountRecord>: rejected")
+        return
+    }
+    print("decode<CountRecord>: unexpectedly accepted {record.count}")
+}
+
+fn strict_reader(text: String) {
+    events := json.reader(text)
+    first :: &events.next() ?? {
+        line :: err.line ?? 0
+        column :: err.column ?? 0
+        print("reader: {kind_name(err.kind)} at `{err.path}` line {line} column {column}: {err.reason}")
+        return
+    }
+    print("reader: unexpectedly started with {event_name(first)}")
+}
+
+fn allow_reader(text: String) {
+    events := json.reader_allow_duplicates(text)
+    loop _ in 0..<6 {
+        event :: &events.next() ?? panic("allowed events")
+        print("allow reader: {event_name(event)}")
+    }
+}
+
+fn run() {
+    text :: "{{\"count\":2,\"count\":3}}"
+    strict_parse(text)
+    strict_decode(text)
+    strict_reader(text)
+    later :: json.parse_allow_duplicates(text) ?? panic("allowed parse")
+    print("allow parse: {json.canonical(later) ?? panic("canonical")}")
+    allow_reader(text)
+}

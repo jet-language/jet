@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 // Native Jet consumers link against musl: glibc's fortified entry points are
 // not part of that platform ABI. Scope the policy to this C compiler child.
-// The policy rows live once in Compiler/JetCli/Assets/native-c-policy.tsv;
-// the Jet CLI embeds the same rows (Compiler/Bootstrap/generate-native-c-policy.mjs).
+// The policy rows live once in Compiler/JetCli/Source/Cli/native-c-policy.tsv;
+// the Jet CLI embeds the same file while the compiler builds (NativeCPolicy.jet).
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const nativeCCompiler = fileURLToPath(import.meta.url);
-export const nativeCPolicyPath = resolve(dirname(nativeCCompiler), '../../Compiler/JetCli/Assets/native-c-policy.tsv');
+export const nativeCPolicyPath = resolve(dirname(nativeCCompiler), '../../Compiler/JetCli/Source/Cli/native-c-policy.tsv');
 
 export function parseNativeCPolicy(text) {
   const flags = [], hardeningRemoved = [];
@@ -38,9 +38,15 @@ export function nativeCEnvironment(environment = process.env) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === nativeCCompiler) {
+  // This wrapper must never reach itself again: a CC that names this file (or
+  // a `cc` on PATH that resolves back here) would fork without bound.
+  if (process.env.JET_NATIVE_C_WRAPPER_ACTIVE === '1') {
+    process.stderr.write('native-c-compiler: CC resolves back to this wrapper; set CC to a real C compiler\n');
+    process.exit(2);
+  }
   const compiler = process.env.CC ?? 'cc';
   const result = spawnSync(compiler, [...process.argv.slice(2), ...nativeCFlags], {
-    env: nativeCEnvironment(), stdio: 'inherit',
+    env: { ...nativeCEnvironment(), JET_NATIVE_C_WRAPPER_ACTIVE: '1' }, stdio: 'inherit',
   });
   if (result.error) throw result.error;
   if (result.signal) process.kill(process.pid, result.signal);

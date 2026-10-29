@@ -55,7 +55,7 @@ fn load_table_page(state: WebTableState) -> WebTablePage<Row> WebTableError! {
 }
 
 fn store_select(value: Int) -> Int { value + 1 }
-fn store_selected(value: Int) -> Unit { print(value) }
+fn store_selected(value: Int) { print(value) }
 
 fn app_surface() {
     live :: web.live("users", "[alice,bob]")
@@ -185,44 +185,41 @@ fn form_surface() {
 fn table_surface() {
     source :: rows()
     plain := table.new("Rows", source)
-    keyed := table.new_keyed("KeyedRows", source, row_key)
-    id_column :: table.column("id", "Int", row_key)
-    name_column :: table.column("name", "String", row_name)
-    active_column :: table.column("active", "Bool", row_active)
-    with_id := table.with_column(&keyed, id_column)
-    with_name := table.with_column(&with_id, name_column)
-    configured := table.with_column(&with_name, active_column)
+    configured := table.new_keyed("KeyedRows", source, row_key)
+    table.with_column(&configured, table.column("id", "Int", r -> row_key(r)))
+    table.with_column(&configured, table.column("name", "String", ^row_name))
+    table.with_column(&configured, table.column("active", "Bool", ^row_active))
     _state :: table.state(configured)
     _facts :: table.facts(configured)
     _keys :: table.keys(configured)
-    _sorted :: table.sort_by(&configured, "id", .Ascending)
-    filtered := table.filter_by(&configured, "active", "true")
-    paged := table.paginate(&filtered, 0, 2)
-    _page_state :: table.page_state(paged)
-    _page :: table.page_state(paged)
-    _server :: table.with_server_page(&paged, load_table_page)
+    table.sort_by(&configured, "id", .Ascending)
+    table.filter_by(&configured, "active", "true")
+    table.paginate(&configured, 0, 2)
+    _page_state :: table.page_state(configured)
+    table.first_page(&configured)
+    table.next_page(&configured)
+    _last :: table.last_page(&configured)
 
-    _set_rows :: table.set_rows(&configured, source)
-    selected :: table.set_selected(&configured, "1", true)
-    toggled :: table.toggle_selection(&configured, "2")
-    focused :: table.focus(&configured, "1")
-    _clear_focus :: table.clear_focus(&configured)
-    _focused_key :: table.focused_key(focused)
-    _clear_selection :: table.clear_selection(&configured)
-    _selected_keys :: table.selected_keys(selected)
-    _selected_rows :: table.selected_rows(selected)
+    _rows_set :: table.set_rows(&configured, source)
+    _selected :: table.set_selected(&configured, "1", true)
+    _toggled :: table.toggle_selection(&configured, "2")
+    _focused :: table.focus(&configured, "1")
+    _focused_key :: table.focused_key(configured)
+    _selected_keys :: table.selected_keys(configured)
+    _selected_rows :: table.selected_rows(configured)
+    table.clear_focus(&configured)
+    table.clear_selection(&configured)
     _inserted :: table.insert_row(&configured, Row{id: 4, name: "New", active: true})
     _replaced :: table.replace_row(&configured, "1", Row{id: 1, name: "Ada Prime", active: true})
     _updated :: table.update_row(&configured, "2", updated_row)
     _removed :: table.remove_row(&configured, "3")
-    _first :: table.first_page(&paged)
-    _next :: table.next_page(&paged)
-    _last :: table.last_page(&paged)
+    table.with_server_page(&configured, ^load_table_page)
+    _server_page :: table.page_state(configured)
 
     // Receiver syntax is intentionally shown next to the module calls.
-    receiver_with_column := &plain.with_column(id_column)
-    receiver_paged :: &receiver_with_column.paginate(0, 2)
-    _receiver_page :: receiver_paged.page()
+    &plain.with_column(table.column("id", "Int", r -> row_key(r)))
+    &plain.paginate(0, 2)
+    _receiver_page :: plain.page()
 }
 
 fn virtual_surface() {

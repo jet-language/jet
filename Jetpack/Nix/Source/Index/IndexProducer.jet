@@ -2,8 +2,13 @@
 // binary and the fixtures): join a differential Nix oracle with the channel's
 // build inventory, emit the canonical index, its compressed target, the
 // coverage report, and the canonical channel manifest.
+use jet_pkg_model.[
+    pkg_json_bool, pkg_json_object, pkg_json_render, pkg_json_texts, pkg_sha256_hex,
+    pkg_text_has_control,
+]
+use jetpack_nix_eval.[nixeval_key_ordered, nixeval_sorted]
 
-NIX_INDEX_COVERAGE_SCOPE :: prep { "off-device packages-info.nix inventory only; overlays, overrides, user Nix config, custom flakes, custom package sets, local inputs, and impure evaluation are outside the denominator" }
+NIX_INDEX_COVERAGE_SCOPE :: "off-device packages-info.nix inventory only; overlays, overrides, user Nix config, custom flakes, custom package sets, local inputs, and impure evaluation are outside the denominator"
 
 // One oracle record and whether its outputs were admitted by the cache.
 struct NixIndexOracleCandidate {
@@ -33,7 +38,7 @@ fn nix_index_generated_document(channel: String, revision: String, system: Strin
 fn nix_index_parse_oracle_for_producer(bytes: [U8], system: String, revision: String) -> [NixIndexOracleCandidate] NixIndexError! {
     nix_index_validate_revision(revision)
     text :: String.from_bytes(bytes) ?? return Err(NixIndexError.Invalid("oracle output is not UTF-8"))
-    value :: json.parse(text, limits: nix_index_json_limits()) ?? return Err(NixIndexError.Invalid("parse oracle JSON: {err.reason}"))
+    value :: nix_index_parse_json(text, "parse oracle JSON")
     map :: pkg_json_object(value) ?? return Err(NixIndexError.Invalid("oracle output must be an object with revision, system, and records"))
     nix_index_reject_unknown(map, [String]{"revision", "system", "records"})
     if nix_index_string_field(map, "revision") != revision -> return Err(NixIndexError.Invalid("oracle has the wrong pinned revision"))
@@ -170,9 +175,9 @@ fn nix_index_generation_report(decoded: [U8], compressed: [U8], document: NixInd
     loop record in document.records -> output_count += record.outputs.len()
     pkg_json_render(Dyn.Object([
         "schema": Dyn.Int(1),
-        "channel": Dyn.Text(document.channel),
-        "revision": Dyn.Text(document.revision),
-        "system": Dyn.Text(document.system),
+        "channel": Dyn.Text(document.channel.copy()),
+        "revision": Dyn.Text(document.revision.copy()),
+        "system": Dyn.Text(document.system.copy()),
         "released_unix": Dyn.Int(document.released_unix),
         "compressed_bytes": Dyn.Int(compressed.len()),
         "decoded_bytes": Dyn.Int(decoded.len()),

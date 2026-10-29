@@ -4,7 +4,7 @@ import { nativeRecordExports, partitionNativeRecordExports } from '../../../Tool
 import { classifyNativeInventory } from '../../../Tools/agent/classify-native-route-glue.mjs';
 
 const types = Array.from({ length: 10 }, (_, index) => {
-  const key = `<corelib>/Core/fixture::Core/fixture/fixture.jet::Record${index}`;
+  const key = `<corelib>/core.fixture::Record${index}`;
   return { runtime: `Record${index}`, jetName: key, source: { key, path: 'Core/fixture/fixture.jet' },
     record: { kind: 'struct', members: [{ name: 'value', kind: ['Text', 'Int', 'Flag', 'Float', 'Tag.Color', 'Rec.Record0', 'OptText', 'OptInt', 'List.Byte', 'Entries.Rec.Record0'][index] }] } };
 });
@@ -33,7 +33,7 @@ assert.throws(() => nativeRecordExports([{ ...types[0], record: { kind: 'struct'
 assert.throws(() => nativeRecordExports([{ ...types[0], record: { kind: 'struct', members: [{ name: 'bad', kind: null }] } }]), /no carrier/);
 
 const source = types.map((type, index) => `pub struct Record${index} { value: Int }`).join('\n');
-const routes = types.map((type) => `LowerRuntimeHandle{jet_name: "${type.jetName}", runtime: "${type.runtime}"},\nLowerRecordSchema{jet_name: "${type.runtime}", variants: "", fields: "value=Int"},`).join('\n') + '\nLowerRuntimeHandle{jet_name: "RustOnly", runtime: "RustOnly"},';
+const routes = types.map((type) => `IRRuntimeHandle{jet_name: "${type.jetName}", runtime: "${type.runtime}"},\nLowerRecordSchema{jet_name: "${type.runtime}", variants: "", fields: "value=Int"},`).join('\n') + '\nLowerRuntimeHandle{jet_name: "RustOnly", runtime: "RustOnly"},';
 const inventory = 'symbol\tlayer\n' + descriptors.map((row) => `${row.name}\tcabi-glue`).join('\n') + '\njet_rt_handle_drop_rust_only\tcabi-glue\n';
 const report = classifyNativeInventory(inventory, routes, (path) => path === 'Core/fixture/fixture.jet' ? source : null);
 assert.equal(report.counts.types, 11);

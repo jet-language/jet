@@ -1,0 +1,57 @@
+package {
+    name: "memory_shared_compound_places"
+    version: "0.1.0"
+    authority: { allow: [IO, Mem.Alloc, Mem.Rc, Time.Wait] }
+}
+// Every projection below a shared cell writes its payload in one locked step.
+struct Counter { hits: Int }
+struct Storage {
+    items: [String: String]
+    numbers: [Int]
+    nested: Counter
+    records: [String: Counter]
+}
+
+fn show(store: Shared<Storage>) {
+    print("{store.items.get("a") ?? "missing"} {store.items.len()}")
+    print(store.numbers.get(0) ?? -1)
+    print(store.nested.hits)
+    record :: store.records.get("a") ?? Counter{hits: -1}
+    print(record.hits)
+}
+
+fn run() {
+    store :: shared Storage{
+        items: [String: String]{},
+        numbers: [1, 2],
+        nested: Counter{hits: 0},
+        records: [String: Counter]{},
+    }
+    store.items["a"] = "dark"
+    store.numbers[0] = 7
+    store.nested.hits += 3
+    store.records["a"] = Counter{hits: 4}
+    store.records["a"].hits += 2
+    store.records["a"].hits -= 1
+    show(store)
+    #Transact {
+        store.items["a"] = "light"
+        store.items["b"] = "extra"
+        store.numbers[0] = 9
+        store.nested.hits -= 1
+        store.records["a"] = Counter{hits: 8}
+        store.records["a"].hits += 3
+        store.records["a"].hits -= 1
+    }
+    show(store)
+    store.guard_edit().value.items["d"] = "temporary"
+    store.guard_edit().value.numbers[1] = 13
+    store.guard_edit().value.nested.hits += 4
+    guard :: store.guard_edit()
+    guard.value.items["c"] = "guard"
+    guard.value.numbers[1] = 11
+    guard.value.nested.hits += 1
+    print(guard.value.items.len())
+    print(guard.value.numbers.get(1) ?? -1)
+    print(guard.value.nested.hits)
+}

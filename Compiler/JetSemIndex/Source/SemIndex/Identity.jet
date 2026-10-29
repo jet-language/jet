@@ -3,9 +3,9 @@
 // CP-NAMES owns generated display projections and checked reference anchors.
 // Presentation replacement never changes an identity or a definition span.
 use jet_foundation.[
-    MIRNameFacts, Span, TraitMethodSig,
-    name_facts_canonical_paths, name_facts_display_path,
-    name_facts_reference, name_facts_declaration, name_facts_semantic_identity,
+    NameFacts,
+    Span,
+    TraitMethodSig,
 ]
 use jet_sema.[SemaCompilerModuleSource, SemaRegistrationGraph]
 
@@ -73,7 +73,7 @@ fn semindex_origin_label(origin: MemberOrigin) -> String Never! {
 
 // Build.rs:514–572: all replacements are collected before presentation mutates.
 // CP-NAMES owns canonical_paths/display_path and their checked producer.
-fn semindex_project_generated_presentation(db: &SymbolDB, registration: SemaRegistrationGraph, names: MIRNameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
+fn semindex_project_generated_presentation(db: &SymbolDB, registration: SemaRegistrationGraph, names: NameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
     projections := [Int:[SemIndexPresentationReplacement]]{}
     sources :: semindex_loaded_source_rows_by_path(module_sources, loaded_module_rows)
     loop source_index in loaded_module_rows {
@@ -104,7 +104,7 @@ fn semindex_project_generated_presentation(db: &SymbolDB, registration: SemaRegi
 
 // Build.rs:998–1043: checked anchors only; no spelling-based target resolution.
 // The prefix reuses S5's one DB/state and explicit canonical names input.
-fn semindex_scoped_ref(db: SymbolDB, ctx: WalkCtx, names: MIRNameFacts, name: String, span: Span, module_path: String) -> SymRef Never! {
+fn semindex_scoped_ref(db: SymbolDB, ctx: WalkCtx, names: NameFacts, name: String, span: Span, module_path: String) -> SymRef Never! {
     target := DefinitionAnchor?{None}
     checked_path :: names.modules[ctx.module_idx].path
     if name_facts_reference(names, checked_path, span.start, span.end) == .Val(reference) {
@@ -112,7 +112,7 @@ fn semindex_scoped_ref(db: SymbolDB, ctx: WalkCtx, names: MIRNameFacts, name: St
     }
     SymRef{name: name, span: span, module_path: module_path, scope_identity: Val(semindex_active_scope(ctx)), target: target, fact: CompilerFact.from_member(name)}
 }
-fn semindex_declaration_ref(db: SymbolDB, ctx: WalkCtx, names: MIRNameFacts, name: String, span: Span, module_path: String) -> SymRef Never! {
+fn semindex_declaration_ref(db: SymbolDB, ctx: WalkCtx, names: NameFacts, name: String, span: Span, module_path: String) -> SymRef Never! {
     target := DefinitionAnchor?{None}
     if name_facts_declaration(names, ctx.module_idx, name) == .Val(declaration) {
         declaration_module := module_path

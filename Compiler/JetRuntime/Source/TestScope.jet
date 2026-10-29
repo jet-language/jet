@@ -5,12 +5,13 @@
 // Strings in rows are owned E4; arguments are borrowed; take transfers ownership.
 
 // Five-byte stop codes as little-endian words, compared and written raw.
-TEST_SCOPE_E3001 :: prep { I64{211261862725} }
-TEST_SCOPE_E3010 :: prep { I64{206983672645} }
-TEST_SCOPE_E3011 :: prep { I64{211278639941} }
-TEST_SCOPE_R0801 :: prep { I64{211262386258} }
-TEST_SCOPE_R0802 :: prep { I64{215557353554} }
-TEST_SCOPE_R0803 :: prep { I64{219852320850} }
+TEST_SCOPE_E3001 :: I64{211261862725}
+TEST_SCOPE_E3010 :: I64{206983672645}
+TEST_SCOPE_E3011 :: I64{211278639941}
+TEST_SCOPE_E2805 :: I64{228442255941}
+TEST_SCOPE_R0801 :: I64{211262386258}
+TEST_SCOPE_R0802 :: I64{215557353554}
+TEST_SCOPE_R0803 :: I64{219852320850}
 
 fn test_scope_clone(text: I64) -> I64 {
     if (text == I64{0}) -> I64{0} else -> test_text_clone(text)
@@ -113,6 +114,15 @@ fn test_scope_state_drop(state: I64) {
     if (state != I64{0}) -> test_scope_failure_clear(state)
 }
 
+// The thread's test state while a testing failure is pending, else 0. The
+// pair stays at state+120/+128 until the next record, clear, or state drop.
+fn test_scope_pending_failure() -> I64 {
+    state :: test_capture_state()
+    if (state == I64{0}) -> return I64{0}
+    if (trap_word(state + I64{120}) == I64{0}) -> return I64{0}
+    state
+}
+
 // Rust Core.rs:718-727.
 #Export(c) fn jet_rt_test_expect_fail_enter_scope(scope: I64, expected: I64, expected_message: I64) {
     state :: test_state_ensure()
@@ -189,11 +199,13 @@ fn test_scope_record_raw_stop(code_word: I64, code_length: I64, message: I64, le
     }
 }
 
-// trap_header numbering: 0 E3001, 1 E3010, 2 E3011 (little-endian words).
+// trap_header numbering: 0 E3001, 1 E3010, 2 E3011; 3 is the host stop
+// E2805 (little-endian words).
 fn test_scope_record_coded_stop(code: I64, message: I64, length: I64) {
     word :: if {
         (code == I64{0}) -> TEST_SCOPE_E3001
         (code == I64{1}) -> TEST_SCOPE_E3010
+        (code == I64{3}) -> TEST_SCOPE_E2805
         else -> TEST_SCOPE_E3011
     }
     test_scope_record_raw_stop(word, I64{5}, message, length)

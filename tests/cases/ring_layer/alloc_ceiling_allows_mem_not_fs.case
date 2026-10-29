@@ -1,0 +1,10 @@
+# tests/ring_layer.rs::alloc_ceiling_allows_mem_not_fs at tests/ring_layer.rs:153; hand-port
+# assert_eq!(bundle.inferred_layer, Alloc) reads a loader bundle field with no CLI projection; this case keeps the E1006 assertion.
+fixture: alloc_ceiling_allows_mem_not_fs.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet check run.jet
+exit: any # the original asserts no exit status
+stderr: !~ "E1006" # tests/ring_layer.rs:172 mem import allowed under the alloc ceiling

@@ -1,5 +1,38 @@
 // Compile-time values retained on AST nodes and semantic projections.
 
+// The compiler stage at which a checked fact becomes available; distinct from
+// the language execution phase `$phase` returns.
+enum CompilerStage {
+    Parsed
+    Resolved
+    Typed
+    Prepared
+    Emitted
+}
+
+COMPILER_STAGE_ALL :: comptime { [CompilerStage]{
+    CompilerStage.Parsed, CompilerStage.Resolved, CompilerStage.Typed,
+    CompilerStage.Prepared, CompilerStage.Emitted
+} }
+
+fn compiler_stage_as_str(stage: CompilerStage) -> String Never! {
+    if stage == {
+        .Parsed -> "Parsed"
+        .Resolved -> "Resolved"
+        .Typed -> "Typed"
+        .Prepared -> "Prepared"
+        .Emitted -> "Emitted"
+    }
+}
+
+// What a metadata producer owes: an unavailable producer never becomes a
+// default value.
+enum MetadataProducerStatus {
+    ContractOnly
+    NotImplemented
+    ExistingCallableProducerNeedsExtension
+}
+
 enum CtFloat {
     F32(value: Float)
     F64(value: Float)
@@ -201,7 +234,7 @@ struct ComptimeNameSite {
 
 // Rust jet-comptime `walk_calls`: every direct `Call` name in an expression
 // tree, in visit order (shallow over lambda and `#Impure` bodies, crossing
-// `prep` blocks; `WalkOpts::PLAIN`).
+// `comptime` blocks; `WalkOpts::PLAIN`).
 fn comptime_walk_calls(expr: Expr) -> [ComptimeNameSite] Never! {
     sites := [ComptimeNameSite]{}
     ast_comptime_walk_expr(expr, true, &sites)
@@ -221,42 +254,42 @@ fn comptime_walk_identifiers(expr: Expr) -> [ComptimeNameSite] Never! {
 // node kind (Call names, else Ident reads).
 fn ast_comptime_walk_expr(expr: Expr, calls: Bool, sites: &[ComptimeNameSite]) Never! {
     if expr == {
-        .Ident(name, span) -> {
+        .Ident(name, span, _) -> {
             if !calls -> &sites.push(ComptimeNameSite{name: name, span: span})
         }
-        .Call(call) -> {
+        .Call(call, _) -> {
             if calls -> &sites.push(ComptimeNameSite{name: call.name, span: call.name_span})
             loop arg in call.args -> ast_comptime_walk_expr(arg.expr, calls, &sites)
         }
-        .Str(parts, _) -> {
+        .Str(parts, _, _) -> {
             loop part in parts {
                 if part == .Interp(inner, _) -> ast_comptime_walk_expr(inner, calls, &sites)
             }
         }
-        .ListLit(items, _) -> loop item in items -> ast_comptime_walk_expr(item, calls, &sites)
-        .CompareChain(operands, _, _, _) -> loop item in operands -> ast_comptime_walk_expr(item, calls, &sites)
-        .MemberSpread(base, _, _) -> ast_comptime_walk_expr(base, calls, &sites)
-        .Spread(inner, _) | .Unary(_, inner, _) | .Deref(inner, _) | .RawOf(inner, _) | .Copy(inner, _) | .Place(inner, _, _) | .Field(inner, _, _) | .Tainted(inner, _, _) | .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) | .Paren(inner, _) -> ast_comptime_walk_expr(inner, calls, &sites)
-        .Try(inner, _, _, note) -> {
+        .ListLit(items, _, _) -> loop item in items -> ast_comptime_walk_expr(item, calls, &sites)
+        .CompareChain(operands, _, _, _, _) -> loop item in operands -> ast_comptime_walk_expr(item, calls, &sites)
+        .MemberSpread(base, _, _, _) -> ast_comptime_walk_expr(base, calls, &sites)
+        .Spread(inner, _, _) | .Unary(_, inner, _, _) | .Deref(inner, _, _) | .RawOf(inner, _, _) | .Copy(inner, _, _) | .Place(inner, _, _, _) | .Field(inner, _, _, _) | .Tainted(inner, _, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .Paren(inner, _, _) -> ast_comptime_walk_expr(inner, calls, &sites)
+        .Try(inner, _, _, note, _) -> {
             ast_comptime_walk_expr(inner, calls, &sites)
             if note == .Val(context) -> ast_comptime_walk_expr(context, calls, &sites)
         }
-        .OptField(base, _, _, _, _) -> ast_comptime_walk_expr(base, calls, &sites)
-        .Range(start, end, _, _) -> {
+        .OptField(base, _, _, _, _, _) -> ast_comptime_walk_expr(base, calls, &sites)
+        .Range(start, end, _, _, _) -> {
             ast_comptime_walk_expr(start, calls, &sites)
             ast_comptime_walk_expr(end, calls, &sites)
         }
-        .MapLit(entries, _) -> {
+        .MapLit(entries, _, _) -> {
             loop entry in entries {
                 ast_comptime_walk_expr(entry.key, calls, &sites)
                 ast_comptime_walk_expr(entry.value, calls, &sites)
             }
         }
-        .Index(base, index, _, _) -> {
+        .Index(base, index, _, _, _) -> {
             ast_comptime_walk_expr(base, calls, &sites)
             ast_comptime_walk_expr(index, calls, &sites)
         }
-        .Slice(base, start, end, range, _) -> {
+        .Slice(base, start, end, range, _, _) -> {
             ast_comptime_walk_expr(base, calls, &sites)
             if range == .Val(whole) {
                 ast_comptime_walk_expr(whole, calls, &sites)
@@ -265,16 +298,16 @@ fn ast_comptime_walk_expr(expr: Expr, calls: Bool, sites: &[ComptimeNameSite]) N
                 ast_comptime_walk_expr(end, calls, &sites)
             }
         }
-        .Binary(_, left, right, _) -> {
+        .Binary(_, left, right, _, _) -> {
             ast_comptime_walk_expr(left, calls, &sites)
             ast_comptime_walk_expr(right, calls, &sites)
         }
-        .MethodCall(receiver, _, _, _, _, args, _, _) -> {
+        .MethodCall(receiver, _, _, _, _, args, _) -> {
             ast_comptime_walk_expr(receiver, calls, &sites)
             loop arg in args -> ast_comptime_walk_expr(arg.expr, calls, &sites)
         }
-        .StructLit(_, _, _, _, fields, _, _) -> loop field in fields -> ast_comptime_walk_expr(field.value, calls, &sites)
-        .TypedLit(_, body, _) -> {
+        .StructLit(_, _, _, _, fields, _, _, _) -> loop field in fields -> ast_comptime_walk_expr(field.value, calls, &sites)
+        .TypedLit(_, body, _, _) -> {
             if body == {
                 .Fields(fields) -> loop field in fields -> ast_comptime_walk_expr(field.value, calls, &sites)
                 .Elements(elements) -> loop element in elements -> ast_comptime_walk_expr(element, calls, &sites)
@@ -288,7 +321,7 @@ fn ast_comptime_walk_expr(expr: Expr, calls: Bool, sites: &[ComptimeNameSite]) N
                 .ByteText(_) | .Empty -> {}
             }
         }
-        .EnumLit(_, _, _, args, _, _) -> {
+        .EnumLit(_, _, _, args, _, _, _) -> {
             loop arg in args {
                 if arg == {
                     .Positional(value) -> ast_comptime_walk_expr(value, calls, &sites)
@@ -296,11 +329,11 @@ fn ast_comptime_walk_expr(expr: Expr, calls: Bool, sites: &[ComptimeNameSite]) N
                 }
             }
         }
-        .PatternTest(subject, pattern, _) -> {
+        .PatternTest(subject, pattern, _, _) -> {
             ast_comptime_walk_expr(subject, calls, &sites)
             ast_comptime_walk_pattern(pattern, calls, &sites)
         }
-        .OrFallback(value, fallback, _, _) -> {
+        .OrFallback(value, fallback, _, _, _) -> {
             ast_comptime_walk_expr(value, calls, &sites)
             if fallback == {
                 .Value(inner) -> ast_comptime_walk_expr(inner, calls, &sites)
@@ -315,19 +348,19 @@ fn ast_comptime_walk_expr(expr: Expr, calls: Bool, sites: &[ComptimeNameSite]) N
                 else -> {}
             }
         }
-        .If(cond, then_body, then_value, else_body, else_value, _) -> {
+        .If(cond, then_body, then_value, else_body, else_value, _, _) -> {
             ast_comptime_walk_expr(cond, calls, &sites)
             ast_comptime_walk_stmts(then_body, calls, &sites)
             ast_comptime_walk_expr(then_value, calls, &sites)
             ast_comptime_walk_stmts(else_body, calls, &sites)
             ast_comptime_walk_expr(else_value, calls, &sites)
         }
-        .TupleLit(fields, _, _) -> loop field in fields -> ast_comptime_walk_expr(field.value, calls, &sites)
-        .CallValue(callee, args, _) -> {
+        .TupleLit(fields, _, _, _) -> loop field in fields -> ast_comptime_walk_expr(field.value, calls, &sites)
+        .CallValue(callee, args, _, _) -> {
             ast_comptime_walk_expr(callee, calls, &sites)
             loop arg in args -> ast_comptime_walk_expr(arg.expr, calls, &sites)
         }
-        .PtrFromAddr(_, _, _, addr, _) -> ast_comptime_walk_expr(addr, calls, &sites)
+        .PtrFromAddr(_, _, _, addr, _, _) -> ast_comptime_walk_expr(addr, calls, &sites)
         // Lambda bodies are suppressed under PLAIN; literals, `OptMethodCall`
         // (absent from the Rust walk) and compile-time names have no children.
         else -> {}
@@ -369,7 +402,7 @@ fn ast_comptime_walk_stmts(body: [Stmt], calls: Bool, sites: &[ComptimeNameSite]
 }
 
 // Rust `walk_stmt_expr_nodes` under `WalkOpts::PLAIN`: `#Impure` and
-// `#AssumeDet` bodies and switched-off statements are skipped; `prep`
+// `#AssumeDet` bodies and switched-off statements are skipped; `comptime`
 // blocks are crossed.
 fn ast_comptime_walk_stmt(statement: Stmt, calls: Bool, sites: &[ComptimeNameSite]) Never! {
     if statement == {
@@ -478,12 +511,10 @@ fn ast_comptime_key_from_value(value: CtValue) -> CtKey? Never! {
     }
 }
 
+// An Int outside the i64 word is keyed by its BigInt decimal.
 fn ast_comptime_integer_key(number: Int) -> CtKey Never! {
-    if mir_integer_constant(number, None, None) == {
-        .Int(value, _, _) -> CtKey.Int{value: value}
-        .BigInt(decimal) -> CtKey.BigInt{decimal: decimal}
-        else -> panic("integer key materialization is not an integer")
-    }
+    if number < -9223372036854775807 - 1 || number > 9223372036854775807 -> return CtKey.BigInt{decimal: "{number}"}
+    CtKey.Int{value: number}
 }
 
 // Rust `CtKey::to_value`.
@@ -529,7 +560,7 @@ fn ast_comptime_key_compare(left: CtKey, right: CtKey) -> Int Never! {
         if right == .BigInt(decimal) -> return if decimal.starts_with("-") -> 1 else -> -1
     }
     if left == .BigInt(decimal) {
-        if right == .BigInt(right_decimal) -> return mir_big_integer_key_compare(decimal, right_decimal)
+        if right == .BigInt(right_decimal) -> return big_integer_key_compare(decimal, right_decimal)
         if right == .Int(_) -> return if decimal.starts_with("-") -> -1 else -> 1
     }
     if left == .Bool(left_flag) {
@@ -540,7 +571,6 @@ fn ast_comptime_key_compare(left: CtKey, right: CtKey) -> Int Never! {
     }
     ast_comptime_bytes_compare(ast_comptime_key_text(left).bytes(), ast_comptime_key_text(right).bytes())
 }
-
 
 fn ast_comptime_key_rank(key: CtKey) -> Int Never! {
     if key == {

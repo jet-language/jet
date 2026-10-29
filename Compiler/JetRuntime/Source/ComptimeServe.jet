@@ -1,0 +1,216 @@
+// Compile-time code's native server. The compiler starts one child per
+// compile running this runtime's image bound to a small entry program, whose
+// entry hands this server its table (the SIGSYS handler); the compiler then
+// loads each comptime batch's code into the child (MAP, WRITE, PROTECT) and
+// drives it over two inherited descriptors: commands arrive on fd 3,
+// replies leave on fd 4 (JetBackend Image/ComptimeWire.jet spells the
+// frames). The compiler reads the child's values and writes host answers
+// itself, through READ/WRITE/ALLOC commands, so the child stays a dumb
+// server running the image's own runtime: no second runtime and no host
+// value code lives here.
+//
+// Frames are eight little-endian words: kind, then up to seven operands.
+// Commands: 1 CALL(address, a0..a4) -> DONE(result); 2 READ(address,
+// length) -> the raw bytes; 3 WRITE(address, length) + bytes; 4 ALLOC(size,
+// align) -> DONE(pointer); 5 TEXT(length) + bytes -> DONE(String);
+// 6 INT(length) + decimal bytes -> DONE(Int); 7 RETURN(word) answers the
+// innermost host request; 8 EXIT; 9 FILTER(handler, length) + BPF program
+// -> DONE(sigaction, prctl, seccomp results); 10 MAP(address, length) ->
+// DONE(mmap result): fresh read-write pages exactly there; 11
+// PROTECT(address, length, protection) -> DONE(mprotect result).
+// Replies: 0 HELLO(count) + count entry words; 1 DONE(words); 2 HOST(kind,
+// operands, count, result area); 3 STOP(kind, words); 4 REFUSED(system
+// call, first argument).
+
+// The outermost serve frame while the image serves the compiler, else 0.
+comptime_serve_root := I64{0}
+
+fn comptime_serving() -> Bool { comptime_serve_root != I64{0} }
+
+fn comptime_serve_move(fd: I64, number: I64, address: I64, count: I64) {
+    at := I64{0}
+    loop at < count {
+        moved :: trap_syscall(number, fd, address + at, count - at, I64{0}, I64{0}, I64{0})
+        if (moved == I64{-4}) -> next
+        // The compiler went away or sent a bad address: nothing is left to serve.
+        if (moved <= I64{0}) {
+            trap_defect_exit(I64{125})
+            return
+        }
+        at += moved
+    }
+}
+
+fn comptime_serve_receive(address: I64, count: I64) { comptime_serve_move(I64{3}, I64{0}, address, count) }
+
+fn comptime_serve_send(address: I64, count: I64) { comptime_serve_move(I64{4}, I64{1}, address, count) }
+
+// Fills `frame` with `kind` and four words (the rest zero).
+fn comptime_serve_fill(frame: I64, kind: I64, a: I64, b: I64, c: I64, d: I64) {
+    thread_zero(frame, I64{64})
+    trap_store(frame, kind)
+    trap_store(frame + I64{8}, a)
+    trap_store(frame + I64{16}, b)
+    trap_store(frame + I64{24}, c)
+    trap_store(frame + I64{32}, d)
+}
+
+fn comptime_serve_reply(frame: I64, kind: I64, a: I64, b: I64, c: I64, d: I64) {
+    comptime_serve_fill(frame, kind, a, b, c, d)
+    comptime_serve_send(frame, I64{64})
+}
+
+// `length` bytes from the compiler in a scratch buffer, made the runtime
+// value `kind` names (5: a String, 6: an Int from its decimal).
+fn comptime_serve_value(kind: I64, length: I64) -> I64 {
+    size :: if (length < I64{8}) -> I64{8} else -> length
+    scratch :: jet_rt_alloc(size, I64{8})
+    comptime_serve_receive(scratch, length)
+    value :: if (kind == I64{5}) -> jet_rt_string_from_static(scratch, length) else -> jet_rt_int_from_static(scratch, length)
+    jet_rt_free(scratch, size, I64{8})
+    value
+}
+
+// Installs the SIGSYS handler `handler` (the object's
+// __jet_comptime_refused) and then the compiler's seccomp program of
+// `length` bytes: a refused system call traps to the handler instead of
+// reaching the host.
+fn comptime_serve_filter(frame: I64, handler: I64, length: I64) {
+    program :: jet_rt_alloc(if (length < I64{8}) -> I64{8} else -> length, I64{8})
+    comptime_serve_receive(program, length)
+    action :: jet_rt_alloc(I64{32}, I64{8})
+    // SA_SIGINFO | SA_RESTORER; the handler never returns, so its restorer never runs.
+    trap_store(action, handler)
+    trap_store(action + I64{8}, I64{67108868})
+    trap_store(action + I64{16}, handler)
+    trap_store(action + I64{24}, I64{0})
+    installed :: trap_syscall(I64{13}, I64{31}, action, I64{0}, I64{8}, I64{0}, I64{0})
+    private :: trap_syscall(I64{157}, I64{38}, I64{1}, I64{0}, I64{0}, I64{0}, I64{0})
+    fprog :: jet_rt_alloc(I64{16}, I64{8})
+    trap_store(fprog, length /% I64{8})
+    trap_store(fprog + I64{8}, program)
+    // SECCOMP_FILTER_FLAG_TSYNC: the runtime's own threads are refused too.
+    filtered :: trap_syscall(I64{317}, I64{1}, I64{1}, fprog, I64{0}, I64{0}, I64{0})
+    jet_rt_free(fprog, I64{16}, I64{8})
+    jet_rt_free(action, I64{32}, I64{8})
+    jet_rt_free(program, if (length < I64{8}) -> I64{8} else -> length, I64{8})
+    comptime_serve_reply(frame, I64{1}, installed, private, filtered, I64{0})
+}
+
+// Serves commands on `frame` until a RETURN, whose word it returns.
+fn comptime_serve_loop(frame: I64) -> I64 {
+    loop {
+        comptime_serve_receive(frame, I64{64})
+        kind :: trap_word(frame)
+        a :: trap_word(frame + I64{8})
+        b :: trap_word(frame + I64{16})
+        c :: trap_word(frame + I64{24})
+        d :: trap_word(frame + I64{32})
+        e :: trap_word(frame + I64{40})
+        f :: trap_word(frame + I64{48})
+        if (kind == I64{1}) {
+            result := I64{0}
+            #Unsafe("the compiler calls an entry of this image's table, or a runtime export it resolved, on the word arguments that entry's System V signature takes") {
+                result = os_call5_i64(a, b, c, d, e, f)
+            }
+            // Output the call buffered is its own effect, made before it answers.
+            jet_rt_stdout_flush()
+            comptime_serve_reply(frame, I64{1}, result, I64{0}, I64{0}, I64{0})
+            next
+        }
+        if (kind == I64{2}) {
+            comptime_serve_send(a, b)
+            next
+        }
+        if (kind == I64{3}) {
+            comptime_serve_receive(a, b)
+            next
+        }
+        if (kind == I64{4}) {
+            comptime_serve_reply(frame, I64{1}, jet_rt_alloc(a, b), I64{0}, I64{0}, I64{0})
+            next
+        }
+        if (kind == I64{5} || kind == I64{6}) {
+            comptime_serve_reply(frame, I64{1}, comptime_serve_value(kind, a), I64{0}, I64{0}, I64{0})
+            next
+        }
+        if (kind == I64{7}) -> return a
+        if (kind == I64{9}) {
+            comptime_serve_filter(frame, a, b)
+            next
+        }
+        if (kind == I64{10}) {
+            // MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, read-write.
+            comptime_serve_reply(frame, I64{1}, trap_syscall(I64{9}, a, b, I64{3}, I64{1048610}, I64{-1}, I64{0}), I64{0}, I64{0}, I64{0})
+            next
+        }
+        if (kind == I64{11}) {
+            comptime_serve_reply(frame, I64{1}, trap_syscall(I64{10}, a, b, c, I64{0}, I64{0}, I64{0}), I64{0}, I64{0}, I64{0})
+            next
+        }
+        // EXIT, or a frame no compiler sends.
+        trap_defect_exit(I64{0})
+        return I64{0}
+    }
+}
+
+// The object's entry: `table` holds `count` words, the image's entries in
+// the compiler's order (ComptimeWire.jet). Serves until the compiler's EXIT.
+#Export(c) fn jet_rt_comptime_serve(table: I64, count: I64) {
+    frame :: jet_rt_alloc(I64{64}, I64{8})
+    comptime_serve_root = frame
+    comptime_serve_reply(frame, I64{0}, count, I64{0}, I64{0}, I64{0})
+    comptime_serve_send(table, count * I64{8})
+    _ := comptime_serve_loop(frame)
+    trap_defect_exit(I64{0})
+}
+
+// A host route of compile-time code (JetIR ir_host_route): `count` operand
+// words at `operands`, which the compiler reads and answers. The answer is
+// the RETURN word; a `result` area receives an aggregate answer in place.
+fn comptime_serve_request(kind: I64, operands: I64, count: I64, result: I64) -> I64 {
+    if !comptime_serving() {
+        jet_rt_unreachable(I64{0}, I64{0})
+        return I64{0}
+    }
+    frame :: jet_rt_alloc(I64{64}, I64{8})
+    comptime_serve_reply(frame, I64{2}, kind, operands, count, result)
+    word :: comptime_serve_loop(frame)
+    jet_rt_free(frame, I64{64}, I64{8})
+    word
+}
+
+#Export(c) fn jet_comptime_host(kind: I64, operands: I64, count: I64) -> I64 {
+    comptime_serve_request(kind, operands, count, I64{0})
+}
+
+#Export(c) fn jet_comptime_host_into(result: I64, kind: I64, operands: I64, count: I64) -> I64 {
+    _ := comptime_serve_request(kind, operands, count, result)
+    result
+}
+
+// A runtime stop of served code (Trap.jet): its kind and words go to the
+// compiler, which reads their texts. The child then serves on above the
+// stopped call's frames, which never resume, so one child serves a whole
+// compile. Buffered output is flushed first, as the stop's own report would.
+fn comptime_serve_stop(kind: I64, a: I64, b: I64, c: I64, d: I64) {
+    if !comptime_serving() -> return
+    jet_rt_stdout_flush()
+    frame :: jet_rt_alloc(I64{64}, I64{8})
+    comptime_serve_fill(frame, I64{3}, kind, a, b, c)
+    trap_store(frame + I64{40}, d)
+    comptime_serve_send(frame, I64{64})
+    _ := comptime_serve_loop(frame)
+    trap_defect_exit(I64{0})
+}
+
+// The SIGSYS handler's body: system call `si_syscall` (siginfo + 24) with
+// first argument rdi (ucontext gregs[8], + 104) is refused. Allocation may
+// be mid-flight, so the frame is a fresh mapping.
+#Export(c) fn jet_rt_comptime_refused(info: I64, context: I64) {
+    number :: trap_word(info + I64{24}).bit_and(I64{4294967295})
+    first :: trap_word(context + I64{104})
+    frame :: trap_syscall(I64{9}, I64{0}, I64{4096}, I64{3}, I64{34}, I64{-1}, I64{0})
+    if (frame > I64{0}) -> comptime_serve_reply(frame, I64{4}, number, first, I64{0}, I64{0})
+    trap_defect_exit(I64{0})
+}

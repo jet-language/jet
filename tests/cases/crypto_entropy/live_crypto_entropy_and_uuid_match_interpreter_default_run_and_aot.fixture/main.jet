@@ -1,0 +1,19 @@
+
+use core.crypto.random as crypto
+use core.time as time
+use core.crypto.uuid as uuid
+
+fn run() {
+    first :: crypto.bytes(32) ?? return
+    second :: crypto.bytes(32) ?? return
+    print(first.len() == 32)
+    print(first != second)
+    v4a :: uuid.v4() ?? return
+    v4b :: uuid.v4() ?? return
+    print(v4a.len() == 36)
+    print(v4a != v4b)
+    clk := Clock.new(1_700_000_000_000)
+    v7 :: uuid.v7(&clk) ?? return
+    print(v7.len() == 36)
+    print(v7.slice(14, 15) == "7")
+}

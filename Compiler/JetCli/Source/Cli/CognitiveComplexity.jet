@@ -1,6 +1,6 @@
 // crates/jet-sema/src/Sema/CognitiveComplexity.rs; adapted from the existing
 // origin/port/compiler port. Score checked parser nodes, never source heuristics.
-use jet_foundation.[BinOp, Expr, Func, Item, Program, Span, Stmt, ast_visit_statement]
+use jet_foundation.[Expr, Func, Item, Program, Span, Stmt, ast_visit_statement]
 
 struct JetCLIComplexityReport {
     name: String
@@ -53,20 +53,20 @@ struct JetCLIComplexityVisitor {
     recursive: Bool
     fn visit(&self, expression: Expr) Never! -[Mem.Alloc, Mem.Rc, Time.Wait]> {
         if expression == {
-            .If(_, _, _, _, _, span) -> {
+            .If(_, _, _, _, _, span, _) -> {
                 &self.controls.push(span)
                 &self.nesting.push(span)
             }
-            .Lambda(lambda) -> {
+            .Lambda(lambda, _) -> {
                 &self.nesting.push(lambda.span)
                 if lambda.body == .Block(body) {
                     loop nested in body -> jet_cli_complexity_statement(nested, &self.controls, &self.nesting)
                 }
             }
-            .Call(call) -> {
+            .Call(call, _) -> {
                 if call.name == self.function_name -> self.recursive = true
             }
-            .Binary(.And, _, _, _) | .Binary(.Or, _, _, _) -> {
+            .Binary(.And, _, _, _, _) | .Binary(.Or, _, _, _, _) -> {
                 operators :: jet_cli_complexity_boolean_operators(expression)
                 if operators == 3 -> self.mixed += 1
             }
@@ -93,9 +93,9 @@ fn jet_cli_complexity_function(function: Func, reports: &[JetCLIComplexityReport
 
 fn jet_cli_complexity_boolean_operators(expression: Expr) -> Int Never! {
     if expression == {
-        .Binary(.And, left, right, _) -> (1).bit_or(jet_cli_complexity_boolean_operators(left)).bit_or(jet_cli_complexity_boolean_operators(right))
-        .Binary(.Or, left, right, _) -> (2).bit_or(jet_cli_complexity_boolean_operators(left)).bit_or(jet_cli_complexity_boolean_operators(right))
-        .Paren(inner, _) -> jet_cli_complexity_boolean_operators(inner)
+        .Binary(.And, left, right, _, _) -> (1).bit_or(jet_cli_complexity_boolean_operators(left)).bit_or(jet_cli_complexity_boolean_operators(right))
+        .Binary(.Or, left, right, _, _) -> (2).bit_or(jet_cli_complexity_boolean_operators(left)).bit_or(jet_cli_complexity_boolean_operators(right))
+        .Paren(inner, _, _) -> jet_cli_complexity_boolean_operators(inner)
         else -> 0
     }
 }

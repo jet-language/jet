@@ -36,8 +36,8 @@ fn store_reuse_direct_cas_entry(verification: &StoreVerification, roots: HangarR
     seal_info :: files.stat(store_reuse_seal_path(roots, digest)) ?? return false
     if !object_info.is_dir || object_info.is_symlink || !seal_info.is_file -> return false
     if (object_info.mode).bit_and(0o222) != 0 -> return false
-    sealed :: store_check_seal(&verification, expected, roots.hangar_dir()) ?? None
-    sealed == Val((digest))
+    sealed :: store_check_seal(&verification, expected, roots.hangar_dir()) ?? return false
+    sealed == digest
 }
 
 // Rust `snapshot_lease_unlocked`: the caller holds the Hangar lock.
@@ -71,8 +71,7 @@ fn store_snapshot_lease_unlocked(verification: &StoreVerification, roots: Hangar
     }
     lease_snapshot_root :: files.join(lease_root, "snapshot")
     snapshot_root :: if direct_cas -> entry.out else -> lease_snapshot_root
-    built :: store_reuse_build_lease(&verification, roots, entry, projection_index, direct_cas, lease_root, lease_lock_path, ^live_lock, snapshot_root, lease_snapshot_root)
-    if built == {
+    if store_reuse_build_lease(&verification, roots, entry, projection_index, direct_cas, lease_root, lease_lock_path, ^live_lock, snapshot_root, lease_snapshot_root) == {
         .Ok(lease) -> Ok(lease)
         .Err(error) -> {
             // The live lock already dropped with the failed build.
@@ -183,10 +182,10 @@ fn store_reuse_build_lease(verification: &StoreVerification, roots: HangarRoots,
     loop output in output_sources {
         stable := output.lease_root
         if !store_reuse_same_path(output.lease_root, snapshot_root) && sys.name() == "linux" {
-            binding :: store_reuse_binding_for(opened.bindings, output.lease_root) ?? return Err(StoreError.Other("named output `{output.output_root}` has no stable lease handle"))
+            at :: store_reuse_binding_index(opened.bindings, output.lease_root) ?? return Err(StoreError.Other("named output `{output.output_root}` has no stable lease handle"))
             // Symlink-root objects have no handle; the canonical source path
             // is the lease root and its target is witnessed at validation.
-            if binding.handle != None -> stable = store_lease_descriptor_path(binding.slot)
+            if opened.bindings[at].handle != None -> stable = store_lease_descriptor_path(opened.bindings[at].slot)
         }
         &leased_output_roots.push(LeasedOutputRoot{output_root: output.output_root, lease_root: stable})
     }
@@ -265,9 +264,9 @@ fn store_reuse_build_lease(verification: &StoreVerification, roots: HangarRoots,
     })
 }
 
-fn store_reuse_binding_for(bindings: [NixProjectionBinding], source: String) -> NixProjectionBinding? Never! {
-    loop binding in bindings {
-        if store_reuse_same_path(binding.source, source) -> return Val(binding)
+fn store_reuse_binding_index(bindings: [NixProjectionBinding], source: String) -> Int? Never! {
+    loop index in 0..<bindings.len() {
+        if store_reuse_same_path(bindings[index].source, source) -> return Val(index)
     }
     None
 }
@@ -321,7 +320,11 @@ fn store_reuse_executable_lease_members(executables: [SnapshotFile]) -> [LeaseMe
         input := executable.file ?? return Err(StoreError.Other("lease executable `{executable.relative}` lost its handle"))
         &input.seek(0)
         hasher := StreamingSHA256.new()
-        loop chunk in input.chunks(65536) -> &hasher.update(chunk)
+        loop {
+            chunk :: input.read(65536)
+            if chunk.len() == 0 -> break
+            &hasher.update(chunk)
+        }
         &members.push(LeaseMember{name: executable.relative, digest: "sha256-{hasher.finalize_hex()}"})
     }
     Ok(members)
@@ -338,7 +341,7 @@ fn store_reuse_find_system_tool(name: String) -> String StoreError! {
     Err(StoreError.NotFound("required system tool `{name}` not found"))
 }
 
-STORE_LEASE_KEEPER_SCRIPT :: prep { "set -eu\n\"$1\" -t tmpfs -o size=1m,mode=0755 jetpack-exec \"$2\"\nprintf 'ready\\n'\nIFS= read -r _\n\"$1\" -o remount,bind,ro \"$2\"\nprintf 'sealed\\n'\nIFS= read -r _ || true\n" }
+STORE_LEASE_KEEPER_SCRIPT :: "set -eu\n\"$1\" -t tmpfs -o size=1m,mode=0755 jetpack-exec \"$2\"\nprintf 'ready\\n'\nIFS= read -r _\n\"$1\" -o remount,bind,ro \"$2\"\nprintf 'sealed\\n'\nIFS= read -r _ || true\n"
 
 // Rust `create_exec_wrappers`: a read-only tmpfs in a private rootless
 // mount namespace holds one link per executable naming its pinned
@@ -358,11 +361,11 @@ fn store_reuse_create_exec_wrappers(snapshot_root: String, executables: [Snapsho
     if ready.trim() != "ready" -> return Err(store_reuse_wrapper_keeper_error(^child, "creating private executable mount"))
     root :: "/proc/{child.id()}/root{mountpoint}"
     loop executable in executables -> files.symlink("/proc/self/fd/{executable.slot}", files.join(root, executable.relative))
-    &child.stdin.write_text("seal\n")
+    child.stdin.write("seal\n")
     sealed :: store_reuse_keeper_line(&child)
     if sealed.trim() != "sealed" -> return Err(store_reuse_wrapper_keeper_error(^child, "sealing private executable mount"))
     directory :: store_reuse_hold_directory(root)
-    &child.stdin.close()
+    child.stdin.close()
     receipt :: child.wait()
     if !receipt.success -> return Err(StoreError.Other("private executable mount keeper failed"))
     files.remove_dir(mountpoint)

@@ -1,6 +1,8 @@
 // Host foreign-library declarations use the same inline/package parser as
 // source loading. C dependencies are not Jet source roots.
 use jet_lexer.[lex_config, token_decoded, TOKEN_STRING, TOKEN_RAW_STRING]
+use jet_foundation.[AccessConvention, Diagnostic, SourceFile, Type, stable_id]
+use jet_sema.[SemaGraphModuleResult]
 
 struct JetDriverCDependency {
     library: String
@@ -23,4 +25,136 @@ fn jet_driver_c_dependencies(snapshot: JetDriverAuthorizedSourceSnapshot) -> [Je
         }
     }
     declarations
+}
+
+// One parameter of an inline C body's C ABI: its checked type, by pointer
+// when the declaration writes it.
+struct JetDriverInlineCParam { ty: Type, write: Bool }
+
+// One `#FFI(c)` (or `#FFI(cpp)`) inline body of the checked foreign rows:
+// its checked C ABI, the triple-quoted body within its declaration span
+// (None when the span holds none) and its position among the program's
+// foreign rows in foreign identity order, which names its translation unit.
+struct JetDriverInlineC {
+    index: Int
+    name: String
+    symbol: String
+    params: [JetDriverInlineCParam]
+    return_type: Type?
+    body: String?
+    cpp: Bool
+}
+
+// What the native link closure reads of the checked foreign declarations:
+// the C provider libraries (sorted, unique), their direct and transitive
+// links (sorted; transitive without the direct ones), whether a C or Rust
+// foreign row needs the program's C platform, and the inline C bodies.
+struct JetDriverForeignLinkFacts {
+    libraries: [String]
+    direct_links: [String]
+    transitive_links: [String]
+    c_or_rust_rows: Bool
+    inline_c: [JetDriverInlineC]
+}
+
+fn jet_driver_foreign_link_empty() -> JetDriverForeignLinkFacts Never! {
+    JetDriverForeignLinkFacts{libraries: [String]{}, direct_links: [String]{}, transitive_links: [String]{}, c_or_rust_rows: false, inline_c: [JetDriverInlineC]{}}
+}
+
+// The cache identity every C provider link unit carries.
+fn jet_driver_foreign_link_cache_identity(facts: JetDriverForeignLinkFacts) -> String Never! {
+    "direct={facts.direct_links.join(",")};transitive={facts.transitive_links.join(",")}"
+}
+
+fn jet_driver_foreign_push_unique(rows: &[String], value: String) Never! {
+    if !rows.contains(value) -> &rows.push(value)
+}
+
+// The language head before any `:`; every head other than C, C++ and
+// assembly (an inline body's `rust`, `zig`, ...) is Rust.
+fn jet_driver_foreign_language_head(language: String) -> String Never! {
+    head :: language.split(":").to_list()[0].lower()
+    if head == "c" -> return "c"
+    if head == "cpp" || head == "c++" -> return "cpp"
+    if head == "asm" || head == "assembly" -> return "asm"
+    "rust"
+}
+
+// The triple-quoted body within `span` of the source file `path`.
+fn jet_driver_inline_c_body(source_files: [SourceFile], path: String, start: Int, end: Int) -> String? Never! {
+    loop source_file in source_files {
+        if source_file.path != path -> next
+        bytes :: source_file.source.bytes()
+        if start < 0 || end < start || end > bytes.len() -> return None
+        open := -1
+        at := start
+        loop at + 2 < end {
+            if bytes[at] == (U8{34}) && bytes[at + 1] == (U8{34}) && bytes[at + 2] == (U8{34}) {
+                if open < 0 {
+                    open = at + 3
+                    at += 3
+                    next
+                }
+                return Val(String.from_bytes(bytes.slice(open, at)) ?? return None)
+            }
+            at += 1
+        }
+        return None
+    }
+    None
+}
+
+// The foreign link facts of the checked modules `modules`; inline bodies
+// read their declaration span in `source_files`.
+fn jet_driver_foreign_link_facts(modules: [SemaGraphModuleResult], source_files: [SourceFile]) -> JetDriverForeignLinkFacts Never! {
+    facts := jet_driver_foreign_link_empty()
+    direct := [String]{}
+    transitive := [String]{}
+    // Foreign identity order: (identity, key) of every checked foreign row.
+    ids := [U64]{}
+    keys := [String]{}
+    rows := [Int]{}
+    modules_of := [Int]{}
+    loop (module_index, semantic_module) in modules {
+        loop provider in semantic_module.foreign_providers {
+            jet_driver_foreign_push_unique(&facts.libraries, provider.library)
+            loop library in provider.direct_links -> jet_driver_foreign_push_unique(&direct, library)
+            loop library in provider.transitive_links -> jet_driver_foreign_push_unique(&transitive, library)
+        }
+        loop (row_index, row) in semantic_module.foreign_functions {
+            head :: jet_driver_foreign_language_head(row.language)
+            if head == "c" || head == "rust" -> facts.c_or_rust_rows = true
+            &ids.push(stable_id("foreign", row.key))
+            &keys.push(row.key)
+            &rows.push(row_index)
+            &modules_of.push(module_index)
+        }
+    }
+    &facts.libraries.sort()
+    &direct.sort()
+    &transitive.sort()
+    loop library in transitive {
+        if !direct.contains(library) -> &facts.transitive_links.push(library)
+    }
+    facts.direct_links = direct
+    order := [Int]{}
+    loop position in 0..<ids.len() -> &order.push(position)
+    &order.sort_by((left: Int, right: Int) -> if ids[left] != ids[right] -> ids[left] <=> ids[right] else -> keys[left] <=> keys[right])
+    loop (index, position) in order {
+        row :: modules[modules_of[position]].foreign_functions[rows[position]]
+        if !row.path.starts_with("jet_ffi_") || row.symbol != "jet_inline_{row.path}" -> next
+        head :: jet_driver_foreign_language_head(row.language)
+        if head != "c" && head != "cpp" -> next
+        params :: loop param in row.params -> JetDriverInlineCParam{ty: param.ty, write: param.convention == AccessConvention.Write}
+        &facts.inline_c.push(JetDriverInlineC{
+            index: index,
+            name: row.name,
+            symbol: row.symbol,
+            params: params,
+            return_type: row.return_type,
+            body: jet_driver_inline_c_body(source_files, row.source_file, row.span.start, row.span.end),
+            cpp: head == "cpp",
+        })
+    }
+    facts
 }

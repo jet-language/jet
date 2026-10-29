@@ -1595,7 +1595,7 @@ fn diagnostic_snapshots_do_not_leak_runtime_or_backend_voice() {
     let mut failures = Vec::new();
     for (path, text) in rendered_snapshot_texts() {
         for needle in banned {
-            if text.contains(needle) && !allowed_backend_voice_snapshot(&path, &text, needle) {
+            if text.contains(needle) && !allowed_backend_voice_snapshot(&path, needle) {
                 failures.push(format!("{} contains `{}`", path.display(), needle));
             }
         }
@@ -1683,13 +1683,10 @@ fn collect_rs_paths(dir: &PathBuf, out: &mut Vec<PathBuf>) {
     out.sort();
 }
 
-fn allowed_backend_voice_snapshot(path: &std::path::Path, text: &str, needle: &str) -> bool {
+fn allowed_backend_voice_snapshot(path: &std::path::Path, needle: &str) -> bool {
     let p = path.to_string_lossy();
     if p.ends_with("ffi_bad_path.stderr") {
         return needle == ".rs:" || needle == "rustc rejected generated code";
-    }
-    if p.ends_with("os_target_unmatched_call.stderr") && text.contains("raw rustc") {
-        return true;
     }
     false
 }

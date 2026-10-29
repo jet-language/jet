@@ -1,5 +1,8 @@
 // Rust Parser::output_def / output_defaults_def: these carry semantic tags,
 // not a runtime record/type constructor interpretation in the CLI.
+use jet_lexer.[TOKEN_COLON, TOKEN_COLON_COLON, TOKEN_DOT, TOKEN_IDENT, TOKEN_LBRACE]
+use jet_foundation.[ConstDef, Expr, Span, Type, ast_const]
+
 fn parser_output_ahead_at(state: &JetParserState, offset: Int) -> Bool Never! {
     parser_kind_at(&state, offset) == TOKEN_IDENT && parser_kind_at(&state, offset + 1) == TOKEN_COLON_COLON && parser_kind_at(&state, offset + 2) == TOKEN_IDENT && parser_value_at(&state, offset + 2) == "Output" && parser_kind_at(&state, offset + 3) == TOKEN_DOT
 }
@@ -16,7 +19,7 @@ fn parser_parse_output(state: &JetParserState, modifiers: ParsedItemModifiers) -
     args :: parser_parse_variant_args(&state, 0, true)
     end :: parser_previous_end(state)
     span :: Span{start: owner.span.start, end: end}
-    value :: Expr.EnumLit{type_name: "Output", variant: parser_value(state, variant), variant_span: Val(variant.span), args: args, leading_dot: false, span: span}
+    value :: Expr.EnumLit{type_name: "Output", variant: parser_value(state, variant), variant_span: Val(variant.span), args: args, leading_dot: false, span: span, id: parser_node_id(&state)}
     result := ast_const(parser_value(state, name), name.span, Span{start: name.span.start, end: end}, value)
     result.ty = Val(Type.Named{name: "Output"})
     result.is_pub = modifiers.is_pub

@@ -1,0 +1,26 @@
+fn sort_key(n: Int) -> String Never! { "{n}" }
+fn stopping_sort_key(n: Int, seen: &String) -> String Err! {
+    seen += "{n}"
+    if n == 1 { return Err("stop", code: "E_SORT") }
+    return "{n}"
+}
+fn unit() {}
+fn run() {
+    ascending := [3, 1, 2]
+    ascending.sort_by((n: Int) -> sort_key(n))
+    descending := [3, 1, 2]
+    descending.sort_by_desc((n: Int) -> sort_key(n))
+
+    values := [3, 1, 2]
+    seen := ""
+    recovered := false
+    values.sort_by((n: Int) -> stopping_sort_key(n, &seen)) ?? {
+        print("{err.code}:{err.message}")
+        recovered = true
+        unit()
+    }
+    print("{ascending}|{descending}")
+    print(seen)
+    print(values)
+    print(recovered)
+}

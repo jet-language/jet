@@ -58,7 +58,7 @@ Runs 2 and 3:
   - The 256 Text results held by the native side stay intact and readable until `jet_text_free`: byte check `hello, …!` passes, so they stay rooted for their declared lifetime.
   - Each result is releasable exactly once. The outstanding count returns to 0 before unload.
   - The Library exposes no internal outstanding-object counter, so this count is host-side accounting only.
-- **External-handle row:** the unchanged fixture opens no files (fd count stays 6 throughout). A scratch variant (`~/.cache/jet-dev/scratch/Closer07/retention2`) adds `use core.files as files` and `#Export(c) pub fn read_len(salt: Int) -> Int { text :: files.read("/etc/hostname") ?? return -1 … text.len() }`, with package `authority: { holds: { allow: [FS, Mem.Alloc] } }`. Host `fdrow.cpp`, 2 runs:
+- **External-handle row:** the unchanged fixture opens no files (fd count stays 6 throughout). A scratch variant (`~/.cache/jet-dev/scratch/Closer07/retention2`) adds `use core.files as files` and `#Export(c) pub fn read_len(salt: Int) -> Int { text :: files.read("/etc/hostname") ?? return -1 … text.len() }`, with package `authority: { allow: [FS, Mem.Alloc] }`. Host `fdrow.cpp`, 2 runs:
   ```
   start fds=6 rss_kb=3728
   single-call result=8 fds_after_return=6

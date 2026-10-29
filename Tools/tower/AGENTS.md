@@ -307,9 +307,9 @@ superseded ballot must not be a draft. Drafts remain hidden from every owner
 ballot list, card panel, count, and Now view until they are marked ready.
 
 Ratifying a `group: "syntax"` decision auto-appends the standard
-post-ratification chores to the card's `criteria[]`: Syntax.rs entry
-updated, syntax-decisions.md log entry, `jet self devtools grammars`
-regenerated, snapshots re-blessed.
+post-ratification chores to the card's `criteria[]`: Data/Syntax registry
+entry updated, syntax-decisions.md log entry, editor grammars regenerated
+(`node Tools/agent/editor-grammars.mjs --write`), snapshots re-blessed.
 
 `blockedBy` accepts a card ref or a decision id; an unratified decision id
 blocks the same as an unfinished card.

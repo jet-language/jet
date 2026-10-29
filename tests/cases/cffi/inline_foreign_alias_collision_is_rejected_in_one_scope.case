@@ -1,0 +1,11 @@
+# tests/cffi.rs::inline_foreign_alias_collision_is_rejected_in_one_scope at tests/cffi.rs:804; hand-port
+# Claim: use c.[c as lib, m as lib] inside a module yields E0105 and 'the import name lib is used twice' (tests/cffi.rs:804)
+# Not ported: Rust test harness setup
+fixture: inline_foreign_alias_collision_is_rejected_in_one_scope.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # use c.[c as lib, m as lib] inside a module yields E0105 and 'the import name lib is used twice' (tests/cffi.rs:804)
+stderr: ~ "E0105" # use c.[c as lib, m as lib] inside a module yields E0105 and 'the import name lib is used twice' (tests/cffi.rs:804)
+stderr: ~ "the import name `lib` is used twice" # use c.[c as lib, m as lib] inside a module yields E0105 and 'the import name lib is used twice' (tests/cffi.rs:804)

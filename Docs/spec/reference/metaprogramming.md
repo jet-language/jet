@@ -3,9 +3,8 @@
 This page is for Jet programmers who need compile-time values, typed facts, or
 build-time generation. It separates source forms exercised by the feature
 examples from metadata and diagnostic contracts defined by the compiler.
-The executable surface is registered in [`Syntax.rs`](../../../crates/jet-foundation/src/Syntax.rs);
-shared contract records live in
-[`AST/metaprogramming.rs`](../../../crates/jet-foundation/src/AST/metaprogramming.rs).
+The executable surface is registered in the
+[syntax registry](../../../Compiler/JetFoundation/Data/Syntax/).
 The runnable examples are the best guide to accepted source forms:
 [`Examples/features/comptime`](../../../Examples/features/comptime) and
 [`Examples/features/reflection`](../../../Examples/features/reflection).
@@ -16,13 +15,13 @@ Jet uses one language at every stage. A compile-time expression is still typed
 Jet code, and a generated item must pass the ordinary checker before it can
 become part of a program. The boundary is visible in source:
 
-- `prep { ... }` is the explicit shared-preparation block (D-PREP-SURFACE2=A).
+- `comptime { ... }` is the explicit shared-preparation block (D-PREP-SURFACE2=A).
   Its body runs while building and emits no runtime code. In the binding form
-  `name :: prep { ... }`, the final expression supplies the prepared value.
+  `name :: comptime { ... }`, the final expression supplies the prepared value.
   That value retains its checked initializer type: numeric widths, empty-list
   element types, optional elements, and function return types are not inferred
   again from the evaluator's erased value representation. The retired
-  `@ { ... }` spelling teaches `prep { ... }` (E0388).
+  `@ { ... }` spelling teaches `comptime { ... }` (E0388).
 - `@name :: expression` binds a value evaluated during compilation.
 - Compiler facts carry `$`: members of their subject such as `T.$fields`, or
   the roots `$build`, `$package`, `$phase` and `$program`. They do not replace
@@ -44,7 +43,7 @@ ordinary runtime expression:
 fn area(width: Int, height: Int) -> Int { width * height }
 
 fn run() {
-    prep {
+    comptime {
         @cells :: area(@WIDTH, @HEIGHT)
         if @cells > 100 -> panic("the grid is too large")
     }
@@ -67,7 +66,7 @@ emitted; the other arm is name-resolved so misspelled names are still found.
 Nested `@if` forms use the same rule. See
 [`comptime_if.jet`](../../../Examples/features/comptime/comptime_if.jet).
 
-`prep loop` is the one typed compile-time repetition mechanism used by derive
+`comptime loop` is the one typed compile-time repetition mechanism used by derive
 and marker bodies. [`derive_loop.jet`](../../../Examples/features/reflection/derive_loop.jet)
 uses it to create methods from `T.$fields`, to emit an `impl` for each type,
 and to create measured test declarations from `CASES`.
@@ -110,7 +109,7 @@ gate and the command-line grant:
 use core.files as fs
 
 fn run() {
-    prep {
+    comptime {
         #Impure("read an explicitly approved ambient input") {
             @CONFIG :: fs.read("config.txt")
         }
@@ -127,14 +126,14 @@ gate, not a blanket host permission. Keep declarations, grants, and resulting
 inputs in the package and lock records rather than relying on ambient process
 state. The executable policy is defined at the compiler boundary; the
 source-facing effect names are registered through
-[`Syntax.rs`](../../../crates/jet-foundation/src/Syntax.rs).
+the [syntax registry](../../../Compiler/JetFoundation/Data/Syntax/).
 
 ## Build entries and typed generation
 
-A package may expose an ordinary `fn build` that takes `BuildContext` and
+A package may expose an ordinary `fn build` that takes `Build` and
 returns a `BuildPlan`. It inspects typed build facts, registers typed graph
 nodes, and returns the plan; it does not become a second configuration
-language. `BuildContext` exposes typed graph operations: `b.add_executable`,
+language. `Build` exposes typed graph operations: `b.add_executable`,
 `b.add_library`, `b.add_test`, `b.add_asset_bundle`, `b.add_doc`,
 `b.add_install`, `b.add_package`, and `b.add_publish` register targets;
 `b.action` registers a typed action; `b.generate` registers additive generated
@@ -146,7 +145,7 @@ The checked example in [`distinct_reflect.jet`](../../../Examples/features/compt
 uses the current return-arrow form:
 
 ```jet
-fn build(b: BuildContext) -> BuildPlan {
+fn build(b: Build) {
     loop info in b.program.types() {
         if {
             info.name == "CustomerID" -> {
@@ -163,7 +162,7 @@ fn build(b: BuildContext) -> BuildPlan {
         }
     }
     app :: b.add_executable("distinct_reflect", ["distinct_reflect.jet"], [])
-    return b.plan(app)
+    b.default(app)
 }
 ```
 
@@ -180,7 +179,7 @@ silently rewrite an existing declaration.
 The source registry reserves typed item-template generation. `derive T.Trait {
 ... }` and `b.generate(name) { ... }` carry ordinary Jet item and statement
 grammar, and neither form accepts a source string or re-lexes generated text.
-This is the `D-META-CODE1` / `D-META-BODY1` rule in [`Syntax.rs`](../../../crates/jet-foundation/src/Syntax.rs).
+This is the `D-META-CODE1` / `D-META-BODY1` rule in the [syntax decisions](../syntax-decisions.md).
 
 ## Typed reflection
 
@@ -261,9 +260,8 @@ variants are:
 `SourceSpan`. A missing fact is therefore distinguishable from a checked empty
 collection. Opaque `SnapshotId`, `TypeId`, `DeclarationHandle`, `ScopeId`,
 `NodeId`, and `ValueHandle` values are compiler-issued identities; source names
-and casts cannot manufacture them. The canonical names and fields live in
-[`AST/metaprogramming.rs`](../../../crates/jet-foundation/src/AST/metaprogramming.rs),
-not in a prose catalog.
+and casts cannot manufacture them. The compiler defines the canonical names
+and fields; this page is not a catalog of them.
 
 Root inputs and scopes are also part of the contract. A root may accept a type
 expression, callable selection, method name, method handle, authorized

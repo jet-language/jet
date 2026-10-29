@@ -1,17 +1,9 @@
 # Port of tests/interpreter_extension_lint_policy.rs:80-88 plus assert_denied():42-68.
 fixture: fixtures/enforced
-env: JET_COMPILER_EXTENSION={root}/crates/jet-pkg-model/fixtures/compiler_extension/lint_no_x.wasm
+env: JET_COMPILER_EXTENSION={root}/tests/fixtures/compiler_extension/lint_no_x.wasm
 env: NO_COLOR=1
 step: jet run main.jet
 env: JET_STORE_DIR={work}/cache-default
-exit: 1
-stdout: empty
-stderr: ~ "Error [E1293]: lint `compiler_extension` (L1401) is denied by policy: compiler-extension `no-x` (warning): prefer y" # original predicate
-stderr: ~ "Why: a configured compiler-extension component reported this finding after type checking (D-DX5-HOOK1). This team's `policy.lints.deny` in `package.jet` turns this warning into a build failure (D-LINTPOLICY1 — the override law); it stays a warning everywhere `package.jet` doesn't opt in. The listed lint name matches." # original predicate
-stderr: ~ "Fix: Use the underlying lint fix (address the finding, or unset JET_COMPILER_EXTENSION to skip the extension), or remove `compiler_extension` from `policy.lints.deny` if this team no longer wants the wall." # original predicate
-stderr: !~ "Warning [L1401]" # original predicate
-step: jet run --interpret main.jet
-env: JET_STORE_DIR={work}/cache-interpreter
 exit: 1
 stdout: empty
 stderr: ~ "Error [E1293]: lint `compiler_extension` (L1401) is denied by policy: compiler-extension `no-x` (warning): prefer y" # original predicate

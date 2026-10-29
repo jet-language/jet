@@ -1,0 +1,29 @@
+// Caller-visible rights storage: private bits must survive every host projection.
+package {
+    name: "host_rights"
+    authority: { allow: [FS, IO, Mem.Alloc] }
+}
+
+use core.ui.host as host
+
+fn run() {
+    read :: host.fs_rights_read()
+    write :: host.fs_rights_write()
+    read_write :: host.fs_rights_read_write()
+    empty :: UIFSRights{}
+    print(read != write)
+    print(read_write != read)
+    print(read_write != write)
+    print(empty != read)
+    print(empty != write)
+    print(empty != read_write)
+    print(empty == UIFSRights{})
+    read_grant :: host.fs_grant(".", read) ?? panic("read grant")
+    write_grant :: host.fs_grant(".", write) ?? panic("write grant")
+    read_write_grant :: host.fs_grant(".", read_write) ?? panic("read-write grant")
+    empty_grant :: host.fs_grant(".", empty) ?? panic("empty grant")
+    print(read_grant.rights == read)
+    print(write_grant.rights == write)
+    print(read_write_grant.rights == read_write)
+    print(empty_grant.rights == empty)
+}

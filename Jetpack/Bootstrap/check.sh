@@ -105,6 +105,24 @@ if [[ -z "$jet" || ! -x "$jet" ]]; then
   echo "jetpack-bootstrap: JET must name the admitted native jet compiler" >&2
   exit 69
 fi
+# The compiler's identity and toolchain root are environment facts of the
+# admitted compiler: the IDENTITY file beside $JET names it (the compiler refuses
+# a host without JET_COMPILER_IDENTITY), and the Core library tree is the
+# repository that holds this script. Explicit settings win.
+if [[ -z "${JET_COMPILER_IDENTITY:-}" ]]; then
+  identity_file="$(dirname "$jet")/IDENTITY"
+  identity=""
+  if [[ -r "$identity_file" ]]; then IFS= read -r identity < "$identity_file" || true; fi
+  if [[ -z "$identity" ]]; then
+    echo "jetpack-bootstrap: JET_COMPILER_IDENTITY is unset and $identity_file is missing or empty" >&2
+    exit 69
+  fi
+  export JET_COMPILER_IDENTITY="$identity"
+fi
+if [[ -z "${JET_TOOLCHAIN_ROOT:-}" ]]; then
+  [[ -d "$repo/Core" ]] || { echo "jetpack-bootstrap: JET_TOOLCHAIN_ROOT is unset and $repo has no Core/ tree" >&2; exit 69; }
+  export JET_TOOLCHAIN_ROOT="$repo"
+fi
 
 root_tag="$(printf '%s\0%s\0%s\0%s' "$(cd "$source_root" && pwd)" "${sorted_areas:-*}" "$own_area" "$deps_from_head" | sha256sum | cut -c1-10)"
 scratch="$HOME/.cache/jet-dev/jetpack-bootstrap/$worker-$root_tag"
@@ -205,7 +223,7 @@ if (( hosted == 1 )); then
   unit_record hosted
   bounded hosted "${JETPACK_HOSTED_MEM:-20G}" "${JETPACK_HOSTED_SECS:-5400}" "$scratch/hosted/project" "$jet" build src/jetpack.jet || overall=1
   node "$bootstrap/locate.mjs" check "$scratch/hosted/jetpack.map.json" "$scratch/hosted.log" > "$scratch/hosted-errors.txt" || true
-  binary="$scratch/hosted/project/jetpack"
+  binary="$scratch/hosted/project/.jet/build/jetpack"
   if (( overall == 0 )) && [[ -x "$binary" ]]; then
     printf 'hosted-binary: %s\nhosted-binary-sha256: %s\n' "$binary" "$(sha256sum "$binary" | cut -d' ' -f1)" >> "$receipt"
   else

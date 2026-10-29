@@ -100,7 +100,10 @@ fn sema_casing_ascii_has_case(name: String, case: SemaNameCase) -> Bool? Never! 
     Val(true)
 }
 
+// The compile-time mark `$` is part of a name (a template splice, `fn $method`);
+// the case policy reads the name under it.
 fn sema_casing_has_case(name: String, case: SemaNameCase) -> Bool {
+    if name.starts_with("$") -> return sema_casing_has_case(sema_casing_drop_first_byte(name), case)
     if sema_casing_ascii_has_case(name, case) == .Val(ascii) -> return ascii
     if name == "_" -> return true
     body := name

@@ -7,8 +7,8 @@
 // stale v1/v2, comma/Formatting and four-input Rust goldens (Rust TANDEM).
 // Original crypto/data byte contracts, cause identity and module corpus stay;
 // no compatibility wire or registry fork is introduced.
-use jet_foundation.[DiagnosticCryptoMisuseReason, DiagnosticStructured, DiagnosticOrigin, TextEdit, DIAGNOSTIC_ERROR, REPORT_SCHEMA, diagnostic_to_json, diagnostic_render_all_json, diagnostic_from_registry, diagnostic_caused_by, diagnostic_with_origin, diagnostic_with_structured_edit, foundation_embedded_core, mir_sha256_hex]
-use jet_driver.[JetDriverCompileRequest, JetDriverCompileTarget, JetDriverAuthorizedSourceSnapshot, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceFile, JetDriverHostFacts, JetDriverQueryExternalFile, jet_driver_embedded_core_sources]
+use jet_foundation.[DiagnosticCryptoMisuseReason, DiagnosticStructured, DiagnosticOrigin, TextEdit, DIAGNOSTIC_ERROR, diagnostic_from_registry, diagnostic_with_origin, diagnostic_with_structured_edit, sha256_hex]
+use jet_driver.[JetDriverCompileRequest, JetDriverAuthorizedSourceSnapshot, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceFile, JetDriverHostFacts]
 use jet_eval.[jet_eval_default_config]
 use jet_pkg_model.[BuildStamp]
 use jet_queries.[QueryKey, FileKey, InputKey]
@@ -132,7 +132,7 @@ fn lsp_diag_test_params(json: String) -> Dyn Never! {
 
 #Test("related imported cause owns UTF16 location and clear count") {
     source :: "😀x\na"
-    origin :: DiagnosticOrigin{display: "cause.jet", path: "/work/cause.jet", source: source, revision: mir_sha256_hex(source)}
+    origin :: DiagnosticOrigin{display: "cause.jet", path: "/work/cause.jet", source: source, revision: sha256_hex(source)}
     root :: diagnostic_with_origin(lsp_diag_test_report("E0956", "imported root", "why", "fix", Val(Span{start: 4, end: 5})), origin)
     dependent :: diagnostic_caused_by(lsp_diag_test_report("E0957", "dependent", "why", "fix", None), root)
     diagnostics :: [Diagnostic]{root, dependent}
@@ -172,8 +172,8 @@ fn lsp_diag_test_snapshot(relative: String, source: String, extras: [JetDriverAu
         authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: lsp_diag_test_path("/lsp"), identity: "lsp-fixture-root", allow_hardlinks: false, files: files, foreign_cache_files: [JetDriverAuthorizedSourceFile]{}}}, entry_root_identity: "lsp-fixture-root", entry_path: lsp_diag_test_path("/lsp/{relative}")},
         canonical_effect_source: core.effect_source(), core_sources: jet_driver_embedded_core_sources(core),
         host_facts: JetDriverHostFacts{target_triple: Val("x86_64-unknown-linux-gnu"), active_os: Val("linux"), compiler_identity: Val("jet@0.1.0#lsp-test"), build_stamp: Val(BuildStamp{git: None, dirty: false, toolchain: "0.1.0", at: ""})},
-        eval_config: jet_eval_default_config(), target: JetDriverCompileTarget.Native,
-        record_store: None, trace_sink: None, mir_lint_every_pass: false,
+        eval_config: jet_eval_default_config(),
+        record_store: None, trace_sink: None,
     }
     JetDriverQuerySnapshot{request: request, external_files: [JetDriverQueryExternalFile]{}, cwd: lsp_diag_test_path("/lsp")}
 }
@@ -426,9 +426,9 @@ fn lsp_diag_test_clean(checked: Shared<JetDriverCheckedQuery>) Never! {
 #Test("retain_document_diagnostics uses exact checked source and canonical path") {
     src :: "a b"
     raw :: lsp_diag_test_report("E0956", "root", "why", "fix", Val(Span{start: 0, end: 1}))
-    owned :: diagnostic_with_origin(raw.copy(), DiagnosticOrigin{display: "main.jet", path: "/work/main.jet", source: src, revision: mir_sha256_hex(src)})
-    other :: diagnostic_with_origin(raw.copy(), DiagnosticOrigin{display: "sibling.jet", path: "/work/sibling.jet", source: src, revision: mir_sha256_hex(src)})
-    stale :: diagnostic_with_origin(raw.copy(), DiagnosticOrigin{display: "main.jet", path: "/work/main.jet", source: "older", revision: mir_sha256_hex("older")})
+    owned :: diagnostic_with_origin(raw.copy(), DiagnosticOrigin{display: "main.jet", path: "/work/main.jet", source: src, revision: sha256_hex(src)})
+    other :: diagnostic_with_origin(raw.copy(), DiagnosticOrigin{display: "sibling.jet", path: "/work/sibling.jet", source: src, revision: sha256_hex(src)})
+    stale :: diagnostic_with_origin(raw.copy(), DiagnosticOrigin{display: "main.jet", path: "/work/main.jet", source: "older", revision: sha256_hex("older")})
     retained :: lsp_retain_document_diagnostics([Diagnostic]{raw, owned, other, stale}, lsp_diag_test_path("/work"), lsp_diag_test_path("main.jet"), src)
     assert_eq(retained.len(), 2)
     assert_eq(retained[0].origin, None)

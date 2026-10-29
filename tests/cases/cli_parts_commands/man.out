@@ -47,9 +47,6 @@ Show receipt-backed claims
 .B inspect shapes
 Show semantic shapes and projections
 .TP
-.B inspect accel
-Show vector proof and acceleration gate decisions
-.TP
 .B inspect decisions
 Show compiler decisions and their evidence
 .TP
@@ -503,9 +500,6 @@ With project parts: Show modules omitted from automatic discovery
 .TP
 .B --stdin-path
 With fmt -: Path label used in diagnostics when reading from stdin
-.TP
-.B --small
-With build/run/jobs: Favor a smaller binary
 .TP
 .B --lib
 With build: Emit the native Library and C header
@@ -963,12 +957,6 @@ With test/inspect build: Show function or diagnostic coverage
 .B --verify
 With build: Rebuild and compare one indexed receipt artifact
 .TP
-.B --rust
-With emit: Print generated Rust source
-.TP
-.B --emit-generated
-With build: Copy generated Jet sources into `.jet/generated/`
-.TP
 .B -u
 Short form of --update-snapshots
 .TP
@@ -977,6 +965,45 @@ With build/run/dev/jobs/test: Optimize for release
 .TP
 .B --profile
 With build/run/dev/jobs/package/test: How hard to optimize: release, debug, ci, hardened, or a named optimization bundle
+.TP
+.B --optimize
+With build/run/dev/test: How hard to optimize: none, basic or full
+.TP
+.B --bounds
+With build/run/dev/test: What a failed bounds check does: fatal, report or off
+.TP
+.B --debug-info
+With build/run/dev/test: Whether the image carries DWARF debug info: true or false
+.TP
+.B --small
+With build/run/dev/test: Favor a smaller binary by keeping inlining to the O1 limits: true or false
+.TP
+.B --inline
+With build/run/dev/test: Which calls the optimizer inlines: auto, always_marked or off
+.TP
+.B --backtrace
+With build/run/dev/test: What a fault report shows of the stack: full, brief or off
+.TP
+.B --dead-code
+With build/run/dev/test: Whether the image keeps the package's unreached functions: remove or keep
+.TP
+.B --write-generated
+With build/run/dev/test: Whether fn build's generated sources are written to .jet/generated/: off or on
+.TP
+.B --output-dir
+With build/run/dev/test: The directory jet build writes its executables to ("" is .jet/build)
+.TP
+.B --libs
+With build/run/dev/test: More C libraries the native link resolves foreign symbols against
+.TP
+.B --link-args
+With build/run/dev/test: More native link inputs: -L<dir>, -l<name> or a .a archive path
+.TP
+.B --os
+With build/run/dev/test: The operating system the image runs on: linux, macos, windows, web or freestanding
+.TP
+.B --min-os
+With build/run/dev/test: The oldest OS version the image runs on ("" is none)
 .TP
 .B --set
 With build/run/dev/jobs/test: Set one declared package setting as key=value

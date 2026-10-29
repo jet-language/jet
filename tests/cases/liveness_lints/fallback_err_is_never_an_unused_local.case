@@ -1,0 +1,13 @@
+# Claim: the err a ?? fallback declares is compiler-made, so L0101 never reports it, in a value
+# fallback, an early-return fallback, a Core call, or an #Unsafe fn called inside an #Unsafe block.
+# A user binding named err that is never read is still reported.
+fixture: fallback_err_is_never_an_unused_local.fixture
+env: NO_COLOR=1
+step: jet check main.jet
+exit: 0
+stderr: ~ "Local binding `err` is never read" # a real unused err still warns
+stderr: ~ "main.jet:21:5" # the user binding at line 21 is the only report
+stderr: !~ "main.jet:8:" # no report for the fallback err on line 8
+stderr: !~ "main.jet:12:" # no report for the fallback err on line 12
+stderr: !~ "main.jet:18:" # no report for the fallback err on line 18
+stderr: !~ "main.jet:19:" # no report for the fallback err on line 19

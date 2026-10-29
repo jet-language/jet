@@ -1,0 +1,17 @@
+
+fn shielded_tail() -> Stream<Int> {
+    #Shield {
+        yield 1
+        print("shielded: after")
+    }
+    print("unshielded: after")
+    yield 2
+}
+
+fn run() {
+    loop x in shielded_tail() {
+        print("consumer: {x}")
+        break
+    }
+    print("closed")
+}

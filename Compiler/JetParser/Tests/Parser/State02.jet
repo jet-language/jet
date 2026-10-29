@@ -1,3 +1,6 @@
+use jet_foundation.[BinOp, DiagnosticFixApplicability, DiagnosticFixSafety, Program, Type]
+use jet_lexer.[TOKEN_BLOCK_COMMENT, TOKEN_LINE_COMMENT, Token, lex]
+use jet_parser.[jfmt_check_parse_accepts, parse_tokens, parser_prepare_tokens]
 
 // Rust: crates/jet-parser/src/Parser/mod.rs:1361
 fn program(source: String) -> Program { parser_test_program(source) }
@@ -16,9 +19,9 @@ fn program(source: String) -> Program { parser_test_program(source) }
     // Token value equality is observable; Rust Cow pointer identity is not a Jet API.
 }
 
-// Rust: crates/jet-parser/src/Parser/mod.rs:1383
-#Test("prefix_failure_contracts_cover_nested_type_positions") {
-    parsed :: program("struct Holder {{\noptional: Int?\nunit: !IOError\nunion: Int (DbError | TimeoutError)!\ncallback: fn(Int? IOError!) IOError!\nimpossible: !Never\n}}\nalias Box<T> :: T? IOError!\nfn fetch(value: Int? IOError!) -> Int? (DbError | TimeoutError)! {{ value }}\nfn save() IOError! {{}}\nfn run() {{}}\n")
+// Rust: crates/jet-parser/src/Parser/mod.rs:1419
+#Test("suffix_failure_contracts_cover_nested_type_positions") {
+    parsed :: program("struct Holder {{\noptional: Int?\nunit: IOError!\nunion: Int (DbError | TimeoutError)!\ncallback: fn(Int? IOError!) IOError!\nimpossible: Never!\n}}\nalias Box<T> :: T? IOError!\nfn fetch(value: Int? IOError!) -> Int? (DbError | TimeoutError)! {{ value }}\nfn save() IOError! {{}}\nfn run() {{}}\n")
     holder :: loop item in parsed.items {
         if item == .Struct(def) && def.name == "Holder" -> break def
     } ?? panic("Holder")
@@ -54,7 +57,6 @@ fn program(source: String) -> Program { parser_test_program(source) }
     assert(field.serde_markers[0].arg_labels[0] == None)
 }
 
-
 // Rust: crates/jet-parser/src/Parser/mod.rs:1515
 #Test("dispatch_atom_boolean_group_has_safe_source_edit") {
     source :: "fn run() {{\n    n :: 48\n    ready :: true\n    if n < {{\n        48 | 45 && ready -> print(\"hit\")\n        else -> print(\"miss\")\n    }}\n}}\n"
@@ -84,7 +86,9 @@ fn program(source: String) -> Program { parser_test_program(source) }
     source :: "fn host_open(path: String) -[FS]> Int\nfn run() {{}}\n"
     lexed :: lex(source.bytes())
     assert(lexed.diagnostics.is_empty())
-    assert(!jfmt_check_parse_accepts(parser_test_result(source).diagnostics))
+    // Rust `parse(&tokens).is_err()`: the ordinary parse reports an error. The check
+    // acceptance (`jfmt_check_parse_accepts`) admits E0081 on purpose, as `parse_for_check` does.
+    assert(loop d in parser_test_result(source).diagnostics { if d.severity == 1 -> break true } ?? false)
     checked :: parser_test_result(source)
     assert(loop d in checked.diagnostics { if d.code == "E0081" -> break true } ?? false)
     names := [String]{}
@@ -107,7 +111,8 @@ fn program(source: String) -> Program { parser_test_program(source) }
 
 // Rust: crates/jet-parser/src/Parser/mod.rs:1637
 #Test("derive_generic_type_holes_stay_in_the_template_ast") {
-    parsed :: program("\nderive T.TypeName {{\n    info :: T.reflect()\n    param :: info.type_params[0].name\n    fn get_value(self) -> @param {{ ~self.value }}\n    fn type_name(self) -> String {{ T.$name }}\n}}\n")
+    // The Rust fixture's retired `~self.value` (binary_unary.rs:949) is spelled `.copy()`.
+    parsed :: program("\nderive T.TypeName {{\n    info :: T.reflect()\n    param :: info.type_params[0].name\n    fn get_value(self) -> @param {{ self.value.copy() }}\n    fn type_name(self) -> String {{ T.$name }}\n}}\n")
     template :: loop item in parsed.items { if item == .UserDerive(d) -> break d } ?? panic("user derive")
     function :: loop body_item in template.body {
         if body_item == .Item(item) {
@@ -125,7 +130,7 @@ fn program(source: String) -> Program { parser_test_program(source) }
     diagnostics :: parser_test_errors(source)
     assert(diagnostics.len() == 1)
     assert(diagnostics[0].code == "E0003")
-    _ :: program("\nfn build(b: BuildContext) {{\n    b.generate(\"made\") {{\n        impl Thing.Debug {{\n            fn debug(self) -> String {{ \"generated\" }}\n        }}\n    }}\n}}\n")
+    _ :: program("\nfn build(b: Build) {{\n    b.generate(\"made\") {{\n        impl Thing.Debug {{\n            fn debug(self) -> String {{ \"generated\" }}\n        }}\n    }}\n}}\n")
 }
 
 // Rust: crates/jet-parser/src/Parser/mod.rs:1707
@@ -144,7 +149,7 @@ fn program(source: String) -> Program { parser_test_program(source) }
     task_group :: loop stmt in run.body { if stmt == .TaskGroup(_, _, _, body, _) -> break body } ?? panic("task group")
     binding :: loop stmt in task_group { if stmt == .Val(b) -> break b } ?? panic("binding")
     if binding.init == {
-        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret) -> {
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, _) -> {
             assert(method == parser_test_task_name("spawn"))
             assert(args.len() == 1)
             assert(if args[0].expr == { .Lambda(_) -> true else -> false })

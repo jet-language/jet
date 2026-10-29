@@ -2,6 +2,10 @@
 // The machine artifact store and canonical Hangar remain distinct stores; this
 // source store holds path/git dependency trees identified by their full lock
 // fingerprint. All filesystem operations reuse Foundation's retained authority.
+use jet_foundation.[Diagnostic, diagnostic_from_registry]
+use jetpack_foundation.[FoundationDirectoryAuthority, foundation_open_directory_authority]
+use core.sys as sys
+use core.files as files
 
 #Error
 struct PackageSourceStoreError { diagnostic: Diagnostic }
@@ -70,10 +74,11 @@ fn pkg_source_snapshot_authority(source: FoundationDirectoryAuthority) -[FS, Env
     root :: pkg_source_store_dir()
     store :: foundation_open_directory_authority(root, true) ?? return Err(pkg_source_store_io("creating source snapshot store", root, err))
     snapshots :: store.child(".snapshots", true) ?? return Err(pkg_source_store_io("opening source snapshot root", files.join(root, ".snapshots"), err))
-    pkg_source_snapshot_into(source, snapshots)
+    pkg_source_snapshot_into(source, ^snapshots)
 }
 
-fn pkg_source_snapshot_into(source: FoundationDirectoryAuthority, snapshots: FoundationDirectoryAuthority) -[FS, Env, Time]> PackageSourceSnapshot PackageSourceStoreError! {
+// The snapshot takes `snapshots`: it removes its stage through that handle on close.
+fn pkg_source_snapshot_into(source: FoundationDirectoryAuthority, snapshots: ^FoundationDirectoryAuthority) -[FS, Env, Time]> PackageSourceSnapshot PackageSourceStoreError! {
     stage :: snapshots.private_child("source") ?? return Err(pkg_source_store_io("creating source snapshot", snapshots.path(), err))
     name :: files.basename(stage.path())
     stage.copy_tree_from(source) ?? {
@@ -84,7 +89,7 @@ fn pkg_source_snapshot_into(source: FoundationDirectoryAuthority, snapshots: Fou
         snapshots.remove_tree(name).drop("snapshot cleanup must preserve the hash error")
         return Err(pkg_source_store_io("hashing source snapshot", stage.path(), err))
     }
-    Ok(PackageSourceSnapshot{directory: stage, content_hash: hash, parent: snapshots, name: name})
+    Ok(PackageSourceSnapshot{directory: stage, content_hash: hash, parent: ^snapshots, name: name})
 }
 
 // Path and git dependencies use this one install path, as ensure_git_dep does

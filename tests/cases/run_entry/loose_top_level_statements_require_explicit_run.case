@@ -1,0 +1,9 @@
+# tests/run_entry.rs::loose_top_level_statements_require_explicit_run at tests/run_entry.rs:21; hand-port
+fixture: loose_top_level_statements_require_explicit_run.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet --json
+exit: 1
+json: stdout doc $.reports[?code="E0621"] #>= 1 # tests/run_entry.rs:26 the explicit-run diagnostic is reported
+json: stdout doc $.reports[?code="E0621"][0] !has "fix_edits" # tests/run_entry.rs:30 it offers no implicit-run rewrite

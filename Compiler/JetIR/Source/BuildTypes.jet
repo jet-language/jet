@@ -1,0 +1,3603 @@
+// The IR builder's types: checked types to IR type rows and layouts
+// (structs, enums, carriers, handles), operators and comparisons, value
+// rendering (Display/Show/Debug) and numeric conversions.
+
+use jet_foundation.[CORE_ENUM_ROWS, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TDeclarationOwnership, TField, FnBody, TGenericParam, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_source_owns_type, name_rows_set, name_rows_value, type_carrier_identity, type_name, type_table_intern, type_union_member_tag]
+
+// A rendered type's identity: its declaration key when it names one (every
+// instance of a generic declaration shares it).
+fn ir_render_type_key(type_rows: [String:Int], types: [TTypeDef], ty: Type) -> String Never! {
+    plain :: ir_untag(ty)
+    name :: ir_nominal_name(plain) ?? return type_carrier_identity(plain)
+    if type_rows.get(name) == .Val(row) -> return "decl:{types[row].key}"
+    type_carrier_identity(plain)
+}
+
+// A `Never`-tagged or pattern-tagged type without its tags.
+fn ir_untag(ty: Type) -> Type Never! {
+    if ty == .Tagged(_, inner) -> return ir_untag(inner)
+    ty.copy()
+}
+
+fn ir_raw_pointer(ty: Type) -> Bool Never! {
+    if ir_untag(ty) == .Apply(name, args) -> return name == "Ptr" && args.len() == 1
+    false
+}
+
+fn ir_never_type(ty: Type) -> Bool Never! {
+    ir_untag(ty) == (Type.Named{name: "Never"})
+}
+
+// Whether `ty` is a SharedGuard that edits, by the read/edit provenance tag
+// it keeps through transparent tags; None for any other type.
+fn ir_shared_guard_editable(ty: Type) -> Bool? Never! {
+    if ty == .Tagged(marker, inner) {
+        if ir_untag(inner) == .Apply(name, args) {
+            if name != "SharedGuard" || args.len() != 1 -> return None
+        } else {
+            return None
+        }
+        if marker == .Internal(internal_tag) {
+            if internal_tag == .SharedGuardRead -> return Val(false)
+            if internal_tag == .SharedGuardEdit -> return Val(true)
+        }
+        return ir_shared_guard_editable(inner)
+    }
+    None
+}
+
+// The success of a `T Never!` carrier.
+fn ir_never_carrier_success(ty: Type) -> Type? Never! {
+    if ir_untag(ty) == .Result(ok, err) {
+        if ir_never_type(err) -> return Val(ok)
+    }
+    None
+}
+
+// ---------------------------------------------------------------------------
+// Types.
+
+fn ir_layout(kind: IRTypeKind, ty: Type, size: Int, align: Int, class: IRClass, signed: Bool, bits: Int, drop: String) -> IRType Never! {
+    IRType{ty: ty, kind: kind, size: size, align: align, class: class, signed: signed, bits: bits, drop: drop}
+}
+
+// A pointer-sized owned value the runtime ends with `drop` and copies with
+// `clone` ("" when it only moves).
+fn ir_owned_layout(kind: IRTypeKind, ty: Type, drop: String, clone: String) -> IRType Never! {
+    IRType{ty: ty, kind: kind, size: 8, align: 8, class: if kind == .Int -> IRClass.Integer else -> IRClass.Pointer, signed: kind == .Int, bits: 64, drop: drop, clone: clone}
+}
+
+// The bytes an IntN of `bits` packs into: 1, 2, 4 or 8.
+fn ir_packed_bytes(bits: Int) -> Int Never! {
+    if bits <= 8 -> return 1
+    if bits <= 16 -> return 2
+    if bits <= 32 -> return 4
+    8
+}
+
+// The type row of a checked type, or None when the builder cannot lay it out yet.
+// A scalar's row is interned once and then read from m.scalar_rows.
+fn ir_type_row(m: &IRModule, ty: Type) -> Int? Never! {
+    code :: ir_scalar_code(ty)
+    if code >= 0 && code < m.scalar_rows.len() && m.scalar_rows[code] >= 0 -> return Val(m.scalar_rows[code])
+    row :: if ty == {
+        .Int -> ir_owned_layout(IRTypeKind.Int, ty, "jet_rt_int_drop", "jet_rt_int_clone")
+        .Bool -> ir_layout(IRTypeKind.Bool, ty, 1, 1, IRClass.Integer, false, 8, "")
+        .Float -> ir_layout(IRTypeKind.Float, ty, 8, 8, IRClass.Float, true, 64, "")
+        .Float32 -> ir_layout(IRTypeKind.Float32, ty, 4, 4, IRClass.Float, true, 32, "")
+        .Char -> ir_layout(IRTypeKind.Char, ty, 8, 8, IRClass.Integer, false, 32, "")
+        .String -> ir_owned_layout(IRTypeKind.String, ty, "jet_rt_string_drop", "jet_rt_string_clone")
+        .IntN(signed, bits) -> {
+            if bits > 64 { return None }
+            // Packed in whole bytes of a power-of-two width in aggregates.
+            bytes :: ir_packed_bytes(bits)
+            ir_layout(IRTypeKind.Word, ty, bytes, bytes, IRClass.Integer, signed, bits, "")
+        }
+        .InlineRange(base, _, _) -> { return ir_type_row(&m, base) }
+        .Tagged(_, inner) -> { return ir_type_row(&m, inner) }
+        .Named(name) -> {
+            if name != "Unit" && name != "()" && name != "Never" { return None }
+            ir_layout(IRTypeKind.Unit, ty, 0, 1, IRClass.Integer, false, 0, "")
+        }
+        .Tuple(fields) -> {
+            if fields.len() != 0 { return None }
+            ir_layout(IRTypeKind.Unit, ty, 0, 1, IRClass.Integer, false, 0, "")
+        }
+        else -> { return None }
+    }
+    interned :: ir_intern_type(&m, type_carrier_identity(ty), row)
+    if code >= 0 {
+        loop m.scalar_rows.len() <= code -> &m.scalar_rows.push(-1)
+        m.scalar_rows[code] = interned
+    }
+    Val(interned)
+}
+
+// The slot of a scalar checked type in IRModule.scalar_rows (its row depends
+// on nothing but the type), -1 for any other type.
+fn ir_scalar_code(ty: Type) -> Int Never! {
+    if ty == {
+        .Int -> 0
+        .Bool -> 1
+        .Float -> 2
+        .Float32 -> 3
+        .Char -> 4
+        .String -> 5
+        .Named(name) -> if name == "Unit" -> 6 else if name == "()" -> 7 else if name == "Never" -> 8 else -> -1
+        .Tuple(fields) -> if fields.len() == 0 -> 9 else -> -1
+        .IntN(signed, bits) -> if bits >= 1 && bits <= 64 -> 10 + (if signed -> 64 else -> 0) + bits - 1 else -> -1
+        else -> -1
+    }
+}
+
+// ir_type_row extended to declared types: a payload-free enum is its
+// discriminant word (the variant index), a distinct type or alias is its
+// base.
+fn ir_value_type(m: &IRModule, p: IRProgram, written: Type) -> Int? Never! {
+    ir_value_type_in(&m, p, written, [String]{})
+}
+
+// ir_value_type while the structs `laying` (instance identities) are being laid
+// out: one of them reached again through a pointer (an Option, Result or List
+// member) is already known to lay out; reached inline it has no finite size.
+// A type's row rests on the type alone when no struct is being laid out, so
+// it is kept in m.value_rows by the type's index in m.value_types; a type
+// reached again while its own row is being laid out (-2) is laid out anew.
+fn ir_value_type_in(m: &IRModule, p: IRProgram, written: Type, laying: [String]) -> Int? Never! {
+    ty :: ir_subst(m, written)
+    if ir_type_row(&m, ty) == .Val(row) -> return Val(row)
+    if laying.len() > 0 -> return ir_value_type_laid(&m, p, ty, laying)
+    index :: type_table_intern(&m.value_types, ty)
+    loop m.value_rows.len() <= index -> &m.value_rows.push(-2)
+    known :: m.value_rows[index]
+    if known >= 0 -> return Val(known)
+    if known == -1 -> return None
+    found :: ir_value_type_laid(&m, p, ty, laying)
+    m.value_rows[index] = found ?? -1
+    found
+}
+
+fn ir_value_type_laid(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) -> Int? Never! {
+    if ir_shared_guard_editable(ty) == .Val(editable) {
+        // An owned runtime permit with no Clone; which permit its drop
+        // releases follows its checked read/edit provenance.
+        drop :: if editable -> "jet_rt_native_shared_edit_guard_drop" else -> "jet_rt_native_shared_read_guard_drop"
+        return Val(ir_intern_type(&m, "{drop}:{type_carrier_identity(ty)}", ir_owned_layout(IRTypeKind.Pointer, ty, drop, "")))
+    }
+    if ty == .Tagged(_, inner) -> return ir_value_type_in(&m, p, inner, laying)
+    if ty == .InlineRange(base, _, _) -> return ir_value_type_in(&m, p, base, laying)
+    if ty == .Option(inner) {
+        if !ir_pointee_lays_out(&m, p, inner, laying) -> return None
+        if ir_option_int_payload(&m, p, inner, laying) {
+            // One word (Build.jet IR_OPTION_INT_NONE): the Int's own when
+            // present, the niche 2^62 when absent; it drops and copies as
+            // the Int does.
+            word := ir_layout(IRTypeKind.Word, ty, 8, 8, IRClass.Integer, true, 64, "jet_rt_int_drop")
+            word.clone = "jet_rt_int_clone"
+            return Val(ir_intern_type(&m, type_carrier_identity(ty), word))
+        }
+        // A box pointer, null when absent; its payload lies at offset 0.
+        boxed :: ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, ""))
+        return Val(ir_mark_box(&m, boxed))
+    }
+    if ty == .Result(ok, err) {
+        // A box pointer: selector word at 0 (Ok 1, Err 0), payload at 8.
+        if !ir_pointee_lays_out(&m, p, ok, laying) || !ir_pointee_lays_out(&m, p, err, laying) -> return None
+        boxed :: ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, ""))
+        return Val(ir_mark_box(&m, boxed))
+    }
+    if ty == .List(element) {
+        // The address of an inline header: len at 0, cap at 8, element data
+        // at 16; cap 0 is a frozen buffer.
+        if !ir_pointee_lays_out(&m, p, element, laying) -> return None
+        interned :: ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 24, 8, IRClass.Pointer, false, 64, ""))
+        return Val(ir_mark_counted(&m, interned))
+    }
+    if ty == .Map(_, _, _) -> return ir_map_row(&m, p, ty, laying)
+    // A counted closure box pointer (BuildCoreClosures.jet ir_closure_row).
+    if ty == .Fn(_, _, _, _, _, _) -> return Val(ir_closure_row(&m, ty))
+    if ty == .TraitObject(_) {
+        // A trait value box pointer: the concrete payload's key word at 0,
+        // the payload from 8.
+        return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, "")))
+    }
+    if ty == .Tuple(fields) {
+        members :: ir_tuple_members_in(&m, p, fields, laying) ?? return None
+        size :: ir_struct_size(m, members)
+        interned :: ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, if size < 8 -> 8 else -> size, 8, IRClass.Pointer, false, 64, ""))
+        return Val(ir_mark_members(&m, interned, members))
+    }
+    if ty == .Union(_) {
+        // A box of its structural enum, one payload per member
+        // (ir_add_union_types).
+        row :: ir_type_def(p, ir_union_key(ty)) ?? return None
+        boxed :: ir_intern_type(&m, "enum:{p.types[row].key}", ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, ""))
+        return Val(ir_mark_box(&m, boxed))
+    }
+    if ir_string_view(ty) -> return ir_type_row(&m, Type.String)
+    if ir_view_element(ty) == .Val(element) {
+        // A View of a List is carried as the List's header.
+        if !ir_pointee_lays_out(&m, p, element, laying) -> return None
+        return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 24, 8, IRClass.Pointer, false, 64, "")))
+    }
+    if ty == .FixedList(element, _) {
+        // `[T#N]` is carried as the List of its N elements.
+        return ir_value_type_in(&m, p, Type.List{element: element}, laying)
+    }
+    if ty == .Shared(_) {
+        // An owned runtime JetShared handle.
+        return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_owned_layout(IRTypeKind.Pointer, ty, "jet_rt_native_shared_drop", "jet_rt_native_shared_clone")))
+    }
+    if ir_iter_element(ty) == .Val(element) {
+        // An owned native iterator handle that only moves.
+        if !ir_pointee_lays_out(&m, p, element, laying) -> return None
+        return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_owned_layout(IRTypeKind.Pointer, ty, "jet_rt_native_iter_drop", "")))
+    }
+    if ir_set_element(ty) == .Val(element) {
+        // The ordered Map<T, Unit> header: len at 0, cap at 8, entry data at
+        // 16; its element is a map key.
+        key :: ir_value_type_in(&m, p, element, laying) ?? return None
+        if ir_map_key_kind(m, key) == "" -> return None
+        interned :: ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 24, 8, IRClass.Pointer, false, 64, ""))
+        return Val(ir_mark_counted(&m, interned))
+    }
+    if ir_priority_queue_element(ty) == .Val(element) {
+        // The List header over the heap: len at 0, cap at 8, element data at
+        // 16; its element needs a native order.
+        heap_element :: ir_value_type_in(&m, p, element, laying) ?? return None
+        if ir_map_key_kind(m, heap_element) == "" -> return None
+        interned :: ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 24, 8, IRClass.Pointer, false, 64, ""))
+        return Val(ir_mark_counted(&m, interned))
+    }
+    if ir_task_element(ty) != None -> return Val(ir_task_row(&m, ty))
+    if ir_channel_element(ty, "Sender") != None -> return Val(ir_channel_row(&m, ty, "Sender"))
+    if ir_channel_element(ty, "Receiver") != None -> return Val(ir_channel_row(&m, ty, "Receiver"))
+    if ir_event_type(ty) -> return Val(ir_event_row(&m, ty))
+    if ir_scope_guard_type(ty) -> return Val(ir_scope_guard_row(&m, ty))
+    if ir_atomic_scalar(ty) == .Val(scalar) -> return Val(ir_atomic_row(&m, ty, ir_atomic_lane(scalar) ?? ""))
+    // A raw pointer `*T` is a bare address: no drop and no copy fixup.
+    if ir_raw_pointer(ty) -> return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, "")))
+    name :: ir_nominal_name(ty) ?? return None
+    args :: ir_type_args(ty)
+    if args.len() == 0 {
+        if ir_handle_row(&m, p, ty, name) == .Val(handle) -> return Val(handle)
+    }
+    row :: ir_type_def(p, name) ?? {
+        // The compiler-owned `ParseError` (of Int.parse, String.to_int, ...) is an
+        // alias of String.
+        if name == "ParseError" -> return ir_type_row(&m, Type.String)
+        if args.len() == 0 && ir_host_value_name(name) -> return Val(ir_intern_type(&m, "host:{name}", ir_layout(IRTypeKind.Word, ty, 8, 8, IRClass.Integer, false, 64, "")))
+        return None
+    }
+    definition :: p.types[row]
+    // A generic declaration lays out per instance, its parameters bound to the
+    // instance's arguments; an instance of a Core or runtime-carried generic is one
+    // of the builder's own carriers, not its declared fields, unless Core source
+    // owns the declaration (DataStream<T>, DataLoader<T>: its Jet fields on every
+    // tier).
+    if definition.generic_params.len() != args.len() -> return None
+    if args.len() > 0 && !core_source_owns_type(definition.key) && (definition.key.starts_with("<corelib>/") || ir_runtime_handle(name) != None) -> return None
+    identity :: ir_instance_identity(definition.key, args)
+    if definition.kind == {
+        .Enum(variants, _) -> {
+            loop variant in variants {
+                if variant.payload != .Unit {
+                    // A heap box: discriminant word at 0, the variant's payload
+                    // members from 8.
+                    boxed :: ir_intern_type(&m, "enum:{identity}", ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, ""))
+                    return Val(ir_mark_box(&m, boxed))
+                }
+            }
+            return Val(ir_intern_type(&m, "enum:{identity}", ir_layout(IRTypeKind.Word, ty, 8, 8, IRClass.Integer, true, 64, "")))
+        }
+        .Struct(_, _) -> { return ir_struct_row(&m, p, ty, row, args, identity, laying) }
+        .Distinct(base, _) -> { return ir_value_type_in(&m, p, ir_instance_type(p, row, args, base), laying) }
+        .Alias(target) -> { return ir_value_type_in(&m, p, ir_instance_type(p, row, args, target), laying) }
+        else -> { return None }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Atomic<T>: ONE inline 8-aligned word, borrowed by its storage address (a
+// local, a struct member); the runtime family jet_rt_atomic_<lane>_* reads
+// and writes it in place. An Atomic<Int> word owns one exact Int its drop
+// releases.
+
+// The runtime lane of Atomic scalar `scalar`, None for a type no Atomic
+// carries.
+fn ir_atomic_lane(scalar: Type) -> String? Never! {
+    if ir_untag(scalar) == {
+        .Bool -> return Val("bool")
+        .Int -> return Val("int")
+        .IntN(signed, bits) -> {
+            if bits == 32 -> return Val(if signed -> "i32" else -> "u32")
+            if bits == 64 -> return Val(if signed -> "i64" else -> "u64")
+        }
+        .InlineRange(inner, _, _) | .Quantity(inner, _) -> return ir_atomic_lane(inner)
+        .Named(name) -> {
+            if name == "Bool" -> return Val("bool")
+        }
+        else -> {}
+    }
+    None
+}
+
+// The scalar of Atomic type `ty`, None for any other type.
+fn ir_atomic_scalar(ty: Type) -> Type? Never! {
+    if ir_untag(ty) == .Apply(name, args) {
+        if (name == "Atomic" || name.ends_with("::Atomic") || name.ends_with(".Atomic")) && args.len() == 1 && ir_atomic_lane(args[0]) != None -> return Val(args[0])
+    }
+    None
+}
+
+// The row of Atomic type `ty` of lane `lane`: an 8-byte inline aggregate
+// whose value is its storage address; an Atomic<Int> drops through its glue
+// (ir_drop_glue).
+fn ir_atomic_row(m: &IRModule, ty: Type, lane: String) -> Int Never! {
+    row :: ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 8, 8, IRClass.Pointer, false, 64, ""))
+    if lane == "int" && m.types[row].drop == "" -> m.types[row].drop = ir_drop_key(m, row)
+    row
+}
+
+// The row of struct declaration `row` applied to `args` (`identity`), None
+// when it does not lay out. A result that does not rest on a struct the
+// caller is still laying out (`laying`) is the same in every context and is
+// kept in m.layouts by identity: m.layout_low is the lowest `laying` index a
+// short cut (ir_laying_touch) read while the result was computed.
+fn ir_struct_row(m: &IRModule, p: IRProgram, ty: Type, row: Int, args: [Type], identity: String, laying: [String]) -> Int? Never! {
+    at :: ir_laying_at(laying, identity)
+    if at >= 0 {
+        ir_laying_touch(&m, at)
+        return None
+    }
+    memo :: "struct:{identity}"
+    known :: name_rows_value(m.layouts, memo) ?? -2
+    if known >= 0 -> return Val(known)
+    if known == -1 -> return None
+    depth :: laying.len()
+    outer :: m.layout_low
+    m.layout_low = depth
+    found :: ir_struct_row_laid(&m, p, ty, row, args, identity, laying)
+    touched :: m.layout_low
+    m.layout_low = if touched < outer -> touched else -> outer
+    if touched >= depth -> name_rows_set(&m.layouts, memo, found ?? -1)
+    found
+}
+
+fn ir_struct_row_laid(m: &IRModule, p: IRProgram, ty: Type, row: Int, args: [Type], identity: String, laying: [String]) -> Int? Never! {
+    members :: ir_struct_members_in(&m, p, row, args, laying, false) ?? return None
+    size :: ir_struct_size(m, members)
+    interned :: ir_intern_type(&m, "struct:{identity}", ir_layout(IRTypeKind.Aggregate, ty, if size < 8 -> 8 else -> size, 8, IRClass.Pointer, false, 64, ""))
+    Val(ir_mark_members(&m, interned, members))
+}
+
+// The index of instance identity `identity` in `laying`, -1 when absent:
+// `Slot<Slot<Int>>` lays out its `Slot<Int>` member inline.
+fn ir_laying_at(laying: [String], identity: String) -> Int Never! {
+    loop (index, laid) in laying {
+        if laid == identity -> return index
+    }
+    -1
+}
+
+// The index in `laying` of any instance of declaration `key`, -1 when
+// absent: a pointer to one breaks the cycle whatever its arguments.
+fn ir_laying_decl_at(laying: [String], key: String) -> Int Never! {
+    loop (index, laid) in laying {
+        if laid == key || laid.starts_with("{key}<") -> return index
+    }
+    -1
+}
+
+// A short cut read `laying` index `at`: results computed since rest on it.
+fn ir_laying_touch(m: &IRModule, at: Int) Never! {
+    if at < m.layout_low -> m.layout_low = at
+}
+
+// The type arguments of a nominal instance (none for a plain name).
+fn ir_type_args(ty: Type) -> [Type] Never! {
+    if ir_untag(ty) == .Apply(_, args) -> return args
+    [Type]{}
+}
+
+// The type arguments of the declaration instance IR type row `ty` lays out.
+fn ir_row_args(m: IRModule, ty: Int) -> [Type] Never! {
+    ir_type_args(m.types[ty].ty)
+}
+
+// The layout identity of declaration `key` applied to `args`.
+fn ir_instance_identity(key: String, args: [Type]) -> String Never! {
+    if args.len() == 0 -> return key.copy()
+    spelled :: loop arg in args -> type_carrier_identity(arg)
+    "{key}<{spelled.join(", ")}>"
+}
+
+// `written` (a member type of declaration `row`) in the terms of the
+// instance whose type parameters are bound to `args`.
+fn ir_instance_type(p: IRProgram, row: Int, args: [Type], written: Type) -> Type Never! {
+    if args.len() == 0 -> return written.copy()
+    names :: loop parameter in p.types[row].generic_params -> parameter.name
+    ir_subst_in(names, args, written)
+}
+
+// The runtime type behind a handle of nominal type `name`: the default Err is
+// the runtime's JetErr; a Core declaration the handle table does not name by
+// its key is named by its own name.
+fn ir_handle_runtime(p: IRProgram, name: String) -> IRRuntimeHandle? Never! {
+    runtime := ir_runtime_handle(name)
+    if ir_type_def(p, name) == .Val(row) {
+        definition :: p.types[row]
+        if definition.compiler_builtin == (Val(TCompilerBuiltin.DefaultErr)) {
+            runtime = ir_runtime_handle("Err")
+        } else if runtime == None && definition.key.starts_with("<corelib>/") {
+            runtime = ir_runtime_handle(definition.name)
+        }
+    }
+    runtime
+}
+
+// The row of a runtime-owned value behind an owned handle of nominal type
+// `name`: the default Err (the runtime's JetErr), a Core type the runtime
+// handle table names that has no Jet declaration, or whose Core declaration
+// has no record schema or native shape; None for any type the program lays
+// out itself. It rests on `name` alone (the row interns under its runtime's
+// key), so it is kept in m.handle_rows.
+fn ir_handle_row(m: &IRModule, p: IRProgram, ty: Type, name: String) -> Int? Never! {
+    known :: name_rows_value(m.handle_rows, name) ?? -2
+    if known >= 0 -> return Val(known)
+    if known == -1 -> return None
+    found :: ir_handle_row_laid(&m, p, ty, name)
+    name_rows_set(&m.handle_rows, name, found ?? -1)
+    found
+}
+
+fn ir_handle_row_laid(m: &IRModule, p: IRProgram, ty: Type, name: String) -> Int? Never! {
+    found :: ir_type_def(p, name)
+    handle :: ir_handle_runtime(p, name) ?? return None
+    // A bare `Group` is the task group handle (sema types `task.group`'s
+    // binding so); Core's data `Group` is always applied to its arguments.
+    if found == .Val(row) && name != "Group" {
+        definition :: p.types[row]
+        native :: ir_native_runtime_carrier(handle, name) || definition.compiler_builtin == (Val(TCompilerBuiltin.DefaultErr))
+        // A compiler-owned row (its key is its bare name) is no program type:
+        // a bare spelling takes its runtime row before any declaration. The
+        // canonical Dyn enum is the exception: it is declared in place and
+        // routes convert it to the runtime tree.
+        if ir_dyn_def(p, ty) != None -> return None
+        core :: name.starts_with("<corelib>/") || definition.key.starts_with("<corelib>/") || definition.key == definition.name
+        // A bare spelling of a Core declaration is that declaration: both
+        // spellings take the row its key does.
+        owned_shape :: ir_record_schema(handle) || ir_native_type(name) != None || core_source_owns_type(name) || (definition.key != name && (ir_native_type(definition.key) != None || core_source_owns_type(definition.key)))
+        if !native && (!core || owned_shape) -> return None
+    }
+    atom :: runtime_abi_atom(handle.runtime)
+    clone :: if handle.clone -> "jet_rt_handle_clone_{atom}" else -> ""
+    Val(ir_intern_type(&m, "handle:{handle.runtime}", ir_owned_layout(IRTypeKind.Pointer, ty, "jet_rt_handle_drop_{atom}", clone)))
+}
+
+// A compiler value with no declaration that build and comptime code hold
+// (the build context and its handles, `Dev`, the ProgramInfo snapshot and
+// its reflection records): a word naming the value in the evaluator's host
+// table, whose methods and fields the evaluator answers (ir_host_method).
+fn ir_host_value_name(name: String) -> Bool Never! {
+    if name == {
+        "Build" | "BuildPlan" | "BuildTarget" | "BuildAction" | "BuildToolchain" | "BuildProbe" | "BuildSigningIdentity" | "BuildError" | "Dev" | "SourceSpan" -> true
+        "ProgramInfo" | "TypeInfo" | "FunctionInfo" | "PackageInfo" | "CompilerDefinition" | "CompilerReference" | "CompilerCall" | "CompilerStructuralNode" -> true
+        "LayoutInfo" | "FieldInfo" | "MethodInfo" | "TypeParamInfo" | "MarkerInfo" | "StateInfo" | "TransitionInfo" | "FactInfo" | "DimensionInfo" | "DimensionAxis" | "EffectInfo" | "ArithmeticOperationInfo" -> true
+        else -> false
+    }
+}
+
+// The compiler value name type row `row` holds as a host word, if any.
+fn ir_host_value_row(m: IRModule, p: IRProgram, row: Int) -> String? Never! {
+    if m.types[row].kind != .Word -> return None
+    if m.types[row].ty == .Named(name) {
+        if ir_host_value_name(name) && ir_type_def(p, name) == None -> return Val(name.copy())
+    }
+    None
+}
+
+// Method `method` of compiler value `owner`, which the compiler answers
+// (ir_host_route kind 1): `{owner}.{method}`, impure, the call's span start
+// and end, (row, word)... over the receiver and the arguments, `impure`
+// inside an `#Impure` block. The span places a build host call's record and
+// failure at the call, not at the invocation.
+fn ir_host_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: String, method: String, receiver: Int, args: [Int], span: Span) -> Int Never! {
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    string_row :: ir_string_row(&m)
+    member :: ir_temp(&m, &b, string_row)
+    ir_emit(&b.f, IROp.ConstText, member, ir_intern_text(&m, "{owner}.{method}"), -1, -1, b.line)
+    impure :: if b.impure > 0 -> 1 else -> 0
+    operands := [Int]{member, ir_word_const(&m, &b, impure), ir_word_const(&m, &b, span.start), ir_word_const(&m, &b, span.end)}
+    words := [Int]{}
+    if !ir_host_operand(&m, p, &b, receiver, &operands, &words) -> return -1
+    loop argument in args {
+        if !ir_host_operand(&m, p, &b, argument, &operands, &words) -> return -1
+    }
+    answer :: ir_host_route(&m, &b, 1, row, operands)
+    loop word in words -> ir_release(&m, &b, word)
+    answer
+}
+
+// A host route of compile-time code: the comptime child hands its compiler
+// (JetRuntime ComptimeServe.jet) route `kind` (1 method, 2 field, 3 comptime
+// input) and a stack area of words, the answer's row key and then
+// `operands`; the compiler reads them and answers a value of row `row`, in
+// place when it is an aggregate (or a float, which a word cell carries).
+fn ir_host_route(m: &IRModule, b: &IRBuilder, kind: Int, row: Int, operands: [Int]) -> Int Never! {
+    pointer_row :: ir_pointer_row(&m)
+    area :: ir_temp(&m, &b, pointer_row)
+    count :: operands.len() + 1
+    ir_emit(&b.f, IROp.StackAddress, area, 8 * count, 8, -1, b.line)
+    key :: ir_host_row_key(&m, &b, row)
+    ir_emit(&b.f, IROp.Store, -1, area, 0, key, b.line)
+    loop (index, operand) in operands -> ir_emit(&b.f, IROp.Store, -1, area, 8 * (index + 1), operand, b.line)
+    kind_word :: ir_word_const(&m, &b, kind)
+    count_word :: ir_word_const(&m, &b, count)
+    row_kind :: m.types[row].kind
+    if row_kind == .Aggregate -> return ir_runtime(&m, &b, "jet_comptime_host_into", [Int]{kind_word, area, count_word}, row)
+    if row_kind == .Float || row_kind == .Float32 {
+        cell :: ir_temp(&m, &b, pointer_row)
+        ir_emit(&b.f, IROp.StackAddress, cell, 8, 8, -1, b.line)
+        word_row :: ir_word_row(&m)
+        _ :: ir_runtime(&m, &b, "jet_comptime_host_into", [Int]{cell, kind_word, area, count_word}, word_row)
+        return ir_load_at(&m, &b, cell, 0, row)
+    }
+    ir_runtime(&m, &b, "jet_comptime_host", [Int]{kind_word, area, count_word}, row)
+}
+
+// Appends operand `operand`'s type row and word to a host method's operands.
+fn ir_host_operand(m: &IRModule, p: IRProgram, b: &IRBuilder, operand: Int, operands: &[Int], words: &[Int]) -> Bool Never! {
+    word :: ir_expr(&m, p, &b, operand)
+    if ir_failed(b) -> return false
+    if word < 0 {
+        operand_span :: ir_body_node(p, b, operand).span
+        ir_fail(&b, operand_span, "Unit operand of a compiler host method")
+        return false
+    }
+    word_row :: b.f.slot_type[word]
+    &operands.push(ir_host_row_key(&m, &b, word_row))
+    &operands.push(word)
+    &words.push(word)
+    true
+}
+
+// A host route names an operand's type row by its intern key, a text the
+// compiler looks up in the comptime module's type_rows: the merge
+// (BuildMerge.jet) renumbers rows and data rows but no Const word.
+fn ir_host_row_key(m: &IRModule, b: &IRBuilder, row: Int) -> Int Never! {
+    string_row :: ir_string_row(&m)
+    key :: ir_temp(&m, &b, string_row)
+    text :: ir_row_key(m, row)
+    ir_emit(&b.f, IROp.ConstText, key, ir_intern_text(&m, text), -1, -1, b.line)
+    key
+}
+
+// Field `field` of the compiler value in slot `base`, which the compiler
+// answers (ir_host_route kind 2): field, row key, word.
+fn ir_host_field(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: Int, field: String, span: Span) -> Int Never! {
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    string_row :: ir_string_row(&m)
+    name :: ir_temp(&m, &b, string_row)
+    ir_emit(&b.f, IROp.ConstText, name, ir_intern_text(&m, field), -1, -1, b.line)
+    base_row :: b.f.slot_type[base]
+    row_key :: ir_host_row_key(&m, &b, base_row)
+    value :: ir_host_route(&m, &b, 2, row, [Int]{name, row_key, base})
+    ir_release(&m, &b, base)
+    value
+}
+
+// A field of a Jet-owned process carrier behind its handle: ProcessReceipt
+// and ProcessPlan hold one word per field at fixed offsets, the Test snapshot
+// (JetTestSuite) its exact-Int iteration and result. A List field's word
+// points at its header, so it reads like a boxed member. None for any other
+// handle or field.
+fn ir_process_member(m: &IRModule, p: IRProgram, ty: Type, name: String) -> IRMember? Never! {
+    nominal :: ir_nominal_name(ir_untag(ty)) ?? return None
+    handle :: ir_handle_runtime(p, nominal) ?? return None
+    fields :: if handle.runtime == {
+        "ProcessReceipt" -> [String]{"code", "output", "errors", "success", "signal", "timed_out", "executable_identity", "argv", "input_digest", "policy_digest", "backend", "authority", "descendants", "limits", "outputs", "redacted", "pid", "limit_hit"}
+        "ProcessPlan" -> [String]{"executable_identity", "argv", "input_digest", "policy_digest", "backend", "authority", "descendants", "limits", "outputs"}
+        "JetTestSuite" -> [String]{"iteration", "result"}
+        else -> { return None }
+    }
+    declared :: ir_declared_field_type(m, p, ty, name) ?? return None
+    row :: ir_value_type(&m, p, declared) ?? return None
+    kind :: m.types[row].kind
+    if handle.runtime == "JetTestSuite" && kind != .Int -> return None
+    if kind != .Int && kind != .Bool && kind != .String && kind != .Pointer && kind != .Aggregate && !ir_option_inline(m, row) -> return None
+    loop (index, field) in fields {
+        if field == name -> return Val(IRMember{name: name, offset: 8 * index, ty: row, boxed: kind == .Aggregate})
+    }
+    None
+}
+
+// Field `name` a runtime handle lends (RuntimeRoutes.jet IR_HANDLE_FIELDS),
+// read through the runtime's field export: a Float or Bool through the
+// address it returns, a String or converted carrier through the header it
+// writes into a frame slot, a nested handle as the word it returns. The
+// handle keeps the field, so the read is copied out before a fresh `base` is
+// released. -2 when the handle lends no such field.
+fn ir_handle_field(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: Int, name: String, field_ty: Type, span: Span) -> Int Never! {
+    if !ir_is_handle(m, b.f.slot_type[base]) -> return -2
+    nominal :: ir_nominal_name(ir_untag(ty)) ?? return -2
+    handle :: ir_handle_runtime(p, nominal) ?? return -2
+    lent :: ir_runtime_handle_field(handle.runtime, name) ?? return -2
+    row :: ir_value_type(&m, p, field_ty) ?? return ir_type_fail(&b, span, field_ty)
+    kind :: m.types[row].kind
+    matches :: if lent.kind == {
+        "Text" -> kind == .String
+        "Float" -> kind == .Float
+        "Flag" -> kind == .Bool
+        else -> lent.kind.starts_with("Handle.")
+    }
+    if !matches -> return -2
+    symbol :: "jet_rt_handle_field_{runtime_abi_atom(handle.runtime)}_{runtime_abi_atom(name)}"
+    pointer_row :: ir_pointer_row(&m)
+    view := -1
+    if lent.kind == "Text" {
+        // The lent header shares the handle's buffer and has no count word
+        // in front of it, so the read is a fresh copy of its bytes rather
+        // than a retain.
+        out :: ir_temp(&m, &b, pointer_row)
+        ir_emit(&b.f, IROp.StackAddress, out, 24, 8, -1, b.line)
+        _ :: ir_runtime(&m, &b, symbol, [Int]{base, out}, -1)
+        word_row :: ir_word_row(&m)
+        data :: ir_load_at(&m, &b, out, 0, word_row)
+        len :: ir_load_at(&m, &b, out, 8, word_row)
+        copied :: ir_runtime(&m, &b, "jet_rt_string_from_static", [Int]{data, len}, row)
+        ir_release(&m, &b, base)
+        return copied
+    }
+    if lent.header_bytes > 0 {
+        out :: ir_temp(&m, &b, pointer_row)
+        ir_emit(&b.f, IROp.StackAddress, out, lent.header_bytes, 8, -1, b.line)
+        _ :: ir_runtime(&m, &b, symbol, [Int]{base, out}, -1)
+        view = ir_temp(&m, &b, row)
+        ir_emit(&b.f, if kind == .Aggregate -> IROp.Offset else -> IROp.Copy, view, out, if kind == .Aggregate -> 0 else -> -1, -1, b.line)
+    } else if lent.kind == "Float" || lent.kind == "Flag" {
+        address :: ir_runtime(&m, &b, symbol, [Int]{base}, pointer_row)
+        view = ir_load_at(&m, &b, address, 0, row)
+    } else {
+        view = ir_runtime(&m, &b, symbol, [Int]{base}, row)
+        b.fresh[view] = false
+    }
+    // The runtime lends the field's storage, so a List gets a buffer of its own.
+    copied :: if kind == .Aggregate && ir_list_element(&m, p, b, view) == .Val(element) -> ir_list_clone(&m, p, &b, view, element, row) else -> ir_copy_value(&m, p, &b, view, span)
+    ir_release(&m, &b, base)
+    copied
+}
+
+// Whether a runtime handle row has a record schema: such a type keeps its
+// declared layout and converts at a route boundary.
+fn ir_record_schema(handle: IRRuntimeHandle) -> Bool Never! {
+    ir_record_schema_row(handle) != None
+}
+
+// The record schema of a runtime handle row: a IR_RECORD_SCHEMAS row by its
+// Jet name, or a generated row keyed by its runtime type.
+fn ir_record_schema_row(handle: IRRuntimeHandle) -> IRRecordSchema? Never! {
+    loop schema in IR_RECORD_SCHEMAS {
+        // copy: the row stays in the global table, which can't be moved from.
+        if schema.jet_name == handle.jet_name -> return Val(schema.copy())
+    }
+    loop schema in IR_GENERATED_RECORDS {
+        if schema.jet_name == handle.runtime -> return Val(IRRecordSchema{jet_name: handle.jet_name, variants: schema.variants, fields: schema.fields})
+    }
+    None
+}
+
+// The runtime record a value of `ty` crosses a route as: a struct or payload
+// enum the program lays out itself whose runtime handle row has a record
+// schema.
+fn ir_record_runtime(m: &IRModule, p: IRProgram, ty: Type) -> IRRuntimeHandle? Never! {
+    plain :: ir_untag(ty)
+    if plain == .Apply(_, args) {
+        if args.len() > 0 -> return None
+    }
+    name :: ir_nominal_name(plain) ?? return None
+    definition :: ir_type_def(p, name) ?? return None
+    row :: ir_value_type(&m, p, ty) ?? return None
+    if ir_is_handle(m, row) -> return None
+    kind :: m.types[row].kind
+    is_struct :: p.types[definition].kind == .Struct(_, _)
+    is_enum :: p.types[definition].kind == .Enum(_, _)
+    if !is_struct && !is_enum -> return None
+    if is_struct && kind != .Aggregate -> return None
+    if is_enum && kind != .Pointer -> return None
+    handle :: ir_handle_runtime(p, name) ?? return None
+    if !ir_record_schema(handle) -> return None
+    Val(handle)
+}
+
+// Whether the runtime's record exports carry a member of type row `row`: a
+// word, Float or String leaf, a record, an optional String, Int or record, or
+// a byte List (the `List.Byte` sequence a getter lends as its List header).
+fn ir_record_member_crosses(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
+    ty :: m.types[row].ty
+    if ir_record_runtime(&m, p, ty) != None -> return true
+    if ir_untag(ty) == .Option(inner) {
+        if ir_record_runtime(&m, p, inner) != None -> return true
+        return if ir_untag(inner) == {
+            .String | .Int -> true
+            else -> false
+        }
+    }
+    if ir_untag(ty) == .List(_) -> return ir_record_byte_list(&m, p, row)
+    if ir_is_handle(m, row) -> return false
+    if m.types[row].kind == {
+        .Bool | .Int | .Word | .Float | .String -> true
+        else -> false
+    }
+}
+
+// Whether List type row `row` holds one-byte words: the runtime's
+// `List.Byte` record sequence has the native List header and stride.
+fn ir_record_byte_list(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
+    element :: ir_list_element_of(&m, p, row) ?? return false
+    m.types[element].kind == .Word && ir_list_stride(m, element) == 1
+}
+
+// Writes the native value of record type `ty` for the runtime record handle
+// in `record` at byte `offset` of `base` (its record.in helper), then drops
+// the handle.
+fn ir_record_in(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: Int, base: Int, offset: Int, span: Span) Never! {
+    handle :: ir_record_runtime(&m, p, ty) ?? return ir_fail(&b, span, "runtime record {ir_type_name(ty)}")
+    helper :: ir_record_in_helper(&m, p, &b, ty, span)
+    if helper < 0 -> return
+    target :: ir_address_at(&m, &b, base, offset)
+    start :: ir_args(&b.f, [Int]{record, target})
+    ir_emit(&b.f, IROp.Call, -1, helper, start, 2, b.line)
+    _ :: ir_runtime(&m, &b, "jet_rt_handle_drop_{runtime_abi_atom(handle.runtime)}", [Int]{record}, -1)
+}
+
+// The IR function writing the native value of record type `ty` for a
+// borrowed runtime record handle at a target address (built on first use;
+// -1 when its body cannot be built).
+fn ir_record_in_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, span: Span) -> Int Never! {
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    helper_key :: "#record.in<{ir_row_key(m, row)}>"
+    known :: name_rows_value(m.function_rows, helper_key) ?? -1
+    if known == -2 {
+        message :: ir_helper_error(m, helper_key) ?? panic("a failed record helper lost its message")
+        return ir_fail_slot(&b, span, message)
+    }
+    if known >= 0 -> return known
+    id :: m.functions.len()
+    &m.functions.push(ir_hashed_function("record.in", helper_key, "jet_ir_record_in_", "", 0))
+    name_rows_set(&m.function_rows, helper_key, id)
+    a := ir_builder_new(m.functions[id].copy())
+    pointer_row :: ir_pointer_row(&m)
+    handle :: ir_new_slot(&a, pointer_row, IRSlotKind.Param, ir_intern_name(&m, "handle"))
+    target :: ir_new_slot(&a, pointer_row, IRSlotKind.Param, ir_intern_name(&m, "target"))
+    ir_record_in_body(&m, p, &a, ty, row, handle, target, span)
+    if a.error != "" {
+        ir_emit(&a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
+        m.functions[id] = ^a.f
+        name_rows_set(&m.function_rows, helper_key, -2)
+        ir_helper_failed(&m, helper_key, a.error.copy())
+        ir_fail(&b, span, a.error)
+        return -1
+    }
+    ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
+    ir_resolve_deferred(&m, p, &a)
+    m.functions[id] = ^a.f
+    id
+}
+
+// The record.in body for record `ty` of type row `row`: a struct's members
+// written in place at `target`, a payload enum as a new box stored at
+// `target` whose discriminant is the checked variant the runtime tag (its
+// schema position) names.
+fn ir_record_in_body(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, row: Int, handle: Int, target: Int, span: Span) Never! {
+    unknown :: "runtime record {ir_type_name(ty)}"
+    record :: ir_record_runtime(&m, p, ty) ?? return ir_fail(&a, span, unknown)
+    schema :: ir_record_schema_row(record) ?? return ir_fail(&a, span, unknown)
+    name :: ir_nominal_name(ir_untag(ty)) ?? return ir_fail(&a, span, unknown)
+    definition :: ir_type_def(p, name) ?? return ir_fail(&a, span, unknown)
+    atom :: runtime_abi_atom(record.runtime)
+    unsupported :: "record {ir_type_name(ty)} has a member no runtime export carries"
+    if p.types[definition].kind == .Struct(_, _) {
+        members :: ir_struct_members(&m, p, definition, [Type]{}) ?? return ir_fail(&a, span, unsupported)
+        loop member in members {
+            if !ir_record_member_crosses(&m, p, member.ty) -> return ir_fail(&a, span, unsupported)
+        }
+        loop member in members {
+            ir_record_load_member(&m, p, &a, handle, "jet_rt_record_get_{atom}_{runtime_abi_atom(member.name)}", target, member, span)
+        }
+        return
+    }
+    variants :: if p.types[definition].kind == .Enum(rows, _) -> rows else -> { return ir_fail(&a, span, unknown) }
+    payloads := [[IRMember]]{}
+    loop index in 0..<variants.len() {
+        members :: ir_variant_members(&m, p, definition, [Type]{}, index) ?? return ir_fail(&a, span, unsupported)
+        loop member in members {
+            if !ir_record_member_crosses(&m, p, member.ty) -> return ir_fail(&a, span, unsupported)
+        }
+        &payloads.push(members)
+    }
+    size :: ir_enum_box_size(&m, p, definition, [Type]{}) ?? return ir_fail(&a, span, unsupported)
+    boxed :: ir_box_alloc(&m, &a, size, row)
+    ir_emit(&a.f, IROp.Store, -1, target, 0, boxed, a.line)
+    word_row :: ir_word_row(&m)
+    runtime_tag :: ir_runtime(&m, &a, "jet_rt_record_tag_{atom}", [Int]{handle}, word_row)
+    loop (index, variant) in variants {
+        ordinal :: ir_record_variant_position(schema, variant.name) ?? return ir_fail(&a, span, "variant {variant.name} outside the {schema.jet_name} record schema")
+        expected :: ir_word_const(&m, &a, ordinal)
+        selected :: ir_bool_op(&m, &a, IROp.Eq, runtime_tag, expected)
+        ir_open_if(&a.f, selected, a.line)
+        discriminant :: ir_word_const(&m, &a, index)
+        ir_emit(&a.f, IROp.Store, -1, boxed, 0, discriminant, a.line)
+        single :: variant.payload == .Single(_)
+        loop member in payloads[index] {
+            getter :: if single -> "jet_rt_record_get_{atom}_{runtime_abi_atom(variant.name)}" else -> "jet_rt_record_get_{atom}_{runtime_abi_atom(variant.name)}_{runtime_abi_atom(member.name)}"
+            ir_record_load_member(&m, p, &a, handle, getter, boxed, member, span)
+        }
+        ir_end(&a.f, a.line)
+    }
+}
+
+// The runtime record handle for the borrowed native record of type `ty` at
+// `value`: a struct's runtime constructor takes the members in the schema's
+// field order; a payload enum's variant constructor
+// (`jet_rt_record_new_<R>_<Variant>`) takes its payload members in
+// declaration order. A nested record crosses as a handle of its own (which
+// the constructor takes). The caller drops the handle after the call. -1
+// after a failure.
+fn ir_record_out(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, span: Span) -> Int Never! {
+    unknown :: "runtime record {ir_type_name(ty)}"
+    record :: ir_record_runtime(&m, p, ty) ?? return ir_fail_slot(&b, span, unknown)
+    schema :: ir_record_schema_row(record) ?? return ir_fail_slot(&b, span, unknown)
+    name :: ir_nominal_name(ir_untag(ty)) ?? return ir_fail_slot(&b, span, unknown)
+    definition :: ir_type_def(p, name) ?? return ir_fail_slot(&b, span, unknown)
+    atom :: runtime_abi_atom(record.runtime)
+    unsupported :: "record {ir_type_name(ty)} has a member no runtime export carries"
+    pointer_row :: ir_pointer_row(&m)
+    if p.types[definition].kind == .Enum(variants, _) {
+        payloads := [[IRMember]]{}
+        loop index in 0..<variants.len() {
+            members :: ir_variant_members(&m, p, definition, [Type]{}, index) ?? return ir_fail_slot(&b, span, unsupported)
+            loop member in members {
+                if !ir_record_member_crosses(&m, p, member.ty) -> return ir_fail_slot(&b, span, unsupported)
+            }
+            &payloads.push(members)
+        }
+        made :: ir_temp(&m, &b, pointer_row)
+        ir_emit(&b.f, IROp.Const, made, 0, -1, -1, b.line)
+        selector :: ir_load_word(&m, &b, value, 0)
+        loop (index, variant) in variants {
+            expected :: ir_word_const(&m, &b, index)
+            selected :: ir_bool_op(&m, &b, IROp.Eq, selector, expected)
+            ir_open_if(&b.f, selected, b.line)
+            args := [Int]{}
+            loop member in payloads[index] {
+                arg :: ir_record_member_arg(&m, p, &b, value, member, span)
+                if arg < 0 -> return -1
+                &args.push(arg)
+            }
+            handle :: ir_runtime(&m, &b, "jet_rt_record_new_{atom}_{runtime_abi_atom(variant.name)}", args, pointer_row)
+            ir_emit(&b.f, IROp.Copy, made, handle, -1, -1, b.line)
+            ir_end(&b.f, b.line)
+        }
+        return made
+    }
+    is_struct :: p.types[definition].kind == .Struct(_, _)
+    if !is_struct -> return ir_fail_slot(&b, span, unknown)
+    members :: ir_struct_members(&m, p, definition, [Type]{}) ?? return ir_fail_slot(&b, span, unsupported)
+    loop member in members {
+        if !ir_record_member_crosses(&m, p, member.ty) -> return ir_fail_slot(&b, span, unsupported)
+    }
+    args := [Int]{}
+    loop entry in schema.fields.split(",").to_list() {
+        if entry == "" -> next
+        field :: entry.split("=").to_list()[0]
+        loop member in members {
+            if member.name != field -> next
+            arg :: ir_record_member_arg(&m, p, &b, value, member, span)
+            if arg < 0 -> return -1
+            &args.push(arg)
+        }
+    }
+    ir_runtime(&m, &b, "jet_rt_record_new_{atom}", args, pointer_row)
+}
+
+// The text of the borrowed native record `slot` of type `ty` from its runtime
+// type's own rendering, or -1 when `ty` is not a record its runtime type
+// renders in `mode`.
+fn ir_record_render(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, mode: IRRender, span: Span) -> Int Never! {
+    record :: ir_record_runtime(&m, p, ty) ?? return -1
+    symbol :: ir_render_handle_symbol(p, ty, mode) ?? return -1
+    handle :: ir_record_out(&m, p, &b, ty, slot, span)
+    if handle < 0 -> return -1
+    string_row :: ir_string_row(&m)
+    text :: ir_runtime(&m, &b, symbol, [Int]{handle}, string_row)
+    _ :: ir_runtime(&m, &b, "jet_rt_handle_drop_{runtime_abi_atom(record.runtime)}", [Int]{handle}, -1)
+    text
+}
+
+// The constructor argument for `member` of the record at `base`: a leaf word,
+// a borrowed Option box, or a nested record's new handle (null for an absent
+// Option).
+fn ir_record_member_arg(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, member: IRMember, span: Span) -> Int Never! {
+    pointer_row :: ir_pointer_row(&m)
+    holder := base
+    at := member.offset
+    if member.boxed {
+        holder = ir_temp(&m, &b, pointer_row)
+        ir_emit(&b.f, IROp.Load, holder, base, member.offset, -1, b.line)
+        at = 0
+    }
+    ty :: m.types[member.ty].ty
+    if ir_untag(ty) == .Option(inner) {
+        if ir_option_inline(m, member.ty) {
+            // The runtime borrows a box with the Int at 0: a stack word
+            // stands in for it, null for None.
+            word :: ir_load_at(&m, &b, holder, at, member.ty)
+            scratch :: ir_out_slot(&m, &b, 1)
+            ir_emit(&b.f, IROp.Store, -1, scratch, 0, word, b.line)
+            lent :: ir_temp(&m, &b, pointer_row)
+            ir_emit(&b.f, IROp.Const, lent, 0, -1, -1, b.line)
+            some :: ir_option_is_some(&m, &b, word)
+            ir_open_if(&b.f, some, b.line)
+            ir_emit(&b.f, IROp.Copy, lent, scratch, -1, -1, b.line)
+            ir_end(&b.f, b.line)
+            return lent
+        }
+        box :: ir_temp(&m, &b, pointer_row)
+        ir_emit(&b.f, IROp.Load, box, holder, at, -1, b.line)
+        if ir_record_runtime(&m, p, inner) == None -> return box
+        inner_row :: ir_value_type(&m, p, inner) ?? return ir_type_fail(&b, span, inner)
+        converted :: ir_temp(&m, &b, pointer_row)
+        ir_emit(&b.f, IROp.Const, converted, 0, -1, -1, b.line)
+        zero :: ir_word_const(&m, &b, 0)
+        present :: ir_bool_op(&m, &b, IROp.Ne, box, zero)
+        ir_open_if(&b.f, present, b.line)
+        inner_value :: ir_load_at(&m, &b, box, 0, inner_row)
+        made :: ir_record_out(&m, p, &b, inner, inner_value, span)
+        if made < 0 -> return -1
+        ir_emit(&b.f, IROp.Copy, converted, made, -1, -1, b.line)
+        ir_end(&b.f, b.line)
+        return converted
+    }
+    if ir_untag(ty) == .List(_) -> return ir_fail_slot(&b, span, "runtime record sequence member {member.name}")
+    value :: ir_load_at(&m, &b, holder, at, member.ty)
+    if ir_record_runtime(&m, p, ty) != None -> return ir_record_out(&m, p, &b, ty, value, span)
+    value
+}
+
+// One member through its getter into `base`: a recursive edge gets its
+// wrapper box first.
+fn ir_record_load_member(m: &IRModule, p: IRProgram, a: &IRBuilder, handle: Int, getter: String, base: Int, member: IRMember, span: Span) Never! {
+    if !member.boxed -> return ir_record_load_value(&m, p, &a, handle, getter, member.ty, base, member.offset, span)
+    pointer_row :: ir_pointer_row(&m)
+    size :: m.types[member.ty].size
+    wrapper :: ir_box_alloc(&m, &a, if size < 8 -> 8 else -> size, pointer_row)
+    ir_record_load_value(&m, p, &a, handle, getter, member.ty, wrapper, 0, span)
+    ir_emit(&a.f, IROp.Store, -1, base, member.offset, wrapper, a.line)
+}
+
+// The member of type row `row` the getter reads from the borrowed record
+// `handle`, stored at byte `offset` of `base`: an Option through a presence
+// word and an out slot, a nested record through its own record.in, a leaf as
+// itself.
+fn ir_record_load_value(m: &IRModule, p: IRProgram, a: &IRBuilder, handle: Int, getter: String, row: Int, base: Int, offset: Int, span: Span) Never! {
+    ty :: m.types[row].ty
+    pointer_row :: ir_pointer_row(&m)
+    if ir_untag(ty) == .Option(inner) {
+        inner_row :: ir_value_type(&m, p, inner) ?? return ir_fail(&a, span, "type {ir_type_name(inner)}")
+        nested :: ir_record_runtime(&m, p, inner) != None
+        slot :: ir_out_slot(&m, &a, 1)
+        word_row :: ir_word_row(&m)
+        presence :: ir_runtime(&m, &a, getter, [Int]{handle, slot}, word_row)
+        zero :: ir_word_const(&m, &a, 0)
+        present :: ir_bool_op(&m, &a, IROp.Ne, presence, zero)
+        joined :: ir_temp(&m, &a, row)
+        ir_option_none(&m, &a, joined)
+        ir_open_if(&a.f, present, a.line)
+        if ir_option_inline(m, row) {
+            // The getter hands its Int over through the out slot.
+            payload :: ir_temp(&m, &a, inner_row)
+            ir_emit(&a.f, IROp.Load, payload, slot, 0, -1, a.line)
+            ir_emit(&a.f, IROp.Move, joined, payload, -1, -1, a.line)
+            ir_end(&a.f, a.line)
+            ir_emit(&a.f, IROp.Store, -1, base, offset, joined, a.line)
+            return
+        }
+        inner_size :: m.types[inner_row].size
+        boxed :: ir_box_alloc(&m, &a, inner_size, row)
+        payload :: ir_temp(&m, &a, if nested -> pointer_row else -> inner_row)
+        ir_emit(&a.f, IROp.Load, payload, slot, 0, -1, a.line)
+        if nested {
+            ir_record_in(&m, p, &a, inner, payload, boxed, 0, span)
+        } else {
+            ir_emit(&a.f, IROp.Store, -1, boxed, 0, payload, a.line)
+        }
+        ir_emit(&a.f, IROp.Copy, joined, boxed, -1, -1, a.line)
+        ir_end(&a.f, a.line)
+        ir_emit(&a.f, IROp.Store, -1, base, offset, joined, a.line)
+        return
+    }
+    if ir_record_runtime(&m, p, ty) != None {
+        nested :: ir_runtime(&m, &a, getter, [Int]{handle}, pointer_row)
+        a.fresh[nested] = false
+        return ir_record_in(&m, p, &a, ty, nested, base, offset, span)
+    }
+    // A byte List member: the getter lends its List header, so the record gets a
+    // buffer of its own.
+    if ir_untag(ty) == .List(_) {
+        element :: ir_list_element_of(&m, p, row) ?? return ir_fail(&a, span, "type {ir_type_name(ty)}")
+        header :: ir_runtime(&m, &a, getter, [Int]{handle}, pointer_row)
+        a.fresh[header] = false
+        lent :: ir_temp(&m, &a, row)
+        ir_emit(&a.f, IROp.Offset, lent, header, 0, -1, a.line)
+        copied :: ir_list_clone(&m, p, &a, lent, element, row)
+        return ir_store_at(&m, p, &a, base, offset, copied)
+    }
+    value :: ir_runtime(&m, &a, getter, [Int]{handle}, row)
+    ir_store_at(&m, p, &a, base, offset, value)
+}
+
+// Whether type row `row` is a runtime handle (ir_handle_row).
+fn ir_is_handle(m: IRModule, row: Int) -> Bool Never! {
+    m.types[row].kind == .Pointer && m.types[row].drop.starts_with("jet_rt_handle_drop_")
+}
+
+// A scalar record carried as its runtime handle whose one exact-Int field
+// crosses a Word route as itself (Duration's `ns`): its field name, record
+// getter and record constructor. None for any other type row.
+struct IRWordRecord { field: String, getter: String, constructor: String }
+
+fn ir_word_record(m: IRModule, p: IRProgram, row: Int) -> IRWordRecord? Never! {
+    if !ir_is_handle(m, row) -> return None
+    name :: ir_nominal_name(ir_untag(m.types[row].ty)) ?? return None
+    handle :: ir_handle_runtime(p, name) ?? return None
+    loop record in IR_WORD_RECORDS {
+        if record.runtime == handle.runtime {
+            fields :: "{record.field}=Int"
+            loop schema in IR_GENERATED_RECORDS {
+                if schema.jet_name == handle.runtime && schema.variants == "" && schema.fields == fields {
+                    atom :: runtime_abi_atom(handle.runtime)
+                    return Val(IRWordRecord{field: record.field.copy(), getter: "jet_rt_record_get_{atom}_{runtime_abi_atom(record.field)}", constructor: "jet_rt_record_new_{atom}"})
+                }
+            }
+        }
+    }
+    None
+}
+
+// A Core struct carried as its runtime handle whose one String field is
+// the handle's text: its field name, the export that renders the text and
+// the export that builds the handle from it. The checked program names
+// the Core/Files/Path.jet record `Path { raw: String }` and the builtin Path
+// alike, so both lower to the JetPath handle, and the record's `raw` is the
+// handle's text. None for any other type row.
+fn ir_text_record(m: IRModule, p: IRProgram, row: Int) -> IRWordRecord? Never! {
+    if !ir_is_handle(m, row) -> return None
+    name :: ir_nominal_name(ir_untag(m.types[row].ty)) ?? return None
+    handle :: ir_handle_runtime(p, name) ?? return None
+    if handle.runtime == "JetPath" -> return Val(IRWordRecord{field: "raw", getter: "jet_path_to_string", constructor: "jet_path_from"})
+    None
+}
+
+// Whether the value a pointer member points at lays out: a struct already
+// being laid out does (the pointer breaks the cycle).
+fn ir_pointee_lays_out(m: &IRModule, p: IRProgram, written: Type, laying: [String]) -> Bool Never! {
+    if laying.len() > 0 {
+        if ir_nominal_name(ir_untag(ir_subst(m, written))) == .Val(name) {
+            if ir_type_def(p, name) == .Val(row) {
+                at :: ir_laying_decl_at(laying, p.types[row].key)
+                if at >= 0 {
+                    ir_laying_touch(&m, at)
+                    return true
+                }
+            }
+        }
+    }
+    ir_value_type_in(&m, p, written, laying) != None
+}
+
+// Whether an Option of `written` (which lays out) is one inline word: its
+// payload is laid out as an exact Int (Int itself, a tagged, ranged or
+// measured Int, or a declared type whose base is Int).
+fn ir_option_int_payload(m: &IRModule, p: IRProgram, written: Type, laying: [String]) -> Bool Never! {
+    ty :: ir_untag(ir_subst(m, written))
+    if ty == {
+        .Int -> return true
+        .Named(_) | .Apply(_, _) | .InlineRange(_, _, _) | .Quantity(_, _) | .Measure(_) -> {}
+        else -> return false
+    }
+    if laying.len() > 0 {
+        if ir_nominal_name(ty) == .Val(name) {
+            if ir_type_def(p, name) == .Val(row) {
+                if ir_laying_decl_at(laying, p.types[row].key) >= 0 -> return false
+            }
+        }
+    }
+    row :: ir_value_type_in(&m, p, ty, laying) ?? return false
+    m.types[row].kind == .Int
+}
+
+// The declared payload-free enum an IR slot type stands for, if any.
+fn ir_enum_def(m: IRModule, p: IRProgram, ty: Int) -> Int? Never! {
+    if ir_untag(m.types[ty].ty) == .Union(_) -> return ir_type_def(p, ir_union_key(ir_untag(m.types[ty].ty)))
+    name :: if m.types[ty].ty == {
+        .Named(name) -> name
+        .Apply(name, _) -> name
+        else -> { return None }
+    }
+    row :: ir_type_def(p, name) ?? return None
+    if p.types[row].kind == .Enum(_, _) -> return Val(row)
+    None
+}
+
+// The index of variant `name` of the enum declaration `row`, by its name,
+// its key's `:`-suffix (a grouped leaf's key ends `Msg:Net.Packet`), or the
+// last segment of its key.
+fn ir_variant_index(p: IRProgram, row: Int, name: String) -> Int? Never! {
+    if p.types[row].kind == .Enum(variants, _) {
+        loop (index, variant) in variants {
+            if name == variant.name || name.ends_with(":{variant.name}") -> return Val(index)
+        }
+        short := name
+        separators :: [String]{"::", ".", ":"}
+        loop separator in separators {
+            parts :: short.split(separator).to_list()
+            short = parts[parts.len() - 1]
+        }
+        loop (index, variant) in variants {
+            if variant.name == short -> return Val(index)
+        }
+    }
+    None
+}
+
+// The leaf variant names under group `group` of the enum declaration `row`
+// (`.Net` matches `Net.Packet` and `Net.Ping`); empty when `group` names no
+// group.
+fn ir_group_leaves(p: IRProgram, row: Int, group: String) -> [String] Never! {
+    leaves := [String]{}
+    if p.types[row].kind == .Enum(variants, _) {
+        prefix :: "{group}."
+        loop variant in variants {
+            if variant.name.starts_with(prefix) -> &leaves.push(variant.name)
+        }
+    }
+    leaves
+}
+
+fn ir_unit_type(ty: Type) -> Bool Never! {
+    if ty == {
+        .Named(name) -> name == "Unit" || name == "()"
+        .Tuple(fields) -> fields.len() == 0
+        else -> false
+    }
+}
+
+enum IRRender { Display Show Debug }
+
+// The String showing `slot`: a String renders as itself (not fresh); scalars
+// through their runtime formatter (fresh).
+fn ir_render(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, mode: IRRender, span: Span) -> Int Never! {
+    string_row :: ir_string_row(&m)
+    if ir_unit_type(ty) {
+        pointer :: ir_pointer_row(&m)
+        builder :: ir_runtime(&m, &b, "jet_rt_string_builder_new", [Int]{}, pointer)
+        b.fresh[builder] = false
+        ir_push_static(&m, &b, builder, "()")
+        return ir_runtime(&m, &b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
+    }
+    if slot < 0 -> return ir_fail_slot(&b, span, "display of {ir_type_name(ty)} without a value")
+    // A Debug render (`{value:Debug}`, `.debug()`) calls the user's Debug
+    // implementation, at the top level and for nested values alike.
+    selected :: if mode == .Debug -> ir_render_debug_impl(&m, p, &b, slot) else -> ir_render_impl(&m, p, &b, slot, mode)
+    if selected >= 0 -> return selected
+    // A Dyn shows its scalar leaf bare and a container as its tree text
+    // (JetRuntime Dyn.jet jet_rt_handle_show_dyn over a runtime tree).
+    if mode != .Debug {
+        if ir_dyn_def(p, ty) == .Val(dyn_row) {
+            tree :: ir_dyn_to_runtime(&m, p, &b, dyn_row, slot, span)
+            if tree < 0 -> return -1
+            text :: ir_runtime(&m, &b, if mode == .Show -> "jet_rt_handle_show_dyn" else -> "jet_rt_handle_display_dyn", [Int]{tree}, string_row)
+            _ :: ir_runtime(&m, &b, "jet_rt_handle_drop_dyn", [Int]{tree}, -1)
+            return text
+        }
+    }
+    if ir_is_handle(m, b.f.slot_type[slot]) && !ir_carrier_type(ty) {
+        // A runtime handle renders through its runtime type's own JetDisplay
+        // / JetShow / JetDebug.
+        symbol :: ir_render_handle_symbol(p, ty, mode) ?? return ir_fail_slot(&b, span, "display of {ir_type_name(ty)}")
+        return ir_runtime(&m, &b, symbol, [Int]{slot}, string_row)
+    }
+    kind :: ir_kind_of(m, b, slot)
+    if kind == .String {
+        if mode != .Debug -> return slot
+        return ir_runtime(&m, &b, "jet_rt_require_debug_string", [Int]{slot}, string_row)
+    }
+    if kind == .Aggregate || ir_carrier_type(ty) || ir_enum_def(m, p, b.f.slot_type[slot]) != None {
+        pointer :: ir_pointer_row(&m)
+        builder :: ir_runtime(&m, &b, "jet_rt_string_builder_new", [Int]{}, pointer)
+        b.fresh[builder] = false
+        ir_render_push(&m, p, &b, builder, slot, mode, false, span)
+        return ir_runtime(&m, &b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
+    }
+    row :: m.types[b.f.slot_type[slot]]
+    symbol :: if kind == {
+        .Int -> "jet_rt_int_to_string"
+        .Char -> "jet_rt_char_to_string"
+        .Word -> if row.signed -> "jet_rt_i64_to_string" else -> "jet_rt_u64_to_string"
+        .Bool -> "jet_rt_bool_to_string"
+        .Float -> if mode == .Debug -> "jet_rt_float_debug" else -> "jet_rt_float_to_string"
+        .Float32 -> if mode == .Debug -> "jet_rt_float32_debug" else -> "jet_rt_float32_to_string"
+        else -> { return ir_fail_slot(&b, span, "display of {ir_type_name(ty)}") }
+    }
+    if kind == .Float32 {
+        // The F32 display exports read the binary32 bits zero-extended in an
+        // integer word (Display.jet), not an SSE argument: the value crosses
+        // through a zeroed frame word.
+        pointer :: ir_pointer_row(&m)
+        area :: ir_temp(&m, &b, pointer)
+        ir_emit(&b.f, IROp.StackAddress, area, 8, 8, -1, b.line)
+        zero :: ir_word_const(&m, &b, 0)
+        ir_emit(&b.f, IROp.Store, -1, area, 0, zero, b.line)
+        ir_emit(&b.f, IROp.Store, -1, area, 0, slot, b.line)
+        bits :: ir_load_word(&m, &b, area, 0)
+        return ir_runtime(&m, &b, symbol, [Int]{bits}, string_row)
+    }
+    ir_runtime(&m, &b, symbol, [Int]{slot}, string_row)
+}
+
+fn ir_push_static(m: &IRModule, b: &IRBuilder, builder: Int, text: String) Never! {
+    args := [Int]{builder}
+    loop arg in ir_static_text(&m, &b, text) -> &args.push(arg)
+    _ :: ir_runtime(&m, &b, "jet_rt_string_builder_push_static", args, -1)
+}
+
+// The owned String a selected Display (`display`) or Printable (`show`)
+// implementation makes of `slot` (Debug never uses one), or -1 when none is
+// selected.
+fn ir_render_impl(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, mode: IRRender) -> Int Never! {
+    if mode == .Debug || p.render_impls.len() == 0 -> return -1
+    trait_short :: if mode == .Show -> "Printable" else -> "Display"
+    receiver_ty :: m.types[b.f.slot_type[slot]].ty
+    row :: p.render_impls.get("{trait_short}|{ir_render_type_key(p.type_rows, p.types, receiver_ty)}") ?? return -1
+    ir_render_impl_call(&m, p, &b, slot, row, trait_short)
+}
+
+// Whether a Display implementation is selected for `slot`'s type.
+fn ir_render_has_display(m: IRModule, p: IRProgram, b: IRBuilder, slot: Int) -> Bool Never! {
+    if slot < 0 || p.render_impls.len() == 0 -> return false
+    p.render_impls.get("Display|{ir_render_type_key(p.type_rows, p.types, m.types[b.f.slot_type[slot]].ty)}") != None
+}
+
+// The owned String the user Debug implementation makes of `slot`, -1 when its
+// type has none (a method `debug` of Debug with a receiver convention whose
+// owner is the value's nominal type, checked as a TraitMethod or, when Debug
+// does not resolve in the implementing module, as the owner's plain Method).
+fn ir_render_debug_impl(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) -> Int Never! {
+    candidates :: p.trait_methods.get("Debug|debug") ?? return -1
+    receiver_ty :: m.types[b.f.slot_type[slot]].ty
+    if ir_nominal_name(ir_untag(receiver_ty)) == None -> return -1
+    key :: ir_render_type_key(p.type_rows, p.types, receiver_ty)
+    loop row in candidates {
+        matched :: if p.functions[row].kind == {
+            .TraitMethod(_, convention, owner_type, _, _) -> convention != None && ir_render_type_key(p.type_rows, p.types, owner_type) == key
+            .Method(convention, owner_type) -> convention != None && ir_render_type_key(p.type_rows, p.types, owner_type) == key
+            .TopLevel -> false
+        }
+        if matched -> return ir_render_impl_call(&m, p, &b, slot, row, "Debug")
+    }
+    -1
+}
+
+// The owned String implementation function `row` of trait `trait_short`
+// makes of `slot`.
+fn ir_render_impl_call(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, trait_short: String) -> Int Never! {
+    receiver_ty :: m.types[b.f.slot_type[slot]].ty
+    function :: p.functions[row]
+    if function.generic_params.len() > 0 {
+        ir_fail(&b, Span{start: 0, end: 0}, "generic {trait_short} implementation {function.name}")
+        return -1
+    }
+    // An implementation for a generic type is built for this instance.
+    owner_args :: ir_owner_args(p, function, receiver_ty) ?? {
+        ir_fail(&b, Span{start: 0, end: 0}, "{trait_short} implementation {function.name} for {ir_type_name(receiver_ty)}")
+        return -1
+    }
+    returned :: ir_executable_return(function) ?? return -1
+    result_row :: ir_value_type(&m, p, returned) ?? return -1
+    dst :: ir_fresh_temp(&m, &b, result_row)
+    // A `^self` implementation (`fn debug(^self)`) owns its receiver: it gets
+    // a copy of a value the caller keeps rendering and using, or the
+    // temporary itself, which the caller then no longer drops.
+    receiver := slot
+    moved :: ir_receiver_access(function.kind) == "move" && ir_has_drop(m, b, slot)
+    if moved && !b.fresh[slot] -> receiver = ir_copy_value(&m, p, &b, slot, Span{start: 0, end: 0})
+    start :: ir_args(&b.f, [Int]{receiver})
+    at :: ir_emit(&b.f, IROp.Call, dst, -1, start, 1, b.line)
+    &b.deferred.push(IRDeferredCall{at: at, key: function.key, args: owner_args})
+    if moved -> b.fresh[receiver] = false
+    ir_stop_check(&m, &b)
+    string_row :: ir_string_row(&m)
+    text :: ir_adapt(&m, p, &b, dst, string_row, Span{start: 0, end: 0})
+    if text != dst -> b.fresh[text] = true
+    text
+}
+
+// The runtime render of a handle value of type `ty`:
+// jet_rt_handle_{display|show|debug}_<T> when its runtime type renders in
+// `mode`; the default Err renders its message in every mode.
+fn ir_render_handle_symbol(p: IRProgram, ty: Type, mode: IRRender) -> String? Never! {
+    plain :: ir_untag(ty)
+    if plain == .Apply(_, args) {
+        if args.len() > 0 -> return None
+    }
+    name :: ir_nominal_name(plain) ?? return None
+    handle :: ir_handle_runtime(p, name) ?? return None
+    rendered :: if mode == {
+        .Display -> handle.display
+        .Show -> handle.show
+        .Debug -> handle.debug
+    }
+    if !rendered -> return None
+    verb :: if mode == {
+        .Display -> "display"
+        .Show -> "show"
+        .Debug -> "debug"
+    }
+    Val("jet_rt_handle_{verb}_{runtime_abi_atom(handle.runtime)}")
+}
+
+// Pushes the rendering of `slot` onto `builder` (a String member renders
+// quoted when `member`).
+fn ir_render_push(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot: Int, mode: IRRender, member: Bool, span: Span) Never! {
+    kind :: ir_kind_of(m, b, slot)
+    ty :: m.types[b.f.slot_type[slot]].ty
+    // Under Debug a nested value calls its user Debug implementation too
+    // (`[debug-only]` for a List of a Debug-implementing owner).
+    selected :: if mode == .Debug -> ir_render_debug_impl(&m, p, &b, slot) else -> ir_render_impl(&m, p, &b, slot, mode)
+    if selected >= 0 {
+        _ :: ir_runtime(&m, &b, "jet_rt_string_builder_push", [Int]{builder, selected}, -1)
+        ir_release(&m, &b, selected)
+        return
+    }
+    // A Core record renders through its runtime type's own JetDisplay /
+    // JetShow / JetDebug, as generated Rust does.
+    rendered :: ir_record_render(&m, p, &b, ty, slot, mode, span)
+    if ir_failed(b) -> return
+    if rendered >= 0 {
+        _ :: ir_runtime(&m, &b, "jet_rt_string_builder_push", [Int]{builder, rendered}, -1)
+        ir_release(&m, &b, rendered)
+        return
+    }
+    if kind == .String && member {
+        string_row :: ir_string_row(&m)
+        quoted :: ir_runtime(&m, &b, "jet_rt_require_debug_string", [Int]{slot}, string_row)
+        _ :: ir_runtime(&m, &b, "jet_rt_string_builder_push", [Int]{builder, quoted}, -1)
+        ir_release(&m, &b, quoted)
+        return
+    }
+    if ir_untag(ty) == .Option(payload) {
+        ir_render_option(&m, p, &b, builder, slot, payload, mode, span)
+        return
+    }
+    if ir_untag(ty) == .Result(ok, err) {
+        ir_render_result(&m, p, &b, builder, slot, ok, err, mode, span)
+        return
+    }
+    if ir_map_entry_type(ty) != None -> return ir_render_map(&m, p, &b, builder, slot, mode, span)
+    list_element :: if ir_untag(ty) == .List(element) -> Val(element.copy()) else -> ir_view_element(ty)
+    if list_element == .Val(element) {
+        ir_render_list(&m, p, &b, builder, slot, element, mode, span)
+        return
+    }
+    if ir_priority_queue_element(ty) == .Val(element) {
+        // A sorted snapshot renders as its List.
+        elem_row :: ir_value_type(&m, p, element) ?? return ir_fail(&b, span, "display of {ir_type_name(ty)}")
+        snapshot :: ir_priority_queue_sorted(&m, p, &b, slot, elem_row, span)
+        if snapshot < 0 -> return
+        ir_render_list(&m, p, &b, builder, snapshot, element, mode, span)
+        return
+    }
+    // A native carrier (Set, Rank, Iter, Shared) renders through routes of
+    // its own, never as the fields its declaration names.
+    if ir_native_carrier(ty) -> return ir_fail(&b, span, "display of {ir_type_name(ty)}")
+    if kind == .Aggregate && ir_untag(ty) == .Tuple(fields) {
+        members :: ir_tuple_members(&m, p, fields) ?? return ir_fail(&b, span, "display of {ir_type_name(ty)}")
+        // A named tuple renders as the record its sorted names spell:
+        // `(tag,value) { tag: "tuple", value: 1 }`.
+        if fields.len() > 0 && fields[0].name != "" {
+            names := [String]{}
+            loop field in fields -> &names.push(field.name)
+            ir_push_static(&m, &b, builder, "({names.join(",")}) {{")
+            loop (index, field) in members {
+                ir_push_static(&m, &b, builder, "{if index == 0 -> " " else -> ", "}{fields[index].name}: ")
+                value :: ir_member_read(&m, &b, slot, field)
+                ir_render_push_value_member(&m, p, &b, builder, value, mode, span)
+            }
+            ir_push_static(&m, &b, builder, " }}")
+            return
+        }
+        ir_push_static(&m, &b, builder, "(")
+        loop (index, field) in members {
+            if index > 0 -> ir_push_static(&m, &b, builder, ", ")
+            value :: ir_member_read(&m, &b, slot, field)
+            ir_render_push_value_member(&m, p, &b, builder, value, mode, span)
+        }
+        if members.len() == 1 -> ir_push_static(&m, &b, builder, ",")
+        ir_push_static(&m, &b, builder, ")")
+        return
+    }
+    // An enum or struct renders through its helper function per type and
+    // mode, so a type reaching itself (a struct holding a List of itself)
+    // renders by a call rather than by expanding without end.
+    value_row :: b.f.slot_type[slot]
+    if kind == .Aggregate || ir_enum_def(m, p, value_row) != None {
+        builder_row :: b.f.slot_type[builder]
+        helper :: ir_render_helper(&m, p, &b, value_row, builder_row, mode, span)
+        if helper < 0 -> return
+        start :: ir_args(&b.f, [Int]{slot, builder})
+        ir_emit(&b.f, IROp.Call, -1, helper, start, 2, b.line)
+        ir_stop_check(&m, &b)
+        return
+    }
+    text :: ir_render(&m, p, &b, ty, slot, mode, span)
+    if ir_failed(b) -> return
+    _ :: ir_runtime(&m, &b, "jet_rt_string_builder_push", [Int]{builder, text}, -1)
+    if text != slot -> ir_release(&m, &b, text)
+}
+
+// The IR function pushing the structural rendering of an enum or struct
+// value of type row `row` onto a String builder of row `builder_row` (built
+// on first use; -1 when its body cannot be built). Its deferred calls move
+// to `b`, which resolves them once the program can be written.
+fn ir_render_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, builder_row: Int, mode: IRRender, span: Span) -> Int Never! {
+    mode_name :: if mode == {
+        .Display -> "display"
+        .Show -> "show"
+        .Debug -> "debug"
+    }
+    helper_key :: "#render.{mode_name}<{ir_row_key(m, row)}>"
+    known :: name_rows_value(m.function_rows, helper_key) ?? -1
+    if known == -2 {
+        message :: ir_helper_error(m, helper_key) ?? panic("a failed render helper lost its message")
+        ir_fail(&b, span, message)
+        return -1
+    }
+    if known >= 0 -> return known
+    id :: m.functions.len()
+    &m.functions.push(ir_hashed_function("render", helper_key, "jet_ir_render_", "", 0))
+    name_rows_set(&m.function_rows, helper_key, id)
+    a := ir_builder_new(m.functions[id].copy())
+    value :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "value"))
+    builder :: ir_new_slot(&a, builder_row, IRSlotKind.Param, ir_intern_name(&m, "builder"))
+    ir_render_nominal(&m, p, &a, builder, value, mode, span)
+    loop call in a.deferred {
+        &b.deferred.push(IRDeferredCall{at: call.at, key: call.key, function: if call.function >= 0 -> call.function else -> id, args: call.args})
+    }
+    if a.error != "" {
+        ir_emit(&a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
+        m.functions[id] = ^a.f
+        name_rows_set(&m.function_rows, helper_key, -2)
+        ir_helper_failed(&m, helper_key, a.error.copy())
+        ir_fail(&b, span, a.error)
+        return -1
+    }
+    ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
+    m.functions[id] = ^a.f
+    id
+}
+
+// The structural rendering of the enum or struct value in `slot`: its
+// variant or record shape.
+fn ir_render_nominal(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot: Int, mode: IRRender, span: Span) Never! {
+    ty :: m.types[b.f.slot_type[slot]].ty
+    if ir_enum_def(m, p, b.f.slot_type[slot]) == .Val(row) {
+        if p.types[row].kind == .Enum(variants, methods) {
+            if ir_render_hook(methods) -> return ir_fail(&b, span, "enum with a show hook")
+            // A union value renders as the member it holds (D-UNIONTYPE1),
+            // as that member renders on its own: never wrapped in its tag.
+            held :: ir_untag(ty) == .Union(_)
+            discriminant :: ir_enum_tag_of(&m, &b, slot)
+            opened := 0
+            loop (index, variant) in variants {
+                index_slot :: ir_temp_like(&m, &b, discriminant)
+                ir_emit(&b.f, IROp.Const, index_slot, index, -1, -1, b.line)
+                bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+                test :: ir_temp(&m, &b, bool_row)
+                ir_emit(&b.f, IROp.Eq, test, discriminant, index_slot, -1, b.line)
+                ir_open_if(&b.f, test, b.line)
+                members :: ir_variant_members(&m, p, row, ir_type_args(ty), index) ?? return ir_fail(&b, span, "display of variant {variant.name}")
+                if variant.payload == {
+                    .Unit -> ir_push_static(&m, &b, builder, ir_render_name(variant.name))
+                    .Single(_) -> {
+                        value :: ir_member_value(&m, &b, slot, members[0])
+                        if held {
+                            ir_render_push_value_member(&m, p, &b, builder, value, mode, span)
+                        } else {
+                            ir_push_static(&m, &b, builder, "{ir_render_name(variant.name)}(")
+                            ir_render_push_value_member(&m, p, &b, builder, value, mode, span)
+                            ir_push_static(&m, &b, builder, ")")
+                        }
+                    }
+                    .Named(_) -> ir_render_record(&m, p, &b, builder, slot, variant.name, members, mode, span)
+                }
+                ir_else(&b.f, b.line)
+                opened += 1
+            }
+            ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+            loop _ in 0..<opened -> ir_end(&b.f, b.line)
+        }
+        return
+    }
+    name :: ir_nominal_name(ty) ?? return ir_fail(&b, span, "display of {ir_type_name(ty)}")
+    row :: ir_type_def(p, name) ?? return ir_fail(&b, span, "display of {ir_type_name(ty)}")
+    if p.types[row].kind == .Struct(_, methods) {
+        if ir_render_hook(methods) -> return ir_fail(&b, span, "struct with a show hook")
+    }
+    members :: ir_struct_members(&m, p, row, ir_type_args(ty)) ?? return ir_fail(&b, span, "display of {ir_type_name(ty)}")
+    ir_render_record(&m, p, &b, builder, slot, p.types[row].name, members, mode, span)
+}
+// Whether a declaration's methods include a source display hook.
+fn ir_render_hook(methods: [String]) -> Bool Never! {
+    loop method in methods {
+        if method == "show" || method == "display" || method == "debug" -> return true
+    }
+    false
+}
+
+// The shown name: a generated `__jet_` prefix is not shown.
+fn ir_render_name(name: String) -> String Never! {
+    if !name.starts_with("__jet_") -> return name.copy()
+    bytes :: name.bytes()
+    String.from_bytes(bytes.slice(6, bytes.len())) ?? name.copy()
+}
+
+fn ir_nominal_name(ty: Type) -> String? Never! {
+    if ty == {
+        .Named(name) -> Val(name)
+        .Apply(name, _) -> Val(name)
+        else -> None
+    }
+}
+
+// One stored struct member: its byte offset and type row.
+// `boxed`: a recursive edge whose storage is a wrapper box pointer holding
+// the value; `redact`: Debug display hides it.
+struct IRMember { name: String, offset: Int, ty: Int, boxed: Bool{false}, redact: Bool{false} }
+
+// The stored members of struct declaration `row` (applied to the instance
+// arguments `args`) at their natural offsets (each member at its own
+// alignment, computed fields take no bytes, a recursive edge is one pointer
+// to its wrapper box); None when a member cannot be laid out.
+fn ir_struct_members(m: &IRModule, p: IRProgram, row: Int, args: [Type]) -> [IRMember]? Never! {
+    // Memoized by the instance's arguments in the terms of the instance
+    // being built, as its member types are laid out. A SharedGuard argument's
+    // member row follows its read/edit tag, which the identity does not spell.
+    bound :: loop arg in args -> ir_subst(m, arg)
+    memo :: ir_instance_identity(p.types[row].key, bound)
+    if memo.contains("SharedGuard<") -> return ir_struct_members_in(&m, p, row, bound, [String]{}, true)
+    if ir_members_memo(m, m.struct_members, memo) == .Val(known) -> return Val(known)
+    found :: ir_struct_members_in(&m, p, row, bound, [String]{}, true) ?? return None
+    name_rows_set(&m.struct_members, memo, m.member_lists.len())
+    &m.member_lists.push(found.copy())
+    Val(found)
+}
+
+// ir_struct_members while the structs `laying` are being laid out. Unless
+// `resolve`, a recursive edge reaching one of them keeps type row -1: only
+// its 8 bytes count toward the layout.
+fn ir_struct_members_in(m: &IRModule, p: IRProgram, row: Int, args: [Type], laying: [String], resolve: Bool) -> [IRMember]? Never! {
+    definition :: p.types[row]
+    if definition.kind == .Struct(fields, _) {
+        inner := laying
+        &inner.push(ir_instance_identity(definition.key, args))
+        members := [IRMember]{}
+        offset := 0
+        loop field in fields {
+            if field.computed -> next
+            field_ty :: ir_instance_type(p, row, args, field.ty)
+            boxed :: definition.boxed_edges.contains(field.name)
+            ty := -1
+            if boxed && resolve {
+                ty = ir_value_type(&m, p, field_ty) ?? return None
+            } else if boxed {
+                if !ir_pointee_lays_out(&m, p, field_ty, inner) -> return None
+                ty = ir_value_type_in(&m, p, field_ty, inner) ?? -1
+            } else {
+                ty = ir_value_type_in(&m, p, field_ty, inner) ?? return None
+            }
+            size :: if boxed -> 8 else -> m.types[ty].size
+            align :: if boxed || m.types[ty].kind == .Aggregate -> 8 else -> m.types[ty].align
+            if size > 0 && align > 0 && offset % align != 0 -> offset += align - offset % align
+            &members.push(IRMember{name: field.name, offset: offset, ty: ty, boxed: boxed, redact: field.redact})
+            offset += size
+        }
+        return Val(members)
+    }
+    None
+}
+
+// The bytes of a struct of `members`, rounded to 8.
+fn ir_struct_size(m: IRModule, members: [IRMember]) -> Int Never! {
+    size := 0
+    loop member in members {
+        width :: if member.boxed -> 8 else -> m.types[member.ty].size
+        end :: member.offset + width
+        if end > size -> size = end
+    }
+    if size % 8 != 0 -> size += 8 - size % 8
+    size
+}
+
+// The members of a tuple type at their natural offsets (as a struct of
+// its fields, in their canonical order).
+fn ir_tuple_members(m: &IRModule, p: IRProgram, fields: [TypeTupleField]) -> [IRMember]? Never! {
+    ir_tuple_members_in(&m, p, fields, [String]{})
+}
+
+fn ir_tuple_members_in(m: &IRModule, p: IRProgram, fields: [TypeTupleField], laying: [String]) -> [IRMember]? Never! {
+    members := [IRMember]{}
+    offset := 0
+    loop field in fields {
+        ty :: ir_value_type_in(&m, p, field.ty, laying) ?? return None
+        size :: m.types[ty].size
+        align :: if m.types[ty].kind == .Aggregate -> 8 else -> m.types[ty].align
+        if size > 0 && align > 0 && offset % align != 0 -> offset += align - offset % align
+        &members.push(IRMember{name: field.name, offset: offset, ty: ty})
+        offset += size
+    }
+    Val(members)
+}
+
+fn ir_binary_op(op: TBinaryOp) -> IROp? Never! {
+    if op == {
+        .Add -> Val(IROp.Add)
+        .Sub -> Val(IROp.Sub)
+        .Mul -> Val(IROp.Mul)
+        .Div -> Val(IROp.Div)
+        .Rem -> Val(IROp.Rem)
+        .FloorDiv -> Val(IROp.FloorDiv)
+        .Mod -> Val(IROp.Mod)
+        .BitAnd -> Val(IROp.BitAnd)
+        .BitOr -> Val(IROp.BitOr)
+        .BitXor -> Val(IROp.BitXor)
+        .Shl -> Val(IROp.Shl)
+        .Shr -> Val(IROp.Shr)
+        .Eq -> Val(IROp.Eq)
+        .Ne -> Val(IROp.Ne)
+        .Lt -> Val(IROp.Lt)
+        .Le -> Val(IROp.Le)
+        .Gt -> Val(IROp.Gt)
+        .Ge -> Val(IROp.Ge)
+        else -> None
+    }
+}
+
+fn ir_compare_op(op: TBinaryOp) -> Bool Never! {
+    op == .Eq || op == .Ne || op == .Lt || op == .Le || op == .Gt || op == .Ge
+}
+
+fn ir_route_member(op: TBinaryOp) -> String Never! {
+    if op == {
+        .Div -> "div"
+        .Rem -> "rem"
+        .FloorDiv -> "floor_div"
+        .Mod -> "mod"
+        .Pow -> "pow"
+        .Shl -> "shl"
+        .Shr -> "shr"
+        .Add -> "add"
+        .Sub -> "sub"
+        .Mul -> "mul"
+        else -> ""
+    }
+}
+
+// Whether compound assignment `place op= value` checks overflow: as its
+// binary form does (sema_expr_check_binary), for + - * / ** << >>; only a
+// fixed-width integer reads it (D-NUMOPS1: plain arithmetic traps). An
+// `op=` under an `#Arithmetic` policy never reaches here: sema lowers it to
+// `place = OverflowOpt(...)` (Statements.jet sema_stmt_policy_compound).
+fn ir_assign_overflow(op: TBinaryOp) -> Bool Never! {
+    op == .Add || op == .Sub || op == .Mul || op == .Div || op == .Pow || op == .Shl || op == .Shr
+}
+
+// `left op right`: exact Int arithmetic, division, bit operators and
+// comparisons are IR ops (inline, with the big-integer or located runtime
+// route as the slow path); its other operators call their located Prelude
+// route; a fixed width with overflow checking (or a trapping op) calls
+// jet_<w>_trap_<op>.
+fn ir_binary(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, overflow: Bool, line: Int, left_ty: Type, left: Int, right: Int, right_ty: Type, span: Span) -> Int Never! {
+    if left < 0 || right < 0 -> return ir_fail_slot(&b, span, "binary operator on Unit")
+    kind :: ir_kind_of(m, b, left)
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    site :: if line > 0 -> line else -> b.line
+    if ir_compare_op(op) {
+        // An inline Option compares as an Option (ir_equal, ir_order_sign).
+        scalar :: kind == .Int || (kind == .Word && !ir_option_inline(m, b.f.slot_type[left])) || kind == .Bool || kind == .Char || kind == .Float || kind == .Float32 || kind == .String
+        if !scalar {
+            if op == .Eq || op == .Ne {
+                same :: ir_equal(&m, p, &b, left, right, span)
+                if op == .Eq -> return same
+                differ :: ir_temp(&m, &b, bool_row)
+                ir_emit(&b.f, IROp.Not, differ, same, -1, -1, site)
+                return differ
+            }
+            sign :: ir_order_sign(&m, p, &b, left, right, span)
+            if ir_failed(b) -> return -1
+            zero :: ir_word_const(&m, &b, 0)
+            dst :: ir_temp(&m, &b, bool_row)
+            ir_emit(&b.f, ir_binary_op(op) ?? IROp.Eq, dst, sign, zero, -1, site)
+            return dst
+        }
+        dst :: ir_temp(&m, &b, bool_row)
+        ir_emit(&b.f, ir_binary_op(op) ?? IROp.Eq, dst, left, right, -1, site)
+        return dst
+    }
+    if op == .Compare -> return ir_three_way(&m, p, &b, left, right, span)
+    if kind == .String {
+        if op != .Add || right_ty != Type.String -> return ir_fail_slot(&b, span, "String operator {op}")
+        dst :: ir_fresh_like(&m, &b, left)
+        ir_emit(&b.f, IROp.Concat, dst, left, right, -1, site)
+        return dst
+    }
+    if kind == .Int {
+        // Exact Int arithmetic, division and bit operators are IR ops (the
+        // selector divides inline and keeps the located runtime route, with
+        // its division-by-zero stop and big results, as the slow path); the
+        // rest call located routes.
+        if op == .Add || op == .Sub || op == .Mul || op == .Div || op == .Rem || op == .FloorDiv || op == .Mod || op == .BitAnd || op == .BitOr || op == .BitXor || op == .Shl || op == .Shr {
+            dst :: ir_fresh_like(&m, &b, left)
+            at :: ir_emit(&b.f, ir_binary_op(op) ?? IROp.Add, dst, left, right, IR_OVERFLOW_TRAP, site)
+            ir_stop_trap(&m, &b, at)
+            return dst
+        }
+        member :: ir_route_member(op)
+        if member == "" -> return ir_fail_slot(&b, span, "exact Int operator {op}")
+        args := [Int]{left, right}
+        loop arg in ir_location(&m, &b, site) -> &args.push(arg)
+        result_ty :: b.f.slot_type[left]
+        return ir_runtime(&m, &b, "jet_int_{member}", args, result_ty)
+    }
+    if kind == .Word {
+        trapping :: op == .Rem || op == .FloorDiv || op == .Mod
+        bitwise :: op == .BitAnd || op == .BitOr || op == .BitXor
+        if op == .Pow -> return ir_fixed_power(&m, p, &b, left, right, site, span)
+        ir_op :: ir_binary_op(op) ?? return ir_fail_slot(&b, span, "fixed-width operator {op}")
+        // The old trap routes (jet_<w>_trap_<op>) are native checked operators.
+        policy :: if (overflow || trapping) && !bitwise -> IR_OVERFLOW_TRAP else -> IR_OVERFLOW_WRAP
+        dst :: ir_temp_like(&m, &b, left)
+        at :: ir_emit(&b.f, ir_op, dst, left, right, policy, site)
+        ir_stop_trap(&m, &b, at)
+        return dst
+    }
+    if kind == .Float || kind == .Float32 {
+        // Float `%`, floor division and `**` call the runtime's libm exports,
+        // never a libm symbol.
+        if kind == .Float && (op == .Rem || op == .FloorDiv || op == .Pow) {
+            row :: b.f.slot_type[left]
+            if op == .Rem -> return ir_runtime(&m, &b, "jet_std_math_fmod", [Int]{left, right}, row)
+            if op == .Pow -> return ir_runtime(&m, &b, "jet_std_math_pow", [Int]{left, right}, row)
+            quotient :: ir_temp_like(&m, &b, left)
+            ir_emit(&b.f, IROp.Div, quotient, left, right, -1, site)
+            return ir_runtime(&m, &b, "jet_std_math_floor", [Int]{quotient}, row)
+        }
+        if op != .Add && op != .Sub && op != .Mul && op != .Div -> return ir_fail_slot(&b, span, "Float operator {op}")
+        dst :: ir_temp_like(&m, &b, left)
+        ir_emit(&b.f, ir_binary_op(op) ?? IROp.Add, dst, left, right, -1, site)
+        return dst
+    }
+    if op == .Add || op == .Sub {
+        if ir_word_record(m, p, b.f.slot_type[left]) == .Val(left_record) {
+            if ir_word_record(m, p, b.f.slot_type[right]) == .Val(right_record) -> return ir_time_binary(&m, p, &b, op, site, left, left_record, right, right_record, span)
+        }
+    }
+    ir_fail_slot(&b, span, "operator {op} on {ir_type_name(left_ty)}")
+}
+
+// Fixed-width `a.pow(n)` (Rust Prelude Power.rs jet_pow, the trapping
+// mode): both operands widen to exact Ints, jet_int_pow raises (a negative
+// exponent stops), and jet_int_checked_fixed narrows the power back to the
+// base's width, stopping when it leaves the range as a multiplication does.
+fn ir_fixed_power(m: &IRModule, p: IRProgram, b: &IRBuilder, left: Int, right: Int, site: Int, span: Span) -> Int Never! {
+    target :: b.f.slot_type[left]
+    row :: m.types[target]
+    int_row :: ir_type_row(&m, Type.Int) ?? 0
+    base :: ir_numeric_cast(&m, p, &b, left, int_row, span)
+    exponent :: ir_numeric_cast(&m, p, &b, right, int_row, span)
+    if ir_failed(b) -> return -1
+    args := [Int]{base, exponent}
+    loop arg in ir_location(&m, &b, site) -> &args.push(arg)
+    power :: ir_runtime(&m, &b, "jet_int_pow", args, int_row)
+    ir_release(&m, &b, base)
+    ir_release(&m, &b, exponent)
+    // jet_int_checked_fixed's kinds: I8, I16, I32, I64, then U8 … U64.
+    width :: if row.bits <= 8 -> 0 else if row.bits <= 16 -> 1 else if row.bits <= 32 -> 2 else -> 3
+    kind_word :: ir_int_constant(&m, &b, int_row, if row.signed -> width else -> width + 4)
+    narrowed := [Int]{power, kind_word}
+    loop arg in ir_location(&m, &b, site) -> &narrowed.push(arg)
+    result :: ir_runtime(&m, &b, ir_route_export("jet_std::jet_int_checked_fixed"), narrowed, target)
+    ir_release(&m, &b, power)
+    result
+}
+
+// `+` and `-` over the time records sema_expr_check_time_binary admits
+// (Duration ± Duration, Instant ± Duration, Duration + Instant, Instant -
+// Instant). Each operand is a word record over its exact-Int nanoseconds, so
+// the result is the exact Int sum or difference of the two fields, stored in
+// the result's record: a Duration, unless one operand is a Duration and the
+// other is not, when it is the other operand's record. The record constructor
+// stops with the range stop on a value beyond i64, so `+` and `-` stop on
+// overflow as `*` and `/` do (jet_duration_scale, jet_duration_divide).
+fn ir_time_binary(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, site: Int, left: Int, left_record: IRWordRecord, right: Int, right_record: IRWordRecord, span: Span) -> Int Never! {
+    duration_ty :: Type.Named{name: "Duration"}
+    duration_row :: ir_value_type(&m, p, duration_ty) ?? return ir_type_fail(&b, span, duration_ty)
+    duration_record :: ir_word_record(m, p, duration_row) ?? return ir_fail_slot(&b, span, "Duration without its word record")
+    left_duration :: left_record.constructor == duration_record.constructor
+    right_duration :: right_record.constructor == duration_record.constructor
+    result_row := duration_row
+    result_record := duration_record.copy()
+    if left_duration && !right_duration {
+        if op == .Sub -> return ir_fail_slot(&b, span, "operator {op} with a Duration on the left")
+        result_row = b.f.slot_type[right]
+        result_record = right_record.copy()
+    } else if !left_duration && right_duration {
+        result_row = b.f.slot_type[left]
+        result_record = left_record.copy()
+    } else if !left_duration && op != .Sub {
+        return ir_fail_slot(&b, span, "operator {op} on two time points")
+    }
+    int_row :: ir_type_row(&m, Type.Int) ?? 0
+    x :: ir_runtime(&m, &b, left_record.getter, [Int]{left}, int_row)
+    y :: ir_runtime(&m, &b, right_record.getter, [Int]{right}, int_row)
+    exact :: ir_fresh_like(&m, &b, x)
+    at :: ir_emit(&b.f, ir_binary_op(op) ?? IROp.Add, exact, x, y, IR_OVERFLOW_TRAP, site)
+    ir_stop_trap(&m, &b, at)
+    ir_release(&m, &b, x)
+    ir_release(&m, &b, y)
+    ir_word_record_new(&m, &b, result_record, exact, result_row)
+}
+
+// `left <=> right`: the Less/Equal/Greater variant of Ordering. Exact Ints
+// and fixed-width words compare as their `<` and `==` do; Strings by the sign
+// of jet_rt_string_compare; any other ordered value (a runtime handle such as
+// Decimal, a tuple, a Comparable record) by the sign ir_order_sign gives.
+fn ir_three_way(m: &IRModule, p: IRProgram, b: &IRBuilder, left: Int, right: Int, span: Span) -> Int Never! {
+    kind :: ir_kind_of(m, b, left)
+    left_ty :: m.types[b.f.slot_type[left]].ty
+    if kind == .Float || kind == .Float32 || kind == .Unit -> return ir_fail_slot(&b, span, "operator <=> on {ir_type_name(left_ty)}")
+    ordering :: ir_type_def(p, "Ordering") ?? return ir_fail_slot(&b, span, "`<=>` result Ordering has no definition")
+    result_row :: ir_value_type(&m, p, Type.Named{name: "Ordering"}) ?? return ir_fail_slot(&b, span, "layout of Ordering")
+    less :: ir_variant_index(p, ordering, "Less") ?? return ir_fail_slot(&b, span, "Ordering has no Less variant")
+    equal :: ir_variant_index(p, ordering, "Equal") ?? return ir_fail_slot(&b, span, "Ordering has no Equal variant")
+    greater :: ir_variant_index(p, ordering, "Greater") ?? return ir_fail_slot(&b, span, "Ordering has no Greater variant")
+    a := left
+    c := right
+    if kind == .String {
+        word :: ir_word_row(&m)
+        a = ir_runtime(&m, &b, "jet_rt_string_compare", [Int]{left, right}, word)
+        c = ir_word_const(&m, &b, 0)
+    } else if kind != .Int && kind != .Word && kind != .Char {
+        a = ir_order_sign(&m, p, &b, left, right, span)
+        if ir_failed(b) -> return -1
+        c = ir_word_const(&m, &b, 0)
+    }
+    dst :: ir_temp(&m, &b, result_row)
+    below :: ir_bool_op(&m, &b, IROp.Lt, a, c)
+    ir_open_if(&b.f, below, b.line)
+    ir_emit(&b.f, IROp.Const, dst, less, -1, -1, b.line)
+    ir_else(&b.f, b.line)
+    same :: ir_bool_op(&m, &b, IROp.Eq, a, c)
+    ir_open_if(&b.f, same, b.line)
+    ir_emit(&b.f, IROp.Const, dst, equal, -1, -1, b.line)
+    ir_else(&b.f, b.line)
+    ir_emit(&b.f, IROp.Const, dst, greater, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+    dst
+}
+
+// `left <=> right` as a word -1, 0 or 1 for operands `<`, `<=`, `>` and `>=`
+// do not compare in place (the Rust derived Ord): an Option orders None
+// first, then its payloads; a List element by element, then by length; a
+// tuple member by member.
+fn ir_order_sign(m: &IRModule, p: IRProgram, b: &IRBuilder, left: Int, right: Int, span: Span) -> Int Never! {
+    word_row :: ir_word_row(&m)
+    sign :: ir_temp(&m, &b, word_row)
+    ir_emit(&b.f, IROp.Const, sign, 0, -1, -1, b.line)
+    decided :: ir_open(&b.f, IROp.Block, b.line)
+    row :: b.f.slot_type[left]
+    ir_order_into(&m, p, &b, row, left, right, sign, decided, span)
+    ir_emit(&b.f, IROp.Const, sign, 0, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    sign
+}
+
+// Sets `sign` to -1 or 1 and leaves the Block `decided` when `left` and
+// `right` of type row `row` differ in order; falls through when they are
+// equal.
+fn ir_order_into(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int, right: Int, sign: Int, decided: Int, span: Span) Never! {
+    kind :: m.types[row].kind
+    if kind == .Unit -> return
+    ty :: ir_untag(m.types[row].ty)
+    if left < 0 || right < 0 -> return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+    // An inline Option is a Word of its own order (the Option arm).
+    if kind == .Int || (kind == .Word && !ir_option_inline(m, row)) || kind == .Char || kind == .Float || kind == .Float32 || kind == .String {
+        a := left
+        c := right
+        if kind == .String {
+            word_row :: ir_word_row(&m)
+            a = ir_runtime(&m, &b, "jet_rt_string_compare", [Int]{left, right}, word_row)
+            c = ir_word_const(&m, &b, 0)
+        }
+        return ir_order_step(&m, &b, a, c, sign, decided)
+    }
+    if kind == .Bool {
+        // false before true: they differ, so `right` holding puts `left` first.
+        same :: ir_bool_op(&m, &b, IROp.Eq, left, right)
+        ir_open_if(&b.f, same, b.line)
+        ir_else(&b.f, b.line)
+        ir_order_decide(&m, &b, right, sign, decided)
+        ir_end(&b.f, b.line)
+        return
+    }
+    if ty == .Option(inner) {
+        payload :: ir_value_type(&m, p, inner) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+        left_some :: ir_option_is_some(&m, &b, left)
+        right_some :: ir_option_is_some(&m, &b, right)
+        same :: ir_bool_op(&m, &b, IROp.Eq, left_some, right_some)
+        ir_open_if(&b.f, same, b.line)
+        ir_open_if(&b.f, left_some, b.line)
+        left_payload :: ir_option_payload(&m, &b, left, payload)
+        right_payload :: ir_option_payload(&m, &b, right, payload)
+        ir_order_into(&m, p, &b, payload, left_payload, right_payload, sign, decided, span)
+        ir_end(&b.f, b.line)
+        ir_else(&b.f, b.line)
+        ir_order_decide(&m, &b, right_some, sign, decided)
+        ir_end(&b.f, b.line)
+        return
+    }
+    if ty == .List(element) {
+        element_row :: ir_value_type(&m, p, element) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+        stride :: ir_list_stride(m, element_row)
+        length :: ir_load_word(&m, &b, left, 0)
+        right_length :: ir_load_word(&m, &b, right, 0)
+        shorter :: ir_bool_op(&m, &b, IROp.Lt, right_length, length)
+        word_row :: ir_word_row(&m)
+        common :: ir_temp(&m, &b, word_row)
+        ir_emit(&b.f, IROp.Copy, common, length, -1, -1, b.line)
+        ir_open_if(&b.f, shorter, b.line)
+        ir_emit(&b.f, IROp.Copy, common, right_length, -1, -1, b.line)
+        ir_end(&b.f, b.line)
+        left_data :: ir_load_word(&m, &b, left, 16)
+        right_data :: ir_load_word(&m, &b, right, 16)
+        index :: ir_word_const(&m, &b, 0)
+        done :: ir_open(&b.f, IROp.Block, b.line)
+        _ :: ir_open(&b.f, IROp.Loop, b.line)
+        more :: ir_bool_op(&m, &b, IROp.Lt, index, common)
+        ir_exit_unless(&m, &b, more, done)
+        left_at :: ir_element_address(&m, &b, left_data, index, stride)
+        a :: ir_load_at(&m, &b, left_at, 0, element_row)
+        right_at :: ir_element_address(&m, &b, right_data, index, stride)
+        c :: ir_load_at(&m, &b, right_at, 0, element_row)
+        ir_order_into(&m, p, &b, element_row, a, c, sign, decided, span)
+        one :: ir_word_const(&m, &b, 1)
+        ir_emit(&b.f, IROp.Add, index, index, one, IR_OVERFLOW_WRAP, b.line)
+        ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
+        ir_end(&b.f, b.line)
+        ir_end(&b.f, b.line)
+        return ir_order_step(&m, &b, length, right_length, sign, decided)
+    }
+    if ty == .Tuple(fields) {
+        members :: ir_tuple_members(&m, p, fields) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+        loop member in members {
+            a :: ir_member_read(&m, &b, left, member)
+            c :: ir_member_read(&m, &b, right, member)
+            ir_order_into(&m, p, &b, member.ty, a, c, sign, decided, span)
+            if ir_failed(b) -> return
+        }
+        return
+    }
+    if ir_is_handle(m, row) -> return ir_order_handle(&m, p, &b, ty, left, right, sign, decided, span)
+    if ir_native_carrier(ty) -> return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+    // A user Comparable impl orders by its own body; a derived one orders
+    // structurally.
+    selected :: ir_compare_impl(&m, p, &b, row, left, right, span)
+    if ir_failed(b) -> return
+    if selected >= 0 {
+        ordering :: ir_type_def(p, "Ordering") ?? return ir_fail(&b, span, "Comparable result Ordering has no definition")
+        equal_index :: ir_variant_index(p, ordering, "Equal") ?? return ir_fail(&b, span, "Ordering has no Equal variant")
+        ordering_row :: b.f.slot_type[selected]
+        equal :: ir_temp(&m, &b, ordering_row)
+        ir_emit(&b.f, IROp.Const, equal, equal_index, -1, -1, b.line)
+        return ir_order_step(&m, &b, selected, equal, sign, decided)
+    }
+    helper :: ir_order_helper(&m, p, &b, row, span)
+    if helper < 0 -> return
+    word_row :: ir_word_row(&m)
+    order :: ir_temp(&m, &b, word_row)
+    start :: ir_args(&b.f, [Int]{left, right})
+    ir_emit(&b.f, IROp.Call, order, helper, start, 2, b.line)
+    ir_stop_check(&m, &b)
+    zero :: ir_word_const(&m, &b, 0)
+    ir_order_step(&m, &b, order, zero, sign, decided)
+}
+
+// The Ordering a selected user Comparable implementation (`compare`) gives
+// `left` against `right` of type row `row`, or -1 when none is selected.
+fn ir_compare_impl(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int, right: Int, span: Span) -> Int Never! {
+    if p.render_impls.len() == 0 -> return -1
+    index :: p.render_impls.get("Comparable|{ir_render_type_key(p.type_rows, p.types, m.types[row].ty)}") ?? return -1
+    function :: p.functions[index]
+    if function.generic_params.len() > 0 -> return ir_fail_slot(&b, span, "generic Comparable implementation {function.name}")
+    returned :: ir_executable_return(function) ?? return ir_fail_slot(&b, span, "Comparable implementation {function.name} without a result")
+    result_row :: ir_value_type(&m, p, returned) ?? return ir_type_fail(&b, span, returned)
+    dst :: ir_temp(&m, &b, result_row)
+    start :: ir_args(&b.f, [Int]{left, right})
+    at :: ir_emit(&b.f, IROp.Call, dst, -1, start, 2, b.line)
+    &b.deferred.push(IRDeferredCall{at: at, key: function.key})
+    ir_stop_check(&m, &b)
+    dst
+}
+
+// The IR function giving the order word -1, 0 or 1 of two values of the
+// struct or payload enum type row `row` (the Rust derived Ord), built on
+// first use so a recursive type orders through its own helper; -1 when its
+// body cannot be built.
+fn ir_order_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, span: Span) -> Int Never! {
+    helper_key :: "#order<{ir_row_key(m, row)}>"
+    known :: name_rows_value(m.function_rows, helper_key) ?? -1
+    if known >= 0 -> return known
+    id :: m.functions.len()
+    &m.functions.push(ir_hashed_function("order", helper_key, "jet_ir_order_", "", 0))
+    name_rows_set(&m.function_rows, helper_key, id)
+    a := ir_builder_new(m.functions[id].copy())
+    left :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "left"))
+    right :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "right"))
+    word_row :: ir_word_row(&m)
+    a.f.result = word_row
+    sign :: ir_temp(&m, &a, word_row)
+    ir_emit(&a.f, IROp.Const, sign, 0, -1, -1, a.line)
+    decided :: ir_open(&a.f, IROp.Block, a.line)
+    ir_order_nominal(&m, p, &a, row, left, right, sign, decided, span)
+    ir_end(&a.f, a.line)
+    if a.error != "" {
+        ir_emit(&a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
+        m.functions[id] = ^a.f
+        name_rows_set(&m.function_rows, helper_key, -1)
+        ir_fail(&b, span, a.error)
+        return -1
+    }
+    ir_emit(&a.f, IROp.Return, -1, sign, -1, -1, a.line)
+    ir_resolve_deferred(&m, p, &a)
+    m.functions[id] = ^a.f
+    id
+}
+
+// Orders two values of the struct or payload enum type row `row` member by
+// member in declaration order; an enum by variant ordinal first, then the
+// selected variant's payload members.
+fn ir_order_nominal(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int, right: Int, sign: Int, decided: Int, span: Span) Never! {
+    ty :: ir_untag(m.types[row].ty)
+    name :: ir_nominal_name(ty) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+    definition_row :: ir_type_def(p, name) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+    if p.types[definition_row].kind == .Struct(_, _) {
+        members :: ir_struct_members(&m, p, definition_row, ir_type_args(ty)) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+        return ir_order_members(&m, p, &b, members, left, right, sign, decided, span)
+    }
+    if m.types[row].kind == .Pointer && p.types[definition_row].kind == .Enum(variants, _) {
+        left_tag :: ir_load_word(&m, &b, left, 0)
+        right_tag :: ir_load_word(&m, &b, right, 0)
+        ir_order_step(&m, &b, left_tag, right_tag, sign, decided)
+        loop index in 0..<variants.len() {
+            members :: ir_variant_members(&m, p, definition_row, ir_type_args(ty), index) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+            if members.len() == 0 -> next
+            variant_word :: ir_word_const(&m, &b, index)
+            selected :: ir_bool_op(&m, &b, IROp.Eq, left_tag, variant_word)
+            ir_open_if(&b.f, selected, b.line)
+            ir_order_members(&m, p, &b, members, left, right, sign, decided, span)
+            ir_end(&b.f, b.line)
+        }
+        return
+    }
+    ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+}
+
+fn ir_order_members(m: &IRModule, p: IRProgram, b: &IRBuilder, members: [IRMember], left: Int, right: Int, sign: Int, decided: Int, span: Span) Never! {
+    loop member in members {
+        if ir_failed(b) -> return
+        a :: ir_member_value(&m, &b, left, member)
+        c :: ir_member_value(&m, &b, right, member)
+        ir_order_into(&m, p, &b, member.ty, a, c, sign, decided, span)
+    }
+}
+
+// A runtime handle orders by the shared runtime's law: a Duration by its
+// exact nanoseconds, a Decimal through jet_decimal_compare, any other runtime
+// type through its `compare_value` route (both: Ordering Less 0, Equal 1,
+// Greater 2).
+fn ir_order_handle(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, left: Int, right: Int, sign: Int, decided: Int, span: Span) Never! {
+    if ty == .Apply(_, args) {
+        if args.len() > 0 -> return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+    }
+    name :: ir_nominal_name(ty) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+    handle :: ir_handle_runtime(p, name) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+    if handle.runtime == "Duration" {
+        int_row :: ir_type_row(&m, Type.Int) ?? 0
+        x :: ir_runtime(&m, &b, "jet_rt_record_get_duration_ns", [Int]{left}, int_row)
+        y :: ir_runtime(&m, &b, "jet_rt_record_get_duration_ns", [Int]{right}, int_row)
+        order :: ir_order_sign(&m, p, &b, x, y, span)
+        ir_release(&m, &b, x)
+        ir_release(&m, &b, y)
+        zero :: ir_word_const(&m, &b, 0)
+        return ir_order_step(&m, &b, order, zero, sign, decided)
+    }
+    symbol :: if handle.runtime == "JetDecimal" -> "jet_decimal_compare" else -> "{handle.runtime}::compare_value"
+    route :: ir_runtime_route(symbol) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+    word_row :: ir_word_row(&m)
+    order :: ir_runtime(&m, &b, route.export, [Int]{left, right}, word_row)
+    equal :: ir_word_const(&m, &b, 1)
+    ir_order_step(&m, &b, order, equal, sign, decided)
+}
+
+// Orders two scalar words `a` and `c` into `sign` and leaves `decided`
+// unless they are equal.
+fn ir_order_step(m: &IRModule, b: &IRBuilder, a: Int, c: Int, sign: Int, decided: Int) Never! {
+    equal :: ir_bool_op(&m, &b, IROp.Eq, a, c)
+    ir_open_if(&b.f, equal, b.line)
+    ir_else(&b.f, b.line)
+    below :: ir_bool_op(&m, &b, IROp.Lt, a, c)
+    ir_order_decide(&m, &b, below, sign, decided)
+    ir_end(&b.f, b.line)
+}
+
+// `sign` = -1 when `below` holds, else 1; then leaves `decided`.
+fn ir_order_decide(m: &IRModule, b: &IRBuilder, below: Int, sign: Int, decided: Int) Never! {
+    ir_emit(&b.f, IROp.Const, sign, 1, -1, -1, b.line)
+    ir_open_if(&b.f, below, b.line)
+    ir_emit(&b.f, IROp.Const, sign, -1, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    depth :: ir_depth(b.f, decided)
+    ir_emit(&b.f, IROp.Br, -1, depth, -1, -1, b.line)
+}
+
+// `a < b < c`: each comparison runs only while every earlier one held, and
+// each operand is evaluated once. The right operand an open test keeps for
+// the next comparison is dropped on the arm that leaves the chain early.
+fn ir_compare_chain(m: &IRModule, p: IRProgram, b: &IRBuilder, operands: [Int], operators: [TBinaryOp], hooks: [Bool], span: Span) -> Int Never! {
+    if operators.len() == 0 || operands.len() != operators.len() + 1 -> return ir_fail_slot(&b, span, "comparison chain shape")
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    result :: ir_temp(&m, &b, bool_row)
+    ir_emit(&b.f, IROp.Const, result, 0, -1, -1, b.line)
+    left := ir_expr(&m, p, &b, operands[0])
+    if ir_failed(b) -> return -1
+    held := [Int]{}
+    loop (index, op) in operators {
+        if index < hooks.len() && hooks[index] -> return ir_fail_slot(&b, span, "comparison chain hook")
+        right :: ir_expr(&m, p, &b, operands[index + 1])
+        if ir_failed(b) -> return -1
+        site :: b.line
+        operand_ty :: ir_ty(p, b, operands[index])
+        operand_type :: ir_ty(p, b, operands[index + 1])
+        test :: ir_binary(&m, p, &b, op, false, site, operand_ty, left, right, operand_type, span)
+        if ir_failed(b) -> return -1
+        ir_release(&m, &b, left)
+        if index + 1 == operators.len() {
+            ir_emit(&b.f, IROp.Copy, result, test, -1, -1, b.line)
+            ir_release(&m, &b, right)
+        } else {
+            &held.push(if right >= 0 && b.fresh[right] && ir_has_drop(m, b, right) -> right else -> -1)
+            ir_open_if(&b.f, test, b.line)
+        }
+        left = right
+    }
+    index := held.len() - 1
+    loop index >= 0 {
+        if held[index] >= 0 {
+            ir_else(&b.f, b.line)
+            ir_emit(&b.f, IROp.Drop, -1, held[index], -1, -1, b.line)
+        }
+        ir_end(&b.f, b.line)
+        index -= 1
+    }
+    result
+}
+
+// `left == right` as a Bool slot (the Rust derived PartialEq), the outermost
+// type compared inline.
+fn ir_equal(m: &IRModule, p: IRProgram, b: &IRBuilder, left: Int, right: Int, span: Span) -> Int Never! {
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    same :: ir_temp(&m, &b, bool_row)
+    ir_emit(&b.f, IROp.Const, same, 0, -1, -1, b.line)
+    differ :: ir_open(&b.f, IROp.Block, b.line)
+    row :: b.f.slot_type[left]
+    ir_equal_into(&m, p, &b, row, left, right, differ, true, span)
+    ir_emit(&b.f, IROp.Const, same, 1, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    same
+}
+
+// Leaves the Block `differ` unless the values `left` and `right` of type row
+// `row` are equal: scalars and Strings compare in place, a runtime handle
+// through its jet_rt_handle_eq_<T>; an Option, Result, List, Map, tuple,
+// struct or payload enum member by member in declaration order. Only the
+// `outer` struct or enum compares its members inline; a nested one compares
+// through its row's helper function, so each row's comparison is built once
+// however often the type graph reaches it.
+fn ir_equal_into(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int, right: Int, differ: Int, outer: Bool, span: Span) Never! {
+    kind :: m.types[row].kind
+    if kind == .Unit -> return
+    ty :: ir_untag(m.types[row].ty)
+    if left < 0 || right < 0 -> return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+    // An inline Option compares its Int payloads (the Option arm): two big
+    // Ints of one value are two words.
+    if kind == .Int || (kind == .Word && !ir_option_inline(m, row)) || kind == .Bool || kind == .Char || kind == .Float || kind == .Float32 || kind == .String {
+        equal :: ir_bool_op(&m, &b, IROp.Eq, left, right)
+        return ir_exit_unless(&m, &b, equal, differ)
+    }
+    if ir_is_handle(m, row) {
+        symbol :: ir_equal_handle_symbol(p, ty) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+        bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+        equal :: ir_runtime(&m, &b, symbol, [Int]{left, right}, bool_row)
+        return ir_exit_unless(&m, &b, equal, differ)
+    }
+    if ty == .Option(inner) {
+        // Both absent are equal, one absent differs, else the payloads.
+        payload :: ir_value_type(&m, p, inner) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+        left_some :: ir_option_is_some(&m, &b, left)
+        right_some :: ir_option_is_some(&m, &b, right)
+        both :: ir_bool_op(&m, &b, IROp.Eq, left_some, right_some)
+        ir_exit_unless(&m, &b, both, differ)
+        ir_open_if(&b.f, left_some, b.line)
+        left_payload :: ir_option_payload(&m, &b, left, payload)
+        right_payload :: ir_option_payload(&m, &b, right, payload)
+        ir_equal_into(&m, p, &b, payload, left_payload, right_payload, differ, outer, span)
+        ir_end(&b.f, b.line)
+        return
+    }
+    if ty == .Result(ok_ty, err_ty) {
+        ok :: ir_value_type(&m, p, ok_ty) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+        err :: ir_value_type(&m, p, err_ty) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+        left_ok :: ir_result_is_ok(&m, &b, left)
+        right_ok :: ir_result_is_ok(&m, &b, right)
+        both :: ir_bool_op(&m, &b, IROp.Eq, left_ok, right_ok)
+        ir_exit_unless(&m, &b, both, differ)
+        ir_open_if(&b.f, left_ok, b.line)
+        left_value :: ir_load_at(&m, &b, left, 8, ok)
+        right_value :: ir_load_at(&m, &b, right, 8, ok)
+        ir_equal_into(&m, p, &b, ok, left_value, right_value, differ, outer, span)
+        ir_else(&b.f, b.line)
+        left_error :: ir_load_at(&m, &b, left, 8, err)
+        right_error :: ir_load_at(&m, &b, right, 8, err)
+        ir_equal_into(&m, p, &b, err, left_error, right_error, differ, outer, span)
+        ir_end(&b.f, b.line)
+        return
+    }
+    element_ty :: if ty == .List(element) -> Val(element.copy()) else if ir_view_element(ty) == .Val(element) -> Val(element) else -> ir_map_entry_type(ty)
+    if element_ty == .Val(element) {
+        // Equal lengths, then every element (a Map's entries) in order.
+        element_row :: ir_value_type(&m, p, element) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+        stride :: ir_list_stride(m, element_row)
+        length :: ir_load_word(&m, &b, left, 0)
+        right_length :: ir_load_word(&m, &b, right, 0)
+        same_length :: ir_bool_op(&m, &b, IROp.Eq, length, right_length)
+        ir_exit_unless(&m, &b, same_length, differ)
+        left_data :: ir_load_word(&m, &b, left, 16)
+        right_data :: ir_load_word(&m, &b, right, 16)
+        index :: ir_word_const(&m, &b, 0)
+        done :: ir_open(&b.f, IROp.Block, b.line)
+        _ :: ir_open(&b.f, IROp.Loop, b.line)
+        more :: ir_bool_op(&m, &b, IROp.Lt, index, length)
+        ir_exit_unless(&m, &b, more, done)
+        left_at :: ir_element_address(&m, &b, left_data, index, stride)
+        a :: ir_load_at(&m, &b, left_at, 0, element_row)
+        right_at :: ir_element_address(&m, &b, right_data, index, stride)
+        c :: ir_load_at(&m, &b, right_at, 0, element_row)
+        ir_equal_into(&m, p, &b, element_row, a, c, differ, outer, span)
+        one :: ir_word_const(&m, &b, 1)
+        ir_emit(&b.f, IROp.Add, index, index, one, IR_OVERFLOW_WRAP, b.line)
+        ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
+        ir_end(&b.f, b.line)
+        ir_end(&b.f, b.line)
+        return
+    }
+    if ty == .Tuple(fields) {
+        members :: ir_tuple_members(&m, p, fields) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+        return ir_equal_members(&m, p, &b, members, left, right, differ, outer, span)
+    }
+    if ir_native_carrier(ty) -> return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+    name :: ir_nominal_name(ty) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+    definition_row :: ir_type_def(p, name) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+    if !outer {
+        helper :: ir_equal_helper(&m, p, &b, row, span)
+        if helper < 0 -> return
+        bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+        equal :: ir_temp(&m, &b, bool_row)
+        start :: ir_args(&b.f, [Int]{left, right})
+        ir_emit(&b.f, IROp.Call, equal, helper, start, 2, b.line)
+        ir_stop_check(&m, &b)
+        return ir_exit_unless(&m, &b, equal, differ)
+    }
+    if p.types[definition_row].kind == .Struct(_, _) {
+        members :: ir_struct_members(&m, p, definition_row, ir_type_args(ty)) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+        return ir_equal_members(&m, p, &b, members, left, right, differ, false, span)
+    }
+    if kind == .Pointer && p.types[definition_row].kind == .Enum(variants, _) {
+        // Equal discriminants, then the selected variant's payload members.
+        left_tag :: ir_load_word(&m, &b, left, 0)
+        right_tag :: ir_load_word(&m, &b, right, 0)
+        same_tag :: ir_bool_op(&m, &b, IROp.Eq, left_tag, right_tag)
+        ir_exit_unless(&m, &b, same_tag, differ)
+        loop index in 0..<variants.len() {
+            members :: ir_variant_members(&m, p, definition_row, ir_type_args(ty), index) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+            if members.len() == 0 -> next
+            variant_word :: ir_word_const(&m, &b, index)
+            selected :: ir_bool_op(&m, &b, IROp.Eq, left_tag, variant_word)
+            ir_open_if(&b.f, selected, b.line)
+            ir_equal_members(&m, p, &b, members, left, right, differ, false, span)
+            ir_end(&b.f, b.line)
+        }
+        return
+    }
+    ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
+}
+
+fn ir_equal_members(m: &IRModule, p: IRProgram, b: &IRBuilder, members: [IRMember], left: Int, right: Int, differ: Int, outer: Bool, span: Span) Never! {
+    loop member in members {
+        if ir_failed(b) -> return
+        left_member :: ir_member_value(&m, &b, left, member)
+        right_member :: ir_member_value(&m, &b, right, member)
+        ir_equal_into(&m, p, &b, member.ty, left_member, right_member, differ, outer, span)
+    }
+}
+
+// The IR function `left == right` of the values of type row `row` (built on
+// first use; -1 when its body cannot be built, which a later use builds
+// again to report the same failure).
+fn ir_equal_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, span: Span) -> Int Never! {
+    helper_key :: "#equal<{ir_row_key(m, row)}>"
+    known :: name_rows_value(m.function_rows, helper_key) ?? -1
+    if known >= 0 -> return known
+    id :: m.functions.len()
+    &m.functions.push(ir_hashed_function("equal", helper_key, "jet_ir_equal_", "", 0))
+    name_rows_set(&m.function_rows, helper_key, id)
+    a := ir_builder_new(m.functions[id].copy())
+    left :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "left"))
+    right :: ir_new_slot(&a, row, IRSlotKind.Param, ir_intern_name(&m, "right"))
+    a.f.result = ir_type_row(&m, Type.Bool) ?? 0
+    same :: ir_equal(&m, p, &a, left, right, span)
+    if a.error != "" {
+        ir_emit(&a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
+        m.functions[id] = ^a.f
+        name_rows_set(&m.function_rows, helper_key, -1)
+        ir_fail(&b, span, a.error)
+        return -1
+    }
+    ir_emit(&a.f, IROp.Return, -1, same, -1, -1, a.line)
+    ir_resolve_deferred(&m, p, &a)
+    m.functions[id] = ^a.f
+    id
+}
+
+// The runtime equality of a handle type: jet_rt_handle_eq_<T> when the
+// runtime type compares.
+fn ir_equal_handle_symbol(p: IRProgram, ty: Type) -> String? Never! {
+    if ty == .Apply(_, args) {
+        if args.len() > 0 -> return None
+    }
+    name :: ir_nominal_name(ty) ?? return None
+    handle :: ir_handle_runtime(p, name) ?? return None
+    if handle.eq -> return Val("jet_rt_handle_eq_{runtime_abi_atom(handle.runtime)}")
+    None
+}
+
+// The declaration key of the structural enum of union type `ty`.
+fn ir_union_key(ty: Type) -> String Never! {
+    "union:{type_carrier_identity(ty)}"
+}
+
+// Adds the structural enum of each union type a signature or a declaration
+// names: one variant per member, named by its union member tag and carrying
+// the member.
+fn ir_add_union_types(types: &[TTypeDef], functions: [FnBody]) Never! {
+    if types.len() == 0 -> return
+    found := [Type]{}
+    ir_collect_signature_unions(functions, &found)
+    loop definition in types {
+        if definition.generic_params.len() > 0 -> next
+        if definition.kind == {
+            .Struct(fields, _) -> loop field in fields -> ir_collect_unions(field.ty, &found)
+            .Enum(variants, _) -> loop variant in variants {
+                if variant.payload == {
+                    .Unit -> {}
+                    .Single(inner) -> ir_collect_unions(inner, &found)
+                    .Named(fields) -> loop field in fields -> ir_collect_unions(field.ty, &found)
+                }
+            }
+            else -> {}
+        }
+    }
+    if found.len() == 0 -> return
+    // A found union is added unless a type of its key exists or an earlier
+    // one of the same key was added.
+    keys := [String]{}
+    pending := [String:Bool]{}
+    loop ty in found {
+        key :: ir_union_key(ty)
+        pending[key.copy()] = true
+        &keys.push(key)
+    }
+    loop definition in types {
+        if pending.get(definition.key) != None -> pending[definition.key.copy()] = false
+    }
+    module_identity :: types[0].module_identity.copy()
+    loop index in 0..<found.len() {
+        if !(pending.get(keys[index]) ?? false) -> next
+        pending[keys[index].copy()] = false
+        if found[index] == .Union(members) -> &types.push(ir_union_def(module_identity, keys[index], members))
+    }
+}
+
+// Adds the structural enum of each union type `functions`' signatures name
+// that `types` lacks (`type_rows`: its rows by key and name, which the
+// added ones join; a union's key is its name).
+fn ir_add_signature_union_types(types: &[TTypeDef], type_rows: &[String:Int], functions: [FnBody]) Never! {
+    if types.len() == 0 -> return
+    found := [Type]{}
+    ir_collect_signature_unions(functions, &found)
+    module_identity :: types[0].module_identity.copy()
+    loop ty in found {
+        key :: ir_union_key(ty)
+        if type_rows.get(key) != None -> next
+        if ty == .Union(members) {
+            type_rows[key.copy()] = types.len()
+            &types.push(ir_union_def(module_identity, key, members))
+        }
+    }
+}
+
+// The union types the non-generic `functions`' parameters and results name.
+fn ir_collect_signature_unions(functions: [FnBody], found: &[Type]) Never! {
+    loop function in functions {
+        if function.generic_params.len() > 0 -> next
+        loop param in function.params -> ir_collect_unions(param.ty, &found)
+        if function.ret == .Val(ret) -> ir_collect_unions(ret, &found)
+    }
+}
+
+// The structural enum of union `key`: one variant per member, named by its
+// union member tag and carrying the member.
+fn ir_union_def(module_identity: String, key: String, members: [Type]) -> TTypeDef Never! {
+    variants :: loop member in members -> TVariant{name: type_union_member_tag(member), wire_name: type_union_member_tag(member), span: Span{start: 0, end: 0}, payload: TVariantPayload.Single{value: member.copy()}, discriminant: None}
+    ir_compiler_owned_def(module_identity, key, TTypeDefKind.Enum{variants: variants, methods: [String]{}})
+}
+
+// Every union type `ty` holds, outermost first.
+fn ir_collect_unions(ty: Type, found: &[Type]) Never! {
+    if ty == {
+        .Union(members) -> {
+            &found.push(ty.copy())
+            loop member in members -> ir_collect_unions(member, &found)
+        }
+        .Option(inner) | .List(inner) | .Shared(inner) -> ir_collect_unions(inner, &found)
+        .Tagged(_, inner) -> ir_collect_unions(inner, &found)
+        .Result(ok, err) -> {
+            ir_collect_unions(ok, &found)
+            ir_collect_unions(err, &found)
+        }
+        .Map(key, _, value) -> {
+            ir_collect_unions(key, &found)
+            ir_collect_unions(value, &found)
+        }
+        .Tuple(fields) -> loop field in fields -> ir_collect_unions(field.ty, &found)
+        .Apply(_, args) -> loop arg in args -> ir_collect_unions(arg, &found)
+        else -> {}
+    }
+}
+
+// The call argument `value` widened to the union `union_ty` (sema
+// widen_to_union).
+fn ir_widen_union(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, union_ty: Type, span: Span) -> Int Never! {
+    value_ty :: ir_ty(p, b, value)
+    subst_ty :: ir_subst(m, value_ty)
+    member_row :: ir_value_type(&m, p, subst_ty) ?? return ir_type_fail(&b, span, value_ty)
+    payload :: ir_value_as(&m, p, &b, value, member_row, span)
+    if ir_failed(b) -> return -1
+    ir_union_box(&m, p, &b, payload, value_ty, union_ty, span)
+}
+
+// A new box of the structural enum of union `union_ty` holding `payload`
+// (of member type `member_ty`) as the variant that member's tag names.
+fn ir_union_box(m: &IRModule, p: IRProgram, b: &IRBuilder, payload: Int, member_ty: Type, union_ty: Type, span: Span) -> Int Never! {
+    target :: ir_untag(ir_subst(m, union_ty))
+    row :: ir_type_def(p, ir_union_key(target)) ?? return ir_fail_slot(&b, span, "union {ir_type_name(target)} without a definition")
+    slot_type :: ir_value_type(&m, p, target) ?? return ir_type_fail(&b, span, target)
+    member_tag :: type_union_member_tag(ir_untag(ir_subst(m, member_ty)))
+    index :: ir_variant_index(p, row, member_tag) ?? return ir_fail_slot(&b, span, "{ir_type_name(member_ty)} is no member of {ir_type_name(target)}")
+    members :: ir_variant_members(&m, p, row, [Type]{}, index) ?? return ir_fail_slot(&b, span, "layout of {ir_type_name(target)}")
+    size :: ir_enum_box_size(&m, p, row, [Type]{}) ?? return ir_fail_slot(&b, span, "layout of {ir_type_name(target)}")
+    boxed :: ir_box_alloc(&m, &b, size, slot_type)
+    tag_word :: ir_word_const(&m, &b, index)
+    ir_emit(&b.f, IROp.Store, -1, boxed, 0, tag_word, b.line)
+    if payload >= 0 && members.len() == 1 -> ir_member_store(&m, p, &b, boxed, members[0], payload)
+    boxed
+}
+
+// The spelling an error conversion reports for `ty`: a nominal type's
+// declared name (`StoreErr`, `IOError`), never the owner-qualified key
+// (`module:…::StoreErr`, `<corelib>/…::IOError`) that identifies it; any
+// other type's own spelling.
+fn ir_error_spelling(p: IRProgram, ty: Type) -> String Never! {
+    plain :: ir_untag(ty)
+    if plain == .Named(name) {
+        if ir_type_def(p, name) == .Val(row) -> return p.types[row].name.copy()
+        parts :: name.split("::").to_list()
+        return parts[parts.len() - 1].copy()
+    }
+    type_name(ty)
+}
+
+// The Err box the failure edge of `?` returns for the Err box `subject` under
+// the function carrier `success ! error`, its error converted as `conversion`
+// asks, then the hop of a journey `site` (ir_journey_hop).
+fn ir_try_reraise(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, conversion: TTryConvert, site: IRTrySite?, success: Type, error: Type, span: Span) -> Int Never! {
+    source := Type.Int
+    held :: m.types[b.f.slot_type[subject]].ty
+    if ir_untag(held) == .Result(_, err) -> source = err.copy()
+    framed := false
+    if site == .Val(at) {
+        if at.note != None {
+            framed = if conversion == {
+                .DefaultErr -> true
+                .Typed(_, _, target) -> ir_default_err(p, target)
+                .NoConversion -> ir_default_err(p, source)
+                else -> false
+            }
+        }
+    }
+    // The Err box passes through unconverted only when it is the size of the
+    // function carrier's box: a box is freed with its own type's size
+    // (ir_box_bytes), so a callee carrier whose Ok is narrower or wider
+    // reboxes its error below.
+    carrier_row :: ir_value_type(&m, p, Type.Result{ok: success.copy(), err: error.copy()}) ?? return ir_fail_slot(&b, span, "layout of the {ir_type_name(error)} failure carrier")
+    if conversion == .NoConversion && !framed && ir_box_bytes(&m, p, b.f.slot_type[subject]) == ir_box_bytes(&m, p, carrier_row) {
+        if site == .Val(at) {
+            _ :: ir_journey_hop(&m, p, &b, at, -1, false, span)
+        }
+        return subject
+    }
+    source_row :: ir_value_type(&m, p, source) ?? return ir_type_fail(&b, span, source)
+    error_value :: ir_load_at(&m, &b, subject, 8, source_row)
+    payload :: ir_own(&m, p, &b, error_value)
+    converted := -1
+    if conversion == {
+        .NoConversion -> converted = payload
+        .DefaultErr -> {
+            error_row :: ir_value_type(&m, p, error) ?? return ir_type_fail(&b, span, error)
+            converted = ir_runtime(&m, &b, "jet_err_from_message", [Int]{payload}, error_row)
+            b.fresh[converted] = true
+            ir_release(&m, &b, payload)
+        }
+        .Typed(function_name, _, target) -> {
+            row :: ir_function_row(p, function_name) ?? return ir_fail_slot(&b, span, "error conversion {function_name} outside the checked program")
+            callee :: ir_function_id(&m, p, function_name, [Type]{}) ?? return ir_fail_slot(&b, span, "call of {function_name}")
+            routine_return :: ir_executable_return(p.functions[row]) ?? return ir_fail_slot(&b, span, "error conversion {function_name} without a result")
+            returned_row :: ir_value_type(&m, p, routine_return) ?? return ir_type_fail(&b, span, routine_return)
+            returned :: ir_fresh_temp(&m, &b, returned_row)
+            start :: ir_args(&b.f, [Int]{payload})
+            ir_emit(&b.f, IROp.Call, returned, callee, start, 1, b.line)
+            ir_stop_check(&m, &b)
+            b.fresh[payload] = false
+            converted = returned
+            if ir_untag(routine_return) == .Result(_, _) {
+                target_row :: ir_value_type(&m, p, target) ?? return ir_type_fail(&b, span, target)
+                converted_value :: ir_load_at(&m, &b, returned, 8, target_row)
+                converted = ir_own(&m, p, &b, converted_value)
+                b.fresh[converted] = true
+                ir_release(&m, &b, returned)
+            }
+            if ir_default_err(p, target) {
+                string_row :: ir_string_row(&m)
+                source_text :: ir_intern_text(&m, ir_error_spelling(p, source))
+                target_text :: ir_intern_text(&m, ir_error_spelling(p, target))
+                source_name :: ir_temp(&m, &b, string_row)
+                ir_emit(&b.f, IROp.ConstText, source_name, source_text, -1, -1, b.line)
+                target_name :: ir_temp(&m, &b, string_row)
+                ir_emit(&b.f, IROp.ConstText, target_name, target_text, -1, -1, b.line)
+                error_row :: b.f.slot_type[converted]
+                applied :: ir_runtime(&m, &b, "jet_err_apply_conversion", [Int]{converted, source_name, target_name}, error_row)
+                b.fresh[applied] = true
+                ir_release(&m, &b, converted)
+                converted = applied
+            }
+        }
+        .WidenUnion(_, _) -> {
+            converted = ir_union_box(&m, p, &b, payload, source, error, span)
+            if ir_failed(b) -> return -1
+            b.fresh[converted] = true
+        }
+        else -> return ir_fail_slot(&b, span, "`?` with error conversion {ir_conversion_name(conversion)}")
+    }
+    if site == .Val(at) {
+        converted = ir_journey_hop(&m, p, &b, at, converted, framed, span)
+        if ir_failed(b) -> return -1
+    }
+    ir_release(&m, &b, subject)
+    ir_result_box(&m, p, &b, Type.Result{ok: success, err: error}, false, converted)
+}
+
+// Whether `ty` is the compiler-owned default error `Err`.
+fn ir_default_err(p: IRProgram, ty: Type) -> Bool Never! {
+    name :: ir_nominal_name(ir_untag(ty)) ?? return false
+    row :: ir_type_def(p, name) ?? return false
+    p.types[row].compiler_builtin == (Val(TCompilerBuiltin.DefaultErr))
+}
+
+// How a program filters one compiler-owned row: a runtime enum yields only to
+// a declared row of its key; a plain Core enum and a record also yield to a
+// program type spelling their name, and a plain Core enum to a single loaded
+// Core source that declares it.
+enum IRCompilerOwnedRowClass {
+    RuntimeEnum
+    CoreEnum
+    Record
+}
+
+struct IRCompilerOwnedTypeRow {
+    class: IRCompilerOwnedRowClass
+    definition: TTypeDef
+}
+
+// Every compiler-owned row, in program order, built when the compiler itself
+// is built: each runtime enum (IR_COMPILER_OWNED_ENUMS), each plain Core enum
+// leaf (CORE_ENUM_ROWS), then `FieldError`, `Range` and the carrier, Core and
+// math records. Rows leave their module identity empty; a program fills in
+// its own.
+IR_COMPILER_OWNED_TYPE_ROWS :: comptime { ir_compiler_owned_type_rows() }
+
+fn ir_compiler_owned_type_rows() -> [IRCompilerOwnedTypeRow] Never! {
+    rows := [IRCompilerOwnedTypeRow]{}
+    loop row in IR_COMPILER_OWNED_ENUMS {
+        variants :: loop variant in row.variants -> ir_compiler_owned_variant(variant, ir_compiler_owned_enum_payload(row.name, variant))
+        &rows.push(IRCompilerOwnedTypeRow{class: .RuntimeEnum, definition: ir_compiler_owned_def("", row.name, TTypeDefKind.Enum{variants: variants, methods: [String]{}})})
+    }
+    loop core_row in CORE_ENUM_ROWS {
+        if core_row.kind == .Enum(names) {
+            variants :: loop variant in names -> ir_compiler_owned_variant(variant, IRCompilerOwnedPayload.Unit)
+            &rows.push(IRCompilerOwnedTypeRow{class: .CoreEnum, definition: ir_compiler_owned_def("", core_row.name, TTypeDefKind.Enum{variants: variants, methods: [String]{}})})
+        }
+    }
+    records := [String]{"FieldError", IR_RANGE_RECORD}
+    loop name in IR_COMPILER_OWNED_CARRIER_RECORDS -> &records.push(name)
+    loop record in IR_COMPILER_OWNED_CORE_RECORDS -> &records.push(record.name)
+    loop record in IR_COMPILER_OWNED_MATH_RECORDS -> &records.push(record.name)
+    core :: ir_compiler_owned_core_fields()
+    loop name in records {
+        fields :: ir_compiler_owned_record_fields(name, core) ?? panic("compiler-owned record `{name}` has no field rows")
+        &rows.push(IRCompilerOwnedTypeRow{class: .Record, definition: ir_compiler_owned_def("", name, TTypeDefKind.Struct{fields: ir_compiler_owned_fields(fields), methods: [String]{}})})
+    }
+    rows
+}
+
+// The compiler-owned rows no checked module declares, in
+// IR_COMPILER_OWNED_TYPE_ROWS order, each under its bare canonical key unless a
+// row already owns it. A plain Core enum leaf also yields to a program type and
+// to a single loaded Core source declaring it; a record yields to a program
+// type spelling its leaf, which keeps that bare spelling: the builder resolves
+// names by leaf, and a bare name in the declaring module is its own declaration
+// (the module scope is searched first).
+fn ir_add_compiler_owned_types(types: &[TTypeDef]) Never! {
+    if types.len() == 0 -> return
+    module_identity :: types[0].module_identity.copy()
+    declared := [String:Bool]{}
+    program_names := [String:Bool]{}
+    core_enums := [String:Int]{}
+    loop definition in types {
+        declared[definition.key] = true
+        if !definition.key.starts_with("<corelib>/") {
+            program_names[definition.name] = true
+        } else if definition.key != definition.name && definition.kind == .Enum(_, _) {
+            core_enums[definition.name] = (core_enums.get(definition.name) ?? 0) + 1
+        }
+    }
+    loop row in IR_COMPILER_OWNED_TYPE_ROWS {
+        name :: row.definition.name
+        if declared.get(name) != None -> next
+        if row.class != .RuntimeEnum && program_names.get(name) != None -> next
+        if row.class == .CoreEnum && (core_enums.get(name) ?? 0) == 1 -> next
+        declared[name] = true
+        definition := row.definition
+        definition.module_identity = module_identity
+        &types.push(^definition)
+    }
+}
+
+fn ir_compiler_owned_variant(name: String, payload: IRCompilerOwnedPayload) -> TVariant Never! {
+    checked :: if payload == {
+        .Unit -> TVariantPayload.Unit
+        .Single(ty) -> TVariantPayload.Single{value: ty.copy()}
+        .Named(fields) -> TVariantPayload.Named{fields: ir_compiler_owned_fields(fields)}
+    }
+    TVariant{name: name.copy(), wire_name: name.copy(), span: Span{start: 0, end: 0}, payload: checked, discriminant: None}
+}
+
+// The public stored fields of a compiler-owned row.
+fn ir_compiler_owned_fields(record_fields: [TypeTupleField]) -> [TField] Never! {
+    loop field in record_fields -> TField{
+        name: field.name.copy(),
+        shape_names: TShapeFieldNames{text: field.name.copy(), json: None, cbor: None, csv: None, toml: None, yaml: None, xml: None, args: field.name.copy(), env: field.name.copy(), db: None, layout: None},
+        skip: false,
+        ty: field.ty.copy(),
+        span: Span{start: 0, end: 0},
+        public: true,
+        package_public: false,
+        computed: false,
+        has_default: false,
+        redact: false,
+    }
+}
+
+// One compiler-owned row under its bare canonical key, with the row's type
+// parameters.
+fn ir_compiler_owned_def(module_identity: String, name: String, kind: ^TTypeDefKind) -> TTypeDef Never! {
+    generic_params :: loop param in ir_compiler_owned_generic_params(name) -> TGenericParam{name: param, bounds: [SymbolID]{}}
+    TTypeDef{
+        module_identity: module_identity.copy(),
+        key: name.copy(),
+        name: name.copy(),
+        span: Span{start: 0, end: 0},
+        public: true,
+        package_public: false,
+        generic_params: generic_params,
+        derives: [String]{},
+        auto_derive_default: false,
+        auto_printable: false,
+        published_schema: false,
+        single_use: false,
+        must_use: false,
+        layout: None,
+        c_layout_tag: None,
+        enum_layout: None,
+        layout_alignment: None,
+        serde: [TSerdeAttribute]{},
+        cli_bindings: [TCLIBinding]{},
+        ownership: TDeclarationOwnership.Owned,
+        boxed_edges: [String]{},
+        compiler_builtin: None,
+        kind: ^kind,
+    }
+}
+
+fn ir_carrier_type(ty: Type) -> Bool Never! {
+    if ir_untag(ty) == {
+        .Option(_) | .Result(_, _) -> true
+        else -> false
+    }
+}
+
+// The payload members of variant `index` of the enum declaration `row`
+// (applied to the instance arguments `args`), laid out from byte 8; a
+// recursive edge holds an 8-byte wrapper box pointer. Memoized in
+// m.variant_members by the instance's arguments in the terms of the instance
+// being built, as ir_struct_members is (a SharedGuard argument's row follows
+// its unspelled read/edit tag).
+fn ir_variant_members(m: &IRModule, p: IRProgram, row: Int, args: [Type], index: Int) -> [IRMember]? Never! {
+    bound :: loop arg in args -> ir_subst(m, arg)
+    identity :: "{row}|{ir_instance_identity(p.types[row].key, bound)}"
+    ir_variant_members_bound(&m, p, row, bound, identity, index)
+}
+
+fn ir_variant_members_bound(m: &IRModule, p: IRProgram, row: Int, bound: [Type], identity: String, index: Int) -> [IRMember]? Never! {
+    if identity.contains("SharedGuard<") -> return ir_variant_members_laid(&m, p, row, bound, index)
+    memo :: "{identity}#{index}"
+    if ir_members_memo(m, m.variant_members, memo) == .Val(known) -> return Val(known)
+    found :: ir_variant_members_laid(&m, p, row, bound, index) ?? return None
+    name_rows_set(&m.variant_members, memo, m.member_lists.len())
+    &m.member_lists.push(found.copy())
+    Val(found)
+}
+
+fn ir_variant_members_laid(m: &IRModule, p: IRProgram, row: Int, args: [Type], index: Int) -> [IRMember]? Never! {
+    definition :: p.types[row]
+    members := [IRMember]{}
+    if definition.kind == .Enum(variants, _) {
+        variant :: variants[index]
+        names := [String]{}
+        types := [Type]{}
+        edges := [String]{}
+        redacts := [Bool]{}
+        if variant.payload == {
+            .Unit -> {}
+            .Single(inner) -> {
+                &names.push(variant.name)
+                &types.push(inner)
+                &edges.push(variant.name)
+                &redacts.push(false)
+            }
+            .Named(fields) -> {
+                loop field in fields {
+                    if field.computed -> next
+                    &names.push(field.name)
+                    &types.push(field.ty)
+                    &edges.push("{variant.name}.{field.name}")
+                    &redacts.push(field.redact)
+                }
+            }
+        }
+        offset := 8
+        loop (position, name) in names {
+            ty :: ir_value_type(&m, p, ir_instance_type(p, row, args, types[position])) ?? return None
+            boxed :: definition.boxed_edges.contains(edges[position])
+            size :: if boxed -> 8 else -> m.types[ty].size
+            align :: if boxed || m.types[ty].kind == .Aggregate -> 8 else -> m.types[ty].align
+            if size > 0 && align > 0 && offset % align != 0 -> offset += align - offset % align
+            &members.push(IRMember{name: name, offset: offset, ty: ty, boxed: boxed, redact: redacts[position]})
+            offset += size
+        }
+    }
+    Val(members)
+}
+
+// The end of the widest variant, in whole words. Memoized in m.enum_sizes by
+// instance identity, as ir_variant_members is.
+fn ir_enum_box_size(m: &IRModule, p: IRProgram, row: Int, args: [Type]) -> Int? Never! {
+    bound :: loop arg in args -> ir_subst(m, arg)
+    identity :: "{row}|{ir_instance_identity(p.types[row].key, bound)}"
+    guarded :: identity.contains("SharedGuard<")
+    if !guarded && name_rows_value(m.enum_sizes, identity) == .Val(known) -> return Val(known)
+    end := 8
+    if p.types[row].kind == .Enum(variants, _) {
+        loop index in 0..<variants.len() {
+            members :: ir_variant_members_bound(&m, p, row, bound, identity, index) ?? return None
+            loop member in members {
+                size :: if member.boxed -> 8 else -> m.types[member.ty].size
+                if member.offset + size > end -> end = member.offset + size
+            }
+        }
+    }
+    size :: ir_align8(end)
+    if !guarded -> name_rows_set(&m.enum_sizes, identity, size)
+    Val(size)
+}
+
+// A member of a record, tuple or variant: a String member renders quoted
+// under Debug and as itself otherwise (`HexError { reason: odd-length ... }`,
+// `BadDigit("x")` under Debug).
+fn ir_render_push_value_member(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, value: Int, mode: IRRender, span: Span) Never! {
+    if value < 0 -> return ir_push_static(&m, &b, builder, "()")
+    ir_render_push(&m, p, &b, builder, value, mode, mode == .Debug, span)
+}
+
+// `Name { a: 1, b: "x" }` (Debug redacts).
+fn ir_render_record(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, base: Int, name: String, members: [IRMember], mode: IRRender, span: Span) Never! {
+    ir_push_static(&m, &b, builder, "{ir_render_name(name)} {{")
+    loop (index, member) in members {
+        ir_push_static(&m, &b, builder, "{if index == 0 -> " " else -> ", "}{ir_render_name(member.name)}: ")
+        if mode == .Debug && member.redact {
+            ir_push_static(&m, &b, builder, "[redacted]")
+            next
+        }
+        value :: ir_member_value(&m, &b, base, member)
+        ir_render_push_value_member(&m, p, &b, builder, value, mode, span)
+        if ir_failed(b) -> return
+    }
+    ir_push_static(&m, &b, builder, if members.len() == 0 -> "}}" else -> " }}")
+}
+
+// ---------------------------------------------------------------------------
+// Carriers. An Option is a box pointer (null when absent, payload at 0); a
+// Result a box with its selector word at 0 (Ok 1, Err 0) and its payload at
+// 8.
+
+fn ir_is_result(ty: Type) -> Bool Never! {
+    if ir_untag(ty) == .Result(_, _) -> return true
+    false
+}
+
+fn ir_is_option(ty: Type) -> Bool Never! {
+    if ir_untag(ty) == .Option(_) -> return true
+    false
+}
+
+fn ir_align8(size: Int) -> Int Never! {
+    if size < 8 -> return 8
+    if size % 8 != 0 -> return size + 8 - size % 8
+    size
+}
+
+fn ir_type_size(m: &IRModule, p: IRProgram, ty: Type) -> Int Never! {
+    row :: ir_value_type(&m, p, ty) ?? return 8
+    m.types[row].size
+}
+
+// A rendered value (-1: Unit) onto `builder`.
+fn ir_render_push_value(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, value: Int, mode: IRRender, span: Span) Never! {
+    if value < 0 -> return ir_push_static(&m, &b, builder, "()")
+    ir_render_push(&m, p, &b, builder, value, mode, false, span)
+}
+
+// Absent is "None" in Debug and "null" otherwise; a present payload renders
+// bare, as `Val(...)` in Debug.
+fn ir_render_option(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot: Int, payload: Type, mode: IRRender, span: Span) Never! {
+    row :: ir_value_type(&m, p, payload) ?? return ir_fail(&b, span, "display of an Option of {ir_type_name(payload)}")
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    absent :: ir_temp(&m, &b, bool_row)
+    some :: ir_option_is_some(&m, &b, slot)
+    ir_emit(&b.f, IROp.Not, absent, some, -1, -1, b.line)
+    ir_open_if(&b.f, absent, b.line)
+    ir_push_static(&m, &b, builder, if mode == .Debug -> "None" else -> "null")
+    ir_else(&b.f, b.line)
+    if mode == .Debug -> ir_push_static(&m, &b, builder, "Val(")
+    value :: ir_option_payload(&m, &b, slot, row)
+    ir_render_push_value(&m, p, &b, builder, value, mode, span)
+    if mode == .Debug -> ir_push_static(&m, &b, builder, ")")
+    ir_end(&b.f, b.line)
+}
+
+// A clean error (Never or Absent) renders like an Option; otherwise `Err(e)`
+// / `Ok(v)`.
+fn ir_render_result(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot: Int, ok_ty: Type, err_ty: Type, mode: IRRender, span: Span) Never! {
+    ok_row :: ir_value_type(&m, p, ok_ty) ?? return ir_fail(&b, span, "display of a Result of {ir_type_name(ok_ty)}")
+    err_row :: ir_value_type(&m, p, err_ty) ?? return ir_fail(&b, span, "display of a Result error {ir_type_name(err_ty)}")
+    clean :: ir_never_type(err_ty) || ir_untag(err_ty) == (Type.Named{name: "Absent"})
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    failed :: ir_temp(&m, &b, bool_row)
+    ok :: ir_result_is_ok(&m, &b, slot)
+    ir_emit(&b.f, IROp.Not, failed, ok, -1, -1, b.line)
+    ir_open_if(&b.f, failed, b.line)
+    if clean {
+        ir_push_static(&m, &b, builder, if mode == .Debug -> "None" else -> "null")
+    } else {
+        ir_push_static(&m, &b, builder, "Err(")
+        error :: ir_load_at(&m, &b, slot, 8, err_row)
+        ir_render_push_value(&m, p, &b, builder, error, mode, span)
+        ir_push_static(&m, &b, builder, ")")
+    }
+    ir_else(&b.f, b.line)
+    if !clean || mode == .Debug -> ir_push_static(&m, &b, builder, if clean -> "Val(" else -> "Ok(")
+    value :: ir_load_at(&m, &b, slot, 8, ok_row)
+    ir_render_push_value(&m, p, &b, builder, value, mode, span)
+    if !clean || mode == .Debug -> ir_push_static(&m, &b, builder, ")")
+    ir_end(&b.f, b.line)
+}
+
+// `[a, b]`, each element in the list's own mode.
+fn ir_render_list(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot: Int, element: Type, mode: IRRender, span: Span) Never! {
+    row :: ir_value_type(&m, p, element) ?? return ir_fail(&b, span, "display of a List of {ir_type_name(element)}")
+    ir_push_static(&m, &b, builder, "[")
+    walk :: ir_walk_open(&m, &b, slot, row)
+    zero :: ir_word_const(&m, &b, 0)
+    later :: ir_bool_op(&m, &b, IROp.Ne, walk.index, zero)
+    ir_open_if(&b.f, later, b.line)
+    ir_push_static(&m, &b, builder, ", ")
+    ir_end(&b.f, b.line)
+    ir_render_push_value(&m, p, &b, builder, walk.item, mode, span)
+    ir_walk_close(&m, &b, walk)
+    ir_push_static(&m, &b, builder, "]")
+}
+
+// ---------------------------------------------------------------------------
+// Lists: the address of a 24-byte header (len, cap, data); elements lie at
+// data + index * stride.
+
+// A fixed-width integer, Float32 or Bool is packed at its width; any other
+// element takes its size rounded up to whole words.
+fn ir_list_stride(m: IRModule, row: Int) -> Int Never! {
+    kind :: m.types[row].kind
+    if kind == .Word || kind == .Float32 || kind == .Bool -> return m.types[row].size
+    ir_align8(m.types[row].size)
+}
+
+// The element type row of a List slot (a Map's entry tuple: a Map is the
+// List of its entries, BuildMaps.jet).
+fn ir_list_element(m: &IRModule, p: IRProgram, b: IRBuilder, list: Int) -> Int? Never! {
+    ir_list_element_of(&m, p, b.f.slot_type[list])
+}
+
+// The element type row of the List type row `list_row`.
+fn ir_list_element_of(m: &IRModule, p: IRProgram, list_row: Int) -> Int? Never! {
+    ty :: m.types[list_row].ty
+    if ir_untag(ty) == .List(element) -> return ir_value_type(&m, p, element)
+    if ir_view_element(ty) == .Val(element) -> return ir_value_type(&m, p, element)
+    if ir_map_entry_type(ty) == .Val(entry) -> return ir_value_type(&m, p, entry)
+    None
+}
+
+// A `View<str>`: text, carried as a String.
+fn ir_string_view(ty: Type) -> Bool Never! {
+    if ir_untag(ty) == .Apply(name, args) {
+        if name != "View" || args.len() != 1 -> return false
+        return ir_untag(args[0]) == (Type.Named{name: "str"}) || ir_untag(args[0]) == (Type.Apply{name: "str", args: [Type]{}})
+    }
+    false
+}
+
+// The element of a `View<T>` / `ViewMut<T>` other than text.
+fn ir_view_element(ty: Type) -> Type? Never! {
+    if ir_string_view(ty) -> return None
+    if ir_untag(ty) == .Apply(name, args) {
+        if (name == "View" || name == "ViewMut") && args.len() == 1 -> return Val(args[0].copy())
+    }
+    None
+}
+
+// The element of an `Iter<T>`.
+fn ir_iter_element(ty: Type) -> Type? Never! {
+    if ir_untag(ty) == .Apply(name, args) {
+        if name == "Iter" && args.len() == 1 -> return Val(args[0].copy())
+    }
+    None
+}
+
+// The element of a `Set<T>` / `Rank<T>`.
+fn ir_set_element(ty: Type) -> Type? Never! {
+    if ir_untag(ty) == .Apply(name, args) {
+        if (name == "Set" || name == "Rank") && args.len() == 1 -> return Val(args[0].copy())
+    }
+    None
+}
+
+// Whether `ty` is a native carrier the builder lays out itself (a Set, Rank,
+// PriorityQueue, Iter, Task, channel endpoint, Event, ScopeGuard or Shared
+// handle), not as its declared fields.
+fn ir_native_carrier(ty: Type) -> Bool Never! {
+    ir_set_element(ty) != None || ir_priority_queue_element(ty) != None || ir_iter_element(ty) != None || ir_task_element(ty) != None || ir_channel_element(ty, "Sender") != None || ir_channel_element(ty, "Receiver") != None || ir_event_type(ty) || ir_scope_guard_type(ty) || ir_untag(ty) == .Shared(_)
+}
+
+// The 64-byte descriptor rows of a text pattern's parts, one per part
+// [tag, a, b, width, destination, storage, scratch, scratch], read by
+// `jet_rt_text_pattern_match` and `jet_rt_cursor_take_pattern`: the runtime
+// writes each named capture into its own zeroed frame cell only on a match,
+// and `pending` gets one row per named capture binding that cell. -1 when a
+// hole has no text carrier.
+fn ir_text_pattern_rows(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [TTextPatternPart], pending: &[IRPending], span: Span) -> Int Never! {
+    pointer :: ir_pointer_row(&m)
+    rows :: ir_out_slot(&m, &b, 8 * parts.len())
+    loop (index, part) in parts {
+        at :: 64 * index
+        part_kind := 0
+        a := -1
+        c := -1
+        width := 0
+        storage := 5
+        destination := -1
+        if part == {
+            .Literal(value) -> {
+                bytes := [U8]{}
+                loop byte in value.bytes() -> &bytes.push(byte)
+                data :: ir_intern_bytes(&m, bytes)
+                address :: ir_temp(&m, &b, pointer)
+                ir_emit(&b.f, IROp.DataAddress, address, data, -1, -1, b.line)
+                a = address
+                c = ir_word_const(&m, &b, bytes.len())
+            }
+            .Hole(name, ty, _) -> {
+                hole :: ir_untag(ty)
+                if hole == {
+                    .String -> {
+                        part_kind = 1
+                        storage = 4
+                    }
+                    .Int -> {
+                        part_kind = 2
+                        storage = 1
+                    }
+                    .IntN(_, bits) -> {
+                        part_kind = 2
+                        storage = 0
+                        width = ir_packed_bytes(bits)
+                    }
+                    .Float -> {
+                        part_kind = 3
+                        storage = 2
+                    }
+                    .Bool -> {
+                        part_kind = 4
+                        storage = 3
+                    }
+                    .InlineRange(_, lo, hi) -> {
+                        part_kind = 5
+                        storage = 1
+                        a = ir_word_const(&m, &b, lo)
+                        c = ir_word_const(&m, &b, hi)
+                    }
+                    else -> return ir_fail_slot(&b, span, "text pattern hole of {ir_type_name(ty)}")
+                }
+                if name == "" || name == "_" {
+                    storage = 5
+                } else {
+                    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+                    destination = ir_out_slot(&m, &b, 1)
+                    slot :: ir_new_slot(&b, row, IRSlotKind.Local, ir_intern_name(&m, name))
+                    &pending.push(IRPending{name: name, slot: slot, subject: destination, offset: 0})
+                }
+            }
+        }
+        tag_word :: ir_word_const(&m, &b, part_kind)
+        width_word :: ir_word_const(&m, &b, width)
+        storage_word :: ir_word_const(&m, &b, storage)
+        line :: b.line
+        ir_emit(&b.f, IROp.Store, -1, rows, at, tag_word, line)
+        if a >= 0 -> ir_emit(&b.f, IROp.Store, -1, rows, at + 8, a, line)
+        if c >= 0 -> ir_emit(&b.f, IROp.Store, -1, rows, at + 16, c, line)
+        ir_emit(&b.f, IROp.Store, -1, rows, at + 24, width_word, line)
+        if destination >= 0 -> ir_emit(&b.f, IROp.Store, -1, rows, at + 32, destination, line)
+        ir_emit(&b.f, IROp.Store, -1, rows, at + 40, storage_word, line)
+    }
+    rows
+}
+
+// The Bool test of a text pattern on the String `subject`: the holes bind
+// from their capture cells.
+fn ir_text_pattern_test(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, parts: [TTextPatternPart], span: Span) -> Int Never! {
+    if ir_kind_of(m, b, subject) != .String -> return ir_fail_slot(&b, span, "text pattern on a non-String subject")
+    word :: ir_word_row(&m)
+    pointer :: ir_pointer_row(&m)
+    pending := [IRPending]{}
+    rows :: ir_text_pattern_rows(&m, p, &b, parts, &pending, span)
+    if ir_failed(b) -> return -1
+    data :: ir_runtime(&m, &b, "jet_rt_string_data", [Int]{subject}, pointer)
+    length :: ir_runtime(&m, &b, "jet_rt_string_byte_len", [Int]{subject}, word)
+    stride :: ir_word_const(&m, &b, 1)
+    count :: ir_word_const(&m, &b, parts.len())
+    hit :: ir_runtime(&m, &b, "jet_rt_text_pattern_match", [Int]{data, length, stride, rows, count}, word)
+    zero :: ir_word_const(&m, &b, 0)
+    test :: ir_bool_op(&m, &b, IROp.Ne, hit, zero)
+    loop row in pending -> &b.pending.push(row)
+    test
+}
+
+// The declared type of member `name` of the struct or tuple type `ty` (in
+// the terms of a generic struct's instance).
+fn ir_declared_field_type(m: IRModule, p: IRProgram, ty: Type, name: String) -> Type? Never! {
+    plain :: ir_untag(ir_subst(m, ty))
+    if plain == .Tuple(fields) {
+        loop field in fields {
+            if field.name == name -> return Val(field.ty)
+        }
+        return None
+    }
+    nominal :: ir_nominal_name(plain) ?? return None
+    row :: ir_type_def(p, nominal) ?? return None
+    if p.types[row].kind == .Struct(fields, _) {
+        loop field in fields {
+            if field.name == name -> return Val(ir_instance_type(p, row, ir_type_args(plain), field.ty))
+        }
+    }
+    None
+}
+
+// ---------------------------------------------------------------------------
+// Numeric methods.
+
+fn ir_numeric_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: TNumericOp, span: Span) -> Int Never! {
+    receiver_ty :: ir_ty(p, b, receiver)
+    target :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    if operation == .CheckedIntToFixed(_, _) {
+        // A sized literal that fits is the fixed word itself: no exact Int is
+        // built, nothing runs. A U64 above I64 range is its bit pattern. This
+        // is also what keeps the runtime's own kernels
+        // (jet_int_checked_fixed), written with sized literals, from calling
+        // themselves.
+        if ir_int_literal(p, b, receiver) == .Val(value) {
+            if ir_fixed_fits(m.types[target], value) -> return ir_int_constant(&m, &b, target, ir_wide_word(value))
+        }
+    }
+    value :: ir_expr(&m, p, &b, receiver)
+    if ir_failed(b) || value < 0 -> return -1
+    if operation == {
+        .CastAs(_) -> return ir_numeric_cast(&m, p, &b, value, target, span)
+        .ToShow -> return ir_render(&m, p, &b, receiver_ty, value, IRRender.Display, span)
+        .InlineRange(_, _, checked) -> {
+            if checked -> return ir_fail_slot(&b, span, "checked inline-range conversion")
+            return ir_copy_value(&m, p, &b, value, span)
+        }
+        .CheckedIntToFixed(host_kind, line) -> {
+            if ir_kind_of(m, b, value) != .Int || m.types[target].kind != .Word -> return ir_fail_slot(&b, span, "checked fixed conversion of {ir_type_name(receiver_ty)}")
+            int_row :: ir_type_row(&m, Type.Int) ?? 0
+            kind_word :: ir_int_constant(&m, &b, int_row, host_kind)
+            args := [Int]{value, kind_word}
+            site :: if line > 0 -> line else -> b.line
+            loop arg in ir_location(&m, &b, site) -> &args.push(arg)
+            result :: ir_runtime(&m, &b, ir_route_export("jet_std::jet_int_checked_fixed"), args, target)
+            ir_release(&m, &b, value)
+            return result
+        }
+        .CheckedIntToFloat(_, _, line) -> {
+            site :: if line > 0 -> line else -> b.line
+            result :: ir_checked_widen(&m, &b, value, target, site, span)
+            ir_release(&m, &b, value)
+            return result
+        }
+        .FloatToInt(_) -> return ir_float_to_int(&m, p, &b, value, ty, span)
+        .FloatNarrow -> return ir_float_narrow(&m, p, &b, value, ty, span)
+        .TryFrom(_) -> {
+            result :: ir_try_from(&m, p, &b, value, ty, span)
+            ir_release(&m, &b, value)
+            return result
+        }
+        .Predicate(method) -> return ir_float_predicate(&m, &b, value, method, receiver_ty, span)
+        .BitCount(method, width) -> return ir_bit_count(&m, &b, value, method, width, target, span)
+        else -> return ir_fail_slot(&b, span, "numeric method {ir_numeric_op_name(operation)}")
+    }
+}
+
+// `x.count_ones()` and the other population counts (Rust
+// lower_numeric_method): an exact Int crosses borrowed to
+// jet_numeric_int_bit_count and a fixed word as its extended 64-bit word to
+// jet_numeric_bit_count, each with the operation code and the receiver's
+// width; the count is an Int.
+fn ir_bit_count(m: &IRModule, b: &IRBuilder, value: Int, method: String, width: Int, target: Int, span: Span) -> Int Never! {
+    operation :: if method == {
+        "count_ones" -> 0
+        "count_zeros" -> 1
+        "leading_zeros" -> 2
+        "trailing_zeros" -> 3
+        "bit_count" -> 4
+        "bit_length" -> 5
+        else -> { return ir_fail_slot(&b, span, "numeric method {method}") }
+    }
+    int_row :: ir_type_row(&m, Type.Int) ?? 0
+    code :: ir_int_constant(&m, &b, int_row, operation)
+    bits :: ir_int_constant(&m, &b, int_row, width)
+    kind :: ir_kind_of(m, b, value)
+    if kind == .Int {
+        result :: ir_runtime(&m, &b, "jet_numeric_int_bit_count", [Int]{value, code, bits}, target)
+        ir_release(&m, &b, value)
+        return result
+    }
+    if kind != .Word {
+        shown :: ir_type_name(m.types[b.f.slot_type[value]].ty)
+        return ir_fail_slot(&b, span, "numeric method {method} of {shown}")
+    }
+    word_row :: ir_word_row(&m)
+    word :: ir_copy_word(&m, &b, value, word_row)
+    ir_runtime(&m, &b, "jet_numeric_bit_count", [Int]{word, code, bits}, target)
+}
+
+// `x.is_nan()`, `x.is_infinite()`, `x.is_finite()` on Float and F32: NaN is
+// the one value unequal to itself; `x - x` is NaN precisely for infinities
+// and NaNs, zero for every finite value.
+fn ir_float_predicate(m: &IRModule, b: &IRBuilder, value: Int, method: String, ty: Type, span: Span) -> Int Never! {
+    kind :: ir_kind_of(m, b, value)
+    if kind != .Float && kind != .Float32 -> return ir_fail_slot(&b, span, "numeric predicate {method} of {ir_type_name(ty)}")
+    if method == "is_nan" -> return ir_bool_op(&m, &b, IROp.Ne, value, value)
+    if method != "is_finite" && method != "is_infinite" -> return ir_fail_slot(&b, span, "numeric predicate {method}")
+    difference :: ir_temp_like(&m, &b, value)
+    ir_emit(&b.f, IROp.Sub, difference, value, value, -1, b.line)
+    finite :: ir_bool_op(&m, &b, IROp.Eq, difference, difference)
+    if method == "is_finite" -> return finite
+    infinite :: ir_bool_op(&m, &b, IROp.Eq, value, value)
+    ir_open_if(&b.f, finite, b.line)
+    ir_emit(&b.f, IROp.Const, infinite, 0, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    infinite
+}
+
+// `U8.from_int(x)`, `I32.from_u64(w)` and the other narrowing integer
+// conversions: Ok(value) when the exact or fixed-width source fits the
+// target's range, else Err of the text "value doesn't fit in destination
+// type". A fixed source is read as its extended 64-bit word (a U64 at or
+// above 2^63 reads negative, so `>= 0` bounds both an unsigned target and a
+// U64 source); an exact source compares exactly, and above I64.MAX a U64
+// target takes the bits of x - 2^64.
+fn ir_try_from(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, ty: Type, span: Span) -> Int Never! {
+    unsupported :: "Prelude conversion try_from into {ir_type_name(ty)} is not lowered at O0 yet"
+    ok_ty :: if ir_untag(ty) == .Result(ok, _) -> ok else -> { return ir_fail_slot(&b, span, unsupported) }
+    err_ty :: if ir_untag(ty) == .Result(_, err) -> err else -> { return ir_fail_slot(&b, span, unsupported) }
+    ok_row :: ir_value_type(&m, p, ok_ty) ?? return ir_type_fail(&b, span, ok_ty)
+    err_row :: ir_value_type(&m, p, err_ty) ?? return ir_type_fail(&b, span, err_ty)
+    if m.types[err_row].kind != .String || m.types[ok_row].kind != .Word -> return ir_fail_slot(&b, span, unsupported)
+    t_signed :: m.types[ok_row].signed
+    t_bits :: m.types[ok_row].bits
+    if t_bits < 1 || t_bits > 64 -> return ir_fail_slot(&b, span, unsupported)
+    source :: m.types[b.f.slot_type[value]]
+    exact :: source.kind == .Int
+    if !exact && (source.kind != .Word || source.bits > 64) -> return ir_fail_slot(&b, span, unsupported)
+    result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    word_row :: ir_word_row(&m)
+    lowest :: if t_bits == 64 -> (if t_signed -> -9223372036854775807 - 1 else -> 0) else -> (if t_signed -> 0 - (1 << (t_bits - 1)) else -> 0)
+    highest :: if t_bits == 64 -> 9223372036854775807 else -> (if t_signed -> (1 << (t_bits - 1)) - 1 else -> (1 << t_bits) - 1)
+    fits :: ir_temp(&m, &b, bool_row)
+    word :: ir_temp(&m, &b, word_row)
+    if exact {
+        int_row :: b.f.slot_type[value]
+        low :: ir_int_constant(&m, &b, int_row, lowest)
+        high := -1
+        if t_bits == 64 && !t_signed {
+            high = ir_fresh_temp(&m, &b, int_row)
+            ir_emit(&b.f, IROp.ConstBigInt, high, ir_intern_name(&m, "18446744073709551615"), -1, -1, b.line)
+        } else {
+            high = ir_int_constant(&m, &b, int_row, highest)
+        }
+        ir_emit(&b.f, IROp.Const, fits, 0, -1, -1, b.line)
+        above :: ir_bool_op(&m, &b, IROp.Ge, value, low)
+        ir_open_if(&b.f, above, b.line)
+        below :: ir_bool_op(&m, &b, IROp.Le, value, high)
+        ir_emit(&b.f, IROp.Copy, fits, below, -1, -1, b.line)
+        ir_end(&b.f, b.line)
+        ir_release(&m, &b, low)
+        ir_release(&m, &b, high)
+    } else {
+        wide :: ir_copy_word(&m, &b, value, word_row)
+        ir_emit(&b.f, IROp.Copy, word, wide, -1, -1, b.line)
+        source_u64 :: !source.signed && source.bits == 64
+        if t_bits == 64 && t_signed == !source_u64 {
+            ir_emit(&b.f, IROp.Const, fits, 1, -1, -1, b.line)
+        } else if t_bits == 64 {
+            zero :: ir_const_like(&m, &b, wide, 0)
+            ir_emit(&b.f, IROp.Ge, fits, wide, zero, -1, b.line)
+        } else {
+            ir_emit(&b.f, IROp.Const, fits, 0, -1, -1, b.line)
+            low :: ir_const_like(&m, &b, wide, lowest)
+            above :: ir_bool_op(&m, &b, IROp.Ge, wide, low)
+            ir_open_if(&b.f, above, b.line)
+            high :: ir_const_like(&m, &b, wide, highest)
+            below :: ir_bool_op(&m, &b, IROp.Le, wide, high)
+            ir_emit(&b.f, IROp.Copy, fits, below, -1, -1, b.line)
+            ir_end(&b.f, b.line)
+        }
+    }
+    found :: ir_fresh_temp(&m, &b, result_row)
+    ir_open_if(&b.f, fits, b.line)
+    if exact {
+        if t_bits == 64 && !t_signed {
+            int_row :: b.f.slot_type[value]
+            signed_max :: ir_int_constant(&m, &b, int_row, 9223372036854775807)
+            low_half :: ir_bool_op(&m, &b, IROp.Le, value, signed_max)
+            ir_release(&m, &b, signed_max)
+            ir_open_if(&b.f, low_half, b.line)
+            direct :: ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{value}, word_row)
+            ir_emit(&b.f, IROp.Copy, word, direct, -1, -1, b.line)
+            ir_else(&b.f, b.line)
+            modulus :: ir_fresh_temp(&m, &b, int_row)
+            ir_emit(&b.f, IROp.ConstBigInt, modulus, ir_intern_name(&m, "18446744073709551616"), -1, -1, b.line)
+            shifted :: ir_fresh_temp(&m, &b, int_row)
+            ir_emit(&b.f, IROp.Sub, shifted, value, modulus, IR_OVERFLOW_TRAP, b.line)
+            wrapped :: ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{shifted}, word_row)
+            ir_emit(&b.f, IROp.Copy, word, wrapped, -1, -1, b.line)
+            ir_release(&m, &b, shifted)
+            ir_release(&m, &b, modulus)
+            ir_end(&b.f, b.line)
+        } else {
+            direct :: ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{value}, word_row)
+            ir_emit(&b.f, IROp.Copy, word, direct, -1, -1, b.line)
+        }
+    }
+    converted :: ir_numeric_cast(&m, p, &b, word, ok_row, span)
+    success :: ir_result_box(&m, p, &b, ty, true, converted)
+    ir_emit(&b.f, IROp.Copy, found, success, -1, -1, b.line)
+    ir_else(&b.f, b.line)
+    string_row :: ir_string_row(&m)
+    text :: ir_temp(&m, &b, string_row)
+    message :: ir_intern_text(&m, "value doesn't fit in destination type")
+    ir_emit(&b.f, IROp.ConstText, text, message, -1, -1, b.line)
+    failure :: ir_result_box(&m, p, &b, ty, false, text)
+    ir_emit(&b.f, IROp.Copy, found, failure, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    found
+}
+
+// `Float{n}` / `Float32{n}` of an integer: the integer crosses only when the
+// target holds it exactly, i.e. its magnitude without trailing zero bits is
+// below 2^53 (2^24 for Float32); otherwise the program stops with the shared
+// widening message. A fixed word is checked and converted inline (the
+// runtime's own widening converts such a word, so it must not call the
+// route). An exact Int calls jet_int_checked_widen(value, f32, file, line)
+// with the source file as a String; an F32 target gets an exact f64 back.
+fn ir_checked_widen(m: &IRModule, b: &IRBuilder, value: Int, target: Int, line: Int, span: Span) -> Int Never! {
+    source :: m.types[b.f.slot_type[value]]
+    single :: m.types[target].kind == .Float32
+    if !single && m.types[target].kind != .Float -> return ir_fail_slot(&b, span, "checked widening to {ir_type_name(m.types[target].ty)}")
+    float_row :: ir_type_row(&m, Type.Float) ?? return ir_fail_slot(&b, span, "checked widening without a Float row")
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    if source.kind == .Int {
+        flag :: ir_temp(&m, &b, bool_row)
+        ir_emit(&b.f, IROp.Const, flag, if single -> 1 else -> 0, -1, -1, b.line)
+        string_row :: ir_string_row(&m)
+        file :: ir_temp(&m, &b, string_row)
+        path :: ir_intern_text(&m, b.f.source_file)
+        ir_emit(&b.f, IROp.ConstText, file, path, -1, -1, b.line)
+        site :: ir_word_const(&m, &b, line)
+        wide :: ir_runtime(&m, &b, ir_route_export("jet_std::jet_int_checked_widen"), [Int]{value, flag, file, site}, float_row)
+        if !single -> return wide
+        narrow :: ir_temp(&m, &b, target)
+        ir_emit(&b.f, IROp.Convert, narrow, wide, -1, -1, b.line)
+        return narrow
+    }
+    if source.kind != .Word || source.bits > 64 -> return ir_fail_slot(&b, span, "checked widening of {ir_type_name(source.ty)}")
+    // A narrow word is extended by its own signedness and below 2^63, so
+    // only a 64-bit unsigned word needs the unsigned conversion.
+    unsigned_word :: !source.signed && source.bits == 64
+    u64_row :: ir_type_row(&m, Type.IntN{signed: false, bits: 64}) ?? 0
+    word_row :: ir_word_row(&m)
+    signed_word :: ir_copy_word(&m, &b, value, word_row)
+    magnitude :: ir_copy_word(&m, &b, value, u64_row)
+    zero :: ir_const_like(&m, &b, magnitude, 0)
+    if !unsigned_word {
+        signed_zero :: ir_const_like(&m, &b, signed_word, 0)
+        negative :: ir_bool_op(&m, &b, IROp.Lt, signed_word, signed_zero)
+        ir_open_if(&b.f, negative, b.line)
+        negated :: ir_temp_like(&m, &b, magnitude)
+        ir_emit(&b.f, IROp.Sub, negated, zero, magnitude, IR_OVERFLOW_WRAP, b.line)
+        ir_emit(&b.f, IROp.Copy, magnitude, negated, -1, -1, b.line)
+        ir_end(&b.f, b.line)
+    }
+    // m & -m is the lowest set bit; m / lowbit has no trailing zeros.
+    negated_magnitude :: ir_temp_like(&m, &b, magnitude)
+    ir_emit(&b.f, IROp.Sub, negated_magnitude, zero, magnitude, IR_OVERFLOW_WRAP, b.line)
+    lowest :: ir_temp_like(&m, &b, magnitude)
+    ir_emit(&b.f, IROp.BitAnd, lowest, magnitude, negated_magnitude, IR_OVERFLOW_WRAP, b.line)
+    divisor :: ir_temp_like(&m, &b, magnitude)
+    ir_emit(&b.f, IROp.Copy, divisor, lowest, -1, -1, b.line)
+    is_zero :: ir_bool_op(&m, &b, IROp.Eq, lowest, zero)
+    ir_open_if(&b.f, is_zero, b.line)
+    ir_emit(&b.f, IROp.Const, divisor, 1, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    odd :: ir_temp_like(&m, &b, magnitude)
+    ir_emit(&b.f, IROp.Div, odd, magnitude, divisor, IR_OVERFLOW_WRAP, b.line)
+    limit :: ir_const_like(&m, &b, magnitude, if single -> 1 << 24 else -> 1 << 53)
+    inexact :: ir_bool_op(&m, &b, IROp.Ge, odd, limit)
+    ir_open_if(&b.f, inexact, b.line)
+    args := ir_location(&m, &b, line)
+    loop arg in ir_static_text(&m, &b, "whole number cannot cross into the decimal without losing precision") -> &args.push(arg)
+    _ :: ir_runtime(&m, &b, "jet_rt_numeric_stop", args, -1)
+    ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    result :: ir_temp(&m, &b, target)
+    if !unsigned_word {
+        // Convert reads the word as signed 64-bit; an accepted value is exact.
+        ir_emit(&b.f, IROp.Convert, result, signed_word, -1, -1, b.line)
+        return result
+    }
+    // An unsigned word at or above 2^63 converts its upper 63 bits, doubled,
+    // plus its low bit: exact, since the value was accepted.
+    wide :: ir_temp(&m, &b, float_row)
+    signed_zero :: ir_const_like(&m, &b, signed_word, 0)
+    low_range :: ir_bool_op(&m, &b, IROp.Ge, signed_word, signed_zero)
+    ir_open_if(&b.f, low_range, b.line)
+    ir_emit(&b.f, IROp.Convert, wide, signed_word, -1, -1, b.line)
+    ir_else(&b.f, b.line)
+    one :: ir_const_like(&m, &b, magnitude, 1)
+    half :: ir_temp_like(&m, &b, magnitude)
+    ir_emit(&b.f, IROp.Shr, half, magnitude, one, IR_OVERFLOW_WRAP, b.line)
+    half_word :: ir_copy_word(&m, &b, half, word_row)
+    half_float :: ir_temp(&m, &b, float_row)
+    ir_emit(&b.f, IROp.Convert, half_float, half_word, -1, -1, b.line)
+    two :: ir_int_constant(&m, &b, float_row, 4611686018427387904)
+    doubled :: ir_temp(&m, &b, float_row)
+    ir_emit(&b.f, IROp.Mul, doubled, half_float, two, IR_OVERFLOW_WRAP, b.line)
+    low_bit :: ir_temp_like(&m, &b, magnitude)
+    ir_emit(&b.f, IROp.BitAnd, low_bit, magnitude, one, IR_OVERFLOW_WRAP, b.line)
+    low_word :: ir_copy_word(&m, &b, low_bit, word_row)
+    low_float :: ir_temp(&m, &b, float_row)
+    ir_emit(&b.f, IROp.Convert, low_float, low_word, -1, -1, b.line)
+    ir_emit(&b.f, IROp.Add, wide, doubled, low_float, IR_OVERFLOW_WRAP, b.line)
+    ir_end(&b.f, b.line)
+    if !single -> return wide
+    ir_emit(&b.f, IROp.Convert, result, wide, -1, -1, b.line)
+    result
+}
+
+// The value of an integer literal expression: `5`, a literal sema folded
+// (CtLit; one beyond I64 range keeps its decimal), and negations of those.
+fn ir_int_literal(p: IRProgram, b: IRBuilder, expression: Int) -> Int? Never! {
+    if ir_body_node(p, b, expression).kind == {
+        .IntLit(value, _) -> return Val(value)
+        .CtLit(constant) -> {
+            if constant == .Int(number) -> return Val(number)
+            if constant == .BigInt(decimal) {
+                number :: Int.parse(decimal) ?? return None
+                return Val(number)
+            }
+        }
+        .Unary(op, operand) -> {
+            if op == .Neg {
+                number :: ir_int_literal(p, b, operand) ?? return None
+                return Val(0 - number)
+            }
+        }
+        else -> {}
+    }
+    None
+}
+
+// Whether `value` is in the range of the fixed-width row `row`.
+fn ir_fixed_fits(row: IRType, value: Int) -> Bool Never! {
+    if row.kind != .Word || row.bits > 64 -> return false
+    lowest :: if row.signed -> 0 - (1 << (row.bits - 1)) else -> 0
+    highest :: if row.signed -> (1 << (row.bits - 1)) - 1 else -> (1 << row.bits) - 1
+    value >= lowest && value <= highest
+}
+
+// A NumericCast between scalar rows: exact Int to exact Int is an owned copy;
+// a fixed integer that already is the target's value is copied, a narrowing
+// one re-read at the target width through a frame cell (Rust `as`); a narrow
+// word or Char is its exact Int; I64 and exact Int cross through the owned
+// runtime adapters.
+fn ir_numeric_cast(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, target: Int, span: Span) -> Int Never! {
+    source :: m.types[b.f.slot_type[value]]
+    destination :: m.types[target]
+    if source.kind == .Int && destination.kind == .Int -> return ir_copy_value(&m, p, &b, value, span)
+    if source.kind == .Word && destination.kind == .Word {
+        same :: destination.bits == 64 || (destination.bits > source.bits && (destination.signed || !source.signed)) || (destination.bits == source.bits && destination.signed == source.signed)
+        result :: ir_temp(&m, &b, target)
+        if same {
+            ir_emit(&b.f, IROp.Copy, result, value, -1, -1, b.line)
+            return result
+        }
+        pointer :: ir_pointer_row(&m)
+        cell :: ir_temp(&m, &b, pointer)
+        ir_emit(&b.f, IROp.StackAddress, cell, 8, 8, -1, b.line)
+        ir_emit(&b.f, IROp.Store, -1, cell, 0, value, b.line)
+        ir_emit(&b.f, IROp.Load, result, cell, 0, -1, b.line)
+        return result
+    }
+    if source.kind == .Word && destination.kind == .Int {
+        if source.bits < 64 {
+            result :: ir_temp(&m, &b, target)
+            ir_emit(&b.f, IROp.Copy, result, value, -1, -1, b.line)
+            return result
+        }
+        if source.signed -> return ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{value}, target)
+        // U64: a word below 2^63 is the I64 widening; above it the exact
+        // value is (word & I64.MAX) + 2^63.
+        result :: ir_fresh_temp(&m, &b, target)
+        word_row :: ir_word_row(&m)
+        word :: ir_copy_word(&m, &b, value, word_row)
+        zero :: ir_const_like(&m, &b, word, 0)
+        small :: ir_bool_op(&m, &b, IROp.Ge, word, zero)
+        ir_open_if(&b.f, small, b.line)
+        widened :: ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{word}, target)
+        ir_emit(&b.f, IROp.Copy, result, widened, -1, -1, b.line)
+        b.fresh[widened] = false
+        ir_else(&b.f, b.line)
+        mask :: ir_const_like(&m, &b, word, 9223372036854775807)
+        low :: ir_temp_like(&m, &b, word)
+        ir_emit(&b.f, IROp.BitAnd, low, word, mask, IR_OVERFLOW_WRAP, b.line)
+        low_int :: ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{low}, target)
+        half :: ir_fresh_temp(&m, &b, target)
+        ir_emit(&b.f, IROp.ConstBigInt, half, ir_intern_name(&m, "9223372036854775808"), -1, -1, b.line)
+        ir_emit(&b.f, IROp.Add, result, low_int, half, IR_OVERFLOW_TRAP, b.line)
+        ir_release(&m, &b, low_int)
+        ir_release(&m, &b, half)
+        ir_end(&b.f, b.line)
+        return result
+    }
+    if source.kind == .Char && destination.kind == .Int {
+        result :: ir_temp(&m, &b, target)
+        ir_emit(&b.f, IROp.Copy, result, value, -1, -1, b.line)
+        return result
+    }
+    if source.kind == .Int && destination.kind == .Word && destination.bits == 64 && destination.signed {
+        return ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{value}, target)
+    }
+    if source.kind == .Int && destination.kind == .Float -> return ir_runtime(&m, &b, "jet_int_owned_to_f64", [Int]{value}, target)
+    // `F32.from_int`: the nearest Float, rounded once more to Float32.
+    if source.kind == .Int && destination.kind == .Float32 {
+        float_row :: ir_type_row(&m, Type.Float) ?? return ir_fail_slot(&b, span, "numeric conversion without a Float row")
+        wide :: ir_runtime(&m, &b, "jet_int_owned_to_f64", [Int]{value}, float_row)
+        result :: ir_temp(&m, &b, target)
+        ir_emit(&b.f, IROp.Convert, result, wide, -1, -1, b.line)
+        return result
+    }
+    // Float32 widens to Float exactly and Float narrows to Float32 by
+    // rounding (`Float.from_f32`; IR Convert between the float rows).
+    if (source.kind == .Float || source.kind == .Float32) && (destination.kind == .Float || destination.kind == .Float32) {
+        result :: ir_temp(&m, &b, target)
+        ir_emit(&b.f, IROp.Convert, result, value, -1, -1, b.line)
+        return result
+    }
+    ir_fail_slot(&b, span, "numeric conversion from {ir_type_name(source.ty)} to {ir_type_name(destination.ty)}")
+}
+
+fn ir_numeric_op_name(operation: TNumericOp) -> String Never! {
+    text := "{operation}"
+    separators :: [String]{"(", "{{", " "}
+    loop separator in separators {
+        parts :: text.split(separator).to_list()
+        text = parts[0]
+    }
+    text
+}

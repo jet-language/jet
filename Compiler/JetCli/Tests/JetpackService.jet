@@ -1,6 +1,13 @@
 // `jet __jetpack <op>`: the internal compiler service verb owns its raw
 // arguments, stays out of help, and refuses what it can't read as a usage
 // error instead of guessing.
+use jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JetDriverVerbOutput]
+use jet_foundation.[
+    JET_COMPILER_SERVICE_CHECK_ENTRY, JET_COMPILER_SERVICE_COMPTIME_EVALUATE,
+    JET_COMPILER_SERVICE_VERB, compiler_service_check_request,
+]
+use jet_cli.[jet_cli_compiler_service, jet_cli_compiler_service_answer, jet_cli_plan]
+
 fn jetpack_service_fixture_usage(output: JetDriverVerbOutput, needle: String) Never! {
     assert_eq(output.exit_code, JET_DRIVER_EXIT_USAGE)
     assert_eq(output.stdout, "")
@@ -8,7 +15,7 @@ fn jetpack_service_fixture_usage(output: JetDriverVerbOutput, needle: String) Ne
     assert(output.stderr.contains(needle), output.stderr)
 }
 
-fn run() {
+#Test("jetpack_service") {
     loop op in ([String]{JET_COMPILER_SERVICE_COMPTIME_EVALUATE, JET_COMPILER_SERVICE_CHECK_ENTRY, "unknown-op"}) {
         if jet_cli_plan([String]{JET_COMPILER_SERVICE_VERB, op}) == {
             .CompilerService(planned) -> assert_eq(planned, op)

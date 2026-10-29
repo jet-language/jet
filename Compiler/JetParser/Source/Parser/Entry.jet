@@ -5,8 +5,6 @@ use jet_foundation.[
     DIAGNOSTIC_ERROR,
     DebugTraceSite,
     Diagnostic,
-    DiagnosticFixApplicability,
-    DiagnosticFixSafety,
     ElseArmSpan,
     Expr,
     FencedStatement,
@@ -20,20 +18,17 @@ use jet_foundation.[
     RuleSite,
     Span,
     Stmt,
-    TextEdit,
     UserPolicyDecl,
     WebBucket,
     ast_program,
     compiler_threads_admit,
     compiler_threads_failure_text,
-    compiler_threads_single,
     compiler_transfer_rows,
-    diagnostic_from_registry,
-    diagnostic_with_edit_grade,
     expr_span,
     name_count,
     name_find,
     name_index,
+    type_name,
 ]
 use jet_lexer.[
     Lexed,
@@ -50,15 +45,12 @@ use jet_lexer.[
     TOKEN_FENCE_OPEN,
     TOKEN_HASH,
     TOKEN_IDENT,
-    TOKEN_KW_COMPTIME,
-    TOKEN_KW_CONST,
     TOKEN_KW_DERIVE,
     TOKEN_KW_EFFECT,
     TOKEN_KW_ENUM,
     TOKEN_KW_EXTERN,
     TOKEN_KW_FN,
     TOKEN_KW_IMPL,
-    TOKEN_KW_LOOP,
     TOKEN_KW_MODULE,
     TOKEN_KW_PRIV,
     TOKEN_KW_PUB,
@@ -796,6 +788,8 @@ fn parser_parse_program(state: &JetParserState) -> Program {
         parser_skip_semicolons(&state)
         if parser_current_kind(&state) == TOKEN_EOF -> break
         before := state.position
+        unit_start :: parser_current(&state).span.start
+        parser_begin_node_unit(&state, unit_start)
         if {
             // A top-level `@` is a misspelled applied rule.
             parser_current_kind(&state) == TOKEN_AT -> {
@@ -814,6 +808,17 @@ fn parser_parse_program(state: &JetParserState) -> Program {
             parser_unattached_marker_at_end(&state) -> {
                 marker :: parser_parse_marker(&state)
                 &program.rule_facts.push(AppliedRuleApplication{marker: marker, target: None, site: Val(RuleSite.File)})
+            }
+            parser_persist_binding_ahead(&state) -> {
+                errors_before :: state.diagnostics.len()
+                item :: parser_parse_persist_binding(&state)
+                if parser_error_since(state, errors_before) {
+                    parser_sync_top(&state)
+                } else if item == .Val(value) {
+                    &program.items.push(value)
+                } else {
+                    parser_sync_top(&state)
+                }
             }
             parser_item_ahead(&state) -> {
                 declaration :: parser_parse_item_or_import(&state)
@@ -1063,7 +1068,7 @@ fn parser_report_repeated_file_marker(state: &JetParserState, name: String, span
 // Rust `html_from_marker`: the companion page is `Path{"page.html"}` or a
 // plain literal string; any other value names no page.
 fn parser_html_page_path(page: Expr) -> String? {
-    if page == .TypedLit(head, body, _) && head == .Val(ty) && ty == .Named(type_name) && type_name == "Path" && body == .Value(inner) -> return parser_expr_literal_string(inner)
+    if page == .TypedLit(head, body, _, _) && head == .Val(ty) && ty == .Named(type_name) && type_name == "Path" && body == .Value(inner) -> return parser_expr_literal_string(inner)
     parser_expr_literal_string(page)
 }
 
@@ -1073,24 +1078,11 @@ fn parser_html_page_path(page: Expr) -> String? {
 fn parser_apply_file_target(state: &JetParserState, program: &Program, marker: Marker, single: Bool) {
     values :: parser_bind_marker_arguments(&state, marker, [String]{"target"}, 1) ?? return
     target :: values[0] ?? return
-    written :: parser_marker_ident_path(target) ?? {
+    name :: parser_marker_target_path(target) ?? {
         parser_marker_shape_error(&state, marker)
         return
     }
-    // Rust `strip_marker_enum_prefix`: the path after the first `Target`
-    // segment, when one follows it.
-    segments :: written.split(".").to_list()
-    kept := [String]{}
-    stripped := false
-    loop (index, segment) in segments {
-        if !stripped && segment == "Target" && index + 1 < segments.len() {
-            stripped = true
-            kept = [String]{}
-            next
-        }
-        &kept.push(segment)
-    }
-    name :: kept.join(".")
+    kept :: name.split(".").to_list()
     here :: parser_current(&state).span
     if kept.len() == 2 && kept[0] == "OS" {
         os :: kept[1]
@@ -1182,7 +1174,7 @@ fn parser_is_item_keyword(kind: Int) -> Bool Never! {
 
 // + owner ruling (2026-09-30): an immutable module binding
 // is named in ALL_CAPS, `MAX_ROWS :: 100`. This is the casing predicate only;
-// compile time is always the explicit `NAME :: prep { value }`.
+// compile time is always the explicit `NAME :: comptime { value }`.
 fn parser_constant_name(name: String) -> Bool Never! {
     if name == "" || name.starts_with("@") || name.starts_with("$") -> return false
     has_upper := false

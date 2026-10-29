@@ -3,9 +3,9 @@
 This specification is for Core API authors and reviewers. It defines the
 naming, failure, ownership, effects, allocation, diagnostics, and evidence
 rules for a public function, method, or type. The executable surface lives in
-[`Core.jet`](../../crates/jet-codegen/src/Prelude/Core.jet) and the Jet source
+[`Core.jet`](../../Compiler/Prelude/Core.jet) and the Jet source
 under [`Core/`](../../Core/); accepted syntax and compiler-owned names live in
-[`Syntax.rs`](../../crates/jet-foundation/src/Syntax.rs). The
+the [syntax registry](../../Compiler/JetFoundation/Data/Syntax/). The
 [Core surface ledger test](../../tests/core_surface_ledger.rs) and its
 [checker](../../Tools/agent/check-core-surface-ledger.mjs) provide focused
 machine checks; runnable examples live under
@@ -21,39 +21,6 @@ signature tell the complete story? Does the body stay at one abstraction
 level? Character-code work or a hand-written search inside a higher-level
 helper belongs in a named lower-level brick. These prompts align the contract
 with the implementation; they do not add a second mechanism.
-
-### Rust-exit accounting
-
-[`Tools/agent/rust-leaves.tsv`](../../Tools/agent/rust-leaves.tsv) is the
-checked registry for remaining Rust-backed Core dispatchers (#4742).
-Every retained dispatcher requires a stable row identity and a reviewed hash
-of its dispatch expression, even when a Jet source wrapper shadows it or
-the generated/implicit runtime body is not yet mapped. Receiver identities
-include the type list and method, not a moving declaration line number.
-
-`leaf` records migrate the former CorelibInteg journals, preserving removal
-conditions and provenance; they do **not** establish that a branch has landed,
-that a leaf is policy-free, or that its behavior is proved. `port` records
-track the other retained dispatchers. Neither kind grants Jet census credit.
-A `-` hash records an unlanded leaf and cannot authorize a live dispatcher.
-Changing a dispatcher requires reviewing its registry hash; retiring it means
-removing the Rust provider, not merely hiding it behind a source-owned wrapper.
-
-Lane checks run `node Tools/agent/rust-exit.mjs --check`. The A–H table in
-[`rust-exit-ratchet.json`](../../Tools/agent/rust-exit-ratchet.json) partitions
-physical Rust source lines (including blanks and comments), with the original
-RUST-EXIT inventory snapshot retained separately. Inventory cross-references
-overlap; area totals do not. Rust source symlinks are not counted a second time.
-Build scripts belong to H before other area classifications; new nonignored
-Rust source is counted before staging. Emitted/build/scratch output is excluded
-by the repository ignore rules.
-
-After a port, lower the ceilings with
-`node Tools/agent/rust-exit.mjs --update`. This command refuses **any** increase
-and does not modify the registry. A zero ceiling permanently excludes Rust
-from that area. Run `node Tools/agent/rust-exit.mjs --check` for the focused
-inventory gate and `node --test Tools/agent/rust-exit.test.mjs` for the planted
-unregistered-leaf and one-line-growth refusal fixtures.
 
 ## Law 1 — Naming
 
@@ -152,7 +119,7 @@ returning `Shared<T>`; its inferred transitive effects may contain only `Mem`.
 Every use of one initializer must select the same lifetime.
 
 Sema publishes that checked identity and lifetime. Lowering creates one typed
-MIR `Global` site per initializer, not a special initializer-name table or a
+IR global site per initializer, not a special initializer-name table or a
 per-caller cache. A getter returns an owning clone; retiring a site releases
 its owner without invalidating outstanding clones. Process sites survive
 world reloads, World sites retire at an explicit quiescent world boundary,
@@ -169,7 +136,7 @@ runtime `jet_rt_shared_site_publish`; the common read is an ordinary typed
 Source evaluation receives a host-retained typed process segment and explicit
 boundary resets, never a compiler-global root. The browser continues to support
 ordinary `Shared`; only existing env/auth/fault APIs without browser providers
-are refused in sema with `E-WEB-TIR-UNSUPPORTED`.
+are refused in sema with `E-WEB-UNSUPPORTED`.
 
 ## Law 4 — Effects
 
@@ -585,13 +552,18 @@ the explicit write-access marker; cancellation does not consume the stream.
 
 ## Testing evidence source policy
 
-`core.testing.golden` and `fixture` own success/failure selection and exact
-evidence messages in `Core/testing/testing.jet`. Golden diffs compare at most
-64 KiB and 256 inclusive-newline lines per input; their delete-first LCS tie
-rule and UTF-8-safe 32 KiB output limit preserve the existing native policy.
+`core.testing.golden`, `snap`, and `fixture` own success/failure selection and
+exact evidence messages in `Core/Testing/Testing.jet`. Golden and snapshot
+diffs compare at most 64 KiB and 256 inclusive-newline lines per input; their
+delete-first LCS tie rule and UTF-8-safe 32 KiB output limit preserve the
+existing native policy. Under `JET_UPDATE_SNAPSHOTS=1` (`jet test -u`) `golden`
+writes a missing or differing file and passes, the same switch `snap` reads.
 The host supplies only file-read facts, failure TLS transport, and selected
 string byte windows. These leaves do not add checkpoints to the old testing
-operations.
+operations. The runtime's one consumer of that transport is the
+`assert`/`assert_eq` stop (`jet_rt_require_stop`, JetRuntime `Trap.jet`): with
+a failure pending it reports the recorded message as the stop message and the
+recorded detail (path, then any diff) as the locals; `panic` keeps its text.
 
 `temp_dir` owns Unicode-scalar prefix sanitation, ASCII-only thread sanitation,
 the `jet_test_` name, remove-before-create ordering, NotFound handling, and
@@ -617,7 +589,7 @@ callback/handle-unregister/wait/close/scope-restore order is unchanged.
 
 The private state and locale fields, seed-bit conversion, exact locale salt,
 fixed draw order, tables, Display, Debug, clone, and equality belong to
-`Core/testing/testing.jet::Fake`. The seeded helper is the existing source
+`Core/Testing/Testing.jet::Fake`. The seeded helper is the existing source
 `core.math.random.__seeded_int`, not another RNG or native Fake carrier.
 
 Removed native routes → source replacements (reviewed pre-removal line anchors):
@@ -651,13 +623,13 @@ glue dies at the post-freeze regeneration; it is not a source compatibility path
 The unused `BrowserHost::eval_core_call` plain-call dispatcher is removed,
 along with its orphan-only `profile_value`, `profile_ct`, `timeout_ct`, and
 `locked_ct` conversions. Repository-wide binding, qualified-call, string, and
-macro searches found no callers. Unrelated compiler/MIR `eval_core_call`
+macro searches found no callers. Unrelated compiler `eval_core_call`
 functions are not that binding. The resident method adapter, handle table,
 live timeout/locked conversions, and included AOT providers are unchanged.
 
 ### Realtime receipt presentation
 
-`Core/rt/rt.jet::RealtimeReceipt` owns `render_json`, `render`, and
+`Core/Rt/Rt.jet::RealtimeReceipt` owns `render_json`, `render`, and
 `frames_per_buffer`. The first two preserve the eight native receipt fields'
 fixed labels, order, punctuation and whitespace (`Realtime.rs:119-144`
 before removal); the last returns `requested_frames` (`Realtime.rs:147-149`).

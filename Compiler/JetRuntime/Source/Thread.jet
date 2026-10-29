@@ -335,6 +335,8 @@ fn rt_thread_entry_address() -> I64 {
 
 #Export(c) fn jet_rt_thread_entry(start: I64) -> I64 {
     jet_rt_thread_bootstrap()
+    // This thread's alternate signal stack, for the fault report (Fault.jet).
+    fault_stack :: fault_stack_start()
     entry :: sync_load(start)
     argument :: sync_load(start + I64{8})
     jet_rt_free(start, I64{16}, I64{8})
@@ -342,6 +344,7 @@ fn rt_thread_entry_address() -> I64 {
     #Unsafe("the caller transferred a System V I64->I64 code address and one argument to this thread") {
         result = os_call_address_i64(entry, argument)
     }
+    fault_stack_end(fault_stack)
     jet_rt_thread_detach()
     result
 }

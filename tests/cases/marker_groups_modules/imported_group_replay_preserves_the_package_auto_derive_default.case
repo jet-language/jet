@@ -1,0 +1,11 @@
+# tests/marker_groups_modules.rs::imported_group_replay_preserves_the_package_auto_derive_default at tests/marker_groups_modules.rs:355; hand-port
+# Claim: a package with lint policy deny [auto_derive] and an imported pub group on a pub fn, plus a plain struct, is accepted (tests/marker_groups_modules.rs:356-366)
+# Fixture migrated: removed `pub` from fixtures: seed rejects it (E0411 `pub` was removed); DEV Examples/features/modules/marker_groups uses no pub
+# Not ported: Plain.auto_derive_default struct field assert (tests/marker_groups_modules.rs:365) reads a Rust AST field; no Jet-visible default-constructor behavior was assumed
+fixture: imported_group_replay_preserves_the_package_auto_derive_default.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # tests/marker_groups_modules.rs:356-365 clean()
+stderr: !~ "[E" # tests/marker_groups_modules.rs:356-365 clean()

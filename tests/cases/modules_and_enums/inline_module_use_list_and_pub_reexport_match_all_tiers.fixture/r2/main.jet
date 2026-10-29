@@ -1,0 +1,16 @@
+module math {
+    fn double(n: Int) -> Int {
+        return (n * 2)
+    }
+}
+module api {
+    use math.[double as twice]
+    pub use math.[double as exported]
+    fn local(n: Int) -> Int {
+        return twice(n)
+    }
+}
+fn run() {
+    print(api.local(4))
+    print(api.exported(5))
+}

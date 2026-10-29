@@ -1,0 +1,33 @@
+# tests/grammar.rs::s6r_terminator_insertion_and_suppression at tests/grammar.rs:544; hand-port
+# Claim: two statements in a block parse as separate statements (tests/grammar.rs:556)
+# Claim: leading `.` continuation is one statement (tests/grammar.rs:560)
+# Claim: leading `&&` continuation is one statement (tests/grammar.rs:563)
+# Claim: leading `+` continuation is one statement (tests/grammar.rs:566)
+# Claim: closing `)` on own line is one statement (tests/grammar.rs:570)
+# Claim: leading-dot dispatch arm starts a new statement (tests/grammar.rs:576-580)
+# Fixture migrated: Rust token-count assertions (count of Semi tokens) -> jet check accepts the snippet; split into one fixture dir per snippet
+# Fixture migrated: undefined `s` in dispatch snippet -> `fn show(s: S)` with enum S defined; `run` kept as the entry point (E1321: run takes no typed parameter)
+# Fixture migrated: `a()`/`b()` call snippets -> concrete Jet values (`"ab".bytes()`; helper `fn chain() -> Int` returns the chain value, else E0433)
+# Not ported: exact count of synthetic Semi tokens (tests/grammar.rs:556,560,563,566,570,576-580): lexer-internal token stream, not observable from the jet CLI
+fixture: s6r_terminator_insertion_and_suppression.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check n1/main.jet
+exit: 0 # tests/grammar.rs:556 two statements separated
+stderr: !~ "E0" # tests/grammar.rs:556 two statements separated
+step: jet check n2/main.jet
+exit: 0 # tests/grammar.rs:560 leading-dot chain is one statement
+stderr: !~ "E0" # tests/grammar.rs:560 leading-dot chain is one statement
+step: jet check n3/main.jet
+exit: 0 # tests/grammar.rs:563 leading && continuation
+stderr: !~ "E0" # tests/grammar.rs:563 leading && continuation
+step: jet check n4/main.jet
+exit: 0 # tests/grammar.rs:566 leading + continuation
+stderr: !~ "E0" # tests/grammar.rs:566 leading + continuation
+step: jet check n5/main.jet
+exit: 0 # tests/grammar.rs:570 closing paren on own line
+stderr: !~ "E0" # tests/grammar.rs:570 closing paren on own line
+step: jet check n6/main.jet
+exit: 0 # tests/grammar.rs:576-580 leading-dot dispatch arms are separate statements
+stderr: !~ "E0" # tests/grammar.rs:576-580 leading-dot dispatch arms are separate statements

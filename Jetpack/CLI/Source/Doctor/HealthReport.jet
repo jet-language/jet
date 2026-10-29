@@ -6,7 +6,7 @@
 // names the one command that fixes it.
 
 // Objects unused for longer than this are stale (30 days, in seconds).
-DOCTOR_STALE_AFTER :: prep { 2592000 }
+DOCTOR_STALE_AFTER :: 2592000
 
 // Overall health, ordered: the report takes the worst check.
 enum DoctorHealth {
@@ -142,6 +142,8 @@ fn cli_doctor_io_kind(error: IOError) -> String Never! {
         .Protocol(_) -> "InvalidData"
         .Other(_) -> "Other"
         .ResourceLimit(_) -> "Other"
+        .AlreadyExists(_) -> "AlreadyExists"
+        .Unsupported(_) -> "Unsupported"
     }
 }
 
@@ -368,7 +370,7 @@ fn cli_doctor_check_locks(project: String, roots: HangarRoots) -[FS, Env]> Docto
 
 // ── Cache ──
 
-fn cli_doctor_check_cache(roots: HangarRoots) -[Time]> DoctorCheck Never! {
+fn cli_doctor_check_cache(roots: HangarRoots) -[FS, Env, Time]> DoctorCheck Never! {
     now :: time.unix_seconds(time.now())
     stale := 0
     entries :: store_list_read_only(roots)
@@ -450,10 +452,10 @@ fn cli_doctor_run_crypto_helper_status(helper: String, command: String) -[Exec, 
 fn cli_doctor_crypto_helper_receipt(helper: String, command: String) -[Exec, Time.Wait]> ProcessReceipt DoctorSigningBridgeError! {
     child :: process.cmd([String]{helper}).stdin(.Stream).stdout(.Capture).stderr(.Capture).spawn() ?? return Err(DoctorSigningBridgeError{detail: "{err}"})
     child.stdin.write(command) ?? return Err(DoctorSigningBridgeError{detail: "{err}"})
-    child.stdin.close() ?? return Err(DoctorSigningBridgeError{detail: "{err}"})
+    child.stdin.close()
     child.wait() ?? return Err(DoctorSigningBridgeError{detail: "{err}"})
 }
 
 fn cli_doctor_hex(bytes: [U8]) -> String Never! {
-    mir_sha256_hex_bytes(bytes) ?? panic("hex rendering failed")
+    sha256_hex_bytes(bytes) ?? panic("hex rendering failed")
 }

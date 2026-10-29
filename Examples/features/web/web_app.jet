@@ -1,5 +1,9 @@
 // D-WEBAPP1=D / D-WEBAUTHOR1=D: one statically known full-stack application graph.
 // `fn run` returns the canonical builder; CSR/SSR/SSG/streaming/islands share TIR.
+package {
+    name: "web_app"
+    authority: { allow: [Browser, Net] }
+}
 use core.web as web
 #Target(Web)
 
@@ -9,8 +13,8 @@ fn save() -> String { "saved" }
 
 fn api_mount(prefix: String) { print(prefix) }
 
-fn run() -> App {
-    return web.app()
+fn run() {
+    web.app()
         .csr()
         .route("/", home)
         .action("save", save)
@@ -24,4 +28,5 @@ fn run() -> App {
         .a11y("wcag-aa")
         .adapter("node")
         .hydration_dev()
+        .serve()
 }

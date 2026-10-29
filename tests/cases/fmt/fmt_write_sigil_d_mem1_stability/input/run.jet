@@ -1,0 +1,24 @@
+struct Player {
+    hp: Int
+}
+
+impl Player {
+    fn show(self) -> Int { return self.hp }
+
+    fn heal(&self, amount: Int) { self.hp = self.hp + amount }
+}
+
+fn damage(p: &Player, amount: Int) {
+    p.hp = p.hp - amount
+}
+
+fn archive(p: ^Player) -> Int {
+    return p.hp
+}
+
+fn run() {
+    p := Player{hp: 100}
+    damage(&p, 10)
+    p.heal(5)
+    print(archive(^p))
+}

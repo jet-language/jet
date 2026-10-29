@@ -1,0 +1,17 @@
+# Claim: jet build main.jet --profile=debug exits 0
+# Claim: built .jet/build/main exits 0 and prints compiler-speed
+# Not ported: rustc argv BEGIN/END log via the PATH-shadowed rustc wrapper (+): reads generated rustc argv, no CLI-observable equivalent
+fixture: production_build_follows_compiler_speed_plan_flags_and_linker.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build main.jet --profile=debug
+env: JET_STORE_DIR=store
+env: JET_STORE_CAP_BYTES=21474836480
+env: JET_STORE_RESERVE_BYTES=2147483648
+env: NO_COLOR=1
+env: RUSTC_LINKER=cc
+exit: 0 # debug build with RUSTC_LINKER
+step: built
+exit: 0 # binary output
+stdout: = "compiler-speed\n" # binary output

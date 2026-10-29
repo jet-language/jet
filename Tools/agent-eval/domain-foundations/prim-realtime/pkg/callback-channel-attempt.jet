@@ -1,6 +1,6 @@
 package {
     name: "callback-channel-attempt"
-    authority: { holds: { allow: [IO, Time.Wait] } }
+    authority: { allow: [IO, Time.Wait] }
 }
 
 fn callback(&buffer: [Float#4], tx: Sender<Int>) -[!Mem.Alloc, !Time]> {
@@ -12,7 +12,7 @@ fn callback(&buffer: [Float#4], tx: Sender<Int>) -[!Mem.Alloc, !Time]> {
 
 fn run() {
     buffer := [Float#4]{0.0, 0.0, 0.0, 0.0}
-    (tx, rx) :: channel<Int>(capacity: 1)
+    { sender: tx, receiver: rx } :: channel<Int>(capacity: 1)
     callback(&buffer, tx)
     print(rx.receive() ?? 0)
 }

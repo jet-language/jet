@@ -119,7 +119,7 @@ function allocations(binary, lib, dir) {
 function measureArm(args, battery, arm) {
   const dir = join(args.work, battery, arm);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "package.jet"), 'name: "core_activation"\nversion: "0.1.0"\nauthority: {\n    holds: {\n        allow: [IO, Mem.Alloc, Time, Net, FS, Env]\n    }\n}\n');
+  writeFileSync(join(dir, "package.jet"), 'name: "core_activation"\nversion: "0.1.0"\nauthority: {\n    \n        allow: [IO, Mem.Alloc, Time, Net, FS, Env]\n\n}\n');
   const stem = `${battery}_${arm}`;
   const source = join(dir, `${stem}.jet`);
   writeFileSync(source, program(battery, arm));

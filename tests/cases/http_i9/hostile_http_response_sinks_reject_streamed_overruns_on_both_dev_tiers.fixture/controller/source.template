@@ -2,7 +2,6 @@ use core.process as process
 fn subject(mode: String, path: String) -> ProcessReceipt {
     if mode != "aot" {
         argv := [String]{"{jet}", "run"}
-        if mode == "interpret" -> &argv.push("--interpret")
         &argv.push(path)
         return process.cmd(argv).run() ?? panic("run subject")
     }
@@ -22,7 +21,7 @@ fn subject(mode: String, path: String) -> ProcessReceipt {
 }
 use core.time as time
 fn run() {
-    modes :: [String]{"default", "interpret"}
+    modes :: [String]{"default"}
     loop mode in modes {
         started :: time.instant()
         output :: subject(mode, "{work}/server/main.jet")

@@ -2,6 +2,12 @@
 // Never replace a failed native adapter with the logical artifact digest.
 // Materialization retains the native adapter's exact failure detail in a typed
 // domain; transport failures never masquerade as a logical bundle digest.
+use jetpack_foundation.[
+    NativeSandboxOutput, foundation_native_sandbox_status, foundation_run_native_sandboxed,
+]
+use core.files as files
+use core.sys as sys
+
 #Error
 struct BundleMaterializeError {
     reason: String
@@ -58,17 +64,21 @@ fn pkg_bundle_native_run(tool: String, args: [String], source: String, output: S
     environment :: [String:String]{"LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "TZ": "UTC"}
     foundation_run_native_sandboxed(tool, args, source, Val(output), environment, false) ?? return Err(BundleMaterializeError{reason: "checked native process authority could not run package tool: {err}"})
 }
-fn pkg_bundle_native_text(bytes: [U8]) -> String Never! { String.from_bytes_lossy(bytes) }
+// The first 4096 bytes of a tool's captured text (lossy at a cut character).
+fn pkg_bundle_native_head(text: String) -> String Never! {
+    bytes :: text.bytes()
+    String.from_bytes_lossy(bytes[0..<(if bytes.len() > 4096 -> 4096 else -> bytes.len())])
+}
 fn pkg_bundle_native_detail(run: NativeSandboxOutput) -> String Never! {
-    stdout :: pkg_bundle_native_text(run.receipt.stdout[0..<(if run.receipt.stdout.len() > 4096 -> 4096 else -> run.receipt.stdout.len())]).trim()
-    stderr :: pkg_bundle_native_text(run.receipt.stderr[0..<(if run.receipt.stderr.len() > 4096 -> 4096 else -> run.receipt.stderr.len())]).trim()
+    stdout :: pkg_bundle_native_head(run.receipt.output).trim()
+    stderr :: pkg_bundle_native_head(run.receipt.errors).trim()
     if stdout == "" && stderr == "" -> return "no tool output"
     if stdout == "" -> return "stderr: {stderr}"
     if stderr == "" -> return "stdout: {stdout}"
     "stdout: {stdout}; stderr: {stderr}"
 }
 fn pkg_bundle_native_version(run: NativeSandboxOutput) -> String BundleMaterializeError! {
-    loop text in ([String]{pkg_bundle_native_text(run.receipt.stdout), pkg_bundle_native_text(run.receipt.stderr)}) {
+    loop text in ([String]{run.receipt.output, run.receipt.errors}) {
         loop line in text.split("\n") {
             value :: line.trim()
             if value == "" -> next
@@ -112,7 +122,7 @@ fn pkg_bundle_native_signing(run: BundleSigningRun) -> BundleSigningFact? Bundle
     Ok(Val(BundleSigningFact.signed().with_tool(tool, identity, "unspecified")))
 }
 // Exact Component::Normal/CurDir policy, including stripped macOS app root.
-fn pkg_bundle_native_relative(plan: &BundlePlan, file: &BundleFile, strip: Bool) -> String BundleMaterializeError! {
+fn pkg_bundle_native_relative(plan: BundlePlan, file: BundleFile, strip: Bool) -> String BundleMaterializeError! {
     raw := file.path.replace("\\", "/")
     if strip {
         root :: "{plan.metadata.identifier}.app/"
@@ -132,7 +142,7 @@ fn pkg_bundle_native_relative(plan: &BundlePlan, file: &BundleFile, strip: Bool)
 fn pkg_bundle_native_tree(plan: &BundlePlan, stage: String, strip: Bool) BundleMaterializeError! -[FS, Env]> {
     seen := [String]{}
     loop file in plan.files {
-        relative :: pkg_bundle_native_relative(&plan, &file, strip)
+        relative :: pkg_bundle_native_relative(plan, file, strip)
         if seen.contains(relative) -> return Err(BundleMaterializeError{reason: "package plan emits duplicate materialized path `{relative}`"})
         &seen.push(relative)
         destination :: files.join(stage, relative)
@@ -147,10 +157,12 @@ fn pkg_bundle_native_builtin(plan: &BundlePlan, compiler_version: String) -[FS, 
     executable :: pkg_bundle_native_regular(sys.executable())
     tool_identity :: pkg_bundle_native_hash(executable)
     paths := [String]{}
-    loop file in plan.files -> &paths.push(pkg_bundle_native_relative(&plan, &file, true))
+    loop file in plan.files -> &paths.push(pkg_bundle_native_relative(plan, file, true))
     order := [Int]{}
     loop index in 0..<paths.len() -> &order.push(index)
-    &order.sort_by((left: Int, right: Int) -> paths[left] <=> paths[right])
+    // The comparator owns its own key list: a non-escaping lambda consumes the locals it captures.
+    keys :: paths.copy()
+    &order.sort_by((left: Int, right: Int) -> keys[left] <=> keys[right])
     digest := "jet-package-materialized-v1".bytes()
     &digest.push(U8{0})
     total := 0

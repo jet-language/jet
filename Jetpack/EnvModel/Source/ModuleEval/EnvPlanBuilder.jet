@@ -4,6 +4,17 @@
 // contributions into the runnable plan.
 use core.files as envmodel_plan_files
 use core.sys as envmodel_plan_sys
+use jet_lexer.[TOKEN_KW_MODULE, lex_config]
+use jet_parser.[parse_lexed]
+use jet_pkg_model.[
+    MigratedRef, PackageFacts, PackageKind, ProviderFactValue, ProviderFacts, RefError, RefSource,
+    RefSpec, SourceTable, pkg_provider_is_external, pkg_split_channel_ref, pkg_with_default_source,
+]
+use jetpack_foundation.[
+    DEFAULT_SOURCE, ENV_FIELD_PROMPT, ENV_FILE, PROMPT_PATH_FULL, PROMPT_SETTING_PATH,
+    PROMPT_SETTING_STRIP, PROMPT_STRIP_ON, REF_CHANNEL_MARKER, REF_PROVIDER_AT, REF_SEPARATOR,
+]
+use jet_foundation.[Namespace, Span]
 
 // True when `src` uses the typed `module { … }` surface (U3/U8) rather than
 // the Phase-1 `pkg.*` directive surface. A file that declares the `module`

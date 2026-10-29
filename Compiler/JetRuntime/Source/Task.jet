@@ -101,7 +101,7 @@ fn task_outcome_new(kind: I64, owned_reason: I64) -> I64 {
     if kind != TASK_OUTCOME_PANICKED -> return true
     jet_rt_string_eq(sync_load(left + TASK_OUTCOME_REASON), sync_load(right + TASK_OUTCOME_REASON))
 }
-// Byte contract: Core/service/service.jet:91-125 at 497daa7a0 (read-only).
+// Byte contract: Core/Service/Service.jet:91-125 at 497daa7a0 (read-only).
 fn task_outcome_render(outcome: I64, debug: Bool) -> I64 {
     kind :: sync_load(outcome + TASK_OUTCOME_TAG)
     result :: jet_rt_string_builder_new()
@@ -131,12 +131,12 @@ fn task_drop(child: I64) {
     sync_park_drop(sync_load(child + I64{104}))
     jet_rt_string_drop(sync_load(child + I64{128}))
     jet_rt_world_drop(sync_load(child + I64{192}))
-    alloc_release_valid(child, I64{200}, I64{8})
+    jet_rt_free(child, I64{200}, I64{8})
 }
 
 fn task_spawn_state(site: I64, label: I64, env: I64, invoke: I64, release: I64, meta: I64, group: I64, permit: I64) -> I64 {
     if (site < I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
-    child :: alloc_required_valid(I64{200}, I64{8})
+    child :: jet_rt_alloc(I64{200}, I64{8})
     thread_zero(child, I64{200})
     sync_store(child, I64{2})
     control :: scheduler_control_new()
@@ -419,19 +419,23 @@ fn task_take_outcome(child: I64, flatten: Bool, out: I64) -> I64 {
 fn scheduler_task_completion_begin() -> I64 {
     stack := sync_load(thread_base() + I64{80})
     if (stack == I64{0}) {
-        stack = alloc_required_valid(I64{24}, I64{8})
+        stack = jet_rt_alloc(I64{24}, I64{8})
         thread_zero(stack, I64{24})
         sync_store(thread_base() + I64{80}, stack)
     }
-    frame :: alloc_required_valid(I64{24}, I64{8})
+    frame :: jet_rt_alloc(I64{24}, I64{8})
     thread_zero(frame, I64{24})
     scheduler_words_push(stack, frame)
     frame
 }
+// The last owner runs the box's release helper at 16 when it has one: a
+// box with nothing to release (a lambda with no captures) holds 0 there,
+// as JetIR ir_closure_unref reads it.
 fn scheduler_closure_drop(closure: I64) {
     count :: sync_load(closure) - I64{1}
     sync_store(closure, count)
-    if (count == I64{0}) -> coll_call1_unit(sync_load(closure + I64{16}), closure)
+    release :: sync_load(closure + I64{16})
+    if (count == I64{0} && release != I64{0}) -> coll_call1_unit(release, closure)
 }
 fn scheduler_task_completion_register(closure: I64) {
     stack :: sync_load(thread_base() + I64{80})
@@ -483,7 +487,7 @@ task_exit_key := I64{0}
 // runtime-init: 3
 #Export(c) fn jet_rt_task_exit_init() {
     if (task_exit_key != I64{0}) -> return
-    destructor :: alloc_required_valid(I64{24}, I64{8})
+    destructor :: jet_rt_alloc(I64{24}, I64{8})
     sync_store(destructor, I64{1})
     sync_store(destructor + I64{8}, rt_task_exit_destructor_address())
     sync_store(destructor + I64{16}, I64{0})
@@ -509,7 +513,7 @@ fn rt_task_exit_destructor_address() -> I64 {
 fn task_exit_queue() -> I64 {
     queue := jet_rt_tls_get(task_exit_key)
     if (queue == I64{0}) {
-        queue = alloc_required_valid(I64{24}, I64{8})
+        queue = jet_rt_alloc(I64{24}, I64{8})
         thread_zero(queue, I64{24})
         jet_rt_tls_set(task_exit_key, queue)
     }

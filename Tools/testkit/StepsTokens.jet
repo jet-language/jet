@@ -162,11 +162,22 @@ fn kit_steps_free_port_names(text: String) -> [String]? {
     Val(names)
 }
 
-fn kit_steps_free_port(context: KitStepCtx) -> Int Err! {
-    probe :: files.join(context.env.root, "Tools/testkit/probes/free_port.jet")
-    result :: kit_exec_invoke(context.env, [context.env.jet, "run", probe], context.work, context.scratch, "") ?? return Err("free-port probe: {err}")
-    if result.code != 0 || kit_exec_process_failure(result) != None -> return Err("free-port probe failed: {result.error} {result.stderr}")
-    port :: Int.parse(result.stdout.trim().copy()) ?? return Err("free-port probe did not print a port")
-    if port < 1 || port > 65535 -> return Err("free-port probe returned an invalid port")
-    Ok(port)
+// One probe run reserves every port a case names: the probe holds all its listeners until it has printed
+// them, so the ports are distinct. The probe is built in the case's own scratch, never in the shared tree,
+// so parallel cases do not race on one build output.
+fn kit_steps_free_ports(context: KitStepCtx, count: Int) -> [Int] Err! {
+    directory :: files.join(context.scratch, "free-port")
+    files.create_dir_all(directory) ?? return Err("free-port probe directory: {err}")
+    probe :: files.join(directory, "free_port.jet")
+    files.copy(files.join(context.env.root, "Tools/testkit/probes/free_port.jet"), probe) ?? return Err("free-port probe copy: {err}")
+    result :: kit_exec_invoke(context.env, [context.env.jet, "run", probe, "--", "{count}"], directory, context.scratch, "") ?? return Err("free-port probe: {err}")
+    if result.code != 0 || kit_exec_process_failure(result) != None -> return Err("free-port probe failed (exit {result.code}): {result.error} {result.stderr}")
+    ports := [Int]{}
+    loop line in result.stdout.trim().split("\n") {
+        port :: Int.parse(line.copy()) ?? return Err("free-port probe printed a line that is not a port")
+        if port < 1 || port > 65535 -> return Err("free-port probe returned an invalid port")
+        &ports.push(port)
+    }
+    if ports.len() != count -> return Err("free-port probe printed {ports.len()} ports for {count} names")
+    Ok(ports)
 }

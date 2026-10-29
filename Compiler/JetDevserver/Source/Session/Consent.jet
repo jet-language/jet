@@ -1,7 +1,8 @@
 // CapturePolicy.rs:532–936: receipt identity, canonical sensitive consent,
 // attempt facts and renderable preflight outcomes. Runtime policy is C3.
-use jet_foundation.[mir_sha256_hex_bytes, mir_sha256_bytes]
+use jet_foundation.[sha256_hex_bytes, sha256_bytes]
 use core.text as capture_consent_text
+use jet_pkg_model.[PackagePolicy]
 
 // Rust CaptureIdentity.exact/is_exact/matches. The sole constructor takes all
 // seven canonical facts; there is no three-field compatibility constructor.
@@ -92,7 +93,7 @@ struct CaptureConsentScope {
         capture_consent_frame(&bytes, "mode", self.mode.as_str())
         capture_consent_frame(&bytes, "source_kinds.count", "{self.source_kinds.len()}")
         loop (index, source) in self.source_kinds -> capture_consent_frame(&bytes, "source_kinds.{index}", source.as_str())
-        mir_sha256_hex_bytes(mir_sha256_bytes(bytes))
+        sha256_hex_bytes(sha256_bytes(bytes))
     }
 }
 fn capture_consent_sort_unique(values: &[String]) Never! {
@@ -152,7 +153,7 @@ struct SensitiveCaptureConsent {
         capture_consent_frame(&bytes, "build_id", self._identity.build_id)
         capture_consent_frame(&bytes, "revision", self._identity.revision)
         capture_consent_frame(&bytes, "scope", self._scope.digest())
-        mir_sha256_hex_bytes(mir_sha256_bytes(bytes))
+        sha256_hex_bytes(sha256_bytes(bytes))
     }
     fn matches(self, identity: CaptureIdentity, scope: CaptureConsentScope) -> Bool Never! {
         self._identity == identity && self._scope == scope

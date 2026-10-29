@@ -1,4 +1,4 @@
-// A module `prep` constant may hold a struct or enum value that a helper
+// A module `comptime` constant may hold a struct or enum value that a helper
 // function builds before the program runs: one row, a payload-free enum
 // variant, and a typed list of rows that passed through a function taking
 // its row by move. Each value keeps its declared type at run time.
@@ -18,9 +18,9 @@ fn mode(name: String) -> Mode Never! { if name == "fast" -> Mode.Fast else -> Mo
 
 fn keep(row: ^Row) -> Row Never! { row }
 
-ROW :: prep { make("a", 1) }
-MODE :: prep { mode("fast") }
-ROWS :: prep { [Row]{keep(make("b", 2)), keep(keep(make("c", 3)))} }
+ROW :: comptime { make("a", 1) }
+MODE :: comptime { mode("fast") }
+ROWS :: comptime { [Row]{keep(make("b", 2)), keep(keep(make("c", 3)))} }
 
 fn run() {
     print("row {ROW.name} {ROW.bits}")

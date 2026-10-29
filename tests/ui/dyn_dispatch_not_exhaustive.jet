@@ -1,0 +1,20 @@
+// E0307 (card #5924): `Dyn` has no source declaration, but it is a closed Core
+// registry enum, so an else-less dispatch over it must name every variant.
+// Before this check an unnamed variant (`Number`, `Bytes`, `DateTime`) reached
+// a runtime "no else arm" trap instead of a compile error.
+use core.encoding.json as json
+use core.encoding.[Dyn]
+
+fn kind(tree: Dyn) -> String {
+    return if tree == {
+        .Null -> "null"
+        .Bool(_) -> "bool"
+        .Int(_) -> "int"
+        .Float(_) -> "float"
+        .Text(_) -> "text"
+        .Array(_) -> "array"
+        .Object(_) -> "object"
+    }
+}
+
+fn run() { print(kind(json.parse("1") ?? panic("parse"))) }

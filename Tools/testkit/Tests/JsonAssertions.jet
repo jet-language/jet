@@ -1,3 +1,5 @@
+use core.encoding.json as json
+
 #Test("JSON assertions use typed equality independent of object key order") {
     assert_eq(kit_steps_json_test("{{\"a\":1,\"b\":true}}", "doc", "$", "=", "{{\"b\":true,\"a\":1}}"), None)
     assert_eq(kit_steps_json_test("[1,2]", "doc", "$", "=", "[1,2]"), None)
@@ -9,7 +11,7 @@
     assert_eq(kit_steps_json_test("9007199254740993", "doc", "$", "=", "9007199254740993"), None)
     assert(kit_steps_json_test("9007199254740992", "doc", "$", "=", "9007199254740993") != None)
     assert(kit_steps_json_test("18446744073709551614", "doc", "$", "=", "18446744073709551615") != None)
-    assert_eq(kit_steps_json_scalar("{{\"count\":9007199254740993}}", "doc", "$.count"), Ok("9007199254740993"))
+    assert_eq(kit_steps_json_scalar("{{\"count\":9007199254740993}}", "doc", "$.count") ?? panic("JSON scalar: {err}"), "9007199254740993")
     assert_eq(kit_steps_json_number(json.parse("1.25e2") ?? panic("numeric token")), Val(125.0))
     edit :: kit_steps_edit(json.parse("{{\"file\":\"main.jet\",\"span\":{{\"start\":1,\"end\":3}},\"new_text\":\"fixed\"}}") ?? panic("edit numeric tokens")) ?? panic("Number offsets must decode as Int")
     assert_eq(edit.start, 1)

@@ -1,7 +1,7 @@
 use core.net as net
 use core.files as files
 use core.time as time
-PEER_CRLF :: prep { String.from_bytes([U8]{13, 10}) ?? panic("fixture CRLF") }
+PEER_CRLF :: comptime { String.from_bytes([U8]{13, 10}) ?? panic("fixture CRLF") }
 
 fn prefix(raw: [U8], want: [U8]) -> Bool {
     if raw.len() < want.len() -> return false
@@ -41,7 +41,6 @@ use core.process as process
 fn subject(mode: String, path: String) -> ProcessReceipt {
     if mode != "aot" {
         argv := [String]{"{jet}", "run"}
-        if mode == "interpret" -> &argv.push("--interpret")
         &argv.push(path)
         return process.cmd(argv).run() ?? panic("run subject")
     }
@@ -76,7 +75,7 @@ fn reserve_address() -> String {
     // Returning drops the only listener before the runner is spawned.
 }
 fn run() {
-    modes :: [String]{"default", "interpret"}
+    modes :: [String]{"default"}
     loop mode in modes {
         address :: reserve_address()
         port :: address.split(":").to_list()[1].copy()

@@ -1,0 +1,27 @@
+use core.service as service
+use core.testing as testing
+
+fn worker() {}
+
+fn run() {
+    temp := testing.temp_dir("service-workflow-wait")
+    path :: Path.from(temp).join("workflow.log").to_string()
+    tree := service.tree("checkout")
+    store :: service.state_store(path) ?? panic("state store")
+    &tree.set_state_event_log(^store, "workflow-events", 1, "reversible") ?? panic("state")
+    &tree.worker("activities", ^worker, capacity: 1) ?? panic("worker")
+    &tree.start() ?? panic("start")
+
+    w :: &tree.workflow_start("checkout", 1) ?? panic("workflow")
+    duration :: Duration.milliseconds(0) ?? panic("duration")
+    w.sleep(duration.copy()) ?? panic("sleep")
+    activity :: w.activity("charge", "charge-1") ?? panic("activity")
+    w.all([activity]) ?? panic("all")
+    print("history:{tree.workflow_history(^w) ?? panic("history")}")
+
+    replay :: &tree.workflow_start("checkout", 1) ?? panic("replay")
+    replay.sleep(^duration) ?? panic("replay sleep")
+    replay_activity :: replay.activity("charge", "charge-1") ?? panic("replay activity")
+    replay.all([replay_activity]) ?? panic("replay all")
+    print("replay:{tree.workflow_history(replay) ?? panic("replay history")}")
+}

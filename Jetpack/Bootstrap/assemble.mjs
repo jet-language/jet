@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Assemble the Jetpack Jet sources into one unqualified unit, mirroring
-// Compiler/Bootstrap/assemble.mjs. `sources.list` is the only implementation
-// order and `tests.list` the only test order; nothing is globbed into a unit.
+// Assemble the Jetpack Jet sources into one unqualified unit. `sources.list` is
+// the only implementation order and `tests.list` the only test order; nothing is
+// globbed into a unit.
 //
 // Modes:
 //   check  implementation + tests as `#Test` claims, for `jet check` (tests are
@@ -11,7 +11,7 @@
 //          generated `fn run()` for the default `jet run` tier (I9)
 //   hosted implementation only + Jetpack/run.jet, for the standalone native
 //          `jetpack` engine binary (`jet build`)
-//   publication  INTERNAL Store implementation closure + the one registered
+//   publication  INTERNAL Engine implementation closure + the one registered
 //                native runtime-pack publisher entry; no test driver
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -31,7 +31,7 @@ const sourceRootDir = resolve(process.env.JETPACK_BOOTSTRAP_SOURCE_ROOT ?? repoR
 // `# == Area ==` sections to assemble (unset: all), and each worker's unit lives
 // in its own scratch directory keyed by source root, selection and worker name.
 const selectedAreas = mode === "publication"
-  ? new Set(execFileSync(process.execPath, [resolve(bootstrapDir, "areas.mjs"), "closure", "Store"], {
+  ? new Set(execFileSync(process.execPath, [resolve(bootstrapDir, "areas.mjs"), "closure", "Engine"], {
     cwd: sourceRootDir,
     env: { ...process.env, JETPACK_BOOTSTRAP_SOURCE_ROOT: sourceRootDir },
     encoding: "utf8",
@@ -60,11 +60,11 @@ const mapPath = resolve(scratchDir, "jetpack.map.json");
 const packageSource = [
   'name: "jetpack_bootstrap"',
   'version: "0.1.0"',
-  'edition: "2028"',
+  'edition: "2026"',
   "authority: {",
-  "    holds: {",
-  "        allow: [Env, Exec, Exec.Args, FS, FS.Read, IO, Mem.Alloc, Mem.Rc, Net, Rand, Time, Time.Wait]",
-  "    }",
+  "    ",
+    "        allow: [Env, Exec, Exec.Args, FS, FS.Read, IO, Mem.Alloc, Mem.Rc, Net, Rand, Time, Time.Wait]",
+    "    ",
   "}",
   "",
 ].join("\n");
@@ -89,7 +89,7 @@ async function jetFilesUnder(directory) {
   for (const entry of entries) {
     const path = resolve(directory, entry.name);
     if (entry.isDirectory()) files.push(...(await jetFilesUnder(path)));
-    else if (entry.isFile() && entry.name.endsWith(".jet")) files.push(path);
+    else if (entry.isFile() && entry.name.endsWith(".jet") && entry.name !== "package.jet") files.push(path);
   }
   return files;
 }
@@ -154,13 +154,18 @@ async function readManifest(name) {
   const workingText = await readFile(manifestPath, "utf8").catch((error) => fail(`cannot read ${label}: ${error.message}`));
   const text = mergedManifest(workingText, name);
   const entries = [];
-  // Section headers look like `# == PackageModel ==`; the name is the text before any `(`.
+  const misplaced = [];
+  // Section headers look like `# == PackageModel ==`; the name is the text before any `(`. An area that
+  // spans several Jetpack folders names them: `# == Engine (folders: Store, Trust) ==`.
   let section = null;
+  let folders = [];
   for (const [index, rawLine] of text.split(/\r?\n/).entries()) {
     const sourcePath = rawLine.trim();
-    const header = /^#\s*==\s*([^=(]+?)\s*(?:\(.*\))?\s*==\s*$/.exec(sourcePath);
+    const header = /^#\s*==\s*([^=(]+?)\s*(?:\((.*)\))?\s*==\s*$/.exec(sourcePath);
     if (header !== null) {
       section = header[1];
+      const listed = /^folders:(.*)$/.exec(header[2]?.trim() ?? "");
+      folders = listed ? listed[1].split(",").map((folder) => folder.trim()).filter(Boolean) : [section];
       continue;
     }
     if (sourcePath === "" || sourcePath.startsWith("#")) continue;
@@ -171,12 +176,12 @@ async function readManifest(name) {
       fail(`${where}: expected a repository-relative .jet source path`);
     }
     if (sourcePath !== normalized) fail(`${where}: use the canonical path ${normalized}`);
-    const publicationEntry = sourcePath === PUBLICATION_ENTRY && name === "sources.list" && section === "Store";
+    const publicationEntry = sourcePath === PUBLICATION_ENTRY && name === "sources.list" && section === "Engine";
     if (!publicationEntry && !allowedPrefixes.some((prefix) => sourcePath.startsWith(prefix))) {
       fail(`${where}: sources must live under ${allowedPrefixes.join(" or ")}`);
     }
     const area = /^Jetpack\/([^/]+)\//.exec(sourcePath)?.[1];
-    if (area !== undefined && area !== section) fail(`${where}: ${sourcePath} belongs under the \`# == ${area} ==\` section`);
+    if (area !== undefined && !folders.includes(area)) misplaced.push(`${where}: ${sourcePath} belongs under the \`# == ${area} ==\` section`);
     if (section === null) fail(`${where}: every source belongs to a \`# == Area ==\` section`);
     if (selectedAreas !== null && !selectedAreas.has(section)) continue;
     // Dependency references have the same live/HEAD rule, never a per-file
@@ -200,21 +205,25 @@ async function readManifest(name) {
     if (!Buffer.from(sourceText, "utf8").equals(bytes)) fail(`${sourcePath}: source is not valid UTF-8`);
     entries.push({ sourcePath, bytes, text: rebaseEmbeds(sourceText, sourcePath, where), where, section });
   }
+  if (misplaced.length > 0) {
+    for (const message of misplaced) console.error(`jetpack-bootstrap: ${message}`);
+    process.exit(1);
+  }
   return entries;
 }
 
 // Registration/inventory still sees the fixed entry in ordinary modes, but
 // only the internal publication artifact emits it.
 const registeredSources = await readManifest("sources.list");
-// The compiler slice is closed under Compiler/Bootstrap/sources.list; a use
-// that only an unlisted slice-package file declares fails the assembly.
+// The compiler slice is closed under the compiler's packages; a use that only an
+// unlisted slice-package member file declares fails the assembly.
 const sliceDrift = compilerSliceDrift(sourceRootDir);
 const sliceFailures = sliceDrift.filter((problem) => !problem.includes("outside the compiler slice"));
-if (sliceFailures.length > 0) fail(`the Jetpack compiler slice drifted from Compiler/Bootstrap/sources.list:\n${sliceFailures.map((problem) => `  ${problem}`).join("\n")}`);
+if (sliceFailures.length > 0) fail(`the Jetpack compiler slice drifted from the compiler's packages:\n${sliceFailures.map((problem) => `  ${problem}`).join("\n")}`);
 for (const problem of sliceDrift.filter((problem) => problem.includes("outside the compiler slice"))) console.log(`note: ${problem}`);
 const sources = registeredSources.filter((entry) => mode === "publication" || entry.sourcePath !== PUBLICATION_ENTRY);
 if (mode === "publication" && registeredSources.filter((entry) => entry.sourcePath === PUBLICATION_ENTRY).length !== 1) {
-  fail(`internal publication requires exactly one Store registration of ${PUBLICATION_ENTRY}`);
+  fail(`internal publication requires exactly one Engine registration of ${PUBLICATION_ENTRY}`);
 }
 const tests = await readManifest("tests.list");
 if (selectedAreas !== null) {
@@ -316,14 +325,14 @@ function append(text) {
   generatedByte += Buffer.byteLength(text, "utf8");
   nextLine += (text.match(/\n/g) ?? []).length;
 }
-// D-MOD-CYCLE1=A (as Compiler/Bootstrap/assemble.mjs): the listed Compiler/
+// D-MOD-CYCLE1=A: the listed Compiler/
 // front-end files import their sibling packages with `use <package>.[names]`
 // or `use <package>.name`. This unit is one namespace, so those imports are
 // blanked to spaces of the same length (every byte offset and line in the
 // source map still matches). A repeated single-line Core import after its first
 // occurrence is blanked the same way (a duplicate import name is E0105), and
 // grouped Core member imports are deduplicated per member.
-const PACKAGE_IMPORT = /^use (?:jet_foundation|jet_lexer|jet_parser|jet_optimizer|jet_sema|jet_codegen|jet_eval|jet_repl|jet_driver|jet_backend|jet_cli|compiler_bootstrap)\.(?:\[[^\]]*\]|[A-Za-z_][A-Za-z0-9_]*[ \t]*$)/gm;
+const PACKAGE_IMPORT = /^use (?:jet_foundation|jet_lexer|jet_parser|jet_sema|jet_eval|jet_repl|jet_driver|jet_backend|jet_cli|compiler_bootstrap|jetpack_foundation|jetpack_trust_root|jet_pkg_model|jet_env_model|jetpack_trust|jetpack_artifact_store|jetpack_nix_eval|jetpack_nix|jetpack_store|jetpack_publication|jetpack_environment|jetpack_secrets|jetpack_integrations)\.(?:\[[^\]]*\]|[A-Za-z_][A-Za-z0-9_]*[ \t]*$)/gm;
 const CORE_IMPORT = /^use core\.[^\[\n]*$/gm;
 const CORE_MEMBER_IMPORT = /^use (core(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\.\[([^\]]*)\]/gm;
 const seenCoreImports = new Set();

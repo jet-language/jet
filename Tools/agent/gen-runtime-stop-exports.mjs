@@ -167,7 +167,7 @@ export function generatedRuntimeStopRegistry(symbols) {
 // Direct named calls only; foreign/dynamic callback effects are separate.
 // Both compiler halves consume these Panic stop facts, not returned Results.
 // The symbols land as literal data: no compile-time execution host is needed.
-RUNTIME_STOP_EXPORTS :: prep { [String]{
+RUNTIME_STOP_EXPORTS :: comptime { [String]{
 ${symbols.map((symbol) => `    "${symbol}",\n`).join("")}} }
 
 fn runtime_export_can_stop(symbol: String) -> Bool Never! {

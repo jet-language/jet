@@ -1,0 +1,131 @@
+
+use core.service as service
+use core.testing as testing
+use core.time as time
+
+fn worker() -[]> {}
+
+fn state_name(delivery: ^Delivery) -> String {
+    state :: delivery.status() ?? panic("status")
+    if state == {
+        .Pending -> { return "Pending" }
+        .Accepted -> { return "Accepted" }
+        .Delivering -> { return "Delivering" }
+        .Delivered -> { return "Delivered" }
+        .DeadLettered -> { return "DeadLettered" }
+        .Cancelled -> { return "Cancelled" }
+    }
+    return "unknown"
+}
+
+fn run() {
+    temp := testing.temp_dir("durable-lifecycle-matrix")
+    delivery_path :: Path.from(temp).join("delivery.log").to_string()
+    state_path :: Path.from(temp).join("state.log").to_string()
+    retention :: Duration.seconds(60) ?? panic("retention")
+    runtime := service.runtime(delivery_path, retention: retention)
+
+    tree := service.tree("lifecycle-matrix")
+    tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
+    state :: service.state_store(state_path) ?? panic("state store")
+    tree.set_state_event_log(state, "lifecycle-events", 1, "reversible") ?? panic("state")
+    endpoint :: tree.worker("api", worker, capacity: 2) ?? panic("worker")
+    tree.start() ?? panic("start")
+
+    accepted :: runtime.send(endpoint, "accepted", key: "same") ?? panic("accept")
+    accepted_state :: state_name(accepted.copy())
+    print("accept:{accepted_state}")
+    duplicate :: runtime.send(endpoint, "accepted", key: "same") ?? panic("duplicate")
+    duplicate_id :: (duplicate.copy()).show()
+    accepted_id :: (accepted.copy()).show()
+    duplicate_state :: state_name(duplicate.copy())
+    print("duplicate:{duplicate_id == accepted_id}:{duplicate_state}")
+    conflict :: runtime.send(endpoint, "different", key: "same")
+    if conflict == {
+        .Ok(delivery) -> {
+            delivery.cancel() ?? panic("unexpected conflict")
+            print("conflict:accepted")
+        }
+        .Err(_) -> { print("conflict:Policy") }
+    }
+    delivered :: tree.receive(endpoint) ?? panic("deliver")
+    print("delivered:{delivered}")
+    runtime.commit(accepted) ?? panic("commit")
+    retained :: runtime.retain(duplicate) ?? panic("retain")
+    retained_receipt :: (retained.copy()).receipt() ?? panic("retained receipt")
+    retained_text :: "{retained_receipt}"
+    retained_events :: (retained.copy()).events() ?? panic("retained events")
+    retention_kept := retained_text.contains("retention_until=-1") == false
+    retained_state :: state_name(^retained)
+    print("retention:{retention_kept}:{retained_events.len()}:{retained_state}")
+
+    retry_source :: runtime.send(endpoint, "retry", key: "retry") ?? panic("retry source")
+    retry_first :: tree.receive(endpoint) ?? panic("retry first")
+    print("retry_first:{retry_first}")
+    retry :: runtime.retry(retry_source) ?? panic("retry")
+    retry_receipt :: (retry.copy()).receipt() ?? panic("retry receipt")
+    retry_text :: "{retry_receipt}"
+    retry_events :: (retry.copy()).events() ?? panic("retry events")
+    retried := retry_text.contains("attempts=1")
+    retry_state :: state_name(retry.copy())
+    print("retry_state:{retry_state}:{retried}:{retry_events.len()}")
+    retry_second :: tree.receive(endpoint) ?? panic("retry second")
+    print("retry_second:{retry_second}")
+    retry_copy :: retry.copy()
+    runtime.commit(retry) ?? panic("retry commit")
+    retry_done :: state_name(^retry_copy)
+    print("retry_done:{retry_done}")
+
+    cancelled_handle :: runtime.send(endpoint, "cancel", key: "cancel") ?? panic("cancel source")
+    cancelled :: cancelled_handle.cancel() ?? panic("cancel")
+    cancel_state :: state_name(^cancelled)
+    print("cancel:{cancel_state}")
+
+    dead_handle :: runtime.send(endpoint, "dead", key: "dead") ?? panic("dead source")
+    dead :: runtime.dead_letter(dead_handle) ?? panic("dead letter")
+    dead_state :: state_name(^dead)
+    print("dead:{dead_state}")
+
+    short_runtime := service.runtime(delivery_path, retention: Duration.milliseconds(1) ?? panic("short retention"))
+    expiring :: short_runtime.send(endpoint, "expire", key: "expire") ?? panic("expire source")
+    time.sleep(Duration.milliseconds(10) ?? panic("sleep"))
+    expiry_events :: (expiring.copy()).events() ?? panic("expiry events")
+    expiry_state :: state_name(^expiring)
+    print("expiry:{expiry_state}:{expiry_events.len()}")
+
+    partition_source :: runtime.send(endpoint, "partition", key: "partition") ?? panic("partition source")
+    tree.partition_worker(endpoint) ?? panic("partition")
+    partition_retry :: runtime.retry(partition_source)
+    if partition_retry == {
+        .Ok(delivery) -> {
+            delivery.cancel() ?? panic("unexpected partition retry")
+            print("partition:accepted")
+        }
+        .Err(_) -> { print("partition:Partitioned") }
+    }
+    tree.reconcile_worker(endpoint) ?? panic("reconcile")
+    recovered :: runtime.send(endpoint, "partition", key: "partition") ?? panic("partition recovery")
+    recovered_state :: state_name(recovered.copy())
+    print("partition_recovery:{recovered_state}")
+    partition_delivery :: tree.receive(endpoint) ?? panic("partition delivery")
+    print("partition_delivery:{partition_delivery}")
+    recovered_copy :: recovered.copy()
+    runtime.commit(recovered) ?? panic("partition commit")
+    recovered_events :: (recovered_copy.copy()).events() ?? panic("recovered events")
+    recovered_state_done :: state_name(^recovered_copy)
+    print("partition_done:{recovered_state_done}:{recovered_events.len()}")
+
+    foreign := service.tree("foreign")
+    foreign_endpoint :: foreign.worker("api", worker, capacity: 1) ?? panic("foreign worker")
+    foreign.start() ?? panic("foreign start")
+    revoked :: tree.send_durable(foreign_endpoint, "revoked", key: "revoked")
+    if revoked == {
+        .Ok(delivery) -> {
+            delivery.cancel() ?? panic("unexpected revoked delivery")
+            print("revoked:accepted")
+        }
+        .Err(_) -> { print("revoked:Revoked") }
+    }
+    foreign.stop() ?? panic("foreign stop")
+    tree.stop() ?? panic("stop")
+}

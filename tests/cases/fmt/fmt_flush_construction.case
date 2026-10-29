@@ -1,0 +1,17 @@
+# tests/fmt.rs::fmt_flush_construction at tests/fmt.rs:1058; hand-port
+# Claim: construction is dotless `Point{x: 1, y: 2}` (tests/fmt.rs:1069-1072)
+# Claim: no `Point {x: 1` space before brace (tests/fmt.rs:1073-1076)
+# Claim: second pass identical (tests/fmt.rs:1077-1078)
+# Fixture migrated: `Point.{ x: 1, y: 2 }` dotted literal head -> `Point{x: 1, y: 2}` (D-LIT-DOT1=B, Docs/spec/syntax-decisions.md:7938)
+fixture: fmt_flush_construction.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt run.jet
+exit: 0 # tests/fmt.rs:1068 formats
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:1069-1076
+stdout: ~ "Point{x: 1, y: 2}" # tests/fmt.rs:1069-1076
+stdout: !~ "Point {x: 1" # tests/fmt.rs:1069-1076
+step: jet fmt --check run.jet
+exit: 0 # tests/fmt.rs:1077-1078 stable

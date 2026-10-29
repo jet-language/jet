@@ -1,5 +1,7 @@
 // Source/ReceiptStore.rs: immutable receipts and append-only section records,
 // held under the selected project root. All store I/O goes through RootedStore.
+use core.crypto as receipt_crypto
+
 fn jet_cli_receipt_lookup_bytes(bytes: [U8]?, claim: JetCLIReceiptClaim, observed_inputs: [JetCLIReceiptInput], published_sections: [JetCLIReceiptSectionRecord]) -> JetCLIReceipt? JetCLIReadError! {
     if !jet_cli_receipt_is_digest(claim.key) || claim.inputs != observed_inputs -> return Ok(None)
     raw :: bytes ?? return Ok(None)
@@ -222,17 +224,4 @@ fn jet_cli_receipt_list(project_root: String) -[FS, Time.Wait]> [JetCLIReceipt] 
         &receipts.push(row)
     }
     Ok(receipts)
-}
-
-fn jet_cli_receipt_list_current(project_root: String) -[FS, Time.Wait]> [JetCLIReceipt] JetCLIReadError! {
-    receipts :: jet_cli_receipt_list(project_root)
-    current := [JetCLIReceipt]{}
-    loop receipt in receipts {
-        if jet_cli_receipt_lookup(project_root, receipt.claim) == {
-            .Val(fresh) -> &current.push(fresh)
-            .None -> {}
-            .Err(error) -> { return Err(error) }
-        }
-    }
-    Ok(current)
 }

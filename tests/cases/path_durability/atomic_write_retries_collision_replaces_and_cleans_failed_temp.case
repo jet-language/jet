@@ -1,0 +1,19 @@
+# tests/path_durability.rs::atomic_write_retries_collision_replaces_and_cleans_failed_temp at tests/path_durability.rs:211; hand-port
+# The per-case work directory replaces the Rust temp directory, so the program names its files relative to it.
+fixture: atomic_write_retries_collision_replaces_and_cleans_failed_temp.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+mkdir: blocked
+chmod: target.bin 0640
+step: jet build atomic_hostile.jet
+exit: 0
+step: built
+exit: 70 # tests/path_durability.rs:244-247 replacing a directory fails through a Jet panic
+file: target.bin ^= "new" # tests/path_durability.rs:248 the first atomic write replaced the target
+file: target.bin size = 3 # tests/path_durability.rs:248
+file: target.bin mode = 0640 # tests/path_durability.rs:249-256 replacement keeps the target permissions
+entries: . kind file name ^= ".jet_tmp_" = 1 # tests/path_durability.rs:257-266 only the forced stale collision remains
+step: sh -c "cat .jet_tmp_*"
+exit: 0
+stdout: = "stale" # tests/path_durability.rs:267 the stale temp is untouched

@@ -1,18 +1,18 @@
 // Source/Publish/Tuf.rs: sparse signed package projections and witnessed log.
 // One trust model: Index/Tier + Sign + Registry's host-pinned root/checkpoint.
 // Core providers #3593 (authority/stat/fsync/locks), #3598 (Index JSON),
-// #4409 (InvalidData) and crypto/entropy #3597 remain real acceptance gates.
+// InvalidData (CORE-GAPS 11) and crypto/entropy #3597 remain real acceptance gates.
 // Cross-module authority/provider closure remains gated #3673; no private
 // fields, copied authority walker or pathname rollback/publisher fallback.
 // Tuf.rs has no expiry/revocation fields: those belong to Advisory/root policy.
 use core.crypto as publication_tuf_crypto
 use core.encoding.hex as publication_tuf_hex
 
-PUBLICATION_TUF_METADATA_MAGIC :: prep { "jet-tuf-sparse-v2" }
-PUBLICATION_TUF_LOG_MAGIC :: prep { "jet-transparency-log-v1" }
-PUBLICATION_TUF_CHECKPOINT_MAGIC :: prep { "jet-transparency-checkpoint-v1" }
-PUBLICATION_TUF_MAX_METADATA_BYTES :: prep { 4194304 }
-PUBLICATION_TUF_MAX_LOG_BYTES :: prep { 67108864 }
+PUBLICATION_TUF_METADATA_MAGIC :: "jet-tuf-sparse-v2"
+PUBLICATION_TUF_LOG_MAGIC :: "jet-transparency-log-v1"
+PUBLICATION_TUF_CHECKPOINT_MAGIC :: "jet-transparency-checkpoint-v1"
+PUBLICATION_TUF_MAX_METADATA_BYTES :: 4194304
+PUBLICATION_TUF_MAX_LOG_BYTES :: 67108864
 
 struct PublicationSparseMetadata {
     name: String
@@ -381,19 +381,22 @@ fn publication_tuf_log_contains_entry(records: [PublicationLogRecord], expected:
 fn publication_tuf_accept_checkpoint(registry_name: String, repo: String, checkpoint: PublicationCheckpoint) IOError! -[FS, Env, Time]> {
     // Mandatory JP-PUB-REG-TRUST-CACHE path, never a repository-supplied pin.
     path :: publication_registry_checkpoint_path(registry_name)
-    publication_tuf_with_checkpoint_lock(path, () -> {
-        if files.stat(path) == .Ok(metadata) {
-            if metadata.is_symlink || !metadata.is_file -> return Err(publication_tuf_invalid("accepted registry checkpoint is not a regular file"))
-            text :: publication_tuf_read_bounded(files.dirname(path), path, 1024, "registry metadata exceeds its size limit")
-            lines :: text.lines()
-            if lines.len() == 0 -> return Err(publication_tuf_invalid("accepted registry checkpoint is malformed"))
-            sequence :: publication_tuf_sequence(lines[0]) ?? return Err(publication_tuf_invalid("accepted registry checkpoint sequence is invalid"))
-            if lines.len() < 2 -> return Err(publication_tuf_invalid("accepted registry checkpoint is missing its root"))
-            records :: if sequence < checkpoint.sequence && sequence != 0 -> publication_tuf_read_log(repo) else -> [PublicationLogRecord]{}
-            if publication_tuf_check_accepted_checkpoint(sequence, lines[1], checkpoint, records) -> return
-        }
-        publication_tuf_atomic_write(files.dirname(path), path, "{checkpoint.sequence}\n{checkpoint.root}\n".bytes())
-    })
+    lock_path :: path.copy()
+    // workaround #5940(h)
+    publication_tuf_with_checkpoint_lock(lock_path, () -> publication_tuf_accept_checkpoint_locked(path, repo, checkpoint))
+}
+fn publication_tuf_accept_checkpoint_locked(path: String, repo: String, checkpoint: PublicationCheckpoint) IOError! -[FS, Env, Time]> {
+    if files.stat(path) == .Ok(metadata) {
+        if metadata.is_symlink || !metadata.is_file -> return Err(publication_tuf_invalid("accepted registry checkpoint is not a regular file"))
+        text :: publication_tuf_read_bounded(files.dirname(path), path, 1024, "registry metadata exceeds its size limit")
+        lines :: text.lines()
+        if lines.len() == 0 -> return Err(publication_tuf_invalid("accepted registry checkpoint is malformed"))
+        sequence :: publication_tuf_sequence(lines[0]) ?? return Err(publication_tuf_invalid("accepted registry checkpoint sequence is invalid"))
+        if lines.len() < 2 -> return Err(publication_tuf_invalid("accepted registry checkpoint is missing its root"))
+        records :: if sequence < checkpoint.sequence && sequence != 0 -> publication_tuf_read_log(repo) else -> [PublicationLogRecord]{}
+        if publication_tuf_check_accepted_checkpoint(sequence, lines[1], checkpoint, records) -> return
+    }
+    publication_tuf_atomic_write(files.dirname(path), path, "{checkpoint.sequence}\n{checkpoint.root}\n".bytes())
 }
 // Returns true when no write is needed, otherwise proves ancestry before advance.
 fn publication_tuf_check_accepted_checkpoint(sequence: Int, root: String, checkpoint: PublicationCheckpoint, records: [PublicationLogRecord]) -> Bool IOError! {
@@ -443,7 +446,7 @@ fn publication_tuf_with_checkpoint_lock(state: String, action: fn() IOError! -[F
         authority.revalidate()
         return
     }
-    return Err(IOError.TimedOut(publication_index_context(state, "accepted registry checkpoint is busy")))
+    return Err(publication_index_error(.TimedOut, state, "accepted registry checkpoint is busy"))
 }
 
 fn publication_tuf_log_record_unsigned(sequence: Int, operation: String, entry: PublicationIndexEntry, previous: String) -> String Never! {
@@ -592,7 +595,7 @@ fn publication_tuf_sequence(value: String) -> Int? Never! {
     pkg_lock_parse_unsigned(value, 18446744073709551615)
 }
 fn publication_tuf_empty_log_root() -> String Never! { "sha256-{publication_tuf_crypto.sha256("jet-transparency-empty-v1".bytes()).hex()}" }
-fn publication_tuf_invalid(message: String) -> IOError Never! { IOError.InvalidData(publication_index_context("registry TUF metadata", message)) }
+fn publication_tuf_invalid(message: String) -> IOError Never! { publication_index_error(.InvalidInput, "registry TUF metadata", message) }
 fn publication_tuf_metadata_diagnostic(detail: String) -> PublicationDiagnosticError Never! {
     diagnostic := diagnostic_from_registry("E2607", None, "registry TUF metadata is malformed: {detail}",
         "supply-chain metadata is security-sensitive, so Jet rejects ambiguous or partial records instead of silently skipping them.",

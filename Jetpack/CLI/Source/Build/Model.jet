@@ -3,12 +3,12 @@
 // provenance_toolchains,errors_keys}.rs. Rust `BuildCapability` is
 // Foundation `BuildEffect`.
 //
-// Jet reserves `BuildContext`, `BuildPlan`, `BuildAction`, `BuildTarget`,
+// Jet reserves `Build`, `BuildPlan`, `BuildAction`, `BuildTarget`,
 // `BuildToolchain`, `BuildProbe`, `BuildSigningIdentity` and `BuildError`
 // for the `fn build` surface (SEMA_RESERVED_TYPES), and the Jetpack unit
 // already owns `ActionHandle` (the artifact store's action record handle).
 // These executor types carry the `Hermetic` prefix the Rust sandbox tests
-// alias them to (`BuildContext as HermeticBuildContext`).
+// alias them to (`Build as HermeticBuildContext`).
 //
 // Ported surface: the graph `jet cc` builds (toolchains, probes, signing
 // identities, actions, targets, plans) and its executor. Not ported here:
@@ -19,7 +19,7 @@
 // none.
 
 // Rust plan_graph.rs `MAX_ACTIONS`.
-BUILD_MAX_ACTIONS :: prep { 100000 }
+BUILD_MAX_ACTIONS :: 100000
 
 // A target within one context (Rust `TargetRef`; the typed `ExecutableTarget`
 // family converts into it, so every `add_*` returns this reference).

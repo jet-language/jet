@@ -30,7 +30,7 @@ struct EvidenceProjection {
     source: EvidenceSource
     completeness: EvidenceCompleteness
     chain: [EvidenceChainLink]
-    derivation: MIRDerivationRef?
+    derivation: DerivationRef?
 }
 
 #Error
@@ -369,10 +369,10 @@ fn evidence_record_state_code(record: EvidenceRecord) -> Int Never! {
 }
 
 fn evidence_record_checked_derivation(record: EvidenceRecord) -> DerivationRecord Never! {
-    method :: if record.kind == EvidenceKind.Property -> MIRDerivationMethod.SampledAgreement else -> MIRDerivationMethod.RecordedExecution
+    method :: if record.kind == EvidenceKind.Property -> DerivationMethod.SampledAgreement else -> DerivationMethod.RecordedExecution
     value := derivation_record(record.identity.evidence_id, record.identity.claim_id, evidence_producer_name(record.producer), method, "evidence-record", [String]{record.identity.claim_id, record.identity.evidence_id}, derivation_identity(record.revision.source, record.revision.build, record.revision.revision, record.build.target))
     if evidence_outcome_is_incomplete(record.outcome) || record.outcome == EvidenceOutcome.Unchecked {
-        value.disposition = MIRDerivationDisposition.Unavailable
+        value.disposition = DerivationDisposition.Unavailable
     }
     value
 }
@@ -381,14 +381,14 @@ fn evidence_report_new(report_id: String, producer: EvidenceProducerKind, source
     EvidenceReport{schema_version: EVIDENCE_REPORT_VERSION, identity: EvidenceIdentity{report_id: report_id, claim_id: "", evidence_id: ""}, producer: producer, source: source, build: build, revision: revision, records: [EvidenceRecord]{}, derivations: [DerivationRecord]{}, attachments: [EvidenceAttachment]{}, diagnostics: [EvidenceDiagnostic]{}, completeness: EvidenceCompleteness.Complete}
 }
 
-fn evidence_report_derivation(report: EvidenceReport, reference: MIRDerivationRef) -> DerivationRecord? Never! {
+fn evidence_report_derivation(report: EvidenceReport, reference: DerivationRef) -> DerivationRecord? Never! {
     loop item in report.derivations {
         if item.id == reference.id -> return Val(item)
     }
     None
 }
 
-fn evidence_report_intern_derivation(report: &EvidenceReport, derivation: ^DerivationRecord) -> MIRDerivationRef Never! {
+fn evidence_report_intern_derivation(report: &EvidenceReport, derivation: ^DerivationRecord) -> DerivationRef Never! {
     loop item in report.derivations {
         if item.id == derivation.id -> return derivation_record_reference(item)
     }
@@ -477,42 +477,6 @@ fn evidence_report_try_from_records(report_id: String, records: ^[EvidenceRecord
 // fabricated empty report or a swallowed merge error.
 fn evidence_report_from_records(report_id: String, records: ^[EvidenceRecord]) -> EvidenceReport Never! {
     evidence_report_try_from_records(report_id, ^records, [DerivationRecord]{}) ?? panic("evidence records in one report must share report identity")
-}
-
-fn evidence_report_merge(reports: [EvidenceReport]) -> EvidenceReport EvidenceMergeError! {
-    if reports.len() == 0 -> return Err(EvidenceMergeError.Empty)
-    merged := reports[0].copy()
-    loop record in reports[0].records -> evidence_report_add_record(&merged, record.copy())
-    loop index in 1..<reports.len() {
-        report :: reports[index]
-        if report.schema_version != merged.schema_version {
-            return Err(EvidenceMergeError.SchemaConflict{expected: merged.schema_version, found: report.schema_version})
-        }
-        evidence_check_identity("report_id", merged.identity.report_id, report.identity.report_id)
-        evidence_check_identity("claim_id", merged.identity.claim_id, report.identity.claim_id)
-        evidence_check_identity("evidence_id", merged.identity.evidence_id, report.identity.evidence_id)
-        evidence_completeness_merge(&merged.completeness, report.completeness)
-        loop item in report.derivations -> _ :: evidence_report_intern_derivation(&merged, item.copy())
-        loop record in report.records -> evidence_report_add_record(&merged, record.copy())
-        loop item in report.attachments {
-            if !merged.attachments.contains(item) -> &merged.attachments.push(item.copy())
-        }
-        loop item in report.diagnostics {
-            if !merged.diagnostics.contains(item) -> &merged.diagnostics.push(item.copy())
-        }
-    }
-    merged.attachments = loop fresh_item in merged.attachments -> fresh_item
-    &merged.attachments.sort_by((left: EvidenceAttachment, right: EvidenceAttachment) -> evidence_attachment_order(left, right))
-    merged.diagnostics = loop fresh_item in merged.diagnostics -> fresh_item
-    &merged.diagnostics.sort_by((left: EvidenceDiagnostic, right: EvidenceDiagnostic) -> evidence_diagnostic_order(left, right))
-    Ok(merged)
-}
-
-fn evidence_check_identity(field: String, expected: String, found: String) EvidenceMergeError! {
-    if expected != found {
-        return Err(EvidenceMergeError.IdentityConflict{field: field, expected: foundation_debug_quoted(expected, 34), found: foundation_debug_quoted(found, 34)})
-    }
-    return
 }
 
 fn evidence_report_is_complete(report: EvidenceReport) -> Bool Never! {

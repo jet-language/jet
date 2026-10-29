@@ -1,0 +1,25 @@
+fn lru_view() -> String {
+    cache := Cache.new(2)
+    empty_before :: cache.is_empty()
+    first :: cache.add("a", 1) ?? -1
+    added_b :: &cache.add_new("b", 2)
+    duplicate_b :: &cache.add_new("b", 99)
+    got_a :: cache.get("a") ?? -1
+    displaced_a :: cache.add("a", 10) ?? -1
+    evicted :: cache.add("c", 3) ?? -1
+    keys :: cache.keys()
+    removed_a :: cache.remove("a") ?? -1
+    missing :: cache.remove("missing") ?? -1
+    length :: cache.len()
+    &cache.clear()
+    zero := Cache.new(-2)
+    zero_add :: zero.add("x", 7) ?? -1
+    zero_add_new :: &zero.add_new("x", 7)
+    return "{empty_before}|{cache.capacity()}|{first}|{added_b}|{duplicate_b}|{got_a}|{displaced_a}|{evicted}|{cache.has_key("b")}|{keys}|{removed_a}|{missing}|{length}|{cache.is_empty()}|{zero.capacity()}|{zero_add}|{zero_add_new}|{zero.len()}"
+}
+
+TRANSCRIPT_0 :: comptime { lru_view() }
+
+fn run() {
+    print("{TRANSCRIPT_0}")
+}

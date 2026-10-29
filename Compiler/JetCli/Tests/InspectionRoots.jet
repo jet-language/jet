@@ -1,5 +1,8 @@
 // Inspection actions and planes consume the same Package discovery as
 // compilation, including inline roots and the command-specific error channel.
+use jet_cli.[JetCLIPlan, jet_cli_inspect_require_root, jet_cli_require_inspect_root]
+use jet_driver.[JET_DRIVER_EXIT_USER_ERROR, JetDriverVerbOutput]
+
 fn inspection_root_fixture_require_root(start: String, expected: String) {
     if jet_cli_require_inspect_root(start, "missing package", true) == {
         .Root(root) -> assert(root == expected)
@@ -38,7 +41,7 @@ fn inspection_root_fixture_missing(start: String) {
     }
 }
 
-fn run() {
+#Test("inspection_roots") {
     root :: "{cli_sys.temp_dir()}/jet-inspection-roots-{cli_process.current_pid()}"
     cli_files.create_dir_all("{root}/manifest/sub") ?? panic("manifest fixture")
     cli_files.create_dir_all("{root}/inline/sub") ?? panic("inline fixture")

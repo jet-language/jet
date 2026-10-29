@@ -1,6 +1,10 @@
 // Evaluate one `profile.<name>` package-generation
 // declaration (`extends`, `packages`, `collisions`) into a source-backed
 // `PackageProfileSpec`.
+use jetpack_foundation.[
+    PROFILE_FIELD_COLLISIONS, PROFILE_FIELD_EXTENDS, PROFILE_FIELD_PACKAGES, TYPE_PROFILE,
+]
+use jet_foundation.[CtValue, Expr, NamedExpr, Span, expr_span, type_name]
 
 // The closed fields of a package generation.
 enum ProfileField {
@@ -21,7 +25,7 @@ enum ProfileField {
 // A `profile.<name>: Profile{ … }` contribution written as an expression.
 fn envmodel_evaluate_package_profile_expr(name: String, value: Expr, src: String, scope: ModuleEvalScope, globals: [String: CtValue], module_name: String) -> PackageProfileSpec EnvModelEvalError! {
     if value == {
-        .StructLit(type_name, _, _, _, fields, _, _) -> {
+        .StructLit(type_name, _, _, _, fields, _, _, _) -> {
             if type_name != "" && type_name != TYPE_PROFILE -> return Err(envmodel_wrong_namespace_type(TYPE_PROFILE, type_name, expr_span(value)))
             named := [NamedExpr]{}
             loop field in fields -> &named.push(NamedExpr{name: field.name, name_span: field.name_span, value: field.value})

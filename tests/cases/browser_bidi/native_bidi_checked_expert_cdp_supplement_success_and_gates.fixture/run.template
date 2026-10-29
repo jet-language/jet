@@ -1,0 +1,32 @@
+
+use core.web.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("ws://127.0.0.1:{free-port:cdp}/session?token=CDP_SUCCESS_SECRET", profile, timeout) ?? panic("connect")
+    abilities :: session.abilities()
+    print("abilities:{abilities.bidi()}:{abilities.cdp()}")
+
+    bidi :: session.protocol("bidi") ?? panic("bidi")
+    smuggle :: bidi.send("goog:cdp.sendCommand", "{{\"method\":\"Network.enable\",\"params\":{{}}}}") ?? "blocked-smuggle"
+    print(smuggle)
+
+    cdp :: session.protocol("cdp") ?? panic("cdp")
+    bad_shape :: cdp.send("session.status", "{{}}") ?? "blocked-shape"
+    print(bad_shape)
+    empty :: cdp.send("", "{{}}") ?? "blocked-empty"
+    print(empty)
+    colon :: cdp.send("goog:cdp.sendCommand", "{{}}") ?? "blocked-colon"
+    print(colon)
+
+    ok :: cdp.send("Network.setCacheDisabled", "{{\"cacheDisabled\":true}}") ?? panic("cdp send")
+    print("cdp:{ok}")
+
+    trace :: session.trace()
+    redacted :: trace.redacted()
+    no_method :: trace.summary().contains("Network") == false
+    no_secret :: trace.summary().contains("CDP_SUCCESS_SECRET") == false
+    print("trace:{redacted}:{no_method}:{no_secret}")
+    session.close() ?? panic("close")
+}

@@ -1,0 +1,14 @@
+# tests/dsl_blocks.rs::sql_and_html_blocks_compile_and_formatter_round_trip at tests/dsl_blocks.rs:7; hand-port
+# Declared #SQL(User) and #HTML blocks compile; the formatter keeps both block heads and is stable on its own output.
+fixture: sql_and_html_blocks_compile_and_formatter_round_trip.fixture
+env: NO_COLOR=1
+step: jet check run.jet
+exit: 0 # tests/dsl_blocks.rs:21 jet::compile(..).expect
+step: jet fmt run.jet
+exit: 0 # tests/dsl_blocks.rs:22 format_source(..).expect
+file: run.jet ~ "#SQL(User)" # tests/dsl_blocks.rs:23 formatted contains #SQL(User)
+file: run.jet ~ "#HTML {" # tests/dsl_blocks.rs:24 formatted contains #HTML {
+copy: run.jet once.jet
+step: jet fmt run.jet
+exit: 0
+file: run.jet == once.jet

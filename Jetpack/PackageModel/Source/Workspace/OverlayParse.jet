@@ -4,6 +4,10 @@
 // `policy: { deny, grants }` record) is read here into `OverlayPolicy` and
 // stripped before the ordinary module evaluator runs, so policy facts never
 // enter module evaluation.
+use jetpack_foundation.[
+    BuildEffect, EFFECTS_FIELD_ALLOW, EFFECTS_FIELD_DENY, MANIFEST_BLOCK_GRANTS,
+    MANIFEST_BLOCK_POLICY, WORKSPACE_OVERLAY,
+]
 
 fn pkg_parse_workspace_policy(src: String) -> OverlayPolicy OverlayError! {
     body :: pkg_overlay_workspace_body(src) ?? return Ok(OverlayPolicy.empty())

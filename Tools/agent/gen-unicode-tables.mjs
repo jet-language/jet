@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Card #298: offline, checksum-verified Unicode 17.0.0 UCD table generator.
 // No network at build/compile time — this script is run by hand (or by a
-// maintainer script) against a local UCD snapshot dir. Rust reference outputs
-// and the allocation-free Jet runtime lookup functions are committed together.
-// No external crates (I6): plain Node, Rust, and Jet.
+// maintainer script) against a local UCD snapshot dir. The allocation-free Jet
+// runtime lookup functions and the JUCD Core text assets are committed together.
+// No external packages (I6): plain Node and Jet.
 //
 // Usage:
 //   node Tools/agent/gen-unicode-tables.mjs [--write | --check] [ucd-dir]
@@ -16,16 +16,13 @@
 //   auxiliary/SentenceBreakProperty.txt, DerivedCoreProperties.txt (GB9c's
 //   Indic_Conjunct_Break, added card #298 segmentation slice)
 //
-// Emits Rust source to these paths:
-//   crates/jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs (the one
-//     table file: the AOT prelude embeds it as text via include_str!, and
-//     the jet-unicode crate compiles it once for jet-foundation, jet-comptime
-//     and the JIT hosts, so every in-binary tier reads one table with no drift)
-//   crates/jet-foundation/src/generated/UnicodeString.rs and
-//   crates/jet-codegen/src/Prelude/Core/UnicodeString.rs (string kernels)
+// Emits these paths:
 //   Compiler/JetRuntime/Source/UnicodeTables.jet (fixed-word runtime lookups)
 //   Compiler/JetRuntime/Source/UnicodeNormalizeTables.jet (NFC-only lookups)
 //   Compiler/JetRuntime/Source/UnicodeText_<n>.jet (native text-method lookups)
+//   Core/Text/... (JUCD schema-1 assets, names and segmentation tables)
+//   Jetpack/Integrations/Source/Foreign/RustBridge/Support/jet-unicode/src/UnicodeTables.rs
+//     (the Rust tables the `extern rust` bridge support crates compile)
 //
 // Pinned Unicode release: 17.0.0. Pinned sha256 of each input file (verified
 // before generating — mismatch aborts):
@@ -376,7 +373,7 @@ const sentenceRanges = encodeBreakRanges(sentenceProp, SENTENCE_TAGS);
 const INCB_TAGS = ["None", "Linker", "Consonant", "Extend"];
 const incbRanges = encodeBreakRanges(incbProp, INCB_TAGS);
 
-// ---- emit Rust ---------------------------------------------------------------
+// ---- Rust table text for the RustBridge jet-unicode support crate -----------
 function fmtU32Triples(rows) {
   return rows.map(([a, b, c]) => `(0x${a.toString(16).toUpperCase()},0x${b.toString(16).toUpperCase()},${c})`).join(",");
 }
@@ -431,185 +428,8 @@ const unicodeNameIndex = [...unicodeNames.entries()].sort((a, b) => a[0] - b[0])
 const HEADER_COMMENT = `// GENERATED FILE — do not hand-edit.
 // Source: Tools/agent/gen-unicode-tables.mjs against pinned Unicode 17.0.0 UCD.
 // Regenerate: node Tools/agent/gen-unicode-tables.mjs <ucd-dir-with-checksummed-files>
-// Foundation modules and AOT-prelude copies are emitted from this one run.
+// Every runtime lookup and Core text asset is emitted from this one run.
 `;
-// jet-foundation is a proper standalone module file: safe to carry an inner
-// attribute. The jet-codegen copy is concatenated flat into
-// other prelude text (see Codegen/mod.rs CORELIB_KERNEL_PARTS / push_corelib_prelude) — no mod
-// wrapper, so an inner `#![...]` attribute there would not be at a crate/mod
-// root and is illegal; leave unused-item warnings alone (I2 only forbids
-// rustc *rejecting* generated code, not warning on it).
-const MODULE_HEADER = HEADER_COMMENT + "#![allow(dead_code)]\n";
-const FLAT_HEADER = HEADER_COMMENT;
-
-// Foundation's host module keeps std Option and &String. The flat Prelude
-// serves borrowed text routes and the checked JetOutcome absence carrier.
-// Both projections use the same Unicode data and split/search semantics.
-function splitKernel(name, search, foundationModule) {
-  if (foundationModule) {
-    return `pub fn ${name}(s: &String, sep: &String) -> Option<(String, String)> {
-    s.${search}(sep).map(|at| (
-        s[..at].to_string(),
-        s[at + sep.len()..].to_string(),
-    ))
-}`;
-  }
-  return `pub fn ${name}(
-    s: &str,
-    sep: &str,
-) -> jet_foundation::Outcome::JetOutcome<
-    (String, String),
-    jet_foundation::Outcome::JetAbsent,
-> {
-    match s.${search}(sep) {
-        Some(at) => Ok((s[..at].to_string(), s[at + sep.len()..].to_string())),
-        None => Err(jet_foundation::Outcome::JetAbsent),
-    }
-}`;
-}
-
-function stringBody(foundationModule) {
-  const textReference = foundationModule ? "&String" : "&str";
-  return `
-pub const UNICODE_STRING_VERSION: &str = "17.0.0";
-
-pub static UNICODE_LOWER_POOL: &[u32] = &[${lower.pool.join(",")}];
-pub static UNICODE_LOWER_INDEX: &[(u32,u32,u32)] = &[${lower.index
-  .map(([cp, s, l]) => `(0x${cp.toString(16).toUpperCase()},${s},${l})`)
-  .join(",")}];
-pub static UNICODE_UPPER_POOL: &[u32] = &[${upper.pool.join(",")}];
-pub static UNICODE_UPPER_INDEX: &[(u32,u32,u32)] = &[${upper.index
-  .map(([cp, s, l]) => `(0x${cp.toString(16).toUpperCase()},${s},${l})`)
-  .join(",")}];
-pub static UNICODE_TITLE_POOL: &[u32] = &[${title.pool.join(",")}];
-pub static UNICODE_TITLE_INDEX: &[(u32,u32,u32)] = &[${title.index
-  .map(([cp, s, l]) => `(0x${cp.toString(16).toUpperCase()},${s},${l})`)
-  .join(",")}];
-pub static UNICODE_WHITE_SPACE: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(whiteSpaceRanges))}];
-pub static UNICODE_LOWERCASE: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(lowercaseRanges))}];
-pub static UNICODE_UPPERCASE: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(uppercaseRanges))}];
-pub static UNICODE_CASED: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(casedRanges))}];
-pub static UNICODE_CASE_IGNORABLE: &[(u32,u32)] = &[${fmtU32Pairs(mergePairRanges(caseIgnorableRanges))}];
-
-fn jet_unicode_contains(table: &[(u32, u32)], cp: u32) -> bool {
-    table
-        .binary_search_by(|&(start, end)| {
-            if cp < start {
-                std::cmp::Ordering::Greater
-            } else if cp > end {
-                std::cmp::Ordering::Less
-            } else {
-                std::cmp::Ordering::Equal
-            }
-        })
-        .is_ok()
-}
-
-fn jet_unicode_mapping(
-    cp: u32,
-    index: &'static [(u32, u32, u32)],
-    pool: &'static [u32],
-) -> Option<&'static [u32]> {
-    let at = index.binary_search_by_key(&cp, |&(source, _, _)| source).ok()?;
-    let (_, start, len) = index[at];
-    Some(&pool[start as usize..(start + len) as usize])
-}
-
-fn jet_unicode_append_mapping(
-    out: &mut String,
-    cp: u32,
-    index: &'static [(u32, u32, u32)],
-    pool: &'static [u32],
-) {
-    if let Some(mapped) = jet_unicode_mapping(cp, index, pool) {
-        out.extend(mapped.iter().filter_map(|&mapped_cp| char::from_u32(mapped_cp)));
-    } else if let Some(ch) = char::from_u32(cp) {
-        out.push(ch);
-    }
-}
-
-fn jet_unicode_final_sigma(chars: &[char], at: usize) -> bool {
-    let before = chars[..at]
-        .iter()
-        .rev()
-        .find(|ch| !jet_unicode_contains(UNICODE_CASE_IGNORABLE, **ch as u32))
-        .is_some_and(|ch| jet_unicode_contains(UNICODE_CASED, *ch as u32));
-    let after = chars[at + 1..]
-        .iter()
-        .find(|ch| !jet_unicode_contains(UNICODE_CASE_IGNORABLE, **ch as u32))
-        .is_some_and(|ch| jet_unicode_contains(UNICODE_CASED, *ch as u32));
-    before && !after
-}
-
-/// Locale-free full lowercase mapping from the pinned Unicode release.
-pub fn jet_unicode_lower(s: &str) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    let mut out = String::with_capacity(s.len());
-    for (at, &ch) in chars.iter().enumerate() {
-        if ch == '\\u{03A3}' && jet_unicode_final_sigma(&chars, at) {
-            out.push('\\u{03C2}');
-        } else {
-            jet_unicode_append_mapping(&mut out, ch as u32, UNICODE_LOWER_INDEX, UNICODE_LOWER_POOL);
-        }
-    }
-    out
-}
-
-/// Locale-free full uppercase mapping from the pinned Unicode release.
-pub fn jet_unicode_upper(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        jet_unicode_append_mapping(&mut out, ch as u32, UNICODE_UPPER_INDEX, UNICODE_UPPER_POOL);
-    }
-    out
-}
-
-/// Borrowed trim using the pinned Unicode White_Space property.
-pub fn jet_unicode_trim_view(s: &str) -> &str {
-    s.trim_matches(|ch| jet_unicode_contains(UNICODE_WHITE_SPACE, ch as u32))
-}
-
-pub fn jet_unicode_trim_start(s: &str) -> String {
-    s.trim_start_matches(|ch| jet_unicode_contains(UNICODE_WHITE_SPACE, ch as u32)).to_string()
-}
-
-pub fn jet_unicode_trim_end(s: &str) -> String {
-    s.trim_end_matches(|ch| jet_unicode_contains(UNICODE_WHITE_SPACE, ch as u32)).to_string()
-}
-
-pub fn jet_unicode_trim(s: &str) -> String {
-    jet_unicode_trim_view(s).to_string()
-}
-
-pub fn jet_unicode_index_of(s: ${textReference}, needle: ${textReference}) -> Option<i64> {
-    s.find(needle)
-        .map(|byte| s[..byte].chars().count() as i64)
-}
-
-pub fn jet_unicode_last_index_of(s: ${textReference}, needle: ${textReference}) -> Option<i64> {
-    s.rfind(needle)
-        .map(|byte| s[..byte].chars().count() as i64)
-}
-
-pub fn jet_unicode_count(s: ${textReference}, needle: ${textReference}) -> i64 {
-    if needle.is_empty() {
-        return 0;
-    }
-    let mut rest = ${foundationModule ? "s.as_str()" : "s"};
-    let mut count = 0i64;
-    while let Some(at) = rest.find(needle) {
-        count += 1;
-        rest = &rest[at + needle.len()..];
-    }
-    count
-}
-
-${splitKernel("jet_unicode_split_once", "find", foundationModule)}
-
-${splitKernel("jet_unicode_cut_last", "rfind", foundationModule)}
-`;
-}
-
 const tablesBody = `
 pub const UNICODE_VERSION: &str = "17.0.0";
 
@@ -667,11 +487,7 @@ pub static UNICODE_SENTENCE_BREAK: &[(u32,u32,u8)] = &[${fmtU32Triples(sentenceR
 // Indic_Conjunct_Break (GB9c) tags: ${INCB_TAGS.map((t, i) => `${i}=${t}`).join(" ")}
 pub static UNICODE_INCB: &[(u32,u32,u8)] = &[${fmtU32Triples(incbRanges)}];
 `;
-
-const stringModuleOut = MODULE_HEADER + stringBody(true);
-const stringFlatOut = FLAT_HEADER + stringBody(false);
-const tablesFlatOut = FLAT_HEADER + tablesBody;
-
+const tablesFlatOut = HEADER_COMMENT + tablesBody;
 // ---- emit Jet runtime lookups -----------------------------------------------
 // The runtime cannot use Core lists/Int indexing to implement Core itself.
 // Balanced static decisions are the immutable tables: no heap, constructor,
@@ -770,8 +586,8 @@ const jetNormalizeTablesOut = jetNormalizeHeader
   + "    unicode_normal_compose_key((a << I64{21}).bit_or(b))\n}\n";
 
 // Native text-method lookups (title/capitalize/casefold, istitle, padding
-// width and its UAX #29 grapheme views). Same parsed rows as the Rust tables
-// above; tagged lookups return the Rust tag, unlisted scalars the Rust default.
+// width and its UAX #29 grapheme views) from the same parsed rows; a tagged
+// lookup returns its row's tag and an unlisted scalar the given default.
 // Lookups are packed in order into UnicodeText_<n>.jet units, each within the
 // existing UnicodeTables.jet size (one lookup alone must also fit).
 function jetTagged(name, ranges, missing) {
@@ -787,7 +603,7 @@ const jetTextLookups = [
   jetMapping("fold", caseFold),
   jetProperty("lowercase", lowercaseRanges),
   jetProperty("uppercase", uppercaseRanges),
-  // General_Category Cc (gc tag 0): Rust char::is_control and jet_text_is_control.
+  // General_Category Cc (gc tag 0): jet_text_is_control.
   jetProperty("control", gcRanges.filter((row) => row[2] === 0)),
   // jet_text_is_zero_width_scalar: gc Mn/Me (tags 2, 3) or Default_Ignorable_Code_Point.
   jetProperty("zero_width", [...gcRanges.filter((row) => row[2] === 2 || row[2] === 3), ...defaultIgnorableRanges]),
@@ -812,16 +628,14 @@ for (const lookup of jetTextLookups) {
 }
 
 const outPaths = [
-  ["crates/jet-foundation/src/generated/UnicodeString.rs", stringModuleOut],
-  ["crates/jet-codegen/src/Prelude/Core/UnicodeString.rs", stringFlatOut],
-  ["crates/jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs", tablesFlatOut],
+  ["Jetpack/Integrations/Source/Foreign/RustBridge/Support/jet-unicode/src/UnicodeTables.rs", tablesFlatOut],
   ["Compiler/JetRuntime/Source/UnicodeTables.jet", jetTablesOut],
   ["Compiler/JetRuntime/Source/UnicodeNormalizeTables.jet", jetNormalizeTablesOut],
   ...jetNormalizeChunks,
   ...jetTextUnits,
 ];
 // Reused JUCD schema-1 encoding from 7c42badbb. These five private Core data
-// tables use the very same parsed/pinned ranges as the Rust verification tier.
+// tables use the same parsed/pinned ranges as the runtime lookups above.
 function le(value, width) {
   if (!Number.isSafeInteger(value) || value < 0 || value >= 2 ** (width * 8))
     throw new Error(`asset field overflow: ${value}/${width}`);
@@ -855,7 +669,7 @@ const segmentationTables = [
   ["UNICODE_ALPHABETIC", mergePairRanges(alphabeticRanges), false],
   ["UNICODE_NUMERIC", mergePairRanges(numericRanges), false],
 ];
-outPaths.push(["Core/text/segmentation_tables.jet",
+outPaths.push(["Core/Text/SegmentationTables.jet",
   HEADER_COMMENT + "// Compiler-private data part; JUCD schema 1, Unicode 17.0.0, little-endian.\n"
   + segmentationTables.map(([symbol, rows, tagged]) => segmentationAsset(symbol, rows, tagged)).join("\n")]);
 for (const [rel, text] of outPaths) {
@@ -876,30 +690,16 @@ for (const [rel, text] of outPaths) {
 // pool_bytes:u32, total_bytes:u32. Offsets are byte offsets from the asset start.
 // Kinds: 1 scalar pool; 2 ranges; 3 tagged ranges; 4 mapping index;
 // 5 decomposition index; 6 composition; 7 simple fold; 8 UTF-8 names.
-const assetRoot = "Core/text/runtime/assets";
+const assetRoot = "Core/Text/Runtime/Assets";
 function bytesLiteral(bytes) {
   return `[U8]{"${Array.from(bytes, b => `\\x${b.toString(16).padStart(2, "0").toUpperCase()}`).join("")}"}`;
 }
 const assets = [];
-const oracleTables = readFileSync("crates/jet-codegen/src/Prelude/CoreLib/Top/UnicodeTables.rs", "utf8");
-const oracleString = readFileSync("crates/jet-codegen/src/Prelude/Core/UnicodeString.rs", "utf8");
 function asset(symbol, kind, rows, widths, namePool = []) {
-  // These two exact derived properties have no frozen bootstrap Rust table yet.
-  // Their oracle is the checksum-pinned UCD parsed above; all preexisting tables
-  // continue to compare against the unchanged Rust sources during --core-only.
-  const oracle = symbol === "UNICODE_LOWERCASE" || symbol === "UNICODE_UPPERCASE"
-    ? oracleString
-    : /^UNICODE_(LOWER|UPPER|TITLE|WHITE_SPACE|CASED|CASE_IGNORABLE)/.test(symbol) ? oracleString : oracleTables;
-  const body = oracle.match(new RegExp(`pub static ${symbol}: [^=]+ = &\\[([^;]+)\\];`))?.[1];
-  assert(body, `missing Rust table: ${symbol}`);
+  // The name asset decodes back to the parsed UCD names before it is encoded.
   if (kind === 8) {
-    const original = [...body.matchAll(/\(0x([0-9A-F]+),("(?:[^"\\]|\\.)*")\)/g)]
-      .map(([, cp, name]) => [parseInt(cp, 16), JSON.parse(name)]);
     const decoded = rows.map(([cp, offset, length]) => [cp, Buffer.from(namePool.slice(offset, offset + length)).toString("utf8")]);
-    assert.deepEqual(decoded, original, `Rust names drift: ${symbol}`);
-  } else {
-    const original = [...body.matchAll(/0x[0-9A-F]+|\d+/g)].map(n => Number(n[0]));
-    assert.deepEqual(rows.flat(), original, `Rust table drift: ${symbol}`);
+    assert.deepEqual(decoded, unicodeNameIndex, `name pool drift: ${symbol}`);
   }
   const stride = widths.reduce((a, b) => a + b, 0);
   const records = rows.flatMap(row => row.flatMap((field, i) => le(field, widths[i])));
@@ -960,8 +760,10 @@ const namesIndex = unicodeNameIndex.map(([cp, name]) => {
 });
 asset("UNICODE_NAME_INDEX", 8, namesIndex, [3,4,4], namesPool);
 if (!checkOnly) mkdirSync(assetRoot, {recursive: true});
-const coreOutputs = assets.map(a => [`${assetRoot}/${a.module}.jet`, a.source]);
-coreOutputs.push([`${assetRoot}/assets.jet`,
+// Core source files are PascalCase; the module names inside them stay snake_case.
+const pascalFile = (module) => module.split("_").map((part) => part[0].toUpperCase() + part.slice(1)).join("");
+const coreOutputs = assets.map(a => [`${assetRoot}/${pascalFile(a.module)}.jet`, a.source]);
+coreOutputs.push([`${assetRoot}/Assets.jet`,
   `${HEADER_COMMENT}${assets.map(a => `module ${a.module}`).join("\n")}\n`]);
 coreOutputs.push([`${assetRoot}/manifest.json`, JSON.stringify({
   schema: 1, unicode: "17.0.0", byteOrder: "little", inputs: PINNED_SHA256,
@@ -972,7 +774,7 @@ function declarations(list) {
   return list.map(a => `use core.text.runtime.assets.${a.module} as text_${a.module}`).join("\n");
 }
 // String asset modules are attached to their canonical kernel, not normalization.
-const stringPath = "Core/text/runtime/kernel_unicode_string.jet";
+const stringPath = "Core/Text/Runtime/KernelUnicodeString.jet";
 const stringSource = readFileSync(stringPath, "utf8");
 const begin = "// BEGIN GENERATED STRING ASSETS";
 const end = "// END GENERATED STRING ASSETS";

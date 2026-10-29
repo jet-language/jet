@@ -1,0 +1,174 @@
+// Names of checked constructs for the builder's failure messages, spelled
+// without formatting their payloads: a checked function type (its call
+// metadata, view provenance) inside an expression or a type is very costly
+// to format, so no message interpolates a Type or an expression directly.
+
+use jet_foundation.[TBuiltinOp, NodeKind, BodyHostCall, BodyPatternBinding, BodyPatternShape, TTryConvert, Type, type_carrier_identity]
+
+// A checked type's carrier spelling (function types without their metadata).
+fn ir_type_name(ty: Type) -> String Never! {
+    type_carrier_identity(ty)
+}
+
+fn ir_expr_kind_name(kind: NodeKind) -> String Never! {
+    if kind == {
+        .IntLit(_, _) -> "IntLit"
+        .FloatLit(_) -> "FloatLit"
+        .BoolLit(_) -> "BoolLit"
+        .CharLit(_) -> "CharLit"
+        .StrLit(_) -> "StrLit"
+        .Local(_) -> "Local"
+        .Unit -> "Unit"
+        .InlineBlock(_) -> "InlineBlock"
+        .Uninit -> "Uninit"
+        .CtLit(_) -> "CtLit"
+        .ConstRef(_) -> "ConstRef"
+        .GlobalShared(_, _) -> "GlobalShared"
+        .Call(_, _, _) -> "Call"
+        .IndirectCall(_, _, _, _) -> "IndirectCall"
+        .MethodCall(_, _, _, _) -> "MethodCall"
+        .DistinctCtor(_) -> "DistinctCtor"
+        .DistinctConvert(_, _, _, _, _) -> "DistinctConvert"
+        .TraitBox(_, _) -> "TraitBox"
+        .UnitConvert(_, _, _, _, _, _, _, _) -> "UnitConvert"
+        .MathBuiltin(_, _, _) -> "MathBuiltin"
+        .PreciseBuiltin(_, _, _) -> "PreciseBuiltin"
+        .Print(_) -> "Print"
+        .Drop(_) -> "Drop"
+        .Close(_) -> "Close"
+        .Move(_) -> "Move"
+        .AmbientInput(_) -> "AmbientInput"
+        .RequireStop(_, _, _) -> "RequireStop"
+        .Binary(_, _, _, _, _) -> "Binary"
+        .CompareChain(_, _, _) -> "CompareChain"
+        .Unary(_, _) -> "Unary"
+        .StructLit(_) -> "StructLit"
+        .Field(_, _) -> "Field"
+        .Index(_, _, _, _, _, _) -> "Index"
+        .Slice(_, _, _, _, _) -> "Slice"
+        .Range(_, _, _) -> "Range"
+        .Tuple(_) -> "Tuple"
+        .List(_, _) -> "List"
+        .Map(_) -> "Map"
+        .EnumCtor(_, _, _) -> "EnumCtor"
+        .Try(_, _, _) -> "Try"
+        .TryWithContext(_, _, _, _, _, _) -> "TryWithContext"
+        .Lambda(_) -> "Lambda"
+        .Borrow(_, _) -> "Borrow"
+        .RawAddressOf(_) -> "RawAddressOf"
+        .Deref(_) -> "Deref"
+        .PtrFromAddr(_, _) -> "PtrFromAddr"
+        .LayoutLiteral(_) -> "LayoutLiteral"
+        .LayoutCompare(_, _, _) -> "LayoutCompare"
+        .SharedGuardValue(_) -> "SharedGuardValue"
+        .SharedGuardMap(_, _, _) -> "SharedGuardMap"
+        .SharedGuardSplit(_, _, _, _) -> "SharedGuardSplit"
+        .SharedGuardWait(_, _, _) -> "SharedGuardWait"
+        .ConditionNotify(_, _) -> "ConditionNotify"
+        .CoreCall(_, _, _, _, _, _) -> "CoreCall"
+        .HostCall(_) -> "HostCall"
+        .AllocNew(_, _) -> "AllocNew"
+        .EnumLit(_, _, _) -> "EnumLit"
+        .JSONLit(_, _, _) -> "JSONLit"
+        .ListLit(_) -> "ListLit"
+        .ListSpread(_) -> "ListSpread"
+        .MapLit(_) -> "MapLit"
+        .PoolSlot(_, _, _, _, _, _) -> "PoolSlot"
+        .MathLaneIndex(_, _, _, _) -> "MathLaneIndex"
+        .MathSwizzleRead(_, _, _) -> "MathSwizzleRead"
+        .Clone(_, _) -> "Clone"
+        .ExplicitCopy(_) -> "ExplicitCopy"
+        .MaterializeView(_) -> "MaterializeView"
+        .StaticCall(_, _, _, _, _) -> "StaticCall"
+        .DecodeUnder(_, _) -> "DecodeUnder"
+        .BuiltinMethod(_, _, _) -> "BuiltinMethod"
+        .IfExpr(_, _, _, _, _) -> "IfExpr"
+        .ResultHandler(_, _, _, _, _, _, _, _) -> "ResultHandler"
+        .RawOf(_) -> "RawOf"
+        .InvariantViolation(_, _) -> "InvariantViolation"
+        .DistinctRaw(_) -> "DistinctRaw"
+        .Present(_) -> "Present"
+        .Absent -> "Absent"
+        .Ok(_) -> "Ok"
+        .Err(_) -> "Err"
+        .OrFallback(_, _, _) -> "OrFallback"
+        .OptField(_, _, _) -> "OptField"
+        .OptMethodCall(_, _, _, _) -> "OptMethodCall"
+        .PatternMatches(_, _) -> "PatternMatches"
+        .OptionLift2(_, _, _) -> "OptionLift2"
+        .ClosureMethod(_, _, _) -> "ClosureMethod"
+        .HostBorrowCallback(_, _) -> "HostBorrowCallback"
+        .NumericMethod(_, _) -> "NumericMethod"
+        .NumericBinaryMethod(_, _, _) -> "NumericBinaryMethod"
+        .OverflowOpt(_, _, _, _, _) -> "OverflowOpt"
+        .HandleMethod(_, _, _) -> "HandleMethod"
+        .CoreClosureCall(_) -> "CoreClosureCall"
+        .TaskGroupAll(_) -> "TaskGroupAll"
+        .TaskGroupRace(_) -> "TaskGroupRace"
+        .TaskGroupAny(_) -> "TaskGroupAny"
+        .SelectStart -> "SelectStart"
+        .SelectRecv(_, _) -> "SelectRecv"
+        .SelectAfter(_, _, _) -> "SelectAfter"
+        .SelectWait(_, _) -> "SelectWait"
+        .FnValue(_) -> "FnValue"
+        .Never(_) -> "Never"
+    }
+}
+
+fn ir_shape_name(shape: BodyPatternShape) -> String Never! {
+    if shape == {
+        .Variant(_, _, _, _) -> "Variant"
+        .Present(_, _, _, _) -> "Present"
+        .Absent(_) -> "Absent"
+        .Ok(_, _, _, _) -> "Ok"
+        .Err(_, _, _, _) -> "Err"
+        .Range(_, _, _) -> "Range"
+        .Or(_, _) -> "Or"
+        .Struct(_, _) -> "Struct"
+        .List(_, _, _) -> "List"
+        .Map(_, _, _) -> "Map"
+        .Text(_, _) -> "Text"
+        .Binary(_, _) -> "Binary"
+    }
+}
+
+fn ir_binding_name(binding: BodyPatternBinding) -> String Never! {
+    if binding == {
+        .Wildcard -> "Wildcard"
+        .Bind(_, _) -> "Bind"
+        .Range(_, _) -> "Range"
+        .Nested(_) -> "Nested"
+        .Value(_) -> "Value"
+    }
+}
+
+fn ir_conversion_name(conversion: TTryConvert) -> String Never! {
+    if conversion == .Typed(fn_name, _, _) -> return "Typed {fn_name}"
+    "{conversion}"
+}
+
+fn ir_host_call_name(call: BodyHostCall) -> String Never! {
+    if call == {
+        .Method(_, method, _) -> "Method {method}"
+        .CellGuardProject(_, _, _, _, _) -> "CellGuardProject"
+        .OptionProbe(_, _) -> "OptionProbe"
+        .TupleIndex(_, _) -> "TupleIndex"
+        .SwitchSubjectValue -> "SwitchSubjectValue"
+        .YieldSend(_) -> "YieldSend"
+        .NumericBounds(_, _) -> "NumericBounds"
+        .ComptimeInput(_, _) -> "ComptimeInput"
+    }
+}
+
+// The variant name of a builtin operation (a zip's field types unspelled).
+fn ir_builtin_name(operation: TBuiltinOp) -> String Never! {
+    if operation == .Zip(_, _, _, _, _, _) -> return "Zip"
+    if operation == .OptionZip(_) -> return "OptionZip"
+    text := "{operation}"
+    separators :: [String]{"(", "{{", " "}
+    loop separator in separators {
+        parts :: text.split(separator).to_list()
+        text = parts[0]
+    }
+    text
+}

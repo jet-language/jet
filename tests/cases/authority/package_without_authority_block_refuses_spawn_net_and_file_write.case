@@ -1,0 +1,56 @@
+# Claim: a package.jet with no authority block refuses spawn, Net and file write with E1803 naming the right and a one-sentence Why; no user code runs (#3718)
+# Fixture migrated: the three refusal programs sit in spawn/, net/, write/, each its own package with no authority block; spawn imports use core.process.[cmd] (E1004 fix); markers are fixture-relative spawned.txt / written.txt
+fixture: package_without_authority_block_refuses_spawn_net_and_file_write.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run spawn/run.jet
+exit: 1 # default: spawn refused
+stdout: = "" # default: spawn refused, no user code ran
+stderr: ~ "E1803" # default: spawn refused
+stderr: ~ "`Exec" # default: E1803 names Exec
+stderr: ~ "package.jet (which has no authority block) has not allowed that yet." # default: the Why is one plain sentence
+stderr: !~ "required_effects=" # default: no raw effect dump
+step: sh {work}/absent-spawn.sh
+exit: 0 # default: the refused spawn never ran
+step: jet run --release spawn/run.jet
+exit: 1 # release: spawn refused
+stdout: = "" # release: spawn refused, no user code ran
+stderr: ~ "E1803" # release: spawn refused
+stderr: ~ "`Exec" # release: E1803 names Exec
+stderr: ~ "package.jet (which has no authority block) has not allowed that yet." # release: the Why is one plain sentence
+stderr: !~ "required_effects=" # release: no raw effect dump
+step: sh {work}/absent-spawn.sh
+exit: 0 # release: the refused spawn never ran
+step: jet run net/run.jet
+exit: 1 # default: Net refused
+stdout: = "" # default: Net refused, no user code ran
+stderr: ~ "E1803" # default: Net refused
+stderr: ~ "`Net" # default: E1803 names Net
+stderr: ~ "package.jet (which has no authority block) has not allowed that yet." # default: the Why is one plain sentence
+stderr: !~ "required_effects=" # default: no raw effect dump
+step: jet run --release net/run.jet
+exit: 1 # release: Net refused
+stdout: = "" # release: Net refused, no user code ran
+stderr: ~ "E1803" # release: Net refused
+stderr: ~ "`Net" # release: E1803 names Net
+stderr: ~ "package.jet (which has no authority block) has not allowed that yet." # release: the Why is one plain sentence
+stderr: !~ "required_effects=" # release: no raw effect dump
+step: jet run write/run.jet
+exit: 1 # default: file write refused
+stdout: = "" # default: file write refused, no user code ran
+stderr: ~ "E1803" # default: file write refused
+stderr: ~ "`FS" # default: E1803 names FS
+stderr: ~ "package.jet (which has no authority block) has not allowed that yet." # default: the Why is one plain sentence
+stderr: !~ "required_effects=" # default: no raw effect dump
+step: sh {work}/absent-write.sh
+exit: 0 # default: the refused write never ran
+step: jet run --release write/run.jet
+exit: 1 # release: file write refused
+stdout: = "" # release: file write refused, no user code ran
+stderr: ~ "E1803" # release: file write refused
+stderr: ~ "`FS" # release: E1803 names FS
+stderr: ~ "package.jet (which has no authority block) has not allowed that yet." # release: the Why is one plain sentence
+stderr: !~ "required_effects=" # release: no raw effect dump
+step: sh {work}/absent-write.sh
+exit: 0 # release: the refused write never ran

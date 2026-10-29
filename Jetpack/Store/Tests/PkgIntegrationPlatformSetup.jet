@@ -42,7 +42,7 @@ fn store_platform_setup() {
     files.chmod(staging, mode_before.bit_or(0o200)) ?? panic("writable staging root")
     files.rename(staging, output) ?? panic("publish native object")
     store_seal_local_output(output) ?? panic("seal published output")
-    assert_eq(pkg_try_output_hash_of(output) ?? panic("published digest"), digest, "published fixture must retain its content-addressed identity")
+    assert((pkg_try_output_hash_of(output) ?? panic("published digest")) == digest, "published fixture must retain its content-addressed identity")
     files.write(files.join(fixtures, "nixpkgs-native-jetpack.json"), "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-native-jetpack.drv\",\"outputs\":{{\"out\":{platform_json.to_string(Dyn.Text(output))}}}}}]") ?? panic("provider fixture")
     files.write(files.join(fixtures, "jetpackage-omp.json"), "{{\"tag\":\"v1.0.0\",\"version\":\"1.0.0\",\"sha256\":\"{artifact_digest}\",\"artifact\":{platform_json.to_string(Dyn.Text(artifact_name))}}}") ?? panic("release fixture")
     if mode == "native" -> return

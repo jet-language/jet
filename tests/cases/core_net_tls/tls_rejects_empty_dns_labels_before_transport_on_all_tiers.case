@@ -1,0 +1,14 @@
+# tests/core_net_tls.rs::tls_rejects_empty_dns_labels_before_transport_on_all_tiers at tests/core_net_tls.rs:30; hand-port
+fixture: tls_rejects_empty_dns_labels_before_transport_on_all_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step run: jet run main.jet
+exit: 1
+stdout: empty
+stderr: ~ "invalid input during connect `bad..example`: host is empty or contains invalid endpoint syntax" # original assert
+step build: jet build main.jet
+exit: 0
+step aot: built
+exit: 1
+stdout: empty
+stderr: ~ "invalid input during connect `bad..example`: host is empty or contains invalid endpoint syntax" # original assert

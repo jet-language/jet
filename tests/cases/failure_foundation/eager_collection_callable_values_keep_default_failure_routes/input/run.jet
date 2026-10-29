@@ -1,0 +1,47 @@
+
+fn key(value: Int) -> Int {
+    if value == 0 -> return Err("zero")
+    value
+}
+
+fn positive(value: Int) -> Bool {
+    if value == 0 -> return Err("zero")
+    value > 0
+}
+
+fn mapped(values: [Int], callback: fn(Int) -> Int) -> [Int] {
+    values.map(callback)
+}
+
+fn filtered(values: [Int], callback: fn(Int) -> Bool) -> [Int] {
+    values.filter(callback)
+}
+
+fn nested(values: [[Int]], callback: fn(Int) -> Int) -> [[Int]] {
+    values.map(items -> items.map(callback))
+}
+
+fn ascending(values: [Int], callback: fn(Int) -> Int) -> [Int] {
+    items := values
+    &items.sort_by(callback)
+    items
+}
+
+fn descending(values: [Int], callback: fn(Int) -> Int) -> [Int] {
+    items := values
+    &items.sort_by_desc(callback)
+    items
+}
+
+fn run() {
+    print((mapped([1, 2], key) ?? [-1]).len())
+    print((mapped([1, 0, 2], key) ?? [-1]).len())
+    print((filtered([-1, 2], positive) ?? [-1, -2]).len())
+    print((filtered([-1, 0, 2], positive) ?? [-1, -2]).len())
+    print((ascending([2, 1], key) ?? [-1])[0])
+    print((ascending([2, 0, 1], key) ?? [-1])[0])
+    print((descending([1, 2], key) ?? [-1])[0])
+    print((descending([1, 0, 2], key) ?? [-1])[0])
+    print((nested([[1, 2], [3, 4]], key) ?? [[]]).len())
+    print((nested([[1, 0], [3, 4]], key) ?? [[]]).len())
+}

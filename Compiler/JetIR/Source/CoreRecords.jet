@@ -1,0 +1,215 @@
+// Complete checked top-level functions into backend-neutral IR.
+use jet_foundation.[AccessConvention, CORE_CALLS, CallablePolicy, CallablePolicyChain, CoreCallCompletion, CoreCallRecord, CoreCallResourceAccess, CoreCapabilityContract, CoreMarkerApplication, FunctionCallMetadata, FunctionDefaultRef, AuthorityDecision, Span, TEffectFacts, TEffectSpan, TFailureCarrier, FnBody, TFuncKind, TGenericParam, BodyLambda, BodyParameter, TTargetApplicability, TVisibility, TWebParamReconstruction, Type, body_tree_new, core_call_key, type_identity_key, body_type]
+use jet_sema.[
+    SemaComptimeItemRequest,
+]
+
+// The method leaf of an impl method key, without an operator `<Rhs>` suffix.
+fn ir_impl_method_leaf(key: String) -> String Never! {
+    bytes :: key.bytes()
+    end := bytes.len()
+    if end > 0 && Int.from_u8(bytes[end - 1]) == 62 {
+        depth := 0
+        position := end - 1
+        loop position >= 0 {
+            byte :: Int.from_u8(bytes[position])
+            if byte == 62 -> depth += 1
+            if byte == 60 {
+                depth -= 1
+                if depth == 0 {
+                    end = position
+                    break
+                }
+            }
+            position -= 1
+        }
+    }
+    start := 0
+    position := end - 2
+    loop position >= 0 {
+        if Int.from_u8(bytes[position]) == 58 && Int.from_u8(bytes[position + 1]) == 58 {
+            start = position + 2
+            break
+        }
+        position -= 1
+    }
+    String.from_bytes(bytes[start..<end].copy()) ?? ""
+}
+
+fn ir_string_rows_equal(left: [String], right: [String]) -> Bool Never! {
+    if left.len() != right.len() -> return false
+    index := 0
+    loop index < left.len() {
+        if left[index] != right[index] -> return false
+        index += 1
+    }
+    true
+}
+
+fn ir_bool_rows_equal(left: [Bool], right: [Bool]) -> Bool Never! {
+    if left.len() != right.len() -> return false
+    index := 0
+    loop index < left.len() {
+        if left[index] != right[index] -> return false
+        index += 1
+    }
+    true
+}
+
+fn ir_core_markers_equal(left: CoreMarkerApplication?, right: CoreMarkerApplication?) -> Bool Never! {
+    if left == {
+        None -> right == None
+        Val(first) -> {
+            if right == {
+                None -> false
+                Val(second) -> first.member == second.member && first.since == second.since && first.replacement == second.replacement && first.removed_in == second.removed_in
+            }
+        }
+    }
+}
+
+fn ir_core_access_rows_equal(left: [CoreCallResourceAccess], right: [CoreCallResourceAccess]) -> Bool Never! {
+    if left.len() != right.len() -> return false
+    index := 0
+    loop index < left.len() {
+        if left[index].argument != right[index].argument || left[index].mode != right[index].mode -> return false
+        index += 1
+    }
+    true
+}
+
+fn ir_core_completion_equal(left: CoreCallCompletion?, right: CoreCallCompletion?) -> Bool Never! {
+    if left == {
+        None -> right == None
+        Val(first) -> {
+            if right == {
+                None -> false
+                Val(second) -> first.kind == second.kind && first.token == second.token && first.provider == second.provider
+            }
+        }
+    }
+}
+
+fn ir_core_capability_equal(left: CoreCapabilityContract, right: CoreCapabilityContract) -> Bool Never! {
+    left.kind == right.kind && left.provider == right.provider && left.fallback == right.fallback && left.failure == right.failure
+}
+fn ir_authority_decisions_equal(left: AuthorityDecision?, right: AuthorityDecision?) -> Bool Never! {
+    if left == None -> return right == None
+    if right == None -> return false
+    first :: left
+    second :: right
+    first.import.id == second.import.id
+        && first.import.operation == second.import.operation
+        && first.import.required_right == second.import.required_right
+        && ir_string_rows_equal(first.import.parameter_type_ids, second.import.parameter_type_ids)
+        && first.import.result_type_id == second.import.result_type_id
+        && first.authority_argument == second.authority_argument
+        && first.inherited == second.inherited
+}
+
+fn ir_core_records_match(left: CoreCallRecord, right: CoreCallRecord) -> Bool Never! {
+    if left.module_name != right.module_name || left.member != right.member || !ir_string_rows_equal(left.receiver_types, right.receiver_types) -> return false
+    if left.signature.arity != right.signature.arity || left.signature.max_arity != right.signature.max_arity || !ir_bool_rows_equal(left.signature.borrow_mask, right.signature.borrow_mask) -> return false
+    if left.fallibility != right.fallibility || left.effect_kind != right.effect_kind || left.effect_leaf != right.effect_leaf || left.sink_class != right.sink_class -> return false
+    if left.pure_route != right.pure_route || left.interpreter_route != right.interpreter_route || left.symbol != right.symbol -> return false
+    if left.coverage.bits != right.coverage.bits || left.aot_direct != right.aot_direct || left.native_int_result != right.native_int_result -> return false
+    if !ir_core_access_rows_equal(left.frame_accesses, right.frame_accesses) || !ir_core_completion_equal(left.frame_completion, right.frame_completion) || !ir_core_capability_equal(left.capability, right.capability) || !ir_string_rows_equal(left.ui_capabilities, right.ui_capabilities) -> return false
+    ir_authority_decisions_equal(left.authority, right.authority) && ir_core_markers_equal(left.marker, right.marker)
+}
+
+fn ir_canonical_core_record(record: CoreCallRecord) -> CoreCallRecord Never! {
+    ir_canonical_core_record_in(CORE_CALLS, record)
+}
+
+// The registry is a read parameter, so the scan reads its rows in place.
+fn ir_canonical_core_record_in(rows: [CoreCallRecord], record: CoreCallRecord) -> CoreCallRecord Never! {
+    key := core_call_key(record)
+    found := CoreCallRecord?{None}
+    loop candidate in rows {
+        if core_call_key(candidate) == key {
+            if found != None -> panic("duplicate canonical Core-call key")
+            found = Val(candidate)
+        }
+    }
+    canonical :: found ?? panic("checked Core-call record is absent from the canonical registry")
+    if !ir_core_records_match(canonical, record) -> panic("checked Core-call metadata disagrees with the canonical registry")
+    canonical
+}
+
+fn ir_lambda_function_type(lambda: BodyLambda) -> Type Never! {
+    metadata := FunctionCallMetadata?{None}
+    if lambda.host_param_conventions != None {
+        conventions :: lambda.host_param_conventions ?? [AccessConvention]{}
+        metadata = Val(FunctionCallMetadata{
+            names: [String]{},
+            defaults: [FunctionDefaultRef?]{},
+            variadic: [Bool]{},
+            conventions: conventions,
+            policies: CallablePolicyChain{policies: [CallablePolicy]{}},
+        })
+    }
+    Type.Fn{params: lambda.param_types, ret: lambda.ret, effect_bound: None, param_contract: None, call_metadata: metadata, return_view_provenance: None}
+}
+
+// The synthetic function a comptime item lowers as, with an empty body the
+// caller fills with the item's expression.
+fn ir_comptime_item_shell(module_identity: String, module_name: String, key: String, source_file: String, span: Span, result_type: Type) -> FnBody Never! {
+    FnBody{
+        name: "__comptime_item",
+        module_name: module_name,
+        module_identity: module_identity,
+        key: key,
+        source_file: source_file,
+        source_span: span,
+        failure_carrier: TFailureCarrier.Infallible,
+        effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}},
+        target_applicability: TTargetApplicability{rust_aot: false, interpreter: true, web: false},
+        web_bucket: None,
+        web_marker: None,
+        visibility: TVisibility.Private,
+        foreign: None,
+        params: [BodyParameter]{},
+        web_param_reconstructions: [TWebParamReconstruction]{},
+        ret: Val(result_type),
+        gc_return: false,
+        gc_scope: false,
+        return_view_provenance: None,
+        generic_params: [TGenericParam]{},
+        is_main: false,
+        line: 0,
+        synthetic: true,
+        is_unsafe: false,
+        unsafe_gate: None,
+        is_pure: false,
+        memo_bound: None,
+        memo_unbounded: false,
+        is_reactive: false,
+        reactive_upgrades: [String]{},
+        is_inline: false,
+        is_inline_always: false,
+        is_scalar: false,
+        kernel_proof: None,
+        uses_stack_sentry: false,
+        body: [Int]{},
+        kind: TFuncKind.TopLevel,
+        tree: body_tree_new(),
+    }
+}
+
+// `module_name` is the name of the item's module.
+fn ir_comptime_item_function(request: SemaComptimeItemRequest, module_name: String) -> FnBody {
+    result_type := body_type(request.expression.tree, request.expression.root)
+    if request.expected_type != None {
+        expected :: request.expected_type ?? panic("checked comptime item lost its expected type")
+        if type_identity_key(expected) != type_identity_key(result_type) -> panic("checked comptime item result disagrees with its expected type")
+        result_type = expected
+    }
+    ir_comptime_item_shell(request.module_identity, module_name, "{request.module_identity}::__comptime_item::{request.key}", request.source_file, request.span, result_type)
+}
+
+// The next unclaimed part of a dynamically scheduled lowering: a claiming
+// thread takes a read guard once and claims part after part with one atomic
+// add.
+struct IRPartQueue {
+    next: Atomic<Int>
+}

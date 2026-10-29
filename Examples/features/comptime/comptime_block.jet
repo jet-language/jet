@@ -1,14 +1,14 @@
-LIMIT :: prep { 1000 }
+LIMIT :: comptime { 1000 }
 
-BASE :: prep { 10 }
+BASE :: comptime { 10 }
 
 fn run() {
-    // D-PREP-SURFACE2=A: `prep { … }` runs in the comptime interpreter and
+    // D-PREP-SURFACE2=A: `comptime { … }` runs in the comptime interpreter and
     // emits no runtime Rust (I3). A value that outlives it is prepared
-    // explicitly with `name :: prep { value }`.
-    ratio :: prep { LIMIT /% BASE }
+    // explicitly with `name :: comptime { value }`.
+    ratio :: comptime { LIMIT /% BASE }
     // Build-time assertion: verify constants are valid before compiling.
-    prep {
+    comptime {
         if ratio < 1 -> panic("limit must be >= base")
     }
     // The check ran at build time and produced no runtime code; `ratio` is a

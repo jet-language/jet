@@ -2,6 +2,7 @@
 // assignments, output attribute paths, and flake-parts list values. The
 // scanner is intentionally limited; arbitrary Nix stays behind the private
 // evaluator boundary and is never guessed into the graph.
+use jet_pkg_model.[pkg_bytes_code, pkg_bytes_skip_space, pkg_bytes_text, pkg_overlay_sorted_unique]
 
 // One `inputs.<path>.<field> = "<value>"` declaration.
 struct FlakeAssignment {
@@ -18,7 +19,7 @@ struct FlakeOutputAssignment {
     attribute: String
 }
 
-TRUST_FLAKE_OUTPUT_PREFIXES :: prep { [String]{"packages.", "legacyPackages.", "devShells.", "devShell.", "apps.", "checks.", "formatter."} }
+TRUST_FLAKE_OUTPUT_PREFIXES :: [String]{"packages.", "legacyPackages.", "devShells.", "devShell.", "apps.", "checks.", "formatter."}
 
 // Rust `is_nix_name_char`: ASCII alphanumerics, `_`, `-`, and `.`.
 fn trust_nix_is_name_byte(code: Int) -> Bool Never! {

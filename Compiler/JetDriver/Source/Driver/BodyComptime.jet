@@ -116,7 +116,6 @@ fn jet_driver_comptime_take_registration(finished: ^SemaRegistrationGraph?, part
     ^partial ?? panic("a comptime run lost its registration graph")
 }
 
-
 // `known` holds the `module\nkey` of every source already added.
 fn jet_driver_comptime_body_source_add(
     sources: &[SemaComptimeItemSource],
@@ -159,6 +158,19 @@ fn jet_driver_pending_comptime_body_sources(
         if present.get("{source.module_identity}\n{source.key}") == None -> &pending.push(source)
     }
     pending
+}
+
+// Whether the body recheck or the checked-text validation evaluates over
+// `graph` and so reads its name facts (jet_driver_comptime_body_pass,
+// jet_driver_validate_checked_text).
+fn jet_driver_comptime_reads_names(graph: SemaGraphResult, values: [SemaComptimeItemValue]) -> Bool Never! {
+    if jet_driver_pending_comptime_body_sources(graph, values).len() > 0 -> return true
+    loop graph_module in graph.modules {
+        loop call in graph_module.comptime_requests {
+            if call.checked_text != None -> return true
+        }
+    }
+    false
 }
 
 fn jet_driver_comptime_body_stage(
@@ -253,8 +265,8 @@ fn jet_driver_comptime_body_pass(
     known := [String:Bool]{}
     loop source in pending -> jet_driver_comptime_body_source_add(&body_sources, &known, source)
     run := jet_driver_run_comptime(
-        ^registration, [SemaGraphModuleResult]{}, body_sources, current_graph.names, values, functions,
-        load, request, &diagnostics,
+        ^registration, [SemaGraphModuleResult]{}, None, body_sources, values, functions,
+        request, &diagnostics,
     )
     finished_registration := ^run.graph
     run.graph = None
@@ -322,11 +334,10 @@ fn jet_driver_validate_checked_text(
     run := jet_driver_run_comptime(
         ^registration,
         [SemaGraphModuleResult]{},
+        None,
         sources,
-        initial_graph.names,
         initial_values,
         initial_functions,
-        load,
         request,
         &diagnostics,
     )
@@ -350,7 +361,7 @@ fn jet_driver_validate_checked_text(
         return jet_driver_comptime_body_returning(^result, ^registration)
     }
     merged_graph := ^initial_graph
-    if !jet_driver_merge_checked_text_functions(&merged_graph, registration, run.functions) {
+    if !jet_driver_merge_checked_text_functions(&merged_graph, run.functions) {
         return jet_driver_comptime_body_returning(jet_driver_comptime_body_failure(
             ^merged_graph,
             run.values,
@@ -359,6 +370,7 @@ fn jet_driver_validate_checked_text(
             Val("checked text method closure lost its checked function or registered owner"),
         ), ^registration)
     }
+    registration = jet_driver_merged_names(&merged_graph, ^registration, request.compiler_threads)
     jet_driver_comptime_body_returning(jet_driver_comptime_body_result(^merged_graph, run.values, run.functions, trace, true, false), ^registration)
 }
 
@@ -376,5 +388,5 @@ fn jet_driver_recheck_comptime_bodies(
     request: JetDriverCompileRequest,
 ) -> SemaGraphResult {
     body_stage := jet_driver_comptime_body_stage(stage, ^semantic_graph, ^body_sources)
-    sema_finalize_graph(^graph, &trail, body_stage, values, comptime_functions, request.eval_config.host_hooks, request.compiler_threads, None, request.trace_sink)
+    sema_finalize_graph(^graph, &trail, body_stage, values, comptime_functions, request.eval_config.host_hooks, request.compiler_threads, None, true, request.trace_sink)
 }

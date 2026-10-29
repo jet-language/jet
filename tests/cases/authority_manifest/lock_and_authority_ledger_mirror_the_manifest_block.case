@@ -5,11 +5,11 @@
 fixture: fixtures/authority
 step: jet fetch
 exit: 0
-file: .jet/lock ~ authority = { holds: { allow: ["IO"], deny: ["Exec"] }, grants: { "image-codec": ["FS.Read"] }, trust: { default: prompt, ci: { prompt: deny }, services: { "stripe": allow }, require: none }, providers: { "nix": { registry: "nixpkgs", deny: ["openssl-1.0"] } } } # Lock also contains a nondeterministic build timestamp; pin the entire authority value captured from fetch.
+file: .jet/lock ~ authority = { allow: ["IO"], deny: ["Exec"], grants: { "image-codec": ["FS.Read"] }, trust: { default: prompt, ci: { prompt: deny }, services: { "stripe": allow }, require: none }, providers: { "nix": { registry: "nixpkgs", deny: ["openssl-1.0"] } } } # Lock also contains a nondeterministic build timestamp; pin the entire authority value captured from fetch.
 step: jet inspect authority --json run.jet
 exit: 0
-# The capture checker must first verify every original subject: authority.holds.allow,
-# authority.holds.deny, image-codec, authority.trust.default, authority.trust.ci,
+# The capture checker must first verify every original subject: authority.allow,
+# authority.deny, image-codec, authority.trust.default, authority.trust.ci,
 # authority.trust.services.stripe, authority.trust.require, authority.providers.nix;
 # it must also verify the .jet/lock provenance substring.
 stdout: = lock-authority-ledger.out

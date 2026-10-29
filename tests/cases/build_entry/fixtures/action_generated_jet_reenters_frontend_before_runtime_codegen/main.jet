@@ -1,5 +1,5 @@
 
-fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+fn build(b: Build) -[Exec, FS]> {
     #Impure("generate declared source") {
     action :: b.action(
         "bad-gen",
@@ -9,8 +9,7 @@ fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
         ["Exec", "FS"]
         )
         app :: b.add_executable("app", ["main.jet", ".jet/generated/main/bad.jet"], [action])
-    return b.plan(app)
+    b.default(app)
     }
-    return b.plan()
 }
 fn run() {}

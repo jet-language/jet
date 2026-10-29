@@ -28,10 +28,10 @@ if (mode === '--assemble') {
     const global = read('tests/fixtures/native_global_word.jet');
     const entry = global.indexOf('fn run()');
     if (entry < 0) throw Error('Global source witness lost its program entry');
-    const globalUnit = global.slice(0, entry) + '\n' + read('Compiler/JetRuntime/Tests/FloatAbi.jet');
+    const globalUnit = global.slice(0, entry) + '\n' + read('Compiler/JetRuntime/Tests/Fragments.fixture/FloatAbi.jet');
     writeFileSync(join(out, 'global/Source/Fixture.jet'), globalUnit);
     writeFileSync(join(out, 'global/lifecycle.list'), runtimeLifecycleList(parseRuntimeExports(globalUnit, 'Source/Fixture.jet')));
-    execFileSync(process.execPath, [join(repo, 'Compiler/JetRuntime/Tests/check-runtime.mjs'), join(out, 'init'), '--assemble-only', '--tests'], { stdio: 'inherit' });
+    execFileSync(process.execPath, [join(repo, 'Compiler/JetRuntime/Tests/check-runtime.mjs'), join(out, 'init'), '--assemble-only', '--test', 'Alloc'], { stdio: 'inherit' });
     let unit = readFileSync(join(out, 'init/unit.jet'), 'utf8');
     const testHead = 'fn alloc_tests() {\n';
     if (unit.split(testHead).length !== 2) throw Error('allocator witness must have one test entry');

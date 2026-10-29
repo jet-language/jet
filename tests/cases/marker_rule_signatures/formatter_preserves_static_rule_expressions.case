@@ -1,0 +1,11 @@
+# tests/marker_rule_signatures.rs::formatter_preserves_static_rule_expressions at tests/marker_rule_signatures.rs:819; hand-port
+# Claim: formatted output contains `#Test(NAME)` and `#HTML(NAME)` (tests/marker_rule_signatures.rs:822-823)
+# Fixture migrated: Rust reads formatted text; jet fmt writes the file in place, so the stdout check fails by design of the observation
+fixture: formatter_preserves_static_rule_expressions.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt main.jet
+exit: 0 # tests/marker_rule_signatures.rs:822-823
+stdout: ~ "#Test(NAME)" # tests/marker_rule_signatures.rs:822-823
+stdout: ~ "#HTML(NAME)" # tests/marker_rule_signatures.rs:822-823

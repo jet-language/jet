@@ -1,0 +1,12 @@
+// Application authority, command-line grant: this file has no package block,
+// so it holds only the beginner default (IO, Mem.Alloc, Exec.Args). Its golden
+// runs it as `jet run --allow=Env,Time authority_allow_flag.jet`
+// (expected/effects/authority_allow_flag.case); the flag grants exactly the
+// two named effects for that one run.
+use core.sys as sys
+use core.time as time
+
+fn run() {
+    print("HOME set: {sys.get("HOME") != None}")
+    print("clock runs: {time.instant().elapsed_millis() >= 0}")
+}

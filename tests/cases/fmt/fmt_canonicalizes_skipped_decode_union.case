@@ -1,0 +1,14 @@
+# tests/fmt.rs::fmt_canonicalizes_skipped_decode_union at tests/fmt.rs:1686; hand-port
+# Claim: `#Skip value: String | Char` prints `#Skip value: Char | String` (tests/fmt.rs:1689-1692)
+# Claim: second pass identical (tests/fmt.rs:1693-1697)
+fixture: fmt_canonicalizes_skipped_decode_union.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt run.jet
+exit: 0 # tests/fmt.rs:1688 formats
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:1689-1692 canonical order kept on #Skip field
+stdout: ~ "#Skip value: Char | String" # tests/fmt.rs:1689-1692 canonical order kept on #Skip field
+step: jet fmt --check run.jet
+exit: 0 # tests/fmt.rs:1693-1697 stable

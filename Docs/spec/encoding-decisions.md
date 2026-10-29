@@ -3,18 +3,16 @@
 Use this record when implementing, reviewing, or documenting Jet's encoding
 contracts. It defines the shared `Dyn` and bounded reader/writer model,
 then the selected wire formats and decoder policies. Executable names and
-carriers are registered in [`Core.jet`](../../crates/jet-codegen/src/Prelude/Core.jet)
-and sourced from [`Core/encoding`](../../Core/encoding/encoding.jet); the
-shared Prelude ABI is in
-[`EncodingTypes.rs`](../../crates/jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs)
+carriers are registered in [`Core.jet`](../../Compiler/Prelude/Core.jet)
+and sourced from [`Core/Encoding`](../../Core/Encoding/Encoding.jet); the
+native raw leaves are in
+[`RouteAEncoding.jet`](../../Compiler/JetRuntime/Source/RouteAEncoding.jet)
 and source stream policy is in
-[`stream.jet`](../../Core/encoding/stream.jet). The native file handle
-constructors remain in
-[`EncodingStream.rs`](../../crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs)
-until the owned-callback holder cutover (#4739) is proven.
-The owned byte/String raw leaves transfer the same allocation on the Rust tier.
+[`stream.jet`](../../Core/Encoding/Stream.jet). The native file handle
+constructors are in
+[`FilesStreams.jet`](../../Compiler/JetRuntime/Source/FilesStreams.jet).
 Native byte Lists currently use word slots, so their C-ABI boundary narrows or
-widens storage instead; packed small-scalar List layout is tracked separately
+widens storage rather than transferring one allocation; packed small-scalar List layout is tracked separately
 in #4749. Borrowed Object-entry views preserve their original ordered backing
 and freeze the input owner through declared return provenance (#4737).
 Source handle protocol methods preserve the shipped `IO` effect. They do not
@@ -79,7 +77,7 @@ format handles and format-only options/events in
 `core.encoding.xml`, and `core.encoding.cbor`. `FileReader` and `FileWriter`
 remain `core.files` types; do not add duplicate re-exports. (D-ENCSTREAM-SURFACE1=A)
 The handle-free event, format, cause, error, and limits declarations are ordinary
-Jet source nominals in `Core/encoding/encoding.jet`. Encoding error Display and
+Jet source nominals in `Core/Encoding/Encoding.jet`. Encoding error Display and
 Debug use the shared location ladder: format, kind, byte offset, optional line
 and column, optional nonempty path, then reason. Attaching a cause does not
 change this rendering. `Dyn` remains the native nominal pending the
@@ -90,8 +88,8 @@ Compact and pretty JSON serialization route through their Jet `Encode` wrappers;
 the old native serializer dispatcher rows are metadata-only source-owned rows.
 The CBOR whole-value rows likewise execute their existing source encoders and
 parser. Alphabet decoders already use source ownership, not native dispatcher
-aliases. `Examples/features/serde/encoding_source_cutover.jet` records focused
-vectors for these routing contracts.
+aliases. `tests/cases/corelib/encoding_source_cutover_retains_decoder_vectors_typed_json_and_error_ladder.case`
+records focused vectors for these routing contracts.
 Untyped `json.decode` performs the D-JSON3 coercion walk in Jet. The wall-clock
 snapshot and stderr emission remain private raw adapters to the existing seed
 operations. Their shipped hidden Time/IO effects are preserved, not promoted
@@ -1268,7 +1266,7 @@ E0956 and E0953 are tier failures, not accepted parity results.
 
 
 Static migration diagnostics `L2001` and `E2002` for `cbor.encode` use
-[`Diagnostics.jet`](../../crates/jet-codegen/src/Prelude/Diagnostics.jet), the
+[`Diagnostics.jet`](../../Compiler/Prelude/Diagnostics.jet), the
 diagnostic registry, snapshots in
 [`tests/ui/cbor_encode_deprecated`](../../tests/ui/cbor_encode_deprecated/) and
 [`tests/ui/cbor_encode_removed`](../../tests/ui/cbor_encode_removed/), and
@@ -1304,7 +1302,7 @@ do not claim that the public `Map` shape has become an ordered source list.
 The unused `__object_into_entries` and `__tree_tag` registry rows were removed
 along with their seed functions, signatures, gates and native lowering handlers.
 A repository-wide reference search found declarations and handlers only, not
-any Jet codec, Rust TIR/MIR emitter, JS or comptime consumer.
+any Jet codec, emitter, JS or comptime consumer.
 
 The D-JSON3 `__coerce_now` and `__coerce_emit` registrations use the ambient
 interpreter route as well as the existing AOT host symbols. The resident

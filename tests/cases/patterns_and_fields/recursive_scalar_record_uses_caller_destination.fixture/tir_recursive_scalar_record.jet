@@ -1,0 +1,24 @@
+
+struct Stats { count: Int, sum: Int, low: Int, high: Int }
+fn stats(lo: Int, hi: Int) -> Stats {
+    if hi - lo <= 1 {
+        leaf := Stats{count: 0, sum: 0, low: lo, high: lo}
+        loop i in lo..<hi {
+            leaf.count += 1
+            leaf.sum += i
+            leaf.high = i
+        }
+        return leaf
+    }
+    mid :: lo + (hi - lo) /% 2
+    a :: stats(lo, mid)
+    b :: stats(mid, hi)
+    Stats{count: a.count + b.count, sum: a.sum + b.sum, low: a.low, high: b.high}
+}
+fn run() {
+    s :: stats(0, 8)
+    print(s.count)
+    print(s.sum)
+    print(s.low)
+    print(s.high)
+}

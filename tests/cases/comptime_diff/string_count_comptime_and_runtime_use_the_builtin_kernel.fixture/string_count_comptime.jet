@@ -1,0 +1,31 @@
+// String.count uses the builtin kernel, not core.text.parse.count.
+// A parameterized helper forces the comptime evaluator to dispatch the MIR route.
+fn count_matches(text: String, needle: String) -> Int Never! {
+    text.count(needle)
+}
+
+fn string_counts() -> [Int] Never! {
+    [
+        count_matches("banana", "an"),
+        count_matches("aaaaa", "aa"),
+        count_matches("ababa", "aba"),
+        count_matches("aé🙂é🙂z", "é🙂"),
+        count_matches("ééé", "éé"),
+        count_matches("éé", "é"),
+        count_matches("jet", "missing"),
+        count_matches("x", "longer"),
+        count_matches("", "x"),
+        count_matches("é🙂", ""),
+        count_matches("", ""),
+    ]
+}
+
+fn run() {
+    folded :: comptime { string_counts() }
+    runtime :: string_counts()
+    expected :: [2, 2, 1, 2, 1, 1, 0, 0, 0, 0, 0]
+    assert(folded == expected, "String.count comptime kernel semantics")
+    assert(runtime == expected, "String.count runtime kernel semantics")
+    print("{folded}")
+    print("{runtime}")
+}

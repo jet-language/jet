@@ -1,4 +1,12 @@
-// Production parser/load/sema/layout/MIR path; no preconstructed output facts.
+// Production parser/load/sema/layout path; no preconstructed output facts.
+use jet_driver.[
+    JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
+    JetDriverCompileMode, JetDriverCompileRequest, jet_driver_output_query,
+]
+use jet_cli.[jet_cli_driver_request]
+use jet_sema.[SchemaSnapshot]
+use jet_foundation.[Type]
+
 fn output_query_require(ok: Bool, detail: String) Never! {
     if !ok -> panic("OutputQuery: {detail}")
 }
@@ -9,7 +17,7 @@ fn output_query_request(source: String, triple: String) -> JetDriverCompileReque
     request.schema_snapshots = Val([String:SchemaSnapshot]{})
     request
 }
-fn run() {
+#Test("output_query") {
     source :: "APP :: Output.Executable{{name: \"demo\", entry: start}}\nstruct Shape {{ pointer: Usize, number: Int }}\nfn start() {{}}"
     loop triple in ["x86_64-unknown-linux-gnu", "i686-unknown-linux-gnu"] {
         result :: jet_driver_output_query(output_query_request(source, triple), None)
@@ -17,8 +25,9 @@ fn run() {
         output_query_require(result.outputs.len() == 1 && result.outputs[0].selected, "sole output selected by sema")
         output :: result.outputs[0]
         output_query_require(output.address == "APP" && output.source_name == "start" && output.semantic_name == "start" && output.lowered_name == "__jet_start", "checked callable identity retained without renaming")
-        output_query_require(output.failure_contract == .InferredNever(Type.Named{name: "Unit"}), "post-body failure inference retained")
-        output_query_require(result.compile.entry_function != None && result.compile.emitted_source == None, "selected MIR root; no emission or execution")
+        unit :: Type.Named{name: "Unit"}
+        inferred :: if output.failure_contract == { .InferredNever(contract) -> contract == unit else -> false }
+        output_query_require(inferred, "post-body failure inference retained")
         output_query_require(result.layouts.len() > 0 && result.target_triple == triple, "canonical layout rows for selected target")
         layout :: result.target_layout ?? panic("OutputQuery: missing target layout")
         output_query_require(layout.pointer_size == (if triple.starts_with("i686") -> 4 else -> 8), "layout never assumes host pointer width")

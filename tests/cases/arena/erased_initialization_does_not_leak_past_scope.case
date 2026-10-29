@@ -1,0 +1,9 @@
+# tests/arena.rs::erased_initialization_does_not_leak_past_scope at tests/arena.rs:155; hand-port
+fixture: erased_initialization_does_not_leak_past_scope.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check fixture.jet --json
+exit: 1 # tests/arena.rs:189 is rejected
+json: stdout doc $.reports[?severity="error"] #= 2 # tests/arena.rs:189 the errors are exactly E0420, E0420
+json: stdout doc $.reports[?code="E0420"] #= 2 # tests/arena.rs:189 reports E0420 2 times

@@ -1,6 +1,5 @@
 use jet_comptime.[ReplEffectRequest]
 use jet_foundation.[authority_parse_right, authority_answer, ApplicationAuthority, AuthorityVerdict, Span]
-use jetpack_foundation.[Holds]
 use jet_driver.Package as repl_turn_test_package
 use jet_driver.EffectBudget as repl_turn_test_budget
 use jet_sema.Effects as repl_turn_test_effects
@@ -54,7 +53,7 @@ impl CountingPrompt.EffectPrompt {
     assert_eq(compile, expected)
     assert(repl_turn_test_effects.effect_covers(written, expected))
     authority := repl_turn_test_package.PackageAuthority.default()
-    authority.holds = repl_turn_test_package.Blocks.AuthorityHolds{allow: Val([String]{external_spelling}), deny: None}
+    authority.allow = Val([String]{external_spelling})
     manifest := repl_turn_test_package.PackageFacts.default()
     manifest.effects_enabled = true
     manifest.authority = ^authority

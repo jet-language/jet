@@ -47,8 +47,11 @@ STRING_PART_BYTE :: 3
 struct TokenTables {
     names: NameTable
     literals: [TokenLiteral]
+    // Per token kind, the name id of its one spelling once a keyword or
+    // punctuation token of that kind interned it (-1 before), so the next
+    // such token skips the hash probe (`intern_token_source`).
+    spellings: [Int]
 }
-
 
 struct Lexed {
     tokens: [Token]
@@ -56,8 +59,13 @@ struct Lexed {
     diagnostics: [Diagnostic]
 }
 
+// One `TokenTables.spellings` slot per token kind.
+TOKEN_KIND_SLOTS :: 108
+
 fn token_tables() -> TokenTables Never! {
-    TokenTables{names: name_table(), literals: [TokenLiteral]{}}
+    spellings := [Int]{}
+    loop _ in 0..<TOKEN_KIND_SLOTS -> &spellings.push(-1)
+    TokenTables{names: name_table(), literals: [TokenLiteral]{}, spellings: ^spellings}
 }
 
 // A token with no spelling and no literal facts.

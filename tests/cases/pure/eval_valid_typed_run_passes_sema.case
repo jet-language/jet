@@ -1,0 +1,11 @@
+# tests/pure.rs::eval_valid_typed_run_passes_sema at tests/pure.rs:763; hand-port
+# Claim: a valid typed eval program passes sema (tests/pure.rs:764-770)
+# Fixture migrated: Rust fn is `-> Int { return 2 + 3 }`; jet eval entry run must return () (E1321), so the expression is bound in a unit run
+# Not ported: jet::check_for_eval Rust API (tests/pure.rs:765): replaced by jet eval --pure
+fixture: eval_valid_typed_run_passes_sema.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet eval --pure main.jet
+exit: 0 # tests/pure.rs:764-770
+stderr: !~ "Error [" # tests/pure.rs:764-770

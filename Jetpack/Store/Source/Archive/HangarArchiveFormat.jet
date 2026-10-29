@@ -8,22 +8,22 @@
 // bytes. This file owns the records, the encoder, the bounded decoder, the
 // per-field validators, and the CLI status report.
 
-STORE_ARCHIVE_MAGIC :: prep { "jet-hangar-archive-v1" }
-STORE_ARCHIVE_NIX_MANIFEST_TRAILER :: prep { 2 }
-STORE_MAX_ARCHIVE_BYTES :: prep { 1073741824 }
-STORE_ARCHIVE_MAX_OBJECTS :: prep { 16384 }
-STORE_ARCHIVE_MAX_NODES_PER_OBJECT :: prep { 1000000 }
-STORE_ARCHIVE_MAX_FIELD_BYTES :: prep { 16777216 }
-STORE_ARCHIVE_MAX_NODE_BYTES :: prep { 536870912 }
-STORE_ARCHIVE_STAGE :: prep { ".archive-stage" }
-STORE_ARCHIVE_KEY :: prep { "hangar.key" }
+STORE_ARCHIVE_MAGIC :: "jet-hangar-archive-v1"
+STORE_ARCHIVE_NIX_MANIFEST_TRAILER :: 2
+STORE_MAX_ARCHIVE_BYTES :: 1073741824
+STORE_ARCHIVE_MAX_OBJECTS :: 16384
+STORE_ARCHIVE_MAX_NODES_PER_OBJECT :: 1000000
+STORE_ARCHIVE_MAX_FIELD_BYTES :: 16777216
+STORE_ARCHIVE_MAX_NODE_BYTES :: 536870912
+STORE_ARCHIVE_STAGE :: ".archive-stage"
+STORE_ARCHIVE_KEY :: "hangar.key"
 
 // Unix permission masks (octal 7777, 0222, 0200, 0600, 0644).
-STORE_MODE_PERMISSION_BITS :: prep { 0xFFF }
-STORE_MODE_WRITE_BITS :: prep { 0x92 }
-STORE_MODE_OWNER_WRITE :: prep { 0x80 }
-STORE_MODE_PRIVATE_FILE :: prep { 0x180 }
-STORE_MODE_DEFAULT_FILE :: prep { 0x1A4 }
+STORE_MODE_PERMISSION_BITS :: 0xFFF
+STORE_MODE_WRITE_BITS :: 0x92
+STORE_MODE_OWNER_WRITE :: 0x80
+STORE_MODE_PRIVATE_FILE :: 0x180
+STORE_MODE_DEFAULT_FILE :: 0x1A4
 
 // The archive magic: the format name and one NUL byte.
 fn store_archive_magic() -> [U8] Never! {
@@ -44,7 +44,7 @@ struct HangarArchiveReport {
         fields :: StatusFields.new()
             .with("bytes", Dyn.Int(self.bytes))
             .with("objects", Dyn.Int(self.objects))
-            .with("root", Dyn.Text(self.root))
+            .with("root", Dyn.Text(self.root.copy()))
             .with("signed", Dyn.Bool(self.signed))
         StatusEnvelope.new(action, true).with_fields(fields).json()
     }
@@ -130,23 +130,23 @@ struct NixClosureManifest {
     }
 
     fn decode_from(reader: &HangarArchiveReader) -> NixClosureManifest StoreError! {
-        output :: reader.string()
-        platform :: reader.string()
-        revision :: reader.string()
-        cache_key :: reader.string()
+        output :: &reader.string()
+        platform :: &reader.string()
+        revision :: &reader.string()
+        cache_key :: &reader.string()
         count :: &reader.u32()
         if count > STORE_ARCHIVE_MAX_OBJECTS -> return Err(StoreError.InvalidData("Nix closure manifest contains too many members"))
         members := [NixClosureMember]{}
         loop _ in 0..<count {
-            key :: reader.string()
-            hash :: reader.string()
+            key :: &reader.string()
+            hash :: &reader.string()
             size :: &reader.u64()
             reference_count :: &reader.u32()
             if reference_count > STORE_ARCHIVE_MAX_OBJECTS {
                 return Err(StoreError.InvalidData("Nix closure manifest member contains too many references"))
             }
             references := [String]{}
-            loop _ in 0..<reference_count -> &references.push(reader.string())
+            loop _ in 0..<reference_count -> &references.push(&reader.string())
             &members.push(NixClosureMember{key, hash, size, references})
         }
         Ok(NixClosureManifest{output, platform, revision, cache_key, members})
@@ -241,7 +241,7 @@ struct HangarArchive {
         reader := HangarArchiveReader{bytes, at: 0}
         magic :: store_archive_magic()
         if &reader.take_bytes(magic.len()) != magic -> return Err(StoreError.InvalidData("archive has an unknown format"))
-        root_id :: reader.string()
+        root_id :: &reader.string()
         store_archive_validate_id(root_id)
         count :: &reader.u32()
         if count > STORE_ARCHIVE_MAX_OBJECTS -> return Err(StoreError.InvalidData("archive contains too many records"))
@@ -249,9 +249,9 @@ struct HangarArchive {
         output_digests := [String]{}
         package_ids := [String]{}
         loop _ in 0..<count {
-            id :: reader.string()
-            digest :: reader.string()
-            meta :: reader.string()
+            id :: &reader.string()
+            digest :: &reader.string()
+            meta :: &reader.string()
             store_archive_validate_id(id)
             store_archive_validate_digest(digest)
             if meta != "" {
@@ -270,7 +270,7 @@ struct HangarArchive {
             nodes := [HangarArchiveNode]{}
             loop _ in 0..<node_count {
                 kind_code :: Int.from_u8(&reader.byte())
-                path :: reader.string()
+                path :: &reader.string()
                 store_archive_validate_relative(path)
                 mode :: &reader.u32()
                 size :: &reader.u64()
@@ -298,9 +298,9 @@ struct HangarArchive {
         if signature_tag != 0 && signature_tag != 1 -> return Err(StoreError.InvalidData("archive has an unknown signature trailer"))
         signature := HangarArchiveSignature?{None}
         if signature_tag == 1 {
-            key_id :: reader.string()
-            algorithm :: reader.string()
-            sig_hex :: reader.string()
+            key_id :: &reader.string()
+            algorithm :: &reader.string()
+            sig_hex :: &reader.string()
             signature = Val(HangarArchiveSignature{key_id, algorithm, sig_hex})
         }
         if reader.remaining() != 0 -> return Err(StoreError.InvalidData("archive has trailing bytes"))

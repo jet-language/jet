@@ -1,8 +1,18 @@
 // Source/CmdTry.rs: speculate using one invocation's real incremental service;
 // keep enters the existing held SourceTransaction writer only after a verdict.
-use jet_driver.[JetDriverCompilerQueries, JetDriverCompilerCheckResult, JetDriverCompilerQueryStats, JetDriverCompileMode, jet_driver_compiler_queries_new, jet_driver_compiler_queries_set_document, jet_driver_compiler_queries_documents, jet_driver_compiler_queries_stats, jet_driver_compiler_queries_check_disk, jet_driver_compiler_queries_check_text, jet_driver_apply_edits]
-use jet_foundation.[Diagnostic, Span, TextEdit, mir_sha256_bytes, mir_sha256_hex_bytes]
+use jet_driver.[
+    JetDriverCompilerQueries, JetDriverCompilerCheckResult, JetDriverCompilerQueryStats,
+    JetDriverCompileMode, jet_driver_compiler_queries_new, jet_driver_compiler_queries_set_document,
+    jet_driver_compiler_queries_documents, jet_driver_compiler_queries_stats,
+    jet_driver_compiler_queries_check_disk, jet_driver_compiler_queries_check_text,
+    jet_driver_apply_edits, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, JetDriverVerbOutput,
+    jet_driver_inline_package, jet_driver_mask_inline_package,
+]
+use jet_foundation.[
+    Diagnostic, Span, TextEdit, sha256_bytes, sha256_hex_bytes, diagnostic_render_all,
+]
 use jet_eval.[JetCompilerServicesParseFacts, JetCompilerServicesSourceInput, JetCompilerServicesSourcePreparation, jet_eval_compiler_services_parse]
+use core.files as cli_files
 
 struct JetCLITryObject {
     fields: [JetCLIStatusField]
@@ -291,7 +301,7 @@ fn jet_cli_try_receipt(name: String, changes: [JetCLISourceChange], verdict: Jet
         &bytes.extend(change.before)
         &bytes.extend(change.after)
     }
-    "try-{mir_sha256_hex_bytes(mir_sha256_bytes(bytes[0..<bytes.len()])).slice(0..<12)}"
+    "try-{sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()])).slice(0..<12)}"
 }
 fn jet_cli_try_output(plan: JetCLITryPlan, verdict: JetCLITryVerdict, receipt: String, keep: Bool, json: Bool, entry_source: String) -> JetDriverVerbOutput {
     failed :: jet_cli_errors(verdict.diagnostics).len() > 0

@@ -52,15 +52,13 @@ fn store_malformed_objects(hangar: String) -[FS, Env]> [MalformedObject] StoreEr
 fn store_quarantine_malformed_objects(verification: &StoreVerification, roots: HangarRoots, objects: [MalformedObject]) -[FS, Env, Time]> Int StoreError! {
     if objects.len() == 0 -> return Ok(0)
     permissions := MovePathPermissions.default()
-    moved :: store_quarantine_move_objects(&verification, roots, objects, &permissions)
-    restored :: permissions.restore()
-    if moved == {
+    if store_quarantine_move_objects(&verification, roots, objects, &permissions) == {
         .Ok(count) -> {
-            restored ?? return Err(err)
+            &permissions.restore() ?? return Err(err)
             Ok(count)
         }
         .Err(error) -> {
-            if restored == {
+            if &permissions.restore() == {
                 .Ok(_) -> Err(error)
                 .Err(restore) -> Err(StoreError.Other("{error.message()}; restoring Hangar permissions failed: {restore.message()}"))
             }

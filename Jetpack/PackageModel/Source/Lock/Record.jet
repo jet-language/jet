@@ -1,6 +1,12 @@
 // Reading, publishing, and updating the project `.jet/lock`. Every recorder
 // reads the current lock, upserts one identity, pins the build stamp, and
 // publishes one complete canonical serialization atomically.
+use jetpack_foundation.[
+    REF_CHANNEL_MARKER, REF_PROVIDER_AT, REF_SOURCE_JETPACK, UNIFIED_LOCK_FILE,
+    foundation_write_file_nofollow_at_root,
+]
+use jet_foundation.[RuntimeLayer]
+use core.files as files
 
 // The project lock path under `project_root`.
 fn pkg_lock_file_path(project_root: String) -> String Never! {
@@ -119,7 +125,7 @@ fn pkg_lock_publish_or_report(project_root: String, contents: String) -[FS, Env,
 
 // M2: persist the inferred runtime profile of the root
 // package after a build. A no-op when the lock or package is absent.
-fn pkg_lock_record_inferred_layer(project_root: String, package_name: String, layer: MIRRuntimeLayer) -[FS, Env, Exec, Time, Time.Wait, IO]> {
+fn pkg_lock_record_inferred_layer(project_root: String, package_name: String, layer: RuntimeLayer) -[FS, Env, Exec, Time, Time.Wait, IO]> {
     lock := pkg_lock_load(project_root) ?? return
     loop index in 0..<lock.packages.len() {
         if lock.packages[index].name == package_name {

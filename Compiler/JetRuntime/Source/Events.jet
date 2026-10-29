@@ -302,10 +302,16 @@ fn event_trace_new(delivered: I64, queued: I64, dropped: I64) -> I64 {
 // JetEvent::with_policy :692-698 borrows the policy ordinal; the caller keeps
 // and releases its policy value.
 #Export(c) fn jet_event_with_policy(policy: I64) -> I64 {
+    event_core_new(encoding_word(policy + ENCODING_ENUM_TAG))
+}
+
+// A fresh EventCore with one strong count and policy ordinal `ordinal` (0 is
+// EventPolicy.Sync, JetEvent::new).
+fn event_core_new(ordinal: I64) -> I64 {
     core :: jet_rt_alloc(I64{56}, I64{8})
     coll_zero(core, I64{56})
     event_store(core, I64{1})
-    event_store(core + I64{48}, encoding_word(policy + ENCODING_ENUM_TAG))
+    event_store(core + I64{48}, ordinal)
     core
 }
 

@@ -1,0 +1,18 @@
+# tests/jetpack_hangar_store_v2.rs::hangar_copy_roundtrip_is_idempotent_and_conflict_safe at tests/jetpack_hangar_store_v2.rs:972; hand-port
+# Claim: copy prints schema jet.report/v1 and action copy (rs:1031-1039)
+# Claim: repeated copy exits 0 (rs:1055-1060)
+# Fixture migrated: destination root fixture-relative (dest-root)
+# Not ported: destination payload check (rs:1049-1052) and destination list count (rs:1061-1064): needs reading the destination store layout
+# Not ported: Store::verify_hangar_object/list_checked (rs:1048,1062): Rust API
+fixture: hangar_copy_roundtrip_is_idempotent_and_conflict_safe.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jetpack hangar ingest source --name copyable --ref copyable@fixture --no-color
+exit: 0 # rs:980-988 exit 0
+step: jet hangar copy copyable@fixture --to dest-root --json --no-color
+exit: 0 # rs:1009-1039
+stdout: ~ "\"schema\":\"jet.report/v1\"" # rs:1009-1039
+stdout: ~ "\"action\":\"copy\"" # rs:1009-1039
+step: jet hangar copy copyable@fixture --to dest-root --json --no-color
+exit: 0 # rs:1055 repeat exit 0

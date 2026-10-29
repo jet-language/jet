@@ -6,12 +6,11 @@ This record explains the durable performance-budget contracts: the declaration
 surface, typed metrics, evidence and baseline math, command behavior, provider
 boundary, integration points, prototype retirement, and cost transparency. It
 is for language, tooling, and benchmark authors. The executable vocabulary is
-in [`jetpack_config.rs`](../../crates/jet-foundation/src/Syntax/jetpack_config.rs);
-report math is in [`PerformanceBudget.rs`](../../crates/jet-foundation/src/PerformanceBudget.rs);
-the command, provider, and store boundaries are in
-[`CmdBudget.rs`](../../Source/CmdBudget.rs),
-[`BudgetProviders.rs`](../../Source/BudgetProviders.rs), and
-[`BudgetStore.rs`](../../Source/BudgetStore.rs). The performance matrix and
+in [`JetpackConfig.jet`](../../Compiler/JetFoundation/Data/Syntax/JetpackConfig.jet);
+report math is in [`Budget.jet`](../../Compiler/JetFoundation/Source/Performance/Budget.jet)
+and [`BudgetReport.jet`](../../Compiler/JetFoundation/Source/Performance/BudgetReport.jet);
+the `budget` command is registered in
+[`CLICommands.jet`](../../Compiler/JetFoundation/Source/Registry/CLICommands.jet). The performance matrix and
 measurement manifests are [`Tools/gauntlet/matrix.json`](../../Tools/gauntlet/matrix.json)
 and [`Tools/gauntlet/measurement-manifest.json`](../../Tools/gauntlet/measurement-manifest.json).
 The checked-in declaration examples are
@@ -727,7 +726,7 @@ parsed back from rendered stderr.
 
 ### Exit law
 
-The exit mapping reuses [`crates/jet-foundation/src/ExitCodes.rs`](../../crates/jet-foundation/src/ExitCodes.rs): OK=0 covers pass,
+The exit mapping reuses [`ExitCodes.jet`](../../Jetpack/Foundation/Source/ExitCodes.jet): OK=0 covers pass,
 warning-only output, cancelled plans, non-TTY/JSON plan-only output, and
 successful or idempotent mutation. USER_ERROR=1 covers budget, evidence,
 compiler, and tool failure. USAGE=2 covers command, flag, argument, and
@@ -912,16 +911,15 @@ The five reportable cost rows are:
 5. **Generic representation fallback:** a collection uses its generic
    representation because no shape proof selected a direct representation.
 
-The sema checker supplies view-copy `L2510` rows. Typed TIR supplies the other
-four rows and the complete explain projection. Before projection, the shared
-cost seam requires every sema-checked reachable callable to have a matching
-TIR body. Type-parameterized, foreign, and otherwise uncovered reachable
-surfaces are explicit completeness failures; they are never silently omitted.
-`jet check` and `jet lint --cost` merge these sources and deduplicate identical
-source-site diagnostics. They retain semantic remainders inside loops.
+The sema checker supplies view-copy `L2510` rows. The checked program supplies
+the other four rows and the complete explain projection. Before projection, the
+shared cost seam requires every sema-checked reachable callable to have a
+matching checked body. Type-parameterized, foreign, and otherwise uncovered
+reachable surfaces are explicit completeness failures; they are never silently
+omitted. `jet check` and `jet lint --cost` merge these sources and deduplicate
+identical source-site diagnostics. They retain semantic remainders inside loops.
 `jet explain --cost` also retains optimizer-proven removals. Backends do not
-reconstruct cost from emitted Rust; every explain row uses the honest
-`tier=shared-tir` label.
+reconstruct cost from emitted code.
 
 ```jet
 loop item in items {

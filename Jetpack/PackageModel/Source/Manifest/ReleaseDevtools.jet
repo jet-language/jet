@@ -1,5 +1,10 @@
 use core.net.ip as release_core_ip
 use core.sys as release_core_sys
+use jet_foundation.[
+    JetReleaseDevtoolsAuthentication, JetReleaseDevtoolsAuthority, JetReleaseDevtoolsDeployment,
+    JetReleaseDevtoolsEndpoint, JetReleaseDevtoolsNetwork, JetReleaseDevtoolsPolicy,
+    JetReleaseDevtoolsPublication, JetReleaseInspect,
+]
 
 // Release-devtools build and deployment policy ported from
 // Package/ReleaseInspect.rs and Package/ReleaseDevtoolsPolicy.rs. The typed
@@ -9,13 +14,13 @@ use core.sys as release_core_sys
 // may exist; deployment variables only enable an endpoint already carried.
 
 // The canonical `package.jet` field name and the refusal text.
-RELEASE_INSPECT_FIELD :: prep { "inspect" }
-RELEASE_INSPECT_EXPECTED :: prep { "expected .Local, .ReadOnly, or .None" }
+RELEASE_INSPECT_FIELD :: "inspect"
+RELEASE_INSPECT_EXPECTED :: "expected .Local, .ReadOnly, or .None"
 
-INSPECT_ENABLE_ENV :: prep { "JET_INSPECT" }
-INSPECT_TOKEN_ENV :: prep { "JET_INSPECT_TOKEN" }
-INSPECT_ALLOWLIST_ENV :: prep { "JET_INSPECT_ALLOWLIST" }
-INSPECT_MAX_ALLOWLIST_ENTRIES :: prep { 64 }
+INSPECT_ENABLE_ENV :: "JET_INSPECT"
+INSPECT_TOKEN_ENV :: "JET_INSPECT_TOKEN"
+INSPECT_ALLOWLIST_ENV :: "JET_INSPECT_ALLOWLIST"
+INSPECT_MAX_ALLOWLIST_ENTRIES :: 64
 
 // Parse one of the three ratified dotted values (`.None` is `Disabled`).
 fn pkg_release_inspect_parse(value: String) -> JetReleaseInspect? Never! {

@@ -1,0 +1,1575 @@
+// core.http.client — configured HTTP client.
+//
+// The canonical request/response carriers and transport builders come from
+// core.http.client. This source module owns deterministic configuration and
+// session policy around those provider leaves.
+
+use core as core
+use core.http as http
+use core.http.[HTTPError, HTTPRequest, HTTPResponse]
+use core.http.client as provider
+use core.net.url as http_url
+use core.net as build_net
+use core.net.tls as build_tls
+use core.archive.gzip as client_gzip
+C_MAX_BODY_BYTES :: 1048576
+C_MAX_URL_BYTES :: 8192
+C_MAX_REDIRECTS :: 10
+C_MAX_RETRIES :: 1
+
+struct Client {
+    method: String
+    url: String
+    headers: [String]
+    redirects: Int
+    proxy: String
+}
+
+struct Proxy { url: String }
+enum RedirectPolicy {
+    Disabled
+    Limited
+    All
+}
+
+struct Session {
+    headers: [String]
+    cookies: [String]
+    timeout_ms: Int
+    retries: Int
+    redirects: Int
+    user: String
+    password: String
+    proxy: String
+}
+
+
+// The public request names build the Jet message; `send` runs the Jet
+// HTTP/1.1 exchange over core.net and core.net.tls.
+fn get(url: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
+    http.__request("GET", url).send()
+}
+
+fn post(url: String, body: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
+    http.__request("POST", url).__with_body(body).send()
+}
+
+fn request(method: String, url: String) -[Net, Time.Wait]> HTTPRequest Never! {
+    http.__request(method, url)
+}
+
+fn send(req: HTTPRequest) -[Net, Time.Wait]> HTTPResponse HTTPError! {
+    req.send()
+}
+
+fn header(client: Client, line: String) -> Client Never! {
+    _ :: header_name(line) ?? return client.copy()
+    _ :: header_value(line) ?? return client.copy()
+    Client{
+        method: client.method.copy(),
+        url: client.url.copy(),
+        headers: append_header(client.headers, line),
+        redirects: client.redirects,
+        proxy: client.proxy.copy(),
+    }
+}
+
+fn set_header(client: Client, name: String, value: String) -> Client Never! {
+    Client{
+        method: client.method.copy(),
+        url: client.url.copy(),
+        headers: set_header_line(client.headers, name, value),
+        redirects: client.redirects,
+        proxy: client.proxy.copy(),
+    }
+}
+fn with_proxy(client: Client, proxy: Proxy) -> Client Never! {
+    Client{method: client.method.copy(), url: client.url.copy(), headers: client.headers.copy(), redirects: client.redirects, proxy: proxy.url.copy()}
+}
+
+
+fn timeout_redirects(client: Client, n: Int) -> Client Never! {
+    limit := n
+    if limit < 0 -> limit = 0
+    if limit > C_MAX_REDIRECTS -> limit = C_MAX_REDIRECTS
+    Client{method: client.method.copy(), url: client.url.copy(), headers: client.headers.copy(), redirects: limit, proxy: client.proxy.copy()}
+}
+
+fn session() -> Session Never! {
+    Session{
+        headers: [String]{},
+        cookies: [String]{},
+        timeout_ms: 30000,
+        retries: 0,
+        redirects: C_MAX_REDIRECTS,
+        user: "",
+        password: "",
+        proxy: "",
+    }
+}
+
+fn session_header(s: Session, name: String, value: String) -> Session Never! {
+    Session{
+        headers: set_header_line(s.headers, name, value),
+        cookies: s.cookies.copy(),
+        timeout_ms: s.timeout_ms,
+        retries: s.retries,
+        redirects: s.redirects,
+        user: s.user.copy(),
+        password: s.password.copy(),
+        proxy: s.proxy.copy(),
+    }
+}
+
+fn session_timeout(s: Session, ms: Int) -> Session Never! {
+    t := ms
+    if t < 0 -> t = 0
+    Session{headers: s.headers.copy(), cookies: s.cookies.copy(), timeout_ms: t, retries: s.retries, redirects: s.redirects, user: s.user.copy(), password: s.password.copy(), proxy: s.proxy.copy()}
+}
+
+fn session_retries(s: Session, n: Int) -> Session Never! {
+    r := n
+    if r < 0 -> r = 0
+    if r > C_MAX_RETRIES -> r = C_MAX_RETRIES
+    Session{headers: s.headers.copy(), cookies: s.cookies.copy(), timeout_ms: s.timeout_ms, retries: r, redirects: s.redirects, user: s.user.copy(), password: s.password.copy(), proxy: s.proxy.copy()}
+}
+
+fn session_redirects(s: Session, n: Int) -> Session Never! {
+    r := n
+    if r < 0 -> r = 0
+    if r > C_MAX_REDIRECTS -> r = C_MAX_REDIRECTS
+    Session{headers: s.headers.copy(), cookies: s.cookies.copy(), timeout_ms: s.timeout_ms, retries: s.retries, redirects: r, user: s.user.copy(), password: s.password.copy(), proxy: s.proxy.copy()}
+}
+
+fn session_auth(s: Session, user: String, password: String) -> Session Never! {
+    Session{headers: s.headers.copy(), cookies: s.cookies.copy(), timeout_ms: s.timeout_ms, retries: s.retries, redirects: s.redirects, user: user, password: password, proxy: s.proxy.copy()}
+}
+
+fn session_proxy(s: Session, url: String) -> Session Never! {
+    Session{headers: s.headers.copy(), cookies: s.cookies.copy(), timeout_ms: s.timeout_ms, retries: s.retries, redirects: s.redirects, user: s.user.copy(), password: s.password.copy(), proxy: url}
+}
+
+fn session_cookie(s: Session, cookie: String) -> Session Never! {
+    if !valid_cookie_pair(cookie) -> return s.copy()
+    cookies := [String]{}
+    name :: cookie_name(cookie) ?? return s.copy()
+    replaced := false
+    loop c in s.cookies {
+        current :: cookie_name(c) ?? next
+        if current == name {
+            &cookies.push(cookie.copy())
+            replaced = true
+        } else {
+            &cookies.push(c)
+        }
+    }
+    if !replaced -> &cookies.push(cookie)
+    Session{headers: s.headers.copy(), cookies: cookies, timeout_ms: s.timeout_ms, retries: s.retries, redirects: s.redirects, user: s.user.copy(), password: s.password.copy(), proxy: s.proxy.copy()}
+}
+
+fn cookie_header(cookies: [String]) -> String Never! {
+    s := ""
+    first := true
+    loop c in cookies {
+        if !valid_cookie_pair(c) -> next
+        if first {
+            s = c
+            first = false
+        } else {
+            s = "{s}; {c}"
+        }
+    }
+    s
+}
+
+fn session_request(s: Session, method: String, url: String, body: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
+    if !valid_method(method) -> return Err(.InvalidMethod)
+    if !valid_url(url) -> return Err(.InvalidURL)
+    if body.bytes().len() > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
+    if s.proxy.bytes().len() > 0 && !valid_url(s.proxy) -> return Err(.Proxy{stage: "invalid proxy"})
+    h := session_headers(s)
+    resp :: request_with_retries(s, method, url, body, h)
+    session_follow(s, method, url, body, h, resp)
+}
+
+fn session_follow(s: Session, method: String, url: String, body: String, h: [String], first: HTTPResponse) -[Net, Time.Wait]> HTTPResponse HTTPError! {
+    hops := 0
+    resp := first
+    current_method := method
+    current_url := url
+    current_body := body
+    headers := h.copy()
+    loop {
+        code := resp.status()
+        if code < 300 || code >= 400 -> return Ok(resp.copy())
+        if code != 301 && code != 302 && code != 303 && code != 307 && code != 308 -> return Ok(resp.copy())
+        if hops >= s.redirects -> return Ok(resp.copy())
+        loc :: resp.header("Location") ?? return Ok(resp.copy())
+        next :: resolve_location(current_url, loc) ?? return Err(.InvalidURL)
+        if is_https_downgrade(current_url, next) -> return Err(.Redirect{reason: "https downgrade"})
+        on_same_origin := same_origin(current_url, next)
+        preserve := code == 307 || code == 308
+        if !preserve {
+            current_method = "GET"
+            current_body = ""
+            headers = redirect_headers(headers, !on_same_origin)
+        } else if !on_same_origin {
+            headers = redirect_headers(headers, true)
+        }
+        retry :: request_with_retries(s, current_method, next, current_body, headers)
+        resp = retry
+        current_url = next
+        hops = hops + 1
+    }
+}
+
+fn request_with_retries(s: Session, method: String, url: String, body: String, headers: [String]) -[Net, Time.Wait]> HTTPResponse HTTPError! {
+    attempts := 0
+    loop {
+        if request_once(s, method, url, body, headers) == {
+            .Ok(response) -> return Ok(response)
+            .Err(error) -> {
+                if attempts >= s.retries || !retryable_method(method) || !retryable_error(error) -> return Err(error)
+                attempts = attempts + 1
+            }
+        }
+    }
+}
+
+fn retryable_method(method: String) -> Bool Never! {
+    u :: ascii_upper(method)
+    u == "GET" || u == "HEAD" || u == "OPTIONS" || u == "TRACE" || u == "PUT" || u == "DELETE"
+}
+
+fn retryable_error(error: HTTPError) -> Bool Never! {
+    if error == {
+        .IO(_) -> true
+        else -> false
+    }
+}
+
+fn redirect_limit(policy: RedirectPolicy, fallback: Int) -> Int Never! {
+    if policy == {
+        RedirectPolicy.Disabled -> return 0
+        RedirectPolicy.All -> return C_MAX_REDIRECTS
+        else -> { _ := 0 }
+    }
+    if fallback < 0 -> return 0
+    if fallback > C_MAX_REDIRECTS -> return C_MAX_REDIRECTS
+    fallback
+}
+fn session_get(s: Session, url: String) -[Net, Time.Wait]> HTTPResponse HTTPError! { session_request(s, "GET", url, "") }
+fn session_post(s: Session, url: String, body: String) -[Net, Time.Wait]> HTTPResponse HTTPError! { session_request(s, "POST", url, body) }
+fn session_put(s: Session, url: String, body: String) -[Net, Time.Wait]> HTTPResponse HTTPError! { session_request(s, "PUT", url, body) }
+fn session_patch(s: Session, url: String, body: String) -[Net, Time.Wait]> HTTPResponse HTTPError! { session_request(s, "PATCH", url, body) }
+fn session_delete(s: Session, url: String) -[Net, Time.Wait]> HTTPResponse HTTPError! { session_request(s, "DELETE", url, "") }
+fn session_head(s: Session, url: String) -[Net, Time.Wait]> HTTPResponse HTTPError! { session_request(s, "HEAD", url, "") }
+
+fn session_json(s: Session, url: String, body: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
+    h := session_header(s, "Content-Type", "application/json")
+    h2 := session_header(h, "Accept", "application/json")
+    session_post(h2, url, body)
+}
+
+fn session_form(s: Session, url: String, body: String) -[Net, Time.Wait]> HTTPResponse HTTPError! {
+    h := session_header(s, "Content-Type", "application/x-www-form-urlencoded")
+    session_post(h, url, body)
+}
+
+fn request_once(s: Session, method: String, url: String, body: String, headers: [String]) -[Net, Time.Wait]> HTTPResponse HTTPError! {
+    req := provider.request(method, url)
+    req = req.redirects(0)
+    req = req.timeout(s.timeout_ms)
+    if s.proxy.bytes().len() > 0 -> req = req.proxy(s.proxy)
+    loop line in headers {
+        name :: header_name(line) ?? return Err(.InvalidHeader)
+        value :: header_value(line) ?? return Err(.InvalidHeader)
+        req = req.__with_header(name, value)
+    }
+    if body.bytes().len() > C_MAX_BODY_BYTES -> return Err(.BodyTooLarge{limit: C_MAX_BODY_BYTES})
+    if body.bytes().len() > 0 -> req = req.__with_body(body)
+    req.send()
+}
+
+fn user_agent(client: Client, name: String) -> Client Never! { set_header(client, "User-Agent", name) }
+fn bearer(client: Client, token: String) -> Client Never! { set_header(client, "Authorization", http.bearer_auth(token)) }
+fn accept(client: Client, mime: String) -> Client Never! { set_header(client, "Accept", mime) }
+fn content_type(client: Client, mime: String) -> Client Never! { set_header(client, "Content-Type", mime) }
+
+
+fn session_headers(s: Session) -> [String] Never! {
+    h := s.headers.copy()
+    if s.user.bytes().len() > 0 -> h = set_header_line(h, "Authorization", http.basic_auth(s.user, s.password))
+    jar :: cookie_header(s.cookies)
+    if jar.bytes().len() > 0 -> h = set_header_line(h, "Cookie", jar)
+    h
+}
+
+fn header_name(line: String) -> String? {
+    raw :: line.bytes()
+    col := index_byte(raw, 58)
+    if col <= 0 -> return None
+    name :: slice_text(line, 0, col)
+    if !valid_header_name(name) -> return None
+    Val(name)
+}
+
+fn header_value(line: String) -> String? {
+    raw :: line.bytes()
+    col := index_byte(raw, 58)
+    if col <= 0 -> return None
+    value :: slice_text(line, col + 1, raw.len())
+    if has_ctl(value.bytes()) -> return None
+    Val(trim(value))
+}
+
+fn append_header(headers: [String], line: String) -> [String] {
+    out := headers.copy()
+    &out.push(line)
+    out
+}
+
+fn set_header_line(headers: [String], name: String, value: String) -> [String] Never! {
+    if !valid_header_name(name) || has_ctl(value.bytes()) -> return headers.copy()
+    out := [String]{}
+    want :: ascii_lower(name)
+    replaced := false
+    loop line in headers {
+        current :: header_name(line) ?? next
+        if ascii_lower(current) == want {
+            if !replaced {
+                &out.push("{name}: {value}")
+                replaced = true
+            }
+        } else {
+            &out.push(line)
+        }
+    }
+    if !replaced -> &out.push("{name}: {value}")
+    out
+}
+
+fn redirect_headers(headers: [String], strip_credentials: Bool) -> [String] Never! {
+    out := [String]{}
+    loop line in headers {
+        name :: header_name(line) ?? next
+        lower :: ascii_lower(name)
+        credential := lower == "authorization" || lower == "proxy-authorization" || lower == "cookie" || lower == "host"
+        body_header := lower == "content-length" || lower == "content-type" || lower == "content-encoding" || lower == "transfer-encoding" || lower == "expect"
+        if !body_header && (!strip_credentials || !credential) -> &out.push(line)
+    }
+    out
+}
+
+fn valid_cookie_pair(cookie: String) -> Bool Never! {
+    eq := index_byte(cookie.bytes(), 61)
+    if eq <= 0 -> return false
+    name :: slice_text(cookie, 0, eq)
+    value :: slice_text(cookie, eq + 1, cookie.bytes().len())
+    valid_cookie_token(name) && valid_cookie_value(value)
+}
+
+fn cookie_name(cookie: String) -> String? {
+    eq := index_byte(cookie.bytes(), 61)
+    if eq <= 0 -> return None
+    Val(slice_text(cookie, 0, eq))
+}
+
+fn valid_cookie_token(name: String) -> Bool Never! {
+    raw :: name.bytes()
+    if raw.len() == 0 -> return false
+    loop b in raw {
+        n :: Int.from_u8(b)
+        if n <= 32 || n >= 127 || n == 34 || n == 40 || n == 41 || n == 44 || n == 47 || n == 58 || n == 59 || n == 60 || n == 61 || n == 62 || n == 63 || n == 64 || n == 91 || n == 92 || n == 93 || n == 123 || n == 125 -> return false
+    }
+    true
+}
+
+fn valid_cookie_value(value: String) -> Bool Never! {
+    loop b in value.bytes() {
+        n :: Int.from_u8(b)
+        if n <= 32 || n >= 127 || n == 34 || n == 44 || n == 59 || n == 92 -> return false
+    }
+    true
+}
+
+fn resolve_location(base: String, location: String) -> String? {
+    if location.bytes().len() == 0 -> return None
+    joined :: http_url.urljoin(base, location) ?? return None
+    hash := index_byte(joined.bytes(), 35)
+    clean := if hash >= 0 -> slice_text(joined, 0, hash) else -> joined
+    if !valid_url(clean) -> return None
+    Val(clean)
+}
+
+fn is_https_downgrade(base: String, next: String) -> Bool Never! {
+    from :: http_url.parse(base) ?? return false
+    to :: http_url.parse(next) ?? return false
+    from.scheme() == "https" && to.scheme() == "http"
+}
+
+fn same_origin(left: String, right: String) -> Bool Never! {
+    a :: http_url.parse(left) ?? return false
+    b :: http_url.parse(right) ?? return false
+    a.scheme() == b.scheme() && a.host() == b.host() &&
+        (a.port() ?? (a.default_port() ?? -1)) == (b.port() ?? (b.default_port() ?? -1))
+}
+
+fn slice_text(text: String, start: Int, end: Int) -> String Never! {
+    raw :: text.bytes()
+    out := [U8]{}
+    i := start
+    loop {
+        if i < 0 || i >= end || i >= raw.len() -> return String.from_bytes(out) ?? ""
+        &out.push(raw[i])
+        i = i + 1
+    }
+}
+
+
+fn ascii_upper(text: String) -> String Never! {
+    out := [U8]{}
+    loop b in text.bytes() {
+        n :: Int.from_u8(b)
+        if n >= 97 && n <= 122 -> &out.push(U8{n - 32}) else -> &out.push(b)
+    }
+    String.from_bytes(out) ?? text
+}
+fn ascii_lower(text: String) -> String Never! {
+    out := [U8]{}
+    loop b in text.bytes() {
+        n :: Int.from_u8(b)
+        if n >= 65 && n <= 90 -> &out.push(U8{n + 32}) else -> &out.push(b)
+    }
+    String.from_bytes(out) ?? text
+}
+
+fn trim(text: String) -> String Never! {
+    raw :: text.bytes()
+    start := 0
+    end := raw.len()
+    loop start < end {
+        n :: Int.from_u8(raw[start])
+        if n == 32 || n == 9 || n == 13 || n == 10 -> start = start + 1 else -> break
+    }
+    loop end > start {
+        n :: Int.from_u8(raw[end - 1])
+        if n == 32 || n == 9 || n == 13 || n == 10 -> end = end - 1 else -> break
+    }
+    if end <= start -> return ""
+    slice_text(text, start, end)
+}
+
+fn index_byte(raw: [U8], target: Int) -> Int Never! {
+    loop i in 0..<raw.len() {
+        if Int.from_u8(raw[i]) == target -> return i
+    }
+    -1
+}
+
+fn valid_header_name(name: String) -> Bool Never! {
+    raw :: name.bytes()
+    if raw.len() == 0 -> return false
+    loop b in raw {
+        if !token_char(Int.from_u8(b)) -> return false
+    }
+    true
+}
+
+fn token_char(n: Int) -> Bool Never! {
+    (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 33 || n == 35 || n == 36 || n == 37 || n == 38 || n == 39 || n == 42 || n == 43 || n == 45 || n == 46 || n == 94 || n == 95 || n == 96 || n == 124 || n == 126
+}
+
+fn valid_method(method: String) -> Bool Never! {
+    raw :: method.bytes()
+    if raw.len() == 0 -> return false
+    loop b in raw {
+        if !token_char(Int.from_u8(b)) -> return false
+    }
+    true
+}
+
+fn has_ctl(raw: [U8]) -> Bool Never! {
+    loop b in raw {
+        n :: Int.from_u8(b)
+        if (n < 32 && n != 9) || n == 127 -> return true
+    }
+    false
+}
+
+fn valid_url(url: String) -> Bool Never! {
+    raw :: url.bytes()
+    if raw.len() < 8 || raw.len() > C_MAX_URL_BYTES || has_url_ctl(raw) -> return false
+    parsed :: http_url.parse(url) ?? return false
+    if parsed.scheme() != "http" && parsed.scheme() != "https" -> return false
+    if parsed.host() == None || parsed.userinfo().bytes().len() > 0 -> return false
+    colon := index_byte(raw, 58)
+    if colon <= 0 || colon + 2 >= raw.len() -> return false
+    if raw[colon + 1] != (U8{47}) || raw[colon + 2] != (U8{47}) -> return false
+    start := colon + 3
+    end := start
+    loop end < raw.len() {
+        if raw[end] == (U8{47}) || raw[end] == (U8{63}) || raw[end] == (U8{35}) -> break
+        n :: Int.from_u8(raw[end])
+        if n <= 32 || n >= 127 || n == 34 || n == 92 -> return false
+        end = end + 1
+    }
+    end > start
+}
+
+fn has_url_ctl(raw: [U8]) -> Bool Never! {
+    loop b in raw {
+        n :: Int.from_u8(b)
+        if n < 32 || n == 127 -> return true
+    }
+    false
+}
+
+// ---- Build transport ---------------------------------------------------------
+// One GET for the Driver's checked build fetches (Cli BuildHTTPTransport) to
+// already-resolved addresses, over TCP or, when `secure`, TLS with the default
+// client trust. HTTP/1.1 framing only: `Connection: close`, identity encoding,
+// informational heads skipped (101 excepted), then a chunked, Content-Length or
+// EOF-delimited body. Fetch, redirect, status and size policy stay in the
+// Driver. `limit` bounds the head and the body; a body may run one byte over so
+// the Driver sees the overflow. The rows are the header lines, the body and the
+// status, in that order. One monotonic deadline covers the whole fetch.
+
+C_BUILD_INT_MAX :: 9223372036854775807
+C_BUILD_READ_BYTES :: 8192
+
+#Error
+struct __BuildHTTPFailure { message: String }
+impl __BuildHTTPFailure.Display { fn display(self) -> String { self.message.copy() } }
+impl __BuildHTTPFailure.Debug { fn debug(^self) -> String { self.message } }
+fn __build_fail(message: String) -> __BuildHTTPFailure Never! { __BuildHTTPFailure{message: message} }
+
+// The connection (exactly one of tcp/tls), the bytes of the last read with
+// the cursor into them, the exchange's absolute deadline, and the current
+// phase's per-operation bound (0 for none).
+struct __BuildWire {
+    tcp: TCPStream?
+    tls: build_tls.TLSStream?
+    buffer: [U8]
+    at: Int
+    end_ns: Int
+    idle_ns: Int
+}
+
+struct __BuildSpan { from: Int, to: Int }
+
+// state 0 parsed, 1 empty, 2 invalid digit, 3 above u64::MAX; big marks a
+// value above Int's range (value unused then).
+struct __BuildNumber { state: Int, value: Int, big: Bool }
+
+fn jet_http_build_get(host: String, authority: String, target: String, secure: Bool, addresses: [[U8]], port: Int, timeout_ms: Int, limit: Int) -[Net, Time.Wait]> [[U8]] __BuildHTTPFailure! {
+    if port < 0 || port > 65535 || timeout_ms < 0 || limit < 0 -> return Err(__build_fail("out of range integral type conversion attempted"))
+    now :: core.time.__clock_mono_ns()
+    end_ns :: if timeout_ms > (C_BUILD_INT_MAX - now) /% 1000000 -> C_BUILD_INT_MAX else -> now + timeout_ms * 1000000
+    tcp := __build_connect(addresses, port, end_ns) ?? return Err(err)
+    wire := __BuildWire{tcp: None, tls: None, buffer: [U8]{}, at: 0, end_ns: end_ns, idle_ns: 0}
+    if secure {
+        remaining :: end_ns - core.time.__clock_mono_ns()
+        if remaining <= 0 -> return Err(__build_fail("timed out"))
+        stream := build_tls.__client_deadline_entry(^tcp, host, Duration{ns: remaining}) ?? return Err(__build_fail("{err}"))
+        wire.tls = Val(stream)
+    } else {
+        wire.tcp = Val(tcp)
+    }
+    request :: "GET {target} HTTP/1.1\r\nHost: {authority}\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n"
+    result := __build_exchange(&wire, request.bytes(), limit)
+    // A TLS stream owns its socket until closed: close it on every outcome so
+    // the peer sees close_notify. The response is already decided; a peer that
+    // refuses the alert does not change it.
+    if wire.tls == {
+        .Val(stream) -> {
+            if stream.close() == {
+                .Ok(_) -> {}
+                .Err(_) -> {}
+            }
+        }
+        .None -> {}
+    }
+    result
+}
+
+fn __build_exchange(&wire: __BuildWire, request: [U8], limit: Int) -[Net, Time.Wait]> [[U8]] __BuildHTTPFailure! {
+    _ :: __build_send(&wire, request) ?? return Err(err)
+    __build_response(&wire, limit)
+}
+
+// Tries each resolver answer (4 or 16 network-order octets) in order within
+// the deadline; the last connect failure when none connects.
+fn __build_connect(addresses: [[U8]], port: Int, end_ns: Int) -[Net, Time.Wait]> TCPStream __BuildHTTPFailure! {
+    failure := "no resolved addresses"
+    loop address in addresses {
+        if address.len() != 4 && address.len() != 16 -> return Err(__build_fail("invalid resolved address carrier"))
+    }
+    loop address in addresses {
+        remaining :: end_ns - core.time.__clock_mono_ns()
+        if remaining <= 0 -> return Err(__build_fail("timed out"))
+        millis :: remaining /% 1000000
+        if build_net.tcp_connect_timeout(__build_socket(address, port), if millis == 0 -> 1 else -> millis) == {
+            .Ok(stream) -> return Ok(stream)
+            .Err(error) -> failure = "{error}"
+        }
+    }
+    Err(__build_fail(failure))
+}
+
+fn __build_socket(address: [U8], port: Int) -> SocketAddr Never! {
+    octets := [U8]{}
+    loop byte in address -> &octets.push(byte)
+    #Unsafe("checked resolver octets and port transferred into the socket carrier") {
+        ip :: core.net.__ip_from_bytes(^octets)
+        return core.net.__socket_from_parts(^ip, U16{port}, U32{0}, U32{0})
+    }
+}
+
+fn __build_send(&wire: __BuildWire, bytes: [U8]) -[Net, Time.Wait]> Int __BuildHTTPFailure! {
+    at := 0
+    loop at < bytes.len() {
+        remaining :: __build_remaining(wire)
+        if remaining <= 0 -> return Err(__build_fail("timed out"))
+        rest :: __build_slice(bytes, at, bytes.len())
+        if wire.tls == {
+            .Val(stream) -> {
+                stream.write_all(rest, deadline: Duration{ns: remaining}) ?? return Err(__build_fail("{err}"))
+                at = bytes.len()
+            }
+            .None -> {
+                if wire.tcp == {
+                    .Val(stream) -> {
+                        sent :: stream.write(rest, deadline: Duration{ns: remaining}) ?? return Err(__build_fail("{err}"))
+                        if sent == 0 -> return Err(__build_fail("failed to write whole buffer"))
+                        at += sent
+                    }
+                    .None -> return Err(__build_fail("HTTP transport has no connection"))
+                }
+            }
+        }
+    }
+    if wire.end_ns - core.time.__clock_mono_ns() <= 0 -> return Err(__build_fail("timed out"))
+    Ok(at)
+}
+
+// Time left for one wire operation: the exchange deadline, narrowed to the
+// current phase's per-operation bound when one is set.
+fn __build_remaining(wire: __BuildWire) -[Time.Wait]> Int Never! {
+    left :: wire.end_ns - core.time.__clock_mono_ns()
+    if wire.idle_ns > 0 && wire.idle_ns < left -> return wire.idle_ns
+    left
+}
+
+// One read into the drained buffer: the byte count, 0 at EOF.
+fn __build_fill(&wire: __BuildWire) -[Net, Time.Wait]> Int __BuildHTTPFailure! {
+    remaining :: __build_remaining(wire)
+    if remaining <= 0 -> return Err(__build_fail("timed out"))
+    got := [U8]{}
+    if wire.tls == {
+        .Val(stream) -> { got = stream.read(C_BUILD_READ_BYTES, deadline: Duration{ns: remaining}) ?? return Err(__build_fail("{err}")) }
+        .None -> {
+            if wire.tcp == {
+                .Val(stream) -> { got = stream.read(C_BUILD_READ_BYTES, deadline: Duration{ns: remaining}) ?? return Err(__build_fail("{err}")) }
+                .None -> return Err(__build_fail("HTTP transport has no connection"))
+            }
+        }
+    }
+    count :: got.len()
+    wire.buffer = got
+    wire.at = 0
+    Ok(count)
+}
+
+// BufReader + Take(limit): appends at most `limit` bytes to `out`, stopping
+// after the first newline when `line`; the appended count.
+fn __build_read(&wire: __BuildWire, limit: Int, line: Bool, &out: [U8]) -[Net, Time.Wait]> Int __BuildHTTPFailure! {
+    taken := 0
+    loop taken < limit {
+        if wire.at == wire.buffer.len() {
+            got :: __build_fill(&wire) ?? return Err(err)
+            if got == 0 -> break
+        }
+        available :: wire.buffer.len() - wire.at
+        count :: if available > limit - taken -> limit - taken else -> available
+        found := false
+        n := 0
+        loop n < count {
+            byte :: wire.buffer[wire.at + n]
+            &out.push(byte)
+            n += 1
+            if line && byte == (U8{10}) {
+                found = true
+                break
+            }
+        }
+        wire.at += n
+        taken += n
+        if found -> break
+    }
+    Ok(taken)
+}
+
+fn __build_response(&wire: __BuildWire, limit: Int) -[Net, Time.Wait]> [[U8]] __BuildHTTPFailure! {
+    over :: if limit == C_BUILD_INT_MAX -> limit else -> limit + 1
+    rows := [[U8]]{}
+    status := [U8]{}
+    head := 0
+    loop {
+        loop {
+            line := [U8]{}
+            _ :: __build_read(&wire, over, true, &line) ?? return Err(err)
+            length := line.len()
+            if length == 0 -> return Err(__build_fail("unexpected EOF in HTTP response head"))
+            head = if head > C_BUILD_INT_MAX - length -> C_BUILD_INT_MAX else -> head + length
+            if head > limit -> return Err(__build_fail("HTTP response head exceeds transport byte bound"))
+            if (length == 2 && line[0] == (U8{13}) && line[1] == (U8{10})) || (length == 1 && line[0] == (U8{10})) -> break
+            loop length > 0 && (line[length - 1] == (U8{13}) || line[length - 1] == (U8{10})) -> length -= 1
+            if status.len() == 0 {
+                // The status is the field between the first two spaces.
+                first := 0
+                loop first < length && line[first] != (U8{32}) -> first += 1
+                if first == length -> return Err(__build_fail("HTTP response status is missing"))
+                end := first + 1
+                loop end < length && line[end] != (U8{32}) -> end += 1
+                status = __build_slice(line, first + 1, end)
+            } else {
+                &rows.push(__build_slice(line, 0, length))
+            }
+        }
+        informational :: status.len() == 3 && status[0] == (U8{49})
+        switching :: informational && status[1] == (U8{48}) && status[2] == (U8{49})
+        if informational && !switching {
+            status = [U8]{}
+            rows = [[U8]]{}
+            next
+        }
+        break
+    }
+    body := [U8]{}
+    if __build_chunked(rows) {
+        _ :: __build_chunked_body(&wire, limit, over, &body) ?? return Err(err)
+    } else {
+        // Content-Length is transport framing, not response-size policy. A
+        // malformed length takes nothing; the Driver interprets the head.
+        found := false
+        number := __BuildNumber{state: 0, value: 0, big: false}
+        loop header in rows {
+            colon :: __build_colon(header)
+            if colon >= 0 && __build_named(header, 0, colon, "content-length") {
+                found = true
+                span :: __build_trim(header, colon + 1, header.len())
+                number = __build_parse_u64(header, span.from, span.to, 10)
+                break
+            }
+        }
+        valid :: found && number.state == 0
+        big :: valid && number.big
+        wanted :: if {
+            found && !valid -> 0
+            valid && !big && number.value < over -> number.value
+            else -> over
+        }
+        _ :: __build_read(&wire, wanted, false, &body) ?? return Err(err)
+        if valid && !big && number.value <= limit && body.len() != number.value -> return Err(__build_fail("unexpected EOF in HTTP response body"))
+    }
+    &rows.push(body)
+    &rows.push(status)
+    Ok(rows)
+}
+
+fn __build_chunked_body(&wire: __BuildWire, limit: Int, over: Int, &body: [U8]) -[Net, Time.Wait]> Int __BuildHTTPFailure! {
+    loop {
+        line := [U8]{}
+        _ :: __build_read(&wire, over, true, &line) ?? return Err(err)
+        if line.len() > limit -> return Err(__build_fail("HTTP chunk head exceeds transport byte bound"))
+        end := 0
+        loop end < line.len() && line[end] != (U8{59}) -> end += 1
+        span :: __build_trim(line, 0, end)
+        number :: __build_parse_u64(line, span.from, span.to, 16)
+        if number.state != 0 -> return Err(__build_fail(__build_parse_message(number.state)))
+        if !number.big && number.value == 0 -> break
+        room :: over - body.len()
+        wanted :: if !number.big && number.value < room -> number.value else -> room
+        got :: __build_read(&wire, wanted, false, &body) ?? return Err(err)
+        if got != wanted -> return Err(__build_fail("unexpected EOF in HTTP response chunk"))
+        if body.len() > limit -> break
+        crlf := [U8]{}
+        _ :: __build_read(&wire, 2, false, &crlf) ?? return Err(err)
+        if crlf.len() != 2 -> return Err(__build_fail("failed to fill whole buffer"))
+        if crlf[0] != (U8{13}) || crlf[1] != (U8{10}) -> return Err(__build_fail("invalid HTTP response chunk framing"))
+    }
+    Ok(body.len())
+}
+
+fn __build_slice(raw: [U8], start: Int, end: Int) -> [U8] Never! {
+    out := [U8]{}
+    loop at in start..<end -> &out.push(raw[at])
+    out
+}
+
+fn __build_lower(byte: Int) -> Int Never! { if byte >= 65 && byte <= 90 -> byte + 32 else -> byte }
+
+fn __build_space(byte: Int) -> Bool Never! { byte == 32 || byte == 9 || byte == 10 || byte == 12 || byte == 13 }
+
+// eq_ignore_ascii_case of raw[start..end] against a lowercase literal.
+fn __build_named(raw: [U8], start: Int, end: Int, literal: String) -> Bool Never! {
+    name :: literal.bytes()
+    if end - start != name.len() -> return false
+    loop at in 0..<name.len() {
+        if __build_lower(Int.from_u8(raw[start + at])) != Int.from_u8(name[at]) -> return false
+    }
+    true
+}
+
+fn __build_colon(raw: [U8]) -> Int Never! {
+    loop at in 0..<raw.len() {
+        if raw[at] == (U8{58}) -> return at
+    }
+    -1
+}
+
+fn __build_trim(raw: [U8], start: Int, end: Int) -> __BuildSpan Never! {
+    from := start
+    to := end
+    loop from < to && __build_space(Int.from_u8(raw[from])) -> from += 1
+    loop to > from && __build_space(Int.from_u8(raw[to - 1])) -> to -= 1
+    __BuildSpan{from: from, to: to}
+}
+
+// A Transfer-Encoding header naming chunked among its comma parts.
+fn __build_chunked(rows: [[U8]]) -> Bool Never! {
+    loop line in rows {
+        colon :: __build_colon(line)
+        if colon >= 0 && __build_named(line, 0, colon, "transfer-encoding") {
+            part := colon + 1
+            loop part <= line.len() {
+                end := part
+                loop end < line.len() && line[end] != (U8{44}) -> end += 1
+                span :: __build_trim(line, part, end)
+                if __build_named(line, span.from, span.to, "chunked") -> return true
+                part = end + 1
+            }
+        }
+    }
+    false
+}
+
+// u64 parsing as Rust's FromStr/from_str_radix: one leading '+', stopping at
+// the first invalid digit or overflow. High/low 32-bit limbs keep the u64
+// overflow check exact.
+fn __build_parse_u64(raw: [U8], start: Int, end: Int, radix: Int) -> __BuildNumber Never! {
+    from := start
+    if end - start > 1 && raw[start] == (U8{43}) -> from += 1
+    if from == end -> return __BuildNumber{state: if end == start -> 1 else -> 2, value: 0, big: false}
+    high := 0
+    low := 0
+    loop at in from..<end {
+        byte :: Int.from_u8(raw[at])
+        digit :: if {
+            byte >= 48 && byte <= 57 -> byte - 48
+            radix == 16 && byte >= 97 && byte <= 102 -> byte - 87
+            radix == 16 && byte >= 65 && byte <= 70 -> byte - 55
+            else -> -1
+        }
+        if digit < 0 -> return __BuildNumber{state: 2, value: 0, big: false}
+        low = low * radix + digit
+        high = high * radix + low /% 4294967296
+        low = low % 4294967296
+        if high > 4294967295 -> return __BuildNumber{state: 3, value: 0, big: false}
+    }
+    if high > 2147483647 -> return __BuildNumber{state: 0, value: 0, big: true}
+    __BuildNumber{state: 0, value: high * 4294967296 + low, big: false}
+}
+
+fn __build_parse_message(state: Int) -> String Never! {
+    if state == 1 -> return "cannot parse integer from empty string"
+    if state == 2 -> return "invalid digit found in string"
+    "number too large to fit in target type"
+}
+
+// ---------------------------------------------------------------------------
+// The one-shot client send behind `HTTPRequest.send`, `get` and `post`:
+// HTTP/1.1 over TCP or TLS (system roots), redirects, an explicit proxy,
+// gzip bodies, and the per-phase timeouts. Each send dials its own
+// connection and closes it, so `reused_connection()` is always false.
+
+C_CLIENT_TIMEOUT_MS :: 30000
+C_CLIENT_REDIRECTS :: 10
+C_CLIENT_HEAD_BYTES :: 65536
+C_CLIENT_BODY_BYTES :: 67108864
+C_CLIENT_UPLOAD_BYTES :: 8388608
+C_CLIENT_INTERIM :: 16
+C_CLIENT_BOUNDARY :: "jet-http-boundary-"
+
+struct __ClientURL { scheme: String, host: String, port: Int, authority: String, target: String }
+
+// One phase's per-operation timeout and the send's absolute deadline.
+struct __ClientPhases {
+    connect_ns: Int
+    tls_ns: Int
+    write_ns: Int
+    first_byte_ns: Int
+    read_ns: Int
+    end_ns: Int
+}
+
+struct __ClientReply {
+    status: Int
+    headers: http.Headers
+    body: [U8]
+    body_error: HTTPError?
+    raw_encoding: String?
+}
+
+fn __send(req: HTTPRequest) -[Net, Time.Wait]> HTTPResponse HTTPError! {
+    if req.__header_error == .Val(error) -> return Err(error)
+    phases :: __client_phases(req) ?? return Err(err)
+    limit :: req.__redirects ?? C_CLIENT_REDIRECTS
+    if limit < 0 || limit > 4294967295 -> return Err(.Redirect{reason: "limit"})
+    explicit_limit :: req.__redirects != None
+    body := [U8]?{None}
+    if req.__body_set {
+        raw :: req.body.bytes(C_CLIENT_UPLOAD_BYTES) ?? return Err(err)
+        body = Val(raw)
+    }
+    fields := __client_request_headers(req.headers.fields) ?? return Err(err)
+    if req.__cookies.len() > 0 {
+        parts := [String]{}
+        loop pair in req.__cookies -> &parts.push("{pair.name}={pair.value}")
+        &fields.push(http.Header{name: "cookie", value: parts.join("; ")})
+    }
+    if body == None {
+        if req.__multipart.len() > 0 {
+            boundary :: __client_boundary(req.__multipart)
+            &fields.push(http.Header{name: "content-type", value: "multipart/form-data; boundary={boundary}"})
+            body = Val(__client_multipart(req.__multipart, boundary).bytes())
+        } else if req.__form.len() > 0 {
+            &fields.push(http.Header{name: "content-type", value: "application/x-www-form-urlencoded"})
+            body = Val(__client_form(req.__form).bytes())
+        }
+    }
+    loop field in fields {
+        _ :: __client_check_header(field.name, field.value) ?? return Err(err)
+    }
+    __client_follow(req.method, req.__url, fields, body, phases, limit, explicit_limit, req.__proxy)
+}
+
+// The phase timeouts of a one-shot send: each phase takes its own timeout,
+// else the blanket one (30 s by default); only an explicit total timeout
+// bounds the whole send.
+fn __client_phases(req: HTTPRequest) -[Time.Wait]> __ClientPhases HTTPError! {
+    blanket :: req.__timeout_ms ?? C_CLIENT_TIMEOUT_MS
+    if blanket < 0 -> return Err(.Timeout{phase: "transport"})
+    now :: core.time.__clock_mono_ns()
+    end_ns := C_BUILD_INT_MAX
+    if req.__total_timeout_ms == .Val(total) {
+        if total < 0 -> return Err(.Timeout{phase: "transport"})
+        end_ns = __client_deadline(now, total)
+    }
+    connect :: __client_phase(req.__connect_timeout_ms, blanket) ?? return Err(err)
+    _ :: __client_phase(req.__dns_timeout_ms, blanket) ?? return Err(err)
+    tls :: __client_phase(req.__tls_timeout_ms, blanket) ?? return Err(err)
+    write :: __client_phase(req.__write_timeout_ms, blanket) ?? return Err(err)
+    first_byte :: __client_phase(req.__first_byte_timeout_ms, blanket) ?? return Err(err)
+    read :: __client_phase(req.__read_timeout_ms, blanket) ?? return Err(err)
+    Ok(__ClientPhases{connect_ns: connect, tls_ns: tls, write_ns: write, first_byte_ns: first_byte, read_ns: read, end_ns: end_ns})
+}
+
+fn __client_phase(explicit: Int?, blanket: Int) -> Int HTTPError! {
+    ms :: explicit ?? blanket
+    if ms < 0 -> return Err(.Timeout{phase: "transport"})
+    Ok(if ms > C_BUILD_INT_MAX /% 1000000 -> C_BUILD_INT_MAX else -> ms * 1000000)
+}
+
+fn __client_deadline(now: Int, ms: Int) -> Int Never! {
+    if ms > (C_BUILD_INT_MAX - now) /% 1000000 -> return C_BUILD_INT_MAX
+    now + ms * 1000000
+}
+
+// The earlier of now + `span_ns` and the send's deadline.
+fn __client_until(span_ns: Int, end_ns: Int) -[Time.Wait]> Int Never! {
+    now :: core.time.__clock_mono_ns()
+    at :: if span_ns > C_BUILD_INT_MAX - now -> C_BUILD_INT_MAX else -> now + span_ns
+    if at < end_ns -> at else -> end_ns
+}
+
+// Validate each header and fold repeated names into one field (`; ` for
+// cookie, `, ` otherwise), keeping the first spelling and position.
+fn __client_request_headers(fields: [http.Header]) -> [http.Header] HTTPError! {
+    out := [http.Header]{}
+    loop field in fields {
+        _ :: __client_check_header(field.name, field.value) ?? return Err(err)
+        want :: ascii_lower(field.name)
+        merged := false
+        loop index in 0..<out.len() {
+            if ascii_lower(out[index].name) == want {
+                glue :: if want == "cookie" -> "; " else -> ", "
+                out[index].value = "{out[index].value}{glue}{field.value}"
+                merged = true
+                break
+            }
+        }
+        if !merged -> &out.push(http.Header{name: field.name, value: field.value})
+    }
+    Ok(out)
+}
+
+// A token name and field-value bytes, else InvalidHeader; a framing or
+// hop-by-hop name the client owns is InvalidFraming (`Connection: close`
+// excepted).
+fn __client_check_header(name: String, value: String) HTTPError! {
+    if !http.client_header_name(name) || !http.client_header_value(value) -> return Err(.InvalidHeader)
+    lower :: ascii_lower(name)
+    owned :: lower == "host" || lower == "content-length" || lower == "transfer-encoding" || lower == "connection" || lower == "proxy-connection" || lower == "keep-alive" || lower == "te" || lower == "trailer" || lower == "upgrade" || lower == "proxy-authenticate" || lower == "proxy-authorization"
+    if owned && !(lower == "connection" && __client_close_value(value)) -> return Err(.InvalidFraming)
+    Ok(())
+}
+
+fn __client_close_value(value: String) -> Bool Never! {
+    if trim(value) == "" -> return false
+    loop item in value.split(",") {
+        if ascii_lower(trim(item)) != "close" -> return false
+    }
+    true
+}
+
+fn __client_form(pairs: [http.Header]) -> String Never! {
+    out := ""
+    loop pair in pairs {
+        if out != "" -> out = "{out}&"
+        out = "{out}{__client_component(pair.name)}={__client_component(pair.value)}"
+    }
+    out
+}
+
+fn __client_component(text: String) -> String Never! {
+    hex :: "0123456789ABCDEF".bytes()
+    out := [U8]{}
+    loop byte in text.bytes() {
+        n :: Int{byte}
+        if (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 45 || n == 95 || n == 46 || n == 126 {
+            &out.push(byte)
+        } else if n == 32 {
+            &out.push(U8{43})
+        } else {
+            &out.push(U8{37})
+            &out.push(hex[n /% 16])
+            &out.push(hex[n % 16])
+        }
+    }
+    String.from_bytes(out) ?? ""
+}
+
+// The first `jet-http-boundary-%016x` whose suffix no field contains.
+fn __client_boundary(pairs: [http.Header]) -> String Never! {
+    used := [String]{}
+    loop pair in pairs {
+        texts :: [String]{pair.name, pair.value}
+        loop text in texts {
+            raw :: text.bytes()
+            prefix :: C_CLIENT_BOUNDARY.bytes()
+            span :: prefix.len() + 16
+            at := 0
+            loop at + span <= raw.len() {
+                if __build_slice(raw, at, at + prefix.len()) == prefix {
+                    suffix :: ascii_lower(String.from_bytes(__build_slice(raw, at + prefix.len(), at + span)) ?? "")
+                    if __client_hex16(suffix) -> &used.push(suffix)
+                }
+                at += 1
+            }
+        }
+    }
+    suffix := 0
+    loop {
+        candidate :: __client_hex(suffix)
+        taken := false
+        loop seen in used {
+            if seen == candidate -> taken = true
+        }
+        if !taken -> return "{C_CLIENT_BOUNDARY}{candidate}"
+        suffix += 1
+    }
+}
+
+fn __client_hex16(text: String) -> Bool Never! {
+    raw :: text.bytes()
+    if raw.len() != 16 -> return false
+    loop byte in raw {
+        n :: Int{byte}
+        if !((n >= 48 && n <= 57) || (n >= 97 && n <= 102)) -> return false
+    }
+    true
+}
+
+fn __client_hex(value: Int) -> String Never! {
+    digits :: "0123456789abcdef".bytes()
+    out := [U8]{}
+    rest := value
+    loop _ in 0..<16 {
+        &out.insert(0, digits[rest % 16])
+        rest = rest /% 16
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn __client_multipart(pairs: [http.Header], boundary: String) -> String Never! {
+    out := ""
+    loop pair in pairs {
+        name :: pair.name.replace("\"", "%22").replace("\r", "%0D").replace("\n", "%0A")
+        out = "{out}--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{pair.value}\r\n"
+    }
+    "{out}--{boundary}--\r\n"
+}
+
+// An absolute http(s) URL without userinfo or fragment.
+fn __client_url(url: String) -> __ClientURL HTTPError! {
+    raw :: url.bytes()
+    sep := -1
+    i := 0
+    loop i + 2 < raw.len() {
+        if raw[i] == (U8{58}) && raw[i + 1] == (U8{47}) && raw[i + 2] == (U8{47}) {
+            sep = i
+            break
+        }
+        i += 1
+    }
+    if sep < 0 -> return Err(.InvalidURL)
+    scheme :: String.from_bytes(__build_slice(raw, 0, sep)) ?? return Err(.InvalidURL)
+    if scheme != "http" && scheme != "https" -> return Err(.InvalidURL)
+    rest :: __build_slice(raw, sep + 3, raw.len())
+    if rest.len() == 0 -> return Err(.InvalidURL)
+    split := 0
+    loop split < rest.len() && rest[split] != (U8{47}) && rest[split] != (U8{63}) && rest[split] != (U8{35}) -> split += 1
+    authority :: __build_slice(rest, 0, split)
+    tail :: __build_slice(rest, split, rest.len())
+    if authority.len() == 0 || __client_has(authority, 64) || __client_has(tail, 35) -> return Err(.InvalidURL)
+    host := [U8]{}
+    port_text := [U8]{}
+    has_port := false
+    if authority[0] == (U8{91}) {
+        close := 1
+        loop close < authority.len() && authority[close] != (U8{93}) -> close += 1
+        if close == authority.len() -> return Err(.InvalidURL)
+        host = __build_slice(authority, 1, close)
+        if close + 1 < authority.len() {
+            if authority[close + 1] != (U8{58}) -> return Err(.InvalidURL)
+            port_text = __build_slice(authority, close + 2, authority.len())
+            has_port = true
+        }
+    } else {
+        colon := authority.len() - 1
+        loop colon >= 0 && authority[colon] != (U8{58}) -> colon -= 1
+        if colon >= 0 && !__client_has(__build_slice(authority, 0, colon), 58) {
+            host = __build_slice(authority, 0, colon)
+            port_text = __build_slice(authority, colon + 1, authority.len())
+            has_port = true
+        } else {
+            host = authority
+        }
+    }
+    if host.len() == 0 -> return Err(.InvalidURL)
+    loop byte in host {
+        if __client_ctl_or_space(Int{byte}) -> return Err(.InvalidURL)
+    }
+    port := if scheme == "https" -> 443 else -> 80
+    if has_port {
+        digits := port_text
+        if digits.len() > 0 && digits[0] == (U8{43}) -> digits = __build_slice(digits, 1, digits.len())
+        if digits.len() == 0 -> return Err(.InvalidURL)
+        value := 0
+        loop byte in digits {
+            n :: Int{byte}
+            if n < 48 || n > 57 -> return Err(.InvalidURL)
+            value = value * 10 + (n - 48)
+            if value > 65535 -> return Err(.InvalidURL)
+        }
+        port = value
+    }
+    target := [U8]{}
+    if tail.len() == 0 {
+        target = "/".bytes()
+    } else if tail[0] == (U8{63}) {
+        &target.push(U8{47})
+        loop byte in tail -> &target.push(byte)
+    } else {
+        target = tail
+    }
+    loop byte in target {
+        if __client_ctl_or_space(Int{byte}) -> return Err(.InvalidURL)
+    }
+    lower := [U8]{}
+    loop byte in host -> &lower.push(U8{__build_lower(Int{byte})})
+    Ok(__ClientURL{
+        scheme: scheme,
+        host: String.from_bytes(lower) ?? return Err(.InvalidURL),
+        port: port,
+        authority: String.from_bytes(authority) ?? return Err(.InvalidURL),
+        target: String.from_bytes(target) ?? return Err(.InvalidURL),
+    })
+}
+
+fn __client_has(raw: [U8], byte: Int) -> Bool Never! {
+    loop item in raw {
+        if Int.from_u8(item) == byte -> return true
+    }
+    false
+}
+
+fn __client_ctl_or_space(n: Int) -> Bool Never! { n < 33 || n == 127 }
+
+// A redirect `Location` resolved against the request URL: absolute,
+// scheme-relative, absolute-path, or relative to the target's directory.
+fn __client_redirect_url(base: __ClientURL, location: String) -> String HTTPError! {
+    if location.starts_with("http://") || location.starts_with("https://") {
+        _ :: __client_url(location) ?? return Err(err)
+        return Ok(location.copy())
+    }
+    if location.starts_with("//") -> return Ok("{base.scheme}:{location}")
+    default_port :: (base.scheme == "http" && base.port == 80) || (base.scheme == "https" && base.port == 443)
+    authority :: if default_port -> base.host.copy() else -> "{base.host}:{base.port}"
+    if location.starts_with("/") -> return Ok("{base.scheme}://{authority}{location}")
+    path :: base.target.split("?").to_list()[0]
+    raw :: path.bytes()
+    slash := raw.len() - 1
+    loop slash >= 0 && raw[slash] != (U8{47}) -> slash -= 1
+    directory :: if slash >= 0 -> "{String.from_bytes(__build_slice(raw, 0, slash)) ?? ""}/" else -> "/"
+    Ok("{base.scheme}://{authority}{directory}{location}")
+}
+
+fn __client_safe_method(method: String) -> Bool Never! {
+    method == "GET" || method == "HEAD" || method == "OPTIONS" || method == "TRACE"
+}
+
+// Redirects: same-origin credentials kept, no https to http downgrade,
+// 301/302/303 turn a POST into a bodyless GET, and a 307/308 replays the
+// body.
+fn __client_follow(original_method: String, original_url: String, original_fields: [http.Header], original_body: [U8]?, phases: __ClientPhases, limit: Int, explicit_limit: Bool, proxy_text: String?) -[Net, Time.Wait]> HTTPResponse HTTPError! {
+    method := original_method.copy()
+    url := original_url.copy()
+    fields := original_fields
+    body := original_body
+    visited := [String]{}
+    history := [String]{}
+    proxy := __ClientURL?{None}
+    if proxy_text == .Val(text) {
+        if text != "" -> proxy = Val(__client_url(text) ?? return Err(.Proxy{stage: "transport"}))
+    }
+    followed := 0
+    loop followed <= limit {
+        loop seen in visited {
+            if seen == url -> return Err(.Redirect{reason: "limit"})
+        }
+        &visited.push(url.copy())
+        parsed :: __client_url(url) ?? return Err(err)
+        reply :: __client_once(method, parsed, fields, body, phases, proxy) ?? return Err(err)
+        status :: reply.status
+        if status != 301 && status != 302 && status != 303 && status != 307 && status != 308 -> return Ok(__client_finish(reply, history))
+        location :: http.headers_get(reply.headers, "location") ?? return Ok(__client_finish(reply, history))
+        if followed == limit || (explicit_limit && limit != 0 && followed + 1 == limit) {
+            if limit == 0 -> return Ok(__client_finish(reply, history))
+            return Err(.Redirect{reason: "limit"})
+        }
+        next_url :: __client_redirect_url(parsed, location) ?? return Err(err)
+        next :: __client_url(next_url) ?? return Err(err)
+        if parsed.scheme == "https" && next.scheme == "http" -> return Err(.Redirect{reason: "limit"})
+        if parsed.host != next.host || parsed.port != next.port || parsed.scheme != next.scheme {
+            kept := [http.Header]{}
+            loop field in fields {
+                lower :: ascii_lower(field.name)
+                if lower != "authorization" && lower != "proxy-authorization" && lower != "cookie" -> &kept.push(field)
+            }
+            fields = kept
+        }
+        if (status == 301 || status == 302 || status == 303) && method == "POST" {
+            method = "GET"
+            body = None
+            kept := [http.Header]{}
+            loop field in fields {
+                lower :: ascii_lower(field.name)
+                if lower != "content-length" && lower != "content-type" -> &kept.push(field)
+            }
+            fields = kept
+        } else if (status == 307 || status == 308) && body == None && !__client_safe_method(method) {
+            return Err(.Redirect{reason: "limit"})
+        }
+        &history.push(url.copy())
+        url = next_url
+        followed += 1
+    }
+    Err(.Redirect{reason: "limit"})
+}
+
+fn __client_finish(reply: __ClientReply, history: [String]) -> HTTPResponse Never! {
+    http.__client_response(reply.status, if reply.body.len() == 0 -> http.Body.Empty else -> http.Body.Bytes(reply.body), reply.headers, history, [Int]{}, false, reply.raw_encoding, reply.body_error)
+}
+
+// One request on a fresh connection: dial (through the proxy when one is
+// set), write the head and body, read the final head and the body. The
+// connection is closed before returning.
+fn __client_once(method: String, url: __ClientURL, fields: [http.Header], body: [U8]?, phases: __ClientPhases, proxy: __ClientURL?) -[Net, Time.Wait]> __ClientReply HTTPError! {
+    if method == "" || !valid_method(method) -> return Err(.InvalidHeader)
+    destination :: proxy ?? url
+    connect_end :: __client_until(phases.connect_ns, phases.end_ns)
+    if connect_end <= core.time.__clock_mono_ns() -> return Err(.Timeout{phase: "transport"})
+    addresses :: provider.jet_http_build_resolve(destination.host, destination.port) ?? return Err(.Resolve{host: "<redacted>"})
+    tcp := __build_connect(addresses, destination.port, connect_end) ?? {
+        if core.time.__clock_mono_ns() >= connect_end -> return Err(.Timeout{phase: "transport"})
+        return Err(.Connect{address: "<redacted>"})
+    }
+    wire := __BuildWire{tcp: None, tls: None, buffer: [U8]{}, at: 0, end_ns: phases.end_ns, idle_ns: 0}
+    if url.scheme == "https" {
+        tls_end :: __client_until(phases.tls_ns, phases.end_ns)
+        if proxy != None {
+            wire.tcp = Val(tcp)
+            wire.idle_ns = phases.tls_ns
+            _ :: __client_tunnel(&wire, url) ?? {
+                __client_close(&wire)
+                return Err(err)
+            }
+            tcp = wire.tcp ?? return Err(.Proxy{stage: "transport"})
+            wire.tcp = None
+        }
+        remaining :: tls_end - core.time.__clock_mono_ns()
+        if remaining <= 0 -> return Err(.Timeout{phase: "transport"})
+        stream := build_tls.__client_deadline_entry(^tcp, url.host, Duration{ns: remaining}) ?? {
+            if core.time.__clock_mono_ns() >= tls_end -> return Err(.Timeout{phase: "transport"})
+            return Err(.TLS{stage: "handshake"})
+        }
+        wire.tls = Val(stream)
+    } else {
+        wire.tcp = Val(tcp)
+    }
+    result := __client_exchange(&wire, method, url, fields, body, phases, proxy != None)
+    __client_close(&wire)
+    result
+}
+
+// A TLS stream owns its socket until closed: close it so the peer sees
+// close_notify; the reply is already decided either way.
+fn __client_close(&wire: __BuildWire) Never! -[Net, Time.Wait]> {
+    if wire.tls == .Val(stream) {
+        if stream.close() == {
+            .Ok(_) -> {}
+            .Err(_) -> {}
+        }
+    }
+}
+
+// `CONNECT host:port` through an http proxy; any failure is Proxy.
+fn __client_tunnel(&wire: __BuildWire, url: __ClientURL) HTTPError! -[Net, Time.Wait]> {
+    authority :: "{url.host}:{url.port}"
+    _ :: __build_send(&wire, "CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\nProxy-Connection: keep-alive\r\n\r\n".bytes()) ?? return Err(.Proxy{stage: "transport"})
+    head :: __client_head(&wire) ?? return Err(.Proxy{stage: "transport"})
+    reply :: __client_parse_head(head) ?? return Err(.Proxy{stage: "transport"})
+    if reply.status != 200 -> return Err(.Proxy{stage: "transport"})
+    Ok(())
+}
+
+fn __client_exchange(&wire: __BuildWire, method: String, url: __ClientURL, fields: [http.Header], body: [U8]?, phases: __ClientPhases, proxied: Bool) -[Net, Time.Wait]> __ClientReply HTTPError! {
+    target :: if proxied && url.scheme == "http" -> "{url.scheme}://{url.authority}{url.target}" else -> url.target.copy()
+    head := "{method} {target} HTTP/1.1\r\nHost: {url.authority}\r\n"
+    has_length := false
+    has_connection := false
+    has_encoding := false
+    loop field in fields {
+        lower :: ascii_lower(field.name)
+        if lower == "content-length" -> has_length = true
+        if lower == "connection" -> has_connection = true
+        if lower == "accept-encoding" -> has_encoding = true
+        head = "{head}{field.name}: {field.value}\r\n"
+    }
+    if !has_encoding -> head = "{head}Accept-Encoding: gzip\r\n"
+    if !has_connection -> head = "{head}Connection: close\r\n"
+    if body == .Val(bytes) {
+        if !has_length -> head = "{head}Content-Length: {bytes.len()}\r\n"
+    }
+    request := "{head}\r\n".bytes()
+    if body == .Val(bytes) {
+        loop byte in bytes -> &request.push(byte)
+    }
+    wire.idle_ns = phases.write_ns
+    _ :: __build_send(&wire, request) ?? return Err(__client_wire_error(wire, err))
+    wire.idle_ns = phases.first_byte_ns
+    interim := 0
+    reply := __client_parse_head(__client_head(&wire) ?? return Err(err)) ?? return Err(err)
+    loop reply.status >= 100 && reply.status <= 199 {
+        if reply.status == 101 -> return Err(.Protocol{version: "unsupported"})
+        interim += 1
+        if interim > C_CLIENT_INTERIM -> return Err(.InvalidFraming)
+        reply = __client_parse_head(__client_head(&wire) ?? return Err(err)) ?? return Err(err)
+    }
+    wire.idle_ns = phases.read_ns
+    raw_encoding :: http.headers_get(reply.headers, "content-encoding")
+    transfer := [String]{}
+    loop field in reply.headers.fields {
+        if field.name == "transfer-encoding" {
+            loop item in field.value.split(",") -> &transfer.push(ascii_lower(trim(item)))
+        }
+    }
+    if transfer.len() > 1 || (transfer.len() == 1 && transfer[0] != "chunked") -> return Err(.InvalidFraming)
+    length := Int?{None}
+    loop field in reply.headers.fields {
+        if field.name != "content-length" -> next
+        loop item in field.value.split(",") {
+            value :: __client_length(item) ?? return Err(.InvalidFraming)
+            if length == .Val(prior) {
+                if prior != value -> return Err(.InvalidFraming)
+            }
+            length = Val(value)
+        }
+    }
+    if length == .Val(declared) {
+        if declared > C_CLIENT_BODY_BYTES -> return Err(.InvalidFraming)
+        if transfer.len() > 0 -> return Err(.InvalidFraming)
+    }
+    gzip := false
+    if raw_encoding == .Val(encoding) {
+        lower :: ascii_lower(encoding)
+        if lower == "gzip" {
+            gzip = true
+        } else if lower != "identity" {
+            return Err(.UnsupportedEncoding)
+        }
+    }
+    bodyless :: method == "HEAD" || reply.status == 204 || reply.status == 304
+    payload := [U8]{}
+    failure := HTTPError?{None}
+    if !bodyless {
+        if transfer.len() > 0 {
+            if __build_chunked_body(&wire, C_CLIENT_BODY_BYTES, C_CLIENT_BODY_BYTES + 1, &payload) == .Err(error) -> failure = Val(__client_body_error(wire, error))
+            if failure == None && payload.len() > C_CLIENT_BODY_BYTES -> failure = Val(HTTPError.InvalidFraming)
+        } else if length == .Val(declared) {
+            if __build_read(&wire, declared, false, &payload) == {
+                .Ok(got) -> { if got != declared -> failure = Val(HTTPError.IO{operation: "transport"}) }
+                .Err(error) -> failure = Val(__client_body_error(wire, error))
+            }
+        } else {
+            if __build_read(&wire, C_CLIENT_BODY_BYTES + 1, false, &payload) == .Err(error) -> failure = Val(__client_body_error(wire, error))
+            if failure == None && payload.len() > C_CLIENT_BODY_BYTES -> failure = Val(HTTPError.InvalidFraming)
+        }
+    }
+    fields_out := reply.headers
+    if gzip {
+        if failure == None && payload.len() > 0 {
+            if client_gzip.decompress(payload) == {
+                .Ok(decoded) -> payload = decoded
+                .Err(_) -> failure = Val(HTTPError.InvalidFraming)
+            }
+        }
+        kept := [http.Header]{}
+        loop field in fields_out.fields {
+            if field.name != "content-encoding" && field.name != "content-length" -> &kept.push(field)
+        }
+        fields_out = http.Headers{fields: kept}
+    }
+    Ok(__ClientReply{status: reply.status, headers: fields_out, body: payload, body_error: failure, raw_encoding: raw_encoding})
+}
+
+fn __client_length(text: String) -> Int? Never! {
+    raw :: text.bytes()
+    if raw.len() == 0 -> return None
+    value := 0
+    loop byte in raw {
+        n :: Int{byte}
+        if n < 48 || n > 57 -> return None
+        if value > (C_BUILD_INT_MAX - (n - 48)) /% 10 -> return None
+        value = value * 10 + (n - 48)
+    }
+    Val(value)
+}
+
+// A transport failure is Timeout when the stream reports one or the send's
+// deadline has passed, else IO.
+fn __client_timed_out(wire: __BuildWire, message: String) -[Time.Wait]> Bool Never! {
+    message.contains("timed out") || message.contains("timeout") || core.time.__clock_mono_ns() >= wire.end_ns
+}
+
+fn __client_wire_error(wire: __BuildWire, failure: __BuildHTTPFailure) -[Time.Wait]> HTTPError Never! {
+    if __client_timed_out(wire, failure.message) -> return HTTPError.Timeout{phase: "transport"}
+    HTTPError.IO{operation: "transport"}
+}
+
+// Body framing faults are InvalidFraming; a short or broken stream is IO.
+fn __client_body_error(wire: __BuildWire, failure: __BuildHTTPFailure) -[Time.Wait]> HTTPError Never! {
+    message :: failure.message
+    if __client_timed_out(wire, message) -> return HTTPError.Timeout{phase: "transport"}
+    if message.starts_with("invalid") || message.contains("chunk head") || message.contains("digit") || message.contains("number") -> return HTTPError.InvalidFraming
+    HTTPError.IO{operation: "transport"}
+}
+
+// The head bytes through the blank line (at most 64 KiB); EOF first is IO.
+fn __client_head(&wire: __BuildWire) -[Net, Time.Wait]> [U8] HTTPError! {
+    head := [U8]{}
+    loop {
+        n :: head.len()
+        if n >= 4 && head[n - 4] == (U8{13}) && head[n - 3] == (U8{10}) && head[n - 2] == (U8{13}) && head[n - 1] == (U8{10}) -> return Ok(head)
+        if n >= C_CLIENT_HEAD_BYTES -> return Err(.InvalidHeader)
+        got :: __build_read(&wire, C_CLIENT_HEAD_BYTES - n, true, &head) ?? return Err(__client_wire_error(wire, err))
+        if got == 0 -> return Err(.IO{operation: "transport"})
+    }
+}
+
+// The status line and header fields: names lowercased, values trimmed of
+// spaces and tabs, at most 100 fields.
+fn __client_parse_head(head: [U8]) -> __ClientReply HTTPError! {
+    text :: String.from_bytes(head) ?? return Err(.InvalidHeader)
+    lines :: __build_slice_text(text, 0, text.bytes().len() - 4).split("\r\n").to_list()
+    if lines.len() == 0 -> return Err(.InvalidFraming)
+    status_parts :: lines[0].split(" ").to_list()
+    version :: status_parts[0]
+    if !version.starts_with("HTTP/") -> return Err(.InvalidFraming)
+    if version != "HTTP/1.0" && version != "HTTP/1.1" -> return Err(.Protocol{version: "unsupported"})
+    if status_parts.len() < 3 -> return Err(.InvalidFraming)
+    status :: __client_status(status_parts[1]) ?? return Err(.InvalidFraming)
+    if status < 100 || status > 599 -> return Err(.InvalidFraming)
+    fields := [http.Header]{}
+    loop index in 1..<lines.len() {
+        line :: lines[index]
+        if fields.len() == 100 -> return Err(.InvalidHeader)
+        if line.starts_with(" ") || line.starts_with("\t") -> return Err(.InvalidHeader)
+        raw :: line.bytes()
+        colon := 0
+        loop colon < raw.len() && raw[colon] != (U8{58}) -> colon += 1
+        if colon == raw.len() -> return Err(.InvalidHeader)
+        name :: String.from_bytes(__build_slice(raw, 0, colon)) ?? return Err(.InvalidHeader)
+        value :: String.from_bytes(__build_slice(raw, colon + 1, raw.len())) ?? return Err(.InvalidHeader)
+        if !http.client_header_name(name) || !http.client_header_value(value) -> return Err(.InvalidHeader)
+        &fields.push(http.Header{name: ascii_lower(name), value: __client_trim_ows(value)})
+    }
+    Ok(__ClientReply{status: status, headers: http.Headers{fields: fields}, body: [U8]{}, body_error: None, raw_encoding: None})
+}
+
+// `str::parse::<i64>`: an optional sign and decimal digits.
+fn __client_status(text: String) -> Int? Never! {
+    raw :: text.bytes()
+    at := 0
+    negative := false
+    if raw.len() > 0 && (raw[0] == (U8{43}) || raw[0] == (U8{45})) {
+        negative = raw[0] == (U8{45})
+        at = 1
+    }
+    if at == raw.len() -> return None
+    value := 0
+    loop at < raw.len() {
+        n :: Int{raw[at]}
+        if n < 48 || n > 57 -> return None
+        if value > 100000 -> return None
+        value = value * 10 + (n - 48)
+        at += 1
+    }
+    Val(if negative -> 0 - value else -> value)
+}
+
+fn __client_trim_ows(text: String) -> String Never! {
+    raw :: text.bytes()
+    from := 0
+    to := raw.len()
+    loop from < to && (raw[from] == (U8{32}) || raw[from] == (U8{9})) -> from += 1
+    loop to > from && (raw[to - 1] == (U8{32}) || raw[to - 1] == (U8{9})) -> to -= 1
+    String.from_bytes(__build_slice(raw, from, to)) ?? ""
+}
+
+fn __build_slice_text(text: String, start: Int, end: Int) -> String Never! {
+    String.from_bytes(__build_slice(text.bytes(), start, end)) ?? ""
+}

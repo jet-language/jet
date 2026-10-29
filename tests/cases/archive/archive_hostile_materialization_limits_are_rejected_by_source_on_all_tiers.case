@@ -1,0 +1,18 @@
+# tests/archive.rs::archive_hostile_materialization_limits_are_rejected_by_source_on_all_tiers at tests/archive.rs:525; hand-port (gen/ is the archive suite's fixture generator (tests/cases/archive/source_compressors_reject_output_over_the_shared_budget_on_all_tiers.fixture/gen), which ports the hostile byte builders (tests/archive.rs:302-522); its "hostile" mode writes the six inputs into the case directory, and run.jet is the original source with the temp-file placeholders replaced by those relative names)
+fixture: archive_hostile_materialization_limits_are_rejected_by_source_on_all_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step gen: jet run gen/gen.jet -- hostile
+exit: 0
+
+step run: jet run run.jet
+exit: 0
+stdout: = archive_hostile_materialization_limits_are_rejected_by_source_on_all_tiers.1.out
+step build: jet build run.jet
+exit: 0
+step aot: built
+exit: == run
+stdout: == run
+stderr: == run

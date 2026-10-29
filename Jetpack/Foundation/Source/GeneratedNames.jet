@@ -4,7 +4,7 @@
 // this one policy so their output never collides with Jet's own names.
 
 // Real Jet keywords (`JET_KEYWORD_LIST`).
-GENERATED_NAME_KEYWORDS :: prep { [String]{
+GENERATED_NAME_KEYWORDS :: comptime { [String]{
     "fn", "pub", "priv", "use", "as", "extern", "module", "if", "else", "loop", "in", "break",
     "return", "defer", "struct", "enum", "alias", "impl", "policy", "wrap", "trait", "tag",
     "effect", "derive", "distinct", "migration", "rename", "add", "remove", "change", "via",
@@ -16,11 +16,11 @@ GENERATED_NAME_KEYWORDS :: prep { [String]{
 // Lexer keywords and teaching words outside the keyword list, and the
 // contextual `state` that stays legal (`KW_MUTATE`, `KW_MOVE`, `KW_COPY`,
 // `KW_CONST`, `FOREIGN_MATCH`, `LIT_NULL`, `KW_STATE_DECL`).
-GENERATED_NAME_RETIRED_WORDS :: prep { [String]{"mut", "take", "copy", "const", "match", "None"} }
-GENERATED_NAME_CONTEXTUAL_STATE :: prep { "state" }
+GENERATED_NAME_RETIRED_WORDS :: [String]{"mut", "take", "copy", "const", "match", "None"}
+GENERATED_NAME_CONTEXTUAL_STATE :: "state"
 
 // Built-in type names a user writes (`JET_TYPE_LIST`).
-GENERATED_NAME_BUILTIN_TYPES :: prep { [String]{
+GENERATED_NAME_BUILTIN_TYPES :: comptime { [String]{
     "Int", "Float", "Bool", "String", "()", "Char", "Err", "Shared", "SharedSnapshot",
     "SharedRevisionError", "SharedGuard", "Shared.Weak", "Condition", "Task", "Receiver", "Sender",
     "TaskFailure", "HashMap", "BTreeMap", "Map", "Queue", "Set", "Rank", "PriorityQueue", "Cache",
@@ -29,11 +29,11 @@ GENERATED_NAME_BUILTIN_TYPES :: prep { [String]{
 } }
 
 // Built-in type names users cannot redefine (`Collections::RESERVED_TYPES`).
-GENERATED_NAME_RESERVED_TYPES :: prep { [String]{
+GENERATED_NAME_RESERVED_TYPES :: comptime { [String]{
     "HashMap", "BTreeMap", "Map", "Char", "Bits", "Bytes", "Set", "Rank", "PriorityQueue", "Cache",
     "Iter", "ViewIter", "MemoStats", "RemoveBy", "Ordering", "Range", "SharedGuard", "Shared.Weak",
     "Condition", "Tally", "Queue", "Decimal", "Duration", "DurationUnit", "RangeError",
-    "ExpiringValue", "Authority", "Validate", "Solver", "BuildContext", "BuildPlan", "BuildAction",
+    "ExpiringValue", "Authority", "Validate", "Solver", "Build", "BuildPlan", "BuildAction",
     "BuildTarget", "BuildToolchain", "BuildProbe", "BuildSigningIdentity", "BuildError",
     "ProgramInfo", "Cell", "CellReadGuard", "CellEditGuard"
 } }
@@ -41,13 +41,13 @@ GENERATED_NAME_RESERVED_TYPES :: prep { [String]{
 // Prelude type spellings (`TYPE_DATA`, `TYPE_JSON`, `TYPE_REGEX`, `TYPE_URL`,
 // `TYPE_PATH`, `TYPE_DATETIME`, `CLOCK_TYPE`, `TYPE_INSTANT`,
 // `TYPE_FRACTION`, `TYPE_RESULT`, `TYPE_ERR`, `TYPE_NEVER`).
-GENERATED_NAME_PRELUDE_TYPES :: prep { [String]{
+GENERATED_NAME_PRELUDE_TYPES :: comptime { [String]{
     "Dyn", "JSON", "Regex", "URL", "Path", "DateTime", "Clock", "Instant", "Fraction",
     "Result", "Err", "Never"
 } }
 
 // The compile-time mark a canonical name keeps in front of its re-cased body.
-GENERATED_NAME_COMPTIME_MARK :: prep { "@" }
+GENERATED_NAME_COMPTIME_MARK :: "@"
 
 // Whether generated source may not use `name`. This applies the keyword,
 // built-in, reserved, and Prelude type tables; Core module type exports

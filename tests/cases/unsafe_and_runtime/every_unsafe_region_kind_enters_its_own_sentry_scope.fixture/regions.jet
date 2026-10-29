@@ -1,0 +1,18 @@
+#Unsafe("the cell is live on this frame")
+fn peek(v: Int) -> Int {
+    cell :: v
+    p :: *cell
+    p.*
+}
+
+fn run() {
+    #Unsafe("call the gated reader") {
+        print(peek(42))
+    }
+}
+
+#Test("gated reader") {
+    #Unsafe("test region calls the gated reader") {
+        assert_eq(peek(1), 1)
+    }
+}

@@ -89,7 +89,7 @@ if(test){
  process.exit(0);
 }
 const fieldDirectory=join(out,'fields');mkdirSync(fieldDirectory);
-const fieldSource=join(root,'Compiler/JetBackend/Tests/Fixtures/ProcessReceiptFields.jet'),fieldHandle=fileObject(fieldSource);
+const fieldSource=join(root,'Compiler/JetBackend/Tests/Fragments.fixture/Fixtures/ProcessReceiptFields.jet'),fieldHandle=fileObject(fieldSource);
 writeFileSync(join(fieldDirectory,'package.jet'),'name: "process_fields_witness"\nversion: "0.0.1"\nedition: "2028"\n',{flag:'wx'});
 const fieldCopy=join(fieldDirectory,'run.jet');
 writeFileSync(fieldCopy,readFileSync(fieldSource),{flag:'wx'});

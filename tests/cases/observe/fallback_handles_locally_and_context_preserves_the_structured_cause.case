@@ -1,0 +1,21 @@
+# tests/observe.rs::fallback_handles_locally_and_context_preserves_the_structured_cause at tests/observe.rs:571; hand-port
+# Claim: exit 1 (tests/observe.rs:592)
+# Claim: stdout is exactly `fallback` (tests/observe.rs:593)
+# Claim: stderr starts with the E_OUTER header, its cause line (tests/observe.rs:595)
+# Claim: Trail header says 2 hops via ?, origin first (tests/observe.rs:599)
+# Claim: hop 1 is pass_through with the loading note (tests/observe.rs:603-605)
+# Claim: hop 2 is run (tests/observe.rs:605)
+# Claim: the " — loading" note appears exactly once (tests/observe.rs:608-612)
+# Not ported: the " — loading" note appears exactly once (tests/observe.rs:608-612): no count matcher; the observed output shows the note once on hop 1
+fixture: fallback_handles_locally_and_context_preserves_the_structured_cause.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run fallback_context_cause.jet
+exit: 1 # tests/observe.rs:580-612
+stdout: = "fallback\n" # tests/observe.rs:580-612
+stderr: ~ "Error [E_OUTER]: outer\n  cause: root\n" # tests/observe.rs:580-612
+stderr: ~ "Trail [E3002] (2 hops via ?, origin first):" # tests/observe.rs:580-612
+stderr: ~ "  1. pass_through (" # tests/observe.rs:580-612
+stderr: ~ ") — loading" # tests/observe.rs:580-612
+stderr: ~ "  2. run (" # tests/observe.rs:580-612

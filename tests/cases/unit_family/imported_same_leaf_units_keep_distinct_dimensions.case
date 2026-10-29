@@ -1,0 +1,16 @@
+# tests/unit_family.rs::imported_same_leaf_units_keep_distinct_dimensions at tests/unit_family.rs:1688; hand-port
+# Claim: same-leaf units from length and time packages add to ok (tests/unit_family.rs:1688)
+# Claim: length + time rejected E0359 (tests/unit_family.rs:1688)
+# Fixture migrated: length.jet and time.jet split into separate packages with deps (same namespace otherwise)
+fixture: imported_same_leaf_units_keep_distinct_dimensions.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check good/main.jet
+exit: 0 # same-leaf units from length and time packages add to ok (tests/unit_family.rs:1688)
+step: jet run good/main.jet
+exit: 0 # same-leaf units from length and time packages add to ok (tests/unit_family.rs:1688)
+stdout: = "ok\n" # same-leaf units from length and time packages add to ok (tests/unit_family.rs:1688)
+step: jet check bad/main.jet
+exit: 1 # same-leaf units from length and time packages add to ok (tests/unit_family.rs:1688)
+stderr: ~ "E0359" # same-leaf units from length and time packages add to ok (tests/unit_family.rs:1688)

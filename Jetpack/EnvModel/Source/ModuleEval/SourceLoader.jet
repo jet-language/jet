@@ -2,6 +2,13 @@
 // discovery (U4), and the merged `(name -> upstream)` source table
 // (U4/U5/U6/U9).
 use core.files as envmodel_source_files
+use jet_pkg_model.[
+    ChannelPolicy, InlinePackageBlock, MergeError, NamedSourceDecl, PackageFacts, ProviderKind,
+    ProviderRef, SourceTable, pkg_bytes_text, pkg_extract_inline_package, pkg_merge_sources,
+    pkg_split_channel_ref,
+]
+use jetpack_foundation.[BUILTIN_FIND, DEFAULT_ENTRY_FILE, FILE_EXT, PACKAGE_FILE]
+use jet_foundation.[Expr, Item, ModuleDecl, expr_span]
 
 // Read-only source access for an environment graph. Paths passed to the
 // loader are relative to the pinned environment root; returned file paths
@@ -165,7 +172,7 @@ fn envmodel_discover_imports<L: SourceLoader>(root: EvalUnit, base_dir: String, 
             written :: envmodel_find_dir_arg(directive)
             relative :: envmodel_normalize_relative_path(written)
             find_span :: if directive == {
-                .Call(call) -> Val(call.name_span)
+                .Call(call, _) -> Val(call.name_span)
                 else -> Val(expr_span(directive))
             }
             if relative == "" || envmodel_source_files.is_absolute(written) || envmodel_path_has_parent_component(relative) {
@@ -208,12 +215,12 @@ fn envmodel_discover_imports<L: SourceLoader>(root: EvalUnit, base_dir: String, 
 fn envmodel_find_dir_arg(directive: Expr) -> String EnvModelEvalError! {
     call :: if directive == {
         // copy: `call` is a payload of read parameter `directive`, which keeps the original; the assigned `call` owns this one
-        .Call(call) -> call.copy()
+        .Call(call, _) -> call.copy()
         else -> { return Err(envmodel_bad_import_directive(expr_span(directive))) }
     }
     if call.name != BUILTIN_FIND || call.args.len() != 1 -> return Err(envmodel_bad_import_directive(expr_span(directive)))
     parts :: if call.args[0].expr == {
-        .Str(parts, _) -> parts
+        .Str(parts, _, _) -> parts
         else -> { return Err(envmodel_bad_import_directive(expr_span(directive))) }
     }
     path := ""

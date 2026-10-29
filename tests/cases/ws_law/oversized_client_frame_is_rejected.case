@@ -1,0 +1,11 @@
+# tests/ws_law.rs::oversized_client_frame_is_rejected at tests/ws_law.rs:963; hand-port
+# Claim: a client frame of 10 bytes exceeds a server max_message of 8 and is rejected with MessageTooLarge{limit:8} (tests/ws_law.rs:963-991)
+# Not ported: no Jet API sets the server max_message: Core/net/ws.jet:12 declares MessageTooLarge(limit: Int) but no setter exists, so the 8-byte limit cannot be expressed; the fixture runs the default limit and only the echo path is observed
+fixture: oversized_client_frame_is_rejected.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0 # tests/ws_law.rs:963-991 oversized frame yields MessageTooLarge{limit:8}
+stdout: ~ "MessageTooLarge" # tests/ws_law.rs:963-991 oversized frame yields MessageTooLarge{limit:8}
+stderr: !~ "E2104" # tests/ws_law.rs:963-991 oversized frame yields MessageTooLarge{limit:8}

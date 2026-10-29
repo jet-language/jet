@@ -11,7 +11,7 @@
 // captured provider payload may stand in for the foreign result in tests.
 
 // The one fixture a flake bridge reads in place of native evaluation.
-BRIDGE_FIXTURE_FILE :: prep { "flake-devshell.json" }
+BRIDGE_FIXTURE_FILE :: "flake-devshell.json"
 
 // Facts pulled from a flake's devShell.
 struct DevShellFacts {
@@ -235,7 +235,7 @@ fn provider_l0204_unmappable(field: String, file: String) -> Diagnostic Never! {
 // `jetpack bridge flake`: read the foreign flake in `dir`, commit its typed
 // graph to `.jet/lock`, print the shim to stdout and one L0204 warning per
 // unmapped field to stderr. Returns the exit code.
-fn provider_cmd_flake(theme: Theme, dir: String, fixtures: String?) -[IO, FS, Env, Time.Wait]> Int Never! {
+fn provider_cmd_flake(theme: Theme, dir: String, fixtures: String?) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
     flake_path := ""
     foreign_files :: [String]{FOREIGN_FLAKE_FILE, FOREIGN_DEVENV_FILE}
     loop name in foreign_files {
@@ -281,7 +281,7 @@ fn provider_cmd_flake(theme: Theme, dir: String, fixtures: String?) -[IO, FS, En
 
 // Evaluate every package derivation and named devShell, merge every loss into
 // the graph, and commit the semantic lock. Some(exit code) on failure.
-fn provider_bridge_commit_graph(theme: Theme, dir: String, flake_path: String, graph: &FlakeGraph, facts: &DevShellFacts) -[IO, FS, Env, Time.Wait]> Int? Never! {
+fn provider_bridge_commit_graph(theme: Theme, dir: String, flake_path: String, graph: &FlakeGraph, facts: &DevShellFacts) -[IO, FS, Env, Exec, Time, Time.Wait]> Int? Never! {
     system :: provider_bridge_host_system()
     source :: if files.read(flake_path) == {
         .Ok(text) -> text
@@ -297,13 +297,6 @@ fn provider_bridge_commit_graph(theme: Theme, dir: String, flake_path: String, g
             return Val(1)
         }
     }
-    authority :: if provider_native_authority(source_root) == {
-        .Ok(value) -> value
-        .Err(error) -> {
-            error.report(theme)
-            return Val(1)
-        }
-    }
     derivations := [(name: String, system: String, derivation: NixNativeDerivation)]{}
     loop output in graph.outputs {
         if output.kind != FlakeOutputKind.Package -> next
@@ -311,7 +304,16 @@ fn provider_bridge_commit_graph(theme: Theme, dir: String, flake_path: String, g
             theme.error("couldn't identify a package system", "{output.name} has no supported system-qualified package output", "write the package under `packages.<system>.<name>`, then run `jet os bridge flake` again.")
             return Val(1)
         }
-        if nix_evaluate_derivation_output_with_import_authority(source, output.system, output.attribute, ^Val(authority.copy())) == {
+        // The import authority holds open handles and moves into each
+        // evaluation, so every package output opens its own.
+        authority :: if provider_native_authority(source_root) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                error.report(theme)
+                return Val(1)
+            }
+        }
+        if nix_evaluate_derivation_output_with_import_authority(source, output.system, output.attribute, ^Val(^authority)) == {
             .Ok(derivation) -> &derivations.push((name: output.name, system: output.system, derivation: derivation))
             .Err(error) -> {
                 if output.system != system {
@@ -324,7 +326,7 @@ fn provider_bridge_commit_graph(theme: Theme, dir: String, flake_path: String, g
             }
         }
     }
-    default_facts :: facts
+    default_facts :: facts.copy()
     shells := [(name: String, facts: DevShellFacts)]{}
     loop output in graph.named_dev_shells() {
         if output.system != system -> next

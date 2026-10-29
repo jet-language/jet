@@ -2,7 +2,7 @@
 # Every original mode/code/receipt field/redaction/byte-identity assertion; no captured oracle.
 fixture: production_failure_receipt_is_canonical_redacted_and_tier_stable.fixture
 env: JET_PRODUCTION_USER_DATA=PRODUCTION_RECEIPT_ENV_MARKER_755
-step tier0: jet run --interpret main.jet -- PRODUCTION_RECEIPT_INPUT_MARKER_755
+step tier0: jet run main.jet -- PRODUCTION_RECEIPT_INPUT_MARKER_755
 cwd: tier-0
 env: JET_STORE_DIR={work}/tier-0/cache
 exit: 70
@@ -34,7 +34,7 @@ file: {cap:report_tier1}/receipt !~ "PRODUCTION_RECEIPT_SOURCE_MARKER_755" # ori
 file: {cap:report_tier1}/receipt !~ "PRODUCTION_RECEIPT_INPUT_MARKER_755" # original ed77c235f tests/production_receipt.rs:42,88-89 excludes input secret
 file: {cap:report_tier1}/receipt !~ "PRODUCTION_RECEIPT_ENV_MARKER_755" # original ed77c235f tests/production_receipt.rs:43,88-89 excludes environment secret
 file: {cap:report_tier1}/receipt == baseline.receipt
-step tier2: jet dev main.jet --interpret --watch=off -- PRODUCTION_RECEIPT_INPUT_MARKER_755
+step tier2: jet dev main.jet --watch=off -- PRODUCTION_RECEIPT_INPUT_MARKER_755
 cwd: tier-2
 env: JET_STORE_DIR={work}/tier-2/cache
 exit: 70

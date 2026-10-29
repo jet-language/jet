@@ -35,7 +35,7 @@ contract_sha256() {
     printf 'Tools/perf/source-compiler-policy.tsv\t%s\n' "$(sha256_file "$POLICY")"
   } | sha256sum | awk '{ print $1 }'
 }
-source_manifest_sha256="$(sha256_file "$ROOT/Compiler/Bootstrap/sources.list")"
+source_manifest_sha256="$(sha256_file "$ROOT/Compiler/package.jet")"
 
 write_identity() {
   cat >"$REPORT/identity.tsv" <<EOF

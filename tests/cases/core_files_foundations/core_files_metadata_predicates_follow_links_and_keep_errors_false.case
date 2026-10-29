@@ -1,0 +1,21 @@
+# tests/core_files_foundations.rs::core_files_metadata_predicates_follow_links_and_keep_errors_false at tests/core_files_foundations.rs:235; hand-port
+# Claim: exists/is_dir on root, regular file, directory link, file link, missing, broken link, file/child (tests/core_files_foundations.rs:249-262)
+# Claim: expected 14-line output "true,true,true,false,true,true,true,false,false,false,false,false,false,false" (tests/core_files_foundations.rs:268)
+# Claim: default run and AOT build produce identical stdout (tests/core_files_foundations.rs:265-269)
+# Fixture migrated: Rust symlink targets were absolute scratch paths -> link-relative targets created at run time by files.symlink (".", "file", "missing"); a symlink in the package tree blocks compile (E2105)
+fixture: core_files_metadata_predicates_follow_links_and_keep_errors_false.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: rm -rf fixture
+exit: 0 # tests/core_files_foundations.rs:235 fresh fixture root per tier
+step: jet run main.jet
+exit: 0 # tests/core_files_foundations.rs:235 default tier stdout
+stdout: = core_files_metadata_predicates_follow_links_and_keep_errors_false-2.out # tests/core_files_foundations.rs:235 default tier stdout
+step: rm -rf fixture
+exit: 0 # tests/core_files_foundations.rs:235 fresh fixture root per tier
+step: jet build main.jet
+exit: 0 # tests/core_files_foundations.rs:235 AOT tier builds
+step: built
+exit: 0 # tests/core_files_foundations.rs:235 AOT tier stdout equals default
+stdout: = core_files_metadata_predicates_follow_links_and_keep_errors_false-5.out # tests/core_files_foundations.rs:235 AOT tier stdout equals default

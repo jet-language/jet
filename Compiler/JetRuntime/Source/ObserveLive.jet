@@ -233,21 +233,8 @@ fn observe_process_facts(out: I64) {
     }
     jet_rt_string_drop(stat)
     if !valid || field != (I64{19}) -> return
-    path = jet_rt_string_builder_new()
-    observe_msg_proc_auxv(path)
-    aux :: observe_read_file(path)
-    jet_rt_string_drop(path)
-    if aux == (I64{0}) -> return
-    hz := I64{0}
-    at = I64{0}
-    loop at + (I64{16}) <= rt_text_len(aux) {
-        if sync_load(rt_text_data(aux) + at) == (I64{17}) {
-            hz = sync_load(rt_text_data(aux) + at + I64{8})
-            break
-        }
-        at += I64{16}
-    }
-    jet_rt_string_drop(aux)
+    // AT_CLKTCK
+    hz :: host_getauxval(I64{17})
     ticks :: wrapping(user + system)
     if hz <= (I64{0}) || observe_unsigned_less(ticks, user) || observe_unsigned_less(I64{18446744073}, ticks) -> return
     sync_store(out + I64{8}, I64{1})
@@ -713,7 +700,7 @@ fn observe_env_key(index: I64) -> I64 {
         jet_rt_string_drop(directory)
         if writer != (I64{0}) && sync_cas(writer + I64{112}, I64{0}, I64{1}) == (I64{0}) {
             handle :: thread_spawn(rt_observe_writer_address(), writer)
-            if handle < (I64{0}) -> scheduler_fatal(scheduler_msg_start_failed())
+            if handle < (I64{0}) -> scheduler_start_failed()
             _ := thread_detach(handle)
         }
     }

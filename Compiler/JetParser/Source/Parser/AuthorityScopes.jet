@@ -14,8 +14,8 @@ use jet_foundation.[
 
 fn parser_authority_effect_path(expr: Expr) -> String? {
     if expr == {
-        .Ident(name, _) -> Val(name)
-        .Field(base, member, _) -> {
+        .Ident(name, _, _) -> Val(name)
+        .Field(base, member, _, _) -> {
             prefix :: parser_authority_effect_path(base) ?? return None
             Val("{prefix}.{member}")
         }

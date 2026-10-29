@@ -7,10 +7,10 @@ index, define the behavior.
 
 ## Run an example
 
-Use the checked-out executable (or the equivalent `jet` on your `PATH`):
+Use the admitted compiler (`jet` on your `PATH`, or `Tools/agent/jet-env jet`):
 
 ```sh
-target/debug/jet run Examples/features/basics/hello.jet
+jet run Examples/features/basics/hello.jet
 ```
 
 The feature runner exercises the same layout in one pass and records the
@@ -19,6 +19,10 @@ command, result, and output for each project:
 ```sh
 node Tools/agent/run-feature-examples.mjs
 ```
+
+`--tier build` checks the same goldens through `jet build` and the built
+binary (same stdin, arguments and working directory); a compile-time
+diagnostic is compared with its command word spelled `jet run`.
 
 For the contributor workflow around the executable and its environment, see
 [`AGENTS.md`](../AGENTS.md) and [`Tools/agent/jet-env`](../Tools/agent/jet-env).
@@ -87,10 +91,8 @@ Failing runs compare stdout as well as stderr and the exact exit code. A
 failure's sibling `.out` is authoritative; without one, stdout must be empty.
 Unknown failure contracts and contradictory exit claims in an oracle are
 missing exit proofs, not permission to accept an arbitrary nonzero status.
-These rules apply to the Rust feature
-runner (`tests/golden.rs`), the native backend runner
-(`Compiler/JetBackend/Tests/run-goldens.mjs`), and the runtime trap runner
-(`Compiler/JetRuntime/Tests/run-trap-goldens.mjs`). Native parity additionally
+These rules apply to the testkit golden suite (`Tools/testkit/Golden.jet`) and the
+native feature runner (`Tools/agent/run-feature-examples.mjs`). Native parity additionally
 requires an executed reference with the same exit and both output streams;
 an emit-only reference does not establish runtime parity.
 
@@ -158,6 +160,6 @@ files are the evidence; this manifest does not duplicate the collection API.
   checker.
 - [`jetpack/executable-lease-recovery.md`](jetpack/executable-lease-recovery.md)
   documents the Jetpack lease-recovery command and its safety boundary.
-- [`tests/golden.rs`](../tests/golden.rs) and
-  [`tests/suite_goldens.rs`](../tests/suite_goldens.rs) are the source of truth
-  for the two golden layouts.
+- [`Tools/testkit/Golden.jet`](../Tools/testkit/Golden.jet) and
+  [`tests/cases/suite_goldens/user_story_suite_matches_expected_output.case`](../tests/cases/suite_goldens/user_story_suite_matches_expected_output.case)
+  are the source of truth for the two golden layouts.

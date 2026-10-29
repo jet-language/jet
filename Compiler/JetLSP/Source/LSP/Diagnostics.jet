@@ -6,8 +6,10 @@
 // These are dependencies, never successful unavailable providers or callbacks.
 use core.term as lsp_diag_term
 use core.text as lsp_diag_text
-use jet_driver.[JetDriverCompilerQueries, JetDriverQuerySnapshot, JetDriverCheckedQuery, JetDriverCompilerCheckResult, jet_driver_query_path, jet_driver_compiler_check_loaded_module_rows, jet_driver_present_checked_diagnostics]
-use jet_foundation.[Diagnostic, Span, ReportPath, DIAGNOSTIC_LINT, diagnostic_cause_matches, diagnostic_to_json_with_clears, diagnostic_report_clear_counts, diagnostic_escape_bidi_text, foundation_json_quote]
+use jet_driver.[JetDriverCompilerQueries, JetDriverCompilerCheckResult]
+use jet_foundation.[Diagnostic, Span, DIAGNOSTIC_LINT, foundation_json_quote]
+use jetpack_foundation.[ReportPath]
+use core.files.runtime.kernel_path_components as lsp_diag_path
 
 // Rust346–348: one actual Stdout write and flush. Byte count is not Jet's
 // scalar String.len. IO errors propagate before any publication-state commit.
@@ -250,7 +252,6 @@ fn lsp_document_group_json(state: LSPDiagnosticState, target: String, diagnostic
     }
     lsp_publish_diagnostics(target, ReportPath.from_process(""), "", None, diagnostics, indices, clears)
 }
-
 
 // didClose534–557: remove the overlay and mark importers before releasing
 // this root's target ownership. Other roots retain their target diagnostics.

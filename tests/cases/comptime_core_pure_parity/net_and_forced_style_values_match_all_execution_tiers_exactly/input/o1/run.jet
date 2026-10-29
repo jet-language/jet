@@ -1,0 +1,15 @@
+use core.term as io
+use core.net as net
+fn net_style_view() -> String {
+    ip4 :: net.ip_addr("127.0.0.1") ?? panic("ip4")
+    ip6 :: net.ip_addr("2001:0db8:0:0:0:0:0:1") ?? panic("ip6")
+    socket :: net.socket_addr_parse("[2001:db8::1]:443") ?? panic("socket")
+    return "{net.ip_to_string(ip4)}:{net.ip_is_ipv4(ip4)}|{net.ip_to_string(ip6)}:{net.ip_is_ipv4(ip6)}|{net.socket_host(socket)}:{net.socket_port(socket)}:{net.socket_to_string(socket)}|{io.style_force("red", "x").len()}:{io.style_force("unknown", "plain")}"
+}
+EXPECTED :: comptime { net_style_view() }
+
+fn run() {
+    actual :: net_style_view()
+    print("{EXPECTED}")
+    print("{actual}")
+}

@@ -3,13 +3,13 @@
 // atomic rename and health-checked rollback on Unix, and the deferred
 // Windows helper that replaces the running executable after it exits.
 //
-// The Windows helper schedules its own copy for deletion at reboot. Core has
-// no ratified design for that yet: the call below is written against
-// `files.delete_at_reboot(path)` (needs Core).
+// Rust scheduled the Windows helper's own copy for deletion at reboot
+// (MoveFileExW with MOVEFILE_DELAY_UNTIL_REBOOT). Core has no such call, so
+// the helper copy is left in the temporary directory.
 
-TOOLCHAIN_WINDOWS_HELPER_ENV :: prep { "JET_TOOLCHAIN_UPDATE_HELPER" }
-TOOLCHAIN_WINDOWS_HANDOFF_ATTEMPTS :: prep { 600 }
-TOOLCHAIN_WINDOWS_HANDOFF_WAIT_MS :: prep { 50 }
+TOOLCHAIN_WINDOWS_HELPER_ENV :: "JET_TOOLCHAIN_UPDATE_HELPER"
+TOOLCHAIN_WINDOWS_HANDOFF_ATTEMPTS :: 600
+TOOLCHAIN_WINDOWS_HANDOFF_WAIT_MS :: 50
 
 // How a verified artifact was installed.
 enum ToolchainInstallOutcome {
@@ -41,7 +41,7 @@ fn recipe_toolchain_update_run_at(options: ToolchainUpdateOptions, current_exe: 
 
 // Seconds since the Unix epoch.
 fn recipe_update_now_seconds() -[Time]> Int RecipeError! {
-    ns :: time.instant().unix_ns
+    ns :: time.unix_ns()
     if ns < 0 -> return Err(RecipeError.Update("system clock is before the Unix epoch"))
     Ok(ns /% 1000000000)
 }
@@ -289,7 +289,7 @@ fn recipe_toolchain_windows_update_helper_requested() -[Env]> Bool Never! {
 }
 
 // Run the deferred Windows helper; the process exit code.
-fn recipe_toolchain_run_windows_update_helper() -[FS, Env, Exec, Time, Time.Wait]> Int Never! {
+fn recipe_toolchain_run_windows_update_helper() -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
     if !sys.is_windows() -> return 1
     if recipe_update_windows_helper_run() == {
         .Ok(_) -> 0
@@ -456,10 +456,8 @@ fn recipe_update_windows_helper_run() RecipeError! -[FS, Env, Exec, Time, Time.W
         }
     }
     files.remove(rollback).drop("the rollback copy is no longer needed once the update committed")
-    helper :: sys.executable()
-    // needs Core: Windows MoveFileExW(path, NULL, MOVEFILE_DELAY_UNTIL_REBOOT);
-    // the running helper cannot delete its own image before it exits.
-    files.delete_at_reboot(helper).drop("removing the helper copy is best-effort")
+    // The running helper cannot delete its own image before it exits, and
+    // Core cannot schedule a delete at reboot: the helper copy stays behind.
 }
 
 fn recipe_update_windows_commit(current: String, state_path: String, state: ToolchainUpdateState) RecipeError! -[FS, Env, Exec, Time.Wait]> {

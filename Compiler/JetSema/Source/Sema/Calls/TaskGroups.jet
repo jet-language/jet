@@ -3,6 +3,7 @@
 // The state lives on SemaCheckContext so statement and expression walks share
 // lexical groups, pending joins, and task-lambda boundaries.
 use jet_foundation.[
+    AST_NODE_GENERATED,
     AccessConvention,
     Binding,
     Call,
@@ -11,34 +12,37 @@ use jet_foundation.[
     EffectRowEntry,
     Expr,
     Marker,
+    NodeKind,
     ParamZone,
     Span,
     Stmt,
+    SwitchArm,
     Symbol,
     SymbolID,
     SymbolKind,
-    TCallArg,
+    TBinaryOp,
+    TBranchClass,
     TCapture,
     TCaptureFacts,
-    TCoreClosureKind,
     TDeclarationOwnership,
     TEffectFacts,
     TEffectSpan,
-    TExpr,
-    TExprKind,
     TFailureCarrier,
-    THandleOp,
-    TLambda,
-    TLambdaBody,
-    TStmt,
+    TLetTy,
+    TLetWrapper,
+    TLocal,
+    TOptionProbe,
     Type,
     TypeTupleField,
     UnOp,
     expr_span,
     symbol_id,
-    tir_symbol_local,
+    checked_symbol_local,
+    checked_user_local,
+    type_identity_equal,
     type_name,
 ]
+use jet_parser.[parser_select_after_field]
 
 enum SemaTaskGroupOrigin {
     Lexical
@@ -165,7 +169,7 @@ fn sema_taskgroup_internal_any_method() -> String Never! { sema_taskgroup_core_k
 
 fn sema_taskgroup_is_internal_receiver(receiver: Expr) -> Bool Never! {
     if receiver == {
-        .Ident(name, _) -> name == sema_taskgroup_internal_receiver()
+        .Ident(name, _, _) -> name == sema_taskgroup_internal_receiver()
         else -> false
     }
 }
@@ -252,7 +256,7 @@ fn sema_taskgroup_expression_moved(state: &SemaOwnershipState, expression: Expr,
 }
 
 fn sema_taskgroup_move_spawn_binding(name: String, span: Span, scopes: SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) {
-    expression := Expr.Ident{name: name, span: span}
+    expression := Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}
     if sema_taskgroup_expression_moved(&state, expression, scopes) -> return
     places := sema_ownership_places_from_expr_in_state(expression, scopes, &state)
     if places.len() == 0 -> return
@@ -290,7 +294,7 @@ fn sema_taskgroup_mark_spawn_owned(context: &SemaCheckContext, name: String, spa
 }
 
 fn sema_taskgroup_receiver_ok(receiver: Expr, span: Span, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
-    name :: if receiver == {.Ident(value, _) -> value else -> ""}
+    name :: if receiver == {.Ident(value, _, _) -> value else -> ""}
     if name == "" {
         &diagnostics.push(sema_error("E1110", span, "a task-group receiver must name an active `Group`", "a group is a scoped spawn authority, not a value that can be computed or copied", "use the active group name directly, or pass `group: Group` to this function"))
         return false
@@ -316,11 +320,11 @@ fn sema_taskgroup_rewrite_anonymous_spawn(statement: Stmt, context: &SemaCheckCo
     expression :: if statement == {.Expr(value) -> value else -> { return None }}
     if context.taskgroups.stack.len() == 0 -> return None
     if expression == {
-        .MethodCall(receiver, method, _, _, _, _, _, _) -> {
+        .MethodCall(receiver, method, _, _, _, _, _) -> {
             if method != sema_taskgroup_internal_spawn_method() -> return None
             canonical := sema_taskgroup_is_internal_receiver(receiver)
             if !canonical {
-                receiver_name :: if receiver == {.Ident(name, _) -> name else -> { return None }}
+                receiver_name :: if receiver == {.Ident(name, _, _) -> name else -> { return None }}
                 if sema_taskgroup_stack_index(context.taskgroups, receiver_name) == None -> return None
             }
         }
@@ -386,7 +390,7 @@ fn sema_taskgroup_check_statement(name: String, name_span: Span, limit: Expr?, b
         }
         else -> {
             sema_ownership_declare_binding(&state, symbol, false)
-            group_ref :: sema_check_expression(Expr.Ident{name: name, span: name_span}, Val(Type.Named{name: "Group"}), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            group_ref :: sema_check_expression(Expr.Ident{name: name, span: name_span, id: AST_NODE_GENERATED}, Val(Type.Named{name: "Group"}), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             if group_ref == None -> valid = false
         }
     }
@@ -396,7 +400,7 @@ fn sema_taskgroup_check_statement(name: String, name_span: Span, limit: Expr?, b
     if context.taskgroups.stack.len() > 0 -> _ := &context.taskgroups.stack.pop()
     sema_single_use_leave_scope(&scopes, &state, &diagnostics)
     if !nested.complete || !valid -> return None
-    group_local := tir_symbol_local(name, name_span, id)
+    group_local := checked_symbol_local(name, name_span, id)
     TStmt.TaskGroup{group: group_local, limit: checked_limit, body: nested.value, span: span}
 }
 
@@ -450,7 +454,7 @@ fn sema_taskgroup_callable_effects(signature: Type) -> TEffectFacts Never! {
     return TEffectFacts{direct: direct, solved: direct, call_edges: [String]{}, maximal: effect_row == None, direct_spans: spans}
 }
 
-fn sema_taskgroup_callable_wrapper(value: TExpr, signature: Type, span: Span) -> TLambda? {
+fn sema_taskgroup_callable_wrapper(value: TExpr, signature: Type, span: Span, context: SemaCheckContext) -> TLambda? {
     params := [Type]{}
     ret := Type?{None}
     if signature == {
@@ -464,7 +468,11 @@ fn sema_taskgroup_callable_wrapper(value: TExpr, signature: Type, span: Span) ->
     captures := [TCapture]{}
     capture_facts := TCaptureFacts{escapes: true, needs_fn_mut: false, mutable: [String]{}, cloned: [String]{}, frozen: [String]{}, materialized: [String]{}, moved: [String]{}}
     if value.kind == {
-        .ConstRef(_) -> {}
+        // A function or constant reference is a flat row (sema_node).
+        .Flat(index) -> if context.arena.tree.nodes[index - context.arena.tree.node_base].kind == {
+            .ConstRef(_) -> {}
+            else -> return None
+        }
         .Local(local) -> {
             &captures.push(TCapture{source: local.name, local: local, ty: signature})
             &capture_facts.moved.push(local.name)
@@ -483,13 +491,11 @@ fn sema_taskgroup_callable_wrapper(value: TExpr, signature: Type, span: Span) ->
         host_param_conventions: None,
         source_params: [String]{},
         source_param_symbols: [SymbolID]{},
-        jit_name: "task.callable@{span.start}",
         param_types: params,
         ret: ret,
         is_move: captures.len() > 0,
         boxed: false,
         rc: false,
-        arc: false,
         captures: captures,
         materialized_captures: [String]{},
         frozen_captures: [String]{},
@@ -504,12 +510,15 @@ fn sema_taskgroup_call_body_result(signature: Type) -> Type? {
     }
 }
 
-
-fn sema_taskgroup_task_group_expr(context: SemaCheckContext, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, diagnostics: &[Diagnostic], span: Span) -> TExpr? {
-    updated_context := context
-    index :: sema_taskgroup_spawn_group_index(updated_context) ?? return None
-    name := updated_context.taskgroups.stack[index].name
-    sema_check_expression(Expr.Ident{name: name, span: span}, Val(Type.Named{name: "Group"}), environment, program, &scopes, &state, &tail_store, &updated_context, &diagnostics)
+fn sema_taskgroup_task_group_expr(context: &SemaCheckContext, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, diagnostics: &[Diagnostic], span: Span) -> TExpr? {
+    index :: sema_taskgroup_spawn_group_index(context) ?? return None
+    name := context.taskgroups.stack[index].name
+    // The group reference is checked on a copy of the context; only its
+    // expression-type rows come back.
+    updated_context := context.copy()
+    group :: sema_check_expression(Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}, Val(Type.Named{name: "Group"}), environment, program, &scopes, &state, &tail_store, &updated_context, &diagnostics)
+    sema_check_context_return_expr_ids(updated_context, &context)
+    group
 }
 
 fn sema_taskgroup_check_lambda_captures(lambda: TLambda, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
@@ -542,7 +551,7 @@ fn sema_taskgroup_admit_capture_borrow(capture: TCapture, facts: TCaptureFacts, 
     active_index := context.taskgroups.stack.len() - 1
     if context.taskgroups.stack[active_index].origin != SemaTaskGroupOrigin.Lexical -> return None
     name := capture.source
-    expression := Expr.Ident{name: name, span: span}
+    expression := Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}
     place := SemaOwnershipPlace?{None}
     access := if sema_taskgroup_contains_name(facts.mutable, name) -> AccessConvention.Write else -> AccessConvention.Read
     symbol :: capture.local.symbol_id ?? return None
@@ -620,7 +629,7 @@ fn sema_taskgroup_report_scoped_loan_conflict(context: SemaCheckContext, changed
 
 fn sema_taskgroup_check_scoped_loan_read(context: &SemaCheckContext, expression: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) {
     if context.taskgroups.in_spawn || context.taskgroups.scoped_loan_read_reported -> return
-    is_place_read := if expression == {.Index(_, _, _, _) | .Field(_, _, _) -> true else -> false}
+    is_place_read := if expression == {.Index(_, _, _, _, _) | .Field(_, _, _, _) -> true else -> false}
     if !is_place_read -> return
     place :: sema_ownership_places_from_expr_in_state(expression, scopes, &state)
     if place.len() == 0 -> return
@@ -637,10 +646,10 @@ fn sema_taskgroup_check_scoped_loan_read(context: &SemaCheckContext, expression:
 
 fn sema_taskgroup_collect_branch_moves(expression: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) {
     if expression == {
-        .Ident(_, _) -> sema_taskgroup_mark_branch_move(expression, scopes, &state, &diagnostics)
-        .Paren(inner, _) -> sema_taskgroup_collect_branch_moves(inner, scopes, &state, &diagnostics)
-        .ListLit(values, _) -> loop value in values -> sema_taskgroup_collect_branch_moves(value, scopes, &state, &diagnostics)
-        .TupleLit(fields, _, _) -> loop field in fields -> sema_taskgroup_collect_branch_moves(field.value, scopes, &state, &diagnostics)
+        .Ident(_, _, _) -> sema_taskgroup_mark_branch_move(expression, scopes, &state, &diagnostics)
+        .Paren(inner, _, _) -> sema_taskgroup_collect_branch_moves(inner, scopes, &state, &diagnostics)
+        .ListLit(values, _, _) -> loop value in values -> sema_taskgroup_collect_branch_moves(value, scopes, &state, &diagnostics)
+        .TupleLit(fields, _, _, _) -> loop field in fields -> sema_taskgroup_collect_branch_moves(field.value, scopes, &state, &diagnostics)
         else -> {}
     }
 }
@@ -653,7 +662,7 @@ fn sema_taskgroup_mark_branch_move(expression: Expr, scopes: SemaScopeTable, sta
 
 fn sema_taskgroup_check_branches(args: [CallArg], span: Span, method: String, all: Bool, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if !sema_taskgroup_check_arity(args, 1, method, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    empty := if args[0].expr == {.ListLit(values, _) -> values.len() == 0 else -> false}
+    empty := if args[0].expr == {.ListLit(values, _, _) -> values.len() == 0 else -> false}
     if empty {
         &diagnostics.push(sema_error("E1112", expr_span(args[0].expr), "`{method}` needs at least one task branch", "a task-group combinator cannot wait for an empty set", "give it one or more task branches"))
         return SemaMethodSpecialCheck{handled: true, value: None}
@@ -722,7 +731,7 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: Type?, envi
     context.taskgroups.current_binding = None
     context.taskgroups.spawn_binding = saved_binding_name
     context.taskgroups.binding_name = None
-    context.taskgroups.spawn_body = if args[0].expr == {.Lambda(_) -> true else -> false}
+    context.taskgroups.spawn_body = if args[0].expr == {.Lambda(_, _) -> true else -> false}
     checked_body := sema_check_expression_with_lambda_escapes(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, Val(true), &diagnostics)
     context.taskgroups.spawn_body = saved_spawn_body
     context.taskgroups.in_spawn = saved_in_spawn
@@ -735,7 +744,7 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: Type?, envi
         &diagnostics.push(sema_error("E0112", args[0].span, "`task` needs a callable body, not `{type_name(body.ty)}`", "a spawned task executes one zero-parameter callable on a worker thread", "pass a zero-parameter lambda or function"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    lambda := if body.kind == {.Lambda(value) | .LambdaValue(value) -> value else -> sema_taskgroup_callable_wrapper(body, body.ty, args[0].span) ?? {
+    lambda := if body.kind == {.Lambda(value) -> value else -> sema_taskgroup_callable_wrapper(body, body.ty, args[0].span, context) ?? {
         &diagnostics.push(sema_error("E0112", args[0].span, "`task` needs a callable body that can be captured for execution", "the worker closure must retain the callable until the task runs", "use a lambda or a direct function value"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }}
@@ -743,7 +752,7 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: Type?, envi
         &diagnostics.push(sema_error("E0104", args[0].span, "`task` needs a zero-parameter body, got {lambda.param_types.len()} parameters", "a task body captures values from the enclosing scope instead of taking arguments", "move or capture data rather than declaring lambda parameters"))
     }
     if body.kind == {
-        .Lambda(_) | .LambdaValue(_) -> { sema_function_reactive_note_task_lambda(&context, lambda) }
+        .Lambda(_) -> { sema_function_reactive_note_task_lambda(&context, lambda) }
         else -> {}
     }
     sema_taskgroup_check_lambda_captures(lambda, args[0].span, environment, program, scopes, &state, &context, &diagnostics)
@@ -755,7 +764,7 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: Type?, envi
     }
     group := TExpr?{None}
     if sema_taskgroup_spawn_group_index(context) != None {
-        group = sema_taskgroup_task_group_expr(context, environment, program, &scopes, &state, &tail_store, &diagnostics, span)
+        group = sema_taskgroup_task_group_expr(&context, environment, program, &scopes, &state, &tail_store, &diagnostics, span)
         if group == None -> return SemaMethodSpecialCheck{handled: true, value: None}
     }
     task_type := Type.Apply{name: "Task", args: [Type]{task_result_ty}}
@@ -781,7 +790,7 @@ fn sema_taskgroup_check_surface_method(receiver: Expr, method: String, args: [Ca
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         sema_taskgroup_note_time_effect(&context, span)
-        value := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Unit, span)
+        value := sema_node(&context, Type.Named{name: "Unit"}, NodeKind.Unit, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
     }
     if method == sema_taskgroup_internal_all_method() || method == sema_taskgroup_internal_race_method() || method == sema_taskgroup_internal_any_method() {
@@ -844,7 +853,7 @@ fn sema_taskgroup_check_task_method(receiver: Expr, receiver_value: TExpr, metho
     // (Rust builtin `Task.detach`): a task whose spawn captured a
     // view borrow may outlive it (E1106); one with any other sendability
     // failure is unsound to run unsupervised (E1103).
-    if method == "detach" && receiver == .Ident(name, _) {
+    if method == "detach" && receiver == .Ident(name, _, _) {
         if context.taskgroups.detach_view_tasks.contains(name) {
             &diagnostics.push(sema_error("E1106", span, "can't detach task `{name}` — it captured a `view` borrow that may not live long enough", "a detached task runs unsupervised and may outlive the caller; a captured `view` would dangle", "pass an owned `copy`, or a `Shared<T>` handle, to the task instead of a `view`"))
         } else if context.taskgroups.detach_unsound_tasks.contains(name) {
@@ -862,11 +871,38 @@ fn sema_taskgroup_check_task_method(receiver: Expr, receiver_value: TExpr, metho
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }
 
+// Rust `task_method_return` (jet-foundation Collections.rs:2138): the task
+// handle's control-plane hooks over the coroutine substrate. `pause` takes an
+// optional mode, and every hook reads the handle (it is not consumed) and
+// returns nothing. The arguments carry no declared type (Rust
+// `builtin_method_arg_types` gives Task none), so they are inferred as written.
+fn sema_taskgroup_check_task_control(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    selected :: if {
+        method == "pause" && (args.len() == 0 || args.len() == 1) -> Val(THandleOp.TaskPause)
+        method == "resume" && args.len() == 0 -> Val(THandleOp.TaskResume)
+        method == "cancel" && args.len() == 0 -> Val(THandleOp.TaskCancel)
+        else -> THandleOp?{None}
+    }
+    operation :: selected ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    if sema_taskgroup_task_payload(receiver_value.ty) == None || !sema_taskgroup_is_canonical_task(receiver_value.ty, environment, program) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    typed := [TExpr]{}
+    loop argument in args {
+        value :: sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        &typed.push(value)
+    }
+    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    result_type :: Type.Named{name: "Unit"}
+    value := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: typed}, span)
+    checked :: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_stream_handle_effect_fact(environment, program, &scopes, &context, "Task.{method}", span, result_type, "", &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    SemaMethodSpecialCheck{handled: true, value: Val(checked)}
+}
+
 fn sema_channel_capacity_literal(expr: Expr) -> Int? Never! {
     if expr == {
-        .Int(value, _, _, raw) -> Val(sema_expr_exact_integer_literal(value, raw))
-        .Paren(inner, _) -> sema_channel_capacity_literal(inner)
-        .Unary(op, inner, _) -> {
+        .Int(value, _, _, raw, _) -> Val(sema_expr_exact_integer_literal(value, raw))
+        .Paren(inner, _, _) -> sema_channel_capacity_literal(inner)
+        .Unary(op, inner, _, _) -> {
             if op == UnOp.Neg {
                 value :: sema_channel_capacity_literal(inner) ?? return None
                 return Val(-value)
@@ -896,7 +932,7 @@ fn sema_call_check_channel(call: Call, expected: Type?, environment: SemaScopeEn
     if call.args.len() == 1 {
         if sema_channel_capacity_literal(call.args[0].expr) == .Val(capacity) {
             if capacity < 1 {
-                &diagnostics.push(sema_error("E0395", call.args[0].span, "A bounded channel capacity is below 1", "A channel capacity must be at least 1, not `{capacity}`. A bounded channel holds at least one value; Jet has no zero-capacity rendezvous channel, and a capacity below 1 is never clamped. A runtime capacity below 1 stops the program (E3001).", "Write `channel<T>(capacity: 1)` or larger, or `channel<T>()` for an unbounded channel."))
+                &diagnostics.push(sema_error("E0395", expr_span(call.args[0].expr), "A channel capacity must be at least 1, not `{capacity}`.", "A bounded channel holds at least one value; Jet has no zero-capacity rendezvous channel, and a capacity below 1 is never clamped. A runtime capacity below 1 stops the program (E3001).", "Write `channel<T>(capacity: 1)` or larger, or `channel<T>()` for an unbounded channel."))
                 return SemaDirectSpecialCheck{handled: true, value: None}
             }
         }
@@ -909,6 +945,184 @@ fn sema_call_check_channel(call: Call, expected: Type?, environment: SemaScopeEn
     member_bytes :: if call.args.len() == 0 -> [U8]{U8{0}, U8{106}, U8{101}, U8{116}, U8{46}, U8{99}, U8{104}, U8{97}, U8{110}, U8{110}, U8{101}, U8{108}, U8{46}, U8{110}, U8{101}, U8{119}} else -> [U8]{U8{0}, U8{106}, U8{101}, U8{116}, U8{46}, U8{99}, U8{104}, U8{97}, U8{110}, U8{110}, U8{101}, U8{108}, U8{46}, U8{98}, U8{111}, U8{117}, U8{110}, U8{100}, U8{101}, U8{100}}
     member :: String.from_bytes(member_bytes) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     record :: sema_call_core_record("core.tasks", member, values.len(), call.name_span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    value :: sema_call_core_tir(record, values, call.name_span, [Type]{element}, [Bool]{}, None, result_type, TFailureCarrier.Infallible, expected, environment, program, &diagnostics)
+    value :: sema_call_core_tir(record, values, call.name_span, [Type]{element}, [Bool]{}, result_type, TFailureCarrier.Infallible, expected, environment, program, &diagnostics)
     SemaDirectSpecialCheck{handled: true, value: value}
+}
+
+// A readiness arm head (Rust `AST::readiness_head`): the parser carries
+// `value, receiver` and `after duration` in a one-field tuple whose `after`
+// field name no source can spell.
+enum SemaReadinessHead {
+    Receive(binding: String, source: Expr)
+    After(duration: Expr)
+}
+
+// One checked readiness arm. `ordinal` counts the arms of its own kind in
+// source order: the scheduler numbers receive arms first, then timer arms.
+enum SemaReadinessArm {
+    Receive(local: TLocal, receiver: TExpr, ordinal: Int)
+    After(duration: TExpr, ordinal: Int)
+}
+
+// The arms of one readiness table as they are checked; an arm whose head did
+// not check is None.
+struct SemaReadinessTable {
+    arms: [SemaReadinessArm?]
+    element: Type?
+    receivers: Int
+    timers: Int
+}
+
+fn sema_readiness_head(cond: Expr) -> SemaReadinessHead? Never! {
+    if cond == {
+        .TupleLit(fields, _, _, _) -> {
+            if fields.len() != 1 -> return None
+            if fields[0].name == parser_select_after_field() -> return Val(SemaReadinessHead.After{duration: fields[0].value})
+            Val(SemaReadinessHead.Receive{binding: fields[0].name, source: fields[0].value})
+        }
+        else -> None
+    }
+}
+
+// Rust `check_switch`: a subjectless table with any readiness arm is a
+// readiness table, not a table of Boolean guards.
+fn sema_readiness_is_table(arms: [SwitchArm]) -> Bool Never! {
+    index := 0
+    loop index < arms.len() {
+        if sema_readiness_head(arms[index].cond) != None -> return true
+        index += 1
+    }
+    false
+}
+
+fn sema_readiness_table_new() -> SemaReadinessTable Never! {
+    SemaReadinessTable{arms: [SemaReadinessArm?]{}, element: None, receivers: 0, timers: 0}
+}
+
+fn sema_readiness_receiver_payload(ty: Type) -> Type? Never! {
+    if ty == {
+        .Apply(name, args) -> if name == "Receiver" && args.len() == 1 -> Val(args[0]) else -> None
+        else -> None
+    }
+}
+
+// Rust `check_readiness_switch`, one arm head: a receive arm validates one
+// plain `Receiver<T>` and returns the payload binding its body declares; an
+// `after` arm validates one `Duration` and records the Time effect.
+fn sema_readiness_check_head(cond: Expr, table: &SemaReadinessTable, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaConditionBinding? {
+    cond_span :: expr_span(cond)
+    head :: sema_readiness_head(cond) ?? {
+        &diagnostics.push(sema_error("E0112", cond_span, "a readiness table cannot mix channel arms with Boolean guards", "every arm in one readiness table waits on a Receiver<T> or a Duration", "write `value, receiver -> ...` or move the Boolean guard to a separate `if`"))
+        &table.arms.push(None)
+        return None
+    }
+    if head == {
+        .Receive(binding, source) -> {
+            source_span :: expr_span(source)
+            checked :: sema_check_expression(source, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            payload := Type.Named{name: "Unit"}
+            if checked == .Val(receiver) {
+                if sema_readiness_receiver_payload(receiver.ty) == .Val(element) {
+                    payload = element
+                } else {
+                    &diagnostics.push(sema_error("E0112", source_span, "a readiness receive arm needs Receiver<T>, not {sema_type_show(receiver.ty)}", "a receive arm waits on one plain channel endpoint", "use the receiver returned by `channel<T>()`"))
+                }
+            }
+            if table.element == .Val(previous) {
+                if !type_identity_equal(previous, payload) -> &diagnostics.push(sema_error("E0112", source_span, "readiness receive arms must share one element type, got {sema_type_show(previous)} and {sema_type_show(payload)}", "one readiness table returns one receive payload type", "use receivers with the same T, or split the table"))
+            } else {
+                table.element = Val(payload)
+            }
+            owner :: sema_scope_local_owner_key(scopes)
+            id :: symbol_id(SymbolKind.Local, environment.module_identity, owner, binding)
+            symbol :: Symbol{id: id, kind: SymbolKind.Local, name: binding, module_name: environment.module_identity, owner: Val(owner), span: cond_span, ty: Val(payload), visibility: 0}
+            if checked == .Val(receiver) {
+                &table.arms.push(Val(SemaReadinessArm.Receive{local: checked_symbol_local(binding, cond_span, id), receiver: receiver, ordinal: table.receivers}))
+            } else {
+                &table.arms.push(None)
+            }
+            table.receivers += 1
+            return Val(SemaConditionBinding{symbol: symbol, window: false, sources: [Expr]{}})
+        }
+        .After(duration) -> {
+            checked :: sema_check_expression(duration, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            shown := "this value"
+            is_duration := false
+            if checked == .Val(value) {
+                is_duration = value.ty == (Type.Named{name: "Duration"})
+                shown = sema_type_show(value.ty)
+            }
+            if !is_duration -> &diagnostics.push(sema_error("E0112", expr_span(duration), "`after` needs a Duration, not {shown}", "a readiness timeout is one canonical Duration delta", "write `after 100ms` or pass a Duration binding"))
+            sema_taskgroup_note_time_effect(&context, cond_span)
+            if checked == .Val(value) {
+                &table.arms.push(Val(SemaReadinessArm.After{duration: value, ordinal: table.timers}))
+            } else {
+                &table.arms.push(None)
+            }
+            table.timers += 1
+            return None
+        }
+    }
+}
+
+fn sema_readiness_result_field(result: TLocal, result_ty: Type, index: Int, ty: Type, span: Span) -> TExpr Never! {
+    base :: sema_tir_node(result_ty, TExprKind.Local{local: result}, span)
+    sema_tir_node(ty, TExprKind.HostCall{call: THostCall.TupleIndex{base: base, index: index}}, span)
+}
+
+// Rust `lower_readiness_switch`: one scheduler wait over every arm in source
+// order, which yields `(arm, value: T?)`, then one dense integer dispatch on
+// the selected arm. A receive arm unwraps its payload only once it is
+// selected; a timer arm never reads it. An `else` makes the wait nonblocking.
+fn sema_readiness_tir(table: ^SemaReadinessTable, branches: ^[SemaStatementResult], else_result: ^[TStmt]?, span: Span, context: &SemaCheckContext) -> TStmt? {
+    owned_table := ^table
+    owned_branches := ^branches
+    if owned_branches.len() != owned_table.arms.len() -> return None
+    element :: owned_table.element ?? Type.Named{name: "Unit"}
+    builder_ty :: Type.Named{name: "__JetReadinessTable"}
+    payload_ty :: Type.Option{inner: element}
+    result_ty :: Type.Tuple{fields: [TypeTupleField]{
+        {name: "arm", ty: Type.Int},
+        {name: "value", ty: payload_ty},
+    }}
+    result_local :: checked_user_local("__select_result", span)
+    // The wait reads the builder chain from the outer node inward, so the
+    // chain is built from the last arm back to keep source order.
+    builder := sema_node(&context, builder_ty, NodeKind.SelectStart, span)
+    reversed := [TMixedArm]{}
+    loop owned_table.arms.len() > 0 {
+        row := &owned_table.arms.pop() ?? return None
+        arm := ^row ?? return None
+        branch := &owned_branches.pop() ?? return None
+        body := [TStmt]{}
+        selected := 0
+        if arm == {
+            .Receive(local, receiver, ordinal) -> {
+                selected = ordinal
+                payload :: sema_tir_node(element, TExprKind.HostCall{call: THostCall.OptionProbe{inner: sema_readiness_result_field(result_local, result_ty, 1, payload_ty, span), kind: TOptionProbe.Unwrap}}, span)
+                &body.push(TStmt.Let{local: local, let_ty: TLetTy.Annotated{ty: element, wrapper: TLetWrapper.Plain}, init: payload, gc_promotion: None, gc_transferred: false, span: local.span})
+                builder = sema_tir_node(builder_ty, TExprKind.SelectRecv{builder: ^builder, channel: receiver}, span)
+            }
+            .After(duration, ordinal) -> {
+                selected = owned_table.receivers + ordinal
+                builder = sema_tir_node(builder_ty, TExprKind.SelectAfter{builder: ^builder, duration: duration, value: None}, span)
+            }
+        }
+        loop statement in ^branch.value -> &body.push(^statement)
+        condition :: sema_tir_node(Type.Bool, TExprKind.Binary{op: TBinaryOp.Eq, overflow: false, line: 0, lhs: sema_readiness_result_field(result_local, result_ty, 0, Type.Int, span), rhs: sema_tir_node(Type.Int, TExprKind.IntLit{value: selected, width: None}, span)}, span)
+        &reversed.push(TMixedArm{condition: condition, body: body})
+    }
+    dispatch := [TMixedArm]{}
+    loop reversed.len() > 0 {
+        dispatch_arm := &reversed.pop() ?? return None
+        &dispatch.push(^dispatch_arm)
+    }
+    nonblocking :: else_result != None
+    builder_row :: sema_arena_adopt(&context, builder)
+    wait :: sema_node(&context, result_ty, NodeKind.SelectWait{builder: builder_row, nonblocking: nonblocking}, span)
+    subject :: sema_readiness_result_field(result_local, result_ty, 0, Type.Int, span)
+    Val(TStmt.Inline{body: [TStmt]{
+        TStmt.Let{local: result_local, let_ty: TLetTy.Inferred, init: wait, gc_promotion: None, gc_transferred: false, span: span},
+        TStmt.MixedSwitch{subject: subject, class: TBranchClass.DenseInt, arms: dispatch, else_body: ^else_result, span: span},
+    }, span: span})
 }

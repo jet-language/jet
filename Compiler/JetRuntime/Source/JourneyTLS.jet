@@ -159,6 +159,12 @@ fn journey_trim_newlines(text: I64) -> I64 {
 fn journey_entry_write_take(report: I64) {
     _ := host_stderr_write(rt_text_data(report), rt_text_len(report))
     jet_rt_string_drop(report)
+    // Under the process root (jet_rt_main) the exit is a root stop: the
+    // root runs the exit handlers and exits 1 once every frame has left.
+    if (jet_rt_stop_domain() == I64{1}) {
+        _ := jet_rt_root_publish_rendered(I64{0}, I64{0}, I64{1})
+        return
+    }
     jet_rt_process_exit(I64{1})
 }
 #Export(c) fn jet_entry_error_exit_jet(error: I64) {

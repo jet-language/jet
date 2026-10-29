@@ -68,9 +68,20 @@ fn parser_parse_distinct(state: &JetParserState, modifiers: ParsedItemModifiers)
     if parser_value(state, keyword) != "distinct" {
         parser_add_error(&state, keyword.span, "expected `distinct` in a distinct type declaration", "nominal declarations use `Name :: distinct Base`", "write `Name :: distinct Int`")
     }
-    base :: parser_parse_type(&state, 0)
+    parsed :: parser_parse_type(&state, 0)
+    // The type grammar owns the `Int(lo..hi)` spelling of every type
+    // position; a named distinct keeps that interval in its declaration, so
+    // its base is never already an inline range.
     range_value := IntegerRange?{None}
-    if parser_current_kind(&state) == TOKEN_LPAREN {
+    base :: if parsed.ty == {
+        .InlineRange(inner, lo, hi) -> {
+            range_value = Val(IntegerRange{lo: lo, hi: hi, span: parsed.span})
+            // copy: `inner` is a payload of `parsed`, which this arm does not consume.
+            ParsedType{ty: inner.copy(), span: parsed.span}
+        }
+        else -> parsed
+    }
+    if range_value == None && parser_current_kind(&state) == TOKEN_LPAREN {
         open :: parser_bump(&state)
         lower :: parser_distinct_range_bound(&state, "as the lower range bound")
         parser_expect(&state, TOKEN_DOT_DOT, "between distinct range bounds")
@@ -142,7 +153,7 @@ fn parser_parse_unit_family(state: &JetParserState, modifiers: ParsedItemModifie
     if family_expr == {
         .Val(value) -> {
             if value == {
-                .Ident(name, span) -> {
+                .Ident(name, span, _) -> {
                     family = name
                     family_span = span
                 }
@@ -162,13 +173,13 @@ fn parser_parse_unit_family(state: &JetParserState, modifiers: ParsedItemModifie
         if {
             label == "base" -> {
                 if value == .Val(expr) {
-                    if expr == .Ident(name, span) -> base = Val(NamedSpan{name: name, span: span})
+                    if expr == .Ident(name, span, _) -> base = Val(NamedSpan{name: name, span: span})
                 }
             }
             index == 1 -> {
                 if value == .Val(expr) {
                     if expr == {
-                        .Ident(name, span) -> {
+                        .Ident(name, span, _) -> {
                             if name == "dimension" -> dimension = Val(UnitDimensionDecl.Base{span: span}) else -> dimension = Val(UnitDimensionDecl.Derived{expr: expr})
                         }
                         else -> dimension = Val(UnitDimensionDecl.Derived{expr: expr})
@@ -177,7 +188,7 @@ fn parser_parse_unit_family(state: &JetParserState, modifiers: ParsedItemModifie
             }
             index == 2 && base == None -> {
                 if value == .Val(expr) {
-                    if expr == .Ident(name, span) -> base = Val(NamedSpan{name: name, span: span})
+                    if expr == .Ident(name, span, _) -> base = Val(NamedSpan{name: name, span: span})
                 }
             }
             else -> {}

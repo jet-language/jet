@@ -1,6 +1,6 @@
 // Read-only compiler source queries use the authorized loader, not a semantic
 // check. This is the CmdSchema/Source-query seam over the same compile request.
-use jet_foundation.[Diagnostic, Item, Program, NameLedger, MIRNameModule, MIRNameAlias, MIRNameVisibility, MIRStructureFact, MIRStructureFactKind, ast_program, compiler_transfer_rows, name_ledger_from_facts]
+use jet_foundation.[Diagnostic, Item, Program, NameLedger, NameModule, NameAlias, NameVisibility, StructureFact, StructureFactKind, ast_program, compiler_transfer_rows, name_ledger_from_facts]
 use jet_sema.[SemaSourceOrigin, SemaRegistrationImportEdge, sema_name_loaded_facts]
 
 struct JetDriverSourceQueryModule {
@@ -23,7 +23,15 @@ struct JetDriverSourceQueryResult {
 }
 
 fn jet_driver_source_query(request: JetDriverCompileRequest) -> JetDriverSourceQueryResult {
-    jet_driver_source_query_loaded(jet_driver_load(request), request)
+    jet_driver_source_query_loaded(jet_driver_load_with_names(request), request)
+}
+
+// A source query's load with its name ledger. Only the source queries read
+// the ledger, so a compile's `jet_driver_load` leaves `names` None.
+fn jet_driver_load_with_names(request: JetDriverCompileRequest) -> JetDriverLoadResult {
+    load := jet_driver_load(request)
+    load.names = Val(jet_driver_loaded_names(&load.modules, load.source_units, load.imports))
+    load
 }
 
 fn jet_driver_source_query_loaded(load: JetDriverLoadResult, request: JetDriverCompileRequest) -> JetDriverSourceQueryResult {
@@ -65,27 +73,27 @@ fn jet_driver_source_query_loaded(load: JetDriverLoadResult, request: JetDriverC
 // loaded modules for the read and back after it (pushing each program into
 // the list copied the whole parse tree).
 fn jet_driver_loaded_names(loaded: &[JetDriverLoadedModule], units: [JetDriverSourceUnit], edges: [SemaRegistrationImportEdge]) -> NameLedger Never! {
-    modules := [MIRNameModule]{}
+    modules := [NameModule]{}
     programs := [Program]{}
     positions := [String:Int]{}
     loop index in 0..<loaded.len() {
         unit_index :: loaded[index].source_unit_index
         positions[loaded[index].module_identity] = index
         namespace :: if units[unit_index].in_namespace -> Val(loaded[index].package_identity) else -> None
-        &modules.push(MIRNameModule{alias: loaded[index].module_name, path: jet_driver_module_display(units[unit_index].relative_path), package: loaded[index].package_identity, namespace: namespace})
+        &modules.push(NameModule{alias: loaded[index].module_name, path: jet_driver_module_display(units[unit_index].relative_path), package: loaded[index].package_identity, namespace: namespace})
         items := ast_program()
         compiler_transfer_rows<Item>(&items.items, &loaded[index].program.items)
         &programs.push(^items)
     }
-    aliases := [MIRNameAlias]{}
-    structure := [MIRStructureFact]{}
+    aliases := [NameAlias]{}
+    structure := [StructureFact]{}
     loop edge in edges {
         source :: positions.get(edge.source_module_identity) ?? next
         target :: positions.get(edge.target_module_identity) ?? next
         declaration :: edge.declaration
-        visibility :: if declaration.is_pub -> MIRNameVisibility.Public else -> if declaration.is_package_pub -> MIRNameVisibility.Package else -> MIRNameVisibility.Private
-        &aliases.push(MIRNameAlias{module_index: source, name: declaration.alias, target: modules[target].alias, target_module: Val(target), span: declaration.alias_span, visibility: visibility})
-        &structure.push(MIRStructureFact{kind: MIRStructureFactKind.ImportEdge, subject: "{modules[source].alias} -> {modules[target].alias}", source: units[loaded[source].source_unit_index].path, span: declaration.span, status: "resolved", detail: "resolved import edge", gate: None})
+        visibility :: if declaration.is_pub -> NameVisibility.Public else -> if declaration.is_package_pub -> NameVisibility.Package else -> NameVisibility.Private
+        &aliases.push(NameAlias{module_index: source, name: declaration.alias, target: modules[target].alias, target_module: Val(target), span: declaration.alias_span, visibility: visibility})
+        &structure.push(StructureFact{kind: StructureFactKind.ImportEdge, subject: "{modules[source].alias} -> {modules[target].alias}", source: units[loaded[source].source_unit_index].path, span: declaration.span, status: "resolved", detail: "resolved import edge", gate: None})
     }
     facts :: sema_name_loaded_facts(modules, programs, aliases, structure)
     loop index in 0..<loaded.len() -> compiler_transfer_rows<Item>(&loaded[index].program.items, &programs[index].items)

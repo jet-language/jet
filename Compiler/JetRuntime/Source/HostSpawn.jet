@@ -258,9 +258,11 @@ fn spawn_exec_errno_class(result: I64) -> I64 {
     I64{0}
 }
 
-// ONLY raw word loads/stores/syscalls are reachable after fork. In particular
+// ONLY raw word loads/stores/syscalls are reachable in the child. In particular
 // there is no allocation, exact-Int/Text helper, mutex, or inherited TLS use.
-// Mirrors std::process's Unix fork+pre_exec path used by ProcessPty.rs.
+// Mirrors std::process's Unix fork+pre_exec path used by ProcessPty.rs; the
+// child shares the parent's memory (spawn_vfork), so its only stores are the
+// scratch error words and the fallback argv slot this spawn owns.
 fn spawn_exec_child(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, err_write: I64, candidates: I64, argv: I64, envp: I64, fallback_argv: I64, cwd: I64, dirs: I64, session: Bool, terminal: Bool, cpu: Bool, memory: Bool, files: Bool) {
     spawn_close(err_read)
     spawn_close(fd_word(child, I64{32}))
@@ -359,6 +361,84 @@ fn spawn_exec_child(plan: I64, count: I64, child: I64, scratch: I64, err_read: I
         at = wrapping(at + sent)
     }
     _ := host_call(I64{231}, I64{127}, I64{0}, I64{0})
+}
+
+// The vfork child's own stack; its lowest page is the guard.
+SPAWN_CHILD_STACK :: I64{131072}
+
+// Checked FunctionAddress intrinsic in the canonical RuntimeLibrary table.
+fn rt_process_spawn_child_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+
+// The child entry of spawn_vfork, on its own stack. Block184: the 17
+// spawn_exec_child arguments at 0..128 (Bools as 0/1 words), all-signals
+// mask 136, the parent's saved mask 144, one kernel sigaction 152..184.
+// Like glibc's __spawni_child: every caught handler becomes SIG_DFL before
+// the parent's mask returns, so no parent handler runs on the shared memory.
+#Export(c) fn jet_rt_process_spawn_child(block: I64) -> I64 {
+    action :: wrapping(block + I64{152})
+    signal := I64{1}
+    loop signal <= (I64{64}) {
+        if (signal != I64{9} && signal != I64{19}) {
+            #Unsafe("rt_sigaction writes the four-word old action into this spawn's block; no allocator, mutex or TLS is touched in the child") {
+                _ := os_syscall_i64(I64{13}, signal, I64{0}, action, I64{8}, I64{0}, I64{0})
+                handler :: fd_word(action, I64{0})
+                if (handler != I64{0} && handler != I64{1}) {
+                    _ := os_syscall_stack4_i64(I64{13}, signal, I64{0}, I64{0}, I64{0}, I64{0}, I64{8})
+                }
+            }
+        }
+        signal = wrapping(signal + I64{1})
+    }
+    #Unsafe("rt_sigprocmask reads the parent's saved mask word in this spawn's block") {
+        _ := os_syscall_i64(I64{14}, I64{2}, wrapping(block + I64{144}), I64{0}, I64{8}, I64{0}, I64{0})
+    }
+    spawn_exec_child(fd_word(block, I64{0}), fd_word(block, I64{8}), fd_word(block, I64{16}), fd_word(block, I64{24}), fd_word(block, I64{32}), fd_word(block, I64{40}), fd_word(block, I64{48}), fd_word(block, I64{56}), fd_word(block, I64{64}), fd_word(block, I64{72}), fd_word(block, I64{80}), fd_word(block, I64{88}), fd_word(block, I64{96}) != I64{0}, fd_word(block, I64{104}) != I64{0}, fd_word(block, I64{112}) != I64{0}, fd_word(block, I64{120}) != I64{0}, fd_word(block, I64{128}) != I64{0})
+    I64{0}
+}
+
+fn spawn_flag_word(flag: Bool) -> I64 { if flag -> I64{1} else -> I64{0} }
+
+// clone(CLONE_VM | CLONE_VFORK | SIGCHLD) onto a fresh guarded stack: the
+// kernel copies no page tables, so a multi-GB parent does not stall, and
+// only this thread waits until the child's execve or exit. All signals stay
+// blocked in the parent across the clone so none is taken in the child before
+// its handlers are reset. The pid, or a negative errno.
+fn spawn_vfork(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, err_write: I64, candidates: I64, argv: I64, envp: I64, fallback_argv: I64, cwd: I64, dirs: I64, session: Bool, terminal: Bool, cpu: Bool, memory: Bool, files: Bool) -> I64 {
+    stack :: alloc_map_try(SPAWN_CHILD_STACK)
+    if (stack == I64{0}) -> return I64{-12}
+    block :: jet_rt_alloc(I64{184}, I64{8})
+    fd_put(block, I64{0}, plan)
+    fd_put(block, I64{8}, count)
+    fd_put(block, I64{16}, child)
+    fd_put(block, I64{24}, scratch)
+    fd_put(block, I64{32}, err_read)
+    fd_put(block, I64{40}, err_write)
+    fd_put(block, I64{48}, candidates)
+    fd_put(block, I64{56}, argv)
+    fd_put(block, I64{64}, envp)
+    fd_put(block, I64{72}, fallback_argv)
+    fd_put(block, I64{80}, cwd)
+    fd_put(block, I64{88}, dirs)
+    fd_put(block, I64{96}, spawn_flag_word(session))
+    fd_put(block, I64{104}, spawn_flag_word(terminal))
+    fd_put(block, I64{112}, spawn_flag_word(cpu))
+    fd_put(block, I64{120}, spawn_flag_word(memory))
+    fd_put(block, I64{128}, spawn_flag_word(files))
+    fd_put(block, I64{136}, I64{-1})
+    fd_put(block, I64{144}, I64{0})
+    entry :: wrapping(stack + SPAWN_CHILD_STACK - I64{16})
+    fd_put(entry, I64{0}, rt_process_spawn_child_address())
+    fd_put(entry, I64{8}, block)
+    pid := I64{-1}
+    #Unsafe("mprotect makes the lowest page of this spawn's fresh mapping the guard; the masks are words of this spawn's block; the child runs only jet_rt_process_spawn_child on the mapped stack and leaves through execve or exit_group before the parent resumes") {
+        _ := os_syscall_i64(I64{10}, stack, I64{4096}, I64{0}, I64{0}, I64{0}, I64{0})
+        _ := os_syscall_i64(I64{14}, I64{2}, wrapping(block + I64{136}), wrapping(block + I64{144}), I64{8}, I64{0}, I64{0})
+        pid = os_clone_i64(I64{16657}, entry, I64{0}, I64{0})
+        _ := os_syscall_i64(I64{14}, I64{2}, wrapping(block + I64{144}), I64{0}, I64{8}, I64{0}, I64{0})
+    }
+    jet_rt_free(block, I64{184}, I64{8})
+    alloc_unmap(stack, SPAWN_CHILD_STACK)
+    pid
 }
 
 #Export(c) fn jet_process_spawn_raw(spec: I64, candidates: I64, argv: I64, envp: I64, os_facts: I64, error: I64) -> I64 {
@@ -501,10 +581,7 @@ fn spawn_exec_child(plan: I64, count: I64, child: I64, scratch: I64, err_read: I
     stage := fd_word(scratch, I64{64})
     if (failure == I64{0}) {
         jet_rt_stdout_flush()
-        pid = host_call(I64{57}, I64{0}, I64{0}, I64{0})
-        if (pid == I64{0}) {
-            spawn_exec_child(plan, count, child, scratch, err_read, err_write, candidates, argv, envp, fallback_argv, cwd, dirs, session, terminal, cpu, memory, files)
-        }
+        pid = spawn_vfork(plan, count, child, scratch, err_read, err_write, candidates, argv, envp, fallback_argv, cwd, dirs, session, terminal, cpu, memory, files)
         if (pid < I64{0}) {
             failure = pid
             stage = I64{2}

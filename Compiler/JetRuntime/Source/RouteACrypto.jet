@@ -1,0 +1,258 @@
+// core.crypto's raw JETC descriptor leaves, CoreLib/Top/CryptoFileIo.rs:41-205
+// (Linux x86-64 targets: O_DIRECTORY 1<<16, O_NOFOLLOW 1<<17, O_CLOEXEC
+// 1<<19, O_TMPFILE (1<<22)|O_DIRECTORY). Source owns the descriptors, file
+// format, faults and publication; each leaf is one host step. A failure is
+// value -1 with the raw OS code, or EIO (5) when std's error carries none
+// (its CString refusal of a NUL path); the leaves' own refusals use EBADF (9)
+// for a descriptor outside 0..=i32::MAX and EINVAL (22) for a bad count,
+// offset or NUL name.
+
+// JetCryptoJetcRaw48: value0, errno8, bytes List24 at 16 (packed U8), linux40.
+// JetCryptoJetcStat80: status0 errno8 dev16 ino24 len32 mtime40 mtime_ns48
+// nlink56 is_file64 is_dir72.
+JETC_RAW_BYTES :: I64{48}
+JETC_STAT_BYTES :: I64{80}
+JETC_O_CLOEXEC :: I64{524288}
+JETC_O_NOFOLLOW :: I64{131072}
+JETC_O_DIRECTORY :: I64{65536}
+JETC_O_TMPFILE :: I64{4259840}
+
+fn jetc_raw_new(value: I64, errno: I64) -> I64 {
+    result :: jet_rt_alloc(JETC_RAW_BYTES, I64{8})
+    thread_zero(result, JETC_RAW_BYTES)
+    rt_text_store(result, value)
+    rt_text_store(result + I64{8}, errno)
+    rt_text_store(result + I64{40}, I64{1})
+    result
+}
+
+// jetc_fd_result: Ok(value) carries errno 0, Err its OS code.
+fn jetc_result(outcome: I64) -> I64 {
+    if (outcome < I64{0}) -> return jetc_raw_new(I64{-1}, -outcome)
+    jetc_raw_new(outcome, I64{0})
+}
+
+// jetc_fd_guard: a descriptor that is not a nonnegative i32.
+fn jetc_fd_valid(fd: I64) -> Bool { fd >= I64{0} && fd <= I64{2147483647} }
+
+// std's open(2) through OpenOptions: cvt_r retries EINTR, a NUL path is an
+// InvalidInput error without an OS code.
+fn jetc_open_path(path: I64, flags: I64, mode: I64) -> I64 {
+    if walk_has_nul(rt_text_data(path), rt_text_len(path)) -> return I64{-5}
+    name :: fd_c_path(path)
+    fd := I64{-4}
+    loop fd == (I64{-4}) -> fd = host_call(I64{2}, name, flags, mode)
+    fd_c_path_drop(name, path)
+    fd
+}
+
+#Export(c) fn jet_crypto_jetc_open_directory(path: I64) -> I64 {
+    jetc_result(jetc_open_path(path, JETC_O_CLOEXEC.bit_or(JETC_O_NOFOLLOW).bit_or(JETC_O_DIRECTORY), I64{438}))
+}
+
+#Export(c) fn jet_crypto_jetc_open_source(path: I64) -> I64 {
+    jetc_result(jetc_open_path(path, JETC_O_CLOEXEC.bit_or(JETC_O_NOFOLLOW), I64{438}))
+}
+
+// read+write+create_new, mode 0o600: O_RDWR|O_CREAT|O_EXCL|O_CLOEXEC.
+#Export(c) fn jet_crypto_jetc_create_named(path: I64) -> I64 {
+    jetc_result(jetc_open_path(path, I64{194}.bit_or(JETC_O_CLOEXEC), I64{384}))
+}
+
+// openat(2) of one plain component under a live parent; no EINTR retry.
+#Export(c) fn jet_crypto_jetc_open_child_directory(parent: I64, name: I64) -> I64 {
+    native_parent :: jet_int_owned_to_i64(parent)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if !jetc_fd_valid(native_parent) -> return jetc_raw_new(I64{-1}, I64{9})
+    if walk_has_nul(rt_text_data(name), rt_text_len(name)) -> return jetc_raw_new(I64{-1}, I64{22})
+    c_name :: fd_c_path(name)
+    fd :: host_call4(I64{257}, native_parent, c_name, JETC_O_CLOEXEC.bit_or(JETC_O_NOFOLLOW).bit_or(JETC_O_DIRECTORY), I64{0})
+    fd_c_path_drop(c_name, name)
+    jetc_result(fd)
+}
+
+// openat(parent, ".", O_RDWR|O_TMPFILE|O_CLOEXEC, 0o600).
+#Export(c) fn jet_crypto_jetc_tmpfile(parent: I64) -> I64 {
+    native_parent :: jet_int_owned_to_i64(parent)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if !jetc_fd_valid(native_parent) -> return jetc_raw_new(I64{-1}, I64{9})
+    dot :: jet_rt_alloc(I64{2}, I64{1})
+    rt_text_put(dot, I64{46})
+    rt_text_put(dot + I64{1}, I64{0})
+    fd :: host_call4(I64{257}, native_parent, dot, I64{2}.bit_or(JETC_O_TMPFILE).bit_or(JETC_O_CLOEXEC), I64{384})
+    jet_rt_free(dot, I64{2}, I64{1})
+    jetc_result(fd)
+}
+
+// One read(2) of at most `count` bytes (File::read: no EINTR retry); the
+// bytes are the prefix actually read.
+#Export(c) fn jet_crypto_jetc_read(fd: I64, count: I64) -> I64 {
+    native_fd :: jet_int_owned_to_i64(fd)
+    wanted :: jet_int_owned_to_i64(count)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if !jetc_fd_valid(native_fd) -> return jetc_raw_new(I64{-1}, I64{9})
+    if (wanted < I64{0}) -> return jetc_raw_new(I64{-1}, I64{22})
+    buffer :: if (wanted == I64{0}) -> I64{0} else -> jet_rt_alloc(wanted * RT_HOST_U8_STRIDE, I64{8})
+    got :: host_call(I64{0}, native_fd, buffer, wanted)
+    if (got < I64{0}) {
+        if (wanted != I64{0}) -> jet_rt_free(buffer, wanted * RT_HOST_U8_STRIDE, I64{8})
+        return jetc_raw_new(I64{-1}, -got)
+    }
+    result :: jetc_raw_new(got, I64{0})
+    rt_text_store(result + I64{16} + DATA_SEQUENCE_LENGTH, got)
+    rt_text_store(result + I64{16} + DATA_SEQUENCE_CAPACITY, wanted)
+    rt_text_store(result + I64{16} + DATA_SEQUENCE_DATA, buffer)
+    result
+}
+
+// One write(2) of bytes[offset..][..count] (File::write: no EINTR retry).
+#Export(c) fn jet_crypto_jetc_write(fd: I64, data: I64, length: I64, offset: I64, count: I64) -> I64 {
+    native_fd :: jet_int_owned_to_i64(fd)
+    start :: jet_int_owned_to_i64(offset)
+    wanted :: jet_int_owned_to_i64(count)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if !jetc_fd_valid(native_fd) -> return jetc_raw_new(I64{-1}, I64{9})
+    size :: if (length < I64{0} || data == I64{0}) -> I64{0} else -> length
+    if (start < I64{0} || wanted < I64{0} || start > size || wanted > size - start) -> return jetc_raw_new(I64{-1}, I64{22})
+    jetc_result(host_call(I64{1}, native_fd, data + start * RT_HOST_U8_STRIDE, wanted))
+}
+
+// lseek(fd, offset, SEEK_SET) for a u64 offset.
+#Export(c) fn jet_crypto_jetc_seek(fd: I64, offset: I64) -> I64 {
+    native_fd :: jet_int_owned_to_i64(fd)
+    position :: jet_int_owned_to_i64(offset)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if !jetc_fd_valid(native_fd) -> return jetc_raw_new(I64{-1}, I64{9})
+    if (position < I64{0}) -> return jetc_raw_new(I64{-1}, I64{22})
+    jetc_result(host_call(I64{8}, native_fd, position, I64{0}))
+}
+
+fn jetc_stat_new(status: I64, errno: I64) -> I64 {
+    result :: jet_rt_alloc(JETC_STAT_BYTES, I64{8})
+    thread_zero(result, JETC_STAT_BYTES)
+    rt_text_store(result, status)
+    rt_text_store(result + I64{8}, errno)
+    result
+}
+
+// File::metadata on the borrowed descriptor (fstat: st_dev0 st_ino8
+// st_nlink16 st_mode24(u32) st_size48 st_mtime88 st_mtime_nsec96).
+#Export(c) fn jet_crypto_jetc_stat(fd: I64) -> I64 {
+    native_fd :: jet_int_owned_to_i64(fd)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if !jetc_fd_valid(native_fd) -> return jetc_stat_new(I64{-1}, I64{9})
+    facts :: jet_rt_alloc(I64{144}, I64{8})
+    thread_zero(facts, I64{144})
+    status :: host_call(I64{5}, native_fd, facts, I64{0})
+    if (status < I64{0}) {
+        jet_rt_free(facts, I64{144}, I64{8})
+        return jetc_stat_new(I64{-1}, -status)
+    }
+    result :: jetc_stat_new(I64{0}, I64{0})
+    kind :: rt_text_word(facts + I64{24}).bit_and(I64{61440})
+    rt_text_store(result + I64{16}, rt_text_word(facts))
+    rt_text_store(result + I64{24}, rt_text_word(facts + I64{8}))
+    rt_text_store(result + I64{32}, rt_text_word(facts + I64{48}))
+    rt_text_store(result + I64{40}, rt_text_word(facts + I64{88}))
+    rt_text_store(result + I64{48}, rt_text_word(facts + I64{96}))
+    rt_text_store(result + I64{56}, rt_text_word(facts + I64{16}))
+    rt_text_store(result + I64{64}, if (kind == I64{32768}) -> I64{1} else -> I64{0})
+    rt_text_store(result + I64{72}, if (kind == I64{16384}) -> I64{1} else -> I64{0})
+    jet_rt_free(facts, I64{144}, I64{8})
+    result
+}
+
+// File::sync_all: fsync(2), retried after EINTR.
+#Export(c) fn jet_crypto_jetc_fsync(fd: I64) -> I64 {
+    native_fd :: jet_int_owned_to_i64(fd)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if !jetc_fd_valid(native_fd) -> return jetc_raw_new(I64{-1}, I64{9})
+    status := I64{-4}
+    loop status == (I64{-4}) -> status = host_call(I64{74}, native_fd, I64{0}, I64{0})
+    jetc_result(status)
+}
+
+// linkat(fd, "", parent, destination, AT_EMPTY_PATH) publishes an O_TMPFILE.
+#Export(c) fn jet_crypto_jetc_link(fd: I64, parent: I64, destination: I64) -> I64 {
+    native_fd :: jet_int_owned_to_i64(fd)
+    native_parent :: jet_int_owned_to_i64(parent)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (!jetc_fd_valid(native_fd) || !jetc_fd_valid(native_parent)) -> return jetc_raw_new(I64{-1}, I64{9})
+    if walk_has_nul(rt_text_data(destination), rt_text_len(destination)) -> return jetc_raw_new(I64{-1}, I64{22})
+    empty :: jet_rt_alloc(I64{1}, I64{1})
+    rt_text_put(empty, I64{0})
+    c_destination :: fd_c_path(destination)
+    status :: host_call5(I64{265}, native_fd, empty, native_parent, c_destination, I64{4096})
+    fd_c_path_drop(c_destination, destination)
+    jet_rt_free(empty, I64{1}, I64{1})
+    jetc_result(status)
+}
+
+// The single transfer of the descriptor back to a File, whose drop closes it
+// and ignores close(2)'s result.
+#Export(c) fn jet_crypto_jetc_close(fd: I64) -> I64 {
+    native_fd :: jet_int_owned_to_i64(fd)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if !jetc_fd_valid(native_fd) -> return jetc_raw_new(I64{-1}, I64{9})
+    _ := host_call(I64{3}, native_fd, I64{0}, I64{0})
+    jetc_raw_new(I64{0}, I64{0})
+}
+
+// Record glue (schema value=Int,errno=Int,bytes=List.Byte,linux=Flag). The
+// constructor consumes the byte sequence's shell; the byte getter lends the
+// inline header.
+#Export(c) fn jet_rt_record_new_jet_crypto_jetc_raw(value: I64, errno: I64, bytes: I64, linux: U8) -> I64 {
+    native_value :: jet_int_owned_to_i64(value)
+    native_errno :: jet_int_owned_to_i64(errno)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    result :: jetc_raw_new(native_value, native_errno)
+    coll_copy(bytes, result + I64{16}, DATA_SEQUENCE_BYTES)
+    jet_rt_free(bytes, DATA_SEQUENCE_BYTES, I64{8})
+    rt_text_store(result + I64{40}, if (linux != U8{0}) -> I64{1} else -> I64{0})
+    result
+}
+#Export(c) fn jet_rt_record_get_jet_crypto_jetc_raw_value(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value)) }
+#Export(c) fn jet_rt_record_get_jet_crypto_jetc_raw_errno(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{8})) }
+#Export(c) fn jet_rt_record_get_jet_crypto_jetc_raw_bytes(value: I64) -> I64 { value + I64{16} }
+#Export(c) fn jet_rt_record_get_jet_crypto_jetc_raw_linux(value: I64) -> Bool { rt_text_word(value + I64{40}) != I64{0} }
+#Export(c) fn jet_rt_handle_drop_jet_crypto_jetc_raw(value: I64) {
+    if (value == I64{0}) -> return
+    data_u8_list_drop_fields(value + I64{16})
+    jet_rt_free(value, JETC_RAW_BYTES, I64{8})
+}
+
+// Schema status,errno,dev,ino,len,mtime,mtime_ns,nlink (Int), is_file,is_dir.
+#Export(c) fn jet_rt_record_new_jet_crypto_jetc_stat(status: I64, errno: I64, dev: I64, ino: I64, len: I64, mtime: I64, mtime_ns: I64, nlink: I64, is_file: U8, is_dir: U8) -> I64 {
+    words :: jet_rt_alloc(I64{64}, I64{8})
+    rt_text_store(words, jet_int_owned_to_i64(status))
+    rt_text_store(words + I64{8}, jet_int_owned_to_i64(errno))
+    rt_text_store(words + I64{16}, jet_int_owned_to_i64(dev))
+    rt_text_store(words + I64{24}, jet_int_owned_to_i64(ino))
+    rt_text_store(words + I64{32}, jet_int_owned_to_i64(len))
+    rt_text_store(words + I64{40}, jet_int_owned_to_i64(mtime))
+    rt_text_store(words + I64{48}, jet_int_owned_to_i64(mtime_ns))
+    rt_text_store(words + I64{56}, jet_int_owned_to_i64(nlink))
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        jet_rt_free(words, I64{64}, I64{8})
+        return I64{0}
+    }
+    result :: jet_rt_alloc(JETC_STAT_BYTES, I64{8})
+    coll_copy(words, result, I64{64})
+    jet_rt_free(words, I64{64}, I64{8})
+    rt_text_store(result + I64{64}, if (is_file != U8{0}) -> I64{1} else -> I64{0})
+    rt_text_store(result + I64{72}, if (is_dir != U8{0}) -> I64{1} else -> I64{0})
+    result
+}
+#Export(c) fn jet_rt_record_get_jet_crypto_jetc_stat_status(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value)) }
+#Export(c) fn jet_rt_record_get_jet_crypto_jetc_stat_errno(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{8})) }
+#Export(c) fn jet_rt_record_get_jet_crypto_jetc_stat_dev(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{16})) }
+#Export(c) fn jet_rt_record_get_jet_crypto_jetc_stat_ino(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{24})) }
+#Export(c) fn jet_rt_record_get_jet_crypto_jetc_stat_len(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{32})) }
+#Export(c) fn jet_rt_record_get_jet_crypto_jetc_stat_mtime(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{40})) }
+#Export(c) fn jet_rt_record_get_jet_crypto_jetc_stat_mtime_ns(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{48})) }
+#Export(c) fn jet_rt_record_get_jet_crypto_jetc_stat_nlink(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{56})) }
+#Export(c) fn jet_rt_record_get_jet_crypto_jetc_stat_is_file(value: I64) -> Bool { rt_text_word(value + I64{64}) != I64{0} }
+#Export(c) fn jet_rt_record_get_jet_crypto_jetc_stat_is_dir(value: I64) -> Bool { rt_text_word(value + I64{72}) != I64{0} }
+#Export(c) fn jet_rt_handle_drop_jet_crypto_jetc_stat(value: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, JETC_STAT_BYTES, I64{8})
+}

@@ -1615,7 +1615,7 @@ fixture executable: `node Compiler/JetRuntime/Tests/run-execution-fixtures.mjs B
 
 ## In-process linking
 
-`Image/StaticLink.jet` (`x64_link_executable(names, bufs)`, #4549) links
+`Image/StaticLink.jet` (`x64_link_executable(names, bufs, base)`, #4549) links
 relocatable objects with the prebuilt runtime archive set into a static
 x86-64 executable without a system linker, compiler or child process.
 `Image/Archive.jet` reads GNU `ar` archives in place (member table, `/` and
@@ -1662,7 +1662,9 @@ the linker supplies the few glibc-only names below. What the linker does:
   exactly when the function it describes is live (and its LSDA then is), and
   every kept FDE's CIE pointer is recomputed. The same pass over each live
   section's relocations assigns GOT slots and reports undefined symbols.
-- **Layout.** ET_EXEC at 0x400000 with file offset = address - base, three
+- **Layout.** ET_EXEC at the link base (`LINK_BASE` 0x400000 for `jet
+  build`; `LINK_RUN_BASE` 0x200000000000 for an image `jet run` maps into its
+  own process, `Image/Loader.jet`) with file offset = address - base, three
   page-aligned `PT_LOAD` segments: read-only (headers, `.rodata*`,
   `.gcc_except_table*`, the kept unwind records plus a zero terminator),
   read+execute (`.text*`, padded with `int3`), read+write (`.tdata`, the
@@ -2689,7 +2691,7 @@ filter, serial and shuffle policies), and `Tests/test-native-test-contract.mjs`
 (output checks observe joined batch state; a fatal child preserves completed
 outcomes and reruns only unreported bodies, never output checks). The registered
 E3015 what/why/fix snapshot is exercised by
-`Tests/test-native-output-diagnostic.mjs`. These consumers require the real
+`Tests/TestNativeOutputDiagnostic.jet`. These consumers require the real
 composed candidate, host and matching runtime pack; metadata-only checks do
 not admit execution parity.
 Its registered What line starts `Output check not run:` in sentence case,
@@ -2939,7 +2941,7 @@ borrowed four-word Jet callback adapter `[payload, next, release, clone]`,
 not a Rust owner or an OS descriptor. Lowering supplies typed source-method
 callbacks, preserving source buffering, UTF-8 validation, CR/LF handling,
 fault checkpoints and `<core.prelude>:0` error rendering. The runtime copies
-callbacks into a kind-28 iterator's existing closure fields; no second
+callbacks into a kind-29 iterator's existing closure fields; no second
 producer/context allocation is required. A pull returns EOF (0), a moved slot
 (1), or a stopped rail (-1, with an unwritten output). Borrowed file/stdin
 sources are eagerly snapshotted; owned sources are lazy. Process producers

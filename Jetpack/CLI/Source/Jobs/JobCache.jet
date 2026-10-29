@@ -212,7 +212,7 @@ fn cli_collect_job_scope_files(root: String, directory: String, metadata: JobMet
         info :: files.stat(item.path) ?? return Err(CLIError.Other("{err}"))
         if {
             info.is_symlink -> return Err(CLIError.Other("strict cached job scope contains unsupported symlink `{relative}`"))
-            info.is_dir -> cli_collect_job_scope_files(root, item.path, metadata, found)
+            info.is_dir -> cli_collect_job_scope_files(root, item.path, metadata, &found)
             info.is_file -> {
                 digest :: foundation_sha256_file_hex(item.path) ?? return Err(CLIError.Other("couldn't hash job scope `{relative}`: {err}"))
                 &found.push((path: relative.replace("\\", "/"), digest: digest))

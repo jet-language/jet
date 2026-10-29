@@ -24,7 +24,7 @@ use jet_foundation.[
     Func,
     Item,
     LValue,
-    MIRDerivationMethod,
+    DerivationMethod,
     Marker,
     NamedSpan,
     OutputKind,
@@ -44,7 +44,7 @@ use jet_foundation.[
     failure_contract_effective_type,
     failure_contract_of_function,
     failure_contract_source,
-    mir_sha256_hex,
+    sha256_hex,
     type_name,
 ]
 use jet_sema.[
@@ -87,7 +87,9 @@ struct JetCLISemWalk {
     structural_slot: String
     structural_slot_kind: String
     block_spans: [Span]
-    claimed_block_spans: [String: Bool]
+    // Union-find successor over `block_spans` (claims are by start and end): `block_next[i] == i`
+    // while span i is unclaimed; a claimed span points past itself. One sentinel slot at the end.
+    block_next: [Int]
     references: [SemaNameReferenceFact]
     module_paths: [String: String]
 }
@@ -194,18 +196,18 @@ fn jet_cli_sem_params(params: [Param], source: String, skip_self: Bool) -> [JetC
 // `#Policy` argument.
 fn jet_cli_sem_policy_argument(expr: Expr) -> String {
     if expr == {
-        .Ident(name, _) -> name
-        .Int(value, _, _, raw) -> raw ?? "{value}"
-        .Bool(value, _) -> if value -> "true" else -> "false"
-        .Str(parts, _) -> {
+        .Ident(name, _, _) -> name
+        .Int(value, _, _, raw, _) -> raw ?? "{value}"
+        .Bool(value, _, _) -> if value -> "true" else -> "false"
+        .Str(parts, _, _) -> {
             text := ""
             loop part in parts {
                 if part == .Lit(value) -> text = "{text}{value}"
             }
             "\"{text}\""
         }
-        .Field(base, member, _) -> "{jet_cli_sem_policy_argument(base)}.{member}"
-        .Call(call) -> {
+        .Field(base, member, _, _) -> "{jet_cli_sem_policy_argument(base)}.{member}"
+        .Call(call, _) -> {
             arguments :: loop argument in call.args -> jet_cli_sem_policy_argument(argument.expr)
             "{call.name}({arguments.join(", ")})"
         }
@@ -220,7 +222,7 @@ fn jet_cli_sem_callable_policies(markers: [Marker]) -> [CallablePolicy] {
         if marker.name != "Policy" -> next
         loop argument in marker.args {
             if argument == .Expr(value) {
-                if value == .Call(call) {
+                if value == .Call(call, _) {
                     arguments :: loop call_argument in call.args -> jet_cli_sem_policy_argument(call_argument.expr)
                     &policies.push(CallablePolicy{name: call.name, arguments: arguments})
                 }
@@ -405,8 +407,8 @@ fn jet_cli_sem_declaration_ref(name: String, span: Span, ctx: JetCLISemWalk, mod
 
 fn jet_cli_sem_state_marker_path(expr: Expr) -> NamedSpan? {
     if expr == {
-        .Ident(name, span) -> return Val(NamedSpan{name: name, span: span})
-        .Field(base, member, span) -> {
+        .Ident(name, span, _) -> return Val(NamedSpan{name: name, span: span})
+        .Field(base, member, span, _) -> {
             inner :: jet_cli_sem_state_marker_path(base) ?? return None
             return Val(NamedSpan{name: "{inner.name}.{member}", span: span})
         }
@@ -483,19 +485,34 @@ fn jet_cli_sem_slot_enter(db: &JetCLISemDB, ctx: &JetCLISemWalk, name: String, k
         parent_start :: db.nodes[parent].span.start
         parent_end :: db.nodes[parent].span.end
         exact_parent_end :: db.nodes[parent].class == "arm"
-        chosen := Span?{None}
-        loop span in ctx.block_spans {
-            if span.start < parent_start -> next
-            if exact_parent_end && !(span.end <= parent_end || parent_end <= span.start) -> next
-            if ctx.claimed_block_spans.has_key("{span.start}:{span.end}") -> next
-            if chosen == .Val(current) {
-                if span.start < current.start -> chosen = Val(span)
-            } else {
-                chosen = Val(span)
-            }
+        // `ctx.block_spans` is sorted by start: from Rust's `partition_point` lower bound,
+        // the first unclaimed candidate is the minimum-start one (`min_by_key` keeps the first).
+        first := 0
+        high := ctx.block_spans.len()
+        loop first < high {
+            middle :: first + (high - first) /% 2
+            if ctx.block_spans[middle].start < parent_start -> first = middle + 1 else -> high = middle
         }
-        if chosen == .Val(span) {
-            ctx.claimed_block_spans["{span.start}:{span.end}"] = true
+        // Claimed spans are skipped through `block_next`, not rescanned on every entry.
+        chosen := Int?{None}
+        index := jet_cli_sem_next_unclaimed(&ctx, first)
+        loop index < ctx.block_spans.len() {
+            if exact_parent_end && !(ctx.block_spans[index].end <= parent_end || parent_end <= ctx.block_spans[index].start) {
+                index = jet_cli_sem_next_unclaimed(&ctx, index + 1)
+                next
+            }
+            chosen = Val(index)
+            break
+        }
+        if chosen == .Val(claimed) {
+            // copy: `ctx.block_spans[claimed]` stays in its list (no move out of an element, E0225);
+            // the binding `span` owns its own.
+            span :: ctx.block_spans[claimed].copy()
+            // Equal spans sort together (same start) after the first unclaimed one; the claim covers them.
+            loop at in claimed..<ctx.block_spans.len() {
+                if ctx.block_spans[at].start != span.start -> break
+                if ctx.block_spans[at].end == span.end -> ctx.block_next[at] = at + 1
+            }
             &db.slot_boundaries.push(JetCLISemSlotBoundary{parent: parent, slot: name, module_path: db.nodes[parent].module_path, span: span})
         }
     }
@@ -503,6 +520,20 @@ fn jet_cli_sem_slot_enter(db: &JetCLISemDB, ctx: &JetCLISemWalk, name: String, k
     ctx.structural_slot = name
     ctx.structural_slot_kind = kind
     saved
+}
+
+// The first unclaimed index of `ctx.block_spans` at or after `index` (`block_spans.len()` when
+// none), compressing the path it walked.
+fn jet_cli_sem_next_unclaimed(ctx: &JetCLISemWalk, index: Int) -> Int {
+    root := index
+    loop ctx.block_next[root] != root -> root = ctx.block_next[root]
+    cursor := index
+    loop cursor != root {
+        following :: ctx.block_next[cursor]
+        ctx.block_next[cursor] = root
+        cursor = following
+    }
+    root
 }
 
 fn jet_cli_sem_slot_leave(ctx: &JetCLISemWalk, saved: JetCLISemSlotSave) Never! {
@@ -616,11 +647,11 @@ fn jet_cli_sem_stmt_head(stmt: Stmt) -> NamedSpan {
 // argument (plus the closing parenthesis).
 fn jet_cli_sem_structural_expr_span(expr: Expr) -> Span {
     if expr == {
-        .Call(call) -> {
+        .Call(call, _) -> {
             end :: if call.args.len() == 0 -> call.name_span.end + 2 else -> jet_cli_sem_structural_expr_span(call.args[call.args.len() - 1].expr).end + 1
             return Span{start: call.name_span.start, end: end}
         }
-        .MethodCall(receiver, _, method_span, _, _, args, _, _) -> {
+        .MethodCall(receiver, _, method_span, _, _, args, _) -> {
             end :: if args.len() == 0 -> method_span.end + 2 else -> jet_cli_sem_structural_expr_span(args[args.len() - 1].expr).end + 1
             return Span{start: jet_cli_sem_structural_expr_span(receiver).start, end: end}
         }
@@ -641,7 +672,7 @@ fn jet_cli_sem_allow_markers(markers: [Marker], site: String, db: &JetCLISemDB, 
         if marker.name != "allow" -> next
         loop argument in marker.args {
             if argument == .Expr(value) {
-                if value == .Ident(lint_name, _) -> &db.bypasses.push(JetCLISemBypass{kind: "lint_allow", site: site, detail: lint_name, module_path: ctx.module_path, span: marker.span})
+                if value == .Ident(lint_name, _, _) -> &db.bypasses.push(JetCLISemBypass{kind: "lint_allow", site: site, detail: lint_name, module_path: ctx.module_path, span: marker.span})
             }
         }
     }
@@ -1060,7 +1091,6 @@ fn jet_cli_sem_bind_name(name: BindName) -> NamedSpan Never! {
     NamedSpan{name: name.name, span: name.span}
 }
 
-
 fn jet_cli_sem_bind_names(pattern: BindPattern) -> [NamedSpan] Never! {
     names := [NamedSpan]{}
     if pattern == {
@@ -1126,7 +1156,7 @@ fn jet_cli_sem_method_call(receiver: Expr, method: String, method_span: Span, ar
     if method == "drop" {
         reason := ""
         if args.len() > 0 {
-            if args[0].expr == .Str(parts, _) {
+            if args[0].expr == .Str(parts, _, _) {
                 if parts.len() == 1 {
                     if parts[0] == .Lit(text) -> reason = text
                 }
@@ -1141,9 +1171,9 @@ fn jet_cli_sem_expr(expr: Expr, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: 
     structural_id :: jet_cli_sem_record_node(&db, &ctx, "expr", "expr", jet_cli_sem_structural_expr_span(expr))
     jet_cli_sem_push_parent(&ctx, structural_id)
     if expr == {
-        .PtrFromAddr(_, _, _, addr, _) -> jet_cli_sem_scalar("address", addr, &db, &ctx, modules)
-        .Ident(name, span) -> &db.refs.push(jet_cli_sem_scoped_ref(name, span, ctx))
-        .Call(call) -> {
+        .PtrFromAddr(_, _, _, addr, _, _) -> jet_cli_sem_scalar("address", addr, &db, &ctx, modules)
+        .Ident(name, span, _) -> &db.refs.push(jet_cli_sem_scoped_ref(name, span, ctx))
+        .Call(call, _) -> {
             loop argument in call.args {
                 fact :: argument.flags.arithmetic_policy ?? next
                 operation :: jet_cli_sem_arithmetic_operation(fact) ?? next
@@ -1153,28 +1183,28 @@ fn jet_cli_sem_expr(expr: Expr, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: 
             &db.refs.push(jet_cli_sem_scoped_ref(call.name, call.name_span, ctx))
             jet_cli_sem_args(call.args, &db, &ctx, modules)
         }
-        .MethodCall(receiver, method, method_span, _, _, args, _, _) -> jet_cli_sem_method_call(receiver, method, method_span, args, &db, &ctx, modules)
-        .OptMethodCall(receiver, method, method_span, _, args, _) -> jet_cli_sem_method_call(receiver, method, method_span, args, &db, &ctx, modules)
-        .Field(base, member, span) -> {
+        .MethodCall(receiver, method, method_span, _, _, args, _) -> jet_cli_sem_method_call(receiver, method, method_span, args, &db, &ctx, modules)
+        .OptMethodCall(receiver, method, method_span, _, args, _, _) -> jet_cli_sem_method_call(receiver, method, method_span, args, &db, &ctx, modules)
+        .Field(base, member, span, _) -> {
             jet_cli_sem_scalar("base", base, &db, &ctx, modules)
             &db.refs.push(jet_cli_sem_scoped_ref(member, span, ctx))
         }
-        .OptField(base, member, member_span, _, _) -> {
+        .OptField(base, member, member_span, _, _, _) -> {
             jet_cli_sem_scalar("base", base, &db, &ctx, modules)
             &db.refs.push(jet_cli_sem_scoped_ref(member, member_span, ctx))
         }
-        .Binary(_, left, right, _) -> {
+        .Binary(_, left, right, _, _) -> {
             jet_cli_sem_scalar("lhs", left, &db, &ctx, modules)
             jet_cli_sem_scalar("rhs", right, &db, &ctx, modules)
         }
-        .CompareChain(operands, _, _, _) -> jet_cli_sem_list("operands", operands, &db, &ctx, modules)
-        .Unary(_, operand, _) -> jet_cli_sem_scalar("operand", operand, &db, &ctx, modules)
-        .Deref(value, _) | .RawOf(value, _) | .Copy(value, _) | .Place(value, _, _) -> jet_cli_sem_scalar("operand", value, &db, &ctx, modules)
-        .Index(base, index, _, _) -> {
+        .CompareChain(operands, _, _, _, _) -> jet_cli_sem_list("operands", operands, &db, &ctx, modules)
+        .Unary(_, operand, _, _) -> jet_cli_sem_scalar("operand", operand, &db, &ctx, modules)
+        .Deref(value, _, _) | .RawOf(value, _, _) | .Copy(value, _, _) | .Place(value, _, _, _) -> jet_cli_sem_scalar("operand", value, &db, &ctx, modules)
+        .Index(base, index, _, _, _) -> {
             jet_cli_sem_scalar("base", base, &db, &ctx, modules)
             jet_cli_sem_scalar("index", index, &db, &ctx, modules)
         }
-        .Slice(base, start, end, range, _) -> {
+        .Slice(base, start, end, range, _, _) -> {
             jet_cli_sem_scalar("base", base, &db, &ctx, modules)
             if range == .Val(value) {
                 jet_cli_sem_scalar("range", value, &db, &ctx, modules)
@@ -1183,35 +1213,35 @@ fn jet_cli_sem_expr(expr: Expr, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: 
                 jet_cli_sem_scalar("end", end, &db, &ctx, modules)
             }
         }
-        .Range(start, end, _, _) -> {
+        .Range(start, end, _, _, _) -> {
             jet_cli_sem_scalar("start", start, &db, &ctx, modules)
             jet_cli_sem_scalar("end", end, &db, &ctx, modules)
         }
-        .Str(parts, _) -> {
+        .Str(parts, _, _) -> {
             interpolations := [Expr]{}
             loop part in parts {
                 if part == .Interp(inner, _) -> &interpolations.push(inner)
             }
             jet_cli_sem_list("interpolations", interpolations, &db, &ctx, modules)
         }
-        .ListLit(elements, _) -> jet_cli_sem_list("items", elements, &db, &ctx, modules)
-        .MemberSpread(base, _, _) -> jet_cli_sem_scalar("base", base, &db, &ctx, modules)
-        .Spread(value, _) -> jet_cli_sem_scalar("value", value, &db, &ctx, modules)
-        .MapLit(entries, _) -> {
+        .ListLit(elements, _, _) -> jet_cli_sem_list("items", elements, &db, &ctx, modules)
+        .MemberSpread(base, _, _, _) -> jet_cli_sem_scalar("base", base, &db, &ctx, modules)
+        .Spread(value, _, _) -> jet_cli_sem_scalar("value", value, &db, &ctx, modules)
+        .MapLit(entries, _, _) -> {
             keys :: loop entry in entries -> entry.key
             values :: loop entry in entries -> entry.value
             jet_cli_sem_list("keys", keys, &db, &ctx, modules)
             jet_cli_sem_list("values", values, &db, &ctx, modules)
         }
-        .TupleLit(fields, _, _) -> {
+        .TupleLit(fields, _, _, _) -> {
             values :: loop field in fields -> field.value
             jet_cli_sem_list("fields", values, &db, &ctx, modules)
         }
-        .StructLit(_, _, _, _, fields, _, _) -> {
+        .StructLit(_, _, _, _, fields, _, _, _) -> {
             values :: loop field in fields -> field.value
             jet_cli_sem_list("fields", values, &db, &ctx, modules)
         }
-        .TypedLit(_, body, _) -> {
+        .TypedLit(_, body, _, _) -> {
             values :: if body == {
                 .Fields(fields) -> loop field in fields -> field.value
                 .Elements(elements) -> elements
@@ -1228,19 +1258,19 @@ fn jet_cli_sem_expr(expr: Expr, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: 
             }
             jet_cli_sem_list("body", values, &db, &ctx, modules)
         }
-        .EnumLit(_, _, _, args, _, _) -> {
+        .EnumLit(_, _, _, args, _, _, _) -> {
             values :: loop argument in args -> if argument == {
                 .Positional(value) -> value
                 .Named(_, value) -> value
             }
             jet_cli_sem_list("args", values, &db, &ctx, modules)
         }
-        .Tainted(value, _, _) | .Present(value, _) | .Ok(value, _) | .Err(value, _) -> jet_cli_sem_scalar("value", value, &db, &ctx, modules)
-        .Try(value, _, _, note) -> {
+        .Tainted(value, _, _, _) | .Present(value, _, _) | .Ok(value, _, _) | .Err(value, _, _) -> jet_cli_sem_scalar("value", value, &db, &ctx, modules)
+        .Try(value, _, _, note, _) -> {
             jet_cli_sem_scalar("value", value, &db, &ctx, modules)
             if note == .Val(context) -> jet_cli_sem_scalar("note", context, &db, &ctx, modules)
         }
-        .OrFallback(value, fallback, _, _) -> {
+        .OrFallback(value, fallback, _, _, _) -> {
             jet_cli_sem_scalar("value", value, &db, &ctx, modules)
             if fallback == {
                 .Value(inner) -> jet_cli_sem_scalar("fallback", inner, &db, &ctx, modules)
@@ -1257,8 +1287,8 @@ fn jet_cli_sem_expr(expr: Expr, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: 
                 .BreakLabel(name, span) | .ContinueLabel(name, span) -> jet_cli_sem_label_ref(name, span, &db, ctx)
             }
         }
-        .PatternTest(subject, _, _) -> jet_cli_sem_scalar("subject", subject, &db, &ctx, modules)
-        .Lambda(lambda) -> {
+        .PatternTest(subject, _, _, _) -> jet_cli_sem_scalar("subject", subject, &db, &ctx, modules)
+        .Lambda(lambda, _) -> {
             loop parameter in lambda.params {
                 &db.defs.push(jet_cli_sem_def(ctx, jet_cli_sem_local_identity(jet_cli_sem_active_scope(ctx), "param", parameter.name), parameter.name, parameter.name, parameter.name_span, JetCLISemKind.Param{ty: parameter.ty ?? Type.Int}))
             }
@@ -1267,22 +1297,22 @@ fn jet_cli_sem_expr(expr: Expr, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: 
                 .Block(stmts) -> jet_cli_sem_block_body("body", stmts, &db, &ctx, modules)
             }
         }
-        .CallValue(callee, args, _) -> {
+        .CallValue(callee, args, _, _) -> {
             jet_cli_sem_scalar("callee", callee, &db, &ctx, modules)
             jet_cli_sem_args(args, &db, &ctx, modules)
         }
-        .If(cond, then_body, then_value, else_body, else_value, _) -> {
+        .If(cond, then_body, then_value, else_body, else_value, _, _) -> {
             jet_cli_sem_scalar("condition", cond, &db, &ctx, modules)
             jet_cli_sem_block_body("then_body", then_body, &db, &ctx, modules)
             jet_cli_sem_scalar("then_value", then_value, &db, &ctx, modules)
             jet_cli_sem_block_body("else_body", else_body, &db, &ctx, modules)
             jet_cli_sem_scalar("else_value", else_value, &db, &ctx, modules)
         }
-        .ComptimeName(name, span, _) -> {
+        .ComptimeName(name, span, _, _) -> {
             nul :: String.from_bytes([U8]{0}) ?? ""
             if name.starts_with("{nul}jet.fact.") && jet_cli_sem_source_text(ctx.source, span) == "$origin" -> &db.refs.push(jet_cli_sem_scoped_ref("$origin", span, ctx))
         }
-        .Paren(value, _) -> jet_cli_sem_scalar("inner", value, &db, &ctx, modules)
+        .Paren(value, _, _) -> jet_cli_sem_scalar("inner", value, &db, &ctx, modules)
         else -> {}
     }
     jet_cli_sem_pop_parent(&ctx, structural_id)
@@ -1857,42 +1887,63 @@ fn jet_cli_sem_normalize_definition(source: String) -> String {
     String.from_bytes(output) ?? source
 }
 
+// One non-local definition, keyed for jet_cli_sem_definition_facts: module, start, listing order.
+struct JetCLISemDefinitionAt {
+    module_path: String
+    start: Int
+    end: Int
+    index: Int
+}
+
 // Build.rs `build_definition_facts`: one fact per top-level item, for the
-// first non-local definition it declares.
+// first non-local definition it declares. Each module's source bytes are read
+// once, and the item's definition is found by binary search over the non-local
+// definitions sorted by (module, start, listing order): the first one inside the
+// item is the earliest-starting, first-listed one.
 fn jet_cli_sem_definition_facts(definitions: [JetCLISemDefinition], nodes: [JetCLISemNode], modules: [JetDriverDocModule]) -> [JetCLISemDefinitionFact] {
     output := [JetCLISemDefinitionFact]{}
+    source_slot := [String: Int]{}
+    sources := [[U8]]{}
+    loop doc_module in modules {
+        if source_slot.has_key(doc_module.path) -> next
+        source_slot[doc_module.path] = sources.len()
+        &sources.push(doc_module.source.bytes())
+    }
+    candidates := [JetCLISemDefinitionAt]{}
+    loop (index, definition) in definitions {
+        if definition.def.kind == {
+            .Local(_, _) | .Param(_) | .Field(_, _) | .EnumVariant(_) -> next
+            else -> {}
+        }
+        &candidates.push(JetCLISemDefinitionAt{module_path: definition.def.module_path, start: definition.def.def_span.start, end: definition.def.def_span.end, index: index})
+    }
+    &candidates.sort_by((left: JetCLISemDefinitionAt, right: JetCLISemDefinitionAt) -> (left.module_path <=> right.module_path).then(left.start <=> right.start).then(left.index <=> right.index))
     loop node in nodes {
         if node.parent != None || node.class != "item" -> next
-        source := String?{None}
-        loop doc_module in modules {
-            if doc_module.path == node.module_path {
-                source = Val(doc_module.source)
-                break
-            }
+        slot :: source_slot.get(node.module_path) ?? next
+        first := 0
+        high := candidates.len()
+        loop first < high {
+            middle :: first + (high - first) /% 2
+            if (candidates[middle].module_path <=> node.module_path).then(candidates[middle].start <=> node.span.start) == Ordering.Less -> first = middle + 1 else -> high = middle
         }
-        module_source :: source ?? next
-        chosen := JetCLISemDefinition?{None}
-        loop definition in definitions {
-            def :: definition.def
-            if def.module_path != node.module_path || def.def_span.start < node.span.start || def.def_span.start > node.span.end || def.def_span.end > node.span.end -> next
-            if def.kind == {
-                .Local(_, _) | .Param(_) | .Field(_, _) | .EnumVariant(_) -> next
-                else -> {}
-            }
-            if chosen == .Val(current) {
-                if def.def_span.start < current.def.def_span.start -> chosen = Val(definition)
-            } else {
-                chosen = Val(definition)
-            }
+        chosen := Int?{None}
+        loop at in first..<candidates.len() {
+            if candidates[at].module_path != node.module_path || candidates[at].start > node.span.end -> break
+            if candidates[at].end > node.span.end -> next
+            chosen = Val(candidates[at].index)
+            break
         }
-        definition :: chosen ?? next
+        position :: chosen ?? next
+        definition :: definitions[position]
         kind :: jet_cli_sem_definition_kind(definition.def.kind)
         structural :: "{kind}|{definition.def.identity}"
         signature :: "{kind}|{jet_cli_sem_definition_signature(definition)}"
+        text :: if node.span.end > sources[slot].len() -> "" else -> jet_cli_doc_text(sources[slot], node.span.start, node.span.end)
         &output.push(JetCLISemDefinitionFact{
-            stable_id: "def:{mir_sha256_hex(structural).slice(0, 16)}",
-            signature_id: "sig:{mir_sha256_hex(signature).slice(0, 16)}",
-            content_id: "sha256:{mir_sha256_hex(jet_cli_sem_normalize_definition(jet_cli_sem_source_text(module_source, node.span)))}",
+            stable_id: "def:{sha256_hex(structural).slice(0, 16)}",
+            signature_id: "sig:{sha256_hex(signature).slice(0, 16)}",
+            content_id: "sha256:{sha256_hex(jet_cli_sem_normalize_definition(text))}",
             human_identity: definition.def.identity,
             name: definition.def.qualified_name,
             kind: kind,
@@ -1900,15 +1951,8 @@ fn jet_cli_sem_definition_facts(definitions: [JetCLISemDefinition], nodes: [JetC
             span: node.span,
         })
     }
-    loop index in 1..<output.len() {
-        value :: output[index]
-        position := index
-        loop position > 0 && (output[position - 1].stable_id > value.stable_id || (output[position - 1].stable_id == value.stable_id && output[position - 1].human_identity > value.human_identity)) {
-            output[position] = output[position - 1]
-            position -= 1
-        }
-        output[position] = value
-    }
+    // Stable: equal (stable_id, human_identity) rows keep their item order.
+    &output.sort_by((left: JetCLISemDefinitionFact, right: JetCLISemDefinitionFact) -> (left.stable_id <=> right.stable_id).then(left.human_identity <=> right.human_identity))
     output
 }
 
@@ -2170,7 +2214,7 @@ fn jet_cli_build_semindex(modules: [JetDriverDocModule], effect_projection: JetC
             structural_slot: "root",
             structural_slot_kind: "list",
             block_spans: block_spans,
-            claimed_block_spans: [String: Bool]{},
+            block_next: loop index in 0..<block_spans.len() + 1 -> index,
             references: doc_module.name_references,
             module_paths: module_paths,
         }
@@ -2196,7 +2240,7 @@ fn jet_cli_build_semindex(modules: [JetDriverDocModule], effect_projection: JetC
     jet_cli_sem_align_reference_targets(&db)
     definitions :: jet_cli_sem_convert_defs(db, modules)
     definition_facts :: jet_cli_sem_definition_facts(definitions, db.nodes, modules)
-    derivations :: loop fact in definition_facts -> derivation_record(fact.stable_id, fact.human_identity, "jet-sema", MIRDerivationMethod.StaticDerivation, "checked-definition", [String]{fact.signature_id, fact.content_id}, derivation_identity(fact.content_id, fact.signature_id, "", fact.module_path))
+    derivations :: loop fact in definition_facts -> derivation_record(fact.stable_id, fact.human_identity, "jet-sema", DerivationMethod.StaticDerivation, "checked-definition", [String]{fact.signature_id, fact.content_id}, derivation_identity(fact.content_id, fact.signature_id, "", fact.module_path))
     arithmetic := ^db.arithmetic
     arithmetic = loop fresh_item in arithmetic -> fresh_item
     &arithmetic.sort_by((left: JetCLISemArithmetic, right: JetCLISemArithmetic) -> (left.module_path <=> right.module_path).then(left.operation_span.start <=> right.operation_span.start).then(left.operation_span.end <=> right.operation_span.end))

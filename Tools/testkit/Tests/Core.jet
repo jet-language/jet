@@ -1,6 +1,7 @@
 use core.files as files
 use core.sys as sys
 use core.process as process
+use core.time as time
 
 fn kit_test_unblessed() -> KitBless {
     KitBless{ids: [], all: false, reason: "", allow_shrink: [], first_tier: true}
@@ -115,6 +116,51 @@ fn kit_test_core_scratch(label: String) -> String {
     assert_eq((kit_exec_process_failure(spawn) ?? panic("spawn")).status, "ERROR")
 }
 
+#Test("the resident guard reads VmRSS and names a memory kill") {
+    assert_eq(kit_exec_resident_bytes("Name:\tjet\nVmSize:\t 8388608 kB\nVmRSS:\t   20480 kB\nThreads:\t33\n"), 20971520)
+    assert_eq(kit_exec_resident_bytes("Name:\tjet\nState:\tZ (zombie)\n"), 0)
+    killed :: KitRun{stdout: "", stderr: "", code: -1, signal: Val(9), timed_out: false, error: "", limit_hit: "memory"}
+    assert_eq((kit_exec_process_failure(killed) ?? panic("memory")).detail, "memory limit hit")
+}
+
+#Test("the resident guard kills a step above its VmRSS limit") {
+    root :: cases_test_root("resident-guard")
+    env :: KitEnv{root: root, scratch: root, jet: "/bin/sh", jetpack: "", timeout: 30s, memory_limit: 0, resident_limit: 67108864}
+    run :: kit_exec_invoke(env, ["/bin/sh", "-c", "x=$(head -c 268435456 /dev/zero | tr '\\0' a); sleep 20"], root, root, "")
+    assert_eq(run.limit_hit, "memory")
+    assert(run.elapsed_ns < 15000000000)
+    small :: kit_exec_invoke(env, ["/bin/sh", "-c", "printf ok"], root, root, "")
+    assert_eq(small.stdout, "ok")
+    assert_eq(small.limit_hit, "")
+    files.remove_all(root) ?? panic("remove resident scratch")
+}
+
+#Test("concurrent children each keep their resident guard and wall-clock timeout") {
+    root :: cases_test_root("pool-guard")
+    env :: KitEnv{root: root, scratch: root, jet: "/bin/sh", jetpack: "", timeout: 3s, memory_limit: 0, resident_limit: 67108864}
+    grow :: ["/bin/sh", "-c", "x=$(head -c 268435456 /dev/zero | tr '\\0' a); sleep 20"]
+    stall :: ["/bin/sh", "-c", "sleep 20"]
+    started :: time.instant()
+    // As the pool runs entries: every child at once, each through kit_exec_invoke.
+    first_grow :: task kit_exec_invoke(env, grow, root, files.join(root, "a"), "")
+    second_grow :: task kit_exec_invoke(env, grow, root, files.join(root, "b"), "")
+    first_stall :: task kit_exec_invoke(env, stall, root, files.join(root, "c"), "")
+    second_stall :: task kit_exec_invoke(env, stall, root, files.join(root, "d"), "")
+    third_stall :: task kit_exec_invoke(env, stall, root, files.join(root, "e"), "")
+    fourth_stall :: task kit_exec_invoke(env, stall, root, files.join(root, "f"), "")
+    loop run in [^first_grow.join() ?? panic("grow"), ^second_grow.join() ?? panic("grow")] {
+        assert_eq(run.limit_hit, "memory")
+        assert_eq((kit_exec_process_failure(run) ?? panic("memory")).detail, "memory limit hit")
+    }
+    loop run in [^first_stall.join() ?? panic("stall"), ^second_stall.join() ?? panic("stall"), ^third_stall.join() ?? panic("stall"), ^fourth_stall.join() ?? panic("stall")] {
+        assert(run.timed_out)
+        assert_eq((kit_exec_process_failure(run) ?? panic("timeout")).status, "TIMEOUT")
+    }
+    // Four 3 s timeouts one after another take 12 s; at once, about 3 s.
+    assert(started.elapsed().ns < 9000000000)
+    files.remove_all(root) ?? panic("remove pool scratch")
+}
+
 #Test("argv0 replaces only the first usage prefix") {
     assert_eq(kit_expect_argv0("Usage: binary\nUsage: binary\n", "binary", "source"), "Usage: source\nUsage: binary\n")
 }
@@ -156,5 +202,19 @@ fn kit_test_core_scratch(label: String) -> String {
     assert(kit_parse_options(["golden", "--timeout", "-1"]).error != "")
     options :: kit_parse_options(["golden", "--timeout", "9223372036854775807"])
     assert_eq(options.error, "")
-    assert_eq(kit_execute_suites(options, ""), 2)
+    assert_eq(kit_execute_suites(options, "").code, 2)
+}
+
+#Test("jobs option refuses non-positive counts and the pool sizes itself from cores and memory") {
+    assert(kit_parse_options(["golden", "--jobs", "0"]).error != "")
+    assert(kit_parse_options(["golden", "--jobs", "x"]).error != "")
+    assert_eq(kit_parse_options(["golden", "--jobs", "3"]).jobs, 3)
+    assert_eq(kit_parse_options(["golden"]).jobs, 0)
+    slot :: kit_job_memory()
+    assert_eq(kit_execute_jobs(3, 100, 16, 0), 3)
+    assert_eq(kit_execute_jobs(8, 2, 16, 0), 2)
+    assert_eq(kit_execute_jobs(0, 100, 16, 0), 16)
+    assert_eq(kit_execute_jobs(0, 100, 16, 5 * slot + 1), 5)
+    assert_eq(kit_execute_jobs(0, 100, 16, slot /% 2), 1)
+    assert_eq(kit_execute_jobs(0, 0, 16, 0), 1)
 }

@@ -1,0 +1,688 @@
+// Simplify (O1, O2): per function, to a fixed point (at most
+// IR_OPT_SIMPLIFY_ROUNDS rounds), each round one sweep of every rewrite and
+// then compaction:
+//   fold        constants of Int (inline range), fixed-width words (wrap or
+//               no fold when it would trap), Bool and Char through + - *,
+//               unary minus, `not` and comparisons (a value against itself
+//               too, never Float); the identities x+0, 0+x, x-0, x*1, 1*x,
+//               x|0, x^0, x<<0, x>>0, x/1, x&-1, x&x, x|x (a copy) and x*0,
+//               0*x, x&0, x-x, x^x (zero); an If or BrIf on a constant keeps
+//               only the arm it takes; the checked fixed-width conversion
+//               (jet_int_checked_fixed) of an Int masked by a constant,
+//               `x & c` with c >= 0 inside the kind, is a Move (an inline
+//               Int is its i64 bits)
+//   unreachable everything after a Br, Return or Unreachable up to the end
+//               of its region
+//   fuse        `t = a <cmp> b; n = not t` becomes `n = a <inverse> b` when t
+//               has no other reader (never for Float: NaN compares false both
+//               ways)
+//   propagate   a slot written once by a Move/Copy of a slot written once
+//               reads its source directly
+//   coalesce    `t = <op>; ...; x = move/copy t` writes x directly when t is a
+//               temporary read only there and nothing between touches x
+//   dead        an instruction without effects whose result nobody reads; the
+//               drop of an exact Int that holds an inline constant or a value
+//               masked by a nonnegative constant
+//   structure   a `br 0` that falls through anyway; empty Block, Loop and If;
+//               a Block no Br targets
+
+use jet_foundation.[name_rows_value]
+
+IR_OPT_SIMPLIFY_ROUNDS :: 8
+
+fn ir_opt_simplify(m: IRModule, f: &IRFunction, report: &IROptReport) Never! {
+    round := 0
+    fixed :: name_rows_value(m.name_rows, "jet_int_checked_fixed") ?? -2
+    loop round < IR_OPT_SIMPLIFY_ROUNDS {
+        // The facts stay true until a sweep changes the function, so they
+        // are computed again only after one does (most sweeps change
+        // nothing, and the last round none).
+        facts := ir_opt_facts(f)
+        changed := ir_opt_fold(m, &f, facts, fixed, &report)
+        changed += ir_opt_unreachable(&f, &report)
+        if changed > 0 -> facts = ir_opt_facts(f)
+        step := ir_opt_fuse_compares(m, &f, facts, &report)
+        if step > 0 -> facts = ir_opt_facts(f)
+        changed += step
+        step = ir_opt_propagate(m, &f, facts, &report)
+        if step > 0 -> facts = ir_opt_facts(f)
+        changed += step
+        step = ir_opt_coalesce(&f, facts, &report)
+        if step > 0 -> facts = ir_opt_facts(f)
+        changed += step
+        changed += ir_opt_dead(m, &f, facts, &report)
+        changed += ir_opt_structure(&f, &report)
+        changed += ir_opt_unwrap(&f)
+        ir_opt_compact(&f)
+        if changed == 0 -> break
+        round += 1
+    }
+}
+
+// The layout of `slot`'s type (kind, width, signedness; no type tree copy).
+fn ir_opt_type(m: IRModule, f: IRFunction, slot: Int) -> IRX64Shape Never! {
+    ir_x64_type(m, f, slot)
+}
+
+fn ir_opt_structural(op: IROp) -> Bool Never! {
+    op == .Block || op == .Loop || op == .If || op == .Else || op == .End || op == .Br || op == .BrIf || op == .Return || op == .Unreachable
+}
+
+fn ir_opt_is_compare(op: IROp) -> Bool Never! {
+    op == .Eq || op == .Ne || op == .Lt || op == .Le || op == .Gt || op == .Ge
+}
+
+fn ir_opt_inverse(op: IROp) -> IROp Never! {
+    if op == {
+        .Eq -> IROp.Ne
+        .Ne -> IROp.Eq
+        .Lt -> IROp.Ge
+        .Le -> IROp.Gt
+        .Gt -> IROp.Le
+        else -> IROp.Lt
+    }
+}
+
+// The matching End of every opener and the Else of every If (-1 when none),
+// by instruction index, over the current (Nop-holding) instruction list.
+struct OptNesting {
+    end: [Int]
+    els: [Int]
+}
+
+fn ir_opt_nesting(f: IRFunction) -> OptNesting Never! {
+    end := [Int]{}
+    els := [Int]{}
+    loop _ in 0..<f.op.len() {
+        &end.push(-1)
+        &els.push(-1)
+    }
+    open := [Int]{}
+    loop at in 0..<f.op.len() {
+        if f.op[at] == {
+            .Block | .Loop | .If -> &open.push(at)
+            .Else -> els[open[open.len() - 1]] = at
+            .End -> {
+                opener :: &open.pop() ?? panic("ir_opt_nesting: End without an open construct")
+                end[opener] = at
+            }
+            else -> {}
+        }
+    }
+    OptNesting{end: end, els: els}
+}
+
+// ---------------------------------------------------------------------------
+// Constant folding.
+
+// `value` as a word of `ty`, or None when it is out of range and `trap`
+// (the operation stops at run time), or when it would be an unsigned 64-bit
+// carrier above the signed range (left to selection).
+fn ir_opt_word(ty: IRX64Shape, value: Int, trap: Bool) -> Int? Never! {
+    bits :: if ty.bits > 0 && ty.bits < 64 -> ty.bits else -> 64
+    lo :: if ty.signed -> 0 - (1 << (bits - 1)) else -> 0
+    hi :: if ty.signed || bits == 64 -> (1 << (bits - 1)) - 1 else -> (1 << bits) - 1
+    if value >= lo && value <= hi -> return Val(value)
+    if trap -> return None
+    span :: 1 << bits
+    wrapped := value % span
+    if wrapped < 0 -> wrapped += span
+    if ty.signed && wrapped > hi -> wrapped -= span
+    if wrapped < lo || wrapped > hi -> return None
+    Val(wrapped)
+}
+
+// The folded value of `op` over constants of `ty`, or None.
+fn ir_opt_fold_value(ty: IRX64Shape, op: IROp, left: Int, right: Int, trap: Bool) -> Int? Never! {
+    if ir_opt_is_compare(op) {
+        if ty.kind != .Int && ty.kind != .Word && ty.kind != .Bool && ty.kind != .Char -> return None
+        // An unsigned 64-bit word constant above the signed range is not folded.
+        if ty.kind == .Word && !ty.signed && (left < 0 || right < 0) -> return None
+        holds :: if op == {
+            .Eq -> left == right
+            .Ne -> left != right
+            .Lt -> left < right
+            .Le -> left <= right
+            .Gt -> left > right
+            else -> left >= right
+        }
+        return Val(if holds -> 1 else -> 0)
+    }
+    if ty.kind != .Int && ty.kind != .Word -> return None
+    exact :: if op == {
+        .Add -> left + right
+        .Sub -> left - right
+        else -> left * right
+    }
+    if ty.kind == .Int {
+        if ir_int_inline(exact) -> return Val(exact)
+        return None
+    }
+    ir_opt_word(ty, exact, trap)
+}
+
+fn ir_opt_set_const(f: &IRFunction, at: Int, value: Int) Never! {
+    f.op[at] = .Const
+    f.a[at] = value
+    f.b[at] = -1
+    f.c[at] = -1
+}
+
+fn ir_opt_set_copy(f: &IRFunction, at: Int, source: Int) Never! {
+    if f.dst[at] == source -> return ir_opt_kill(&f, at)
+    f.op[at] = .Copy
+    f.a[at] = source
+    f.b[at] = -1
+    f.c[at] = -1
+}
+
+fn ir_opt_fold(m: IRModule, f: &IRFunction, facts: OptFacts, fixed: Int, report: &IROptReport) -> Int Never! {
+    nesting :: ir_opt_nesting(f)
+    changed := 0
+    loop at in 0..<f.op.len() {
+        op :: f.op[at]
+        if op == .If || op == .BrIf {
+            value :: ir_opt_const_at(f, facts, f.a[at], at) ?? next
+            ir_opt_fold_branch(&f, nesting, at, value != 0)
+            report.branches_folded += 1
+            changed += 1
+            next
+        }
+        if op == .Not {
+            ty :: ir_opt_type(m, f, f.a[at])
+            if ty.kind != .Bool -> next
+            value :: ir_opt_const_at(f, facts, f.a[at], at) ?? next
+            ir_opt_set_const(&f, at, if value != 0 -> 0 else -> 1)
+            report.folded += 1
+            changed += 1
+            next
+        }
+        if op == .Neg {
+            ty :: ir_opt_type(m, f, f.a[at])
+            value :: ir_opt_const_at(f, facts, f.a[at], at) ?? next
+            folded := Int?{None}
+            if ty.kind == .Int && ir_int_inline(0 - value) -> folded = Val(0 - value)
+            if ty.kind == .Word && ty.signed -> folded = ir_opt_word(ty, 0 - value, f.c[at] != IR_OVERFLOW_WRAP)
+            result :: folded ?? next
+            ir_opt_set_const(&f, at, result)
+            report.folded += 1
+            changed += 1
+            next
+        }
+        if op == .CallRuntime {
+            if f.a[at] != fixed || f.c[at] != 5 || f.dst[at] < 0 -> next
+            value :: f.args[f.b[at]]
+            if ir_opt_type(m, f, value).kind != .Int -> next
+            mask :: ir_opt_masked_at(f, facts, value, at) ?? next
+            kind :: ir_opt_const_at(f, facts, f.args[f.b[at] + 1], at) ?? next
+            if mask > ir_opt_fixed_high(kind) -> next
+            f.op[at] = .Move
+            f.a[at] = value
+            f.b[at] = -1
+            f.c[at] = -1
+            report.folded += 1
+            changed += 1
+            next
+        }
+        arithmetic :: op == .Add || op == .Sub || op == .Mul
+        bitwise :: op == .BitAnd || op == .BitOr || op == .BitXor
+        // Shifts and division only through their identities (x<<0, x>>0, x/1).
+        identity_only :: op == .Shl || op == .Shr || op == .Div
+        if !arithmetic && !bitwise && !identity_only && !ir_opt_is_compare(op) -> next
+        ty :: ir_opt_type(m, f, f.a[at])
+        if ty.kind != .Int && ty.kind != .Word && ty.kind != .Bool && ty.kind != .Char -> next
+        left_slot :: f.a[at]
+        right_slot :: f.b[at]
+        if ir_opt_is_compare(op) && left_slot == right_slot {
+            // A value against itself (never Float: NaN).
+            ir_opt_set_const(&f, at, if op == .Eq || op == .Le || op == .Ge -> 1 else -> 0)
+            report.folded += 1
+            changed += 1
+            next
+        }
+        left :: ir_opt_const_at(f, facts, left_slot, at)
+        right :: ir_opt_const_at(f, facts, right_slot, at)
+        has_l :: left != None
+        has_r :: right != None
+        l :: left ?? 0
+        r :: right ?? 0
+        if has_l && has_r && !bitwise && !identity_only {
+            value :: ir_opt_fold_value(ty, op, l, r, f.c[at] != IR_OVERFLOW_WRAP) ?? next
+            ir_opt_set_const(&f, at, value)
+            report.folded += 1
+            changed += 1
+            next
+        }
+        if ir_opt_is_compare(op) || (ty.kind != .Int && ty.kind != .Word) -> next
+        // Identities: the other operand's value (a copy), or zero. `& -1`
+        // only where -1 is every bit (Int, signed words).
+        all_ones :: ty.kind == .Int || ty.signed
+        zero_l :: has_l && l == 0
+        zero_r :: has_r && r == 0
+        if (op == .Add || op == .Sub || op == .BitOr || op == .BitXor) && zero_r {
+            ir_opt_set_copy(&f, at, left_slot)
+        } else if (op == .Add || op == .BitOr || op == .BitXor) && zero_l {
+            ir_opt_set_copy(&f, at, right_slot)
+        } else if op == .Mul && has_r && r == 1 {
+            ir_opt_set_copy(&f, at, left_slot)
+        } else if op == .Mul && has_l && l == 1 {
+            ir_opt_set_copy(&f, at, right_slot)
+        } else if (op == .Mul || op == .BitAnd) && (zero_l || zero_r) {
+            ir_opt_set_const(&f, at, 0)
+        } else if (op == .Sub || op == .BitXor) && left_slot == right_slot {
+            ir_opt_set_const(&f, at, 0)
+        } else if (op == .BitAnd || op == .BitOr) && left_slot == right_slot {
+            ir_opt_set_copy(&f, at, left_slot)
+        } else if (op == .Shl || op == .Shr) && zero_r {
+            ir_opt_set_copy(&f, at, left_slot)
+        } else if op == .Div && has_r && r == 1 {
+            ir_opt_set_copy(&f, at, left_slot)
+        } else if op == .BitAnd && all_ones && has_r && r == -1 {
+            ir_opt_set_copy(&f, at, left_slot)
+        } else if op == .BitAnd && all_ones && has_l && l == -1 {
+            ir_opt_set_copy(&f, at, right_slot)
+        } else {
+            next
+        }
+        report.folded += 1
+        changed += 1
+    }
+    changed
+}
+
+// The constant c >= 0 an Int `slot` is masked by at instruction `at`, when
+// its single reaching write is `x & c` (or `c & x`): the value lies in
+// [0, c], an inline Int.
+fn ir_opt_masked_at(f: IRFunction, facts: OptFacts, slot: Int, at: Int) -> Int? Never! {
+    def :: ir_opt_reaching_def(f, facts, slot, at)
+    if def < 0 || f.op[def] != .BitAnd -> return None
+    right :: ir_opt_const_at(f, facts, f.b[def], def) ?? -1
+    if right >= 0 -> return Val(right)
+    left :: ir_opt_const_at(f, facts, f.a[def], def) ?? -1
+    if left >= 0 -> return Val(left)
+    None
+}
+
+// The largest value of jet_int_checked_fixed's `kind` (0..3 the signed
+// 8..64-bit integers, 4..7 the unsigned ones; OptRange ir_range_fixed_kind),
+// or -1 for none.
+fn ir_opt_fixed_high(kind: Int) -> Int Never! {
+    if kind == {
+        0 -> 127
+        1 -> 32767
+        2 -> 2147483647
+        3 -> 9223372036854775807
+        4 -> 255
+        5 -> 65535
+        6 -> 4294967295
+        7 -> 9223372036854775807
+        else -> -1
+    }
+}
+
+// An If or BrIf at `at` whose condition is the constant `taken`.
+fn ir_opt_fold_branch(f: &IRFunction, nesting: OptNesting, at: Int, taken: Bool) Never! {
+    if f.op[at] == .BrIf {
+        if !taken -> return ir_opt_kill(&f, at)
+        depth :: f.b[at]
+        f.op[at] = .Br
+        f.a[at] = depth
+        f.b[at] = -1
+        return
+    }
+    end :: nesting.end[at]
+    other :: nesting.els[at]
+    if taken {
+        // The then-part stays as a Block (a Br inside counts it the same).
+        f.op[at] = .Block
+        f.a[at] = -1
+        if other >= 0 {
+            loop k in other..<end -> ir_opt_kill(&f, k)
+        }
+        return
+    }
+    if other < 0 {
+        loop k in at..<(end + 1) -> ir_opt_kill(&f, k)
+        return
+    }
+    f.op[at] = .Block
+    f.a[at] = -1
+    loop k in (at + 1)..<(other + 1) -> ir_opt_kill(&f, k)
+}
+
+// ---------------------------------------------------------------------------
+// Unreachable code.
+
+fn ir_opt_unreachable(f: &IRFunction, report: &IROptReport) -> Int Never! {
+    removed := 0
+    at := 0
+    loop at < f.op.len() {
+        op :: f.op[at]
+        at += 1
+        if op != .Br && op != .Return && op != .Unreachable -> next
+        depth := 0
+        loop at < f.op.len() {
+            next_op :: f.op[at]
+            if next_op == .Nop {
+                at += 1
+                next
+            }
+            if (next_op == .Else || next_op == .End) && depth == 0 -> break
+            if next_op == .Block || next_op == .Loop || next_op == .If -> depth += 1
+            if next_op == .End -> depth -= 1
+            ir_opt_kill(&f, at)
+            removed += 1
+            at += 1
+        }
+    }
+    report.unreachable_removed += removed
+    removed
+}
+
+// ---------------------------------------------------------------------------
+// Compare fusion.
+
+fn ir_opt_fuse_compares(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROptReport) -> Int Never! {
+    changed := 0
+    loop at in 1..<f.op.len() {
+        if f.op[at] != .Not -> next
+        tested :: f.a[at]
+        if tested < f.param_count || facts.defs[tested] != 1 || facts.uses[tested] != 1 -> next
+        def :: facts.def_at[tested]
+        if def < 0 || def >= at || !ir_opt_is_compare(f.op[def]) -> next
+        between := false
+        loop k in (def + 1)..<at {
+            if f.op[k] != .Nop -> between = true
+        }
+        if between -> next
+        kind :: ir_opt_type(m, f, f.a[def]).kind
+        if kind == .Float || kind == .Float32 -> next
+        f.op[at] = ir_opt_inverse(f.op[def])
+        f.a[at] = f.a[def]
+        f.b[at] = f.b[def]
+        f.c[at] = f.c[def]
+        ir_opt_kill(&f, def)
+        report.compares_fused += 1
+        changed += 1
+    }
+    changed
+}
+
+// ---------------------------------------------------------------------------
+// Copy propagation: `x = move/copy y` where x is written only there and y
+// is a parameter or written once before it, and the Move/Copy reaches every
+// read of x: the reads of x read y, and the Move/Copy goes. A Copy of a
+// value with a drop is a clone and stays.
+
+fn ir_opt_propagate(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROptReport) -> Int Never! {
+    count :: f.slot_type.len()
+    replace := [Int]{}
+    loop _ in 0..<count -> &replace.push(-1)
+    killed := [Bool]{}
+    loop _ in 0..<f.op.len() -> &killed.push(false)
+    any := false
+    loop at in 0..<f.op.len() {
+        op :: f.op[at]
+        if op != .Move && op != .Copy -> next
+        x :: f.dst[at]
+        y :: f.a[at]
+        if x == y || x < f.param_count || facts.defs[x] != 1 -> next
+        if f.slot_type[x] != f.slot_type[y] -> next
+        if op == .Copy && m.types[f.slot_type[y]].drop != "" -> next
+        // y keeps the value it had at the Move for as long as x is read.
+        if y >= f.param_count && ir_opt_reaching_def(f, facts, y, at) < 0 -> next
+        if y < f.param_count && facts.defs[y] != 1 -> next
+        replace[x] = y
+        killed[at] = true
+        any = true
+    }
+    if !any -> return 0
+    // Every read of a replaced slot must be reached by its Move/Copy.
+    reads := [Int]{}
+    loop at in 0..<f.op.len() {
+        ir_x64_reads_into(f, at, &reads)
+        loop slot in reads {
+            if slot < 0 || replace[slot] < 0 -> next
+            if ir_opt_reaching_def(f, facts, slot, at) < 0 {
+                killed[facts.def_at[slot]] = false
+                replace[slot] = -1
+            }
+        }
+    }
+    // A source that is itself replaced resolves to its own source (chains).
+    loop slot in 0..<count {
+        target := replace[slot]
+        steps := 0
+        loop target >= 0 && replace[target] >= 0 && steps < count {
+            target = replace[target]
+            steps += 1
+        }
+        if target >= 0 -> replace[slot] = target
+    }
+    changed := 0
+    loop at in 0..<f.op.len() {
+        if killed[at] {
+            ir_opt_kill(&f, at)
+            changed += 1
+            next
+        }
+        ir_opt_rename_reads(&f, at, replace)
+    }
+    report.copies_coalesced += changed
+    changed
+}
+
+// Rewrites the slots instruction `at` reads through `replace` (-1: kept).
+fn ir_opt_rename_reads(f: &IRFunction, at: Int, replace: [Int]) Never! {
+    op :: f.op[at]
+    if op == {
+        .Copy | .Move | .Drop | .Close | .Neg | .Not | .Convert | .Load | .Offset | .If | .BrIf -> f.a[at] = ir_opt_renamed(replace, f.a[at])
+        .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Concat | .CopyBytes -> {
+            f.a[at] = ir_opt_renamed(replace, f.a[at])
+            f.b[at] = ir_opt_renamed(replace, f.b[at])
+        }
+        .Store -> {
+            f.a[at] = ir_opt_renamed(replace, f.a[at])
+            f.c[at] = ir_opt_renamed(replace, f.c[at])
+        }
+        .Return -> f.a[at] = ir_opt_renamed(replace, f.a[at])
+        .Call | .CallRuntime | .CallIndirect -> {
+            if op == .CallIndirect -> f.a[at] = ir_opt_renamed(replace, f.a[at])
+            loop index in f.b[at]..<(f.b[at] + f.c[at]) -> f.args[index] = ir_opt_renamed(replace, f.args[index])
+        }
+        else -> {}
+    }
+}
+
+fn ir_opt_renamed(replace: [Int], slot: Int) -> Int Never! {
+    if slot < 0 || slot >= replace.len() || replace[slot] < 0 -> return slot
+    replace[slot]
+}
+
+// ---------------------------------------------------------------------------
+// Coalescing.
+
+fn ir_opt_coalesce(f: &IRFunction, facts: OptFacts, report: &IROptReport) -> Int Never! {
+    changed := 0
+    reads := [Int]{}
+    loop at in 0..<f.op.len() {
+        op :: f.op[at]
+        if op != .Move && op != .Copy -> next
+        t :: f.a[at]
+        x :: f.dst[at]
+        if t == x || t < f.param_count || f.slot_kind[t] != .Temp -> next
+        if facts.defs[t] != 1 || facts.uses[t] != 1 || f.slot_type[t] != f.slot_type[x] -> next
+        def :: facts.def_at[t]
+        if def < 0 || def >= at || f.dst[def] != t -> next
+        clean := true
+        loop k in (def + 1)..<at {
+            if ir_opt_structural(f.op[k]) || ir_x64_write(f, k) == x {
+                clean = false
+                break
+            }
+            ir_x64_reads_into(f, k, &reads)
+            loop slot in reads {
+                if slot == x -> clean = false
+            }
+            if !clean -> break
+        }
+        if !clean -> next
+        f.dst[def] = x
+        ir_opt_kill(&f, at)
+        report.copies_coalesced += 1
+        changed += 1
+    }
+    changed
+}
+
+// ---------------------------------------------------------------------------
+// Dead code.
+
+// Whether instruction `at` does nothing but write its result.
+fn ir_opt_removable(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
+    op :: f.op[at]
+    if op == {
+        .Const | .ConstText | .ConstBigInt | .DataAddress | .FunctionAddress | .StackAddress | .Offset | .Load | .Not | .Convert | .Concat | .Copy | .Move -> return true
+        .Eq | .Ne | .Lt | .Le | .Gt | .Ge -> return true
+        .Add | .Sub | .Mul | .Neg | .BitAnd | .BitOr | .BitXor | .Div | .Shl | .Shr -> {
+            kind :: ir_opt_type(m, f, f.a[at]).kind
+            if kind == .Float || kind == .Float32 -> return op != .BitAnd && op != .BitOr && op != .BitXor && op != .Shl && op != .Shr
+            if kind == .Int -> return op != .Div && op != .Shl && op != .Shr
+            if kind == .Word {
+                if op == .BitAnd || op == .BitOr || op == .BitXor -> return true
+                if op == .Div -> return false
+                return f.c[at] == IR_OVERFLOW_WRAP
+            }
+            return false
+        }
+        else -> return false
+    }
+}
+
+// `facts` are the function's as it is now; each sweep after one that removed
+// something reads new ones.
+fn ir_opt_dead(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROptReport) -> Int Never! {
+    total := ir_opt_dead_sweep(m, &f, facts)
+    removed := total
+    loop removed > 0 {
+        fresh :: ir_opt_facts(f)
+        removed = ir_opt_dead_sweep(m, &f, fresh)
+        total += removed
+    }
+    report.dead_removed += total
+    total
+}
+
+fn ir_opt_dead_sweep(m: IRModule, f: &IRFunction, facts: OptFacts) -> Int Never! {
+    removed := 0
+    loop at in 0..<f.op.len() {
+        op :: f.op[at]
+        if op == .Drop {
+            slot :: f.a[at]
+            if ir_opt_type(m, f, slot).kind == .Int && (ir_opt_const_at(f, facts, slot, at) != None || ir_opt_masked_at(f, facts, slot, at) != None) {
+                ir_opt_kill(&f, at)
+                removed += 1
+            }
+            next
+        }
+        dst :: f.dst[at]
+        if dst < 0 || facts.uses[dst] != 0 || !ir_opt_removable(m, f, at) -> next
+        ir_opt_kill(&f, at)
+        removed += 1
+    }
+    removed
+}
+
+// ---------------------------------------------------------------------------
+// Structure: `br 0` that only falls through, and empty constructs.
+
+fn ir_opt_next_live(f: IRFunction, from: Int) -> Int Never! {
+    at := from
+    loop at < f.op.len() && f.op[at] == .Nop {
+        at += 1
+    }
+    at
+}
+
+fn ir_opt_structure(f: &IRFunction, report: &IROptReport) -> Int Never! {
+    changed := 0
+    open := [Int]{}
+    at := 0
+    loop at < f.op.len() {
+        op :: f.op[at]
+        if op == {
+            .Block | .Loop | .If -> {
+                after :: ir_opt_next_live(f, at + 1)
+                if after < f.op.len() && f.op[after] == .End {
+                    ir_opt_kill(&f, at)
+                    ir_opt_kill(&f, after)
+                    changed += 1
+                    at = after + 1
+                    next
+                }
+                if op == .If && after < f.op.len() && f.op[after] == .Else {
+                    closing :: ir_opt_next_live(f, after + 1)
+                    if closing < f.op.len() && f.op[closing] == .End {
+                        ir_opt_kill(&f, at)
+                        ir_opt_kill(&f, after)
+                        ir_opt_kill(&f, closing)
+                        changed += 1
+                        at = closing + 1
+                        next
+                    }
+                }
+                &open.push(at)
+            }
+            .End -> _ := &open.pop()
+            .Br -> {
+                if f.a[at] == 0 && open.len() > 0 {
+                    target :: f.op[open[open.len() - 1]]
+                    after :: ir_opt_next_live(f, at + 1)
+                    if after < f.op.len() && target != .Loop && (f.op[after] == .End || (f.op[after] == .Else && target == .If)) {
+                        ir_opt_kill(&f, at)
+                        changed += 1
+                    }
+                }
+            }
+            else -> {}
+        }
+        at += 1
+    }
+    report.unreachable_removed += changed
+    changed
+}
+
+// A Block no Br targets is only nesting: it goes, and every Br inside it
+// that leaves past it counts one construct fewer. One Block at a time, in
+// order, each over the depths the previous ones left.
+fn ir_opt_unwrap(f: &IRFunction) -> Int Never! {
+    nesting :: ir_opt_nesting(f)
+    changed := 0
+    loop at in 0..<f.op.len() {
+        if f.op[at] != .Block -> next
+        end :: nesting.end[at]
+        targeted := false
+        depth := 0
+        loop k in (at + 1)..<end {
+            op :: f.op[k]
+            if op == .End -> depth -= 1
+            if op == .Br && f.a[k] == depth -> targeted = true
+            if op == .BrIf && f.b[k] == depth -> targeted = true
+            if op == .Block || op == .Loop || op == .If -> depth += 1
+            if targeted -> break
+        }
+        if targeted -> next
+        depth = 0
+        loop k in (at + 1)..<end {
+            op :: f.op[k]
+            if op == .End -> depth -= 1
+            if op == .Br && f.a[k] > depth -> f.a[k] = f.a[k] - 1
+            if op == .BrIf && f.b[k] > depth -> f.b[k] = f.b[k] - 1
+            if op == .Block || op == .Loop || op == .If -> depth += 1
+        }
+        ir_opt_kill(&f, at)
+        ir_opt_kill(&f, end)
+        changed += 1
+    }
+    changed
+}

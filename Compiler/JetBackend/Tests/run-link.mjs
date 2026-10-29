@@ -1,11 +1,13 @@
 #!/usr/bin/env node
-// Assemble the in-process linker unit (Tests/LinkRuntime.jet with
-// Image/Archive.jet, Image/StaticLink.jet, Image/RuntimePack.jet and the ELF
-// writer helpers they share with ELF.jet and Object.jet) as one
-// package-free Jet file.
+// Assemble the in-process linker unit (Tests/Fragments.fixture/LinkRuntime.jet
+// with Image/Archive.jet, Image/StaticLink.jet, Image/RuntimePack.jet,
+// Image/MemoryLink.jet, the ELF writer helpers they share with ELF.jet and
+// Object.jet, and the compiler-thread items of JetFoundation's Threads.jet)
+// as one package-free Jet file.
 //
 // usage: node Compiler/JetBackend/Tests/run-link.mjs <outdir>
-// then:  cd <outdir> && jet run unit.jet -- [--pack] <output> <input>...
+// then:  cd <outdir> && jet run unit.jet -- [--pack | --image | --bind] <output> <input>...
+//        (or -- --image-compare <runtime pack> <runtime image>)
 // Or: node Compiler/JetBackend/Tests/run-link.mjs <outdir> --indices
 // then: cd <outdir> && jet run unit.jet (reserved-index round-trip tests).
 // Or: node Compiler/JetBackend/Tests/run-link.mjs <outdir> --pack-roots
@@ -54,6 +56,7 @@ function body(path) {
 
 const elf = "Compiler/JetBackend/Source/Image/ELF.jet";
 const object = "Compiler/JetBackend/Source/Image/Object.jet";
+const threads = "Compiler/JetFoundation/Source/Threads.jet";
 const parts = [
   `// [unit source: ELF writer items of ${elf} and ${object}]`,
   item(elf, "struct X64ExecutableResult {"),
@@ -63,13 +66,20 @@ const parts = [
   item(object, "fn elf64_string("),
   item(object, "fn elf64_pad("),
   item(object, "fn elf64_section_header("),
+  `// [unit source: compiler-thread items of ${threads}]`,
+  item(threads, "struct CompilerThreads {"),
+  item(threads, "fn compiler_threads_single("),
+  item(threads, "fn compiler_threads_admit("),
+  item(threads, "fn compiler_threads_partition("),
+  item(threads, "fn compiler_threads_failure_text("),
   "",
   body("Compiler/JetBackend/Source/Image/Archive.jet"),
   body("Compiler/JetBackend/Source/Image/StaticLink.jet"),
   body("Compiler/JetBackend/Source/Image/RuntimePack.jet"),
-  body(`Compiler/JetBackend/Tests/${fixture}.jet`),
+  body("Compiler/JetBackend/Source/Image/MemoryLink.jet"),
+  body(`Compiler/JetBackend/Tests/Fragments.fixture/${fixture}.jet`),
 ];
 mkdirSync(outDir, { recursive: true });
 writeFileSync(`${outDir}/unit.jet`, [...coreUses, "", ...parts].join("\n"));
-writeFileSync(`${outDir}/package.jet`, `name: "jet_backend_link_runtime"\nversion: "0.1.0"\nauthority: { holds: { allow: [Exec, Exec.Args, FS.Read, FS.Write, IO, Mem.Alloc, Time] } }\n`);
+writeFileSync(`${outDir}/package.jet`, `name: "jet_backend_link_runtime"\nversion: "0.1.0"\nauthority: { allow: [Exec, Exec.Args, FS.Read, FS.Write, IO, Mem.Alloc, Time] }\n`);
 console.log(`${outDir}/unit.jet`);

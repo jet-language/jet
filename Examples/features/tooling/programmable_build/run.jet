@@ -1,9 +1,9 @@
-fn build(b: BuildContext) -> BuildPlan {
+fn build(b: Build) {
     b.generate("build_message_generated") {
         fn generated_build_message() -> String { "generated source checked" }
     }
     app :: b.add_executable("programmable_build", ["run.jet", ".jet/generated/programmable_build/build_message_generated.jet"], [])
-    return b.plan(app)
+    b.default(app)
 }
 
 fn run() { print("generated source checked") }

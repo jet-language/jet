@@ -1,0 +1,13 @@
+# tests/grammar.rs::parse_braceless_leading_dot_dispatch_arms at tests/grammar.rs:585; hand-port
+# Claim: lexing and parsing the enum+area+run source succeeds with no diagnostics (tests/grammar.rs:601-603)
+# Claim: area body is one switch with exactly 2 arms and no else (tests/grammar.rs:607-614)
+# Claim: both arm bodies are a single return statement (tests/grammar.rs:615-616)
+# Fixture migrated: enum `Shape` kept; `prog.items[1]`/AST shape checks replaced by jet check acceptance
+# Not ported: AST shape assertions (arms.len()==2, else_body none, Stmt::Return per arm, tests/grammar.rs:604-616): Rust AST internals, not observable from the CLI
+fixture: parse_braceless_leading_dot_dispatch_arms.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # tests/grammar.rs:602 no lex diagnostics; tests/grammar.rs:603 parse succeeds
+stderr: !~ "E0" # tests/grammar.rs:602 no lex diagnostics; tests/grammar.rs:603 parse succeeds

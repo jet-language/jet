@@ -6,10 +6,6 @@
     flake-utils.url = "github:numtide/flake-utils";
     rust-overlay.url = "github:oxalica/rust-overlay";
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
-    # D-COMPILER-PROOF-TOOLS1=A: proof artifacts use the exact Lean 4.29.1
-    # derivation recorded by the compiler-proof manifest, independently from
-    # the rolling nixpkgs input used by ordinary Jet development.
-    proofNixpkgs.url = "github:NixOS/nixpkgs/0c88e1f2bdb93d5999019e99cb0e61e1fe2af4c5";
   };
 
   outputs =
@@ -17,7 +13,6 @@
       self,
       nixpkgs,
       flake-utils,
-      proofNixpkgs,
       rust-overlay,
     }:
     flake-utils.lib.eachDefaultSystem (
@@ -27,7 +22,6 @@
           inherit system;
           overlays = [ rust-overlay.overlays.default ];
         };
-        proofPkgs = proofNixpkgs.legacyPackages.${system};
         jetR = pkgs.rWrapper.override { packages = [ pkgs.rPackages.jsonlite ]; };
 
         # User FFI helpers opt into this compiler/sysroot explicitly. Keep
@@ -50,7 +44,7 @@
           export JET_RUST_MUSL_AR="${jetMuslAR}"
         '';
 
-        # jet build/run shells out to rustc; keep this path in one place.
+        # Tools `jet build`/`jet run` shell out to; rustc only builds user `extern rust`.
         jetRuntimePath = pkgs.lib.makeBinPath [
           pkgs.rustc
           pkgs.stdenv.cc
@@ -72,12 +66,11 @@
         jetRuntimeLibraryHook = ''
           export ${jetRuntimeLibraryVariable}="${jetRuntimeLibraryPath}:''${${jetRuntimeLibraryVariable}:-}"
         '';
-        # Cargo builds in the dev shells link through lld: GNU ld links the
-        # multi-hundred-MB debug `jet` (and every integration test binary)
-        # single-threaded. The wrapped lld keeps Nix's dynamic-linker and
-        # rpath handling; bare `pkgs.lld` would emit binaries that cannot find
-        # libgcc_s. Set per shell, not in .cargo/config.toml, so `nix build`
-        # and plain cargo outside the shell keep the stdenv linker.
+        # Foreign helper Cargo builds in the dev shells (user Rust FFI, measured
+        # Rust peers) link through lld. The wrapped lld keeps Nix's
+        # dynamic-linker and rpath handling; bare `pkgs.lld` would emit binaries
+        # that cannot find libgcc_s. Set per shell, not in .cargo/config.toml,
+        # so plain cargo outside the shell keeps the stdenv linker.
         jetCargoLinker = pkgs.writeShellScript "jet-cargo-linker" ''
           exec ${pkgs.stdenv.cc}/bin/cc -B${pkgs.llvmPackages.bintools}/bin/ -fuse-ld=lld "$@"
         '';
@@ -90,114 +83,30 @@
           fetchPnpmDeps = args: pkgs.fetchPnpmDeps (args // { pnpm = pkgs.pnpm_10; });
         };
 
-        jet = pkgs.rustPlatform.buildRustPackage {
-          pname = "jet";
-          version = "0.1.0";
-          src = ./.;
-          cargoLock.lockFile = ./Cargo.lock;
-
-          nativeBuildInputs = [ pkgs.makeWrapper ];
-          buildInputs = [ pkgs.rustc ];
-
-          doCheck = true;
-
-          postInstall = ''
-            mv $out/bin/jet-cxx $out/bin/jet-c++
-            # Ship the runtime rlib for the default build facts beside `jet`
-            # (jet-runtime/<key>/), so a first `jet build` links it instead of
-            # compiling the ~130k-line runtime (crates/jet-store/src/runtime.rs).
-            PATH="${jetRuntimePath}:$PATH" bash Tools/packaging/prebuild-runtime.sh $out/bin/jet
-            wrapProgram $out/bin/jet \
-              --prefix PATH : "${jetRuntimePath}" \
-              --prefix ${jetRuntimeLibraryVariable} : "${jetRuntimeLibraryPath}" \
-              --set-default TZDIR "${jetTzdb}" \
-              ${pkgs.lib.optionalString jetHasMuslHelpers ''
-                --set JET_RUST_MUSL_TOOLCHAIN "${jetRustToolchain}" \
-                --set JET_RUST_MUSL_LINKER "${jetMuslLinker}" \
-                --set JET_RUST_MUSL_AR "${jetMuslAR}" \
-              ''}
-          '';
-
-          meta = with pkgs.lib; {
-            description = "Compiler for the Jet programming language";
-            homepage = "https://github.com/jet-language/jet";
-            mainProgram = "jet";
-            platforms = platforms.unix;
-          };
-        };
-        # `jet` in the dev shell: run the cargo-built debug binary from anywhere
-        # in the repo, with rustc + cc on PATH for `jet build`/`jet run`.
+        # `jet` / `jetpack` in the dev shell: run the admitted native binaries
+        # named by $JET / $JETPACK from anywhere, with the runtime tools on PATH.
         mkJetDevBin =
-          name:
+          name: variable:
           pkgs.writeShellScriptBin name ''
             set -euo pipefail
-            root="''${JET_ROOT:-}"
-            if [ -z "$root" ]; then
-              dir="$PWD"
-              while [ "$dir" != "/" ]; do
-                if [ -f "$dir/Cargo.toml" ] && [ -f "$dir/flake.nix" ]; then
-                  root="$dir"
-                  break
-                fi
-                dir=$(dirname "$dir")
-              done
-            fi
-            root="''${root:-$PWD}"
-            bin="$root/target/debug/${name}"
+            bin="''${${variable}:-}"
             export PATH="${jetRuntimePath}:$PATH"
             ${jetRustHelperHook}
             ${jetRuntimeLibraryHook}
-            if [ ! -x "$bin" ]; then
-              echo "jet: no debug binary at $bin" >&2
-              echo "fix: cargo build" >&2
+            if [ -z "$bin" ] || [ ! -x "$bin" ]; then
+              echo "${name}: ${variable} must name the admitted native ${name} binary" >&2
               exit 1
             fi
             exec "$bin" "$@"
           '';
-        jetDev = mkJetDevBin "jet";
-        jetpackDev = mkJetDevBin "jetpack";
-        # D-COMPILER-PROOF-TOOLS1=A: keep Lean development-only. The exact
-        # output path is recorded in tests/compiler-proof/toolchain/manifest.json;
-        # ordinary compiler/runtime shells must not inherit this closure.
-        # Keep this literal while the proof artifacts are assembled in the
-        # worktree: Nix flakes expose tracked inputs only. The manifest remains
-        # the runtime authority and rejects any different executable.
-        proofToolchainPin = "/nix/store/sz7vdknpsl9ipkjj003vbfa7sd284535-lean4-4.29.1";
-        proofToolchain = proofPkgs.lean4;
-        proofShell = pkgs.mkShellNoCC {
-          packages = [ proofToolchain ];
-          shellHook = ''
-            export JET_PROOF_TOOLCHAIN_STORE="${proofToolchain}"
-            export JET_PROOF_TOOLCHAIN_PIN="${proofToolchainPin}"
-            if [ "$JET_PROOF_TOOLCHAIN_STORE" != "$JET_PROOF_TOOLCHAIN_PIN" ]; then
-              echo "compiler-proof: pinned Lean derivation mismatch" >&2
-              echo "  manifest: $JET_PROOF_TOOLCHAIN_PIN" >&2
-              echo "  nixpkgs:  $JET_PROOF_TOOLCHAIN_STORE" >&2
-              exit 78
-            fi
-            export JET_NIX_TMP_CLEANED=1
-            export JET_ENV_DISABLE=1
-          '';
-        };
+        jetDev = mkJetDevBin "jet" "JET";
+        jetpackDev = mkJetDevBin "jetpack" "JETPACK";
       in
       {
         packages = {
-          default = jet;
-          inherit jet;
-          jetpack = jet;
-          proof-toolchain = proofToolchain;
           rust-musl-toolchain = jetRustToolchain;
         } // pkgs.lib.optionalAttrs jetHasMuslHelpers {
           musl-linker = jetMuslCC;
-        };
-
-        apps.default = {
-          type = "app";
-          program = "${jet}/bin/jet";
-        };
-        apps.jetpack = {
-          type = "app";
-          program = "${jet}/bin/jetpack";
         };
 
         # Fast everyday shell. Keep normal compiler work independent from the
@@ -205,10 +114,7 @@
         devShells.default = pkgs.mkShell {
           packages = [
             pkgs.cargo
-            pkgs.sccache
-            pkgs.clippy
             pkgs.rustc
-            pkgs.rustfmt
             pkgs.gcc
             pkgs.clang
             pkgs.lld
@@ -239,6 +145,9 @@
             jetDev
             jetpackDev
             pkgs.pkg-config
+            # The https/TLS cases' loopback peer is `openssl s_server`
+            # (`requires: tool:openssl`), so the testkit runs them here.
+            pkgs.openssl
           ]
           ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
             # D-BUILDENTRY1 / #95: core verification executes typed build actions.
@@ -268,20 +177,13 @@
           '';
         };
 
-        # Development-only proof shell. It is deliberately not part of the
-        # default shell used by ordinary Jet compilation or installation.
-        devShells.proof = proofShell;
         # Integration shell: full FFI matrix, Canvas, graphics, emulator, and
         # OS-image work. Use `nix develop .#full` / `jet-env full …` explicitly.
         devShells.full = pkgs.mkShell {
           packages = [
             pkgs.cargo
-            pkgs.sccache
-            # E4-JP9: resolved-symbol native evaluator authority stop-line.
-            pkgs.clippy
             pkgs.rustc
             pkgs.rustup
-            pkgs.rustfmt
             pkgs.gcc
             pkgs.clang
             # D-FFI-ADA1=A: provision GNAT for C-ABI Ada binder compilation.
@@ -348,6 +250,8 @@
             jetDev
             jetpackDev
             pkgs.pkg-config
+            # `tool:openssl` loopback TLS peer, as in the default shell.
+            pkgs.openssl
             pkgs.raylib
           ]
           ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
@@ -391,15 +295,14 @@
             # grepping/capture (agents misread results otherwise)
             {
               echo "Jet dev shell"
-              echo "  build:    cargo build"
+              echo "  compiler: JET=<admitted native jet>  (built by Tools/agent/native-compiler.mjs)"
               echo "  run:      jet run Examples/features/basics/hello.jet"
-              echo "  package:  jetpack help"
-              echo "  search:   rg \"pattern\" Docs Source tests"
-              echo "  LSP:      jet lsp        (tests: cargo test --test lsp)"
+              echo "  package:  jetpack help        (JETPACK=<native jetpack>)"
+              echo "  search:   rg \"pattern\" Docs Compiler Core Jetpack tests"
+              echo "  LSP:      jet lsp"
               echo "  editor:   Tools/editors/vscode/install.sh   (Cursor/VS Code)"
               echo "            Tools/editors/zed/install.sh        (Zed dev extension)"
-              echo "  debug:    jet debug <file.jet>  (native lldb backend: tests/debug.rs)"
-              echo "  release:  nix build .#jet"
+              echo "  debug:    jet debug <file.jet>  (native lldb backend)"
             } >&2
           '';
         };

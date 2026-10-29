@@ -95,11 +95,11 @@ fn kit_steps_json_select(value: Dyn, parts: [String], depth: Int) -> [Dyn]? {
     if part.starts_with("{{") {
         if value == {
             .Object(_) -> {
-                projected := [(key: String, value: Dyn)]{}
+                projected := [String: Dyn]{}
                 loop raw in kit_steps_byte_slice(part, 1, part.count_bytes() - 1).split(",") {
                     name :: raw.trim().copy()
                     child :: value.get(name) ?? return None
-                    &projected.push((key: name, value: child))
+                    _ :: &projected.add(name, child)
                 }
                 return kit_steps_json_select(Dyn.Object(projected), parts, depth + 1)
             }

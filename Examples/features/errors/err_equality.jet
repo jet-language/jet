@@ -1,0 +1,44 @@
+// `Err` values compare with `==`, through a generic `Equatable` bound, in
+// `contains`, as a field of a derived comparison, and at compile time. The
+// Prelude derives `Err`'s equality; the compiler checks that derived body only
+// in a program that compares errors, so a program that never does pays
+// nothing for it.
+struct Attempt {
+    label: String
+    failure: Err
+}
+
+fn same<T: Equatable>(left: T, right: T) -> Bool {
+    left == right
+}
+
+fn limited(n: Int) -> Int Err! {
+    if n > 2 -> return Err("too big: {n}", code: "E_LIMIT")
+    return Ok(n)
+}
+
+fn same_message(left: String, right: String) -> Bool {
+    first :: Err(left)
+    second :: Err(right)
+    first == second
+}
+
+SAME_AT_BUILD :: comptime { same_message("offline", "offline") }
+
+fn run() {
+    value :: limited(5) ?? {
+        print("caught {err.message}")
+        0
+    }
+    first :: Err("disk offline", code: "E_DISK")
+    again :: Err("disk offline", code: "E_DISK")
+    other :: Err("disk offline", code: "E_NET")
+    print("equal {first == again}, differs {first == other}, not equal {first != other}")
+    print("generic {same(first, again)} {same(first, other)}")
+    seen :: [Err]{first, other}
+    print("contains {seen.contains(again)} {seen.contains(Err("unknown"))}")
+    one :: Attempt{label: "sync", failure: first}
+    two :: Attempt{label: "sync", failure: again}
+    print("attempts {one == two}, value {value}")
+    print("at build {SAME_AT_BUILD}, at run {same_message("a", "b")}")
+}

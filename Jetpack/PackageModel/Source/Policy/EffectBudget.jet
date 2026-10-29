@@ -3,7 +3,7 @@
 //
 // Zero-config: every `jet build` prints a one-line summary of the effects the
 // dependency graph uses, and per-dependency provenance is recorded in the
-// lockfile. An `authority: { holds: { allow: […], deny: […] } }` block enforces
+// lockfile. An `authority: { allow: […], deny: […] }` block enforces
 // the whole graph (E1220); `authority.grants` is the audited per-dependency
 // escape, also recorded in the lockfile.
 //
@@ -11,10 +11,15 @@
 // driver's selected entry, then attributes only reached functions to the
 // package (root or a dependency) whose module defines them, matching each
 // module's on-disk path against the loader's dependency roots.
+use jet_foundation.[
+    AUTHORITY_PANIC_ROOT, AuthorityVerdict, Diagnostic, Span, authority_answer,
+    authority_covers, authority_covers_any, authority_holds, authority_is_deny_only, authority_parse_rights,
+    authority_root, diagnostic_from_registry, diagnostic_with_source_path,
+]
 
-EFFECT_ROOT_PACKAGE :: prep { "root" }
-EFFECT_PANIC_EDGE :: prep { "__jet_panic__" }
-EFFECT_BUILD_ENTRY :: prep { "build" }
+EFFECT_ROOT_PACKAGE :: "root"
+EFFECT_PANIC_EDGE :: "__jet_panic__"
+EFFECT_BUILD_ENTRY :: "build"
 
 // Sema's per-function effect summary (Rust `Sema::EffectSummary`): the
 // directly performed effects, the static call edges, and whether an open
@@ -49,7 +54,7 @@ struct EffectBudgetModule {
     function_keys: [String]
     function_spans: [String: Span]
     imports: [EffectBudgetImport]
-    // Whether the module declares the `build(BuildContext)` entry.
+    // Whether the module declares the `build(Build)` entry.
     has_build_entry: Bool
 }
 
@@ -312,18 +317,18 @@ fn pkg_effect_budget_rights(names: [String]) -> [String] Never! {
     authority_parse_rights(names)
 }
 
-// Whole-graph enforcement: with `authority.holds` declared,
+// Whole-graph enforcement: with `authority` declared,
 // every package (root or dependency) reaching an effect outside `allow` or
 // inside `deny` fails with E1220, unless `authority.grants` covers it for
 // that dependency. Rows may be ancestor roots; the substrate
 // verdict decides. Panic is deny-only.
 fn pkg_effect_enforce(entries: [PackageEffects], manifest: PackageFacts) -> [Diagnostic] Never! {
     if !manifest.effects_enabled -> return [Diagnostic]{}
-    allow :: if manifest.authority.holds.allow == {
+    allow :: if manifest.authority.allow == {
         .Val(names) -> Val(pkg_effect_budget_rights(names))
         .None -> None
     }
-    deny :: pkg_effect_budget_rights(manifest.authority.holds.deny ?? [String]{})
+    deny :: pkg_effect_budget_rights(manifest.authority.deny ?? [String]{})
     empty :: [String]{}
     diagnostics := [Diagnostic]{}
     loop package in entries {
@@ -390,8 +395,8 @@ fn pkg_update_lock_provenance(lock: &LockFile, entries: [PackageEffects], manife
         }
         package.granted_effects = granted
         package.effect_grants = granted
-        package.denied_effects = manifest.authority.holds.deny ?? [String]{}
-        package.effect_authority = Val(if is_root || granted.len() == 0 -> EFFECT_AUTHORITY_PACKAGE_HOLDS else -> EFFECT_AUTHORITY_PACKAGE_GRANTS)
+        package.denied_effects = manifest.authority.deny ?? [String]{}
+        package.effect_authority = Val(if is_root || granted.len() == 0 -> EFFECT_AUTHORITY_PACKAGE else -> EFFECT_AUTHORITY_PACKAGE_GRANTS)
         lock.packages[index] = package
     }
 }
@@ -406,10 +411,10 @@ fn pkg_e1220_at(dependency: String, effect_name: String, site: String?) -> Diagn
         .Val(function) -> " function `{function}`"
         .None -> ""
     }
-    fix :: if dependency == EFFECT_ROOT_PACKAGE -> "add `{effect_name}` to `authority.holds.allow` or remove the code that reaches it" else -> "add `{effect_name}` to `authority.holds.allow`, grant it to `{dependency}` in `authority.grants`, or drop the dependency"
+    fix :: if dependency == EFFECT_ROOT_PACKAGE -> "add `{effect_name}` to `authority.allow` or remove the code that reaches it" else -> "add `{effect_name}` to `authority.allow`, grant it to `{dependency}` in `authority.grants`, or drop the dependency"
     diagnostic_from_registry("E1220", None,
         "`{dependency}`{location} uses the `{effect_name}` effect, which this package's budget doesn't allow",
-        "an `authority.holds` budget fails the build when package code or any dependency reaches an effect you didn't list — supply-chain review as a compile error",
+        "an `authority` budget fails the build when package code or any dependency reaches an effect you didn't list — supply-chain review as a compile error",
         fix)
 }
 

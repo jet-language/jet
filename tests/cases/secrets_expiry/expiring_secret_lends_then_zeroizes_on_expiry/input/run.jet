@@ -1,0 +1,37 @@
+
+use core.crypto as crypto
+use core.time as time
+use core.crypto.vault as vault
+
+fn run() {
+    clock := Clock.new(100)
+    ttl := Duration.seconds(1) ?? panic("duration")
+    key := crypto.SigningKey.new_random() ?? panic("key")
+    secret := vault.ExpiringSecret.new(^key, ttl, clock)
+
+    if secret.with((borrowed) -> borrowed.public_key()) == .Ok(_) {
+        print("available")
+    }
+    fork := clock.copy()
+    &fork.tick(1001)
+    if secret.with((borrowed) -> borrowed.public_key()) == .Ok(_) {
+        print("forked")
+    }
+    &clock.tick(1001)
+    if secret.with((borrowed) -> borrowed.public_key()) == .Err(_) {
+        print("expired")
+    }
+    &clock.advance(0)
+    if secret.with((borrowed) -> borrowed.public_key()) == .Err(_) {
+        print("sticky")
+    }
+
+    thread_key := crypto.SigningKey.new_random() ?? panic("thread key")
+    threaded := vault.ExpiringSecret.new(^thread_key, ttl, clock)
+    handle := task {
+        if threaded.with((borrowed) -> borrowed.public_key()) == .Ok(_) {
+            print("threaded")
+        }
+    }
+    handle.join() ?? panic("task failed")
+}

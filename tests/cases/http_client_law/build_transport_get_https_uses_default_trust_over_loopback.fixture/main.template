@@ -1,0 +1,26 @@
+use core.http.client as client
+
+fn text(row: [U8]) -> String {
+    out := ""
+    loop byte in row {
+        n :: Int.from_u8(byte)
+        out = if n >= 32 && n < 127 -> "{out}{String.from_bytes([U8]{byte}) ?? "?"}" else -> "{out}\\x{n}"
+    }
+    out
+}
+
+fn fetch(host: String) {
+    if client.jet_http_build_get(host, "{host}:{free-port:tls}", "/hello.txt", true, [[U8]]{[U8]{127, 0, 0, 1}}, {free-port:tls}, 5000, 1024) == {
+        .Ok(rows) -> {
+            out := ""
+            loop row in rows -> out = "{out}[{text(row)}]"
+            print("{host}: {rows.len()} {out}")
+        }
+        .Err(error) -> print("{host}: error {error}")
+    }
+}
+
+fn run() {
+    fetch("localhost")
+    fetch("fixture.test")
+}

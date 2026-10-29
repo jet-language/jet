@@ -38,7 +38,8 @@ fn cli_dashboard_test_run(initial: DashboardLoader?, keys: String, results: [Das
         .Val(step) -> DashboardClock.stepping(step)
         .None -> DashboardClock.system()
     }
-    code :: cli_dashboard_run_loop(&reader, &loader, &frame, &output, Theme.plain(), &factory, &clock, None)
+    verification := StoreVerification.new()
+    code :: cli_dashboard_run_loop(&verification, &reader, &loader, &frame, &output, Theme.plain(), &factory, &clock)
     DashboardTestRun{code: code, frames: output.frames, starts: factory.starts}
 }
 

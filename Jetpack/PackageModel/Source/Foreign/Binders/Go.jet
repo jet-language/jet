@@ -5,9 +5,11 @@
 // values compile into one in-process Go runtime archive. Handles become
 // move-only Jet values, so a foreign call cannot reuse a consumed handle.
 // Unsupported signatures fail before compilation instead of guessing an ABI.
+use core.files as files
 
-PKG_GO_BUILD_TOOL :: prep { "go build -buildmode=c-archive" }
-PKG_GO_BUILD_ACTION :: prep { "rejected the source" }
+
+PKG_GO_BUILD_TOOL :: "go build -buildmode=c-archive"
+PKG_GO_BUILD_ACTION :: "rejected the source"
 
 // The Go scalar shapes the c-archive boundary accepts.
 enum GoScalar {

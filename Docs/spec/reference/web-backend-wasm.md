@@ -1,13 +1,12 @@
 # Web backend: JavaScript DOM operations and WebAssembly logic
 
-The web backend partitions checked TIR between JavaScript for browser/DOM work
+The web backend partitions the checked program between JavaScript for browser/DOM work
 and WebAssembly for eligible logic. This page is for web application authors
 and compiler contributors choosing a target, reading partition diagnostics, and
-checking the source-backed examples. The executable boundary is implemented by
-[`Source/CmdCompile.rs`](../../../Source/CmdCompile.rs) and
-[`crates/jet-foundation/src/WebPartition.rs`](../../../crates/jet-foundation/src/WebPartition.rs);
-web diagnostics are registered in
-[`crates/jet-codegen/src/Prelude/Diagnostics.jet`](../../../crates/jet-codegen/src/Prelude/Diagnostics.jet).
+checking the source-backed examples. The Jet-hosted CLI does not build the web
+target yet: `jet build --target=web` is refused with E2104. Web diagnostics are
+registered in
+[`Compiler/Prelude/Diagnostics.jet`](../../../Compiler/Prelude/Diagnostics.jet).
 
 The ratified decisions are D-WEBBACKEND1, D-WASM1, D-JSBIND1, D-WEBKIND1, and
 D-DOMGEN1. Per-function partition pins use `#Target(JS)` and `#Target(Wasm)`;
@@ -48,7 +47,7 @@ Wasm layout. `#WasmExport` makes a selected Wasm entry callable from generated
 JavaScript. `web.manifest.json` records module-to-bucket assignments for the
 loader and `--explain-partition`.
 
-This is a checked TIR boundary, not a second web language. It does not imply
+This is a checked-program boundary, not a second web language. It does not imply
 full Jet-to-JavaScript transpilation, WASI imports, or that every `core.ui`
 provider is available in a browser.
 
@@ -56,7 +55,7 @@ provider is available in a browser.
 
 Unsupported constructs fail before emission with registered diagnostics:
 
-- `E-WEB-TIR-UNSUPPORTED` — the construct cannot be lowered for the selected
+- `E-WEB-UNSUPPORTED` — the construct cannot be lowered for the selected
   web partition;
 - `E-WEB-CROSS-PARTITION` — a direct JS/Wasm call lacks a generated bridge;
 - `E-WEB-ABI-TYPE` — a value is not valid at the JS/Wasm boundary;
@@ -71,8 +70,8 @@ fall back to CPU. Native hosts retain the typed fail-closed WebGPU provider.
 ## Source-backed examples
 
 The top-level source set under `Examples/features/web/` is the contract checked
-by [`tests/web_examples_doc.rs`](../../../tests/web_examples_doc.rs). Each file
-is named here so documentation review cannot silently omit a new example:
+by [`tests/cases/web_examples_doc/web_examples_are_documented_and_have_expected_outputs.case`](../../../tests/cases/web_examples_doc/web_examples_are_documented_and_have_expected_outputs.case).
+Each file is named here so documentation review cannot silently omit a new example:
 
 - `package.jet`
 - `app_hello.jet`

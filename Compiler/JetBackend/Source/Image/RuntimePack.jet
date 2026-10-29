@@ -54,7 +54,6 @@ fn link_pack_rust_symbol(name: String) -> Bool Never! {
     false
 }
 
-
 // Whether `name` is a plain C identifier and not a Rust-mangled name (v0
 // `_R...` or legacy `_ZN...`): the runtime's C ABI.
 fn link_pack_c_abi(name: String) -> Bool Never! {
@@ -439,7 +438,7 @@ fn link_pack_write(c: &LinkContext, exports: [Int]) -> [U8] Never! {
 // Audited Jet exports are defined public globals in standalone objects;
 // private functions and imports are not exports. Archives only satisfy roots.
 fn x64_link_runtime_pack(names: [String], bufs: ^[[U8]], extra_roots: [String]) -> X64ExecutableResult Never! {
-    c := link_context(^bufs)
+    c := link_context(^bufs, LINK_BASE)
     link_load_inputs(&c, names)
     if c.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
     if c.obj_name.len() == 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"runtime pack: no Jet runtime object among the inputs"}}
@@ -476,9 +475,11 @@ fn x64_link_runtime_pack(names: [String], bufs: ^[[U8]], extra_roots: [String]) 
     entry_section :: link_entry_section(&c, entry_g)
     if entry_section < 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
     // Exported too: the entry, the startup marker (StaticLink.jet
-    // link_has_startup), and `__tls_get_addr`, which a linker checks a TLS
-    // general/local-dynamic call sequence against by name.
-    optional :: [String]{"__jet_link_main", "__tls_get_addr"}
+    // link_has_startup), `__tls_get_addr`, which a linker checks a TLS
+    // general/local-dynamic call sequence against by name, and libgcc's
+    // `__register_frame_info`, with which a program bound to the runtime image
+    // (Image/MemoryLink.jet) registers its own unwind tables.
+    optional :: [String]{"__jet_link_main", "__tls_get_addr", "__register_frame_info"}
     &root_names.push("_start")
     loop name in optional -> &root_names.push(name)
     exports := [Int]{}
@@ -505,4 +506,186 @@ fn x64_link_runtime_pack(names: [String], bufs: ^[[U8]], extra_roots: [String]) 
     bytes :: link_pack_write(&c, exports)
     if c.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
     X64ExecutableResult{bytes: bytes, errors: [String]{}}
+}
+
+// ---------------------------------------------------------------------------
+// The prelinked runtime image (#4741): the pack linked once, when it is
+// built, into a static executable at LINK_RUN_BASE that keeps every
+// definition the pack exports, so `jet run` binds a program's object against
+// it (Image/MemoryLink.jet) instead of relinking the runtime. Its bytes are
+// what the static linker writes for the pack at that base. The one
+// program-dependent value in them is `main`, which the startup's
+// `__jet_link_main` jumps to: it is linked at the image's program base (the
+// first page after the image's memory), and every place it is written is
+// listed in the `.jet.bind` section, words of eight bytes:
+//
+//     LINK_IMAGE_BIND_MAGIC, the program base, the place count, then per
+//     place its address, relocation type (PC32, PLT32 or 64) and addend.
+//
+// The unloaded tail keeps the `.symtab` (the runtime's symbols, for binding
+// and for symbolizers) and the section headers. The `.jet.exports` section
+// indexes the `.symtab`'s defined globals by name (link_image_export_index),
+// so binding looks up only a program's imports.
+
+LINK_IMAGE_BIND_SECTION :: ".jet.bind"
+// "JETBIND1", little-endian.
+LINK_IMAGE_BIND_MAGIC :: 0x31444e494254454a
+LINK_IMAGE_EXPORTS_SECTION :: ".jet.exports"
+// "JETEXPT1", little-endian.
+LINK_IMAGE_EXPORTS_MAGIC :: 0x3154505845544548
+
+fn link_image_failure(c: LinkContext) -> X64ExecutableResult Never! {
+    X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
+}
+
+// Link the runtime pack `pack` (named `name` in reports) into the runtime image.
+fn x64_link_runtime_image(name: String, pack: ^[U8]) -> X64ExecutableResult Never! {
+    c := link_context(^[[U8]]{^pack}, LINK_RUN_BASE)
+    link_load_inputs(&c, [String]{name})
+    if c.errors.len() > 0 -> return link_image_failure(c)
+    entry_g :: link_resolve_program(&c)
+    entry_section :: link_entry_section(&c, entry_g)
+    if entry_section < 0 -> return link_image_failure(c)
+    // Every definition the pack exports stays: any program may use it.
+    sections := [Int]{entry_section}
+    loop g in 0..<c.g_name.len() {
+        if c.g_kind[g] == LINK_G_FILE && c.g_alias[g] < 0 && c.g_section[g] >= 0 -> &sections.push(c.g_section[g])
+    }
+    imports := [String:Bool]{}
+    &imports.add("main", true).drop("a fresh map")
+    loop linker_name in link_linker_names() -> &imports.add(linker_name, true).drop("names are unique")
+    link_collect(&c, sections, imports)
+    if c.errors.len() > 0 -> return link_image_failure(c)
+    layout :: link_layout(&c)
+    startup :: link_has_startup(c)
+    link_define_names(&c, layout, startup)
+    program_base :: link_align(layout.mem_end, LINK_PAGE)
+    main_g :: c.g_index.get("main") ?? -1
+    if main_g < 0 || c.g_kind[link_final(c, main_g)] != LINK_G_NONE {
+        link_error(&c, "{name}: the runtime pack's startup does not import `main`")
+        return link_image_failure(c)
+    }
+    main_final :: link_final(c, main_g)
+    c.g_kind[main_final] = LINK_G_LINKER
+    c.g_addr[main_final] = program_base
+    sites := [U8]{}
+    count := 0
+    loop row in 0..<c.live_secs.len() {
+        if c.live_class[row] < 0 -> next
+        s :: c.live_secs[row].copy()
+        obj :: link_obj_of(c, s)
+        b :: c.obj_buffer[obj].copy()
+        table :: link_rel_table(c, obj, s)
+        loop k in 0..<link_rel_count(c, obj, s) {
+            at :: table + 24 * k
+            g :: link_global_of(c, obj, link_u32(c.bufs, b, at + 12))
+            if g < 0 || link_final(c, g) != main_final -> next
+            kind :: link_u32(c.bufs, b, at + 8)
+            off :: link_u64(c.bufs, b, at)
+            if kind != LINK_R_PC32 && kind != LINK_R_PLT32 && kind != LINK_R_64 {
+                link_reloc_error(&c, s, off, "runtime image: relocation type {kind} against `main` cannot be bound")
+                next
+            }
+            elf64_u64(&sites, c.live_addr[row] + off)
+            elf64_u64(&sites, kind)
+            elf64_u64(&sites, link_s64(c.bufs, b, at + 16))
+            count += 1
+        }
+    }
+    if count == 0 -> link_error(&c, "{name}: nothing in the runtime pack calls `main`")
+    if c.errors.len() > 0 -> return link_image_failure(c)
+    entry :: link_global_addr(c, entry_g)
+    debug :: link_debug_sections(&c)
+    in_place := link_no_pieces()
+    image := link_write(&c, layout, entry, &in_place)
+    link_write_sections(&c, &image, layout, debug, &in_place)
+    if c.errors.len() > 0 -> return link_image_failure(c)
+    bind := [U8]{}
+    elf64_u64(&bind, LINK_IMAGE_BIND_MAGIC)
+    elf64_u64(&bind, program_base)
+    elf64_u64(&bind, count)
+    &bind.extend(sites)
+    link_image_add_section(&image, LINK_IMAGE_BIND_SECTION, bind)
+    exports :: link_image_export_index(image)
+    link_image_add_section(&image, LINK_IMAGE_EXPORTS_SECTION, exports)
+    X64ExecutableResult{bytes: image, errors: [String]{}}
+}
+
+// Add section `name` holding `payload` to `image`, an executable whose
+// section name table and then section headers end it (link_write_sections).
+fn link_image_add_section(image: &[U8], name: String, payload: [U8]) Never! {
+    shoff :: link_image_i64(image, 40)
+    shnum :: link_image_u16(image, 60)
+    names_header :: shoff + 64 * link_image_u16(image, 62)
+    names_at :: link_image_i64(image, names_header + 24)
+    names := [U8]{}
+    &names.extend(image[names_at..<names_at + link_image_i64(image, names_header + 32)])
+    headers := [U8]{}
+    &headers.extend(image[shoff..<shoff + 64 * shnum])
+    name_at :: elf64_string(&names, name)
+    loop image.len() > names_at { _ :: &image.pop() }
+    elf64_pad(&image, 8)
+    payload_at :: image.len()
+    &image.extend(payload)
+    new_names_at :: image.len()
+    &image.extend(names)
+    elf64_pad(&image, 8)
+    new_shoff :: image.len()
+    &image.extend(headers)
+    link_put64(&image, new_shoff + names_header - shoff + 24, new_names_at)
+    link_put64(&image, new_shoff + names_header - shoff + 32, names.len())
+    elf64_section_header(&image, name_at, LINK_SHT_PROGBITS, 0, payload_at, payload.len(), 0, 0, 8, 8)
+    link_put64(&image, 40, new_shoff)
+    image[60] = U8{(shnum + 1).bit_and(255)}
+    image[61] = U8{((shnum + 1) >> 8).bit_and(255)}
+}
+
+// FNV-1a, 32 bits, of a symbol name: the `.jet.exports` hash.
+fn link_image_export_hash(bytes: [U8]) -> Int Never! {
+    hash := U32{0x811c9dc5}
+    loop byte in bytes -> hash = (hash.bit_xor(U32.from_u8(byte))).wrapping_mul(U32{0x01000193})
+    Int.from_u32(hash)
+}
+
+// The `.jet.exports` payload of the executable `image`: LINK_IMAGE_EXPORTS_MAGIC,
+// the slot count (a power of two, at least twice the defined globals), then
+// per slot the `.symtab` index of a defined global (0: empty), four bytes,
+// placed by link_image_export_hash of its name with linear probing.
+fn link_image_export_index(image: [U8]) -> [U8] Never! {
+    shoff :: link_image_i64(image, 40)
+    shnum :: link_image_u16(image, 60)
+    symtab_at := 0
+    symtab_count := 0
+    first_global := 0
+    strtab_at := 0
+    loop k in 1..<shnum {
+        h :: shoff + 64 * k
+        if link_image_u32(image, h + 4) != LINK_SHT_SYMTAB -> next
+        symtab_at = link_image_i64(image, h + 24)
+        symtab_count = link_image_i64(image, h + 32).div_euclid(24)
+        first_global = link_image_u32(image, h + 44)
+        strtab_at = link_image_i64(image, shoff + 64 * link_image_u32(image, h + 40) + 24)
+    }
+    defined := [Int]{}
+    loop k in first_global..<symtab_count {
+        if link_image_u16(image, symtab_at + 24 * k + 6) != 0 -> &defined.push(k)
+    }
+    slots := 1
+    loop slots < 2 * defined.len() -> slots = slots * 2
+    table := [Int]{}
+    loop _ in 0..<slots -> &table.push(0)
+    mask :: slots - 1
+    loop k in defined {
+        at := strtab_at + link_image_u32(image, symtab_at + 24 * k)
+        start :: at
+        loop at < image.len() && Int.from_u8(image[at]) != 0 -> at += 1
+        slot := link_image_export_hash(image[start..<at]).bit_and(mask)
+        loop table[slot] != 0 -> slot = (slot + 1).bit_and(mask)
+        table[slot] = k
+    }
+    out := [U8]{}
+    elf64_u64(&out, LINK_IMAGE_EXPORTS_MAGIC)
+    elf64_u64(&out, slots)
+    loop k in table -> elf64_u32(&out, k)
+    out
 }

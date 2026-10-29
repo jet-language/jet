@@ -1,0 +1,20 @@
+# tests/browser_bidi.rs::native_bidi_privacy_isolation_receipt_and_cleanup_success at tests/browser_bidi.rs:2568; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port})
+fixture: native_bidi_privacy_isolation_receipt_and_cleanup_success.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+requires: tool:node
+write: browser_bidi_privacy_success.jet native_bidi_privacy_isolation_receipt_and_cleanup_success.fixture/run.template
+step: jet build browser_bidi_privacy_success.jet
+exit: 0
+session privacy raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:privacy} privacy.json
+sleep: 500ms
+step run: built
+exit: 0
+stdout: = native_bidi_privacy_isolation_receipt_and_cleanup_success.1.out
+stdout: !~ "PRIVACY_SUCCESS_SECRET" # original predicate: !stdout.contains
+stderr: !~ "PRIVACY_SUCCESS_SECRET" # original predicate: !stderr.contains
+close privacy
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+stdout: = native_bidi_privacy_isolation_receipt_and_cleanup_success.2.out # original assert_eq!(server.join().unwrap(), [..])

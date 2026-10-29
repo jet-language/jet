@@ -26,7 +26,7 @@ fn run() {
     request :: http_client.request("POST", "http://example.test/")
         .json(Reading{city: "Reno", degrees: 31})
     request_decoded :: request.json<Reading>() ?? panic("request")
-    request_content_type :: &request.header("content-type") ?? "missing"
+    request_content_type :: request.header("content-type") ?? "missing"
     print("{decoded.city}|{request_decoded.degrees}|{request_content_type}|{response_text.text() ?? "invalid body"}")
     malformed :: http_client.request("POST", "http://example.test/").body("{{")
     if malformed.json<Reading>() == {

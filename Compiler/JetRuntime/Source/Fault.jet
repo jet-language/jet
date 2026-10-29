@@ -1,0 +1,772 @@
+// Native fault reports. A fatal signal in a native program (SIGSEGV, SIGBUS,
+// SIGILL, SIGFPE) runs jet_rt_fault_signal on the faulting thread's
+// alternate signal stack, so the report runs even when the thread's own
+// stack is exhausted:
+// - A SIGSEGV within 1 MiB below the stack pointer is a stack overflow: the
+//   E3012 stop names the innermost Jet function with its file, declaration
+//   line and source line, and the process exits 70 like every registered stop.
+// - Any other fatal signal prints the signal, the faulting address (SIGSEGV,
+//   SIGBUS) and the Jet frames (function and file:line), then the signal's
+//   default action ends the process: status 128 + signal, with a core dump
+//   where enabled, exactly as without the report.
+// How much of the stack follows a report's first line is the image's
+// `backtrace` build option (fault_backtrace).
+// Jet frames come from the image's DWARF (.debug_info subprograms,
+// .debug_line rows; Image/Dwarf.jet writes both). Under `jet run` the image is
+// the loader's mapping (HOST_AT_IMAGE), else /proc/self/exe mapped read-only,
+// so `jet run` and the built program print the same report. The handler
+// never allocates: its scratch is one fresh mapping, and every byte goes to
+// fd 2 by write(2). Source lines are read from the file named in the DWARF.
+
+// Checked FunctionAddress intrinsic in the canonical RuntimeLibrary table.
+fn rt_fault_signal_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+
+// The main thread's alternate stack (fault_stack_start); its word 24 is the
+// claim of the one report a process prints.
+fault_main_stack := I64{0}
+
+// The `backtrace` build option of the running image (0 full, 1 brief, 2 off;
+// JetIR IRBacktrace): what a report prints after its first line. Full lists
+// the Jet frames; brief only the faulting frame (a stack overflow names its
+// innermost Jet function either way); off no frame.
+fault_backtrace := I64{0}
+
+// The image's entry passes a `brief` or `off` backtrace before it runs
+// anything else (JetIR ir_entry_function).
+#Export(c) fn jet_rt_fault_backtrace(mode: I64) { fault_backtrace = mode }
+
+// The handler for the four fatal signals, and the calling thread's
+// alternate stack. jet_rt_main calls it once per entry; a loaded-image host
+// running another entry on the same thread keeps the first stack.
+fn fault_start() {
+    if (fault_main_stack == I64{0}) -> fault_main_stack = fault_stack_start()
+    handler :: rt_fault_signal_address()
+    fault_action(I64{11}, handler)
+    fault_action(I64{7}, handler)
+    fault_action(I64{4}, handler)
+    fault_action(I64{8}, handler)
+}
+
+// sa_flags SA_SIGINFO | SA_RESTORER | SA_ONSTACK | SA_NODEFER | SA_RESETHAND.
+// x86-64 refuses a handler without SA_RESTORER; the handler never returns,
+// so its restorer is never used. SA_RESETHAND makes a fault inside the report
+// take the default action; SA_NODEFER lets the report re-raise its signal.
+fn fault_action(signal: I64, handler: I64) {
+    #Unsafe("rt_sigaction borrows the four-word action on the stack; handler is this runtime's C-ABI export with the (signal, info, context) signature") {
+        _ := os_syscall_stack4_i64(I64{13}, signal, handler, I64{3422552068}, I64{0}, I64{0}, I64{8})
+    }
+}
+
+// Map and register this thread's 256 KiB alternate signal stack; its lowest
+// words hold the stack_t that sigaltstack copies. 0 when either call fails.
+fn fault_stack_start() -> I64 {
+    stack :: alloc_map_try(I64{262144})
+    if (stack == I64{0}) -> return I64{0}
+    status := I64{0}
+    #Unsafe("stack is a fresh private mapping; sigaltstack copies its first three words (ss_sp, ss_flags, ss_size)") {
+        os_store_i64(stack, stack)
+        os_store_i64(stack + I64{8}, I64{0})
+        os_store_i64(stack + I64{16}, I64{262144})
+        os_store_i64(stack + I64{24}, I64{0})
+        status = os_syscall_i64(I64{131}, stack, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    if (status < I64{0}) {
+        alloc_unmap(stack, I64{262144})
+        return I64{0}
+    }
+    stack
+}
+
+// Unregister (SS_DISABLE) and unmap a thread's alternate stack before the
+// thread ends; the thread is not on it.
+fn fault_stack_end(stack: I64) {
+    if (stack == I64{0}) -> return
+    #Unsafe("stack is this thread's registered alternate stack, unused outside a handler; sigaltstack copies its first three words") {
+        os_store_i64(stack + I64{8}, I64{2})
+        _ := os_syscall_i64(I64{131}, stack, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    alloc_unmap(stack, I64{262144})
+}
+
+// ---------------------------------------------------------------------------
+// The handler.
+
+// signal, siginfo_t (si_addr at 16) and ucontext_t (mcontext gregs at 40:
+// rbp 120, rsp 160, rip 168), as the kernel passes them to an SA_SIGINFO
+// handler. It never returns; the I64 result is the address-target shape.
+#Export(c) fn jet_rt_fault_signal(signal: I64, info: I64, context: I64) -> I64 {
+    // One report per process: a second faulting thread waits for the exit.
+    if (fault_main_stack != I64{0} && sync_cas(fault_main_stack + I64{24}, I64{0}, I64{1}) != I64{0}) {
+        loop { _ := trap_syscall(I64{34}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) }
+    }
+    // No Secret outlives the process in its memory or its core (#5478),
+    // even if the report itself faults.
+    secret_scrub()
+    address :: fault_word(info + I64{16})
+    rbp :: fault_word(context + I64{120})
+    rsp :: fault_word(context + I64{160})
+    rip :: fault_word(context + I64{168})
+    host_stdout_flush_fault()
+    s :: alloc_map_try(I64{65536})
+    image :: alloc_check_image()
+    if (s != I64{0}) {
+        fault_store(s + I64{8}, image)
+        fault_store(s + I64{16}, alloc_check_bias(image))
+        fault_sections(s, image)
+    }
+    overflow :: signal == I64{11} && address < rsp + I64{65536} && address + I64{1048576} > rsp
+    if overflow {
+        fault_overflow(s, rip, rbp, rsp)
+        trap_defect_exit(I64{70})
+    }
+    fault_report(s, signal, address, rip, rbp, rsp)
+    fault_raise(signal)
+    I64{0}
+}
+
+// The E3012 stop for the innermost Jet frame of an exhausted stack.
+fn fault_overflow(s: I64, rip: I64, rbp: I64, rsp: I64) {
+    found := false
+    if (s != I64{0}) {
+        found = fault_function(s, rip)
+        frame := fault_first_frame(rbp, rsp)
+        steps := I64{0}
+        loop !found && frame != (I64{0}) && steps < (I64{4096}) {
+            found = fault_function(s, fault_word(frame + I64{8}) - I64{1})
+            frame = fault_next_frame(frame)
+            steps += I64{1}
+        }
+    }
+    alloc_check_say(rt_static_text("Stop [E3012]: Stack overflow"))
+    if (fault_backtrace != I64{2}) {
+        alloc_check_say(rt_static_text(" in `"))
+        if found {
+            fault_write_string(fault_word(s + I64{104}))
+        } else {
+            alloc_check_say(rt_static_text("??"))
+        }
+        alloc_check_say(rt_static_text("`"))
+        // No Jet frame named (an image without debug info, or a foreign
+        // frame): the faulting pc.
+        if !found {
+            alloc_check_say(rt_static_text(" at "))
+            alloc_check_hex(rip)
+        }
+    }
+    alloc_check_say(rt_static_text("\n"))
+    if found && (fault_backtrace != I64{2}) && fault_file(s, fault_word(s + I64{120})) {
+        line :: fault_word(s + I64{128})
+        alloc_check_say(rt_static_text("  --> "))
+        fault_write_string(fault_word(s + I64{176}))
+        alloc_check_say(rt_static_text(":"))
+        alloc_write_size(line)
+        alloc_check_say(rt_static_text(" in "))
+        fault_write_string(fault_word(s + I64{104}))
+        alloc_check_say(rt_static_text("\n"))
+        if fault_source(s, line) -> fault_snippet(line, fault_word(s + I64{232}), fault_word(s + I64{240}))
+    }
+    alloc_check_say(rt_static_text(" Why: The call stack kept growing without reaching a safe return — with Jet file, line, and source context\n Fix: End the recursion or make progress toward a base case.\nMore: jet-lang.dev/e/E3012\n"))
+}
+
+// The gutter, source line and caret of a stop's context (Trap.jet
+// trap_context), column 1.
+fn fault_snippet(line: I64, source: I64, length: I64) {
+    digits := I64{1}
+    remainder := line
+    loop remainder >= (I64{10}) {
+        digits += I64{1}
+        remainder = remainder /% I64{10}
+    }
+    fault_spaces(digits + I64{3})
+    alloc_check_say(rt_static_text("|\n"))
+    alloc_write_size(line)
+    alloc_check_say(rt_static_text(" | "))
+    alloc_check_write(source, length)
+    alloc_check_say(rt_static_text("\n"))
+    fault_spaces(digits + I64{3})
+    alloc_check_say(rt_static_text("| ^\n"))
+}
+
+fn fault_spaces(count: I64) {
+    at := I64{0}
+    loop at < count {
+        alloc_write_word(I64{32}, I64{1})
+        at += I64{1}
+    }
+}
+
+// Signal, address and the Jet frames of any other fatal signal.
+fn fault_report(s: I64, signal: I64, address: I64, rip: I64, rbp: I64, rsp: I64) {
+    alloc_check_say(rt_static_text("Fault ["))
+    if {
+        (signal == I64{11}) -> alloc_check_say(rt_static_text("SIGSEGV]: invalid memory access"))
+        (signal == I64{7}) -> alloc_check_say(rt_static_text("SIGBUS]: bus error"))
+        (signal == I64{4}) -> alloc_check_say(rt_static_text("SIGILL]: illegal instruction"))
+        else -> alloc_check_say(rt_static_text("SIGFPE]: arithmetic fault"))
+    }
+    if (signal == I64{11} || signal == I64{7}) {
+        alloc_check_say(rt_static_text(" at address "))
+        alloc_check_hex(address)
+    }
+    if (fault_backtrace == I64{2}) {
+        alloc_check_say(rt_static_text("\n"))
+        return
+    }
+    alloc_check_say(rt_static_text("\nBacktrace:\n"))
+    if (s == I64{0}) -> return
+    // An image without .debug_info (`debug_info: false`) names no function:
+    // the faulting pc and the return addresses of the frame walk print.
+    if (fault_word(s + I64{24}) == I64{0}) {
+        fault_address_line(rip)
+        if (fault_backtrace == I64{1}) -> return
+        frame := fault_first_frame(rbp, rsp)
+        steps := I64{0}
+        loop frame != (I64{0}) && steps < (I64{64}) {
+            fault_address_line(fault_word(frame + I64{8}))
+            frame = fault_next_frame(frame)
+            steps += I64{1}
+        }
+        return
+    }
+    // The faulting frame always prints (?? when it is not a Jet function);
+    // its callers print when they are Jet functions.
+    if !fault_frame_line(s, rip, I64{0}) -> alloc_check_say(rt_static_text("  ??\n"))
+    if (fault_backtrace == I64{1}) -> return
+    frame := fault_first_frame(rbp, rsp)
+    steps := I64{0}
+    shown := I64{0}
+    loop frame != (I64{0}) && steps < (I64{4096}) && shown < (I64{64}) {
+        if fault_frame_line(s, fault_word(frame + I64{8}), I64{1}) -> shown += I64{1}
+        frame = fault_next_frame(frame)
+        steps += I64{1}
+    }
+}
+
+// One backtrace line `  0x…` of an image without debug info.
+fn fault_address_line(pc: I64) {
+    alloc_check_say(rt_static_text("  "))
+    alloc_check_hex(pc)
+    alloc_check_say(rt_static_text("\n"))
+}
+
+// One backtrace line `  name at file:line` for the Jet function holding pc
+// (a return address when back is 1: its call is the byte before), or false.
+fn fault_frame_line(s: I64, pc: I64, back: I64) -> Bool {
+    target :: pc - back
+    if !fault_function(s, target) -> return false
+    alloc_check_say(rt_static_text("  "))
+    fault_write_string(fault_word(s + I64{104}))
+    if (fault_line(s, target - fault_word(s + I64{16})) && fault_file(s, fault_word(s + I64{168}))) {
+        alloc_check_say(rt_static_text(" at "))
+        fault_write_string(fault_word(s + I64{176}))
+        alloc_check_say(rt_static_text(":"))
+        alloc_write_size(fault_word(s + I64{160}))
+    }
+    alloc_check_say(rt_static_text("\n"))
+    true
+}
+
+// The default action of signal for this thread, now: SIG_DFL, then tgkill.
+// SA_NODEFER left the signal unblocked, so it is delivered as the syscall
+// returns; exit_group(128 + signal) only if it is not.
+fn fault_raise(signal: I64) {
+    #Unsafe("rt_sigaction borrows the four-word SIG_DFL action on the stack; tgkill signals this thread") {
+        _ := os_syscall_stack4_i64(I64{13}, signal, I64{0}, I64{0}, I64{0}, I64{0}, I64{8})
+        process :: os_syscall_i64(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        thread :: os_syscall_i64(I64{186}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        _ := os_syscall_i64(I64{234}, process, thread, signal, I64{0}, I64{0}, I64{0})
+    }
+    trap_defect_exit(I64{128} + signal)
+}
+
+// The frame pointer at the fault, when it is a plausible frame on this
+// stack (aligned, at or above the stack pointer, within 16 MiB of it), else 0.
+fn fault_first_frame(rbp: I64, rsp: I64) -> I64 {
+    if (rbp.bit_and(I64{7}) != I64{0} || rbp < rsp || rbp - rsp >= I64{16777216}) -> return I64{0}
+    rbp
+}
+
+// The caller's frame: the saved rbp when it ascends by less than 16 MiB,
+// so the walk never leaves the stack, else 0.
+fn fault_next_frame(frame: I64) -> I64 {
+    above :: fault_word(frame)
+    if (above.bit_and(I64{7}) != I64{0} || above <= frame || above - frame >= I64{16777216}) -> return I64{0}
+    above
+}
+
+// ---------------------------------------------------------------------------
+// Image reads. Scratch words: 0 cursor, 8 image, 16 load bias, 24/32
+// .debug_info, 40/48 .debug_abbrev, 56/64 .debug_line, 72/80 .debug_line_str,
+// 88/96 .debug_str (address, size), 104 function name, 120 its declaration
+// file, 128 its declaration line, 136 its unit's line table offset, 160 line
+// and 168 file of an address, 176 file path, 184 second cursor, 192 line
+// table directory formats, 200 form failure, 208 path directory, 216 entry
+// format cursor, 232/240 source line (address, length); 1024 abbreviation
+// index (1024 codes), 16384 directory table (256 entries), 24576 source path.
+
+fn fault_word(address: I64) -> I64 {
+    #Unsafe("address is a word of the read-only image mapping, the scratch mapping, a stack frame the walk checked, or the kernel's signal frame") {
+        return os_load_i64(address)
+    }
+}
+
+fn fault_byte(address: I64) -> I64 {
+    #Unsafe("address is a byte of the read-only image mapping or the scratch mapping") {
+        return os_load_u8(address)
+    }
+}
+
+fn fault_store(address: I64, value: I64) {
+    #Unsafe("address is a word of the private scratch mapping") {
+        os_store_i64(address, value)
+    }
+}
+
+// count (1, 2 or 4) little-endian bytes at address.
+fn fault_le(address: I64, count: I64) -> I64 {
+    value := I64{0}
+    at := count
+    loop at > (I64{0}) {
+        at -= I64{1}
+        value = (value << I64{8}).bit_or(fault_byte(address + at))
+    }
+    value
+}
+
+// count bytes at the cursor stored in word `cursor` (8 as one word), advancing it.
+fn fault_take(cursor: I64, count: I64) -> I64 {
+    at :: fault_word(cursor)
+    fault_store(cursor, at + count)
+    if (count == I64{8}) -> return fault_word(at)
+    fault_le(at, count)
+}
+
+fn fault_uleb(cursor: I64) -> I64 {
+    value := I64{0}
+    shift := I64{0}
+    loop {
+        byte :: fault_take(cursor, I64{1})
+        if (shift < I64{63}) -> value = value.bit_or(((byte.bit_and(I64{127})) << shift))
+        shift += I64{7}
+        if (byte < I64{128}) -> return value
+    }
+}
+
+fn fault_sleb(cursor: I64) -> I64 {
+    value := I64{0}
+    shift := I64{0}
+    loop {
+        byte :: fault_take(cursor, I64{1})
+        if (shift < I64{63}) -> value = value.bit_or(((byte.bit_and(I64{127})) << shift))
+        shift += I64{7}
+        if (byte < I64{128}) {
+            if (shift < I64{64} && byte.bit_and(I64{64}) != I64{0}) -> value = value.bit_or((I64{-1} << shift))
+            return value
+        }
+    }
+}
+
+// The NUL-terminated string at the cursor; the cursor moves past its NUL.
+fn fault_cstr(cursor: I64) -> I64 {
+    start :: fault_word(cursor)
+    at := start
+    loop fault_byte(at) != (I64{0}) -> at += I64{1}
+    fault_store(cursor, at + I64{1})
+    start
+}
+
+fn fault_strlen(text: I64) -> I64 {
+    at := text
+    loop fault_byte(at) != (I64{0}) -> at += I64{1}
+    at - text
+}
+
+fn fault_write_string(text: I64) {
+    alloc_check_write(text, fault_strlen(text))
+}
+
+// Whether the NUL-terminated name at address is `text`.
+fn fault_named(address: I64, text: I64) -> Bool {
+    data :: rt_text_data(text)
+    length :: rt_text_len(text)
+    at := I64{0}
+    loop at < length {
+        if (fault_byte(address + at) != fault_byte(data + at)) -> return false
+        at += I64{1}
+    }
+    fault_byte(address + length) == I64{0}
+}
+
+// The DWARF sections of the image (absent ones stay 0).
+fn fault_sections(s: I64, image: I64) {
+    if (image == I64{0}) -> return
+    headers :: image + fault_word(image + I64{40})
+    entry :: fault_le(image + I64{58}, I64{2})
+    count :: fault_le(image + I64{60}, I64{2})
+    names_header :: headers + fault_le(image + I64{62}, I64{2}) * entry
+    names :: image + fault_word(names_header + I64{24})
+    index := I64{0}
+    loop index < count {
+        header :: headers + index * entry
+        name :: names + fault_le(header, I64{4})
+        slot := I64{0}
+        if {
+            fault_named(name, rt_static_text(".debug_info")) -> slot = I64{24}
+            fault_named(name, rt_static_text(".debug_abbrev")) -> slot = I64{40}
+            fault_named(name, rt_static_text(".debug_line")) -> slot = I64{56}
+            fault_named(name, rt_static_text(".debug_line_str")) -> slot = I64{72}
+            fault_named(name, rt_static_text(".debug_str")) -> slot = I64{88}
+            else -> {}
+        }
+        if (slot != I64{0}) {
+            fault_store(s + slot, image + fault_word(header + I64{24}))
+            fault_store(s + slot + I64{8}, fault_word(header + I64{32}))
+        }
+        index += I64{1}
+    }
+}
+
+// One attribute value of `form` at the cursor: a constant, an address, or
+// the address of a string or block. An unknown form sets the failure word.
+fn fault_form(s: I64, cursor: I64, form: I64) -> I64 {
+    if {
+        (form == I64{1} || form == I64{7} || form == I64{20}) -> return fault_take(cursor, I64{8})
+        (form == I64{11} || form == I64{12} || form == I64{17}) -> return fault_take(cursor, I64{1})
+        (form == I64{5} || form == I64{18}) -> return fault_take(cursor, I64{2})
+        (form == I64{6} || form == I64{19} || form == I64{23}) -> return fault_take(cursor, I64{4})
+        (form == I64{15} || form == I64{21}) -> return fault_uleb(cursor)
+        (form == I64{13}) -> return fault_sleb(cursor)
+        (form == I64{8}) -> return fault_cstr(cursor)
+        (form == I64{14} && fault_word(s + I64{88}) != I64{0}) -> return fault_word(s + I64{88}) + fault_take(cursor, I64{4})
+        (form == I64{31} && fault_word(s + I64{72}) != I64{0}) -> return fault_word(s + I64{72}) + fault_take(cursor, I64{4})
+        (form == I64{25}) -> return I64{1}
+        (form == I64{30}) -> {
+            start :: fault_word(cursor)
+            fault_store(cursor, start + I64{16})
+            return start
+        }
+        (form == I64{9} || form == I64{24} || form == I64{10}) -> {
+            length :: if (form == I64{10}) -> fault_take(cursor, I64{1}) else -> fault_uleb(cursor)
+            start :: fault_word(cursor)
+            fault_store(cursor, start + length)
+            return start
+        }
+        else -> {}
+    }
+    fault_store(s + I64{200}, I64{1})
+    I64{0}
+}
+
+// Index the abbreviations at `offset` of .debug_abbrev by code (codes below
+// 1024): each entry is the address of its tag. False on a larger code.
+fn fault_abbrevs(s: I64, offset: I64) -> Bool {
+    at := I64{0}
+    loop at < (I64{1024}) {
+        fault_store(s + I64{1024} + at * I64{8}, I64{0})
+        at += I64{1}
+    }
+    cursor :: s + I64{184}
+    end :: fault_word(s + I64{40}) + fault_word(s + I64{48})
+    fault_store(cursor, fault_word(s + I64{40}) + offset)
+    loop fault_word(cursor) < end {
+        code :: fault_uleb(cursor)
+        if (code == I64{0}) -> return true
+        if (code >= I64{1024}) -> return false
+        fault_store(s + I64{1024} + code * I64{8}, fault_word(cursor))
+        _ := fault_uleb(cursor)
+        _ := fault_take(cursor, I64{1})
+        loop {
+            attribute :: fault_uleb(cursor)
+            form :: fault_uleb(cursor)
+            if (attribute == I64{0} && form == I64{0}) -> break
+            if (form == I64{33}) -> _ := fault_sleb(cursor)
+        }
+    }
+    true
+}
+
+// The subprogram whose code holds pc (a run-time address): its name,
+// declaration file and line and its unit's line table offset. Generated
+// subprograms (no declaration line) are not Jet functions.
+fn fault_function(s: I64, pc: I64) -> Bool {
+    target :: pc - fault_word(s + I64{16})
+    unit := fault_word(s + I64{24})
+    end :: unit + fault_word(s + I64{32})
+    loop unit != (I64{0}) && unit + (I64{12}) <= end {
+        length :: fault_le(unit, I64{4})
+        if (length == I64{0} || length >= I64{0xfffffff0}) -> return false
+        next :: unit + I64{4} + length
+        // DWARF 5 compile unit with 8-byte addresses.
+        if (fault_le(unit + I64{4}, I64{2}) == I64{5} && fault_byte(unit + I64{6}) == I64{1} && fault_byte(unit + I64{7}) == I64{8}) {
+            if fault_unit(s, unit + I64{12}, next, fault_le(unit + I64{8}, I64{4}), target) -> return true
+        }
+        unit = next
+    }
+    false
+}
+
+fn fault_unit(s: I64, start: I64, end: I64, abbrev_offset: I64, target: I64) -> Bool {
+    if !fault_abbrevs(s, abbrev_offset) -> return false
+    fault_store(s, start)
+    fault_store(s + I64{200}, I64{0})
+    lines := I64{-1}
+    loop fault_word(s) < end {
+        code :: fault_uleb(s)
+        if (code == I64{0}) -> next
+        if (code >= I64{1024}) -> return false
+        spec :: fault_word(s + I64{1024} + code * I64{8})
+        if (spec == I64{0}) -> return false
+        cursor :: s + I64{184}
+        fault_store(cursor, spec)
+        die_tag :: fault_uleb(cursor)
+        _ := fault_take(cursor, I64{1})
+        name := I64{0}
+        file := I64{-1}
+        line := I64{-1}
+        low := I64{-1}
+        high := I64{0}
+        high_length := true
+        loop {
+            attribute :: fault_uleb(cursor)
+            form :: fault_uleb(cursor)
+            if (attribute == I64{0} && form == I64{0}) -> break
+            value :: if (form == I64{33}) -> fault_sleb(cursor) else -> fault_form(s, s, form)
+            if (fault_word(s + I64{200}) != I64{0}) -> return false
+            if {
+                (attribute == I64{3}) -> name = value
+                (attribute == I64{58}) -> file = value
+                (attribute == I64{59}) -> line = value
+                (attribute == I64{17}) -> low = value
+                (attribute == I64{18}) -> {
+                    high = value
+                    high_length = form != I64{1}
+                }
+                (attribute == I64{16}) -> lines = value
+                else -> {}
+            }
+        }
+        if (die_tag == I64{46} && low != I64{-1} && line > I64{0} && name != I64{0}) {
+            top :: if high_length -> low + high else -> high
+            if (target >= low && target < top) {
+                fault_store(s + I64{104}, name)
+                fault_store(s + I64{120}, file)
+                fault_store(s + I64{128}, line)
+                fault_store(s + I64{136}, lines)
+                return true
+            }
+        }
+    }
+    false
+}
+
+// The line and file of `target` (a link-time address) in the line table of
+// the unit fault_function last matched (DWARF 5): the row before the first
+// row past target in its sequence.
+fn fault_line(s: I64, target: I64) -> Bool {
+    offset :: fault_word(s + I64{136})
+    if (offset < I64{0} || offset >= fault_word(s + I64{64})) -> return false
+    unit :: fault_word(s + I64{56}) + offset
+    end :: unit + I64{4} + fault_le(unit, I64{4})
+    if (fault_le(unit + I64{4}, I64{2}) != I64{5}) -> return false
+    program :: unit + I64{12} + fault_le(unit + I64{8}, I64{4})
+    step :: fault_byte(unit + I64{12})
+    base_byte :: fault_byte(unit + I64{15})
+    line_base :: if (base_byte >= I64{128}) -> base_byte - I64{256} else -> base_byte
+    line_range :: fault_byte(unit + I64{16})
+    opcode_base :: fault_byte(unit + I64{17})
+    if (line_range == I64{0}) -> return false
+    lengths :: unit + I64{18}
+    fault_store(s, program)
+    address := I64{0}
+    file := I64{1}
+    line := I64{1}
+    previous := I64{-1}
+    previous_line := I64{0}
+    previous_file := I64{0}
+    loop fault_word(s) < end {
+        op :: fault_take(s, I64{1})
+        row := false
+        if (op >= opcode_base) {
+            adjusted :: op - opcode_base
+            address += (adjusted / line_range) * step
+            line += line_base + adjusted % line_range
+            row = true
+        } else if (op == I64{0}) {
+            length :: fault_uleb(s)
+            after :: fault_word(s) + length
+            sub :: fault_take(s, I64{1})
+            if (sub == I64{1}) {
+                if (previous >= I64{0} && target >= previous && target < address) {
+                    fault_store(s + I64{160}, previous_line)
+                    fault_store(s + I64{168}, previous_file)
+                    return true
+                }
+                address = I64{0}
+                file = I64{1}
+                line = I64{1}
+                previous = I64{-1}
+            } else if (sub == I64{2}) {
+                address = fault_take(s, I64{8})
+            }
+            fault_store(s, after)
+        } else if (op == I64{1}) {
+            row = true
+        } else if (op == I64{2}) {
+            address += fault_uleb(s) * step
+        } else if (op == I64{3}) {
+            line += fault_sleb(s)
+        } else if (op == I64{4}) {
+            file = fault_uleb(s)
+        } else if (op == I64{8}) {
+            address += ((I64{255} - opcode_base) / line_range) * step
+        } else if (op == I64{9}) {
+            address += fault_take(s, I64{2})
+        } else {
+            // Other standard opcodes: their operand count of ulebs.
+            operands := fault_byte(lengths + op - I64{1})
+            loop operands > (I64{0}) {
+                _ := fault_uleb(s)
+                operands -= I64{1}
+            }
+        }
+        if row {
+            if (previous >= I64{0} && target >= previous && target < address) {
+                fault_store(s + I64{160}, previous_line)
+                fault_store(s + I64{168}, previous_file)
+                return true
+            }
+            previous = address
+            previous_line = line
+            previous_file = file
+        }
+    }
+    false
+}
+
+// The path of entry `file` of the matched unit's line table file list, as
+// written (s + 176), and its directory (s + 208).
+fn fault_file(s: I64, file: I64) -> Bool {
+    offset :: fault_word(s + I64{136})
+    if (offset < I64{0} || offset >= fault_word(s + I64{64})) -> return false
+    unit :: fault_word(s + I64{56}) + offset
+    if (fault_le(unit + I64{4}, I64{2}) != I64{5}) -> return false
+    fault_store(s + I64{192}, unit + I64{17} + fault_byte(unit + I64{17}))
+    cursor :: s + I64{184}
+    fault_store(cursor, fault_word(s + I64{192}))
+    fault_store(s + I64{200}, I64{0})
+    // Directories: formats, then entries; each entry's path is kept by index.
+    formats :: fault_take(cursor, I64{1})
+    format_at :: fault_word(cursor)
+    at := I64{0}
+    loop at < formats {
+        _ := fault_uleb(cursor)
+        _ := fault_uleb(cursor)
+        at += I64{1}
+    }
+    count :: fault_uleb(cursor)
+    entry := I64{0}
+    loop entry < count {
+        path := I64{0}
+        fault_store(s + I64{216}, format_at)
+        at = I64{0}
+        loop at < formats {
+            kind :: fault_uleb(s + I64{216})
+            form :: fault_uleb(s + I64{216})
+            value :: fault_form(s, cursor, form)
+            if (kind == I64{1}) -> path = value
+            at += I64{1}
+        }
+        if (fault_word(s + I64{200}) != I64{0}) -> return false
+        if (entry < I64{256}) -> fault_store(s + I64{16384} + entry * I64{8}, path)
+        entry += I64{1}
+    }
+    // Files: formats, then entries (path, directory index).
+    file_formats :: fault_take(cursor, I64{1})
+    file_format_at :: fault_word(cursor)
+    at = I64{0}
+    loop at < file_formats {
+        _ := fault_uleb(cursor)
+        _ := fault_uleb(cursor)
+        at += I64{1}
+    }
+    files :: fault_uleb(cursor)
+    entry = I64{0}
+    loop entry < files {
+        path := I64{0}
+        directory := I64{0}
+        fault_store(s + I64{216}, file_format_at)
+        at = I64{0}
+        loop at < file_formats {
+            kind :: fault_uleb(s + I64{216})
+            form :: fault_uleb(s + I64{216})
+            value :: fault_form(s, cursor, form)
+            if (kind == I64{1}) -> path = value
+            if (kind == I64{2}) -> directory = value
+            at += I64{1}
+        }
+        if (fault_word(s + I64{200}) != I64{0}) -> return false
+        if (entry == file) {
+            if (path == I64{0}) -> return false
+            fault_store(s + I64{176}, path)
+            fault_store(s + I64{208}, if (directory >= I64{0} && directory < count && directory < I64{256}) -> fault_word(s + I64{16384} + directory * I64{8}) else -> I64{0})
+            return true
+        }
+        entry += I64{1}
+    }
+    false
+}
+
+// Line `line` of the file fault_file found, without its line break
+// (s + 232 address, s + 240 length): the file is read from its path as
+// written (relative paths from the directory entry, `.` the working
+// directory). False when it cannot be read or is shorter.
+fn fault_source(s: I64, line: I64) -> Bool {
+    path :: fault_word(s + I64{176})
+    directory :: fault_word(s + I64{208})
+    buffer :: s + I64{24576}
+    used := I64{0}
+    if (fault_byte(path) != I64{47} && directory != I64{0} && !fault_named(directory, rt_static_text("."))) {
+        used = fault_copy(buffer, used, directory)
+        if (used > I64{0}) {
+            #Unsafe("buffer + used lies inside the scratch mapping's 8 KiB path buffer") { os_store_u8(buffer + used, I64{47}) }
+            used += I64{1}
+        }
+    }
+    used = fault_copy(buffer, used, path)
+    if (used < I64{0}) -> return false
+    #Unsafe("buffer + used lies inside the scratch mapping's 8 KiB path buffer") { os_store_u8(buffer + used, I64{0}) }
+    fd :: trap_syscall(I64{257}, I64{-100}, buffer, I64{524288}, I64{0}, I64{0}, I64{0})
+    if (fd < I64{0}) -> return false
+    size :: trap_syscall(I64{8}, fd, I64{0}, I64{2}, I64{0}, I64{0}, I64{0})
+    text := I64{-1}
+    if (size > I64{0}) -> text = trap_syscall(I64{9}, I64{0}, size, I64{1}, I64{2}, fd, I64{0})
+    _ := trap_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    if (text < I64{0}) -> return false
+    at := I64{0}
+    current := I64{1}
+    loop current < line && at < size {
+        if (fault_byte(text + at) == I64{10}) -> current += I64{1}
+        at += I64{1}
+    }
+    if (current != line || at >= size) -> return false
+    stop := at
+    loop stop < size && fault_byte(text + stop) != (I64{10}) -> stop += I64{1}
+    loop stop > at && (fault_byte(text + stop - I64{1}) == I64{13} || fault_byte(text + stop - I64{1}) == I64{32} || fault_byte(text + stop - I64{1}) == I64{9}) -> stop -= I64{1}
+    fault_store(s + I64{232}, text + at)
+    fault_store(s + I64{240}, stop - at)
+    true
+}
+
+// Append the NUL-terminated text to the path buffer at used; -1 when the
+// path would not fit its 8 KiB.
+fn fault_copy(buffer: I64, used: I64, text: I64) -> I64 {
+    if (used < I64{0}) -> return used
+    length :: fault_strlen(text)
+    if (used + length >= I64{8191}) -> return I64{-1}
+    at := I64{0}
+    loop at < length {
+        #Unsafe("buffer + used + at lies inside the scratch mapping's 8 KiB path buffer") { os_store_u8(buffer + used + at, fault_byte(text + at)) }
+        at += I64{1}
+    }
+    used + length
+}

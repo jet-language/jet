@@ -6,12 +6,14 @@
 // Layout authority: Lower/Values.jet lower_size/lower_place_members,
 // lower_list_stride and lower_option_box_size. List aux0 is the actual stride,
 // not the child size. Option is the native nullable pointer: None=0, Some=box
-// containing child at offset0; aux0=0, aux1=box allocation size. E4 size8 is
+// containing child at offset0; aux0=0, aux1=box allocation size. An Int? is no
+// box (the IR lays it as one inline word, None=2^62), so no Option5 has an
+// ExactInt3 child. E4 size8 is
 // the native heap-header handle; size24 is the inline Source physical carrier.
 // Factories must refuse unsupported layouts before emitting a descriptor.
 // The same encoding is instantiated separately in Source and pinned Core;
 // addresses, cells and borrowed views NEVER cross process/segment boundaries.
-source_meta_kind :: I64{100}
+SOURCE_META_KIND :: I64{100}
 source_borrows := I64{0}
 
 // Hash encoding: FNV-1a-64, initial 0xcbf29ce484222325, prime 0x100000001b3.
@@ -236,10 +238,10 @@ fn source_shared_free(payload: I64, meta: I64) {
     meta :: jet_rt_alloc(I64{72}, I64{8})
     coll_zero(meta, I64{72})
     trap_store(meta, source_payload_size(owned))
-    trap_store(meta + I64{48}, source_meta_kind)
+    trap_store(meta + I64{48}, SOURCE_META_KIND)
     trap_store(meta + I64{56}, owned)
     // Exclusive meta-kind admission: never accept ordinary callback metadata.
-    if (trap_word(meta + I64{48}) != source_meta_kind) { jet_rt_unreachable(I64{0}, I64{0}) }
+    if (trap_word(meta + I64{48}) != SOURCE_META_KIND) { jet_rt_unreachable(I64{0}, I64{0}) }
     payload :: jet_rt_alloc(source_payload_size(owned), trap_word(owned + I64{24}))
     coll_zero(payload, source_payload_size(owned))
     coll_copy(slot, payload, trap_word(owned + I64{16}))
@@ -286,7 +288,7 @@ fn source_borrow_begin(shared: I64, expected: I64, lifetime: I64, out: I64, edit
     shared_retain(shared)
     shared_acquire(shared, editable)
     meta :: sync_load(shared + I64{56})
-    matches := trap_word(meta + I64{48}) == source_meta_kind
+    matches := trap_word(meta + I64{48}) == SOURCE_META_KIND
     if matches {
         schema :: trap_word(meta + I64{56})
         matches = trap_word(schema) == trap_word(expected) && trap_word(schema + I64{8}) == trap_word(expected + I64{8})

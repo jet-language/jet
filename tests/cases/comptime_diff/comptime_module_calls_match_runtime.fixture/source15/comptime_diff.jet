@@ -1,0 +1,14 @@
+use core.encoding.hex as comptime_diff_hex
+use core.data as data
+COMPTIME_VALUE :: comptime { data.variance([Float]{ 2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0 }) ?? panic("data") }
+
+fn run() {
+    r :: data.variance([Float]{ 2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0 }) ?? panic("data")
+    comptime_diff_frame("{COMPTIME_VALUE}", "{r}")
+
+}
+
+fn comptime_diff_frame(expected_text: String, actual_text: String) {
+    print("{comptime_diff_hex.encode(expected_text.bytes())}")
+    print("{comptime_diff_hex.encode(actual_text.bytes())}")
+}

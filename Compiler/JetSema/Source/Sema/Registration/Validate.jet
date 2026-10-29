@@ -8,6 +8,7 @@
 // generated decode of a struct with a block returns `T.validate(decoded)`
 // (sema_serde_items_struct_decode_body).
 use jet_foundation.[
+    AST_NODE_GENERATED,
     Diagnostic,
     Expr,
     Func,
@@ -15,6 +16,7 @@ use jet_foundation.[
     Item,
     NamedType,
     Param,
+    PlaceAccess,
     Span,
     Stmt,
     StructDef,
@@ -71,13 +73,13 @@ fn sema_validate_impl(definition: StructDef, diagnostics: &[Diagnostic]) -> Impl
 // and gives None.
 fn sema_validate_rule(statement: Stmt, fields: [String:Bool], diagnostics: &[Diagnostic]) -> SemaValidateRule? {
     if statement == .Expr(expression) {
-        if expression == .Call(call) {
+        if expression == .Call(call, _) {
             if call.name != SEMA_VALIDATE_CHECK || call.args.len() != 3 -> return sema_validate_refuse(sema_validate_e0353(call.name_span), &diagnostics)
             if call.args[0].label != None -> return sema_validate_refuse(sema_validate_e0353(call.args[0].span), &diagnostics)
             at_label :: call.args[1].label ?? return sema_validate_refuse(sema_validate_e0353(call.args[1].span), &diagnostics)
             if at_label.name != "at" -> return sema_validate_refuse(sema_validate_e0353(call.args[1].span), &diagnostics)
             if call.args[2].label != None -> return sema_validate_refuse(sema_validate_e0353(call.args[2].span), &diagnostics)
-            if call.args[1].expr == .Ident(name, name_span) {
+            if call.args[1].expr == .Ident(name, name_span, _) {
                 if fields.get(name) == None -> return sema_validate_refuse(sema_validate_e0354(name, name_span), &diagnostics)
                 return Val(SemaValidateRule{cond: call.args[0].expr.copy(), field: name.copy(), message: call.args[2].expr.copy()})
             }
@@ -113,14 +115,16 @@ fn sema_validate_build(definition: StructDef, rules: [SemaValidateRule], span: S
     loop name in referenced -> &checks.push(sema_serde_items_binding(name, None, sema_serde_items_field_read(SEMA_VALIDATE_VALUE, name, span), false, span))
     loop rule in rules {
         failure :: sema_serde_items_field_error_value(sema_serde_items_string(rule.field, span), rule.message.copy(), span)
-        push :: Stmt.Expr{expr: sema_serde_items_method_call(sema_serde_items_ident(SEMA_VALIDATE_ERRORS, span), "push", [Expr]{failure}, span)}
+        // `&__errors.push(failure)`: the push writes the collected list.
+        errors :: Expr.Place{value: sema_serde_items_ident(SEMA_VALIDATE_ERRORS, span), access: PlaceAccess.Write, span: span, id: AST_NODE_GENERATED}
+        push :: Stmt.Expr{expr: sema_serde_items_method_call(errors, "push", [Expr]{failure}, span)}
         &checks.push(sema_serde_items_if(sema_serde_items_not(rule.cond.copy(), span), [Stmt]{push}, span))
     }
-    body := [Stmt]{sema_serde_items_binding(SEMA_VALIDATE_ERRORS, Val(sema_data_decode_error()), Expr.ListLit{elements: [Expr]{}, span: span}, true, span)}
-    &body.push(sema_serde_items_if(Expr.Bool{value: true, span: span}, checks, span))
+    body := [Stmt]{sema_serde_items_binding(SEMA_VALIDATE_ERRORS, Val(sema_data_decode_error()), Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}, true, span)}
+    &body.push(sema_serde_items_if(Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, checks, span))
     has_errors :: sema_serde_items_not(sema_serde_items_method_call(sema_serde_items_ident(SEMA_VALIDATE_ERRORS, span), "is_empty", [Expr]{}, span), span)
-    &body.push(sema_serde_items_if(has_errors, [Stmt]{sema_serde_items_return(Expr.Err{value: sema_serde_items_ident(SEMA_VALIDATE_ERRORS, span), span: span}, span)}, span))
-    &body.push(sema_serde_items_return(Expr.Ok{value: sema_serde_items_copy(sema_serde_items_ident(SEMA_VALIDATE_VALUE, span), span), span: span}, span))
+    &body.push(sema_serde_items_if(has_errors, [Stmt]{sema_serde_items_return(Expr.Err{value: sema_serde_items_ident(SEMA_VALIDATE_ERRORS, span), span: span, id: AST_NODE_GENERATED}, span)}, span))
+    &body.push(sema_serde_items_return(Expr.Ok{value: sema_serde_items_copy(sema_serde_items_ident(SEMA_VALIDATE_VALUE, span), span), span: span, id: AST_NODE_GENERATED}, span))
     target :: Type.Named{name: definition.name}
     function := ast_func("validate", span, span)
     function.is_pub = definition.is_pub
@@ -136,26 +140,19 @@ fn sema_validate_build(definition: StructDef, rules: [SemaValidateRule], span: S
 
 // The struct fields the rules' conditions and messages name, in order of
 // first reference.
-struct SemaValidateNames {
-    fields: [String:Bool]
-    found: [String]
-}
-
 fn sema_validate_referenced_fields(rules: [SemaValidateRule], fields: [String:Bool]) -> [String] {
-    state :: shared SemaValidateNames{fields: fields, found: [String]{}}
+    found := [String]{}
     // Each visit is written at its call, where it takes the visitor's effect row.
     loop rule in rules {
-        ast_visit_expr(rule.cond, (expression: Expr) -> sema_validate_note_name(state, expression))
-        ast_visit_expr(rule.message, (expression: Expr) -> sema_validate_note_name(state, expression))
+        ast_visit_expr(rule.cond, (expression: Expr) -> sema_validate_note_name(fields, &found, expression))
+        ast_visit_expr(rule.message, (expression: Expr) -> sema_validate_note_name(fields, &found, expression))
     }
-    permit :: state.guard_read()
-    permit.value.found.copy()
+    found
 }
 
-fn sema_validate_note_name(state: Shared<SemaValidateNames>, expression: Expr) Never! -[Mem.Alloc, Mem.Rc, Time.Wait]> {
-    if expression == .Ident(name, _) {
-        permit :: state.guard_edit()
-        if permit.value.fields.get(name) == None || permit.value.found.contains(name) -> return
-        &permit.value.found.push(name.copy())
+fn sema_validate_note_name(fields: [String:Bool], found: &[String], expression: Expr) Never! -[Mem.Alloc]> {
+    if expression == .Ident(name, _, _) {
+        if fields.get(name) == None || found.contains(name) -> return
+        &found.push(name.copy())
     }
 }

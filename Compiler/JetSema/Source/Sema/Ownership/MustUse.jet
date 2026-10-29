@@ -53,11 +53,11 @@ fn sema_must_use_method(type_name: String, method: String, environment: SemaScop
 // method the statement calls. A method counts only on a named receiver.
 fn sema_must_use_call_target(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> String? {
     if expr == {
-        .Call(call) -> {
+        .Call(call, _) -> {
             if sema_must_use_function(call, environment, program, scopes) -> return Val(call.name)
         }
-        .MethodCall(receiver, method, _, _, _, _, _, _) -> {
-            if receiver == .Ident(name, _) {
+        .MethodCall(receiver, method, _, _, _, _, _) -> {
+            if receiver == .Ident(name, _, _) {
                 index :: sema_scope_resolve_index(scopes, name) ?? return None
                 ty :: sema_scope_binding_type(environment, scopes, index) ?? return None
                 // A resolved receiver type carries its canonical identity

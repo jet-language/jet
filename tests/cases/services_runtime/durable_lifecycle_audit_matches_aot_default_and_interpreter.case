@@ -1,0 +1,21 @@
+# tests/services_runtime.rs::durable_lifecycle_audit_matches_aot_default_and_interpreter at tests/services_runtime.rs:236; hand-port
+# Claim: AOT build of DURABLE_AUDIT_SOURCE exits 0 and prints DURABLE_AUDIT_OUTPUT exactly (tests/services_runtime.rs:240-242)
+# Claim: default run of main.jet exits 0 and prints DURABLE_AUDIT_OUTPUT exactly (tests/services_runtime.rs:244-250)
+# Claim: the seed has no ServiceRuntime.send (Core/Service/Service.jet:540-592); the Rust runtime API under test has no jet equivalent here (tests/services_runtime.rs:236)
+# Claim: the interpreter lane (tests/services_runtime.rs:252-258) is the same jet run path on this seed, so it is covered by the default-run step (tests/services_runtime.rs:252-258)
+# Fixture migrated: the quoted-interpolation `contains(\"DeliveryReceipt\")` is not valid Jet (E0002); bound to a local `is_receipt` first, output unchanged
+# Fixture migrated: current Jet needs delivery mode and a state adapter before tree.worker/start (as in tests/cases/services_runtime/durable_lifecycle_matrix_covers_all_delivery_scenarios_on_all_tiers/input/run.jet:28-33): added tree.set_delivery(service.delivery_durable()) and tree.set_state_event_log
+# Fixture migrated: worker declared `-[]>` as in the matrix case
+# Not ported: separate interpreter lane folded into the default run step (no distinct CLI flag)
+fixture: durable_lifecycle_audit_matches_aot_default_and_interpreter.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build main.jet
+exit: 0 # tests/services_runtime.rs:240 AOT build
+step: built
+exit: 0 # tests/services_runtime.rs:241-242
+stdout: = durable_lifecycle_audit_matches_aot_default_and_interpreter-2.out # tests/services_runtime.rs:241-242
+step: jet run main.jet
+exit: 0 # tests/services_runtime.rs:249-250
+stdout: = durable_lifecycle_audit_matches_aot_default_and_interpreter-3.out # tests/services_runtime.rs:249-250

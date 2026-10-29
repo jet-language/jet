@@ -5,7 +5,7 @@ The binary consumes files; it does **not** invoke Nix, download data, compress
 inputs, or hold a signing secret. An outer producer job supplies those steps.
 A Jetpack client receives signed targets and does not need a Nix executable to
 read them. The implementation is
-[`jetpack-nix-index.rs`](../../crates/jetpack/src/bin/jetpack-nix-index.rs).
+[`NixIndexProducer.jet`](../../Jetpack/CLI/Source/Bin/NixIndexProducer.jet).
 
 ## Staged evidence
 

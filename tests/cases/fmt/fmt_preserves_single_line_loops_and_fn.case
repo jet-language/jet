@@ -1,0 +1,46 @@
+# tests/fmt.rs::fmt_preserves_single_line_loops_and_fn at tests/fmt.rs:1993; hand-port
+# Claim: single-line while/loop, infinite loop, state loop, for loop, exclusive range loop, two-binding loop each format stably (tests/fmt.rs:1995-2009)
+# Claim: single-line fn body `fn one() -> Int { 1 }` is stable (tests/fmt.rs:2011-2012)
+# Claim: retired `fn one() => Int = 1` is rewritten to `fn one() -> Int { 1 }` (tests/fmt.rs:2014-2016)
+# Claim: empty single-line fn body is stable (tests/fmt.rs:2018-2019)
+fixture: fmt_preserves_single_line_loops_and_fn.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt loop_while.jet
+exit: 0 # tests/fmt.rs:1995-1996 single-line while loop stable
+step: jet fmt --check loop_while.jet
+exit: 0 # tests/fmt.rs:1995-1996 single-line while loop stable
+step: jet fmt loop_infinite.jet
+exit: 0 # tests/fmt.rs:1998-1999 single-line infinite loop stable
+step: jet fmt --check loop_infinite.jet
+exit: 0 # tests/fmt.rs:1998-1999 single-line infinite loop stable
+step: jet fmt loop_state.jet
+exit: 0 # tests/fmt.rs:2001-2002 single-line state loop stable
+step: jet fmt --check loop_state.jet
+exit: 0 # tests/fmt.rs:2001-2002 single-line state loop stable
+step: jet fmt loop_for.jet
+exit: 0 # tests/fmt.rs:2004-2005 single-line for loop stable
+step: jet fmt --check loop_for.jet
+exit: 0 # tests/fmt.rs:2004-2005 single-line for loop stable
+step: jet fmt loop_excl.jet
+exit: 0 # tests/fmt.rs:2006-2007 exclusive range loop stable
+step: jet fmt --check loop_excl.jet
+exit: 0 # tests/fmt.rs:2006-2007 exclusive range loop stable
+step: jet fmt loop_two_bind.jet
+exit: 0 # tests/fmt.rs:2008-2009 two-binding list loop stable
+step: jet fmt --check loop_two_bind.jet
+exit: 0 # tests/fmt.rs:2008-2009 two-binding list loop stable
+step: jet fmt fn_one.jet
+exit: 0 # tests/fmt.rs:2011-2012 single-line fn body stable
+step: jet fmt --check fn_one.jet
+exit: 0 # tests/fmt.rs:2011-2012 single-line fn body stable
+step: jet fmt fn_noop.jet
+exit: 0 # tests/fmt.rs:2018-2019 empty single-line fn body stable
+step: jet fmt --check fn_noop.jet
+exit: 0 # tests/fmt.rs:2018-2019 empty single-line fn body stable
+step: jet fmt fn_retired.jet
+exit: 0 # tests/fmt.rs:2014-2016 retired `fn one() => Int = 1` is fixed
+step: sh {work}/step-18.sh
+exit: 0 # tests/fmt.rs:2016 output contains `fn one() -> Int { 1 }`
+stdout: ~ "fn one() -> Int { 1 }" # tests/fmt.rs:2016 output contains `fn one() -> Int { 1 }`

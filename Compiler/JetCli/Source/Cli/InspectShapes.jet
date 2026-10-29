@@ -8,18 +8,16 @@ JET_DRIVER_EXIT_OK,
 JET_DRIVER_EXIT_USER_ERROR,
 ]
 use jet_foundation.[
-CtValue,
-Field,
-Item,
-Marker,
-MarkerCallArg,
-StructDef,
-StructLayout,
-Type,
-diagnostic_from_registry,
-type_name,
+    CtValue,
+    Field,
+    Marker,
+    MarkerCallArg,
+    StructDef,
+    Type,
+    diagnostic_from_registry,
+    type_name,
 ]
-use jet_sema.sema_checked_wire_case
+use jet_sema.[sema_checked_wire_case]
 
 // Shape.rs `ShapeProjectionKind::ALL`, in order.
 JET_CLI_SHAPE_PROJECTIONS :: [String]{"json", "cbor", "csv", "toml", "yaml", "xml", "args", "env", "db", "layout"}
@@ -173,7 +171,7 @@ fn jet_cli_shape_marker(markers: [Marker], name: String) -> Marker? Never! {
 // `shape_static_string`).
 fn jet_cli_shape_static_string(argument: MarkerCallArg) -> String? Never! {
     if argument == .Expr(expression) {
-        if expression == .Str(parts, _) {
+        if expression == .Str(parts, _, _) {
             if parts.len() > 0 {
                 if parts[0] == .Lit(text) -> return Val(text)
             }
@@ -205,7 +203,7 @@ fn jet_cli_shape_rename_all_style(structure: StructDef) -> String? Never! {
     marker :: jet_cli_shape_marker(structure.serde_markers, "RenameAll") ?? return None
     if marker.args.len() == 0 -> return None
     if marker.args[0] == .Expr(expression) {
-        if expression == .Ident(name, _) -> return Val(name)
+        if expression == .Ident(name, _, _) -> return Val(name)
     }
     None
 }

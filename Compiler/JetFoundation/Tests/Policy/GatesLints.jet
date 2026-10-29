@@ -1,0 +1,117 @@
+// Invocation gate parsing, policy explanations, lint-policy package reads,
+// root-first diagnostic ordering, import bindings, app entries, unit-family
+// distinct types and the protocol JSON parse.
+use jet_foundation.[
+    Diagnostic, EffectivePolicy, FoundationJSONError, GateSet, ImportDecl, ImportKind, ImportedItem,
+    Item, PolicyDeclaration, PolicyKey, PolicyScope, PolicyValue, Span, Type, app_entry_run_fn,
+    diagnostic_cause_matches, diagnostic_caused_by, diagnostic_from_registry,
+    diagnostic_order_root_first, foundation_json_parse, foundation_parse_protocol_json_with_limit,
+    import_alias, import_walk_bindings, lint_parse_package_source, lint_selection_code_error,
+    lint_strip_comments, member_import_local, policy_explain, policy_gate_parse,
+    policy_gate_set_is_empty, type_is_app, unit_family_type_name,
+]
+
+
+#Test("gate parse accepts only an audited gate with allow") {
+    assert((policy_gate_parse("unsafe=allow") ?? panic("unsafe gate refused")) == PolicyKey.Unsafe)
+    assert((policy_gate_parse(" impure = allow ") ?? panic("impure gate refused")) == PolicyKey.Impure)
+    if policy_gate_parse("unsafe") == {
+        .Ok(_) -> panic("a gate without `=` was accepted")
+        .Err(error) -> assert_eq(error.message, "use `--gate name=allow`")
+    }
+    if policy_gate_parse("bogus=allow") == {
+        .Ok(_) -> panic("an unknown gate was accepted")
+        .Err(error) -> assert_eq(error.message, "`bogus` is not an audited gate")
+    }
+    if policy_gate_parse("unsafe=deny") == {
+        .Ok(_) -> panic("a non-allow gate was accepted")
+        .Err(error) -> assert_eq(error.message, "`--gate unsafe=deny` must name an audited gate with `=allow`")
+    }
+    assert(policy_gate_set_is_empty(GateSet{}))
+    assert(!policy_gate_set_is_empty(GateSet{allowed: [PolicyKey]{PolicyKey.Unsafe}}))
+}
+
+#Test("policy explanation marks the last declaration effective") {
+    outer :: PolicyDeclaration{key: PolicyKey.Unsafe, value: PolicyValue.Forbid, scope: PolicyScope.Package, span: Span{start: 1, end: 4}, target: None, source: "package.jet"}
+    inner :: PolicyDeclaration{key: PolicyKey.Unsafe, value: PolicyValue.Forbid, scope: PolicyScope.Function, span: Span{start: 9, end: 12}, target: None, source: "run.jet"}
+    text :: policy_explain(EffectivePolicy{key: PolicyKey.Unsafe, value: PolicyValue.Forbid, provenance: [PolicyDeclaration]{outer, inner}})
+    lines :: text.split("\n").to_list()
+    assert_eq(lines.len(), 3)
+    assert(lines[1].starts_with("  [shadowed] package "))
+    assert(lines[1].ends_with(" at package.jet:1..4"))
+    assert(lines[2].starts_with("  [effective] function "))
+    assert(lines[2].ends_with(" at run.jet:9..12"))
+}
+
+#Test("lint policy reads the package source after removing line comments") {
+    source :: "name: \"demo\"\n// policy: {{ lints: {{ deny: [float_money] }} }}\npolicy: {{\n    lints: {{ deny: [\"same_enum_guard_table\"] }} // denied\n}}\n"
+    assert_eq(lint_strip_comments("a // b\nc \"//kept\"\n"), "a \nc \"//kept\"\n")
+    if lint_parse_package_source(source) == {
+        .Ok(denied) -> assert_eq(denied, Val([String]{"same_enum_guard_table"}))
+        .Err(error) -> panic("policy parse: {error.message()}")
+    }
+    if lint_parse_package_source("name: \"demo\"\n") == {
+        .Ok(denied) -> assert(denied == [String]?{None})
+        .Err(error) -> panic("no policy: {error.message()}")
+    }
+    assert(lint_selection_code_error("float_money", "`#allow(...)`", None) == None)
+    refusal :: lint_selection_code_error("L9999", "`#allow(...)`", None) ?? panic("a code-shaped selector is refused")
+    assert_eq(refusal.code, "E0927")
+}
+
+fn gates_lints_test_diagnostic(code: String, start: Int) -> Diagnostic Never! {
+    diagnostic_from_registry("E0001", Val(Span{start: start, end: start + 1}), "what {code}", "why", "fix")
+}
+
+#Test("root-first ordering puts causes before the reports that name them") {
+    root :: gates_lints_test_diagnostic("root", 1)
+    child :: diagnostic_caused_by(gates_lints_test_diagnostic("child", 5), root)
+    other :: gates_lints_test_diagnostic("other", 9)
+    assert_eq(child.cause.len(), 1)
+    assert(diagnostic_cause_matches(child.cause[0], root))
+    ordered :: diagnostic_order_root_first([Diagnostic]{child, other, root})
+    assert_eq(ordered[0].span, Val(Span{start: 9, end: 10}))
+    assert_eq(ordered[1].span, Val(Span{start: 1, end: 2}))
+    assert_eq(ordered[2].span, Val(Span{start: 5, end: 6}))
+}
+
+#Test("import bindings name each local binding of a declaration") {
+    span :: Span{start: 0, end: 1}
+    whole :: ImportDecl{kind: ImportKind.Module{name: "core.text", span: span}, alias: "", alias_span: span, span: span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None}
+    assert_eq(import_alias(whole), "core.text")
+    file :: ImportDecl{kind: ImportKind.File{path: "lib/util", span: span}, alias: "", alias_span: span, span: span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None}
+    assert_eq(import_alias(file), "util")
+    assert(import_walk_bindings(file).is_empty())
+    members :: ImportDecl{kind: ImportKind.Unqualified{module_alias: "core", module_alias_span: span, items: [ImportedItem]{ImportedItem{original: "files.read", alias: None}, ImportedItem{original: "text", alias: Val("t")}}, items_span: span, span: span}, alias: "", alias_span: span, span: span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: true, is_package_pub: false, inline_version: None}
+    bindings :: import_walk_bindings(members)
+    assert_eq(bindings.len(), 2)
+    assert_eq(bindings[0].local, "read")
+    assert_eq(bindings[1].local, "t")
+    assert(bindings[1].is_pub)
+    assert_eq(member_import_local("a.b.c", None), "c")
+}
+
+#Test("only a concrete App return is an app entry type") {
+    assert(type_is_app(Type.Named{name: "App"}))
+    assert(type_is_app(Type.Result{ok: Type.Named{name: "App"}, err: Type.Named{name: "Err"}}))
+    assert(!type_is_app(Type.Named{name: "Application"}))
+    assert(!type_is_app(Type.Int))
+    assert(app_entry_run_fn([Item]{}) == None)
+}
+
+#Test("unit family type names capitalize every segment") {
+    assert_eq(unit_family_type_name("meter"), "Meter")
+    assert_eq(unit_family_type_name("kilo_meter"), "KiloMeter")
+    assert_eq(unit_family_type_name("_"), "_")
+    assert_eq(unit_family_type_name("élan"), "Élan")
+}
+
+#Test("protocol JSON keeps the provider error text and the i64 domain") {
+    _ :: foundation_json_parse("{{\"a\":[1,2]}}") ?? panic("valid JSON refused: {err.message}")
+    if foundation_json_parse("[9223372036854775808]") == {
+        .Ok(_) -> panic("an integer outside i64 was accepted")
+        .Err(error) -> assert_eq(error.message, "invalid number `9223372036854775808`")
+    }
+    assert(foundation_parse_protocol_json_with_limit("[1]", 2) == None)
+    _ :: foundation_parse_protocol_json_with_limit("[1]", 3) ?? panic("a frame within the limit was refused")
+}

@@ -1,0 +1,32 @@
+
+use core.web.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("ws://127.0.0.1:{free-port:network}/session?token=NETWORK_SECRET", profile, timeout) ?? panic("connect")
+    session.subscribe("network.beforeRequestSent") ?? panic("subscribe")
+
+    intercept :: session.add_intercept("beforeRequestSent") ?? panic("add_intercept")
+    event :: &session.next_event(timeout) ?? panic("next_event")
+    print(event.kind())
+    print(event.request_id())
+    print(event.request_method())
+    print(event.is_blocked())
+    hash :: event.url_hash()
+    print(hash.len() == 16)
+    print(hash.contains("SECRET") == false)
+
+    session.continue_request(event.request_id()) ?? panic("continue")
+    session.fail_request("req-secret-1") ?? panic("fail")
+    session.fulfill_request("req-secret-1", 200, "ok") ?? panic("fulfill")
+
+    url_intercept :: session.add_intercept_url("beforeRequestSent", "https://api.test/*")
+        ?? panic("add_intercept_url")
+    url_intercept.remove() ?? panic("remove url")
+    intercept.remove() ?? panic("remove")
+    intercept.remove() ?? panic("remove idempotent")
+
+    print("network:ok")
+    session.close() ?? panic("session close")
+}

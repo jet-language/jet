@@ -3,6 +3,7 @@
 use core.encoding.json as cli_json
 use core.math as status_math
 use core.text as status_text
+use core.encoding.[Dyn]
 
 // Rust's `String` refusals from the status readers (StatusValue::parse and
 // the ledgers and manifests read through it).
@@ -22,8 +23,9 @@ fn report_status_value_parse(text: String) -> Dyn JetCLIReadError! {
     }
 }
 
-// Rust StatusValue::from_dyn. Core's public tree has seven variants;
-// typed text/bytes/number atoms are represented by Text/Array/Int here.
+// Rust StatusValue::from_dyn over every Dyn variant: a Number lexeme is an
+// integer when it parses as one, else float text; Bytes are their base64
+// text and a DateTime its RFC 3339 text.
 fn jet_cli_status_from_tree(tree: Dyn) -> JetCLIStatusValue JetCLIReadError! {
     value :: if tree == {
         .Null -> JetCLIStatusValue.Null
@@ -35,7 +37,13 @@ fn jet_cli_status_from_tree(tree: Dyn) -> JetCLIStatusValue JetCLIReadError! {
             }
             JetCLIStatusValue.Float{text: "{value}"}
         }
+        .Number(lexeme) -> {
+            if Int.parse(lexeme) == .Ok(number) -> return Ok(jet_cli_status_int(number))
+            // copy: `lexeme` is a payload view of read parameter `tree`; the status value owns its text.
+            JetCLIStatusValue.Float{text: lexeme.copy()}
+        }
         .Text(value) -> jet_cli_status_text(value)
+        .Bytes(_) | .DateTime(_) -> jet_cli_status_text(tree.to_text() ?? panic("Bytes and DateTime always have a text form"))
         .Array(values) -> {
             items := [JetCLIStatusValue]{}
             loop value in values -> &items.push(jet_cli_status_from_tree(value))

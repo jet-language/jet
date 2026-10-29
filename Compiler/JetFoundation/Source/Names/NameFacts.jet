@@ -1,0 +1,59 @@
+// Checked name facts: modules, declarations, aliases, references and structure facts that sema
+// publishes for the index, the LSP and the CLI.
+
+enum NameVisibility { Private Package Public }
+
+struct NameModule { alias: String, path: String, package: String, namespace: String?{None} }
+
+struct NameDeclaration {
+    module_index: Int
+    name: String
+    path: String
+    kind: String
+    span: Span
+    visibility: NameVisibility
+}
+
+struct NameAlias {
+    module_index: Int
+    name: String
+    target: String
+    target_module: Int?
+    span: Span
+    visibility: NameVisibility
+}
+
+struct NameReference {
+    module_path: String
+    kind: String
+    def_span: Span
+    semantic_identity: String?
+}
+
+enum StructureFactKind { Liveness Lifecycle ImportEdge }
+
+struct StructureFact {
+    kind: StructureFactKind
+    subject: String
+    source: String
+    span: Span
+    status: String
+    detail: String
+    gate: String?
+}
+
+struct NameDisplayPath {
+    module_index: Int
+    internal_path: String
+    display_path: String
+}
+
+struct NameFacts {
+    modules: [NameModule]
+    declarations: [NameDeclaration]
+    aliases: [NameAlias]
+    references: [NameReference]
+    structure_facts: [StructureFact]
+    // Source-facing paths are semantic-check metadata, not emitted identities.
+    display_paths: [NameDisplayPath]{[NameDisplayPath]{}}
+}

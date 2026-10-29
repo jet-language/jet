@@ -1,0 +1,68 @@
+# #5005: the Choice rows `backtrace` (full, brief, off; stock full) and
+# `dead_code` (remove, keep; stock remove). `backtrace: off` drops the frame
+# from a fault report, `brief` keeps only the faulting one; a written
+# `backtrace: full` with `debug_info: false` is refused, since naming frames
+# needs the debug info. `dead_code: keep` builds the package's unreached
+# functions into the image too.
+fixture: fixtures/build_backtrace
+artifact: main
+env: NO_COLOR=1
+step: jet run main.jet
+cwd: open
+exit: 70
+stderr: ~ "Stop [E3012]: Stack overflow in `depth`" # full names the function
+stderr: ~ "--> main.jet:" # and its line
+step: jet run --backtrace=brief main.jet
+cwd: open
+exit: 70
+stderr: ~ "Stop [E3012]: Stack overflow in `depth`" # an overflow names its innermost frame under brief too
+step: jet run --profile=quiet main.jet
+cwd: open
+exit: 70
+stdout: = "depth: 3\n"
+stderr: ~ "Stop [E3012]: Stack overflow\n" # off prints no frame
+stderr: !~ "--> main.jet:" # and no line
+step: jet build --backtrace=off main.jet
+cwd: open
+exit: 0
+step: {work}/open/.jet/build/main
+exit: 70
+stderr: ~ "Stop [E3012]: Stack overflow\n" # the built image keeps the option
+step: jet build --debug-info=false main.jet
+cwd: open
+exit: 0
+step: jet build --backtrace=full --debug-info=false main.jet
+cwd: open
+exit: 2
+stderr: ~ "Error [E2104]: `--backtrace=full` needs debug info, which `--debug-info=false` leaves out" # a written full backtrace needs DWARF
+step: jet build --profile=refused main.jet
+cwd: open
+exit: 2
+stderr: ~ "needs debug info, which `debug_info: false` in profile `refused` of package.jet leaves out" # the profile layer too
+step: jet build --backtrace=sometimes main.jet
+cwd: open
+exit: 2
+stderr: ~ "Error [E2104]: `--backtrace=sometimes` isn't a value of `backtrace`" # full, brief or off
+step: jet build main.jet
+cwd: dead
+exit: 0
+rename: dead/.jet/build/main dead/.jet/build/main_remove
+capture: remove_size = size file dead/.jet/build/main_remove
+step: jet build --dead-code=keep main.jet
+cwd: dead
+exit: 0
+capture: keep_size = size file dead/.jet/build/main
+file: dead/.jet/build/main_remove size < {cap:keep_size}
+step: {work}/dead/.jet/build/main
+exit: 0
+stdout: = "used: 42\n"
+step: jet build
+cwd: code
+exit: 0
+step: {work}/code/.jet/build/main
+exit: 70
+stderr: ~ "Stop [E3012]: Stack overflow\n" # b.backtrace(.Off) in fn build
+step: jet build --backtrace=brief
+cwd: code
+exit: 0
+stderr: ~ "note: --backtrace=brief replaces b.backtrace(.Off) at @build.jet:2 for this run" # the flag goes over fn build

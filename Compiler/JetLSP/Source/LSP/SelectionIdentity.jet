@@ -1,5 +1,11 @@
 // Rust: Source/LSP/Features.rs:1152–1813. Checked identity, never text inference.
-use jet_foundation.[Span, DerivationRecord, foundation_json_quote, derivation_record_json, fact_read_kind, KW_SELF]
+use jet_foundation.[
+    Span,
+    DerivationRecord,
+    foundation_json_quote,
+    derivation_record_json,
+    type_name,
+]
 use jet_lexer.[Token, TOKEN_IDENT, TOKEN_DOT, TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_EQ_EQ, TOKEN_NOT_EQ, TOKEN_LT, TOKEN_GT, TOKEN_LE, TOKEN_GE, TOKEN_KW_IF, TOKEN_KW_FN, TOKEN_SELF, TOKEN_PIPE, TOKEN_UNIFIED_ARROW]
 use jet_semindex.[SymbolDB, SemanticSymbol, SymRef, SymDef, SymKind, DefinitionAnchor, SourceSpan, SemanticVisibilityAnchor]
 
@@ -339,7 +345,7 @@ fn lsp_checked_subject_type_name(db: SymbolDB, tokens: [Token], path: String, su
     if subject_index >= tokens.len() -> return None
     span :: tokens[subject_index].span
     checked :: lsp_checked_identity_in_span(db, path, span.start, span.end)
-    if checked == .Ok(.Val(identity)) {
+    if checked == .Val(identity) {
         loop definition in db.defs {
             if definition.identity != identity -> next
             if lsp_type_name_from_kind(definition.kind) == .Val(name) -> return Val(name)

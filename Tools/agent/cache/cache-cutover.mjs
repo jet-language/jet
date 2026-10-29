@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 const repo = JET_TOOL_REPO;
 const cache = path.join(process.env.HOME, '.cache/jet-dev');
 const apply = process.argv.includes('--apply');
-const coupled = new Set(['Compiler/Bootstrap/Tests.rs', 'Compiler/Bootstrap/assemble.mjs', 'Compiler/Bootstrap/check.sh']);
+const coupled = new Set(['Compiler/Bootstrap/Tests.rs']);
 const manual = [];
 const replacements = new Map([
   ['jet-luna', 'jet-dev'], ['jet-test-scratch', 'jet-dev/scratch'],
@@ -29,8 +29,7 @@ const repoPaths = tracked.filter(p => !coupled.has(p)
   && !/^(Docs\/(audits|research)\/|\.agent-worktrees\/|\.claude\/worktrees\/|target(?:[^/]*)\/|build\/|\.jet\/|\.tmp\/)/.test(p)
   && !/(^|\/)\.tower(\/|$)/.test(p)
   && !/^Tools\/agent-eval\/.*\/_defects[^/]*\//.test(p)
-  && !/^Tools\/gauntlet\/performance-surface-evidence-\d/.test(p)
-  && p !== 'Docs/proposals/automatic-build-optimization.md');
+  && !/^Tools\/gauntlet\/performance-surface-evidence-\d/.test(p));
 const cachePaths = [];
 function tooling(dir, recursive) {
   if (!fs.existsSync(dir)) return;

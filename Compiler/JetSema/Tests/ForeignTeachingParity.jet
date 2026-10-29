@@ -1,5 +1,9 @@
 // Production parser/checker teaching spans, including native Field's whole
 // path versus the canonical Rust member span. No diagnostic substitutes.
+use jet_parser.[parse_source]
+use jet_sema.[SemaSourceSegment, check_program]
+use jet_foundation.[DIAGNOSTIC_ERROR]
+
 fn foreign_teaching_expect(source: String, code: String, spelling: String) {
     parsed :: parse_source(source.bytes())
     if parsed.diagnostics.len() != 0 -> panic("foreign teaching fixture must parse")
@@ -16,7 +20,7 @@ fn foreign_teaching_expect(source: String, code: String, spelling: String) {
     if found != 1 -> panic("foreign teaching did not refuse exactly one site")
 }
 
-fn run() {
+#Test("foreign_teaching_parity") {
     foreign_teaching_expect("fn run() {{ getenv(\"HOME\") }}", "E0039", "getenv")
     foreign_teaching_expect("fn run() {{ value :: os.environ }}", "E0039", "environ")
     foreign_teaching_expect("fn run() {{ async(42) }}", "E0040", "async")

@@ -6,16 +6,17 @@ use std.path.[Component, MAIN_SEPARATOR]
 use std.collections.[HashSet] // GATE #4499 composite tuple keys
 use std.fmt.[format]
 use jet_driver.Diagnostics.[ReportEnvelope, Diagnostic, Severity, render_all]
-use jet_driver.[FixEngine, Syntax, Lexer, Parser, Formatter, Driver, SHA256]
 use jet_driver.Package as Package
 use jet_driver.Manifest as Manifest
 use jet_semindex.[DefinitionAnchor, SourceSpan, SymbolDef, SymbolRef, SemIndex]
 use jet_semindex as semindex
-use jet_env_model.[WorkspaceFile, ModuleEval]
 use jet_devserver.Canvas.GraphHelpers.[edit, project_edit_conflict, project_edit_error, project_edit_ok_with_audit, simple_diff]
 use jet_devserver.Canvas.ProjectScan.[project_context_for_entry, project_revision_from_files, ProjectChange, ProjectContext, ProjectFileRec, TouchedProjectFile]
 use jet_devserver.Canvas.SourceModel.[ensure_no_symlink_directory, read_source_without_symlinks, replace_source_if_unchanged_locked, source_revision, with_source_transaction, write_new_file_without_symlinks, SourceWriteError]
 use jet_devserver.Canvas.ValidationJson.[json_array_body, json_bool_field, json_object_bodies, json_str, json_string_array, json_string_field, json_usize_field, required_project_string, validate_ident_for_project]
+use jet_pkg_model.[Manifest]
+use jet_foundation.[Diagnostic]
+use jetpack_foundation.[ReportEnvelope]
 
 // Rust: crates/jet-devserver/src/Canvas/project_transactions.rs:26
 struct ProjectRenamePlan { changes: [ProjectChange] }

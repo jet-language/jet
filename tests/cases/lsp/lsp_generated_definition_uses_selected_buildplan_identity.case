@@ -8,7 +8,7 @@ send lsp0: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{
 recv lsp0
 stdout: ~ "definitionProvider" # original predicate
 send lsp0: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
-send lsp0: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"fn build(b: BuildContext) -> BuildPlan {\\n    b.generate(\\\"right\\\") {\\n        fn generated_value() -> String { \\\"right\\\" }\\n    }\\n    b.generate(\\\"left\\\") {\\n        fn generated_value() -> String { \\\"left\\\" }\\n    }\\n    app :: b.add_executable(\\\"app\\\", [\\\"main.jet\\\", \\\".jet/generated/main/left.jet\\\"], [])\\n    return b.plan(app)\\n}\\nfn run() {\\n    generated_value()\\n}\\n\"}}}"
+send lsp0: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"fn build(b: Build) {\\n    b.generate(\\\"right\\\") {\\n        fn generated_value() -> String { \\\"right\\\" }\\n    }\\n    b.generate(\\\"left\\\") {\\n        fn generated_value() -> String { \\\"left\\\" }\\n    }\\n    app :: b.add_executable(\\\"app\\\", [\\\"main.jet\\\", \\\".jet/generated/main/left.jet\\\"], [])\\n    b.default(app)\\n}\\nfn run() {\\n    generated_value()\\n}\\n\"}}}"
 recv lsp0
 stdout: ~ "publishDiagnostics" # original predicate
 send lsp0: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":11,\"character\":10}}}"
@@ -34,7 +34,7 @@ send lsp1: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{
 recv lsp1
 stdout: ~ "definitionProvider" # original predicate
 send lsp1: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
-send lsp1: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"fn build(b: BuildContext) -> BuildPlan {\\n    b.generate(\\\"left\\\") {\\n        fn generated_value() -> String { \\\"left\\\" }\\n    }\\n    b.generate(\\\"right\\\") {\\n        fn generated_value() -> String { \\\"right\\\" }\\n    }\\n    app :: b.add_executable(\\\"app\\\", [\\\"main.jet\\\", \\\".jet/generated/main/right.jet\\\"], [])\\n    return b.plan(app)\\n}\\nfn run() {\\n    generated_value()\\n}\\n\"}}}"
+send lsp1: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"fn build(b: Build) {\\n    b.generate(\\\"left\\\") {\\n        fn generated_value() -> String { \\\"left\\\" }\\n    }\\n    b.generate(\\\"right\\\") {\\n        fn generated_value() -> String { \\\"right\\\" }\\n    }\\n    app :: b.add_executable(\\\"app\\\", [\\\"main.jet\\\", \\\".jet/generated/main/right.jet\\\"], [])\\n    b.default(app)\\n}\\nfn run() {\\n    generated_value()\\n}\\n\"}}}"
 recv lsp1
 stdout: ~ "publishDiagnostics" # original predicate
 send lsp1: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":11,\"character\":10}}}"

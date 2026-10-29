@@ -2,6 +2,19 @@
 // #[cfg(test)]. `host_reuses_jet_pkg_model_wasmtime_substrate` inspected the
 // Rust Wasmtime host source; the Jet host is Core `plugin`, so it has no
 // counterpart here.
+use jetpack_integrations.[
+    AnalyzeResponse, EXTENSION_ANALYZE_EXPORT, EXTENSION_APPLICATION_PLUGIN_WORLD,
+    EXTENSION_PACKAGE_NAME, EXTENSION_PROTOCOL_VERSION, EXTENSION_STAGE, EXTENSION_WORLD_NAME,
+    ExtensionAbility, ExtensionFinding, ExtensionProposedEdit, ExtensionProtocolError,
+    ExtensionResourceLimits, ExtensionSession, ExtensionSessionPhase, ExtensionTrustPolicy,
+    PluginMechanism, SpanFact, SymbolFact,
+    TypeFact, TypeFactShape, TypedSnapshot, pkg_extension_is_application_plugin_world,
+    pkg_extension_is_compiler_extension_world, pkg_extension_mechanism,
+    pkg_extension_message_exposes_rustc, pkg_extension_negotiate_abilities,
+    pkg_extension_parse_analyze_result, pkg_extension_parse_load_result, pkg_extension_wit_world,
+]
+use jet_foundation.[HostImportFact]
+use jet_pkg_model.[PKG_JSON_MAX_DEPTH, PKG_JSON_MAX_PROTOCOL_BYTES]
 
 fn pkg_test_extension_snapshot() -> TypedSnapshot {
     types :: [TypeFact]{TypeFact{id: "t1", repr: "Int", shape: TypeFactShape.Scalar}}
@@ -39,7 +52,7 @@ fn pkg_test_extension_too_deep() -> String {
         {id: "t-list", repr: "[Int]", shape: TypeFactShape.List{element_type_id: "t-int"}},
         {id: "t-int", repr: "Int", shape: TypeFactShape.Scalar}
     }
-    imports :: [MIRHostImportFact]{MIRHostImportFact{id: "host-read", operation: "read_file", required_right: "FS.Read", parameter_type_ids: [String]{"t-list"}, result_type_id: Val("t-int")}}
+    imports :: [HostImportFact]{HostImportFact{id: "host-read", operation: "read_file", required_right: "FS.Read", parameter_type_ids: [String]{"t-list"}, result_type_id: Val("t-int")}}
     snapshot :: TypedSnapshot.new_with_imports(ExtensionAbility.v1_defaults(), types, [SymbolFact]{}, [SpanFact]{}, imports) ?? panic("valid structured snapshot")
     decoded :: TypedSnapshot.decode_bytes(snapshot.encode_bytes() ?? panic("encode")) ?? panic("decode")
     assert_eq(decoded.types, snapshot.types)

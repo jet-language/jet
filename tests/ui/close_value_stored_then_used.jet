@@ -1,0 +1,54 @@
+// A value that holds a Close type cannot be copied, so storing it in a
+// struct, a variant or a List moves it: a later use is E0121, and storing a
+// read parameter is a move out of borrowed storage (E0201).
+struct Res { id: Int }
+
+impl Res.Close {
+    fn close(^self) { print("close {self.id}") }
+}
+
+struct Holder { item: Res }
+
+struct Group { items: [Res] }
+
+enum Slot {
+    Full(Res)
+    Empty
+}
+
+fn in_struct() {
+    a :: Res{id: 1}
+    h :: Holder{item: a}
+    print(a.id)
+    print(h.item.id)
+}
+
+fn list_in_struct() {
+    a :: [Res]{Res{id: 1}, Res{id: 2}}
+    g :: Group{items: a}
+    print(a.len())
+    print(g.items.len())
+}
+
+fn in_variant() {
+    a :: Res{id: 1}
+    s :: Slot.Full(a)
+    print(a.id)
+    if s == .Full(inner) -> print(inner.id)
+}
+
+fn in_list() {
+    a :: Res{id: 1}
+    out := [Res]{}
+    &out.push(a)
+    print(a.id)
+    print(out.len())
+}
+
+fn from_parameter(r: Res) -> Holder {
+    Holder{item: r}
+}
+
+fn run() {
+
+}

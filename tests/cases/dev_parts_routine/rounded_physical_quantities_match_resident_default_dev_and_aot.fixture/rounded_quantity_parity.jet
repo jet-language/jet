@@ -1,0 +1,23 @@
+
+#UnitFamily(Length, base: meter) {
+    meter
+    half(scale: 1/2)
+    near_quarter(scale: 249/1000)
+    near_three_quarters(scale: 751/1000)
+}
+#UnitFamily(Temperature, base: kelvin) {
+    kelvin
+    shifted(scale: 1, offset: 249/1000)
+}
+fn run() {
+    positive :: Half.from_float(Float{5.0})
+    negative :: Half.from_float(-Float{5.0})
+    toward_zero :: Meter.from_half_rounded(positive, .TowardZero, digits: 0)
+    floor :: Meter.from_half_rounded(negative, .Floor, digits: 0)
+    ceiling :: Meter.from_half_rounded(positive, .Ceiling, digits: 0)
+    nearest_even :: Meter.from_near_quarter_rounded(1near_quarter, .NearestEven, digits: 2)
+    nearest_odd :: Meter.from_near_three_quarters_rounded(1near_three_quarters, .NearestEven, digits: 2)
+    point :: KelvinPoint.from_shifted_point_rounded(ShiftedPoint.from_float(Float{0.0}), .Ceiling, digits: 2)
+    delta :: KelvinDelta.from_shifted_delta_rounded(ShiftedDelta.from_float(Float{0.0}), .Ceiling, digits: 2)
+    print("{(toward_zero.raw())} {(floor.raw())} {(ceiling.raw())} {(nearest_even.raw())} {(nearest_odd.raw())} {(point.raw())} {(delta.raw())}")
+}

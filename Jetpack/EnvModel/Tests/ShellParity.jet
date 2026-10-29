@@ -2,6 +2,7 @@
 // The existing envmodel_test_repo_root helper obtains the test driver's
 // repository root (ModuleEvalSupport.jet:9-12). Pass that root explicitly:
 // neither the source read nor either evaluator relies on an ambient cwd.
+use jet_env_model.[envmodel_evaluate_env_with_environment]
 
 fn envmodel_test_shell_parity(root: String) {
     source :: files.read(files.join(root, "env.jet")) ?? panic("root env.jet")
@@ -9,8 +10,8 @@ fn envmodel_test_shell_parity(root: String) {
 
     dev :: envmodel_evaluate_env_with_environment(source, root, Val("dev")) ?? panic("default environment evaluates")
     expected_default :: [String]{
-        "cargo@default", "sccache@default", "clippy@default", "rustc@default",
-        "rustfmt@default", "gcc@default", "clang@default", "lld@default",
+        "cargo@default", "rustc@default",
+        "gcc@default", "clang@default", "lld@default",
         "nodejs_22@default", "python3@default", "nixfmt@default", "ripgrep@default",
         "jq@default", "gh@default", "fd@default", "bashInteractive@default",
         "zsh@default", "fish@default", "util-linux@default", "wasm-tools@default",
@@ -28,7 +29,7 @@ fn envmodel_test_shell_parity(root: String) {
     loop reference in expected_default -> assert(unique.contains(reference))
 
     full :: envmodel_evaluate_env_with_environment(source, root, Val("full")) ?? panic("full environment evaluates")
-    assert_eq(full.package_refs.len(), 51)
+    assert_eq(full.package_refs.len(), 48)
     required_full :: [String]{
         "rustup@default", "gnat@default", "fpc@default", "dart@default",
         "powershell@default", "gfortran@default", "gnucobol@default", "go@default",

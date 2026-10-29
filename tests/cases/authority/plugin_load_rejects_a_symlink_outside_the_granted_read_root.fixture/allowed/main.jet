@@ -1,0 +1,14 @@
+
+use core.plugin as plugin
+
+fn run() {
+    policy :: Authority.from_rights(["FS.Read:allowed"])
+    hostile :: plugin.load("allowed/link.wat", policy)
+    _result :: hostile.zero() ?? {
+        print("rejected")
+        print(err)
+        return
+    }
+    print("guest-executed")
+    print(_result)
+}

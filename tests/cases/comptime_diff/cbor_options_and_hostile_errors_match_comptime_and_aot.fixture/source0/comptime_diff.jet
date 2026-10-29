@@ -1,0 +1,94 @@
+use core.encoding.hex as comptime_diff_hex
+use core.encoding.cbor as cbor
+
+fn safe() -> cbor.CBOROptions {
+    return cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: false }
+}
+
+fn show(bytes: [U8]) -> String {
+    if cbor.parse(bytes, safe()) == {
+        .Ok(_) -> return "ok"
+        .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+    }
+    return "unreachable"
+}
+
+fn show_strict(bytes: [U8]) -> String {
+    if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true }) == {
+        .Ok(_) -> return "ok"
+        .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+    }
+    return "unreachable"
+}
+fn show_depth(bytes: [U8]) -> String {
+    if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 1, max_items: 1000000, max_bytes: 1073741824, require_canonical: false }) == {
+        .Ok(_) -> return "ok"
+        .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+    }
+    return "unreachable"
+}
+fn show_items(bytes: [U8]) -> String {
+    if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 256, max_items: 2, max_bytes: 1073741824, require_canonical: false }) == {
+        .Ok(_) -> return "ok"
+        .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+    }
+    return "unreachable"
+}
+fn show_bytes(bytes: [U8]) -> String {
+    if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 2, require_canonical: false }) == {
+        .Ok(_) -> return "ok"
+        .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+    }
+    return "unreachable"
+}
+fn show_alloc(bytes: [U8]) -> String {
+    if cbor.parse(bytes, cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 3, require_canonical: false }) == {
+        .Ok(_) -> return "ok"
+        .Err(e) -> return "{e.byte_offset}|{e.path}|{e.reason}"
+    }
+    return "unreachable"
+}
+
+fn show_ints(bytes: [U8]) -> String {
+    if cbor.decode<[Int]>(bytes, safe()) == {
+        .Ok(_) -> return "ok"
+        .Err(e) -> return "{e[0].path}|{e[0].reason}"
+    }
+    return "unreachable"
+}
+
+EXPECTED_MALFORMED :: comptime { show([255]) }
+EXPECTED_TRUNCATED :: comptime { show([129]) }
+EXPECTED_NONCANONICAL :: comptime { show_strict([24, 1]) }
+EXPECTED_UNSUPPORTED :: comptime { show([192, 1]) }
+EXPECTED_MISMATCH :: comptime { show_ints([129, 97, 120]) }
+EXPECTED_DEPTH :: comptime { show_depth([129, 129, 1]) }
+EXPECTED_ITEMS :: comptime { show_items([130, 1, 2]) }
+EXPECTED_BYTES :: comptime { show_bytes([130, 1, 2]) }
+EXPECTED_ALLOC :: comptime { show_alloc([130, 1, 2]) }
+
+fn run() {
+    malformed_wire := [U8]{ 255 }
+    truncated_wire := [U8]{ 129 }
+    noncanonical_wire := [U8]{ 24, 1 }
+    unsupported_wire := [U8]{ 192, 1 }
+    mismatch_wire := [U8]{ 129, 97, 120 }
+    depth_wire := [U8]{ 129, 129, 1 }
+    items_wire := [U8]{ 130, 1, 2 }
+    actual_malformed := show(malformed_wire)
+    actual_truncated := show(truncated_wire)
+    actual_noncanonical := show_strict(noncanonical_wire)
+    actual_unsupported := show(unsupported_wire)
+    actual_mismatch := show_ints(mismatch_wire)
+    actual_depth := show_depth(depth_wire)
+    actual_items := show_items(items_wire)
+    actual_bytes := show_bytes(items_wire)
+    actual_alloc := show_alloc(items_wire)
+    comptime_diff_frame("{EXPECTED_MALFORMED}{EXPECTED_TRUNCATED}.copy(){EXPECTED_NONCANONICAL}.copy(){EXPECTED_UNSUPPORTED}.copy(){EXPECTED_MISMATCH}.copy(){EXPECTED_DEPTH}.copy(){EXPECTED_ITEMS}.copy(){EXPECTED_BYTES}.copy(){EXPECTED_ALLOC}.copy()", "{actual_malformed}{actual_truncated}.copy(){actual_noncanonical}.copy(){actual_unsupported}.copy(){actual_mismatch}.copy(){actual_depth}.copy(){actual_items}.copy(){actual_bytes}.copy(){actual_alloc}.copy()")
+
+}
+
+fn comptime_diff_frame(expected_text: String, actual_text: String) {
+    print("{comptime_diff_hex.encode(expected_text.bytes())}")
+    print("{comptime_diff_hex.encode(actual_text.bytes())}")
+}

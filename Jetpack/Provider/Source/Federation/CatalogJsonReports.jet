@@ -304,7 +304,7 @@ impl ProviderFactReport {
         }
         if object.get("constraints") == {
             .Val(constraints) -> {
-                if pkg_json_object(constraints) != None {
+                if pkg_json_object(constraints) == .Val(_) {
                     &facts.add_typed_json("provider.registry.constraints", constraints)
                 } else {
                     &losses.push("registry `constraints` must be an object")
@@ -358,7 +358,7 @@ impl ProviderFactReport {
             same_identity :: provider_graph_json_string(other, "name") == provider_graph_json_string(object, "name") && provider_graph_json_string(other, "version") == provider_graph_json_string(object, "version")
             if {
                 !same_identity -> &report.losses.push("registry metadata contains multiple package identities; line {line_number} needs its own lock record")
-                other != object -> &report.conflicts.push("registry identity on line {line_number} has conflicting native facts")
+                !pkg_json_objects_equal(other, object) -> &report.conflicts.push("registry identity on line {line_number} has conflicting native facts")
                 else -> {}
             }
         }
@@ -378,7 +378,7 @@ impl ProviderFactReport {
         release_tag :: provider_graph_json_string(object, "tag_name")
         version :: provider_graph_json_string(object, "version")
         if release_tag != None && version != None && release_tag != version {
-            &conflicts.push("GitHub release declares conflicting tag/version facts: {release_tag ?? ""} vs {version ?? ""}")
+            &conflicts.push("GitHub release declares conflicting tag/version facts: {release_tag} vs {version}")
         }
         facts.version = provider_graph_either(release_tag, version) ?? ""
         if object.get("target_commitish") == {
@@ -601,8 +601,8 @@ fn provider_graph_is_non_negative_int(value: Dyn) -> Bool Never! {
 fn provider_graph_shape_is(value: Dyn?, text: Bool, array: Bool, object: Bool) -> Bool Never! {
     present :: value ?? return true
     if text && provider_graph_is_text(present) -> return true
-    if array && pkg_json_array(present) != None -> return true
-    object && pkg_json_object(present) != None
+    if array && pkg_json_array(present) == .Val(_) -> return true
+    object && pkg_json_object(present) == .Val(_)
 }
 
 // Rust `provider_dependency_field`: the dependency names of an array field,

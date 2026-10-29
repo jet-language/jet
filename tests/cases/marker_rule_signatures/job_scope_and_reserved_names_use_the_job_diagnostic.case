@@ -1,0 +1,43 @@
+# tests/marker_rule_signatures.rs::job_scope_and_reserved_names_use_the_job_diagnostic at tests/marker_rule_signatures.rs:106; hand-port
+# Claim: valid #Job names (ship, inspect_job, output, serve) produce no diagnostics (tests/marker_rule_signatures.rs:112)
+# Claim: each reserved top-level command name as #Job fn gives E0928 (tests/marker_rule_signatures.rs:117)
+fixture: job_scope_and_reserved_names_use_the_job_diagnostic.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check valid/main.jet
+exit: 0 # tests/marker_rule_signatures.rs:112 valid job names must be empty
+stderr: !~ "Error [" # tests/marker_rule_signatures.rs:112 valid job names must be empty
+step: jet check r_run/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:118 reserved name run gives E0928
+stderr: ~ "E0928" # tests/marker_rule_signatures.rs:118 reserved name run gives E0928
+step: jet check r_dev/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:118 reserved name dev gives E0928
+stderr: ~ "E0928" # tests/marker_rule_signatures.rs:118 reserved name dev gives E0928
+step: jet check r_build/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:118 reserved name build gives E0928
+stderr: ~ "E0928" # tests/marker_rule_signatures.rs:118 reserved name build gives E0928
+step: jet check r_test/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:118 reserved name test gives E0928
+stderr: ~ "E0928" # tests/marker_rule_signatures.rs:118 reserved name test gives E0928
+step: jet check r_help/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:118 reserved name help gives E0928
+stderr: ~ "E0928" # tests/marker_rule_signatures.rs:118 reserved name help gives E0928
+step: jet check r_version/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:118 reserved name version gives E0928
+stderr: ~ "E0928" # tests/marker_rule_signatures.rs:118 reserved name version gives E0928
+step: jet check r_lint/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:118 reserved name lint gives E0928
+stderr: ~ "E0928" # tests/marker_rule_signatures.rs:118 reserved name lint gives E0928
+step: jet check r_fmt/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:118 reserved name fmt gives E0928
+stderr: ~ "E0928" # tests/marker_rule_signatures.rs:118 reserved name fmt gives E0928
+step: jet check r_check/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:118 reserved name check gives E0928
+stderr: ~ "E0928" # tests/marker_rule_signatures.rs:118 reserved name check gives E0928
+step: jet check r_clean/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:118 reserved name clean gives E0928
+stderr: ~ "E0928" # tests/marker_rule_signatures.rs:118 reserved name clean gives E0928
+step: jet check r_inspect/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:118 reserved name inspect gives E0928
+stderr: ~ "E0928" # tests/marker_rule_signatures.rs:118 reserved name inspect gives E0928

@@ -127,11 +127,10 @@ fn store_repro_snapshot_for_entry(roots: HangarRoots, entry: StoreEntry) -[FS, E
 fn store_repro_snapshot_output(path: String, hangar_root: String?, allow_semantic_xattrs: Bool) -[FS, Env]> OutputSnapshot StoreError! {
     canonical :: files.canonicalize(path)
     hook := EnvelopeWalkHook.recording()
-    hashed :: if hangar_root == {
-        .Val(root) -> pkg_try_output_hash_of_in_hangar_with_policy(path, root, allow_semantic_xattrs, &hook)
-        else -> pkg_try_output_hash_of_with_policy(path, allow_semantic_xattrs, &hook)
+    digest :: if hangar_root == {
+        .Val(root) -> pkg_try_output_hash_of_in_hangar_with_policy(path, root, allow_semantic_xattrs, &hook) ?? return Err(StoreError.Other(err.message()))
+        else -> pkg_try_output_hash_of_with_policy(path, allow_semantic_xattrs, &hook) ?? return Err(StoreError.Other(err.message()))
     }
-    digest :: hashed ?? return Err(StoreError.Other(err.message()))
     nodes := [String: NodeObservation]{}
     hardlink_first := [String: String]{}
     loop event in hook.events {
@@ -141,11 +140,10 @@ fn store_repro_snapshot_output(path: String, hangar_root: String?, allow_semanti
         if nodes.has_key(relative) -> return Err(store_repro_invalid("reproducibility observed one output node twice"))
         nodes[relative] = observation
     }
-    confirmed :: if hangar_root == {
-        .Val(root) -> pkg_try_output_hash_of_in_hangar(path, root, allow_semantic_xattrs)
-        else -> pkg_try_output_hash_of(path)
+    confirmed_digest :: if hangar_root == {
+        .Val(root) -> pkg_try_output_hash_of_in_hangar(path, root, allow_semantic_xattrs) ?? return Err(StoreError.Other(err.message()))
+        else -> pkg_try_output_hash_of(path) ?? return Err(StoreError.Other(err.message()))
     }
-    confirmed_digest :: confirmed ?? return Err(StoreError.Other(err.message()))
     if confirmed_digest != digest -> return Err(store_repro_invalid("output changed while collecting reproducibility evidence"))
     Ok(OutputSnapshot{digest, nodes})
 }
@@ -183,7 +181,9 @@ fn store_repro_read_file_digest(path: String) -[FS]> String StoreError! {
     file :: files.open(path, links: .Refuse)
     before :: store_repro_metadata_fingerprint(file.stat())
     bytes := [U8]{}
-    loop chunk in file.chunks(65536) {
+    loop {
+        chunk :: file.read(65536)
+        if chunk.len() == 0 -> break
         loop byte in chunk -> &bytes.push(byte)
     }
     after :: store_repro_metadata_fingerprint(file.stat())
@@ -198,7 +198,7 @@ fn store_repro_metadata_fingerprint(info: files.Stat) -> String Never! {
 }
 
 fn store_repro_first_node_difference(left: OutputSnapshot, right: OutputSnapshot) -> FirstDifference? Never! {
-    paths := left.nodes.keys()
+    paths := left.nodes.keys().to_list()
     loop path in right.nodes.keys() {
         if !left.nodes.has_key(path) -> &paths.push(path)
     }
@@ -207,7 +207,9 @@ fn store_repro_first_node_difference(left: OutputSnapshot, right: OutputSnapshot
         if left.nodes.get(path) == {
             .Val(left_node) -> {
                 if right.nodes.get(path) == {
-                    .Val(right_node) -> if left_node != right_node -> return Val(store_repro_node_difference(path, left_node, right_node))
+                    .Val(right_node) -> {
+                        if left_node != right_node -> return Val(store_repro_node_difference(path, left_node, right_node))
+                    }
                     else -> return Val(FirstDifference{path: store_repro_path_display(path), kind: .MissingRight, left: left_node.value(), right: "<missing>"})
                 }
             }
@@ -244,7 +246,7 @@ fn store_repro_metadata_difference(left: StoreEntry, right: StoreEntry) -> First
     loop check in checks {
         if check.left != check.right -> return Val(FirstDifference{path: ".", kind: check.kind, left: check.left, right: check.right})
     }
-    names := left.named_outputs.keys()
+    names := left.named_outputs.keys().to_list()
     loop name in right.named_outputs.keys() {
         if !left.named_outputs.has_key(name) -> &names.push(name)
     }
@@ -317,5 +319,5 @@ fn store_repro_text_object(map: [String: String]) -> Dyn Never! {
 
 fn store_repro_path_display(path: String) -> String Never! {
     if path == "" -> return "."
-    path
+    path.copy()
 }

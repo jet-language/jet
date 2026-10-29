@@ -1,7 +1,7 @@
 
-fn build(b: BuildContext) -> BuildPlan {
+fn build(b: Build) {
     action :: b.action("never-run", [], ["out"], ["sh", "-c", "exit 99"], [])
     app :: b.add_executable("app", ["main.jet"], [action])
-    return b.plan(app)
+    b.default(app)
 }
 fn run() {}

@@ -34,7 +34,7 @@ fn cli_doctor_test_walk(root: String, path: String, out: &[DoctorTreeNode]) -[FS
             children := [String]{}
             loop entry in entries -> &children.push(entry.path)
             &children.sort()
-            loop child in children -> cli_doctor_test_walk(root, child, out)
+            loop child in children -> cli_doctor_test_walk(root, child, &out)
         }
         else -> &out.push(DoctorTreeNode{relative: relative, kind: "file", bytes: files.read_bytes(path) ?? panic("read scratch file")})
     }

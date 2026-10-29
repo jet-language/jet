@@ -1,0 +1,8 @@
+# tests/cross.rs::e3301_tasks_in_freestanding at tests/cross.rs:62; hand-port
+# The original ran jet::compile_no_os in-process; `jet build --target=wasm.no-os test.jet` selects the no-OS target machine on the CLI.
+fixture: e3301_tasks_in_freestanding.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build --target=wasm.no-os test.jet
+exit: nonzero
+stderr: ~ "E3301" # original: E3301 is reported

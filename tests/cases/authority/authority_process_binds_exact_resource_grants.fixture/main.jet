@@ -1,0 +1,15 @@
+
+use core.process as process
+
+fn run() {
+    policy :: Authority.from_rights([
+        "FS.Read:repo",
+        "FS.Write:.jet/build",
+        "Exec:/usr/bin/true",
+    ])
+    spec :: process.cmd(["/usr/bin/true", "test"]).cwd("/tmp").under(policy)
+    if spec.plan() == {
+        .Ok(_) -> print("planned")
+        .Err(_) -> print("refused")
+    }
+}

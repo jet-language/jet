@@ -2,9 +2,11 @@
 // graph reads the declarative subset of `flake.nix`, the native `flake.lock`
 // graph (FlakeLock.jet), and its own semantic lock records; file reads stay
 // with the caller.
+use jet_pkg_model.[pkg_overlay_sorted_unique, pkg_sha256_hex]
+use core.files as files
 
 // Declared facts that are not graph data; `checks` is an ordinary output.
-TRUST_FLAKE_UNSUPPORTED_FIELDS :: prep { [String]{"shellHook", "inputsFrom", "processes", "services", "nixosConfigurations", "homeConfigurations", "darwinConfigurations"} }
+TRUST_FLAKE_UNSUPPORTED_FIELDS :: [String]{"shellHook", "inputsFrom", "processes", "services", "nixosConfigurations", "homeConfigurations", "darwinConfigurations"}
 
 struct FlakeGraph {
     source: String
@@ -438,15 +440,14 @@ struct FlakeGraph {
             .None -> {}
         }
         lock_path :: files.with_name(path, "flake.lock")
-        lock_read :: files.read(lock_path)
-        lock_missing :: if lock_read == {
-            .Ok(_) -> false
+        lock_text := String?{None}
+        if files.read(lock_path) == {
+            .Ok(content) -> lock_text = Val(content)
             .Err(error) -> if error == {
-                .NotFound(_) -> true
-                else -> false
+                .NotFound(_) -> {}
+                else -> return Err(TrustError.IO("couldn't read `{lock_path}`: {error}"))
             }
         }
-        lock_text :: if lock_missing -> None else -> Val(lock_read ?? return Err(TrustError.IO("couldn't read `{lock_path}`: {err}")))
         graph := FlakeGraph.parse_with_lock(path, text, lock_text, true)
         &graph.attach_composition_sources(path)
         graph.validate()

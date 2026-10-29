@@ -1,0 +1,12 @@
+# tests/compiler_stack.rs::public_compile_accepts_depth_256_and_reports_depth_257 at tests/compiler_stack.rs:294; hand-port
+# 254 parentheses sit at the nesting limit and compile; 255 exceed it with E1403.
+fixture: public_compile_accepts_depth_256_and_reports_depth_257.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check at_limit/main.jet
+exit: 0
+step: jet check past_limit/main.jet
+exit: 1
+stderr: ~ "[E1403]" # original registered diagnostic
+stderr: ~ "257 levels deep" # original what contains
+stderr: ~ "limit is 256" # original what contains

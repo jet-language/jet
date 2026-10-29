@@ -4,28 +4,23 @@ This specification is for Core maintainers, provider authors, and reviewers. It
 defines where Core owns semantics, where a host may provide a typed leaf, how
 capabilities and effects are exposed, and what evidence makes an export
 complete. The declaration registry is
-[`Core.jet`](../../crates/jet-codegen/src/Prelude/Core.jet); Jet source bodies
+[`Core.jet`](../../Compiler/Prelude/Core.jet); Jet source bodies
 are under [`Core/`](../../Core/). Generated call and module views are derived
 from those inputs by the [Core table generator](../../Tools/agent/gen-core-tables.mjs).
 The [surface ledger](../../tests/core_surface_ledger.rs) checks selected
 identity rows; runnable provider examples live under
 [`Examples/features/`](../../Examples/features/).
 
-The Rust-hosted compiler under `Source/` and `crates/` remains the production
-and reference compiler. The default CLI continues to use that reference path.
-The staged Jet-authored compiler under `Compiler/` may implement the same
-contracts in bootstrap scopes, but this document does not claim that Jet is
-self-hosted. Rust emission and rustc/LLVM are transitional bootstrap seams that
-leave with the rest of Rust once the Jet back end covers every program (D-EXEC2,
-D-BACKEND-OWN1, owner directive 19). No Core contract is defined as
-permanently owned by a particular compiler implementation.
+The compiler under `Compiler/` is written in Jet and is the compiler the CLI
+runs. No Core contract is defined as permanently owned by a particular compiler
+implementation.
 
 Loaded declaration graphs close over source-owned Core nominal field and
 payload types, including optional/container members, aliases, and distinct
 bases. An implicit bare name such as `Stat.modified: DateTime` selects the
 registered Core owner (`core.time`), unless a local declaration or generic
 binder owns that name. The owner source and its own declaration dependencies
-join the ordinary checked module queue before MIR nominal facts are frozen;
+join the ordinary checked module queue before nominal facts are frozen;
 emission must not substitute a native carrier, invent an alias declaration, or
 resolve an unrelated module merely because its type shares the leaf name.
 
@@ -55,7 +50,7 @@ that proof requires the freshly composed Jet-only runtime object.
 
 Native task-stop publication requires both a current task control and the
 compiler's scoped publication capability: only a checked operation immediately
-followed by MIR `Poll(Propagate)` may arm it. Plain calls and root bodies remain
+followed by the IR's stop poll (`IR_STOP_POLL_KEY`) may arm it. Plain calls and root bodies remain
 process-fatal. Runtime-internal traps (overflow, division by zero, and list
 bounds) in task bodies are not publishable unless compiler-armed.
 The native raw-pointer Deref sentry read uses that same immediate-Propagate
@@ -72,22 +67,8 @@ Program-side require, panic, and index-miss producers run registered cleanup
 before the call only when they cannot emit a real Propagate (plain mode,
 cleanup-masked code, transactions, or a closed block). Otherwise the Poll stop
 edge owns that cleanup exactly once, and an unconditional stop's impossible
-resume seals `Stopped`. This minimal runtime-port seam is mirrored in
-`crates/jet-codegen/src/Codegen/TIR/{mir,tir_to_mir_expr}.rs`; that seed and
-verification mirror dies at the Rust cutover.
-The Rust seed's plain `TOrFallback::Panic` path in `tir_to_mir_expr.rs`
-emits RequireStop then Unreachable without pre-call cleanup, unlike the Jet
-`jet_codegen_lower_fallback_panic` path in `Statements.jet`. This seam preserves
-that pre-existing plain-mode divergence rather than changing seed semantics.
-
-The factory selects `jet_driver_compile_mir` for both native programs and
-runtime-library objects. `JetDriverCompileRequest.native_stop_points` selects
-returning-stop MIR before the shared `lower_functions` lowers functions and
-closures; runtime-library objects leave it false. It does not enable comptime
-budgets. This matches the Rust task
-boundary's panic-to-TaskFailure catch rather than letting an ordinary native
-task panic abort its whole process. Plain/no-task MIR production uses the
-same false-mode implementation; its output is expected to remain byte-identical.
+resume seals `Stopped`. The plain fallback-panic path runs that pre-call
+cleanup too.
 
 Native cleanup frames bracket their actions with `jet_rt_cleanup_enter/leave`:
 one runtime cleanup scope (`jet_rt_session_cleanup_enter/leave`, whose owned
@@ -96,8 +77,7 @@ owned Stop stays in the control slot, while Check/Propagate delivery of it is
 masked even inside deferred thunks and resource closes. Cancellation and
 deadlines do not interrupt those
 closes. A new panic during cleanup with a pending Stop is process-fatal (70),
-matching the Rust seed's panic-during-unwinding abort semantics
-(`crates/jet-codegen/src/Prelude/Scheduler.rs:234–244`). No additional TLS state
+the same abort a panic during unwinding gets. No additional TLS state
 or specialized plain cleanup call graph is introduced.
 The Source acceptance runner
 `Compiler/JetBackend/Tests/run-trap-source-fixtures.mjs` reuses the registered
@@ -124,20 +104,6 @@ A mismatch replaces the original with `E3001` and sets unmet so no
 parent can catch the mismatch. Cancellation, deadlines, skips, unrecognized
 codes, and probes for another scope do not mutate the pending stop. Sentry
 records its raw fault detail before dropping it, never its rendered report.
-The native checked-MIR transport calls the CLI's authorized compiler request
-and serializes the resulting MIR through the canonical Jet MIR writer. The
-transport records the real driver outcome and requires a fresh output stream.
-`Tests/Fixtures/ExpectFail.jet` supplies compiled native match, mismatch,
-unmet, nested, checked/unarmed R080 and deeper/own-close witnesses through the
-real Task transport. `run-expect-producer.mjs` appends a focused proof to the
-compiler aggregate: it reuses the CLI's authorized request, selects Test mode,
-checks real MIR branch/boundary/exit-poll edges, then emits and runs that checked
-test's object. `check-expect-mir-identity.mjs` compares a fixed non-test corpus
-through before/after checked-MIR drivers built from their respective pinned
-compiler sources. Both drivers use the same native transport and stop-point
-mode; compiling the same current frontend twice does not establish a historical
-frontend comparison. These execution and byte-identity checks belong to the
-composed compiler-unit proof, not the light source-parser lane.
 
 ## Purpose and scope
 
@@ -212,32 +178,13 @@ secret with the same leaf spelling. The SMTP provider adapter supplies the
 runtime's TLS, wiping, signing, cancellation, and deadline callbacks. Optional
 native fields cross the checked `JetOutcome` boundary on both value and place
 reads, including borrowed payload projections.
-The generated Rust tables are projections, not a second API catalog. Never
-hand-edit them. The main generated views are
-[`CoreModuleExports.rs`](../../crates/jet-foundation/src/CoreModuleExports.rs),
-[`core_calls.rs`](../../crates/jet-foundation/src/Syntax/core_calls.rs), and the
-corresponding generated projections in the Prelude. Rust implementation files
-such as [`Core.rs`](../../crates/jet-codegen/src/Prelude/Core.rs),
-[`PortableCore.rs`](../../crates/jet-codegen/src/Prelude/PortableCore.rs), and
-[`CoreLib/`](../../crates/jet-codegen/src/Prelude/CoreLib/) provide registered
-leaves and adapters; they do not become an independent public API registry.
-
-### Borrowed UI-host callback scopes
-
-The seed `HostServices.rs` adapter exposes borrowed hosts only through the
-lexical `jet_ui_with_host` callback. Its lifetime-bound restoration guard and
-unsafe installer are private: safe callers cannot retain, forget, or reorder a
-guard while leaving a borrowed host in thread-local storage. The stored thin
-pointer addresses the wrapper's live stack-held host reference; no trait-object
-lifetime is transmuted. Unwinding restores the predecessor before that reference
-or the host borrow ends.
-
-Current-host access holds its mutable thread-local borrow throughout the host
-callback. Re-entry is refused with a diagnostic panic before a second mutable
-host reference can be created; nested host installation during that callback
-is likewise refused. Ordinary nested lexical host scopes remain valid.
-`crates/jet-codegen/tests/ui_host_scope.rs` covers the rejected dangling guard
-and recursive-callback rejection with subsequent access and unwind recovery.
+The generated registry tables are projections, not a second API catalog. Never
+hand-edit them. The main generated view is
+[`CoreCallRows.jet`](../../Compiler/JetFoundation/Source/Registry/CoreCallRows.jet),
+with the corresponding generated projections in the Prelude. Native runtime
+files under [`Compiler/JetRuntime`](../../Compiler/JetRuntime/) provide
+registered leaves and adapters; they do not become an independent public API
+registry.
 
 ## Jet semantics and native leaves
 
@@ -443,7 +390,7 @@ at its consumer; other borrow-only callbacks, iteration cursors, and reference
 bindings live in their defining lexical scope. Owned handles and shared-capture
 cells retain their existing release rules. Disjoint fields behind an exclusive
 guard project from one reborrow of its referent, not repeated guard dereferences.
-Map-store callbacks capture their owned payload, not the reusable MIR slot.
+Map-store callbacks capture their owned payload, not the reusable IR slot.
 An owned callback return does not introduce a caller-supplied capture lifetime
 when no callback-bearing input supplies one. Stored callback handles retain
 their owning lifetime; forwarding a borrowed input retains its capture lifetime.
@@ -565,7 +512,7 @@ returns an unheld guard with no lingering registration.
 
 Like Rust's `Arc<T>` releasing its final strong owner, the callback runs in the
 releasing caller's context. The provider adds neither a cleanup mask nor a
-session shield; releases inside a MIR cleanup frame inherit that frame's
+session shield; releases inside a cleanup frame inherit that frame's
 bracket. A callback that returns with pending stop still permits the provider
 to free the payload allocation and descriptor and release the strong owners'
 implicit weak reservation before the caller propagates it. Reclamation on a
@@ -666,6 +613,13 @@ reservation even after switching back to system mode. Policy facts retain
 historical allocation/request/high-water counters on cancelled heap requests,
 while live bytes and tracker nodes return to zero.
 
+`jet_rt_alloc_8(size: I64) -> I64` and `jet_rt_free_8(pointer: I64, size: I64)`
+are `jet_rt_alloc(size, 8)` and `jet_rt_free(pointer, size, 8)`: the doors a
+code generator calls when the alignment is the constant 8 (boxes, records and
+word buffers). The runtime owns them and their layout: a thread-cache hit is
+served in place, and every other request, including checked mode, takes the
+ordinary door. A block of either door may be freed by the other.
+
 The explicit native host policy edges are `jet_rt_program_allocator_configure`,
 `jet_rt_program_allocator_restore`, and `jet_rt_program_allocator_fact`
 (allocations, requested, live, high-water, cap, mode at indices 0..5). Hosts
@@ -729,7 +683,7 @@ runtime. Until formatter issue #4770 is fixed, diff-scoped formatting receipts
 preserve those declarations rather than accepting empty import bodies or
 rewriting the registry as an immutable binding.
 
-At native C byte boundaries, `List<U8>` retains its word-stride layout.
+At native C byte boundaries, `[U8]` retains its word-stride layout.
 `jet_rt_bytes_pack` borrows that header and returns an independently owned
 packed byte buffer; `jet_rt_bytes_free` releases it with its original length
 and alignment one. Empty packed bytes use the non-null dangling pointer `1`
@@ -737,7 +691,10 @@ and require no deallocation. `jet_rt_bytes_unpack` copies C bytes into a fresh
 owned native list header and packed byte buffer allocated at alignment eight;
 the empty header has all three words zero. Native list destruction releases
 `capacity` bytes at that same alignment. Neither conversion transfers or frees
-its borrowed input.
+its borrowed input. Compiled `core.mem.__bytes_unpack` calls reach the same
+copy through `jet_rt_bytes_unpack_route`, which takes the route's exact Int
+carriers and returns the List by the route convention: the length, with the
+fresh packed buffer written through the out word.
 `Collections.jet` owns the single runtime-wide `RT_HOST_U8_STRIDE` fact and
 `host_u8_get`/`host_u8_put` accessors. Later host layers reuse them; changing
 the compiler's U8 storage epoch flips this one fact with its byte-list fixtures.
@@ -881,40 +838,21 @@ directly with valid Rust behavior. A redesigned surface maps valid Rust inputs
 to the new Jet contract and compares semantic values and errors. Do not keep a
 runtime compatibility layer merely to make that comparison.
 
-TLS root-certificate and trust data use native carriers independently of the
-TLS transport engine. `TLSCarriers.jet` transfers consumed list/root headers
-without copying their buffers; cloning creates independent byte storage using
-the canonical host U8 stride. The root PEM field is a borrowed list header,
-whereas a trust-variant projection returns an owned root clone. System trust
-has no active root buffer. These ownership operations do not perform certificate
-validation or a TLS handshake. `TLSRootsWitness.c` pins their ownership and
-wrong-variant contracts against the composed Jet object.
-Certificate and peer snapshots also use independent native data storage: cloning
-recurses through byte lists, DNS text lists, and the certificate chain without
-duplicating an inline record's header. The chain stores inline certificates;
-growth moves their owned children, and a sequence projection borrows its slot.
-Certificate subject/issuer and peer name/cipher projections lend caller-owned
-E4 descriptors, which must not be freed, grown, or consumed. Signed validity
-timestamps remain raw i64 facts. `TLSCertificateWitness.c` exercises deep clones,
-parent lifetimes, list growth, and these borrowed projections.
-
-Native client identity owns its inline PEM byte-list header and a native
-Secret handle. Cloning copies only initialized U8 elements into independent
-buffers; dropping delegates private-key erasure and release to the canonical
-Secret provider, including its entire capacity and host U8 stride. Client
-configuration owns inline trust, optional identity, raw protocol-version tags,
-and an ALPN text list. Its trust projection borrows the parent's inline field.
-`TLSClientWitness.c` checks independence, optional identity, all trust variants,
-ALPN ownership, null drops, and private-key capacity erasure before deallocation.
-This data-provider contract does not claim TLS engine or certificate validation.
+`core.net.tls` has no native carriers or handles. `Core/Net/Tls.jet` is plain
+Core source over the vendored Mbed TLS 3.6 closure (`c.[mbedtls]`,
+`Core/Vendor/Mbedtls`, version and sha256 in its `VERSION` file). The
+`jet_tls.c` shim only binds an Mbed TLS context to the borrowed nonblocking
+descriptor from `core.net.__tcp_fd` and returns raw Mbed TLS status codes;
+trust selection, hostname checks, version bounds, ALPN, readiness waits,
+deadlines, close_notify, the verified peer identity and every error message are
+Jet. The `TCPStream` stays the descriptor's owner for the stream's lifetime.
 
 `DataSequences.jet` owns the shared native List header constants
 `DATA_SEQUENCE_BYTES`, `DATA_SEQUENCE_LENGTH`, `DATA_SEQUENCE_CAPACITY`, and
 `DATA_SEQUENCE_DATA`, plus `data_sequence_new`, `data_sequence_slot`, and
-`data_sequence_reserve`. Dyn and TLS certificate sequences use those
-unchanged helpers. TLS byte-list children use `data_u8_list_copy_into` and
-`data_u8_list_drop_fields` from the same provider; their old private TLS
-definitions are removed. The shared sequence index and capacity failure
+`data_sequence_reserve`. Dyn sequences use those unchanged helpers. Byte-list
+children use `data_u8_list_copy_into` and `data_u8_list_drop_fields` from the
+same provider. The shared sequence index and capacity failure
 providers still require composition before native caller admission.
 
 Native mail attachment data uses `MailAttachment.jet`'s 40-byte carrier:
@@ -942,36 +880,10 @@ Read/Write/Both respectively). They do not own socket resources. Null drops
 release nothing. `NetReadinessWitness.c` covers all boolean/ordinal combinations,
 low-byte normalization, independent clones and exact-sized shell deallocation.
 
-The native DB connection handle is a move-only 8-byte backend ID wrapper.
-As in the seed's `HandlesRaylib.rs` definition, it has no implicit close action;
-connection close remains explicit. `DbConnectionHandle.jet` releases only the
-wrapper allocation and ignores null handles. `DbConnectionHandleWitness.c`
-pins that shell-only deallocation for zero, ordinary and maximal u64 IDs;
-it does not claim admission of a database transport engine.
-
-The held native TLS stream handle is 112 bytes: ID, owned canonical FD72,
-optional timeout facts, seven borrowed callback pointers and one nullable
-owned peer snapshot. The seventh callback is the seed's `peer_snapshot`,
-distinct from its optional `peer_identity` owner. Drop releases the descriptor
-through `HostFiles.jet`'s canonical `jet_fd_drop_raw` (dependency `047fb460b`),
-then the peer snapshot in field declaration order, then the stream shell.
-It never invokes a TLS-close or other borrowed callback, matching the absence
-of a custom seed destructor. Show is exactly `TLSStream(<signed ID>)`.
-`TLSStreamHandleWitness.c` checks real descriptor closure before snapshot
-release, optional ownership and untouched callbacks. This does not claim a
-native TLS handshake engine or transport callback admission.
-
-The held native DB scope is 48 bytes: a raw backend ID, inline canonical
-24-byte row policy, owned user text and a nullable request-ID text owner.
-`RowPolicyHandles.jet` single-sources `row_policy_copy_into` and
-`row_policy_drop_fields`; both standalone row-policy handles and inline
-scope fields use them without temporary owner shells. Clone preserves the
-compiled policy and raw ID while independently cloning every text child.
-Drop releases the inline policy fields, user and optional request text, then
-the scope shell; it does not close the backend ID. Policy projection borrows
-the inline field, and user projection fills a caller-owned read/clone-only
-E4 descriptor. `DbScopeHandleWitness.c` checks those lifetimes, both compiled
-policies, absent versus present-empty requests and exact-once destruction.
+`core.db` has no native handles. `Core/Db/Db.jet` is plain Core source: the
+connection, scope, pool and lease carriers are Jet structs over the vendored
+SQLite C closure (`c.[sqlite3]`), `RowPolicy` and `SQL` are source values, and
+typed `SQL{…}` literals desugar to `core.db.__sql_literal`.
 
 The native delivery handle owns three independent text children in a 40-byte
 carrier, plus normalized duplicate Bool and raw signed generation facts.
@@ -1024,7 +936,7 @@ and capacity-sized frees. Runtime execution and route enrollment are separate
 admission steps; the witness source alone does not establish execution parity.
 
 Service workflow start, step, activity, retry and completion decisions live in
-`Core/service/service.jet`. They retain the exclusive tree borrow across durable
+`Core/Service/Service.jet`. They retain the exclusive tree borrow across durable
 synchronization, validation, replay checks and cursor updates. The existing
 durable append and handle creation operations remain registered bootstrap leaves;
 field leaves only project or assign the existing carrier and die at cutover.
@@ -1138,7 +1050,7 @@ bytes, not allocation identity.
 
 Show and Display preserve the raw `Panicked(reason)` bytes. Debug delegates the
 reason to the canonical `rt_text_push_rust_debug_str` renderer. This matches the
-read-only contract in `Core/service/service.jet:91-125` at497daa7a0, including
+read-only contract in `Core/Service/Service.jet:91-125` at497daa7a0, including
 the `a"b` source test vector; that source file is not imported by this carrier
 batch. `Tests/TaskOutcomeWitness.c` constructs through the real producers and
 checks every variant, deep clone/getter ownership, embedded NUL, Unicode,

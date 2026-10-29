@@ -1,0 +1,31 @@
+use core.files as files
+use core.process as process
+
+// The case puts {work}/links first on PATH; this program fills it afresh on every tier.
+fn run() {
+    if files.exists("links") -> files.remove_all("links") ?? panic("remove links")
+    files.create_dir_all("links/dir-target") ?? panic("create links/dir-target")
+    files.write("links/real-tool", "#!/bin/sh\n") ?? panic("write links/real-tool")
+    files.set_mode("links/real-tool", 493) ?? panic("chmod links/real-tool")
+    files.symlink("real-tool", "links/linked-tool") ?? panic("link links/linked-tool")
+    files.symlink("missing-tool", "links/dangling-tool") ?? panic("link links/dangling-tool")
+    files.symlink("dir-target", "links/dir-tool") ?? panic("link links/dir-tool")
+
+    linked :: process.which("linked-tool") ?? "none"
+    print("process.which linked: {linked.ends_with("/links/linked-tool")}")
+    linked_files :: files.which("linked-tool") ?? "none"
+    print("files.which linked: {linked_files.ends_with("/links/linked-tool")}")
+    print("process.which dangling: {process.which("dangling-tool") ?? "none"}")
+    print("files.which dangling: {files.which("dangling-tool") ?? "none"}")
+    print("process.which dir link: {process.which("dir-tool") ?? "none"}")
+    print("files.which dir link: {files.which("dir-tool") ?? "none"}")
+    sh :: process.which("sh") ?? ""
+    print("process.which sh: {sh.len() > 0}")
+
+    // is_file and is_symlink describe the entry itself, never a final link's target.
+    print("is_file link: {files.is_file("links/linked-tool")}")
+    print("is_symlink link: {files.is_symlink("links/linked-tool")}")
+    print("is_file target: {files.is_file("links/real-tool")}")
+    // The package's source scan refuses links, so the next tier's build needs them gone.
+    files.remove_all("links") ?? panic("remove links")
+}

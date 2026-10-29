@@ -4,7 +4,6 @@
 // three 8-byte words. No String/Vec Rust layout is read here. These exports
 // replace the corresponding Rust exports when E2 cuts the pack over.
 
-
 fn trap_word(address: I64) -> I64 {
     #Unsafe("the caller borrows an initialized word of a live JetText or static require descriptor") {
         return os_load_i64(address)
@@ -88,7 +87,6 @@ fn trap_write_handle(handle: I64) {
     trap_write(trap_word(handle), trap_word(handle + I64{8}))
 }
 
-
 fn trap_exit(status: I64) {
     if (scheduler_report_domain() == I64{1}) {
         text :: scheduler_root_capture_take(scheduler_control_current())
@@ -102,7 +100,10 @@ fn trap_defect_prepare() {
     control :: scheduler_report_control_current()
     if (control != I64{0}) -> jet_rt_string_drop(scheduler_root_capture_take(control))
 }
+// Every exit_group of a stop, process.exit or defect: the live Secrets are
+// scrubbed first, as no drop will clear them (#5478).
 fn trap_defect_exit(status: I64) {
+    secret_scrub()
     _ := trap_syscall(I64{231}, status, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
 }
 
@@ -238,12 +239,27 @@ fn trap_root_panic_report(message: I64) -> I64 {
 fn trap_simple(code: I64, file: I64, file_len: I64, line: I64, message: I64, message_len: I64) {
     // Core.rs jet_runtime_stop_unwind carries the raw message into the task
     // runner, not this process report (Scheduler.rs jet_scheduler_panic_message).
+    comptime_serve_stop(I64{1}, message, message_len, I64{0}, I64{0})
     if rt_task_panic_publish(message, message_len, code) -> return
     trap_header(code)
     trap_write(message, message_len)
     trap_msg_message_end()
     trap_context(file, file_len, trap_line(line), I64{0}, I64{0}, I64{0}, I64{0}, I64{1}, I64{1})
     trap_footer(code)
+}
+
+// trap_simple's report without a file, for the whole process: no task stop
+// and no root capture (Scheduler.jet scheduler_start_failed), exit 70. Served
+// comptime code reports it to the compiler as a panic message.
+fn trap_process_stop(code: I64, message: I64, message_len: I64) {
+    comptime_serve_stop(I64{1}, message, message_len, I64{0}, I64{0})
+    trap_defect_prepare()
+    trap_header_bytes(code)
+    trap_write(message, message_len)
+    trap_msg_message_end()
+    trap_context(I64{0}, I64{0}, trap_line(I64{0}), I64{0}, I64{0}, I64{0}, I64{0}, I64{1}, I64{1})
+    trap_footer_bytes(code)
+    trap_defect_exit(I64{70})
 }
 
 #Export(c) fn jet_rt_numeric_stop(file: I64, file_len: I64, line: I64, message: I64, message_len: I64) {
@@ -254,6 +270,7 @@ fn trap_simple(code: I64, file: I64, file_len: I64, line: I64, message: I64, mes
 // is out of range (this type is {bits} bits wide)". The count prints in the
 // shifted type's signedness (1 = unsigned), as the seed's i128 operand does.
 #Export(c) fn jet_rt_fixed_shift_stop(direction: I64, count: I64, count_unsigned: I64, bits: I64, file: I64, file_len: I64, line: I64) {
+    comptime_serve_stop(I64{2}, count, count_unsigned, bits, I64{0})
     message :: jet_rt_string_builder_new()
     jet_rt_string_builder_push(message, rt_static_text("Shifting "))
     jet_rt_string_builder_push(message, if (direction == I64{0}) -> rt_static_text("left") else -> rt_static_text("right"))
@@ -273,14 +290,14 @@ fn trap_simple(code: I64, file: I64, file_len: I64, line: I64, message: I64, mes
 // CAbiRoutes.rs:11-12: publish the seed's raw native-Int range reason.
 // Root rendering stays separate so task publication never prints a report.
 fn trap_native_index_range_stop() {
-    message :: alloc_required_valid(I64{40}, I64{8})
+    message :: jet_rt_alloc(I64{40}, I64{8})
     trap_store(message, I64{5269323123273261422})
     trap_store(message + I64{8}, I64{7887324063362741358})
     trap_store(message + I64{16}, I64{7305815396256607845})
     trap_store(message + I64{24}, I64{8391173023733081189})
     trap_store(message + I64{32}, I64{111494907916832})
     published :: rt_task_panic_publish(message, I64{38}, I64{1})
-    alloc_release_valid(message, I64{40}, I64{8})
+    jet_rt_free(message, I64{40}, I64{8})
     if published -> return
     trap_native_index_range_root()
 }
@@ -295,7 +312,7 @@ fn trap_native_index_range_root() {
 // Registered E3010 overflow: tasks carry the exact root message; the root
 // report stays unchanged even where the seed uses raw Rust arithmetic.
 #Export(c) fn jet_rt_panic_overflow() {
-    message :: alloc_required_valid(I64{80}, I64{8})
+    message :: jet_rt_alloc(I64{80}, I64{8})
     trap_store(message, I64{7598242313330583636})
     trap_store(message + I64{8}, I64{2333824980546840692})
     trap_store(message + I64{16}, I64{8606216600190023279})
@@ -307,7 +324,7 @@ fn trap_native_index_range_root() {
     trap_store(message + I64{64}, I64{7021710449270399077})
     trap_store(message + I64{72}, I64{694511470})
     published :: rt_task_panic_publish(message, I64{76}, I64{1})
-    alloc_release_valid(message, I64{80}, I64{8})
+    jet_rt_free(message, I64{80}, I64{8})
     if published -> return
     trap_header(I64{1})
     trap_msg_overflow()
@@ -323,6 +340,7 @@ fn trap_native_index_range_root() {
 }
 
 #Export(c) fn jet_rt_panic_message(message: I64, message_len: I64) {
+    comptime_serve_stop(I64{1}, message, message_len, I64{0}, I64{0})
     if rt_task_panic_publish(message, message_len, I64{0}) -> return
     trap_header(I64{0})
     trap_write(message, message_len)
@@ -339,21 +357,9 @@ fn trap_native_index_range_root() {
         if (jet_scheduler_native_propagate() != I64{0}) -> return
         return
     }
-    // Outcome.rs:2463-2466 supplies the one list-index reason. Reuse the
-    // existing decimal formatter, including I64.MIN; publication copies it.
-    message :: jet_rt_string_builder_new()
-    scratch :: alloc_required_valid(I64{24}, I64{8})
-    rt_text_push_word(message, I64{8391166443842267252}, I64{8})
-    rt_text_push_word(message, I64{139374716960}, I64{5})
-    coll_render_i64(message, scratch, len)
-    rt_text_push_word(message, I64{2318354821879720224}, I64{8})
-    rt_text_push_word(message, I64{8388362703413997427}, I64{8})
-    rt_text_push_word(message, I64{544108393}, I64{4})
-    coll_render_i64(message, scratch, native)
-    rt_text_push_word(message, I64{8369779874393449504}, I64{8})
-    rt_text_push_word(message, I64{128039039558944}, I64{6})
+    comptime_serve_stop(I64{3}, len, native, I64{0}, I64{0})
+    message :: trap_list_bounds_reason(len, native)
     published :: rt_task_panic_publish(rt_text_data(message), rt_text_len(message), I64{1})
-    alloc_release_valid(scratch, I64{24}, I64{8})
     jet_rt_string_drop(message)
     if published -> return
     trap_header(I64{1})
@@ -365,19 +371,67 @@ fn trap_native_index_range_root() {
     trap_footer(I64{1})
 }
 
+// Outcome.rs:2463-2466 supplies the one list-index reason, as an owned
+// String. Reuse the existing decimal formatter, including I64.MIN.
+fn trap_list_bounds_reason(len: I64, index: I64) -> I64 {
+    message :: jet_rt_string_builder_new()
+    scratch :: jet_rt_alloc(I64{24}, I64{8})
+    rt_text_push_word(message, I64{8391166443842267252}, I64{8})
+    rt_text_push_word(message, I64{139374716960}, I64{5})
+    coll_render_i64(message, scratch, len)
+    rt_text_push_word(message, I64{2318354821879720224}, I64{8})
+    rt_text_push_word(message, I64{8388362703413997427}, I64{8})
+    rt_text_push_word(message, I64{544108393}, I64{4})
+    coll_render_i64(message, scratch, index)
+    rt_text_push_word(message, I64{8369779874393449504}, I64{8})
+    rt_text_push_word(message, I64{128039039558944}, I64{6})
+    jet_rt_free(scratch, I64{24}, I64{8})
+    message
+}
+
+// The list-index stop of compiled code (Core.rs jet_runtime_stop): the IR's
+// native word index, reported at the indexing file and line.
+#Export(c) fn jet_rt_list_bounds_stop(len: I64, index: I64, file: I64, file_len: I64, line: I64) {
+    comptime_serve_stop(I64{3}, len, index, I64{0}, I64{0})
+    message :: trap_list_bounds_reason(len, index)
+    trap_simple(I64{1}, file, file_len, line, rt_text_data(message), rt_text_len(message))
+    jet_rt_string_drop(message)
+}
+
+// `bounds: report` (JetIR ir_list_bounds_report): a failed list bounds check
+// of code built with the `check_removal` gate writes one line to stderr,
+// naming the indexing file and line, and the program goes on with the
+// access. The index is the native word the check compared, so no exact-Int
+// seam is crossed and nothing here stops.
+#Export(c) fn jet_rt_report_list_bounds(len: I64, index: I64, file: I64, file_len: I64, line: I64) {
+    jet_rt_stdout_flush()
+    trap_msg_report_list_head()
+    trap_number(len)
+    trap_msg_list_position()
+    trap_number(index)
+    trap_msg_report_list_at()
+    trap_write(file, file_len)
+    trap_write_word(I64{58}, I64{1})
+    trap_number(trap_line(line))
+    trap_msg_report_list_end()
+}
+
 // CAbi.rs:91-98: an uncaught host payload is a defect, not an E3001 stop.
 // Rust's thread/source/backtrace panic-hook framing is host implementation
-// detail; retain the payload bytes and the host-fault exit class.
+// detail; retain the payload bytes and the host-fault exit class. Like
+// jet_rt_unreachable it exits at once: no program stop publication.
 fn trap_host_fault(message: I64, length: I64) {
+    trap_defect_prepare()
     jet_rt_stdout_flush()
     trap_write(message, length)
     trap_msg_newline()
-    trap_exit(I64{101})
+    trap_defect_exit(I64{101})
 }
 
 // MIR Never is not a program-side stop. The Rust host's thread/source/backtrace
 // prefix is not Jet semantics; preserve the unreachable! body and status 101.
 #Export(c) fn jet_rt_unreachable(reason: I64, length: I64) {
+    comptime_serve_stop(I64{1}, reason, length, I64{0}, I64{0})
     trap_defect_prepare()
     jet_rt_stdout_flush()
     trap_msg_unreachable()
@@ -427,7 +481,6 @@ fn rt_seq_index_oob_stop(length: I64, index: I64) {
     trap_defect_exit(I64{101})
 }
 
-
 #Export(c) fn jet_panic(file: I64, line: I64, message: I64) {
     trap_simple(I64{0}, trap_word(file), trap_word(file + I64{8}), trap_line(line), trap_word(message), trap_word(message + I64{8}))
 }
@@ -437,14 +490,14 @@ fn rt_seq_index_oob_stop(length: I64, index: I64) {
 // task-publication path. At root its header + message + prelude_end + footer
 // is byte-identical to jet_panic("<core.prelude>", 0, message).
 fn rt_record_variant_panic() {
-    message :: alloc_required_valid(I64{33}, I64{8})
+    message :: jet_rt_alloc(I64{33}, I64{8})
     trap_store(message, I64{8511913738388071794})
     trap_store(message + I64{8}, I64{7575182590666699361})
     trap_store(message + I64{16}, I64{8391735665924334702})
     trap_store(message + I64{24}, I64{7453001576142499616})
     trap_put(message + I64{32}, I64{101})
     jet_rt_panic_message(message, I64{33})
-    alloc_release_valid(message, I64{33}, I64{8})
+    jet_rt_free(message, I64{33}, I64{8})
 }
 
 fn trap_rich(file: I64, line: I64, function: I64, source: I64, column: I64, caret: I64, message: I64, locals: I64) {
@@ -482,7 +535,22 @@ fn trap_rich(file: I64, line: I64, function: I64, source: I64, column: I64, care
     trap_footer(I64{2})
 }
 
+// A pending core.testing evidence failure (`golden`, `snap`, `fixture`) is
+// what a failed `assert`/`assert_eq` of that result reports: its message is
+// the stop's message and its detail (the path, then any bounded diff) the
+// locals line. An explicit `panic` (kind 2) keeps its own text. The stop does
+// not return, so the pair stays owned by the thread's test state.
 #Export(c) fn jet_rt_require_stop(kind: I64, descriptor: I64, message: I64, left: I64, right: I64, locals: I64) {
+    state :: if (kind == I64{2}) -> I64{0} else -> test_scope_pending_failure()
+    if (state == I64{0}) {
+        trap_require_stop(kind, descriptor, message, left, right, locals)
+        return
+    }
+    trap_require_stop(I64{0}, descriptor, trap_word(state + I64{120}), I64{0}, I64{0}, trap_word(state + I64{128}))
+}
+
+fn trap_require_stop(kind: I64, descriptor: I64, message: I64, left: I64, right: I64, locals: I64) {
+    comptime_serve_stop(I64{4}, kind, message, left, right)
     if (jet_rt_stop_domain() == I64{2}) {
         // Same raw task message as trap_rich; equality stops carry their text.
         raw := message

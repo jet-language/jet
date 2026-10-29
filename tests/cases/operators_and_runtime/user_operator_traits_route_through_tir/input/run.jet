@@ -1,0 +1,63 @@
+
+struct Vec2 { x: Int y: Int }
+struct Holder { value: Vec2 }
+struct EqBox<T: Equatable> { value: T }
+#Comparable
+struct Tier<T: Comparable> { value: T }
+#Comparable
+struct NestedTier<T: Comparable> {
+    head: T?
+    tail: [T]
+}
+struct Adder<T: Add> { value: T }
+
+impl Vec2.Add {
+    fn add(self, rhs: Vec2) -> Vec2 {
+        return Vec2{ x: self.x + rhs.x, y: self.y + rhs.y }
+    }
+}
+
+impl Vec2.Equatable {
+    fn equal(self, rhs: Vec2) -> Bool { return self.x == rhs.x && self.y == rhs.y }
+}
+
+impl Vec2.Comparable {
+    fn compare(self, rhs: Vec2) -> Ordering {
+        if self.x < rhs.x { return Ordering.Less }
+        if self.x > rhs.x { return Ordering.Greater }
+        return Ordering.Equal
+    }
+}
+
+fn add_generic<T: Add>(left: T, right: T) -> T { return left + right }
+fn equal_generic<T: Equatable>(left: T, right: T) -> Bool { return left == right }
+fn less_generic<T: Comparable>(left: T, right: T) -> Bool { return left < right }
+
+fn marked(x: Int) -> Vec2 {
+    print("marked {x}")
+    return Vec2{ x: x, y: 0 }
+}
+
+fn run() {
+    a :: Vec2{ x: 1, y: 2 }
+    b :: Vec2{ x: 3, y: 4 }
+    c :: add_generic(a, b)
+    d := Vec2{ x: 1, y: 2 }
+    d = { x: 1, y: 2 }
+    d += { x: 3, y: 4 }
+    holder := Holder{ value: Vec2{ x: 1, y: 2 } }
+    holder.value = { x: 1, y: 2 }
+    holder.value += { x: 3, y: 4 }
+    box := EqBox<Int>{ value: 1 }
+    box = { value: 7 }
+    chain :: marked(1) < marked(2) < marked(3)
+    boxes_equal :: equal_generic(EqBox<Int>{ value: 7 }, EqBox<Int>{ value: 7 })
+    ranks_ordered :: less_generic(Tier<Int>{ value: 1 }, Tier<Int>{ value: 2 })
+    nested_ordered :: less_generic(
+        NestedTier<Int>{ head: Val(1), tail: [2, 3] },
+        NestedTier<Int>{ head: Val(1), tail: [2, 4] }
+    )
+    cell := Adder<Int>{ value: 4 }
+    cell.value += 3
+    print("{c.x},{c.y} {d.x},{d.y} {holder.value.x},{holder.value.y} {(!equal_generic(a, b))} {less_generic(a, b)} {(b >= a)} {chain} {boxes_equal} {ranks_ordered} {nested_ordered} {cell.value} {box.value}")
+}

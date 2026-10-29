@@ -1,0 +1,14 @@
+// #5005: `bounds` says what a failed list bounds check does. `fatal` (the
+// stock) stops the program; `report` writes the failure to stderr and goes on
+// with the access unchecked; `off` drops the check. `report` and `off` remove a
+// memory-safety check, so each is a `check_removal` gate: jet prints a note
+// naming it, `jet inspect gates` lists it, and `policy: { check_removal: .Forbid }`
+// here refuses it (E3415). Only this package's code loses the check; its
+// dependencies and Core keep theirs.
+name: "build_bounds_example"
+version: "0.1.0"
+edition: "2026"
+
+build: {
+    unchecked: Build{ optimize: none, bounds: off },
+}

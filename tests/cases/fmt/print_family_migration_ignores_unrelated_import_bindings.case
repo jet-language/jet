@@ -1,0 +1,15 @@
+# tests/fmt.rs::print_family_migration_ignores_unrelated_import_bindings at tests/fmt.rs:220; hand-port
+# Claim: no print-family rewrite when io is bound to an unrelated import (tests/fmt.rs:221-222)
+# Fixture migrated: Rust asserts only that no print-family edit is produced; CLI check is "io.sprint kept, no print rewrite". jet fmt canonicalises the one-statement body to `fn run() { io.sprint(value) }`, so exact bytes are not asserted.
+# Not ported: retired_print_family_edits is empty (tests/fmt.rs:222): Rust Formatter API; checked via stdout
+fixture: print_family_migration_ignores_unrelated_import_bindings.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt printunrel.jet
+exit: 0 # tests/fmt.rs:221-222 formats without edits
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:222 no print-family rewrite for an unrelated `io` binding
+stdout: ~ "io.sprint(value)" # tests/fmt.rs:222 no print-family rewrite for an unrelated `io` binding
+stdout: !~ "io.print(" # tests/fmt.rs:222 no print-family rewrite for an unrelated `io` binding
+stdout: !~ "print(\"{value}\")" # tests/fmt.rs:222 no print-family rewrite for an unrelated `io` binding

@@ -109,12 +109,12 @@ struct Orders {
         state :: battery.login_state(input.user, input.password) ?? return Ok(battery.status_response(401, "login failed"))
         self.state.guard_edit().value.session_id = state.session_id
         response :: battery.ok_response("logged in")
-        Ok(&response.header("set-cookie", state.cookie))
+        Ok(response.header("set-cookie", state.cookie))
     }
 
     #server.Get("/protected")
     fn protected(self, req: HTTPRequest) -> HTTPResponse HTTPError! {
-        cookie :: &req.header("cookie") ?? return Ok(battery.status_response(401, "login required"))
+        cookie :: req.header("cookie") ?? return Ok(battery.status_response(401, "login required"))
         session_id :: self.state.guard_read().value.session_id
         status :: battery.protected_status(session_id, cookie)
         if status != 200 -> return Ok(battery.status_response(status, "login required"))
@@ -198,7 +198,7 @@ fn run() (HTTPError | NetError | TaskFailure)! {
     print("detail:{detail.status()}")
     login_request :: client.request("POST", "http://{addr}/login").json(Login{user: "alice", password: "argon2id:demo"})
     logged :: login_request.send()
-    set_cookie :: &logged.header("set-cookie") ?? return
+    set_cookie :: logged.header("set-cookie") ?? return
     print("login:{logged.status()}:cookie={set_cookie.starts_with("jet_session=")}")
     protected_request :: client.request("GET", "http://{addr}/protected").cookie("jet_session", state.guard_read().value.session_id)
     protected_response :: protected_request.send()

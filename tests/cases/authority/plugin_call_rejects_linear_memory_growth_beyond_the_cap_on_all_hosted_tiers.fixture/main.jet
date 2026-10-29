@@ -1,0 +1,22 @@
+
+use core.plugin as plugin
+
+fn run() {
+    policy :: Authority.from_rights(["FS.Read:."])
+    hostile :: plugin.load("linear_memory.wat", policy)
+    _result :: hostile.grow() ?? {
+        print("memory-bound-failure")
+        if err == {
+            .Budget(_, fault) -> {
+                assert(fault.export == "grow")
+                assert(fault.frames.len() > 0 && fault.frames.len() <= 32)
+                print("Budget")
+            }
+            else -> assert(false)
+        }
+        print(err)
+        return
+    }
+    print("guest-returned")
+    print(_result)
+}

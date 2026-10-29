@@ -1,8 +1,9 @@
-// Trusted compiler-runtime marshaling for Core/build's private source kernel.
+// Trusted compiler-runtime marshaling for Core/Build's private source kernel.
 // The bootstrap unit includes that kernel beside these helpers. No graph
 // validation, policy, defaulting or key recipe is implemented at this boundary.
 use jet_foundation.[Diagnostic, DiagnosticStructured, DiagnosticBuildError, DiagnosticErrorDetails, DiagnosticErrorField, DiagnosticErrorSpan, Span, TComptimeEnumArg, TComptimeField, TComptimeReport, TComptimeValue, Type, diagnostic_from_registry]
 use core.build.[BuildGraph, BuildGraphAction, BuildGraphFile]
+use jet_build_session.[BuildSessionDiagnostic, BuildSessionValue, build_session_error_projection]
 
 fn jet_eval_build_field(data: TComptimeValue, name: String) -> TComptimeValue? Never! {
     if data == .Struct(_, fields) {
@@ -14,7 +15,7 @@ fn jet_eval_build_field(data: TComptimeValue, name: String) -> TComptimeValue? N
 }
 
 fn jet_eval_build_context_value(session: Int, program: TComptimeValue) -> TComptimeValue Never! {
-    TComptimeValue.Struct{type_name: "BuildContext", fields: [TComptimeField]{
+    TComptimeValue.Struct{type_name: "Build", fields: [TComptimeField]{
         {name: "__session", value: TComptimeValue.Int{value: session}},
         {name: "program", value: program},
     }}
@@ -22,7 +23,7 @@ fn jet_eval_build_context_value(session: Int, program: TComptimeValue) -> TCompt
 
 fn jet_eval_build_context_id(data: TComptimeValue) -> Int? Never! {
     if data == .Struct(name, _) {
-        if name == "BuildContext" && jet_eval_build_field(data, "__session") == .Val(.Int(id)) -> return Val(id)
+        if name == "Build" && jet_eval_build_field(data, "__session") == .Val(.Int(id)) -> return Val(id)
     }
     None
 }
@@ -62,40 +63,6 @@ fn jet_eval_build_session_input(data: TComptimeValue) -> BuildSessionValue? Neve
         else -> {}
     }
     None
-}
-
-// A closed host packet has no owner leases to transfer. Refuse closures,
-// Shared, resource handles and cursor requests rather than fabricating data.
-fn jet_eval_build_host_data(value: JetEvalHostValue) -> TComptimeValue? Never! {
-    if value == {
-        // copy: `data` is a payload of read parameter `value`, which keeps the original; the Val carrier owns this one
-        .Data(data) -> return Val(data.copy())
-        .Present(inner) -> return Val(TComptimeValue.Present{value: jet_eval_build_host_data(inner) ?? return None})
-        .List(values) -> {
-            output := [TComptimeValue]{}
-            loop item in values -> &output.push(jet_eval_build_host_data(item) ?? return None)
-            return Val(TComptimeValue.List{values: output})
-        }
-        .Struct(name, fields) -> {
-            output := [TComptimeField]{}
-            loop field in fields -> &output.push(TComptimeField{name: field.name, value: jet_eval_build_host_data(field.value) ?? return None})
-            return Val(TComptimeValue.Struct{type_name: name, fields: output})
-        }
-        .Enum(name, variant, args) -> {
-            output := [TComptimeEnumArg]{}
-            loop arg in args -> &output.push(TComptimeEnumArg{name: arg.name, value: jet_eval_build_host_data(arg.value) ?? return None})
-            return Val(TComptimeValue.Enum{type_name: name, variant: variant, args: output})
-        }
-        else -> None
-    }
-}
-
-fn jet_eval_build_session_host_input(value: JetEvalHostValue) -> BuildSessionValue? Never! {
-    jet_eval_build_session_input(jet_eval_build_host_data(value) ?? return None)
-}
-
-fn jet_eval_build_context_host_id(value: JetEvalHostValue) -> Int? Never! {
-    jet_eval_build_context_id(jet_eval_build_host_data(value) ?? return None)
 }
 
 fn jet_eval_build_session_output(value: BuildSessionValue) -> TComptimeValue Never! {

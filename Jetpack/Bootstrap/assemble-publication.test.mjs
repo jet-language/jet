@@ -11,7 +11,7 @@ import test from "node:test";
 const assembler = resolve(dirname(fileURLToPath(import.meta.url)), "assemble.mjs");
 const entry = "Tools/packaging/native-runtime-pack-publisher.jet";
 const paths = ["Jetpack/Foundation/Source/Fixture.jet", "Jetpack/Store/Source/Fixture.jet", entry, "Jetpack/CLI/Source/Fixture.jet"];
-const manifest = `# == Foundation ==\n${paths[0]}\n# == Store ==\n${paths[1]}\n${entry}\n# == CLI ==\n${paths[3]}\n`;
+const manifest = `# == Foundation ==\n${paths[0]}\n# == Engine (folders: Store) ==\n${paths[1]}\n${entry}\n# == CLI ==\n${paths[3]}\n`;
 
 async function fixture(run) {
   const root = await mkdtemp(resolve(tmpdir(), "jetpack-publication-assembly-"));
@@ -21,9 +21,9 @@ async function fixture(run) {
     await writeFile(path, text);
   };
   try {
-    await put("Jetpack/Bootstrap/areas.list", "Foundation:\nStore: Foundation\nCLI: Foundation\n");
+    await put("Jetpack/Bootstrap/areas.list", "Foundation:\nEngine: Foundation\nCLI: Foundation\n");
     await put("Jetpack/Bootstrap/sources.list", manifest);
-    await put("Jetpack/Bootstrap/tests.list", "# == Store ==\nJetpack/Store/Tests/Fixture.jet\n");
+    await put("Jetpack/Bootstrap/tests.list", "# == Engine (folders: Store) ==\nJetpack/Store/Tests/Fixture.jet\n");
     await put(paths[0], "fn foundation_fixture() {}\n");
     await put(paths[1], "fn store_fixture() {}\n");
     await put(entry, "fn native_runtime_pack_publisher() NativeRuntimePackError! {}\n");
@@ -40,7 +40,7 @@ async function fixture(run) {
   }
 }
 
-test("publication emits only the canonical Store closure plus one fixed forwarding entry", async () => {
+test("publication emits only the canonical Engine closure plus one fixed forwarding entry", async () => {
   await fixture(async ({ root, invoke }) => {
     const result = invoke("publication", { JETPACK_BOOTSTRAP_AREAS: "CLI", JETPACK_BOOTSTRAP_OWN_AREA: "CLI" });
     assert.equal(result.status, 0, result.stderr);
@@ -59,7 +59,7 @@ test("publication emits only the canonical Store closure plus one fixed forwardi
 test("ordinary modes retain test semantics without emitting the fixed Tools entry", async () => {
   await fixture(async ({ root, invoke }) => {
     for (const mode of ["check", "aot", "run"]) {
-      const result = invoke(mode, { JETPACK_BOOTSTRAP_OWN_AREA: "Store" });
+      const result = invoke(mode, { JETPACK_BOOTSTRAP_OWN_AREA: "Engine" });
       assert.equal(result.status, 0, result.stderr);
       const map = JSON.parse(await readFile(resolve(root, "scratch/jetpack.map.json"), "utf8"));
       assert.deepEqual(map.files.map(({ path }) => path), [paths[0], paths[1], paths[3], "Jetpack/Store/Tests/Fixture.jet"]);

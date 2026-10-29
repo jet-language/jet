@@ -1,0 +1,21 @@
+# tests/jetpack_hangar_store_v2.rs::hangar_du_rejects_corrupt_output_projection_without_following_escape at tests/jetpack_hangar_store_v2.rs:1582; hand-port
+# Claim: du --json on the corrupt projection exits 2 with schema jet.report/v1, moment compile, code E1340 (rs:1627-1650)
+# Claim: recover --json exits 0 with action recover (rs:1658-1673)
+# Fixture migrated: [INFERENCE] source payload and ingest --ref flag taken from the find_by_reference name du-proof@fixture (rs:1613); source file not read
+# Not ported: meta.json output-path rewrite to an outside dir and journal move (rs:1618-1633): needs in-place mutation
+# Not ported: outside/must-survive checks (rs:1653-1656,1675-1678) and meta unchanged check (rs:1674)
+fixture: hangar_du_rejects_corrupt_output_projection_without_following_escape.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jetpack hangar ingest source --name du-proof --ref du-proof@fixture --no-color
+exit: 0 # rs:1588-1607 exit 0
+step: jetpack hangar du --json --no-color
+exit: 2 # rs:1627-1650
+stdout: ~ "\"schema\":\"jet.report/v1\"" # rs:1627-1650
+stdout: ~ "\"moment\":\"compile\"" # rs:1627-1650
+stdout: ~ "\"code\":\"E1340\"" # rs:1627-1650
+step: jetpack hangar recover --json --no-color
+exit: 0 # rs:1658-1673
+stdout: ~ "\"schema\":\"jet.report/v1\"" # rs:1658-1673
+stdout: ~ "\"action\":\"recover\"" # rs:1658-1673

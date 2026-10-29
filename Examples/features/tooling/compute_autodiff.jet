@@ -1,7 +1,7 @@
 package {
     name: "tooling_compute_autodiff"
     version: "0.1.0"
-    authority: { holds: { allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time] } }
+    authority: { allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time] }
 }
 
 // D-COMPUTE-AUTODIFF1 / #1141–#1143: gradient/VJP/JVP, sparse CSR, SIMD tile, profile.
@@ -12,12 +12,12 @@ fn loss(w: Tensor, x: Tensor) -> Tensor { compute.mul(w, x) ?? panic("loss") }
 fn run() {
     w :: compute.from_list([2.0]) ?? panic("w")
     x :: compute.from_list([4.0]) ?? panic("x")
-    (dw, dx) :: compute.gradient(loss, w.copy(), x.copy())
+    { w: dw, x: dx } :: compute.gradient(loss, w.copy(), x.copy())
     print("grad:{compute.to_list(dw)}")
     print("grad_x:{compute.to_list(dx)}")
 
     d_loss :: compute.gradient(loss)
-    (transform_w, transform_x) :: d_loss(w.copy(), x.copy())
+    { w: transform_w, x: transform_x } :: d_loss(w.copy(), x.copy())
     print("transform_w:{compute.to_list(transform_w)}")
     print("transform_x:{compute.to_list(transform_x)}")
 

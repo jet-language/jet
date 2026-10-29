@@ -4,8 +4,8 @@ Jet can compile one source model for hosted, browser, WASI, and embedded target
 machines. This page is for firmware and systems engineers choosing a target,
 inspecting its machine contract, and embedding a generated library. The
 executable definitions are in
-[`jet-driver/src/Driver/mod.rs`](../../../crates/jet-driver/src/Driver/mod.rs),
-[`jet-foundation/src/TargetMachine.rs`](../../../crates/jet-foundation/src/TargetMachine.rs),
+[`Compiler/JetDriver/Source/Driver`](../../../Compiler/JetDriver/Source/Driver/),
+[`TargetMachine.jet`](../../../Compiler/JetFoundation/Source/Target/TargetMachine.jet),
 and [`tests/target_machines.rs`](../../../tests/target_machines.rs).
 
 ## Choose a target machine

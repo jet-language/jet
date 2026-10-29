@@ -1,8 +1,10 @@
-Error [E3401]: `read_first` calls the impure function `term.stdin`
-  --> tests/ui/stdin_pure_e3401.jet:5:18
+Error [E3401]: `read_first` calls the impure function `read_line`
+  --> tests/ui/stdin_pure_e3401.jet:6:21
     |
-  5 |     handle :: io.stdin()
-    |                  ^^^^^
- Why: `term.stdin` is impure, but `read_first` declares `-[]>`
- Fix: remove the call from `read_first`, or drop the `-[]>` bound from `read_first` so its effects are inferred
+  6 |     line :: &handle.read_line()
+    |                     ^^^^^^^^^
+ Why: `read_line` is impure, but `read_first` declares `-[]>`
+ Fix: Remove the call from `read_first`, or drop the `-[]>` bound from `read_first` so its effects are inferred
+ Denial: pure
+ Call chain: read_first → read_line
 More: jet-lang.dev/e/E3401

@@ -1,10 +1,9 @@
 // One compile-time read model for source and policy gates.
 // Adapted from origin/port/compiler GateLedger.jet and current Rust writers.
-use jet_foundation.[GateLedger, GateEntry, GateDiagnostic, GateOperation, GateKind, GateSet, NameLedger, Program, Item, Func, Expr, Stmt, Span, CallArg, DeriveBodyItem, Marker, RuleSite, PolicyKey, PolicyValue, policy_key_name, policy_scope_rank, gate_kind_policy_key, gate_source_entry, gate_ledger_push, gate_ledger_sort, ast_visit_expr, ast_visit_statement, expr_span]
+use jet_foundation.[GateLedger, GateEntry, GateDiagnostic, GateOperation, GateKind, GateSet, NameLedger, Program, Item, Func, Expr, Stmt, Span, CallArg, DeriveBodyItem, Marker, RuleSite, PolicyKey, PolicyValue, policy_key_name, policy_scope_rank, gate_kind_policy_key, gate_source_entry, gate_ledger_push, gate_ledger_sort, ast_visit_expr, ast_visit_statement]
 use jet_foundation.[Type, PolicyDeclaration, StrPart, ast_program]
-use jet_lexer.Token
-use jet_sema.[SemaGateModule, UnsafeGateInspection, sema_unsafe_inspect, sema_unsafe_nested_bodies, sema_error_optional]
-use jet_parser.jfmt_format_program_with_tokens
+use jet_lexer.[Token]
+use jet_parser.[jfmt_format_program_with_tokens]
 
 struct SemaGateContext {
     checked_text_types: [String:Bool]
@@ -265,8 +264,8 @@ fn sema_gate_expression(source: String, expression: Expr, ledger: &GateLedger, c
 
 fn sema_gate_expression_value(source: String, expression: Expr, ledger: &GateLedger, context: SemaGateContext) Never! {
     if expression == {
-        .Call(call) -> {
-            if call.widen_approx || call.name == "approx" {
+        .Call(call, _) -> {
+            if call.name == "approx" {
                 gate_ledger_push(&ledger, gate_source_entry(GateKind.PrecisionDemotion, "knowledge", "expression", source, call.name_span, "approx", None, "exact value widened to an approximation", "recorded"))
             } else if call.name == "wrapping" || call.name == "saturating" || call.name == "checked" {
                 detail :: if call.name == {
@@ -277,7 +276,7 @@ fn sema_gate_expression_value(source: String, expression: Expr, ledger: &GateLed
                 gate_ledger_push(&ledger, gate_source_entry(GateKind.PrecisionDemotion, "knowledge", "expression", source, call.name_span, call.name, None, detail, "recorded"))
             }
         }
-        .MethodCall(receiver, method, span, _, _, args, _, _) -> {
+        .MethodCall(receiver, method, span, _, _, args, _) -> {
             if {
                 sema_gate_rounded_conversion(method, args) -> {
                     gate_ledger_push(&ledger, gate_source_entry(GateKind.PrecisionDemotion, "knowledge", "expression", source, span, method, None, "unit conversion rounded with an explicit mode", "recorded"))
@@ -298,7 +297,7 @@ fn sema_gate_expression_value(source: String, expression: Expr, ledger: &GateLed
                 else -> {}
             }
         }
-        .RawOf(_, span) -> {
+        .RawOf(_, span, _) -> {
             gate_ledger_push(&ledger, gate_source_entry(GateKind.PrecisionDemotion, "knowledge", "expression", source, span, ".raw", None, "typed fact extracted as a raw value", "recorded"))
         }
         else -> {}
@@ -308,9 +307,9 @@ fn sema_gate_expression_value(source: String, expression: Expr, ledger: &GateLed
 fn sema_gate_checked_receiver(receiver: Expr, names: [String:Bool]) -> Bool Never! {
     candidate := String?{None}
     if receiver == {
-        .Ident(name, _) -> { candidate = Val(name) }
-        .Field(base, name, _) -> {
-            if base == .Ident(_, _) -> candidate = Val(name)
+        .Ident(name, _, _) -> { candidate = Val(name) }
+        .Field(base, name, _, _) -> {
+            if base == .Ident(_, _, _) -> candidate = Val(name)
         }
         else -> {}
     }
@@ -364,7 +363,7 @@ fn sema_gate_marker_expr(marker: Marker, position: Int) -> Expr? Never! {
 
 fn sema_gate_literal_text(expression: Expr?) -> String? Never! {
     value :: expression ?? return None
-    parts :: (if value == .Str(str_parts, _) -> Val(str_parts) else -> [StrPart]?{None}) ?? return None
+    parts :: (if value == .Str(str_parts, _, _) -> Val(str_parts) else -> [StrPart]?{None}) ?? return None
     text := ""
     loop part in parts {
         if part == {

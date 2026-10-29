@@ -1,0 +1,15 @@
+# tests/dev_parts/routine.rs::generic_module_instance_runs_identically_in_resident_jit_and_aot at tests/dev_parts/routine.rs:2955; hand-port
+fixture: generic_module_instance_runs_identically_in_resident_jit_and_aot.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step jit: jet run generic_module_instance.jet
+exit: any # original asserts stdout, then tier equality
+stdout: = generic_module_instance_runs_identically_in_resident_jit_and_aot.1.out
+step: jet build generic_module_instance.jet
+exit: 0
+step aot: built
+exit: == jit
+stdout: == jit
+stderr: == jit

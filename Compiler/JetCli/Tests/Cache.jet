@@ -1,5 +1,11 @@
 // CmdStatus cache parser/rendering, assembled with Compiler's source closure.
-fn run() Never! {
+use jet_cli.[
+    JetCLICacheRequest, jet_cli_cache_format_size, jet_cli_cache_parse, jet_cli_cache_prune,
+    jet_cli_cache_size,
+]
+use jetpack_artifact_store.[ArtifactEntryStatus, ArtifactPruneReport]
+
+#Test("cache") {
     if jet_cli_cache_parse([String]{"prune", "--to=+1024", "--json"}) != .Ok(JetCLICacheRequest.Prune{bytes: 1024}) -> panic("cache prune parse")
     if jet_cli_cache_parse([String]{"limit", "--host", "4MiB"}) != .Ok(JetCLICacheRequest.Limit{bytes: 4194304}) -> panic("cache limit parse")
     if jet_cli_cache_parse([String]{"status", "--host=1"}) == {

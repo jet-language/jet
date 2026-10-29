@@ -1,0 +1,102 @@
+// CoreSlice7BrowserRaw.rs: core.web.browser's filesystem projections.
+// std's CString refusal (an interior NUL) is a failed metadata/read: None.
+
+// stat(path) following links into StatFacts128 (HostFiles.jet); 0 or -errno.
+fn browser_stat(path: I64, facts: I64) -> I64 {
+    if testing_has_nul(path) -> return I64{-22}
+    jet_fs_stat_raw(path, true, facts, facts + I64{128})
+    I64{0} - files_out_errno(facts + I64{128})
+}
+
+// read_to_string(path).ok()
+#Export(c) fn jet_browser_read_text_raw(path: I64, some: I64) -> I64 {
+    if testing_has_nul(path) -> return I64{0}
+    scratch :: jet_rt_alloc(I64{8}, I64{8})
+    status :: env_read_file(path, scratch)
+    out :: rt_text_word(scratch)
+    jet_rt_free(scratch, I64{8}, I64{8})
+    if (status == I64{1}) {
+        rt_text_store(some, out)
+        return I64{1}
+    }
+    if (status < I64{0}) -> jet_rt_string_drop(out)
+    I64{0}
+}
+
+// Path::is_file: metadata (following links) is a regular file.
+#Export(c) fn jet_browser_is_file_raw(path: I64) -> Bool {
+    facts :: jet_rt_alloc(I64{160}, I64{8})
+    status :: browser_stat(path, facts)
+    mode :: rt_text_word(facts + I64{16}).bit_and(I64{61440})
+    jet_rt_free(facts, I64{160}, I64{8})
+    status == I64{0} && mode == I64{32768}
+}
+
+// metadata(path).ok().map(len)
+#Export(c) fn jet_browser_file_size_raw(path: I64, some: I64) -> I64 {
+    facts :: jet_rt_alloc(I64{160}, I64{8})
+    status :: browser_stat(path, facts)
+    size :: rt_text_word(facts + I64{56})
+    jet_rt_free(facts, I64{160}, I64{8})
+    if (status != I64{0}) -> return I64{0}
+    rt_text_store(some, jet_int_owned_from_i64(size))
+    I64{1}
+}
+
+// metadata(path)?; modified time since the epoch in whole milliseconds,
+// saturating at i64::MAX; a time before the epoch is 0.
+#Export(c) fn jet_browser_modified_ms_raw(path: I64, some: I64) -> I64 {
+    facts :: jet_rt_alloc(I64{160}, I64{8})
+    status :: browser_stat(path, facts)
+    seconds :: rt_text_word(facts + I64{80})
+    nanos :: rt_text_word(facts + I64{88})
+    jet_rt_free(facts, I64{160}, I64{8})
+    if (status != I64{0}) -> return I64{0}
+    millis := I64{0}
+    if (seconds >= I64{0}) {
+        limit :: (I64{9223372036854775807} - nanos /% I64{1000000}) /% I64{1000}
+        millis = if (seconds > limit) -> I64{9223372036854775807} else -> seconds * I64{1000} + nanos /% I64{1000000}
+    }
+    rt_text_store(some, jet_int_owned_from_i64(millis))
+    I64{1}
+}
+
+// Path::new(root).join(path): PathBuf::push, the same join the host path
+// leaf implements.
+#Export(c) fn jet_browser_path_join_raw(root: I64, path: I64) -> I64 { jet_fs_host_path_join_raw(root, path) }
+
+// Path::with_extension("html"): the path up to the end of the file stem, then
+// ".html". Trailing separators and "." components after the file name are
+// not part of it; with no file name (empty, a root, a lone ".", or "..") the
+// path is unchanged. A stem keeps a leading dot (".rc" has no extension).
+#Export(c) fn jet_browser_html_path_raw(path: I64) -> I64 {
+    data :: rt_text_data(path)
+    end := rt_text_len(path)
+    start := I64{0}
+    loop {
+        loop end > (I64{0}) && rt_text_byte(data + end - I64{1}) == (I64{47}) { end -= I64{1} }
+        start = end
+        loop start > (I64{0}) && rt_text_byte(data + start - I64{1}) != (I64{47}) { start -= I64{1} }
+        if !(start > I64{0} && end - start == I64{1} && rt_text_byte(data + start) == I64{46}) -> break
+        end = start
+    }
+    length :: end - start
+    if (length == I64{0}) -> return jet_rt_string_clone(path)
+    dot :: rt_text_byte(data + start) == I64{46}
+    if ((length == I64{1} && dot) || (length == I64{2} && dot && rt_text_byte(data + start + I64{1}) == I64{46})) {
+        return jet_rt_string_clone(path)
+    }
+    stem_end := end
+    at := end - I64{1}
+    loop at > start {
+        if (rt_text_byte(data + at) == I64{46}) {
+            stem_end = at
+            break
+        }
+        at -= I64{1}
+    }
+    result :: rt_text_copy(data, stem_end)
+    if (result == I64{0}) -> return I64{0}
+    jet_rt_string_builder_push(result, rt_static_text(".html"))
+    result
+}

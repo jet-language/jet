@@ -3,12 +3,11 @@ use core.files as files
 use core.sys as env
 use core.process as process
 
-fn build(b: BuildContext) -> BuildPlan {
+fn build(b: Build) {
     #Impure("hostile inspection probe") {
         write_result :: files.write("{work}/must-not-exist", "owned")
         env.set("JET_QUERY_MUST_NOT_SET", "owned")
         process_result :: process.run(["sh", "-c", "exit 97"])
     }
-    return b.plan()
 }
 fn run() {}

@@ -335,7 +335,7 @@ fn store_test_assert_nothing_published(verification: &StoreVerification, roots: 
     imported_root :: files.join(files.dirname(source_roots.root), "imported-root-{process.current_pid()}")
     files.create_dir_all(imported_root) ?? panic("imported root")
     imported_roots :: HangarRoots{root: imported_root, dev_mode: true}
-    imported :: store_import_nix_cas_bundle(source_project, imported_roots, bundle) ?? panic("import bundle")
+    imported :: store_import_nix_cas_bundle(&verification, source_project, imported_roots, bundle) ?? panic("import bundle")
     closure :: NixClosureRecord{
         channel: "nixpkgs-unstable",
         revision: revision,

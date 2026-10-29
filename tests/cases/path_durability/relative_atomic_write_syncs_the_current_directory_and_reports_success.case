@@ -1,0 +1,11 @@
+# tests/path_durability.rs::relative_atomic_write_syncs_the_current_directory_and_reports_success at tests/path_durability.rs:110; hand-port
+# Authority migration: common::build_and_run wrote a bare manifest; Jet requires decided FS authority (E1803), so the TIR package grants it.
+fixture: relative_atomic_write_syncs_the_current_directory_and_reports_success.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build atomic_relative.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "new\n" # tests/path_durability.rs:128 common::build_and_run_in_scratch

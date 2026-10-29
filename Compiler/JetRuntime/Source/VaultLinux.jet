@@ -1,13 +1,13 @@
 // SecretsCrypto.rs:1244-1354. Linux x86-64 raw descriptor policy; no Core fd
 // carrier. Paths borrow native raw-byte Text spans, never Rust Path/File objects.
 // os_syscall_i64 via the audited trap_syscall leaf preserves negative errno.
-VAULT_O_CLOEXEC :: prep { I64{524288} }
-VAULT_O_NOFOLLOW :: prep { I64{131072} }
-VAULT_O_DIRECTORY :: prep { I64{65536} }
-VAULT_RESOLVE :: prep { I64{12} }
-VAULT_STAT_BYTES :: prep { I64{144} }
-VAULT_STAT_MODE :: prep { I64{24} }
-VAULT_STAT_UID :: prep { I64{28} }
+VAULT_O_CLOEXEC :: I64{524288}
+VAULT_O_NOFOLLOW :: I64{131072}
+VAULT_O_DIRECTORY :: I64{65536}
+VAULT_RESOLVE :: I64{12}
+VAULT_STAT_BYTES :: I64{144}
+VAULT_STAT_MODE :: I64{24}
+VAULT_STAT_UID :: I64{28}
 // Only the temporary NUL shell is allocated; embedded NUL is invalid exactly
 // as CString::new. No normalization or UTF-8 conversion of filesystem bytes.
 fn vault_linux_path(path: I64) -> I64 {
@@ -668,10 +668,10 @@ fn vault_lock_fields(bytes: I64, length: I64, expected_repo: I64, expected_revis
 }
 
 // SecretsCrypto.rs:2170,2338-2342. Private fd ownership only; no Core FD carrier.
-VAULT_LOCK_BYTES :: prep { I64{32} }
-VAULT_LOCK_DIR :: prep { I64{0} }
-VAULT_LOCK_FILE :: prep { I64{8} }
-VAULT_LOCK_NONCE :: prep { I64{16} }
+VAULT_LOCK_BYTES :: I64{32}
+VAULT_LOCK_DIR :: I64{0}
+VAULT_LOCK_FILE :: I64{8}
+VAULT_LOCK_NONCE :: I64{16}
 fn vault_hex_put(out: I64, raw: I64, count: I64) {
     at := I64{0}
     loop at < count * (I64{2}) {

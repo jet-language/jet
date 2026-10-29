@@ -2,28 +2,18 @@
 // `run_build_plugin_host` plus Prelude/BuildPlugin.rs). Request bytes arrive
 // on stdin; one `list<u8>` guest response goes to stdout. The caller
 // validates the graph response and performs the transaction in the compiler
-// process. The component runs with no host imports and
-// the build limits any capability request fails at
-// instantiation instead of escaping the sandbox.
+// process.
+//
+// The guest is a runtime-path WebAssembly component that must load against
+// its verified digest and run with no host imports under fuel, memory,
+// table, and wall-clock limits. Core's plugin loader only binds a literal,
+// registered artifact, with no digest pin and no resource limits, so the
+// host fails closed after the package and request checks: no guest code
+// runs.
 
-// The guest world: one pure `build(request: list<u8>) -> list<u8>` export.
-trait BuildPluginGuest {
-    fn build(self, request: [U8]) -> [U8]
-}
+BUILD_PLUGIN_HOST_UNSUPPORTED :: "build plugins are not available: this jetpack cannot load a runtime WebAssembly component against a pinned digest under fuel, memory, table, and time limits"
 
-// Fuel, memory, tables, and wall time for one build call.
-fn cli_build_plugin_limits() -> plugin.Limits Never! {
-    plugin.Limits{fuel: 10000000, memory_bytes: 16777216, table_elements: 10000, timeout: time.duration_ms(2000)}
-}
-
-// The component file name only, so errors never leak an absolute worktree.
-fn cli_guest_name(path: String) -> String Never! {
-    name :: files.basename(path)
-    if name == "" -> return path
-    name
-}
-
-fn cli_run_build_plugin_host(args: [String]) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+fn cli_run_build_plugin_host(args: [String]) -[IO, FS]> Int Never! {
     if args.len() != 4 {
         term.eprint("build-plugin host requires manifest, component, and expected digests")
         return EXIT_USAGE
@@ -60,27 +50,6 @@ fn cli_run_build_plugin_host(args: [String]) -[IO, FS, Env, Exec, Time, Time.Wai
         term.eprint("build-plugin request exceeds {BUILD_PLUGIN_MAX_REQUEST_BYTES} bytes")
         return EXIT_USAGE
     }
-    // The load hashes the exact bytes it reads and refuses a component that
-    // changed after the digest check above (check-then-load race).
-    authority :: Authority.from_rights([String]{"FS.Read:{component_path}"})
-    guest :: plugin.load<BuildPluginGuest>(component_path, authority, sha256: Val(expected_component_digest), limits: cli_build_plugin_limits()) ?? {
-        term.eprint("couldn't load build plugin {cli_guest_name(component_path)}: {err}")
-        return EXIT_USAGE
-    }
-    response :: guest.build(request) ?? {
-        close(^guest)
-        term.eprint("calling build plugin build trapped: {err}")
-        return EXIT_USAGE
-    }
-    close(^guest)
-    if response.len() > BUILD_PLUGIN_MAX_RESPONSE_BYTES {
-        term.eprint("build-plugin response exceeds {BUILD_PLUGIN_MAX_RESPONSE_BYTES} bytes")
-        return EXIT_USAGE
-    }
-    stdout_handle := term.stdout()
-    &stdout_handle.write_bytes(response) ?? {
-        term.eprint("couldn't write build-plugin response: {err}")
-        return EXIT_USAGE
-    }
-    EXIT_OK
+    term.eprint(BUILD_PLUGIN_HOST_UNSUPPORTED)
+    EXIT_USER_ERROR
 }

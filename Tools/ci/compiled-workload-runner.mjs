@@ -64,7 +64,11 @@ const hostPlatform = process.platform === "linux" ? "linux" :
 if (platform !== hostPlatform) fail("report platform does not match the host: " + platform + " (host=" + hostPlatform + ")");
 reportDir = path.isAbsolute(reportDir) ? reportDir : path.join(root, reportDir);
 
-const jetBin = path.resolve(process.env.JET_COMPILED_WORKLOAD_JET_BIN || path.join(root, "target", "debug", process.platform === "win32" ? "jet.exe" : "jet"));
+// The Jet compiler under measurement: JET_COMPILED_WORKLOAD_JET_BIN, then JET
+// (the admitted native compiler), then `jet` on PATH.
+const configuredJet = process.env.JET_COMPILED_WORKLOAD_JET_BIN || process.env.JET;
+const jetBin = path.resolve(configuredJet || resolveExecutable(process.platform === "win32" ? "jet.exe" : "jet")
+  || fail("no Jet compiler: set JET_COMPILED_WORKLOAD_JET_BIN or JET, or put jet on PATH"));
 const exeSuffix = process.platform === "win32" ? ".exe" : "";
 const scratchRoot = process.env.JET_COMPILED_WORKLOAD_SCRATCH || path.join(os.homedir(), ".cache", "jet-dev", "scratch");
 const scratchPath = path.resolve(scratchRoot);
@@ -615,9 +619,10 @@ function peerLauncherInfo() {
     process.platform === "win32" ? "compiled-workload-peer-launcher.exe" : "compiled-workload-peer-launcher",
   );
   if (!configured && !fs.existsSync(launcherPath)) {
-    const source = path.join(root, "Tools", "ci", "compiled-workload-peer-launcher.rs");
-    fs.mkdirSync(path.dirname(launcherPath), { recursive: true });
-    const build = spawnSync("rustc", ["--edition=2021", "-O", source, "-o", launcherPath], {
+    // `jet build` writes the binary to `.jet/build/<stem>` beside the source.
+    const source = path.join(root, "Tools", "ci", "CompiledWorkloadPeerLauncher.jet");
+    const built = path.join(path.dirname(source), ".jet", "build", "CompiledWorkloadPeerLauncher" + exeSuffix);
+    const build = spawnSync(jetBin, ["build", "--quiet", source], {
       cwd: root,
       encoding: "utf8",
       maxBuffer: 1024 * 1024,
@@ -625,6 +630,9 @@ function peerLauncherInfo() {
     if (build.error || build.status !== 0) {
       fail("peer isolation launcher build failed: " + cleanText(build.stderr || build.stdout || build.error?.message));
     }
+    fs.mkdirSync(path.dirname(launcherPath), { recursive: true });
+    fs.copyFileSync(built, launcherPath);
+    fs.chmodSync(launcherPath, 0o755);
   }
   const launcher = resolveExecutable(launcherPath);
   if (!launcher) fail("peer isolation launcher is unavailable: " + launcherPath);
@@ -816,7 +824,7 @@ function writeWorkloadPackage(project, task, sourcePath) {
     path.join(project, "package.jet"),
     "name: \"compiled-workload\"\n" +
       "version: \"0.1.0\"\n" +
-      "authority: { holds: { allow: [" + allow + "] } }\n",
+      "authority: { allow: [" + allow + "] }\n",
   );
 }
 

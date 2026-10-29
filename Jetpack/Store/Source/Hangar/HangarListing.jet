@@ -8,19 +8,19 @@
 // model-only listing live in the package model (`HangarRoots`,
 // `pkg_store_list`); this facade is the checked engine boundary above it.
 
-STORE_STAGE_DIR :: prep { ".stage" }
-STORE_OBJECTS_DIR :: prep { "objects" }
-STORE_CAS_DIR :: prep { "cas" }
-STORE_REFERRERS_DIR :: prep { "referrers" }
-STORE_PARTIAL_SUFFIX :: prep { ".partial" }
-STORE_NIX_GC_ROOT :: prep { "nix-gc-root" }
-STORE_BUILD_SCRATCH_DIR :: prep { "build-scratch" }
-STORE_FAILED_SCRATCH_DIR :: prep { "failed-scratch" }
-STORE_AUTO_CLEAN_STAMP :: prep { ".last-auto-clean" }
-STORE_STALE_AFTER_SECONDS :: prep { 2592000 }
-STORE_AUTO_CLEAN_AFTER_SECONDS :: prep { 86400 }
-STORE_MAX_GC_METADATA_BYTES :: prep { 1048576 }
-STORE_LEASE_NAME_MAX :: prep { 256 }
+STORE_STAGE_DIR :: ".stage"
+STORE_OBJECTS_DIR :: "objects"
+STORE_CAS_DIR :: "cas"
+STORE_REFERRERS_DIR :: "referrers"
+STORE_PARTIAL_SUFFIX :: ".partial"
+STORE_NIX_GC_ROOT :: "nix-gc-root"
+STORE_BUILD_SCRATCH_DIR :: "build-scratch"
+STORE_FAILED_SCRATCH_DIR :: "failed-scratch"
+STORE_AUTO_CLEAN_STAMP :: ".last-auto-clean"
+STORE_STALE_AFTER_SECONDS :: 2592000
+STORE_AUTO_CLEAN_AFTER_SECONDS :: 86400
+STORE_MAX_GC_METADATA_BYTES :: 1048576
+STORE_LEASE_NAME_MAX :: 256
 
 store_optimize_sequence := 0
 store_gc_quarantine_sequence := 0
@@ -215,7 +215,7 @@ fn store_recover_hangar(verification: &StoreVerification, roots: HangarRoots) ->
     protocol :: ExecutableLeaseProtocol.open(roots.root)
     leases :: protocol.recover_stale_leases()
     closure :: store_recover_closure_journal_unlocked(&verification, roots)
-    migrated :: store_migrate_closure_graph_unlocked(&verification, roots)
+    migrated :: store_migrate_closure_graph_unlocked(&verification, roots).migrated
     Ok(staging + reproducibility + archive + repairs + build_debug + leases + closure + migrated)
 }
 
@@ -280,7 +280,8 @@ fn store_parse_decimal(text: String) -> Int? Never! {
         code :: Int.from_u8(byte)
         if code < 48 || code > 57 -> return None
     }
-    Int.parse(digits) ?? None
+    parsed :: Int.parse(digits) ?? return None
+    Val(parsed)
 }
 
 // Build the store id for a realization: human-readable `<name>-<version>`

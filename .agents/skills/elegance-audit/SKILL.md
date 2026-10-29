@@ -38,11 +38,11 @@ Stable identities are part of the surface. Diagnostic codes, command names, and 
 
 | Layer | Executable home |
 | --- | --- |
-| Syntax and lexical space | `crates/jet-foundation/src/Syntax.rs` and `Syntax/` |
+| Syntax and lexical space | `Compiler/JetFoundation/Data/Syntax/` and `Compiler/JetFoundation/Source/Syntax/` |
 | Concepts and semantics | Sema, the embedded Prelude, `Examples/`, and ratified decisions |
-| Diagnostics | `crates/jet-codegen/src/Prelude/Diagnostics.jet` |
+| Diagnostics | `Compiler/Prelude/Diagnostics.jet` |
 | Core API | `Core/` |
-| CLI and tooling surface | `crates/jet-cli/src/CLI.rs` (`COMMANDS`), flags, output formats, and manifest keys |
+| CLI and tooling surface | `Compiler/JetFoundation/Source/Registry/CLICommands.jet` (`JET_CLI_COMMANDS`), flags, output formats, and manifest keys |
 
 Other methods are rough references, not chained workflows. Use [`surface-audit`](../surface-audit/SKILL.md) outlier kinds, the [`isomorphic-ontology-audit`](../isomorphic-ontology-audit/SKILL.md) ontology and false-rhyme discipline, and [`structure-cleanup`](../structure-cleanup/SKILL.md) grouping and cohesion sense wherever they sharpen a count or a law. A passive read of them is not a second audit.
 

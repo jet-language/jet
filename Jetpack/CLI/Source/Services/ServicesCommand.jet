@@ -3,13 +3,13 @@
 // jetpack::CLI::services_secrets_config.
 
 // The E1262 guidance for an unrecognized dev-service field.
-SERVICES_UNKNOWN_FIELD_WHY :: prep { "a dev-supervised `Service` stays open at parse time, but Jet's dev-runtime tier is the only consumer of its fields — an unrecognized key is almost always a typo." }
-SERVICES_UNKNOWN_FIELD_FIX :: prep { "rename it to one of `enable`, `ports`, `run`, `shutdown`, `data_dir`, `ready`, `restart`, `watch`, `after`, `before_start`, or `sockets`, or remove it." }
+SERVICES_UNKNOWN_FIELD_WHY :: "a dev-supervised `Service` stays open at parse time, but Jet's dev-runtime tier is the only consumer of its fields — an unrecognized key is almost always a typo."
+SERVICES_UNKNOWN_FIELD_FIX :: "rename it to one of `enable`, `ports`, `run`, `shutdown`, `data_dir`, `ready`, `restart`, `watch`, `after`, `before_start`, or `sockets`, or remove it."
 // U12: the readiness-poll ceiling before E1261; tests shorten it through
 // this env var (the same test-only escape hatch as JETPACK_ROOT).
-SERVICES_HEALTH_TIMEOUT_ENV :: prep { "JETPACK_SERVICE_HEALTH_TIMEOUT_MS" }
-SERVICES_HEALTH_TIMEOUT_SECONDS :: prep { 15 }
-SERVICES_PROBE_SAMPLES :: prep { 20 }
+SERVICES_HEALTH_TIMEOUT_ENV :: "JETPACK_SERVICE_HEALTH_TIMEOUT_MS"
+SERVICES_HEALTH_TIMEOUT_SECONDS :: 15
+SERVICES_PROBE_SAMPLES :: 20
 
 // The `jet os services` verbs.
 enum ServicesVerb {
@@ -65,9 +65,13 @@ fn cli_validate_declared_secrets_with_reuse(theme: Theme, project_dir: String, s
         missing := String?{None}
         if !reuse_verified_store {
             visiting := [String]{}
-            missing = cli_secret_activation_missing(project_dir, spec, specs, &visiting) ?? {
-                theme.error("couldn't read secret named {spec.name}", err.message(), "")
-                return Err(CLIError.Reported(EXIT_USAGE))
+            if cli_secret_activation_missing(project_dir, spec, specs, &visiting) == {
+                .Val(name) -> missing = Val(name)
+                .None -> {}
+                .Err(error) -> {
+                    theme.error("couldn't read secret named {spec.name}", error.message(), "")
+                    return Err(CLIError.Reported(EXIT_USAGE))
+                }
             }
         }
         if missing == .Val(name) {
@@ -87,11 +91,14 @@ fn cli_validate_declared_secrets_with_reuse(theme: Theme, project_dir: String, s
 // A max-age rotation policy: overdue is E1333, an error for a required
 // declaration and a warning for an optional one.
 fn cli_check_secret_rotation(theme: Theme, project_dir: String, spec: SecretSpec, environment: String, seconds: Int) CLIError! -[IO, FS, Env, Time, Time.Wait]> {
-    stored :: trust_secrets_store_age(project_dir) ?? {
-        theme.error("couldn't inspect secret rotation age", err.message(), "")
-        return Err(CLIError.Reported(EXIT_USAGE))
+    age :: if trust_secrets_store_age(project_dir) == {
+        .Val(found) -> found
+        .None -> { return }
+        .Err(error) -> {
+            theme.error("couldn't inspect secret rotation age", error.message(), "")
+            return Err(CLIError.Reported(EXIT_USAGE))
+        }
     }
-    age :: stored ?? return
     if age.ns <= time.duration_seconds(seconds).ns -> return
     headline :: "secret named {spec.name} is past its rotation age for environment {environment}"
     if spec.required {
@@ -103,13 +110,15 @@ fn cli_check_secret_rotation(theme: Theme, project_dir: String, spec: SecretSpec
 
 // The first stored name a declaration needs that the store lacks, following
 // composition inputs; a composition cycle reports the revisited name.
-fn cli_secret_activation_missing(project_dir: String, spec: SecretSpec, specs: [SecretSpec], visiting: &[String]) -[FS, Env]> String? CLIError! {
+fn cli_secret_activation_missing(project_dir: String, spec: SecretSpec, specs: [SecretSpec], visiting: &[String]) -[FS, Env, Exec, Time.Wait]> String? CLIError! {
     if visiting.contains(spec.name) -> return Ok(Val(spec.name))
     if spec.declaration == {
         .Stored -> {
-            value :: trust_secrets_get(project_dir, spec.name) ?? return Err(CLIError.Other(err.message()))
-            if value == None -> return Ok(Val(spec.name))
-            Ok(None)
+            if trust_secrets_get(project_dir, spec.name) == {
+                .Val(_) -> Ok(None)
+                .None -> Ok(Val(spec.name))
+                .Err(error) -> Err(CLIError.Other(error.message()))
+            }
         }
         .Compose(_, from) -> {
             &visiting.push(spec.name)
@@ -119,16 +128,16 @@ fn cli_secret_activation_missing(project_dir: String, spec: SecretSpec, specs: [
                     if candidate.name == input && input_spec == None -> input_spec = Val(candidate)
                 }
                 found :: input_spec ?? {
-                    &visiting.pop()
+                    _ :: &visiting.pop()
                     return Ok(Val(input))
                 }
                 nested :: cli_secret_activation_missing(project_dir, found, specs, &visiting)
                 if nested != None {
-                    &visiting.pop()
+                    _ :: &visiting.pop()
                     return Ok(nested)
                 }
             }
-            &visiting.pop()
+            _ :: &visiting.pop()
             Ok(None)
         }
     }
@@ -138,13 +147,13 @@ fn cli_secret_activation_missing(project_dir: String, spec: SecretSpec, specs: [
 // healthy (or E1261 on timeout) before `jet dev` runs the project's
 // `fn dev()`/`fn run()`. The composed env puts catalog binaries on PATH the
 // same way as the project's own command.
-fn cli_wait_for_services_ready(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, env: ShellEnv, services: [DevServicePlan]) CLIError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
+fn cli_wait_for_services_ready(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, env: &ShellEnv, services: [DevServicePlan]) CLIError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
     selected := [Int]{}
     loop index in 0..<services.len() {
         if services[index].enable -> &selected.push(index)
     }
     before_start :: (svc: DevServicePlan) -> cli_service_before_start(&verification, &cache, theme, parsed, roots, project_dir, entry, svc, true)
-    if services_up_ordered_with(ServiceHost.Platform, project_dir, env, services, selected, cli_service_health_timeout(), before_start) == .Err(error) {
+    if services_up_ordered_with(ServiceHost.Platform, project_dir, &env, services, selected, cli_service_health_timeout(), before_start) == .Err(error) {
         cli_report_service_start_error(theme, "couldn't start dev services", error.message)
         return Err(CLIError.Reported(EXIT_USAGE))
     }
@@ -198,22 +207,22 @@ struct LifecycleHookMode {
 // Run typed lifecycle actions through the same composed environment used by
 // commands and services. The normal short form names a checked `#Job fn`;
 // only an explicit record command uses the expert trust-gated hook escape.
-fn cli_run_lifecycle_hooks(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, env: ShellEnv, hooks: [HookSpec], phase: String) CLIError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
-    cli_run_lifecycle_hooks_with_mode(&verification, &cache, theme, parsed, roots, project_dir, entry, env, hooks, phase, LifecycleHookMode{clean: false, strict: false, silent: false})
+fn cli_run_lifecycle_hooks(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, env: &ShellEnv, hooks: [HookSpec], phase: String) CLIError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
+    cli_run_lifecycle_hooks_with_mode(&verification, &cache, theme, parsed, roots, project_dir, entry, &env, hooks, phase, LifecycleHookMode{clean: false, strict: false, silent: false})
 }
 
 // Shell activation: job stdout must not corrupt the generated export script.
-fn cli_run_lifecycle_hooks_silent(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, env: ShellEnv, hooks: [HookSpec], phase: String) CLIError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
-    cli_run_lifecycle_hooks_with_mode(&verification, &cache, theme, parsed, roots, project_dir, entry, env, hooks, phase, LifecycleHookMode{clean: false, strict: false, silent: true})
+fn cli_run_lifecycle_hooks_silent(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, env: &ShellEnv, hooks: [HookSpec], phase: String) CLIError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
+    cli_run_lifecycle_hooks_with_mode(&verification, &cache, theme, parsed, roots, project_dir, entry, &env, hooks, phase, LifecycleHookMode{clean: false, strict: false, silent: true})
 }
 
 // `jet env test`: only the declared environment is visible, so a check cannot
 // pass because a host variable or host-installed executable leaked in.
-fn cli_run_lifecycle_hooks_clean(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, env: ShellEnv, hooks: [HookSpec], phase: String) CLIError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
-    cli_run_lifecycle_hooks_with_mode(&verification, &cache, theme, parsed, roots, project_dir, entry, env, hooks, phase, LifecycleHookMode{clean: true, strict: true, silent: true})
+fn cli_run_lifecycle_hooks_clean(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, env: &ShellEnv, hooks: [HookSpec], phase: String) CLIError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
+    cli_run_lifecycle_hooks_with_mode(&verification, &cache, theme, parsed, roots, project_dir, entry, &env, hooks, phase, LifecycleHookMode{clean: true, strict: true, silent: true})
 }
 
-fn cli_run_lifecycle_hooks_with_mode(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, env: ShellEnv, hooks: [HookSpec], phase: String, mode: LifecycleHookMode) CLIError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
+fn cli_run_lifecycle_hooks_with_mode(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, env: &ShellEnv, hooks: [HookSpec], phase: String, mode: LifecycleHookMode) CLIError! -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> {
     loop hook in hooks {
         if hook.action == {
             .Task(job) -> {
@@ -224,13 +233,13 @@ fn cli_run_lifecycle_hooks_with_mode(verification: &StoreVerification, cache: &W
                     return Err(CLIError.Reported(code))
                 }
             }
-            .Command(command) -> cli_run_lifecycle_command(theme, project_dir, env, hook, command, phase, mode)
+            .Command(command) -> cli_run_lifecycle_command(theme, project_dir, &env, hook, command, phase, mode)
         }
     }
 }
 
 // One explicit, trust-gated lifecycle command in a checked project cwd.
-fn cli_run_lifecycle_command(theme: Theme, project_dir: String, env: ShellEnv, hook: HookSpec, command: String, phase: String, mode: LifecycleHookMode) CLIError! -[IO, FS, Env, Exec, Time.Wait]> {
+fn cli_run_lifecycle_command(theme: Theme, project_dir: String, env: &ShellEnv, hook: HookSpec, command: String, phase: String, mode: LifecycleHookMode) CLIError! -[IO, FS, Env, Exec, Time.Wait]> {
     if !hook.trusted {
         if !mode.strict {
             theme.detail("skipping untrusted lifecycle {phase} hook `{hook.name}`")
@@ -256,7 +265,10 @@ fn cli_run_lifecycle_command(theme: Theme, project_dir: String, env: ShellEnv, h
         return Err(CLIError.Reported(EXIT_USAGE))
     }
     spec := process.shell(command).cwd(cwd).stdout(.Capture).stderr(.Capture)
-    spec = if mode.clean -> &env.apply_clean_to(spec.env_clear()) else -> &env.apply_to(spec)
+    spec = &env.apply_in_mode(spec, mode.clean) ?? {
+        theme.error("couldn't run {phase} hook '{hook.name}'", err.message(), "run the hook outside the leased environment until Core can pass descriptors to a child.")
+        return Err(CLIError.Reported(EXIT_USAGE))
+    }
     receipt :: spec.run() ?? {
         theme.error("couldn't run {phase} hook '{hook.name}'", "{err}", "check the hook command and its working directory.")
         return Err(CLIError.Reported(EXIT_USAGE))
@@ -334,8 +346,8 @@ fn cli_services_order_or_report(theme: Theme, services: [DevServicePlan], name: 
     }
 }
 
-SERVICES_ORDER_FIX_DECLARE :: prep { "declare each dependency once, keep it enabled, and remove dependency cycles." }
-SERVICES_ORDER_FIX_CYCLES :: prep { "remove dependency cycles and unknown dependencies." }
+SERVICES_ORDER_FIX_DECLARE :: "declare each dependency once, keep it enabled, and remove dependency cycles."
+SERVICES_ORDER_FIX_CYCLES :: "remove dependency cycles and unknown dependencies."
 
 // `jet os services up|down|health|logs|wait|restart|watch [<name>]` (U12).
 // With no `<name>` every declared dev service is targeted; `logs` requires
@@ -404,11 +416,11 @@ fn cli_services_up(verification: &StoreVerification, cache: &WorkspaceDeclaratio
     project_dir :: plan.project_root
     roots :: pkg_resolve_roots()
     if roots.dev_mode -> theme.detail(theme.gray("user-owned hangar active"))
-    env :: cli_compose_env(&verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    env := cli_compose_env(&verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
     order :: cli_services_order_or_report(theme, plan.dev_services, name, SERVICES_ORDER_FIX_DECLARE) ?? return EXIT_USAGE
     entry :: cli_find_project_entry(project_dir)
     before_start :: (svc: DevServicePlan) -> cli_service_before_start(&verification, &cache, theme, parsed, roots, project_dir, entry, svc, false)
-    started :: services_up_ordered_with(ServiceHost.Platform, project_dir, env, plan.dev_services, order, cli_service_health_timeout(), before_start) ?? {
+    started :: services_up_ordered_with(ServiceHost.Platform, project_dir, &env, plan.dev_services, order, cli_service_health_timeout(), before_start) ?? {
         cli_report_service_start_error(theme, "couldn't start services", err.message)
         return EXIT_USAGE
     }
@@ -419,11 +431,11 @@ fn cli_services_up(verification: &StoreVerification, cache: &WorkspaceDeclaratio
 fn cli_services_restart(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, plan: RunPlan, name: String?) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     project_dir :: plan.project_root
     roots :: pkg_resolve_roots()
-    env :: cli_compose_env(&verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    env := cli_compose_env(&verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
     order :: cli_services_order_or_report(theme, plan.dev_services, name, SERVICES_ORDER_FIX_CYCLES) ?? return EXIT_USAGE
     entry :: cli_find_project_entry(project_dir)
     before_start :: (svc: DevServicePlan) -> cli_service_before_start(&verification, &cache, theme, parsed, roots, project_dir, entry, svc, false)
-    restarted :: services_restart_ordered_with(ServiceHost.Platform, project_dir, env, plan.dev_services, order, cli_service_health_timeout(), before_start) ?? {
+    restarted :: services_restart_ordered_with(ServiceHost.Platform, project_dir, &env, plan.dev_services, order, cli_service_health_timeout(), before_start) ?? {
         theme.error("couldn't restart services", err.message, "check the service logs, readiness declarations, and restart policy.")
         return EXIT_USAGE
     }
@@ -431,7 +443,7 @@ fn cli_services_restart(verification: &StoreVerification, cache: &WorkspaceDecla
     EXIT_OK
 }
 
-fn cli_services_down(theme: Theme, plan: RunPlan, name: String?) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+fn cli_services_down(theme: Theme, plan: RunPlan, name: String?) -[IO, FS, Env, Exec, Time, Time.Wait, Rand]> Int Never! {
     order :: cli_services_order_or_report(theme, plan.dev_services, name, SERVICES_ORDER_FIX_DECLARE) ?? return EXIT_USAGE
     services_down_ordered(ServiceHost.Platform, plan.project_root, plan.dev_services, order) ?? {
         theme.error("couldn't stop services", err.message, "inspect the service logs and state.")
@@ -459,25 +471,28 @@ fn cli_service_health_label(health: ServiceHealth, json: Bool) -> (label: String
 fn cli_services_health(verification: &StoreVerification, theme: Theme, parsed: CLIParsed, plan: RunPlan, targets: [DevServicePlan]) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     project_dir :: plan.project_root
     roots :: pkg_resolve_roots()
-    env :: cli_compose_env(&verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    env := cli_compose_env(&verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
     all_healthy := true
     if parsed.flags.json {
         records := [String]{}
         loop svc in targets {
-            state :: cli_service_health_label(services_health_one_with_env(project_dir, Val(env), svc), true)
+            state :: cli_service_health_label(services_health_one(project_dir, &env, svc), true)
             all_healthy = all_healthy && state.healthy
-            found :: services_lifecycle_json(project_dir, svc.name) ?? {
-                eprint("services JSON: {err.message}")
-                return EXIT_USAGE
+            lifecycle :: if services_lifecycle_json(project_dir, svc.name) == {
+                .Val(json) -> json
+                .None -> "null"
+                .Err(error) -> {
+                    eprint("services JSON: {error.message}")
+                    return EXIT_USAGE
+                }
             }
-            lifecycle :: found ?? "null"
             &records.push("{{\"service\":{cli_json_quote(svc.name)},\"health\":{cli_json_quote(state.label)},\"lifecycle\":{lifecycle}}}")
         }
         print("[{records.join(",")}]")
         return if all_healthy -> EXIT_OK else -> EXIT_USER_ERROR
     }
     loop svc in targets {
-        state :: cli_service_health_label(services_health_one_with_env(project_dir, Val(env), svc), false)
+        state :: cli_service_health_label(services_health_one(project_dir, &env, svc), false)
         all_healthy = all_healthy && state.healthy
         if state.healthy {
             theme.ok("service `{svc.name}`: {state.label}")
@@ -491,11 +506,11 @@ fn cli_services_health(verification: &StoreVerification, theme: Theme, parsed: C
 fn cli_services_wait(verification: &StoreVerification, theme: Theme, parsed: CLIParsed, plan: RunPlan, name: String?) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     project_dir :: plan.project_root
     roots :: pkg_resolve_roots()
-    env :: cli_compose_env(&verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    env := cli_compose_env(&verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
     order :: cli_services_order_or_report(theme, plan.dev_services, name, SERVICES_ORDER_FIX_CYCLES) ?? return EXIT_USAGE
     loop index in order {
         svc :: plan.dev_services[index]
-        if !services_wait_healthy_with_env(project_dir, Val(env), svc, cli_service_health_timeout()) {
+        if !services_wait_healthy(project_dir, &env, svc, cli_service_health_timeout()) {
             theme.error_coded("E1261", "service `{svc.name}` is not ready", "jet waited for the service's typed readiness contract and it did not pass.", "start it with `jet os services up {svc.name}` or inspect its logs.")
             return EXIT_USER_ERROR
         }
@@ -507,11 +522,11 @@ fn cli_services_wait(verification: &StoreVerification, theme: Theme, parsed: CLI
 fn cli_services_watch(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, plan: RunPlan, name: String?) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     project_dir :: plan.project_root
     roots :: pkg_resolve_roots()
-    env :: cli_compose_env(&verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    env := cli_compose_env(&verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
     order :: cli_services_order_or_report(theme, plan.dev_services, name, SERVICES_ORDER_FIX_CYCLES) ?? return EXIT_USAGE
     entry :: cli_find_project_entry(project_dir)
     before_start :: (svc: DevServicePlan) -> cli_service_before_start(&verification, &cache, theme, parsed, roots, project_dir, entry, svc, false)
-    changed :: services_watch_once_ordered_with(ServiceHost.Platform, project_dir, env, plan.dev_services, order, cli_service_health_timeout(), before_start) ?? {
+    changed :: services_watch_once_ordered_with(ServiceHost.Platform, project_dir, &env, plan.dev_services, order, cli_service_health_timeout(), before_start) ?? {
         theme.error("couldn't watch services", err.message, "declare project-relative files in `watch` and inspect the service lifecycle error.")
         return EXIT_USAGE
     }
@@ -553,8 +568,8 @@ fn cli_cmd_service_probe(verification: &StoreVerification, theme: Theme, parsed:
     if trust_gate_with_environment(theme, trust_store_path(), project_dir, plan.refs, plan.table, plan.secrets, plan.environment, parsed.flags.trust) == .Val(code) -> return code
     cli_validate_declared_secrets(theme, project_dir, plan.secrets, plan.environment.active_environment) ?? return cli_exit_for(theme, err)
     roots :: pkg_resolve_roots()
-    env :: cli_compose_env(&verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
-    samples :: services_measure_readiness(ServiceHost.Platform, project_dir, env, service, SERVICES_PROBE_SAMPLES) ?? {
+    env := cli_compose_env(&verification, theme, roots, parsed.flags, plan) ?? return cli_exit_for(theme, err)
+    samples :: services_measure_readiness(ServiceHost.Platform, project_dir, &env, service, SERVICES_PROBE_SAMPLES) ?? {
         theme.error("couldn't measure service `{name}`", err.message, "check the service run, shutdown, and readiness declarations.")
         return EXIT_USAGE
     }

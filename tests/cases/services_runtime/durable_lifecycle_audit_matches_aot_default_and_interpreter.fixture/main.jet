@@ -1,0 +1,52 @@
+use core.service as service
+use core.testing as testing
+use core.time as time
+
+fn worker() -[]> {}
+
+fn state_name(delivery: ^Delivery) -> String {
+    state :: delivery.status() ?? panic("status")
+    if state == {
+        .Pending -> { return "pending" }
+        .Accepted -> { return "accepted" }
+        .Delivering -> { return "delivering" }
+        .Delivered -> { return "delivered" }
+        .DeadLettered -> { return "dead" }
+        .Cancelled -> { return "cancelled" }
+    }
+    return "unknown"
+}
+
+fn run() {
+    temp := testing.temp_dir("durable-audit")
+    store :: Path.from(temp).join("authority.log").to_string()
+    state_path :: Path.from(temp).join("state.log").to_string()
+    retention :: Duration.seconds(86400) ?? panic("retention")
+    runtime := service.runtime(store, retention: retention)
+    tree := service.tree("durable-audit")
+    &tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
+    state :: service.state_store(state_path) ?? panic("state")
+    &tree.set_state_event_log(^state, "audit-events", 1, "reversible") ?? panic("state adapter")
+    endpoint :: &tree.worker("worker", worker, capacity: 2) ?? panic("worker")
+    &tree.start() ?? panic("start")
+
+    accepted :: runtime.send(endpoint, "accepted", key: "accepted") ?? panic("accepted")
+    receipt :: (accepted.copy()).receipt() ?? panic("receipt")
+    events :: (accepted.copy()).events() ?? panic("events")
+    is_receipt :: receipt.show().contains("DeliveryReceipt")
+    print("audit:{is_receipt}:{events.len()}")
+    accepted.status() ?? panic("accepted status")
+
+    cancelled_handle :: runtime.send(endpoint, "cancelled", key: "cancelled") ?? panic("cancelled")
+    cancelled :: cancelled_handle.cancel() ?? panic("cancel")
+    print("cancel:{state_name(^cancelled)}")
+
+    dead_handle :: runtime.send(endpoint, "dead", key: "dead") ?? panic("dead")
+    dead :: runtime.dead_letter(dead_handle) ?? panic("dead letter")
+    print("dead:{state_name(^dead)}")
+
+    short_runtime := service.runtime(store, retention: Duration.milliseconds(1) ?? panic("short retention"))
+    expiring :: short_runtime.send(endpoint, "expiring", key: "expiring") ?? panic("expiring")
+    time.sleep(Duration.milliseconds(5) ?? panic("sleep"))
+    print("expired:{state_name(^expiring)}")
+}

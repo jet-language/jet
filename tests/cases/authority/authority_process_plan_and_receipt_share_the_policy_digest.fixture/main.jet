@@ -1,0 +1,19 @@
+
+use core.process as process
+
+fn run() {
+    policy :: Authority.from_rights([
+        "FS.Read:repo",
+        "FS.Write:.jet/build",
+        "Exec:/usr/bin/printf",
+    ])
+    spec :: process.cmd(["/usr/bin/printf", "receipt"]).cwd("/tmp").under(policy)
+    if spec.plan() == {
+        .Ok(plan) -> {
+            receipt :: spec.run() ?? panic("run failed")
+            print(plan.policy_digest == receipt.policy_digest)
+            print(receipt.redacted)
+        }
+        .Err(_) -> print("refused")
+    }
+}

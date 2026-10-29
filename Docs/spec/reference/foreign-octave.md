@@ -2,10 +2,9 @@
 
 Jet can call one-input, one-output matrix functions from an Octave `.m` file.
 This page is for numerical-code authors using the `octave.*` binder and for
-reviewers checking the foreign-process boundary. The executable binder is
-[`Source/CmdDevTools.rs`](../../../Source/CmdDevTools.rs), with input rules and
-artifact generation in
-[`crates/jet-pkg-model/src/OctaveBind.rs`](../../../crates/jet-pkg-model/src/OctaveBind.rs).
+reviewers checking the foreign-process boundary. Input rules and artifact
+generation are in
+[`Octave.jet`](../../../Jetpack/Integrations/Source/Foreign/Binders/Octave.jet).
 The boundary is identified by `D-FFI-OCTAVE1=A`.
 
 ## Bind a script

@@ -1,0 +1,8 @@
+Error [E0118]: `first` in this pattern would make a new `first`, but `first` already holds a value
+  --> pattern_test_reuse_list_item.jet:19:23
+    |
+ 19 |     same :: words == [first, ..rest]
+    |                       ^^^^^
+ Why: A pattern test introduces the names in its pattern; it does not compare with an existing value
+ Fix: Pick a new name to bind (`_` if unused); to compare, test the pattern in an `if` condition and compare the bound name there: `if subject == .Case(found) && found == first`
+More: jet-lang.dev/e/E0118

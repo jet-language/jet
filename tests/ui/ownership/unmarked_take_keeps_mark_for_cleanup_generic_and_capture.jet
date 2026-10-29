@@ -1,0 +1,20 @@
+
+struct Lock {
+    name: String
+}
+
+impl Lock.Close {
+    fn close(^self) { print("release {self.name}") }
+}
+
+struct Session {
+    lock: Lock
+    user: String
+}
+
+fn hand_off(s: ^Session) { print(s.user) }
+
+fn run() {
+    held :: Session{lock: Lock{name: "db"}, user: "ada"}
+    hand_off(held)
+}

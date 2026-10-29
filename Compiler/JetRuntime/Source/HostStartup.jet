@@ -114,7 +114,7 @@ fn host_startup_byte_length(bytes: I64) -> I64 {
     count
 }
 
-// Native List<U8> is packed. Empty data is null; capacity is exactly length,
+// Native [U8] is packed. Empty data is null; capacity is exactly length,
 // and the sole owner releases length bytes at the native list alignment 8.
 fn host_startup_bytes(bytes: I64, length: I64) -> I64 {
     if (length == I64{0}) { return I64{0} }
@@ -135,7 +135,7 @@ fn host_startup_bytes(bytes: I64, length: I64) -> I64 {
 
 fn host_startup_list(bytes: I64, length: I64, output: I64) {
     data :: host_startup_bytes(bytes, length)
-    #Unsafe("output lends a 24-byte native List<U8> header and receives ownership of data") {
+    #Unsafe("output lends a 24-byte native [U8] header and receives ownership of data") {
         os_store_i64(output, length)
         os_store_i64(wrapping(output + I64{8}), length)
         os_store_i64(wrapping(output + I64{16}), data)

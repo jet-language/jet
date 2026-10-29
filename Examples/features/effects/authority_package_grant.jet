@@ -1,0 +1,15 @@
+// Application authority, written grant: a leading package block adds rights
+// under `authority`. The row adds to the beginner floor (IO, Mem.Alloc,
+// Exec.Args), so it names only Env and Time, and printing still works.
+package {
+    name: "authority_package_grant"
+    authority: { allow: [Env, Time] }
+}
+
+use core.sys as sys
+use core.time as time
+
+fn run() {
+    print("HOME set: {sys.get("HOME") != None}")
+    print("clock runs: {time.instant().elapsed_millis() >= 0}")
+}

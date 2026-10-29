@@ -1,0 +1,66 @@
+
+use core.files as files
+use core.time as time
+
+struct Holder { owner: files.TempFile }
+
+fn transfer_owner(owner: ^files.TempFile) -> files.TempFile {
+    owner
+}
+
+fn replaced_paths() -> [String] {
+    owner := files.temp_file("replace-before") ?? panic("before")
+    old_path :: owner.path
+    owner = files.temp_file("replace-after") ?? panic("after")
+    print(!files.exists(old_path))
+    path :: owner.path
+    print(files.exists(path))
+    [old_path, path]
+}
+
+fn replace_moved_slot() {
+    owner := files.temp_file("replace-moved") ?? panic("moved")
+    moved :: transfer_owner(^owner)
+    path :: moved.path
+    owner = files.temp_file("replace-reinit") ?? panic("reinit")
+    print(files.exists(path))
+    close(^moved)
+    print(!files.exists(path))
+    replacement :: owner.path
+    close(^owner)
+    print(!files.exists(replacement))
+}
+
+fn failed_replacement(root: String) -> String {
+    old_path :: files.join(root, "old.lock")
+    owner := files.lock(old_path) ?? panic("old lock")
+    occupied :: files.join(root, "occupied.lock")
+    contender :: files.lock(occupied) ?? panic("hold occupied")
+    owner = files.lock(occupied, timeout: Val(time.duration_ms(1))) ?? {
+        print(files.exists(old_path))
+        close(^contender)
+        files.remove(occupied) ?? panic("remove occupied")
+        return old_path
+    }
+    panic("lock of held path must time out")
+}
+
+fn replace_aggregate_slot() {
+    holder := Holder{owner: files.temp_file("aggregate-before") ?? panic("before")}
+    old_path :: holder.owner.path
+    holder.owner = files.temp_file("aggregate-after") ?? panic("after")
+    print(!files.exists(old_path))
+    path :: holder.owner.path
+    close(^holder.owner)
+    print(!files.exists(path))
+}
+
+fn run() {
+    paths :: replaced_paths()
+    print(!files.exists(paths[0]))
+    print(!files.exists(paths[1]))
+    replace_moved_slot()
+    old_lock :: failed_replacement("scratch")
+    print(files.exists(old_lock))
+    replace_aggregate_slot()
+}

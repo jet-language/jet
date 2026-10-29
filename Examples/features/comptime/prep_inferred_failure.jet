@@ -1,0 +1,20 @@
+// A value prepared while building may reach a function with no failure
+// annotation from one that promises `Never!` (#3708): `checked_total` calls
+// `doubled`, whose failure is inferred. The build proves `doubled` cannot
+// fail over the functions the preparation reaches, as the whole program's
+// check does, so `TOTAL` is prepared while building and the run's own call
+// reuses the bodies that preparation checked.
+fn doubled(value: Int) -> Int { value * 2 }
+
+fn checked_total(count: Int) -> Int Never! {
+    total := 0
+    loop index in 0..<count -> total += doubled(index)
+    total
+}
+
+TOTAL :: comptime { checked_total(5) }
+
+fn run() {
+    print("total: {TOTAL}")
+    print("again: {checked_total(3)}")
+}

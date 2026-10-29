@@ -2,9 +2,10 @@
 
 This page defines the hermetic `jet cc` and `jet c++` interfaces. It is for
 Make, CMake, and other build-host authors that need a C-family compiler slot.
-The executable contract lives in [`Source/main.rs`](../../../Source/main.rs),
-the driver implementation in [`Source/CmdCompile.rs`](../../../Source/CmdCompile.rs),
-and the focused fixtures in [`tests/cc_driver_hosts.rs`](../../../tests/cc_driver_hosts.rs).
+The `jet` front door forwards `cc` and `c++` to Jetpack in
+[`CommandOutput.jet`](../../../Compiler/JetCli/Source/Cli/CommandOutput.jet);
+the driver implementation is in [`Jetpack/CLI/Source/CcDriver`](../../../Jetpack/CLI/Source/CcDriver/),
+and the focused fixtures are in [`tests/guards/cc_driver_hosts.jet`](../../../tests/guards/cc_driver_hosts.jet).
 
 `jet-cc` is the installed alias for `jet cc`; `jet-cxx` and `jet-c++` are
 aliases for `jet c++`. The aliases are real binaries, not shell wrappers. They
@@ -100,8 +101,9 @@ response file.
 
 ```sh
 repo="$(git rev-parse --show-toplevel)"
-cc="$repo/target/debug/jet-cc"
-cxx="$repo/target/debug/jet-c++"
+jet="${JET:-$(command -v jet)}"
+cc="$(dirname "$jet")/jet-cc"
+cxx="$(dirname "$jet")/jet-c++"
 make_src="$repo/tests/fixtures/foreign_build_hosts/make-cc"
 make_build="$make_src/build"
 

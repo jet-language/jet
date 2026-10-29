@@ -2,9 +2,9 @@
 // diagnostic through jet_foundation::Diagnostics; here the pinned fixture's
 // Error/Why/Fix lines are compared field by field.
 
-MEMBER_SELECT_E1231_SNAPSHOT :: prep { embed_file("../../../tests/fixtures/jetpack-diagnostics/E1231.stderr") }
-MEMBER_SELECT_E1295_SNAPSHOT :: prep { embed_file("../../../tests/fixtures/jetpack-diagnostics/E1295.stderr") }
-MEMBER_SELECT_E1296_SNAPSHOT :: prep { embed_file("../../../tests/fixtures/jetpack-diagnostics/E1296.stderr") }
+MEMBER_SELECT_E1231_SNAPSHOT :: comptime { embed_file("../../../tests/fixtures/jetpack-diagnostics/E1231.stderr") }
+MEMBER_SELECT_E1295_SNAPSHOT :: comptime { embed_file("../../../tests/fixtures/jetpack-diagnostics/E1295.stderr") }
+MEMBER_SELECT_E1296_SNAPSHOT :: comptime { embed_file("../../../tests/fixtures/jetpack-diagnostics/E1296.stderr") }
 
 fn env_select_test_snapshot(snapshot: String, diagnostic: Diagnostic) {
     expected :: "Error [{diagnostic.code}]: {diagnostic.what}\n Why: {diagnostic.why}\n Fix: {diagnostic.fix}\n"
@@ -50,7 +50,7 @@ fn env_select_test_commit_base(root: String) -[Exec, Time.Wait]> {
     env_select_test_git(root, [String]{"config", "user.email", "test@example.com"})
     env_select_test_git(root, [String]{"config", "user.name", "test"})
     env_select_test_git(root, [String]{"add", "."})
-    env_select_test_git(root, [String]{"commit", "-m", "base"})
+    _ :: env_select_test_git(root, [String]{"commit", "-m", "base"})
 }
 
 fn env_select_test_names(members: [WorkspacePlanMember]) -> [String] {

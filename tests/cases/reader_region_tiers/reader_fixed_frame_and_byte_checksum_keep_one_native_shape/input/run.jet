@@ -1,0 +1,14 @@
+
+fn run() {
+    payload :: [U8]{7, 1, 0x34, 0x12, 1, 0, 0, 0}
+    checksum := U64{0}
+    loop byte in payload -> checksum += U64.from_u8(byte)
+    reader :: Reader.over(payload)
+    frame :: reader.take_pattern([U8]{"{channel:U8}{flags:U8}{sample:U16le}{tick:U32le}"}) ?? panic("short frame")
+    print(checksum)
+    print(frame.channel)
+    print(frame.flags)
+    print(frame.sample)
+    print(frame.tick)
+    print(reader.remaining())
+}

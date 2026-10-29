@@ -2,6 +2,16 @@
 // value shape and every response row survives the JSON round trip exactly,
 // and anything else is refused rather than guessed.
 use core.math as math
+use jet_foundation.[
+    CtEnumArg, CtFloat, CtKey, CtMapEntry, CtReport, CtValue, Diagnostic, JetConfigOutcome,
+    NamedCtKey, NamedCtValue, Span, compiler_service_check_diagnostics,
+    compiler_service_check_request, compiler_service_check_request_from,
+    compiler_service_check_response, compiler_service_comptime_outcome,
+    compiler_service_comptime_request, compiler_service_comptime_request_from,
+    compiler_service_comptime_response, compiler_service_render, compiler_service_value_from_wire,
+    compiler_service_value_wire, diagnostic_from_registry, foundation_parse_protocol_json,
+    jet_config_eval_diagnostic,
+]
 
 fn compiler_service_test_round_trip(value: CtValue) Never! {
     wire :: compiler_service_value_wire(value) ?? panic("a config value has a wire spelling")
@@ -15,39 +25,39 @@ fn compiler_service_test_response(text: String) -> Dyn Never! {
     foundation_parse_protocol_json(text) ?? panic("a service response is protocol JSON")
 }
 
-fn run() {
+#Test("compiler_service") {
     // comptime-evaluate values: scalars, floats by bit pattern, and nesting.
-    compiler_service_test_round_trip(CtValue.Int(-9223372036854775807))
-    compiler_service_test_round_trip(CtValue.BigInt("123456789012345678901234567890"))
-    compiler_service_test_round_trip(CtValue.Bool(true))
-    compiler_service_test_round_trip(CtValue.Char('\n'))
-    compiler_service_test_round_trip(CtValue.Str("quote \" brace {{ tab \t"))
-    compiler_service_test_round_trip(CtValue.Float(CtFloat.F64(0.1)))
-    compiler_service_test_round_trip(CtValue.Float(CtFloat.F64(-math.infinity())))
-    compiler_service_test_round_trip(CtValue.Float(CtFloat.F32(1.5)))
-    compiler_service_test_round_trip(CtValue.Bytes([U8]{U8{0}, U8{255}}))
+    compiler_service_test_round_trip(CtValue.Int{value: -9223372036854775807})
+    compiler_service_test_round_trip(CtValue.BigInt{value: "123456789012345678901234567890"})
+    compiler_service_test_round_trip(CtValue.Bool{value: true})
+    compiler_service_test_round_trip(CtValue.Char{value: '\n'})
+    compiler_service_test_round_trip(CtValue.Str{value: "quote \" brace {{ tab \t"})
+    compiler_service_test_round_trip(CtValue.Float{value: CtFloat.F64{value: 0.1}})
+    compiler_service_test_round_trip(CtValue.Float{value: CtFloat.F64{value: -math.infinity()}})
+    compiler_service_test_round_trip(CtValue.Float{value: CtFloat.F32{value: 1.5}})
+    compiler_service_test_round_trip(CtValue.Bytes{value: [U8]{U8{0}, U8{255}}})
     compiler_service_test_round_trip(CtValue.Unit)
-    compiler_service_test_round_trip(CtValue.Present(CtValue.Str("set")))
-    compiler_service_test_round_trip(CtValue.List([CtValue]{CtValue.Int(1), CtValue.List([CtValue]{CtValue.Str("nested")})}))
-    compiler_service_test_round_trip(CtValue.Map([CtMapEntry]{
-        {key: CtKey.Str("a"), value: CtValue.Int(1)},
-        {key: CtKey.Tuple([NamedCtKey]{NamedCtKey{name: "0", value: CtKey.Int(2)}}), value: CtValue.Bool(false)},
-        {key: CtKey.Enum("Mode", "Fast"), value: CtValue.Unit},
-    }))
-    compiler_service_test_round_trip(CtValue.Struct("Env", [NamedCtValue]{NamedCtValue{name: "port", value: CtValue.Int(8080)}}))
-    compiler_service_test_round_trip(CtValue.Enum("Mode", "Port", [CtEnumArg]{CtEnumArg{label: Val("number"), value: CtValue.Int(1)}, CtEnumArg{label: None, value: CtValue.Str("x")}}))
+    compiler_service_test_round_trip(CtValue.Present{value: CtValue.Str{value: "set"}})
+    compiler_service_test_round_trip(CtValue.List{values: [CtValue]{CtValue.Int{value: 1}, CtValue.List{values: [CtValue]{CtValue.Str{value: "nested"}}}}})
+    compiler_service_test_round_trip(CtValue.Map{entries: [CtMapEntry]{
+        {key: CtKey.Str{value: "a"}, value: CtValue.Int{value: 1}},
+        {key: CtKey.Tuple{fields: [NamedCtKey]{NamedCtKey{name: "0", value: CtKey.Int{value: 2}}}}, value: CtValue.Bool{value: false}},
+        {key: CtKey.Enum{type_name: "Mode", variant: "Fast"}, value: CtValue.Unit},
+    }})
+    compiler_service_test_round_trip(CtValue.Struct{type_name: "Env", fields: [NamedCtValue]{NamedCtValue{name: "port", value: CtValue.Int{value: 8080}}}})
+    compiler_service_test_round_trip(CtValue.Enum{type_name: "Mode", variant: "Port", args: [CtEnumArg]{CtEnumArg{label: Val("number"), value: CtValue.Int{value: 1}}, CtEnumArg{label: None, value: CtValue.Str{value: "x"}}}})
     assert(compiler_service_value_from_wire(compiler_service_test_response("{{\"Int\":\"1\"}}")) == None, "a mistyped payload is refused")
     assert(compiler_service_value_from_wire(compiler_service_test_response("{{\"Int\":1,\"Str\":\"x\"}}")) == None, "two tags are refused")
     assert(compiler_service_value_from_wire(compiler_service_test_response("{{\"Bytes\":[256]}}")) == None, "an out-of-range byte is refused")
 
     // comptime-evaluate request and responses.
-    request :: compiler_service_test_response(compiler_service_comptime_request("JET_CONFIG_VALUE :: prep {{ 1 + 2 }}\n", "/tmp/project"))
+    request :: compiler_service_test_response(compiler_service_comptime_request("JET_CONFIG_VALUE :: comptime {{ 1 + 2 }}\n", "/tmp/project"))
     fields :: compiler_service_comptime_request_from(request) ?? panic("the comptime request reads back")
-    assert_eq(fields.program, "JET_CONFIG_VALUE :: prep {{ 1 + 2 }}\n")
+    assert_eq(fields.program, "JET_CONFIG_VALUE :: comptime {{ 1 + 2 }}\n")
     assert_eq(fields.base_dir, "/tmp/project")
     assert(compiler_service_comptime_request_from(compiler_service_test_response("{{\"program\":\"x\"}}")) == None, "a request without base_dir is refused")
-    if compiler_service_comptime_outcome(compiler_service_test_response(compiler_service_comptime_response(JetConfigOutcome.Value{value: CtValue.Int(3)}))) == {
-        .Val(.Value(value)) -> assert(value == CtValue.Int(3))
+    if compiler_service_comptime_outcome(compiler_service_test_response(compiler_service_comptime_response(JetConfigOutcome.Value{value: CtValue.Int{value: 3}}))) == {
+        .Val(.Value(value)) -> assert(value == CtValue.Int{value: 3})
         else -> panic("a value response reads back as the value")
     }
     refusal :: jet_config_eval_diagnostic(None, "this config value produced no build-time value")
@@ -62,7 +72,7 @@ fn run() {
         }
         else -> panic("a refusal response reads back as the refusal")
     }
-    if compiler_service_comptime_outcome(compiler_service_test_response(compiler_service_comptime_response(JetConfigOutcome.Value{value: CtValue.Failed(CtReport.Told(CtValue.Str("boom")))}))) == {
+    if compiler_service_comptime_outcome(compiler_service_test_response(compiler_service_comptime_response(JetConfigOutcome.Value{value: CtValue.Failed{report: CtReport.Told{value: CtValue.Str{value: "boom"}}}}))) == {
         .Val(.Refused(diagnostic)) -> assert_eq(diagnostic.code, "E0956")
         else -> panic("a value no wire spelling carries is refused as an unreadable result")
     }

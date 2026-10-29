@@ -1,18 +1,23 @@
+use jet_foundation.[Diagnostic, DiagnosticFixApplicability, Expr, Program, Span, TextEdit]
+use jet_lexer.[lex]
+use jet_parser.[parse_tokens]
 
-// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2017
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2097 (`Lexer::lex` inserts the
+// line terminators, as `lex` does)
 fn value_block_parsed(source: String) -> Program {
-    lexed :: lex_payload(source.bytes(), false)
+    lexed :: lex(source.bytes())
     assert(lexed.diagnostics.is_empty(), "lex diagnostics for valid source")
     admission :: parse_tokens(lexed.tokens, lexed.tables)
     loop diagnostic in admission.diagnostics -> assert(diagnostic.severity != 1, "parse diagnostics")
     admission.program
 }
-// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2026
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2106 (`parse(..).expect_err`:
+// the parse reports an error)
 fn value_block_rejected(source: String) -> [Diagnostic] {
-    lexed :: lex_payload(source.bytes(), false)
+    lexed :: lex(source.bytes())
     assert(lexed.diagnostics.is_empty(), "lex diagnostics for parser rejection")
     admission :: parser_test_result(source)
-    assert(!jfmt_check_parse_accepts(admission.diagnostics), "source should be rejected")
+    assert(loop diagnostic in admission.diagnostics { if diagnostic.severity == 1 -> break true } ?? false, "source should be rejected")
     admission.diagnostics
 }
 // Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2035
@@ -31,13 +36,13 @@ fn value_block_binding_init(program: Program, function_name: String) -> Expr {
 #Test("value_block_accepts_control_statement_before_tail") {
     program :: value_block_parsed("\nfn run() {{\n    result :: if ready -> {{\n        loop {{\n            break\n        }}\n        1\n    }} else -> 0\n}}\n")
     assert(if value_block_binding_init(program, "run") == {
-        .If(_, then_body, then_value, _, else_value, _) -> {
+        .If(_, then_body, then_value, _, else_value, _, _) -> {
             assert(then_body.len() == 1)
             assert(if then_body[0] == { .Loop(_, _, _, _) -> true
  else -> false })
-            assert(if then_value == { .Int(value, _, _, _) -> value == 1
+            assert(if then_value == { .Int(value, _, _, _, _) -> value == 1
  else -> false })
-            assert(if else_value == { .Int(value, _, _, _) -> value == 0
+            assert(if else_value == { .Int(value, _, _, _, _) -> value == 0
  else -> false })
             true
         }
@@ -48,13 +53,13 @@ fn value_block_binding_init(program: Program, function_name: String) -> Expr {
 #Test("value_block_accepts_multiple_nested_control_statements_before_tail") {
     program :: value_block_parsed("\nfn run() {{\n    result :: if ready -> {{\n        loop {{\n            if done {{\n                break\n            }}\n        }}\n        if fallback {{\n            notify()\n        }}\n        7\n    }} else -> 0\n}}\n")
     assert(if value_block_binding_init(program, "run") == {
-        .If(_, then_body, then_value, _, _, _) -> {
+        .If(_, then_body, then_value, _, _, _, _) -> {
             assert(then_body.len() == 2)
             assert(if then_body[0] == { .Loop(_, _, _, _) -> true
  else -> false })
             assert(if then_body[1] == { .Switch(_, arms, _, _) -> arms.len() == 1
  else -> false })
-            assert(if then_value == { .Int(value, _, _, _) -> value == 7
+            assert(if then_value == { .Int(value, _, _, _, _) -> value == 7
  else -> false })
             true
         }
@@ -72,9 +77,9 @@ fn value_block_binding_init(program: Program, function_name: String) -> Expr {
     assert(e0114, "expected E0114 for a non-value tail")
     loop_value :: value_block_parsed("\nfn run() {{\n    result :: if ready -> {{\n        loop {{\n            break\n        }}\n    }} else -> 0\n}}\n")
     assert(if value_block_binding_init(loop_value, "run") == {
-        .If(_, then_body, then_value, _, _, _) -> {
+        .If(_, then_body, then_value, _, _, _, _) -> {
             assert(then_body.is_empty())
-            if then_value == { .CallValue(callee, _, _) -> if callee == { .Lambda(lambda) -> lambda.meta.result_loop
+            if then_value == { .CallValue(callee, _, _, _) -> if callee == { .Lambda(lambda) -> lambda.meta.result_loop
  else -> false }
  else -> false }
         }
@@ -82,11 +87,11 @@ fn value_block_binding_init(program: Program, function_name: String) -> Expr {
     }, "loop branch must retain its result-loop lambda")
     program :: value_block_parsed("\nfn run() {{\n    result :: if ready -> {{\n        return\n    }} else -> 0\n}}\n")
     assert(if value_block_binding_init(program, "run") == {
-        .If(_, then_body, then_value, _, _, _) -> {
+        .If(_, then_body, then_value, _, _, _, _) -> {
             assert(then_body.len() == 1)
             assert(if then_body[0] == { .Return(value, _) -> value == None
  else -> false })
-            if then_value == { .NoElse(_) -> true
+            if then_value == { .NoElse(_, _) -> true
  else -> false }
         }
         else -> false
@@ -109,11 +114,11 @@ fn value_block_binding_init(program: Program, function_name: String) -> Expr {
 #Test("result_handler_value_block_accepts_control_statement_before_tail") {
     program :: value_block_parsed("\nfn run() {{\n    result :: fetch() ? ok -> {{\n        loop {{\n            break\n        }}\n        ok\n    }}\n    ! err -> err\n}}\n")
     assert(if value_block_binding_init(program, "run") == {
-        .If(_, then_body, then_value, _, _, _) -> {
+        .If(_, then_body, then_value, _, _, _, _) -> {
             assert(then_body.len() == 1)
             assert(if then_body[0] == { .Loop(_, _, _, _) -> true
  else -> false })
-            if then_value == { .Ident(name, _) -> name == "ok"
+            if then_value == { .Ident(name, _, _) -> name == "ok"
  else -> false }
         }
         else -> false
@@ -130,7 +135,7 @@ fn value_block_binding_init(program: Program, function_name: String) -> Expr {
  else -> false })
             assert(if function.body[0] == {
                 .Val(result) -> if result.init == {
-                    .OrFallback(_, fallback, _, _) -> if fallback == {
+                    .OrFallback(_, fallback, _, _, _) -> if fallback == {
                         .Block(body, value, _) -> {
                             assert(value == None)
                             assert(body.len() == 5)
@@ -143,7 +148,7 @@ fn value_block_binding_init(program: Program, function_name: String) -> Expr {
  else -> false })
                             assert(if body[2] == { .Val(binding) -> binding.name == "bound"
  else -> false })
-                            assert(if body[3] == { .Expr(expr) -> if expr == { .Call(call) -> call.name == "notify"
+                            assert(if body[3] == { .Expr(expr) -> if expr == { .Call(call, _) -> call.name == "notify"
  else -> false }
  else -> false })
                             assert(if body[4] == { .Return(returned, _) -> returned == None
@@ -161,21 +166,24 @@ fn value_block_binding_init(program: Program, function_name: String) -> Expr {
         else -> false
     }, "expected run function")
 }
-// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2326
+// An authored `;` after nested control in a fallback block is not a synthetic
+// terminator: it is reported as the explicit-semicolon diagnostic E0373 at
+// exactly that `;` (Rust `report_explicit_semicolon`,
+// crates/jet-parser/src/Parser/mod.rs:850).
 #Test("fallback_block_rejects_authored_semicolon_after_nested_control") {
     source :: "\nfn run(value: Int?) {{\n    result :: value ?? {{\n        loop {{\n            break\n        }};\n        1\n    }}\n}}\n"
     diagnostics :: value_block_rejected(source)
     semicolon :: parser_test_find(source, "}};")
     found := false
     loop diagnostic in diagnostics {
-        if diagnostic.code == "E0003" && diagnostic.span == (Val(Span{start: semicolon + 1, end: semicolon + 2})) && diagnostic.what.contains("found `;`") -> found = true
+        if diagnostic.code == "E0373" && diagnostic.span == (Val(Span{start: semicolon + 1, end: semicolon + 2})) -> found = true
     }
     assert(found, "authored semicolon must not be treated as a synthetic terminator")
 }
 
 // Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs:2347
 fn arm_table_checked(source: String) -> [Diagnostic] {
-    lexed :: lex_payload(source.bytes(), false)
+    lexed :: lex(source.bytes())
     assert(lexed.diagnostics.is_empty(), "lex")
     admission :: parser_test_result(source)
     loop diagnostic in admission.diagnostics -> assert(diagnostic.severity != 1, "parse")

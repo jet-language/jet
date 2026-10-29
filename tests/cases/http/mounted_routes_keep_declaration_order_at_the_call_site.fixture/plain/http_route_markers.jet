@@ -1,0 +1,73 @@
+// D-HTTP-ROUTE-EXPOSE1=A: tags expose only this explicitly mounted value.
+use core.http.client as client
+use core.http.server as server
+use core.net as net
+use core.web as web
+
+#Codable
+struct NewJoke { text: String }
+
+struct JokeState { added: Int }
+
+struct Jokes {
+    prefix: String
+    state: Shared<JokeState>
+
+    #server.Get("/jokes/:id")
+    fn joke(self, id: Int) -> HTTPResponse HTTPError! {
+        count :: self.state.guard_read().value.added
+        Ok(server.response(200, "{self.prefix} {id} added={count}"))
+    }
+
+    #server.Post("/jokes")
+    fn add(self, request: HTTPRequest) -> HTTPResponse HTTPError! {
+        input :: request.json<NewJoke>() ?? return
+        self.state.guard_edit().value.added += 1
+        Ok(server.response(201, "{self.prefix}: {input.text}"))
+    }
+
+    #server.Get("/order/:name")
+    fn first(self, name: String) -> HTTPResponse HTTPError! {
+        Ok(server.response(200, "first:{name}"))
+    }
+
+    #server.Get("/order/fixed")
+    fn second(self) -> HTTPResponse HTTPError! {
+        Ok(server.response(200, "second"))
+    }
+}
+
+fn run() (HTTPError | NetError | TaskFailure)! {
+    mux :: server.mux()
+    state :: shared JokeState{added: 0}
+    mux.get("/before/:name", (name: String) -> Ok(server.response(200, "before:{name}")))
+    mux.mount(Jokes{prefix: "joke", state: state})
+    mux.get("/order/after", () -> Ok(server.response(200, "after")))
+    mux.get("/before/fixed", () -> Ok(server.response(200, "late")))
+    schema :: web.openapi(mux)
+    print("openapi-get:{schema.contains("/jokes/") && schema.contains("\"get\"") && schema.contains("\"id\"")}")
+    print("openapi-post:{schema.contains("\"/jokes\"") && schema.contains("\"post\"") && schema.contains("\"201\"") && schema.contains("\"text\"")}")
+    listener :: net.tcp_listen("127.0.0.1:0")
+    addr :: listener.local_addr()
+    serving :: task {
+        server.serve_once_listener(listener, mux)
+        server.serve_once_listener(listener, mux)
+        server.serve_once_listener(listener, mux)
+        server.serve_once_listener(listener, mux)
+        server.serve_once_listener(listener, mux)
+        server.serve_once_listener(listener, mux)
+    }
+    got :: client.get("http://{addr}/jokes/7")
+    print("get:{got.status()}:{got.body().text(1024) ?? return}")
+    added :: client.request("POST", "http://{addr}/jokes").json(NewJoke{text: "hello"}).send()
+    print("post:{added.status()}:{added.body().text(1024) ?? return}")
+    again :: client.get("http://{addr}/jokes/7")
+    print("shared:{again.body().text(1024) ?? return}:{state.guard_read().value.added}")
+    before :: client.get("http://{addr}/before/fixed")
+    print("value-before:{before.body().text(1024) ?? return}")
+    ordered :: client.get("http://{addr}/order/fixed")
+    print("mounted-order:{ordered.body().text(1024) ?? return}")
+    after :: client.get("http://{addr}/order/after")
+    print("value-after:{after.body().text(1024) ?? return}")
+    serving.join()
+}

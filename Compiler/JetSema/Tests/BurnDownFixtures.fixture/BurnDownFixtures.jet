@@ -1,0 +1,44 @@
+// Production Source contracts for the recovered policy and guest boundaries.
+fn bd_require(ok: Bool, message: String) Never! {
+    if !ok -> panic("recovered Source contract: {message}")
+}
+
+fn bd_returned(function: FnBody) -> Int Never! {
+    loop statement in function.body {
+        if function.tree.stmts[statement] == .Return(value, _) -> return value ?? panic("missing returned policy value")
+    }
+    panic("missing policy return")
+}
+
+fn bd_policy() Never! {
+    source :: "policy audit(topic: String{{\"users\"}}) {{ wrap(call) {{ return call() }} }}\n#Policy(audit()) fn value() -> Int {{ 7 }}\nfn direct() -> Int {{ value() }}\nfn selected() -> Int {{ chosen :: apply(audit(), value)\n chosen() }}\nfn bare() -> Int {{ chosen :: apply(value)\n chosen() }}\n"
+    parsed :: parse_source(source.bytes())
+    bd_require(parsed.diagnostics.len() == 0, "policy parses")
+    checked :: check_program(parsed.program, "policy_fixture", "policy.jet", [SemaSourceSegment]{})
+    loop diagnostic in checked.diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> panic("policy checker: {diagnostic.code}: {diagnostic.what}")
+    }
+    bd_require(checked.complete, "policy uses the complete Source path")
+    saw_direct := false
+    saw_wrapper := false
+    loop function in checked.functions {
+        if function.name == "__jet_policy_audit_value" -> saw_wrapper = true
+        if function.name == "direct" {
+            returned :: body_node(function.tree, bd_returned(function))
+            bd_require(if returned.kind == .IndirectCall(callee, _, _, _) -> if body_node(function.tree, callee).kind == .FnValue(kind) -> if kind == .Policy(_, arguments, _, _, _, _) -> arguments.len() == 1 else -> false else -> false else -> false, "direct #Policy call uses its checked wrapper and default")
+            saw_direct = true
+        }
+    }
+    bd_require(saw_direct && saw_wrapper, "direct callable and generated wrapper are both checked")
+}
+
+fn run() Never! {
+    bd_policy()
+    scalar :: sema_guest_export_value_type(Val(Type.Result{ok: Type.Int, err: Type.Named{name: "Never"}}))
+    bd_require(scalar == Val(Type.Int), "guest inferred infallible scalar is one value")
+    fallible :: Type.Result{ok: Type.Int, err: Type.String}
+    bd_require(sema_guest_export_value_type(Val(fallible)) == Val((fallible)), "guest declared failure rail is retained")
+    diverging :: Type.Result{ok: Type.Named{name: "Never"}, err: Type.Named{name: "Never"}}
+    bd_require(sema_guest_export_value_type(Val(diverging)) == Val((diverging)), "guest divergence is not a scalar")
+    print("recovered Source policy/guest contracts: passed")
+}

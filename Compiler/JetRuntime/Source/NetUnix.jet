@@ -1,0 +1,243 @@
+// NetHTTP.rs:3012-3511 Unix listener/stream routes over Listener8/Stream56
+// (HostNetCarriers.jet) and FD72. Accept, shutdown, ready and deadlines share
+// the TCP handle policy; unlike TCP, the reference applies no OS socket
+// timeouts and retries Interrupted as well as WouldBlock on read/write.
+// Broker.rs:494-503,842-867: an inherited listener descriptor and the
+// SO_PEERCRED triple of a connected stream.
+
+fn net_unix_path_refused(status: I64, operation: I64, path: I64, error: I64) -> I64 {
+    message :: if (status == HOST_UNIX_PATH_NUL) -> rt_static_text(" failed: paths must not contain interior null bytes") else -> rt_static_text(" failed: path must be shorter than SUN_LEN")
+    net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, path, net_route_message(operation, message), I64{0}, error)
+}
+
+#Export(c) fn jet_net_unix_listen(path: I64, output: I64, error: I64) -> I64 {
+    jet_rt_world_reject_uncontrolled(I64{1})
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    operation :: rt_static_text("unix listen")
+    // std::fs::remove_file(path) first; its failure is ignored.
+    if (net_unix_path_status(path) != HOST_UNIX_PATH_NUL) {
+        name :: fd_c_path(path)
+        _ := host_call(I64{87}, name, I64{0}, I64{0})
+        fd_c_path_drop(name, path)
+    }
+    scratch :: jet_rt_alloc(I64{32}, I64{8})
+    thread_zero(scratch, I64{32})
+    state :: jet_socket_create_raw(I64{1}, I64{1}, I64{0}, scratch)
+    status := I64{-1}
+    if (state != I64{0}) {
+        status = jet_socket_unix_bind_raw(state, path, scratch)
+        // std's Linux UnixListener::bind listens with backlog -1 (somaxconn).
+        if (status >= I64{0}) -> status = jet_socket_listen_raw(state, I64{-1}, scratch)
+    }
+    code :: net_word(scratch, I64{8})
+    jet_rt_free(scratch, I64{32}, I64{8})
+    if (status < I64{0}) {
+        if (state != I64{0}) -> jet_fd_drop_raw(state)
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+        if (status == HOST_UNIX_PATH_NUL || status == HOST_UNIX_PATH_TOO_LONG) -> return net_unix_path_refused(status, operation, path, error)
+        return net_route_errno(operation, path, code, error)
+    }
+    net_put(output, I64{0}, jet_socket_listener_from_fd_raw(state))
+    I64{1}
+}
+
+#Export(c) fn jet_net_unix_accept(listener: I64, output: I64, error: I64) -> I64 { net_route_accept(listener, rt_static_text("unix accept"), output, error) }
+#Export(c) fn jet_net_unix_accept_deadline(listener: I64, deadline: I64, output: I64, error: I64) -> I64 { net_listener_accept_deadline(listener, deadline, rt_static_text("unix accept"), output, error) }
+
+// Read once into at most min(limit, 16 MiB) bytes; text decodes as UTF-8.
+// limit is the caller's exact Int word.
+fn net_unix_read_result(stream: I64, word: I64, output: I64, length: I64, text: Bool, error: I64) -> I64 {
+    operation :: rt_static_text("unix read")
+    limit :: host_native_int(word)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if !net_tcp_direction_open(stream, true, operation, error) -> return I64{0}
+    if (limit <= I64{0}) -> return net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_clone(rt_static_text("unix read limit must be positive")), I64{0}, error)
+    cap :: if (limit < I64{16777216}) -> limit else -> I64{16777216}
+    scratch :: jet_rt_alloc(I64{48}, I64{8})
+    net_tcp_deadline(stream, true, scratch + I64{32})
+    bytes := jet_rt_alloc(cap * RT_HOST_U8_STRIDE, I64{8})
+    result := I64{0}
+    loop {
+        count :: jet_socket_read_raw(jet_socket_stream_fd_raw(stream), bytes, cap, scratch)
+        if (count >= I64{0}) {
+            if text {
+                result = net_read_decode_text(bytes, count, false, rt_static_text("unix read text"), output, error)
+            } else {
+                // Publish exactly len slots: the list destructor reads no capacity.
+                owned :: if (count == I64{0}) -> I64{1} else if (count == cap) -> bytes else -> jet_rt_alloc(count * RT_HOST_U8_STRIDE, I64{8})
+                if (count != cap && count != I64{0}) -> rt_text_bytes_copy(owned, bytes, count * RT_HOST_U8_STRIDE)
+                net_put(output, I64{0}, owned)
+                net_put(length, I64{0}, count)
+                if (count == cap) -> bytes = I64{0}
+                result = I64{1}
+            }
+            break
+        }
+        code :: net_word(scratch, I64{8})
+        if (code != I64{11} && code != I64{4}) {
+            _ := net_route_errno(operation, I64{0}, code, error)
+            break
+        }
+        if (net_tcp_wait(jet_socket_stream_fd_raw(stream), I64{1}, operation, scratch, error) == I64{0}) -> break
+    }
+    if (bytes != I64{0}) -> jet_rt_free(bytes, cap * RT_HOST_U8_STRIDE, I64{8})
+    jet_ctx_pop_deadline(scratch + I64{32})
+    jet_rt_free(scratch, I64{48}, I64{8})
+    result
+}
+#Export(c) fn jet_net_unix_read(stream: I64, output: I64, error: I64) -> I64 { net_unix_read_result(stream, I64{8192}, output, I64{0}, true, error) }
+#Export(c) fn jet_net_unix_read_bytes(stream: I64, limit: I64, output: I64, length: I64, error: I64) -> I64 { net_unix_read_result(stream, limit, output, length, false, error) }
+#Export(c) fn jet_net_unix_read_bytes_deadline(stream: I64, limit: I64, deadline: I64, output: I64, length: I64, error: I64) -> I64 {
+    milliseconds :: net_deadline_millis(deadline)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if !net_tcp_timeout_valid(milliseconds, rt_static_text("unix read"), error) -> return I64{0}
+    save :: jet_rt_alloc(I64{16}, I64{8})
+    net_route_deadline_push(milliseconds, save)
+    result :: net_unix_read_result(stream, limit, output, length, false, error)
+    jet_ctx_pop_deadline(save)
+    jet_rt_free(save, I64{16}, I64{8})
+    result
+}
+
+// jet_net_unix_write_slice: one open check per slice, then write until a
+// count is produced, waiting for writability on WouldBlock/Interrupted.
+fn net_unix_write_slice(stream: I64, data: I64, length: I64, scratch: I64, error: I64) -> I64 {
+    operation :: rt_static_text("unix write")
+    if !net_tcp_direction_open(stream, false, operation, error) -> return I64{-1}
+    loop {
+        count :: jet_socket_write_raw(jet_socket_stream_fd_raw(stream), data, length, scratch)
+        if (count >= I64{0}) -> return count
+        code :: net_word(scratch, I64{8})
+        if (code != I64{11} && code != I64{4}) {
+            _ := net_route_errno(operation, I64{0}, code, error)
+            return I64{-1}
+        }
+        if (net_tcp_wait(jet_socket_stream_fd_raw(stream), I64{4}, operation, scratch, error) == I64{0}) -> return I64{-1}
+    }
+}
+fn net_unix_write_all(stream: I64, data: I64, length: I64, error: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{48}, I64{8})
+    net_tcp_deadline(stream, false, scratch + I64{32})
+    result := I64{1}
+    offset := I64{0}
+    loop offset < length {
+        count :: net_unix_write_slice(stream, data + offset * RT_HOST_U8_STRIDE, length - offset, scratch, error)
+        if (count < I64{0}) {
+            result = I64{0}
+            break
+        }
+        if (count == I64{0}) {
+            result = net_route_fail_take(NET_ERROR_CONNECTION_RESET, rt_static_text("unix write all"), I64{0}, jet_rt_string_clone(rt_static_text("unix write all failed: zero bytes written")), I64{0}, error)
+            break
+        }
+        offset += count
+    }
+    jet_ctx_pop_deadline(scratch + I64{32})
+    jet_rt_free(scratch, I64{48}, I64{8})
+    result
+}
+#Export(c) fn jet_net_unix_write_all_bytes(stream: I64, data: I64, length: I64, error: I64) -> I64 { net_unix_write_all(stream, data, length, error) }
+#Export(c) fn jet_net_unix_write_all_bytes_deadline(stream: I64, data: I64, length: I64, deadline: I64, error: I64) -> I64 {
+    milliseconds :: net_deadline_millis(deadline)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if !net_tcp_timeout_valid(milliseconds, rt_static_text("unix write all"), error) -> return I64{0}
+    save :: jet_rt_alloc(I64{16}, I64{8})
+    net_route_deadline_push(milliseconds, save)
+    result :: net_unix_write_all(stream, data, length, error)
+    jet_ctx_pop_deadline(save)
+    jet_rt_free(save, I64{16}, I64{8})
+    result
+}
+#Export(c) fn jet_net_unix_write(stream: I64, text: I64, error: I64) -> I64 {
+    length :: rt_text_len(text)
+    bytes :: if (RT_HOST_U8_STRIDE == I64{1} || length == I64{0}) -> rt_text_data(text) else -> jet_rt_alloc(length * RT_HOST_U8_STRIDE, I64{8})
+    if (RT_HOST_U8_STRIDE != I64{1} && length != I64{0}) {
+        at := I64{0}
+        loop at < length {
+            host_u8_put(bytes, at, rt_text_byte(rt_text_data(text) + at))
+            at += I64{1}
+        }
+    }
+    result :: net_unix_write_all(stream, bytes, length, error)
+    if (RT_HOST_U8_STRIDE != I64{1} && length != I64{0}) -> jet_rt_free(bytes, length * RT_HOST_U8_STRIDE, I64{8})
+    result
+}
+
+#Export(c) fn jet_net_unix_shutdown(stream: I64, how: I64, error: I64) -> I64 { net_stream_shutdown(stream, how, rt_static_text("unix shutdown"), error) }
+// The reference marks the stream closed before shutdown(Both), so a failed
+// shutdown still leaves it closed; NotConnected is not a failure.
+#Export(c) fn jet_net_unix_close(stream: I64, error: I64) -> I64 {
+    if (jet_socket_stream_flags_raw(stream).bit_and(I64{1}) != I64{0}) -> return I64{1}
+    scratch :: jet_rt_alloc(I64{32}, I64{8})
+    result :: jet_socket_shutdown_raw(jet_socket_stream_fd_raw(stream), I64{2}, scratch)
+    code :: net_word(scratch, I64{8})
+    jet_rt_free(scratch, I64{32}, I64{8})
+    jet_socket_stream_mark_closed_raw(stream)
+    if (result < I64{0} && code != I64{107}) -> return net_route_errno(rt_static_text("unix close"), I64{0}, code, error)
+    I64{1}
+}
+#Export(c) fn jet_net_unix_ready(stream: I64, interest: I64, deadline: I64, output: I64, error: I64) -> I64 { net_stream_ready(stream, interest, deadline, rt_static_text("unix ready"), output, error) }
+#Export(c) fn jet_net_unix_set_timeout(stream: I64, timeout: I64, error: I64) -> I64 {
+    net_route_set_timeout(stream, net_deadline_millis(timeout), I64{3}, rt_static_text("set unix timeout"), error)
+}
+
+// getsockopt(SOL_SOCKET, option) on a descriptor this route does not own yet.
+fn net_unix_fd_option(descriptor: I64, option: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{16}, I64{8})
+    thread_zero(scratch, I64{16})
+    net_store_uint(scratch + I64{8}, I64{4}, I64{4})
+    result := I64{0}
+    #Unsafe("private scratch lends one native int and its 4B socklen; getsockopt retains neither pointer") {
+        result = os_syscall_i64(I64{55}, descriptor, I64{1}, option, scratch, scratch + I64{8}, I64{0})
+    }
+    value :: net_load_uint(scratch, I64{4})
+    jet_rt_free(scratch, I64{16}, I64{8})
+    if (result < I64{0}) -> I64{-1} else -> value
+}
+// UnixListener::from_raw_fd, validated: the descriptor must be a listening
+// AF_UNIX SOCK_STREAM socket. It then becomes CLOEXEC and nonblocking (the
+// accept loop waits on readiness) and the listener owns it.
+#Export(c) fn jet_net_unix_listener_adopt(word: I64, output: I64, error: I64) -> I64 {
+    descriptor :: host_native_int(word)
+    jet_rt_world_reject_uncontrolled(I64{1})
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    operation :: rt_static_text("unix listener adopt")
+    valid :: (descriptor >= I64{0} && descriptor <= I64{2147483647}
+        && net_unix_fd_option(descriptor, I64{39}) == I64{1}
+        && net_unix_fd_option(descriptor, I64{3}) == I64{1}
+        && net_unix_fd_option(descriptor, I64{30}) == I64{1})
+    if !valid {
+        message :: jet_rt_string_builder_new()
+        jet_rt_string_builder_push(message, rt_static_text("descriptor "))
+        rt_text_push_number(message, descriptor)
+        jet_rt_string_builder_push(message, rt_static_text(" is not a listening Unix stream socket"))
+        return net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_builder_finish(message), I64{0}, error)
+    }
+    status := host_call(I64{72}, descriptor, I64{2}, I64{1})
+    if (status >= I64{0}) {
+        flags :: host_call(I64{72}, descriptor, I64{3}, I64{0})
+        status = if (flags < I64{0}) -> flags else -> host_call(I64{72}, descriptor, I64{4}, flags.bit_or(I64{2048}))
+    }
+    if (status < I64{0}) -> return net_route_errno(operation, I64{0}, -status, error)
+    net_put(output, I64{0}, jet_socket_listener_from_fd_raw(jet_fd_adopt_unbuffered_raw(descriptor, I64{0})))
+    I64{1}
+}
+
+// SO_PEERCRED is fixed at connect time: ucred {pid i32, uid u32, gid u32}.
+// Each export reads one field (offset 0 pid, 4 uid, 8 gid).
+fn net_unix_peer_field(stream: I64, offset: I64, output: I64, error: I64) -> I64 {
+    operation :: rt_static_text("unix peer credentials")
+    if !net_route_stream_open(stream, operation, error) -> return I64{0}
+    scratch :: jet_rt_alloc(I64{24}, I64{8})
+    thread_zero(scratch, I64{24})
+    net_store_uint(scratch + I64{16}, I64{4}, I64{12})
+    result :: net_socket_call(jet_socket_stream_fd_raw(stream), I64{55}, I64{1}, I64{17}, scratch, scratch + I64{16}, I64{0})
+    value :: net_load_uint(scratch + offset, I64{4})
+    jet_rt_free(scratch, I64{24}, I64{8})
+    if (result < I64{0}) -> return net_route_errno(operation, I64{0}, -result, error)
+    net_put(output, I64{0}, value)
+    I64{1}
+}
+#Export(c) fn jet_net_unix_peer_process(stream: I64, output: I64, error: I64) -> I64 { net_unix_peer_field(stream, I64{0}, output, error) }
+#Export(c) fn jet_net_unix_peer_user(stream: I64, output: I64, error: I64) -> I64 { net_unix_peer_field(stream, I64{4}, output, error) }
+#Export(c) fn jet_net_unix_peer_group(stream: I64, output: I64, error: I64) -> I64 { net_unix_peer_field(stream, I64{8}, output, error) }

@@ -1,6 +1,5 @@
-// The shared command registry owns help, completion and
-// semantic job-name reservation. Rust keeps its copy in foundation
-// (commands) and jet-cli (flags); check-command-table.mjs compares both.
+// The shared command registry owns help, completion and semantic job-name
+// reservation. This file is the one command table.
 JET_CLI_JOB_INVOCATION_HELP :: "\nRun a project job: jet [jet flags] <name> [job args...]\nJet flags go before the job name; every word after it belongs to the job.\n"
 
 // One flag. A `With <cmd>[/<cmd>…]: ` help prefix scopes it to those commands;
@@ -44,7 +43,7 @@ struct JetCLICommandSpec {
     actions: [JetCLIActionSpec]
 }
 
-JET_CLI_HANDLERS :: prep { [JetCLIHandlerSpec]{
+JET_CLI_HANDLERS :: comptime { [JetCLIHandlerSpec]{
     {key: "Publish", dispatch_word: "publish", keeps_group: false},
     {key: "Yank", dispatch_word: "yank", keeps_group: false},
     {key: "Keygen", dispatch_word: "keygen", keeps_group: false},
@@ -91,7 +90,7 @@ JET_CLI_HANDLERS :: prep { [JetCLIHandlerSpec]{
     {key: "Db", dispatch_word: "db", keeps_group: true},
 } }
 
-JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{
+JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
     {
         name: "registry",
         summary: "Publish and manage packages",
@@ -130,7 +129,6 @@ JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{
             {name: "rights", usage: "rights [TARGET] [--live PID | --replay ARTIFACT]", summary: "Show required and granted rights", handler: "InspectPlane", also_canonical_top_level: false},
             {name: "claims", usage: "claims [TARGET] [--live PID | --replay ARTIFACT]", summary: "Show receipt-backed claims", handler: "InspectPlane", also_canonical_top_level: false},
             {name: "shapes", usage: "shapes [TARGET] [--live PID | --replay ARTIFACT]", summary: "Show semantic shapes and projections", handler: "InspectPlane", also_canonical_top_level: false},
-            {name: "accel", usage: "accel [TARGET] [--live PID | --replay ARTIFACT]", summary: "Show vector proof and acceleration gate decisions", handler: "InspectPlane", also_canonical_top_level: false},
             {name: "decisions", usage: "decisions [TARGET] [--live PID | --replay ARTIFACT]", summary: "Show compiler decisions and their evidence", handler: "InspectPlane", also_canonical_top_level: false},
             {name: "structure", usage: "structure [TARGET] [--core] [--live PID | --replay ARTIFACT]", summary: "Show structure and lifecycle facts", handler: "InspectPlane", also_canonical_top_level: false},
             {name: "build", usage: "build [TARGET] [--coverage] [--live PID | --replay ARTIFACT]", summary: "Show build identity, provenance, and coverage", handler: "InspectPlane", also_canonical_top_level: false},
@@ -202,7 +200,7 @@ JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{
         name: "diff",
         summary: "Compare two Jet programs by meaning",
         headline: false,
-        frequency_rank: 45,
+        frequency_rank: 43,
         exhaustive: false,
         usage: None,
         actions: [JetCLIActionSpec]{},
@@ -211,7 +209,7 @@ JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{
         name: "merge",
         summary: "Merge Jet programs without losing code structure",
         headline: false,
-        frequency_rank: 35,
+        frequency_rank: 33,
         exhaustive: false,
         usage: None,
         actions: [JetCLIActionSpec]{},
@@ -231,7 +229,7 @@ JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{
         headline: true,
         frequency_rank: 1,
         exhaustive: false,
-        usage: Val("run [<file.jet|dir>] [--no-prepare] [-- <args>]"),
+        usage: Val("run [-A] [<file.jet|dir>] [--no-prepare] [-- <args>]"),
         actions: [JetCLIActionSpec]{},
     },
     {
@@ -305,7 +303,7 @@ JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{
         name: "status",
         summary: "Show what the project has proved",
         headline: false,
-        frequency_rank: 36,
+        frequency_rank: 35,
         exhaustive: false,
         usage: Val("status [<file.jet|dir>]"),
         actions: [JetCLIActionSpec]{},
@@ -395,7 +393,7 @@ JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{
         name: "notebook",
         summary: "Open a Jet notebook (.jetnb) or Jupyter adapter",
         headline: false,
-        frequency_rank: 33,
+        frequency_rank: 32,
         exhaustive: false,
         usage: None,
         actions: [JetCLIActionSpec]{},
@@ -458,7 +456,7 @@ JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{
         name: "doc",
         summary: "Generate reference documentation",
         headline: false,
-        frequency_rank: 37,
+        frequency_rank: 36,
         exhaustive: false,
         usage: Val("doc [--json|--check] [<file.jet|dir>]"),
         actions: [JetCLIActionSpec]{},
@@ -532,7 +530,7 @@ JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{
         name: "trust",
         summary: "Review or change trusted authority",
         headline: false,
-        frequency_rank: 44,
+        frequency_rank: 45,
         exhaustive: false,
         usage: None,
         actions: [JetCLIActionSpec]{},
@@ -604,7 +602,7 @@ JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{
         name: "find",
         summary: "Find code by type, effect, or example",
         headline: false,
-        frequency_rank: 43,
+        frequency_rank: 44,
         exhaustive: false,
         usage: Val("find [--effect <effect>] [--example <input -> output>] [<query>] [<file.jet|dir>]"),
         actions: [JetCLIActionSpec]{},
@@ -650,7 +648,7 @@ JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{
         name: "gc",
         summary: "Show values moved into automatic memory management",
         headline: false,
-        frequency_rank: 31,
+        frequency_rank: 30,
         exhaustive: false,
         usage: None,
         actions: [JetCLIActionSpec]{
@@ -661,7 +659,7 @@ JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{
         name: "clean",
         summary: "Remove unused package-store data",
         headline: false,
-        frequency_rank: 32,
+        frequency_rank: 31,
         exhaustive: false,
         usage: None,
         actions: [JetCLIActionSpec]{},
@@ -673,7 +671,7 @@ JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{
         name: "emit",
         summary: "Print generated build output",
         headline: false,
-        frequency_rank: 30,
+        frequency_rank: 37,
         exhaustive: false,
         usage: None,
         actions: [JetCLIActionSpec]{},
@@ -745,7 +743,21 @@ JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{
     },
 } }
 
-JET_CLI_FLAGS :: prep { [JetCLIFlagSpec]{
+// Every jet flag: the fixed rows, with one row per build option
+// (BuildOptions.jet) after `--profile`.
+JET_CLI_FLAGS :: comptime { jet_cli_flag_rows() }
+
+fn jet_cli_flag_rows() -> [JetCLIFlagSpec] Never! {
+    rows := [JetCLIFlagSpec]{}
+    loop spec in JET_CLI_FIXED_FLAGS {
+        &rows.push(spec.copy())
+        if spec.long != "--profile" -> next
+        loop option in JET_BUILD_OPTIONS -> &rows.push(JetCLIFlagSpec{long: build_option_flag(option.name), help: "With build/run/dev/test: {option.help}"})
+    }
+    rows
+}
+
+JET_CLI_FIXED_FLAGS :: comptime { [JetCLIFlagSpec]{
     {long: "--live", help: "With inspect: Process id for a live plane scope"},
     {long: "--observe", help: "With run: Expose bounded live runtime facts for attachment"},
     {long: "--raw-frames", help: "With debug: Show generated Rust frames and scopes (expert)"},
@@ -787,7 +799,6 @@ JET_CLI_FLAGS :: prep { [JetCLIFlagSpec]{
     {long: "--explicit-copies", help: "With fmt: Materialize implicit read-view copies as `.copy()`"},
     {long: "--skipped", help: "With project parts: Show modules omitted from automatic discovery"},
     {long: "--stdin-path", help: "With fmt -: Path label used in diagnostics when reading from stdin"},
-    {long: "--small", help: "With build/run/jobs: Favor a smaller binary"},
     {long: "--lib", help: "With build: Emit the native Library and C header"},
     {long: "--output", help: "With build/run/dev/jobs/package: Select a named output (build --lib selects a Library; Canvas uses it as the initial selection)"},
     {long: "--locked", help: "With build/fetch/jobs/run: Require locked dependency and provenance facts"},
@@ -864,6 +875,8 @@ JET_CLI_FLAGS :: prep { [JetCLIFlagSpec]{
     {long: "--no-prepare", help: "With run: Refuse Jetpack project environment preparation"},
     {long: "--pure", help: "With eval: Reject code with side effects"},
     {long: "--allow", help: "With run/build/jobs/repl/db: Allow comma-separated effect roots or leaves as --allow=RIGHTS"},
+    {long: "--allow-all", help: "With run/build: Allow every effect, as --allow with every right; --deny still wins. A file starting with a #!/ line runs this way"},
+    {long: "-A", help: "Short form of --allow-all"},
     {long: "--deny", help: "With run/build/jobs/repl/db: Deny comma-separated effect roots or leaves as --deny=RIGHTS"},
     {long: "--offline", help: "With env/run/dev/test/cc/c++: Reuse only cached signed toolchain and package data"},
     {long: "--fixtures", help: "With env/run/dev/test/cc/c++: Use an explicit fixture bundle"},
@@ -957,14 +970,10 @@ JET_CLI_FLAGS :: prep { [JetCLIFlagSpec]{
     {long: "--update", help: "With import: Merge generated Jet into an existing target"},
     {long: "--coverage", help: "With test/inspect build: Show function or diagnostic coverage"},
     {long: "--verify", help: "With build: Rebuild and compare one indexed receipt artifact"},
-    {long: "--rust", help: "With emit: Print generated Rust source"},
-    // Jet-only emit tiers (owner-directed 2026-10-15); the frozen Rust host
-    // table never gains them (Compiler/Bootstrap/check-command-table.mjs).
+    // The emit tiers (owner-directed 2026-10-15).
     {long: "--ast", help: "With emit: Print the parsed syntax tree"},
-    {long: "--mir", help: "With emit: Print the checked MIR"},
-    {long: "--lir", help: "With emit: Print the LIR the native backend lowers, before its optimization passes"},
-    {long: "--fn", help: "With emit --ast/--mir/--lir: Print only the named function"},
-    {long: "--emit-generated", help: "With build: Copy generated Jet sources into `.jet/generated/`"},
+    {long: "--ir", help: "With emit: Print the slot IR the native backend builds"},
+    {long: "--fn", help: "With emit --ast/--ir: Print only the named function"},
     {long: "-u", help: "Short form of --update-snapshots"},
     // (ratified 2026-06-25): named optimization bundles.
     {long: "--release", help: "With build/run/dev/jobs/test: Optimize for release"},
@@ -973,9 +982,8 @@ JET_CLI_FLAGS :: prep { [JetCLIFlagSpec]{
     {long: "--set", help: "With build/run/dev/jobs/test: Set one declared package setting as key=value"},
     // The compiler's thread cap; never the program's own threads.
     {long: "--threads", help: "With build/run/check/test/dev/inspect: Use at most N compiler threads (1 = one thread); without it jet picks a safe number of compiler threads"},
-    // Jet-only (owner-directed 2026-10-16): the compiler's streaming trace,
-    // the flag form of JET_TRACE_FILE; the frozen Rust host table never gains
-    // it (Compiler/Bootstrap/check-command-table.mjs).
+    // The compiler's streaming trace (owner-directed 2026-10-16), the flag
+    // form of JET_TRACE_FILE.
     {long: "--trace", help: "With build/run/check/test/emit: Stream the compiler's phases and progress to stderr, or to FILE with --trace=FILE"},
     {long: "--builder", help: "With build/jobs: Select a previously bound remote builder"},
     // (c134 Phase 6): accessibility is an opt-in lint category.

@@ -1,0 +1,16 @@
+// A `#Persist` binding is mutable module state: a function that takes
+// write access (`value: &Int`) may be handed the binding with `&`, exactly
+// like a local. Other static cells (plain mutable module bindings, `#Static`)
+// still refuse write access, because their storage is shared.
+#Persist total := 0
+
+fn bump(value: &Int) {
+    value += 1
+}
+
+fn run() {
+    bump(&total)
+    print("{total}")
+}
+// --- expected output --------------------------------------------------
+// 1

@@ -6,11 +6,11 @@
 // objects and destinations with a rollback path. The state file records
 // ownership metadata only and never stores file contents.
 
-ENV_FILES_DIR :: prep { "files" }
-ENV_FILES_OBJECTS_DIR :: prep { "objects" }
-ENV_FILES_STATE_FILE :: prep { "state" }
-ENV_FILES_STATE_HEADER :: prep { "jet-env-files-v1" }
-ENV_FILES_READ_CHUNK :: prep { 65536 }
+ENV_FILES_DIR :: "files"
+ENV_FILES_OBJECTS_DIR :: "objects"
+ENV_FILES_STATE_FILE :: "state"
+ENV_FILES_STATE_HEADER :: "jet-env-files-v1"
+ENV_FILES_READ_CHUNK :: 65536
 
 enum FileActionKind {
     Create
@@ -503,7 +503,7 @@ fn env_files_load_state(path: String) -[FS]> ManagedFileState EnvironmentError! 
         }
     }
     state := ManagedFileState.empty()
-    lines :: text.lines().to_list()
+    lines :: text.lines()
     loop line_number in 0..<lines.len() {
         line :: lines[line_number]
         if line == "" || line == ENV_FILES_STATE_HEADER -> next
@@ -587,7 +587,7 @@ fn env_files_hex_value(code: Int) -> Int Never! {
     if code >= 48 && code <= 57 -> return code - 48
     if code >= 65 && code <= 70 -> return code - 55
     if code >= 97 && code <= 102 -> return code - 87
-    -1
+    return -1
 }
 
 fn env_files_unescape(value: String) -> String EnvironmentError! {

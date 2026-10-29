@@ -56,7 +56,9 @@ fn kit_cases_run(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
 }
 
 // An annotation changes the verdict, not execution or the underlying receipt.
-// Header ownership wins over the central ledger for the same case.
+// Header ownership wins over the central ledger for the same case. Besides FAIL,
+// an annotation owns a crashed process (ICE exit 101 or a signal), keeping its
+// ERROR detail. Other ERRORs and TIMEOUT are never owned.
 fn kit_cases_known_failure(entry: KitEntry, root: String, source: String) -> String {
     prefix :: "# KNOWN-FAILING "
     loop raw in source.split("\n") {
@@ -78,7 +80,7 @@ fn kit_cases_known_failure(entry: KitEntry, root: String, source: String) -> Str
 fn kit_cases_known_verdict(outcome: KitOutcome, annotation: String) -> KitOutcome {
     result := outcome
     if annotation == "" -> return result
-    if result.verdict.status == "FAIL" {
+    if kit_cases_owned_failure(result.verdict) {
         result.verdict.status = "KNOWN-FAILING"
         result.verdict.detail = "{annotation}: {result.verdict.detail}"
     } else if result.verdict.status == "PASS" {
@@ -86,4 +88,9 @@ fn kit_cases_known_verdict(outcome: KitOutcome, annotation: String) -> KitOutcom
         result.verdict.detail = "{annotation}: remove stale known-failing annotation"
     }
     result
+}
+
+fn kit_cases_owned_failure(verdict: KitVerdict) -> Bool {
+    if verdict.status == "FAIL" -> return true
+    verdict.status == "ERROR" && (verdict.detail.contains("internal compiler error (exit 101)") || verdict.detail.contains("child terminated by signal"))
 }

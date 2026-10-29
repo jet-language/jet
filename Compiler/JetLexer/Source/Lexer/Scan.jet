@@ -5,7 +5,6 @@
 // [kind, byte_start, byte_end, first_char_is_uppercase].
 use core.text as unicode
 
-
 fn byte_at(source: [U8], index: Int) -> Int Never! {
     if index < 0 || index >= source.len() -> return -1
     Int.from_u8(source[index])
@@ -390,7 +389,9 @@ fn decimal_digits_fit_int(source: [U8], start: Int, end: Int) -> Bool Never! {
         if code == 95 -> next
         if !ascii_digit(code) -> return false
         digit :: code - 48
-        if value > (9223372036854775807 - digit) /% 10 -> return false
+        // value * 10 + digit <= I64 max exactly when value is below max /% 10,
+        // or equal and digit <= the remainder 7 (parse_integer_literal).
+        if value > 922337203685477580 || (value == 922337203685477580 && digit > 7) -> return false
         value = value * 10 + digit
     }
     true

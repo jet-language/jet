@@ -39,15 +39,15 @@ fn doc_test_loaded_source(identity: String, display: String, alias: String, path
         doc_test_loaded_source("second", "shared-display", "shared-alias", doc_test_os_path("/project/second.jet"), Val(1)),
         doc_test_loaded_source("omitted", "omitted.jet", "omitted", doc_test_os_path("/project/omitted.jet"), Val(2)),
         doc_test_loaded_source("first", "shared-display", "shared-alias", doc_test_os_path("/project/first.jet"), Val(0)),
-        doc_test_loaded_source("core", "Core/math", "math", None, Val(3)),
+        doc_test_loaded_source("core", "Core/Math", "math", None, Val(3)),
     }
     // Deliberately not table order, not loaded ordinals and not registration.
     original_rows :: [Int]{3, 1, 4}
     paths :: doc_contract_module_paths(sources, original_rows, doc_test_os_path("/project"))
     assert_eq(paths["shared-display"], [String]{"first.jet", "second.jet"})
     assert_eq(paths["shared-alias"], [String]{"first.jet", "second.jet"})
-    assert_eq(paths["Core/math"], [String]{"Core/math"})
-    assert_eq(paths["math"], [String]{"Core/math"})
+    assert_eq(paths["Core/Math"], [String]{"Core/Math"})
+    assert_eq(paths["math"], [String]{"Core/Math"})
     assert(!paths.has_key("Core/native"))
     assert(!paths.has_key("native"))
     assert(!paths.has_key("omitted.jet"))

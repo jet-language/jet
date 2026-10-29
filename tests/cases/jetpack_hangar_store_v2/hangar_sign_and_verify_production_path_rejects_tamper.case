@@ -1,0 +1,24 @@
+# tests/jetpack_hangar_store_v2.rs::hangar_sign_and_verify_production_path_rejects_tamper at tests/jetpack_hangar_store_v2.rs:359; hand-port
+# Claim: sign --yes --json prints schema jet.report/v1, action sign, signed true (rs:404-415)
+# Claim: dump of the entry exits 2 with code E1340 (rs:428-439)
+# Claim: verify --json reports signed true (rs:453-472)
+# Fixture migrated: ingest and sign/dump/verify invocations use the Rust argument order as recorded in h05
+# Not ported: payload tamper then verify expecting exit 2 and E1315 (rs:613-624): needs in-place mutation of store files, not expressible as a step
+# Not ported: archive sign/verify (rs:482-557) not ported
+fixture: hangar_sign_and_verify_production_path_rejects_tamper.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jetpack hangar ingest source --name signed --ref signed@fixture --no-color
+exit: 0 # rs:366-374 exit 0
+step: jet hangar sign signed@fixture --yes --json --no-color
+exit: 0 # rs:404-415
+stdout: ~ "\"schema\":\"jet.report/v1\"" # rs:404-415
+stdout: ~ "\"action\":\"sign\"" # rs:404-415
+stdout: ~ "\"signed\":true" # rs:404-415
+step: jet hangar dump signed@fixture --json --no-color
+exit: 2 # rs:428-439
+stdout: ~ "\"code\":\"E1340\"" # rs:428-439
+step: jet hangar verify signed@fixture --json --no-color
+exit: 0 # rs:453-472
+stdout: ~ "\"signed\":true" # rs:453-472

@@ -1,0 +1,15 @@
+
+#UnitFamily(Temperature, dimension, base: kelvin) {
+    kelvin
+    celsius(scale: 1, offset: 27315/100)
+}
+fn run() {
+    freezing :: CelsiusPoint.from_float(Float{0.0})
+    step :: CelsiusDelta.from_float(Float{5.0})
+    warmer :: freezing + step
+    drift :: warmer - freezing
+    total :: drift + step
+    absolute :: KelvinPoint.from_celsius_point_rounded(warmer, .NearestEven, digits: 0) ?? panic("rounded point conversion")
+    relative :: KelvinDelta.from_celsius_delta(total) ?? panic("exact delta conversion")
+    print("{(absolute.raw())} {(relative.raw())}")
+}

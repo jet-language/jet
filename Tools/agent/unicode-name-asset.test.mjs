@@ -3,7 +3,7 @@
 // The asset replaced a 162,765-line generated Jet decision tree; this pins it
 // to that tree's exact meaning: the same 40,531 (scalar, name) rows, every
 // other scalar UNASSIGNED. The hash is of the sorted "scalar\tname\n" rows the
-// tree returned (ec9648355 Core/text/text.jet, exhaustive leaf parity 0 diffs).
+// tree returned (ec9648355 Core/Text/Text.jet, exhaustive leaf parity 0 diffs).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -13,7 +13,7 @@ const TREE_ROWS = 40531;
 const TREE_SHA256 = "a60dd4cc39c63787a010ddb7a70b20daa37106405784a2912e3583891ea340c0";
 
 function decodeNameAsset() {
-  const source = readFileSync(new URL("../../Core/text/runtime/assets/unicode_name_index.jet", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../../Core/Text/Runtime/Assets/UnicodeNameIndex.jet", import.meta.url), "utf8");
   const literal = source.match(/UNICODE_NAME_INDEX :: \[U8\]\{"([^"]*)"\}/)?.[1];
   assert.ok(literal, "UNICODE_NAME_INDEX byte literal");
   const bytes = Buffer.from(literal.split("\\x").slice(1).map((pair) => parseInt(pair, 16)));

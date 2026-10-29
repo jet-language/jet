@@ -116,7 +116,7 @@ if (process.argv[3]) {
 // JetFoundation/Text/RustDebug.jet. Do not introduce a second runtime table.
 const canonicalSource = readFileSync('Compiler/JetRuntime/Source/TrapMessages.jet', 'utf8');
 const canonical = [...requiredMatch(canonicalSource,
-  /TRAP_DEBUG_RANGES :: prep \{ \[I64\]\{([\s\S]*?)\}\s*\}/, 'TRAP_DEBUG_RANGES')
+  /TRAP_DEBUG_RANGES :: comptime \{ \[I64\]\{([\s\S]*?)\}\s*\}/, 'TRAP_DEBUG_RANGES')
   .matchAll(/I64\{(\d+)\}/g)].map(m => Number(m[1]));
 let oldRange = 0, newRange = 0, compared = 0;
 for (let cp = 128; cp <= 0x10ffff; ++cp) {

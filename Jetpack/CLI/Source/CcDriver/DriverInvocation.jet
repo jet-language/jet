@@ -2,7 +2,7 @@
 // of crates/jetpack/src/CLI/cc.rs.
 //
 // The driver resolves the one Jetpack C toolchain package and submits the
-// invocation to the ordinary BuildContext executor. The actual compiler
+// invocation to the ordinary Build executor. The actual compiler
 // remains a declared tool in the Hangar descriptor.
 
 // The normalized compiler invocation: the forwarded argv plus the declared
@@ -72,7 +72,7 @@ fn cli_cc_main(verification: &StoreVerification, verb: String, args: [String]) -
         return EXIT_USAGE
     }
     build := HermeticBuildContext.new()
-    toolchain :: &build.toolchain("cc-toolchain", descriptor.toolchain_spec()) ?? {
+    toolchain :: &build.toolchain("cc-toolchain", cli_cc_toolchain_spec(descriptor)) ?? {
         cli_cc_report_operational_error("C/C++ toolchain could not enter the build graph", err.debug_text(), "repair the pinned Hangar descriptor and retry")
         return EXIT_USER_ERROR
     }
@@ -139,7 +139,7 @@ fn cli_cc_main(verification: &StoreVerification, verb: String, args: [String]) -
 
 // Normalize sources, outputs, dependency files, and path operands to
 // project-relative paths and declare every project input.
-fn cli_cc_build_invocation(project_root: String, verb: String, options: DriverOptions) -[FS]> CcInvocation CLIToolError! {
+fn cli_cc_build_invocation(project_root: String, verb: String, options: DriverOptions) -[FS, Env]> CcInvocation CLIToolError! {
     build_root :: cli_cc_resolve_build_root(project_root, options)
     explicit_build_root :: options.build_root != None
     sources := [String]{}
@@ -307,7 +307,7 @@ fn cli_cc_normalize_output_path(raw: String, project_root: String, build_root: S
 // Rewrite an option operand, keeping an attached option prefix (`-oout.o`).
 fn cli_cc_replace_option_operand(argument: String, option: String, value: String) -> String Never! {
     if argument.starts_with(option) && argument.removeprefix(option) != "" -> return "{option}{value}"
-    value
+    value.copy()
 }
 
 fn cli_cc_resolve_project_root(options: DriverOptions) -[FS, Env]> String CLIToolError! {
@@ -403,7 +403,7 @@ fn cli_cc_replace_extension(path: String, extension: String) -> String Never! {
         .None -> ""
     }
     name :: halves?.after ?? path
-    if name == "" || name == ".." -> return path
+    if name == "" || name == ".." -> return path.copy()
     stem :: if name.cut_last(".") == {
         .Val(parts) -> if parts.before == "" -> name else -> parts.before
         .None -> name
@@ -447,4 +447,29 @@ fn cli_cc_report_execution_error(error: BuildExecutionError) -[IO, Env, Time.Wai
 
 fn cli_cc_report_operational_error(headline: String, reason: String, fix: String) -[IO, Env, Time.Wait]> {
     Theme.resolve_choice(ColorChoice.Auto).error_coded("E1340", headline, reason, fix)
+}
+
+// The declared-only toolchain spec the build executor consumes: every tool
+// is a virtual path under read-only mounts of the verified Hangar objects.
+fn cli_cc_toolchain_spec(descriptor: CcToolchainDescriptor) -> ToolchainSpec Never! {
+    provenance :: BuildProvenance.jetpack_dependency("{CC_TOOLCHAIN_PACKAGE}@{CC_TOOLCHAIN_SOURCE}", LockRecord.new("hangar", descriptor.bundle_sha256))
+    spec := ToolchainSpec.target(descriptor.target, provenance)
+    spec = spec.with_host_triple(descriptor.host)
+    spec = spec.with_sdk(SDKIdentity.new("jet-cc", descriptor.version, provenance))
+    spec = spec.with_linker(LinkerIdentity.new("{descriptor.linker}@{descriptor.linker_sha256}", provenance))
+    spec = spec.with_sysroot(SysrootIdentity.new(descriptor.sysroot, descriptor.sysroot_sha256, provenance))
+    spec = spec.with_tool("cc", descriptor.compiler_virtual_path())
+    spec = spec.with_tool("c++", descriptor.cxx_virtual_path())
+    spec = spec.with_tool("ld", descriptor.linker_virtual_path())
+    spec = spec.declared_only()
+    if descriptor.is_nix_layout() {
+        loop mount in descriptor.mounts {
+            spec = spec.with_read_only_mount_identity(mount.source, mount.destination, mount.digest)
+        }
+        spec = spec.with_read_only_mount_identity(descriptor.compiler_root, descriptor.role_virtual_root(CcToolchainRole.Compiler), descriptor.bundle_sha256)
+        spec = spec.with_read_only_mount_identity(descriptor.linker_root, descriptor.role_virtual_root(CcToolchainRole.Linker), descriptor.linker_root_digest())
+        spec = spec.with_read_only_mount_identity(descriptor.sysroot_root, descriptor.role_virtual_root(CcToolchainRole.Sysroot), descriptor.sysroot_sha256)
+        return spec
+    }
+    spec.with_read_only_mount_identity(descriptor.root, descriptor.virtual_root(), descriptor.bundle_sha256)
 }

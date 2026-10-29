@@ -4,11 +4,11 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-binary=${JETPACK_TRUST_ROOT_BIN:-"$repo/target/debug/jetpack-trust-root"}
+binary=${JETPACK_TRUST_ROOT_BIN:?JETPACK_TRUST_ROOT_BIN must name the native jetpack-trust-root binary}
 output=${JET_TRUST_OUTPUT:-"$repo/Docs/site/dist/keys"}
 
 [ -x "$binary" ] || {
-    echo "missing $binary; build jetpack-trust-root first" >&2
+    echo "missing $binary; set JETPACK_TRUST_ROOT_BIN to the native jetpack-trust-root binary" >&2
     exit 1
 }
 

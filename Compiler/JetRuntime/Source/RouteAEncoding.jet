@@ -1,0 +1,369 @@
+// core.encoding / core.data raw leaves. Rust providers: Core/StringBytes.rs:28
+// (text into bytes), CoreLib/Top/EncodingStream.rs:4197-4274 (coerce clock and
+// audit line, stream writes), CoreLib/Top/EncodingHostileIo.rs (the hostile
+// streaming law seam, active only when JET_ENC_HOSTILE_IO is set) and
+// CoreLib/Top/DataStats.rs:11 (host path metadata). Codec policy is Jet.
+
+// StringBytes.rs:28: text.into_bytes() as a fresh List<U8>.
+#Export(c) fn jet_raw_text_into_bytes(value: I64, output: I64) -> I64 { jet_string_bytes(value, output) }
+
+// EncodingStream.rs:4197: SystemTime ms since the epoch (0 before it).
+#Export(c) fn jet_raw_json_coerce_now() -> I64 { jet_int_owned_from_i64(deadline_wall_now_ms()) }
+
+// EncodingStream.rs:4204: eprintln!("{}", line).
+#Export(c) fn jet_raw_json_coerce_emit(line: I64) { _ := host_stdio_text_failure(line, true, true, false) }
+
+// format!("{:?}", io::Error::from_raw_os_error(code).kind()) on Linux (the
+// Rust 1.97 sys::decode_error_kind table).
+fn rt_io_error_kind_name(code: I64) -> I64 {
+    if {
+        (code == I64{1} || code == I64{13}) -> rt_static_text("PermissionDenied")
+        (code == I64{2}) -> rt_static_text("NotFound")
+        (code == I64{4}) -> rt_static_text("Interrupted")
+        (code == I64{7}) -> rt_static_text("ArgumentListTooLong")
+        (code == I64{11}) -> rt_static_text("WouldBlock")
+        (code == I64{12}) -> rt_static_text("OutOfMemory")
+        (code == I64{16}) -> rt_static_text("ResourceBusy")
+        (code == I64{17}) -> rt_static_text("AlreadyExists")
+        (code == I64{18}) -> rt_static_text("CrossesDevices")
+        (code == I64{20}) -> rt_static_text("NotADirectory")
+        (code == I64{21}) -> rt_static_text("IsADirectory")
+        (code == I64{22}) -> rt_static_text("InvalidInput")
+        (code == I64{26}) -> rt_static_text("ExecutableFileBusy")
+        (code == I64{27}) -> rt_static_text("FileTooLarge")
+        (code == I64{28}) -> rt_static_text("StorageFull")
+        (code == I64{29}) -> rt_static_text("NotSeekable")
+        (code == I64{30}) -> rt_static_text("ReadOnlyFilesystem")
+        (code == I64{31}) -> rt_static_text("TooManyLinks")
+        (code == I64{32}) -> rt_static_text("BrokenPipe")
+        (code == I64{35}) -> rt_static_text("Deadlock")
+        (code == I64{36}) -> rt_static_text("InvalidFilename")
+        (code == I64{38} || code == I64{95}) -> rt_static_text("Unsupported")
+        (code == I64{39}) -> rt_static_text("DirectoryNotEmpty")
+        (code == I64{40}) -> rt_static_text("FilesystemLoop")
+        (code == I64{98}) -> rt_static_text("AddrInUse")
+        (code == I64{99}) -> rt_static_text("AddrNotAvailable")
+        (code == I64{100}) -> rt_static_text("NetworkDown")
+        (code == I64{101}) -> rt_static_text("NetworkUnreachable")
+        (code == I64{103}) -> rt_static_text("ConnectionAborted")
+        (code == I64{104}) -> rt_static_text("ConnectionReset")
+        (code == I64{107}) -> rt_static_text("NotConnected")
+        (code == I64{110}) -> rt_static_text("TimedOut")
+        (code == I64{111}) -> rt_static_text("ConnectionRefused")
+        (code == I64{113}) -> rt_static_text("HostUnreachable")
+        (code == I64{115}) -> rt_static_text("InProgress")
+        (code == I64{116}) -> rt_static_text("StaleNetworkFileHandle")
+        (code == I64{122}) -> rt_static_text("QuotaExceeded")
+        else -> rt_static_text("Uncategorized")
+    }
+}
+
+// An EncodingCause (EncodingABI.jet layout) owning `message`.
+fn encoding_cause_take(kind: I64, present: Bool, code: I64, message: I64) -> I64 {
+    result :: jet_rt_alloc(ENCODING_CAUSE_BYTES, I64{8})
+    encoding_store(result + ENCODING_CAUSE_KIND, jet_rt_string_clone(kind))
+    encoding_store(result + ENCODING_CAUSE_OS_PRESENT, if present -> I64{1} else -> I64{0})
+    encoding_store(result + ENCODING_CAUSE_OS_CODE, if present -> code else -> I64{0})
+    encoding_store(result + ENCODING_CAUSE_MESSAGE, message)
+    result
+}
+
+// EncodingStream.rs:4220 jet_raw_encoding_cause of an OS error.
+fn encoding_cause_errno(code: I64) -> I64 { encoding_cause_take(rt_io_error_kind_name(code), true, code, host_errno_cause(code)) }
+
+fn encoding_cause_custom(kind: I64, message: I64) -> I64 { encoding_cause_take(kind, false, I64{0}, jet_rt_string_clone(message)) }
+
+fn encoding_fail(cause: I64, error: I64) -> I64 {
+    encoding_store(error, cause)
+    I64{0}
+}
+
+// ---------------------------------------------------------------------------
+// EncodingHostileIo.rs: one thread_local state. Hostile32... words:
+// active0 (0: no plan read yet, 1: no plan, 2: plan), read_one8 write_chunk16
+// interrupt_reads24 interrupt_writes32 fail_read_present40 fail_read48
+// fail_write_present56 fail_write64, stats: read_calls72 write_calls80
+// flush_calls88 bytes_read96 bytes_written104 interrupts112, read_total120
+// write_total128, read plan words136/len144/cap152 + idx160, write plan
+// words168/len176/cap184 + idx192.
+ENCODING_HOSTILE_BYTES :: I64{200}
+ENCODING_IO_CHUNK :: I64{65536}
+encoding_hostile_key := I64{0}
+
+// runtime-init: 3
+#Export(c) fn jet_rt_encoding_hostile_init() {
+    if (encoding_hostile_key == I64{0}) -> encoding_hostile_key = jet_rt_tls_key_new(I64{0})
+}
+
+fn encoding_env_flag(name: I64) -> Bool {
+    value :: host_environment_value(name)
+    if (value == I64{0}) -> return false
+    length :: host_startup_byte_length(value)
+    !(length == I64{1} && rt_text_byte(value) == I64{48})
+}
+
+// str::trim's Unicode White_Space set.
+fn encoding_white_space(scalar: I64) -> Bool {
+    (scalar >= I64{9} && scalar <= I64{13}) || scalar == I64{32} || scalar == I64{133} || scalar == I64{160} || scalar == I64{5760} ||
+        (scalar >= I64{8192} && scalar <= I64{8202}) || scalar == I64{8232} || scalar == I64{8233} || scalar == I64{8239} || scalar == I64{8287} || scalar == I64{12288}
+}
+
+fn encoding_scalar_at(data: I64, at: I64) -> I64 {
+    lead :: rt_text_byte(data + at)
+    width :: rt_text_width(data + at)
+    if (width == I64{1}) -> return lead
+    value := lead.bit_and(if (width == I64{2}) -> I64{31} else if (width == I64{3}) -> I64{15} else -> I64{7})
+    index := I64{1}
+    loop index < width {
+        value = (value << I64{6}).bit_or(rt_text_byte(data + at + index).bit_and(I64{63}))
+        index += I64{1}
+    }
+    value
+}
+
+// Trimmed [start, end) of data[start..end).
+fn encoding_trim(data: I64, start: I64, end: I64, out: I64) {
+    from := start
+    loop from < end && encoding_white_space(encoding_scalar_at(data, from)) -> from += rt_text_width(data + from)
+    to := end
+    loop to > from {
+        back := to - I64{1}
+        loop back > from && (rt_text_byte(data + back).bit_and(I64{192})) == (I64{128}) -> back -= I64{1}
+        if !encoding_white_space(encoding_scalar_at(data, back)) -> break
+        to = back
+    }
+    rt_text_store(out, from)
+    rt_text_store(out + I64{8}, to)
+}
+
+// `str::parse::<uN>()` of data[start..end): optional '+', decimal digits, no
+// overflow past `limit` (an unsigned bound in U64 bits). -1: Err.
+fn encoding_parse_unsigned(data: I64, start: I64, end: I64, limit: U64) -> I64 {
+    at := start
+    if (at < end && rt_text_byte(data + at) == I64{43}) -> at += I64{1}
+    if (at >= end) -> return I64{-1}
+    value := U64{0}
+    loop at < end {
+        digit :: rt_text_byte(data + at) - I64{48}
+        if (digit < I64{0} || digit > I64{9}) -> return I64{-1}
+        if (value > (limit - U64{digit}) /% U64{10}) -> return I64{-1}
+        value = value * U64{10} + U64{digit}
+        at += I64{1}
+    }
+    I64{value}
+}
+
+// std::env::var(name).ok().and_then(|v| v.parse().ok()); -1 when absent.
+fn encoding_env_number(name: I64, limit: U64) -> I64 {
+    value :: rt_env_get(name)
+    if (value == I64{0}) -> return I64{-1}
+    parsed :: encoding_parse_unsigned(rt_text_data(value), I64{0}, rt_text_len(value), limit)
+    jet_rt_string_drop(value)
+    parsed
+}
+
+// jet_encoding_hostile_parse_plan into the words at `plan`.
+fn encoding_env_plan(name: I64, plan: I64) {
+    value :: rt_env_get(name)
+    if (value == I64{0}) -> return
+    data :: rt_text_data(value)
+    length :: rt_text_len(value)
+    scratch :: jet_rt_alloc(I64{16}, I64{8})
+    start := I64{0}
+    loop start <= length {
+        end := start
+        loop end < length && rt_text_byte(data + end) != (I64{44}) -> end += I64{1}
+        encoding_trim(data, start, end, scratch)
+        from :: rt_text_word(scratch)
+        to :: rt_text_word(scratch + I64{8})
+        if (to > from) {
+            number :: encoding_parse_unsigned(data, from, to, U64{9223372036854775807})
+            if (number > I64{0}) -> files_words_push(plan, number)
+        }
+        start = end + I64{1}
+    }
+    jet_rt_free(scratch, I64{16}, I64{8})
+    jet_rt_string_drop(value)
+}
+
+// The thread's hostile plan state when JET_ENC_HOSTILE_IO is set (read once
+// per thread, as jet_encoding_hostile_io_plan caches it), else 0.
+fn encoding_hostile_state() -> I64 {
+    state := jet_rt_tls_get(encoding_hostile_key)
+    if (state == I64{0}) {
+        state = jet_rt_alloc(ENCODING_HOSTILE_BYTES, I64{8})
+        thread_zero(state, ENCODING_HOSTILE_BYTES)
+        jet_rt_tls_set(encoding_hostile_key, state)
+    }
+    if (rt_text_word(state) == I64{0}) {
+        if !encoding_env_flag(rt_static_text("JET_ENC_HOSTILE_IO")) -> return I64{0}
+        rt_text_store(state, I64{2})
+        rt_text_store(state + I64{8}, if encoding_env_flag(rt_static_text("JET_ENC_HOSTILE_READ_ONE")) -> I64{1} else -> I64{0})
+        chunk :: encoding_env_number(rt_static_text("JET_ENC_HOSTILE_WRITE_MAX"), U64{18446744073709551615})
+        rt_text_store(state + I64{16}, if (chunk < I64{0}) -> I64{0} else -> chunk)
+        reads :: encoding_env_number(rt_static_text("JET_ENC_HOSTILE_INTERRUPT_READS"), U64{255})
+        rt_text_store(state + I64{24}, if (reads < I64{0}) -> I64{0} else -> reads)
+        writes :: encoding_env_number(rt_static_text("JET_ENC_HOSTILE_INTERRUPT_WRITES"), U64{255})
+        rt_text_store(state + I64{32}, if (writes < I64{0}) -> I64{0} else -> writes)
+        read_after :: encoding_env_number(rt_static_text("JET_ENC_HOSTILE_FAIL_READ_AFTER"), U64{9223372036854775807})
+        rt_text_store(state + I64{40}, if (read_after < I64{0}) -> I64{0} else -> I64{1})
+        rt_text_store(state + I64{48}, read_after)
+        write_after :: encoding_env_number(rt_static_text("JET_ENC_HOSTILE_FAIL_WRITE_AFTER"), U64{9223372036854775807})
+        rt_text_store(state + I64{56}, if (write_after < I64{0}) -> I64{0} else -> I64{1})
+        rt_text_store(state + I64{64}, write_after)
+        encoding_env_plan(rt_static_text("JET_ENC_HOSTILE_READ_PLAN"), state + I64{136})
+        encoding_env_plan(rt_static_text("JET_ENC_HOSTILE_WRITE_PLAN"), state + I64{168})
+    }
+    state
+}
+
+// next_write_chunk: the write plan (last entry repeats), else the fixed chunk.
+fn encoding_hostile_write_chunk(state: I64, remaining: I64) -> I64 {
+    count :: rt_text_word(state + I64{176})
+    if (count != I64{0}) {
+        index :: rt_text_word(state + I64{192})
+        cap :: rt_text_word(rt_text_word(state + I64{168}) + (if (index < count) -> index else -> count - I64{1}) * I64{8})
+        if (index < count) -> rt_text_store(state + I64{192}, index + I64{1})
+        bounded :: if (cap < remaining) -> cap else -> remaining
+        return if (bounded < ENCODING_IO_CHUNK) -> bounded else -> ENCODING_IO_CHUNK
+    }
+    chunk :: rt_text_word(state + I64{16})
+    if (chunk == I64{0}) -> return if (remaining < ENCODING_IO_CHUNK) -> remaining else -> ENCODING_IO_CHUNK
+    if (chunk < remaining) -> chunk else -> remaining
+}
+
+fn encoding_hostile_fail_cause() -> I64 { encoding_cause_custom(rt_static_text("Other"), rt_static_text("hostile encoding I/O failure")) }
+
+// File::write_all straight to the descriptor (the seam bypasses BufWriter).
+fn encoding_file_write(writer: I64, bytes: I64, length: I64) -> I64 {
+    failure :: host_write_all(fd_word(writer, I64{8}), bytes, length)
+    if (failure == I64{0}) -> return I64{0}
+    if (failure == HOST_WRITE_ZERO) -> return encoding_cause_custom(rt_static_text("WriteZero"), rt_static_text("failed to write whole buffer"))
+    encoding_cause_errno(-failure)
+}
+
+// The hostile write of EncodingHostileIo.rs:277; a cause or 0.
+fn encoding_hostile_write(state: I64, writer: I64, bytes: I64, length: I64) -> I64 {
+    rt_text_store(state + I64{80}, rt_text_word(state + I64{80}) + I64{1})
+    pending :: rt_text_word(state + I64{32})
+    if (pending != I64{0}) {
+        rt_text_store(state + I64{112}, rt_text_word(state + I64{112}) + I64{1})
+        rt_text_store(state + I64{32}, pending - I64{1})
+        return encoding_cause_custom(rt_static_text("Interrupted"), rt_static_text("operation interrupted"))
+    }
+    limited :: rt_text_word(state + I64{56}) != I64{0}
+    limit :: rt_text_word(state + I64{64})
+    if (limited && !alloc_unsigned_less(rt_text_word(state + I64{128}), limit)) -> return encoding_hostile_fail_cause()
+    offset := I64{0}
+    loop offset < length {
+        chunk :: encoding_hostile_write_chunk(state, length - offset)
+        total :: rt_text_word(state + I64{128})
+        if (limited && alloc_unsigned_less(limit, total + chunk)) {
+            allowed :: limit - total
+            if (allowed == I64{0}) -> return encoding_hostile_fail_cause()
+            cause :: encoding_file_write(writer, bytes + offset, allowed)
+            if (cause != I64{0}) -> return cause
+            rt_text_store(state + I64{128}, total + allowed)
+            rt_text_store(state + I64{104}, rt_text_word(state + I64{104}) + allowed)
+            return encoding_hostile_fail_cause()
+        }
+        cause :: encoding_file_write(writer, bytes + offset, chunk)
+        if (cause != I64{0}) -> return cause
+        rt_text_store(state + I64{128}, total + chunk)
+        rt_text_store(state + I64{104}, rt_text_word(state + I64{104}) + chunk)
+        offset += chunk
+    }
+    I64{0}
+}
+
+// EncodingHostileIo.rs:265 jet_encoding_file_write_all; a cause or 0.
+fn encoding_write_all(writer: I64, bytes: I64, length: I64) -> I64 {
+    if jet_fault_should_fail(rt_static_text("FS.Write")) -> return encoding_cause_custom(rt_static_text("Other"), rt_static_text("fault injected: FS.Write"))
+    state :: encoding_hostile_state()
+    if (state != I64{0}) -> return encoding_hostile_write(state, writer, bytes, length)
+    offset := I64{0}
+    loop offset < length {
+        chunk :: if (length - offset < ENCODING_IO_CHUNK) -> length - offset else -> ENCODING_IO_CHUNK
+        failure :: files_writer_write(writer, bytes + offset, chunk)
+        if (failure != I64{0}) {
+            if (failure == FILES_WRITE_WHOLE_ZERO) -> return encoding_cause_custom(rt_static_text("WriteZero"), rt_static_text("failed to write whole buffer"))
+            if (failure == FILES_WRITE_BUFFERED_ZERO) -> return encoding_cause_custom(rt_static_text("WriteZero"), rt_static_text("failed to write the buffered data"))
+            return encoding_cause_errno(-failure)
+        }
+        offset += chunk
+    }
+    I64{0}
+}
+
+// EncodingHostileIo.rs:316 jet_encoding_file_flush; a cause or 0. The seam
+// flushes the File itself (a no-op), not the BufWriter.
+fn encoding_flush(writer: I64) -> I64 {
+    if jet_fault_should_fail(rt_static_text("FS.Write")) -> return encoding_cause_custom(rt_static_text("Other"), rt_static_text("fault injected: FS.Write"))
+    state :: encoding_hostile_state()
+    if (state != I64{0}) {
+        rt_text_store(state + I64{88}, rt_text_word(state + I64{88}) + I64{1})
+        pending :: rt_text_word(state + I64{32})
+        if (pending != I64{0}) {
+            rt_text_store(state + I64{112}, rt_text_word(state + I64{112}) + I64{1})
+            rt_text_store(state + I64{32}, pending - I64{1})
+            return encoding_cause_custom(rt_static_text("Interrupted"), rt_static_text("operation interrupted"))
+        }
+        return I64{0}
+    }
+    failure :: files_writer_flush(writer)
+    if (failure == I64{0}) -> return I64{0}
+    if (failure == FILES_WRITE_BUFFERED_ZERO) -> return encoding_cause_custom(rt_static_text("WriteZero"), rt_static_text("failed to write the buffered data"))
+    encoding_cause_errno(-failure)
+}
+
+// EncodingStream.rs:4258 (a borrowed List<U8>), :4262 and :4272.
+#Export(c) fn jet_raw_encoding_write_bytes(writer: I64, data: I64, length: I64, error: I64) -> I64 {
+    temporary :: RT_HOST_U8_STRIDE != I64{1} && length != I64{0}
+    packed :: if temporary -> jet_rt_alloc(length, I64{8}) else -> data
+    if temporary -> net_copy_packed(data, length, packed)
+    cause :: encoding_write_all(writer, packed, length)
+    if temporary -> jet_rt_free(packed, length, I64{8})
+    if (cause != I64{0}) -> return encoding_fail(cause, error)
+    I64{1}
+}
+#Export(c) fn jet_raw_encoding_flush(writer: I64, error: I64) -> I64 {
+    cause :: encoding_flush(writer)
+    if (cause != I64{0}) -> return encoding_fail(cause, error)
+    I64{1}
+}
+#Export(c) fn jet_raw_encoding_write_text(writer: I64, text: I64, error: I64) -> I64 {
+    cause :: encoding_write_all(writer, rt_text_data(text), rt_text_len(text))
+    if (cause != I64{0}) -> return encoding_fail(cause, error)
+    I64{1}
+}
+
+// DataStats.rs:11: std::fs::metadata (stat, following links) of the raw path
+// bytes; a NUL is std's CString refusal.
+#Export(c) fn jet_data_host_path_is_file(data: I64, length: I64, ok: I64, error: I64) -> I64 {
+    count :: if (length < I64{0} || data == I64{0}) -> I64{0} else -> length
+    name :: jet_rt_alloc(count + I64{1}, I64{1})
+    at := I64{0}
+    nul := false
+    loop at < count {
+        byte :: host_u8_get(data, at)
+        if (byte == I64{0}) -> nul = true
+        rt_text_put(name + at, byte)
+        at += I64{1}
+    }
+    rt_text_put(name + count, I64{0})
+    if nul {
+        jet_rt_free(name, count + I64{1}, I64{1})
+        return encoding_fail(encoding_cause_custom(rt_static_text("InvalidInput"), rt_static_text("file name contained an unexpected NUL byte")), error)
+    }
+    facts :: jet_rt_alloc(I64{128}, I64{8})
+    result := I64{0}
+    #Unsafe("the terminated raw path and the 128-byte stat fact row are live for the syscall") {
+        result = os_stat_facts_i64(I64{4}, name, facts)
+    }
+    mode :: rt_text_word(facts + I64{16})
+    jet_rt_free(facts, I64{128}, I64{8})
+    jet_rt_free(name, count + I64{1}, I64{1})
+    if (result < I64{0}) -> return encoding_fail(encoding_cause_errno(-result), error)
+    rt_text_store(ok, if ((mode.bit_and(I64{61440})) == I64{32768}) -> I64{1} else -> I64{0})
+    I64{1}
+}

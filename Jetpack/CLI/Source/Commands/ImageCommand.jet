@@ -241,9 +241,8 @@ fn cli_cmd_image(verification: &StoreVerification, theme: Theme, parsed: CLIPars
         theme.error("couldn't build image `{name}`", err.message(), "check that the output directory is writable.")
         return EXIT_USAGE
     }
-    artifacts :: if image.from_environment -> image_write_projection_artifacts(out_dir, built.manifest_digest, projection_plan, projection) else -> image_write_projection_report(out_dir, built.manifest_digest, projection)
-    if artifacts == .Err(error) {
-        theme.error("couldn't write image {name} projection", error.message(), "check that the image output directory is writable.")
+    cli_write_image_projection(image.from_environment, out_dir, built.manifest_digest, projection_plan, projection) ?? {
+        theme.error("couldn't write image {name} projection", err.message(), "check that the image output directory is writable.")
         return EXIT_USAGE
     }
     if push_destination.destination == {
@@ -268,6 +267,13 @@ fn cli_cmd_image(verification: &StoreVerification, theme: Theme, parsed: CLIPars
     }
     theme.ok("built image `{name}` -> {out_dir} ({built.manifest_digest})")
     EXIT_OK
+}
+
+// An environment image writes its projection artifacts; any other image
+// writes only the projection report.
+fn cli_write_image_projection(from_environment: Bool, out_dir: String, manifest_digest: String, plan: ProjectionPlan, report: ProjectionReport) ImageError! -[FS, Env]> {
+    if from_environment -> return image_write_projection_artifacts(out_dir, manifest_digest, plan, report)
+    image_write_projection_report(out_dir, manifest_digest, report)
 }
 
 // The resolved `--push` destination (None without `--push`); a refused
@@ -432,7 +438,7 @@ fn cli_image_layer_path_conflicts(layer_files: [LayerFile], candidate: String) -
 }
 
 // The bytes of a regular project file read without following links.
-fn cli_read_project_image_file(root: String, relative: String) -[FS]> [U8] CLIError! {
+fn cli_read_project_image_file(root: String, relative: String) -[FS, Env]> [U8] CLIError! {
     normalized :: cli_normalize_project_relative_image_path(relative)
     if foundation_read_file_nofollow_at_root(root, normalized, MAX_TREE_FILE_BYTES) == {
         .Ok(bytes) -> Ok(bytes)

@@ -1,0 +1,20 @@
+use core.archive as archive
+fn invalid_tar_name_view(name: String) -> String {
+    empty :: [U8]{}
+    valid :: archive.tar_add(empty, "keep.txt", [1]) ?? [U8]{}
+    refused :: if archive.tar_add(valid, name, [2]) == {
+        .Ok(_) -> "accepted"
+        .Err(_) -> "refused"
+    }
+    names_json :: archive.tar_names_json(valid) ?? ""
+    kept :: archive.tar_get(valid, "keep.txt") ?? [U8]{}
+    rejected :: archive.tar_get(valid, name) ?? [U8]{}
+    return "{refused}|{names_json}|{kept}|{rejected}"
+}
+EXPECTED :: comptime { invalid_tar_name_view("") }
+
+fn run() {
+    actual :: invalid_tar_name_view("")
+    print("{EXPECTED}")
+    print("{actual}")
+}

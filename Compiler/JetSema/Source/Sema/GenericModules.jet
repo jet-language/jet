@@ -1,4 +1,5 @@
 use jet_foundation.[
+    AST_NODE_GENERATED,
     BinOp,
     CodeModule,
     Diagnostic,
@@ -20,6 +21,7 @@ use jet_foundation.[
     Type,
     type_identity_key,
     type_name,
+    Func,
 ]
 
 // Generic module instantiation checks (Rust
@@ -319,11 +321,11 @@ fn sema_genmod_type_structure(ty: Type) -> String {
 // not closed (a runtime call, an unknown name, an interpolated string).
 fn sema_genmod_value_type(expression: Expr, values: [String:Type], enums: [String:Bool]) -> Type? {
     if expression == {
-        .Int(_, _, _, _) -> Val(Type.Int)
-        .Float(_, _, _, _) -> Val(Type.Float)
-        .Bool(_, _) -> Val(Type.Bool)
-        .Char(_, _) -> Val(Type.Char)
-        .Str(parts, _) -> {
+        .Int(_, _, _, _, _) -> Val(Type.Int)
+        .Float(_, _, _, _, _) -> Val(Type.Float)
+        .Bool(_, _, _) -> Val(Type.Bool)
+        .Char(_, _, _) -> Val(Type.Char)
+        .Str(parts, _, _) -> {
             loop part in parts {
                 if part == {
                     .Lit(_) -> {}
@@ -332,9 +334,9 @@ fn sema_genmod_value_type(expression: Expr, values: [String:Type], enums: [Strin
             }
             Val(Type.String)
         }
-        .Paren(value, _) -> sema_genmod_value_type(value, values, enums)
-        .Ident(name, _) -> values.get(name)
-        .Unary(op, operand, _) -> {
+        .Paren(value, _, _) -> sema_genmod_value_type(value, values, enums)
+        .Ident(name, _, _) -> values.get(name)
+        .Unary(op, operand, _, _) -> {
             inner :: sema_genmod_value_type(operand, values, enums) ?? return None
             if op == {
                 .Neg -> if inner == {
@@ -348,7 +350,7 @@ fn sema_genmod_value_type(expression: Expr, values: [String:Type], enums: [Strin
                 }
             }
         }
-        .Binary(op, left, right, _) -> {
+        .Binary(op, left, right, _, _) -> {
             left_type :: sema_genmod_value_type(left, values, enums) ?? return None
             right_type :: sema_genmod_value_type(right, values, enums) ?? return None
             left_key :: sema_genmod_tier0_key(left_type) ?? return None
@@ -359,13 +361,13 @@ fn sema_genmod_value_type(expression: Expr, values: [String:Type], enums: [Strin
                 else -> None
             }
         }
-        .Field(base, _, _) -> {
-            if base == .Ident(enum_name, _) {
+        .Field(base, _, _, _) -> {
+            if base == .Ident(enum_name, _, _) {
                 if enums.get(enum_name) != None -> return Val(Type.Named{name: enum_name})
             }
             None
         }
-        .EnumLit(enum_name, _, _, args, _, _) -> {
+        .EnumLit(enum_name, _, _, args, _, _, _) -> {
             if args.len() == 0 && enums.get(enum_name) != None -> return Val(Type.Named{name: enum_name})
             None
         }
@@ -396,7 +398,7 @@ fn sema_genmod_arg_span(arg: ModuleArg) -> Span {
 // declaration (a primitive, an unknown name) implements no declared trait.
 fn sema_genmod_implements(graph: SemaRegistrationGraph, module_identity: String, ty: Type, bound: String) -> Bool {
     resolved_bound :: sema_registration_lookup_name(graph, module_identity, bound) ?? return true
-    if resolved_bound.symbol.kind != SymbolKind.Trait -> return true
+    if sema_resolved_kind(graph, resolved_bound) != SymbolKind.Trait -> return true
     if sema_type_resolve_nominal_row(graph, ty, module_identity) == None -> return false
     sema_type_bound_satisfied(graph, ty, bound, module_identity) ?? true
 }
@@ -414,7 +416,7 @@ fn sema_genmod_resolve_args(graph: SemaRegistrationGraph, alias: ModuleAliasDef,
                 if arg == {
                     .Type(value, _) -> ty = value
                     .Value(expression, _) -> {
-                        if expression == .Ident(type_ident, _) {
+                        if expression == .Ident(type_ident, _, _) {
                             ty = Type.Named{name: type_ident}
                         } else {
                             sema_genmod_push(&check, sema_error("E0852", span, "type argument for `{name}` does not satisfy its module bound", "this slot resolves to a type parameter, but the argument is a value expression", "pass a type that satisfies the declared bound"))
@@ -437,7 +439,7 @@ fn sema_genmod_resolve_args(graph: SemaRegistrationGraph, alias: ModuleAliasDef,
                 if arg == {
                     .Value(value, _) -> expression = Val(value)
                     .Type(value, type_span) -> {
-                        if value == .Named(type_ident) -> expression = Val(Expr.Ident{name: type_ident, span: type_span})
+                        if value == .Named(type_ident) -> expression = Val(Expr.Ident{name: type_ident, span: type_span, id: AST_NODE_GENERATED})
                     }
                 }
                 value_expression :: expression ?? {
@@ -1057,7 +1059,7 @@ fn sema_genmod_bind(alias: ModuleAliasDef, source: SemaGenericModuleSource, valu
                 if arg == {
                     .Type(value, _) -> ty = value
                     .Value(expression, _) -> {
-                        if expression == .Ident(type_ident, _) {
+                        if expression == .Ident(type_ident, _, _) {
                             ty = Type.Named{name: type_ident}
                         } else {
                             return None
@@ -1073,7 +1075,7 @@ fn sema_genmod_bind(alias: ModuleAliasDef, source: SemaGenericModuleSource, valu
                 if arg == {
                     .Value(value, _) -> expression = Val(value)
                     .Type(value, type_span) -> {
-                        if value == .Named(type_ident) -> expression = Val(Expr.Ident{name: type_ident, span: type_span})
+                        if value == .Named(type_ident) -> expression = Val(Expr.Ident{name: type_ident, span: type_span, id: AST_NODE_GENERATED})
                     }
                 }
                 written :: expression ?? return None
@@ -1268,56 +1270,56 @@ fn sema_genmod_folded_consts(items: [Item], inherited: [String:Expr], enums: [St
 // (`sema_genmod_value_type`): the literal the expression folds to.
 fn sema_genmod_fold(expression: Expr, values: [String:Expr], enums: [String:Bool]) -> Expr? {
     if expression == {
-        .Int(number, span, _, _) -> Val(Expr.Int{value: number, span: span, width: None, raw: None})
+        .Int(number, span, _, _, node) -> Val(Expr.Int{value: number, span: span, width: None, raw: None, id: node})
         // copy: the folded literal is a new owned Expr. A Bool/Char literal equals `expression`,
         // the generic template's node (a read parameter), which stays in the template for other
         // instances.
-        .Bool(_, _) | .Char(_, _) -> Val(expression.copy())
-        .Str(_, span) -> {
+        .Bool(_, _, _) | .Char(_, _, _) -> Val(expression.copy())
+        .Str(_, span, node) -> {
             text :: sema_genmod_text(expression) ?? return None
-            Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: span})
+            Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: span, id: node})
         }
-        .Paren(value, _) -> sema_genmod_fold(value, values, enums)
-        .Ident(name, _) -> values.get(name)
-        .Unary(op, operand, span) -> {
+        .Paren(value, _, _) -> sema_genmod_fold(value, values, enums)
+        .Ident(name, _, _) -> values.get(name)
+        .Unary(op, operand, span, _) -> {
             inner :: sema_genmod_fold(operand, values, enums) ?? return None
             if op == {
                 .Neg -> if inner == {
-                    .Int(number, _, _, _) -> Val(Expr.Int{value: 0 - number, span: span, width: None, raw: None})
+                    .Int(number, _, _, _, node) -> Val(Expr.Int{value: 0 - number, span: span, width: None, raw: None, id: node})
                     else -> None
                 }
                 .Not -> if inner == {
-                    .Bool(flag, _) -> Val(Expr.Bool{value: !flag, span: span})
+                    .Bool(flag, _, node) -> Val(Expr.Bool{value: !flag, span: span, id: node})
                     else -> None
                 }
             }
         }
-        .Binary(op, left, right, span) -> {
+        .Binary(op, left, right, span, _) -> {
             lhs :: sema_genmod_fold(left, values, enums) ?? return None
             rhs :: sema_genmod_fold(right, values, enums) ?? return None
-            if lhs == .Int(left_number, _, _, _) {
-                if rhs == .Int(right_number, _, _, _) {
-                    if op == BinOp.Add -> return Val(Expr.Int{value: left_number + right_number, span: span, width: None, raw: None})
-                    if op == BinOp.Sub -> return Val(Expr.Int{value: left_number - right_number, span: span, width: None, raw: None})
-                    if op == BinOp.Mul -> return Val(Expr.Int{value: left_number * right_number, span: span, width: None, raw: None})
+            if lhs == .Int(left_number, _, _, _, _) {
+                if rhs == .Int(right_number, _, _, _, _) {
+                    if op == BinOp.Add -> return Val(Expr.Int{value: left_number + right_number, span: span, width: None, raw: None, id: AST_NODE_GENERATED})
+                    if op == BinOp.Sub -> return Val(Expr.Int{value: left_number - right_number, span: span, width: None, raw: None, id: AST_NODE_GENERATED})
+                    if op == BinOp.Mul -> return Val(Expr.Int{value: left_number * right_number, span: span, width: None, raw: None, id: AST_NODE_GENERATED})
                 }
                 return None
             }
             if op != BinOp.Add -> return None
             left_text :: sema_genmod_text(lhs) ?? return None
             right_text :: sema_genmod_text(rhs) ?? return None
-            Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: "{left_text}{right_text}"}}, span: span})
+            Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: "{left_text}{right_text}"}}, span: span, id: AST_NODE_GENERATED})
         }
-        .Field(base, member, span) -> {
-            if base == .Ident(enum_name, _) {
+        .Field(base, member, span, _) -> {
+            if base == .Ident(enum_name, _, _) {
                 fieldless :: enums.get(enum_name) ?? false
-                if fieldless -> return Val(Expr.EnumLit{type_name: enum_name, variant: member, variant_span: None, args: [EnumLitArg]{}, leading_dot: false, span: span})
+                if fieldless -> return Val(Expr.EnumLit{type_name: enum_name, variant: member, variant_span: None, args: [EnumLitArg]{}, leading_dot: false, span: span, id: AST_NODE_GENERATED})
             }
             None
         }
-        .EnumLit(enum_name, variant, _, args, _, span) -> {
+        .EnumLit(enum_name, variant, _, args, _, span, node) -> {
             fieldless :: enums.get(enum_name) ?? false
-            if args.len() == 0 && fieldless -> return Val(Expr.EnumLit{type_name: enum_name, variant: variant, variant_span: None, args: [EnumLitArg]{}, leading_dot: false, span: span})
+            if args.len() == 0 && fieldless -> return Val(Expr.EnumLit{type_name: enum_name, variant: variant, variant_span: None, args: [EnumLitArg]{}, leading_dot: false, span: span, id: node})
             None
         }
         else -> None
@@ -1326,7 +1328,7 @@ fn sema_genmod_fold(expression: Expr, values: [String:Expr], enums: [String:Bool
 
 // The text of a literal string with no interpolation.
 fn sema_genmod_text(value: Expr) -> String? {
-    if value == .Str(parts, _) {
+    if value == .Str(parts, _, _) {
         text := ""
         loop part in parts {
             if part == {
@@ -1341,33 +1343,33 @@ fn sema_genmod_text(value: Expr) -> String? {
 
 fn sema_genmod_literal_key(value: Expr) -> String? {
     if value == {
-        .Int(_, _, _, _) -> Val("Int")
-        .Bool(_, _) -> Val("Bool")
-        .Char(_, _) -> Val("Char")
-        .Str(_, _) -> Val("String")
-        .EnumLit(type_name, _, _, _, _, _) -> Val("enum {type_name}")
+        .Int(_, _, _, _, _) -> Val("Int")
+        .Bool(_, _, _) -> Val("Bool")
+        .Char(_, _, _) -> Val("Char")
+        .Str(_, _, _) -> Val("String")
+        .EnumLit(type_name, _, _, _, _, _, _) -> Val("enum {type_name}")
         else -> None
     }
 }
 
 fn sema_genmod_literal_text(value: Expr) -> String {
     if value == {
-        .Int(number, _, _, _) -> "Int:{number}"
-        .Bool(flag, _) -> if flag -> "Bool:true" else -> "Bool:false"
-        .Char(text, _) -> "Char:{text}"
-        .Str(_, _) -> "String:{sema_genmod_text(value) ?? ""}"
-        .EnumLit(type_name, variant, _, _, _, _) -> "{type_name}.{variant}"
+        .Int(number, _, _, _, _) -> "Int:{number}"
+        .Bool(flag, _, _) -> if flag -> "Bool:true" else -> "Bool:false"
+        .Char(text, _, _) -> "Char:{text}"
+        .Str(_, _, _) -> "String:{sema_genmod_text(value) ?? ""}"
+        .EnumLit(type_name, variant, _, _, _, _, _) -> "{type_name}.{variant}"
         else -> ""
     }
 }
 
 fn sema_genmod_literal_type(value: Expr) -> Type? {
     if value == {
-        .Int(_, _, _, _) -> Val(Type.Int)
-        .Bool(_, _) -> Val(Type.Bool)
-        .Char(_, _) -> Val(Type.Char)
-        .Str(_, _) -> Val(Type.String)
-        .EnumLit(type_name, _, _, _, _, _) -> Val(Type.Named{name: type_name})
+        .Int(_, _, _, _, _) -> Val(Type.Int)
+        .Bool(_, _, _) -> Val(Type.Bool)
+        .Char(_, _, _) -> Val(Type.Char)
+        .Str(_, _, _) -> Val(Type.String)
+        .EnumLit(type_name, _, _, _, _, _, _) -> Val(Type.Named{name: type_name})
         else -> None
     }
 }

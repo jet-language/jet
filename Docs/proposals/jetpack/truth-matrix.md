@@ -55,7 +55,7 @@ rejects unknown classes, and requires non-live rows to name an active successor.
 | #6 | compatibility-only | `tests/pkg.rs` | #423 owns live registry consumption and delivery. |
 | #139 | schema-only | `Source/Publish/Schema.rs` | #393 landed canonical Store v2; #395 owns the live cache protocol over its envelope and store. |
 | #187 | live | `tests/decisions.rs` | Language memory model; not Jetpack parity. |
-| #188 | live | `tests/syntax_reconciliation.rs` | Companion syntax law only. |
+| #188 | live | `tests/guards/syntax_reconciliation.jet` | Companion syntax law only. |
 | #214 | live | `crates/jetpack/src/CLI.rs` | Historical package-ref spelling only; D-JPK-REF1 later replaced it with `name@source`. |
 | #215 | live | `tests/jetpack_dispatch.rs` | Run visibility only. |
 | #330 | compatibility-only | `crates/jetpack/src/Overlay.rs` | #424/#428 own lock invalidation and provider conformance. |
@@ -73,7 +73,7 @@ rejects unknown classes, and requires non-live rows to name an active successor.
 | #394 | live | `crates/jetpack/src/NixDrv.rs` | ATerm parsing, derivation path calculus, fail-closed inputs, and the 64-derivation corpus passed 5 focused tests and independent review at 54cbab28d; no broader native-Nix claim. |
 | #421 | live | `tests/jetpack_trust_root.rs` | Bootstrap pins, digest threshold, delegation, snapshot, rollback, bad-clock, and signature-stripping cases passed 8 library tests plus the integration test at 75678cab; broader authority remains #434. |
 | #424 | live | `tests/jetpack_semantic_lock.rs` | One atomic `.jet/lock` path covers inputs, source maps, catalogs, selective update, overlay invalidation, and merge revalidation; 10 semantic-lock tests passed at 4380df6a8. |
-| #426 | live | `tests/jetpack_variants.rs` | Typed PackageVariant selection, SysrootIdentity, action-key identity, lock records, and E1316 passed 7 focused tests and independent review at 5af6aeb5d. |
+| #426 | live | `Jetpack/Trust/Tests/SemanticLockVariants.jet`, `Jetpack/CLI/Tests/BuildActionKeyVariants.jet` | Typed PackageVariant selection, SysrootIdentity, action-key identity, lock records, and E1316 passed 7 focused tests and independent review at 5af6aeb5d. |
 | #539 | model-only | `Docs/spec/syntax-decisions.md` | D-SHAPE5a=A records typed package-role fields using the existing record form; independent review found no parser/runtime claim, and #560 owns executable enforcement. |
 | #540 | model-only | `Docs/spec/syntax-decisions.md` | D-SHAPE5b=A records the closed Output sum; independent review limits this card to the decision, while #587 owns the live Output model and #560 owns language enforcement. |
 | #541 | live | `tests/cli.rs` | The grouped command registry, typed run parameters, metadata, completions, E2101/E2103 failures, and single-help path passed the recorded hostile CLI matrix at b1217649b and follow-up commits; no second CLI schema. |

@@ -4,6 +4,7 @@
 // Prelude files stay canonical and unchanged, so the `pub` rewrite exists
 // only in the cached build artifact. Rust comments, strings and character
 // literals are masked to spaces first, so only real code is read.
+use jet_pkg_model.[pkg_bytes_code, pkg_bytes_is_word, pkg_bytes_starts_with, pkg_bytes_text]
 
 // The Rust item context one line sits in.
 enum NativeRuntimeScope {
@@ -115,7 +116,7 @@ fn store_runtime_split_inclusive(text: String) -> [String] Never! {
 // `line` with its item made `pub` when it is exportable in `scope`.
 fn store_runtime_export_line(line: String, masked: String, scope: NativeRuntimeScope) -> String Never! {
     code :: masked.trim_start()
-    if code == "" || code.starts_with("#") -> return line
+    if code == "" || code.starts_with("#") -> return line.copy()
     should_export :: if scope == {
         .Module -> store_runtime_starts_exportable_item(code) || store_runtime_starts_restricted_reexport(code)
         .Struct -> store_runtime_looks_like_struct_field(code)
@@ -123,7 +124,7 @@ fn store_runtime_export_line(line: String, masked: String, scope: NativeRuntimeS
         .ThreadLocal -> store_runtime_strip_visibility(code).starts_with("static ")
         else -> false
     }
-    if !should_export -> return line
+    if !should_export -> return line.copy()
     raw :: line.bytes()
     indent :: raw.len() - line.trim_start().bytes().len()
     lead :: pkg_bytes_text(raw, 0, indent)
@@ -154,7 +155,7 @@ fn store_runtime_export_macro_line(line: String, masked: String, transcriber_ite
         }
     }
     if transcriber_item && !code.starts_with("pub") && store_runtime_starts_exportable_item(code) -> return "{lead}pub {body}"
-    line
+    line.copy()
 }
 
 fn store_runtime_is_tuple_struct(code: String) -> Bool Never! {
@@ -167,10 +168,10 @@ fn store_runtime_export_tuple_field(line: String) -> String Never! {
     raw :: line.bytes()
     keyword :: "struct ".bytes()
     struct_at :: store_artifact_find(raw, keyword, 0)
-    if struct_at < 0 -> return line
+    if struct_at < 0 -> return line.copy()
     open :: store_artifact_find(raw, "(".bytes(), struct_at + keyword.len())
-    if open < 0 -> return line
-    if pkg_bytes_starts_with(raw, open + 1, "pub ".bytes()) -> return line
+    if open < 0 -> return line.copy()
+    if pkg_bytes_starts_with(raw, open + 1, "pub ".bytes()) -> return line.copy()
     "{pkg_bytes_text(raw, 0, open + 1)}pub {pkg_bytes_text(raw, open + 1, raw.len())}"
 }
 
@@ -204,7 +205,7 @@ fn store_runtime_strip_visibility(code: String) -> String Never! {
         close_at :: store_artifact_find(raw, ")".bytes(), 4)
         if close_at >= 0 -> return pkg_bytes_text(raw, close_at + 1, raw.len()).trim_start()
     }
-    code
+    code.copy()
 }
 
 fn store_runtime_starts_with_any(code: String, prefixes: [String]) -> Bool Never! {
@@ -303,7 +304,7 @@ fn store_runtime_code_mask(source: String) -> String Never! {
                         state = NativeRuntimeMaskState.BlockComment(1)
                     }
                     raw_start != None -> {
-                        found :: raw_start ?? panic("raw string start was just found")
+                        found :: raw_start
                         store_runtime_push_spaces(&out, found.prefix_len)
                         index += found.prefix_len
                         state = NativeRuntimeMaskState.RawStr(found.hashes)

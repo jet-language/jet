@@ -1,0 +1,14 @@
+# tests/marker_rule_signatures.rs::static_string_products_report_one_shared_type_error_each at tests/marker_rule_signatures.rs:633; hand-port
+# Claim: `VALUE :: comptime { 42 }` with `#HTML(VALUE)` yields E0930 (tests/marker_rule_signatures.rs:638-646)
+# Claim: `VALUE :: comptime { 42 }` with `#Test(VALUE) {}` yields E0930 (tests/marker_rule_signatures.rs:638-646)
+# Not ported: Rust asserts E0930 exactly once per source; CLI pins E0930 presence only
+fixture: static_string_products_report_one_shared_type_error_each.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check html/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:638 E0930 once
+stderr: ~ "E0930" # tests/marker_rule_signatures.rs:638 E0930 once
+step: jet check test/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:638 E0930 once
+stderr: ~ "E0930" # tests/marker_rule_signatures.rs:638 E0930 once

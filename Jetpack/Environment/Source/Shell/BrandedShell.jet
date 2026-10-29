@@ -4,7 +4,7 @@
 // source: every generated prompt reads `$JETPACK_PROMPT_LABEL` through a fixed
 // quoted print, so label contents stay data.
 
-ENV_SHELL_PROMPT_LABEL_ENV :: prep { "JETPACK_PROMPT_LABEL" }
+ENV_SHELL_PROMPT_LABEL_ENV :: "JETPACK_PROMPT_LABEL"
 
 // One ASCII control byte as text. Plain Jet strings have no byte escapes, so
 // the readline invisible markers (0x01/0x02) and ESC are built here.
@@ -151,7 +151,6 @@ struct BrandedShell {
 // wrapped shells. The raw markers work on every bash and are invisible
 // control bytes when readline isn't displaying at all.
 fn env_shell_bash_rc(label: String, path: PromptPathMode, strip: PromptStripMode) -> String Never! {
-    _ :: label
     soh :: env_shell_control(1)
     stx :: env_shell_control(2)
     esc :: env_shell_control(27)
@@ -216,7 +215,6 @@ fn env_shell_bash_rc(label: String, path: PromptPathMode, strip: PromptStripMode
 }
 
 fn env_shell_zsh_rc(label: String, path: PromptPathMode, strip: PromptStripMode) -> String Never! {
-    _ :: label
     path_escape :: if path == {
         .Short -> "%1~"
         .Full -> "%~"
@@ -253,7 +251,6 @@ fn env_shell_zsh_rc(label: String, path: PromptPathMode, strip: PromptStripMode)
 }
 
 fn env_shell_fish_init(label: String, path: PromptPathMode, strip: PromptStripMode) -> String Never! {
-    _ :: label
     path_expr :: if path == {
         .Short -> "prompt_pwd"
         .Full -> "pwd"
@@ -320,7 +317,7 @@ fn env_shell_write_best_effort(path: String, contents: String) -[FS]> {
 }
 
 fn env_shell_unique_tmp(prefix: String) -[Env, Time]> String Never! {
-    files.join(sys.temp_dir(), "{prefix}-{sys.pid()}-{time.instant().unix_ns}")
+    files.join(sys.temp_dir(), "{prefix}-{sys.pid()}-{time.unix_ns()}")
 }
 
 fn env_shell_write_temp(prefix: String, contents: String) -[FS, Env, Time]> String Never! {

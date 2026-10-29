@@ -1,0 +1,23 @@
+# tests/browser_bidi.rs::native_bidi_network_response_event_exposes_status_without_payload_leak at tests/browser_bidi.rs:1800; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port})
+fixture: native_bidi_network_response_event_exposes_status_without_payload_leak.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+requires: tool:node
+write: browser_bidi_network_response.jet native_bidi_network_response_event_exposes_status_without_payload_leak.fixture/run.template
+step: jet build browser_bidi_network_response.jet
+exit: 0
+session response raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:response} response.json
+sleep: 500ms
+step run: built
+exit: 0
+stdout: ~ "network.responseCompleted\n" # original predicate: stdout.contains
+stdout: ~ "POST\n" # original predicate: stdout.contains
+stdout: ~ "201\n" # original predicate: stdout.contains
+stdout: ~ "response:ok\n" # original predicate: stdout.contains
+stdout: !~ "SECRET" # original predicate: !stdout.contains
+stderr: !~ "SECRET" # original predicate: !stderr.contains
+close response
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+stdout: $= "session.end\n" # original predicate: methods.last() == Some(..)

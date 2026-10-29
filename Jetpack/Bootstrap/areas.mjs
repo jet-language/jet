@@ -3,8 +3,8 @@
 // script validates the graph against the `# == Area ==` sections of sources.list and answers:
 //   areas.mjs closure <Area>   comma-separated area plus its transitive dependencies (bottom-up order)
 //   areas.mjs sources <Area>   canonical repository-relative source/dependency assembly list, one per line
-//   areas.mjs populated        Jetpack/<Area> folders that list at least one source, bottom-up, one per line
-import { existsSync, readFileSync } from "node:fs";
+//   areas.mjs populated        areas that list at least one Jetpack/ source, bottom-up, one per line
+import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -75,8 +75,8 @@ if (command === "closure") {
   const assembly = closure(argument ?? fail("sources needs an area"));
   console.log(assembly.flatMap((area) => sourceSections.get(area)).join("\n"));
 } else if (command === "populated") {
-  // Only real Jetpack/<Area> folders are checkable units; reused Compiler sections are dependencies.
-  const populated = order.filter((area) => (sourceSections.get(area)?.length ?? 0) > 0 && existsSync(resolve(sourceRoot, "Jetpack", area)));
+  // Only areas with Jetpack sources are checkable units; reused Compiler sections are dependencies.
+  const populated = order.filter((area) => (sourceSections.get(area) ?? []).some((path) => path.startsWith("Jetpack/")));
   if (populated.length > 0) console.log(populated.join("\n"));
 } else {
   fail("usage: areas.mjs closure <Area> | sources <Area> | populated");

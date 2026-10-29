@@ -1,0 +1,26 @@
+# Port of tests/tir_core_and_closures.rs:137-200 + stage_jetpack_phase1:125-135.
+# KNOWN-FAILING #4817: dogfood/jetpack removed by 6fc6f3862; no authentic moved copy.
+# No substitute package. Verbatim source staging and all original tier equalities retained.
+# PENDING-GRAMMAR(batch-four); copying an absent original remains a failure.
+copy: {root}/dogfood/jetpack dogfood/jetpack
+mkdir: phase1/.jet
+copy: dogfood/jetpack/tests/fixtures/phase1/package.jet phase1/package.jet
+copy: dogfood/jetpack/tests/fixtures/phase1/env.jet phase1/env.jet
+copy: dogfood/jetpack/tests/fixtures/phase1/fixture-state/lock phase1/.jet/lock
+mkdir: dogfood-root
+mkdir: cache-release
+mkdir: cache-default
+mkdir: cache-interpret
+step release: jet run --release dogfood/jetpack -- plan --json --offline
+env: JET_STORE_DIR={work}/cache-release
+env: JETPACK_DOGFOOD_ROOT={work}/dogfood-root
+env: JETPACK_PROJECT_ROOT={work}/phase1
+env: JETPACK_OFFLINE=1
+env: NO_COLOR=1
+step default: jet run dogfood/jetpack -- plan --json --offline
+env: JET_STORE_DIR={work}/cache-default
+env: JETPACK_DOGFOOD_ROOT={work}/dogfood-root
+env: JETPACK_PROJECT_ROOT={work}/phase1
+env: JETPACK_OFFLINE=1
+env: NO_COLOR=1
+stdout: == release

@@ -21,6 +21,8 @@ fn policy_key_name(key: PolicyKey) -> String Never! {
         .PrecisionDemotion -> "precision_demotion"
         .Structure -> "structure"
         .LintAllow -> "lint_allow"
+        .CheckRemoval -> "check_removal"
+        .LinkOverride -> "link_override"
         .ScopedGC -> "gc"
         .ExplicitUnits -> "explicit_units"
         .Copies -> "copies"
@@ -45,6 +47,8 @@ fn policy_key_parse(name: String) -> PolicyKey? Never! {
         "precision_demotion" -> Val(PolicyKey.PrecisionDemotion)
         "structure" -> Val(PolicyKey.Structure)
         "lint_allow" -> Val(PolicyKey.LintAllow)
+        "check_removal" -> Val(PolicyKey.CheckRemoval)
+        "link_override" -> Val(PolicyKey.LinkOverride)
         "gc" -> Val(PolicyKey.ScopedGC)
         "explicit_units" -> Val(PolicyKey.ExplicitUnits)
         "copies" -> Val(PolicyKey.Copies)
@@ -111,11 +115,11 @@ struct PolicyRule {
     combine: PolicyCombine
 }
 
-POLICY_PACKAGE_SCOPES :: prep { [PolicyScope]{PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
-POLICY_ALL_SCOPES :: prep { [PolicyScope]{PolicyScope.Organization, PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
+POLICY_PACKAGE_SCOPES :: comptime { [PolicyScope]{PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
+POLICY_ALL_SCOPES :: comptime { [PolicyScope]{PolicyScope.Organization, PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
 
 // Rust `POLICY_RULES`.
-POLICY_RULES :: prep { [PolicyRule]{
+POLICY_RULES :: comptime { [PolicyRule]{
     {key: PolicyKey.Unsafe, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.Impure, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.Nondeterministic, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
@@ -130,6 +134,8 @@ POLICY_RULES :: prep { [PolicyRule]{
     {key: PolicyKey.PrecisionDemotion, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.Structure, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.LintAllow, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
+    {key: PolicyKey.CheckRemoval, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
+    {key: PolicyKey.LinkOverride, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.ScopedGC, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Override},
     {key: PolicyKey.ExplicitUnits, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Tighten},
     {key: PolicyKey.Copies, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Tighten},
@@ -149,6 +155,17 @@ struct EffectivePolicy {
     value: PolicyValue
     // Outer-to-inner declaration chain, including overridden declarations.
     provenance: [PolicyDeclaration]
+}
+
+// The resolution as `key = value` followed by every declaration of its chain,
+// the last one effective and the earlier ones shadowed.
+fn policy_explain(resolution: EffectivePolicy) -> String Never! {
+    out := "{policy_key_name(resolution.key)} = {policy_value_display(resolution.value)}"
+    loop (index, declaration) in resolution.provenance {
+        status :: if index + 1 == resolution.provenance.len() -> "effective" else -> "shadowed"
+        out = "{out}\n  [{status}] {policy_scope_name(declaration.scope)} {policy_value_display(declaration.value)} at {declaration.source}:{declaration.span.start}..{declaration.span.end}"
+    }
+    out
 }
 
 #Error
@@ -186,6 +203,8 @@ fn policy_key_debug_text(key: PolicyKey) -> String Never! {
         .PrecisionDemotion -> "PrecisionDemotion"
         .Structure -> "Structure"
         .LintAllow -> "LintAllow"
+        .CheckRemoval -> "CheckRemoval"
+        .LinkOverride -> "LinkOverride"
         .ScopedGC -> "ScopedGc"
         .ExplicitUnits -> "ExplicitUnits"
         .Copies -> "Copies"

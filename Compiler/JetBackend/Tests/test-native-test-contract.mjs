@@ -16,7 +16,7 @@ const receipts=[];
 for(const [name,source,code,events]of [['same-process',success,0,'first\nsecond\ncheck\n'],['fatal-recovery',fatal,1,'already\nfatal\nfatal\nremaining\n']]){
  const work=join(out,name);rmSync(work,{recursive:true,force:true});mkdirSync(work,{recursive:true});
  writeFileSync(join(work,'case.jet'),source);
- writeFileSync(join(work,'package.jet'),'name: "native_test_contract"\nversion: "0.0.1"\nedition: "2028"\nauthority: { holds: { allow: [Env, Exec, Exec.Args, FS, FS.Read, IO, Mem.Alloc, Mem.Rc] } }\n');
+ writeFileSync(join(work,'package.jet'),'name: "native_test_contract"\nversion: "0.0.1"\nedition: "2028"\nauthority: { allow: [Env, Exec, Exec.Args, FS, FS.Read, IO, Mem.Alloc, Mem.Rc] }\n');
  const run=spawnSync(host,['test','--serial','--capture=all','--color=never','case.jet'],{cwd:work,env:{...process.env,JET_TOOLCHAIN_ROOT:repo,JET_TEST_JSON:'1',NO_COLOR:'1',TERM:'dumb'},encoding:'utf8',timeout:600000,maxBuffer:64<<20});
  writeFileSync(join(work,'stdout'),run.stdout??'');writeFileSync(join(work,'stderr'),run.stderr??'');
  let report=null;for(const line of (run.stdout??'').split('\n')){try{const value=JSON.parse(line);if(value.schema==='jet.test.v1')report=value;}catch{}}

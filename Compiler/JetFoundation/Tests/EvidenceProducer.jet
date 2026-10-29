@@ -1,0 +1,55 @@
+// Evidence.rs producer: append_frame, write_record_from_codes and the
+// expectation / property-case capture context.
+use jet_foundation.[
+    EvidenceExpectation, EvidenceOutcome, evidence_capture_context, evidence_report_read,
+    evidence_write_record_from_codes,
+]
+use core.files as evidence_test_files
+use core.sys as evidence_test_sys
+// The native O0 lowering lays out `files.Stat`'s DateTime fields only when
+// core.time is in the unit; the producer stats the report it appends to.
+use core.time as evidence_test_time
+
+fn evidence_producer_require(ok: Bool, name: String) Never! {
+    if !ok -> panic("evidence producer contract: {name}")
+}
+
+#Test("evidence_producer appends framed records under one header") {
+    root :: evidence_test_files.join(evidence_test_sys.temp_dir(), "jet-evidence-producer-{evidence_test_sys.pid()}")
+    evidence_test_files.create_dir_all(root) ?? panic("create scratch")
+    path :: evidence_test_files.join(root, "report.jetevid")
+    ordinary :: evidence_capture_context(false, false)
+    evidence_write_record_from_codes(path, 0, 0, "adds", "", "a.jet", U32{3}, ordinary) ?? panic("first record")
+    evidence_write_record_from_codes(path, 0, 1, "expected stop", "boom", "a.jet", U32{9}, evidence_capture_context(true, false)) ?? panic("expected failure record")
+    // A runtime stop caught by a property case keeps its own identity.
+    evidence_write_record_from_codes(path, 2, 1, "stop", "boom", "a.jet", U32{12}, evidence_capture_context(false, true)) ?? panic("property case record")
+    evidence_write_record_from_codes(path, 2, 1, "stop", "boom", "a.jet", U32{12}, ordinary) ?? panic("ordinary stop record")
+    report :: evidence_report_read(path) ?? panic("read report")
+    evidence_producer_require(report.records.len() == 4, "every append lands in one report")
+    expected := 0
+    caught := 0
+    loop record in report.records {
+        if record.expectation == EvidenceExpectation.ExpectedFailure -> expected += 1
+        loop attachment in record.attachments {
+            if attachment.name == "caught_by" && attachment.value == "property_case" -> caught += 1
+        }
+    }
+    evidence_producer_require(expected == 1, "the declared expectation is stamped on its record")
+    evidence_producer_require(caught == 1, "only the property case's stop carries the capture")
+
+    conflict :: evidence_test_files.join(root, "conflict.jetevid")
+    evidence_test_files.write(conflict, "JETEVID2xx") ?? panic("write foreign header")
+    refused :: if evidence_write_record_from_codes(conflict, 0, 0, "adds", "", "a.jet", U32{3}, ordinary) == {
+        .Ok(_) -> false
+        .Err(error) -> error.message == "evidence report schema conflict"
+    }
+    evidence_producer_require(refused, "a foreign header is refused")
+    short :: evidence_test_files.join(root, "short.jetevid")
+    evidence_test_files.write(short, "JET") ?? panic("write short header")
+    truncated :: if evidence_write_record_from_codes(short, 0, 0, "adds", "", "a.jet", U32{3}, ordinary) == {
+        .Ok(_) -> false
+        .Err(error) -> error.message == "truncated evidence report header"
+    }
+    evidence_producer_require(truncated, "a truncated header is refused")
+    evidence_test_files.remove_all(root).drop("test scratch")
+}

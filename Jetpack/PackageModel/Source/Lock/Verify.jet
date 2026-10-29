@@ -1,6 +1,11 @@
 // `--locked` verification: typed lock completeness, manifest staleness,
 // generated-input and build-contribution replay, the plan fingerprint, and
 // the registered lock diagnostics.
+use jetpack_foundation.[BINARY_NAME, JETPACK_BINARY_NAME, PACKAGE_FILE, UNIFIED_LOCK_FILE]
+use jet_foundation.[
+    Diagnostic, RuntimeLayer, Span, diagnostic_from_registry, diagnostic_registry_row,
+]
+use core.files as files
 
 // The lock record kind that is incomplete. The distinction lets hosts
 // report a missing generated fact without treating it as a request to move a
@@ -155,7 +160,7 @@ fn pkg_lock_verify_all_manifest_deps_locked(manifest: Manifest, lock: LockFile) 
 
 // M2: the manifest `runtime:` ceiling set on locked packages
 // at fetch time.
-fn pkg_lock_layer_from_manifest(manifest: Manifest) -> MIRRuntimeLayer? Never! {
+fn pkg_lock_layer_from_manifest(manifest: Manifest) -> RuntimeLayer? Never! {
     manifest.package.layer
 }
 

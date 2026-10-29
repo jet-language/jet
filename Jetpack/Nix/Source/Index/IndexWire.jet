@@ -2,20 +2,26 @@
 // carrier, the wire model, strict parsers and the canonical encoders. Every
 // parser re-encodes what it read and rejects bytes that are not already
 // canonical, because the canonical bytes are what the producer signed.
+use core.encoding.json as json
+use jet_pkg_model.[
+    pkg_json_array, pkg_json_bool, pkg_json_object, pkg_json_render, pkg_json_text, pkg_json_texts,
+    pkg_text_has_control,
+]
+use jetpack_nix_eval.[nixeval_is_ascii_alphanumeric, nixeval_key_ordered, nixeval_sorted]
 
-NIX_INDEX_MAX_COMPRESSED_BYTES :: prep { 33554432 }
-NIX_INDEX_MAX_DECODED_BYTES :: prep { 268435456 }
-NIX_INDEX_MAX_RECORDS :: prep { 400000 }
-NIX_INDEX_MAX_NATIVE_RECIPE_BYTES :: prep { 4194304 }
-NIX_INDEX_MAX_SIGNATURE_BYTES :: prep { 16384 }
-NIX_INDEX_MAX_MANIFEST_BYTES :: prep { 16777216 }
-NIX_INDEX_MAX_MANIFEST_FUTURE_SKEW_SECONDS :: prep { 300 }
-NIX_INDEX_SCHEMA :: prep { 1 }
-NIX_INDEX_U64_MAX :: prep { 18446744073709551615 }
-NIX_INDEX_JSON_MAX_DEPTH :: prep { 16 }
-NIX_INDEX_CHANNELS :: prep { [String]{"nixpkgs-unstable", "nixos-unstable"} }
-NIX_INDEX_SYSTEMS :: prep { [String]{"x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"} }
-NIX_INDEX_COVERAGE_REASONS :: prep { [String]{"evaluation-failed", "unsupported-value", "unsupported-system", "no-channel-build", "missing-narinfo", "missing-version", "missing-primary-output", "policy-excluded"} }
+NIX_INDEX_MAX_COMPRESSED_BYTES :: 33554432
+NIX_INDEX_MAX_DECODED_BYTES :: 268435456
+NIX_INDEX_MAX_RECORDS :: 400000
+NIX_INDEX_MAX_NATIVE_RECIPE_BYTES :: 4194304
+NIX_INDEX_MAX_SIGNATURE_BYTES :: 16384
+NIX_INDEX_MAX_MANIFEST_BYTES :: 16777216
+NIX_INDEX_MAX_MANIFEST_FUTURE_SKEW_SECONDS :: 300
+NIX_INDEX_SCHEMA :: 1
+NIX_INDEX_U64_MAX :: 18446744073709551615
+NIX_INDEX_JSON_MAX_DEPTH :: 16
+NIX_INDEX_CHANNELS :: [String]{"nixpkgs-unstable", "nixos-unstable"}
+NIX_INDEX_SYSTEMS :: [String]{"x86_64-linux", "aarch64-linux", "x86_64-darwin", "aarch64-darwin"}
+NIX_INDEX_COVERAGE_REASONS :: [String]{"evaluation-failed", "unsupported-value", "unsupported-system", "no-channel-build", "missing-narinfo", "missing-version", "missing-primary-output", "policy-excluded"}
 
 #Error
 enum NixIndexError {
@@ -74,12 +80,12 @@ struct NixNativeRecipe {
 
     fn tree(self) -> Dyn Never! {
         Dyn.Object([
-            "name": Dyn.Text(self.name),
-            "version": Dyn.Text(self.version),
-            "kind": Dyn.Text(self.kind),
-            "url": Dyn.Text(self.url),
-            "sha256": Dyn.Text(self.sha256),
-            "bin": Dyn.Text(self.bin),
+            "name": Dyn.Text(self.name.copy()),
+            "version": Dyn.Text(self.version.copy()),
+            "kind": Dyn.Text(self.kind.copy()),
+            "url": Dyn.Text(self.url.copy()),
+            "sha256": Dyn.Text(self.sha256.copy()),
+            "bin": Dyn.Text(self.bin.copy()),
         ])
     }
 
@@ -105,16 +111,16 @@ struct NixIndexProof {
     fn canonical_json(self) -> String Never! {
         pkg_json_render(Dyn.Object([
             "schema": Dyn.Int(self.schema),
-            "channel": Dyn.Text(self.channel),
-            "revision": Dyn.Text(self.revision),
-            "system": Dyn.Text(self.system),
+            "channel": Dyn.Text(self.channel.copy()),
+            "revision": Dyn.Text(self.revision.copy()),
+            "system": Dyn.Text(self.system.copy()),
             "attrpath": pkg_json_texts(self.attrpath),
             "manifest_generation": Dyn.Int(self.manifest_generation),
-            "manifest_sha256": Dyn.Text(self.manifest_sha256),
-            "index_sha256": Dyn.Text(self.index_sha256),
-            "record_sha256": Dyn.Text(self.record_sha256),
-            "jet_key_id": Dyn.Text(self.jet_key_id),
-            "jet_signature": Dyn.Text(self.jet_signature),
+            "manifest_sha256": Dyn.Text(self.manifest_sha256.copy()),
+            "index_sha256": Dyn.Text(self.index_sha256.copy()),
+            "record_sha256": Dyn.Text(self.record_sha256.copy()),
+            "jet_key_id": Dyn.Text(self.jet_key_id.copy()),
+            "jet_signature": Dyn.Text(self.jet_signature.copy()),
         ]))
     }
 }
@@ -156,7 +162,7 @@ struct NixIndexOutputWire {
     store_path: String
 
     fn tree(self) -> Dyn Never! {
-        Dyn.Object(["name": Dyn.Text(self.name), "storePath": Dyn.Text(self.store_path)])
+        Dyn.Object(["name": Dyn.Text(self.name.copy()), "storePath": Dyn.Text(self.store_path.copy())])
     }
 }
 
@@ -184,8 +190,8 @@ struct NixIndexRecordWire {
         loop output in self.outputs -> &outputs.push(output.tree())
         Dyn.Object([
             "attrpath": pkg_json_texts(self.attrpath),
-            "version": Dyn.Text(self.version),
-            "drvPath": Dyn.Text(self.drv_path),
+            "version": Dyn.Text(self.version.copy()),
+            "drvPath": Dyn.Text(self.drv_path.copy()),
             "outputs": Dyn.Array(outputs),
         ])
     }
@@ -203,7 +209,7 @@ struct NixIndexCoverageMiss {
     reason: String
 
     fn tree(self) -> Dyn Never! {
-        Dyn.Object(["attrpath": pkg_json_texts(self.attrpath), "reason": Dyn.Text(self.reason)])
+        Dyn.Object(["attrpath": pkg_json_texts(self.attrpath), "reason": Dyn.Text(self.reason.copy())])
     }
 }
 
@@ -310,9 +316,9 @@ struct NixIndexDocument {
         loop miss in misses -> &miss_trees.push(miss.tree())
         Ok(pkg_json_render(Dyn.Object([
             "schema": Dyn.Int(self.schema),
-            "channel": Dyn.Text(self.channel),
-            "revision": Dyn.Text(self.revision),
-            "system": Dyn.Text(self.system),
+            "channel": Dyn.Text(self.channel.copy()),
+            "revision": Dyn.Text(self.revision.copy()),
+            "system": Dyn.Text(self.system.copy()),
             "released_unix": Dyn.Int(self.released_unix),
             "records": Dyn.Array(record_trees),
             "coverage": Dyn.Object(["indexed": Dyn.Array(indexed_trees), "notIndexed": Dyn.Array(miss_trees)]),
@@ -347,7 +353,8 @@ struct NixIndexSignature {
 
     fn parse(bytes: [U8]) -> NixIndexSignature NixIndexError! {
         text :: String.from_bytes(bytes) ?? return Err(NixIndexError.Invalid("nix index signature is not UTF-8"))
-        value :: json.parse(text, limits: nix_index_json_limits()) ?? return Err(NixIndexError.Invalid("parse nix index signature: {err.reason}"))
+        value :: json.parse(text) ?? return Err(NixIndexError.Invalid("parse nix index signature: {err.reason}"))
+        if !nix_index_json_depth_within(value, 0) -> return Err(NixIndexError.Invalid("parse nix index signature: JSON exceeds maximum nesting depth"))
         map :: nix_index_object(value, "nix index signature")
         nix_index_reject_unknown(map, [String]{"schema", "key_id", "algorithm", "signature"})
         signature :: NixIndexSignature{
@@ -363,9 +370,9 @@ struct NixIndexSignature {
     fn canonical_bytes(self) -> [U8] Never! {
         pkg_json_render(Dyn.Object([
             "schema": Dyn.Int(self.schema),
-            "key_id": Dyn.Text(self.key_id),
-            "algorithm": Dyn.Text(self.algorithm),
-            "signature": Dyn.Text(self.signature),
+            "key_id": Dyn.Text(self.key_id.copy()),
+            "algorithm": Dyn.Text(self.algorithm.copy()),
+            "signature": Dyn.Text(self.signature.copy()),
         ])).bytes()
     }
 }
@@ -387,15 +394,15 @@ struct NixIndexManifestTarget {
 
     fn tree(self) -> Dyn Never! {
         Dyn.Object([
-            "revision": Dyn.Text(self.revision),
-            "system": Dyn.Text(self.system),
-            "url": Dyn.Text(self.url),
-            "signature_url": Dyn.Text(self.signature_url),
-            "sha256": Dyn.Text(self.sha256),
+            "revision": Dyn.Text(self.revision.copy()),
+            "system": Dyn.Text(self.system.copy()),
+            "url": Dyn.Text(self.url.copy()),
+            "signature_url": Dyn.Text(self.signature_url.copy()),
+            "sha256": Dyn.Text(self.sha256.copy()),
             "compressed_length": Dyn.Int(self.compressed_length),
             "decoded_length": Dyn.Int(self.decoded_length),
             "record_count": Dyn.Int(self.record_count),
-            "index_signature_sha256": Dyn.Text(self.signature_sha256),
+            "index_signature_sha256": Dyn.Text(self.signature_sha256.copy()),
             "discoverable": Dyn.Bool(self.discoverable),
         ])
     }
@@ -459,7 +466,7 @@ struct NixIndexChannelManifest {
         loop target in targets -> &trees.push(target.tree())
         Ok(pkg_json_render(Dyn.Object([
             "schema": Dyn.Int(self.schema),
-            "channel": Dyn.Text(self.channel),
+            "channel": Dyn.Text(self.channel.copy()),
             "generation": Dyn.Int(self.generation),
             "issued_unix": Dyn.Int(self.issued_unix),
             "expires_unix": Dyn.Int(self.expires_unix),
@@ -491,7 +498,7 @@ fn nix_index_parse_local_native_recipes(bytes: [U8]) -> [NixNativeRecipe] NixInd
     values :: nix_index_array_field(map, "recipes")
     if values.len() > NIX_INDEX_MAX_RECORDS -> return Err(NixIndexError.Invalid("local unofficial native catalog has too many recipes"))
     recipes := [NixNativeRecipe]{}
-    loop value in values -> &recipes.push(nix_index_parse_native_recipe(value))
+    loop item in values -> &recipes.push(nix_index_parse_native_recipe(item))
     &recipes.sort_by((left: NixNativeRecipe, right: NixNativeRecipe) -> (left.name <=> right.name).then(left.version <=> right.version))
     identities := [String]{}
     loop recipe in recipes {
@@ -681,22 +688,40 @@ fn nix_index_is_loopback_host(authority: String) -> Bool Never! {
     host == "127.0.0.1" || host == "localhost" || host == "::1"
 }
 
-// Strict JSON under the index's own size bound.
+// Strict JSON under the index's own size and nesting bounds. Core's parser
+// takes no caller limits, so the bounds are checked around it.
 fn nix_index_parse_json(text: String, context: String) -> Dyn NixIndexError! {
-    if json.parse(text, limits: nix_index_json_limits()) == {
-        .Ok(value) -> return Ok(value)
+    if text.bytes().len() > NIX_INDEX_MAX_DECODED_BYTES -> return Err(NixIndexError.Invalid("{context}: JSON exceeds its size bound"))
+    value :: if json.parse(text) == {
+        .Ok(parsed) -> parsed
         .Err(error) -> {
             line :: error.line ?? 0
             return Err(NixIndexError.Invalid("{context} at line {line}: {error.reason}"))
         }
     }
+    if !nix_index_json_depth_within(value, 0) -> return Err(NixIndexError.Invalid("{context}: JSON exceeds maximum nesting depth"))
+    Ok(value)
 }
 
-fn nix_index_json_limits() -> encoding.EncodingLimits Never! {
-    limits := encoding.EncodingLimits.safe()
-    limits.max_total_bytes = Val(NIX_INDEX_MAX_DECODED_BYTES)
-    limits.max_depth = NIX_INDEX_JSON_MAX_DEPTH
-    limits
+// Whether every container sits below NIX_INDEX_JSON_MAX_DEPTH.
+fn nix_index_json_depth_within(value: Dyn, depth: Int) -> Bool Never! {
+    if value == {
+        .Array(values) -> {
+            if depth >= NIX_INDEX_JSON_MAX_DEPTH -> return false
+            loop child in values {
+                if !nix_index_json_depth_within(child, depth + 1) -> return false
+            }
+            true
+        }
+        .Object(fields) -> {
+            if depth >= NIX_INDEX_JSON_MAX_DEPTH -> return false
+            loop entry in fields {
+                if !nix_index_json_depth_within(entry.value, depth + 1) -> return false
+            }
+            true
+        }
+        else -> true
+    }
 }
 
 // Segments joined by a byte no valid segment contains (validation rejects

@@ -21,7 +21,7 @@ fn build_test_restore_env(name: String, previous: String?) -[Env]> {
 // bin directory, so `cp`, `sleep` and other host tools are not commands inside
 // it (Rust execution_runtime.rs tests). Sandboxed fixture scripts use shell
 // builtins only.
-BUILD_TEST_COPY_SCRIPT :: prep { "read -r line < input.txt; printf %s \"$line\" > out.txt" }
+BUILD_TEST_COPY_SCRIPT :: "read -r line < input.txt; printf %s \"$line\" > out.txt"
 
 // A fixture that exercises the native boundary fails when the backend is
 // missing; it never passes without running anything.
@@ -453,7 +453,7 @@ fn build_test_output_action(outputs: [String]) -[Rand]> HermeticBuildAction Neve
     decoded :: build_report_from_json(wire) ?? panic("canonical report")
     assert_eq(build_report_to_json(decoded), wire)
     if build_report_from_json(wire.replace(",\"cause\":null", ", \"cause\":null")) == {
-        .Err(error) -> assert_eq(error, "error report is not canonical")
+        .Err(error) -> assert_eq(error.message, "error report is not canonical")
         .Ok(_) -> panic("a non-canonical report must be refused")
     }
     rendered :: build_report_render(report)

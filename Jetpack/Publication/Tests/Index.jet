@@ -1,7 +1,7 @@
 // JP-PUB-INDEX: Index.rs and NamePolicy.rs embedded tests, plus Tier.rs's
 // carrier/review tests. Native publication retains real Registry dependencies:
 // JP-PUB-REG-VERIFY, JP-PUB-REG-REFERRERS; authority operations owe Core #3593.
-// Rust InvalidData-kind acceptance is retained pending Core owner ballot #4409.
+// Rust InvalidData refusals report InvalidInput until Core has InvalidData (CORE-GAPS 11).
 // The pure name/wire proof is NOT proof of the native publication acceptance.
 fn publication_index_test_entry(name: String, version: String, yanked: Bool) -> PublicationIndexEntry Never! {
     PublicationIndexEntry{name: name, version: version, content_hash: "sha256-tree", fingerprint: "sha256-fp", yanked: yanked, tier: .Core, gate_status: publication_core_reviewed(), public_key: "", signature: ""}
@@ -112,7 +112,6 @@ fn publication_index_test_root(label: String) -[FS, Env]> String Never! {
     entry.name = "{entry.name}a"
     assert_eq(publication_index_parse_line(publication_index_to_jsonl(entry)), None)
 }
-
 
 #Test("publication name skeleton_collapses_common_homoglyphs") {
     assert_eq(publication_confusable_skeleton("раypal"), "paypal")
@@ -226,11 +225,11 @@ fn publication_index_test_root(label: String) -[FS, Env]> String Never! {
     files.create_dir_all(files.dirname(path)) ?? panic("directory")
     files.write(path, "{malformed}\n") ?? panic("fixture")
     if publication_read_entries(repo, "textkit") == {
-        .Err(error) -> assert(error == .InvalidData(_))
+        .Err(error) -> assert(error == .InvalidInput(_))
         .Ok(_) -> panic("malformed read accepted")
     }
     if publication_mark_yanked(repo, "textkit", "1.0.0") == {
-        .Err(error) -> assert(error == .InvalidData(_))
+        .Err(error) -> assert(error == .InvalidInput(_))
         .Ok(_) -> panic("malformed yank accepted")
     }
     files.remove_all(repo) ?? panic("cleanup")
@@ -299,7 +298,7 @@ fn publication_index_test_root(label: String) -[FS, Env]> String Never! {
     link :: files.join(root, "textkit")
     files.symlink(outside, link) ?? panic("directory symlink")
     if publication_package_names(repo) == {
-        .Err(error) -> assert(error == .InvalidData(_))
+        .Err(error) -> assert(error == .InvalidInput(_))
         .Ok(_) -> panic("package directory symlink accepted")
     }
     files.remove(link) ?? panic("remove directory link")
@@ -310,7 +309,7 @@ fn publication_index_test_root(label: String) -[FS, Env]> String Never! {
     files.write(target, publication_index_to_jsonl(publication_index_test_entry("textkit", "1.0.0", false))) ?? panic("outside record")
     files.symlink(target, files.join(link, "textkit.jsonl")) ?? panic("record symlink")
     if publication_package_names(repo) == {
-        .Err(error) -> assert(error == .InvalidData(_))
+        .Err(error) -> assert(error == .InvalidInput(_))
         .Ok(_) -> panic("record symlink accepted")
     }
     files.remove_all(repo) ?? panic("cleanup")

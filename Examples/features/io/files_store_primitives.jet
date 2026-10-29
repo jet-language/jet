@@ -1,6 +1,6 @@
 package {
     name: "files_store_primitives"
-    authority: { holds: { allow: [FS, FS.Read, FS.Write, IO, Mem.Alloc] } }
+    authority: { allow: [FS, FS.Read, FS.Write, IO, Mem.Alloc] }
 }
 
 // Store-grade core.files primitives (#3593): exclusive create with a mode,
@@ -70,8 +70,8 @@ fn run() {
         .Ok(_) -> print("held open of a link: opened")
         .Err(error) -> print("held open of a link: {kind(error)}")
     }
-    reader :: store.open("stage/payload")
-    line :: reader.read_line()
+    reader := store.open("stage/payload")
+    line :: &reader.read_line()
     print("held read: {line ?? "<end>"}")
     print("read_link: {store.read_link("alias")}")
     print("entry_stat link: {store.entry_stat("alias").is_symlink}")

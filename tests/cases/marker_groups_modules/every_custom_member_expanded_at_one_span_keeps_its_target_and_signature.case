@@ -1,0 +1,27 @@
+# tests/marker_groups_modules.rs::every_custom_member_expanded_at_one_span_keeps_its_target_and_signature at tests/marker_groups_modules.rs:310; hand-port
+# Claim: group whose members take matching typed arguments (First("fixed"), Second(7)) is accepted (tests/marker_groups_modules.rs:311-318)
+# Claim: a member argument of the wrong type (First(7)) is rejected with E0930 (tests/marker_groups_modules.rs:319-321)
+# Claim: a member argument of the wrong type (Second("wrong")) is rejected with E0930 (tests/marker_groups_modules.rs:319-321)
+# Claim: a group whose members have mismatched target sites (Function vs Type) is rejected with E0355 (tests/marker_groups_modules.rs:322-330)
+# Fixture migrated: removed `pub` from fixtures: seed rejects it (E0411 `pub` was removed); DEV Examples/features/modules/marker_groups uses no pub
+# Not ported: rule_facts target/site/span equality (tests/marker_groups_modules.rs:314-321) reads Rust-internal rule facts
+fixture: every_custom_member_expanded_at_one_span_keeps_its_target_and_signature.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+cwd: e1
+exit: 0 # tests/marker_groups_modules.rs:311-318 clean()
+stderr: !~ "[E" # tests/marker_groups_modules.rs:311-318 clean()
+step: jet check main.jet
+cwd: e2
+exit: 1 # tests/marker_groups_modules.rs:319-321 First(7) -> E0930
+stderr: ~ "E0930" # tests/marker_groups_modules.rs:319-321 First(7) -> E0930
+step: jet check main.jet
+cwd: e3
+exit: 1 # tests/marker_groups_modules.rs:319-321 Second("wrong") -> E0930
+stderr: ~ "E0930" # tests/marker_groups_modules.rs:319-321 Second("wrong") -> E0930
+step: jet check main.jet
+cwd: e4
+exit: 1 # tests/marker_groups_modules.rs:322-330 site mismatch -> E0355
+stderr: ~ "E0355" # tests/marker_groups_modules.rs:322-330 site mismatch -> E0355

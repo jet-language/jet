@@ -1,0 +1,16 @@
+# tests/marker_rule_signatures.rs::int_rule_arguments_use_local_semantic_types at tests/marker_rule_signatures.rs:443; hand-port
+# Claim: valid Int rule argument produces no E0930/E0762 (tests/marker_rule_signatures.rs:452-454)
+# Claim: deadline :: "soon" in #Context yields E0930 and no E0762 (tests/marker_rule_signatures.rs:464-469)
+# Not ported: Rust asserts E0930 exactly once; CLI pins E0930 presence only
+fixture: int_rule_arguments_use_local_semantic_types.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check valid/main.jet
+exit: 0 # tests/marker_rule_signatures.rs:452 no E0930/E0762
+stderr: !~ "E0930" # tests/marker_rule_signatures.rs:452 no E0930/E0762
+stderr: !~ "E0762" # tests/marker_rule_signatures.rs:452 no E0930/E0762
+step: jet check wrong/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:464 E0930 once; :469 no E0762
+stderr: ~ "E0930" # tests/marker_rule_signatures.rs:464 E0930 once; :469 no E0762
+stderr: !~ "E0762" # tests/marker_rule_signatures.rs:464 E0930 once; :469 no E0762

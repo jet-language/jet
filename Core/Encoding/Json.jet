@@ -1,0 +1,1533 @@
+
+// core.encoding.json — RFC 8259 JSON as Dyn.
+//
+// `parse` is the strict codec: objects keep insertion order, whole numbers
+// become `Dyn.Int` (exact `Int`, not binary64), fractions become
+// `Dyn.Float`, and `NaN` / `Infinity` are syntax errors. Untyped `decode`
+// applies the historical lenient coercion walk and emits an audit line for
+// each coercion. Typed `decode<T>` runs `__decode_typed`.
+//
+// `to_string` is compact. `to_string_pretty` uses two-space indent. Neither
+// emits a trailing newline, sorts keys, or is a hashing contract: insertion
+// order is the document order. `canonical` is the one byte-exact form, RFC 8785
+// JCS keys sorted by UTF-16 code units, ECMAScript shortest
+// numbers, and explicit `EncodingError`s for values JCS cannot encode.
+// Native typed-decode carriers are inspected only inside audited Core regions;
+// strict parse errors stay on their original EncodingError location rail.
+//
+// Duplicate object names `parse`, `decode`, and
+// `reader` reject them with the key's path, line, and column. The named
+// `parse_allow_duplicates` keeps the later value in the first key's position;
+// bounded native streaming readers remain strict. The duplicate check uses
+// the object's own key map, so the input bound
+// (`EncodingLimits.safe().max_item_bytes`) also bounds it.
+//
+// `pointer` is RFC 6901 selection and `patch` is RFC
+// 6902 application. Both leave their inputs unchanged.
+//
+// Allocates one output tree plus the decoded strings. Depth is bounded by
+// `EncodingLimits.safe().max_depth` (256) so hostile nesting cannot run the
+// process out of stack.
+
+
+use core as core
+use core.encoding.[DataEvent, Dyn, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
+use core.files.[FileWriter]
+use core.math as math
+use __core_encoding_stream as stream
+
+fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError Never! {
+    {
+        format: format,
+        kind: EncodingErrorKind.Syntax,
+        byte_offset: offset,
+        line: Val(line),
+        column: Val(column),
+        path: path,
+        reason: reason,
+        cause: None,
+    }
+}
+
+fn truncated_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String) -> EncodingError Never! {
+    {
+        format: format,
+        kind: EncodingErrorKind.Truncated,
+        byte_offset: offset,
+        line: Val(line),
+        column: Val(column),
+        path: path,
+        reason: "input ended before the value was complete",
+        cause: None,
+    }
+}
+fn limit_error(format: EncodingFormat, offset: Int, reason: String) -> EncodingError Never! {
+    {
+        format: format,
+        kind: EncodingErrorKind.Limit,
+        byte_offset: offset,
+        line: None,
+        column: None,
+        path: "",
+        reason: reason,
+        cause: None,
+    }
+}
+
+fn safe_limits() -> EncodingLimits Never! {
+    {
+        buffer_bytes: 65536,
+        max_depth: 256,
+        max_item_bytes: 16777216,
+        max_total_bytes: None,
+        max_expansion_depth: 32,
+        max_expansion_bytes: 8388608,
+    }
+}
+/// Strict JSON → `Dyn`. Every number keeps its exact lexeme as `Dyn.Number`
+/// until a typed read range-checks it (#4602).
+fn parse(text: String) -> Dyn EncodingError! { parse_json(text, false, safe_limits()) }
+
+/// Strict JSON → `Dyn` under caller limits: `max_item_bytes` bounds the input
+/// size and `max_depth` the nesting of arrays and objects.
+fn parse_with_limits(text: String, limits: EncodingLimits) -> Dyn EncodingError! {
+    if limits.max_depth < 1 || limits.max_item_bytes < 1 {
+        return Err(value_error(EncodingErrorKind.Limit, "", "EncodingLimits.max_depth and max_item_bytes must be positive"))
+    }
+    parse_json(text, false, limits)
+}
+
+/// Strict JSON → `Dyn`, except that a repeated object name keeps the later
+/// value at the first name's position.
+fn parse_allow_duplicates(text: String) -> Dyn EncodingError! { parse_json(text, true, safe_limits()) }
+
+/// Coerce strings that are exactly booleans or finite numbers.
+fn decode(text: String) -> Dyn EncodingError! {
+    tree :: parse(text) ?? return Err(err)
+    coerce_tree(tree, "", (line: String) -> { emit_coercion(line) })
+}
+
+fn emit_coercion(line: String) Never! {
+    #Unsafe("preserve the shipped decoder's hidden stderr effect at its existing host boundary") {
+        core.encoding.__coerce_emit(line)
+    }
+}
+
+fn coerce_line(path: String, target: String) -> String Never! {
+    label :: if path == "" -> "<root>" else -> path
+    timestamp := 0
+    #Unsafe("preserve the shipped decoder's hidden wall-clock snapshot at its existing host boundary") {
+        timestamp = core.encoding.__coerce_now()
+    }
+    "{{\"level\":\"info\",\"body\":\"json coerce: field \"{label}\" string → {target}\",\"ts\":{timestamp}}}"
+}
+
+fn coerce_tree(value: Dyn, path: String, emit: fn(String) Never!) -> Dyn Never! {
+    if value == {
+        .Text(text) -> {
+            if text == "true" || text == "false" {
+                emit(coerce_line(path, "boolean"))
+                return Dyn.Bool(text == "true")
+            }
+            if Float.parse(text) == .Ok(number) {
+                if math.is_finite(number) {
+                    emit(coerce_line(path, "number"))
+                    return Dyn.Float(number)
+                }
+            }
+            return value.copy()
+        }
+        .Array(items) -> {
+            out := [Dyn]{}
+            loop i in 0..<items.len() -> &out.push(coerce_tree(items[i], "{path}[{i}]", emit))
+            return Dyn.Array(out)
+        }
+        .Object(_) -> {
+            out := [(key: String, value: Dyn)]{}
+            loop entry in stream.object_entries(value) {
+                child_path :: if path == "" -> entry.key else -> "{path}.{entry.key}"
+                &out.push((key: entry.key.copy(), value: coerce_tree(entry.value, child_path, emit)))
+            }
+            return stream.object_from_entries(^out)
+        }
+        else -> return value.copy()
+    }
+}
+
+#Test("lenient JSON preserves ordered shape and coercion traversal") {
+    lines := [String]{}
+    value :: parse("{{\"port\":\"8080\",\"enabled\":\"true\",\"x\":[\"false\",\"Infinity\",\"2\"]}}") ?? panic("JSON")
+    actual :: coerce_tree(value, "", (line: String) -> { &lines.push(line) })
+    assert_eq(to_string(actual) ?? panic("encode coerced tree"), "{{\"port\":8080.0,\"enabled\":true,\"x\":[false,\"Infinity\",2.0]}}")
+    assert_eq(lines.len(), 4)
+    assert(lines[0].contains("field \"port\" string → number"))
+    assert(lines[1].contains("field \"enabled\" string → boolean"))
+    assert(lines[2].contains("field \"x[0]\" string → boolean"))
+    assert(lines[3].contains("field \"x[2]\" string → number"))
+}
+
+/// Python-compatible spelling for JSON parsing.
+fn loads(text: String) -> Dyn EncodingError! { parse(text) }
+
+/// Python-compatible file-shaped spelling for JSON parsing.
+fn load(text: String) -> Dyn EncodingError! { parse(text) }
+/// Compact JSON text. Object keys keep insertion order.
+fn to_string<T: Encode>(value: T) -> String EncodingError! { render_json(value.encode(), false) }
+/// Python-compatible spelling for compact JSON serialization.
+fn dumps(value: Dyn) -> String EncodingError! { render_json(value, false) }
+/// Python-compatible file-shaped spelling for JSON serialization.
+fn dump(value: Dyn) -> String EncodingError! { render_json(value, false) }
+
+/// Two-space indented JSON text.
+fn to_string_pretty<T: Encode>(value: T) -> String EncodingError! { render_json(value.encode(), true) }
+
+/// RFC 8785 JSON Canonicalization Scheme bytes compact,
+/// object keys sorted by unsigned UTF-16 code units, ECMAScript `Number`
+/// spelling, `-0.0` as `0`. Rejects NaN and infinities, an `Int` that binary64
+/// cannot hold exactly, and repeated keys, naming the failing value's JSON
+/// Pointer. Nesting is bounded by `EncodingLimits.safe().max_depth`.
+fn canonical(value: Dyn) -> String EncodingError! {
+    out := [U8]{}
+    path := [String]{}
+    write_canonical(&out, value, &path, 1) ?? return Err(err)
+    Ok(stream.text_from_bytes(^out) ?? "")
+}
+
+/// A pull reader over text already held by the caller. File readers use the
+/// bounded native stream contract and consume a `^FileReader`.
+fn reader(text: String) -> JSONReader Never! { JSONReader{parser: Parser.new(text.bytes(), false, false)} }
+
+/// Report each occurrence of a duplicate key as an event.
+fn reader_allow_duplicates(text: String) -> JSONReader Never! { JSONReader{parser: Parser.new(text.bytes(), true, true)} }
+
+struct JSONReader {
+    parser: Parser
+
+    fn next(&self) -> DataEvent EncodingError! { &self.parser.next_event() }
+}
+
+/// Bounded event output. The source push engine owns framing, canonicalization,
+/// limits and sticky errors; its registered leaves perform only file operations.
+struct JSONWriter {
+    output: stream.JSONPush
+
+    fn write(&self, event: ^DataEvent) EncodingError! -[IO]> {
+        &self.output.write(^event)
+    }
+
+    fn flush(&self) EncodingError! -[IO]> { &self.output.flush() }
+
+    fn finish(&self) EncodingError! -[IO]> { &self.output.finish() }
+}
+
+fn writer(target: ^FileWriter, limits: EncodingLimits{EncodingLimits.safe()}, canonical: Bool{false}) -[FS]> JSONWriter EncodingError! {
+    output :: stream.json_writer(^target, limits, canonical) ?? return Err(err)
+    Ok(JSONWriter{output: ^output})
+}
+
+/// RFC 6901 JSON Pointer selection. `""` is the whole
+/// value and `/` the empty-named member; `~0` and `~1` escape `~` and `/`;
+/// array steps are canonical decimal indices (no `-`). JSON `null` is a value,
+/// not absence. A missing member, bad index, bad escape, or step into a scalar
+/// fails with the pointer prefix through the failing step. The walk borrows
+/// each ancestor; only the selected subtree is returned as an owned value.
+/// A pointer may have at most `EncodingLimits.safe().max_depth` steps.
+fn pointer(tree: Dyn, path: String) -> Dyn EncodingError! {
+    segments :: pointer_segments(path)
+    if segments.len() > safe_limits().max_depth {
+        return Err(value_error(EncodingErrorKind.Limit, "", "JSON Pointer has more than max_depth {safe_limits().max_depth} steps"))
+    }
+    pointer_select(tree, segments, 0)
+}
+
+/// RFC 6902 JSON Patch under `EncodingLimits.safe()`.
+/// See `patch_with_limits`.
+fn patch(doc: Dyn, ops: Dyn) -> Dyn EncodingError! { patch_with_limits(doc, ops, safe_limits()) }
+
+/// Apply an RFC 6902 operation array (`add`, `remove`, `replace`, `move`,
+/// `copy`, `test`) and return the patched value. The whole array is validated
+/// first; the operations then build a new value, so `doc` is unchanged when
+/// any operation fails. Errors name the operation as a pointer into `ops`
+/// (`/2`, `/2/from`) and quote the target path. `test` uses JSON equality:
+/// numbers compare by value, objects ignore member order. Limits:
+/// `max_item_bytes` bounds the compact size of `ops`, `max_depth` bounds each
+/// path and the result's nesting, `max_expansion_bytes` bounds the bytes that
+/// `copy` duplicates across the patch, and `max_total_bytes` (when set) bounds
+/// the compact size of the result.
+fn patch_with_limits(doc: Dyn, ops: Dyn, limits: EncodingLimits) -> Dyn EncodingError! {
+    if limits.max_depth < 1 || limits.max_item_bytes < 1 || limits.max_expansion_bytes < 0 {
+        return Err(value_error(EncodingErrorKind.Limit, "", "EncodingLimits.max_depth and max_item_bytes must be positive and max_expansion_bytes nonnegative"))
+    }
+    encoded_ops :: render_json(ops, false) ?? return Err(err)
+    if encoded_ops.bytes().len() > limits.max_item_bytes {
+        return Err(value_error(EncodingErrorKind.Limit, "", "JSON Patch document exceeds max_item_bytes {limits.max_item_bytes}"))
+    }
+    operations :: patch_operations(ops, limits)
+    working := doc
+    expansion := 0
+    loop index in 0..<operations.len() {
+        op :: operations[index]
+        target :: pointer_text(op.path, op.path.len())
+        if op.kind == PATCH_COPY {
+            copied :: pointer_select(working, op.from, 0) ?? return Err(value_error(err.kind, "/{index}", "operation {index} `copy` from `{pointer_text(op.from, op.from.len())}`: {err.reason}"))
+            encoded_copy :: render_json(copied, false) ?? return Err(err)
+            expansion += encoded_copy.bytes().len()
+            if expansion > limits.max_expansion_bytes {
+                return Err(value_error(EncodingErrorKind.Limit, "/{index}", "operation {index} `copy` duplicates more than max_expansion_bytes {limits.max_expansion_bytes}"))
+            }
+        }
+        next_doc :: patch_step(working, op) ?? return Err(value_error(err.kind, "/{index}", "operation {index} `{op.name}` at `{target}`: {err.reason}"))
+        working = next_doc
+    }
+    if tree_depth(working) > limits.max_depth {
+        return Err(value_error(EncodingErrorKind.Limit, "", "patched document nests deeper than max_depth {limits.max_depth}"))
+    }
+    if limits.max_total_bytes == {
+        .Val(max) -> {
+            encoded_working :: render_json(working, false) ?? return Err(err)
+            if encoded_working.bytes().len() > max -> return Err(value_error(EncodingErrorKind.Limit, "", "patched document exceeds max_total_bytes {max}"))
+        }
+        .None -> { _ := 0 }
+    }
+    Ok(working)
+}
+
+/// Convert a parsed tree to the canonical streaming event sequence.
+fn events(value: Dyn) -> [DataEvent] Never! { append_events(value) }
+
+
+struct Parser {
+    bytes: [U8]
+    index: Int
+    line: Int
+    column: Int
+    depth: Int
+    max_depth: Int
+    path: [String]
+    pending: [DataEvent]
+    pending_index: Int
+    parsed: Bool
+    recording: Bool
+    allow_duplicates: Bool
+    typed_numbers: Bool
+    // Numbers parse as their validated `Dyn.Number` lexemes (parse_json).
+    exact_numbers: Bool
+}
+
+impl Parser {
+    fn new(bytes: [U8], allow_duplicates: Bool, recording: Bool) -> Parser Never! {
+        Parser{
+            bytes: bytes,
+            index: 0,
+            line: 1,
+            column: 1,
+            depth: 0,
+            max_depth: safe_limits().max_depth,
+            path: [String]{},
+            pending: [DataEvent]{},
+            pending_index: 0,
+            parsed: false,
+            recording: recording,
+            allow_duplicates: allow_duplicates,
+            typed_numbers: false,
+            exact_numbers: false,
+        }
+    }
+
+    fn eof(self) -> Bool Never! { self.index >= self.bytes.len() }
+
+    fn peek(self) -> U8? {
+        if self.eof() -> return None
+        Val(self.bytes[self.index])
+    }
+
+    fn bump(&self) -> U8? {
+        b :: self.peek() ?? return None
+        self.index += 1
+        if b == (U8{10}) {
+            self.line += 1
+            self.column = 1
+        } else {
+            self.column += 1
+        }
+        Val(b)
+    }
+
+    fn err(self, reason: String) -> EncodingError Never! {
+        return syntax_error(
+            EncodingFormat.JSON,
+            self.index,
+            self.line,
+            self.column,
+            "/{self.path.join("/")}",
+            reason,
+        )
+    }
+
+    // Whitespace is read in place: no per-byte `U8?` (a heap box natively).
+    fn skip_ws(&self) -> Bool EncodingError! {
+        if self.index < 0 -> return Err(self.err("JSON parser index became negative"))
+        loop self.index < self.bytes.len() {
+            n :: Int.from_u8(self.bytes[self.index])
+            if n != 32 && n != 9 && n != 10 && n != 13 -> return true
+            self.index += 1
+            if n == 10 {
+                self.line += 1
+                self.column = 1
+            } else {
+                self.column += 1
+            }
+        }
+        true
+    }
+
+    fn expect(&self, want: U8) -> Bool Never! {
+        got :: &self.bump()
+        b :: got ?? return false
+        b == want
+    }
+
+
+    fn parse_value(&self) -> Dyn EncodingError! {
+        &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+        b :: self.peek() ?? return Err(truncated_error(
+            EncodingFormat.JSON,
+            self.index,
+            self.line,
+            self.column,
+            "/{self.path.join("/")}",
+        ))
+        n :: b
+        if n == {
+            91 -> return &self.parse_array()
+            123 -> return &self.parse_object()
+            else -> { _ := 0 }
+        }
+        value := Dyn.Null
+        if n == 110 {
+            value = &self.parse_literal("null", Dyn.Null)
+        } else {
+            if n == 116 {
+                value = &self.parse_literal("true", Dyn.Bool(true))
+            } else {
+                if n == 102 {
+                    value = &self.parse_literal("false", Dyn.Bool(false))
+                } else {
+                    if n == 34 {
+                        s :: &self.parse_string()
+                        value = if self.typed_numbers -> stream.typed_string(^s) else -> Dyn.Text(s)
+                    } else {
+                        // The typed rail keeps the shared typed-decode vocabulary (Rust EncodingErrors.rs).
+                        if n != 45 && (n < 48 || n > 57) -> return Err(self.err(if self.typed_numbers -> "expected a JSON value" else -> "expected a JSON value (object, array, string, number, true, false, or null)"))
+                        value = &self.parse_number()
+                    }
+                }
+            }
+        }
+        if self.recording {
+            loop event in append_events(value) -> &self.pending.push(event)
+        }
+        Ok(value)
+    }
+
+    fn parse_literal(&self, spelling: String, value: Dyn) -> Dyn EncodingError! {
+        loop b in spelling.bytes() {
+            got :: &self.bump() ?? return Err(self.err("input ended inside `{spelling}`"))
+            if got != b -> return Err(self.err("expected `{spelling}`"))
+        }
+        Ok(value)
+    }
+
+    fn parse_string(&self) -> String EncodingError! {
+        if !&self.expect(U8{34}) -> return Err(self.err("expected a string opening quote"))
+        out := [U8]{}
+        loop {
+            // The run up to the next quote, escape or control byte is copied
+            // in place (no newline inside: control bytes end the run).
+            run :: self.index
+            loop self.index < self.bytes.len() {
+                n :: Int.from_u8(self.bytes[self.index])
+                if n == 34 || n == 92 || n < 32 -> break
+                self.index += 1
+            }
+            if self.index > run {
+                loop at in run..<self.index -> &out.push(self.bytes[at])
+                self.column += self.index - run
+            }
+            b :: &self.bump() ?? return Err(self.err("unterminated string"))
+            n :: b
+            if n == 34 {
+                s :: stream.text_from_bytes(^out) ?? return Err(self.err("invalid UTF-8 in string"))
+                return Ok(s)
+            }
+            if n < 32 -> return Err(self.err("unescaped control character in string; use a JSON escape"))
+            esc :: &self.bump() ?? return Err(self.err("unterminated string escape"))
+            e :: esc
+            if e == 34 || e == 92 || e == 47 {
+                &out.push(esc)
+                next
+            }
+            if e == 98 {
+                &out.push(U8{8})
+                next
+            }
+            if e == 102 {
+                &out.push(U8{12})
+                next
+            }
+            if e == 110 {
+                &out.push(U8{10})
+                next
+            }
+            if e == 114 {
+                &out.push(U8{13})
+                next
+            }
+            if e == 116 {
+                &out.push(U8{9})
+                next
+            }
+            if e == 117 {
+                cp := &self.parse_hex4()
+                if cp >= 55296 && cp <= 57343 {
+                    if cp > 56319 -> return Err(self.err("lone low surrogate in JSON string"))
+                    slash :: &self.bump() ?? return Err(self.err("high surrogate must be followed by a low surrogate"))
+                    if slash != (U8{92}) -> return Err(self.err("high surrogate must be followed by a low surrogate"))
+                    u :: &self.bump() ?? return Err(self.err("high surrogate must be followed by a low surrogate"))
+                    if u != (U8{117}) -> return Err(self.err("high surrogate must be followed by a low surrogate"))
+                    low :: &self.parse_hex4()
+                    if low < 56320 || low > 57343 -> return Err(self.err("high surrogate must be followed by a low surrogate"))
+                    cp = 65536 + ((cp - 55296) << 10) + (low - 56320)
+                }
+                utf8 := utf8_bytes(cp)
+                loop byte in utf8 -> &out.push(byte)
+                next
+            }
+            return Err(self.err("unknown string escape; JSON allows \\\", \\\\, \\/, \\b, \\f, \\n, \\r, \\t, \\uXXXX"))
+        }
+    }
+
+    fn parse_hex4(&self) -> Int EncodingError! {
+        n := 0
+        loop _ in 0..<4 {
+            b :: &self.bump() ?? return Err(self.err("truncated \\u escape"))
+            d :: hex_digit(b) ?? return Err(self.err("\\u escape needs four hexadecimal digits"))
+            n = n * 16 + d
+        }
+        Ok(n)
+    }
+
+    fn parse_number(&self) -> Dyn EncodingError! {
+        start :: self.index
+        if (self.peek() ?? (U8{0})) == (U8{45}) -> _ :: &self.bump()
+        first :: self.peek() ?? return Err(self.err("input ended inside a number"))
+        first_digit :: first
+        if first_digit < 48 || first_digit > 57 -> return Err(self.err("expected a digit"))
+        if first_digit == 48 {
+            _ :: &self.bump()
+            nextc :: self.peek() ?? (U8{0})
+            nn :: nextc
+            if nn >= 48 && nn <= 57 -> return Err(self.err("leading zeros are not allowed in JSON numbers"))
+        } else {
+            loop {
+                n :: self.peek() ?? break
+                d :: n
+                if d >= 48 && d <= 57 {
+                    _ :: &self.bump()
+                } else {
+                    break
+                }
+            }
+        }
+        fractional := false
+        if (self.peek() ?? (U8{0})) == (U8{46}) {
+            fractional = true
+            _ :: &self.bump()
+            digit :: self.peek() ?? return Err(self.err("decimal point must be followed by a digit"))
+            dn :: digit
+            if dn < 48 || dn > 57 -> return Err(self.err("decimal point must be followed by a digit"))
+            loop {
+                n :: self.peek() ?? break
+                d :: n
+                if d >= 48 && d <= 57 {
+                    _ :: &self.bump()
+                } else {
+                    break
+                }
+            }
+        }
+        exp := false
+        ebyte :: self.peek() ?? (U8{0})
+        en :: ebyte
+        if en == 101 || en == 69 {
+            exp = true
+            _ :: &self.bump()
+            sign :: self.peek() ?? (U8{0})
+            sn :: sign
+            if sn == 43 || sn == 45 -> _ :: &self.bump()
+            digit :: self.peek() ?? return Err(self.err("exponent must contain a digit"))
+            dn :: digit
+            if dn < 48 || dn > 57 -> return Err(self.err("exponent must contain a digit"))
+            loop {
+                n :: self.peek() ?? break
+                d :: n
+                if d >= 48 && d <= 57 {
+                    _ :: &self.bump()
+                } else {
+                    break
+                }
+            }
+        }
+        token :: String.from_bytes(self.bytes[start..self.index - 1]) ?? return Err(self.err("invalid number token"))
+        if self.typed_numbers || self.exact_numbers -> return Ok(stream.typed_number(^token))
+        if fractional || exp {
+            f :: Float.parse(token) ?? return Err(self.err("number does not fit in Float"))
+            if !math.is_finite(f) -> return Err(self.err("non-finite JSON numbers are not allowed"))
+            return Ok(Dyn.Float(f))
+        }
+        n :: Int.parse(token) ?? return Err(self.err("number does not fit in Int"))
+        Ok(Dyn.Int(n))
+    }
+
+    fn parse_array(&self) -> Dyn EncodingError! {
+        if !&self.expect(U8{91}) -> return Err(self.err("expected '['"))
+        if !&self.enter() -> return Err(self.err("nesting exceeds max_depth ({self.max_depth})"))
+        if self.recording -> &self.pending.push(DataEvent.ArrayStart)
+        items := [Dyn]{}
+        &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+        if (self.peek() ?? (U8{0})) == (U8{93}) {
+            _ :: &self.bump()
+            self.depth -= 1
+            if self.recording -> &self.pending.push(DataEvent.ArrayEnd)
+            return Ok(Dyn.Array(items))
+        }
+        index := 0
+        loop {
+            &self.path.push("{index}")
+            value :: &self.parse_value()
+            _ :: &self.path.pop()
+            &items.push(value)
+            &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+            b :: self.peek() ?? return Err(self.err("unterminated array"))
+            if b == (U8{93}) {
+                _ :: &self.bump()
+                self.depth -= 1
+                if self.recording -> &self.pending.push(DataEvent.ArrayEnd)
+                return Ok(Dyn.Array(items))
+            }
+            if b != (U8{44}) -> return Err(self.err("expected ',' or ']' after an array element"))
+            _ :: &self.bump()
+            &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+            if (self.peek() ?? (U8{0})) == (U8{93}) -> return Err(self.err("trailing commas are not allowed in JSON"))
+            index += 1
+        }
+    }
+
+    fn parse_object(&self) -> Dyn EncodingError! {
+        if !&self.expect(U8{123}) -> return Err(self.err("expected '{{'"))
+        if !&self.enter() -> return Err(self.err("nesting exceeds max_depth ({self.max_depth})"))
+        if self.recording -> &self.pending.push(DataEvent.ObjectStart)
+        entries := [(key: String, value: Dyn)]{}
+        positions := [String: Int]{}
+        &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+        if (self.peek() ?? (U8{0})) == (U8{125}) {
+            _ :: &self.bump()
+            self.depth -= 1
+            if self.recording -> &self.pending.push(DataEvent.ObjectEnd)
+            return Ok(stream.object_from_entries(^entries))
+        }
+        loop {
+            &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+            if (self.peek() ?? (U8{0})) != (U8{34}) -> return Err(self.err("object keys must be strings"))
+            key :: &self.parse_string()
+            &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+            if !&self.expect(U8{58}) -> return Err(self.err("expected ':' after an object key"))
+            &self.path.push(key)
+            if self.recording -> &self.pending.push(DataEvent.Key(key))
+            if positions.get(key) == .Val(position) {
+                if !self.allow_duplicates {
+                    error :: self.err("duplicate object key `{key}`")
+                    _ :: &self.path.pop()
+                    return Err(error)
+                }
+                // parse_allow_duplicates: the later value, at the first name's position.
+                later :: &self.parse_value()
+                entries[position].value = later
+            } else {
+                value :: &self.parse_value()
+                _ :: &positions.add(key, entries.len())
+                &entries.push((key: key, value: value))
+            }
+            _ :: &self.path.pop()
+            &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+            b :: self.peek() ?? return Err(self.err("unterminated object"))
+            if b == (U8{125}) {
+                _ :: &self.bump()
+                self.depth -= 1
+                if self.recording -> &self.pending.push(DataEvent.ObjectEnd)
+                return Ok(stream.object_from_entries(^entries))
+            }
+            if b != (U8{44}) -> return Err(self.err("expected ',' or '}}' after an object member"))
+            _ :: &self.bump()
+            &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+            if (self.peek() ?? (U8{0})) == (U8{125}) -> return Err(self.err("trailing commas are not allowed in JSON"))
+        }
+    }
+
+    fn enter(&self) -> Bool Never! {
+        self.depth += 1
+        self.depth <= self.max_depth
+    }
+
+    fn next_event(&self) -> DataEvent EncodingError! {
+        if !self.parsed {
+            if self.bytes.len() > safe_limits().max_item_bytes {
+                return Err(limit_error(EncodingFormat.JSON, 0, "JSON input exceeds max_item_bytes ({safe_limits().max_item_bytes})"))
+            }
+            &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+            if self.eof() -> return Err(truncated_error(EncodingFormat.JSON, self.index, self.line, self.column, ""))
+            value :: &self.parse_value()
+            &self.skip_ws() ?? return Err(self.err("failed while scanning JSON whitespace"))
+            if !self.eof() -> return Err(self.err("unexpected trailing data after the JSON value"))
+            if !self.recording -> self.pending = append_events(value)
+            self.parsed = true
+        }
+        if self.pending_index >= self.pending.len() -> return Err(self.err("JSON reader is exhausted"))
+        event :: self.pending[self.pending_index]
+        self.pending_index += 1
+        Ok(event)
+    }
+}
+
+fn parse_json(text: String, allow_duplicates: Bool, limits: EncodingLimits) -> Dyn EncodingError! {
+    raw :: text.bytes()
+    if raw.len() > limits.max_item_bytes {
+        return Err(limit_error(EncodingFormat.JSON, 0, "JSON input exceeds max_item_bytes ({limits.max_item_bytes})"))
+    }
+    p := Parser.new(raw, allow_duplicates, false)
+    p.exact_numbers = true
+    p.max_depth = limits.max_depth
+    value :: &p.parse_value()
+    &p.skip_ws() ?? return Err(p.err("failed while scanning JSON whitespace"))
+    if !p.eof() -> return Err(p.err("unexpected trailing data after the JSON value"))
+    Ok(value)
+}
+// Compiler-private typed decoder entry; number lexemes retain their target-free carriers.
+fn __parse_typed(text: String) -> Dyn EncodingError! {
+    raw :: text.bytes()
+    if raw.len() > safe_limits().max_item_bytes -> return Err(limit_error(EncodingFormat.JSON, 0, "JSON input exceeds max_item_bytes ({safe_limits().max_item_bytes})"))
+    parser := Parser.new(raw, false, false)
+    parser.typed_numbers = true
+    value :: &parser.parse_value()
+    &parser.skip_ws() ?? return Err(parser.err("failed while scanning JSON whitespace"))
+    if !parser.eof() -> return Err(parser.err("extra text after JSON value"))
+    Ok(value)
+}
+
+// Typed `json.decode<T>(text)`: the checker forwards the typed call here
+// (JetSema Calls/Core.jet). The tree keeps number lexemes for the target's
+// Decode, and a parse failure is one root FieldError naming the line. The
+// parameter is not spelled `T`: explicit-argument inference binds by name, so
+// a generic caller's `decode<[T]>` would read as `T := [T]`.
+fn __decode_typed<Target: Decode>(text: String) -> Target [FieldError]! {
+    tree :: __parse_typed(text) ?? return Err(typed_parse_error(err))
+    value :: tree.decode<Target>() ?? return Err(err)
+    Ok(value)
+}
+
+fn typed_parse_error(error: EncodingError) -> [FieldError] Never! {
+    line :: error.line ?? 0
+    [FieldError]{FieldError{path: "", reason: "invalid JSON (line {line}): {error.reason}"}}
+}
+
+
+fn append_events(value: Dyn) -> [DataEvent] Never! {
+    out := [DataEvent]{}
+    if value == {
+        .Null -> &out.push(DataEvent.Null)
+        .Bool(v) -> &out.push(DataEvent.Bool(v))
+        .Int(n) -> &out.push(DataEvent.Int(n))
+        .Float(n) -> &out.push(DataEvent.Float(n))
+        .Number(text) -> {
+            #Unsafe("preserve the native compiler-private Dyn carriers in Core JSON event projection") {
+                &out.push(DataEvent.Number(text))
+            }
+        }
+        .Bytes(bytes) -> {
+            #Unsafe("preserve the native compiler-private Dyn carriers in Core JSON event projection") {
+                &out.push(DataEvent.Bytes(bytes))
+            }
+        }
+        .Text(s) -> &out.push(DataEvent.Text(s))
+        // JSON events carry temporal values as their RFC 3339 text, not a
+        // format-specific event variant absent from the shared DataEvent rail.
+        .DateTime(_) -> &out.push(DataEvent.Text(value.to_text() ?? ""))
+        .Array(items) -> {
+            &out.push(DataEvent.ArrayStart)
+            loop item in items {
+                chunk := append_events(item)
+                loop event in chunk -> &out.push(event)
+            }
+            &out.push(DataEvent.ArrayEnd)
+        }
+        .Object(_) -> {
+            entries :: stream.object_entries(value)
+            &out.push(DataEvent.ObjectStart)
+            loop pair in entries {
+                &out.push(DataEvent.Key(pair.key))
+                chunk := append_events(pair.value)
+                loop event in chunk -> &out.push(event)
+            }
+            &out.push(DataEvent.ObjectEnd)
+        }
+    }
+    out
+}
+
+fn hex_digit(b: U8) -> Int? {
+    n :: u8_int(b)
+    if n >= 48 && n <= 57 -> return Val(n - 48)
+    if n >= 97 && n <= 102 -> return Val(n - 87)
+    if n >= 65 && n <= 70 -> return Val(n - 55)
+    None
+}
+fn u8_int(b: U8) -> Int Never! { Int.from_u8(b) }
+fn utf8_bytes(cp: Int) -> [U8] Never! {
+    out := [U8]{}
+    if cp < 128 {
+        &out.push(U8{cp})
+        return out
+    }
+    if cp < 2048 {
+        &out.push(U8{(192).bit_or((cp >> 6))})
+        &out.push(U8{(128).bit_or(((cp).bit_and(63)))})
+        return out
+    }
+    if cp < 65536 {
+        &out.push(U8{(224).bit_or((cp >> 12))})
+        &out.push(U8{(128).bit_or((((cp >> 6)).bit_and(63)))})
+        &out.push(U8{(128).bit_or(((cp).bit_and(63)))})
+        return out
+    }
+    &out.push(U8{(240).bit_or((cp >> 18))})
+    &out.push(U8{(128).bit_or((((cp >> 12)).bit_and(63)))})
+    &out.push(U8{(128).bit_or((((cp >> 6)).bit_and(63)))})
+    &out.push(U8{(128).bit_or(((cp).bit_and(63)))})
+    out
+}
+
+fn render_json(value: Dyn, pretty: Bool) -> String EncodingError! {
+    out := [U8]{}
+    write_json(&out, value, pretty, 0) ?? return Err(err)
+    text :: stream.text_from_bytes(^out) ?? return Err(value_error(EncodingErrorKind.State, "", "JSON renderer produced invalid UTF-8"))
+    Ok(text)
+}
+
+
+fn value_error(kind: EncodingErrorKind, path: String, reason: String) -> EncodingError Never! {
+    {
+        format: EncodingFormat.JSON,
+        kind: kind,
+        byte_offset: 0,
+        line: None,
+        column: None,
+        path: path,
+        reason: reason,
+        cause: None,
+    }
+}
+
+fn write_canonical(out: &[U8], value: Dyn, path: &[String], depth: Int) -> Bool EncodingError! {
+    if depth > safe_limits().max_depth {
+        return Err(value_error(EncodingErrorKind.Limit, pointer_text(path, path.len()), "max_depth {safe_limits().max_depth} exceeded"))
+    }
+    if value == {
+        .Null -> write_ascii(&out, "null")
+        .Bytes(_) -> return Err(value_error(EncodingErrorKind.Unsupported, pointer_text(path, path.len()), "JSON cannot encode Bytes; encode bytes as Text explicitly"))
+        .Bool(v) -> {
+            if v -> write_ascii(&out, "true")
+            else -> write_ascii(&out, "false")
+        }
+        .Int(n) -> {
+            if !stream.int_is_binary64(n) {
+                return Err(value_error(EncodingErrorKind.Unsupported, pointer_text(path, path.len()), "JCS requires Int exactly representable as IEEE 754 binary64; encode this integer as Text"))
+            }
+            write_ascii(&out, stream.jcs_number(Float{n}))
+        }
+        .Float(n) -> {
+            if !math.is_finite(n) {
+                return Err(value_error(EncodingErrorKind.Unsupported, pointer_text(path, path.len()), "JCS cannot encode a non-finite Float"))
+            }
+            write_ascii(&out, stream.jcs_number(n))
+        }
+        .Number(s) -> {
+            // An integer lexeme follows the Int rule: exact in binary64 or rejected.
+            integral :: !s.contains(".") && !s.contains("e") && !s.contains("E")
+            if integral && Int.parse(s) == .Ok(n) {
+                if !stream.int_is_binary64(n) {
+                    return Err(value_error(EncodingErrorKind.Unsupported, pointer_text(path, path.len()), "JCS requires Int exactly representable as IEEE 754 binary64; encode this integer as Text"))
+                }
+                write_ascii(&out, stream.jcs_number(Float{n}))
+            } else {
+                f :: Float.parse(s) ?? return Err(value_error(EncodingErrorKind.Unsupported, pointer_text(path, path.len()), "JCS cannot encode number {s}"))
+                if !math.is_finite(f) {
+                    return Err(value_error(EncodingErrorKind.Unsupported, pointer_text(path, path.len()), "JCS requires a number within IEEE 754 binary64; {s} is out of range"))
+                }
+                write_ascii(&out, stream.jcs_number(f))
+            }
+        }
+        .Text(s) -> write_json_string(&out, s)
+        .DateTime(_) -> write_json_string(&out, value.to_text() ?? "")
+        .Array(items) -> {
+            &out.push(U8{91})
+            loop i in 0..<items.len() {
+                if i > 0 -> &out.push(U8{44})
+                &path.push("{i}")
+                write_canonical(&out, items[i], &path, depth + 1) ?? return Err(err)
+                _ :: &path.pop()
+            }
+            &out.push(U8{93})
+        }
+        .Object(_) -> {
+            entries :: stream.object_entries(value)
+            units := [[Int]]{}
+            loop pair in entries {
+                &units.push(stream.utf16_units(pair.key))
+            }
+            order :: stream.sort_by_units(units)
+            &out.push(U8{123})
+            loop i in 0..<order.len() {
+                at :: order[i]
+                &path.push(entries[at].key)
+                if i > 0 {
+                    if stream.compare_units(units[order[i - 1]], units[at]) == 0 {
+                        return Err(value_error(EncodingErrorKind.Syntax, pointer_text(path, path.len()), "JCS requires unique object keys"))
+                    }
+                    &out.push(U8{44})
+                }
+                write_json_string(&out, entries[at].key)
+                &out.push(U8{58})
+                write_canonical(&out, entries[at].value, &path, depth + 1) ?? return Err(err)
+                _ :: &path.pop()
+            }
+            &out.push(U8{125})
+        }
+    }
+    true
+}
+
+
+fn write_json(out: &[U8], value: Dyn, pretty: Bool, indent: Int) EncodingError! {
+    if value == {
+        .Null -> write_ascii(&out, "null")
+        .Number(text) -> write_ascii(&out, text)
+        .Bytes(bytes) -> {
+            &out.push(U8{91})
+            loop index in 0..<bytes.len() {
+                if index > 0 -> &out.push(U8{44})
+                write_ascii(&out, "{bytes[index]}")
+            }
+            &out.push(U8{93})
+        }
+        .Bool(v) -> {
+            if v -> write_ascii(&out, "true")
+            else -> write_ascii(&out, "false")
+        }
+        .Int(n) -> write_ascii(&out, "{n}")
+        .Float(n) -> write_json_float(&out, n) ?? return Err(err)
+        .Text(s) -> write_json_string(&out, s)
+        .DateTime(_) -> write_json_string(&out, value.to_text() ?? "")
+        .Array(items) -> {
+            &out.push(U8{91})
+            if items.len() == 0 {
+                &out.push(U8{93})
+                return Ok(())
+            }
+            loop i in 0..<items.len() {
+                if pretty {
+                    &out.push(U8{10})
+                    write_indent(&out, indent + 1)
+                }
+                write_json(&out, items[i], pretty, indent + 1) ?? return Err(err)
+                if i + 1 < items.len() -> &out.push(U8{44})
+            }
+            if pretty {
+                &out.push(U8{10})
+                write_indent(&out, indent)
+            }
+            &out.push(U8{93})
+        }
+        .Object(_) -> {
+            entries :: stream.object_entries(value)
+            &out.push(U8{123})
+            if value.len() == 0 {
+                &out.push(U8{125})
+                return Ok(())
+            }
+            i := 0
+            loop pair in entries {
+                if pretty {
+                    &out.push(U8{10})
+                    write_indent(&out, indent + 1)
+                }
+                write_json_string(&out, pair.key)
+                &out.push(U8{58})
+                if pretty -> &out.push(U8{32})
+                write_json(&out, pair.value, pretty, indent + 1) ?? return Err(err)
+                i += 1
+                if i < value.len() -> &out.push(U8{44})
+            }
+            if pretty {
+                &out.push(U8{10})
+                write_indent(&out, indent)
+            }
+            &out.push(U8{125})
+        }
+    }
+    Ok(())
+}
+fn write_json_float(out: &[U8], n: Float) EncodingError! {
+    if !math.is_finite(n) -> return Err(value_error(EncodingErrorKind.Unsupported, "$", "JSON cannot encode a non-finite Float"))
+    write_ascii(&out, "{n}")
+    Ok(())
+}
+// Bytes render as their byte values, `[1,255]`, the same text every tier writes.
+fn write_json_bytes(out: &[U8], bytes: [U8]) Never! {
+    &out.push(U8{91})
+    loop i in 0..<bytes.len() {
+        if i > 0 -> &out.push(U8{44})
+        write_ascii(&out, "{Int.from_u8(bytes[i])}")
+    }
+    &out.push(U8{93})
+}
+
+fn write_ascii(out: &[U8], text: String) Never! {
+    loop b in text.bytes() -> &out.push(b)
+}
+
+fn write_indent(out: &[U8], n: Int) Never! {
+    loop _ in 0..<n {
+        &out.push(U8{32})
+        &out.push(U8{32})
+    }
+}
+
+fn write_json_string(out: &[U8], text: String) Never! {
+    &out.push(U8{34})
+    loop index in 0..<text.count_bytes() {
+        b :: stream.byte_at(text, index)
+        n :: b
+        if n == 34 {
+            write_ascii(&out, "\\\"")
+            next
+        }
+        if n == 92 {
+            write_ascii(&out, "\\\\")
+            next
+        }
+        if n == 8 {
+            write_ascii(&out, "\\b")
+            next
+        }
+        if n == 12 {
+            write_ascii(&out, "\\f")
+            next
+        }
+        if n == 10 {
+            write_ascii(&out, "\\n")
+            next
+        }
+        if n == 13 {
+            write_ascii(&out, "\\r")
+            next
+        }
+        if n == 9 {
+            write_ascii(&out, "\\t")
+            next
+        }
+        if n < 32 {
+            write_ascii(&out, "\\u00")
+            &out.push(nibble(Int.from_u8(n) /% 16))
+            &out.push(nibble(Int.from_u8(n) %% 16))
+            next
+        }
+        &out.push(b)
+    }
+    &out.push(U8{34})
+}
+
+fn nibble(n: Int) -> U8 Never! {
+    if n < 10 -> return (U8{48 + n})
+    (U8{87 + n})
+}
+
+// ---- RFC 6901 JSON Pointer ----
+
+fn pointer_escape(segment: String) -> String Never! {
+    out := [U8]{}
+    loop b in segment.bytes() {
+        if b == (U8{126}) {
+            &out.push(U8{126})
+            &out.push(U8{48})
+            next
+        }
+        if b == (U8{47}) {
+            &out.push(U8{126})
+            &out.push(U8{49})
+            next
+        }
+        &out.push(b)
+    }
+    stream.text_from_bytes(^out) ?? ""
+}
+
+// Pointer text for the first `count` decoded steps.
+fn pointer_text(segments: [String], count: Int) -> String Never! {
+    out := ""
+    loop i in 0..<count -> out = "{out}/{pointer_escape(segments[i])}"
+    out
+}
+
+// Decode pointer text into its unescaped steps. Patch paths reuse it.
+fn pointer_segments(path: String) -> [String] EncodingError! {
+    segments := [String]{}
+    raw :: path.bytes()
+    if raw.len() == 0 -> return Ok(segments)
+    if raw[0] != (U8{47}) -> return Err(value_error(EncodingErrorKind.Syntax, "", "a JSON Pointer is empty or starts with `/`"))
+    current := [U8]{}
+    i := 1
+    loop i < raw.len() {
+        b :: raw[i]
+        if b == (U8{47}) {
+            &segments.push(stream.text_from_bytes(^current) ?? "")
+            current = [U8]{}
+            i += 1
+            next
+        }
+        if b == (U8{126}) {
+            escape := U8{0}
+            if i + 1 < raw.len() -> escape = raw[i + 1]
+            if escape == (U8{48}) {
+                &current.push(U8{126})
+            } else {
+                if escape != (U8{49}) {
+                    through := [U8]{}
+                    loop k in 0..<(i + 2) {
+                        if k < raw.len() -> &through.push(raw[k])
+                    }
+                    return Err(value_error(EncodingErrorKind.Syntax, String.from_bytes(through) ?? "", "`~` in a JSON Pointer must be `~0` or `~1`"))
+                }
+                &current.push(U8{47})
+            }
+            i += 2
+            next
+        }
+        &current.push(b)
+        i += 1
+    }
+    &segments.push(stream.text_from_bytes(^current) ?? "")
+    Ok(segments)
+}
+
+// A canonical array index: `0` or a digit string without a leading zero.
+fn pointer_index(segment: String) -> Int? {
+    raw :: segment.bytes()
+    if raw.len() == 0 || raw.len() > 18 -> return None
+    if raw.len() > 1 && raw[0] == (U8{48}) -> return None
+    n := 0
+    loop b in raw {
+        d :: Int.from_u8(b)
+        if d < 48 || d > 57 -> return None
+        n = n * 10 + (d - 48)
+    }
+    Val(n)
+}
+
+// Walk by borrowing each ancestor; only the final node is returned.
+fn pointer_select(node: Dyn, segments: [String], depth: Int) -> Dyn EncodingError! {
+    if depth == segments.len() -> return Ok(node)
+    segment :: segments[depth]
+    at :: pointer_text(segments, depth + 1)
+    if node == {
+        .Object(entries) -> {
+            child :: object_member(entries, segment) ?? return Err(value_error(EncodingErrorKind.Syntax, at, "no object member named `{segment}`"))
+            return pointer_select(child, segments, depth + 1)
+        }
+        .Array(items) -> {
+            index :: pointer_index(segment) ?? return Err(value_error(EncodingErrorKind.Syntax, at, "array index `{segment}` is not a canonical nonnegative integer"))
+            if index >= items.len() -> return Err(value_error(EncodingErrorKind.Syntax, at, "array index {index} is out of range for length {items.len()}"))
+            return pointer_select(items[index], segments, depth + 1)
+        }
+        else -> { _ := 0 }
+    }
+    Err(value_error(EncodingErrorKind.Syntax, at, "cannot select `{segment}` inside a scalar value"))
+}
+
+fn pointer_is_proper_prefix(prefix: [String], path: [String]) -> Bool Never! {
+    if prefix.len() >= path.len() -> return false
+    loop i in 0..<prefix.len() {
+        if prefix[i] != path[i] -> return false
+    }
+    true
+}
+
+fn pointer_equal(left: [String], right: [String]) -> Bool Never! {
+    if left.len() != right.len() -> return false
+    loop i in 0..<left.len() {
+        if left[i] != right[i] -> return false
+    }
+    true
+}
+
+// ---- RFC 6902 JSON Patch ----
+
+PATCH_ADD :: 0
+PATCH_REMOVE :: 1
+PATCH_REPLACE :: 2
+PATCH_MOVE :: 3
+PATCH_COPY :: 4
+PATCH_TEST :: 5
+
+struct PatchOp {
+    kind: Int
+    name: String
+    path: [String]
+    from: [String]
+    value: Dyn
+}
+
+// The first member named `name`, scanning the object's ordered pairs.
+fn object_member(members: [(key: String, value: Dyn)], name: String) -> Dyn? {
+    loop pair in members {
+        if pair.key == name -> return Val(pair.value)
+    }
+    None
+}
+
+fn patch_field(members: [(key: String, value: Dyn)], index: Int, name: String) -> Dyn EncodingError! {
+    value :: object_member(members, name) ?? return Err(value_error(EncodingErrorKind.Syntax, "/{index}", "operation {index} needs a `{name}` member"))
+    Ok(value)
+}
+
+fn patch_pointer_field(members: [(key: String, value: Dyn)], index: Int, name: String, limits: EncodingLimits) -> [String] EncodingError! {
+    raw :: patch_field(members, index, name)
+    text := ""
+    valid := false
+    if raw == {
+        .Text(s) -> {
+            text = s
+            valid = true
+        }
+        else -> { _ := 0 }
+    }
+    if !valid -> return Err(value_error(EncodingErrorKind.Syntax, "/{index}/{name}", "operation {index} `{name}` must be a JSON Pointer string"))
+    segments :: pointer_segments(text) ?? return Err(value_error(EncodingErrorKind.Syntax, "/{index}/{name}", "operation {index} `{name}`: {err.reason}"))
+    if segments.len() > limits.max_depth -> return Err(value_error(EncodingErrorKind.Limit, "/{index}/{name}", "operation {index} `{name}` has more than max_depth {limits.max_depth} steps"))
+    Ok(segments)
+}
+
+// Validate the whole operation array before any operation runs.
+fn patch_operations(ops: Dyn, limits: EncodingLimits) -> [PatchOp] EncodingError! {
+    items := [Dyn]{}
+    is_array := false
+    if ops == {
+        .Array(values) -> {
+            items = values
+            is_array = true
+        }
+        else -> { _ := 0 }
+    }
+    if !is_array -> return Err(value_error(EncodingErrorKind.Syntax, "", "a JSON Patch document is an array of operation objects"))
+    list := [PatchOp]{}
+    loop index in 0..<items.len() {
+        members := [(key: String, value: Dyn)]{}
+        is_object := false
+        if items[index] == {
+            .Object(fields) -> {
+                members = fields
+                is_object = true
+            }
+            else -> { _ := 0 }
+        }
+        if !is_object -> return Err(value_error(EncodingErrorKind.Syntax, "/{index}", "operation {index} must be an object"))
+        name := ""
+        op_value :: patch_field(members, index, "op")
+        if op_value == {
+            .Text(s) -> name = s
+            else -> { _ := 0 }
+        }
+        kind := -1
+        if name == "add" -> kind = PATCH_ADD
+        if name == "remove" -> kind = PATCH_REMOVE
+        if name == "replace" -> kind = PATCH_REPLACE
+        if name == "move" -> kind = PATCH_MOVE
+        if name == "copy" -> kind = PATCH_COPY
+        if name == "test" -> kind = PATCH_TEST
+        if kind < 0 -> return Err(value_error(EncodingErrorKind.Syntax, "/{index}/op", "operation {index} has unknown op `{name}`; use add, remove, replace, move, copy, or test"))
+        path :: patch_pointer_field(members, index, "path", limits)
+        from := [String]{}
+        if kind == PATCH_MOVE || kind == PATCH_COPY -> from = patch_pointer_field(members, index, "from", limits)
+        value := Dyn.Null
+        if kind == PATCH_ADD || kind == PATCH_REPLACE || kind == PATCH_TEST -> value = patch_field(members, index, "value")
+        if kind == PATCH_MOVE && pointer_is_proper_prefix(from, path) {
+            return Err(value_error(EncodingErrorKind.Syntax, "/{index}/from", "operation {index} cannot move `{pointer_text(from, from.len())}` into its own descendant `{pointer_text(path, path.len())}`"))
+        }
+        &list.push(PatchOp{kind: kind, name: name, path: path, from: from, value: value})
+    }
+    Ok(list)
+}
+
+// Return `node` rebuilt along `segments` with one add/remove/replace applied.
+// Siblings off the path are shared, not rewritten.
+fn patch_edit(node: Dyn, segments: [String], depth: Int, kind: Int, value: Dyn) -> Dyn EncodingError! {
+    if segments.len() == 0 {
+        if kind == PATCH_REMOVE -> return Err(value_error(EncodingErrorKind.Syntax, "", "cannot remove the document root"))
+        return Ok(value)
+    }
+    segment :: segments[depth]
+    at :: pointer_text(segments, depth + 1)
+    last :: depth + 1 == segments.len()
+    if node == {
+        .Object(entries) -> {
+            out := [(key: String, value: Dyn)]{}
+            found := false
+            loop pair in entries {
+                if pair.key != segment {
+                    &out.push((key: pair.key, value: pair.value))
+                    next
+                }
+                found = true
+                if !last {
+                    child :: patch_edit(pair.value, segments, depth + 1, kind, value)
+                    &out.push((key: pair.key, value: child))
+                    next
+                }
+                if kind != PATCH_REMOVE -> &out.push((key: pair.key, value: value))
+            }
+            if !found {
+                if !last || kind != PATCH_ADD -> return Err(value_error(EncodingErrorKind.Syntax, at, "no object member named `{segment}`"))
+                &out.push((key: segment, value: value))
+            }
+            return Ok(stream.object_from_entries(^out))
+        }
+        .Array(items) -> {
+            appending :: last && kind == PATCH_ADD && segment == "-"
+            index := items.len()
+            if !appending -> index = pointer_index(segment) ?? return Err(value_error(EncodingErrorKind.Syntax, at, "array index `{segment}` is not a canonical nonnegative integer"))
+            bound := items.len()
+            if last && kind == PATCH_ADD -> bound = items.len() + 1
+            if index >= bound -> return Err(value_error(EncodingErrorKind.Syntax, at, "array index {index} is out of range for length {items.len()}"))
+            out := [Dyn]{}
+            loop i in 0..<items.len() {
+                if i != index {
+                    &out.push(items[i])
+                    next
+                }
+                if !last {
+                    child :: patch_edit(items[i], segments, depth + 1, kind, value)
+                    &out.push(child)
+                    next
+                }
+                if kind == PATCH_ADD {
+                    &out.push(value)
+                    &out.push(items[i])
+                    next
+                }
+                if kind == PATCH_REPLACE -> &out.push(value)
+            }
+            if last && kind == PATCH_ADD && index == items.len() -> &out.push(value)
+            return Ok(Dyn.Array(out))
+        }
+        else -> { _ := 0 }
+    }
+    Err(value_error(EncodingErrorKind.Syntax, at, "cannot address `{segment}` inside a scalar value"))
+}
+
+// RFC 6902 `test` equality: numbers by value, arrays in order, objects by
+// member set regardless of order.
+fn json_equal(left: Dyn, right: Dyn) -> Bool Never! {
+    if left == {
+        .Null -> {
+            if right == {
+                .Null -> return true
+                else -> return false
+            }
+        }
+        .Bool(a) -> {
+            if right == {
+                .Bool(b) -> return a == b
+                else -> return false
+            }
+        }
+        .Int(a) -> {
+            if right == {
+                .Int(b) -> return a == b
+                .Float(b) -> return Float{a} == b
+                .Number(b) -> return Float{a} == (Float.parse(b) ?? return false)
+                else -> return false
+            }
+        }
+        .Float(a) -> {
+            if right == {
+                .Float(b) -> return a == b
+                .Int(b) -> return a == Float{b}
+                .Number(b) -> return a == (Float.parse(b) ?? return false)
+                else -> return false
+            }
+        }
+        .Number(a) -> {
+            if right == {
+                .Number(b) -> return a == b || (Float.parse(a) ?? return false) == (Float.parse(b) ?? return false)
+                .Int(b) -> return (Float.parse(a) ?? return false) == Float{b}
+                .Float(b) -> return (Float.parse(a) ?? return false) == b
+                else -> return false
+            }
+        }
+        .Text(a) -> {
+            if right == {
+                .Text(b) -> return a == b
+                else -> return false
+            }
+        }
+        .DateTime(_) -> return left == right
+        .Bytes(a) -> {
+            if right == {
+                .Bytes(b) -> return a == b
+                else -> return false
+            }
+        }
+        .Array(a) -> {
+            if right == {
+                .Array(b) -> {
+                    if a.len() != b.len() -> return false
+                    loop i in 0..<a.len() {
+                        if !json_equal(a[i], b[i]) -> return false
+                    }
+                    return true
+                }
+                else -> return false
+            }
+        }
+        .Object(a) -> {
+            if right == {
+                .Object(b) -> {
+                    if a.len() != b.len() -> return false
+                    loop pair in a {
+                        other :: object_member(b, pair.key) ?? return false
+                        if !json_equal(pair.value, other) -> return false
+                    }
+                    return true
+                }
+                else -> return false
+            }
+        }
+    }
+    false
+}
+
+fn tree_depth(value: Dyn) -> Int Never! {
+    deepest := 0
+    if value == {
+        .Array(items) -> {
+            loop item in items {
+                d :: tree_depth(item)
+                if d > deepest -> deepest = d
+            }
+            return deepest + 1
+        }
+        .Object(_) -> {
+            loop key in value.keys() {
+                d :: tree_depth(value[key])
+                if d > deepest -> deepest = d
+            }
+            return deepest + 1
+        }
+        else -> { _ := 0 }
+    }
+    0
+}
+
+fn patch_step(doc: Dyn, op: PatchOp) -> Dyn EncodingError! {
+    if op.kind == PATCH_TEST {
+        actual :: pointer_select(doc, op.path, 0)
+        if !json_equal(actual, op.value) -> return Err(value_error(EncodingErrorKind.Syntax, pointer_text(op.path, op.path.len()), "test failed: the value differs"))
+        return Ok(doc)
+    }
+    if op.kind == PATCH_MOVE {
+        if pointer_equal(op.from, op.path) -> return Ok(doc)
+        moved :: pointer_select(doc, op.from, 0)
+        removed :: patch_edit(doc, op.from, 0, PATCH_REMOVE, Dyn.Null)
+        return patch_edit(removed, op.path, 0, PATCH_ADD, moved)
+    }
+    if op.kind == PATCH_COPY {
+        copied :: pointer_select(doc, op.from, 0)
+        return patch_edit(doc, op.path, 0, PATCH_ADD, copied)
+    }
+    patch_edit(doc, op.path, 0, op.kind, op.value)
+}
+
+#Test("JSON ordered Object backing survives compact and pretty rendering") {
+    tree :: parse("{{\"z\":1,\"a\":2}}") ?? panic("JSON parse")
+    assert_eq(to_string(tree) ?? panic("encode ordered tree"), "{{\"z\":1,\"a\":2}}")
+    assert_eq(to_string_pretty(tree) ?? panic("encode pretty tree"), "{{\n  \"z\": 1,\n  \"a\": 2\n}}")
+}
+
+#Test("JSON duplicate replacement retains the first member position") {
+    tree :: parse_allow_duplicates("{{\"z\":1,\"a\":2,\"z\":3}}") ?? panic("JSON parse")
+    assert_eq(to_string(tree) ?? panic("encode replacement tree"), "{{\"z\":3,\"a\":2}}")
+}
+
+#Test("typed JSON retains number lexemes until Decode") {
+    tree :: __parse_typed("[9007199254740993,1e2]") ?? panic("typed JSON parse")
+    rows :: tree.decode<[Int]>() ?? panic("typed JSON decode")
+    assert_eq(rows, [Int]{9007199254740993, 100})
+}
+
+#Test("JSON text serializers reject non-finite Float on the EncodingError rail") {
+    numbers :: [Float]{math.nan(), math.infinity(), -math.infinity()}
+    loop number in numbers {
+        tree :: Dyn.Array([Dyn]{Dyn.Float(number)})
+        if to_string(tree) == {
+            .Ok(_) -> panic("non-finite compact JSON accepted")
+            .Err(error) -> {
+                assert(error.format == .JSON)
+                assert(error.kind == .Unsupported)
+                assert_eq(error.reason, "JSON cannot encode a non-finite Float")
+                assert_eq(error.path, "$")
+                assert_eq(error.byte_offset, 0)
+                assert_eq(error.line, None)
+                assert_eq(error.column, None)
+            }
+        }
+        if dumps(tree) == .Ok(_) -> panic("non-finite dumps accepted")
+        if dump(tree) == .Ok(_) -> panic("non-finite dump accepted")
+        if to_string_pretty(tree) == .Ok(_) -> panic("non-finite pretty JSON accepted")
+    }
+    assert_eq(to_string(Dyn.Int(9007199254740993)) ?? panic("exact Int JSON"), "9007199254740993")
+}
+
+#Test("JSON text encodes Char and C0 with lowercase string escapes") {
+    assert_eq(to_string('\n') ?? panic("Char encode"), "\"\\n\"")
+    assert_eq(to_string('"') ?? panic("Char encode"), "\"\\\"\"")
+    bytes := [U8]{}
+    loop index in 0..<32 -> &bytes.push(U8{index})
+    controls :: String.from_bytes(bytes) ?? panic("C0 text")
+    wire :: to_string(controls) ?? panic("C0 encode")
+    assert(wire.contains("\\u001f"))
+    assert_eq(parse(wire) ?? panic("C0 decode"), Dyn.Text(controls))
+}
+
+#Test("strict JSON separates whole numbers, fractions, and exponents") {
+    assert_eq(parse("42") ?? panic("integer JSON"), Dyn.Int(42))
+    assert_eq(parse("1.5") ?? panic("fractional JSON"), Dyn.Float(1.5))
+    assert_eq(parse("1e2") ?? panic("exponent JSON"), Dyn.Float(100.0))
+    assert_eq(parse("-2E-1") ?? panic("signed exponent JSON"), Dyn.Float(-0.2))
+}
+
+#Test("JSON object patch returns ordered Object backing") {
+    doc :: parse("{{\"a\":1,\"b\":2}}") ?? panic("patch document")
+    changes :: parse("[{{\"op\":\"replace\",\"path\":\"/a\",\"value\":3}}]") ?? panic("patch operations")
+    updated :: patch(doc, changes) ?? panic("object patch")
+    assert_eq(to_string(updated) ?? panic("patched object"), "{{\"a\":3,\"b\":2}}")
+    assert_eq(to_string(doc) ?? panic("original object"), "{{\"a\":1,\"b\":2}}")
+}

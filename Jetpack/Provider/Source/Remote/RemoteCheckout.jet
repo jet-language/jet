@@ -11,8 +11,8 @@
 // directory renames from. The Rust reference reached this
 // through openat/mkdirat/renameat/unlinkat FFI.
 
-PROVIDER_HELD_PRIVATE_MODE :: prep { 0o700 }
-PROVIDER_READ_CHUNK_BYTES :: prep { 65536 }
+PROVIDER_HELD_PRIVATE_MODE :: 0o700
+PROVIDER_READ_CHUNK_BYTES :: 65536
 
 // Resolve a `core` upstream to a local checkout: `path:` sources in place,
 // the embedded batteries catalog, or a fetched git checkout. For a monorepo
@@ -25,7 +25,7 @@ fn provider_source_repo(upstream: String, want_package: String, ctx: ProviderCtx
         return Ok(files.join(files.cwd() ?? "", path))
     }
     if upstream == BATTERIES_UPSTREAM {
-        materialized :: env_battery_materialize_package(ctx.store_dir, want_package) ?? return Err(ProviderError.CoreBuild(err.message()))
+        materialized :: env_battery_materialize_package(ctx.store_dir, want_package) ?? return Err(ProviderError.CoreBuild(err.message))
         return Ok(materialized)
     }
     remote :: RemoteSource.parse(upstream)
@@ -222,7 +222,7 @@ fn provider_clone_into_staging(remote: RemoteSource, cache: String, cache_parent
 // The last line of trimmed tool output, or `fallback` when there is none.
 fn provider_last_line(text: String, fallback: String) -> String Never! {
     lines :: text.trim().split("\n").to_list()
-    if lines.len() == 0 || lines[lines.len() - 1] == "" -> return fallback
+    if lines.len() == 0 || lines[lines.len() - 1] == "" -> return fallback.copy()
     lines[lines.len() - 1]
 }
 
@@ -339,8 +339,9 @@ struct HeldDirectoryEntry {
     }
 
     fn from_child(parent: Directory, name: String) -[FS]> HeldDirectoryEntry IOError! {
-        directory :: parent.open_directory(name)
-        Ok(HeldDirectoryEntry{parent, name, directory})
+        owned :: provider_reopen_held_directory(parent)
+        directory :: owned.open_directory(name)
+        Ok(HeldDirectoryEntry{parent: owned, name, directory})
     }
 
     // A CSPRNG-named private directory under `parent`, never reusing or
@@ -374,12 +375,21 @@ struct HeldDirectoryEntry {
     }
 }
 
-
 // Multiply linked files could alias bytes outside the checkout.
 fn provider_reject_multiply_linked(info: Stat) IOError! {
     if info.links > 1 {
         return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("multiply linked files are not accepted in a remote checkout")}))
     }
+}
+
+// Core has no directory-handle duplication: reopen the held directory by its
+// path and require the same inode, failing closed when it was replaced.
+fn provider_reopen_held_directory(held: Directory) -[FS]> Directory IOError! {
+    reopened :: provider_open_held_directory(held.path, false)
+    if held.stat().id != reopened.stat().id {
+        return Err(provider_io_error_other(held.path, "held directory was replaced while it was reopened"))
+    }
+    Ok(reopened)
 }
 
 // The same file object: identity, length, link count, and modification time.

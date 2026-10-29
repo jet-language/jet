@@ -14,9 +14,8 @@ typedef struct { unsigned char *data; int64_t length,capacity; } Text;
 typedef struct { int64_t length,capacity; unsigned char *data; } Sequence;
 typedef struct { Sequence *bytes; uint64_t position; } Buffer;
 typedef struct { Sequence *bytes; } Path;
-typedef struct { Text *table,*expression; int64_t compiled; } Policy;
 _Static_assert(sizeof(Buffer)==16 && offsetof(Buffer,position)==8,"ByteHandlesABI buffer");
-_Static_assert(sizeof(Path)==8 && sizeof(Policy)==24 && offsetof(Policy,compiled)==16,"ByteHandlesABI path/policy");
+_Static_assert(sizeof(Path)==8,"ByteHandlesABI path");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
 extern void __real_jet_rt_free(void *,int64_t,int64_t);
@@ -34,10 +33,6 @@ RENDER_DECL(Buffer,jet_byte_buffer)
 extern Path *jet_rt_handle_clone_jet_path(Path *);
 extern void jet_rt_handle_drop_jet_path(Path *);
 RENDER_DECL(Path,jet_path)
-extern Policy *jet_rt_handle_clone_jet_row_policy(Policy *);
-extern void jet_rt_handle_drop_jet_row_policy(Policy *);
-extern void jet_rt_handle_field_jet_row_policy_table(Policy *,Text *);
-extern void jet_rt_handle_field_jet_row_policy_expression(Policy *,Text *);
 extern Sequence *jet_rt_native_bits_new(void);
 extern Sequence *jet_rt_handle_clone_jet_bit_set(Sequence *);
 extern void jet_rt_handle_drop_jet_bit_set(Sequence *);
@@ -66,7 +61,6 @@ static void watch(void *p,int64_t size,int64_t align) {
     watched[count].pointer=p;watched[count].size=size;watched[count].align=align;watched[count++].frees=0;
 }
 static void freed(unsigned before) { assert(intercepted>before);for(size_t i=0;i<count;++i) assert(watched[i].frees==1);count=0; }
-static void watch_text(Text *t) { watch((char *)(t)-8,32,8);if(t->capacity) watch(t->data,t->capacity,1); }
 static void watch_sequence(Sequence *s,int64_t stride) { watch(s,24,8);if(s->capacity) watch(s->data,s->capacity*stride,8); }
 static void expect(Text *t,const void *bytes,size_t n) { assert(t->length==(int64_t)n);assert(memcmp(t->data,bytes,n)==0);jet_rt_string_drop(t); }
 static void expect_s(Text *t,const char *s) { expect(t,s,strlen(s)); }
@@ -125,23 +119,6 @@ static void path_cases(void) {
     path_case(malformed,10,lossy,sizeof lossy-1);
     jet_rt_handle_drop_jet_path(NULL);
 }
-static void policy_cases(void) {
-    for(int64_t kind=0;kind<2;++kind) {
-        Policy *a=jet_rt_alloc(24,8);a->table=jet_rt_string_from_static("accounts",8);a->expression=jet_rt_string_from_static(kind?"owner == user":"true",kind?13:4);a->compiled=kind;
-        Policy *b=jet_rt_handle_clone_jet_row_policy(a);
-        assert(a!=b && a->table!=b->table && a->expression!=b->expression && a->table->data!=b->table->data && a->expression->data!=b->expression->data && b->compiled==kind);
-        Text table={0},expression={0};unsigned before=intercepted;
-        jet_rt_handle_field_jet_row_policy_table(a,&table);jet_rt_handle_field_jet_row_policy_expression(a,&expression);
-        assert(intercepted==before && table.data==a->table->data && table.length==a->table->length && table.capacity==a->table->capacity);
-        assert(expression.data==a->expression->data && expression.length==a->expression->length && expression.capacity==a->expression->capacity);
-        Text *owned=jet_rt_string_clone(&expression);a->expression->data[0]='X';
-        assert(b->expression->data[0]!=(unsigned char)'X');expect_s(owned,kind?"owner == user":"true");
-        watch(a,24,8);watch(b,24,8);watch_text(a->table);watch_text(a->expression);watch_text(b->table);watch_text(b->expression);
-        before=intercepted;jet_rt_handle_drop_jet_row_policy(a);jet_rt_handle_drop_jet_row_policy(b);freed(before);
-        // The two stack descriptors were lent; neither may be dropped.
-    }
-    jet_rt_handle_drop_jet_row_policy(NULL);
-}
 static void enum_cases(int64_t variants,int64_t *(*clone)(int64_t *),void (*drop)(int64_t *),bool (*eq)(int64_t *,int64_t *)) {
     for(int64_t i=0;i<variants;++i) {
         int64_t *a=jet_rt_alloc(8,8);*a=i;int64_t *b=clone(a);assert(a!=b && *b==i && eq(a,a) && eq(a,b));
@@ -166,7 +143,7 @@ static void bitset_cases(void) {
     jet_rt_handle_drop_jet_bit_set(NULL);
 }
 int main(void) {
-    jet_rt_alloc_init();buffer_cases();path_cases();policy_cases();bitset_cases();
+    jet_rt_alloc_init();buffer_cases();path_cases();bitset_cases();
     enum_cases(4,jet_rt_handle_clone_jet_failure_policy,jet_rt_handle_drop_jet_failure_policy,jet_rt_handle_eq_jet_failure_policy);
     enum_cases(7,jet_rt_handle_clone_jet_dispatch_state,jet_rt_handle_drop_jet_dispatch_state,jet_rt_handle_eq_jet_dispatch_state);
     enum_cases(1,jet_rt_handle_clone_jet_event_config_error,jet_rt_handle_drop_jet_event_config_error,jet_rt_handle_eq_jet_event_config_error);

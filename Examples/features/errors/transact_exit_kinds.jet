@@ -1,0 +1,118 @@
+// #5477: every exit of a `#Transact` block other than its clean end rolls back
+// the same way: the values the block changed are restored (here through the
+// Ledger's `Rollback` implementation, which says so), then the `on_rollback`
+// hooks run newest first. Shown here: an early return, a failure that
+// propagates and a `break` out of the block. A hook that fails is never
+// fatal: its failure is reported on stderr after "while rolling back, this
+// also failed:", the remaining hooks still run, and the program goes on.
+// transact_panic_rollback.jet shows a panic, transact_process_exit.jet and
+// transact_os_stop.jet an exit. A cancellation or a deadline rolls back as a
+// panic does.
+package {
+    name: "transact_exit_kinds"
+    authority: { allow: [IO] }
+}
+
+struct Ledger {
+    name: String
+    balance: Int
+}
+
+struct LedgerSnap {
+    balance: Int
+}
+
+impl Ledger.Rollback {
+    type Snapshot = LedgerSnap
+
+    fn snapshot(self) -> LedgerSnap { return LedgerSnap{balance: self.balance} }
+
+    fn restore(&self, snap: ^LedgerSnap) {
+        print("  {self.name}: balance {self.balance} restored to {snap.balance}")
+        self.balance = snap.balance
+    }
+}
+
+#Error
+enum Refused {
+    Closed
+}
+
+fn refuse() -> Int Refused! {
+    Err(Refused.Closed)
+}
+
+fn audit() {
+    panic("the audit log is unavailable")
+}
+
+fn commit(ledger: &Ledger) {
+    #Transact(tx) {
+        ledger.balance -= 10
+        tx.on_rollback(() -> print("  commit: hook (never runs)"))
+    }
+}
+
+fn early_return(ledger: &Ledger) -> Int {
+    #Transact(tx) {
+        ledger.balance -= 10
+        tx.on_rollback(() -> print("  early return: first hook"))
+        tx.on_rollback(() -> print("  early return: second hook"))
+        if ledger.balance < 1000 -> return -1
+    }
+    0
+}
+
+fn failure(ledger: &Ledger) -> Int Refused! {
+    #Transact(tx) {
+        ledger.balance -= 10
+        tx.on_rollback(() -> print("  failure: first hook"))
+        tx.on_rollback(() -> print("  failure: second hook"))
+        _ :: refuse()
+    }
+    Ok(0)
+}
+
+fn loop_break(ledger: &Ledger) {
+    loop {
+        #Transact(tx) {
+            ledger.balance -= 10
+            tx.on_rollback(() -> print("  break: hook"))
+            break
+        }
+    }
+}
+
+fn failing_hook(ledger: &Ledger) -> Int {
+    #Transact(tx) {
+        ledger.balance -= 10
+        tx.on_rollback(() -> print("  failing hook: first hook still runs"))
+        tx.on_rollback(() -> audit())
+        tx.on_rollback(() -> print("  failing hook: third hook"))
+        if ledger.balance < 1000 -> return -1
+    }
+    0
+}
+
+fn run() {
+    ledger := Ledger{name: "ledger", balance: 1000}
+    print("commit:")
+    commit(&ledger)
+    print("  balance {ledger.balance}")
+
+    print("early return:")
+    _ :: early_return(&ledger)
+    print("  balance {ledger.balance}")
+
+    print("failure:")
+    _ :: failure(&ledger) ?? -1
+    print("  balance {ledger.balance}")
+
+    print("break:")
+    loop_break(&ledger)
+    print("  balance {ledger.balance}")
+
+    print("failing hook:")
+    _ :: failing_hook(&ledger)
+    print("  balance {ledger.balance}")
+}

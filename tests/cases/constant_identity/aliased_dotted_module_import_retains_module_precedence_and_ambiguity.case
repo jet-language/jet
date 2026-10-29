@@ -1,0 +1,11 @@
+# tests/mir_constant_identity.rs::aliased_dotted_module_import_retains_module_precedence_and_ambiguity
+# Exact original sources/predicates; runtime UNRUN.
+fixture: aliased_dotted_module_import_retains_module_precedence_and_ambiguity.fixture
+env: NO_COLOR=1
+step: jet run public/main.jet
+stdin: null
+exit: 0
+step: jet check --json ambiguous/main.jet
+exit: nonzero
+json: machine doc $.reports[?code="E0606"] #>= 1
+# PENDING-SEAM(compiler-lib): Loader entry.imports[0].kind == ImportKind.Module(alpha.value,_); entry.imports[1].kind == ImportKind.Module(alpha.tools.value,_) (namespace precedence exact AST)

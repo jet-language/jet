@@ -1,0 +1,33 @@
+# tests/jetpack_hangar_store_v2.rs::hangar_ingest_verify_and_dedupe_roundtrip at tests/jetpack_hangar_store_v2.rs:101; hand-port
+# Claim: ingest prints ingested and sha256-; identical second ingest prints deduplicated (rs:137-170)
+# Claim: hangar list stderr contains hello (rs:180)
+# Claim: list --json has schema jet.report/v1, action list, packages array (rs:196-198)
+# Claim: verify prints verified (rs:217)
+# Claim: recover exits 0 (rs:245)
+# Fixture migrated: bin/hello mode 0755 not representable in fixtures; written 0644 (script body unchanged)
+# Fixture migrated: verify digest argument dropped: steps cannot capture the digest printed by the first ingest; verify runs without a digest
+# Not ported: digest-specific verify (rs:206) reduced to a store-wide verify step
+fixture: hangar_ingest_verify_and_dedupe_roundtrip.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jetpack hangar ingest src --name hello --version 1.0.0 --no-color
+exit: 0 # rs:137-138
+stderr: ~ "ingested" # rs:137-138
+stderr: ~ "sha256-" # rs:137-138
+step: jetpack hangar ingest src2 --name hello2 --version 1.0.0 --no-color
+exit: 0 # rs:170
+stderr: ~ "deduplicated" # rs:170
+step: jetpack hangar list --no-color
+exit: 0 # rs:180
+stderr: ~ "hello" # rs:180
+step: jetpack hangar list --json --no-color
+exit: 0 # rs:196-198
+stdout: ~ "\"schema\":\"jet.report/v1\"" # rs:196-198
+stdout: ~ "\"action\":\"list\"" # rs:196-198
+stdout: ~ "\"packages\":[" # rs:196-198
+step: jetpack hangar verify --no-color
+exit: 0 # rs:217 (digest dropped)
+stderr: ~ "verified" # rs:217 (digest dropped)
+step: jetpack hangar recover --no-color
+exit: 0 # rs:245

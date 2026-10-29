@@ -1,4 +1,4 @@
-// Hosted recipe refusal tests. Core/build producer/fingerprint admission is
+// Hosted recipe refusal tests. Core/Build producer/fingerprint admission is
 // owner-gated; refusal must precede validation reads, execution and publication.
 // Independent trust and retained-directory publication tests remain below.
 
@@ -19,7 +19,6 @@ fn recipe_test_run_error(recipe: BuildRecipe, ctx: RecipeBuildContext) -[FS, Env
         .Err(error) -> error
     }
 }
-
 
 fn recipe_test_has_stage_leftover(base: String) -[FS]> Bool {
     entries :: files.list_dir(base) ?? panic("list the recipe test base")
@@ -155,7 +154,7 @@ fn recipe_test_has_stage_leftover(base: String) -[FS]> Bool {
         error :: recipe_test_run_error(BuildRecipe{steps: [BuildStep]{step}}, recipe_test_ctx(src, out, cache, false))
         assert_eq(error.code, "E1238")
         assert(error.what.contains("not available"))
-        assert(error.why.contains("Core/build"))
+        assert(error.why.contains("Core/Build"))
         assert(!error.what.contains(secret) && !error.why.contains(secret) && !error.fix.contains(secret))
     }
     assert_eq(files.read(files.join(out, "sentinel")) ?? panic("unchanged output"), "keep")

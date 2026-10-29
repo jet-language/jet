@@ -1,6 +1,19 @@
 // Claims ported from crates/jetpack/src/JetPin.rs #[cfg(test)]. Each claim
 // works in its own scratch project from `files.temp_dir`. Claims that set
 // the process-global toolchain object variable restore it before return.
+use jetpack_foundation.[
+    BINARY_NAME, PACKAGE_FILE, PAYLOAD_FILE, TOOLCHAIN_EXEC_MARKER_ENV, TOOLCHAIN_OBJECT_ENV,
+]
+use jetpack_trust.[
+    TrustError, trust_pin_channel_of, trust_pin_classify_channel, trust_pin_decide,
+    trust_pin_identity_preparse, trust_pin_locked_toolchain, trust_pin_move,
+    trust_pin_realize_jet_binary, trust_pin_report, trust_pin_resolve_channel,
+    trust_pin_toolchain_record, trust_pin_write_init,
+]
+use jet_pkg_model.[pkg_lock_record_toolchain]
+use core.files as files
+use core.process as process
+use core.sys as sys
 
 fn trust_pin_test_root(label: String) -> String {
     scratch :: files.temp_dir("jetpin_{label}") ?? panic("scratch directory")

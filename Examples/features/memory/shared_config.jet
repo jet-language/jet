@@ -1,7 +1,7 @@
 package {
     name: "memory_shared_config"
     version: "0.1.0"
-    authority: { holds: { allow: [Exec, IO, Mem.Alloc, Mem.Rc, Time.Wait] } }
+    authority: { allow: [Exec, IO, Mem.Alloc, Mem.Rc, Time.Wait] }
 }
 
 // D-CONC-SHARE1=A (amends D-MEM1 stage S6 / D-SHARED-API1=A): `Shared<T>` is a
@@ -28,9 +28,9 @@ fn run() {
     t1 :: task handle(1, config)
     t2 :: task handle(2, config)
     t3 :: task handle(3, config)
-    print(^^t1.join() ?? panic("task 1 failed"))
-    print(^^t2.join() ?? panic("task 2 failed"))
-    print(^^t3.join() ?? panic("task 3 failed"))
+    print(^t1.join() ?? panic("task 1 failed"))
+    print(^t2.join() ?? panic("task 2 failed"))
+    print(^t3.join() ?? panic("task 3 failed"))
     config.hits += 1
     total :: config.hits
     print("hits={total}")

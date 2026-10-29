@@ -1,0 +1,9 @@
+# Port of tests/guard_selftest.rs:66-69 -> tests/unsafe_ratchet.rs:203-218; scanner input bytes verbatim.
+# A `}` closing a default-value literal inside the parameter list must not end the signature.
+# Transitional Node debt in NODE-DEBT.tsv.
+requires: tool:node
+fixture: fixtures/ratchet
+copy: brace-defaults.txt Core/Sys/Sys.jet
+step: node {root}/Tools/agent/check-unsafe-ratchet.mjs --root {work} --baseline {work}/safety.md --update
+exit: nonzero
+stderr: ~ "fn fork opens #Unsafe" # original predicate

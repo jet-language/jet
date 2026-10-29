@@ -1,0 +1,19 @@
+# tests/archive.rs::source_compressors_reject_output_over_the_shared_budget_on_all_tiers at tests/archive.rs:256; hand-port
+# gen/gen.jet (its own package, so its run() does not collide with run.jet) ports the original byte builders (tests/archive.rs:127-254) and writes the inputs into the case directory; run.jet is the original source with the temp-file placeholders replaced by those relative names.
+fixture: source_compressors_reject_output_over_the_shared_budget_on_all_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step gen: jet run gen/gen.jet -- codec
+exit: 0
+step default: jet run run.jet
+exit: 0
+stdout: = source_compressors_reject_output_over_the_shared_budget_on_all_tiers.out # tests/archive.rs:295 tir_support::assert_tiers_agree
+step: jet build run.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = source_compressors_reject_output_over_the_shared_budget_on_all_tiers.out # tests/archive.rs:295 tir_support::assert_tiers_agree
+stdout: == default # tir_support assert_tiers_agree AOT/run agreement
+stderr: == default # tir_support assert_tiers_agree AOT/run agreement

@@ -1,0 +1,36 @@
+fn push_priority(values: &PriorityQueue<Int>, value: Int) {
+    &values.push(value)
+}
+fn counted_priority(hits: &Int) -> PriorityQueue<Int> {
+    hits += 1
+    return PriorityQueue.from([2, 6])
+}
+fn priority_queue_view() -> String {
+    values := PriorityQueue.from([4, 1, 7, 3, 7])
+    initial_len :: values.len()
+    initial_empty :: values.is_empty()
+    initial_peek :: values.peek() ?? -1
+    initial_sorted :: values.to_sorted_list()
+    &values.push(5)
+    push_priority(&values, 9)
+    after_push :: values.to_sorted_list()
+    after_push_len :: values.len()
+    popped_nine :: &values.pop() ?? -1
+    popped_seven :: &values.pop() ?? -1
+    after_pop :: values.to_sorted_list()
+    words := PriorityQueue.from(["a", "z", "m"])
+    empty := PriorityQueue.new()
+    receiver_hits := 0
+    counted_values := counted_priority(&receiver_hits)
+    counted_peek :: counted_values.peek() ?? -1
+    &counted_values.push(8)
+    &values.clear()
+    return "{initial_len}|{initial_empty}|{initial_peek}|{initial_sorted}|{after_push}|{after_push_len}|{popped_nine}|{popped_seven}|{after_pop}|{words.peek() ?? "none"}|{words.to_sorted_list()}|{values.is_empty()}|{values.len()}|{values.peek() ?? -1}|{empty.pop() ?? -1}|{counted_peek}|{counted_values.to_sorted_list()}|{receiver_hits}"
+}
+EXPECTED :: comptime { priority_queue_view() }
+
+fn run() {
+    actual :: priority_queue_view()
+    print("{EXPECTED}")
+    print("{actual}")
+}

@@ -77,15 +77,15 @@ and source history for work tracking and recovery.
 
 | Path | Holds |
 |---|---|
-| `Source/`, `crates/` | The Rust reference implementation: the `jet` CLI and its crates (`crates/vendor/` holds patched upstream crates) |
-| `Compiler/`, `Jetpack/` | Staged Jet-authored ports of the compiler and the package manager |
+| `Compiler/` | The Jet compiler (native backend, runtime, embedded Prelude under `Compiler/Prelude/`) and its bootstrap assembly |
+| `Jetpack/` | The Jet package manager |
 | `Core/` | Core library sources |
 | `Examples/` | Executable examples and golden output |
-| `tests/` | Rust integration tests, UI snapshots, fixtures, and compiler proofs |
+| `tests/` | Native test corpora (cases, UI snapshots), fixtures, and compiler proofs |
 | `Docs/` | Documentation, the website, and assets |
 | `Tools/` | Contributor tooling: `agent/` (environment and gates), `ci/`, `perf/`, `gauntlet/`, `editors/`, `tower/`, and more |
 
-`crates/` and `tests/` keep Cargo's lowercase names; every other top-level
+`tests/` keeps its lowercase name; every other top-level
 folder is capitalized. Keep the top level small: new tooling goes under
 `Tools/`, new documentation under `Docs/`. Never commit build output, scratch
 files, or one-off run artifacts.
@@ -108,17 +108,18 @@ A violation stops the affected work until it is fixed at the root.
 
 - **I1 — Safety.** Jet is memory-safe and type-safe by default. The expert
   escape hatch is a user-written, audited `#Unsafe("reason") { … }` block or
-  `#Unsafe("reason") fn`. Generated Rust `unsafe` appears only there or in
+  `#Unsafe("reason") fn`. Generated `unsafe` operations appear only there or in
   vetted standard-library and memory internals.
-- **I2 — Hidden backend.** If rustc rejects generated code, that is an internal
-  compiler error with exit code 101, never a user diagnostic.
+- **I2 — Hidden backend.** If the native backend rejects or cannot lower checked
+  code, that is an internal compiler error with exit code 101, never a user
+  diagnostic.
 - **I3 — Sema owns checks.** All language checking lives in sema. Codegen lowers
-  facts sema already established; it never probes rustc to find user errors.
+  facts sema already established; it never probes the backend to find user errors.
 - **I4 — Complete diagnostics.** Every diagnostic has a registered code,
   what/why/fix text, and a UI snapshot. Without the snapshot it is not done.
 - **I5 — Executable examples.** Every feature has an example with golden-tested
   output, and the example proves the same meaning on every applicable tier.
-- **I6 — Dependency seams.** The compiler and its seam crates use path
+- **I6 — Dependency seams.** The compiler and its seam packages use path
   dependencies only. The ratified stdlib bootstrap dependencies are temporary.
   Any new stdlib external dependency needs an owner decision and an approved
   bridge pattern.
@@ -203,7 +204,7 @@ Never create any other branch, a worktree, or any other ref (`refs/keep`,
 candidates, measurements, and proofs included. To build or measure an
 uncommitted change,
 apply a scratch patch to a temporary `git archive` export outside the
-repository. Use checkout-owned external Cargo targets configured through
+repository. Use checkout-owned external targets configured through
 `jet-env` (see the orchestration resource reference). Never overwrite another
 task's paths. Never run `git add -A`, a broad `git commit -a`, `git stash`,
 `git restore .`, `git reset --hard`, or any equivalent broad operation. Never
@@ -292,21 +293,21 @@ in one pass:
 
 ## Environment and proof
 
-Run repository commands through `Tools/agent/jet-env`. Keep scratch and logs on
-disk and build output outside the repository. Follow the orchestration resource
-reference for bounded, checkout-owned targets and shared artifacts; respect
-`JET_TARGET_CAP_GB=120`. Keep `CARGO_INCREMENTAL=0`, except
-in the orchestrator's lock-serialized build targets, which opt in with
-`JET_CARGO_INCREMENTAL=1` and are pruned between builds.
+Run repository commands through `Tools/agent/jet-env`; `JET` names the admitted
+native compiler (the stage-2 output of `Tools/agent/native-compiler.mjs`) for
+every tool and gate. Keep scratch and logs on disk and build output outside the
+repository. Follow the orchestration resource reference for bounded,
+checkout-owned targets and shared artifacts; respect `JET_TARGET_CAP_GB=120`.
 Rebuild before compiler smoke tests. After integration, run the exact narrow
 proof the criteria name. Broad suites, unfiltered censuses, and
 `Tools/agent/verify-full.sh` are milestone or release operations and need the
 required token. A worker's type-check is not proof of runtime behavior, tier
 parity, goldens, snapshots, or generated artifacts.
 
-Hosted CI currently runs only a workspace `cargo check`
-(`.github/workflows/ci.yml`); the full gate runs locally through
-`Tools/agent/verify-full.sh`.
+Hosted CI runs only the Core source-coverage ratchet
+(`.github/workflows/ci.yml`); until a pinned native seed release exists
+(D-SEED-DIST1), `Tools/agent/lane-check.sh` and the full gate
+(`Tools/agent/verify-full.sh`) run locally with the admitted `JET`.
 
 ## References
 
@@ -316,7 +317,7 @@ Read this file first, then load only what the task needs:
 |---|---|
 | Dispatch, waves, worktrees, receipts, recovery, or card closure | `.agents/skills/orchestration/SKILL.md` |
 | Compiler or language semantics | The relevant code, examples, and tests; `Docs/spec/syntax-decisions.md` for decision rationale |
-| Diagnostics or snapshots | `crates/jet-codegen/src/Prelude/Diagnostics.jet`, the matching UI snapshots, and `Docs/spec/diagnostics.md` |
+| Diagnostics or snapshots | `Compiler/Prelude/Diagnostics.jet`, the matching UI snapshots, and `Docs/spec/diagnostics.md` |
 | Examples or golden paths | `Docs/spec/contributing/examples.md` and `Examples/README.md` |
 | Tower cards, questions, tags, or board operations | `Docs/spec/contributing/issue-tracker.md`, `Docs/spec/contributing/triage-labels.md`, and `Tools/tower/skills/tower/SKILL.md` |
 | Domain vocabulary or decisions | `Docs/spec/vocabulary.md`, `Docs/spec/syntax-decisions.md`, and `Docs/spec/contributing/domain.md` |

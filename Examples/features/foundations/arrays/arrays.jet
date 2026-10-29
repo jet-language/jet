@@ -144,7 +144,7 @@ fn map_chunk(plan: &ChunkedArray, index: Int, f: fn(Float) -[]> Float) -> Tensor
 fn map_all(plan: &ChunkedArray, f: fn(Float) -[]> Float) -> Tensor {
     mapped := [Float]{}
     loop index in 0..<chunk_count(plan) {
-        chunk :: map_chunk(plan, index, f)
+        chunk :: map_chunk(&plan, index, f)
         values :: compute.to_list(chunk)
         loop value in values -> &mapped.push(value)
     }
@@ -167,7 +167,7 @@ fn ppm_tokens(source: String) -> [String] {
 
 // Decode the small, standards-compatible ASCII PPM (P3) fixture used by the
 // executable.  Pixel samples are normalized into the canonical Float Tensor.
-fn decode_ppm(source: String) -> ImageArray String! {
+fn decode_ppm(source: String) -> ImageArray Err! {
     tokens :: ppm_tokens(source)
     if tokens.len() < 4 -> return Err("PPM header is incomplete")
     if tokens[0] != "P3" -> return Err("PPM magic must be P3")
@@ -205,7 +205,7 @@ fn decode_ppm(source: String) -> ImageArray String! {
 
 fn resize_nearest(image: ImageArray, new_width: Int, new_height: Int) -> ImageArray {
     if new_width <= 0 || new_height <= 0 -> panic("resize dimensions must be positive")
-    out :: compute.zeros([new_height, new_width, image.channels]) ?? panic("resize allocation")
+    out := compute.zeros([new_height, new_width, image.channels]) ?? panic("resize allocation")
     y := 0
     loop y < new_height {
         x := 0
@@ -234,7 +234,7 @@ fn resize_nearest(image: ImageArray, new_width: Int, new_height: Int) -> ImageAr
 
 fn grayscale(image: ImageArray) -> ImageArray {
     if image.channels < 3 -> panic("RGB image required")
-    out :: compute.zeros([image.height, image.width, 1]) ?? panic("grayscale allocation")
+    out := compute.zeros([image.height, image.width, 1]) ?? panic("grayscale allocation")
     y := 0
     loop y < image.height {
         x := 0

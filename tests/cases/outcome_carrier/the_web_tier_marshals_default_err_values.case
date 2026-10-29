@@ -1,0 +1,19 @@
+# tests/outcome_carrier.rs::the_web_tier_marshals_default_err_values at tests/outcome_carrier.rs:302; hand-port
+# The wasm_rust/js_app text claims retire with the Rust backend; both web targets must print the default Err message.
+fixture: the_web_tier_marshals_default_err_values.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+requires: tool:node
+step: jet build --target web wasm/default_err.jet
+exit: 0 # tests/outcome_carrier.rs web wasm Err fixture compiles
+step wasm: node app.js
+cwd: wasm/.jet/build
+exit: 0
+stdout: = "bad\n" # tests/outcome_carrier.rs:302 the wasm tier carries Err.message
+step: jet build --target web js/default_err.jet
+exit: 0 # tests/outcome_carrier.rs web js Err fixture compiles
+step js: node app.js
+cwd: js/.jet/build
+exit: 0
+stdout: = "bad\n" # tests/outcome_carrier.rs:302 the js tier carries Err.message

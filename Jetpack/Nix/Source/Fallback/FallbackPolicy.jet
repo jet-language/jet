@@ -3,15 +3,22 @@
 // its receipt; the provider owns lock identity, output parsing and Store
 // publication. The gate runs before executable discovery, so `--offline`
 // cannot even inspect a Nix executable.
+use core.files as files
+use core.sys as sys
+use core.process as process
+use core.term as term
+use jet_pkg_model.[pkg_bytes_text, pkg_json_render, pkg_lock_load]
+use jetpack_nix_eval.[nixeval_key_ordered]
+use jetpack_foundation.[REF_SOURCE_NIXPKGS]
 
-NIX_FALLBACK_POLICY_ENV :: prep { "JETPACK_NIX_FALLBACK_POLICY" }
-NIX_FALLBACK_BIN_ENV :: prep { "JETPACK_NIX_FALLBACK_BIN" }
-NIX_FALLBACK_ALLOW_VALUE :: prep { "allow" }
-NIX_FALLBACK_RECEIPT_SCHEMA :: prep { "jetpack.nix-fallback-policy.v1" }
-NIX_FALLBACK_MAX_STDOUT_BYTES :: prep { 67108864 }
-NIX_FALLBACK_MAX_STDERR_BYTES :: prep { 16384 }
+NIX_FALLBACK_POLICY_ENV :: "JETPACK_NIX_FALLBACK_POLICY"
+NIX_FALLBACK_BIN_ENV :: "JETPACK_NIX_FALLBACK_BIN"
+NIX_FALLBACK_ALLOW_VALUE :: "allow"
+NIX_FALLBACK_RECEIPT_SCHEMA :: "jetpack.nix-fallback-policy.v1"
+NIX_FALLBACK_MAX_STDOUT_BYTES :: 67108864
+NIX_FALLBACK_MAX_STDERR_BYTES :: 16384
 // Nix environment the one-shot build must not inherit.
-NIX_FALLBACK_SCRUBBED_ENV :: prep { [String]{"NIX_PATH", "NIX_CONFIG", "NIX_USER_CONF_FILES", "NIX_REMOTE"} }
+NIX_FALLBACK_SCRUBBED_ENV :: [String]{"NIX_PATH", "NIX_CONFIG", "NIX_USER_CONF_FILES", "NIX_REMOTE"}
 
 enum NixFallbackMode {
     Offline
@@ -44,8 +51,8 @@ struct NixFallbackPolicyReceipt {
             "mode": Dyn.Text(self.mode.label()),
             "allowed": Dyn.Bool(self.allowed),
             "explicit": Dyn.Bool(self.explicit),
-            "policy": Dyn.Text(self.policy_value),
-            "reason": Dyn.Text(self.reason),
+            "policy": Dyn.Text(self.policy_value.copy()),
+            "reason": Dyn.Text(self.reason.copy()),
             "nix_invocations": Dyn.Int(self.invocations),
         ]))
     }
@@ -106,7 +113,7 @@ fn nix_fallback_decide(offline: Bool, ci: Bool, interactive: Bool, policy: Strin
 }
 
 // The policy decision for this process's environment and terminals.
-fn nix_fallback_authorize_from_environment(offline: Bool) -[Env]> NixFallbackPolicyReceipt NixError! {
+fn nix_fallback_authorize_from_environment(offline: Bool) -[Env, IO]> NixFallbackPolicyReceipt NixError! {
     ci :: (sys.get("CI") ?? "") != ""
     interactive :: term.stdin().is_tty() && term.stdout().is_tty()
     policy :: sys.get(NIX_FALLBACK_POLICY_ENV) ?? ""
@@ -115,7 +122,7 @@ fn nix_fallback_authorize_from_environment(offline: Bool) -[Env]> NixFallbackPol
     Ok(receipt)
 }
 
-fn nix_fallback_allowed_from_environment(offline: Bool) -[Env]> Bool Never! {
+fn nix_fallback_allowed_from_environment(offline: Bool) -[Env, IO]> Bool Never! {
     if nix_fallback_authorize_from_environment(offline) == {
         .Ok(_) -> true
         else -> false
@@ -124,7 +131,7 @@ fn nix_fallback_allowed_from_environment(offline: Bool) -[Env]> Bool Never! {
 
 // Run one exact-lock compatibility evaluation after the policy gate passes.
 // The only Nix build process is spawned after the gate.
-fn nix_fallback_run(project: String, source_name: String, revision: String, system: String, attr: [String], offline: Bool) -[FS, Env, Exec, Time.Wait]> NixFallbackRun NixError! {
+fn nix_fallback_run(project: String, source_name: String, revision: String, system: String, attr: [String], offline: Bool) -[FS, Env, Exec, Time.Wait, IO]> NixFallbackRun NixError! {
     policy :: nix_fallback_authorize_from_environment(offline)
     executable :: nix_fallback_discover_executable()
     locked_source :: nix_fallback_locked_source_name(project, source_name, revision)

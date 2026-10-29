@@ -1,0 +1,13 @@
+# tests/layout.rs::infeasible_required_constraints_report_conflict at tests/layout.rs:220; hand-port
+fixture: infeasible_required_constraints_report_conflict.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check fixture.jet
+exit: 0 # tests/layout.rs:236 infeasibility is a runtime fact, not a compile error
+step: jet build fixture.jet
+exit: 0
+step: built
+exit: 0
+stdout: ^= "feasible=false\n" # tests/layout.rs:243 is_feasible() is false
+stdout: ~ "conflict:" # tests/layout.rs:244 conflict() names a constraint

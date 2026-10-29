@@ -7,7 +7,7 @@
 // digest, the manifest, and (when locked) the lock's closure identity before
 // any Hangar staging or publication.
 
-STORE_PROJECT_NIX_CAS_DIR :: prep { "nix-cas" }
+STORE_PROJECT_NIX_CAS_DIR :: "nix-cas"
 
 // Export the selected Hangar closure as a portable, unsigned CAS bundle and
 // its `sha256-<hex>` digest.
@@ -59,15 +59,15 @@ fn store_publish_nix_cas_bundle(verification: &StoreVerification, project: Strin
 
 // Import a project Nix CAS bundle only after checking its declared digest.
 // Returns the import report and the manifest's member keys.
-fn store_import_nix_cas_bundle(project: String, roots: HangarRoots, digest: String) -> (report: HangarArchiveReport, digests: [String]) StoreError! {
-    store_nix_cas_import_with_expectation(project, roots, digest, None)
+fn store_import_nix_cas_bundle(verification: &StoreVerification, project: String, roots: HangarRoots, digest: String) -> (report: HangarArchiveReport, digests: [String]) StoreError! {
+    store_nix_cas_import_with_expectation(&verification, project, roots, digest, None)
 }
 
 // Import a Nix CAS bundle against the lock's complete closure identity. The
 // manifest is decoded and checked before any Hangar staging or publication,
 // so the lock identity is an admission precondition, not a post-import
 // observation.
-fn store_import_nix_cas_bundle_checked(project: String, roots: HangarRoots, digest: String, closure: NixClosureRecord, envelope: LockEnvelope) -> (report: HangarArchiveReport, digests: [String]) StoreError! {
+fn store_import_nix_cas_bundle_checked(verification: &StoreVerification, project: String, roots: HangarRoots, digest: String, closure: NixClosureRecord, envelope: LockEnvelope) -> (report: HangarArchiveReport, digests: [String]) StoreError! {
     closure.validate() ?? return Err(StoreError.Other(err.message()))
     if envelope.output_hash != closure.output || envelope.platform != closure.system {
         return Err(StoreError.InvalidData("locked Nix envelope identity disagrees with its closure record"))
@@ -79,10 +79,10 @@ fn store_import_nix_cas_bundle_checked(project: String, roots: HangarRoots, dige
         cache_key: closure.cache_key,
         references: closure.references,
     }
-    store_nix_cas_import_with_expectation(project, roots, digest, Val(expectation))
+    store_nix_cas_import_with_expectation(&verification, project, roots, digest, Val(expectation))
 }
 
-fn store_nix_cas_import_with_expectation(project: String, roots: HangarRoots, digest: String, expectation: NixReplayExpectation?) -> (report: HangarArchiveReport, digests: [String]) StoreError! {
+fn store_nix_cas_import_with_expectation(verification: &StoreVerification, project: String, roots: HangarRoots, digest: String, expectation: NixReplayExpectation?) -> (report: HangarArchiveReport, digests: [String]) StoreError! {
     store_archive_validate_digest(digest)
     path :: files.join(files.join(pkg_managed_dir(project), STORE_PROJECT_NIX_CAS_DIR), digest)
     bytes :: files.read_bytes(path)
@@ -94,7 +94,7 @@ fn store_nix_cas_import_with_expectation(project: String, roots: HangarRoots, di
     manifest :: archive.nix_manifest ?? return Err(StoreError.InvalidData("project Nix CAS bundle has no closure manifest"))
     digests := [String]{}
     loop member in manifest.members -> &digests.push(member.key)
-    report :: store_archive_import_verified(roots, archive, true)
+    report :: store_archive_import_verified(&verification, roots, archive, true)
     Ok((report: report, digests: digests))
 }
 
@@ -190,7 +190,7 @@ fn store_nix_cas_visit(key: String, edges: [String: [String]], visiting: &[Strin
     visiting[key] = true
     references :: edges.get(key) ?? return Err(StoreError.InvalidData("Nix closure manifest has a missing graph node"))
     loop reference in references -> store_nix_cas_visit(reference, edges, &visiting, &reachable)
-    visiting.remove(key)
+    _ :: &visiting.remove(key)
     reachable[key] = true
 }
 
@@ -239,7 +239,7 @@ fn store_nix_cas_validate_platform(value: String) StoreError! {
 // objects, rooted at the output digest, with a manifest built from the
 // closure graph and the producer's locked index facts.
 fn store_nix_cas_build_unlocked(verification: &StoreVerification, roots: HangarRoots, target: String) -> HangarArchive StoreError! {
-    entry :: store_archive_select_entry_unlocked(roots, target)
+    entry :: store_archive_select_entry_unlocked(&verification, roots, target)
     producer :: ProducerRecord.decode(entry.producer_record) ?? return Err(StoreError.InvalidData("Nix CAS export has invalid producer record: {err.message()}"))
     if producer.provider != "nix" {
         return Err(StoreError.InvalidData("Nix CAS export requires a Nix producer record; generic Hangar entries use generic archives"))
@@ -256,7 +256,7 @@ fn store_nix_cas_build_unlocked(verification: &StoreVerification, roots: HangarR
     }
     graph :: store_closure_graph_structure_unlocked(&verification, roots)
     root_digest :: entry.envelope.output_hash
-    full :: store_archive_build_unlocked(roots, target, true, true)
+    full :: store_archive_build_unlocked(&verification, roots, target, true, true)
     objects := [HangarArchiveObject]{}
     has_output := false
     loop object in full.objects {

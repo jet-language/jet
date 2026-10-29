@@ -43,7 +43,7 @@ fn store_validate_profile_generation_root(verification: &StoreVerification, root
     if targets.len() == 0 -> return
     id :: store_profile_generation_root_id(owner, profile, generation)
     snapshot :: store_lifecycle_snapshot(&verification, roots)
-    root :: snapshot.roots.get(id) ?? return Err(StoreError.NotFound("profile generation lifecycle root is missing"))
+    root :: snapshot.roots.get(id.as_str()) ?? return Err(StoreError.NotFound("profile generation lifecycle root is missing"))
     if root.phase != RootPhase.Committed -> return Err(StoreError.Other("profile generation lifecycle root is not committed"))
     expected :: store_sorted_unique(targets)
     if root.identity.kind != RootKind.ProfileGeneration || root.identity.producer.as_str() != "jetpack-profile-generation" || root.identity.incarnation.get() != 1 || root.identity.witness.as_str() != witness || root.targets != expected || root.protected_targets != expected {
@@ -75,7 +75,7 @@ fn store_reconcile_external_consumer_root(verification: &StoreVerification, root
     incarnation :: Incarnation.new(1)
     identity :: RootIdentity.new(RootKind.ExternalConsumer, id, ProducerID.new(consumer), incarnation, root_witness)
     snapshot :: store_lifecycle_prepare_if_absent(&verification, roots, identity, targets, LifecycleTimestamp.from_unix_seconds(at))
-    root :: snapshot.roots.get(id) ?? return Err(StoreError.Other("external consumer root disappeared after prepare"))
+    root :: snapshot.roots.get(id.as_str()) ?? return Err(StoreError.Other("external consumer root disappeared after prepare"))
     if root.phase == RootPhase.Committed -> return Ok(None)
     Ok(Val(PreparedExternalConsumerRoot{id: id, incarnation: incarnation, witness: root_witness}))
 }

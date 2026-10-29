@@ -1,0 +1,11 @@
+
+use core.process as process
+
+fn run() {
+    policy :: process.workspace()
+    spec :: process.cmd(["cmd.exe", "/C", "exit", "0"]).under(policy)
+    plan :: spec.plan() ?? panic("plan failed")
+    receipt :: spec.run() ?? panic("run failed")
+    print(plan.policy_digest == receipt.policy_digest)
+    print(receipt.backend)
+}

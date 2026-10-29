@@ -5,6 +5,9 @@
 // Native UI proof: jet check tests/ui/layout_unknown_variant.jet and
 // tests/ui/layout_unsupported_variant.jet (E1105), and
 // tests/ui/layout_columnar_prefix_reserved.jet (E1107).
+use jet_foundation.[StructDef, StructLayout]
+use jet_parser.[parse_source]
+
 fn layout_marker_struct(source: String) -> StructDef {
     parsed :: parse_source(source.bytes())
     if parsed.diagnostics.len() != 0 -> panic("a supported layout form reported a diagnostic")
@@ -21,7 +24,7 @@ fn layout_marker_refusal(source: String, code: String, spelled: String) {
     if source.slice(span.start, span.end) != spelled -> panic("a layout refusal points at `{source.slice(span.start, span.end)}`, not `{spelled}`")
 }
 
-fn run() {
+#Test("layout_marker") {
     plain :: layout_marker_struct("#Layout(c)\nstruct P {{ x: Int }}")
     if plain.layout != Val(StructLayout.C) || plain.layout_span == None -> panic("`#Layout(c)` lost its C layout fact")
     aligned :: layout_marker_struct("#Layout(c, align(64))\nstruct P {{ x: Int }}")

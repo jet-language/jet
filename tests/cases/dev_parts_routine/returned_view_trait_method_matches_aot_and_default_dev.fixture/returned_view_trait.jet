@@ -1,0 +1,22 @@
+trait Select {
+    fn select(self, left: [Int], right: [Int]) -> View<Int>
+}
+
+struct First { marker: Int }
+impl First.Select {
+    fn select(self, left: [Int], right: [Int]) -> View<Int> {
+        return left[0..1]
+    }
+}
+
+fn wrapper(selector: First, left: [Int], right: [Int]) -> View<Int> {
+    return selector.select(left, right)
+}
+
+fn run() {
+    selector :: First{ marker: 0 }
+    left := [7, 8]
+    right := [9, 10]
+    result :: wrapper(selector, left, right)
+    print(result[0])
+}

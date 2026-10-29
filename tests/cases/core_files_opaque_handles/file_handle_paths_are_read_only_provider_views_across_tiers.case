@@ -1,0 +1,17 @@
+# tests/core_files_opaque_handles.rs::file_handle_paths_are_read_only_provider_views_across_tiers at tests/core_files_opaque_handles.rs:11; hand-port
+fixture: file_handle_paths_are_read_only_provider_views_across_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+mkdir: scratch
+
+step run: jet run run.jet
+exit: 0
+stdout: = file_handle_paths_are_read_only_provider_views_across_tiers.1.out
+step build: jet build run.jet
+exit: 0
+step aot: built
+exit: == run
+stdout: == run
+stderr: == run

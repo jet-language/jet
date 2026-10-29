@@ -1,14 +1,14 @@
 // Linux parent observations reproduce Process.rs's typed memory/open-file
 // exhaustion classification. Kernel rlimits are installed by HostSpawn.
-fn process_execution_proc_path(child: I64, suffix: I64) -> I64 {
+fn process_execution_proc_path(pid: I64, suffix: I64) -> I64 {
     text :: jet_rt_string_builder_new()
     jet_rt_string_builder_push(text, rt_static_text("/proc/"))
-    rt_text_push_number(text, fd_word(process_execution_native(child), I64{8}))
+    rt_text_push_number(text, pid)
     jet_rt_string_builder_push(text, suffix)
     jet_rt_string_builder_finish(text)
 }
-fn process_execution_memory_used(child: I64, scratch: I64) -> I64 {
-    path :: process_execution_proc_path(child, rt_static_text("/status"))
+fn process_execution_memory_used(pid: I64, scratch: I64) -> I64 {
+    path :: process_execution_proc_path(pid, rt_static_text("/status"))
     name :: fd_c_path(path)
     file :: host_call(I64{2}, name, I64{524288}, I64{0})
     jet_rt_free(name, rt_text_len(path) + I64{1}, I64{1})
@@ -52,8 +52,8 @@ fn process_execution_memory_used(child: I64, scratch: I64) -> I64 {
     jet_rt_string_drop(text)
     used
 }
-fn process_execution_files_used(child: I64, scratch: I64) -> I64 {
-    path :: process_execution_proc_path(child, rt_static_text("/fd"))
+fn process_execution_files_used(pid: I64, scratch: I64) -> I64 {
+    path :: process_execution_proc_path(pid, rt_static_text("/fd"))
     name :: fd_c_path(path)
     file :: host_call(I64{2}, name, I64{589824}, I64{0})
     jet_rt_free(name, rt_text_len(path) + I64{1}, I64{1})
@@ -87,17 +87,20 @@ fn process_execution_files_used(child: I64, scratch: I64) -> I64 {
     used
 }
 fn process_execution_live_limit(child: I64, scratch: I64) -> I64 {
-    spec :: fd_word(child, I64{24})
+    process_spec_live_limit(fd_word(process_execution_native(child), I64{8}), fd_word(child, I64{24}), scratch)
+}
+// Process.rs:2530-2557 for one live pid under `spec` (borrowed).
+fn process_spec_live_limit(pid: I64, spec: I64, scratch: I64) -> I64 {
     memory :: fd_word(spec, PROCESS_SPEC_MEMORY_LIMIT)
     if (memory != I64{0}) {
         limit :: fd_word(memory, I64{0})
         threshold :: if (limit <= I64{1048576}) -> { I64{0} } else -> { limit - I64{1048576} }
-        used :: process_execution_memory_used(child, scratch)
+        used :: process_execution_memory_used(pid, scratch)
         if (used >= I64{0} && used >= threshold) -> return PROCESS_RESOURCE_MEMORY
     }
     files :: fd_word(spec, PROCESS_SPEC_OPEN_FILE_LIMIT)
     if (files != I64{0}) {
-        used :: process_execution_files_used(child, scratch)
+        used :: process_execution_files_used(pid, scratch)
         limit :: fd_word(files, I64{0})
         if (used >= I64{0} && used >= limit) -> return PROCESS_RESOURCE_OPEN_FILES
     }

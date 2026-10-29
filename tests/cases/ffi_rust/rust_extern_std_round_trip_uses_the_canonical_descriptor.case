@@ -1,0 +1,11 @@
+# Port of tests/ffi_rust.rs:20-89. An `extern rust "std"` call builds through cargo and the program prints 40.
+# The original's descriptor=<stamp> provenance line is the production formatter that
+# Compiler/JetCli/Tests/RustForeign.fixture/RustForeign.jet:61-75 pins. Its rustc-of-generated-Rust step has no
+# Jet-backend counterpart: jet run is the whole build. Like the original, this case needs cargo and rustc.
+fixture: rust_extern_std_round_trip_uses_the_canonical_descriptor.fixture
+env: NO_COLOR=1
+requires: tool:cargo
+requires: tool:rustc
+step: jet run main.jet
+exit: 0
+stdout: = "40\n"

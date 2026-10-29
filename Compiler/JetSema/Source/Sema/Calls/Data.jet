@@ -1,38 +1,37 @@
 use jet_foundation.[
+    AST_NODE_GENERATED,
     AccessConvention,
     CallArg,
     CoreCallRecord,
     Diagnostic,
     Expr,
+    EffectRowEntry,
     FunctionDefaultRef,
-    MIRCopyFact,
+    NodeKind,
     ParamZone,
     PlaceAccess,
     Span,
     StrPart,
-    TExpr,
-    TExprKind,
     TFailureCarrier,
-    THandleOp,
-    TMapEntry,
-    THostCall,
-    TTypedTextForm,
     Type,
     TypeTupleField,
     ast_empty_call_arg_flags,
     core_receiver_method,
     core_source_owns_type,
+    expr_source_span,
     expr_span,
     type_name,
+    UnOp,
+    core_identity_in_module,
+    core_identity_is,
 ]
 
 fn sema_dyn_type() -> Type Never! { Type.Named{name: "Dyn"} }
-fn sema_data_value_type() -> Type Never! { Type.Named{name: "DBValue"} }
 fn sema_data_decode_error() -> Type Never! { Type.List{element: Type.Named{name: "FieldError"}} }
 fn sema_data_result(ok: Type, err: Type) -> Type Never! { Type.Result{ok: ok, err: err} }
 
 fn sema_data_nominal_is(name: String, leaf: String) -> Bool Never! {
-    name == leaf || (name.starts_with("<corelib>/Core/data::") && name.ends_with("::{leaf}"))
+    name == leaf || (core_identity_in_module(name, "core.data") && name.ends_with("::{leaf}"))
 }
 
 fn sema_data_source_type_name(environment: SemaScopeEnvironment, program: SemaProgramTables, leaf: String) -> String Never! {
@@ -80,22 +79,22 @@ fn sema_dyn_wrappable(ty: Type) -> Bool Never! {
 
 fn sema_dyn_site(expr: Expr) -> String Never! {
     return if expr == {
-        .Ident(name, _) -> name
-        .Field(base, member, _) -> "{sema_dyn_site(base)}.{member}"
-        .Index(base, index, _, _) -> "{sema_dyn_site(base)}[{sema_dyn_site(index)}]"
-        .Paren(inner, _) | .Place(inner, _, _) -> sema_dyn_site(inner)
-        .Int(value, _, _, _) -> "{value}"
-        .Float(value, _, _, raw) -> raw ?? "{value}"
-        .Bool(value, _) -> if value -> "true" else -> "false"
-        .Unary(op, inner, _) -> {
+        .Ident(name, _, _) -> name
+        .Field(base, member, _, _) -> "{sema_dyn_site(base)}.{member}"
+        .Index(base, index, _, _, _) -> "{sema_dyn_site(base)}[{sema_dyn_site(index)}]"
+        .Paren(inner, _, _) | .Place(inner, _, _, _) -> sema_dyn_site(inner)
+        .Int(value, _, _, _, _) -> "{value}"
+        .Float(value, _, _, raw, _) -> raw ?? "{value}"
+        .Bool(value, _, _) -> if value -> "true" else -> "false"
+        .Unary(op, inner, _, _) -> {
             literal :: if inner == {
-                .Int(_, _, _, _) | .Float(_, _, _, _) -> true
+                .Int(_, _, _, _, _) | .Float(_, _, _, _, _) -> true
                 else -> false
             }
             if op == UnOp.Neg && literal -> return "-{sema_dyn_site(inner)}"
             "…"
         }
-        .Str(parts, _) -> {
+        .Str(parts, _, _) -> {
             text := ""
             loop part in parts {
                 if part == .Lit(piece) -> text = "{text}{piece}" else -> return "…"
@@ -106,12 +105,12 @@ fn sema_dyn_site(expr: Expr) -> String Never! {
     }
 }
 
-fn sema_dyn_index_operation(ty: Type, site: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> THandleOp? {
+fn sema_dyn_index_operation(ty: Type, site: String, span: Span, index_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> THandleOp? {
     location :: sema_expression_panic_location(environment, program, scopes, span)
     resolved :: sema_expr_expected_type(ty, environment, program)
     if resolved == Type.String -> return Val(THandleOp.DynIndexKey{site: site, location: location})
     if resolved == Type.Int -> return Val(THandleOp.DynIndexAt{site: site, location: location})
-    &diagnostics.push(sema_error("E0505", span, "a Dyn index must be String or Int, not {type_name(ty)}", "Dyn objects use String keys and Dyn arrays use Int positions", "use a String key or Int index"))
+    &diagnostics.push(sema_error("E0505", index_span, "Dyn index must be String or Int, not {sema_type_show(ty)}", "Dyn indexes object keys and array positions", "use a String key or an Int index"))
     None
 }
 
@@ -139,7 +138,7 @@ fn sema_dyn_try_member(receiver: Expr, receiver_value: TExpr, method: String, ar
         if method == "get" {
             index_ty :: sema_expr_expected_type(argument.ty, environment, program)
             if index_ty != Type.String && index_ty != Type.Int {
-                &diagnostics.push(sema_error("E0505", args[0].span, "a Dyn index must be String or Int, not {type_name(argument.ty)}", "Dyn objects use String keys and Dyn arrays use Int positions", "use a String key or Int index"))
+                &diagnostics.push(sema_error("E0505", args[0].span, "Dyn index must be String or Int, not {sema_type_show(argument.ty)}", "Dyn indexes object keys and array positions", "use a String key or an Int index"))
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
             operation = if index_ty == Type.String -> THandleOp.DynGetKey else -> THandleOp.DynGetAt
@@ -152,6 +151,9 @@ fn sema_dyn_try_member(receiver: Expr, receiver_value: TExpr, method: String, ar
     }
     convention :: if method == "remove" -> AccessConvention.Write else -> AccessConvention.Read
     if !sema_ownership_check_call_receiver(&state, receiver, convention, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    // Dyn reads report no receiver convention (Rust `dyn_method_return`), so a
+    // written mark on the receiver is not compared with one.
+    if method != "remove" -> sema_receiver_mark_forget(&state, receiver)
     value :: sema_tir_node(result_ty, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: typed}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
@@ -237,7 +239,9 @@ fn sema_data_check_field_error_under(args: [CallArg], span: Span, expected: Type
     if !framed {
         &diagnostics.push(sema_error("E0905", expr_span(args[1].expr), "`FieldError.under` expects a result with `[FieldError]` errors", "the framing helper preserves the child result and prefixes every accumulated decode failure", "pass a typed decode/accessor result, such as `tree.field(\"name\")?.decode<T>()`"))
     }
-    value := sema_tir_node(inner.ty, TExprKind.DecodeUnder{segment: segment_value, inner: inner}, span)
+    segment_row :: sema_arena_adopt(&context, segment_value)
+    inner_row :: sema_arena_adopt(&context, inner)
+    value := sema_node(&context, inner.ty, NodeKind.DecodeUnder{segment: segment_row, inner: inner_row}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
@@ -247,10 +251,6 @@ struct SemaDataAccessorContract {
     argument_types: [Type]
 }
 
-struct SemaDataValueAccessorContract {
-    result_type: Type
-    operation: THandleOp
-}
 
 fn sema_data_accessor_contract(method: String, receiver_ty: Type, alias: Bool) -> SemaDataAccessorContract? {
     data := if alias -> sema_dyn_type() else -> receiver_ty
@@ -288,58 +288,307 @@ fn sema_data_try_accessor(receiver: Expr, receiver_value: TExpr, name: String, m
         &typed.push(value)
     }
     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    sema_receiver_mark_forget(&state, receiver)
     value := sema_tir_node(contract.result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: contract.operation, args: typed}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
-fn sema_data_dbvalue_accessor(method: String) -> SemaDataValueAccessorContract? {
+fn sema_data_without_user_tags(ty: Type) -> Type Never! {
+    if ty == {
+        .Tagged(marker, inner) -> {
+            if marker == {
+                .User(_) -> return sema_data_without_user_tags(inner)
+                // copy: the untagged type is a new owned Type; `ty` stays the caller's.
+                else -> return ty.copy()
+            }
+        }
+        else -> return ty.copy()
+    }
+}
+
+// Rust arg_expect.rs `expect_core_arg`: the argument is checked against the
+// parameter type and a mismatch the checker did not already report is E0112.
+fn sema_data_expect_core_arg(name: String, index: Int, required: Type, argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    value :: sema_data_check_argument(name, index, argument, required, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    if sema_call_host_callback_assignable(required, value.ty, environment, program) == (.Val(false)) {
+        &diagnostics.push(sema_error("E0112", expr_span(argument.expr), "`{name}` wants {sema_type_show(required)} for argument {index + 1}, but this is {sema_type_show(value.ty)}", "every argument must match its parameter's type", sema_type_fix_hint(required, value.ty)))
+        return None
+    }
+    Val(value)
+}
+
+struct SemaDataQueryCallback {
+    value: TExpr?
+    result: Type?
+}
+
+fn sema_data_fn_has_empty_effect_bound(ty: Type) -> Bool Never! {
+    if ty == {
+        .Fn(_, _, bound, _, _, _) -> {
+            if bound == .Val(row) -> return row.len() == 0
+            return false
+        }
+        else -> return false
+    }
+}
+
+// Rust core_call.rs `infer_query_callback`: a one-row query callback (`map`,
+// `min`, `max`, the join keys, `group_by`, a grouped reducer) whose result is
+// open. The row seeds the lambda parameter and the callback keeps its own
+// result type, so keys and values keep their nominal or exact types. The
+// expected callback carries an explicit empty effect bound: a maintained query
+// replays its callbacks after each source delta (`check_query_callback_effect`).
+fn sema_data_infer_query_callback(call_name: String, row: Type, argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDataQueryCallback {
+    required :: Type.Fn{params: [Type]{row}, ret: None, effect_bound: Val([EffectRowEntry]{}), param_contract: None, call_metadata: None, return_view_provenance: None}
+    checked :: sema_expression_lambda_collection_callback(argument.expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDataQueryCallback{value: None, result: None}
+    callback_span :: expr_span(argument.expr)
+    if checked.ty == {
+        .Fn(params, ret, _, _, _, _) -> {
+            if !sema_data_fn_has_empty_effect_bound(checked.ty) {
+                &diagnostics.push(sema_error("E2476", callback_span, "live query callback `{call_name}` is not replay-safe", "a maintained query replays callbacks after each source delta, so the callback must have an explicit empty effect bound", "remove the effectful operation, or declare/use a pure callback over the tracked row"))
+            }
+            if params.len() != 1 || params[0] != row {
+                &diagnostics.push(sema_error("E0112", callback_span, "`{call_name}` wants a callback over {sema_type_show(row)} for argument 1", "a query callback receives exactly one row", "write `row -> …`"))
+            }
+            return SemaDataQueryCallback{value: Val(checked), result: ret}
+        }
+        else -> {
+            &diagnostics.push(sema_error("E0112", callback_span, "`{call_name}` wants a callback for argument 1, but this is {sema_type_show(checked.ty)}", "query reducers take one callback over the row", "pass a lambda such as `row -> row.field`"))
+            return SemaDataQueryCallback{value: None, result: None}
+        }
+    }
+}
+
+fn sema_data_query_push_argument(argument: CallArg, value: TExpr?, source_args: &[CallArg], argument_types: &[Type], typed: &[TExpr]) -> Bool {
+    checked :: value ?? return false
+    &source_args.push(argument)
+    &argument_types.push(checked.ty)
+    &typed.push(checked)
+    true
+}
+
+fn sema_data_query_receiver(name: String, parameters: [Type], method: String) -> String Never! {
+    if sema_data_nominal_is(name, "DataTracked") && parameters.len() == 2 && (method == "query" || method == "insert" || method == "replace" || method == "remove") -> return "DataTracked"
+    if sema_data_nominal_is(name, "DataWatch") && parameters.len() == 1 && (method == "get" || method == "status" || method == "cancel") -> return "DataWatch"
+    if sema_data_nominal_is(name, "Query") && parameters.len() == 1 && (method == "filter" || method == "sort_by" || method == "map" || method == "min" || method == "max" || method == "inner_join" || method == "left_join" || method == "collect" || method == "plan" || method == "group_by" || method == "watch") -> return "Query"
+    if sema_data_nominal_is(name, "DataGroupedQuery") && parameters.len() == 2 && (method == "count" || method == "sum" || method == "mean") -> return "DataGroupedQuery"
+    ""
+}
+
+fn sema_data_query_arity(method: String) -> Int Never! {
     if method == {
-        "int" -> Val(SemaDataValueAccessorContract{result_type: sema_data_result(Type.Int, Type.String), operation: THandleOp.DBValueInt})
-        "float" -> Val(SemaDataValueAccessorContract{result_type: sema_data_result(Type.Float, Type.String), operation: THandleOp.DBValueFloat})
-        "text" -> Val(SemaDataValueAccessorContract{result_type: sema_data_result(Type.String, Type.String), operation: THandleOp.DBValueText})
-        "bool" -> Val(SemaDataValueAccessorContract{result_type: sema_data_result(Type.Bool, Type.String), operation: THandleOp.DBValueBool})
-        "blob" -> Val(SemaDataValueAccessorContract{result_type: sema_data_result(Type.List{element: Type.IntN{signed: false, bits: 8}}, Type.String), operation: THandleOp.DBValueBlob})
-        "is_null" -> Val(SemaDataValueAccessorContract{result_type: Type.Bool, operation: THandleOp.DBValueIsNull})
-        else -> None
+        "insert" | "remove" | "filter" | "sort_by" | "map" | "min" | "max" | "group_by" | "sum" | "mean" -> 1
+        "replace" -> 2
+        "inner_join" | "left_join" -> 3
+        else -> 0
     }
 }
 
-fn sema_data_try_dbvalue_accessor(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    contract :: sema_data_dbvalue_accessor(method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+fn sema_data_group_sum_numeric(value: Type?) -> Bool Never! {
+    found :: value ?? return false
+    if found == {
+        .Int | .IntN(_, _) | .Float | .Float32 -> return true
+        else -> return false
+    }
+}
+
+// Rust method_calls.rs (the Query family of `infer_method_call`): `Query<T>`
+// methods keep the deferred carrier and only `collect` turns it back into a
+// list. `group_by` yields the internal `DataGroupedQuery<T, K>` carrier whose
+// reducers return `Query<Group<K, V>>`; keys and values keep the callback
+// result types, never a String/Float projection. `DataTracked` and `DataWatch`
+// are the maintained sources and live views of the same rows. Every call lowers
+// onto its receiver Core row with the receiver as the first argument.
+fn sema_data_try_query_method(receiver: Expr, receiver_value: TExpr, name: String, parameters: [Type], method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    receiver_type :: sema_data_query_receiver(name, parameters, method)
+    if receiver_type == "" -> return SemaMethodSpecialCheck{handled: false, value: None}
+    complete := true
     if type_args.len() != 0 {
-        sema_data_check_explicit_type_args(method, type_args, 0, span, &diagnostics)
-        sema_data_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        sema_data_check_explicit_type_args("{receiver_type}.{method}", type_args, 0, span, &diagnostics)
+        complete = false
+    }
+    want :: sema_data_query_arity(method)
+    if args.len() != want {
+        &diagnostics.push(sema_wrong_core_arity(method, want, args.len(), span))
+        complete = false
+    }
+    if args.len() > want -> sema_data_check_discarded_arguments(args.slice(want, args.len()), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    row :: parameters[0]
+    data_error :: Type.Named{name: sema_data_source_type_name(environment, program, "DataError")}
+    source_args := [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}
+    argument_types := [Type]{receiver_value.ty}
+    typed := [TExpr]{receiver_value}
+    call_type_args := [Type]{}
+    result_type := Type.Named{name: "Unit"}
+    if receiver_type == "DataTracked" {
+        key :: parameters[1]
+        if method == "query" {
+            result_type = Type.Apply{name: "Query", args: [Type]{row}}
+        } else {
+            slots := if method == {
+                "insert" -> [Type]{row}
+                "replace" -> [Type]{key, row}
+                else -> [Type]{key}
+            }
+            loop index in 0..<slots.len() {
+                if index >= args.len() -> break
+                value :: sema_data_expect_core_arg(method, index, slots[index], args[index], environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                if !sema_data_query_push_argument(args[index], value, &source_args, &argument_types, &typed) -> complete = false
+            }
+            result_type = Type.Result{ok: Type.Named{name: "Unit"}, err: data_error}
+        }
+    }
+    if receiver_type == "DataWatch" {
+        result_type = if method == {
+            "get" -> Type.Result{ok: Type.List{element: row}, err: data_error}
+            "status" -> Type.Named{name: sema_data_source_type_name(environment, program, "DataWatchStatus")}
+            else -> Type.Named{name: "Unit"}
+        }
+    }
+    if receiver_type == "Query" {
+        if method == "filter" || method == "sort_by" {
+            // Ordinary Query combinators collect later; the empty effect bound
+            // belongs to the live `.watch()` callbacks.
+            callback_result :: if method == "filter" -> Type.Bool else -> Type.String
+            callback_type :: Type.Fn{params: [Type]{row}, ret: Val(callback_result), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+            if args.len() > 0 {
+                value :: sema_data_expect_core_arg(method, 0, callback_type, args[0], environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                if !sema_data_query_push_argument(args[0], value, &source_args, &argument_types, &typed) -> complete = false
+            }
+            result_type = Type.Apply{name: name, args: [Type]{row}}
+        }
+        if method == "map" || method == "min" || method == "max" {
+            value_type := row
+            if args.len() > 0 {
+                callback :: sema_data_infer_query_callback(method, row, args[0], environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                if callback.result == .Val(found) -> value_type = found
+                if !sema_data_query_push_argument(args[0], callback.value, &source_args, &argument_types, &typed) -> complete = false
+            }
+            result_type = Type.Apply{name: name, args: [Type]{value_type}}
+        }
+        if method == "inner_join" || method == "left_join" {
+            right_row := row
+            if args.len() > 0 {
+                other := sema_check_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                if other == .Val(value) {
+                    query_row := Type?{None}
+                    if sema_data_without_user_tags(value.ty) == {
+                        .Apply(other_name, other_parameters) -> {
+                            if sema_data_nominal_is(other_name, "Query") && other_parameters.len() == 1 -> query_row = Val(other_parameters[0])
+                        }
+                        else -> {}
+                    }
+                    if query_row == .Val(found) {
+                        right_row = found
+                    } else {
+                        &diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` wants a Query as argument 1, but this is {sema_type_show(value.ty)}", "keyed joins combine two typed deferred queries", "pass another `Query<Row>` value"))
+                        other = None
+                    }
+                }
+                if !sema_data_query_push_argument(args[0], other, &source_args, &argument_types, &typed) -> complete = false
+            }
+            if args.len() > 1 {
+                left_key :: sema_data_infer_query_callback(method, row, args[1], environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                if !sema_data_query_push_argument(args[1], left_key.value, &source_args, &argument_types, &typed) -> complete = false
+            }
+            if args.len() > 2 {
+                right_key :: sema_data_infer_query_callback(method, right_row, args[2], environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                if !sema_data_query_push_argument(args[2], right_key.value, &source_args, &argument_types, &typed) -> complete = false
+            }
+            joined_right :: if method == "left_join" -> Type.Option{inner: right_row} else -> right_row
+            result_type = Type.Apply{name: name, args: [Type]{Type.Apply{name: "DataJoin", args: [Type]{row, joined_right}}}}
+        }
+        if method == "collect" {
+            call_type_args = [Type]{row}
+            result_type = sema_data_result(Type.List{element: row}, data_error)
+        }
+        if method == "plan" -> result_type = Type.List{element: Type.String}
+        if method == "group_by" {
+            key := Type.String
+            if args.len() > 0 {
+                callback :: sema_data_infer_query_callback(method, row, args[0], environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                if callback.result == .Val(found) -> key = found
+                if !sema_data_query_push_argument(args[0], callback.value, &source_args, &argument_types, &typed) -> complete = false
+            }
+            result_type = Type.Apply{name: "DataGroupedQuery", args: [Type]{row, key}}
+        }
+        if method == "watch" -> result_type = Type.Result{ok: Type.Apply{name: "DataWatch", args: [Type]{row}}, err: data_error}
+    }
+    if receiver_type == "DataGroupedQuery" {
+        key :: parameters[1]
+        value_type := Type.Int
+        if method == "sum" || method == "mean" {
+            value := Type?{None}
+            if args.len() > 0 {
+                callback :: sema_data_infer_query_callback(method, row, args[0], environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                value = callback.result
+                if !sema_data_query_push_argument(args[0], callback.value, &source_args, &argument_types, &typed) -> complete = false
+            }
+            if method == "sum" {
+                if !sema_data_group_sum_numeric(value) {
+                    shown :: if value == .Val(found) -> sema_type_show(found) else -> "missing"
+                    &diagnostics.push(sema_error("E0112", span, "`sum` wants an Int, fixed-width Int, Float, or F32 result, but this is {shown}", "grouped sum follows the runtime numeric domain and does not add arbitrary values", "return a numeric row value, or use `count` for cardinality"))
+                    complete = false
+                }
+                if value == .Val(found) -> value_type = found
+            } else {
+                if value == .Val(found) {
+                    if found != Type.Float {
+                        &diagnostics.push(sema_error("E0112", span, "`mean` wants Float for argument 1's result, but this is {sema_type_show(found)}", "a grouped mean follows the Float numeric rules; it does not widen integers or units silently", "return a Float from the value callback, or use `sum`"))
+                        complete = false
+                    }
+                }
+                value_type = Type.Float
+            }
+        }
+        result_type = Type.Apply{name: "Query", args: [Type]{Type.Apply{name: "Group", args: [Type]{key, value_type}}}}
+    }
+    if !complete -> return SemaMethodSpecialCheck{handled: true, value: None}
+    record :: core_receiver_method(receiver_type, method) ?? {
+        &diagnostics.push(sema_error("E0003", span, "checked query method `{method}` has no canonical receiver Core row", "every checked query method lowers onto its receiver Core row", "repair the Core registry receiver rows"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if args.len() != 0 {
-        sema_data_arity_diagnostic(method, 0, args.len(), span, &diagnostics)
-        sema_data_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    value := sema_tir_node(contract.result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: contract.operation, args: [TExpr]{}}, span)
-    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+    value :: sema_data_core_emit(record, "{receiver_type}.{method}", source_args, argument_types, typed, call_type_args, result_type, span, expected, environment, program, &scopes, &state, &context, &diagnostics)
+    SemaMethodSpecialCheck{handled: true, value: value}
 }
 
+// The compiler-owned receiver key of the checked-SQL list door (Rust
+// package_files.rs `INTERNAL_LIST_QUERY_HANDLE`); it has no source spelling.
+fn sema_data_list_query_handle() -> String Never! {
+    String.from_bytes([U8]{U8{0}, U8{106}, U8{101}, U8{116}, U8{46}, U8{113}, U8{117}, U8{101}, U8{114}, U8{121}, U8{46}, U8{108}, U8{105}, U8{115}, U8{116}}) ?? ""
+}
+
+// Rust method_calls.rs (`[T].query(sql)`): an in-memory row list runs one
+// checked SQL query into the deferred `Query<T>` carrier. The call lowers onto
+// the list-query receiver row with the list as its first argument.
+fn sema_data_check_list_query(receiver: Expr, receiver_value: TExpr, row: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if args.len() != 1 {
+        &diagnostics.push(sema_wrong_core_arity("query", 1, args.len(), span))
+        sema_data_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    sema_data_check_analytics_sql_schema(row, args[0].expr, expr_span(args[0].expr), environment, program, &diagnostics)
+    sql :: Type.Named{name: "SQL"}
+    query :: sema_data_expect_core_arg("query", 0, sql, args[0], environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    record :: core_receiver_method(sema_data_list_query_handle(), "query") ?? {
+        &diagnostics.push(sema_error("E0003", span, "checked query method `query` has no canonical receiver Core row", "every checked query method lowers onto its receiver Core row", "repair the Core registry receiver rows"))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    source_args := [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}
+    loop argument in args -> &source_args.push(argument)
+    result_type :: Type.Result{ok: Type.Apply{name: "Query", args: [Type]{row}}, err: sema_data_decode_error()}
+    value :: sema_data_core_emit(record, "query", source_args, [Type]{receiver_value.ty, sql}, [TExpr]{receiver_value, query}, [Type]{row}, result_type, span, expected, environment, program, &scopes, &state, &context, &diagnostics)
+    SemaMethodSpecialCheck{handled: true, value: value}
+}
 
 fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     resolved_ty := sema_call_resolved_type(receiver_value.ty, environment, program)
     if resolved_ty == .Apply(name, parameters) {
-        if sema_data_nominal_is(name, "Query") && parameters.len() == 1 && method == "collect" {
-            if type_args.len() != 0 || args.len() != 0 {
-                sema_data_check_explicit_type_args("Query.collect", type_args, 0, span, &diagnostics)
-                sema_data_arity_diagnostic("Query.collect", 0, args.len(), span, &diagnostics)
-                sema_data_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-                return SemaMethodSpecialCheck{handled: true, value: None}
-            }
-            record :: core_receiver_method("Query", "collect") ?? return SemaMethodSpecialCheck{handled: false, value: None}
-            source_arg :: CallArg{convention: AccessConvention.Read, expr: receiver, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
-            result_type :: sema_data_result(Type.List{element: parameters[0]}, Type.Named{name: sema_data_source_type_name(environment, program, "DataError")})
-            value :: sema_data_core_emit(record, "Query.collect", [CallArg]{^source_arg}, [Type]{receiver_value.ty}, [TExpr]{receiver_value}, [Type]{parameters[0]}, result_type, span, expected, environment, program, &scopes, &state, &context, &diagnostics)
-            return SemaMethodSpecialCheck{handled: true, value: value}
-        }
+        query :: sema_data_try_query_method(receiver, receiver_value, name, parameters, method, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        if query.handled -> return query
     }
-    if method == "encode" -> return sema_data_check_encode(receiver, receiver_value, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if method == "query" && resolved_ty == .List(row) -> return sema_data_check_list_query(receiver, receiver_value, row, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if method == "encode" && !sema_expr_declares_inherent_method(environment, program, receiver_value.ty, "encode") -> return sema_data_check_encode(receiver, receiver_value, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if resolved_ty == {
         .Named(name) -> {
             if sema_data_is_json_name(name) {
@@ -365,27 +614,6 @@ fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: Stri
                 }
                 return sema_data_try_accessor(receiver, receiver_value, name, method, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             }
-            if name == "DBValue" -> return sema_data_try_dbvalue_accessor(receiver, receiver_value, method, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-            // `.template()`/`.params()` project the checked
-            // `SQL` value (the Rust reference's TypedText SQLTemplate/SQLParams).
-            if name == "SQL" && (method == "template" || method == "params") {
-                if args.len() != 0 -> sema_data_arity_diagnostic(method, 0, args.len(), span, &diagnostics)
-                if type_args.len() != 0 -> sema_data_check_explicit_type_args(method, type_args, 0, span, &diagnostics)
-                sema_data_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-                if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-                ret := if method == "template" -> Type.String else -> Type.List{element: sema_data_value_type()}
-                form :: if method == "template" -> TTypedTextForm.SQLTemplate else -> TTypedTextForm.SQLParams
-                return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected_owned(sema_tir_node(ret, TExprKind.HostCall{call: THostCall.TypedText{kind: form, argument: receiver_value}}, span), expected, environment, program, &diagnostics)}
-            }
-            // `.text()` reads the escaped HTML as a String copy
-            // (the Rust reference's `HTML.text` route).
-            if name == "HTML" && method == "text" {
-                if args.len() != 0 -> sema_data_arity_diagnostic(method, 0, args.len(), span, &diagnostics)
-                if type_args.len() != 0 -> sema_data_check_explicit_type_args(method, type_args, 0, span, &diagnostics)
-                sema_data_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-                if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-                return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected_owned(sema_tir_node(Type.String, TExprKind.Clone{value: receiver_value, fact: MIRCopyFact.Materialize}, span), expected, environment, program, &diagnostics)}
-            }
             if name == "RealtimeStream" {
                 ret := if {
                     method == "next_deadline" && args.len() == 0 -> Val(Type.Named{name: "Instant"})
@@ -406,6 +634,16 @@ fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: Stri
                     value := sema_tir_node(ret ?? Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
                     return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
                 }
+            }
+            // `suite.run()` runs the package's `#Test` blocks on the harness the
+            // `Test` value carries and returns the failure count.
+            if name == "Test" && method == "run" {
+                if args.len() != 0 -> sema_data_arity_diagnostic("Test.run", 0, args.len(), span, &diagnostics)
+                if type_args.len() != 0 -> sema_data_check_explicit_type_args("Test.run", type_args, 0, span, &diagnostics)
+                sema_data_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+                value := sema_tir_node(Type.Int, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.TestSuiteRun, args: [TExpr]{}}, span)
+                return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
             }
         }
         .Apply(name, parameters) -> {
@@ -440,7 +678,7 @@ fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: Stri
                     return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
                 }
             }
-            if parameters.len() == 1 && method == "force" && (name == "ExpiringValue" || (core_source_owns_type(name) && name.ends_with("::Core/time/time.jet::ExpiringValue"))) {
+            if parameters.len() == 1 && method == "force" && (name == "ExpiringValue" || (core_source_owns_type(name) && core_identity_is(name, "core.time", "ExpiringValue"))) {
                 &diagnostics.push(sema_error("E0511", span, "`ExpiringValue.force` bypasses expiry checking", "TTL-wrapped values must use fallible `get(clock)` so expired access is handled explicitly", "use `.get(clock)` and handle `Expired`"))
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
@@ -451,17 +689,6 @@ fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: Stri
 }
 
 fn sema_data_literal_expected(ty: Type, variant: String) -> Type? {
-    if ty == (Type.Named{name: "DBValue"}) {
-        if variant == {
-            "Null" -> { return None }
-            "Int" -> { return Val(Type.Int) }
-            "Float" -> { return Val(Type.Float) }
-            "Text" -> { return Val(Type.String) }
-            "Bool" -> { return Val(Type.Bool) }
-            "Blob" -> { return Val(Type.List{element: Type.IntN{signed: false, bits: 8}}) }
-            else -> { return None }
-        }
-    }
     if !sema_data_is_json_name(sema_data_type_name(ty) ?? "") -> return None
     if variant == {
         "Null" -> { return None }
@@ -487,8 +714,8 @@ fn sema_data_object_pairs_type() -> Type Never! {
 
 fn sema_data_object_pairs_argument(argument: Expr, scopes: SemaScopeTable) -> Bool {
     if argument == {
-        .ListLit(_, _) -> return true
-        .Ident(name, _) -> {
+        .ListLit(_, _, _) -> return true
+        .Ident(name, _, _) -> {
             index :: sema_scope_resolve_index(scopes, name) ?? return false
             ty :: scopes.bindings[index].symbol.ty ?? return false
             return sema_data_is_object_pairs_type(ty)
@@ -511,47 +738,23 @@ fn sema_data_is_object_pairs_type(ty: Type) -> Bool Never! {
 }
 
 fn sema_data_literal_variant_valid(ty: Type, variant: String) -> Bool Never! {
-    if ty == (Type.Named{name: "DBValue"}) -> return variant == "Null" || variant == "Int" || variant == "Float" || variant == "Text" || variant == "Bool" || variant == "Blob"
     sema_data_is_json_name(sema_data_type_name(ty) ?? "") && (variant == "Null" || variant == "Bool" || variant == "Int" || variant == "Float" || variant == "Text" || variant == "Bytes" || variant == "DateTime" || variant == "Array" || variant == "Object")
 }
 
 fn sema_data_argument_is_borrowed(argument: Expr, scopes: SemaScopeTable) -> Bool Never! {
     if argument == {
-        .Ident(name, _) -> {
+        .Ident(name, _, _) -> {
             index :: sema_scope_resolve_index(scopes, name) ?? return false
             return sema_ownership_binding_is_borrowed_param(scopes.bindings[index])
         }
-        .Field(base, _, _) | .Index(base, _, _, _) | .Paren(base, _) -> return sema_data_argument_is_borrowed(base, scopes)
+        .Field(base, _, _, _) | .Index(base, _, _, _, _) | .Paren(base, _, _) -> return sema_data_argument_is_borrowed(base, scopes)
         else -> false
     }
 }
 
-fn sema_data_dbvalue_payload_live_after(ty: Type, argument: Expr, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Bool {
-    if ty != (Type.Named{name: "DBValue"}) -> return false
-    if argument == {
-        .Ident(name, _) -> { return sema_ownership_name_live_after(name, &tail_store, &context) }
-        else -> { return false }
-    }
-}
-
-// `HTML.raw("…")` is the audited escape from a runtime
-// String into checked HTML. `HTML` names the type here; the caller routes
-// only an owner no local value shadows (the Rust reference's typed-text raw).
-fn sema_call_try_html_raw(owner: String, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    if owner != "HTML" || method != "raw" -> return SemaMethodSpecialCheck{handled: false, value: None}
-    if args.len() != 1 {
-        &diagnostics.push(sema_error("E0103", span, "`HTML.raw()` takes exactly one argument", "`.raw()` wraps one already-audited `String` as the escape hatch", "write `HTML.raw(text)`"))
-        sema_data_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    text :: sema_check_expression(args[0].expr, Val(Type.String), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    value := sema_tir_node(Type.Named{name: "HTML"}, TExprKind.HostCall{call: THostCall.TypedText{kind: TTypedTextForm.HTMLRaw, argument: text}}, span)
-    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
-}
-
 fn sema_call_try_data_literal(ty: Type, variant: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     known_type :: sema_data_type_name(ty) ?? ""
-    if ty != (Type.Named{name: "DBValue"}) && !sema_data_is_json_name(known_type) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if !sema_data_is_json_name(known_type) -> return SemaMethodSpecialCheck{handled: false, value: None}
     // Rust `check_core_json_lit`: `Dyn.object()` is an empty object and
     // `Dyn.from(value)` calls the value's Encode contract.
     if sema_data_is_json_name(known_type) && (variant == "object" || variant == "from") {
@@ -573,7 +776,7 @@ fn sema_call_try_data_literal(ty: Type, variant: String, args: [CallArg], span: 
     }
     private_number :: sema_data_is_json_name(known_type) && variant == "Number" && context.unsafe_depth > 0 && environment.module_name == "__core_encoding_stream"
     if !private_number && !sema_data_literal_variant_valid(ty, variant) {
-        &diagnostics.push(sema_error("E0304", span, "`{type_name(ty)}` has no variant `{variant}`", "Dyn and DBValue expose closed compiler-owned literal variants", "check the variant name"))
+        &diagnostics.push(sema_error("E0304", span, "`{type_name(ty)}` has no variant `{variant}`", "Dyn exposes closed compiler-owned literal variants", "check the variant name"))
         sema_data_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -581,7 +784,7 @@ fn sema_call_try_data_literal(ty: Type, variant: String, args: [CallArg], span: 
     if private_number -> expected_payload = Val(Type.String)
     // (Rust `is_object_pairs_arg`): a pair-list literal or
     // local keeps its arrival order; anything else is read as a Map.
-    if variant == "Object" && ty != (Type.Named{name: "DBValue"}) && args.len() == 1 && sema_data_object_pairs_argument(args[0].expr, scopes) -> expected_payload = Val(sema_data_object_pairs_type())
+    if variant == "Object" && args.len() == 1 && sema_data_object_pairs_argument(args[0].expr, scopes) -> expected_payload = Val(sema_data_object_pairs_type())
     expected_count := if expected_payload == None -> 0 else -> 1
     if args.len() != expected_count {
         sema_data_arity_diagnostic("{type_name(ty)}.{variant}", expected_count, args.len(), span, &diagnostics)
@@ -597,15 +800,23 @@ fn sema_call_try_data_literal(ty: Type, variant: String, args: [CallArg], span: 
         borrowed := sema_data_argument_is_borrowed(argument.expr, scopes)
         if argument.convention != AccessConvention.Move && borrowed && !sema_ownership_type_is_copy(want) {
             if sema_ownership_type_cloneable(want) == (Val(true)) -> clone_arg = true
-            &diagnostics.push(sema_error("E0209", argument.span, "implicit clone of this borrowed payload", "the Dyn/DBValue constructor stores its own value, so borrowed storage cannot be moved", "copy the payload explicitly before constructing the value"))
+            shown :: sema_expression_simple_place_text(argument.expr)
+            what := "implicit clone of this consumed expression"
+            fix := "call `.copy()` on the highlighted expression to copy it explicitly"
+            if shown == .Val(text) {
+                what = "implicit clone of `{text}`"
+                fix = "write `{text}.copy()` to copy explicitly"
+            }
+            &diagnostics.push(sema_error("E0209", expr_source_span(argument.expr), what, "`{variant}` stores its own copy of this value", fix))
         }
-        if argument.convention != AccessConvention.Move && !borrowed && !sema_ownership_type_is_copy(want) && sema_data_dbvalue_payload_live_after(ty, argument.expr, &tail_store, &context) && sema_ownership_type_cloneable(want) == (Val(true)) -> clone_arg = true
         if argument.convention == AccessConvention.Move -> clone_arg = false
-        taken :: if argument.convention == AccessConvention.Move -> Expr.Place{value: argument.expr, access: PlaceAccess.Take, span: argument.span} else -> argument.expr
-        if !clone_arg && !sema_ownership_consume_expression(&state, taken, scopes, "`{type_name(ty)}.{variant}`", &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        taken :: if argument.convention == AccessConvention.Move -> Expr.Place{value: argument.expr, access: PlaceAccess.Take, span: argument.span, id: AST_NODE_GENERATED} else -> argument.expr
+        // A fresh payload (a literal or call) had its moves recorded by the
+        // check above; only a named place is consumed here.
+        fresh :: argument.convention != AccessConvention.Move && sema_ownership_places_from_expr_in_state(argument.expr, scopes, &state).len() == 0
+        if !clone_arg && !fresh && !sema_ownership_consume_expression(&state, taken, scopes, "`{type_name(ty)}.{variant}`", &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         }
-    result_ty := if ty == (Type.Named{name: "DBValue"}) -> sema_data_value_type() else -> sema_dyn_type()
-    value := sema_tir_expr(result_ty, if ty == (Type.Named{name: "DBValue"}) -> TExprKind.DBValueLit{variant: variant, arg: payload, clone_arg: clone_arg} else -> TExprKind.JSONLit{variant: variant, arg: payload, clone_arg: clone_arg}, span)
+    value := sema_tir_expr(sema_dyn_type(), TExprKind.JSONLit{variant: variant, arg: payload, clone_arg: clone_arg}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
@@ -693,12 +904,12 @@ fn sema_call_try_data_stream_core_call(module_name: String, member: String, args
     if !ownership.accepted || !ownership.complete -> return SemaDirectSpecialCheck{handled: true, value: None}
     widen_to_vec := (loop _ in call_args -> false)
     if !sema_call_core_record_effects(record, span, effective_type_args, result_type, fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
-    value :: sema_call_core_tir(record, call_args, span, effective_type_args, widen_to_vec, None, result_type, fallibility, expected, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    value :: sema_call_core_tir(record, call_args, span, effective_type_args, widen_to_vec, result_type, fallibility, expected, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     SemaDirectSpecialCheck{handled: true, value: Val(value)}
 }
 
 fn sema_data_core_default_call(type_name: String, method: String, span: Span) -> Expr Never! {
-    Expr.MethodCall{receiver: Expr.Ident{name: type_name, span: span}, method: method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, recv_type: None, resolved_ret: None}
+    Expr.MethodCall{receiver: Expr.Ident{name: type_name, span: span, id: AST_NODE_GENERATED}, method: method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
 }
 
 fn sema_data_core_param(label: String, ty: Type, convention: AccessConvention, zone: ParamZone, default: Expr?) -> SemaCallParam Never! {
@@ -713,28 +924,51 @@ fn sema_data_core_param_access(record: CoreCallRecord, index: Int, span: Span, d
 }
 
 fn sema_data_core_emit(record: CoreCallRecord, call_name: String, source_args: [CallArg], argument_types: [Type], typed_args: [TExpr], type_args: [Type], result_type: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    accesses := [AccessConvention]{}
+    loop index in 0..<typed_args.len() {
+        access :: sema_data_core_param_access(record, index, span, &diagnostics) ?? return None
+        &accesses.push(access)
+    }
+    sema_data_core_emit_with_accesses(record, call_name, source_args, argument_types, typed_args, accesses, type_args, result_type, span, expected, environment, program, &scopes, &state, &context, &diagnostics)
+}
+
+// One checked CoreCall over explicit parameter accesses: a `&` slot lends the
+// caller's place for the call (the registry row only says it is borrowed).
+fn sema_data_core_emit_with_accesses(record: CoreCallRecord, call_name: String, source_args: [CallArg], argument_types: [Type], typed_args: [TExpr], accesses: [AccessConvention], type_args: [Type], result_type: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     updated_source_args := source_args
-    if argument_types.len() != typed_args.len() || updated_source_args.len() != typed_args.len() {
+    if argument_types.len() != typed_args.len() || updated_source_args.len() != typed_args.len() || accesses.len() != typed_args.len() {
         &diagnostics.push(sema_error("E0003", span, "`{call_name}` has an incomplete checked argument list", "CoreCall TIR stores every checked argument in the registry ABI order", "repair the Core call body"))
         return None
     }
     params := [SemaCallParam]{}
     arguments := [TExpr]{}
     loop (index, value) in typed_args {
-        access :: sema_data_core_param_access(record, index, span, &diagnostics) ?? return None
+        access :: accesses[index]
         &params.push(sema_data_core_param("arg{index}", argument_types[index], access, ParamZone.PositionalOnly, None))
-        &arguments.push(sema_services_apply_access(value, access))
+        if access == AccessConvention.Write {
+            &arguments.push(sema_tir_node(value.ty, TExprKind.Borrow{place: value, access: AccessConvention.Write}, value.span))
+        } else {
+            &arguments.push(sema_services_apply_access(value, access))
+        }
     }
     ownership := sema_ownership_check_call_arguments(&state, call_name, params, &updated_source_args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return None
     fallibility := sema_call_failure_carrier(Val(result_type))
     if !sema_call_core_record_effects(record, span, type_args, result_type, fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return None
     widen_to_vec := (loop _ in arguments -> false)
-    sema_call_core_tir(record, arguments, span, type_args, widen_to_vec, None, result_type, fallibility, expected, environment, program, &diagnostics)
+    // A checked call finishes like the fixed Core route: inside a fallible
+    // body's success view a Result call is compared by its success side.
+    value :: sema_call_core_tir(record, arguments, span, type_args, widen_to_vec, result_type, fallibility, None, environment, program, &diagnostics) ?? return None
+    sema_expression_call_expected(value, expected, environment, program, context, &diagnostics)
 }
 
+// Rust core_call.rs `exactly_one_type_arg`: a typed decode/query call names one
+// target type.
 fn sema_data_core_target_type(type_args: [Type], name: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Type? {
-    if !sema_data_check_explicit_type_args(name, type_args, 1, span, &diagnostics) -> return None
+    if type_args.len() != 1 {
+        &diagnostics.push(sema_error("E0119", span, "`{name}` expects exactly one type argument, got {type_args.len()}", "a typed decode call needs one target type", "write `{name}<Target>(...)` with one target type"))
+        return None
+    }
     target := type_args[0]
     if program.registration_graph == .Val(graph) -> target = sema_type_resolve_declared_with_generics(graph, target, environment.module_identity, environment.generic_params)
     Val(target)
@@ -776,10 +1010,18 @@ fn sema_data_core_decode_contract(module_name: String, member: String, target: T
     None
 }
 
+// The Core calls whose typed decode contract lives here.
+fn sema_data_core_decode_member(module_name: String, member: String) -> Bool Never! {
+    if module_name != "core.db" && module_name != "core.sys" && !module_name.starts_with("core.encoding.") -> return false
+    member == "decode" || (module_name == "core.encoding.xml" && member == "decode_bytes")
+}
+
 fn sema_data_core_try_decode(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck? {
     updated_args := args
-    if module_name != "core.db" && module_name != "core.sys" && !module_name.starts_with("core.encoding.") -> return None
-    if member != "decode" && !(module_name == "core.encoding.xml" && member == "decode_bytes") -> return None
+    if !sema_data_core_decode_member(module_name, member) -> return None
+    // Rust core_call.rs:3741: an untyped `cbor.decode(bytes)` is the Dyn
+    // parse row, not a typed decode.
+    if module_name == "core.encoding.cbor" && type_args.len() == 0 -> return None
     if module_name == "core.encoding.json" && type_args.len() == 0 {
         if updated_args.len() != 1 {
             sema_data_arity_diagnostic("core.encoding.json.decode", 1, updated_args.len(), span, &diagnostics)
@@ -793,7 +1035,7 @@ fn sema_data_core_try_decode(module_name: String, member: String, args: [CallArg
         result :: sema_data_core_emit(record, "{module_name}.{member}", updated_args, argument_types, [TExpr]{value}, [Type]{}, result_type, span, expected, environment, program, &scopes, &state, &context, &diagnostics) ?? return Val(SemaDirectSpecialCheck{handled: true, value: None})
         return Val(SemaDirectSpecialCheck{handled: true, value: Val(result)})
     }
-    target :: sema_data_core_target_type(type_args, "{module_name}.{member}", span, environment, program, &diagnostics) ?? return Val(SemaDirectSpecialCheck{handled: true, value: None})
+    target :: sema_data_core_target_type(type_args, member, span, environment, program, &diagnostics) ?? return Val(SemaDirectSpecialCheck{handled: true, value: None})
     if !sema_serde_type_is_admissible(environment, program, target, SemaSerdeDirection.Decode) {
         &diagnostics.push(sema_error("E0905", span, "`{type_name(target)}` does not implement `Decode`", "`{module_name}.{member}<T>` can only decode into a type with the registered Decode contract", "derive `Decode` on this type, or write its Decode implementation"))
     }
@@ -806,9 +1048,9 @@ fn sema_data_core_try_decode(module_name: String, member: String, args: [CallArg
     // registered defaults before the shared arity and argument checks.
     if module_name == "core.sys" {
         params := [SemaCallParam]{
-            sema_data_core_param("prefix", Type.String, AccessConvention.Read, ParamZone.Either, Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: ""}}, span: span})),
-            sema_data_core_param("file", Type.String, AccessConvention.Read, ParamZone.Either, Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: ".env"}}, span: span})),
-            sema_data_core_param("allow", Type.List{element: Type.String}, AccessConvention.Read, ParamZone.Either, Val(Expr.ListLit{elements: [Expr]{}, span: span})),
+            sema_data_core_param("prefix", Type.String, AccessConvention.Read, ParamZone.Either, Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: ""}}, span: span, id: AST_NODE_GENERATED})),
+            sema_data_core_param("file", Type.String, AccessConvention.Read, ParamZone.Either, Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: ".env"}}, span: span, id: AST_NODE_GENERATED})),
+            sema_data_core_param("allow", Type.List{element: Type.String}, AccessConvention.Read, ParamZone.Either, Val(Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED})),
         }
         binding :: sema_call_bind_args("{module_name}.{member}", params, &updated_args, span, &diagnostics)
         if binding == None {
@@ -846,7 +1088,6 @@ fn sema_data_core_try_decode(module_name: String, member: String, args: [CallArg
     Val(SemaDirectSpecialCheck{handled: true, value: Val(result)})
 }
 
-
 fn sema_data_core_reader_writer_params(module_name: String, member: String, record: CoreCallRecord, span: Span, diagnostics: &[Diagnostic]) -> [SemaCallParam]? {
     reader := member == "reader"
     if !reader && member != "writer" -> return None
@@ -880,9 +1121,9 @@ fn sema_data_core_reader_writer_params(module_name: String, member: String, reco
             &labels.push("header")
             &labels.push("skip_blank")
             &defaults.push(Val(sema_data_core_default_call("EncodingLimits", "safe", span)))
-            &defaults.push(Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: ","}}, span: span}))
-            &defaults.push(Val(Expr.Bool{value: false, span: span}))
-            &defaults.push(Val(Expr.Bool{value: false, span: span}))
+            &defaults.push(Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: ","}}, span: span, id: AST_NODE_GENERATED}))
+            &defaults.push(Val(Expr.Bool{value: false, span: span, id: AST_NODE_GENERATED}))
+            &defaults.push(Val(Expr.Bool{value: false, span: span, id: AST_NODE_GENERATED}))
         }
         else -> {
             &argument_types.push(Type.Named{name: "EncodingLimits"})
@@ -898,7 +1139,7 @@ fn sema_data_core_reader_writer_params(module_name: String, member: String, reco
                 module_name == "core.encoding.json" && !reader -> {
                     &argument_types.push(Type.Bool)
                     &labels.push("canonical")
-                    &defaults.push(Val(Expr.Bool{value: false, span: span}))
+                    &defaults.push(Val(Expr.Bool{value: false, span: span, id: AST_NODE_GENERATED}))
                 }
             }
         }
@@ -997,12 +1238,12 @@ fn sema_data_sql_column_token(raw: String) -> String Never! {
 
 fn sema_data_analytics_sql_literal(expression: Expr) -> String? {
     if expression == {
-        .TypedLit(head, body, _) -> {
+        .TypedLit(head, body, _, _) -> {
             if head != .Val(Type.Named{name: "SQL"}) -> return None
             if body == {
                 .Value(value) -> {
                     if value == {
-                        .Str(parts, _) -> {
+                        .Str(parts, _, _) -> {
                             result := ""
                             loop part in parts {
                                 if part == {
@@ -1078,14 +1319,143 @@ fn sema_data_check_analytics_sql_schema(row: Type, query: Expr, span: Span, envi
     }
 }
 
+// Rust core_call.rs `infer_core_call`, the typed `core.data` arms: the loader
+// declarations and `snapshot`, `plot` and its renderers, the beginner `csv` /
+// `json` facade and the bounded `csv_reader` / `json_reader` streams. Each
+// names its row type with one explicit `<T>`; without one the call stays on
+// its ordinary route.
+fn sema_data_core_plot_view(member: String) -> Bool Never! {
+    member == "inspect" || member == "inspect_json" || member == "text" || member == "svg" || member == "show" || member == "render"
+}
+
+fn sema_data_core_typed_member(module_name: String, member: String) -> Bool Never! {
+    if module_name == "core.data.plot" -> return member == "plot" || sema_data_core_plot_view(member)
+    if module_name != "core.data" -> return false
+    if member == {
+        "load" | "load_default" | "file" | "file_member" | "url" | "database" | "value" | "snapshot" -> true
+        "plot" | "csv" | "json" | "csv_reader" | "json_reader" -> true
+        else -> sema_data_core_plot_view(member)
+    }
+}
+
+fn sema_data_core_declaration(member: String) -> Bool Never! {
+    member == "load" || member == "load_default" || member == "file" || member == "file_member" || member == "url" || member == "database" || member == "value" || member == "snapshot"
+}
+
+// The parameter types of one typed arm once its row type is known.
+fn sema_data_core_typed_params(member: String, row: Type) -> [Type] Never! {
+    limits :: Type.Named{name: "DataLimits"}
+    plot :: Type.Apply{name: "JetDataPlot", args: [Type]{row}}
+    if member == {
+        "load" -> [Type]{Type.String, limits}
+        "load_default" | "csv" | "json" -> [Type]{Type.String}
+        "file" -> [Type]{Type.String, Type.String, limits}
+        "file_member" | "url" -> [Type]{Type.String, Type.String, Type.String, limits}
+        "database" -> [Type]{Type.String, Type.List{element: Type.String}, Type.String, limits}
+        "value" -> [Type]{row, limits}
+        "snapshot" -> [Type]{Type.Apply{name: "DataLoader", args: [Type]{row}}}
+        "plot" -> [Type]{Type.List{element: row}}
+        "render" -> [Type]{plot, Type.Named{name: "JetDataPlotBackend"}}
+        "csv_reader" | "json_reader" -> [Type]{Type.Named{name: "FileReader"}, limits}
+        else -> [Type]{plot}
+    }
+}
+
+fn sema_data_core_typed_result(member: String, row: Type) -> Type Never! {
+    data_error :: Type.Named{name: "DataError"}
+    if member == {
+        "snapshot" -> sema_data_result(Type.Apply{name: "DataSnapshot", args: [Type]{row}}, data_error)
+        "plot" -> sema_data_result(Type.Apply{name: "JetDataPlot", args: [Type]{row}}, data_error)
+        "inspect" -> sema_data_result(Type.Named{name: "JetDataPlotInspection"}, data_error)
+        "inspect_json" | "text" | "svg" -> sema_data_result(Type.String, data_error)
+        "show" | "render" -> sema_data_result(Type.Named{name: "JetDataPlotRender"}, data_error)
+        "csv" | "json" -> sema_data_result(Type.List{element: row}, sema_data_decode_error())
+        "csv_reader" | "json_reader" -> sema_data_result(Type.Apply{name: "DataStream", args: [Type]{row}}, data_error)
+        else -> sema_data_result(Type.Apply{name: "DataLoader", args: [Type]{row}}, data_error)
+    }
+}
+
+// Rust arg_expect.rs `expect_core_arg_moving`: the owning reader slot takes
+// an explicit `^`; a mismatch the checker did not already report is E0112.
+fn sema_data_expect_core_arg_moving(name: String, index: Int, required: Type, argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    value :: sema_check_expression(argument.expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    if sema_call_host_callback_assignable(required, value.ty, environment, program) == (.Val(false)) {
+        &diagnostics.push(sema_error("E0112", expr_span(argument.expr), "`{name}` wants {sema_type_show(required)} for argument {index + 1}, but this is {sema_type_show(value.ty)}", "every argument must match its parameter's type", sema_type_fix_hint(required, value.ty)))
+        return None
+    }
+    Val(value)
+}
+
+fn sema_data_core_check_typed(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    // As in the reference, the declarations and the plot renderers name their
+    // row before their arity, `plot` right after it, and the facade and the
+    // readers (whose parameters do not depend on the row) after their arguments.
+    row := Type?{None}
+    if sema_data_core_declaration(member) || sema_data_core_plot_view(member) {
+        row = sema_data_core_target_type(type_args, member, span, environment, program, &diagnostics)
+        if row == None -> return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    want :: if member == {
+        "render" | "load" | "value" | "csv_reader" | "json_reader" -> 2
+        "file" -> 3
+        "file_member" | "url" | "database" -> 4
+        else -> 1
+    }
+    if args.len() != want {
+        &diagnostics.push(sema_wrong_core_arity(member, want, args.len(), span))
+        sema_data_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    if member == "plot" {
+        row = sema_data_core_target_type(type_args, member, span, environment, program, &diagnostics)
+        if row == None {
+            sema_data_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            return SemaDirectSpecialCheck{handled: true, value: None}
+        }
+    }
+    params :: sema_data_core_typed_params(member, row ?? Type.Named{name: "Unit"})
+    record :: sema_call_core_record(module_name, member, args.len(), span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    accesses := [AccessConvention]{}
+    typed := [TExpr]{}
+    complete := true
+    loop (index, argument) in args {
+        // As Rust `expect_core_arg`, every slot reads its argument except the
+        // readers' owning `^reader` (`expect_core_arg_moving`, which records the
+        // move) and the snapshot's `&loader`.
+        reader_slot :: (member == "csv_reader" || member == "json_reader") && index == 0
+        if member == "snapshot" {
+            if argument.convention != AccessConvention.Write {
+                &diagnostics.push(sema_error("E0202", argument.span, "`snapshot` requires the write-access marker `&`", "taking a snapshot refreshes loader state in place", "write the write-access marker `&`: `&loader`"))
+            }
+            &accesses.push(AccessConvention.Write)
+        } else {
+            &accesses.push(if reader_slot -> AccessConvention.Move else -> AccessConvention.Read)
+        }
+        value :: if reader_slot -> sema_data_expect_core_arg_moving(member, index, params[index], argument, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_data_expect_core_arg(member, index, params[index], argument, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        if value == .Val(checked) {
+            &typed.push(checked)
+        } else {
+            complete = false
+        }
+    }
+    if row == None -> row = sema_data_core_target_type(type_args, member, span, environment, program, &diagnostics)
+    target :: row ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    if member == "snapshot" || member == "csv" || member == "json" || member == "csv_reader" || member == "json_reader" -> sema_call_http_check_serde(SemaSerdeDirection.Decode, target, span, environment, program, &diagnostics)
+    if member == "value" || member == "snapshot" || member == "plot" -> sema_call_http_check_serde(SemaSerdeDirection.Encode, target, span, environment, program, &diagnostics)
+    if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
+    result :: sema_data_core_emit_with_accesses(record, "{module_name}.{member}", args, params, typed, accesses, [Type]{target}, sema_data_core_typed_result(member, target), span, expected, environment, program, &scopes, &state, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    SemaDirectSpecialCheck{handled: true, value: Val(result)}
+}
+
 fn sema_call_try_data_core_call(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if module_name == "core.data.stream" -> return sema_call_try_data_stream_core_call(module_name, member, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     reader_writer :: sema_data_core_try_reader_writer(module_name, member, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if reader_writer == .Val(result) -> return result
     decoder :: sema_data_core_try_decode(module_name, member, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if decoder == .Val(result) -> return result
+    if type_args.len() != 0 && sema_data_core_typed_member(module_name, member) -> return sema_data_core_check_typed(module_name, member, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if module_name == "core.encoding.csv" && member == "query" {
-        row :: sema_data_core_target_type(type_args, "core.encoding.csv.query", span, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        row :: sema_data_core_target_type(type_args, member, span, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         if args.len() != 2 {
             sema_data_arity_diagnostic("core.encoding.csv.query", 2, args.len(), span, &diagnostics)
             sema_data_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)

@@ -1,0 +1,394 @@
+// Assemble with JetRuntime/Source and the fixed-width OS leaves. Native exit
+// witness once E1/E2 land: stdout exactly "alloc tests: ok\n", status 0. A failed
+// witness exits 1 without requiring text, containers or any other runtime layer.
+// Tests are single-threaded on the attached main thread, so small blocks pass
+// through its cache; a test that inspects slab metadata first returns the
+// cache (alloc_cache_flush). Raw metadata inspection owns the entire heap here.
+fn alloc_test_require(ok: Bool) {
+    if ok {
+        return
+    }
+    #Unsafe("a failed allocator witness terminates this isolated test process") {
+        _ := os_syscall_i64(I64{231}, I64{1}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    loop {
+
+    }
+}
+
+fn alloc_test_payload(size: I64, align: I64) {
+    first :: jet_rt_alloc(size, align)
+    second :: jet_rt_alloc(size, align)
+    count :: if (size == I64{0}) -> I64{1} else -> size
+    alloc_test_require(first != I64{0} && second != I64{0} && first != second)
+    alloc_test_require((first.bit_and(wrapping(align - I64{1}))) == I64{0})
+    alloc_test_require((second.bit_and(wrapping(align - I64{1}))) == I64{0})
+    alloc_test_require(wrapping(first + count) <= second || wrapping(second + count) <= first)
+    #Unsafe("both allocations own count bytes; touching their endpoints must not alias each other or their metadata") {
+        os_store_u8(first, I64{17})
+        os_store_u8(wrapping(first + count - I64{1}), I64{29})
+        os_store_u8(second, I64{43})
+        os_store_u8(wrapping(second + count - I64{1}), I64{61})
+        alloc_test_require(os_load_u8(wrapping(first + count - I64{1})) == I64{29})
+        alloc_test_require(os_load_u8(wrapping(second + count - I64{1})) == I64{61})
+        if (count > I64{1}) {
+            alloc_test_require(os_load_u8(first) == I64{17})
+            alloc_test_require(os_load_u8(second) == I64{43})
+        }
+    }
+    jet_rt_free(second, size, align)
+    jet_rt_free(first, size, align)
+}
+
+fn alloc_test_boundaries(align: I64) {
+    slot := I64{32}
+    loop slot <= (I64{4096}) {
+        boundary :: wrapping(slot - alloc_header(align) - (if (align == I64{8}) -> I64{0} else -> wrapping(align - I64{1})))
+        if {
+            boundary > (I64{0}) -> {
+                alloc_test_require(alloc_class(boundary, align, ALLOC_CLASS_LIMIT) == slot)
+                alloc_test_require(alloc_class(wrapping(boundary + I64{1}), align, ALLOC_CLASS_LIMIT) == (if (slot == I64{4096}) -> I64{0} else -> wrapping(slot * I64{2})))
+                alloc_test_payload(wrapping(boundary - I64{1}), align)
+                alloc_test_payload(boundary, align)
+                alloc_test_payload(wrapping(boundary + I64{1}), align)
+            }
+            else -> alloc_test_payload(slot, align)
+        }
+        slot = wrapping(slot * I64{2})
+    }
+}
+
+fn alloc_test_reuse() {
+    first :: jet_rt_alloc(I64{8}, I64{8})
+    // The arena this frame's stack band selects; every allocation below
+    // comes from the same frame, so it uses the same arena.
+    arena := I64{0}
+    slab := I64{0}
+    #Unsafe("first's private header names its live slab, whose arena word is fixed") {
+        slab = os_load_i64(wrapping(first - I64{16}))
+        arena = os_load_i64(wrapping(slab + I64{40}))
+    }
+    jet_rt_free(first, I64{8}, I64{8})
+    // The cache is LIFO: the block just freed serves the next allocation.
+    second :: jet_rt_alloc(I64{8}, I64{8})
+    alloc_test_require(first == second)
+    jet_rt_free(second, I64{8}, I64{8})
+    alloc_cache_flush()
+    // The slab must serve every iteration: not merely an equal virtual
+    // address obtained by munmap/mmap. Its head/live/free words remain
+    // present and its live count returns to what it was. When this process
+    // holds no other block of the class (an isolated allocator unit), the
+    // slab is the class's retained empty slab and its list head.
+    head :: alloc_head(arena, I64{32})
+    resting := I64{0}
+    #Unsafe("the flushed cache left the slab linked; its live count and the class cell are stable while this thread is the heap's only user") {
+        resting = os_load_i64(wrapping(slab + I64{24}))
+        alloc_test_require(os_load_i64(head) != I64{0})
+        if (resting == I64{0}) {
+            alloc_test_require(os_load_i64(head) == slab && os_load_i64(wrapping(head + I64{64})) == slab)
+        }
+    }
+    iteration := I64{0}
+    loop iteration < (I64{1000}) {
+        pointer :: jet_rt_alloc(I64{8}, I64{8})
+        #Unsafe("pointer's private header identifies its still-live slab, which must be the same mapping") {
+            alloc_test_require(os_load_i64(wrapping(pointer - I64{16})) == slab)
+        }
+        jet_rt_free(pointer, I64{8}, I64{8})
+        alloc_cache_flush()
+        #Unsafe("no other thread touches the slab or its class list") {
+            alloc_test_require(os_load_i64(head) != I64{0})
+            alloc_test_require(os_load_i64(wrapping(slab + I64{24})) == resting)
+            if (resting == I64{0}) { alloc_test_require(os_load_i64(head) == slab) }
+        }
+        iteration = wrapping(iteration + I64{1})
+    }
+}
+
+// A freed large mapping of a cached class serves the next allocation of that
+// class: the same address, the class-rounded length, no munmap/mmap between.
+fn alloc_test_large_reuse() {
+    first :: jet_rt_alloc(I64{65537}, I64{8})
+    bytes := I64{0}
+    #Unsafe("first's private header holds its mapping base and length") {
+        bytes = os_load_i64(wrapping(first - I64{8}))
+    }
+    class :: alloc_large_class(bytes)
+    alloc_test_require(class >= I64{0} && wrapping(alloc_large_class_pages(class) * I64{4096}) == bytes)
+    alloc_test_require(alloc_large_class(wrapping(bytes + I64{4096})) == wrapping(class + I64{1}))
+    jet_rt_free(first, I64{65537}, I64{8})
+    second :: jet_rt_alloc(I64{65537}, I64{8})
+    alloc_test_require(second == first)
+    jet_rt_free(second, I64{65537}, I64{8})
+}
+
+fn alloc_test_full_slabs() {
+    // Class 4096 has 15 blocks/slab. The 16th block must come from a second
+    // mapping. Keep our pointer chain inside owned payloads, not a Jet list.
+    // Start from an empty cache: a refill takes blocks of one slab only, so
+    // the first fifteen allocations share the retained slab.
+    alloc_cache_flush()
+    chain := I64{0}
+    first_slab := I64{0}
+    arena := I64{0}
+    count := I64{0}
+    loop count < (I64{16}) {
+        pointer :: jet_rt_alloc(I64{2048}, I64{16})
+        #Unsafe("the test owns the full payload and can read its allocator header") {
+            slab :: os_load_i64(wrapping(pointer - I64{16}))
+            if (count == I64{0}) {
+                first_slab = slab
+                arena = os_load_i64(wrapping(slab + I64{40}))
+            }
+            if (count < I64{15}) { alloc_test_require(slab == first_slab) } else {
+                alloc_test_require(slab != first_slab)
+            }
+            alloc_test_require(os_load_i64(wrapping(slab + I64{40})) == arena)
+            os_store_i64(pointer, chain)
+        }
+        chain = pointer
+        count = wrapping(count + I64{1})
+    }
+    loop chain != (I64{0}) {
+        pointer :: chain
+        #Unsafe("the chain word remains readable until its payload is freed") {
+            chain = os_load_i64(pointer)
+        }
+        jet_rt_free(pointer, I64{2048}, I64{16})
+    }
+    alloc_cache_flush()
+    head :: alloc_head(arena, I64{4096})
+    #Unsafe("after all payloads are freed, exactly one empty slab is retained; any second empty slab was unlinked onto the free-slab stack") {
+        retained :: os_load_i64(wrapping(head + I64{64}))
+        alloc_test_require(retained != I64{0} && os_load_i64(head) == retained)
+        alloc_test_require(os_load_i64(retained) == I64{0})
+        alloc_test_require(os_load_i64(wrapping(retained + I64{8})) == I64{0})
+        alloc_test_require(os_load_i64(wrapping(retained + I64{24})) == I64{0})
+    }
+}
+
+// Ten slabs of class 4096 emptied at once: the class keeps at most
+// ALLOC_RETAINED_EMPTY_SLABS of them, the rest go on the free-slab stack
+// still mapped, and the next slab mapped for any class is the stack's top.
+fn alloc_test_slab_stack() {
+    alloc_cache_flush()
+    chain := I64{0}
+    count := I64{0}
+    loop count < (I64{150}) {
+        pointer :: jet_rt_alloc(I64{2048}, I64{16})
+        #Unsafe("the test owns the full payload and keeps its chain word there") {
+            os_store_i64(pointer, chain)
+        }
+        chain = pointer
+        count = wrapping(count + I64{1})
+    }
+    loop chain != (I64{0}) {
+        pointer :: chain
+        #Unsafe("the chain word remains readable until its payload is freed") {
+            chain = os_load_i64(pointer)
+        }
+        jet_rt_free(pointer, I64{2048}, I64{16})
+    }
+    alloc_cache_flush()
+    stacked := I64{0}
+    #Unsafe("this thread is the heap's only user; the stack word is read once and the stacked slab's link word stays mapped") {
+        stacked = os_load_i64(wrapping(alloc_root + I64{760}))
+        alloc_test_require(stacked != I64{0})
+        os_store_i64(wrapping(stacked + I64{8}), I64{1})
+    }
+    taken :: alloc_slab_map()
+    alloc_test_require(taken == stacked)
+    alloc_slab_retire(taken)
+    #Unsafe("the retired slab is the stack's top again; its pages were never unmapped") {
+        alloc_test_require(os_load_i64(wrapping(alloc_root + I64{760})) == stacked)
+        alloc_test_require(os_load_i64(wrapping(stacked + I64{8})) == I64{1})
+    }
+}
+
+fn alloc_test_nullable() {
+    alloc_test_require(alloc_try(I64{1}, I64{0}) == I64{0})
+    alloc_test_require(alloc_try(I64{1}, I64{3}) == I64{0})
+    alloc_test_require(alloc_try(I64{-1}, I64{8}) == I64{0})
+    // Valid Layout, but the allocator's mapping overhead cannot fit.
+    alloc_test_require(alloc_try(I64{9223372036854775807}, I64{1}) == I64{0})
+    // The actual kernel refuses an address-space-sized mapping.
+    alloc_test_require(alloc_map_try(I64{-1}) == I64{0})
+    small :: alloc_try(I64{8}, I64{8})
+    alloc_test_require(small != I64{0})
+    jet_rt_free(small, I64{8}, I64{8})
+    aligned :: alloc_try(I64{0}, I64{8192})
+    alloc_test_require(aligned != I64{0} && (aligned.bit_and(I64{8191})) == I64{0})
+    jet_rt_free(aligned, I64{0}, I64{8192})
+}
+
+// #5041 P2: every align >= 8 block (small, large, over-aligned) starts with
+// one owner in the count word 24 bytes before its payload; the block
+// protocol shares it, and byte blocks (align < 8) carry no count.
+fn alloc_test_count(size: I64) {
+    pointer :: jet_rt_alloc(size, I64{8})
+    #Unsafe("the test owns this fresh align-8 block and its count word") {
+        alloc_test_require(os_load_i64(wrapping(pointer - I64{24})) == I64{1})
+    }
+    alloc_test_require(jet_rt_block_unique(pointer))
+    jet_rt_block_retain(pointer)
+    alloc_test_require(!jet_rt_block_unique(pointer))
+    alloc_test_require(!jet_rt_block_release(pointer))
+    alloc_test_require(jet_rt_block_unique(pointer))
+    alloc_test_require(jet_rt_block_release(pointer))
+    jet_rt_free(pointer, size, I64{8})
+}
+
+fn alloc_test_counts() {
+    alloc_test_count(I64{8})
+    alloc_test_count(I64{24})
+    alloc_test_count(I64{4000})
+    alloc_test_count(I64{65537})
+    over :: jet_rt_alloc(I64{40}, I64{64})
+    alloc_test_require(jet_rt_block_unique(over) && over.bit_and(I64{63}) == I64{0})
+    jet_rt_free(over, I64{40}, I64{64})
+}
+
+// The thread cache: refills arrive 32 blocks at a time, a row holds at most
+// 64 blocks, a full row returns 32 of them before taking one more, every
+// cached block still counts as live in its slab, the witness nets the cached
+// blocks out, and a flush returns them all.
+fn alloc_test_cache() {
+    alloc_cache_flush()
+    baseline :: alloc_live_blocks(I64{64})
+    row :: alloc_cache_row(I64{64})
+    alloc_test_require(row != I64{0})
+    chain := I64{0}
+    count := I64{0}
+    loop count < (I64{100}) {
+        pointer :: jet_rt_alloc(I64{40}, I64{8})
+        #Unsafe("the test owns the payload and keeps its chain word there") {
+            os_store_i64(pointer, chain)
+        }
+        chain = pointer
+        count = wrapping(count + I64{1})
+    }
+    alloc_test_require(alloc_live_blocks(I64{64}) == wrapping(baseline + I64{100}))
+    // Four refills of 32 served the 100 allocations: 28 blocks stay cached.
+    expected := I64{0}
+    #Unsafe("row is this thread's own cache row") { expected = os_load_i64(wrapping(row + I64{8})) }
+    alloc_test_require(expected == I64{28})
+    loop chain != (I64{0}) {
+        pointer :: chain
+        #Unsafe("the chain word remains readable until its payload is freed") {
+            chain = os_load_i64(pointer)
+        }
+        jet_rt_free(pointer, I64{40}, I64{8})
+        if (expected >= I64{64}) { expected = wrapping(expected - I64{32}) }
+        expected = wrapping(expected + I64{1})
+        #Unsafe("row is this thread's own cache row") {
+            alloc_test_require(os_load_i64(wrapping(row + I64{8})) == expected)
+        }
+    }
+    alloc_test_require(expected == I64{64})
+    alloc_test_require(alloc_live_blocks(I64{64}) == baseline)
+    alloc_cache_flush()
+    #Unsafe("after the flush the row is empty") {
+        alloc_test_require(os_load_i64(row) == I64{0} && os_load_i64(wrapping(row + I64{8})) == I64{0})
+    }
+    alloc_test_require(alloc_live_blocks(I64{64}) == baseline)
+}
+
+// The cached block count of the class `width` row of this thread.
+fn alloc_test_row_count(width: I64) -> I64 {
+    row :: alloc_cache_row(width)
+    count := I64{0}
+    #Unsafe("row is this thread's own cache row") { count = os_load_i64(wrapping(row + I64{8})) }
+    count
+}
+
+// A block of jet_rt_alloc_8 is an align-8 payload with its count and block
+// header words, one block out of the class `width` row: the count that row
+// holds now.
+fn alloc_test_row_taken(width: I64, pointer: I64) -> I64 {
+    alloc_test_require(pointer != I64{0} && pointer.bit_and(I64{7}) == I64{0})
+    #Unsafe("the test owns this fresh align-8 block and its header words") {
+        alloc_test_require(os_load_i64(wrapping(pointer - I64{24})) == I64{1})
+        alloc_test_require(os_load_i64(wrapping(pointer - I64{8})) == wrapping(pointer - I64{24}))
+    }
+    alloc_test_require(jet_rt_block_unique(pointer))
+    alloc_test_row_count(width)
+}
+
+// The align-8 entries (jet_rt_alloc_8, jet_rt_free_8): each row's smallest
+// and largest size goes through its row's cache (an empty row's first
+// request refills it by the general entry, so the second takes one more
+// cached block and the frees put both back), a block of either kind of entry
+// may be freed by the other, and a size past the rows is a direct mapping.
+fn alloc_test_rows() {
+    alloc_cache_flush()
+    width := I64{32}
+    // Row `width` serves the sizes past the previous row's, row 32 from 0.
+    smallest := I64{0}
+    loop width <= (I64{4096}) {
+        largest :: wrapping(width - I64{24})
+        first :: jet_rt_alloc_8(smallest)
+        cached :: alloc_test_row_taken(width, first)
+        second :: jet_rt_alloc_8(largest)
+        alloc_test_require(alloc_test_row_taken(width, second) == wrapping(cached - I64{1}))
+        jet_rt_free_8(first, smallest)
+        jet_rt_free_8(second, largest)
+        alloc_test_require(alloc_test_row_count(width) == wrapping(cached + I64{1}))
+        // Either kind of entry frees the other's block.
+        general :: jet_rt_alloc(largest, I64{8})
+        alloc_test_require(alloc_test_row_taken(width, general) == cached)
+        jet_rt_free_8(general, largest)
+        entry :: jet_rt_alloc_8(smallest)
+        alloc_test_require(alloc_test_row_taken(width, entry) == cached)
+        jet_rt_free(entry, smallest, I64{8})
+        alloc_test_require(alloc_test_row_count(width) == wrapping(cached + I64{1}))
+        smallest = wrapping(largest + I64{1})
+        width = wrapping(width + width)
+    }
+    // Past the largest row: a direct mapping, no row block.
+    held :: alloc_test_row_count(I64{4096})
+    large :: jet_rt_alloc_8(I64{4073})
+    alloc_test_require(large != I64{0} && alloc_test_row_count(I64{4096}) == held)
+    jet_rt_free_8(large, I64{4073})
+    alloc_test_require(alloc_test_row_count(I64{4096}) == held)
+    // Null is a no-op, as for jet_rt_free.
+    jet_rt_free_8(I64{0}, I64{200})
+    alloc_cache_flush()
+}
+
+// Probes for AllocCacheWitness.c, the multi-thread cache witness.
+#Export(c) fn alloc_test_live_blocks(width: I64) -> I64 { alloc_live_blocks(width) }
+
+#Export(c) fn alloc_test_cache_flush() { alloc_cache_flush() }
+
+fn alloc_tests() {
+    jet_rt_alloc_init()
+    jet_rt_alloc_init()
+    alloc_test_require(alloc_layout_valid(I64{0}, I64{1}))
+    alloc_test_require(!alloc_layout_valid(I64{1}, I64{0}))
+    alloc_test_require(!alloc_layout_valid(I64{1}, I64{3}))
+    alloc_test_require(!alloc_layout_valid(I64{-1}, I64{8}))
+    alloc_test_require(!alloc_layout_valid(I64{9223372036854775807}, I64{8}))
+    // Null must remain a no-op even with an otherwise-invalid layout.
+    jet_rt_free(I64{0}, I64{-1}, I64{0})
+    alloc_test_nullable()
+    alloc_test_boundaries(I64{1})
+    alloc_test_boundaries(I64{8})
+    alloc_test_boundaries(I64{16})
+    alloc_test_boundaries(I64{64})
+    alloc_test_boundaries(I64{4096})
+    alloc_test_payload(I64{0}, I64{1})
+    alloc_test_payload(I64{0}, I64{8192})
+    alloc_test_payload(I64{1}, I64{8192})
+    alloc_test_payload(I64{65537}, I64{8192})
+    alloc_test_large_reuse()
+    alloc_test_reuse()
+    alloc_test_full_slabs()
+    alloc_test_slab_stack()
+    alloc_test_counts()
+    alloc_test_cache()
+    alloc_test_rows()
+    #Unsafe("the exact success line is two bounded stack words written to stdout") {
+        _ := os_write_word_i64(I64{1}, I64{7310503706572385377}, I64{8})
+        _ := os_write_word_i64(I64{1}, I64{750815947097601139}, I64{8})
+    }
+}

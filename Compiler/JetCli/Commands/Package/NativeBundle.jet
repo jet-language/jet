@@ -1,0 +1,39 @@
+// Real desktop provider: checked Jetpack transport followed by RootedStore
+// receipt publication. Dispatch still owns platform admission and output.
+use jet_pkg_model.[BundlePlan, pkg_bundle_materialize]
+use jet_foundation.[canonical_json_bytes]
+use core.files.path as bundle_paths
+
+struct JetCLINativeBundleHost {
+    receipt_root: String
+    compiler_version: String
+    terminal_identity: [U8]
+    secret_values: [String]
+    impl JetCLIBundleHost {
+        fn current_dir(&self) -[FS, Env]> bundle_paths.Path JetCLIBundleError! {
+            path :: cli_sys.current_dir() ?? return Err(jet_cli_bundle_error("could not read current directory: {err}"))
+            Ok(bundle_paths.of(path))
+        }
+        fn metadata_no_follow(&self, path: bundle_paths.Path) -[FS]> JetCLIBundleMetadata JetCLIBundleError! {
+            stat :: cli_files.stat(path.raw) ?? return Err(jet_cli_bundle_error("{err}"))
+            Ok(JetCLIBundleMetadata{symlink: stat.is_symlink, regular: stat.is_file})
+        }
+        fn read_bytes(&self, path: bundle_paths.Path) -[FS]> [U8] JetCLIBundleError! {
+            cli_files.read_bytes(path.raw) ?? return Err(jet_cli_bundle_error("{err}"))
+        }
+        fn materialize(&self, plan: &BundlePlan, output: bundle_paths.Path) -[FS, Env, Exec, Time]> JetCLIBundleMaterializedFacts JetCLIBundleError! {
+            facts :: pkg_bundle_materialize(plan, output.raw, self.compiler_version) ?? return Err(jet_cli_bundle_error(err.message()))
+            Ok(JetCLIBundleMaterializedFacts{sha256: facts.sha256, bytes: facts.bytes, materializer: facts.materializer, signing: facts.signing})
+        }
+        fn record(&self, request: JetCLIBundleStoreRequest) -[FS, Env]> String JetCLIBundleError! {
+            paths := [String]{}
+            loop path in request.input_paths -> &paths.push(path.raw)
+            claim :: jet_cli_receipt_claim(request.command, paths, request.args, self.terminal_identity) ?? return Err(jet_cli_bundle_error(err.message))
+            section :: jet_cli_receipt_section_new("package", "PackageBundleReceipt", canonical_json_bytes(request.receipt.to_json_tree())) ?? return Err(jet_cli_bundle_error(err.message))
+            receipt :: jet_cli_receipt_prepare(claim, 0, request.receipt.json().bytes(), [U8]{}, [JetCLIReceiptSection]{section}, [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, self.secret_values) ?? return Err(jet_cli_bundle_error(err.message))
+            published :: jet_cli_receipt_publish(self.receipt_root, receipt) ?? return Err(jet_cli_bundle_error(err.message))
+            if !published -> return Err(jet_cli_bundle_error("package inputs changed before receipt publication"))
+            Ok(receipt.digest)
+        }
+    }
+}

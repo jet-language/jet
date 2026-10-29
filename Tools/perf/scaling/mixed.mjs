@@ -4,7 +4,7 @@
 // lines per function and 53 bytes per line, structs, enums with payloads, a
 // trait called through trait values, generic functions, closures, value and
 // variant matches, maps, strings and interpolation, and about 4.7%
-// compile-time (`prep`) items. `fn run` prints one checksum line.
+// compile-time (`comptime`) items. `fn run` prints one checksum line.
 //
 // The package is one source file (main.jet) of numbered sections, like the
 // assembled compiler unit. Both compilers that must build it disagree on a
@@ -81,7 +81,7 @@ function unit(m, u, r, stats) {
   const constantValue = constantA * 7 + constantB;
   if (constant) {
     lines.push(`// Prepared once while building; folded into every use below.`);
-    lines.push(`${constant} :: prep { ${constantA} * 7 + ${constantB} }`, '');
+    lines.push(`${constant} :: comptime { ${constantA} * 7 + ${constantB} }`, '');
     stats.comptime_items += 1;
   }
   const scoreA = r.int(3, 19);

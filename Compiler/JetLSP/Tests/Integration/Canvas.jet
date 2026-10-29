@@ -1,7 +1,6 @@
 // -* source-backed graph, formatter round-trip and write transactions.
 use jet.Canvas.[graph_json_for_file, project_json_for_entry, query_json_for_file, apply_transaction_json, source_revision, source_control_json_for_file]
 use jet.[format_source]
-use jet_foundation.[read_machine_line, MachineRecord, PAYLOAD_FILE]
 use std.[fs, env, process]
 
 // Rust: tests/canvas.rs:11
@@ -65,31 +64,31 @@ fn variant_name(chunk: String) -> String? {
 }
 
 // Rust: tests/canvas.rs:88
-CANVAS_FIXTURE :: prep { String{"fn square(n: Int) -> Int {{\n    return n * n\n}}\n\nfn summarize(limit: Int) -> Int {{\n    total := square(limit)\n    if total > 10 {{ return total }} else {{ return total + 1 }}\n}}\n\nfn run() {{\n    print(summarize(4))\n}}\n"} }
+CANVAS_FIXTURE :: comptime { String{"fn square(n: Int) -> Int {{\n    return n * n\n}}\n\nfn summarize(limit: Int) -> Int {{\n    total := square(limit)\n    if total > 10 {{ return total }} else {{ return total + 1 }}\n}}\n\nfn run() {{\n    print(summarize(4))\n}}\n"} }
 // Rust: tests/canvas.rs:102
-CANVAS_COVERAGE_FIXTURE :: prep { String{"fn coverage(limit: Int) -> Int {{\n    total := 0\n    loop i in 0..<limit {{\n        if i == 2 {{\n            next\n        }}\n        total += i\n    }}\n    if total == {{\n        0 -> {{ return 1 }}\n        else -> {{ return total }}\n    }}\n}}\n\nfn run() {{\n    print(coverage(4))\n}}\n"} }
+CANVAS_COVERAGE_FIXTURE :: comptime { String{"fn coverage(limit: Int) -> Int {{\n    total := 0\n    loop i in 0..<limit {{\n        if i == 2 {{\n            next\n        }}\n        total += i\n    }}\n    if total == {{\n        0 -> {{ return 1 }}\n        else -> {{ return total }}\n    }}\n}}\n\nfn run() {{\n    print(coverage(4))\n}}\n"} }
 // Rust: tests/canvas.rs:121
-CANVAS_DATA_FIXTURE :: prep { String{"struct Point {{\n    x: Int\n    y: Int\n}}\n\nenum Choice {{\n    Pick(Int)\n    Skip\n}}\n\nfn make(n: Int) -> Int {{\n    p :: Point{{x: n, y: n + 1}}\n    c :: Choice.Pick(p.x)\n    return p.y\n}}\n\nfn run() {{\n    print(make(3))\n}}\n"} }
+CANVAS_DATA_FIXTURE :: comptime { String{"struct Point {{\n    x: Int\n    y: Int\n}}\n\nenum Choice {{\n    Pick(Int)\n    Skip\n}}\n\nfn make(n: Int) -> Int {{\n    p :: Point{{x: n, y: n + 1}}\n    c :: Choice.Pick(p.x)\n    return p.y\n}}\n\nfn run() {{\n    print(make(3))\n}}\n"} }
 // Rust: tests/canvas.rs:142
-CANVAS_PIN_AUTHORING_FIXTURE :: prep { String{"fn to_int(n: Int) -> Int {{\n    return n\n}}\n\nfn choose(limit: Int) -> Int {{\n    if limit > 1 {{\n        return limit\n    }} else {{\n        return 0\n    }}\n}}\n\nfn run() {{\n    print(choose(3))\n}}\n"} }
+CANVAS_PIN_AUTHORING_FIXTURE :: comptime { String{"fn to_int(n: Int) -> Int {{\n    return n\n}}\n\nfn choose(limit: Int) -> Int {{\n    if limit > 1 {{\n        return limit\n    }} else {{\n        return 0\n    }}\n}}\n\nfn run() {{\n    print(choose(3))\n}}\n"} }
 // Rust: tests/canvas.rs:159
-CANVAS_WIRE_FIXTURE :: prep { String{"fn pick(a: Int, b: Int) -> Int {{\n    return a\n}}\n\nfn run() {{\n    print(pick(1, 2))\n}}\n"} }
+CANVAS_WIRE_FIXTURE :: comptime { String{"fn pick(a: Int, b: Int) -> Int {{\n    return a\n}}\n\nfn run() {{\n    print(pick(1, 2))\n}}\n"} }
 // Rust: tests/canvas.rs:168
-CANVAS_REORDER_FIXTURE :: prep { String{"fn order() {{\n    a :: 1\n    b :: 2\n    c :: 3\n    print(a + b + c)\n}}\n\nfn run() {{\n    order()\n}}\n"} }
+CANVAS_REORDER_FIXTURE :: comptime { String{"fn order() {{\n    a :: 1\n    b :: 2\n    c :: 3\n    print(a + b + c)\n}}\n\nfn run() {{\n    order()\n}}\n"} }
 // Rust: tests/canvas.rs:180
-CANVAS_REORDER_BINDING_FIXTURE :: prep { String{"fn order() {{\n    a :: 1\n    b :: 2\n    c :: a + b\n    print(c)\n}}\n\nfn run() {{\n    order()\n}}\n"} }
+CANVAS_REORDER_BINDING_FIXTURE :: comptime { String{"fn order() {{\n    a :: 1\n    b :: 2\n    c :: a + b\n    print(c)\n}}\n\nfn run() {{\n    order()\n}}\n"} }
 // Rust: tests/canvas.rs:192
-CANVAS_REORDER_CROSS_BLOCK_FIXTURE :: prep { String{"fn order() {{\n    a :: 1\n    if true {{\n        c :: 3\n    }} else {{\n        print(a)\n    }}\n    b :: 2\n    print(a + b)\n}}\n\nfn run() {{\n    order()\n}}\n"} }
+CANVAS_REORDER_CROSS_BLOCK_FIXTURE :: comptime { String{"fn order() {{\n    a :: 1\n    if true {{\n        c :: 3\n    }} else {{\n        print(a)\n    }}\n    b :: 2\n    print(a + b)\n}}\n\nfn run() {{\n    order()\n}}\n"} }
 // Rust: tests/canvas.rs:208
-CANVAS_PATTERN_MULTI_FIXTURE :: prep { String{"fn first_or_zero(x: Int?) -> Int {{\n    if x == Val(n) {{\n        return n\n    }} else {{\n        return 0\n    }}\n}}\n\nfn list_total() -> Int {{\n    xs :: [1, 2, 3]\n    ys :: [to_int(1), to_int(2)]\n    return xs[0] + ys[0]\n}}\n\nfn to_int(n: Int) -> Int {{\n    return n\n}}\n\nfn run() {{\n    print(first_or_zero(Val(4)))\n    print(list_total())\n}}\n"} }
+CANVAS_PATTERN_MULTI_FIXTURE :: comptime { String{"fn first_or_zero(x: Int?) -> Int {{\n    if x == Val(n) {{\n        return n\n    }} else {{\n        return 0\n    }}\n}}\n\nfn list_total() -> Int {{\n    xs :: [1, 2, 3]\n    ys :: [to_int(1), to_int(2)]\n    return xs[0] + ys[0]\n}}\n\nfn to_int(n: Int) -> Int {{\n    return n\n}}\n\nfn run() {{\n    print(first_or_zero(Val(4)))\n    print(list_total())\n}}\n"} }
 // Rust: tests/canvas.rs:232
-CANVAS_FUNCTION_EVENT_FIXTURE :: prep { String{"/// Starts the scene.\npub fn on_start(limit: Int{{1}}) -> Int {{\n    total := limit + 1\n    return total\n}}\n\nfn run() {{\n    print(on_start())\n}}\n"} }
+CANVAS_FUNCTION_EVENT_FIXTURE :: comptime { String{"/// Starts the scene.\npub fn on_start(limit: Int{{1}}) -> Int {{\n    total := limit + 1\n    return total\n}}\n\nfn run() {{\n    print(on_start())\n}}\n"} }
 // Rust: tests/canvas.rs:243
-CANVAS_COMMENT_FIXTURE :: prep { String{"fn run() {{\n    print(\"damage\")\n}}\n"} }
+CANVAS_COMMENT_FIXTURE :: comptime { String{"fn run() {{\n    print(\"damage\")\n}}\n"} }
 // Rust: tests/canvas.rs:249
 #Test("canvas_parity_matrix_tracks_ast_language_forms") {
     matrix :: fs.read_to_string(OSPath("Docs/spec/reference/canvas-parity.md")).expect("Canvas parity matrix must exist")
-    loop (enum_name, path) in [(_0: "Item", _1: "crates/jet-foundation/src/AST/items.rs"), (_0: "Stmt", _1: "crates/jet-foundation/src/AST/statements.rs"), (_0: "Expr", _1: "crates/jet-foundation/src/AST/expressions.rs"), (_0: "Type", _1: "crates/jet-foundation/src/AST/types.rs"), (_0: "Pattern", _1: "crates/jet-foundation/src/AST/patterns.rs"), (_0: "BindPattern", _1: "crates/jet-foundation/src/AST/patterns.rs"), (_0: "LValue", _1: "crates/jet-foundation/src/AST/lvalues.rs")] {
+    loop (enum_name, path) in [(_0: "Item", _1: "Compiler/JetFoundation/Source/AST/Items.jet"), (_0: "Stmt", _1: "Compiler/JetFoundation/Source/AST/Statements.jet"), (_0: "Expr", _1: "Compiler/JetFoundation/Source/AST/Expressions.jet"), (_0: "Type", _1: "Compiler/JetFoundation/Source/Types/Types.jet"), (_0: "Pattern", _1: "Compiler/JetFoundation/Source/AST/Patterns.jet"), (_0: "BindPattern", _1: "Compiler/JetFoundation/Source/AST/Patterns.jet"), (_0: "LValue", _1: "Compiler/JetFoundation/Source/AST/Statements.jet")] {
         loop variant in ast_enum_variants(path, enum_name) {
             token :: "[{enum_name}::{variant}]"
             assert(matrix.contains(token), "Canvas parity matrix missing {token} from {path}")
@@ -97,29 +96,29 @@ CANVAS_COMMENT_FIXTURE :: prep { String{"fn run() {{\n    print(\"damage\")\n}}\
     }
 }
 // Rust: tests/canvas.rs:271
-CANVAS_COLLAPSE_FIXTURE :: prep { String{"fn compute(limit: Int) -> Int {{\n    return limit + 1\n}}\n\nfn run() {{\n    print(compute(4))\n}}\n"} }
+CANVAS_COLLAPSE_FIXTURE :: comptime { String{"fn compute(limit: Int) -> Int {{\n    return limit + 1\n}}\n\nfn run() {{\n    print(compute(4))\n}}\n"} }
 // Rust: tests/canvas.rs:280
-CANVAS_STRUCTURAL_WRITE_FIXTURE :: prep { String{"fn run() {{\n    print(\"start\")\n}}\n"} }
+CANVAS_STRUCTURAL_WRITE_FIXTURE :: comptime { String{"fn run() {{\n    print(\"start\")\n}}\n"} }
 // Rust: tests/canvas.rs:285
-CANVAS_RAILS_FIXTURE :: prep { String{"use core.mem as mem\n\nfn maybe() -> Int String! {{\n    return Ok(1)\n}}\n\nfn checked() -> Int String! {{\n    n :: maybe()\n    return Ok(n)\n}}\n\nfn run() {{\n    #Unsafe(\"Canvas proof rail fixture\") {{\n        marker := 1\n    }}\n    print(checked())\n}}\n"} }
+CANVAS_RAILS_FIXTURE :: comptime { String{"use core.mem as mem\n\nfn maybe() -> Int String! {{\n    return Ok(1)\n}}\n\nfn checked() -> Int String! {{\n    n :: maybe()\n    return Ok(n)\n}}\n\nfn run() {{\n    #Unsafe(\"Canvas proof rail fixture\") {{\n        marker := 1\n    }}\n    print(checked())\n}}\n"} }
 // Rust: tests/canvas.rs:304
-CANVAS_SHIELD_FIXTURE :: prep { String{"fn run() {{\n    #Shield {{\n        print(\"before\")\n    }}\n}}\n"} }
+CANVAS_SHIELD_FIXTURE :: comptime { String{"fn run() {{\n    #Shield {{\n        print(\"before\")\n    }}\n}}\n"} }
 // Rust: tests/canvas.rs:311
-CANVAS_POLICY_FIXTURE :: prep { String{"fn run() {{\n    #Policy(copies: .Explicit) {{\n        print(\"bounded\")\n    }}\n}}\n"} }
+CANVAS_POLICY_FIXTURE :: comptime { String{"fn run() {{\n    #Policy(copies: .Explicit) {{\n        print(\"bounded\")\n    }}\n}}\n"} }
 // Rust: tests/canvas.rs:318
-CANVAS_TASK_RAIL_FIXTURE :: prep { String{"fn worker() -> Int {{\n    return 1\n}}\n\nfn run() {{\n    task.group g {{\n        t :: task {{\n            worker()\n        }}\n        result :: (task.all {{ worker() }}) ?? panic(\"task.all failed\")\n        print(result[0])\n    }}\n}}\n"} }
+CANVAS_TASK_RAIL_FIXTURE :: comptime { String{"fn worker() -> Int {{\n    return 1\n}}\n\nfn run() {{\n    task.group g {{\n        t :: task {{\n            worker()\n        }}\n        result :: (task.all {{ worker() }}) ?? panic(\"task.all failed\")\n        print(result[0])\n    }}\n}}\n"} }
 // Rust: tests/canvas.rs:333
-CANVAS_EVENT_DISPATCHER_FIXTURE :: prep { String{"use core.event as event\n\nstruct Resource {{\n    id: Int\n\n    fn on(&self) {{}}\n    fn close(&self) {{}}\n    fn cancel(&self) {{}}\n}}\n\nfn run() {{\n    resource := Resource{{ id: 1 }}\n    resource.on()\n    resource.close()\n    resource.cancel()\n    scope :: event.scope()\n    clicked :: event.new<Int>()\n    clicked.on(scope, (n) -> {{ print(\"clicked {{n}}\") }})\n    clicked.once(scope, (n) -> {{ print(\"once {{n}}\") }})\n    clicked.on_priority(scope, 10, (n) -> {{ print(\"priority {{n}}\") }})\n    print(&clicked.emit(1).summary())\n    before_save :: event.hook<Int, String>(\"allow\")\n    before_save.on(scope, n -> \"seen {{n}}\")\n    print(before_save.run(5, \"fallback\"))\n    before_publish :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)\n    before_publish.on(scope, n -> HookDecision.Continue)\n    show_publish(before_publish.run(7))\n    jobs :: event.async_result<Int, String>(AsyncPolicy{{ capacity: 2, overflow: .Block }}, .Collect) ?? panic(\"policy\")\n    jobs.on(scope, (n) -> {{ print(\"job {{n}}\") }})\n    report :: jobs.emit_async(2).join() ?? panic(\"report\")\n    print(jobs.queued_count())\n    jobs.close()\n    scope.cancel()\n}}\n\nfn show_publish(outcome: HookOutcome<Int, String>) {{\n    if outcome == {{\n        .Continue(value) -> print(\"continue {{value}}\")\n        .Cancel -> print(\"cancel\")\n        .Fail(error) -> print(\"fail {{error}}\")\n    }}\n}}\n"} }
+CANVAS_EVENT_DISPATCHER_FIXTURE :: comptime { String{"use core.event as event\n\nstruct Resource {{\n    id: Int\n\n    fn on(&self) {{}}\n    fn close(&self) {{}}\n    fn cancel(&self) {{}}\n}}\n\nfn run() {{\n    resource := Resource{{ id: 1 }}\n    resource.on()\n    resource.close()\n    resource.cancel()\n    scope :: event.scope()\n    clicked :: event.new<Int>()\n    clicked.on(scope, (n) -> {{ print(\"clicked {{n}}\") }})\n    clicked.once(scope, (n) -> {{ print(\"once {{n}}\") }})\n    clicked.on_priority(scope, 10, (n) -> {{ print(\"priority {{n}}\") }})\n    print(&clicked.emit(1).summary())\n    before_save :: event.hook<Int, String>(\"allow\")\n    before_save.on(scope, n -> \"seen {{n}}\")\n    print(before_save.run(5, \"fallback\"))\n    before_publish :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)\n    before_publish.on(scope, n -> HookDecision.Continue)\n    show_publish(before_publish.run(7))\n    jobs :: event.async_result<Int, String>(AsyncPolicy{{ capacity: 2, overflow: .Block }}, .Collect) ?? panic(\"policy\")\n    jobs.on(scope, (n) -> {{ print(\"job {{n}}\") }})\n    report :: jobs.emit_async(2).join() ?? panic(\"report\")\n    print(jobs.queued_count())\n    jobs.close()\n    scope.cancel()\n}}\n\nfn show_publish(outcome: HookOutcome<Int, String>) {{\n    if outcome == {{\n        .Continue(value) -> print(\"continue {{value}}\")\n        .Cancel -> print(\"cancel\")\n        .Fail(error) -> print(\"fail {{error}}\")\n    }}\n}}\n"} }
 // Rust: tests/canvas.rs:377
-CANVAS_TRAIT_INTERFACE_FIXTURE :: prep { String{"trait Drawable {{\n    fn render(self) -[IO]> String\n    fn label(self) -> String {{\n        return \"drawable\"\n    }}\n}}\n\nstruct Badge {{\n    text: String\n}}\n\nfn run() {{\n    print(\"ready\")\n}}\n"} }
+CANVAS_TRAIT_INTERFACE_FIXTURE :: comptime { String{"trait Drawable {{\n    fn render(self) -[IO]> String\n    fn label(self) -> String {{\n        return \"drawable\"\n    }}\n}}\n\nstruct Badge {{\n    text: String\n}}\n\nfn run() {{\n    print(\"ready\")\n}}\n"} }
 // Rust: tests/canvas.rs:393
-CANVAS_NESTED_TRAIT_INTERFACE_FIXTURE :: prep { String{"module ui {{\n    trait Drawable {{\n        fn render(self) -[IO]> String\n        fn label(self) -> String {{\n            return \"drawable\"\n        }}\n    }}\n\n    struct Badge {{\n        text: String\n    }}\n}}\n\nfn run() {{\n    print(\"ready\")\n}}\n"} }
+CANVAS_NESTED_TRAIT_INTERFACE_FIXTURE :: comptime { String{"module ui {{\n    trait Drawable {{\n        fn render(self) -[IO]> String\n        fn label(self) -> String {{\n            return \"drawable\"\n        }}\n    }}\n\n    struct Badge {{\n        text: String\n    }}\n}}\n\nfn run() {{\n    print(\"ready\")\n}}\n"} }
 // Rust: tests/canvas.rs:411
-CANVAS_TRAIT_ASSOC_TYPE_FIXTURE :: prep { String{"trait Indexed {{\n    type Elem\n    fn at(self, i: Int) -> Elem\n}}\n\nstruct Nums {{\n    values: [Int]\n}}\n\nfn run() {{\n    print(\"ready\")\n}}\n"} }
+CANVAS_TRAIT_ASSOC_TYPE_FIXTURE :: comptime { String{"trait Indexed {{\n    type Elem\n    fn at(self, i: Int) -> Elem\n}}\n\nstruct Nums {{\n    values: [Int]\n}}\n\nfn run() {{\n    print(\"ready\")\n}}\n"} }
 // Rust: tests/canvas.rs:425
-CANVAS_TASK_FLOW_FIXTURE :: prep { String{"use core.tasks as tasks\n\nfn work() -> Int {{\n    return 1\n}}\n\nfn run() {{\n    (sender, ch) :: channel<Int>()\n    task.group g {{\n        t :: task {{\n            sender.send(work())\n        }}\n        print(ch.receive() ?? panic(\"channel closed\"))\n    }}\n}}\n"} }
+CANVAS_TASK_FLOW_FIXTURE :: comptime { String{"use core.tasks as tasks\n\nfn work() -> Int {{\n    return 1\n}}\n\nfn run() {{\n    (sender, ch) :: channel<Int>()\n    task.group g {{\n        t :: task {{\n            sender.send(work())\n        }}\n        print(ch.receive() ?? panic(\"channel closed\"))\n    }}\n}}\n"} }
 // Rust: tests/canvas.rs:442
-CANVAS_DEBUG_FIXTURE :: prep { String{"fn run() {{\n    total := 1\n    print(total)\n    print(\"program finished\")\n}}\n"} }
+CANVAS_DEBUG_FIXTURE :: comptime { String{"fn run() {{\n    total := 1\n    print(total)\n    print(\"program finished\")\n}}\n"} }
 
 // Rust: tests/canvas.rs:449
 fn field_before(haystack: String, marker: String, field: String) -> String {

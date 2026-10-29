@@ -1,0 +1,47 @@
+// D-ROUTE1=A: HTTP router — typed path inputs, 404/405.
+// Tags sit on the handlers; mount adds this struct's routes in method order.
+// serve_once_listener drives one connection at a time so golden output order
+// stays fixed.
+package {
+    name: "http_routes"
+    authority: { allow: [FS.Read, IO, Mem.Alloc, Net, Time, Time.Wait] }
+}
+
+use core.http.client as http
+use core.http.server as server
+use core.net as net
+
+struct Routes {
+    #server.Get("/")
+    fn root(self) -> HTTPResponse HTTPError! { Ok(server.response(200, "welcome")) }
+
+    #server.Get("/users/:id")
+    fn user(self, id: Int) -> HTTPResponse HTTPError! {
+        Ok(server.response(200, "user={id}"))
+    }
+
+    #server.Post("/users")
+    fn create(self) -> HTTPResponse HTTPError! { Ok(server.response(201, "created")) }
+}
+
+fn run() (HTTPError | NetError | TaskFailure)! {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind failed")
+    addr :: listener.local_addr() ?? panic("address failed")
+    mux :: server.mux()
+    mux.mount(Routes{})
+    t :: task {
+        server.serve_once_listener(listener, mux) ?? panic("serve failed")
+        server.serve_once_listener(listener, mux) ?? panic("serve failed")
+        server.serve_once_listener(listener, mux) ?? panic("serve failed")
+        server.serve_once_listener(listener, mux) ?? panic("serve failed")
+    }
+    r1 :: http.get("http://{addr}/") ?? panic("GET / failed")
+    print(r1.body().text(8388608) ?? panic("body failed"))
+    r2 :: http.get("http://{addr}/users/42") ?? panic("GET /users/42 failed")
+    print(r2.body().text(8388608) ?? panic("body failed"))
+    r3 :: http.post("http://{addr}/users", "") ?? panic("POST /users failed")
+    print(r3.body().text(8388608) ?? panic("body failed"))
+    r4 :: http.get("http://{addr}/missing") ?? panic("GET /missing failed")
+    print(r4.status())
+    ^t.join() ?? panic("server failed")
+}

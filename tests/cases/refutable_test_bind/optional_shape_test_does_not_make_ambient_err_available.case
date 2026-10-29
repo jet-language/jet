@@ -1,0 +1,8 @@
+# tests/refutable_test_bind.rs::optional_shape_test_does_not_make_ambient_err_available at tests/refutable_test_bind.rs:85; hand-port
+fixture: optional_shape_test_does_not_make_ambient_err_available.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check refutable_test_bind_optional.jet --json
+exit: 1 # tests/refutable_test_bind.rs:93 is rejected
+json: stdout doc $.reports[?code="E0408"] #>= 1 # tests/refutable_test_bind.rs:93 reports E0408

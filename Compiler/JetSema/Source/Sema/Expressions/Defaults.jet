@@ -1,0 +1,92 @@
+// Declared defaults used from another module. A struct field default or a
+// callable parameter default is written in its declaring module, and its names
+// resolve there: the declaration's own check reports a problem in it once, at
+// the declaration. A literal or call that takes the default in another module
+// checks the same expression in the declaring module's names to produce the
+// value it lowers.
+use jet_foundation.[
+    DiagnosticLabel,
+    Diagnostic,
+    Expr,
+    Span,
+    StrPart,
+]
+
+// The declaring module's scope for one default: its environment facts and a
+// scope table holding its declarations, imports and package names
+// (sema_registration_apply_graph_module), with one frame above them owned by
+// the calling function so a binder slot the default declares keys under the
+// call. `state` is the default's own ownership state: the default is a fresh
+// value, so nothing it records concerns the caller's bindings.
+struct SemaDefaultOwnerScope {
+    environment: SemaScopeEnvironment
+    scopes: SemaScopeTable
+    state: SemaOwnershipState
+}
+
+// None when the default is written in the module being checked, or when it is
+// a literal that names nothing, so the caller's scope checks it unchanged.
+fn sema_default_owner_scope(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, owner_module: String, default_value: Expr) -> SemaDefaultOwnerScope? {
+    if owner_module == "" || owner_module == environment.module_identity -> return None
+    if sema_default_names_nothing(default_value) -> return None
+    if program.registration_graph == .Val(graph) {
+        module_index :: sema_registration_module_index(graph, owner_module) ?? return None
+        owner_environment := sema_scope_environment_init(
+            graph.modules[module_index].module_identity,
+            graph.modules[module_index].package_identity,
+            graph.modules[module_index].module_name,
+            graph.modules[module_index].source_file,
+            graph.modules[module_index].source_origin,
+            graph.modules[module_index].source_segments,
+            [SemaScopeDeclaration]{},
+        )
+        // copy: handle copies of the shared comptime publication the caller reads.
+        owner_environment.comptime_body_publication = environment.comptime_body_publication.copy()
+        owner_environment.comptime_body_values = environment.comptime_body_values.copy()
+        owner_environment.function_name = environment.function_name
+        table := sema_scope_init(owner_module)
+        registration_diagnostics := [Diagnostic]{}
+        if !sema_registration_apply_graph_module(graph, owner_module, &table, &registration_diagnostics) -> return None
+        state := sema_ownership_state_init()
+        _ := sema_scope_enter(&table, &state, sema_scope_function_owner_key(scopes))
+        return Val(SemaDefaultOwnerScope{environment: ^owner_environment, scopes: ^table, state: ^state})
+    }
+    None
+}
+
+// A literal default (`0`, `""`, `false`, `[]`, `None`, `.Variant`) resolves no
+// name, so it checks the same in any module.
+fn sema_default_names_nothing(value: Expr) -> Bool Never! {
+    if value == {
+        .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Absent(_, _) -> true
+        .Str(parts, _, _) -> {
+            loop part in parts {
+                if part == .Interp(_, _) -> return false
+            }
+            true
+        }
+        .ListLit(elements, _, _) -> elements.len() == 0
+        .MapLit(entries, _, _) -> entries.len() == 0
+        .Ident(name, _, _) -> name == "None"
+        .EnumLit(type_name, _, _, args, _, _, _) -> type_name == "" && args.len() == 0
+        .Unary(_, operand, _, _) -> sema_default_names_nothing(operand)
+        .Paren(inner, _, _) -> sema_default_names_nothing(inner)
+        else -> false
+    }
+}
+
+// A problem the default reports in its declaring module, anchored at the use
+// that takes the default: its declaration-site edit and labels belong to the
+// other module's text.
+fn sema_default_use_site_diagnostic(diagnostic: ^Diagnostic, use_span: Span) -> Diagnostic Never! {
+    updated := diagnostic
+    updated.span = Val(use_span)
+    updated.source_path = None
+    updated.source_offset = None
+    updated.source_start = None
+    updated.labels = [DiagnosticLabel]{}
+    updated.edit = None
+    updated.applicability = None
+    updated.safety = None
+    updated
+}

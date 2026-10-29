@@ -1,5 +1,5 @@
 
-fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+fn build(b: Build) -[Exec, FS]> {
     #Impure("exercise hostile output path") {
     action :: b.action(
         "escape",
@@ -9,8 +9,7 @@ fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
         ["Exec", "FS"]
     )
     app :: b.add_executable("app", ["main.jet"], [action])
-    return b.plan(app)
+    b.default(app)
     }
-    return b.plan()
 }
 fn run() {}

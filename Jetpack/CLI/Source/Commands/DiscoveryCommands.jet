@@ -6,7 +6,7 @@
 // Rust `empty_dash`.
 fn cli_empty_dash(value: String) -> String Never! {
     if value == "" -> return "-"
-    value
+    value.copy()
 }
 
 // `jet search <query>`: local/offline package discovery (U26).
@@ -71,11 +71,14 @@ fn cli_cmd_info(verification: &StoreVerification, theme: Theme, parsed: CLIParse
 // project's declared refs; written back when the project has an env file.
 fn cli_discovery_index(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> PackageIndex CLIError! {
     project_dir :: cli_current_dir()
-    loaded :: env_discovery_load(project_dir) ?? {
-        theme.error("local discovery index is malformed", err.message, "delete `.jet/discovery/index.jsonl` and rerun `jet search` from a project with env metadata.")
-        return Err(CLIError.Reported(EXIT_USAGE))
+    index := if env_discovery_load(project_dir) == {
+        .Val(found) -> found
+        .None -> PackageIndex.empty()
+        .Err(error) -> {
+            theme.error("local discovery index is malformed", error.message, "delete `.jet/discovery/index.jsonl` and rerun `jet search` from a project with env metadata.")
+            return Err(CLIError.Reported(EXIT_USAGE))
+        }
     }
-    index := loaded ?? PackageIndex.empty()
     roots :: pkg_resolve_roots()
     store_entries :: store_list(&verification, roots)
     env_discovery_merge_store_entries(&index, store_entries)
@@ -84,8 +87,8 @@ fn cli_discovery_index(verification: &StoreVerification, cache: &WorkspaceDeclar
         plan :: cli_load_project_plan(&cache, theme)
         env_discovery_merge_refs(&index, plan.refs, cli_fixtures_for(parsed.flags), store_entries)
         env_discovery_merge_adapters(&index, plan.adapters)
-        if env_discovery_write(project_dir, index) == .Err(error) {
-            theme.error("couldn't write local discovery index", error.message, "check permissions on `.jet/discovery/`.")
+        env_discovery_write(project_dir, index) ?? {
+            theme.error("couldn't write local discovery index", err.message, "check permissions on `.jet/discovery/`.")
             return Err(CLIError.Reported(EXIT_USAGE))
         }
     }
@@ -222,8 +225,8 @@ fn cli_read_logs_error(theme: Theme, reason: String) -[IO, Time.Wait]> Int Never
 // U27: after a failed build, open an interactive shell in the preserved,
 // verified build scratch.
 fn cli_shell_on_failed_build(theme: Theme, roots: HangarRoots, package: String) Never! -[IO, FS, Env, Exec, Time.Wait]> {
-    found :: recipe_debug_latest(roots.hangar_dir(), package) ?? return
-    attempt :: found ?? return
+    // A missing or unreadable attempt record means there is no shell to open.
+    attempt :: recipe_debug_latest(roots.hangar_dir(), package) ?? return
     if attempt.status != "failed" || attempt.scratch_dir == "" -> return
     scratch :: cli_verified_failed_scratch(roots, attempt, package) ?? {
         theme.detail("failed-build shell skipped: preserved scratch is not a real Hangar directory")

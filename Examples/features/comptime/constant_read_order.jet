@@ -1,0 +1,44 @@
+// A compile-time constant may call a function that reads another
+// compile-time constant declared later in the file. The compiler computes
+// ROWS first, then checks `total` and `first_name` against its value; the
+// order the constants are written in does not matter.
+struct Row {
+    name: String
+    size: Int
+}
+
+fn small(n: Int) -> Bool {
+    n < 10
+}
+
+fn total() -> Int Never! {
+    sum := 0
+    loop row in ROWS {
+        if row.size > 0 && small(row.size) -> sum += row.size
+    }
+    sum
+}
+
+fn first_name() -> String Never! {
+    picked :: ROWS.get(0)
+    if picked == .Val(row) -> return row.name
+    ""
+}
+
+TOTAL :: comptime { total() }
+FIRST :: comptime { first_name() }
+
+fn build_rows() -> [Row] Never! {
+    rows := [Row]{}
+    loop index in 0..<4 {
+        if small(index) -> &rows.push(Row{name: "r{index}", size: index + 1})
+    }
+    rows
+}
+
+ROWS :: comptime { build_rows() }
+
+fn run() {
+    print("total at build {TOTAL}, at run {total()}")
+    print("first at build {FIRST}, rows {ROWS.len()}")
+}

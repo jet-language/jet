@@ -13,10 +13,7 @@ use jet_foundation.[
     FunctionDefaultRef,
     ParamZone,
     Span,
-    TExpr,
-    TExprKind,
     TFailureCarrier,
-    THostCall,
     Type,
 ]
 
@@ -99,10 +96,12 @@ fn sema_compiler_services_check_untyped(args: [CallArg], environment: SemaScopeE
         _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
 }
-fn sema_compiler_services_arity_diagnostic(member: String, expected: Int, actual: Int, span: Span) -> Diagnostic {
+fn sema_compiler_services_arity_diagnostic(module_name: String, member: String, expected: Int, actual: Int, span: Span) -> Diagnostic {
+    // The reference checks a compiler query as a function of the imported
+    // Core source module.
+    if module_name == "core.compiler" -> return sema_error("E0104", span, "`{member}` expects {expected} argument{if expected == 1 -> "" else -> "s"}, got {actual}", "every argument must match a parameter", "check the definition of `{member}` in the imported file")
     sema_error("E0104", span, "`{member}` expects {expected} argument{if expected == 1 -> "" else -> "s"}, got {actual}", "every argument must match a standard library function parameter", "check the call to `{member}`")
 }
-
 
 fn sema_compiler_services_compile_time_gate(module_name: String, member: String, span: Span, compiler_api_allowed: Bool, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
     if scopes.comptime_execution_depth > 0 || compiler_api_allowed -> return
@@ -128,7 +127,7 @@ fn sema_compiler_services_check_call(module_name: String, member: String, args: 
     selected :: contract ?? return SemaCompilerServicesCallCheck{recognized: false, arguments_complete: false, module_name: module_name, member: member, arguments: [TExpr]{}, result_type: sema_compiler_services_result("CompilerError", "CompilerError"), failure_carrier: TFailureCarrier.Result{success: Type.Named{name: "CompilerError"}, error: Type.Named{name: "CompilerError"}}}
     sema_compiler_services_compile_time_gate(module_name, member, span, compiler_api_allowed, scopes, &diagnostics)
     if args.len() != selected.parameters.len() {
-        &diagnostics.push(sema_compiler_services_arity_diagnostic(member, selected.parameters.len(), args.len(), span))
+        &diagnostics.push(sema_compiler_services_arity_diagnostic(module_name, member, selected.parameters.len(), args.len(), span))
         if {
             selected.parameters.len() == 0 -> {
                 sema_compiler_services_check_untyped(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -175,7 +174,7 @@ fn sema_compiler_services_lower_core_call(check: SemaCompilerServicesCallCheck, 
     if check.module_name != "core.compiler" -> return None
     record :: sema_call_core_record(check.module_name, check.member, check.arguments.len(), span, &diagnostics) ?? return None
     if !sema_call_core_record_effects(record, span, [Type]{}, check.result_type, check.failure_carrier, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return None
-    sema_call_core_tir(record, check.arguments, span, [Type]{}, [Bool]{}, None, check.result_type, check.failure_carrier, expected, environment, program, &diagnostics)
+    sema_call_core_tir(record, check.arguments, span, [Type]{}, [Bool]{}, check.result_type, check.failure_carrier, expected, environment, program, &diagnostics)
 }
 fn sema_call_compiler_value_owner(ty: Type) -> String? {
     if ty == {

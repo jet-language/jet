@@ -1,26 +1,26 @@
 Error [E0104]: `check` expects 1 argument, got 2
-  --> tests/ui/compiler_api/compiler_api_rejects_zero_and_extra_arguments_at_checking_6.jet:2:26
+  --> tests/ui/compiler_api/compiler_api_rejects_zero_and_extra_arguments_at_checking_6.jet:2:30
     |
-  2 | VALUE :: prep { compiler.check("source", "extra") }
-    |                          ^^^^^
+  2 | VALUE :: comptime { compiler.check("source", "extra") }
+    |                              ^^^^^
  Why: Every argument must match a parameter
  Fix: Check the definition of `check` in the imported file
 More: jet-lang.dev/e/E0104
 
 Error [E0112]: `check` wants `CompilerSyntaxTree` here, but this is String (text)
-  --> tests/ui/compiler_api/compiler_api_rejects_zero_and_extra_arguments_at_checking_6.jet:2:32
+  --> tests/ui/compiler_api/compiler_api_rejects_zero_and_extra_arguments_at_checking_6.jet:2:36
     |
-  2 | VALUE :: prep { compiler.check("source", "extra") }
-    |                                ^^^^^^^^
+  2 | VALUE :: comptime { compiler.check("source", "extra") }
+    |                                    ^^^^^^^^
  Why: Every argument must match its parameter's type
  Fix: Use `CompilerSyntaxTree` here
 More: jet-lang.dev/e/E0112
 
 Error [E2402]: This implicit fallible call can't convert `CompilerError` into `Err` — no declared conversion exists
-  --> tests/ui/compiler_api/compiler_api_rejects_zero_and_extra_arguments_at_checking_6.jet:2:26
+  --> tests/ui/compiler_api/compiler_api_rejects_zero_and_extra_arguments_at_checking_6.jet:2:30
     |
-  2 | VALUE :: prep { compiler.check("source", "extra") }
-    |                          ^^^^^
+  2 | VALUE :: comptime { compiler.check("source", "extra") }
+    |                              ^^^^^
  Why: Ordinary fallible calls propagate automatically; `CompilerError` can reach `Err` only through `impl CompilerError -> Err`
  Fix: Handle this call locally with `??`, add `impl CompilerError -> Err { … }`, or change the return type
 More: jet-lang.dev/e/E2402

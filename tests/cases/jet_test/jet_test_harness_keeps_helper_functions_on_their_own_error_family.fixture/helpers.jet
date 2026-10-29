@@ -1,0 +1,45 @@
+#Error
+struct HelperError {
+    message: String
+}
+
+fn first(values: [Int]) -> Int {
+    return values.get(0) ?? panic("empty list")
+}
+
+fn checked(flag: Bool) -> Bool {
+    assert(flag, "flag must hold")
+    assert_eq(flag, true)
+    return true
+}
+
+fn port(text: String) -> Int HelperError! {
+    number :: text.trim().to_int() ?? panic("not a port number")
+    if number < 0 -> return Err(HelperError{message: "negative port"})
+    return Ok(number)
+}
+
+struct Recorded {
+    argv: [String]
+}
+
+// #2350 part 2: both operands are read windows into borrowed non-scalar
+// parameters. Binding them by value moved out of a shared reference (E0507),
+// so the generated Rust never compiled.
+fn same_argv(expected: Recorded, oracle_argv: [String]) -> Bool {
+    assert_eq(expected.argv, oracle_argv)
+    return true
+}
+
+#Test("helpers with assert and ?? panic build inside a test harness") {
+    assert(checked(true))
+    assert_eq(first([7]), 7)
+    resolved :: port("  8080  ") ?? -1
+    assert_eq(resolved, 8080)
+    recorded :: Recorded{argv: ["jet", "run"]}
+    assert(same_argv(recorded, ["jet", "run"]))
+}
+
+#Test("a failing harness assertion is still a caught failure") {
+    assert_eq(first([1]), 2)
+}

@@ -6,11 +6,22 @@
 // Full composition is externally gated (CP-NAMES/CP-AST/CP-POLICY/S8/S10–S12,
 // S20/C4 and native composite-key #4397); this is not compiled-complete evidence.
 use jet_foundation.[
-    Item, Program, MIRNameFacts, Func, Param, Span, TraitMethodSig,
-    AccessConvention, CallablePolicy, FailureContract, TypeParam,
-    PolicyDeclaration, PolicyScope,
-    RuleSite, rule_allows, POLICY_RULES, policy_resolve, policy_explain,
-    trait_method_failure_contract, trait_method_effective_return_type, type_name,
+    Item,
+    Program,
+    NameFacts,
+    Func,
+    Param,
+    Span,
+    TraitMethodSig,
+    AccessConvention,
+    CallablePolicy,
+    FailureContract,
+    TypeParam,
+    PolicyDeclaration,
+    RuleSite,
+    POLICY_RULES,
+    policy_resolve,
+    type_name,
 ]
 
 // Rust's policy-declaration filter1955–1968. No policy resolution here: the
@@ -34,7 +45,7 @@ fn semindex_collect_parameter_defs(db: &SymbolDB, params: [Param], identity: Str
 // differences: only struct-body and standalone impl methods emit param defs;
 // only struct-body methods emit method-name hover rows. Trait-body requirements
 // have their own typed signature path below, not a manufactured Func.
-fn semindex_collect_item_method(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, program: Program, source: String, method: Func, owner: String, origin: MemberOrigin, define_params: Bool, hover: Bool, mp: String) {
+fn semindex_collect_item_method(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, method: Func, owner: String, origin: MemberOrigin, define_params: Bool, hover: Bool, mp: String) {
     semindex_record_func_type_nodes(&db, &ctx, method, mp)
     identity :: semindex_callable_identity(ctx.scope_identity, Val(owner), method.name)
     &db.members.push(semindex_method_fact(ctx.scope_identity, owner, method, origin, mp, source))
@@ -78,7 +89,7 @@ fn semindex_collect_trait_requirement(db: &SymbolDB, ctx: WalkCtx, source: Strin
     })
 }
 
-fn semindex_collect_item(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, program: Program, source: String, item: Item, mp: String) {
+fn semindex_collect_item(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, item: Item, mp: String) {
     structural_id :: semindex_record_node(&db, ctx, "item", semindex_item_shape(item), mp, semindex_item_span(item))
     if structural_id == .Val(id) -> &ctx.structural_parents.push(id)
     semindex_collect_state_marker_references(&db, ctx, names, item, mp)

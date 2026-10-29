@@ -1,4 +1,6 @@
 // Exact originals tests/policy_scope.rs; no fixture spelling migrations.
+use jet_pkg_model.[PackageFacts, pkg_parse_policy_document]
+use jet_foundation.[PolicyKey, PolicyValue]
 
 #Test("package policy cannot authorize unsafe") {
     rejected :: if PackageFacts.parse("name: \"bad_policy\"\nversion: \"0.1.0\"\npolicy: {{ unsafe: .Allow }}\n", "test") == {
@@ -27,7 +29,7 @@
 }
 
 #Test("manifest memory denial uses the effects rights tree") {
-    package :: PackageFacts.parse("name: \"memory\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ deny: [Mem.Alloc(above: 65536)] }} }}\n", "test") ?? panic("memory denial parse")
+    package :: PackageFacts.parse("name: \"memory\"\nversion: \"0.1.0\"\nauthority: {{ deny: [Mem.Alloc(above: 65536)] }}\n", "test") ?? panic("memory denial parse")
     assert_eq(package.effects_deny, Val([String]{"Mem.Alloc(above: 65536)"}))
 }
 

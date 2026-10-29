@@ -1,0 +1,18 @@
+# tests/observe.rs::propagation_trace_collapses_repeated_frames at tests/observe.rs:785; hand-port
+# Claim: exit 1 (tests/observe.rs:808)
+# Claim: stdout is empty (tests/observe.rs:809-812)
+# Claim: exactly one dive hop line, ending in ×4 (tests/observe.rs:813-825)
+# Claim: the header says 5 hops via ?, origin first (tests/observe.rs:827-829)
+# Not ported: exactly one line containing `. dive (` (tests/observe.rs:813-821): no line-count matcher; stderr_lacks rules out an uncollapsed ` 2. dive (` hop
+fixture: propagation_trace_collapses_repeated_frames.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run error_trace_collapse.jet
+exit: 1 # tests/observe.rs:794-829
+stdout: = "" # tests/observe.rs:794-829
+stderr: ~ "Trail [E3002] (5 hops via ?, origin first):" # tests/observe.rs:794-829
+stderr: ~ "  1. dive (" # tests/observe.rs:794-829
+stderr: ~ " ×4" # tests/observe.rs:794-829
+stderr: ~ "  2. run (" # tests/observe.rs:794-829
+stderr: !~ "  2. dive (" # tests/observe.rs:794-829

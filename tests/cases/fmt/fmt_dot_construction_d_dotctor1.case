@@ -1,0 +1,25 @@
+# tests/fmt.rs::fmt_dot_construction_d_dotctor1 at tests/fmt.rs:2555; hand-port
+# Claim: named `Pt{` construction survives and no `Pt.{` appears (tests/fmt.rs:2560-2569)
+# Claim: named form is fmt-idempotent (tests/fmt.rs:2570-2571)
+# Claim: retired `Pt.{ x: 1, y: 2 }` auto-fixes to `Pt{`, not `Pt.{` (tests/fmt.rs:2574-2583)
+# Claim: fixed form is fmt-idempotent (tests/fmt.rs:2584-2585)
+fixture: fmt_dot_construction_d_dotctor1.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt a.jet
+exit: 0 # tests/fmt.rs:2561 formats
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:2562-2569
+stdout: ~ "Pt{" # tests/fmt.rs:2562-2569
+stdout: !~ "Pt.{" # tests/fmt.rs:2562-2569
+step: jet fmt --check a.jet
+exit: 0 # tests/fmt.rs:2570-2571 stable
+step: jet fmt b.jet
+exit: 0 # tests/fmt.rs:2575 retired dotted form formats
+step: sh {work}/step-5.sh
+exit: 0 # tests/fmt.rs:2576-2583
+stdout: ~ "Pt{" # tests/fmt.rs:2576-2583
+stdout: !~ "Pt.{" # tests/fmt.rs:2576-2583
+step: jet fmt --check b.jet
+exit: 0 # tests/fmt.rs:2584-2585 stable

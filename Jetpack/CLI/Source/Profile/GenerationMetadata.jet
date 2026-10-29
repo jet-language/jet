@@ -6,16 +6,16 @@
 // The bounded JSON field readers at the end are shared by the tool manifest
 // and the package-generation records.
 
-TOOL_PROFILE_CURRENT_SCHEMA :: prep { "jet-profile-current-v1" }
-TOOL_PROFILE_GENERATION_SCHEMA :: prep { "jet-profile-generation-v2" }
-TOOL_PROFILE_OWNER :: prep { "user" }
-TOOL_PROFILE_MAX_TOOLS :: prep { 256 }
-TOOL_PROFILE_MAX_BINS :: prep { 1024 }
-TOOL_PROFILE_MAX_STRING :: prep { 4096 }
-TOOL_PROFILE_MAX_BIN_NAME :: prep { 255 }
+TOOL_PROFILE_CURRENT_SCHEMA :: "jet-profile-current-v1"
+TOOL_PROFILE_GENERATION_SCHEMA :: "jet-profile-generation-v2"
+TOOL_PROFILE_OWNER :: "user"
+TOOL_PROFILE_MAX_TOOLS :: 256
+TOOL_PROFILE_MAX_BINS :: 1024
+TOOL_PROFILE_MAX_STRING :: 4096
+TOOL_PROFILE_MAX_BIN_NAME :: 255
 // 2^53 - 1: the largest float JSON number that is still an exact integer.
-CLI_JSON_MAX_EXACT_FLOAT :: prep { 9007199254740991.0 }
-CLI_INT_MAX :: prep { 9223372036854775807 }
+CLI_JSON_MAX_EXACT_FLOAT :: 9007199254740991.0
+CLI_INT_MAX :: 9223372036854775807
 
 // The checked `current` pointer: which generation is live, bound to its
 // witness and a checksum over the preceding lines.
@@ -77,9 +77,9 @@ struct ToolGenerationTool {
             (key: "store_root", value: self.store_root)
         }
         loop field in fields -> &out.push("      \"{field.key}\": {cli_json_quote(field.value)},\n")
-        cli_profile_string_array_line(out, "bins", self.bins, true)
-        cli_profile_string_array_line(out, "members", self.members, true)
-        cli_profile_string_array_line(out, "projection_hashes", self.projection_hashes, false)
+        cli_profile_string_array_line(&out, "bins", self.bins, true)
+        cli_profile_string_array_line(&out, "members", self.members, true)
+        cli_profile_string_array_line(&out, "projection_hashes", self.projection_hashes, false)
         &out.push(if last -> "    }}\n" else -> "    }},\n")
     }
 
@@ -203,7 +203,7 @@ fn cli_physical_bin_name(logical: String) -[Env]> String {
 // Windows appends `.exe` unless the name already ends with it in any case.
 fn cli_physical_bin_name_for(logical: String, windows: Bool) -> String Never! {
     if windows && !pkg_ascii_lower(logical).ends_with(".exe") -> return "{logical}.exe"
-    logical
+    logical.copy()
 }
 
 // One normal path component of `[A-Za-z0-9_.+-]`, not a Windows device name
@@ -303,7 +303,7 @@ fn cli_profile_string_array_line(out: &[String], key: String, values: [String], 
 
 // One JSON string literal.
 fn cli_json_quote(value: String) -> String Never! {
-    pkg_json_render(Dyn.Text(value))
+    pkg_json_render(Dyn.Text(value.copy()))
 }
 
 // `[a,b]` of JSON string literals, no spaces.

@@ -1,3 +1,6 @@
+use jet_foundation.[Expr, Func, Program, Type]
+use jet_lexer.[lex]
+use jet_parser.[parse_tokens]
 
 fn result_handler_function(program: Program, name: String) -> Func? {
     loop item in program.items {
@@ -14,7 +17,7 @@ fn result_handler_binding(function: Func, name: String) -> Expr? {
 // Rust: crates/jet-parser/tests/result_handler_grammar.rs:4 (stale on dev: Rust rejects retired Error with E0432 and teaches Err)
 #Test("result_handler_lookahead_keeps_neighboring_forms_unambiguous") {
     source :: "\nfn optional() -> Success? {{ None }}\nfn fallible() Err! {{ Err(\"bad\") }}\n\nfn run(value: Int Err!, optional: String) {{\n    propagated :: value\n    noted :: value?(\"context\")\n    chained :: optional?.len\n    negated :: !true\n    handled :: value ? ok -> if {{\n        !true -> ok\n        else -> ok\n    }}\n    ! error -> error\n}}\n"
-    lexed :: lex_payload(source.bytes(), false)
+    lexed :: lex(source.bytes())
     assert(lexed.diagnostics.is_empty(), "lexer diagnostics must be empty")
     parsed :: parse_tokens(lexed.tokens, lexed.tables)
     assert(parsed.diagnostics.is_empty(), "neighboring forms should parse")
@@ -30,27 +33,27 @@ fn result_handler_binding(function: Func, name: String) -> Expr? {
     })
     run :: result_handler_function(parsed.program, "run") ?? panic("run")
     propagated :: result_handler_binding(run, "propagated") ?? panic("propagated")
-    assert(if propagated == { .Ident(name, _) -> name == "value" else -> false })
+    assert(if propagated == { .Ident(name, _, _) -> name == "value" else -> false })
     noted :: result_handler_binding(run, "noted") ?? panic("noted")
-    assert(if noted == { .Try(_, _, _, .Val(_)) -> true else -> false })
+    assert(if noted == { .Try(_, _, _, .Val(_), _) -> true else -> false })
     chained :: result_handler_binding(run, "chained") ?? panic("chained")
-    assert(if chained == { .OptField(_, _, _, _, _) -> true else -> false })
+    assert(if chained == { .OptField(_, _, _, _, _, _) -> true else -> false })
     negated :: result_handler_binding(run, "negated") ?? panic("negated")
-    assert(if negated == { .Unary(.Not, inner, _) -> if inner == { .Bool(value, _) -> value else -> false } else -> false })
+    assert(if negated == { .Unary(.Not, inner, _, _) -> if inner == { .Bool(value, _, _) -> value else -> false } else -> false })
     handled :: result_handler_binding(run, "handled") ?? panic("handled")
-    if handled == .If(cond, _, then_value, _, else_value, _) {
-        assert(if cond == { .PatternTest(_, .Ok(binding, _, _, _), _) -> binding == "ok" else -> false })
+    if handled == .If(cond, _, then_value, _, else_value, _, _) {
+        assert(if cond == { .PatternTest(_, .Ok(binding, _, _, _), _, _) -> binding == "ok" else -> false })
         assert(if then_value == {
-            .If(inner_cond, _, _, _, _, _) -> if inner_cond == {
-                .Unary(.Not, inner, _) -> if inner == { .Bool(value, _) -> value else -> false }
+            .If(inner_cond, _, _, _, _, _, _) -> if inner_cond == {
+                .Unary(.Not, inner, _, _) -> if inner == { .Bool(value, _, _) -> value else -> false }
                 else -> false
             }
             else -> false
         })
         assert(if else_value == {
-            .If(err_cond, _, failure, _, _, _) -> {
-                is_error :: if err_cond == { .PatternTest(_, .Err(binding, _, _, _), _) -> binding == "error" else -> false }
-                is_failure :: if failure == { .Ident(name, _) -> name == "error" else -> false }
+            .If(err_cond, _, failure, _, _, _, _) -> {
+                is_error :: if err_cond == { .PatternTest(_, .Err(binding, _, _, _), _, _) -> binding == "error" else -> false }
+                is_failure :: if failure == { .Ident(name, _, _) -> name == "error" else -> false }
                 is_error && is_failure
             }
             else -> false
@@ -69,7 +72,7 @@ fn result_handler_is_pointer_to(ty: Type, element: String) -> Bool Never! {
 // Rust: crates/jet-parser/tests/result_handler_grammar.rs:103
 #Test("pointer_mark_leaves_the_failure_contract_and_union_to_the_enclosing_type") {
     source :: "\nfn from_addr<T>(addr: Int) -> *T Never! {{ todo }}\nfn either(value: *Node | Label) {{}}\n"
-    lexed :: lex_payload(source.bytes(), false)
+    lexed :: lex(source.bytes())
     assert(lexed.diagnostics.is_empty(), "lexer diagnostics must be empty")
     parsed :: parse_tokens(lexed.tokens, lexed.tables)
     assert(parsed.diagnostics.is_empty(), "pointer types should parse")

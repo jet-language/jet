@@ -1,0 +1,11 @@
+# tests/path_durability.rs::normalize_is_lexical_rooted_and_platform_native at tests/path_durability.rs:14; hand-port
+# Unix spelling of the cfg!(windows) fixture: absolute = "/../../alpha/../beta", root = "/", no Windows prefix lines.
+fixture: normalize_is_lexical_rooted_and_platform_native.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build normalize.jet
+exit: 0
+step: built
+exit: 0 # tests/path_durability.rs:41
+stdout: = "../../alpha/gamma\n/beta\n\n/\n" # tests/path_durability.rs:42-64 lexical, rooted, platform-native normalization

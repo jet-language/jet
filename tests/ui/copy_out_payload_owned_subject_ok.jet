@@ -1,0 +1,33 @@
+// A payload bound from a subject this scope owns moves with an unmarked
+// use: the binding takes it, and the subject never closes it again.
+struct Res { name: String }
+impl Res.Close {
+    fn close(^self) { print("close {self.name}") }
+}
+
+fn keep(r: ^Res) -> Int { r.name.len() }
+
+fn make(name: String) -> Res? { Val(Res{name: name}) }
+
+fn from_local() -> Int {
+    local := make("local")
+    if local == .Val(held) {
+        applied := held
+        return keep(^applied)
+    }
+    0
+}
+
+fn from_call() -> Int {
+    if make("call") == {
+        .Val(held) -> {
+            applied := held
+            keep(^applied)
+        }
+        .None -> 0
+    }
+}
+
+fn run() {
+    print(from_local() + from_call())
+}

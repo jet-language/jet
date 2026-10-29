@@ -1,0 +1,14 @@
+# tests/outcome_carrier.rs::both_views_lower_onto_one_carrier at tests/outcome_carrier.rs:84; hand-port
+# The generated-Rust spelling claims (JetOutcome<_, JetAbsent>, no Option) retire with the Rust backend; the program both views lower from runs.
+fixture: both_views_lower_onto_one_carrier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run views.jet
+exit: 0
+stdout: = "9\n7\n" # tests/outcome_carrier.rs:84 `??` reads both views the same way
+step: jet build views.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "9\n7\n" # tests/outcome_carrier.rs:84 the AOT carrier agrees

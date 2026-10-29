@@ -1,6 +1,16 @@
 // The one structural reader of `package.jet` Package and Config carriers
 // (Package/mod.rs `parse_common` and its field readers). There is no second,
 // legacy-vocabulary parser.
+use jet_foundation.[Span, jet_ring_parse_manifest_layer]
+use jet_lexer.[
+    Lexed, TOKEN_BLOCK_COMMENT, TOKEN_DOT, TOKEN_EOF, TOKEN_LBRACE, TOKEN_LINE_COMMENT, Token, lex,
+]
+use jetpack_foundation.[
+    BUILD_ENTRY_FN, MANIFEST_BLOCK_AUTHORITY, MANIFEST_BLOCK_BOUNDARIES, MANIFEST_BLOCK_BUILD,
+    MANIFEST_BLOCK_DEPS, MANIFEST_BLOCK_MEMBERS, MANIFEST_BLOCK_OUTPUTS, MANIFEST_BLOCK_SETTINGS,
+    MANIFEST_FIELD_NAME, MANIFEST_FIELD_VERSION, OUTPUT_FIELD_BINDINGS, OUTPUT_FIELD_LOADABLE,
+    OUTPUT_FIELD_NATIVE, SYSTEM_FIELD_TARGET,
+]
 
 impl PackageFacts {
     // Parse the canonical `package.jet` root shape, validating guarantees and
@@ -209,13 +219,13 @@ impl PackageFacts {
     }
 
     fn apply_authority(&self, authority: AuthorityBlock) Never! {
-        if authority.holds.allow != None || authority.holds.deny != None {
+        if authority.allow != None || authority.deny != None {
             self.effects_enabled = true
-            self.effects_allow = authority.holds.allow
-            self.effects_deny = authority.holds.deny
+            self.effects_allow = authority.allow
+            self.effects_deny = authority.deny
         }
         if authority.grants.len() > 0 -> self.grants = authority.grants
-        self.authority = PackageAuthority{holds: authority.holds, needs: authority.needs, grants: authority.grants, trust: authority.trust, providers: authority.providers}
+        self.authority = PackageAuthority{allow: authority.allow, deny: authority.deny, needs: authority.needs, grants: authority.grants, trust: authority.trust, providers: authority.providers}
     }
 }
 
@@ -447,7 +457,7 @@ fn pkg_output_field_allowed(kind: PackageOutputKind, field: String) -> Bool Neve
     allowed.contains(field)
 }
 
-PKG_SERVICE_FIELDS :: prep { [String]{"enable", "from", "ports", "ready", "run", "restart", "watch", "after", "before_start", "sockets", "shutdown", "depends_on", "health", "limits", "logs"} }
+PKG_SERVICE_FIELDS :: [String]{"enable", "from", "ports", "ready", "run", "restart", "watch", "after", "before_start", "sockets", "shutdown", "depends_on", "health", "limits", "logs"}
 
 fn pkg_service_field_allowed(field: String) -> Bool Never! {
     PKG_SERVICE_FIELDS.contains(field)

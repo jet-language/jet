@@ -6,19 +6,19 @@ step aot-populate: built populate --label ci
 stdout: = populate.out
 step: jet populate --label ci
 stdout: == aot-populate
-step: jet run --interpret run.jet -- populate --label ci
+step: jet run run.jet -- populate --label ci
 stdout: == aot-populate
 step aot-migrate: built migrate --to 004
 stdout: = migrate.out
 step: jet migrate --to 004
 stdout: == aot-migrate
-step: jet run --interpret run.jet -- migrate --to 004
+step: jet run run.jet -- migrate --to 004
 stdout: == aot-migrate
 step aot-web: built web --port 3000
 stdout: = web-local.out
 step: jet web --port 3000
 stdout: == aot-web
-step: jet run --interpret run.jet -- web --port 3000
+step: jet run run.jet -- web --port 3000
 stdout: == aot-web
 step aot-broken: built needs_broken
 exit: nonzero
@@ -26,7 +26,7 @@ stdout: !~ 'needs_broken ran' # original predicate
 step: jet needs_broken
 exit: nonzero
 stdout: == aot-broken
-step: jet run --interpret run.jet -- needs_broken
+step: jet run run.jet -- needs_broken
 exit: nonzero
 stdout: == aot-broken
 step aot-bogus: built populate --bogus
@@ -37,7 +37,7 @@ step: jet populate --bogus
 exit: 2
 stderr: ~ E1331 # original predicate
 stdout: == aot-bogus
-step: jet run --interpret run.jet -- populate --bogus
+step: jet run run.jet -- populate --bogus
 exit: 2
 stderr: ~ E1331 # original predicate
 stdout: == aot-bogus

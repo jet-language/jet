@@ -1,0 +1,30 @@
+
+struct Gate { step: Int }
+
+fn slow_value(gate: Shared<Gate>) -> Int {
+    gate.step = 1
+    total := 0
+    loop n in 0..<2000000 { total += n }
+    print("settled")
+    return 1
+}
+
+fn fail_after_start(gate: Shared<Gate>) -> Int {
+    loop gate.step == 0 {}
+    panic("wait failed")
+    return 0
+}
+
+fn leave_on_wait_panic() {
+    gate :: shared Gate{ step: 0 }
+    task.group group {
+        slow :: task slow_value(gate)
+        _ignored :: (task.any { fail_after_start(gate) }) ?? 0
+        slow.join() ?? panic("slow child failed")
+    }
+}
+
+fn run() {
+    leave_on_wait_panic()
+    print("caller")
+}

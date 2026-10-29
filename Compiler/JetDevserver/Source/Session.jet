@@ -13,21 +13,25 @@ use jet_foundation.JSON.[foundation_json_escape, parse_json, parse_json_with_lim
 use jet_foundation.Persist.[PersistRejectReason]
 use jet_devserver.CapturePolicy.[CaptureFaultFact, CaptureIdentity, CaptureSkip, CaptureStartFact]
 use jet_devserver.WatchService.[PersistOutcome, SessionSnapshot, SessionBroker]
+use jet_foundation.[foundation_json_escape]
+use core.files.[OSPath]
+use core.devtools.runtime.kernel_devtools_panel_catalog.[JetDevtoolsHostKind, JetDevtoolsPanelCapability]
+use core.encoding.[Dyn]
 
 // Rust: crates/jet-devserver/src/Session.rs:43
-DEVTOOLS_TEXT_LIMIT :: prep { USize{JET_DEVTOOLS_MAX_TEXT_BYTES} }
+DEVTOOLS_TEXT_LIMIT :: comptime { USize{JET_DEVTOOLS_MAX_TEXT_BYTES} }
 // Rust: crates/jet-devserver/src/Session.rs:44
-MAX_CLIENT_ID :: prep { USize{128} }
+MAX_CLIENT_ID :: USize{128}
 // Rust: crates/jet-devserver/src/Session.rs:45
-MAX_CLIENTS :: prep { USize{256} }
+MAX_CLIENTS :: USize{256}
 // Rust: crates/jet-devserver/src/Session.rs:46
-CLIENT_TTL_MS :: prep { U64{160} }
+CLIENT_TTL_MS :: U64{160}
 // Rust: crates/jet-devserver/src/Session.rs:47
-CLIENT_TTL :: prep { Duration.from_millis(CLIENT_TTL_MS) }
+CLIENT_TTL :: comptime { Duration.from_millis(CLIENT_TTL_MS) }
 // Rust: crates/jet-devserver/src/Session.rs:48
-MAX_RECEIPTS :: prep { USize{128} }
+MAX_RECEIPTS :: USize{128}
 // Rust: crates/jet-devserver/src/Session.rs:49
-MAX_RETAINED_VIEW_BYTES :: prep { USize{2 * 1024 * 1024} }
+MAX_RETAINED_VIEW_BYTES :: comptime { USize{2 * 1024 * 1024} }
 // Rust: crates/jet-devserver/src/Session.rs:50
 // GATE #4494: canonical atomic storage and relaxed fetch-add.
 NEXT_SESSION_ID :: AtomicU64.new(1)
@@ -87,11 +91,11 @@ impl ResidentRecordingState {
     }
 }
 // Rust: crates/jet-devserver/src/Session.rs:206
-BROWSER_ASSET_WATCH_MAX_FILES :: prep { USize{4096} }
+BROWSER_ASSET_WATCH_MAX_FILES :: USize{4096}
 // Rust: crates/jet-devserver/src/Session.rs:207
-BROWSER_ASSET_WATCH_MAX_EVENTS :: prep { USize{256} }
+BROWSER_ASSET_WATCH_MAX_EVENTS :: USize{256}
 // Rust: crates/jet-devserver/src/Session.rs:208
-BROWSER_ASSET_WATCH_MAX_PATH_BYTES :: prep { USize{1024} }
+BROWSER_ASSET_WATCH_MAX_PATH_BYTES :: USize{1024}
 // Rust: crates/jet-devserver/src/Session.rs:211
 struct BrowserAssetStamp { modified: SystemTime?; len: U64 }
 // Rust: crates/jet-devserver/src/Session.rs:217

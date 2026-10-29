@@ -1,0 +1,13 @@
+use core.email as email
+use core.encoding.hex as hex
+fn email_wire() -> String {
+    message :: email.message(email.address("a@example.com") ?? panic("a"), [email.address("b@example.com") ?? panic("b")], [Address]{}, "s", "body", HTML{""}, [Attachment]{}) ?? panic("m")
+    return hex.encode(email.serialize(message) ?? panic("serialize"))
+}
+EXPECTED :: comptime { email_wire() }
+
+fn run() {
+    actual :: email_wire()
+    print("{EXPECTED}")
+    print("{actual}")
+}

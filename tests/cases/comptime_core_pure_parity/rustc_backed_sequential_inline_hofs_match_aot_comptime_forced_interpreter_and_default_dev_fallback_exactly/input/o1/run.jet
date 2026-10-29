@@ -1,0 +1,21 @@
+fn inline_hof_view() -> String {
+    values := [1, 2, 3, 4]
+    each_seen := [Int]{}
+    shadow := 99
+    values.each((shadow: Int) -> { &each_seen.push(shadow) })
+    predicate_seen := Set.from([0])
+    has_three :: values.any((n: Int) -> predicate_seen.add(n) && n == 3)
+    fold_seen := [Int:Int]{ 0: 0 }
+    total :: values.fold(0, (acc: Int, n: Int) -> fold_seen.add(n, n) ?? (acc + n))
+    partition_seen := Set.from([0])
+    partition_shadow := 88
+    split :: values.partition((partition_shadow: Int) -> partition_seen.add(partition_shadow) && partition_shadow % 2 == 0)
+    return "{each_seen}|{shadow}|{predicate_seen.len()}:{predicate_seen.has(1)}:{predicate_seen.has(2)}:{predicate_seen.has(3)}:{predicate_seen.has(4)}|{has_three}|{fold_seen.values().to_list()}|{total}|{partition_shadow}|{partition_seen.len()}:{partition_seen.has(1)}:{partition_seen.has(2)}:{partition_seen.has(3)}:{partition_seen.has(4)}|{split.false_}|{split.true_}"
+}
+EXPECTED :: comptime { inline_hof_view() }
+
+fn run() {
+    actual :: inline_hof_view()
+    print("{EXPECTED}")
+    print("{actual}")
+}

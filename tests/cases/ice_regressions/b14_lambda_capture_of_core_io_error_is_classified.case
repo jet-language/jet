@@ -1,0 +1,15 @@
+# #5817: a lambda capturing `IOError` must type-check, run and build; it was an
+# ICE ("semantic body rechecking did not return a complete resolved package graph").
+fixture: fixtures/b14_lambda_capture_of_core_io_error_is_classified
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run source0.jet
+exit: 0
+stdout: = b14_lambda_capture_of_core_io_error_is_classified.out
+stderr: empty
+step: jet build source0.jet
+exit: 0
+step: jet test source0.jet
+exit: 0
+stdout: ~ "1 passed, 0 failed" # the summary line; the runner's other lines name the cached test binary

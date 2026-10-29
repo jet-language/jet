@@ -1,0 +1,19 @@
+# tests/marker_rule_signatures.rs::string_and_bool_rule_arguments_use_local_semantic_types at tests/marker_rule_signatures.rs:406; hand-port
+# Claim: valid String/Bool rule arguments produce no E0930/E3112/L3102 (tests/marker_rule_signatures.rs:416-421)
+# Claim: wrong String/Bool rule arguments yield E0930 and no E0345/E0347 (tests/marker_rule_signatures.rs:432-439)
+# Fixture migrated: local lowercase names rejected with E0357 (constants must be ALL_CAPS); renamed to CATEGORY/ENABLED; marked local statement gave E0003, moved to top-level comptime constants
+# Not ported: Rust asserts E0930 exactly once; CLI pins E0930 presence only
+fixture: string_and_bool_rule_arguments_use_local_semantic_types.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check valid/main.jet
+exit: 0 # tests/marker_rule_signatures.rs:416 no E0930/E3112/L3102
+stderr: !~ "E0930" # tests/marker_rule_signatures.rs:416 no E0930/E3112/L3102
+stderr: !~ "E3112" # tests/marker_rule_signatures.rs:416 no E0930/E3112/L3102
+stderr: !~ "L3102" # tests/marker_rule_signatures.rs:416 no E0930/E3112/L3102
+step: jet check wrong/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:432 E0930 once; :437 no E0345/E0347
+stderr: ~ "E0930" # tests/marker_rule_signatures.rs:432 E0930 once; :437 no E0345/E0347
+stderr: !~ "E0345" # tests/marker_rule_signatures.rs:432 E0930 once; :437 no E0345/E0347
+stderr: !~ "E0347" # tests/marker_rule_signatures.rs:432 E0930 once; :437 no E0345/E0347

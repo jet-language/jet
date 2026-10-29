@@ -3,10 +3,10 @@
 // allocated ports, the shutdown marker, supervisor errors, and captured logs.
 // Every state file is replaced whole, so a reader never sees half a record.
 
-SERVICES_MAX_SERVICE_NAME_BYTES :: prep { 256 }
-SERVICES_MAX_STATE_BYTES :: prep { 4096 }
-SERVICES_MAX_LIFECYCLE_BYTES :: prep { 16384 }
-SERVICES_SUPERVISOR_ENV :: prep { "JETPACK_SERVICE_SUPERVISOR" }
+SERVICES_MAX_SERVICE_NAME_BYTES :: 256
+SERVICES_MAX_STATE_BYTES :: 4096
+SERVICES_MAX_LIFECYCLE_BYTES :: 16384
+SERVICES_SUPERVISOR_ENV :: "JETPACK_SERVICE_SUPERVISOR"
 
 // A service process's saved identity: the PID plus the platform-tagged start
 // token and optional containment name so a reused PID
@@ -15,10 +15,6 @@ struct ServiceProcessState {
     pid: Int
     start_identity: String
     containment: String?
-
-    fn identity(self) -> ProcessIdentity Never! {
-        ProcessIdentity{pid: self.pid, start: self.start_identity, containment: self.containment}
-    }
 
     fn encode(self) -> String Never! {
         text := "version=1\npid={self.pid}\nstart={self.start_identity}\n"
@@ -263,7 +259,7 @@ fn services_read_process_state(dir: String) -[FS]> PersistedProcessState? Servic
         }
     }
     trimmed :: text.trim()
-    if Int.parse(trimmed) == .Val(legacy) {
+    if Int.parse(trimmed) == .Ok(legacy) {
         if legacy <= 0 || legacy > 4294967295 -> return Err(invalid)
         return Ok(Val(PersistedProcessState.LegacyPID(legacy)))
     }

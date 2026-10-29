@@ -23,8 +23,6 @@ enum BuiltinStaticLowering {
     // A Prelude associated function; `generics` are the owner arguments, written
     // over the row type parameters (`Type.Named(name)`) and substituted at the call.
     PreludeStatic(rooted: Bool, path: String, generics: [TPreludeArg])
-    // A handle operation whose receiver is the first value argument.
-    ArgumentHandle(operation: THandleOp)
     // `Duration.<unit>(value)`: the checked Int or Float value selects the route.
     DurationNew(unit: String)
     // A registered Core call; every value argument is a Core argument.
@@ -92,7 +90,7 @@ fn builtin_static(owner: String, method: String, parameters: [Type], return_type
 // execution host. A `parameter_convention: AccessConvention.Move` row owns its
 // arguments: each one moves into the constructed value.
 
-BUILTIN_STATIC_ROWS :: prep { [BuiltinStaticRow]{
+BUILTIN_STATIC_ROWS :: comptime { [BuiltinStaticRow]{
     {module_name: "", owner: "Int", method: "parse", type_params: [String]{}, owner_type_params: 0, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{Type.String}, parameter_convention: AccessConvention.Read, return_type: Type.Result{ok: Type.Int, err: Type.Named{name: "ParseError"}}, lowering: BuiltinStaticLowering.ArgumentBuiltin{operation: TBuiltinOp.ParseInt}, arity_code: "E0104"},
     {module_name: "", owner: "Int", method: "from_radix", type_params: [String]{}, owner_type_params: 0, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{Type.String, Type.Int}, parameter_convention: AccessConvention.Read, return_type: Type.Result{ok: Type.Int, err: Type.Named{name: "ParseError"}}, lowering: BuiltinStaticLowering.IntFromRadix, arity_code: "E0104"},
     {module_name: "", owner: "Float", method: "parse", type_params: [String]{}, owner_type_params: 0, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{Type.String}, parameter_convention: AccessConvention.Read, return_type: Type.Result{ok: Type.Float, err: Type.Named{name: "ParseError"}}, lowering: BuiltinStaticLowering.ArgumentBuiltin{operation: TBuiltinOp.ParseFloat}, arity_code: "E0104"},
@@ -108,6 +106,11 @@ BUILTIN_STATIC_ROWS :: prep { [BuiltinStaticRow]{
     // moves its payload into a `JetShared<T>`; T is the payload's own type.
     {module_name: "", owner: "Shared", method: "new", type_params: [String]{"T"}, owner_type_params: 0, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{Type.Named{name: "T"}}, parameter_convention: AccessConvention.Move, return_type: Type.Shared{inner: Type.Named{name: "T"}}, lowering: BuiltinStaticLowering.PreludeStatic{rooted: true, path: "jet_std::JetShared", generics: [TPreludeArg]{TPreludeArg.Jet{ty: Type.Named{name: "T"}}}}, arity_code: "E0104"},
     {module_name: "", owner: "Authority", method: "workspace", type_params: [String]{}, owner_type_params: 0, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{}, parameter_convention: AccessConvention.Read, return_type: Type.Named{name: "Authority"}, lowering: BuiltinStaticLowering.PreludeStatic{rooted: true, path: "JetAuthority", generics: [TPreludeArg]{}}, arity_code: "E0104"},
+    {module_name: "", owner: "Authority", method: "from_rights", type_params: [String]{}, owner_type_params: 0, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{Type.List{element: Type.String}}, parameter_convention: AccessConvention.Read, return_type: Type.Named{name: "Authority"}, lowering: BuiltinStaticLowering.PreludeStatic{rooted: true, path: "JetAuthority", generics: [TPreludeArg]{}}, arity_code: "E0101"},
+    // The local mutation cell and the generational slot pool are ambient
+    // built-in owners (no Core import), as in the bootstrap's static checker.
+    {module_name: "", owner: "Cell", method: "new", type_params: [String]{"T"}, owner_type_params: 1, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{Type.Named{name: "T"}}, parameter_convention: AccessConvention.Move, return_type: Type.Apply{name: "Cell", args: [Type]{Type.Named{name: "T"}}}, lowering: BuiltinStaticLowering.PreludeStatic{rooted: true, path: "jet_std::JetCell", generics: [TPreludeArg]{TPreludeArg.Jet{ty: Type.Named{name: "T"}}}}, arity_code: "E0104"},
+    {module_name: "", owner: "Pool", method: "new", type_params: [String]{"T"}, owner_type_params: 1, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{}, parameter_convention: AccessConvention.Read, return_type: Type.Apply{name: "Pool", args: [Type]{Type.Named{name: "T"}}}, lowering: BuiltinStaticLowering.PreludeStatic{rooted: true, path: "jet_std::JetPool", generics: [TPreludeArg]{TPreludeArg.Jet{ty: Type.Named{name: "T"}}}}, arity_code: "E0104"},
     {module_name: "", owner: "Duration", method: "nanoseconds", type_params: [String]{}, owner_type_params: 0, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{Type.Union{members: [Type]{Type.Int, Type.Float}}}, parameter_convention: AccessConvention.Read, return_type: Type.Result{ok: Type.Named{name: "Duration"}, err: Type.Named{name: "RangeError"}}, lowering: BuiltinStaticLowering.DurationNew{unit: "Nanoseconds"}, arity_code: "E0104"},
     {module_name: "", owner: "Duration", method: "microseconds", type_params: [String]{}, owner_type_params: 0, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{Type.Union{members: [Type]{Type.Int, Type.Float}}}, parameter_convention: AccessConvention.Read, return_type: Type.Result{ok: Type.Named{name: "Duration"}, err: Type.Named{name: "RangeError"}}, lowering: BuiltinStaticLowering.DurationNew{unit: "Microseconds"}, arity_code: "E0104"},
     {module_name: "", owner: "Duration", method: "milliseconds", type_params: [String]{}, owner_type_params: 0, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{Type.Union{members: [Type]{Type.Int, Type.Float}}}, parameter_convention: AccessConvention.Read, return_type: Type.Result{ok: Type.Named{name: "Duration"}, err: Type.Named{name: "RangeError"}}, lowering: BuiltinStaticLowering.DurationNew{unit: "Milliseconds"}, arity_code: "E0104"},
@@ -122,6 +125,7 @@ BUILTIN_STATIC_ROWS :: prep { [BuiltinStaticRow]{
     {module_name: "", owner: "Set", method: "new", type_params: [String]{"T"}, owner_type_params: 1, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{}, parameter_convention: AccessConvention.Read, return_type: Type.Apply{name: "Set", args: [Type]{Type.Named{name: "T"}}}, lowering: BuiltinStaticLowering.PreludeStatic{rooted: false, path: "std::collections::HashSet", generics: [TPreludeArg]{TPreludeArg.Jet{ty: Type.Named{name: "T"}}}}, arity_code: "E0104"},
     {module_name: "", owner: "Set", method: "from", type_params: [String]{"T"}, owner_type_params: 1, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{Type.List{element: Type.Named{name: "T"}}}, parameter_convention: AccessConvention.Read, return_type: Type.Apply{name: "Set", args: [Type]{Type.Named{name: "T"}}}, lowering: BuiltinStaticLowering.ArgumentBuiltin{operation: TBuiltinOp.SetFrom}, arity_code: "E0104"},
     {module_name: "", owner: "Rank", method: "new", type_params: [String]{"T"}, owner_type_params: 1, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{}, parameter_convention: AccessConvention.Read, return_type: Type.Apply{name: "Rank", args: [Type]{Type.Named{name: "T"}}}, lowering: BuiltinStaticLowering.PreludeStatic{rooted: false, path: "std::collections::BTreeSet", generics: [TPreludeArg]{TPreludeArg.Jet{ty: Type.Named{name: "T"}}}}, arity_code: "E0104"},
+    {module_name: "", owner: "Rank", method: "from", type_params: [String]{"T"}, owner_type_params: 1, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{Type.List{element: Type.Named{name: "T"}}}, parameter_convention: AccessConvention.Read, return_type: Type.Apply{name: "Rank", args: [Type]{Type.Named{name: "T"}}}, lowering: BuiltinStaticLowering.ArgumentBuiltin{operation: TBuiltinOp.SortedSetFrom}, arity_code: "E0104"},
     {module_name: "", owner: "PriorityQueue", method: "new", type_params: [String]{"T"}, owner_type_params: 1, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{}, parameter_convention: AccessConvention.Read, return_type: Type.Apply{name: "PriorityQueue", args: [Type]{Type.Named{name: "T"}}}, lowering: BuiltinStaticLowering.PreludeStatic{rooted: false, path: "std::collections::BinaryHeap", generics: [TPreludeArg]{TPreludeArg.Jet{ty: Type.Named{name: "T"}}}}, arity_code: "E0104"},
     {module_name: "", owner: "PriorityQueue", method: "from", type_params: [String]{"T"}, owner_type_params: 1, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{Type.List{element: Type.Named{name: "T"}}}, parameter_convention: AccessConvention.Read, return_type: Type.Apply{name: "PriorityQueue", args: [Type]{Type.Named{name: "T"}}}, lowering: BuiltinStaticLowering.ArgumentBuiltin{operation: TBuiltinOp.PriorityQueueFrom}, arity_code: "E0104"},
     {module_name: "", owner: "Bits", method: "new", type_params: [String]{}, owner_type_params: 0, owner_rule: BuiltinStaticOwnerRule.Inferred, parameters: [Type]{}, parameter_convention: AccessConvention.Read, return_type: Type.Named{name: "Bits"}, lowering: BuiltinStaticLowering.PreludeStatic{rooted: true, path: "JetBitSet", generics: [TPreludeArg]{}}, arity_code: "E0104"},
@@ -151,7 +155,7 @@ BUILTIN_STATIC_ROWS :: prep { [BuiltinStaticRow]{
 } }
 
 // Numeric destination owners (`numeric_type_from_name`) and their host words.
-BUILTIN_NUMERIC_KINDS :: prep { [BuiltinNumericKind]{
+BUILTIN_NUMERIC_KINDS :: comptime { [BuiltinNumericKind]{
     {name: "Int", ty: Type.Int, rust: "i64", integer: true, fixed: false, signed: true, bits: 64},
     {name: "I8", ty: Type.IntN{signed: true, bits: 8}, rust: "i8", integer: true, fixed: true, signed: true, bits: 8},
     {name: "I16", ty: Type.IntN{signed: true, bits: 16}, rust: "i16", integer: true, fixed: true, signed: true, bits: 16},
@@ -168,7 +172,7 @@ BUILTIN_NUMERIC_KINDS :: prep { [BuiltinNumericKind]{
 
 // Destination-owned `from_<source>` spellings (Syntax.rs
 // `NUMERIC_CONVERSION_SOURCES`; the semantic symbol catalog reads it too).
-BUILTIN_NUMERIC_SOURCES :: prep { [BuiltinNumericSource]{
+BUILTIN_NUMERIC_SOURCES :: comptime { [BuiltinNumericSource]{
     {method: "from_i8", source: "I8"},
     {method: "from_i64", source: "I64"},
     {method: "from_i16", source: "I16"},
@@ -223,40 +227,19 @@ fn builtin_numeric_host_kind(kind: BuiltinNumericKind) -> Int Never! {
     offset + step
 }
 
-fn builtin_numeric_float_lower(kind: BuiltinNumericKind) -> String Never! {
-    if !kind.signed -> return "0.0"
-    if kind.bits == 8 -> return "-128.0"
-    if kind.bits == 16 -> return "-32768.0"
-    if kind.bits == 32 -> return "-2147483648.0"
-    "-9223372036854775808.0"
-}
-
-fn builtin_numeric_float_upper_exclusive(kind: BuiltinNumericKind) -> String Never! {
-    if kind.signed {
-        if kind.bits == 8 -> return "128.0"
-        if kind.bits == 16 -> return "32768.0"
-        if kind.bits == 32 -> return "2147483648.0"
-        return "9223372036854775808.0"
-    }
-    if kind.bits == 8 -> return "256.0"
-    if kind.bits == 16 -> return "65536.0"
-    if kind.bits == 32 -> return "4294967296.0"
-    "18446744073709551616.0"
-}
-
 fn builtin_numeric_operation(source: BuiltinNumericKind, target: BuiltinNumericKind) -> TNumericOp Never! {
     if !target.integer {
-        if target.ty == Type.Float32 && source.ty == Type.Float -> return TNumericOp.FloatNarrow{dst_spelling: target.name}
+        if target.ty == Type.Float32 && source.ty == Type.Float -> return TNumericOp.FloatNarrow
         return TNumericOp.CastAs{dst_rust: target.rust}
     }
     // `U64` rides an i64 word; `Int.from_u64` stays on the exact CastAs adapter.
     if target.name == "Int" && source.integer && !source.signed -> return TNumericOp.CastAs{dst_rust: target.rust}
-    if source.name == "Int" && target.name != "Int" -> return TNumericOp.TryFrom{host_kind: builtin_numeric_host_kind(target), dst_rust: target.rust, dst_spelling: target.name}
+    if source.name == "Int" && target.name != "Int" -> return TNumericOp.TryFrom{host_kind: builtin_numeric_host_kind(target)}
     if source.integer {
         if builtin_numeric_widening(source, target) -> return TNumericOp.CastAs{dst_rust: target.rust}
-        return TNumericOp.TryFrom{host_kind: builtin_numeric_host_kind(target), dst_rust: target.rust, dst_spelling: target.name}
+        return TNumericOp.TryFrom{host_kind: builtin_numeric_host_kind(target)}
     }
-    TNumericOp.FloatToInt{host_kind: builtin_numeric_host_kind(target), dst_rust: target.rust, dst_spelling: target.name, lower: builtin_numeric_float_lower(target), upper_exclusive: builtin_numeric_float_upper_exclusive(target)}
+    TNumericOp.FloatToInt{host_kind: builtin_numeric_host_kind(target)}
 }
 
 fn builtin_static_numeric_row(owner: String, method: String) -> BuiltinStaticRow? {

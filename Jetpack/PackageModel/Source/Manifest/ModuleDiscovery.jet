@@ -2,6 +2,10 @@
 // resolve a package name to the directory of the unique `.jet` file that
 // declares `module <name>` at the top level, and project `#Job` declarations
 // into the shared job registry.
+use jetpack_foundation.[KW_MODULE, PACKAGE_FILE]
+use jet_foundation.[Diagnostic, Item, JobRegistry]
+use jet_lexer.[lex]
+use jet_parser.[parse_lexed]
 
 // Why discovering a package's module failed (U10).
 #Error
@@ -64,7 +68,7 @@ fn pkg_discover_jobs_in(root: String) -[FS, Env]> JobRegistry JobDiscoveryError!
             return Err(JobDiscoveryError{message: error.message()})
         }
     }
-    registry := JobRegistry.default()
+    job_items := [Item]{}
     loop file in listed {
         file_name :: pkg_path_file_name(file.relative)
         if file_name == PACKAGE_FILE -> next
@@ -84,11 +88,15 @@ fn pkg_discover_jobs_in(root: String) -[FS, Env]> JobRegistry JobDiscoveryError!
         if lexed.diagnostics.len() > 0 -> return Err(JobDiscoveryError{message: "{file.path}: lexer diagnostics: {pkg_diagnostic_codes(lexed.diagnostics)}"})
         parsed :: parse_lexed(^lexed)
         if parsed.diagnostics.len() > 0 -> return Err(JobDiscoveryError{message: "{file.path}: parser diagnostics: {pkg_diagnostic_codes(parsed.diagnostics)}"})
-        &registry.append(JobRegistry.from_program(parsed.program))
+        loop item in parsed.program.items {
+            if item == .Func(function) {
+                if function.is_job -> &job_items.push(item)
+            }
+        }
         if resolver.revalidate_file(file) == .Err(error) -> return Err(JobDiscoveryError{message: error.message()})
     }
     if resolver.revalidate_root() == .Err(error) -> return Err(JobDiscoveryError{message: error.message()})
-    Ok(registry)
+    Ok(JobRegistry.from_items(job_items))
 }
 
 // `code: what` of each diagnostic, one per line.

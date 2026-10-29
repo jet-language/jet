@@ -25,8 +25,21 @@ fn kit_report_counts(results: [KitCaseResult], suites: [String]) -> String {
     timeout :: kit_report_count(results, "TIMEOUT")
     known :: kit_report_count(results, "KNOWN-FAILING")
     unexpected :: kit_report_count(results, "UNEXPECTED-PASS")
-    names :: json.to_string(suites) ?? panic("testkit suite report encode: {err}")
+    names :: json.to_string(Dyn.Array(suites.map(suite -> Dyn.Text(suite.copy())))) ?? panic("testkit suite report encode: {err}")
     "{{\"PASS\":{pass},\"FAIL\":{fail},\"KNOWN-FAILING\":{known},\"UNEXPECTED-PASS\":{unexpected},\"UNSUPPORTED\":{unsupported},\"SKIP-HOST\":{skip},\"OPT-IN\":{opt_in},\"REFUSED\":{refused},\"ERROR\":{error},\"TIMEOUT\":{timeout},\"suites\":{names}}}"
+}
+
+// One case verdict as its report record.
+fn kit_report_record(result: KitCaseResult) -> Dyn {
+    fields := [String: Dyn]{}
+    _ :: &fields.add("suite", Dyn.Text(result.suite.copy()))
+    _ :: &fields.add("case", Dyn.Text(result.case.copy()))
+    _ :: &fields.add("tier", Dyn.Text(result.tier.copy()))
+    _ :: &fields.add("status", Dyn.Text(result.status.copy()))
+    _ :: &fields.add("detail", Dyn.Text(result.detail.copy()))
+    _ :: &fields.add("exit", Dyn.Int(result.exit))
+    _ :: &fields.add("diff", Dyn.Text(result.diff.copy()))
+    Dyn.Object(fields)
 }
 
 fn kit_report_exit_code(results: [KitCaseResult]) -> Int {
@@ -38,9 +51,8 @@ fn kit_report_exit_code(results: [KitCaseResult]) -> Int {
 fn kit_report_finish(jet: String, results: [KitCaseResult], path: String, suites: [String]) -> Int {
     summary :: kit_report_counts(results, suites)
     if path != "" {
-        // The reflected record preserves the literal `case` schema key.
-        records :: results.map(result -> json.to_string(result) ?? panic("testkit case report encode: {err}")).join(",")
-        compiler :: json.to_string(jet) ?? panic("testkit compiler report encode: {err}")
+        records :: results.map(result -> json.to_string(kit_report_record(result)) ?? panic("testkit case report encode: {err}")).join(",")
+        compiler :: json.to_string(Dyn.Text(jet.copy())) ?? panic("testkit compiler report encode: {err}")
         document :: "{{\"jet\":{compiler},\"counts\":{summary},\"results\":[{records}]}}\n"
         files.write(path, document) ?? {
             print("ERROR\tresults\t\t{err}")

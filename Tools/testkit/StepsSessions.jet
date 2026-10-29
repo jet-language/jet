@@ -70,7 +70,7 @@ fn kit_steps_session_action(step: KitStep, context: KitStepCtx, previous: KitSte
         input_error := ""
         if step.stdin == "null" -> child.stdin.close()
         else if prepared.stdin != "" {
-            &child.stdin.write(prepared.stdin) ?? {
+            child.stdin.write(prepared.stdin) ?? {
                 input_error = "session stdin: {err}"
                 ()
             }
@@ -88,7 +88,7 @@ fn kit_steps_session_action(step: KitStep, context: KitStepCtx, previous: KitSte
             expanded :: kit_steps_runtime_expand(payload, context, state) ?? return kit_steps_action_error(state, "send token unavailable")
             cr :: String.from_bytes([U8{13}]) ?? panic("CR")
             framed :: if pending.step.session_mode == "content-length" -> "Content-Length: {expanded.len()}{cr}\n{cr}\n{expanded}" else if pending.step.session_mode == "line" -> "{expanded}\n" else -> expanded
-            &pending.child.stdin.write(framed) ?? return kit_steps_action_error(state, "session send: {err}")
+            pending.child.stdin.write(framed) ?? return kit_steps_action_error(state, "session send: {err}")
             return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
         }
         if step.action == "signal" {
@@ -123,7 +123,7 @@ fn kit_steps_signal(pid: Int, name: String) -> Bool Err! {
 
 fn kit_steps_parallel(steps: [KitStep], context: KitStepCtx, state: KitStepState) -> KitStepResult {
     // #4790: keep task handles in joined call frames, not a typed Task list.
-    (sender, reports) :: channel<String>()
+    { sender, receiver: reports } :: channel<String>()
     errors := [String]{}
     task.group sends {
         kit_steps_parallel_start(sends, steps, 0, context, state, sender)
@@ -162,9 +162,8 @@ fn kit_steps_parallel_start(group: Group, steps: [KitStep], index: Int, context:
     worker :: task kit_steps_send_report(step, context, state, reporter)
     // Start all remaining sends before joining this one, preserving concurrency.
     kit_steps_parallel_start(group, steps, index + 1, context, state, sender)
-    joined :: ^worker.join() ?? {
+    ^worker.join() ?? {
         sender.send("parallel task join failed")
         return
     }
-    joined ?? panic("infallible parallel report")
 }

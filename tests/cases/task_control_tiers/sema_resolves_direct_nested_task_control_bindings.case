@@ -1,0 +1,14 @@
+# tests/task_control_tiers.rs::sema_resolves_direct_nested_task_control_bindings at tests/task_control_tiers.rs:315; hand-port
+# The forced-interpreter run retires: jet has no interpreter tier (`jet run --interpret` is E2102); the default run keeps the claim.
+fixture: sema_resolves_direct_nested_task_control_bindings.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step r1: jet run r1/main.jet
+exit: 0
+stdout: = "[2, 4]\n" # tests/task_control_tiers.rs:336 run_default_multi
+step: jet build r2/task_nested.jet
+exit: 0
+step r2aot: built
+exit: 0
+stdout: = "[2, 4]\n" # tests/task_control_tiers.rs:341 build_and_run

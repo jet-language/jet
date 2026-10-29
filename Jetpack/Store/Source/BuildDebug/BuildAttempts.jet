@@ -9,9 +9,9 @@
 // random suffix beside the process id, so concurrent writers still never
 // share a staging name.
 
-BUILD_DEBUG_LOG_ROOT :: prep { "build-logs" }
-BUILD_DEBUG_SCRATCH_ROOT :: prep { "failed-scratch" }
-BUILD_DEBUG_STAGE_PREFIX :: prep { ".jet-build-stage-" }
+BUILD_DEBUG_LOG_ROOT :: "build-logs"
+BUILD_DEBUG_SCRATCH_ROOT :: "failed-scratch"
+BUILD_DEBUG_STAGE_PREFIX :: ".jet-build-stage-"
 
 // One logged recipe step.
 struct StepLog {
@@ -29,10 +29,10 @@ struct StepLog {
         fields := [String: Dyn]{}
         fields["index"] = Dyn.Int(self.index)
         fields["total"] = Dyn.Int(self.total)
-        fields["name"] = Dyn.Text(self.name)
-        fields["command"] = Dyn.Text(self.command)
-        fields["cwd"] = Dyn.Text(self.cwd)
-        fields["status"] = Dyn.Text(self.status)
+        fields["name"] = Dyn.Text(self.name.copy())
+        fields["command"] = Dyn.Text(self.command.copy())
+        fields["cwd"] = Dyn.Text(self.cwd.copy())
+        fields["status"] = Dyn.Text(self.status.copy())
         fields["stdout"] = Dyn.Text(recipe_debug_redact(self.stdout))
         fields["stderr"] = Dyn.Text(recipe_debug_redact(self.stderr))
         Dyn.Object(fields)
@@ -55,7 +55,7 @@ struct BuildAttempt {
     steps: [StepLog]
 
     fn new(package: String, reference: String, provider: String, recipe_hash: String, source_hash: String) -[Env, Time]> BuildAttempt Never! {
-        now :: time.instant().unix_ns
+        now :: time.unix_ns()
         BuildAttempt{
             id: "{recipe_debug_safe_name(package)}-{now}",
             package,
@@ -134,17 +134,17 @@ struct BuildAttempt {
         steps := [Dyn]{}
         loop step in self.steps -> &steps.push(step.to_tree())
         fields := [String: Dyn]{}
-        fields["id"] = Dyn.Text(self.id)
-        fields["package"] = Dyn.Text(self.package)
-        fields["reference"] = Dyn.Text(self.reference)
-        fields["provider"] = Dyn.Text(self.provider)
-        fields["recipe_hash"] = Dyn.Text(self.recipe_hash)
-        fields["source_hash"] = Dyn.Text(self.source_hash)
-        fields["platform"] = Dyn.Text(self.platform)
-        fields["status"] = Dyn.Text(self.status)
+        fields["id"] = Dyn.Text(self.id.copy())
+        fields["package"] = Dyn.Text(self.package.copy())
+        fields["reference"] = Dyn.Text(self.reference.copy())
+        fields["provider"] = Dyn.Text(self.provider.copy())
+        fields["recipe_hash"] = Dyn.Text(self.recipe_hash.copy())
+        fields["source_hash"] = Dyn.Text(self.source_hash.copy())
+        fields["platform"] = Dyn.Text(self.platform.copy())
+        fields["status"] = Dyn.Text(self.status.copy())
         fields["failed_step"] = Dyn.Int(self.failed_step)
-        fields["scratch_dir"] = Dyn.Text(self.scratch_dir)
-        fields["log_dir"] = Dyn.Text(self.log_dir)
+        fields["scratch_dir"] = Dyn.Text(self.scratch_dir.copy())
+        fields["log_dir"] = Dyn.Text(self.log_dir.copy())
         fields["steps"] = Dyn.Array(steps)
         pkg_json_render(Dyn.Object(fields))
     }
@@ -246,7 +246,7 @@ fn recipe_debug_promote_stage(stage: String, source_scratch: String, target_scra
     recipe_debug_copy_tree(source_scratch, stage)
     files.rename(stage, target_scratch)
     attempt.scratch_dir = target_scratch
-    attempt.persist(target_hangar)
+    &attempt.persist(target_hangar)
 }
 
 // `jet logs` text: a header, then each step's status and trimmed output.
@@ -359,7 +359,7 @@ fn recipe_debug_num_field(object: [String: Dyn], key: String) -> Int Never! {
     value :: object.get(key) ?? return 0
     if value == {
         .Int(number) -> if number >= 0 -> number else -> 0
-        .Float(number) -> if number - number == 0.0 && number >= 0.0 -> number.to_int() else -> 0
+        .Float(number) -> if number - number == 0.0 && number >= 0.0 -> (Int.from_float(math.trunc(number)) ?? 0) else -> 0
         else -> 0
     }
 }

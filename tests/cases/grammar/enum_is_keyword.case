@@ -1,0 +1,14 @@
+# tests/grammar.rs::enum_is_keyword at tests/grammar.rs:529; hand-port
+# Claim: lexing `enum x { A; }` yields no diagnostics (tests/grammar.rs:531)
+# Claim: first token is KwEnum (tests/grammar.rs:532-535)
+# Fixture migrated: `enum x { A; }` -> canonical multi-line enum without `;` (jet check E0373: explicit semicolon is not canonical Jet syntax)
+# Fixture migrated: enum name `x` -> `X` (jet check E0357: enum names must be PascalCase)
+# Not ported: TokKind::KwEnum token kind check: Rust lexer internal, not observable from the jet CLI; represented by jet check accepting the declaration
+fixture: enum_is_keyword.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # tests/grammar.rs:531 diags.is_empty(); tests/grammar.rs:532 enum keyword lexed
+stdout: !~ "E0" # tests/grammar.rs:531 diags.is_empty(); tests/grammar.rs:532 enum keyword lexed
+stderr: !~ "E0" # tests/grammar.rs:531 diags.is_empty(); tests/grammar.rs:532 enum keyword lexed

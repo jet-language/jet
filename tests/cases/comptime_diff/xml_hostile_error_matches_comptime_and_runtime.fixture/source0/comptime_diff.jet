@@ -1,0 +1,25 @@
+use core.encoding.hex as comptime_diff_hex
+use core.encoding.xml as xml
+
+fn show(result: Dyn XMLError!) -> String {
+    if result == {
+        .Ok(_) -> return "ok"
+        .Err(e) -> {
+            return "{e.byte_offset}|{e.line}|{e.column}|{e.path}|{e.reason}"
+        }
+    }
+    return "unreachable"
+}
+
+EXPECTED_MISMATCH :: comptime { show(xml.parse("<root>\n<a></root>")) }
+
+fn run() {
+    actual_mismatch :: show(xml.parse("<root>\n<a></root>"))
+    comptime_diff_frame("{EXPECTED_MISMATCH}", "{actual_mismatch}")
+
+}
+
+fn comptime_diff_frame(expected_text: String, actual_text: String) {
+    print("{comptime_diff_hex.encode(expected_text.bytes())}")
+    print("{comptime_diff_hex.encode(actual_text.bytes())}")
+}

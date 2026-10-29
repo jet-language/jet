@@ -1,0 +1,11 @@
+# tests/web_partition.rs::ordinary_wasm_struct_field_does_not_gain_export_boundary_support at tests/web_partition.rs:93; hand-port
+# Claim: A Wasm-pinned fn taking an ordinary struct param is refused with exactly [E-WEB-UNSUPPORTED] (tests/web_partition.rs:101-105)
+fixture: ordinary_wasm_struct_field_does_not_gain_export_boundary_support.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build --target=web main.jet
+exit: 1 # tests/web_partition.rs:101-105 expect_err, codes exactly [E-WEB-UNSUPPORTED]
+stderr: ~ "E-WEB-UNSUPPORTED" # tests/web_partition.rs:101-105 expect_err, codes exactly [E-WEB-UNSUPPORTED]
+stderr: !~ "E-WEB-ABI-TYPE" # tests/web_partition.rs:101-105 expect_err, codes exactly [E-WEB-UNSUPPORTED]
+stderr: !~ "E-WEB-CROSS-PARTITION" # tests/web_partition.rs:101-105 expect_err, codes exactly [E-WEB-UNSUPPORTED]

@@ -1,7 +1,10 @@
 // Exact complete reviewed tests/pkg.rs:3131-3200, public Lock API counterpart.
 // PENDING-SEAM(package-tests); no snapshots or altered fixtures.
+use jet_pkg_model.[LockFile, LockedPackage, LockedWorkspaceMember, pkg_lock_parse, pkg_lock_write]
+use jet_foundation.[RuntimeLayer]
+
 #Test("pkg integration lock_file_content_hash_roundtrip") {
-    package :: LockedPackage{name: "foo", version: "1.0.0", source: .Path("../foo"), fingerprint: "sha256-cccc", content_hash: Val("sha256-deadbeef"), layer: Val(MIRRuntimeLayer.Core), inferred_layer: Val(MIRRuntimeLayer.Std)}
+    package :: LockedPackage{name: "foo", version: "1.0.0", source: .Path("../foo"), fingerprint: "sha256-cccc", content_hash: Val("sha256-deadbeef"), layer: Val(RuntimeLayer.Core), inferred_layer: Val(RuntimeLayer.Std)}
     lock := LockFile.empty()
     lock.packages = [LockedPackage]{package}
     lock.root_dependencies = [String]{"foo"}
@@ -12,8 +15,8 @@
     assert(serialized.contains("inferred-layer = \"hosted\""))
     parsed :: pkg_lock_parse(serialized) ?? panic("must parse back")
     assert_eq(parsed.packages[0].content_hash, Val("sha256-deadbeef"))
-    assert_eq(parsed.packages[0].layer, Val(MIRRuntimeLayer.Core))
-    assert_eq(parsed.packages[0].inferred_layer, Val(MIRRuntimeLayer.Std))
+    assert_eq(parsed.packages[0].layer, Val(RuntimeLayer.Core))
+    assert_eq(parsed.packages[0].inferred_layer, Val(RuntimeLayer.Std))
     assert_eq(parsed.workspace_members[0].name, "hello")
     assert_eq(parsed.workspace_members[0].path, "packages/hello")
 }

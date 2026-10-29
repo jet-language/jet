@@ -1,4 +1,11 @@
 // 4c7227ad5: evidence diagnostic source marker admits only 0 and 1; assemble with Compiler and run.
+use jet_foundation.[
+    EvidenceDiagnostic, EvidenceKind, EvidenceOutcome, EvidenceProducerKind, EvidenceRecord,
+    EvidenceSource, evidence_build_empty, evidence_cursor, evidence_decode_record,
+    evidence_encode_record, evidence_identity_for_record, evidence_record_new,
+    evidence_revision_empty,
+]
+
 fn evidence_marker_require(ok: Bool, name: String) Never! {
     if !ok -> panic("evidence source marker contract: {name}")
 }
@@ -42,7 +49,7 @@ fn evidence_marker_decode_error(bytes: [U8]) -> String {
     }
 }
 
-fn run() {
+#Test("evidence_source_marker") {
     none_bytes := evidence_marker_encode(evidence_marker_record(None))
     some_bytes := evidence_marker_encode(evidence_marker_record(Val(EvidenceSource{path: "source.jet", line: U32{3}, column: U32{4}})))
 

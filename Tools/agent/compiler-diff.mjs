@@ -39,7 +39,7 @@ const UI_DIR = join(ROOT, "tests/ui");
 const DIFFERENTIAL_DIR = join(ROOT, "tests/fuzz/sema/differential");
 const CANARY_DIR = join(ROOT, "tests/compiler-diff/canary");
 const CANARY_CANDIDATE = join(ROOT, "tests/compiler-diff/canary-candidate.mjs");
-const EXAMPLE_STDIN_SOURCE = join(ROOT, "tests/common/mod.rs");
+const EXAMPLE_STDIN_DIR = join(FEATURES, "expected");
 const EXT = "jet";
 const WORKSPACE_FILE = "workspace.jet";
 
@@ -66,6 +66,8 @@ export function usage() {
     "       compiler-diff.mjs --canary [--reference <jet>]",
     "  --reference PATH     pinned reference compiler (default $JET_REFERENCE_COMPILER, else $JET; required)",
     "  --candidate PATH     candidate compiler (default $JET_CANDIDATE_COMPILER; required)",
+    "  --reference-env K=V  environment for the reference compiler only, e.g. JET_TOOLCHAIN_ROOT (repeatable)",
+    "  --candidate-env K=V  environment for the candidate compiler only (repeatable)",
     "  --corpus NAME        golden | ui | differential | all (default all; repeatable)",
     "  --phases LIST        override phases: check,run,build",
     "  --filter TEXT        keep cases whose path contains TEXT (repeatable)",
@@ -97,6 +99,8 @@ export function parseArgs(argv) {
     root: null,
     list: false,
     canary: false,
+    referenceEnv: {},
+    candidateEnv: {},
     help: false,
   };
   const value = (i, flag) => {
@@ -107,7 +111,12 @@ export function parseArgs(argv) {
     const arg = argv[i];
     if (arg === "--reference") options.reference = value(++i, arg);
     else if (arg === "--candidate") options.candidate = value(++i, arg);
-    else if (arg === "--corpus") {
+    else if (arg === "--reference-env" || arg === "--candidate-env") {
+      const pair = value(++i, arg);
+      const eq = pair.indexOf("=");
+      if (eq <= 0) throw new Unavailable(`${arg} expects KEY=VALUE, got ${pair}`);
+      options[arg === "--reference-env" ? "referenceEnv" : "candidateEnv"][pair.slice(0, eq)] = pair.slice(eq + 1);
+    } else if (arg === "--corpus") {
       const corpus = value(++i, arg);
       if (corpus === "all") options.corpora.push(...CORPORA);
       else if (CORPORA.includes(corpus)) options.corpora.push(corpus);
@@ -185,8 +194,9 @@ export function goldenFailureExit(stem, stderr) {
   }
   // #1474: this source disables logging before log.fatal exits 1.
   if (stderr === "") return stem === "io/log_fatal" ? 1 : null;
-  // Source-proved entry returns, matching tests/golden.rs; fatal_exit explicitly
-  // calls process.exit(1). An arbitrary Error prefix is not an exit oracle.
+  // Source-proved entry returns, matching kit_golden_failure_exit in Tools/testkit/Golden.jet;
+  // fatal_exit explicitly calls process.exit(1), and an E1803 authority refusal
+  // exits 1 before anything runs. An arbitrary Error prefix is not an exit oracle.
   switch (stem) {
     case "errors/propagation_journey":
     case "errors/propagation_journey_direct":
@@ -198,13 +208,17 @@ export function goldenFailureExit(stem, stderr) {
     case "errors/fatal_exit":
     case "serde/decode_error_exit":
     case "crypto/crypto_error_run":
+    case "effects/authority_core_method":
+    case "effects/authority_denied":
+    case "effects/authority_partial":
+    case "effects/authority_undeclared":
       return 1;
     default:
       return null;
   }
 }
 
-// Port of `collect_feature_golden_entries` (tests/golden.rs).
+// Mirrors kit_golden_collect (Tools/testkit/Golden.jet): project roots own their descendants.
 export function collectGoldenEntries(exDir = FEATURES) {
   const entries = [];
   const push = (path, stem, shown) => entries.push({ path, stem, shown });
@@ -245,20 +259,22 @@ export function collectGoldenEntries(exDir = FEATURES) {
   return entries.sort((a, b) => (a.stem < b.stem ? -1 : a.stem > b.stem ? 1 : 0));
 }
 
-// The interactive-example answers live in one place: `example_stdin` in
-// tests/common/mod.rs. Read that table instead of restating it.
-export function loadExampleStdin(source = readFileSync(EXAMPLE_STDIN_SOURCE, "utf8")) {
-  const consts = new Map();
-  for (const match of source.matchAll(/const (\w+): ExampleStdin = ExampleStdin \{\s*piped: ("(?:[^"\\]|\\.)*")/gu)) {
-    consts.set(match[1], JSON.parse(match[2]));
-  }
-  const body = source.split("pub fn example_stdin(")[1]?.split("\n}\n")[0] ?? "";
+// The interactive-example answers live in one place: the `<stem>.stdin`
+// goldens under Examples/features/expected, the same files the native testkit
+// pipes. Read them instead of restating them.
+export function loadExampleStdin(directory = EXAMPLE_STDIN_DIR) {
   const table = new Map();
-  for (const match of body.matchAll(/"([^"]+)" => Some\(&(\w+)\)/gu)) {
-    if (!consts.has(match[2])) throw new Error(`example_stdin names ${match[2]} but its piped answers were not found`);
-    table.set(match[1], consts.get(match[2]));
-  }
-  if (table.size === 0) throw new Error(`no example_stdin rows found in ${relative(ROOT, EXAMPLE_STDIN_SOURCE)}`);
+  const visit = (path) => {
+    for (const entry of readdirSync(path, { withFileTypes: true })) {
+      const child = join(path, entry.name);
+      if (entry.isDirectory()) visit(child);
+      else if (entry.isFile() && entry.name.endsWith(".stdin")) {
+        table.set(relative(directory, child).split(sep).join("/").slice(0, -".stdin".length), readFileSync(child, "utf8"));
+      }
+    }
+  };
+  visit(directory);
+  if (table.size === 0) throw new Error(`no example .stdin goldens found under ${relative(ROOT, directory)}`);
   return table;
 }
 
@@ -333,10 +349,9 @@ function uiCommands(source, file) {
   if (has("cli_e2101")) return [{ phase: "check", args: ["bench"] }];
   if (has("cli_e1219")) return [{ phase: "build", args: ["build", file, "--profile=turbo"] }];
   if (has("cli_build")) return [{ phase: "build", args: ["build", file] }];
-  if (has("sandbox_effect") || has("plugin_target")) return [{ phase: "build", args: ["build", file, "--target=sandbox"] }];
   if (complexity) return [{ phase: "check", args: ["lint", "--complexity", file, `--max=${complexity.split(/\s+/u)[1]}`] }];
   if (has("cost_cli")) return [{ phase: "check", args: ["explain", "--cost", file] }];
-  if (has("run_cli") || has("web_run") || has("dev_interpreter") || has("runtime_ffi") || has("parent_control_cancel")) {
+  if (has("run_cli") || has("web_run") || has("runtime_ffi") || has("parent_control_cancel")) {
     return [{ phase: "run", args: ["run", file] }];
   }
   return [{ phase: "check", args: ["check", file] }];
@@ -601,6 +616,26 @@ function invoke(compiler, command, cwd, env, options) {
   });
 }
 
+// A compiler that cannot run a trivial program in its scrubbed side
+// environment (a missing toolchain root or identity, a broken runtime pack)
+// would fail every case the same way as the other side and look "matched".
+// Refuse to compare until each side proves it runs.
+const READY_TEXT = "compiler-diff-ready";
+
+async function requireReady(compiler, options) {
+  const dir = join(compiler.sideRoot, "ready");
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `ready.${EXT}`), `fn run() {\n    print("${READY_TEXT}")\n}\n`);
+  const run = await invoke(compiler, { args: ["run", `ready.${EXT}`], stdin: null }, dir, sideEnv(compiler.sideRoot), options);
+  rmSync(dir, { recursive: true, force: true });
+  if (run.spawnError) throw new Unavailable(`${compiler.role} compiler could not start: ${run.spawnError}`);
+  if (run.code !== 0 || run.stdout.trim() !== READY_TEXT) {
+    const why = run.stderr.trim().split("\n").slice(0, 3).join(" | ") || `stdout ${JSON.stringify(run.stdout.slice(0, 200))}`;
+    throw new Unavailable(`${compiler.role} compiler cannot run a trivial program in its side environment (status ${run.code ?? run.signal}): ${why}; pass --${compiler.role}-env KEY=VALUE for any variable it needs`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Normalization, redaction and observation
 // ---------------------------------------------------------------------------
@@ -654,6 +689,14 @@ function stabilizeStderr(text) {
   return text
     .replace(/\b\d+(?:\.\d+)?\s?(?:ns|µs|us|ms|s|sec|secs|seconds)\b/gu, "<DUR>")
     .replace(/\b[0-9a-f]{16,}\b/gu, "<HEX>");
+}
+
+// Wall-clock timestamps a program prints (structured log `"ts"` fields in
+// epoch milliseconds, ISO-8601 instants) differ between any two runs.
+function stabilizeClock(text) {
+  return text
+    .replace(/"ts":\d{12,14}\b/gu, '"ts":<TS>')
+    .replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?/gu, "<TS>");
 }
 
 const DIAGNOSTIC_HEADER = /^(Error|Warning|Note|Help|Info|Hint|Stop|Lint)\b[^[\n]*\[([A-Z][A-Za-z0-9-]*)\](?: \(([^)]*)\))?: ?(.*)$/u;
@@ -763,8 +806,8 @@ function sideEffects(caseDir, before, after, normalize) {
 }
 
 function observe(run, normalize, effects) {
-  const stdout = normalize(run.stdout);
-  const stderr = stabilizeStderr(normalize(run.stderr));
+  const stdout = stabilizeClock(normalize(run.stdout));
+  const stderr = stabilizeClock(stabilizeStderr(normalize(run.stderr)));
   return {
     status: statusText(run),
     panic: classifyPanic(stderr),
@@ -1116,7 +1159,7 @@ async function compare(options) {
         role: "reference",
         path: referencePath,
         argv: [referencePath],
-        env: {},
+        env: { ...options.referenceEnv },
         sideRoot: join(root, "reference"),
         pinned: pinFiles([referencePath]),
       },
@@ -1125,7 +1168,7 @@ async function compare(options) {
           role: "candidate",
           path: CANARY_CANDIDATE,
           argv: [process.execPath, CANARY_CANDIDATE],
-          env: { COMPILER_DIFF_CANARY_REAL: referencePath },
+          env: { ...options.referenceEnv, COMPILER_DIFF_CANARY_REAL: referencePath },
           sideRoot: join(root, "candidate"),
           pinned: pinFiles([CANARY_CANDIDATE, referencePath]),
         }
@@ -1133,7 +1176,7 @@ async function compare(options) {
           role: "candidate",
           path: candidatePath,
           argv: [candidatePath],
-          env: {},
+          env: { ...options.candidateEnv },
           sideRoot: join(root, "candidate"),
           pinned: pinFiles([candidatePath]),
         },
@@ -1148,6 +1191,8 @@ async function compare(options) {
     }
     const corpora = options.canary ? ["canary"] : options.corpora;
     console.log(`compiler-diff: ${cases.length} case(s) from ${corpora.join(", ")}; root ${tilde(root)}`);
+    await requireReady(context.reference, options);
+    if (!options.canary) await requireReady(context.candidate, options);
 
     const width = String(cases.length).length;
     const results = await runAll(cases, context, options, (index, result) => {

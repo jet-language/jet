@@ -1,0 +1,662 @@
+// Canonical lowering for closed checked builtin-method operations.
+use jet_foundation.[
+    Effect,
+    TBuiltinOp,
+    TFailureCarrier,
+    Type,
+]
+
+struct IRBuiltinRoute {
+    module_name: String
+    member: String
+    symbol: String
+    arity: Int
+    borrow_mask: [Bool]
+    effect_kind: Effect?
+}
+
+fn ir_builtin_route_row(module_name: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?) -> IRBuiltinRoute Never! {
+    IRBuiltinRoute{module_name: module_name, member: member, symbol: symbol, arity: arity, borrow_mask: borrow_mask, effect_kind: route_effect}
+}
+
+fn ir_builtin_plain_route(member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?) -> IRBuiltinRoute Never! {
+    ir_builtin_route_row("core.builtin", member, symbol, arity, borrow_mask, route_effect)
+}
+
+fn ir_builtin_untag(ty: Type) -> Type Never! {
+    if ty == {
+        .Tagged(_, inner) -> return ir_builtin_untag(inner)
+        // copy: the untagged type is a new owned Type. Otherwise it equals `ty`, the caller's
+        // checked type (a read parameter), which stays on the checked node.
+        else -> return ty.copy()
+    }
+}
+
+fn ir_builtin_string_receiver(ty: Type) -> Bool Never! {
+    ir_builtin_untag(ty) == Type.String
+}
+
+fn ir_builtin_iter_receiver(ty: Type) -> Bool Never! {
+    if ir_builtin_untag(ty) == {
+        .Apply(name, args) -> return args.len() == 1 && (name == "Iter" || name == "ViewIter")
+        else -> return false
+    }
+}
+
+fn ir_builtin_route_for_receiver(operation: TBuiltinOp, receiver: Type, carrier: TFailureCarrier) -> IRBuiltinRoute Never! {
+    ty := ir_builtin_untag(receiver)
+    if operation == {
+        .Clear -> {
+            if ty == {
+                .Apply(name, _) -> {
+                    if name == "Set" -> return ir_builtin_plain_route("set_clear", "std::collections::HashSet::clear", 1, [Bool]{true}, Val(Effect.Mem))
+                    if name == "Rank" -> return ir_builtin_plain_route("sorted_set_clear", "std::collections::BTreeSet::clear", 1, [Bool]{true}, Val(Effect.Mem))
+                    if name == "Tally" -> return ir_builtin_plain_route("bag_clear", "std::collections::HashMap::clear", 1, [Bool]{true}, Val(Effect.Mem))
+                    if name == "Cache" -> return ir_builtin_plain_route("lru_clear", "JetCache::clear", 1, [Bool]{true}, Val(Effect.Mem))
+                    if name == "Queue" -> return ir_builtin_plain_route("deque_clear", "std::collections::VecDeque::clear", 1, [Bool]{true}, Val(Effect.Mem))
+                    if name == "PriorityQueue" -> return ir_builtin_plain_route("priority_queue_clear", "std::collections::BinaryHeap::clear", 1, [Bool]{true}, Val(Effect.Mem))
+                }
+                else -> {}
+            }
+            if ty == {
+                .Map(_, _, _) -> return ir_builtin_plain_route("map_clear", "std::collections::HashMap::clear", 1, [Bool]{true}, Val(Effect.Mem))
+                else -> {}
+            }
+            if ty == {
+                .Named(name) -> {
+                    if name == "Bits" -> return ir_builtin_plain_route("bit_set_clear", "JetBitSet::clear", 1, [Bool]{true}, Val(Effect.Mem))
+                }
+                else -> {}
+            }
+            return ir_builtin_plain_route("list_clear", "jet_list_clear", 1, [Bool]{true}, Val(Effect.Mem))
+        }
+        else -> {}
+    }
+    if operation == {
+        .LenList -> {
+            if ty == {
+                .List(_) | .FixedList(_, _) -> return ir_builtin_plain_route("len", "jet_list_len", 1, [Bool]{true}, None)
+                .Map(_, _, _) -> return ir_builtin_plain_route("len", "jet_map_len", 1, [Bool]{true}, None)
+                .String -> return ir_builtin_plain_route("len", "jet_char_len", 1, [Bool]{true}, None)
+                .Apply(name, _) -> {
+                    if name == "Iter" || name == "ViewIter" -> return ir_builtin_plain_route("len", "jet_iter_len", 1, [Bool]{false}, None)
+                    if name == "View" || name == "ViewMut" || name == "ComputeViewMut" -> return ir_builtin_plain_route("len", "jet_list_len", 1, [Bool]{true}, None)
+                    if name == "Set" -> return ir_builtin_plain_route("len", "jet_set_len", 1, [Bool]{true}, None)
+                    if name == "Rank" -> return ir_builtin_plain_route("len", "jet_sorted_set_len", 1, [Bool]{true}, None)
+                    if name == "PriorityQueue" -> return ir_builtin_plain_route("len", "jet_priority_queue_len", 1, [Bool]{true}, None)
+                    if name == "Cache" -> return ir_builtin_plain_route("len", "jet_lru_len", 1, [Bool]{true}, None)
+                    if name == "Tally" -> return ir_builtin_plain_route("len", "jet_bag_len", 1, [Bool]{true}, None)
+                    if name == "Queue" -> return ir_builtin_plain_route("len", "jet_deque_len", 1, [Bool]{true}, None)
+                }
+                .Named(name) -> {
+                    if name == "Bits" -> return ir_builtin_plain_route("len", "jet_bit_set_len", 1, [Bool]{true}, None)
+                }
+                else -> {}
+            }
+        }
+        .IsEmpty -> {
+            if ty == {
+                .List(_) | .FixedList(_, _) -> return ir_builtin_plain_route("is_empty", "jet_list_is_empty", 1, [Bool]{true}, None)
+                .Map(_, _, _) -> return ir_builtin_plain_route("is_empty", "jet_map_is_empty", 1, [Bool]{true}, None)
+                .String -> return ir_builtin_plain_route("is_empty", "jet_string_is_empty", 1, [Bool]{true}, None)
+                .Apply(name, _) -> {
+                    if name == "Iter" || name == "ViewIter" -> return ir_builtin_plain_route("is_empty", "jet_iter_is_empty", 1, [Bool]{false}, None)
+                    if name == "View" || name == "ViewMut" || name == "ComputeViewMut" -> return ir_builtin_plain_route("is_empty", "jet_list_is_empty", 1, [Bool]{true}, None)
+                    if name == "Set" -> return ir_builtin_plain_route("is_empty", "jet_set_is_empty", 1, [Bool]{true}, None)
+                    if name == "Rank" -> return ir_builtin_plain_route("is_empty", "jet_sorted_set_is_empty", 1, [Bool]{true}, None)
+                    if name == "PriorityQueue" -> return ir_builtin_plain_route("is_empty", "jet_priority_queue_is_empty", 1, [Bool]{true}, None)
+                    if name == "Cache" -> return ir_builtin_plain_route("is_empty", "jet_lru_is_empty", 1, [Bool]{true}, None)
+                    if name == "Tally" -> return ir_builtin_plain_route("is_empty", "jet_bag_is_empty", 1, [Bool]{true}, None)
+                    if name == "Queue" -> return ir_builtin_plain_route("is_empty", "jet_deque_is_empty", 1, [Bool]{true}, None)
+                }
+                .Named(name) -> {
+                    if name == "Bits" -> return ir_builtin_plain_route("is_empty", "jet_bit_set_is_empty", 1, [Bool]{true}, None)
+                }
+                else -> {}
+            }
+        }
+        .GetList -> {
+            if ty == {
+                .List(_) | .FixedList(_, _) -> return ir_builtin_plain_route("get", "jet_list_get_opt", 2, [Bool]{true, false}, None)
+                else -> {}
+            }
+            if ty == {
+                .Apply(name, _) -> {
+                    if name == "View" || name == "ViewMut" || name == "ComputeViewMut" -> return ir_builtin_plain_route("get", "jet_list_get_opt", 2, [Bool]{true, false}, None)
+                }
+                else -> {}
+            }
+        }
+        .GetMap -> {
+            if ty == {
+                .Map(_, _, _) -> return ir_builtin_plain_route("get", "jet_map_get_opt", 2, [Bool]{true, true}, None)
+                else -> {}
+            }
+        }
+        .ContainsKey -> {
+            if ty == {
+                .Map(_, _, _) -> return ir_builtin_plain_route("map_has_key", "jet_map_has_key", 2, [Bool]{true, true}, None)
+                else -> {}
+            }
+            if ty == {
+                .Apply(name, _) -> {
+                    if name == "Cache" -> return ir_builtin_plain_route("lru_has", "jet_lru_has", 2, [Bool]{true, true}, None)
+                }
+                else -> {}
+            }
+        }
+        .SetShuffle -> {
+            if ty == {
+                .Apply(name, _) -> {
+                    if name == "Set" -> return ir_builtin_plain_route("shuffle", "jet_set_shuffle", 1, [Bool]{true}, None)
+                }
+                else -> {}
+            }
+        }
+        .Max(max) -> {
+            if !max {
+                if ty == {
+                    .Apply(name, _) -> {
+                        if name == "Set" -> return ir_builtin_plain_route("max", "jet_set_max", 1, [Bool]{true}, None)
+                    }
+                    else -> {}
+                }
+                return ir_builtin_plain_route("max", "jet_list_max", 1, [Bool]{false}, None)
+            }
+        }
+        .First -> {
+            if ty == {
+                .List(_) | .FixedList(_, _) -> return ir_builtin_plain_route("first", "jet_list_first", 1, [Bool]{true}, None)
+                else -> {}
+            }
+            if ir_builtin_iter_receiver(ty) -> return ir_builtin_plain_route("first", "jet_iter_first", 1, [Bool]{false}, None)
+            if ty == {
+                .Apply(name, _) -> {
+                    if name == "View" || name == "ViewMut" || name == "ComputeViewMut" -> return ir_builtin_plain_route("first", "jet_list_first", 1, [Bool]{true}, None)
+                }
+                else -> {}
+            }
+            if ty == {
+                .Apply(name, _) -> {
+                    if name == "Rank" -> return ir_builtin_plain_route("first", "jet_sorted_set_first", 1, [Bool]{true}, None)
+                }
+                else -> {}
+            }
+        }
+        .Last -> {
+            if ty == {
+                .List(_) | .FixedList(_, _) -> return ir_builtin_plain_route("last", "jet_list_last", 1, [Bool]{true}, None)
+                else -> {}
+            }
+            if ty == {
+                .Apply(name, _) -> {
+                    if name == "View" || name == "ViewMut" || name == "ComputeViewMut" -> return ir_builtin_plain_route("last", "jet_list_last", 1, [Bool]{true}, None)
+                }
+                else -> {}
+            }
+            if ty == {
+                .Apply(name, _) -> {
+                    if name == "Rank" -> return ir_builtin_plain_route("last", "jet_sorted_set_last", 1, [Bool]{true}, None)
+                }
+                else -> {}
+            }
+        }
+        .Contains -> {
+            if ir_builtin_string_receiver(ty) -> return ir_builtin_plain_route("contains", "jet_string_contains", 2, [Bool]{true, true}, None)
+            if ty == {
+                .List(_) | .FixedList(_, _) -> return ir_builtin_plain_route("contains", "jet_list_contains", 2, [Bool]{true, true}, None)
+                else -> {}
+            }
+            if ty == {
+                .Apply(name, _) -> {
+                    if name == "Set" -> return ir_builtin_plain_route("contains", "jet_set_has", 2, [Bool]{true, true}, None)
+                }
+                else -> {}
+            }
+            if ty == {
+                .Named(name) -> {
+                    if name == "Range" || name == "Bits" -> return ir_builtin_plain_route(if name == "Range" -> "contains" else -> "bit_set_has", if name == "Range" -> "jet_range_value_contains" else -> "jet_bit_set_has", 2, [Bool]{true, false}, None)
+                }
+                else -> {}
+            }
+            if ty == {
+                .InlineRange(_, _, _) -> return ir_builtin_plain_route("contains", "jet_range_contains", 2, [Bool]{true, false}, None)
+                else -> {}
+            }
+            if ty == {
+                .Apply(name, _) -> {
+                    if name == "Rank" -> return ir_builtin_plain_route("sorted_set_has", "std::collections::BTreeSet::contains", 2, [Bool]{true, true}, None)
+                }
+                else -> {}
+            }
+            if ty == {
+                .Apply(name, _) -> {
+                    if name == "View" || name == "ViewMut" || name == "ComputeViewMut" -> return ir_builtin_plain_route("contains", "jet_list_contains", 2, [Bool]{true, true}, None)
+                }
+                else -> {}
+            }
+        }
+        .StartsWith -> {
+            if ir_builtin_string_receiver(ty) -> return ir_builtin_plain_route("string_starts_with", "jet_string_starts_with", 2, [Bool]{true, true}, None)
+            return ir_builtin_plain_route("list_starts_with", "jet_list_starts_with", 2, [Bool]{true, true}, None)
+        }
+        .EndsWith -> {
+            if ir_builtin_string_receiver(ty) -> return ir_builtin_plain_route("string_ends_with", "jet_string_ends_with", 2, [Bool]{true, true}, None)
+            return ir_builtin_plain_route("list_ends_with", "jet_list_ends_with", 2, [Bool]{true, true}, None)
+        }
+        .DequeCapacity -> {
+            if ty == {
+                .Apply(name, _) -> {
+                    if name == "Queue" -> return ir_builtin_plain_route("capacity", "jet_deque_capacity", 1, [Bool]{true}, None)
+                }
+                else -> {}
+            }
+        }
+        .SetCapacity -> {
+            if ty == {
+                .Apply(name, _) -> {
+                    if name == "Set" -> return ir_builtin_plain_route("capacity", "jet_set_capacity", 1, [Bool]{true}, None)
+                }
+                else -> {}
+            }
+        }
+        .ListUnion -> {
+            if ty == {
+                .List(_) | .FixedList(_, _) -> return ir_builtin_plain_route("union", "jet_list_union", 2, [Bool]{true, true}, None)
+                else -> {}
+            }
+        }
+        .ListIntersection -> {
+            if ty == {
+                .List(_) | .FixedList(_, _) -> return ir_builtin_plain_route("intersection", "jet_list_intersection", 2, [Bool]{true, true}, None)
+                else -> {}
+            }
+        }
+        .ListDifference -> {
+            if ty == {
+                .List(_) | .FixedList(_, _) -> return ir_builtin_plain_route("difference", "jet_list_difference", 2, [Bool]{true, true}, None)
+                else -> {}
+            }
+        }
+        .ListRandom -> {
+            if ty == {
+                .List(_) | .FixedList(_, _) -> return ir_builtin_plain_route("random", "jet_list_random", 1, [Bool]{true}, None)
+                else -> {}
+            }
+        }
+        .MapFromKeys -> {
+            key := ty
+            if ty == {
+                .List(inner) -> {
+                    key = ir_builtin_untag(inner)
+                }
+                else -> {}
+            }
+            if ty == {
+                .FixedList(inner, _) -> {
+                    key = ir_builtin_untag(inner)
+                }
+                else -> {}
+            }
+            symbol := if key == {
+                .String -> "jet_map_from_keys_kernel"
+                .Int | .IntN(_, _) -> "jet_map_from_keys_int"
+                else -> "jet_map_from_keys_composite"
+            }
+            return ir_builtin_plain_route("map_from_keys", symbol, 2, [Bool]{false, false}, None)
+        }
+        else -> {}
+    }
+    panic("checked receiver-sensitive TBuiltinOp has no canonical route for its receiver type")
+}
+
+fn ir_builtin_container_route(operation: TBuiltinOp) -> IRBuiltinRoute Never! {
+    if operation == {
+        .SetFrom -> return ir_builtin_plain_route("set_from", "jet_set_from", 1, [Bool]{false}, None)
+        .SetToList -> return ir_builtin_plain_route("set_to_list", "jet_set_to_list", 1, [Bool]{true}, None)
+        .SetSort -> return ir_builtin_plain_route("set_sort", "jet_set_sort", 1, [Bool]{true}, None)
+        .SetEqual -> return ir_builtin_plain_route("set_equal", "jet_set_equal", 2, [Bool]{true, true}, None)
+        .SetFirst -> return ir_builtin_plain_route("set_first", "jet_set_first", 1, [Bool]{true}, None)
+        .SetValues -> return ir_builtin_plain_route("set_values", "jet_set_values", 1, [Bool]{true}, None)
+        .SetPop -> return ir_builtin_plain_route("set_pop", "jet_set_pop_kernel", 2, [Bool]{true, true}, Val(Effect.Mem))
+        .SetReplace -> return ir_builtin_plain_route("set_replace", "jet_set_replace_kernel", 2, [Bool]{true, false}, Val(Effect.Mem))
+        .SetInsert -> return ir_builtin_plain_route("set_insert", "jet_set_insert", 2, [Bool]{true, false}, Val(Effect.Mem))
+        .SetUpdate -> return ir_builtin_plain_route("set_update", "jet_set_update", 2, [Bool]{true, true}, Val(Effect.Mem))
+        .SetDifferenceUpdate -> return ir_builtin_plain_route("set_difference_update", "jet_set_difference_update", 2, [Bool]{true, true}, Val(Effect.Mem))
+        .SetIntersectionUpdate -> return ir_builtin_plain_route("set_intersection_update", "jet_set_intersection_update", 2, [Bool]{true, true}, Val(Effect.Mem))
+        .SetSymmetricDifferenceUpdate -> return ir_builtin_plain_route("set_symmetric_difference_update", "jet_set_symmetric_difference_update", 2, [Bool]{true, true}, Val(Effect.Mem))
+        .SetRemove -> return ir_builtin_plain_route("set_remove", "jet_set_remove", 2, [Bool]{true, false}, Val(Effect.Mem))
+        .SetUnion -> return ir_builtin_plain_route("set_union", "jet_set_union", 2, [Bool]{true, true}, None)
+        .SetIntersection -> return ir_builtin_plain_route("set_intersection", "jet_set_intersection", 2, [Bool]{true, true}, None)
+        .SetDifference -> return ir_builtin_plain_route("set_difference", "jet_set_difference", 2, [Bool]{true, true}, None)
+        .SetSymmetricDifference -> return ir_builtin_plain_route("set_symmetric_difference", "jet_set_symmetric_difference", 2, [Bool]{true, true}, None)
+        .SetIsSubset -> return ir_builtin_plain_route("set_is_subset", "jet_set_is_subset", 2, [Bool]{true, true}, None)
+        .SetIsSuperset -> return ir_builtin_plain_route("set_is_superset", "jet_set_is_superset", 2, [Bool]{true, true}, None)
+        .SetIsDisjoint -> return ir_builtin_plain_route("set_is_disjoint", "jet_set_is_disjoint", 2, [Bool]{true, true}, None)
+        .SortedSetFrom -> return ir_builtin_plain_route("sorted_set_from", "jet_sorted_set_from", 1, [Bool]{false}, None)
+        .SortedSetToList -> return ir_builtin_plain_route("sorted_set_to_list", "jet_sorted_set_to_list", 1, [Bool]{true}, None)
+        .SortedSetInsert -> return ir_builtin_plain_route("sorted_set_insert", "jet_sorted_set_insert", 2, [Bool]{true, false}, Val(Effect.Mem))
+        .SortedSetRemove -> return ir_builtin_plain_route("sorted_set_remove", "jet_sorted_set_remove", 2, [Bool]{true, false}, Val(Effect.Mem))
+        .SortedSetUnion -> return ir_builtin_plain_route("sorted_set_union", "jet_sorted_set_union", 2, [Bool]{true, true}, None)
+        .SortedSetIntersection -> return ir_builtin_plain_route("sorted_set_intersection", "jet_sorted_set_intersection", 2, [Bool]{true, true}, None)
+        .SortedSetDifference -> return ir_builtin_plain_route("sorted_set_difference", "jet_sorted_set_difference", 2, [Bool]{true, true}, None)
+        .SortedSetSymmetricDifference -> return ir_builtin_plain_route("sorted_set_symmetric_difference", "jet_sorted_set_symmetric_difference", 2, [Bool]{true, true}, None)
+        .SortedSetIsSubset -> return ir_builtin_plain_route("sorted_set_is_subset", "jet_sorted_set_is_subset", 2, [Bool]{true, true}, None)
+        .SortedSetIsSuperset -> return ir_builtin_plain_route("sorted_set_is_superset", "jet_sorted_set_is_superset", 2, [Bool]{true, true}, None)
+        .SortedSetIsDisjoint -> return ir_builtin_plain_route("sorted_set_is_disjoint", "jet_sorted_set_is_disjoint", 2, [Bool]{true, true}, None)
+        .PriorityQueueFrom -> return ir_builtin_plain_route("priority_queue_from", "jet_priority_queue_from", 1, [Bool]{false}, None)
+        .PriorityQueuePeek -> return ir_builtin_plain_route("priority_queue_peek", "jet_priority_queue_peek", 1, [Bool]{true}, None)
+        .PriorityQueueToSortedList -> return ir_builtin_plain_route("priority_queue_to_sorted_list", "jet_priority_queue_to_sorted_list", 1, [Bool]{true}, None)
+        .PriorityQueueRemove(_, mode) -> {
+            if mode == {
+                .Value -> return ir_builtin_plain_route("priority_queue_remove_value", "jet_priority_queue_remove_value", 2, [Bool]{true, false}, Val(Effect.Mem))
+                .Slot -> return ir_builtin_plain_route("priority_queue_remove_slot", "jet_priority_queue_remove_slot_canonical", 2, [Bool]{true, false}, Val(Effect.Mem))
+                .Dynamic -> panic("dynamic priority queue removal requires structural lowering")
+            }
+        }
+        .LRUPut -> return ir_builtin_plain_route("lru_put", "jet_lru_put", 3, [Bool]{true, false, false}, Val(Effect.Mem))
+        .LRUAddNew -> return ir_builtin_plain_route("lru_add_new", "jet_lru_add_new", 3, [Bool]{true, false, false}, Val(Effect.Mem))
+        .LRUGet -> return ir_builtin_plain_route("lru_get", "jet_lru_get", 2, [Bool]{true, true}, Val(Effect.Mem))
+        .LRUKeys -> return ir_builtin_plain_route("lru_keys", "jet_lru_keys", 1, [Bool]{true}, None)
+        .BitSetAdd -> return ir_builtin_plain_route("bitset_add", "jet_bitset_add", 2, [Bool]{true, false}, Val(Effect.Mem))
+        .LRUCapacity -> return ir_builtin_plain_route("lru_capacity", "JetCache::capacity", 1, [Bool]{true}, None)
+        .LRURemove -> return ir_builtin_plain_route("lru_remove", "JetCache::remove", 2, [Bool]{true, true}, Val(Effect.Mem))
+        .BitSetRemove -> return ir_builtin_plain_route("bitset_remove", "jet_bitset_remove", 2, [Bool]{true, false}, Val(Effect.Mem))
+        .BitSetCount -> return ir_builtin_plain_route("bit_set_count", "jet_bit_set_count", 1, [Bool]{true}, None)
+        .BitSetToList -> return ir_builtin_plain_route("bit_set_to_list", "jet_bit_set_to_list", 1, [Bool]{true}, None)
+        .BagAdd -> return ir_builtin_plain_route("bag_add", "jet_bag_add", 2, [Bool]{true, false}, Val(Effect.Mem))
+        .BagRemove -> return ir_builtin_plain_route("bag_remove", "jet_bag_remove", 2, [Bool]{true, false}, Val(Effect.Mem))
+        .BagHas -> return ir_builtin_plain_route("bag_has", "jet_bag_has", 2, [Bool]{true, true}, None)
+        .BagCount -> return ir_builtin_plain_route("bag_count", "jet_bag_count", 2, [Bool]{true, true}, None)
+        .DequePushFront -> return ir_builtin_plain_route("deque_push_front", "jet_deque_push_front", 2, [Bool]{true, false}, Val(Effect.Mem))
+        .DequePushBack -> return ir_builtin_plain_route("deque_push_back", "jet_deque_push_back", 2, [Bool]{true, false}, Val(Effect.Mem))
+        .DequePopFront -> return ir_builtin_plain_route("deque_pop_front", "jet_deque_pop_front_kernel", 1, [Bool]{true}, Val(Effect.Mem))
+        .DequePopBack -> return ir_builtin_plain_route("deque_pop_back", "jet_deque_pop_back_kernel", 1, [Bool]{true}, Val(Effect.Mem))
+        .DequePeekFront -> return ir_builtin_plain_route("deque_peek_front", "jet_deque_peek_front", 1, [Bool]{true}, None)
+        .DequePeekBack -> return ir_builtin_plain_route("deque_peek_back", "jet_deque_peek_back", 1, [Bool]{true}, None)
+        .DequeContains -> return ir_builtin_plain_route("deque_contains", "jet_deque_contains", 2, [Bool]{true, true}, None)
+        .DequeDelete -> return ir_builtin_plain_route("deque_delete", "jet_deque_delete", 2, [Bool]{true, false}, Val(Effect.Mem))
+        .DequeToList -> return ir_builtin_plain_route("deque_to_list", "jet_deque_to_list", 1, [Bool]{true}, None)
+        .DequeJoin -> return ir_builtin_plain_route("deque_join", "jet_deque_join", 2, [Bool]{true, true}, None)
+        .DequeReverse -> return ir_builtin_plain_route("deque_reverse", "jet_deque_reverse", 1, [Bool]{true}, Val(Effect.Mem))
+        .DequeSplit -> return ir_builtin_plain_route("deque_split", "jet_deque_split", 2, [Bool]{true, false}, Val(Effect.Mem))
+        .DequeFrom -> return ir_builtin_plain_route("deque_from", "jet_deque_from", 1, [Bool]{false}, None)
+        else -> {}
+    }
+    panic("checked container TBuiltinOp has no canonical Prelude route")
+}
+
+fn ir_builtin_route_plan(operation: TBuiltinOp, receiver: Type, result: Type, carrier: TFailureCarrier) -> IRBuiltinRoute Never! {
+    if operation == {
+        .AtomicMethod(method) -> {
+            if method == "load" -> return ir_builtin_route_row("core.mem", "load", "jet_atomic_load", 1, [Bool]{true}, None)
+            if method == "store" -> return ir_builtin_route_row("core.mem", "store", "jet_atomic_store", 2, [Bool]{true, false}, None)
+            if method == "add" -> return ir_builtin_route_row("core.mem", "add", "jet_atomic_add", 2, [Bool]{true, false}, None)
+            if method == "try_add" -> return ir_builtin_route_row("core.mem", "try_add", "jet_atomic_try_add", 2, [Bool]{true, false}, Val(Effect.Mem))
+            if method == "compare_exchange" -> return ir_builtin_route_row("core.mem", "compare_exchange", "jet_atomic_compare_exchange", 3, [Bool]{true, false, false}, None)
+            if method == "publish" -> return ir_builtin_route_row("core.mem", "publish", "jet_atomic_publish", 2, [Bool]{true, false}, None)
+            if method == "observe" -> return ir_builtin_route_row("core.mem", "observe", "jet_atomic_observe", 1, [Bool]{true}, None)
+            panic("checked Atomic method has no canonical route")
+        }
+        .LenString -> return ir_builtin_plain_route("len_string", "jet_char_len", 1, [Bool]{true}, None)
+        .LenList | .IsEmpty | .GetMap | .GetList | .First | .Last | .Contains | .ContainsKey | .DequeCapacity | .SetCapacity | .MapFromKeys | .SetShuffle | .ListUnion | .ListIntersection | .ListDifference | .ListRandom -> return ir_builtin_route_for_receiver(operation, receiver, carrier)
+        // Float extrema use the collection sort order, so a NaN
+        // item is the greatest value and never the least.
+        .Max(float) -> {
+            if float -> return ir_builtin_plain_route("max_float", "jet_list_max_float", 1, [Bool]{false}, None)
+            return ir_builtin_route_for_receiver(operation, receiver, carrier)
+        }
+        .Push -> {
+            is_priority_queue := if ir_builtin_untag(receiver) == {
+                .Apply(name, _) -> name == "PriorityQueue"
+                else -> false
+            }
+            if is_priority_queue -> return ir_builtin_plain_route("list_push", "std::collections::BinaryHeap::push", 2, [Bool]{true, false}, Val(Effect.Mem))
+            return ir_builtin_plain_route("list_push", "jet_list_push", 2, [Bool]{true, false}, Val(Effect.Mem))
+        }
+        .ListTryNew -> return ir_builtin_plain_route("list_try_new", "jet_list_try_new", 1, [Bool]{false}, Val(Effect.Mem))
+        .ListTryWithCapacity -> return ir_builtin_plain_route("list_try_with_capacity", "jet_list_try_with_capacity", 2, [Bool]{false, false}, Val(Effect.Mem))
+        .TryPush -> return ir_builtin_plain_route("list_try_push", "jet_list_try_push", 2, [Bool]{true, false}, Val(Effect.Mem))
+        .TryReserve -> return ir_builtin_plain_route("list_try_reserve", "jet_list_try_reserve", 2, [Bool]{true, false}, Val(Effect.Mem))
+        .TryInsertMap -> return ir_builtin_plain_route("map_try_insert", "jet_map_try_insert", 3, [Bool]{true, false, false}, Val(Effect.Mem))
+        .TryStringPush -> return ir_builtin_plain_route("string_try_push", "jet_string_try_push", 2, [Bool]{true, true}, Val(Effect.Mem))
+        .Pop -> return ir_builtin_plain_route("list_pop", "jet_list_pop_kernel", 1, [Bool]{true}, Val(Effect.Mem))
+        .IterNext -> return ir_builtin_plain_route("iter_next", "jet_iter_next", 1, [Bool]{true}, Val(Effect.Mem))
+        .PriorityQueuePop -> return ir_builtin_plain_route("priority_queue_pop", "jet_priority_queue_pop_kernel", 1, [Bool]{true}, Val(Effect.Mem))
+        .InsertMap -> return ir_builtin_plain_route("map_insert", "jet_map_insert", 3, [Bool]{true, false, false}, Val(Effect.Mem))
+        .AddNewMap -> return ir_builtin_plain_route("map_add_new", "jet_map_add_new", 3, [Bool]{true, false, false}, Val(Effect.Mem))
+        .MapSetDefault -> return ir_builtin_plain_route("map_setdefault", "jet_map_setdefault", 3, [Bool]{true, false, false}, Val(Effect.Mem))
+        .MapUpdate -> return ir_builtin_plain_route("map_update", "jet_map_update_all", 2, [Bool]{true, true}, Val(Effect.Mem))
+        .MapMerge -> return ir_builtin_plain_route("map_merge", "jet_map_merge", 2, [Bool]{true, true}, None)
+        .MapMergeWith -> return ir_builtin_plain_route("map_merge_with", "jet_map_merge_with", 3, [Bool]{true, true, false}, None)
+        .InsertList -> return ir_builtin_plain_route("list_insert", "jet_list_insert", 3, [Bool]{true, false, false}, Val(Effect.Mem))
+        .RemoveMap -> return ir_builtin_plain_route("map_remove", "jet_map_pop_kernel", 2, [Bool]{true, true}, Val(Effect.Mem))
+        .RemoveList(_, mode) -> {
+            if mode == {
+                .Value -> return ir_builtin_plain_route("list_remove_value", "jet_list_remove_value", 2, [Bool]{true, false}, Val(Effect.Mem))
+                .Slot -> return ir_builtin_plain_route("list_remove_slot", "jet_list_remove_slot", 2, [Bool]{true, false}, Val(Effect.Mem))
+                .Dynamic -> panic("dynamic list removal requires structural lowering")
+            }
+        }
+        .CountList -> return ir_builtin_plain_route("list_count", "jet_list_count", 2, [Bool]{true, true}, None)
+        .Counts -> return ir_builtin_plain_route("list_counts", "jet_list_counts", 1, [Bool]{false}, None)
+        .ExtendList -> return ir_builtin_plain_route("list_extend", "jet_list_extend", 2, [Bool]{true, false}, Val(Effect.Mem))
+        .ConcatList -> return ir_builtin_plain_route("list_concat", "jet_list_concat", 2, [Bool]{true, true}, None)
+        .IndexOf -> return ir_builtin_plain_route("list_index_of", "jet_list_index_of", 2, [Bool]{true, true}, None)
+        .Reverse -> return ir_builtin_plain_route("list_reverse", "jet_list_reverse", 1, [Bool]{true}, Val(Effect.Mem))
+        .SwapList -> return ir_builtin_plain_route("list_swap", "jet_list_swap", 3, [Bool]{true, false, false}, Val(Effect.Mem))
+        .Sort -> return ir_builtin_plain_route("list_sort", "jet_list_sort", 1, [Bool]{true}, Val(Effect.Mem))
+        .SortDesc -> return ir_builtin_plain_route("list_sort_desc", "jet_list_sort_desc", 1, [Bool]{true}, Val(Effect.Mem))
+        .OrderingThen -> return ir_builtin_plain_route("ordering_then", "jet_ordering_then", 2, [Bool]{true, true}, None)
+        .OrderingReverse -> return ir_builtin_plain_route("ordering_reverse", "jet_ordering_reverse", 1, [Bool]{true}, None)
+        .JoinSep -> {
+            if ir_builtin_iter_receiver(receiver) -> return ir_builtin_plain_route("iter_join", "jet_iter_join", 2, [Bool]{false, true}, None)
+            return ir_builtin_plain_route("join", "jet_list_join", 2, [Bool]{true, true}, None)
+        }
+        .Sum(fixed, float) -> {
+            if fixed && float -> return ir_builtin_plain_route("sum_fixed_f32", "jet_list_sum_fixed_f32", 1, [Bool]{false}, None)
+            if fixed -> return ir_builtin_plain_route("sum_fixed_f64", "jet_list_sum_fixed_f64", 1, [Bool]{false}, None)
+            return ir_builtin_plain_route("sum", "jet_list_sum", 1, [Bool]{false}, None)
+        }
+        .Product(fixed) -> {
+            if !fixed -> return ir_builtin_plain_route("product", "jet_list_product", 1, [Bool]{false}, None)
+        }
+        .Min(float) -> {
+            if float -> return ir_builtin_plain_route("min_float", "jet_list_min_float", 1, [Bool]{false}, None)
+            return ir_builtin_plain_route("min", "jet_list_min", 1, [Bool]{false}, None)
+        }
+        .Flatten -> {
+            if ir_builtin_iter_receiver(receiver) -> return ir_builtin_plain_route("iter_flatten", "jet_iter_flatten", 1, [Bool]{false}, None)
+            return ir_builtin_plain_route("list_flatten", "jet_list_flatten", 1, [Bool]{false}, None)
+        }
+        .Intersperse -> return ir_builtin_plain_route("iter_intersperse", "jet_iter_intersperse", 2, [Bool]{false, false}, None)
+        .Clear -> return ir_builtin_route_for_receiver(operation, receiver, carrier)
+        .Bytes(owned) -> {
+            if owned -> return ir_builtin_plain_route("bytes", "jet_string_bytes", 1, [Bool]{false}, None)
+            return ir_builtin_plain_route("bytes", "jet_string_bytes", 1, [Bool]{true}, None)
+        }
+        .StringFromBytes -> return ir_builtin_plain_route("string_from_bytes", "jet_string_from_bytes", 1, [Bool]{true}, None)
+        .StringFromBytesLossy -> return ir_builtin_plain_route("string_from_bytes_lossy", "jet_string_from_bytes_lossy", 1, [Bool]{true}, None)
+        .Trim -> return ir_builtin_plain_route("string_trim", "jet_unicode_trim", 1, [Bool]{true}, None)
+        .TrimStart -> return ir_builtin_plain_route("string_trim_start", "jet_text_trim_start", 1, [Bool]{true}, None)
+        .TrimEnd -> return ir_builtin_plain_route("string_trim_end", "jet_text_trim_end", 1, [Bool]{true}, None)
+        // `pad_start`/`pad_end` are `rjust`/`ljust`: one runtime pad route each.
+        .PadStart -> return ir_builtin_plain_route("rjust", "jet_text_pad_start_ref", 3, [Bool]{true, true, true}, None)
+        .PadEnd -> return ir_builtin_plain_route("ljust", "jet_text_pad_end_ref", 3, [Bool]{true, true, true}, None)
+        .StringIndexOf -> return ir_builtin_plain_route("string_index_of", "jet_unicode_index_of", 2, [Bool]{true, true}, None)
+        .StringCount -> return ir_builtin_plain_route("string_count", "jet_unicode_count", 2, [Bool]{true, true}, None)
+        .StringIsAlphabetic -> return ir_builtin_plain_route("string_is_alphabetic", "jet_text_is_alphabetic", 1, [Bool]{true}, None)
+        .StringIsNumeric -> return ir_builtin_plain_route("string_is_numeric", "jet_text_is_numeric", 1, [Bool]{true}, None)
+        .StringIsWhitespace -> return ir_builtin_plain_route("string_is_whitespace", "jet_text_is_whitespace", 1, [Bool]{true}, None)
+        .StringIsASCII -> return ir_builtin_plain_route("string_is_ascii", "jet_text_unicode_is_ascii", 1, [Bool]{true}, None)
+        .StringToTitle -> return ir_builtin_plain_route("string_to_title", "jet_text_title", 1, [Bool]{true}, None)
+        .Split -> return ir_builtin_plain_route("string_split", "jet_iter_string_split", 2, [Bool]{true, true}, None)
+        .Lines -> return ir_builtin_plain_route("string_lines", "jet_string_lines", 1, [Bool]{true}, None)
+        .Chars -> return ir_builtin_plain_route("string_chars", "jet_string_chars", 1, [Bool]{true}, None)
+        .ParseInt -> return ir_builtin_plain_route("int_parse", "jet_std::jet_int_parse", 1, [Bool]{true}, None)
+        .ParseFloat -> return ir_builtin_plain_route("float_parse", "jet_std::jet_float_parse", 1, [Bool]{true}, None)
+        .IntToRadix -> return ir_builtin_plain_route("int_to_radix", "jet_std::jet_int_to_radix", 2, [Bool]{false, false}, None)
+        .IntFromRadix -> return ir_builtin_plain_route("int_from_radix", "jet_std::jet_int_from_radix", 2, [Bool]{true, false}, None)
+        .ToUpper -> return ir_builtin_plain_route("string_upper", "jet_unicode_upper", 1, [Bool]{true}, None)
+        .ToLower -> return ir_builtin_plain_route("string_lower", "jet_unicode_lower", 1, [Bool]{true}, None)
+        .ToASCIILower -> return ir_builtin_plain_route("string_ascii_lower", "jet_text_ascii_lower", 1, [Bool]{true}, None)
+        .ToASCIIUpper -> return ir_builtin_plain_route("string_ascii_upper", "jet_text_ascii_upper", 1, [Bool]{true}, None)
+        .Slice(_) -> return ir_builtin_plain_route("string_slice", "jet_string_slice_builtin", 3, [Bool]{true, false, false}, None)
+        .After -> return ir_builtin_plain_route("string_after", "jet_string_after", 2, [Bool]{true, true}, None)
+        .Before -> return ir_builtin_plain_route("string_before", "jet_string_before", 2, [Bool]{true, true}, None)
+        .TrimView -> return ir_builtin_plain_route("string_trim_view", "jet_unicode_trim_view", 1, [Bool]{true}, None)
+        .AfterView -> return ir_builtin_plain_route("string_after_view", "jet_string_after_view", 2, [Bool]{true, true}, None)
+        .BeforeView -> return ir_builtin_plain_route("string_before_view", "jet_string_before_view", 2, [Bool]{true, true}, None)
+        .Keys -> return ir_builtin_plain_route("map_keys", "jet_map_keys", 1, [Bool]{true}, None)
+        .Values -> return ir_builtin_plain_route("map_values", "jet_map_values", 1, [Bool]{true}, None)
+        .MapTopN -> return ir_builtin_plain_route("map_top_n", "jet_map_top_n", 2, [Bool]{true, false}, None)
+        .MapToList -> return ir_builtin_route_row("core.map", "to_list", "jet_map_to_list", 1, [Bool]{true}, None)
+        .MapMin -> return ir_builtin_plain_route("map_min", "jet_map_min_value_kernel", 1, [Bool]{true}, None)
+        .MapMax -> return ir_builtin_plain_route("map_max", "jet_map_max_value_kernel", 1, [Bool]{true}, None)
+        .MapPopFirst -> return ir_builtin_plain_route("map_pop_first", "jet_map_pop_first", 1, [Bool]{true}, Val(Effect.Mem))
+        .MapEqual -> return ir_builtin_plain_route("map_equal", "jet_map_equal", 2, [Bool]{true, true}, None)
+        .MapFirst -> return ir_builtin_plain_route("map_first", "jet_map_first_key", 1, [Bool]{true}, None)
+        .MapIntersection -> return ir_builtin_plain_route("map_intersection", "jet_map_intersection", 2, [Bool]{true, true}, None)
+        .MapSliceKeys -> return ir_builtin_plain_route("map_slice", "jet_map_slice_keys_kernel", 2, [Bool]{true, false}, None)
+        .MapContainsValue -> return ir_builtin_plain_route("map_contains_value", "jet_map_contains_value", 2, [Bool]{true, true}, None)
+        .DequeGet -> return ir_builtin_plain_route("deque_get", "jet_deque_get", 2, [Bool]{true, false}, None)
+        .StringSplitOnce -> return ir_builtin_plain_route("string_split_once", "jet_unicode_split_once", 2, [Bool]{true, true}, None)
+        .StringCutLast -> return ir_builtin_plain_route("string_cut_last", "jet_unicode_cut_last", 2, [Bool]{true, true}, None)
+        .SplitWrite -> return ir_builtin_plain_route("split_write", "jet_split_write", 2, [Bool]{true, false}, Val(Effect.Mem))
+        .GetDisjointWrite -> return ir_builtin_plain_route("get_disjoint_write", "jet_get_disjoint_write", 2, [Bool]{true, true}, Val(Effect.Mem))
+        .ViewNew(_) -> return ir_builtin_plain_route("view_new", "jet_view_new", 4, [Bool]{true, false, false, false}, Val(Effect.Mem))
+        .ListMinMax -> return ir_builtin_route_row("core.list", "min_max", "jet_list_min_max", 1, [Bool]{true}, None)
+        .Indexes -> return ir_builtin_plain_route("indexes", "jet_iter_indexes", 1, [Bool]{false}, None)
+        .Indexed -> return ir_builtin_plain_route("iter_enumerate", "jet_iter_enumerate", 2, [Bool]{false, false}, None)
+        .IterSplit -> return ir_builtin_plain_route("iter_split", "jet_iter_split_at", 3, [Bool]{false, false, false}, None)
+        .SetFrom | .SetToList | .SetSort | .SetEqual | .SetFirst | .SetValues | .SetPop | .SetReplace | .SetInsert | .SetUpdate | .SetDifferenceUpdate | .SetIntersectionUpdate | .SetSymmetricDifferenceUpdate | .SetRemove | .SetUnion | .SetIntersection | .SetDifference | .SetSymmetricDifference | .SetIsSubset | .SetIsSuperset | .SetIsDisjoint | .SortedSetFrom | .SortedSetToList | .SortedSetInsert | .SortedSetRemove | .SortedSetUnion | .SortedSetIntersection | .SortedSetDifference | .SortedSetSymmetricDifference | .SortedSetIsSubset | .SortedSetIsSuperset | .SortedSetIsDisjoint | .PriorityQueueFrom | .PriorityQueuePeek | .PriorityQueueToSortedList | .PriorityQueueRemove(_, _) | .LRUPut | .LRUAddNew | .LRUGet | .LRURemove | .LRUCapacity | .LRUKeys | .BitSetAdd | .BitSetRemove | .BitSetCount | .BitSetToList | .BagAdd | .BagRemove | .BagHas | .BagCount | .DequeFrom | .DequePushFront | .DequePushBack | .DequePopFront | .DequePopBack | .DequePeekFront | .DequePeekBack | .DequeContains | .DequeDelete | .DequeGet | .DequeToList | .DequeJoin | .DequeSplit | .DequeReverse | .DequeCapacity -> return ir_builtin_container_route(operation)
+        .OptionZip(_) | .Zip(_, _, _, _, _, _) | .Unzip -> panic("checked structural builtin requires its dedicated non-route lowering")
+        .TryCollect | .IterToList | .IterCollect | .ListLazy | .Take | .Skip | .StepBy | .Dedup | .Chunks | .Windows | .IterRepeat | .IterCycle | .IterDropLast | .IterShuffle | .IterIsSorted | .IterLastIndexOf | .IterAverage(_) | .IterCompare -> return ir_builtin_iter_route(operation, receiver, carrier)
+        .StringMethod(method) -> return ir_builtin_string_method_route(method, result, carrier)
+        .ByteBufferMethod(method) -> return ir_builtin_byte_buffer_method_route(method)
+        .ByteBufferWrite(method) -> return ir_builtin_plain_route("byte_buffer_{method}", "JetByteBuffer::{method}", 2, [Bool]{true, method == "write" || method == "write_bytes"}, Val(Effect.Mem))
+        .ByteBufferToBytes -> return ir_builtin_plain_route("byte_buffer_to_bytes", "JetByteBuffer::to_bytes", 1, [Bool]{true}, None)
+        .ByteBufferFrom -> return ir_builtin_plain_route("byte_buffer_from", "JetByteBuffer::from", 1, [Bool]{true}, None)
+        .ByteBufferWithCapacity -> return ir_builtin_plain_route("byte_buffer_with_capacity", "JetByteBuffer::with_capacity", 1, [Bool]{false}, None)
+        .Repeat -> return ir_builtin_plain_route("string_repeat", "jet_string_repeat", 2, [Bool]{true, false}, None)
+        .ListSlice -> return ir_builtin_plain_route("list_slice", "jet_list_slice", 3, [Bool]{true, false, false}, None)
+        .ListBinarySearch -> return ir_builtin_plain_route("list_binary_search", "jet_list_binary_search", 2, [Bool]{true, true}, None)
+        .ListEqual -> return ir_builtin_plain_route("list_equal", "jet_list_equal", 2, [Bool]{true, true}, None)
+        .ListReplace -> return ir_builtin_plain_route("list_replace", "jet_list_replace", 3, [Bool]{true, false, false}, None)
+        else -> {}
+    }
+    ir_builtin_route_for_receiver(operation, receiver, carrier)
+}
+
+fn ir_builtin_iter_route(operation: TBuiltinOp, receiver: Type, carrier: TFailureCarrier) -> IRBuiltinRoute Never! {
+    if operation == {
+        .ListLazy -> {
+            is_list_receiver := if ir_builtin_untag(receiver) == {
+                .List(_) | .FixedList(_, _) -> true
+                else -> false
+            }
+            if is_list_receiver -> return ir_builtin_plain_route("list_lazy", "jet_iter_from_vec", 1, [Bool]{false}, None)
+            panic("checked ListLazy builtin has a non-list receiver")
+        }
+        // One collector for lists and iterators: `[T !E]` becomes `[T] !E`.
+        .TryCollect -> return ir_builtin_plain_route("try_collect", "jet_list_try_collect", 1, [Bool]{false}, None)
+        else -> {}
+    }
+    if !ir_builtin_iter_receiver(receiver) -> panic("checked iterator builtin has a non-iterator receiver")
+    if operation == {
+        .IterToList -> return ir_builtin_plain_route("iter_to_list", "jet_iter_to_list", 1, [Bool]{false}, None)
+        .IterCollect -> return ir_builtin_plain_route("iter_collect", "jet_iter_collect", 1, [Bool]{false}, None)
+        .Take -> return ir_builtin_plain_route("iter_take", "jet_iter_take", 2, [Bool]{false, false}, None)
+        .Skip -> return ir_builtin_plain_route("iter_skip", "jet_iter_skip", 2, [Bool]{false, false}, None)
+        .StepBy -> return ir_builtin_plain_route("iter_step_by", "jet_iter_step_by", 2, [Bool]{false, false}, None)
+        .Dedup -> return ir_builtin_plain_route("iter_dedup", "jet_iter_dedup", 1, [Bool]{false}, None)
+        .Chunks -> return ir_builtin_plain_route("iter_chunks", "jet_iter_chunks", 2, [Bool]{false, false}, None)
+        .Windows -> return ir_builtin_plain_route("iter_windows", "jet_iter_windows", 2, [Bool]{false, false}, None)
+        .Flatten -> return ir_builtin_plain_route("iter_flatten", "jet_iter_flatten", 1, [Bool]{false}, None)
+        .Intersperse -> return ir_builtin_plain_route("iter_intersperse", "jet_iter_intersperse", 2, [Bool]{false, false}, None)
+        .IterRepeat -> return ir_builtin_plain_route("iter_repeat", "jet_iter_repeat", 2, [Bool]{false, false}, None)
+        .IterCycle -> return ir_builtin_plain_route("iter_cycle", "jet_iter_cycle", 2, [Bool]{false, false}, None)
+        .IterDropLast -> return ir_builtin_plain_route("iter_drop_last", "jet_iter_drop_last", 2, [Bool]{false, false}, None)
+        .IterShuffle -> return ir_builtin_plain_route("iter_shuffle", "jet_iter_shuffle", 1, [Bool]{false}, None)
+        .IterIsSorted -> return ir_builtin_plain_route("iter_is_sorted", "jet_iter_is_sorted", 1, [Bool]{false}, None)
+        .IterLastIndexOf -> return ir_builtin_plain_route("iter_last_index_of", "jet_iter_last_index_of", 2, [Bool]{false, false}, None)
+        .IterAverage(float) -> {
+            if float -> return ir_builtin_plain_route("iter_average_float", "jet_iter_average_float", 1, [Bool]{false}, None)
+            return ir_builtin_plain_route("iter_average_int", "jet_iter_average_int", 1, [Bool]{false}, None)
+        }
+        .IterCompare -> return ir_builtin_plain_route("iter_compare", "jet_iter_compare", 2, [Bool]{false, false}, None)
+        else -> panic("checked iterator operation has no canonical route")
+    }
+}
+
+fn ir_builtin_string_method_route(method: String, result: Type, carrier: TFailureCarrier) -> IRBuiltinRoute Never! {
+    if method == "equal" -> return ir_builtin_route_row("core.compare", "eq", "jet_eq", 2, [Bool]{true, true}, None)
+    if method == "expandtabs" -> return ir_builtin_plain_route("expandtabs", "jet_text_expandtabs", 2, [Bool]{true, false}, None)
+    if method == "find" -> return ir_builtin_plain_route("find", "jet_text_parse_find", 2, [Bool]{true, true}, None)
+    if method == "rfind" -> return ir_builtin_plain_route("rfind", "jet_text_parse_rfind", 2, [Bool]{true, true}, None)
+    if method == "partition" -> return ir_builtin_plain_route("partition", "jet_text_parse_partition", 2, [Bool]{true, true}, None)
+    if method == "rpartition" -> return ir_builtin_plain_route("rpartition", "jet_text_parse_rpartition", 2, [Bool]{true, true}, None)
+    if method == "strip" -> return ir_builtin_plain_route("strip", "jet_text_parse_strip", 1, [Bool]{true}, None)
+    if method == "lstrip" -> return ir_builtin_plain_route("lstrip", "jet_text_parse_lstrip", 1, [Bool]{true}, None)
+    if method == "rstrip" -> return ir_builtin_plain_route("rstrip", "jet_text_parse_rstrip", 1, [Bool]{true}, None)
+    if method == "replace" -> return ir_builtin_plain_route("replace", "jet_string_replace", 3, [Bool]{true, true, true}, None)
+    if method == "count_bytes" -> return ir_builtin_plain_route("count_bytes", "jet_string_count_bytes", 1, [Bool]{true}, None)
+    if method == "hash" -> return ir_builtin_plain_route("hash", "jet_string_hash", 1, [Bool]{true}, None)
+    if method == "last_index_of" -> return ir_builtin_plain_route("last_index_of", "jet_unicode_last_index_of", 2, [Bool]{true, true}, None)
+    if method == "is_lower" -> return ir_builtin_plain_route("is_lower", "jet_text_is_lower", 1, [Bool]{true}, None)
+    if method == "is_upper" -> return ir_builtin_plain_route("is_upper", "jet_text_is_upper", 1, [Bool]{true}, None)
+    if method == "capitalize" -> return ir_builtin_plain_route("capitalize", "jet_text_capitalize", 1, [Bool]{true}, None)
+    if method == "swapcase" -> return ir_builtin_plain_route("swapcase", "jet_text_swapcase", 1, [Bool]{true}, None)
+    if method == "remove_prefix" || method == "removeprefix" -> return ir_builtin_plain_route("remove_prefix", "jet_text_remove_prefix", 2, [Bool]{true, true}, None)
+    if method == "remove_suffix" || method == "removesuffix" -> return ir_builtin_plain_route("remove_suffix", "jet_text_remove_suffix", 2, [Bool]{true, true}, None)
+    if method == "compare" -> return ir_builtin_plain_route("compare", "jet_text_compare", 2, [Bool]{true, true}, None)
+    if method == "reverse" -> return ir_builtin_plain_route("reverse", "jet_text_reverse", 1, [Bool]{true}, None)
+    if method == "normalize" -> return ir_builtin_plain_route("normalize", "jet_text_normalize_nfc", 1, [Bool]{true}, None)
+    if method == "rsplit" -> return ir_builtin_plain_route("rsplit", "jet_iter_string_rsplit", 2, [Bool]{true, true}, None)
+    if method == "matches" -> return ir_builtin_plain_route("matches", "jet_std::jet_string_matches", 2, [Bool]{true, true}, None)
+    if method == "match" -> return ir_builtin_plain_route("match", "jet_std::jet_string_match", 2, [Bool]{true, true}, None)
+    if method == "isalnum" -> return ir_builtin_plain_route("isalnum", "jet_text_isalnum", 1, [Bool]{true}, None)
+    if method == "isalpha" -> return ir_builtin_plain_route("isalpha", "jet_text_is_alphabetic", 1, [Bool]{true}, None)
+    if method == "isascii" -> return ir_builtin_plain_route("isascii", "jet_text_unicode_is_ascii", 1, [Bool]{true}, None)
+    if method == "isdecimal" -> return ir_builtin_plain_route("isdecimal", "jet_text_isdecimal", 1, [Bool]{true}, None)
+    if method == "isdigit" -> return ir_builtin_plain_route("isdigit", "jet_text_isdigit", 1, [Bool]{true}, None)
+    if method == "isidentifier" -> return ir_builtin_plain_route("isidentifier", "jet_text_isidentifier", 1, [Bool]{true}, None)
+    if method == "isnumeric" -> return ir_builtin_plain_route("isnumeric", "jet_text_isnumeric", 1, [Bool]{true}, None)
+    if method == "isprintable" -> return ir_builtin_plain_route("isprintable", "jet_text_isprintable", 1, [Bool]{true}, None)
+    if method == "isspace" -> return ir_builtin_plain_route("isspace", "jet_text_is_whitespace", 1, [Bool]{true}, None)
+    if method == "istitle" -> return ir_builtin_plain_route("istitle", "jet_text_istitle", 1, [Bool]{true}, None)
+    if method == "islower" -> return ir_builtin_plain_route("islower", "jet_text_is_lower", 1, [Bool]{true}, None)
+    if method == "isupper" -> return ir_builtin_plain_route("isupper", "jet_text_is_upper", 1, [Bool]{true}, None)
+    if method == "lower" -> return ir_builtin_plain_route("lower", "jet_unicode_lower", 1, [Bool]{true}, None)
+    if method == "upper" -> return ir_builtin_plain_route("upper", "jet_unicode_upper", 1, [Bool]{true}, None)
+    if method == "title" -> return ir_builtin_plain_route("title", "jet_text_title", 1, [Bool]{true}, None)
+    if method == "casefold" -> return ir_builtin_plain_route("casefold", "jet_text_casefold", 1, [Bool]{true}, None)
+    if method == "center" -> return ir_builtin_plain_route("center", "jet_text_center_ref", 3, [Bool]{true, true, true}, None)
+    if method == "ljust" -> return ir_builtin_plain_route("ljust", "jet_text_pad_end_ref", 3, [Bool]{true, true, true}, None)
+    if method == "rjust" -> return ir_builtin_plain_route("rjust", "jet_text_pad_start_ref", 3, [Bool]{true, true, true}, None)
+    if method == "zfill" -> return ir_builtin_plain_route("zfill", "jet_text_zfill_ref", 2, [Bool]{true, true}, None)
+    panic("checked StringMethod has no canonical route")
+}
+
+fn ir_builtin_byte_buffer_method_route(method: String) -> IRBuiltinRoute Never! {
+    if method == "capacity" -> return ir_builtin_plain_route("byte_buffer_capacity", "JetByteBuffer::capacity", 1, [Bool]{true}, None)
+    arity := 0
+    if method == "len" || method == "is_empty" || method == "clear" || method == "position" || method == "eof" || method == "rewind" || method == "flush" || method == "close" || method == "shutdown" || method == "get_buffer" || method == "buffer" || method == "to_string" || method == "string" || method == "trim" || method == "trim_start" || method == "trim_end" || method == "to_lower" || method == "to_upper" || method == "to_title" || method == "title" || method == "clone" || method == "lines" || method == "first" || method == "next" || method == "read_byte" || method == "read" || method == "is_ascii" -> arity = 1
+    if method == "get" || method == "seek" || method == "read_bytes" || method == "read_string" || method == "contains" || method == "starts_with" || method == "ends_with" || method == "index_of" || method == "last_index_of" || method == "split" || method == "partition" || method == "join" || method == "equal" || method == "compare" || method == "copy_to" || method == "write_to" -> arity = 2
+    if method == "replace" -> arity = 3
+    if arity == 0 -> panic("checked ByteBufferMethod has no canonical route")
+    mask := [Bool]{}
+    index := 0
+    loop index < arity {
+        // An index/count operand crosses the kernel as the native i64 word.
+        &mask.push(index == 0 || !ir_byte_buffer_native_int_operand(method))
+        index += 1
+    }
+    ir_builtin_plain_route("byte_buffer_{method}", "JetByteBuffer::{method}", arity, mask, Val(Effect.Mem))
+}
+
+// ByteBuffer methods whose operand is an index or count the kernel takes as
+// the native `i64` word (by value, narrowed from the exact Int).
+fn ir_byte_buffer_native_int_operand(method: String) -> Bool Never! {
+    method == "get" || method == "seek" || method == "read_bytes" || method == "read_string"
+}

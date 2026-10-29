@@ -1,0 +1,298 @@
+// Value transport between native compile-time memory (Native.jet) and
+// checked compile-time data: the result of an evaluation read back by its
+// checked type through the builder's layouts (JetIR Build.jet): a struct by
+// its declaration's name, an enum case by its variant name, Some/Ok as
+// Present, None as a clean failure and Err as a told one, a fixed-width
+// integer as an Int.
+use jet_foundation.[DeclTable, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeKeyField, TComptimeMapEntry, TComptimeReport, TComptimeValue, TConstantDef, TImplDef, TTypeDef, Type, compiler_threads_single, checked_comptime_integer_key, name_rows_value, type_name, FnBody]
+use jet_ir.[IRBuildFailure, IRMember, IRModule, IRProgram, IR_OPTION_INT_NONE, ir_build_roots_in, ir_declared_field_type, ir_enum_def, ir_host_value_row, ir_list_stride, ir_map_shape, ir_option_inline, ir_program_bind, ir_program_new, ir_program_put_constant, ir_row_args, ir_struct_members, ir_tuple_members, ir_type_args, ir_type_def, ir_untag, ir_value_type, ir_variant_members]
+
+// What one IR evaluation produced: its value (when it completed with data),
+// the failure it reports, and its output.
+struct JetEvalIRResult {
+    value: TComptimeValue?
+    complete: Bool
+    error: JetEvalError?
+    internal_problem: JetEvalInternalProblem?
+    stdout: String
+    stderr: String
+    exit_code: Int?
+    steps: Int
+}
+
+// The IR of comptime items: the checked functions they reach and the item
+// functions (zero-parameter functions returning the items' expressions)
+// built together, `items` holding each item's function, in order, and
+// `layouts` (its one row) the program they were built from, which their
+// values read back by; or the builder failures (`build_failures`, one line
+// per failing function) that keep them from running at all.
+struct JetEvalIRComptime {
+    code: IRModule
+    layouts: Shared<[IRProgram]>
+    items: [Int]
+    build_failures: [String]
+}
+
+// Builds `functions` from the roots `item_keys`; `type_defs`, `impls` and
+// `constants` are the checked modules' declarations the builder lays values
+// out by, `decls` the run's declaration table their direct calls name. A
+// comptime value reads no source location and links no C closure, so the
+// build has no source files and no foreign functions.
+// `comptime_values` when the roots compute compile-time values (not a build
+// invocation): ambient reads with no system call are refused while building
+// (IRProgram.comptime_values).
+fn jet_eval_ir_comptime_build(functions: ^[FnBody], decls: DeclTable, item_keys: [String], type_defs: ^[TTypeDef], impls: ^[TImplDef], constants: ^[TConstantDef], comptime_values: Bool) -> JetEvalIRComptime {
+    program := ir_program_new(^functions, decls, ^type_defs, ^impls, [String:String]{}, ^constants)
+    program.comptime_values = comptime_values
+    jet_eval_ir_comptime_roots(shared [IRProgram]{}, ^program, item_keys)
+}
+
+// Builds `functions` from the roots `item_keys` over the declared program
+// `declared` holds (ir_program_declared, its one row), which holds it again
+// after, bound to them: one program serves a run's every batch. `landed`
+// (rows of compile-time values landed since its last build) take over its
+// constant rows first, each key once (`taken`: the keys taken over).
+fn jet_eval_ir_comptime_build_over(declared: Shared<[IRProgram]>, functions: ^[FnBody], decls: DeclTable, item_keys: [String], landed: ^[TConstantDef], taken: &[String:Bool]) -> JetEvalIRComptime {
+    program := jet_eval_ir_program_take(declared)
+    program.comptime_values = true
+    loop definition in ^landed -> ir_program_put_constant(&program, ^definition, &taken)
+    ir_program_bind(&program, ^functions, decls)
+    jet_eval_ir_comptime_roots(declared, ^program, item_keys)
+}
+
+// Builds the roots `item_keys` of `program`, which `cell` then holds.
+fn jet_eval_ir_comptime_roots(cell: Shared<[IRProgram]>, program: ^IRProgram, item_keys: [String]) -> JetEvalIRComptime {
+    kept := ir_build_roots_in(^program, item_keys, compiler_threads_single())
+    jet_eval_ir_program_put(cell, ^kept.program)
+    built := ^kept.result
+    lines := [String]{}
+    loop failure in built.failures -> &lines.push(jet_eval_ir_build_failure_text(failure))
+    items := [Int]{}
+    loop key in item_keys -> &items.push(name_rows_value(built.program.function_rows, key) ?? -1)
+    JetEvalIRComptime{code: ^built.program, layouts: cell, items: ^items, build_failures: ^lines}
+}
+
+// The program `cell` holds (its one row), moved out.
+fn jet_eval_ir_program_take(cell: Shared<[IRProgram]>) -> IRProgram Never! {
+    held := cell.guard_edit()
+    program := &held.value.pop() ?? panic("the comptime program cell is empty")
+    ^program
+}
+
+fn jet_eval_ir_program_put(cell: Shared<[IRProgram]>, program: ^IRProgram) {
+    held := cell.guard_edit()
+    &held.value.push(^program)
+}
+
+fn jet_eval_ir_build_failure_text(failure: IRBuildFailure) -> String Never! {
+    "{failure.name} [{failure.key}]: {failure.message}"
+}
+
+// The data of the word `word` of type row `row`.
+fn jet_eval_ir_data(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, row: Int) -> TComptimeValue? {
+    ty :: m.types[row]
+    checked :: ir_untag(ty.ty)
+    if ty.kind == {
+        .Unit -> return Val(TComptimeValue.Unit)
+        .Bool -> return Val(TComptimeValue.Bool{value: word != 0})
+        .Int -> {
+            value :: jet_eval_ir_int_value(&s, word) ?? return None
+            // An Int outside 64 bits is a BigInt decimal.
+            if !jet_eval_ir_in_range(value, 64, true) -> return Val(TComptimeValue.BigInt{decimal: "{value}"})
+            return Val(TComptimeValue.Int{value: value})
+        }
+        .Char -> return Val(TComptimeValue.Char{value: word})
+        .Float -> return Val(TComptimeValue.Float{value: jet_eval_ir_float(word), bits: 64})
+        .Float32 -> return Val(TComptimeValue.Float{value: jet_eval_ir_float32(word), bits: 32})
+        .String -> {
+            text :: jet_eval_ir_text(&s, word) ?? return None
+            return Val(TComptimeValue.String{value: text})
+        }
+        .Word -> {
+            // An inline Int?: the niche word is None, any other its Int.
+            if checked == .Option(inner) && ir_option_inline(m, row) {
+                if word == IR_OPTION_INT_NONE -> return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: jet_eval_ir_type_display(inner)}}})
+                inner_row :: ir_value_type(&m, p, inner) ?? return jet_eval_ir_transport_fail(&s, checked)
+                value :: jet_eval_ir_data(&m, p, &s, word, inner_row) ?? return None
+                return Val(TComptimeValue.Present{value: value})
+            }
+            if ir_host_value_row(m, p, row) != None -> return jet_eval_ir_host_value(&s, word)
+            if ir_enum_def(m, p, row) == .Val(definition) {
+                args :: ir_row_args(m, row)
+                return jet_eval_ir_enum_data(&m, p, &s, definition, args, word, word, false)
+            }
+            return Val(TComptimeValue.Int{value: word})
+        }
+        .Pointer -> {
+            if checked == .Option(inner) {
+                inner_row :: ir_value_type(&m, p, inner) ?? return jet_eval_ir_transport_fail(&s, checked)
+                if word == 0 -> return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: jet_eval_ir_type_display(inner)}}})
+                payload :: jet_eval_ir_member_word(&m, &s, word, 0, inner_row) ?? return None
+                value :: jet_eval_ir_data(&m, p, &s, payload, inner_row) ?? return None
+                return Val(TComptimeValue.Present{value: value})
+            }
+            if checked == .Result(ok_ty, err_ty) {
+                selector :: jet_eval_ir_read(&s, word, 8) ?? return None
+                payload_ty :: if selector == 1 -> ok_ty else -> err_ty
+                payload_row :: ir_value_type(&m, p, payload_ty) ?? return jet_eval_ir_transport_fail(&s, checked)
+                payload :: jet_eval_ir_member_word(&m, &s, word, 8, payload_row) ?? return None
+                value :: jet_eval_ir_data(&m, p, &s, payload, payload_row) ?? return None
+                if selector == 1 -> return Val(TComptimeValue.Present{value: value})
+                return Val(TComptimeValue.Failed{report: TComptimeReport.Told{value: value}})
+            }
+            if ir_enum_def(m, p, row) == .Val(definition) {
+                discriminant :: jet_eval_ir_read(&s, word, 8) ?? return None
+                args :: ir_row_args(m, row)
+                return jet_eval_ir_enum_data(&m, p, &s, definition, args, discriminant, word, true)
+            }
+            return jet_eval_ir_transport_fail(&s, checked)
+        }
+        .Aggregate -> {
+            if checked == .List(element) {
+                element_row :: ir_value_type(&m, p, element) ?? return jet_eval_ir_transport_fail(&s, checked)
+                length :: jet_eval_ir_read(&s, word, 8) ?? return None
+                values := [TComptimeValue]{}
+                if length > 0 {
+                    data :: jet_eval_ir_read(&s, word + 16, 8) ?? return None
+                    stride :: ir_list_stride(m, element_row)
+                    loop index in 0..<length {
+                        item :: jet_eval_ir_member_word(&m, &s, data, index * stride, element_row) ?? return None
+                        &values.push(jet_eval_ir_data(&m, p, &s, item, element_row) ?? return None)
+                    }
+                }
+                return Val(TComptimeValue.List{values: values})
+            }
+            if checked == .Map(_, _, _) {
+                // A Map is the List of its (key, value) entries in key order.
+                shape :: ir_map_shape(&m, p, row) ?? return jet_eval_ir_transport_fail(&s, checked)
+                key_ty :: m.types[shape.key.ty].ty.copy()
+                length :: jet_eval_ir_read(&s, word, 8) ?? return None
+                entries := [TComptimeMapEntry]{}
+                if length > 0 {
+                    data :: jet_eval_ir_read(&s, word + 16, 8) ?? return None
+                    loop index in 0..<length {
+                        entry :: jet_eval_ir_member_word(&m, &s, data, index * shape.stride, shape.entry) ?? return None
+                        key_value :: jet_eval_ir_member_value(&m, p, &s, entry, shape.key) ?? return None
+                        key :: jet_eval_ir_key(m, p, key_value, key_ty) ?? return jet_eval_ir_transport_fail(&s, checked)
+                        value :: jet_eval_ir_member_value(&m, p, &s, entry, shape.value) ?? return None
+                        &entries.push(TComptimeMapEntry{key: key, value: value})
+                    }
+                }
+                return Val(TComptimeValue.Map{entries: entries})
+            }
+            if checked == .Tuple(fields) {
+                members :: ir_tuple_members(&m, p, fields) ?? return jet_eval_ir_transport_fail(&s, checked)
+                output :: jet_eval_ir_fields(&m, p, &s, word, members) ?? return None
+                return Val(TComptimeValue.Struct{type_name: type_name(checked), fields: output})
+            }
+            name :: if checked == {
+                .Named(name) -> name
+                .Apply(name, _) -> name
+                else -> { return jet_eval_ir_transport_fail(&s, checked) }
+            }
+            definition :: ir_type_def(p, name) ?? return jet_eval_ir_transport_fail(&s, checked)
+            members :: ir_struct_members(&m, p, definition, ir_type_args(checked)) ?? return jet_eval_ir_transport_fail(&s, checked)
+            output :: jet_eval_ir_fields(&m, p, &s, word, members) ?? return None
+            return Val(TComptimeValue.Struct{type_name: p.types[definition].name.copy(), fields: output})
+        }
+    }
+}
+
+fn jet_eval_ir_transport_fail(s: &JetEvalIRState, ty: Type) -> TComptimeValue? Never! {
+    jet_eval_ir_unsupported(&s, "materializing an IR value of type {type_name(ty)}")
+    None
+}
+
+// The map key of `value`, a key of type `ty` read back (the inverse of
+// JetIR ir_comptime_key_value); None for a value no key spells.
+fn jet_eval_ir_key(m: IRModule, p: IRProgram, value: TComptimeValue, ty: Type) -> TComptimeKey? Never! {
+    if value == {
+        .Int(number) -> return Val(checked_comptime_integer_key(number))
+        .BigInt(decimal) -> return Val(TComptimeKey.BigInt{decimal: decimal})
+        .String(text) -> return Val(TComptimeKey.String{value: text})
+        .Bool(flag) -> return Val(TComptimeKey.Bool{value: flag})
+        .Char(code) -> return Val(TComptimeKey.Char{value: code})
+        .Enum(name, variant, args) -> {
+            if args.len() > 0 -> return None
+            return Val(TComptimeKey.Enum{type_name: name, variant: variant})
+        }
+        .Struct(name, fields) -> {
+            keys := [TComptimeKeyField]{}
+            loop field in fields {
+                field_ty :: ir_declared_field_type(m, p, ty, field.name) ?? return None
+                key :: jet_eval_ir_key(m, p, field.value, field_ty) ?? return None
+                &keys.push(TComptimeKeyField{name: field.name, key: key})
+            }
+            if ir_untag(ty) == .Tuple(_) -> return Val(TComptimeKey.Tuple{fields: keys})
+            return Val(TComptimeKey.Struct{type_name: name, fields: keys})
+        }
+        else -> return None
+    }
+}
+
+// The display name a clean absence names its element by: a nominal names its
+// arguments in angle brackets, none as `Name<>`, so the message is the same
+// for a bare nominal and its applications.
+fn jet_eval_ir_type_display(ty: Type) -> String Never! {
+    if ty == {
+        .Named(name) -> "{name}<>"
+        .Apply(name, args) -> {
+            names :: loop arg in args -> jet_eval_ir_type_display(arg)
+            "{name}<{names.join(", ")}>"
+        }
+        else -> type_name(ty)
+    }
+}
+
+// The word of a member of type row `row` at byte `offset` of `base`: an
+// aggregate is its address, anything else is loaded.
+fn jet_eval_ir_member_word(m: &IRModule, s: &JetEvalIRState, base: Int, offset: Int, row: Int) -> Int? Never! {
+    ty :: m.types[row]
+    if ty.kind == .Aggregate -> return Val(base + offset)
+    width :: jet_eval_ir_width(ty)
+    if width == 0 -> return Val(0)
+    jet_eval_ir_load(&s, ty, base + offset, width)
+}
+
+fn jet_eval_ir_fields(m: &IRModule, p: IRProgram, s: &JetEvalIRState, base: Int, members: [IRMember]) -> [TComptimeField]? {
+    output := [TComptimeField]{}
+    loop member in members {
+        value :: jet_eval_ir_member_value(&m, p, &s, base, member) ?? return None
+        &output.push(TComptimeField{name: member.name.copy(), value: value})
+    }
+    Val(output)
+}
+
+fn jet_eval_ir_member_value(m: &IRModule, p: IRProgram, s: &JetEvalIRState, base: Int, member: IRMember) -> TComptimeValue? {
+    if member.boxed {
+        boxed :: jet_eval_ir_read(&s, base + member.offset, 8) ?? return None
+        word :: jet_eval_ir_member_word(&m, &s, boxed, 0, member.ty) ?? return None
+        return jet_eval_ir_data(&m, p, &s, word, member.ty)
+    }
+    word :: jet_eval_ir_member_word(&m, &s, base, member.offset, member.ty) ?? return None
+    jet_eval_ir_data(&m, p, &s, word, member.ty)
+}
+
+// An enum case: variant `index` of declaration `definition` instanced at
+// `type_args`, its payload read from the box at `boxed` when the enum is boxed.
+fn jet_eval_ir_enum_data(m: &IRModule, p: IRProgram, s: &JetEvalIRState, definition: Int, type_args: [Type], index: Int, boxed: Int, has_box: Bool) -> TComptimeValue? {
+    declaration :: p.types[definition]
+    if declaration.kind == .Enum(variants, _) {
+        if index < 0 || index >= variants.len() {
+            jet_eval_ir_problem(&s, "enum {declaration.name} holds discriminant {index}, outside its {variants.len()} variants")
+            return None
+        }
+        args := [TComptimeEnumArg]{}
+        if has_box {
+            members :: ir_variant_members(&m, p, definition, type_args, index) ?? return jet_eval_ir_transport_fail(&s, Type.Named{name: declaration.name.copy()})
+            single :: variants[index].payload == .Single(_)
+            loop member in members {
+                value :: jet_eval_ir_member_value(&m, p, &s, boxed, member) ?? return None
+                &args.push(TComptimeEnumArg{name: if single -> None else -> Val(member.name.copy()), value: value})
+            }
+        }
+        return Val(TComptimeValue.Enum{type_name: declaration.name.copy(), variant: variants[index].name.copy(), args: args})
+    }
+    jet_eval_ir_problem(&s, "{declaration.name} is not an enum")
+    None
+}

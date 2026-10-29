@@ -12,7 +12,7 @@
     "id": "prim-capabilities-G2",
     "tags": ["impossible"],
     "primitive": "Resource-scoped authority enforcement for ordinary `core.files` operations, such as `read(path, authority)` with a no-follow root boundary.",
-    "evidence": "`/home/nate/Projects/Github/jet/Tools/agent/jet-env jet run /home/nate/.cache/jet-dev/dx3/prim-capabilities/scoped_fs_pkg/run.jet --allow-fs` with `authority.holds.allow: [IO, Mem.Alloc, \"FS.Read:/home/nate/.cache/jet-dev/dx3/prim-capabilities/inputs\"]` returns E1803: `required_effects=FS, IO, Mem.Alloc; granted_effects=FS.Read:/home/nate/.cache/jet-dev/dx3/prim-capabilities/inputs, IO, Mem.Alloc; undecided_effects=FS`. Replacing the manifest with broad `[FS, IO, Mem.Alloc]` lets the same path-only `fs.read` program print both `inside=inside-capability` and `outside=outside-capability`.",
+    "evidence": "`/home/nate/Projects/Github/jet/Tools/agent/jet-env jet run /home/nate/.cache/jet-dev/dx3/prim-capabilities/scoped_fs_pkg/run.jet --allow-fs` with `authority.allow: [IO, Mem.Alloc, \"FS.Read:/home/nate/.cache/jet-dev/dx3/prim-capabilities/inputs\"]` returns E1803: `required_effects=FS, IO, Mem.Alloc; granted_effects=FS.Read:/home/nate/.cache/jet-dev/dx3/prim-capabilities/inputs, IO, Mem.Alloc; undecided_effects=FS`. Replacing the manifest with broad `[FS, IO, Mem.Alloc]` lets the same path-only `fs.read` program print both `inside=inside-capability` and `outside=outside-capability`.",
     "areas": ["backend", "cli", "gui", "games"],
     "severity": "hurts",
     "workaround": "Use package-wide FS and manually validate paths; the shipped no-follow root boundary is only on `plugin.load` for WASM artifacts."

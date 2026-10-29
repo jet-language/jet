@@ -1,0 +1,16 @@
+fn halve(value: Int) -> Int {
+    if value < 0 -> return Err("negative")
+    value * 2
+}
+
+fn checked_total(count: Int) -> Int Never! {
+    total := 0
+    loop index in 0..<count -> total += halve(index)
+    total
+}
+
+TOTAL :: comptime { checked_total(5) }
+
+fn run() {
+    print("{TOTAL}")
+}

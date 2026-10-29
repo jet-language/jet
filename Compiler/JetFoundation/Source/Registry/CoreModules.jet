@@ -16,13 +16,15 @@ struct CoreModuleTypeExport {
     kind: CoreLeafKind
 }
 
-// One variant of a compiler-owned Core enum family (Rust
-// `resolve_enum_variants_cloned` tables) and its positional payload types;
-// an empty payload is a unit variant.
+// One variant of a compiler-owned Core enum family (authored in
+// CoreEnumPayloadRows.jet): its payload types in slot order (an empty payload
+// is a unit variant) and, for a named payload, each slot's field label (empty
+// for a positional payload).
 struct CoreEnumPayloadRow {
     enum_name: String
     variant: String
     payload: [Type]
+    labels: [String]
 }
 
 struct CoreModuleDeclaration {
@@ -120,7 +122,7 @@ struct CoreSourceOwnedType {
 }
 
 // Rust `CoreModuleExports::core_source_owns_type`: whether a checked Core
-// identity (`<corelib>/Core/net::Core/net/url.jet::URL`) names a source-owned
+// identity (`<corelib>/core.net.url::URL`) names a source-owned
 // Core nominal, including exact registered source value-hook owners. An owned
 // type remains the Jet declaration on every tier, never a native projection.
 fn core_source_owns_type(name: String) -> Bool Never! {
@@ -132,11 +134,11 @@ fn core_source_owns_type(name: String) -> Bool Never! {
 
 // The table is a read parameter, so the scan reads its rows in place.
 fn core_source_owns_type_in(rows: [CoreSourceOwnedType], name: String) -> Bool Never! {
-    if !name.starts_with("<corelib>/") -> return false
+    module_name :: core_identity_module(name) ?? return false
     parts :: name.split("::").to_list()
-    if parts.len() < 3 -> return false
+    if parts.len() < 2 -> return false
     leaf :: parts[parts.len() - 1]
-    file :: parts[parts.len() - 2]
+    file :: core_module_source_path(module_name) ?? return false
     loop row in rows {
         if row.name == leaf && row.path == file -> return true
     }
@@ -146,10 +148,30 @@ fn core_source_owns_type_in(rows: [CoreSourceOwnedType], name: String) -> Bool N
 // The existing public bool(p) arity targets one reserved source
 // method. This is not an overload mechanism or a native receiver route.
 CORE_SOURCE_BOOL_P_OWNER :: [CoreSourceOwnedType]{
-    {path: "Core/math/random.jet", name: "RNG"},
+    {path: "Core/Math/Random.jet", name: "RNG"},
 }
+// The public HTTP message builders keep their setter arities: `header(n, v)`
+// on either message, and `body(text)` / `json(value)` on a request, target
+// the reserved `__with_*` source methods beside the getters of those names.
+CORE_SOURCE_HTTP_REQUEST_OWNER :: [CoreSourceOwnedType]{
+    {path: "Core/Http/Http.jet", name: "HTTPRequest"},
+}
+CORE_SOURCE_HTTP_MESSAGE_OWNERS :: [CoreSourceOwnedType]{
+    {path: "Core/Http/Http.jet", name: "HTTPRequest"},
+    {path: "Core/Http/Http.jet", name: "HTTPResponse"},
+}
+
+// Whether `method` at `nargs` may target a reserved source method, so the
+// caller resolves the receiver's checked identity first.
+fn core_source_receiver_method_routes(method: String, nargs: Int) -> Bool Never! {
+    if nargs == 2 -> return method == "header"
+    nargs == 1 && (method == "bool" || method == "body" || method == "json")
+}
+
 fn core_source_receiver_method(identity: String, method: String, nargs: Int) -> String Never! {
     if method == "bool" && nargs == 1 && core_source_owns_type(identity) && core_source_owns_type_in(CORE_SOURCE_BOOL_P_OWNER, identity) -> return "__bool_p"
+    if method == "header" && nargs == 2 && core_source_owns_type_in(CORE_SOURCE_HTTP_MESSAGE_OWNERS, identity) -> return "__with_header"
+    if nargs == 1 && (method == "body" || method == "json") && core_source_owns_type_in(CORE_SOURCE_HTTP_REQUEST_OWNER, identity) -> return "__with_{method}"
     method.copy()
 }
 
@@ -161,6 +183,26 @@ struct CoreBareSourceModule {
 }
 CORE_BARE_SOURCE_MODULES :: [CoreBareSourceModule]{
     {name: "URL", module_name: "core.net.url"},
+    {name: "Path", module_name: "core.files"},
+    {name: "HTML", module_name: "core.text.html"},
+    {name: "Sh", module_name: "core.process"},
+    {name: "SQL", module_name: "core.db"},
+    {name: "DBValue", module_name: "core.db"},
+    {name: "TLSStream", module_name: "core.net.tls"},
+    {name: "TLSVersion", module_name: "core.net.tls"},
+    {name: "TLSClientTrust", module_name: "core.net.tls"},
+    {name: "TLSPeerIdentity", module_name: "core.net.tls"},
+    {name: "TLSCertificate", module_name: "core.net.tls"},
+    {name: "HTTPRequest", module_name: "core.http"},
+    {name: "HTTPResponse", module_name: "core.http"},
+    {name: "HTTPBodyChunks", module_name: "core.http"},
+    {name: "HTTPMux", module_name: "core.http.server"},
+    {name: "HTTPHandler", module_name: "core.http.server"},
+    {name: "HTTPServer", module_name: "core.http.server"},
+    {name: "HTTPShutdownReport", module_name: "core.http.server"},
+    {name: "HTTPServerTLS", module_name: "core.http.server"},
+    {name: "HTTPCorsPolicy", module_name: "core.http.server"},
+    {name: "HTTPCorsOrigins", module_name: "core.http.server"},
     {name: "Perf", module_name: "core.perf"},
     {name: "RNG", module_name: "core.testing"},
     {name: "Vec2", module_name: "core.math"},
@@ -188,10 +230,32 @@ CORE_BARE_SOURCE_MODULES :: [CoreBareSourceModule]{
     {name: "Fraction", module_name: "core.math"},
     {name: "Decimal", module_name: "core.math"},
     {name: "Complex", module_name: "core.math"},
+    {name: "eprint", module_name: "core.term"},
+    {name: "debug", module_name: "core.term"},
+    {name: "read_file", module_name: "core.files"},
+    {name: "write_file", module_name: "core.files"},
+    {name: "file_exists", module_name: "core.files"},
+    {name: "Date", module_name: "core.time"},
+    {name: "keep", module_name: "core.prelude"},
 }
 fn core_bare_source_module(name: String) -> String? Never! {
     loop row in CORE_BARE_SOURCE_MODULES {
         if row.name == name -> return Val(row.module_name)
+    }
+    None
+}
+
+// The Core module an unknown module-style name most likely meant to import:
+// one whose last segment is the name (`mem`, `archive`), or the conventional
+// short alias of a module (`fs`, `ar`, `gz`, `re`).
+fn core_module_for_alias(name: String) -> String? {
+    if name == "fs" -> return Val("core.files")
+    if name == "ar" -> return Val("core.archive")
+    if name == "gz" -> return Val("core.archive.gzip")
+    if name == "re" -> return Val("core.regex")
+    suffix :: ".{name}"
+    loop row in CORE_MODULE_EXPORTS {
+        if row.module_name.starts_with("core.") && row.module_name.ends_with(suffix) -> return Val(row.module_name.copy())
     }
     None
 }
@@ -208,7 +272,7 @@ fn core_root_type(name: String) -> Bool Never! {
 // short nominal spelling. They do not add public trait implementations.
 fn core_source_value_hook(name: String, operation: String) -> String? Never! {
     if !name.starts_with("<corelib>/") -> return None
-    if !name.ends_with("::Core/compute/solve.jet::Solver") -> return None
+    if !core_identity_is(name, "core.compute.solve", "Solver") -> return None
     if operation == {
         "show" -> Val("__show")
         "debug" -> Val("__debug")
@@ -241,6 +305,15 @@ fn core_enum_variant_payload(name: String, variant: String) -> [Type]? {
     if declared.contains(variant) -> Val([Type]{}) else -> None
 }
 
+// The field labels of `name.variant`'s named payload, in slot order. `None`
+// when the variant is not a compiler-owned case with a named payload.
+fn core_enum_variant_labels(name: String, variant: String) -> [String]? {
+    loop row in CORE_ENUM_PAYLOAD_ROWS {
+        if row.enum_name == name && row.variant == variant -> return if row.labels.len() == 0 -> None else -> Val(row.labels)
+    }
+    None
+}
+
 // The variants of the enum `name` that the Core module `module_name` exports:
 // the module's catalog row authenticates the export, and the generator keeps
 // every enum leaf's variant list identical across the modules that export it.
@@ -251,8 +324,8 @@ fn core_module_enum_variants(module_name: String, name: String) -> [String]? {
     core_enum_variants(name)
 }
 
-// One field of a builtin Core record (Rust `core_struct_field`); rows are
-// generated into CoreRecordRows.jet in the oracle's first-match order.
+// One field of a builtin Core record; rows are authored in CoreRecordRows.jet
+// and the first match wins.
 struct CoreRecordFieldRow {
     owner: String
     field: String
@@ -267,8 +340,39 @@ struct CoreRecordLiteralRow {
     core_only: Bool{false}
 }
 
+// The Core module a Core declaration key or module identity names
+// (`<corelib>/core.crypto.vault::Secret` -> `core.crypto.vault`).
+fn core_identity_module(key: String) -> String? Never! {
+    if !key.starts_with("<corelib>/") -> return None
+    rest :: key.slice("<corelib>/".len(), key.len())
+    if rest.split_once("::") == .Val(parts) -> return Val(parts.before)
+    Val(rest)
+}
+
+// The source path of Core module `module_name` (`core.crypto.vault` ->
+// `Core/Crypto/Vault.jet`), from the Core source table.
+fn core_module_source_path(module_name: String) -> String? Never! {
+    loop row in CORE_SOURCE_OWNED_ROWS {
+        if row.module_name == module_name -> return Val(row.path)
+    }
+    None
+}
+
+// Whether `key` is exactly the declaration `leaf` of Core module `module_name`.
+fn core_identity_is(key: String, module_name: String, leaf: String) -> Bool Never! {
+    expected :: "<corelib>/{module_name}::{leaf}"
+    key == expected
+}
+
+// Whether a Core module identity or declaration key belongs to Core module
+// `module_name` (`core.sync`) or one of its submodules (`core.sync.rows`).
+fn core_identity_in_module(key: String, module_name: String) -> Bool Never! {
+    prefix :: "<corelib>/{module_name}"
+    key == prefix || key.starts_with("{prefix}::") || key.starts_with("{prefix}.")
+}
+
 // Corelib nominal types carry a source identity; the record oracle is keyed
-// by the declared leaf (`<corelib>/Core/process::...::ProcessReceipt`).
+// by the declared leaf (`<corelib>/core.process::ProcessReceipt`).
 fn core_record_leaf(owner: String) -> String Never! {
     if !owner.starts_with("<corelib>/") -> return "{owner}"
     parts :: owner.split("::").to_list()
@@ -285,6 +389,27 @@ fn core_record_field_in(rows: [CoreRecordFieldRow], owner: String, field: String
         if row.owner == owner && row.field == field -> return Val(row.ty)
     }
     None
+}
+
+// The field types of many Core records in one pass over the rows:
+// `table[k][f]` is the first matching row's type of `owners[k]`.`fields[k][f]`,
+// None when no row types it. `owners` are distinct record leaves. JetIR adds
+// about 140 compiler-owned records to every program, and core_record_field
+// would rescan the rows from the top for each of their fields.
+fn core_record_field_table(owners: [String], fields: [[String]]) -> [[Type?]] Never! {
+    at := [String:Int]{}
+    table := [[Type?]]{}
+    loop (k, owner) in owners {
+        at[owner] = k
+        &table.push(loop _ in fields[k] -> Type?{None})
+    }
+    loop row in CORE_RECORD_FIELD_ROWS {
+        k :: at.get(row.owner) ?? next
+        loop (f, field) in fields[k] {
+            if field == row.field && table[k][f] == None -> table[k][f] = Val(row.ty)
+        }
+    }
+    table
 }
 
 fn core_record_literal_fields(owner: String) -> [TypeTupleField]? {

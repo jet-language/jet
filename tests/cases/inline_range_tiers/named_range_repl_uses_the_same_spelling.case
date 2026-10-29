@@ -1,0 +1,11 @@
+# tests/inline_range_tiers.rs::named_range_repl_uses_the_same_spelling at tests/inline_range_tiers.rs:256; hand-port
+# jet::REPL::run_transcript(&["Die :: distinct Int(1..6)", "Die.from_int(3)"]): no `error [` and the value 3. input.txt
+# holds the two original inputs, the style of tests/cases/fact_declaration_tiers/repl_accepts_the_fixture.case.
+fixture: named_range_repl_uses_the_same_spelling.fixture
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+step: jet repl
+stdin: named_range_repl_uses_the_same_spelling.fixture/input.txt
+exit: 0
+stdout+stderr: !~ "error [" # tests/inline_range_tiers.rs:29-32 REPL rejected named range
+stdout: ~ "3" # tests/inline_range_tiers.rs:33-36 REPL lost named range value

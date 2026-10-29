@@ -1,0 +1,13 @@
+# tests/tir_modules_and_enums.rs::imported_enum_groups_use_canonical_facts_and_local_values_shadow_types at tests/tir_modules_and_enums.rs:1402; hand-port
+# Rust inspected the checked AST; the run variant prints the alias and imported `.measure()` results, which are 7 only if they stay method calls.
+# The local-value-shadows-type sub-claim retires: value and field names must be snake_case (E0357), so no local value can be named `Choice`.
+# Fixture migrated: a type import is `use tags.[Choice]` (a bare `use tags.Choice` is a module alias, E0357).
+fixture: imported_enum_groups_use_canonical_facts_and_local_values_shadow_types.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check check/main.jet
+exit: 0 # tests/tir_modules_and_enums.rs:1434-1435 no error diagnostics
+step: jet run run/main.jet
+exit: 0
+stdout: = "7\n7\n" # tests/tir_modules_and_enums.rs:1448-1455 alias and imported `.measure()` stay method calls

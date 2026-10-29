@@ -47,8 +47,14 @@ struct ImportPlan {
             self.provider_facts[reference] = facts
             return
         }
-        if existing.provider != facts.provider -> &existing.add_conflict("provider", existing.provider, facts.provider, "provider.import")
-        if existing.target != facts.target -> &existing.add_conflict("target", existing.target, facts.target, "provider.import")
+        if existing.provider != facts.provider {
+            previous_provider :: existing.provider.copy()
+            &existing.add_conflict("provider", previous_provider, facts.provider, "provider.import")
+        }
+        if existing.target != facts.target {
+            previous_target :: existing.target.copy()
+            &existing.add_conflict("target", previous_target, facts.target, "provider.import")
+        }
         if facts.resolved_source != "" -> &existing.set_resolved_source(facts.resolved_source)
         if facts.native_format != "" -> &existing.set_native_document(facts.native_format, facts.native_document)
         keys := facts.facts.keys().to_list()
@@ -200,10 +206,10 @@ fn cli_import_source_path_for_finding(source: String, fallback: String) -> Strin
         "" | "provider.native_document" | "reference.provider" | "reference.selector" -> true
         else -> source.starts_with("package.json.")
     }
-    if fallback.trim() != "" && internal -> return fallback
+    if fallback.trim() != "" && internal -> return fallback.copy()
     if source.trim() == "" {
         if fallback.trim() == "" -> return "provider facts"
-        return fallback
+        return fallback.copy()
     }
-    source
+    source.copy()
 }

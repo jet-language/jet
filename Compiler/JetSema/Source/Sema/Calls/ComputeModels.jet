@@ -1,6 +1,7 @@
 // Canonical source-owned checking/TIR for Core compute special forms.
 // Ordinary Core math/text/identity calls stay in the shared Core path.
 use jet_foundation.[
+    AST_NODE_GENERATED,
     AccessConvention,
     CallArg,
     CallContractRow,
@@ -13,8 +14,6 @@ use jet_foundation.[
     ParamZone,
     Span,
     SymbolKind,
-    TExpr,
-    TExprKind,
     TFailureCarrier,
     Type,
     TypeTupleField,
@@ -44,9 +43,9 @@ fn sema_call_compute_gradient_value_type(output: Type) -> Type? {
 
 fn sema_call_compute_literal_int(expression: Expr) -> Int? {
     return if expression == {
-        .Int(value, _, _, _) -> Val(value)
-        .Paren(inner, _) -> sema_call_compute_literal_int(inner)
-        .Unary(operator, operand, _) -> {
+        .Int(value, _, _, _, _) -> Val(value)
+        .Paren(inner, _, _) -> sema_call_compute_literal_int(inner)
+        .Unary(operator, operand, _, _) -> {
             if operator == UnOp.Neg {
                 inner :: sema_call_compute_literal_int(operand) ?? return None
                 if inner == -9223372036854775807 - 1 -> return None
@@ -122,22 +121,22 @@ fn sema_call_compute_check_alias(member: String, record: CoreCallRecord, args: [
     if !ownership.accepted || !ownership.complete -> return SemaComputeModelsSpecialCheck{handled: true, value: None}
     result_type :: sema_call_compute_alias_type(member, updated_args) ?? Type.Result{ok: Type.Named{name: "Tensor"}, err: Type.Named{name: "ComputeError"}}
     fallibility := if result_type == {.Result(ok, error) -> TFailureCarrier.Result{success: ok, error: error} else -> TFailureCarrier.Infallible}
-    value :: sema_call_core_tir(record, typed, span, [Type]{}, loop _ in typed -> false, None, result_type, fallibility, expected, environment, program, &diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
+    value :: sema_call_core_tir(record, typed, span, [Type]{}, loop _ in typed -> false, result_type, fallibility, expected, environment, program, &diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
     _ := sema_call_core_record_effects(record, span, [Type]{}, result_type, fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics)
     return SemaComputeModelsSpecialCheck{handled: true, value: Val(value)}
 }
 
 fn sema_call_compute_wrt_name(item: Expr) -> String? {
     if item == {
-        .Ident(name, _) -> Val(name)
-        .Paren(inner, _) -> sema_call_compute_wrt_name(inner)
+        .Ident(name, _, _) -> Val(name)
+        .Paren(inner, _, _) -> sema_call_compute_wrt_name(inner)
         else -> None
     }
 }
 
 fn sema_call_compute_wrt_names(expression: Expr) -> [String]? {
     if expression == {
-        .ListLit(items, _) -> {
+        .ListLit(items, _, _) -> {
             names := [String]{}
             loop item in items {
                 name :: sema_call_compute_wrt_name(item) ?? return None
@@ -145,7 +144,7 @@ fn sema_call_compute_wrt_names(expression: Expr) -> [String]? {
             }
             Val(names)
         }
-        .Paren(inner, _) -> sema_call_compute_wrt_names(inner)
+        .Paren(inner, _, _) -> sema_call_compute_wrt_names(inner)
         else -> None
     }
 }
@@ -163,8 +162,8 @@ fn sema_call_compute_function_type_names(ty: Type) -> [String]? {
 
 fn sema_call_compute_function_names(expression: Expr, ty: Type, scopes: SemaScopeTable) -> [String]? {
     if expression == {
-        .Paren(inner, _) -> return sema_call_compute_function_names(inner, ty, scopes)
-        .Lambda(lambda) -> {
+        .Paren(inner, _, _) -> return sema_call_compute_function_names(inner, ty, scopes)
+        .Lambda(lambda, _) -> {
             params := [String]{}
             loop parameter in lambda.params -> &params.push(parameter.name)
             if ty == {
@@ -174,13 +173,13 @@ fn sema_call_compute_function_names(expression: Expr, ty: Type, scopes: SemaScop
                 else -> {}
             }
         }
-        .Call(call) -> if call.name == "gradient" || call.name == "value_and_gradient" || call.name == "vjp" || call.name == "jvp" {
+        .Call(call, _) -> if call.name == "gradient" || call.name == "value_and_gradient" || call.name == "vjp" || call.name == "jvp" {
             if call.args.len() > 0 -> return sema_call_compute_function_names(call.args[0].expr, ty, scopes)
         }
-        .MethodCall(_, method, _, _, _, args, _, _) -> if method == "gradient" || method == "value_and_gradient" || method == "vjp" || method == "jvp" {
+        .MethodCall(_, method, _, _, _, args, _) -> if method == "gradient" || method == "value_and_gradient" || method == "vjp" || method == "jvp" {
             if args.len() > 0 -> return sema_call_compute_function_names(args[0].expr, ty, scopes)
         }
-        .Ident(name, _) -> if sema_scope_resolve(scopes, name) == .Val(symbol) && symbol.kind == SymbolKind.Function {
+        .Ident(name, _, _) -> if sema_scope_resolve(scopes, name) == .Val(symbol) && symbol.kind == SymbolKind.Function {
             return sema_call_compute_function_type_names(ty)
         }
         else -> {}
@@ -190,10 +189,10 @@ fn sema_call_compute_function_names(expression: Expr, ty: Type, scopes: SemaScop
 
 fn sema_call_compute_function_identity(expression: Expr, scopes: SemaScopeTable) -> String? {
     return if expression == {
-        .Paren(inner, _) -> sema_call_compute_function_identity(inner, scopes)
-        .Ident(name, _) -> if sema_scope_resolve(scopes, name) == .Val(symbol) && symbol.kind == SymbolKind.Function -> Val(symbol.id.key) else -> None
-        .Call(call) -> if (call.name == "gradient" || call.name == "value_and_gradient" || call.name == "vjp" || call.name == "jvp") && call.args.len() > 0 -> sema_call_compute_function_identity(call.args[0].expr, scopes) else -> None
-        .MethodCall(_, method, _, _, _, args, _, _) -> if (method == "gradient" || method == "value_and_gradient" || method == "vjp" || method == "jvp") && args.len() > 0 -> sema_call_compute_function_identity(args[0].expr, scopes) else -> None
+        .Paren(inner, _, _) -> sema_call_compute_function_identity(inner, scopes)
+        .Ident(name, _, _) -> if sema_scope_resolve(scopes, name) == .Val(symbol) && symbol.kind == SymbolKind.Function -> Val(symbol.id.key) else -> None
+        .Call(call, _) -> if (call.name == "gradient" || call.name == "value_and_gradient" || call.name == "vjp" || call.name == "jvp") && call.args.len() > 0 -> sema_call_compute_function_identity(call.args[0].expr, scopes) else -> None
+        .MethodCall(_, method, _, _, _, args, _) -> if (method == "gradient" || method == "value_and_gradient" || method == "vjp" || method == "jvp") && args.len() > 0 -> sema_call_compute_function_identity(args[0].expr, scopes) else -> None
         else -> None
     }
 }
@@ -234,7 +233,7 @@ fn sema_call_compute_transform(record: CoreCallRecord, member: String, args: [Ca
         valid = false
     }
     if wrt_expression != None && wrt_names == None {
-        &diagnostics.push(sema_error("E0112", expr_span(wrt_expression ?? Expr.Unit{span: span}), "`wrt:` for `compute.{member}` must list parameter names", "the differentiation target is selected by the function parameter name", "write `wrt: [parameter]`"))
+        &diagnostics.push(sema_error("E0112", expr_span(wrt_expression ?? Expr.Unit{span: span, id: AST_NODE_GENERATED}), "`wrt:` for `compute.{member}` must list parameter names", "the differentiation target is selected by the function parameter name", "write `wrt: [parameter]`"))
         valid = false
     }
     function_value :: sema_check_expression_with_lambda_escapes(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, Val(!direct), &diagnostics) ?? {
@@ -413,7 +412,7 @@ fn sema_call_compute_transform(record: CoreCallRecord, member: String, args: [Ca
     accesses := (loop _ in ownership_types -> AccessConvention.Read)
     ownership := sema_ownership_check_call_arguments(&state, "core.compute.{member}", sema_call_compute_owned_params(ownership_types, accesses), &values_args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaComputeModelsSpecialCheck{handled: true, value: None}
-    value :: sema_call_core_tir(record, runtime_args, span, effective_type_args, loop _ in runtime_args -> false, None, result_type, fallibility, expected, environment, program, &diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
+    value :: sema_call_core_tir(record, runtime_args, span, effective_type_args, loop _ in runtime_args -> false, result_type, fallibility, expected, environment, program, &diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
     _ := sema_call_core_record_effects(record, span, effective_type_args, result_type, fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics)
     return SemaComputeModelsSpecialCheck{handled: true, value: Val(value)}
 }

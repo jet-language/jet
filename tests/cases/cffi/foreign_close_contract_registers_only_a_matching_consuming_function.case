@@ -1,0 +1,14 @@
+# tests/cffi.rs::foreign_close_contract_registers_only_a_matching_consuming_function at tests/cffi.rs:443; hand-port
+# Claim: valid extern rust close contract checks with no diagnostics (tests/cffi.rs:446-463)
+# Claim: handle: String mismatch yields E0702 (tests/cffi.rs:473-482)
+# Fixture migrated: fixture: validation split into two subdirs valid/ and invalid/ instead of valid.jet and invalid.jet
+# Not ported: compile_with_path generated-Rust asserts: impl __jet_Close for String, jet_ffi_release text (text of generated Rust)
+fixture: foreign_close_contract_registers_only_a_matching_consuming_function.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check valid/main.jet
+exit: 0 # valid extern rust close contract checks with no diagnostics (tests/cffi.rs:446-463)
+step: jet check invalid/main.jet
+exit: 1 # valid extern rust close contract checks with no diagnostics (tests/cffi.rs:446-463)
+stderr: ~ "E0702" # valid extern rust close contract checks with no diagnostics (tests/cffi.rs:446-463)

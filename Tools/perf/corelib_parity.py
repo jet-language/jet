@@ -34,7 +34,7 @@ from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-CORE_REGISTRY = ROOT / "crates/jet-codegen/src/Prelude/Core.jet"
+CORE_REGISTRY = ROOT / "Compiler/Prelude/Core.jet"
 CORE_SOURCE = ROOT / "Core"
 JET_ENV = ROOT / "Tools/agent/jet-env"
 LEDGER_CHECK = ROOT / "Tools/agent/check-core-surface-ledger.mjs"

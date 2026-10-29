@@ -1,6 +1,19 @@
 // The production request is not cloneable (its optional TraceSink is a trait
 // object). These real parse/query calls must transfer that carrier, even when
 // authorization rejects the entry before checking. No manufactured success.
+use jet_driver.[
+    JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot, JetDriverCompileRequest,
+    JetDriverCompilerQueries, JetDriverCoreSource, JetDriverHostFacts,
+    JetDriverStage, jet_driver_compiler_queries_check_disk, jet_driver_compiler_queries_check_text,
+    jet_driver_compiler_queries_documents, jet_driver_compiler_queries_new,
+    jet_driver_compiler_queries_stats,
+]
+use jet_eval.[
+    JetCompilerServicesSourceInput, jet_eval_compiler_services_parse, jet_eval_default_config,
+]
+use jet_foundation.[compiler_threads_single]
+use jet_sema.[sema_has_error_since]
+
 fn query_ownership_request() -> JetDriverCompileRequest Never! {
     JetDriverCompileRequest{
         authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{}, entry_root_identity: "query-ownership", entry_path: "main.jet"},
@@ -8,10 +21,8 @@ fn query_ownership_request() -> JetDriverCompileRequest Never! {
         core_sources: [JetDriverCoreSource]{},
         host_facts: JetDriverHostFacts{target_triple: Val("x86_64-unknown-linux-gnu"), active_os: Val("linux"), compiler_identity: None},
         eval_config: jet_eval_default_config(),
-        target: JetDriverCompileTarget.Native,
         record_store: None,
         trace_sink: None,
-        mir_lint_every_pass: false,
         compiler_threads: compiler_threads_single(),
     }
 }
@@ -42,7 +53,7 @@ fn query_ownership_case(label: String, source: String, disk: Bool, parse_error: 
     if stats.item_hits != 0 || stats.item_recomputes != 0 || stats.live_items != 0 || stats.live_item_bytes != 0 -> &failures.push("{label}: failed ingress fabricated Sema cache work")
 }
 
-fn run() {
+#Test("compiler_query_ownership_fixtures") {
     failures := [String]{}
     queries := jet_driver_compiler_queries_new()
     query_ownership_case("text owned request", "fn run() {{}}\n", false, false, &queries, &failures)

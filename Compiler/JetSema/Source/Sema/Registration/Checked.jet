@@ -38,7 +38,7 @@ use jet_foundation.[
     TComptimeEnumArg,
     TComptimeField,
     TComptimeKey,
-    tir_comptime_integer_key,
+    checked_comptime_integer_key,
     TComptimeKeyField,
     TComptimeMapEntry,
     TComptimeReport,
@@ -92,8 +92,9 @@ use jet_foundation.[
     jet_target_layout_from_machine,
     type_identity_equal,
     type_name,
+    CModule,
 ]
-use jet_parser.parser_guest_import_symbol
+use jet_parser.[parser_guest_import_symbol]
 
 fn sema_checked_module_key(module_row: SemaRegistrationModule, name: String) -> String Never! {
     if module_row.module_identity == "" -> name else -> "{module_row.module_identity}::{name}"
@@ -125,8 +126,8 @@ fn sema_checked_marker_text(marker: Marker) -> String? {
     if marker.args.len() == 0 -> return None
     if marker.args[0] == {
         .Expr(expression) -> if expression == {
-            .Ident(name, _) -> Val(name)
-            .Str(parts, _) -> {
+            .Ident(name, _, _) -> Val(name)
+            .Str(parts, _, _) -> {
                 if parts.len() == 1 {
                     if parts[0] == .Lit(text) -> return Val(text)
                 }
@@ -145,13 +146,13 @@ fn sema_checked_marker_text_label(marker: Marker, label: String) -> String? {
                 if marker.args[index] == {
                     .Expr(expression) -> {
                         if expression == {
-                            .Str(parts, _) -> {
+                            .Str(parts, _, _) -> {
                                 if parts.len() == 1 {
                                     if parts[0] == .Lit(text) -> return Val(text)
                                 }
                                 return None
                             }
-                            .Ident(name, _) -> return Val(name)
+                            .Ident(name, _, _) -> return Val(name)
                             else -> return None
                         }
                     }
@@ -1184,7 +1185,40 @@ fn sema_checked_foreign_undo(graph: SemaRegistrationGraph, module_row: SemaRegis
     inverse_params := [SemaRegistrationParameter]{}
     inverse_return := Type?{None}
     found := false
+    // A C binding lives in a shared module; its inverse belongs to the module
+    // that imports the binding and defines that name. Two such modules leave
+    // the owner ambiguous.
+    owners := [Int]{}
+    loop edge in graph.edges {
+        if edge.target_module_identity != module_row.module_identity || edge.source_module_identity == module_row.module_identity -> next
+        loop (position, candidate) in graph.modules {
+            if candidate.module_identity != edge.source_module_identity || owners.contains(position) -> next
+            loop function in candidate.functions {
+                if function.declaration.name == inverse.name {
+                    &owners.push(position)
+                    break
+                }
+            }
+        }
+    }
+    if owners.len() > 1 {
+        names := [String]{}
+        loop position in owners -> &names.push(graph.modules[position].module_name)
+        &diagnostics.push(sema_error("E0105", inverse.span, "undo function `{inverse.name}` is ambiguous for foreign binding `{registered.declaration.name}`", "the shared C binding is imported by more than one module that defines `{inverse.name}`: {names.join(", ")}", "give the foreign binding one uniquely named inverse in one defining module"))
+        return false
+    }
+    if owners.len() == 1 {
+        loop function in graph.modules[owners[0]].functions {
+            if function.declaration.name == inverse.name {
+                inverse_params = function.parameters
+                inverse_return = function.declaration.return_type
+                found = true
+                break
+            }
+        }
+    }
     loop function_index in 0..<module_row.functions.len() {
+        if found -> break
         if module_row.functions[function_index].declaration.name == inverse.name {
             inverse_params = module_row.functions[function_index].parameters
             inverse_return = module_row.functions[function_index].declaration.return_type
@@ -1217,13 +1251,13 @@ fn sema_checked_foreign_undo(graph: SemaRegistrationGraph, module_row: SemaRegis
         inverse_type :: sema_checked_qualify_type(graph, inverse_parameter.ty, module_row.module_identity)
         if forward.convention != inverse_parameter.convention || !type_identity_equal(forward_type, inverse_type) {
             reason :: if forward.convention != inverse_parameter.convention -> "access convention `{sema_checked_foreign_access_keyword(inverse_parameter.convention)}` does not match `{sema_checked_foreign_access_keyword(forward.convention)}`" else -> "type `{type_name(inverse_type)}` does not match `{type_name(forward_type)}`"
-            &diagnostics.push(sema_error("E0112", inverse.span, "undo function `{inverse.name}` parameter {index + 1} is incompatible with `{registered.declaration.name}`: {reason}", "rollback passes the foreign call's captured arguments to the inverse with the same Jet signature", "make the parameter use the same type and access convention as the foreign call"))
+            &diagnostics.push(sema_error("E0112", inverse.span, "undo function `{inverse.name}` parameter {index + 1} is incompatible with `{registered.declaration.name}`: {reason}", "rollback passes the foreign call's captured arguments to the inverse with the same Jet signature", "make parameter {index + 1} of `{inverse.name}` use the same type and access convention as `{registered.declaration.name}`"))
             valid = false
         }
     }
     if inverse_return == .Val(return_type) {
         if return_type != (Type.Named{name: "Unit"}) {
-            &diagnostics.push(sema_error("E0113", inverse.span, "undo function `{inverse.name}` returns `{type_name(return_type)}`, but rollback functions must return Unit", "rollback invokes the inverse for its side effect and cannot use a returned value", "remove the return type so `{inverse.name}` returns Unit"))
+            &diagnostics.push(sema_error("E0113", inverse.span, "undo function `{inverse.name}` returns `{type_name(return_type)}`, but rollback functions must return Unit", "rollback invokes the inverse for its side effect and cannot use a returned value", "remove `{type_name(return_type)}` from `{inverse.name}` so it returns Unit"))
             valid = false
         }
     }
@@ -1355,13 +1389,13 @@ fn sema_checked_inline_undo(graph: SemaRegistrationGraph, module_row: SemaRegist
         forward_type :: sema_checked_qualify_type(graph, forward.ty, module_row.module_identity)
         inverse_type :: sema_checked_qualify_type(graph, inverse_parameter.ty, module_row.module_identity)
         if forward.convention != inverse_parameter.convention || !type_identity_equal(forward_type, inverse_type) {
-            &diagnostics.push(sema_error("E0112", inverse.span, "undo function `{inverse.name}` parameter {index + 1} is incompatible with `{registered.declaration.name}`", "rollback passes the foreign call's captured arguments to the inverse with the same Jet signature", "make the parameter use the same type and access convention as the foreign call"))
+            &diagnostics.push(sema_error("E0112", inverse.span, "undo function `{inverse.name}` parameter {index + 1} is incompatible with `{registered.declaration.name}`", "rollback passes the foreign call's captured arguments to the inverse with the same Jet signature", "make parameter {index + 1} of `{inverse.name}` use the same type and access convention as `{registered.declaration.name}`"))
             valid = false
         }
     }
     if inverse_return == .Val(return_type) {
         if return_type != (Type.Named{name: "Unit"}) {
-            &diagnostics.push(sema_error("E0113", inverse.span, "undo function `{inverse.name}` returns `{type_name(return_type)}`, but rollback functions must return Unit", "rollback invokes the inverse for its side effect and cannot use a returned value", "remove the return type so `{inverse.name}` returns Unit"))
+            &diagnostics.push(sema_error("E0113", inverse.span, "undo function `{inverse.name}` returns `{type_name(return_type)}`, but rollback functions must return Unit", "rollback invokes the inverse for its side effect and cannot use a returned value", "remove `{type_name(return_type)}` from `{inverse.name}` so it returns Unit"))
             valid = false
         }
     }
@@ -1523,7 +1557,7 @@ fn sema_checked_inline_foreign_row(graph: SemaRegistrationGraph, module_row: Sem
         module_name: module_row.module_name,
         module_path: module_row.module_path,
         // Rust `function_foreign_provenance` keeps the leaf on its own source
-        // file, as an ordinary checked function's TFunc does, so the native
+        // file, as an ordinary checked function's FnBody does, so the native
         // backend reads the inline body from the declaration span.
         source_file: sema_source_file_at(module_row.source_segments, module_row.source_file, module_row.source_origin, registered.declaration.span),
         name: registered.declaration.name,
@@ -1556,7 +1590,7 @@ fn sema_checked_inline_foreign_row(graph: SemaRegistrationGraph, module_row: Sem
 // `#Import(c)` declaration becomes the foreign row its calls bind to. The row
 // keeps the function's symbol identity, so a checked direct call to the
 // declaration lowers as a foreign C call of the marker's symbol; the
-// declaration itself has no Jet body and no TFunc.
+// declaration itself has no Jet body and no FnBody.
 fn sema_checked_guest_import_foreign_row(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, registered: SemaRegistrationFunction) -> SemaCheckedForeignFunction? {
     symbol :: parser_guest_import_symbol(registered.declaration) ?? return None
     module_identity :: module_row.module_identity
@@ -1883,7 +1917,7 @@ fn sema_checked_cli_bindings(module_row: SemaRegistrationModule, definition: Str
     result := [TCLIBinding]{}
     loop binding in definition.cli_bindings {
         target_name :: if binding.target == {
-            .Ident(name, _) -> name
+            .Ident(name, _, _) -> name
             else -> binding.name
         }
         markers :: loop marker in binding.markers if !marker.negated -> marker.name
@@ -1970,7 +2004,7 @@ fn sema_checked_validate_struct_field(definition: StructDef, field: Field, diagn
         &diagnostics.push(sema_error("E1110", field.name_span, "`Group` cannot be stored in a struct field", "a task group is a scoped spawn authority, not a value that can escape its call stack", "pass `group: Group` directly to a helper function or method instead"))
     }
     if sema_checked_layout_is_c(definition.layout) && sema_checked_type_is_growable(field.ty) {
-        &diagnostics.push(sema_error("E1104", definition.layout_span ?? field.name_span, "a C-layout struct cannot contain a growable field", "lists, maps, and strings have no stable C layout", "use a fixed-size array or remove the C layout marker"))
+        &diagnostics.push(sema_error("E1104", definition.layout_span ?? field.name_span, "`#Layout(c)` struct `{definition.name}` has a growable field `{field.name}` ({type_name(field.ty)})", "growable types (`[T]`, `Map`, `String`) don't have a stable C layout", "use a fixed-size array `[T#N]` instead, or remove `#Layout(c)`"))
     }
 }
 
@@ -2354,11 +2388,11 @@ fn sema_checked_generic_params(graph: SemaRegistrationGraph, module_row: SemaReg
             // Rust never rejects an unregistered bound name at the declaration
             // (`T: Clone`); it carries no trait identity, so it is dropped.
             symbol :: sema_type_graph_bound_symbol(graph, module_row.module_identity, bound) ?? next
-            if symbol.symbol.kind != SymbolKind.Trait {
+            if sema_resolved_kind(graph, symbol) != SymbolKind.Trait {
                 &diagnostics.push(sema_error("E0301", parameter.span, "the generic bound `{bound}` is not a trait", "generic bounds refer to trait contracts", "use a trait name as the generic bound"))
                 next
             }
-            &bounds.push(symbol.symbol.id)
+            &bounds.push(sema_resolved_id(graph, symbol))
         }
         &result.push(TGenericParam{name: parameter.name, bounds: bounds})
     }
@@ -2366,7 +2400,7 @@ fn sema_checked_generic_params(graph: SemaRegistrationGraph, module_row: SemaReg
 }
 
 // A type row names each method by its function's SymbolId key, the key its
-// checked TFunc carries (Rust tir_to_mir_types.rs::resolve_type_methods
+// checked FnBody carries (Rust tir_to_mir_types.rs::resolve_type_methods
 // resolves these through the checked function registry).
 fn sema_checked_nominal_methods(definition: Item, methods: [SemaRegistrationFunction]) -> [String] Never! {
     keys := [String]{}
@@ -2655,7 +2689,6 @@ fn sema_checked_type_def(graph: SemaRegistrationGraph, boxed: [String:[String]],
         layout_alignment: None,
         serde: serde,
         cli_bindings: cli_bindings,
-        cli: None,
         ownership: ownership,
         compiler_builtin: sema_registration_compiler_builtin_marker(nominal),
         boxed_edges: boxed_edges,
@@ -2716,7 +2749,6 @@ fn sema_checked_unit_member_defs(module_row: SemaRegistrationModule, definition:
                 layout_alignment: None,
                 serde: [TSerdeAttribute]{},
                 cli_bindings: [TCLIBinding]{},
-                cli: None,
                 ownership: TDeclarationOwnership.Owned,
                 compiler_builtin: None,
                 kind: TTypeDefKind.Distinct{base: Type.Float, range: None},
@@ -2817,7 +2849,7 @@ fn sema_checked_impl_row(graph: SemaRegistrationGraph, module_row: SemaRegistrat
 
 fn sema_checked_trait_nominal_row(graph: SemaRegistrationGraph, module_identity: String, trait_name: String) -> SemaRegistrationRowRef? {
     resolved :: sema_type_graph_lookup_symbol(graph, module_identity, trait_name) ?? return None
-    if resolved.symbol.kind != SymbolKind.Trait -> return None
+    if sema_resolved_kind(graph, resolved) != SymbolKind.Trait -> return None
     sema_type_graph_resolved_nominal_row(graph, resolved)
 }
 
@@ -2835,6 +2867,28 @@ fn sema_checked_validate_impl(graph: SemaRegistrationGraph, module_row: SemaRegi
         else -> {}
     }
     trait_ref :: sema_checked_trait_nominal_row(graph, module_row.module_identity, trait_name) ?? return
+    // Rust `validate_trait_impl` (E0906): every trait method without a default
+    // body appears in the impl. A `using` delegation forwards them instead, and
+    // a generated codec writes its own.
+    if implementation.declaration.delegation_field == None && !implementation.declaration.is_generated_serde {
+        missing := [String]{}
+        loop required_index in 0..<graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods.len() {
+            if graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods[required_index].declaration.default_body != None -> next
+            required_name :: graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods[required_index].declaration.name
+            provided := false
+            loop actual in implementation.methods {
+                if actual.declaration.name == required_name {
+                    provided = true
+                    break
+                }
+            }
+            if !provided -> &missing.push("`{required_name}`")
+        }
+        if missing.len() > 0 {
+            listed :: missing.join(", ")
+            &diagnostics.push(sema_error("E0906", implementation.declaration.type_span, "`impl …: {trait_name}` is missing {listed}", "every `{trait_name}` method must appear in the impl block", "add the missing method signatures and bodies"))
+        }
+    }
     loop expected_index in 0..<graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods.len() {
         found := SemaRegistrationFunction?{None}
         loop actual in implementation.methods {
@@ -3118,7 +3172,7 @@ fn sema_checked_validate_delegation(graph: SemaRegistrationGraph, module_row: Se
             field_type_name :: type_name(graph.modules[owner_index].nominals[nominal_index].fields[field_index].ty)
             satisfied :: sema_type_bound_satisfied(graph, graph.modules[owner_index].nominals[nominal_index].fields[field_index].ty, trait_name, module_row.module_identity) ?? true
             if !satisfied {
-                &diagnostics.push(sema_error("E2401", definition.type_span, "`{field_type_name}` doesn't implement `{trait_name}`, so it can't delegate", "`impl {definition.type_name}.{trait_name} using {field_name}` forwards `{trait_name}` methods to the `{field_name}` field, but `{field_type_name}` doesn't implement `{trait_name}`", "implement `impl {field_type_name}: {trait_name}` on the field's type, or choose a different field"))
+                &diagnostics.push(sema_error("E2401", definition.type_span, "`{field_type_name}` doesn't implement `{trait_name}`, so it can't delegate", "`impl {definition.type_name}.{trait_name} using {field_name}` forwards `{trait_name}` methods to the `{field_name}` field, but `{field_type_name}` doesn't implement `{trait_name}`", "implement `impl {field_type_name}.{trait_name}` on the field's type, or choose a different field"))
             }
             return
         }
@@ -3138,7 +3192,7 @@ fn sema_checked_member_names(graph: SemaRegistrationGraph, module_row: SemaRegis
             hook :: method.symbol.owner != Val(owner)
             previous :: names.get(key)
             if previous != None && !(hook && previous == (Val(true))) {
-                &diagnostics.push(sema_defined_twice(method.symbol.name, "ordinary methods and operator hooks share one method namespace", method.symbol.span))
+                &diagnostics.push(sema_method_defined_twice(method.symbol.name, module_row.nominals[nominal_index].symbol.name, method.symbol.span))
             }
             if previous == None -> &names.add(key, hook).drop("new member name")
         }
@@ -3156,12 +3210,13 @@ fn sema_checked_member_names(graph: SemaRegistrationGraph, module_row: SemaRegis
         }
         row :: sema_type_resolve_nominal_row(graph, module_row.impls[implementation_index].target_type, module_row.module_identity)
         owner :: if row == .Val(value) -> graph.modules[value.module_index].nominals[value.row].symbol.id.key else -> type_name(module_row.impls[implementation_index].target_type)
+        owner_name :: if row == .Val(value) -> graph.modules[value.module_index].nominals[value.row].symbol.name else -> type_name(module_row.impls[implementation_index].target_type)
         hook :: sema_checked_operator_trait(module_row.impls[implementation_index].trait_name ?? "")
         loop method in module_row.impls[implementation_index].methods {
             key :: "{owner}::{method.symbol.name}"
             previous :: names.get(key)
             if previous != None && !(hook && previous == (Val(true))) {
-                &diagnostics.push(sema_defined_twice(method.symbol.name, "ordinary methods and operator hooks share one method namespace", method.symbol.span))
+                &diagnostics.push(sema_method_defined_twice(method.symbol.name, owner_name, method.symbol.span))
             }
             if previous == None -> &names.add(key, hook).drop("new member name")
         }
@@ -3249,10 +3304,10 @@ fn sema_checked_const_char(text: String) -> Int? Never! {
 
 fn sema_checked_comptime_key(key: CtKey) -> TComptimeKey? {
     if key == {
-        .Int(value) -> Val(tir_comptime_integer_key(value))
+        .Int(value) -> Val(checked_comptime_integer_key(value))
         .BigInt(decimal) -> {
             number :: Int.parse(decimal) ?? return None
-            Val(tir_comptime_integer_key(number))
+            Val(checked_comptime_integer_key(number))
         }
         .Str(value) -> Val(TComptimeKey.String{value: value})
         .Bool(value) -> Val(TComptimeKey.Bool{value: value})
@@ -3335,12 +3390,12 @@ fn sema_checked_comptime(source: CtValue) -> TComptimeValue? {
 fn sema_checked_constant_type(definition: ConstDef) -> Type? {
     if definition.ty != None -> return definition.ty
     if definition.value == {
-        .Int(_, _, _, _) -> Val(Type.Int)
-        .Float(_, _, _, _) -> Val(Type.Float)
-        .Bool(_, _) -> Val(Type.Bool)
-        .Char(_, _) -> Val(Type.Char)
-        .Str(parts, _) -> if parts.len() == 1 && parts[0] == .Lit(_) -> Val(Type.String) else -> None
-        .TypedLit(_, _, _) -> sema_checked_typed_scalar_literal_type(definition.value)
+        .Int(_, _, _, _, _) -> Val(Type.Int)
+        .Float(_, _, _, _, _) -> Val(Type.Float)
+        .Bool(_, _, _) -> Val(Type.Bool)
+        .Char(_, _, _) -> Val(Type.Char)
+        .Str(parts, _, _) -> if parts.len() == 1 && parts[0] == .Lit(_) -> Val(Type.String) else -> None
+        .TypedLit(_, _, _, _) -> sema_checked_typed_scalar_literal_type(definition.value)
         else -> None
     }
 }
@@ -3348,7 +3403,7 @@ fn sema_checked_constant_type(definition: ConstDef) -> Type? {
 // Preserve the type on a scalar literal when no staged type
 // has been installed yet. Calls/operators remain outside module storage.
 fn sema_checked_typed_scalar_literal_type(value: Expr) -> Type? {
-    if value == .TypedLit(head, body, _) {
+    if value == .TypedLit(head, body, _, _) {
         ty :: head ?? return None
         if ty == {
             .Int | .IntN(_, _) | .Float | .Float32 | .Bool -> {}
@@ -3369,9 +3424,9 @@ fn sema_checked_typed_scalar_literal_type(value: Expr) -> Type? {
 
 fn sema_checked_module_scalar_literal(value: Expr) -> Bool Never! {
     if value == {
-        .Int(_, _, _, _) | .Float(_, _, _, _) | .Bool(_, _) -> true
-        .Unary(op, inner, _) -> op == UnOp.Neg && (inner == .Int(_, _, _, _) || inner == .Float(_, _, _, _))
-        .Paren(inner, _) -> sema_checked_module_scalar_literal(inner)
+        .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) -> true
+        .Unary(op, inner, _, _) -> op == UnOp.Neg && (inner == .Int(_, _, _, _, _) || inner == .Float(_, _, _, _, _))
+        .Paren(inner, _, _) -> sema_checked_module_scalar_literal(inner)
         else -> false
     }
 }
@@ -3418,7 +3473,7 @@ fn sema_checked_runtime_tvalue_supported(definition: ConstDef, value: TComptimeV
 }
 
 fn sema_checked_constant_from_value(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, constant: SemaRegistrationConstant, value: SemaComptimeItemValue, diagnostics: &[Diagnostic]) -> TConstantDef? {
-    if !sema_checked_runtime_tvalue_supported(constant.declaration, value.value) {
+    if !value.startup && !sema_checked_runtime_tvalue_supported(constant.declaration, value.value) {
         &diagnostics.push(sema_checked_module_value_error(constant.declaration))
         return None
     }
@@ -3429,13 +3484,14 @@ fn sema_checked_constant_from_value(graph: SemaRegistrationGraph, module_row: Se
             return None
         }
     }
-    TConstantDef{module_identity: module_row.module_identity, key: sema_checked_module_key(module_row, constant.declaration.name), name: constant.declaration.name, span: constant.declaration.span, visibility: TVisibility.Public, ty: sema_checked_qualify_type(graph, ty, module_row.module_identity), is_comptime: constant.declaration.is_comptime, is_storage: !constant.declaration.is_comptime && (constant.declaration.is_persist || constant.declaration.mutable), value: value.value}
+    init :: if value.init == .Val(function) -> Val(function.key) else -> None
+    TConstantDef{module_identity: module_row.module_identity, key: sema_checked_module_key(module_row, constant.declaration.name), name: constant.declaration.name, span: constant.declaration.span, visibility: TVisibility.Public, ty: sema_checked_qualify_type(graph, ty, module_row.module_identity), is_comptime: constant.declaration.is_comptime, is_storage: !constant.declaration.is_comptime && (constant.declaration.is_persist || constant.declaration.mutable), value: value.value, init: init}
 }
 
 // `staged_values` holds the module's staged constant values by symbol key.
 fn sema_checked_constant_with_values(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, constant: SemaRegistrationConstant, staged_values: [String:SemaComptimeItemValue], diagnostics: &[Diagnostic]) -> TConstantDef? {
     if sema_output_metadata_binding(constant.declaration) -> return None
-    if !sema_checked_module_value_evaluates(constant.declaration) {
+    if !sema_checked_module_value_evaluates(constant.declaration) && !sema_checked_module_value_soft(constant.declaration) {
         &diagnostics.push(sema_checked_module_value_error(constant.declaration))
         return None
     }
@@ -3456,39 +3512,45 @@ fn sema_checked_module_value_evaluates(definition: ConstDef) -> Bool Never! {
     sema_checked_module_literal(definition.value)
 }
 
+// An immutable `NAME :: expr` whose value is not literal data: the build
+// tries it (folding it when its evaluation is pure and succeeds) and
+// otherwise computes it at startup. Runtime storage (mutable or `#Persist`)
+// still needs a literal.
+fn sema_checked_module_value_soft(definition: ConstDef) -> Bool Never! {
+    if definition.mutable || definition.is_persist -> return false
+    !sema_checked_module_value_evaluates(definition)
+}
+
 fn sema_checked_module_value_error(definition: ConstDef) -> Diagnostic {
-    if definition.mutable || definition.is_persist {
-        return sema_error("E0622", expr_span(definition.value), "a module binding's value must be a literal", "a mutable or `#Persist` module global is runtime storage, which every execution tier initializes from a scalar literal before `fn run`", "use an integer, float, or bool literal, or keep struct and list values in an unmarked `::` constant")
-    }
-    sema_error("E0622", expr_span(definition.value), "a module binding's value must be a literal", "a module constant is folded once while building, so its value must be literal data: numbers, text, typed literals, and enum cases", "write the value as literal data, such as `RGB{{r: U8{{0}}, g: U8{{0}}, b: U8{{0}}}}`, prepare it while building with `NAME :: prep {{ value }}`, or compute it inside a function")
+    sema_error("E0622", expr_span(definition.value), "a module binding's value must be a literal", "a mutable or `#Persist` module global is runtime storage, which every execution tier initializes from a scalar literal before `fn run`", "use an integer, float, or bool literal, or keep struct and list values in an unmarked `::` constant")
 }
 
 // Literal data only: no calls, operators, or name reads. An uppercase
 // `Type.Case` path, optionally `Type.Case(args)`, names an enum case.
 fn sema_checked_module_literal(value: Expr) -> Bool Never! {
     if value == {
-        .Int(_, _, _, _) | .Float(_, _, _, _) | .Bool(_, _) | .Char(_, _) | .Unit(_) | .Absent(_) -> true
-        .Str(parts, _) -> {
+        .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Char(_, _, _) | .Unit(_, _) | .Absent(_, _) -> true
+        .Str(parts, _, _) -> {
             loop part in parts {
                 if part == .Lit(_) -> next
                 return false
             }
             true
         }
-        .Unary(op, operand, _) -> op == UnOp.Neg && (operand == .Int(_, _, _, _) || operand == .Float(_, _, _, _))
-        .Paren(inner, _) -> sema_checked_module_literal(inner)
-        .Present(inner, _) -> sema_checked_module_literal(inner)
-        .ListLit(elements, _) -> sema_checked_module_literal_list(elements)
-        .MapLit(entries, _) -> sema_checked_module_literal_pairs(entries)
-        .StructLit(_, _, _, _, fields, _, _) -> sema_checked_module_literal_fields(fields)
-        .TypedLit(_, body, _) -> if body == {
+        .Unary(op, operand, _, _) -> op == UnOp.Neg && (operand == .Int(_, _, _, _, _) || operand == .Float(_, _, _, _, _))
+        .Paren(inner, _, _) -> sema_checked_module_literal(inner)
+        .Present(inner, _, _) -> sema_checked_module_literal(inner)
+        .ListLit(elements, _, _) -> sema_checked_module_literal_list(elements)
+        .MapLit(entries, _, _) -> sema_checked_module_literal_pairs(entries)
+        .StructLit(_, _, _, _, fields, _, _, _) -> sema_checked_module_literal_fields(fields)
+        .TypedLit(_, body, _, _) -> if body == {
             .Fields(fields) -> sema_checked_module_literal_fields(fields)
             .Elements(elements) -> sema_checked_module_literal_list(elements)
             .Entries(entries) -> sema_checked_module_literal_pairs(entries)
             .Value(inner) -> sema_checked_module_literal(inner)
             .ByteText(_) | .Empty -> true
         }
-        .EnumLit(_, _, _, args, _, _) -> {
+        .EnumLit(_, _, _, args, _, _, _) -> {
             loop argument in args {
                 item :: if argument == {
                     .Positional(inner) -> inner
@@ -3498,8 +3560,8 @@ fn sema_checked_module_literal(value: Expr) -> Bool Never! {
             }
             true
         }
-        .Field(_, _, _) -> sema_checked_module_type_path(value)
-        .MethodCall(receiver, method, _, _, type_args, args, _, _) -> {
+        .Field(_, _, _, _) -> sema_checked_module_type_path(value)
+        .MethodCall(receiver, method, _, _, type_args, args, _) -> {
             if type_args.len() != 0 || !sema_checked_module_uppercase(method) || !sema_checked_module_type_path(receiver) -> return false
             loop argument in args {
                 if !sema_checked_module_literal(argument.expr) -> return false
@@ -3533,8 +3595,8 @@ fn sema_checked_module_literal_fields(fields: [ExprField]) -> Bool Never! {
 
 fn sema_checked_module_type_path(value: Expr) -> Bool Never! {
     if value == {
-        .Ident(name, _) -> sema_checked_module_uppercase(name)
-        .Field(base, member, _) -> sema_checked_module_uppercase(member) && sema_checked_module_type_path(base)
+        .Ident(name, _, _) -> sema_checked_module_uppercase(name)
+        .Field(base, member, _, _) -> sema_checked_module_uppercase(member) && sema_checked_module_type_path(base)
         else -> false
     }
 }

@@ -1,0 +1,17 @@
+# tests/fmt.rs::fmt_preserves_inline_range_in_type_positions at tests/fmt.rs:3497; hand-port
+# Claim: `level: Int(0..100)` field and param spelling kept (tests/fmt.rs:3517)
+# Claim: `Int(0..100) -> {` return spelling kept (tests/fmt.rs:3518)
+# Claim: `Int(0..100).from_int(12)` conversion head kept (tests/fmt.rs:3519)
+fixture: fmt_preserves_inline_range_in_type_positions.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt run.jet
+exit: 0 # tests/fmt.rs:3514 formats
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:3517-3519 needles kept
+stdout: ~ "level: Int(0..100)" # tests/fmt.rs:3517-3519 needles kept
+stdout: ~ "Int(0..100) { return level }" # tests/fmt.rs:3517-3519 needles kept
+stdout: ~ "Int(0..100).from_int(12)" # tests/fmt.rs:3517-3519 needles kept
+step: jet fmt --check run.jet
+exit: 0 # fmt output stable

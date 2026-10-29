@@ -1,0 +1,21 @@
+# tests/build_metadata_compat.rs::previous_tool_owned_artifacts_are_read_fail_closed_without_rewriting_input at tests/build_metadata_compat.rs:28; hand-port
+# Previous-format tool-owned artifacts are read fail-closed and never rewritten: a version-0 .jet/lock and a
+# jet-receipt-v1 receipt object survive jet build and jet status byte for byte, and the old receipt lists as no
+# claim. The fixtures are tests/fixtures/build-metadata-compat/{lock-v0.lock,receipt-v1.magic}. The pure readers keep
+# their own Jet tests: the v0 lock is E1214 in Jetpack/PackageModel/Tests/LockRoundTrip.jet ("previous lock fixture
+# is rejected with registered diagnostic"), and the jet.store.v0 action record and jet.build-record/v0 are rejected
+# in Jetpack/Store/Tests/ArtifactStore.jet ("artifact store previous store and build record fixtures fail closed").
+fixture: previous_tool_owned_artifacts_are_read_fail_closed_without_rewriting_input.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+mkdir: .jet/receipts/objects
+copy: lock-v0.lock .jet/lock
+copy: receipt-v1.magic .jet/receipts/objects/e27dfe4d5c5f1b2c8a861de44091b4c7ac7eec90fe2f4cac59a328f73c66337f
+step: jet build main.jet
+exit: 0
+file: .jet/lock == lock-v0.lock # tests/build_metadata_compat.rs:39 the previous lock is not rewritten
+step: jet status main.jet --json
+exit: 0
+stdout: ~ "\"claims\":[]" # tests/build_metadata_compat.rs:84-89 the previous receipt lists as no claim
+file: .jet/receipts/objects/e27dfe4d5c5f1b2c8a861de44091b4c7ac7eec90fe2f4cac59a328f73c66337f == receipt-v1.magic # tests/build_metadata_compat.rs:90 the previous receipt is not rewritten

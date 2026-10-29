@@ -3,9 +3,9 @@
 Jetpack turns one typed project graph into package, environment, service, profile,
 and image operations. This reference is for package and environment authors and
 for tools that inspect or realize their declarations. The executable contracts
-live in the [package model](../../../crates/jet-pkg-model/src/Package/mod.rs),
-[environment model](../../../crates/jet-env-model/src/ModuleEval/Environment.rs),
-and [Jetpack CLI help](../../../crates/jetpack/src/CLI/usage_tests.rs).
+live in the [package model](../../../Jetpack/PackageModel/Source/),
+[environment model](../../../Jetpack/EnvModel/Source/ModuleEval/),
+and [Jetpack CLI help](../../../Jetpack/CLI/Source/Dispatch/UsagePage.jet).
 
 ## One typed graph
 

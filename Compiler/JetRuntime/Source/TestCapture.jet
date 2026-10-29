@@ -137,8 +137,9 @@ fn test_capture_state_drop(state: I64) {
 
 // Native test Print syntax must always execute inside its unit's capture.
 // The ordinary Rust tier retains the TEST_PRELUDE TLS print implementation.
-#Export(c) fn jet_rt_test_print(text: I64, _flush: Bool) {
+// Outside a unit (the package `fn test` setup) there is no capture frame: print to stdout.
+#Export(c) fn jet_rt_test_print(text: I64, flush: Bool) {
     if !jet_rt_test_capture_print(text) {
-        jet_rt_unreachable(I64{0}, I64{0})
+        _ :: host_stdio_text_failure(text, true, false, flush)
     }
 }

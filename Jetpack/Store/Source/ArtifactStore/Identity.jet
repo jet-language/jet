@@ -3,6 +3,10 @@
 // handles, the lease targets that pin them, and the store's one failure
 // carrier. The compiler build cache consumes this store; nothing here touches
 // the filesystem.
+use jet_foundation.[sha256_hex_bytes]
+use jet_pkg_model.[pkg_bytes_is_word, pkg_bytes_starts_with, pkg_bytes_text]
+use core.time as time
+use core.crypto as crypto
 
 // The artifact store's one failure carrier. `message` keeps the exact text of
 // the Rust `StoreError` Display implementation.
@@ -70,7 +74,7 @@ struct ArtifactDigest {
 
     // Lowercase hex, the Display form.
     fn to_hex(self) -> String Never! {
-        mir_sha256_hex_bytes(self.bytes)
+        sha256_hex_bytes(self.bytes)
     }
 }
 

@@ -1,0 +1,477 @@
+// Declared flash invocation and canonical receipt policy (Source/CmdFlash.rs).
+// Execution/receipt-store publication are C-PROC/RE02. Canonical machine
+// validation/lookup come from TargetMachine/TargetSelection. No launch here.
+use core.files.path as flash_paths
+use core.files.path.[Path]
+use jet_foundation.[
+    CanonicalJSON, CanonicalJSONField, MemoryKind, TargetMachine, TargetProgrammerFacts,
+    canonical_json_bytes, canonical_json_object, canonical_json_sha256, jet_target_hardware_json,
+    jet_target_machine_errors_debug, jet_target_machine_use_default, jet_target_machine_validate,
+    jet_target_programmer_missing_fact, jet_target_provider_identity, sha256_hex,
+]
+use jet_driver.[jet_driver_target_machine_by_name]
+JET_CLI_FLASH_RECEIPT_SCHEMA :: "jet.flash.receipt"
+JET_CLI_FLASH_PLAN_SCHEMA :: "jet.flash.plan"
+JET_CLI_FLASH_AUTHORITY :: "Build.native_sandboxed"
+JET_CLI_FLASH_MAX_AUDIT_BYTES :: 1048576
+JET_CLI_FLASH_MAX_CAPTURE_BYTES :: 65536
+#Error
+struct JetCLIFlashError { message: String, byte_offset: Int? }
+fn jet_cli_flash_error(message: String) -> JetCLIFlashError Never! { JetCLIFlashError{message: message, byte_offset: None} }
+// #4378: until Core owns raw OS bytes, the native seam refuses non-UTF-8
+// addresses (including PATH entries and parent directories), never lossy text.
+fn jet_cli_flash_non_utf8_error(byte_offset: Int) -> JetCLIFlashError Never! {
+    JetCLIFlashError{message: "flash path is not UTF-8 at byte {byte_offset}", byte_offset: Val(byte_offset)}
+}
+fn jet_cli_flash_context_error(message: String, cause: JetCLIFlashError) -> JetCLIFlashError Never! {
+    // copy: `cause` stays with the caller (`cause` is a read parameter: no move out of it, E0201)
+    // and the new value owns its own.
+    if cause.byte_offset != None -> return cause.copy()
+    jet_cli_flash_error(message)
+}
+// One C-FS seam, using Core's canonical Path address. The host preserves
+// no-follow semantics, exact u64 metadata sizes and one captured PATH.
+struct JetCLIFlashMetadata { symlink: Bool, regular: Bool, bytes: Int }
+trait JetCLIFlashHost {
+    fn symlink_metadata(&self, path: Path) -> JetCLIFlashMetadata JetCLIFlashError!
+    fn canonicalize(&self, path: Path) -> Path JetCLIFlashError!
+    fn metadata(&self, path: Path) -> JetCLIFlashMetadata JetCLIFlashError!
+    fn sha256_file(&self, path: Path) -> String JetCLIFlashError!
+    fn read_audit_text(&self, path: Path) -> String JetCLIFlashError!
+    fn path_snapshot(&self) -> [Path]? JetCLIFlashError!
+    fn utf8_filename(&self, path: Path) -> String? JetCLIFlashError!
+}
+// Rust FlashAdapter (CmdFlash.rs:32-55).
+enum JetCLIFlashAdapter { Emulator ProbeRs OpenOcd }
+// Rust FlashAdapter::as_str (CmdFlash.rs:39-45).
+fn jet_cli_flash_adapter_name(adapter: JetCLIFlashAdapter) -> String Never! {
+    if adapter == {
+        .Emulator -> "emulator"
+        .ProbeRs -> "probe-rs"
+        .OpenOcd -> "openocd"
+    }
+}
+// Rust FlashAdapter::parse (CmdFlash.rs:47-55).
+fn jet_cli_flash_adapter_parse(value: String) -> JetCLIFlashAdapter? Never! {
+    if value == {
+        "emulator" -> Val(JetCLIFlashAdapter.Emulator)
+        "probe-rs" -> Val(JetCLIFlashAdapter.ProbeRs)
+        "openocd" -> Val(JetCLIFlashAdapter.OpenOcd)
+        else -> None
+    }
+}
+// Rust FlashArgument/FlashToolDeclaration (CmdFlash.rs:60-76).
+enum JetCLIFlashArgument { Literal(String) ImageName Dynamic(String) OpenOcdProgram(Bool) }
+struct JetCLIFlashToolDeclaration { adapter: JetCLIFlashAdapter, executable: String, arguments: [JetCLIFlashArgument], programmer: TargetProgrammerFacts }
+// Rust FlashToolDeclaration::from_facts (CmdFlash.rs:79-144).
+fn jet_cli_flash_tool_from_facts(facts: TargetProgrammerFacts) -> JetCLIFlashToolDeclaration Never! {
+    adapter :: if facts.adapter == {
+        .Emulator -> JetCLIFlashAdapter.Emulator
+        .ProbeRs -> JetCLIFlashAdapter.ProbeRs
+        .OpenOcd -> JetCLIFlashAdapter.OpenOcd
+    }
+    arguments := [JetCLIFlashArgument]{}
+    if facts.adapter == {
+        .Emulator -> {
+            &arguments.push(JetCLIFlashArgument.Literal("-machine"))
+            // copy: `value` is a payload view of `facts` (owner: the caller, a read parameter: no
+            // move out of it, E0201); the pushed argument owns its own.
+            if facts.machine == .Val(value) -> &arguments.push(JetCLIFlashArgument.Dynamic(value.copy()))
+            &arguments.push(JetCLIFlashArgument.Literal("-cpu"))
+            // copy: `value` is a payload view of `facts` (owner: the caller, a read parameter: no
+            // move out of it, E0201); the pushed argument owns its own.
+            if facts.cpu == .Val(value) -> &arguments.push(JetCLIFlashArgument.Dynamic(value.copy()))
+            &arguments.push(JetCLIFlashArgument.Literal("-nographic"))
+            &arguments.push(JetCLIFlashArgument.Literal("-kernel"))
+            &arguments.push(JetCLIFlashArgument.ImageName)
+        }
+        .ProbeRs -> {
+            &arguments.push(JetCLIFlashArgument.Literal("download"))
+            if facts.chip == .Val(value) {
+                &arguments.push(JetCLIFlashArgument.Literal("--chip"))
+                // copy: `value` is a payload view of `facts` (owner: the caller, a read parameter:
+                // no move out of it, E0201); the pushed argument owns its own.
+                &arguments.push(JetCLIFlashArgument.Dynamic(value.copy()))
+            }
+            if facts.interface == .Val(value) {
+                &arguments.push(JetCLIFlashArgument.Literal("--probe"))
+                // copy: `value` is a payload view of `facts` (owner: the caller, a read parameter:
+                // no move out of it, E0201); the pushed argument owns its own.
+                &arguments.push(JetCLIFlashArgument.Dynamic(value.copy()))
+            }
+            if facts.speed_khz == .Val(value) {
+                &arguments.push(JetCLIFlashArgument.Literal("--speed"))
+                &arguments.push(JetCLIFlashArgument.Dynamic("{value}"))
+            }
+            if facts.reset -> &arguments.push(JetCLIFlashArgument.Literal("--connect-under-reset"))
+            &arguments.push(JetCLIFlashArgument.ImageName)
+        }
+        .OpenOcd -> {
+            if facts.interface == .Val(value) {
+                &arguments.push(JetCLIFlashArgument.Literal("-f"))
+                // copy: `value` is a payload view of `facts` (owner: the caller, a read parameter:
+                // no move out of it, E0201); the pushed argument owns its own.
+                &arguments.push(JetCLIFlashArgument.Dynamic(value.copy()))
+            }
+            loop config in facts.config {
+                &arguments.push(JetCLIFlashArgument.Literal("-f"))
+                // copy: `config` stays in the iterated collection (`config` is a view of its
+                // element; no move out of an element, E0225) and the new
+                // `JetCLIFlashArgument.Dynamic` value owns its own.
+                &arguments.push(JetCLIFlashArgument.Dynamic(config.copy()))
+            }
+            if facts.speed_khz == .Val(value) {
+                &arguments.push(JetCLIFlashArgument.Literal("-c"))
+                &arguments.push(JetCLIFlashArgument.Dynamic("adapter speed {value}"))
+            }
+            &arguments.push(JetCLIFlashArgument.Literal("-c"))
+            &arguments.push(JetCLIFlashArgument.OpenOcdProgram(facts.reset))
+        }
+    }
+    // copy: `facts.executable` stays with the caller (`facts` is a read parameter: no move out of
+    // it, E0201) and the field `executable` owns its own. `facts` stays with the caller (`facts` is
+    // a read parameter: no move out of it, E0201) and the field `programmer` owns its own.
+    JetCLIFlashToolDeclaration{adapter: adapter, executable: facts.executable.copy(), arguments: arguments, programmer: facts.copy()}
+}
+// Rust FlashToolDeclaration::argv (CmdFlash.rs:146-172).
+fn jet_cli_flash_tool_argv(tool: JetCLIFlashToolDeclaration, image_name: String) -> [String] JetCLIFlashError! {
+    name :: jet_cli_flash_adapter_name(tool.adapter)
+    if jet_target_programmer_missing_fact(tool.programmer) == .Val(missing) -> return Err(jet_cli_flash_error("target programmer `{name}` is missing explicit `{missing}` fact"))
+    if tool.adapter == JetCLIFlashAdapter.OpenOcd && !jet_cli_flash_safe_openocd_image_name(image_name) -> return Err(jet_cli_flash_error("image filename `{image_name}` cannot be passed to OpenOCD safely"))
+    result := [String]{}
+    loop argument in tool.arguments {
+        value :: if argument == {
+            // copy: `text` is a payload view of an argument in `tool` (owner: the caller, a read
+            // parameter: no move out of it, E0201); the argv entry owns its own.
+            .Literal(text) -> text.copy()
+            // copy: `text` is a payload view of an argument in `tool` (owner: the caller, a read
+            // parameter: no move out of it, E0201); the argv entry owns its own.
+            .Dynamic(text) -> text.copy()
+            // copy: `image_name` stays with the caller (`image_name` is a read parameter: no move
+            // out of it, E0201) and the arm's value owns its own.
+            .ImageName -> image_name.copy()
+            .OpenOcdProgram(reset) -> if reset -> "program {image_name} verify reset exit" else -> "program {image_name} verify exit"
+        }
+        &result.push(value)
+    }
+    Ok(result)
+}
+// Rust FlashProfile (CmdFlash.rs:176-182).
+struct JetCLIFlashProfile { target: String, target_triple: String, target_identity: String, hardware_identity: String, tools: [JetCLIFlashToolDeclaration] }
+// Rust FlashProfile::from_machine (CmdFlash.rs:187-206).
+fn jet_cli_flash_profile_from_machine(machine: TargetMachine) -> JetCLIFlashProfile JetCLIFlashError! {
+    tools := [JetCLIFlashToolDeclaration]{}
+    loop facts in machine.programmers -> &tools.push(jet_cli_flash_tool_from_facts(facts))
+    if tools.is_empty() -> return Err(jet_cli_flash_error("target `{machine.name}` has no owner-approved programmer facts; declare an adapter plus chip for probe-rs, interface/config for OpenOCD, or machine/cpu for an emulator"))
+    // copy: `machine.name` stays with the caller (`machine` is a read parameter: no move out of it,
+    // E0201) and the field `target` owns its own. `machine.triple` stays with the caller (`machine`
+    // is a read parameter: no move out of it, E0201) and the field `target_triple` owns its own.
+    Ok(JetCLIFlashProfile{target: machine.name.copy(), target_triple: machine.triple.copy(), target_identity: jet_target_provider_identity(machine), hardware_identity: sha256_hex(jet_target_hardware_json(machine.hardware)), tools: tools})
+}
+// Rust FlashProfile::select (CmdFlash.rs:208-246). Return an index, not a copied tool.
+fn jet_cli_flash_profile_select(profile: JetCLIFlashProfile, requested: JetCLIFlashAdapter?) -> Int JetCLIFlashError! {
+    loop (index, tool) in profile.tools {
+        matches :: if requested == .Val(adapter) -> tool.adapter == adapter else -> true
+        if matches && jet_target_programmer_missing_fact(tool.programmer) == None -> return Ok(index)
+    }
+    loop tool in profile.tools {
+        matches :: if requested == .Val(adapter) -> tool.adapter == adapter else -> true
+        if matches {
+            if jet_target_programmer_missing_fact(tool.programmer) == .Val(missing) -> return Err(jet_cli_flash_error("target `{profile.target}` `{jet_cli_flash_adapter_name(tool.adapter)}` programmer is missing explicit `{missing}` fact"))
+        }
+    }
+    names := [String]{}
+    loop tool in profile.tools -> &names.push(jet_cli_flash_adapter_name(tool.adapter))
+    available :: names.join(", ")
+    if requested == .Val(adapter) -> return Err(jet_cli_flash_error("target `{profile.target}` does not declare the `{jet_cli_flash_adapter_name(adapter)}` adapter (declared: {available})"))
+    Err(jet_cli_flash_error("target `{profile.target}` declares no usable programmer ({available})"))
+}
+// Rust FlashPlan record (CmdFlash.rs:251-271).
+struct JetCLIFlashPlan {
+    schema: String, target: String, target_triple: String, target_identity: String, hardware_identity: String
+    adapter: JetCLIFlashAdapter, programmer: TargetProgrammerFacts
+    tool: String, tool_identity: String, executable: Path, image: Path, audit: Path
+    audit_sha256: String, image_bytes: Int, image_sha256: String, argv: [String], authority: String
+}
+// Rust FlashPlan::from_target_and_image (CmdFlash.rs:277-286).
+fn jet_cli_flash_plan_from_target_and_image<H: JetCLIFlashHost>(host: &H, target: String, image: Path, audit: Path?, adapter: JetCLIFlashAdapter?, package_version: String) -> JetCLIFlashPlan JetCLIFlashError! {
+    machine :: jet_driver_target_machine_by_name(target, package_version) ?? return Err(jet_cli_flash_error("unknown target machine `{target}`"))
+    jet_cli_flash_plan_from_machine<H>(&host, machine, image, audit, adapter)
+}
+// Rust FlashPlan::from_machine (CmdFlash.rs:289-376), same validation order.
+fn jet_cli_flash_plan_from_machine<H: JetCLIFlashHost>(host: &H, machine: TargetMachine, image: Path, audit: Path?, adapter: JetCLIFlashAdapter?) -> JetCLIFlashPlan JetCLIFlashError! {
+    if !machine.no_os -> return Err(jet_cli_flash_error("target `{machine.name}` is hosted; flashing requires a no-OS board or emulator profile"))
+    validation :: jet_target_machine_validate(machine, jet_target_machine_use_default())
+    if !validation.is_empty() -> return Err(jet_cli_flash_error("target `{machine.name}` failed canonical profile validation: {jet_target_machine_errors_debug(validation)}"))
+    capacity := -1
+    loop region in machine.memory {
+        if region.kind == MemoryKind.Flash && region.size.bytes > capacity -> capacity = region.size.bytes
+    }
+    if capacity < 0 -> return Err(jet_cli_flash_error("target `{machine.name}` declares no flash memory region"))
+    canonical_image :: jet_cli_flash_regular_file<H>(&host, image, "flash image")
+    // #4376: Core's exact-text Path projection in error messages avoids external owner-field lowering.
+    metadata :: &host.metadata(canonical_image) ?? return Err(jet_cli_flash_context_error("cannot inspect flash image `{flash_paths.show(canonical_image)}`: {err.message}", err))
+    if metadata.bytes > capacity -> return Err(jet_cli_flash_error("flash image `{flash_paths.show(canonical_image)}` is {metadata.bytes} bytes but target `{machine.name}` declares only {capacity} flash bytes"))
+    image_digest :: &host.sha256_file(canonical_image) ?? return Err(jet_cli_flash_context_error("cannot hash flash image `{flash_paths.show(canonical_image)}`: {err.message}", err))
+    // #4376: consume fallible optional payload with a result match, never an implicit optional owner.
+    image_name :: if &host.utf8_filename(canonical_image) == {
+        .Ok(name) -> jet_cli_flash_required_filename(name, canonical_image)
+        .Err(cause) -> { return Err(^cause) }
+    }
+    canonical_audit :: jet_cli_flash_resolve_audit<H>(&host, canonical_image, machine.name, audit)
+    text :: jet_cli_flash_read_audit<H>(&host, canonical_audit)
+    audit_digest :: sha256_hex(text)
+    fields :: jet_cli_flash_parse_top_level_string_fields(text) ?? return Err(jet_cli_flash_error("target audit `{flash_paths.show(canonical_audit)}` is malformed: {err.message}"))
+    jet_cli_flash_verify_audit(fields, machine, image_digest)
+    profile :: jet_cli_flash_profile_from_machine(machine)
+    selected :: jet_cli_flash_profile_select(profile, adapter)
+    declaration :: profile.tools[selected]
+    declared_argv :: jet_cli_flash_tool_argv(declaration, image_name)
+    executable :: jet_cli_flash_resolve_tool<H>(&host, declaration.executable)
+    tool_digest :: &host.sha256_file(executable) ?? return Err(jet_cli_flash_context_error("cannot hash declared flash tool `{flash_paths.show(executable)}`: {err.message}", err))
+    // copy: `declaration.executable` stays with `declaration`, which is read again at line 200, and
+    // the new value owns its own.
+    argv := [String]{declaration.executable.copy()}
+    // copy: `word` stays in the iterated collection (`word` is a view of its element; no move out
+    // of an element, E0225) and the pushed row owns its own.
+    loop word in declared_argv -> &argv.push(word.copy())
+    // copy: the machine facts stay with the caller (`machine`, a read parameter: no move out of it,
+    // E0201) and the tool declaration stays in `profile.tools` (no move out of an element, E0225);
+    // the plan owns its own fields.
+    Ok(JetCLIFlashPlan{schema: JET_CLI_FLASH_PLAN_SCHEMA, target: machine.name.copy(), target_triple: machine.triple.copy(), target_identity: profile.target_identity.copy(), hardware_identity: profile.hardware_identity.copy(), adapter: declaration.adapter, programmer: declaration.programmer.copy(), tool: declaration.executable.copy(), tool_identity: tool_digest, executable: executable, image: canonical_image, audit: canonical_audit, audit_sha256: audit_digest, image_bytes: metadata.bytes, image_sha256: image_digest, argv: argv, authority: JET_CLI_FLASH_AUTHORITY})
+}
+// Rust default_flash_image (CmdFlash.rs:935-943).
+fn jet_cli_flash_default_image(target: String, package_version: String) -> Path Never! {
+    machine :: jet_driver_target_machine_by_name(target, package_version)
+    // copy: the machine name stays in its catalog row (`value`, a view) and `target` stays with the
+    // caller (a read parameter: no move out of it, E0201); `canonical` owns its own text.
+    canonical :: if machine == .Val(value) -> value.name.copy() else -> target.copy()
+    flash_paths.join(flash_paths.join(flash_paths.of(".jet/target"), canonical), "firmware.elf")
+}
+// Rust FlashPlan::from_machine filename checks (CmdFlash.rs:323-326).
+fn jet_cli_flash_required_filename(name: String?, image: Path) -> String JetCLIFlashError! {
+    if name == .Val(value) {
+        // copy: `value` is a payload view of `name` (owner: the caller, a read parameter: no move
+        // out of it, E0201); the result owns its own text.
+        if !value.is_empty() -> return Ok(value.copy())
+    }
+    Err(jet_cli_flash_error("flash image `{flash_paths.show(image)}` has no UTF-8 filename"))
+}
+fn jet_cli_flash_strings_json(values: [String]) -> CanonicalJSON Never! {
+    rows := [CanonicalJSON]{}
+    // copy: `value` stays in the iterated collection (`value` is a view of its element; no move out
+    // of an element, E0225) and the new `CanonicalJSON.String` value owns its own.
+    loop value in values -> &rows.push(CanonicalJSON.String(value.copy()))
+    CanonicalJSON.Array(rows)
+}
+// Rust FlashPlan::identity object (CmdFlash.rs:378-436); keys in canonical order.
+// #4376: use Core's exact-text Path projection rather than nested external owner-field lowering.
+fn jet_cli_flash_plan_json(plan: JetCLIFlashPlan) -> CanonicalJSON Never! {
+    CanonicalJSON.Object([CanonicalJSONField]{
+        {key: "adapter", value: CanonicalJSON.String(jet_cli_flash_adapter_name(plan.adapter))},
+        {key: "argv", value: jet_cli_flash_strings_json(plan.argv)},
+        {key: "audit", value: CanonicalJSON.String(flash_paths.show(plan.audit))},
+        // copy: `plan.audit_sha256` stays with the caller (`plan` is a read parameter: no move out
+        // of it, E0201) and the new `CanonicalJSON.String` value owns its own.
+        {key: "audit_sha256", value: CanonicalJSON.String(plan.audit_sha256.copy())},
+        // copy: `plan.authority` stays with the caller (`plan` is a read parameter: no move out of
+        // it, E0201) and the new `CanonicalJSON.String` value owns its own.
+        {key: "authority", value: CanonicalJSON.String(plan.authority.copy())},
+        // copy: `plan.hardware_identity` stays with the caller (`plan` is a read parameter: no move
+        // out of it, E0201) and the new `CanonicalJSON.String` value owns its own.
+        {key: "hardware_identity", value: CanonicalJSON.String(plan.hardware_identity.copy())},
+        {key: "image", value: CanonicalJSON.String(flash_paths.show(plan.image))},
+        {key: "image_bytes", value: CanonicalJSON.Integer("{plan.image_bytes}")},
+        // copy: `plan.image_sha256` stays with the caller (`plan` is a read parameter: no move out
+        // of it, E0201) and the new `CanonicalJSON.String` value owns its own.
+        {key: "image_sha256", value: CanonicalJSON.String(plan.image_sha256.copy())},
+        // copy: `plan.schema` stays with the caller (`plan` is a read parameter: no move out of it,
+        // E0201) and the new `CanonicalJSON.String` value owns its own.
+        {key: "plan_schema", value: CanonicalJSON.String(plan.schema.copy())},
+        {key: "programmer", value: jet_cli_flash_programmer_json(plan.programmer)},
+        // copy: `plan.target` stays with the caller (`plan` is a read parameter: no move out of it,
+        // E0201) and the new `CanonicalJSON.String` value owns its own.
+        {key: "target", value: CanonicalJSON.String(plan.target.copy())},
+        // copy: `plan.target_identity` stays with the caller (`plan` is a read parameter: no move
+        // out of it, E0201) and the new `CanonicalJSON.String` value owns its own.
+        {key: "target_identity", value: CanonicalJSON.String(plan.target_identity.copy())},
+        // copy: `plan.target_triple` stays with the caller (`plan` is a read parameter: no move out
+        // of it, E0201) and the new `CanonicalJSON.String` value owns its own.
+        {key: "target_triple", value: CanonicalJSON.String(plan.target_triple.copy())},
+        // copy: `plan.tool` stays with the caller (`plan` is a read parameter: no move out of it,
+        // E0201) and the new `CanonicalJSON.String` value owns its own.
+        {key: "tool", value: CanonicalJSON.String(plan.tool.copy())},
+        // copy: `plan.tool_identity` stays with the caller (`plan` is a read parameter: no move out
+        // of it, E0201) and the new `CanonicalJSON.String` value owns its own.
+        {key: "tool_identity", value: CanonicalJSON.String(plan.tool_identity.copy())},
+    })
+}
+// Rust FlashPlan::identity (CmdFlash.rs:378-436): JSON text, NOT its digest.
+fn jet_cli_flash_plan_identity(plan: JetCLIFlashPlan) -> String Never! {
+    bytes :: canonical_json_bytes(jet_cli_flash_plan_json(plan))
+    // copy: the identity text is a sub-range copied out of `bytes` (which keeps its whole list); a
+    // range has no owner to move from.
+    String.from_bytes(bytes[0..<bytes.len() - 1].copy()) ?? panic("flash plan identity JSON is UTF-8")
+}
+// Rust FlashFailure, FlashExecution records (CmdFlash.rs:472-475,626-633).
+struct JetCLIFlashFailure { kind: String, detail: String }
+struct JetCLIFlashExecution { status: Int?, stdout: [U8], stderr: [U8], mechanism: String, policy: String, failure: JetCLIFlashFailure? }
+// Rust FlashExecution::failed (CmdFlash.rs:636-646).
+fn jet_cli_flash_execution_failed(kind: String, detail: String, mechanism: String, policy: String) -> JetCLIFlashExecution Never! {
+    JetCLIFlashExecution{status: None, stdout: [U8]{}, stderr: [U8]{}, mechanism: mechanism, policy: policy, failure: Val(JetCLIFlashFailure{kind: kind, detail: detail})}
+}
+// Rust FlashReceipt (CmdFlash.rs:441-469); plan carries the shared immutable fields.
+struct JetCLIFlashReceipt {
+    schema: String, plan: JetCLIFlashPlan, plan_identity: String
+    mechanism: String, policy: String, status: Int?, success: Bool
+    stdout: [U8], stderr: [U8], stdout_truncated: Bool, stderr_truncated: Bool
+    failure: JetCLIFlashFailure?, result_identity: String
+}
+// Rust FlashReceipt::from_execution (CmdFlash.rs:478-512).
+fn jet_cli_flash_receipt_from_execution(plan: JetCLIFlashPlan, execution: ^JetCLIFlashExecution) -> JetCLIFlashReceipt Never! {
+    stdout := jet_cli_flash_bound_capture(execution.stdout)
+    stderr := jet_cli_flash_bound_capture(execution.stderr)
+    success :: execution.failure == None
+    // copy: `plan` stays with the caller (`plan` is a read parameter: no move out of it, E0201) and
+    // the field `plan` owns its own.
+    receipt := JetCLIFlashReceipt{schema: JET_CLI_FLASH_RECEIPT_SCHEMA, plan: plan.copy(), plan_identity: jet_cli_flash_plan_identity(plan), mechanism: ^execution.mechanism, policy: ^execution.policy, status: execution.status, success: success, stdout: ^stdout.bytes, stderr: ^stderr.bytes, stdout_truncated: stdout.truncated, stderr_truncated: stderr.truncated, failure: ^execution.failure, result_identity: ""}
+    receipt.result_identity = "flash-result-v1:{canonical_json_sha256(jet_cli_flash_receipt_result_json(receipt))}"
+    receipt
+}
+// Rust FlashReceipt::failure_json (CmdFlash.rs:556-564).
+fn jet_cli_flash_receipt_failure_json(receipt: JetCLIFlashReceipt) -> CanonicalJSON Never! {
+    // copy: `failure` is a payload view of `receipt.failure` (owner: the caller, a read parameter:
+    // no move out of it, E0201); the JSON strings own their own text.
+    if receipt.failure == .Val(failure) -> return CanonicalJSON.Object([CanonicalJSONField]{CanonicalJSONField{key: "detail", value: CanonicalJSON.String(failure.detail.copy())}, CanonicalJSONField{key: "kind", value: CanonicalJSON.String(failure.kind.copy())}})
+    CanonicalJSON.Null
+}
+fn jet_cli_flash_status_json(status: Int?) -> CanonicalJSON Never! { if status == .Val(value) -> CanonicalJSON.Integer("{value}") else -> CanonicalJSON.Null }
+// Rust String::from_utf8_lossy in result_json/to_json. Rust replaces each invalid
+// sequence once (including an incomplete suffix), not once per invalid byte.
+fn jet_cli_flash_utf8_lossy(bytes: [U8]) -> String Never! {
+    out := [U8]{}
+    at := 0
+    loop at < bytes.len() {
+        first :: Int.from_u8(bytes[at])
+        if first < 128 {
+            &out.push(bytes[at])
+            at += 1
+            next
+        }
+        width :: if {
+            first >= 194 && first <= 223 -> 2
+            first >= 224 && first <= 239 -> 3
+            first >= 240 && first <= 244 -> 4
+            else -> 0
+        }
+        consumed := 1
+        valid := width > 0
+        loop valid && consumed < width {
+            if at + consumed >= bytes.len() {
+                valid = false
+                break
+            }
+            byte :: Int.from_u8(bytes[at + consumed])
+            low :: if consumed == 1 && first == 224 -> 160 else -> if consumed == 1 && first == 240 -> 144 else -> 128
+            high :: if consumed == 1 && first == 237 -> 159 else -> if consumed == 1 && first == 244 -> 143 else -> 191
+            if byte < low || byte > high {
+                valid = false
+                break
+            }
+            consumed += 1
+        }
+        if valid {
+            loop index in at..<at + width -> &out.push(bytes[index])
+            at += width
+        } else {
+            &out.push(U8{239})
+            &out.push(U8{191})
+            &out.push(U8{189})
+            at += consumed
+        }
+    }
+    String.from_bytes(out) ?? panic("lossy UTF-8 is valid")
+}
+// Rust FlashReceipt::result_json (CmdFlash.rs:514-554).
+fn jet_cli_flash_receipt_result_json(receipt: JetCLIFlashReceipt) -> CanonicalJSON Never! {
+    plan :: receipt.plan
+    CanonicalJSON.Object([CanonicalJSONField]{
+        {key: "adapter", value: CanonicalJSON.String(jet_cli_flash_adapter_name(plan.adapter))},
+        {key: "argv", value: jet_cli_flash_strings_json(plan.argv)},
+        {key: "audit", value: CanonicalJSON.String(flash_paths.show(plan.audit))},
+        // copy: `plan.audit_sha256` stays with `plan`, which is read again at line 331, and the new
+        // `CanonicalJSON.String` value owns its own.
+        {key: "audit_sha256", value: CanonicalJSON.String(plan.audit_sha256.copy())},
+        {key: "failure", value: jet_cli_flash_receipt_failure_json(receipt)},
+        // copy: `plan.hardware_identity` stays with `plan`, which is read again at line 332, and
+        // the new `CanonicalJSON.String` value owns its own.
+        {key: "hardware_identity", value: CanonicalJSON.String(plan.hardware_identity.copy())},
+        // copy: `plan.image_sha256` stays with `plan`, which is read again at line 336, and the new
+        // `CanonicalJSON.String` value owns its own.
+        {key: "image_sha256", value: CanonicalJSON.String(plan.image_sha256.copy())},
+        // copy: `receipt.mechanism` stays with the caller (`receipt` is a read parameter: no move
+        // out of it, E0201) and the new `CanonicalJSON.String` value owns its own.
+        {key: "mechanism", value: CanonicalJSON.String(receipt.mechanism.copy())},
+        // copy: `receipt.plan_identity` stays with the caller (`receipt` is a read parameter: no
+        // move out of it, E0201) and the new `CanonicalJSON.String` value owns its own.
+        {key: "plan_identity", value: CanonicalJSON.String(receipt.plan_identity.copy())},
+        // copy: `receipt.policy` stays with the caller (`receipt` is a read parameter: no move out
+        // of it, E0201) and the new `CanonicalJSON.String` value owns its own.
+        {key: "policy", value: CanonicalJSON.String(receipt.policy.copy())},
+        {key: "programmer", value: jet_cli_flash_programmer_json(plan.programmer)},
+        {key: "status", value: jet_cli_flash_status_json(receipt.status)},
+        {key: "stderr", value: CanonicalJSON.String(jet_cli_flash_utf8_lossy(receipt.stderr))},
+        {key: "stdout", value: CanonicalJSON.String(jet_cli_flash_utf8_lossy(receipt.stdout))},
+        {key: "success", value: CanonicalJSON.Bool(receipt.success)},
+        // copy: `plan.target_identity` stays with `plan`, which is read again at line 342, and the
+        // new `CanonicalJSON.String` value owns its own.
+        {key: "target_identity", value: CanonicalJSON.String(plan.target_identity.copy())},
+        // copy: `plan` is a view of `receipt.plan` (owner: the caller, a read parameter: no move
+        // out of it, E0201); the JSON string owns its own text.
+        {key: "tool_identity", value: CanonicalJSON.String(plan.tool_identity.copy())},
+    })
+}
+// Rust FlashReceipt::to_json (CmdFlash.rs:566-619).
+fn jet_cli_flash_receipt_to_json(receipt: JetCLIFlashReceipt) -> CanonicalJSON Never! {
+    plan :: receipt.plan
+    fields := [CanonicalJSONField]{}
+    if jet_cli_flash_plan_json(plan) == .Object(plan_fields) {
+        loop field in plan_fields {
+            // copy: `field` stays in the iterated collection (`field` is a view of its element; no
+            // move out of an element, E0225) and the pushed row owns its own.
+            if field.key != "plan_schema" -> &fields.push(field.copy())
+        }
+    }
+    additions :: [CanonicalJSONField]{
+        {key: "failure", value: jet_cli_flash_receipt_failure_json(receipt)},
+        // copy: `receipt.mechanism` stays with the caller (`receipt` is a read parameter: no move
+        // out of it, E0201) and the new `CanonicalJSON.String` value owns its own.
+        {key: "mechanism", value: CanonicalJSON.String(receipt.mechanism.copy())},
+        // copy: `receipt.plan_identity` stays with the caller (`receipt` is a read parameter: no
+        // move out of it, E0201) and the new `CanonicalJSON.String` value owns its own.
+        {key: "plan_identity", value: CanonicalJSON.String(receipt.plan_identity.copy())},
+        // copy: `receipt.policy` stays with the caller (`receipt` is a read parameter: no move out
+        // of it, E0201) and the new `CanonicalJSON.String` value owns its own.
+        {key: "policy", value: CanonicalJSON.String(receipt.policy.copy())},
+        // copy: `receipt.schema` stays with the caller (`receipt` is a read parameter: no move out
+        // of it, E0201) and the new `CanonicalJSON.String` value owns its own.
+        {key: "receipt_schema", value: CanonicalJSON.String(receipt.schema.copy())},
+        {key: "result", value: CanonicalJSON.String(if receipt.success -> "ok" else -> "failed")},
+        // copy: `receipt` is a read parameter (no move out of it, E0201); the JSON string owns its
+        // own text.
+        {key: "result_identity", value: CanonicalJSON.String(receipt.result_identity.copy())},
+        {key: "status", value: jet_cli_flash_status_json(receipt.status)},
+        {key: "stderr", value: CanonicalJSON.String(jet_cli_flash_utf8_lossy(receipt.stderr))},
+        {key: "stderr_truncated", value: CanonicalJSON.Bool(receipt.stderr_truncated)},
+        {key: "stdout", value: CanonicalJSON.String(jet_cli_flash_utf8_lossy(receipt.stdout))},
+        {key: "stdout_truncated", value: CanonicalJSON.Bool(receipt.stdout_truncated)},
+    }
+    // copy: `field` stays in the iterated collection (`field` is a view of its element; no move out
+    // of an element, E0225) and the pushed row owns its own.
+    loop field in additions -> &fields.push(field.copy())
+    canonical_json_object(fields) ?? panic("flash receipt JSON keys are unique")
+}
+// Rust FlashReceipt::section (CmdFlash.rs:621-624).
+fn jet_cli_flash_receipt_section(receipt: JetCLIFlashReceipt) -> JetCLIReceiptSection JetCLIReadError! {
+    jet_cli_receipt_section_new("flash", "FlashReceipt", canonical_json_bytes(jet_cli_flash_receipt_to_json(receipt)))
+}

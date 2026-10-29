@@ -117,38 +117,3 @@ test("#4754 whole inline moved-payload/Option-unwrap/backedge class stays a requ
   writeFileSync(path, JSON.stringify(receipt));
   assert.equal(coverageReceipt({ receipt: path, sha256: hash(readFileSync(path)) }, "abcdef123", coverage), true);
 });
-
-test("sanitizer cannot green on empty/missing/uninstrumented/link-failed native corpus", (t) => {
-  const root = temporary(t);
-  const features = join(root, "Examples/features");
-  mkdirSync(join(features, "core"), { recursive: true });
-  mkdirSync(join(features, "expected/core"), { recursive: true });
-  for (const stem of ["present", "missing"]) {
-    writeFileSync(join(features, "core", `${stem}.jet`), 'fn run() { print("ok") }\n');
-    writeFileSync(join(features, "expected/core", `${stem}.out`), "ok\n");
-  }
-  const out = join(root, "output");
-  mkdirSync(join(out, "lower"), { recursive: true });
-  const runtime = join(root, "runtime.a");
-  writeFileSync(runtime, "!<arch>\n");
-  const jetObject = join(root, "runtime.o");
-  const cc = process.env.SANITIZE_CC ?? "clang";
-  const compile = spawnSync(cc, ["-x", "c", "-c", "-", "-o", jetObject], { input: "", encoding: "utf8" });
-  assert.equal(compile.status, 0, compile.error?.message ?? compile.stderr);
-  const invoke = (extra = []) => spawnSync(process.execPath, [resolve("Compiler/JetBackend/Tests/run-sanitized.mjs"), out, "--runtime-library", runtime, ...extra], {
-    cwd: resolve("."), encoding: "utf8", env: { ...process.env, JET_GOLDEN_FEATURES: features, JET_RUNTIME_JET_OBJECT: jetObject, SANITIZE_CC: cc, RUSTC: "/nonexistent-rustc" },
-  });
-  writeFileSync(join(out, "results.tsv"), "");
-  assert.equal(invoke().status, 1);
-  assert.match(readFileSync(join(out, "sanitize-summary.txt"), "utf8"), /empty-corpus/u);
-  writeFileSync(join(out, "results.tsv"), "core/present\tpass\n");
-  writeFileSync(join(out, "lower/core_present.o"), "invalid native object");
-  const caseList = join(root, "cases");
-  writeFileSync(caseList, "core/present\ncore/missing\n");
-  assert.equal(invoke(["--case-list", caseList]).status, 1);
-  assert.match(readFileSync(join(out, "sanitize.tsv"), "utf8"), /core\/present\tuninstrumented/u);
-  assert.match(readFileSync(join(out, "sanitize.tsv"), "utf8"), /core\/missing\tno-object/u);
-  writeFileSync(join(out, "lower/core_present.asan.o"), "invalid native object");
-  assert.equal(invoke().status, 1);
-  assert.match(readFileSync(join(out, "sanitize.tsv"), "utf8"), /link-failed/u);
-});

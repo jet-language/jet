@@ -4,12 +4,12 @@
 // snapshot load, and non-TTY callers receive the compact status summary
 // rendered from one synchronous read-only snapshot.
 
-DASHBOARD_MAX_RECENT_ACTIVITY :: prep { 5 }
-DASHBOARD_RETRY_INITIAL_MS :: prep { 100 }
-DASHBOARD_RETRY_MAX_MS :: prep { 2000 }
-// Raw key reads return Idle after this long with nothing typed, so the loop
-// can poll the loader without spinning.
-DASHBOARD_KEY_POLL_MS :: prep { 100 }
+DASHBOARD_MAX_RECENT_ACTIVITY :: 5
+DASHBOARD_RETRY_INITIAL_MS :: 100
+DASHBOARD_RETRY_MAX_MS :: 2000
+// A key read with nothing typed sleeps this long and returns Idle, so the
+// loop can poll the loader without spinning.
+DASHBOARD_KEY_POLL_MS :: 100
 
 enum DashboardLockState {
     Missing
@@ -77,17 +77,22 @@ enum DashboardKey {
     Other
 }
 
-// Keys come from the raw terminal, or from a fixed byte script (tests).
+// Keys come from the terminal, or from a fixed byte script (tests). Core has
+// no key read with a timeout (#5935), so a background task
+// forwards each terminal key and a read polls what it has forwarded.
 struct DashboardKeyReader {
     priv script: [U8]?
     priv position: Int
+    priv keys: Receiver<DashboardKey>?
 
-    fn terminal() -> DashboardKeyReader Never! {
-        DashboardKeyReader{script: None, position: 0}
+    fn terminal() -[IO, Time.Wait]> DashboardKeyReader Never! {
+        (sender, receiver) :: channel<DashboardKey>(capacity: 16)
+        task cli_dashboard_forward_keys(sender)
+        DashboardKeyReader{script: None, position: 0, keys: Val(receiver)}
     }
 
     fn from_bytes(bytes: [U8]) -> DashboardKeyReader Never! {
-        DashboardKeyReader{script: Val(bytes), position: 0}
+        DashboardKeyReader{script: Val(bytes), position: 0, keys: None}
     }
 
     fn read_key(&self) -[IO, Time.Wait]> DashboardKey Never! {
@@ -97,13 +102,37 @@ struct DashboardKeyReader {
             self.position += 1
             return cli_dashboard_key_for_byte(Int.from_u8(byte))
         }
-        key :: term.read_key_timeout(time.duration_ms(DASHBOARD_KEY_POLL_MS)) ?? return DashboardKey.Idle
-        if key == {
-            .Char(text) -> if text.bytes().len() == 1 -> cli_dashboard_key_for_byte(Int.from_u8(text.bytes()[0])) else -> DashboardKey.Char(text)
+        if self.keys == .Val(keys) {
+            if keys.try_receive() == .Val(key) -> return key
+        }
+        time.sleep(time.duration_ms(DASHBOARD_KEY_POLL_MS))
+        DashboardKey.Idle
+    }
+}
+
+// The terminal key task. Core has no raw-mode API (#5935), so the
+// terminal stays cooked: a key arrives once its line is entered. The task
+// ends after forwarding a key that quits the dashboard.
+fn cli_dashboard_forward_keys(sender: Sender<DashboardKey>) -[IO, Time.Wait]> {
+    loop {
+        key :: if term.read_key() == {
+            .Char(character) -> cli_dashboard_key_for_text("{character}")
             .Escape -> DashboardKey.Escape
+            .Ctrl(character) -> if character == 'c' -> DashboardKey.CtrlC else if character == 'd' -> DashboardKey.EOF else -> DashboardKey.Other
             else -> DashboardKey.Other
         }
+        quits :: cli_dashboard_key_quits(key)
+        sender.send(^key)
+        if quits -> break
     }
+}
+
+// One typed character: a single byte keeps its raw meaning (ESC, Ctrl-C,
+// Ctrl-D), anything wider is a character key.
+fn cli_dashboard_key_for_text(text: String) -> DashboardKey Never! {
+    bytes :: text.bytes()
+    if bytes.len() == 1 -> return cli_dashboard_key_for_byte(Int.from_u8(bytes[0]))
+    DashboardKey.Char(text)
 }
 
 // One raw byte as a key: ESC, Ctrl-C, Ctrl-D (end of input), or a character.
@@ -153,7 +182,7 @@ struct DashboardLoader {
     // A load that has already finished with `result`.
     fn completed(result: DashboardLoadResult) -> DashboardLoader Never! {
         (sender, receiver) :: channel<DashboardLoadResult>(capacity: 1)
-        sender.send(result)
+        sender.send(result.copy())
         DashboardLoader{result: receiver, held: None}
     }
 
@@ -163,12 +192,11 @@ struct DashboardLoader {
         DashboardLoader{result: receiver, held: Val(sender)}
     }
 
-    // The finished result, if any; a load whose worker vanished retries.
+    // The finished result, if any. Core's Receiver has no closed query
+    // (#5935), so a load whose worker vanished stays pending until
+    // `r` starts another.
     fn try_result(self) -> DashboardLoadResult? Never! {
-        if self.result.try_receive() == {
-            .Val(result) -> Val(result)
-            .None -> if self.result.is_closed() -> Val(DashboardLoadResult.Retry) else -> None
-        }
+        self.result.try_receive()
     }
 }
 
@@ -252,12 +280,8 @@ fn cli_run_dashboard(verification: &StoreVerification) -[IO, FS, Env, Exec, Net,
         cli_dashboard_print_status_summary(&verification, &cache, theme)
         return EXIT_OK
     }
-    // Declared before raw mode so raw mode is restored first at scope exit.
-    signals :: process.signals([ProcessSignal]{ProcessSignal.Interrupt, ProcessSignal.Terminate})
-    raw :: term.enable_raw_mode() ?? {
-        cli_dashboard_print_status_summary(&verification, &cache, theme)
-        return EXIT_OK
-    }
+    // Core has no raw-mode or signal API (#5935): keys arrive
+    // cooked, and an interrupt ends the process before the screen guard runs.
     screen :: DashboardAlternateScreen.enter()
     reader := DashboardKeyReader.terminal()
     loader := DashboardLoader?{None}
@@ -265,34 +289,28 @@ fn cli_run_dashboard(verification: &StoreVerification) -[IO, FS, Env, Exec, Net,
     output := DashboardOutput.terminal()
     factory := DashboardLoaderFactory.background()
     clock := DashboardClock.system()
-    cli_dashboard_run_loop(&reader, &loader, &frame, &output, theme, &factory, &clock, Val(signals))
-}
-
-fn cli_dashboard_signalled(signals: Receiver<ProcessSignal>?) -> Bool Never! {
-    receiver :: signals ?? return false
-    receiver.try_receive() != None
+    cli_dashboard_run_loop(&verification, &reader, &loader, &frame, &output, theme, &factory, &clock)
 }
 
 // The interactive loop. The loading frame is drawn and the key reader is
 // live before the first Store read starts. A busy store backs off
 // exponentially up to 2 s; `r` restarts the load at once.
-fn cli_dashboard_run_loop(reader: &DashboardKeyReader, loader: &DashboardLoader?, frame: &DashboardFrame, output: &DashboardOutput, theme: Theme, factory: &DashboardLoaderFactory, clock: &DashboardClock, signals: Receiver<ProcessSignal>?) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+fn cli_dashboard_run_loop(verification: &StoreVerification, reader: &DashboardKeyReader, loader: &DashboardLoader?, frame: &DashboardFrame, output: &DashboardOutput, theme: Theme, factory: &DashboardLoaderFactory, clock: &DashboardClock) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
     &output.draw(frame, theme)
     retry_delay := DASHBOARD_RETRY_INITIAL_MS
     next_retry := &clock.now() + retry_delay
-    if loader == None -> loader = Val(&factory.start())
+    if loader == None -> loader = Val(&factory.start(&verification))
     loop {
-        if cli_dashboard_signalled(signals) -> break
         key :: &reader.read_key()
         current :: &clock.now()
-        if cli_dashboard_key_quits(key) || cli_dashboard_signalled(signals) -> break
+        if cli_dashboard_key_quits(key) -> break
         if cli_dashboard_key_refreshes(key) {
             loader = None
             frame = cli_dashboard_refresh_frame(frame)
             retry_delay = DASHBOARD_RETRY_INITIAL_MS
             next_retry = current + retry_delay
             &output.draw(frame, theme)
-            loader = Val(&factory.start())
+            loader = Val(&factory.start(&verification))
             next
         }
         finished := DashboardLoadResult?{None}
@@ -323,7 +341,7 @@ fn cli_dashboard_run_loop(reader: &DashboardKeyReader, loader: &DashboardLoader?
             frame = cli_dashboard_refresh_frame(frame)
             next_retry = current + retry_delay
             &output.draw(frame, theme)
-            loader = Val(&factory.start())
+            loader = Val(&factory.start(&verification))
         }
     }
     EXIT_OK

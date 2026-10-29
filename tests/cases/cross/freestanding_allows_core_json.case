@@ -1,0 +1,9 @@
+# tests/cross.rs::freestanding_allows_core_json at tests/cross.rs:97; hand-port
+# The original ran jet::compile_no_os in-process; `jet build --target=wasm.no-os test.jet` selects the no-OS target machine on the CLI.
+# The original asserted only that E3301 is absent.
+fixture: freestanding_allows_core_json.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build --target=wasm.no-os test.jet
+stderr: !~ "E3301" # original: the module is allowed without an OS
+stdout: !~ "E3301" # original: the module is allowed without an OS

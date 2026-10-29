@@ -7,19 +7,19 @@
 // Signatures are checked with Core `crypto.verify` under the ratified strict
 // accept rule.
 
-TOOLCHAIN_DEFAULT_ENDPOINT :: prep { "https://dl.jet-lang.dev" }
-TOOLCHAIN_DEFAULT_CHANNEL :: prep { "stable" }
-TOOLCHAIN_ENDPOINT_ENV :: prep { "JET_TOOLCHAIN_ENDPOINT" }
-TOOLCHAIN_MANIFEST_DOMAIN :: prep { "jet-toolchain-channel-v1\n" }
-TOOLCHAIN_ARTIFACT_DOMAIN :: prep { "jet-toolchain-artifact-v1\n" }
+TOOLCHAIN_DEFAULT_ENDPOINT :: "https://dl.jet-lang.dev"
+TOOLCHAIN_DEFAULT_CHANNEL :: "stable"
+TOOLCHAIN_ENDPOINT_ENV :: "JET_TOOLCHAIN_ENDPOINT"
+TOOLCHAIN_MANIFEST_DOMAIN :: "jet-toolchain-channel-v1\n"
+TOOLCHAIN_ARTIFACT_DOMAIN :: "jet-toolchain-artifact-v1\n"
 
-TOOLCHAIN_MAX_MANIFEST_BYTES :: prep { 1048576 }
-TOOLCHAIN_MAX_SIGNATURE_BYTES :: prep { 16384 }
-TOOLCHAIN_MAX_ARTIFACT_BYTES :: prep { 536870912 }
-TOOLCHAIN_MAX_STATE_BYTES :: prep { 16384 }
-TOOLCHAIN_MAX_ARTIFACTS :: prep { 64 }
-TOOLCHAIN_MAX_CLOCK_SKEW_SECONDS :: prep { 300 }
-TOOLCHAIN_MAX_MANIFEST_AGE_SECONDS :: prep { 2592000 }
+TOOLCHAIN_MAX_MANIFEST_BYTES :: 1048576
+TOOLCHAIN_MAX_SIGNATURE_BYTES :: 16384
+TOOLCHAIN_MAX_ARTIFACT_BYTES :: 536870912
+TOOLCHAIN_MAX_STATE_BYTES :: 16384
+TOOLCHAIN_MAX_ARTIFACTS :: 64
+TOOLCHAIN_MAX_CLOCK_SKEW_SECONDS :: 300
+TOOLCHAIN_MAX_MANIFEST_AGE_SECONDS :: 2592000
 
 // What one `jet self update` invocation asks for.
 struct ToolchainUpdateOptions {
@@ -138,12 +138,12 @@ struct ToolchainChannelManifest {
         loop artifact in self.artifacts -> &artifacts.push(artifact.to_tree())
         fields := [String: Dyn]{}
         fields["schema"] = Dyn.Int(self.schema)
-        fields["channel"] = Dyn.Text(self.channel)
-        fields["version"] = Dyn.Text(self.version)
+        fields["channel"] = Dyn.Text(self.channel.copy())
+        fields["version"] = Dyn.Text(self.version.copy())
         fields["sequence"] = Dyn.Int(self.sequence)
         fields["published_at"] = Dyn.Int(self.published_at)
         fields["expires_at"] = Dyn.Int(self.expires_at)
-        fields["min_version"] = Dyn.Text(self.min_version)
+        fields["min_version"] = Dyn.Text(self.min_version.copy())
         fields["artifacts"] = Dyn.Array(artifacts)
         "{pkg_json_render(Dyn.Object(fields))}\n"
     }
@@ -171,11 +171,11 @@ struct ToolchainArtifact {
 
     fn to_tree(self) -> Dyn Never! {
         fields := [String: Dyn]{}
-        fields["target"] = Dyn.Text(self.target)
-        fields["path"] = Dyn.Text(self.path)
-        fields["sha256"] = Dyn.Text(self.sha256)
+        fields["target"] = Dyn.Text(self.target.copy())
+        fields["path"] = Dyn.Text(self.path.copy())
+        fields["sha256"] = Dyn.Text(self.sha256.copy())
         fields["size"] = Dyn.Int(self.size)
-        fields["signature"] = Dyn.Text(self.signature)
+        fields["signature"] = Dyn.Text(self.signature.copy())
         Dyn.Object(fields)
     }
 }
@@ -205,9 +205,9 @@ struct ToolchainSignatureSidecar {
     fn canonical(self) -> String Never! {
         fields := [String: Dyn]{}
         fields["schema"] = Dyn.Int(self.schema)
-        fields["key_id"] = Dyn.Text(self.key_id)
-        fields["algorithm"] = Dyn.Text(self.algorithm)
-        fields["signature"] = Dyn.Text(self.signature)
+        fields["key_id"] = Dyn.Text(self.key_id.copy())
+        fields["algorithm"] = Dyn.Text(self.algorithm.copy())
+        fields["signature"] = Dyn.Text(self.signature.copy())
         pkg_json_render(Dyn.Object(fields))
     }
 }
@@ -250,11 +250,11 @@ struct ToolchainUpdateState {
     fn canonical(self) -> String Never! {
         fields := [String: Dyn]{}
         fields["schema"] = Dyn.Int(self.schema)
-        fields["channel"] = Dyn.Text(self.channel)
-        fields["platform"] = Dyn.Text(self.platform)
+        fields["channel"] = Dyn.Text(self.channel.copy())
+        fields["platform"] = Dyn.Text(self.platform.copy())
         fields["sequence"] = Dyn.Int(self.sequence)
-        fields["version"] = Dyn.Text(self.version)
-        fields["sha256"] = Dyn.Text(self.sha256)
+        fields["version"] = Dyn.Text(self.version.copy())
+        fields["sha256"] = Dyn.Text(self.sha256.copy())
         "{pkg_json_render(Dyn.Object(fields))}\n"
     }
 }

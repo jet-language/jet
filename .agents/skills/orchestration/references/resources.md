@@ -25,27 +25,13 @@ Keep the all-parts seed's public Core imports current, including `core.db.sql`;
 otherwise a newly exposed source-owned boundary is absent from the error census.
 
 The separate candidate build requires read-only generator checks and a frontend
-check of the complete compiler assembled by `Compiler/Bootstrap/assemble.mjs`,
+check of the complete compiler package graph (`jet check Compiler/JetCli`),
 using the fresh release verifier. A file-local parse receipt does not establish
-that the assembled compiler resolves its current APIs; inspect nested diagnostics,
+that the compiler packages resolve their current APIs; inspect nested diagnostics,
 not just the transport's top-level `ok` flag. Migrate callers to retained current
 APIs without restoring retired providers or aliases. Append the candidate entry
 only after its real CLI hello succeeds and its collect-all report contains no
 failure rows; typed traps are failure evidence, not a green compiler.
-
-The hosted seed preflight enables `JET_DEBUG_LOWER_ALL=1` to collect every
-per-function MIR failure before another bootstrap rebuild. Require its final
-`0/<actual total>` summary, then successful Rust emission and metadata checking
-as separate gates. Earlier `__comptime` probe summaries are not the main-program
-census. A completed per-function sweep does not establish final program assembly
-or Rust type correctness. Native stages still require their empty all-phases TSV.
-Also retain the optimizer's per-pass accepted/discarded census and full Debug
-violations after the final function-sweep marker. Debug discovery rolls back an
-invalid pass output and examines later passes, but any discarded main-program
-pass still fails the preflight; later accepted passes cannot turn it green.
-Earlier comptime-probe rejections stay visible separately. Budget for one
-additional owning MIR snapshot in this debug-only collector; normal mode does
-not allocate snapshots or publish a partially optimized program.
 
 ## Keep build output separate and bounded
 
@@ -126,10 +112,12 @@ the immutable export, not the shared worktree, and require 18/18 before moving
 the hold into the runnable queue. A worktree check can consume uncommitted
 hash refreshes that the export omits; commit the canonical generated outputs
 and re-export rather than bypassing the build-script stale-table guard.
-Core catalog changes also require the canonical structure registry and enum/
-record payload projections. Regenerate them with `gen-core-tables --write`
-(the structure registry is edited directly); refreshing the surface ledger alone
-does not keep the assembled compiler's catalog or source hashes current.
+Core catalog changes also require the canonical structure registry and Core
+row projections. Regenerate them with `gen-core-tables --write` (the structure
+registry is edited directly); the enum payload and record rows
+(`CoreEnumPayloadRows.jet`, `CoreRecordRows.jet`) are authored by hand.
+Refreshing the surface ledger alone does not keep the assembled compiler's
+catalog or source hashes current.
 Before releasing a producer, pin every live compiler target and read-only
 snapshot in an active `proofq/*plan*` document: the disk guard reads these plans
 as live references. Historic receipts and `disk-protect.txt` are not live pins.
@@ -170,35 +158,6 @@ after its formal closeout prefix, without adding a skip-closeout option.
 Report qualified formal proof composition and milestone closeout separately
 as `NOT MET — deferred per owner #59`; stage equivalence and passing suites
 cannot fabricate Lean discharge/standing-safety-net qualification.
-The Rust-hosted `native-compiler --seed-build` does not execute Jet Host/Entry
-and cannot produce that TSV. Its proof instead requires the real host build
-exit zero, a seed log with no error/ICE/panic rows, and verified seed JSON and
-executable ELF hashes. Preserve this hosted/native boundary in the receipt;
-never fabricate an empty keep-going report to pass a hosted seed.
-Before the RC seed build, assemble its exact CLI unit and emit the complete
-inline Rust monolith with the final debug snapshot. Capture that snapshot's
-small release build rustc argv, then type-check the monolith using
-`--emit=metadata` and the captured release edition/cfg/type-affecting flags,
-without backend codegen/LTO/link. Record the Dev Jet frontend versus Release
-rustc boundary; this preflight is not a successful release seed build.
-For an emit-only preflight, set `JET_TRACE_FILE` and retain the actual
-`sema.check`, `lower`, `mir.digest`, and `emit` trace spans, together with the
-per-step UTC/exit records. The emit CLI has its own entry and must not rely on
-the build entry's trace wrappers. Entry into the following `mir.digest` span
-proves MIR lowering returned and bounds successful sealing; an end event alone
-can also occur during unwinding. Neither is a distinct internal seal timestamp.
-Keep externally observed canonical-order acceptance separate from exact trace
-timestamps. On a retry that already has complete MIR dumps, do not enable `JET_DUMP_MIR`
-again: the debug text is many gigabytes and is not a mandatory clean-run gate.
-Require the hosted emitter's own final `0/<actual item count>` census in
-collect-all mode, preserving every failed item's kind, lossless identity,
-source span, and full diagnostic. A missing emitter census, any failed item,
-or later accepted output after an earlier emission failure is not a pass.
-When failed hosted emission retains a diagnostic-only `JET_DUMP_RUST` file,
-type-check its surviving real items in the same discovery cycle. Keep the
-partial dump, its failure/item counts, and metadata diagnostics separate from
-the full monolith proof: even a clean partial metadata check never admits the
-failed emission, a seed executable, or an RC. Failed-item comments are not code.
 The missing historical display comparator and AGE testkit generator are retired
 Rust-oracle modes (owner #38(b)/#59), not native-suite failures. Report their
 individual rows as `UNCOVERED`, print them, and require a Tower card; never label

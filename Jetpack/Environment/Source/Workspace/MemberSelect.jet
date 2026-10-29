@@ -7,7 +7,7 @@
 // uses) and always close under dependents. There is no
 // pnpm-style `--filter` pattern DSL.
 
-MEMBER_INPUT_HASHES :: prep { "member-input-hashes" }
+MEMBER_INPUT_HASHES :: "member-input-hashes"
 
 // A selection failure carries the registered diagnostic the CLI renders.
 #Error
@@ -97,7 +97,7 @@ fn env_dependency_order_packages_checked(resolver: AuthorityResolver, members: [
         &dependents.push([Int]{})
         &indegree.push(0)
     }
-    packages := [CheckedPackage]{}
+    packages := [Int: CheckedPackage]{}
     loop index in 0..<count {
         checked :: resolver.checked_package(members[index].path)
         resolver.revalidate_member(checked.member)
@@ -107,9 +107,9 @@ fn env_dependency_order_packages_checked(resolver: AuthorityResolver, members: [
             if dependency == index || seen.contains(dependency) -> next
             &seen.push(dependency)
             &dependents[dependency].push(index)
-            indegree[index] += 1
+            indegree[index] = indegree[index] + 1
         }
-        &packages.push(checked)
+        packages[index] = checked
     }
     // Ready members leave in source order, so selection is stable even when a
     // caller builds a plan with duplicate names.
@@ -125,12 +125,12 @@ fn env_dependency_order_packages_checked(resolver: AuthorityResolver, members: [
         loop candidate in 0..<ready.len() {
             if ready[candidate] < ready[at] -> at = candidate
         }
-        index :: ready.remove(at)
+        index :: &ready.remove(at, .Slot) ?? panic("ready member position is in range")
         emitted[index] = true
         &order.push(index)
         next_dependents :: dependents[index]
         loop dependent in next_dependents {
-            indegree[dependent] -= 1
+            indegree[dependent] = indegree[dependent] - 1
             if indegree[dependent] == 0 -> &ready.push(dependent)
         }
     }
@@ -141,7 +141,10 @@ fn env_dependency_order_packages_checked(resolver: AuthorityResolver, members: [
     }
     resolver.revalidate_root()
     out := [(member: WorkspacePlanMember, package: CheckedPackage)]{}
-    loop index in order -> &out.push((member: members[index], package: packages[index]))
+    loop index in order {
+        package :: &packages.remove(index) ?? panic("each member is ordered exactly once")
+        &out.push((member: members[index], package: ^package))
+    }
     Ok(out)
 }
 
@@ -256,7 +259,7 @@ fn env_close_under_dependents(root: String, plan: WorkspacePlan, seeds: [String]
     out := seeds
     stack := seeds
     loop stack.len() > 0 {
-        name :: stack.pop() ?? break
+        name :: &stack.pop() ?? break
         dependents :: reverse.get(name) ?? next
         loop dependent in dependents {
             if !out.contains(dependent) {

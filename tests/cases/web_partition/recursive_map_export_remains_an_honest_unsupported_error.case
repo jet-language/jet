@@ -1,0 +1,10 @@
+# tests/web_partition.rs::recursive_map_export_remains_an_honest_unsupported_error at tests/web_partition.rs:110; hand-port
+# Claim: A #WasmExport taking and returning a recursive Map [String: [Int]] is refused with exactly [E-WEB-UNSUPPORTED] (tests/web_partition.rs:120-122)
+fixture: recursive_map_export_remains_an_honest_unsupported_error.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build --target=web main.jet
+exit: 1 # tests/web_partition.rs:120-122 expect_err, codes exactly [E-WEB-UNSUPPORTED]
+stderr: ~ "E-WEB-UNSUPPORTED" # tests/web_partition.rs:120-122 expect_err, codes exactly [E-WEB-UNSUPPORTED]
+stderr: !~ "E-WEB-ABI-TYPE" # tests/web_partition.rs:120-122 expect_err, codes exactly [E-WEB-UNSUPPORTED]

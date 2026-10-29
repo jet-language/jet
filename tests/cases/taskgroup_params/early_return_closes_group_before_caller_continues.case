@@ -1,0 +1,14 @@
+# tests/taskgroup_params.rs::early_return_closes_group_before_caller_continues at tests/taskgroup_params.rs:571; hand-port
+# The forced-interpreter run retires: jet has no interpreter tier (`jet run --interpret` is E2102); the default run keeps the claim.
+fixture: early_return_closes_group_before_caller_continues.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step r1: jet run r1/main.jet
+exit: 0
+stdout: = "after\n" # tests/taskgroup_params.rs:613 run_default_multi name taskgroup_early_return, entry main.jet
+step: jet build r2/taskgroup_early_return.jet
+exit: 0
+step r2aot: built
+exit: 0
+stdout: = "after\n" # tests/taskgroup_params.rs:619 build_and_run_full with prefix jet_taskgroup, name taskgroup_early_return (if have_rustc)

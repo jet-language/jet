@@ -7,9 +7,9 @@ import { runtimeExportSignatures } from './runtime-route-abi.mjs';
 import { nativeEnvironmentRoutes, emitNativeEnvironmentRoutes } from './native-route-environment.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const registry = readFileSync(`${root}/crates/jet-foundation/src/Syntax/core_calls.rs`, 'utf8');
+const registry = readFileSync(`${root}/Compiler/JetFoundation/Source/Registry/CoreCallRows.jet`, 'utf8');
 const routes = new Map();
-for (const match of registry.matchAll(/CoreCallRecord::new\(\s*"([^"]+)",\s*"([^"]+)",\s*"([^"]+)"/g)) {
+for (const match of registry.matchAll(/module_name: "([^"]+)", member: "([^"]+)".*symbol: CoreCallSymbol\.Prelude\{name: "([^"]+)"\}/g)) {
   const [, module, member, symbol] = match;
   const route = routes.get(symbol) ?? { rows: [] };
   route.rows.push(`${module}.${member}`);
@@ -23,7 +23,7 @@ test('real composed Core registry and Jet providers admit all six env primitives
   for (const name of ['jet_rt_logical_env_get_os', 'jet_rt_logical_env_set', 'jet_rt_logical_env_unset', 'jet_rt_logical_env_columns', 'jet_rt_startup_env_columns', 'jet_rt_env_key_compare']) {
     assert.equal(rows.filter(row => row.name === name).length, 1, `${name} requires fresh composed source/registry`);
   }
-  assert.match(emitNativeEnvironmentRoutes(rows).join('\n'), /LOWER_ENVIRONMENT_ROUTES/);
+  assert.match(emitNativeEnvironmentRoutes(rows).join('\n'), /IR_ENVIRONMENT_ROUTES/);
 });
 
 test('absent real provider manifest ownership cannot generate a binding', () => {

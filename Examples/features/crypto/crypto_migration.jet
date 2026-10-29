@@ -1,7 +1,7 @@
 package {
     name: "crypto_crypto_migration"
     version: "0.1.0"
-    authority: { holds: { allow: [Exec, FS, FS.Read, IO, Mem.Alloc, Rand] } }
+    authority: { allow: [Exec, FS, FS.Read, IO, Mem.Alloc, Rand] }
 }
 // D-CRYPTO-API1=A: raw interoperability stays explicit and #Unsafe-gated.
 use core.crypto as crypto
@@ -42,7 +42,7 @@ fn run() {
     }
     print("expert AES ok: {plain == msg}")
     print("expert JETC v1 ok: {historical == msg}")
-    crypto.file_open(&recipient, source: migrated, destination: restored) ?? return
+    crypto.file_open(recipient, source: migrated, destination: restored) ?? return
     restored_bytes :: fs.read(restored_text)
     restored_ok :: restored_bytes == "abc"
     print("expert JETC v1 migrated: {restored_ok}")

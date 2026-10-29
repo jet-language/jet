@@ -1,0 +1,119 @@
+//! #4792: instantiated owned fields and List/Option payloads retain Close.
+//! Each id is closed once; replacing a moved field must not close its empty slot.
+//! String storage makes Secret owned: ^ must consume rather than copy its field.
+struct Secret { id: Int, token: String }
+
+impl Secret.Close {
+    fn close(^self) {
+        print("close {self.id}")
+        if self.id == 8 {
+            nested :: Secret{id: 9, token: "owned"}
+            print("nested {nested.id}")
+        }
+    }
+}
+
+struct Wrapper<T> { value: T }
+struct Pair<T> { first: T, second: T }
+struct ConcretePair { first: Secret, second: Secret }
+struct PlainPair { first: String, second: String }
+struct DrainPair { first: Secret, second: Secret }
+
+impl DrainPair.Close {
+    fn close(^self) {
+        print("drain")
+        taken :: ^self.first
+        print("drained {taken.id}")
+    }
+}
+
+fn direct() {
+    held :: Secret{id: 8, token: "owned"}
+    print("direct {held.id}")
+}
+
+fn wrapped() {
+    held :: Wrapper<Secret>{value: Secret{id: 1, token: "owned"}}
+    print("wrapper {held.value.id}")
+}
+
+fn listed() {
+    held :: [Secret]{Secret{id: 2, token: "owned"}, Secret{id: 3, token: "owned"}}
+    print("list {held.len()}")
+}
+
+fn optional(take_inner: Bool, id: Int) {
+    held := Val(Secret{id: id, token: "owned"})
+    if {
+        take_inner -> {
+            taken :: ^held ?? return
+            print("take {taken.id}")
+        }
+        else -> print("keep")
+    }
+}
+
+fn replaced() {
+    held := Wrapper<Secret>{value: Secret{id: 6, token: "owned"}}
+    taken :: ^held.value
+    held.value = Secret{id: 7, token: "owned"}
+    print("replace {taken.id} {held.value.id}")
+}
+
+fn remainder() {
+    held :: Pair<Secret>{first: Secret{id: 10, token: "owned"}, second: Secret{id: 11, token: "owned"}}
+    taken :: ^held.first
+    print("remainder {taken.id} {held.second.id}")
+}
+
+fn concrete_remainder() {
+    held :: ConcretePair{first: Secret{id: 12, token: "owned"}, second: Secret{id: 13, token: "owned"}}
+    taken :: ^held.first
+    print("concrete {taken.id} {held.second.id}")
+}
+
+fn plain_remainder() {
+    held :: PlainPair{first: "first", second: "second"}
+    taken :: ^held.first
+    print("plain {taken} {held.second}")
+}
+
+fn early_remainder(leave: Bool, first_id: Int) {
+    held :: Pair<Secret>{first: Secret{id: first_id, token: "owned"}, second: Secret{id: first_id + 1, token: "owned"}}
+    taken :: ^held.first
+    print("early {taken.id} {held.second.id}")
+    if leave -> return
+    print("fallthrough")
+}
+
+fn close_remainder() {
+    held :: DrainPair{first: Secret{id: 18, token: "owned"}, second: Secret{id: 19, token: "owned"}}
+    print("close remainder")
+}
+
+// Moving an outer field must not disturb an inner resource's atomic cleanup.
+fn inner_resource_remainder() {
+    held :: PlainPair{first: "outer", second: "kept"}
+    taken :: ^held.first
+    if true {
+        inner :: Secret{id: 20, token: "owned"}
+        print("shadow {inner.id}")
+    }
+    print("outer {taken} {held.second}")
+}
+
+fn run() {
+    wrapped()
+    listed()
+    optional(true, 4)
+    optional(false, 5)
+    replaced()
+    direct()
+    remainder()
+    concrete_remainder()
+    plain_remainder()
+    early_remainder(true, 14)
+    early_remainder(false, 16)
+    close_remainder()
+    inner_resource_remainder()
+}

@@ -1,5 +1,11 @@
 // CmdDevTools lint presentation and CognitiveComplexity scoring contracts.
-fn run() Never! {
+use jet_driver.[jet_driver_parse_user_source]
+use jet_cli.[
+    JetCLIArchitectureInspection, jet_cli_architecture_text, jet_cli_architecture_value,
+    jet_cli_complexity_reports, jet_cli_lint_max, jet_cli_status_json,
+]
+
+#Test("lint") {
     plain :: jet_driver_parse_user_source("fn run() {{}}\n")
     if plain.diagnostics.len() != 0 -> panic("plain fixture must parse")
     reports :: jet_cli_complexity_reports(plain.program)

@@ -1,0 +1,21 @@
+use core.time as time
+use core.time as date
+fn time_duration_edges() -> String {
+    clamped :: date.new(2023, 2, 31)
+    leap_end :: date.new(2024, 1, 31).add_months(1)
+    negative_time :: time.from_unix_ms(-1)
+    fractional :: Duration.seconds(1.75) ?? panic("fractional duration")
+    negative :: Duration.milliseconds(-1500) ?? panic("negative duration")
+    left :: Duration.milliseconds(500) ?? panic("left")
+    right :: Duration.milliseconds(1500) ?? panic("right")
+    difference :: left.difference(right)
+    zero :: Duration.nanoseconds(0) ?? panic("zero")
+    return "{clamped.to_string()}|{leap_end.to_string()}|{negative_time.to_timestamp()}|{negative_time.to_unix_ms()}|{negative_time.format_rfc3339()}|{fractional.in(.Milliseconds) ?? panic("fractional read")}|{negative.in(.Seconds) ?? panic("negative read")}|{difference.in(.Milliseconds) ?? panic("difference read")}|{zero.is_zero()}"
+                }
+EXPECTED :: comptime { time_duration_edges() }
+
+fn run() {
+    actual :: time_duration_edges()
+    print("{EXPECTED}")
+    print("{actual}")
+}

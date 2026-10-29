@@ -1,0 +1,52 @@
+use core.files as ps_matrix_files
+
+// Rust: tests/process_sessions.rs:710-763. The original host-column check is
+// implied: every native column must name the expected fixture test, and
+// `other` must be unsupported, whichever host runs the guard.
+fn ps_matrix_expected_test(capability: String) -> String {
+    if capability.starts_with("terminal-") -> return "native_fixture_terminal_bytes_resize_and_closed_stream"
+    return "native_fixture_controls_the_full_tree_on_interrupt_timeout_and_drop"
+}
+
+fn ps_matrix_check() {
+    path :: "tests/fixtures/process_sessions/compatibility.tsv"
+    matrix :: ps_matrix_files.read(path) ?? panic("read process-session compatibility matrix")
+    expected :: [String]{
+        "terminal-byte-stream",
+        "terminal-resize",
+        "terminal-input-and-close",
+        "process-tree-interrupt",
+        "process-tree-terminate",
+        "process-tree-kill",
+        "process-tree-timeout",
+        "process-tree-drop",
+    }
+    rows := [String]{}
+    first := true
+    loop line in matrix.lines() {
+        if first {
+            assert(line == "capability\tfixture\tlinux\tmacos\twindows\tother", "{path}: header drifted: {line}")
+            first = false
+            next
+        }
+        // Rust `str::lines` drops the final newline; blank lines carry no row, as in agent_workloads.jet.
+        if line != "" -> &rows.push("{line}")
+    }
+    assert(!first, "{path}: missing header")
+    assert(rows.len() == expected.len(), "{path}: {rows.len()} rows; expected {expected.len()}")
+    i := 0
+    loop row in rows {
+        fields :: row.split("\t").to_list()
+        assert(fields.len() == 6, "malformed matrix row: {row}")
+        assert(fields[0] == expected[i], "{path}: row {i} is {fields[0]}; expected {expected[i]}")
+        assert(fields[1] == "session_fixture.rs", "{path}: wrong fixture: {row}")
+        want :: ps_matrix_expected_test(expected[i])
+        assert(fields[2] == want && fields[3] == want && fields[4] == want, "matrix does not describe the fixture evidence: {row}")
+        assert(fields[5] == "unsupported", "matrix does not describe the fixture evidence: {row}")
+        i += 1
+    }
+}
+
+#Test("compatibility_matrix_names_every_session_capability") {
+    ps_matrix_check()
+}

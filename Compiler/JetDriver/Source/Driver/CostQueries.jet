@@ -1,6 +1,14 @@
-// One invocation-scoped checked-TIR cost producer for every consumer.
-use jet_codegen.[TCostReport, jet_codegen_cost_report]
-use jet_sema.[SemaGraphResult]
+// One invocation-scoped checked cost producer for every consumer.
+use jet_foundation.[Span, TCostKind, TCostState]
+
+struct TCostSite {
+    function: String
+    span: Span
+    loop_depth: Int
+    kind: TCostKind
+    state: TCostState
+}
+struct TCostReport { sites: [TCostSite]{[TCostSite]{}} }
 
 struct JetDriverCostQueryResult {
     compile: JetDriverCompileResult
@@ -11,7 +19,7 @@ fn jet_driver_cost_query(request: ^JetDriverCompileRequest) -> JetDriverCostQuer
     selected := ^request
     selected.mode = JetDriverCompileMode.Doc
     selected.capture_cost_report = true
-    compile := jet_driver_compile_mir(^selected)
+    compile := jet_driver_compile(^selected)
     // Move the report rows out and reset the fields with whole assignments,
     // so `compile` is whole again when it moves below.
     report := ^compile.cost_report
@@ -19,15 +27,4 @@ fn jet_driver_cost_query(request: ^JetDriverCompileRequest) -> JetDriverCostQuer
     gaps := ^compile.cost_gaps
     compile.cost_gaps = [String]{}
     JetDriverCostQueryResult{compile: ^compile, report: ^report, gaps: ^gaps}
-}
-fn jet_driver_checked_cost_report(checked: SemaGraphResult) -> TCostReport {
-    report := TCostReport{}
-    loop module_row in checked.modules {
-        // Only canonical user source modules contribute warning sites. Core
-        // bodies still participate in sema's callable coverage proof.
-        if module_row.module_identity.starts_with("<corelib>/") -> next
-        collected :: jet_codegen_cost_report(module_row.functions)
-        loop site in collected.sites -> &report.sites.push(site)
-    }
-    report
 }

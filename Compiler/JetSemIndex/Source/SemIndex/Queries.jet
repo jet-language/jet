@@ -1,7 +1,7 @@
 use jet_foundation.[
     DerivationIdentity,
     DerivationRecord,
-    MIRDerivationRef,
+    DerivationRef,
     derivation_record_reference,
     derivation_record_invalidate_if_identity_changed,
 ]
@@ -57,7 +57,7 @@ impl SemIndex {
         }
         None
     }
-    fn derivation_ref(self, subject: String) -> MIRDerivationRef? Never! {
+    fn derivation_ref(self, subject: String) -> DerivationRef? Never! {
         loop record in self.derivations {
             if record.subject == subject -> return Val(derivation_record_reference(record))
         }

@@ -1,0 +1,21 @@
+# tests/core_files_foundations.rs::core_files_read_bytes_plain_iteration_preserves_unsigned_bytes_and_empty_input at tests/core_files_foundations.rs:40; hand-port
+# Claim: read_bytes of [0,1,127,128,255] iterates as unsigned bytes and len is 5 (tests/core_files_foundations.rs:58-62)
+# Claim: empty file read_bytes yields zero iterations and len 0 (tests/core_files_foundations.rs:63-67)
+# Claim: read_bytes on a missing path returns Err (tests/core_files_foundations.rs:68-69)
+# Claim: plain loop over [7, 13] prints 7 and 13 (tests/core_files_foundations.rs:70-72)
+# Claim: default run and AOT build produce identical stdout (tests/core_files_foundations.rs:76-80)
+# Fixture migrated: Rust temp dir fixture -> fixture-relative dir "fixture" created by a sh step (printf writes the raw bytes)
+fixture: core_files_read_bytes_plain_iteration_preserves_unsigned_bytes_and_empty_input.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: sh {work}/step-1.sh
+exit: 0 # tests/core_files_foundations.rs:44-46 fixture bytes [0,1,127,128,255] and empty file
+step: jet run main.jet
+exit: 0 # tests/core_files_foundations.rs:40 default tier stdout
+stdout: = core_files_read_bytes_plain_iteration_preserves_unsigned_bytes_and_empty_input-2.out # tests/core_files_foundations.rs:40 default tier stdout
+step: jet build main.jet
+exit: 0 # tests/core_files_foundations.rs:40 AOT tier builds
+step: built
+exit: 0 # tests/core_files_foundations.rs:40 AOT tier stdout equals default
+stdout: = core_files_read_bytes_plain_iteration_preserves_unsigned_bytes_and_empty_input-4.out # tests/core_files_foundations.rs:40 AOT tier stdout equals default

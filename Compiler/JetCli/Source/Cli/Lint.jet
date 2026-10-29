@@ -1,10 +1,20 @@
 // Source/CmdDevTools.rs lint --complexity and the JSON-aware --a11y host.
 use core.time as cli_time
-use jet_driver.[JetDriverVerbOutput, JetDriverCompileMode, jet_driver_parse_user_source, jet_driver_present_diagnostics, jet_driver_report_problems, jet_driver_is_a11y_lint, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
+use jet_driver.[
+    JetDriverVerbOutput,
+    JetDriverCompileMode,
+    jet_driver_parse_user_source,
+    jet_driver_present_diagnostics,
+    jet_driver_report_problems,
+    jet_driver_is_a11y_lint,
+    JET_DRIVER_EXIT_OK,
+    JET_DRIVER_EXIT_USAGE,
+    JET_DRIVER_EXIT_USER_ERROR,
+    TCostReport,
+]
 use jet_foundation.[Diagnostic, DIAGNOSTIC_LINT, diagnostic_from_registry, diagnostic_line_at, diagnostic_render_all]
 use jet_driver.[jet_driver_cost_query]
-use jet_codegen.[TCostReport]
-use jet_foundation.[TCostKind, TCostState, diagnostic_registry_row, tir_cost_operation, tir_cost_fix]
+use jet_foundation.[TCostKind, TCostState, diagnostic_registry_row, checked_cost_operation, checked_cost_fix]
 
 fn jet_cli_lint_errors(file: String, source: String, diagnostics: [Diagnostic], color: Bool, json: Bool) -> JetDriverVerbOutput {
     rendered :: if json -> jet_cli_reports_status_json("diagnostics", false, jet_cli_report_cwd(), file, source, diagnostics) else -> jet_driver_report_problems(file, source, diagnostics, color, true)
@@ -13,7 +23,7 @@ fn jet_cli_lint_errors(file: String, source: String, diagnostics: [Diagnostic], 
 
 fn jet_cli_lint_a11y(file: String, source: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_file(file, color, false, None, JetDriverCompileMode.Program)
+    compiled :: jet_cli_compile_file(file, color, None, JetDriverCompileMode.Program)
     if compiled == {
         .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> {
@@ -65,7 +75,7 @@ fn jet_cli_lint_max_error(text: String, color: Bool) -> JetDriverVerbOutput Neve
 
 fn jet_cli_lint_architecture(file: String, color: Bool) -> JetCLIArchitectureInspection {
     watch :: cli_time.start()
-    compiled :: jet_cli_compile_file(file, color, false, None, JetDriverCompileMode.Doc)
+    compiled :: jet_cli_compile_file(file, color, None, JetDriverCompileMode.Doc)
     if compiled == {
         .Refused(refusal) -> return JetCLIArchitectureInspection{rows: [], check: None, reason: Val("the checked semantic projection was unavailable; no architecture claim was emitted ({refusal.stderr.trim()})")}
         .Compiled(result, snapshot) -> {
@@ -89,7 +99,7 @@ fn jet_cli_lint_complexity(file: String, source: String, raw: [String], color: B
         .Refused(output) -> return ^output
     }
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_file(file, color, false, None, JetDriverCompileMode.Program)
+    compiled :: jet_cli_compile_file(file, color, None, JetDriverCompileMode.Program)
     if compiled == {
         .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> {
@@ -167,8 +177,8 @@ fn jet_cli_cost_diagnostics(report: TCostReport, sema: [Diagnostic]) -> [Diagnos
     registry :: diagnostic_registry_row("L2510") ?? panic("L2510 must be registered")
     loop site in report.sites {
         if site.loop_depth == 0 || site.state != TCostState.SemanticRemainder || site.kind == TCostKind.ViewMaterialization -> next
-        operation :: tir_cost_operation(site.kind)
-        fix :: tir_cost_fix(site.kind)
+        operation :: checked_cost_operation(site.kind)
+        fix :: checked_cost_fix(site.kind)
         diagnostic :: diagnostic_from_registry("L2510", Val(site.span), registry.what.replace("{{operation}}", operation), registry.why, registry.fix.replace("{{fix}}", fix))
         jet_cli_cost_add(&rows, diagnostic)
     }
@@ -176,7 +186,7 @@ fn jet_cli_cost_diagnostics(report: TCostReport, sema: [Diagnostic]) -> [Diagnos
 }
 // The refusal of a cost query that produced no report.
 fn jet_cli_lint_cost_gap(file: String, gaps: [String], color: Bool, json: Bool) -> JetDriverVerbOutput {
-    detail :: if gaps.len() > 0 -> gaps.join("; ") else -> "the checked TIR projection did not complete"
+    detail :: if gaps.len() > 0 -> gaps.join("; ") else -> "the checked projection did not complete"
     jet_cli_execute(jet_cli_inspect_b_report("E2104", "cost projection for `{file}` failed", detail, "report the missing checked specialization with this source file; its cost cannot be proved until the compiler lowers that specialization", color, json, JET_DRIVER_EXIT_USER_ERROR))
 }
 

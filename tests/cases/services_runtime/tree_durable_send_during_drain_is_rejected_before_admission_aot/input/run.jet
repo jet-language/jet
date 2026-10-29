@@ -1,0 +1,31 @@
+
+use core.service as service
+use core.testing as testing
+
+fn worker() {}
+
+fn run() {
+    temp := testing.temp_dir("tree-drain-reject")
+    store :: Path.from(temp).join("authority.log").to_string()
+    tree := service.tree("tree-drain-reject")
+    tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
+    state :: service.state_store(store) ?? panic("state")
+    tree.set_state_event_log(state, "events", 1, "reversible") ?? panic("state adapter")
+    endpoint :: tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    tree.directory_register("api", endpoint) ?? panic("directory")
+    tree.drain_worker(endpoint) ?? panic("drain")
+    rejected :: tree.send_durable(endpoint, "after", key: "after")
+    if rejected == {
+        .Ok(_) -> { print("direct:accepted") }
+        .Err(_) -> { print("direct:rejected") }
+    }
+    print("handoff:{tree.handoff_generation() ?? panic("handoff")}")
+    current :: tree.directory_resolve("api") ?? panic("resolve")
+    pending :: tree.receive(current)
+    if pending == {
+        .Ok(_) -> { print("pending:accepted") }
+        .Err(_) -> { print("pending:rejected") }
+    }
+    tree.stop() ?? panic("stop")
+}

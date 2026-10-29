@@ -2,7 +2,7 @@
 // Set JET_JOB_QUEUE_DB to a fresh database path before launching this example.
 package {
     name: "job_queue"
-    authority: { holds: { allow: [DB, FS.Read, FS.Write, IO, Mem.Alloc, Rand, Time, Time.Wait] } }
+    authority: { allow: [DB, Env, FS, IO, Mem.Alloc, Rand, Time, Time.Wait] }
 }
 
 use core.jobs as jobs
@@ -10,12 +10,12 @@ use core.jobs as jobs
 #Job(.Dev) fn process(payload: String) { print("job:{payload}") }
 
 fn run() {
-    queue :: jobs.queue() ?? return
+    queue := jobs.queue() ?? return
 
     first :: &queue.enqueue(process, "now", key: "first") ?? return
     _failed :: &queue.enqueue(process, "fail", key: "failed") ?? return
-    cancelled :: queue.delay(process, "cancel", for: 1s) ?? return
-    deadlettered :: queue.delay(process, "dead", for: 1s) ?? return
+    cancelled :: &queue.delay(process, "cancel", for: 1s) ?? return
+    deadlettered :: &queue.delay(process, "dead", for: 1s) ?? return
     receipt :: queue.receipt(first.id) ?? return
     print("receipt:{receipt.id}:{receipt.job_type}")
     records :: queue.inspect(16, true) ?? return
@@ -50,5 +50,6 @@ fn run() {
     queue.pause() ?? return
     queue.resume() ?? return
     queue.wait(1ms) ?? return
-    print("pruned:{queue.prune()}")
+    pruned :: queue.prune() ?? return
+    print("pruned:{pruned}")
 }

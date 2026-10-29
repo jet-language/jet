@@ -1,0 +1,9 @@
+
+use core.files as files
+fn read_inside(scope: files.FileScope) -> String {
+    scope.read("inside.txt") ?? panic("scoped read")
+}
+fn run() {
+    scope :: files.scope(Authority.from_rights(["FS.Read:{work}"]))
+    print(read_inside(scope))
+}

@@ -291,14 +291,9 @@ function main() {
   };
   addCensus("D10b marker groups", "load.marker_groups.relex", false);
   addCensus("D10b marker groups", "load.marker_groups.reparse", false);
-  addCensus("D12 comptime lower", "comptime.lower", true);
-  addCensus("D5 MIR digest", "mir.digest", true);
+  addCensus("D12 comptime build", "comptime.build", true);
   console.log("");
   console.log(table(["census", "span", "spans", "seconds", "ns/line", "items"], census));
-  const overlap = counters.get("lower.comptime_overlap_functions");
-  const comptimeLowered = counters.get("comptime.functions_lowered");
-  const programLowered = counters.get("lower.functions");
-  console.log(`D12 overlap: ${overlap === undefined ? "not in trace" : `${grouped(overlap)} functions lowered by a comptime program and again by \`lower\` (comptime lowered ${grouped(comptimeLowered)}, lower ${grouped(programLowered)})`}`);
 
   if (notes.size > 0) {
     console.log("");

@@ -1,0 +1,23 @@
+#Error
+enum ParseError {
+    Empty
+    BadDigit(String)
+}
+fn parse_age(raw: String) -[]> Int ParseError! {
+    if raw == "" {
+        return Err(ParseError.Empty)
+    }
+    return Ok(42)
+}
+fn load(raw: String) -[]> Int ParseError! {
+    n :: parse_age(raw)?("loading age")
+    return Ok((n * 2))
+}
+fn double(raw: String) -[]> Int ParseError! {
+    n :: load(raw)?("doubling age")
+    return Ok((n * 2))
+}
+fn run() ParseError! {
+    n :: double("")
+    print(n)
+}

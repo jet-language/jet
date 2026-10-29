@@ -1,0 +1,256 @@
+// tests/build_graph.rs declaration rules, run through the Jet build session
+// service that replaced the Rust BuildContext. Each call is what a
+// `fn build(b: Build)` body issues; nothing is executed.
+use jet_build_session.[
+    BuildSession, BuildSessionError, BuildSessionPolicy, BuildSessionReply, BuildSessionValue,
+    build_session_call, build_session_compiler_node, build_session_graph, build_session_new,
+]
+
+fn build_graph_rules_session(id: Int) -> BuildSession Never! {
+    policy :: BuildSessionPolicy{legacy_denied: None, plugins_denied: None, plugin_grants: [String:[String]]{}}
+    build_session_new(id, "graph", "graph-compiler", policy)
+}
+
+fn build_graph_rules_list(values: [String]) -> BuildSessionValue Never! {
+    BuildSessionValue.List{values: loop value in values -> BuildSessionValue.Text{value: value}}
+}
+
+fn build_graph_rules_error(reply: BuildSessionReply) -> BuildSessionError? Never! {
+    if reply == {.Failure(diagnostic) -> diagnostic.error else -> None}
+}
+
+fn build_graph_rules_ok(reply: BuildSessionReply) -> Bool Never! {
+    if reply == {.Value(_) -> true else -> false}
+}
+
+// ActionSpec::cached(argv).with_outputs(outputs): the five-argument `b.action` form.
+fn build_graph_rules_cached(session: &BuildSession, name: String, argv: [String], outputs: [String]) -> BuildSessionReply Never! {
+    empty :: build_graph_rules_list([String]{})
+    build_session_call(&session, "action", [BuildSessionValue]{.Text(value: name), empty, build_graph_rules_list(outputs), build_graph_rules_list(argv), empty}, None, false, 1, 2)
+}
+
+fn build_graph_rules_value(reply: BuildSessionReply) -> BuildSessionValue Never! {
+    if reply == {.Value(value) -> value else -> panic("build declaration failed")}
+}
+
+fn build_graph_rules_failed(reply: BuildSessionReply) -> Bool Never! {
+    if reply == {.Failure(_) -> true else -> false}
+}
+
+// Positional controls six through eight of `b.action`: the session's host
+// toolchain, no probes, and a declared signing identity.
+fn build_graph_rules_controls(session: &BuildSession, id: Int) -> [BuildSessionValue] Never! {
+    signing :: build_graph_rules_value(build_session_call(&session, "signing", [BuildSessionValue]{.Text(value: "dev"), .Text(value: "Developer")}, None, false, 3, 4))
+    [BuildSessionValue]{.Handle(type_name: "BuildToolchain", session: id, id: 0), build_graph_rules_list([String]{}), signing}
+}
+
+// ActionSpec::uncached_phony(argv).with_cap(caps): the trailing cache control is the
+// fifteenth argument, after the controls and empty kind/pool/env/helper/label slots.
+fn build_graph_rules_phony(session: &BuildSession, id: Int, name: String, argv: [String], caps: [String]) -> BuildSessionReply Never! {
+    empty :: build_graph_rules_list([String]{})
+    args := [BuildSessionValue]{.Text(value: name), empty, empty, build_graph_rules_list(argv), build_graph_rules_list(caps)}
+    loop value in build_graph_rules_controls(&session, id) -> &args.push(value)
+    tail :: [BuildSessionValue]{.Text(value: "generic"), empty, empty, empty, empty, empty, .Text(value: "phony")}
+    loop value in tail -> &args.push(value)
+    build_session_call(&session, "action", args, None, caps.len() > 0, 5, 6)
+}
+
+// Rust: tests/build_graph.rs:523
+#Test("duplicate_target_or_action_names_are_rejected") {
+    session := build_graph_rules_session(81)
+    empty :: build_graph_rules_list([String]{})
+    assert(build_graph_rules_ok(build_session_call(&session, "add_executable", [BuildSessionValue]{.Text(value: "app"), empty, empty}, None, false, 1, 2)))
+    duplicate_target :: build_session_call(&session, "add_library", [BuildSessionValue]{.Text(value: "app"), empty, empty}, None, false, 3, 4)
+    assert_eq(build_graph_rules_error(duplicate_target), Val(BuildSessionError.DuplicateTargetName{value: "app"}))
+    assert(build_graph_rules_ok(build_graph_rules_cached(&session, "codegen", [String]{"tool"}, [String]{"out.jet"})))
+    duplicate_action :: build_graph_rules_cached(&session, "codegen", [String]{"tool"}, [String]{"other.jet"})
+    assert_eq(build_graph_rules_error(duplicate_action), Val(BuildSessionError.DuplicateActionName{value: "codegen"}))
+}
+
+// Rust: tests/build_graph.rs:544
+#Test("cached_actions_need_outputs") {
+    session := build_graph_rules_session(82)
+    refused :: build_graph_rules_cached(&session, "probe", [String]{"cc", "--version"}, [String]{})
+    assert_eq(build_graph_rules_error(refused), Val(BuildSessionError.CachedActionWithoutOutputs{value: "probe"}))
+}
+
+// Rust: tests/build_graph.rs:556
+#Test("outputless_commands_are_explicit_uncached_phony_actions") {
+    session := build_graph_rules_session(83)
+    clean :: build_graph_rules_phony(&session, 83, "clean-generated", [String]{"rm", "-rf", ".jet/generated"}, [String]{"FS"})
+    assert_eq(clean, BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildAction", session: 83, id: 0}})
+    plan :: build_session_call(&session, "plan", [BuildSessionValue]{}, None, false, 7, 8)
+    queried :: build_session_graph(session, if plan == {.Value(value) -> value else -> panic("plan failed")})
+    assert(queried.diagnostic == None)
+    graph :: queried.graph ?? panic("plan graph")
+    assert_eq(graph.actions.len(), 1)
+    assert(graph.actions[0].outputs.len() == 0)
+    // plan.phony_actions() == [action]: the session's one phony action is this one.
+    permit :: session.storage.guard_read()
+    phony :: loop action in permit.value.actions -> if action.cache == "uncached-phony" -> action.name else -> ""
+    assert_eq(phony, [String]{"clean-generated"})
+}
+
+// Rust: tests/build_graph.rs:574
+#Test("phony_actions_need_a_declared_capability") {
+    session := build_graph_rules_session(84)
+    refused :: build_graph_rules_phony(&session, 84, "clean-generated", [String]{"rm", "-rf", ".jet/generated"}, [String]{})
+    assert_eq(build_graph_rules_error(refused), Val(BuildSessionError.PhonyActionWithoutCaps{value: "clean-generated"}))
+}
+
+// Rust: tests/build_graph.rs:589
+#Test("action_outputs_have_one_owner_in_the_plan") {
+    session := build_graph_rules_session(85)
+    assert(build_graph_rules_ok(build_graph_rules_cached(&session, "generate-a", [String]{"tool-a"}, [String]{".jet/generated/out.jet"})))
+    assert(build_graph_rules_ok(build_graph_rules_cached(&session, "generate-b", [String]{"tool-b"}, [String]{".jet/generated/out.jet"})))
+    plan :: build_session_call(&session, "plan", [BuildSessionValue]{}, None, false, 7, 8)
+    queried :: build_session_graph(session, if plan == {.Value(value) -> value else -> panic("plan failed")})
+    assert(queried.graph == None)
+    diagnostic :: queried.diagnostic ?? panic("duplicate output must refuse the plan")
+    assert_eq(diagnostic.error, Val(BuildSessionError.DuplicateBuildOutput{output: ".jet/generated/out.jet", first_action: "generate-a", second_action: "generate-b"}))
+}
+
+// Rust: tests/build_graph.rs:4063
+#Test("compiler_nodes_are_sorted_and_path_independent") {
+    first :: build_session_compiler_node("check", "src/main.jet", [BuildGraphInputDigest]{{name: "src/z.jet", digest: "digest-z"}, {name: "src/a.jet", digest: "digest-a"}})
+    second :: build_session_compiler_node("check", "src/main.jet", [BuildGraphInputDigest]{{name: "src/a.jet", digest: "digest-a"}, {name: "src/z.jet", digest: "digest-z"}})
+    assert_eq(first.kind, second.kind)
+    assert_eq(first.subject, second.subject)
+    assert_eq(first.key, second.key)
+    assert_eq(first.inputs, second.inputs)
+    assert_eq(loop row in first.input_digests -> "{row.name}={row.digest}", loop row in second.input_digests -> "{row.name}={row.digest}")
+    assert_eq(first.inputs, [String]{"src/a.jet", "src/z.jet"})
+    assert_eq(first.key.len(), 64)
+}
+
+// Rust: tests/build_graph.rs:80
+#Test("registers_typed_targets_and_default_plan") {
+    session := build_graph_rules_session(86)
+    empty :: build_graph_rules_list([String]{})
+    gen :: build_graph_rules_value(build_session_call(&session, "action", [BuildSessionValue]{.Text(value: "generate-assets"), build_graph_rules_list([String]{"assets/sprite.png"}), build_graph_rules_list([String]{".jet/generated/assets.jet"}), build_graph_rules_list([String]{"jet-tool", "pack"}), build_graph_rules_list([String]{"FS"})}, None, true, 1, 2))
+    lib :: build_graph_rules_value(build_session_call(&session, "add_library", [BuildSessionValue]{.Text(value: "engine"), build_graph_rules_list([String]{"src/engine.jet"}), .List(values: [BuildSessionValue]{gen})}, None, false, 3, 4))
+    app :: build_graph_rules_value(build_session_call(&session, "add_executable", [BuildSessionValue]{.Text(value: "game"), build_graph_rules_list([String]{"src/main.jet"}), empty, .List(values: [BuildSessionValue]{lib})}, None, false, 5, 6))
+    on_app :: BuildSessionValue.List{values: [BuildSessionValue]{app}}
+    assert(build_graph_rules_ok(build_session_call(&session, "add_test", [BuildSessionValue]{.Text(value: "unit"), empty, empty, on_app}, None, false, 7, 8)))
+    assert(build_graph_rules_ok(build_session_call(&session, "add_test", [BuildSessionValue]{.Text(value: "frame-time"), empty, empty, on_app}, None, false, 9, 10)))
+    assert(build_graph_rules_ok(build_session_call(&session, "add_asset_bundle", [BuildSessionValue]{.Text(value: "assets"), empty, .List(values: [BuildSessionValue]{gen})}, None, false, 11, 12)))
+    assert(build_graph_rules_ok(build_session_call(&session, "add_doc", [BuildSessionValue]{.Text(value: "manual"), build_graph_rules_list([String]{"docs/manual.md"}), empty}, None, false, 13, 14)))
+    assert(build_graph_rules_ok(build_session_call(&session, "add_install", [BuildSessionValue]{.Text(value: "install"), empty, empty, on_app}, None, false, 15, 16)))
+    assert(build_graph_rules_ok(build_session_call(&session, "add_package", [BuildSessionValue]{.Text(value: "package"), empty, empty, on_app}, None, false, 17, 18)))
+    assert(build_graph_rules_ok(build_session_call(&session, "add_publish", [BuildSessionValue]{.Text(value: "publish"), empty, empty, on_app}, None, false, 19, 20)))
+    plan :: build_graph_rules_value(build_session_call(&session, "plan", [BuildSessionValue]{app}, None, false, 21, 22))
+    // plan.default_target() == app: the plan handle carries the default target's id.
+    assert_eq(app, BuildSessionValue.Handle{type_name: "BuildTarget", session: 86, id: 1})
+    assert_eq(plan, BuildSessionValue.Handle{type_name: "BuildPlan", session: 86, id: 1})
+    queried :: build_session_graph(session, plan)
+    assert(queried.diagnostic == None)
+    graph :: queried.graph ?? panic("plan graph")
+    assert_eq(graph.targets[1].kind, "Executable")
+    assert_eq(graph.targets[0].kind, "Library")
+    bundles := 0
+    loop target in graph.targets { if target.kind == "AssetBundle" -> bundles += 1 }
+    assert_eq(bundles, 1)
+    assert_eq(graph.actions.len(), 1)
+    assert_eq(graph.actions[0].outputs[0], ".jet/generated/assets.jet")
+    // The executable uses the session's default host toolchain (role Host).
+    permit :: session.storage.guard_read()
+    assert_eq(permit.value.targets[1].toolchain, 0)
+    assert_eq(permit.value.toolchains[0].role, "host")
+}
+
+// Rust: tests/build_graph.rs:425
+#Test("foreign_toolchain_probe_and_signer_handles_are_rejected") {
+    a := build_graph_rules_session(87)
+    b := build_graph_rules_session(88)
+    toolchain :: build_graph_rules_value(build_session_call(&b, "toolchain", [BuildSessionValue]{.Text(value: "other"), .Text(value: "wasm32-wasi")}, None, false, 1, 2))
+    signer :: build_graph_rules_value(build_session_call(&b, "signing", [BuildSessionValue]{.Text(value: "other-signer"), .Text(value: "developer-id:OTHER")}, None, false, 3, 4))
+    probe :: build_graph_rules_value(build_session_call(&b, "probe", [BuildSessionValue]{.Text(value: "other-cc"), .Text(value: "find_program"), .Text(value: "cc")}, None, true, 5, 6))
+    empty :: build_graph_rules_list([String]{})
+    host :: BuildSessionValue.Handle{type_name: "BuildToolchain", session: 87, id: 0}
+    assert(build_graph_rules_failed(build_session_call(&a, "add_executable", [BuildSessionValue]{.Text(value: "bad-toolchain"), empty, empty, empty, empty, toolchain}, None, false, 7, 8)))
+    assert(build_graph_rules_failed(build_session_call(&a, "add_executable", [BuildSessionValue]{.Text(value: "bad-signer"), empty, empty, empty, empty, host, signer}, None, false, 9, 10)))
+    assert(build_graph_rules_failed(build_session_call(&a, "add_library", [BuildSessionValue]{.Text(value: "bad-probe"), empty, empty, empty, .List(values: [BuildSessionValue]{probe})}, None, false, 11, 12)))
+    permit :: a.storage.guard_read()
+    assert_eq(permit.value.targets.len(), 0)
+}
+
+// Rust: tests/build_graph.rs:469
+#Test("invalid_toolchain_probe_and_signer_specs_do_not_reserve_names") {
+    session := build_graph_rules_session(89)
+    bad_toolchain :: build_session_call(&session, "toolchain", [BuildSessionValue]{.Text(value: "cross"), .Text(value: "")}, None, false, 1, 2)
+    assert_eq(build_graph_rules_error(bad_toolchain), Val(BuildSessionError.EmptyToolchainTriple{value: "cross"}))
+    toolchain :: build_graph_rules_value(build_session_call(&session, "toolchain", [BuildSessionValue]{.Text(value: "cross"), .Text(value: "wasm32-wasi")}, None, false, 3, 4))
+    bad_signer :: build_session_call(&session, "signing", [BuildSessionValue]{.Text(value: "release"), .Text(value: "")}, None, false, 5, 6)
+    assert_eq(build_graph_rules_error(bad_signer), Val(BuildSessionError.EmptyIdentityField{value: "release"}))
+    assert(build_graph_rules_ok(build_session_call(&session, "signing", [BuildSessionValue]{.Text(value: "release"), .Text(value: "developer-id:ACME")}, None, false, 7, 8)))
+    bad_probe :: build_session_call(&session, "probe", [BuildSessionValue]{.Text(value: "sqlite"), .Text(value: "pkg_config"), .Text(value: "")}, None, true, 9, 10)
+    assert_eq(build_graph_rules_error(bad_probe), Val(BuildSessionError.EmptyProbeField{value: "sqlite"}))
+    assert(build_graph_rules_ok(build_session_call(&session, "probe", [BuildSessionValue]{.Text(value: "sqlite"), .Text(value: "pkg_config"), .Text(value: "sqlite3"), toolchain}, None, true, 11, 12)))
+}
+
+// Rust: tests/build_graph.rs:2772
+#Test("legacy_wrappers_are_typed_declared_and_policy_denied_without_ambient_authority") {
+    session := build_graph_rules_session(90)
+    wrappers :: [String]{"cmake", "make", "gradle", "npm", "cargo"}
+    commands :: [[String]]{[String]{"cmake", "--build", "build"}, [String]{"make"}, [String]{"gradle", "assemble"}, [String]{"npm", "run", "build"}, [String]{"cargo", "build"}}
+    loop (index, wrapper) in wrappers {
+        args :: [BuildSessionValue]{.Text(value: wrapper), .Text(value: "legacy-{wrapper}"), build_graph_rules_list([String]{"legacy/project"}), build_graph_rules_list([String]{"build/{wrapper}"}), build_graph_rules_list(commands[index]), build_graph_rules_list([String]{"Exec", "FS"})}
+        assert(build_graph_rules_ok(build_session_call(&session, "legacy", args, None, true, 1, 2)))
+    }
+    capless :: build_session_call(&session, "legacy", [BuildSessionValue]{.Text(value: "make"), .Text(value: "legacy-capless"), build_graph_rules_list([String]{"Makefile"}), build_graph_rules_list([String]{"build/app"}), build_graph_rules_list([String]{"make"}), build_graph_rules_list([String]{})}, None, false, 7, 8)
+    assert_eq(build_graph_rules_error(capless), Val(BuildSessionError.LegacyWrapperWithoutCaps{kind: "make"}))
+    plan :: build_graph_rules_value(build_session_call(&session, "plan", [BuildSessionValue]{}, None, false, 3, 4))
+    graph :: build_session_graph(session, plan).graph ?? panic("plan graph")
+    permit :: session.storage.guard_read()
+    loop (index, wrapper) in wrappers {
+        action :: graph.actions[index]
+        assert_eq(action.legacy_wrapper, Val(wrapper))
+        exec := false
+        loop cap in action.caps { if cap == "Exec" -> exec = true }
+        assert(exec)
+        assert_eq(action.inputs[0], "legacy/project")
+        assert_eq(permit.value.actions[index].labels.get("legacy.wrapper"), Val(wrapper))
+    }
+    denied_policy :: BuildSessionPolicy{legacy_denied: Val("CI forbids legacy build tools"), plugins_denied: None, plugin_grants: [String:[String]]{}}
+    ci := build_session_new(91, "graph", "graph-compiler", denied_policy)
+    denial :: build_session_call(&ci, "legacy", [BuildSessionValue]{.Text(value: "cargo"), .Text(value: "legacy-cargo"), build_graph_rules_list([String]{"Cargo.toml"}), build_graph_rules_list([String]{"target/debug/app"}), build_graph_rules_list([String]{"cargo", "build"}), build_graph_rules_list([String]{"Exec"})}, None, true, 5, 6)
+    reason :: if denial == {.Failure(diagnostic) -> diagnostic.what else -> panic("legacy wrapper must be denied")}
+    assert(reason.contains("CI forbids legacy build tools"))
+}
+
+// Rust: tests/build_graph.rs:3313
+#Test("action_environment_allowlist_cannot_name_undeclared_values") {
+    session := build_graph_rules_session(92)
+    empty :: build_graph_rules_list([String]{})
+    args := [BuildSessionValue]{.Text(value: "env-check"), empty, build_graph_rules_list([String]{"build/out"}), build_graph_rules_list([String]{"tool"}), empty}
+    loop value in build_graph_rules_controls(&session, 92) -> &args.push(value)
+    tail :: [BuildSessionValue]{.Text(value: "generic"), empty, empty, build_graph_rules_list([String]{"MISSING"})}
+    loop value in tail -> &args.push(value)
+    refused :: build_session_call(&session, "action", args, None, false, 5, 6)
+    assert_eq(build_graph_rules_error(refused), Val(BuildSessionError.UndeclaredEnvName{action: "env-check", key: "MISSING"}))
+}
+
+fn build_graph_rules_kind_key(id: Int, kind: String) -> String Never! {
+    session := build_graph_rules_session(id)
+    args := [BuildSessionValue]{.Text(value: "same"), build_graph_rules_list([String]{"src/main.jet"}), build_graph_rules_list([String]{"build/out"}), build_graph_rules_list([String]{"jetc", "src/main.jet"}), build_graph_rules_list([String]{})}
+    loop value in build_graph_rules_controls(&session, id) -> &args.push(value)
+    &args.push(.Text(value: kind))
+    _ :: build_graph_rules_value(build_session_call(&session, "action", args, None, false, 5, 6))
+    plan :: build_graph_rules_value(build_session_call(&session, "plan", [BuildSessionValue]{}, None, false, 7, 8))
+    graph :: build_session_graph(session, plan).graph ?? panic("plan graph")
+    graph.action_keys[0].key
+}
+
+// Rust: tests/build_graph.rs:3362
+#Test("action_kinds_have_distinct_identities") {
+    compile :: build_graph_rules_kind_key(93, "compile")
+    docs :: build_graph_rules_kind_key(94, "docs")
+    debug :: build_graph_rules_kind_key(95, "debug")
+    archive :: build_graph_rules_kind_key(96, "source_archive")
+    assert(compile != docs)
+    assert(compile != debug)
+    assert(compile != archive)
+    assert(docs != debug)
+    assert(docs != archive)
+    assert(debug != archive)
+}

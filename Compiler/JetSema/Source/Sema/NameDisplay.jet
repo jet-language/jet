@@ -1,17 +1,17 @@
 // Rust Bundle.rs generic-instance/inline-module display paths, reused from
 // origin/port/compiler CheckProgram.jet. Identity paths remain untouched.
-use jet_foundation.[MIRNameFacts, MIRNameDisplayPath, Item, Func, CodeModule]
+use jet_foundation.[NameFacts, NameDisplayPath, Item, Func, CodeModule]
 fn sema_name_strip_prefix(name: String, prefix: String) -> String Never! {
     if !name.starts_with(prefix) -> return name.copy()
     name.slice(prefix.len(), name.len())
 }
-fn sema_name_display_add(facts: &MIRNameFacts, module_index: Int, module_alias: String, internal: String, display: String) Never! {
-    &facts.display_paths.push(MIRNameDisplayPath{module_index: module_index, internal_path: "{module_alias}.{internal}", display_path: display})
+fn sema_name_display_add(facts: &NameFacts, module_index: Int, module_alias: String, internal: String, display: String) Never! {
+    &facts.display_paths.push(NameDisplayPath{module_index: module_index, internal_path: "{module_alias}.{internal}", display_path: display})
 }
-fn sema_name_display_methods(facts: &MIRNameFacts, module_index: Int, module_alias: String, internal: String, display: String, methods: [Func]) Never! {
+fn sema_name_display_methods(facts: &NameFacts, module_index: Int, module_alias: String, internal: String, display: String, methods: [Func]) Never! {
     loop method in methods -> sema_name_display_add(&facts, module_index, module_alias, "{internal}.{method.name}", "{display}.{method.name}")
 }
-fn sema_name_display_item(facts: &MIRNameFacts, module_index: Int, module_alias: String, scope: String, internal_prefix: String, display_prefix: String, item: Item) Never! {
+fn sema_name_display_item(facts: &NameFacts, module_index: Int, module_alias: String, scope: String, internal_prefix: String, display_prefix: String, item: Item) Never! {
     type_prefix :: sema_inline_type_prefix(scope)
     value_prefix :: sema_genmod_value_name(scope, "")
     if item == {
@@ -69,7 +69,7 @@ fn sema_name_display_selected(item: Item, type_prefix: String, value_prefix: Str
         else -> false
     }
 }
-fn sema_name_plain_display_paths(facts: &MIRNameFacts, module_index: Int, module_alias: String, instance: CodeModule, source_path: String, display_path: String, items: [Item]) Never! {
+fn sema_name_plain_display_paths(facts: &NameFacts, module_index: Int, module_alias: String, instance: CodeModule, source_path: String, display_path: String, items: [Item]) Never! {
     scope :: sema_inline_type_alias(source_path)
     type_prefix :: sema_inline_type_prefix(scope)
     loop item in items {
@@ -81,7 +81,7 @@ fn sema_name_plain_display_paths(facts: &MIRNameFacts, module_index: Int, module
         }
     }
 }
-fn sema_name_add_display_paths(facts: &MIRNameFacts, module_index: Int, module_alias: String, items: [Item]) Never! {
+fn sema_name_add_display_paths(facts: &NameFacts, module_index: Int, module_alias: String, items: [Item]) Never! {
     loop item in items {
         if item == .CodeModule(instance) {
             if instance.instance_identity != None {

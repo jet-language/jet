@@ -1,0 +1,14 @@
+
+use core.process as process
+
+struct SessionHolder {
+    authority: Authority
+}
+
+fn run() {
+    session :: SessionHolder{authority: Authority.workspace()}
+    #FX(authority: Exec, IO, Time.Wait) {
+        result :: process.run(["echo", "authority"], authority)
+        print("boundary")
+    }
+}

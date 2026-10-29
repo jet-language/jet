@@ -1,0 +1,137 @@
+package {
+    name: "files_descriptor_transactions"
+    authority: { allow: [FS, FS.Read, FS.Write, IO, Mem.Alloc] }
+}
+
+use core.files as files
+
+fn byte_io() {
+    scratch :: files.temp_dir("descriptor-io")
+    directory :: files.open_directory(scratch.path)
+    writer :: directory.create("payload", if_exists: .Refuse, mode: Val(0o600))
+    writer.write_all([U8]{0, 127, 128, 255})
+    writer.write_all([U8]{})
+    writer.set_mode(0o640)
+    writer.fsync()
+    info :: writer.stat()
+    assert(info.is_file && info.size == 4 && info.mode == 0o640 && info.links == 1)
+    close(^writer)
+    reader :: directory.open("payload")
+    held :: reader.stat()
+    assert(held.id == info.id)
+    assert(held.owner == directory.entry_stat("payload").owner)
+    assert(reader.read(3) == [U8]{0, 127, 128})
+    assert(reader.read(3) == [U8]{255})
+    assert(reader.read(3).len() == 0)
+    assert(reader.read(0) == .Err(.InvalidInput(_)))
+    assert(reader.read(-1) == .Err(.InvalidInput(_)))
+    assert(writer_mode_refused(directory))
+    assert(directory.create("payload", if_exists: .Refuse) == .Err(.AlreadyExists(_)))
+}
+
+fn writer_mode_refused(directory: files.Directory) -> Bool {
+    writer :: directory.create("mode", if_exists: .Refuse)
+    writer.set_mode(-1) == .Err(.InvalidInput(_))
+}
+
+fn publication() {
+    scratch :: files.temp_dir("descriptor-publish")
+    original :: files.join(scratch.path, "before")
+    moved :: files.join(scratch.path, "after")
+    outside :: files.join(scratch.path, "outside")
+    files.create_dir(original)
+    files.write(outside, "old")
+    files.hard_link(outside, files.join(original, "current"))
+    files.symlink(outside, files.join(original, "alias"))
+    directory :: files.open_directory(original)
+    old :: directory.open("current")
+    old_info :: old.stat()
+    files.rename(original, moved)
+    files.create_dir(original)
+    files.write(files.join(original, "current"), "decoy")
+    writer :: directory.create("partial", if_exists: .Refuse)
+    writer.write_all("new".bytes())
+    writer.fsync()
+    published :: writer.stat()
+    directory.rename("partial", "current")
+    directory.fsync()
+    assert(directory.entry_stat("current").id == published.id)
+    assert(old.stat().id == old_info.id)
+    assert(old.read(8) == "old".bytes())
+    reader :: directory.open("current")
+    assert(reader.read(8) == "new".bytes())
+    assert(files.read(outside) == "old")
+    assert(files.read(files.join(original, "current")) == "decoy")
+    assert(directory.open("alias") == .Err(.InvalidInput(_)))
+    alias_writer :: directory.create("alias.partial", if_exists: .Refuse)
+    alias_writer.write_all("alias-new".bytes())
+    alias_writer.fsync()
+    directory.rename("alias.partial", "alias")
+    directory.fsync()
+    assert(!directory.entry_stat("alias").is_symlink)
+    assert(files.read(outside) == "old")
+    assert(directory.open("../outside") == .Err(.InvalidInput(_)))
+    assert(directory.open("/outside") == .Err(.InvalidInput(_)))
+    assert(directory.open("./current") == .Err(.InvalidInput(_)))
+    assert(directory.open("current/") == .Err(.InvalidInput(_)))
+    files.symlink(scratch.path, files.join(moved, "redirect"))
+    assert(directory.open("redirect/outside") == .Err(_))
+    directory.remove("redirect")
+    directory.remove("alias")
+    assert(directory.entry_stat("alias") == .Err(.NotFound(_)))
+    assert(files.read(outside) == "old")
+}
+
+fn advisory_lock() {
+    scratch :: files.temp_dir("descriptor-flock")
+    path :: files.join(scratch.path, "before")
+    moved :: files.join(scratch.path, "after")
+    files.create_dir(path)
+    directory :: files.open_directory(path)
+    lock :: directory.lock()
+    assert(directory.lock() == .Err(_))
+    files.rename(path, moved)
+    other :: files.open_directory(moved)
+    assert(other.lock() == .Err(_))
+    close(^directory)
+    assert(other.lock() == .Err(_))
+    close(^lock)
+    again :: other.lock()
+    close(^again)
+    scoped_lock(other)
+    _released :: other.lock()
+}
+
+fn scoped_lock(directory: files.Directory) {
+    _lock :: directory.lock()
+}
+
+fn entry_names() {
+    scratch :: files.temp_dir("descriptor-names")
+    directory :: files.open_directory(scratch.path)
+    writer :: directory.create("é.bin", if_exists: .Refuse)
+    writer.write_all([U8]{})
+    writer.fsync()
+    entries :: directory.list()
+    assert(entries.len() == 1)
+    entry :: entries[0]
+    assert(entry.name == "é.bin" && entry.name_is_unicode)
+    assert(entry.raw_name == "é.bin".bytes() && !entry.is_dir)
+    assert(directory.list().len() == 1)
+}
+
+fn run() {
+    byte_io()
+    print("descriptor read/write/fsync/stat/set_mode: true")
+    publication()
+    print("held atomic publication and no-follow removal: true")
+    advisory_lock()
+    print("directory flock survives rename, closes and releases: true")
+    entry_names()
+    print("directory listing preserves Unicode raw bytes: true")
+}
+
+#Test("descriptor read/write/fsync/stat/set_mode") { byte_io() }
+#Test("held atomic publication, identity and no-follow removal") { publication() }
+#Test("directory flock ownership across rename and close") { advisory_lock() }
+#Test("Directory.list raw basename and fresh listing") { entry_names() }

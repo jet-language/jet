@@ -77,7 +77,7 @@ int main(void) {
     Suite *empty = snapshot();
     assert(empty->iteration == 0 && empty->result == 0 && empty->runner == 0);
     assert(jet_test_suite_status() == 0 && jet_test_suite_run(address(empty)) == 0);
-    show(empty, "TestSuite { iteration: 0, result: 0 }");
+    show(empty, "Test { iteration: 0, result: 0 }");
     drop(empty);
     jet_test_suite_install(address(first));
     assert(first->refs == 2);
@@ -93,11 +93,11 @@ int main(void) {
     assert(old->iteration == 0 && old->result == 0 && old->runner == address(first));
     Suite *after = snapshot();
     assert(after->iteration == INT64_MIN && after->result == 17 && after->runner == address(second));
-    show(after, "TestSuite { iteration: -9223372036854775808, result: 17 }");
+    show(after, "Test { iteration: -9223372036854775808, result: 17 }");
     assert(jet_test_suite_run(address(copy)) == 17 && jet_test_suite_status() == 17);
     assert(jet_test_suite_run(address(after)) == -3 && after->result == 17);
     Suite *latest = snapshot();
-    show(latest, "TestSuite { iteration: 9223372036854775807, result: -3 }");
+    show(latest, "Test { iteration: 9223372036854775807, result: -3 }");
     jet_test_suite_install(address(second));
     assert(second->refs == 3 && jet_test_suite_status() == 0);
     assert(jet_test_suite_run(address(copy)) == 17);

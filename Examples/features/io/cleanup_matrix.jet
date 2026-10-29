@@ -7,7 +7,7 @@
 // kill or abort is outside this graceful cleanup law and is not exercised.
 package {
     name: "cleanup_matrix"
-    authority: { holds: { allow: [Env, Exec, Exec.Args, IO, Mem.Alloc, Time.Wait] } }
+    authority: { allow: [Env, Exec, Exec.Args, IO, Mem.Alloc, Time.Wait] }
 }
 
 use core.sys as os
@@ -80,8 +80,8 @@ fn child(path: String) CaseFail! {
         os.atexit(() -> print("atexit 2"))
     }
     if path == "cancel" {
-        (ready_tx, ready_rx) :: channel<Int>()
-        (block_tx, block_rx) :: channel<Int>()
+        { sender: ready_tx, receiver: ready_rx } :: channel<Int>()
+        { sender: block_tx, receiver: block_rx } :: channel<Int>()
         winner :: task.race {cancelled_body(ready_tx, block_rx), quick(ready_rx)} ?? panic("race failed")
         // Keep the unreleased wait's sender alive until the loser has drained.
         block_tx.close()

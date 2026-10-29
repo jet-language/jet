@@ -1,0 +1,14 @@
+# tests/taskgroup_params.rs::evaluator_supports_taskgroup_combinators at tests/taskgroup_params.rs:331; hand-port
+# The forced-interpreter run retires: jet has no interpreter tier (`jet run --interpret` is E2102); the default run keeps the claim.
+fixture: evaluator_supports_taskgroup_combinators.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step r1: jet run r1/main.jet
+exit: 0
+stdout: = "3\n8\n12\n" # tests/taskgroup_params.rs:374 run_default_multi name taskgroup_combinators, entry main.jet
+step: jet build r2/taskgroup_combinators.jet
+exit: 0
+step r2aot: built
+exit: 0
+stdout: = "3\n8\n12\n" # tests/taskgroup_params.rs:379 build_and_run (tir_support, 2-tuple) name taskgroup_combinators (if have_rustc)

@@ -1,0 +1,50 @@
+use core.encoding.hex as comptime_diff_hex
+
+fn pass_f32(value: F32) -> F32 {
+    return value
+}
+
+fn apply_f32(transform: fn(F32) -> F32, value: F32) -> F32 {
+    return transform(value)
+}
+
+fn f32_value_flow() -> String {
+    literal :: F32{ 16777217.0 }
+    one :: F32{ 1.0 }
+    two :: F32{ 2.0 }
+    three :: F32{ 3.0 }
+    threshold :: F32{ 16777215.0 }
+    immutable :: F32{ literal + one }
+    mutable := F32{ literal }
+    mutable += one
+    mutable -= two
+    mutable *= three
+    mutable /= two
+    transform :: (value: F32) -> value + one
+    same :: pass_f32(literal)
+    wide :: Float.from_f32(literal)
+    narrowed :: F32.from_float(wide) ?? one
+    nested :: [["values": [literal, apply_f32(transform, literal), narrowed]]]
+    option_left :: [[[literal].get(0)]]
+    option_right :: [[[same].get(0)]]
+    result_left :: [[F32.from_float(wide)]]
+    result_right :: [[F32.from_float(Float.from_f32(same))]]
+    negative :: F32{ -literal }
+    difference :: F32{ literal - one }
+    product :: F32{ literal * two }
+    quotient :: F32{ literal / two }
+    return "{literal}|{immutable}|{mutable}|{negative}|{difference}|{product}|{quotient}|{literal == same}|{literal > threshold}|{nested[0]["values"]}|{option_left == option_right}|{result_left == result_right}"
+}
+
+EXPECTED :: comptime { f32_value_flow() }
+
+fn run() {
+    actual :: f32_value_flow()
+    comptime_diff_frame("{EXPECTED}", "{actual}")
+
+}
+
+fn comptime_diff_frame(expected_text: String, actual_text: String) {
+    print("{comptime_diff_hex.encode(expected_text.bytes())}")
+    print("{comptime_diff_hex.encode(actual_text.bytes())}")
+}

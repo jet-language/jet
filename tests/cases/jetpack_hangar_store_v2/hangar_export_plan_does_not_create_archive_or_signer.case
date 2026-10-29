@@ -1,0 +1,23 @@
+# tests/jetpack_hangar_store_v2.rs::hangar_export_plan_does_not_create_archive_or_signer at tests/jetpack_hangar_store_v2.rs:628; hand-port
+# Claim: export without --yes is a plan: schema jet.report/v1, moment tool, status plan, action export, applied false (rs:682-689)
+# Claim: planned.hangar not created (rs:690)
+# Claim: trust/hangar.key not created (rs:691)
+# Fixture migrated: archive path fixture-relative (planned.hangar); key path checked under the try.mjs JETPACK_ROOT (jetpack/trust/hangar.key)
+fixture: hangar_export_plan_does_not_create_archive_or_signer.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jetpack hangar ingest source --name planned --ref planned@fixture --no-color
+exit: 0 # rs:635-643
+step: jet hangar export planned@fixture --to planned.hangar --json --no-color
+exit: 0 # rs:657-668 plan JSON
+stdout: ~ "\"schema\":\"jet.report/v1\"" # rs:657-668 plan JSON
+stdout: ~ "\"moment\":\"tool\"" # rs:657-668 plan JSON
+stdout: ~ "\"status\":\"plan\"" # rs:657-668 plan JSON
+stdout: ~ "\"action\":\"export\"" # rs:657-668 plan JSON
+stdout: ~ "\"applied\":false" # rs:657-668 plan JSON
+stderr: !~ "Error" # rs:657-668 plan JSON
+step: sh {work}/step-3.sh
+exit: 0 # rs:690 archive absent
+step: sh {work}/step-4.sh
+exit: 0 # rs:691 signer absent

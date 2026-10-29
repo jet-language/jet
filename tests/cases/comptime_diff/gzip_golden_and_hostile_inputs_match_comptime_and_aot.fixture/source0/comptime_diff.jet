@@ -1,0 +1,28 @@
+use core.encoding.hex as comptime_diff_hex
+use core.archive.gzip as gzip
+
+fn codec_probe() -> String {
+    bytes :: [U8]{ 72, 101, 108, 108, 111 }
+    encoded :: gzip.compress(bytes) ?? [U8]{}
+    gz :: gzip.decompress(encoded) ?? [U8]{}
+    golden :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 5, 0, 0, 0]) ?? [U8]{}
+    bad_size :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 6, 0, 0, 0]) ?? [U8]{ 255 }
+    h :: U8{ 72 }
+    lower_h :: U8{ 104 }
+    o :: U8{ 111 }
+    max :: U8{ 255 }
+    return "{gz.len() == 5}|{gz[0] == h}|{golden.len() == 5}|{golden[0] == lower_h}|{golden[4] == o}|{bad_size[0] == max}"
+}
+
+EXPECTED :: comptime { codec_probe() }
+
+fn run() {
+    actual :: codec_probe()
+    comptime_diff_frame("{EXPECTED}", "{actual}")
+
+}
+
+fn comptime_diff_frame(expected_text: String, actual_text: String) {
+    print("{comptime_diff_hex.encode(expected_text.bytes())}")
+    print("{comptime_diff_hex.encode(actual_text.bytes())}")
+}

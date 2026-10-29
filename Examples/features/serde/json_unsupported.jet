@@ -2,9 +2,16 @@ use core.encoding.json as json
 use core.encoding.jsonl as jsonl
 use core.math as math
 
-COMPTIME_UNSUPPORTED :: prep { json.to_string(Dyn.Float(math.nan())) }
-COMPTIME_CHAR :: prep { json.to_string('\n') ?? panic("comptime Char JSON") }
-C0_EXPECTED :: prep { "\"\\u0000\\u0001\\u0002\\u0003\\u0004\\u0005\\u0006\\u0007\\b\\t\\n\\u000b\\f\\r\\u000e\\u000f\\u0010\\u0011\\u0012\\u0013\\u0014\\u0015\\u0016\\u0017\\u0018\\u0019\\u001a\\u001b\\u001c\\u001d\\u001e\\u001f\"" }
+// A comptime value runs on the build's implicit `Err` rail: an unhandled
+// failure fails the build, so this one handles the failure itself.
+COMPTIME_UNSUPPORTED :: comptime {
+    if json.to_string(Dyn.Float(math.nan())) == {
+        .Ok(_) -> "accepted"
+        .Err(error) -> if error.format == .JSON && error.kind == .Unsupported -> error.reason else -> "another error"
+    }
+}
+COMPTIME_CHAR :: comptime { json.to_string('\n') ?? panic("comptime Char JSON") }
+C0_EXPECTED :: "\"\\u0000\\u0001\\u0002\\u0003\\u0004\\u0005\\u0006\\u0007\\b\\t\\n\\u000b\\f\\r\\u000e\\u000f\\u0010\\u0011\\u0012\\u0013\\u0014\\u0015\\u0016\\u0017\\u0018\\u0019\\u001a\\u001b\\u001c\\u001d\\u001e\\u001f\""
 
 fn reject(label: String, number: Float) {
     tree :: Dyn.Array([Dyn]{Dyn.Float(number)})
@@ -26,13 +33,8 @@ fn reject(label: String, number: Float) {
 }
 
 fn run() {
-    if COMPTIME_UNSUPPORTED == {
-        .Ok(_) -> panic("comptime non-finite JSON accepted")
-        .Err(error) -> {
-            assert(error.format == .JSON && error.kind == .Unsupported)
-            assert_eq(error.reason, "JSON cannot encode a non-finite Float")
-        }
-    }
+    assert_eq(COMPTIME_UNSUPPORTED, "JSON cannot encode a non-finite Float")
+    print("comptime: {COMPTIME_UNSUPPORTED}")
     assert_eq(COMPTIME_CHAR, json.to_string('\n') ?? panic("Char JSON parity"))
     reject("nan", math.nan())
     reject("positive infinity", math.infinity())

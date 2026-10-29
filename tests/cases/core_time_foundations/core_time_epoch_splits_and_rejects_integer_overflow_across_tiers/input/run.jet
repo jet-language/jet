@@ -1,0 +1,22 @@
+
+use core.time as time
+
+fn run() {
+    print(time.from_unix_nanoseconds(-1).format_rfc3339())
+    print(time.from_unix_microseconds(-1).format_rfc3339())
+    print(time.from_unix_ms(-1).format_rfc3339())
+    print(time.from_unix_seconds(-1).format_rfc3339())
+
+    if time.parse("2024-02-29") == {
+        .Ok(date) -> print("leap:{date}")
+        .Err(_) -> print("leap:rejected")
+    }
+    if time.parse("2023-02-29") == {
+        .Ok(_) -> print("bad-leap:accepted")
+        .Err(_) -> print("bad-leap:rejected")
+    }
+    if time.parse("9223372036854775808-01-01") == {
+        .Ok(_) -> print("wide-year:accepted")
+        .Err(_) -> print("wide-year:rejected")
+    }
+}

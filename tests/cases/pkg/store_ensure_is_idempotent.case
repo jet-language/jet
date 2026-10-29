@@ -1,0 +1,16 @@
+# tests/pkg.rs::store_ensure_is_idempotent at tests/pkg.rs:2867; hand-port
+# Claim: second ensure returns the same store entry (tests/pkg.rs:2867)
+# Fixture migrated: Rust Store::ensure_path_dep replaced by two jet fetch runs
+fixture: store_ensure_is_idempotent.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fetch
+env: JET_PACKAGE_STORE_DIR=store
+exit: 0 # tests/pkg.rs:2867 first ensure
+step: jet fetch
+env: JET_PACKAGE_STORE_DIR=store
+exit: 0 # tests/pkg.rs:2867 second ensure succeeds
+step: sh {work}/step-3.sh
+exit: 0 # tests/pkg.rs:2867 exactly one entry, so the second ensure reused it
+stdout: = "1\n" # tests/pkg.rs:2867 exactly one entry, so the second ensure reused it

@@ -249,33 +249,42 @@ fn process_execution_identity(spec: I64) -> I64 {
 }
 fn process_execution_receipt(child: I64, status: I64) -> I64 {
     spec :: fd_word(child, I64{24})
-    receipt :: jet_rt_alloc(I64{144}, I64{8})
-    coll_zero(receipt, I64{144})
     signal :: status.bit_and(I64{127})
     code :: if (signal == I64{0}) -> { (status >> I64{8}).bit_and(I64{255}) } else -> { I64{-1} }
-    fd_put(receipt, I64{0}, jet_int_owned_from_i64(code))
-    fd_put(receipt, I64{24}, if (status == I64{0}) -> { I64{1} } else -> { I64{0} })
-    if (signal != I64{0}) {
-        box :: jet_rt_alloc(I64{8}, I64{8})
-        fd_put(box, I64{0}, jet_int_owned_from_i64(signal))
-        fd_put(receipt, I64{32}, box)
-    }
-    fd_put(receipt, I64{40}, fd_word(child, I64{104}))
     output :: rt_text_copy(rt_text_data(fd_word(child, I64{80})), rt_text_len(fd_word(child, I64{80})))
     errors :: rt_text_copy(rt_text_data(fd_word(child, I64{88})), rt_text_len(fd_word(child, I64{88})))
     secrets :: process_execution_secrets(spec)
+    receipt :: process_receipt_build(spec, fd_word(process_execution_native(child), I64{8}), code, status == I64{0}, signal, fd_word(child, I64{104}) != I64{0}, output, errors, secrets)
+    jet_rt_string_drop(output)
+    jet_rt_string_drop(errors)
+    process_text_list_drop(secrets, false)
+    receipt
+}
+// Process.rs:451-532 jet_process_receipt without a launch plan. `output` and
+// `errors` are borrowed raw texts; `secrets` (borrowed) redacts them and sets
+// `redacted`, while argv redacts with the spec's own environment secrets.
+// signal 0 is Absent.
+fn process_receipt_build(spec: I64, pid: I64, code: I64, success: Bool, signal: I64, timed_out: Bool, output: I64, errors: I64, secrets: I64) -> I64 {
+    receipt :: jet_rt_alloc(I64{144}, I64{8})
+    coll_zero(receipt, I64{144})
+    fd_put(receipt, I64{0}, jet_int_owned_from_i64(code))
+    fd_put(receipt, I64{24}, if success -> { I64{1} } else -> { I64{0} })
+    fd_put(receipt, I64{32}, if (signal != I64{0}) -> jet_int_owned_from_i64(signal) else -> INT_OPTION_NONE)
+    fd_put(receipt, I64{40}, if timed_out -> { I64{1} } else -> { I64{0} })
     fd_put(receipt, I64{8}, process_execution_redact(output, secrets))
     fd_put(receipt, I64{16}, process_execution_redact(errors, secrets))
     fd_put(receipt, I64{48}, process_execution_identity(spec))
+    own_secrets :: process_execution_secrets(spec)
     argv :: data_sequence_new(I64{0}, I64{8})
     cmd :: fd_word(spec, PROCESS_SPEC_CMD)
     at := I64{0}
     loop at < fd_word(cmd, I64{0}) {
-        word :: process_execution_redact(fd_word(fd_word(cmd, I64{16}), at * I64{8}), secrets)
+        word :: process_execution_redact(fd_word(fd_word(cmd, I64{16}), at * I64{8}), own_secrets)
         process_text_list_push(argv, word)
         jet_rt_string_drop(word)
         at += I64{1}
     }
+    process_text_list_drop(own_secrets, false)
     fd_put(receipt, I64{56}, argv)
     fd_put(receipt, I64{64}, process_execution_input_digest(spec))
     fd_put(receipt, I64{72}, process_execution_policy_digest(spec))
@@ -299,43 +308,40 @@ fn process_execution_receipt(child: I64, status: I64) -> I64 {
     jet_rt_string_drop(entry)
     fd_put(receipt, I64{112}, outputs)
     fd_put(receipt, I64{120}, if (fd_word(secrets, I64{0}) != I64{0}) -> { I64{1} } else -> { I64{0} })
-    fd_put(receipt, I64{128}, jet_int_owned_from_i64(fd_word(process_execution_native(child), I64{8})))
-    fd_put(receipt, I64{136}, if (fd_word(child, I64{104}) != I64{0}) -> { process_raw_box(PROCESS_RESOURCE_WALL_TIME) } else -> { I64{0} })
-    jet_rt_string_drop(output)
-    jet_rt_string_drop(errors)
-    process_text_list_drop(secrets, false)
+    fd_put(receipt, I64{128}, jet_int_owned_from_i64(pid))
+    fd_put(receipt, I64{136}, if timed_out -> { process_raw_box(PROCESS_RESOURCE_WALL_TIME) } else -> { I64{0} })
     receipt
 }
 // String::from_utf8 is strict in both Rust collection lanes. The scanner's
 // negative width is Utf8Error.error_len; a truncated valid prefix has None.
 fn process_execution_validate_output(child: I64, err: I64) -> Bool {
-    stream := I64{1}
-    loop stream <= (I64{2}) {
-        text :: fd_word(child, if (stream == I64{1}) -> { I64{80} } else -> { I64{88} })
-        length :: rt_text_len(text)
-        data :: rt_text_data(text)
-        at := I64{0}
-        loop at < length {
-            width :: rt_text_valid_width(data + at, length - at, I64{1})
-            if (width < I64{0}) {
-                lead :: rt_text_byte(data + at)
-                expected :: if (lead >= I64{194} && lead <= I64{223}) -> { I64{2} } else -> { if (lead >= I64{224} && lead <= I64{239}) -> { I64{3} } else -> { if (lead >= I64{240} && lead <= I64{244}) -> { I64{4} } else -> { I64{1} } } }
-                cause :: jet_rt_string_builder_new()
-                if (expected > I64{1} && at - width == length) {
-                    jet_rt_string_builder_push(cause, rt_static_text("incomplete utf-8 byte sequence from index "))
-                    rt_text_push_number(cause, at)
-                } else {
-                    jet_rt_string_builder_push(cause, rt_static_text("invalid utf-8 sequence of "))
-                    rt_text_push_number(cause, -width)
-                    jet_rt_string_builder_push(cause, rt_static_text(" bytes from index "))
-                    rt_text_push_number(cause, at)
-                }
-                _ := host_io_other_take(HOST_IO_OP_READ, jet_rt_string_clone(if (stream == I64{1}) -> rt_static_text("process stdout") else -> rt_static_text("process stderr")), jet_rt_string_builder_finish(cause), err)
-                return false
+    process_execution_validate_text(fd_word(child, I64{80}), rt_static_text("process stdout"), err) &&
+        process_execution_validate_text(fd_word(child, I64{88}), rt_static_text("process stderr"), err)
+}
+// `label` (borrowed) names the reader in the Read error.
+fn process_execution_validate_text(text: I64, label: I64, err: I64) -> Bool {
+    length :: rt_text_len(text)
+    data :: rt_text_data(text)
+    at := I64{0}
+    loop at < length {
+        width :: rt_text_valid_width(data + at, length - at, I64{1})
+        if (width < I64{0}) {
+            lead :: rt_text_byte(data + at)
+            expected :: if (lead >= I64{194} && lead <= I64{223}) -> { I64{2} } else -> { if (lead >= I64{224} && lead <= I64{239}) -> { I64{3} } else -> { if (lead >= I64{240} && lead <= I64{244}) -> { I64{4} } else -> { I64{1} } } }
+            cause :: jet_rt_string_builder_new()
+            if (expected > I64{1} && at - width == length) {
+                jet_rt_string_builder_push(cause, rt_static_text("incomplete utf-8 byte sequence from index "))
+                rt_text_push_number(cause, at)
+            } else {
+                jet_rt_string_builder_push(cause, rt_static_text("invalid utf-8 sequence of "))
+                rt_text_push_number(cause, -width)
+                jet_rt_string_builder_push(cause, rt_static_text(" bytes from index "))
+                rt_text_push_number(cause, at)
             }
-            at += width
+            _ := host_io_other_take(HOST_IO_OP_READ, jet_rt_string_clone(label), jet_rt_string_builder_finish(cause), err)
+            return false
         }
-        stream += I64{1}
+        at += width
     }
     true
 }

@@ -1,0 +1,111 @@
+
+
+// Frozen typed cost evidence, shared by lowering and its reporting consumers.
+// Mirrors Rust TIR::cost_fact_for_expr; never inspect generated adapter text.
+TCOST_I128_MIN :: -170141183460469231731687303715884105728
+
+TCOST_I128_MAX :: 170141183460469231731687303715884105727
+
+TCOST_INLINE_MIN :: -4611686018427387904
+
+TCOST_INLINE_MAX :: 4611686018427387903
+
+fn checked_cost_bounded(lo: Int, hi: Int) -> TIntegerBounds? Never! {
+    if lo < TCOST_I128_MIN || hi > TCOST_I128_MAX -> return None
+    Val(TIntegerBounds{lo: lo, hi: hi})
+}
+
+fn checked_cost_type_bounds(ty: Type) -> TIntegerBounds? Never! {
+    if ty == {
+        .InlineRange(_, lo, hi) -> checked_cost_bounded(lo, hi)
+        .IntN(signed, bits) -> {
+            if bits <= 0 || bits > 128 || (!signed && bits == 128) -> return None
+            if signed {
+                limit :: 1 << (bits - 1)
+                return Val(TIntegerBounds{lo: -limit, hi: limit - 1})
+            }
+            Val(TIntegerBounds{lo: 0, hi: (1 << bits) - 1})
+        }
+        .Tagged(_, inner) -> checked_cost_type_bounds(inner)
+        else -> None
+    }
+}
+
+fn checked_cost_min(left: Int, right: Int) -> Int Never! { if left < right -> left else -> right }
+
+fn checked_cost_max(left: Int, right: Int) -> Int Never! { if left > right -> left else -> right }
+
+fn checked_cost_combine_bounds(op: TBinaryOp, left: TIntegerBounds, right: TIntegerBounds) -> TIntegerBounds? Never! {
+    if op == {
+        .Add -> return checked_cost_bounded(checked_cost_min(left.lo + right.lo, 0), checked_cost_max(left.hi + right.hi, 0))
+        .Sub -> return checked_cost_bounded(checked_cost_min(left.lo - right.hi, 0), checked_cost_max(left.hi - right.lo, 0))
+        .Mul -> {
+            first :: left.lo * right.lo
+            second :: left.lo * right.hi
+            third :: left.hi * right.lo
+            fourth :: left.hi * right.hi
+            return checked_cost_bounded(checked_cost_min(checked_cost_min(first, second), checked_cost_min(third, fourth)), checked_cost_max(checked_cost_max(first, second), checked_cost_max(third, fourth)))
+        }
+        .FloorDiv -> {
+            if right.lo <= 0 && right.hi >= 0 -> return None
+            if left.lo == TCOST_I128_MIN && right.lo <= -1 && right.hi >= -1 -> return None
+            first :: left.lo /% right.lo
+            second :: left.lo /% right.hi
+            third :: left.hi /% right.lo
+            fourth :: left.hi /% right.hi
+            return checked_cost_bounded(checked_cost_min(checked_cost_min(first, second), checked_cost_min(third, fourth)), checked_cost_max(checked_cost_max(first, second), checked_cost_max(third, fourth)))
+        }
+        .Mod | .Rem -> {
+            if right.lo <= 0 && right.hi >= 0 -> return None
+            if left.lo == 0 && left.hi == 0 -> return Val(integer_bounds_exact(0))
+            if right.lo == TCOST_I128_MIN || right.hi == TCOST_I128_MIN -> return None
+            low_abs :: if right.lo < 0 -> -right.lo else -> right.lo
+            high_abs :: if right.hi < 0 -> -right.hi else -> right.hi
+            magnitude :: checked_cost_max(low_abs, high_abs) - 1
+            if right.hi < 0 -> return Val(TIntegerBounds{lo: -magnitude, hi: 0})
+            return Val(TIntegerBounds{lo: 0, hi: magnitude})
+        }
+        else -> return None
+    }
+}
+
+fn checked_cost_bounds_fit_inline(bounds: TIntegerBounds) -> Bool Never! {
+    bounds.lo >= TCOST_INLINE_MIN && bounds.hi <= TCOST_INLINE_MAX
+}
+
+fn checked_builtin_mutates_receiver(operation: TBuiltinOp) -> Bool Never! {
+    if operation == {
+        .Push | .TryPush | .TryReserve | .TryInsertMap | .TryStringPush | .Pop
+        | .InsertMap | .AddNewMap | .MapSetDefault | .MapUpdate | .InsertList | .RemoveMap
+        | .RemoveList(_, _) | .MapPopFirst | .ExtendList | .Reverse | .SwapList | .Sort | .SortDesc | .Clear
+        | .SetInsert | .SetUpdate | .SetDifferenceUpdate | .SetIntersectionUpdate
+        | .SetSymmetricDifferenceUpdate | .SetRemove | .SetPop | .SetReplace | .SortedSetInsert
+        | .SortedSetRemove | .BitSetAdd | .BitSetRemove | .BagAdd | .BagRemove | .LRUPut
+        | .LRUAddNew | .LRUGet | .LRURemove | .DequePushFront | .DequePushBack | .DequePopFront
+        | .DequePopBack | .DequeDelete | .DequeReverse | .DequeSplit | .SplitWrite | .GetDisjointWrite
+        | .PriorityQueuePop | .PriorityQueueRemove(_, _) | .IterNext -> return true
+        .ByteBufferWrite(_) -> return true
+        .ByteBufferMethod(method) -> return method == "clear" || method == "seek" || method == "rewind" || method == "next" || method == "read" || method == "read_byte" || method == "read_bytes" || method == "read_string" || method == "flush" || method == "close" || method == "shutdown" || method == "copy_to" || method == "write_to"
+        else -> return false
+    }
+}
+
+fn checked_cost_operation(kind: TCostKind) -> String Never! {
+    if kind == {
+        .ViewMaterialization -> "materializing a read-only view"
+        .CollectionCopyOnWrite -> "editing a shared map backing store"
+        .ExactIntSpill -> "an exact Int operation may spill to bigint"
+        .OutcomeConstruction -> "constructing an Outcome carrier"
+        .RepresentationFallback -> "using a generic collection representation"
+    }
+}
+
+fn checked_cost_fix(kind: TCostKind) -> String Never! {
+    if kind == {
+        .ViewMaterialization -> "keep the value in its view form, or make the copy explicit outside the loop"
+        .CollectionCopyOnWrite -> "mutate an exclusive map place, or move the edit outside the loop"
+        .ExactIntSpill -> "bound the operands so the result stays on the packed Int rail, or accept exact bigint cost"
+        .OutcomeConstruction -> "consume the outcome through an immediate fast path when one exists"
+        .RepresentationFallback -> "provide the collection shape proof that selects the direct representation"
+    }
+}

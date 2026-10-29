@@ -1,0 +1,10 @@
+# tests/task_state.rs::task_lifecycle_joins_through_the_shared_flow_fact_walker at tests/task_state.rs:62; hand-port
+fixture: task_lifecycle_joins_through_the_shared_flow_fact_walker.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet check branches/run.jet
+exit: 0 # tests/task_state.rs:72 both branches must discharge the task duty
+stderr: ~ "[L0152]" # tests/task_state.rs:73 joined task states report the shared typestate divergence
+stderr: !~ "[L1101]" # tests/task_state.rs:81 no D-LIN1 report for a task consumed on both branches

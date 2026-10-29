@@ -1,0 +1,57 @@
+// core.regex matches leftmost-first, as RE2 and Rust do. The leftmost match
+// wins; alternation prefers its earlier arm, a greedy repetition its largest
+// count and a lazy one (`*?`, `+?`, `??`, `{n,m}?`) its smallest. The
+// example also covers the assertions `\b \B \A \z`, the escapes, class
+// escapes inside `[]`, and the positioned RegexError a bad pattern reports.
+use core.regex as rx
+
+fn show(label: String, re: rx.Regex, text: String) {
+    found :: re.find(text) ?? "none"
+    print("{label}: find='{found}' full={re.full_match(text)} all={re.find_all(text)}")
+}
+
+fn verdict(pattern: String) {
+    if rx.compile(pattern) == {
+        .Ok(_) -> print("ok: {pattern}")
+        .Err(err) -> print("{err} [offset {err.offset}]")
+    }
+}
+
+// `RegexError` converts to `Err`, so `compile` propagates like any call.
+fn count_words(pattern: String, text: String) -> Int Err! {
+    words :: rx.compile(pattern)
+    words.find_all(text).len()
+}
+
+fn run() {
+    show("first arm wins", Regex{"a|ab"}, "ab")
+    show("arms keep order", Regex{"ab|a"}, "ab")
+    show("greedy", Regex{"<.+>"}, "<a><b>")
+    show("lazy", Regex{"<.+?>"}, "<a><b>")
+    show("lazy count", Regex{"x{{2,4}}?"}, "xxxxx")
+    show("lazy option", Regex{"ab??"}, "ab")
+    show("word boundary", Regex{"\bcat\b"}, "cat concat cat.")
+    show("inside a word", Regex{"\Bcat"}, "cat concat")
+    show("text anchors", Regex{"\A\d+\z"}, "2026")
+    show("not digits", Regex{"[\D]+"}, "ab12cd")
+    show("letters or _", Regex{"[^\P{{L}}_]+"}, "1_héllo_2")
+    show("escapes", Regex{"\x41\u00e9\x{{1F600}}\x21"}, "Aé😀!")
+    show("punctuation", Regex{"\.\-\#\ "}, "a.-# b")
+    show("python name", Regex{"(?P<year>\d{{4}})"}, "in 2026")
+    m :: Regex{"(?P<key>\w+)=(?<value>\w*)"}.match("set mode=fast") ?? panic("no match")
+    print("key={m.name("key") ?? "none"} value={m.name("value") ?? "none"}")
+    verdict("(a")
+    verdict("a)")
+    verdict("a**")
+    verdict("(?i)abc")
+    verdict("(?=a)")
+    verdict("(a)\\1")
+    verdict("[z-a]")
+    verdict("\\q")
+    verdict("[\\b]")
+    verdict("(?<n>a)(?<n>b)")
+    verdict("\\x{{110000}}")
+    verdict("(?:a{{1000}}){{1000}}")
+    print(count_words("\\w+", "one two three") ?? -1)
+    if count_words("(", "text") == .Err(err) -> print("propagated: {err}")
+}

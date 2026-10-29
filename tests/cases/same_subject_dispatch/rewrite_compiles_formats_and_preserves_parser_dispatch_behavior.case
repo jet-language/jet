@@ -1,0 +1,36 @@
+# tests/same_subject_dispatch.rs::rewrite_compiles_formats_and_preserves_parser_dispatch_behavior at tests/same_subject_dispatch.rs:392; hand-port
+# run.jet moved here from tests/fixtures/adjacent_subject_dispatch_witness.jet (only the deleted .rs used it); package.jet is
+# tir_support::TIR_TEST_PACKAGE. The L0514 edit is applied from `jet check --json` fix_edits, as in
+# braced_rewrite_is_formatter_stable_and_compiles.case. tir_support::assert_tiers_agree: default run, forced interpreter
+# and the AOT build print "revision\n" before and after the rewrite.
+fixture: rewrite_compiles_formats_and_preserves_parser_dispatch_behavior.fixture
+env: NO_COLOR=1
+step: jet run run.jet
+exit: 0
+stdout: = "revision\n"
+step: jet build run.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "revision\n"
+step: jet check run.jet --json
+exit: 0
+json: stdout doc $.reports[?code="L0514"][?applicability="suggested"] #>= 1
+json: stdout doc $.reports[?code="L0514"][0].fix_edits[?safety="needs-review"] #>= 1
+apply-edits: stdout doc $.reports[?code="L0514"][0].fix_edits[*]
+file: run.jet ~ "if key == {\n        \"revision\" | \"rev\" -> print(\"revision\")" # tests/same_subject_dispatch.rs:410-413 aliases grouped in an ordered table
+capture: fixed = text file run.jet
+step: jet fmt run.jet
+exit: 0
+file: run.jet = "{cap:fixed}"
+step: jet check run.jet --json
+exit: 0
+json: stdout doc $.reports[?code="L0514"] #= 0
+step: jet run run.jet
+exit: 0
+stdout: = "revision\n"
+step: jet build run.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "revision\n"

@@ -14,9 +14,9 @@
 // generations stay as rollback authority and recovery fails closed on any
 // state it cannot prove idle.
 
-LEASE_AUTH_KEY_BYTES :: prep { 32 }
-LEASE_KEY_MODE :: prep { 0o600 }
-LEASE_RECEIPT_BYTE_BOUND :: prep { 131072 }
+LEASE_AUTH_KEY_BYTES :: 32
+LEASE_KEY_MODE :: 0o600
+LEASE_RECEIPT_BYTE_BOUND :: 131072
 
 // A snapshot request and the owner lock that must stay held until the
 // receipt is accepted and the process handoff completes.
@@ -416,7 +416,7 @@ struct ExecutableLeaseProtocol {
             // container inode. The claim recreates only the marker and still
             // tests that inode.
             live_lock :: env_try_acquire_lock(path, "live") ?? next
-            if store_lease_reclaim_container(path, leases, live_lock) -> swept += 1
+            if store_lease_reclaim_container(path, leases, ^live_lock) -> swept += 1
         }
         Ok(swept)
     }
@@ -447,7 +447,7 @@ struct ExecutableLeaseProtocol {
         Ok(files.join(leases, parts[0]))
     }
 
-    fn request(self, operation: LeaseOperation, lease_id: String, generation: Int, owner_scope_text: String, snapshot_root: String, package: String, version: String, reference: String, output_digest: String, previous_output_digest: String, members: [LeaseMember]) -[Rand]> LeaseRequest IOError! {
+    fn request(self, operation: LeaseOperation, lease_id: String, generation: Int, owner_scope_text: String, snapshot_root: String, package: String, version: String, reference: String, output_digest: String, previous_output_digest: String, members: [LeaseMember]) -[Env, Rand]> LeaseRequest IOError! {
         store_lease_validate_id(lease_id, "lease id")
         store_lease_validate_scope(owner_scope_text)
         if store_lease_owner_scope(lease_id) != owner_scope_text -> return Err(store_lease_invalid("executable lease owner scope does not match the lease"))
@@ -770,7 +770,9 @@ fn store_lease_read_bounded(path: String) -[FS]> String IOError! {
     if !held.is_file -> return Err(store_lease_invalid("executable lease receipt artifact is not a regular file"))
     if held.size > LEASE_RECEIPT_BYTE_BOUND -> return Err(store_lease_invalid("executable lease receipt exceeds the bound"))
     bytes := [U8]{}
-    loop chunk in file.chunks(65536) {
+    loop {
+        chunk :: file.read(65536)
+        if chunk.len() == 0 -> break
         &bytes.extend(chunk)
         if bytes.len() > LEASE_RECEIPT_BYTE_BOUND -> return Err(store_lease_invalid("executable lease receipt exceeds the bound"))
     }
@@ -808,7 +810,7 @@ enum LeaseQuarantine {
 
 // Rename `path` to `quarantine` and sync `leases` while the live claim is
 // held (released first on Windows); the claim ends when this returns.
-fn store_lease_quarantine(path: String, quarantine: String, leases: String, live_lock: ^RuntimeLock) -[FS]> LeaseQuarantine Never! {
+fn store_lease_quarantine(path: String, quarantine: String, leases: String, live_lock: ^RuntimeLock) -[FS, Env]> LeaseQuarantine Never! {
     if sys.is_windows() -> close(^live_lock)
     if files.rename(path, quarantine) == .Err(_) -> return LeaseQuarantine.NotMoved
     // Publish the quarantine name before deleting anything: an interrupted

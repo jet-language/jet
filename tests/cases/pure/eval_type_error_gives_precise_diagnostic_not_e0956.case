@@ -1,0 +1,12 @@
+# tests/pure.rs::eval_type_error_gives_precise_diagnostic_not_e0956 at tests/pure.rs:739; hand-port
+# Claim: a String + Int mismatch under jet eval --pure is reported and not as E0956 (tests/pure.rs:741-758)
+# Fixture migrated: Rust fn is `-> Int { return "string" + 5 }`; jet eval entry run must return () (E1321), so the bad expression is bound in a unit run
+# Not ported: jet::check_for_eval Rust API returning diagnostics (tests/pure.rs:742): replaced by the jet eval --pure CLI on the same source
+fixture: eval_type_error_gives_precise_diagnostic_not_e0956.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet eval --pure main.jet
+exit: 1 # tests/pure.rs:741-758
+stderr: ~ "Error [E" # tests/pure.rs:741-758
+stderr: !~ "E0956" # tests/pure.rs:741-758

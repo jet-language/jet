@@ -211,11 +211,12 @@ impl ProviderFactReport {
             .None -> {}
         }
         if facts.name == "" -> facts.name = provider_graph_json_string(metadata, "name") ?? ""
-        if is_packument && metadata != object {
+        separate_package :: is_packument && !pkg_json_objects_equal(metadata, object)
+        if separate_package {
             top_name :: provider_graph_json_string(object, "name")
             package_name :: provider_graph_json_string(metadata, "name")
             if top_name != None && package_name != None && top_name != package_name {
-                &conflicts.push("npm packument name `{top_name ?? ""}` conflicts with package name `{package_name ?? ""}`")
+                &conflicts.push("npm packument name `{top_name}` conflicts with package name `{package_name}`")
             }
             if metadata.get("version") == {
                 .Val(raw_version) -> {
@@ -231,7 +232,7 @@ impl ProviderFactReport {
         }
         facts.source_identity = "npm:{facts.name}@{facts.version}"
         &facts.add_json_projection("provider.npm.native", object)
-        if is_packument && metadata != object -> &facts.add_json_projection("provider.npm.package", metadata)
+        if separate_package -> &facts.add_json_projection("provider.npm.package", metadata)
         dependency_sets :: [(field: String, kind: String)]{
             (field: "dependencies", kind: "runtime"), (field: "devDependencies", kind: "dev"),
             (field: "optionalDependencies", kind: "optional"), (field: "peerDependencies", kind: "peer"),
@@ -366,7 +367,7 @@ impl ProviderFactReport {
     // A PyPI JSON API record (`info` plus artifact `urls`).
     fn pypi_json_document(object: [String: Dyn]) -> ProviderFactReport Never! {
         info_object :: pkg_json_object(object.get("info") ?? Dyn.Null)
-        has_info :: info_object != None
+        has_info :: info_object == .Val(_)
         info :: info_object ?? object
         facts := MetadataFacts.empty(ProviderFamily.PyPI, provider_graph_either(provider_graph_json_string(info, "name"), provider_graph_json_string(object, "name")) ?? "")
         facts.version = provider_graph_either(provider_graph_json_string(info, "version"), provider_graph_json_string(object, "version")) ?? ""
@@ -593,7 +594,7 @@ impl ProviderFactReport {
             identity :: provider_graph_json_string(pin, "identity")
             package :: provider_graph_json_string(pin, "package")
             if identity != None && package != None && identity != package {
-                &conflicts.push("SwiftPM pin declares conflicting identity values: {identity ?? ""}, {package ?? ""}")
+                &conflicts.push("SwiftPM pin declares conflicting identity values: {identity}, {package}")
             }
             pin_fields :: [String]{"identity", "package", "location", "repositoryURL", "kind"}
             loop field in pin_fields {

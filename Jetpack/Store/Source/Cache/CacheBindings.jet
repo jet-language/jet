@@ -8,10 +8,10 @@
 // transfer boundary and the local-output sealing helpers other Store code
 // calls before an output becomes reusable.
 
-STORE_CACHE_BINDING_MAGIC :: prep { "jet-cache-bind-v1" }
-STORE_CACHE_MAX_BINDING_BYTES :: prep { 1048576 }
-STORE_CACHE_MAX_INFO_BYTES :: prep { 1048576 }
-STORE_CACHE_TRUST_KEY_MAX_BYTES :: prep { 4096 }
+STORE_CACHE_BINDING_MAGIC :: "jet-cache-bind-v1"
+STORE_CACHE_MAX_BINDING_BYTES :: 1048576
+STORE_CACHE_MAX_INFO_BYTES :: 1048576
+STORE_CACHE_TRUST_KEY_MAX_BYTES :: 4096
 
 // One host-owned cache role binding.
 struct CacheBinding {
@@ -102,7 +102,7 @@ struct CacheBinding {
 
     // Status object of one binding: role, mirrors, credential label, write.
     fn status_fields(self) -> StatusFields Never! {
-        StatusFields.new().with("role", Dyn.Text(self.role)).with("mirrors", report_texts(self.mirrors)).with("credential_provider", report_optional_text(self.credential_provider)).with("write", Dyn.Bool(self.allow_write))
+        StatusFields.new().with("role", Dyn.Text(self.role.copy())).with("mirrors", report_texts(self.mirrors)).with("credential_provider", report_optional_text(self.credential_provider)).with("write", Dyn.Bool(self.allow_write))
     }
 }
 
@@ -228,7 +228,7 @@ fn store_cache_read_trust_key(path: String) -> TrustKey StoreError! {
 // Create a fresh 32-byte role key exactly once, owner-only on Unix.
 fn store_cache_write_new_key(path: String) StoreError! {
     store_cache_ensure_parent(path)
-    secret :: random.bytes(32) ?? return Err(StoreError.Other(err.message()))
+    secret :: random.bytes(32) ?? return Err(StoreError.Other("{err}"))
     if store_archive_lstat_ok(path) != None -> return
     out :: files.create(path, if_exists: .Refuse)
     out.write_all(secret)

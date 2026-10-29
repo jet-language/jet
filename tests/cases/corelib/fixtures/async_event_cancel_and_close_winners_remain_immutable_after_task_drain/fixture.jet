@@ -4,8 +4,8 @@ use core.tasks as tasks
 use core.time as time
 
 fn run() {
-    (cancel_gate_started_tx, cancel_gate_started_rx) :: channel<Int>()
-    (cancel_gate_release_tx, cancel_gate_release_rx) :: channel<Int>()
+    { sender: cancel_gate_started_tx, receiver: cancel_gate_started_rx } :: channel<Int>()
+    { sender: cancel_gate_release_tx, receiver: cancel_gate_release_rx } :: channel<Int>()
     cancel_gate :: task {
         cancel_gate_started_tx.send(1)
         released :: cancel_gate_release_rx.receive() ?? panic("cancel gate")
@@ -27,8 +27,8 @@ fn run() {
     }
     print("cancel counts={cancel_event.queued_count()},{cancel_event.running_count()},{cancel_event.blocked_count()}")
 
-    (close_gate_started_tx, close_gate_started_rx) :: channel<Int>()
-    (close_gate_release_tx, close_gate_release_rx) :: channel<Int>()
+    { sender: close_gate_started_tx, receiver: close_gate_started_rx } :: channel<Int>()
+    { sender: close_gate_release_tx, receiver: close_gate_release_rx } :: channel<Int>()
     close_gate :: task {
         close_gate_started_tx.send(1)
         released :: close_gate_release_rx.receive() ?? panic("close gate")

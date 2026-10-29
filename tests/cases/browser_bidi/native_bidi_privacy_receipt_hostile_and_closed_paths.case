@@ -1,0 +1,28 @@
+# tests/browser_bidi.rs::native_bidi_privacy_receipt_hostile_and_closed_paths at tests/browser_bidi.rs:2713; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port})
+fixture: native_bidi_privacy_receipt_hostile_and_closed_paths.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+requires: tool:node
+write: browser_bidi_privacy_hostile.jet native_bidi_privacy_receipt_hostile_and_closed_paths.fixture/run.template
+step: jet build browser_bidi_privacy_hostile.jet
+exit: 0
+session privacy_hostile raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:privacy_hostile} privacy_hostile.json
+session privacy_closed raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:privacy_closed} privacy_closed.json
+sleep: 500ms
+step run: built
+exit: 0
+stdout: = native_bidi_privacy_receipt_hostile_and_closed_paths.1.out
+stdout: !~ "PRIVACY_HOSTILE_SECRET" # original predicate: !stdout.contains
+stderr: !~ "PRIVACY_HOSTILE_SECRET" # original predicate: !stderr.contains
+stdout: !~ "PRIVACY_CLOSED_SECRET" # original predicate: !stdout.contains
+stderr: !~ "PRIVACY_CLOSED_SECRET" # original predicate: !stderr.contains
+stdout: !~ "SECRET STACK" # original predicate: !stdout.contains
+stderr: !~ "SECRET STACK" # original predicate: !stderr.contains
+close privacy_hostile
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+stdout: = native_bidi_privacy_receipt_hostile_and_closed_paths.2.out # original assert_eq!(server.join().unwrap(), [..])
+close privacy_closed
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+stdout: = native_bidi_privacy_receipt_hostile_and_closed_paths.3.out # original assert_eq!(server.join().unwrap(), [..])

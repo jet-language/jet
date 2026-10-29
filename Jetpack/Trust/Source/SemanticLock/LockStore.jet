@@ -2,8 +2,14 @@
 // with the machine package and toolchain sections. Every write revalidates
 // first and splices the semantic text after the machine half under the
 // project lock, so machine `pkg_lock_parse`/`pkg_lock_write` keep their bytes.
+use jet_pkg_model.[
+    pkg_lock_ensure_build_stamp, pkg_lock_parse, pkg_lock_path, pkg_lock_write,
+    pkg_lock_write_atomically,
+]
+use jetpack_foundation.[env_runtime_project_lock]
+use core.files as files
 
-SEMANTIC_LOCK_SCOPE :: prep { "semantic-lock" }
+SEMANTIC_LOCK_SCOPE :: "semantic-lock"
 
 // Rust `live_path`: the project's `.jet/lock`.
 fn trust_semantic_lock_live_path(project: String) -> String Never! {

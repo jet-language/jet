@@ -1,0 +1,11 @@
+# Port of tests/ffi_rust.rs:91-121. A Rust signature whose result does not match the foreign item is E0705 with
+# what, why and fix lines, reported before any foreign call. Like the original, this case needs cargo and rustc.
+fixture: rust_extern_signature_mismatch_is_typed_before_a_foreign_call.fixture
+env: NO_COLOR=1
+requires: tool:cargo
+requires: tool:rustc
+step: jet check main.jet
+exit: 1
+stderr: ~ "Error [E0705]: " # tests/ffi_rust.rs:108-118 the mismatch is E0705
+stderr: ~ " Why: " # tests/ffi_rust.rs:113 non-empty why line
+stderr: ~ " Fix: " # tests/ffi_rust.rs:114 non-empty fix line

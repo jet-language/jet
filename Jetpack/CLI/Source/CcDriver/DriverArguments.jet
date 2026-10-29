@@ -6,12 +6,12 @@
 // toolchain overrides are refused, and every path operand is recorded so the
 // invocation can rewrite it to a project-relative, symlink-free path.
 
-CC_MAX_INPUT_FILES :: prep { 100000 }
-CC_MAX_INPUT_BYTES :: prep { 536870912 }
-CC_MAX_RESPONSE_FILES :: prep { 64 }
-CC_MAX_RESPONSE_DEPTH :: prep { 16 }
-CC_MAX_RESPONSE_BYTES :: prep { 8388608 }
-CC_MAX_RESPONSE_ARGS :: prep { 100000 }
+CC_MAX_INPUT_FILES :: 100000
+CC_MAX_INPUT_BYTES :: 536870912
+CC_MAX_RESPONSE_FILES :: 64
+CC_MAX_RESPONSE_DEPTH :: 16
+CC_MAX_RESPONSE_BYTES :: 8388608
+CC_MAX_RESPONSE_ARGS :: 100000
 
 // A standalone compiler metadata probe; it takes no flags or sources.
 enum DriverProbe {
@@ -311,7 +311,7 @@ fn cli_cc_parse_prefixed_argument(value: String, options: &DriverOptions) CLIToo
             &options.path_indices.push(DriverPathOperand{index: options.last_index(), prefix: "-L"})
         }
         attached != None -> {
-            prefix :: attached ?? ""
+            prefix :: attached
             cli_cc_validate_operand(value.removeprefix(prefix), prefix)
             &options.argv.push(value)
             &options.path_indices.push(DriverPathOperand{index: options.last_index(), prefix: prefix})
@@ -449,7 +449,7 @@ struct CcResponseExpansion {
 
     fn run(args: [String], current_dir: String, scope_roots: [String]) -[FS]> [String] CLIToolError! {
         expansion := CcResponseExpansion{expanded: [String]{}, stack: [String]{}, file_count: 0}
-        expansion.expand(args, current_dir, scope_roots, 0)
+        &expansion.expand(args, current_dir, scope_roots, 0)
         Ok(expansion.expanded)
     }
 
@@ -479,8 +479,9 @@ struct CcResponseExpansion {
             bytes :: cli_cc_read_bounded_response_file(canonical)
             words :: cli_cc_parse_response_words(bytes, raw_path)
             nested_base :: cli_cc_path_parent(canonical) ?? base_dir
-            self.expand(words, nested_base, scope_roots, depth + 1)
-            self.stack.remove_value(canonical)
+            &self.expand(words, nested_base, scope_roots, depth + 1)
+            // The nested expansion pops its own entries, so `canonical` is on top.
+            _ :: &self.stack.pop()
         }
     }
 }
@@ -641,7 +642,7 @@ fn cli_cc_absolutize_lexically(base: String, raw: String, label: String) -> Stri
         if part == "" || part == "." -> next
         if part == ".." {
             if output.len() == 0 -> return Err(CLIToolError.new("{label} path {raw} escapes its scope"))
-            &output.pop()
+            _ :: &output.pop()
             if !absolute && output.len() < base_components.len() -> return Err(CLIToolError.new("{label} path {raw} escapes its scope"))
             next
         }
@@ -702,7 +703,7 @@ fn cli_cc_reject_symlinks_in_path(path: String, label: String) CLIToolError! -[F
 
 // A project-relative path without `.`/`..` components, NULs, or a root.
 fn cli_cc_validate_relative_path(path: String, label: String) CLIToolError! {
-    components :: path.split("/")
+    components :: path.split("/").to_list()
     invalid :: path == "" || cli_cc_has_nul(path) || path.starts_with("/") || path == "." || path.starts_with("./") || components.contains("..")
     if invalid -> return Err(CLIToolError.new("{label} path `{path}` must be project-relative and must not contain `..`"))
 }

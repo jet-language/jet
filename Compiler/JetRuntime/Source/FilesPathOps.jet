@@ -1,14 +1,14 @@
-// Core/files raw path leaves. Rust providers: CoreLib/Top/FSRuntimeOps.rs
+// Core/Files raw path leaves. Rust providers: CoreLib/Top/FSRuntimeOps.rs
 // (fsync/canonicalize/stat_mode/set_mode/temp_dir), CoreLib/Top/Text.rs
 // (remove/list_dir/remove_all), Core/FileHandleOwners.rs (TempDir owner),
 // CoreLib/Top/PathFiles.rs (Path.to_string). Core owns the fault
 // checkpoints; these leaves do the one host step with std's error mapping
 // (jet_std::io_error_at through compiler_fs_errno) and std's CString refusal.
-FILES_O_DIRECTORY_CLOEXEC :: prep { I64{589824} }
+FILES_O_DIRECTORY_CLOEXEC :: I64{589824}
 // O_RDONLY|O_CLOEXEC|O_NOFOLLOW|O_DIRECTORY: std remove_dir_all's openat.
-FILES_TREE_OPEN :: prep { I64{720896} }
-FILES_DIRENT_BYTES :: prep { I64{8192} }
-FILES_AT_FDCWD :: prep { I64{-100} }
+FILES_TREE_OPEN :: I64{720896}
+FILES_DIRENT_BYTES :: I64{8192}
+FILES_AT_FDCWD :: I64{-100}
 
 // ErrorOut32 POSIX code, or 0 for success.
 fn files_out_errno(out: I64) -> I64 {
@@ -443,3 +443,228 @@ fn files_entries_sort(data: I64, count: I64) {
 
 // PathFiles.rs:27: Path.to_string is its Display text.
 #Export(c) fn jet_path_to_string(path: I64) -> I64 { path_handle_render(path) }
+
+// fstat st_mode (kernel x86-64 struct stat: st_mode u32 at 24), or -errno.
+fn files_fd_mode(fd: I64) -> I64 {
+    buffer :: jet_rt_alloc(I64{144}, I64{8})
+    result :: host_call(I64{5}, fd, buffer, I64{0})
+    mode :: rt_text_word(buffer + I64{24}).bit_and(I64{4294967295})
+    jet_rt_free(buffer, I64{144}, I64{8})
+    if (result < I64{0}) -> return result
+    mode
+}
+
+fn files_copy_failed(source: I64, target: I64, code: I64, from: I64, error: I64) -> I64 {
+    if (source >= I64{0}) -> _ := host_call(I64{3}, source, I64{0}, I64{0})
+    if (target >= I64{0}) -> _ := host_call(I64{3}, target, I64{0}, I64{0})
+    compiler_fs_errno(HOST_IO_OP_WRITE, from, code, error)
+}
+
+// Text.rs:1867 std::fs::copy(from, to) on unix: open `from` (a regular file,
+// following links), create/truncate `to` with the source mode, fchmod a
+// regular `to` to that mode, then copy every byte. Every failure is
+// io_error_at(Write, from).
+#Export(c) fn jet_std_fs_copy_raw(from: I64, to: I64, error: I64) -> I64 {
+    if !files_paths_valid(from, to, from, HOST_IO_OP_WRITE, error) -> return I64{0}
+    name :: fd_c_path(from)
+    source := I64{-4}
+    loop source == (I64{-4}) -> source = host_call(I64{2}, name, I64{524288}, I64{0})
+    fd_c_path_drop(name, from)
+    if (source < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, from, -source, error)
+    mode :: files_fd_mode(source)
+    if (mode < I64{0}) -> return files_copy_failed(source, I64{-1}, -mode, from, error)
+    if ((mode.bit_and(I64{61440})) != I64{32768}) {
+        _ := host_call(I64{3}, source, I64{0}, I64{0})
+        return compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_WRITE, from, I64{0}, jet_rt_string_clone(rt_static_text("the source path is neither a regular file nor a symlink to a regular file")), error)
+    }
+    permissions :: mode.bit_and(I64{4095})
+    target_name :: fd_c_path(to)
+    target := I64{-4}
+    // O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC
+    loop target == (I64{-4}) -> target = host_call(I64{2}, target_name, I64{524865}, permissions)
+    fd_c_path_drop(target_name, to)
+    if (target < I64{0}) -> return files_copy_failed(source, I64{-1}, -target, from, error)
+    target_mode :: files_fd_mode(target)
+    if (target_mode < I64{0}) -> return files_copy_failed(source, target, -target_mode, from, error)
+    if ((target_mode.bit_and(I64{61440})) == I64{32768}) {
+        changed := I64{-4}
+        loop changed == (I64{-4}) -> changed = host_call(I64{91}, target, permissions, I64{0})
+        if (changed < I64{0}) -> return files_copy_failed(source, target, -changed, from, error)
+    }
+    buffer :: jet_rt_alloc(I64{65536}, I64{8})
+    failure := I64{0}
+    loop {
+        count :: host_call(I64{0}, source, buffer, I64{65536})
+        if (count == I64{-4}) -> next
+        if (count < I64{0}) {
+            failure = count
+            break
+        }
+        if (count == I64{0}) -> break
+        written :: host_write_all(target, buffer, count)
+        if (written != I64{0}) {
+            failure = written
+            break
+        }
+    }
+    jet_rt_free(buffer, I64{65536}, I64{8})
+    if (failure == HOST_WRITE_ZERO) {
+        _ := host_call(I64{3}, source, I64{0}, I64{0})
+        _ := host_call(I64{3}, target, I64{0}, I64{0})
+        return host_io_other_take(HOST_IO_OP_WRITE, jet_rt_string_clone(from), host_write_zero_text(), error)
+    }
+    if (failure < I64{0}) -> return files_copy_failed(source, target, -failure, from, error)
+    _ := host_call(I64{3}, source, I64{0}, I64{0})
+    _ := host_call(I64{3}, target, I64{0}, I64{0})
+    I64{1}
+}
+
+// std's CString refusal for a two-path call: either path holding NUL fails
+// before the syscall as InvalidInput naming `shown` (io_error_at's path).
+fn files_paths_valid(first: I64, second: I64, shown: I64, operation: I64, error: I64) -> Bool {
+    if !fs_text_has_nul(first) && !fs_text_has_nul(second) -> return true
+    _ := compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, operation, shown, I64{0}, jet_rt_string_clone(rt_static_text("file name contained an unexpected NUL byte")), error)
+    false
+}
+
+// One two-path namespace syscall (rename 82, link 86, symlink 88) failing
+// as io_error_at(operation, shown).
+fn files_two_path_call(number: I64, first: I64, second: I64, shown: I64, operation: I64, error: I64) -> I64 {
+    if !files_paths_valid(first, second, shown, operation, error) -> return I64{0}
+    a :: fd_c_path(first)
+    b :: fd_c_path(second)
+    result :: host_call(number, a, b, I64{0})
+    fd_c_path_drop(a, first)
+    fd_c_path_drop(b, second)
+    if (result < I64{0}) -> return compiler_fs_errno(operation, shown, -result, error)
+    I64{1}
+}
+
+// FSRuntimeOps.rs:88 std::fs::hard_link(from, to): Write errors name `to`.
+#Export(c) fn jet_std_fs_hard_link_raw(from: I64, to: I64, error: I64) -> I64 {
+    files_two_path_call(I64{86}, from, to, to, HOST_IO_OP_WRITE, error)
+}
+
+// FSRuntimeOps.rs:431 std::fs::metadata(from).is_dir(), following links;
+// Read errors name `from`.
+#Export(c) fn jet_std_fs_symlink_directory_raw(from: I64, ok: I64, error: I64) -> I64 {
+    if !compiler_fs_path(from, HOST_IO_OP_READ, error) -> return I64{0}
+    scratch :: jet_rt_alloc(I64{160}, I64{8})
+    jet_fs_stat_raw(from, true, scratch, scratch + I64{128})
+    code :: files_out_errno(scratch + I64{128})
+    mode :: rt_text_word(scratch + I64{16})
+    jet_rt_free(scratch, I64{160}, I64{8})
+    if (code != I64{0}) -> return compiler_fs_errno(HOST_IO_OP_READ, from, code, error)
+    rt_text_put(ok, if ((mode.bit_and(I64{61440})) == I64{16384}) -> I64{1} else -> I64{0})
+    I64{1}
+}
+
+// FSRuntimeOps.rs:437 unix std::os::unix::fs::symlink(from, to); `directory`
+// selects the link kind only on Windows. Write errors name `to`.
+#Export(c) fn jet_std_fs_symlink_raw(from: I64, to: I64, _directory: Bool, error: I64) -> I64 {
+    files_two_path_call(I64{88}, from, to, to, HOST_IO_OP_WRITE, error)
+}
+
+// Files1Raw.rs: the OS leaves of Core's atomic write. Core owns the retry
+// count, temporary naming, fault checkpoints, cleanup and ordering; these do
+// one host step each with io_error_at's mapping. The temporary is a held
+// descriptor (HostHeldDirectory.jet) that Core closes with __atomic_close.
+#Export(c) fn jet_files_atomic_pid_raw() -> I64 { jet_std_os_pid() }
+
+// cfg!(windows): this runtime is the Linux pack.
+#Export(c) fn jet_files_path_windows_raw() -> Bool { false }
+
+// OpenOptions::new().create_new(true).write(true).open(candidate): open
+// O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, mode 0666 before the umask, EINTR
+// retried. Errors name `target`. A taken name is AlreadyExists, the one kind
+// Core's write_atomic retries with the next temporary name.
+#Export(c) fn jet_files_atomic_reserve_raw(target: I64, candidate: I64, ok: I64, error: I64) -> I64 {
+    if !files_paths_valid(candidate, candidate, target, HOST_IO_OP_WRITE, error) -> return I64{0}
+    name :: fd_c_path(candidate)
+    fd := I64{-4}
+    loop {
+        fd = host_call(I64{2}, name, I64{524481}, I64{438})
+        if (fd != I64{-4}) -> break
+    }
+    fd_c_path_drop(name, candidate)
+    if (fd == I64{-17}) -> return compiler_fs_error(HOST_IO_KIND_ALREADY_EXISTS, HOST_IO_OP_WRITE, target, I64{17}, host_errno_cause(I64{17}), error)
+    if (fd < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, target, -fd, error)
+    rt_text_store(ok, jet_int_owned_from_i64(fs_held_hold(fd, jet_rt_string_clone(candidate))))
+    I64{1}
+}
+
+// The target's permissions are read (following links) before the first
+// write; a missing or unreadable target has none to copy. Then write_all
+// (Write), set_permissions (fchmod, Write) and sync_all (fsync, Flush), all
+// naming `candidate` and EINTR retried. A released handle is Closed.
+#Export(c) fn jet_files_atomic_finish_raw(handle: I64, data: I64, length: I64, target: I64, candidate: I64, error: I64) -> I64 {
+    key :: host_native_int(handle)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    mode := I64{-1}
+    if !fs_text_has_nul(target) {
+        scratch :: jet_rt_alloc(I64{160}, I64{8})
+        jet_fs_stat_raw(target, true, scratch, scratch + I64{128})
+        if (files_out_errno(scratch + I64{128}) == I64{0}) -> mode = (rt_text_word(scratch + I64{16})).bit_and(I64{4095})
+        jet_rt_free(scratch, I64{160}, I64{8})
+    }
+    state :: fs_held_state(key)
+    if (state == I64{0}) -> return compiler_fs_error(HOST_IO_KIND_CLOSED, HOST_IO_OP_WRITE, candidate, I64{0}, jet_rt_string_clone(rt_static_text("the atomic temporary file is already closed")), error)
+    fd :: fd_word(state, I64{8})
+    temporary :: RT_HOST_U8_STRIDE != I64{1} && length != I64{0}
+    packed :: if temporary -> jet_rt_alloc(length, I64{8}) else -> data
+    if temporary -> net_copy_packed(data, length, packed)
+    written :: host_write_all(fd, packed, length)
+    if temporary -> jet_rt_free(packed, length, I64{8})
+    result := I64{1}
+    if (written == HOST_WRITE_ZERO) {
+        result = host_io_other_take(HOST_IO_OP_WRITE, jet_rt_string_clone(candidate), host_write_zero_text(), error)
+    } else if (written < I64{0}) {
+        result = compiler_fs_errno(HOST_IO_OP_WRITE, candidate, -written, error)
+    } else {
+        failure := I64{0}
+        if (mode >= I64{0}) {
+            failure = I64{-4}
+            loop failure == (I64{-4}) -> failure = host_call(I64{91}, fd, mode, I64{0})
+        }
+        if (failure < I64{0}) {
+            result = compiler_fs_errno(HOST_IO_OP_WRITE, candidate, -failure, error)
+        } else {
+            synced := I64{-4}
+            loop synced == (I64{-4}) -> synced = host_call(I64{74}, fd, I64{0}, I64{0})
+            if (synced < I64{0}) -> result = compiler_fs_errno(HOST_IO_OP_FLUSH, candidate, -synced, error)
+        }
+    }
+    jet_fd_drop_raw(state)
+    result
+}
+
+// std::fs::remove_file(path): Write errors name `path`.
+#Export(c) fn jet_files_atomic_remove_raw(path: I64, error: I64) -> I64 {
+    if !compiler_fs_path(path, HOST_IO_OP_WRITE, error) -> return I64{0}
+    name :: fd_c_path(path)
+    result :: host_call(I64{87}, name, I64{0}, I64{0})
+    fd_c_path_drop(name, path)
+    if (result < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, path, -result, error)
+    I64{1}
+}
+
+// std::fs::rename(candidate, target): Write errors name `target`.
+#Export(c) fn jet_files_atomic_rename_raw(candidate: I64, target: I64, error: I64) -> I64 {
+    files_two_path_call(I64{82}, candidate, target, target, HOST_IO_OP_WRITE, error)
+}
+
+// File::open(parent) then sync_all: open O_RDONLY|O_CLOEXEC and fsync, both
+// EINTR retried; either failure is Flush naming `target`.
+#Export(c) fn jet_files_atomic_sync_parent_raw(parent: I64, target: I64, error: I64) -> I64 {
+    if !files_paths_valid(parent, parent, target, HOST_IO_OP_FLUSH, error) -> return I64{0}
+    name :: fd_c_path(parent)
+    fd := I64{-4}
+    loop fd == (I64{-4}) -> fd = host_call(I64{2}, name, I64{524288}, I64{0})
+    fd_c_path_drop(name, parent)
+    if (fd < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_FLUSH, target, -fd, error)
+    result := I64{-4}
+    loop result == (I64{-4}) -> result = host_call(I64{74}, fd, I64{0}, I64{0})
+    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    if (result < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_FLUSH, target, -result, error)
+    I64{1}
+}

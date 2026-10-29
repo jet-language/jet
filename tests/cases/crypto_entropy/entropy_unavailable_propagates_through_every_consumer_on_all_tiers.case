@@ -29,16 +29,6 @@ when bytes_default.stdout !~ "typed failure": stderr: ~ "could not provide crypt
 exit: == bytes_aot
 stdout: == bytes_aot
 stderr: == bytes_aot
-step bytes_interpret: {work}/no-entropy {jet} run --interpret bytes.jet
-env: JET_STORE_DIR={work}/cache-bytes/build
-exit: any # original status is tuple component, not success-only
-stdout: ^= "before\n" # original starts_with
-stdout: !~ "drew" # original never produces entropy-backed value
-when bytes_interpret.stdout !~ "typed failure": exit: nonzero
-when bytes_interpret.stdout !~ "typed failure": stderr: ~ "could not provide cryptographic randomness" # original typed-failure OR nonzero+error fallback
-exit: == bytes_aot
-stdout: == bytes_aot
-stderr: == bytes_aot
 step: jet build uuid.jet
 env: JET_STORE_DIR={work}/cache-uuid/aot
 exit: 0
@@ -59,16 +49,6 @@ when uuid_default.stdout !~ "typed failure": stderr: ~ "could not provide crypto
 exit: == uuid_aot
 stdout: == uuid_aot
 stderr: == uuid_aot
-step uuid_interpret: {work}/no-entropy {jet} run --interpret uuid.jet
-env: JET_STORE_DIR={work}/cache-uuid/build
-exit: any # original status is tuple component, not success-only
-stdout: ^= "before\n" # original starts_with
-stdout: !~ "drew" # original never produces entropy-backed value
-when uuid_interpret.stdout !~ "typed failure": exit: nonzero
-when uuid_interpret.stdout !~ "typed failure": stderr: ~ "could not provide cryptographic randomness" # original typed-failure OR nonzero+error fallback
-exit: == uuid_aot
-stdout: == uuid_aot
-stderr: == uuid_aot
 step: jet build keygen.jet
 env: JET_STORE_DIR={work}/cache-keygen/aot
 exit: 0
@@ -86,16 +66,6 @@ stdout: ^= "before\n" # original starts_with
 stdout: !~ "drew" # original never produces entropy-backed value
 when keygen_default.stdout !~ "typed failure": exit: nonzero
 when keygen_default.stdout !~ "typed failure": stderr: ~ "could not provide cryptographic randomness" # original typed-failure OR nonzero+error fallback
-exit: == keygen_aot
-stdout: == keygen_aot
-stderr: == keygen_aot
-step keygen_interpret: {work}/no-entropy {jet} run --interpret keygen.jet
-env: JET_STORE_DIR={work}/cache-keygen/build
-exit: any # original status is tuple component, not success-only
-stdout: ^= "before\n" # original starts_with
-stdout: !~ "drew" # original never produces entropy-backed value
-when keygen_interpret.stdout !~ "typed failure": exit: nonzero
-when keygen_interpret.stdout !~ "typed failure": stderr: ~ "could not provide cryptographic randomness" # original typed-failure OR nonzero+error fallback
 exit: == keygen_aot
 stdout: == keygen_aot
 stderr: == keygen_aot

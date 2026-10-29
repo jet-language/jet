@@ -1,4 +1,10 @@
 // Claims ported from crates/jet-pkg-model/src/RefSpec.rs #[cfg(test)].
+use jet_pkg_model.[
+    ChannelPolicy, ChannelRef, MigratedRef, NamedSourceDecl, ProviderKind, ProviderRef, RefError,
+    RefSource, RefSpec, SourceTable, WorkspaceIndex, WorkspaceMember, pkg_canonical_locked_ref,
+    pkg_with_default_source,
+]
+use jetpack_foundation.[REF_PROVIDER_AT]
 
 fn pkg_test_ref_error(raw: String) -> RefError {
     if RefSpec.classify(raw) == {
@@ -212,12 +218,14 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
     assert(!RefSource.is_builtin("stable"))
 }
 
+// Rust: tests/workspace.rs:243
 #Test("bare form resolves unique member") {
     spec :: pkg_test_classify_workspace("logging", SourceTable.empty(), pkg_test_ws_index())
     assert_eq(spec.source, RefSource.Path)
     assert_eq(spec.package, "infra/logging")
 }
 
+// Rust: tests/workspace.rs:243
 #Test("path form resolves member") {
     // Path form matches the normalized relative path (`./` trimmed).
     spec :: pkg_test_classify_workspace("infra/logging", SourceTable.empty(), pkg_test_ws_index())
@@ -243,6 +251,7 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
     }
 }
 
+// Rust: tests/workspace.rs:269
 #Test("ambiguous bare member is E1230 and lists candidates") {
     index :: WorkspaceIndex.from_members([WorkspaceMember]{
         {name: "logging", path: "infra/logging"},

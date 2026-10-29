@@ -83,7 +83,7 @@ fn int_new(cap: I64) -> I64 {
     // Checking the full byte size before multiplication preserves allocator
     // failure behavior without allowing a wrapped undersized allocation.
     if (cap <= I64{0} || cap > I64{2305843009213693951}) { rt_trap_invalid_box_layout() }
-    node :: jet_rt_alloc(I64{48}, I64{8})
+    node :: jet_rt_alloc_8(I64{48})
     limbs :: jet_rt_alloc(cap * I64{4}, I64{4})
     int_node_init(node, limbs, cap)
     node
@@ -104,7 +104,7 @@ fn int_try_new(cap: I64, requested: I64) -> I64 {
     bytes :: cap * I64{4}
     limbs :: alloc_try_reserved(bytes, I64{4})
     if (limbs == I64{0}) {
-        jet_rt_free(node, I64{48}, I64{8})
+        jet_rt_free_8(node, I64{48})
         int_store(requested, bytes)
         return I64{0}
     }
@@ -121,7 +121,7 @@ fn int_set(node: I64, index: I64, limb: I64) {
 fn int_free_node(node: I64) {
     cap :: int_load(node + I64{40})
     if (cap != I64{0}) { jet_rt_free(int_load(node + I64{24}), cap * I64{4}, I64{4}) }
-    jet_rt_free(node, I64{48}, I64{8})
+    jet_rt_free_8(node, I64{48})
 }
 
 fn int_discard(value: I64) {
@@ -368,8 +368,14 @@ fn int_try_add(left: I64, right: I64, output: I64, requested: I64, probed: I64) 
     int_tag(node)
 }
 
+// The absent word of an inline `Int?` (JetIR Build.jet IR_OPTION_INT_NONE):
+// 2^62 with no node. No Int is that word: an inline Int lies in
+// [-2^62, 2^62 - 1] and int_tag only tags a node allocation's non-null
+// address, so clone and drop pass it by as they pass an inline Int.
+INT_OPTION_NONE :: I64{4611686018427387904}
+
 #Export(c) fn jet_rt_int_clone(value: I64) -> I64 {
-    if int_inline(value) -> return value
+    if int_inline(value) || value == INT_OPTION_NONE -> return value
     node :: int_node(value)
     loop {
         refs :: int_load(node)
@@ -389,7 +395,7 @@ fn int_try_add(left: I64, right: I64, output: I64, requested: I64, probed: I64) 
 // no hazard => immediate free; hazard => retired_next list, reclaimed when the
 // last reader clears its guard. Never create a second Jet retirement list.
 #Export(c) fn jet_rt_int_drop(value: I64) {
-    if int_inline(value) {
+    if int_inline(value) || value == INT_OPTION_NONE {
         return
     }
     node :: int_node(value)
@@ -874,9 +880,7 @@ fn int_bitwise(left: I64, right: I64, kind: I64) -> I64 {
 }
 
 #Export(c) fn jet_int_owned_to_f64(value: I64) -> Float {
-    if int_inline(value) -> return Float{value}
-    bound :: if int_negative(value) -> U64{9223372036854775808} else -> U64{9223372036854775807}
-    if int_fits(value, bound) -> return Float{int_word(value)}
+    if int_inline(value) -> return int_inline_to_f64(value)
     length :: int_len(value)
     if (length > I64{35} || (length == I64{35} && int_limb(value, I64{34}) >= I64{1000})) {
         infinity :: Float{1.0} / Float{0.0}
@@ -921,4 +925,151 @@ fn int_bitwise(left: I64, right: I64, kind: I64) -> I64 {
         }
     }
     return if (int_negative(value)) -> -result else -> result
+}
+
+// The nearest Float to an inline Int, ties to even (Rust `as f64`);
+// `Float{n}` itself only takes a word the Float holds exactly.
+fn int_inline_to_f64(value: I64) -> Float {
+    magnitude :: if (value < I64{0}) -> -value else -> value
+    width :: int_word_bits(magnitude)
+    if (width <= I64{53}) -> return Float{value}
+    dropped :: width - I64{53}
+    mantissa := magnitude >> dropped
+    lost :: magnitude.bit_and((I64{1} << dropped) - I64{1})
+    half :: I64{1} << (dropped - I64{1})
+    if (lost > half || (lost == half && mantissa.bit_and(I64{1}) != I64{0})) -> mantissa += I64{1}
+    result :: int_scale_f64(Float{mantissa}, dropped)
+    if (value < I64{0}) -> -result else -> result
+}
+
+// JetBigInt::ratio_to_f64: `left / right` rounded once to the nearest
+// binary64, ties to even, with gradual underflow; `right` is not zero. The
+// magnitudes' quotient is taken to 55..62 bits with a sticky remainder, so
+// the only rounding is the final one.
+fn int_ratio_to_f64(left: I64, right: I64) -> Float {
+    if (left == I64{0}) -> return Float{0.0}
+    limit :: I64{9007199254740992}
+    if (int_inline(left) && int_inline(right) && left <= limit && left >= -limit && right <= limit && right >= -limit) -> return Float{left} / Float{right}
+    negative :: int_negative(left) != int_negative(right)
+    numerator :: int_magnitude(left)
+    denominator :: int_magnitude(right)
+    shift := I64{58} - int_bits_estimate(numerator) + int_bits_estimate(denominator)
+    word := I64{0}
+    sticky := false
+    settled := false
+    loop !settled {
+        scaled :: if (shift >= I64{0}) -> jet_int_shl(numerator, shift, I64{0}, I64{0}, I64{0}) else -> jet_rt_int_clone(numerator)
+        divisor :: if (shift >= I64{0}) -> jet_rt_int_clone(denominator) else -> jet_int_shl(denominator, -shift, I64{0}, I64{0}, I64{0})
+        whole :: jet_int_div(scaled, divisor, I64{0}, I64{0}, I64{0})
+        rest :: jet_int_rem(scaled, divisor, I64{0}, I64{0}, I64{0})
+        jet_rt_int_drop(scaled)
+        jet_rt_int_drop(divisor)
+        width :: if int_inline(whole) -> int_word_bits(whole) else -> int_bits_estimate(whole)
+        if (width >= I64{55} && width <= I64{62}) {
+            word = whole
+            sticky = rest != I64{0}
+            settled = true
+        } else {
+            shift += I64{58} - width
+        }
+        if !settled -> jet_rt_int_drop(whole)
+        jet_rt_int_drop(rest)
+    }
+    jet_rt_int_drop(numerator)
+    jet_rt_int_drop(denominator)
+    width :: int_word_bits(word)
+    // floor(log2(|left / right|)).
+    exponent :: width - I64{1} - shift
+    infinity :: Float{1.0} / Float{0.0}
+    if (exponent > I64{1023}) -> return if negative -> -infinity else -> infinity
+    precision :: if (exponent < I64{-1022}) -> exponent + I64{1075} else -> I64{53}
+    if (precision < I64{0}) -> return if negative -> -Float{0.0} else -> Float{0.0}
+    dropped :: width - precision
+    mantissa := word >> dropped
+    lost :: word.bit_and((I64{1} << dropped) - I64{1})
+    half :: I64{1} << (dropped - I64{1})
+    if (lost > half || (lost == half && (sticky || mantissa.bit_and(I64{1}) != I64{0}))) -> mantissa += I64{1}
+    result :: int_scale_f64(Float{mantissa}, dropped - shift)
+    if negative -> -result else -> result
+}
+
+fn int_magnitude(value: I64) -> I64 {
+    if int_negative(value) -> return jet_int_sub(I64{0}, value)
+    jet_rt_int_clone(value)
+}
+
+// The bit width of a non-negative word.
+fn int_word_bits(value: I64) -> I64 {
+    bits := I64{0}
+    rest := value
+    loop rest > (I64{0}) {
+        rest >>= I64{1}
+        bits += I64{1}
+    }
+    bits
+}
+
+// The bit width of a non-negative Int from its decimal digit count, within
+// 4 bits either way.
+fn int_bits_estimate(value: I64) -> I64 {
+    length :: int_len(value)
+    top := int_limb(value, length - I64{1})
+    digits := I64{9} * (length - I64{1})
+    loop top > (I64{0}) {
+        top = top /% I64{10}
+        digits += I64{1}
+    }
+    digits * I64{33219} /% I64{10000}
+}
+
+// value * 2^power, exact while the result is representable: each partial
+// product lies between value and the result.
+fn int_scale_f64(value: Float, power: I64) -> Float {
+    result := value
+    scale := if (power < I64{0}) -> Float{0.5} else -> Float{2.0}
+    remaining := if (power < I64{0}) -> -power else -> power
+    loop remaining > (I64{0}) {
+        if ((remaining.bit_and(I64{1})) != I64{0}) { result *= scale }
+        remaining >>= I64{1}
+        if (remaining != I64{0}) { scale *= scale }
+    }
+    result
+}
+
+// Core/InlineRange.rs jet_inline_range_from_int through the C adapter: the
+// borrowed exact Int checked against the inline refinement Int(lo..hi), the
+// carrier unchanged. An Int past I64 is outside every such interval, so it
+// takes the same Err text rather than the seed's narrowing message.
+#Export(c) fn jet_inline_range_from_int(value: I64, lo: I64, hi: I64, output: I64, error: I64) -> I64 {
+    low :: host_native_int(lo)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    high :: host_native_int(hi)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    inside := false
+    raw := value
+    if int_inline(value) {
+        inside = raw >= low && raw <= high
+    } else {
+        bound :: if int_negative(value) -> U64{9223372036854775808} else -> U64{9223372036854775807}
+        if int_fits(value, bound) {
+            raw = int_word(value)
+            inside = raw >= low && raw <= high
+        }
+    }
+    if inside {
+        int_store(output, jet_int_owned_from_i64(raw))
+        return I64{1}
+    }
+    message :: rt_text_builder_with_capacity(I64{64})
+    jet_rt_string_builder_push(message, rt_static_text("value is outside Int("))
+    low_text :: jet_rt_i64_to_string(low)
+    jet_rt_string_builder_push(message, low_text)
+    jet_rt_string_drop(low_text)
+    jet_rt_string_builder_push(message, rt_static_text(".."))
+    high_text :: jet_rt_i64_to_string(high)
+    jet_rt_string_builder_push(message, high_text)
+    jet_rt_string_drop(high_text)
+    jet_rt_string_builder_push(message, rt_static_text(")"))
+    int_store(error, message)
+    I64{0}
 }

@@ -1,10 +1,10 @@
-CORE_CALL_COVERAGE_SEMA :: prep { 1 }
-CORE_CALL_COVERAGE_TIR_SUBSET :: prep { 2 }
-CORE_CALL_COVERAGE_TIR_EVAL :: prep { 4 }
-CORE_CALL_COVERAGE_AOT :: prep { 8 }
-CORE_CALL_COVERAGE_INTERPRETER :: prep { 16 }
-CORE_CALL_COVERAGE_COMPTIME :: prep { 32 }
-CORE_CALL_COVERAGE_KNOWN :: prep { 63 }
+CORE_CALL_COVERAGE_SEMA :: 1
+CORE_CALL_COVERAGE_TIR_SUBSET :: 2
+CORE_CALL_COVERAGE_TIR_EVAL :: 4
+CORE_CALL_COVERAGE_AOT :: 8
+CORE_CALL_COVERAGE_INTERPRETER :: 16
+CORE_CALL_COVERAGE_COMPTIME :: 32
+CORE_CALL_COVERAGE_KNOWN :: 63
 
 enum Effect { Net FS IO DB Time Rand Env Exec Log GPU Panic FFI Browser Secret Mem }
 
@@ -85,7 +85,7 @@ struct CoreCallRecord {
     native_int_result: Bool
     ui_capabilities: [String]
     marker: CoreMarkerApplication?
-    authority: MIRAuthorityDecision?
+    authority: AuthorityDecision?
 }
 
 enum CoreCallProjectionError {
@@ -121,7 +121,7 @@ fn core_call_source_member(row: CoreCallRecord) -> String? Never! {
     Val(row.source_target ?? row.member)
 }
 
-// The same checked boundary fact used by legacy Core MIR and source forwarding.
+// The checked authority boundary sema applies to a `core.plugin.load` argument.
 fn core_call_authority_boundary_at(row: CoreCallRecord, index: Int) -> Bool Never! {
     row.module_name == "core.plugin" && row.member == "load" && index == 1
 }
@@ -157,13 +157,6 @@ fn core_call_capability_is_well_formed(capability: CoreCapabilityContract) -> Bo
     }
 }
 
-fn core_call_symbol_name(symbol: CoreCallSymbol) -> String Never! {
-    if symbol == {
-        .Prelude(name) | .Rust(name) -> name
-        .SourceOwned -> panic("source-owned Core declarations have no host symbol")
-    }
-}
-
 fn core_call_is_receiver(row: CoreCallRecord) -> Bool Never! {
     row.receiver_types.len() > 0
 }
@@ -176,10 +169,6 @@ fn core_call_key(row: CoreCallRecord) -> String Never! {
 
 fn core_call_accepts_arity(row: CoreCallRecord, count: Int) -> Bool Never! {
     count >= row.signature.arity && count <= row.signature.max_arity
-}
-
-fn core_call_has_direct_symbol(row: CoreCallRecord) -> Bool Never! {
-    row.aot_direct && !core_call_is_receiver(row) && core_call_symbol_name(row.symbol) != ""
 }
 
 fn core_call_in(rows: [CoreCallRecord], module_name: String, member: String) -> CoreCallRecord? {

@@ -1,0 +1,31 @@
+# tests/checked_text_crossings.rs::plain_string_cannot_cross_checked_text_boundaries at tests/checked_text_crossings.rs:39; hand-port
+# Each boundary is its own program (the original DECLS + body); each must be rejected with a checked-text type-boundary code.
+# The foreign boundary is plain_string_cannot_cross_checked_text_boundaries_foreign.case.
+# The original DECLS declare `enum TextError`; the failure-domain law (E2417) now needs `#Error enum TextError`.
+fixture: plain_string_cannot_cross_checked_text_boundaries.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+# checked text parameter
+step: jet check parameter/main.jet
+exit: 1
+stderr: ~any "[E0112]" "[E0108]" "[E0113]" "[E0905]" "[E0702]" "[E3203]" # original: some checked-text type-boundary diagnostic
+# checked text field
+step: jet check field/main.jet
+exit: 1
+stderr: ~any "[E0112]" "[E0108]" "[E0113]" "[E0905]" "[E0702]" "[E3203]" # original: some checked-text type-boundary diagnostic
+# checked text collection
+step: jet check collection/main.jet
+exit: 1
+stderr: ~any "[E0112]" "[E0108]" "[E0113]" "[E0905]" "[E0702]" "[E3203]" # original: some checked-text type-boundary diagnostic
+# checked text generic
+step: jet check generic/main.jet
+exit: 1
+stderr: ~any "[E0112]" "[E0108]" "[E0113]" "[E0905]" "[E0702]" "[E3203]" # original: some checked-text type-boundary diagnostic
+# checked text return
+step: jet check return/main.jet
+exit: 1
+stderr: ~any "[E0112]" "[E0108]" "[E0113]" "[E0905]" "[E0702]" "[E3203]" # original: some checked-text type-boundary diagnostic
+# checked text trait method
+step: jet check trait_method/main.jet
+exit: 1
+stderr: ~any "[E0112]" "[E0108]" "[E0113]" "[E0905]" "[E0702]" "[E3203]" # original: some checked-text type-boundary diagnostic

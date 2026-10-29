@@ -1,0 +1,33 @@
+# tests/dev_parts/routine.rs::jit_1216_adversarial_regressions at tests/dev_parts/routine.rs:3737; hand-port (each JET_1216_ADVERSARIAL_CASE child process is one fixture directory)
+fixture: jit_1216_adversarial_regressions.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step oob: jet run run.jet
+cwd: oob
+exit: 70
+stderr: ~ "Stop [E3010]" # original predicate: stderr.contains
+stderr: ~ "the list has 1 items, so position 4 doesn't exist" # original predicate: stderr.contains
+stderr: !~ "E0953" # original predicate: no comptime voice
+stderr: !~ "comptime" # original predicate: no comptime voice
+step stm_return: jet run run.jet
+cwd: stm_return
+exit: any # original asserts only stdout
+stdout: = jit_1216_adversarial_regressions.1.out
+step generator: jet run run.jet
+cwd: generator
+exit: any # original asserts only stdout
+stdout: = jit_1216_adversarial_regressions.2.out
+step raw_alias: jet run run.jet
+cwd: raw_alias
+exit: any # original asserts only stdout
+stdout: = jit_1216_adversarial_regressions.3.out
+step option_minus_one: jet run run.jet
+cwd: option_minus_one
+exit: any # original asserts only stdout
+stdout: = jit_1216_adversarial_regressions.4.out
+step sum_bigint: jet run run.jet
+cwd: sum_bigint
+exit: any # original asserts only stdout
+stdout: = jit_1216_adversarial_regressions.5.out

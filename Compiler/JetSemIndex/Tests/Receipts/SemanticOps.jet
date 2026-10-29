@@ -1,4 +1,4 @@
-use jet_foundation.[mir_sha256_hex]
+use jet_foundation.[sha256_hex]
 use core.testing as semops_testing
 
 // Rust SemanticOps.rs:244–288 and tests/semantic_ops.rs:16–76 checked oracles.
@@ -26,8 +26,8 @@ fn semops_test_semantic_op_producer_and_blame_consumer_use_checked_facts(root: S
     assert(found)
     receipt_dir :: semops_files.join(root, ".jet/codemods")
     semops_files.create_dir_all(receipt_dir) ?? panic("create receipt directory")
-    before_hash :: mir_sha256_hex(semops_test_inline_before_source())
-    after_hash :: mir_sha256_hex(semops_test_inline_after_source())
+    before_hash :: sha256_hex(semops_test_inline_before_source())
+    after_hash :: sha256_hex(semops_test_inline_after_source())
     raw :: `{"semantic_ops":[{"kind":"rename","from":"report","to":"summarize"}],"files":[{"path":"run.jet","before_hash":"BEFORE","after_hash":"AFTER"}]}`.replace("BEFORE", before_hash).replace("AFTER", after_hash)
     semops_files.write(semops_files.join(receipt_dir, "rename.log.json"), raw) ?? panic("write receipt")
     found_receipt := false
@@ -183,8 +183,8 @@ fn semops_test_operation(kind: String, to: String?) -> SemanticOp Never! {
     path :: semops_files.join(child, "run.jet")
     other :: semops_files.join(child, "other.jet")
     source :: "fn summarize() -[]> Int {{ return 1 }}\n"
-    before_hash :: mir_sha256_hex("fn report() -[]> Int {{ return 1 }}\n")
-    after_hash :: mir_sha256_hex(source)
+    before_hash :: sha256_hex("fn report() -[]> Int {{ return 1 }}\n")
+    after_hash :: sha256_hex(source)
     semops_files.create_dir_all(child) ?? panic("create source directory")
     semops_files.write(path, source) ?? panic("write source")
     semops_files.write(other, source) ?? panic("write other source")
@@ -219,7 +219,7 @@ fn semops_test_operation(kind: String, to: String?) -> SemanticOp Never! {
     assert_eq(semantic_ops_for_file(other, after_hash).len(), 0)
     assert_eq(semantic_ops_for_file(path, before_hash).len(), 3)
     semops_files.write(path, "fn hand_edit() {{}}\n") ?? panic("write hand edit")
-    assert_eq(semantic_ops_for_file(path, mir_sha256_hex("fn hand_edit() {{}}\n")).len(), 0)
+    assert_eq(semantic_ops_for_file(path, sha256_hex("fn hand_edit() {{}}\n")).len(), 0)
     semops_files.remove_all(root) ?? panic("remove receipt fixture")
 }
 #Test("semantic_receipt_protocol_limits_count_bytes_and_container_depth") {

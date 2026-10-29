@@ -1,12 +1,12 @@
 E1803
 
 What this means:
-  Application authority is undecided or denies a required effect; the report names `required_effects`, `granted_effects`, `denied_effects`, and `authority` separately.
+  Application authority is undecided or denies a required effect; the Why line says in one sentence what the program tried to do and which policy has not allowed it.
 
 Why Jet enforces it:
-  The effect projection distinguishes sema requirements from policy grants, denials, and the policy identity; execution stops before host state changes.
+  Execution stops before host state changes. Every program already allows printing, reading input, allocating memory, and reading the program's own arguments; a written `allow` row adds any other effect, and only `deny` takes a right away. `--json` carries the raw `required_effects`, `granted_effects`, `denied_effects`, and `authority` facts.
 
 How to fix it:
-  Add `allow: [IO, Mem.Alloc, Exec]` under `authority.holds` in `package.jet` (use every value in this report's `undecided_effects` list). A program with no `package.jet` declares its complete required row, such as `allow: [FS, IO]`, under `authority.holds` in a leading `package { … }` block of its entry file; `jet fix --all` inserts that block. Otherwise deny effects deliberately, or approve the exact operation once or for the project in an interactive terminal.
+  Add the effects the report names under `authority` in `package.jet`, for example `allow: [FS]`; the row adds to what every program already holds. A program with no `package.jet` declares that row in a leading `package { … }` block of its entry file; `jet fix --all` inserts that block. For one run, `--allow=<RIGHTS>` grants the named effects and `-A` (`--allow-all`) grants every effect; a file whose first line is `#!/usr/bin/env jet` is a script and always runs that way. Otherwise deny effects deliberately, or approve the exact operation once or for the project in an interactive terminal.
 
 This explanation comes from jet's diagnostics reference.

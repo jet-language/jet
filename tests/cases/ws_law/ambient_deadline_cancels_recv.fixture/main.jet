@@ -1,0 +1,22 @@
+use core.net as net
+use core.net.ws as ws
+use core.http.server as server
+fn handle(req: HTTPRequest) -> HTTPResponse HTTPError! {
+    sock :: ws.upgrade(req) ?? panic("upgrade")
+    message :: sock.recv() ?? panic("recv")
+    text :: message.text() ?? panic("text")
+    sock.send_text("echo:{text}") ?? panic("send")
+    return Ok(server.response(500, "unused"))
+}
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    addr :: listener.local_addr() ?? panic("address")
+    mux :: server.mux()
+    mux.get("/live", (req: HTTPRequest) -> handle(req))
+    serving :: task { server.serve_once_listener(listener, mux) ?? panic("serve") }
+    client :: ws.connect("ws://{addr}/live") ?? panic("connect")
+    client.send_text("0123456789") ?? panic("client send")
+    reply :: client.recv() ?? panic("client recv")
+    print(reply.text() ?? panic("reply text"))
+    ^serving.join() ?? panic("server join")
+}

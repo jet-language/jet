@@ -1,0 +1,709 @@
+package {
+    name: "core.tui"
+    version: "0.0.1"
+    edition: "2026"
+    description: "Terminal UI layout, color, and events."
+    license: "MIT"
+    outputs: {
+        tui: .Library{ entry: tui }
+    }
+}
+use core.sys as tui_sys
+use core as core
+use core.ui as ui
+use core.ui.[Rect, UINode]
+use core.math as math
+
+// core.tui — the portable terminal presentation layer.
+//
+// Models and layout are pure. Environment and stdout-terminal facts cross
+// provider seams; drawing remains owned by the selected UI backend.
+
+enum TUIEvent {
+    Key(code: String, modifiers: Int)
+    Resize(size: ui.Size)
+    Timer(id: String, elapsed_ms: Int)
+    IO(channel: String, payload: [U8])
+    Focus(focused: Bool)
+    Interrupt
+    Close
+}
+
+enum TUIColorProfile {
+    ANSI16
+    ANSI256
+    TrueColor
+    ASCII
+}
+
+enum TUIColor {
+    ANSI16(Int)
+    ANSI256(Int)
+    RGB(red: Int, green: Int, blue: Int)
+}
+
+enum TUIDirection {
+    Horizontal
+    Vertical
+}
+
+enum TUIConstraint {
+    Length(Float)
+    Min(Float)
+    Max(Float)
+    Percent(Float)
+    Fill(Float)
+}
+
+struct TUICapabilities {
+    profile: TUIColorProfile
+    color: Bool
+    unicode: Bool
+    mouse: Bool
+    resize: Bool
+    clipboard: Bool
+    width: Int
+    height: Int
+}
+
+struct TUIStyle {
+    foreground: TUIColor?
+    background: TUIColor?
+    bold: Bool
+    dim: Bool
+    underline: Bool
+}
+
+struct TUIListState {
+    selected: Int
+    offset: Int
+}
+
+fn capabilities() -> TUICapabilities Never! {
+    capabilities_from_inputs(capability_inputs())
+}
+
+// Ui.rs:499-543 samples host facts. Runtime leaves do not choose a
+// presentation profile, parse dimensions, or apply the NO_COLOR override.
+struct TUICapabilityInputs {
+    columns: String?
+    lines: String?
+    term: String?
+    color_term: String?
+    ascii: Bool
+    forced: Bool
+    no_color: Bool
+    terminal: Bool
+    usize_max: U64
+}
+
+fn capability_env_bytes(name: String) -> [U8]? Never! {
+    result := [U8]?{None}
+    #Unsafe("Core TUI reads owned encoded OS environment bytes from the current host; no UTF-8 assumption") {
+        result = core.tui.__cap_env_bytes(name)
+    }
+    result
+}
+
+fn capability_env_text(name: String) -> String? Never! {
+    raw :: capability_env_bytes(name) ?? return None
+    capability_text(raw)
+}
+
+fn capability_text(raw: [U8]) -> String? Never! {
+    Val(String.from_bytes(raw) ?? return None)
+}
+
+fn capability_env_flag(name: String) -> Bool Never! {
+    capability_raw_flag(capability_env_bytes(name))
+}
+
+fn capability_raw_flag(value: [U8]?) -> Bool Never! {
+    if value == .Val(raw) -> return raw != [U8]{48}
+    false
+}
+
+fn capability_stdout_terminal() -> Bool Never! {
+    result := false
+    #Unsafe("Core TUI samples the same stdout terminal fact consumed by terminal style/progress") {
+        result = core.term.__stdout_terminal()
+    }
+    result
+}
+
+fn capability_inputs() -> TUICapabilityInputs Never! {
+    // env::var: invalid UTF-8 is absent (Ui.rs:500,516-519).
+    columns :: capability_env_text("COLUMNS")
+    lines :: capability_env_text("LINES")
+    term :: capability_env_text("TERM")
+    color_term :: capability_env_text("COLORTERM")
+    // env::var_os: presence and raw != "0" (Ui.rs:508,520,534-535).
+    ascii :: capability_env_flag("JET_TUI_ASCII")
+    forced :: capability_env_flag("FORCE_COLOR")
+    no_color :: capability_env_bytes("NO_COLOR") != None
+    terminal :: capability_stdout_terminal()
+    TUICapabilityInputs{
+        columns: columns, lines: lines, term: term, color_term: color_term,
+        ascii: ascii, forced: forced, no_color: no_color, terminal: terminal,
+        usize_max: tui_sys.usize_max()
+    }
+}
+
+fn capability_dimension(text: String?, fallback: Int, maximum: U64) -> Int Never! {
+    value :: text ?? return fallback
+    raw :: value.bytes()
+    at := 0
+    if raw.len() > 0 && raw[0] == (U8{43}) -> at = 1
+    if at == raw.len() -> return fallback
+    parsed := U64{0}
+    loop at < raw.len() {
+        byte :: raw[at]
+        if byte < (U8{48}) || byte > (U8{57}) -> return fallback
+        digit :: U64{Int.from_u8(byte) - 48}
+        if parsed > (maximum - digit) / (U64{10}) -> return fallback
+        parsed = parsed * U64{10} + digit
+        at += 1
+    }
+    if parsed == (U64{0}) -> return fallback
+    Int.from_u64(parsed)
+}
+
+fn capability_ascii_lower(text: String) -> String Never! {
+    raw :: text.bytes()
+    out := [U8]{}
+    loop byte in raw {
+        if byte >= (U8{65}) && byte <= (U8{90}) -> &out.push(U8{Int.from_u8(byte) + 32})
+        else -> &out.push(byte)
+    }
+    String.from_bytes(out) ?? panic("ASCII case conversion preserves UTF-8")
+}
+
+fn capabilities_from_inputs(inputs: TUICapabilityInputs) -> TUICapabilities Never! {
+    term :: capability_ascii_lower(inputs.term ?? "")
+    color_term :: capability_ascii_lower(inputs.color_term ?? "")
+    profile := TUIColorProfile.ANSI16
+    if inputs.ascii || term == "dumb" -> profile = TUIColorProfile.ASCII
+    else if color_term == "truecolor" || color_term == "24bit" || term.contains("truecolor") || term.contains("24bit") -> profile = TUIColorProfile.TrueColor
+    else if term.contains("256color") -> profile = TUIColorProfile.ANSI256
+    rich :: profile != TUIColorProfile.ASCII
+    TUICapabilities{
+        profile: profile,
+        color: !inputs.no_color && rich && (inputs.terminal || inputs.forced),
+        unicode: rich, mouse: rich && !inputs.no_color, resize: rich,
+        clipboard: rich && !inputs.no_color,
+        width: capability_dimension(inputs.columns, 80, inputs.usize_max),
+        height: capability_dimension(inputs.lines, 24, inputs.usize_max)
+    }
+}
+
+fn ascii(value: String) -> String Never! {
+    raw :: value.bytes()
+    out := [U8]{}
+    i := 0
+    loop i < raw.len() {
+        width :: utf8_width(raw[i])
+        n :: scalar_at(raw, i, width)
+        i += width
+        &out.push(U8{ascii_scalar(n)})
+    }
+    String.from_bytes(out) ?? ""
+}
+fn color_ansi16(index: Int) -> TUIColor Never! { TUIColor.ANSI16(clamp_int(index, 15)) }
+fn color_ansi256(index: Int) -> TUIColor Never! { TUIColor.ANSI256(clamp_int(index, 255)) }
+fn color_rgb(red: Int, green: Int, blue: Int) -> TUIColor Never! {
+    TUIColor.RGB{red: clamp_int(red, 255), green: clamp_int(green, 255), blue: clamp_int(blue, 255)}
+}
+
+fn style() -> TUIStyle Never! {
+    TUIStyle{foreground: None, background: None, bold: false, dim: false, underline: false}
+}
+fn style_bold(s: TUIStyle, enabled: Bool) -> TUIStyle Never! {
+    result := s
+    result.bold = enabled
+    result
+}
+fn style_dim(s: TUIStyle, enabled: Bool) -> TUIStyle Never! {
+    result := s
+    result.dim = enabled
+    result
+}
+fn style_underline(s: TUIStyle, enabled: Bool) -> TUIStyle Never! {
+    result := s
+    result.underline = enabled
+    result
+}
+fn style_foreground(s: TUIStyle, color: TUIColor) -> TUIStyle Never! {
+    result := s
+    result.foreground = Val(color)
+    result
+}
+fn style_background(s: TUIStyle, color: TUIColor) -> TUIStyle Never! {
+    result := s
+    result.background = Val(color)
+    result
+}
+fn style_text(value: String, s: TUIStyle, caps: TUICapabilities) -> String Never! {
+    text := value
+    if !caps.unicode -> text = ascii(text)
+    if !caps.color -> return text
+    if caps.profile == .ASCII -> return text
+    codes := [String]{}
+    if s.bold -> &codes.push("1")
+    if s.dim -> &codes.push("2")
+    if s.underline -> &codes.push("4")
+    if s.foreground == .Val(color) -> &codes.push(color_code(color, caps.profile, false))
+    if s.background == .Val(color) -> &codes.push(color_code(color, caps.profile, true))
+    if codes.len() == 0 -> return text
+    escape :: String.from_bytes([U8]{27}) ?? ""
+    "{escape}[{codes.join(";")}m{text}{escape}[0m"
+}
+fn display_width(value: String) -> Int Never! {
+    raw :: value.bytes()
+    result := 0
+    i := 0
+    escape := false
+    loop i < raw.len() {
+        width :: utf8_width(raw[i])
+        n :: scalar_at(raw, i, width)
+        i += width
+        if escape {
+            if n == 64 || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) -> escape = false
+        } else if n == 27 -> escape = true
+        else -> result += scalar_display_width(n)
+    }
+    result
+}
+
+fn length(value: Float) -> TUIConstraint Never! { TUIConstraint.Length(nonnegative(value)) }
+fn min(value: Float) -> TUIConstraint Never! { TUIConstraint.Min(nonnegative(value)) }
+fn max(value: Float) -> TUIConstraint Never! { TUIConstraint.Max(nonnegative(value)) }
+fn percent(value: Float) -> TUIConstraint Never! {
+    TUIConstraint.Percent(bounded_float(value, 100.0))
+}
+fn fill(weight: Float) -> TUIConstraint Never! { TUIConstraint.Fill(normalized_weight(weight)) }
+fn horizontal() -> TUIDirection Never! { TUIDirection.Horizontal }
+fn vertical() -> TUIDirection Never! { TUIDirection.Vertical }
+
+fn layout(area: Rect, direction: TUIDirection, constraints: [TUIConstraint]) -> [Rect] Never! {
+    total := nonnegative(area.height)
+    if direction == .Horizontal -> total = nonnegative(area.width)
+    sizes := [Float]{}
+    desired_total := Float{0.0}
+    fill_weight := Float{0.0}
+    normalized := constraints
+    loop i in 0..<normalized.len() {
+        desired := Float{0.0}
+        if normalized[i] == {
+            .Length(value) -> desired = nonnegative(value)
+            .Min(value) -> desired = nonnegative(value)
+            .Max(value) -> desired = nonnegative(value)
+            .Percent(value) -> desired = total * bounded_float(value, 100.0) / 100.0
+            .Fill(weight) -> {
+                value :: normalized_weight(weight)
+                normalized[i] = TUIConstraint.Fill(value)
+                fill_weight += value
+            }
+        }
+        &sizes.push(desired)
+        desired_total += desired
+    }
+    scale := Float{1.0}
+    if desired_total > total && desired_total > 0.0 -> scale = total / desired_total
+    used := Float{0.0}
+    loop i in 0..<sizes.len() {
+        sizes[i] = sizes[i] * scale
+        used += sizes[i]
+    }
+    remaining :: nonnegative(total - used)
+    if fill_weight > 0.0 {
+        loop i in 0..<normalized.len() {
+            if normalized[i] == .Fill(weight) -> sizes[i] = remaining * weight / fill_weight
+        }
+    }
+    result := [Rect]{}
+    cursor := Float{0.0}
+    loop size in sizes {
+        frame := Rect{x: area.x, y: area.y + cursor, width: area.width, height: size}
+        if direction == .Horizontal -> frame = Rect{x: area.x + cursor, y: area.y, width: size, height: area.height}
+        &result.push(frame)
+        cursor += size
+    }
+    result
+}
+
+fn list(items: [String]) -> UINode Never! {
+    caps :: capabilities()
+    children := [UINode]{}
+    rows := caps.height
+    if rows < 1 -> rows = 1
+    count := items.len()
+    if count > rows -> count = rows
+    loop index in 0..<count {
+        prefix := "  "
+        if index == 0 -> prefix = "> "
+        &children.push(ui.text(truncate_text("{prefix}{items[index]}", caps.width)))
+    }
+    if children.len() == 0 -> &children.push(ui.text(""))
+    ui.box(children)
+}
+
+fn table(headers: [String], rows: [[String]]) -> ui.UINode Never! {
+    columns := headers.len()
+    loop row in rows {
+        if row.len() > columns -> columns = row.len()
+    }
+    if columns == 0 -> return ui.text("")
+    caps :: capabilities()
+    children := [UINode]{}
+    if headers.len() > 0 -> &children.push(ui.text(table_line(headers, columns, caps.width)))
+    loop row in rows -> &children.push(ui.text(table_line(row, columns, caps.width)))
+    ui.box(children)
+}
+
+fn list_state() -> TUIListState Never! { TUIListState{selected: 0, offset: 0} }
+fn list_state_select(state: TUIListState, index: Int) -> TUIListState Never! {
+    result := state
+    result.selected = nonnegative_int(index)
+    result
+}
+fn list_state_selected(state: TUIListState) -> Int Never! { state.selected }
+fn list_state_offset(state: TUIListState, offset: Int) -> TUIListState Never! {
+    result := state
+    result.offset = nonnegative_int(offset)
+    result
+}
+
+fn key_event(code: String) -> TUIEvent Never! { TUIEvent.Key{code: code, modifiers: 0} }
+fn key_event_modifiers(code: String, modifiers: Int) -> TUIEvent Never! {
+    TUIEvent.Key{code: code, modifiers: modifiers.bit_and(255)}
+}
+fn resize_event(width: Float, height: Float) -> TUIEvent Never! {
+    TUIEvent.Resize{size: ui.Size{width: width, height: height}}
+}
+fn timer_event(id: String, elapsed_ms: Int) -> TUIEvent Never! {
+    TUIEvent.Timer{id: id, elapsed_ms: elapsed_ms}
+}
+fn io_event(channel: String, payload: [U8]) -> TUIEvent Never! {
+    TUIEvent.IO{channel: channel, payload: payload}
+}
+fn focus_event(focused: Bool) -> TUIEvent Never! { TUIEvent.Focus{focused: focused} }
+fn interrupt_event() -> TUIEvent Never! { TUIEvent.Interrupt }
+fn close_event() -> TUIEvent Never! { TUIEvent.Close }
+
+struct ColorWords {
+    kind: Int
+    word: Int
+}
+
+struct StyleWords {
+    foreground: ColorWords
+    background: ColorWords
+    flags: Int
+}
+
+fn color_words(color: TUIColor?) -> ColorWords Never! {
+    if color == .Val(value) {
+        if value == {
+            .ANSI16(index) -> return ColorWords{kind: 1, word: clamp_int(index, 15)}
+            .ANSI256(index) -> return ColorWords{kind: 2, word: clamp_int(index, 255)}
+            .RGB(red, green, blue) -> return ColorWords{
+                kind: 3,
+                word: (clamp_int(red, 255) << 16).bit_or((clamp_int(green, 255) << 8)).bit_or(clamp_int(blue, 255)),
+            }
+        }
+    }
+    ColorWords{kind: 0, word: 0}
+}
+
+fn style_words(value: TUIStyle) -> StyleWords Never! {
+    flags := 0
+    if value.bold -> flags = flags.bit_or(1)
+    if value.dim -> flags = flags.bit_or(2)
+    if value.underline -> flags = flags.bit_or(4)
+    StyleWords{foreground: color_words(value.foreground), background: color_words(value.background), flags: flags}
+}
+
+fn truncate_text(value: String, limit: Int) -> String Never! {
+    if limit <= 0 -> return ""
+    raw :: value.bytes()
+    out := [U8]{}
+    used := 0
+    index := 0
+    escape := false
+    loop index < raw.len() {
+        size :: utf8_width(raw[index])
+        scalar :: scalar_at(raw, index, size)
+        start :: index
+        index += size
+        if escape {
+            if scalar == 64 || (scalar >= 65 && scalar <= 90) || (scalar >= 97 && scalar <= 122) -> escape = false
+        } else if scalar == 27 -> escape = true
+        else {
+            width :: scalar_display_width(scalar)
+            if used + width > limit -> break
+            loop offset in 0..<size -> &out.push(raw[start + offset])
+            used += width
+        }
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn table_line(values: [String], columns: Int, width: Int) -> String Never! {
+    column_width :: nonnegative_int(width - (columns - 1) * 3) /% columns
+    out := ""
+    loop index in 0..<columns {
+        if index > 0 -> out += " | "
+        value := ""
+        if index < values.len() -> value = values[index]
+        value = truncate_text(value, column_width)
+        out += value
+        if index + 1 < columns {
+            padding :: nonnegative_int(column_width - display_width(value))
+            loop unused in 0..<padding -> out += " "
+        }
+    }
+    truncate_text(out, width)
+}
+
+fn normalized_weight(weight: Float) -> Float Never! {
+    // This conversion is bounded and truncating: positive half ties round up.
+    rounded :: Int.from_float(bounded_float(weight, 65535.0) + 0.5) ?? panic("a bounded weight is finite")
+    Float{clamp_int(rounded, 65535)}
+}
+
+fn nonnegative_int(value: Int) -> Int Never! {
+    if value < 0 -> return 0
+    value
+}
+fn clamp_int(value: Int, upper: Int) -> Int Never! {
+    if value > upper -> return upper
+    nonnegative_int(value)
+}
+fn nonnegative(value: Float) -> Float Never! {
+    if value - value != 0.0 || value < 0.0 -> return 0.0
+    value
+}
+fn bounded_float(value: Float, upper: Float) -> Float Never! {
+    result :: nonnegative(value)
+    if result > upper -> return upper
+    result
+}
+fn rgb_cube(value: Int) -> Int Never! {
+    if value < 48 -> return 0
+    if value < 115 -> return 1
+    clamp_int((value - 55) /% 40, 5)
+}
+fn rgb_ansi16(red: Int, green: Int, blue: Int) -> Int Never! {
+    index := 0
+    brightest := red
+    if green > brightest -> brightest = green
+    if blue > brightest -> brightest = blue
+    if red > 96 -> index = index.bit_or(1)
+    if green > 96 -> index = index.bit_or(2)
+    if blue > 96 -> index = index.bit_or(4)
+    if index == 0 && brightest > 48 -> index = 7
+    if brightest > 170 -> index += 8
+    index
+}
+fn color_code(color: TUIColor, profile: TUIColorProfile, background: Bool) -> String Never! {
+    base := 38
+    if background -> base = 48
+    if profile == .ASCII -> return ""
+    if color == {
+        .RGB(red, green, blue) -> {
+            if profile == .TrueColor -> return "{base};2;{red};{green};{blue}"
+            if profile == .ANSI256 {
+                index :: 16 + 36 * rgb_cube(red) + 6 * rgb_cube(green) + rgb_cube(blue)
+                return "{base};5;{index}"
+            }
+            return color_code(TUIColor.ANSI16(rgb_ansi16(red, green, blue)), profile, background)
+        }
+        .ANSI256(index) -> {
+            if profile == .ANSI16 -> return color_code(TUIColor.ANSI16(index % 16), profile, background)
+            return "{base};5;{index}"
+        }
+        .ANSI16(index) -> {
+            value :: index % 16
+            if profile == .ANSI16 {
+                if value < 8 -> return "{base - 8 + value}"
+                return "{base + 44 + value}"
+            }
+            return "{base};5;{value}"
+        }
+    }
+}
+
+
+fn utf8_width(byte: U8) -> Int Never! {
+    n :: Int.from_u8(byte)
+    if n < 128 -> return 1
+    if n < 224 -> return 2
+    if n < 240 -> return 3
+    4
+}
+
+fn scalar_at(raw: [U8], offset: Int, width: Int) -> Int Never! {
+    value := Int.from_u8(raw[offset])
+    if width == 1 -> return value
+    value = value.bit_and(((1 << (7 - width)) - 1))
+    i := 1
+    loop i < width {
+        value = (value << 6).bit_or((Int.from_u8(raw[offset + i]).bit_and(63)))
+        i += 1
+    }
+    value
+}
+
+fn ascii_scalar(n: Int) -> Int Never! {
+    if n == 0x2500 || n == 0x2501 || n == 0x2550 -> return 45
+    if n == 0x2502 || n == 0x2503 || n == 0x2551 -> return 124
+    if n == 0x250C || n == 0x250F || n == 0x2554 || n == 0x2510 || n == 0x2513 || n == 0x2557 ||
+       n == 0x2514 || n == 0x2517 || n == 0x255A || n == 0x2518 || n == 0x251B || n == 0x255D ||
+       n == 0x251C || n == 0x2524 || n == 0x252C || n == 0x2534 || n == 0x253C || n == 0x254B || n == 0x256C -> return 43
+    if n == 0x2192 || n == 0x21D2 || n == 0x279C -> return 62
+    if n == 0x2190 || n == 0x21D0 -> return 60
+    if n == 0x2191 || n == 0x21D1 -> return 94
+    if n == 0x2193 || n == 0x21D3 -> return 118
+    if n < 128 -> return n
+    63
+}
+
+fn scalar_display_width(n: Int) -> Int Never! {
+    if n < 32 || (n >= 0x7F && n <= 0x9F) ||
+       (n >= 0x0300 && n <= 0x036F) || (n >= 0x0483 && n <= 0x0489) ||
+       (n >= 0x0591 && n <= 0x05BD) || (n >= 0x0610 && n <= 0x061A) ||
+       (n >= 0x064B && n <= 0x065F) || (n >= 0x1AB0 && n <= 0x1AFF) ||
+       (n >= 0x1DC0 && n <= 0x1DFF) || (n >= 0x20D0 && n <= 0x20FF) ||
+       (n >= 0xFE20 && n <= 0xFE2F) -> return 0
+    if (n >= 0x1100 && n <= 0x115F) || (n >= 0x2329 && n <= 0x232A) ||
+       (n >= 0x2E80 && n <= 0x303E) || (n >= 0x3040 && n <= 0xA4CF) ||
+       (n >= 0xAC00 && n <= 0xD7A3) || (n >= 0xF900 && n <= 0xFAFF) ||
+       (n >= 0xFE10 && n <= 0xFE19) || (n >= 0xFE30 && n <= 0xFE6F) ||
+       (n >= 0xFF00 && n <= 0xFF60) || (n >= 0xFFE0 && n <= 0xFFE6) ||
+       (n >= 0x1F300 && n <= 0x1FAFF) -> return 2
+    1
+}
+
+#Test("TUI ASCII projection and display width") {
+    assert(ascii("─━═│┃║┌┏╔┐┓╗└┗╚┘┛╝├┤┬┴┼╋╬") == "---|||+++++++++++++++++++")
+    assert(ascii("→⇒➜←⇐↑⇑↓⇓é🙂") == ">>><<^^vv??")
+    assert(display_width("é") == 1)
+    assert(display_width("界🙂") == 4)
+    assert(display_width("\n\t") == 0)
+    escape :: String.from_bytes([U8]{27}) ?? ""
+    assert(display_width("{escape}[31mred{escape}[0m") == 3)
+    assert(display_width("{escape}[31") == 0)
+}
+
+#Test("TUI color, style and list-state policy") {
+    if color_ansi16(-1) == .ANSI16(index) -> assert(index == 0)
+    if color_ansi16(99) == .ANSI16(index) -> assert(index == 15)
+    if color_ansi256(999) == .ANSI256(index) -> assert(index == 255)
+    if color_rgb(-1, 128, 999) == .RGB(red, green, blue) {
+        assert(red == 0 && green == 128 && blue == 255)
+    }
+    selected :: list_state_select(list_state(), -3)
+    assert(list_state_selected(selected) == 0)
+    shifted :: list_state_offset(selected, 12)
+    assert(shifted.offset == 12)
+    bold :: style_bold(style(), true)
+    assert(bold.bold && !bold.dim && !bold.underline)
+    dim :: style_dim(bold, true)
+    assert(dim.bold && dim.dim)
+    underlined :: style_underline(dim, true)
+    assert(underlined.underline)
+}
+
+#Test("TUI layout scales fixed constraints and apportions fill") {
+    area :: ui.rect(2.0, 3.0, 100.0, 20.0)
+    frames :: layout(area, horizontal(), [TUIConstraint]{length(20.0), fill(1.0), fill(3.0)})
+    assert(frames.len() == 3)
+    assert(frames[0].x == 2.0 && frames[0].width == 20.0)
+    assert(frames[1].x == 22.0 && frames[1].width == 20.0)
+    assert(frames[2].x == 42.0 && frames[2].width == 60.0)
+    scaled :: layout(area, vertical(), [TUIConstraint]{length(30.0), min(10.0)})
+    assert(scaled[0].height == 15.0 && scaled[1].height == 5.0)
+    assert(layout(area, horizontal(), [TUIConstraint]{}).len() == 0)
+    if fill(1.5) == .Fill(weight) -> assert(weight == 2.0)
+    if percent(200.0) == .Percent(value) -> assert(value == 100.0)
+}
+
+#Test("TUI event payloads preserve byte truncation") {
+    if key_event_modifiers("A", -1) == .Key(code, modifiers) {
+        assert(code == "A" && modifiers == 255)
+    }
+    if timer_event("tick", -2) == .Timer(id, elapsed) -> assert(id == "tick" && elapsed == -2)
+    if io_event("pipe", [U8]{0, 255}) == .IO(channel, payload) {
+        assert(channel == "pipe" && payload.len() == 2 && payload[1] == U8{255})
+    }
+}
+
+#Test("TUI style code ordering and color-profile projection") {
+    s :: style_background(style_foreground(style_underline(style_dim(style_bold(style(), true), true), true), color_rgb(255, 0, 0)), color_ansi16(9))
+    escape :: String.from_bytes([U8]{27}) ?? ""
+    assert(color_code(color_rgb(255, 0, 0), TUIColorProfile.TrueColor, false) == "38;2;255;0;0")
+    assert(color_code(color_rgb(255, 0, 0), TUIColorProfile.ANSI256, false) == "38;5;196")
+    assert(color_code(color_rgb(255, 0, 0), TUIColorProfile.ANSI16, false) == "91")
+    assert(s.bold && s.dim && s.underline)
+    caps :: capabilities()
+    if !caps.color -> assert(style_text("jet", s, caps) == "jet")
+    assert(escape.len() == 1)
+}
+
+fn normalized_style_test_node(words: StyleWords) -> UINode Never! {
+    #Unsafe("Core TUI test: normalized style words and explicit absent UI slots") {
+        return ui.__node_transfer("jet", 3.0, 1.0, 2, 1, [UINode]{}, false, "", 63, true,
+            words.foreground.kind, words.foreground.word, words.background.kind, words.background.word, words.flags)
+    }
+}
+
+#Test("TUI normalized style words cross the actual retained renderer boundary") {
+    styled :: style_background(style_foreground(style_bold(style(), true), color_rgb(12, 34, 56)), color_ansi16(2))
+    words :: style_words(styled)
+    assert(words.foreground.kind == 3 && words.foreground.word == 795192)
+    assert(words.background.kind == 1 && words.background.word == 2 && words.flags == 1)
+    node :: normalized_style_test_node(words)
+    backend :: ui.tui_backend()
+    ui.mount(backend, node)
+    lines :: backend.frame_lines()
+    assert(lines.len() > 0 && lines[0] == style_text("jet", styled, capabilities()))
+}
+
+#Test("TUI list/table formatting keeps scalar widths and empty cells") {
+    assert(truncate_text("a界b", 3) == "a界")
+    assert(truncate_text("a界b", 2) == "a")
+    assert(truncate_text("áb", 1) == "á")
+    assert(table_line([String]{"x"}, 2, 9) == "x   | ")
+}
+
+#Test("TUI sampled capability policy preserves raw environment and usize rules") {
+    inputs := TUICapabilityInputs{
+        columns: Val("+00120"), lines: Val("0"), term: Val("XTERM-256COLOR"),
+        color_term: None, ascii: false, forced: false, no_color: false,
+        terminal: true, usize_max: U64{4294967295}
+    }
+    caps :: capabilities_from_inputs(inputs)
+    assert(caps.profile == .ANSI256 && caps.color && caps.unicode)
+    assert(caps.width == 120 && caps.height == 24)
+    inputs.no_color = true
+    inputs.forced = true
+    overridden :: capabilities_from_inputs(inputs)
+    assert(!overridden.color && !overridden.mouse && !overridden.clipboard)
+    assert(overridden.unicode && overridden.resize)
+    inputs.no_color = false
+    inputs.term = Val("DUMB")
+    plain :: capabilities_from_inputs(inputs)
+    assert(plain.profile == .ASCII && !plain.color && !plain.unicode && !plain.resize)
+    assert(capability_dimension(Val("4294967296"), 80, U64{4294967295}) == 80)
+    assert(capability_dimension(Val("18446744073709551616"), 80, core.sys.usize_max()) == 80)
+    assert(capability_dimension(Val(" 120"), 80, U64{4294967295}) == 80)
+    assert(capability_dimension(Val("-1"), 80, U64{4294967295}) == 80)
+    invalid :: capability_text([U8]{255})
+    assert(invalid == None && capability_dimension(invalid, 80, U64{4294967295}) == 80)
+    assert((capability_text([U8]{104, 195, 169}) ?? "") == "hé")
+    // Raw var_os checks distinguish an absent flag, an empty flag, and "0".
+    assert(!capability_raw_flag(None))
+    assert(capability_raw_flag(Val([U8]{})))
+    assert(!capability_raw_flag(Val([U8]{48})))
+    assert(capability_raw_flag(Val([U8]{255})))
+}

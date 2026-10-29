@@ -1,0 +1,36 @@
+{
+ "max": 20,
+ "stop": "session.end",
+ "replies": {
+  "session.status": "{\"ready\":true,\"message\":\"ready\"}",
+  "session.new": "{\"sessionId\":\"privacy-ok\",\"capabilities\":{\"browserName\":\"mock\"}}",
+  "browser.createUserContext": [
+   "{\"userContext\":\"user-1\"}",
+   "{\"userContext\":\"user-2\"}"
+  ],
+  "browsingContext.create": {
+   "if_contains": "\"userContext\":\"user-1\"",
+   "then": "{\"context\":\"page-1\"}",
+   "else": "{\"context\":\"page-2\"}"
+  },
+  "storage.setCookie": "{}",
+  "storage.getCookies": {
+   "if_contains": "\"context\":\"page-1\"",
+   "then": "{\"cookies\":[{\"name\":\"session\",\"value\":{\"type\":\"string\",\"value\":\"SECRET_COOKIE\"},\"domain\":\"example.test\",\"path\":\"/\"}]}",
+   "else": "{\"cookies\":[]}"
+  },
+  "browsingContext.close": "{}",
+  "browser.removeUserContext": "{}",
+  "session.end": "{}"
+ },
+ "require": {
+  "storage.setCookie": [
+   "\"value\":\"SECRET_COOKIE\""
+  ]
+ },
+ "forbid": {
+  "storage.setCookie": [
+   "PRIVACY_SUCCESS_SECRET"
+  ]
+ }
+}

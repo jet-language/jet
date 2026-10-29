@@ -3,8 +3,15 @@
 // vector positions are only local lookup accelerators.
 use jet_foundation.[
     AccessConvention,
+    AST_NODE_GENERATED,
     ArithmeticPolicyFact,
+    BodyExpr,
+    BodyNode,
+    BodyTree,
+    StmtKind,
+    TExprType,
     CoreMarkerApplication,
+    DeclID,
     Diagnostic,
     DebugTraceSite,
     DistinctDef,
@@ -13,8 +20,8 @@ use jet_foundation.[
     Expr,
     Field,
     Item,
-    MIRTargetHardwareUse,
-    MIRSharedLifetime,
+    TargetHardwareUse,
+    SharedLifetime,
     PolicyDeclaration,
     PolicyKey,
     PolicyScope,
@@ -24,8 +31,9 @@ use jet_foundation.[
     SymbolID,
     SymbolKind,
     TComptimeValue,
-    TExpr,
+    TEXPR_FIRST_LOCAL_ID,
     TOriginProjection,
+    TTypedGoal,
     TFailureCarrier,
     TGenericParam,
     TIntegerBounds,
@@ -37,6 +45,16 @@ use jet_foundation.[
     ViewSourcePath,
     type_identity_equal,
     type_name,
+    expr_node_id,
+    Effect,
+    Exactness,
+    Func,
+    Namespace,
+    StateTransition,
+    NameRows,
+    name_rows,
+    name_rows_get_text,
+    name_rows_set,
 ]
 
 enum SemaKnowledgePlane {
@@ -69,14 +87,15 @@ struct SemaScopeBinding {
     integer_bounds: TIntegerBounds?
     string_view: Bool
     compiler_builtin: Bool
-    // A `name :: prep { … }` local reads as this value.
+    // A `name :: comptime { … }` local reads as this value.
     prepared: TComptimeValue?{None}
     // The `#Track` origin row for this binding; `None`
     // is the untracked row.
     origin: SemaOriginFact?{None}
     // This `::` name reads a field or element of a place
-    // through a view, or is a loop name over a collection a read or write
-    // parameter owns. It owns nothing to give away: an exact `^` on it is
+    // through a view, is a loop name over a collection a read or write
+    // parameter owns, or is a match payload bound from storage this scope
+    // does not own. It owns nothing to give away: an exact `^` on it is
     // E0201 (sema_ownership_mark_move_as), as on a borrowed parameter.
     place_alias: Bool{false}
 }
@@ -109,7 +128,7 @@ struct SemaCallSiteFact {
     foreign_effect_root: String?{None}
     // A resolved Core lifecycle marker, retained with the checked call site.
     lifecycle: CoreMarkerApplication?{None}
-    shared_lifetime: MIRSharedLifetime?{None}
+    shared_lifetime: SharedLifetime?{None}
     shared_member: String{""}
     shared_source: String{""}
 }
@@ -317,8 +336,10 @@ struct SemaCheckedTextEvaluation {
     type_name: String
     source_file: String
     source_expression: Expr
-    expression: TExpr
-    hardware_use: MIRTargetHardwareUse
+    // The checked literal's flat form (sema_publish_expression) and its type.
+    expression: BodyExpr
+    ty: Type
+    hardware_use: TargetHardwareUse
     reachable_function_keys: [String]
     dependencies: [String]
     span: Span
@@ -332,6 +353,16 @@ struct SemaComptimeRequest {
     checked_text: SemaCheckedTextEvaluation?
 }
 
+// A prepared local (`name :: comptime { value }`) visible at a body comptime
+// site. The staged check declares it again, so the site's code reads its
+// finished value as it does in the owner body.
+struct SemaComptimePreparedLocal {
+    name: String
+    ty: Type
+    value: TComptimeValue
+    span: Span
+}
+
 struct SemaComptimeBodySource {
     module_identity: String
     function_key: String
@@ -343,6 +374,7 @@ struct SemaComptimeBodySource {
     expected_type: Type
     span: Span
     site_span: Span
+    prepared: [SemaComptimePreparedLocal]
 }
 
 struct SemaComptimeBodyValue {
@@ -409,6 +441,9 @@ enum SemaComptimeBodyWorkOperation {
 struct SemaScopeEnvironment {
     registration_graph: SemaRegistrationGraph?{None}
     module_identity: String
+    // The registration row of `module_identity` when module entry set it
+    // (sema_scope_caller_row checks it still is), -1 otherwise.
+    module_row: Int{-1}
     package_identity: String
     module_name: String
     source_file: String
@@ -419,6 +454,7 @@ struct SemaScopeEnvironment {
     checked_type_name_slots: [String:Int]{[String:Int]{}}
     checked_type_name_rows: [[Int]]{[[Int]]{}}
     boxed_edges: [String:[String]]{[String:[String]]{}}
+    copy_facts: SemaCopyFactsTable{SemaCopyFactsTable{rows: [[SemaCopyTypeFacts?]]{}, close: [[(known: Bool, value: Bool)]]{}}}
     declarations: [SemaScopeDeclaration]
     generic_params: [TGenericParam]
     // One publication survives probe retargets. The selected view may be empty
@@ -447,8 +483,8 @@ struct SemaScopeEnvironment {
 // User bodies consume the selected machine fact, never a host OS guess.
 fn sema_scope_environment_no_os(environment: SemaScopeEnvironment) -> Bool Never! {
     if sema_module_is_core_source(environment.module_identity) -> return false
-    graph :: environment.registration_graph ?? return false
-    graph.target_machine.no_os
+    if environment.registration_graph == .Val(graph) -> return graph.target_machine.no_os
+    false
 }
 
 // The declaration scope of one module for compile-time probes (dependency
@@ -506,7 +542,7 @@ struct SemaCheckContext {
     lambda_statement_tails: [SemaStatementTailFrame]
     call_facts: [SemaCallSiteFact]
     http_routes: [String]{[String]{}}
-    hardware_use: MIRTargetHardwareUse
+    hardware_use: TargetHardwareUse
     call_return_views: [SemaCallReturnView]
     local_view_provenance: [SemaLocalViewProvenance]
     return_view_receiver_key: String
@@ -546,6 +582,12 @@ struct SemaCheckContext {
     // its first propagated call, as the Rust reference's callback inference.
     failure_inference: Bool
     inferred_failure_carrier: TFailureCarrier?
+    // An expected callback with no return row (`fn(T)`, nothing after it):
+    // its `return value` has no slot until a propagated fallible call gives it
+    // that call's carrier as its row (`callback_return_row`), as the Rust
+    // reference's callback `ret`.
+    callback_return_open: Bool{false}
+    callback_return_row: Type?{None}
     // The enclosing callable's written failure contract, for E2404 provenance.
     failure_contract_source: String
     // The enclosing named callable, for the return verdicts.
@@ -590,8 +632,8 @@ struct SemaCheckContext {
     // propagating runtime range conversion inside it is reported there.
     binding_initializer: Bool{false}
     // E1403: source forms being checked right now, one per
-    // statement and per expression level, against the limit the parser and
-    // the TIR evaluator share.
+    // statement and per expression level, against the limit the parser
+    // also enforces.
     source_nesting: Int{0}
     // Active bindingless collecting-loop subjects, where a
     // bare `.member` chain reads the implicit `it`.
@@ -603,6 +645,16 @@ struct SemaCheckContext {
     // driver's internal-problem report (I2), never the user's diagnostics.
     incomplete_reasons: [String]{[String]{}}
     origin_facts: [TOriginProjection]{[TOriginProjection]{}}
+    // The body's `todo` goals, with the card naming each one's expected type.
+    typed_goals: [TTypedGoal]{[TTypedGoal]{}}
+    // The source node ids this check gave its nodes (sema_check_record_expr_id),
+    // in filing order and as a set, and the next function-local id for a node
+    // whose source id is generated or already filed (a desugared copy). A
+    // snapshot starts with no ids and continues the id count; its merge hands
+    // both back.
+    filed_expr_ids: [Int]{[Int]{}}
+    filed_expr_id_set: [Int:Bool]{[Int:Bool]{}}
+    next_expr_id: Int{TEXPR_FIRST_LOCAL_ID}
     // The host callbacks this check may call (SemaHostHookAccess); every
     // context derived from it reaches the same ones.
     host_hooks: SemaHostHookAccess?{None}
@@ -610,6 +662,25 @@ struct SemaCheckContext {
     // fixed-width arithmetic mode of the function being checked, from its
     // `#Arithmetic(mode)` marker. Closures checked inside the body keep it.
     arithmetic_policy: ArithmeticPolicyFact?{None}
+    // The body being checked is compiler-generated scaffolding (a derived
+    // codec or protocol method, a field policy wrapper) that spells every
+    // carrier out: a call root keeps its Result and an unmarked writing
+    // receiver is not reported. A `#Test` body is user code and is not.
+    compiler_generated: Bool{false}
+    // The function being checked declares its result's owners (`-> T from
+    // self | param`): a returned place read is a view of them, not a copy.
+    return_view_declared: Bool{false}
+    // The rows of the nodes this check built flat (sema_node): a node's
+    // children are row indices of this arena (the flattener's into-arena
+    // mode). A mark never truncates it, so a kept speculative result never
+    // names a row past its end; the rows no published node reaches are
+    // dropped when the function is flattened.
+    arena: BodyFlat{BodyFlat{tree: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}, arena: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}, into_arena: true}}
+    // The field facts of the non-generic structs this check built literals
+    // of (sema_expression_struct_field_facts): owner key -> index of its
+    // first field's fact.
+    struct_field_fact_rows: [String:Int]{[String:Int]{}}
+    struct_field_facts: [SemaStructFieldFact]{[SemaStructFieldFact]{}}
 }
 
  
@@ -626,9 +697,9 @@ struct SemaScopeTable {
     frames: [SemaScopeFrame]
     bindings: [SemaScopeBinding]
     // Binding positions per name, ascending: `name_slots` maps a name to its
-    // row in `name_positions`. Every push goes through
+    // row in `name_positions` (interned spellings, A1). Every push goes through
     // sema_scope_push_binding, so name resolution never rescans `bindings`.
-    name_slots: [String:Int]
+    name_slots: NameRows
     name_positions: [[Int]]
     loop_labels: [SemaScopeLoopLabel]
     hardware_transfers: [SemaHardwareDMATransferFact]
@@ -665,6 +736,10 @@ struct SemaScopeTable {
     // function type stayed in the environment's `module_scope`
     // (sema_scope_light_copy). Empty for every other table.
     light_types: [Bool]{[Bool]{}}
+    // A contract condition is written above the parameters it reads and is
+    // checked again at each call site, whose spans name another place, so
+    // its names resolve without the declared-before-use position rule.
+    position_free: Bool{false}
 }
 
 struct SemaScopeBindingUndo {
@@ -707,9 +782,39 @@ struct SemaProgramTables {
     // comptime values type only waiting constants, never a nominal's fields,
     // so landing values leaves these edges unchanged.
     boxed_edges: [String:[String]]
+    // `sema_copy_facts_table(registration_graph)`: each non-generic nominal's
+    // copy facts, walked once per tables. Landing comptime values never
+    // changes a nominal's members, so these stay true.
+    copy_facts: SemaCopyFactsTable
+}
+
+// The DeclID a direct call to the registered callable `symbol` names (Cutover
+// B L2b). Every direct call target is a registered callable, so a target with
+// no row is a compiler bug, reported rather than lowered to a guessed callee.
+fn sema_call_callee_decl(program: SemaProgramTables, symbol: SymbolID, span: Span, diagnostics: &[Diagnostic]) -> DeclID? Never! {
+    if program.registration_graph == .Val(graph) {
+        if sema_registration_callable_id(graph, symbol.key) == .Val(id) -> return Val(id)
+    }
+    &diagnostics.push(sema_error("E0003", span, "the call target `{symbol.key}` is not a registered callable", "every direct call names the DeclID its callable registered", "report this compiler bug with the source that triggers it"))
+    None
+}
+
+// The key text of the registered declaration `id` (diagnostics, call facts,
+// effect node keys). A DeclID is only minted from a graph's table.
+fn sema_program_decl_key(program: SemaProgramTables, id: DeclID) -> String Never! {
+    if program.registration_graph == .Val(graph) -> return graph.decls.rows[id.row].key.copy()
+    panic("a DeclID outlived its registration graph")
 }
 
 fn sema_program_tables_init(graph: ^SemaRegistrationGraph?, checked_types: [TTypeDef]) -> SemaProgramTables Never! {
+    boxed_edges := sema_scope_environment_boxed_edges(graph)
+    copy_facts := sema_copy_facts_table(graph)
+    sema_program_tables_with(^graph, checked_types, ^boxed_edges, ^copy_facts)
+}
+
+// The tables over `graph` whose boxed edges and copy facts were already
+// computed from it (sema_scope_environment_boxed_edges, sema_copy_facts_table).
+fn sema_program_tables_with(graph: ^SemaRegistrationGraph?, checked_types: [TTypeDef], boxed_edges: ^[String:[String]], copy_facts: ^SemaCopyFactsTable) -> SemaProgramTables Never! {
     rows := [String:Int]{}
     name_slots := [String:Int]{}
     name_rows := [[Int]]{}
@@ -723,7 +828,6 @@ fn sema_program_tables_init(graph: ^SemaRegistrationGraph?, checked_types: [TTyp
             &name_rows.push([Int]{index})
         }
     }
-    boxed_edges := sema_scope_environment_boxed_edges(graph)
     SemaProgramTables{
         registration_graph: graph,
         checked_types: checked_types,
@@ -731,6 +835,7 @@ fn sema_program_tables_init(graph: ^SemaRegistrationGraph?, checked_types: [TTyp
         checked_type_name_slots: name_slots,
         checked_type_name_rows: name_rows,
         boxed_edges: boxed_edges,
+        copy_facts: copy_facts,
     }
 }
 
@@ -754,11 +859,12 @@ fn sema_scope_environment_init(module_identity: String, package_identity: String
     }
 }
 
-// The boxed field edges of `graph`, read in place: matching the owned graph
-// parameter against `.Val(…)` would copy the whole graph first.
+// The boxed field edges of `graph`, read in place through the `.Val(…)`
+// pattern on the parameter; binding `value :: graph ?? …` copies the whole
+// graph.
 fn sema_scope_environment_boxed_edges(graph: SemaRegistrationGraph?) -> [String:[String]] Never! {
-    value :: graph ?? return [String:[String]]{}
-    sema_checked_program_boxed_edges(value)
+    if graph == .Val(value) -> return sema_checked_program_boxed_edges(value)
+    [String:[String]]{}
 }
 
 // The first checked declaration of `name` owned by `module_identity`.
@@ -777,6 +883,7 @@ fn sema_scope_checked_type_name_rows(environment: SemaScopeEnvironment, program:
 fn sema_scope_environment_enter_module(environment: &SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, comptime_body_values: ^SemaComptimeBodyValues) Never! {
     if program.registration_graph == .Val(graph) {
         environment.module_identity = graph.modules[module_index].module_identity
+        environment.module_row = module_index
         environment.package_identity = graph.modules[module_index].package_identity
         environment.module_name = graph.modules[module_index].module_name
         environment.source_file = graph.modules[module_index].source_file
@@ -800,6 +907,7 @@ fn sema_scope_environment_enter_probe_module(environment: &SemaScopeEnvironment,
     if program.registration_graph == .Val(graph) {
         module_index :: sema_registration_module_index(graph, module_identity) ?? return false
         environment.module_identity = graph.modules[module_index].module_identity
+        environment.module_row = module_index
         environment.package_identity = graph.modules[module_index].package_identity
         environment.module_name = graph.modules[module_index].module_name
         environment.source_file = graph.modules[module_index].source_file
@@ -816,6 +924,21 @@ fn sema_scope_environment_enter_probe_module(environment: &SemaScopeEnvironment,
     false
 }
 
+// The registration row of the environment's module: the row module entry
+// recorded when `graph` still registers `module_identity` there (one shared
+// buffer compare), else the identity lookup. Callers pass it as the `caller`
+// row of named-type resolution instead of looking the identity up each time.
+fn sema_scope_caller_row(environment: SemaScopeEnvironment, graph: SemaRegistrationGraph) -> Int Never! {
+    sema_scope_caller_index(environment, graph) ?? -1
+}
+
+// sema_scope_caller_row as an option: None when no row registers the module.
+fn sema_scope_caller_index(environment: SemaScopeEnvironment, graph: SemaRegistrationGraph) -> Int? Never! {
+    row :: environment.module_row
+    if row >= 0 && row < graph.modules.len() && graph.modules[row].module_identity == environment.module_identity -> return Val(row)
+    sema_registration_module_index(graph, environment.module_identity)
+}
+
 fn sema_scope_environment_boxed_edge(environment: SemaScopeEnvironment, program: SemaProgramTables, owner: SymbolID, edge: String) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
         row :: sema_type_graph_nominal_row(graph, owner.key) ?? return false
@@ -824,6 +947,13 @@ fn sema_scope_environment_boxed_edge(environment: SemaScopeEnvironment, program:
         // Matched in place: a pattern on the indexed path copies the whole item.
         nominal :: graph.modules[row.module_index].nominals[row.row]
         if nominal.source == .SourceAST(definition) {
+            // The declaration's own name resolves to this nominal in its own
+            // module, so its edges are the ones keyed by the owner (what
+            // sema_checked_boxed_edges looks up after resolving that name).
+            if sema_registration_root_name(definition) == nominal.symbol.name {
+                edges :: program.boxed_edges.get(owner.key) ?? return false
+                return edges.contains(edge)
+            }
             return sema_checked_boxed_edges(graph, program.boxed_edges, module_identity, definition).contains(edge)
         }
     }
@@ -953,6 +1083,8 @@ fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext Nev
         failure_success_view: source.failure_success_view,
         failure_inference: source.failure_inference,
         inferred_failure_carrier: source.inferred_failure_carrier,
+        callback_return_open: source.callback_return_open,
+        callback_return_row: source.callback_return_row,
         failure_contract_source: source.failure_contract_source,
         function_name: source.function_name,
         fallback_err_denial: source.fallback_err_denial,
@@ -970,6 +1102,13 @@ fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext Nev
         subject_shorthand_depth: source.subject_shorthand_depth,
         host_hooks: source.host_hooks,
         arithmetic_policy: source.arithmetic_policy,
+        compiler_generated: source.compiler_generated,
+        return_view_declared: source.return_view_declared,
+        // A snapshot's check continues the arena of the check it starts
+        // from: its rows follow that arena's rows, and its caller appends
+        // them there after the check (sema_arena_take_back).
+        arena: BodyFlat{tree: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}, node_base: source.arena.tree.node_base + source.arena.tree.nodes.len(), stmt_base: source.arena.tree.stmt_base + source.arena.tree.stmts.len()}, arena: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}, into_arena: true},
+        next_expr_id: source.next_expr_id,
     }
     sema_comptime_body_sources_index(&snapshot)
     sema_comptime_body_work_count(source.comptime_body_values, SemaComptimeBodyWorkOperation.ContextSnapshot)
@@ -1001,6 +1140,9 @@ struct SemaCheckContextMark {
     failure_union_edges: Int
     incomplete_reasons: Int
     origin_facts: Int
+    typed_goals: Int
+    filed_expr_ids: Int
+    next_expr_id: Int
     saved: SemaCheckContext
 }
 
@@ -1032,6 +1174,9 @@ fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMark Ne
         failure_union_edges: context.failure_union_edges.len(),
         incomplete_reasons: context.incomplete_reasons.len(),
         origin_facts: context.origin_facts.len(),
+        typed_goals: context.typed_goals.len(),
+        filed_expr_ids: context.filed_expr_ids.len(),
+        next_expr_id: context.next_expr_id,
         saved: SemaCheckContext{
             exact_int_reachable: context.exact_int_reachable,
             unsafe_depth: context.unsafe_depth,
@@ -1079,6 +1224,8 @@ fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMark Ne
             failure_success_view: context.failure_success_view,
             failure_inference: context.failure_inference,
             inferred_failure_carrier: context.inferred_failure_carrier,
+            callback_return_open: context.callback_return_open,
+            callback_return_row: context.callback_return_row,
             failure_contract_source: context.failure_contract_source,
             function_name: context.function_name,
             fallback_err_denial: context.fallback_err_denial,
@@ -1098,6 +1245,8 @@ fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMark Ne
             implicit_loop_subject_depth: context.implicit_loop_subject_depth,
             subject_shorthand_depth: context.subject_shorthand_depth,
             arithmetic_policy: context.arithmetic_policy,
+            compiler_generated: context.compiler_generated,
+            return_view_declared: context.return_view_declared,
         },
     }
 }
@@ -1123,6 +1272,12 @@ fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckContex
     loop context.autodiff_obligations.len() > mark.autodiff_obligations -> _ := &context.autodiff_obligations.pop()
     loop context.copy_events.len() > mark.copy_events -> _ := &context.copy_events.pop()
     loop context.origin_facts.len() > mark.origin_facts -> _ := &context.origin_facts.pop()
+    loop context.typed_goals.len() > mark.typed_goals -> _ := &context.typed_goals.pop()
+    loop context.filed_expr_ids.len() > mark.filed_expr_ids {
+        dropped := &context.filed_expr_ids.pop()
+        if dropped == .Val(id) -> _ := &context.filed_expr_id_set.remove(id)
+    }
+    context.next_expr_id = mark.next_expr_id
     loop context.noelse_chain_starts.len() > mark.noelse_chain_starts -> _ := &context.noelse_chain_starts.pop()
     loop context.failure_edges.len() > mark.failure_edges -> _ := &context.failure_edges.pop()
     loop context.failure_union_members.len() > mark.failure_union_members -> _ := &context.failure_union_members.pop()
@@ -1164,6 +1319,8 @@ fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckContex
     context.failure_success_view = saved.failure_success_view
     context.failure_inference = saved.failure_inference
     context.inferred_failure_carrier = saved.inferred_failure_carrier
+    context.callback_return_open = saved.callback_return_open
+    context.callback_return_row = saved.callback_return_row
     context.failure_contract_source = saved.failure_contract_source
     context.function_name = saved.function_name
     context.fallback_err_denial = saved.fallback_err_denial
@@ -1178,12 +1335,67 @@ fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckContex
     context.implicit_loop_subject_depth = saved.implicit_loop_subject_depth
     context.subject_shorthand_depth = saved.subject_shorthand_depth
     context.arithmetic_policy = saved.arithmetic_policy
+    context.compiler_generated = saved.compiler_generated
+    context.return_view_declared = saved.return_view_declared
 }
 
 // Records why the body being checked is incomplete when no diagnostic says so.
 // Every path that marks a body incomplete without a diagnostic calls this.
 fn sema_check_unsupported(context: &SemaCheckContext, reason: String) Never! {
     &context.incomplete_reasons.push(reason)
+}
+
+// Gives `value`, the checked form of `expr`, the expression's node id, or a
+// fresh function-local id when that id is generated or already filed (a
+// desugared copy checked again), so no two nodes of the flat body share an
+// id. A value a nested check filed (a grouping, a delegated form) keeps its id.
+fn sema_check_record_expr_id(expr: Expr, value: &TExpr, context: &SemaCheckContext) Never! {
+    if value.id != AST_NODE_GENERATED -> return
+    id := expr_node_id(expr)
+    if id == AST_NODE_GENERATED || context.filed_expr_id_set.get(id) != None {
+        id = context.next_expr_id
+        context.next_expr_id -= 1
+    } else {
+        context.filed_expr_id_set[id] = true
+        &context.filed_expr_ids.push(id)
+    }
+    value.id = id
+}
+
+// Hands the source ids a snapshot (sema_check_context_snapshot) filed back to
+// the context it was taken from, with its id count.
+fn sema_check_context_merge_expr_ids(source: SemaCheckContext, target: &SemaCheckContext) Never! {
+    loop id in source.filed_expr_ids {
+        target.filed_expr_id_set[id] = true
+        &target.filed_expr_ids.push(id)
+    }
+    target.next_expr_id = source.next_expr_id
+}
+
+// Hands back the source ids a full copy of `target` filed past target's own,
+// with its id count: a check run on a copied context keeps its ids.
+fn sema_check_context_return_expr_ids(copied: SemaCheckContext, target: &SemaCheckContext) Never! {
+    loop index in target.filed_expr_ids.len()..<copied.filed_expr_ids.len() {
+        id :: copied.filed_expr_ids[index]
+        target.filed_expr_id_set[id] = true
+        &target.filed_expr_ids.push(id)
+    }
+    target.next_expr_id = copied.next_expr_id
+}
+
+// Rolls `context` back to `mark` but keeps the source ids filed since it,
+// with the id count: the facts of an erased `#DebugOnly` body stay inside it,
+// while its checked statements stay in the tree and keep their ids.
+fn sema_check_context_rollback_keep_expr_ids(context: &SemaCheckContext, mark: SemaCheckContextMark) Never! {
+    kept := [Int]{}
+    loop index in mark.filed_expr_ids..<context.filed_expr_ids.len() -> &kept.push(context.filed_expr_ids[index])
+    next_expr_id :: context.next_expr_id
+    sema_check_context_rollback(&context, mark)
+    loop id in kept {
+        context.filed_expr_id_set[id] = true
+        &context.filed_expr_ids.push(id)
+    }
+    context.next_expr_id = next_expr_id
 }
 
 fn sema_scope_hardware_transfers_snapshot(source: [SemaHardwareDMATransferFact]) -> [SemaHardwareDMATransferFact] Never! {
@@ -1219,6 +1431,7 @@ fn sema_scope_snapshot(source: SemaScopeTable) -> SemaScopeTable Never! {
         open_marks: source.open_marks,
         location_function: source.location_function,
         light_types: source.light_types.copy(),
+        position_free: source.position_free,
     }
 }
 
@@ -1233,7 +1446,7 @@ fn sema_scope_mark(table: &SemaScopeTable) -> SemaScopeMark Never! {
         saved: SemaScopeTable{
             frames: [SemaScopeFrame]{},
             bindings: [SemaScopeBinding]{},
-            name_slots: [String:Int]{},
+            name_slots: name_rows(),
             name_positions: [[Int]]{},
             loop_labels: table.loop_labels.copy(),
             hardware_transfers: sema_scope_hardware_transfers_snapshot(table.hardware_transfers),
@@ -1269,7 +1482,7 @@ fn sema_scope_rollback(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
     }
     loop table.bindings.len() > mark.bindings {
         last :: table.bindings.len() - 1
-        if table.name_slots.get(table.bindings[last].symbol.name) == .Val(slot) -> _ := &table.name_positions[slot].pop()
+        if sema_scope_name_slot(table, table.bindings[last].symbol.name) == .Val(slot) -> _ := &table.name_positions[slot].pop()
         _ := &table.bindings.pop()
     }
     loop table.frames.len() > mark.frames -> _ := &table.frames.pop()
@@ -1315,7 +1528,7 @@ fn sema_scope_init(module_name: String) -> SemaScopeTable Never! {
     SemaScopeTable{
         frames: [SemaScopeFrame]{SemaScopeFrame{parent: -1, owner: module_name}},
         bindings: [SemaScopeBinding]{},
-        name_slots: [String:Int]{},
+        name_slots: name_rows(),
         name_positions: [[Int]]{},
         loop_labels: [SemaScopeLoopLabel]{},
         hardware_transfers: [SemaHardwareDMATransferFact]{},
@@ -1444,7 +1657,7 @@ fn sema_scope_enter_existing(table: &SemaScopeTable, owner: String) -> Bool Neve
 // Module declarations share one root namespace. The declaration pass reports
 // E0105 at the source declaration when this returns false.
 fn sema_scope_add_module_symbol(table: &SemaScopeTable, symbol: Symbol) -> Bool Never! {
-    if table.name_slots.get(symbol.name) == .Val(slot) {
+    if sema_scope_name_slot(table, symbol.name) == .Val(slot) {
         loop index in table.name_positions[slot] {
             binding :: table.bindings[index]
             if binding.frame == 0 && !binding.compiler_builtin -> return false
@@ -1646,17 +1859,22 @@ fn sema_scope_pop_loop_label(table: &SemaScopeTable) Never! {
 // Appends one binding and records its position under its name.
 fn sema_scope_push_binding(table: &SemaScopeTable, binding: SemaScopeBinding) Never! {
     position :: table.bindings.len()
-    if table.name_slots.get(binding.symbol.name) == .Val(slot) {
+    if sema_scope_name_slot(table, binding.symbol.name) == .Val(slot) {
         &table.name_positions[slot].push(position)
     } else {
-        &table.name_slots.add(binding.symbol.name, table.name_positions.len()).drop("the lookup above proved this name has no slot")
+        name_rows_set(&table.name_slots, binding.symbol.name, table.name_positions.len())
         &table.name_positions.push([Int]{position})
     }
     &table.bindings.push(binding)
 }
 
+// The `name_positions` row of `name`, if any binding ever had that name.
+fn sema_scope_name_slot(table: SemaScopeTable, name: String) -> Int? Never! {
+    name_rows_get_text(table.name_slots, name)
+}
+
 fn sema_scope_resolve_index(table: SemaScopeTable, name: String) -> Int? {
-    slot :: table.name_slots.get(name) ?? return None
+    slot :: sema_scope_name_slot(table, name) ?? return None
     frame := table.current
     loop frame >= 0 {
         cursor := table.name_positions[slot].len() - 1
@@ -1670,15 +1888,46 @@ fn sema_scope_resolve_index(table: SemaScopeTable, name: String) -> Int? {
     None
 }
 
-fn sema_scope_resolve_index_at(table: SemaScopeTable, name: String, use_span: Span) -> Int? {
-    slot :: table.name_slots.get(name) ?? return None
+// The visible binding name nearest `name`, for an unknown name's fix: at most
+// a third of its length away (one edit for short names), nearer frames first.
+fn sema_scope_closest_visible_name(table: SemaScopeTable, name: String) -> String? {
+    limit :: if name.count_bytes() /% 3 > 1 -> name.count_bytes() /% 3 else -> 1
+    best := String?{None}
+    best_distance := limit + 1
     frame := table.current
     loop frame >= 0 {
+        loop index in 0..<table.bindings.len() {
+            if table.bindings[index].frame != frame || table.bindings[index].compiler_builtin -> next
+            candidate :: table.bindings[index].symbol.name
+            if candidate == name || candidate.starts_with("__") || candidate.starts_with("@") -> next
+            distance :: sema_taint_edit_distance(name, candidate)
+            if distance < best_distance {
+                best_distance = distance
+                best = Val(candidate.copy())
+            }
+        }
+        frame = table.frames[frame].parent
+    }
+    best
+}
+
+// The binding of `name` visible at `use_span`. Inside a body a binding is
+// visible only after its declaration, except in a position-free table (a
+// contract condition). Module-level bindings (the root frame:
+// items and imports) are visible everywhere in the module, and an imported
+// or staged symbol's span may come from another file, so position never
+// hides them.
+fn sema_scope_resolve_index_at(table: SemaScopeTable, name: String, use_span: Span) -> Int? {
+    slot :: sema_scope_name_slot(table, name) ?? return None
+    frame := table.current
+    loop frame >= 0 {
+        module_frame :: table.frames[frame].parent < 0
         cursor := table.name_positions[slot].len() - 1
         loop cursor >= 0 {
             index :: table.name_positions[slot][cursor]
-            binding :: table.bindings[index]
-            if binding.frame == frame && binding.symbol.span.start <= use_span.start -> return Val(index)
+            // Read the row through its place: binding it copied the whole row
+            // (its Symbol's Strings) for every candidate.
+            if table.bindings[index].frame == frame && (module_frame || table.position_free || table.bindings[index].symbol.span.start <= use_span.start) -> return Val(index)
             cursor -= 1
         }
         frame = table.frames[frame].parent
@@ -1848,7 +2097,7 @@ fn sema_scope_declaration_site(environment: SemaScopeEnvironment, program: SemaP
         // (earlier modules first, functions before nominals in one module).
         function_module := -1
         function_row := -1
-        if graph.callable_rows.get(id.key) == .Val(callable) {
+        if sema_registration_callable_row(graph, id.key) == .Val(callable) {
             if callable == .Function(module_index, row) {
                 function_module = module_index
                 function_row = row
@@ -1942,6 +2191,29 @@ fn sema_scope_declaration_struct(environment: SemaScopeEnvironment, program: Sem
 // row copied the whole declaration, methods included, on every field read.
 fn sema_scope_nominal_struct(graph: SemaRegistrationGraph, module_index: Int, row: Int) -> SemaScopeStructShape? {
     if graph.modules[module_index].nominals[row].source == .SourceAST(item) -> return sema_scope_item_struct(item)
+    None
+}
+
+// The labels of a struct declaration's `state { … }` section (empty when it
+// has none); none when sema_scope_resolve_declaration(environment, id) is not
+// a struct.
+fn sema_scope_declaration_struct_states(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> [String]? {
+    site :: sema_scope_declaration_site(environment, program, id) ?? return None
+    if site == .Local(index) -> return sema_scope_item_struct_states(environment.declarations[index].item)
+    if site == .Nominal(module_index, row) {
+        if program.registration_graph == .Val(graph) {
+            if graph.modules[module_index].nominals[row].source == .SourceAST(item) -> return sema_scope_item_struct_states(item)
+        }
+    }
+    None
+}
+
+fn sema_scope_item_struct_states(item: Item) -> [String]? {
+    if item == .Struct(definition) {
+        declared :: definition.state ?? return Val([String]{})
+        labels :: loop member in declared.states -> member.name
+        return Val(labels)
+    }
     None
 }
 

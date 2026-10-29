@@ -1,0 +1,15 @@
+use core.encoding.hex as comptime_diff_hex
+
+STAMP :: comptime { DateTime{"2026-08-07T12:00:00Z"} }
+EXPECTED :: comptime { STAMP.to_string() }
+
+fn run() {
+    runtime :: DateTime{"2026-08-07T12:00:00Z"}
+    comptime_diff_frame("{EXPECTED}", "{runtime.to_string()}")
+
+}
+
+fn comptime_diff_frame(expected_text: String, actual_text: String) {
+    print("{comptime_diff_hex.encode(expected_text.bytes())}")
+    print("{comptime_diff_hex.encode(actual_text.bytes())}")
+}

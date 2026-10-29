@@ -1,5 +1,5 @@
 // Allocation ledger-zero: pending RtL8a6 ProgramAllocator facts SHA.
-// Pipe24 ownership/position witnesses against real Jet allocation and OS fds.
+// Pipe40 ownership/position witnesses against real Jet allocation and OS fds.
 // No Rust layout, fake allocator, synthetic stop or fixed host line iterator.
 #define _POSIX_C_SOURCE 200809L
 #include <assert.h>
@@ -164,7 +164,7 @@ int main(void) {
         int fd = transferred_fd;
         Word first = clones[family](holder), second = clones[family](holder);
         assert(first == holder && second == holder);
-        assert(*(Word *)holder == 3); // Canonical Pipe24 refs word.
+        assert(*(Word *)holder == 3); // Canonical Pipe40 refs word.
         // One refill contains all three lines. Interleaving distinct clones
         // must share buffered position, not only the kernel fd offset.
         line(first, bytes, 3);

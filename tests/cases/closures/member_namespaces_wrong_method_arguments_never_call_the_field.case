@@ -1,0 +1,10 @@
+# tests/closures.rs::member_namespaces_wrong_method_arguments_never_call_the_field at tests/closures.rs:513; hand-port
+fixture: member_namespaces_wrong_method_arguments_never_call_the_field.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # tests/closures.rs:524 sema errors
+stderr: ~ "Error [E0766]" # tests/closures.rs:525 the method call is checked, E0766
+stderr: ~ "amount" # tests/closures.rs:525 naming the missing argument
+stderr: !~ "[E0105]" # tests/closures.rs:526 no duplicate-member error

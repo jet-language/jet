@@ -1,0 +1,31 @@
+// CommonTypes.rs:2715-2807,6975-6984 Clock; MathRandomTime.rs:45-47 jet_std_clock_new.
+// Natively a Clock is only ever ClockState::Manual (no route builds the system
+// clock), so Clock8 owns its one millisecond word: now@0. Rust's Clone of a
+// manual clock is a new independent manual clock at the same instant.
+CLOCK_BYTES :: I64{8}
+#Export(c) fn jet_std_clock_new(seed: I64) -> I64 {
+    now :: jet_int_owned_to_i64(seed)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    clock :: jet_rt_alloc(CLOCK_BYTES, I64{8})
+    rt_text_store(clock, now)
+    clock
+}
+#Export(c) fn jet_rt_handle_clone_clock(value: I64) -> I64 {
+    clock :: jet_rt_alloc(CLOCK_BYTES, I64{8})
+    rt_text_store(clock, rt_text_word(value))
+    clock
+}
+#Export(c) fn jet_rt_handle_drop_clock(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_free(value, CLOCK_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_clock(left: I64, right: I64) -> Bool { rt_text_word(left) == rt_text_word(right) }
+// "Clock { now: N }" for both Show and Debug.
+#Export(c) fn jet_rt_handle_show_clock(value: I64) -> I64 {
+    target :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(target, rt_static_text("Clock {{ now: "))
+    rt_text_push_number(target, rt_text_word(value))
+    jet_rt_string_builder_push(target, rt_static_text(" }}"))
+    jet_rt_string_builder_finish(target)
+}
+#Export(c) fn jet_rt_handle_debug_clock(value: I64) -> I64 { jet_rt_handle_show_clock(value) }

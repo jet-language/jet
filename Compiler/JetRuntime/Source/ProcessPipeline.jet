@@ -1,0 +1,568 @@
+// Process.rs:2051-2455 jet_process_spec_pipeline on the HostSpawn Child72 seam.
+// Rust's drain and relay threads become one nonblocking pump on the waiting
+// task: every stage's stderr, the final stdout and each bounded relay advance
+// whenever the wait loop runs, and the task parks only when nothing moved.
+// Stage128 rows: native0 finished8 started16 errfd24 errtext32 used40 limit48
+// (-1 = no limit) relaysrc56 relaydst64 relaybuf72 start80 end88 stop96
+// relayerr104 relayactive112 errerror120. Top64: outfd0 outtext8 outerror16
+// limithit24 cancel32 exceeded40 count48 scratch56.
+PIPELINE_STAGE_BYTES :: I64{128}
+PIPELINE_TOP_BYTES :: I64{64}
+PIPELINE_CHUNK_BYTES :: I64{16384}
+PIPELINE_SCRATCH_BYTES :: I64{16448}
+
+fn pipeline_row(rows: I64, index: I64) -> I64 { rows + index * PIPELINE_STAGE_BYTES }
+fn pipeline_pid(row: I64) -> I64 { fd_word(fd_word(row, I64{0}), I64{8}) }
+fn pipeline_take_stream(native: I64, offset: I64) -> I64 {
+    sync_mutex_lock(native)
+    number :: fd_word(native, offset)
+    fd_put(native, offset, I64{-1})
+    sync_mutex_unlock(native)
+    number
+}
+fn pipeline_nonblocking(number: I64) {
+    if (number < I64{0}) -> return
+    flags :: host_call(I64{72}, number, I64{3}, I64{0})
+    if (flags >= I64{0}) -> _ := host_call(I64{72}, number, I64{4}, flags.bit_or(I64{2048}))
+}
+fn pipeline_close(slot: I64) {
+    spawn_close(fd_word(slot, I64{0}))
+    fd_put(slot, I64{0}, I64{-1})
+}
+// Process.rs:1942-1956: SIGKILL every spawned stage's process group.
+fn pipeline_stop_groups(rows: I64, count: I64) {
+    at := I64{0}
+    loop at < count {
+        row :: pipeline_row(rows, at)
+        if (fd_word(row, I64{0}) != I64{0}) -> _ := host_call(I64{62}, I64{0} - pipeline_pid(row), I64{9}, I64{0})
+        at += I64{1}
+    }
+}
+// Process.rs:1913-1940: kill each group and child, then reap every stage.
+fn pipeline_cleanup(rows: I64, count: I64, scratch: I64) {
+    at := I64{0}
+    loop at < count {
+        row :: pipeline_row(rows, at)
+        native :: fd_word(row, I64{0})
+        if (native != I64{0}) {
+            _ := host_call(I64{62}, I64{0} - pipeline_pid(row), I64{9}, I64{0})
+            if (fd_word(native, I64{16}) != I64{1}) -> _ := host_call(I64{62}, pipeline_pid(row), I64{9}, I64{0})
+        }
+        at += I64{1}
+    }
+    at = I64{0}
+    loop at < count {
+        row :: pipeline_row(rows, at)
+        native :: fd_word(row, I64{0})
+        if (native != I64{0}) {
+            _ := jet_process_wait_raw(native, false, scratch, scratch + I64{8})
+            fd_put(row, I64{8}, I64{1})
+        }
+        at += I64{1}
+    }
+}
+// Process.rs:1922-1931 after a stage's own wait: its group may still hold pipes.
+fn pipeline_stop_after_wait(row: I64) {
+    _ := host_call(I64{62}, I64{0} - pipeline_pid(row), I64{9}, I64{0})
+}
+// Process.rs jet_process_output_reserve against the stage's shared budget.
+fn pipeline_reserve(row: I64, count: I64) -> I64 {
+    limit :: fd_word(row, I64{48})
+    if (limit < I64{0}) -> return count
+    used :: fd_word(row, I64{40})
+    room :: if (limit > used) -> limit - used else -> I64{0}
+    kept :: if (room < count) -> room else -> count
+    fd_put(row, I64{40}, used + kept)
+    kept
+}
+fn pipeline_read(number: I64, buffer: I64) -> I64 {
+    loop {
+        count :: host_call(I64{0}, number, buffer, PIPELINE_CHUNK_BYTES)
+        if (count != I64{-4}) -> return count
+    }
+}
+// Process.rs:1301-1374 jet_process_drain_reader for one pipe: reads until it
+// would block; EOF closes; a read error cancels the pipeline; a budget
+// overrun keeps the bounded prefix, records the limit and stops every group.
+fn pipeline_drain(top: I64, rows: I64, slot: I64, text: I64, error: I64, budget: I64, label: I64) -> Bool {
+    moved := false
+    scratch :: fd_word(top, I64{56})
+    loop fd_word(slot, I64{0}) >= (I64{0}) {
+        count :: pipeline_read(fd_word(slot, I64{0}), scratch)
+        if (count == I64{-11}) -> return moved
+        moved = true
+        if (count < I64{0}) {
+            if (fd_word(error, I64{0}) == I64{0}) -> _ := host_io_other_take(HOST_IO_OP_READ, jet_rt_string_clone(label), host_errno_cause(I64{0} - count), error)
+            fd_put(top, I64{32}, I64{1})
+            pipeline_stop_groups(rows, fd_word(top, I64{48}))
+            pipeline_close(slot)
+            return true
+        }
+        if (count == I64{0}) {
+            pipeline_close(slot)
+            return true
+        }
+        kept :: pipeline_reserve(budget, count)
+        if (kept != I64{0}) -> rt_text_append(text, scratch, kept)
+        if (kept < count) {
+            fd_put(top, I64{40}, I64{1})
+            fd_put(top, I64{24}, I64{1})
+            pipeline_stop_groups(rows, fd_word(top, I64{48}))
+            pipeline_close(slot)
+            return true
+        }
+    }
+    moved
+}
+fn pipeline_relay_fail(top: I64, rows: I64, row: I64, errno: I64) {
+    if (fd_word(row, I64{104}) == I64{0}) -> _ := host_io_other_take(HOST_IO_OP_READ, jet_rt_string_clone(rt_static_text("pipeline stdout")), host_errno_cause(errno), row + I64{104})
+    fd_put(top, I64{32}, I64{1})
+    pipeline_stop_groups(rows, fd_word(top, I64{48}))
+    pipeline_relay_end(row)
+}
+fn pipeline_relay_end(row: I64) {
+    pipeline_close(row + I64{56})
+    pipeline_close(row + I64{64})
+    fd_put(row, I64{112}, I64{0})
+}
+// Process.rs:1975-2016 jet_process_forward_pipeline_output into stage `row`
+// from the previous stage, whose row owns the limit and the shared budget.
+fn pipeline_relay(top: I64, rows: I64, row: I64, previous: I64) -> Bool {
+    if (fd_word(row, I64{112}) == I64{0}) -> return false
+    moved := false
+    buffer :: fd_word(row, I64{72})
+    loop {
+        start :: fd_word(row, I64{80})
+        end :: fd_word(row, I64{88})
+        if (start < end) {
+            written :: host_call(I64{1}, fd_word(row, I64{64}), buffer + start, end - start)
+            if (written == I64{-4}) -> next
+            if (written == I64{-11}) -> return moved
+            if (written < I64{0}) {
+                pipeline_relay_fail(top, rows, row, I64{0} - written)
+                return true
+            }
+            fd_put(row, I64{80}, start + written)
+            moved = true
+            next
+        }
+        if (fd_word(row, I64{96}) != I64{0}) {
+            // Publish the bounded prefix before stopping the tree.
+            fd_put(top, I64{24}, I64{1})
+            pipeline_stop_groups(rows, fd_word(top, I64{48}))
+            pipeline_relay_end(row)
+            return true
+        }
+        count :: pipeline_read(fd_word(row, I64{56}), buffer)
+        if (count == I64{-11}) -> return moved
+        moved = true
+        if (count < I64{0}) {
+            pipeline_relay_fail(top, rows, row, I64{0} - count)
+            return true
+        }
+        if (count == I64{0}) {
+            pipeline_relay_end(row)
+            return true
+        }
+        kept :: pipeline_reserve(previous, count)
+        fd_put(row, I64{80}, I64{0})
+        fd_put(row, I64{88}, kept)
+        if (kept < count) -> fd_put(row, I64{96}, I64{1})
+    }
+}
+fn pipeline_pump(top: I64, rows: I64) -> Bool {
+    count :: fd_word(top, I64{48})
+    moved := false
+    at := I64{0}
+    loop at < count {
+        row :: pipeline_row(rows, at)
+        if (at != I64{0} && pipeline_relay(top, rows, row, pipeline_row(rows, at - I64{1}))) -> moved = true
+        if pipeline_drain(top, rows, row + I64{24}, fd_word(row, I64{32}), row + I64{120}, row, rt_static_text("pipeline stderr")) -> moved = true
+        at += I64{1}
+    }
+    if pipeline_drain(top, rows, top, fd_word(top, I64{8}), top + I64{16}, pipeline_row(rows, count - I64{1}), rt_static_text("pipeline stdout")) -> moved = true
+    moved
+}
+fn pipeline_open(top: I64, rows: I64) -> Bool {
+    if (fd_word(top, I64{0}) >= I64{0}) -> return true
+    at := I64{0}
+    loop at < fd_word(top, I64{48}) {
+        row :: pipeline_row(rows, at)
+        if (fd_word(row, I64{24}) >= I64{0} || fd_word(row, I64{112}) != I64{0}) -> return true
+        at += I64{1}
+    }
+    false
+}
+// Drain to EOF: the joins in Process.rs:2408-2410. `idle` is a zero word the
+// pump sleeps on for 1ms when no pipe moved.
+fn pipeline_finish_io(top: I64, rows: I64, idle: I64) {
+    fd_put(idle, I64{0}, I64{0})
+    loop pipeline_open(top, rows) {
+        if !pipeline_pump(top, rows) -> _ := sync_wait(idle, I64{0}, sync_deadline(I64{1000000}))
+    }
+}
+// Process.rs:2581-2594: SIGXCPU under a declared CPU limit.
+fn pipeline_status_limit(status: I64, spec: I64) -> I64 {
+    if (fd_word(spec, PROCESS_SPEC_CPU_TIME_LIMIT) != I64{0} && status.bit_and(I64{127}) == I64{24}) -> return PROCESS_RESOURCE_CPU_TIME
+    I64{-1}
+}
+fn pipeline_free(top: I64, rows: I64) {
+    count :: fd_word(top, I64{48})
+    pipeline_close(top)
+    jet_rt_string_drop(fd_word(top, I64{8}))
+    jet_rt_handle_drop_io_error(fd_word(top, I64{16}))
+    at := I64{0}
+    loop at < count {
+        row :: pipeline_row(rows, at)
+        pipeline_close(row + I64{24})
+        pipeline_relay_end(row)
+        jet_rt_string_drop(fd_word(row, I64{32}))
+        if (fd_word(row, I64{72}) != I64{0}) -> jet_rt_free(fd_word(row, I64{72}), PIPELINE_CHUNK_BYTES, I64{1})
+        jet_rt_handle_drop_io_error(fd_word(row, I64{104}))
+        jet_rt_handle_drop_io_error(fd_word(row, I64{120}))
+        jet_process_drop_raw(fd_word(row, I64{0}))
+        at += I64{1}
+    }
+    jet_rt_free(fd_word(top, I64{56}), PIPELINE_SCRATCH_BYTES, I64{8})
+    jet_rt_free(rows, count * PIPELINE_STAGE_BYTES, I64{8})
+    jet_rt_free(top, PIPELINE_TOP_BYTES, I64{8})
+}
+fn pipeline_fail(top: I64, rows: I64, error: I64, err: I64) -> I64 {
+    fd_put(err, I64{0}, error)
+    pipeline_free(top, rows)
+    I64{0}
+}
+// Spawn one stage. The previous stage's stdout is the kernel pipe into this
+// stage's stdin, or (limited previous stage) a relay this task forwards.
+fn pipeline_spawn(spec: I64, input: I64, relayed: Bool, last: Bool, err: I64) -> I64 {
+    prepared :: jet_rt_handle_clone_process_spec(spec)
+    // Pipeline stages always join their own process group (Process.rs:2151).
+    fd_put(prepared, PROCESS_SPEC_DETACHED, I64{0})
+    if !last -> fd_put(prepared, PROCESS_SPEC_STDOUT, PROCESS_STREAM_STREAM)
+    if (input >= I64{0} || relayed) {
+        encoding_enum_drop(fd_word(prepared, PROCESS_SPEC_STDIN))
+        fd_put(prepared, PROCESS_SPEC_STDIN, process_raw_box(if relayed -> PROCESS_STREAM_STREAM else -> HOST_PROCESS_STREAM_INHERIT))
+    }
+    if (input >= I64{0} && !relayed) {
+        dirs := fd_word(prepared, PROCESS_SPEC_DIRECTORIES)
+        if (dirs == I64{0}) {
+            dirs = data_sequence_new(I64{1}, I64{24})
+            fd_put(prepared, PROCESS_SPEC_DIRECTORIES, dirs)
+        }
+        row :: data_sequence_reserve(dirs, I64{24})
+        fd_put(row, I64{0}, jet_fd_adopt_unbuffered_raw(input, I64{0}))
+        fd_put(row, I64{8}, I64{0})
+        fd_put(row, I64{16}, I64{0})
+        fd_put(dirs, I64{0}, fd_word(dirs, I64{0}) + I64{1})
+    }
+    native :: process_execution_launch_native(prepared, err)
+    jet_rt_handle_drop_process_spec(prepared)
+    native
+}
+fn pipeline_needs_relay(spec: I64) -> Bool {
+    limit :: fd_word(spec, PROCESS_SPEC_OUTPUT_LIMIT)
+    limit != I64{0} && fd_word(limit, I64{0}) != PROCESS_SPEC_DEFAULT_OUTPUT_LIMIT
+}
+fn pipeline_secrets(specs: I64, count: I64) -> I64 {
+    secrets :: data_sequence_new(I64{0}, I64{8})
+    at := I64{0}
+    loop at < count {
+        own :: process_execution_secrets(fd_word(specs, at * I64{8}))
+        index := I64{0}
+        loop index < fd_word(own, I64{0}) {
+            process_text_list_push(secrets, fd_word(fd_word(own, I64{16}), index * I64{8}))
+            index += I64{1}
+        }
+        process_text_list_drop(own, false)
+        at += I64{1}
+    }
+    // Stable descending length, then adjacent dedup (Process.rs:2440-2441).
+    data :: fd_word(secrets, I64{16})
+    at = I64{1}
+    loop at < fd_word(secrets, I64{0}) {
+        j := at
+        loop j > (I64{0}) && rt_text_len(fd_word(data, j * I64{8})) > rt_text_len(fd_word(data, (j - I64{1}) * I64{8})) {
+            value :: fd_word(data, j * I64{8})
+            fd_put(data, j * I64{8}, fd_word(data, (j - I64{1}) * I64{8}))
+            fd_put(data, (j - I64{1}) * I64{8}, value)
+            j -= I64{1}
+        }
+        at += I64{1}
+    }
+    read := I64{0}
+    write := I64{0}
+    loop read < fd_word(secrets, I64{0}) {
+        value :: fd_word(data, read * I64{8})
+        if (write != I64{0} && jet_rt_string_eq(value, fd_word(data, (write - I64{1}) * I64{8}))) { jet_rt_string_drop(value) } else {
+            fd_put(data, write * I64{8}, value)
+            write += I64{1}
+        }
+        read += I64{1}
+    }
+    fd_put(secrets, I64{0}, write)
+    secrets
+}
+fn pipeline_text(builder: I64) -> I64 { rt_text_copy(rt_text_data(builder), rt_text_len(builder)) }
+#Export(c) fn jet_std_process_pipeline(specs: I64, length: I64, ok: I64, err: I64) -> I64 {
+    count :: if (specs == I64{0} || length <= I64{0}) -> I64{0} else -> length
+    if (count == I64{0}) -> return compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_RESOLVE, rt_static_text("process.pipeline([])"), I64{0}, jet_rt_string_clone(rt_static_text("process.pipeline needs at least one command")), err)
+    at := I64{0}
+    loop at < count {
+        if (fd_word(fd_word(specs, at * I64{8}), PROCESS_SPEC_POLICY_WIRE) != I64{0}) -> return host_io_other_take(HOST_IO_OP_RESOLVE, jet_rt_string_clone(rt_static_text("process.pipeline")), jet_rt_string_clone(rt_static_text("authority-bound pipelines need one auditable launch transaction; refusing before spawn")), err)
+        at += I64{1}
+    }
+    direct := true
+    at = I64{0}
+    loop at < count {
+        spec :: fd_word(specs, at * I64{8})
+        if (fd_word(spec, PROCESS_SPEC_TIMEOUT) != I64{0} || fd_word(spec, PROCESS_SPEC_MEMORY_LIMIT) != I64{0} || fd_word(spec, PROCESS_SPEC_OPEN_FILE_LIMIT) != I64{0}) -> direct = false
+        at += I64{1}
+    }
+    top :: jet_rt_alloc(PIPELINE_TOP_BYTES, I64{8})
+    coll_zero(top, PIPELINE_TOP_BYTES)
+    fd_put(top, I64{0}, I64{-1})
+    fd_put(top, I64{8}, jet_rt_string_builder_new())
+    fd_put(top, I64{48}, count)
+    fd_put(top, I64{56}, jet_rt_alloc(PIPELINE_SCRATCH_BYTES, I64{8}))
+    scratch :: fd_word(top, I64{56})
+    rows :: jet_rt_alloc(count * PIPELINE_STAGE_BYTES, I64{8})
+    coll_zero(rows, count * PIPELINE_STAGE_BYTES)
+    at = I64{0}
+    loop at < count {
+        row :: pipeline_row(rows, at)
+        limit :: fd_word(fd_word(specs, at * I64{8}), PROCESS_SPEC_OUTPUT_LIMIT)
+        fd_put(row, I64{24}, I64{-1})
+        fd_put(row, I64{32}, jet_rt_string_builder_new())
+        fd_put(row, I64{48}, if (limit == I64{0}) -> I64{-1} else -> { if (fd_word(limit, I64{0}) < I64{0}) -> I64{0} else -> fd_word(limit, I64{0}) })
+        fd_put(row, I64{56}, I64{-1})
+        fd_put(row, I64{64}, I64{-1})
+        at += I64{1}
+    }
+    previous_stdout := I64{-1}
+    at = I64{0}
+    loop at < count {
+        spec :: fd_word(specs, at * I64{8})
+        row :: pipeline_row(rows, at)
+        last :: at + I64{1} == count
+        relayed :: at != I64{0} && pipeline_needs_relay(fd_word(specs, (at - I64{1}) * I64{8}))
+        input :: previous_stdout
+        previous_stdout = I64{-1}
+        if (fd_word(spec, PROCESS_SPEC_TERMINAL) != I64{0}) {
+            spawn_close(input)
+            pipeline_cleanup(rows, count, scratch)
+            _ := process_execution_error(spec, HOST_IO_OP_RESOLVE, jet_rt_string_clone(rt_static_text("terminal sessions cannot be used as pipeline stages; spawn the session directly")), err)
+            pipeline_free(top, rows)
+            return I64{0}
+        }
+        native :: pipeline_spawn(spec, if relayed -> I64{-1} else -> input, relayed, last, err)
+        if (native == I64{0}) {
+            if relayed -> spawn_close(input)
+            pipeline_cleanup(rows, count, scratch)
+            pipeline_free(top, rows)
+            return I64{0}
+        }
+        fd_put(row, I64{0}, native)
+        fd_put(row, I64{16}, process_execution_now())
+        if relayed {
+            fd_put(row, I64{56}, input)
+            fd_put(row, I64{64}, pipeline_take_stream(native, I64{32}))
+            fd_put(row, I64{72}, jet_rt_alloc(PIPELINE_CHUNK_BYTES, I64{1}))
+            fd_put(row, I64{112}, I64{1})
+            pipeline_nonblocking(input)
+            pipeline_nonblocking(fd_word(row, I64{64}))
+        }
+        previous_stdout = pipeline_take_stream(native, I64{40})
+        fd_put(row, I64{24}, pipeline_take_stream(native, I64{48}))
+        pipeline_nonblocking(fd_word(row, I64{24}))
+        at += I64{1}
+    }
+    fd_put(top, I64{0}, previous_stdout)
+    pipeline_nonblocking(previous_stdout)
+    code := I64{0}
+    success := true
+    timed_out := false
+    output_limit_exceeded := false
+    resource_limit := I64{-1}
+    wait_error := I64{0}
+    cancelled := false
+    park :: sync_park_new()
+    wait :: scratch + I64{16384}
+    index := I64{0}
+    loop index < count {
+        if (fd_word(pipeline_row(rows, index), I64{8}) != I64{0}) {
+            index += I64{1}
+            next
+        }
+        stop := false
+        loop {
+            moved := pipeline_pump(top, rows)
+            if (!direct && fd_word(top, I64{24}) != I64{0}) {
+                pipeline_cleanup(rows, count, wait)
+                output_limit_exceeded = true
+                stop = true
+                break
+            }
+            if (!direct && fd_word(top, I64{32}) != I64{0}) {
+                pipeline_cleanup(rows, count, wait)
+                stop = true
+                break
+            }
+            stage := if direct -> index else -> I64{0}
+            loop stage < count {
+                row :: pipeline_row(rows, stage)
+                if (fd_word(row, I64{8}) != I64{0}) {
+                    stage += I64{1}
+                    next
+                }
+                if !direct {
+                    limit :: process_spec_live_limit(pipeline_pid(row), fd_word(specs, stage * I64{8}), scratch)
+                    if (limit >= I64{0}) {
+                        pipeline_cleanup(rows, count, wait)
+                        resource_limit = limit
+                        stop = true
+                        break
+                    }
+                }
+                result :: jet_process_wait_raw(fd_word(row, I64{0}), true, wait, wait + I64{8})
+                if (result < I64{0}) {
+                    errno :: fd_word(wait, I64{16})
+                    pipeline_cleanup(rows, count, wait)
+                    _ := host_io_other_take(HOST_IO_OP_CLOSE, jet_rt_string_clone(rt_static_text("pipeline process")), host_errno_cause(errno), scratch + I64{16376})
+                    wait_error = fd_word(scratch, I64{16376})
+                    stop = true
+                    break
+                }
+                if (result > I64{0}) {
+                    moved = true
+                    status :: fd_word(wait, I64{0})
+                    limit :: pipeline_status_limit(status, fd_word(specs, stage * I64{8}))
+                    if (limit >= I64{0}) {
+                        pipeline_cleanup(rows, count, wait)
+                        resource_limit = limit
+                        stop = true
+                        break
+                    }
+                    fd_put(row, I64{8}, I64{1})
+                    pipeline_stop_after_wait(row)
+                    if (status != I64{0}) {
+                        success = false
+                        code = if (status.bit_and(I64{127}) == I64{0}) -> (status >> I64{8}).bit_and(I64{255}) else -> I64{-1}
+                    }
+                }
+                if direct -> break
+                stage += I64{1}
+            }
+            if stop -> break
+            if (fd_word(pipeline_row(rows, index), I64{8}) != I64{0}) -> break
+            if !direct {
+                now :: process_execution_now()
+                expired := false
+                stage = I64{0}
+                loop stage < count {
+                    timeout :: fd_word(fd_word(specs, stage * I64{8}), PROCESS_SPEC_TIMEOUT)
+                    if (fd_word(pipeline_row(rows, stage), I64{8}) == I64{0} && timeout != I64{0}) {
+                        allowed :: if (fd_word(timeout, I64{0}) < I64{0}) -> I64{0} else -> fd_word(timeout, I64{0})
+                        if ((now - fd_word(pipeline_row(rows, stage), I64{16})) /% I64{1000000} >= allowed) -> expired = true
+                    }
+                    stage += I64{1}
+                }
+                if expired {
+                    pipeline_cleanup(rows, count, wait)
+                    timed_out = true
+                    success = false
+                    stop = true
+                    break
+                }
+            }
+            if !moved {
+                if (scheduler_yield(rt_static_text("process wait"), park, I64{10000000}) != I64{0}) {
+                    cancelled = true
+                    stop = true
+                    break
+                }
+            }
+        }
+        if stop -> break
+        index += I64{1}
+    }
+    if (cancelled || fd_word(top, I64{32}) != I64{0}) -> pipeline_cleanup(rows, count, wait)
+    pipeline_finish_io(top, rows, scratch + I64{16440})
+    sync_park_drop(park)
+    if cancelled {
+        jet_rt_handle_drop_io_error(wait_error)
+        pipeline_free(top, rows)
+        return I64{0}
+    }
+    // Forwarders join last stage first (Process.rs:2018-2049).
+    at = count - I64{1}
+    loop at > (I64{0}) {
+        row :: pipeline_row(rows, at)
+        if (fd_word(row, I64{104}) != I64{0}) {
+            error :: fd_word(row, I64{104})
+            fd_put(row, I64{104}, I64{0})
+            jet_rt_handle_drop_io_error(wait_error)
+            return pipeline_fail(top, rows, error, err)
+        }
+        at -= I64{1}
+    }
+    // Drains: stdout first, then stderr in stage order (Process.rs:1399-1432).
+    drained :: scratch + I64{16384}
+    fd_put(drained, I64{0}, I64{0})
+    if (fd_word(top, I64{16}) != I64{0}) {
+        fd_put(drained, I64{0}, fd_word(top, I64{16}))
+        fd_put(top, I64{16}, I64{0})
+    } else {
+        _ := process_execution_validate_text(fd_word(top, I64{8}), rt_static_text("pipeline stdout"), drained)
+    }
+    errors :: jet_rt_string_builder_new()
+    at = I64{0}
+    loop at < count {
+        row :: pipeline_row(rows, at)
+        failed := I64{0}
+        if (fd_word(row, I64{120}) != I64{0}) {
+            failed = fd_word(row, I64{120})
+            fd_put(row, I64{120}, I64{0})
+        } else {
+            slot :: scratch + I64{16392}
+            fd_put(slot, I64{0}, I64{0})
+            if process_execution_validate_text(fd_word(row, I64{32}), rt_static_text("pipeline stderr"), slot) {
+                text :: fd_word(row, I64{32})
+                rt_text_append(errors, rt_text_data(text), rt_text_len(text))
+            } else {
+                failed = fd_word(slot, I64{0})
+            }
+        }
+        if (failed != I64{0}) {
+            if (fd_word(drained, I64{0}) == I64{0}) -> fd_put(drained, I64{0}, failed) else -> jet_rt_handle_drop_io_error(failed)
+        }
+        at += I64{1}
+    }
+    if (fd_word(drained, I64{0}) != I64{0}) {
+        jet_rt_string_drop(errors)
+        jet_rt_handle_drop_io_error(wait_error)
+        return pipeline_fail(top, rows, fd_word(drained, I64{0}), err)
+    }
+    if (wait_error != I64{0}) {
+        jet_rt_string_drop(errors)
+        return pipeline_fail(top, rows, wait_error, err)
+    }
+    if (resource_limit >= I64{0}) {
+        jet_rt_string_drop(errors)
+        return pipeline_fail(top, rows, jet_rt_record_new_io_error_resource_limit(resource_limit), err)
+    }
+    if (fd_word(top, I64{40}) != I64{0} || output_limit_exceeded || fd_word(top, I64{24}) != I64{0}) {
+        jet_rt_string_drop(errors)
+        return pipeline_fail(top, rows, jet_rt_record_new_io_error_resource_limit(PROCESS_RESOURCE_OUTPUT), err)
+    }
+    output :: pipeline_text(fd_word(top, I64{8}))
+    error_text :: pipeline_text(errors)
+    jet_rt_string_drop(errors)
+    secrets :: pipeline_secrets(specs, count)
+    receipt :: process_receipt_build(fd_word(specs, (count - I64{1}) * I64{8}), I64{0}, code, success, I64{0}, timed_out, output, error_text, secrets)
+    process_text_list_drop(secrets, false)
+    jet_rt_string_drop(output)
+    jet_rt_string_drop(error_text)
+    pipeline_free(top, rows)
+    fd_put(ok, I64{0}, receipt)
+    I64{1}
+}

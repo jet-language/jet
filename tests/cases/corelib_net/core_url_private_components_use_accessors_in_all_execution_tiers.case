@@ -1,0 +1,14 @@
+# tests/corelib_net.rs::core_url_private_components_use_accessors_in_all_execution_tiers at tests/corelib_net.rs:71; hand-port
+fixture: core_url_private_components_use_accessors_in_all_execution_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step run: jet run main.jet
+exit: 0
+stdout: = "https\nexample.test\n8443\n/a\nx=1\nfrag\nalice\nsecret\nhttps\nexample.test\n8443\n/a\nx=1\nfrag\nalice\nsecret\n"
+stderr: empty
+step build: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "https\nexample.test\n8443\n/a\nx=1\nfrag\nalice\nsecret\nhttps\nexample.test\n8443\n/a\nx=1\nfrag\nalice\nsecret\n"
+stderr: empty

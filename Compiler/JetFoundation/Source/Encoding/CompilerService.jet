@@ -59,10 +59,10 @@ enum JetConfigOutcome {
 // literal is its own value, so no program is checked for it.
 fn jet_config_plain_literal(expr: Expr) -> CtValue? Never! {
     if expr == {
-        .Paren(inner, _) -> jet_config_plain_literal(inner)
-        .Bool(flag, _) -> Val(CtValue.Bool{value: flag})
-        .Int(number, _, width, _) -> if width == None -> Val(CtValue.Int{value: number}) else -> None
-        .Str(parts, _) -> {
+        .Paren(inner, _, _) -> jet_config_plain_literal(inner)
+        .Bool(flag, _, _) -> Val(CtValue.Bool{value: flag})
+        .Int(number, _, width, _, _) -> if width == None -> Val(CtValue.Int{value: number}) else -> None
+        .Str(parts, _, _) -> {
             text := [String]{}
             loop part in parts {
                 if part == .Lit(piece) -> &text.push(piece) else -> return None
@@ -111,7 +111,7 @@ fn jet_config_program(expr: Expr, source: String, funcs: [String: Func], globals
     }
     &text.push(String.from_bytes(bytes.slice(cursor, span.end)) ?? "")
     body :: text.join("")
-    &lines.push("{JET_CONFIG_VALUE_NAME} :: prep {{ {body} }}")
+    &lines.push("{JET_CONFIG_VALUE_NAME} :: comptime {{ {body} }}")
     &lines.push("")
     Ok(lines.join("\n"))
 }

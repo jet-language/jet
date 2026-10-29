@@ -3,8 +3,8 @@
 // Hangar package, its action identity, the post-publication lock-digest
 // refresh, and adapter build-hook producer validation.
 
-STORE_PRODUCER_RECORD_HEADER :: prep { "jet-producer-record-v1" }
-STORE_PRIVATE_UNTRUSTED_BUILD :: prep { "private-untrusted" }
+STORE_PRODUCER_RECORD_HEADER :: "jet-producer-record-v1"
+STORE_PRIVATE_UNTRUSTED_BUILD :: "private-untrusted"
 
 // Immutable producer facts committed beside package/object relations.
 struct ProducerRecord {
@@ -142,7 +142,8 @@ fn store_canonical_producer(provider: String, immutable_source: String, source_d
 
 // Whether a producer was built as a private untrusted build.
 fn store_is_private_untrusted_build(producer: ProducerRecord) -> Bool Never! {
-    producer.facts.get("build.trust") == .Val(trust) && trust == STORE_PRIVATE_UNTRUSTED_BUILD
+    // workaround #5940(c): no `== Val(CONST)`.
+    (producer.facts.get("build.trust") ?? "") == STORE_PRIVATE_UNTRUSTED_BUILD
 }
 
 // The signed SLSA-style action identity of one cache admission.
@@ -209,7 +210,7 @@ fn store_refresh_lock_digest(verification: &StoreVerification, roots: HangarRoot
     transaction := AdmissionTransaction.new(&verification, roots)
     mode :: if producer.provider == "nix" -> RegistrationMode.AdmittedNix else -> RegistrationMode.Native
     batch := [StoreEntry]{refreshed}
-    transaction.commit(&batch, [AdmissionReceipt]{}, None, mode, None)
+    &transaction.commit(&batch, [AdmissionReceipt]{}, None, mode, None)
     Ok(batch[0])
 }
 
@@ -258,7 +259,7 @@ fn store_validate_build_hook_producer(producer: ProducerRecord, plan: AdapterPla
             if sandbox.level != SandboxLevel.Strong {
                 return Err(StoreError.Unsupported("executable adapter cache requires a native sandbox before launch: {sandbox.reason}"))
             }
-            mechanism :: sandbox.mechanism.as_str()
+            mechanism :: sandbox.mechanism
             if recorded_sandbox != Val(mechanism) -> return Err(store_hook_fact_mismatch("build.sandbox", mechanism, recorded_sandbox))
             if planned_sandbox != Val(mechanism) -> return Err(store_hook_fact_mismatch("adapter.build.sandbox", mechanism, planned_sandbox))
         }

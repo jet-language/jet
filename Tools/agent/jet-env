@@ -16,26 +16,22 @@ if [ "$#" -eq 0 ]; then
   echo "usage: Tools/agent/jet-env [full] <command> [args...]" >&2
   exit 64
 fi
-# The development command means this checkout's compiler, not the prebuilt Jet
-# package that the Nix shell also puts on PATH. Keep the package as bootstrap
-# fallback for a clean tree with no local binary yet.
-if [ "$1" = "jet" ] && [ -x "$repo/target/debug/jet" ]; then
+# The development command means the admitted native compiler named by $JET,
+# not the prebuilt Jet package the Nix shell may also put on PATH.
+if [ "$1" = "jet" ] && [ -n "${JET:-}" ]; then
   shift
-  set -- "$repo/target/debug/jet" "$@"
+  set -- "$JET" "$@"
 fi
 
-# Check after every environment boundary. direnv and nix can add a shared
-# target dir after the outer process starts, so checking only the caller's
-# environment leaves the same cross-worktree corruption door open.
-check_target_dir() {
-  local checkout="$1"
-
-  # /tmp is RAM-backed tmpfs on this machine; cargo artifacts or test scratch
-  # there fill swap and trigger kernel OOM kills. Use a disk path instead.
-  reject_tmpfs_path() {
-    local name="$1"
-    local value="$2"
-    local resolved
+# /tmp is RAM-backed tmpfs on this machine; build output or test scratch there
+# fills swap and triggers kernel OOM kills. Check after every environment
+# boundary: direnv and nix can import these variables after the outer process
+# starts.
+check_scratch_dirs() {
+  local name value resolved
+  for name in JET_SCRATCH_ROOT JET_TEST_SCRATCH_DIR JET_DEV_ORACLE_CACHE_DIR CARGO_TARGET_DIR; do
+    value="${!name:-}"
+    [ -n "$value" ] || continue
     resolved="$(realpath -m -- "$value")"
     case "$resolved" in
       /tmp|/tmp/*)
@@ -44,89 +40,17 @@ check_target_dir() {
         exit 64
         ;;
     esac
-  }
-
-  if [ -n "${CARGO_TARGET_DIR:-}" ]; then
-    reject_tmpfs_path CARGO_TARGET_DIR "$CARGO_TARGET_DIR"
-  fi
-  for scratch_var in JET_TEST_SCRATCH_DIR JET_DEV_ORACLE_CACHE_DIR; do
-    scratch_value="${!scratch_var:-}"
-    if [ -n "$scratch_value" ]; then
-      reject_tmpfs_path "$scratch_var" "$scratch_value"
-    fi
   done
-
-  # A target dir outside this checkout can be shared by another same-name
-  # checkout; cargo then reports "Finished" while target/debug/<bin> still holds
-  # the other checkout's binary with its embedded assets. Per-checkout caches
-  # only (card 1640).
-  if [ -n "${CARGO_TARGET_DIR:-}" ]; then
-    local target scratch_targets=""
-    target="$(realpath -m -- "$CARGO_TARGET_DIR")"
-    if [ -n "${JET_SCRATCH_ROOT:-}" ]; then
-      case "$JET_SCRATCH_ROOT" in
-        /*) ;;
-        *) echo "jet-env: JET_SCRATCH_ROOT must be absolute." >&2; exit 64 ;;
-      esac
-      reject_tmpfs_path JET_SCRATCH_ROOT "$JET_SCRATCH_ROOT"
-      scratch_targets="$(realpath -m -- "$JET_SCRATCH_ROOT/targets")"
-    fi
-    if [[ "$target" == "$checkout/"* ]]; then
-      :
-    elif [ -n "$scratch_targets" ] && [[ "$target" == "$scratch_targets/"* ]]; then
-      # Off-drive targets retain card 1640's one-checkout ownership rule.
-      mkdir -p -- "$target"
-      if [ -f "$target/.jet-checkout" ]; then
-        if [ "$(cat -- "$target/.jet-checkout")" != "$checkout" ]; then
-          echo "jet-env: $CARGO_TARGET_DIR belongs to $(cat -- "$target/.jet-checkout"), not $checkout." >&2
-          exit 64
-        fi
-      else
-        printf '%s\n' "$checkout" > "$target/.jet-checkout"
-      fi
-    else
-      echo "jet-env: CARGO_TARGET_DIR=$CARGO_TARGET_DIR is not checkout-owned." >&2
-      echo "jet-env: configure JET_SCRATCH_ROOT and use its targets/<name> directory." >&2
-      exit 64
-    fi
-  fi
 }
 
-set_default_target_dir() {
-  if [ -z "${CARGO_TARGET_DIR:-}" ]; then
-    export CARGO_TARGET_DIR="$1/target"
-  fi
-}
-
-set_default_target_dir "$repo"
-check_target_dir "$repo"
-
-# Cache wrappers are caller-selected; a missing debug directory does not imply
-# that sccache is wanted (release builds and immutable exports lack it too).
-# JET_NO_SCCACHE=1 disables wrappers imported by direnv/nix as well.
-# Agent commands keep incremental compilation disabled; lock-serialized build
-# targets opt in with JET_CARGO_INCREMENTAL=1.
+# Apply after direnv/nix as well: shell imports may replace the caller's
+# environment. A machine-wide fan-out of foreign helper builds (user Rust FFI,
+# measured peers) can exhaust shared RAM.
 ensure_command_resources() {
-  # Apply after direnv/nix as well: shell imports may replace the caller's
-  # environment. A machine-wide Cargo/test fan-out can exhaust shared RAM.
   export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}"
-  export RUST_TEST_THREADS="${RUST_TEST_THREADS:-1}"
-  if [ "${JET_CARGO_INCREMENTAL:-0}" = 1 ]; then
-    export CARGO_INCREMENTAL=1
-  else
-    export CARGO_INCREMENTAL=0
-  fi
-  # Recursive formatter/parser walks overflow the 2 MiB test-thread default.
-  if [ -z "${RUST_MIN_STACK:-}" ]; then
-    export RUST_MIN_STACK=8388608
-  fi
 }
 
-cache_mode_env() {
-  if [ "${JET_NO_SCCACHE:-0}" = 1 ]; then
-    unset RUSTC_WRAPPER RUSTC_WORKSPACE_WRAPPER
-  fi
-}
+check_scratch_dirs
 
 # `direnv export` returns cached environment assignments when `.envrc` has
 # been allowed. Execute the requested command once; never fall back after its
@@ -134,9 +58,7 @@ cache_mode_env() {
 if command -v direnv >/dev/null 2>&1; then
   if env_dump="$(cd "$repo" && JET_DEV_SHELL="$profile" direnv export bash 2>/dev/null)"; then
     eval "$env_dump"
-    set_default_target_dir "$repo"
-    check_target_dir "$repo"
-    cache_mode_env "$repo"
+    check_scratch_dirs
     ensure_command_resources
     exec "$@"
   fi
@@ -169,4 +91,4 @@ fi
 # shell from this checkout and return to the caller's directory for the command.
 caller_dir="$PWD"
 cd -- "$repo"
-exec nix develop "${shell_args[@]}" -c bash --noprofile --norc -c "cd -- $(printf %q "$caller_dir") || exit 64; $(declare -f check_target_dir set_default_target_dir cache_mode_env ensure_command_resources); set_default_target_dir $(printf %q "$repo"); check_target_dir $(printf %q "$repo"); cache_mode_env $(printf %q "$repo"); ensure_command_resources; exec $joined"
+exec nix develop "${shell_args[@]}" -c bash --noprofile --norc -c "cd -- $(printf %q "$caller_dir") || exit 64; $(declare -f check_scratch_dirs ensure_command_resources); check_scratch_dirs; ensure_command_resources; exec $joined"

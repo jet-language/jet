@@ -1,0 +1,32 @@
+UserID :: distinct Int
+Label :: distinct String
+#UnitFamily(Currency) { usd }
+
+fn checked_user(value: U64) -> UserID String! { return UserID.from_u64(value) }
+fn pass_user(value: UserID String!) -> UserID String! { return value.copy() }
+
+fn run() {
+    fallback :: UserID.from_int(0)
+    print(UserID.from_i8(-8).raw())
+    print(UserID.from_i16(-16).raw())
+    print(UserID.from_i32(-32).raw())
+    print(UserID.from_int(-64).raw())
+    print(UserID.from_u8(8).raw())
+    print(UserID.from_u16(16).raw())
+    print(UserID.from_u32(32).raw())
+    print((pass_user(checked_user(64)) ?? fallback).raw())
+    print((UserID.from_f32(3.75) ?? fallback).raw())
+    print((UserID.from_float(4.75) ?? fallback).raw())
+    print(Usd.from_i8(-8).raw())
+    print(Usd.from_i16(-16).raw())
+    print(Usd.from_i32(-32).raw())
+    print(Usd.from_int(-64).raw())
+    print(Usd.from_u8(8).raw())
+    print(Usd.from_u16(16).raw())
+    print(Usd.from_u32(32).raw())
+    print(Usd.from_u64(64).raw())
+    print(Usd.from_f32(3.75).raw())
+    print(Usd.from_float(4.75).raw())
+    label :: Label.from_string("converted")
+    print(label.raw())
+}

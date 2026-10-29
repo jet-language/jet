@@ -1,10 +1,9 @@
 
-fn build(b: BuildContext) -[Exec]> BuildPlan {
+fn build(b: Build) -[Exec]> {
     #Impure("workspace ceiling wins last") {
     action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf bad > stamp"], ["Exec"])
     app :: b.add_executable("app", ["run.jet"], [action])
-    return b.plan(app)
+    b.default(app)
     }
-    return b.plan()
 }
 fn run() {}

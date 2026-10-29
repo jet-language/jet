@@ -1,0 +1,218 @@
+// Inlining (O1, O2): bottom-up over the call graph (Opt.jet
+// ir_opt_bottom_up), so a callee is cloned in its final, already simplified
+// form and wrapper chains collapse into their callers. A direct Call is
+// replaced by the callee's body when the callee is not recursive, its size
+// (ir_opt_size) is at most the level's callee limit and the caller's budget
+// still covers it, it never writes a parameter, and its stops name the
+// caller's source file (selection reports a stop at the function's file, so a
+// callee whose arithmetic can stop is inlined only into its own file). At O2
+// a callee with one direct call site in the module is inlined there up to a
+// larger limit, outside the budget: its body then sees the caller's
+// arguments (constants, ranges), and the copy adds at most its own size.
+//
+// The body sits in a Block of its own. Parameters read the call's argument
+// slots (a callee that wrote one is refused); every other callee slot is a
+// new slot of the caller. `return v` becomes a move of v into the call's
+// result slot (an aggregate result: fresh frame storage and a copy of its
+// bytes, as the call's result storage) and a Br out of that Block. Lines of
+// a callee from another file become the call's line.
+//
+// Under `inline: always_marked` (IROptInline.Marked) only a callee marked
+// `#Inline(Always)` (IRFunction.inline_always) is taken, at every call site
+// that passes the checks above but the size limits and the budget.
+
+IR_OPT_INLINE_CALLEE_O1 :: 40
+IR_OPT_INLINE_BUDGET_O1 :: 200
+IR_OPT_INLINE_CALLEE_O2 :: 60
+IR_OPT_INLINE_BUDGET_O2 :: 400
+// A once-called callee (O2), and the caller size past which none is taken.
+IR_OPT_INLINE_ONCE_O2 :: 1500
+IR_OPT_INLINE_ONCE_CALLER_O2 :: 3000
+// The size limit of a marked callee under IROptInline.Marked: none.
+IR_OPT_INLINE_MARKED :: 1000000000
+
+// `caller`'s body with its selected call sites inlined, None when it selects
+// none. `bodies[g]` holds function g's final body (one row), or no row when
+// g's size is past ir_opt_inline_reach (it is never inlined); the caller's
+// own row and the rows of recursive functions are never read. `sites[g]`
+// counts the direct calls of g in the module; `once_called` takes the
+// once-called ones (O2); `inline` which callees are taken (Auto by size,
+// Marked only the `#Inline(Always)` ones).
+fn ir_opt_inline_build(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, recursive: [Bool], sites: [Int], once_called: Bool, level: Int, inline: IROptInline, report: &IROptReport) -> IRFunction? Never! {
+    limit :: if level >= 2 -> IR_OPT_INLINE_CALLEE_O2 else -> IR_OPT_INLINE_CALLEE_O1
+    budget := if level >= 2 -> IR_OPT_INLINE_BUDGET_O2 else -> IR_OPT_INLINE_BUDGET_O1
+    grown := ir_opt_size(caller)
+    selected_sites := [Bool]{}
+    any := false
+    loop at in 0..<caller.op.len() {
+        selected := false
+        if inline == .Marked {
+            selected = caller.op[at] == .Call && ir_opt_inline_marked(bodies, caller.a[at]) && ir_opt_inline_size(m, bodies, caller, at, recursive, IR_OPT_INLINE_MARKED) >= 0
+        } else {
+            once :: once_called && caller.op[at] == .Call && caller.a[at] >= 0 && caller.a[at] < sites.len() && sites[caller.a[at]] == 1
+            size :: if caller.op[at] != .Call -> -1 else if once -> ir_opt_inline_size(m, bodies, caller, at, recursive, IR_OPT_INLINE_ONCE_O2) else -> ir_opt_inline_size(m, bodies, caller, at, recursive, limit)
+            if size >= 0 && once && size > limit {
+                selected = grown + size <= IR_OPT_INLINE_ONCE_CALLER_O2
+            } else if size >= 0 {
+                selected = size <= budget
+                if selected -> budget -= size
+            }
+            if selected -> grown += size
+        }
+        if selected -> any = true
+        &selected_sites.push(selected)
+    }
+    if !any -> return None
+    out := ir_function_new(caller.name, caller.key, caller.symbol, caller.source_file, caller.line)
+    out.inline_always = caller.inline_always
+    out.symbol_hash = caller.symbol_hash
+    loop slot in 0..<caller.slot_type.len() -> _ := ir_slot(&out, caller.slot_type[slot], caller.slot_kind[slot], caller.slot_name[slot], caller.slot_line[slot])
+    out.result = caller.result
+    loop value in caller.args -> &out.args.push(value)
+    loop at in 0..<caller.op.len() {
+        if selected_sites[at] {
+            ir_opt_splice(m, &out, caller, at, bodies[caller.a[at]][0])
+            report.inlined_calls += 1
+        } else {
+            _ := ir_emit(&out, caller.op[at], caller.dst[at], caller.a[at], caller.b[at], caller.c[at], caller.code_line[at])
+        }
+    }
+    ir_opt_compact(&out)
+    Val(out)
+}
+
+// The size of the callee of the Call at `at` when it may be inlined there,
+// else -1. An asm leaf's code is its template, never IR to inline.
+fn ir_opt_inline_size(m: IRModule, bodies: [[IRFunction]], caller: IRFunction, at: Int, recursive: [Bool], limit: Int) -> Int Never! {
+    callee_id :: caller.a[at]
+    if callee_id < 0 || callee_id >= bodies.len() || recursive[callee_id] || bodies[callee_id].len() == 0 -> return -1
+    callee :: bodies[callee_id][0]
+    if callee.asm != None -> return -1
+    if caller.c[at] != callee.param_count -> return -1
+    if caller.dst[at] >= 0 && (callee.result < 0 || caller.slot_type[caller.dst[at]] != callee.result) -> return -1
+    // A parameter becomes the call's argument slot: same type rows only.
+    loop slot in 0..<callee.param_count {
+        if caller.slot_type[caller.args[caller.b[at] + slot]] != callee.slot_type[slot] -> return -1
+    }
+    size :: ir_opt_size(callee)
+    if size > limit -> return -1
+    loop k in 0..<callee.op.len() {
+        written :: ir_x64_write(callee, k)
+        if written >= 0 && written < callee.param_count -> return -1
+        if callee.source_file != caller.source_file && ir_opt_located(m, callee, k) -> return -1
+    }
+    size
+}
+
+// The largest ir_opt_size of `callee` that ir_opt_inline_build may inline at
+// one of its call sites: the once-called limit for a callee called once
+// (`once_called`, O2), else the level's callee limit. Under `inline` Marked
+// a `marked` callee has no limit and no other callee is inlined; under Off
+// none is (-1).
+fn ir_opt_inline_reach(sites: [Int], callee: Int, once_called: Bool, level: Int, inline: IROptInline, marked: Bool) -> Int Never! {
+    if inline == {
+        .Off -> return -1
+        .Marked -> return if marked -> IR_OPT_INLINE_MARKED else -> -1
+        .Auto -> {}
+    }
+    if once_called && callee >= 0 && callee < sites.len() && sites[callee] == 1 -> return IR_OPT_INLINE_ONCE_O2
+    if level >= 2 -> IR_OPT_INLINE_CALLEE_O2 else -> IR_OPT_INLINE_CALLEE_O1
+}
+
+// Whether function `callee` has a body here and is marked `#Inline(Always)`.
+fn ir_opt_inline_marked(bodies: [[IRFunction]], callee: Int) -> Bool Never! {
+    callee >= 0 && callee < bodies.len() && bodies[callee].len() > 0 && bodies[callee][0].inline_always
+}
+
+// Whether selection reports a stop of instruction `at` at the function's
+// own source file and line (X64Select: stop_if, located routes, shift stops).
+fn ir_opt_located(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
+    op :: f.op[at]
+    if op != .Add && op != .Sub && op != .Mul && op != .Div && op != .Rem && op != .FloorDiv && op != .Mod && op != .Shl && op != .Shr && op != .Neg -> return false
+    kind :: ir_x64_type(m, f, f.a[at]).kind
+    if kind == {
+        .Int -> op == .Div || op == .Rem || op == .FloorDiv || op == .Mod || op == .Shl || op == .Shr
+        .Word -> op == .Div || op == .Rem || op == .FloorDiv || op == .Mod || f.c[at] != IR_OVERFLOW_WRAP
+        else -> false
+    }
+}
+
+// The callee's body in place of the Call at `at` of `caller`, appended to `f`.
+fn ir_opt_splice(m: IRModule, f: &IRFunction, caller: IRFunction, at: Int, callee: IRFunction) Never! {
+    site_line :: caller.code_line[at]
+    same_file :: callee.source_file == caller.source_file
+    map := [Int]{}
+    loop slot in 0..<callee.slot_type.len() {
+        if slot < callee.param_count {
+            &map.push(caller.args[caller.b[at] + slot])
+            next
+        }
+        name :: if same_file -> callee.slot_name[slot] else -> -1
+        line :: if same_file -> callee.slot_line[slot] else -> 0
+        &map.push(ir_slot(&f, callee.slot_type[slot], callee.slot_kind[slot], name, line))
+    }
+    dst :: caller.dst[at]
+    callee_facts :: ir_opt_facts(callee)
+    _ := ir_emit(&f, IROp.Block, -1, -1, -1, -1, site_line)
+    depth := 0
+    loop k in 0..<callee.op.len() {
+        op :: callee.op[k]
+        line :: if same_file -> callee.code_line[k] else -> site_line
+        if op == .Return {
+            value :: callee.a[k]
+            if value >= 0 && dst >= 0 {
+                // Frame storage of the inlined body is the caller's now: the
+                // result can be that storage itself, like call-site storage.
+                own :: value >= callee.param_count && callee_facts.defs[value] == 1 && callee.op[callee_facts.def_at[value]] == .StackAddress
+                ir_opt_result(m, &f, dst, map[value], own, line)
+            }
+            _ := ir_emit(&f, IROp.Br, -1, depth, -1, -1, line)
+            next
+        }
+        if op == .End -> depth -= 1
+        ir_opt_emit_mapped(&f, callee, k, map, line)
+        if op == .Block || op == .Loop || op == .If -> depth += 1
+    }
+    _ := ir_emit(&f, IROp.End, -1, -1, -1, -1, site_line)
+}
+
+// The call's result slot `dst` takes the returned `value`: a move, or for an
+// aggregate not in the inlined body's own frame storage (`own`) a copy of
+// its bytes into fresh frame storage, as the call's result storage.
+fn ir_opt_result(m: IRModule, f: &IRFunction, dst: Int, value: Int, own: Bool, line: Int) Never! {
+    ty :: ir_x64_type(m, f, dst)
+    if ty.kind == .Aggregate && !own {
+        _ := ir_emit(&f, IROp.StackAddress, dst, ty.size, ty.align, -1, line)
+        _ := ir_emit(&f, IROp.CopyBytes, -1, dst, value, ty.size, line)
+        return
+    }
+    _ := ir_emit(&f, IROp.Move, dst, value, -1, -1, line)
+}
+
+// Callee instruction `k` with its slots through `map` (its argument list
+// copied into `f`'s args pool).
+fn ir_opt_emit_mapped(f: &IRFunction, callee: IRFunction, k: Int, map: [Int], line: Int) Never! {
+    op :: callee.op[k]
+    dst :: if callee.dst[k] >= 0 -> map[callee.dst[k]] else -> -1
+    a := callee.a[k]
+    b := callee.b[k]
+    c := callee.c[k]
+    if op == {
+        .Copy | .Move | .Drop | .Close | .Neg | .Not | .Convert | .Load | .Offset | .If | .BrIf | .CallIndirect -> a = map[a]
+        .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Concat | .CopyBytes -> {
+            a = map[a]
+            b = map[b]
+        }
+        .Store -> {
+            a = map[a]
+            c = map[c]
+        }
+        else -> {}
+    }
+    if op == .Call || op == .CallRuntime || op == .CallIndirect {
+        start :: f.args.len()
+        loop index in b..<(b + c) -> &f.args.push(map[callee.args[index]])
+        b = start
+    }
+    _ := ir_emit(&f, op, dst, a, b, c, line)
+}

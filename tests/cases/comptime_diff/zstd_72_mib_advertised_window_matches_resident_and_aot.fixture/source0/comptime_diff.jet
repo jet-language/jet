@@ -1,0 +1,15 @@
+use core.encoding.hex as comptime_diff_hex
+use core.archive.zstd as zstd
+
+EXPECTED :: comptime { zstd.decompress([40, 181, 47, 253, 0, 129, 41, 0, 0, 104, 101, 108, 108, 111]) ?? [U8]{ 255 } }
+
+fn run() {
+    actual :: zstd.decompress([40, 181, 47, 253, 0, 129, 41, 0, 0, 104, 101, 108, 108, 111]) ?? [U8]{ 255 }
+    comptime_diff_frame("{EXPECTED}", "{actual}")
+
+}
+
+fn comptime_diff_frame(expected_text: String, actual_text: String) {
+    print("{comptime_diff_hex.encode(expected_text.bytes())}")
+    print("{comptime_diff_hex.encode(actual_text.bytes())}")
+}

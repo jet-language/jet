@@ -10,9 +10,9 @@
 
 // Provider scratch liveness marker (Rust Provider::ACTIVE_TMP_MARKER). The
 // Store owns it because garbage collection sits below the Provider area.
-STORE_ACTIVE_TMP_MARKER :: prep { ".active" }
-STORE_ACTIVE_TMP_GRACE_SECONDS :: prep { 86400 }
-STORE_NANOS_PER_SECOND :: prep { 1000000000 }
+STORE_ACTIVE_TMP_MARKER :: ".active"
+STORE_ACTIVE_TMP_GRACE_SECONDS :: 86400
+STORE_NANOS_PER_SECOND :: 1000000000
 
 // The project and Hangar locks one clean holds, released at scope exit.
 struct CleanLocks {
@@ -494,11 +494,10 @@ fn store_maybe_auto_clean(verification: &StoreVerification, roots: HangarRoots) 
     hangar :: roots.hangar_dir()
     store_ensure_real_directory(hangar, "Hangar root")
     stamp :: files.join(hangar, STORE_AUTO_CLEAN_STAMP)
-    now :: time.instant()
     if sys.get("JETPACK_AUTO_CLEAN_ALWAYS") == None {
         if files.stat(stamp) == {
             .Ok(metadata) -> {
-                if now.unix_ns - (metadata.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")) < STORE_AUTO_CLEAN_AFTER_SECONDS * STORE_NANOS_PER_SECOND -> return Ok(None)
+                if time.unix_ns() - (metadata.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")) < STORE_AUTO_CLEAN_AFTER_SECONDS * STORE_NANOS_PER_SECOND -> return Ok(None)
             }
             .Err(_) -> {}
         }

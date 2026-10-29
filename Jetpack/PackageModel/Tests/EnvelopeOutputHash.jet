@@ -1,6 +1,14 @@
 // Claims ported from crates/jet-pkg-model/src/Envelope.rs #[cfg(test)].
 // Fixtures live under the process temp directory; host tools (`truncate`,
 // `touch`, `mkfifo`) stand in for the Rust tests' libc calls.
+use jet_pkg_model.[
+    ENVELOPE_ARCHIVE_MAGIC, Envelope, EnvelopeWalkEvent, EnvelopeWalkHook, EnvelopeWalkStage,
+    pkg_envelope_cas_key, pkg_envelope_hex8, pkg_envelope_mode, pkg_host_platform,
+    pkg_is_excluded_xattr, pkg_list_xattr_names, pkg_output_hash_of, pkg_reject_casefold_collisions,
+    pkg_sha256_hex, pkg_try_output_hash_of, pkg_try_output_hash_of_in_hangar,
+    pkg_try_output_hash_of_with_policy, pkg_u32_be_bytes, pkg_u64_be_bytes,
+    pkg_validate_path_component, pkg_validate_path_component_with_mode, pkg_xattr_value,
+]
 
 fn pkg_test_envelope_scratch(label: String) -[FS, Env]> String Never! {
     dir :: files.join(sys.temp_dir(), "env-{label}-{process.current_pid()}")

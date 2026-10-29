@@ -1,0 +1,10 @@
+# tests/marker_rule_signatures.rs::static_string_products_resolve_before_consumers at tests/marker_rule_signatures.rs:570; hand-port
+# Claim: LABEL/PAGE comptime strings feeding #HTML(PAGE) and #Test(LABEL) produce no E0930 (tests/marker_rule_signatures.rs:580-583)
+# Not ported: module.html_path == "index.html" and Item::Test/Distinct AST asserts (tests/marker_rule_signatures.rs:584-599): internal AST, no CLI equivalent
+fixture: static_string_products_resolve_before_consumers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # tests/marker_rule_signatures.rs:581 no E0930
+stderr: !~ "E0930" # tests/marker_rule_signatures.rs:581 no E0930

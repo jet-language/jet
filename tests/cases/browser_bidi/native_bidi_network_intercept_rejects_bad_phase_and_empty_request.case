@@ -1,0 +1,20 @@
+# tests/browser_bidi.rs::native_bidi_network_intercept_rejects_bad_phase_and_empty_request at tests/browser_bidi.rs:1724; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port})
+fixture: native_bidi_network_intercept_rejects_bad_phase_and_empty_request.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+requires: tool:node
+write: browser_bidi_network_hostile.jet native_bidi_network_intercept_rejects_bad_phase_and_empty_request.fixture/run.template
+step: jet build browser_bidi_network_hostile.jet
+exit: 0
+session network_hostile raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:network_hostile} network_hostile.json
+sleep: 500ms
+step run: built
+exit: 0
+stdout: = native_bidi_network_intercept_rejects_bad_phase_and_empty_request.1.out
+stdout: !~ "SECRET" # original predicate: !stdout.contains
+stderr: !~ "SECRET" # original predicate: !stderr.contains
+close network_hostile
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+stdout: !~ "network." # original predicate: no method equals or starts with it

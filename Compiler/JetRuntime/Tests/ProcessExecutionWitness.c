@@ -1,8 +1,9 @@
 // Real child plain ProcessSpec native ABI witness. No Rust layout reads: Spec,
 // ProcessReceipt and ProcessChild are opaque; receipt fields are read by the
 // physical offsets in ProcessExecutionReceipt.jet (code0 output8 errors16
-// success24 signal32 timed_out40). IOError is 56 bytes (kind0 op8 resource16
-// has_code24 code32 cause40 limit48).
+// success24 signal32 timed_out40; signal is an inline Int? word, 2^62 when
+// absent). IOError is 56 bytes (kind0 op8 resource16 has_code24 code32 cause40
+// limit48).
 #define _POSIX_C_SOURCE 200809L
 #include <errno.h>
 #include <signal.h>
@@ -35,6 +36,7 @@ typedef struct JetAuthority JetAuthority;
 #define STREAM_CAPTURE 2
 // HOST_IO_KIND_*: INVALID_INPUT=0 NOT_FOUND=1 RESOURCE_LIMIT=8 OTHER=7.
 #define KIND_INVALID_INPUT 0
+#define KIND_NOT_FOUND 1
 #define KIND_OTHER 7
 #define KIND_RESOURCE_LIMIT 8
 // HOST_IO_OP_*: CLOSE=5 RESOLVE=6.
@@ -50,7 +52,8 @@ extern void jet_rt_int_drop(int64_t);
 extern Spec *jet_std_process_cmd(Text *const *, int64_t);
 extern Spec *jet_process_spec_stdout(const Spec *, int64_t);
 extern Spec *jet_process_spec_stderr(const Spec *, int64_t);
-extern Spec *jet_process_spec_timeout(const Spec *, const int64_t *);
+extern Spec *jet_process_spec_timeout(const Spec *, int64_t);
+extern int64_t jet_int_owned_from_i64(int64_t);
 extern Spec *jet_process_spec_output_limit(const Spec *, int64_t);
 extern Spec *jet_process_spec_env(const Spec *, const Text *, const Text *);
 extern Spec *jet_process_spec_terminal(const Spec *);
@@ -67,6 +70,7 @@ extern int64_t jet_process_child_wait(ProcessChild *, ProcessReceipt **, IOError
 extern int64_t jet_process_child_id(ProcessChild *);
 extern void jet_rt_handle_drop_process_child(ProcessChild *);
 extern void jet_rt_handle_drop_process_receipt(ProcessReceipt *);
+extern int64_t jet_std_process_pipeline(Spec *const *, int64_t, ProcessReceipt **, IOError **);
 extern void jet_rt_handle_drop_io_error(IOError *);
 extern int64_t jet_rt_world_new(void);
 extern void jet_rt_world_enter(int64_t, int64_t *);
@@ -77,6 +81,11 @@ extern void jet_rt_root_leave(int64_t, int64_t *);
 extern int64_t jet_rt_root_take_stop(int64_t, int64_t *);
 extern void jet_rt_stop_drop(int64_t);
 extern int64_t jet_scheduler_native_status(void);
+extern int64_t jet_rt_handle_field_process_child_stdout(ProcessChild *);
+extern int64_t jet_rt_handle_clone_process_stdout_stream(int64_t);
+extern void jet_rt_handle_drop_process_stdout_stream(int64_t);
+extern int64_t jet_process_stream_line_bytes_raw(int64_t, int64_t *, int64_t *, int64_t *);
+extern void jet_rt_free(int64_t, int64_t, int64_t);
 #ifdef JET_PROCESS_JET_FIXTURES
 // The fresh native library exports this Jet fixture; Spec is an opaque word.
 extern int64_t jet_rt_process_execution_controlled_fixture(Spec *);
@@ -134,10 +143,8 @@ static int64_t receipt_code(const ProcessReceipt *r) { return jet_int_owned_to_i
 static const Text *receipt_output(const ProcessReceipt *r) { return (const Text *)(intptr_t)word(r, 8); }
 static const Text *receipt_errors(const ProcessReceipt *r) { return (const Text *)(intptr_t)word(r, 16); }
 static int64_t receipt_success(const ProcessReceipt *r) { return word(r, 24); }
-static bool receipt_has_signal(const ProcessReceipt *r) { return word(r, 32) != 0; }
-static int64_t receipt_signal(const ProcessReceipt *r) {
-    return jet_int_owned_to_i64(word((void *)(intptr_t)word(r, 32), 0));
-}
+static bool receipt_has_signal(const ProcessReceipt *r) { return word(r, 32) != (INT64_C(1) << 62); }
+static int64_t receipt_signal(const ProcessReceipt *r) { return jet_int_owned_to_i64(word(r, 32)); }
 static int64_t receipt_timed_out(const ProcessReceipt *r) { return word(r, 40); }
 
 static Spec *replace(Spec *old, Spec *next) {
@@ -257,11 +264,52 @@ int main(int argc, char **argv, char **envp) {
         jet_rt_handle_drop_process_spec(s);
     }
 
+    // 6b. A streamed stdout reads the collector's capture through the child's
+    // own cell: lines arrive in order, a clone of the cell keeps the child
+    // after its last alias drops, and the receipt still holds every byte.
+    {
+        Spec *s = SPEC("/bin/sh", "-c", "printf 'a\\nb'");
+        s = replace(s, jet_process_spec_stdout(s, 0));
+        ProcessChild *child = NULL;
+        IOError *e = NULL;
+        check(jet_process_spec_spawn(s, &child, &e) == 1 && e == NULL && child != NULL, "stream spawn ok");
+        int64_t pipe = jet_rt_handle_field_process_child_stdout(child);
+        check(pipe != 0 && pipe == jet_rt_handle_field_process_child_stdout(child), "stdout field lends one cell");
+        int64_t data = 0, len = 0, error = 0;
+        check(jet_process_stream_line_bytes_raw(pipe, &data, &len, &error) == 1 && error == 0 && len == 2 && memcmp((const void *)(intptr_t)data, "a\n", 2) == 0, "streamed first line");
+        jet_rt_free(data, len, 1);
+        ProcessReceipt *r = NULL;
+        check(jet_process_child_wait(child, &r, &e) == 1 && e == NULL && r != NULL, "stream wait ok");
+        check(eq(receipt_output(r), "a\nb"), "receipt keeps streamed bytes");
+        drop_receipt(r);
+        check(jet_process_stream_line_bytes_raw(pipe, &data, &len, &error) == 1 && error == 0 && len == 0 && data == 0, "stream at EOF after wait");
+        jet_rt_handle_drop_process_child(child);
+        jet_rt_handle_drop_process_spec(s);
+    }
+    {
+        Spec *s = SPEC("/bin/sh", "-c", "printf 'x\\ny\\n'");
+        s = replace(s, jet_process_spec_stdout(s, 0));
+        ProcessChild *child = NULL;
+        IOError *e = NULL;
+        check(jet_process_spec_spawn(s, &child, &e) == 1 && e == NULL && child != NULL, "pinned spawn ok");
+        int64_t held = jet_rt_handle_clone_process_stdout_stream(jet_rt_handle_field_process_child_stdout(child));
+        jet_rt_handle_drop_process_child(child);
+        int64_t data = 0, len = 0, error = 0;
+        check(jet_process_stream_line_bytes_raw(held, &data, &len, &error) == 1 && error == 0 && len == 2 && memcmp((const void *)(intptr_t)data, "x\n", 2) == 0, "clone reads after the child alias drops");
+        jet_rt_free(data, len, 1);
+        check(jet_process_stream_line_bytes_raw(held, &data, &len, &error) == 1 && error == 0 && len == 2 && memcmp((const void *)(intptr_t)data, "y\n", 2) == 0, "clone reads every line");
+        jet_rt_free(data, len, 1);
+        check(jet_process_stream_line_bytes_raw(held, &data, &len, &error) == 1 && error == 0 && len == 0, "clone reaches EOF");
+        jet_rt_handle_drop_process_stdout_stream(held);
+        jet_rt_handle_drop_process_spec(s);
+    }
+
     // 7. Timeout kills the child process group and reports timed_out with SIGKILL.
     {
         Spec *s = SPEC("/bin/sh", "-c", "sleep 5");
-        const int64_t timeout_ns = INT64_C(100000000);
-        s = replace(s, jet_process_spec_timeout(s, &timeout_ns));
+        const int64_t timeout_ns = jet_int_owned_from_i64(INT64_C(100000000));
+        s = replace(s, jet_process_spec_timeout(s, timeout_ns));
+        jet_rt_int_drop(timeout_ns);
         ProcessReceipt *r = NULL;
         IOError *e = NULL;
         check(jet_process_spec_run(s, &r, &e) == 1 && e == NULL, "timeout run returns receipt");
@@ -284,26 +332,41 @@ int main(int argc, char **argv, char **envp) {
         jet_rt_handle_drop_process_spec(s);
     }
 
-    // 9. Missing executable: spawn failure carries the errno cause.
+    // 9. Missing executable: the child's exec errno (HostSpawn's CLOEXEC
+    // pipe) is the error's kind, code and cause, naming the program.
     {
         Spec *s = SPEC("/nonexistent/jet-no-such");
         ProcessReceipt *r = NULL;
         IOError *e = NULL;
         int64_t ok = jet_process_spec_run(s, &r, &e);
         check(ok == 0 && r == NULL && e != NULL, "missing executable is error");
+        check(e->kind == KIND_NOT_FOUND && e->operation == OP_RESOLVE, "missing executable is NotFound/Resolve");
+        check(e->has_code == 1 && e->code == 2, "missing executable carries ENOENT");
+        check(eq(e->resource, "/nonexistent/jet-no-such"), "missing executable names the program");
         check(has(e->cause, " (os error 2)"), "missing executable errno cause");
         jet_rt_handle_drop_io_error(e);
         jet_rt_handle_drop_process_spec(s);
     }
 
-    // 10. Empty command.
+    // 10. Empty command: InvalidInput/Resolve naming the empty command (it
+    // has no program to name).
     {
         Spec *s = spec_of(NULL, 0);
         ProcessReceipt *r = NULL;
         IOError *e = NULL;
         int64_t ok = jet_process_spec_run(s, &r, &e);
+        check(ok == 0 && e != NULL && eq(e->resource, "process.cmd([])"), "empty command names process.cmd([])");
         expect_error(ok, e, KIND_INVALID_INPUT, OP_RESOLVE, "process command needs at least one word");
         jet_rt_handle_drop_process_spec(s);
+    }
+
+    // 10b. Empty pipeline: InvalidInput/Resolve naming process.pipeline([]).
+    {
+        ProcessReceipt *r = NULL;
+        IOError *e = NULL;
+        int64_t ok = jet_std_process_pipeline(NULL, 0, &r, &e);
+        check(ok == 0 && e != NULL && eq(e->resource, "process.pipeline([])"), "empty pipeline names process.pipeline([])");
+        expect_error(ok, e, KIND_INVALID_INPUT, OP_RESOLVE, "process.pipeline needs at least one command");
     }
 
     // 11. NUL byte inside a command word: Other/Resolve.

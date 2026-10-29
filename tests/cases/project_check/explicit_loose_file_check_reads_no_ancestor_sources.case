@@ -1,0 +1,20 @@
+# `jet check FILE` on a loose file checks the unit set `jet run FILE` builds:
+# the file's own directory, never its ancestors (cli.md "authorized source
+# root", I8). The E2393 project-context preflight decides from the file's own
+# imports first, so a file that does not import `project.<module>` reads no
+# ancestor source. The 1 GiB sparse `trap.jet` beside the loose directory is
+# never opened; a check that walks ancestors reads and lexes all of it and
+# misses the time limit.
+requires: os:unix
+requires: tool:truncate
+fixture: explicit_loose_file_check_reads_no_ancestor_sources.fixture
+env: NO_COLOR=1
+env: TERM=dumb
+step: truncate -s 1G {work}/trap.jet
+exit: 0
+step: jet check hello.jet
+cwd: {work}/loose
+env: JET_RECEIPT_BYPASS=1
+limit: time=30
+exit: 0
+stderr: ~ "has no problems" # the loose file checks clean without opening the ancestor trap.jet

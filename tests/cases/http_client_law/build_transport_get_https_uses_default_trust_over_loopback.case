@@ -1,0 +1,23 @@
+# #5484 step 1: the checked-build GET's https branch is core.net.tls with the default client trust.
+# OpenSSL `s_server -WWW` serves hello.txt with the checked-in test chain; SSL_CERT_FILE pins the default
+# trust to that chain's CA. `localhost` verifies and returns the rows (header lines, body, status);
+# `fixture.test` reaches the same server and fails the certificate name check.
+requires: tool:openssl
+fixture: build_transport_get_https_uses_default_trust_over_loopback.fixture
+copy: {root}/tests/fixtures/tls/smtp.ca.cert.pem ca.pem
+copy: {root}/tests/fixtures/tls/smtp.server.cert.pem server.cert.pem
+copy: {root}/tests/fixtures/tls/smtp.server.key.pem server.key.pem
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: SSL_CERT_FILE={work}/ca.pem
+session tls raw: openssl s_server -quiet -WWW -accept {free-port:tls} -cert server.cert.pem -key server.key.pem
+sleep: 250ms
+write: main.jet build_transport_get_https_uses_default_trust_over_loopback.fixture/main.template
+step build: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = build_transport_get_https_uses_default_trust_over_loopback.stdout.expected
+signal tls: KILL
+close tls
+exit: any # s_server is killed by the case; its exit status is not part of the contract

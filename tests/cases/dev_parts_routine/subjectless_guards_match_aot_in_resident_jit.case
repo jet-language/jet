@@ -1,0 +1,15 @@
+# tests/dev_parts/routine.rs::subjectless_guards_match_aot_in_resident_jit at tests/dev_parts/routine.rs:2512; hand-port
+fixture: subjectless_guards_match_aot_in_resident_jit.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step jit: jet run subjectless_guards.jet
+exit: any # original compares the tiers, then asserts stdout
+stdout: = subjectless_guards_match_aot_in_resident_jit.1.out
+step: jet build subjectless_guards.jet
+exit: 0
+step aot: built
+exit: == jit
+stdout: == jit
+stderr: == jit

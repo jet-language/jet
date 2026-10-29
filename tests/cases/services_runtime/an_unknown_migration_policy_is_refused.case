@@ -1,0 +1,13 @@
+# tests/services_runtime.rs::an_unknown_migration_policy_is_refused at tests/services_runtime.rs:2186; hand-port
+# Claim: an unknown migration policy (whenever) stops the program with a nonzero exit (tests/services_runtime.rs:2190-2195)
+# Fixture migrated: the same ROLLBACK source as 09; policy whenever via step env; exit asserted nonzero (exit 1 recorded; any nonzero also satisfies the Rust !ok check)
+fixture: an_unknown_migration_policy_is_refused.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build main.jet
+exit: 0 # tests/services_runtime.rs:2190
+step: built
+env: JET_SERVICE_ROLLBACK_STORE=cluster.log
+env: JET_SERVICE_ROLLBACK_POLICY=whenever
+exit: 1 # tests/services_runtime.rs:2193-2195 expects !ok

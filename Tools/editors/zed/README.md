@@ -12,7 +12,6 @@ manifest is [`extension.toml`](extension.toml); its process capability invokes
 From the repository root:
 
 ```sh
-Tools/agent/jet-env cargo build
 Tools/editors/zed/install.sh
 ```
 
@@ -61,12 +60,11 @@ The executable is chosen in this order
 ```
 
 The extension never reads the worktree's files or guesses a repository build
-output such as `target/debug/jet`. A trusted worktree whose `PATH` puts a
+output. A trusted worktree whose `PATH` puts a
 different `jet` first gets that `jet`; pin `binary.path` to avoid it.
 
-`jet self lsp` does not invoke `rustc`, so the plain executable produced by the
-repository build is sufficient. Rebuild it and reload Zed after changing the
-server.
+`jet self lsp` does not invoke a host compiler, so a plain Jet executable is
+sufficient. Rebuild it and reload Zed after changing the server.
 
 ## Native debugging
 
@@ -90,9 +88,12 @@ outlines gets its own node (declarations, calls, members, bindings, labels,
 constructors, variants, markers, literals). New syntax therefore keeps
 parsing; the compiler remains the only judge of validity. Keyword spellings
 come from the generated `BEGIN/END GENERATED JET SYNTAX HIGHLIGHTS` sections,
-rendered from [`Syntax.rs`](../../../crates/jet-foundation/src/Syntax.rs) by
-`jet self devtools grammars`. Every string in `highlights.scm` must be an
-anonymous grammar token. The LSP semantic overlay refines live coloring for
+rendered from the syntax registry
+([`Highlights.jet`](../../../Compiler/JetFoundation/Data/Syntax/Highlights.jet)
+and the active rows of [`Markers.jet`](../../../Compiler/Prelude/Markers.jet))
+by `node Tools/agent/editor-grammars.mjs --write`. Every string in
+`highlights.scm` must be an anonymous grammar token. The LSP semantic overlay
+refines live coloring for
 ownership markers, rules, decorators, and effect rows; it does not change
 compiler parsing.
 
@@ -106,12 +107,13 @@ tree-sitter parse --quiet --stat ../../../Examples/**/*.jet
 
 then rerun `install.sh`.
 
-Useful repository checks are:
+Useful repository checks, with `JET` naming an admitted Jet executable, are:
 
 ```sh
-Tools/agent/jet-env cargo test --test lsp
-Tools/agent/jet-env target/debug/jet self lsp doctor
-Tools/agent/jet-env target/debug/jet self lsp --bench
+node Tools/agent/editor-grammars.mjs --check
+Tools/agent/jet-env "$JET" test Compiler/JetLSP
+Tools/agent/jet-env "$JET" self lsp doctor
+Tools/agent/jet-env "$JET" self lsp --bench
 ```
 
 The benchmark reports cold, warm-hit, and warm-edit measurements plus query

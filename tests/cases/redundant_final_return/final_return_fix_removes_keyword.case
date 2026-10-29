@@ -1,0 +1,33 @@
+# tests/redundant_final_return.rs::final_return_fix_removes_keyword at tests/redundant_final_return.rs:109; hand-port
+# run.jet is tests/ui_lint/redundant_final_return.jet, the original's include_str! source. The original ran the
+# L0530 fix through FixEngine::apply_edits + format_source; here `jet fix` applies the safe fix to the file.
+# tir_support::assert_tiers_agree: default run, forced interpreter and the AOT build print "42\n" before and after the fix.
+fixture: final_return_fix_removes_keyword.fixture
+env: NO_COLOR=1
+step: jet check run.jet --json
+exit: 0
+json: stdout doc $.reports[?code="L0530"][?applicability="safe"] #= 1
+json: stdout doc $.reports[?code="L0530"][0].fix_edits[?safety="formatting"] #= 1
+step: jet run run.jet
+exit: 0
+stdout: = "42\n"
+step: jet build run.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "42\n"
+step: jet fix run.jet
+exit: 0
+file: run.jet !~ "return 42" # tests/redundant_final_return.rs:128 final return survived
+file: run.jet ~ "    42\n" # tests/redundant_final_return.rs:129 implicit tail was not formed
+step: jet check run.jet
+exit: 0
+stderr: !~ "L0530" # tests/redundant_final_return.rs:135-138 the fixed source carries no L0530
+step: jet run run.jet
+exit: 0
+stdout: = "42\n"
+step: jet build run.jet
+exit: 0
+step: built
+exit: 0
+stdout: = "42\n"

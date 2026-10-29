@@ -26,7 +26,7 @@ if (mode === "assemble") {
     const result = spawnSync(process.execPath, [join(repo, "Compiler/JetSema/Tests/run-gate-fixtures.mjs"), out], { encoding: "utf8" });
     if (result.status !== 0) throw Error(result.stderr || result.stdout);
     const assembled = readFileSync(join(out, "unsafe-obligations/src/compiler.jet"), "utf8");
-    const oldFixture = readFileSync(join(repo, "Compiler/JetSema/Tests/UnsafeObligations.jet"), "utf8");
+    const oldFixture = readFileSync(join(repo, "Compiler/JetSema/Tests/UnsafeObligations.fixture/UnsafeObligations.jet"), "utf8");
     if (!assembled.endsWith(oldFixture)) throw Error("production fixture boundary changed");
     const production = assembled.slice(0, -oldFixture.length);
     const literal = value => {
@@ -39,7 +39,7 @@ if (mode === "assemble") {
     const project = join(out, "tier-parity");
     mkdirSync(join(project, "src"), { recursive: true });
     writeFileSync(join(project, "src/compiler.jet"), production + fixture + `\nfn run() {\n${calls}\n    print("tier parity: ${cases.length} cases")\n}\n`);
-    writeFileSync(join(project, "package.jet"), 'name: "tier_parity"\nversion: "0.1.0"\nauthority: { holds: { allow: [IO, Mem.Alloc, Mem.Rc, Time.Wait] } }\n');
+    writeFileSync(join(project, "package.jet"), 'name: "tier_parity"\nversion: "0.1.0"\nauthority: { allow: [IO, Mem.Alloc, Mem.Rc, Time.Wait] }\n');
     console.log(join(project, "src/compiler.jet"));
 } else {
     const receipts = [];

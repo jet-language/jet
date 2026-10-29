@@ -1,0 +1,10 @@
+policy audit(topic: String) {
+    wrap(call) { return "{topic}:{call()}" }
+}
+
+fn load_user() -> String { "ok" }
+
+fn run() {
+    selected :: apply(audit("users.load"), load_user)
+    print(selected())
+}

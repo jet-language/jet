@@ -1,7 +1,7 @@
 // The final argument is parser metadata, never source text
 // supplied by a program. Marker/derive/generated bodies share one parser.
 use jet_foundation.[AccessConvention, CallArg, Expr, StrPart, ast_empty_call_arg_flags]
-use jet_lexer.TOKEN_LBRACE
+use jet_lexer.[TOKEN_LBRACE]
 
 fn parser_parse_generate_template_arg(state: &JetParserState, method: String, args: &[CallArg]) -> Bool {
     if method != "generate" || parser_current_kind(&state) != TOKEN_LBRACE -> return false
@@ -10,6 +10,6 @@ fn parser_parse_generate_template_arg(state: &JetParserState, method: String, ar
     span :: parser_cover(open, parser_lookahead(&state, -1).span)
     flags := ast_empty_call_arg_flags()
     flags.template_items = Val(items)
-    &args.push(CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{}, span: span}, span: span, flags: flags, label: None, spread: false})
+    &args.push(CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{}, span: span, id: parser_node_id(&state)}, span: span, flags: flags, label: None, spread: false})
     true
 }

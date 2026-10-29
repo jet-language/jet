@@ -3,11 +3,15 @@
 // Canonical Foundation quantity/numeric/name/AST providers own meaning. Their
 // missing publication is a provider gate, never permission for local catalogs.
 use jet_foundation.[
-    Item, Type, Expr, Span, MIRNameFacts,
-    type_name, type_is_numeric, numeric_conversion_sources,
-    numeric_conversion_return, conversion_method_for_source,
-    unit_family_distinct_defs, CHECKED_TEXT, expr_span,
-    failure_contract_effective_type, failure_contract_source,
+    Item,
+    Type,
+    Expr,
+    Span,
+    NameFacts,
+    type_name,
+    expr_span,
+    failure_contract_effective_type,
+    failure_contract_source,
 ]
 
 struct SemanticShape {
@@ -266,7 +270,7 @@ fn semantic_checked_anchor(module_path: String, offset: Int) -> SemanticVisibili
 
 // Rust semantic_shape: name projection delegates to S14's canonical checked
 // display helper; S6 owns parameter labels/zones/variadic presentation.
-fn semantic_shape(name: String, kind: SymKind, owner: String?, names: MIRNameFacts, module_index: Int) -> SemanticShape Never! {
+fn semantic_shape(name: String, kind: SymKind, owner: String?, names: NameFacts, module_index: Int) -> SemanticShape Never! {
     if kind == {
         .Module -> SemanticShape{kind: .Module, signature: "module {name}"}
         .Function(params, _, _, contract, variadic, return_type, failure_contract, _, effects, via, _, _, _, _) -> {

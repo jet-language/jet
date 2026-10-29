@@ -1,0 +1,10 @@
+# Claim: a package function used as a value from a sibling file, a same-file function passed to a sibling-file method, and a struct-field hook passed as a call argument keep their targets, and a nominal type declared in one file is the same type in a callback signature in another, on the release AOT and default jet run tiers
+fixture: sibling_file_function_values_keep_their_targets_and_types.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run --release run.jet
+exit: 0 # release AOT
+stdout: = "8\n1\n3\n" # release AOT
+step: jet run run.jet
+exit: 0 # default jet run
+stdout: = "8\n1\n3\n" # default jet run

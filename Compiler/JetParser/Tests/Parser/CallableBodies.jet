@@ -1,4 +1,10 @@
 // Rust: crates/jet-parser/src/Parser/mod.rs:2382
+use jet_parser.[parse_generated_source]
+use jet_foundation.[UnitFamilyDef]
+// The standard unit catalog as the compiler embeds it (JetSema's generated
+// prelude source) and the outline JetSema reads before it parses it.
+use jet_sema.[SEMA_PRELUDE_UNITS_SOURCE, sema_units_catalog_outline]
+
 #Test("lambda_callable_interface_parses_only_parameters_and_effects") {
     parsed :: parser_test_program(`fn run() {
     f :: (n: Int) -[IO]> { print(n) }
@@ -51,8 +57,8 @@ fn run() {}
     hole :: parser_test_function(parsed, "hole").body
     assert_eq(ok.len(), 1)
     assert_eq(hole.len(), 1)
-    assert(if ok[0] == { .Expr(.EnumLit(_, _, _, _, leading_dot, _)) -> leading_dot else -> false })
-    assert(if hole[0] == { .Expr(.Todo(_, _)) -> true else -> false })
+    assert(if ok[0] == { .Expr(.EnumLit(_, _, _, _, leading_dot, _, _)) -> leading_dot else -> false })
+    assert(if hole[0] == { .Expr(.Todo(_, _, _)) -> true else -> false })
 }
 
 // Rust: crates/jet-parser/src/Parser/Expressions/patterns.rs:13
@@ -75,7 +81,7 @@ fn run() {
 
 // Rust: crates/jet-parser/src/Parser/Items/distinct_units_structs.rs:1336
 #Test("standard_units_source_parses_with_unique_members_and_provenance") {
-    parsed :: parse_generated_source(PARSER_TEST_UNITS_SOURCE.bytes())
+    parsed :: parse_generated_source(SEMA_PRELUDE_UNITS_SOURCE.bytes())
     assert(parsed.diagnostics.is_empty())
     families := [UnitFamilyDef]{}
     loop item in parsed.program.items { if item == .UnitFamily(family) -> &families.push(family) }
@@ -100,6 +106,22 @@ fn run() {
         }
     }
     assert(degree && dalton && mmhg && square && cubic)
+}
+
+// JetSema scans sources for unit mentions with the outline's names and parses
+// the catalog only when one is found, so the outline must name exactly the
+// parsed families and members, in order.
+#Test("standard_units_outline_matches_the_parsed_catalog") {
+    parsed :: parse_generated_source(SEMA_PRELUDE_UNITS_SOURCE.bytes())
+    families := [UnitFamilyDef]{}
+    loop item in parsed.program.items { if item == .UnitFamily(family) -> &families.push(family) }
+    outline :: sema_units_catalog_outline()
+    assert_eq(outline.len(), families.len())
+    loop (index, family) in families {
+        assert_eq(outline[index].family, family.family)
+        assert_eq(outline[index].members.len(), family.members.len())
+        loop (member_index, member) in family.members -> assert_eq(outline[index].members[member_index], member.name)
+    }
 }
 
 fn parser_test_statement_guard_tree(depth: Int) -> String Never! {
@@ -139,5 +161,5 @@ else -> return cp
 }
 `)
     body :: parser_test_function(parsed, "mapping").body
-    assert(if body[body.len() - 1] == { .Expr(.If(_, _, _, _, _, _)) -> true else -> false })
+    assert(if body[body.len() - 1] == { .Expr(.If(_, _, _, _, _, _, _)) -> true else -> false })
 }

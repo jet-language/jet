@@ -4,10 +4,14 @@
 // The binder accepts only top-level scalar annotations. It emits one
 // supervised worker and the same checked C/Jet boundary used by the other
 // scalar adapters. Unsupported annotations fail before an artifact exists.
+use core.files as files
+use core.process as process
+use core.math as math
+use core.sys as sys
 
-PKG_PYTHON_RUNTIME :: prep { "python3" }
-PKG_PYTHON_TOOL_ACTION :: prep { "rejected the Python binding" }
-PKG_PYTHON_COMPILE_CHECK :: prep { "import pathlib,sys; compile(pathlib.Path(sys.argv[1]).read_text(), sys.argv[1], 'exec')" }
+PKG_PYTHON_RUNTIME :: "python3"
+PKG_PYTHON_TOOL_ACTION :: "rejected the Python binding"
+PKG_PYTHON_COMPILE_CHECK :: "import pathlib,sys; compile(pathlib.Path(sys.argv[1]).read_text(), sys.argv[1], 'exec')"
 
 // Bind the top-level scalar-annotated functions of the Python source.
 fn pkg_python_bind(source_path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ScalarBindResult ForeignBindError! {
@@ -122,7 +126,7 @@ fn pkg_python_render_worker(functions: [ScalarBridgeFunction]) -> String Never! 
 }
 
 // The fixed worker body after the `RESULTS` table.
-PKG_PYTHON_WORKER_TAIL :: prep { ```}
+PKG_PYTHON_WORKER_TAIL :: comptime { ```}
 
 def convert(kind, value):
     if kind == "int":

@@ -44,12 +44,13 @@ fn vault_test_state_ensure() -> I64 {
 // Foreign panic precedent: flush stdout, exact body + LF on stderr, exit101;
 // no Jet program stop publication, atexit, or Rust thread/backtrace prefix.
 fn vault_test_borrow_stop() {
+    trap_defect_prepare()
     jet_rt_stdout_flush()
     trap_write_word(I64{2336361488876725586}, I64{8})
     trap_write_word(I64{2340011850872286305}, I64{8})
     trap_write_word(I64{7234319696985747298}, I64{8})
     trap_msg_newline()
-    trap_exit(I64{101})
+    trap_defect_exit(I64{101})
 }
 #Export(c) fn jet_rt_vault_test_hooks_destroy(_closure: I64, state: I64) -> I64 {
     if (sync_load(state + I64{24}) != I64{0}) -> vault_test_borrow_stop()

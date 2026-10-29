@@ -1,0 +1,22 @@
+
+use core.process as process
+use core.encoding.csv as csv
+use core.files as files
+fn run() {
+    spec := process.cmd([String]{"jet"})
+    print(spec.cmd.len())
+    input :: files.open("input.csv") ?? panic("open")
+    reader := csv.reader(^input) ?? panic("reader")
+    first :: &reader.next() ?? panic("first")
+    if first == {
+        Val(row) -> {
+            print(row.fields[0])
+            print(row.fields[1])
+        }
+        None -> panic("missing row")
+    }
+    eof :: &reader.next() ?? panic("eof")
+    print(eof == None)
+    again :: &reader.next() ?? panic("eof again")
+    print(again == None)
+}

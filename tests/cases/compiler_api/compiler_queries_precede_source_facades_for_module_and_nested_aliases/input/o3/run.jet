@@ -1,0 +1,6 @@
+use core as root
+LEXED :: comptime { root.compiler.lex(`fn run() {}`) ?? panic("lex") }
+PARSED :: comptime { root.compiler.parse(`fn run() {}`) ?? panic("parse") }
+CHECKED :: comptime { root.compiler.check(PARSED) ?? panic("check") }
+MAPPED :: comptime { root.compiler.source_map(`fn run() {}`) ?? panic("map") }
+fn run() { print("compiler queries") }

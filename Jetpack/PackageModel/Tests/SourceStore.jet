@@ -1,5 +1,13 @@
 // Source-store contracts; all filesystem fixtures have explicit held scratch
 // parents, so these tests do not alter the user's default source store.
+use jet_pkg_model.[
+    pkg_source_snapshot_into, pkg_source_store_component, pkg_source_store_link_into_project,
+]
+use jetpack_foundation.[
+    foundation_open_directory_authority, foundation_read_file_nofollow_at_root,
+    foundation_tree_hash,
+]
+
 fn pkg_source_store_test_root(label: String) -[FS, Env]> String Never! {
     root :: files.join(sys.temp_dir(), "jet-source-store-{label}-{process.current_pid()}")
     files.remove_all(root).drop("a stale fixture may be absent")
@@ -46,7 +54,7 @@ fn pkg_source_store_test_root(label: String) -[FS, Env]> String Never! {
     files.write(files.join(source_path, "main.jet"), "before") ?? panic("source bytes")
     source :: foundation_open_directory_authority(source_path) ?? panic("hold source")
     snapshots :: foundation_open_directory_authority(snapshots_path, true) ?? panic("hold snapshots")
-    snapshot :: pkg_source_snapshot_into(source, snapshots) ?? panic("snapshot")
+    snapshot :: pkg_source_snapshot_into(source, ^snapshots) ?? panic("snapshot")
     path :: snapshot.path()
     files.write(files.join(source_path, "main.jet"), "after") ?? panic("change source")
     bytes :: foundation_read_file_nofollow_at_root(path, "main.jet", 1024) ?? panic("read snapshot")
@@ -66,12 +74,11 @@ fn pkg_source_store_test_root(label: String) -[FS, Env]> String Never! {
         files.write(files.join(root, "external"), "external") ?? panic("external bytes")
         files.symlink(files.join(root, "external"), files.join(source_path, ".ignored")) ?? panic("symlink fixture")
         source :: foundation_open_directory_authority(source_path) ?? panic("hold source")
-        snapshots :: foundation_open_directory_authority(snapshots_path, true) ?? panic("hold snapshots")
-        assert(pkg_source_snapshot_into(source, snapshots) == .Err(_))
+        assert(pkg_source_snapshot_into(source, foundation_open_directory_authority(snapshots_path, true) ?? panic("hold snapshots")) == .Err(_))
         assert_eq((files.read_dir(snapshots_path) ?? panic("failed stage list")).len(), 0)
         files.remove(files.join(source_path, ".ignored")) ?? panic("remove symlink")
         files.hard_link(files.join(root, "external"), files.join(source_path, ".ignored")) ?? panic("hardlink fixture")
-        assert(pkg_source_snapshot_into(source, snapshots) == .Err(_))
+        assert(pkg_source_snapshot_into(source, foundation_open_directory_authority(snapshots_path, true) ?? panic("hold snapshots")) == .Err(_))
         assert_eq((files.read_dir(snapshots_path) ?? panic("failed stage list")).len(), 0)
         files.remove_all(root) ?? panic("fixture cleanup")
     }

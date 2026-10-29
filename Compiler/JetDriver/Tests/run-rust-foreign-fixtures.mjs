@@ -10,6 +10,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { compilerSources } from '../../../Tools/agent/compiler-packages.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const out = process.argv[2];
 if (!out) throw new Error('usage: run-rust-foreign-fixtures.mjs <outdir>');
@@ -27,8 +28,10 @@ function body(text) {
   return kept.join('\n');
 }
 const declarations = new Map();
-for (const path of read('Compiler/Bootstrap/sources.list').split('\n').filter(line => line.trim() && !line.startsWith('#'))) {
-  if (!path.startsWith('Compiler/JetFoundation/') && path !== 'Compiler/JetCli/Source/Cli/RustForeign.jet') continue;
+// Declarations of the Foundation package and the CLI's Rust foreign host.
+const declaredIn = compilerSources(repo).flatMap(entry => entry.files)
+  .filter(path => path.startsWith('Compiler/JetFoundation/') || path === 'Compiler/JetCli/Source/Cli/RustForeign.jet');
+for (const path of declaredIn) {
   const lines = read(path).split('\n');
   for (let i = 0; i < lines.length; i++) {
     const match = /^(?:struct|enum|fn)\s+([A-Za-z_]\w*)\b|^([A-Z][A-Z_\d]*)\s*::/.exec(lines[i]);
@@ -48,7 +51,7 @@ for (const path of read('Compiler/Bootstrap/sources.list').split('\n').filter(li
 const planner = read('Compiler/JetDriver/Source/Driver/RustForeign.jet');
 const prefix = planner.indexOf('struct JetDriverRustForeignRecord ');
 if (prefix < 0) throw new Error('missing planner/checked-graph boundary');
-const fixture = read('Compiler/JetDriver/Tests/RustForeignFixtures.jet');
+const fixture = read('Compiler/JetDriver/Tests/RustForeignFixtures.fixture/RustForeignFixtures.jet');
 const environmentFixture = process.argv.includes('--host-env');
 const host = process.argv.includes('--host') || process.argv.includes('--host-full') || environmentFixture;
 const roots = [body(planner.slice(0, prefix)), body(read('Compiler/JetDriver/Source/Driver/RustForeignSource.jet')), body(host ? fixture.slice(0, fixture.indexOf('fn run()')) : fixture)];
@@ -56,12 +59,12 @@ if (host) {
   if (process.argv.includes('--host-full')) roots.push(body(read('Compiler/JetCli/Source/Cli/RustForeign.jet')));
   else roots.push(body(read('Compiler/JetCli/Source/Cli/RustForeign.jet').split('\n').filter(line => line.startsWith('use core.')).join('\n')));
   if (environmentFixture) {
-    const tests = read('Compiler/JetCli/Tests/RustForeign.jet');
+    const tests = read('Compiler/JetCli/Tests/RustForeign.fixture/RustForeign.jet');
     const start = tests.indexOf('fn cli_rust_foreign_test_environment()');
     const end = tests.indexOf('\nfn run()', start);
     if (start < 0 || end < 0) throw new Error('missing canonical helper environment regression');
     roots.push(body('use core.sys as rust_foreign_test_sys\n' + tests.slice(start, end) + '\nfn run() { cli_rust_foreign_test_environment()\nprint("FFI environment fixtures passed") }\n'));
-  } else roots.push(body(read('Compiler/JetCli/Tests/RustForeignFixtures.jet')));
+  } else roots.push(body(read('Compiler/JetCli/Tests/RustForeignFixtures.fixture/RustForeignFixtures.jet')));
 }
 const owned = new Set(roots.join('\n').match(/\b(?:JetDriverRustForeign\w*|jet_driver_rust_foreign_\w*|rust_foreign_fixture_\w*|JET_DRIVER_RUST_FOREIGN_\w*)\b/g) ?? []);
 owned.add('run');

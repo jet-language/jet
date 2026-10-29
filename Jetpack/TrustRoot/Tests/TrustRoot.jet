@@ -1,7 +1,18 @@
 // Claims ported from crates/jetpack/src/TrustRoot.rs #[cfg(test)]. Scratch
 // roots come from `files.temp_dir` instead of the Rust per-process counter.
+use jetpack_trust_root.[
+    BoundIdentity, CacheProvenance, CacheReceipt, IdentityKind, Keyring, MetadataRole,
+    PublicTrustKey, PublisherIdentity, RootBootstrap, SignedMetadata, SnapshotMetaEntry,
+    SnapshotMetadata, TUFRootMetadata, TargetMeta, TargetsMetadata, TimestampMetadata, TrustEngine,
+    TrustFixtureRoot, TrustKey, TrustRootPolicy, TrustSignature, TrustedClock, trust_canonical_root,
+    trust_canonical_snapshot, trust_canonical_targets, trust_fixture_threshold_root,
+    trust_os_random_bytes, trust_public_trust_manifest, trust_sign_root, trust_sign_snapshot,
+    trust_sign_targets, trust_sign_timestamp,
+]
+use core.crypto as crypto
+use core.files as files
 
-TRUST_TEST_NOW :: prep { 1700000000 }
+TRUST_TEST_NOW :: 1700000000
 
 fn trust_test_scratch(label: String) -> String {
     scratch :: files.temp_dir("jet-trustroot-{label}") ?? panic("scratch directory")
@@ -308,7 +319,9 @@ fn trust_test_tamper(sig_hex: String) -> String {
 // object insertion order, including this manifest's terminal newline.
 #Test("public trust manifest empty key ceremony wire is exact") {
     manifest :: trust_public_trust_manifest("jet-lang.dev", None, [PublicTrustKey]{}) ?? panic("render public manifest")
-    assert_eq(manifest, `{"schema":1,"domain":"jet-lang.dev","status":"awaiting-key-ceremony","root":null,"keys":[],"rotation":"offline threshold root rotation; publish a new manifest only after the old root verifies the new root"}` + "\n")
+    body :: `{"schema":1,"domain":"jet-lang.dev","status":"awaiting-key-ceremony","root":null,"keys":[],"rotation":"offline threshold root rotation; publish a new manifest only after the old root verifies the new root"}`
+    expected :: "{body}\n"
+    assert_eq(manifest, expected)
 }
 
 #Test("public trust manifest preserves its existing validation error") {

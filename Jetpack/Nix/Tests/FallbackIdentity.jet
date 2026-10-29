@@ -1,8 +1,13 @@
 // Local Nix fallback identity claims ported from the tests of
 // crates/jetpack/src/NixIdentity.rs. Each claim works in its own scratch
 // directory and removes it.
+use core.files as files
+use core.sys as sys
+use jetpack_foundation.[SOURCE_ROOT_DIR]
+use jetpack_nix.[NIX_LOCKED_NIXPKGS_PREFIX, NixFallbackIdentity]
+use jet_pkg_model.[pkg_sha256_hex]
 
-NIX_TEST_FALLBACK_REVISION :: prep { "b5aa0fbd538984f6e3d201be0005b4463d8b09f8" }
+NIX_TEST_FALLBACK_REVISION :: "b5aa0fbd538984f6e3d201be0005b4463d8b09f8"
 
 fn nix_test_fallback_root(label: String) -[FS]> String {
     files.tmpdir("jetpack-nix-fallback-{label}-") ?? panic("scratch directory")

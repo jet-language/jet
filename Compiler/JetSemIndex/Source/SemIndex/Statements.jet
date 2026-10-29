@@ -7,9 +7,9 @@
 // Foundation POLICY_RULES/resolver/explain belong to the item walker, not here.
 // CP-AST must publish stmt_span (AST/statements.rs865–902) and the borrowed
 // bind_pattern_names projection (AST/patterns.rs278–284); no local replicas.
-use jet_foundation.[Stmt, LValue, Binding, NamedSpan, Span, CallArg, Program, MIRNameFacts, expr_span, stmt_span, type_name, bind_pattern_names]
+use jet_foundation.[Stmt, LValue, Binding, NamedSpan, Span, CallArg, Program, NameFacts, expr_span, type_name]
 
-fn semindex_collect_stmts(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, program: Program, source: String, stmts: [Stmt], mp: String) {
+fn semindex_collect_stmts(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, stmts: [Stmt], mp: String) {
     loop stmt in stmts -> semindex_collect_stmt(&db, &ctx, names, program, source, stmt, mp)
 }
 
@@ -23,12 +23,12 @@ fn semindex_collect_loop_label_def(db: &SymbolDB, ctx: WalkCtx, label: NamedSpan
 fn semindex_loop_label_span(name: String, span: Span) -> Span Never! {
     Span{start: span.start, end: span.start + name.bytes().len()}
 }
-fn semindex_collect_loop_label_ref(db: &SymbolDB, ctx: WalkCtx, names: MIRNameFacts, name: String, span: Span, mp: String) Never! {
+fn semindex_collect_loop_label_ref(db: &SymbolDB, ctx: WalkCtx, names: NameFacts, name: String, span: Span, mp: String) Never! {
     reference :: semindex_scoped_ref(&db, ctx, names, name, semindex_loop_label_span(name, span), mp)
     &db.refs.push(reference)
 }
 
-fn semindex_collect_stmt(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, program: Program, source: String, stmt: Stmt, mp: String) {
+fn semindex_collect_stmt(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, stmt: Stmt, mp: String) {
     structural_id :: semindex_record_node(&db, ctx, "stmt", semindex_stmt_shape(stmt), mp, stmt_span(stmt))
     if structural_id == .Val(id) -> &ctx.structural_parents.push(id)
     if stmt == {
@@ -132,7 +132,7 @@ fn semindex_collect_stmt(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, prog
     if structural_id != None -> &ctx.structural_parents.pop()
 }
 
-fn semindex_collect_lvalue(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, program: Program, source: String, target: LValue, mp: String) {
+fn semindex_collect_lvalue(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, target: LValue, mp: String) {
     if target == {
         .Local(name, span) -> {
             reference :: semindex_scoped_ref(&db, ctx, names, name, span, mp)
@@ -146,7 +146,7 @@ fn semindex_collect_lvalue(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, pr
     }
 }
 
-fn semindex_collect_binding(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, program: Program, source: String, binding: Binding, mp: String) {
+fn semindex_collect_binding(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, binding: Binding, mp: String) {
     if binding.ty_span == .Val(span) -> semindex_structural_slot(&db, &ctx, "type", StructuralSlotKind.Scalar, (db: SymbolDB, ctx: WalkCtx) -> { semindex_record_node(&db, ctx, "type", "type", mp, span) })
     if binding.pattern == .Val(pattern) {
         semindex_structural_slot(&db, &ctx, "initializer", StructuralSlotKind.Scalar, (db: SymbolDB, ctx: WalkCtx) -> semindex_collect_expr(&db, &ctx, names, program, source, binding.init, mp))

@@ -1,5 +1,16 @@
 // JetTrace.rs:2594-3368. Original names preserved except six retired legacy
 // reader witnesses (Main current-schema-only greenfield ruling).
+use jet_foundation.[
+    CanonicalJSON, JetSymbolRef, SourceIdentity, TRACE_SCHEMA, TRACE_VERSION, TraceAllocation,
+    TraceBrowser, TraceGameDrawEvent, TraceGameFrame, TraceHardware, TraceIO, TraceLock,
+    TraceNative, TraceReceiptSection, TraceSample, TraceSkeleton, TraceSourceMap, TraceSpan,
+    TraceTask, TraceToolchain, artifact_extension, build_skeleton_bytes, canonical_json_bytes,
+    capture_policy_default_exclusions, capture_policy_to_json, jettrace_array, jettrace_artifact,
+    jettrace_get, jettrace_object_view, jettrace_wrapper_fields, trace_id,
+    trace_profile_unsupported, trace_skeleton_content_json, trace_source_map_jet_with_source,
+    verify_jettrace,
+]
+
 fn jettrace_sample_skeleton() -> TraceSkeleton Never! {
     TraceSkeleton{command: "run", argv: [String]{"run", "app.jet"},
         toolchain: TraceToolchain{jet_version: "0.0.0-test", compiler_build_id: "build-test", stdlib_id: "stdlib-test", runner_id: "runner-test"},
@@ -37,18 +48,31 @@ fn jettrace_test_set(value: &CanonicalJSON, key: String, ^replacement: Canonical
     }
 }
 fn jettrace_test_wrap(^content: CanonicalJSON) -> [U8] Never! { canonical_json_bytes(jettrace_artifact(^content) ?? panic(err.message)) }
-fn jettrace_test_task(id: U64, parent: U64, state: String, wait: String) -> TraceTask Never! {
+fn jettrace_test_task(id: U64, parent: U64, ^state: String, ^wait: String) -> TraceTask Never! {
     TraceTask{id: id, parent: parent, state: ^state, wait: ^wait, cancelled: false, symbol: jettrace_test_symbol()}
+}
+// The view readers return views of their argument; these copy the one node a
+// test compares, so no view outlives the call.
+fn jettrace_test_wrapper_lookup(value: CanonicalJSON, key: String) -> CanonicalJSON JetTraceError! {
+    fields :: jettrace_wrapper_fields(value)
+    Ok(fields[jettrace_get(fields, key)].value.copy())
+}
+fn jettrace_test_object_lookup(value: CanonicalJSON, key: String) -> CanonicalJSON JetTraceError! {
+    fields :: jettrace_object_view(value, "fixture object")
+    Ok(fields[jettrace_get(fields, key)].value.copy())
+}
+fn jettrace_test_array_item(value: CanonicalJSON, index: Int) -> CanonicalJSON JetTraceError! {
+    items :: jettrace_array(value, "fixture array")
+    Ok(items[index].copy())
 }
 #Test("trace_version_has_one_typed_home") {
     version :: TRACE_VERSION
     assert_eq(version, U32{1})
     assert_eq(TRACE_SCHEMA, "jet.trace")
     wrapper :: jettrace_test_valid(jettrace_sample_skeleton())
-    fields :: jettrace_wrapper_fields(wrapper) ?? panic(err.message)
-    assert_eq(fields[jettrace_get(fields, "version")].value, CanonicalJSON.Integer("{version}"))
+    assert_eq(jettrace_test_wrapper_lookup(wrapper, "version") ?? panic(err.message), CanonicalJSON.Integer("{version}"))
 }
-fn jettrace_test_window(status: String, wall: U64?, cpu: U64?) -> Bool Never! {
+fn jettrace_test_window(^status: String, wall: U64?, cpu: U64?) -> Bool Never! {
     skeleton := jettrace_sample_skeleton()
     skeleton.profile.window_status = ^status
     skeleton.profile.window_wall_ns = wall
@@ -209,8 +233,7 @@ fn jettrace_test_window(status: String, wall: U64?, cpu: U64?) -> Bool Never! {
 }
 #Test("skeleton_round_trips_with_schema_identity") {
     verified :: jettrace_test_valid(jettrace_sample_skeleton())
-    fields :: jettrace_wrapper_fields(verified) ?? panic(err.message)
-    assert_eq(fields[jettrace_get(fields, "schema")].value, CanonicalJSON.String(TRACE_SCHEMA))
+    assert_eq(jettrace_test_wrapper_lookup(verified, "schema") ?? panic(err.message), CanonicalJSON.String(TRACE_SCHEMA))
     assert_eq((trace_id(verified) ?? panic(err.message)).len(), 64)
     assert(artifact_extension().ends_with("jettrace"))
 }
@@ -235,14 +258,12 @@ fn jettrace_test_window(status: String, wall: U64?, cpu: U64?) -> Bool Never! {
     assert(text.contains("\"kind\":\"jet\""))
     assert(text.contains("sourcesContent"))
     verified :: jettrace_test_valid(skeleton)
-    fields :: jettrace_wrapper_fields(verified) ?? panic(err.message)
-    content :: fields[jettrace_get(fields, "content")].value
-    cfields :: jettrace_object_view(content, "content") ?? panic(err.message)
-    maps :: jettrace_array(cfields[jettrace_get(cfields, "source_maps")].value, "maps") ?? panic(err.message)
-    first :: jettrace_object_view(maps[0], "map") ?? panic(err.message)
-    second :: jettrace_object_view(maps[1], "map") ?? panic(err.message)
-    assert_eq(first[jettrace_get(first, "path")].value, CanonicalJSON.String("a.jet"))
-    assert_eq(second[jettrace_get(second, "path")].value, CanonicalJSON.String("b.jet"))
+    content :: jettrace_test_wrapper_lookup(verified, "content") ?? panic(err.message)
+    maps :: jettrace_test_object_lookup(content, "source_maps") ?? panic(err.message)
+    first :: jettrace_test_array_item(maps, 0) ?? panic(err.message)
+    second :: jettrace_test_array_item(maps, 1) ?? panic(err.message)
+    assert_eq(jettrace_test_object_lookup(first, "path") ?? panic(err.message), CanonicalJSON.String("a.jet"))
+    assert_eq(jettrace_test_object_lookup(second, "path") ?? panic(err.message), CanonicalJSON.String("b.jet"))
     skeleton.source_maps[1].sha256 = "0".repeat(64)
     assert(jettrace_test_error(skeleton).contains("does not match map bytes"))
 }

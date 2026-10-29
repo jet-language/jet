@@ -6,11 +6,10 @@ This reference is for Jet application authors who need the standard modules for
 files, data, networking, security, command-line programs, and system
 integration. The executable declarations live in [`Core/`](../../../Core/);
 the Prelude registry lists exports and module paths in
-[`Core.jet`](../../../crates/jet-codegen/src/Prelude/Core.jet), and the
+[`Core.jet`](../../../Compiler/Prelude/Core.jet), and the
 [`Examples/`](../../../Examples/) and [`tests/`](../../../tests/) directories
-exercise the contracts. The Rust-hosted compiler remains the reference
-execution path; `Compiler/` is a staged compiler port, not a claim that Jet is
-self-hosted.
+exercise the contracts. The Jet compiler in [`Compiler/`](../../../Compiler/)
+checks and builds them.
 
 Application and `#Test` helper functions retain their canonical entry-module
 call identity in both single-file and multi-file packages; the absence of
@@ -121,7 +120,7 @@ Directory creation shares the existing `jet_std_fs_create_dir_all_raw` host
 operation; its callers keep their own fault preflight and error resource.
 
 Devtools checked publication constructs its package/module/panel identities
-and ordered, JSON-escaped field envelope in `Core/devtools/devtools.jet`.
+and ordered, JSON-escaped field envelope in `Core/Devtools/Devtools.jet`.
 The private typed-payload leaf retains the existing validated event and global
 sink, including silent rejection of invalid events and no durable-delivery
 claim when no sink is installed. Volatile memory access retains the checked
@@ -138,7 +137,7 @@ library, then removes its staged payload, matching the verification provider's
 error path. Successful finish transfers those resources into the existing Mod.
 
 Email address, attachment, envelope, and message construction validates in
-`Core/email/email.jet`: control-character refusal precedes address parsing,
+`Core/Email/Email.jet`: control-character refusal precedes address parsing,
 mailbox grammar is ASCII dot-atom or quoted local, MIME and physical-header
 limits precede attachment size, and envelopes require 1–100 recipients.
 The same source computes the native conservative wire bound and assembles MIME:
@@ -466,6 +465,9 @@ records the shipped surface without adding aliases:
 
 `partition` is stable, and the list sort family preserves source order for equal
 keys. `min_by` and `max_by` retain the last source item for equal keys.
+`sort`, `sort_desc`, `min` and `max` on named tuples compare members in label
+order, not written order (S73, D-TUPLE-ORDER1=A). So `(key, index)` sorts by
+`index`, then `key`; use `sort_by` to put another member first.
 `binary_search` returns a matching index, not an insertion position or a
 promise to return the first equal item. `counts()` returns a map of element
 counts; `top_n(n)` orders by descending count and ascending key for ties.
@@ -641,7 +643,7 @@ Whole-file and metadata functions:
 false. Their false-on-host-error policy is Jet-owned; the host boundary
 supplies only the following-metadata fact or the host error.
 
-`glob` and `copy_dir` own their DFS policy in `Core/files/files.jet`. Native
+`glob` and `copy_dir` own their DFS policy in `Core/Files/Files.jet`. Native
 entries contexts retain `DirEntry` and source/destination paths, not reconstructed
 UTF-8 names. Directory copy processes unsorted `ReadDir` order, copies only
 regular files, and releases each entry after use. All host failures report the
@@ -969,7 +971,7 @@ optional `SMTP_DKIM_SIGNED_HEADERS`; partial configuration fails before
 connecting.
 
 The safe limits, environment configuration, and private configuration predicates
-live in `Core/email`. Before creating a mailer, `smtp_from_env` checks limits,
+live in `Core/Email`. Before creating a mailer, `smtp_from_env` checks limits,
 host, port/security pairing, authentication name, CA PEM, and DKIM header policy,
 in that order. The first invalid limit is reported in field declaration order.
 `Limits.safe()` supplies the same six bounds used by `smtp_from_env`; DKIM
@@ -1070,44 +1072,82 @@ meaning rather than becoming an I/O error. The public `Body.Empty`,
 
 ### `core.http.server` — HTTP serving
 
-`core.http.server` builds a typed multiplexer and serves HTTP/1.1. `bind` and
-`serve` accept optional `HTTPServerTLS` and optional deadlines; `serve_once`
-and `serve_once_listener` provide testable one-request entry points.
+`core.http.server` builds a typed multiplexer and serves HTTP/1.1 over
+`core.net` TCP, one request per connection with `Connection: close`. `bind`
+and `serve` accept optional `HTTPServerTLS` and optional deadlines; `serve_once`
+and `serve_once_listener` provide testable one-request entry points. A server
+given TLS material refuses to bind, because no listener TLS adapter exists yet.
 The Jet `tls(cert, key)` constructor preserves both PEM strings verbatim,
 including empty or malformed material. Loading and validating those credentials
 belongs to the listener's TLS setup, not to construction.
 
+`core.http.serve(mux, deadline)` binds `mux` on 127.0.0.1:8080 and returns the
+`HTTPServer`, panicking when the address cannot be bound.
 
-`core.http.serve(mux, deadline:)` is the loopback lifecycle entry point: it
-returns an `HTTPServer` handle whose `shutdown()` drains pending requests and
-returns an `HTTPShutdownReport`. It is distinct from the blocking
-`core.http.server.serve(addr, mux, ...)` operation.
+An `HTTPServer` answers connections from `serve()` (alias `wait()`) until
+`shutdown(grace)`. Each request is answered before the next is accepted, so a
+shutdown has no in-flight request to cancel. Every caller of `serve` and
+`shutdown` receives the same `HTTPShutdownReport{accepted, overloaded,
+completed, cancelled}`; a second `serve` is an `HTTPError.IO`. The connection
+deadline bounds each connection's reads and writes (30 seconds by default).
 
-`core.http.serve(mux, deadline:)` is the loopback lifecycle entry point: it
-returns an `HTTPServer` handle whose `shutdown()` drains pending requests and
-returns an `HTTPShutdownReport`. It is distinct from the blocking
-`core.http.server.serve(addr, mux, ...)` operation.
-
-`core.http.serve(mux, deadline:)` is the loopback lifecycle entry point: it
-returns an `HTTPServer` handle whose `shutdown()` drains pending requests and
-returns an `HTTPShutdownReport`. It is distinct from the blocking
-`core.http.server.serve(addr, mux, ...)` operation.
+Static files are read through `core.files` and the `Date` field comes from the
+`core.time` wall clock, so serving carries `[Net, FS.Read, Time]`:
+`serve(addr, …)`, `HTTPServer.serve`/`wait`, `serve_once` and
+`serve_once_listener` have that row. `static_file`, `static_file_range`,
+`HTTPHandler.handle`, and the mux installers `static_files`, `cors` and
+`request_id` are `[Net, FS.Read]`, and a handler closure may use `Net` and
+`FS.Read`.
 
 | API | Result | Description |
 | --- | --- | --- |
 | `mux()` | `HTTPMux` | Create a router carrier. |
-| `bind(addr, mux, tls, deadline)` | `HTTPServer !HTTPError` | Bind a plaintext or explicitly configured TLS listener. |
-| `serve(addr, mux, tls, deadline)` | `!HTTPError` | Serve requests until the operation fails or is stopped. |
+| `bind(addr, mux, tls, deadline)` | `HTTPServer !HTTPError` | Bind a plaintext listener. |
+| `serve(addr, mux, tls, deadline)` | `!HTTPError` | Bind, then serve requests until the listener fails. |
 | `serve_once(addr, mux)` / `serve_once_listener(listener, mux)` | `!HTTPError` | Serve one request for tests and small adapters. |
 | `response(status, body)` | `HTTPResponse` | Construct a text response. |
 | `json(status, body)` | `HTTPResponse` | Encode an `Encode` value as JSON response data. |
 | `static_file(path, content_type)` / `static_file_range(request, path, content_type)` | `HTTPResponse !HTTPError` | Serve a file, with a range-aware form for a request. |
-| `static_files(mux, prefix, root)` | unit | Mount a directory below a route prefix. |
+| `static_files(mux, prefix, root, index:, dotfiles:, follow_links:)` | unit | Mount a directory below a route prefix; each optional `Bool` label overrides one default policy. |
 | `tls(cert, key)` | `HTTPServerTLS` | Build explicit server TLS material. |
 | `sse(body)` | `HTTPResponse` | Build a server-sent-events response. |
 | `cors_policy(origins)` / `cors(mux, policy)` | policy/unit | Validate a CORS origin policy and install it. |
 | `access_log(request, status)` | `String` | Render a stable access-log line. |
 | `request_id(mux)` | unit | Install request-id middleware. |
+
+Routes are `/`, static segments, `:name` parameters, and one final `*name`
+catch-all that may match zero segments. An invalid pattern panics with E2805
+and a second route of the same method and shape panics with E2804. Request
+paths are percent-decoded per segment without `+` rewriting; an encoded `/`, a
+`.` or `..` segment, or invalid UTF-8 is `400`. A static segment outranks a
+parameter, which outranks a catch-all, segment by segment; then the shorter
+pattern wins, then the earlier registration. `HEAD` falls back to `GET`. A path
+served only for other methods is `405` with `Allow`, an unknown path `404`, and
+`OPTIONS *` is `204` with every registered method in `Allow`. Middleware
+registered first runs outermost. Every request carries `x-request-id`: a valid
+incoming value (1–128 visible ASCII bytes) is kept, otherwise one is generated.
+
+Request framing refuses what HTTP/1.1 forbids: a head over 32 KiB or more than
+100 fields is `431`; a malformed request line, an obsolete folded field, a
+missing or repeated `Host` on HTTP/1.1, `Content-Length` with
+`Transfer-Encoding`, a coding other than `chunked`, and conflicting lengths are
+`400`; a body over 1 MiB is `413`; any `Content-Encoding` is `415`; an
+`Expect` other than `100-continue` is `417`; an unsupported `HTTP/` version is
+`505`; and a request not completed within the deadline is `408`. Chunked bodies
+accept only the trailers the request declared. Responses carry `Date` and the
+server's own framing: user `Content-Length`, `Transfer-Encoding`, `Trailer`
+and `Connection` fields are not sent. Response trailers switch the body to
+chunked framing with a `Trailer` field; `1xx`, `204`, `205` and `304` carry no
+body. A handler error of `BodyTooLarge`, `InvalidFraming` or
+`UnsupportedEncoding` answers `413`, `400` or `415`; any other is `500`.
+
+`static_files` serves `GET` below the prefix. It refuses dot-files unless
+`dotfiles: true`, symbolic links unless `follow_links: true`, and any path that
+resolves outside the root. A directory serves its `index.html` unless
+`index: false`. Responses carry a content type from the file extension,
+`accept-ranges`, an `etag` and `last-modified`; `If-None-Match` and
+`If-Modified-Since` answer `304`, one byte range answers `206` (guarded by
+`If-Range`), an unsatisfiable range `416`, and anything unservable `404`.
 
 The Jet CORS constructor accepts named-origin lists or `.Any`/`.List` policies.
 Empty method/header lists retain the published defaults, credentials default to
@@ -1510,8 +1550,11 @@ declined under D-CORESURF-SMALL1.
 
 `core.watcher` creates explicit watch handles for files, process IDs, and TCP
 ports (D-WATCH-SCOPE1). Polling is explicit: a handle or set does not own a
-background thread or shell process, and the public module has no callback
-registration method.
+background thread or shell process. Each handle owns one synchronous
+`Event<WatchEvent>`: `handle.on(scope, handler)` and `handle.once(scope,
+handler)` register on it, and every `poll` emits each event it returns to it.
+Handles and sets are shared: copies observe the same watch state, and
+`set.add(handle)` keeps the handle in every copy of the set.
 
 Watch constructors retain provider-owned resource state, not string-backed
 handle records. `files(path)` passes the path to the provider unchanged; its
@@ -1530,6 +1573,23 @@ filesystem error is not replaced by a source-only empty-path error.
 | `len(set)` | `Int` | Count handles in a set. |
 | `remove(set, target)` / `contains(set, target)` | `!IOError` / `Bool !IOError` | Return the explicit unsupported-operation error for non-empty set operations; an empty `contains` target returns false. |
 | `debounce(handle, ms)` | `WatchHandle !IOError` | Reject a negative duration and otherwise return the provider's unsupported-operation error. |
+
+| Method | Result | Description |
+| --- | --- | --- |
+| `handle.poll()` / `handle.events()` | `[WatchEvent]` | Diff the target since the last poll and emit each event to the handle's event. A cancelled handle returns none. |
+| `handle.on(scope, handler)` / `handle.once(scope, handler)` | `Subscription` | Register a `fn(WatchEvent)` handler for the scope's lifetime. |
+| `handle.cancel()` / `handle.is_active()` | unit/bool | Stop the handle, or ask whether it still polls. |
+| `handle.summary()` | `String` | `watch file <root>`, `watch process <pid>`, or `watch port <host>:<port>`. |
+| `set.add(handle)` | unit | Add a handle to the shared set. |
+| `set.poll()` / `set.events()` | `[WatchEvent]` | Poll every handle in insertion order. |
+| `set.summary()` | `String` | `watchset handles=<n>`. |
+
+A file poll reports `Created` and `Modified` paths in path order, then
+`Removed` paths in path order, with detail `dir` or `file`; a failed snapshot
+is one `Error` event for the root. A process poll reports `Ready` when the
+process is first seen alive and `Exited` when it stops or was never alive. A
+port poll reports `Ready` (detail `host:port`) once a connection succeeds
+after the port was not ready.
 
 `WatchDomain` is `File`, `Process`, or `Port`. `WatchEventKind` is `Created`,
 `Modified`, `Removed`, `Error`, `Exited`, or `Ready`. `WatchEvent` carries
@@ -1712,7 +1772,7 @@ dynamic code loading; `get`, `set`, `clear`, `copy`, `equal`, `getfile`,
 Compiler fact reads such as `@function.effects` are separate from runtime
 reflection. Projections of prepared fact records, including fields reached
 through an optional fact, remain compile-time values. Tests against their
-closed fact-enum variants fold before MIR lowering; ordinary user enums retain
+closed fact-enum variants fold before the IR is built; ordinary user enums retain
 their nominal owner and are not folded as compiler facts.
 
 ### `core.sys` — environment and system facts
@@ -1751,7 +1811,7 @@ fn run() {
 | `home_dir()` / `temp_dir()` | `?String -[Env]>` / `String -[Env]>` | Return platform home or temporary-directory values. |
 | `name()` / `family()` / `arch()` | `String -[Env]>` | Return OS name, OS family, and CPU architecture. |
 | `platform()` / `is_windows()` / `is_unix()` / `is_linux()` / `is_macos()` | platform values `-[Env]>` | Query the environment-derived platform facts. |
-| `executable()` / `username()` | `String -[Env]>` | Return process facts. |
+| `executable()` / `username()` | `String -[Env]>` | Return process facts. `executable()` is the running program's path: the built binary, or the script's absolute path under `jet run`; launching it runs the program again on either tier. |
 | `hostname()` | `String -[Env, FS]>` | Return the host name. |
 | `release()` / `version()` | `String -[Env, FS, Exec, Time.Wait]>` | Read operating-system facts; macOS queries run `uname` or `sw_vers`. |
 | `pid()` / `getpid()` / `getppid()` / `cpu_count()` | `Int -[Env]>` | Return process IDs or a logical CPU count of at least one. |
@@ -1778,7 +1838,7 @@ cannot contain NUL. `vars` does not silently skip an unrepresentable entry:
 
 OS-fact fallback selection, release-file parsing, supplementary-group sizing,
 load-average fallback, process-time conversion, and POSIX syscall error contexts
-are implemented in `Core/sys/sys.jet`. Temporary native leaves provide only host
+are implemented in `Core/Sys/Sys.jet`. Temporary native leaves provide only host
 availability, syscall return values, errno, or host bytes. `release`/`version`
 keep the first matching release-file field, including an empty field; they do
 not interpret it as shell syntax.
@@ -1794,7 +1854,7 @@ whether the call goes through the module alias or a direct import:
 | `setpriority(who, priority)` | `!IOError -[Env]>` | Change scheduling priority. |
 | `utime(path, atime, mtime)` | `!IOError -[FS, Env]>` | Change file timestamps. |
 | `stop(code)` | never returns `-[Env]>` | Request process termination through the process boundary. |
-| `fork()` / `setsid()` | `Int !IOError -[Env]>` | Fork or create a process session. |
+| `fork()` / `setsid()` | `Int !IOError -[Env, Exec]>` | Fork or create a process session. Both change the process tree, so callers need `Exec`, like `process.cmd`. |
 | `wait()` / `waitpid(pid, options)` | `Int !IOError -[Env, Time.Wait]>` | Reap a child or selected child. |
 | `kill(pid, signal)` | `!IOError -[Env]>` | Send a signal. |
 | `setuid` / `setgid` / `setpgid` / `setpgrp` / `initgroups` | `!IOError -[Env]>` | Change credentials, groups, or process-group membership. |
@@ -1818,13 +1878,11 @@ redact the rejected value.
 
 `core.process` is the process-boundary reference for application and tool
 authors who launch or supervise child processes. Its executable contract is
-defined by [`Core/process/process.jet`](../../../Core/process/process.jet), the
-process checks in
-[`process_ui.rs`](../../../crates/jet-sema/src/Sema/CheckerCoreLib/process_ui.rs),
-and tests such as
-[`tests/corelib_parts/system.rs`](../../../tests/corelib_parts/system.rs).
+defined by [`Core/Process/Process.jet`](../../../Core/Process/Process.jet) and
+tests such as
+[`tests/cases/corelib/process_wait_observes_inherited_deadline.case`](../../../tests/cases/corelib/process_wait_observes_inherited_deadline.case).
 The export registry is
-[`Prelude/Core.jet`](../../../crates/jet-codegen/src/Prelude/Core.jet); the
+[`Prelude/Core.jet`](../../../Compiler/Prelude/Core.jet); the
 data example used later is
 [`data_analysis.jet`](../../../Examples/features/tooling/data_analysis.jet).
 
@@ -1887,7 +1945,7 @@ fn run() -[Exec, Time.Wait]> {
 | `process.env_keys()` | `[String] !EnvError -[Env]>` | List environment-variable names. |
 | `process.env_set(spec, key, value)` | `ProcessSpec` | Builder form that sets one child environment variable. |
 | `process.env_truthy(name)` | `Bool -[Env]>` | Test the conventional truthy environment values. |
-| `process.which(name)` | `?String -[FS, Env]>` | Find an executable using filesystem checks and the host search path. |
+| `process.which(name)` | `?String -[FS, Env]>` | Find an executable using filesystem checks and the host search path. A candidate that is a link counts when its target is a file; `files.which` and `Path.which` search the same way. |
 | `process.exit(code)` | `Never -[Exec]>` | Terminate the current process at the explicit process boundary. |
 | `process.on_signal(signal)` | `Unit -[Exec]>` | Register the process signal policy for one `ProcessSignal` value. |
 | `process.signal_number(signal)` | `Int` | Convert a `ProcessSignal` value to its platform signal number where one exists. |
@@ -1895,6 +1953,14 @@ fn run() -[Exec, Time.Wait]> {
 | `ProcessSignal` | type | Closed variants: `Term`, `Hup`, and `Int`, matching the shared signal dispatcher. |
 | `ProcessReceipt` | type | The immutable result of a run, including status, output, policy digests, backend, authority, descendants, limits, and redaction facts. |
 | `ProcessSpec` | type | The executable, arguments, stream policy, authority, terminal policy, limits, and detachment policy for a child. |
+
+A child that cannot start is an `IOError`, never a receipt: its kind
+follows the launch's OS error the way a file operation's does (`NotFound`
+for a missing program, `PermissionDenied` for one that may not be run,
+`Other` for the rest), with operation `.Resolve`, the program as its
+resource and the OS error code. An empty command (`process.cmd([])`) or an
+empty `process.pipeline([])` is `InvalidInput` naming that empty call. A
+program that starts and then exits nonzero, 127 included, is a receipt.
 
 #### Building a process policy
 
@@ -2101,7 +2167,7 @@ results use normalized exact policies, not fieldwise record derivation.
 Decimal's named hooks, rounding, and exact rendering are also source methods,
 so loaded nominal identities and bare exact values expose the same behavior.
 
-The policies and rendering live in `Core/math/math.jet`. Checked precise TIR
+The policies and rendering live in `Core/Math/Math.jet`. Checked precise
 operations resolve their reserved helpers by the loaded math module identity;
 they do not resolve a user function with the same helper spelling.
 The bare and `core.math`-qualified `Fraction`, `Decimal`, and `Complex`
@@ -2426,6 +2492,12 @@ the UTF-8 byte length. The public convenience surface is the qualified
 `core.text` module; the old catalogue of unqualified string methods is not a
 separate core module contract (D-STR-DECLINE1=C).
 
+`s.hash()` returns a `U64` hash of the UTF-8 bytes, read in place. Equal
+strings hash equal within one process run (on every optimization tier and at
+compile time), so the value can key a hash table. It is not cryptographic, and
+the value may differ between runs and compiler versions: never persist it or
+compare it across processes.
+
 ### `core.time` — dates, durations, and clocks
 
 `core.time` uses the proleptic Gregorian calendar, including year `0` (1 BCE),
@@ -2437,7 +2509,7 @@ particular call uses UTC or bundled web data. `now`, `now_utc`, `today`,
 
 The civil carriers (`Date`/`LocalDate`, `LocalTime`, `DateTime`, `Period`,
 `Zone`, `ZonedDateTime`, and `Instant`) and their arithmetic, parsing,
-formatting, and text codecs are implemented in `Core/time/time.jet` on all
+formatting, and text codecs are implemented in `Core/Time/Time.jet` on all
 tiers. `Date` aliases `LocalDate`; immutable zone tables are plain values,
 copied with their zone, and borrowed reads need no shared-memory guard or
 `Time.Wait` effect. Native seams supply raw clock samples, environment values
@@ -2453,7 +2525,7 @@ filesystem samples as absent.
 
 Core's reserved `__` seams are loaded only through the trusted embedded-Core
 loader. To check this implementation, check a program importing `core.time`,
-not `Core/time/time.jet` as a user entry: user-written reserved names still
+not `Core/Time/Time.jet` as a user entry: user-written reserved names still
 produce E0067.
 
 Codec compatibility is intentionally separate from strict public parsing:
@@ -2467,8 +2539,8 @@ before saturating the final `Duration` to its signed nanosecond range.
 
 `zone` accepts UTC/GMT/Z and numeric offsets; the runtime host also resolves
 named IANA zones from TZif data. On native hosts, lookup checks
-`JET_TZDB_DIR`, `TZDIR`, `$JET_ROOT/Core/time/tzdb`, the repository's
-`Core/time/tzdb`, `/usr/share/zoneinfo`, `/usr/share/lib/zoneinfo`, and
+`JET_TZDB_DIR`, `TZDIR`, `$JET_ROOT/Core/Time/tzdb`, the repository's
+`Core/Time/tzdb`, `/usr/share/zoneinfo`, `/usr/share/lib/zoneinfo`, and
 `/etc/zoneinfo`. Optional `posix/` and `right/` prefixes are stripped for
 lookup. Web/WASM uses its embedded zone data. A name with `..`, a leading
 `/`, or a leading `\` is rejected; an unavailable name returns `TimeError`
@@ -2550,7 +2622,7 @@ following the Measurement/LogSpan rule. The retired module constructor and
 `force` diagnostics are unchanged.
 
 `ExpiringValue` is a reserved source-owned nominal declared in
-`Core/time/time.jet`. The canonical Core ownership inventory admits that
+`Core/Time/Time.jet`. The canonical Core ownership inventory admits that
 declaration and its impl even though the spelling remains reserved for user
 code (E0106 for redeclarations, E0301 for user impls on the builtin spelling).
 Source ownership is distinct from public export metadata and also applies
@@ -2590,7 +2662,7 @@ replayed (D-TIMERES1=A; D-DET-CAPAPI).
 week calculations without locale tables. Its module-global weekday constants
 are `MONDAY :: 0` through `SUNDAY :: 6`.
 
-All calendar behavior is implemented in the embedded `Core/time/calendar.jet`
+All calendar behavior is implemented in the embedded `Core/Time/Calendar.jet`
 source shared by the execution tiers, including epoch conversion without a
 native date-time carrier.
 
@@ -2671,8 +2743,8 @@ public typed-text carrier.
 Validation can be declared as `validate { check(...) }`: all failed checks accumulate, and conditions and messages are purity-checked (`D-VALIDATE1`; `D-FIELDPOL1`; `S60/E3401`).
 
 The concrete format sources live under
-[`Core/encoding/`](../../../Core/encoding/), and typed CSV/JSON convenience
-functions are also exported by [`Core/data/data.jet`](../../../Core/data/data.jet).
+[`Core/Encoding/`](../../../Core/Encoding/), and typed CSV/JSON convenience
+functions are also exported by [`Core/Data/Data.jet`](../../../Core/Data/Data.jet).
 A decoder is only type-safe when its destination has an explicit shape; do not
 use an untyped string round trip as a substitute for a typed codec.
 
@@ -2789,7 +2861,7 @@ serializer.
 security rules in [encoding-decisions.md](../encoding-decisions.md#xml-representation-and-security).
 Native authority preserves the complete parse/render options, entity policies,
 lexical evidence, encodings, canonical modes, and located `XMLError` payloads.
-The native CBOR and XML options/error records retain checked MIR owner rows
+The native CBOR and XML options/error records retain checked owner rows
 even when no source module declares them. Their field shapes come from the
 same checked Core field registry used by type checking; removing a source
 codec must not remove its native options or located error payloads.
@@ -2876,7 +2948,7 @@ Its format grammar accepts optional `<` little-endian or `>`/`!` big-endian
 prefixes, repeat counts, and the `x`, `c`, `b`, `B`, `h`, `H`, `i`, `l`, `I`,
 `L`, `q`, and `Q` integer codes. Native-alignment `@` is not part of this
 portable grammar. The source is
-[`Core/encoding/binary.jet`](../../../Core/encoding/binary.jet).
+[`Core/Encoding/Binary.jet`](../../../Core/Encoding/Binary.jet).
 
 | Signature | Result | Description |
 |---|---|---|
@@ -3073,7 +3145,7 @@ stream is terminal and does not resume iteration.
 plan and renders that plan as text or SVG. The source implementation is a
 portable inspection renderer: it does not require a GPU, and it makes missing
 values explicit as zero. The module contract is defined in
-[`Core/data/plot.jet`](../../../Core/data/plot.jet) and exercised by the plot
+[`Core/Data/Plot.jet`](../../../Core/Data/Plot.jet) and exercised by the plot
 corpus under [`tests/conformance/corpus/core/data/plot/`](../../../tests/conformance/corpus/core/data/plot/).
 
 The aggregate selector retains the native absence value, distinct from
@@ -3145,7 +3217,7 @@ with the source helpers, while application examples use public formatting.
 | `bytes(value: Int) -> String` | text | Format bytes in SI units `B`, `KB`, `MB`, `GB`, `TB`, `PB`, or `EB`, with one decimal below 10 (`1536` is `1.5 KB`, `1000` is `1 KB`). |
 | `duration(milliseconds: Int) -> String` | text | Format a duration using at most three nonzero units. |
 
-Calls run [`Core/text/fmt.jet`](../../../Core/text/fmt.jet); interpolation
+Calls run [`Core/Text/Fmt.jet`](../../../Core/Text/Fmt.jet); interpolation
 selectors and compile-time calls run the shared Prelude kernel with the same
 steps, so every tier prints the same text. Fixed-precision rounding scales by
 `10^frac` and rounds half away from zero; non-finite values print as ordinary
@@ -3157,7 +3229,7 @@ The library-call boundary is deliberate: ordinary human formatting remains expli
 `core.log` writes structured records through a configured sink. Levels are
 `debug`, `info`, `warn`, `error`, `critical`, and `fatal`; `warning` is an
 alias for `warn`. A record can carry typed fields and a redaction marker. The
-package source is [`Core/log/log.jet`](../../../Core/log/log.jet).
+package source is [`Core/Log/Log.jet`](../../../Core/Log/Log.jet).
 
 | Signature | Result | Description |
 |---|---|---|
@@ -3201,7 +3273,7 @@ at explicit suspension points; the scheduler does not turn a blocking
 computation into preemptive parallelism. Mutable task-owned values stay with
 their task; values crossing a task or channel boundary must satisfy Jet's
 sendability rules. The implementation is in
-[`Core/tasks/tasks.jet`](../../../Core/tasks/tasks.jet).
+[`Core/Tasks/Tasks.jet`](../../../Core/Tasks/Tasks.jet).
 
 | Signature | Result | Description |
 |---|---|---|
@@ -3261,7 +3333,7 @@ one millisecond; their first delivered tick is one.
 `core.prelude` is available without a separate package import. Its functions
 are deliberately small barriers and predicates used by generic code and
 constant evaluation; they are not alternate syntax for bindings. See
-[`Core/prelude/prelude.jet`](../../../Core/prelude/prelude.jet).
+[`Core/Prelude/Prelude.jet`](../../../Core/Prelude/Prelude.jet).
 
 | Signature | Result | Description |
 |---|---|---|
@@ -3281,21 +3353,22 @@ constant evaluation; they are not alternate syntax for bindings. See
 it does not replace `jet test`'s test discovery. A test can use a fake clock,
 fake random source, fake data, temporary directory, fixture, corpus, snapshot,
 or golden file. The public source is
-[`Core/testing/testing.jet`](../../../Core/testing/testing.jet).
+[`Core/Testing/Testing.jet`](../../../Core/Testing/Testing.jet).
 
 | Signature | Result | Description |
 |---|---|---|
 | `assert_equal(comparison: TestComparison) -> Bool` | Boolean | Check the comparison's recorded proof fields. |
 | `compare<E>(cases: [Dyn], reference: fn(Dyn) -> Dyn E!, candidate: fn(Dyn) -> Dyn E!, relation: String) -> TestComparison E!` | comparison | Compare reference and candidate outputs over explicit cases. The callbacks' shared failure type passes up (D-CALLBACK-ERR1=A); callbacks that cannot fail make the comparison `Never!`. |
-| `snap(name: String, value: String) -[FS, Env]> Bool` | Boolean | Compare or create `__snapshots__/<sanitized-name>.snap`; `JET_UPDATE_SNAPSHOTS=1` rewrites it. Snapshot names retain ASCII letters, digits, `-`, and `_`, replacing other scalars with `_`; an empty name becomes `case`. |
-| `golden(name: String, value: String) -[FS]> Bool` | Boolean | Check a named golden value. |
+| `snap(name: String, value: String) -[FS, Env]> Bool` | Boolean | Compare or create `__snapshots__/<sanitized-name>.snap`; `JET_UPDATE_SNAPSHOTS=1` rewrites it. Snapshot names retain ASCII letters, digits, `-`, and `_`, replacing other scalars with `_`; an empty name becomes `case`. A mismatch returns `false` and records `snapshot differs: <name>` with the same bounded unified diff as `golden`, so a failing `assert` shows it. |
+| `golden(name: String, value: String) -[FS, Env]> Bool` | Boolean | Compare `value` with the file `name`. A missing, unreadable, or differing file returns `false` and records the reason (with a bounded unified diff for a difference). The next failing `assert` or `assert_eq` on that thread reports the recorded reason as its stop message and the path and diff as its locals; a passing helper call clears it. Under `JET_UPDATE_SNAPSHOTS=1` (`jet test -u`) a missing or differing file is written, parent folders included, and the check passes. |
 | `fixture(name: String) -[FS]> String` | text | Load a named fixture. |
 | `temp_dir(prefix: String) -[FS]> String` | path | Allocate an isolated temporary directory. |
-| `corpus(glob: String) -[FS]> [String]` | paths | Select files matching a corpus glob. |
+| `corpus(glob: String) -[FS]> [String]` | contents | Read each readable regular file directly inside the directory `glob` (the parameter keeps its historical name; it is not a pattern), ordered by full path; an absent directory gives `[]`. |
+| `corpus_entries(root: String, suffix: String) -[FS]> [CorpusEntry]` | entries | List the regular files below `root`, at any depth, whose names end in `suffix`, ordered by `id`. `CorpusEntry{id, path}`: `id` is the path below `root` without `suffix` (`basics/hello` for `<root>/basics/hello.jet`). Names starting with `.` are skipped, folders included; an absent root gives `[]`. |
 | `fake_clock(unix_ms: Int) -> Clock` | clock | Create a deterministic clock at a Unix-millisecond value. |
 | `fake_rng(seed: Int) -> RNG` | RNG | Create deterministic random state. |
 | `fake_data(seed: Int) -> Fake` | fake | Create a deterministic fake-data carrier. |
-| `test_suite() -> TestSuite` | suite | Create the default suite record. |
+| `test_suite() -> Test` | suite | Create the default suite record. |
 | `world(body: fn(DeterministicWorld))` | — | Run a body with deterministic world services. |
 | `status(comparison: TestComparison) -> String` | text | Read the comparison status. |
 
@@ -3304,45 +3377,106 @@ Use `#Test` for test declarations and keep assertions about behavior rather
 than implementation details. The compiler and test runner own test discovery;
 the helper types only control inputs and observations.
 
-### `core.regex` — Unicode regular expressions
+### `core.regex` — linear-time regular expressions
 
-`core.regex` and Prelude use one `Regex`, `Match`, and `RegexFlags` surface.
-The Thompson/Pike VM supports concatenation, alternation, named and numbered
-groups, noncapturing groups, greedy/lazy quantifiers, bounded repetition, `.`,
-anchors, and Unicode `\d`, `\w`, and `\s` classes. Flags select Unicode
-case-insensitive matching, multiline anchors, and dot-all matching.
+`core.regex` is a Thompson/Pike VM over Unicode scalars, so every tier gives
+one answer. Matching is linear in the text, with no recursion and no step
+budget. Matching is leftmost-first, as in RE2 and Rust: the leftmost match
+wins, and among the matches that start there, alternation prefers its earlier
+arm and a repetition prefers its greedy count. `Regex{"a|ab"}.find("ab")` is
+`"a"`, while `full_match` asks whether any reading covers the whole text, so
+`Regex{"a|ab"}.full_match("ab")` is `true`.
 
-The budget is an execution bound, not a promise of linear-time matching. The
-engine does not expose named capture groups: `Match.groups` is a positional
-list. Use the compiled `Pattern`/`Regex` values when the same expression is
+The syntax:
+
+- concatenation, alternation `|`, capture groups numbered by their `(`,
+  `(?:…)`, and named groups `(?<name>…)` or `(?P<name>…)`. A group name is
+  ASCII letters, digits and `_`, does not start with a digit, and is unique.
+- `*`, `+`, `?`, `{n}`, `{n,}` and `{n,m}` (a count may be at most 1000), each
+  with a lazy form written with a trailing `?` (`*?`, `{2,5}?`), which prefers
+  the smallest count. A repetition cannot directly follow another, so `a**`
+  is an error.
+- `.` (any scalar except `\n`), `^` (start of text), `$` and `\z` (end of
+  text), `\A` (start of text), and `\b`/`\B` (an ASCII word boundary, or its
+  absence).
+- classes over scalars: `[]`, `[^]`, ranges, and a `]` written first as a
+  member (`[]a]`). A literal `[` inside a class is written `\[`.
+- the class escapes `\d` and `\w` (ASCII), `\s` (Unicode White_Space), and
+  `\p{L}`/`\pL`/`\p{Letter}`/`\p{Alphabetic}`, `\p{N}`/`\p{Number}` and
+  `\p{White_Space}`. `\D`, `\W`, `\S` and `\P{…}` are their negations. All
+  of them work inside `[]` too, so `[\D_]` and `[^\P{L}]` are classes.
+- the escapes `\n \r \t \f \v \a`, `\xHH`, `\uHHHH`, and `\x{…}`/`\u{…}` for any
+  Unicode scalar value. A `\` before ASCII punctuation or a space matches that
+  character; any other escape is an error.
+
+`ignore_case` compares Unicode simple case mappings; a range matches a scalar
+when either its lowercase or its uppercase form is in the range.
+`multiline` lets `^` match after a newline. `dot_matches_newline` lets `.`
+match `\n`. A `RegexFlags` value displays as its inline-flag letters (`"im"`).
+
+Backreferences, lookaround and inline flags (`(?i)`) are syntax errors: the
+first two would break the linear bound, and flags go through `compile_with`.
+Groups nest at most 250 deep, and a compiled program holds at most 100000
+instructions (nested counted repetitions multiply), so compile time and
+memory stay proportional to a bounded pattern.
+
+A malformed pattern is a `RegexError { offset: Int, reason: String }`.
+`offset` is the zero-based character position in the pattern where the
+problem is, and the error displays as
+`invalid regex at position {offset}: {reason}`. `RegexError` converts to
+`Err`, so `rx :: re.compile(text)` propagates inside a fallible function. The
+implementation is in [`Core/Regex/Regex.jet`](../../../Core/Regex/Regex.jet).
+
+Checked `Regex{"…"}` literals and inferred-head `{"…"}` arguments in a
+`Regex`-typed slot produce the same source-owned `Regex` as `compile`; there is
+no separate native regex carrier or engine. The compiler checks the complete
+literal by running the same Core `compile`, so a literal and a run-time
+pattern can never disagree about what a pattern means. An invalid literal is
+E0152, which carries the same position and reason as the run-time
+`RegexError`. The literal then lowers through the source `compile` function,
+which keeps its checked success value.
+
+`Regex` has the public fields `pattern` and `flags`. `Match` has the public
+fields `start`, `end`, `text` and `groups`; `start` and `end` are character
+(Unicode scalar) positions, and `groups` is a positional list in which a group
+that did not take part is `""`. `replace`, `replace_first` and `expand` share
+one template dialect: `$N` and `${N}` insert group `N` (`$0` is the whole
+match), `${name}` inserts a named group, `$$` is a literal `$`, and any other
+`$` is literal text. Use the compiled `Regex` value when the same expression is
 used repeatedly, and call `escape` for literal user input.
-Checked `Regex{"…"}` literals and inferred-head `.{"…"}` arguments produce the
-same source-owned `Regex` as `compile`; they do not use a separate native regex
-carrier or engine. The compiler validates the complete literal before lowering
-it through the source `compile` function and retaining its checked success value.
-`Match.start` and `Match.end` are UTF-8 byte offsets, and `Match.text` contains
-the entire match. `Match.groups` contains the captured groups in positional
-order, excluding the whole match; use `expand` for numbered substitution.
+
+Methods on `Regex` take the receiver as the pattern of the free function of
+the same name: `is_match`, `full_match`, `match`, `find`, `find_all`,
+`matches`, `split`, `split_limit`, `replace`, `replace_first`, plus
+`replace_all_with(text, replacer: fn(Match) -> String)`, which replaces every
+match with what `replacer` returns for it. Methods on `Match`:
+
+| Method | Result | Description |
+|---|---|---|
+| `group(n: Int) -> ?String` | text | Group `n` (0 is the whole match); none when there is no group `n` or it took no part. |
+| `name(name: String) -> ?String` | text | The named group, as `group` reports it. |
+| `group_start(n: Int) -> ?Int` | position | Character position where group `n` starts. |
+| `group_end(n: Int) -> ?Int` | position | Character position where group `n` ends. |
 
 | Signature | Result | Description |
 |---|---|---|
 | `flags(ignore_case: Bool, multiline: Bool, dot_matches_newline: Bool) -> RegexFlags` | flags | Build explicit compilation flags. |
-| `compile(pattern: String) -> Regex !String` | regex | Compile a pattern with default flags. |
-| `compile_with(pattern: String, flags: RegexFlags) -> Regex !String` | regex | Compile with explicit flags. |
+| `compile(pattern: String) -> Regex !RegexError` | regex | Compile a pattern with default flags. |
+| `compile_with(pattern: String, flags: RegexFlags) -> Regex !RegexError` | regex | Compile with explicit flags. |
 | `escape(text: String) -> String` | text | Escape regex metacharacters. |
 | `is_match(pattern: Regex, text: String) -> Bool` | Boolean | Test whether any match exists. |
 | `full_match(pattern: Regex, text: String) -> Bool` | Boolean | Require the entire text to match. |
-| `match(pattern: Regex, text: String) -> ?Match` | match | Return the first capture-bearing match. |
+| `match(pattern: Regex, text: String) -> ?Match` | match | Return the first positional match record. |
 | `find(pattern: Regex, text: String) -> ?String` | text | Return the first matched text. |
 | `find_all(pattern: Regex, text: String) -> [String]` | text list | Return all matched text values. |
-| `finditer(pattern: Regex, text: String) -> [Match]` | matches | Return capture-bearing matches. |
-| `matches(pattern: Regex, text: String) -> [Match]` | matches | Return all capture-bearing matches. |
+| `finditer(pattern: Regex, text: String) -> [Match]` | matches | Return positional match records. |
+| `matches(pattern: Regex, text: String) -> [Match]` | matches | Return all positional match records. |
 | `split(pattern: Regex, text: String) -> [String]` | text list | Split on matches. |
 | `split_limit(pattern: Regex, text: String, n: Int) -> [String]` | text list | Split with a maximum number of matches. |
 | `replace(pattern: Regex, text: String, replacement: String) -> String` | text | Replace every match. |
 | `replace_first(pattern: Regex, text: String, replacement: String) -> String` | text | Replace only the first match. |
-| `expand(match: Match, template: String) -> String` | text | Expand numbered and named capture references. |
-| `purge()` | — | Clear the compiled-pattern cache. Existing Regex values remain valid. |
+| `expand(match: Match, template: String) -> String` | text | Expand a replacement template against a match. |
+| `purge() !RegexError` | — | Report that the source engine has no mutable cache to purge. |
 | `subn(pattern: Regex, text: String, replacement: String) -> {text: String, count: Int}` | replacement receipt | Replace matches and return their count. |
 
 The provider also exposes the concise names `regex`, `join`, `search`,
@@ -3354,7 +3488,7 @@ standard-library vocabulary.
 `core.ui` represents a UI as a typed node tree plus geometry and accessibility
 metadata. It provides portable node construction and backend adapters; it does
 not pretend that a desktop, phone, or terminal backend has the same input or
-rendering capabilities. The source is [`Core/ui/ui.jet`](../../../Core/ui/ui.jet).
+rendering capabilities. The source is [`Core/Ui/Ui.jet`](../../../Core/Ui/Ui.jet).
 
 `box` stores its children in the returned tree. Its runtime boundary therefore
 accepts an owned child list; compiler borrow-elision must not treat that native
@@ -3423,7 +3557,7 @@ existing public capability row.
 a value and version; `computed` and `derived` values track reads; an `Effect`
 can be unsubscribed. The source carrier is immutable, while the runtime
 provider supplies synchronized boxes and dependency tracking. See
-[`Core/reactive/reactive.jet`](../../../Core/reactive/reactive.jet) and the
+[`Core/Reactive/Reactive.jet`](../../../Core/Reactive/Reactive.jet) and the
 reactive conformance corpus.
 
 | Signature | Result | Description |
@@ -3458,7 +3592,7 @@ button handlers use the trailing block form, `ui.button("Click") { … }`.
 `core.reactive.loadable` models a value that is idle, loading, loaded, or
 failed. The state carries the successful value or failure reason and provides a
 retry transition; callers can inspect it without using sentinel values. Its
-source is [`Core/reactive/loadable.jet`](../../../Core/reactive/loadable.jet).
+source is [`Core/Reactive/Loadable.jet`](../../../Core/Reactive/Loadable.jet).
 
 | Signature | Result | Description |
 |---|---|---|
@@ -3475,7 +3609,7 @@ source is [`Core/reactive/loadable.jet`](../../../Core/reactive/loadable.jet).
 
 `core.event` defines typed event values, scopes, listeners, policies, and
 bounded asynchronous delivery. It does not use a stringly named global event
-bus. The source contract is [`Core/event/event.jet`](../../../Core/event/event.jet),
+bus. The source contract is [`Core/Event/Event.jet`](../../../Core/Event/Event.jet),
 and the event conformance corpus covers listener lifetime, policy, and
 async-result behavior.
 
@@ -3508,7 +3642,7 @@ The event family is a typed Core value with no additional event syntax (`D-EVENT
 `core.web` builds server-rendered applications on top of `core.http`. An
 `App` owns routes, live state, sessions, and storage adapters; the browser
 surface is represented by typed effects rather than an assumed browser DOM.
-The module source is [`Core/web/web.jet`](../../../Core/web/web.jet).
+The module source is [`Core/Web/Web.jet`](../../../Core/Web/Web.jet).
 `App` and `WebPage` are opaque compiler-owned carriers, not constructible source
 records. The registered constructors and App builder methods retain the checked
 route graph and its typed handlers across both compiler implementations.
@@ -3555,6 +3689,10 @@ its module functions. Mutating source query, form, table, virtual viewport, and
 store calls take explicit write access. Source table pages keep typed row values
 and separate stable row keys, with `total_rows`, `page_index`, `page_size`, and
 `page_count` facts. Form action failures are a declared `#Error` domain.
+A table holds its columns' projection functions and its server loader, which
+cannot be duplicated, so its configuring and mutating calls (`with_column`,
+`with_server_page`, `sort_by`, `paginate`, selection, focus, and page moves)
+edit the table in place and return no second table.
 `with_server_page` retains its typed `WebTableError!` loader without fetching.
 Each server-mode `page_state` call passes the current requested boundary to
 that loader, validates its row keys and boundary, and preserves the remote
@@ -3632,7 +3770,7 @@ lambda.
 `core.mem` contains explicit allocator families and audited raw-memory helpers.
 Arenas are the safe fast-allocation primitive; raw pointers and volatile access
 are separate unsafe operations. The source is
-[`Core/mem/mem.jet`](../../../Core/mem/mem.jet).
+[`Core/Mem/Mem.jet`](../../../Core/Mem/Mem.jet).
 
 Raw `*T` fields in physical aggregates use the selected target's pointer size,
 alignment, and pointer-sized stride, even when the pointee's layout is opaque;
@@ -3695,7 +3833,7 @@ views cannot be returned, captured, stored, or sent across a task boundary.
 Option-returning convenience parsers. `Int.parse` and `Float.parse` are
 fallible destination-owned conversions; do not confuse their `Result` return
 with the module's Option helpers. The implementation is in
-[`Core/text/parse.jet`](../../../Core/text/parse.jet).
+[`Core/Text/Parse.jet`](../../../Core/Text/Parse.jet).
 
 The builtin method `text.count(needle)` uses the shared `jet_unicode_count`
 kernel in compile-time evaluation and at runtime. It counts non-overlapping,
@@ -3859,7 +3997,7 @@ narrowing.
 sockets, address conversion, readiness, timeouts, and DNS. Calls that need a
 provider report a typed `NetError` or `IOError`; the module does not silently
 turn a missing transport into a successful no-op. The implementation is
-[`Core/net/net.jet`](../../../Core/net/net.jet).
+[`Core/Net/Net.jet`](../../../Core/Net/Net.jet).
 
 DNS failures carry the built-in `NetDNSError` inside `NetError.DNS`: `NotFound`
 retains the queried name, while `Failure` retains the resolver's message.
@@ -3943,27 +4081,35 @@ and Unix listen/shutdown/close require `Net` without `Time.Wait`. Accept,
 connect, byte transfer, DNS, and the other listed waiting operations retain
 their existing `Time.Wait` leaf. Reserved raw aliases mirror those same rows;
 moving public validation into Jet does not widen the authority contract.
-TCP reply, TCP option access, and UDP bind enter their Jet public functions
-before the corresponding reserved `__tcp_reply`, `__set_*`, `__nodelay`,
-`__ttl`, and `__udp_bind*` leaves. Raw leaves retain existing native error
-mapping, borrow/move conventions, and interpreter-route availability.
+TCP reply is Jet end to end: it frames the plain-text HTTP/1.1 reply and
+writes it with the stream's own `write_all`, then shuts down the write half.
+TCP option access and UDP bind enter their Jet public functions before the
+corresponding reserved `__set_*`, `__nodelay`, `__ttl`, and `__udp_bind*`
+leaves. Raw leaves retain existing native error mapping, borrow/move
+conventions, and interpreter-route availability.
 UDP address, timeout, send, and receive operations and Unix listen, accept,
 read, byte-write, shutdown, and close also enter Jet source first. Their
 reserved raw leaves preserve exactly the public operation's existing effect
 row and supported interpreter/native tiers.
-HTTP client `get`, `post`, and `request`, and server `mux`, `serve_once`,
-`serve_once_listener`, `static_file`, `static_file_range`, `cors`, and
-`request_id` likewise enter their Jet source functions before the reserved
-raw leaves. Existing specialized public admission remains unchanged;
-callback-bearing host leaves retain their original unsupported AOT tiers.
-HTTP router creation, parsing, and dispatch, TLS byte I/O, and WebSocket
-connect/upgrade are also source-owned; the reserved transport/carrier leaves
-keep their old effects (including no new WebSocket effect) and tier support.
-Reserved Unix connect, TLS client handshake, HTTP serve/bind, static-files,
-and middleware leaves use full positional signatures inside Core. Their
-public overload selection, implicit option defaults, and escaping callback
-admission still precede source forwarding; registration of a raw alias alone
-does not replace those public admission checks.
+The HTTP client is Jet end to end: `get`, `post`, `request`, and `send` build
+an `HTTPRequest` record, frame HTTP/1.1 over `core.net` TCP or `core.net.tls`,
+and decode the status line, headers, chunked/length framing, and gzip into an
+`HTTPResponse` record. `HTTPRequest`, `HTTPResponse`, and `HTTPBodyChunks` are
+Jet records in `Core/Http/Http.jet`; their accessors and builders are Jet
+methods, and `core.http.parse` reuses the Jet request parser. The HTTP server
+is Jet end to end as well: `HTTPMux`, `HTTPHandler`, `HTTPServer`, and
+`HTTPShutdownReport` are records in `Core/Http/Server.jet`, which accepts over
+`core.net` TCP, frames requests and responses, routes, and serves static files.
+Its only reserved leaves read the wall clock for `Date` and stat, canonicalize,
+and read files for static serving, all under the Net effect.
+HTTP router creation and dispatch, TLS byte I/O, and WebSocket connect/upgrade are also
+source-owned; the reserved transport/carrier leaves keep their old effects
+(including no new WebSocket effect) and tier support.
+Reserved Unix connect and TLS client handshake leaves use full positional
+signatures inside Core. Their public overload selection, implicit option
+defaults, and escaping callback admission still precede source forwarding;
+registration of a raw alias alone does not replace those public admission
+checks.
 
 DNS error classification is Jet source policy. Reserved Core-only
 `__dns_*_lookup` leaves call the existing resolver and return its raw string
@@ -3979,9 +4125,9 @@ not a copied local handle.
 
 ### `core.net.tls` — TLS stream wrapper
 
-`core.net.tls` upgrades a connected TCP stream to a verified TLS stream. Its
-configuration carriers are validated before network use, and configured ALPN
-protocols are passed through the native TLS provider. See [`Core/net/tls.jet`](../../../Core/net/tls.jet).
+`core.net.tls` upgrades a connected TCP stream to a verified TLS 1.2/1.3
+stream. It is Jet source over the vendored Mbed TLS 3.6 engine; configuration
+carriers are validated before network use. See [`Core/Net/Tls.jet`](../../../Core/Net/Tls.jet).
 
 | Signature | Result | Description |
 |---|---|---|
@@ -4001,23 +4147,25 @@ protocols are passed through the native TLS provider. See [`Core/net/tls.jet`](.
 | `stream.read(limit, deadline:)` / `stream.write_all(bytes, deadline:)` | matching results | Apply explicit per-call deadlines on the same TLS handle. |
 | `stream.close_write(deadline:)` | `!IOError` | Flush close-notify and close only writes while reads continue. |
 
-TLS handshake, read, write, and close-notify use the consumed socket's shared
-readiness path. Handshake failures use `NetError`; stream failures use the
-`IOError` tree, including cancellation, timeout, closed, and protocol errors.
+TLS handshake, read, write, and close-notify drive the engine over the consumed
+socket's nonblocking descriptor and wait through `TCPStream.ready`. Handshake
+failures use `NetError`; stream failures use the `IOError` tree, including
+cancellation, timeout, closed, and protocol errors. A peer that closes the
+socket without close_notify is a protocol (truncation) error, not end of stream.
 
-`TLSCertificate` and `TLSPeerIdentity` also retain the provider carrier: peer
-identity returns verified native certificate values, not independent Jet
-records. Keeping one nominal carrier avoids missing declarations and mismatched
-certificate-chain layouts without changing the public API.
+`TLSCertificate` and `TLSPeerIdentity` are plain Jet records parsed from the
+verified chain: DER bytes, SHA-256 of the certificate and its SubjectPublicKeyInfo,
+DNS subjectAltNames, validity in Unix milliseconds, and RFC 4514-style subject
+and issuer names.
 
 The consumed-stream overload is distinct from `client(host, port)`: using
-`tls.client(^tcp, server_name:, config:, deadline:)` keeps the immutable native
-configuration and returns `NetError`, with the explicit budget combined with
-the ambient earliest deadline. `RootCertificates.from_pem` and
-`ClientIdentity.from_pem` validate through the same provider used by the
-handshake before any TCP stream is consumed. A custom-only trust policy never
-loads system roots. The `net/tls_peer_identity` example exercises that path
-against the checked-in local CA and checks the verified peer chain.
+`tls.client(^tcp, server_name:, config:, deadline:)` keeps the immutable
+configuration and returns `NetError`. System trust reads `SSL_CERT_FILE` /
+`SSL_CERT_DIR` when set and otherwise the first distribution bundle that loads.
+`RootCertificates.from_pem` and `ClientIdentity.from_pem` validate through the
+same engine used by the handshake before any TCP stream is consumed. A
+custom-only trust policy never loads system roots. The `core_net_tls` testkit
+cases exercise that path over loopback against the checked-in local CA.
 
 ### `core.db` — checked database boundaries
 
@@ -4025,7 +4173,7 @@ against the checked-in local CA and checks the verified peer chain.
 migrations, and typed row decoding. SQL interpolation binds values; raw SQL
 requires the explicit `SQL.raw` escape. Database operations carry `DB` (and,
 when they wait, `Time.Wait`) effects. The module source is
-[`Core/db/db.jet`](../../../Core/db/db.jet).
+[`Core/Db/Db.jet`](../../../Core/Db/Db.jet).
 The backend-neutral driver/policy boundary keeps query operations and the user policy attached to the typed scope (`D-DBDRIVER1=A`; `D-DBPOLICY-BIND1=A`).
 
 | Signature | Result | Description |
@@ -4075,7 +4223,7 @@ adapter is held; it is not part of this source-owned Core integration.
 
 ### `core.db.sql` — pure SQL grammar and row selection
 
-[`Core/db/sql.jet`](../../../Core/db/sql.jet) is the canonical public SQL
+[`Core/Db/Sql.jet`](../../../Core/Db/Sql.jet) is the canonical public SQL
 kernel. Import it with `use core.db.sql as sql`; the former Core-private
 runtime module has been relocated, without a compatibility module or re-export.
 It carries no database connection or raw-SQL execution authority.
@@ -4105,7 +4253,7 @@ The lifted declarations retain their private visibility for other files.
 helpers, value-based differentiation, linear algebra, FFT, and serialization.
 `Auto` selects the CPU reference path; an explicit unsupported device returns a
 typed capability error rather than silently falling back. The source is
-[`Core/compute/compute.jet`](../../../Core/compute/compute.jet), with executable
+[`Core/Compute/Compute.jet`](../../../Core/Compute/Compute.jet), with executable
 examples under [`Examples/features/tooling/`](../../../Examples/features/tooling/).
 This is one ranked Tensor operation family with an explicit placement contract (`D-COMPUTE1=D`; `D-COMPUTE-TYPE1=D`; `D-COMPUTE-PLACE1=D`). Gradient and value-and-gradient calls remain explicit, checked value-based transforms (`D-COMPUTE-GRAD1=E`).
 The registered compute vocabulary is the sole nominal owner of tensors,
@@ -4169,7 +4317,7 @@ claiming that an arbitrary closure is a native kernel.
 `core.service` describes named service trees, bounded mailboxes, restart
 strategies, and durable delivery. The topology and delivery records are
 structured values, not an untyped supervisor log. The source is
-[`Core/service/service.jet`](../../../Core/service/service.jet); the service
+[`Core/Service/Service.jet`](../../../Core/Service/Service.jet); the service
 runtime model is also exercised by the service examples and tests.
 The tree is the single public topology boundary; workers, delivery, and restart policies remain typed rather than string-keyed (`D-SERVICE1=D`).
 
@@ -4287,7 +4435,7 @@ to the selected delivery policy rather than assuming retries are free.
 ### `core.archive` — byte containers and checksummed compression
 
 `core.archive` contains bounded archive and compression primitives. The Jet
-implementation lives under [`Core/archive/`](../../../Core/archive/); it is not
+implementation lives under [`Core/Archive/`](../../../Core/Archive/); it is not
 the retired Rust `corelib/core.archive` path. Archive output is capped at
 67,108,864 bytes and archive entry counts at 4,096; file-oriented gzip and
 zstd helpers use their own 64 MiB output cap.
@@ -4326,7 +4474,7 @@ output-bomb, 4,097-entry, and traversal-name inputs for every codec.
 
 `core.archive.gzip` handles whole-buffer gzip streams and text/file adapters.
 It validates the gzip magic, size, CRC, and supported method before returning
-bytes. See [`Core/archive/gzip.jet`](../../../Core/archive/gzip.jet).
+bytes. See [`Core/Archive/Gzip.jet`](../../../Core/Archive/Gzip.jet).
 
 | Signature | Result | Description |
 |---|---|---|
@@ -4349,7 +4497,7 @@ checksum failures. The output limit is 64 MiB.
 `core.archive.zstd` handles the supported subset of Zstandard whole-buffer
 streams and file adapters. It emits standards-valid single-segment raw blocks;
 compressed blocks and dictionaries are rejected explicitly. The source is
-[`Core/archive/zstd.jet`](../../../Core/archive/zstd.jet).
+[`Core/Archive/Zstd.jet`](../../../Core/Archive/Zstd.jet).
 
 | Signature | Result | Description |
 |---|---|---|
@@ -4427,7 +4575,7 @@ provider calls reached while obtaining its wall-clock sample.
 
 The state transitions, SQL, row projections, CBOR payloads, signed receipts,
 retry policy, event fields, and commit-before-publication ordering are Jet
-source in `Core/jobs/jobs.jet`. The private SQLite and Devtools leaves call
+source in `Core/Jobs/Jobs.jet`. The private SQLite and Devtools leaves call
 the existing host kernels; they do not implement a second queue or sink.
 The compiler checks the declared `#Job` identity and its payload type before
 normalizing the name and forwarding `enqueue`/`delay` to their checked source
@@ -4435,8 +4583,8 @@ targets; arbitrary function values or string-selected jobs are not admitted.
 
 ## `core` — built Core modules
 
-The canonical module registry is [`Core.jet`](../../../crates/jet-codegen/src/Prelude/Core.jet),
-and the loader's exported list is [`CoreModuleExports.rs`](../../../crates/jet-foundation/src/CoreModuleExports.rs).
+The canonical module registry is [`Core.jet`](../../../Compiler/Prelude/Core.jet),
+and the loader's exported list is the generated [`CoreCallRows.jet`](../../../Compiler/JetFoundation/Source/Registry/CoreCallRows.jet).
 The list below is the source-facing module inventory. A module may be a
 namespace-only provider boundary; its presence in the registry does not imply
 that every provider operation is available on every target.
@@ -4563,12 +4711,8 @@ storage, and mutating a sketch uses its `&self` receiver with an explicit `&` ca
 
 ### Writing Core in Jet
 
-The Rust-hosted compiler remains Jet's production and reference compiler. Jet
-source packages under [`Core/`](../../../Core/) are compiled by that normal
-frontend; they are not evidence that the compiler is self-hosted. The staged
-Jet-authored compiler in [`Compiler/`](../../../Compiler/) is a separate
-bootstrap project, while Rust emission and rustc/LLVM remain part of the host
-implementation.
+Jet source packages under [`Core/`](../../../Core/) are compiled by the Jet
+compiler's normal frontend, like any other package.
 
 `Core.jet` is the declaration registry, `Core/**/*.jet` is the source for the
 Jet-owned package surface, and provider code supplies operations that require
@@ -4582,8 +4726,9 @@ The audited intrinsic/ABI kernel is the only provider seam; ordinary Core packag
 The overloaded Unix connect and TLS client calls retain their checked public
 argument forms before forwarding into their owning Jet entry points. HTTP
 server serve/bind and static-file mounts likewise forward normalized options;
-`HTTPMux.middleware` forwards only after the existing escaping-callback
-admission. The original effects and resource conventions remain in force.
+`HTTPMux` route and middleware registration lower to its Jet methods after the
+existing escaping-callback admission. The original effects and resource
+conventions remain in force.
 
 ### Examples in the repository
 

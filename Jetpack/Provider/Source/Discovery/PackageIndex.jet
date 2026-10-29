@@ -5,8 +5,8 @@
 // project lock. Nothing here fetches; missing data stays missing until a
 // normal resolver or update path records it.
 
-DISCOVERY_INDEX_DIR :: prep { "discovery" }
-DISCOVERY_INDEX_FILE :: prep { "index.jsonl" }
+DISCOVERY_INDEX_DIR :: "discovery"
+DISCOVERY_INDEX_FILE :: "index.jsonl"
 
 // One documented configuration field of an indexed package.
 struct PackageOptionField {
@@ -212,7 +212,10 @@ fn env_discovery_write(project_dir: String, index: PackageIndex) ProviderReason!
 // one exists.
 fn env_discovery_merge_refs(index: &PackageIndex, refs: [RefSpec], fixtures: String?, store_entries: [StoreEntry]) Never! -[FS]> {
     loop spec in refs {
-        found :: env_discovery_fixture_version(fixtures, spec) ?? env_discovery_store_version(store_entries, spec)
+        found :: if env_discovery_fixture_version(fixtures, spec) == {
+            .Val(pair) -> Val(pair)
+            .None -> env_discovery_store_version(store_entries, spec)
+        }
         version :: if found == {
             .Val(pair) -> pair.version
             .None -> ""
@@ -449,15 +452,15 @@ fn env_discovery_record_tree(record: PackageIndexEntry) -> Dyn Never! {
         &options.push(Dyn.Object(["name": Dyn.Text(option.name), "default": Dyn.Text(option.default), "docs": Dyn.Text(option.docs)]))
     }
     Dyn.Object([
-        "source": Dyn.Text(record.source),
-        "name": Dyn.Text(record.name),
-        "reference": Dyn.Text(record.reference),
-        "version": Dyn.Text(record.version),
+        "source": Dyn.Text(record.source.copy()),
+        "name": Dyn.Text(record.name.copy()),
+        "reference": Dyn.Text(record.reference.copy()),
+        "version": Dyn.Text(record.version.copy()),
         "platforms": pkg_json_texts(record.platforms),
-        "docs": Dyn.Text(record.docs),
-        "provenance": Dyn.Text(record.provenance),
-        "tier": Dyn.Text(record.tier),
-        "gate_status": Dyn.Text(record.gate_status),
+        "docs": Dyn.Text(record.docs.copy()),
+        "provenance": Dyn.Text(record.provenance.copy()),
+        "tier": Dyn.Text(record.tier.copy()),
+        "gate_status": Dyn.Text(record.gate_status.copy()),
         "maintainer_liveness": Dyn.Text(record.maintainer_liveness()),
         "options": Dyn.Array(options),
     ])

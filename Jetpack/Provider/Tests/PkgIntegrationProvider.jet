@@ -2,7 +2,7 @@
 // Native document bytes are copied from the originals; only Jet interpolation
 // braces are escaped. No reference outputs or expectations are fabricated.
 
-fn provider_pkg_integration_contract(contracts: [ProviderContract], family: ProviderFamily) -> ProviderContract Never! {
+fn provider_pkg_integration_contract(contracts: [ProviderFamilyContract], family: ProviderFamily) -> ProviderFamilyContract Never! {
     loop contract in contracts {
         if contract.family == family -> return contract
     }
@@ -18,7 +18,7 @@ fn provider_pkg_integration_report_error(report: ProviderFactReport) -> Provider
 
 // Ported from pkg.rs:919-948.
 #Test("pkg integration provider_contract_covers_core_nix_path_github") {
-    contracts :: ProviderContract.built_in()
+    contracts :: ProviderFamilyContract.built_in()
     families := [ProviderFamily]{}
     loop contract in contracts -> &families.push(contract.family)
     assert(families.contains(ProviderFamily.Core))

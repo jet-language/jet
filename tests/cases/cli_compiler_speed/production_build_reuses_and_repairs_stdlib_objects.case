@@ -1,0 +1,56 @@
+# Claim: cold build exits 0 and reports its runtime-store decision
+# Claim: built binary prints first and true
+# Claim: unchanged rebuild exits 0 and reports cache hit -> reused cached binary
+# Claim: edited source prints changed and true
+# Claim: after a further edit the rebuild stores the binary and prints repaired
+# Fixture migrated: package.jet: bare top-level fields, as the repo's own package.jet files (Compiler/JetFoundation/package.jet); the Rust fixture's fields are kept
+# Not ported: corrupting the final-binary blob in the machine-wide store and checking the repair: writes store internals through the Rust jet_store API, no CLI path
+# Not ported: native-cache.log digest checks: reads a Rust-side log, no stable CLI contract
+# Not ported: jet_store blob and action-record counts: Rust jet_store API
+fixture: production_build_reuses_and_repairs_stdlib_objects.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build main.jet --profile=debug --verbose
+env: JET_STORE_DIR=store
+env: JET_STORE_CAP_BYTES=21474836480
+env: JET_STORE_RESERVE_BYTES=2147483648
+env: NO_COLOR=1
+exit: 0 # cold build
+stderr: ~ "[build] runtime   ->" # cold build
+step: built
+exit: 0 # cold binary output
+stdout: = production_build_reuses_and_repairs_stdlib_objects-2.out # cold binary output
+step: jet build main.jet --profile=debug --verbose
+env: JET_STORE_DIR=store
+env: JET_STORE_CAP_BYTES=21474836480
+env: JET_STORE_RESERVE_BYTES=2147483648
+env: NO_COLOR=1
+exit: 0 # unchanged rebuild
+stderr: ~ "cache hit -> reused cached binary" # unchanged rebuild
+step: built
+exit: 0 # unchanged output
+stdout: = production_build_reuses_and_repairs_stdlib_objects-4.out # unchanged output
+step: sh {work}/step-5.sh
+exit: 0 # edit source
+step: jet build main.jet --profile=debug --verbose
+env: JET_STORE_DIR=store
+env: JET_STORE_CAP_BYTES=21474836480
+env: JET_STORE_RESERVE_BYTES=2147483648
+env: NO_COLOR=1
+exit: 0 # warm build of edit
+step: built
+exit: 0 # changed output
+stdout: = production_build_reuses_and_repairs_stdlib_objects-7.out # changed output
+step: sh {work}/step-8.sh
+exit: 0 # edit source again
+step: jet build main.jet --profile=debug --verbose
+env: JET_STORE_DIR=store
+env: JET_STORE_CAP_BYTES=21474836480
+env: JET_STORE_RESERVE_BYTES=2147483648
+env: NO_COLOR=1
+exit: 0 # repaired build stores the binary
+stderr: ~ "cache store -> saved binary" # repaired build stores the binary
+step: built
+exit: 0 # repaired output
+stdout: = production_build_reuses_and_repairs_stdlib_objects-10.out # repaired output

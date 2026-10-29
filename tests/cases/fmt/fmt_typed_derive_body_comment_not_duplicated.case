@@ -1,0 +1,14 @@
+# tests/fmt.rs::fmt_typed_derive_body_comment_not_duplicated at tests/fmt.rs:3952; hand-port
+# Claim: derive-body comment "resolves to the same value as `tname`" occurs exactly once (tests/fmt.rs:3958-3962)
+# Claim: second pass identical (tests/fmt.rs:3963-3964)
+fixture: fmt_typed_derive_body_comment_not_duplicated.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt run.jet
+exit: 0 # tests/fmt.rs:3957 formats
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:3958-3962 comment appears exactly once
+stdout: = "1\n" # tests/fmt.rs:3958-3962 comment appears exactly once
+step: jet fmt --check run.jet
+exit: 0 # tests/fmt.rs:3963-3964 stable

@@ -1,0 +1,15 @@
+
+use core.process as process
+
+fn run() {
+    spec :: process.cmd(["sh", "-c", "printf '%s' \"$SECRET_TOKEN\""])
+        .env_clear()
+        .env("SECRET_TOKEN", "receipt-secret")
+        .stdout(.Capture)
+        .stderr(.Capture)
+    receipt :: spec.run() ?? panic("process receipt failed")
+    print(receipt.output)
+    print(receipt.redacted)
+    print(receipt.policy_digest != "")
+    print(receipt.descendants)
+}

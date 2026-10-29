@@ -1,0 +1,17 @@
+# tests/unit_family.rs::quantities_display_units_styles_and_explicit_overrides at tests/unit_family.rs:1350; hand-port
+# Claim: default display prints 12 meter, 4 meter/ns, 766 px, 5 usd, 12 Meter, 12, 12.0 (tests/unit_family.rs:1350)
+# Claim: explicit impl Meter.Display prints custom length (tests/unit_family.rs:1350)
+# Claim: web target builds (tests/unit_family.rs:1350)
+# Not ported: rustc wasm check of generated code (tests/unit_family.rs:1350): Rust backend gate, Jet counterpart is jet build of #Target(Web)
+fixture: quantities_display_units_styles_and_explicit_overrides.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run defaults/main.jet
+exit: 0 # default display prints 12 meter, 4 meter/ns, 766 px, 5 usd, 12 Meter, 12, 12.0 (tests/unit_family.rs:1350)
+stdout: = quantities_display_units_styles_and_explicit_overrides-1.out # default display prints 12 meter, 4 meter/ns, 766 px, 5 usd, 12 Meter, 12, 12.0 (tests/unit_family.rs:1350)
+step: jet run custom/main.jet
+exit: 0 # default display prints 12 meter, 4 meter/ns, 766 px, 5 usd, 12 Meter, 12, 12.0 (tests/unit_family.rs:1350)
+stdout: = quantities_display_units_styles_and_explicit_overrides-2.out # default display prints 12 meter, 4 meter/ns, 766 px, 5 usd, 12 Meter, 12, 12.0 (tests/unit_family.rs:1350)
+step: jet build web/main.jet
+exit: 0 # default display prints 12 meter, 4 meter/ns, 766 px, 5 usd, 12 Meter, 12, 12.0 (tests/unit_family.rs:1350)

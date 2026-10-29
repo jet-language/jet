@@ -1,0 +1,20 @@
+use core.compute.solve as solve
+fn solver_view() -> String {
+    empty := solve.Solver.new(-1)
+    ok_solver := solve.Solver.new(7)
+    ok_solver.require(true)
+    ok_solver.require(1 == 1)
+    bad := solve.Solver.new(42)
+    bad.require(true)
+    bad.require(false)
+    bad.require(false)
+    bad.require(true)
+    return "{empty.status()}|{empty.failure_count()}|{ok_solver.status()}|{ok_solver.failure_count()}|{bad.status()}|{bad.failure_count()}"
+}
+EXPECTED :: comptime { solver_view() }
+
+fn run() {
+    actual :: solver_view()
+    print("{EXPECTED}")
+    print("{actual}")
+}

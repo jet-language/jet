@@ -1,0 +1,55 @@
+#!/usr/bin/env jet
+// A Jet runtime layer and its Rust-export deletion are one pack cutover.
+// Archive ordering must never silently choose one of two strong definitions.
+// Usage: jet run Tools/packaging/CheckRuntimeExports.jet -- <jet_runtime_jet.o> <libjet_runtime.rlib>
+use core.process as process
+use core.regex as re
+use core.term as term
+
+fn fail(message: String) -> Never {
+    term.eprint(message)
+    process.exit(1)
+}
+
+// Global names nm reports as defined in `path`, first occurrence order; weak
+// (W), undefined (U) and versioned-undefined (V) rows are not definitions.
+fn definitions(path: String) -> [String] {
+    row :: Regex{"^(?:.*:\s+)?(\S+)\s+([A-Z])\s"}
+    receipt :: process.cmd(["nm", "-g", "--defined-only", "--format=posix", path.copy()]).output_limit(268435456).run() ?? fail("nm {path} failed: {err}")
+    if receipt.code != 0 -> fail("nm {path} failed: {receipt.errors}")
+    names := [String]{}
+    seen := [String:Bool]{}
+    loop line in receipt.output.split("\n").to_list() {
+        if re.match(row, line) == None -> next
+        hit :: re.match(row, line) ?? panic("unreachable: matched row")
+        kind :: hit.group(2) ?? panic("unreachable: kind group")
+        if kind == "W" || kind == "V" || kind == "U" -> next
+        name :: hit.group(1) ?? panic("unreachable: name group")
+        if seen.get(name) != None -> next
+        seen[name.copy()] = true
+        &names.push(name)
+    }
+    names
+}
+
+fn run() {
+    args :: process.args()
+    if args.len() != 2 -> fail("usage: check-runtime-exports.mjs <jet_runtime_jet.o> <libjet_runtime.rlib>")
+    jet :: definitions(args[0].copy())
+    rust :: definitions(args[1].copy())
+    rust_set := [String:Bool]{}
+    loop name in rust {
+        rust_set[name.copy()] = true
+    }
+    duplicates := [String]{}
+    loop name in jet {
+        if rust_set.get(name) != None -> &duplicates.push(name.copy())
+    }
+    if duplicates.len() == 0 -> return
+    &duplicates.sort()
+    listed := [String]{}
+    loop name in duplicates {
+        &listed.push("  {name}")
+    }
+    fail("prebuild-runtime: replaced runtime exports still defined in Rust:\n{listed.join("\n")}\nDelete these Rust definitions in the same cutover as their Jet runtime layer; duplicate definitions are not permitted.")
+}

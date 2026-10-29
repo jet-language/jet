@@ -1,0 +1,15 @@
+# tests/jetpack_acquisition.rs::non_tty_download_without_yes_fails_before_realization at tests/jetpack_acquisition.rs:28; hand-port
+# A download that needs consent fails without -y when stdin is not a terminal, before anything is realized: the error
+# names -y, stdout stays empty and the root store holds no objects. fixtures/ is the Rust write_native_omp_fixture output
+# (artifact script plus its sha256 manifest). The Rust Store::list emptiness check reads as an absent hangar object dir.
+fixture: non_tty_download_without_yes_fails_before_realization.fixture
+mkdir: root
+mkdir: home
+step: jetpack use omp@releases#1.0.0 --no-color --offline --fixtures {work}/fixtures -- omp
+cwd: {work}/project
+env: JETPACK_ROOT={work}/root
+env: HOME={work}/home
+exit: nonzero # tests/jetpack_acquisition.rs:51
+stderr: ~ "-y" # tests/jetpack_acquisition.rs:52-53
+stdout: empty # tests/jetpack_acquisition.rs:54
+file: root/hangar/objects absent # tests/jetpack_acquisition.rs:55 nothing was realized

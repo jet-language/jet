@@ -15,7 +15,7 @@ node Tools/agent/port/place-rust.mjs --dry
 ```
 
 `place-rust.mjs` without `--dry` writes pending Rust blocks into packet targets.
-`defer.mjs` mutates claims for the explicitly excluded CoreLib/Prelude/JIT ranges;
+`Defer.jet` mutates claims for the explicitly excluded CoreLib/Prelude/JIT ranges;
 run it only when that exclusion is still authorized. Claim/done/release use the
 queue lock; these commands do not compile or write Tower.
 [INPLACE-BRIEF.md](INPLACE-BRIEF.md) is the owner's source-translation procedure.

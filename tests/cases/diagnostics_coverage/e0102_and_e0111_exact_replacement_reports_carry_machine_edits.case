@@ -1,0 +1,19 @@
+# tests/diagnostics_coverage.rs::e0102_and_e0111_exact_replacement_reports_carry_machine_edits at tests/diagnostics_coverage.rs:1774; hand-port
+# Claim: E0102 JSON report with one exact replacement carries fix_edits (tests/cli/check_json.txt:1 golden; check_json_golden.case)
+# Claim: E0111 JSON report with one exact replacement must carry fix_edits (tests/diagnostics_coverage.rs:1788-1800)
+# Fixture migrated: JSON report stream: seed prints jet.status/v3 JSON on stdout, so checks moved from stderr to stdout_has (the Rust asserts the report, not the stream)
+# Not ported: Recursive directory walk over every tests/cli/**/*.txt snapshot: Rust fs scan; CLI equivalent is one jet check --json per code that the snapshots cover
+fixture: e0102_and_e0111_exact_replacement_reports_carry_machine_edits.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check --json bad.jet
+env: NO_COLOR=1
+exit: 1 # tests/diagnostics_coverage.rs:1788-1800 machine-readable diagnostic with one exact replacement must carry fix_edits
+stdout: ~ "\"code\":\"E0102\"" # tests/diagnostics_coverage.rs:1788-1800 machine-readable diagnostic with one exact replacement must carry fix_edits
+stdout: ~ "\"fix_edits\":[{" # tests/diagnostics_coverage.rs:1788-1800 machine-readable diagnostic with one exact replacement must carry fix_edits
+step: jet check --json const.jet
+env: NO_COLOR=1
+exit: 1 # tests/diagnostics_coverage.rs:1788-1800 machine-readable diagnostic with one exact replacement must carry fix_edits
+stdout: ~ "\"code\":\"E0111\"" # tests/diagnostics_coverage.rs:1788-1800 machine-readable diagnostic with one exact replacement must carry fix_edits
+stdout: ~ "\"fix_edits\":[{" # tests/diagnostics_coverage.rs:1788-1800 machine-readable diagnostic with one exact replacement must carry fix_edits

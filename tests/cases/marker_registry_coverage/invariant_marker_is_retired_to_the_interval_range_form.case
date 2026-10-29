@@ -1,0 +1,10 @@
+# tests/marker_registry_coverage.rs::invariant_marker_is_retired_to_the_interval_range_form at tests/marker_registry_coverage.rs:384; hand-port
+# Claim: the Invariant row is retired to the replacement distinct Int(lo..hi) (tests/marker_registry_coverage.rs:385-389)
+# Not ported: the Rust RuleStatus::Retired replacement field is not visible from the CLI; only the teaching text in stderr is checked
+fixture: invariant_marker_is_retired_to_the_interval_range_form.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # tests/marker_registry_coverage.rs:385-389 Policy::applied_rule("Invariant") is Retired with replacement distinct Int(lo..hi)
+stderr: ~ "distinct Int(lo..hi)" # tests/marker_registry_coverage.rs:385-389 Policy::applied_rule("Invariant") is Retired with replacement distinct Int(lo..hi)

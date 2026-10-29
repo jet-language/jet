@@ -7,15 +7,12 @@ use jet_foundation.[
     EffectRowEntry,
     Expr,
     FunctionDefaultRef,
-    MIRComponentSignatureDescriptor,
-    MIRComponentTypeDescriptor,
-    MIRComponentTypeField,
+    ComponentSignatureDescriptor,
+    ComponentTypeDescriptor,
+    ComponentTypeField,
     ParamZone,
     Span,
-    TExpr,
-    TExprKind,
     TFailureCarrier,
-    THandleOp,
     TTypeDef,
     Type,
     type_name,
@@ -61,20 +58,20 @@ fn sema_plugin_checked_type_definition(environment: SemaScopeEnvironment, progra
     Val(program.checked_types[row])
 }
 
-fn sema_plugin_component_descriptor(graph: SemaRegistrationGraph, environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, seen: [String]) -> MIRComponentTypeDescriptor? {
+fn sema_plugin_component_descriptor(graph: SemaRegistrationGraph, environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, seen: [String]) -> ComponentTypeDescriptor? {
     if ty == {
-        .Int -> return Val(MIRComponentTypeDescriptor.Int)
-        .Float -> return Val(MIRComponentTypeDescriptor.Float)
-        .Bool -> return Val(MIRComponentTypeDescriptor.Bool)
-        .String -> return Val(MIRComponentTypeDescriptor.String)
-        .List(inner) -> return sema_plugin_component_descriptor(graph, environment, program, inner, seen).map(value -> MIRComponentTypeDescriptor.List{inner: value})
-        .Option(inner) -> return sema_plugin_component_descriptor(graph, environment, program, inner, seen).map(value -> MIRComponentTypeDescriptor.Option{inner: value})
-        .FixedList(inner, _) -> return sema_plugin_component_descriptor(graph, environment, program, inner, seen).map(value -> MIRComponentTypeDescriptor.List{inner: value})
+        .Int -> return Val(ComponentTypeDescriptor.Int)
+        .Float -> return Val(ComponentTypeDescriptor.Float)
+        .Bool -> return Val(ComponentTypeDescriptor.Bool)
+        .String -> return Val(ComponentTypeDescriptor.String)
+        .List(inner) -> return sema_plugin_component_descriptor(graph, environment, program, inner, seen).map(value -> ComponentTypeDescriptor.List{inner: value})
+        .Option(inner) -> return sema_plugin_component_descriptor(graph, environment, program, inner, seen).map(value -> ComponentTypeDescriptor.Option{inner: value})
+        .FixedList(inner, _) -> return sema_plugin_component_descriptor(graph, environment, program, inner, seen).map(value -> ComponentTypeDescriptor.List{inner: value})
         .InlineRange(inner, _, _) | .Tagged(_, inner) -> return sema_plugin_component_descriptor(graph, environment, program, inner, seen)
         .Result(ok, err) -> {
             ok_descriptor :: sema_plugin_component_descriptor(graph, environment, program, ok, seen) ?? return None
             err_descriptor :: sema_plugin_component_descriptor(graph, environment, program, err, seen) ?? return None
-            return Val(MIRComponentTypeDescriptor.Result{ok: ok_descriptor, err: err_descriptor})
+            return Val(ComponentTypeDescriptor.Result{ok: ok_descriptor, err: err_descriptor})
         }
         .Named(name) | .Apply(name, _) -> {
             if sema_plugin_forbidden_component_name(name) -> return None
@@ -97,15 +94,15 @@ fn sema_plugin_component_descriptor(graph: SemaRegistrationGraph, environment: S
                     return sema_plugin_component_descriptor(graph, environment, program, specialized, next_seen)
                 }
                 .Struct(fields, _) -> {
-                    component_fields := [MIRComponentTypeField]{}
+                    component_fields := [ComponentTypeField]{}
                     loop index in 0..<fields.len() {
                         field := fields[index]
                         if field.skip || field.computed -> next
                         field_type := sema_inference_substitute_type(field.ty, generic_names, type_args)
                         descriptor :: sema_plugin_component_descriptor(graph, environment, program, field_type, next_seen) ?? return None
-                        &component_fields.push(MIRComponentTypeField{index: index, name: field.shape_names.json ?? field.name, ty: descriptor})
+                        &component_fields.push(ComponentTypeField{index: index, name: field.shape_names.json ?? field.name, ty: descriptor})
                     }
-                    return Val(MIRComponentTypeDescriptor.Record{name: definition.name, fields: component_fields})
+                    return Val(ComponentTypeDescriptor.Record{name: definition.name, fields: component_fields})
                 }
                 else -> return None
             }
@@ -197,7 +194,7 @@ fn sema_call_try_plugin_method(receiver: Expr, receiver_value: TExpr, method: St
     }
     if program.registration_graph == .Val(graph) {
     supported := true
-    component_params := [MIRComponentTypeDescriptor]{}
+    component_params := [ComponentTypeDescriptor]{}
     loop index in 0..<export_value.params.len() {
         parameter := export_value.params[index]
         required := sema_type_resolve_declared(graph, parameter.ty, environment.module_identity)
@@ -234,7 +231,7 @@ fn sema_call_try_plugin_method(receiver: Expr, receiver_value: TExpr, method: St
         supported = false
     }
     if !supported -> return SemaMethodSpecialCheck{handled: true, value: None}
-    signature := MIRComponentSignatureDescriptor{params: component_params, result: result_descriptor ?? return SemaMethodSpecialCheck{handled: true, value: None}}
+    signature := ComponentSignatureDescriptor{params: component_params, result: result_descriptor ?? return SemaMethodSpecialCheck{handled: true, value: None}}
     result := Type.Result{ok: result_type, err: Type.Named{name: "PluginError"}}
     value := sema_tir_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.PluginInvoke{export_name: export_value.name, signature: signature}, args: values}, span)
     return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}

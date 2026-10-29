@@ -1,0 +1,20 @@
+
+use core.web.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("ws://127.0.0.1:{free-port:response}/session?token=RESPONSE_SECRET", profile, timeout) ?? panic("connect")
+    session.subscribe("network.responseCompleted") ?? panic("subscribe")
+    event :: &session.next_event(timeout) ?? panic("next_event")
+    print(event.kind())
+    print(event.request_method())
+    print(event.status_code())
+    print(event.is_blocked())
+    print(event.url_hash().contains("SECRET") == false)
+    trace :: session.trace()
+    print(trace.redacted())
+    print(trace.summary().contains("SECRET") == false)
+    print("response:ok")
+    session.close() ?? panic("close")
+}

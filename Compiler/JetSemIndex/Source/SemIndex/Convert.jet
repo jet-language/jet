@@ -4,11 +4,15 @@
 // Effects consume Sema's full SemIndexEffectFacts from the same checked solve.
 // That producer is queued: no reduced local carrier or second solve.
 use jet_foundation.[
-    CompilerStage, Item, MIRNameFacts, MetadataProducerStatus, NamedType,
-    ParamZone, ViewProvenance, ViewProvenanceMap,
-    failure_contract_effective_type, type_name,
+    Item,
+    NameFacts,
+    NamedType,
+    ViewProvenance,
+    ViewProvenanceMap,
+    failure_contract_effective_type,
+    type_name,
 ]
-use jet_sema.[SemaCompilerModuleSource, SemaRegistrationGraph, SemIndexEffectFacts]
+use jet_sema.[SemaCompilerModuleSource, SemaRegistrationGraph]
 
 // First member with an identity owns its callable presentation, even when a
 // later trait/inherent row has the same identity but a different owner.
@@ -20,7 +24,7 @@ fn semindex_convert_member_owners(members: [MemberFact]) -> [String:String] Neve
     owners
 }
 
-fn semindex_convert_defs(defs: [SymDef], view_provenance: [String:ViewProvenanceMap], members: [MemberFact], registration: SemaRegistrationGraph, names: MIRNameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) -> [SymbolDef] Never! {
+fn semindex_convert_defs(defs: [SymDef], view_provenance: [String:ViewProvenanceMap], members: [MemberFact], registration: SemaRegistrationGraph, names: NameFacts, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) -> [SymbolDef] Never! {
     owners :: semindex_convert_member_owners(members)
     sources :: semindex_loaded_source_rows_by_path(module_sources, loaded_module_rows)
     output := [SymbolDef]{}

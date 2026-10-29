@@ -13,7 +13,7 @@ Files:
 - `pkg/stencil.jet` — one 1024 x 1024 five-point sweep.
 - `pkg/compute.jet`, `pkg/compute_fft.jet` — shipped Tensor paths.
 - `pkg/pi_probe.jet`, `pkg/pi_literal_probe.jet`, `pkg/time_ns.jet` — defect and timing checks.
-- `rust_bench.rs` — same-input Rust baseline, compiled with `rustc -O -C target-cpu=native`.
+- `Tools/perf/domain-foundations/prim-numerics-perf/rust_bench.rs` — same-input Rust baseline, compiled with `rustc -O -C target-cpu=native` (a Rust benchmark peer, kept under `Tools/perf`).
 
 ## What worked
 

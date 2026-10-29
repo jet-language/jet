@@ -1,0 +1,25 @@
+# tests/core_files_opaque_handles.rs::file_manual_close_consumes_the_checked_provider_owner at tests/core_files_opaque_handles.rs:314; hand-port
+# __ROOT__ (the original scratch root) is the case work dir `.`.
+fixture: file_manual_close_consumes_the_checked_provider_owner.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step run: jet run close/main.jet
+exit: 0
+stdout: = "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"
+step build: jet build close/main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n"
+step: jet check after_close_temp/main.jet
+exit: nonzero
+stderr: ~ "[E0121]" # original: use after close is rejected by sema
+stderr: !~ "[E0905]" # original: the checked Core owner implements Close
+step: jet check after_close_reader/main.jet
+exit: nonzero
+stderr: ~ "[E0121]" # original: use after close is rejected by sema
+stderr: !~ "[E0905]" # original: the checked Core owner implements Close
+step: jet check after_close_writer/main.jet
+exit: nonzero
+stderr: ~ "[E0121]" # original: use after close is rejected by sema
+stderr: !~ "[E0905]" # original: the checked Core owner implements Close

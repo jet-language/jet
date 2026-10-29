@@ -1,0 +1,16 @@
+struct Reservation {
+    state { Pending, Confirmed }
+    guest: String
+
+    #Transition(_, Pending) fn book(guest: String) -> Reservation {
+        return Reservation{guest: guest.copy()}
+    }
+
+    #Transition(Pending, Confirmed) fn pay(self: ^Reservation) -> Reservation {
+        return self
+    }
+
+    #State(Confirmed) fn check_in(self) {
+        print(self.guest)
+    }
+}

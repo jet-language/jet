@@ -1,0 +1,12 @@
+# tests/task_state.rs::task_join_duty_uses_the_dlin1_obligation_pass at tests/task_state.rs:19; hand-port
+fixture: task_join_duty_uses_the_dlin1_obligation_pass.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet check unjoined/run.jet
+exit: any # the original asserts only the codes
+stderr: ~ "[L1101]" # tests/task_state.rs:27 missing shared join-duty error
+step: jet check joined/run.jet
+exit: any # the original asserts only the codes
+stderr: !~ "[L1101]" # tests/task_state.rs:38 joining must discharge the D-LIN1 duty

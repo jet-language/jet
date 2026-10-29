@@ -1042,7 +1042,7 @@ fn kit_steps_artifact(entry: String, source: String, artifact: String) -> String
     }
     name :: files.basename(entry)
     stem :: if name.ends_with(".jet") -> kit_steps_byte_slice(name, 0, name.count_bytes() - 4) else -> name
-    files.join(files.join(root, ".jet/build"), if artifact == "" -> stem.replace(".", "_") else -> artifact)
+    files.join(files.join(root, ".jet/build"), if artifact == "" -> stem else -> artifact)
 }
 
 fn kit_steps_context(plan: KitPlan, id: String, env: KitEnv, work: String, scratch: String, snapshots: String, bless: KitBless) -> KitStepCtx {

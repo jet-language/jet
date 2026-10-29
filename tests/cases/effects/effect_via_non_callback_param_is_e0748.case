@@ -1,0 +1,10 @@
+# Claim: `-[via n]>` naming a parameter that is not a callback is exactly E0748
+fixture: effect_via_non_callback_param_is_e0748.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # the pass-through annotation is rejected
+stderr: ~ "Error [E0748]" # via on a non-fn param is E0748
+stderr: ~ "names a parameter that isn't a callback" # the message names the problem
+stderr: ~ "1 problem found" # E0748 is the only diagnostic

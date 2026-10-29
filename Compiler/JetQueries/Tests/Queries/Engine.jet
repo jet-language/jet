@@ -2,6 +2,8 @@
 // finish seam in place of Rust's FnOnce(&mut QueryEngine) callback.
 // The complete behavior suite is retained: execution is blocked on #4397
 // composite-key Rust derives, not replaced with string keys or literal stats.
+use jet_queries.[FileKey, InputKey, QueryEngine, QueryKey, QueryStats]
+
 enum QueryTestValue {
     Count(value: Int)
     Text(value: String)
@@ -28,24 +30,24 @@ fn query_test_words(text: String) -> Int Never! {
     }
     count
 }
-fn query_test_word_count(db: QueryEngine<QueryTestValue>, path: String) -> Int Never! {
+fn query_test_word_count(db: &QueryEngine<QueryTestValue>, path: String) -> Int Never! {
     key :: QueryKey.new("tokens", path)
     if (&db.query(key, "count")) == .Val(hit) -> return query_test_count(hit)
     text :: (&db.input_text(InputKey.new(path))) ?? ""
     query_test_count(&db.finish_query(key, "count", QueryTestValue.Count{value: query_test_words(text)}))
 }
-fn query_test_read(db: QueryEngine<QueryTestValue>, key: QueryKey, input: InputKey) -> String Never! {
+fn query_test_read(db: &QueryEngine<QueryTestValue>, key: QueryKey, input: InputKey) -> String Never! {
     if (&db.query(key, "text")) == .Val(hit) -> return query_test_text(hit)
     text :: (&db.input_text(input)) ?? ""
     query_test_text(&db.finish_query(key, "text", QueryTestValue.Text{value: text}))
 }
-fn query_test_graph(db: QueryEngine<QueryTestValue>, key: QueryKey) -> String Never! {
+fn query_test_graph(db: &QueryEngine<QueryTestValue>, key: QueryKey) -> String Never! {
     if (&db.query(key, "text")) == .Val(hit) -> return query_test_text(hit)
     a :: (&db.input_text(InputKey.new("a.jet"))) ?? ""
     b :: (&db.input_text(InputKey.new("b.jet"))) ?? ""
     query_test_text(&db.finish_query(key, "text", QueryTestValue.Text{value: "{a}+{b}"}))
 }
-fn query_test_symbols(db: QueryEngine<QueryTestValue>, key: QueryKey) -> String Never! {
+fn query_test_symbols(db: &QueryEngine<QueryTestValue>, key: QueryKey) -> String Never! {
     if (&db.query(key, "text")) == .Val(hit) -> return query_test_text(hit)
     n :: query_test_word_count(&db, "a.jet")
     query_test_text(&db.finish_query(key, "text", QueryTestValue.Text{value: "symbols:{n}"}))

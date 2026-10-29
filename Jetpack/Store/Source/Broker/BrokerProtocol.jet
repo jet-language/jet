@@ -5,26 +5,26 @@
 // `key=hex` text ending at a blank line, and every length is checked against
 // the 1 GiB archive bound before bytes are read.
 
-STORE_BROKER_CONFIG_MAGIC :: prep { "jet-shared-store-v1" }
-STORE_BROKER_REQUEST_MAGIC :: prep { "jet-shared-store-request-v1" }
-STORE_BROKER_RESPONSE_MAGIC :: prep { "jet-shared-store-response-v1" }
-STORE_BROKER_MAX_CONFIG_BYTES :: prep { 16384 }
-STORE_BROKER_MAX_REQUEST_BYTES :: prep { 1073741824 }
-STORE_BROKER_MAX_REFERENCE_BYTES :: prep { 4096 }
-STORE_BROKER_MAX_PROVENANCE_FIELD_BYTES :: prep { 4096 }
-STORE_BROKER_MAX_HEADER_BYTES :: prep { 4096 }
-STORE_BROKER_GRANT_MAGIC :: prep { "jet-shared-store-grant-v2" }
-STORE_BROKER_GRANT_TTL_SECS :: prep { 900 }
-STORE_BROKER_INCOMING_STALE_AFTER_SECS :: prep { 900 }
-STORE_BROKER_MAX_INCOMING_ENTRIES :: prep { 1024 }
-STORE_BROKER_STAGE_MARKER :: prep { ".jet-shared-store-stage" }
-STORE_BROKER_SANDBOX_POLICY :: prep { "jet-shared-store-sandbox-v1\nno-source-evaluation\nsocket-activated\n" }
-STORE_BROKER_SHARED_DIR :: prep { "shared-store" }
-STORE_BROKER_ADMIN_CONFIG :: prep { "/etc/jet/shared-store/config" }
-STORE_BROKER_ADMIN_BASE :: prep { "/var/lib/jet/shared-store" }
-STORE_BROKER_ADMIN_SOCKET :: prep { "/run/jet/shared-store.sock" }
+STORE_BROKER_CONFIG_MAGIC :: "jet-shared-store-v1"
+STORE_BROKER_REQUEST_MAGIC :: "jet-shared-store-request-v1"
+STORE_BROKER_RESPONSE_MAGIC :: "jet-shared-store-response-v1"
+STORE_BROKER_MAX_CONFIG_BYTES :: 16384
+STORE_BROKER_MAX_REQUEST_BYTES :: 1073741824
+STORE_BROKER_MAX_REFERENCE_BYTES :: 4096
+STORE_BROKER_MAX_PROVENANCE_FIELD_BYTES :: 4096
+STORE_BROKER_MAX_HEADER_BYTES :: 4096
+STORE_BROKER_GRANT_MAGIC :: "jet-shared-store-grant-v2"
+STORE_BROKER_GRANT_TTL_SECS :: 900
+STORE_BROKER_INCOMING_STALE_AFTER_SECS :: 900
+STORE_BROKER_MAX_INCOMING_ENTRIES :: 1024
+STORE_BROKER_STAGE_MARKER :: ".jet-shared-store-stage"
+STORE_BROKER_SANDBOX_POLICY :: "jet-shared-store-sandbox-v1\nno-source-evaluation\nsocket-activated\n"
+STORE_BROKER_SHARED_DIR :: "shared-store"
+STORE_BROKER_ADMIN_CONFIG :: "/etc/jet/shared-store/config"
+STORE_BROKER_ADMIN_BASE :: "/var/lib/jet/shared-store"
+STORE_BROKER_ADMIN_SOCKET :: "/run/jet/shared-store.sock"
 // The credential a private (rootless) broker owner presents.
-STORE_BROKER_PRIVATE_OWNER :: prep { "private-owner" }
+STORE_BROKER_PRIVATE_OWNER :: "private-owner"
 
 // Rust `invalid`: every broker refusal is InvalidData with this exact text.
 fn store_broker_invalid(message: String) -> StoreError Never! {
@@ -46,7 +46,8 @@ fn store_broker_parse_unsigned(text: String) -> Int? Never! {
         code :: Int.from_u8(raw[index])
         if code < 48 || code > 57 -> return None
     }
-    Int.parse(pkg_bytes_text(raw, start, raw.len())) ?? None
+    parsed :: Int.parse(pkg_bytes_text(raw, start, raw.len())) ?? return None
+    Val(parsed)
 }
 
 // Rust `decode_hex`: even length, ASCII hex digits of either case.
@@ -151,14 +152,20 @@ struct BrokerWireReader {
         BrokerWireReader{stream: None, bytes: bytes, position: 0}
     }
 
-    fn socket(stream: UnixStream) -> BrokerWireReader Never! {
-        BrokerWireReader{stream: Val(stream), bytes: [U8]{}, position: 0}
+    fn socket(^stream: UnixStream) -> BrokerWireReader Never! {
+        BrokerWireReader{stream: Val(^stream), bytes: [U8]{}, position: 0}
+    }
+
+    // Write `bytes` back over this exchange's stream.
+    fn reply(&self, bytes: [U8]) StoreError! {
+        if &self.stream == .Val(stream) -> return store_broker_send(&stream, bytes)
+        Err(StoreError.Other("an in-memory broker exchange has no stream to reply on"))
     }
 
     // Up to `limit` bytes; an empty list is end of input.
     fn read_some(&self, limit: Int) -> [U8] StoreError! {
-        if self.stream == {
-            .Val(stream) -> Ok(net.unix_read_bytes(stream, limit) ?? return Err(store_broker_net_error(err)))
+        if &self.stream == {
+            .Val(stream) -> Ok(net.unix_read_bytes(&stream, limit) ?? return Err(store_broker_net_error(err)))
             .None -> {
                 end :: if self.position + limit < self.bytes.len() -> self.position + limit else -> self.bytes.len()
                 chunk :: self.bytes[self.position..<end]
@@ -510,8 +517,8 @@ fn store_broker_authorize_grant(grant: WriterGrant, write: Bool, binding: Proven
 }
 
 // Rust `now_secs`: Unix seconds, saturating at zero before the epoch.
-fn store_broker_now_secs() -> Int Never! {
-    seconds :: time.instant().unix_ns /% 1000000000
+fn store_broker_now_secs() -[Time]> Int Never! {
+    seconds :: time.unix_ns() /% 1000000000
     if seconds < 0 -> return 0
     seconds
 }

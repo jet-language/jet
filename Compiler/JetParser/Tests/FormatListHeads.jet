@@ -1,9 +1,11 @@
 // 2945ed58b: repeated struct list heads keep explicit heads; assemble with Compiler and run.
+use jet_parser.[jet_format_source]
+
 fn fmt_list_require(ok: Bool, name: String) Never! {
     if !ok -> panic("formatter list heads contract: {name}")
 }
 
-fn run() {
+#Test("format_list_heads") {
     source := "struct Point {{\n    x: Int\n}}\n\nfn run() {{\n    compact := [Point{{x: 1}}, Point{{x: 2}}]\n    spread := [\n        Point{{x: 3}},\n        Point{{x: 4}},\n    ]\n}}\n"
     plain :: jet_format_source(source, false)
     fmt_list_require(plain.ok, "plain format succeeds")

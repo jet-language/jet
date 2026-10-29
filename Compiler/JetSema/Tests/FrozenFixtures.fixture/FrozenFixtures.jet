@@ -1,0 +1,40 @@
+// Assemble with the production compiler sources and this replacement run.
+fn run() {
+    scopes := sema_scope_init("frozen-fixture")
+    state := sema_ownership_state_init()
+    span := Span{start: 0, end: 1}
+    key := symbol_id(SymbolKind.Local, "frozen-fixture", "run", "snapshot")
+    symbol := Symbol{id: key, kind: SymbolKind.Local, name: "snapshot", module_name: "frozen-fixture", owner: Val("run"), span: span, ty: Val(Type.List{element: Type.Int}), visibility: 0}
+    if !sema_scope_declare_local(&scopes, symbol, true, AccessConvention.Read, None, false) -> panic("fixture binding was not declared")
+    sema_ownership_declare_binding(&state, symbol, false)
+    site := SemaOwnershipFreezeSite{span: Span{start: 10, end: 16}, line: 3, column: 5}
+    state.declarations[0].frozen_site = Val(site)
+    source := Expr.Ident{name: "snapshot", span: Span{start: 20, end: 28}, id: AST_NODE_GENERATED}
+    projected := Expr.Field{base: source, member: "value", span: Span{start: 20, end: 34}, id: AST_NODE_GENERATED}
+    if sema_ownership_frozen_expr_site(state, projected, scopes) != Val(site) -> panic("a projected place lost its freeze provenance")
+    diagnostics := [Diagnostic]{}
+    if !sema_ownership_reject_frozen_write(state, projected, "be edited", expr_span(projected), scopes, &diagnostics) -> panic("a frozen place accepted a write")
+    if diagnostics.len() != 1 || diagnostics[0].code != "E1113" || !diagnostics[0].what.contains("line 3, column 5") -> panic("frozen write lost its diagnostic or source site")
+    before := sema_ownership_state_snapshot(state)
+    mutable_path := sema_ownership_state_snapshot(state)
+    mutable_path.declarations[0].frozen_site = None
+    sema_ownership_join_paths(&state, before, before, mutable_path, true)
+    if sema_ownership_frozen_for_key(state, key.key) != None -> panic("one frozen branch is not a frozen-value proof")
+    sema_ownership_join_paths(&state, before, before, before, true)
+    if sema_ownership_frozen_for_key(state, key.key) != Val(site) -> panic("two frozen branches lost their proof")
+    fork :: sema_ownership_fork(&state)
+    sema_ownership_note_undo(&state, 0)
+    state.declarations[0].frozen_site = None
+    &state.freeze_sites.push(site)
+    mutable_arm :: sema_ownership_fork_path(state, fork)
+    sema_ownership_fork_rollback(&state, fork)
+    if sema_ownership_frozen_for_key(state, key.key) != Val(site) -> panic("fork rollback lost freeze provenance")
+    if state.freeze_sites.len() != fork.freeze_sites.len() -> panic("fork rollback kept an arm's freeze sites")
+    frozen_arm :: sema_ownership_fork_base(fork)
+    joined :: sema_ownership_path_join(state, fork, frozen_arm, mutable_arm, true, state.share_found)
+    sema_ownership_fork_apply(&state, joined)
+    sema_ownership_fork_close(&state, fork)
+    if sema_ownership_frozen_for_key(state, key.key) != None -> panic("fork join kept a one-arm freeze proof")
+    if state.freeze_sites.len() != 1 -> panic("fork join lost an arm's freeze site")
+    print("frozen provenance and write checks: passed")
+}

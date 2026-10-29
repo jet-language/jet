@@ -7,7 +7,10 @@ struct NixProvider {
     fn validate_cache_authority(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) ProviderError! -[FS]> {
         project :: ctx.project_dir ?? return
         if !files.is_dir(project) -> return
-        pkg_lock_load_strict(project) ?? return Err(ProviderError.BadOutput(err.message()))
+        if pkg_lock_load_strict(project) == {
+            .Err(error) -> { return Err(ProviderError.BadOutput(error.message())) }
+            else -> {}
+        }
     }
 
     // The exact identity a cached Nix output must carry: the locked closure,
@@ -59,7 +62,10 @@ struct NixProvider {
         plan := DownloadPlan.empty()
         nix_paths := [String]{}
         loop spec in specs {
-            native :: index.resolve_native_recipe(spec.package) ?? return Err(ProviderError.NixIndex(err))
+            native :: if index.resolve_native_recipe(spec.package) == {
+                .Ok(found) -> found
+                .Err(error) -> { return Err(ProviderError.NixIndex(error)) }
+            }
             if native == {
                 .Val(recipe) -> {
                     size :: provider_native_catalog_download_size(recipe)
@@ -118,7 +124,10 @@ struct NixProvider {
         }
         if ctx.nix_index == {
             .Val(catalog) -> {
-                native :: catalog.resolve_native_recipe(spec.package) ?? return Err(ProviderError.NixIndex(err))
+                native :: if catalog.resolve_native_recipe(spec.package) == {
+                    .Ok(found) -> found
+                    .Err(error) -> { return Err(ProviderError.NixIndex(error)) }
+                }
                 if native == {
                     .Val(recipe) -> return provider_native_realize_catalog_recipe(spec, recipe, ctx)
                     .None -> {}

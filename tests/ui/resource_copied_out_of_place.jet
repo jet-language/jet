@@ -1,0 +1,31 @@
+// E0211: a value that holds a resource (here a `Directory` handle) has one
+// cleanup owner. Binding an element, a field of an element, or a field of a
+// borrowed receiver into an owned name would copy the handle, and the copy's
+// cleanup would close the handle the collection still holds.
+use core.files as files
+
+struct Held {
+    handle: files.Directory
+    path: String
+}
+
+struct Auth {
+    dirs: [Held]
+
+    fn element(self) -> String {
+        parent :: self.dirs[0]
+        parent.path
+    }
+
+    fn element_field(self) -[FS]> Bool {
+        h :: self.dirs[0].handle
+        h.stat() != None
+    }
+
+    fn whole_list(self) -> Int {
+        dirs := self.dirs
+        dirs.len()
+    }
+}
+
+fn run() {}

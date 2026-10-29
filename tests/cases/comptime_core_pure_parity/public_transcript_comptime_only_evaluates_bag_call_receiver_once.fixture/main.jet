@@ -1,0 +1,50 @@
+enum TallyToken {
+    Red
+    Blue
+}
+fn add_bag(values: &Tally<Int>, value: Int) -> Bool {
+    return values.add(value)
+}
+fn counted_bag(hits: &Int) -> Tally<Int> {
+    hits += 1
+    values := Tally<Int>.new()
+    &values.add(6)
+    return values
+}
+fn bag_view() -> String {
+    values := Tally<Int>.new()
+    empty_before :: values.is_empty()
+    added_four :: values.add(4)
+    duplicate_four :: values.add(4)
+    added_two :: add_bag(&values, 2)
+    length_before :: values.len()
+    count_four_before :: values.count(4)
+    has_two :: values.has(2)
+    any_large :: values.any((value) -> value > 3)
+    any_negative :: values.any((value) -> value < 0)
+    values.remove(4)
+    count_four_after_one :: values.count(4)
+    values.remove(4)
+    values.remove(99)
+    words := Tally<String>.new()
+    words.add("a")
+    words.add("z")
+    words.add("a")
+    tokens := Tally<TallyToken>.new()
+    tokens.add(TallyToken.Red)
+    tokens.add(TallyToken.Red)
+    empty := Tally<Int>.new()
+    return "{empty_before}|{added_four}|{duplicate_four}|{added_two}|{length_before}|{count_four_before}|{has_two}|{any_large}|{any_negative}|{count_four_after_one}|{values.has(4)}|{values.len()}|{values.is_empty()}|{words.count("a")}|{words.len()}|{words.any((value) -> value == "z")}|{tokens.count(TallyToken.Red)}|{tokens.has(TallyToken.Blue)}|{empty.any((value) -> value == 0)}"
+}
+
+fn bag_call_receiver_view() -> String {
+    receiver_hits := 0
+    count :: counted_bag(&receiver_hits).count(6)
+    return "{count}|{receiver_hits}"
+}
+
+TRANSCRIPT_0 :: comptime { bag_call_receiver_view() }
+
+fn run() {
+    print("{TRANSCRIPT_0}")
+}

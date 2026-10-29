@@ -15,10 +15,9 @@ use jet_foundation.[
     Span,
     TextEdit,
     diagnostic_from_registry,
-    diagnostic_with_edit,
+    diagnostic_with_structured_edit,
 ]
 use jet_lexer.[
-    TOKEN_AT,
     TOKEN_BANG,
     TOKEN_COLON,
     TOKEN_COMMA,
@@ -70,12 +69,12 @@ fn parser_marker_label(marker: Marker, index: Int) -> String Never! {
     if label == { .Val(value) -> value.name else -> "" }
 }
 
-// A canonical `marker Name(…)`, or the
+// A canonical `marker Name(…)`, a fixed `marker Name = #[…]` group, or the
 // retired checked-text `marker Name on …` so the parser can teach it.
 fn parser_marker_decl_ahead(state: &JetParserState) -> Bool Never! {
     if !(parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "marker" && parser_kind_at(&state, 1) == TOKEN_IDENT) -> return false
     third :: parser_lookahead(&state, 2)
-    third.kind == TOKEN_LPAREN || (third.kind == TOKEN_IDENT && parser_value(state, third) == "on")
+    third.kind == TOKEN_LPAREN || third.kind == TOKEN_EQ || (third.kind == TOKEN_IDENT && parser_value(state, third) == "on")
 }
 
 fn parser_fact_decl_ahead(state: &JetParserState) -> Bool Never! {
@@ -101,8 +100,8 @@ fn parser_parse_marker_decl(state: &JetParserState, modifiers: ParsedItemModifie
     marker_name :: parser_value(state, name)
     if on.kind == TOKEN_IDENT && parser_value(state, on) == "on" {
         parser_skip_marker_trailer(&state)
-        parser_add_fatal_code(&state, "E0381", on.span, "a marker declaration has no `on` clause", "every marker declaration uses one named parameter list; `$sites` records legal sites, and checked-text contracts are not a separate marker form", "write `marker {marker_name}($sites: [.Text])` for a plain rule, or use a built-in typed text head")
-        return Item.MarkerDecl{value: MarkerDecl{name: marker_name, name_span: name.span, params: [MarkerDeclParam]{}, body: None, span: parser_cover(start.span, on.span)}}
+        parser_add_fatal_code(&state, "E0381", on.span, "the checked-text marker declaration is retired", "every marker declaration uses one named parameter list; `$sites` records legal sites, and checked-text contracts are not a separate marker form", "write `marker {marker_name}($sites: [.Text])` for a plain rule, or use a built-in typed text head")
+        return Item.MarkerDecl{value: MarkerDecl{name: marker_name, name_span: name.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, params: [MarkerDeclParam]{}, body: None, span: parser_cover(start.span, on.span)}}
     }
     params :: parser_marker_decl_params(&state)
     body := [DeriveBodyItem]?{None}
@@ -126,7 +125,7 @@ fn parser_parse_marker_decl(state: &JetParserState, modifiers: ParsedItemModifie
         else -> {}
     }
     if parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
-    Item.MarkerDecl{value: MarkerDecl{name: marker_name, name_span: name.span, params: params, body: body, span: parser_cover(start.span, end)}}
+    Item.MarkerDecl{value: MarkerDecl{name: marker_name, name_span: name.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, params: params, body: body, span: parser_cover(start.span, end)}}
 }
 
 // Consume a rejected marker-declaration trailer (the `on` word and its
@@ -220,7 +219,7 @@ fn parser_marker_decl_params(state: &JetParserState) -> [MarkerDeclParam] {
     params
 }
 
-// Rust `derive_body_items`: the body is a template, so nested `prep loop`
+// Rust `derive_body_items`: the body is a template, so nested `comptime loop`
 // statements are template loops.
 fn parser_marker_body(state: &JetParserState) -> [DeriveBodyItem] {
     parser_expect(&state, TOKEN_LBRACE, "`{{` before a marker body")
@@ -269,14 +268,14 @@ fn parser_marker_body_item(state: &JetParserState, modifiers: ParsedItemModifier
     }
 }
 
-// A declaration loop is `prep loop`, in marker bodies and at the root.
+// A declaration loop is `comptime loop`, in marker bodies and at the root.
 fn parser_template_loop_ahead(state: &JetParserState) -> Bool Never! {
     parser_prep_verb_ahead(&state, 0, TOKEN_KW_LOOP)
 }
 
 fn parser_parse_template_loop(state: &JetParserState) -> ItemTemplateLoop {
     start :: parser_bump(&state)
-    parser_expect(&state, TOKEN_KW_LOOP, "after `prep` in a declaration loop")
+    parser_expect(&state, TOKEN_KW_LOOP, "after `comptime` in a declaration loop")
     variable :: parser_expect_name(&state, "for a declaration loop binding")
     parser_expect(&state, TOKEN_KW_IN, "between a declaration loop binding and source")
     // Rust `derive_body_loop`: `expr_no_struct_lit`, so `T.$fields {` opens
@@ -413,7 +412,7 @@ fn parser_report_singleton_marker_group(state: &JetParserState, span: Span, mark
         &state.diagnostics.push(diagnostic)
         return
     }
-    &state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: "#{written}"}))
+    &state.diagnostics.push(diagnostic_with_structured_edit(diagnostic, TextEdit{span: span, new_text: "#{written}"}))
 }
 
 // (Rust `parse_attached_marker_sequence`): two or more
@@ -436,5 +435,5 @@ fn parser_report_adjacent_markers(state: &JetParserState, markers: [Marker], chu
         &rendered.push(text)
     }
     joined :: rendered.join(", ")
-    &state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: "#[{joined}]"}))
+    &state.diagnostics.push(diagnostic_with_structured_edit(diagnostic, TextEdit{span: span, new_text: "#[{joined}]"}))
 }

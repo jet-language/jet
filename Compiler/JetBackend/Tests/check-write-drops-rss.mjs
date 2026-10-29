@@ -1,22 +1,30 @@
 #!/usr/bin/env node
-// Runtime check that a write of an owned value releases the value it overwrites
-// (Lower.jet lower_release_write_drops / lower_release_slot_deaths): every owned
-// heap kind rebound inside a loop, then written through the rebound place, and
-// nested places (a field of a local, an element or map entry of a field).
+// Runtime check that a write of an owned value releases the value it overwrites:
+// every owned heap kind rebound inside a loop, then written through the rebound
+// place, and nested places (a field of a local, an element or map entry of a field).
 // Each shape is built natively at two round counts and run under GNU time; every
 // round rewrites the place 20000 times, so a leaked old value grows the peak RSS
-// by about 1 MB per round. The static LIR check cannot see these leaks: an
-// inline List or Map is a stack aggregate whose buffer pointer only lives in
-// memory. The programs import nothing (no corelib module beyond the prelude),
+// by about 1 MB per round. The programs import nothing (no corelib module beyond the prelude),
 // so each build stays small.
 //
 // usage: node check-write-drops-rss.mjs <jet> <work dir> [small rounds] [large rounds]
 // Exits 1 when any shape fails to build or run, or its peak RSS grows by more
 // than 8 MB from the small to the large round count (default 25 and 200).
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { gnuTime, peakRss } from '../../../Tools/agent/stage1/native-factory.mjs';
+
+// GNU time, never the shell keyword.
+function gnuTime() {
+  const found = spawnSync('bash', ['-c', 'type -P time'], { encoding: 'utf8' }).stdout.trim();
+  if (!found || !spawnSync(found, ['--version'], { encoding: 'utf8' }).stdout.includes('GNU')) throw Error('GNU time is required to measure native stages');
+  return found;
+}
+function peakRss(timing) {
+  const text = fs.existsSync(timing) ? fs.readFileSync(timing, 'utf8') : '';
+  const match = /Maximum resident set size \(kbytes\): (\d+)/.exec(text);
+  return match ? Number(match[1]) : null;
+}
 
 const [jet, work, smallArg, largeArg] = process.argv.slice(2);
 if (!jet || !work) { console.error('usage: node check-write-drops-rss.mjs <jet> <work dir> [small rounds] [large rounds]'); process.exit(64); }
@@ -250,7 +258,7 @@ const peak = (name, rounds) => {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'unit.jet'), program(shapes[name], rounds));
   // The closure shape's call is effect-generic, so the program holds every effect.
-  fs.writeFileSync(path.join(dir, 'package.jet'), 'name: "write_drops"\nversion: "0.0.1"\nedition: "2028"\nauthority: {\n    holds: { allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time] }\n}\n');
+  fs.writeFileSync(path.join(dir, 'package.jet'), 'name: "write_drops"\nversion: "0.0.1"\nedition: "2028"\nauthority: {\n    allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time]\n}\n');
   execFileSync(jet, ['build', 'unit.jet'], { cwd: dir, stdio: ['ignore', 'ignore', 'inherit'] });
   const timing = path.join(dir, 'run.time');
   execFileSync(time, ['-v', '-o', timing, path.join(dir, '.jet/build/unit')], { cwd: dir, stdio: ['ignore', 'ignore', 'inherit'] });

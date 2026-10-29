@@ -12,24 +12,13 @@ use jet_foundation.[
     Param,
     Span,
     SymbolKind,
-    TFunc,
     TFunctionRef,
-    TJobArgumentFact,
-    TJobFact,
     Type,
     ast_job_metadata,
     expr_span,
     symbol_id,
-    tir_job_artifact_fact,
     type_name,
 ]
-
-struct SemaJobArtifactCheckResult {
-    fact: TJobFact?
-    schedule: EverySchedule?
-    diagnostics: [Diagnostic]
-    complete: Bool
-}
 
 struct SemaJobScheduleResolution {
     schedule: EverySchedule?
@@ -136,14 +125,14 @@ fn sema_job_schedule_error(reason: EveryScheduleError, span: Span) -> Diagnostic
 
 fn sema_job_default_text(expression: Expr) -> String? {
     if expression == {
-        .Paren(value, _) -> return sema_job_default_text(value)
-        .Int(value, _, _, _) -> return Val("{value}")
-        .Float(value, _, _, raw) -> {
+        .Paren(value, _, _) -> return sema_job_default_text(value)
+        .Int(value, _, _, _, _) -> return Val("{value}")
+        .Float(value, _, _, raw, _) -> {
             text :: raw ?? "{value}"
             return Val(text.replace("_", ""))
         }
-        .Bool(value, _) -> return Val("{value}")
-        .Str(parts, _) -> {
+        .Bool(value, _, _) -> return Val("{value}")
+        .Str(parts, _, _) -> {
             if parts.len() != 1 -> return None
             if parts[0] == {
                 .Lit(text) -> {
@@ -158,30 +147,13 @@ fn sema_job_default_text(expression: Expr) -> String? {
     }
 }
 
-fn sema_job_parameter_fact(parameter: Param) -> TJobArgumentFact Never! {
-    default := if parameter.default == .Val(expression) -> sema_job_default_text(expression) else -> None
-    optional_type :: if parameter.ty == {
-        .Option(_) -> true
-        else -> false
-    }
-    return TJobArgumentFact{
-        name: parameter.name,
-        label: parameter.public_label.map((label) -> label.name) ?? parameter.name,
-        ty: type_name(parameter.ty),
-        required: !parameter.variadic && !optional_type && parameter.ty != Type.Bool && parameter.default == None,
-        default: default,
-        variadic: parameter.variadic,
-        zone: parameter.zone,
-    }
-}
-
 fn sema_job_doc(function: Func) -> String? {
     loop marker in function.markers {
         if marker.name != "Doc" -> next
         if marker.args.len() == 0 -> return None
         if marker.args[0] == {
             .Expr(expression) -> if expression == {
-                .Str(parts, _) -> {
+                .Str(parts, _, _) -> {
                     if parts.len() != 1 -> return None
                     if parts[0] == {
                         .Lit(text) -> {
@@ -199,52 +171,6 @@ fn sema_job_doc(function: Func) -> String? {
         }
     }
     None
-}
-
-fn sema_job_argument_facts(function: Func) -> [TJobArgumentFact] Never! {
-    arguments := [TJobArgumentFact]{}
-    loop parameter_index in 0..<function.params.len() {
-        if function.params[parameter_index].name != "self" -> &arguments.push(sema_job_parameter_fact(function.params[parameter_index]))
-    }
-    arguments
-}
-
-fn sema_check_job_artifact(function: Func, checked_function: TFunc, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaJobArtifactCheckResult {
-    diagnostics := [Diagnostic]{}
-    schedule := EverySchedule?{None}
-    complete := true
-    if function.every == .Val(every) {
-        resolution := sema_job_resolve_every_arg(every.arg, environment, program)
-        schedule = resolution.schedule
-        if resolution.error == .Val(reason) {
-            &diagnostics.push(sema_job_schedule_error(reason, sema_job_every_error_span(every.arg)))
-            complete = false
-        }
-    }
-    fact := TJobFact?{None}
-    if function.is_job {
-        // A bare `#Job` carries no marker arguments; it is still a job with
-        // the default metadata, so it can run and be an `after:` predecessor.
-        metadata := function.job_metadata ?? ast_job_metadata()
-        expected_key := symbol_id(SymbolKind.Function, environment.module_identity, "", function.name).key
-        identity_matches := checked_function.key == expected_key && checked_function.module_identity == environment.module_identity && checked_function.name == function.name && checked_function.source_span.start == function.span.start && checked_function.source_span.end == function.span.end
-        if {
-            identity_matches -> {
-                reference := TFunctionRef{
-                    key: checked_function.key,
-                    module_identity: checked_function.module_identity,
-                    name: checked_function.name,
-                    span: checked_function.source_span,
-                    visibility: checked_function.visibility,
-                }
-                fact = Val(tir_job_artifact_fact(reference, function.name, sema_job_doc(function), sema_job_argument_facts(function), schedule, metadata))
-            }
-            else -> {
-                complete = false
-            }
-        }
-    }
-    SemaJobArtifactCheckResult{fact: fact, schedule: schedule, diagnostics: diagnostics, complete: complete}
 }
 
 /// Sema and help read the same command registry.

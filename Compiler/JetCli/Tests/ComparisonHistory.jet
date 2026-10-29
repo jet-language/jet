@@ -1,6 +1,13 @@
 // Actual Rust dev-595 captures: scratch/SolCLI8/history-capture. This fixture
 // tests the producer payloads, not a guessed receipt context or claim key.
-fn run() Never! {
+use jet_cli.[
+    JetCLIReceiptInput, jet_cli_comparison_evidence, jet_cli_comparison_parse,
+    jet_cli_receipt_argv_identity, jet_cli_receipt_canonical_member, jet_cli_receipt_frame,
+    jet_cli_receipt_secret_name,
+]
+use jet_foundation.[canonical_json_bytes, comparison_record_to_json, evidence_report_encode]
+
+#Test("comparison_history") {
     input :: "{{\"foreign_binding\":{{\"boundary_digest\":\"boundary-v1\",\"source_identity\":\"source-v1\",\"replacement_identity\":\"replacement-v1\",\"tool_identity\":\"tool-v1\",\"target_identity\":\"target-v1\",\"coverage_digest\":\"coverage-v1\",\"assumptions\":[\"z\",\"a\",\"a\"]}},\"cases\":[{{\"case_id\":\"sample-1\",\"input_id\":\"input-1\",\"reference\":{{\"answer\":42}},\"candidate\":{{\"answer\":42}}}}]}}\n"
     run :: jet_cli_comparison_parse(input, None) ?? panic("comparison fixture parse")
     payload :: comparison_record_to_json(run.record) ?? panic("comparison fixture payload")

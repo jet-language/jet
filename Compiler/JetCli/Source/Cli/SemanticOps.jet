@@ -2,7 +2,8 @@
 // semantic intent. Hand edits never manufacture a rename receipt.
 use core.files as cli_files
 use core.encoding.json as cli_sem_json
-use jet_driver.JetDriverCompileMode
+use jet_driver.[JetDriverCompileMode]
+use core.encoding.[Dyn]
 
 struct JetCLISemOpTarget {
     stable_id: String
@@ -169,7 +170,7 @@ fn jet_cli_semantic_rename_ops(before: [JetCLISemDefinitionFact], after: [JetCLI
 // A refused/invalid structural check has no rename authority. Rust's fix
 // receipt then records the exact changed byte region instead.
 fn jet_cli_fix_definition_facts(file: String, source: String) -> [JetCLISemDefinitionFact]? {
-    compiled :: jet_cli_compile_entry(file, false, false, None, JetDriverCompileMode.Doc, Val(source), None) ?? return None
+    compiled :: jet_cli_compile_entry(file, false, None, JetDriverCompileMode.Doc, Val(source), None) ?? return None
     if compiled == {
         .Refused(_) -> return None
         .Compiled(result, _) -> {

@@ -1,11 +1,11 @@
-// Compiler-required whole-file leaves. Core/files owns the fault checkpoints,
+// Compiler-required whole-file leaves. Core/Files owns the fault checkpoints,
 // UTF-8 validation and mapped-writer refusal; these leaves do only host work.
 // Linux transport uses the existing HostFiles/HostProcess and audited OS layer.
 fn compiler_fs_error(kind: I64, operation: I64, path: I64, code: I64, cause: I64, error: I64) -> I64 {
     value :: jet_rt_alloc(I64{56}, I64{8})
     rt_text_store(value, kind)
     rt_text_store(value + I64{8}, operation)
-    rt_text_store(value + I64{16}, jet_rt_string_clone(path))
+    rt_text_store(value + I64{16}, if (path == I64{0}) -> I64{0} else -> jet_rt_string_clone(path))
     rt_text_store(value + I64{24}, if (code == I64{0}) -> I64{0} else -> I64{1})
     rt_text_store(value + I64{32}, code)
     rt_text_store(value + I64{40}, cause)
@@ -46,7 +46,10 @@ fn compiler_fs_fault(path: I64, error: I64) -> Bool {
 fn compiler_fs_bytes_take(bytes: I64, capacity: I64, length: I64, output: I64, len: I64) {
     data := I64{0}
     if (length != I64{0}) {
-        if (RT_HOST_U8_STRIDE == I64{1} && length == capacity) { data = bytes } else {
+        if (RT_HOST_U8_STRIDE == I64{1} && length == capacity) { data = bytes } else if (RT_HOST_U8_STRIDE == I64{1}) {
+            data = jet_rt_alloc(length, I64{8})
+            rt_text_bytes_copy(data, bytes, length)
+        } else {
             data = jet_rt_alloc(length * RT_HOST_U8_STRIDE, I64{8})
             at := I64{0}
             loop at < length {
@@ -68,6 +71,14 @@ fn compiler_fs_bytes_take(bytes: I64, capacity: I64, length: I64, output: I64, l
         return compiler_fs_errno(HOST_IO_OP_READ, path, -fd, error)
     }
     capacity := I64{8192}
+    // A regular file's size sizes the buffer once: the reads fill it exactly
+    // and the EOF probe ends them, with no growth copies and no final copy.
+    facts :: jet_rt_alloc(I64{144}, I64{8})
+    if (host_call(I64{5}, fd, facts, I64{0}) == I64{0}) {
+        size :: rt_text_word(facts + I64{48})
+        if (rt_text_word(facts + I64{24}).bit_and(I64{61440}) == I64{32768} && size > I64{0}) -> capacity = size
+    }
+    jet_rt_free(facts, I64{144}, I64{8})
     bytes := jet_rt_alloc(capacity, I64{8})
     used := I64{0}
     failure := I64{0}
@@ -244,6 +255,34 @@ fn compiler_fs_write_open(path: I64, data: I64, length: I64, error: I64, flags: 
     }
     jet_rt_free(scratch, I64{32}, I64{8})
     compiler_fs_bytes_take(bytes, limit, count, output, len)
+    I64{1}
+}
+// FileReader.seek(position): std Seek::seek(SeekFrom::Start(position)) on
+// the reader's descriptor. jet_fd_seek_raw drops buffered read-ahead, so the
+// next read, read_line or lines starts at `position`.
+#Export(c) fn jet_std_file_reader_seek(reader: I64, position: I64, error: I64) -> I64 {
+    path :: fd_word(reader, I64{24})
+    if compiler_fs_fault(path, error) -> return I64{0}
+    if (jet_int_compare(position, I64{0}) < I64{0}) {
+        offset :: if int_fits(position, U64{9223372036854775808}) -> jet_int_owned_to_i64(position) else -> I64{-9223372036854775808}
+        cause :: jet_rt_string_builder_new()
+        jet_rt_string_builder_push(cause, rt_static_text("seek needs a non-negative byte position, got "))
+        rt_text_push_number(cause, offset)
+        return compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_READ, path, I64{0}, jet_rt_string_builder_finish(cause), error)
+    }
+    scratch :: jet_rt_alloc(I64{40}, I64{8})
+    result :: jet_fd_seek_raw(reader, position, I64{0}, scratch, scratch + I64{32})
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        jet_rt_free(scratch, I64{40}, I64{8})
+        return I64{0}
+    }
+    if (rt_text_word(scratch) != I64{0} || result == I64{-1}) {
+        code :: rt_text_word(scratch + I64{8})
+        jet_rt_free(scratch, I64{40}, I64{8})
+        return compiler_fs_errno(HOST_IO_OP_READ, path, code, error)
+    }
+    jet_rt_int_drop(result)
+    jet_rt_free(scratch, I64{40}, I64{8})
     I64{1}
 }
 

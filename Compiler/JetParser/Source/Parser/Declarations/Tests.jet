@@ -7,7 +7,6 @@ use jet_foundation.[
     expr_span,
 ]
 use jet_lexer.[
-    TOKEN_DOT,
     TOKEN_HASH,
     TOKEN_IDENT,
     TOKEN_KW_FN,
@@ -19,7 +18,7 @@ fn parser_test_ahead(state: &JetParserState) -> Bool Never! {
 
 fn parser_test_name(value: Expr) -> (name: String?, span: Span) {
     if value == {
-        .Str(parts, span) -> {
+        .Str(parts, span, _) -> {
             if parts.len() == 1 {
                 if parts[0] == .Lit(text) -> return (name: Val(text), span: span)
             }

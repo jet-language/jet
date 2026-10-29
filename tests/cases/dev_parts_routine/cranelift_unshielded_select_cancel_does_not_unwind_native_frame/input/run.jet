@@ -1,0 +1,20 @@
+use core.tasks as tasks
+fn select_cancel_worker(ready_sender: Sender<Int>) {
+    task.group worker {
+        { sender: _sender, receiver: ch } :: channel<Int>()
+        ready_sender.send(1)
+        if {
+            value, ch -> print(value)
+        }
+        print(99)
+    }
+}
+
+fn run() {
+    task.group g {
+    { sender: ready_sender, receiver: ready } :: channel<Int>()
+        slow :: task select_cancel_worker(ready_sender)
+        ready.receive() ?? panic("closed")
+        slow.cancel()
+    }
+}

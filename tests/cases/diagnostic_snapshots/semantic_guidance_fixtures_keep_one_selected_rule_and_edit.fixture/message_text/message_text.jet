@@ -1,0 +1,25 @@
+fn read(req: HTTPRequest) -> String {
+    body :: req.body().text(1048576) ?? "fallback"
+    smaller :: req.body().text(1024) ?? "fallback"
+    exact :: comptime { 1024 * 1024 }
+    from_constant :: req.body().text(exact) ?? "fallback"
+    #allow(message_text, "the fixture exercises suppression of this occurrence") allowed :: req.body().text(1048576) ?? "fallback"
+    print(smaller)
+    print(from_constant)
+    print(allowed)
+    body
+}
+
+fn read_response(response: HTTPResponse) -> String {
+    response.body().text(1048576) ?? "fallback"
+}
+
+fn read_binary(req: HTTPRequest) -> [U8] {
+    req.body().bytes(1048576) ?? []
+}
+
+fn read_stream(req: HTTPRequest) -> HTTPBodyChunks {
+    req.body().chunks(1024)
+}
+
+fn run() {}

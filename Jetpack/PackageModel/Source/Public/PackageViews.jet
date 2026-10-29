@@ -4,9 +4,11 @@
 // authority material, provenance internals, or current-package scalar facts
 // that already have a canonical `@build.*` spelling. Git credentials and URL
 // query/fragment text are redacted before they cross the projection.
+use jetpack_foundation.[ENV_FILE, PACKAGE_FILE, UNIFIED_LOCK_FILE]
+use jet_foundation.[RuntimeLayer, jet_ring_layer_name]
 
 // Version of the public package-model field matrix.
-PACKAGE_MODEL_SCHEMA_VERSION :: prep { 1 }
+PACKAGE_MODEL_SCHEMA_VERSION :: 1
 
 // One declared dependency (source redacted by `pkg_dep_display_redacted`).
 struct DependencyView {
@@ -204,7 +206,7 @@ fn pkg_lock_view_from_lock(lock: LockFile) -> LockView Never! {
     }
 }
 
-fn pkg_view_layer(layer: MIRRuntimeLayer?) -> String? Never! {
+fn pkg_view_layer(layer: RuntimeLayer?) -> String? Never! {
     value :: layer ?? return None
     Val(jet_ring_layer_name(value))
 }

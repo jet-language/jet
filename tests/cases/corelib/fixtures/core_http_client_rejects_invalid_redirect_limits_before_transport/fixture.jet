@@ -28,7 +28,7 @@ fn check_redirect_limits() {
     listener := net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
     base :: "http://{address}"
-    (stop_tx, stop_rx) :: channel<Int>()
+    { sender: stop_tx, receiver: stop_rx } :: channel<Int>()
     peer :: task {
         requests := [String]{}
         // Exact original stop-atomic nonblocking observer, no finite26 cap.

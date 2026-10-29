@@ -1,0 +1,589 @@
+// Integer ranges (O2, pass "range"), on a function's SSA form before it
+// leaves SSA: the range [lo, hi] of every Int and word value (a 64-bit word
+// by its signed bits), and from it the reads that can never meet a big
+// integer and the comparisons the ranges decide.
+//
+// A constant is itself; Copy and Move keep their operand's range; Add, Sub,
+// Mul and Neg are interval arithmetic; FloorDiv, Div, Mod and Rem by a
+// positive constant and BitAnd with a nonnegative constant bound their
+// result; a phi is the union of its arguments, each read at the end of its
+// edge's block; anything else (a parameter, a load, a call) is unbounded.
+// A word narrower than 64 bits lies in its type's bounds; only a constant,
+// a copy or a phi inside them narrows it further.
+// A read is narrowed by the compares deciding the branches that dominate it:
+// an If's arms and a BrIf's fall-through (below `br_if !(i < n)`, `i < n`).
+// The ranges are an ascending fixpoint in which a phi bound still growing
+// after IR_RANGE_WIDEN rounds widens to unbounded, then IR_RANGE_NARROW
+// descending rounds win back the bounds the loop tests imply.
+//
+// Every bound lies inside the inline Ints [-2^62, 2^62 - 1], where word
+// arithmetic cannot wrap, so a word range is exact for its bits. An unsigned
+// word's comparison or division is read through the ranges only when its
+// operands are nonnegative.
+//
+// An inline Int (bits 63 and 62 agree, X64Select) is the i64 itself and owns
+// nothing. For an Int whose range lies strictly inside the inline Ints: its
+// Drop is nothing (a Nop), its Copy is a Move, and jet_int_owned_to_i64 or
+// jet_rt_int_clone of it is a Move, as is jet_int_checked_fixed of it when
+// it lies inside the fixed-width kind; an Int Add, Sub or Mul whose operands
+// and result are inline, a Div, Rem, FloorDiv or Mod of inline operands by
+// a positive divisor, and an Int comparison of inline operands, are marked
+// IR_OVERFLOW_WRAP (X64Select: the plain i64 instruction). A comparison the
+// ranges decide becomes its constant. Returns the rewritten instructions;
+// `f` and `s` stay one SSA form.
+
+use jet_foundation.[name_rows_value]
+
+// The inline Int bounds; a bound at or past one is unbounded.
+IR_RANGE_LOW :: -4611686018427387904
+IR_RANGE_HIGH :: 4611686018427387903
+IR_RANGE_WIDEN :: 3
+IR_RANGE_ROUNDS :: 40
+IR_RANGE_NARROW :: 2
+// Dominating blocks a read's narrowing looks through, and the largest form
+// analyzed (values).
+IR_RANGE_DEPTH :: 64
+IR_RANGE_VALUES :: 20000
+
+struct IRRange {
+    known: Bool
+    lo: Int
+    hi: Int
+}
+
+struct IRRanges {
+    // Per value: whether it has a range (an Int or a word), whether it is
+    // an Int, whether it is an unsigned word, whether it is a word narrower
+    // than 64 bits (its range is its type's: its arithmetic wraps or stops
+    // at its width), its type's bounds, and its range so far.
+    ranged: [Bool]
+    exact: [Bool]
+    unsigned: [Bool]
+    narrow: [Bool]
+    cap_lo: [Int]
+    cap_hi: [Int]
+    known: [Bool]
+    lo: [Int]
+    hi: [Int]
+    // Per block: the value of the condition its entry decides (-1: none),
+    // whether the condition holds there (else it fails), and the nearest
+    // block at or above it in the dominator tree that decides one (-1:
+    // none).
+    cond: [Int]
+    holds: [Bool]
+    up: [Int]
+    // Per value: the block of its write, and whether a deciding condition
+    // compares it (else no branch narrows it).
+    home: [Int]
+    tested: [Bool]
+}
+
+fn ir_range_top() -> IRRange Never! {
+    IRRange{known: true, lo: IR_RANGE_LOW, hi: IR_RANGE_HIGH}
+}
+
+fn ir_range_none() -> IRRange Never! {
+    IRRange{known: false, lo: 0, hi: 0}
+}
+
+fn ir_range_make(lo: Int, hi: Int) -> IRRange Never! {
+    IRRange{known: true, lo: if lo <= IR_RANGE_LOW -> IR_RANGE_LOW else -> lo, hi: if hi >= IR_RANGE_HIGH -> IR_RANGE_HIGH else -> hi}
+}
+
+fn ir_range_inline(r: IRRange) -> Bool Never! {
+    r.known && r.lo <= r.hi && r.lo > IR_RANGE_LOW && r.hi < IR_RANGE_HIGH
+}
+
+fn ir_range_bounded(r: IRRange) -> Bool Never! {
+    r.lo > IR_RANGE_LOW && r.hi < IR_RANGE_HIGH
+}
+
+// Whether value `used` (-1: none) has a range.
+fn ir_range_has(s: IRSsa, r: IRRanges, used: Int) -> Bool Never! {
+    used >= 0 && r.ranged[ir_ssa_find(s, used)]
+}
+
+fn ir_range_is_compare(op: IROp) -> Bool Never! {
+    op == .Lt || op == .Le || op == .Gt || op == .Ge || op == .Eq || op == .Ne
+}
+
+// Whether function `f` has an Int or word slot (a value with a range).
+fn ir_range_wanted(m: IRModule, f: IRFunction) -> Bool Never! {
+    loop row in f.slot_type {
+        kind :: m.types[row].kind
+        if kind == .Int || kind == .Word -> return true
+    }
+    false
+}
+
+fn ir_opt_int_facts(m: IRModule, f: &IRFunction, s: &IRSsa) -> Int Never! {
+    count :: s.val_slot.len()
+    if count == 0 || count > IR_RANGE_VALUES -> return 0
+    r := IRRanges{ranged: [Bool]{}, exact: [Bool]{}, unsigned: [Bool]{}, narrow: [Bool]{}, cap_lo: [Int]{}, cap_hi: [Int]{}, known: [Bool]{}, lo: [Int]{}, hi: [Int]{}, cond: [Int]{}, holds: [Bool]{}, up: [Int]{}, home: [Int]{}, tested: [Bool]{}}
+    any := false
+    loop value in 0..<count {
+        ty :: m.types[f.slot_type[s.val_slot[value]]]
+        exact :: ty.kind == .Int
+        word :: ty.kind == .Word
+        narrow :: word && ty.bits > 0 && ty.bits < 64
+        if exact || word -> any = true
+        &r.ranged.push(exact || word)
+        &r.exact.push(exact)
+        &r.unsigned.push(word && !ty.signed)
+        &r.narrow.push(narrow)
+        cap_lo :: if {
+            !narrow -> IR_RANGE_LOW
+            ty.signed -> 0 - (1 << (ty.bits - 1))
+            else -> 0
+        }
+        cap_hi :: if {
+            !narrow -> IR_RANGE_HIGH
+            ty.signed -> (1 << (ty.bits - 1)) - 1
+            else -> (1 << ty.bits) - 1
+        }
+        &r.cap_lo.push(cap_lo)
+        &r.cap_hi.push(cap_hi)
+        &r.known.push(false)
+        &r.lo.push(0)
+        &r.hi.push(0)
+        kind :: s.val_kind[value]
+        home :: if kind == .Def -> s.block[s.val_at[value]] else if kind == .Phi -> s.join_block[s.phi_join[s.val_at[value]]] else -> 0
+        &r.home.push(home)
+        &r.tested.push(false)
+    }
+    if !any -> return 0
+    loop _ in 0..<s.preds.len() {
+        &r.cond.push(-1)
+        &r.holds.push(false)
+        &r.up.push(-1)
+    }
+    ir_range_conditions(f, s, &r)
+    // Ascending rounds, widening late phi growth.
+    round := 0
+    changed := true
+    loop changed && round < IR_RANGE_ROUNDS {
+        changed = false
+        loop value in 0..<count {
+            if !r.ranged[value] || ir_ssa_find(s, value) != value -> next
+            got :: ir_range_eval(f, s, r, value)
+            if !got.known -> next
+            if !r.known[value] {
+                r.known[value] = true
+                r.lo[value] = got.lo
+                r.hi[value] = got.hi
+                changed = true
+                next
+            }
+            lo := if got.lo < r.lo[value] -> got.lo else -> r.lo[value]
+            hi := if got.hi > r.hi[value] -> got.hi else -> r.hi[value]
+            if lo == r.lo[value] && hi == r.hi[value] -> next
+            if s.val_kind[value] == .Phi && round >= IR_RANGE_WIDEN {
+                if lo < r.lo[value] -> lo = IR_RANGE_LOW
+                if hi > r.hi[value] -> hi = IR_RANGE_HIGH
+            }
+            r.lo[value] = lo
+            r.hi[value] = hi
+            changed = true
+        }
+        round += 1
+    }
+    if changed -> return 0
+    // Descending rounds from the post-fixpoint.
+    loop _ in 0..<IR_RANGE_NARROW {
+        loop value in 0..<count {
+            if !r.ranged[value] || !r.known[value] || ir_ssa_find(s, value) != value -> next
+            got :: ir_range_eval(f, s, r, value)
+            if !got.known || got.lo > got.hi -> next
+            if got.lo > r.lo[value] -> r.lo[value] = got.lo
+            if got.hi < r.hi[value] -> r.hi[value] = got.hi
+        }
+    }
+    ir_range_rewrite(m, &f, &s, r)
+}
+
+// Each block entered through a decided branch: an If's arms, a BrIf's
+// fall-through; then each block's nearest deciding dominator (blocks are
+// numbered after their immediate dominators).
+fn ir_range_conditions(f: IRFunction, s: IRSsa, r: &IRRanges) Never! {
+    loop at in 0..<f.op.len() {
+        if s.block[at] < 0 || at + 1 >= f.op.len() -> next
+        op :: f.op[at]
+        if op == .If && s.use_a[at] >= 0 {
+            ir_range_decide(f, s, &r, at + 1, s.use_a[at], true)
+            if f.b[at] >= 0 && f.b[at] + 1 < f.op.len() -> ir_range_decide(f, s, &r, f.b[at] + 1, s.use_a[at], false)
+        }
+        if op == .BrIf && s.use_a[at] >= 0 -> ir_range_decide(f, s, &r, at + 1, s.use_a[at], false)
+    }
+    loop block in 1..<s.preds.len() {
+        if r.cond[block] >= 0 {
+            r.up[block] = block
+        } else if s.idom[block] >= 0 && s.idom[block] < block {
+            r.up[block] = r.up[s.idom[block]]
+        }
+    }
+}
+
+// Block `at`'s entry decides `cond`; the values the comparison under its
+// Nots compares are tested (ir_range_narrow reads through the same Nots).
+fn ir_range_decide(f: IRFunction, s: IRSsa, r: &IRRanges, at: Int, cond: Int, holds: Bool) Never! {
+    block :: s.block[at]
+    if block <= 0 || s.preds[block].len() != 1 -> return
+    r.cond[block] = ir_ssa_find(s, cond)
+    r.holds[block] = holds
+    test := r.cond[block]
+    loop s.val_kind[test] == .Def {
+        def :: s.val_at[test]
+        op :: f.op[def]
+        if op == .Not && s.use_a[def] >= 0 {
+            test = ir_ssa_find(s, s.use_a[def])
+            next
+        }
+        if ir_range_is_compare(op) && s.use_a[def] >= 0 && s.use_b[def] >= 0 {
+            r.tested[ir_ssa_find(s, s.use_a[def])] = true
+            r.tested[ir_ssa_find(s, s.use_b[def])] = true
+        }
+        break
+    }
+}
+
+// The range of value `used` read in `block`, narrowed by the decided
+// branches dominating it below the value's write: up to IR_RANGE_DEPTH of
+// them, nearest first.
+fn ir_range_at(f: IRFunction, s: IRSsa, r: IRRanges, used: Int, block: Int) -> IRRange Never! {
+    if used < 0 -> return ir_range_top()
+    value :: ir_ssa_find(s, used)
+    if !r.ranged[value] || s.val_kind[value] == .Undef -> return ir_range_top()
+    if !r.known[value] -> return ir_range_none()
+    out := IRRange{known: true, lo: r.lo[value], hi: r.hi[value]}
+    if !r.tested[value] || block <= 0 -> return out
+    home :: r.home[value]
+    at := r.up[block]
+    steps := 0
+    loop out.known && at > 0 && steps < IR_RANGE_DEPTH {
+        if home >= 0 && ir_ssa_dominates(s, at, home) -> break
+        out = ir_range_narrow(f, s, r, out.lo, out.hi, value, r.cond[at], r.holds[at])
+        at = if s.idom[at] >= 0 && s.idom[at] < at -> r.up[s.idom[at]] else -> -1
+        steps += 1
+    }
+    out
+}
+
+// [lo_in, hi_in] (the range of `value`) narrowed by condition `cond`
+// holding or not; unknown when nothing is left.
+fn ir_range_narrow(f: IRFunction, s: IRSsa, r: IRRanges, lo_in: Int, hi_in: Int, value: Int, cond: Int, holds: Bool) -> IRRange Never! {
+    same :: IRRange{known: true, lo: lo_in, hi: hi_in}
+    if s.val_kind[cond] != .Def -> return same
+    at :: s.val_at[cond]
+    op :: f.op[at]
+    if op == .Not && s.use_a[at] >= 0 -> return ir_range_narrow(f, s, r, lo_in, hi_in, value, ir_ssa_find(s, s.use_a[at]), !holds)
+    if !ir_range_is_compare(op) || s.use_a[at] < 0 || s.use_b[at] < 0 -> return same
+    left :: ir_ssa_find(s, s.use_a[at])
+    right :: ir_ssa_find(s, s.use_b[at])
+    if left == right -> return same
+    if left != value && right != value -> return same
+    other :: if left == value -> right else -> left
+    if !r.ranged[other] || !r.known[other] || s.val_kind[other] == .Undef -> return same
+    // An unsigned order is the signed one on nonnegative operands only.
+    if (r.unsigned[value] || r.unsigned[other]) && (lo_in < 0 || r.lo[other] < 0) -> return same
+    // value `rel` other.
+    rel := if left == value -> op else -> ir_range_swap(op)
+    if !holds -> rel = ir_range_negate(rel)
+    lo := lo_in
+    hi := hi_in
+    if rel == {
+        .Lt -> { if r.hi[other] < IR_RANGE_HIGH && r.hi[other] - 1 < hi -> hi = r.hi[other] - 1 }
+        .Le -> { if r.hi[other] < hi -> hi = r.hi[other] }
+        .Gt -> { if r.lo[other] > IR_RANGE_LOW && r.lo[other] + 1 > lo -> lo = r.lo[other] + 1 }
+        .Ge -> { if r.lo[other] > lo -> lo = r.lo[other] }
+        .Eq -> {
+            if r.hi[other] < hi -> hi = r.hi[other]
+            if r.lo[other] > lo -> lo = r.lo[other]
+        }
+        else -> {}
+    }
+    if lo > hi -> return ir_range_none()
+    IRRange{known: true, lo: lo, hi: hi}
+}
+
+// `a op b` as `b op' a`.
+fn ir_range_swap(op: IROp) -> IROp Never! {
+    if op == {
+        .Lt -> IROp.Gt
+        .Le -> IROp.Ge
+        .Gt -> IROp.Lt
+        .Ge -> IROp.Le
+        else -> op
+    }
+}
+
+fn ir_range_negate(op: IROp) -> IROp Never! {
+    if op == {
+        .Lt -> IROp.Ge
+        .Le -> IROp.Gt
+        .Gt -> IROp.Le
+        .Ge -> IROp.Lt
+        .Eq -> IROp.Ne
+        else -> IROp.Eq
+    }
+}
+
+// The range of `value`'s write. A narrow word's is its type's unless it is a
+// constant, a copy or a phi already inside the type (its arithmetic wraps or
+// stops at its width, and a copy into it from a wider value truncates).
+fn ir_range_eval(f: IRFunction, s: IRSsa, r: IRRanges, value: Int) -> IRRange Never! {
+    if !r.narrow[value] -> return ir_range_write(f, s, r, value)
+    cap :: ir_range_make(r.cap_lo[value], r.cap_hi[value])
+    kind :: s.val_kind[value]
+    if kind != .Def && kind != .Phi -> return cap
+    if kind == .Def {
+        op :: f.op[s.val_at[value]]
+        if op != .Const && op != .Copy && op != .Move -> return cap
+    }
+    got :: ir_range_write(f, s, r, value)
+    if got.known && (got.lo < cap.lo || got.hi > cap.hi) -> return cap
+    got
+}
+
+fn ir_range_write(f: IRFunction, s: IRSsa, r: IRRanges, value: Int) -> IRRange Never! {
+    kind :: s.val_kind[value]
+    if kind == .Phi -> return ir_range_phi(f, s, r, s.val_at[value])
+    if kind != .Def -> return ir_range_top()
+    at :: s.val_at[value]
+    block :: s.block[at]
+    op :: f.op[at]
+    if op == {
+        .Const -> ir_range_make(f.a[at], f.a[at])
+        .Copy | .Move -> {
+            if !ir_range_has(s, r, s.use_a[at]) -> return ir_range_top()
+            a :: ir_range_at(f, s, r, s.use_a[at], block)
+            // An unsigned 64-bit word past 2^63 is negative in its bits.
+            if a.known && a.lo < 0 && r.unsigned[ir_ssa_find(s, s.use_a[at])] && !r.unsigned[value] -> return ir_range_top()
+            a
+        }
+        .Neg -> {
+            if !ir_range_has(s, r, s.use_a[at]) -> return ir_range_top()
+            a :: ir_range_at(f, s, r, s.use_a[at], block)
+            if !a.known -> return a
+            ir_range_make(if a.hi >= IR_RANGE_HIGH -> IR_RANGE_LOW else -> 0 - a.hi, if a.lo <= IR_RANGE_LOW -> IR_RANGE_HIGH else -> 0 - a.lo)
+        }
+        .Add | .Sub | .Mul | .FloorDiv | .Div | .Mod | .Rem | .BitAnd -> {
+            if !ir_range_has(s, r, s.use_a[at]) || !ir_range_has(s, r, s.use_b[at]) -> return ir_range_top()
+            a :: ir_range_at(f, s, r, s.use_a[at], block)
+            b :: ir_range_at(f, s, r, s.use_b[at], block)
+            if !a.known || !b.known -> return ir_range_none()
+            if op == .BitAnd -> return ir_range_mask(a, b)
+            // An unsigned word divides its bits as unsigned.
+            division :: op == .FloorDiv || op == .Div || op == .Mod || op == .Rem
+            if division && r.unsigned[value] && a.lo < 0 -> return ir_range_top()
+            ir_range_binary(op, a, b)
+        }
+        else -> ir_range_top()
+    }
+}
+
+// `a & b`: within [0, c] when either side is a constant c >= 0.
+fn ir_range_mask(a: IRRange, b: IRRange) -> IRRange Never! {
+    if b.lo == b.hi && b.lo >= 0 -> return ir_range_make(0, b.lo)
+    if a.lo == a.hi && a.lo >= 0 -> return ir_range_make(0, a.lo)
+    if a.lo >= 0 && b.lo >= 0 -> return ir_range_make(0, if a.hi < b.hi -> a.hi else -> b.hi)
+    ir_range_top()
+}
+
+fn ir_range_binary(op: IROp, a: IRRange, b: IRRange) -> IRRange Never! {
+    if op == {
+        .Add -> ir_range_make(if !(a.lo > IR_RANGE_LOW && b.lo > IR_RANGE_LOW) -> IR_RANGE_LOW else -> a.lo + b.lo, if !(a.hi < IR_RANGE_HIGH && b.hi < IR_RANGE_HIGH) -> IR_RANGE_HIGH else -> a.hi + b.hi)
+        .Sub -> ir_range_make(if !(a.lo > IR_RANGE_LOW && b.hi < IR_RANGE_HIGH) -> IR_RANGE_LOW else -> a.lo - b.hi, if !(a.hi < IR_RANGE_HIGH && b.lo > IR_RANGE_LOW) -> IR_RANGE_HIGH else -> a.hi - b.lo)
+        .Mul -> {
+            if !ir_range_bounded(a) || !ir_range_bounded(b) -> return ir_range_top()
+            p1 :: a.lo * b.lo
+            p2 :: a.lo * b.hi
+            p3 :: a.hi * b.lo
+            p4 :: a.hi * b.hi
+            lo := p1
+            hi := p1
+            corners :: [Int]{p2, p3, p4}
+            loop p in corners {
+                if p < lo -> lo = p
+                if p > hi -> hi = p
+            }
+            ir_range_make(lo, hi)
+        }
+        else -> {
+            // By a positive constant only.
+            if b.lo != b.hi || b.lo <= 0 -> return ir_range_top()
+            c :: b.lo
+            if op == .Mod || op == .Rem {
+                if a.lo >= 0 -> return ir_range_make(0, if a.hi < c - 1 -> a.hi else -> c - 1)
+                return ir_range_make(1 - c, c - 1)
+            }
+            lo :: if a.lo <= IR_RANGE_LOW -> IR_RANGE_LOW else if a.lo >= 0 -> a.lo /% c else -> 0 - ((0 - a.lo) /% c) - 1
+            hi :: if a.hi >= IR_RANGE_HIGH -> IR_RANGE_HIGH else if a.hi >= 0 -> a.hi /% c else -> 0
+            ir_range_make(lo, hi)
+        }
+    }
+}
+
+// A phi: the union of its arguments at the ends of their edges' blocks.
+fn ir_range_phi(f: IRFunction, s: IRSsa, r: IRRanges, phi: Int) -> IRRange Never! {
+    join :: s.phi_join[phi]
+    out := ir_range_none()
+    loop k in 0..<s.join_edges[join].len() {
+        edge :: s.join_edges[join][k]
+        arg :: ir_ssa_phi_arg(s, phi, k)
+        if !ir_range_has(s, r, arg) -> return ir_range_top()
+        got :: ir_range_at(f, s, r, arg, s.edge_block[edge])
+        if !got.known -> next
+        if !out.known {
+            out = got
+            next
+        }
+        if got.lo < out.lo -> out.lo = got.lo
+        if got.hi > out.hi -> out.hi = got.hi
+    }
+    out
+}
+
+// Whether comparison `op` of `a` and `b` is decided: 1 true, 0 false, -1
+// not decided.
+fn ir_range_decided(op: IROp, a: IRRange, b: IRRange) -> Int Never! {
+    if op == {
+        .Lt -> {
+            if a.hi < b.lo -> return 1
+            if a.lo >= b.hi -> return 0
+        }
+        .Le -> {
+            if a.hi <= b.lo -> return 1
+            if a.lo > b.hi -> return 0
+        }
+        .Gt -> {
+            if a.lo > b.hi -> return 1
+            if a.hi <= b.lo -> return 0
+        }
+        .Ge -> {
+            if a.lo >= b.hi -> return 1
+            if a.hi < b.lo -> return 0
+        }
+        .Eq -> {
+            if a.lo == a.hi && b.lo == b.hi && a.lo == b.lo -> return 1
+            if a.hi < b.lo || b.hi < a.lo -> return 0
+        }
+        else -> {
+            if a.lo == a.hi && b.lo == b.hi && a.lo == b.lo -> return 0
+            if a.hi < b.lo || b.hi < a.lo -> return 1
+        }
+    }
+    -1
+}
+
+// The rewrites the ranges prove (the header comment).
+fn ir_range_rewrite(m: IRModule, f: &IRFunction, s: &IRSsa, r: IRRanges) -> Int Never! {
+    to_i64 :: name_rows_value(m.name_rows, "jet_int_owned_to_i64") ?? -2
+    clone :: name_rows_value(m.name_rows, "jet_rt_int_clone") ?? -2
+    fixed :: name_rows_value(m.name_rows, "jet_int_checked_fixed") ?? -2
+    rewritten := 0
+    loop at in 0..<f.op.len() {
+        block :: s.block[at]
+        if block < 0 -> next
+        op :: f.op[at]
+        if op == .Drop && ir_range_has(s, r, s.use_a[at]) && r.exact[ir_ssa_find(s, s.use_a[at])] && ir_range_inline(ir_range_at(f, s, r, s.use_a[at], block)) {
+            f.op[at] = .Nop
+            f.a[at] = -1
+            s.use_a[at] = -1
+            rewritten += 1
+            next
+        }
+        if op == .Copy && ir_range_has(s, r, s.use_a[at]) && r.exact[ir_ssa_find(s, s.use_a[at])] && f.dst[at] >= 0 && f.slot_type[f.dst[at]] == f.slot_type[f.a[at]] && ir_range_inline(ir_range_at(f, s, r, s.use_a[at], block)) {
+            f.op[at] = .Move
+            rewritten += 1
+            next
+        }
+        if (op == .Add || op == .Sub || op == .Mul) && f.c[at] == IR_OVERFLOW_TRAP && ir_range_has(s, r, s.use_a[at]) && ir_range_has(s, r, s.use_b[at]) && r.exact[ir_ssa_find(s, s.use_a[at])] && r.exact[ir_ssa_find(s, s.use_b[at])] {
+            a :: ir_range_at(f, s, r, s.use_a[at], block)
+            b :: ir_range_at(f, s, r, s.use_b[at], block)
+            if !ir_range_inline(a) || !ir_range_inline(b) || !ir_range_inline(ir_range_binary(op, a, b)) -> next
+            f.c[at] = IR_OVERFLOW_WRAP
+            rewritten += 1
+            next
+        }
+        if (op == .Div || op == .Rem || op == .FloorDiv || op == .Mod) && f.c[at] == IR_OVERFLOW_TRAP && ir_range_has(s, r, s.use_a[at]) && ir_range_has(s, r, s.use_b[at]) && r.exact[ir_ssa_find(s, s.use_a[at])] && r.exact[ir_ssa_find(s, s.use_b[at])] {
+            a :: ir_range_at(f, s, r, s.use_a[at], block)
+            b :: ir_range_at(f, s, r, s.use_b[at], block)
+            // By a positive divisor nothing stops, and the result is no
+            // larger than the dividend.
+            if !ir_range_inline(a) || !ir_range_inline(b) || b.lo <= 0 -> next
+            f.c[at] = IR_OVERFLOW_WRAP
+            rewritten += 1
+            next
+        }
+        if ir_range_is_compare(op) && f.dst[at] >= 0 && ir_range_has(s, r, s.use_a[at]) && ir_range_has(s, r, s.use_b[at]) {
+            left :: ir_ssa_find(s, s.use_a[at])
+            right :: ir_ssa_find(s, s.use_b[at])
+            a :: ir_range_at(f, s, r, left, block)
+            b :: ir_range_at(f, s, r, right, block)
+            if !ir_range_inline(a) || !ir_range_inline(b) -> next
+            unsigned :: r.unsigned[left] || r.unsigned[right]
+            if unsigned && (a.lo < 0 || b.lo < 0) -> next
+            decided :: ir_range_decided(op, a, b)
+            if decided >= 0 {
+                f.op[at] = .Const
+                f.a[at] = decided
+                f.b[at] = -1
+                f.c[at] = -1
+                s.use_a[at] = -1
+                s.use_b[at] = -1
+                rewritten += 1
+                next
+            }
+            if r.exact[left] && r.exact[right] && f.c[at] != IR_OVERFLOW_WRAP {
+                f.c[at] = IR_OVERFLOW_WRAP
+                rewritten += 1
+            }
+            next
+        }
+        if op == .CallRuntime && f.c[at] == 1 && f.dst[at] >= 0 && (f.a[at] == to_i64 || f.a[at] == clone) {
+            used :: s.use_args[f.b[at]]
+            if !ir_range_has(s, r, used) || !r.exact[ir_ssa_find(s, used)] || !ir_range_inline(ir_range_at(f, s, r, used, block)) -> next
+            f.op[at] = .Move
+            f.a[at] = f.args[f.b[at]]
+            f.b[at] = -1
+            f.c[at] = -1
+            s.use_a[at] = used
+            rewritten += 1
+            next
+        }
+        if op == .CallRuntime && f.a[at] == fixed && f.c[at] == 5 && f.dst[at] >= 0 {
+            used :: s.use_args[f.b[at]]
+            if !ir_range_has(s, r, used) || !r.exact[ir_ssa_find(s, used)] -> next
+            a :: ir_range_at(f, s, r, used, block)
+            bounds :: ir_range_fixed_kind(f, s, s.use_args[f.b[at] + 1])
+            if !ir_range_inline(a) || !bounds.known || a.lo < bounds.lo || a.hi > bounds.hi -> next
+            f.op[at] = .Move
+            f.a[at] = f.args[f.b[at]]
+            f.b[at] = -1
+            f.c[at] = -1
+            s.use_a[at] = used
+            rewritten += 1
+        }
+    }
+    rewritten
+}
+
+// The values jet_int_checked_fixed passes for its constant `kind` (value
+// `used`): 0..3 the signed 8..64-bit integers, 4..7 the unsigned ones.
+fn ir_range_fixed_kind(f: IRFunction, s: IRSsa, used: Int) -> IRRange Never! {
+    if used < 0 -> return ir_range_none()
+    value :: ir_ssa_find(s, used)
+    if s.val_kind[value] != .Def || f.op[s.val_at[value]] != .Const -> return ir_range_none()
+    kind :: f.a[s.val_at[value]]
+    if kind == {
+        0 -> ir_range_make(-128, 127)
+        1 -> ir_range_make(-32768, 32767)
+        2 -> ir_range_make(-2147483648, 2147483647)
+        3 -> ir_range_top()
+        4 -> ir_range_make(0, 255)
+        5 -> ir_range_make(0, 65535)
+        6 -> ir_range_make(0, 4294967295)
+        7 -> ir_range_make(0, IR_RANGE_HIGH)
+        else -> ir_range_none()
+    }
+}

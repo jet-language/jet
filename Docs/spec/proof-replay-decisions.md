@@ -3,11 +3,12 @@
 This record preserves the rationale and ratified contracts for `jet prove`,
 `.jetproof` evidence, `.jetproof-replay` capture, the opt-in solver, and proof
 lenses. It is for compiler, CLI, artifact, and test authors. The executable
-spellings and receipt boundaries are in [`Source/CmdProve.rs`](../../Source/CmdProve.rs),
-[`Source/ProveReplay.rs`](../../Source/ProveReplay.rs), and
-[`Source/ProveSolver.rs`](../../Source/ProveSolver.rs); exercised command
+spellings are registered in
+[`CLICommands.jet`](../../Compiler/JetFoundation/Source/Registry/CLICommands.jet), and the
+replay artifact path check is in
+[`Inspect.jet`](../../Compiler/JetCli/Source/Cli/Inspect.jet); exercised command
 contracts are in [`tests/prove.rs`](../../tests/prove.rs), and diagnostic copy
-is in [`Diagnostics.jet`](../../crates/jet-codegen/src/Prelude/Diagnostics.jet).
+is in [`Diagnostics.jet`](../../Compiler/Prelude/Diagnostics.jet).
 Use the [Jet vocabulary](vocabulary.md) for domain terms.
 
 Each section states a rule, the reason for it, and its consequence. Decision
@@ -427,13 +428,13 @@ Error [E3627]: replay capture refused sensitive data
 More: jet-lang.dev/e/E3627
 ```
 
-**Rule.** Replay identity binds schema, Jet build, Core ABI, MIR/TIR schema and
+**Rule.** Replay identity binds schema, Jet build, Core ABI, IR schema and
 hashes, target triple/backend/profile, producer, entry, source hashes,
 package/workspace/lock/build inputs, and the authority/capture manifest. A
 reader requires exact semantic identity (E3621), then runs the recorded adapter
 and any ratified counterpart. `dev-tir-v1` and `aot-native-v1` are the only
 ratified counterpart pair for a matching native target, ABI, profile, Core ABI,
-and checked TIR hash.
+and checked-program hash.
 
 **Reason.** Reproducing a value is not equivalent to proving that two different
 program identities or adapters produced the same result.
@@ -508,7 +509,7 @@ in [jetpack-epoch5.md](reference/jetpack-epoch5.md).
 TARGET` never runs it. Sema remains authoritative for compilation, user
 rejections, and diagnostics; the solver consumes immutable typed obligations
 exported after sema. It cannot parse source as an authority, add syntax, relax a
-rejection, alter TIR or codegen, or ask rustc whether code works. It is a
+rejection, alter the checked program or codegen, or ask rustc whether code works. It is a
 standard-library-only path producer with no external crate, daemon, network
 call, executable, or compiler dependency. (D-WD12) (D-OOBPROOF1)
 

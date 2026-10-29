@@ -21,7 +21,7 @@ for (const [name, expected] of [
 ]) {
   const cwd = join(out, name); mkdirSync(cwd, {recursive: true});
   writeFileSync(join(cwd, "main.jet"), readFileSync(join(repo, "tests/fixtures", name + ".jet")));
-  writeFileSync(join(cwd, "package.jet"), 'name: "' + name + '"\nversion: "0.0.1"\nauthority: { holds: { allow: [Net, Time, IO, Mem.Alloc] } }\n');
+  writeFileSync(join(cwd, "package.jet"), 'name: "' + name + '"\nversion: "0.0.1"\nauthority: { allow: [Net, Time, IO, Mem.Alloc] }\n');
   const result = spawnSync(jet, ["build", "main.jet"], {cwd, env: {...process.env, NO_COLOR: "1"}, encoding: "utf8", timeout: 300000, maxBuffer: 64 << 20});
   writeFileSync(join(cwd, "stdout"), result.stdout ?? ""); writeFileSync(join(cwd, "stderr"), result.stderr ?? "");
   assert.equal(result.error, undefined, String(result.error)); assert.equal(result.signal, null);

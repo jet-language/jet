@@ -44,17 +44,21 @@ to hide a compiler or runtime regression.
 
 ## Cargo-free golden kit
 
-Build the Jet test package with the admitted compiler, then invoke the reported
-artifact from the repository root:
+The testkit package's own `fn test` is the fixture gate. Run it from the
+repository root with the compiler under test in `JET`:
 
 ```sh
-jet build --release Tools/testkit
-testkit golden --jet /path/to/jet --tier ref --filter basics/fizzbuzz
-testkit golden --jet /path/to/hosted/jet --tier o0,o1,o2 --results /disk/scratch/golden.json
+JET=/path/to/jet jet test Tools/testkit                    # every suite
+JET=/path/to/jet jet test Tools/testkit "suite golden"     # one suite
+TESTKIT_ARGS="--filter basics/fizzbuzz --tier o0" JET=/path/to/jet jet test Tools/testkit "suite golden"
+JET_CI_EVIDENCE_DIR=/disk/scratch JET=/path/to/jet jet test Tools/testkit "suite golden"  # writes golden.json
 ```
 
-`ref` is the temporary Rust-emitting verification tier and retires with that
-compiler. `o0` runs through `jet run`; `o1` builds an ordinary artifact; `o2`
+Each suite (`suite golden`, `suite ui`, `suite cases`) is one test; a failing
+test lists every failing case row. `TESTKIT_ARGS` carries the kit flags below, split like
+`.case` step words.
+
+`o0` runs through `jet run`; `o1` builds an ordinary artifact; `o2`
 builds with `--release`. Every tier compares against the same expected bytes.
 A PASS/FAIL disagreement is reported as `tier-split`, not blessed separately.
 An E2104 build refusal is `UNSUPPORTED` only on a native tier.
@@ -85,16 +89,20 @@ documented host-dependent alternatives and must be edited by hand.
 Golden sidecars and CLI cases share one step sequencer and assertion checker.
 In a CLI case, `step: built [args…]` runs the artifact from the preceding
 successful `step: jet build <entry>`; Golden also supplies its implicit build.
-Shared kit record types, callback factories and the step sequencer are colocated
-in `run.jet` while the front end's cross-file identity issue (#4780) is unresolved. List
-field defaults use explicitly typed empty lists, just like kit constructors.
+Shared kit record types, the step sequencer and the gate entry are colocated in
+`run.jet`. List field defaults use explicitly typed empty lists, just like kit
+constructors.
 Fixture copies preserve file permission bits, including executable tools nested
 under `state/` when that directory is staged as `.jet/` in the case workspace.
 
 Use `--list`, `--cases FILE` (exact repository-relative IDs), or `--filter TEXT`
 to select cases. `--shard I/N` partitions the sorted corpus deterministically.
 Scratch must be disk-backed and outside the checkout; it is staged and removed
-per case. The gate supplies concurrency, not a thread pool inside the kit.
+per case. Selected entries run in one `task.group` whose limit is `--jobs N`;
+without it the kit admits one entry per core, capped so each running entry
+keeps 2 GiB of the host's available memory. Every child process keeps its own
+timeout and resident-memory guard. Rows, diffs and the results file stay in
+corpus order, identical to `--jobs 1`.
 Timeouts must be positive seconds within `Duration`'s representable range;
 out-of-range values are refused before corpus discovery with exit code 2.
 
@@ -107,8 +115,8 @@ exact. `Tools/testkit/Ui.jet` owns the rule.
 Expected files are read-only unless explicitly selected for blessing:
 
 ```sh
-testkit golden --jet /path/to/jet --bless Examples/features/basics/fizzbuzz.jet
-testkit golden --jet /path/to/jet --filter basics/ --bless-all --reason "compiler output change"
+TESTKIT_ARGS="--bless Examples/features/basics/fizzbuzz.jet" JET=/path/to/jet jet test Tools/testkit "suite golden"
+TESTKIT_ARGS='--filter basics/ --bless-all --reason "compiler output change"' JET=/path/to/jet jet test Tools/testkit "suite golden"
 ```
 
 `--bless ID` selects only named cases. `--bless-all` requires a nonempty reason;
@@ -151,8 +159,8 @@ The default is 4 GiB; `JET_CENSUS_MEMORY=8G` selects 8 GiB when the coordinator
 permits it. Launch is refused below 12 GiB `MemAvailable`. `--runtime DIR`
 selects a matching Jet-native runtime directory for native registry transports;
 otherwise the compiler's adjacent `jet-runtime` is used. Missing prerequisites
-are recorded as blocked/skipped, never as passes. Native-only transports and
-host-specific fixtures therefore remain visible when a Rust host is selected.
+are recorded as blocked/skipped, never as passes, so native-only transports and
+host-specific fixtures stay visible in the census.
 
 The codec/file runner's `--test CodecCSV|CodecEnv|DynCodec|CompilerFileLeaves`
 mode assembles the selected Jet test with the canonical runtime sources,

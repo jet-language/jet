@@ -1,0 +1,40 @@
+# Claim: cold release build exits 0 and reports cache miss -> compiling
+# Claim: unchanged release rebuild exits 0 and reports cache hit -> reused cached binary without a miss
+# Claim: byte-identical release rebuild reuses the same artifact
+# Claim: edited release build exits 0 and reports cache miss -> compiling without a hit
+# Not ported: exact counts of the cache marker lines ( `.matches(..).count`): the has/lacks checks assert presence and absence, not the count
+fixture: release_build_timing_runs_inner_cache_and_invalidates_on_source_edit.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build main.jet --profile=release --verbose
+env: JET_STORE_DIR=store
+env: JET_STORE_CAP_BYTES=21474836480
+env: JET_STORE_RESERVE_BYTES=2147483648
+env: NO_COLOR=1
+exit: 0 # cold release build
+stderr: ~ "[build] cache miss -> compiling" # cold release build
+step: sh {work}/step-2.sh
+exit: 0 # first binary digest
+step: sh {work}/step-3.sh
+exit: 0 # rewrite identical source (touch changes metadata only)
+step: jet build main.jet --profile=release --verbose
+env: JET_STORE_DIR=store
+env: JET_STORE_CAP_BYTES=21474836480
+env: JET_STORE_RESERVE_BYTES=2147483648
+env: NO_COLOR=1
+exit: 0 # unchanged release build
+stderr: ~ "[build] cache hit -> reused cached binary" # unchanged release build
+stderr: !~ "[build] cache miss -> compiling" # unchanged release build
+step: sh {work}/step-5.sh
+exit: 0 # byte-identical artifact
+step: sh {work}/step-6.sh
+exit: 0 # edit source
+step: jet build main.jet --profile=release --verbose
+env: JET_STORE_DIR=store
+env: JET_STORE_CAP_BYTES=21474836480
+env: JET_STORE_RESERVE_BYTES=2147483648
+env: NO_COLOR=1
+exit: 0 # edited release build
+stderr: ~ "[build] cache miss -> compiling" # edited release build
+stderr: !~ "[build] cache hit -> reused cached binary" # edited release build

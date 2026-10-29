@@ -1,0 +1,61 @@
+// The shipped 256-register HyperLogLog, stored as an independent plain value.
+use core.math as math
+use core.data.sketch as sketch
+
+struct HyperLogLog {
+    registers: [U8]
+
+    impl Display {
+        fn display(self) -> String { "HyperLogLog(count={self.count()})" }
+    }
+}
+
+fn new() -> HyperLogLog Never! { HyperLogLog.new() }
+
+impl HyperLogLog {
+    fn new() -> HyperLogLog Never! {
+        registers := [U8]{}
+        loop _ in 0..<256 -> &registers.push(U8{0})
+        HyperLogLog{registers: registers}
+    }
+
+    fn add(&self, key: String) Never! {
+        hash :: sketch.__fnv1a64(key, U64{14695981039346656037})
+        index :: Int.from_u64(hash.bit_and(U64{255}))
+        rest :: hash >> 8
+        zeros :: if rest == (U64{0}) -> 57 else -> rest.leading_zeros() + 1
+        if zeros > Int.from_u8(self.registers[index]) -> self.registers[index] = U8{zeros}
+    }
+
+    fn count(self) -> Int Never! {
+        empty := 0
+        loop register in self.registers {
+            if register == (U8{0}) -> empty = empty + 1
+        }
+        width :: Float{256.0}
+        if empty > 0 -> return rounded_count(width * math.ln(width / Float{empty}))
+        sum := Float{0.0}
+        loop register in self.registers {
+            sum = sum + math.from_bits((1023 - Int.from_u8(register)) << 52)
+        }
+        alpha :: Float{0.7213} / (Float{1.0} + Float{1.079} / width)
+        rounded_count(alpha * width * width / sum)
+    }
+}
+
+fn rounded_count(estimate: Float) -> Int Never! {
+    if estimate >= 9223372036854775808.0 -> return 9223372036854775807
+    math.round(estimate)
+}
+
+#Test("HLL preserves shipped distinct counts and independent clones") {
+    hll := new()
+    assert_eq(hll.count(), 0)
+    &hll.add("apple")
+    clone := hll.copy()
+    &clone.add("banana")
+    &clone.add("cherry")
+    &clone.add("apple")
+    assert_eq(hll.count(), 1)
+    assert_eq(clone.count(), 3)
+}

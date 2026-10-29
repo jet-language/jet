@@ -5,9 +5,9 @@
 // record plus native cache admission).
 
 // A Nix store path basename starts with this many hash characters.
-PROVIDER_NIX_HASH_LEN :: prep { 32 }
-PROVIDER_NIX_OUTPUT_SUFFIXES :: prep { [String]{"-bin", "-dev", "-lib", "-doc", "-man", "-info", "-out"} }
-PROVIDER_NIXPKGS_EXACT_PREFIX :: prep { "github:NixOS/nixpkgs#" }
+PROVIDER_NIX_HASH_LEN :: 32
+PROVIDER_NIX_OUTPUT_SUFFIXES :: [String]{"-bin", "-dev", "-lib", "-doc", "-man", "-info", "-out"}
+PROVIDER_NIXPKGS_EXACT_PREFIX :: "github:NixOS/nixpkgs#"
 
 // Immutable Nix identity prepared from the resolved request and the output
 // bytes. The Store receives the same facts through the realization record; no
@@ -450,7 +450,8 @@ fn provider_parse_u64(text: String) -> Int? Never! {
         code :: Int.from_u8(byte)
         if code < 48 || code > 57 -> return None
     }
-    Int.parse(digits)
+    parsed :: Int.parse(digits) ?? return None
+    Val(parsed)
 }
 
 // Exactly `count` lowercase hexadecimal digits.
@@ -487,7 +488,7 @@ fn provider_realize_from_local_nix(verification: &StoreVerification, spec: RefSp
 
 // A native cache admission failure as E1350, naming the missing Nix
 // reference when a registered Nix entry no longer hashes to its record.
-fn provider_nix_cache_error(verification: &StoreVerification, roots: HangarRoots, error: NixCacheError) -[FS, Env]> ProviderError Never! {
+fn provider_nix_cache_error(verification: &StoreVerification, roots: HangarRoots, error: NixCacheError) -[FS, Env, Time]> ProviderError Never! {
     detail := "{error.code()}: {error.what()}; why: {error.why()}; fix: {error.fix()}"
     if provider_missing_nix_store_path(&verification, roots) == {
         .Val(store_path) -> detail = "{detail}; missing Nix reference `{store_path}`"
@@ -496,7 +497,7 @@ fn provider_nix_cache_error(verification: &StoreVerification, roots: HangarRoots
     ProviderError.NixCache(detail)
 }
 
-fn provider_missing_nix_store_path(verification: &StoreVerification, roots: HangarRoots) -[FS, Env]> String? Never! {
+fn provider_missing_nix_store_path(verification: &StoreVerification, roots: HangarRoots) -[FS, Env, Time]> String? Never! {
     entries :: store_list_checked(&verification, roots) ?? return None
     loop entry in entries {
         producer :: ProducerRecord.decode(entry.producer_record) ?? next
@@ -543,7 +544,7 @@ fn provider_same_admitted_object(left: AdmittedNixObject, right: AdmittedNixObje
 // Every admitted object must agree with the signed record before any fact is
 // recorded; both provenance families (index proof and cache receipts) are
 // kept in the producer facts.
-fn provider_realization_from_index(spec: RefSpec, key: NixIndexKey, verified: NixVerifiedIndexRecord, admitted: AdmittedNixClosure) -[FS]> Realized ProviderError! {
+fn provider_realization_from_index(spec: RefSpec, key: NixIndexKey, verified: NixVerifiedIndexRecord, admitted: AdmittedNixClosure) -[FS, Env]> Realized ProviderError! {
     if verified.record.attrpath != key.attrpath -> return Err(ProviderError.BadOutput("signed nixpkgs record attrpath disagrees with the requested key"))
     catalog_policy :: if verified.trust == {
         .OfficialSigned -> "trusted substitution (signed index + Nix cache)"
@@ -670,12 +671,15 @@ fn provider_realization_from_index(spec: RefSpec, key: NixIndexKey, verified: Ni
 // Parse a pinned compatibility result: exactly one build result with an
 // `outputs` object and an exact `drvPath`. `out` is the canonical primary;
 // `bin` remains a named output.
-fn provider_parse_realization(spec: RefSpec, stdout: String) -[FS]> Realized ProviderError! {
+fn provider_parse_realization(spec: RefSpec, stdout: String) -[FS, Env]> Realized ProviderError! {
     parsed :: provider_json_parse_lenient(stdout)
     results :: provider_json_array(parsed.value) ?? return Err(parsed.bad_output(err.message))
     if results.len() != 1 -> return Err(parsed.bad_output("provider produced {results.len()} build results; expected exactly one"))
     first :: results[0]
-    fallback :: nix_fallback_import_record(first) ?? return Err(parsed.bad_output("could not import fallback state: {err.message()}"))
+    fallback :: if nix_fallback_import_record(first) == {
+        .Ok(found) -> found
+        .Err(error) -> { return Err(parsed.bad_output("could not import fallback state: {error.message()}")) }
+    }
     outputs_value :: provider_json_get(first, "outputs") ?? return Err(parsed.bad_output(err.message))
     outputs :: provider_json_object(outputs_value) ?? return Err(parsed.bad_output(err.message))
     drv_value :: provider_json_get(first, "drvPath") ?? return Err(parsed.bad_output(err.message))

@@ -11,9 +11,9 @@
 // no-follow opens are `links: .Refuse` and file identity
 // is `Stat.id`.
 
-RECIPE_PRIVATE_MODE :: prep { 0o700 }
-RECIPE_EXCLUSIVE_ATTEMPTS :: prep { 16 }
-RECIPE_COPY_CHUNK :: prep { 65536 }
+RECIPE_PRIVATE_MODE :: 0o700
+RECIPE_EXCLUSIVE_ATTEMPTS :: 16
+RECIPE_COPY_CHUNK :: 65536
 
 // A freshly allocated private child of a held directory.
 struct RecipeChildDir {
@@ -233,7 +233,9 @@ fn recipe_normalize(path: String) -> String Never! {
     loop segment in segments {
         if segment == "" || segment == "." -> next
         if segment == ".." {
-            if out.len() > 0 -> &out.pop()
+            if out.len() > 0 {
+                _ :: &out.pop()
+            }
             next
         }
         &out.push(segment)
@@ -366,7 +368,7 @@ fn recipe_sorted_names(path: String) -[FS]> [String] RecipeError! {
     names := [String]{}
     entries :: files.list_dir(path)
     loop entry in entries -> &names.push(entry.name)
-    names.sort()
+    &names.sort()
     Ok(names)
 }
 
@@ -380,7 +382,11 @@ fn recipe_copy_regular_file_nofollow(src: String, dst: String, expected: Stat) R
         return Err(RecipeError.PermissionDenied("recipe source file changed before copy `{src}`"))
     }
     destination :: files.create(dst, links: .Refuse)
-    loop chunk in source.chunks(RECIPE_COPY_CHUNK) -> destination.write_all(chunk)
+    loop {
+        chunk :: source.read(RECIPE_COPY_CHUNK)
+        if chunk.len() == 0 -> break
+        destination.write_all(chunk)
+    }
     destination.fsync()
     after :: files.stat(src)
     if after.id != expected.id -> return Err(RecipeError.Other("recipe source file changed while copying `{src}`"))

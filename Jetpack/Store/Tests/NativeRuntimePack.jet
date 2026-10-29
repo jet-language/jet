@@ -68,13 +68,13 @@ fn native_pack_test_refused(bytes: [U8]) -> Bool {
 
 fn native_pack_test_receipt(store: ArtifactStore, id: String, invocation: ObjectHandle, inputs: [NativeRuntimeRoleObject], outputs: [NativeRuntimeRoleObject]) -[FS, Env, Exec, Time, Rand]> NativeRuntimeObservedStep {
     log :: store.publish_blob("small codec fixture log\n".bytes()) ?? panic("log")
-    tree :: Dyn.Object([String: Dyn]{"schema": Dyn.Text("jet.native-runtime-step-receipt/v1"), "id": Dyn.Text(id), "rc": Dyn.Text("0"), "invocation": native_pack_handle_tree(invocation), "inputs": native_pack_roles_tree(inputs), "outputs": native_pack_roles_tree(outputs), "log": native_pack_handle_tree(log)})
+    tree :: Dyn.Object([String: Dyn]{"schema": Dyn.Text("jet.native-runtime-step-receipt/v1"), "id": Dyn.Text(id.copy()), "rc": Dyn.Text("0"), "invocation": native_pack_handle_tree(invocation), "inputs": native_pack_roles_tree(inputs), "outputs": native_pack_roles_tree(outputs), "log": native_pack_handle_tree(log)})
     receipt :: store.publish_blob(native_pack_encode(tree) ?? panic("receipt codec")) ?? panic("receipt")
     NativeRuntimeObservedStep{id, observed_rc: "0", invocation, inputs, outputs, receipt}
 }
 
 fn native_pack_test_lifecycle_entry(symbol: String, phase: String, priority: String, section: String, provider: ObjectHandle) -> Dyn {
-    Dyn.Object([String: Dyn]{"symbol": Dyn.Text(symbol), "phase": Dyn.Text(phase), "priority": Dyn.Text(priority), "section": Dyn.Text(section), "provider": native_pack_handle_tree(provider)})
+    Dyn.Object([String: Dyn]{"symbol": Dyn.Text(symbol.copy()), "phase": Dyn.Text(phase.copy()), "priority": Dyn.Text(priority.copy()), "section": Dyn.Text(section.copy()), "provider": native_pack_handle_tree(provider)})
 }
 
 fn native_pack_test_lifecycle(store: ArtifactStore, object: ObjectHandle) -[FS, Env, Exec, Time, Rand]> ObjectHandle {

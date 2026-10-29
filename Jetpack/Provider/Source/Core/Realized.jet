@@ -9,14 +9,14 @@
 // The stable recipe id of a Nix-provider realization. Hashed
 // into the cache identity's recipe fingerprint and recomputed offline, so a
 // lock-backed reuse reproduces it without any Nix or network call.
-PROVIDER_NIX_RECIPE_ID :: prep { "nix-compat-v1" }
+PROVIDER_NIX_RECIPE_ID :: "nix-compat-v1"
 
 // The shared provider-facts carrier kept in every producer record.
-PROVIDER_SHARED_FACTS :: prep { "provider-facts" }
-PROVIDER_SHARED_FACTS_DIGEST :: prep { "provider-facts-digest" }
+PROVIDER_SHARED_FACTS :: "provider-facts"
+PROVIDER_SHARED_FACTS_DIGEST :: "provider-facts-digest"
 // The native document a Nix producer retained verbatim.
-PROVIDER_NIX_NATIVE_FORMAT :: prep { "nix.native.format" }
-PROVIDER_NIX_NATIVE_DOCUMENT :: prep { "nix.native.document" }
+PROVIDER_NIX_NATIVE_FORMAT :: "nix.native.format"
+PROVIDER_NIX_NATIVE_DOCUMENT :: "nix.native.document"
 
 // What a provider needs to acquire and realize a ref beyond the ref and its
 // source table: offline fixtures, the store to materialize into, the project
@@ -246,9 +246,9 @@ struct DownloadPlan {
 
     fn add_item(&self, item: PlanItem) Never! {
         if item.state == {
-            .New -> self.new = self.new.saturating_add(1)
-            .Cached -> self.cached = self.cached.saturating_add(1)
-            .Repaired -> self.repaired = self.repaired.saturating_add(1)
+            .New -> self.new = math.saturating_add(self.new, 1)
+            .Cached -> self.cached = math.saturating_add(self.cached, 1)
+            .Repaired -> self.repaired = math.saturating_add(self.repaired, 1)
         }
         self.download_bytes = provider_plan_sum(self.download_bytes, item.download_bytes)
         self.disk_bytes = provider_plan_sum(self.disk_bytes, item.disk_bytes)
@@ -257,7 +257,7 @@ struct DownloadPlan {
 
     fn extend(&self, other: DownloadPlan) Never! {
         if other.estimated_seconds != None -> self.estimated_seconds = other.estimated_seconds
-        loop item in other.items -> self.add_item(item)
+        loop item in other.items -> &self.add_item(item)
     }
 
     fn add_nix(&self, nix: NixDownloadPlan) Never! {
@@ -268,7 +268,7 @@ struct DownloadPlan {
                 .Cached -> PlanState.Cached
                 .Repaired -> PlanState.Repaired
             }
-            self.add_item(PlanItem{package: item.package, state, download_bytes: Val(item.download_bytes), disk_bytes: Val(item.disk_bytes)})
+            &self.add_item(PlanItem{package: item.package, state, download_bytes: Val(item.download_bytes), disk_bytes: Val(item.disk_bytes)})
         }
     }
 }
@@ -276,5 +276,5 @@ struct DownloadPlan {
 fn provider_plan_sum(left: Int?, right: Int?) -> Int? Never! {
     total :: left ?? return None
     extra :: right ?? return None
-    total.checked_add(extra)
+    math.checked_add(total, extra)
 }

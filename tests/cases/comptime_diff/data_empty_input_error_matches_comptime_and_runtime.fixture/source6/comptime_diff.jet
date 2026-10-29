@@ -1,0 +1,27 @@
+use core.encoding.hex as comptime_diff_hex
+use core.data as data
+
+fn show(result: Float DataError!) -> String {
+    if result == {
+        .Ok(value) -> return "ok {value}"
+        .Err(e) -> return "{e.operation}|{e.reason}"
+    }
+    return "unreachable"
+}
+
+fn empty() -> [Float] {
+    return []
+}
+
+EXPECTED_EMPTY :: comptime { show(data.stddev(empty())) }
+
+fn run() {
+    actual_empty :: show(data.stddev(empty()))
+    comptime_diff_frame("{EXPECTED_EMPTY}", "{actual_empty}")
+
+}
+
+fn comptime_diff_frame(expected_text: String, actual_text: String) {
+    print("{comptime_diff_hex.encode(expected_text.bytes())}")
+    print("{comptime_diff_hex.encode(actual_text.bytes())}")
+}

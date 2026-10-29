@@ -61,10 +61,10 @@ fn run() {
         loop sample in samples -> total += sample
     },
     )
-    stream.next_deadline()
+    stream.next_deadline().drop("the stream is armed; this run does not schedule against its first deadline")
 
     control :: control_loop()
-    stream.cancel()
+    &stream.cancel()
     receipt :: stream.receipt()
 
     // These are measured host facts from the callback receipt. They do not

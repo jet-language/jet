@@ -3,8 +3,9 @@
 // private user and mount namespace (`unshare`) where an empty tmpfs `/nix`
 // receives exact read-only binds of the leased closure objects, so the
 // program never sees the host store. The tools that build the namespace are
-// opened first and passed to the child by descriptor
-// so a path swap after verification cannot redirect them.
+// opened first and must reach the child by descriptor so a path swap after
+// verification cannot redirect them; Core cannot pass an open descriptor to
+// a child process yet, so the projection fails closed once it is resolved.
 //
 // Failures use two EnvironmentError kinds: `Unsupported` (the host cannot
 // build the namespace, reported as E1351) and `InvalidData` (the leased
@@ -13,7 +14,7 @@
 // Started once, before it hides the host Nix store: the mount process keeps
 // its loaded interpreter while applying every exact Hangar bind, then the
 // script verifies each mount and replaces itself with the program.
-ENV_SHELL_NIX_PROJECTION_SCRIPT :: prep { `set -eu
+ENV_SHELL_NIX_PROJECTION_SCRIPT :: comptime { `set -eu
 mount="$1"
 fstab="$2"
 count="$3"
@@ -56,12 +57,13 @@ else
 fi
 ` }
 
-ENV_SHELL_NIX_STORE :: prep { "/nix/store" }
-ENV_SHELL_UNSHARE_CANDIDATES :: prep { [String]{"/run/current-system/sw/bin/unshare", "/usr/bin/unshare", "/bin/unshare"} }
-ENV_SHELL_MOUNT_CANDIDATES :: prep { [String]{"/run/current-system/sw/bin/mount", "/usr/bin/mount", "/bin/mount"} }
-ENV_SHELL_SH_CANDIDATES :: prep { [String]{"/run/current-system/sw/bin/sh", "/usr/bin/sh", "/bin/sh"} }
-ENV_SHELL_SYSTEM_TOOL_DIRS :: prep { [String]{"/run/current-system/sw/bin", "/usr/bin", "/bin"} }
-ENV_SHELL_NAMESPACE_FLAGS :: prep { [String]{"--user", "--map-root-user", "--mount", "--propagation", "private"} }
+ENV_SHELL_NIX_STORE :: "/nix/store"
+ENV_SHELL_UNSHARE_CANDIDATES :: [String]{"/run/current-system/sw/bin/unshare", "/usr/bin/unshare", "/bin/unshare"}
+ENV_SHELL_MOUNT_CANDIDATES :: [String]{"/run/current-system/sw/bin/mount", "/usr/bin/mount", "/bin/mount"}
+ENV_SHELL_SH_CANDIDATES :: [String]{"/run/current-system/sw/bin/sh", "/usr/bin/sh", "/bin/sh"}
+ENV_SHELL_SYSTEM_TOOL_DIRS :: [String]{"/run/current-system/sw/bin", "/usr/bin", "/bin"}
+ENV_SHELL_NAMESPACE_FLAGS :: [String]{"--user", "--map-root-user", "--mount", "--propagation", "private"}
+ENV_SHELL_PROJECTION_HANDOFF_UNSUPPORTED :: "running a leased Nix closure in its rootless `/nix/store` projection is not supported yet: Core cannot pass the namespace tools' open descriptors to a child process"
 
 // One tool opened before the namespace exists. The child reaches it through
 // its pinned descriptor path; `coreutils_mode` names the multicall program
@@ -125,21 +127,14 @@ fn env_shell_nix_projection_command(env: ShellEnv, program: String, rest: [Strin
     binary :: env_shell_projected_binary(env, projections, program)
     scratch := ShellScratch.empty()
     if env_shell_projection_fstab(projections, &scratch) == {
-        .Ok(mounts) -> {
-            argv := [String]{unshare_tool.path}
-            loop flag in ENV_SHELL_NAMESPACE_FLAGS -> &argv.push(flag)
-            script_args :: [String]{shell_tool.path, "-c", ENV_SHELL_NIX_PROJECTION_SCRIPT, "jetpack-nix-run", mount_tool.path, mounts.fstab_path, "{mounts.bound_logicals.len()}"}
-            loop part in script_args -> &argv.push(part)
-            loop logical in mounts.bound_logicals -> &argv.push(logical)
-            &argv.push(binary.path)
-            &argv.push(binary.mode ?? "")
-            loop arg in rest -> &argv.push(arg)
-            spec := process.cmd(argv)
-            spec = spec.keep_open(^unshare_tool.handle, at: Val(unshare_tool.slot))
-            spec = spec.keep_open(^shell_tool.handle, at: Val(shell_tool.slot))
-            spec = spec.keep_open(^mount_tool.handle, at: Val(mount_tool.slot))
-            if binary.tool == .Val(tool) -> spec = spec.keep_open(^tool.handle, at: Val(tool.slot))
-            Ok(Val(ShellLaunch{spec: spec, scratch: scratch}))
+        .Ok(_) -> {
+            // Rust hands the unshare, shell, mount, and binary descriptors to
+            // the namespace at their slots so a path swap after verification
+            // cannot redirect it. Core cannot pass an open descriptor to a
+            // child process, so the projection fails closed here, after every
+            // tool and the binary resolved.
+            close(^scratch)
+            Err(EnvironmentError.Unsupported(ENV_SHELL_PROJECTION_HANDOFF_UNSUPPORTED))
         }
         .Err(error) -> {
             close(^scratch)

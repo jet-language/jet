@@ -1,17 +1,23 @@
 // Assemble with the canonical Compiler unit, replacing its host entry.
+use jet_foundation.[
+    NameAlias, NameDeclaration, NameDisplayPath, NameFacts, NameModule,
+    NameVisibility, Span, name_ledger_canonical_path, name_ledger_display_path,
+    name_ledger_display_path_at, name_ledger_from_facts, name_ledger_semantic_identity,
+]
+
 fn names_projection_require(ok: Bool, message: String) Never! {
     if !ok -> panic("NameLedger projection: {message}")
 }
-fn run() Never! {
+#Test("names_projection") {
     span :: Span{start: 1, end: 2}
-    facts := MIRNameFacts{modules: [MIRNameModule]{MIRNameModule{alias: "a", path: "a", package: "p"}, MIRNameModule{alias: "b", path: "b", package: "q"}}, declarations: [MIRNameDeclaration]{MIRNameDeclaration{module_index: 0, name: "Thing", path: "a.Thing", kind: "type", span: span, visibility: MIRNameVisibility.Public}}, aliases: [MIRNameAlias]{MIRNameAlias{module_index: 1, name: "Renamed", target: "a.Thing", target_module: Val(0), span: span, visibility: MIRNameVisibility.Public}}, references: [], structure_facts: []}
+    facts := NameFacts{modules: [NameModule]{NameModule{alias: "a", path: "a", package: "p"}, NameModule{alias: "b", path: "b", package: "q"}}, declarations: [NameDeclaration]{NameDeclaration{module_index: 0, name: "Thing", path: "a.Thing", kind: "type", span: span, visibility: NameVisibility.Public}}, aliases: [NameAlias]{NameAlias{module_index: 1, name: "Renamed", target: "a.Thing", target_module: Val(0), span: span, visibility: NameVisibility.Public}}, references: [], structure_facts: []}
     ledger :: name_ledger_from_facts(facts.copy())
     names_projection_require(name_ledger_canonical_path(ledger, 1, "Renamed") == (Val("a.Thing")), "import canonical origin")
     names_projection_require(name_ledger_display_path(ledger, 0, "Thing", Val(0)) == (Val("Thing")), "unambiguous short spelling")
-    &facts.declarations.push(MIRNameDeclaration{module_index: 1, name: "Thing", path: "b.Thing", kind: "type", span: span, visibility: MIRNameVisibility.Public})
+    &facts.declarations.push(NameDeclaration{module_index: 1, name: "Thing", path: "b.Thing", kind: "type", span: span, visibility: NameVisibility.Public})
     ambiguous :: name_ledger_from_facts(facts.copy())
     names_projection_require(name_ledger_display_path(ambiguous, 0, "Thing", Val(0)) == (Val("a.Thing")), "ambiguous spelling retains resolved owner")
-    facts.display_paths = [MIRNameDisplayPath]{MIRNameDisplayPath{module_index: 0, internal_path: "a.Thing", display_path: "instance.Thing"}}
+    facts.display_paths = [NameDisplayPath]{NameDisplayPath{module_index: 0, internal_path: "a.Thing", display_path: "instance.Thing"}}
     projected :: name_ledger_from_facts(^facts)
     names_projection_require(name_ledger_display_path_at(projected, 0, span, "Thing", None, Val(0)) == (Val("instance.Thing")), "generated member display")
     names_projection_require(name_ledger_semantic_identity(projected, 0, "Thing") == (Val("p::a::Thing")), "presentation preserves semantic identity")

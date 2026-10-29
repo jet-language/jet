@@ -1,0 +1,12 @@
+# tests/ownership.rs::write_mark_on_read_parameter_is_e0225 at tests/ownership.rs:2638; hand-port
+# Claim: jet check exits 1 for show(&score) where show reads its parameter (tests/ownership.rs:650-651)
+# Claim: exactly one E0225 is reported (tests/ownership.rs:651-652)
+# Fixture migrated: none: source is the verbatim Rust raw string
+# Not ported: the span-exact assertion on the & byte (tests/ownership.rs:653-655) is not checkable from CLI text
+fixture: write_mark_on_read_parameter_is_e0225.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # tests/ownership.rs:650-652
+stderr: ~ "E0225" # tests/ownership.rs:650-652

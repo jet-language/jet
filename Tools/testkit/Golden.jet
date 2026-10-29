@@ -60,7 +60,7 @@ fn kit_golden_failure_exit(expected: String, report: String) -> Int? {
     start :: expected.index(prefix) ?? return None
     stem :: kit_steps_byte_slice(expected, start + prefix.count_bytes(), expected.count_bytes())
     if report == "" -> return if stem == "io/log_fatal" -> Val(1) else -> None
-    if kit_expect_named(["errors/propagation_journey", "errors/propagation_journey_direct", "errors/propagation_journey_one_hop", "errors/propagation_journey_core", "errors/error_context", "errors/default_error_conversion", "errors/default_err_edge", "errors/fatal_exit", "serde/decode_error_exit", "crypto/crypto_error_run"], stem) -> return Val(1)
+    if kit_expect_named(["errors/propagation_journey", "errors/propagation_journey_direct", "errors/propagation_journey_one_hop", "errors/propagation_journey_core", "errors/error_context", "errors/default_error_conversion", "errors/default_err_edge", "errors/fatal_exit", "serde/decode_error_exit", "crypto/crypto_error_run", "effects/authority_core_method", "effects/authority_denied", "effects/authority_partial", "effects/authority_undeclared"], stem) -> return Val(1)
     None
 }
 
@@ -182,14 +182,15 @@ fn kit_golden_step_invoke(step: KitStep, index: Int, context: KitStepCtx, previo
         if command == "build" -> return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
     }
     actual := step
+    // The direct tier runs the staged entry by its full path from the case's
+    // work directory, the same cwd the compiled tier's artifact runs in.
     if command == "built" && golden.tier.direct {
-        argv := [String]{context.env.jet, "run", golden.entry.path}
+        argv := [String]{context.env.jet, "run", files.join(golden.source, golden.entry.path)}
         if step.argv.len() > 1 {
             &argv.push("--")
             loop arg in step.argv.slice(1, step.argv.len()) -> &argv.push(arg)
         }
         actual.argv = argv
-        if actual.cwd == "" -> actual.cwd = golden.source
     }
     if index == plan.steps.len() - 1 && actual.stdin == "" && kit_golden_exists("{golden.expected}.stdin") -> actual.stdin = "{golden.expected}.stdin"
     kit_steps_invoke(actual, index, context, state)
@@ -205,6 +206,9 @@ fn kit_golden_step_check(step: KitStep, index: Int, context: KitStepCtx, state: 
         streams := state.last
         if state.json_stdout == .Val(text) -> streams.stdout = text
         if state.json_stderr == .Val(text) -> streams.stderr = text
+        // The direct tier runs the staged entry by its absolute path; a report
+        // that echoes the path compares repo-relative, as the snapshot spells it.
+        streams.stderr = streams.stderr.replace("{golden.source}/", "")
         verdict :: kit_golden_stream_verdict(context.id, golden.expected, streams, context.bless, name, kit_golden_source_name(golden.entry))
         if verdict.status != "PASS" -> return verdict
         // Default stream comparison owns its expected failure exit. Explicit

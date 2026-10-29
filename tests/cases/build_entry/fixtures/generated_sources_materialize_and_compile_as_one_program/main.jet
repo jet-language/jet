@@ -1,5 +1,5 @@
 
-fn build(b: BuildContext) -> BuildPlan {
+fn build(b: Build) {
     b.generate("consumer") {
         fn generated_value() -> String { "round two" }
     }
@@ -7,6 +7,6 @@ fn build(b: BuildContext) -> BuildPlan {
         fn message() -> String { "round two" }
         }
     app :: b.add_executable("app", ["main.jet", ".jet/generated/main/consumer.jet", ".jet/generated/main/provider.jet"], [])
-    return b.plan(app)
+    b.default(app)
 }
 fn run() { print(generated_value()) }

@@ -3,12 +3,16 @@
 use core.files as cli_files
 use core.sys as cli_sys
 use core.process as cli_process
+use jet_cli.[
+    JetCLIStatusField, JetCLIStatusValue, jet_cli_external_fmt_diff, jet_cli_external_fmt_finish,
+    jet_cli_external_fmt_status, jet_cli_status_field, jet_cli_status_object, jet_cli_status_text,
+]
 
 fn external_format_require(ok: Bool, label: String) Never! {
     if !ok -> panic("external formatter continuation: {label}")
 }
 
-fn run() {
+#Test("external_format") {
     base :: cli_sys.get("JET_CLI_FMT_TEST_ROOT") ?? panic("set JET_CLI_FMT_TEST_ROOT to disk-backed scratch")
     root :: "{base}/fmt-{cli_process.current_pid()}"
     cli_files.create_dir_all("{root}/staged") ?? panic("create fixture")

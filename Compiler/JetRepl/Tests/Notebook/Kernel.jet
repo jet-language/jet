@@ -3,7 +3,7 @@
 // Native journeys below use the actual Kernel/evaluator/UUID providers; they
 // remain #4494/#4483/#4409/#4500 gated until Main publishes those producers.
 use jet_ast.[CtValue, NamedCtValue]
-use jet_foundation.[Type, TypeTupleField, TEXT_NUL, mir_sha256_hex]
+use jet_foundation.[Type, TypeTupleField, sha256_hex]
 // Test source assembled into the same canonical jet_repl owner by Main.
 use core.files.runtime.kernel_path_components as notebook_kernel_test_paths
 
@@ -25,7 +25,7 @@ fn notebook_kernel_test_add(kernel: &Kernel, id: String, source: String) Never! 
 fn notebook_kernel_test_grant(kernel: &Kernel, bundle: NotebookMIMEBundle, source: String, renderer: String) Never! {
     // In-memory trust store mutation is the real canonical policy operation,
     // not a replacement native persistence provider or mock authorizer.
-    request :: NotebookActiveRequest{notebook_source_hash: mir_sha256_hex(source), payload_hash: notebook_trust_payload_hash(bundle), renderer_hash: renderer, environment_hash: kernel.notebook.environment_hash.copy(), policy_version: NOTEBOOK_TRUST_POLICY_VERSION, widget_id: bundle.widget_id ?? "", origins: bundle.requested_origins.copy(), messages: bundle.requested_messages.copy()}
+    request :: NotebookActiveRequest{notebook_source_hash: sha256_hex(source), payload_hash: notebook_trust_payload_hash(bundle), renderer_hash: renderer, environment_hash: kernel.notebook.environment_hash.copy(), policy_version: NOTEBOOK_TRUST_POLICY_VERSION, widget_id: bundle.widget_id ?? "", origins: bundle.requested_origins.copy(), messages: bundle.requested_messages.copy()}
     _ :: notebook_trust_grant_active(&kernel.trust, request)
 }
 
@@ -37,8 +37,8 @@ fn notebook_kernel_test_grant(kernel: &Kernel, bundle: NotebookMIMEBundle, sourc
 #Test("kernel environment identity preserves path display and marker") {
     unix :: notebook_kernel_test_paths.from_text("./project", notebook_kernel_test_paths.PathPlatform.Unix)
     windows :: notebook_kernel_test_paths.from_text("C:\\project", notebook_kernel_test_paths.PathPlatform.Windows)
-    assert_eq(Kernel.environment_hash(unix), mir_sha256_hex("./project|notebook-env-1"))
-    assert_eq(Kernel.environment_hash(windows), mir_sha256_hex("C:\\project|notebook-env-1"))
+    assert_eq(Kernel.environment_hash(unix), sha256_hex("./project|notebook-env-1"))
+    assert_eq(Kernel.environment_hash(windows), sha256_hex("C:\\project|notebook-env-1"))
     assert(Kernel.environment_hash(unix) != Kernel.environment_hash(notebook_kernel_test_paths.from_text("project", notebook_kernel_test_paths.PathPlatform.Unix)))
 }
 #Test("kernel controls use exactly one NUL between function and parameter") {
@@ -274,7 +274,7 @@ fn notebook_kernel_test_grant(kernel: &Kernel, bundle: NotebookMIMEBundle, sourc
         else -> false
     })
     &kernel.set_authority("new authority")
-    assert_eq(kernel.identity().authority, mir_sha256_hex("new authority"))
+    assert_eq(kernel.identity().authority, sha256_hex("new authority"))
     assert_eq(kernel.identity().session, identity.session)
     assert(kernel.identity().authority != identity.authority)
 }

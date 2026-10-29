@@ -1,0 +1,18 @@
+# tests/fmt.rs::fmt_preserves_module_declaration_and_function_source_order at tests/fmt.rs:69; hand-port
+# Claim: module binding MESSAGE remains and precedes fn helper (tests/fmt.rs:73-80)
+# Claim: second format pass is identical (tests/fmt.rs:81-82)
+# Fixture migrated: order check: `head -n 1` shows MESSAGE is the first line, which is the only item before fn helper
+fixture: fmt_preserves_module_declaration_and_function_source_order.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt run.jet
+exit: 0 # tests/fmt.rs:72 module globals format
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:73-80 MESSAGE comes before fn helper
+stdout: ~ "MESSAGE ::" # tests/fmt.rs:73-80 MESSAGE comes before fn helper
+step: sh {work}/step-3.sh
+exit: 0 # tests/fmt.rs:76 declaration remains
+stdout: ~ "fn helper" # tests/fmt.rs:76 declaration remains
+step: jet fmt --check run.jet
+exit: 0 # tests/fmt.rs:81-82 idempotent

@@ -1,0 +1,21 @@
+# tests/encoding_edition.rs::user_deprecated_marker_emits_l2001_for_a_consumer at tests/encoding_edition.rs:156; hand-port
+fixture: user_deprecated_marker_emits_l2001_for_a_consumer.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check c1/run.jet
+exit: 0 # tests/encoding_edition.rs:164 compiles
+stderr: ~ "L2001" # tests/encoding_edition.rs:164 reports L2001
+stderr: ~ "`decode`" # tests/encoding_edition.rs:164 rendered diagnostic text
+step: jet check c2/run.jet --json
+exit: 1 # tests/encoding_edition.rs:179 is rejected
+json: stdout doc $.reports[?code="E2002"] #>= 1 # tests/encoding_edition.rs:179 reports E2002
+step: jet check c2/run.jet
+exit: 1 # tests/encoding_edition.rs:179 is rejected
+stderr: ~ "`decode`" # tests/encoding_edition.rs:179 rendered diagnostic text
+step: jet check c3/run.jet
+exit: 0 # tests/encoding_edition.rs:194 compiles
+stderr: !~ "[L2001]" # tests/encoding_edition.rs:194 never reports L2001
+stderr: !~ "[E2002]" # tests/encoding_edition.rs:194 never reports E2002
+stderr: !~ "L2001" # tests/encoding_edition.rs:194 absent from the diagnostics
+stderr: !~ "E2002" # tests/encoding_edition.rs:194 absent from the diagnostics

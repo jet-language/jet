@@ -1,0 +1,55 @@
+// Machine-word projections of checked constants.
+use core.math as math
+
+// An exact Int that fits the inline word form (bits 63 and 62 agree).
+fn ir_int_inline(value: Int) -> Bool Never! {
+    value >= -4611686018427387904 && value <= 4611686018427387903
+}
+
+// A checked Int is exact. Reinterpret each half as a signed machine word
+// before emitting Const, avoiding any truncating host conversion or parser.
+fn ir_wide_word(value: Int) -> Int Never! {
+    modulus :: 18446744073709551616
+    bits :: value.bit_and((modulus - 1))
+    if bits >= 9223372036854775808 -> bits - modulus else -> bits
+}
+
+// Untyped map keys retain large U64s as decimal BigInt. Their checked
+// destination recovers the machine-word bit pattern, not an exact-Int owner.
+fn ir_constant_u64_bits(decimal: String) -> Int Never! {
+    value :: Int.parse(decimal) ?? panic("checked U64 constant is not decimal")
+    ir_wide_word(value)
+}
+
+// Pack a checked machine-float literal into its native carrier. Binary32 is
+// an unsigned low-word payload, rounded once from the checked binary64 value.
+// Integer rounding keeps ties-to-even, subnormals and signed zero independent
+// of the compiler host's floating-point environment.
+fn ir_float_constant_bits(value: Float, f32: Bool) -> Int Never! {
+    bits :: math.to_bits(value)
+    if !f32 -> return bits
+    sign :: (bits >> 32).bit_and(2147483648)
+    exponent :: (bits >> 52).bit_and(2047)
+    fraction :: bits.bit_and(4503599627370495)
+    if exponent == 2047 {
+        if fraction == 0 -> return sign.bit_or(2139095040)
+        return sign.bit_or(2139095040).bit_or((fraction >> 29)).bit_or(4194304)
+    }
+    if exponent == 0 -> return sign
+    power := exponent - 1023
+    if power > 127 -> return sign.bit_or(2139095040)
+    if power < -150 -> return sign
+    significand :: fraction.bit_or(4503599627370496)
+    shift :: if power < -126 -> -power - 97 else -> 29
+    rounded := significand >> shift
+    remainder :: significand.bit_and(((1 << shift) - 1))
+    halfway :: 1 << (shift - 1)
+    if remainder > halfway || (remainder == halfway && (rounded.bit_and(1)) != 0) -> rounded += 1
+    if power < -126 -> return sign.bit_or(rounded)
+    if rounded == 16777216 {
+        rounded = rounded >> 1
+        power += 1
+    }
+    if power > 127 -> return sign.bit_or(2139095040)
+    sign.bit_or(((power + 127) << 23)).bit_or((rounded.bit_and(8388607)))
+}

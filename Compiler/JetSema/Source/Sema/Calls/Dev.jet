@@ -1,0 +1,64 @@
+// The `jet dev` context: `fn dev(d: Dev)` configures the dev loop and the
+// toolchain uses that configuration. Calls are compiler values evaluated like
+// fn build's, through the dev adapter.
+//   d.watch(path)               watch this file or directory too
+//   d.serve(port) / (port: N)   serve on this port with browser live reload
+//   d.reload(.Restart | .Hot)   rerun on change, or swap code into the running program
+use jet_foundation.[AccessConvention, CallArg, Diagnostic, Expr, ParamZone, Span, Type, expr_source_start]
+
+fn sema_dev_context_method_known(method: String) -> Bool Never! {
+    method == "watch" || method == "serve" || method == "reload"
+}
+
+fn sema_call_try_dev_context_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if receiver_value.ty != (Type.Named{name: "Dev"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    failed :: SemaMethodSpecialCheck{handled: true, value: None}
+    // A wrong method or arity points at the whole `d.method` head.
+    head :: Span{start: expr_source_start(receiver), end: span.end}
+    if !sema_dev_context_method_known(method) {
+        &diagnostics.push(sema_error("E0311", head, "`{method}` isn't a method of `Dev`", "the dev context offers `watch`, `serve` and `reload`", "use `d.watch(path)`, `d.serve(port)` or `d.reload(.Restart)` / `d.reload(.Hot)`"))
+        return failed
+    }
+    if args.len() != 1 {
+        &diagnostics.push(sema_error("E0104", head, "`Dev.{method}` expects 1 argument, got {args.len()}", "each dev method takes one value", "pass exactly one argument"))
+        return failed
+    }
+    argument :: args[0]
+    label_name :: if argument.label == .Val(label) -> label.name.copy() else -> ""
+    if argument.spread || (label_name.len() > 0 && !(method == "serve" && label_name == "port")) {
+        if method == "serve" {
+            &diagnostics.push(sema_error("E0764", argument.span, "`Dev.serve` takes its port positionally or as `port:`", "the dev server argument is the port", "write `d.serve(3000)` or `d.serve(port: 3000)`"))
+        } else {
+            &diagnostics.push(sema_error("E0764", argument.span, "`Dev.{method}` takes a positional argument", "only `d.serve` names its argument (`port:`)", "remove the label or spread"))
+        }
+        return failed
+    }
+    value := TExpr?{None}
+    if method == "reload" {
+        // `.Restart` or `.Hot`: the reload mode, carried as its variant name.
+        mode := ""
+        if argument.expr == .EnumLit(_, variant, _, enum_args, leading_dot, _, _) {
+            if leading_dot && enum_args.len() == 0 && (variant == "Restart" || variant == "Hot") -> mode = variant.copy()
+        }
+        if mode.len() == 0 {
+            &diagnostics.push(sema_error("E0308", argument.span, "`Dev.reload` takes `.Restart` or `.Hot`", "the reload mode is one of the two dev loop behaviours", "write `d.reload(.Restart)` or `d.reload(.Hot)`"))
+            return failed
+        }
+        value = Val(sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: mode}}}, argument.span))
+    } else {
+        required :: if method == "watch" -> Type.String else -> Type.Int
+        checked :: sema_check_expression(argument.expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return failed
+        compatible :: sema_call_type_assignable(required, checked.ty, environment, program) ?? return failed
+        if !compatible {
+            &diagnostics.push(sema_type_mismatch(required, checked.ty, argument.span))
+            return failed
+        }
+        value = Val(checked)
+    }
+    params :: [SemaCallParam]{SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}}
+    ordinary := [CallArg]{argument}
+    ownership :: sema_ownership_check_method_call(&state, "Dev.{method}", receiver, AccessConvention.Read, params, &ordinary, scopes, span, &diagnostics)
+    if !ownership.accepted || !ownership.complete -> return failed
+    result :: sema_tir_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: [TExpr]{value ?? return failed}}}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(result, expected, environment, program, &diagnostics)}
+}

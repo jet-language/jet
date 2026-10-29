@@ -1,0 +1,22 @@
+fn load(path: String) -[FS.Read]> String {
+    return path
+}
+
+fn archive(path: String) -[FS.Write]> {
+    print(path)
+}
+
+fn read_only(path: String) -[FS.Read, !FS.Write]> {
+    load(path)
+}
+
+fn boot() -[FS]> {
+    load("app.conf")
+    archive("out.tar")
+    #FX(Net.HTTP.Get) {
+        print("net")
+    }
+    #FX(authority: FS.Read) {
+        load("app.conf")
+    }
+}

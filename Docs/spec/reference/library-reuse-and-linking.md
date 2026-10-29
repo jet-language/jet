@@ -3,10 +3,8 @@
 This reference explains exact-match reuse of compiled dependency work and the
 `Library` output boundary. It is for package authors, build engineers, and
 people integrating a Jet library into another language. The executable
-contracts are the driver implementation in
-[`crates/jet-driver/src/LibraryExport.rs`](../../../crates/jet-driver/src/LibraryExport.rs),
-the code generator in
-[`crates/jet-codegen/src/Codegen/Library.rs`](../../../crates/jet-codegen/src/Codegen/Library.rs),
+contracts are the library build and export rows in
+[`Request.jet`](../../../Compiler/JetCli/Source/Cli/Request.jet),
 and the library tests. Ratified decision IDs below are the durable law; build
 receipts and diagnostics are the operational proof.
 

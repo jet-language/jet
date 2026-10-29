@@ -3,33 +3,37 @@
 // sema_call_check_method_candidate_owned; the local collector only exposes
 // declarations already present in SemaScopeTable.
 use jet_foundation.[
+    BUILTIN_METHOD_ROWS,
+    BinOp,
+    COLLECTION_OPERATIONS,
     AccessConvention,
     CallArg,
     Diagnostic,
     Expr,
     Func,
+    NodeKind,
     Span,
     SymbolID,
     SymbolKind,
-    TCallArg,
-    TContract,
-    TCoreClosureKind,
-    TExpr,
-    TExprKind,
-    TFnValueKind,
-    THandleOp,
-    THostCall,
     TLetTy,
     TMethodRef,
-    TStmt,
+    TGenericParam,
     Type,
     TypeTupleField,
+    TextEdit,
     ast_empty_call_arg_flags,
+    builtin_method_receiver_accepts,
     core_source_receiver_method,
+    core_source_receiver_method_routes,
+    diagnostic_with_edit,
     expr_span,
+    sema_collection_is_list,
+    sema_collection_method_contract,
+    sema_collection_receiver_element,
+    sema_reserved_type_name,
     symbol_id,
     type_name,
-    tir_symbol_local,
+    checked_symbol_local,
 ]
 
 struct SemaMethodSpecialCheck {
@@ -42,14 +46,14 @@ fn sema_call_shared_access_forbidden_diagnostic(method: String, span: Span) -> D
 }
 
 fn sema_call_distinct_raw_finish(receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    facts :: sema_expr_distinct_facts(receiver_value.ty, environment, program, &scopes) ?? {
+    base :: sema_expr_distinct_facts(receiver_value.ty, environment, program, &scopes)?.base ?? sema_expr_quantity_raw_base(receiver_value.ty, environment, program, &scopes) ?? {
         &diagnostics.push(sema_error("E0311", span, "`.raw()` is only valid on a distinct type value", "`.raw()` unwraps a distinct type to its base representation", "only call `.raw()` on a value whose type was declared with `:: distinct`"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if args.len() > 0 {
         &diagnostics.push(sema_error("E0103", span, "`.raw()` takes no arguments", "`.raw()` simply unwraps the base value — no arguments needed", "write `.raw()` with no arguments"))
     }
-    value :: sema_tir_node(facts.base, TExprKind.DistinctRaw{value: receiver_value}, span)
+    value :: sema_tir_node(base, TExprKind.DistinctRaw{value: receiver_value}, span)
     checked :: sema_expr_expected(value, expected, environment, program, &diagnostics)
     SemaMethodSpecialCheck{handled: true, value: checked}
 }
@@ -82,9 +86,9 @@ fn sema_call_try_transaction_hook(receiver: Expr, receiver_value: TExpr, method:
         &diagnostics.push(sema_error("E0104", span, "`{method}` takes one lambda, got {args.len()}", if method == "on_commit" -> "a post-commit hook registers a single cleanup lambda" else -> "a rollback hook registers a single undo lambda", "write `<handle>.{method}(() -> {{ … }})`"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if args[0].expr == .Lambda(lambda) {
+    if args[0].expr == .Lambda(lambda, _) {
         if lambda.params.len() != 0 {
-            &diagnostics.push(sema_error("E0104", args[0].span, "`{method}` needs a zero-parameter lambda, got {lambda.params.len()} parameter{if lambda.params.len() == 1 -> "" else -> "s"}", "the hook body takes no arguments — it captures what it needs via closure", "write `<handle>.{method}(() -> {{ … }})` with no parameters"))
+            &diagnostics.push(sema_error("E0104", expr_span(args[0].expr), "`{method}` needs a zero-parameter lambda, got {lambda.params.len()} parameter{if lambda.params.len() == 1 -> "" else -> "s"}", "the hook body takes no arguments — it captures what it needs via closure", "write `<handle>.{method}(() -> {{ … }})` with no parameters"))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }
@@ -92,15 +96,15 @@ fn sema_call_try_transaction_hook(receiver: Expr, receiver_value: TExpr, method:
     saved_transaction_wall_depth :: scopes.transaction_wall_depth
     scopes.transaction_depth = 0
     scopes.transaction_wall_depth = 0
-    checked :: sema_check_expression_with_lambda_escapes(args[0].expr, if args[0].expr == {.Lambda(_) -> Val(Type.Fn{params: [Type]{}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}) else -> None}, environment, program, &scopes, &state, &tail_store, &context, Val(true), &diagnostics)
+    checked :: sema_check_expression_with_lambda_escapes(args[0].expr, if args[0].expr == {.Lambda(_, _) -> Val(Type.Fn{params: [Type]{}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}) else -> None}, environment, program, &scopes, &state, &tail_store, &context, Val(true), &diagnostics)
     scopes.transaction_depth = saved_transaction_depth
     scopes.transaction_wall_depth = saved_transaction_wall_depth
     callback :: checked ?? return SemaMethodSpecialCheck{handled: true, value: None}
     executable :: if callback.kind == {.Lambda(value) -> Val(value) else -> None} ?? {
-        &diagnostics.push(sema_error("E0112", args[0].span, "`{method}` needs a lambda, not {type_name(callback.ty)}", if method == "on_commit" -> "a post-commit hook runs a lambda only after the transaction commits" else -> "a rollback hook runs a lambda only when the transaction rolls back", "write `<handle>.{method}(() -> {{ … }})`"))
+        &diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` needs a lambda, not {type_name(callback.ty)}", if method == "on_commit" -> "a post-commit hook runs a lambda only after the transaction commits" else -> "a rollback hook runs a lambda only when the transaction rolls back", "write `<handle>.{method}(() -> {{ … }})`"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    handle_name :: if receiver == {.Ident(name, _) -> name else -> ""}
+    handle_name :: if receiver == {.Ident(name, _, _) -> name else -> ""}
     if handle_name == "" -> return SemaMethodSpecialCheck{handled: true, value: None}
     kind :: if method == "on_commit" -> TCoreClosureKind.OnCommit{handle_name: handle_name, executable: executable} else -> TCoreClosureKind.OnRollback{handle_name: handle_name, executable: executable}
     value :: sema_tir_node(Type.Named{name: "TransactionGuard"}, TExprKind.CoreClosureCall{kind: kind}, span)
@@ -109,7 +113,7 @@ fn sema_call_try_transaction_hook(receiver: Expr, receiver_value: TExpr, method:
 }
 
 fn sema_call_shared_access_result_type(receiver_ty: Type, method: String, result_type: Type, transaction_depth: Int) -> Type Never! {
-    if sema_shared_access_is_shared_type(receiver_ty) && method == "edit" && transaction_depth > 0 -> Type.Tuple{fields: [TypeTupleField]{}} else -> result_type
+    if sema_shared_access_is_shared_type(receiver_ty) && method == "edit" && transaction_depth > 0 -> Type.Named{name: "Unit"} else -> result_type
 }
 
 fn sema_call_builtin_host_arity_diagnostic(method: String, actual: Int, span: Span) -> Diagnostic {
@@ -137,7 +141,7 @@ fn sema_call_try_builtin_host_route(receiver: Expr, receiver_value: TExpr, metho
     callback_expected :: Val(Type.Fn{params: [Type]{inner}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None})
     host_stored :: sema_shared_access_is_shared_type(receiver_value.ty) && method == "edit" && scopes.transaction_depth > 0
     callback :: if args[0].expr == {
-        .Lambda(_) -> if host_stored -> sema_expression_lambda_host_callback_stored(args[0].expr, callback_expected, method == "edit", environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_expression_lambda_host_callback(args[0].expr, callback_expected, method == "edit", environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        .Lambda(_, _) -> if host_stored -> sema_expression_lambda_host_callback_stored(args[0].expr, callback_expected, method == "edit", environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_expression_lambda_host_callback(args[0].expr, callback_expected, method == "edit", environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         else -> {
             checked :: sema_check_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             &diagnostics.push(sema_call_builtin_host_lambda_diagnostic(method, checked.ty, args[0].span))
@@ -155,7 +159,7 @@ fn sema_call_try_builtin_host_route(receiver: Expr, receiver_value: TExpr, metho
             callback_value.kind = TExprKind.Lambda{value: moved_lambda}
         }
     }
-    callback_value.ty = sema_call_host_callback_type(sema_shared_access_guarded_inner(receiver_value.ty) ?? Type.Named{name: "Unit"}, if sema_shared_access_is_shared_type(receiver_value.ty) -> None else -> Val(callback_result), sema_shared_access_is_shared_type(receiver_value.ty))
+    tir_expr_retype(&callback_value, sema_call_host_callback_type(sema_shared_access_guarded_inner(receiver_value.ty) ?? Type.Named{name: "Unit"}, if sema_shared_access_is_shared_type(receiver_value.ty) -> None else -> Val(callback_result), sema_shared_access_is_shared_type(receiver_value.ty)))
     callback_name :: sema_shared_access_host_method_name(receiver_value.ty, method)
     if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, callback_name, span, sema_shared_access_effect_row(receiver_value.ty, method, span), &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     value :: sema_tir_node(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: callback_name, args: [TExpr]{callback_value}}}, span)
@@ -190,8 +194,14 @@ fn sema_call_try_int_abs_source(receiver: Expr, receiver_value: TExpr, method: S
 // the already checked receiver so builtin identity comes from its Type rather
 // than from a user spelling or a basename.
 fn sema_call_try_builtin_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    hook :: sema_call_try_type_param_hook_method(receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if hook.handled -> return hook
     build :: sema_call_try_build_context_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if build.handled -> return build
+    dev :: sema_call_try_dev_context_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if dev.handled -> return dev
+    task_control :: sema_taskgroup_check_task_control(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if task_control.handled -> return task_control
     if method == "raw" {
         if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         return sema_call_try_distinct_raw_value(receiver_value, args, span, expected, environment, program, &scopes, &diagnostics)
@@ -199,6 +209,112 @@ fn sema_call_try_builtin_method(receiver: Expr, receiver_value: TExpr, method: S
     transaction :: sema_call_try_transaction_hook(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if transaction.handled -> return transaction
     sema_call_try_builtin_host_route(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+}
+
+// Rust `infer_method_call`'s type-parameter dispatch (method_calls.rs:6877-6941)
+// over the compiler's synthetic hook traits (Traits.rs:2883
+// register_synthetic_operators, :3626 register_synthetic_binary_trait): inside
+// a generic body the bounded parameter is the trait's `Self`, so
+// `left.compare(right)` with `T: Comparable` takes a `T` and yields an
+// `Ordering`, and `left.equal(right)` with `T: Equatable` a `Bool`. The checked
+// call is the operator's own comparison, which is how codegen lowers a builtin
+// hook method (lower/method_calls.rs:629 lower_builtin_binary_method). The
+// first bound that declares the method decides, so a registered trait bound
+// keeps its candidate path. When no bound declares it, the trait with the
+// least name that does is the missing bound (E0901, Generics.rs:708).
+fn sema_call_try_type_param_hook_method(receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    unhandled :: SemaMethodSpecialCheck{handled: false, value: None}
+    rejected :: SemaMethodSpecialCheck{handled: true, value: None}
+    receiver_name :: if receiver_value.ty == {
+        .Named(name) -> Val(name)
+        else -> None
+    }
+    name :: receiver_name ?? return unhandled
+    parameter := TGenericParam?{None}
+    index := environment.generic_params.len()
+    loop index > 0 {
+        index -= 1
+        candidate :: environment.generic_params[index]
+        if candidate.name == name {
+            parameter = Val(candidate)
+            break
+        }
+    }
+    current :: parameter ?? return unhandled
+    hook_trait := String?{None}
+    loop bound in current.bounds {
+        segments :: bound.key.split(":").to_list()
+        trait_name :: segments[segments.len() - 1]
+        if sema_type_builtin_trait_symbol(trait_name) == .Val(builtin) && builtin.id.key == bound.key {
+            if sema_checked_operator_hook(trait_name) == (Val(method)) {
+                hook_trait = Val(trait_name)
+                break
+            }
+            next
+        }
+        if program.registration_graph == .Val(graph) {
+            row :: sema_call_trait_row_for_symbol(graph, bound) ?? next
+            if sema_call_trait_row_declares(graph, row, method) -> return unhandled
+        }
+    }
+    if hook_trait == None {
+        missing :: sema_call_type_param_method_trait(program, method) ?? return unhandled
+        &diagnostics.push(sema_error("E0901", span, "calling `{method}` needs `{missing}`", "methods on a type parameter require that bound", "add `<T: {missing}>` to the generic parameter list"))
+        if sema_checked_operator_hook(missing) != (Val(method)) || (method != "compare" && method != "equal") -> return rejected
+        hook_trait = Val(missing)
+    }
+    if method != "compare" && method != "equal" -> return unhandled
+    if args.len() != 1 {
+        &diagnostics.push(sema_error("E0104", span, "`{method}` expects 1 argument, got {args.len()}", "every argument must match a parameter (not counting `self`)", "check the definition of `{method}` on the trait"))
+        return rejected
+    }
+    argument :: sema_check_expression(args[0].expr, Val(receiver_value.ty), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return rejected
+    assignable :: sema_call_type_assignable(receiver_value.ty, argument.ty, environment, program) ?? return rejected
+    if !assignable {
+        &diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` wants {sema_type_show(receiver_value.ty)}, but this is {sema_type_show(argument.ty)}", "every argument must match its parameter's type", sema_type_fix_hint(receiver_value.ty, argument.ty)))
+        return rejected
+    }
+    line :: sema_source_line_at(environment.source_segments, span) ?? 0
+    ordering :: method == "compare"
+    op :: if ordering -> BinOp.Compare else -> BinOp.Eq
+    result_ty :: if ordering -> Type.Named{name: "Ordering"} else -> Type.Bool
+    value :: sema_tir_node(result_ty, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: receiver_value, rhs: argument}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+}
+
+// Rust's fallback over every registered trait (method_calls.rs:6887-6894):
+// the least-named trait that declares `method`, the synthetic hook traits
+// (Traits.rs:2883, :2852 Close, :3566 CheckedText) included.
+fn sema_call_type_param_method_trait(program: SemaProgramTables, method: String) -> String? {
+    best := String?{None}
+    synthetic :: [String]{"Add", "CheckedText", "Close", "Comparable", "Div", "Equatable", "Mul", "Sub"}
+    loop trait_name in synthetic {
+        declares :: sema_checked_operator_hook(trait_name) == (Val(method)) || (trait_name == "Close" && method == "close") || (trait_name == "CheckedText" && (method == "check" || method == "encode_hole"))
+        if !declares -> next
+        if best == .Val(current) && current <= trait_name -> next
+        best = Val(trait_name)
+    }
+    if program.registration_graph == .Val(graph) {
+        loop graph_module in graph.modules {
+            loop nominal in graph_module.nominals {
+                if nominal.kind != SemaRegistrationNominalKind.Trait -> next
+                declares :: loop trait_method in nominal.trait_methods {
+                    if trait_method.declaration.name == method -> break true
+                } ?? false
+                if !declares -> next
+                if best == .Val(current) && current <= nominal.symbol.name -> next
+                best = Val(nominal.symbol.name)
+            }
+        }
+    }
+    best
+}
+
+fn sema_call_trait_row_declares(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef, method: String) -> Bool Never! {
+    loop trait_method in graph.modules[row.module_index].nominals[row.row].trait_methods {
+        if trait_method.declaration.name == method -> return true
+    }
+    false
 }
 
 fn sema_call_method_owner_type(name: String, type_args: [Type]) -> Type Never! {
@@ -413,6 +529,8 @@ fn sema_call_resolve_method_with_inference(receiver_type: Type, method: String, 
         if candidate.method.name == method {
             if sema_call_method_receiver_candidate_type(candidate) == .Val(expected_value) {
                 receiver_compatible :: sema_call_type_assignable(expected_value, receiver_type, environment, program) ?? false
+                // copy: `candidate` is a row of read parameter `candidates`; the receiver-match list owns this one and the shape-match list may own another
+                if receiver_compatible -> &receiver_matches.push(candidate.copy())
                 if receiver_compatible && sema_call_method_shape_matches(candidate, method, args, span) -> &shape_matches.push(candidate)
             }
         }
@@ -428,7 +546,7 @@ fn sema_call_resolve_method_with_inference(receiver_type: Type, method: String, 
             _ :: sema_call_bind_method(method, receiver_matches[0].signature, receiver_matches[0].receiver_offset, &probe, span, &diagnostics)
             if diagnostics.len() > reported -> return None
         }
-        &diagnostics.push(sema_error("E0311", span, "`{method}` isn't a method on this value", "method resolution found no candidate with a compatible receiver and argument shape", "use a registered method for this receiver type"))
+        &diagnostics.push(sema_call_missing_method_diagnostic(receiver_type, method, args.len(), span, environment, program))
         return None
     }
     viable := [SemaCallMethodCandidate]{}
@@ -513,7 +631,7 @@ fn sema_call_typecheck_host_bound_arguments(callee: String, params: [SemaCallPar
         decision :: sema_call_argument_convention(parameter, args[index])
         if decision != SemaCallConventionDecision.Accepted -> return None
         checked_argument :: if args[index].expr == {
-            .Lambda(_) -> if host_stored -> sema_expression_lambda_host_callback_stored(args[index].expr, Val(required), host_write, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_expression_lambda_host_callback(args[index].expr, Val(required), host_write, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            .Lambda(_, _) -> if host_stored -> sema_expression_lambda_host_callback_stored(args[index].expr, Val(required), host_write, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_expression_lambda_host_callback(args[index].expr, Val(required), host_write, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             else -> if apply_lambda_escape_override -> sema_check_expression_with_lambda_escapes(args[index].expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, sema_call_lambda_escape_policy(parameter, abi), &diagnostics) else -> sema_check_expression(args[index].expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         }
         value :: checked_argument ?? return None
@@ -541,7 +659,7 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
     // registered identity's visibility here, never while filtering candidates.
     if program.registration_graph == .Val(graph) {
         visible := Bool?{None}
-        if graph.callable_rows.get(candidate.method.symbol.key) == .Val(row) {
+        if sema_registration_callable_row(graph, candidate.method.symbol.key) == .Val(row) {
             visible = Val(if row == {
                 .Function(owner, index) -> sema_registration_visible(graph.modules[owner].functions[index].symbol.visibility, environment.module_identity, environment.package_identity, graph.modules[owner].module_identity, graph.modules[owner].package_identity)
                 .Foreign(owner, index) -> sema_registration_visible(graph.modules[owner].foreign_functions[index].symbol.visibility, environment.module_identity, environment.package_identity, graph.modules[owner].module_identity, graph.modules[owner].package_identity)
@@ -563,7 +681,7 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
         // Graph-free local checks retain their existing declaration rules.
         if !(visible ?? true) {
             name :: candidate.method.name
-            &diagnostics.push(sema_error("E0605", span, "`{name}` exists but is private to its file", "only names marked `pub` can be used from another file (S18)", "add `pub` before `{name}`, or don't reach across files here"))
+            &diagnostics.push(sema_error("E0605", span, "`{name}` is private to its module", "a `priv` method is usable only inside the module that declares it", "call `{name}` from inside its module, or remove `priv` from it"))
             return None
         }
     }
@@ -620,7 +738,8 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
     host_stored :: sema_shared_access_is_shared_type(receiver_value.ty) && resolved_candidate.method.name == "edit" && scopes.transaction_depth > 0
     typed_option :: if host_method -> sema_call_typecheck_host_bound_arguments(resolved_candidate.method.name, params, abi, true, resolved_binding, &checked_args, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics, sema_shared_access_host_method_writes(receiver_value.ty, resolved_candidate.method.name), host_stored) else -> sema_call_typecheck_bound_arguments(resolved_candidate.method.name, params, abi, true, resolved_binding, &checked_args, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics, false)
     typed :: typed_option ?? return None
-    ownership :: sema_ownership_check_two_phase_method_call(&state, resolved_candidate.method.name, receiver, resolved_candidate.receiver_convention, true, params, &checked_args, scopes, span, &diagnostics)
+    consumer :: "`{sema_call_method_leaf(sema_call_receiver_method_label(receiver_type))}.{resolved_candidate.method.name}`"
+    ownership :: sema_ownership_check_two_phase_method_call(&state, resolved_candidate.method.name, consumer, receiver, resolved_candidate.receiver_convention, true, params, &checked_args, scopes, span, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return None
     lowered := sema_call_lower_bound_arguments(typed, params, &checked_args, environment, program)
     if !sema_call_prepare_variadic_elements(typed, params, checked_args, &lowered, environment, program, &scopes, &state, &context, &diagnostics) -> return None
@@ -632,7 +751,7 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
         pin_slot :: -typed.values.len() - 1
         owner :: sema_scope_function_owner_key(scopes)
         symbol :: sema_call_binder_ref_symbol(environment, program, owner, typed.binder_site, pin_slot, "receiver", receiver_value.ty, span)
-        local := tir_symbol_local("binder_ref_{typed.binder_site}_{pin_slot}", span, symbol.id)
+        local := checked_symbol_local("binder_ref_{typed.binder_site}_{pin_slot}", span, symbol.id)
         local.generated = true
         local.mutable = access == AccessConvention.Write
         local.deref = borrowed
@@ -678,7 +797,7 @@ fn sema_call_method_checked_from_value(state: &SemaOwnershipState, receiver: Exp
                 callback.kind = TExprKind.Lambda{value: moved_lambda}
             }
         }
-        callback.ty = sema_call_host_callback_type(sema_shared_access_guarded_inner(receiver_value.ty) ?? Type.Named{name: "Unit"}, if sema_shared_access_is_shared_type(receiver_value.ty) -> None else -> Val(result_type), sema_shared_access_is_shared_type(receiver_value.ty))
+        tir_expr_retype(&callback, sema_call_host_callback_type(sema_shared_access_guarded_inner(receiver_value.ty) ?? Type.Named{name: "Unit"}, if sema_shared_access_is_shared_type(receiver_value.ty) -> None else -> Val(result_type), sema_shared_access_is_shared_type(receiver_value.ty)))
         callback_name :: sema_shared_access_host_method_name(receiver_value.ty, resolved_candidate.method.name)
         call_value = sema_tir_node(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: call_receiver, method: callback_name, args: [TExpr]{callback}}}, span)
     }
@@ -717,7 +836,7 @@ fn sema_call_check_method_candidate(state: &SemaOwnershipState, receiver: Expr, 
 
 fn sema_call_check_method(state: &SemaOwnershipState, receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     receiver_value :: sema_check_expression(receiver, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    routed_method :: core_source_receiver_method(if method == "bool" && args.len() == 1 -> sema_expr_receiver_nominal_identity(environment, program, receiver_value.ty) else -> type_name(receiver_value.ty), method, args.len())
+    routed_method :: core_source_receiver_method(if core_source_receiver_method_routes(method, args.len()) -> sema_expr_receiver_nominal_identity(environment, program, receiver_value.ty) else -> type_name(receiver_value.ty), method, args.len())
     candidates := sema_call_local_method_candidates(environment, program, routed_method, owner_type_args, type_args)
     if program.registration_graph == .Val(graph) {
         trait_candidates :: sema_call_trait_method_candidates(graph, receiver_value.ty, routed_method, type_args, environment.module_identity, environment.package_identity, environment.generic_params, method_span, &diagnostics)
@@ -792,6 +911,7 @@ fn sema_call_try_app_method(receiver: Expr, receiver_value: TExpr, method: Strin
     if receiver_value.ty != (Type.Named{name: "App"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
     arity :: sema_app_method_arity(method, args.len())
     if arity < 0 -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if (method == "route" || method == "page" || method == "layout") && args.len() > 0 -> _ := sema_http_route_check_literal(args[0], environment, program, scopes, &diagnostics)
     if args.len() != arity {
         &diagnostics.push(sema_call_arity_diagnostic(method, arity, args.len(), false, span))
         return SemaMethodSpecialCheck{handled: true, value: None}
@@ -808,7 +928,7 @@ fn sema_call_try_app_method(receiver: Expr, receiver_value: TExpr, method: Strin
         }
         if handler && method != "mount" {
             if argument.expr == {
-                .Ident(_, _) -> {}
+                .Ident(_, _, _) -> {}
                 else -> {
                     &diagnostics.push(sema_error("E2810", argument.span, "App `{method}` requires a named handler", "the statically checked App graph retains the handler's typed input and effect contract", "declare the handler as a function and pass its name"))
                     return SemaMethodSpecialCheck{handled: true, value: None}
@@ -823,7 +943,10 @@ fn sema_call_try_app_method(receiver: Expr, receiver_value: TExpr, method: Strin
                 &diagnostics.push(sema_error("E2810", argument.span, "App `{method}` requires a function handler", "the registered handler must be callable through its checked input contract", "pass the name of a declared function"))
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }}
-            if method != "mount" -> value = sema_tir_node(checked.ty, TExprKind.HostBorrowCallback{callable: checked, params: params}, checked.span)
+            if method != "mount" {
+                callable_row :: sema_arena_adopt(&context, checked)
+                value = sema_node(&context, checked.ty, NodeKind.HostBorrowCallback{callable: callable_row, params: params}, checked.span)
+            }
             value = sema_tir_node(value.ty, TExprKind.FnValue{kind: TFnValueKind.Send{value: value}}, value.span)
             if has_binding -> binding = sema_app_route_binding(method, argument.expr, environment, program, scopes, context.host_hooks)
         }
@@ -836,4 +959,376 @@ fn sema_call_try_app_method(receiver: Expr, receiver_value: TExpr, method: Strin
         if !sema_network_handle_effect_fact(environment, program, &scopes, &context, "App.{method}", span, result, Val("Net"), &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     }
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+}
+
+// Rust `FOREIGN_METHOD_ALIASES` (Sema/Diagnostics.rs:1176): another
+// language's primary name for one operation, the receiver family that
+// carries it, and the Jet spelling.
+struct SemaCallForeignMethodAlias {
+    foreign: String
+    family: String
+    target: String
+}
+
+SEMA_CALL_FOREIGN_METHOD_ALIASES :: comptime { [SemaCallForeignMethodAlias]{
+    {foreign: "append", family: "List", target: "push"},
+    {foreign: "add", family: "List", target: "push"},
+    {foreign: "push_back", family: "List", target: "push"},
+    {foreign: "extend", family: "List", target: "push"},
+    {foreign: "size", family: "List", target: "len"},
+    {foreign: "size", family: "Map", target: "len"},
+    {foreign: "size", family: "String", target: "len"},
+    {foreign: "length", family: "List", target: "len"},
+    {foreign: "length", family: "Map", target: "len"},
+    {foreign: "length", family: "String", target: "len"},
+    {foreign: "count", family: "List", target: "len"},
+    {foreign: "count", family: "Map", target: "len"},
+    {foreign: "count", family: "String", target: "len"},
+    {foreign: "contains_key", family: "Map", target: "has_key"},
+    {foreign: "contains_key", family: "Set", target: "has"},
+    {foreign: "has", family: "Map", target: "has_key"},
+    {foreign: "contains", family: "List", target: "contains"},
+    {foreign: "contains", family: "Set", target: "has"},
+    {foreign: "includes", family: "List", target: "contains"},
+    {foreign: "set", family: "Map", target: "add"},
+    {foreign: "put", family: "Map", target: "add"},
+    {foreign: "insert", family: "Map", target: "add"},
+    {foreign: "upper", family: "String", target: "to_upper"},
+    {foreign: "lower", family: "String", target: "to_lower"},
+    {foreign: "strip", family: "String", target: "trim"},
+    {foreign: "substring", family: "String", target: "slice"},
+    {foreign: "substr", family: "String", target: "slice"},
+    {foreign: "to_str", family: "String", target: "to_string"},
+} }
+
+// Rust `MethodSuggestion`: the Jet spelling to write instead (also the rename
+// edit) and the rendered `Fix:` sentence.
+struct SemaCallMethodSuggestion {
+    name: String
+    fix: String
+}
+
+// Rust `alias_target`: the first alias row the receiver really carries; a
+// target equal to the refused name is never offered back.
+fn sema_call_method_alias_target(name: String, family: String, candidates: [String]) -> String? {
+    loop row in SEMA_CALL_FOREIGN_METHOD_ALIASES {
+        if row.foreign == name && row.family == family && row.target != name && candidates.contains(row.target) -> return Val(row.target.copy())
+    }
+    None
+}
+
+// Rust `snake_case_of_camel`: `indexOf` → `index_of`; none without a capital.
+fn sema_call_snake_case_of_camel(name: String) -> String? {
+    capital := false
+    bytes := [U8]{}
+    upper_a :: U8{65}
+    upper_z :: U8{90}
+    loop byte in name.bytes() {
+        upper :: byte >= upper_a && byte <= upper_z
+        if upper {
+            capital = true
+            if bytes.len() > 0 -> &bytes.push(U8{95})
+            &bytes.push(byte + U8{32})
+        } else {
+            &bytes.push(byte)
+        }
+    }
+    if !capital -> return None
+    snake :: String.from_bytes(bytes) ?? return None
+    Val(snake)
+}
+
+fn sema_call_foreign_method_fix(name: String, jet: String) -> String Never! {
+    "did you mean `{jet}`? `{name}` is another language's name for the same operation"
+}
+
+// Rust `suggest_method_for_receiver` (Sema/Diagnostics.rs:1272): an exact
+// camelCase → snake_case hit first, a cross-language alias next, edit
+// distance last.
+fn sema_call_suggest_method_for_receiver(name: String, family: String, candidates: [String]) -> SemaCallMethodSuggestion? {
+    if sema_call_snake_case_of_camel(name) == .Val(snake) {
+        if candidates.contains(snake) -> return Val(SemaCallMethodSuggestion{name: snake.copy(), fix: "did you mean `{snake}`? Jet method names are snake_case"})
+        if sema_call_method_alias_target(snake, family, candidates) == .Val(jet) -> return Val(SemaCallMethodSuggestion{name: jet.copy(), fix: sema_call_foreign_method_fix(name, jet)})
+    }
+    if sema_call_method_alias_target(name, family, candidates) == .Val(jet) -> return Val(SemaCallMethodSuggestion{name: jet.copy(), fix: sema_call_foreign_method_fix(name, jet)})
+    candidate :: sema_suggest_field(name, candidates) ?? return None
+    Val(SemaCallMethodSuggestion{name: candidate.copy(), fix: "did you mean `{candidate}`?"})
+}
+
+// Rust `receiver_method_label` (method_calls.rs:128).
+fn sema_call_receiver_method_label(receiver: Type) -> String Never! {
+    if receiver == {
+        .Tagged(_, inner) -> sema_call_receiver_method_label(inner)
+        .List(_) | .FixedList(_, _) -> "List"
+        .Map(_, _, _) -> "Map"
+        .String -> "String"
+        .Named(name) -> name
+        .Apply(name, _) -> name
+        else -> type_name(receiver)
+    }
+}
+
+fn sema_call_method_leaf(name: String) -> String Never! {
+    parts :: name.split("::").to_list()
+    parts[parts.len() - 1]
+}
+
+fn sema_call_push_arity(arities: &[Int], arity: Int) Never! {
+    if !arities.contains(arity) -> &arities.push(arity)
+}
+
+// The argument counts the receiver's built-in method table accepts for one
+// method name: the collection contracts, the value-method rows, the
+// dedicated parallel adapters and the built-in handle families (Rust
+// `Collections::builtin_method_return`, probed per arity as
+// `builtin_method_names` and `builtin_method_arity_diagnostic` do).
+fn sema_call_builtin_method_arities(receiver: Type, method: String) -> [Int] Never! {
+    arities := [Int]{}
+    ty :: sema_expr_unwrap_tag(receiver)
+    if sema_collection_method_contract(ty, method) == .Val(contract) {
+        loop arity in contract.minimum_arity..<(contract.maximum_arity + 1) -> sema_call_push_arity(&arities, arity)
+    }
+    if sema_collection_is_list(ty) {
+        if method == "para_map" {
+            sema_call_push_arity(&arities, 1)
+            sema_call_push_arity(&arities, 2)
+        }
+        if method == "para_filter" || method == "para_partition" -> sema_call_push_arity(&arities, 1)
+        if method == "para_fold" -> sema_call_push_arity(&arities, 3)
+    }
+    loop row in BUILTIN_METHOD_ROWS {
+        if row.name == method && builtin_method_receiver_accepts(row.receiver, ty) -> sema_call_push_arity(&arities, row.parameters.len())
+    }
+    owner :: sema_call_method_leaf(sema_call_receiver_method_label(ty))
+    loop arity in 0..<4 {
+        known :: if owner == {
+            "Duration" -> sema_time_duration_result(method, arity) != None || (method == "round" && arity >= 1)
+            "Decimal" | "Fraction" -> sema_value_method_precise_result(owner, method, arity) != None
+            "DeterministicWorld" -> sema_time_world_contract(method, arity) != None
+            "HistoryRNG" -> sema_time_history_rng_contract(method, arity) != None
+            "RNG" -> sema_time_rng_fixed_signature(method, arity) != None || ((method == "pick" || method == "shuffle") && arity == 1) || ((method == "weighted_pick" || method == "sample") && arity == 2)
+            "Clock" -> (method == "now" && arity == 0) || ((method == "tick" || method == "advance" || method == "wait") && arity == 1)
+            "Task" -> ((method == "join" || method == "detach" || method == "resume" || method == "cancel" || method == "trace") && arity == 0) || (method == "pause" && arity < 2)
+            else -> false
+        }
+        if known -> sema_call_push_arity(&arities, arity)
+    }
+    arities
+}
+
+fn sema_call_builtin_method_pool(receiver: Type) -> [String] Never! {
+    pool := [String]{}
+    owner :: sema_call_method_leaf(sema_call_receiver_method_label(sema_expr_unwrap_tag(receiver)))
+    if owner == {
+        "Duration" -> pool = [String]{"in", "is_zero", "total_seconds", "difference", "abs", "negated", "sign", "total_in", "round"}
+        "Decimal" -> pool = [String]{"add", "sub", "mul", "div", "round", "floor", "ceil", "equal", "compare", "to_string", "to_float"}
+        "Fraction" -> pool = [String]{"add", "sub", "mul", "div", "numerator", "denominator", "to_string", "to_float", "is_zero", "equal"}
+        "DeterministicWorld" -> pool = [String]{"now", "advance", "wait_idle", "history"}
+        "HistoryRNG" -> pool = [String]{"next_u64", "below"}
+        "RNG" -> pool = [String]{"int", "float", "float_range", "bool", "normal", "exponential", "bytes", "split", "pick", "weighted_pick", "sample", "shuffle"}
+        "Clock" -> pool = [String]{"now", "tick", "advance", "wait"}
+        "Task" -> pool = [String]{"join", "detach", "pause", "resume", "cancel", "trace"}
+        else -> {
+            loop row in COLLECTION_OPERATIONS {
+                if !pool.contains(row.name) -> &pool.push(row.name.copy())
+            }
+            loop name in ([String]{"para_map", "para_filter", "para_partition", "para_fold"}) -> &pool.push(name)
+            loop row in BUILTIN_METHOD_ROWS {
+                if !pool.contains(row.name) -> &pool.push(row.name.copy())
+            }
+        }
+    }
+    pool
+}
+
+// Rust `Collections::builtin_method_names` (jet-foundation
+// Collections.rs:333): every name the receiver's built-in table accepts at
+// some arity.
+fn sema_call_builtin_method_names(receiver: Type) -> [String] Never! {
+    names := [String]{}
+    loop name in sema_call_builtin_method_pool(receiver) {
+        if sema_call_builtin_method_arities(receiver, name).len() > 0 && !names.contains(name) -> &names.push(name)
+    }
+    names
+}
+
+// Rust `method_names_for_type_name` filtered to instance methods: the
+// methods a nominal receiver declares in its own or impl blocks.
+fn sema_call_declared_method_names(receiver: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> [String] Never! {
+    names := [String]{}
+    base_name :: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver)) ?? return names
+    if program.registration_graph == .Val(graph) {
+        if graph.source_impl_owner_modules.get(base_name) == .Val(owner_modules) {
+            loop owner_index in owner_modules {
+                loop implementation in graph.modules[owner_index].impls {
+                    if implementation.target_type_name != base_name -> next
+                    loop function in implementation.methods {
+                        if function.parameters.len() > 0 && !names.contains(function.symbol.name) -> &names.push(function.symbol.name.copy())
+                    }
+                }
+            }
+        }
+        loop nominal_row in sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(base_name)) {
+            loop function in graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods {
+                if function.parameters.len() > 0 && !names.contains(function.symbol.name) -> &names.push(function.symbol.name.copy())
+            }
+        }
+    }
+    loop candidate in sema_call_local_method_names(environment, sema_call_method_leaf(base_name)) {
+        if !names.contains(candidate) -> &names.push(candidate)
+    }
+    names
+}
+
+// Whether a nominal receiver declares `method` as a static method (no `self`
+// receiver) in its own or impl blocks.
+fn sema_call_declares_static_method(receiver: Type, method: String, program: SemaProgramTables) -> Bool Never! {
+    base_name :: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver)) ?? return false
+    if program.registration_graph == .Val(graph) {
+        if graph.source_impl_owner_modules.get(base_name) == .Val(owner_modules) {
+            loop owner_index in owner_modules {
+                loop implementation in graph.modules[owner_index].impls {
+                    if implementation.target_type_name != base_name -> next
+                    loop function in implementation.methods {
+                        if function.symbol.name == method && (function.parameters.len() == 0 || function.parameters[0].symbol.name != "self") -> return true
+                    }
+                }
+            }
+        }
+        loop nominal_row in sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(base_name)) {
+            loop function in graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods {
+                if function.symbol.name == method && (function.parameters.len() == 0 || function.parameters[0].symbol.name != "self") -> return true
+            }
+        }
+    }
+    false
+}
+
+fn sema_call_local_method_names(environment: SemaScopeEnvironment, owner: String) -> [String] Never! {
+    names := [String]{}
+    loop declaration_index in 0..<environment.declarations.len() {
+        if environment.declarations[declaration_index].item == {
+            .Struct(value) -> {
+                if value.name == owner -> sema_call_push_instance_method_names(&names, value.methods)
+            }
+            .Enum(value) -> {
+                if value.name == owner -> sema_call_push_instance_method_names(&names, value.methods)
+            }
+            .Impl(value) -> {
+                if value.type_name == owner -> sema_call_push_instance_method_names(&names, value.methods)
+            }
+            else -> {}
+        }
+    }
+    names
+}
+
+fn sema_call_push_instance_method_names(names: &[String], methods: [Func]) Never! {
+    loop method in methods {
+        if method.params.len() > 0 && method.params[0].name == "self" && !names.contains(method.name) -> &names.push(method.name.copy())
+    }
+}
+
+// Rust `method_suggestion` (method_calls.rs:89): built-in names plus the
+// receiver type's declared instance methods.
+fn sema_call_method_suggestion(method: String, receiver: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaCallMethodSuggestion? {
+    candidates := sema_call_builtin_method_names(receiver)
+    loop name in sema_call_declared_method_names(receiver, environment, program) {
+        if !candidates.contains(name) -> &candidates.push(name)
+    }
+    sema_call_suggest_method_for_receiver(method, sema_call_receiver_method_label(receiver), candidates)
+}
+
+// The suggested spelling is also the rename edit.
+fn sema_call_method_error(code: String, span: Span, what: String, why: String, fix: String, suggestion: SemaCallMethodSuggestion?) -> Diagnostic {
+    diagnostic :: sema_error(code, span, what, why, fix)
+    if suggestion == .Val(found) -> return diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: found.name})
+    diagnostic
+}
+
+// Rust `missing_instance_method_diagnostic` (method_calls.rs:181).
+fn sema_call_missing_instance_method(method: String, receiver: Type, why: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic {
+    suggestion :: sema_call_method_suggestion(method, receiver, environment, program)
+    fix :: if suggestion == .Val(found) -> "{found.fix}" else -> "check the spelling of `{method}`"
+    sema_call_method_error("E0311", span, "`{method}` isn't a method on this value", why, fix, suggestion)
+}
+
+// Rust `builtin_method_arity_diagnostic` (method_calls.rs:147): the method
+// exists for this receiver, but at another argument count.
+fn sema_call_builtin_method_arity(receiver: Type, method: String, actual: Int, span: Span) -> Diagnostic? {
+    arities := sema_call_builtin_method_arities(receiver, method)
+    if arities.len() == 0 || arities.contains(actual) -> return None
+    first := arities[0]
+    last := arities[0]
+    loop arity in arities {
+        if arity < first -> first = arity
+        if arity > last -> last = arity
+    }
+    expected :: if first == last -> "{first} argument{if first == 1 -> "" else -> "s"}" else -> "{first} to {last} arguments"
+    label :: sema_call_receiver_method_label(receiver)
+    Val(sema_error("E0104", span, "`{label}.{method}` expects {expected}, got {actual}", "`{label}` has a `{method}` method, but no form of it takes {actual} arguments", "Call `.{method}(…)` with {expected}."))
+}
+
+fn sema_call_option_nominal(ty: Type) -> Type Never! {
+    if ty == {
+        .Option(inner) -> inner
+        else -> ty
+    }
+}
+
+fn sema_call_is_iter_receiver(receiver: Type) -> Bool Never! {
+    if sema_expr_unwrap_tag(receiver) == {
+        .Apply(name, _) -> name == "Iter" || name == "ViewIter"
+        else -> false
+    }
+}
+
+// Rust `infer_method_call`'s missing-method tail (method_calls.rs:8185-8449):
+// a built-in receiver reports its arity or E0311 against its own table, a
+// structural value reports E0311, and a nominal receiver reports E0102 —
+// a protected Core type has a closed surface, a type parameter names its
+// bounds, and any other type can declare the method.
+fn sema_call_missing_method_diagnostic(receiver: Type, method: String, actual: Int, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic {
+    ty :: sema_expr_unwrap_tag(receiver)
+    source_owned :: if ty == {
+        .Named(_) | .Apply(_, _) -> sema_call_declared_method_names(ty, environment, program).len() > 0
+        else -> false
+    }
+    if sema_call_builtin_method_names(ty).len() > 0 && !source_owned && !sema_call_is_iter_receiver(ty) {
+        if sema_call_builtin_method_arity(ty, method, actual, span) == .Val(diagnostic) -> return diagnostic
+        return sema_call_missing_instance_method(method, ty, "this `{sema_call_receiver_method_label(ty)}` value has no instance method named `{method}`", span, environment, program)
+    }
+    nominal :: sema_call_option_nominal(ty)
+    type_name_value :: if nominal == {
+        .Named(name) | .Apply(name, _) -> name
+        else -> ""
+    }
+    if type_name_value == "" -> return sema_call_missing_instance_method(method, ty, "this value does not expose an instance method named `{method}`", span, environment, program)
+    display :: sema_call_method_leaf(type_name_value)
+    // Rust `infer_method_call`: a static method named through a value.
+    if sema_call_declares_static_method(nominal, method, program) -> return sema_error("E0311", span, "`{method}` is a static method on `{display}`", "static methods belong to the type name, not a value", "write `{display}.{method}(...)` instead")
+    if sema_call_is_iter_receiver(ty) && method == "nth" -> return sema_error("E0102", span, "`{display}` has no method `{method}`", "positional picks on `Iter` use one consuming path", "use `.skip(n).first()`; `nth` is not part of the API")
+    if sema_call_is_iter_receiver(ty) {
+        element :: sema_collection_receiver_element(ty) ?? Type.Int
+        if sema_call_builtin_method_arities(Type.List{element: element}, method).len() > 0 -> return sema_error("E0102", span, "`{display}` has no method `{method}`", "`{display}` is a one-pass source; `{method}` needs a materialized list, so collection consumes the source and allocates the list", "materialize it first with `.to_list()`; this consumes the source and allocates a list")
+    }
+    suggestion :: sema_call_method_suggestion(method, nominal, environment, program)
+    protected :: !source_owned && (sema_reserved_type_name(display) || type_name_value.starts_with("<corelib>/"))
+    if protected {
+        fix :: if suggestion == .Val(found) -> "{found.fix}" else -> "use a documented method on `{display}`"
+        return sema_call_method_error("E0102", span, "`{display}` has no method `{method}`", "`{display}` is a protected Core type with a closed method surface", fix, suggestion)
+    }
+    loop param in environment.generic_params {
+        if param.name != type_name_value -> next
+        bound_names := [String]{}
+        loop bound in param.bounds {
+            segments :: bound.key.split(":").to_list()
+            &bound_names.push("`{segments[segments.len() - 1]}`")
+        }
+        why :: if bound_names.len() == 0 -> "type parameter `{type_name_value}` has no bound that provides `{method}`" else -> "none of type parameter `{type_name_value}`'s bounds ({bound_names.join(" + ")}) provides `{method}`"
+        fix :: if bound_names.len() == 0 -> "add a trait bound that defines `{method}`, or use a method available on `{type_name_value}`" else -> "add a bound that defines `{method}`, or use a method from {bound_names.join(" + ")}"
+        return sema_error("E0102", span, "`{display}` has no method `{method}`", why, fix)
+    }
+    fix :: if suggestion == .Val(found) -> "{found.fix}" else -> "define it inside `struct {display}` or `impl {display}`"
+    sema_call_method_error("E0102", span, "`{display}` has no method `{method}`", "check the method name on this type", fix, suggestion)
 }

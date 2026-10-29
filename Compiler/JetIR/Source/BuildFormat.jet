@@ -1,0 +1,66 @@
+// Interpolation selectors beyond Display, Debug and the Float Fixed/Grouped
+// kernels: the selector's Core/Text/Fmt.jet helper renders the value, called
+// with the selector's constants.
+
+use jet_foundation.[Span, TStrFormat, Type]
+
+// The text `{value:format}` adds to the string: a fresh String. Pretty hands
+// the helper the Debug spelling (quotes on a String included); a String
+// parameter takes any other value's Display text; a numeric parameter takes
+// the value cast to its type.
+fn ir_string_format(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, format: TStrFormat, span: Span) -> Int Never! {
+    value_ty :: ir_ty(p, b, value)
+    concrete :: ir_subst(m, value_ty)
+    member :: ir_string_format_member(concrete, format) ?? return ir_fail_slot(&b, span, "interpolation format {format}")
+    row := -1
+    loop (index, function) in p.functions {
+        if function.name == member && ir_string_format_source(function.module_identity, function.source_file, function.kind) && ir_function_row(p, function.key) == (Val(index)) {
+            row = index
+            break
+        }
+    }
+    if row < 0 -> return ir_fail_slot(&b, span, "interpolation format {format}: Core/Text/Fmt.jet {member} is outside the checked program")
+    params :: p.functions[row].params
+    expected :: if format == {
+        .Fixed(_) | .Grouped(_) | .Hex(_) | .Sci(_) | .Percent(_) -> 2
+        .Pad(_, _) | .PadLeft(_, _) -> 3
+        else -> 1
+    }
+    if params.len() != expected -> return ir_fail_slot(&b, span, "interpolation helper {member} takes {params.len()} parameters")
+    target :: params[0].ty
+    callee :: ir_function_id(&m, p, p.functions[row].key, [Type]{}) ?? return ir_fail_slot(&b, span, "call of {member}")
+    slot :: ir_expr(&m, p, &b, value)
+    if ir_failed(b) || slot < 0 -> return -1
+    argument := slot
+    if format == .Pretty {
+        argument = ir_render(&m, p, &b, value_ty, slot, IRRender.Debug, span)
+    } else if target == Type.String && ir_untag(concrete) != Type.String {
+        argument = ir_render(&m, p, &b, value_ty, slot, IRRender.Display, span)
+    } else if target != Type.String && target != concrete {
+        target_row :: ir_value_type(&m, p, target) ?? return ir_type_fail(&b, span, target)
+        // A distinct or tagged value already is its base's row.
+        source_row :: b.f.slot_type[slot]
+        same :: source_row == target_row || (m.types[source_row].kind == m.types[target_row].kind && m.types[source_row].kind == .Float && m.types[source_row].size == m.types[target_row].size)
+        if !same -> argument = ir_numeric_cast(&m, p, &b, slot, target_row, span)
+    }
+    if ir_failed(b) || argument < 0 -> return -1
+    operands := [Int]{argument}
+    string_row :: ir_string_row(&m)
+    if format == {
+        .Fixed(count) | .Grouped(count) | .Hex(count) | .Sci(count) | .Percent(count) -> &operands.push(ir_word_const(&m, &b, count))
+        .Pad(width, fill) | .PadLeft(width, fill) -> {
+            &operands.push(ir_word_const(&m, &b, width))
+            text :: ir_temp(&m, &b, string_row)
+            ir_emit(&b.f, IROp.ConstText, text, ir_intern_text(&m, fill), -1, -1, b.line)
+            &operands.push(text)
+        }
+        else -> {}
+    }
+    result :: ir_fresh_temp(&m, &b, string_row)
+    start :: ir_args(&b.f, operands)
+    ir_emit(&b.f, IROp.Call, result, callee, start, operands.len(), b.line)
+    ir_stop_check(&m, &b)
+    if argument != slot -> ir_release(&m, &b, argument)
+    ir_release(&m, &b, slot)
+    result
+}

@@ -1,0 +1,28 @@
+use core.encoding.cbor as cbor
+
+fn run() {
+    cbor0 := cbor.parse([0]) ?? panic("appendix A accept 00")
+    print(true)
+    cbor1 := cbor.parse([1]) ?? panic("appendix A accept 01")
+    print(true)
+    cbor2 := cbor.parse([23]) ?? panic("appendix A accept 17")
+    print(true)
+    cbor3 := cbor.parse([24, 24]) ?? panic("appendix A accept 1818")
+    print(true)
+    cbor4 := cbor.parse([32]) ?? panic("appendix A accept 20")
+    print(true)
+    if cbor.parse([64]) == {
+        .Ok(_) -> print(false)
+        .Err(_) -> print(true)
+    }
+    cbor6 := cbor.parse([96]) ?? panic("appendix A accept 60")
+    print(true)
+    cbor7 := cbor.parse([159, 1, 2, 255]) ?? panic("appendix A accept 9f0102ff")
+    print(true)
+    cbor8 := cbor.parse([191, 97, 97, 1, 255]) ?? panic("appendix A accept bf616101ff")
+    print(true)
+    if cbor.parse([255]) == {
+        .Ok(_) -> print(false)
+        .Err(_) -> print(true)
+    }
+}

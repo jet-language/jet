@@ -1,0 +1,10 @@
+# Claim: erased #Off devtools publications do not satisfy DevPanel state: two E1414 errors
+# Fixture migrated: source copied verbatim from the Rust r#"..."# literal
+# Not ported: Rust checks the diagnostic list via compile_source; spec checks CLI stderr contains E1414 (count of exactly two is not expressible as a step key)
+fixture: erased_devtools_publications_do_not_feed_panel_state.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # compile fails
+stderr: ~ "E1414" # compile fails

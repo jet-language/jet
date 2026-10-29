@@ -1,10 +1,11 @@
 // Service readiness: one-shot health checks and the bounded polling gate
 // `jet dev` and `services up` wait on. Probes run with the same realized PATH
-// and variables as the service when the caller passes its environment.
+// and variables as the service: the caller lends its environment, whose
+// cache leases travel into each probe child.
 
-SERVICES_PROBE_CONNECT_MS :: prep { 300 }
-SERVICES_HEALTH_POLL_MS :: prep { 300 }
-SERVICES_NO_PROBE_STABILITY_MS :: prep { 300 }
+SERVICES_PROBE_CONNECT_MS :: 300
+SERVICES_HEALTH_POLL_MS :: 300
+SERVICES_NO_PROBE_STABILITY_MS :: 300
 
 // A `services health` result for one service.
 enum ServiceHealth {
@@ -24,45 +25,36 @@ enum ServiceHealth {
 }
 
 // One-shot readiness check; it neither waits nor retries.
-fn services_health_one(project_dir: String, plan: DevServicePlan) -[FS, Env, Exec, Net, Time, Time.Wait]> ServiceHealth Never! {
-    services_health_one_with_env(project_dir, None, plan)
-}
-
-fn services_health_one_with_env(project_dir: String, env: ShellEnv?, plan: DevServicePlan) -[FS, Env, Exec, Net, Time, Time.Wait]> ServiceHealth Never! {
+fn services_health_one(project_dir: String, env: &ShellEnv, plan: DevServicePlan) -[FS, Env, Exec, Net, Time, Time.Wait]> ServiceHealth Never! {
     if services_validate_service_name(plan.name) == .Err(_) -> return ServiceHealth.NotRunning
     if !plan.enable -> return ServiceHealth.Disabled
     dir :: services_service_dir(project_dir, plan.name)
     if files.is_file(services_supervisor_error_path(dir)) -> return ServiceHealth.Unhealthy
-    persisted :: services_read_process_state(dir) ?? return ServiceHealth.NotRunning
-    record :: persisted ?? return ServiceHealth.NotRunning
+    record :: services_read_process_state(dir) ?? return ServiceHealth.NotRunning
     state :: services_verified_state(record) ?? return ServiceHealth.NotRunning
     if !(services_process_matches_start(state) ?? false) -> return ServiceHealth.NotRunning
     resolved :: services_resolve(project_dir, plan) ?? return ServiceHealth.Unhealthy
-    if services_probe_ready(resolved, env) -> return ServiceHealth.Healthy
+    if services_probe_ready(resolved, &env) -> return ServiceHealth.Healthy
     ServiceHealth.Unhealthy
 }
 
 // The shell spelling of a readiness command, in the project directory with
 // the service's environment.
-fn services_probe_shell(command: String, resolved: ServiceResolved, env: ShellEnv?) -[Env, Exec, Time, Time.Wait]> Bool Never! {
-    spec := process.shell(command).cwd(resolved.project_dir).stdout(.Capture).stderr(.Capture)
-    if env == .Val(shell_env) {
-        applied := shell_env
-        spec = &applied.apply_to(spec)
-    }
+fn services_probe_shell(command: String, resolved: ServiceResolved, env: &ShellEnv) -[Env, Exec, Time, Time.Wait]> Bool Never! {
+    spec :: &env.apply_to(process.shell(command).cwd(resolved.project_dir).stdout(.Capture).stderr(.Capture)) ?? return false
     services_run_bounded_probe(spec, SERVICES_MAX_READY_PROBE_MS)
 }
 
-fn services_probe_ready(resolved: ServiceResolved, env: ShellEnv?) -[FS, Env, Exec, Net, Time, Time.Wait]> Bool Never! {
+fn services_probe_ready(resolved: ServiceResolved, env: &ShellEnv) -[FS, Env, Exec, Net, Time, Time.Wait]> Bool Never! {
     if resolved.ready_probe == .Val(probe) {
         return if probe == {
-            .Exec(command) -> services_probe_shell(command, resolved, env)
+            .Exec(command) -> services_probe_shell(command, resolved, &env)
             .HTTP(url, status) -> services_probe_http(url, status)
             .Notify(path) -> services_probe_notify(resolved.project_dir, path)
             .TCP(host, port) -> services_probe_tcp(host, port)
         }
     }
-    if resolved.ready == .Val(command) -> return services_probe_shell(command, resolved, env)
+    if resolved.ready == .Val(command) -> return services_probe_shell(command, resolved, &env)
     // No `ready:` and no port: a live verified process is the only signal,
     // and it already passed the identity check.
     if resolved.ports.len() == 0 -> return true
@@ -96,7 +88,7 @@ fn services_probe_http(url: String, expected_status: Int?) -[Net, Time.Wait]> Bo
     host := authority
     port := 80
     if authority.cut_last(":") == .Val(parts) {
-        if Int.parse(parts.after) == .Val(parsed) {
+        if Int.parse(parts.after) == .Ok(parsed) {
             if parsed >= 0 && parsed <= 65535 {
                 host = parts.before
                 port = parsed
@@ -105,7 +97,7 @@ fn services_probe_http(url: String, expected_status: Int?) -[Net, Time.Wait]> Bo
     }
     if host == "" || host.contains("[") || host.contains("]") -> return false
     address :: net.socket_addr_parse("{host}:{port}") ?? return false
-    stream :: net.tcp_connect_timeout(address, SERVICES_PROBE_CONNECT_MS) ?? return false
+    stream := net.tcp_connect_timeout(address, SERVICES_PROBE_CONNECT_MS) ?? return false
     net.set_read_timeout(&stream, SERVICES_PROBE_CONNECT_MS).drop("a probe without a read timeout still reads once")
     net.set_write_timeout(&stream, SERVICES_PROBE_CONNECT_MS).drop("a probe without a write timeout still writes once")
     crlf :: "{env_shell_control(13)}\n"
@@ -124,11 +116,7 @@ fn services_probe_http(url: String, expected_status: Int?) -[Net, Time.Wait]> Bo
 
 // Poll readiness until it passes or `timeout` elapses; false on timeout
 // (the caller renders E1261).
-fn services_wait_healthy(project_dir: String, plan: DevServicePlan, timeout: Duration) -[FS, Env, Exec, Net, Time, Time.Wait]> Bool Never! {
-    services_wait_healthy_with_env(project_dir, None, plan, timeout)
-}
-
-fn services_wait_healthy_with_env(project_dir: String, env: ShellEnv?, plan: DevServicePlan, timeout: Duration) -[FS, Env, Exec, Net, Time, Time.Wait]> Bool Never! {
+fn services_wait_healthy(project_dir: String, env: &ShellEnv, plan: DevServicePlan, timeout: Duration) -[FS, Env, Exec, Net, Time, Time.Wait]> Bool Never! {
     if !plan.enable -> return true
     // With no readiness probe and no port, a service is healthy only after
     // it stays alive for one bounded window, so a fast exit that a detached
@@ -138,10 +126,10 @@ fn services_wait_healthy_with_env(project_dir: String, env: ShellEnv?, plan: Dev
         .Err(_) -> false
     }
     stable_since := Int?{None}
-    deadline :: services_now_ms() + timeout.ns / 1000000
+    deadline :: services_now_ms() + timeout.ns /% 1000000
     loop {
         if services_supervisor_failure(project_dir, plan) != None -> return false
-        if services_health_one_with_env(project_dir, env, plan) == ServiceHealth.Healthy {
+        if services_health_one(project_dir, &env, plan) == ServiceHealth.Healthy {
             if !needs_stability -> return true
             since :: stable_since ?? services_now_ms()
             stable_since = Val(since)

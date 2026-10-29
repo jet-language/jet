@@ -1,0 +1,15 @@
+# tests/mir_fact_lifecycle.rs::place_only_capture_accepts_its_capture_place_anchor at tests/mir_fact_lifecycle.rs:160; hand-port
+# Claim: program.validate() accepts the borrowed capture place as a legal anchor (tests/mir_fact_lifecycle.rs:162)
+# Claim: the captured text is readable from the closure at run time (tests/mir_fact_lifecycle.rs:117-120)
+# Fixture migrated: MIR fixture built by lower_checked replaced by plain source fn run()
+# Not ported: MirProgram.validate() legality has no CLI surface; represented by clean jet check and a run that prints the capture
+fixture: place_only_capture_accepts_its_capture_place_anchor.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # tests/mir_fact_lifecycle.rs:162 validate() accepts the capture anchor: the program is accepted
+stderr: !~ "Error" # tests/mir_fact_lifecycle.rs:162 validate() accepts the capture anchor: the program is accepted
+step: jet run main.jet
+exit: 0 # tests/mir_fact_lifecycle.rs:119 the closure reads its borrowed capture
+stdout: ~ "borrowed capture" # tests/mir_fact_lifecycle.rs:119 the closure reads its borrowed capture

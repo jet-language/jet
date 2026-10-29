@@ -20,7 +20,7 @@ fn run() {
             print("sum:{compute.to_list(reduced)}")
             prediction :: compute.mse_loss(left, right) ?? panic("mse")
             print("mse:{compute.to_list(prediction)}")
-            (gradient_left, gradient_right) :: compute.gradient(loss, left.copy(), right.copy())
+            { left: gradient_left, right: gradient_right } :: compute.gradient(loss, left.copy(), right.copy())
             print("grad:{compute.to_list(gradient_left)}:{compute.to_list(gradient_right)}")
             tangent_cpu :: compute.ones([2, 2]) ?? panic("tangent")
             tangent :: compute.on_device(compute.matmul_f32_tile(tangent_cpu, compute.eye(2) ?? panic("eye")) ?? panic("tangent f32"), compute.device_vulkan()) ?? panic("tangent Vulkan")

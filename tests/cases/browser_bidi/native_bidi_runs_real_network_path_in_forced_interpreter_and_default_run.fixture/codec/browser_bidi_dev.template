@@ -1,0 +1,13 @@
+
+use core.web.browser as browser
+
+fn outcome(endpoint: String) -> String {
+    session :: browser.connect(endpoint) ?? return "caught"
+    session.close() ?? return "close-error"
+    return "connected"
+}
+
+fn run() {
+    print(outcome("ws://127.0.0.1:{free-port:invalid}/session"))
+    print(outcome("ws://127.0.0.1:{free-port:codec_surrogate}/session"))
+}

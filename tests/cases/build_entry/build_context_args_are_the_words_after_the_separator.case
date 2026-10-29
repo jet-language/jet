@@ -1,0 +1,19 @@
+# #5829: `b.args()` returns the words after `--` on `jet build`, so a
+# `fn build` can pick what it builds from them. A build that runs no
+# `fn build` refuses the words instead of dropping them.
+fixture: fixtures/build_args
+artifact: hello
+env: NO_COLOR=1
+step: jet build
+exit: 0
+file: .jet/build/hello exists
+file: .jet/build/goodbye absent
+step: jet build -- goodbye
+exit: 0
+file: .jet/build/goodbye exists
+step: {work}/.jet/build/goodbye
+exit: 0
+stdout: = "built\n"
+step: jet build main.jet -- goodbye
+exit: 2
+stderr: ~ "Error [E2104]: `jet build main.jet -- …` passes the words after `--` to `fn build`, and this build runs none" # a file build reads no words

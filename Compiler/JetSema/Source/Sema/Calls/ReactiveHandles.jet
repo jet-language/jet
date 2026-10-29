@@ -11,11 +11,6 @@ use jet_foundation.[
     FunctionDefaultRef,
     ParamZone,
     Span,
-    TCoreClosureKind,
-    TExpr,
-    TExprKind,
-    THandleOp,
-    TLambda,
     Type,
     type_name,
 ]
@@ -62,8 +57,8 @@ fn sema_reactive_value_ok(ty: Type, kind: String, span: Span, diagnostics: &[Dia
 
 fn sema_reactive_source_lambda_arity(expr: Expr) -> Int? {
     if expr == {
-        .Lambda(lambda) -> Val(lambda.params.len())
-        .Paren(value, _) -> sema_reactive_source_lambda_arity(value)
+        .Lambda(lambda, _) -> Val(lambda.params.len())
+        .Paren(value, _, _) -> sema_reactive_source_lambda_arity(value)
         else -> None
     }
 }
@@ -90,7 +85,7 @@ fn sema_reactive_call_fact(environment: SemaScopeEnvironment, program: SemaProgr
 }
 
 fn sema_reactive_core_call_value(record: CoreCallRecord, args: [TExpr], span: Span, type_args: [Type], result_type: Type, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    value :: sema_call_core_tir(record, args, span, type_args, [Bool]{}, None, result_type, sema_call_failure_carrier(Val(result_type)), expected, environment, program, &diagnostics) ?? return None
+    value :: sema_call_core_tir(record, args, span, type_args, [Bool]{}, result_type, sema_call_failure_carrier(Val(result_type)), expected, environment, program, &diagnostics) ?? return None
     if !sema_call_core_record_effects(record, span, type_args, result_type, sema_call_failure_carrier(Val(result_type)), [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return None
     Val(value)
 }
@@ -133,7 +128,7 @@ fn sema_reactive_check_retained_lambda(kind: String, argument: CallArg, expected
 }
 
 fn sema_reactive_direct_closure(kind: String, lambda: TLambda, result_type: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, type_args: [Type], diagnostics: &[Diagnostic]) -> TExpr? {
-    closure_kind :: if kind == "effect" -> TCoreClosureKind.ReactiveEffect{executable: lambda, site: span.start} else -> TCoreClosureKind.ReactiveDerived{executable: lambda, site: span.start}
+    closure_kind :: if kind == "effect" -> TCoreClosureKind.ReactiveEffect{executable: lambda} else -> TCoreClosureKind.ReactiveDerived{executable: lambda}
     value := sema_tir_node(result_type, TExprKind.CoreClosureCall{kind: closure_kind}, span)
     checked :: sema_expr_expected(value, expected, environment, program, &diagnostics) ?? return None
     if !sema_reactive_call_fact(environment, program, &scopes, &context, "core.reactive.{kind}", span, result_type, type_args, "", &diagnostics) -> return None
@@ -272,7 +267,7 @@ fn sema_call_try_reactive_handle_method(receiver: Expr, receiver_value: TExpr, m
     result_type := sema_reactive_handle_result(owner, method, receiver_value.ty)
     checked_args :: sema_reactive_checked_handle_args(owner, method, args, receiver, receiver_value.ty, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     operation :: if {
-        owner == "Effect" -> THandleOp.ReactiveEffectMethod{method: method}
+        owner == "Effect" -> THandleOp.ReactiveEffectMethod
         method == "set" -> THandleOp.ReactiveSet
         else -> THandleOp.ReactiveGet
     }

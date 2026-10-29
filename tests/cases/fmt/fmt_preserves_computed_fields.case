@@ -1,0 +1,16 @@
+# tests/fmt.rs::fmt_preserves_computed_fields at tests/fmt.rs:3838; hand-port
+# Claim: `attack: Int => strength * 2 + gear_mod` survives (tests/fmt.rs:3847)
+# Claim: `threat: Int => attack + gear_mod` survives, referencing a computed field (tests/fmt.rs:3848)
+# Claim: assert_fmt_stable: second pass identical (tests/fmt.rs:3856, 1779-1791)
+fixture: fmt_preserves_computed_fields.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt run.jet
+exit: 0 # tests/fmt.rs:3856 formats
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:3847-3848 computed field spellings kept
+stdout: ~ "attack: Int => strength * 2 + gear_mod" # tests/fmt.rs:3847-3848 computed field spellings kept
+stdout: ~ "threat: Int => attack + gear_mod" # tests/fmt.rs:3847-3848 computed field spellings kept
+step: jet fmt --check run.jet
+exit: 0 # tests/fmt.rs:1779-1791 stable

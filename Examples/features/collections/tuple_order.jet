@@ -1,0 +1,45 @@
+// Named tuples order member by member in label order: the labels sorted by
+// name, not the order they are written in (S73, D-TUPLE-ORDER1). So a
+// (key, index) pair sorts by `index` first, then `key`. sort_by names any
+// other order. The same order holds for <, sort_desc, Map and Set keys, at
+// run time and at compile time.
+fn label_order(pairs: [(key: String, index: Int)]) -> [(key: String, index: Int)] {
+    sorted := pairs.copy()
+    &sorted.sort()
+    sorted
+}
+
+fn show(title: String, pairs: [(key: String, index: Int)]) {
+    out := "{title}:"
+    loop pair in pairs -> out = "{out} {pair.key}{pair.index}"
+    print(out)
+}
+
+PAIRS :: comptime { label_order([(key: "c", index: 0), (key: "a", index: 2), (key: "b", index: 1), (key: "a", index: 1)]) }
+
+fn run() {
+    pairs := [(key: "c", index: 0), (key: "a", index: 2), (key: "b", index: 1), (key: "a", index: 1)]
+    &pairs.sort()
+    show("sort", pairs)
+    &pairs.sort_desc()
+    show("sort_desc", pairs)
+    &pairs.sort_by((left, right) -> (left.key <=> right.key).then(left.index <=> right.index))
+    show("by key", pairs)
+    show("comptime", PAIRS)
+
+    // `index` decides first; `key` only breaks a tie.
+    print((key: "z", index: 0) < (key: "a", index: 1))
+    print((key: "a", index: 1) < (key: "b", index: 1))
+
+    // A Map iterates its keys in this order: `x` before `y`. A Set keeps no
+    // order, and its sort() gives the same order.
+    cells := [(y: Int, x: Int): String]{}
+    cells[(y: 0, x: 2)] = "east"
+    cells[(y: 5, x: 1)] = "north"
+    cells[(y: 1, x: 1)] = "center"
+    loop (cell, name) in cells -> print("x{cell.x} y{cell.y} {name}")
+    seen := Set.from([(y: 9, x: 0), (y: 0, x: 9), (y: 3, x: 0), (y: 9, x: 0)])
+    out := "set sorted:"
+    loop cell in seen.sort() -> out = "{out} ({cell.x},{cell.y})"
+    print(out)
+}

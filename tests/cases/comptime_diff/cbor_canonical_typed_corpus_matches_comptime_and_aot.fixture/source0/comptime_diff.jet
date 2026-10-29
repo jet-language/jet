@@ -1,0 +1,30 @@
+use core.encoding.hex as comptime_diff_hex
+use core.encoding.json as json
+use core.encoding.cbor as cbor
+use core.encoding.hex as hex
+
+#Codable
+struct Packet { id: Int, payload: [U8] }
+
+EXPECTED_MAP :: comptime { hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical")) }
+EXPECTED_FLOATS :: comptime { hex.encode(cbor.to_bytes_canonical([Float]{ 1.5, 100000.0, -0.0 }) ?? panic("canonical")) }
+EXPECTED_NAN :: comptime { hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canonical")) }
+EXPECTED_TYPED :: comptime { hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("canonical")) }
+
+fn run() {
+    actual_map := hex.encode(cbor.to_bytes_canonical(json.parse("{{\"aa\":1,\"b\":2}}") ?? panic("json")) ?? panic("canonical"))
+    actual_floats := hex.encode(cbor.to_bytes_canonical([Float]{ 1.5, 100000.0, -0.0 }) ?? panic("canonical"))
+    actual_nan := hex.encode(cbor.to_bytes_canonical(Float.NAN) ?? panic("canonical"))
+    actual_typed := hex.encode(cbor.to_bytes_canonical(Packet{ id: 7, payload: [222, 173] }) ?? panic("canonical"))
+    if actual_map != "a261620262616101" { panic("canonical encoded-key order drift") }
+    if actual_floats != "83f93e00fa47c35000f98000" { panic("preferred Float width drift") }
+    if actual_nan != "f97e00" { panic("canonical NaN drift") }
+    if actual_typed != "a262696407677061796c6f616442dead" { panic("typed byte-string drift") }
+    comptime_diff_frame("{EXPECTED_MAP}|{EXPECTED_FLOATS}|{EXPECTED_NAN}|{EXPECTED_TYPED}", "{actual_map}|{actual_floats}|{actual_nan}|{actual_typed}")
+
+}
+
+fn comptime_diff_frame(expected_text: String, actual_text: String) {
+    print("{comptime_diff_hex.encode(expected_text.bytes())}")
+    print("{comptime_diff_hex.encode(actual_text.bytes())}")
+}

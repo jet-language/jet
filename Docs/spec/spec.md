@@ -8,16 +8,15 @@ inventory or a progress log.
 [Ratified syntax decisions](syntax-decisions.md) are the rationale and decision
 record for this contract. A decision ID is a citation, not an implementation
 status: only ratified decisions define the language. The canonical lexical ledger
-is [`Syntax.rs`](../../crates/jet-foundation/src/Syntax.rs), and
+is the [syntax registry](../../Compiler/JetFoundation/Data/Syntax/), and
 [`tests/decisions.rs`](../../tests/decisions.rs) checks that the ratified decision
 surface and ledger agree. The parser and semantic checker are the executable
-language rules; the reference implementation is in
-[`crates/jet-parser`](../../crates/jet-parser/) and
-[`crates/jet-sema`](../../crates/jet-sema/). The Prelude is under
-[`crates/jet-codegen/src/Prelude`](../../crates/jet-codegen/src/Prelude/) and
-the core library under [`Core/`](../../Core/). The Rust-hosted compiler is the
-reference implementation while the compiler is ported to Jet; this document
-states the contract, not where it is implemented.
+language rules; the implementation is in
+[`Compiler/JetParser`](../../Compiler/JetParser/) and
+[`Compiler/JetSema`](../../Compiler/JetSema/). The Prelude's Jet declarations are
+under [`Compiler/Prelude`](../../Compiler/Prelude/) and
+the core library under [`Core/`](../../Core/). This document states the
+contract, not where it is implemented.
 
 The [`Examples/`](../../Examples/) tree is the executable form of the examples in
 this document. Prefer a feature example under `Examples/features/` when checking
@@ -150,7 +149,7 @@ vocabulary](vocabulary.md).
 ## Core grammar
 
 The following compact grammar shows the surface that the rules below rely on;
-the parser and [`Syntax.rs`](../../crates/jet-foundation/src/Syntax.rs) own the
+the parser and the [syntax registry](../../Compiler/JetFoundation/Data/Syntax/) own the
 complete token ledger. `;` is shown only as the internal terminator `NL`, not as
 source syntax.
 
@@ -242,13 +241,16 @@ an explicit entry for the submitted fragment (S12, D-CLIFLAG1,
 D-FAIL-EXIT1=A).
 
 At ordinary file scope, `name :: value` declares an immutable module global and
-`name := value` declares a mutable module global. A mutable global's initializer
-is a tier-stable scalar literal; an immutable global's initializer is literal
-data (numbers, text, struct, enum-case, list, and map literals, nested freely),
-which the compile-time evaluator folds once, and every read is an ordinary
-copy (D-MODULE-VALUE1). Both are visible to functions in the file; only the
-mutable form may be assigned after initialization. Calls, operators, and name
-reads in an initializer are E0622; computation belongs in an explicit function.
+`name := value` declares a mutable module global. A mutable or `#Persist`
+global's initializer is a tier-stable scalar literal; any other initializer is
+E0622. An immutable global's initializer is any expression, computed once in
+dependency order before `fn run`, and every read is an ordinary copy
+(D-MODULE-VALUE1). An initializer that stops stops the program before `fn run`
+with its normal report, the same way on every tier. Compile-time code reads an
+immutable global only when the build can compute it, which needs a pure
+evaluation that succeeds (E0627). Only an explicit `comptime { … }` reads build
+inputs. Both globals are visible to functions in the file; only the mutable
+form may be assigned after initialization.
 Typed scalar literals such as `I64{0}`, `I64{-1}`, and `F32{1.25}` retain their
 checked scalar type in module storage (D-BIND-BARE1); the inner value must still
 be literal data, not a call or arithmetic expression.
@@ -258,8 +260,8 @@ The `const` keyword is retired and is recognized only to teach its replacement
 (E0146). A compile-time constant is an ordinary ALL_CAPS name, `NAME :: value`,
 described below.
 The retired `#Known` constant, branch, and block forms teach E0377 and recover
-their compile-time form. Their replacements use `NAME :: prep { value }`,
-`prep if condition { … }`, and `prep { … }` (D-META-STAGE1=B,
+their compile-time form. Their replacements use `NAME :: comptime { value }`,
+`comptime if condition { … }`, and `comptime { … }` (D-META-STAGE1=B,
 D-PREP-SURFACE2=A). Constant and local-name repairs use the same canonical
 identifier-casing algorithm as semantic diagnostics.
 
@@ -438,9 +440,9 @@ parentheses: `value ?? (next)`.
 A compile-time constant is an ordinary ALL_CAPS name: an immutable module-level
 `::` binding such as `MAX_RETRIES :: 3` is evaluated while building and read as
 `MAX_RETRIES`; failure to compute it stops the build (D-PREP-SURFACE2=A). In a
-block, names stay snake_case (D-SHAPE-CASE1): `lanes :: prep { calculate() }`
+block, names stay snake_case (D-SHAPE-CASE1): `lanes :: comptime { calculate() }`
 evaluates its single final expression while building, and names bound inside a
-`prep { … }` statement block stay readable after it. Ordinary foldable expressions need no constant. At file
+`comptime { … }` statement block stay readable after it. Ordinary foldable expressions need no constant. At file
 scope, other `name :: value` and `name := value` bindings remain runtime module
 globals; they do not require `#Persist`. `#Static NAME :: value` requests a
 stable-address Rust static when the contract needs one, and `#Inline NAME ::
@@ -490,7 +492,7 @@ D-SHAPE3a, D-SHAPE-OPAQUE-INFER1).
 
 Struct and enum bodies may declare methods with `fn` or `pub fn`; `pub`
 exports the method, while an unqualified method remains private. A build-time
-method places `prep` directly before `fn`, including `pub prep fn`.
+method places `comptime` directly before `fn`, including `pub comptime fn`.
 Methods declared inside a generic struct share that struct's type-parameter
 scope; Core's generic record methods use this form rather than generic `impl`
 heads.
@@ -565,7 +567,7 @@ trait in or out (`#Debug`, `#!Debug`), while a hand-written implementation wins.
 `Decode.decode(tree: Dyn) -> Self ![FieldError]` are ordinary trait methods.
 `Dyn.decode<T>()` is the public typed-dispatch path for primitive,
 container, generated, and hand-written implementations. A built-in derive adds
-typed Jet items beside the marked type and sends them through the same sema, TIR,
+typed Jet items beside the marked type and sends them through the same sema, IR builder,
 and codegen path as hand-written members. JSON therefore compares the same
 encoded bytes and decoded values for generated and hand-written codecs. A
 user-defined derive expands only when its provider or target is entry-local;
@@ -629,7 +631,7 @@ uses the host OS by default. Ungated code can select the surviving implementatio
 with the compiler-known switch
 
 ```jet
-prep if $build.os == {
+comptime if $build.os == {
     .Linux -> …
     .MacOS -> …
     .Windows -> …
@@ -1206,8 +1208,8 @@ copy :: values[0..1].copy()
 The windows above are disjoint. A bare read window remains a view in a non-owning
 place and materializes when it enters an owning slot. Constant disjoint indexes
 and ranges lower through a safe structural split; known fields are disjoint;
-dynamic projections conservatively overlap. Jet's sema, not rustc, validates
-these facts. A call or temporary is not a place: bind it first (E0213). The
+dynamic projections conservatively overlap. Jet's sema validates these facts.
+A call or temporary is not a place: bind it first (E0213). The
 retired `values.view(0..1)` spelling is E0214 and points to `values[0..1]`.
 Method calls do not extend a place, so `&values[0..1].sort()` writes the maximal
 range and then calls the method on that window (D-SHAPE-PLACE1=A).
@@ -1256,7 +1258,7 @@ Public API snapshots publish each relation canonically. One source is
 `source;access:...;path:...`; a union is
 `one_of(source;path:...,source;path:...);access:...`, sorted by stable source
 identity. Adding, removing, or changing a possible source changes the API digest
-and is a breaking provenance change. TIR receives only sema-approved provenance
+and is a breaking provenance change. The IR builder receives only sema-approved provenance
 and lowering flags; it does not infer owners, overlaps, lifetimes, or escapes.
 
 A kept link into a growable container follows D-LINK-ITEM1=A. A brief link
@@ -1362,15 +1364,32 @@ for the bounded-queue shape.
 Inside `#Transact`, writes to `Shared` values are buffered and commit atomically.
 The body runs exactly once. At commit, touched values are write-locked together
 in stable-address order, buffered writes are applied, and the locks are released.
-Contention waits; it does not retry the body. A `?` failure or early return
-before commit drops buffered writes. Irreversible `Net`, `FS`, or `Exec` effects
-inside the body are E0746; move them after the transaction or register them with
-`on_commit` on a named transaction. A transaction name is optional; the named
-form exposes `on_commit` and `on_rollback`. `name.on_rollback(() -> { … })`
-hooks run in reverse registration order after a `?` failure or early return and
-are dropped on a clean commit. Registering one takes control of undo for the
-handled value, so that value is not automatically snapshotted (D-STM1,
-D-CONC-STM1=A, D-TXN-ROLLBACK).
+Contention waits; it does not retry the body. Irreversible `Net`, `FS`, or `Exec`
+effects inside the body are E0746; move them after the transaction or register
+them with `on_commit` on a named transaction. A transaction name is optional;
+the named form exposes `on_commit` and `on_rollback`. Registering an
+`on_rollback` hook takes control of undo for the handled value, so that value is
+not automatically snapshotted (D-STM1, D-CONC-STM1=A, D-TXN-ROLLBACK).
+
+Every exit other than the body's clean end rolls back, the same way on `jet run`,
+`jet build` and `--release`: a failure that propagates out of the block, an
+early `return`, a `break` or `next` out of the block, a panic or trap, a
+cancellation or deadline, `process.exit` and `os.stop`. Rollback restores the
+snapshotted values (latest first), drops the buffered `Shared` writes, then runs
+the `on_rollback` hooks in reverse registration order, in the same cleanup that
+runs the frame's closes and guards (D-FAIL-EXIT1). A clean commit drops the
+rollback hooks unrun. Each hook runs with the stop that is unwinding the frame
+masked (a cancellation or deadline does not reach it) and under its own
+deadline of 5 seconds, observed at the hook's wait points like any `#Context`
+deadline. A failure inside a hook (a panic, a trap, its deadline) is never
+fatal: it stops only that hook, the remaining hooks and the frame's cleanup
+still run, and it is reported as a secondary failure after `while rolling back,
+this also failed:`. It is appended to the report of the panic or stop being
+unwound, or written to stderr when the rollback came from a propagated failure
+or an early exit, and the program goes on. Rollback never turns a panic into a
+recoverable error: after the hooks the panic keeps propagating (D-NOPANIC1). A
+hard kill (SIGKILL, power loss) runs nothing; the buffered writes were never
+applied, so no half transaction is visible (#5477).
 
 ```jet
 fn transfer(from: Shared<Account>, to: Shared<Account>, amount: Int) {
@@ -1421,6 +1440,18 @@ fn run() {
 See [`entity_world.jet`](../../Examples/features/memory/entity_world.jet) and
 [`entity_tree.jet`](../../Examples/features/memory/entity_tree.jet) for pool
 links and nested writes (D-POOLID-API1).
+
+`Rows<T>` (`core.collections`) is an add-only table and `Row<T>` its 4-byte
+row handle. `&rows.add(v)` appends `v` and returns its `Row<T>`; `rows[row]`
+reads or writes that row (`rows[row].f = v` too); `rows.f` is a read-only
+`[F]` of field `f` of every row, in row order; `row.index()` is the row's
+position as an `Int`; `freeze(rows)` snapshots the table. There is no remove,
+insert, or sort, so a handle never goes stale and needs no generation. A handle
+indexes only a table of its own row type: `Row<Node>` indexing a `Rows<Ty>` is
+E0112 at compile time. `add` panics past 4,294,967,295 rows. Row fields are
+meant to be scalars or `Row` handles, which a later column layout keeps one
+array per field (D-COLUMNS1). See
+[`rows.jet`](../../Examples/features/collections/rows.jet).
 
 ### Transitive memory facts
 
@@ -1487,6 +1518,10 @@ error[E0029]: two access markers on one parameter
    |           ^^ remove one access marker
 ```
 
+A value takes one marker too: `^^handle.join()` or `&^items` on an argument or
+expression is E0029 ("this value has two access markers"); write
+`^handle.join()` (D-SHAPE-COPY1=A).
+
 `.copy()` is a method call, not an access marker. Raw-pointer access (`p.*` or
 prefix `*x`) is a separate `#Unsafe`-gated mechanism. It does not change the
 parameter-access table (D-MEM1, D-COPY-WORD1=A, D-CAP9).
@@ -1534,10 +1569,10 @@ default `jet run`, and interpreter execution.
 This section defines effect inference, authority, and the checked tooling that
 exposes those facts. It is for authors of functions and packages, and for tools
 that consume checked programs. Executable truth lives in the [effect
-table](../../crates/jet-codegen/src/Prelude/Effects.jet), [syntax
-tables](../../crates/jet-foundation/src/Syntax/), [sema effect
-checker](../../crates/jet-sema/src/Sema/Effects.rs), [inspect
-projections](../../Source/CmdExpand.rs), and [expand
+table](../../Compiler/Prelude/Effects.jet), [syntax
+tables](../../Compiler/JetFoundation/Data/Syntax/), [sema effect
+checker](../../Compiler/JetSema/Source/Effects/), [inspect
+projections](../../Compiler/JetCli/Source/Cli/Expand.jet), and [expand
 tests](../../tests/cli_parts/expand.rs).
 
 Every function has an **effect set**: the ambient powers exercised by its body,
@@ -1621,33 +1656,47 @@ default and does not alter these sema facts.
 
 ### Application authority
 
-A manifest-less program, and a `package.jet` that writes no
-`authority.holds`, receive the beginner grant `IO`, `Mem.Alloc`, and
-`Exec.Args`. This covers output, ordinary allocation, and argument reads. It
-never covers the `Exec` root, which also starts processes. Written
-`authority.holds` replace that default with exactly the written policy. A deny
-wins over a grant, and the floor does not silently grant filesystem, network,
-process, or other roots. An undecided or denied required effect stops before
-host state changes with E1803, whose Why is one plain sentence naming what the
-program does; the required, granted, denied, and policy-identity facts stay
-separate in its structured detail for `--json` (D-AUTH-AMBIENT1). In a
-terminal, a run with undecided authority first lists each one in plain words
-and asks `Run it? [Y/n/always]`: Enter runs once, `n` stops with exit code 1,
-and `always` writes the complete grant into the script's package block or
-`package.jet` (D-SCRIPT-CONFIRM1). Without a terminal the run stops with
-E1803 and its Fix names the exact `--allow` command. A program without
-`package.jet` has no manifest to edit, so its E1803 names the complete
-required row and carries the leading inline `package { … }` block
-(D-ECO-INLINEPACKAGE1) that declares it; because the block replaces the
-beginner default, the row lists every required effect, not only the
-undecided ones. Rights widen only by a written word, so the edit is graded
+Every program holds the beginner floor `IO`, `Mem.Alloc`, and `Exec.Args`,
+whether it is manifest-less, has a `package.jet` that writes no `authority`,
+or writes an `authority` block. This covers output, ordinary allocation, and
+argument reads. It never covers the `Exec` root, which also starts processes.
+A written `allow` row adds rights to the floor; a floor right leaves only
+through `deny`, and a deny wins over every grant (D-AUTH-AMBIENT3). The floor
+never silently grants filesystem, network, process, or other roots. Each
+`deny` entry of a package is also a whole-program prohibition, exactly as if
+every function of the package wrote `-[!E]>`: `jet check`, `jet build`, and
+`jet run` report a function that reaches a denied right with E0749
+(D-AUTHORITY-DENYROW1). An undecided required effect, or one a command-line
+`--deny` removes, stops before host state changes with E1803, whose Why is
+one plain sentence naming what the program does; the required, granted,
+denied, and policy-identity facts stay separate in its structured detail for
+`--json` (D-AUTH-AMBIENT1). In a terminal, a run with undecided authority
+first lists each one in plain words and asks `Run it? [Y/n/always]`: Enter
+runs once, `n` stops with exit code 1, and `always` writes the grant into the
+script's package block or `package.jet` (D-SCRIPT-CONFIRM1). Without a
+terminal the run stops with E1803 and its Fix names the exact `--allow`
+command. A program without `package.jet` has no manifest to edit, so its
+E1803 names the undecided rights and carries the leading inline
+`package { … }` block (D-ECO-INLINEPACKAGE1) that declares them; the floor
+stays granted beside that row, so the row lists only the rights the floor
+does not hold. Rights widen only by a written word, so the edit is graded
 `needs-review` and `jet fix --all` inserts it (D-RIGHTS-DIAG1).
 
 Command-line authority uses one rights surface: `--allow=<RIGHTS>` and
 `--deny=<RIGHTS>`, where the value is a comma-separated list of canonical roots
 or leaves, such as `--allow=FS.Read,Time`. The spaced form is also accepted.
+`-A` (`--allow-all`) is `--allow` with every right; a deny still wins over it.
 The CLI has no per-effect flag family: all authority uses this one rights
 surface (D-RIGHTS-CLI1).
+
+A file whose first line is a `#!/...` launch line, such as
+`#!/usr/bin/env jet`, is a script. A script runs as `-A` runs a program, with
+the invoking user's authority as a shell script has it: it needs no package
+block and never stops with E1803 for an undecided right, and it is still
+fully checked. A script is a standalone program wherever it lives, never a
+member of the package around it. `jet <file> [args...]` runs a file, and every word after the
+file is the program's, so an executable script runs as `./tool.jet args`.
+An unchanged script reruns its kept build without compiling.
 
 ### Function and block ceilings
 
@@ -1830,8 +1879,8 @@ CI or an administrator supplies the floor through
 The path is retained as provenance, and an unreadable or malformed configured
 file fails closed. `jet inspect gates --kind unsafe FILE` reports each gate,
 operation, discharge state, and effective policy. Assertions erase in sema
-before the shared AOT
-or development TIR boundary. See
+before the shared IR
+boundary. See
 [`Examples/features/lowlevel/unsafe_obligations.jet`](../../Examples/features/lowlevel/unsafe_obligations.jet). (D-UNSAFE-OBLIG1)
 
 ### One audited-gate law
@@ -1840,7 +1889,7 @@ Every deliberate gate uses the same organization → package → module →
 function → block tightening ladder. The policy keys are `unsafe`, `impure`,
 `nondeterministic`, `dependency_grant`, `build_flag`, `session_flag`,
 `trust_grant`, `force_pin`, `taint_scrub`, `duty_drop`, `state_transition`,
-`precision_demotion`, `structure`, and `lint_allow`. The first three retain
+`precision_demotion`, `structure`, `lint_allow`, `check_removal`, and `link_override`. The first three retain
 their existing modes; every added key accepts `.GateOnly` (the default) or
 `.Forbid`. An organization's `.Forbid` cannot be widened by a package
 `.GateOnly` or a command-line allowance. Refusal reports the gate kind, its
@@ -2388,7 +2437,7 @@ cancelled (D-CANCELMODEL1=C, D-SHIELDNAME1=A).
 at the call site:
 
 ```jet
-(tx, rx) :: channel<Int>()
+{ sender: tx, receiver: rx } :: channel<Int>()
 tx.send(7)
 value :: rx.receive() ?? panic("channel closed")
 ```
@@ -2846,7 +2895,7 @@ records its identity.
 The identity includes the descriptor, source and worker bytes, runtime,
 native toolchain, and typed function list. The source fixture is
 [`Examples/interop/python`](../../Examples/interop/python); the generated
-surface and effect spelling are asserted in [`tests/ffi_python.rs`](../../tests/ffi_python.rs). (D-FFI-PY1)
+surface and effect spelling are asserted in [`tests/cases/ffi_python`](../../tests/cases/ffi_python/). (D-FFI-PY1)
 
 ### JavaScript and TypeScript
 
@@ -3248,15 +3297,16 @@ source. Regeneration is explicit. Writing the default destination with a
 different recorded command is E2104, an unreadable input or unwritable output
 is E2105, and an invalid schema or input with no record is E3208. The generic
 binder implementation and CLI dispatch live in
-[`Source/CmdDevTools.rs`](../../Source/CmdDevTools.rs). (D-BOUND-BIND1, D-NAME-FILES1)
+[`Bindings.jet`](../../Compiler/JetCli/Source/Cli/Bindings.jet) and
+[`InspectB.jet`](../../Compiler/JetCli/Source/Cli/InspectB.jet). (D-BOUND-BIND1, D-NAME-FILES1)
 
 ## Browser effects and web values
 
 `core.web` is the server-rendered web application surface over `core.http`; its
 `App`, pages, sessions, forms, and live records are Jet values. Browser-owned
 operations carry the `Browser` effect and are lowered by the web target. The
-source authority is [`Core/web/web.jet`](../../Core/web/web.jet), while the
-browser test controller is [`Core/web/browser.jet`](../../Core/web/browser.jet). (D-FLAGSHIP-WEBAPI1)
+source authority is [`Core/Web/Web.jet`](../../Core/Web/Web.jet), while the
+browser test controller is [`Core/Web/Browser.jet`](../../Core/Web/Browser.jet). (D-FLAGSHIP-WEBAPI1)
 
 ### Browser events, values, and storage
 
@@ -3274,9 +3324,9 @@ For example, the browser conformance surface uses
 `web.on("#new-task", "input", handler)` and
 `web.storage.local.set("draft", web.value("#new-task"))`. The generated web
 runtime uses `addEventListener`, DOM selection, `localStorage`, and
-`sessionStorage`; native codegen provides inert checked routes rather than
-asking rustc to type-check browser APIs. The round-trip is exercised by
-[`tests/web_build.rs`](../../tests/web_build.rs).
+`sessionStorage`; native codegen provides inert checked routes for the browser
+APIs. The round-trip is exercised by
+[`tests/cases/web_build`](../../tests/cases/web_build).
 
 ### Web queries
 
@@ -3307,8 +3357,7 @@ queued payloads and invalidation targets under
 `$HOME/.local/state/jet/web-query-queue.v1`; it uses a temporary file and atomic
 rename and reports a durability error when no usable state directory or queue
 file is available. Query state and queue transitions are defined by
-[`Core/web/query.jet`](../../Core/web/query.jet) and
-[`CoreLib/Top/WebQuery.rs`](../../crates/jet-codegen/src/Prelude/CoreLib/Top/WebQuery.rs). (D-WEBQUERY1)
+[`Core/Web/Query.jet`](../../Core/Web/Query.jet). (D-WEBQUERY1)
 
 ### Events and hooks
 
@@ -3371,8 +3420,8 @@ Canvas session attached to the live Jet identity consume that validated source;
 a source-call match alone is not a runtime observation. The observation writer
 bounds event history and does not include channel values, task locals,
 environment, or credentials. The executable event example is covered by
-[`tests/canvas.rs`](../../tests/canvas.rs) and the public API by
-[`Core/event/event.jet`](../../Core/event/event.jet). (D-OBSERVE-LIVE1, D-OBSERVE-TASK1)
+[`Compiler/JetLSP/Tests/Integration`](../../Compiler/JetLSP/Tests/Integration/) (`Canvas*.jet`) and the public API by
+[`Core/Event/Event.jet`](../../Core/Event/Event.jet). (D-OBSERVE-LIVE1, D-OBSERVE-TASK1)
 
 ## Terminal direct input
 
@@ -3421,7 +3470,7 @@ reports files that would change and exits nonzero without writing them; add
 `--diff` to the check for unified diffs. `jet fmt -` reads source from stdin
 and writes formatted source to stdout; `--stdin-path=<label>` supplies the
 reported source name. These commands run the lexer, parser, and printer, not
-sema or rustc. (S44)
+sema. (S44)
 
 The formatter also accepts `--lang`, `--simplify`, `--changed`, and
 `--explicit-copies`. `--simplify` opts into the ratified simplest spellings;
@@ -3448,7 +3497,7 @@ carrier is preserved byte-for-byte, including its source spans; only the Jet
 source after the carrier is formatted. The driver preflights every selected
 file before writing any file, so one read or parse failure leaves the batch
 unchanged. The formatter contract is exercised by
-[`tests/fmt.rs`](../../tests/fmt.rs); its idempotence law is
+[`tests/cases/fmt/`](../../tests/cases/fmt/); its idempotence law is
 `fmt(fmt(source)) == fmt(source)`.
 
 ## Writing and running tests
@@ -3525,8 +3574,9 @@ or the print-only entry plus the commented command homes
 name is E2104. `--annotated` includes commented example dependencies.
 The same command family also provides `jet new service|route|job|migration` for
 backend source scaffolds; those subcommands have their own `--path`, `--route`,
-`--model`, SQL, risk, lock, and preview/apply options. The scaffold source is
-the command implementation in [`Source/CmdCompile.rs`](../../Source/CmdCompile.rs).
+`--model`, SQL, risk, lock, and preview/apply options. The `new` command
+implementation is in [`Front.jet`](../../Compiler/JetCli/Source/Cli/Front.jet);
+the backend scaffold subcommands are not yet ported and report that.
 (D-CLI-RECIPE1, D-ILE1, D-CLI-BARE1, D-VERDICT-678-1)
 
 Inside a package, bare `jet run`, `jet dev`, `jet check`, `jet build`, and
@@ -3572,13 +3622,119 @@ claim's execution record.
 
 ## Size-oriented builds and language tooling
 
+### Build options
+
+Build options come from one table (`JET_BUILD_OPTIONS`, #5005). Each row is
+settable in three places that spell it the same way: a profile field in
+`package.jet` (`build: { release: Build{ optimize: full } }`), a call in
+`fn build` (`b.optimize(.Full)`), and a flag (`--optimize=full`; the `=` is
+required). Layers apply in order over the command's stock values (`jet build`
+optimizes `basic`; `jet run`, `jet dev` and `jet test` optimize `none`):
+profile, then `fn build`, then the flag. A flag that replaces a profile or
+`fn build` value prints one `note:` line naming the replaced value and where it
+was written. `b.pin(.optimize, .Full)` fixes the value for every build; a flag
+with another value is E2113. `jet run` reads profiles and flags, not
+`fn build`. Example:
+[`Examples/features/tooling/build_options`](../../Examples/features/tooling/build_options/run.jet).
+
+The `bounds` row says what a failed list bounds check does: `fatal` (the
+stock everywhere) stops the program, `report` writes the failure to stderr and
+goes on with the access unchecked, `off` drops the check. It applies only to
+the built package's own code; dependencies and Core keep their fatal checks.
+`report` and `off` remove a memory-safety check, so each is a `check_removal`
+gate (see One audited-gate law): the command prints a `note:` naming it
+(`--quiet` drops it), `jet inspect gates FILE --bounds=off` lists it, and a
+package or organization `policy: { check_removal: .Forbid }` refuses it with
+E3415 before the native program is built. Jai's `null` and `casts` checks have no row: a
+reference is never null and a raw pointer's validity is the `#Unsafe` author's
+obligation (I1), and a conversion is total or returns an Optional
+(D-SHAPE-CONVERT1), so there is no check to switch. A profile field, flag or
+`fn build` call of either name is refused with that law. Example:
+[`Examples/features/tooling/build_bounds`](../../Examples/features/tooling/build_bounds/run.jet).
+
+The `debug_info` and `small` rows hold a Bool: a profile field writes
+`debug_info: false`, `fn build` writes `b.debug_info(false)`, and the flag
+writes `--debug-info=false`; a bare `--small` or `--debug-info` means `true`.
+`debug_info` (stock `true`) says whether the image carries DWARF debug info.
+With `false` the image has no `.debug_*` section; `.eh_frame` stays, and a
+crash report prints the faulting address and the return addresses of its
+frames instead of function names and lines.
+
 ### Size-oriented builds
 
-`jet build --small` selects the size-oriented build profile. The profile uses
-`opt-level=z`, fat LTO, `panic=abort`, and stripped symbols rather than the
-speed-oriented defaults. The command-line help describes the flag as
-“Favor a smaller binary”; it does not promise a particular byte-size ratio
-(S15).
+`small` (stock `false`) favors a smaller binary: with `true` the optimizer
+inlines only within the O1 limits (callee size and per-caller budget, and no
+once-called callees) at any `optimize` level, so inlining grows the code no
+more than `optimize: basic` does. `jet build --small` is `--small=true`. Jai's
+`min_size` has no row, since the native backend has no separate size pass. The
+command-line help describes the flag as “Favor a smaller binary”; it does not
+promise a particular byte-size ratio (S15). Example:
+[`Examples/features/tooling/build_debug_info`](../../Examples/features/tooling/build_debug_info/run.jet).
+
+`inline` says which callees the optimizer inlines at `optimize: basic` and
+`full` (`none` inlines none). `auto` (the stock) picks them by size, within the
+level's limits. `always_marked` takes only the functions marked
+`#Inline(Always)`, at every direct call the inliner can splice, whatever their
+size and with no per-caller budget (`small` does not limit them). The inliner
+cannot splice a recursive callee, a callee that writes a parameter, an
+`#FFI(asm)` leaf, or a callee from another file whose arithmetic can stop.
+`off` inlines nothing. `fn build` writes `b.inline(.AlwaysMarked)`, and the
+flag writes `--inline=always_marked`. Example:
+[`Examples/features/tooling/build_inline`](../../Examples/features/tooling/build_inline/run.jet).
+
+### Fault reports and unreached functions
+
+`backtrace` (stock `full`) says what a native fault report prints after its
+first line. `full` prints every Jet frame with its file and line, read from the
+image's debug info. `brief` prints only the faulting frame. A stack-overflow
+report names the innermost Jet function and its line under both `full` and
+`brief`. `off` prints no frame: the report is the stop line alone, for example
+`Stop [E3012]: Stack overflow`. Naming frames needs `debug_info`, so writing
+`backtrace: full` (in a profile, in `fn build` or as `--backtrace=full`)
+together with `debug_info: false` is refused with E2104. The stock `full` under
+`debug_info: false` prints the return addresses instead.
+
+`dead_code` (stock `remove`) says whether the image keeps functions the entry
+never reaches. `remove` builds only the reached ones. `keep` also builds every
+non-generic function of the package's own modules, so the image carries them
+(a generic function is still built only for the instances a call reaches).
+`fn build` writes `b.backtrace(.Brief)` and `b.dead_code(.Keep)`, and the
+flags write `--backtrace=brief` and `--dead-code=keep`. Example:
+[`Examples/features/tooling/build_backtrace`](../../Examples/features/tooling/build_backtrace/run.jet).
+
+### Output places, link inputs and targets
+
+The `output_dir`, `libs`, `link_args`, `os` and `min_os` rows place the
+executable, add native link inputs and name the target. `output_dir` and
+`min_os` hold a string (`output_dir: "dist"`, `b.output_dir("dist")`,
+`--output-dir=dist`); `libs` and `link_args` hold a list of strings
+(`libs: ["z"]`, `b.libs(["z"])`), and each flag adds one item
+(`--libs=z --libs=bz2`). `fn build` writes a string or list literal.
+
+`output_dir` (stock `""`, which is `.jet/build`) is the directory `jet build`
+writes its executables to, under the package root unless it is absolute. It
+places a product without changing its bytes, so no cache key names it.
+`jet run`, `jet dev` and `jet test` write no executable for it to place, and
+a value written for them is refused with E2104.
+
+`libs` names more C libraries the native link resolves foreign symbols
+against. Each is a static archive, found like an undeclared `#Link` library:
+in a `link_args` `-L` directory, then through `pkg-config`, then on the C
+compiler's search path. `link_args` adds `-L<dir>` (a directory searched
+first), `-l<name>` (a library, as in `libs`) and `.a` archive paths, under the
+package root unless absolute. The native linker takes no flags and reads `ar`
+archives only, so any other word is refused with E2104. Link inputs the
+program's own declarations don't name are a `link_override` gate (see One
+audited-gate law): `jet inspect gates FILE --link-args=-lz` lists it, and a
+package or organization `policy: { link_override: .Forbid }` refuses it with
+E3415 before the program is linked.
+
+`os` (stock `linux`; also `macos`, `windows`, `web` and `freestanding`) is the
+operating system the image runs on. The native backend writes Linux x86-64 ELF
+images, so every other value is refused with E2104. `min_os` (stock `""`) is
+the oldest OS version the image runs on; a Linux ELF image has no versioned
+ABI floor, so any value is refused with E2104. Example:
+[`Examples/features/tooling/build_link_inputs`](../../Examples/features/tooling/build_link_inputs/run.jet).
 
 ### Language server
 
@@ -3593,8 +3749,8 @@ The LSP integration coverage is in `tests/lsp.rs`.
 
 The VS Code/Cursor client in `Tools/editors/vscode/` provides the TextMate grammar
 and LSP transport. `install.sh` packages the extension. Server discovery uses
-`jet.languageServerPath`, then `<workspaceFolder>/target/debug/jet`, then
-`jet` on `PATH`; `jet self lsp` does not invoke `rustc`.
+`jet.executablePath`, then the legacy `jet.languageServerPath`, then `jet` on
+`PATH`; `jet self lsp` does not invoke `rustc`.
 
 ### Hand-rolled parser contracts
 
@@ -3705,8 +3861,8 @@ and continues with session-only history (D-FE-REPL-HISTORY1=A).
 ## `jet inspect expand`
 
 `jet inspect expand` is the single transparency command for compiler-inferred
-facts. It reads the ordinary checked bundle; it does not run a second analysis
-or ask rustc.
+facts. It reads the ordinary checked bundle; it does not run a second
+analysis.
 
 ```text
 jet inspect expand --facts <lens> <file.jet>
@@ -3752,7 +3908,7 @@ retains the stable `effect roles` header and grouped lens lines including
 are skipped in the bare form. In JSON, a usage error starts with the
 `jet.status/v1` envelope and an unknown lens carries `"code":"E2941"`.
 
-Lenses live in one static registry in `Source/CmdExpand.rs`. A future ratified
+Lenses live in one static registry in `Compiler/JetCli/Source/Cli/Expand.jet`. A future ratified
 projection adds a row rather than a new subcommand or mechanism-specific flag
 (D-EXPANDCLI1).
 
@@ -3979,8 +4135,8 @@ completion, and typo suggestions. Daily commands such as `jet run`, `jet build`,
 actions use `jet inspect`; among them are `semindex`, `output`, `expand`,
 `schema`, `codemod`, `compiler`, `graph`, and `outdated`. A bare moved word is
 E2101 and names its canonical route; it is not a compatibility alias. The
-registry source is `crates/jet-cli/src/CLI.rs` and the runtime dispatch is in
-`Source/` (D-SHAPE6, D-CLI-ONE1).
+registry source is `Compiler/JetFoundation/Source/Registry/CLICommands.jet` and the runtime
+dispatch is in `Compiler/JetCli/Source/Cli/` (D-SHAPE6, D-CLI-ONE1).
 
 ### Typed entry signatures
 
@@ -4079,7 +4235,7 @@ fn verify_release() {}
 
 An Executable takes zero or one supported typed CLI parameter; a Service or
 Check takes no parameters. Each returns `Unit` or `Unit ?`. Sema resolves and
-validates the reference before TIR or Rust emission and publishes its definition
+validates the reference before the IR is built and publishes its definition
 and effect row to semantic tooling.
 With no explicit selection, a legacy `fn run` wins; otherwise one compatible
 Executable is selected. Multiple candidates are E1321 with a sorted list
@@ -4208,9 +4364,12 @@ and LSP mask only those bytes, preserving offsets; they do not reimplement
 Package fields. `priv(package) module` keeps package-scoped privacy.
 
 Only one inline block may appear, and it must precede every other top-level
-declaration. A byte-zero `#!/...` launch header may precede it. A malformed
-or unbalanced block is E1362, a non-leading block is E1360, and a duplicate is
-E1361. Coexistence with a project `package.jet` is E1363. The file otherwise
+declaration. A byte-zero `#!/...` launch header may precede it. An
+unbalanced block is E1362, a non-leading block is E1360, and a duplicate is
+E1361. A balanced block's field errors are the diagnostics `package.jet`
+reports for the same body (an `authority:` field error is E1221 at the
+carrier file), never a generic wrapper. Coexistence with a project
+`package.jet` is E1363. The file otherwise
 has normal single-file package context and does not create a synthetic
 manifest (D-ECO-INLINEPACKAGE1).
 
@@ -4264,10 +4423,12 @@ manifest's `deps` block without discarding their declarations
 
 ## Sandboxed WASM packages
 
-A package with `target: sandbox` compiles to an isolated `wasm32` Component
-Model module. A native host loads and calls it across the Component boundary;
-the sandbox does not require a `#Unsafe` gate. This application-sandbox world
-is distinct from PATH helpers and from the compiler-extension world.
+A sandbox is an isolated `wasm32` Component Model module. A native host loads
+and calls it across the Component boundary; the sandbox does not require a
+`#Unsafe` gate. This application-sandbox world is distinct from PATH helpers
+and from the compiler-extension world. The compiler does not build sandbox
+Components: `jet build` has no sandbox target, and a host loads a Component
+that was built ahead of time.
 
 ```jet
 // package.jet
@@ -4282,9 +4443,8 @@ fn scale(a: Float, b: Float) -> Float {
 }
 ```
 
-The sandbox build derives a WIT world from the entry file's top-level functions
-surface, emits guest code, and uses the Component Model toolchain to produce a
-`.wasm` component. A host uses a typed plugin handle:
+A sandbox's WIT world lists the entry file's top-level functions. A host uses a
+typed plugin handle:
 
 ```jet
 use core.plugin as plugin
@@ -4327,11 +4487,11 @@ export `load` and no frames.
 
 The manifest `export:` target names the interface and defaults to the package
 name. The frozen public interface is keyed as `plugin__<export>` in
-`.jet/cache/api/`; unchanged interfaces freeze silently, while removing or
-changing an export is E1257. E1258 reports authority denial, E1259 a component
-build/toolchain failure, and E1260 an unsupported export shape on either the
-sandbox Component boundary or the native `#Export(c)` C boundary
-(D-PLUGIN1, D-PLUGIN-EXPORT1, D-PLUGIN-VERSION1, D-DEP-WASM1, D-EMBED2).
+`.jet/cache/api/`. Sema resolves a host's calls against that frozen interface,
+and a call to an export it does not list is E1257. E1260 reports an unsupported
+export shape on
+either the sandbox Component boundary or the native `#Export(c)` C boundary
+(D-PLUGIN1, D-PLUGIN-EXPORT1, D-PLUGIN-VERSION1, D-EMBED2).
 
 ### Embedding artifacts
 
@@ -4348,16 +4508,15 @@ header. It needs no Component runtime, but the native artifact is trusted code:
 the C host owns its ABI and capabilities. Text results are released with the
 generated `jet_text_free` function.
 
-`jet build --target=sandbox` emits the Component from the same list. A sandbox
-host supplies a Component runtime; the guest has no ambient Jet authority, and
-future host capabilities must be explicit WIT imports. The native and Component
-artifacts therefore share source semantics while offering different trust and
-runtime guarantees.
+A sandbox host supplies a Component runtime; the guest has no ambient Jet
+authority, and future host capabilities must be explicit WIT imports. The
+native and Component artifacts therefore offer different trust and runtime
+guarantees.
 
 ## Programmable builds
 
 `jet build` checks the root program and then evaluates at most one package-local
-`fn build(b: BuildContext) -> BuildPlan` through the comptime interpreter. The
+`fn build(b: Build) -> BuildPlan` through the comptime interpreter. The
 entry may live in any package source file or in `package.jet`; two candidates
 name both sites and fail. An explicit Output `entry:` can select a rare layout.
 For a workspace, member entries run in deterministic dependency order with
@@ -4375,9 +4534,14 @@ toolchain and probe identity. `b.plan()` or `b.plan(default)` hands one
 canonical graph to scheduling, caching, execution, queries, and LSP.
 `b.toolchain(name, target_triple)` records target identity. `b.probe` supports
 `find_program`, `pkg_config`, and `header` probes.
+`b.args()` returns the words after `--` on the command line as a `[String]`
+(`jet build -- release-notes` gives `["release-notes"]`; no `--` gives
+`[]`), so a build entry can choose its default target or options from them.
+A `jet build` that runs no `fn build`, such as `jet build main.jet -- a`,
+refuses the words with E2104 instead of dropping them.
 
 ```jet
-fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+fn build(b: Build) -[Exec, FS]> {
     #Impure("run declared toolchain probe and action") {
         shell :: b.probe("shell", "find_program", "sh")
         native :: b.toolchain("native", "x86_64-linux")
@@ -4391,7 +4555,7 @@ fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
             [shell]
         )
         app :: b.add_executable("app", ["main.jet"], [stamp])
-        return b.plan(app)
+        b.default(app)
     }
 }
 
@@ -4414,11 +4578,18 @@ sandbox is E3505, not an unsandboxed run. Build authority uses the same
 effectful action or probe is inside an active `#Impure("reason")` region;
 signature declaration and effective grant are checked before execution.
 
-`b.generate(name) { ... }` materializes
+`b.generate(name) { ... }` produces the module
 `.jet/generated/<package>/<name>.jet`. Action outputs ending in `.jet` follow
 the same path. Built-in derives, user derives, and build entries share one
 checked expansion pass. Build-only entries and imported build entries are
-removed before runtime code generation, so build handles never reach rustc.
+removed before runtime code generation, so build handles never reach the built program.
+The `write_generated` build option (stock `off`) says whether `jet build`
+writes each generated module to that path under the package root for
+inspection: `on` writes them, `off` writes none. It is the profile field
+`write_generated: on`, the flag `--write-generated=on` (which replaces the
+retired `--emit-generated`) and the `fn build` call `b.write_generated(.On)`.
+Example:
+[`Examples/features/tooling/build_write_generated`](../../Examples/features/tooling/build_write_generated/run.jet).
 
 Generation is additive with one owner per managed path. Generated modules are
 ordered in dependency rounds using ordinary quoted-file imports; a later round
@@ -4656,9 +4827,8 @@ These are intentional boundaries, not implied promises:
   tier boundary requires the binder or an explicit importer contract.
 - Retired spellings and routes are not compatibility aliases. The command
   registry and its canonical grouped routes are the only CLI contract.
-- Jet is not described here as self-hosted. The Rust-hosted compiler remains
-  the reference execution path while the staged `Compiler/` work proceeds under
-  its separate bootstrap gates.
+- The compiler is written in Jet and builds programs through its own back end;
+  no Rust-hosted compiler or Rust emission path is part of the toolchain.
 
 For teaching diagnostics, staged parser errors should point toward the current
 operator spelling—for example, `and` should teach `&&`—rather than accepting a

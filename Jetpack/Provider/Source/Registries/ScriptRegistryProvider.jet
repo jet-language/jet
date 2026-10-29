@@ -488,7 +488,7 @@ fn provider_script_safe_filename(value: String) -> String Never! {
 
 // A registry-relative URL joined to the repository; absolute URLs stay.
 fn provider_script_absolutize(repository: String, url: String) -> String Never! {
-    if url.contains("://") -> return url
+    if url.contains("://") -> return url.copy()
     base := repository
     loop base.ends_with("/") -> base = base.removesuffix("/")
     path := url
@@ -568,8 +568,8 @@ fn provider_script_version_satisfies(kind: ScriptRegistryKind, actual: String, r
     }
 }
 
-SCRIPT_REGISTRY_OPERATORS :: prep { [String]{">=", "<=", "!=", "==", "~>", "=", ">", "<", "~", "^"} }
-SCRIPT_REGISTRY_COMPOSER_OPERATORS :: prep { [String]{">=", "<=", "!=", "==", "=", ">", "<", "~", "^"} }
+SCRIPT_REGISTRY_OPERATORS :: [String]{">=", "<=", "!=", "==", "~>", "=", ">", "<", "~", "^"}
+SCRIPT_REGISTRY_COMPOSER_OPERATORS :: [String]{">=", "<=", "!=", "==", "=", ">", "<", "~", "^"}
 
 // One constraint token: an operator token with its version in the next
 // token, or an operator-prefixed version, or a bare version (`=`).

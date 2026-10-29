@@ -1,0 +1,11 @@
+# tests/marker_groups_modules.rs::exported_nested_marker_and_group_keep_their_declaration_identity at tests/marker_groups_modules.rs:106; hand-port
+# Claim: nested exported group #lib.inner.Fast accepted through an import alias (tests/marker_groups_modules.rs:107-110)
+# Claim: the grouped helper is inline (is_inline) and its LibraryNote member resolves to the nested module (tests/marker_groups_modules.rs:112-119; Rust-internal)
+# Not ported: helper.is_inline flag, resolved.module/exported/declaration identity asserts (tests/marker_groups_modules.rs:112-119) read Rust AST/resolver tables; no CLI output shows them
+fixture: exported_nested_marker_and_group_keep_their_declaration_identity.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # tests/marker_groups_modules.rs:107-110 clean(): accepted with no diagnostics
+stderr: !~ "[E" # tests/marker_groups_modules.rs:107-110 clean(): accepted with no diagnostics

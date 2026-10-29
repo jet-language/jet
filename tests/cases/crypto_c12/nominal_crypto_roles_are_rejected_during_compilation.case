@@ -1,0 +1,16 @@
+# tests/crypto_c12.rs::nominal_crypto_roles_are_rejected_during_compilation at tests/crypto_c12.rs:26; hand-port
+fixture: nominal_crypto_roles_are_rejected_during_compilation.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check sign/main.jet
+exit: nonzero
+stderr: count "Error [" = 1 # original: exactly one error
+stderr: ~ "Error [E0112]" # original: that error is E0112
+stderr: ~ "SigningKey" # original: the rendered diagnostic names SigningKey
+stderr: ~ "X25519SecretKey" # original: the rendered diagnostic names X25519SecretKey
+step: jet check open/main.jet
+exit: nonzero
+stderr: count "Error [" = 1 # original: exactly one error
+stderr: ~ "Error [E0112]" # original: that error is E0112
+stderr: ~ "X25519SecretKey" # original: the rendered diagnostic names X25519SecretKey
+stderr: ~ "SigningKey" # original: the rendered diagnostic names SigningKey

@@ -1,0 +1,13 @@
+# tests/mir_pattern_phi_lowering.rs::cfg_simplification_prunes_dead_index_places_and_keeps_live_ones at tests/mir_pattern_phi_lowering.rs:64; hand-port
+# The block/place-count assertions read the Rust jet_foundation MIR (optimize_mir_program, MirProjection::Index), which is gone;
+# Jet lowers through JetIR, which keeps no MIR place table. The observable kept is that pruning the dead indexed branch leaves the live one running.
+# Fixture migrated: retired `value.print()` calls spelled `print(value)`.
+fixture: cfg_simplification_prunes_dead_index_places_and_keeps_live_ones.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build run.jet
+exit: 0
+step: built
+exit: 0 # tests/mir_pattern_phi_lowering.rs:82
+stdout: = "17\n24\n17\n" # tests/mir_pattern_phi_lowering.rs:83

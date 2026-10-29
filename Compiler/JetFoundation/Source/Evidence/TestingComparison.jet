@@ -2,7 +2,7 @@
 // (crates/jet-foundation/src/TestingComparison.rs). An equal finite sample is
 // never a universal proof; the record identity is the SHA-256 of its
 // A-canonical JSON payload (Encoding/CanonicalJson.jet).
-TEST_COMPARISON_SCHEMA_VERSION :: prep { U16{1} }
+TEST_COMPARISON_SCHEMA_VERSION :: U16{1}
 
 // A comparison verdict. The non-success states are deliberately distinct: a
 // caller must not turn an empty, unavailable, or cancelled run into pass.
@@ -100,6 +100,9 @@ fn comparison_status_as_str(status: ComparisonStatus) -> String Never! {
     }
 }
 
+// Rust `ComparisonStatus::is_success`.
+fn comparison_status_is_success(status: ComparisonStatus) -> Bool Never! { status == ComparisonStatus.Matched }
+
 // Rust `ObservationRelation::as_str`.
 fn observation_relation_as_str(relation: ObservationRelation) -> String Never! {
     if relation == {
@@ -110,9 +113,69 @@ fn observation_relation_as_str(relation: ObservationRelation) -> String Never! {
     }
 }
 
+// Rust `ObservationRelation::supports_plain_callable`: only typed equality is
+// observable from a plain callable; the others need effect or failure capture.
+fn observation_relation_supports_plain_callable(relation: ObservationRelation) -> Bool Never! { relation == ObservationRelation.TypedEquality }
+
+// Rust `ComparisonObservation::{value, failure}` and its builders.
+fn comparison_observation_value(raw: String) -> ComparisonObservation Never! {
+    ComparisonObservation{raw: raw, typed_failure: None, mutation: None, ordered_effects: [String]{}, cleanup: [String]{}}
+}
+
+fn comparison_observation_failure(raw: String, failure: String) -> ComparisonObservation Never! {
+    ComparisonObservation{raw: raw, typed_failure: Val(failure), mutation: None, ordered_effects: [String]{}, cleanup: [String]{}}
+}
+
+fn comparison_observation_with_effects(observation: ComparisonObservation, effects: [String]) -> ComparisonObservation Never! {
+    result := observation
+    result.ordered_effects = effects
+    result
+}
+
+fn comparison_observation_with_cleanup(observation: ComparisonObservation, cleanup: [String]) -> ComparisonObservation Never! {
+    result := observation
+    result.cleanup = cleanup
+    result
+}
+
+fn comparison_observation_with_mutation(observation: ComparisonObservation, mutation: String) -> ComparisonObservation Never! {
+    result := observation
+    result.mutation = Val(mutation)
+    result
+}
+
+// Rust `ComparisonIdentity::new` (no seed).
+fn comparison_identity_new(case_id: String, input_id: String, source: String, tool: String, target: String) -> ComparisonIdentity Never! {
+    ComparisonIdentity{case_id: case_id, input_id: input_id, seed: None, source: source, tool: tool, target: target}
+}
+
 // Rust `ComparisonIdentity::is_complete`.
 fn comparison_identity_is_complete(identity: ComparisonIdentity) -> Bool Never! {
     identity.case_id != "" && identity.input_id != "" && identity.source != "" && identity.tool != "" && identity.target != ""
+}
+
+// Rust `ComparisonSample::{new, with_replays, with_declared_equal}`.
+fn comparison_sample_new(identity: ComparisonIdentity, reference: ComparisonObservation, candidate: ComparisonObservation) -> ComparisonSample Never! {
+    ComparisonSample{identity: identity, reference: reference, candidate: candidate, reference_replay: None, candidate_replay: None, declared_equal: None}
+}
+
+fn comparison_sample_with_replays(sample: ComparisonSample, reference: ComparisonObservation, candidate: ComparisonObservation) -> ComparisonSample Never! {
+    result := sample
+    result.reference_replay = Val(reference)
+    result.candidate_replay = Val(candidate)
+    result
+}
+
+fn comparison_sample_with_declared_equal(sample: ComparisonSample, equal: Bool) -> ComparisonSample Never! {
+    result := sample
+    result.declared_equal = Val(equal)
+    result
+}
+
+// Rust `ComparisonRecord::terminal`: a non-observing verdict whose status the
+// caller names; `assert_equal` rejects every status but matched.
+fn comparison_record_terminal(relation: ObservationRelation, status: ComparisonStatus, reason: String) -> ComparisonRecord Never! {
+    ComparisonRecord{schema_version: TEST_COMPARISON_SCHEMA_VERSION, status: status, relation: relation, samples: [ComparisonSample]{}, discarded_cases: 0, first_difference: None, reduced_counterexample: None, contamination: None, reason: Val(reason), universal_proof: false}
 }
 
 // Rust `ComparisonRecord::validate`: a matched record is a finite
@@ -170,6 +233,14 @@ fn comparison_record_assert_equal(record: ComparisonRecord) ComparisonAssertionE
 // Rust `Display for ComparisonAssertionError`.
 fn comparison_assertion_error_text(error: ComparisonAssertionError) -> String Never! {
     "comparison {comparison_status_as_str(error.status)}: {error.reason}"
+}
+
+// Rust `ComparisonRecord::first_mismatch`.
+fn comparison_record_first_mismatch(record: ComparisonRecord) -> ComparisonSample? Never! {
+    if record.reduced_counterexample != None -> return record.reduced_counterexample
+    index :: record.first_difference ?? return None
+    if index >= record.samples.len() -> return None
+    Val(record.samples[index])
 }
 
 // Rust `optional_string_json`.

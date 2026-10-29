@@ -1,31 +1,31 @@
 // Owned native provider state; layout mirrors SecretsCrypto.rs:543-609.
 // Record key storage is the canonical native Secret, not a Rust Vec/key object.
 // Raw u64 bit words retain the entire reference range (including its high bit).
-VAULT_STORE_BYTES :: prep { I64{40} }
-VAULT_STORE_UUID :: prep { I64{0} }
-VAULT_STORE_REVISION :: prep { I64{16} }
-VAULT_STORE_STRINGS :: prep { I64{24} }
-VAULT_STORE_RECORDS :: prep { I64{32} }
-VAULT_RECORD_BYTES :: prep { I64{184} }
-VAULT_RECORD_NAME :: prep { I64{0} }
-VAULT_RECORD_TYPE :: prep { I64{8} }
-VAULT_RECORD_GENERATION :: prep { I64{16} }
-VAULT_RECORD_STATUS :: prep { I64{24} }
-VAULT_RECORD_PROVENANCE :: prep { I64{32} }
-VAULT_RECORD_OPAQUE :: prep { I64{40} }
-VAULT_RECORD_CREATED :: prep { I64{56} }
-VAULT_RECORD_STATUS_MS :: prep { I64{64} }
-VAULT_RECORD_HASH :: prep { I64{72} }
-VAULT_RECORD_PUBLIC_HASH :: prep { I64{104} }
-VAULT_RECORD_REASON_HASH :: prep { I64{136} }
-VAULT_RECORD_ORIGIN :: prep { I64{168} }
-VAULT_RECORD_SECRET :: prep { I64{176} }
-VAULT_ORIGIN_BYTES :: prep { I64{80} }
-VAULT_ORIGIN_UUID :: prep { I64{0} }
-VAULT_ORIGIN_NAME :: prep { I64{16} }
-VAULT_ORIGIN_GENERATION :: prep { I64{24} }
-VAULT_ORIGIN_OPAQUE :: prep { I64{32} }
-VAULT_ORIGIN_HASH :: prep { I64{48} }
+VAULT_STORE_BYTES :: I64{40}
+VAULT_STORE_UUID :: I64{0}
+VAULT_STORE_REVISION :: I64{16}
+VAULT_STORE_STRINGS :: I64{24}
+VAULT_STORE_RECORDS :: I64{32}
+VAULT_RECORD_BYTES :: I64{184}
+VAULT_RECORD_NAME :: I64{0}
+VAULT_RECORD_TYPE :: I64{8}
+VAULT_RECORD_GENERATION :: I64{16}
+VAULT_RECORD_STATUS :: I64{24}
+VAULT_RECORD_PROVENANCE :: I64{32}
+VAULT_RECORD_OPAQUE :: I64{40}
+VAULT_RECORD_CREATED :: I64{56}
+VAULT_RECORD_STATUS_MS :: I64{64}
+VAULT_RECORD_HASH :: I64{72}
+VAULT_RECORD_PUBLIC_HASH :: I64{104}
+VAULT_RECORD_REASON_HASH :: I64{136}
+VAULT_RECORD_ORIGIN :: I64{168}
+VAULT_RECORD_SECRET :: I64{176}
+VAULT_ORIGIN_BYTES :: I64{80}
+VAULT_ORIGIN_UUID :: I64{0}
+VAULT_ORIGIN_NAME :: I64{16}
+VAULT_ORIGIN_GENERATION :: I64{24}
+VAULT_ORIGIN_OPAQUE :: I64{32}
+VAULT_ORIGIN_HASH :: I64{48}
 #Import(c) fn vault_secret_adopt(bytes: I64) -> I64 = "jet_rt_secret_from_bytes"
 #Import(c) fn vault_secret_bytes(secret: I64) -> I64 = "jet_rt_secret_bytes"
 #Import(c) fn vault_secret_drop(secret: I64) = "jet_rt_secret_drop"
@@ -578,9 +578,9 @@ fn vault_canonical_pairs(pairs: I64, out: I64) -> I64 {
     rt_text_store(out, canonical)
     I64{0}
 }
-VAULT_START_ABSENT :: prep { I64{0} }
-VAULT_START_HISTORICAL :: prep { I64{1} }
-VAULT_START_V2 :: prep { I64{2} }
+VAULT_START_ABSENT :: I64{0}
+VAULT_START_HISTORICAL :: I64{1}
+VAULT_START_V2 :: I64{2}
 // Scratch608 = SHA576 + disjoint domain32. Digest32 is caller-owned/disjoint.
 fn vault_start_hash(kind: I64, bytes: I64, length: I64, out: I64, scratch: I64) {
     domain :: scratch + I64{576}
@@ -893,13 +893,13 @@ fn vault_replace_strings_at_root(root: I64, pairs: I64) -> I64 {
 
 // Existing name-mapped JetVaultKeyRef<T>, SecretsCrypto.rs:453-460.
 // T is phantom: the provider receives its checked key tag as a parameter.
-VAULT_REF_BYTES :: prep { I64{88} }
-VAULT_REF_PROVIDER :: prep { I64{0} }
-VAULT_REF_UUID :: prep { I64{8} }
-VAULT_REF_NAME :: prep { I64{24} }
-VAULT_REF_GENERATION :: prep { I64{32} }
-VAULT_REF_OPAQUE :: prep { I64{40} }
-VAULT_REF_HASH :: prep { I64{56} }
+VAULT_REF_BYTES :: I64{88}
+VAULT_REF_PROVIDER :: I64{0}
+VAULT_REF_UUID :: I64{8}
+VAULT_REF_NAME :: I64{24}
+VAULT_REF_GENERATION :: I64{32}
+VAULT_REF_OPAQUE :: I64{40}
+VAULT_REF_HASH :: I64{56}
 fn vault_ref(store: I64, record: I64) -> I64 {
     reference :: jet_rt_alloc(VAULT_REF_BYTES, I64{8})
     rt_text_store(reference + VAULT_REF_PROVIDER, I64{0})
@@ -1120,31 +1120,31 @@ fn vault_status_at_root(root: I64, reference: I64, key_type: I64, out: I64) -> I
 }
 
 // Name-mapped seed carriers, SecretsCrypto.rs:667-694. No runtime T field.
-VAULT_PLAN_BYTES :: prep { I64{288} }
-VAULT_PLAN_ACTION :: prep { I64{0} }
-VAULT_PLAN_NAME :: prep { I64{8} }
-VAULT_PLAN_TARGET :: prep { I64{16} }
-VAULT_PLAN_IMPORTED :: prep { I64{24} }
-VAULT_PLAN_REASON :: prep { I64{32} }
-VAULT_PLAN_UUID :: prep { I64{40} }
-VAULT_PLAN_REVISION :: prep { I64{56} }
-VAULT_PLAN_START_HASH :: prep { I64{64} }
-VAULT_PLAN_PROVIDER :: prep { I64{96} }
-VAULT_PLAN_PUBLIC_HASH :: prep { I64{128} }
-VAULT_PLAN_KEY_DIGEST :: prep { I64{160} }
-VAULT_PLAN_FROM :: prep { I64{192} }
-VAULT_PLAN_TO :: prep { I64{200} }
-VAULT_PLAN_KIND :: prep { I64{208} }
-VAULT_PLAN_OPERATION :: prep { I64{216} }
-VAULT_PLAN_ISSUED :: prep { I64{248} }
-VAULT_PLAN_DEADLINE :: prep { I64{264} }
-VAULT_PLAN_EXPIRES :: prep { I64{280} }
-VAULT_WRITE_BYTES :: prep { I64{96} }
-VAULT_WRITE_OPERATION :: prep { I64{0} }
-VAULT_WRITE_PREVIEW :: prep { I64{32} }
-VAULT_WRITE_USER :: prep { I64{64} }
-VAULT_WRITE_SESSION :: prep { I64{72} }
-VAULT_WRITE_DEADLINE :: prep { I64{80} }
+VAULT_PLAN_BYTES :: I64{288}
+VAULT_PLAN_ACTION :: I64{0}
+VAULT_PLAN_NAME :: I64{8}
+VAULT_PLAN_TARGET :: I64{16}
+VAULT_PLAN_IMPORTED :: I64{24}
+VAULT_PLAN_REASON :: I64{32}
+VAULT_PLAN_UUID :: I64{40}
+VAULT_PLAN_REVISION :: I64{56}
+VAULT_PLAN_START_HASH :: I64{64}
+VAULT_PLAN_PROVIDER :: I64{96}
+VAULT_PLAN_PUBLIC_HASH :: I64{128}
+VAULT_PLAN_KEY_DIGEST :: I64{160}
+VAULT_PLAN_FROM :: I64{192}
+VAULT_PLAN_TO :: I64{200}
+VAULT_PLAN_KIND :: I64{208}
+VAULT_PLAN_OPERATION :: I64{216}
+VAULT_PLAN_ISSUED :: I64{248}
+VAULT_PLAN_DEADLINE :: I64{264}
+VAULT_PLAN_EXPIRES :: I64{280}
+VAULT_WRITE_BYTES :: I64{96}
+VAULT_WRITE_OPERATION :: I64{0}
+VAULT_WRITE_PREVIEW :: I64{32}
+VAULT_WRITE_USER :: I64{64}
+VAULT_WRITE_SESSION :: I64{72}
+VAULT_WRITE_DEADLINE :: I64{80}
 fn vault_imported_drop(bytes: I64) {
     if (bytes == I64{0}) -> return
     thread_zero(rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_word(bytes + DATA_SEQUENCE_CAPACITY))

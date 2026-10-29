@@ -34,7 +34,7 @@ fn provider_realize_foreign_dependencies(verification: &StoreVerification, roots
 
 fn provider_realize_foreign_one(verification: &StoreVerification, roots: HangarRoots, project_root: String, name: String, language: ForeignLanguage, reference: String, ctx: ProviderCtx) -[FS, Env, Time]> ForeignRealization ProviderError! {
     provider_validate_library_name(name)
-    spec :: ProviderRef.classify(reference) ?? return Err(ProviderError.ForeignProjection("foreign dependency {name} has an invalid provider ref {reference}: {err.message()}"))
+    spec :: ProviderRef.classify(reference) ?? return Err(ProviderError.ForeignProjection("foreign dependency {name} has an invalid provider ref {reference}: {err}"))
     source :: provider_foreign_artifact_root(project_root, spec, ctx, name)
     expected_binding :: provider_foreign_binding_in(source, language, name)
     provider_require_regular_file(expected_binding, "generated foreign binding")

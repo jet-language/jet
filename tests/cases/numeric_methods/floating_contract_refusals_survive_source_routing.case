@@ -1,0 +1,35 @@
+# tests/numeric_methods.rs::floating_contract_refusals_survive_source_routing at tests/numeric_methods.rs:56; hand-port
+fixture: floating_contract_refusals_survive_source_routing.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check c1/core_math_float_type_mismatch.jet --json
+exit: 1 # tests/numeric_methods.rs:70 is rejected
+json: stdout doc $.reports[?code="E0112"] #>= 1 # tests/numeric_methods.rs:70 reports E0112
+step: jet check c1/core_math_float_type_mismatch.jet
+exit: 1 # tests/numeric_methods.rs:70 is rejected
+stderr: ~ "numeric knowledge grade" # tests/numeric_methods.rs:70 rendered diagnostic text
+step: jet check c2/core_math_float_type_mismatch_is_nan.jet --json
+exit: 1 # tests/numeric_methods.rs:70 is rejected
+json: stdout doc $.reports[?code="E0112"] #>= 1 # tests/numeric_methods.rs:70 reports E0112
+step: jet check c2/core_math_float_type_mismatch_is_nan.jet
+exit: 1 # tests/numeric_methods.rs:70 is rejected
+stderr: ~ "classification" # tests/numeric_methods.rs:70 rendered diagnostic text
+step: jet check c3/core_math_float_type_mismatch_sign.jet --json
+exit: 1 # tests/numeric_methods.rs:70 is rejected
+json: stdout doc $.reports[?code="E0112"] #>= 1 # tests/numeric_methods.rs:70 reports E0112
+step: jet check c3/core_math_float_type_mismatch_sign.jet
+exit: 1 # tests/numeric_methods.rs:70 is rejected
+stderr: ~ "parameter" # tests/numeric_methods.rs:70 rendered diagnostic text
+step: jet check c4/core_math_float_type_mismatch_pow.jet --json
+exit: 1 # tests/numeric_methods.rs:70 is rejected
+json: stdout doc $.reports[?code="E0109"] #>= 1 # tests/numeric_methods.rs:70 reports E0109
+step: jet check c4/core_math_float_type_mismatch_pow.jet
+exit: 1 # tests/numeric_methods.rs:70 is rejected
+stderr: ~ "mixing float widths" # tests/numeric_methods.rs:70 rendered diagnostic text
+step: jet check c5/core_math_float_type_mismatch_hypot.jet --json
+exit: 1 # tests/numeric_methods.rs:70 is rejected
+json: stdout doc $.reports[?code="E0112"] #>= 1 # tests/numeric_methods.rs:70 reports E0112
+step: jet check c5/core_math_float_type_mismatch_hypot.jet
+exit: 1 # tests/numeric_methods.rs:70 is rejected
+stderr: ~ "mixing float widths" # tests/numeric_methods.rs:70 rendered diagnostic text

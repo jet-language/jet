@@ -1,23 +1,25 @@
 // Availability comes from the canonical producer, never from a CLI ID table.
 use jet_foundation.[CanonicalPassOptions, canonical_pass_boundary_gaps]
+use jet_cli.[
+    jet_cli_canonical_route_gap_text, jet_cli_canonical_route_gap_values, jet_cli_status_array,
+    jet_cli_status_json,
+]
 
 fn inspect_canonical_gap_require(ok: Bool, label: String) Never! {
     if !ok -> panic("canonical route gap projection: {label}")
 }
 
-fn run() {
+#Test("inspect_canonical_gaps") {
     disabled :: canonical_pass_boundary_gaps(CanonicalPassOptions{})
     inspect_canonical_gap_require(disabled.len() == 0, "ordinary invocation has no requested gaps")
     inspect_canonical_gap_require(jet_cli_status_json(jet_cli_status_array(jet_cli_canonical_route_gap_values(disabled))) == "[]", "empty gap JSON")
     inspect_canonical_gap_require(jet_cli_canonical_route_gap_text(disabled) == "", "empty gap human output")
     no_ids :: canonical_pass_boundary_gaps(CanonicalPassOptions{adapter_mode: "canonical-pass"})
     inspect_canonical_gap_require(no_ids.len() == 0, "empty operation selection has no gaps")
-    selected :: canonical_pass_boundary_gaps(CanonicalPassOptions{adapter_mode: "canonical-pass", operation_ids: [String]{"sema.desugar-os-switches", "mir.exact-constant-folding"}})
-    inspect_canonical_gap_require(selected.len() == 1 && selected[0].operation_id == "sema.desugar-os-switches", "only selected absent boundary")
+    selected :: canonical_pass_boundary_gaps(CanonicalPassOptions{adapter_mode: "canonical-pass", operation_ids: [String]{"sema.desugar-os-switches", "ir.exact-constant-folding"}})
+    inspect_canonical_gap_require(selected.len() == 2 && selected[0].operation_id == "sema.desugar-os-switches" && selected[1].operation_id == "ir.exact-constant-folding", "every selected boundary, in selection order")
     values :: jet_cli_canonical_route_gap_values(selected)
     json :: jet_cli_status_json(jet_cli_status_array(values))
-    inspect_canonical_gap_require(json == "[{{\"operation_id\":\"sema.desugar-os-switches\",\"status\":\"no Jet pass\"}}]", "gap is availability, not schema/receipt")
-    inspect_canonical_gap_require(jet_cli_canonical_route_gap_text(selected) == "canonical route sema.desugar-os-switches: no Jet pass\n", "explicit human availability")
-    implemented :: canonical_pass_boundary_gaps(CanonicalPassOptions{adapter_mode: "canonical-pass", operation_ids: [String]{"mir.exact-constant-folding"}})
-    inspect_canonical_gap_require(implemented.len() == 0, "implemented boundary never mislabeled as a gap")
+    inspect_canonical_gap_require(json == "[{{\"operation_id\":\"sema.desugar-os-switches\",\"status\":\"no Jet pass\"}},{{\"operation_id\":\"ir.exact-constant-folding\",\"status\":\"no Jet pass\"}}]", "gap is availability, not schema/receipt")
+    inspect_canonical_gap_require(jet_cli_canonical_route_gap_text(selected) == "canonical route sema.desugar-os-switches: no Jet pass\ncanonical route ir.exact-constant-folding: no Jet pass\n", "explicit human availability")
 }

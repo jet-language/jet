@@ -1,5 +1,7 @@
-# Hosted CI checks compilation and the cheap source-coverage ratchet. The full
-# gate suite runs locally through Tools/agent/verify-full.sh.
+# Hosted CI runs the cheap source-coverage ratchet. The native compiler check
+# and the full gate suite run locally through Tools/agent/lane-check.sh and
+# Tools/agent/verify-full.sh until a pinned native seed release exists
+# (D-SEED-DIST1).
 name: CI
 
 on:
@@ -9,13 +11,12 @@ on:
 
 jobs:
   check:
-    name: Cargo check
+    name: Core source coverage ratchet
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
 
       - name: Install Node
         uses: actions/setup-node@v4
@@ -26,11 +27,3 @@ jobs:
         run: |
           node --test Tools/agent/core-coverage-census.test.mjs
           node Tools/agent/core-coverage-census.mjs --check
-      - name: Install Nix
-        uses: cachix/install-nix-action@v27
-        with:
-          extra_nix_config: |
-            experimental-features = nix-command flakes
-
-      - name: Cargo check
-        run: nix develop .#full -c cargo check --workspace --all-targets --locked

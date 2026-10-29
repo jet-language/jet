@@ -27,12 +27,6 @@ exit: 0
 stdout: ~ "Usage:" # Original stdout.contains.
 stdout.after_first("\n"): == typed_help # Original help_body byte equality (drops first line, absent LF fails).
 mkdir: cache/help-interpreter-typed.jet
-step: jet run --interpret typed.jet -- --help
-env: JET_STORE_DIR={work}/cache/help-interpreter-typed.jet/build
-env: JET_STORE_DIR={work}/cache/help-interpreter-typed.jet/run
-exit: 0
-stdout: ~ "Usage:" # Original stdout.contains.
-stdout.after_first("\n"): == typed_help # Original help_body byte equality (drops first line, absent LF fails).
 step: {work}/.jet/build/typed --not-a-real-option
 exit: 2
 stdout: empty
@@ -47,13 +41,6 @@ stdout: empty
 stderr: ~ "unknown option" # Original assert_cli_rejection expected needle.
 stderr: ~ "Usage:" # Original assert_cli_rejection expected needle.
 mkdir: cache/unknown-interpreter-typed.jet
-step: jet run --interpret typed.jet -- --not-a-real-option
-env: JET_STORE_DIR={work}/cache/unknown-interpreter-typed.jet/build
-env: JET_STORE_DIR={work}/cache/unknown-interpreter-typed.jet/run
-exit: 2
-stdout: empty
-stderr: ~ "unknown option" # Original assert_cli_rejection expected needle.
-stderr: ~ "Usage:" # Original assert_cli_rejection expected needle.
 step: {work}/.jet/build/typed surplus-a surplus-b
 exit: 2
 stdout: empty
@@ -72,15 +59,6 @@ stderr: ~ "`surplus-a`" # Original assert_cli_rejection expected needle.
 stderr: ~ "`surplus-b`" # Original assert_cli_rejection expected needle.
 stderr: ~ "Usage:" # Original assert_cli_rejection expected needle.
 mkdir: cache/surplus-interpreter-typed.jet
-step: jet run --interpret typed.jet -- surplus-a surplus-b
-env: JET_STORE_DIR={work}/cache/surplus-interpreter-typed.jet/build
-env: JET_STORE_DIR={work}/cache/surplus-interpreter-typed.jet/run
-exit: 2
-stdout: empty
-stderr: ~ "unexpected arguments" # Original assert_cli_rejection expected needle.
-stderr: ~ "`surplus-a`" # Original assert_cli_rejection expected needle.
-stderr: ~ "`surplus-b`" # Original assert_cli_rejection expected needle.
-stderr: ~ "Usage:" # Original assert_cli_rejection expected needle.
 step builder_help: {work}/.jet/build/builder --help
 exit: 0
 stdout: ~ "Usage:" # Original stdout.contains.
@@ -92,12 +70,6 @@ exit: 0
 stdout: ~ "Usage:" # Original stdout.contains.
 stdout.after_first("\n"): == builder_help # Original help_body byte equality (drops first line, absent LF fails).
 mkdir: cache/help-interpreter-builder.jet
-step: jet run --interpret builder.jet -- --help
-env: JET_STORE_DIR={work}/cache/help-interpreter-builder.jet/build
-env: JET_STORE_DIR={work}/cache/help-interpreter-builder.jet/run
-exit: 0
-stdout: ~ "Usage:" # Original stdout.contains.
-stdout.after_first("\n"): == builder_help # Original help_body byte equality (drops first line, absent LF fails).
 step: {work}/.jet/build/builder --not-a-real-option
 exit: 2
 stdout: empty
@@ -112,13 +84,6 @@ stdout: empty
 stderr: ~ "unknown option" # Original assert_cli_rejection expected needle.
 stderr: ~ "Usage:" # Original assert_cli_rejection expected needle.
 mkdir: cache/unknown-interpreter-builder.jet
-step: jet run --interpret builder.jet -- --not-a-real-option
-env: JET_STORE_DIR={work}/cache/unknown-interpreter-builder.jet/build
-env: JET_STORE_DIR={work}/cache/unknown-interpreter-builder.jet/run
-exit: 2
-stdout: empty
-stderr: ~ "unknown option" # Original assert_cli_rejection expected needle.
-stderr: ~ "Usage:" # Original assert_cli_rejection expected needle.
 step: {work}/.jet/build/builder surplus-a surplus-b
 exit: 2
 stdout: empty
@@ -137,15 +102,6 @@ stderr: ~ "`surplus-a`" # Original assert_cli_rejection expected needle.
 stderr: ~ "`surplus-b`" # Original assert_cli_rejection expected needle.
 stderr: ~ "Usage:" # Original assert_cli_rejection expected needle.
 mkdir: cache/surplus-interpreter-builder.jet
-step: jet run --interpret builder.jet -- surplus-a surplus-b
-env: JET_STORE_DIR={work}/cache/surplus-interpreter-builder.jet/build
-env: JET_STORE_DIR={work}/cache/surplus-interpreter-builder.jet/run
-exit: 2
-stdout: empty
-stderr: ~ "unexpected arguments" # Original assert_cli_rejection expected needle.
-stderr: ~ "`surplus-a`" # Original assert_cli_rejection expected needle.
-stderr: ~ "`surplus-b`" # Original assert_cli_rejection expected needle.
-stderr: ~ "Usage:" # Original assert_cli_rejection expected needle.
 step positionals_help: {work}/.jet/build/positionals --help
 exit: 0
 stdout: ~ "Usage:" # Original stdout.contains.
@@ -157,12 +113,6 @@ exit: 0
 stdout: ~ "Usage:" # Original stdout.contains.
 stdout.after_first("\n"): == positionals_help # Original help_body byte equality (drops first line, absent LF fails).
 mkdir: cache/help-interpreter-positionals.jet
-step: jet run --interpret positionals.jet -- --help
-env: JET_STORE_DIR={work}/cache/help-interpreter-positionals.jet/build
-env: JET_STORE_DIR={work}/cache/help-interpreter-positionals.jet/run
-exit: 0
-stdout: ~ "Usage:" # Original stdout.contains.
-stdout.after_first("\n"): == positionals_help # Original help_body byte equality (drops first line, absent LF fails).
 step: {work}/.jet/build/positionals add --not-a-real-option
 exit: 2
 stdout: empty
@@ -177,13 +127,6 @@ stdout: empty
 stderr: ~ "unknown option" # Original assert_cli_rejection expected needle.
 stderr: ~ "Usage:" # Original assert_cli_rejection expected needle.
 mkdir: cache/unknown-interpreter-positionals.jet
-step: jet run --interpret positionals.jet -- add --not-a-real-option
-env: JET_STORE_DIR={work}/cache/unknown-interpreter-positionals.jet/build
-env: JET_STORE_DIR={work}/cache/unknown-interpreter-positionals.jet/run
-exit: 2
-stdout: empty
-stderr: ~ "unknown option" # Original assert_cli_rejection expected needle.
-stderr: ~ "Usage:" # Original assert_cli_rejection expected needle.
 step: {work}/.jet/build/positionals add accepted surplus-a surplus-b
 exit: 2
 stdout: empty
@@ -202,15 +145,6 @@ stderr: ~ "`surplus-a`" # Original assert_cli_rejection expected needle.
 stderr: ~ "`surplus-b`" # Original assert_cli_rejection expected needle.
 stderr: ~ "Usage:" # Original assert_cli_rejection expected needle.
 mkdir: cache/surplus-interpreter-positionals.jet
-step: jet run --interpret positionals.jet -- add accepted surplus-a surplus-b
-env: JET_STORE_DIR={work}/cache/surplus-interpreter-positionals.jet/build
-env: JET_STORE_DIR={work}/cache/surplus-interpreter-positionals.jet/run
-exit: 2
-stdout: empty
-stderr: ~ "unexpected arguments" # Original assert_cli_rejection expected needle.
-stderr: ~ "`surplus-a`" # Original assert_cli_rejection expected needle.
-stderr: ~ "`surplus-b`" # Original assert_cli_rejection expected needle.
-stderr: ~ "Usage:" # Original assert_cli_rejection expected needle.
 step named_aot: {work}/.jet/build/positionals add bare-loses --text named-wins
 exit: 0
 stdout: ~ "named-wins" # Original contains named value.
@@ -224,11 +158,4 @@ stdout: ~ "named-wins" # Original contains named value.
 stdout: !~ "bare-loses" # Original excludes positional value.
 stdout: == named_aot # Original whole stdout byte equality.
 mkdir: cache/named-interpreter
-step named_interpreter: jet run --interpret positionals.jet -- add bare-loses --text named-wins
-env: JET_STORE_DIR={work}/cache/named-interpreter/build
-env: JET_STORE_DIR={work}/cache/named-interpreter/run
-exit: 0
-stdout: ~ "named-wins" # Original contains named value.
-stdout: !~ "bare-loses" # Original excludes positional value.
-stdout: == named_aot # Original whole stdout byte equality.
 

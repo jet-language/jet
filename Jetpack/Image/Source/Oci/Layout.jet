@@ -12,16 +12,16 @@
 // Layout written: `oci-layout`, `index.json`, and `blobs/sha256/<digest>` for
 // the layer tar, the image config, and the manifest.
 
-IMAGE_OS :: prep { "linux" }
-IMAGE_MEDIA_TYPE_MANIFEST :: prep { "application/vnd.oci.image.manifest.v1+json" }
-IMAGE_MEDIA_TYPE_CONFIG :: prep { "application/vnd.oci.image.config.v1+json" }
-IMAGE_MEDIA_TYPE_LAYER :: prep { "application/vnd.oci.image.layer.v1.tar" }
-IMAGE_DEFAULT_PLATFORM :: prep { "linux.x64" }
-IMAGE_DEFAULT_USER :: prep { 10001 }
-IMAGE_LAYOUT_VERSION :: prep { "1.0.0" }
-IMAGE_MAX_BLOB_BYTES :: prep { 536870912 }
-IMAGE_MAX_JSON_BYTES :: prep { 1048576 }
-IMAGE_MAX_LAYER_PATH_BYTES :: prep { 100 }
+IMAGE_OS :: "linux"
+IMAGE_MEDIA_TYPE_MANIFEST :: "application/vnd.oci.image.manifest.v1+json"
+IMAGE_MEDIA_TYPE_CONFIG :: "application/vnd.oci.image.config.v1+json"
+IMAGE_MEDIA_TYPE_LAYER :: "application/vnd.oci.image.layer.v1.tar"
+IMAGE_DEFAULT_PLATFORM :: "linux.x64"
+IMAGE_DEFAULT_USER :: 10001
+IMAGE_LAYOUT_VERSION :: "1.0.0"
+IMAGE_MAX_BLOB_BYTES :: 536870912
+IMAGE_MAX_JSON_BYTES :: 1048576
+IMAGE_MAX_LAYER_PATH_BYTES :: 100
 
 // One file layered into the image, relative to the image root (no leading
 // `/`), e.g. `usr/local/bin/myapp`. `mode` is the tar entry's permission bits.
@@ -77,8 +77,8 @@ struct OCILayerDescriptor {
 
     fn tree(self) -> Dyn Never! {
         fields := [String: Dyn]{}
-        fields["mediaType"] = Dyn.Text(self.media_type)
-        fields["digest"] = Dyn.Text(self.digest)
+        fields["mediaType"] = Dyn.Text(self.media_type.copy())
+        fields["digest"] = Dyn.Text(self.digest.copy())
         fields["size"] = Dyn.Int(self.size)
         Dyn.Object(fields)
     }
@@ -121,7 +121,7 @@ fn image_build_with_base(spec: OCIBuildSpec, out_dir: String, ref_name: String, 
     layer_files :: image_sorted_layer_files(spec.files)
     image_validate_layer_files(layer_files)
 
-    layer_tar :: image_build_tar(layer_files, files.join(out_dir, ".layer.tar.partial-{sys.pid()}"))
+    layer_tar :: image_build_tar(layer_files)
     layer_digest :: pkg_sha256_hex(layer_tar)
 
     base_layout :: image_load_optional_base(base)
@@ -192,11 +192,14 @@ fn image_copy_layout(source: String, destination: String) ImageError! -[FS, Env,
     }
     name :: files.basename(destination)
     if name == "" -> return Err(image_invalid("OCI copy destination has no UTF-8 name"))
-    stage :: files.join(parent, ".{name}-jet-oci-copy-{sys.pid()}-{random.token_hex(8)}")
+    stage :: files.join(parent, ".{name}-jet-oci-copy-{sys.pid()}-{random.token_hex(8) ?? return Err(image_invalid("OCI copy stage name: {err}"))}")
     files.create_dir(stage)
-    if image_publish_staged_copy(canonical_source, stage, destination) == .Err(error) {
-        image_remove_all_quiet(stage)
-        return Err(error)
+    if image_publish_staged_copy(canonical_source, stage, destination) == {
+        .Ok(_) -> {}
+        .Err(error) -> {
+            image_remove_all_quiet(stage)
+            return Err(error)
+        }
     }
 }
 
@@ -220,7 +223,7 @@ fn image_publish_staged_copy(source: String, stage: String, destination: String)
     files.rename(stage, destination)
 }
 
-fn image_copy_layout_tree(source: String, destination: String) ImageError! -[FS]> {
+fn image_copy_layout_tree(source: String, destination: String) ImageError! -[FS, Env]> {
     names := [String]{}
     loop entry in files.list_dir(source) -> &names.push(entry.name)
     &names.sort()
@@ -310,7 +313,7 @@ fn image_link_new_blob(temporary: String, path: String, digest: String, data: [U
 
 fn image_write_index(out_dir: String, manifest_digest: String, manifest_size: Int, ref_name: String) ImageError! -[FS, Env]> {
     annotations := [String: Dyn]{}
-    annotations["org.opencontainers.image.ref.name"] = Dyn.Text(ref_name)
+    annotations["org.opencontainers.image.ref.name"] = Dyn.Text(ref_name.copy())
     descriptor := [String: Dyn]{}
     descriptor["mediaType"] = Dyn.Text(IMAGE_MEDIA_TYPE_MANIFEST)
     descriptor["digest"] = Dyn.Text("sha256:{manifest_digest}")
@@ -348,7 +351,7 @@ fn image_config_json(spec: OCIBuildSpec, diff_ids: [String], architecture: Strin
     rootfs["type"] = Dyn.Text("layers")
     rootfs["diff_ids"] = Dyn.Array(ids)
     document := [String: Dyn]{}
-    document["architecture"] = Dyn.Text(architecture)
+    document["architecture"] = Dyn.Text(architecture.copy())
     document["os"] = Dyn.Text(IMAGE_OS)
     document["config"] = Dyn.Object(container)
     document["rootfs"] = Dyn.Object(rootfs)
@@ -593,7 +596,9 @@ fn image_read_regular_bounded(path: String, limit: Int) -[FS]> [U8] ImageError! 
     }
     reader := files.open(path, links: .Refuse)
     bytes := [U8]{}
-    loop chunk in reader.chunks(65536) {
+    loop {
+        chunk :: reader.read(65536)
+        if chunk.len() == 0 -> break
         &bytes.extend(chunk)
         if bytes.len() > limit -> return Err(image_invalid("OCI input exceeded its bound while being read"))
     }

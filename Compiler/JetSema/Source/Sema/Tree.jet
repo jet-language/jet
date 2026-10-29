@@ -1,0 +1,1317 @@
+// The checker's typed expression tree: JetSema-private. Sema publishes each
+// checked function as its flat FnBody (jet_foundation Facts/Body.jet), never
+// this tree (Sema/BodyFlatten.jet).
+use jet_foundation.[
+    AST_NODE_GENERATED,
+    AccessConvention,
+    AutoVectorizationFacts,
+    BinMatchPart,
+    Call,
+    ComponentSignatureDescriptor,
+    CopyFact,
+    CoreCallRecord,
+    DerivationRef,
+    Expr,
+    Field,
+    FrameSchedule,
+    HTTPRouteMethod,
+    KernelProof,
+    DeclID,
+    Lambda,
+    Measure,
+    OrFallback,
+    ParamZone,
+    SharedLifetime,
+    Span,
+    StrMatchPart,
+    SymbolID,
+    TAddressLifetime,
+    TAllocCtor,
+    TBinaryOp,
+    TBinaryPatternPart,
+    TBranchClass,
+    TBuiltinOp,
+    TCanonicalField,
+    TCapture,
+    TCaptureFacts,
+    TClosureOp,
+    TComptimeValue,
+    TContractDisposition,
+    TContractKind,
+    TContractResult,
+    TDestructureBinding,
+    TEffectFacts,
+    TFailureCarrier,
+    TFieldRef,
+    TFnCoerce,
+    TForInMethod,
+    TForeignProvenance,
+    TFuncKind,
+    TGCPromotion,
+    TGenericParam,
+    THardwareCall,
+    TIndexKind,
+    TIntegerWidth,
+    TLetTy,
+    TListPatternRest,
+    TLocal,
+    TMethodRef,
+    TNumericOp,
+    TOptionProbe,
+    TOriginProjection,
+    TPanicLoc,
+    TPatternBindingFact,
+    TPatternPosition,
+    TStaticOwner,
+    TStrFormat,
+    TTargetApplicability,
+    TTextPatternPart,
+    TTransactionSnapshot,
+    TTryConvert,
+    TTypedGoal,
+    TUnaryOp,
+    TUnitRoundingMode,
+    TUnsafeGate,
+    TVisibility,
+    TWebParamReconstruction,
+    Type,
+    TypedHeadKind,
+    Variant,
+    ViewProvenanceMap,
+    WebBucket,
+    WebPartitionMarker,
+]
+
+enum TStrPart {
+    Literal(text: String)
+    Interpolation(value: TExpr, format: TStrFormat)
+}
+
+struct TCallArg {
+    value: TExpr
+    template_items: [SymbolID]
+    borrow: Bool
+    mut_borrow: Bool
+    fn_coerce: TFnCoerce?
+    widen_to_vec: Bool
+    widen_to_union: Type?
+    box_as_trait: Type?
+    label: String?
+    spread: Bool
+}
+
+struct TEnumArg {
+    value: TExpr
+}
+
+enum TEnumPayload {
+    Unit
+    Positional(args: [TEnumArg])
+    Named(fields: [TNamedEnumArg])
+}
+
+struct TNamedEnumArg {
+    name: String
+    value: TEnumArg
+}
+
+enum TPatternShape {
+    Variant(variant: String, bindings: [TPatternBinding], leading_dot: Bool, span: Span)
+    // S31: `inner` is a nested payload pattern (`.Val(.Rect(w, h))`).
+    Present(binding: String, binding_span: Span, inner: TNestedPattern?, span: Span)
+    Absent(span: Span)
+    Ok(binding: String, binding_span: Span, inner: TNestedPattern?, span: Span)
+    Err(binding: String, binding_span: Span, inner: TNestedPattern?, span: Span)
+    Range(lo: Int, hi: Int, span: Span)
+    Or(alternatives: [TPatternShape], span: Span)
+    Struct(fields: [TPatternField], span: Span)
+    List(items: [TPatternBinding], rest: TListPatternRest?, span: Span)
+    Map(entries: [TMapPatternEntry], rest: Bool, span: Span)
+    Text(parts: [TTextPatternPart], span: Span)
+    Binary(parts: [TBinaryPatternPart], span: Span)
+}
+
+// S31: a checked nested payload pattern with the payload type's owner.
+struct TNestedPattern {
+    shape: TPatternShape
+    enum_type: SymbolID?
+}
+
+struct TPattern {
+    shape: TPatternShape
+    bindings: [TPatternBindingFact]
+    enum_type: SymbolID?
+    position: TPatternPosition
+    mutable: Bool
+    boxed: Bool
+}
+
+enum TPatternBinding {
+    Wildcard
+    Bind(name: String, span: Span)
+    Range(lo: Int, hi: Int)
+    Nested(pattern: TNestedPattern)
+    Value(value: TExpr)
+}
+
+enum TPatternField {
+    Bind(field: String, local: String, span: Span)
+    Value(field: String, value: TExpr, span: Span)
+    Nested(field: String, pattern: TNestedPattern, span: Span)
+}
+
+struct TMapPatternEntry {
+    key: TExpr
+    optional: Bool
+    slot: TPatternBinding
+    span: Span
+}
+
+// Logical key identity ignores source spelling and resolved constant aliases.
+fn tir_pattern_key_identity(key: TExpr, context: SemaCheckContext) -> String? Never! {
+    if key.kind == {
+        .IntLit(value, _) -> Val("int:{value}")
+        .StrLit(value) -> Val("text:{value}")
+        // A scalar literal or a constant reference is a flat row (sema_node).
+        .Flat(index) -> if context.arena.tree.nodes[index - context.arena.tree.node_base].kind == {
+            .BoolLit(value) -> Val("bool:{value}")
+            .CharLit(value) -> Val("char:{value}")
+            .ConstRef(symbol) -> Val("constant:{symbol.key}")
+            else -> None
+        }
+        .EnumLit(owner, variant, _) -> Val("enum:{owner}:{variant}")
+        .Unary(op, value) -> {
+            if op == TUnaryOp.Neg && value.kind == .IntLit(number, _) -> Val("int:{-number}") else -> None
+        }
+        .CtLit(value) -> if value == {
+            .Int(number) -> Val("int:{number}")
+            .BigInt(number) -> Val("int:{number}")
+            .String(text) -> Val("text:{text}")
+            .Bool(flag) -> Val("bool:{flag}")
+            .Char(character) -> Val("char:{character}")
+            .Enum(owner, variant, _) -> Val("enum:{owner}:{variant}")
+            else -> None
+        }
+        else -> None
+    }
+}
+
+struct TMatchArm {
+    pattern: TPattern
+    body: [TStmt]
+}
+
+enum TIfCond {
+    Plain(value: TExpr)
+    And(left: TIfCond, right: TIfCond)
+    IfLet(pattern: TPattern, subj: TExpr)
+}
+
+struct TContract {
+    kind: TContractKind
+    condition: TExpr
+    message: TExpr
+    file: String
+    line: Int
+    span: Span
+    disposition: TContractDisposition
+}
+
+enum TStmt {
+    Contract(contract: TContract)
+    ContractScope(pre: [TContract], body: [TStmt], post: [TContract], result: TContractResult, span: Span)
+    Let(local: TLocal, let_ty: TLetTy, init: TExpr, gc_promotion: TGCPromotion?, gc_transferred: Bool, span: Span)
+    RefutableBind(pattern: TPattern, init: TExpr, fallback: [TStmt], span: Span)
+    TupleDestructure(temp: TLocal, init: TExpr, move_fields: Bool, binds: [TDestructureBinding], span: Span)
+    StructDestructure(temp: TLocal, init: TExpr, move_fields: Bool, binds: [TDestructureBinding], span: Span)
+    ListDestructure(temp: TLocal, init: TExpr, count: Int, line: Int, elements: [TLocal], span: Span)
+    Assign(place: TPlace, op: TBinaryOp?, value: TExpr, line: Int, span: Span)
+    CountedLoop(label: String?, init: TStmt, condition: TExpr, step: TStmt?, vectorization: AutoVectorizationFacts?, body: [TStmt], span: Span)
+    ForRange(label: String?, local: TLocal, start: TExpr, end: TExpr, step: TExpr?, exclusive: Bool, body: [TStmt], vectorization: AutoVectorizationFacts?, span: Span)
+    Range(label: String?, variable: TLocal, source: TExpr?, start: TExpr, end: TExpr, step: TExpr?, exclusive: Bool, vectorization: AutoVectorizationFacts?, body: [TStmt], span: Span)
+    ExprStmt(value: TExpr, span: Span)
+    Return(value: TExpr?, span: Span)
+    TaskGroup(group: TLocal, limit: TExpr?, body: [TStmt], span: Span)
+    DeferClose(close: TExpr, resource: SymbolID, span: Span)
+    If(condition: TIfCond, then_body: [TStmt], else_body: [TStmt]?, else_is_elseif: Bool, span: Span)
+    Loop(label: String?, body: [TStmt], span: Span)
+    While(label: String?, condition: TExpr, body: [TStmt], span: Span)
+    Break(label: String?, span: Span)
+    BreakValue(label: String?, value: TExpr, span: Span)
+    Continue(label: String?, span: Span)
+    Match(subject: TExpr, arms: [TMatchArm], exhaustive: Bool, span: Span)
+    EnumMatch(scrutinee: TExpr, arms: [TMatchArm], else_body: [TStmt]?, fallthrough: Bool, span: Span)
+    RangeSwitch(subject: TExpr, arms: [TRangeArm], else_body: [TStmt], span: Span)
+    ForIn(label: String?, variable: TLocal, variable_two: TLocal?, source: TExpr, collection: TExpr, step: TExpr?, method_kind: TForInMethod?, columnar: Bool, by_value: Bool, source_stable: Bool, body: [TStmt], span: Span)
+    Inline(body: [TStmt], span: Span)
+    DebugOnly(body: [TStmt], span: Span)
+    MixedSwitch(subject: TExpr, class: TBranchClass, arms: [TMixedArm], else_body: [TStmt]?, span: Span)
+    Unsafe(gate: TUnsafeGate, body: [TStmt])
+    UnsafeBlock(gate: TUnsafeGate, body: [TStmt], span: Span)
+    SentryPolicy(enabled: Bool, body: [TStmt], span: Span)
+    Impure(body: [TStmt], span: Span)
+    Reactive(executable: TLambda, span: Span)
+    Region(body: [TStmt], span: Span)
+    Layout(handle: TLocal, label: String, body: [TStmt], span: Span)
+    ContextBlock(guards: [TContextGuard], body: [TStmt], span: Span)
+    Live(body: [TStmt], span: Span)
+    Shield(body: [TStmt], span: Span)
+    ScopeMember(kind: TScopeMemberKind, body: [TStmt], span: Span)
+    Transact(handle: TLocal?, snapshots: [TTransactionSnapshot], stm: TLocal?, body: [TStmt], span: Span)
+    GCEdit(root: String, slot: String, edges: [String], replace_all: Bool, index_temp: TExpr?, statement: TStmt, span: Span)
+}
+
+struct TRangeArm {
+    lo: Int
+    hi: Int
+    body: [TStmt]
+}
+
+struct TMixedArm {
+    condition: TExpr
+    body: [TStmt]
+}
+
+struct TContextGuard {
+    field: String
+    value: TExpr
+}
+
+struct TUnitRounding { mode: TUnitRoundingMode, digits: TExpr }
+
+enum TExprKind {
+    IntLit(value: Int, width: TIntegerWidth?)
+    StrLit(parts: [TStrPart])
+    Local(local: TLocal)
+    InlineBlock(body: [TStmt])
+    CtLit(value: TComptimeValue)
+    Call(callee: DeclID, type_args: [Type], args: [TCallArg])
+    IndirectCall(callee: TExpr, type_args: [Type], args: [TCallArg], signature: Type)
+    MethodCall(receiver: TExpr, method: TMethodRef, type_args: [Type], args: [TCallArg])
+    DistinctCtor(argument: TExpr)
+    TraitBox(value: TExpr, target: Type)
+    UnitConvert(argument: TExpr, scale: String, offset: String, rounding: TUnitRounding?, fallible: Bool, relative_uncertainty: Float?, file: String, line: Int)
+    MathBuiltin(type_name: String, function: String, args: [TExpr])
+    PreciseBuiltin(type_name: String, function: String, args: [TExpr])
+    Print(value: TExpr)
+    Drop(value: TExpr)
+    Close(value: TExpr)
+    Move(value: TExpr)
+    AmbientInput(prompt: TExpr?)
+    RequireStop(kind: TRequireKind, location: TPanicLoc, always_stops: Bool)
+    Binary(op: TBinaryOp, overflow: Bool, line: Int, lhs: TExpr, rhs: TExpr)
+    CompareChain(operands: [TExpr], operators: [TBinaryOp], hooks: [Bool])
+    Unary(op: TUnaryOp, operand: TExpr)
+    StructLit(fields: [TStructFieldValue])
+    Field(receiver: TExpr, field: TFieldRef)
+    Index(base: TExpr, index: TExpr, kind: TIndexKind, access: AccessConvention, checked_call: SymbolID?, location: TPanicLoc)
+    Slice(base: TExpr, start: TExpr, end: TExpr, range: TExpr?, location: TPanicLoc)
+    Range(start: TExpr, end: TExpr, exclusive: Bool)
+    Tuple(values: [TExpr])
+    List(values: [TExpr], trait_coercion: Type?)
+    Map(entries: [TMapEntry])
+    Try(value: TExpr, conversion: TTryConvert, failure: TFailureCarrier)
+    TryWithContext(inner: TExpr, note: TExpr?, convert: TTryConvert, file: String, line: Int, function: String)
+    Lambda(value: TLambda)
+    Borrow(place: TExpr, access: AccessConvention)
+    RawAddressOf(place: TPlace)
+    Deref(value: TExpr)
+    PtrFromAddr(address: TExpr, element: Type)
+    LayoutLiteral(value: TExpr)
+    LayoutCompare(op: TBinaryOp, lhs: TExpr, rhs: TExpr)
+    SharedGuardValue(guard: TExpr)
+    SharedGuardWait(guard: TExpr, condition: TExpr, predicate: TLambda)
+    CoreCall(record: CoreCallRecord, args: [TExpr], source_span: Span, type_args: [Type], widen_to_vec: [Bool], fallibility: TFailureCarrier)
+    HostCall(call: THostCall)
+    AllocNew(ctor: TAllocCtor, args: [TCallArg])
+    EnumLit(enum_type: String, variant: String, payload: TEnumPayload)
+    JSONLit(variant: String, arg: TExpr?, clone_arg: Bool)
+    ListLit(values: [TExpr])
+    ListSpread(parts: [TListSpreadPart])
+    MapLit(entries: [TMapEntry])
+    PoolSlot(pool: TExpr, id: TExpr, mutable: Bool, field: String?, line: Int, source_line: String)
+    // #4318: `fact` is the sema decision behind the copy; MIR keeps it on Copy.
+    Clone(value: TExpr, fact: CopyFact)
+    ExplicitCopy(value: TExpr)
+    MaterializeView(value: TExpr)
+    StaticCall(owner: TStaticOwner, owner_type: Type?, method: TMethodRef, type_args: [Type], args: [TCallArg])
+    BuiltinMethod(receiver: TExpr, operation: TBuiltinOp, args: [TExpr])
+    IfExpr(cond: TIfCond, then_body: [TStmt], then_value: TExpr, else_body: [TStmt], else_value: TExpr)
+    ResultHandler(subject: TExpr, ok_pattern: TPattern, ok_body: [TStmt], ok_value: TExpr, err_pattern: TPattern, err_body: [TStmt], err_value: TExpr, terminal: TExpr)
+    RawOf(value: TExpr)
+    DistinctRaw(value: TExpr)
+    Present(value: TExpr)
+    Ok(value: TExpr)
+    Err(value: TExpr)
+    OrFallback(value: TExpr, fallback: TOrFallback, ambient_err: TLocal?)
+    OptField(base: TExpr, member: String, flatten: Bool)
+    OptMethodCall(base: TExpr, binding: TLocal, call: TExpr, flatten: Bool)
+    PatternMatches(subject: TExpr, pattern: TPattern)
+    ClosureMethod(receiver: TExpr, operation: TClosureOp, args: [TExpr])
+    NumericMethod(receiver: TExpr, operation: TNumericOp)
+    NumericBinaryMethod(receiver: TExpr, operation: TNumericOp, argument: TExpr)
+    OverflowOpt(prefix: String, operation: String, line: Int, lhs: TExpr, rhs: TExpr)
+    HandleMethod(receiver: TExpr, operation: THandleOp, args: [TExpr])
+    CoreClosureCall(kind: TCoreClosureKind)
+    TaskGroupAll(tasks: TExpr)
+    TaskGroupRace(tasks: TExpr)
+    TaskGroupAny(tasks: TExpr)
+    SelectRecv(builder: TExpr, channel: TExpr)
+    SelectAfter(builder: TExpr, duration: TExpr, value: TExpr?)
+    FnValue(kind: TFnValueKind)
+    // A node the checker built as row `index` of its arena (sema_node): the
+    // row's NodeKind holds the node, with arena row indices as children.
+    Flat(index: Int)
+}
+
+// `id` keys the node's row in its function's flat body (BodyFlatten.jet): the
+// AST NodeId of the expression sema checked it from, or a negative
+// function-local id (below AST_NODE_GENERATED) for a node the checker gave
+// one in its context (sema_check_record_expr_id). A node built without one is
+// AST_NODE_GENERATED and takes a fresh id when it is flattened.
+struct TExpr {
+    ty: Type
+    kind: TExprKind
+    span: Span
+    id: Int{-1}
+}
+
+// Gives `value` a type other than the one its checked source node has (a
+// coercion or wrapper retyping a checked node): the node leaves its source
+// id and takes a function-local one of its own when it is flattened.
+fn tir_expr_retype(value: &TExpr, ty: Type) Never! {
+    value.ty = ty
+    value.id = AST_NODE_GENERATED
+}
+
+struct TStructFieldValue {
+    field: TFieldRef
+    value: TExpr
+    boxed: Bool
+}
+
+struct TMapEntry {
+    key: TExpr
+    value: TExpr
+}
+
+enum TListSpreadPart {
+    Element(value: TExpr)
+    Spread(value: TExpr)
+}
+
+enum TScopeMemberKind {
+    Setup
+    ExpectFail(code: String?, message: String?)
+    Timeout(duration: TExpr)
+    Measure
+    Skip
+}
+
+enum TOrFallback {
+    Value(value: TExpr)
+    Return(value: TExpr?)
+    Panic(message: TExpr, location: TPanicLoc)
+    Break
+    Continue
+    BreakLabel(label: String)
+    ContinueLabel(label: String)
+}
+
+enum THostCall {
+    Method(receiver: TExpr, method: String, args: [TExpr])
+    CellGuardProject(receiver: TExpr, paths: [[String]], result_type: Type, editable: Bool, edit_paths_disjoint: Bool)
+    OptionProbe(inner: TExpr, kind: TOptionProbe)
+    TupleIndex(base: TExpr, index: Int)
+    SwitchSubjectValue
+    YieldSend(value: TExpr)
+    NumericBounds(ty: Type, member: String)
+    // A Tier-1 comptime input (`embed_file`, `embed_bytes`, `find`): the
+    // checked literal path or glob, relative to the source file being
+    // compiled. The compiler reads and records it; it never runs at runtime.
+    ComptimeInput(builtin: String, path: String)
+}
+
+enum TCoreClosureKind {
+    Spawn(group: TExpr?, site: Int, label: String?, executable: TLambda)
+    Realtime(rate: TExpr, frames: TExpr, executable: TLambda)
+    Guard(executable: TLambda)
+    OnCommit(handle_name: String, executable: TLambda)
+    OnRollback(handle_name: String, executable: TLambda)
+    UIButtonOnClick(label: TExpr, shortcut: TExpr, accessible_label: TExpr, executable: TLambda)
+    UITextInputOnDrop(state: TExpr, ime: TExpr, executable: TLambda)
+    ReactiveDerived(executable: TLambda)
+    ReactiveEffect(executable: TLambda)
+    UIReactiveRender(executable: TLambda)
+}
+
+enum TFnValueKind {
+    NamedFn(function: DeclID?, lambda: TLambda?)
+    Policy(fn_type: Type, policy_args: [TCallArg], policy_conventions: [AccessConvention], wrapper: DeclID?, captures: [TCapture], callee: TExpr)
+    Call(callee: TExpr, args: [TCallArg])
+    Send(value: TExpr)
+}
+
+enum THandleOp {
+    Hardware(operation: THardwareCall)
+    DurationNew(unit: String, float: Bool)
+    FileReaderReadLine
+    FileReaderRead
+    FileReaderSeek
+    FileReaderPath
+    MappedFileWindow
+    MappedFileWindowLen
+    MappedFileLines
+    MappedFileLen
+    MappedFileIsEmpty
+    FileWriterWriteLine
+    FileWriterFlush
+    FileWriterWriteAll
+    FileWriterFsync
+    FileWriterPath
+    JSONReaderNext
+    JSONWriterWrite
+    JSONWriterFlush
+    JSONWriterFinish
+    JSONLReaderNext
+    JSONLWriterWrite
+    JSONLWriterFlush
+    JSONLWriterFinish
+    DataStreamNext
+    XMLReaderNext
+    XMLWriterWrite
+    XMLWriterFlush
+    XMLWriterFinish
+    CBORReaderNext
+    CBORWriterWrite
+    CBORWriterFlush
+    CBORWriterFinish
+    StdinReadLine
+    StdoutWrite
+    StdoutWriteLine
+    StdoutWriteBytes
+    StdoutFlush
+    StdoutIsTTY
+    StderrWrite
+    StderrWriteLine
+    StderrWriteBytes
+    StderrFlush
+    StderrIsTTY
+    WorldNow
+    WorldAdvance
+    WorldWaitIdle
+    WorldHistory
+    RealtimeNextDeadline
+    RealtimeReceipt
+    RealtimeCancel
+    RealtimeIsCancelled
+    HistoryRNGNextU64
+    HistoryRNGBelow
+    GameSceneNew
+    GameReplayRecord
+    GameBackendHeadless
+    GameBackendShouldContinue
+    GameBackendPresent
+    GameSceneOnFrame(schedule: FrameSchedule?, derivation: DerivationRef?)
+    GameSceneComponent
+    GameSceneQuery
+    GameAssetsImage
+    GameAssetsSound
+    GameInputBind
+    GameInputPressed
+    RNGInt
+    RNGFloat
+    RNGFloatRange
+    RNGBool
+    RNGBoolP
+    RNGNormal
+    RNGExponential
+    RNGBytes
+    RNGSplit
+    RNGPick
+    RNGWeightedPick
+    RNGSample
+    RNGShuffle
+    DurationIn
+    DurationIsZero
+    DurationTotalSeconds
+    DurationDifference
+    TestSuiteRun
+    DurationAbs
+    DurationNegated
+    DurationSign
+    DurationTotalIn
+    DurationRound
+    DurationNsValue
+    DurationScale
+    DurationDivide
+    AllocAlloc
+    AllocTryAlloc
+    AllocReset
+    PreciseMethod(type_name: String, method: String)
+    TCPListenerAccept
+    TCPListenerAcceptDeadline
+    TCPListenerLocalAddr
+    TCPStreamRead
+    TCPStreamPeerAddr
+    TCPStreamLocalAddr
+    TCPStreamClose
+    TCPStreamReadBytes
+    TCPStreamReadBytesDeadline
+    TCPStreamReadText
+    TCPStreamReadTextDeadline
+    TCPStreamWriteBytes
+    TCPStreamWriteBytesDeadline
+    TCPStreamWriteAllBytes
+    TCPStreamWriteAllBytesDeadline
+    TCPStreamWriteText
+    TCPStreamWriteTextDeadline
+    TCPStreamShutdown
+    TCPStreamReady
+    UDPSocketReady
+    UDPSocketClose
+    UDPSocketReceiveDeadline
+    UDPSocketSendToDeadline
+    UnixListenerAcceptDeadline
+    UnixStreamReadDeadline
+    UnixStreamWriteAllDeadline
+    UnixStreamReady
+    UnixStreamClose
+    UnixStreamSetTimeout
+    HTTPClientNew
+    ArgsSpecFlag
+    ArgsSpecFlagShort
+    ArgsSpecOption
+    ArgsSpecOptionShort
+    ArgsSpecOptionDefault
+    ArgsSpecOptionEnv
+    ArgsSpecOptionInt
+    ArgsSpecOptionFloat
+    ArgsSpecOptionChoice
+    ArgsSpecRepeat
+    ArgsSpecRequiredOption
+    ArgsSpecPositional
+    ArgsSpecDescription
+    ArgsSpecSubcommand
+    ArgsSpecVersion
+    ArgsSpecCompletion
+    ArgsSpecHelp
+    ArgsSpecParse
+    ArgsSpecParseOrExit
+    ParsedArgsFlag
+    ParsedArgsOption
+    ParsedArgsOptionInt
+    ParsedArgsOptionFloat
+    ParsedArgsOptions
+    ParsedArgsSubcommand
+    ParsedArgsPositional
+    ProcessSpecMethod(method: String, args_len: Int)
+    ProcessChildMethod(method: String)
+    TerminalSessionResize
+    ProcessStdinWrite
+    ProcessStdinClose
+    ProcessStdinWriteAll
+    ProcessStdoutRead
+    ProcessStderrRead
+    ReflectValueTypeName
+    ReflectValuePath
+    ReflectValueDisplay
+    ReflectValueFields
+    ReflectFieldName
+    ReflectFieldValue
+    TaskJoin
+    TaskDetach
+    TaskPause
+    TaskResume
+    TaskCancel
+    ChannelReceive
+    ChannelTryReceive
+    ChannelIsTimer
+    ChannelIsInterval
+    ChannelIsCancelled
+    ChannelIsReady
+    ChannelDelayMs
+    ChannelClose
+    SenderSend
+    HTTPRouterRegister(verb: HTTPRouteMethod, handler: TExpr, file: String, line: Int, handler_param_names: [String], contract_json: String)
+    MathMethod(type_name: String, method: String, reduce_op: String?)
+    ReactiveGet
+    ReactiveSet
+    ReactiveEffectMethod
+    EventMethod(method: String)
+    LayoutMethod(method: String)
+    LoadableMethod(method: String)
+    CivilTimeMethod(kind: String, method: String)
+    EmailMethod(method: String)
+    HTTPClientMethod(kind: String, method: String)
+    HTTPServerMethod(kind: String, method: String)
+    DynField
+    DynAt
+    DynInt
+    DynText
+    DynBool
+    DynFloat
+    DynToText
+    DynEqualUnordered
+    DynDecode(ty: Type)
+    DynIndexKey(site: String, location: TPanicLoc)
+    DynIndexAt(site: String, location: TPanicLoc)
+    DynGetKey
+    DynGetAt
+    DynHas
+    DynKeys
+    DynLen(site: String, location: TPanicLoc)
+    DynRemove
+    DynBinary(op: String, site: String, location: TPanicLoc)
+    DynCompare(op: String, site: String, location: TPanicLoc)
+    DynSetPath(keys: [Bool], site: String, location: TPanicLoc)
+    SerdeEncode
+    JSONField
+    JSONAt
+    JSONInt
+    JSONText
+    JSONBool
+    JSONFloat
+    JSONToText
+    JSONEqualUnordered
+    PathFrom
+    PathHome
+    PathJoin
+    PathParent
+    PathExtension
+    PathStem
+    PathNormalize
+    PathIsWithin
+    PathToString
+    PathWriteAtomic
+    PathWalk
+    UIBackendMethod(method: String)
+    AppMethod(method: String, args_len: Int)
+    ServiceRuntimeSend
+    ServiceRuntimeRetry
+    ServiceRuntimeDeadLetter
+    ServiceRuntimeRetain
+    ServiceRuntimeCommit
+    PluginInvoke(export_name: String, signature: ComponentSignatureDescriptor)
+    ReaderOver(owned: Bool)
+    ReaderReadU8
+    ReaderReadI8
+    ReaderReadU16Le
+    ReaderReadU16Be
+    ReaderReadI16Le
+    ReaderReadI16Be
+    ReaderReadU32Le
+    ReaderReadU32Be
+    ReaderReadI32Le
+    ReaderReadI32Be
+    ReaderReadU64Le
+    ReaderReadU64Be
+    ReaderReadI64Le
+    ReaderReadI64Be
+    ReaderReadF32Le
+    ReaderReadF32Be
+    ReaderReadF64Le
+    ReaderReadF64Be
+    ReaderPeek
+    ReaderSeek
+    ReaderSkip
+    ReaderTake
+    ReaderRemaining
+    ReaderAtEnd
+    CursorOver
+    CursorTakeUntil
+    CursorSkipWs
+    CursorTakePattern(parts: [StrMatchPart], canonical: [TCanonicalField])
+    ReaderTakePattern(parts: [BinMatchPart], canonical: [TCanonicalField])
+    ProcessLines
+}
+
+enum TRequireKind {
+    Require(cond: TExpr, msg: TExpr?)
+    RequireEq(left: TExpr, right: TExpr)
+    Panic(msg: TExpr)
+}
+
+struct TLambda {
+    executable: TLambdaBody
+    source_span: Span
+    frame_schedule: FrameSchedule?
+    frame_schedule_derivation: DerivationRef?
+    capture_facts: TCaptureFacts
+    failure_carrier: TFailureCarrier
+    effects: TEffectFacts
+    host_param_conventions: [AccessConvention]?
+    source_params: [String]
+    source_param_symbols: [SymbolID]
+    param_types: [Type]
+    ret: Type?
+    is_move: Bool
+    boxed: Bool
+    rc: Bool
+    captures: [TCapture]
+    materialized_captures: [String]
+    frozen_captures: [String]
+    uses_stack_sentry: Bool
+}
+
+enum TLambdaBody {
+    Expr(value: TExpr)
+    Block(body: [TStmt])
+}
+
+struct TFunc {
+    name: String
+    module_name: String
+    module_identity: String
+    key: String
+    source_file: String
+    source_span: Span
+    failure_carrier: TFailureCarrier
+    effects: TEffectFacts
+    target_applicability: TTargetApplicability
+    web_bucket: WebBucket?
+    web_marker: WebPartitionMarker?
+    visibility: TVisibility
+    foreign: TForeignProvenance?
+    params: [TParameter]
+    web_param_reconstructions: [TWebParamReconstruction]
+    ret: Type?
+    gc_return: Bool
+    gc_scope: Bool
+    return_view_provenance: ViewProvenanceMap?
+    generic_params: [TGenericParam]
+    is_main: Bool
+    line: Int
+    synthetic: Bool
+    is_unsafe: Bool
+    unsafe_gate: TUnsafeGate?
+    is_pure: Bool
+    memo_bound: Int?
+    memo_unbounded: Bool
+    is_reactive: Bool
+    reactive_upgrades: [String]
+    is_inline: Bool
+    is_inline_always: Bool
+    is_scalar: Bool
+    kernel_proof: KernelProof?
+    uses_stack_sentry: Bool
+    body: [TStmt]
+    kind: TFuncKind
+    origin_facts: [TOriginProjection]{[TOriginProjection]{}}
+    typed_goals: [TTypedGoal]{[TTypedGoal]{}}
+}
+
+struct TParameter {
+    local: TLocal
+    name: String
+    span: Span
+    ty: Type
+    convention: AccessConvention
+    public_label: String
+    zone: ParamZone
+    default: TExpr?
+    variadic: Bool
+}
+
+enum TPlace {
+    Local(local: TLocal)
+    Expr(value: TExpr)
+}
+
+fn tir_each_pattern_child(pattern: TPattern, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    tir_each_pattern_shape_child(pattern.shape, visit)
+}
+
+fn tir_each_pattern_shape_child(shape: TPatternShape, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if shape == {
+        .Variant(_, slots, _, _) | .List(slots, _, _) -> {
+            loop slot in slots {
+                tir_each_pattern_slot_child(slot, visit)
+            }
+        }
+        .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
+            if inner == .Val(nested) -> tir_each_pattern_shape_child(nested.shape, visit)
+        }
+        .Map(entries, _, _) -> loop entry in entries {
+            visit(entry.key)
+            tir_each_pattern_slot_child(entry.slot, visit)
+        }
+        .Or(alternatives, _) -> {
+            loop alternative in alternatives {
+                tir_each_pattern_shape_child(alternative, visit)
+            }
+        }
+        .Struct(fields, _) -> {
+            loop field in fields {
+                if field == {
+                    .Value(_, value, _) -> visit(value)
+                    .Nested(_, inner, _) -> tir_each_pattern_shape_child(inner.shape, visit)
+                    else -> {}
+                }
+            }
+        }
+        else -> {}
+    }
+}
+
+fn tir_each_pattern_slot_child(slot: TPatternBinding, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if slot == {
+        .Value(value) -> visit(value)
+        .Nested(inner) -> tir_each_pattern_shape_child(inner.shape, visit)
+        else -> {}
+    }
+}
+
+fn tir_each_if_cond_child(condition: TIfCond, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if condition == {
+        .Plain(value) -> visit(value)
+        .And(left, right) -> {
+            tir_each_if_cond_child(left, visit)
+            tir_each_if_cond_child(right, visit)
+        }
+        .IfLet(pattern, subj) -> {
+            tir_each_pattern_child(pattern, visit)
+            visit(subj)
+        }
+    }
+}
+
+fn tir_each_lambda_child(lambda: TLambda, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if lambda.executable == {
+        .Expr(value) -> visit(value)
+        .Block(body) -> {
+            loop statement in body {
+                tir_each_stmt_child(statement, visit)
+            }
+        }
+    }
+}
+
+fn tir_each_stmt_list_child(statements: [TStmt], visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    loop statement in statements {
+        tir_each_stmt_child(statement, visit)
+    }
+}
+
+fn tir_each_match_arm_child(arms: [TMatchArm], visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    loop arm in arms {
+        tir_each_pattern_child(arm.pattern, visit)
+        tir_each_stmt_list_child(arm.body, visit)
+    }
+}
+
+// Visits the children of an `else`. An else-if chain (an `else` that is
+// exactly one `if`, the shape sema gives every N-arm decision table) is
+// followed by direct recursion over read parameters, one frame per arm:
+// each link is read in place, never copied.
+fn tir_each_else_child(else_body: [TStmt]?, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if else_body == .Val(statements) {
+        loop statement in statements {
+            if statement == .If(condition, then_body, nested_else, _, _) {
+                tir_each_if_cond_child(condition, visit)
+                tir_each_stmt_list_child(then_body, visit)
+                tir_each_else_child(nested_else, visit)
+            } else {
+                tir_each_stmt_child(statement, visit)
+            }
+        }
+    }
+}
+
+fn tir_each_stmt_child(statement: TStmt, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if statement == {
+        .Contract(contract) -> {
+            visit(contract.condition)
+            visit(contract.message)
+        }
+        .ContractScope(pre, body, post, result, _) -> {
+            loop contract in pre {
+                visit(contract.condition)
+                visit(contract.message)
+            }
+            tir_each_stmt_list_child(body, visit)
+            loop contract in post {
+                visit(contract.condition)
+                visit(contract.message)
+            }
+            _ := result
+        }
+        .Let(_, _, init, _, _, _) -> visit(init)
+        .RefutableBind(pattern, init, fallback, _) -> {
+            tir_each_pattern_child(pattern, visit)
+            visit(init)
+            tir_each_stmt_list_child(fallback, visit)
+        }
+        .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) | .ListDestructure(_, init, _, _, _, _) -> visit(init)
+        .Assign(place, _, value, _, _) -> {
+            if place == {
+                .Expr(place_value) -> visit(place_value)
+                else -> {}
+            }
+            visit(value)
+        }
+        .Return(value, _) -> {
+            if value == Val(nested) -> visit(nested)
+        }
+        .ExprStmt(value, _) -> visit(value)
+        .TaskGroup(_, limit, body, _) -> {
+            if limit == Val(nested) -> visit(nested)
+            tir_each_stmt_list_child(body, visit)
+        }
+        .DeferClose(close, _, _) -> visit(close)
+        .If(condition, then_body, else_body, _, _) -> {
+            tir_each_if_cond_child(condition, visit)
+            tir_each_stmt_list_child(then_body, visit)
+            tir_each_else_child(else_body, visit)
+        }
+        .Loop(_, body, _) -> tir_each_stmt_list_child(body, visit)
+        .While(_, condition, body, _) -> {
+            visit(condition)
+            tir_each_stmt_list_child(body, visit)
+        }
+        .CountedLoop(_, init, condition, step, _, body, _) -> {
+            tir_each_stmt_child(init, visit)
+            visit(condition)
+            if step == Val(nested) {
+                tir_each_stmt_child(nested, visit)
+            }
+            tir_each_stmt_list_child(body, visit)
+        }
+        .ForRange(_, _, start, end, step, _, body, _, _) -> {
+            visit(start)
+            visit(end)
+            if step == Val(nested) -> visit(nested)
+            tir_each_stmt_list_child(body, visit)
+        }
+        .Range(_, _, source, start, end, step, _, _, body, _) -> {
+            if source == Val(nested_source) -> visit(nested_source)
+            visit(start)
+            visit(end)
+            if step == Val(nested_step) -> visit(nested_step)
+            tir_each_stmt_list_child(body, visit)
+        }
+        .BreakValue(_, value, _) -> visit(value)
+        .Match(subject, arms, _, _) -> {
+            visit(subject)
+            tir_each_match_arm_child(arms, visit)
+        }
+        .EnumMatch(scrutinee, arms, else_body, _, _) -> {
+            visit(scrutinee)
+            tir_each_match_arm_child(arms, visit)
+            if else_body == Val(nested) {
+                tir_each_stmt_list_child(nested, visit)
+            }
+        }
+        .RangeSwitch(subject, arms, else_body, _) -> {
+            visit(subject)
+            loop arm in arms {
+                tir_each_stmt_list_child(arm.body, visit)
+            }
+            tir_each_stmt_list_child(else_body, visit)
+        }
+        .ForIn(_, _, _, source, collection, step, _, _, _, _, body, _) -> {
+            visit(source)
+            visit(collection)
+            if step == Val(nested) -> visit(nested)
+            tir_each_stmt_list_child(body, visit)
+        }
+        .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> tir_each_stmt_list_child(body, visit)
+        .MixedSwitch(subject, _, arms, else_body, _) -> {
+            visit(subject)
+            loop arm in arms {
+                visit(arm.condition)
+                tir_each_stmt_list_child(arm.body, visit)
+            }
+            if else_body == Val(nested) {
+                tir_each_stmt_list_child(nested, visit)
+            }
+        }
+        .Unsafe(_, body) -> tir_each_stmt_list_child(body, visit)
+        .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) -> tir_each_stmt_list_child(body, visit)
+        .Reactive(executable, _) -> tir_each_lambda_child(executable, visit)
+        .Layout(_, _, body, _) -> tir_each_stmt_list_child(body, visit)
+        .ContextBlock(guards, body, _) -> {
+            loop guard in guards -> visit(guard.value)
+            tir_each_stmt_list_child(body, visit)
+        }
+        .ScopeMember(kind, body, _) -> {
+            if kind == {
+                .Timeout(duration) -> visit(duration)
+                else -> {}
+            }
+            tir_each_stmt_list_child(body, visit)
+        }
+        .Transact(_, _, _, body, _) -> tir_each_stmt_list_child(body, visit)
+        .GCEdit(_, _, _, _, index_temp, edited, _) -> {
+            if index_temp == Val(nested) -> visit(nested)
+            tir_each_stmt_child(edited, visit)
+        }
+        else -> {}
+    }
+}
+
+fn tir_each_place_child(place: TPlace, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if place == {
+        .Expr(value) -> visit(value)
+        else -> {}
+    }
+}
+
+fn tir_each_require_child(requirement: TRequireKind, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if requirement == {
+        .Require(condition, message) -> {
+            visit(condition)
+            if message == Val(message_value) -> visit(message_value)
+        }
+        .RequireEq(left, right) -> {
+            visit(left)
+            visit(right)
+        }
+        .Panic(message) -> visit(message)
+    }
+}
+
+fn tir_each_or_fallback_child(fallback: TOrFallback, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if fallback == {
+        .Value(value) -> visit(value)
+        .Return(value) -> {
+            if value == Val(nested) -> visit(nested)
+        }
+        .Panic(message, _) -> visit(message)
+        else -> {}
+    }
+}
+
+fn tir_each_list_spread_child(parts: [TListSpreadPart], visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    loop part in parts {
+        if part == {
+            .Element(value) | .Spread(value) -> visit(value)
+        }
+    }
+}
+
+fn tir_each_host_call_child(call: THostCall, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if call == {
+        .Method(receiver, _, args) -> {
+            visit(receiver)
+            loop value in args -> visit(value)
+        }
+        .CellGuardProject(receiver, _, _, _, _) -> visit(receiver)
+        .OptionProbe(inner, _) -> visit(inner)
+        .TupleIndex(base, _) -> visit(base)
+        .YieldSend(value) -> visit(value)
+        else -> {}
+    }
+}
+
+fn tir_each_core_closure_child(kind: TCoreClosureKind, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if kind == {
+        .Spawn(group, _, _, executable) -> {
+            if group == Val(group_value) -> visit(group_value)
+            tir_each_lambda_child(executable, visit)
+        }
+        .Realtime(rate, frames, executable) -> {
+            visit(rate)
+            visit(frames)
+            tir_each_lambda_child(executable, visit)
+        }
+        .UITextInputOnDrop(state, ime, executable) -> {
+            visit(state)
+            visit(ime)
+            tir_each_lambda_child(executable, visit)
+        }
+        .Guard(executable) -> tir_each_lambda_child(executable, visit)
+        .ReactiveDerived(executable) | .ReactiveEffect(executable) | .UIReactiveRender(executable) -> tir_each_lambda_child(executable, visit)
+        .OnCommit(_, executable) | .OnRollback(_, executable) -> tir_each_lambda_child(executable, visit)
+        .UIButtonOnClick(label, shortcut, accessible_label, executable) -> {
+            visit(label)
+            visit(shortcut)
+            visit(accessible_label)
+            tir_each_lambda_child(executable, visit)
+        }
+    }
+
+}
+
+fn tir_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if expression.kind == {
+        .StrLit(parts) -> loop part in parts {
+            if part == {
+                .Interpolation(value, _) -> visit(value)
+                else -> {}
+            }
+        }
+        .InlineBlock(body) -> tir_each_stmt_list_child(body, visit)
+        .Call(_, _, args) -> loop argument in args -> visit(argument.value)
+        .IndirectCall(callee, _, args, _) -> {
+            visit(callee)
+            loop argument in args -> visit(argument.value)
+        }
+        .MethodCall(receiver, _, _, args) -> {
+            visit(receiver)
+            loop argument in args -> visit(argument.value)
+        }
+        .DistinctCtor(argument) | .TraitBox(argument, _) -> visit(argument)
+        .UnitConvert(argument, _, _, rounding, _, _, _, _) -> {
+            visit(argument)
+            if rounding == Val(rounding_value) -> visit(rounding_value.digits)
+        }
+        .MathBuiltin(_, _, args) | .PreciseBuiltin(_, _, args) -> loop value in args -> visit(value)
+        .Print(value) | .Drop(value) | .Close(value) | .Move(value) -> visit(value)
+        .AmbientInput(prompt) -> {
+            if prompt == Val(prompt_value) -> visit(prompt_value)
+        }
+        .RequireStop(kind, _, _) -> tir_each_require_child(kind, visit)
+        .Binary(_, _, _, lhs, rhs) -> {
+            visit(lhs)
+            visit(rhs)
+        }
+        .CompareChain(operands, _, _) -> loop value in operands -> visit(value)
+        .Unary(_, operand) -> visit(operand)
+        .StructLit(fields) -> loop field in fields -> visit(field.value)
+        .Field(receiver, _) -> visit(receiver)
+        .Index(base, index, _, _, _, _) -> {
+            visit(base)
+            visit(index)
+        }
+        .Slice(base, start, end, range, _) -> {
+            visit(base)
+            visit(start)
+            visit(end)
+            if range == Val(range_value) -> visit(range_value)
+        }
+        .Range(start, end, _) -> {
+            visit(start)
+            visit(end)
+        }
+        .Tuple(values) | .List(values, _) -> loop value in values -> visit(value)
+        .Map(entries) | .MapLit(entries) -> loop entry in entries {
+            visit(entry.key)
+            visit(entry.value)
+        }
+        .EnumLit(_, _, payload) -> {
+            if payload == {
+                .Positional(args) -> loop argument in args -> visit(argument.value)
+                .Named(fields) -> loop field in fields -> visit(field.value.value)
+                .Unit -> {}
+            }
+        }
+        .Present(value) | .Ok(value) | .Err(value) | .DistinctRaw(value) -> visit(value)
+        .Try(value, _, _) -> visit(value)
+        .TryWithContext(inner, note, _, _, _, _) -> {
+            visit(inner)
+            if note == Val(note_value) -> visit(note_value)
+        }
+        .Lambda(value) -> tir_each_lambda_child(value, visit)
+        .Borrow(place, _) -> visit(place)
+        .RawAddressOf(place) -> tir_each_place_child(place, visit)
+        .RawOf(value) | .Deref(value) | .PtrFromAddr(value, _) | .LayoutLiteral(value) -> visit(value)
+        .LayoutCompare(_, lhs, rhs) -> {
+            visit(lhs)
+            visit(rhs)
+        }
+        .SharedGuardValue(guard) -> visit(guard)
+        .SharedGuardWait(guard, condition, predicate) -> {
+            visit(guard)
+            visit(condition)
+            tir_each_lambda_child(predicate, visit)
+        }
+        .CoreCall(_, args, _, _, _, _) -> loop value in args -> visit(value)
+        .HostCall(call) -> tir_each_host_call_child(call, visit)
+        .JSONLit(_, argument, _) -> {
+            if argument == Val(argument_value) -> visit(argument_value)
+        }
+        .AllocNew(_, args) -> loop argument in args -> visit(argument.value)
+        .ListLit(values) -> loop value in values -> visit(value)
+        .ListSpread(parts) -> tir_each_list_spread_child(parts, visit)
+        .PoolSlot(pool, id, _, _, _, _) -> {
+            visit(pool)
+            visit(id)
+        }
+        .Clone(value, _) | .ExplicitCopy(value) | .MaterializeView(value) -> visit(value)
+        .StaticCall(_, _, _, _, args) -> loop argument in args -> visit(argument.value)
+        .BuiltinMethod(receiver, _, args) -> {
+            visit(receiver)
+            loop value in args -> visit(value)
+        }
+        .IfExpr(cond, then_body, then_value, else_body, else_value) -> {
+            tir_each_if_cond_child(cond, visit)
+            tir_each_stmt_list_child(then_body, visit)
+            visit(then_value)
+            tir_each_stmt_list_child(else_body, visit)
+            visit(else_value)
+        }
+        .ResultHandler(subject, ok_pattern, ok_body, ok_value, err_pattern, err_body, err_value, terminal) -> {
+            visit(subject)
+            tir_each_pattern_child(ok_pattern, visit)
+            tir_each_stmt_list_child(ok_body, visit)
+            visit(ok_value)
+            tir_each_pattern_child(err_pattern, visit)
+            tir_each_stmt_list_child(err_body, visit)
+            visit(err_value)
+            visit(terminal)
+        }
+        .OrFallback(value, fallback, _) -> {
+            visit(value)
+            tir_each_or_fallback_child(fallback, visit)
+        }
+        .OptField(base, _, _) -> visit(base)
+        .OptMethodCall(base, _, call, _) -> {
+            visit(base)
+            visit(call)
+        }
+        .PatternMatches(subject, pattern) -> {
+            visit(subject)
+            tir_each_pattern_child(pattern, visit)
+        }
+        .ClosureMethod(receiver, _, args) -> {
+            visit(receiver)
+            loop value in args -> visit(value)
+        }
+        .NumericMethod(receiver, _) -> visit(receiver)
+        .NumericBinaryMethod(receiver, _, argument) -> {
+            visit(receiver)
+            visit(argument)
+        }
+        .OverflowOpt(_, _, _, lhs, rhs) -> {
+            visit(lhs)
+            visit(rhs)
+        }
+        .HandleMethod(receiver, _, args) -> {
+            visit(receiver)
+            loop value in args -> visit(value)
+        }
+        .CoreClosureCall(kind) -> tir_each_core_closure_child(kind, visit)
+        .TaskGroupAll(tasks) | .TaskGroupRace(tasks) | .TaskGroupAny(tasks) -> visit(tasks)
+        .SelectRecv(builder, channel) -> {
+            visit(builder)
+            visit(channel)
+        }
+        .SelectAfter(builder, duration, value) -> {
+            visit(builder)
+            visit(duration)
+            if value == Val(nested) -> visit(nested)
+        }
+        .FnValue(kind) -> tir_each_fn_value_child(kind, visit)
+        else -> {}
+    }
+}
+
+fn tir_each_fn_value_child(kind: TFnValueKind, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if kind == {
+        .NamedFn(_, lambda) -> {
+            if lambda == Val(lambda_value) {
+                tir_each_lambda_child(lambda_value, visit)
+            }
+        }
+        .Policy(_, policy_args, _, _, _, callee) -> {
+            loop argument in policy_args -> visit(argument.value)
+            visit(callee)
+        }
+        .Call(callee, args) -> {
+            visit(callee)
+            loop argument in args -> visit(argument.value)
+        }
+        .Send(value) -> visit(value)
+    }
+}

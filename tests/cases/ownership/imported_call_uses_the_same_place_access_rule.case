@@ -1,0 +1,10 @@
+# tests/ownership.rs::imported_call_uses_the_same_place_access_rule at tests/ownership.rs:2390; hand-port
+# Claim: helper.both(&x, x) through an imported module is rejected with E0204 (tests/ownership.rs:2408-2413)
+# Fixture migrated: the Rust compile_with_path call becomes jet check on main.jet in the fixture dir
+fixture: imported_call_uses_the_same_place_access_rule.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 1 # tests/ownership.rs:2411
+stderr: ~ "E0204" # tests/ownership.rs:2411

@@ -2,11 +2,12 @@
 // dotenv file through the pinned project authority. It needs the package
 // resolver (Core directory handles), so it stays out of the
 // Compiler unit's EnvModel block until (#4697).
+use jet_pkg_model.[AuthorityResolver]
 
 // Open a declared dotenv file below a pinned project authority and return the
 // bytes read from that same descriptor. The caller must consume these snapshot
 // bytes rather than reopen the project pathname.
-fn envmodel_checked_dotenv_snapshot(root: String, relative: String) -[FS]> [U8] EnvironmentFactError! {
+fn envmodel_checked_dotenv_snapshot(root: String, relative: String) -[FS, Env]> [U8] EnvironmentFactError! {
     if !envmodel_normal_project_path(relative) {
         return Err(EnvironmentFactError.new("dotenv path must be a normal project-relative path"))
     }

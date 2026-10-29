@@ -16,8 +16,8 @@ struct WrongCell {
     required_text: String
 }
 
-GOOD_PARQUET :: prep { embed_bytes("../int32_with_null_pages.parquet") }
-BAD_PARQUET :: prep { embed_bytes("../ARROW-RS-GH-6229-DICTHEADER.parquet") }
+GOOD_PARQUET :: comptime { embed_bytes("../int32_with_null_pages.parquet") }
+BAD_PARQUET :: comptime { embed_bytes("../ARROW-RS-GH-6229-DICTHEADER.parquet") }
 
 fn typed_success() -> String {
     loader :: data.url<[IntCell]>("https://typed-data.invalid/embedded.parquet", "parquet", "typed-data.invalid", data.DataLimits.safe()) ?? panic("typed loader")

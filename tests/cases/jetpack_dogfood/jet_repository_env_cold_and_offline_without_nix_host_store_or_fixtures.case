@@ -16,18 +16,18 @@ env: JETPACK_NIX_FALLBACK_POLICY=deny
 env: NO_COLOR=1
 step: jet run {work}/setup.jet {work} {root} {jet}
 exit: 0
-step: jetpack update default --env compiler --yes --local-nix-catalog {root}/crates/jetpack/catalogs/jet-dev
+step: jetpack update default --env compiler --yes --local-nix-catalog {root}/Jetpack/Environment/Catalogs/jet-dev
 cwd: project
 env-clear: true
 isolate: no-nix network=enabled
 exit: 0
-step online-tools: jetpack env --env compiler --trust --yes --local-nix-catalog {root}/crates/jetpack/catalogs/jet-dev -- bash -eu {work}/tools.sh
+step online-tools: jetpack env --env compiler --trust --yes --local-nix-catalog {root}/Jetpack/Environment/Catalogs/jet-dev -- bash -eu {work}/tools.sh
 cwd: project
 env-clear: true
 isolate: no-nix network=enabled
 exit: 0
 stdout: $= "JETPACK_NATIVE_TOOLS_OK\n" # original ed77c235f tests/jetpack_dogfood.rs:157 ends_with predicate
-step online-smoke: jetpack env --env compiler --trust --yes --local-nix-catalog {root}/crates/jetpack/catalogs/jet-dev -- {jet} run Examples/features/basics/hello.jet
+step online-smoke: jetpack env --env compiler --trust --yes --local-nix-catalog {root}/Jetpack/Environment/Catalogs/jet-dev -- {jet} run Examples/features/basics/hello.jet
 cwd: project
 env-clear: true
 isolate: no-nix network=enabled

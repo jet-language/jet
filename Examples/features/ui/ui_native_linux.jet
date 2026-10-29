@@ -1,7 +1,7 @@
 package {
     name: "ui_ui_native_linux"
     version: "0.1.0"
-    authority: { holds: { allow: [Browser, Exec, FFI, IO, Mem.Alloc] } }
+    authority: { allow: [Browser, Exec, FFI, IO, Mem.Alloc] }
 }
 
 // D-UIDEVSHELL1=A (ratified 2026-07-03, c134 Phase 8): the native Linux UI
@@ -17,8 +17,8 @@ package {
 //
 // Run it inside `nix develop` (which provides gtk4):
 //     jet run Examples/features/ui/ui_native_linux.jet
-// and a window opens with a live counter. Selection is the shipped `@if
-// @build.os` dispatch (D-OSTARGET2=B): only the `.Linux` arm compiles into a
+// and a window opens with a live counter. Selection is the shipped `comptime if
+// $build.os` dispatch: only the `.Linux` arm compiles into a
 // native Linux build, so the gtk path never reaches a non-Linux target. The
 // native link (`-lgtk-4 …`) is named by `use c.gtk4` via `pkg-config gtk4`
 // (S59); every gtk C call lives in the vetted `jet_gtk` prelude — this file
@@ -30,7 +30,7 @@ use core.reactive as reactive
 use c.gtk4 as gtk4
 
 fn run() {
-    prep if $build.os == {
+    comptime if $build.os == {
         .Linux -> {
             clicks :: reactive.signal(0)
             app :: ui.gtk_backend()

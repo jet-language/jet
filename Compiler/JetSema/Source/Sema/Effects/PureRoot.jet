@@ -1,7 +1,19 @@
 // Runtime-root purity: Rust Sema/Effects.rs check_pure_program_root and
-// Sema/Purity.rs e3401, adapted to checked TIR and the canonical effect facts.
-// No source-text name resolution or interpreter participates in this check.
-use jet_foundation.[Diagnostic, Span, TExpr, TFunc, diagnostic_with_rights, tir_each_expr_child, tir_each_stmt_child]
+// Sema/Purity.rs e3401, adapted to checked flat bodies and the canonical
+// effect facts. No source-text name resolution or interpreter participates
+// in this check.
+use jet_foundation.[
+    DeclTable,
+    Diagnostic,
+    FnBody,
+    Span,
+    body_each_expr_child,
+    body_each_stmt_child,
+    body_node,
+    diagnostic_with_rights,
+    name_rows,
+    name_rows_set,
+]
 
 struct SemaPureRootPosition {
     module_index: Int
@@ -19,103 +31,130 @@ fn sema_pure_root_diagnostic(root: String, call: String, path: [String], span: S
     diagnostic_with_rights(sema_error("E3401", span, "`{root}` calls the impure function `{call}`", why, fix), "pure", chain, [String]{}, None)
 }
 
-fn sema_pure_root_expr(root: String, modules: [SemaGraphModuleResult], positions: [String:SemaPureRootPosition], calls: &SemaEffectCallIndex, owner: TFunc, expression: TExpr, visited: &[String:Bool], path: &[String]) -> Diagnostic? Never! {
-    if sema_effect_is_call(expression) {
+fn sema_pure_root_expr(root: String, modules: [SemaGraphModuleResult], decls: DeclTable, positions: [String:SemaPureRootPosition], calls: SemaEffectCallIndex, owner: FnBody, expression: Int, shallow: Bool, visited: &[String:Bool], path: &[String]) -> Diagnostic? Never! {
+    node :: body_node(owner.tree, expression)
+    if sema_effect_is_call(node.kind) {
         module_index :: positions[owner.key].module_index
-        calls.current_module = module_index
         // The call fact is read in place from its module (the call index
         // keeps positions in the same order as `call_facts`).
-        fact :: sema_effect_find_fact(calls, sema_effect_caller_slot(calls, owner.key), expression.span)
+        fact :: sema_effect_find_fact(calls, sema_effect_caller_slot(calls, module_index, owner.key), node.span)
         key := ""
         if fact == .Val(at) {
             if modules[module_index].call_facts[at].callee == .Val(callee) -> key = callee.key
         }
-        if key == "" && expression.kind == .Call(callee, _, _) -> key = callee.key
+        if key == "" && node.kind == .Call(callee, _, _) -> key = decls.rows[callee.row].key.copy()
         if positions.get(key) == .Val(position) {
-            found :: sema_pure_root_function(root, modules, positions, &calls, modules[position.module_index].functions[position.function_index], &visited, &path)
-            if found != None -> return found
+            callee_body :: modules[position.module_index].functions[position.function_index]
+            if !shallow {
+                found :: sema_pure_root_function(root, modules, decls, positions, calls, callee_body, shallow, &visited, &path)
+                if found != None -> return found
+            } else {
+                // A callee outside the checked modules (a Core body or
+                // method) has no stamped row; its call fact carries its
+                // declared one.
+                impure := sema_effect_without_deny_only(callee_body.effects.solved).len() > 0
+                if !impure && fact == .Val(at) {
+                    if modules[module_index].call_facts[at].facts.effect_bound == .Val(row) {
+                        names :: loop entry in row -> entry.name
+                        impure = sema_effect_without_deny_only(names).len() > 0
+                    }
+                }
+                call :: if node.kind == {
+                    .Call(_, _, _) -> sema_effect_decl_label(key)
+                    else -> sema_effect_node_call_api(decls, node.kind)
+                }
+                if impure -> return Val(sema_pure_root_diagnostic(root, call, path, node.span))
+            }
         } else {
             denied := false
             if fact == .Val(at) {
                 if modules[module_index].call_facts[at].facts.effect_bound == .Val(row) {
                     names :: loop entry in row -> entry.name
                     denied = sema_effect_without_deny_only(names).len() > 0
-                } else { denied = !sema_effect_is_compiler_intrinsic(expression) }
+                } else { denied = !sema_effect_is_compiler_intrinsic(node.kind) }
             } else {
                 // Use the source witnesses already published by the one effect
                 // solver, rather than maintaining another builtin-effect list.
                 loop witness in owner.effects.direct_spans {
-                    if sema_effect_span_contains(expression.span, witness.span) && sema_effect_without_deny_only([String]{witness.name}).len() > 0 {
+                    if sema_effect_span_contains(node.span, witness.span) && sema_effect_without_deny_only([String]{witness.name}).len() > 0 {
                         denied = true
                         break
                     }
                 }
-                if expression.kind == .ExternCall(_, _, _) -> denied = true
             }
             if denied {
-                call :: if expression.kind == {
+                call :: if node.kind == {
                     .Print(_) -> "print"
-                    .ExternCall(symbol, _, _) -> sema_effect_symbol_leaf(symbol)
-                    else -> sema_effect_call_api(expression)
+                    else -> sema_effect_node_call_api(decls, node.kind)
                 }
-                return Val(sema_pure_root_diagnostic(root, call, path, expression.span))
+                return Val(sema_pure_root_diagnostic(root, call, path, node.span))
             }
         }
     }
     found := Diagnostic?{None}
-    tir_each_expr_child(expression, (child: TExpr) -> sema_pure_root_visit(root, modules, positions, &calls, owner, child, &visited, &path, &found))
+    body_each_expr_child(owner.tree, node, (child: Int) -> sema_pure_root_visit(root, modules, decls, positions, calls, owner, child, shallow, &visited, &path, &found))
     found
 }
 
 // One child of a pure-root walk; stops descending once a diagnostic is found.
 // The visitor closures stay expression-bodied: they only re-borrow the walk's
-// write parameters, the shape every other TIR child visitor uses.
-fn sema_pure_root_visit(root: String, modules: [SemaGraphModuleResult], positions: [String:SemaPureRootPosition], calls: &SemaEffectCallIndex, owner: TFunc, child: TExpr, visited: &[String:Bool], path: &[String], found: &Diagnostic?) Never! {
-    if found == None -> found = sema_pure_root_expr(root, modules, positions, &calls, owner, child, &visited, &path)
+// write parameters, the shape every other body child visitor uses.
+fn sema_pure_root_visit(root: String, modules: [SemaGraphModuleResult], decls: DeclTable, positions: [String:SemaPureRootPosition], calls: SemaEffectCallIndex, owner: FnBody, child: Int, shallow: Bool, visited: &[String:Bool], path: &[String], found: &Diagnostic?) Never! {
+    if found == None -> found = sema_pure_root_expr(root, modules, decls, positions, calls, owner, child, shallow, &visited, &path)
 }
 
 // The first diagnostic under one statement of a pure root's body. Its own
 // function, not a walk inline in sema_pure_root_function's loop: the Rust
-// tier (stage 0) holds the visitor closure's write captures (`calls`,
-// `visited`, `path`) until the loop ends, so the next iteration's closure
+// tier (stage 0) holds the visitor closure's write captures (`visited`,
+// `path`) until the loop ends, so the next iteration's closure
 // and the `path.pop()` after the loop are rejected there (E0499); here the
 // walk is the last use of those parameters.
-fn sema_pure_root_statement(root: String, modules: [SemaGraphModuleResult], positions: [String:SemaPureRootPosition], calls: &SemaEffectCallIndex, function: TFunc, statement: TStmt, visited: &[String:Bool], path: &[String]) -> Diagnostic? Never! {
+fn sema_pure_root_statement(root: String, modules: [SemaGraphModuleResult], decls: DeclTable, positions: [String:SemaPureRootPosition], calls: SemaEffectCallIndex, function: FnBody, statement: Int, shallow: Bool, visited: &[String:Bool], path: &[String]) -> Diagnostic? Never! {
     found := Diagnostic?{None}
-    tir_each_stmt_child(statement, (expression: TExpr) -> sema_pure_root_visit(root, modules, positions, &calls, function, expression, &visited, &path, &found))
+    body_each_stmt_child(function.tree, function.tree.stmts[statement], (expression: Int) -> sema_pure_root_visit(root, modules, decls, positions, calls, function, expression, shallow, &visited, &path, &found))
     found
 }
 
-fn sema_pure_root_function(root: String, modules: [SemaGraphModuleResult], positions: [String:SemaPureRootPosition], calls: &SemaEffectCallIndex, function: TFunc, visited: &[String:Bool], path: &[String]) -> Diagnostic? Never! {
+fn sema_pure_root_function(root: String, modules: [SemaGraphModuleResult], decls: DeclTable, positions: [String:SemaPureRootPosition], calls: SemaEffectCallIndex, function: FnBody, shallow: Bool, visited: &[String:Bool], path: &[String]) -> Diagnostic? Never! {
     if visited.get(function.key) != None -> return None
     visited[function.key] = true
     nested :: visited.len() > 1
     if nested -> &path.push(function.name)
     loop statement in function.body {
-        found :: sema_pure_root_statement(root, modules, positions, &calls, function, statement, &visited, &path)
+        found :: sema_pure_root_statement(root, modules, decls, positions, calls, function, statement, shallow, &visited, &path)
         if found != None -> return found
     }
     if nested -> _ :: &path.pop()
     None
 }
 
-fn check_pure_program_root(entry_key: String, modules: [SemaGraphModuleResult]) -> [Diagnostic] {
+// `decls` is the run's declaration table, which direct callees name. A
+// runtime root follows its whole call chain.
+fn check_pure_program_root(entry_key: String, modules: [SemaGraphModuleResult], decls: DeclTable) -> [Diagnostic] {
+    if sema_pure_root_find(entry_key, modules, decls, false) == .Val(diagnostic) -> return [Diagnostic]{diagnostic}
+    [Diagnostic]{}
+}
+
+// The first impure call a pure function reaches, named with its call chain;
+// None when no single call site carries the impurity. A `shallow` walk stays
+// in the function's own body and names the first direct call whose callee is
+// impure, as a declared `-[]>` bound reports it.
+fn sema_pure_root_find(entry_key: String, modules: [SemaGraphModuleResult], decls: DeclTable, shallow: Bool) -> Diagnostic? {
     positions := [String:SemaPureRootPosition]{}
-    node_by_key := [String:Int]{}
+    node_by_key := name_rows()
     loop module_index in 0..<modules.len() {
         loop function_index in 0..<modules[module_index].functions.len() {
             key :: modules[module_index].functions[function_index].key
             positions[key] = SemaPureRootPosition{module_index: module_index, function_index: function_index}
-            node_by_key[key] = node_by_key.len()
+            distinct :: node_by_key.texts.len()
+            name_rows_set(&node_by_key, key, distinct)
         }
     }
-    position :: positions.get(entry_key) ?? return [Diagnostic]{}
+    position :: positions.get(entry_key) ?? return None
     root :: modules[position.module_index].functions[position.function_index]
-    // One call index serves every module (SemaEffectCallIndex.current_module).
-    calls := SemaEffectCallIndex{current_module: 0, modules: loop module_row in modules -> sema_effect_module_calls(module_row.call_facts), node_by_key: node_by_key}
+    // One call index serves every module; each lookup names its module.
+    calls :: SemaEffectCallIndex{modules: loop module_row in modules -> sema_effect_module_calls(module_row.call_facts), node_by_key: node_by_key}
     visited := [String:Bool]{}
     path := [String]{}
-    found :: sema_pure_root_function(root.name, modules, positions, &calls, root, &visited, &path)
-    if found == .Val(diagnostic) -> return [Diagnostic]{diagnostic}
-    [Diagnostic]{}
+    sema_pure_root_function(root.name, modules, decls, positions, calls, root, shallow, &visited, &path)
 }

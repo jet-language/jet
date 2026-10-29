@@ -5,9 +5,18 @@
 // generated Jet source, and the checked boundary. Adapters may vary their
 // transport, but they do not get a second ABI vocabulary. Every binder, the
 // hidden Rust bridge, and the C import stage read this one table.
+use jetpack_foundation.[
+    ADA_MODULE_ROOT, BINDINGS_ROOT_SUBDIR, COBOL_MODULE_ROOT, COM_MODULE_ROOT, CPP_MODULE_ROOT,
+    CS_MODULE_ROOT, C_MODULE_ROOT, DART_MODULE_ROOT, FORTRAN_MODULE_ROOT, GO_MODULE_ROOT,
+    JAVA_MODULE_ROOT, JS_MODULE_ROOT, KW_RUST, LUA_MODULE_ROOT, OCTAVE_MODULE_ROOT,
+    PASCAL_MODULE_ROOT, PERL_MODULE_ROOT, PHP_MODULE_ROOT, PWSH_MODULE_ROOT, PY_MODULE_ROOT,
+    RUBY_MODULE_ROOT, R_MODULE_ROOT, SWIFT_MODULE_ROOT, TCL_MODULE_ROOT,
+]
+use jet_foundation.[Namespace]
+use jetpack_trust_root.[CacheProvenance]
 
-FOREIGN_DESCRIPTOR_SCHEMA :: prep { "jet-ffi-descriptor-v1" }
-FOREIGN_ABI_CONTRACT_VERSION :: prep { 1 }
+FOREIGN_DESCRIPTOR_SCHEMA :: "jet-ffi-descriptor-v1"
+FOREIGN_ABI_CONTRACT_VERSION :: 1
 
 // Registered foreign language roots.
 enum ForeignLanguage {
@@ -35,9 +44,8 @@ enum ForeignLanguage {
     Octave
     Com
 
-    // Every registered language in declaration order (`ForeignLanguage::ALL`).
-    // #4708: rename back to all() when fixed (a static `all()` lowers as the closure method `.all`).
-    fn registered() -> [ForeignLanguage] Never! {
+    // Every registered language in declaration order.
+    fn all() -> [ForeignLanguage] Never! {
         [ForeignLanguage]{
             ForeignLanguage.C, ForeignLanguage.Cpp, ForeignLanguage.Rust, ForeignLanguage.Py,
             ForeignLanguage.JS, ForeignLanguage.Swift, ForeignLanguage.Go, ForeignLanguage.Java,
@@ -108,7 +116,7 @@ enum ForeignLanguage {
 
     // The language whose mount root is `root`.
     fn from_root(root: String) -> ForeignLanguage? Never! {
-        loop language in ForeignLanguage.registered() {
+        loop language in ForeignLanguage.all() {
             if language.root() == root -> return Val(language)
         }
         None
@@ -920,7 +928,7 @@ struct CLib {
     module_idx: Int
 }
 
-FFI_BOUNDARY_OBLIGATIONS :: prep { [String]{"abi", "layout", "width", "alignment", "ownership", "lifetime", "cleanup", "encoding", "nullability", "errors", "exceptions", "callbacks", "task-thread", "target", "copy-cost", "effects"} }
+FFI_BOUNDARY_OBLIGATIONS :: [String]{"abi", "layout", "width", "alignment", "ownership", "lifetime", "cleanup", "encoding", "nullability", "errors", "exceptions", "callbacks", "task-thread", "target", "copy-cost", "effects"}
 
 // Lower-layer carrier projected from ForeignBoundaryContract.
 struct FFIBoundaryObligation {

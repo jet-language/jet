@@ -1,7 +1,7 @@
 use core.net as net
 use core.files as files
 use core.time as time
-PEER_CRLF :: prep { String.from_bytes([U8]{13, 10}) ?? panic("fixture CRLF") }
+PEER_CRLF :: comptime { String.from_bytes([U8]{13, 10}) ?? panic("fixture CRLF") }
 fn publish(listener: TCPListener, path: String) {
     address :: listener.local_addr() ?? panic("address")
     files.write_atomic(path, address.bytes()) ?? panic("publish address")

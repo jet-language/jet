@@ -1,0 +1,17 @@
+# Claim: build with a missing RUSTC_LINKER exits 1
+# Claim: the diagnostic carries L2101 and the missing linker path
+# Claim: the failure does not reach the internal-compiler-error rail
+fixture: production_build_reports_missing_explicit_linker_as_tool_error.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build main.jet --profile=debug
+env: RUSTC_LINKER={work}/missing-linker
+env: JET_STORE_DIR=store
+env: JET_STORE_CAP_BYTES=21474836480
+env: JET_STORE_RESERVE_BYTES=2147483648
+env: NO_COLOR=1
+exit: 1 # missing linker build result
+stderr: ~ "L2101" # tool diagnostic
+stderr: ~ "{work}/missing-linker" # linker path in diagnostic
+stderr: !~ "internal compiler error" # no ICE

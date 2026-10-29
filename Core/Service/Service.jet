@@ -1,0 +1,2215 @@
+package {
+    name: "core.service"
+    version: "0.0.1"
+    edition: "2026"
+    description: "Typed service topology, delivery, and workflow handles."
+    license: "MIT"
+    outputs: {
+        service: .Library{ entry: service }
+    }
+}
+
+use core as core
+use core.sys as service_sys
+use core.encoding as service_encoding
+use core.crypto as service_crypto
+
+// Ordinary source values: construction, matching, equality and ownership use
+// the compiler's existing record/enum rails, not service-specific handles.
+#Error
+enum ServiceError {
+    Full(String)
+    Ambiguous(String)
+    Unknown(String)
+    NotStarted(String)
+    Policy(String)
+    Unavailable(String)
+    Partitioned(String)
+    Revoked(String)
+    Stale(String)
+    Expired(String)
+
+    impl Display {
+        fn display(self) -> String { service_error_show(self) }
+    }
+}
+
+fn service_error_show(error: ServiceError) -> String Never! {
+    if error == {
+        .Full(message) -> message
+        .Ambiguous(message) -> message
+        .Unknown(message) -> message
+        .NotStarted(message) -> message
+        .Policy(message) -> message
+        .Unavailable(message) -> message
+        .Partitioned(message) -> message
+        .Revoked(message) -> message
+        .Stale(message) -> message
+        .Expired(message) -> message
+    }
+}
+
+enum DeliveryState {
+    Pending
+    Accepted
+    Delivering
+    Delivered
+    DeadLettered
+    Cancelled
+}
+
+fn delivery_state_show(state: DeliveryState) -> String Never! {
+    if state == {
+        .Pending -> "Pending"
+        .Accepted -> "Accepted"
+        .Delivering -> "Delivering"
+        .Delivered -> "Delivered"
+        .DeadLettered -> "DeadLettered"
+        .Cancelled -> "Cancelled"
+    }
+}
+
+struct DeliveryReceipt {
+    id: String
+    state: DeliveryState
+    attempts: Int
+    retention_until: Int
+    deadline: Int
+    idempotency_key: String
+    duplicate: Bool
+    authority: String
+    generation: Int
+    signature: String
+
+    impl Display {
+        fn display(self) -> String { delivery_receipt_show(self) }
+    }
+}
+
+fn delivery_receipt_show(receipt: DeliveryReceipt) -> String Never! {
+    state :: delivery_state_show(receipt.state)
+    "DeliveryReceipt(id={receipt.id}, state={state}, attempts={receipt.attempts}, retention_until={receipt.retention_until}, deadline={receipt.deadline}, key={receipt.idempotency_key}, duplicate={receipt.duplicate}, authority={receipt.authority}, generation={receipt.generation}, signature={receipt.signature})"
+}
+
+enum TaskOutcome {
+    Finished
+    Panicked(String)
+    Cancelled
+    DeadlineBlown
+
+    impl Display {
+        fn display(self) -> String { task_outcome_show(self) }
+    }
+    impl Debug {
+        fn debug(^self) -> String {
+            if self == {
+                .Panicked(reason) -> "Panicked({reason:Debug})"
+                else -> task_outcome_show(self)
+            }
+        }
+    }
+}
+
+fn task_outcome_show(outcome: TaskOutcome) -> String Never! {
+    if outcome == {
+        .Finished -> "Finished"
+        .Panicked(reason) -> "Panicked({reason})"
+        .Cancelled -> "Cancelled"
+        .DeadlineBlown -> "DeadlineBlown"
+    }
+}
+
+#Test("task outcome display and debug distinguish raw and quoted panic reasons") {
+    assert(task_outcome_show(TaskOutcome.Finished) == "Finished")
+    assert(task_outcome_show(TaskOutcome.Cancelled) == "Cancelled")
+    assert(task_outcome_show(TaskOutcome.DeadlineBlown) == "DeadlineBlown")
+    assert(task_outcome_show(TaskOutcome.Panicked("a\"b")) == "Panicked(a\"b)")
+    outcome :: TaskOutcome.Panicked("a\"b")
+    assert("{outcome:Debug}" == "Panicked(\"a\\\"b\")")
+}
+
+// Byte-exact current token-derived key. This intentionally does not introduce
+// a signing-key registry or strengthen the existing authority proof.
+fn __authority_signing_key(authority: String) -> [U8] ServiceError! {
+    raw :: authority.bytes()
+    if raw.len() != 67 || raw[0] != (U8{115}) || raw[1] != (U8{97}) || raw[2] != (U8{45}) {
+        return Err(ServiceError.Revoked("service authority proof is malformed"))
+    }
+    key := [U8]{}
+    loop i in 0..<32 {
+        high :: authority_hex_digit(Int.from_u8(raw[3 + i * 2])) ?? return Err(ServiceError.Revoked("service authority proof is malformed"))
+        low :: authority_hex_digit(Int.from_u8(raw[4 + i * 2])) ?? return Err(ServiceError.Revoked("service authority proof is malformed"))
+        &key.push(U8{high * 16 + low})
+    }
+    key
+}
+
+fn authority_hex_digit(value: Int) -> Int? Never! {
+    if value >= 48 && value <= 57 -> return Val(value - 48)
+    if value >= 65 && value <= 70 -> return Val(value - 65 + 10)
+    if value >= 97 && value <= 102 -> return Val(value - 97 + 10)
+    None
+}
+
+// ServiceAuthority::service_authority_validate_endpoint / authority_validate:
+// keep input checks and all authoritative fallback/status decisions in source.
+fn __authority_validate(endpoint: ServiceEndpoint) ServiceError! {
+    #Unsafe("one existing registry read snapshots exact and candidate facts; no second authority or resource carrier") {
+        identity :: core.service.__endpoint_identity_parts(endpoint)
+        if validate_endpoint_identity(identity.authority, identity.tree, identity.worker, identity.generation) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        snapshot :: if core.service.__endpoint_validation_snapshot(endpoint) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                return Err(error)
+            }
+        }
+        return authority_validate_snapshot(identity, snapshot.exact, snapshot.candidates)
+    }
+}
+
+// Exact policy order from ServiceAuthority::jet_services_authority_validate:
+// missing-key identity fallback, newer unpartitioned fallback; for an exact
+// row, tree/worker mismatch, partition, generation, then stopped/newer-started.
+fn authority_validate_snapshot(identity: (authority: String, tree: String, worker: String, generation: Int), exact: (authority: String, tree: String, worker: String, generation: Int, started: Bool, draining: Bool, partitioned: Bool)?, candidates: [(authority: String, tree: String, worker: String, generation: Int, started: Bool, draining: Bool, partitioned: Bool)]) ServiceError! {
+    if exact == {
+        .None -> {
+            loop candidate in candidates {
+                if candidate.tree == identity.tree && candidate.worker == identity.worker && candidate.generation == identity.generation {
+                    return Err(ServiceError.Revoked("service endpoint authority does not match the registered worker"))
+                }
+            }
+            loop candidate in candidates {
+                if candidate.tree == identity.tree && candidate.worker == identity.worker && candidate.authority == identity.authority && candidate.generation > identity.generation && !candidate.partitioned {
+                    return Err(ServiceError.Stale("service endpoint generation {identity.generation} is no longer current"))
+                }
+            }
+            return Err(ServiceError.Partitioned("service endpoint authority is not registered"))
+        }
+        .Val(state) -> {
+            if state.tree != identity.tree -> return Err(ServiceError.Revoked("service endpoint belongs to another tree"))
+            if state.worker != identity.worker -> return Err(ServiceError.Revoked("service endpoint belongs to another worker"))
+            if state.partitioned -> return Err(ServiceError.Partitioned("service endpoint authority is partitioned"))
+            if state.generation != identity.generation {
+                return Err(ServiceError.Stale("service endpoint generation {identity.generation} is not current (current generation {state.generation})"))
+            }
+            if !state.started && !state.draining {
+                loop candidate in candidates {
+                    if candidate.tree == identity.tree && candidate.worker == identity.worker && candidate.authority == identity.authority && candidate.generation > identity.generation && candidate.started && !candidate.partitioned {
+                        return Err(ServiceError.Stale("service endpoint generation {identity.generation} is no longer current"))
+                    }
+                }
+                return Err(ServiceError.NotStarted("service worker `{identity.worker}` is not running"))
+            }
+            return Ok()
+        }
+    }
+}
+
+#Test("endpoint snapshot preserves mismatch partition stale and stopped priorities") {
+    token :: "sa-000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    identity :: (authority: token, tree: "tree", worker: "worker", generation: 2)
+    empty :: [(authority: String, tree: String, worker: String, generation: Int, started: Bool, draining: Bool, partitioned: Bool)]{}
+    wrong_tree :: (authority: token, tree: "other", worker: "worker", generation: 1, started: false, draining: false, partitioned: true)
+    wrong_worker :: (authority: token, tree: "tree", worker: "other", generation: 1, started: false, draining: false, partitioned: true)
+    partitioned :: (authority: token, tree: "tree", worker: "worker", generation: 1, started: false, draining: false, partitioned: true)
+    stale :: (authority: token, tree: "tree", worker: "worker", generation: 1, started: false, draining: false, partitioned: false)
+    stopped :: (authority: token, tree: "tree", worker: "worker", generation: 2, started: false, draining: false, partitioned: false)
+    assert(if authority_validate_snapshot(identity, Val(wrong_tree), empty) == {.Err(.Revoked(message)) -> message == "service endpoint belongs to another tree" else -> false})
+    assert(if authority_validate_snapshot(identity, Val(wrong_worker), empty) == {.Err(.Revoked(message)) -> message == "service endpoint belongs to another worker" else -> false})
+    assert(if authority_validate_snapshot(identity, Val(partitioned), empty) == {.Err(.Partitioned(message)) -> message == "service endpoint authority is partitioned" else -> false})
+    assert(if authority_validate_snapshot(identity, Val(stale), empty) == {.Err(.Stale(message)) -> message == "service endpoint generation 2 is not current (current generation 1)" else -> false})
+    assert(if authority_validate_snapshot(identity, Val(stopped), empty) == {.Err(.NotStarted(message)) -> message == "service worker `worker` is not running" else -> false})
+    newer :: (authority: token, tree: "tree", worker: "worker", generation: 3, started: true, draining: false, partitioned: false)
+    peers := [(authority: String, tree: String, worker: String, generation: Int, started: Bool, draining: Bool, partitioned: Bool)]{}
+    &peers.push(newer)
+    assert(if authority_validate_snapshot(identity, Val(stopped), peers) == {.Err(.Stale(message)) -> message == "service endpoint generation 2 is no longer current" else -> false})
+    assert(if authority_validate_snapshot(identity, None, empty) == {.Err(.Partitioned(message)) -> message == "service endpoint authority is not registered" else -> false})
+    assert(if authority_validate_snapshot(identity, None, peers) == {.Err(.Stale(message)) -> message == "service endpoint generation 2 is no longer current" else -> false})
+    other_authority :: (authority: "sa-ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", tree: "tree", worker: "worker", generation: 2, started: false, draining: false, partitioned: false)
+    &peers.push(other_authority)
+    assert(if authority_validate_snapshot(identity, None, peers) == {.Err(.Revoked(message)) -> message == "service endpoint authority does not match the registered worker" else -> false})
+}
+
+fn validate_endpoint_identity(authority: String, tree: String, worker: String, generation: Int) ServiceError! {
+    if !valid_service_text(tree, 256) -> return Err(ServiceError.Policy("service tree is empty, too long, or contains control characters"))
+    if !valid_service_text(worker, 256) -> return Err(ServiceError.Policy("service worker is empty, too long, or contains control characters"))
+    if !valid_authority_token(authority) -> return Err(ServiceError.Policy("service authority must be a provider-issued opaque token"))
+    if __authority_signing_key(authority) == {
+        .Err(error) -> return Err(error)
+        .Ok(_) -> {}
+    }
+    if generation < 1 -> return Err(ServiceError.Policy("service endpoint generation must be positive"))
+}
+
+fn valid_authority_token(authority: String) -> Bool Never! {
+    raw :: authority.bytes()
+    if raw.len() != 67 || !authority.starts_with("sa-") -> return false
+    loop i in 3..<67 {
+        value :: Int.from_u8(raw[i])
+        if !((value >= 48 && value <= 57) || (value >= 97 && value <= 102)) -> return false
+    }
+    true
+}
+
+#Test("endpoint identity checks preserve native order and lowercase issuance") {
+    token :: "sa-000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    assert(if validate_endpoint_identity(token, " ", "worker", 1) == {.Ok(_) -> true else -> false})
+    assert(if validate_endpoint_identity("bad", "", "", 0) == {.Err(.Policy(message)) -> message == "service tree is empty, too long, or contains control characters" else -> false})
+    assert(if validate_endpoint_identity(token, "tree", "", 0) == {.Err(.Policy(message)) -> message == "service worker is empty, too long, or contains control characters" else -> false})
+    assert(if validate_endpoint_identity("sa-000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F", "tree", "worker", 1) == {.Err(.Policy(message)) -> message == "service authority must be a provider-issued opaque token" else -> false})
+    assert(if validate_endpoint_identity(token, "tree", "worker", 0) == {.Err(.Policy(message)) -> message == "service endpoint generation must be positive" else -> false})
+}
+
+fn endpoint_show(endpoint: ServiceEndpoint) -> String Never! {
+    #Unsafe("read the existing endpoint's tree, worker and generation fields") {
+        parts :: core.service.__endpoint_parts(endpoint)
+        return "Endpoint({parts.tree}/{parts.worker}@g{parts.generation})"
+    }
+}
+
+fn set_delivery(tree: &ServiceTree, delivery: ServiceDelivery) ServiceError! {
+    #Unsafe("Services3081: check started before the single delivery-field write") {
+        if core.service.__tree_started(tree) -> return Err(ServiceError.Policy("cannot change delivery after start"))
+        core.service.__tree_write_delivery(&tree, delivery.copy())
+    }
+}
+
+fn set_restart(tree: &ServiceTree, restart: ServiceRestart) ServiceError! {
+    #Unsafe("Services1415: root policy write precedes each declared group policy write") {
+        if core.service.__tree_started(tree) -> return Err(ServiceError.Policy("cannot change restart policy after start"))
+        core.service.__tree_write_restart(&tree, restart.copy())
+        count :: core.service.__tree_group_count(tree)
+        loop i in 0..<count {
+            core.service.__group_write_restart(&tree, i)
+        }
+    }
+}
+
+fn drain_dead_letters(tree: &ServiceTree) -> Int ServiceError! {
+    #Unsafe("Services3220: tree's exclusive write borrow covers count then clear") {
+        if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
+        count :: core.service.__tree_dead_letter_count(tree)
+        core.service.__tree_clear_dead_letters(&tree)
+        return count
+    }
+}
+
+fn set_state_empty(tree: &ServiceTree) ServiceError! {
+    #Unsafe("Services3231: started and record checks precede adapter then authority writes") {
+        if core.service.__tree_started(tree) -> return Err(ServiceError.Policy("cannot change state adapter after start"))
+        if core.service.__tree_has_snapshot(tree) || core.service.__tree_event_count(tree) != 0 {
+            return Err(ServiceError.Policy("cannot discard state records while selecting Empty state adapter"))
+        }
+        core.service.__tree_write_empty_adapter(&tree)
+        core.service.__tree_clear_state_authority(&tree)
+    }
+}
+
+// Services3247/3274: identical checks, then adapter followed by authority.
+fn set_state_snapshot(tree: &ServiceTree, store: ServiceStateStore, schema: String, version: Int, migration: String) ServiceError! {
+    select_state_adapter(&tree, store, schema, version, migration, false)
+}
+
+fn set_state_event_log(tree: &ServiceTree, store: ServiceStateStore, schema: String, version: Int, migration: String) ServiceError! {
+    select_state_adapter(&tree, store, schema, version, migration, true)
+}
+
+fn select_state_adapter(tree: &ServiceTree, store: ServiceStateStore, schema: String, version: Int, migration: String, event_log: Bool) ServiceError! {
+    #Unsafe("the source exclusive tree borrow covers the same complete mutation as Rust &mut; no lock or interleaving window") {
+        if core.service.__tree_started(tree) -> return Err(ServiceError.Policy("cannot change state adapter after start"))
+        if core.service.__tree_has_snapshot(tree) || core.service.__tree_event_count(tree) != 0 {
+            return Err(ServiceError.Policy("cannot replace a state adapter after it has records"))
+        }
+        if migration != "reversible" && migration != "dual_write" && migration != "forward_only" {
+            return Err(ServiceError.Policy("unknown migration policy {migration:Debug}; write \"reversible\", \"dual_write\", or \"forward_only\""))
+        }
+        if !valid_service_text(store.path, 4096) -> return Err(ServiceError.Policy("service state store is empty, too long, or contains control characters"))
+        if !valid_service_text(schema, 256) -> return Err(ServiceError.Policy("service state schema is empty, too long, or contains control characters"))
+        if version < 1 -> return Err(ServiceError.Policy("service state schema version must be positive"))
+        core.service.__tree_write_state_adapter(&tree, event_log)
+        core.service.__tree_write_state_authority(&tree, store.path.copy(), schema.copy(), version, migration.copy(), event_log)
+    }
+}
+
+fn valid_service_text(text: String, limit: Int) -> Bool Never! {
+    raw :: text.bytes()
+    if raw.len() == 0 || raw.len() > limit -> return false
+    loop i in 0..<raw.len() {
+        value :: Int.from_u8(raw[i])
+        if value < 32 || value == 127 -> return false
+        if value == 194 && i + 1 < raw.len() {
+            next_byte :: Int.from_u8(raw[i + 1])
+            if next_byte >= 128 && next_byte <= 159 -> return false
+        }
+    }
+    true
+}
+
+fn restore_snapshot(tree: ServiceTree) -> String ServiceError! {
+    #Unsafe("Services4437: authority lookup, durable load, first record, then checked framing") {
+        authority :: core.service.__tree_state_authority(tree) ?? return Err(ServiceError.Policy("Snapshot state has no injected authority"))
+        records :: if core.service.__state_load(tree, false) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                return Err(error)
+            }
+        }
+        if records.len() == 0 -> return Err(ServiceError.Policy("no snapshot committed"))
+        return read_state_record("v{authority.version}:", records[0])
+    }
+}
+
+fn replay_events(tree: ServiceTree) -> String Never! {
+    #Unsafe("Services4493: replay existing in-memory records without issuing a store read") {
+        authority :: core.service.__tree_state_authority(tree)
+        version :: if authority == {.Val(value) -> value.version else -> 1}
+        records :: core.service.__tree_event_records(tree)
+        events := [String]{}
+        loop record in records {
+            event :: read_state_record("v{version}:", record) ?? return "StateReplayError(invalid_record)"
+            &events.push(event)
+        }
+        return events.join("|")
+    }
+}
+
+fn read_state_record(prefix: String, record: String) -> String ServiceError! {
+    if !record.starts_with(prefix) -> return Err(ServiceError.Policy("state record schema is incompatible"))
+    raw :: record.bytes()
+    start :: prefix.bytes().len()
+    separator := start
+    loop separator < raw.len() && raw[separator] != (U8{58}) -> separator = separator + 1
+    if separator == raw.len() -> return Err(ServiceError.Policy("state record is truncated"))
+    digits_start := start
+    if digits_start < separator && raw[digits_start] == (U8{43}) -> digits_start = digits_start + 1
+    if digits_start == separator -> return Err(ServiceError.Policy("state record length is invalid"))
+    length := 0
+    maximum :: service_sys.usize_max()
+    loop i in digits_start..<separator {
+        digit :: Int.from_u8(raw[i]) - 48
+        if digit < 0 || digit > 9 || length > (maximum - digit) /% 10 -> return Err(ServiceError.Policy("state record length is invalid"))
+        length = length * 10 + digit
+    }
+    if length != raw.len() - separator - 1 -> return Err(ServiceError.Policy("state record length does not match payload"))
+    String.from_bytes(raw.slice(separator + 1, raw.len())) ?? return Err(ServiceError.Policy("state record length does not match payload"))
+}
+
+fn upgrade_receipt(tree: ServiceTree) -> ServiceUpgradeReceipt ServiceError! {
+    #Unsafe("Services6729: copy the existing optional last-upgrade field") {
+        return core.service.__tree_upgrade_receipt(tree) ?? return Err(ServiceError.Policy("service tree has no completed generation handoff"))
+    }
+}
+
+fn __upgrade_receipt_display(receipt: ServiceUpgradeReceipt) -> String Never! {
+    #Unsafe("Services1153: plain field projection; rollback store remains omitted from all text views") {
+        parts :: core.service.__upgrade_receipt_parts(receipt)
+        pinned :: parts.pinned_shards.join(",")
+        return "ServiceUpgradeReceipt(from={parts.from_generation}, to={parts.to_generation}, migration={parts.migration}, rollback_available={parts.rollback_available}, pinned={pinned})"
+    }
+}
+
+fn tree_show(tree: ServiceTree) -> String Never! {
+    #Unsafe("Services1265: read the existing topology fields, preserve handler insertion order") {
+        parts :: core.service.__tree_display_parts(tree)
+        handlers := [String]{}
+        loop worker in parts.handlers -> &handlers.push("{worker.name}:{worker.handler}")
+        restart :: if parts.restart == {
+            .OneForOne -> "OneForOne"
+            .OneForAll -> "OneForAll"
+            .RestForOne -> "RestForOne"
+        }
+        delivery :: if parts.delivery == {
+            .AtMostOnce -> "AtMostOnce"
+            .DurableAtLeastOnce -> "DurableAtLeastOnce"
+        }
+        return "ServiceTree(name={parts.name}, workers={parts.workers}, handlers=[{handlers.join(",")}], started={parts.started}, restart={restart}, budget={parts.budget_max}/{parts.budget_per_ms}ms, delivery={delivery})"
+    }
+}
+
+fn workflow_history(tree: ServiceTree, run_id: Int) -> String ServiceError! {
+    #Unsafe("Services5867: durable replay before lookup; first matching run wins") {
+        workflows :: if core.service.__workflow_replay_parts(tree) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                return Err(error)
+            }
+        }
+        loop workflow in workflows {
+            if workflow.run_id == run_id -> return workflow.history.join("|")
+        }
+        return Err(ServiceError.Unknown("workflow run {run_id} not found"))
+    }
+}
+
+fn workflow_outcome(tree: ServiceTree, run_id: Int) -> TaskOutcome ServiceError! {
+    #Unsafe("Services5879: durable replay before lookup; missing or nonterminal run is Policy") {
+        workflows :: if core.service.__workflow_replay_parts(tree) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                return Err(error)
+            }
+        }
+        loop workflow in workflows {
+            if workflow.run_id == run_id {
+                return workflow.outcome ?? return Err(ServiceError.Policy("workflow run {run_id} has no recorded terminal outcome"))
+            }
+        }
+        return Err(ServiceError.Policy("workflow run {run_id} has no recorded terminal outcome"))
+    }
+}
+
+fn observe(tree: ServiceTree) -> String Never! {
+    #Unsafe("Services6978: project existing runtime facts; source owns counts and text") {
+        parts :: core.service.__tree_observation_parts(tree)
+        running := 0
+        paused := 0
+        cancel_requested := 0
+        pending := 0
+        finished := 0
+        panicked := 0
+        cancelled := 0
+        deadline_blown := 0
+        loop workflow in parts.workflows {
+            if workflow.status == 0 -> running = running + 1
+            else if workflow.status == 1 -> paused = paused + 1
+            else -> cancel_requested = cancel_requested + 1
+            if workflow.outcome == -1 -> pending = pending + 1
+            else if workflow.outcome == 0 -> finished = finished + 1
+            else if workflow.outcome == 1 -> panicked = panicked + 1
+            else if workflow.outcome == 2 -> cancelled = cancelled + 1
+            else -> deadline_blown = deadline_blown + 1
+        }
+        return "Observe(workers={parts.workers}, started={parts.started}, generation={parts.generation}, dead_letters={parts.dead_letters}, events={parts.events}, chaos={parts.chaos}, draining={parts.draining}, partitions={parts.partitions}, rollback={parts.rollback}, workflows={parts.workflows.len()},statuses={{running:{running},paused:{paused},cancel_requested:{cancel_requested}}},outcomes={{pending:{pending},finished:{finished},panicked:{panicked},cancelled:{cancelled},deadline_blown:{deadline_blown}}})"
+    }
+}
+
+#Test("service state records use UTF-8 byte lengths and exact corruption errors") {
+    assert((read_state_record("v1:", "v1:2:é") ?? panic("record")) == "é")
+    assert((read_state_record("v1:", "v1:+2:é") ?? panic("record")) == "é")
+    assert(if read_state_record("v1:", "v2:2:é") == {.Err(.Policy(message)) -> message == "state record schema is incompatible" else -> false})
+    assert(if read_state_record("v1:", "v1:1:é") == {.Err(.Policy(message)) -> message == "state record length does not match payload" else -> false})
+    assert(if read_state_record("v1:", "v1:-1:x") == {.Err(.Policy(message)) -> message == "state record length is invalid" else -> false})
+}
+
+#Test("service authority key decodes the existing token, including uppercase hex") {
+    key :: __authority_signing_key("sa-000102030405060708090A0B0C0D0E0F101112131415161718191A1B1C1D1E1F") ?? panic("key")
+    assert(key.len() == 32)
+    loop i in 0..<32 -> assert(Int.from_u8(key[i]) == i)
+    assert(if __authority_signing_key("bad") == {.Err(.Revoked(message)) -> message == "service authority proof is malformed" else -> false})
+}
+
+#Test("service errors keep every message and delivery receipts keep every field") {
+    assert(service_error_show(ServiceError.Full("full")) == "full")
+    assert(service_error_show(ServiceError.Ambiguous("ambiguous")) == "ambiguous")
+    assert(service_error_show(ServiceError.Unknown("unknown")) == "unknown")
+    assert(service_error_show(ServiceError.NotStarted("not started")) == "not started")
+    assert(service_error_show(ServiceError.Policy("policy")) == "policy")
+    assert(service_error_show(ServiceError.Unavailable("unavailable")) == "unavailable")
+    assert(service_error_show(ServiceError.Partitioned("partitioned")) == "partitioned")
+    assert(service_error_show(ServiceError.Revoked("revoked")) == "revoked")
+    assert(service_error_show(ServiceError.Stale("stale")) == "stale")
+    assert(service_error_show(ServiceError.Expired("expired")) == "expired")
+    receipt :: DeliveryReceipt{id: "id", state: DeliveryState.Delivered, attempts: 3, retention_until: 4, deadline: 5, idempotency_key: "key", duplicate: true, authority: "authority", generation: 6, signature: "signature"}
+    assert(delivery_receipt_show(receipt) == "DeliveryReceipt(id=id, state=Delivered, attempts=3, retention_until=4, deadline=5, key=key, duplicate=true, authority=authority, generation=6, signature=signature)")
+}
+
+// core.service is the typed Jet facade for the registered service provider.
+// Topology, authority, delivery, state, and workflow values are provider
+// handles; this source module does not recreate their runtime state.
+// Mutating tree operations take the same exclusive borrow as the typed builder.
+// Native retaining transports receive explicit moves; borrowed public inputs
+// are copied once at that boundary, while locally owned queues and mailboxes
+// move directly (mailbox copies would fork the channel).
+
+// Plain policy values retain their existing native representation while their
+// constructors and duration projection are source-owned.
+enum ServiceRestart {
+    OneForOne
+    OneForAll
+    RestForOne
+}
+
+enum ServiceDelivery {
+    AtMostOnce
+    DurableAtLeastOnce
+}
+
+struct ServiceRuntime {
+    store: String
+    retention_ms: Int
+}
+
+struct ServiceStateStore {
+    path: String
+}
+
+fn tree(name: String) -> ServiceTree Never! {
+    #Unsafe("Allocation only: source supplies every Services.rs initializer field at 2d9953adf:1293-1319, in native evaluation order") {
+        return core.service.__tree_allocate(
+            ^"", // native 1295: authority
+            name.copy(), // native 1296: name
+            I64{1}, // native 1297: generation
+            ^ServiceDelivery.AtMostOnce, // native 1298: delivery
+            ^ServiceRestart.OneForOne, // native 1299: restart
+            ^(max: I64{5}, per_ms: I64{60000}), // native 1300 / ratified_default 60-61
+            ^[__TreeWorker]{}, // native 1301: workers
+            ^[__TreeGroup]{}, // native 1302: groups
+            false, // native 1303: started
+            ^__TreeStateAdapter.Empty, // native 1304: state_adapter
+            ^None, // native 1305: state_authority
+            ^None, // native 1306: snapshot
+            ^[String]{}, // native 1307: event_log
+            ^[String]{}, // native 1308: dead_letters
+            ^[(key: String, endpoint: ServiceEndpoint, value: String)]{}, // native 1309: idempotency_seen
+            ^[(key: String, endpoint: ServiceEndpoint, handler: String)]{}, // native 1310: directory
+            ^[String]{}, // native 1311: draining
+            ^[String]{}, // native 1312: partitioned
+            ^[__TreeWorkflowState]{}, // native 1313: workflows
+            core.service.__tree_task_group_new(), // native 1314: existing task runtime allocation
+            ^[__TreeSupervisorState]{}, // native 1315: supervisor_tasks
+            I64{0}, // native 1316: chaos_fails
+            I64{0}, // native 1317: previous_generation
+            ^None // native 1318: last_upgrade
+        )
+    }
+}
+
+#Test("fresh service tree exposes every native seed without starting a task") {
+    fresh :: tree("seed")
+    assert(tree_show(fresh) == "ServiceTree(name=seed, workers=0, handlers=[], started=false, restart=OneForOne, budget=5/60000ms, delivery=AtMostOnce)")
+    assert(observe(fresh) == "Observe(workers=0, started=false, generation=1, dead_letters=0, events=0, chaos=0, draining=0, partitions=0, rollback=false, workflows=0,statuses={{running:0,paused:0,cancel_requested:0}},outcomes={{pending:0,finished:0,panicked:0,cancelled:0,deadline_blown:0}})")
+    assert(directory_generation(fresh) == 1)
+    assert(event_count(fresh) == 0)
+    assert(dead_letter_count(fresh) == 0)
+}
+
+fn runtime(store: String, retention: Duration) -> ServiceRuntime Never! {
+    ServiceRuntime{store: store, retention_ms: retention.ns /% 1000000}
+}
+
+fn state_store(path: String) -[FS.Read]> ServiceStateStore ServiceError! {
+    if !valid_store_text(path) {
+        return Err(ServiceError.Policy("service state store is empty, too long, or contains control characters"))
+    }
+    if state_path_kind(path) == {
+        .Ok(kind) -> {
+            if kind == 2 -> return Err(state_error("service state store must not be a symlink"))
+            if kind != 0 -> return Err(state_error("service state store is not a regular file"))
+        }
+        .Err(.NotFound(_)) -> {}
+        .Err(error) -> return Err(state_error("cannot inspect service state store: {stat_cause(error)}"))
+    }
+    windows :: StatePathPlatform{}.windows()
+    parent := state_parent_lex(path, windows)
+    loop {
+        ancestor :: parent ?? break
+        if state_path_kind(ancestor) == {
+            .Ok(kind) -> {
+                if kind == 2 -> return Err(state_error("service state parent is a symlink: {ancestor}"))
+                if kind != 1 -> return Err(state_error("service state parent is not a directory: {ancestor}"))
+            }
+            .Err(.NotFound(_)) -> {}
+            .Err(error) -> return Err(state_error("cannot inspect service state parent: {stat_cause(error)}"))
+        }
+        parent = state_parent_lex(ancestor, windows)
+    }
+    ServiceStateStore{path: path}
+}
+
+// Metadata-only raw read: Windows identity acquisition would add failures that
+// the constructor's native symlink_metadata contract never had.
+fn state_path_kind(path: String) -[FS.Read]> Int IOError! {
+    #Unsafe("read the final path component's OS metadata kind without opening an identity handle") {
+        return core.files.__path_kind(path)
+    }
+}
+
+fn restart_one_for_one() -> ServiceRestart Never! {
+    ServiceRestart.OneForOne
+}
+
+fn restart_one_for_all() -> ServiceRestart Never! {
+    ServiceRestart.OneForAll
+}
+
+fn restart_rest_for_one() -> ServiceRestart Never! {
+    ServiceRestart.RestForOne
+}
+
+fn delivery_at_most_once() -> ServiceDelivery Never! {
+    ServiceDelivery.AtMostOnce
+}
+
+fn delivery_durable() -> ServiceDelivery Never! {
+    ServiceDelivery.DurableAtLeastOnce
+}
+
+fn directory_generation(tree: ServiceTree) -> Int Never! {
+    #Unsafe("read the checked service tree's generation field without mutating or copying its scheduler carrier") {
+        return core.service.__tree_generation(tree)
+    }
+}
+
+fn event_count(tree: ServiceTree) -> Int Never! {
+    #Unsafe("read event-log storage length on the checked service tree") {
+        return core.service.__tree_event_count(tree)
+    }
+}
+
+fn dead_letter_count(tree: ServiceTree) -> Int Never! {
+    #Unsafe("read dead-letter storage length on the checked service tree") {
+        return core.service.__tree_dead_letter_count(tree)
+    }
+}
+
+#Test("service policy constructors retain their nominal values") {
+    assert(restart_one_for_one() == ServiceRestart.OneForOne)
+    assert(restart_one_for_all() == ServiceRestart.OneForAll)
+    assert(restart_rest_for_one() == ServiceRestart.RestForOne)
+    assert(delivery_at_most_once() == ServiceDelivery.AtMostOnce)
+    assert(delivery_durable() == ServiceDelivery.DurableAtLeastOnce)
+    retention :: Duration.milliseconds(1234) ?? panic("retention")
+    value :: runtime("queue.store", retention)
+    assert(value.store == "queue.store")
+    assert(value.retention_ms == 1234)
+}
+
+fn valid_store_text(text: String) -> Bool Never! {
+    raw :: text.bytes()
+    if raw.len() == 0 || raw.len() > 4096 -> return false
+    loop i in 0..<raw.len() {
+        value :: Int.from_u8(raw[i])
+        if value < 32 || value == 127 -> return false
+        // Rust char::is_control is Unicode Cc, not only ASCII controls.
+        if value == 194 && i + 1 < raw.len() {
+            next :: Int.from_u8(raw[i + 1])
+            if next >= 128 && next <= 159 -> return false
+        }
+    }
+    true
+}
+
+fn state_error(message: String) -> ServiceError Never! {
+    ServiceError.Policy("{message}; repair or replace the state store before retrying")
+}
+
+fn stat_cause(error: IOError) -> String Never! {
+    context :: if error == {
+        .InvalidInput(value) -> Val(value)
+        .NotFound(value) -> Val(value)
+        .PermissionDenied(value) -> Val(value)
+        .TimedOut(value) -> Val(value)
+        .Cancelled(value) -> Val(value)
+        .Closed(value) -> Val(value)
+        .Protocol(value) -> Val(value)
+        .Other(value) -> Val(value)
+        .AlreadyExists(value) -> Val(value)
+        .Unsupported(value) -> Val(value)
+        .ResourceLimit(_) -> None
+    } ?? return "{error}"
+    context.cause ?? "{error}"
+}
+
+// Select path grammar at compile time, not through an Env capability.
+struct StatePathPlatform {}
+impl StatePathPlatform {
+    fn windows(self) -> Bool Never! {
+        comptime if $build.os == {
+            .Linux -> { return false }
+            .MacOS -> { return false }
+            .Windows -> { return true }
+        }
+    }
+}
+
+struct StatePathPrefix {
+    length: Int
+    verbatim: Bool
+    implicit_root: Bool
+}
+
+// Match Path::components().next_back()/as_path(): retain lexical `..` and
+// interior separators, but skip empty/dot suffix components. dirname's
+// normalization would miss a symlink ancestor in paths such as link/../store.
+fn state_parent_lex(path: String, windows: Bool) -> String? Never! {
+    raw :: path.bytes()
+    prefix :: state_prefix(raw, windows)
+    physical_root :: prefix.length < raw.len() && state_separator(raw[prefix.length], windows, false)
+    rooted :: physical_root || prefix.implicit_root
+    curdir :: !rooted && prefix.length < raw.len() && raw[prefix.length] == (U8{46})
+        && (raw.len() == prefix.length + 1 || state_separator(raw[prefix.length + 1], windows, prefix.verbatim))
+    floor := prefix.length
+    if physical_root -> floor = floor + 1
+    if curdir -> floor = floor + 1
+    end :: state_trim_suffix(raw, raw.len(), floor, windows, prefix.verbatim)
+    if end == floor {
+        if curdir -> return Val(state_path_slice(raw, prefix.length))
+        return None
+    }
+    begin :: state_component_begin(raw, end, floor, windows, prefix.verbatim)
+    remaining := begin
+    if begin > floor -> remaining = begin - 1
+    Val(state_path_slice(raw, state_trim_suffix(raw, remaining, floor, windows, prefix.verbatim)))
+}
+
+fn state_separator(value: U8, windows: Bool, verbatim: Bool) -> Bool Never! {
+    if windows && verbatim -> return value == (U8{92})
+    value == (U8{47}) || (windows && value == (U8{92}))
+}
+
+fn state_component_begin(raw: [U8], end: Int, floor: Int, windows: Bool, verbatim: Bool) -> Int Never! {
+    start := end
+    loop start > floor && !state_separator(raw[start - 1], windows, verbatim) {
+        start = start - 1
+    }
+    start
+}
+
+fn state_trim_suffix(raw: [U8], limit: Int, floor: Int, windows: Bool, verbatim: Bool) -> Int Never! {
+    end := limit
+    loop end > floor {
+        begin :: state_component_begin(raw, end, floor, windows, verbatim)
+        skipped :: begin == end || (!verbatim && end == begin + 1 && raw[begin] == (U8{46}))
+        if !skipped -> break
+        end = begin
+        if begin > floor -> end = begin - 1
+    }
+    end
+}
+
+fn state_path_slice(raw: [U8], end: Int) -> String Never! {
+    bytes := [U8]{}
+    loop i in 0..<end -> &bytes.push(raw[i])
+    String.from_bytes(bytes) ?? panic("path component boundary is not UTF-8")
+}
+
+fn state_next_separator(raw: [U8], start: Int, verbatim: Bool) -> Int Never! {
+    i := start
+    loop i < raw.len() && !state_separator(raw[i], true, verbatim) -> i = i + 1
+    i
+}
+
+fn state_drive(raw: [U8], start: Int) -> Bool Never! {
+    if start + 1 >= raw.len() || raw[start + 1] != (U8{58}) -> return false
+    value :: Int.from_u8(raw[start])
+    (value >= 65 && value <= 90) || (value >= 97 && value <= 122)
+}
+
+fn state_prefix(raw: [U8], windows: Bool) -> StatePathPrefix Never! {
+    if !windows -> return StatePathPrefix{length: 0, verbatim: false, implicit_root: false}
+    if raw.len() >= 2 && state_separator(raw[0], true, false) && state_separator(raw[1], true, false) {
+        if raw.len() >= 4 && raw[0] == (U8{92}) && raw[1] == (U8{92}) && raw[2] == (U8{63}) && raw[3] == (U8{92}) {
+            if raw.len() >= 8 && raw[4] == (U8{85}) && raw[5] == (U8{78}) && raw[6] == (U8{67}) && state_separator(raw[7], true, false) {
+                server_end :: state_next_separator(raw, 8, true)
+                share_start := server_end
+                if server_end < raw.len() -> share_start = server_end + 1
+                share_end :: state_next_separator(raw, share_start, true)
+                length := server_end
+                if share_end > share_start -> length = share_end
+                return StatePathPrefix{length: length, verbatim: true, implicit_root: true}
+            }
+            if state_drive(raw, 4) && (raw.len() == 6 || state_separator(raw[6], true, false)) {
+                return StatePathPrefix{length: 6, verbatim: true, implicit_root: false}
+            }
+            return StatePathPrefix{length: state_next_separator(raw, 4, true), verbatim: true, implicit_root: true}
+        }
+        if raw.len() >= 4 && raw[2] == (U8{46}) && state_separator(raw[3], true, false) {
+            return StatePathPrefix{length: state_next_separator(raw, 4, false), verbatim: false, implicit_root: true}
+        }
+        server_end :: state_next_separator(raw, 2, false)
+        share_start := server_end
+        if server_end < raw.len() -> share_start = server_end + 1
+        share_end :: state_next_separator(raw, share_start, false)
+        if server_end > 2 && share_end > share_start {
+            return StatePathPrefix{length: share_end, verbatim: false, implicit_root: true}
+        }
+    } else if state_drive(raw, 0) {
+        return StatePathPrefix{length: 2, verbatim: false, implicit_root: false}
+    }
+    StatePathPrefix{length: 0, verbatim: false, implicit_root: false}
+}
+
+#Test("service state path text and lexical parents") {
+    assert(!valid_store_text(""))
+    assert(!valid_store_text("bad\npath"))
+    control :: String.from_bytes([U8]{194, 133}) ?? panic("Unicode control")
+    assert(!valid_store_text(control))
+    assert(valid_store_text("normal/../store"))
+    assert(state_parent_lex("", false) == None)
+    assert(state_parent_lex("/", false) == None)
+    assert(state_parent_lex("///", false) == None)
+    assert(state_parent_lex(".", false) == (Val("")))
+    assert(state_parent_lex("./file", false) == (Val(".")))
+    assert(state_parent_lex("file", false) == (Val("")))
+    assert(state_parent_lex("dir/./file", false) == (Val("dir")))
+    assert(state_parent_lex("dir//sub/file", false) == (Val("dir//sub")))
+    assert(state_parent_lex("link/../store", false) == (Val("link/..")))
+    assert(state_parent_lex("dir///./", false) == (Val("")))
+    assert(state_parent_lex("/dir/file/", false) == (Val("/dir")))
+    assert(state_parent_lex("C:\\dir\\file", true) == (Val("C:\\dir")))
+    assert(state_parent_lex("C:\\file", true) == (Val("C:\\")))
+    assert(state_parent_lex("C:file", true) == (Val("C:")))
+    assert(state_parent_lex("C:\\", true) == None)
+    assert(state_parent_lex("\\\\server\\share\\file", true) == (Val("\\\\server\\share\\")))
+    assert(state_parent_lex("\\\\server\\share", true) == None)
+    assert(state_parent_lex("\\\\?\\C:\\dir\\.\\file", true) == (Val("\\\\?\\C:\\dir\\.")))
+    assert(state_parent_lex("\\\\.\\COM42\\file", true) == (Val("\\\\.\\COM42\\")))
+}
+
+// Workflow tree operations preserve the Rust exclusive borrow over every
+// decision and cursor write. Handle-only wait points retain their mutex leaf.
+fn workflow_start(tree: &ServiceTree, id: String, version: Int) -> ServiceWorkflow ServiceError! {
+    #Unsafe("Services5439-5507: synchronize before validation; exact version replay precedes active-version rejection") {
+        if workflow_prepare(&tree) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        if id.trim() == "" || !workflow_visible(id, 256) -> return Err(ServiceError.Policy("workflow id must be non-empty and visible"))
+        if version < 1 -> return Err(ServiceError.Policy("workflow version must be >= 1"))
+        count :: core.service.__workflow_count(tree)
+        loop index in 0..<count {
+            if core.service.__workflow_id_at(tree, index) == id && core.service.__workflow_version_at(tree, index) == version {
+                run_id :: core.service.__workflow_run_at(tree, index)
+                core.service.__workflow_set_cursor(&tree, index, 1)
+                return core.service.__workflow_handle(tree, run_id)
+            }
+        }
+        maximum := 0
+        loop index in 0..<count {
+            if core.service.__workflow_id_at(tree, index) == id && core.service.__workflow_version_at(tree, index) != version && core.service.__workflow_outcome_at(tree, index) == None {
+                return Err(ServiceError.Policy("workflow `{id}` already has a different active version"))
+            }
+            run_id :: core.service.__workflow_run_at(tree, index)
+            if run_id > maximum -> maximum = run_id
+        }
+        if maximum == 9223372036854775807 -> return Err(ServiceError.Policy("workflow run id exhausted"))
+        run_id :: maximum + 1
+        if core.service.__workflow_append(&tree, ^"workflow-start:{run_id}:{version}:{workflow_frame(id)}") == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        loop index in 0..<core.service.__workflow_count(tree) {
+            if core.service.__workflow_run_at(tree, index) == run_id -> core.service.__workflow_set_cursor(&tree, index, 1)
+        }
+        return core.service.__workflow_handle(tree, run_id)
+    }
+}
+
+fn workflow_step(tree: &ServiceTree, run_id: Int, step: String) ServiceError! {
+    #Unsafe("Services5656-5705: exclusive tree borrow keeps replay and append cursor decisions indivisible") {
+        if workflow_prepare(&tree) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        if step.trim() == "" || !workflow_visible(step, 1048576) -> return Err(ServiceError.Policy("workflow step must be non-empty and visible"))
+        markers :: [String]{"time.", "random", "rand.", "io.", "channel", "spawn", "service.connect"}
+        loop marker in markers {
+            if step.contains(marker) -> return Err(ServiceError.Policy("workflow step reaches a non-deterministic effect; use a recorded activity"))
+        }
+        index :: workflow_find(tree, run_id) ?? return Err(ServiceError.Unknown("workflow run {run_id} not found"))
+        replaying :: core.service.__workflow_cursor_at(tree, index) != 0
+        if replaying {
+            if workflow_replay_decision(&tree, index, "step:{step}") == {
+                .Err(error) -> return Err(error)
+                .Ok(consumed) -> { if consumed -> return Ok() }
+            }
+        } else {
+            workflow_advance(&tree, index, false, 0)
+        }
+        if core.service.__workflow_outcome_at(tree, index) != None -> return Err(ServiceError.Policy("workflow step follows a terminal workflow outcome"))
+        if core.service.__workflow_steps_len(tree, index) >= 100000 -> return Err(ServiceError.Policy("workflow step history limit exceeded"))
+        if core.service.__workflow_append(&tree, ^"workflow-step:{run_id}:{workflow_frame(step)}") == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        workflow_advance(&tree, index, replaying, 1)
+    }
+}
+
+fn workflow_activity(tree: &ServiceTree, run_id: Int, activity: String, key: String, max_attempts: Int) -> TaskStatus ServiceError! {
+    #Unsafe("Services5708-5789: first recorded definition wins; replay precedes terminal checks") {
+        if workflow_prepare(&tree) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        if workflow_token(activity, "activity") == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        if workflow_token(key, "idempotency key") == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        if max_attempts < 1 || max_attempts > 1000 -> return Err(ServiceError.Policy("workflow activity retry limit is outside the bounded range"))
+        index :: workflow_find(tree, run_id) ?? return Err(ServiceError.Unknown("workflow run {run_id} not found"))
+        replaying :: core.service.__workflow_cursor_at(tree, index) != 0
+        expected :: "activity:{activity}:{key}@1/{max_attempts}"
+        if workflow_activity_definition(tree, index, key) == {
+            .Val(existing) -> {
+                if existing.activity != activity || existing.max_attempts != max_attempts -> return Err(ServiceError.Policy("workflow activity `{key}` does not match its recorded definition"))
+                if replaying {
+                    if workflow_replay_decision(&tree, index, expected) == {
+                        .Err(error) -> return Err(error)
+                        .Ok(consumed) -> { if consumed -> return Ok(TaskStatus.Running) }
+                    }
+                }
+                return Ok(core.service.__workflow_status_at(tree, index))
+            }
+            .None -> {}
+        }
+        if !replaying {
+            workflow_advance(&tree, index, false, 0)
+        } else {
+            if core.service.__workflow_event_at(tree, index, core.service.__workflow_cursor_at(tree, index)) == {
+                .Val(actual) -> {
+                    if actual == expected -> return Err(ServiceError.Policy("workflow replay activity is missing its durable state"))
+                    return Err(ServiceError.Policy("workflow replay diverged: expected `{actual}`, got `{expected}`"))
+                }
+                .None -> {}
+            }
+        }
+        if core.service.__workflow_outcome_at(tree, index) != None -> return Err(ServiceError.Policy("workflow activity follows a terminal workflow outcome"))
+        payload :: "workflow-activity:{run_id}:1:{max_attempts}:{workflow_frame(activity)}{workflow_frame(key)}"
+        if core.service.__workflow_append(&tree, ^payload) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        workflow_advance(&tree, index, false, 0)
+        return Ok(TaskStatus.Running)
+    }
+}
+
+fn workflow_activity_retry(tree: &ServiceTree, run_id: Int, key: String, outcome: TaskOutcome) -> TaskStatus ServiceError! {
+    #Unsafe("Services5792-5867: replay consumes recorded attempts, never derives another attempt from replayed state") {
+        if workflow_prepare(&tree) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        if workflow_token(key, "idempotency key") == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        index :: workflow_find(tree, run_id) ?? return Err(ServiceError.Unknown("workflow run {run_id} not found"))
+        replaying :: core.service.__workflow_cursor_at(tree, index) != 0
+        activity :: workflow_activity_definition(tree, index, key) ?? return Err(ServiceError.Unknown("activity key `{key}` not found"))
+        if outcome == TaskOutcome.Finished -> return Err(ServiceError.Policy("a finished activity cannot be retried"))
+        if !workflow_valid_outcome(outcome) -> return Err(ServiceError.Policy("workflow activity outcome is invalid"))
+        if replaying {
+            if workflow_replay_retry(&tree, index, key, activity.max_attempts, outcome) == {
+                .Err(error) -> return Err(error)
+                .Ok(consumed) -> { if consumed -> return Ok(TaskStatus.Paused) }
+            }
+        }
+        if core.service.__workflow_outcome_at(tree, index) != None || workflow_activity_result(tree, index, key) != None -> return Err(ServiceError.Policy("workflow activity retry follows a terminal activity"))
+        if activity.attempt >= activity.max_attempts -> return Err(ServiceError.Policy("workflow activity retry limit exhausted"))
+        if !replaying -> workflow_advance(&tree, index, false, 0)
+        next_attempt :: activity.attempt + 1
+        payload :: "workflow-activity-retry:{run_id}:{next_attempt}:{workflow_frame(key)}{workflow_frame(workflow_outcome_wire(outcome))}"
+        if core.service.__workflow_append(&tree, ^payload) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        workflow_advance(&tree, index, replaying, 1)
+        return Ok(TaskStatus.Paused)
+    }
+}
+
+fn workflow_activity_complete(tree: &ServiceTree, run_id: Int, key: String, outcome: TaskOutcome) -> TaskOutcome ServiceError! {
+    #Unsafe("Services5870-5950: two replay entries advance together; identical terminal completions are idempotent") {
+        if workflow_prepare(&tree) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        if workflow_token(key, "idempotency key") == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        if !workflow_valid_outcome(outcome) -> return Err(ServiceError.Policy("workflow activity outcome is invalid"))
+        index :: workflow_find(tree, run_id) ?? return Err(ServiceError.Unknown("workflow run {run_id} not found"))
+        if workflow_activity_definition(tree, index, key) == None -> return Err(ServiceError.Unknown("activity key `{key}` not found"))
+        replaying :: core.service.__workflow_cursor_at(tree, index) != 0
+        if replaying {
+            cursor :: core.service.__workflow_cursor_at(tree, index)
+            actual_done :: core.service.__workflow_event_at(tree, index, cursor)
+            actual_result :: core.service.__workflow_event_at(tree, index, cursor + 1)
+            if actual_done == (Val("activity-done:{key}")) && actual_result == (Val("activity-result:{task_outcome_show(outcome)}")) {
+                core.service.__workflow_set_cursor(&tree, index, cursor + 2)
+                return Ok(outcome)
+            }
+            if actual_done == {
+                .Val(actual) -> return Err(ServiceError.Policy("workflow replay diverged: expected completion for `{key}`, got `{actual}`"))
+                .None -> {}
+            }
+        }
+        if workflow_activity_result(tree, index, key) == {
+            .Val(existing) -> {
+                if existing == outcome -> return Ok(outcome)
+                return Err(ServiceError.Policy("workflow activity completion conflicts with its recorded outcome"))
+            }
+            .None -> {}
+        }
+        if !replaying -> workflow_advance(&tree, index, false, 0)
+        payload :: "workflow-activity-done:{run_id}:{workflow_frame(key)}{workflow_frame(workflow_outcome_wire(outcome))}"
+        if core.service.__workflow_append(&tree, ^payload) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        workflow_advance(&tree, index, replaying, 2)
+        return Ok(outcome)
+    }
+}
+
+fn workflow_prepare(tree: &ServiceTree) ServiceError! {
+    if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
+    core.service.__workflow_sync_tree(&tree)
+}
+
+fn workflow_find(tree: ServiceTree, run_id: Int) -> Int? Never! {
+    loop index in 0..<core.service.__workflow_count(tree) {
+        if core.service.__workflow_run_at(tree, index) == run_id -> return Val(index)
+    }
+    None
+}
+
+fn workflow_visible(text: String, limit: Int) -> Bool Never! {
+    // Empty payloads are valid; Rust char::is_control includes C0, DEL and C1.
+    if text == "" -> return true
+    valid_service_text(text, limit)
+}
+
+fn workflow_token(text: String, label: String) ServiceError! {
+    if text.trim() == "" || !workflow_visible(text, 256) || text.contains(":") -> return Err(ServiceError.Policy("workflow {label} must be non-empty, visible, bounded, and contain no `:`"))
+}
+
+fn workflow_frame(text: String) -> String Never! { "{text.bytes().len()}:{text}" }
+
+fn workflow_valid_outcome(outcome: TaskOutcome) -> Bool Never! {
+    if outcome == {
+        .Panicked(reason) -> reason.trim() != "" && workflow_visible(reason, 1048576)
+        else -> true
+    }
+}
+
+fn workflow_outcome_wire(outcome: TaskOutcome) -> String Never! {
+    if outcome == {
+        .Panicked(reason) -> "Panicked:{workflow_frame(reason)}"
+        else -> task_outcome_show(outcome)
+    }
+}
+
+fn workflow_replay_decision(tree: &ServiceTree, index: Int, expected: String) -> Bool ServiceError! {
+    cursor :: core.service.__workflow_cursor_at(tree, index)
+    if cursor == 0 -> return Ok(false)
+    actual :: core.service.__workflow_event_at(tree, index, cursor) ?? return Ok(false)
+    if actual != expected -> return Err(ServiceError.Policy("workflow replay diverged: expected `{actual}`, got `{expected}`"))
+    core.service.__workflow_set_cursor(&tree, index, cursor + 1)
+    Ok(true)
+}
+
+fn workflow_advance(tree: &ServiceTree, index: Int, replaying: Bool, amount: Int) Never! {
+    next :: if replaying -> core.service.__workflow_cursor_at(tree, index) + amount else -> core.service.__workflow_history_len(tree, index)
+    core.service.__workflow_set_cursor(&tree, index, next)
+}
+
+struct WorkflowActivityDefinition {
+    activity: String
+    attempt: Int
+    max_attempts: Int
+}
+
+fn workflow_activity_definition(tree: ServiceTree, index: Int, key: String) -> WorkflowActivityDefinition? Never! {
+    loop step_index in 0..<core.service.__workflow_steps_len(tree, index) {
+        fields :: core.service.__workflow_step_at(tree, index, step_index).split(":").to_list()
+        if fields.len() == 5 && fields[0] == "activity" && fields[2] == key {
+            attempt :: workflow_i64(fields[3]) ?? next
+            maximum :: workflow_i64(fields[4]) ?? next
+            return Val(WorkflowActivityDefinition{activity: fields[1], attempt: attempt, max_attempts: maximum})
+        }
+    }
+    None
+}
+
+fn workflow_activity_result(tree: ServiceTree, index: Int, key: String) -> TaskOutcome? Never! {
+    loop pair_index in 0..<core.service.__workflow_activity_count(tree, index) {
+        if core.service.__workflow_activity_key_at(tree, index, pair_index) == key -> return Val(core.service.__workflow_activity_outcome_at(tree, index, pair_index))
+    }
+    None
+}
+
+fn workflow_i64(text: String) -> Int? Never! {
+    raw :: text.bytes()
+    if raw.len() == 0 -> return None
+    start := 0
+    negative := false
+    if raw[0] == (U8{43}) -> start = 1
+    if raw[0] == (U8{45}) {
+        start = 1
+        negative = true
+    }
+    if start == raw.len() -> return None
+    limit :: if negative -> 9223372036854775808 else -> 9223372036854775807
+    value := 0
+    loop i in start..<raw.len() {
+        digit :: Int.from_u8(raw[i]) - 48
+        if digit < 0 || digit > 9 || value > (limit - digit) /% 10 -> return None
+        value = value * 10 + digit
+    }
+    Val(if negative -> -value else -> value)
+}
+
+fn workflow_replay_retry(tree: &ServiceTree, index: Int, key: String, maximum: Int, outcome: TaskOutcome) -> Bool ServiceError! {
+    cursor :: core.service.__workflow_cursor_at(tree, index)
+    if cursor == 0 -> return Ok(false)
+    actual :: core.service.__workflow_event_at(tree, index, cursor) ?? return Ok(false)
+    prefix :: "activity-retry:{key}@"
+    suffix :: ":{task_outcome_show(outcome)}"
+    if !actual.starts_with(prefix) || !actual.ends_with(suffix) -> return Err(ServiceError.Policy("workflow replay diverged: expected retry for `{key}`, got `{actual}`"))
+    raw :: actual.bytes()
+    range :: String.from_bytes(raw.slice(prefix.bytes().len(), raw.len() - suffix.bytes().len())) ?? return Err(ServiceError.Policy("workflow replay has an invalid retry decision for `{key}`"))
+    parts :: range.split("/").to_list()
+    if parts.len() < 2 -> return Err(ServiceError.Policy("workflow replay has an invalid retry decision for `{key}`"))
+    attempt :: workflow_i64(parts[0]) ?? return Err(ServiceError.Policy("workflow replay has an invalid retry attempt for `{key}`"))
+    recorded_limit_text := parts[1]
+    if parts.len() > 2 -> recorded_limit_text = "{parts[1]}/{parts.slice(2, parts.len()).join("/")}"
+    recorded_limit :: workflow_i64(recorded_limit_text) ?? return Err(ServiceError.Policy("workflow replay has an invalid retry limit for `{key}`"))
+    if attempt < 2 || attempt > maximum || recorded_limit != maximum -> return Err(ServiceError.Policy("workflow replay retry definition for `{key}` changed"))
+    core.service.__workflow_set_cursor(&tree, index, cursor + 1)
+    Ok(true)
+}
+
+#Test("workflow framing, token bounds, signed replay counters and panic validation") {
+    assert(workflow_frame("λ") == "2:λ")
+    assert(workflow_i64("+0002") == (Val(2)))
+    assert(workflow_i64("-9223372036854775808") == (Val(-9223372036854775808)))
+    assert(workflow_i64("9223372036854775808") == None)
+    assert(workflow_i64(" 2") == None)
+    assert(workflow_i64("2/3") == None)
+    assert(workflow_visible("", 1048576))
+    assert(!workflow_visible("\n", 1048576))
+    assert(!workflow_valid_outcome(TaskOutcome.Panicked("   ")))
+    assert(workflow_outcome_wire(TaskOutcome.Panicked("λ")) == "Panicked:2:λ")
+}
+
+fn group(tree: &ServiceTree, name: String, workers: [String]) ServiceError! {
+    #Unsafe("Services1546: exclusive tree write borrow preserves validation, reparent, append ordering") {
+        if core.service.__tree_started(tree) -> return Err(ServiceError.Policy("cannot add groups after start"))
+        facts :: core.service.__group_parts(tree)
+        if validate_group(name, workers, facts.workers, facts.groups) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        loop worker in workers {
+            if core.service.__group_reparent(&tree, name, worker) == {
+                .Err(error) -> return Err(error)
+                .Ok(_) -> {}
+            }
+        }
+        core.service.__group_push(&tree, name.copy(), workers.copy())
+    }
+}
+
+fn validate_group(name: String, workers: [String], known: [String], groups: [(name: String, workers: [String])]) ServiceError! {
+    if name.trim().len() == 0 || !valid_service_text(name, 256) || workers.len() == 0 || workers.len() > 4096 {
+        return Err(ServiceError.Policy("service group needs a visible name and at least one worker"))
+    }
+    loop existing in groups {
+        if existing.name == name -> return Err(ServiceError.Policy("group `{name}` already exists"))
+    }
+    loop worker in workers {
+        found := false
+        loop existing in known {
+            if existing == worker -> found = true
+        }
+        if !found -> return Err(ServiceError.Unknown("group `{name}` references unknown worker `{worker}`"))
+    }
+    loop worker in workers {
+        loop existing in groups {
+            loop member in existing.workers {
+                if member == worker -> return Err(ServiceError.Policy("a worker can belong to only one service supervisor group"))
+            }
+        }
+    }
+    loop i in 0..<workers.len() {
+        loop j in 0..<i {
+            if workers[j] == workers[i] -> return Err(ServiceError.Policy("group `{name}` lists a worker more than once"))
+        }
+    }
+}
+
+fn chaos_fail(tree: &ServiceTree) -> Int ServiceError! {
+    #Unsafe("Services7044: counter write precedes reachable-worker selection and canonical failure policy") {
+        if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
+        counter :: core.service.__tree_chaos_count(tree)
+        if counter == 9223372036854775807 -> return Err(ServiceError.Policy("chaos failure counter exhausted"))
+        next :: counter + 1
+        core.service.__tree_write_chaos_count(&tree, next)
+        endpoint :: core.service.__first_running_endpoint(tree) ?? return Err(ServiceError.Partitioned("chaos failure has no reachable service worker"))
+        if fail_worker(&tree, endpoint) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        return core.service.__tree_chaos_count(tree)
+    }
+}
+
+fn append_event(tree: &ServiceTree, event: String) ServiceError! {
+    #Unsafe("Services4575: source owns adapter/authority/payload/count checks and record framing; store append before field push") {
+        if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
+        // CoreEnumRows registers Empty, Snapshot, EventLog; only EventLog permits append.
+        if core.service.__tree_state_adapter(tree) == {
+            .EventLog -> {}
+            .Empty | .Snapshot -> return Err(ServiceError.Policy("append_event requires EventLog state adapter"))
+        }
+        authority :: core.service.__tree_state_authority(tree) ?? return Err(ServiceError.Policy("EventLog state has no injected authority"))
+        if !valid_record_payload(event) -> return Err(ServiceError.Policy("event record exceeds the state record limit"))
+        if core.service.__tree_event_count(tree) >= 100000 -> return Err(ServiceError.Policy("event-log record limit exceeded"))
+        record :: "v{authority.version}:{event.bytes().len()}:{event}"
+        if core.service.__event_store_append(tree, record) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        core.service.__tree_event_push(&tree, ^record)
+    }
+}
+
+fn commit_snapshot(tree: &ServiceTree, payload: String) ServiceError! {
+    #Unsafe("Services4525: host record-write leaf retains existing mutex through store write and field assignment; no guard exposed") {
+        if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
+        // CoreEnumRows registers Empty, Snapshot, EventLog; only Snapshot permits commit.
+        if core.service.__tree_state_adapter(tree) == {
+            .Snapshot -> {}
+            .Empty | .EventLog -> return Err(ServiceError.Policy("commit_snapshot requires Snapshot state adapter"))
+        }
+        authority :: core.service.__tree_state_authority(tree) ?? return Err(ServiceError.Policy("Snapshot state has no injected authority"))
+        if !valid_record_payload(payload) -> return Err(ServiceError.Policy("snapshot record exceeds the state record limit"))
+        record :: "v{authority.version}:{payload.bytes().len()}:{payload}"
+        return core.service.__snapshot_store_write(&tree, ^record)
+    }
+}
+
+fn valid_record_payload(text: String) -> Bool Never! {
+    // Rust allows empty messages/records but rejects every Unicode Cc scalar.
+    text.len() == 0 || valid_service_text(text, 1048576)
+}
+
+#Test("service group policy preserves native error precedence") {
+    assert(if validate_group("", [String]{}, [String]{}, [(name: String, workers: [String])]{}) == {.Err(.Policy(message)) -> message == "service group needs a visible name and at least one worker" else -> false})
+    existing :: [(name: String, workers: [String])]{(name: "g", workers: [String]{"w"})}
+    assert(if validate_group("g", [String]{"unknown"}, [String]{"w"}, existing) == {.Err(.Policy(message)) -> message == "group `g` already exists" else -> false})
+    assert(if validate_group("new", [String]{"unknown", "w"}, [String]{"w"}, existing) == {.Err(.Unknown(message)) -> message == "group `new` references unknown worker `unknown`" else -> false})
+    assert(if validate_group("new", [String]{"w", "w"}, [String]{"w"}, existing) == {.Err(.Policy(message)) -> message == "a worker can belong to only one service supervisor group" else -> false})
+    assert(if validate_group("new", [String]{"w", "w"}, [String]{"w"}, [(name: String, workers: [String])]{}) == {.Err(.Policy(message)) -> message == "group `new` lists a worker more than once" else -> false})
+    assert(valid_record_payload(""))
+    assert(valid_record_payload("é"))
+    assert(!valid_record_payload("\n"))
+}
+
+#Test("mutating service operations borrow the tree and preserve pre-start policy") {
+    fresh := tree("mutation-contract")
+    assert(if group(&fresh, "g", [String]{"missing"}) == {.Err(.Unknown(message)) -> message == "group `g` references unknown worker `missing`" else -> false})
+    assert(if chaos_fail(&fresh) == {.Err(.NotStarted(message)) -> message == "service tree is not started" else -> false})
+    assert(if append_event(&fresh, "event") == {.Err(.NotStarted(message)) -> message == "service tree is not started" else -> false})
+    assert(if commit_snapshot(&fresh, "snapshot") == {.Err(.NotStarted(message)) -> message == "service tree is not started" else -> false})
+    assert(directory_generation(fresh) == 1)
+    assert(event_count(fresh) == 0)
+    delivery :: delivery_durable()
+    restart :: restart_one_for_all()
+    set_delivery(&fresh, delivery) ?? panic("pre-start delivery")
+    set_restart(&fresh, restart) ?? panic("pre-start restart")
+    assert(delivery == delivery_durable())
+    assert(restart == restart_one_for_all())
+    assert(tree_show(fresh).contains("restart=OneForAll"))
+    assert(tree_show(fresh).contains("delivery=DurableAtLeastOnce"))
+}
+
+fn validate_tree_endpoint(tree: ServiceTree, endpoint: ServiceEndpoint) ServiceError! {
+    #Unsafe("Services2184: identity and pinned-generation checks precede authority validation") {
+        parts :: core.service.__tree_route_parts(tree)
+        identity :: core.service.__endpoint_identity_parts(endpoint)
+        if identity.authority != parts.authority || identity.tree != parts.name -> return Err(ServiceError.Revoked("service endpoint {identity.tree}/{identity.worker} is not issued by this authority"))
+        if !route_generation_allowed(parts.generation, parts.upgrade, identity.worker, identity.generation) {
+            return Err(stale_tree_endpoint(identity.tree, identity.worker, identity.generation, parts.generation))
+        }
+        return __authority_validate(endpoint)
+    }
+}
+
+fn route_generation_allowed(generation: Int, upgrade: (from_generation: Int, to_generation: Int, pinned: [String])?, worker: String, endpoint_generation: Int) -> Bool Never! {
+    if endpoint_generation == generation -> return true
+    if upgrade == {
+        .Val(receipt) -> {
+            if receipt.to_generation != generation || receipt.from_generation != endpoint_generation -> return false
+            loop name in receipt.pinned {
+                if name == worker -> return true
+            }
+        }
+        else -> {}
+    }
+    false
+}
+
+fn directory_resolve(tree: ServiceTree, name: String) -> ServiceEndpoint ServiceError! {
+    #Unsafe("Services6081: exact directory lookup, generation, proof, authority, running, draining order") {
+        entry :: core.service.__directory_entry(tree, name) ?? return Err(ServiceError.Unknown("directory has no entry `{name}`"))
+        parts :: core.service.__tree_route_parts(tree)
+        identity :: core.service.__endpoint_identity_parts(entry.endpoint)
+        if !route_generation_allowed(parts.generation, parts.upgrade, identity.worker, identity.generation) -> return Err(ServiceError.Stale("directory entry `{name}` is from generation {identity.generation}"))
+        if core.service.__validate_directory_proof(parts.authority, parts.name, entry.name, entry.endpoint, entry.signature) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        if __authority_validate(entry.endpoint) == {
+            .Err(.NotStarted(message)) -> return Err(ServiceError.Expired(message))
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        worker :: core.service.__worker_route(tree, entry.endpoint) ?? return Err(ServiceError.Expired("directory entry `{name}` no longer names a running worker"))
+        if !worker.running -> return Err(ServiceError.Expired("directory entry `{name}` no longer names a running worker"))
+        loop draining in parts.draining {
+            if draining == identity.worker -> return Err(ServiceError.Unavailable("directory entry `{name}` is draining"))
+        }
+        return entry.endpoint
+    }
+}
+
+fn send(tree: &ServiceTree, endpoint: ServiceEndpoint, message: String) ServiceError! {
+    #Unsafe("Services2558: source owns routing, message checks, worker gate, capacity error text, post-send ordering") {
+        if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
+        if validate_tree_endpoint(tree, endpoint) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        if !valid_record_payload(message) -> return Err(ServiceError.Policy("service message exceeds the 1 MiB limit"))
+        message_bytes :: message.bytes().len()
+        parts :: core.service.__tree_route_parts(tree)
+        identity :: core.service.__endpoint_identity_parts(endpoint)
+        draining := false
+        loop name in parts.draining {
+            if name == identity.worker -> draining = true
+        }
+        // Native find_worker_mut validates again before selecting a worker.
+        if validate_tree_endpoint(tree, endpoint) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        worker :: core.service.__worker_route(tree, endpoint) ?? return Err(ServiceError.Unknown("endpoint {identity.tree}/{identity.worker} is not in this tree"))
+        if !worker.running || draining -> return Err(ServiceError.NotStarted("worker `{worker.name}` is not running"))
+        if core.service.__authority_try_send(endpoint, message.copy()) == {
+            .Err(.Full(_)) -> return Err(full_tree_mailbox(worker.name, worker.capacity))
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        // Accounting is best effort in native: validation/find errors are ignored.
+        if validate_tree_endpoint(tree, endpoint) == {
+            .Ok(_) -> {
+                if core.service.__worker_route(tree, endpoint) == {
+                    .Val(current) -> core.service.__worker_sent_account(&tree, current.index, message_bytes)
+                    else -> {}
+                }
+            }
+            else -> {}
+        }
+    }
+}
+
+#Test("service route generation accepts only active or explicitly pinned predecessors") {
+    assert(route_generation_allowed(2, None, "w", 2))
+    assert(!route_generation_allowed(2, None, "w", 1))
+    receipt :: Val((from_generation: 1, to_generation: 2, pinned: [String]{"w"}))
+    assert(route_generation_allowed(2, receipt, "w", 1))
+    assert(!route_generation_allowed(2, receipt, "other", 1))
+    assert(!route_generation_allowed(3, receipt, "w", 1))
+}
+
+fn stale_tree_endpoint(tree: String, worker: String, generation: Int, current: Int) -> ServiceError Never! {
+    ServiceError.Stale("service endpoint {tree}/{worker}@g{generation} is stale (current generation {current})")
+}
+
+fn full_tree_mailbox(worker: String, capacity: Int) -> ServiceError Never! {
+    ServiceError.Full("mailbox for `{worker}` is full (capacity {capacity})")
+}
+
+#Test("service send capacity remap and endpoint generation text retain exact native spelling") {
+    assert(if full_tree_mailbox("worker", 3) == {.Full(message) -> message == "mailbox for `worker` is full (capacity 3)" else -> false})
+    assert(if stale_tree_endpoint("tree", "worker", 1, 2) == {.Stale(message) -> message == "service endpoint tree/worker@g1 is stale (current generation 2)" else -> false})
+}
+
+// Private, owned copies of the existing durable reader result. They carry no
+// authority registry or second delivery state; the locked read is unchanged.
+struct __DeliveryRecord {
+    op: Int
+    fields: [String]
+}
+
+struct __DeliveryFacts {
+    id: String
+    key: String
+    tree: String
+    worker: String
+    message: String
+    authority: String
+    generation: Int
+    state: DeliveryState
+    attempts: Int
+    retention_until: Int
+    deadline: Int
+    event_sequence: Int
+    duplicate: Bool
+    records: [__DeliveryRecord]
+}
+
+struct __MailboxRead {
+    status: Int
+    message: String
+}
+
+struct DeliveryEvent {
+    sequence: Int
+    state: DeliveryState
+    attempts: Int
+    timestamp: Int
+    signature: String
+}
+
+fn delivery_status(delivery: Delivery) -> DeliveryState ServiceError! {
+    #Unsafe("ServiceAuthority2504: one existing locked durable read, then the owned entry's state") {
+        facts :: if core.service.__delivery_read(delivery, false) == {
+            .Ok(value) -> value
+            .Err(error) -> { return Err(error) }
+        }
+        return Ok(facts.state)
+    }
+}
+
+fn delivery_wait(delivery: Delivery) -> DeliveryState ServiceError! {
+    // Native wait is a single status sample, not polling or a scheduler wait.
+    delivery_status(delivery)
+}
+
+fn delivery_receipt(delivery: Delivery) -> DeliveryReceipt ServiceError! {
+    #Unsafe("ServiceAuthority2517: same locked read; receipt fields and signature are source policy") {
+        facts :: if core.service.__delivery_read(delivery, false) == {
+            .Ok(value) -> value
+            .Err(error) -> { return Err(error) }
+        }
+        signature :: if delivery_receipt_signature(facts) == {
+            .Ok(value) -> value
+            .Err(error) -> { return Err(error) }
+        }
+        return Ok(DeliveryReceipt{id: facts.id, state: facts.state, attempts: facts.attempts, retention_until: facts.retention_until, deadline: facts.deadline, idempotency_key: facts.key, duplicate: facts.duplicate, authority: facts.authority, generation: facts.generation, signature: signature})
+    }
+}
+
+fn delivery_events(delivery: Delivery) -> [DeliveryEvent] ServiceError! {
+    #Unsafe("ServiceAuthority2535-2647: one locked read, then exact record filtering, error order and signature validation") {
+        facts :: if core.service.__delivery_read(delivery, true) == {
+            .Ok(value) -> value
+            .Err(error) -> { return Err(error) }
+        }
+        events := [DeliveryEvent]{}
+        loop record in facts.records {
+            fields :: record.fields
+            if record.op == 83 && fields.len() == 10 && fields[0] == facts.id {
+                generation :: workflow_i64(fields[5]) ?? return Err(ServiceError.Unavailable("delivery event generation is malformed"))
+                timestamp :: workflow_i64(fields[7]) ?? return Err(ServiceError.Unavailable("delivery event timestamp is malformed"))
+                if events.len() != 0 -> return Err(ServiceError.Unavailable("delivery event sequence is not monotonic"))
+                &events.push(DeliveryEvent{sequence: 1, state: DeliveryState.Accepted, attempts: 0, timestamp: timestamp, signature: fields[9]})
+                expires :: workflow_i64(fields[8]) ?? return Err(ServiceError.Unavailable("delivery acceptance expiry is malformed"))
+                key :: if delivery_generation_key(fields[2], generation) == {
+                    .Ok(value) -> value
+                    .Err(error) -> { return Err(error) }
+                }
+                signed_fields :: [String]{"jet-service-delivery-acceptance-v2", fields[0], fields[1], fields[2], fields[3], fields[4], "{generation}", fields[6], "{timestamp}", "{expires}"}
+                expected :: service_crypto.hmac_sha256(key, delivery_signature_payload(signed_fields))
+                supplied :: service_encoding.hex_to_bytes(fields[9]) ?? return Err(ServiceError.Unavailable("delivery acceptance signature is malformed"))
+                if !service_crypto.constant_time_equal_bytes(expected, supplied) -> return Err(ServiceError.Unavailable("delivery acceptance history signature does not validate"))
+            } else if record.op == 69 && fields.len() == 6 && fields[0] == facts.id {
+                sequence :: workflow_i64(fields[1]) ?? return Err(ServiceError.Unavailable("delivery event sequence is malformed"))
+                state :: delivery_parse_state(fields[2]) ?? return Err(ServiceError.Unavailable("service delivery lifecycle state is malformed"))
+                attempts :: workflow_i64(fields[3]) ?? return Err(ServiceError.Unavailable("delivery event attempts are malformed"))
+                timestamp :: workflow_i64(fields[4]) ?? return Err(ServiceError.Unavailable("delivery event timestamp is malformed"))
+                expected_sequence := 1
+                if events.len() != 0 {
+                    previous :: events[events.len() - 1].sequence
+                    expected_sequence = if previous == 9223372036854775807 -> previous else -> previous + 1
+                }
+                if sequence != expected_sequence -> return Err(ServiceError.Unavailable("delivery event sequence is not monotonic"))
+                expected :: if delivery_event_signature(facts.authority, facts.generation, fields[0], sequence, state, attempts, timestamp) == {
+                    .Ok(value) -> value
+                    .Err(error) -> { return Err(error) }
+                }
+                supplied :: service_encoding.hex_to_bytes(fields[5]) ?? return Err(ServiceError.Unavailable("delivery event signature is malformed"))
+                if !service_crypto.constant_time_equal_bytes(expected, supplied) -> return Err(ServiceError.Unavailable("delivery event signature does not validate"))
+                &events.push(DeliveryEvent{sequence: sequence, state: state, attempts: attempts, timestamp: timestamp, signature: fields[5]})
+            }
+        }
+        if events.len() != facts.event_sequence || events.len() == 0 -> return Err(ServiceError.Unavailable("delivery event history is incomplete"))
+        if events[0].sequence != 1 -> return Err(ServiceError.Unavailable("delivery event history is incomplete"))
+        return Ok(events)
+    }
+}
+
+fn delivery_retry(delivery: Delivery) -> Delivery ServiceError! {
+    #Unsafe("ServiceAuthority2650: validate/read first, then an exact zero-retention runtime and existing retry operation") {
+        if core.service.__delivery_probe(delivery) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        runtime :: ServiceRuntime{store: core.service.__delivery_store(delivery), retention_ms: 0}
+        return core.service.__runtime_retry(runtime, delivery)
+    }
+}
+
+fn endpoint_receive(endpoint: ServiceEndpoint) -> String ServiceError! {
+    #Unsafe("ServiceAuthority1297: identity checks, existing two registry reads/captured Arc, conditional depth check, one receive") {
+        identity :: core.service.__endpoint_identity_parts(endpoint)
+        if validate_endpoint_identity(identity.authority, identity.tree, identity.worker, identity.generation) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        mailbox :: if core.service.__endpoint_mailbox(endpoint) == {
+            .Ok(value) -> value
+            .Err(error) -> { return Err(error) }
+        }
+        if !core.service.__mailbox_started(mailbox) && (!core.service.__mailbox_draining(mailbox) || core.service.__mailbox_depth(mailbox) == 0) -> return Err(ServiceError.NotStarted("service worker is not running"))
+        result :: core.service.__mailbox_receive(mailbox)
+        if result.status == 0 -> return Ok(result.message)
+        if result.status == 1 -> return Err(ServiceError.Ambiguous("service endpoint mailbox is empty"))
+        if result.status == 2 -> return Err(ServiceError.NotStarted("service endpoint mailbox is closed"))
+        return Err(ServiceError.Policy("service channel returned an invalid receive result"))
+    }
+}
+
+fn delivery_receipt_signature(facts: __DeliveryFacts) -> String ServiceError! {
+    key :: if delivery_generation_key(facts.authority, facts.generation) == {
+        .Ok(value) -> value
+        .Err(error) -> { return Err(error) }
+    }
+    fields :: [String]{"jet-service-delivery-receipt-v1", facts.id, facts.key, "{facts.duplicate}", facts.tree, facts.worker, facts.message, delivery_state_show(facts.state), "{facts.attempts}", "{facts.deadline}", "{facts.retention_until}", "{facts.generation}"}
+    Ok(service_encoding.bytes_to_hex(service_crypto.hmac_sha256(key, delivery_signature_payload(fields))))
+}
+
+fn delivery_event_signature(authority: String, generation: Int, id: String, sequence: Int, state: DeliveryState, attempts: Int, timestamp: Int) -> [U8] ServiceError! {
+    key :: if delivery_generation_key(authority, generation) == {
+        .Ok(value) -> value
+        .Err(error) -> { return Err(error) }
+    }
+    fields :: [String]{"jet-service-delivery-event-v1", id, "{sequence}", delivery_state_show(state), "{attempts}", "{timestamp}"}
+    Ok(service_crypto.hmac_sha256(key, delivery_signature_payload(fields)))
+}
+
+fn delivery_generation_key(authority: String, generation: Int) -> [U8] ServiceError! {
+    key :: if __authority_signing_key(authority) == {
+        .Ok(value) -> value
+        .Err(error) -> { return Err(error) }
+    }
+    fields :: [String]{"jet-service-delivery-generation-v1", "{generation}"}
+    Ok(service_crypto.hmac_sha256(key, delivery_signature_payload(fields)))
+}
+
+fn delivery_signature_payload(fields: [String]) -> [U8] Never! {
+    payload := [U8]{}
+    loop field in fields {
+        bytes :: field.bytes()
+        length :: bytes.len()
+        loop byte in 0..<8 -> &payload.push(U8{(length >> ((7 - byte) * 8)).bit_and(255)})
+        loop value in bytes -> &payload.push(value)
+    }
+    payload
+}
+
+fn delivery_parse_state(text: String) -> DeliveryState? Never! {
+    if text == "Pending" -> return Val(DeliveryState.Pending)
+    if text == "Accepted" -> return Val(DeliveryState.Accepted)
+    if text == "Delivering" -> return Val(DeliveryState.Delivering)
+    if text == "Delivered" -> return Val(DeliveryState.Delivered)
+    if text == "DeadLettered" -> return Val(DeliveryState.DeadLettered)
+    if text == "Cancelled" -> return Val(DeliveryState.Cancelled)
+    None
+}
+
+#Test("delivery signature fields retain big-endian byte counts and state spellings") {
+    fields :: [String]{"λ", ""}
+    assert(service_encoding.bytes_to_hex(delivery_signature_payload(fields)) == "0000000000000002cebb0000000000000000")
+    assert(delivery_parse_state("Delivered") == (Val(DeliveryState.Delivered)))
+    assert(delivery_parse_state("delivered") == None)
+}
+
+// Independent node:crypto oracle, captured in JsonStreams8/service-signature-
+// oracle.json. Native framing: ServiceAuthority.rs2252-2266 (generation),
+// 2269-2295 (event), 2350-2379 (receipt); each length is u64 BE UTF8 bytes.
+#Test("delivery receipt and event signatures match observed fixed-key framing vectors") {
+    authority :: "sa-000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    generation_key :: delivery_generation_key(authority, 7) ?? panic("fixed key")
+    assert(service_encoding.bytes_to_hex(generation_key) == "0efa1cbc75008d741cc1cdfb5a9b4512112201437413147ff3a5bdaabc65699e")
+    facts :: __DeliveryFacts{id: "d1", key: "k1", tree: "tree", worker: "worker", message: "λ", authority: authority, generation: 7, state: DeliveryState.Delivered, attempts: 3, retention_until: 1700000010000, deadline: 1700000000999, event_sequence: 4, duplicate: true, records: [__DeliveryRecord]{}}
+    receipt :: delivery_receipt_signature(facts) ?? panic("receipt vector")
+    assert(receipt == "df0bd21f6f2307c792cfb3b56258a633200241a964aca0c5f669853f11883601")
+    event :: delivery_event_signature(authority, 7, "d1", 4, DeliveryState.Delivered, 3, 1700000000123) ?? panic("event vector")
+    assert(service_encoding.bytes_to_hex(event) == "b26b530c1223a26a44476d6d44df66905c6cf02eaf51f440790b5ee153140aa6")
+}
+
+fn local_delivery_ids(tree: ServiceTree, endpoint: ServiceEndpoint, store: String) -> [String] Never! {
+    #Unsafe("Services2864: local queued-message/idempotency matching stays source; existing cryptographic ID leaf") {
+        worker :: core.service.__worker_route(tree, endpoint) ?? return [String]{}
+        messages :: core.service.__mailbox_snapshot(tree, worker.index)
+        runtime :: ServiceRuntime{store: store, retention_ms: 0}
+        identity :: core.service.__endpoint_identity_parts(endpoint)
+        ids := [String]{}
+        loop record in core.service.__idempotency_records(tree) {
+            recorded :: core.service.__endpoint_identity_parts(record.endpoint)
+            if recorded.tree != identity.tree || recorded.worker != identity.worker || recorded.authority != identity.authority -> next
+            queued := false
+            loop message in messages {
+                if message == record.message -> queued = true
+            }
+            if queued -> &ids.push(core.service.__delivery_id(runtime, record.endpoint, record.message, record.key))
+        }
+        return ids
+    }
+}
+
+fn send_durable(tree: &ServiceTree, endpoint: ServiceEndpoint, message: String, idempotency_key: String) -> Delivery ServiceError! {
+    #Unsafe("Services3127: no enclosing lock; source owns local deduplication/admission/rollback orchestration") {
+        if core.service.__tree_delivery(tree) != ServiceDelivery.DurableAtLeastOnce -> return Err(ServiceError.Policy("send_durable requires DurableAtLeastOnce delivery"))
+        authority :: core.service.__tree_state_authority(tree) ?? return Err(ServiceError.Policy("durable service delivery needs its injected authority"))
+        runtime :: ServiceRuntime{store: "{authority.store}.delivery", retention_ms: 0}
+        if !valid_service_text(idempotency_key, 256) -> return Err(ServiceError.Policy("durable send requires a non-empty idempotency key"))
+        if !valid_record_payload(message) -> return Err(ServiceError.Policy("service message exceeds the 1 MiB limit"))
+        if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
+        if validate_tree_endpoint(tree, endpoint) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        identity :: core.service.__endpoint_identity_parts(endpoint)
+        parts :: core.service.__tree_route_parts(tree)
+        draining := false
+        loop name in parts.draining {
+            if name == identity.worker -> draining = true
+        }
+        if draining -> return Err(ServiceError.Unavailable("service endpoint is draining"))
+        local_id :: core.service.__delivery_id(runtime, endpoint, message, idempotency_key)
+        loop id in local_delivery_ids(tree, endpoint, runtime.store) {
+            if id == local_id -> return core.service.__delivery_allocate(^local_id, ^runtime.store, true, ^identity.authority, identity.generation)
+        }
+        delivery :: if core.service.__runtime_send(runtime, endpoint, message, idempotency_key) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                return Err(error)
+            }
+        }
+        id :: core.service.__delivery_identity(delivery).id
+        if core.service.delivery_status(delivery) == {
+            .Err(error) -> return Err(error)
+            .Ok(state) -> {
+                if state != DeliveryState.Accepted -> return delivery
+            }
+        }
+        index :: core.service.__worker_named_index(tree, identity.worker) ?? return Err(ServiceError.Unknown("endpoint {identity.tree}/{identity.worker} is not in this tree"))
+        before :: core.service.__mailbox_snapshot(tree, index)
+        if send(&tree, endpoint, message) == {
+            .Err(error) -> {
+                if error == {
+                    .Full(_) -> {
+                        core.service.__runtime_dead_letter(runtime, delivery).drop("seed best-effort dead-letter transition ignores the result")
+                        if core.service.__tree_dead_letter_count(tree) < 100000 -> core.service.__dead_letter_push(&tree, ^id)
+                    }
+                    else -> {}
+                }
+                return Err(error)
+            }
+            .Ok(_) -> {}
+        }
+        if core.service.__mark_delivered(runtime.store, id) == {
+            .Err(error) -> {
+                restore_index :: core.service.__worker_named_index(tree, identity.worker) ?? return Err(ServiceError.Policy("{service_error_show(error)}; mailbox rollback failed: endpoint {identity.tree}/{identity.worker} disappeared during durable delivery"))
+                if core.service.__mailbox_restore(&tree, restore_index, ^before, draining) == {
+                    .Err(rollback_error) -> return Err(ServiceError.Policy("{service_error_show(error)}; mailbox rollback failed: {service_error_show(rollback_error)}"))
+                    .Ok(_) -> return Err(error)
+                }
+            }
+            .Ok(_) -> {}
+        }
+        records :: core.service.__idempotency_records(tree)
+        if records.len() < 100000 {
+            seen := false
+            loop record in records {
+                if record.key == idempotency_key -> seen = true
+            }
+            if !seen -> core.service.__idempotency_push(&tree, idempotency_key.copy(), endpoint, message.copy())
+        }
+        return delivery
+    }
+}
+
+fn receive(tree: &ServiceTree, endpoint: ServiceEndpoint) -> String ServiceError! {
+    #Unsafe("Services2629: no enclosing guard; existing atomic authority operations retain their locks") {
+        if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
+        if validate_tree_endpoint(tree, endpoint) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        identity :: core.service.__endpoint_identity_parts(endpoint)
+        parts :: core.service.__tree_route_parts(tree)
+        draining := false
+        loop name in parts.draining {
+            if name == identity.worker -> draining = true
+        }
+        worker :: core.service.__worker_route(tree, endpoint) ?? return Err(ServiceError.Unknown("endpoint {identity.tree}/{identity.worker} is not in this tree"))
+        available := 0
+        if worker.running || draining -> available = worker.capacity - worker.depth
+        if available > 0 {
+            local_ids := [String]{}
+            if core.service.__tree_delivery(tree) == ServiceDelivery.DurableAtLeastOnce {
+                if core.service.__tree_state_authority(tree) == {
+                    .Val(authority) -> local_ids = local_delivery_ids(tree, endpoint, "{authority.store}.delivery")
+                    else -> {}
+                }
+            }
+            pending :: if core.service.__take_pending(endpoint, available, local_ids) == {
+                .Ok(value) -> value
+                .Err(error) -> {
+                    return Err(error)
+                }
+            }
+            if pending.len() != 0 {
+                if validate_tree_endpoint(tree, endpoint) == {
+                    .Err(error) -> return Err(error)
+                    .Ok(_) -> {}
+                }
+                target :: core.service.__worker_route(tree, endpoint) ?? return Err(ServiceError.Unknown("endpoint {identity.tree}/{identity.worker} is not in this tree"))
+                loop i in 0..<pending.len() {
+                    record :: pending[i]
+                    before :: core.service.__mailbox_snapshot(tree, target.index)
+                    status :: core.service.__mailbox_try_send(&tree, target.index, record.message)
+                    if status != 0 {
+                        error :: if status == {
+                            1 -> ServiceError.Policy("service authority delivery exceeded mailbox capacity")
+                            2 -> ServiceError.NotStarted("service authority worker mailbox is closed")
+                            else -> ServiceError.Policy("service channel returned an invalid send result")
+                        }
+                        return Err(pending_delivery_rollback(&tree, endpoint, target.index, pending.slice(i, pending.len()), ^before, draining, error))
+                    }
+                    if core.service.__mark_delivered(record.store, record.id) == {
+                        .Err(error) -> return Err(pending_delivery_rollback(&tree, endpoint, target.index, pending.slice(i, pending.len()), ^before, draining, error))
+                        .Ok(_) -> {}
+                    }
+                }
+            }
+        }
+        if validate_tree_endpoint(tree, endpoint) == {
+            .Err(error) -> return Err(error)
+            .Ok(_) -> {}
+        }
+        current :: core.service.__worker_route(tree, endpoint) ?? return Err(ServiceError.Unknown("endpoint {identity.tree}/{identity.worker} is not in this tree"))
+        if !current.running && current.depth == 0 -> return Err(ServiceError.NotStarted("worker `{current.name}` is not running"))
+        before :: core.service.__mailbox_snapshot(tree, current.index)
+        read :: core.service.__mailbox_try_receive(&tree, current.index)
+        if read.status == 1 {
+            core.service.__worker_wait_notify(&tree, current.index, endpoint)
+            return Err(ServiceError.Ambiguous("mailbox for `{current.name}` is empty"))
+        }
+        if read.status == 2 -> return Err(ServiceError.NotStarted("mailbox for `{current.name}` is closed"))
+        if read.status != 0 -> return Err(ServiceError.Policy("service channel returned an invalid receive result"))
+        message :: read.message ?? panic("successful channel read has no message")
+        empty :: core.service.__worker_receive_account(&tree, current.index, message.bytes().len())
+        if draining && empty {
+            if core.service.__finish_drain(&tree, endpoint) == {
+                .Err(error) -> {
+                    restore :: core.service.__worker_route(tree, endpoint)
+                    if restore == {
+                        .Val(target) -> {
+                            if core.service.__mailbox_restore(&tree, target.index, ^before, draining) == {
+                                .Err(restore_error) -> return Err(ServiceError.Policy("{service_error_show(error)}; drained mailbox restore failed: {service_error_show(restore_error)}"))
+                                .Ok(_) -> return Err(error)
+                            }
+                        }
+                        else -> return Err(ServiceError.Policy("{service_error_show(error)}; drained mailbox restore failed: endpoint {identity.tree}/{identity.worker} disappeared while restoring a drained mailbox"))
+                    }
+                }
+                .Ok(_) -> {}
+            }
+        }
+        return message
+    }
+}
+
+fn pending_delivery_rollback(tree: &ServiceTree, endpoint: ServiceEndpoint, index: Int, remaining: ^[(id: String, message: String, store: String)], before: ^[String], draining: Bool, error: ServiceError) -> ServiceError Never! {
+    #Unsafe("Services2693-2762: retain authority requeue then mailbox-restore ordering and both failure texts") {
+        // Each consuming transport runs once, even when the other fails.
+        // Mailbox restoration always follows authority requeue.
+        authority_error := ServiceError?{None}
+        core.service.__requeue_pending(endpoint, ^remaining) ?? {
+            authority_error = Val(err)
+            ()
+        }
+        mailbox_error := ServiceError?{None}
+        core.service.__mailbox_restore(&tree, index, ^before, draining) ?? {
+            mailbox_error = Val(err)
+            ()
+        }
+        return pending_rollback_error(error, authority_error, mailbox_error)
+    }
+}
+
+fn pending_rollback_error(error: ServiceError, authority_error: ServiceError?, mailbox_error: ServiceError?) -> ServiceError Never! {
+    if authority_error == {
+        .Val(rollback) -> {
+            if mailbox_error == {
+                .Val(mailbox) -> return ServiceError.Policy("{service_error_show(error)}; authority rollback failed: {service_error_show(rollback)}; mailbox rollback failed: {service_error_show(mailbox)}")
+                else -> return ServiceError.Policy("{service_error_show(error)}; authority rollback failed: {service_error_show(rollback)}; unmarked receipts remain recoverable from the authority log")
+            }
+        }
+        else -> {
+            if mailbox_error == {
+                .Val(mailbox) -> return ServiceError.Policy("{service_error_show(error)}; mailbox rollback failed: {service_error_show(mailbox)}")
+                else -> return error.copy()
+            }
+        }
+    }
+}
+
+#Test("pending delivery failure preserves authority-requeue then mailbox-restore partial-failure text") {
+    send_error :: ServiceError.Policy("service authority delivery exceeded mailbox capacity")
+    requeue_error :: ServiceError.Policy("requeue")
+    restore_error :: ServiceError.Policy("restore")
+    both :: pending_rollback_error(send_error, Val(requeue_error), Val(restore_error))
+    assert(service_error_show(both) == "service authority delivery exceeded mailbox capacity; authority rollback failed: requeue; mailbox rollback failed: restore")
+    recoverable :: pending_rollback_error(send_error, Val(requeue_error), None)
+    assert(service_error_show(recoverable) == "service authority delivery exceeded mailbox capacity; authority rollback failed: requeue; unmarked receipts remain recoverable from the authority log")
+    assert(service_error_show(pending_rollback_error(send_error, None, Val(restore_error))) == "service authority delivery exceeded mailbox capacity; mailbox rollback failed: restore")
+    assert(pending_rollback_error(send_error, None, None) == send_error)
+}
+
+// Physical transports only. Their paired emitters use the existing Services
+// types, not a second mailbox, callback carrier, supervisor or channel.
+struct __WorkerMailbox {
+    endpoint: ServiceEndpoint
+    capacity: I64
+    channel: __WorkerChannel
+}
+
+enum __WorkerStatus { Starting Running Failed Cancelling Stopped Escalated Partitioned }
+enum __WorkerTopologyKind { Supervisor Task }
+enum __WorkerTopologyState { Starting Running Failed Restarting Stopping Stopped Escalated }
+enum __WorkerRestartReason { Failed Exited HealthCheck Manual Policy }
+
+fn worker(tree: &ServiceTree, name: String, handler: __WorkerHandler, handler_name: String, capacity: Int) -> ServiceEndpoint ServiceError! {
+    #Unsafe("Services1464-1544: checked function item is passed through; source owns validation and every seed") {
+        if core.service.__tree_started(tree) -> return Err(ServiceError.Policy("cannot add workers after start"))
+        if capacity <= 0 || capacity > 1000000 -> return Err(ServiceError.Policy("mailbox capacity must be positive and bounded"))
+        if name.trim().len() == 0 || !valid_service_text(name, 256) -> return Err(ServiceError.Policy("worker name must be non-empty and visible"))
+        if handler_name.trim().len() == 0 || !valid_service_text(handler_name, 256) -> return Err(ServiceError.Policy("worker handler name must be non-empty and visible"))
+        names :: core.service.__group_parts(tree)
+        if names.workers.len() >= 4096 -> return Err(ServiceError.Policy("service tree worker limit exceeded"))
+        route :: core.service.__tree_route_parts(tree)
+        loop existing in names.workers {
+            if existing == name -> return Err(ServiceError.Unknown("worker `{name}` already exists in tree `{route.name}`"))
+        }
+        authority := route.authority
+        if authority.len() == 0 {
+            authority = if core.service.__authority_issue() == {
+                .Ok(value) -> value
+                .Err(error) -> {
+                    return Err(error)
+                }
+            }
+            core.service.__tree_write_authority(&tree, authority.copy())
+        }
+        unchecked :: if core.service.__endpoint_unchecked(route.name.copy(), name.copy(), route.generation, ^authority) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                return Err(error)
+            }
+        }
+        mailbox :: if core.service.__worker_mailbox_new(^unchecked, I64{capacity}, ^[String]{}) == {
+            .Ok(value) -> value
+            .Err(error) -> {
+                return Err(error)
+            }
+        }
+        endpoint :: mailbox.endpoint.copy()
+        // Services1519-1521: allocation precedes registry publication.
+        if core.service.__authority_register(endpoint, false) == {
+            .Err(error) -> return Err(error)
+            else -> {}
+        }
+        worker_task :: core.service.__worker_task_new(__WorkerStatus.Stopped)
+        worker_id :: core.service.__topology_worker_id(route.name, name)
+        parent_id :: core.service.__topology_root_id(route.name)
+        if core.service.__task_bind_topology(worker_task, __WorkerTopologyKind.Task, ^worker_id, ^Val(parent_id)) == {
+            .Err(error) -> return Err(error)
+            else -> {}
+        }
+        // Mailbox must move: native Mailbox::clone forks its channel.
+        core.service.__worker_push(&tree, name.copy(), handler, handler_name.copy(), endpoint.copy(), ^mailbox, ^[I64]{}, false, U64{0}, U64{0}, ^worker_task)
+        return endpoint
+    }
+}
+
+fn worker_contains(names: [String], name: String) -> Bool Never! {
+    loop existing in names {
+        if existing == name -> return true
+    }
+    false
+}
+
+fn worker_index(names: [String], name: String) -> Int? Never! {
+    loop i in 0..<names.len() {
+        if names[i] == name -> return Val(i)
+    }
+    None
+}
+
+fn worker_supervisor(groups: [(name: String, workers: [String])], worker: String) -> Int Never! {
+    loop i in 0..<groups.len() {
+        if worker_contains(groups[i].workers, worker) -> return i
+    }
+    groups.len()
+}
+
+fn worker_scope(names: [String], groups: [(name: String, workers: [String])], worker: String) -> (supervisor: Int, scope: [Int]) Never! {
+    supervisor :: worker_supervisor(groups, worker)
+    if supervisor < groups.len() {
+        scope := [Int]{}
+        loop member in groups[supervisor].workers {
+            if worker_index(names, member) == {
+                .Val(index) -> &scope.push(index)
+                else -> {}
+            }
+        }
+        return (supervisor: supervisor, scope: scope)
+    }
+    scope := [Int]{}
+    loop i in 0..<names.len() {
+        grouped := false
+        loop group in groups {
+            if worker_contains(group.workers, names[i]) -> grouped = true
+        }
+        if !grouped -> &scope.push(i)
+    }
+    (supervisor: groups.len(), scope: scope)
+}
+
+fn worker_targets(restart: ServiceRestart, scope: [Int], failed: Int) -> [Int] Never! {
+    if restart == ServiceRestart.OneForOne -> return [Int]{failed}
+    begin := 0
+    if restart == ServiceRestart.RestForOne {
+        loop i in 0..<scope.len() {
+            if scope[i] == failed {
+                begin = i
+                break
+            }
+        }
+    }
+    out := [Int]{}
+    loop i in begin..<scope.len() -> &out.push(scope[i])
+    out
+}
+
+fn worker_window_start(now: I64, per: I64) -> I64 Never! {
+    if per > 0 {
+        if now < -9223372036854775808 + per -> return I64{-9223372036854775808}
+    }
+    if per < 0 {
+        if now > 9223372036854775807 + per -> return I64{9223372036854775807}
+    }
+    now - per
+}
+
+fn worker_spent(restarts: [I64], now: I64, per: I64) -> Int Never! {
+    start :: worker_window_start(now, per)
+    spent := 0
+    loop at in restarts {
+        if at > start -> spent = spent + 1
+    }
+    spent
+}
+
+fn worker_pruned(restarts: [I64], now: I64, per: I64) -> [I64] Never! {
+    start :: worker_window_start(now, per)
+    out := [I64]{}
+    loop at in restarts {
+        if at > start -> &out.push(at)
+    }
+    if now > start -> &out.push(now)
+    out
+}
+
+fn fail_worker(tree: &ServiceTree, endpoint: ServiceEndpoint) ServiceError! {
+    #Unsafe("Services2917-3078: exclusive tree borrow; each write follows the native order") {
+        if !core.service.__tree_started(tree) -> return Err(ServiceError.NotStarted("service tree is not started"))
+        if validate_tree_endpoint(tree, endpoint) == {
+            .Err(error) -> return Err(error)
+            else -> {}
+        }
+        identity :: core.service.__endpoint_identity_parts(endpoint)
+        topology :: core.service.__group_parts(tree)
+        facts :: core.service.__worker_tree_parts(tree)
+        root :: core.service.__tree_display_parts(tree)
+        scope :: worker_scope(topology.workers, topology.groups, identity.worker)
+        restart := root.restart
+        max := root.budget_max
+        per := I64{root.budget_per_ms}
+        if scope.supervisor < facts.groups.len() {
+            restart = facts.groups[scope.supervisor].restart
+            max = facts.groups[scope.supervisor].max
+            per = I64{facts.groups[scope.supervisor].per_ms}
+        }
+        now :: core.service.__authority_now()
+        preserve :: root.delivery == ServiceDelivery.DurableAtLeastOnce
+        failed :: worker_index(topology.workers, identity.worker) ?? return Err(ServiceError.Unknown("endpoint {identity.tree}/{identity.worker} is not in this tree"))
+        targets :: worker_targets(restart, scope.scope, failed)
+        loop index in targets {
+            if worker_spent(facts.workers[index].restarts, now, per) >= max {
+                reason :: "worker `{topology.workers[index]}` spent its restart budget of {max} per {per}ms; the supervisor escalates to its parent group"
+                // Identical ignored Results: native2989,2992.
+                loop worker in facts.workers {
+                    _ :: core.service.__task_escalate(worker.task, reason.copy())
+                }
+                loop supervisor in facts.supervisors {
+                    _ :: core.service.__task_escalate(supervisor, reason.copy())
+                }
+                loop i in 0..<facts.workers.len() {
+                    core.service.__worker_write_running(&tree, i, false) // native2995
+                    if core.service.__authority_update(facts.workers[i].endpoint, false) == {
+                        .Err(_) -> {
+                            _ :: core.service.__authority_register(facts.workers[i].endpoint, false)
+                        }
+                        else -> {}
+                    } // native2996-2997 ignores the fallback Result too.
+                }
+                core.service.__close_runtime_groups(&tree) // native2999
+                core.service.__tree_write_started(&tree, false) // native3000
+                core.service.__publish_tree_topology(tree, __WorkerTopologyState.Escalated)
+                return Err(ServiceError.Unavailable(reason))
+            }
+        }
+        previous := [Bool]{}
+        desired := [Bool]{}
+        loop i in 0..<facts.workers.len() {
+            current :: core.service.__worker_route(tree, facts.workers[i].endpoint) ?? panic("physical worker route must exist")
+            &previous.push(current.running)
+            targeted := false
+            loop target in targets {
+                if target == i -> targeted = true
+            }
+            &desired.push(if targeted -> !worker_contains(facts.partitioned, topology.workers[i]) else -> current.running)
+        }
+        updated := 0
+        loop i in 0..<facts.workers.len() {
+            if core.service.__authority_update(facts.workers[i].endpoint, desired[i]) == {
+                .Err(error) -> {
+                    rollback := ServiceError?{None}
+                    loop updated > 0 {
+                        updated = updated - 1
+                        if core.service.__authority_update(facts.workers[updated].endpoint, previous[updated]) == {
+                            .Err(failure) -> {
+                                if rollback == None -> rollback = Val(failure)
+                            }
+                            else -> {}
+                        }
+                    }
+                    if rollback == {
+                        .Val(failure) -> return Err(ServiceError.Policy("{service_error_show(error)}; service failure authority rollback failed: {service_error_show(failure)}"))
+                        else -> return Err(error)
+                    }
+                }
+                else -> updated = updated + 1
+            }
+        }
+        // Identical ignored Results: native3043-3051.
+        _ :: core.service.__task_fail(facts.workers[failed].task, ^"worker `{identity.worker}` failed under supervisor")
+        if scope.supervisor < facts.supervisors.len() {
+            _ :: core.service.__task_fail(facts.supervisors[scope.supervisor], ^"supervisor restarted worker `{identity.worker}`")
+        }
+        loop index in targets {
+            // Services1992-1994: append/prune restart times before running.
+            core.service.__worker_write_restarts(&tree, index, ^worker_pruned(facts.workers[index].restarts, now, per))
+            core.service.__worker_write_running(&tree, index, true)
+            mailbox :: core.service.__worker_route(tree, facts.workers[index].endpoint) ?? panic("physical worker route must exist")
+            messages :: if preserve -> core.service.__mailbox_snapshot(tree, index) else -> [String]{}
+            core.service.__mailbox_close(tree, index) // native2000
+            replacement :: core.service.__worker_mailbox_new(facts.workers[index].endpoint.copy(), I64{mailbox.capacity}, ^messages) ?? panic("validated service mailbox must restart with its bounded queue")
+            core.service.__worker_write_mailbox(&tree, index, ^replacement) // MOVE, native2001-2006
+            // Native2007-2012 ignores both Results; clamp its u64 time identically.
+            at :: U64{if now < 0 -> 0 else -> Int{now}}
+            _ :: core.service.__record_topology_restart(facts.workers[index].task, at, __WorkerRestartReason.Failed)
+            _ :: core.service.__task_restart(facts.workers[index].task)
+        }
+        if scope.supervisor < facts.supervisors.len() {
+            _ :: core.service.__task_restart(facts.supervisors[scope.supervisor]) // native3062 ignored.
+        }
+        loop i in 0..<facts.workers.len() {
+            if worker_contains(facts.partitioned, topology.workers[i]) {
+                core.service.__worker_write_running(&tree, i, false) // native3069
+                // Native3070-3073: both state fields under ONE mutex.
+                core.service.__task_write_partition(facts.workers[i].task, __WorkerStatus.Partitioned, TaskFailure.Cancelled)
+            }
+        }
+        core.service.__publish_tree_topology(tree, __WorkerTopologyState.Running)
+    }
+}
+
+fn restarts(tree: ServiceTree, endpoint: ServiceEndpoint) -> Int ServiceError! {
+    #Unsafe("Services3080-3100: pinned validation, group policy, one now, then weak name/tree match") {
+        if validate_tree_endpoint(tree, endpoint) == {
+            .Err(error) -> return Err(error)
+            else -> {}
+        }
+        identity :: core.service.__endpoint_identity_parts(endpoint)
+        topology :: core.service.__group_parts(tree)
+        facts :: core.service.__worker_tree_parts(tree)
+        root :: core.service.__tree_display_parts(tree)
+        supervisor :: worker_supervisor(topology.groups, identity.worker)
+        per :: I64{if supervisor < facts.groups.len() -> facts.groups[supervisor].per_ms else -> root.budget_per_ms}
+        now :: core.service.__authority_now()
+        loop i in 0..<facts.workers.len() {
+            physical :: core.service.__endpoint_identity_parts(facts.workers[i].endpoint)
+            if topology.workers[i] == identity.worker && physical.tree == identity.tree -> return worker_spent(facts.workers[i].restarts, now, per)
+        }
+        return Err(ServiceError.Unknown("endpoint {identity.tree}/{identity.worker} is not in this tree"))
+    }
+}
+
+fn mailbox_depth(tree: ServiceTree, endpoint: ServiceEndpoint) -> Int ServiceError! {
+    #Unsafe("Services2847-2862: validated endpoint, then deliberately weak name/tree match, channel depth") {
+        if validate_tree_endpoint(tree, endpoint) == {
+            .Err(error) -> return Err(error)
+            else -> {}
+        }
+        identity :: core.service.__endpoint_identity_parts(endpoint)
+        topology :: core.service.__group_parts(tree)
+        facts :: core.service.__worker_tree_parts(tree)
+        loop i in 0..<facts.workers.len() {
+            physical :: core.service.__endpoint_identity_parts(facts.workers[i].endpoint)
+            if topology.workers[i] == identity.worker && physical.tree == identity.tree -> return core.service.__worker_mailbox_depth(tree, i)
+        }
+        return Err(ServiceError.Unknown("endpoint {identity.tree}/{identity.worker} is not in this tree"))
+    }
+}
+
+#Test("service worker restart scope preserves group declaration order and root membership") {
+    names :: [String]{"a", "b", "c", "d"}
+    groups :: [(name: String, workers: [String])]{(name: "g", workers: [String]{"c", "a", "missing"})}
+    grouped :: worker_scope(names, groups, "a")
+    assert(grouped.supervisor == 0 && grouped.scope == [Int]{2, 0})
+    root :: worker_scope(names, groups, "b")
+    assert(root.supervisor == 1 && root.scope == [Int]{1, 3})
+    assert(worker_targets(ServiceRestart.OneForOne, grouped.scope, 0) == [Int]{0})
+    assert(worker_targets(ServiceRestart.OneForAll, grouped.scope, 0) == [Int]{2, 0})
+    assert(worker_targets(ServiceRestart.RestForOne, grouped.scope, 0) == [Int]{0})
+    assert(worker_targets(ServiceRestart.RestForOne, grouped.scope, 99) == [Int]{2, 0})
+}
+
+#Test("service worker restart budget excludes the exact boundary and saturates i64 subtraction") {
+    assert(worker_window_start(-9223372036854775808, 1) == I64{-9223372036854775808})
+    assert(worker_window_start(9223372036854775807, -1) == I64{9223372036854775807})
+    instants :: [I64]{I64{0}, I64{1}, I64{10}}
+    assert(worker_spent(instants, 10, 10) == 2)
+    assert(worker_pruned(instants, 10, 10) == [I64]{I64{1}, I64{10}, I64{10}})
+    assert(worker_pruned([I64]{}, -9223372036854775808, 1).len() == 0)
+}

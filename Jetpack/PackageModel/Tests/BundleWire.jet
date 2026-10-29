@@ -1,5 +1,15 @@
 // Rust Bundler.rs wire projections and PerformanceBudget.rs:2438-2450.
 // These facts intentionally exceed JCS's exact binary64 integer boundary.
+use jet_pkg_model.[
+    BundleFile, BundleFileFact, BundleFileKind, BundleInputFact, BundleKind, BundleMetadata,
+    BundlePlan, BundleReceipt, BundleTarget, LaunchDescriptor, SigningHook, UpdaterManifest,
+    pkg_bundle_canonical_bytes, pkg_bundle_canonical_text, pkg_bundle_integer, pkg_bundle_object,
+]
+use jet_foundation.[
+    CanonicalJSON, canonical_json_integer, canonical_json_sha256, sha256_bytes,
+    sha256_hex_bytes,
+]
+
 fn pkg_bundle_wire_test_plan() -> BundlePlan Never! {
     BundlePlan{
         schema_version: 1, kind: BundleKind.Desktop, target: BundleTarget.LinuxAppImage,
@@ -17,7 +27,7 @@ fn pkg_bundle_wire_test_plan() -> BundlePlan Never! {
     expected :: "{{\"a\":123,\"z\":\"é\\n\"}}\n".bytes()
     assert_eq(pkg_bundle_canonical_bytes(tree), expected)
     view :: expected[0..<expected.len()]
-    assert_eq(canonical_json_sha256(tree), mir_sha256_hex_bytes(mir_sha256_bytes(view)))
+    assert_eq(canonical_json_sha256(tree), sha256_hex_bytes(sha256_bytes(view)))
     invalids :: [String]{"-0", "01"}
     loop invalid in invalids {
         if canonical_json_integer(invalid) == {

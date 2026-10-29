@@ -1,0 +1,12 @@
+# tests/pkg.rs::path_dep_compiles_ok at tests/pkg.rs:3246; hand-port
+# Claim: path dependency compiles and runs (tests/pkg.rs:3246)
+# Fixture migrated: pub removed from the language (E0411): exports are public by default, so greeter.jet uses plain fn
+fixture: path_dep_compiles_ok.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check greeter
+exit: 0 # tests/pkg.rs:3246 greeter checks on its own
+step: jet run run.jet
+exit: 0 # tests/pkg.rs:3246 compile succeeds and greeter resolves
+stdout: = "hello!\n" # tests/pkg.rs:3246 compile succeeds and greeter resolves

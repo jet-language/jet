@@ -1,0 +1,9 @@
+# tests/arena.rs::use_after_reset_is_e0632 at tests/arena.rs:256; hand-port
+fixture: use_after_reset_is_e0632.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check fixture.jet --json
+exit: 1 # tests/arena.rs:257 is rejected
+json: stdout doc $.reports[?severity="error"] #= 1 # tests/arena.rs:257 the errors are exactly E0632
+json: stdout doc $.reports[?code="E0632"] #= 1 # tests/arena.rs:257 reports E0632

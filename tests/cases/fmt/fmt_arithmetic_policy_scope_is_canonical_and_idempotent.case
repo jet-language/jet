@@ -1,0 +1,16 @@
+# tests/fmt.rs::fmt_arithmetic_policy_scope_is_canonical_and_idempotent at tests/fmt.rs:125; hand-port
+# Claim: output contains `#Arithmetic(.Wrapping)` (tests/fmt.rs:135)
+# Claim: retired `wrapping(` expression wrapper absent (tests/fmt.rs:136-139)
+# Claim: second pass identical (tests/fmt.rs:140-141)
+fixture: fmt_arithmetic_policy_scope_is_canonical_and_idempotent.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt run.jet
+exit: 0 # tests/fmt.rs:134 formats
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:135-139
+stdout: ~ "#Arithmetic(.Wrapping)" # tests/fmt.rs:135-139
+stdout: !~ "wrapping(" # tests/fmt.rs:135-139
+step: jet fmt --check run.jet
+exit: 0 # tests/fmt.rs:140-141 stable

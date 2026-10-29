@@ -1,0 +1,37 @@
+# tests/fmt.rs::fmt_marks_only_value_returning_braced_callables_with_an_arrow at tests/fmt.rs:1283; hand-port
+# Claim: fn value() -> Int { return 1 } (tests/fmt.rs:1286)
+# Claim: fn concise() -> Int { 1 } (tests/fmt.rs:1287)
+# Claim: fn record() -> Rect { {width: 1, height: 2} } (tests/fmt.rs:1288-1291)
+# Claim: fn impure() { print(1) } kept (tests/fmt.rs:1292)
+# Claim: fn explicit() () { print(1) } kept (tests/fmt.rs:1293)
+# Claim: fn fail() Err! {} (tests/fmt.rs:1294)
+# Claim: fn bounded() -[IO]> Int { return 1 } (tests/fmt.rs:1295-1298)
+# Claim: fn pure() -[]> Int { return 1 } (tests/fmt.rs:1299)
+# Claim: trait method fn get(self) -> Int { (tests/fmt.rs:1300)
+# Claim: trait method fn bounded(self) -[IO]> Int { (tests/fmt.rs:1301)
+# Claim: output is stable (tests/fmt.rs:1302-1305)
+# Fixture migrated: unarrowed return forms are retired: rewritten as `-> Int { … }`, `-> Int { 1 }`, `-> Rect { … }`, `-[IO]> Int { … }` (Docs/spec/syntax-decisions.md: `fn double(n: Int) -> Int { n * 2 }`; `-[IO]> String {` in Docs/spec).
+# Fixture migrated: explicit unit `fn explicit() () {` is replaced by the plain unit form `fn explicit() { … }` (Docs/spec/spec.md:237 "a plain `fn run() { … }`"); `()` return is rejected (E0081).
+# Fixture migrated: error-only contract `fn fail() Err! { }` is rewritten to `fn fail() !Err { print(1) }` (empty body `{ }` is reported as E0081 "no body") (Docs/spec/spec.md:238 `fn run() !IOError`; Docs/spec/reference/core-library.md:403 `AppErr!` follows a return type).
+# Fixture migrated: the arrow-insertion claim is dropped: canonical input already carries the arrow; unarrowed input is rejected by jet (E0081).
+# Not ported: the arrow-insertion claim: canonical input already has the arrow; retired unarrowed input is rejected by jet (E0081)
+fixture: fmt_marks_only_value_returning_braced_callables_with_an_arrow.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt marks/run.jet
+exit: 0 # tests/fmt.rs:1285 formats
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:1286-1301 the ten substrings
+stdout: ~ "fn value() -> Int { return 1 }" # tests/fmt.rs:1286-1301 the ten substrings
+stdout: ~ "fn concise() -> Int { 1 }" # tests/fmt.rs:1286-1301 the ten substrings
+stdout: ~ "fn record() -> Rect { {width: 1, height: 2} }" # tests/fmt.rs:1286-1301 the ten substrings
+stdout: ~ "fn impure() { print(1) }" # tests/fmt.rs:1286-1301 the ten substrings
+stdout: ~ "fn explicit() { print(1) }" # tests/fmt.rs:1286-1301 the ten substrings
+stdout: ~ "fn fail() !Err { print(1) }" # tests/fmt.rs:1286-1301 the ten substrings
+stdout: ~ "fn bounded() -[IO]> Int { return 1 }" # tests/fmt.rs:1286-1301 the ten substrings
+stdout: ~ "fn pure() -[]> Int { return 1 }" # tests/fmt.rs:1286-1301 the ten substrings
+stdout: ~ "fn get(self) -> Int {" # tests/fmt.rs:1286-1301 the ten substrings
+stdout: ~ "fn bounded(self) -[IO]> Int {" # tests/fmt.rs:1286-1301 the ten substrings
+step: jet fmt --check marks/run.jet
+exit: 0 # tests/fmt.rs:1302-1305 stable

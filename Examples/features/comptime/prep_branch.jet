@@ -1,18 +1,18 @@
-// D-PREP-BRANCH1=A: `prep if` chooses a branch while building. Only the
+// D-PREP-BRANCH1=A: `comptime if` chooses a branch while building. Only the
 // chosen arm is fully checked and emitted; the other arms get name checks
-// only (D-WHEN2). `prep` is contextual: a value named `prep` stays an
+// only (D-WHEN2). `prep` is no longer a keyword: a value named `prep` is an
 // ordinary name.
-MODE :: prep { "fast" }
+MODE :: comptime { "fast" }
 
-LEVEL :: prep { 2 }
+LEVEL :: comptime { 2 }
 
 fn add(a: Int, b: Int) -> Int { a + b }
 
 fn describe() -> String {
     label := "unknown mode"
-    prep if MODE == "safe" {
+    comptime if MODE == "safe" {
         label = "safe mode"
-    } else prep if MODE == "fast" {
+    } else comptime if MODE == "fast" {
         label = "fast mode"
     } else {
         label = "other mode"
@@ -22,22 +22,22 @@ fn describe() -> String {
 
 fn run() {
     print(describe())
-    prep if LEVEL > 1 {
+    comptime if LEVEL > 1 {
         print("level above one")
     }
-    prep if LEVEL > 5 {
+    comptime if LEVEL > 5 {
         print("level above five")
     }
     // The unchosen arm is not type-checked: this call would not type-check.
-    prep if false {
+    comptime if false {
         broken :: add("text", 0)
         print("{broken}")
     } else {
         print("dropped arm skipped")
     }
     // Nested branches.
-    prep if LEVEL == 2 {
-        prep if MODE == "fast" {
+    comptime if LEVEL == 2 {
+        comptime if MODE == "fast" {
             print("level two, fast")
         } else {
             print("level two, other")

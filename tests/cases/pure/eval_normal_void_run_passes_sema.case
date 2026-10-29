@@ -1,0 +1,10 @@
+# tests/pure.rs::eval_normal_void_run_passes_sema at tests/pure.rs:775; hand-port
+# Claim: a normal `fn run() -[]>` program passes eval sema (tests/pure.rs:776-782)
+# Not ported: jet::check_for_eval Rust API (tests/pure.rs:777): replaced by jet eval --pure
+fixture: eval_normal_void_run_passes_sema.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet eval --pure main.jet
+exit: 0 # tests/pure.rs:776-782
+stderr: !~ "Error [" # tests/pure.rs:776-782

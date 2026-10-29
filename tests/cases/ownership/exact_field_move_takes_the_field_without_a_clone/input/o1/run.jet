@@ -1,0 +1,27 @@
+
+struct Graph {
+    names: [String]
+    size: Int
+}
+struct Run {
+    graph: Graph
+    values: [String]
+}
+fn make_run() -> Run {
+    return Run{graph: Graph{names: ["a", "b"], size: 2}, values: ["v"]}
+}
+fn hop(run: ^Run) -> Graph {
+    graph := ^run.graph
+    print(run.values.len())
+    return graph
+}
+fn hop_local() -> Int {
+    run := make_run()
+    names := ^run.graph.names
+    run.graph.names = ["c"]
+    return names.len() + run.graph.names.len()
+}
+fn run() {
+    print(hop(make_run()).names.len())
+    print(hop_local())
+}

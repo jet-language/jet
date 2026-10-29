@@ -2,6 +2,12 @@
 // typed facts consumed by package realization, environment files, trust, and
 // disclosure. Unknown calls remain the E0969 import diagnostic; there is no
 // stringly escape hatch here.
+use jet_foundation.[
+    CallArg, CtEnumArg, CtKey, CtMapEntry, CtValue, Expr, NamedCtValue, Span,
+    ast_comptime_key_to_value, ast_comptime_value_show, expr_span,
+    type_name,
+]
+use jetpack_foundation.[BUILTIN_FIND]
 
 fn envmodel_evaluate_integration_imports(imports: [Expr], scope: ModuleEvalScope, globals: [String: CtValue]) -> [EnvironmentIntegration] EnvModelEvalError! {
     leaves := [Expr]{}
@@ -31,8 +37,8 @@ fn envmodel_evaluate_integration_imports(imports: [Expr], scope: ModuleEvalScope
 // that is not a call.
 fn envmodel_integration_call_parts(import: Expr) -> (args: [CallArg], name_span: Span)? Never! {
     if import == {
-        .Call(call) -> Val((args: call.args, name_span: call.name_span))
-        .MethodCall(_, _, method_span, _, _, args, _, _) -> Val((args: args, name_span: method_span))
+        .Call(call, _) -> Val((args: call.args, name_span: call.name_span))
+        .MethodCall(_, _, method_span, _, _, args, _) -> Val((args: args, name_span: method_span))
         else -> None
     }
 }
@@ -40,7 +46,7 @@ fn envmodel_integration_call_parts(import: Expr) -> (args: [CallArg], name_span:
 // `imports: [a, [b, c]]` flattens to its non-list leaves in source order.
 fn envmodel_collect_import_leaves(expr: Expr, out: &[Expr]) Never! {
     if expr == {
-        .ListLit(items, _) -> {
+        .ListLit(items, _, _) -> {
             loop item in items -> envmodel_collect_import_leaves(item, &out)
         }
         else -> { &out.push(expr) }
@@ -126,14 +132,14 @@ fn envmodel_evaluate_integration_call(name: String, args: [CallArg], kind: Integ
 
 fn envmodel_integration_arg_value(expr: Expr, scope: ModuleEvalScope, globals: [String: CtValue]) -> CtValue EnvModelEvalError! {
     if expr == {
-        .Ident(name, _) -> Ok(CtValue.Str{value: name})
-        .Field(base, member, _) -> Ok(CtValue.Str{value: "{envmodel_expression_name(base)}.{member}"})
-        .ListLit(values, _) -> {
+        .Ident(name, _, _) -> Ok(CtValue.Str{value: name})
+        .Field(base, member, _, _) -> Ok(CtValue.Str{value: "{envmodel_expression_name(base)}.{member}"})
+        .ListLit(values, _, _) -> {
             items := [CtValue]{}
             loop value in values -> &items.push(envmodel_integration_arg_value(value, scope, globals))
             Ok(CtValue.List{values: items})
         }
-        .MapLit(pairs, _) -> {
+        .MapLit(pairs, _, _) -> {
             lowered := [CtMapEntry]{}
             loop pair in pairs {
                 key_value :: envmodel_integration_arg_value(pair.key, scope, globals)
@@ -145,12 +151,12 @@ fn envmodel_integration_arg_value(expr: Expr, scope: ModuleEvalScope, globals: [
             }
             Ok(CtValue.Map{entries: lowered})
         }
-        .StructLit(type_name, _, _, _, fields, _, _) -> {
+        .StructLit(type_name, _, _, _, fields, _, _, _) -> {
             lowered := [NamedCtValue]{}
             loop field in fields -> &lowered.push(NamedCtValue{name: field.name, value: envmodel_integration_arg_value(field.value, scope, globals)})
             Ok(CtValue.Struct{type_name: type_name, fields: lowered})
         }
-        .EnumLit(type_name, variant, _, args, _, _) -> {
+        .EnumLit(type_name, variant, _, args, _, _, _) -> {
             lowered := [CtEnumArg]{}
             loop arg in args {
                 if arg == {
@@ -203,12 +209,12 @@ fn envmodel_lower_integration_arg(integration: &EnvironmentIntegration, key: Str
 fn envmodel_integration_reference_names(expr: Expr) -> [String]? Never! {
     unwrapped :: envmodel_unparen(expr)
     if unwrapped == {
-        .Ident(name, _) -> Val([String]{name})
-        .Field(_, _, _) -> {
+        .Ident(name, _, _) -> Val([String]{name})
+        .Field(_, _, _, _) -> {
             path :: envmodel_integration_reference_path(unwrapped) ?? return None
             Val([String]{path})
         }
-        .ListLit(values, _) -> {
+        .ListLit(values, _, _) -> {
             names := [String]{}
             loop value in values {
                 found :: envmodel_integration_reference_names(value) ?? return None
@@ -223,8 +229,8 @@ fn envmodel_integration_reference_names(expr: Expr) -> [String]? Never! {
 fn envmodel_integration_reference_path(expr: Expr) -> String? Never! {
     unwrapped :: envmodel_unparen(expr)
     if unwrapped == {
-        .Ident(name, _) -> Val(name)
-        .Field(base, member, _) -> {
+        .Ident(name, _, _) -> Val(name)
+        .Field(base, member, _, _) -> {
             prefix :: envmodel_integration_reference_path(base) ?? return None
             Val("{prefix}.{member}")
         }

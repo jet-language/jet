@@ -14,7 +14,7 @@ const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const generator = 'Tools/agent/gen-runtime-trap-messages.mjs';
 const frozen = 'Compiler/JetRuntime/Source/TrapMessages.jet';
 const defects = 'Compiler/JetRuntime/Source/TrapDefectMessages.jet';
-const inputs = [generator, frozen, 'Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet', 'Compiler/JetFoundation/Source/Text/RustDebug.jet'];
+const inputs = [generator, frozen, 'Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet', 'Compiler/JetFoundation/Source/Text/RustDebug.jet', 'Compiler/JetIR/Source/RouteCarriers.jet'];
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 function fixture(body) {
   const root = mkdtempSync(join(tmpdir(), 'jet-trap-defects-'));

@@ -8,13 +8,16 @@ use core.sys as cli_sys
 use core.encoding.json as cli_rust_json
 use core.encoding.json.[pointer]
 use core.encoding.[Dyn]
-use jet_driver.[JetDriverRustForeignEntry, JetDriverRustForeignFacts, JetDriverRustForeignPlan, JetDriverRustForeignError, jet_driver_rust_foreign_plan, JET_DRIVER_RUST_FOREIGN_DESCRIPTOR, JET_DRIVER_RUST_FOREIGN_ARTIFACT_MODE, JET_DRIVER_RUST_FOREIGN_TARGET]
-use jet_foundation.[MIRProgram, MIRForeignLanguage, MIRLinkUnit, MIRLinkUnitID, MIRLinkArtifact, MIRLinkArtifactKind, MIRTargetApplicability, mir_module_id, stable_id, mir_sha256_bytes, mir_sha256_hex_bytes, Diagnostic, diagnostic_from_registry, diagnostic_render_all]
+use jet_driver.[JetDriverForeignLinkFacts, JetDriverRustForeignFacts, JetDriverRustForeignPlan, JetDriverRustForeignError, jet_driver_foreign_link_cache_identity, jet_driver_rust_foreign_plan, JET_DRIVER_RUST_FOREIGN_DESCRIPTOR, JET_DRIVER_RUST_FOREIGN_ARTIFACT_MODE, JET_DRIVER_RUST_FOREIGN_TARGET]
+use jet_foundation.[stable_id, sha256_bytes, sha256_hex_bytes, Diagnostic, diagnostic_from_registry, diagnostic_render_all]
 
 JET_CLI_RUST_ARTIFACT_SCHEMA :: "jet-ffi-artifacts-v2"
 JET_CLI_RUST_PROVENANCE_SCHEMA :: "jet-ffi-bridge-provenance-v1"
 JET_CLI_RUST_SANDBOX_POLICY :: "filesystem=source-readonly,output-private-copy;process=private-pid,parent-death;network=declared-shared;environment=clear;devices=private-dev;privilege=no-new-privs+cap-drop-all;resources=tmpfs-64MiB"
 struct JetCLIRustForeignArtifact { plan: JetDriverRustForeignPlan, target_dir: String, release: String }
+
+// The helper's exact StaticLibrary, which joins the program's native link.
+fn jet_cli_rust_foreign_archive(artifact: JetCLIRustForeignArtifact) -> String Never! { "{artifact.release}/lib{artifact.plan.crate_name}.a" }
 fn jet_cli_rust_foreign_diagnostic(error: JetDriverRustForeignError) -> Diagnostic Never! {
     result := diagnostic_from_registry(error.code, None, error.what, error.why, error.fix)
     result.detail = error.detail
@@ -31,7 +34,7 @@ fn jet_cli_rust_foreign_sandbox_error(detail: String) -> JetDriverRustForeignErr
     JetDriverRustForeignError{code: "E1275", what: "build sandboxing is required but unavailable", why: detail, fix: "install the native sandbox backend and retry; Jet will not run Cargo unsandboxed"}
 }
 fn jet_cli_rust_foreign_digest(bytes: [U8]) -> String Never! {
-    mir_sha256_hex_bytes(mir_sha256_bytes(bytes[0..<bytes.len()]))
+    sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))
 }
 fn jet_cli_rust_foreign_hex(value: String) -> Bool Never! {
     if value.len() != 64 -> return false
@@ -120,26 +123,18 @@ fn jet_cli_rust_foreign_require_std() JetDriverRustForeignError! -[FS, Env]> {
     Err(jet_cli_rust_foreign_io("the selected Rust compiler has no installed `{JET_DRIVER_RUST_FOREIGN_TARGET}` standard library; set JET_RUST_MUSL_TOOLCHAIN to the provisioned native-helper toolchain"))
 }
 
-// Every checked native link input, not an opaque host-supplied cache salt.
-fn jet_cli_rust_foreign_link_identity(program: MIRProgram) -[FS, Env]> String JetDriverRustForeignError! {
+// Every checked native link input, not an opaque host-supplied cache salt:
+// one row per checked C provider link unit (which carries no artifact and no
+// dependency directory), then the direct and transitive links.
+fn jet_cli_rust_foreign_link_identity(facts: JetDriverForeignLinkFacts) -[FS, Env]> String JetDriverRustForeignError! {
     rows := [String]{}
-    loop unit in program.links {
-        artifacts := [String]{}
-        loop artifact in unit.artifacts {
-            if artifact.kind == MIRLinkArtifactKind.GeneratedSource -> next
-            parent :: cli_files.open_directory(cli_files.dirname(artifact.path)) ?? return Err(jet_cli_rust_foreign_io("couldn't open native link input `{artifact.path}`: {err}"))
-            digest :: jet_cli_rust_foreign_digest(jet_cli_rust_foreign_read(parent, cli_files.basename(artifact.path)))
-            &artifacts.push("{artifact.path.len()}:{artifact.path}:{digest}")
-        }
-        &artifacts.sort()
-        // copy: `unit.dependency_dirs` stays in the iterated collection (`unit` is a view of its
-        // element; no move out of an element, E0225) and the binding `dirs` owns its own.
-        dirs := unit.dependency_dirs.copy()
-        &dirs.sort()
-        &rows.push("{unit.id.value}:{unit.crate_spec.len()}:{unit.crate_spec}:{unit.cache_identity}:{artifacts.join("|")}:{dirs.join("|")}")
+    cache_identity :: jet_driver_foreign_link_cache_identity(facts)
+    loop library in facts.libraries {
+        id :: stable_id("link", "c::{library}")
+        &rows.push("{id}:{library.len()}:{library}:{cache_identity}::")
     }
-    loop name in program.cffi.direct_links -> &rows.push("direct:{name.len()}:{name}")
-    loop name in program.cffi.transitive_links -> &rows.push("transitive:{name.len()}:{name}")
+    loop name in facts.direct_links -> &rows.push("direct:{name.len()}:{name}")
+    loop name in facts.transitive_links -> &rows.push("transitive:{name.len()}:{name}")
     // Target-scoped native tool bytes participate in both planner keys.
     loop variable in ([String]{"JET_RUST_MUSL_LINKER", "JET_RUST_MUSL_AR"}) {
         if cli_sys.get(variable) == .Val(path) {
@@ -560,33 +555,10 @@ fn jet_cli_rust_foreign_build(plan: JetDriverRustForeignPlan, cache: String, sou
     Ok(())
 }
 
-fn jet_cli_rust_foreign_attach(plan: JetDriverRustForeignPlan, target_dir: String, release: String, program: ^MIRProgram) -> MIRProgram JetDriverRustForeignError! {
-    result := ^program
-    id :: MIRLinkUnitID{value: stable_id("mir-link", "rust-helper:{plan.key}")}
-    dependencies := [MIRLinkUnitID]{}
-    loop unit in result.links -> &dependencies.push(unit.id)
-    attached := 0
-    loop index in 0..<result.foreign.len() {
-        if result.foreign[index].foreign_language != MIRForeignLanguage.Rust -> next
-        loop entry in plan.entries {
-            if result.foreign[index].module_id == mir_module_id(entry.module_identity) && result.foreign[index].name == entry.declaration.name {
-                result.foreign[index].link = Val(id)
-                attached += 1
-                break
-            }
-        }
-    }
-    if attached != plan.entries.len() -> return Err(jet_cli_rust_foreign_io("checked Rust foreign rows do not match the helper's module/name entries"))
-    &result.links.push(MIRLinkUnit{id: id, crate_spec: plan.crate_name, cache_identity: plan.key, target_applicability: MIRTargetApplicability{rust_aot: true, interpreter: true, web: false}, artifacts: [MIRLinkArtifact]{MIRLinkArtifact{kind: MIRLinkArtifactKind.StaticLibrary, path: "{release}/lib{plan.crate_name}.a"}}, dependency_dirs: [String]{"{release}/deps", "{target_dir}/release/deps"}, link_closure: dependencies})
-    // The checked symbol is deliberately unchanged; native lowering uses its
-    // canonical `_cabi` descriptor adapter and this exact StaticLibrary.
-    Ok(^result)
-}
-
-fn jet_cli_rust_foreign_realize(facts: JetDriverRustForeignFacts, program: MIRProgram) -[FS, Env, Exec, Time.Wait]> JetCLIRustForeignArtifact? JetDriverRustForeignError! {
+fn jet_cli_rust_foreign_realize(facts: JetDriverRustForeignFacts, link: JetDriverForeignLinkFacts) -[FS, Env, Exec, Time.Wait]> JetCLIRustForeignArtifact? JetDriverRustForeignError! {
     if facts.entries.len() == 0 -> return Ok(None)
     toolchain :: jet_cli_rust_foreign_toolchain()
-    link_closure :: jet_cli_rust_foreign_link_identity(program)
+    link_closure :: jet_cli_rust_foreign_link_identity(link)
     plan :: jet_driver_rust_foreign_plan(facts, toolchain, JET_DRIVER_RUST_FOREIGN_TARGET, link_closure)
     cache :: jet_cli_rust_foreign_cache()
     source :: cli_files.join(cache, plan.key)
@@ -604,11 +576,4 @@ fn jet_cli_rust_foreign_realize(facts: JetDriverRustForeignFacts, program: MIRPr
     cli_files.create_dir_all(target_dir) ?? return Err(jet_cli_rust_foreign_io("couldn't create the FFI target folder: {err}"))
     jet_cli_rust_foreign_build(plan, cache, source, target_dir, release, toolchain, link_closure, cargo)
     Ok(Val(JetCLIRustForeignArtifact{plan: plan, target_dir: target_dir, release: release}))
-}
-fn jet_cli_rust_foreign_prepare(facts: JetDriverRustForeignFacts, program: ^MIRProgram) -[FS, Env, Exec, Time.Wait]> MIRProgram JetDriverRustForeignError! {
-    realized :: jet_cli_rust_foreign_realize(facts, program)
-    if realized == {
-        .Val(artifact) -> { return jet_cli_rust_foreign_attach(artifact.plan, artifact.target_dir, artifact.release, ^program) }
-        .None -> { return Ok(^program) }
-    }
 }

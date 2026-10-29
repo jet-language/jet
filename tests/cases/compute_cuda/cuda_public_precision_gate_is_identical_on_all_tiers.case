@@ -1,0 +1,12 @@
+# tests/compute_cuda.rs::cuda_public_precision_gate_is_identical_on_all_tiers at tests/compute_cuda.rs:16; hand-port
+# The compute_cuda example prints the same rejected f64 precision gate on the release and default tiers.
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step release: jet run --release {root}/Examples/features/tooling/compute_cuda.jet
+exit: 0 # tests/tir_support/mod.rs assert_example_cli_tiers_agree release run succeeds
+stdout: = "cuda:f64:rejected\n" # tests/compute_cuda.rs:17
+step default: jet run {root}/Examples/features/tooling/compute_cuda.jet
+exit: == release # tests/tir_support/mod.rs exit code agrees with release
+stdout: == release # tests/tir_support/mod.rs output agrees with release

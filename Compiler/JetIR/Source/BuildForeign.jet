@@ -1,0 +1,230 @@
+// Calls of checked foreign functions: a direct C function is called by its
+// checked symbol, which the program's C closure defines (an `#FFI(c)` body's
+// `jet_inline_jet_ffi_<name>` wrapper); an `#FFI(asm)` function is a leaf
+// whose code is its assembled template.
+
+use jet_backend.[x64_assemble_template]
+use jet_foundation.[AccessConvention, DeclTable, Span, BodyCallArg, decl_table_find, name_rows_set, name_rows_value]
+use jet_sema.[SemaCheckedForeignFunction]
+
+// Indexes the checked foreign functions by the function key their calls
+// name (the first row of a key), and by DeclID row over `decls`.
+fn ir_foreign_index(p: &IRProgram, foreign: ^[SemaCheckedForeignFunction], decls: DeclTable) Never! {
+    p.decl_foreign = (loop _ in 0..<decls.rows.len() -> -1)
+    loop row in ^foreign {
+        if p.foreign.get(row.symbol_id.key) != None -> next
+        if decl_table_find(decls, row.symbol_id.key) == .Val(id) {
+            p.decl_foreign[id.row.index()] = p.foreign_rows.len()
+            &p.foreign_rows.push(row.copy())
+        }
+        p.foreign[row.symbol_id.key.copy()] = row
+    }
+}
+
+// A call of the foreign function `foreign`: a direct C function (C language
+// and ABI, no callback, close or undo adapter) whose arguments cross as C
+// scalars, an exact Int as its I64 (jet_int_owned_to_i64), a String as a
+// packed NUL-terminated copy freed after the call, and a written machine
+// scalar (`&U64`, `&I32`, `&F64`) as the address of its place, read back
+// after the call; the C result converts back.
+fn ir_foreign_call(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction, args: [BodyCallArg], span: Span) -> Int Never! {
+    if foreign.language == "asm" -> return ir_asm_call(&m, p, &b, foreign, args, span)
+    if foreign.language != "c" || foreign.abi != "C" || foreign.callback_key != None || foreign.close_function_key != None || foreign.close_foreign_key != None || foreign.undo_function_key != None || foreign.symbol == "" {
+        return ir_fail_slot(&b, span, "foreign import requires a checked direct C scalar signature")
+    }
+    if args.len() != foreign.params.len() -> return ir_fail_slot(&b, span, "foreign import argument count differs from its checked signature")
+    word_row :: ir_word_row(&m)
+    pointer_row :: ir_pointer_row(&m)
+    result_row := -1
+    if foreign.return_type == .Val(ty) {
+        if !ir_unit_type(ty) {
+            result_row = ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+            // An inline Int? word (IR_OPTION_INT_NONE) never crosses as an Int.
+            if ir_option_inline(m, result_row) -> return ir_fail_slot(&b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshalling")
+            if m.types[result_row].kind == {
+                .Int | .Word | .Bool | .Float | .String -> {}
+                else -> return ir_fail_slot(&b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshalling")
+            }
+        }
+    }
+    values := [Int]{}
+    lowered := [Int]{}
+    strings := [Int]{}
+    sizes := [Int]{}
+    backs := [IRWriteBack]{}
+    loop (index, arg) in args {
+        param :: foreign.params[index]
+        written :: param.convention == AccessConvention.Write
+        if param.variadic || written != arg.mut_borrow || arg.spread -> return ir_fail_slot(&b, span, "foreign C import has a variadic or mismatched access convention")
+        row :: ir_value_type(&m, p, param.ty) ?? return ir_type_fail(&b, span, param.ty)
+        if ir_option_inline(m, row) -> return ir_fail_slot(&b, span, "foreign C parameter {ir_type_name(param.ty)} has no native C ABI marshalling")
+        if written {
+            if m.types[row].kind == {
+                .Word | .Float -> {}
+                else -> return ir_fail_slot(&b, span, "foreign C out-parameter {param.name} has no native C ABI marshalling")
+            }
+            address :: ir_place_address(&m, p, &b, arg.value, &backs, span)
+            if ir_failed(b) -> return -1
+            &lowered.push(address)
+            next
+        }
+        value :: ir_value_as(&m, p, &b, arg.value, row, span)
+        if ir_failed(b) -> return -1
+        if value < 0 -> return ir_fail_slot(&b, span, "Unit foreign C argument")
+        &values.push(value)
+        if m.types[row].kind == {
+            .Int -> &lowered.push(ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{value}, word_row))
+            .Word | .Bool | .Float | .Char -> &lowered.push(value)
+            .String -> {
+                pointer :: ir_runtime(&m, &b, "jet_rt_c_string_pack", [Int]{value}, pointer_row)
+                length :: ir_runtime(&m, &b, "jet_rt_string_byte_len", [Int]{value}, word_row)
+                one :: ir_word_const(&m, &b, 1)
+                size :: ir_temp(&m, &b, word_row)
+                ir_emit(&b.f, IROp.Add, size, length, one, IR_OVERFLOW_WRAP, b.line)
+                &strings.push(pointer)
+                &sizes.push(size)
+                &lowered.push(pointer)
+            }
+            else -> return ir_fail_slot(&b, span, "foreign C parameter {param.name} has no native C ABI marshalling")
+        }
+    }
+    dst := -1
+    kind :: if result_row < 0 -> IRTypeKind.Unit else -> m.types[result_row].kind
+    if kind == {
+        .Unit -> {
+            _ :: ir_runtime(&m, &b, foreign.symbol, lowered, -1)
+        }
+        .Int -> {
+            raw :: ir_runtime(&m, &b, foreign.symbol, lowered, word_row)
+            dst = ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{raw}, result_row)
+        }
+        .Bool -> {
+            raw :: ir_runtime(&m, &b, foreign.symbol, lowered, word_row)
+            mask :: ir_word_const(&m, &b, 255)
+            low :: ir_temp(&m, &b, word_row)
+            ir_emit(&b.f, IROp.BitAnd, low, raw, mask, IR_OVERFLOW_WRAP, b.line)
+            zero :: ir_word_const(&m, &b, 0)
+            dst = ir_bool_op(&m, &b, IROp.Ne, low, zero)
+        }
+        .String -> {
+            // Own the String before freeing the arguments: a C function may
+            // return a pointer into one of its CString arguments.
+            raw :: ir_runtime(&m, &b, foreign.symbol, lowered, pointer_row)
+            dst = ir_runtime(&m, &b, "jet_rt_c_string_unpack", [Int]{raw}, result_row)
+        }
+        else -> dst = ir_runtime(&m, &b, foreign.symbol, lowered, result_row)
+    }
+    loop back in backs -> ir_emit(&b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
+    loop (index, pointer) in strings {
+        _ :: ir_runtime(&m, &b, "jet_rt_c_string_free", [Int]{pointer, sizes[index]}, -1)
+    }
+    loop value in values -> ir_release(&m, &b, value)
+    dst
+}
+
+// A call of the `#FFI(asm)` function `foreign`: a call of its leaf
+// (ir_asm_leaf) on machine words. An exact Int crosses as its I64
+// (jet_int_owned_to_i64) and an Int result converts back
+// (jet_int_owned_from_i64), as for a C function.
+fn ir_asm_call(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction, args: [BodyCallArg], span: Span) -> Int Never! {
+    if args.len() != foreign.params.len() -> return ir_fail_slot(&b, span, "inline asm argument count differs from its checked signature")
+    word_row :: ir_word_row(&m)
+    rows := [Int]{}
+    leaf_params := [Int]{}
+    loop param in foreign.params {
+        row :: ir_value_type(&m, p, param.ty) ?? return ir_type_fail(&b, span, param.ty)
+        if ir_option_inline(m, row) -> return ir_fail_slot(&b, span, "inline asm: parameter {param.name} is not a machine word")
+        if m.types[row].kind == {
+            .Int -> &leaf_params.push(word_row)
+            .Word | .Pointer -> &leaf_params.push(row)
+            else -> return ir_fail_slot(&b, span, "inline asm: parameter {param.name} is not a machine word")
+        }
+        if param.convention == AccessConvention.Write -> return ir_fail_slot(&b, span, "inline asm: write parameters are unsupported")
+        &rows.push(row)
+    }
+    result_row := -1
+    leaf_result := -1
+    if foreign.return_type == .Val(ty) {
+        if !ir_unit_type(ty) {
+            result_row = ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+            if ir_option_inline(m, result_row) -> return ir_fail_slot(&b, span, "inline asm: result is not a machine word")
+            if m.types[result_row].kind == {
+                .Int -> leaf_result = word_row
+                .Word | .Pointer -> leaf_result = result_row
+                else -> return ir_fail_slot(&b, span, "inline asm: result is not a machine word")
+            }
+        }
+    }
+    problem :: ir_asm_leaf(&m, p, foreign, leaf_params, leaf_result)
+    if problem != "" -> return ir_fail_slot(&b, span, problem)
+    leaf :: name_rows_value(m.function_rows, "{foreign.symbol_id.key}#asm") ?? return ir_fail_slot(&b, span, "inline asm leaf of {foreign.name} was not built")
+    values := [Int]{}
+    lowered := [Int]{}
+    loop (index, arg) in args {
+        if arg.mut_borrow || arg.spread -> return ir_fail_slot(&b, span, "inline asm has a mismatched access convention")
+        value :: ir_value_as(&m, p, &b, arg.value, rows[index], span)
+        if ir_failed(b) -> return -1
+        if value < 0 -> return ir_fail_slot(&b, span, "Unit inline asm argument")
+        &values.push(value)
+        if m.types[rows[index]].kind == .Int -> &lowered.push(ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{value}, word_row)) else -> &lowered.push(value)
+    }
+    raw :: if leaf_result >= 0 -> ir_temp(&m, &b, leaf_result) else -> -1
+    start :: ir_args(&b.f, lowered)
+    ir_emit(&b.f, IROp.Call, raw, leaf, start, lowered.len(), b.line)
+    dst := raw
+    if result_row >= 0 && m.types[result_row].kind == .Int -> dst = ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{raw}, result_row)
+    loop value in values -> ir_release(&m, &b, value)
+    dst
+}
+
+// Builds the leaf function of the `#FFI(asm)` function `foreign` once per
+// module, keyed "<function key>#asm": `params` and `result` (-1: none) its
+// Word rows, its code the template (the first triple-quoted body within the
+// checked span) assembled for its parameter names. Returns the problem
+// when the template is missing or does not assemble, else "".
+fn ir_asm_leaf(m: &IRModule, p: IRProgram, foreign: SemaCheckedForeignFunction, params: [Int], result: Int) -> String Never! {
+    key :: "{foreign.symbol_id.key}#asm"
+    if name_rows_value(m.function_rows, key) != None -> return ""
+    source :: ir_asm_source(p, foreign) ?? return "inline asm: missing triple-quoted body within the checked source span"
+    names :: loop param in foreign.params -> param.name
+    assembled :: x64_assemble_template(source, names, result >= 0)
+    if assembled.error == .Val(reason) -> return reason
+    line :: ir_source_line_of(p, foreign.source_file, foreign.span.start) ?? 0
+    bytes := [U8]{}
+    loop byte in "{foreign.module_name}.{foreign.name}".bytes() {
+        alphanumeric :: (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
+        &bytes.push(if alphanumeric -> byte else -> U8{95})
+    }
+    symbol :: String.from_bytes(bytes) ?? foreign.name.copy()
+    f := ir_function_new(foreign.name, key, "{symbol}__asm", foreign.source_file, line)
+    loop (index, param) in foreign.params -> _ := ir_slot(&f, params[index], IRSlotKind.Param, ir_intern_name(&m, param.name), line)
+    f.result = result
+    f.asm = Val(IRAsmLeaf{code: assembled.code, regs: assembled.regs, result: assembled.result})
+    id :: m.functions.len()
+    &m.functions.push(^f)
+    name_rows_set(&m.function_rows, key, id)
+    ""
+}
+
+// The template of an `#FFI(asm)` function: the first triple-quoted body
+// within its checked span.
+fn ir_asm_source(p: IRProgram, foreign: SemaCheckedForeignFunction) -> String? Never! {
+    row :: p.source_rows.get(foreign.source_file) ?? return None
+    start :: foreign.span.start
+    end :: foreign.span.end
+    if start < 0 || end < start || end > p.source_bytes[row].len() -> return None
+    open := -1
+    at := start
+    loop at + 2 < end {
+        if p.source_bytes[row][at] == (U8{34}) && p.source_bytes[row][at + 1] == (U8{34}) && p.source_bytes[row][at + 2] == (U8{34}) {
+            if open < 0 {
+                open = at + 3
+                at += 3
+                next
+            }
+            return Val(String.from_bytes(p.source_bytes[row].slice(open, at)) ?? return None)
+        }
+        at += 1
+    }
+    None
+}

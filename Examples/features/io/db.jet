@@ -5,7 +5,7 @@
 // `.query`/`.query_one`/`.execute` are the only ways to talk to the database.
 package {
     name: "db"
-    authority: { holds: { allow: [DB, DB.Read, DB.Write, IO, Mem.Alloc, Time.Wait] } }
+    authority: { allow: [DB, DB.Read, DB.Write, IO, Mem.Alloc, Time.Wait] }
 }
 
 use core.db as db
@@ -38,7 +38,7 @@ fn run() {
     _begun :: scoped.begin()
     temporary :: "temporary"
     _ins3 :: scoped.execute(SQL{"INSERT INTO greet (msg) VALUES ({temporary})"}) ?? panic("insert failed")
-    _rolledback :: &scoped.rollback()
+    _rolledback :: scoped.rollback()
     after_opt :: scoped.query_one(SQL{"SELECT COUNT(*) AS n FROM greet"})
     if after_opt == .Val(after_row) {
         n_val :: after_row.get("n") ?? panic("missing n")

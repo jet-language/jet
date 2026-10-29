@@ -1,6 +1,15 @@
 // Source/CmdTest.rs::persist_comparison_artifacts and ReceiptStore.rs
 // index_published_receipt. The comparison and receipt index rows land together.
-use jet_foundation.[EvidenceSource, EvidenceBuild, EvidenceRevision, EvidenceAttachment, EvidenceProducerKind, EvidenceKind, EvidenceOutcome, EvidenceReport, evidence_identity_for_record, evidence_record_new, evidence_record_checked_derivation, evidence_report_new, evidence_report_add_record_with_derivation, evidence_merge_error_text, evidence_report_encode, canonical_json_bytes, comparison_record_to_json]
+use jet_foundation.[
+    EvidenceSource, EvidenceBuild, EvidenceRevision, EvidenceAttachment, EvidenceProducerKind,
+    EvidenceKind, EvidenceOutcome, EvidenceReport, evidence_identity_for_record,
+    evidence_record_new, evidence_record_checked_derivation, evidence_report_new,
+    evidence_report_add_record_with_derivation, evidence_merge_error_text, evidence_report_encode,
+    canonical_json_bytes, comparison_record_to_json, ComparisonStatus, comparison_status_as_str,
+]
+use jet_pkg_model.[AuthorityResolver, WorkspaceDeclarationCache]
+use core.crypto as receipt_crypto
+use core.sys as cli_sys
 
 fn jet_cli_comparison_evidence_outcome(status: ComparisonStatus) -> EvidenceOutcome Never! {
     if status == {

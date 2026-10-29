@@ -14,7 +14,7 @@ lowering, silent omission, or unverified platform claim.
 
 An API name is not proof. A parser path is not execution. A generated schema is
 not a package manager. A fake DOM is not browser proof. A three-frame transcript
-is not a game runtime. A validated TIR followed by AST emission is not R12. A
+is not a game runtime. A validated checked program followed by AST emission is not R12. A
 fallback counts only when its observable contract is the same, its limitations
 are explicit, and its acceptance evidence proves them.
 
@@ -36,7 +36,7 @@ they are labeled truthfully; they do not support a broader claim.
 
 ## Product laws
 
-1. **One executable meaning.** Parser, sema, TIR, AOT, JIT, comptime, REPL,
+1. **One executable meaning.** Parser, sema, IR, AOT, JIT, comptime, REPL,
    web, debugger, editor, and analysis tools consume the same semantic facts.
 2. **Exhaustive lowering.** No wildcard arm may silently omit a checked node or
    synthesize `undefined`, `()`, empty text, or a success-shaped placeholder.
@@ -74,7 +74,7 @@ properties through one coherent Jet mechanism.
 | Interactive work | Python/Julia/Jupyter REPL and notebook loop | structural multiline REPL; persistent search; rich display; Jupyter protocol; interrupt/debug/profile; AOT-equivalent Core semantics |
 | Web applications | React server components; Svelte runes; SvelteKit/Next routing, data, forms, SSR; Vite HMR | one typed application graph; fine-grained dependency compilation; SSR/SSG/streaming; hydration; server actions/forms; accessibility; real-browser HMR and deployment evidence |
 | Native/mobile UI | SwiftUI and Jetpack Compose state, previews, accessibility, adaptive layout | one renderer/component model; desktop/mobile backends; previews; hot reload; navigation/lifecycle/restoration; accessibility and packaging evidence |
-| Data/ML/compute | NumPy broadcasting/ufunc/linalg; dataframe/lazy-query systems; accelerator graphs and explicit kernels | one typed compute model beneath executable TIR; ndarray/table schemas; Arrow/Parquet; lazy fusion; autodiff; CPU/GPU parity; device ownership; multi-device evidence |
+| Data/ML/compute | NumPy broadcasting/ufunc/linalg; dataframe/lazy-query systems; accelerator graphs and explicit kernels | one typed compute model beneath the IR; ndarray/table schemas; Arrow/Parquet; lazy fusion; autodiff; CPU/GPU parity; device ownership; multi-device evidence |
 | Tooling | rust-analyzer incremental semantics; Go tool coherence; .NET diagnostics | shared incremental query service; LSP/DAP; formatter/test/doc/profile/trace; stable JSON; one diagnostic model; project-scale latency evidence |
 | Packages/builds | Nix hermetic store/build model plus Cargo/uv/pnpm ergonomics | hermetic package/build/store behavior with independent live evidence |
 | Games/media | mature engine asset/render/audio/input/editor/replay workflows | real renderer/audio/input; asset import/cook/hot reload; ECS; replay/networking; editor; packaged game on supported platforms |

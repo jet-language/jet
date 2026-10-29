@@ -1,0 +1,50 @@
+# tests/dev_parts/routine.rs::fixed_width_integers_match_interpreter_resident_jit_default_and_aot at tests/dev_parts/routine.rs:4210; hand-port (the forced-interpreter tier is carried by `jet run`; the Jet CLI has no interpreter flag)
+fixture: fixed_width_integers_match_interpreter_resident_jit_default_and_aot.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet check fixed_width_integers.jet
+cwd: fixed
+exit: 0
+step dev: jet run fixed_width_integers.jet
+cwd: fixed
+exit: 0
+stdout: = fixed_width_integers_match_interpreter_resident_jit_default_and_aot.1.out
+stderr: empty
+step: jet build fixed_width_integers.jet
+cwd: fixed
+exit: 0
+step aot: built
+cwd: fixed
+exit: 0
+stdout: = fixed_width_integers_match_interpreter_resident_jit_default_and_aot.1.out
+stderr: empty
+copy: {root}/Examples/features/lowlevel/sized_integers.jet sized/sized_integers.jet
+step jit_sized: jet run sized_integers.jet
+cwd: sized
+stdin: null
+exit: any # original assert_tier_parity compares the tiers with each other, not with a golden
+step: jet build sized_integers.jet
+cwd: sized
+exit: 0
+step aot_sized: built
+cwd: sized
+stdin: null
+exit: == jit_sized
+stdout: == jit_sized
+stderr: == jit_sized
+copy: {root}/Examples/features/types/typed_literal_forms.jet literal/typed_literal_forms.jet
+step jit_literal: jet run typed_literal_forms.jet
+cwd: literal
+stdin: null
+exit: any # original assert_tier_parity compares the tiers with each other, not with a golden
+step: jet build typed_literal_forms.jet
+cwd: literal
+exit: 0
+step aot_literal: built
+cwd: literal
+stdin: null
+exit: == jit_literal
+stdout: == jit_literal
+stderr: == jit_literal

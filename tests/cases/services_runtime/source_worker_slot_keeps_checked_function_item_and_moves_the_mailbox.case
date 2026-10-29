@@ -1,0 +1,13 @@
+# tests/services_runtime.rs::source_worker_slot_keeps_checked_function_item_and_moves_the_mailbox at tests/services_runtime.rs:2484; hand-port
+# Claim: tree.send to a started worker leaves mailbox_depth == 1 (tests/services_runtime.rs:2495-2496)
+# Claim: tree.fail_worker followed by tree.restarts == 1 (tests/services_runtime.rs:2497-2498)
+# Claim: tree.stop succeeds (tests/services_runtime.rs:2499)
+# Fixture migrated: named_worker passed with ^ (E0209 migration: last use); receiver writes marked & (E0224 migration, as in tests/cases/services_runtime/durable_lifecycle_matrix input run.jet); the Rust compile_with_path + rustc build is replaced by jet run of main.jet in a package named worker-slot
+# Not ported: the output.rust text assertions (JetServiceWorkerHandler, jet_services_raw_worker_push, Mailbox::clone absence; tests/services_runtime.rs:2508-2526): jet run exposes no generated rust
+fixture: source_worker_slot_keeps_checked_function_item_and_moves_the_mailbox.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0 # tests/services_runtime.rs:2528-2529 build_and_run_full status 0
+stdout: = "" # tests/services_runtime.rs:2528-2529 build_and_run_full status 0

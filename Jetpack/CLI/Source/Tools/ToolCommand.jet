@@ -177,7 +177,7 @@ fn cli_tool_profile_switch(verification: &StoreVerification, theme: Theme, parse
     EXIT_OK
 }
 
-fn cli_tool_activate_under_lock(verification: &StoreVerification, generation: Int) CLIError! -[FS, Env, Time]> {
+fn cli_tool_activate_under_lock(verification: &StoreVerification, generation: Int) CLIError! -[FS, Env, Exec, Time, Rand]> {
     lock :: cli_tool_profile_lock()
     cli_recover_tool_profile_state(&verification)
     cli_activate_tool_generation_locked(&verification, generation)
@@ -195,7 +195,7 @@ fn cli_tool_profile_rollback(verification: &StoreVerification, theme: Theme, par
 }
 
 // The explicit target, or the newest generation older than the current one.
-fn cli_tool_rollback_locked(verification: &StoreVerification, target: Int?) -[FS, Env, Time]> Int CLIError! {
+fn cli_tool_rollback_locked(verification: &StoreVerification, target: Int?) -[FS, Env, Exec, Time, Rand]> Int CLIError! {
     lock :: cli_tool_profile_lock()
     cli_recover_tool_profile_state(&verification)
     current :: cli_tool_current_generation_locked() ?? return Err(CLIError.Other("user-tools profile has no current generation to roll back"))
@@ -223,7 +223,7 @@ struct ToolProfileUsage {
     bin_bytes: Int
 }
 
-fn cli_tool_profile_usage_locked(verification: &StoreVerification) -[FS, Env, Time]> ToolProfileUsage CLIError! {
+fn cli_tool_profile_usage_locked(verification: &StoreVerification) -[FS, Env, Exec, Time, Rand]> ToolProfileUsage CLIError! {
     lock :: cli_tool_profile_lock()
     cli_recover_tool_profile_state(&verification)
     current :: cli_tool_current_generation_locked()
@@ -234,7 +234,7 @@ fn cli_tool_profile_usage_locked(verification: &StoreVerification) -[FS, Env, Ti
     Ok(ToolProfileUsage{generations: generations, state_bytes: cli_tool_profile_state_disk_bytes(), bin_bytes: cli_tool_profile_bin_disk_bytes()})
 }
 
-fn cli_tool_profile_generations(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
+fn cli_tool_profile_generations(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Time, Time.Wait, Rand]> Int Never! {
     if cli_tool_profile_args(theme, parsed, PROFILE_VERB_GENERATIONS, false) == None -> return EXIT_USAGE
     usage :: cli_tool_profile_usage_locked(&verification) ?? return cli_report_tool_profile_error(theme, err)
     generations_bytes := 0
@@ -264,7 +264,7 @@ fn cli_tool_profile_generations(verification: &StoreVerification, theme: Theme, 
 fn cli_pad_start(text: String, width: Int) -> String Never! {
     scalars := 0
     loop _ in text.chars() -> scalars += 1
-    if scalars >= width -> return text
+    if scalars >= width -> return text.copy()
     "{" ".repeat(width - scalars)}{text}"
 }
 
@@ -288,7 +288,7 @@ fn cli_update_user_tools(verification: &StoreVerification, theme: Theme, parsed:
     cli_update_user_tools_with_plan(&verification, theme, parsed, &confirmation, false, () -> EXIT_OK)
 }
 
-fn cli_update_user_tools_with_plan(verification: &StoreVerification, theme: Theme, parsed: CLIParsed, confirmation: &UpdateConfirmation, has_other_plan: Bool, apply_other: fn() -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_update_user_tools_with_plan(verification: &StoreVerification, theme: Theme, parsed: CLIParsed, confirmation: &UpdateConfirmation, has_other_plan: Bool, apply_other: fn() -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never!) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     if parsed.flags.offline {
         theme.error("cannot update user-tools offline", "channel movement needs the configured source metadata or a captured fixture", "remove `--offline` and run `jetpack update tools` again")
         return EXIT_USAGE
@@ -308,7 +308,7 @@ fn cli_update_user_tools_with_plan(verification: &StoreVerification, theme: Them
     }
 }
 
-fn cli_update_user_tools_locked(verification: &StoreVerification, theme: Theme, parsed: CLIParsed, confirmation: &UpdateConfirmation, has_other_plan: Bool, apply_other: fn() -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> UserToolsUpdateOutcome CLIError! {
+fn cli_update_user_tools_locked(verification: &StoreVerification, theme: Theme, parsed: CLIParsed, confirmation: &UpdateConfirmation, has_other_plan: Bool, apply_other: fn() -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never!) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> UserToolsUpdateOutcome CLIError! {
     lock :: cli_tool_profile_lock()
     cli_recover_tool_profile_state(&verification)
     manifest := cli_read_tool_manifest()
@@ -343,8 +343,8 @@ fn cli_tool_install(verification: &StoreVerification, cache: &WorkspaceDeclarati
     roots :: pkg_resolve_roots()
     plan := RunPlan.empty(project_dir, cli_cwd_table(&cache))
     &plan.refs.push(spec)
-    env :: cli_compose_env_scoped(&verification, theme, roots, parsed.flags, plan, RealizeScope.UserProfile, false) ?? return cli_exit_for(theme, err)
-    lease :: env.cache_leases.get(0) ?? {
+    env := cli_compose_env_scoped(&verification, theme, roots, parsed.flags, plan, RealizeScope.UserProfile, false) ?? return cli_exit_for(theme, err)
+    lease :: &env.cache_leases.remove(0, .Slot) ?? {
         theme.error("`{spec.raw}` has no bin directory to install", "tool install projects package binaries onto PATH; this realization produced no `bin/`.", "pick a package that ships executables, or use `jetpack use <package> -- <command>` for a one-shot.")
         return EXIT_USAGE
     }
@@ -367,7 +367,7 @@ fn cli_tool_install(verification: &StoreVerification, cache: &WorkspaceDeclarati
             return EXIT_USAGE
         }
     }
-    installed :: cli_tool_project_install(&verification, &cache, spec, receipt, lease, bins, channel_policy) ?? {
+    installed :: cli_tool_project_install(&verification, &cache, spec, receipt, ^lease, bins, channel_policy) ?? {
         cli_report_tool_install_error(theme, err)
         return EXIT_USAGE
     }
@@ -386,7 +386,7 @@ fn cli_report_tool_install_error(theme: Theme, error: CLIError) Never! -[IO, Tim
     }
 }
 
-fn cli_tool_list(verification: &StoreVerification, theme: Theme) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
+fn cli_tool_list(verification: &StoreVerification, theme: Theme) -[IO, FS, Env, Exec, Time, Time.Wait, Rand]> Int Never! {
     tools :: cli_tool_list_locked(&verification) ?? {
         theme.error("couldn't read installed tools", err.message(), "check `~/.jet/tools`.")
         return EXIT_USAGE
@@ -403,13 +403,13 @@ fn cli_tool_list(verification: &StoreVerification, theme: Theme) -[IO, FS, Env, 
     EXIT_OK
 }
 
-fn cli_tool_list_locked(verification: &StoreVerification) -[FS, Env, Time]> [InstalledUserTool] CLIError! {
+fn cli_tool_list_locked(verification: &StoreVerification) -[FS, Env, Exec, Time, Rand]> [InstalledUserTool] CLIError! {
     lock :: cli_tool_profile_lock()
     cli_recover_tool_profile_state(&verification)
     cli_read_current_tools()
 }
 
-fn cli_tool_uninstall(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
+fn cli_tool_uninstall(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Time, Time.Wait, Rand]> Int Never! {
     name :: parsed.positional.get(1) ?? {
         theme.error("`jetpack tool uninstall` needs a tool name", "names match `jetpack tool list` (package short name or projected bin).", "try `jetpack tool uninstall ripgrep`.")
         return EXIT_USAGE
@@ -721,28 +721,27 @@ fn cli_build_tool_manifest_generation(verification: &StoreVerification, theme: T
     manifest := cli_read_tool_manifest()
     refreshed :: cli_refresh_tool_manifest_sources(theme, parsed, &manifest, false)
     leases := [CacheLease]{}
-    built :: cli_realize_tool_manifest(&verification, theme, parsed, manifest, &leases)
-    if built == {
+    if cli_realize_tool_manifest(&verification, theme, parsed, manifest, &leases) == {
         .Ok(tools) -> {
             if cli_write_tool_generation_locked(&verification, tools, None) == {
                 .Ok(generation) -> {
                     if refreshed.changed {
                         if cli_write_tool_manifest(manifest) == .Err(error) {
-                            loop lease in leases -> lease.release()
+                            loop lease in ^leases -> ^lease.release()
                             return Err(error)
                         }
                     }
-                    loop lease in leases -> lease.release()
+                    loop lease in ^leases -> ^lease.release()
                     Ok(generation)
                 }
                 .Err(error) -> {
-                    loop lease in leases -> lease.release()
+                    loop lease in ^leases -> ^lease.release()
                     Err(error)
                 }
             }
         }
         .Err(error) -> {
-            loop lease in leases -> lease.release()
+            loop lease in ^leases -> ^lease.release()
             Err(error)
         }
     }
@@ -775,9 +774,9 @@ fn cli_realize_tool_manifest(verification: &StoreVerification, theme: Theme, par
             }
         }
         &leases.push(lease)
-        held :: leases[leases.len() - 1]
-        held.validate()
-        receipt :: held.profile_install_receipt()
+        held :: leases.len() - 1
+        leases[held].validate()
+        receipt :: leases[held].profile_install_receipt()
         if receipt.reference != spec.raw || receipt.output_hash == "" -> return Err(CLIError.Other("verified user-tools receipt disagrees with `{entry.resolved}`"))
         bins :: cli_collect_manifest_bins(receipt, entry)
         bin_names := [String]{}
@@ -800,7 +799,7 @@ struct ToolInstallResult {
 
 // Replace the tool (and any tool owning one of its bins) in the current
 // generation, publish the new generation, and record the manifest.
-fn cli_tool_project_install(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, spec: RefSpec, receipt: ProfileInstallReceipt, lease: CacheLease, bins: [ToolBinPair], channel_policy: ChannelPolicy) -[IO, FS, Env, Exec, Time, Time.Wait]> ToolInstallResult CLIError! {
+fn cli_tool_project_install(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, spec: RefSpec, receipt: ProfileInstallReceipt, ^lease: CacheLease, bins: [ToolBinPair], channel_policy: ChannelPolicy) -[IO, FS, Env, Exec, Time, Time.Wait, Rand]> ToolInstallResult CLIError! {
     if receipt.reference != spec.raw || receipt.package != spec.short_name() || receipt.output_hash == "" {
         return Err(CLIError.Other("verified tool receipt disagrees with requested package"))
     }
@@ -846,7 +845,7 @@ fn cli_tool_manifest_source_table(cache: &WorkspaceDeclarationCache, spec: RefSp
 
 // Remove the tool named `name` (or owning bin `name`); false when none is
 // installed.
-fn cli_uninstall_tool(verification: &StoreVerification, name: String) -[FS, Env, Time]> Bool CLIError! {
+fn cli_uninstall_tool(verification: &StoreVerification, name: String) -[FS, Env, Exec, Time, Rand]> Bool CLIError! {
     lock :: cli_tool_profile_lock()
     cli_recover_tool_profile_state(&verification)
     current :: cli_read_current_tools()

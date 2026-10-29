@@ -1,0 +1,15 @@
+# tests/build_entry_epoch4.rs::workspace_build_observes_dependency_order_and_execution_chain at tests/build_entry_epoch4.rs:168; hand-port
+# Sources from tests/build_entry_epoch4.rs:171-256, moved to the current build API: `b: BuildContext` is `b: Build`,
+# `-> BuildPlan { .. return b.plan(t) }` is `b.default(t)`, and the root package declares member a itself, because a
+# member's path dependency may not escape its package (E1206) unless the root declares the same directory.
+# The workspace build runs member a, then member b, then the workspace entry, and each action leaves its output.
+fixture: workspace_build_observes_dependency_order_and_execution_chain.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet build workspace.jet --allow=Exec
+exit: 0 # tests/build_entry_epoch4.rs:262-274 the workspace and member entries run through the production driver
+file: packages/a/a/a.jet is-file # tests/build_entry_epoch4.rs:275 member a ran its action
+file: packages/b/b/b.jet is-file # tests/build_entry_epoch4.rs:276 member b ran its action
+file: workspace-stamp = "workspace" # tests/build_entry_epoch4.rs:277-280 the workspace entry ran last

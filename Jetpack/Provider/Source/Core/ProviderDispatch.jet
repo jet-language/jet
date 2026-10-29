@@ -5,12 +5,6 @@
 // roots without a native realization path fail closed instead of falling
 // through to Nix.
 
-// The one realize-time classification memo per process: an exact commit's
-// classification is also durable on disk; anything else is stable for one
-// process. Without it a warm 28-package env re-peeked the same pinned
-// nixpkgs revision 28 times.
-provider_remote_kind_memo := [String: ProviderKind]{}
-
 // The adapter behind a resolved provider kind.
 enum ProviderAdapter {
     Nix
@@ -275,18 +269,12 @@ fn provider_infer_remote_kind(upstream: String, offline: Bool, cache_dir: String
         .Val(rev) -> rev.bytes().len() == 40 && provider_is_ascii_hex(rev)
         .None -> false
     }
-    memo_key :: "{cache_dir}\n{upstream}"
-    if provider_remote_kind_memo.get(memo_key) == {
-        .Val(kind) -> return kind
-        .None -> {}
-    }
     parent :: files.dirname(cache_dir)
     durable :: files.join(files.join(if parent == "" -> cache_dir else -> parent, "source-kinds"), pkg_sha256_hex(upstream.bytes()))
     if exact {
         if files.read(durable) == {
             .Ok(text) -> {
                 kind :: provider_pack_kind(text.trim() == "core")
-                provider_remote_kind_memo[memo_key] = kind
                 return kind
             }
             .Err(_) -> {}
@@ -295,7 +283,6 @@ fn provider_infer_remote_kind(upstream: String, offline: Bool, cache_dir: String
     if offline -> return ProviderKind.Nix
     has_pack :: provider_remote_has_pack_jet(remote)
     kind :: provider_pack_kind(has_pack)
-    provider_remote_kind_memo[memo_key] = kind
     if exact {
         files.create_dir_all(files.dirname(durable)).drop("the durable classification is a cache")
         files.write(durable, if has_pack -> "core" else -> "nix").drop("the durable classification is a cache")

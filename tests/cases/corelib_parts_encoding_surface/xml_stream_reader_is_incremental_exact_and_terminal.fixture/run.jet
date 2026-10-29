@@ -1,0 +1,142 @@
+
+use core.encoding as encoding
+use core.encoding.xml as xml
+use core.files as files
+
+fn run() {
+    paths :: [String]{ "boundary-4078.xml", "boundary-4079.xml", "boundary-4080.xml", "boundary-4081.xml", "boundary-4082.xml", "boundary-4083.xml", "boundary-4084.xml", "boundary-4085.xml", "boundary-4086.xml", "boundary-4087.xml", "boundary-4088.xml", "boundary-4089.xml", "boundary-4090.xml", "boundary-4091.xml", "boundary-4092.xml", "boundary-4093.xml", "boundary-4094.xml", "boundary-4095.xml", "boundary-4096.xml", "boundary-4097.xml", "boundary-4098.xml", "boundary-4099.xml", "boundary-4100.xml", "boundary-4101.xml", "boundary-4102.xml", "boundary-4103.xml", "boundary-4104.xml", "boundary-4105.xml", "boundary-4106.xml", "boundary-4107.xml", "boundary-4108.xml", "boundary-4109.xml", "boundary-4110.xml" }
+    passed := 0
+    loop path in paths {
+        input :: files.open(path) ?? panic("open boundary")
+        reader :: xml.reader(^input) ?? panic("reader defaults")
+        document_start := false
+        root_start := false
+        document_end := false
+        loop true {
+            maybe :: reader.next() ?? panic("boundary next")
+            if maybe == {
+                Val(event) -> {
+                    event_kind := (&event.field("$xml_event") ?? panic("event tag")).text() ?? ""
+                    if event_kind == "document_start" {
+                        wire_encoding := (&event.field("encoding") ?? panic("encoding")).text() ?? ""
+                        document_start = wire_encoding == "UTF-8"
+                    }
+                    if event_kind == "element_start" {
+                        name := &event.field("name") ?? panic("name")
+                        local := (&name.field("local") ?? panic("local")).text() ?? ""
+                        namespace := (&name.field("namespace_uri") ?? panic("namespace")).text() ?? ""
+                        root_start = local == "r" && namespace == "urn:r"
+                    }
+                    if event_kind == "document_end" { document_end = true }
+                }
+                None -> { break }
+            }
+        }
+        eof_again :: reader.next() ?? panic("fused eof")
+        if eof_again == {
+            Val(_) -> {}
+            None -> { if document_start && root_start && document_end { passed++ } }
+        }
+    }
+    print(passed)
+
+    malformed_input :: files.open("malformed.xml") ?? panic("open malformed")
+    malformed_reader :: xml.reader(^malformed_input) ?? panic("malformed reader")
+    loop true {
+        result :: malformed_reader.next()
+        if result == {
+            .Ok(maybe) -> {
+                if maybe == {
+                    Val(_) -> {}
+                    None -> {
+                        print("malformed-missed")
+                        break
+                    }
+                }
+            }
+            .Err(first) -> {
+                again :: malformed_reader.next()
+                if again == {
+                    .Ok(_) -> { print("terminal-missed") }
+                    .Err(second) -> { print(first.byte_offset == second.byte_offset && first.reason == second.reason) }
+                }
+                break
+            }
+        }
+    }
+
+    invalid_char_input :: files.open("invalid-char.xml") ?? panic("open invalid character")
+    invalid_char_reader :: xml.reader(^invalid_char_input) ?? panic("invalid character reader")
+    loop true {
+        result :: invalid_char_reader.next()
+        if result == {
+            .Ok(maybe) -> {
+                if maybe == {
+                    Val(_) -> {}
+                    None -> {
+                        print("invalid-character-missed")
+                        break
+                    }
+                }
+            }
+            .Err(first) -> {
+                print(first.kind == encoding.EncodingErrorKind.Syntax)
+                print(first.byte_offset)
+                print(first.line ?? -1)
+                print(first.column ?? -1)
+                print(first.path)
+                print(first.reason)
+                again :: invalid_char_reader.next()
+                if again == {
+                    .Ok(_) -> { print("invalid-character-terminal-missed") }
+                    .Err(second) -> { print(first.reason == second.reason) }
+                }
+                break
+            }
+        }
+    }
+
+    total_limits := encoding.EncodingLimits.safe()
+    total_limits.max_total_bytes = Val(6)
+    total_input :: files.open("limited.xml") ?? panic("open total")
+    total_reader :: xml.reader(^total_input, total_limits, xml.XMLParseOptions.safe()) ?? panic("total reader")
+    loop true {
+        result :: total_reader.next()
+        if result == {
+            .Ok(maybe) -> {
+                if maybe == {
+                    Val(_) -> {}
+                    None -> {
+                        print("total-missed")
+                        break
+                    }
+                }
+            }
+            .Err(first) -> {
+                again :: total_reader.next()
+                if again == {
+                    .Ok(_) -> { print("total-terminal-missed") }
+                    .Err(second) -> {
+                        print(first.byte_offset)
+                        print(first.reason == second.reason)
+                    }
+                }
+                break
+            }
+        }
+    }
+
+    conflict_input :: files.open("encoding-conflict.xml") ?? panic("open encoding conflict")
+    conflict_reader :: xml.reader(^conflict_input) ?? panic("encoding conflict reader")
+    conflict_start :: conflict_reader.next() ?? panic("encoding conflict document start")
+    if conflict_start == None { panic("missing document start") }
+    conflict :: conflict_reader.next()
+    if conflict == {
+        .Ok(_) -> { print("encoding-conflict-missed") }
+        .Err(error) -> {
+            print(error.kind == encoding.EncodingErrorKind.Syntax)
+            print(error.byte_offset)
+            print(error.reason)
+        }
+    }
+}

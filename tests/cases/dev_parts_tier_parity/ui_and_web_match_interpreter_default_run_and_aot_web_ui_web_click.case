@@ -1,0 +1,20 @@
+# tests/dev_parts/tier_parity.rs::ui_and_web_match_interpreter_default_run_and_aot at tests/dev_parts/tier_parity.rs:321; hand-port (golden case is `run: none`: the suite only builds it; other ui_and_web stems are covered by the golden suite)
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+env: JET_UI_HEADLESS=1
+copy: {root}/Examples/features/web/ui_web_click.jet ui_web_click.jet
+step jit: jet run ui_web_click.jet
+stdin: null
+limit: time=30
+exit: 0
+stdout: = ../../../Examples/features/expected/web/ui_web_click.out
+stderr: empty
+step: jet build ui_web_click.jet
+exit: 0
+step aot: built
+limit: time=30
+exit: == jit
+stdout: == jit
+stderr: == jit

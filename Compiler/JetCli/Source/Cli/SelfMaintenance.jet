@@ -2,7 +2,7 @@
 // even under --json/--quiet; only CLI diagnostic macros use machine mode.
 use core.files as cli_files
 use jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, jet_driver_present_diagnostics]
-use jet_foundation.diagnostic_render_all
+use jet_foundation.[diagnostic_render_all]
 
 fn jet_cli_maintenance_error(code: String, what: String, fix: String?, color: Bool, json: Bool) -> JetDriverVerbOutput Never! {
     diagnostic_copy :: jet_cli_diagnostic_copy(code)
@@ -25,7 +25,7 @@ fn jet_cli_devtools_new_ui(args: [String], color: Bool, json: Bool) -> JetDriver
     source :: jet_cli_new_ui_source()
     cli_files.write(file, source) ?? return jet_cli_maintenance_error("E2105", "couldn't write `{file}`: {jet_cli_io_error_text(err)}", None, color, json)
     actual := "(no errors)\n"
-    if jet_cli_compile_file(file, false, false, None, JetDriverCompileMode.Program) == {
+    if jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program) == {
         .Refused(output) -> return output
         .Compiled(result, snapshot) -> {
             diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
@@ -36,13 +36,13 @@ fn jet_cli_devtools_new_ui(args: [String], color: Bool, json: Bool) -> JetDriver
     }
     cli_files.write(expected, actual) ?? return jet_cli_maintenance_error("E2105", "couldn't write `{expected}`: {jet_cli_io_error_text(err)}", None, color, json)
     stdout := "wrote {file}\nwrote {expected}\n"
-    if actual == "(no errors)\n" -> stdout = "{stdout}note: scaffold compiled cleanly — edit `{file}` to trigger the diagnostic you want, then `jet devtools bless diagnostic_snapshots`\n"
+    if actual == "(no errors)\n" -> stdout = "{stdout}note: scaffold compiled cleanly — edit `{file}` to trigger the diagnostic you want, then bless it with `node Tools/testkit/run.mjs ui --bless <fixture> --reason <why>`\n"
     JetDriverVerbOutput{stdout: stdout, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
 fn jet_cli_fixture_literal(text: String) -> Bool Never! {
     prefix :: text.starts_with("Examples/features/") || text.starts_with("Docs/spec/") || text.starts_with("tests/ui/") || text.starts_with("tests/ui_lint/") || text.starts_with("tests/cli/") || text.starts_with("tests/release/")
-    if !prefix || text.contains("{") || text.contains("}") -> return false
+    if !prefix || text.contains("{{") || text.contains("}}") -> return false
     text.ends_with(".jet") || text.ends_with(".md") || text.ends_with(".out") || text.ends_with(".stderr") || text.ends_with(".warn") || text.ends_with(".txt") || text.ends_with(".snapshot")
 }
 

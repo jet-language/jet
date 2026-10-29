@@ -1,0 +1,20 @@
+# tests/marker_rule_signatures.rs::task_metadata_binds_typed_platform_skip_limits_and_formats_stably at tests/marker_rule_signatures.rs:332; hand-port
+# Claim: `#Job(.Dev, skip: .Unless(.Platform(.Linux)), limits: ["cpu": 2]) fn build() {}` lexes, parses and checks clean for Linux and MacOS spellings (tests/marker_rule_signatures.rs:335-339)
+# Claim: formatted output contains `skip: .Unless(.Platform(.Linux))` (tests/marker_rule_signatures.rs:380)
+# Fixture migrated: job fn renamed build -> compile_app (E0928: `build` is reserved by Jet's command line)
+# Not ported: job_metadata skip/limits AST fields and skip.reason_for_host(...) asserts (tests/marker_rule_signatures.rs:340-376): internal AST, no CLI equivalent
+# Not ported: formatted-text assertion (tests/marker_rule_signatures.rs:380): jet fmt writes the file in place (stdout empty); on-disk linux/main.jet keeps `skip: .Unless(.Platform(.Linux))`, so the fmt steps check exit only
+fixture: task_metadata_binds_typed_platform_skip_limits_and_formats_stably.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check linux/main.jet
+exit: 0 # tests/marker_rule_signatures.rs:339 Linux spelling parses
+stderr: !~ "Error [" # tests/marker_rule_signatures.rs:339 Linux spelling parses
+step: jet check macos/main.jet
+exit: 0 # tests/marker_rule_signatures.rs:339 MacOS spelling parses
+stderr: !~ "Error [" # tests/marker_rule_signatures.rs:339 MacOS spelling parses
+step: jet fmt linux/main.jet
+exit: 0 # tests/marker_rule_signatures.rs:380 formatted contains skip spelling
+step: jet fmt macos/main.jet
+exit: 0 # tests/marker_rule_signatures.rs:380 formatted contains skip spelling

@@ -1,0 +1,26 @@
+# tests/dev_parts/routine.rs::dev_default_resident_boundaries_report_jit_gap at tests/dev_parts/routine.rs:1672; hand-port (memory/expiring_secret declares its inline package, so its directory gets no package.jet)
+fixture: dev_default_resident_boundaries_report_jit_gap.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+copy: {root}/Examples/features/memory/entity_tree.jet entity/entity_tree.jet
+copy: {root}/Examples/features/memory/expiring_secret.jet secret/expiring_secret.jet
+step check_entity: jet check entity_tree.jet
+cwd: entity
+exit: any # original assert_default_run_or_named_boundary accepts a run or a named dev boundary
+stderr: !~ "E2211" # original predicate: problems never name the retired E2211
+when exit != 0: stderr: ~any "E2202" "E0952" "E0956" "E0953" "E3410" "E3411" "E3412" "E1265" "E0102" "E0857" "E0107" "E0501" "E0308" "E0504" "E0302" "E0505" "E0915" "E0311" "E1004" # original predicate: is_named_dev_boundary (some diagnostic carries a BOUNDARY_CODES code)
+step run_entity: jet run entity_tree.jet
+cwd: entity
+stdin: null
+exit: any # original predicate: RunOutcome::Ran passes whatever the program exits
+step check_secret: jet check expiring_secret.jet
+cwd: secret
+exit: any # original assert_default_run_or_named_boundary accepts a run or a named dev boundary
+stderr: !~ "E2211" # original predicate: problems never name the retired E2211
+when exit != 0: stderr: ~any "E2202" "E0952" "E0956" "E0953" "E3410" "E3411" "E3412" "E1265" "E0102" "E0857" "E0107" "E0501" "E0308" "E0504" "E0302" "E0505" "E0915" "E0311" "E1004" # original predicate: is_named_dev_boundary (some diagnostic carries a BOUNDARY_CODES code)
+step run_secret: jet run expiring_secret.jet
+cwd: secret
+stdin: null
+exit: any # original predicate: RunOutcome::Ran passes whatever the program exits

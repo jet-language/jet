@@ -1,0 +1,79 @@
+// Stop points right after their calls (O1, O2, last): a stop point
+// (Build.jet ir_stop_point) after a direct call whose argument temporaries
+// are dropped between the two,
+//
+//     r := g(t); drop t; stopped := poll(); if stopped { E }
+//
+// becomes
+//
+//     r := g(t); stopped := poll(); if stopped { drop t; E }; drop t
+//
+// so the poll follows its call and the selector tests the stop g reports
+// in edx instead of calling the poll (X64Select ir_x64_stop_point). Only
+// drops of Int and word slots move (no code of theirs can publish or mask
+// a stop), and only into an edge E that never comes back
+// (OptUnique.jet ir_opt_dead_end), so each path drops once.
+
+fn ir_opt_stops_after_calls(f: &IRFunction, m: IRModule, keys: [String]) Never! {
+    count :: f.op.len()
+    // A moved call's poll (-1: none), and the call whose drops follow each End.
+    poll_of := [Int]{}
+    after := [Int]{}
+    loop _ in 0..<count {
+        &poll_of.push(-1)
+        &after.push(-1)
+    }
+    moved := false
+    loop site in 0..<count {
+        if f.op[site] != .Call -> next
+        k := site + 1
+        loop k < count && f.op[k] == .Drop && ir_opt_stops_plain(m, f, f.a[k]) -> k += 1
+        if k == site + 1 || !ir_opt_stops_poll(f, keys, k) -> next
+        if ir_opt_dead_end(f, k + 1) < 0 -> next
+        poll_of[site] = k
+        after[f.c[k + 1]] = site
+        moved = true
+    }
+    if !moved -> return
+    code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
+    at := 0
+    loop at < count {
+        ir_opt_code_put(&code, f.op[at], f.dst[at], f.a[at], f.b[at], f.c[at], f.code_line[at])
+        if after[at] >= 0 -> ir_opt_stops_drops(&code, f, after[at] + 1, poll_of[after[at]])
+        poll :: poll_of[at]
+        if poll < 0 {
+            at += 1
+            next
+        }
+        // The poll, its If, then the drops at the start of the edge.
+        loop k in poll..<(poll + 2) -> ir_opt_code_put(&code, f.op[k], f.dst[k], f.a[k], f.b[k], f.c[k], f.code_line[k])
+        ir_opt_stops_drops(&code, f, at + 1, poll)
+        at = poll + 2
+    }
+    f.op = ^code.op
+    f.dst = ^code.dst
+    f.a = ^code.a
+    f.b = ^code.b
+    f.c = ^code.c
+    f.code_line = ^code.line
+    ir_opt_compact(&f)
+}
+
+// Whether `slot` is an Int or word slot.
+fn ir_opt_stops_plain(m: IRModule, f: IRFunction, slot: Int) -> Bool Never! {
+    if slot < 0 || slot >= f.slot_type.len() -> return false
+    kind :: m.types[f.slot_type[slot]].kind
+    kind == .Int || kind == .Word
+}
+
+// Whether `at` is `stopped := poll()` followed by `if stopped` with no Else.
+fn ir_opt_stops_poll(f: IRFunction, keys: [String], at: Int) -> Bool Never! {
+    if at + 1 >= f.op.len() || f.op[at] != .Call || f.c[at] != 0 || f.dst[at] < 0 -> return false
+    callee :: f.a[at]
+    if callee < 0 || callee >= keys.len() || keys[callee] != IR_STOP_POLL_KEY -> return false
+    f.op[at + 1] == .If && f.a[at + 1] == f.dst[at] && f.b[at + 1] < 0
+}
+
+fn ir_opt_stops_drops(code: &IROptCode, f: IRFunction, start: Int, end: Int) Never! {
+    loop k in start..<end -> ir_opt_code_put(&code, f.op[k], f.dst[k], f.a[k], f.b[k], f.c[k], f.code_line[k])
+}

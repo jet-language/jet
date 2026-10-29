@@ -1,42 +1,22 @@
 // Checked graph queries share the Driver invocation; no CLI graph reconstruction.
-use jet_driver.[JetDriverCompileRequest, JetDriverBuildQueryScope, JetDriverBuildQueryResult, JetDriverOptimizationQueryResult, JetDriverVerbOutput, jet_driver_query_build_plan, jet_driver_present_diagnostics, jet_driver_build_plan_json, jet_driver_build_explanation, jet_driver_optimization_query, jet_driver_report_problems, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
-use jet_foundation.[Diagnostic, DIAGNOSTIC_LINT, MIROptimizationDecision, MIRSourceFile]
+use jet_driver.[
+    JetDriverCompileRequest, JetDriverBuildQueryScope, JetDriverBuildQueryResult,
+    JetDriverVerbOutput, jet_driver_query_build_plan,
+    jet_driver_present_diagnostics, jet_driver_build_plan_json, jet_driver_build_explanation,
+    jet_driver_report_problems, JET_DRIVER_EXIT_OK,
+    JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, JetDriverCompileMode,
+]
+use jet_foundation.[
+    BuildOptionChoice, BuildOptionLayer, BuildOptions, Diagnostic, DIAGNOSTIC_LINT, SourceFile,
+    build_option_argument, build_option_check_removal_note, build_option_row, build_options_check_removals, build_options_value, build_options_with_code,
+]
 use core.build.[BuildGraphNode as InspectBuildGraphNode]
+use core.files as build_files
 use core.math as build_math
+use jetpack_artifact_store.[BuildNodeRecord, BuildRecord, ObjectHandle]
+use jet_build_session.[BuildPlanSelection, BuildSessionGeneratedModule, BuildSessionOption, build_plan_generated, build_plan_selection]
 
-fn jet_cli_build_vector(query: JetDriverOptimizationQueryResult, json: Bool) -> String Never! {
-    rows := [JetCLIStatusValue]{}
-    text := ""
-    // Build inspection uses MIR declaration order (CmdCompile.rs), whereas
-    // acceleration inspection intentionally sorts its function projection.
-    program :: query.compile.mir ?? panic("completed build vector query lost its MIR")
-    loop function in program.functions {
-        loop fact in function.optimization.vector_facts {
-            rule :: jet_cli_optimization_vector_rule(fact.rule)
-            layout :: jet_cli_optimization_vector_layout(fact.layout)
-            lane :: if fact.lane_width == .Val(width) -> "{width}" else -> "none"
-            decision :: if fact.decision == {
-                .Eligible -> "accepted"
-                .Rejected(reason) -> jet_cli_optimization_rejection(reason).code
-            }
-            if !json {
-                text += "vector\t{function.key}\t{fact.span.start}..{fact.span.end}\t{rule}\t{layout}\t{lane}\t{decision}\n"
-            } else {
-                &rows.push(jet_cli_status_object([
-                    jet_cli_status_field("function", jet_cli_status_text(function.key)),
-                    jet_cli_status_field("span", jet_cli_optimization_span(fact.span)),
-                    jet_cli_status_field("rule", jet_cli_status_text(rule)),
-                    jet_cli_status_field("layout", jet_cli_status_text(layout)),
-                    jet_cli_status_field("lane", jet_cli_status_text(lane)),
-                    jet_cli_status_field("decision", jet_cli_status_text(decision)),
-                ]))
-            }
-        }
-    }
-    if json -> jet_cli_status_json(jet_cli_status_array(rows)) else -> text
-}
-
-fn jet_cli_build_report(query: JetDriverBuildQueryResult, vector: String, subject: String?, json: Bool) -> String Never! {
+fn jet_cli_build_report(query: JetDriverBuildQueryResult, subject: String?, json: Bool) -> String Never! {
     plan :: query.plan ?? {
         if json -> return "{jet_cli_status_render("inspect.build", true, [jet_cli_status_field("build", JetCLIStatusValue.Null)])}\n"
         return "default pipeline: no root fn build\n"
@@ -49,7 +29,7 @@ fn jet_cli_build_report(query: JetDriverBuildQueryResult, vector: String, subjec
         return text
     }
     if json {
-        payload :: jet_driver_build_plan_json(plan, vector)
+        payload :: jet_driver_build_plan_json(plan)
         build :: jet_cli_status_from_tree(report_status_value_parse(payload) ?? panic("checked build projection lost its JSON")) ?? panic("checked build projection lost its status value")
         return "{jet_cli_status_render("inspect.build", true, [jet_cli_status_field("build", build)])}\n"
     }
@@ -57,12 +37,12 @@ fn jet_cli_build_report(query: JetDriverBuildQueryResult, vector: String, subjec
     text := ""
     loop target in graph.targets -> text += "target\t{target.name}\t{target.kind}\n"
     loop action in graph.actions -> text += "action\t{action.name}\t{action.outputs.join(",")}\n"
-    "{text}{vector}"
+    text
 }
 
 fn jet_cli_build_query_failure(request: JetDriverCompileRequest, query: JetDriverBuildQueryResult, file: String, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput Never! {
     if query.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
-    diagnostics :: jet_driver_present_diagnostics(query.diagnostics, request.authorized_sources, [MIRSourceFile]{})
+    diagnostics :: jet_driver_present_diagnostics(query.diagnostics, request.authorized_sources, [SourceFile]{})
     errors :: jet_cli_errors(diagnostics)
     if errors.len() == 0 -> return jet_cli_ice("the checked build query stopped before completing `{file}`")
     source := ""
@@ -78,19 +58,98 @@ fn jet_cli_build_query_failure(request: JetDriverCompileRequest, query: JetDrive
     report :: if json -> jet_cli_reports_status_json("diagnostics", false, jet_cli_report_cwd(), file, source, shown) else -> jet_driver_report_problems(file, source, shown, color, verbose)
     return {stdout: if json -> report else -> "", stderr: if json -> "" else -> report, exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
+// `jet build` of a package whose `fn build(b: Build)` configures the build: evaluate it,
+// then compile each selected executable target from its source, named after the target.
+// The options fn build set go between `options`' profile values and its flags;
+// `build_args` (the words after `--`) are what its `b.args()` returns. Under
+// `write_generated: on` each generated source is first written to its
+// `.jet/generated/` path under the package root.
+fn jet_cli_build_package(file: String, color: Bool, options: BuildOptions, build_args: [String], threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+    selection := BuildPlanSelection?{None}
+    generated := [BuildSessionGeneratedModule]{}
+    prepared :: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Doc)
+    if ^prepared == {
+        .Refused(output) -> return output
+        .Prepared(request, _) -> {
+            scope := JetDriverBuildQueryScope{next_session_id: 1}
+            query_request := ^request
+            query_request.build_args = build_args.copy()
+            response := jet_driver_query_build_plan(^query_request, &scope)
+            query := ^response.query
+            if !query.complete || query.internal_problem != None -> return jet_cli_build_query_failure(response.request, query, file, false, color, false)
+            plan :: query.plan ?? return jet_cli_ice("the completed build query has no plan")
+            selection = Val(build_plan_selection(plan))
+            generated = build_plan_generated(plan)
+        }
+    }
+    selected :: selection ?? return jet_cli_ice("the completed build query has no plan")
+    if selected.unsupported.len() > 0 {
+        return jet_cli_build_failed("`jet build` doesn't run these build targets yet: {selected.unsupported.join(", ")}", jet_cli_why("E2105"), "select an executable target with `b.default(...)`, or build its source file directly", color)
+    }
+    merged := build_options_with_code(options, jet_cli_build_code_options(file, selected.options))
+    resolved_options := BuildOptions?{None}
+    if ^merged == {
+        .Refused(code, what, fix) -> return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report(code, what, jet_cli_why(code), fix, color), exit_code: JET_DRIVER_EXIT_USAGE}
+        .Resolved(resolved, notes) -> {
+            loop note in notes -> jet_cli_write_notice("{note}\n")
+            // The command line and profile removals were noted before the compile (jet_cli_build_options).
+            loop choice in build_options_check_removals(resolved) {
+                if choice.layer == BuildOptionLayer.Code -> jet_cli_write_notice("{build_option_check_removal_note(choice)}\n")
+            }
+            resolved_options = Val(^resolved)
+        }
+    }
+    selected_options :: resolved_options ?? return jet_cli_ice("the build options lost their resolution")
+    root :: jet_cli_parent(build_files.realpath(file) ?? file) ?? "."
+    if build_options_value(selected_options, "write_generated") == "on" {
+        loop source_file in generated {
+            path :: jet_cli_entry_join(root, source_file.path)
+            directory :: jet_cli_parent(path) ?? root
+            build_files.create_dir_all(directory) ?? return jet_cli_build_failed("couldn't write the generated source `{path}`: {err}", jet_cli_why("E2105"), "make `{directory}` writable, or build with `--write-generated=off`", color)
+            build_files.write(path, source_file.source) ?? return jet_cli_build_failed("couldn't write the generated source `{path}`: {err}", jet_cli_why("E2105"), "make `{directory}` writable, or build with `--write-generated=off`", color)
+        }
+    }
+    loop executable in selected.executables {
+        source_path :: jet_cli_entry_join(root, executable.source)
+        source :: build_files.read(source_path) ?? return jet_cli_build_failed("couldn't read the target source `{source_path}`: {err}", jet_cli_why("E2105"), "correct the source path given to `b.add_executable`", color)
+        built :: jet_cli_compile_target(source_path, executable.name, source, color, selected_options.copy(), threads, invocation, trace_sink)
+        if built.exit_code != JET_DRIVER_EXIT_OK -> return built
+    }
+    JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// fn build's layer of the build options: each option `selected` set, placed
+// at its call in `file` (`at @build.jet:3`, relative to the package root).
+fn jet_cli_build_code_options(file: String, set: [BuildSessionOption]) -> [BuildOptionChoice] {
+    choices := [BuildOptionChoice]{}
+    if set.len() == 0 -> return choices
+    source :: build_files.read(file) ?? ""
+    directory :: jet_cli_parent(file) ?? "."
+    root :: jet_cli_manifest_root(directory) ?? directory
+    relative := file.copy()
+    if file.starts_with("{root}/") -> relative = file.slice(root.len() + 1..<file.len())
+    bytes :: source.bytes()
+    loop option in set {
+        end := option.start
+        if end > bytes.len() -> end = bytes.len()
+        line := 1
+        loop index in 0..<end {
+            if bytes[index] == (U8{10}) -> line += 1
+        }
+        row :: build_option_row(option.name) ?? panic("the build session set `{option.name}`, which is no build-option row")
+        value :: build_option_argument(row, option.value)
+        written :: if option.pinned -> "b.pin(.{option.name}, {value})" else -> "b.{option.name}({value})"
+        &choices.push(BuildOptionChoice{name: option.name.copy(), value: option.value.copy(), layer: BuildOptionLayer.Code, written: written, site: "at {relative}:{line}", pinned: option.pinned})
+    }
+    choices
+}
+
 fn jet_cli_build_host(owned_request: ^JetDriverCompileRequest, scope: &JetDriverBuildQueryScope, file: String, subject: String?, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput {
     response := jet_driver_query_build_plan(^owned_request, &scope)
     request := ^response.request
     query := ^response.query
     if !query.complete || query.internal_problem != None -> return jet_cli_build_query_failure(request, query, file, json, color, verbose)
-    vector := if json -> "[]" else -> ""
-    if query.plan == .Val(_) && subject == None {
-        optimization :: jet_driver_optimization_query(^request)
-        // The reference omits vector rows on failed semantic lowering. An
-        // actual completed producer, never an absent provider, supplies [].
-        if optimization.compile.complete && optimization.compile.internal_problem == None -> vector = jet_cli_build_vector(optimization, json)
-    }
-    {stdout: jet_cli_build_report(query, vector, subject, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    JetDriverVerbOutput{stdout: jet_cli_build_report(query, subject, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
 // Exact IEEE-754 fixed-three formatting, including half-to-even and -0.

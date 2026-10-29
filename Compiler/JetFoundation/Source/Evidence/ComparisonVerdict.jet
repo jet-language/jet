@@ -1,6 +1,22 @@
-// Rust TestingComparison.rs::compare_samples_with_discarded, adapted from
-// origin/port/compiler's TestingComparison.jet to the existing record model.
-// This is the verdict engine for all consumers, not a CLI-specific comparator.
+// Rust TestingComparison.rs verdict engine (compare_samples_with_discarded,
+// compare_samples, reduce_mismatch) for every consumer, not a CLI comparator.
+
+// Rust `ObservationRelation::compares`: None when the relation declared no
+// checked equality result (TypedEquality and Custom read `declared_equal`).
+fn comparison_relation_compares(relation: ObservationRelation, reference: ComparisonObservation, candidate: ComparisonObservation, declared_equal: Bool?) -> Bool? Never! {
+    if relation == {
+        .TypedEquality -> declared_equal
+        .OrderedEffects -> Val(reference.raw == candidate.raw && reference.ordered_effects == candidate.ordered_effects && reference.cleanup == candidate.cleanup && reference.mutation == candidate.mutation)
+        .TypedFailure -> Val(reference.typed_failure == candidate.typed_failure && reference.raw == candidate.raw)
+        .Custom(_) -> declared_equal
+    }
+}
+
+// Rust `compare_samples`.
+fn testing_compare_samples(relation: ObservationRelation, samples: [ComparisonSample]) -> ComparisonRecord Never! {
+    testing_compare_samples_with_discarded(relation, samples, 0)
+}
+
 fn testing_compare_samples_with_discarded(relation: ObservationRelation, samples: [ComparisonSample], discarded_cases: Int) -> ComparisonRecord Never! {
     record := ComparisonRecord{schema_version: U16{1}, status: ComparisonStatus.Empty, relation: relation, samples: samples, discarded_cases: discarded_cases, first_difference: None, reduced_counterexample: None, contamination: None, reason: None, universal_proof: false}
     if record.samples.len() == 0 {
@@ -31,12 +47,7 @@ fn testing_compare_samples_with_discarded(relation: ObservationRelation, samples
                 return record
             }
         }
-        equal :: if relation == {
-            .TypedEquality -> sample.declared_equal
-            .OrderedEffects -> Val(sample.reference.raw == sample.candidate.raw && sample.reference.ordered_effects == sample.candidate.ordered_effects && sample.reference.cleanup == sample.candidate.cleanup && sample.reference.mutation == sample.candidate.mutation)
-            .TypedFailure -> Val(sample.reference.typed_failure == sample.candidate.typed_failure && sample.reference.raw == sample.candidate.raw)
-            .Custom(_) -> sample.declared_equal
-        } ?? {
+        equal :: comparison_relation_compares(relation, sample.reference, sample.candidate, sample.declared_equal) ?? {
             record.status = ComparisonStatus.InvalidOracle
             record.reason = Val("comparison relation did not declare a checked equality result")
             return record
@@ -57,4 +68,15 @@ fn testing_compare_samples_with_discarded(relation: ObservationRelation, samples
         record.reason = Val("{record.samples.len()} observed case(s) matched under {observation_relation_as_str(record.relation)}")
     }
     record
+}
+
+// Rust `reduce_mismatch`: a reduction counts only when the same relation
+// still observes a mismatch; otherwise the record's own counterexample stays.
+fn testing_reduce_mismatch(record: ComparisonRecord, candidates: [[ComparisonSample]]) -> ComparisonSample? Never! {
+    if record.status != ComparisonStatus.Mismatch -> return None
+    loop candidate in candidates {
+        reduced :: testing_compare_samples(record.relation, candidate)
+        if reduced.status == ComparisonStatus.Mismatch -> return reduced.reduced_counterexample
+    }
+    record.reduced_counterexample
 }

@@ -2,15 +2,23 @@
 // against a signed, unexpired, non-rolled-back channel manifest and its
 // content-addressed index target, caching both under the Hangar root, or
 // against an explicit local (unsigned) catalog directory.
+use core.files as files
+use core.process as process
+use core.time as time
+use core.crypto as crypto
+use core.http.client as http_client
+use core.encoding.base64 as base64
+use jet_pkg_model.[HangarRoots, pkg_ascii_lower, pkg_sha256_hex]
+use jetpack_nix_eval.[nixeval_is_ascii_digit, nixeval_is_ascii_hexdigit]
 
-NIX_INDEX_TEST_KEY_ID :: prep { "jet-test-index-v1" }
-NIX_INDEX_ROOT :: prep { "hangar/nix-index/v1" }
-NIX_INDEX_LOCAL_INDEX_ROOT :: prep { "index-v1" }
-NIX_INDEX_LOCAL_NATIVE_RECIPE_ROOT :: prep { "recipes-v1.json" }
-NIX_INDEX_TRUST_CONFIG :: prep { "trust/nix-index-v1.ed25519.pub" }
-NIX_INDEX_ENDPOINT_CONFIG :: prep { "config/nix-index-v1.endpoint" }
-NIX_INDEX_TRANSPORT_TIMEOUT_MS :: prep { 120000 }
-NIX_INDEX_MAX_LOCAL_REVISIONS :: prep { 128 }
+NIX_INDEX_TEST_KEY_ID :: "jet-test-index-v1"
+NIX_INDEX_ROOT :: "hangar/nix-index/v1"
+NIX_INDEX_LOCAL_INDEX_ROOT :: "index-v1"
+NIX_INDEX_LOCAL_NATIVE_RECIPE_ROOT :: "recipes-v1.json"
+NIX_INDEX_TRUST_CONFIG :: "trust/nix-index-v1.ed25519.pub"
+NIX_INDEX_ENDPOINT_CONFIG :: "config/nix-index-v1.endpoint"
+NIX_INDEX_TRANSPORT_TIMEOUT_MS :: 120000
+NIX_INDEX_MAX_LOCAL_REVISIONS :: 128
 
 nix_index_temp_sequence := 0
 
@@ -27,7 +35,7 @@ enum NixIndexClock {
 
     fn now_unix(self) -[Time]> Int Never! {
         if self == {
-            .System -> time.instant().unix_ns /% 1000000000
+            .System -> time.unix_ns() /% 1000000000
             .Fixed(unix) -> unix
         }
     }
@@ -83,17 +91,17 @@ struct NixIndexClient {
         if !nix_index_path_exists(catalog) -> return Err(NixIndexError.Invalid("local unofficial nixpkgs catalog `{catalog}` does not exist"))
         nix_index_ensure_real_directory(catalog)
         transport :: NixIndexTransport{get_bounded: (url: String, max_bytes: Int) -[Net, Time.Wait]> {
-            Err(NixIndexError.Transport("native index transport has no configured endpoint"))
+            nix_index_unconfigured_get(url, max_bytes)
         }}
         Ok(NixIndexClient{endpoint: "", root: catalog, key_id: "", public_key: None, local_catalog: true, offline, clock: NixIndexClock.System, transport})
     }
 
     // A signed client over an explicit transport and clock (the Rust test
     // seam `for_test`).
-    fn with_transport(root: String, endpoint: String, key_id: String, public_key: [U8], transport: NixIndexTransport, clock: NixIndexClock, offline: Bool) -> NixIndexClient NixIndexError! {
+    fn with_transport(root: String, endpoint: String, key_id: String, public_key: [U8], transport: ^NixIndexTransport, clock: NixIndexClock, offline: Bool) -> NixIndexClient NixIndexError! {
         parsed :: nix_index_parse_endpoint(endpoint)
         key :: crypto.VerifyKey.from_bytes(public_key) ?? return Err(NixIndexError.Invalid("test index public key is invalid"))
-        Ok(NixIndexClient{endpoint: parsed, root, key_id, public_key: Val(key), local_catalog: false, offline, clock, transport})
+        Ok(NixIndexClient{endpoint: parsed, root, key_id, public_key: Val(key), local_catalog: false, offline, clock, transport: ^transport})
     }
 
     fn resolve(self, key: NixIndexKey) -[FS, Env, Net, Time, Time.Wait]> NixVerifiedIndexRecord NixIndexError! {
@@ -427,40 +435,35 @@ struct NixIndexCachedManifest {
     signature_bytes: [U8]
 }
 
-// The native transport: HTTPS to checked public addresses, plain HTTP only to
-// loopback, both pinned per host for this client, never following redirects,
-// and never changing the configured scheme.
+// The native transport: never following redirects and never changing the
+// configured scheme. Core's HTTP client has no destination-address policy,
+// so the Rust public-address and loopback-only pins are not enforced here.
 fn nix_index_native_transport(endpoint: String) -> NixIndexTransport NixIndexError! {
     configured :: nix_index_parse_network_url(endpoint)
-    destinations :: if configured.scheme == "https" -> HTTPDestinations.Public else -> HTTPDestinations.Loopback
-    client :: http_client.Client.new()
-        .destinations(destinations)
-        .redirects(.Disabled)
-        .timeouts(total: time.duration_ms(NIX_INDEX_TRANSPORT_TIMEOUT_MS))
     scheme :: configured.scheme
     Ok(NixIndexTransport{get_bounded: (url: String, max_bytes: Int) -[Net, Time.Wait]> {
-        nix_index_native_get(client, scheme, url, max_bytes)
+        nix_index_native_get(scheme, url, max_bytes)
     }})
 }
 
-fn nix_index_native_get(client: HTTPClient, scheme: String, url: String, max_bytes: Int) -[Net, Time.Wait]> [U8] NixIndexError! {
+fn nix_index_native_get(scheme: String, url: String, max_bytes: Int) -[Net, Time.Wait]> [U8] NixIndexError! {
     requested :: nix_index_parse_network_url(url)
     if requested.scheme != scheme -> return Err(NixIndexError.Transport("signed nix index target changes the endpoint scheme"))
-    response :: client.send(http_client.request("GET", url)) ?? return Err(NixIndexError.Transport("{err}"))
+    request :: http_client.request("GET", url).total_timeout(NIX_INDEX_TRANSPORT_TIMEOUT_MS).redirects(0)
+    response :: http_client.send(request) ?? return Err(NixIndexError.Transport("{err}"))
     status :: response.status()
     if status != 200 -> return Err(NixIndexError.Transport("index endpoint returned HTTP {status}"))
     declared :: nix_index_content_length(response)
     if (declared ?? 0) > max_bytes -> return Err(NixIndexError.Invalid("index response exceeds its bound"))
-    body := response.body(limit: max_bytes + 1)
-    bytes := [U8]{}
-    loop {
-        chunk :: &body.read(65536) ?? return Err(NixIndexError.Transport("read index endpoint: {err}"))
-        if chunk.len() == 0 -> break
-        loop byte in chunk -> &bytes.push(byte)
-        if bytes.len() > max_bytes -> return Err(NixIndexError.Invalid("index response exceeds its bound"))
-    }
-    if declared != None && (declared ?? 0) != bytes.len() -> return Err(NixIndexError.Transport("index response Content-Length disagrees"))
+    bytes :: response.body().bytes(max_bytes + 1) ?? return Err(NixIndexError.Transport("read index endpoint: {err}"))
+    if bytes.len() > max_bytes -> return Err(NixIndexError.Invalid("index response exceeds its bound"))
+    if declared == .Val(length) && length != bytes.len() -> return Err(NixIndexError.Transport("index response Content-Length disagrees"))
     Ok(bytes)
+}
+
+// The transport of a local catalog client: it never reaches the network.
+fn nix_index_unconfigured_get(url: String, max_bytes: Int) -[Net, Time.Wait]> [U8] NixIndexError! {
+    Err(NixIndexError.Transport("native index transport has no configured endpoint"))
 }
 
 fn nix_index_content_length(response: HTTPResponse) -> Int? Never! {

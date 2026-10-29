@@ -1,0 +1,11 @@
+# tests/web_partition.rs::browser_effect_partition_metadata at tests/web_partition.rs:173; hand-port
+# Claim: A fn using ui.null_backend (Browser effect) is placed in the JS partition bucket (tests/web_partition.rs:225-226)
+# Not ported: Rust reads ProgramBundle.web_partitions via Jet-internal Lexer/Parser/Sema API; the observable form is the CLI partition report (--explain-partition), asserted here as stdout substrings
+fixture: browser_effect_partition_metadata.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build --target=web --explain-partition main.jet
+exit: 0 # tests/web_partition.rs:225-226 dom_fn lands in bucket JS
+stdout: ~ "dom_fn" # tests/web_partition.rs:225-226 dom_fn lands in bucket JS
+stdout: ~ "JS" # tests/web_partition.rs:225-226 dom_fn lands in bucket JS

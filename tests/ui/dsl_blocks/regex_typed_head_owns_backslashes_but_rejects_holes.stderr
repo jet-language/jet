@@ -1,17 +1,8 @@
-Error [E0320]: Struct construction uses `Regex{…}`, not `Regex.{…}`
-  --> tests/ui/dsl_blocks/regex_typed_head_owns_backslashes_but_rejects_holes.jet:4:22
-    |
-  4 |     pattern :: Regex.{"\d+{name}"}
-    |                      ^
- Why: Literal heads place no dot before their brace (D-LIT-DOT1)
- Fix: Write `Regex{…}`
-More: jet-lang.dev/e/E0320
-
 Error [E0152]: A `Regex` literal cannot contain interpolation
-  --> regex_typed_head_owns_backslashes_but_rejects_holes.jet:4:23
+  --> tests/ui/dsl_blocks/regex_typed_head_owns_backslashes_but_rejects_holes.jet:4:27
     |
-  4 |     pattern :: Regex.{"\d+{name}"}
-    |                       ^^^^^^^^^^^
+  4 |     pattern :: Regex{"\d+{name}"}
+    |                           ^^^^
  Why: The compiler must know the complete pattern before the program runs
- Fix: Use a fixed `Regex.{"..."}` pattern, or build text and call `re.compile(text)`
+ Fix: Use a fixed `Regex{"..."}` pattern, or build text and call `re.compile(text)`
 More: jet-lang.dev/e/E0152

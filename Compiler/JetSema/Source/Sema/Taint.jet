@@ -4,13 +4,16 @@
 // the registration graph's declaration identities; it is never reconstructed
 // from generated TIR and it does not maintain a second name registry.
 use jet_foundation.[
+    authority_grantable_roots,
     BindPattern,
+    CompilerThreads,
     Diagnostic,
     Effect,
     Expr,
     ExternFn,
     Field,
     Func,
+    NameTable,
     SinkClass,
     Span,
     Stmt,
@@ -18,19 +21,25 @@ use jet_foundation.[
     TagDef,
     TextEdit,
     Type,
+    compiler_threads_admit,
+    compiler_threads_failure_text,
+    compiler_threads_heaviest_first,
     core_call,
     diagnostic_with_edit,
     expr_optional_method_call_as_call,
     expr_span,
+    name_find,
+    name_index,
+    name_intern,
+    name_table,
     sema_effect_covers,
 ]
 
-SEMA_TAINT_ORIGIN_NET :: prep { "$origin.net" }
-SEMA_TAINT_ORIGIN_FS :: prep { "$origin.fs" }
-SEMA_TAINT_ORIGIN_ENV :: prep { "$origin.env" }
-SEMA_TAINT_ORIGIN_PROCESS :: prep { "$origin.process" }
-SEMA_TAINT_ORIGIN_FFI :: prep { "$origin.ffi" }
-
+SEMA_TAINT_ORIGIN_NET :: "$origin.net"
+SEMA_TAINT_ORIGIN_FS :: "$origin.fs"
+SEMA_TAINT_ORIGIN_ENV :: "$origin.env"
+SEMA_TAINT_ORIGIN_PROCESS :: "$origin.process"
+SEMA_TAINT_ORIGIN_FFI :: "$origin.ffi"
 
 struct SemaTaintTagFact {
     name: String
@@ -73,31 +82,49 @@ struct SemaTaintBindingFact {
     type_name: String?
 }
 
-struct SemaTaintFlowValue {
-    tags: [String]
-    type_name: String?
-}
-
-struct SemaTaintFlowResult {
-    value: SemaTaintFlowValue
-    bindings: [SemaTaintBindingFact]
-    diagnostics: [Diagnostic]
-    complete: Bool
-}
-
-struct SemaTaintResult {
-    tag_facts: [SemaTaintTagFact]
-    callable_facts: [SemaTaintCallableFact]
-    field_facts: [SemaTaintFieldFact]
-    diagnostics: [Diagnostic]
-    complete: Bool
-}
-
 struct SemaTaintCatalog {
     tags: [SemaTaintTagFact]
     callables: [SemaTaintCallableFact]
     fields: [SemaTaintFieldFact]
     known_sources: [String]
+    // Lookup slots kept beside the rows: the first row of each key wins, as
+    // the ordered scans over every callable and field did.
+    callable_slots: SemaTaintSlots
+    callable_name_slots: SemaTaintSlots
+    field_slots: SemaTaintSlots
+    field_name_slots: SemaTaintSlots
+    known_source_slots: SemaTaintSlots
+}
+
+// The first row of each key: `keys` interns the key (an open-addressing
+// hash, so a whole-graph catalog filled in module order never shifts a
+// sorted entry list) and `rows[id]` is the row of that id (-1: none yet;
+// id 0, the empty key, starts with none).
+struct SemaTaintSlots {
+    keys: NameTable
+    rows: [Int]
+}
+
+fn sema_taint_slots() -> SemaTaintSlots Never! {
+    SemaTaintSlots{keys: name_table(), rows: [Int]{-1}}
+}
+
+// Records `row` for `key` unless the key has a row; whether it was new.
+fn sema_taint_slot_add(slots: &SemaTaintSlots, key: String, row: Int) -> Bool Never! {
+    id :: name_index(name_intern(&slots.keys, key))
+    if id < slots.rows.len() {
+        if slots.rows[id] >= 0 -> return false
+        slots.rows[id] = row
+        return true
+    }
+    &slots.rows.push(row)
+    true
+}
+
+fn sema_taint_slot(slots: SemaTaintSlots, key: String) -> Int? Never! {
+    name :: name_find(slots.keys, key) ?? return None
+    row :: slots.rows[name_index(name)]
+    if row < 0 -> None else -> Val(row)
 }
 
 struct SemaTaintImportAlias {
@@ -115,7 +142,18 @@ struct SemaTaintFlowState {
     bindings: [SemaTaintBindingFact]
     imports: [SemaTaintImportAlias]
     diagnostics: [Diagnostic]
-    existing_diagnostics: [Diagnostic]
+    // The bundle's switch coverage reports so far (sema_taint_coverage_reports).
+    coverage_reports: [Diagnostic]
+}
+
+// The E0307 reports of `diagnostics`: all that settles switch coverage for
+// the walk (sema_taint_switch_exhaustive).
+fn sema_taint_coverage_reports(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
+    reports := [Diagnostic]{}
+    loop diagnostic in diagnostics {
+        if diagnostic.code == "E0307" -> &reports.push(diagnostic)
+    }
+    reports
 }
 
 fn sema_taint_has(values: [String], value: String) -> Bool Never! {
@@ -196,6 +234,71 @@ fn sema_taint_effect_name(effect_value: Effect) -> String Never! {
     }
 }
 
+// The effect of the Core call `module.method` (Rust `Effects::core_effect`):
+// its registered row's effect, else the module's resolver default, so a call
+// the module does not declare still reaches its effect destination.
+fn sema_taint_core_effect(module_name: String, method: String) -> Effect? Never! {
+    if core_call(module_name, method) == .Val(record) -> return record.effect_kind
+    if module_name == "core.service" && method == "state_store" -> return Val(Effect.FS)
+    if module_name == "core.net" && method == "gethostname" -> return Val(Effect.Env)
+    if (module_name == "core.sys" && method == "success") || (module_name == "core.process" && method == "status_ok") -> return None
+    if module_name == "core.time" && method == "__zone_env" -> return Val(Effect.Env)
+    if module_name == "core.time" && (method == "zone" || method == "parse_zoned" || method == "__zone_file_bytes") -> return Val(Effect.FS)
+    if module_name == "core.time" && ["clock", "time", "parse_time", "period", "period_days", "period_months", "period_years", "utc", "zoned", "zoned_local", "__embedded_zone_bytes", "__clock_mono_ns"].contains(method) -> return None
+    if module_name == "core.math.random" && method == "rng" -> return None
+    if module_name == "core.math" && method == "random" -> return Val(Effect.Rand)
+    if module_name == "core.term" && method == "style_force" -> return None
+    if module_name == "core.net" && ["ip_addr", "ip_to_string", "ip_is_ipv4", "ip", "ipv4", "ipv6", "parse_ip", "is_ipv4", "is_ipv6", "__ip_from_bytes", "__ip_bytes", "__ip_is_v4", "__socket_from_parts", "__socket_ip", "__socket_port", "__socket_scope", "__udp_packet_addr", "socket_addr_parse", "socket_host", "socket_port", "socket_to_string", "ready_readable", "ready_writable", "error_operation", "error_address", "error_name", "error_message", "error_os_code", "dns_srv_target", "dns_srv_port", "dns_srv_priority", "dns_srv_weight", "udp_packet_data", "udp_packet_addr", "udp_packet_bytes", "udp_packet_original_len", "udp_packet_truncated"].contains(method) -> return None
+    if module_name == "core.watcher" {
+        return if method == {
+            "files" -> Val(Effect.FS)
+            "process_pid" -> Val(Effect.Exec)
+            "port" -> Val(Effect.Net)
+            else -> None
+        }
+    }
+    if module_name == "core.web.browser" {
+        return if method == {
+            "profile" | "timeout" -> None
+            "locked" -> Val(Effect.FS)
+            "config_from_env" -> Val(Effect.Env)
+            else -> Val(Effect.Net)
+        }
+    }
+    if module_name == "core.encoding" && ["__read_byte", "__read_into", "__write_bytes", "__write_text", "__flush"].contains(method) -> return Val(Effect.IO)
+    if ["core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.xml", "core.encoding.cbor"].contains(module_name) && (method == "reader" || method == "writer") -> return Val(Effect.FS)
+    if module_name == "core.compute" && method != "device_cpu" -> return Val(Effect.GPU)
+    if module_name == "core.crypto" && method.starts_with("__jetc_") -> return Val(Effect.FS)
+    if module_name == "core.auth" && ["register_user", "password_login", "session_validate", "magic_link_issue", "magic_link_consume", "oauth_begin", "oauth_finish", "__store_load", "__store_replace"].contains(method) -> return Val(Effect.DB)
+    if module_name == "core.crypto.vault" && ["get", "current", "versions", "load", "status", "prepare_generate", "prepare_store", "prepare_rotate", "prepare_retire", "prepare_revoke", "authorize_write", "commit_generate", "commit_store", "commit_rotate", "commit_retire", "commit_revoke", "export_to_recipients", "export_to_passphrase", "prepare_import_wrapped", "authorize_wrapped_import", "commit_import_wrapped", "prepare_import_signing", "prepare_import_x25519", "commit_import_signing", "commit_import_x25519"].contains(method) -> return Val(Effect.Secret)
+    if module_name == {
+        "core.files" -> Val(Effect.FS)
+        "core.net" | "core.net.tls" | "core.http.client" | "core.http.server" | "core.http.middleware" -> Val(Effect.Net)
+        "core.game.raylib" -> Val(Effect.GPU)
+        "core.time" -> Val(Effect.Time)
+        "core.math.random" | "core.crypto.random" -> Val(Effect.Rand)
+        "core.sys" -> Val(Effect.Env)
+        "core.process" | "core.plugin" | "core.mod" -> Val(Effect.Exec)
+        "core.term" -> Val(Effect.IO)
+        "core.db" -> Val(Effect.DB)
+        "core.log" -> Val(Effect.Log)
+        "core.ui" | "core.web" | "core.web.storage.local" | "core.web.storage.session" -> Val(Effect.Browser)
+        else -> None
+    }
+}
+
+// A Core call that writes to a log, terminal, or serialized output, where a
+// credential would leak (Rust `Syntax::credential_sink`).
+fn sema_taint_credential_sink(module_name: String, method: String) -> Bool Never! {
+    if core_call(module_name, method) == .Val(record) {
+        if record.sink_class == .Val(sink_class) -> return sink_class == SinkClass.Credential
+    }
+    if module_name == "core.log" -> return true
+    if module_name == "core.term" -> return method == "print" || method == "eprint"
+    if ["core.encoding.json", "core.encoding.csv", "core.encoding.toml", "core.encoding.yaml", "core.encoding.cbor", "core.encoding.xml"].contains(module_name) -> return ["to_string", "to_string_pretty", "to_bytes", "to_bytes_canonical"].contains(method)
+    module_name == "core.encoding.jsonl" && method == "to_string"
+}
+
 fn sema_taint_builtin_tag(name: String) -> SemaTaintTagFact? {
     injection := [String]{"DB", "Exec", "Net"}
     if name == "Input" || name == "PII" || name == "Secret" {
@@ -231,7 +334,7 @@ fn sema_taint_add_builtin_tags(catalog: &SemaTaintCatalog) Never! {
 }
 
 fn sema_taint_catalog_init() -> SemaTaintCatalog Never! {
-    catalog := SemaTaintCatalog{tags: [SemaTaintTagFact]{}, callables: [SemaTaintCallableFact]{}, fields: [SemaTaintFieldFact]{}, known_sources: [String]{}}
+    catalog := SemaTaintCatalog{tags: [SemaTaintTagFact]{}, callables: [SemaTaintCallableFact]{}, fields: [SemaTaintFieldFact]{}, known_sources: [String]{}, callable_slots: sema_taint_slots(), callable_name_slots: sema_taint_slots(), field_slots: sema_taint_slots(), field_name_slots: sema_taint_slots(), known_source_slots: sema_taint_slots()}
     sema_taint_add_builtin_tags(&catalog)
     catalog
 }
@@ -302,15 +405,14 @@ fn sema_taint_known_destination(destination: String) -> Bool Never! {
 }
 
 fn sema_taint_known_source(source: String, catalog: SemaTaintCatalog) -> Bool Never! {
-    sema_effect_parse_name(source) != None || sema_taint_has(catalog.known_sources, source)
+    sema_effect_parse_name(source) != None || sema_taint_slot(catalog.known_source_slots, source) != None
 }
-
 
 fn sema_taint_push_invalid_path(diagnostics: &[Diagnostic], name: String, span: Span, destination: Bool, catalog: SemaTaintCatalog) {
     candidates := [String]{}
     if {
         destination -> {
-            candidates = sema_effect_grantable_roots()
+            candidates = authority_grantable_roots()
             &candidates.push("Html")
         }
         else -> {
@@ -361,16 +463,28 @@ fn sema_taint_collect_tag_declarations(catalog: &SemaTaintCatalog, graph: SemaRe
     }
 }
 
-
 fn sema_taint_callable_key(module_identity: String, owner: String, name: String) -> String Never! {
     if owner == "" -> return "{module_identity}:{name}"
     "{module_identity}:{owner}::{name}"
 }
 
+fn sema_taint_add_known_source(catalog: &SemaTaintCatalog, source: String) Never! {
+    if sema_taint_slot_add(&catalog.known_source_slots, source, catalog.known_sources.len()) -> &catalog.known_sources.push(source)
+}
+
 fn sema_taint_add_source_path(catalog: &SemaTaintCatalog, module_alias: String, owner: String, name: String) Never! {
     local := if owner == "" -> name else -> "{owner}.{name}"
-    sema_taint_add(&catalog.known_sources, local)
-    sema_taint_add(&catalog.known_sources, "{module_alias}.{local}")
+    sema_taint_add_known_source(&catalog, local)
+    sema_taint_add_known_source(&catalog, "{module_alias}.{local}")
+}
+
+// The slots of the callable row just pushed.
+fn sema_taint_index_callable(catalog: &SemaTaintCatalog, module_identity: String, owner: String, name: String) Never! {
+    slot :: catalog.callables.len() - 1
+    exact :: "{module_identity}|{owner}|{name}"
+    _ :: sema_taint_slot_add(&catalog.callable_slots, exact, slot)
+    loose :: "{owner}|{name}"
+    _ :: sema_taint_slot_add(&catalog.callable_name_slots, loose, slot)
 }
 
 fn sema_taint_add_callable(catalog: &SemaTaintCatalog, module_identity: String, module_alias: String, owner: String, function: Func) Never! {
@@ -385,6 +499,7 @@ fn sema_taint_add_callable(catalog: &SemaTaintCatalog, module_identity: String, 
     if ffi_origin -> sema_taint_add(&return_tags, SEMA_TAINT_ORIGIN_FFI)
     key := sema_taint_callable_key(module_identity, owner, function.name)
     &catalog.callables.push(SemaTaintCallableFact{key: key, module_identity: module_identity, owner: owner, name: function.name, parameter_tags: params, return_tags: return_tags, return_type: function.return_type, scrub_tag: function.scrub_tag, ffi_origin: ffi_origin, span: function.name_span})
+    sema_taint_index_callable(&catalog, module_identity, owner, function.name)
     sema_taint_add_source_path(&catalog, module_alias, owner, function.name)
 }
 
@@ -395,10 +510,16 @@ fn sema_taint_add_extern_callable(catalog: &SemaTaintCatalog, module_identity: S
     if function.return_type != None -> returns = sema_taint_type_tags(function.return_type ?? Type.Named{name: "Unit"})
     sema_taint_add(&returns, SEMA_TAINT_ORIGIN_FFI)
     &catalog.callables.push(SemaTaintCallableFact{key: "{module_identity}:{function.name}", module_identity: module_identity, owner: "", name: function.name, parameter_tags: params, return_tags: returns, return_type: function.return_type, scrub_tag: None, ffi_origin: true, span: function.name_span})
+    sema_taint_index_callable(&catalog, module_identity, "", function.name)
 }
 
 fn sema_taint_add_field(catalog: &SemaTaintCatalog, module_identity: String, owner: String, field: Field) Never! {
     &catalog.fields.push(SemaTaintFieldFact{module_identity: module_identity, owner_type: owner, field: field.name, tags: sema_taint_type_tags(field.ty), type_name: sema_taint_type_name(field.ty), span: field.ty_span})
+    slot :: catalog.fields.len() - 1
+    exact :: "{module_identity}|{owner}|{field.name}"
+    _ :: sema_taint_slot_add(&catalog.field_slots, exact, slot)
+    loose :: "{owner}|{field.name}"
+    _ :: sema_taint_slot_add(&catalog.field_name_slots, loose, slot)
 }
 fn sema_taint_collect_items(catalog: &SemaTaintCatalog, graph: SemaRegistrationGraph) Never! {
     loop module_row_index in 0..<graph.modules.len() {
@@ -422,7 +543,6 @@ fn sema_taint_collect_items(catalog: &SemaTaintCatalog, graph: SemaRegistrationG
     }
 }
 
-
 fn sema_taint_import_module(graph: SemaRegistrationGraph, module_identity: String, name: String) -> String Never! {
     module_index :: sema_registration_module_index(graph, module_identity) ?? return ""
     module_row :: graph.modules[module_index]
@@ -444,7 +564,7 @@ fn sema_taint_import_module(graph: SemaRegistrationGraph, module_identity: Strin
 }
 
 fn sema_taint_namespace_module(graph: SemaRegistrationGraph, module_index: Int, name: String) -> String Never! {
-    if graph.modules[module_index].symbol_positions.get(name) != None -> return ""
+    if sema_registration_module_has_name(graph.modules[module_index], name) -> return ""
     owner :: sema_registration_namespace_owner(graph, module_index, name) ?? return ""
     graph.modules[owner.module_index].module_identity
 }
@@ -461,29 +581,36 @@ fn sema_taint_find_tag(catalog: SemaTaintCatalog, graph: SemaRegistrationGraph, 
 }
 
 fn sema_taint_find_callable(catalog: SemaTaintCatalog, module_identity: String, owner: String, name: String) -> SemaTaintCallableFact? {
-    index := 0
-    loop index < catalog.callables.len() {
-        callable := catalog.callables[index]
-        if callable.module_identity == module_identity && callable.owner == owner && callable.name == name -> return Val(callable)
-        index += 1
+    exact :: sema_taint_slot(catalog.callable_slots, "{module_identity}|{owner}|{name}")
+    if exact == .Val(slot) {
+        callable := catalog.callables[slot]
+        return Val(callable)
     }
-    index = 0
-    loop index < catalog.callables.len() {
-        callable := catalog.callables[index]
-        if callable.owner == owner && callable.name == name -> return Val(callable)
-        index += 1
-    }
-    None
+    loose :: sema_taint_slot(catalog.callable_name_slots, "{owner}|{name}") ?? return None
+    callable := catalog.callables[loose]
+    Val(callable)
 }
 
+// A field of `owner` declared in `module_identity` (or with no declaring
+// module), else the first field of that name on any `owner`.
 fn sema_taint_find_field(catalog: SemaTaintCatalog, module_identity: String, owner: String, field: String) -> SemaTaintFieldFact? {
-    loop fact in catalog.fields {
-        if fact.owner_type == owner && fact.field == field && (fact.module_identity == module_identity || fact.module_identity == "") -> return Val(fact)
+    local :: sema_taint_slot(catalog.field_slots, "{module_identity}|{owner}|{field}")
+    unowned :: sema_taint_slot(catalog.field_slots, "|{owner}|{field}")
+    first := local
+    if unowned == .Val(unowned_slot) {
+        if local == .Val(local_slot) {
+            if unowned_slot < local_slot -> first = unowned
+        } else {
+            first = unowned
+        }
     }
-    loop fact in catalog.fields {
-        if fact.owner_type == owner && fact.field == field -> return Val(fact)
+    if first == .Val(slot) {
+        fact := catalog.fields[slot]
+        return Val(fact)
     }
-    None
+    loose :: sema_taint_slot(catalog.field_name_slots, "{owner}|{field}") ?? return None
+    fact := catalog.fields[loose]
+    Val(fact)
 }
 fn sema_taint_validate_tag_in_catalog(tag_value: String, module_identity: String, catalog: SemaTaintCatalog, graph: SemaRegistrationGraph, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if sema_taint_find_tag(catalog, graph, module_identity, tag_value) != None -> return true
@@ -527,7 +654,6 @@ fn sema_taint_validate_tag(tag_value: String, env: SemaScopeEnvironment, program
     }
     false
 }
-
 
 fn sema_taint_validate_type_tags(graph: SemaRegistrationGraph, ty: Type, module_identity: String, state: &SemaTaintFlowState, span: Span) {
     if ty == {
@@ -607,8 +733,8 @@ fn sema_taint_core_alias(state: SemaTaintFlowState, alias: String) -> String Nev
 
 fn sema_taint_core_module_for_receiver(state: SemaTaintFlowState, receiver: Expr) -> String Never! {
     if receiver == {
-        .Ident(name, _) -> return sema_taint_core_alias(state, name)
-        .Field(base, field, _) -> {
+        .Ident(name, _, _) -> return sema_taint_core_alias(state, name)
+        .Field(base, field, _, _) -> {
             module_row := sema_taint_core_module_for_receiver(state, base)
             if module_row != "" -> return "{module_row}.{field}"
         }
@@ -616,17 +742,10 @@ fn sema_taint_core_module_for_receiver(state: SemaTaintFlowState, receiver: Expr
     }
     ""
 }
-fn sema_taint_method_destinations(state: SemaTaintFlowState, receiver: Expr, method: String, recv_type: String?) -> [String] Never! {
+fn sema_taint_method_destinations(state: SemaTaintFlowState, receiver: Expr, method: String) -> [String] Never! {
     destinations := [String]{}
-    if recv_type == {
-        .Val(owner) -> {
-            &destinations.push("{owner}.{method}")
-            &destinations.push("{owner}::{method}")
-        }
-        .None -> {}
-    }
     if receiver == {
-        .Ident(alias, _) -> {
+        .Ident(alias, _, _) -> {
             module_row := sema_taint_core_alias(state, alias)
             if {
                 module_row == "" -> {
@@ -634,20 +753,8 @@ fn sema_taint_method_destinations(state: SemaTaintFlowState, receiver: Expr, met
                 }
                 else -> {
                     &destinations.push("{module_row}.{method}")
-                    row := core_call(module_row, method)
-                    if row == {
-                        .Val(record) -> {
-                            if record.effect_kind == {
-                                .Val(effect_value) -> &destinations.push(sema_taint_effect_name(effect_value))
-                                .None -> {}
-                            }
-                            if record.sink_class == {
-                                .Val(sink_class) -> if sink_class == SinkClass.Credential -> &destinations.push("Log")
-                                .None -> {}
-                            }
-                        }
-                        .None -> {}
-                    }
+                    if sema_taint_core_effect(module_row, method) == .Val(effect_value) -> &destinations.push(sema_taint_effect_name(effect_value))
+                    if sema_taint_credential_sink(module_row, method) -> &destinations.push("Log")
                 }
             }
         }
@@ -666,40 +773,22 @@ fn sema_taint_is_credential_verify(state: SemaTaintFlowState, receiver: Expr, me
     module_row == "core.auth" && (method == "verify_jwt" || method == "verify_paseto")
 }
 
-
 fn sema_taint_type_of_expr(state: SemaTaintFlowState, expression: Expr) -> String? {
     if expression == {
-        .Ident(name, _) -> return sema_taint_get_binding(state, name).type_name
-        .StructLit(type_name, _, _, _, _, _, _) -> return Val(type_name)
-        .Call(call) -> {
-            if call.resolved_ret == {
-                .Val(ty) -> return sema_taint_type_name(ty)
-                .None -> {}
-            }
+        .Ident(name, _, _) -> return sema_taint_get_binding(state, name).type_name
+        .StructLit(type_name, _, _, _, _, _, _, _) -> return Val(type_name)
+        .Call(call, _) -> {
             fact :: sema_taint_find_callable(state.catalog, state.module_identity, "", call.name) ?? return None
             return sema_taint_type_name(fact.return_type ?? Type.Named{name: "Unit"})
         }
-        .MethodCall(_, method, _, _, _, _, recv_type, resolved_ret) -> {
-            if resolved_ret == {
-                .Val(ty) -> return sema_taint_type_name(ty)
-                .None -> {}
-            }
-            if recv_type == {
-                .Val(owner) -> {
-                    fact :: sema_taint_find_callable(state.catalog, state.module_identity, owner, method) ?? return None
-                    return sema_taint_type_name(fact.return_type ?? Type.Named{name: "Unit"})
-                }
-                .None -> {}
-            }
-        }
-        .OptMethodCall(receiver, method, method_span, type_args, args, _) -> return sema_taint_type_of_expr(state, expr_optional_method_call_as_call(receiver, method, method_span, type_args, args))
-        .Field(base, field, _) | .OptField(base, field, _, _, _) -> {
+        .OptMethodCall(receiver, method, method_span, type_args, args, _, _) -> return sema_taint_type_of_expr(state, expr_optional_method_call_as_call(receiver, method, method_span, type_args, args))
+        .Field(base, field, _, _) | .OptField(base, field, _, _, _, _) -> {
             owner :: sema_taint_type_of_expr(state, base) ?? return None
             fact :: sema_taint_find_field(state.catalog, state.module_identity, owner, field) ?? return None
             return fact.type_name
         }
-        .Paren(inner, _) | .Copy(inner, _) | .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) -> return sema_taint_type_of_expr(state, inner)
-        .Try(inner, _, _, _) -> return sema_taint_type_of_expr(state, inner)
+        .Paren(inner, _, _) | .Copy(inner, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) -> return sema_taint_type_of_expr(state, inner)
+        .Try(inner, _, _, _, _) -> return sema_taint_type_of_expr(state, inner)
         else -> {}
     }
     None
@@ -724,14 +813,14 @@ fn sema_taint_scrub(state: SemaTaintFlowState, tags: &[String], owner: String, n
 
 fn sema_taint_tags_of(state: &SemaTaintFlowState, expression: Expr) -> [String] {
     if expression == {
-        .Tainted(inner, tag_value, _) -> {
+        .Tainted(inner, tag_value, _, _) -> {
             tags := sema_taint_tags_of(&state, inner)
             actual := tag_value ?? "Input"
             sema_taint_add(&tags, actual)
             return tags
         }
-        .Ident(name, _) -> return sema_taint_get_binding(state, name).tags
-        .Call(call) -> {
+        .Ident(name, _, _) -> return sema_taint_get_binding(state, name).tags
+        .Call(call, _) -> {
             tags := [String]{}
             loop argument in call.args -> sema_taint_union(&tags, sema_taint_tags_of(&state, argument.expr))
             sema_taint_union(&tags, sema_taint_source_tags(state, [String]{call.name}))
@@ -740,34 +829,34 @@ fn sema_taint_tags_of(state: &SemaTaintFlowState, expression: Expr) -> [String] 
  
             return tags
         }
-        .MethodCall(receiver, method, _, _, _, args, recv_type, _) -> {
+        .MethodCall(receiver, method, _, _, _, args, _) -> {
             tags := sema_taint_tags_of(&state, receiver)
             loop argument in args -> sema_taint_union(&tags, sema_taint_tags_of(&state, argument.expr))
-            destinations := sema_taint_method_destinations(state, receiver, method, recv_type)
+            destinations := sema_taint_method_destinations(state, receiver, method)
             sema_taint_union(&tags, sema_taint_source_tags(state, destinations))
-            sema_taint_union(&tags, sema_taint_call_return_tags(state, recv_type ?? "", method))
-            sema_taint_scrub(state, &tags, recv_type ?? "", method)
+            sema_taint_union(&tags, sema_taint_call_return_tags(state, "", method))
+            sema_taint_scrub(state, &tags, "", method)
             if sema_taint_is_typed_decode(state, receiver, method) -> sema_taint_clear_origins(&tags)
             if sema_taint_is_credential_verify(state, receiver, method) -> sema_taint_remove(&tags, "Credential")
             return tags
         }
-        .OptMethodCall(receiver, method, method_span, type_args, args, _) -> return sema_taint_tags_of(&state, expr_optional_method_call_as_call(receiver, method, method_span, type_args, args))
-        .CallValue(callee, args, _) -> {
+        .OptMethodCall(receiver, method, method_span, type_args, args, _, _) -> return sema_taint_tags_of(&state, expr_optional_method_call_as_call(receiver, method, method_span, type_args, args))
+        .CallValue(callee, args, _, _) -> {
             tags := sema_taint_tags_of(&state, callee)
             loop argument in args -> sema_taint_union(&tags, sema_taint_tags_of(&state, argument.expr))
             return tags
         }
-        .Binary(_, left, right, _) | .Range(left, right, _, _) -> {
+        .Binary(_, left, right, _, _) | .Range(left, right, _, _, _) -> {
             tags := sema_taint_tags_of(&state, left)
             sema_taint_union(&tags, sema_taint_tags_of(&state, right))
             return tags
         }
-        .CompareChain(operands, _, _, _) | .ListLit(operands, _) -> {
+        .CompareChain(operands, _, _, _, _) | .ListLit(operands, _, _) -> {
             tags := [String]{}
             loop value in operands -> sema_taint_union(&tags, sema_taint_tags_of(&state, value))
             return tags
         }
-        .Field(base, field, _) | .OptField(base, field, _, _, _) -> {
+        .Field(base, field, _, _) | .OptField(base, field, _, _, _, _) -> {
             tags := sema_taint_tags_of(&state, base)
             owner := sema_taint_type_of_expr(state, base)
             if owner == {
@@ -782,8 +871,8 @@ fn sema_taint_tags_of(state: &SemaTaintFlowState, expression: Expr) -> [String] 
             }
             return tags
         }
-        .Unary(_, inner, _) | .Deref(inner, _) | .RawOf(inner, _) | .Copy(inner, _) | .Place(inner, _, _) | .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) | .Paren(inner, _) | .Spread(inner, _) -> return sema_taint_tags_of(&state, inner)
-        .Try(inner, _, _, note) -> {
+        .Unary(_, inner, _, _) | .Deref(inner, _, _) | .RawOf(inner, _, _) | .Copy(inner, _, _) | .Place(inner, _, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .Paren(inner, _, _) | .Spread(inner, _, _) -> return sema_taint_tags_of(&state, inner)
+        .Try(inner, _, _, note, _) -> {
             tags := sema_taint_tags_of(&state, inner)
             if note == {
                 .Val(other) -> sema_taint_union(&tags, sema_taint_tags_of(&state, other))
@@ -791,13 +880,13 @@ fn sema_taint_tags_of(state: &SemaTaintFlowState, expression: Expr) -> [String] 
             }
             return tags
         }
-        .MemberSpread(base, _, _) -> return sema_taint_tags_of(&state, base)
-        .Index(base, index, _, _) -> {
+        .MemberSpread(base, _, _, _) -> return sema_taint_tags_of(&state, base)
+        .Index(base, index, _, _, _) -> {
             tags := sema_taint_tags_of(&state, base)
             sema_taint_union(&tags, sema_taint_tags_of(&state, index))
             return tags
         }
-        .Slice(base, start, end, range, _) -> {
+        .Slice(base, start, end, range, _, _) -> {
             tags := sema_taint_tags_of(&state, base)
             if range == {
                 .Val(value) -> sema_taint_union(&tags, sema_taint_tags_of(&state, value))
@@ -808,7 +897,7 @@ fn sema_taint_tags_of(state: &SemaTaintFlowState, expression: Expr) -> [String] 
             }
             return tags
         }
-        .MapLit(entries, _) -> {
+        .MapLit(entries, _, _) -> {
             tags := [String]{}
             loop entry in entries {
                 sema_taint_union(&tags, sema_taint_tags_of(&state, entry.key))
@@ -816,18 +905,18 @@ fn sema_taint_tags_of(state: &SemaTaintFlowState, expression: Expr) -> [String] 
             }
             return tags
         }
-        .TupleLit(fields, _, _) -> {
+        .TupleLit(fields, _, _, _) -> {
             tags := [String]{}
             loop field in fields -> sema_taint_union(&tags, sema_taint_tags_of(&state, field.value))
             return tags
         }
-        .StructLit(_, _, _, _, fields, _, _) -> {
+        .StructLit(_, _, _, _, fields, _, _, _) -> {
             tags := [String]{}
             loop field in fields -> sema_taint_union(&tags, sema_taint_tags_of(&state, field.value))
             sema_taint_clear_origins(&tags)
             return tags
         }
-        .TypedLit(_, body, _) -> {
+        .TypedLit(_, body, _, _) -> {
             tags := [String]{}
             if body == {
                 .Fields(fields) -> loop field in fields -> sema_taint_union(&tags, sema_taint_tags_of(&state, field.value))
@@ -839,7 +928,7 @@ fn sema_taint_tags_of(state: &SemaTaintFlowState, expression: Expr) -> [String] 
             sema_taint_clear_origins(&tags)
             return tags
         }
-        .EnumLit(_, _, _, args, _, _) -> {
+        .EnumLit(_, _, _, args, _, _, _) -> {
             tags := [String]{}
             loop argument in args {
                 if argument == {
@@ -849,14 +938,14 @@ fn sema_taint_tags_of(state: &SemaTaintFlowState, expression: Expr) -> [String] 
             }
             return tags
         }
-        .Str(parts, _) -> {
+        .Str(parts, _, _) -> {
             tags := [String]{}
             loop part in parts {
                 if part == .Interp(value, _) -> sema_taint_union(&tags, sema_taint_tags_of(&state, value))
             }
             return tags
         }
-        .OrFallback(value, fallback, _, _) -> {
+        .OrFallback(value, fallback, _, _, _) -> {
             tags := sema_taint_tags_of(&state, value)
             if fallback == {
                 .Value(other) -> sema_taint_union(&tags, sema_taint_tags_of(&state, other))
@@ -871,14 +960,14 @@ fn sema_taint_tags_of(state: &SemaTaintFlowState, expression: Expr) -> [String] 
             }
             return tags
         }
-        .PatternTest(subject, _, _) -> return sema_taint_tags_of(&state, subject)
-        .If(_, _, then_value, _, else_value, _) -> {
+        .PatternTest(subject, _, _, _) -> return sema_taint_tags_of(&state, subject)
+        .If(_, _, then_value, _, else_value, _, _) -> {
             tags := sema_taint_tags_of(&state, then_value)
             sema_taint_union(&tags, sema_taint_tags_of(&state, else_value))
             return tags
         }
-        .PtrFromAddr(_, _, _, addr, _) -> return sema_taint_tags_of(&state, addr)
-        .Lambda(_) -> return [String]{}
+        .PtrFromAddr(_, _, _, addr, _, _) -> return sema_taint_tags_of(&state, addr)
+        .Lambda(_, _) -> return [String]{}
         else -> return [String]{}
     }
 }
@@ -907,14 +996,14 @@ fn sema_taint_e0721(tag_value: String, api: String, destinations: [String], span
 
 fn sema_taint_check_expr(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, expression: Expr) {
     if expression == {
-        .MethodCall(receiver, method, method_span, _, _, args, recv_type, _) -> {
-            destinations := sema_taint_method_destinations(state, receiver, method, recv_type)
+        .MethodCall(receiver, method, method_span, _, _, args, _) -> {
+            destinations := sema_taint_method_destinations(state, receiver, method)
             loop argument in args {
                 tags := sema_taint_tags_of(&state, argument.expr)
                 denied := sema_taint_denied_tag(graph, state, tags, destinations)
                 if denied != None {
                     tag_value :: denied ?? "Input"
-                    api := if receiver == {.Ident(alias, _) -> "{alias}.{method}" else -> method}
+                    api := if receiver == {.Ident(alias, _, _) -> "{alias}.{method}" else -> method}
                     if {
                         tag_value == "Credential" && sema_taint_has(destinations, "Log") -> {
                             &state.diagnostics.push(sema_taint_e0722(api, method_span))
@@ -929,7 +1018,7 @@ fn sema_taint_check_expr(graph: SemaRegistrationGraph, state: &SemaTaintFlowStat
             sema_taint_check_expr(graph, &state, receiver)
             loop argument in args -> sema_taint_check_expr(graph, &state, argument.expr)
         }
-        .Call(call) -> {
+        .Call(call, _) -> {
             credential_sink := call.name == "print" || call.name == "eprint"
             destinations := if credential_sink -> [String]{"Log"} else -> [String]{call.name}
             loop argument in call.args {
@@ -950,31 +1039,31 @@ fn sema_taint_check_expr(graph: SemaRegistrationGraph, state: &SemaTaintFlowStat
             }
             loop argument in call.args -> sema_taint_check_expr(graph, &state, argument.expr)
         }
-        .CallValue(callee, args, _) -> {
+        .CallValue(callee, args, _, _) -> {
             sema_taint_check_expr(graph, &state, callee)
             loop argument in args -> sema_taint_check_expr(graph, &state, argument.expr)
         }
-        .Tainted(inner, _, _) -> sema_taint_check_expr(graph, &state, inner)
-        .Binary(_, left, right, _) -> {
+        .Tainted(inner, _, _, _) -> sema_taint_check_expr(graph, &state, inner)
+        .Binary(_, left, right, _, _) -> {
             sema_taint_check_expr(graph, &state, left)
             sema_taint_check_expr(graph, &state, right)
         }
-        .CompareChain(operands, _, _, _) | .ListLit(operands, _) -> loop value in operands -> sema_taint_check_expr(graph, &state, value)
-        .Unary(_, inner, _) | .Deref(inner, _) | .RawOf(inner, _) | .Copy(inner, _) | .Place(inner, _, _) | .Field(inner, _, _) | .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) | .Paren(inner, _) | .Spread(inner, _) -> sema_taint_check_expr(graph, &state, inner)
-        .Try(inner, _, _, note) -> {
+        .CompareChain(operands, _, _, _, _) | .ListLit(operands, _, _) -> loop value in operands -> sema_taint_check_expr(graph, &state, value)
+        .Unary(_, inner, _, _) | .Deref(inner, _, _) | .RawOf(inner, _, _) | .Copy(inner, _, _) | .Place(inner, _, _, _) | .Field(inner, _, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .Paren(inner, _, _) | .Spread(inner, _, _) -> sema_taint_check_expr(graph, &state, inner)
+        .Try(inner, _, _, note, _) -> {
             sema_taint_check_expr(graph, &state, inner)
             if note == {
                 .Val(value) -> sema_taint_check_expr(graph, &state, value)
                 .None -> {}
             }
         }
-        .OptField(base, _, _, _, _) -> sema_taint_check_expr(graph, &state, base)
-        .OptMethodCall(receiver, method, method_span, type_args, args, _) -> sema_taint_check_expr(graph, &state, expr_optional_method_call_as_call(receiver, method, method_span, type_args, args))
-        .Index(base, index, _, _) -> {
+        .OptField(base, _, _, _, _, _) -> sema_taint_check_expr(graph, &state, base)
+        .OptMethodCall(receiver, method, method_span, type_args, args, _, _) -> sema_taint_check_expr(graph, &state, expr_optional_method_call_as_call(receiver, method, method_span, type_args, args))
+        .Index(base, index, _, _, _) -> {
             sema_taint_check_expr(graph, &state, base)
             sema_taint_check_expr(graph, &state, index)
         }
-        .Slice(base, start, end, range, _) -> {
+        .Slice(base, start, end, range, _, _) -> {
             sema_taint_check_expr(graph, &state, base)
             if range == {
                 .Val(value) -> sema_taint_check_expr(graph, &state, value)
@@ -984,17 +1073,17 @@ fn sema_taint_check_expr(graph: SemaRegistrationGraph, state: &SemaTaintFlowStat
                 }
             }
         }
-        .Range(start, end, _, _) -> {
+        .Range(start, end, _, _, _) -> {
             sema_taint_check_expr(graph, &state, start)
             sema_taint_check_expr(graph, &state, end)
         }
-        .MapLit(entries, _) -> loop entry in entries {
+        .MapLit(entries, _, _) -> loop entry in entries {
             sema_taint_check_expr(graph, &state, entry.key)
             sema_taint_check_expr(graph, &state, entry.value)
         }
-        .TupleLit(fields, _, _) -> loop field in fields -> sema_taint_check_expr(graph, &state, field.value)
-        .StructLit(_, _, _, _, fields, _, _) -> loop field in fields -> sema_taint_check_expr(graph, &state, field.value)
-        .TypedLit(_, body, _) -> {
+        .TupleLit(fields, _, _, _) -> loop field in fields -> sema_taint_check_expr(graph, &state, field.value)
+        .StructLit(_, _, _, _, fields, _, _, _) -> loop field in fields -> sema_taint_check_expr(graph, &state, field.value)
+        .TypedLit(_, body, _, _) -> {
             if body == {
                 .Fields(fields) -> loop field in fields -> sema_taint_check_expr(graph, &state, field.value)
                 .Elements(elements) -> loop value in elements -> sema_taint_check_expr(graph, &state, value)
@@ -1006,16 +1095,16 @@ fn sema_taint_check_expr(graph: SemaRegistrationGraph, state: &SemaTaintFlowStat
                 else -> {}
             }
         }
-        .EnumLit(_, _, _, args, _, _) -> loop argument in args {
+        .EnumLit(_, _, _, args, _, _, _) -> loop argument in args {
             if argument == {
                 .Positional(value) -> sema_taint_check_expr(graph, &state, value)
                 .Named(_, value) -> sema_taint_check_expr(graph, &state, value)
             }
         }
-        .Str(parts, _) -> loop part in parts {
+        .Str(parts, _, _) -> loop part in parts {
             if part == .Interp(value, _) -> sema_taint_check_expr(graph, &state, value)
         }
-        .OrFallback(value, fallback, _, _) -> {
+        .OrFallback(value, fallback, _, _, _) -> {
             sema_taint_check_expr(graph, &state, value)
             if fallback == {
                 .Value(other) -> sema_taint_check_expr(graph, &state, other)
@@ -1035,8 +1124,8 @@ fn sema_taint_check_expr(graph: SemaRegistrationGraph, state: &SemaTaintFlowStat
                 else -> {}
             }
         }
-        .PatternTest(subject, _, _) -> sema_taint_check_expr(graph, &state, subject)
-        .If(cond, then_body, then_value, else_body, else_value, _) -> {
+        .PatternTest(subject, _, _, _) -> sema_taint_check_expr(graph, &state, subject)
+        .If(cond, then_body, then_value, else_body, else_value, _, _) -> {
             sema_taint_check_expr(graph, &state, cond)
             before := sema_taint_snapshot(state)
             sema_taint_check_block(graph, &state, then_body)
@@ -1048,8 +1137,8 @@ fn sema_taint_check_expr(graph: SemaRegistrationGraph, state: &SemaTaintFlowStat
             else_path := sema_taint_snapshot(state)
             sema_taint_merge_paths(&state, before, [SemaTaintSnapshot]{then_path, else_path})
         }
-        .PtrFromAddr(_, _, _, addr, _) -> sema_taint_check_expr(graph, &state, addr)
-        .Lambda(lambda) -> {
+        .PtrFromAddr(_, _, _, addr, _, _) -> sema_taint_check_expr(graph, &state, addr)
+        .Lambda(lambda, _) -> {
             if lambda.body == {
                 .Expr(value) -> sema_taint_check_expr(graph, &state, value)
                 .Block(body) -> sema_taint_check_block(graph, &state, body)
@@ -1157,7 +1246,7 @@ fn sema_taint_check_stmt(graph: SemaRegistrationGraph, state: &SemaTaintFlowStat
             }
             if else_body == {
                 .Val(body) -> &paths.push(sema_taint_walk_path(graph, &state, before, body))
-                .None -> if !sema_taint_switch_exhaustive(arms, state.existing_diagnostics, span) -> &paths.push(before)
+                .None -> if !sema_taint_switch_exhaustive(arms, state.coverage_reports, span) -> &paths.push(before)
             }
             sema_taint_merge_paths(&state, before, paths)
         }
@@ -1296,7 +1385,7 @@ fn sema_taint_switch_exhaustive(arms: [SwitchArm], diagnostics: [Diagnostic], sp
     if arms.len() == 0 -> return false
     loop arm in arms {
         if arm.cond == {
-            .PatternTest(_, _, _) -> {}
+            .PatternTest(_, _, _, _) -> {}
             else -> return false
         }
     }
@@ -1332,35 +1421,33 @@ fn sema_taint_collect_imports(graph: SemaRegistrationGraph, module_identity: Str
     imports
 }
 
-fn sema_taint_register_scrubbers(catalog: SemaTaintCatalog, graph: SemaRegistrationGraph, module_identity: String, diagnostics: &[Diagnostic]) {
+// Every `#Scrub(Tag)` function's tag and signature, in catalog order, each
+// report placed in its declaring module.
+fn sema_taint_register_scrubbers(catalog: SemaTaintCatalog, graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) {
     index := 0
     loop index < catalog.callables.len() {
         fact := catalog.callables[index]
-        if fact.module_identity == module_identity && fact.scrub_tag != None {
-            tag_value :: fact.scrub_tag ?? ""
-            declared := sema_taint_find_tag(catalog, graph, module_identity, tag_value) != None
-            if {
-                !declared -> {
-                    &diagnostics.push(sema_error("E0733", fact.span, "there's no tag called `{tag_value}`", "a value tag must name a declared `tag`", "declare it first with `tag {tag_value} {{ deny: [Effect] }}`, or check the spelling"))
+        index += 1
+        tag_value :: fact.scrub_tag ?? next
+        found := [Diagnostic]{}
+        declared := sema_taint_find_tag(catalog, graph, fact.module_identity, tag_value) != None
+        if {
+            !declared -> {
+                &found.push(sema_error("E0733", fact.span, "there's no tag called `{tag_value}`", "a value tag must name a declared `tag`", "declare it first with `tag {tag_value} {{ deny: [Effect] }}`, or check the spelling"))
+            }
+            else -> {
+                consumes := false
+                loop parameter in fact.parameter_tags {
+                    if sema_taint_has(parameter.tags, tag_value) -> consumes = true
                 }
-                else -> {
-                    consumes := false
-                    index2 := 0
-                    loop index2 < fact.parameter_tags.len() {
-                        if sema_taint_has(fact.parameter_tags[index2].tags, tag_value) -> consumes = true
-                        index2 += 1
-                    }
-                    returns := sema_taint_has(fact.return_tags, tag_value)
-                    if !consumes || returns -> &diagnostics.push(sema_error("E0736", fact.span, "`#Scrub({tag_value})` does not match this function signature", "a scrubber consumes a value carrying that tag and returns a value without it", "accept a `#{tag_value} T` parameter and return the untagged result"))
-                }
+                returns := sema_taint_has(fact.return_tags, tag_value)
+                if !consumes || returns -> &found.push(sema_error("E0736", fact.span, "`#Scrub({tag_value})` does not match this function signature", "a scrubber consumes a value carrying that tag and returns a value without it", "accept a `#{tag_value} T` parameter and return the untagged result"))
             }
         }
-        index += 1
+        if found.len() == 0 -> next
+        if sema_registration_module_index(graph, fact.module_identity) == .Val(module_index) -> sema_attach_diagnostic_source_locations(&found, 0, graph.modules[module_index].source_segments)
+        loop diagnostic in found -> &diagnostics.push(diagnostic)
     }
-}
-
-fn sema_taint_initial_state(catalog: SemaTaintCatalog, graph: SemaRegistrationGraph, module_identity: String, initial_bindings: [SemaTaintBindingFact], existing_diagnostics: [Diagnostic]) -> SemaTaintFlowState Never! {
-    SemaTaintFlowState{catalog: catalog, module_identity: module_identity, bindings: sema_taint_copy_bindings(initial_bindings), imports: sema_taint_collect_imports(graph, module_identity), diagnostics: [Diagnostic]{}, existing_diagnostics: existing_diagnostics}
 }
 
 fn sema_taint_initial_parameter_bindings(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, function: Func, owner: String) {
@@ -1381,150 +1468,95 @@ fn sema_taint_initial_parameter_bindings(graph: SemaRegistrationGraph, state: &S
     }
 }
 
-fn sema_taint_function_for_key(graph: SemaRegistrationGraph, module_identity: String, owner_key: String) -> Func? {
-    module_index :: sema_registration_module_index(graph, module_identity) ?? return None
-    module_row :: graph.modules[module_index]
-    loop item in module_row.program.items {
+// One body's flow from its parameters' tags; its reports, placed in the
+// body's module, join `found` (sema_taint_join_reports settles repeats).
+fn sema_taint_check_function(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, module_index: Int, function: Func, owner: String, found: &[Diagnostic]) {
+    state.bindings = [SemaTaintBindingFact]{}
+    state.diagnostics = [Diagnostic]{}
+    sema_taint_initial_parameter_bindings(graph, &state, function, owner)
+    sema_taint_check_block(graph, &state, function.body)
+    sema_taint_finish_body(graph, &state, module_index, &found)
+}
+
+fn sema_taint_check_body(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, module_index: Int, body: [Stmt], found: &[Diagnostic]) {
+    state.bindings = [SemaTaintBindingFact]{}
+    state.diagnostics = [Diagnostic]{}
+    sema_taint_check_block(graph, &state, body)
+    sema_taint_finish_body(graph, &state, module_index, &found)
+}
+
+fn sema_taint_finish_body(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, module_index: Int, found: &[Diagnostic]) {
+    if state.diagnostics.len() == 0 -> return
+    sema_attach_diagnostic_source_locations(&state.diagnostics, 0, graph.modules[module_index].source_segments)
+    loop diagnostic in state.diagnostics -> &found.push(diagnostic)
+}
+
+// The bodies of module `module_index`, walked in item order; their reports
+// join `found` in that order.
+fn sema_taint_check_module(graph: SemaRegistrationGraph, state: &SemaTaintFlowState, module_index: Int, found: &[Diagnostic]) {
+    state.module_identity = graph.modules[module_index].module_identity
+    state.imports = sema_taint_collect_imports(graph, state.module_identity)
+    loop item in graph.modules[module_index].program.items {
         if item == {
-            .Func(function) -> if owner_key == function.name || owner_key == sema_taint_callable_key(module_identity, "", function.name) -> return Val(function)
+            .Func(function) -> sema_taint_check_function(graph, &state, module_index, function, "", &found)
             .Struct(definition) -> {
-                loop method in definition.methods {
-                    method_key :: "{definition.name}::{method.name}"
-                    if owner_key == method_key || owner_key == sema_taint_callable_key(module_identity, definition.name, method.name) -> return Val(method)
-                }
+                loop method in definition.methods -> sema_taint_check_function(graph, &state, module_index, method, definition.name, &found)
                 loop trait_impl in definition.trait_impls {
-                    loop method in trait_impl.methods {
-                        method_key :: "{definition.name}::{method.name}"
-                        if owner_key == method_key -> return Val(method)
-                    }
+                    loop method in trait_impl.methods -> sema_taint_check_function(graph, &state, module_index, method, definition.name, &found)
                 }
             }
-            .Enum(definition) -> {
-                loop method in definition.methods {
-                    method_key :: "{definition.name}::{method.name}"
-                    if owner_key == method_key -> return Val(method)
-                }
-            }
-            .Impl(definition) -> {
-                loop method in definition.methods {
-                    method_key :: "{definition.type_name}::{method.name}"
-                    if owner_key == method_key -> return Val(method)
-                }
-            }
+            .Enum(definition) -> loop method in definition.methods -> sema_taint_check_function(graph, &state, module_index, method, definition.name, &found)
+            .Impl(definition) -> loop method in definition.methods -> sema_taint_check_function(graph, &state, module_index, method, definition.type_name, &found)
+            .Test(test) -> sema_taint_check_body(graph, &state, module_index, test.body, &found)
+            .ErrorConv(definition) -> sema_taint_check_body(graph, &state, module_index, definition.body, &found)
             else -> {}
         }
     }
-    None
 }
 
-
-fn sema_taint_check_body_graph(body: [Stmt], module_identity: String, owner_key: String, graph: SemaRegistrationGraph, initial_bindings: [SemaTaintBindingFact], existing_diagnostics: [Diagnostic]) -> SemaTaintFlowResult {
-    catalog := sema_taint_catalog_init()
-    diagnostics := [Diagnostic]{}
-    sema_taint_collect_items(&catalog, graph)
-    sema_taint_collect_tag_declarations(&catalog, graph, &diagnostics)
-    scrubber_diagnostics := [Diagnostic]{}
-    sema_taint_register_scrubbers(catalog, graph, module_identity, &scrubber_diagnostics)
-    source_module_index := sema_registration_module_index(graph, module_identity)
-    if source_module_index == {
-        .Val(index) -> sema_attach_diagnostic_source_locations(&scrubber_diagnostics, 0, graph.modules[index].source_segments)
-        .None -> {}
+// A module's reports join `reports` in order, each unless `reports` or
+// `existing_diagnostics` already holds it.
+fn sema_taint_join_reports(reports: &[Diagnostic], existing_diagnostics: [Diagnostic], found: [Diagnostic]) {
+    loop diagnostic in found {
+        if !sema_taint_has_diagnostic(reports, diagnostic) && !sema_taint_has_diagnostic(existing_diagnostics, diagnostic) -> &reports.push(diagnostic)
     }
-    loop diagnostic in scrubber_diagnostics -> &diagnostics.push(diagnostic)
-    state := sema_taint_initial_state(catalog, graph, module_identity, initial_bindings, existing_diagnostics)
-    function := sema_taint_function_for_key(graph, module_identity, owner_key)
-    if function == {
-        .Val(value) -> {
-            owner := ""
-            if owner_key.contains("::") -> owner = owner_key.split("::").to_list()[0]
-            sema_taint_initial_parameter_bindings(graph, &state, value, owner)
-        }
-        .None -> {}
-    }
-    sema_taint_check_block(graph, &state, body)
-    source_module_index = sema_registration_module_index(graph, module_identity)
-    if source_module_index == {
-        .Val(index) -> sema_attach_diagnostic_source_locations(&state.diagnostics, 0, graph.modules[index].source_segments)
-        .None -> {}
-    }
-    loop diagnostic in state.diagnostics -> &diagnostics.push(diagnostic)
-    value := SemaTaintFlowValue{tags: [String]{}, type_name: None}
-    SemaTaintFlowResult{value: value, bindings: state.bindings, diagnostics: diagnostics, complete: true}
 }
 
+// The tag dataflow's catalog of tags, callables and fields, the reports
+// building it raised, and each module's walk weight (its items' source
+// bytes). It reads only the graph's function, type, extern and tag items,
+// which nothing after the failure projection rewrites, so the finalization
+// builds it beside its other read-only checks (sema_finalize_side_checks).
+struct SemaTaintPrepared {
+    catalog: SemaTaintCatalog
+    reports: [Diagnostic]
+    weights: [Int]
+}
 
+fn sema_taint_prepared_empty() -> SemaTaintPrepared Never! {
+    SemaTaintPrepared{catalog: sema_taint_catalog_init(), reports: [Diagnostic]{}, weights: [Int]{}}
+}
 
-fn sema_taint_check_graph(graph: SemaRegistrationGraph, existing_diagnostics: [Diagnostic]) -> SemaTaintResult {
-    catalog := sema_taint_catalog_init()
-    diagnostics := existing_diagnostics
-    sema_taint_collect_items(&catalog, graph)
-    sema_taint_collect_tag_declarations(&catalog, graph, &diagnostics)
-    module_index := 0
-    loop module_index < graph.modules.len() {
-        module_row :: graph.modules[module_index]
-        scrubber_diagnostics := [Diagnostic]{}
-        sema_taint_register_scrubbers(catalog, graph, module_row.module_identity, &scrubber_diagnostics)
-        sema_attach_diagnostic_source_locations(&scrubber_diagnostics, 0, module_row.source_segments)
-        loop diagnostic in scrubber_diagnostics -> &diagnostics.push(diagnostic)
-        module_index += 1
-    }
-    module_index = 0
-    loop module_index < graph.modules.len() {
-        module_row :: graph.modules[module_index]
-        loop item in module_row.program.items {
-            if item == {
-                .Func(function) -> {
-                    result := sema_taint_check_body_graph(function.body, module_row.module_identity, function.name, graph, [SemaTaintBindingFact]{}, existing_diagnostics)
-                    loop diagnostic in result.diagnostics {
-                        if !sema_taint_has_diagnostic(diagnostics, diagnostic) -> &diagnostics.push(diagnostic)
-                    }
-                }
-                .Struct(definition) -> {
-                    loop method in definition.methods {
-                        result := sema_taint_check_body_graph(method.body, module_row.module_identity, "{definition.name}::{method.name}", graph, [SemaTaintBindingFact]{}, existing_diagnostics)
-                        loop diagnostic in result.diagnostics {
-                            if !sema_taint_has_diagnostic(diagnostics, diagnostic) -> &diagnostics.push(diagnostic)
-                        }
-                    }
-                    loop trait_impl in definition.trait_impls {
-                        loop method in trait_impl.methods {
-                            result := sema_taint_check_body_graph(method.body, module_row.module_identity, "{definition.name}::{method.name}", graph, [SemaTaintBindingFact]{}, existing_diagnostics)
-                            loop diagnostic in result.diagnostics {
-                                if !sema_taint_has_diagnostic(diagnostics, diagnostic) -> &diagnostics.push(diagnostic)
-                            }
-                        }
-                    }
-                }
-                .Enum(definition) -> loop method in definition.methods {
-                    result := sema_taint_check_body_graph(method.body, module_row.module_identity, "{definition.name}::{method.name}", graph, [SemaTaintBindingFact]{}, existing_diagnostics)
-                    loop diagnostic in result.diagnostics {
-                        if !sema_taint_has_diagnostic(diagnostics, diagnostic) -> &diagnostics.push(diagnostic)
-                    }
-                }
-                .Impl(definition) -> loop method in definition.methods {
-                    result := sema_taint_check_body_graph(method.body, module_row.module_identity, "{definition.type_name}::{method.name}", graph, [SemaTaintBindingFact]{}, existing_diagnostics)
-                    loop diagnostic in result.diagnostics {
-                        if !sema_taint_has_diagnostic(diagnostics, diagnostic) -> &diagnostics.push(diagnostic)
-                    }
-                }
-                .Test(test) -> {
-                    result := sema_taint_check_body_graph(test.body, module_row.module_identity, "", graph, [SemaTaintBindingFact]{}, existing_diagnostics)
-                    loop diagnostic in result.diagnostics {
-                        if !sema_taint_has_diagnostic(diagnostics, diagnostic) -> &diagnostics.push(diagnostic)
-                    }
-                }
-                .ErrorConv(definition) -> {
-                    result := sema_taint_check_body_graph(definition.body, module_row.module_identity, "", graph, [SemaTaintBindingFact]{}, existing_diagnostics)
-                    loop diagnostic in result.diagnostics {
-                        if !sema_taint_has_diagnostic(diagnostics, diagnostic) -> &diagnostics.push(diagnostic)
-                    }
-                }
-                else -> {}
-            }
+fn sema_taint_prepare(graph: SemaRegistrationGraph) -> SemaTaintPrepared {
+    prepared := sema_taint_prepared_empty()
+    sema_taint_collect_items(&prepared.catalog, graph)
+    sema_taint_collect_tag_declarations(&prepared.catalog, graph, &prepared.reports)
+    sema_taint_register_scrubbers(prepared.catalog, graph, &prepared.reports)
+    loop module_index in 0..<graph.modules.len() {
+        weight := 0
+        loop item in graph.modules[module_index].program.items {
+            span :: sema_compiler_index_item_span(item)
+            weight += span.end - span.start
         }
-        module_index += 1
+        &prepared.weights.push(weight)
     }
-    SemaTaintResult{tag_facts: catalog.tags, callable_facts: catalog.callables, field_facts: catalog.fields, diagnostics: diagnostics, complete: true}
+    prepared
+}
+
+// One walked module's reports (sema_finalize_walks).
+struct SemaTaintWalked {
+    module_index: Int
+    found: [Diagnostic]
 }
 
 fn sema_taint_has_diagnostic(diagnostics: [Diagnostic], candidate: Diagnostic) -> Bool Never! {

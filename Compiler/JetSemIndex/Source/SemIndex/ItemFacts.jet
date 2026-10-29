@@ -7,14 +7,21 @@
 // Full execution is gated by CP-NAMES/AST handles/C4/S8/S11/S12 and Foundation's
 // canonical unit-family expansion/callable projections. Never synthesize them.
 use jet_foundation.[
-    Item, Program, MIRNameFacts, Func, ExternFn, DeriveBodyItem,
-    AccessConvention, ParamZone, CallablePolicy,
-    unit_family_distinct_defs, access_sigil, type_name,
-    callable_policy_display, func_failure_contract, func_effective_return_type,
-    failure_contract_effective_type, failure_contract_source,
+    Item,
+    Program,
+    NameFacts,
+    Func,
+    ExternFn,
+    DeriveBodyItem,
+    AccessConvention,
+    CallablePolicy,
+    access_sigil,
+    type_name,
+    failure_contract_effective_type,
+    failure_contract_source,
 ]
 
-fn semindex_collect_item_facts(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, program: Program, source: String, item: Item, mp: String) {
+fn semindex_collect_item_facts(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, item: Item, mp: String) {
     if item == {
         // These six belong to the root's nominal dispatch. Explicit invariant
         // arms keep new AST variants from silently disappearing in a catch-all.
@@ -132,7 +139,7 @@ fn semindex_collect_item_facts(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts
 
 // Rust2759–2779/2788–2794 deliberately stop at a nested Loop's source. This is
 // not a recursive derive expander: checked expansion belongs to Sema.
-fn semindex_collect_template_body_item(db: &SymbolDB, ctx: &WalkCtx, names: MIRNameFacts, program: Program, source: String, body_item: DeriveBodyItem, mp: String) {
+fn semindex_collect_template_body_item(db: &SymbolDB, ctx: &WalkCtx, names: NameFacts, program: Program, source: String, body_item: DeriveBodyItem, mp: String) {
     if body_item == {
         .Item(child) -> semindex_collect_item(&db, &ctx, names, program, source, child, mp)
         .Stmt(statement) -> semindex_collect_stmt(&db, &ctx, names, program, source, statement, mp)

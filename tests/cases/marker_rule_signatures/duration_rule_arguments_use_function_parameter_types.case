@@ -1,0 +1,18 @@
+# tests/marker_rule_signatures.rs::duration_rule_arguments_use_function_parameter_types at tests/marker_rule_signatures.rs:473; hand-port
+# Claim: Duration-typed Every(schedule) has no E0930/E3112/L3102 and still reports E0926 (tests/marker_rule_signatures.rs:481-487)
+# Claim: Int-typed Every(schedule) yields E0930 and no E0926 (tests/marker_rule_signatures.rs:496-501)
+# Not ported: Rust asserts E0930 exactly once; CLI pins E0930 presence only
+fixture: duration_rule_arguments_use_function_parameter_types.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check valid/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:487 E0926 present; :481 no E0930/E3112/L3102
+stderr: ~ "E0926" # tests/marker_rule_signatures.rs:487 E0926 present; :481 no E0930/E3112/L3102
+stderr: !~ "E0930" # tests/marker_rule_signatures.rs:487 E0926 present; :481 no E0930/E3112/L3102
+stderr: !~ "E3112" # tests/marker_rule_signatures.rs:487 E0926 present; :481 no E0930/E3112/L3102
+stderr: !~ "L3102" # tests/marker_rule_signatures.rs:487 E0926 present; :481 no E0930/E3112/L3102
+step: jet check wrong/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:501 E0930 once, no E0926
+stderr: ~ "E0930" # tests/marker_rule_signatures.rs:501 E0930 once, no E0926
+stderr: !~ "E0926" # tests/marker_rule_signatures.rs:501 E0930 once, no E0926

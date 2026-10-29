@@ -1,6 +1,6 @@
 // Replay the loader's immutable source closure through the
 // ordinary parser; sema's resolver binds each member in its declaring module.
-use jet_foundation.[CompilerTraceSink, Diagnostic, ImportDecl, Item, MIRSourceFile, Marker, Span, diagnostic_with_source_path]
+use jet_foundation.[CompilerTraceSink, Diagnostic, ImportDecl, Item, SourceFile, Marker, diagnostic_with_source_path]
 use jet_lexer.[lex, lex_generated]
 use jet_parser.[NamedMarkerGroupTokens, named_marker_groups, expand_named_marker_groups_with_uses, parse_lexed_with_source, parser_line_starts]
 use jet_sema.[SemaRegistrationImportEdge, SemaMarkerModuleResolution, SemaMarkerModuleBinding, sema_marker_module_target_in_scope, sema_marker_module_resolve_items, sema_marker_module_declarations, sema_marker_module_declaration_by_span, sema_marker_module_bind_program]
@@ -39,7 +39,7 @@ struct JetDriverMarkerGroup {
     members: [Marker]
 }
 
-fn jet_driver_marker_group_source(source_files: [MIRSourceFile], path: String) -> String? Never! {
+fn jet_driver_marker_group_source(source_files: [SourceFile], path: String) -> String? Never! {
     loop file in source_files { if file.path == path -> return Val(file.source) }
     None
 }
@@ -148,7 +148,7 @@ fn jet_driver_marker_group_dependency_order(identity: String, indices: [String:I
 // whole, and re-parsed when it applies one. Traced as `load.marker_groups.relex`
 // (items: the bytes lexed) and `load.marker_groups.reparse` (items: the
 // module's items), one span per module.
-fn jet_driver_expand_imported_marker_groups(modules: &[JetDriverLoadedModule], edges: &[SemaRegistrationImportEdge], units: [JetDriverSourceUnit], source_files: [MIRSourceFile], diagnostics: &[Diagnostic], trace_sink: CompilerTraceSink?) -> Bool {
+fn jet_driver_expand_imported_marker_groups(modules: &[JetDriverLoadedModule], edges: &[SemaRegistrationImportEdge], units: [JetDriverSourceUnit], source_files: [SourceFile], diagnostics: &[Diagnostic], trace_sink: CompilerTraceSink?) -> Bool {
     raw := [String:[JetDriverMarkerGroup]]{}
     loop module_index in 0..<modules.len() {
         // Skip lexing files without group declarations.

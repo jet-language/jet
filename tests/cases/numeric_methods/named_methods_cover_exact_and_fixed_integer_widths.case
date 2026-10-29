@@ -1,0 +1,20 @@
+# tests/numeric_methods.rs::named_methods_cover_exact_and_fixed_integer_widths at tests/numeric_methods.rs:8; hand-port
+fixture: named_methods_cover_exact_and_fixed_integer_widths.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step r1: jet run r1/numeric_methods.jet
+exit: 0
+stdout: = ../../../Examples/features/expected/math/numeric_methods.out # tests/numeric_methods.rs:11 assert_tiers_agree
+step: jet build r1/numeric_methods.jet
+exit: 0
+step r1aot: built
+exit: 0
+stdout: = ../../../Examples/features/expected/math/numeric_methods.out # tests/numeric_methods.rs:11 assert_tiers_agree
+stdout: == r1 # tir_support assert_tiers_agree AOT/run agreement
+stderr: == r1 # tir_support assert_tiers_agree AOT/run agreement
+step: jet build r2/numeric_methods_aot.jet
+exit: 0
+step r2aot: built
+exit: 0
+stdout: = ../../../Examples/features/expected/math/numeric_methods.out # tests/numeric_methods.rs:15 build_and_run

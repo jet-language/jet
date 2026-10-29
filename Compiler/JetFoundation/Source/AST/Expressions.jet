@@ -1,57 +1,64 @@
 // Expression and call AST. Recursive expression types and semantic type
 // annotations are shared across compiler phases; `Type` is JetFoundation's.
 
+// Every expression carries its AST NodeId (`id`), the key its facts are
+// filed under. The parser numbers each top-level unit's expressions from the
+// unit's first byte (`parser_node_id`), so ids are unique per file and do not
+// depend on how the parse was chunked. A rewrite that rebuilds a node keeps
+// its id; a node no source spelled carries `AST_NODE_GENERATED`.
+AST_NODE_GENERATED :: -1
+
 enum Expr {
-    Str(parts: [StrPart], span: Span)
-    StrMatchLit(parts: [StrMatchPart], span: Span)
-    BinMatchLit(parts: [BinMatchPart], span: Span)
-    Int(value: Int, span: Span, width: IntegerWidth?, raw: String?)
-    Float(value: Float, span: Span, is_f32: Bool, raw: String?)
-    Bool(value: Bool, span: Span)
-    Unit(span: Span)
-    Char(value: String, span: Span)
-    ListLit(elements: [Expr], span: Span)
-    MemberSpread(base: Expr, members: [ExprMember], span: Span)
-    Spread(value: Expr, span: Span)
-    MapLit(entries: [ExprPair], span: Span)
-    Index(base: Expr, index: Expr, span: Span, kind: IndexKind)
-    Slice(base: Expr, start: Expr, end: Expr, range: Expr?, span: Span)
-    Range(start: Expr, end: Expr, exclusive: Bool, span: Span)
-    Ident(name: String, span: Span)
-    Call(call: Call)
-    Unary(op: UnOp, operand: Expr, span: Span)
-    Binary(op: BinOp, left: Expr, right: Expr, span: Span)
-    CompareChain(operands: [Expr], ops: [BinOp], hooks: [Bool], span: Span)
-    UnitLit(raw: String, int: Int?, float: Float?, suffix: String, suffix_span: Span, span: Span)
-    Deref(value: Expr, span: Span)
-    RawOf(value: Expr, span: Span)
-    Copy(value: Expr, span: Span)
-    Place(value: Expr, access: PlaceAccess, span: Span)
-    Field(base: Expr, member: String, span: Span)
-    OptField(base: Expr, member: String, member_span: Span, flatten: Bool, span: Span)
-    MethodCall(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], recv_type: String?, resolved_ret: Type?)
-    OptMethodCall(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg], span: Span)
-    StructLit(type_name: String, type_args: [Type], import_ns: String?, as_trait: String?, fields: [ExprField], inferred: Bool, span: Span)
-    TypedLit(head: Type?, body: TypedLitBody, span: Span)
-    EnumLit(type_name: String, variant: String, variant_span: Span?, args: [EnumLitArg], leading_dot: Bool, span: Span)
-    Tainted(value: Expr, tag: String?, span: Span)
-    Present(value: Expr, span: Span)
-    Absent(span: Span)
-    Todo(span: Span, expected_type: String?)
-    NoElse(span: Span)
-    ReduceMarker(name: String, span: Span)
-    PatternTest(subject: Expr, pattern: Pattern, span: Span)
-    Ok(value: Expr, span: Span)
-    Err(value: Expr, span: Span)
-    Try(value: Expr, span: Span, conversion: TryConvert, context: Expr?)
-    OrFallback(value: Expr, fallback: OrFallback, is_option: Bool, span: Span)
-    If(cond: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span)
-    TupleLit(fields: [TupleField], span: Span, ty: Type?)
-    Lambda(lambda: Lambda)
-    CallValue(callee: Expr, args: [CallArg], span: Span)
-    PtrFromAddr(alias: String, alias_span: Span, elem: Type, addr: Expr, span: Span)
-    ComptimeName(name: String, span: Span, value: CtValue?)
-    Paren(value: Expr, span: Span)
+    Str(parts: [StrPart], span: Span, id: Int)
+    StrMatchLit(parts: [StrMatchPart], span: Span, id: Int)
+    BinMatchLit(parts: [BinMatchPart], span: Span, id: Int)
+    Int(value: Int, span: Span, width: IntegerWidth?, raw: String?, id: Int)
+    Float(value: Float, span: Span, is_f32: Bool, raw: String?, id: Int)
+    Bool(value: Bool, span: Span, id: Int)
+    Unit(span: Span, id: Int)
+    Char(value: String, span: Span, id: Int)
+    ListLit(elements: [Expr], span: Span, id: Int)
+    MemberSpread(base: Expr, members: [ExprMember], span: Span, id: Int)
+    Spread(value: Expr, span: Span, id: Int)
+    MapLit(entries: [ExprPair], span: Span, id: Int)
+    Index(base: Expr, index: Expr, span: Span, kind: IndexKind, id: Int)
+    Slice(base: Expr, start: Expr, end: Expr, range: Expr?, span: Span, id: Int)
+    Range(start: Expr, end: Expr, exclusive: Bool, span: Span, id: Int)
+    Ident(name: String, span: Span, id: Int)
+    Call(call: Call, id: Int)
+    Unary(op: UnOp, operand: Expr, span: Span, id: Int)
+    Binary(op: BinOp, left: Expr, right: Expr, span: Span, id: Int)
+    CompareChain(operands: [Expr], ops: [BinOp], hooks: [Bool], span: Span, id: Int)
+    UnitLit(raw: String, int: Int?, float: Float?, suffix: String, suffix_span: Span, span: Span, id: Int)
+    Deref(value: Expr, span: Span, id: Int)
+    RawOf(value: Expr, span: Span, id: Int)
+    Copy(value: Expr, span: Span, id: Int)
+    Place(value: Expr, access: PlaceAccess, span: Span, id: Int)
+    Field(base: Expr, member: String, span: Span, id: Int)
+    OptField(base: Expr, member: String, member_span: Span, flatten: Bool, span: Span, id: Int)
+    MethodCall(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], id: Int)
+    OptMethodCall(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg], span: Span, id: Int)
+    StructLit(type_name: String, type_args: [Type], import_ns: String?, as_trait: String?, fields: [ExprField], inferred: Bool, span: Span, id: Int)
+    TypedLit(head: Type?, body: TypedLitBody, span: Span, id: Int)
+    EnumLit(type_name: String, variant: String, variant_span: Span?, args: [EnumLitArg], leading_dot: Bool, span: Span, id: Int)
+    Tainted(value: Expr, tag: String?, span: Span, id: Int)
+    Present(value: Expr, span: Span, id: Int)
+    Absent(span: Span, id: Int)
+    Todo(span: Span, expected_type: String?, id: Int)
+    NoElse(span: Span, id: Int)
+    ReduceMarker(name: String, span: Span, id: Int)
+    PatternTest(subject: Expr, pattern: Pattern, span: Span, id: Int)
+    Ok(value: Expr, span: Span, id: Int)
+    Err(value: Expr, span: Span, id: Int)
+    Try(value: Expr, span: Span, conversion: TryConvert, context: Expr?, id: Int)
+    OrFallback(value: Expr, fallback: OrFallback, is_option: Bool, span: Span, id: Int)
+    If(cond: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span, id: Int)
+    TupleLit(fields: [TupleField], span: Span, ty: Type?, id: Int)
+    Lambda(lambda: Lambda, id: Int)
+    CallValue(callee: Expr, args: [CallArg], span: Span, id: Int)
+    PtrFromAddr(alias: String, alias_span: Span, elem: Type, addr: Expr, span: Span, id: Int)
+    ComptimeName(name: String, span: Span, value: CtValue?, id: Int)
+    Paren(value: Expr, span: Span, id: Int)
 }
 
 struct IntegerWidth {
@@ -90,9 +97,6 @@ struct Call {
     name_span: Span
     type_args: [Type]
     args: [CallArg]
-    resolved_ret: Type?
-    range_checked: Bool
-    widen_approx: Bool
 }
 
 struct CallArg {
@@ -475,61 +479,136 @@ struct DerivationRef {
 // S71 the ordinary call that `receiver?.method(args)` runs on the
 // present payload. Syntax walkers reuse their `MethodCall` facts through it.
 fn expr_optional_method_call_as_call(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg]) -> Expr Never! {
-    Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: [Type]{}, type_args: type_args, args: args, recv_type: None, resolved_ret: None}
+    Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: [Type]{}, type_args: type_args, args: args, id: AST_NODE_GENERATED}
 }
 
 fn expr_span(expr: Expr) -> Span {
     if expr == {
-        .Str(_, span) -> return span
-        .StrMatchLit(_, span) -> return span
-        .BinMatchLit(_, span) -> return span
-        .Int(_, span, _, _) -> return span
-        .Float(_, span, _, _) -> return span
-        .Bool(_, span) -> return span
-        .Unit(span) -> return span
-        .Char(_, span) -> return span
-        .ListLit(_, span) -> return span
-        .MemberSpread(_, _, span) -> return span
-        .Spread(_, span) -> return span
-        .MapLit(_, span) -> return span
-        .Index(_, _, span, _) -> return span
-        .Slice(_, _, _, _, span) -> return span
-        .Range(_, _, _, span) -> return span
-        .Ident(_, span) -> return span
-        .Call(call) -> return call.name_span
-        .Unary(_, _, span) -> return span
-        .Binary(_, _, _, span) -> return span
-        .CompareChain(_, _, _, span) -> return span
-        .UnitLit(_, _, _, _, _, span) -> return span
-        .Deref(_, span) -> return span
-        .RawOf(_, span) -> return span
-        .Copy(_, span) -> return span
-        .Place(_, _, span) -> return span
-        .Field(_, _, span) -> return span
-        .OptField(_, _, _, _, span) -> return span
-        .MethodCall(_, _, method_span, _, _, _, _, _) -> return method_span
-        .OptMethodCall(_, _, method_span, _, _, _) -> return method_span
-        .StructLit(_, _, _, _, _, _, span) -> return span
-        .TypedLit(_, _, span) -> return span
-        .EnumLit(_, _, _, _, _, span) -> return span
-        .Tainted(_, _, span) -> return span
-        .Present(_, span) -> return span
-        .Absent(span) -> return span
-        .Todo(span, _) -> return span
-        .NoElse(span) -> return span
-        .ReduceMarker(_, span) -> return span
-        .PatternTest(_, _, span) -> return span
-        .Ok(_, span) -> return span
-        .Err(_, span) -> return span
-        .Try(_, span, _, _) -> return span
-        .OrFallback(_, _, _, span) -> return span
-        .If(_, _, _, _, _, span) -> return span
-        .TupleLit(_, span, _) -> return span
-        .Lambda(lambda) -> return lambda.span
-        .CallValue(_, _, span) -> return span
-        .PtrFromAddr(_, _, _, _, span) -> return span
-        .ComptimeName(_, span, _) -> return span
-        .Paren(_, span) -> return span
+        .Str(_, span, _) -> return span
+        .StrMatchLit(_, span, _) -> return span
+        .BinMatchLit(_, span, _) -> return span
+        .Int(_, span, _, _, _) -> return span
+        .Float(_, span, _, _, _) -> return span
+        .Bool(_, span, _) -> return span
+        .Unit(span, _) -> return span
+        .Char(_, span, _) -> return span
+        .ListLit(_, span, _) -> return span
+        .MemberSpread(_, _, span, _) -> return span
+        .Spread(_, span, _) -> return span
+        .MapLit(_, span, _) -> return span
+        .Index(_, _, span, _, _) -> return span
+        .Slice(_, _, _, _, span, _) -> return span
+        .Range(_, _, _, span, _) -> return span
+        .Ident(_, span, _) -> return span
+        .Call(call, _) -> return call.name_span
+        .Unary(_, _, span, _) -> return span
+        .Binary(_, _, _, span, _) -> return span
+        .CompareChain(_, _, _, span, _) -> return span
+        .UnitLit(_, _, _, _, _, span, _) -> return span
+        .Deref(_, span, _) -> return span
+        .RawOf(_, span, _) -> return span
+        .Copy(_, span, _) -> return span
+        .Place(_, _, span, _) -> return span
+        .Field(_, _, span, _) -> return span
+        .OptField(_, _, _, _, span, _) -> return span
+        .MethodCall(_, _, method_span, _, _, _, _) -> return method_span
+        .OptMethodCall(_, _, method_span, _, _, _, _) -> return method_span
+        .StructLit(_, _, _, _, _, _, span, _) -> return span
+        .TypedLit(_, _, span, _) -> return span
+        .EnumLit(_, _, _, _, _, span, _) -> return span
+        .Tainted(_, _, span, _) -> return span
+        .Present(_, span, _) -> return span
+        .Absent(span, _) -> return span
+        .Todo(span, _, _) -> return span
+        .NoElse(span, _) -> return span
+        .ReduceMarker(_, span, _) -> return span
+        .PatternTest(_, _, span, _) -> return span
+        .Ok(_, span, _) -> return span
+        .Err(_, span, _) -> return span
+        .Try(_, span, _, _, _) -> return span
+        .OrFallback(_, _, _, span, _) -> return span
+        .If(_, _, _, _, _, span, _) -> return span
+        .TupleLit(_, span, _, _) -> return span
+        .Lambda(lambda, _) -> return lambda.span
+        .CallValue(_, _, span, _) -> return span
+        .PtrFromAddr(_, _, _, _, span, _) -> return span
+        .ComptimeName(_, span, _, _) -> return span
+        .Paren(_, span, _) -> return span
     }
     Span{start: 0, end: 0}
+}
+
+// The AST NodeId of an expression (AST_NODE_GENERATED for a compiler-built one).
+fn expr_node_id(expr: Expr) -> Int Never! {
+    if expr == {
+        .Str(_, _, id) -> id
+        .StrMatchLit(_, _, id) -> id
+        .BinMatchLit(_, _, id) -> id
+        .Int(_, _, _, _, id) -> id
+        .Float(_, _, _, _, id) -> id
+        .Bool(_, _, id) -> id
+        .Unit(_, id) -> id
+        .Char(_, _, id) -> id
+        .ListLit(_, _, id) -> id
+        .MemberSpread(_, _, _, id) -> id
+        .Spread(_, _, id) -> id
+        .MapLit(_, _, id) -> id
+        .Index(_, _, _, _, id) -> id
+        .Slice(_, _, _, _, _, id) -> id
+        .Range(_, _, _, _, id) -> id
+        .Ident(_, _, id) -> id
+        .Call(_, id) -> id
+        .Unary(_, _, _, id) -> id
+        .Binary(_, _, _, _, id) -> id
+        .CompareChain(_, _, _, _, id) -> id
+        .UnitLit(_, _, _, _, _, _, id) -> id
+        .Deref(_, _, id) -> id
+        .RawOf(_, _, id) -> id
+        .Copy(_, _, id) -> id
+        .Place(_, _, _, id) -> id
+        .Field(_, _, _, id) -> id
+        .OptField(_, _, _, _, _, id) -> id
+        .MethodCall(_, _, _, _, _, _, id) -> id
+        .OptMethodCall(_, _, _, _, _, _, id) -> id
+        .StructLit(_, _, _, _, _, _, _, id) -> id
+        .TypedLit(_, _, _, id) -> id
+        .EnumLit(_, _, _, _, _, _, id) -> id
+        .Tainted(_, _, _, id) -> id
+        .Present(_, _, id) -> id
+        .Absent(_, id) -> id
+        .Todo(_, _, id) -> id
+        .NoElse(_, id) -> id
+        .ReduceMarker(_, _, id) -> id
+        .PatternTest(_, _, _, id) -> id
+        .Ok(_, _, id) -> id
+        .Err(_, _, id) -> id
+        .Try(_, _, _, _, id) -> id
+        .OrFallback(_, _, _, _, id) -> id
+        .If(_, _, _, _, _, _, id) -> id
+        .TupleLit(_, _, _, id) -> id
+        .Lambda(_, id) -> id
+        .CallValue(_, _, _, id) -> id
+        .PtrFromAddr(_, _, _, _, _, id) -> id
+        .ComptimeName(_, _, _, id) -> id
+        .Paren(_, _, id) -> id
+    }
+}
+
+// The first source byte of an expression. A method call is spanned at its
+// method name, so a method chain or a member path starts at its receiver.
+fn expr_source_start(expr: Expr) -> Int Never! {
+    if expr == {
+        .Paren(_, span, _) -> return span.start
+        .Field(base, _, _, _) -> return expr_source_start(base)
+        .OptField(base, _, _, _, _, _) -> return expr_source_start(base)
+        .MethodCall(receiver, _, _, _, _, _, _) -> return expr_source_start(receiver)
+        else -> return expr_span(expr).start
+    }
+}
+
+// An expression's source extent from its first byte (`expr_source_start`)
+// to the end of its own span: a method call covers its receiver path
+// through the method name (`xs.zip`), any other expression its own span.
+fn expr_source_span(expr: Expr) -> Span Never! {
+    Span{start: expr_source_start(expr), end: expr_span(expr).end}
 }

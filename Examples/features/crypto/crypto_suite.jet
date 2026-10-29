@@ -1,7 +1,7 @@
 package {
     name: "crypto_crypto_suite"
     version: "0.1.0"
-    authority: { holds: { allow: [Exec, FS, FS.Read, IO, Mem.Alloc, Rand] } }
+    authority: { allow: [Exec, FS, FS.Read, IO, Mem.Alloc, Rand] }
 }
 // D-CRYPTO-SUITE1=A / D-PWHASH1=A: misuse-resistant suite.
 use core.crypto as crypto
@@ -57,7 +57,7 @@ fn run() {
     source.write_atomic(abc)
     file_recipient :: crypto.X25519SecretKey.new_random() ?? return
     crypto.file_seal([file_recipient.public_key()], source: source, destination: sealed) ?? return
-    crypto.file_open(&file_recipient, source: sealed, destination: opened) ?? return
+    crypto.file_open(file_recipient, source: sealed, destination: opened) ?? return
     opened_bytes :: fs.read(opened_text)
     print(opened_bytes == "abc")
     fs.remove(source_text)

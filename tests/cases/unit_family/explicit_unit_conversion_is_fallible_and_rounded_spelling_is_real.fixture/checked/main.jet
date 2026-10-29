@@ -1,0 +1,12 @@
+
+#UnitFamily(Length, dimension, base: meter) {
+    meter
+    millimeter(scale: 1/1000)
+    thirdish(scale: 2/3)
+}
+fn run() {
+    exact :: Meter.from_millimeter(3000millimeter) ?? panic("exact conversion failed")
+    inexact :: Meter.from_thirdish(1thirdish) ?? Meter.from_float(Float{-1.0})
+    rounded :: Meter.from_thirdish_rounded(1thirdish, .NearestEven, digits: 0) ?? panic("rounded conversion failed")
+    print("{(exact.raw())} {(inexact.raw())} {(rounded.raw())}")
+}

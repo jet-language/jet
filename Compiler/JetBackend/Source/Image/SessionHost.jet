@@ -1,775 +1,490 @@
-// #4720 SP4. The one owning child for native comptime and session turns.
-// Only compiler-produced images are accepted. Values in live slots never cross
-// this channel. Each scalar has an explicit kind; integers and float bits are
-// decimal strings, so no JSON number coercion or Display reinjection occurs.
-use core.encoding as execution_encoding
-use core.encoding.json as execution_json
-use core.files as execution_files
-use core.crypto as execution_crypto
-use jet_foundation.[foundation_json_quote]
+// The comptime child: one process per compile running the runtime image
+// bound to the comptime entry program (JetRuntime ComptimeServe.jet), which
+// the compiler drives over ComptimeWire.jet frames and loads each comptime
+// batch's code into. The child runs in its own address space, so a stop, a
+// refused effect or a crash never reaches the compiler; seccomp refuses its
+// effects.
 
-struct X64ExecutionScalar {
-    kind: String
-    value: String
-    // The checked callable consumes an owning carrier at its entry, including
-    // on Stopped. Borrowed inputs remain ours and are released after the call.
-    consumed: Bool{true}
-}
-enum X64ExecutionMode { Comptime Turn }
-struct X64ExecutionRequest {
-    image: X64MemoryImage
-    mode: X64ExecutionMode
-    args: [X64ExecutionScalar]
-    result_kind: String
-    fuel: Int
-    depth: Int
-    // Logical retained scopes share one child but never share session slots.
-    session: Int{0}
-    boundary: X64ValueBoundary?{None}
-    release: Int?{None}
-    closures: [X64ClosureRegistration]{[X64ClosureRegistration]{}}
-    // The compiler's canonical Core producer supplies this image. It is
-    // admitted once per child generation, independent of logical session close.
-    core: X64MemoryImage?{None}
-}
-struct X64ExecutionResponse {
-    // Exactly one response body: tagged lossless value JSON or the canonical
-    // shared JetStopRecord JSON (all optional site fields preserved).
-    body: String
-    stopped: Bool
-    invalidated: Bool
-    generation: Int
+// The child's descriptors are kept above every descriptor the child is given
+// (0..4), so moving them into place never collides.
+X64_COMPTIME_FD_FLOOR :: 100
+X64_COMPTIME_BUFFER :: 65536
+
+struct X64ComptimeChild {
+    pid: Int{0}
+    command: Int{-1}
+    reply: Int{-1}
+    output: Int{-1}
+    errors: Int{-1}
+    // One mapping: the poll set and clock (first page), then the read buffer.
+    scratch: Int{0}
+    // The image's entries, in the compiler's table order.
+    entries: [Int]{[Int]{}}
     stdout: [U8]{[U8]{}}
     stderr: [U8]{[U8]{}}
-    errors: [String]
-    value: X64NativeValue?{None}
-}
-struct X64ExecutionScopes {
-    closed: [Int:Bool]
-    core_identity: String{""}
-    core_generation: Int{0}
-}
-struct X64ExecutionHost {
-    executable: String
-    runtime: String
-    runtime_identity: String
-    runtime_identity_words: [Int]
-    // [pid, fd, generation, stdout, stderr, SHA-256 as 8 u32s, next session].
-    // Copying this descriptor never copies live bindings.
-    state: Int
-    // Descriptor copies share retirement metadata across child generations.
-    // A fatal reset may not silently recreate an explicitly closed scope.
-    scopes: Shared<X64ExecutionScopes>
-    errors: [String]
+    // Milliseconds of child time left (-1: no limit), and whether it ran out.
+    budget: Int{-1}
+    exhausted: Bool{false}
+    // The wait status once the child ended, else -1.
+    status: Int{-1}
+    failure: String{""}
 }
 
-struct X64PinnedExecutionImage {
-    session: Int
-    image: X64LoadedImage
-    codes: [Int]
-}
-struct X64ExecutionProtocolError {
-    message: String
-    restart: Bool
-}
-
-struct X64ExecutionEnvelope {
-    request: X64ExecutionRequest
-    image_bytes: Int
-}
-
-fn x64_execution_send_image(fd: Int, request: X64ExecutionRequest, runtime_identity: String) -> Bool {
-    if request.image.text.len() > 268435456 -> return false
-    if !x64_session_write_frame(fd, x64_execution_request_json(request, runtime_identity)) -> return false
-    x64_execution_send_image_bytes(fd, request.image)
-}
-fn x64_execution_send_image_bytes(fd: Int, image: X64MemoryImage) -> Bool {
-    at := 0
-    loop at < image.text.len() {
-        end := at + 65536
-        if end > image.text.len() -> end = image.text.len()
-        if !x64_session_write_bytes_range(fd, image.text, at, end - at) -> return false
-        at = end
+// Starts the static executable `image` (Image/Loader.jet) in a child and
+// receives its entries; `stdout` admits the child's own standard output. A
+// failure leaves `failure` set.
+fn x64_comptime_spawn(image: [U8], stdout: Bool, budget: Int) -> X64ComptimeChild {
+    child := X64ComptimeChild{budget: budget}
+    scratch :: os_map(4096 + X64_COMPTIME_BUFFER, OS_PROT_READ + OS_PROT_WRITE)
+    if os_failed(scratch) {
+        child.failure = "can't map the comptime child's buffers ({-scratch})"
+        return child
     }
-    digest :: execution_crypto.sha256(image.text).hex()
-    x64_session_write_frame(fd, "[\"ImageEnd\",{foundation_json_quote(digest)}]")
-}
-
-fn x64_execution_core_metadata(image: X64MemoryImage, runtime_identity: String) -> String Never! {
-    request :: X64ExecutionRequest{image: image, mode: X64ExecutionMode.Comptime, args: [X64ExecutionScalar]{}, result_kind: "Unit", fuel: 0, depth: 0}
-    exports :: loop (symbol, offset) in image.exports -> "[{foundation_json_quote(symbol)},{offset}]"
-    "[{x64_execution_request_json(request, runtime_identity)},[{exports.join(",")}]]"
-}
-fn x64_execution_core_identity(image: X64MemoryImage, metadata: String) -> String Never! {
-    // Include ABI/layout/export metadata: identical code bytes with another
-    // site inventory are not the same pinned Core image.
-    "{execution_crypto.sha256(image.text).hex()}:{execution_crypto.sha256(metadata.bytes()).hex()}"
-}
-fn x64_execution_prepare_core(host: X64ExecutionHost, image: X64MemoryImage, generation: Int) -> [String] {
-    if image.errors.len() > 0 -> return image.errors
-    if image.text.len() < 1 || image.text.len() > 268435456 -> return [String]{"pinned Core image stream length is outside the admitted1..256MiB range"}
-    errors :: x64_core_export_errors(image)
-    if errors.len() > 0 -> return errors
-    metadata :: x64_execution_core_metadata(image, host.runtime_identity)
-    identity :: x64_execution_core_identity(image, metadata)
-    if host.scopes.core_generation == generation {
-        if host.scopes.core_identity == identity -> return [String]{}
-        return [String]{"this native child already owns a different pinned Core image; its Shared sites cannot be replaced"}
-    }
-    header :: "[\"Core\",{foundation_json_quote(identity)},{metadata}]"
-    if header.bytes().len() > 16777216 -> return [String]{"pinned Core metadata exceeds its admitted16MiB frame"}
-    fd :: x64_execution_word(host.state, 1)
-    if !x64_session_write_frame(fd, header) || !x64_execution_send_image_bytes(fd, image) {
-        return x64_execution_core_transport_failure(host, "could not send the pinned Core image stream")
-    }
-    reply :: x64_session_read_frame(fd) ?? return x64_execution_core_transport_failure(host, "pinned Core admission ended without a lifecycle response")
-    if reply != ("[\"CoreReady\",{foundation_json_quote(identity)}]") {
-        if x64_execution_protocol_error(reply) == .Val(error) {
-            if error.restart -> return x64_execution_core_transport_failure(host, error.message)
-            return [String]{error.message}
+    child.scratch = scratch
+    // command, reply, output, errors: [read end, write end] each.
+    pipes := [Int]{}
+    loop _ in 0..<4 {
+        ends :: x64_comptime_pipe(scratch)
+        if ends.len() != 2 {
+            loop fd in pipes -> x64_comptime_close_fd(fd)
+            x64_comptime_close(&child)
+            child.failure = "can't create the comptime child's pipes"
+            return child
         }
-        return x64_execution_core_transport_failure(host, "pinned Core admission returned an invalid lifecycle response")
+        &pipes.push(ends[0])
+        &pipes.push(ends[1])
     }
-    host.scopes.core_identity = identity
-    host.scopes.core_generation = generation
-    [String]{}
-}
-fn x64_execution_core_transport_failure(host: X64ExecutionHost, message: String) -> [String] {
-    _ := x64_execution_reap(host)
-    if !x64_execution_spawn(host) {
-        _ := x64_execution_reap(host)
-        return [String]{message, "native execution child could not restart"}
+    loaded :: x64_image_load(image)
+    spawned := X64Spawned{pid: -1, failure: loaded.failure}
+    if loaded.failure == "" {
+        // No parent_death: the compile's child may outlive the worker thread that spawned it; it ends when its command pipe closes.
+        launch :: X64Launch{argv: [String]{"jet-comptime"}, env: Val([String]{}), executable: "", name: "jet-comptime", relaunch: [String]{}, parent_death: false}
+        // The child's standard input stays the compiler's; its filter refuses reading it.
+        spawned = x64_image_spawn(loaded, launch, [Int]{-1, pipes[5], pipes[7], pipes[0], pipes[3]})
+        x64_image_unload(loaded)
     }
-    [String]{message}
+    x64_comptime_close_fd(pipes[0])
+    x64_comptime_close_fd(pipes[3])
+    x64_comptime_close_fd(pipes[5])
+    x64_comptime_close_fd(pipes[7])
+    child.command = pipes[1]
+    child.reply = pipes[2]
+    child.output = pipes[4]
+    child.errors = pipes[6]
+    if spawned.failure != "" {
+        child.failure = "can't start the comptime child: {spawned.failure}"
+        x64_comptime_close(&child)
+        return child
+    }
+    child.pid = spawned.pid
+    hello :: x64_comptime_receive(&child) ?? {
+        child.failure = x64_comptime_end_text(child, "before it started")
+        x64_comptime_close(&child)
+        return child
+    }
+    count :: x64_comptime_word(hello, 8)
+    table :: x64_comptime_receive_bytes(&child, 8 * count) ?? {
+        child.failure = x64_comptime_end_text(child, "before it started")
+        x64_comptime_close(&child)
+        return child
+    }
+    loop index in 0..<count -> &child.entries.push(x64_comptime_word(table, 8 * index))
+    if child.entries.len() == 0 || !x64_comptime_filter_child(&child, stdout) {
+        if child.failure == "" -> child.failure = x64_comptime_end_text(child, "before it refused its effects")
+        x64_comptime_close(&child)
+    }
+    child
 }
 
-fn x64_execution_receive_image(fd: Int, envelope: X64ExecutionEnvelope) -> X64ExecutionRequest? {
-    if envelope.image_bytes < 1 || envelope.image_bytes > 268435456 -> return None
-    bytes := [U8]{}
-    loop bytes.len() < envelope.image_bytes {
-        chunk :: x64_session_read_bytes_frame(fd, 65536) ?? return None
-        if chunk.len() == 0 || chunk.len() > envelope.image_bytes - bytes.len() -> return None
-        loop byte in chunk -> &bytes.push(byte)
+// The entry table's first word is the refusal handler. Installs the child's
+// seccomp program; `stdout` admits its standard output.
+fn x64_comptime_filter_child(child: &X64ComptimeChild, stdout: Bool) -> Bool {
+    program :: x64_comptime_filter(stdout)
+    handler :: child.entries[0]
+    if !x64_comptime_send(&child, x64_comptime_frame(X64_COMPTIME_FILTER, [Int]{handler, program.len()}), program) -> return false
+    done :: x64_comptime_receive(&child) ?? return false
+    loop index in 1..<4 {
+        result :: x64_comptime_word(done, 8 * index)
+        if result != 0 {
+            child.failure = "the comptime child couldn't refuse its effects (step {index}: {-result})"
+            return false
+        }
     }
-    end :: x64_session_read_frame(fd) ?? return None
-    digest :: execution_crypto.sha256(bytes).hex()
-    if end != "[\"ImageEnd\",{foundation_json_quote(digest)}]" -> return None
-    request := envelope.request
-    request.image.text = ^bytes
-    Val(request)
-}
-
-fn x64_execution_protocol_error(body: String) -> X64ExecutionProtocolError? {
-    tree :: execution_json.parse(body) ?? return None
-    rows :: x64_execution_array(tree) ?? return None
-    if rows.len() != 3 || x64_execution_string(rows[0]) != (Val("HostError")) -> return None
-    message :: x64_execution_string(rows[1]) ?? return None
-    restart :: x64_execution_bool(rows[2]) ?? return None
-    Val(X64ExecutionProtocolError{message: message, restart: restart})
-}
-fn x64_execution_service_error(message: String) -> Int {
-    _ := x64_session_write_frame(3, "[\"HostError\",{foundation_json_quote(message)},true]")
-    101
-}
-
-fn x64_execution_failure(message: String, generation: Int) -> X64ExecutionResponse Never! {
-    X64ExecutionResponse{body: "", stopped: false, invalidated: false, generation: generation, errors: [String]{message}}
-}
-fn x64_execution_word(state: Int, index: Int) -> Int {
-    value := 0
-    #Unsafe("state is the compiler-process-lifetime fourteen-word execution resource") { value = os_load_word(state + 8 * index) }
-    value
-}
-fn x64_execution_set(state: Int, index: Int, value: Int) {
-    #Unsafe("state is the compiler-process-lifetime fourteen-word execution resource") { os_store_word(state + 8 * index, value) }
-}
-fn x64_execution_identity_words(digest: String) -> [Int] Never! {
-    bytes :: execution_encoding.hex_to_bytes(digest) ?? return [Int]{}
-    if bytes.len() != 32 -> return [Int]{}
-    words := [Int]{}
-    loop index in 0..<8 {
-        at :: 4 * index
-        &words.push(Int.from_u8(bytes[at]) + (Int.from_u8(bytes[at + 1]) << 8) + (Int.from_u8(bytes[at + 2]) << 16) + (Int.from_u8(bytes[at + 3]) << 24))
-    }
-    words
-}
-fn x64_execution_spawn(host: X64ExecutionHost) -> Bool {
-    executable :: os_c_string(host.executable)
-    runtime :: os_c_string(host.runtime)
-    identity :: os_c_string(host.runtime_identity)
-    if executable == 0 || runtime == 0 || identity == 0 {
-        if executable != 0 -> _ := os_unmap(executable, host.executable.bytes().len() + 1)
-        if runtime != 0 -> _ := os_unmap(runtime, host.runtime.bytes().len() + 1)
-        if identity != 0 -> _ := os_unmap(identity, host.runtime_identity.bytes().len() + 1)
-        return false
-    }
-    result := -1
-    #Unsafe("terminated paths and admitted identity and five writable resource words remain live through posix_spawn") {
-        result = os_session_spawn(executable, runtime, identity, host.state)
-    }
-    _ := os_unmap(executable, host.executable.bytes().len() + 1)
-    _ := os_unmap(runtime, host.runtime.bytes().len() + 1)
-    _ := os_unmap(identity, host.runtime_identity.bytes().len() + 1)
-    if result != 0 -> return false
-    x64_execution_set(host.state, 2, x64_execution_word(host.state, 2) + 1)
-    ready :: x64_session_read_frame(x64_execution_word(host.state, 1)) ?? return false
-    if ready != "[\"Ready\",{foundation_json_quote(host.runtime_identity)}]" -> return false
-    loop (index, word) in host.runtime_identity_words -> x64_execution_set(host.state, 5 + index, word)
     true
 }
-fn x64_execution_runtime_identity(runtime: String) -> String? {
-    text :: execution_files.read("{runtime}.sha256") ?? return None
-    digest :: text.trim()
-    if digest.len() != 64 -> return None
-    loop byte in digest.bytes() {
-        code :: Int.from_u8(byte)
-        if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return None
-    }
-    Val(digest)
-}
-fn x64_execution_open(executable: String, runtime: String) -> X64ExecutionHost {
-    state := 0
-    #Unsafe("the raw host leaf returns the compiler-process-lifetime resource words; requests serialize access") { state = os_session_state() }
-    identity :: x64_execution_runtime_identity(runtime)
-    digest :: identity ?? ""
-    X64ExecutionHost{executable: executable, runtime: runtime, runtime_identity: digest, runtime_identity_words: x64_execution_identity_words(digest), state: state, scopes: shared X64ExecutionScopes{closed: [Int:Bool]{}}, errors: if identity == None -> [String]{"native runtime lacks its admitted SHA-256 manifest: {runtime}.sha256"} else -> [String]{}}
-}
-fn x64_execution_session_new(host: X64ExecutionHost) -> Int {
-    #Unsafe("logical identities share the process-owned execution counter and mutex") { os_session_lock() }
-    identity :: x64_execution_word(host.state, 13) + 1
-    x64_execution_set(host.state, 13, identity)
-    #Unsafe("release the private execution mutex acquired above") { os_session_unlock() }
-    identity
-}
-fn x64_execution_reap(host: X64ExecutionHost) -> Int {
-    pid :: x64_execution_word(host.state, 0)
-    fd :: x64_execution_word(host.state, 1)
-    if pid == 0 -> return 0
-    os_session_close(fd)
-    os_session_close(x64_execution_word(host.state, 3))
-    os_session_close(x64_execution_word(host.state, 4))
-    result := -1
-    #Unsafe("wait writes only the owned status word, after this child's socket was closed") {
-        _ := os_session_wait(pid, host.state + 8)
-        result = os_load_word(host.state + 8)
-    }
-    x64_execution_set(host.state, 0, 0)
-    x64_execution_set(host.state, 1, -1)
-    result
-}
-fn x64_execution_close(host: X64ExecutionHost) {
-    if host.state == 0 -> return
-    #Unsafe("close is serialized with every request on this process-owned host") { os_session_lock() }
-    if x64_execution_word(host.state, 0) != 0 {
-        _ := x64_session_write_frame(x64_execution_word(host.state, 1), "[\"Shutdown\"]")
-        _ := x64_execution_reap(host)
-    }
-    #Unsafe("release the private execution mutex acquired above") { os_session_unlock() }
+
+// What the child left behind when it ended `when`.
+fn x64_comptime_end_text(child: X64ComptimeChild, when: String) -> String Never! {
+    if child.failure != "" -> return child.failure
+    report :: (String.from_bytes(child.stderr) ?? "").trim()
+    if report != "" -> return report
+    "the comptime child ended {when} (wait status {child.status})"
 }
 
-fn x64_execution_session_close(host: X64ExecutionHost, identity: Int) -> [String] {
-    if host.state == 0 -> return [String]{"native execution host is not open"}
-    #Unsafe("logical close serializes with turns and shared-child teardown") { os_session_lock() }
-    errors :: x64_execution_session_close_locked(host, identity)
-    #Unsafe("release the execution mutex acquired for this logical close") { os_session_unlock() }
-    errors
-}
-fn x64_execution_session_close_locked(host: X64ExecutionHost, identity: Int) -> [String] {
-    if identity < 0 -> return [String]{"native logical session identity is invalid"}
-    if host.scopes.closed.get(identity) != None -> return [String]{}
-    if x64_execution_word(host.state, 0) == 0 {
-        host.scopes.closed[identity] = true
-        return [String]{}
-    }
-    fd :: x64_execution_word(host.state, 1)
-    if !x64_session_write_frame(fd, "[\"Close\",{identity}]") -> return [String]{"native logical close could not send its lifecycle frame"}
-    body :: x64_session_read_frame(fd) ?? return [String]{"native logical close ended without a lifecycle response"}
-    if body == ("[\"Closed\",{identity}]") {
-        host.scopes.closed[identity] = true
-        return [String]{}
-    }
-    if x64_execution_protocol_error(body) == .Val(error) -> return [String]{error.message}
-    [String]{"native logical close returned an invalid lifecycle response"}
-}
-
-fn x64_execution_request_json(request: X64ExecutionRequest, runtime_identity: String) -> String Never! {
-    imports :: loop symbol in request.image.imports -> foundation_json_quote(symbol)
-    slots :: loop slot in request.image.slots -> "{slot}"
-    args :: loop arg in request.args -> "[{foundation_json_quote(arg.kind)},{foundation_json_quote(arg.value)},{arg.consumed}]"
-    mode :: if request.mode == X64ExecutionMode.Comptime -> "Comptime" else -> "Turn"
-    relocs :: loop reloc in request.image.relocs -> "[{reloc.at},{reloc.target}]"
-    finalizer :: if request.image.finalizer == .Val(at) -> "{at}" else -> "null"
-    functions :: loop offset in request.image.functions -> "{offset}"
-    boundary :: if request.boundary == .Val(value) -> x64_value_boundary_json(value) else -> "null"
-    release :: if request.release == .Val(value) -> "{value}" else -> "null"
-    closures :: loop closure in request.closures -> x64_closure_registration_json(closure)
-    "[\"Call\",{foundation_json_quote(mode)},{request.image.text.len()},{request.image.entry},[{imports.join(",")}],[{slots.join(",")}],[{args.join(",")}],{foundation_json_quote(request.result_kind)},\"{request.fuel}\",\"{request.depth}\",{request.image.align},{finalizer},{request.image.data_offset},[{relocs.join(",")}],{foundation_json_quote(runtime_identity)},[{functions.join(",")}],{request.session},{boundary},{release},[{closures.join(",")}]]"
-}
-fn x64_execution_stop_kind(body: String) -> String? {
-    tree :: execution_json.parse(body) ?? return None
-    if tree == .Object(fields) {
-        loop field in fields {
-            if field.key == "kind" && field.value == .Text(kind) -> return Val(kind)
-        }
-    }
-    None
-}
-fn x64_execution_request(host: X64ExecutionHost, request: X64ExecutionRequest) -> X64ExecutionResponse {
-    #Unsafe("all compiler threads share this one process-owned execution resource") { os_session_lock() }
-    response :: x64_execution_request_locked(host, request)
-    #Unsafe("release the private execution mutex acquired above") { os_session_unlock() }
-    response
-}
-fn x64_execution_request_locked(host: X64ExecutionHost, request: X64ExecutionRequest) -> X64ExecutionResponse {
-    if host.errors.len() > 0 -> return x64_execution_failure(host.errors.join("\n"), 0)
-    if host.state == 0 -> return x64_execution_failure("native execution host is not open", 0)
-    if host.scopes.closed.get(request.session) != None -> return x64_execution_failure("native logical session was closed; its bindings cannot be reused", x64_execution_word(host.state, 2))
-    generation := x64_execution_word(host.state, 2)
-    if request.image.errors.len() > 0 -> return X64ExecutionResponse{body: "", stopped: false, invalidated: false, generation: generation, errors: request.image.errors}
-    if request.image.text.len() < 1 || request.image.text.len() > 268435456 -> return x64_execution_failure("native image stream length is outside the admitted1..256MiB range", generation)
-    if request.image.exports.len() > 0 -> return x64_execution_failure("a dynamic native image may not export pinned Core Shared sites", generation)
-    if x64_execution_word(host.state, 0) == 0 {
-        if !x64_execution_spawn(host) {
-            _ := x64_execution_reap(host)
-            return x64_execution_failure("native execution child could not admit runtime {host.runtime_identity} or start", generation)
-        }
-        generation = x64_execution_word(host.state, 2)
-    }
-    loop (index, word) in host.runtime_identity_words {
-        if x64_execution_word(host.state, 5 + index) != word -> return x64_execution_failure("native request belongs to a different admitted runtime than this process's child", generation)
-    }
-    if request.core == .Val(core_image) {
-        errors :: x64_execution_prepare_core(host, core_image, generation)
-        if errors.len() > 0 {
-            return X64ExecutionResponse{body: "", stopped: false, invalidated: x64_execution_word(host.state, 2) != generation || x64_execution_word(host.state, 0) == 0, generation: generation, errors: errors}
-        }
-    }
-    fd :: x64_execution_word(host.state, 1)
-    if !os_session_output_reset(x64_execution_word(host.state, 3)) || !os_session_output_reset(x64_execution_word(host.state, 4)) -> return x64_execution_failure("could not reset native execution output", generation)
-    sent :: x64_execution_send_image(fd, request, host.runtime_identity)
-    body := String?{None}
-    native_value := X64NativeValue?{None}
-    if sent {
-        body = x64_session_read_frame(fd)
-        if request.boundary != None && body == .Val(first) && first.starts_with("[\"Node\",") {
-            native_value = x64_value_receive(fd, first)
-            if native_value == None || x64_session_read_frame(fd) != (Val("[\"ValueEnd\"]")) {
-                native_value = None
-                body = Val("[\"HostError\",\"native typed value stream is malformed or truncated\",true]")
-            }
-        }
-    }
-    stdout :: os_session_output_read(x64_execution_word(host.state, 3)) ?? return x64_execution_failure("could not read native stdout", generation)
-    stderr :: os_session_output_read(x64_execution_word(host.state, 4)) ?? return x64_execution_failure("could not read native stderr", generation)
-    if body == .Val(text) {
-        protocol_error :: if native_value == None -> x64_execution_protocol_error(text) else -> None
-        if protocol_error == .Val(error) {
-            if !error.restart -> return X64ExecutionResponse{body: "", stopped: false, invalidated: false, generation: generation, stdout: stdout, stderr: stderr, errors: [String]{error.message}}
-            _ := x64_execution_reap(host)
-            restarted :: x64_execution_spawn(host)
-            errors := [String]{error.message}
-            if !restarted {
-                _ := x64_execution_reap(host)
-                &errors.push("native execution child could not restart")
-            }
-            return X64ExecutionResponse{body: "", stopped: false, invalidated: true, generation: generation, stdout: stdout, stderr: stderr, errors: errors}
-        }
-        kind :: if native_value == None -> x64_execution_stop_kind(text) else -> None
-        // A turn's #MaxDepth/resource exhaustion invalidates its
-        // native stack and bindings. Bounded comptime depth is recoverable and
-        // does not discard independent, previously published REPL slots.
-        fatal :: kind == (Val("Panic")) || kind == (Val("HostFault")) || kind == (Val("Trap")) || (request.mode == X64ExecutionMode.Turn && kind == (Val("BudgetDepth")))
-        if !fatal -> return X64ExecutionResponse{body: if native_value != None -> "" else -> text, value: native_value, stopped: kind != None, invalidated: false, generation: generation, stdout: stdout, stderr: stderr, errors: [String]{}}
-        _ := x64_execution_reap(host)
-        // Fresh child, fresh slots; NEVER reinstall or replay earlier turns.
-        restarted :: x64_execution_spawn(host)
-        errors := [String]{}
-        if !restarted {
-            _ := x64_execution_reap(host)
-            &errors.push("native execution child could not restart")
-        }
-        return X64ExecutionResponse{body: text, stopped: true, invalidated: true, generation: generation, stdout: stdout, stderr: stderr, errors: errors}
-    }
-    status :: x64_execution_reap(host)
-    restarted :: x64_execution_spawn(host)
-    kind :: if status < 0 -> "Trap" else -> "HostFault"
-    message :: foundation_json_quote("native execution child ended without a stop record (status {status})")
-    errors := [String]{}
-    if !restarted {
-        _ := x64_execution_reap(host)
-        &errors.push("native execution child could not restart")
-    }
-    X64ExecutionResponse{body: "{{\"kind\":\"{kind}\",\"jct_status\":null,\"owner\":null,\"start\":null,\"end\":null,\"message\":{message}}}", stopped: true, invalidated: true, generation: generation, stdout: stdout, stderr: stderr, errors: errors}
-}
-
-fn x64_execution_string(tree: Dyn) -> String? Never! {
-    if tree == .Text(text) -> return Val(text)
-    None
-}
-fn x64_execution_int(tree: Dyn) -> Int? Never! {
-    if tree == .Int(number) -> return Val(number)
-    if tree == .Number(text) -> return Val(Int.parse(text) ?? return None)
-    None
-}
-fn x64_execution_array(tree: Dyn) -> [Dyn]? Never! {
-    if tree == .Array(rows) -> return Val(rows)
-    None
-}
-fn x64_execution_bool(tree: Dyn) -> Bool? Never! {
-    if tree == .Bool(flag) -> return Val(flag)
-    None
-}
-fn x64_execution_decode(tree: Dyn, runtime_identity: String) -> X64ExecutionEnvelope? {
-    fields :: x64_execution_array(tree) ?? return None
-    if fields.len() != 20 -> return None
-    if x64_execution_string(fields[14]) != Val(runtime_identity) -> return None
-    if x64_execution_string(fields[0]) != (Val("Call")) -> return None
-    mode_text :: x64_execution_string(fields[1]) ?? return None
-    mode := X64ExecutionMode.Comptime
-    if mode_text == "Turn" { mode = X64ExecutionMode.Turn } else { if mode_text != "Comptime" -> return None }
-    image_bytes :: x64_execution_int(fields[2]) ?? return None
-    if image_bytes < 1 || image_bytes > 268435456 -> return None
-    entry :: x64_execution_int(fields[3]) ?? return None
-    imports := [String]{}
-    import_rows :: x64_execution_array(fields[4]) ?? return None
-    loop row in import_rows -> &imports.push(x64_execution_string(row) ?? return None)
-    slots := [Int]{}
-    slot_rows :: x64_execution_array(fields[5]) ?? return None
-    loop row in slot_rows -> &slots.push(x64_execution_int(row) ?? return None)
-    args := [X64ExecutionScalar]{}
-    arg_rows :: x64_execution_array(fields[6]) ?? return None
-    loop row in arg_rows {
-        arg :: x64_execution_array(row) ?? return None
-        if arg.len() != 3 -> return None
-        kind :: x64_execution_string(arg[0]) ?? return None
-        value :: x64_execution_string(arg[1]) ?? return None
-        consumed :: x64_execution_bool(arg[2]) ?? return None
-        &args.push(X64ExecutionScalar{kind: kind, value: value, consumed: consumed})
-    }
-    result :: x64_execution_string(fields[7]) ?? return None
-    fuel :: Int.parse(x64_execution_string(fields[8]) ?? return None) ?? return None
-    depth :: Int.parse(x64_execution_string(fields[9]) ?? return None) ?? return None
-    if fuel < 0 || fuel > 18446744073709551615 || depth < 0 || depth > 18446744073709551615 -> return None
-    align :: x64_execution_int(fields[10]) ?? return None
-    finalizer := Int?{None}
-    if !(fields[11] == .Null) -> finalizer = Val(x64_execution_int(fields[11]) ?? return None)
-    data_offset :: x64_execution_int(fields[12]) ?? return None
-    reloc_rows :: x64_execution_array(fields[13]) ?? return None
-    relocs := [X64ImageDataReloc]{}
-    loop row in reloc_rows {
-        pair :: x64_execution_array(row) ?? return None
-        if pair.len() != 2 -> return None
-        &relocs.push(X64ImageDataReloc{at: x64_execution_int(pair[0]) ?? return None, target: x64_execution_int(pair[1]) ?? return None})
-    }
-    function_rows :: x64_execution_array(fields[15]) ?? return None
-    functions := [Int]{}
-    loop row in function_rows {
-        offset :: x64_execution_int(row) ?? return None
-        if offset < -1 || offset >= data_offset -> return None
-        &functions.push(offset)
-    }
-    session :: x64_execution_int(fields[16]) ?? return None
-    if session < 0 -> return None
-    boundary := X64ValueBoundary?{None}
-    release := Int?{None}
-    if !(fields[17] == .Null) {
-        boundary = Val(x64_value_boundary_decode(fields[17]) ?? return None)
-        offset :: x64_execution_int(fields[18]) ?? return None
-        if offset < 0 || offset >= data_offset -> return None
-        release = Val(offset)
-    } else if !(fields[18] == .Null) -> return None
-    closure_rows :: x64_execution_array(fields[19]) ?? return None
-    closures := [X64ClosureRegistration]{}
-    loop row in closure_rows -> &closures.push(x64_closure_registration_decode(row, data_offset) ?? return None)
-    request :: X64ExecutionRequest{image: X64MemoryImage{text: [U8]{}, align: align, entry: entry, finalizer: finalizer, functions: functions, data_offset: data_offset, imports: imports, slots: slots, relocs: relocs, errors: [String]{}}, mode: mode, args: args, result_kind: result, fuel: fuel, depth: depth, session: session, boundary: boundary, release: release, closures: closures}
-    Val(X64ExecutionEnvelope{request: request, image_bytes: image_bytes})
-}
-
-fn x64_execution_call(runtime: X64Runtime, symbol: String, word: Int) -> Int {
-    address :: os_library_symbol(runtime.library, symbol)
-    if address == 0 -> panic("execution runtime lacks {symbol}")
+fn x64_comptime_pipe(scratch: Int) -> [Int] {
     result := 0
-    #Unsafe("this is the canonical runtime's checked single-word C ABI") { result = os_call_address(address, word) }
-    result
+    #Unsafe("pipe2 writes two descriptors into our scratch page") {
+        result = os_syscall(293, scratch, 524288, 0, 0, 0, 0)
+    }
+    if os_failed(result) -> return [Int]{}
+    packed := 0
+    #Unsafe("pipe2 wrote the scratch page's first word") { packed = os_load_word(scratch) }
+    ends := [Int]{}
+    lows :: [Int]{packed.bit_and(4294967295), (packed >> 32).bit_and(4294967295)}
+    loop low in lows {
+        // F_DUPFD_CLOEXEC above every descriptor the child is given.
+        high := 0
+        #Unsafe("fcntl duplicates our own descriptor") {
+            high = os_syscall(72, low, 1030, X64_COMPTIME_FD_FLOOR, 0, 0, 0)
+        }
+        x64_comptime_close_fd(low)
+        if os_failed(high) -> return [Int]{}
+        &ends.push(high)
+    }
+    ends
 }
 
-fn x64_execution_scalar_word(runtime: X64Runtime, scalar: X64ExecutionScalar) -> Int? {
-    if scalar.kind == "String" || scalar.kind == "Int" {
-        if scalar.kind == "Int" {
-            number :: Int.parse(scalar.value) ?? return None
-            if number >= -4611686018427387904 && number < 4611686018427387904 -> return Val(number)
-        }
-        symbol :: if scalar.kind == "String" -> "jet_rt_string_from_static" else -> "jet_rt_int_from_static"
-        encoded :: x64_comptime_runtime_text(runtime, scalar.value, symbol)
-        if encoded.errors.len() > 0 -> return None
-        return Val(encoded.word)
-    }
-    if scalar.kind == "Unit" -> return Val(0)
-    number := Int.parse(scalar.value) ?? return None
-    if scalar.kind == "Bool" {
-        if number == 0 || number == 1 -> return Val(number)
-        return None
-    }
-    if scalar.kind == "Char" {
-        if number >= 0 && number <= 1114111 && (number < 55296 || number > 57343) -> return Val(number)
-        return None
-    }
-    if scalar.kind == "Float" || scalar.kind == "U64" {
-        if number < 0 || number > 18446744073709551615 -> return None
-        if number >= 9223372036854775808 -> number -= 18446744073709551616
-        return Val(number)
-    }
-    if scalar.kind == "I64" && number >= -9223372036854775808 && number <= 9223372036854775807 -> return Val(number)
-    None
-}
-fn x64_execution_drop_scalar(runtime: X64Runtime, kind: String, word: Int) {
-    if kind == "String" || kind == "Json" -> _ := x64_execution_call(runtime, "jet_rt_string_drop", word)
-}
-fn x64_execution_result(runtime: X64Runtime, kind: String, word: Int) -> String? {
-    value := "{word}"
-    if kind == "String" || kind == "Json" {
-        decoded :: x64_comptime_read_string(runtime, word)
-        if decoded.errors.len() > 0 -> return None
-        scalar :: decoded.value ?? return None
-        text :: if scalar == .String(string_value) -> string_value else -> { return None }
-        value = text
-        if kind == "Json" {
-            // The checked turn wrapper produced type-directed JSON for its
-            // echo, not Display. Validate JSON but return its exact bytes.
-            _ := execution_json.parse(value) ?? return None
-        }
-    } else {
-        if kind == "Int" && (word < -4611686018427387904 || word >= 4611686018427387904) {
-            text_word :: x64_execution_call(runtime, "jet_rt_int_to_string", word)
-            decoded :: x64_comptime_read_string(runtime, text_word)
-            _ := x64_execution_call(runtime, "jet_rt_string_drop", text_word)
-            if decoded.errors.len() > 0 -> return None
-            scalar :: decoded.value ?? return None
-            text :: if scalar == .String(integer_text) -> integer_text else -> { return None }
-            value = text
-        }
-        if (kind == "Float" || kind == "U64") && word < 0 -> value = "{word + 18446744073709551616}"
-        if kind == "Unit" -> value = ""
-        if kind != "Int" && kind != "Float" && kind != "U64" && kind != "I64" && kind != "Bool" && kind != "Char" && kind != "Unit" -> return None
-    }
-    Val("[\"Value\",{foundation_json_quote(kind)},{foundation_json_quote(value)}]")
+fn x64_comptime_close_fd(fd: Int) {
+    if fd < 0 -> return
+    #Unsafe("closes our own descriptor") { _ := os_syscall(3, fd, 0, 0, 0, 0, 0) }
 }
 
-// Invoked by the private CLI entry. One thread owns all code and bindings.
-// Retain even images with no newly published slot: live closures may point
-// into any earlier image. Destroy slots BEFORE unmapping their original glue.
-fn x64_execution_service(runtime_path: String, runtime_identity: String) -> Int {
-    bytes :: execution_files.read_bytes(runtime_path) ?? return 101
-    if execution_crypto.sha256(bytes).hex() != runtime_identity -> return 101
-    runtime := x64_runtime_open(runtime_path)
-    if runtime.errors.len() > 0 -> return 101
-    sessions := [Int:Int]{}
-    images := [X64PinnedExecutionImage]{}
-    closures := [Int:X64ClosureValueLayout]{}
-    closed := [Int:Bool]{}
-    core_identity := ""
-    // Deliberately not part of `images`: close/reload cannot finalize or unmap
-    // any canonical Shared cell. Process exit releases this mapping.
-    core_image := X64LoadedImage?{None}
-    if !x64_session_write_frame(3, "[\"Ready\",{foundation_json_quote(runtime_identity)}]") -> return 101
-    loop {
-        frame :: x64_session_read_frame_status(3, 16777216)
-        if frame == .EOF -> break
-        first :: if frame == .Bytes(frame_bytes) -> frame_bytes else -> { return x64_execution_service_error("native first frame is malformed, oversized, or truncated") }
-        body :: String.from_bytes(first) ?? return x64_execution_service_error("native first frame is not UTF-8 metadata")
-        if body == "[\"Shutdown\"]" -> break
-        lifecycle :: execution_json.parse(body) ?? return x64_execution_service_error("native lifecycle metadata is malformed")
-        if lifecycle == .Array(fields) && fields.len() == 3 && x64_execution_string(fields[0]) == (Val("Core")) {
-            identity :: x64_execution_string(fields[1]) ?? return x64_execution_service_error("pinned Core identity is malformed")
-            metadata :: x64_execution_array(fields[2]) ?? return x64_execution_service_error("pinned Core metadata is malformed")
-            if metadata.len() != 2 -> return x64_execution_service_error("pinned Core metadata has the wrong field count")
-            envelope :: x64_execution_decode(metadata[0], runtime_identity) ?? return x64_execution_service_error("pinned Core image metadata is malformed")
-            received :: x64_execution_receive_image(3, envelope) ?? return x64_execution_service_error("pinned Core stream is oversized, truncated, or has a different length/digest")
-            image := received.image
-            exports :: x64_execution_array(metadata[1]) ?? return x64_execution_service_error("pinned Core export inventory is malformed")
-            loop row in exports {
-                pair :: x64_execution_array(row) ?? return x64_execution_service_error("pinned Core export row is malformed")
-                if pair.len() != 2 -> return x64_execution_service_error("pinned Core export row has the wrong field count")
-                symbol :: x64_execution_string(pair[0]) ?? return x64_execution_service_error("pinned Core export name is malformed")
-                offset :: x64_execution_int(pair[1]) ?? return x64_execution_service_error("pinned Core export offset is malformed")
-                if image.exports.get(symbol) != None -> return x64_execution_service_error("duplicate pinned Core export {symbol}")
-                image.exports[symbol] = offset
-            }
-            expected :: x64_execution_core_identity(image, x64_execution_core_metadata(image, runtime_identity))
-            if identity != expected -> return x64_execution_service_error("pinned Core identity does not match its image and metadata")
-            if core_image != None && core_identity != identity {
-                if !x64_session_write_frame(3, "[\"HostError\",\"this native child already owns a different pinned Core image; its Shared sites cannot be replaced\",false]") -> return 101
-                next
-            }
-            if core_image == None {
-                errors :: x64_core_export_errors(image)
-                if errors.len() > 0 -> return x64_execution_service_error(errors.join("\n"))
-                loaded :: x64_load_image(image, runtime)
-                if loaded.errors.len() > 0 -> return x64_execution_service_error(loaded.errors.join("\n"))
-                begin :: os_library_symbol(runtime.library, "jet_rt_execution_begin")
-                status :: os_library_symbol(runtime.library, "jet_rt_session_status")
-                end :: os_library_symbol(runtime.library, "jet_rt_execution_end")
-                failure :: x64_core_startup_bound(loaded, begin, status, end)
-                if failure != "" -> return x64_execution_service_error(failure)
-                runtime = x64_core_bind_exports(runtime, image, loaded)
-                core_image = Val(loaded)
-                core_identity = identity
-            }
-            if !x64_session_write_frame(3, "[\"CoreReady\",{foundation_json_quote(identity)}]") -> return 101
-            next
+// Writes all of `bytes` to `fd` through the `size`-byte buffer at `buffer`;
+// 0 or a failed call's result.
+fn x64_comptime_write_all(fd: Int, bytes: [U8], buffer: Int, size: Int) -> Int {
+    at := 0
+    loop at < bytes.len() {
+        count :: if bytes.len() - at < size -> bytes.len() - at else -> size
+        os_copy_in_range(buffer, bytes, at, count)
+        done := 0
+        loop done < count {
+            moved :: os_write(fd, buffer + done, count - done)
+            if moved == -4 -> next
+            if os_failed(moved) -> return moved
+            done += moved
         }
-        if lifecycle == .Array(fields) && fields.len() == 2 && x64_execution_string(fields[0]) == (Val("Close")) {
-            identity :: x64_execution_int(fields[1]) ?? return x64_execution_service_error("native logical close identity is malformed")
-            if identity < 0 -> return x64_execution_service_error("native logical close identity is invalid")
-            if &sessions.remove(identity) == .Val(session) {
-                if x64_execution_call(runtime, "jet_rt_session_destroy", session) == 0 -> return x64_execution_service_error("native logical session could not release its typed slots")
-            }
-            // Reverse definition order, AFTER typed slots have run their
-            // original drop glue. Keep survivors in original definition order.
-            survivors := [X64PinnedExecutionImage]{}
-            loop images.len() > 0 {
-                pinned :: &images.pop() ?? panic("checked nonempty pinned images")
-                if pinned.session != identity {
-                    &survivors.push(pinned)
-                    next
-                }
-                loop code in pinned.codes -> _ := &closures.remove(code)
-                if !x64_unload_image(pinned.image) -> return x64_execution_service_error("native logical close could not finalize and unload its image")
-            }
-            loop survivors.len() > 0 {
-                survivor :: &survivors.pop() ?? panic("checked nonempty surviving images")
-                &images.push(survivor)
-            }
-            closed[identity] = true
-            if !x64_session_write_frame(3, "[\"Closed\",{identity}]") -> return 101
-            next
-        }
-        envelope :: x64_execution_decode(lifecycle, runtime_identity) ?? return x64_execution_service_error("native request metadata is malformed or oversized")
-        request :: x64_execution_receive_image(3, envelope) ?? return x64_execution_service_error("native image stream is oversized, truncated, or has a different length/digest")
-        if closed.get(request.session) != None {
-            if !x64_session_write_frame(3, "[\"HostError\",\"native logical session was closed; its bindings cannot be reused\",false]") -> return 101
-            next
-        }
-        session := sessions.get(request.session) ?? 0
-        if session == 0 {
-            session = x64_execution_call(runtime, "jet_rt_session_create", 0)
-            if session == 0 -> return x64_execution_service_error("native logical session could not allocate its retained scope")
-            &sessions.add(request.session, session).drop("checked absent above")
-        }
-        loaded :: x64_load_image(request.image, runtime)
-        if loaded.errors.len() > 0 -> return x64_execution_service_error(loaded.errors.join("\n"))
-        codes := [Int]{}
-        loop row in request.closures {
-            code :: loaded.base + row.offset
-            closures[code] = row.layout
-            &codes.push(code)
-        }
-        &images.push(X64PinnedExecutionImage{session: request.session, image: loaded, codes: codes})
-        output := 0
-        header := 0
-        output_allocation := X64NativeAllocation?{None}
-        header_allocation := X64NativeAllocation?{None}
-        if request.boundary == .Val(boundary) {
-            layout :: boundary.descriptors[boundary.root]
-            allocate :: os_library_symbol(runtime.library, "jet_rt_alloc")
-            release :: os_library_symbol(runtime.library, "jet_rt_free")
-            owned_output :: x64_execution_alloc(allocate, release, layout.size, layout.align)
-            if owned_output.refusal_key != "" -> return x64_execution_service_error(owned_output.refusal_key)
-            output_allocation = Val(owned_output)
-            output = owned_output.pointer
-            owned_header :: x64_execution_alloc(allocate, release, 32, 8)
-            if owned_header.refusal_key != "" {
-                error :: x64_execution_free(owned_output, layout.size, layout.align)
-                if error != "" -> return x64_execution_service_error(error)
-                return x64_execution_service_error(owned_header.refusal_key)
-            }
-            header_allocation = Val(owned_header)
-            header = owned_header.pointer
-        }
-        cells :: os_map(8 * (request.args.len() + 3), OS_PROT_READ + OS_PROT_WRITE)
-        if os_failed(cells) -> return 101
-        words := [Int]{}
-        loop arg in request.args -> &words.push(x64_execution_scalar_word(runtime, arg) ?? return 101)
-        if request.mode == X64ExecutionMode.Turn -> &words.insert(0, session)
-        if request.boundary != None -> &words.insert(0, output)
-        loop (index, word) in words {
-            #Unsafe("each initialized argument is inside this request's mapped cells") { os_store_word(cells + 8 * index, word) }
-        }
-        if (x64_execution_call(runtime, "jet_rt_session_begin", session).bit_and(255)) == 0 -> return 101
-        begin :: os_library_symbol(runtime.library, "jet_rt_execution_begin")
-        if begin == 0 -> return 101
-        started := 0
-        #Unsafe("execution_begin takes three u64 words: fuel, depth, is_comptime") {
-            is_comptime :: request.mode == X64ExecutionMode.Comptime
-            started = os_call_address_three(begin, if is_comptime -> request.fuel else -> -1, if is_comptime -> request.depth else -> -1, if is_comptime -> 1 else -> 0)
-        }
-        if (started.bit_and(255)) == 0 -> return 101
-        #Unsafe("entry is the selector-generated pointer-to-cells adapter for this checked request; images and runtime stay pinned") { _ := os_call_address(loaded.entry, cells) }
-        status :: x64_execution_call(runtime, "jet_rt_session_status", 0)
-        reply := String?{None}
-        streamed := false
-        _ := x64_execution_call(runtime, "jet_rt_session_shield_enter", 0)
-        // NEVER touch an uninitialized stopped result cell.
-        if status == 0 {
-            if request.boundary == .Val(boundary) {
-                streamed = x64_value_native_stream(runtime, 3, boundary, boundary.root, output, closures, header)
-                release :: request.release ?? return x64_execution_service_error("native result has no original release glue")
-                #Unsafe("successful result storage belongs to this exact pinned image's generated typed release glue") {
-                    _ := os_call_address(loaded.base + release, output)
-                }
-            } else {
-                word := 0
-                if request.result_kind != "Unit" {
-                    #Unsafe("the successful checked adapter initialized its result cell") { word = os_load_word(cells + 8 * words.len()) }
-                }
-                reply = x64_execution_result(runtime, request.result_kind, word)
-                x64_execution_drop_scalar(runtime, request.result_kind, word)
-            }
-        }
-        loop (index, arg) in request.args {
-            if !arg.consumed {
-                at :: index + (if request.mode == X64ExecutionMode.Turn -> 1 else -> 0) + (if request.boundary != None -> 1 else -> 0)
-                x64_execution_drop_scalar(runtime, arg.kind, words[at])
-            }
-        }
-        _ := x64_execution_call(runtime, "jet_rt_session_shield_leave", 0)
-        if (x64_execution_call(runtime, "jet_rt_session_end", session).bit_and(255)) == 0 -> return 101
-        if request.boundary == .Val(boundary) {
-            layout :: boundary.descriptors[boundary.root]
-            owned_output :: output_allocation ?? return x64_execution_service_error("native result allocation receipt is missing")
-            owned_header :: header_allocation ?? return x64_execution_service_error("native header allocation receipt is missing")
-            output_error :: x64_execution_free(owned_output, layout.size, layout.align)
-            header_error :: x64_execution_free(owned_header, 32, 8)
-            if output_error != "" || header_error != "" -> return x64_execution_service_error("{output_error};{header_error}")
-        }
-        _ := os_unmap(cells, 8 * (request.args.len() + 3))
-        if status != 0 {
-            if x64_execution_call(runtime, "jet_rt_execution_stop_write", 0) == 0 -> return 101
-        }
-        _ := x64_execution_call(runtime, "jet_rt_execution_end", 0)
-        if status == 0 {
-            if request.boundary != None {
-                if !streamed -> return x64_execution_service_error("native typed value stream could not detach the checked result")
-                if !x64_session_write_frame(3, "[\"ValueEnd\"]") -> return 101
-            } else {
-                text :: reply ?? return x64_execution_service_error("native scalar result could not be marshaled")
-                if !x64_session_write_frame(3, text) -> return x64_execution_service_error("native scalar result exceeds its metadata frame")
-            }
-        }
-    }
-    loop (_, session) in sessions {
-        if x64_execution_call(runtime, "jet_rt_session_destroy", session) == 0 -> return 101
-    }
-    loop images.len() > 0 {
-        pinned :: &images.pop() ?? panic("checked nonempty pinned images")
-        if !x64_unload_image(pinned.image) -> return 101
+        at += count
     }
     0
 }
 
-#Test("native execution JSON integers retain exact Dyn numbers") {
-    assert_eq(x64_execution_int(Dyn.Number("18446744073709551615")), Val(18446744073709551615))
-    assert_eq(x64_execution_int(Dyn.Number("-42")), Val(-42))
-    assert_eq(x64_execution_int(Dyn.Number("1.5")), None)
-    assert_eq(x64_execution_int(Dyn.Text("42")), None)
+// Sends one frame and its payload.
+fn x64_comptime_send(child: &X64ComptimeChild, frame: [U8], payload: [U8]) -> Bool {
+    if child.pid <= 0 -> return false
+    error := x64_comptime_write_all(child.command, frame, child.scratch + 4096, X64_COMPTIME_BUFFER)
+    if error == 0 && payload.len() > 0 {
+        error = x64_comptime_write_all(child.command, payload, child.scratch + 4096, X64_COMPTIME_BUFFER)
+    }
+    if error == 0 -> return true
+    // The child is gone; its end is what its exit says.
+    x64_comptime_reap(&child, false)
+    false
+}
+
+// One reply frame, or None once the child ended or ran out of time.
+fn x64_comptime_receive(child: &X64ComptimeChild) -> [U8]? {
+    x64_comptime_receive_bytes(&child, X64_COMPTIME_FRAME_BYTES)
+}
+
+// Exactly `count` reply bytes, draining the child's output meanwhile.
+fn x64_comptime_receive_bytes(child: &X64ComptimeChild, count: Int) -> [U8]? {
+    bytes := [U8]{}
+    if child.pid <= 0 -> return None
+    poll :: child.scratch
+    loop bytes.len() < count {
+        // pollfd {fd: i32, events: POLLIN, revents}; a closed (-1) output is skipped.
+        #Unsafe("the poll set is our scratch page's first three entries") {
+            os_store_word(poll, child.reply.bit_and(4294967295).bit_or(1 << 32))
+            os_store_word(poll + 8, child.output.bit_and(4294967295).bit_or(1 << 32))
+            os_store_word(poll + 16, child.errors.bit_and(4294967295).bit_or(1 << 32))
+        }
+        started :: x64_comptime_clock(child.scratch)
+        ready := 0
+        #Unsafe("poll reads and writes the three entries of our scratch page") {
+            ready = os_syscall(7, poll, 3, child.budget, 0, 0, 0)
+        }
+        if child.budget >= 0 {
+            spent :: x64_comptime_clock(child.scratch) - started
+            child.budget = if child.budget > spent -> child.budget - spent else -> 0
+        }
+        if ready == -4 -> next
+        if os_failed(ready) {
+            child.failure = "can't wait for the comptime child ({-ready})"
+            x64_comptime_reap(&child, true)
+            return None
+        }
+        if ready == 0 {
+            child.exhausted = true
+            x64_comptime_reap(&child, true)
+            return None
+        }
+        events := [Int]{}
+        #Unsafe("poll wrote the entries' returned events") {
+            loop index in 0..<3 -> &events.push((os_load_word(poll + 8 * index) >> 48).bit_and(65535))
+        }
+        if events[1] != 0 {
+            _ := x64_comptime_drain(&child, false)
+        }
+        if events[2] != 0 {
+            _ := x64_comptime_drain(&child, true)
+        }
+        if events[0] != 0 {
+            want :: if count - bytes.len() < X64_COMPTIME_BUFFER -> count - bytes.len() else -> X64_COMPTIME_BUFFER
+            moved :: os_read(child.reply, child.scratch + 4096, want)
+            if moved == -4 -> next
+            if moved <= 0 {
+                x64_comptime_reap(&child, false)
+                return None
+            }
+            x64_comptime_take(child.scratch + 4096, moved, &bytes)
+        }
+    }
+    Val(bytes)
+}
+
+// Takes the output the child wrote before its last reply: drains its
+// standard output and error until neither holds more.
+fn x64_comptime_settle(child: &X64ComptimeChild) {
+    if child.pid <= 0 -> return
+    poll :: child.scratch
+    loop {
+        #Unsafe("the poll set is our scratch page's first two entries") {
+            os_store_word(poll, child.output.bit_and(4294967295).bit_or(1 << 32))
+            os_store_word(poll + 8, child.errors.bit_and(4294967295).bit_or(1 << 32))
+        }
+        ready := 0
+        #Unsafe("poll reads and writes the two entries of our scratch page") {
+            ready = os_syscall(7, poll, 2, 0, 0, 0, 0)
+        }
+        if ready == -4 -> next
+        if ready <= 0 -> return
+        events := [Int]{}
+        #Unsafe("poll wrote the entries' returned events") {
+            loop index in 0..<2 -> &events.push((os_load_word(poll + 8 * index) >> 48).bit_and(65535))
+        }
+        if events[0] != 0 -> _ := x64_comptime_drain(&child, false)
+        if events[1] != 0 -> _ := x64_comptime_drain(&child, true)
+    }
+}
+
+// Reads what the child's stdout (or, `errors`, stderr) holds now; false,
+// and the pipe closed, at its end.
+fn x64_comptime_drain(child: &X64ComptimeChild, errors: Bool) -> Bool {
+    fd :: if errors -> child.errors else -> child.output
+    if fd < 0 -> return false
+    moved :: os_read(fd, child.scratch + 4096, X64_COMPTIME_BUFFER)
+    if moved == -4 -> return true
+    if moved <= 0 {
+        x64_comptime_close_fd(fd)
+        if errors {
+            child.errors = -1
+        } else {
+            child.output = -1
+        }
+        return false
+    }
+    if errors {
+        x64_comptime_take(child.scratch + 4096, moved, &child.stderr)
+    } else {
+        x64_comptime_take(child.scratch + 4096, moved, &child.stdout)
+    }
+    true
+}
+
+// Appends the `count` bytes at `address` (in our mapping) to `bytes`.
+fn x64_comptime_take(address: Int, count: Int, bytes: &[U8]) {
+    at := 0
+    loop at < count {
+        word := 0
+        #Unsafe("the bytes lie in our scratch mapping, whose size is a multiple of eight") { word = os_load_word(address + at) }
+        bits := if word < 0 -> word + 18446744073709551616 else -> word
+        loop _ in 0..<(if count - at < 8 -> count - at else -> 8) {
+            &bytes.push(U8{bits.bit_and(255)})
+            bits = bits >> 8
+        }
+        at += 8
+    }
+}
+
+// Monotonic milliseconds.
+fn x64_comptime_clock(scratch: Int) -> Int {
+    time := 0
+    #Unsafe("clock_gettime writes two words at scratch + 64, past the poll set") {
+        _ := os_syscall(228, 1, scratch + 64, 0, 0, 0, 0)
+        time = os_load_word(scratch + 64) * 1000 + os_load_word(scratch + 72) /% 1000000
+    }
+    time
+}
+
+// Waits for the child (killing it first when `kill`), collecting what it
+// wrote on its way out; then its descriptors close.
+fn x64_comptime_reap(child: &X64ComptimeChild, kill: Bool) {
+    if child.pid <= 0 -> return
+    if kill {
+        #Unsafe("kills our own child") { _ := os_syscall(62, child.pid, 9, 0, 0, 0, 0) }
+    }
+    // The output pipes end when the child does.
+    loop x64_comptime_drain(&child, false) {}
+    loop x64_comptime_drain(&child, true) {}
+    result := 0
+    loop {
+        #Unsafe("wait4 writes the status word into our scratch page") {
+            result = os_syscall(61, child.pid, child.scratch + 80, 0, 0, 0, 0)
+        }
+        if result != -4 -> break
+    }
+    #Unsafe("wait4 wrote the status word") {
+        child.status = if result == child.pid -> os_load_word(child.scratch + 80).bit_and(4294967295) else -> 0
+    }
+    child.pid = 0
+    x64_comptime_close_fd(child.command)
+    x64_comptime_close_fd(child.reply)
+    x64_comptime_close_fd(child.output)
+    x64_comptime_close_fd(child.errors)
+    child.command = -1
+    child.reply = -1
+    child.output = -1
+    child.errors = -1
+}
+
+// The child's end: an exit status, or 128 + the signal that ended it.
+fn x64_comptime_exit_code(child: X64ComptimeChild) -> Int Never! {
+    signal :: child.status.bit_and(127)
+    if signal == 0 -> (child.status >> 8).bit_and(255) else -> 128 + signal
+}
+
+// Ends a live child and releases its buffers.
+fn x64_comptime_close(child: &X64ComptimeChild) {
+    if child.pid > 0 {
+        _ := x64_comptime_send(&child, x64_comptime_frame(X64_COMPTIME_EXIT, [Int]{}), [U8]{})
+        x64_comptime_reap(&child, false)
+    }
+    x64_comptime_close_fd(child.command)
+    x64_comptime_close_fd(child.reply)
+    x64_comptime_close_fd(child.output)
+    x64_comptime_close_fd(child.errors)
+    child.command = -1
+    child.reply = -1
+    child.output = -1
+    child.errors = -1
+    if child.scratch != 0 {
+        _ := os_unmap(child.scratch, 4096 + X64_COMPTIME_BUFFER)
+        child.scratch = 0
+    }
+}
+
+// The part of a bound executable (MemoryLink.jet) from address `from` up:
+// its segments, whose offsets index `bytes`, and the page its last one
+// ends before; or why the executable has none.
+struct X64ComptimeCode {
+    segments: [X64Segment]
+    bytes: [U8]
+    high: Int
+    failure: String
+}
+
+fn x64_comptime_code(image: [U8], from: Int) -> X64ComptimeCode Never! {
+    parsed :: x64_image_segments(image)
+    code := X64ComptimeCode{segments: [X64Segment]{}, bytes: [U8]{}, high: from, failure: parsed.failure}
+    if parsed.failure != "" -> return code
+    first := -1
+    last := 0
+    loop segment in parsed.segments {
+        if segment.vaddr < from -> next
+        if first < 0 || segment.offset < first -> first = segment.offset
+        if segment.offset + segment.file_size > last -> last = segment.offset + segment.file_size
+    }
+    if first < 0 -> return code
+    &code.bytes.extend(image[first..<last])
+    loop segment in parsed.segments {
+        if segment.vaddr < from -> next
+        &code.segments.push(X64Segment{vaddr: segment.vaddr, file_size: segment.file_size, memory_size: segment.memory_size, flags: segment.flags, offset: segment.offset - first})
+        end :: os_page_round(segment.vaddr + segment.memory_size)
+        if end > code.high -> code.high = end
+    }
+    code
+}
+
+// Loads `code` into the child: each segment gets fresh pages at its
+// address, its bytes, then its protection. "" or why it didn't load.
+fn x64_comptime_load(child: &X64ComptimeChild, code: X64ComptimeCode) -> String {
+    loop segment in code.segments {
+        low :: segment.vaddr - segment.vaddr % OS_PAGE_SIZE
+        end :: os_page_round(segment.vaddr + segment.memory_size)
+        mapped :: x64_comptime_ask(&child, X64_COMPTIME_MAP, [Int]{low, end - low}) ?? return x64_comptime_end_text(child, "while its code loaded")
+        if mapped != low -> return "the comptime child couldn't map {end - low} bytes at {low} ({mapped})"
+        if segment.file_size > 0 {
+            bytes := [U8]{}
+            &bytes.extend(code.bytes[segment.offset..<(segment.offset + segment.file_size)])
+            if !x64_comptime_send(&child, x64_comptime_frame(X64_COMPTIME_WRITE, [Int]{segment.vaddr, segment.file_size}), bytes) -> return x64_comptime_end_text(child, "while its code loaded")
+        }
+        // PF_X, PF_W, PF_R to PROT_EXEC, PROT_WRITE, PROT_READ.
+        protection := 0
+        if segment.flags.bit_and(1) != 0 -> protection += 4
+        if segment.flags.bit_and(2) != 0 -> protection += 2
+        if segment.flags.bit_and(4) != 0 -> protection += 1
+        protected :: x64_comptime_ask(&child, X64_COMPTIME_PROTECT, [Int]{low, end - low, protection}) ?? return x64_comptime_end_text(child, "while its code loaded")
+        if protected != 0 -> return "the comptime child couldn't protect its code at {low} ({protected})"
+    }
+    ""
+}
+
+// Sends command `kind` and returns its DONE word; None when the child
+// ended or answered anything else.
+fn x64_comptime_ask(child: &X64ComptimeChild, kind: Int, operands: [Int]) -> Int? {
+    if !x64_comptime_send(&child, x64_comptime_frame(kind, operands), [U8]{}) -> return None
+    reply :: x64_comptime_receive(&child) ?? return None
+    if x64_comptime_word(reply, 0) != X64_COMPTIME_DONE {
+        child.failure = "the comptime child answered command {kind} with frame {x64_comptime_word(reply, 0)}"
+        x64_comptime_reap(&child, true)
+        return None
+    }
+    Val(x64_comptime_word(reply, 8))
+}
+
+// The defined symbols of the executable `image` (its `.symtab`) whose names
+// start with `prefix`, by name: their addresses. `globals` keeps only the
+// global and weak ones, which are what a bound program's imports resolve to.
+fn x64_comptime_symbols(image: [U8], prefix: String, globals: Bool) -> [String:Int] Never! {
+    found := [String:Int]{}
+    if image.len() < 64 -> return found
+    start :: prefix.bytes()
+    sections :: x64_comptime_unsigned(image, 40, 8)
+    header_size :: x64_comptime_unsigned(image, 58, 2)
+    count :: x64_comptime_unsigned(image, 60, 2)
+    loop section in 0..<count {
+        header :: sections + section * header_size
+        if header + 64 > image.len() -> break
+        // SHT_SYMTAB
+        if x64_comptime_unsigned(image, header + 4, 4) != 2 -> next
+        offset :: x64_comptime_unsigned(image, header + 24, 8)
+        size :: x64_comptime_unsigned(image, header + 32, 8)
+        strings_header :: sections + x64_comptime_unsigned(image, header + 40, 4) * header_size
+        entry_size :: x64_comptime_unsigned(image, header + 56, 8)
+        if entry_size < 24 || strings_header + 64 > image.len() -> next
+        strings :: x64_comptime_unsigned(image, strings_header + 24, 8)
+        loop symbol in 0..<(size /% entry_size) {
+            entry :: offset + symbol * entry_size
+            if entry + 24 > image.len() -> break
+            // SHN_UNDEF: an import, not a definition.
+            if x64_comptime_unsigned(image, entry + 6, 2) == 0 -> next
+            // STB_LOCAL
+            if globals && image[entry + 4] < (U8{16}) -> next
+            at := strings + x64_comptime_unsigned(image, entry, 4)
+            matches := at + start.len() <= image.len()
+            loop (index, byte) in start {
+                if !matches -> break
+                if image[at + index] != byte -> matches = false
+            }
+            if !matches -> next
+            name := [U8]{}
+            loop at < image.len() && image[at] != (U8{0}) {
+                &name.push(image[at])
+                at += 1
+            }
+            text :: String.from_bytes(name) ?? { next }
+            found[text] = x64_comptime_unsigned(image, entry + 8, 8)
+        }
+    }
+    found
 }

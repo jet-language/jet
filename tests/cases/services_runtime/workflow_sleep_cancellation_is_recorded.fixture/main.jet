@@ -1,0 +1,36 @@
+use core.service as service
+use core.testing as testing
+
+fn worker() {}
+
+fn sleeping_workflow(store_path: String, ready: Sender<Int>) {
+    tree := service.tree("checkout")
+    store :: service.state_store(store_path) ?? panic("state store")
+    &tree.set_state_event_log(^store, "workflow-events", 1, "reversible") ?? panic("state")
+    &tree.worker("activities", ^worker, capacity: 1) ?? panic("worker")
+    &tree.start() ?? panic("start")
+    workflow :: &tree.workflow_start("checkout", 1) ?? panic("workflow")
+    ready.send(1)
+    workflow.sleep(Duration.seconds(10) ?? panic("duration")) ?? panic("sleep completed")
+}
+
+fn run() {
+    temp :: testing.temp_dir("workflow-sleep-cancel")
+    store_path :: Path.from(temp).join("workflow.log").to_string()
+    { sender: ready, receiver: started } :: channel<Int>()
+    task_handle :: task sleeping_workflow(store_path.copy(), ready)
+    started.receive() ?? panic("workflow did not start")
+    task_handle.cancel()
+    result :: task_handle.join()
+    if result == {
+        .Err(_) -> print("cancelled")
+        .Ok(_) -> print("completed")
+    }
+
+    tree := service.tree("checkout")
+    store :: service.state_store(store_path) ?? panic("state store")
+    &tree.set_state_event_log(^store, "workflow-events", 1, "reversible") ?? panic("state")
+    &tree.worker("activities", ^worker, capacity: 1) ?? panic("worker")
+    &tree.start() ?? panic("restart")
+    print("history:{tree.workflow_history(1) ?? panic("history")}")
+}

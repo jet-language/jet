@@ -12,11 +12,15 @@ export function nativeSuiteCommands({ root, jet, head, scratch, evidence, node =
         ['agent-doc-flags', 'check-agent-doc-flags.mjs', []],
         ['decision-index', 'decision-index.mjs', ['--check']],
         ['core-coverage', 'core-coverage-census.mjs', ['--check']],
+        ['core-module-check', 'core-module-check.mjs', ['--check']],
     ].map(([scope, file, args]) => ({ scope, command: node, args: [join(root, 'Tools/agent', file), ...args], cwd: root, kind: 'gate', documents: {} }));
     for (const suite of suites) {
         if (suite !== 'registries') {
+            // The fixture gate is `jet test Tools/testkit`; its `suite <name>` test reads JET (the
+            // compiler under test) and JET_TEST_SCRATCH_DIR from the runner's environment and writes
+            // the case verdicts to $JET_CI_EVIDENCE_DIR/<name>.json, the evidence report below.
             const report = join(evidence, `${suite}.json`);
-            definitions.push({ scope: suite, command: node, args: [join(root, 'Tools/testkit/run.mjs'), suite, '--jet', jet, '--tier', 'o0,o1,o2', '--opt-in', '--scratch', scratch, '--results', report], cwd: root, kind: 'testkit', documents: { report }, jet, suite });
+            definitions.push({ scope: suite, command: jet, args: ['test', join(root, 'Tools/testkit'), `suite ${suite}`, '--serial', '--capture=all', '--color=never'], cwd: root, kind: 'testkit', documents: { report }, jet, suite });
         } else {
             const output = join(scratch, 'registries'), manifest = join(output, 'manifest.json'), report = join(evidence, 'registries.json');
             definitions.push({ scope: 'registry-manifest', command: node, args: [join(root, 'Tools/agent/compiler-registries.mjs'), 'manifest', head, '--out', output], cwd: root, kind: 'manifest', documents: { manifest }, head, root });

@@ -1,0 +1,20 @@
+# `jet test <dir>` and a bare `jet test` in the package run the directory's own `fn test`
+# (its `@test.jet` role home), as `jet build <dir>` runs its `fn build`; `--show-default`
+# tests the stock entry instead.
+fixture: fixtures/test_directory
+step: jet test . --serial --capture=all
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "directory entry"
+stdout: ~ "stock: pass"
+step: jet test --serial --capture=all
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "directory entry"
+stdout: ~ "stock: pass"
+step: jet test . --show-default --serial --capture=all
+env: NO_COLOR=1
+exit: 0
+stderr: ~ "jet test: using stock default"
+stdout: !~ "directory entry"
+stdout: ~ "stock: pass"

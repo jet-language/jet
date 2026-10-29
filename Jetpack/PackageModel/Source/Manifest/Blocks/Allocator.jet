@@ -2,23 +2,24 @@
 // parsed once into the compiler's `MirAllocatorPolicy` (Package/Blocks.rs).
 // v1 ships the hidden system heap and its counting/capping wrapper; unknown
 // values fail closed.
+use jet_foundation.[AllocatorPolicy, ByteSize]
 
 fn pkg_bad_allocator(detail: String) -> PackageParseError Never! {
     PackageParseError.BadAllocatorPolicy{detail: detail}
 }
 
-fn pkg_parse_program_allocator(value: String) -> MIRAllocatorPolicy PackageParseError! {
+fn pkg_parse_program_allocator(value: String) -> AllocatorPolicy PackageParseError! {
     compact :: pkg_without_whitespace(value)
-    if compact == "mem.Heap" -> return Ok(MIRAllocatorPolicy.HostedDefault)
+    if compact == "mem.Heap" -> return Ok(AllocatorPolicy.HostedDefault)
     args :: pkg_strip_wrapped(compact, "mem.Counting.over(", ")") ?? return Err(pkg_bad_allocator("`allocator:` must be `mem.Heap` or `mem.Counting.over(mem.Heap, cap: <bytes>)`"))
     parts :: pkg_top_level_commas(args)
     if parts.len() == 0 || parts[0] != "mem.Heap" || parts.len() > 2 {
         return Err(pkg_bad_allocator("`mem.Counting.over` wraps `mem.Heap` and accepts only the optional `cap:` argument"))
     }
-    if parts.len() == 1 -> return Ok(MIRAllocatorPolicy.Counting{cap: None})
+    if parts.len() == 1 -> return Ok(AllocatorPolicy.Counting{cap: None})
     if !parts[1].starts_with("cap:") -> return Err(pkg_bad_allocator("the counting allocator's optional argument is spelled `cap:`"))
     bytes :: pkg_parse_allocator_bytes(parts[1].removeprefix("cap:"))
-    Ok(MIRAllocatorPolicy.Counting{cap: Val(MIRByteSize{bytes: bytes})})
+    Ok(AllocatorPolicy.Counting{cap: Val(ByteSize{bytes: bytes})})
 }
 
 fn pkg_parse_allocator_bytes(value: String) -> Int PackageParseError! {
@@ -46,7 +47,7 @@ fn pkg_parse_allocator_bytes(value: String) -> Int PackageParseError! {
 
 // The largest byte count an `Int` carries; Rust's u64 range beyond it is
 // refused as not fitting.
-PKG_MAX_U64_IN_INT :: prep { 9223372036854775807 }
+PKG_MAX_U64_IN_INT :: 9223372036854775807
 
 // `str::parse::<u64>()`: an optional `+`, then one or more ASCII digits.
 fn pkg_parse_u64(text: String) -> Int? Never! {

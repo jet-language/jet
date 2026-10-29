@@ -1,10 +1,9 @@
 
-fn build(b: BuildContext) -[Exec]> BuildPlan {
+fn build(b: Build) -[Exec]> {
     #Impure("locked action output") {
     action :: b.action("emit", [], ["artifact"], ["sh", "-c", "printf two > artifact"], ["Exec"])
     app :: b.add_executable("app", ["main.jet"], [action])
-    return b.plan(app)
+    b.default(app)
     }
-    return b.plan()
 }
 fn run() {}

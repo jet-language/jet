@@ -1,0 +1,19 @@
+# tests/failure_tier_parity.rs::failure_contract_matrix_matches_web_js_and_wasm at tests/failure_tier_parity.rs:377; hand-port
+# The web build lands in .jet/build; wasm.mjs is the Rust harness driver copied there before the Wasm run.
+fixture: failure_contract_matrix_matches_web_js_and_wasm.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+requires: tool:node
+step: jet build --target web failure_tier_parity.jet
+exit: 0 # tests/failure_tier_parity.rs:383 the failure matrix compiles for web
+step js: node app.js
+cwd: .jet/build
+exit: 0 # tests/failure_tier_parity.rs:417 web JS failure matrix runs
+stdout: = "2|-1|2|-2|2|-3|-4|2|-5|7|-6|7\n2|-1|2|-2|2|-3|-4|2|-5|7|-6|7\n" # tests/failure_tier_parity.rs:422 JS matrix stdout
+step: cp wasm.mjs .jet/build/wasm.mjs
+exit: 0
+step wasm: node wasm.mjs
+cwd: .jet/build
+exit: 0 # tests/failure_tier_parity.rs:444 web Wasm failure matrix runs
+stdout: = "2|-1|2|-2|2|-3|-4|2|-5|7|-6|7\n2|-1|2|-2|2|-3|-4|2|-5|7|-6|7\n" # tests/failure_tier_parity.rs:449 Wasm matrix stdout

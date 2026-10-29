@@ -1,0 +1,14 @@
+# tests/marker_declarations.rs::source_rules_record_facts_and_add_checked_members at tests/marker_declarations.rs:398; hand-port
+# Claim: bodyless source rule and bodyful source rule both compile (tests/marker_declarations.rs:417)
+# Claim: the additive body generates a checked impl member greeting on Person (tests/marker_declarations.rs:402-407)
+# Claim: the generated member is callable: person.greeting() returns the body value (tests/marker_declarations.rs:412-414)
+# Not ported: Policy::MarkerVocabulary and jet::Comptime TypeInfo reflection asserts (tests/marker_declarations.rs:419-508): Rust AST API, no CLI path
+fixture: source_rules_record_facts_and_add_checked_members.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # tests/marker_declarations.rs:417 jet::compile succeeds
+step: jet run main.jet
+exit: 0 # tests/marker_declarations.rs:412-414 generated greeting prints the body value
+stdout: = "hello\n" # tests/marker_declarations.rs:412-414 generated greeting prints the body value

@@ -1,0 +1,25 @@
+
+use core.testing as api
+
+fn failing_model(commands: [Dyn]) -> Dyn Err! {
+    return Err("history callback marker")
+}
+
+fn candidate_size(commands: [Dyn]) -> Dyn {
+    Dyn.Int(commands.len())
+}
+
+fn observe(value: Dyn) -> Dyn { value.copy() }
+
+fn run() Err! {
+    comparison :: api.histories<Dyn>(
+        seed: 1,
+        cases: 1,
+        strategy: None,
+        model: failing_model,
+        actual: candidate_size,
+        observe: observe,
+    )
+    print(comparison.status)
+    print(comparison.reason)
+}

@@ -10,13 +10,11 @@ use jet_foundation.[
     Diagnostic,
     Span,
     SymbolKind,
-    TCallArg,
-    TExpr,
-    TExprKind,
     TTypeDef,
     Type,
     type_identity_equal,
     type_name,
+    Item,
 ]
 
 // One comparability query. A recursive type (`enum Expr { Neg(inner: Expr) }`)
@@ -67,8 +65,8 @@ fn sema_comparability_sealed_crypto_plan(leaf: String) -> Bool Never! {
 fn sema_comparability_definition(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: String, name: String) -> TTypeDef? {
     if program.registration_graph == .Val(graph) {
         resolved :: sema_type_graph_lookup_symbol(graph, module_identity, name) ?? return None
-        if resolved.symbol.kind != SymbolKind.Type -> return None
-        index :: sema_scope_checked_type_row(environment, program, resolved.target_module_identity, resolved.symbol.name) ?? return None
+        if sema_resolved_kind(graph, resolved) != SymbolKind.Type -> return None
+        index :: sema_scope_checked_type_row(environment, program, resolved.target_module_identity, sema_resolved_name(graph, resolved)) ?? return None
         return Val(program.checked_types[index])
     }
     sema_serde_type_definition(environment, program, name)
@@ -85,12 +83,12 @@ fn sema_comparability_implements(environment: SemaScopeEnvironment, program: Sem
         if sema_derive_builtin_supports(sema_serde_named_leaf(carrier), trait_name) -> return true
     }
     if program.registration_graph == .Val(graph) {
-        bound := sema_type_bound_satisfied_with_generics(graph, ty, trait_name, environment.module_identity, environment.generic_params) ?? false
+        bound := sema_type_bound_satisfied_at(graph, ty, trait_name, sema_scope_caller_row(environment, graph), environment.generic_params) ?? false
         if bound -> return true
         name :: sema_type_graph_base_name(ty) ?? return false
-        resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return false
-        if resolved.symbol.kind != SymbolKind.Type -> return false
-        if sema_scope_checked_type_row(environment, program, resolved.target_module_identity, resolved.symbol.name) == .Val(checked_row) {
+        resolved :: sema_type_graph_lookup_symbol_at(graph, sema_scope_caller_row(environment, graph), name) ?? return false
+        if sema_resolved_kind(graph, resolved) != SymbolKind.Type -> return false
+        if sema_scope_checked_type_row(environment, program, resolved.target_module_identity, sema_resolved_name(graph, resolved)) == .Val(checked_row) {
             if sema_serde_has_name(program.checked_types[checked_row].derives, trait_name) -> return true
         }
         if trait_name != "Equatable" -> return false
@@ -371,7 +369,7 @@ fn sema_comparability_check_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span
             field := sema_incomparable_field(environment, program, lhs.ty)
             field_name := field ?? ""
             if {
-                sema_call_reflection_secret_bearing(lhs.ty) -> &diagnostics.push(sema_error("E0312", span, "secret-bearing `{shown}` values cannot use {label}", "ordinary equality may leak secret information through timing and secret-bearing crypto types never implement comparison", "use `core.crypto.constant_time_equal` for `Secret` values; compare public keys through their canonical `.bytes()` values"))
+                sema_call_reflection_secret_bearing(lhs.ty) -> &diagnostics.push(sema_error("E0312", span, "secret-bearing `{sema_call_reflection_leaf_name(shown)}` values cannot use {label}", "ordinary equality may leak secret information through timing and secret-bearing crypto types never implement comparison", "use `core.crypto.constant_time_equal` for `Secret` values; compare public keys through their canonical `.bytes()` values"))
                 field != None -> &diagnostics.push(sema_error("E0312", span, "`{shown}` can't be compared with `{type_name(rhs.ty)}` because field `{field_name}` doesn't support {label}", "value equality needs every field to support the comparison", "compare individual fields instead"))
                 else -> &diagnostics.push(sema_error("E0312", span, "`{shown}` doesn't support {label}", "value equality requires the Equatable trait", "add `#Equatable` before the type, implement `Equatable` by hand, or compare individual fields"))
             }

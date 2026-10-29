@@ -1,0 +1,15 @@
+# tests/marker_rule_signatures.rs::method_markers_share_the_ordered_registry_collector at tests/marker_rule_signatures.rs:202; hand-port
+# Claim: method marker list `#[Inline, State(Ready)]` on a struct method parses and checks clean (tests/marker_rule_signatures.rs:213)
+# Claim: `#Job` on a struct method yields E0355 (tests/marker_rule_signatures.rs:226)
+# Not ported: AST door.methods[0].is_inline and state_requires asserts (tests/marker_rule_signatures.rs:217-224): internal AST fields with no CLI equivalent
+# Not ported: Rust asserts exactly one E0355; the CLI check pins E0355 presence only
+fixture: method_markers_share_the_ordered_registry_collector.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check ok/main.jet
+exit: 0 # tests/marker_rule_signatures.rs:213 method marker list parses
+stderr: !~ "Error [" # tests/marker_rule_signatures.rs:213 method marker list parses
+step: jet check wrong/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:226 #Job on a method gives E0355
+stderr: ~ "E0355" # tests/marker_rule_signatures.rs:226 #Job on a method gives E0355

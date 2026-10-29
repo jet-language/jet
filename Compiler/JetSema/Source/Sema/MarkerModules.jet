@@ -1,5 +1,5 @@
 // Canonical identity is (declaring module, name span).
-use jet_foundation.[Diagnostic, Func, Item, Marker, MarkerDecl, Program, Span, TAppliedRule, TAppliedRuleArgumentMenu, foundation_core_argument_menus]
+use jet_foundation.[Diagnostic, Func, Item, MARKER_SOURCE, Marker, MarkerDecl, Program, Span, TAppliedRule, TAppliedRuleArgumentMenu, foundation_core_argument_menus]
 use jet_parser.[parse_generated_source]
 
 struct SemaMarkerModuleResolution {
@@ -369,7 +369,7 @@ fn sema_marker_module_check_groups(graph: SemaRegistrationGraph, module_identity
                     if resolved.declaration == .Val(row) -> forbidden = forbidden || row.group != None
                     else -> forbidden = true
                 }
-                if forbidden -> &diagnostics.push(sema_error("E0400", member.span, "this member cannot be stored in a named marker group", "a group contains only active, fixed marker applications; gates, refusals, retired markers and other groups must not be hidden in it", "remove this member from the group and write gates or refusals explicitly at each use site"))
+                if forbidden -> &diagnostics.push(sema_error("E0400", member.span, "this member cannot be stored in a named marker group.", "a group contains only active, fixed marker applications; gates, refusals, retired markers and other groups must not be hidden in it", "remove this member from the group and write gates or refusals explicitly at each use site"))
             }
         }
     }
@@ -389,10 +389,10 @@ fn sema_marker_module_argument_menus(graph: SemaRegistrationGraph) -> [TAppliedR
 }
 
 fn sema_marker_module_check(graph: SemaRegistrationGraph) -> [Diagnostic]? {
-    parsed :: parse_generated_source(SEMA_PRELUDE_MARKER_SOURCE.bytes())
+    parsed :: parse_generated_source(MARKER_SOURCE.bytes())
     if parsed.diagnostics.len() > 0 -> return None
     argument_menus :: sema_marker_module_argument_menus(graph) ?? return None
-    applied :: sema_marker_rules_build_catalog(parsed.program, SEMA_PRELUDE_MARKER_SOURCE, argument_menus) ?? return None
+    applied :: sema_marker_rules_build_catalog(parsed.program, MARKER_SOURCE, argument_menus) ?? return None
     catalog := SemaScopeMembersMarkerRegistry{applied_rules: applied.rows, argument_menus: applied.argument_menus, marker_rules: [SemaScopeMembersMarkerRule]{}, known_marker_names: [String]{}, function_allowed_markers: [String]{}, block_allowed_markers: [String]{}, derive_provider_names: [String]{}}
     if !sema_scope_members_registry_add_applied_catalog(&catalog, applied) -> return None
     diagnostics := [Diagnostic]{}
@@ -400,20 +400,24 @@ fn sema_marker_module_check(graph: SemaRegistrationGraph) -> [Diagnostic]? {
         start :: diagnostics.len()
         markers :: sema_marker_rules_collect_program(graph.modules[module_row_index].program)
         seen := [String:Bool]{}
+        unresolved := [Marker]{}
+        source_declared := false
         loop marker in markers {
             occurrence :: sema_marker_rules_occurrence_key(marker)
             if seen.get(occurrence) != None -> next
             seen[occurrence] = true
+            if marker.declaration_module != None -> source_declared = true
             if marker.declaration_module == None && sema_marker_rules_catalog_rule_index(catalog.applied_rules, marker.name) != None -> next
             resolved :: sema_marker_module_resolve_application(graph, graph.modules[module_row_index].module_identity, marker)
             if marker.name.contains(".") || marker.declaration_module != None {
                 if {
-                    resolved.status == "private" -> &diagnostics.push(sema_error("E0605", marker.name_span, "marker `#{marker.name}` is private to its declaring module", "a library marker is public unless it is marked `priv`", "remove `priv` from the marker, or remove this use"))
+                    resolved.status == "private" -> &diagnostics.push(sema_error("E0605", marker.name_span, "marker `#{marker.name}` is private to its declaring module", "a marker declared inside a `priv module` is usable only by that module's parent and its other children", "use a marker from a public module, or remove `priv` from the module"))
                     resolved.status == "ambiguous" -> &diagnostics.push(sema_error("E0086", marker.name_span, "this qualified marker has more than one declaring module", "a marker's import path must resolve to one module and one exported row", "give the modules distinct import aliases and qualify the marker with one of them"))
                     resolved.status == "unknown" -> &diagnostics.push(sema_marker_rules_unknown_error(catalog, marker))
                     else -> {}
                 }
             } else if resolved.status == "unknown" {
+                qualified_elsewhere := false
                 scope :: sema_marker_module_scope(graph.modules[module_row_index].program.items, marker.name_span, "")
                 loop edge_index in 0..<graph.edges.len() {
                     if graph.edges[edge_index].source_module_identity != graph.modules[module_row_index].module_identity -> next
@@ -422,9 +426,21 @@ fn sema_marker_module_check(graph: SemaRegistrationGraph) -> [Diagnostic]? {
                     imported :: sema_marker_module_resolve_items(graph.modules[target].program.items, SemaMarkerModuleTarget{status: "found", module_identity: graph.edges[edge_index].target_module_identity, name: marker.name, require_export: false})
                     if imported.status == "found" {
                         &diagnostics.push(sema_error("E0085", marker.name_span, "library marker `#{marker.name}` must be qualified", "markers from another module must name their import; a module's own markers may stay bare", "write `#{graph.edges[edge_index].declaration.alias}.{marker.name}` through its import's local name"))
+                        qualified_elsewhere = true
                         break
                     }
                 }
+                if !qualified_elsewhere -> &unresolved.push(marker)
+            }
+        }
+        // A bare marker that no applied rule, marker declaration or derive
+        // provider names is outside the closed vocabulary (E0927); a
+        // source-declared marker attaches only at its declared sites (E0355).
+        if (unresolved.len() > 0 || source_declared) && !sema_module_is_core_source(graph.modules[module_row_index].module_identity) {
+            program_registry :: sema_scope_members_build_marker_registry(graph, graph.modules[module_row_index].module_identity, graph.modules[module_row_index].program, applied)
+            if program_registry == .Val(registry) {
+                if unresolved.len() > 0 -> sema_marker_rules_validate_vocabulary(registry, graph.modules[module_row_index].program, unresolved, &diagnostics)
+                if source_declared -> sema_marker_rules_validate_user_sites(registry, graph.modules[module_row_index].program, &diagnostics)
             }
         }
         sema_marker_module_check_groups(graph, graph.modules[module_row_index].module_identity, graph.modules[module_row_index].program.items, "", true, catalog, &diagnostics)
@@ -437,11 +453,11 @@ fn sema_marker_module_check(graph: SemaRegistrationGraph) -> [Diagnostic]? {
 // one marker vocabulary source; empty when that source does not parse.
 fn sema_marker_module_prelude_rules() -> [TAppliedRule] {
     rows := [TAppliedRule]{}
-    parsed :: parse_generated_source(SEMA_PRELUDE_MARKER_SOURCE.bytes())
+    parsed :: parse_generated_source(MARKER_SOURCE.bytes())
     if parsed.diagnostics.len() > 0 -> return rows
     loop item in parsed.program.items {
         if item == .MarkerDecl(declaration) {
-            if sema_marker_rules_applied_row(declaration, SEMA_PRELUDE_MARKER_SOURCE) == .Val(row) -> &rows.push(row)
+            if sema_marker_rules_applied_row(declaration, MARKER_SOURCE) == .Val(row) -> &rows.push(row)
         }
     }
     rows
@@ -464,7 +480,7 @@ fn sema_marker_module_first_argument_evaluates(rules: [TAppliedRule], marker: Ma
             .Ident | .EffectRoots -> return false
             .Any -> return marker.name == "Default"
             .DurationOrString -> {
-                if argument == .UnitLit(_, _, _, _, _, _) -> return false
+                if argument == .UnitLit(_, _, _, _, _, _, _) -> return false
                 return true
             }
             else -> return true

@@ -1,0 +1,19 @@
+
+trait Indexed {
+    type Elem
+    fn at(self, i: Int) -> Elem?
+    fn count(self) -> Elem
+}
+struct Nums {
+    values: [Int]
+    impl Indexed {
+        type Elem = Int
+        fn at(self, i: Int) -> Int? { Val(self.values[i]) }
+        fn count(self) -> Int { self.values.len() }
+    }
+}
+fn run() {
+    nums :: Nums{values: [10, 20]}
+    print(nums.at(1) ?? -1)
+    print(nums.count() ?? -1)
+}

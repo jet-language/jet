@@ -1,0 +1,332 @@
+// Reused from fix/runtime-corelib@5933a61b Core/Files/Runtime/kernel_path_components.jet.
+// Canonical std::path lexical components for both selected platforms. This
+// private Core source part contains only the scans used by scoped reads and
+// atomic writes; no OS ingress, lossy conversion, or alternate path policy.
+// Spans retain caller bytes, including Windows verbatim prefixes.
+enum PathPlatform { Unix Windows }
+struct OSPath { encoded: [U8] platform: PathPlatform }
+struct PathSpan { start: Int end: Int }
+enum PrefixKind { Absent Disk UNC DeviceNS Verbatim VerbatimUNC VerbatimDisk }
+struct PathPrefix { kind: PrefixKind len: Int drive: U8 first: PathSpan second: PathSpan }
+enum ComponentKind { Prefix RootDir CurDir ParentDir Normal }
+struct PathComponent { kind: ComponentKind span: PathSpan }
+struct Components { prefix: PathPrefix physical_root: Bool start: Int end: Int front: Int back: Int }
+fn from_text(text: String, platform: PathPlatform) -> OSPath Never! { OSPath{encoded: text.bytes(), platform: platform} }
+fn span(start: Int, end: Int) -> PathSpan Never! { PathSpan{start: start, end: end} }
+fn no_prefix() -> PathPrefix Never! { PathPrefix{kind: .Absent, len: 0, drive: U8{0}, first: span(0, 0), second: span(0, 0)} }
+fn is_separator(platform: PathPlatform, byte: U8, verbatim: Bool) -> Bool Never! {
+    if platform == .Unix -> return byte == (U8{47})
+    byte == (U8{92}) || (!verbatim && byte == (U8{47}))
+}
+fn main_separator(platform: PathPlatform) -> U8 Never! { if platform == .Windows -> U8{92} else -> U8{47} }
+fn prefix_verbatim(prefix: PathPrefix) -> Bool Never! {
+    prefix.kind == .Verbatim || prefix.kind == .VerbatimUNC || prefix.kind == .VerbatimDisk
+}
+fn implicit_root(prefix: PathPrefix) -> Bool Never! { prefix.kind != .Absent && prefix.kind != .Disk }
+fn drive_at(path: OSPath, start: Int) -> U8? Never! {
+    if path.encoded.len() < start + 2 || path.encoded[start + 1] != (U8{58}) -> return None
+    byte :: path.encoded[start]
+    if byte >= (U8{65}) && byte <= (U8{90}) -> return Val(byte)
+    if byte >= (U8{97}) && byte <= (U8{122}) -> return Val(U8{Int.from_u8(byte) - 32})
+    None
+}
+fn prefix_byte(path: OSPath, at: Int) -> U8 Never! {
+    byte :: path.encoded[at]
+    if byte == (U8{47}) -> U8{92} else -> byte
+}
+fn prefix_component_end(path: OSPath, start: Int, limit: Int, verbatim: Bool) -> Int Never! {
+    at := start
+    loop at < limit && !is_separator(path.platform, path.encoded[at], verbatim) -> at += 1
+    at
+}
+fn parse_prefix_span(path: OSPath, extent: PathSpan) -> PathPrefix Never! {
+    if path.platform == .Unix -> return no_prefix()
+    start :: extent.start
+    limit :: extent.end
+    size :: limit - start
+    out := no_prefix()
+    if size >= 2 && prefix_byte(path, start) == (U8{92}) && prefix_byte(path, start + 1) == (U8{92}) {
+        exact := size >= 4
+        if exact { loop i in start..<start + 4 { if path.encoded[i] == (U8{47}) -> exact = false } }
+        if exact && path.encoded[start + 2] == (U8{63}) && path.encoded[start + 3] == (U8{92}) {
+            if size >= 8 && prefix_byte(path, start + 4) == (U8{85}) && prefix_byte(path, start + 5) == (U8{78}) && prefix_byte(path, start + 6) == (U8{67}) && prefix_byte(path, start + 7) == (U8{92}) {
+                first_end :: prefix_component_end(path, start + 8, limit, true)
+                second_start := first_end
+                if second_start < limit -> second_start += 1
+                second_end :: prefix_component_end(path, second_start, limit, true)
+                out.kind = .VerbatimUNC
+                out.first = span(start + 8, first_end)
+                out.second = span(second_start, second_end)
+                out.len = first_end - start
+                if second_end > second_start -> out.len = second_end - start
+                return out
+            }
+            if size >= 6 {
+                drive :: drive_at(path, start + 4)
+                exact_drive :: size == 6 || is_separator(path.platform, path.encoded[start + 6], false)
+                if drive == .Val(letter) && exact_drive {
+                    out.kind = .VerbatimDisk
+                    out.drive = letter
+                    out.len = 6
+                    return out
+                }
+            }
+            end :: prefix_component_end(path, start + 4, limit, true)
+            out.kind = .Verbatim
+            out.first = span(start + 4, end)
+            out.len = end - start
+            return out
+        }
+        if size >= 4 && prefix_byte(path, start + 2) == (U8{46}) && prefix_byte(path, start + 3) == (U8{92}) {
+            end :: prefix_component_end(path, start + 4, limit, false)
+            out.kind = .DeviceNS
+            out.first = span(start + 4, end)
+            out.len = end - start
+            return out
+        }
+        first_end :: prefix_component_end(path, start + 2, limit, false)
+        second_start := first_end
+        if second_start < limit -> second_start += 1
+        second_end :: prefix_component_end(path, second_start, limit, false)
+        if first_end > start + 2 && second_end > second_start {
+            out.kind = .UNC
+            out.first = span(start + 2, first_end)
+            out.second = span(second_start, second_end)
+            out.len = second_end - start
+        }
+        return out
+    }
+    if size >= 2 && drive_at(path, start) == .Val(letter) {
+        out.kind = .Disk
+        out.drive = letter
+        out.len = 2
+    }
+    out
+}
+fn parse_prefix(path: OSPath) -> PathPrefix Never! { parse_prefix_span(path, span(0, path.encoded.len())) }
+fn components_span(path: OSPath, extent: PathSpan) -> Components Never! {
+    prefix :: parse_prefix_span(path, extent)
+    at :: extent.start + prefix.len
+    rooted :: extent.end > at && is_separator(path.platform, path.encoded[at], false)
+    Components{prefix: prefix, physical_root: rooted, start: extent.start, end: extent.end, front: 0, back: 2}
+}
+fn components(path: OSPath) -> Components Never! { components_span(path, span(0, path.encoded.len())) }
+fn is_absolute(path: OSPath) -> Bool Never! {
+    cursor :: components(path)
+    rooted :: cursor.physical_root || implicit_root(cursor.prefix)
+    rooted && (path.platform == .Unix || cursor.prefix.kind != .Absent)
+}
+fn finished(cursor: Components) -> Bool Never! { cursor.front == 3 || cursor.back == 3 || cursor.front > cursor.back }
+fn prefix_remaining(cursor: Components) -> Int Never! { if cursor.front == 0 -> cursor.prefix.len else -> 0 }
+fn include_cur_dir(path: OSPath, cursor: Components) -> Bool Never! {
+    if cursor.physical_root || implicit_root(cursor.prefix) -> return false
+    at :: cursor.start + prefix_remaining(cursor)
+    if at >= cursor.end || path.encoded[at] != (U8{46}) -> return false
+    at + 1 == cursor.end || is_separator(path.platform, path.encoded[at + 1], prefix_verbatim(cursor.prefix))
+}
+fn before_body(path: OSPath, cursor: Components) -> Int Never! {
+    extra := 0
+    if cursor.front <= 1 && cursor.physical_root -> extra += 1
+    if cursor.front <= 1 && include_cur_dir(path, cursor) -> extra += 1
+    prefix_remaining(cursor) + extra
+}
+fn component(kind: ComponentKind, start: Int, end: Int) -> PathComponent Never! { PathComponent{kind: kind, span: span(start, end)} }
+fn single(path: OSPath, cursor: Components, start: Int, end: Int) -> PathComponent? Never! {
+    if start == end -> return None
+    if end - start == 1 && path.encoded[start] == (U8{46}) {
+        if prefix_verbatim(cursor.prefix) -> return Val(component(.CurDir, start, end))
+        return None
+    }
+    if end - start == 2 && path.encoded[start] == (U8{46}) && path.encoded[start + 1] == (U8{46}) -> return Val(component(.ParentDir, start, end))
+    Val(component(.Normal, start, end))
+}
+fn next(path: OSPath, cursor: &Components) -> PathComponent? Never! {
+    loop !finished(cursor) {
+        if cursor.front == 0 {
+            cursor.front = 1
+            if cursor.prefix.len > 0 {
+                at :: cursor.start
+                cursor.start += cursor.prefix.len
+                return Val(component(.Prefix, at, cursor.start))
+            }
+        } else if cursor.front == 1 {
+            cursor.front = 2
+            if cursor.physical_root {
+                cursor.start += 1
+                return Val(component(.RootDir, cursor.start - 1, cursor.start))
+            }
+            if implicit_root(cursor.prefix) && !prefix_verbatim(cursor.prefix) -> return Val(component(.RootDir, cursor.start, cursor.start))
+            if cursor.prefix.kind == .Absent && include_cur_dir(path, cursor) {
+                cursor.start += 1
+                return Val(component(.CurDir, cursor.start - 1, cursor.start))
+            }
+        } else if cursor.start < cursor.end {
+            at :: cursor.start
+            end := at
+            loop end < cursor.end && !is_separator(path.platform, path.encoded[end], prefix_verbatim(cursor.prefix)) -> end += 1
+            cursor.start = end
+            if end < cursor.end -> cursor.start += 1
+            value :: single(path, cursor, at, end)
+            if value != None -> return value
+        } else { cursor.front = 3 }
+    }
+    None
+}
+fn next_back(path: OSPath, cursor: &Components) -> PathComponent? Never! {
+    loop !finished(cursor) {
+        if cursor.back == 2 {
+            body :: cursor.start + before_body(path, cursor)
+            if cursor.end > body {
+                end :: cursor.end
+                at := end
+                loop at > body && !is_separator(path.platform, path.encoded[at - 1], prefix_verbatim(cursor.prefix)) -> at -= 1
+                cursor.end = at
+                if at > body -> cursor.end -= 1
+                value :: single(path, cursor, at, end)
+                if value != None -> return value
+            } else { cursor.back = 1 }
+        } else if cursor.back == 1 {
+            cursor.back = 0
+            if cursor.physical_root {
+                cursor.end -= 1
+                return Val(component(.RootDir, cursor.end, cursor.end + 1))
+            }
+            if implicit_root(cursor.prefix) && !prefix_verbatim(cursor.prefix) -> return Val(component(.RootDir, cursor.end, cursor.end))
+            if cursor.prefix.kind == .Absent && include_cur_dir(path, cursor) {
+                cursor.end -= 1
+                return Val(component(.CurDir, cursor.end, cursor.end + 1))
+            }
+        } else {
+            cursor.back = 3
+            if cursor.prefix.len > 0 -> return Val(component(.Prefix, cursor.start, cursor.end))
+        }
+    }
+    None
+}
+fn remaining_span(path: OSPath, original: Components) -> PathSpan Never! {
+    cursor := original
+    if cursor.front == 2 {
+        loop cursor.start < cursor.end {
+            at :: cursor.start
+            end := at
+            loop end < cursor.end && !is_separator(path.platform, path.encoded[end], prefix_verbatim(cursor.prefix)) -> end += 1
+            if single(path, cursor, at, end) != None -> break
+            cursor.start = end
+            if end < cursor.end -> cursor.start += 1
+        }
+    }
+    if cursor.back == 2 {
+        body :: cursor.start + before_body(path, cursor)
+        loop cursor.end > body {
+            end :: cursor.end
+            at := end
+            loop at > body && !is_separator(path.platform, path.encoded[at - 1], prefix_verbatim(cursor.prefix)) -> at -= 1
+            if single(path, cursor, at, end) != None -> break
+            cursor.end = at
+            if at > body -> cursor.end -= 1
+        }
+    }
+    span(cursor.start, cursor.end)
+}
+fn parent_span(path: OSPath) -> PathSpan? Never! {
+    cursor := components(path)
+    last :: next_back(path, &cursor) ?? return None
+    if last.kind == .Prefix || last.kind == .RootDir -> return None
+    Val(remaining_span(path, cursor))
+}
+fn bytes_equal(left: OSPath, a: PathSpan, right: OSPath, b: PathSpan) -> Bool Never! {
+    if a.end - a.start != b.end - b.start -> return false
+    loop i in 0..<a.end - a.start { if left.encoded[a.start + i] != right.encoded[b.start + i] -> return false }
+    true
+}
+fn component_equal(left: OSPath, a: PathComponent, right: OSPath, b: PathComponent) -> Bool Never! {
+    if a.kind != b.kind -> return false
+    if a.kind == .Normal -> return bytes_equal(left, a.span, right, b.span)
+    if a.kind != .Prefix -> return true
+    p :: parse_prefix_span(left, a.span)
+    q :: parse_prefix_span(right, b.span)
+    p.kind == q.kind && p.drive == q.drive && bytes_equal(left, p.first, right, q.first) && bytes_equal(left, p.second, right, q.second)
+}
+fn strip_prefix_span(path: OSPath, root: OSPath) -> PathSpan? Never! {
+    if path.platform != root.platform -> return None
+    cursor := components(path)
+    base := components(root)
+    loop {
+        b :: next(root, &base) ?? return Val(remaining_span(path, cursor))
+        a :: next(path, &cursor) ?? return None
+        if !component_equal(path, a, root, b) -> return None
+    }
+}
+fn owned_span(path: OSPath, extent: PathSpan) -> OSPath Never! {
+    out := [U8]{}
+    loop i in extent.start..<extent.end -> &out.push(path.encoded[i])
+    OSPath{encoded: out, platform: path.platform}
+}
+fn truncate(out: &[U8], len: Int) Never! {
+    loop out.len() > len { _ :: &out.pop() }
+}
+fn append_span(out: &[U8], path: OSPath, extent: PathSpan) Never! { loop i in extent.start..<extent.end -> &out.push(path.encoded[i]) }
+fn append_component(out: &[U8], path: OSPath, value: PathComponent) Never! {
+    if value.kind == .RootDir -> &out.push(main_separator(path.platform)) else -> append_span(&out, path, value.span)
+}
+fn push_verbatim(base: &OSPath, path: OSPath, extent: PathSpan) Never! {
+    values := [PathComponent]{}
+    owners := [Bool]{}
+    cursor := components(base)
+    loop {
+        value :: next(base, &cursor) ?? break
+        &values.push(value)
+        &owners.push(false)
+    }
+    cursor = components_span(path, extent)
+    loop {
+        value :: next(path, &cursor) ?? break
+        if value.kind == .RootDir {
+            loop values.len() > 1 {
+                _ :: &values.pop()
+                _ :: &owners.pop()
+            }
+            &values.push(value)
+            &owners.push(true)
+        } else if value.kind == .ParentDir {
+            if values.len() > 0 && values[values.len() - 1].kind == .Normal {
+                _ :: &values.pop()
+                _ :: &owners.pop()
+            }
+        } else if value.kind != .CurDir {
+            &values.push(value)
+            &owners.push(true)
+        }
+    }
+    out := [U8]{}
+    need_sep := false
+    prefix :: parse_prefix(base)
+    loop i in 0..<values.len() {
+        value :: values[i]
+        if need_sep && value.kind != .RootDir -> &out.push(main_separator(base.platform))
+        if owners[i] -> append_component(&out, path, value) else -> append_component(&out, base, value)
+        need_sep = value.kind != .RootDir
+        if value.kind == .Prefix -> need_sep = prefix.kind != .Disk && prefix.len > 0
+    }
+    base.encoded = out
+}
+fn push(base: &OSPath, path: OSPath) Never! {
+    assert(base.platform == path.platform)
+    extent :: span(0, path.encoded.len())
+    prefix :: parse_prefix(base)
+    added :: components(path)
+    rooted :: added.physical_root || implicit_root(added.prefix)
+    absolute :: rooted && (path.platform == .Unix || added.prefix.kind != .Absent)
+    if absolute || added.prefix.kind != .Absent -> truncate(&base.encoded, 0) else {
+        if prefix_verbatim(prefix) && extent.end > 0 {
+            push_verbatim(&base, path, extent)
+            return
+        }
+        if rooted -> truncate(&base.encoded, prefix.len) else {
+            size :: base.encoded.len()
+            need_sep :: size > 0 && !is_separator(base.platform, base.encoded[size - 1], false) && !(prefix.kind == .Disk && prefix.len == size)
+            if need_sep -> &base.encoded.push(main_separator(base.platform))
+        }
+    }
+    append_span(&base.encoded, path, extent)
+}

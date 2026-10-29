@@ -5,31 +5,36 @@
 // `--no-color` / `NO_COLOR` reach every surface through that single value.
 // Areas below the CLI (Environment, Store, Provider) render through this
 // Theme, so it lives in Foundation.
+use jet_foundation.[diagnostic_from_registry, diagnostic_render]
+use core.sys as sys
+use core.term as term
+use core.text as core_text
+use core.time as time
 
 // ── Palette roles (jet_foundation::Terminal::Theme) ──
 
-ACCENT_SGR :: prep { "1;96" }
-DIM_SGR :: prep { "2;37" }
-SUCCESS_SGR :: prep { "32" }
-WARN_SGR :: prep { "33" }
-ERROR_SGR :: prep { "31" }
-INVERT_SGR :: prep { "48;5;24;97;1" }
-BORDER_SGR :: prep { "90" }
-BOLD_SGR :: prep { "1" }
+ACCENT_SGR :: "1;96"
+DIM_SGR :: "2;37"
+SUCCESS_SGR :: "32"
+WARN_SGR :: "33"
+ERROR_SGR :: "31"
+INVERT_SGR :: "48;5;24;97;1"
+BORDER_SGR :: "90"
+BOLD_SGR :: "1"
 
 // Rust `Severity::Lint` in the Compiler `Diagnostic.severity` encoding.
-TERMINAL_LINT_SEVERITY :: prep { 2 }
+TERMINAL_LINT_SEVERITY :: 2
 
 // Byte counts below this redraw a live progress line only on a structural
 // change (Rust `BYTE_REDRAW_THRESHOLD`).
-TERMINAL_BYTE_REDRAW_THRESHOLD :: prep { 1000000 }
+TERMINAL_BYTE_REDRAW_THRESHOLD :: 1000000
 
 // The largest Int; a byte counter that would pass it has overflowed.
-TERMINAL_INT_MAX :: prep { 9223372036854775807 }
+TERMINAL_INT_MAX :: 9223372036854775807
 
-TERMINAL_SIZE_UNITS :: prep { [String]{"B", "KB", "MB", "GB", "TB"} }
+TERMINAL_SIZE_UNITS :: [String]{"B", "KB", "MB", "GB", "TB"}
 
-TERMINAL_SPINNER_FRAMES :: prep { [String]{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"} }
+TERMINAL_SPINNER_FRAMES :: [String]{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 // ESC, which opens every ANSI control sequence. Jet string literals have no
 // hex escape, so the byte is built here once.
@@ -705,7 +710,7 @@ struct Theme {
             }
             terminal_write_output("{carriage_return}{esc}[2K")
         }
-        Spinner{stop: Val(stop), running: Val(running)}
+        Spinner{stop: Val(stop), running: Val(^running)}
     }
 
     // An operational Jet failure through the registered E1340 row.
@@ -764,7 +769,7 @@ struct SpinnerState {
 // A running spinner; closing it stops and clears it.
 struct Spinner {
     priv stop: Shared<SpinnerState>?
-    priv running: Task<Never!>?
+    priv running: Task<Unit>?
 }
 
 impl Spinner.Close {

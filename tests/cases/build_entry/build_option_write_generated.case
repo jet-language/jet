@@ -1,0 +1,23 @@
+# #5829: the Choice row `write_generated` (off, on; stock off). `on` writes
+# each source `b.generate` produces to its `.jet/generated/` path for
+# inspection; the stock writes none. `--write-generated=on` replaces the
+# retired `--emit-generated` flag.
+fixture: fixtures/build_write_generated
+artifact: app
+env: NO_COLOR=1
+step: jet build
+exit: 0
+file: .jet/generated absent
+step: {work}/.jet/build/app
+exit: 0
+stdout: = "built\n"
+step: jet build --write-generated=on
+exit: 0
+file: .jet/generated/write_generated/greeting.jet ~ "fn greeting() -> String" # the generated source, as fn build wrote it
+remove: .jet/generated
+step: jet build --profile=inspect
+exit: 0
+file: .jet/generated/write_generated/greeting.jet exists # the profile layer too
+step: jet build --emit-generated
+exit: 2
+stderr: ~ "--emit-generated" # the retired flag is unknown

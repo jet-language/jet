@@ -3,12 +3,11 @@
 use jet_foundation.[
     DIAGNOSTIC_ERROR,
     Diagnostic,
-    DiagnosticStructured,
-    DiagnosticFixApplicability,
-    DiagnosticFixSafety,
-    TextEdit,
+    InternalTag,
     Span,
+    TagMarker,
     Type,
+    core_module_for_alias,
     diagnostic_from_registry,
     diagnostic_with_source_mapping,
     dimension_display_name,
@@ -135,7 +134,6 @@ fn sema_attach_diagnostic_source_locations(diagnostics: &[Diagnostic], start: In
     }
 }
 
-
 // Whether any diagnostic from `start` on is an error. Completeness follows
 // errors only: a warning-only module still lowers and emits.
 fn sema_has_error_since(diagnostics: [Diagnostic], start: Int) -> Bool Never! {
@@ -200,6 +198,11 @@ fn sema_lint(code: String, span: Span, what: String, why: String, fix: String) -
     diagnostic_from_registry(code, Val(span), what, why, fix)
 }
 
+// L0511: a user binding or parameter spelled `err`.
+fn sema_err_shadow_lint(span: Span) -> Diagnostic {
+    sema_lint("L0511", span, "Binding `err` shadows the fallback's ambient failure report", "`err` has a special meaning inside a fallible `??` fallback, so the same name is easy to misread as the report there", "Rename the binding, or use it outside a fallback")
+}
+
 fn sema_defined_twice_optional(name: String, why: String, span: Span?) -> Diagnostic {
     sema_error_optional("E0105", span, "`{name}` is defined twice", why, "rename or remove one of the definitions")
 }
@@ -218,6 +221,14 @@ fn sema_defined_twice(name: String, why: String, span: Span) -> Diagnostic {
     sema_error("E0105", span, "`{name}` is defined twice", why, "rename or remove one of the definitions")
 }
 
+fn sema_field_defined_twice(name: String, owner: String, span: Span) -> Diagnostic {
+    sema_error("E0105", span, "field `{name}` is defined twice in `{owner}`", "each field name may appear only once", "rename or remove the duplicate field")
+}
+
+fn sema_method_defined_twice(name: String, owner: String, span: Span) -> Diagnostic {
+    sema_error("E0105", span, "method `{name}` is defined twice on `{owner}`", "each method name may appear only once on a type", "rename or remove one of the definitions")
+}
+
 fn sema_unknown_name(name: String, span: Span) -> Diagnostic {
     sema_error(
         "E0107",
@@ -228,26 +239,70 @@ fn sema_unknown_name(name: String, span: Span) -> Diagnostic {
     )
 }
 
-fn sema_type_mismatch(required: Type, offered: Type, span: Span) -> Diagnostic {
-    // (Rust `typed_text_mismatch`): a
-    // runtime `String` never becomes a checked typed text or a `Regex`.
-    if required == .Named(name) && offered == Type.String {
-        head :: sema_call_reflection_leaf_name(name)
-        if head == "Regex" -> return sema_error("E0152", span, "a `String` is not a `Regex` pattern", "regex patterns are typed literals, so Jet can validate them before the program runs", "write `.{{\"...\"}}` here, or call `re.compile(text)` for a pattern built at run time")
-        if head == "SQL" || head == "HTML" || head == "Sh" {
-            why :: if head == "Sh" -> "a runtime string could change the executable or argument boundaries; only a checked literal may build `Sh`, where every `{{value}}` hole is exactly one argv item" else -> "interpolating untrusted text into a query or page is how injection happens; only a checked literal (its `{{value}}` holes become bound parameters or escaped insertions) may build one"
-            return sema_error("E0149", span, "a runtime `String` can't be used as `{head}`", why, "write `{head}{{\"...\"}}` with `{{value}}` holes, or use `{head}.raw(\"…\")` if you have audited the text")
-        }
+// E0107 with the most useful fix: the Core import a module-style name
+// misses, a near visible name, or declaring it.
+fn sema_unknown_name_in(name: String, span: Span, scopes: SemaScopeTable) -> Diagnostic {
+    fix := "declare it first: `{name} :: ...`"
+    if core_module_for_alias(name) == .Val(owner) {
+        fix = "add `use {owner} as {name}`"
+    } else if sema_scope_closest_visible_name(scopes, name) == .Val(near) {
+        fix = "did you mean `{near}`?"
     }
+    sema_error("E0107", span, "nothing named `{name}` exists here", "a name must be declared before it's used", fix)
+}
+
+fn sema_type_mismatch(required: Type, offered: Type, span: Span) -> Diagnostic {
+    if sema_typed_text_mismatch(required, offered, span) == .Val(typed_text) -> return typed_text
     required_name :: type_name(required)
     offered_name :: type_name(offered)
+    // `/` of two whole numbers is an exact Fraction; storing it in an Int
+    // most often wants floor division.
+    fix :: if required == Type.Int && sema_type_nominal_leaf(offered) == "Fraction" -> "use `/%` to divide and round down, or convert the Fraction explicitly" else -> "use a value of the required type or convert it explicitly"
     sema_error(
         "E0108",
         span,
         "this needs {required_name}, but the value is {offered_name}",
         "the value here does not have the type required by this declaration",
-        "use a value of the required type or convert it explicitly",
+        fix,
     )
+}
+
+// E0108: a write whose value doesn't fit the binding or field it lands in;
+// `holder` is "binding" or "field".
+fn sema_slot_holds_mismatch(slot: String, holder: String, required: Type, offered: Type, span: Span) -> Diagnostic {
+    fix :: if required == Type.Int && sema_type_nominal_leaf(offered) == "Fraction" -> "use `/%` to divide and round down (`/%=` in place), or make the {holder} a Float" else -> sema_type_fix_hint(required, offered)
+    sema_error("E0108", span, "{slot} holds {sema_type_show(required)}, but this value is {sema_type_show(offered)}", "a {holder} keeps one type for its whole life", fix)
+}
+
+// (Rust `typed_text_mismatch`): a runtime `String` never becomes a checked
+// typed text or a `Regex`.
+fn sema_typed_text_mismatch(required: Type, offered: Type, span: Span) -> Diagnostic? {
+    if required == .Named(name) && offered == Type.String {
+        head :: sema_call_reflection_leaf_name(name)
+        if head == "Regex" -> return Val(sema_error("E0152", span, "a `String` is not a `Regex` pattern", "regex patterns are typed literals, so Jet can validate them before the program runs", "write `Regex{{\"...\"}}` here, or call `re.compile(text)` for a pattern built at run time"))
+        if head == "SQL" || head == "HTML" || head == "Sh" {
+            why :: if head == "Sh" -> "a runtime string could change the executable or argument boundaries; only a checked literal may build `Sh`, where every `{{value}}` hole is exactly one argv item" else -> "interpolating untrusted text into a query or page is how injection happens; only a checked literal (its `{{value}}` holes become bound parameters or escaped insertions) may build one"
+            return Val(sema_error("E0149", span, "a runtime `String` can't be used as `{head}`", why, "write `{head}{{\"...\"}}` with `{{value}}` holes, or use `{head}.raw(\"…\")` if you have audited the text"))
+        }
+    }
+    None
+}
+
+// A slot whose check reports its own mismatch wording finds the generic
+// E0108 its value's check reported at the value, from `start` on.
+fn sema_value_mismatch_index(diagnostics: [Diagnostic], start: Int, span: Span) -> Int? {
+    index := start
+    loop index < diagnostics.len() {
+        if diagnostics[index].code == "E0108" && diagnostics[index].span == (Val(span)) -> return Val(index)
+        index += 1
+    }
+    None
+}
+
+// Rust serde_diags.rs `wrong_core_arity`: a standard-library method or
+// function called with the wrong number of arguments.
+fn sema_wrong_core_arity(name: String, expected: Int, actual: Int, span: Span) -> Diagnostic {
+    sema_error("E0104", span, "`{name}` expects {expected} argument{if expected == 1 -> "" else -> "s"}, got {actual}", "every argument must match a standard library function parameter", "check the call to `{name}`")
 }
 
 // The plain-words type name diagnostics print (the Rust reference's
@@ -281,6 +336,21 @@ fn sema_type_show(ty: Type) -> String Never! {
         }
         else -> type_name(ty)
     }
+}
+
+// sema_type_show inside one pair of backticks: a nominal type is its name
+// with its arguments (`Wrap<Plain>`) and a trait value its bounds, never
+// quoted twice.
+fn sema_type_show_quoted(ty: Type) -> String Never! {
+    if ty == {
+        .Named(name) -> {
+            if name != "Decimal" -> return "`{name}`"
+        }
+        .Apply(_, _) -> return "`{type_name(ty)}`"
+        .TraitObject(bounds) -> return "`{bounds.join(" + ")}`"
+        else -> {}
+    }
+    "`{sema_type_show(ty)}`"
 }
 
 fn sema_type_int_range_text(signed: Bool, bits: Int) -> String Never! {
@@ -357,4 +427,103 @@ fn sema_return_value_mismatch(function: String, want: Type, got: Type, span: Spa
     required :: if want == .Result(success, error) && sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) -> success else -> want
     want_name :: type_name(required)
     sema_error("E0113", span, "this value is {sema_type_show(got)}, but `{function}` returns {want_name}", "`{function}` declares {want_name} as its result, so the value it hands back must be {want_name}", sema_return_value_fix(required, got))
+}
+
+// The leaf of a canonical Core nominal declared by `module_name`
+// (`core.crypto`) in `source` (`Core/crypto/crypto.jet`), in either identity
+// spelling the registration graph gives it.
+fn sema_core_canonical_leaf(name: String, module_name: String, source: String) -> String? {
+    parts :: name.split("::").to_list()
+    if parts.len() < 2 -> return None
+    leaf :: parts[parts.len() - 1]
+    owner :: parts.slice(0, parts.len() - 1).join("::")
+    core_owner :: "<corelib>/{module_name}"
+    source_suffix :: "::{source}"
+    if owner == core_owner || (owner.starts_with("<corelib>/") && owner.ends_with(source_suffix)) -> return Val(leaf)
+    None
+}
+
+fn sema_core_crypto_leaf(name: String) -> String? {
+    sema_core_canonical_leaf(name, "core.crypto", "Core/crypto/crypto.jet")
+}
+
+// The one closed secret-lifetime wrapper, by its bare name or its canonical
+// source identity.
+fn sema_is_expiring_secret_name(name: String) -> Bool Never! {
+    name == "ExpiringSecret" || sema_core_canonical_leaf(name, "core.crypto.vault", "Core/crypto/vault.jet") == (Val("ExpiringSecret"))
+}
+
+// The read loan `ExpiringSecret.with` lends its callback: `T` under the
+// compiler-only loan tag, which source can neither name nor store.
+fn sema_expiring_secret_loan_type(ty: Type) -> Type Never! {
+    Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.ExpiringSecretLoan}, inner: ty}
+}
+
+// The closed family `ExpiringSecret<T>` may own: Secret, SigningKey and
+// X25519SecretKey, as a crypto nominal or a canonical `core.crypto` name.
+fn sema_is_expiring_secret_member_type(ty: Type) -> Bool Never! {
+    if ty == {
+        .Tagged(marker, inner) -> {
+            if marker != (TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}) -> return false
+            if inner == .Named(name) -> return sema_expiring_secret_leaf(name)
+            false
+        }
+        .Named(name) -> sema_expiring_secret_leaf(sema_core_crypto_leaf(name) ?? "")
+        else -> false
+    }
+}
+
+fn sema_expiring_secret_leaf(leaf: String) -> Bool Never! {
+    leaf == "Secret" || leaf == "SigningKey" || leaf == "X25519SecretKey"
+}
+
+// A secret-bearing `core.crypto` value: a cloned copy would be a second owned
+// credential, so an unmarked owning argument is E0201, never an implicit clone.
+fn sema_is_secret_bearing_crypto_type(ty: Type) -> Bool Never! {
+    if ty == {
+        .Tagged(marker, inner) -> {
+            if marker == (TagMarker.Internal{internal_tag: InternalTag.CoreCryptoNominal}) {
+                if inner == .Named(name) -> return sema_secret_bearing_crypto_leaf(name)
+                return false
+            }
+            sema_is_secret_bearing_crypto_type(inner)
+        }
+        .Named(name) -> sema_secret_bearing_crypto_leaf(sema_core_crypto_leaf(name) ?? "")
+        else -> false
+    }
+}
+
+fn sema_secret_bearing_crypto_leaf(leaf: String) -> Bool Never! {
+    leaf == "Secret" || leaf == "SigningKey" || leaf == "X25519SecretKey" || leaf == "SharedSecret"
+}
+
+// Whether a value of `ty` carries an ExpiringSecret loan anywhere a store,
+// return or escape could keep it.
+fn sema_contains_expiring_secret_loan(ty: Type) -> Bool Never! {
+    if ty == {
+        .Tagged(marker, inner) -> marker == (TagMarker.Internal{internal_tag: InternalTag.ExpiringSecretLoan}) || sema_contains_expiring_secret_loan(inner)
+        .Option(inner) | .List(inner) | .Shared(inner) | .FixedList(inner, _) -> sema_contains_expiring_secret_loan(inner)
+        .Result(ok, err) -> sema_contains_expiring_secret_loan(ok) || sema_contains_expiring_secret_loan(err)
+        .Map(key, _, value) -> sema_contains_expiring_secret_loan(key) || sema_contains_expiring_secret_loan(value)
+        .Fn(params, ret, _, _, _, _) -> {
+            loop param in params {
+                if sema_contains_expiring_secret_loan(param) -> return true
+            }
+            if ret == .Val(returned) -> return sema_contains_expiring_secret_loan(returned)
+            false
+        }
+        .Tuple(fields) -> {
+            loop field in fields {
+                if sema_contains_expiring_secret_loan(field.ty) -> return true
+            }
+            false
+        }
+        .Apply(_, args) -> {
+            loop arg in args {
+                if sema_contains_expiring_secret_loan(arg) -> return true
+            }
+            false
+        }
+        else -> false
+    }
 }

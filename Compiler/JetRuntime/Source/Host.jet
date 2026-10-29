@@ -38,7 +38,7 @@ fn host_unlock() { sync_mutex_unlock(host_root) }
 // Linux returns -errno; retry only interrupted writes and advance after a short
 // write. Linux errno occupies 1..4095, so -4096 is a distinct private
 // WriteZero fact, never an OS errno or a boxed exact-Int carrier.
-HOST_WRITE_ZERO :: prep { I64{-4096} }
+HOST_WRITE_ZERO :: I64{-4096}
 
 fn host_write_all(fd: I64, bytes: I64, length: I64) -> I64 {
     at := I64{0}
@@ -192,6 +192,15 @@ fn host_is_tty(fd: I64) -> Bool {
     // A terminal host fault may precede the runtime's init array.
     if (host_root == I64{0}) -> return
     host_lock()
+    _ := host_stdout_flush_locked()
+    host_unlock()
+}
+
+// The fault report's flush (Fault.jet): skipped when the lock is held, since
+// the faulting thread may hold it mid-write and would wait forever.
+fn host_stdout_flush_fault() {
+    if (host_root == I64{0}) -> return
+    if !sync_mutex_try_lock(host_root) -> return
     _ := host_stdout_flush_locked()
     host_unlock()
 }

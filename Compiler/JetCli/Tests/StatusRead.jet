@@ -1,9 +1,11 @@
 // StatusValue adapter contract: assemble with Compiler and use this run entry.
+use jet_cli.[jet_cli_status_json, jet_cli_status_value_parse]
+
 fn status_read_require(ok: Bool, name: String) Never! {
     if !ok -> panic("status reader contract: {name}")
 }
 
-fn run() {
+#Test("status_read") {
     value :: jet_cli_status_value_parse("{{\"n\":18446744073709551615,\"f\":1.2300e+4,\"a\":[null,true,\"é\"]}}") ?? panic("status parse")
     status_read_require(jet_cli_status_json(value) == "{{\"n\":18446744073709551615,\"f\":12300,\"a\":[null,true,\"é\"]}}", "exact integer and normalized float")
     loop text in

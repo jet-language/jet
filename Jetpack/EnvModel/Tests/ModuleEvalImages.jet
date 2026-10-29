@@ -1,5 +1,7 @@
 // Claims ported from crates/jet-env-model/src/ModuleEval/mod.rs #[cfg(test)] (OCI images).
 // JetOS system/fleet/vmtest claims are omitted (mapping-B jetos_detail).
+use jet_env_model.[ImageEnvVar, ImageKind, envmodel_evaluate_env]
+use jetpack_foundation.[PACKAGE_FILE]
 
 #Test("s61 leading hyphen name is clean error") {
     // S84: a leading-hyphen name is rejected cleanly (the ordinary teaching
@@ -49,7 +51,7 @@
 
 #Test("computed image fields consume top level known values") {
     dir :: envmodel_test_oci_base_dir("computed-fields")
-    src :: "\nPORT :: prep {{ 8080 }}\nmodule image.server {{\n    from: packages.app,\n    expose: [PORT],\n}}\n"
+    src :: "\nPORT :: comptime {{ 8080 }}\nmodule image.server {{\n    from: packages.app,\n    expose: [PORT],\n}}\n"
     plan :: envmodel_evaluate_env(src, dir) ?? panic("the image plans")
     assert_eq(plan.images[0].expose, [Int]{8080})
     files.remove_all(dir) ?? return

@@ -1,0 +1,645 @@
+#!/usr/bin/env jet
+// Native boundary for compiled-workload peer commands.
+// Build: jet build Tools/ci/CompiledWorkloadPeerLauncher.jet (the runner and
+// Tools/ci/test-compiled-workload-peer-launcher.mjs build it with JET).
+// Usage:
+//   compiled-workload-peer-launcher --version
+//   compiled-workload-peer-launcher --contract
+//   compiled-workload-peer-launcher --contract=compiled-workload-peer-isolation-v1
+//     --task-id ID --root DIR --cwd DIR --network disabled|loopback-only
+//     --external-write disabled --host ambient -- COMMAND [ARG...]
+//
+// The launcher has no ambient fallback. Linux uses Bubblewrap mount, PID and
+// network namespaces: the whole filesystem is read-only except the task root,
+// and /proc, /dev and /tmp are private. `--network disabled` also loads a
+// seccomp filter (through `bwrap --seccomp`) that denies socket creation, so
+// even loopback is closed while pipes and socketpairs stay available to
+// compiler and linker subprocesses. `--network loopback-only` brings up the
+// private namespace's loopback interface and nothing else.
+//
+// Inside the sandbox the launcher runs again as the supervisor
+// (`--internal-disabled` / `--internal-loopback`): it runs the command in its
+// own process group, then signals every other process left in the private PID
+// namespace, and reports a signal that ended the command through a one-byte
+// status file in the task root. The outer launcher re-raises that signal on
+// itself, so callers see the same exit code or signal as the command. A
+// signal sent to the launcher ends it with that signal; Bubblewrap's
+// `--die-with-parent` then kills the sandbox and the PID namespace with it.
+//
+// Other hosts refuse: the Jet runtime's process boundary is Linux-only, and
+// Core has no Seatbelt or AppContainer surface.
+use core.files as files
+use core.process as process
+use core.sys as sys
+use core.term as term
+use core.time as time
+
+CONTRACT :: "compiled-workload-peer-isolation-v1"
+EXIT_UNSUPPORTED :: 78
+LAUNCHER_NAME :: "compiled-workload-peer-launcher"
+
+// glibc `signal`, used only to restore the default disposition (SIG_DFL = 0)
+// before the launcher re-raises a signal on itself.
+#Import(c) fn libc_signal(signal: I64, handler: I64) -> I64 = "signal"
+
+enum NetworkPolicy {
+    Disabled
+    LoopbackOnly
+}
+
+struct Invocation {
+    task_id: String
+    root: String
+    cwd: String
+    network: NetworkPolicy
+    command: String
+    args: [String]
+}
+
+// How a supervised child ended: its exit code, or the signal that ended it
+// (0 when it exited).
+struct ChildEnd {
+    code: Int
+    signal: Int
+}
+
+#Error
+struct LaunchError {
+    message: String
+}
+
+fn launch_error(message: String) -> LaunchError Never! { LaunchError{message: message} }
+
+fn run() {
+    args :: process.args()
+    if args.len() > 0 && (args[0] == "--internal-disabled" || args[0] == "--internal-loopback") {
+        internal_main(args[1..<args.len()], args[0] == "--internal-loopback")
+    }
+    if args.len() == 1 && args[0] == "--version" {
+        print(CONTRACT)
+        return
+    }
+    if args.len() == 1 && args[0] == "--contract" {
+        capability_check() ?? fail(err.message)
+        print(CONTRACT)
+        return
+    }
+    invocation :: parse_invocation(args) ?? fail(err.message)
+    capability_check() ?? fail(err.message)
+    end :: run_linux(invocation) ?? fail("task `{invocation.task_id}`: {err.message}")
+    finish(end)
+}
+
+fn fail(reason: String) -[IO, Exec, Time.Wait]> Never {
+    term.eprint("{LAUNCHER_NAME}: {reason}")
+    process.exit(EXIT_UNSUPPORTED)
+}
+
+// ---- Invocation ----
+
+fn parse_invocation(args: [String]) -[FS]> Invocation LaunchError! {
+    if args.len() == 0 -> return Err(launch_error("missing execution arguments; use --contract for the capability probe"))
+    task_id := String?{None}
+    root := String?{None}
+    cwd := String?{None}
+    network := NetworkPolicy?{None}
+    external_write := false
+    host := false
+    command := String?{None}
+    command_args := [String]{}
+    separator := false
+    index := 0
+    loop index < args.len() {
+        arg :: args[index]
+        if separator {
+            if command == None -> command = Val(arg.copy()) else -> &command_args.push(arg.copy())
+            index += 1
+            next
+        }
+        if arg == "--" {
+            separator = true
+            index += 1
+            next
+        }
+        if !arg.starts_with("--") -> return Err(launch_error("expected launcher option, found `{arg}`"))
+        option :: text_from(arg, 2)
+        equals :: byte_position(option, 61)
+        name :: if equals < 0 -> option.copy() else -> text_range(option, 0, equals)
+        known :: name == "contract" || name == "task-id" || name == "root" || name == "cwd" || name == "network" || name == "external-write" || name == "host"
+        if !known {
+            if name.starts_with("--") -> return Err(launch_error("unsupported launcher option `{name}`"))
+            return Err(launch_error("expected `--` before command, found `{name}`"))
+        }
+        value := ""
+        if equals >= 0 -> value = text_from(option, equals + 1)
+        if equals < 0 {
+            index += 1
+            if index >= args.len() -> return Err(launch_error("missing value for --{name}"))
+            value = args[index].copy()
+        }
+        if {
+            name == "contract" -> {
+                if value != CONTRACT -> return Err(launch_error("unsupported contract `{value}`"))
+            }
+            name == "task-id" -> {
+                if !valid_task_id(value) -> return Err(launch_error("invalid task id `{value}`"))
+                task_id = Val(value.copy())
+            }
+            name == "root" -> root = Val(value.copy())
+            name == "cwd" -> cwd = Val(value.copy())
+            name == "network" -> network = Val(network_policy(value))
+            name == "external-write" -> {
+                if value != "disabled" -> return Err(launch_error("unsupported external-write authority `{value}`"))
+                external_write = true
+            }
+            else -> {
+                if value != "ambient" -> return Err(launch_error("unsupported host authority `{value}`"))
+                host = true
+            }
+        }
+        index += 1
+    }
+    if !separator -> return Err(launch_error("missing `--` command separator"))
+    task_text :: task_id ?? return Err(launch_error("missing --task-id"))
+    root_text :: root ?? return Err(launch_error("missing --root"))
+    root_path :: canonical_directory("root", root_text)
+    cwd_text :: cwd ?? return Err(launch_error("missing --cwd"))
+    cwd_path :: canonical_directory("cwd", cwd_text)
+    if root_path == "/" || root_path == "" -> return Err(launch_error("root must not be a filesystem root"))
+    if !contained(root_path, cwd_path) -> return Err(launch_error("cwd `{cwd_path}` escapes root `{root_path}` after canonicalization"))
+    if !external_write -> return Err(launch_error("missing --external-write=disabled"))
+    if !host -> return Err(launch_error("missing --host=ambient"))
+    policy :: network ?? return Err(launch_error("missing --network authority"))
+    program :: command ?? return Err(launch_error("missing command after `--`"))
+    if program == "" || has_nul(program) -> return Err(launch_error("command is empty or contains NUL"))
+    loop item in command_args {
+        if has_nul(item) -> return Err(launch_error("command argument contains NUL"))
+    }
+    Ok(Invocation{task_id: task_text, root: root_path, cwd: cwd_path, network: policy, command: program, args: command_args})
+}
+
+fn network_policy(value: String) -> NetworkPolicy LaunchError! {
+    if value == "disabled" -> return Ok(NetworkPolicy.Disabled)
+    if value == "loopback-only" -> return Ok(NetworkPolicy.LoopbackOnly)
+    Err(launch_error("unsupported network authority `{value}`"))
+}
+
+fn valid_task_id(value: String) -> Bool Never! {
+    if value == "" -> return false
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        alphanumeric :: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+        if !alphanumeric && code != 46 && code != 95 && code != 45 -> return false
+    }
+    true
+}
+
+// A real directory (a final symbolic link is refused), canonicalized.
+// Canonicalizing first means `stat` only describes a path that exists: a
+// failed `stat` corrupts later file operations in the seed runtime (a0_010).
+fn canonical_directory(what: String, value: String) -[FS]> String LaunchError! {
+    if value == "" || has_nul(value) -> return Err(launch_error("{what} is empty or contains NUL"))
+    canonical :: files.canonicalize(value) ?? return Err(launch_error("{what} `{value}` is unavailable: {err}"))
+    info :: files.stat(value) ?? return Err(launch_error("{what} `{value}` is unavailable: {err}"))
+    if !info.is_dir -> return Err(launch_error("{what} `{value}` is not a directory"))
+    Ok(canonical)
+}
+
+// Component-wise containment of one canonical path in another.
+fn contained(root: String, child: String) -> Bool Never! {
+    child == root || child.starts_with("{root}/")
+}
+
+// ---- Paths and text ----
+
+fn has_nul(value: String) -> Bool Never! {
+    loop byte in value.bytes() {
+        if Int.from_u8(byte) == 0 -> return true
+    }
+    false
+}
+
+fn byte_position(value: String, wanted: Int) -> Int Never! {
+    raw :: value.bytes()
+    loop index in 0..<raw.len() {
+        if Int.from_u8(raw[index]) == wanted -> return index
+    }
+    -1
+}
+
+fn text_range(value: String, start: Int, end: Int) -> String Never! {
+    String.from_bytes_lossy(value.bytes()[start..<end])
+}
+
+fn text_from(value: String, start: Int) -> String Never! {
+    text_range(value, start, value.bytes().len())
+}
+
+fn digits_value(text: String) -> Int? Never! {
+    if text == "" -> return None
+    value := 0
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        if code < 48 || code > 57 || value > 100000000 -> return None
+        value = value * 10 + code - 48
+    }
+    Val(value)
+}
+
+// PATH entries as the host splits them: an empty entry is the current directory.
+fn path_entries(value: String) -> [String] Never! {
+    entries := [String]{}
+    start := 0
+    raw :: value.bytes()
+    loop index in 0..<raw.len() + 1 {
+        if index == raw.len() || Int.from_u8(raw[index]) == 58 {
+            &entries.push(text_range(value, start, index))
+            start = index + 1
+        }
+    }
+    entries
+}
+
+fn path_join(directory: String, name: String) -> String Never! {
+    if directory == "" -> return name.copy()
+    if directory.ends_with("/") -> return "{directory}{name}"
+    "{directory}/{name}"
+}
+
+// A regular file after following links, judged on its canonical path (see
+// `canonical_directory`).
+fn regular_file(path: String) -[FS]> Bool Never! {
+    canonical :: files.canonicalize(path) ?? return false
+    if files.stat(canonical) == {
+        .Ok(info) -> info.is_file
+        .Err(_) -> false
+    }
+}
+
+fn find_on_path(program: String) -[FS, Env]> String? Never! {
+    path :: process.env_get("PATH") ?? return None
+    loop directory in path_entries(path) {
+        candidate :: path_join(directory, program)
+        if regular_file(candidate) -> return Val(candidate)
+    }
+    None
+}
+
+fn resolve_program(program: String) -[FS, Env]> String LaunchError! {
+    if program.starts_with("/") || byte_position(program, 47) >= 0 {
+        return files.canonicalize(program) ?? return Err(launch_error("command `{program}` is unavailable: {err}"))
+    }
+    path :: process.env_get("PATH") ?? return Err(launch_error("PATH is unavailable"))
+    loop directory in path_entries(path) {
+        candidate :: path_join(directory, program)
+        if regular_file(candidate) {
+            return files.canonicalize(candidate) ?? return Err(launch_error("command `{program}` cannot be canonicalized: {err}"))
+        }
+    }
+    Err(launch_error("command `{program}` is unavailable on PATH"))
+}
+
+fn launcher_path() -[FS, Env]> String LaunchError! {
+    executable :: sys.executable()
+    if executable == "" -> return Err(launch_error("Linux peer isolation unavailable: launcher path cannot be resolved: the host reports no executable path"))
+    files.canonicalize(executable) ?? return Err(launch_error("Linux peer isolation unavailable: launcher path cannot be resolved: {err}"))
+}
+
+fn clean_probe_stderr(text: String) -> String Never! {
+    out := [U8]{}
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        if code == 13 || code == 10 || code == 9 -> &out.push(U8{32}) else -> &out.push(byte)
+    }
+    cleaned :: String.from_bytes_lossy(out).trim()
+    if cleaned == "" -> return ""
+    ": {cleaned}"
+}
+
+fn status_text(end: ChildEnd) -> String Never! {
+    if end.signal > 0 -> return "signal: {end.signal}"
+    "exit status: {end.code}"
+}
+
+// ---- Capability check ----
+
+fn capability_check() LaunchError! -[FS, Env, Exec, Time, Time.Wait]> {
+    if sys.name() != "linux" {
+        return Err(launch_error("unsupported host `{sys.name()}`: native peer isolation is unavailable; it is implemented only on Linux (the Jet runtime's process boundary is Linux-only)"))
+    }
+    bwrap :: find_on_path("bwrap") ?? return Err(launch_error("Linux peer isolation unavailable: bubblewrap (`bwrap`) is not available on PATH"))
+    shell :: find_on_path("sh") ?? return Err(launch_error("Linux peer isolation unavailable: POSIX `sh` is not available on PATH"))
+    ip :: find_on_path("ip") ?? return Err(launch_error("Linux peer isolation unavailable: `ip` is required to enable loopback-only networking"))
+    launcher :: launcher_path()
+    filter :: socket_filter()
+    root :: probe_root()
+    if probe_policies(bwrap, shell, ip, launcher, filter, root) == .Err(error) {
+        files.remove_all(root).drop("the capability probe root is scratch")
+        return Err(error)
+    }
+    files.remove_all(root).drop("the capability probe root is scratch")
+    Ok()
+}
+
+fn probe_policies(bwrap: String, shell: String, ip: String, launcher: String, filter: [U8], root: String) LaunchError! -[FS, Env, Exec, Time, Time.Wait]> {
+    filter_path :: "{root}/.compiled-workload-peer-seccomp"
+    files.write_bytes(filter_path, filter) ?? return Err(launch_error("Linux peer isolation unavailable: seccomp socket filter cannot be staged at `{filter_path}`: {err}"))
+    loop choice in ([NetworkPolicy]{NetworkPolicy.Disabled, NetworkPolicy.LoopbackOnly}) {
+        mode :: if choice == .LoopbackOnly -> "--internal-loopback" else -> "--internal-disabled"
+        inner := [String]{launcher.copy(), mode}
+        if choice == .LoopbackOnly -> &inner.push(ip.copy())
+        &inner.push(shell.copy())
+        &inner.push("-c")
+        &inner.push("exit 0")
+        argv :: sandbox_argv(bwrap, shell, filter_path, root, root, choice, inner)
+        named :: if choice == .LoopbackOnly -> "LoopbackOnly" else -> "Disabled"
+        receipt :: process.cmd(argv).stdin(.Capture).stdout(.Capture).stderr(.Capture).run() ?? return Err(launch_error("Linux peer isolation unavailable: bubblewrap {named} probe failed: {err}"))
+        if !receipt.success {
+            return Err(launch_error("Linux peer isolation unavailable: bubblewrap {named} probe exited {status_text(child_end(receipt))}{clean_probe_stderr(receipt.errors)}"))
+        }
+    }
+    Ok()
+}
+
+fn probe_root() -[FS, Env, Time]> String LaunchError! {
+    base := ""
+    if process.env_get("JET_COMPILED_WORKLOAD_PEER_PROBE_ROOT") == {
+        .Val(configured) -> base = configured
+        .None -> {
+            home :: process.env_get("HOME") ?? return Err(launch_error("cannot locate a disk-backed capability probe directory"))
+            base = "{home}/.cache/jet-dev/scratch"
+        }
+    }
+    files.create_dir_all(base) ?? return Err(launch_error("capability probe root `{base}` cannot be created: {err}"))
+    root :: "{base}/compiled-workload-peer-probe-{sys.pid()}-{time.unix_ns()}"
+    if files.exists(root) -> return Err(launch_error("capability probe root `{root}` cannot be created: it already exists"))
+    files.create_dir(root) ?? return Err(launch_error("capability probe root `{root}` cannot be created: {err}"))
+    Ok(root)
+}
+
+// The classic-BPF seccomp program `bwrap --seccomp` loads: deny socket(2)
+// with EPERM, allow every other system call. Each sock_filter is
+// {u16 code, u8 jt, u8 jf, u32 k}, little-endian.
+fn socket_filter() -[Env]> [U8] LaunchError! {
+    arch :: sys.arch()
+    number :: socket_syscall(arch) ?? return Err(launch_error("Linux peer isolation unavailable: seccomp socket policy has no syscall table for `{arch}`"))
+    Ok([U8]{
+        32, 0, 0, 0, 0, 0, 0, 0,
+        21, 0, 0, 1, U8{number}, 0, 0, 0,
+        6, 0, 0, 0, 1, 0, 5, 0,
+        6, 0, 0, 0, 0, 0, 255, 127,
+    })
+}
+
+fn socket_syscall(arch: String) -> Int? Never! {
+    if arch == "x86_64" -> return Val(41)
+    if arch == "aarch64" -> return Val(198)
+    None
+}
+
+// ---- Bubblewrap ----
+
+fn linux_base_args(root: String, cwd: String, network: NetworkPolicy) -> [String] Never! {
+    args := [String]{
+        "--die-with-parent",
+        "--unshare-all",
+        "--ro-bind", "/", "/",
+        "--remount-ro", "/",
+        "--bind", root.copy(), root.copy(),
+        "--proc", "/proc",
+        "--dev", "/dev",
+        "--tmpfs", "/tmp",
+        "--chdir", cwd.copy(),
+    }
+    if network == .LoopbackOnly {
+        // CAP_NET_ADMIN exists only inside bwrap's fresh user and network
+        // namespaces and is used solely to bring up the private loopback
+        // interface. Disabled networking receives no extra capability.
+        loop extra in ([String]{"--uid", "0", "--gid", "0", "--cap-add", "CAP_NET_ADMIN"}) -> &args.push(extra)
+    }
+    args
+}
+
+// The full command line for one sandboxed run. Disabled networking runs
+// bwrap through `sh` only to open the seccomp program as descriptor 3 for
+// `--seccomp 3`; `exec` keeps one process, so bwrap is the launcher's direct
+// child and its `--die-with-parent` parent is the launcher.
+fn sandbox_argv(bwrap: String, shell: String, filter_path: String, root: String, cwd: String, network: NetworkPolicy, inner: [String]) -> [String] Never! {
+    argv := [String]{}
+    if network == .Disabled {
+        loop word in ([String]{shell.copy(), "-c", "exec 3<\"$1\" || exit {EXIT_UNSUPPORTED}; shift; exec \"$@\"", LAUNCHER_NAME, filter_path.copy()}) -> &argv.push(word)
+    }
+    &argv.push(bwrap.copy())
+    loop word in linux_base_args(root, cwd, network) -> &argv.push(word)
+    if network == .Disabled {
+        &argv.push("--seccomp")
+        &argv.push("3")
+    }
+    &argv.push("--")
+    loop word in inner -> &argv.push(word)
+    argv
+}
+
+fn run_linux(invocation: Invocation) -[FS, Env, Exec, IO, Time, Time.Wait]> ChildEnd LaunchError! {
+    bwrap :: find_on_path("bwrap") ?? return Err(launch_error("Linux peer isolation unavailable: bubblewrap disappeared from PATH"))
+    shell :: find_on_path("sh") ?? return Err(launch_error("Linux peer isolation unavailable: POSIX `sh` disappeared from PATH"))
+    ip :: find_on_path("ip") ?? return Err(launch_error("Linux peer isolation unavailable: `ip` disappeared from PATH"))
+    launcher :: launcher_path()
+    command :: resolve_program(invocation.command)
+    filter :: socket_filter()
+    stamp :: "{sys.pid()}-{time.unix_ns()}"
+    status_file :: "{invocation.root}/.compiled-workload-peer-status-{stamp}"
+    filter_path :: "{invocation.root}/.compiled-workload-peer-seccomp-{stamp}"
+    files.create(status_file, if_exists: .Refuse) ?? return Err(launch_error("Linux peer isolation signal status cannot be created at `{status_file}`: {err}"))
+    if invocation.network == .Disabled {
+        staged :: files.create(filter_path, if_exists: .Refuse) ?? {
+            files.remove(status_file).drop("the signal status file is scratch")
+            return Err(launch_error("Linux peer isolation seccomp socket filter cannot be created at `{filter_path}`: {err}"))
+        }
+        staged.write_all(filter) ?? {
+            files.remove(status_file).drop("the signal status file is scratch")
+            return Err(launch_error("Linux peer isolation seccomp socket filter cannot be written to `{filter_path}`: {err}"))
+        }
+        staged.flush() ?? {
+            files.remove(status_file).drop("the signal status file is scratch")
+            return Err(launch_error("Linux peer isolation seccomp socket filter cannot be written to `{filter_path}`: {err}"))
+        }
+    }
+    inner := [String]{launcher.copy()}
+    &inner.push(if invocation.network == .LoopbackOnly -> "--internal-loopback" else -> "--internal-disabled")
+    &inner.push("--status-file")
+    &inner.push(status_file.copy())
+    if invocation.network == .LoopbackOnly -> &inner.push(ip.copy())
+    &inner.push(command.copy())
+    loop item in invocation.args -> &inner.push(item.copy())
+    result := ChildEnd{code: 0, signal: 0}
+    failure := ""
+    if run_child(sandbox_argv(bwrap, shell, filter_path, invocation.root, invocation.cwd, invocation.network, inner)) == {
+        .Ok(end) -> result = end
+        .Err(error) -> failure = error.message
+    }
+    if invocation.network == .Disabled {
+        files.remove(filter_path) ?? return Err(launch_error("Linux peer isolation seccomp socket filter cannot be removed from `{filter_path}`: {err}"))
+    }
+    reported := 0
+    if read_linux_signal(status_file) == {
+        .Ok(number) -> reported = number
+        .Err(error) -> if failure == "" -> failure = error.message
+    }
+    files.remove(status_file) ?? return Err(launch_error("Linux peer isolation signal status cannot be removed from `{status_file}`: {err}"))
+    if failure != "" -> return Err(launch_error(failure))
+    if reported > 0 {
+        raise_default(reported)
+        return Err(launch_error("Linux peer isolation signal {reported} could not propagate"))
+    }
+    Ok(result)
+}
+
+// The signal the supervisor reported, or 0 when the command was not ended by one.
+fn read_linux_signal(path: String) -[FS]> Int LaunchError! {
+    bytes :: files.read_bytes(path) ?? return Err(launch_error("Linux peer isolation signal status cannot be read from `{path}`: {err}"))
+    if bytes.len() == 0 -> return Ok(0)
+    if bytes.len() == 1 {
+        number :: Int.from_u8(bytes[0])
+        if number >= 1 && number <= 64 -> return Ok(number)
+    }
+    Err(launch_error("Linux peer isolation signal status returned invalid data"))
+}
+
+// ---- Supervision ----
+
+// Runs `argv` on this process's stdin, stdout and stderr. Core spawns the
+// child as the leader of its own process group and, once the leader exits,
+// kills whatever is left in that group.
+fn run_child(argv: [String]) -[Exec, Time.Wait]> ChildEnd LaunchError! {
+    receipt :: process.cmd(argv).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? return Err(launch_error("native peer isolation child could not start: {err}"))
+    Ok(child_end(receipt))
+}
+
+fn child_end(receipt: ProcessReceipt) -> ChildEnd Never! {
+    ChildEnd{code: receipt.code, signal: receipt.signal ?? 0}
+}
+
+// The supervisor inside the sandbox.
+fn internal_main(args: [String], loopback: Bool) -[FS, Env, Exec, IO, Time, Time.Wait]> Never {
+    if sys.name() != "linux" -> fail("internal runner is Linux-only")
+    rest := args.copy()
+    status_file := ""
+    if rest.len() > 0 && rest[0] == "--status-file" {
+        if rest.len() < 2 -> fail("internal runner status file is missing")
+        value :: rest[1].copy()
+        if value == "" || has_nul(value) -> fail("internal runner status file is invalid")
+        status_file = value
+        rest = rest[2..<rest.len()]
+    }
+    if loopback -> rest = loopback_command(rest)
+    // Bubblewrap loaded the socket filter before running this process;
+    // refuse to supervise anything without it.
+    if !loopback -> require_socket_filter() ?? fail(err.message)
+    if rest.len() == 0 -> fail("internal runner received no command")
+    end :: run_child(rest) ?? fail(err.message)
+    // A leader may leave a background descendant outside its process group.
+    // Every other process in the private PID namespace is closed before the
+    // status is reported.
+    sweep_namespace(15) ?? fail(err.message)
+    time.sleep(25ms)
+    sweep_namespace(9) ?? fail(err.message)
+    if status_file != "" && end.signal > 0 {
+        byte :: U8.from_int(end.signal) ?? fail("internal runner signal status could not propagate: signal {end.signal} is out of range")
+        files.write_bytes(status_file, [U8]{byte}) ?? fail("internal runner signal status could not propagate: {err}")
+    }
+    finish(end)
+}
+
+// Brings up the private namespace's loopback interface with `ip` (the first
+// argument) and returns the command after it.
+fn loopback_command(args: [String]) -[Exec, IO, Time.Wait]> [String] Never! {
+    if args.len() == 0 -> fail("loopback-only internal runner received no ip command")
+    ip :: args[0].copy()
+    if args.len() < 2 -> fail("loopback-only internal runner received no command")
+    receipt :: process.cmd([String]{ip.copy(), "link", "set", "lo", "up"}).stdin(.Capture).stdout(.Capture).stderr(.Capture).run() ?? fail("loopback-only internal runner could not start `{ip}`: {err}")
+    if !receipt.success -> fail("loopback-only internal runner `{ip}` exited {status_text(child_end(receipt))}")
+    args[1..<args.len()]
+}
+
+// Seccomp filter mode with no_new_privs, as `bwrap --seccomp` leaves it.
+fn require_socket_filter() LaunchError! -[FS]> {
+    status :: files.read("/proc/self/status") ?? return Err(launch_error("disabled-network internal runner cannot read its seccomp status: {err}"))
+    filtered := false
+    no_new_privs := false
+    loop line in status.split("\n") {
+        if line.starts_with("Seccomp:") && text_from(line, 8).trim() == "2" -> filtered = true
+        if line.starts_with("NoNewPrivs:") && text_from(line, 11).trim() == "1" -> no_new_privs = true
+    }
+    if !filtered || !no_new_privs -> return Err(launch_error("disabled-network internal runner requires the bubblewrap seccomp socket filter"))
+    Ok()
+}
+
+fn sweep_namespace(signal: Int) LaunchError! -[FS, Env]> {
+    own :: sys.pid()
+    entries :: files.list_dir("/proc") ?? return Err(launch_error("Linux peer process tree cannot be enumerated: {err}"))
+    loop entry in entries {
+        pid :: digits_value(entry.name) ?? next
+        if pid <= 1 || pid == own -> next
+        signalled := true
+        #Unsafe("posix kill: every process in the sandbox's private PID namespace except its init and this supervisor belongs to the supervised command") {
+            if sys.kill(pid, signal) == .Err(_) -> signalled = false
+        }
+        // A process that exited since the listing is already closed.
+        if !signalled && files.exists("/proc/{pid}") -> return Err(launch_error("Linux peer process tree signal failed for pid {pid}"))
+    }
+    Ok()
+}
+
+// Ends this process with the default action of `signal`. Returns only when
+// the signal did not end the process.
+fn raise_default(signal: Int) -[Env, Time]> {
+    #Unsafe("libc signal + posix kill: restore SIG_DFL for one signal number, then re-raise it on this process so the caller observes the supervised command's signal") {
+        _ :: libc_signal(I64{signal}, I64{0})
+        sys.kill(sys.pid(), signal).drop("a failed re-raise falls through to the caller's fallback")
+    }
+    time.sleep(100ms)
+}
+
+fn finish(end: ChildEnd) -[Env, Exec, Time]> Never {
+    if end.signal > 0 {
+        raise_default(end.signal)
+        process.exit(128 + end.signal)
+    }
+    process.exit(end.code)
+}
+
+#Test("cwd containment is component-wise") {
+    assert(contained("/a/b", "/a/b"))
+    assert(contained("/a/b", "/a/b/c"))
+    assert(!contained("/a/b", "/a/bc"))
+    assert(!contained("/a/b", "/a"))
+}
+
+#Test("PATH entries keep empty entries as the current directory") {
+    assert_eq(path_entries("/bin::/usr/bin"), [String]{"/bin", "", "/usr/bin"})
+    assert_eq(path_entries(""), [String]{""})
+    assert_eq(path_join("", "sh"), "sh")
+    assert_eq(path_join("/bin/", "sh"), "/bin/sh")
+}
+
+#Test("the seccomp program is four sock_filter rows") {
+    filter :: socket_filter() ?? panic("socket filter: {err}")
+    assert_eq(filter.len(), 32)
+    if sys.arch() == "x86_64" -> assert_eq(Int.from_u8(filter[12]), 41)
+}
+
+fn rejection(args: [String]) -[FS]> String Never! {
+    if parse_invocation(args) == {
+        .Ok(_) -> "accepted"
+        .Err(error) -> error.message
+    }
+}
+
+#Test("launcher options parse into one checked invocation") {
+    assert_eq(rejection([String]{"--task-id", "t", "--root", "/", "--cwd", "/", "--network", "internet", "--external-write", "disabled", "--host", "ambient", "--", "x"}), "unsupported network authority `internet`")
+    assert_eq(rejection([String]{"--task-id", "bad id"}), "invalid task id `bad id`")
+    assert_eq(rejection([String]{"--bogus"}), "expected `--` before command, found `bogus`")
+    assert_eq(rejection([String]{"--contract=other"}), "unsupported contract `other`")
+    assert_eq(rejection([String]{"--task-id", "t", "--network", "disabled"}), "missing `--` command separator")
+}

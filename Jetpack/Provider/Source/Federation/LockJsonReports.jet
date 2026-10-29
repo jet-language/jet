@@ -265,7 +265,7 @@ impl ProviderFactReport {
         declared_version :: provider_graph_json_string(object, "version")
         facts.version = provider_graph_either(declared_version, ref_version) ?? ""
         if declared_version != None && ref_version != None && declared_version != ref_version {
-            &conflicts.push("Conan package version `{declared_version ?? ""}` conflicts with ref version `{ref_version ?? ""}`")
+            &conflicts.push("Conan package version `{declared_version}` conflicts with ref version `{ref_version}`")
         }
         if object.get("license") == {
             .Val(raw_license) -> {
@@ -353,7 +353,7 @@ impl ProviderFactReport {
                 }
             }
             .None -> {
-                if graph_value != None || object.has_key("nodes") -> &losses.push("Conan graph lock `nodes` must be an object")
+                if graph_value == .Val(_) || object.has_key("nodes") -> &losses.push("Conan graph lock `nodes` must be an object")
             }
         }
         variant_keys :: [String]{"settings", "options", "generators", "package_id", "rrev", "prev"}

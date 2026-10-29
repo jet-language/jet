@@ -14,13 +14,13 @@ NixEval:
 PackageModel: Foundation
 EnvModel: PackageModel, Compiler front end
 Nix: NixEval, PackageModel
-Store: PackageModel, TrustRoot
-Trust: Store, EnvModel
-Recipe: Trust
-Provider: Trust, Recipe, Nix, EnvModel
-Publication: PackageModel, Provider
-Environment: Provider
-Services: Environment
-Image: Environment
-JetOS: EnvModel, Store
-CLI: Services, Image
+# Engine holds Store, Trust, Recipe, Provider and Environment: their sources use each other in a cycle
+# (Store reaches Provider, Trust and Environment), so they check as one unit until #4589 breaks it.
+Engine: PackageModel, TrustRoot, EnvModel, Nix
+Secrets: Compiler front end, Foundation, PackageModel, EnvModel, Engine
+Publication: PackageModel, Engine
+Services: Engine
+Image: Engine
+JetOS: EnvModel, Engine
+Integrations: Compiler front end, Foundation, PackageModel
+CLI: Services, Image, Integrations, Secrets

@@ -1,0 +1,47 @@
+# tests/dev_parts/routine.rs::comptime_scalar_examples_match_interpreter_resident_jit_and_aot at tests/dev_parts/routine.rs:4067; hand-port (the forced-interpreter tier is carried by `jet run`; the Jet CLI has no interpreter flag)
+fixture: comptime_scalar_examples_match_interpreter_resident_jit_and_aot.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+copy: {root}/Examples/features/comptime/comptime_core.jet core/comptime_core.jet
+copy: {root}/Examples/features/comptime/comptime_tiers.jet tiers/comptime_tiers.jet
+step dev_core: jet run comptime_core.jet
+cwd: core
+exit: 0
+stdout: = ../../../Examples/features/expected/comptime/comptime_core.out
+stderr: empty
+step: jet build comptime_core.jet
+cwd: core
+exit: 0
+step aot_core: built
+cwd: core
+exit: 0
+stdout: = ../../../Examples/features/expected/comptime/comptime_core.out
+stderr: empty
+step dev_tiers: jet run comptime_tiers.jet
+cwd: tiers
+exit: 0
+stdout: = ../../../Examples/features/expected/comptime/comptime_tiers.out
+stderr: empty
+step: jet build comptime_tiers.jet
+cwd: tiers
+exit: 0
+step aot_tiers: built
+cwd: tiers
+exit: 0
+stdout: = ../../../Examples/features/expected/comptime/comptime_tiers.out
+stderr: empty
+step dev_nonfinite: jet run comptime_nonfinite.jet
+cwd: nonfinite
+exit: 0
+stdout: = comptime_scalar_examples_match_interpreter_resident_jit_and_aot.1.out
+stderr: empty
+step: jet build comptime_nonfinite.jet
+cwd: nonfinite
+exit: 0
+step aot_nonfinite: built
+cwd: nonfinite
+exit: 0
+stdout: = comptime_scalar_examples_match_interpreter_resident_jit_and_aot.1.out
+stderr: empty

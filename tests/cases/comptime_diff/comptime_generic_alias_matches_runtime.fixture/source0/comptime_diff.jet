@@ -1,0 +1,19 @@
+use core.encoding.hex as comptime_diff_hex
+alias Answer<T> :: T
+
+fn answer() -> Answer<Int> {
+    return 42
+}
+
+EXPECTED :: comptime { answer() }
+
+fn run() {
+    actual :: answer()
+    comptime_diff_frame("{EXPECTED}", "{actual}")
+
+}
+
+fn comptime_diff_frame(expected_text: String, actual_text: String) {
+    print("{comptime_diff_hex.encode(expected_text.bytes())}")
+    print("{comptime_diff_hex.encode(actual_text.bytes())}")
+}

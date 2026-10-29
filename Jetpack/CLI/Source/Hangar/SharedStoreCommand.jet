@@ -4,7 +4,7 @@
 // activated broker takes its listener from the service manager (Store
 // `store_serve_shared_store`), so `broker` has no descriptor argument.
 
-fn cli_cmd_shared_store(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Net, Time, Time.Wait]> Int Never! {
+fn cli_cmd_shared_store(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     verb :: if parsed.positional.len() == 0 -> "install" else -> parsed.positional[0]
     roots :: pkg_resolve_roots()
     if verb == {
@@ -26,13 +26,13 @@ fn cli_cmd_shared_store(verification: &StoreVerification, theme: Theme, parsed: 
             EXIT_OK
         }
         "status" -> {
-            config :: store_shared_store_config(roots) ?? {
-                theme.error("shared-store status failed", err.message(), "repair the administrator-installed shared-store config.")
-                return EXIT_USAGE
-            }
-            if config == {
+            if store_shared_store_config(roots) == {
                 .Val(found) -> theme.status("shared-store broker configured at {found.socket}")
                 .None -> theme.status("shared-store broker is not installed.")
+                .Err(error) -> {
+                    theme.error("shared-store status failed", error.message(), "repair the administrator-installed shared-store config.")
+                    return EXIT_USAGE
+                }
             }
             EXIT_OK
         }
@@ -50,7 +50,7 @@ fn cli_cmd_shared_store(verification: &StoreVerification, theme: Theme, parsed: 
 
 // `hangar shared enroll <uid> [--read-only]`: one uid and an optional
 // read-only grant, nothing else.
-fn cli_shared_store_enroll(theme: Theme, parsed: CLIParsed, roots: HangarRoots) -[IO, FS, Env, Time, Time.Wait]> Int Never! {
+fn cli_shared_store_enroll(theme: Theme, parsed: CLIParsed, roots: HangarRoots) -[IO, FS, Env, Time, Time.Wait, Rand]> Int Never! {
     if parsed.positional.len() < 2 {
         theme.error("shared-store enrollment needs a uid", "no user id was supplied", "run `jetpack hangar shared enroll <uid>` as the administrator.")
         return EXIT_USAGE

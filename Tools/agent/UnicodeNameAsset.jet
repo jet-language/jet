@@ -1,0 +1,125 @@
+#!/usr/bin/env jet
+// core.text `unicode_name` reads the generated UNICODE_NAME_INDEX asset
+// (kind 8: 11-byte rows [scalar:3, pool offset:4, length:4] + a UTF-8 pool).
+// The asset replaced a 162,765-line generated Jet decision tree; this pins it
+// to that tree's exact meaning: the same 40,531 (scalar, name) rows, every
+// other scalar UNASSIGNED. The hash is of the sorted "scalar\tname\n" rows the
+// tree returned (exhaustive leaf parity 0 diffs).
+// Usage (from the repository root): jet Tools/agent/UnicodeNameAsset.jet
+//   (`jet test Tools/agent/UnicodeNameAsset.jet` runs the same check as a #Test)
+use core.crypto as crypto
+use core.files as files
+use core.process as process
+use core.term as term
+
+ASSET_PATH :: "Core/Text/Runtime/Assets/UnicodeNameIndex.jet"
+MARKER :: "UNICODE_NAME_INDEX :: [U8]{{\""
+TREE_ROWS :: 40531
+TREE_SHA256 :: "a60dd4cc39c63787a010ddb7a70b20daa37106405784a2912e3583891ea340c0"
+
+fn hex_value(code: Int) -> Int Never! {
+    if code >= 48 && code <= 57 -> return code - 48
+    if code >= 97 && code <= 102 -> return code - 87
+    if code >= 65 && code <= 70 -> return code - 55
+    return -1
+}
+
+// The bytes of the `\xHH` escapes in the asset's byte literal; None without the literal.
+fn literal_bytes(source: String) -> [U8]? Never! {
+    start :: source.find(MARKER)
+    if start < 0 -> return None
+    text :: source.bytes()
+    out := [U8]{}
+    at := start + MARKER.bytes().len()
+    loop at < text.len() && text[at] != (U8{34}) {
+        if text[at] == (U8{92}) && at + 3 < text.len() && text[at + 1] == (U8{120}) {
+            high :: hex_value(Int.from_u8(text[at + 2]))
+            low :: hex_value(Int.from_u8(text[at + 3]))
+            if high < 0 || low < 0 -> return None
+            &out.push(U8{high * 16 + low})
+            at += 4
+        } else {
+            at += 1
+        }
+    }
+    Val(out)
+}
+
+fn little_endian(bytes: [U8], at: Int, width: Int) -> Int Never! {
+    value := 0
+    scale := 1
+    loop index in 0..<width {
+        value += Int.from_u8(bytes[at + index]) * scale
+        scale *= 256
+    }
+    value
+}
+
+// Every way the asset departs from the retired decision tree; empty when it matches.
+fn asset_failures(source: String) -> [String] Never! {
+    failures := [String]{}
+    bytes :: literal_bytes(source) ?? return [String]{"UNICODE_NAME_INDEX byte literal is missing"}
+    if bytes.len() < 40 -> return [String]{"UNICODE_NAME_INDEX header is truncated ({bytes.len()} bytes)"}
+    magic :: String.from_bytes_lossy(bytes[0..<4])
+    if magic != "JUCD" -> &failures.push("magic is {magic}, expected JUCD")
+    if little_endian(bytes, 12, 4) != 8 -> &failures.push("kind {little_endian(bytes, 12, 4)}, expected 8 (UTF-8 names)")
+    if little_endian(bytes, 20, 4) != 11 -> &failures.push("stride {little_endian(bytes, 20, 4)}, expected 11")
+    if little_endian(bytes, 36, 4) != bytes.len() -> &failures.push("extent {little_endian(bytes, 36, 4)}, expected {bytes.len()}")
+    if failures.len() > 0 -> return failures
+    count :: little_endian(bytes, 16, 4)
+    records :: little_endian(bytes, 24, 4)
+    pool :: little_endian(bytes, 28, 4)
+    if count != TREE_ROWS -> &failures.push("{count} rows, expected {TREE_ROWS}")
+    rows := [U8]{}
+    previous := -1
+    first := ""
+    last := ""
+    loop row in 0..<count {
+        at :: records + row * 11
+        if at + 11 > bytes.len() {
+            &failures.push("row {row} record extent")
+            return failures
+        }
+        scalar :: little_endian(bytes, at, 3)
+        start :: little_endian(bytes, at + 3, 4)
+        length :: little_endian(bytes, at + 7, 4)
+        if pool + start + length > bytes.len() {
+            &failures.push("row {row} name extent")
+            return failures
+        }
+        if scalar <= previous -> &failures.push("not sorted at row {row}")
+        previous = scalar
+        name :: String.from_bytes_lossy(bytes[pool + start..<pool + start + length])
+        line :: "{scalar}\t{name}"
+        if row == 0 -> first = line.copy()
+        if row == count - 1 -> last = line.copy()
+        loop byte in line.bytes() -> &rows.push(byte)
+        &rows.push(U8{10})
+    }
+    expected_first :: "0\tNULL"
+    expected_last :: "917999\tVARIATION SELECTOR-256"
+    if first != expected_first -> &failures.push("first row is {first}, expected {expected_first}")
+    if last != expected_last -> &failures.push("last row is {last}, expected {expected_last}")
+    digest :: crypto.sha256(rows).hex()
+    if digest != TREE_SHA256 -> &failures.push("row digest {digest}, expected {TREE_SHA256}")
+    failures
+}
+
+fn run() {
+    source :: files.read(ASSET_PATH) ?? {
+        term.eprint("unicode-name-asset: cannot read {ASSET_PATH}: {err}")
+        process.exit(1)
+        return
+    }
+    failures :: asset_failures(source)
+    if failures.len() > 0 {
+        loop failure in failures -> term.eprint("unicode-name-asset: {failure}")
+        process.exit(1)
+    }
+    print("unicode-name-asset: ok ({TREE_ROWS} rows)")
+}
+
+#Test("UNICODE_NAME_INDEX carries the retired decision tree's exact names") {
+    source :: files.read(ASSET_PATH) ?? panic("cannot read {ASSET_PATH}: {err}")
+    assert_eq(asset_failures(source).join("\n"), "")
+}

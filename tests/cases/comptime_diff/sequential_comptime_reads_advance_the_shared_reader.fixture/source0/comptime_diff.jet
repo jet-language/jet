@@ -1,0 +1,21 @@
+use core.encoding.hex as comptime_diff_hex
+
+fn run() {
+    ct :: comptime { Reader.over([U8]{7, 9, 11}) }
+    ct_a :: comptime { ct.read_u8() ?? panic("ct a") }
+    ct_b :: comptime { ct.read_u8() ?? panic("ct b") }
+    comptime_value :: comptime { "{ct_a}|{ct_b}|{ct.remaining()}" }
+
+    rt :: Reader.over([U8]{7, 9, 11})
+    rt_a :: rt.read_u8() ?? panic("rt a")
+    rt_b :: rt.read_u8() ?? panic("rt b")
+    runtime_value :: "{rt_a}|{rt_b}|{rt.remaining()}"
+
+    comptime_diff_frame("{comptime_value}", "{runtime_value}")
+
+}
+
+fn comptime_diff_frame(expected_text: String, actual_text: String) {
+    print("{comptime_diff_hex.encode(expected_text.bytes())}")
+    print("{comptime_diff_hex.encode(actual_text.bytes())}")
+}

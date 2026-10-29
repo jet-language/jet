@@ -1,0 +1,14 @@
+
+use core.crypto as crypto
+use core.encoding.json as json
+
+#[Decode]
+struct Config {
+    #Redact password: crypto.Secret
+}
+
+fn run() {
+    value :: json.decode<Config>("{{\"password\":\"credential\"}}") ?? return
+    if value.password.bytes != "credential".bytes() -> panic("secret decode bytes")
+    if crypto.Secret.decode(DataTree.Int(42)) == .Ok(_) -> panic("non-text secret accepted")
+}

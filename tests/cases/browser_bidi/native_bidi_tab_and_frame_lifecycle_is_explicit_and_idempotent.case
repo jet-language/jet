@@ -1,0 +1,20 @@
+# tests/browser_bidi.rs::native_bidi_tab_and_frame_lifecycle_is_explicit_and_idempotent at tests/browser_bidi.rs:824; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port})
+fixture: native_bidi_tab_and_frame_lifecycle_is_explicit_and_idempotent.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+requires: tool:node
+write: browser_bidi_tab_frame.jet native_bidi_tab_and_frame_lifecycle_is_explicit_and_idempotent.fixture/run.template
+step: jet build browser_bidi_tab_frame.jet
+exit: 0
+session tab_frame raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:tab_frame} tab_frame.json
+sleep: 500ms
+step run: built
+exit: 0
+stdout: = native_bidi_tab_and_frame_lifecycle_is_explicit_and_idempotent.1.out
+stdout: !~ "SECRET" # original predicate: !stdout.contains
+stderr: !~ "SECRET" # original predicate: !stderr.contains
+close tab_frame
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+stdout: = native_bidi_tab_and_frame_lifecycle_is_explicit_and_idempotent.2.out # original assert_eq!(server.join().unwrap(), [..])

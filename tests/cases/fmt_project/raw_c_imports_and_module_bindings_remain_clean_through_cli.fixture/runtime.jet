@@ -1,0 +1,17 @@
+#Import(c) fn no_result() = "jet_rt_trap"
+
+#Import(c) fn scalar(value: I64) -> I64 = "jet_rt_iter_next"
+
+#Import(c) fn renamed(value: I64) -> I64 = "host-add$raw"
+
+#[Import(c), Unsafe("audited C boundary")]
+fn attributed(value: I64) -> I64 = "jet_rt_alloc"
+
+#[Unsafe("audited C boundary"), Import(c)]
+fn attributed_no_result(value: I64) = "jet_rt_thread_reset"
+
+#Import(c) fn escaped() = "symbol\\path\"quoted{{braces}}"
+
+counter := I64{0}
+
+limit :: I64{0}

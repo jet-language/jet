@@ -1,0 +1,76 @@
+# tests/dev_parts/routine.rs::tower_1754_collection_parity_focus at tests/dev_parts/routine.rs:6381; hand-port
+fixture: tower_1754_collection_parity_focus.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+copy: {root}/Examples/features/collections/iter_adapters.jet adapters/iter_adapters.jet
+step jit_adapters: jet run iter_adapters.jet
+cwd: adapters
+stdin: null
+exit: any # original assert_tier_parity compares the tiers with each other, not with a golden
+step: jet build iter_adapters.jet
+cwd: adapters
+exit: 0
+step aot_adapters: built
+cwd: adapters
+stdin: null
+exit: == jit_adapters
+stdout: == jit_adapters
+stderr: == jit_adapters
+copy: {root}/Examples/features/collections/iter_tools_audit.jet tools/iter_tools_audit.jet
+step jit_tools: jet run iter_tools_audit.jet
+cwd: tools
+stdin: null
+exit: any # original assert_tier_parity compares the tiers with each other, not with a golden
+step: jet build iter_tools_audit.jet
+cwd: tools
+exit: 0
+step aot_tools: built
+cwd: tools
+stdin: null
+exit: == jit_tools
+stdout: == jit_tools
+stderr: == jit_tools
+copy: {root}/Examples/features/collections/list_remove_selector.jet remove/list_remove_selector.jet
+step jit_remove: jet run list_remove_selector.jet
+cwd: remove
+stdin: null
+exit: any # original assert_tier_parity compares the tiers with each other, not with a golden
+step: jet build list_remove_selector.jet
+cwd: remove
+exit: 0
+step aot_remove: built
+cwd: remove
+stdin: null
+exit: == jit_remove
+stdout: == jit_remove
+stderr: == jit_remove
+copy: {root}/Examples/features/collections/list_surface.jet surface/list_surface.jet
+step jit_surface: jet run list_surface.jet
+cwd: surface
+stdin: null
+exit: any # original assert_tier_parity compares the tiers with each other, not with a golden
+step: jet build list_surface.jet
+cwd: surface
+exit: 0
+step aot_surface: built
+cwd: surface
+stdin: null
+exit: == jit_surface
+stdout: == jit_surface
+stderr: == jit_surface
+copy: {root}/Examples/features/effects/taint.jet taint/taint.jet
+step jit_taint: jet run taint.jet
+cwd: taint
+stdin: null
+exit: any # original assert_tier_parity compares the tiers with each other, not with a golden
+step: jet build taint.jet
+cwd: taint
+exit: 0
+step aot_taint: built
+cwd: taint
+stdin: null
+exit: == jit_taint
+stdout: == jit_taint
+stderr: == jit_taint

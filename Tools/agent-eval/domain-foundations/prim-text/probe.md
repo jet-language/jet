@@ -11,7 +11,7 @@ Files:
 - `pkg/regex_gap.jet` — intentional lookaround probe.
 - `pkg/byte_gap.jet` — intentional raw-byte-view probe.
 - `shape_ffi_gap/pointer_gap.jet`, `shape_ffi_gap/harfbuzz.h` — intentional C pointer/bindgen probes.
-- `bench_python.py`, `bench_rust.rs` — same-fixture incumbent comparisons.
+- `bench_python.py` and `Tools/perf/domain-foundations/prim-text/bench_rust.rs` — same-fixture incumbent comparisons (the Rust peer is kept under `Tools/perf`).
 
 The source-of-truth checks were `Tools/agent/jet-env jet --help` and `Tools/agent/jet-env jet inspect facts`; both ran with the supplied binary. Archived research mined: `dx2/nlp-text/report.md` (Hugging Face BPE/alignment and missing `core.nlp`), `dx2/typography-publishing/report.md` (HarfBuzz buffer-to-positioned-glyph contract), `dx2/text-processing-parsing/report.md` (linear regex/search tradeoffs), and deleted `dx2/ballots/D-M-NLP1.json` (offset-preserving tokenizer/document model).
 

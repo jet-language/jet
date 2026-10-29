@@ -1,0 +1,24 @@
+
+use core.files as files
+
+fn run() {
+    root :: "fixture"
+    target_dir :: files.join(root, "target-dir")
+    target :: files.join(target_dir, "target.txt")
+    linked :: files.join(root, "linked.txt")
+    missing :: files.join(target_dir, "missing.txt")
+
+    files.create_dir_all(target_dir) ?? panic("target dir")
+    files.write(target, "canonical target") ?? panic("target")
+    files.symlink("target-dir/target.txt", linked) ?? panic("symlink")
+
+    canonical_target :: files.canonicalize(target) ?? panic("target canonicalize")
+    canonical_link :: files.canonicalize(linked) ?? panic("symlink canonicalize")
+    print(files.is_abs(canonical_target))
+    print(canonical_target == canonical_link)
+    print(files.canonicalize(missing) == .Err(_))
+
+    files.remove(linked) ?? panic("cleanup symlink")
+
+    files.remove_all(root) ?? panic("cleanup")
+}

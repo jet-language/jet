@@ -189,7 +189,11 @@ fn env_overlay_test_write(path: String, text: String) -[FS]> {
     files.rename(files.join(workspace, "patches"), moved) ?? panic("move patches")
     files.symlink(outside, files.join(workspace, "patches")) ?? panic("plant the symlink")
     bytes := [U8]{}
-    loop chunk in patch_file.chunks(65536) -> &bytes.extend(chunk)
+    loop {
+        chunk :: patch_file.read(65536) ?? panic("read the patch")
+        if chunk.len() == 0 -> break
+        &bytes.extend(chunk)
+    }
     patch_text :: String.from_bytes(bytes) ?? panic("patch text")
     assert_eq(patch_text, patch)
     env_overlay_test_apply(source, patch_text) ?? panic("apply the held patch")

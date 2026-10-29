@@ -1,0 +1,26 @@
+
+use core.files as files
+
+fn run() {
+    root :: "fixture"
+    files.create_dir_all(root) ?? panic("root")
+    files.write(files.join(root, "file"), "contents") ?? panic("file")
+    files.symlink(".", files.join(root, "directory-link")) ?? panic("directory link")
+    files.symlink("file", files.join(root, "file-link")) ?? panic("file link")
+    files.symlink("missing", files.join(root, "broken-link")) ?? panic("broken link")
+    print(files.exists(root))
+    print(files.is_dir(root))
+    print(files.exists(files.join(root, "file")))
+    print(files.is_dir(files.join(root, "file")))
+    print(files.exists(files.join(root, "directory-link")))
+    print(files.is_dir(files.join(root, "directory-link")))
+    print(files.exists(files.join(root, "file-link")))
+    print(files.is_dir(files.join(root, "file-link")))
+    print(files.exists(files.join(root, "missing")))
+    print(files.is_dir(files.join(root, "missing")))
+    print(files.exists(files.join(root, "broken-link")))
+    print(files.is_dir(files.join(root, "broken-link")))
+    print(files.exists(files.join(root, "file/child")))
+    print(files.is_dir(files.join(root, "file/child")))
+    files.remove_all(root) ?? panic("cleanup")
+}

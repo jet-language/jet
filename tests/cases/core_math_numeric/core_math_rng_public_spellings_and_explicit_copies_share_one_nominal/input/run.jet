@@ -1,0 +1,23 @@
+
+use core.math.random as random
+use core.testing as testing
+
+struct Envelope { stream: testing.RNG }
+fn identity<T>(value: ^T) -> T { return value }
+fn into_testing(value: ^RNG) -> testing.RNG { return value }
+fn into_random(value: ^testing.RNG) -> random.RNG { return value }
+fn into_bare(value: ^random.RNG) -> RNG { return value }
+fn draw(stream: &RNG) {
+    print(&stream.bool())
+    print(&stream.bool(0.25))
+}
+fn run() {
+    original := random.rng(42)
+    independent := original.copy()
+    envelope := Envelope{stream: into_testing(identity<RNG>(^original))}
+    round_trip := into_bare(into_random(^envelope.stream))
+    draw(&round_trip)
+    draw(&independent)
+    print(round_trip)
+    print(independent)
+}

@@ -1,0 +1,11 @@
+# tests/ui_fixes.rs::liveness_fix_renames_to_existing_underscore_form at tests/ui_fixes.rs:124; hand-port
+# Claim: jet fix exits 0 and rewrites exactly the expected text (tests/ui_fixes.rs:124-155)
+fixture: liveness_fix_renames_to_existing_underscore_form.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fix liveness.jet
+exit: 0 # tests/ui_fixes.rs:136-147
+step: sh {work}/step-2.sh
+exit: 0 # tests/ui_fixes.rs:148-154 exact fixed text
+stdout: = liveness_fix_renames_to_existing_underscore_form-2.out # tests/ui_fixes.rs:148-154 exact fixed text

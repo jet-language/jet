@@ -1,0 +1,29 @@
+package { authority: { allow: [Net, Time.Wait, IO, Mem.Alloc] } }
+use core.net as net
+
+fn carrier_observation() -[Net, Time.Wait]> String Never! {
+    ipv6 :: net.ip_addr("::ffff:192.0.2.1") ?? panic("IPv6 parse")
+    scoped :: net.socket_addr_parse("[fe80::1%4294967295]:65535") ?? panic("scoped parse")
+    receiver_address :: net.socket_addr_parse("127.0.0.1:0") ?? panic("receiver address")
+    receiver :: net.udp_bind_addr(receiver_address) ?? panic("receiver bind")
+    native_address :: net.udp_local_addr(receiver) ?? panic("local address")
+    source_address :: net.socket_addr_parse(net.socket_to_string(native_address)) ?? panic("source address")
+    sender :: net.udp_bind_addr(net.socket_addr_parse("127.0.0.1:0") ?? panic("sender address")) ?? panic("sender bind")
+    sent :: net.udp_send_bytes_to(sender, [U8]{65, 255, 66, 67}, source_address) ?? panic("send")
+    packet :: net.udp_receive(receiver, 3) ?? panic("receive")
+    packet_address :: net.udp_packet_addr(packet)
+    sender_address :: net.udp_local_addr(sender) ?? panic("sender local address")
+    result :: "{net.ip_to_string(ipv6)}\n{net.socket_to_string(scoped)}\n{sent}\n{net.socket_host(packet_address)}\n{net.ip_to_string(net.socket_ip(packet_address))}\n{net.socket_port(packet_address) == net.socket_port(sender_address)}\n{net.udp_packet_data(packet)}\n{net.udp_packet_original_len(packet)}\n{net.udp_packet_truncated(packet)}"
+    net.udp_close(sender) ?? panic("sender close")
+    net.udp_close(receiver) ?? panic("receiver close")
+    result
+}
+
+#Test("Jet source addresses cross the live native UDP carrier unchanged")
+fn _() {
+    assert(carrier_observation() == "::ffff:192.0.2.1\n[fe80::1%4294967295]:65535\n4\n127.0.0.1\n127.0.0.1\ntrue\nA�B\n4\ntrue")
+}
+
+// The retained Rust-tier comparison harness imports this same test program;
+// there is no second Rust-owned copy of the network assertions.
+fn run() { print(carrier_observation()) }

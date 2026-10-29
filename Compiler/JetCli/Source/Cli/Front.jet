@@ -3,22 +3,37 @@
 // commands (E2101) and flags (E2102), then the verbs the Jet driver owns
 // (`explain <CODE>`, `check [<file>|<dir>]`, `build <file>`,
 // `run [<file>|<dir>]`, `test <file>`, `new <name>`, `doc <file>`, `fmt`,
-// and `emit --ast|--mir|--lir|--rust <file>`; a bare or directory target
+// and `emit --ast|--ir <file>`; a bare or directory target
 // resolves the project entry, Entry.jet), and the inspect group
 // (Inspect.jet). Every report is the Rust host's exact bytes and exit
-// status for the same argv, except `jet emit`'s Jet-only parts: the
-// `--ast`/`--mir`/`--lir` tiers, `--fn`, and the E2102 reports for a target
+// status for the same argv, except `jet emit`, which is Jet-only: its
+// `--ast`/`--ir` tiers, `--fn`, and the E2102 reports for a target
 // with no mode flag or with two. A command whose Jet port has not landed yet
 // is refused with E2104 instead of guessing its behavior.
 use core.files as cli_files
 use jet_driver.[
     JetDriverVerbOutput,
-    JET_DRIVER_EXIT_OK,
     JET_DRIVER_EXIT_USER_ERROR,
     JET_DRIVER_EXIT_USAGE,
     jet_driver_explain_code,
 ]
 use jet_foundation.[
+    BuildOptionChoice,
+    BuildOptionKind,
+    BuildOptionLayer,
+    BuildOptions,
+    build_option_accepts,
+    build_option_argument,
+    build_option_check_removal_note,
+    build_option_flag_refusal,
+    build_options_check_removals,
+    build_option_flag_row,
+    build_option_flags,
+    build_option_profile_hint,
+    build_option_refusal,
+    build_option_row,
+    build_options_resolve,
+    build_options_stock,
     JET_CLI_COMMANDS,
     JET_CLI_HANDLERS,
     JET_COMPILER_SERVICE_VERB,
@@ -28,6 +43,7 @@ use jet_foundation.[
     diagnostic_render_all,
     policy_key_parse,
 ]
+use jet_pkg_model.[WorkspaceDeclarationCache]
 
 enum JetCLIPlan {
     // The command finished: write these bytes and exit with this status.
@@ -48,21 +64,21 @@ enum JetCLIPlan {
     // entry resolution wrote. The host compiles it and renders the outcome,
     // as machine reports when `json`.
     Check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, notice: String, json: Bool)
-    // `jet build <file>`: the entry and its bytes; `release` compiles under
-    // the `release` profile (MIR Release mode, LIR O2), otherwise `dev`;
+    // `jet build <file>`: the entry and its bytes; `options` are the build
+    // options it compiles under (jet_cli_build_options: stock, profile, flags);
     // `invocation` holds the `--allow`/`--deny` rows.
-    Build(file: String, source: String, color: Bool, release: Bool, threads: Int?, invocation: JetCLIInvocationAuthority?, notice: String)
-    // `jet build --target=sandbox <file>` compile the entry
-    // module's `pub fn` rows as a WASM Component guest against the frozen
-    // `.jet/cache/api` interface, then build the component with rustc
-    // wasm32 and `wasm-tools` (Source/CmdCompile.rs `write_plugin_artifacts`).
-    BuildSandbox(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, notice: String)
+    Build(file: String, source: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, notice: String)
+    // A package build its `fn build(b: Build)` in `file` configures; its
+    // option calls join `options` as their `fn build` layer, and its
+    // `b.args()` returns `build_args` (the words after `--`).
+    BuildPackage(file: String, color: Bool, options: BuildOptions, build_args: [String], threads: Int?, invocation: JetCLIInvocationAuthority?, notice: String)
     // `jet run <file>` (or `jet <file>`): build the entry as `jet build`
     // does, then run it with `program_args`. `verbose` (`--verbose`/`-v`
     // before `--`) shows advisory lints.
-    Run(file: String, source: String, color: Bool, release: Bool, verbose: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, notice: String)
+    // `watch` (`jet dev`): rerun the program whenever a package source changes.
+    Run(file: String, source: String, color: Bool, options: BuildOptions, verbose: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, notice: String, watch: Bool)
     // `jet test <file>`: compile the checked test harness and run it under
-    // `options`; native O0 unless the release profile was selected.
+    // `options` (native O0 unless its build options say otherwise).
     Test(file: String, source: String, color: Bool, verbose: Bool, threads: Int?, options: JetCLITestOptions)
     // `jet new <name>`: write the project folder (Source/CmdCompile.rs
     // `run_new`); `template` is "" for the print-only starter.
@@ -70,9 +86,8 @@ enum JetCLIPlan {
     // `jet doc <file>` (Source/CmdDoc.rs `run_doc`): `json` prints the
     // `inspect.doc` status, `check` reports undocumented public items.
     Doc(file: String, source: String, color: Bool, json: Bool, check: Bool)
-    // `jet emit --ast|--mir|--lir|--rust <file>`: print one tier of the
-    // entry (`--rust`: CmdDevTools.rs `run_emit_rust`); `function` is the
-    // `--fn` selection of the AST, MIR and LIR tiers.
+    // `jet emit --ast|--ir <file>`: print one tier of the entry;
+    // `function` is the `--fn` selection.
     Emit(file: String, source: String, color: Bool, json: Bool, tier: String, function: String?)
     // `jet eval <file>` (CmdDevTools.rs `run_eval`): evaluate the entry's
     // `run` and print its value; `pure` (`--pure`) adds the transitive E3401
@@ -120,7 +135,7 @@ enum JetCLIPlan {
     // CmdTry uses the actual invocation-owned checked projection and counters.
     // Quiet does not change its output contract; JSON selects its wire report.
     Try(plan_path: String, keep: Bool, json: Bool)
-    // `jet self devtools new-ui|check-fixture-paths|reduce|ice-report|bless`
+    // `jet self devtools new-ui|check-fixture-paths|reduce|ice-report`
     // (CmdDevTools.rs `run_devtools`): `args` is the raw argv after the tool
     // word; their confirmations are direct bytes under --json/--quiet too.
     Maintenance(action: String, args: [String], color: Bool, json: Bool)
@@ -142,6 +157,9 @@ enum JetCLIPlan {
     // `jet inspect output <file> [<address>]` (CmdInspect.rs `run_output`):
     // the sema-selected Output of the authorized request of `file`.
     Output(file: String, address: String?, color: Bool, json: Bool)
+    // `jet self doctor` (Doctor.jet): environment self-diagnosis; `apply` is
+    // `--fix`, `cross_target` the rustc triple `--target` selects.
+    Doctor(online: Bool, apply: Bool, cross_target: String?, color: Bool)
     // `jet __jetpack <op>` (JetpackService.jet): the internal compiler
     // service `jetpack` speaks over stdin/stdout; never in help.
     CompilerService(op: String)
@@ -172,7 +190,7 @@ struct JetCLIFmtRequest {
 // `TestRunOpts`). `capture` is `failed`, `all`, or `none`; `status` is the
 // stderr status text the Rust host writes before the compile.
 struct JetCLITestOptions {
-    release: Bool
+    build: BuildOptions
     capture: String
     filter: String?
     shuffle_seed: String?
@@ -225,6 +243,7 @@ fn jet_cli_why(code: String) -> String Never! {
         "E2102" -> return "Jet ignores no flags silently, so a typo cannot quietly change a command"
         "E2104" -> return "Jet needs valid command input before it can run this command"
         "E2105" -> return "Jet could not complete the named file, tool, or operating-system operation"
+        "E2113" -> return "`b.pin(.option, .Value)` in `fn build` fixes a build option for every build; a flag may only change values that aren't pinned"
         else -> {}
     }
     "Jet could not complete this command"
@@ -248,7 +267,7 @@ fn jet_cli_fail(code: String, what: String, why: String, fix: String, color: Boo
     JetCLIPlan.Refused{report: diagnostic_from_registry(code, None, what, why, fix), color: color, exit_code: exit_code, notice: ""}
 }
 
-// A real `jet` command whose Jet port has not landed: refused, never guessed.
+// A real `jet` command that is not built yet: refused, never guessed.
 fn jet_cli_not_ported(command: String, color: Bool) -> JetCLIPlan Never! {
     JetCLIPlan.Done{output: jet_cli_not_ported_output(command, color)}
 }
@@ -257,7 +276,7 @@ fn jet_cli_not_ported(command: String, color: Bool) -> JetCLIPlan Never! {
 fn jet_cli_not_ported_output(command: String, color: Bool) -> JetDriverVerbOutput Never! {
     JetDriverVerbOutput{
         stdout: "",
-        stderr: jet_cli_report("E2104", "`jet {command}` is not part of the Jet-hosted CLI yet", jet_cli_why("E2104"), "run `jet {command}` with the Rust-hosted `jet` until the Jet CLI owns it", color),
+        stderr: jet_cli_report("E2104", "`jet {command}` is not built yet", "This `jet` has no implementation of this command form yet, and no other `jet` can run it.", "Use a form this `jet` supports (`jet help` lists them); this one needs its Jet implementation first.", color),
         exit_code: JET_DRIVER_EXIT_USAGE,
     }
 }
@@ -272,6 +291,23 @@ fn jet_cli_tail(items: [String], start: Int) -> [String] Never! {
     tail := [String]{}
     loop index in start..<items.len() -> &tail.push(items[index])
     tail
+}
+
+// Source/main.rs moves the first command word to `raw[0]`, keeping the order
+// of every other word.
+fn jet_cli_command_first(items: [String], command: String) -> [String] Never! {
+    at := 0
+    loop (index, item) in items {
+        if item == command {
+            at = index
+            break
+        }
+    }
+    out := [String]{items[at].copy()}
+    loop (index, item) in items {
+        if index != at -> &out.push(item.copy())
+    }
+    out
 }
 
 fn jet_cli_has(items: [String], value: String) -> Bool Never! {
@@ -377,9 +413,7 @@ fn jet_cli_check_flags(jet_argv: [String], command: String, color: Bool) -> JetC
         if jet_cli_is_known_flag(argument) -> next
         head :: argument.split("=").to_list()[0]
         if external_fmt && JET_CLI_EXTERNAL_FMT_FLAGS.contains(head) -> next
-        if head == "--emit-rust" {
-            return Val(jet_cli_fail("E2102", "`--emit-rust` isn't a flag jet understands", "generated output belongs to the `emit` command", "run `jet emit --rust <file.jet>`", color, JET_DRIVER_EXIT_USAGE))
-        }
+        if build_option_flag_refusal(head) == .Val(refusal) -> return Val(jet_cli_fail("E2102", "`{head}` isn't a build option jet has", refusal.law, "drop `{head}`", color, JET_DRIVER_EXIT_USAGE))
         program :: command == "run" || command == "test"
         fix := ""
         if jet_cli_closest_flag(head) == .Val(close) {
@@ -409,6 +443,7 @@ fn jet_cli_check_flags(jet_argv: [String], command: String, color: Bool) -> JetC
 
 // The directory part of `path`, as Rust `Path::parent` reads it.
 fn jet_cli_parent(path: String) -> String? Never! {
+    if path == "/" -> return None
     parts :: path.split("/").to_list()
     if parts.len() <= 1 -> return None
     parent :: jet_cli_prefix(parts, parts.len() - 1).join("/")
@@ -503,6 +538,29 @@ fn jet_cli_looks_like_source(argument: String) -[FS]> Bool Never! {
     cli_files.exists("{argument}.jet")
 }
 
+// The argv index of the file the `jet <file> [args...]` shorthand runs, when
+// the first command word is one. Every word after it is the program's, as a
+// shell hands a script its arguments, so a `#!/usr/bin/env jet` file runs
+// with exactly the arguments it was launched with.
+fn jet_cli_shorthand_file(argv: [String]) -[FS]> Int? Never! {
+    skip_next := false
+    loop (index, argument) in argv {
+        if skip_next {
+            skip_next = false
+            next
+        }
+        if argument == "--" -> return None
+        if JET_CLI_SEPARATE_VALUE_FLAGS.contains(argument) {
+            skip_next = true
+            next
+        }
+        if argument.starts_with("-") && argument != "-" -> next
+        if jet_cli_is_builtin(argument) || !jet_cli_looks_like_source(argument) || cli_files.is_dir(argument) -> return None
+        return Val(index)
+    }
+    None
+}
+
 // The commands that compile, and so take `--threads N`.
 JET_CLI_THREADS_COMMANDS :: [String]{"build", "run", "check", "test", "dev", "inspect"}
 
@@ -580,7 +638,6 @@ fn jet_cli_check(jet_argv: [String], args: [String], command: String, color: Boo
     if args.len() < 2 {
         directory :: cli_files.cwd() ?? "."
         if command == "build" {
-            if jet_cli_has_manifest_above(directory) -> return jet_cli_not_ported(command, color)
             return jet_cli_fail("E2104", "no file given and no `package.jet` found in this directory or above", jet_cli_why("E2104"), "run `jet {command} <file.jet>` or cd into a project", color, JET_DRIVER_EXIT_USAGE)
         }
         notices := [String]{}
@@ -593,7 +650,6 @@ fn jet_cli_check(jet_argv: [String], args: [String], command: String, color: Boo
     }
     target :: args[1]
     if cli_files.is_dir(target) {
-        if command == "build" -> return jet_cli_not_ported("{command} <directory>", color)
         if jet_cli_resolve_directory_target(command, target, member_flag, !show_default, color) == {
             .File(path, _, notice) -> return jet_cli_read_entry(path, command, color, quiet, threads, command == "check", "{notice}{status}", json)
             .Refused(plan) -> return plan
@@ -630,13 +686,9 @@ fn jet_cli_doc(jet_argv: [String], args: [String], color: Bool, quiet: Bool, jso
 
 // Build flags whose Jet port has not landed: refused, never ignored.
 JET_CLI_BUILD_UNPORTED_FLAGS :: [String]{
-    "--lib", "--small", "--verify", "--sbom", "--import", "--emit-generated", "--set",
+    "--lib", "--verify", "--sbom", "--import", "--set",
     "--builder", "--locked", "-p", "--output", "--gate",
 }
-
-// The one `--target` value the Jet host builds (jetpack_config.rs
-// `TARGET_SANDBOX`); every other machine or triple is refused until ported.
-JET_CLI_TARGET_SANDBOX :: "sandbox"
 
 enum JetCLITargetFlag {
     Absent
@@ -661,32 +713,129 @@ fn jet_cli_target_flag(jet_argv: [String]) -> JetCLITargetFlag Never! {
     JetCLITargetFlag.Absent
 }
 
-enum JetCLIProfile {
-    // `release` selects the `release` profile: MIR Release mode and LIR O2.
-    Selected(release: Bool)
+enum JetCLIBuildOptions {
+    // `notes` is the stderr text naming each value a flag replaced.
+    Selected(options: BuildOptions, notes: String)
     Refused(plan: JetCLIPlan)
 }
 
-// `--release` (or `--profile release`) compiles under the `release` profile
-// (Rust CmdCompile `select_native_profile`); the default and `--profile debug`
-// compile under `dev`. Other profiles are not ported yet.
-fn jet_cli_profile(jet_argv: [String], command: String, color: Bool) -> JetCLIProfile Never! {
-    release := jet_argv.contains("--release")
+// A build-option flag without its value or with a value outside its row,
+// refused before entry resolution reads its words.
+fn jet_cli_option_flags_refusal(jet_argv: [String], color: Bool) -> JetCLIPlan? Never! {
+    if build_option_flags(jet_argv) == .Refused(code, what, fix) -> return Val(jet_cli_fail(code, what, jet_cli_why(code), fix, color, JET_DRIVER_EXIT_USAGE))
+    None
+}
+
+// The selected build profile, "" for none: `--release` is `--profile=release`
+// and wins over another `--profile`.
+fn jet_cli_profile_name(jet_argv: [String]) -> String Never! {
+    profile := ""
     loop (index, argument) in jet_argv {
-        if argument.split("=").to_list()[0] != "--profile" -> next
-        profile := ""
-        if {
-            argument.starts_with("--profile=") -> profile = argument.slice(10..<argument.len())
-            index + 1 < jet_argv.len() -> profile = jet_argv[index + 1]
-            else -> {}
+        if argument == "--" -> break
+        if argument == "--release" -> return "release"
+        if argument.starts_with("--profile=") -> profile = argument.slice(10..<argument.len())
+        if argument == "--profile" && index + 1 < jet_argv.len() -> profile = jet_argv[index + 1]
+    }
+    profile
+}
+
+// D-SETTING-ORDER1=A (#5005): the build options `command` compiles `file`
+// (whose bytes are `source`) under. Over the command's stock values come the
+// selected profile's fields, then the flags (`--optimize=full`); a package
+// build adds its `fn build` layer between the two (jet_cli_build_package). A
+// profile `package.jet` declares replaces the stock profile of that name:
+// `release` is `optimize: full`, `debug` the stock values.
+fn jet_cli_build_options(jet_argv: [String], command: String, file: String, source: String, color: Bool, quiet: Bool) -[FS, Env]> JetCLIBuildOptions Never! {
+    written := [BuildOptionChoice]{}
+    flags := [BuildOptionChoice]{}
+    if build_option_flags(jet_argv) == {
+        .Refused(code, what, fix) -> return JetCLIBuildOptions.Refused{plan: jet_cli_fail(code, what, jet_cli_why(code), fix, color, JET_DRIVER_EXIT_USAGE)}
+        .Resolved(given, _) -> flags = given.written
+    }
+    name :: jet_cli_profile_name(jet_argv)
+    profile := name
+    if name != "" {
+        declared := JetCLIBuildProfile?{None}
+        if jet_cli_file_manifest(file, source) == .Val(manifest) {
+            loop candidate in manifest.profiles {
+                if candidate.name == name -> declared = Val(candidate.copy())
+            }
         }
-        if {
-            profile == "release" -> release = true
-            profile == "debug" -> {}
-            else -> return JetCLIProfile.Refused{plan: jet_cli_not_ported("{command} --profile {profile}", color)}
+        if declared == .Val(found) {
+            site :: "in profile `{name}` of package.jet"
+            loop field in found.fields {
+                if build_option_refusal(field.name) == .Val(refusal) -> return JetCLIBuildOptions.Refused{plan: jet_cli_fail("E2104", "`{field.name}: {field.value}` {site} isn't a build option", refusal.law, "remove the `{field.name}` field", color, JET_DRIVER_EXIT_USAGE)}
+                row :: build_option_row(field.name) ?? next
+                shown :: if field.list -> build_option_argument(row, field.value) else -> field.value.copy()
+                if field.list != (row.kind == BuildOptionKind.List) || !build_option_accepts(row, field.value) {
+                    return JetCLIBuildOptions.Refused{plan: jet_cli_fail("E2104", "`{field.name}: {shown}` {site} isn't a value of `{field.name}`", jet_cli_why("E2104"), "write `{field.name}:` with {build_option_profile_hint(row)}", color, JET_DRIVER_EXIT_USAGE)}
+                }
+                &written.push(BuildOptionChoice{name: field.name.copy(), value: field.value.copy(), layer: BuildOptionLayer.Profile, written: "{field.name}: {shown}", site: site.copy(), pinned: false})
+            }
+        } else {
+            if {
+                name == "release" -> &written.push(jet_cli_stock_release_choice())
+                // The stock `debug` profile is the stock values; the front end keeps its `dev` profile.
+                name == "debug" -> profile = ""
+                name == "ci" || name == "hardened" -> return JetCLIBuildOptions.Refused{plan: jet_cli_not_ported("{command} --profile {name}", color)}
+                else -> return JetCLIBuildOptions.Refused{plan: jet_cli_fail("E2104", "build profile `{name}` isn't declared", jet_cli_why("E2104"), "declare it under `build:` in package.jet, or select `release` or `debug`", color, JET_DRIVER_EXIT_USAGE)}
+            }
         }
     }
-    JetCLIProfile.Selected{release: release}
+    loop flag in flags -> &written.push(flag)
+    if build_options_resolve(command, profile, written) == {
+        .Refused(code, what, fix) -> return JetCLIBuildOptions.Refused{plan: jet_cli_fail(code, what, jet_cli_why(code), fix, color, JET_DRIVER_EXIT_USAGE)}
+        .Resolved(options, notes) -> {
+            text := ""
+            if !quiet {
+                loop note in notes -> text = "{text}{note}\n"
+                loop choice in build_options_check_removals(options) -> text = "{text}{build_option_check_removal_note(choice)}\n"
+            }
+            return JetCLIBuildOptions.Selected{options: options, notes: text}
+        }
+    }
+}
+
+// The stock `release` profile: `optimize: full`.
+fn jet_cli_stock_release_choice() -> BuildOptionChoice Never! {
+    BuildOptionChoice{name: "optimize", value: "full", layer: BuildOptionLayer.Profile, written: "optimize: full", site: "of the stock `release` profile", pinned: false}
+}
+
+// `jet build --release` with no `package.jet` profile of that name.
+fn jet_cli_stock_release_options() -> BuildOptions Never! {
+    if build_options_resolve("build", "release", [BuildOptionChoice]{jet_cli_stock_release_choice()}) == {
+        .Resolved(options, _) -> return options
+        .Refused(_, what, _) -> panic("the stock release profile refused: {what}")
+    }
+}
+
+// `plan` (a build, package build, or run) with the build options its entry
+// compiles under, or the refusal of a profile or flag.
+fn jet_cli_with_build_options(plan: ^JetCLIPlan, jet_argv: [String], quiet: Bool) -[FS, Env]> JetCLIPlan Never! {
+    if plan == {
+        .Build(file, source, color, _, threads, invocation, notice) -> {
+            if jet_cli_build_options(jet_argv, "build", file, source, color, quiet) == {
+                .Refused(refusal) -> return refusal
+                .Selected(options, notes) -> return JetCLIPlan.Build{file: ^file, source: ^source, color: color, options: ^options, threads: threads, invocation: ^invocation, notice: "{notice}{notes}"}
+            }
+        }
+        .BuildPackage(file, color, _, build_args, threads, invocation, notice) -> {
+            source :: cli_files.read(file) ?? ""
+            if jet_cli_build_options(jet_argv, "build", file, source, color, quiet) == {
+                .Refused(refusal) -> return refusal
+                .Selected(options, notes) -> return JetCLIPlan.BuildPackage{file: ^file, color: color, options: ^options, build_args: ^build_args, threads: threads, invocation: ^invocation, notice: "{notice}{notes}"}
+            }
+        }
+        .Run(file, source, color, _, verbose, threads, program_args, invocation, notice, watch) -> {
+            command :: if watch -> "dev" else -> "run"
+            if jet_cli_build_options(jet_argv, command, file, source, color, quiet) == {
+                .Refused(refusal) -> return refusal
+                .Selected(options, notes) -> return JetCLIPlan.Run{file: ^file, source: ^source, color: color, options: ^options, verbose: verbose, threads: threads, program_args: ^program_args, invocation: ^invocation, notice: "{notice}{notes}", watch: watch}
+            }
+        }
+        else -> {}
+    }
+    plan
 }
 
 enum JetCLIAuthorityFlags {
@@ -696,14 +845,20 @@ enum JetCLIAuthorityFlags {
 }
 
 // Source/main.rs `parse_authority_flags`: the `--allow`/`--deny` rows of a
-// build or run, canonical and deduplicated; a right both allowed and denied
-// is E2102.
+// build or run, canonical and deduplicated, and `-A` (`--allow-all`), which
+// allows every right; a right both allowed and denied is E2102.
 fn jet_cli_authority_flags(jet_argv: [String], color: Bool) -> JetCLIAuthorityFlags Never! {
+    all := false
     allow := [String]{}
     deny := [String]{}
     index := 0
     loop index < jet_argv.len() {
         argument :: jet_argv[index]
+        if argument == "-A" || argument == "--allow-all" {
+            all = true
+            index += 1
+            next
+        }
         kind := ""
         inline := String?{None}
         if {
@@ -748,14 +903,21 @@ fn jet_cli_authority_flags(jet_argv: [String], color: Bool) -> JetCLIAuthorityFl
     loop right in allow {
         if deny.contains(right) -> return JetCLIAuthorityFlags.Refused{plan: jet_cli_fail("E2102", "authority right `{right}` is both allowed and denied", "the same exact effective right cannot be granted and denied in one invocation", "remove one of `--allow={right}` or `--deny={right}`", color, JET_DRIVER_EXIT_USAGE)}
     }
-    if allow.len() == 0 && deny.len() == 0 -> return JetCLIAuthorityFlags.Rows{invocation: None}
-    JetCLIAuthorityFlags.Rows{invocation: Val(JetCLIInvocationAuthority{allow: allow, deny: deny})}
+    if !all && allow.len() == 0 && deny.len() == 0 -> return JetCLIAuthorityFlags.Rows{invocation: None}
+    JetCLIAuthorityFlags.Rows{invocation: Val(JetCLIInvocationAuthority{all: all, allow: allow, deny: deny})}
 }
 
-// `jet build <file>` through the backend `jet_cli_profile` selects, or as a
-// sandbox WASM Component under `--target=sandbox`. The flags above and the
-// other `--target` machines are not ported yet.
-fn jet_cli_build(jet_argv: [String], args: [String], color: Bool, quiet: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
+// `jet build <file>` under its build options (jet_cli_build_options). The
+// flags above and every `--target` machine are not ported yet. The words
+// after `--` (`passthrough`) go to the package's `fn build` (`b.args()`).
+fn jet_cli_build(jet_argv: [String], args: [String], passthrough: [String]?, color: Bool, quiet: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
+    jet_cli_with_build_options(jet_cli_build_entry(jet_argv, args, passthrough, color, quiet, threads), jet_argv, quiet)
+}
+
+// The `jet build` plan at the stock options, its entry resolved. Words after
+// `--` are refused when no `fn build` runs to read them.
+fn jet_cli_build_entry(jet_argv: [String], args: [String], passthrough: [String]?, color: Bool, quiet: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
+    if jet_cli_option_flags_refusal(jet_argv, color) == .Val(refusal) -> return refusal
     loop argument in jet_argv {
         head :: argument.split("=").to_list()[0]
         if JET_CLI_BUILD_UNPORTED_FLAGS.contains(head) -> return jet_cli_not_ported("build {head}", color)
@@ -765,47 +927,75 @@ fn jet_cli_build(jet_argv: [String], args: [String], color: Bool, quiet: Bool, t
         .Refused(refusal) -> return refusal
         .Rows(rows) -> invocation = rows
     }
-    release := false
-    if jet_cli_profile(jet_argv, "build", color) == {
-        .Refused(refusal) -> return refusal
-        .Selected(selected) -> release = selected
-    }
-    sandbox := false
     if jet_cli_target_flag(jet_argv) == {
         .Absent -> {}
         .Missing -> return jet_cli_fail("E2104", "`--target` needs a value", jet_cli_why("E2104"), "write `--target=<triple>` or `--target <triple>` before the source file", color, JET_DRIVER_EXIT_USAGE)
-        .Named(name) -> {
-            if name != JET_CLI_TARGET_SANDBOX -> return jet_cli_not_ported("build --target={name}", color)
-            sandbox = true
+        .Named(name) -> return jet_cli_not_ported("build --target={name}", color)
+    }
+    // A package (no file given, or a directory): its `fn build(b: Build)` when it declares one,
+    // otherwise the stock build of its run entry.
+    if args.len() < 2 || cli_files.is_dir(args[1]) {
+        directory :: if args.len() < 2 -> cli_files.cwd() ?? "." else -> args[1]
+        // The directory's own `fn build` is its build entry, also for a workspace root whose
+        // members are runnable (`jet build Compiler/`).
+        if !jet_argv.contains("--show-default") && jet_cli_option_value(jet_argv, "-p") == None {
+            if jet_cli_command_override(directory, "build", color) == {
+                .Entry(found) -> return JetCLIPlan.BuildPackage{file: found.path, color: color, options: build_options_stock("build"), build_args: passthrough ?? [String]{}, threads: threads, invocation: invocation, notice: ""}
+                .Refused(plan) -> return ^plan
+                .Absent -> {}
+            }
+        }
+        notices := [String]{}
+        resolved :: jet_cli_resolve_bare_entry("build", directory, jet_cli_option_value(jet_argv, "-p"), !jet_argv.contains("--show-default"), color, &notices)
+        if resolved == {
+            .Entry(found) -> {
+                if (found.callable ?? "") == "build" -> return JetCLIPlan.BuildPackage{file: found.path, color: color, options: build_options_stock("build"), build_args: passthrough ?? [String]{}, threads: threads, invocation: invocation, notice: notices.join("")}
+                if (passthrough ?? [String]{}).len() > 0 -> return jet_cli_build_args_refused(found.path, color)
+                planned :: jet_cli_read_entry(found.path, "build", color, quiet, threads, false, notices.join(""), false)
+                if planned == .Check(file, source, _, _, _, _, notice, _) -> return JetCLIPlan.Build{file: file, source: source, color: color, options: build_options_stock("build"), threads: threads, invocation: invocation, notice: notice}
+                return planned
+            }
+            .Refused(plan) -> return jet_cli_with_notices(notices, ^plan)
+            .Absent -> return jet_cli_with_notices(notices, jet_cli_missing_bare_entry("build", directory, color))
         }
     }
     entry :: jet_cli_check(jet_argv, args, "build", color, quiet, threads, false)
+    if (passthrough ?? [String]{}).len() > 0 && entry == .Check(file, _, _, _, _, _, _, _) -> return jet_cli_build_args_refused(file, color)
     if entry == {
-        .Check(file, source, _, _, _, _, notice, _) -> {
-            if sandbox -> return JetCLIPlan.BuildSandbox{file: file, source: source, color: color, quiet: quiet, threads: threads, notice: notice}
-            return JetCLIPlan.Build{file: file, source: source, color: color, release: release, threads: threads, invocation: invocation, notice: notice}
-        }
+        .Check(file, source, _, _, _, _, notice, _) -> return JetCLIPlan.Build{file: file, source: source, color: color, options: build_options_stock("build"), threads: threads, invocation: invocation, notice: notice}
         else -> {}
     }
     entry
+}
+
+// `jet build <entry> -- words` where no `fn build` runs: nothing reads the
+// words, so they are refused, never dropped.
+fn jet_cli_build_args_refused(file: String, color: Bool) -> JetCLIPlan Never! {
+    jet_cli_fail("E2104", "`jet build {file} -- …` passes the words after `--` to `fn build`, and this build runs none", jet_cli_why("E2104"), "remove the words after `--`, or build a package whose `@build.jet` declares `fn build(b: Build)` and reads them with `b.args()`", color, JET_DRIVER_EXIT_USAGE)
 }
 
 // The jet flags `jet run` honors. Any other registered flag on a run is
 // refused until its port lands, never ignored; an unregistered one was
 // already refused by E2102, or is ignored by the `jet <file>` shorthand as
 // the Rust host ignores it.
-JET_CLI_RUN_PORTED_FLAGS :: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--color", "--threads", "--trace", "--allow", "--deny", "-p", "--show-default"}
+JET_CLI_RUN_PORTED_FLAGS :: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--color", "--threads", "--trace", "--allow", "--allow-all", "-A", "--deny", "-p", "--show-default"}
+
+// `jet run [<file>]` under its build options (jet_cli_build_options).
+fn jet_cli_run(jet_argv: [String], args: [String], passthrough: [String]?, shorthand: Bool, color: Bool, quiet: Bool, verbose: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
+    jet_cli_with_build_options(jet_cli_run_entry(jet_argv, args, passthrough, shorthand, color, quiet, verbose, threads), jet_argv, quiet)
+}
 
 // `jet run [<file>]` (`args` = `run`, the target, then the positional
 // words), also the `jet <file>` shorthand (`shorthand`). The target resolves
 // as `jet check` resolves it (Source/main.rs `resolve_command_target`). The
 // program's arguments are the words after the first standalone `--`
 // (`passthrough`), or else the positional words after the target.
-fn jet_cli_run(jet_argv: [String], args: [String], passthrough: [String]?, shorthand: Bool, color: Bool, quiet: Bool, verbose: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
+fn jet_cli_run_entry(jet_argv: [String], args: [String], passthrough: [String]?, shorthand: Bool, color: Bool, quiet: Bool, verbose: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
+    if jet_cli_option_flags_refusal(jet_argv, color) == .Val(refusal) -> return refusal
     loop argument in jet_argv {
         if !argument.starts_with("-") || argument == "-" -> next
         head :: argument.split("=").to_list()[0]
-        if JET_CLI_RUN_PORTED_FLAGS.contains(head) || !jet_cli_is_known_flag(head) -> next
+        if JET_CLI_RUN_PORTED_FLAGS.contains(head) || build_option_flag_row(head) != None || !jet_cli_is_known_flag(head) -> next
         return jet_cli_not_ported("run {head}", color)
     }
     // Source/main.rs `dispatch_nixpkgs_run`: `jet run <package>@nixpkgs`.
@@ -818,16 +1008,11 @@ fn jet_cli_run(jet_argv: [String], args: [String], passthrough: [String]?, short
         .Refused(refusal) -> return refusal
         .Rows(rows) -> invocation = rows
     }
-    release := false
-    if jet_cli_profile(jet_argv, "run", color) == {
-        .Refused(refusal) -> return refusal
-        .Selected(selected) -> release = selected
-    }
     entry :: jet_cli_check(jet_argv, args, "run", color, quiet, threads, false)
     if entry == {
         .Check(file, source, _, _, _, _, notice, _) -> {
             program_args :: passthrough ?? jet_cli_tail(args, 2)
-            return JetCLIPlan.Run{file: file, source: source, color: color, release: release, verbose: verbose, threads: threads, program_args: program_args, invocation: invocation, notice: notice}
+            return JetCLIPlan.Run{file: file, source: source, color: color, options: build_options_stock("run"), verbose: verbose, threads: threads, program_args: program_args, invocation: invocation, notice: notice, watch: false}
         }
         else -> {}
     }
@@ -874,21 +1059,14 @@ fn jet_cli_has_doctests(source: String) -> Bool Never! {
     false
 }
 
-// Source/main.rs `has_entry_fn(file, "test")`: a top-level `fn test` is the
-// command override. Top-level declarations start their line.
-fn jet_cli_declares_test_override(source: String) -> Bool Never! {
-    loop line in source.split("\n") {
-        if line.starts_with("fn test(") || line.starts_with("fn test ") -> return true
-    }
-    false
-}
-
-// `jet test <file> [<filter>]` (Source/CmdCompile.rs `TestRunOpts::parse`,
-// `run_test_opts`, `run_test_target` up to the compile). Directory and package
-// targets, doctests, the `fn test` override, the result cache, and the flags
-// above are not ported yet.
+// `jet test [<target>] [<filter>]` (Source/CmdCompile.rs `TestRunOpts::parse`,
+// `run_test_opts`, `run_test_target` up to the compile). A package directory
+// (or no target inside a package) tests through its own `fn test(t: Test)` when
+// it declares one, as `jet build` runs its `fn build`. Doctests, the result
+// cache, and the flags above are not ported yet.
 fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
-    options := JetCLITestOptions{release: false, capture: "failed", filter: None, shuffle_seed: None, serial: false, trace_tiers: false, update_snapshots: false, project_root: None, status: ""}
+    if jet_cli_option_flags_refusal(jet_argv, color) == .Val(refusal) -> return refusal
+    options := JetCLITestOptions{build: build_options_stock("test"), capture: "failed", filter: None, shuffle_seed: None, serial: false, trace_tiers: false, update_snapshots: false, project_root: None, status: ""}
     fresh := false
     show_default := false
     positionals := [String]{}
@@ -959,23 +1137,47 @@ fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, thr
             options.filter = Val(filter)
         }
     }
-    // `--profile` accepts debug and release, as `run` does.
-    if jet_cli_profile(jet_argv, "test", color) == {
-        .Refused(refusal) -> return refusal
-        .Selected(release) -> options.release = release
-    }
     if show_default && !quiet -> options.status = "jet test: using stock default\n"
-    // A bare `jet test` runs the package (spec S43), not ported yet.
-    if positionals.len() == 0 {
-        directory :: cli_files.cwd() ?? "."
-        if jet_cli_has_manifest_above(directory) -> return jet_cli_not_ported("test", color)
-        return jet_cli_fail("E2104", "no file given and no `package.jet` found in this directory or above", jet_cli_why("E2104"), "run `jet test <file.jet>` or cd into a project", color, JET_DRIVER_EXIT_USAGE)
+    // A bare `jet test` or `jet test <dir>` tests the package: the directory's own
+    // `fn test(t: Test)` file when it declares one (also for a workspace root), otherwise
+    // its stock entry. The entry file loads the whole package, and the harness collects
+    // every #Test of every package file.
+    if positionals.len() == 0 || cli_files.is_dir(positionals[0]) {
+        directory :: if positionals.len() == 0 -> cli_files.cwd() ?? "." else -> positionals[0]
+        if positionals.len() == 0 && !jet_cli_has_manifest_above(directory) {
+            return jet_cli_fail("E2104", "no file given and no `package.jet` found in this directory or above", jet_cli_why("E2104"), "run `jet test <file.jet>` or cd into a project", color, JET_DRIVER_EXIT_USAGE)
+        }
+        if !show_default {
+            if jet_cli_command_override(directory, "test", color) == {
+                .Entry(found) -> return jet_cli_test_file(jet_argv, found.path, color, verbose, threads, options, fresh, quiet)
+                .Refused(plan) -> return ^plan
+                .Absent -> {}
+            }
+        }
+        if positionals.len() == 0 {
+            notices := [String]{}
+            if jet_cli_resolve_bare_entry("test", directory, None, !show_default, color, &notices) == {
+                .Entry(entry) -> return jet_cli_test_file(jet_argv, entry.path, color, verbose, threads, options, fresh, quiet)
+                .Refused(plan) -> return jet_cli_with_notices(notices, ^plan)
+                .Absent -> return jet_cli_with_notices(notices, jet_cli_missing_bare_entry("test", directory, color))
+            }
+        }
+        if jet_cli_resolve_directory_target("test", directory, None, !show_default, color) == {
+            .File(path, _, _) -> return jet_cli_test_file(jet_argv, path, color, verbose, threads, options, fresh, quiet)
+            .Refused(plan) -> return plan
+        }
     }
     target :: positionals[0]
-    if cli_files.is_dir(target) -> return jet_cli_not_ported("test <directory>", color)
     // Source/main.rs `resolve_source_path`: the typed spelling, else `<target>.jet`.
     file := target
     if !cli_files.is_file(target) && cli_files.is_file("{target}.jet") -> file = "{target}.jet"
+    jet_cli_test_file(jet_argv, file, color, verbose, threads, options, fresh, quiet)
+}
+
+// One test file (or a package entry file): the harness collects every #Test the file and
+// its package load, and a `fn test(t: Test)` there runs first with the suite.
+fn jet_cli_test_file(jet_argv: [String], file: String, color: Bool, verbose: Bool, threads: Int?, given: JetCLITestOptions, fresh: Bool, quiet: Bool) -[FS, Env]> JetCLIPlan Never! {
+    options := given
     if !cli_files.exists(file) {
         return jet_cli_done("", "{options.status}{jet_cli_report("E2105", "can't find `{file}`", jet_cli_why("E2105"), "correct the named problem, then run the command again", color)}", JET_DRIVER_EXIT_USER_ERROR)
     }
@@ -984,7 +1186,13 @@ fn jet_cli_test(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, thr
         return jet_cli_done("", "{options.status}{jet_cli_report("E2105", "couldn't read `{file}`: {err}", jet_cli_why("E2105"), "correct the named problem, then run the command again", color)}", JET_DRIVER_EXIT_USER_ERROR)
     }
     if jet_cli_has_doctests(source) -> return jet_cli_not_ported("test <file with doctests>", color)
-    if !show_default && jet_cli_declares_test_override(source) -> return jet_cli_not_ported("test <fn test override>", color)
+    if jet_cli_build_options(jet_argv, "test", file, source, color, quiet) == {
+        .Refused(refusal) -> return refusal
+        .Selected(selected, notes) -> {
+            options.build = ^selected
+            options.status = "{options.status}{notes}"
+        }
+    }
     options.project_root = jet_cli_manifest_root(jet_cli_parent(file) ?? ".")
     JetCLIPlan.Test{file: file, source: source, color: color, verbose: verbose, threads: threads, options: options}
 }
@@ -1092,15 +1300,12 @@ fn jet_cli_fuzz_command(jet_argv: [String], args: [String], color: Bool, quiet: 
     jet_cli_with_notices([String]{notice}, jet_cli_fuzz(file, test_name, iterations, color))
 }
 
-// The tiers `jet emit` prints, one mode flag each (`--ast`, `--mir`,
-// `--lir`, `--rust`).
-JET_CLI_EMIT_TIERS :: [String]{"ast", "mir", "lir", "rust"}
+// The tiers `jet emit` prints, one mode flag each (`--ast`, `--ir`).
+JET_CLI_EMIT_TIERS :: [String]{"ast", "ir"}
 
-// `jet emit --ast|--mir|--lir|--rust <file>` (`--rust`: Source/main.rs
-// `"emit"`, CmdDevTools.rs `run_emit_rust`): with no target the command's
-// help is a usage error; a target needs exactly one mode flag (E2102); the
-// file is read as typed. `--fn NAME` selects one function's tree on the
-// AST, MIR and LIR tiers.
+// `jet emit --ast|--ir <file>`: with no target the command's help is a usage
+// error; a target needs exactly one mode flag (E2102); the file is read as
+// typed. `--fn NAME` selects one function's tree.
 fn jet_cli_emit(jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool) -[FS]> JetCLIPlan Never! {
     if args.len() < 2 -> return jet_cli_done("", if quiet -> "" else -> jet_cli_command_help("emit"), JET_DRIVER_EXIT_USAGE)
     modes := [String]{}
@@ -1108,7 +1313,7 @@ fn jet_cli_emit(jet_argv: [String], args: [String], color: Bool, quiet: Bool, js
         if jet_argv.contains("--{tier}") -> &modes.push(tier)
     }
     if modes.len() == 0 {
-        return jet_cli_fail("E2102", "usage: jet emit --ast|--mir|--lir|--rust <file.jet>", "`emit` needs a mode flag naming the tier it prints", "run `jet emit --mir <file.jet>`; `--ast`, `--lir` and `--rust` print the other tiers", color, JET_DRIVER_EXIT_USAGE)
+        return jet_cli_fail("E2102", "usage: jet emit --ast|--ir <file.jet>", "`emit` needs a mode flag naming the tier it prints", "run `jet emit --ir <file.jet>`; `--ast` prints the parsed tier", color, JET_DRIVER_EXIT_USAGE)
     }
     if modes.len() > 1 {
         return jet_cli_fail("E2102", "`jet emit` prints one tier, but both `--{modes[0]}` and `--{modes[1]}` were given", "`emit` writes a single tier so its output has one meaning", "keep one of the mode flags", color, JET_DRIVER_EXIT_USAGE)
@@ -1123,9 +1328,6 @@ fn jet_cli_emit(jet_argv: [String], args: [String], color: Bool, quiet: Bool, js
         name :: jet_cli_option_value(jet_argv, "--fn") ?? ""
         if name == "" || name.starts_with("-") {
             return jet_cli_fail("E2104", "`--fn` needs a function name", jet_cli_why("E2104"), "write `jet emit --{tier} <file.jet> --fn <name>`", color, JET_DRIVER_EXIT_USAGE)
-        }
-        if tier == "rust" {
-            return jet_cli_fail("E2102", "`--fn` doesn't apply to `jet emit --rust`", "`--rust` prints the whole generated program", "use `--fn` with `--ast`, `--mir` or `--lir`, or drop it", color, JET_DRIVER_EXIT_USAGE)
         }
         function = Val(name)
     }
@@ -1234,16 +1436,19 @@ fn jet_cli_fmt(argv: [String], jet_argv: [String], args: [String], color: Bool, 
     }}
 }
 
-// The jet-owned argv prefix before the first standalone `--`.
-fn jet_cli_owned_flags(raw: [String]) -> [String] Never! {
-    output_end := raw.len()
+// Where the jet-owned argv prefix ends: after the file of the `jet <file>`
+// shorthand, else at the first standalone `--`.
+fn jet_cli_owned_end(raw: [String]) -[FS]> Int Never! {
+    if jet_cli_shorthand_file(raw) == .Val(file) -> return file + 1
     loop (index, argument) in raw {
-        if argument == "--" {
-            output_end = index
-            break
-        }
+        if argument == "--" -> return index
     }
-    jet_cli_prefix(raw, output_end)
+    raw.len()
+}
+
+// The jet-owned argv prefix (`jet_cli_owned_end`).
+fn jet_cli_owned_flags(raw: [String]) -[FS]> [String] Never! {
+    jet_cli_prefix(raw, jet_cli_owned_end(raw))
 }
 
 // Source/main.rs `OutputMode::json`: `--json` before `--`, or the `compiler`
@@ -1348,17 +1553,13 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
     }
     if argv[0] == "perf" -> return jet_cli_not_ported(argv[0], color)
 
-    // Everything after the first standalone `--` belongs to the program.
-    separator := argv.len()
-    loop (index, argument) in argv {
-        if argument == "--" {
-            separator = index
-            break
-        }
-    }
+    // The program's words: everything after the first standalone `--`, or
+    // every word after the file of the `jet <file>` shorthand (a `--` right
+    // after that file still only separates).
+    separator :: jet_cli_owned_end(argv)
     jet_argv :: jet_cli_prefix(argv, separator)
     passthrough := [String]?{None}
-    if separator < argv.len() -> passthrough = Val(jet_cli_tail(argv, separator + 1))
+    if separator < argv.len() -> passthrough = Val(jet_cli_tail(argv, if argv[separator] == "--" -> separator + 1 else -> separator))
     loop (index, argument) in jet_argv {
         if argument != "--version" -> next
         builtin_before := false
@@ -1463,7 +1664,7 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
             tool :: if argv.len() > 1 -> argv[1] else -> ""
             if tool == {
                 "new-example" -> return jet_cli_devtools_new_example(jet_cli_tail(argv, 2), color)
-                "new-ui" | "reduce" | "ice-report" | "bless" -> return JetCLIPlan.Maintenance{action: tool, args: jet_cli_tail(argv, 2), color: color, json: json}
+                "new-ui" | "reduce" | "ice-report" -> return JetCLIPlan.Maintenance{action: tool, args: jet_cli_tail(argv, 2), color: color, json: json}
                 // Rust ignores extra words after `check-fixture-paths`.
                 "check-fixture-paths" -> return JetCLIPlan.Maintenance{action: tool, args: [String]{}, color: color, json: json}
                 else -> {}
@@ -1472,12 +1673,22 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
         "fuzz" -> return jet_cli_fuzz_command(jet_argv, args, color, quiet)
         "explain" -> return jet_cli_explain(jet_argv, args, color, json)
         "check" -> return jet_cli_check(jet_argv, args, "check", color, quiet, threads, json)
-        "build" -> return jet_cli_build(jet_argv, args, color, quiet, threads)
+        "build" -> return jet_cli_build(jet_argv, args, passthrough, color, quiet, threads)
         "run" -> return jet_cli_run(jet_argv, args, passthrough, false, color, quiet, verbose, threads)
+        // Stock `jet dev`: the `jet run` entry, rebuilt and rerun on every source change.
+        // `--canvas`, `--app` and `--share` are their own dev hosts, not this loop.
+        "dev" -> {
+            if !jet_argv.contains("--canvas") && !jet_cli_has(jet_argv, "--app") && !jet_cli_has(jet_argv, "--share") {
+                plan :: jet_cli_run(jet_argv, args, passthrough, false, color, quiet, verbose, threads)
+                if plan == .Run(file, source, color_flag, options, verbose_flag, threads_cap, program_args, invocation, notice, _) {
+                    return JetCLIPlan.Run{file: file, source: source, color: color_flag, options: options, verbose: verbose_flag, threads: threads_cap, program_args: program_args, invocation: invocation, notice: notice, watch: true}
+                }
+                return plan
+            }
+        }
         "test" -> return jet_cli_test(jet_argv, color, quiet, verbose, threads)
         "new" -> return jet_cli_new(jet_argv, args, color, quiet)
         "doc" -> return jet_cli_doc(jet_argv, args, color, quiet, json, jet_argv.contains("--check"))
-        "emit" -> return jet_cli_emit(jet_argv, args, color, quiet, json)
         "eval" -> return jet_cli_eval(argv, args, color, json)
         "fill" -> {
             if args.len() < 2 -> return jet_cli_done("", if quiet -> "" else -> jet_cli_command_help("fill"), JET_DRIVER_EXIT_USAGE)
@@ -1523,12 +1734,15 @@ fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> 
         "remote" -> return JetCLIPlan.Remote{argv: argv, json: json, color: color}
         // `jet self toolchain` (main.rs `run_toolchain`): read-only pin report.
         "toolchain" -> return jet_cli_self_toolchain(json)
+        "doctor" -> return jet_cli_doctor_plan(raw, jet_argv, color)
         // CmdTest.rs `run_test_compare(target, jet_argv, mode)`.
         "test-compare" -> return JetCLIPlan.Comparison{target: if args.len() > 1 -> args[1] else -> "", argv: jet_argv, json: json}
         "try" -> {
             if args.len() < 2 -> return jet_cli_done("", if quiet || json -> "" else -> jet_cli_command_help("try"), JET_DRIVER_EXIT_USAGE)
             return JetCLIPlan.Try{plan_path: args[1], keep: jet_argv.contains("--keep"), json: json}
         }
+        // Source/main.rs `"import"` -> CmdImport::run(&raw): raw with the command word first.
+        "import" -> return JetCLIPlan.Done{output: jet_cli_import_run(jet_cli_command_first(argv, command), json)}
         else -> {}
     }
     if jet_cli_inspect_word(command) {

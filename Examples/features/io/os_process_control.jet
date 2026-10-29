@@ -2,14 +2,14 @@
 // (D-OSTARGET2). Beginner `os_facts.jet` stays fact-only.
 package {
     name: "os_process_control"
-    authority: { holds: { allow: [Env, FS.Write, IO, Mem.Alloc] } }
+    authority: { allow: [Env, FS.Write, IO, Mem.Alloc] }
 }
 
 use core.sys as os
 use core.files as files
 
 fn run() {
-    prep if $build.os == {
+    comptime if $build.os == {
         .Linux -> { posix_control() }
         .MacOS -> { posix_control() }
         .Windows -> {

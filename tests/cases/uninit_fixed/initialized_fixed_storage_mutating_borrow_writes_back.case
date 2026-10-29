@@ -1,0 +1,13 @@
+# tests/uninit_fixed.rs::initialized_fixed_storage_mutating_borrow_writes_back at tests/uninit_fixed.rs:113; hand-port
+fixture: initialized_fixed_storage_mutating_borrow_writes_back.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "8\n8\n" # tests/uninit_fixed.rs:115 tir_support::build_and_run
+step default: jet run main.jet
+exit: 0
+stdout: = "8\n8\n" # tests/uninit_fixed.rs:115 tir_support::run_default_multi

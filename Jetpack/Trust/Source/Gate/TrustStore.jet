@@ -4,10 +4,14 @@
 // <subject>` grants with `%`/`:` escaped. `Recipe` build trust uses the same
 // store and record format through these helpers. Record JSON and grant
 // selector parsing (the command surface) live in TrustCommandText.jet.
+use jet_foundation.[Pattern]
+use jetpack_foundation.[CONFIG_DEFAULT_DIR, TRUST_FILE]
+use core.sys as sys
+use core.files as files
 
-TRUST_HASH_PREFIX :: prep { "hash:" }
-TRUST_PATTERN_PREFIX :: prep { "pattern:" }
-TRUST_GRANT_PREFIX :: prep { "grant:" }
+TRUST_HASH_PREFIX :: "hash:"
+TRUST_PATTERN_PREFIX :: "pattern:"
+TRUST_GRANT_PREFIX :: "grant:"
 
 // The authority a typed grant carries. JetOS fleet/activation authorities
 // are not part of this port.
@@ -170,7 +174,6 @@ fn trust_store_add_line(store: String, line: String) -[FS]> Bool Never! {
     trust_store_append(store, line)
     true
 }
-
 
 // `jetpack config trust list`: every stored line.
 fn trust_list_entries(store: String) -[FS]> [String] {

@@ -1,0 +1,214 @@
+// Current dynamic-encoding surfaces name the dynamic value type `Dyn`. A `Data`
+// identifier survives only in prose, comments, strings, or an explicitly
+// historical line. Identifiers come from the Jet lexer, never a text search.
+use core.files as dyn_surface_files
+use jet_lexer.[lex, Token, TokenTables, TOKEN_IDENT, STRING_PART_INTERPOLATION, token_decoded]
+
+DYN_SURFACE_PATHS :: [String]{
+    "Docs/spec/syntax-decisions.md",
+    "Docs/spec/encoding-decisions.md",
+    "Docs/spec/reference/core-library.md",
+    "Examples/features/serde/dyn_accessors.jet",
+    "Examples/features/serde/encoding_breadth.jet",
+    "Examples/features/serde/encoding_base.jet",
+    "Examples/features/serde/encoding_base_expert/run.jet",
+}
+
+DYN_SURFACE_HISTORICAL_LABELS :: [String]{"retired `Data`", "old `Data`", "former `Data`", "historical `Data`", "pre-`Dyn`", "edition 2026"}
+
+struct DynSurfaceLine {
+    line: Int
+    text: String
+}
+
+struct DynSurfaceFence {
+    marker: Int
+    width: Int
+    rest: String
+}
+
+fn dyn_surface_slice(bytes: [U8], start: Int, end: Int) -> String {
+    String.from_bytes((bytes[start..<end]).copy()) ?? panic("fence and backtick runs split UTF-8 at ASCII bytes")
+}
+
+// A segment of a file path (`Core/Data/Plot.jet`) lexes as an identifier too;
+// an identifier touching `/` names a directory or file, never the type.
+fn dyn_surface_path_segment(bytes: [U8], start: Int, end: Int) -> Bool {
+    (start > 0 && Int.from_u8(bytes[start - 1]) == 47) || (end < bytes.len() && Int.from_u8(bytes[end]) == 47)
+}
+
+fn dyn_surface_collect(bytes: [U8], tables: TokenTables, tokens: [Token], identifier: String, offsets: &[Int]) {
+    loop token in tokens {
+        if token.kind == TOKEN_IDENT && token_decoded(tables, token) == identifier && !dyn_surface_path_segment(bytes, token.span.start, token.span.end) -> &offsets.push(token.span.start)
+        if token.literal < 0 -> next
+        loop part in tables.literals[token.literal].string_parts {
+            if part.kind == STRING_PART_INTERPOLATION -> dyn_surface_collect(bytes, tables, part.tokens, identifier, &offsets)
+        }
+    }
+}
+
+// Byte offsets of `identifier` written as source identifiers, interpolations
+// included; comments and string text never count.
+fn dyn_surface_source_offsets(source: String, identifier: String) -> [Int] {
+    bytes :: source.bytes()
+    lexed :: lex(source.bytes())
+    offsets := [Int]{}
+    dyn_surface_collect(bytes, lexed.tables, lexed.tokens, identifier, &offsets)
+    offsets
+}
+
+fn dyn_surface_line_of(source: String, offset: Int) -> Int {
+    bytes :: source.bytes()
+    line := 1
+    loop index in 0..<offset {
+        if Int.from_u8(bytes[index]) == 10 -> line += 1
+    }
+    line
+}
+
+fn dyn_surface_fence(line: String) -> DynSurfaceFence? {
+    bytes :: line.bytes()
+    at := 0
+    loop at < bytes.len() && (Int.from_u8(bytes[at]) == 32 || Int.from_u8(bytes[at]) == 9) -> at += 1
+    if at == bytes.len() -> return None
+    marker :: Int.from_u8(bytes[at])
+    if marker != 96 && marker != 126 -> return None
+    end := at
+    loop end < bytes.len() && Int.from_u8(bytes[end]) == marker -> end += 1
+    if end - at < 3 -> return None
+    Val(DynSurfaceFence{marker: marker, width: end - at, rest: dyn_surface_slice(bytes, end, bytes.len())})
+}
+
+fn dyn_surface_inline_code_has(line: String, identifier: String) -> Bool {
+    bytes :: line.bytes()
+    at := 0
+    loop at < bytes.len() {
+        if Int.from_u8(bytes[at]) != 96 {
+            at += 1
+            next
+        }
+        delimiter := 0
+        loop at + delimiter < bytes.len() && Int.from_u8(bytes[at + delimiter]) == 96 -> delimiter += 1
+        content_start :: at + delimiter
+        close := content_start
+        matched := false
+        loop close < bytes.len() {
+            if Int.from_u8(bytes[close]) != 96 {
+                close += 1
+                next
+            }
+            run := 0
+            loop close + run < bytes.len() && Int.from_u8(bytes[close + run]) == 96 -> run += 1
+            if run == delimiter {
+                if dyn_surface_source_offsets(dyn_surface_slice(bytes, content_start, close), identifier).len() > 0 -> return true
+                at = close + run
+                matched = true
+                break
+            }
+            close += run
+        }
+        if !matched -> return false
+    }
+    false
+}
+
+fn dyn_surface_fence_lines(source: String, start_line: Int, source_lines: [String], identifier: String, out: &[DynSurfaceLine]) {
+    loop offset in dyn_surface_source_offsets(source, identifier) {
+        line_no :: start_line + dyn_surface_line_of(source, offset) - 1
+        seen := false
+        loop existing in out {
+            if existing.line == line_no -> seen = true
+        }
+        if !seen -> &out.push(DynSurfaceLine{line: line_no, text: source_lines[line_no - 1]})
+    }
+}
+
+// Lines of a Markdown document that write `identifier` as source: inside an
+// inline code span or a fenced block. An unclosed fence runs to the end.
+fn dyn_surface_markdown_lines(text: String, identifier: String) -> [DynSurfaceLine] {
+    source_lines :: text.lines()
+    out := [DynSurfaceLine]{}
+    open := false
+    open_marker := 0
+    open_width := 0
+    start_line := 0
+    fenced := [String]{}
+    loop (index, line) in source_lines {
+        fence :: dyn_surface_fence(line)
+        if open {
+            closes :: if fence == {
+                .Val(found) -> found.marker == open_marker && found.width >= open_width && found.rest.trim().is_empty()
+                else -> false
+            }
+            if !closes {
+                &fenced.push(line)
+                next
+            }
+            dyn_surface_fence_lines("{fenced.join("\n")}\n", start_line, source_lines, identifier, &out)
+            open = false
+            next
+        }
+        if fence == .Val(found) {
+            open = true
+            open_marker = found.marker
+            open_width = found.width
+            start_line = index + 2
+            fenced = [String]{}
+            next
+        }
+        if dyn_surface_inline_code_has(line, identifier) -> &out.push(DynSurfaceLine{line: index + 1, text: line})
+    }
+    if open -> dyn_surface_fence_lines("{fenced.join("\n")}\n", start_line, source_lines, identifier, &out)
+    out
+}
+
+fn dyn_surface_line_numbers(lines: [DynSurfaceLine]) -> [Int] {
+    numbers := [Int]{}
+    loop line in lines -> &numbers.push(line.line)
+    numbers
+}
+
+fn dyn_surface_historical(line: String) -> Bool {
+    loop label in DYN_SURFACE_HISTORICAL_LABELS {
+        if line.contains(label) -> return true
+    }
+    false
+}
+
+#Test("dynamic_encoding_surface_uses_dyn_name") {
+    failures := [String]{}
+    loop path in DYN_SURFACE_PATHS {
+        text :: dyn_surface_files.read(path) ?? panic("cannot read Dyn inventory surface {path}")
+        if path.ends_with(".md") {
+            loop found in dyn_surface_markdown_lines(text, "Data") {
+                if !dyn_surface_historical(found.text) -> &failures.push("{path}:{found.line}: {found.text.trim()}")
+            }
+            next
+        }
+        lines :: text.lines()
+        loop offset in dyn_surface_source_offsets(text, "Data") {
+            line_no :: dyn_surface_line_of(text, offset)
+            &failures.push("{path}:{line_no}: {lines[line_no - 1].trim()}")
+        }
+    }
+    assert(failures.is_empty(), "current dynamic-encoding surfaces must use `Dyn`; label historical `Data` references explicitly:\n{failures.join("\n")}")
+}
+
+#Test("dyn_name_check_distinguishes_prose_and_type_names") {
+    lawful_rows :: [String]{"| `conn.send_text(text)` | Data frames; client frames are masked |", "| Data ownership | Official UCD inputs are checked in. |"}
+    loop lawful in lawful_rows -> assert(dyn_surface_markdown_lines(lawful, "Data").is_empty(), lawful)
+    prohibited_spans :: [String]{"`Data.Object`", "`[Data]`", "`Data?`"}
+    loop prohibited in prohibited_spans -> assert_eq(dyn_surface_markdown_lines(prohibited, "Data").len(), 1)
+    assert_eq(dyn_surface_line_numbers(dyn_surface_markdown_lines("~~~jet\nvalue: Data\n~~~", "Data")), [Int]{2})
+    // A shorter inner fence line does not close the block. Jet lexes a backtick
+    // run as raw text, so the width rule is pinned with tilde fences.
+    assert_eq(dyn_surface_line_numbers(dyn_surface_markdown_lines("~~~~jet\nvalue: Data\n~~~\nother: Data\n~~~~", "Data")), [Int]{2, 4})
+    assert(dyn_surface_markdown_lines("[`Core/Data/Plot.jet`](../Core/Data/Plot.jet) and `Compiler/JetFoundation/Data/Syntax/`", "Data").is_empty())
+    multiline :: "```jet\n/*\nData in a comment\n*/\ntext :: \"\"\"\nData in text\n\"\"\"\nvalue: Data\n```"
+    assert_eq(dyn_surface_line_numbers(dyn_surface_markdown_lines(multiline, "Data")), [Int]{8})
+    assert_eq(dyn_surface_line_numbers(dyn_surface_markdown_lines("```jet\nvalue: Data", "Data")), [Int]{2})
+    assert(dyn_surface_source_offsets("// Data is retired\ntext :: \"Data\"\n/* Data */\nvalue: Dyn", "Data").is_empty())
+    assert_eq(dyn_surface_source_offsets("value: Data", "Data").len(), 1)
+    assert(dyn_surface_source_offsets("text :: \"{{{{Data}}}}\"", "Data").is_empty())
+    assert_eq(dyn_surface_source_offsets("text :: \"{{Data.of(1)}}\"", "Data").len(), 1)
+}

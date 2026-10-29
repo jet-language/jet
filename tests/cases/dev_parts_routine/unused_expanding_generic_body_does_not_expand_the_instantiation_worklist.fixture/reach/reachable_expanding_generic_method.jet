@@ -1,0 +1,15 @@
+
+struct Grow<T: Printable> {
+    value: T
+
+    fn read(self) -> T { return self.value.copy() }
+    fn unused(self) -> Int {
+        nested := Grow<[T]>{ value: [self.value.copy()] }
+        return nested.unused()
+    }
+}
+
+fn run() {
+    value := Grow<Int>{ value: 7 }
+    print(value.unused())
+}

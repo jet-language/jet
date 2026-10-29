@@ -1,0 +1,16 @@
+use c.[close as c]
+#Layout(c)
+struct Handle {
+    value: I64
+}
+#Import module c.close {
+    #Close(release)
+    fn acquire() -> Handle = "jet_close_acquire"
+    fn release(handle: ^Handle) = "jet_close_release"
+    fn released() -> I64 = "jet_close_released"
+}
+fn run() {
+    handle := c.acquire()
+    close(^handle)
+    print(c.released())
+}

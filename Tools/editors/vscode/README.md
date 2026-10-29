@@ -8,12 +8,14 @@ commands and settings: [`package.json`](package.json).
 
 ## Install from this checkout
 
-Build the repository executable, then package and install the extension:
+Package and install the extension:
 
 ```sh
-Tools/agent/jet-env cargo build
 Tools/editors/vscode/install.sh
 ```
+
+The extension runs the Jet executable it discovers below; it bundles no
+compiler.
 
 The installer packages `vscode-languageclient` into a `.vsix` and installs it
 with the first available `cursor`, `codium`, or `code` command. If the editor
@@ -30,18 +32,17 @@ The extension chooses the executable in this order:
 1. `jet.executablePath` (with `${workspaceFolder}`, `${workspaceRoot}`, and
    `~` expansion);
 2. the legacy `jet.languageServerPath` setting;
-3. `<workspaceFolder>/target/debug/jet` in a trusted workspace; and
-4. `jet` on `PATH`.
+3. `jet` on `PATH`.
 
-The server is started as `jet self lsp` over stdio. It does not invoke `rustc`,
-so a plain Jet executable is sufficient. After rebuilding the executable, use
+The server is started as `jet self lsp` over stdio. It does not invoke a host
+compiler, so a plain Jet executable is sufficient. After rebuilding the executable, use
 **Jet: Restart Language Server** or reload the editor window.
 
 Example settings:
 
 ```json
 {
-  "jet.executablePath": "${workspaceFolder}/target/debug/jet",
+  "jet.executablePath": "/absolute/path/to/admitted/jet",
   "jet.inlayHints.cloneHints": true,
   "jet.inlayHints.typeAnnotations": false
 }
@@ -122,8 +123,8 @@ path relative to the sidecar, not the editor process's current directory:
   "type": "jet",
   "request": "attach",
   "name": "Jet: Attach",
-  "program": "${workspaceFolder}/target/debug/jet-program",
-  "map": "${workspaceFolder}/target/debug/jet-program.jetmap",
+  "program": "${workspaceFolder}/.jet/build/jet-program",
+  "map": "${workspaceFolder}/.jet/build/jet-program.jetmap",
   "processId": 12345
 }
 ```
@@ -134,32 +135,34 @@ requested debug inputs, so a replaced binary or edited map is rejected. Set
 `showRawFrames` only when generated native frames and scopes are useful; the
 default projection stays in Jet terms. DAP messages use strict
 `Content-Length` framing with a 16 MiB maximum frame, and adapter identity is
-`jet`. See [`crates/jet-debug`](../../../crates/jet-debug/) for the native adapter
-implementation.
+`jet`. See [`Compiler/JetDebug`](../../../Compiler/JetDebug/) for the native
+adapter implementation.
 
 ## Source highlighting
 
 TextMate grammar sources live in
 [`Tools/editors/vscode/syntaxes`](syntaxes/); their lexical vocabulary is generated
-from [`Syntax.rs`](../../../crates/jet-foundation/src/Syntax.rs). Semantic tokens
-refine live coloring for ownership markers, rules, decorators, and effect
-rows. The editor surface is not a substitute for the compiler's parser: use
-feature sources and the language specification for accepted syntax.
+from the syntax registry
+([`Highlights.jet`](../../../Compiler/JetFoundation/Data/Syntax/Highlights.jet)
+and the active rows of [`Markers.jet`](../../../Compiler/Prelude/Markers.jet)).
+Semantic tokens refine live coloring for ownership markers, rules, decorators,
+and effect rows. The editor surface is not a substitute for the compiler's
+parser: use feature sources and the language specification for accepted syntax.
 
 To regenerate the checked-in grammar while working on the repository:
 
 ```sh
-Tools/agent/jet-env cargo run --bin jet -- self devtools grammars
+node Tools/agent/editor-grammars.mjs --write
 ```
 
 ## Focused checks
 
-From the repository root, the language-server test and deterministic benchmark
-can be run with:
+From the repository root, with `JET` naming an admitted Jet executable, the
+language-server test and deterministic benchmark can be run with:
 
 ```sh
-Tools/agent/jet-env cargo test --test lsp
-Tools/agent/jet-env target/debug/jet self lsp --bench
+Tools/agent/jet-env "$JET" test Compiler/JetLSP
+Tools/agent/jet-env "$JET" self lsp --bench
 ```
 
 The benchmark reports cold, warm-hit, and warm-edit measurements plus cache

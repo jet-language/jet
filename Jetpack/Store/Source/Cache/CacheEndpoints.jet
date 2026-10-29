@@ -8,8 +8,8 @@
 // back, and then promoted, so a reader never sees a half-written object.
 // Nix store endpoints are retired; no Nix process is ever started here.
 
-STORE_CACHE_HTTP_TIMEOUT_SECONDS :: prep { 120 }
-STORE_CACHE_STDERR_LIMIT :: prep { 4096 }
+STORE_CACHE_HTTP_TIMEOUT_SECONDS :: 120
+STORE_CACHE_STDERR_LIMIT :: 4096
 
 // What an endpoint can do. `credential_required` endpoints need an explicit
 // typed credential provider; none may execute remote commands.
@@ -300,15 +300,13 @@ fn store_cache_promote_remote(endpoint: CacheEndpoint, partial: String, final_ke
 
 // HTTP GET with a caller byte cap; 404 and 410 are a miss.
 fn store_cache_http_get(url: String, limit: Int) -> [U8]? StoreError! {
-    response :: http.get(url) ?? return Err(StoreError.InvalidData("HTTP cache GET failed: {err.message()}"))
+    response :: http.get(url) ?? return Err(StoreError.InvalidData("HTTP cache GET failed: {err}"))
     status :: response.status()
     if status == 404 || status == 410 -> return Ok(None)
     if status < 200 || status >= 300 -> return Err(StoreError.InvalidData("HTTP cache GET failed with status {status}"))
-    body := response.body(limit: limit + 1)
     bytes := [U8]{}
-    loop {
-        chunk :: body.read(65536) ?? return Err(StoreError.InvalidData("HTTP cache response could not be read: {StoreError.IO(err).message()}"))
-        if chunk.len() == 0 -> break
+    loop part in response.body().chunks(65536) {
+        chunk :: part ?? return Err(StoreError.InvalidData("HTTP cache response could not be read: {err}"))
         loop byte in chunk -> &bytes.push(byte)
         if bytes.len() > limit -> return Err(StoreError.InvalidData("HTTP cache response exceeded its bound"))
     }
@@ -414,7 +412,9 @@ fn store_cache_run_bounded_output(spec: ProcessSpec, input: [U8]?, limit: Int, l
         .None -> {}
     }
     stdout := [U8]{}
-    loop chunk in child.stdout.chunks(65536) {
+    loop {
+        chunk :: child.stdout.read(65536)
+        if chunk.len() == 0 -> break
         loop byte in chunk -> &stdout.push(byte)
         if stdout.len() > limit {
             child.kill().drop("the transport already exceeded its bound")

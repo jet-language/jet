@@ -1,0 +1,112 @@
+// `fn dev(d: Dev)`: the package's dev-loop configuration. The function is
+// evaluated like fn build; its `d.watch`, `d.serve` and `d.reload` calls
+// reach this adapter, which records them for `jet dev`.
+use jet_foundation.[Diagnostic, Span, TComptimeValue, Type]
+use jet_eval.[JetEvalBuildHostAdapter, JetEvalBuildReply, jet_eval_build_session_input, jet_eval_runtime_config]
+
+// The stock dev loop: watch the package and hot reload, no dev server.
+struct JetDriverDevConfig {
+    // Extra watched paths, relative to the dev file's directory.
+    watch: [String]
+    // The dev server port `d.serve` chose.
+    port: Int?
+    // "Hot" or "Restart".
+    reload: String
+    // Whether a `fn dev(d: Dev)` configured this (false: the stock loop).
+    configured: Bool
+}
+
+fn jet_driver_dev_config_stock() -> JetDriverDevConfig Never! {
+    {watch: [String]{}, port: None, reload: "Hot", configured: false}
+}
+
+struct JetDriverDevAdapter { state: Shared<JetDriverDevConfig> }
+
+fn jet_driver_dev_host_call(state: Shared<JetDriverDevConfig>, member: String, args: [TComptimeValue]) -> JetEvalBuildReply? {
+    if !member.starts_with("Dev.") || args.len() != 2 -> return None
+    method :: member.slice("Dev.".len(), member.len())
+    value :: jet_eval_build_session_input(args[1]) ?? return None
+    permit := state.guard_edit()
+    if {
+        method == "watch" -> {
+            if value == .Text(path) -> &permit.value.watch.push(path.copy())
+            else -> return None
+        }
+        method == "serve" -> {
+            if value == .Int(port) -> permit.value.port = Val(port)
+            else -> return None
+        }
+        method == "reload" -> {
+            if value == .Text(mode) -> permit.value.reload = mode.copy()
+            else -> return None
+        }
+        else -> return None
+    }
+    Val(JetEvalBuildReply.Value{value: TComptimeValue.Unit})
+}
+
+impl JetDriverDevAdapter.JetEvalBuildHostAdapter {
+    fn clone_adapter(self) -[]> JetEvalBuildHostAdapter {
+        JetDriverDevAdapter{state: self.state}
+    }
+    fn build_call(self, member: String, args: [TComptimeValue], fallible: Bool, impure: Bool, span: Span) -[FS.Read, Net, Time.Wait]> JetEvalBuildReply? {
+        // The dev adapter records configuration only.
+        jet_driver_dev_host_call(self.state, member, args)
+    }
+}
+
+struct JetDriverDevQueryResult {
+    config: JetDriverDevConfig
+    diagnostics: [Diagnostic]
+    complete: Bool
+    internal_problem: String?
+}
+
+fn jet_driver_dev_query_failed(diagnostics: ^[Diagnostic], problem: ^String?) -> JetDriverDevQueryResult Never! {
+    {config: jet_driver_dev_config_stock(), diagnostics: ^diagnostics, complete: false, internal_problem: ^problem}
+}
+
+// The dev configuration of the request's entry package: the stock loop when the
+// package has no `fn dev(d: Dev)`, otherwise what that function configures.
+fn jet_driver_query_dev_config(owned_request: ^JetDriverCompileRequest) -> JetDriverDevQueryResult {
+    request := ^owned_request
+    sources :: jet_driver_source_query(request)
+    if !sources.complete -> return jet_driver_dev_query_failed(^sources.diagnostics, None)
+    if sources.entry_module_index < 0 || sources.entry_module_index >= sources.modules.len() -> return jet_driver_dev_query_failed(^sources.diagnostics, Val("loaded dev query has no exact entry module"))
+    package :: sources.modules[sources.entry_module_index].package_identity
+    selected := String?{None}
+    loop loaded_module in sources.modules {
+        if loaded_module.package_identity != package -> next
+        loop item in loaded_module.program.items {
+            if item == .Func(function) && function.name == "dev" && function.params.len() == 1 && function.params[0].ty == (Type.Named{name: "Dev"}) {
+                if selected != None {
+                    errors := ^sources.diagnostics
+                    &errors.push(jet_driver_diagnostic_without_span("E3520", "two dev entries for the package", "one package configures its dev loop once", "keep one `fn dev(d: Dev)` in the package"))
+                    return jet_driver_dev_query_failed(^errors, None)
+                }
+                selected = Val(loaded_module.physical_path.copy())
+            }
+        }
+    }
+    path :: selected ?? return JetDriverDevQueryResult{config: jet_driver_dev_config_stock(), diagnostics: ^sources.diagnostics, complete: true, internal_problem: None}
+    selection := jet_driver_lowering_inputs_selection(&request, JetDriverCompileMode.Interpreter, Val(^path), Val("dev"), true)
+    compiled := ^selection.compile
+    if !compiled.complete || compiled.internal_problem != None -> return jet_driver_dev_query_failed(^compiled.diagnostics, ^compiled.internal_problem)
+    inputs :: ^selection.inputs ?? return jet_driver_dev_query_failed(^compiled.diagnostics, Val("checked dev invocation lost its checked functions"))
+    configured := jet_driver_dev_config_stock()
+    configured.configured = true
+    state :: shared configured
+    config := jet_eval_runtime_config(request.eval_config)
+    config.build_host_adapter = Val(JetDriverDevAdapter{state: state})
+    run := jet_driver_invocation_run(^inputs, [TComptimeValue]{TComptimeValue.Struct{type_name: "Dev", fields: []}}, config, Span{start: 0, end: 0})
+    errors := ^compiled.diagnostics
+    evaluated :: ^run.result ?? return jet_driver_dev_query_failed(^errors, ^run.problem)
+    if evaluated.error == .Val(error) -> &errors.push(error.diagnostic.copy())
+    if evaluated.internal_problem != None || !evaluated.complete {
+        // copy: `internal` is a payload view of `evaluated.internal_problem`.
+        problem :: if evaluated.internal_problem == .Val(internal) -> { Val(internal.message.copy()) } else -> { None }
+        return jet_driver_dev_query_failed(^errors, ^problem)
+    }
+    permit :: state.guard_read()
+    JetDriverDevQueryResult{config: permit.value.copy(), diagnostics: ^errors, complete: true, internal_problem: None}
+}

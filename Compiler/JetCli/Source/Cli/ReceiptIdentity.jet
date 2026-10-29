@@ -1,6 +1,10 @@
 // Source/ReceiptStore.rs: comparison claims use the exact framed invocation
 // context and canonical target closure. Terminal bits are host facts, not color.
 use jet_foundation.[foundation_json_quote]
+use jet_pkg_model.[AuthorityResolver, WorkspaceDeclarationCache]
+use core.sys as cli_sys
+use core.files as cli_files
+use core.crypto as receipt_crypto
 
 fn jet_cli_receipt_secret_component(component: String) -> Bool Never! {
     bytes :: component.bytes()
@@ -118,7 +122,7 @@ fn jet_cli_receipt_context_identity(verb: String, argv: [String], terminal: [U8]
             next
         }
         jet_cli_receipt_frame(&tools, path.bytes())
-        digest :: if name == "jet" -> jet_cli_compiler_identity() ?? return Err(jet_cli_read_error("this compiler has no embedded identity and JET_COMPILER_IDENTITY is unset")) else -> {
+        digest :: if name == "jet" -> jet_cli_compiler_identity() ?? return Err(jet_cli_read_error("JET_COMPILER_IDENTITY is unset, so this compiler has no identity")) else -> {
             if cli_files.read_bytes(path) == {
                 .Ok(bytes) -> receipt_crypto.sha256(bytes).hex()
                 .Err(_) -> "unreadable"

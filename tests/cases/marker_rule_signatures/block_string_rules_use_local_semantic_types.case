@@ -1,0 +1,16 @@
+# tests/marker_rule_signatures.rs::block_string_rules_use_local_semantic_types at tests/marker_rule_signatures.rs:505; hand-port
+# Claim: valid string reason arguments on #Unsafe, #Impure, #Nondeterministic produce no E0930/E3112/L3102 (tests/marker_rule_signatures.rs:516-521)
+# Claim: Int reason argument on the three block markers yields E0930 (tests/marker_rule_signatures.rs:533-537)
+# Not ported: Rust asserts exactly 3 E0930; CLI pins E0930 presence only
+fixture: block_string_rules_use_local_semantic_types.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check valid/main.jet
+exit: 0 # tests/marker_rule_signatures.rs:519 no E0930/E3112/L3102
+stderr: !~ "E0930" # tests/marker_rule_signatures.rs:519 no E0930/E3112/L3102
+stderr: !~ "E3112" # tests/marker_rule_signatures.rs:519 no E0930/E3112/L3102
+stderr: !~ "L3102" # tests/marker_rule_signatures.rs:519 no E0930/E3112/L3102
+step: jet check wrong/main.jet
+exit: 1 # tests/marker_rule_signatures.rs:533 E0930 (3 times in Rust)
+stderr: ~ "E0930" # tests/marker_rule_signatures.rs:533 E0930 (3 times in Rust)

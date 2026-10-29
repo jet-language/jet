@@ -1,0 +1,46 @@
+// json.parse_with_limits: the caller chooses the input-size and nesting bounds
+// instead of EncodingLimits.safe() (16 MiB, depth 256). A larger budget
+// accepts what `json.parse` refuses; a smaller one refuses what it accepts.
+use core.encoding as encoding
+use core.encoding.json as json
+
+fn kind_name(kind: encoding.EncodingErrorKind) -> String {
+    if kind == encoding.EncodingErrorKind.Syntax -> return "Syntax"
+    if kind == encoding.EncodingErrorKind.Limit -> return "Limit"
+    "other"
+}
+
+fn nested(depth: Int) -> String {
+    out := ""
+    loop _ in 0..<depth -> out = "{out}["
+    loop _ in 0..<depth -> out = "{out}]"
+    out
+}
+
+fn limits(depth: Int, bytes: Int) -> encoding.EncodingLimits {
+    encoding.EncodingLimits{buffer_bytes: 65536, max_depth: depth, max_item_bytes: bytes, max_total_bytes: None, max_expansion_depth: 32, max_expansion_bytes: 8388608}
+}
+
+fn show(label: String, text: String, chosen: encoding.EncodingLimits) {
+    value :: json.parse_with_limits(text, chosen) ?? {
+        print("{label}: {kind_name(err.kind)}: {err.reason}")
+        return
+    }
+    print("{label}: accepted {text.len()} bytes, canonical {json.canonical(value) ?? panic("canonical")}")
+}
+
+fn run() {
+    deep :: nested(300)
+    if json.parse(deep) == {
+        .Ok(_) -> print("parse depth 300: accepted")
+        .Err(err) -> print("parse depth 300: {kind_name(err.kind)}: {err.reason}")
+    }
+    if json.parse_with_limits(deep, limits(512, 1048576)) == {
+        .Ok(_) -> print("limits depth 512: accepted depth 300")
+        .Err(err) -> print("limits depth 512: {err.reason}")
+    }
+    show("limits depth 16", nested(20), limits(16, 1048576))
+    show("limits depth 16 shallow", "[[1,2],{{\"a\":[3]}}]", limits(16, 1048576))
+    show("limits 8 bytes", "[1,2,3,4,5]", limits(16, 8))
+    show("limits zero depth", "[]", limits(0, 8))
+}

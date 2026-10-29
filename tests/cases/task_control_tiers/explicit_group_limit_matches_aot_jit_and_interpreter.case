@@ -1,0 +1,31 @@
+# tests/task_control_tiers.rs::explicit_group_limit_matches_aot_jit_and_interpreter at tests/task_control_tiers.rs:377; hand-port
+# The forced-interpreter run retires: jet has no interpreter tier (`jet run --interpret` is E2102); the default run keeps the claim.
+# limit_source(limit) is the format! body with {limit} = 1, 0, -3.
+fixture: explicit_group_limit_matches_aot_jit_and_interpreter.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build l1/main.jet
+exit: 0
+step: built
+exit: 0 # tests/task_control_tiers.rs:386 AOT limit 1
+stdout: = "2\n3\n" # tests/task_control_tiers.rs:387 AOT limit 1
+step: jet run l1/main.jet
+exit: 0 # tests/task_control_tiers.rs:395 default limit 1
+stdout: = "2\n3\n" # tests/task_control_tiers.rs:396 default limit 1
+step: jet build l0/main.jet
+exit: 0
+step: built
+exit: 0 # tests/task_control_tiers.rs:386 AOT limit 0
+stdout: = "2\n3\n" # tests/task_control_tiers.rs:387 AOT limit 0
+step: jet run l0/main.jet
+exit: 0 # tests/task_control_tiers.rs:395 default limit 0
+stdout: = "2\n3\n" # tests/task_control_tiers.rs:396 default limit 0
+step: jet build lneg3/main.jet
+exit: 0
+step: built
+exit: 0 # tests/task_control_tiers.rs:386 AOT limit -3
+stdout: = "2\n3\n" # tests/task_control_tiers.rs:387 AOT limit -3
+step: jet run lneg3/main.jet
+exit: 0 # tests/task_control_tiers.rs:395 default limit -3
+stdout: = "2\n3\n" # tests/task_control_tiers.rs:396 default limit -3

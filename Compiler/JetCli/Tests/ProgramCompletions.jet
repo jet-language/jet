@@ -1,10 +1,14 @@
 use jet_foundation.[CLICommandSchema, CLIInputSchema, CLIInputShape, CLISubcommandSchema, JobFact]
+use jet_cli.[
+    jet_cli_program_completion_error, jet_cli_program_completion_name,
+    jet_cli_program_completion_name_control, jet_cli_program_completions,
+]
 
 fn program_completion_require(ok: Bool, label: String) Never! {
     if !ok -> panic("program completion contract: {label}")
 }
 
-fn run() {
+#Test("program_completions") {
     schema := CLICommandSchema{entry_type: "Args", description: None, inputs: [CLIInputSchema]{}, commands: [CLISubcommandSchema]{}, jobs: [JobFact]{}, standard: false, version: None}
     bash :: jet_cli_program_completions("bash", "greeter", schema) ?? panic("bash supported")
     program_completion_require(bash == "# bash completion from JetCommandSchema v8\n__jet_program_completion() {{\n    local cur\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    COMPREPLY=( $(compgen -W '--help' -- \"$cur\") )\n}}\ncomplete -F __jet_program_completion -- 'greeter'\n", "plain bash exact captured bytes")

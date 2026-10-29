@@ -81,13 +81,13 @@ function verifyNativeProjectionManifest() {
       {
         definition: "jetDev",
         command: "jet",
-        relative_binary: "target/debug/jet",
+        variable: "JET",
         mode: "direct",
       },
       {
         definition: "jetpackDev",
         command: "jetpack",
-        relative_binary: "target/debug/jetpack",
+        variable: "JETPACK",
         mode: "direct",
       },
     ],
@@ -128,7 +128,7 @@ function verifyNativeProjectionManifest() {
     "native environment fact manifest",
   );
   for (const tool of manifest.tools) {
-    const declaration = `${tool.definition} -> ${tool.relative_binary}`;
+    const declaration = `${tool.definition} -> $${tool.variable}`;
     if (!source.includes(declaration)) {
       throw new Error(`env.jet is missing native tool declaration: ${declaration}`);
     }

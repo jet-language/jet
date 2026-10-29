@@ -1,0 +1,233 @@
+// Channels: a Sender<T> or Receiver<T> is an owned runtime channel endpoint
+// handle; `channel<T>()` writes both endpoints of one runtime channel into
+// the tuple, the endpoint methods cross the native channel exports, and `loop
+// value in rx` walks the receiver as an Iter.
+
+use jet_foundation.[Span, BodyHandleOp, TLocal, Type, type_carrier_identity]
+
+// The element of a `Sender<T>` / `Receiver<T>` endpoint.
+fn ir_channel_element(ty: Type, endpoint: String) -> Type? Never! {
+    if ir_untag(ty) == .Apply(name, args) {
+        if name == endpoint && args.len() == 1 -> return Val(args[0].copy())
+    }
+    None
+}
+
+// The row of a channel endpoint: the owned runtime channel, whose drop
+// retires the endpoint and whose clone adds one.
+fn ir_channel_row(m: &IRModule, ty: Type, endpoint: String) -> Int Never! {
+    atom :: if endpoint == "Sender" -> "sender" else -> "receiver"
+    ir_intern_type(&m, type_carrier_identity(ty), ir_owned_layout(IRTypeKind.Pointer, ty, "jet_rt_native_{atom}_drop", "jet_rt_native_{atom}_clone"))
+}
+
+// `channel<T>()` / `channel_bounded<T>(capacity)`: both endpoints of one
+// runtime channel, written into the result tuple; the bound crosses as its
+// exact Int.
+fn ir_channel_new(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, bounded: Bool, args: [Int], span: Span) -> Int Never! {
+    result_ty :: ir_subst(m, ty)
+    fields :: if ir_untag(result_ty) == .Tuple(items) -> items else -> { return ir_fail_slot(&b, span, "channel producing {ir_type_name(result_ty)}") }
+    members :: ir_tuple_members(&m, p, fields) ?? return ir_type_fail(&b, span, result_ty)
+    if members.len() != 2 || ir_channel_element(m.types[members[0].ty].ty, "Sender") == None || ir_channel_element(m.types[members[1].ty].ty, "Receiver") == None {
+        return ir_fail_slot(&b, span, "channel producing {ir_type_name(result_ty)}")
+    }
+    if args.len() != (if bounded -> 1 else -> 0) -> return ir_fail_slot(&b, span, "channel with {args.len()} arguments")
+    row :: ir_value_type(&m, p, result_ty) ?? return ir_type_fail(&b, span, result_ty)
+    capacity := ir_word_const(&m, &b, 0)
+    if bounded {
+        capacity = ir_expr(&m, p, &b, args[0])
+        if ir_failed(b) || capacity < 0 -> return -1
+        // The reference scheduler stops a bound below 1 (Scheduler.rs:3557);
+        // the native channel export only clamps it.
+        word_row :: ir_word_row(&m)
+        bound :: ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{capacity}, word_row)
+        one :: ir_word_const(&m, &b, 1)
+        short :: ir_bool_op(&m, &b, IROp.Lt, bound, one)
+        ir_open_if(&b.f, short, b.line)
+        ir_channel_capacity_stop(&m, p, &b, capacity, span)
+        ir_end(&b.f, b.line)
+        if ir_failed(b) -> return -1
+    }
+    storage :: ir_fresh_temp(&m, &b, row)
+    ir_emit(&b.f, IROp.StackAddress, storage, m.types[row].size, 8, -1, b.line)
+    tx :: ir_address_at(&m, &b, storage, members[0].offset)
+    rx :: ir_address_at(&m, &b, storage, members[1].offset)
+    flag :: ir_word_const(&m, &b, if bounded -> 1 else -> 0)
+    _ :: ir_runtime(&m, &b, "jet_rt_native_channel", [Int]{flag, capacity, tx, rx}, -1)
+    if bounded -> ir_release(&m, &b, capacity)
+    storage
+}
+
+// `panic: channel capacity must be at least 1, got {capacity}`: an E3001
+// stop whose zeroed descriptor carries no source location, as the
+// reference scheduler's runtime stop reports it.
+fn ir_channel_capacity_stop(m: &IRModule, p: IRProgram, b: &IRBuilder, capacity: Int, span: Span) Never! {
+    pointer_row :: ir_pointer_row(&m)
+    builder :: ir_runtime(&m, &b, "jet_rt_string_builder_new", [Int]{}, pointer_row)
+    b.fresh[builder] = false
+    ir_push_static(&m, &b, builder, "channel capacity must be at least 1, got ")
+    text :: ir_render(&m, p, &b, Type.Int, capacity, IRRender.Display, span)
+    if ir_failed(b) -> return
+    _ :: ir_runtime(&m, &b, "jet_rt_string_builder_push", [Int]{builder, text}, -1)
+    string_row :: ir_string_row(&m)
+    message :: ir_runtime(&m, &b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
+    descriptor :: ir_temp(&m, &b, pointer_row)
+    ir_emit(&b.f, IROp.StackAddress, descriptor, 88, 8, -1, b.line)
+    zero :: ir_word_const(&m, &b, 0)
+    loop index in 0..<11 -> ir_emit(&b.f, IROp.Store, -1, descriptor, 8 * index, zero, b.line)
+    panic_kind :: ir_word_const(&m, &b, 2)
+    _ :: ir_runtime(&m, &b, "jet_rt_require_stop", [Int]{panic_kind, descriptor, message, zero, zero, zero}, -1)
+    ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+}
+
+// An endpoint method: close on either endpoint, send on a Sender (an owned
+// copy of the value moves into the channel), is_ready, try_receive and
+// receive on a Receiver. None leaves any other operation to ir_handle_method.
+fn ir_channel_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int? Never! {
+    receiver_ty :: ir_subst(m, ir_ty(p, b, receiver))
+    sender :: ir_channel_element(receiver_ty, "Sender")
+    receiving :: ir_channel_element(receiver_ty, "Receiver")
+    element :: sender ?? (receiving ?? return None)
+    is_sender :: sender != None
+    handled :: if operation == {
+        .ChannelClose -> true
+        .SenderSend -> is_sender
+        .ChannelIsReady | .ChannelTryReceive | .ChannelReceive -> !is_sender
+        else -> false
+    }
+    if !handled -> return None
+    handle :: ir_expr(&m, p, &b, receiver)
+    if ir_failed(b) || handle < 0 -> return Val(-1)
+    result := -1
+    if operation == {
+        .ChannelClose -> {
+            if args.len() != 0 -> return Val(ir_fail_slot(&b, span, "close with {args.len()} arguments"))
+            atom :: if is_sender -> "sender" else -> "receiver"
+            _ :: ir_runtime(&m, &b, "jet_rt_native_{atom}_close", [Int]{handle}, -1)
+        }
+        .SenderSend -> {
+            if args.len() != 1 -> return Val(ir_fail_slot(&b, span, "Sender.send with {args.len()} arguments"))
+            value :: ir_expr(&m, p, &b, args[0])
+            if ir_failed(b) || value < 0 -> return Val(-1)
+            owned :: if b.fresh[value] -> value else -> ir_copy_value(&m, p, &b, value, span)
+            if ir_failed(b) -> return Val(-1)
+            b.fresh[owned] = false
+            slot :: ir_lazy_value_slot(&m, &b, owned)
+            meta :: ir_lazy_meta(&m, p, &b, element, span)
+            if meta < 0 -> return Val(-1)
+            _ :: ir_runtime(&m, &b, "jet_rt_native_sender_send", [Int]{handle, slot, meta}, -1)
+        }
+        .ChannelIsReady -> {
+            row :: ir_value_type(&m, p, ty) ?? return Val(ir_type_fail(&b, span, ty))
+            result = ir_runtime(&m, &b, "jet_rt_native_receiver_is_ready", [Int]{handle}, row)
+        }
+        .ChannelTryReceive -> {
+            row :: ir_value_type(&m, p, ty) ?? return Val(ir_type_fail(&b, span, ty))
+            meta :: ir_lazy_meta(&m, p, &b, element, span)
+            if meta < 0 -> return Val(-1)
+            if ir_option_inline(m, row) {
+                // The runtime answers its generic Option box (ir_option_unbox).
+                pointer_row :: ir_pointer_row(&m)
+                boxed :: ir_runtime(&m, &b, "jet_rt_native_receiver_try_receive", [Int]{handle, meta}, pointer_row)
+                result = ir_option_unbox(&m, &b, boxed, row)
+            } else {
+                result = ir_runtime(&m, &b, "jet_rt_native_receiver_try_receive", [Int]{handle, meta}, row)
+            }
+            b.fresh[result] = m.types[row].drop != ""
+        }
+        .ChannelReceive -> {
+            err_ty :: if ir_untag(ir_subst(m, ty)) == .Result(_, err) -> err else -> { return Val(ir_fail_slot(&b, span, "Receiver.receive as {ir_type_name(ty)}")) }
+            result = ir_task_outcome(&m, p, &b, "jet_rt_native_receiver_receive", [Int]{handle}, ty, err_ty, span)
+        }
+        else -> {}
+    }
+    ir_release(&m, &b, handle)
+    Val(result)
+}
+
+// `loop value in rx`: the receiver becomes a runtime Iter over the values it
+// receives, which takes a fresh endpoint over and adds one for a kept
+// receiver; the Iter is then walked as any other.
+fn ir_channel_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection: Int, body: [Int], span: Span) Never! {
+    collection_ty :: ir_ty(p, b, collection)
+    element :: ir_channel_element(ir_subst(m, collection_ty), "Receiver") ?? return ir_fail(&b, span, "channel loop over {ir_type_name(collection_ty)}")
+    iter_ty :: Type.Apply{name: "Iter", args: [Type]{element}}
+    iter_row :: ir_value_type(&m, p, iter_ty) ?? return ir_fail(&b, span, "type {ir_type_name(iter_ty)}")
+    item_row :: ir_value_type(&m, p, element) ?? return ir_fail(&b, span, "type {ir_type_name(element)}")
+    handle :: ir_expr(&m, p, &b, collection)
+    if ir_failed(b) || handle < 0 -> return
+    meta :: ir_lazy_meta(&m, p, &b, element, span)
+    if ir_failed(b) -> return
+    moved :: ir_lazy_moved(&m, &b, handle)
+    source :: ir_runtime(&m, &b, "jet_rt_native_receiver_iter", [Int]{handle, moved, meta}, iter_row)
+    ir_release(&m, &b, handle)
+    ir_lazy_walk_source(&m, p, &b, label, variable, variable_two, source, item_row, body)
+}
+
+// `select { ... }`: the readiness table's receivers and timer deadlines
+// (exact nanoseconds) become two owned Lists, which the runtime empties, and
+// the runtime writes the ready arm and its payload (the received value's
+// box, or None for a timer) into the result tuple.
+fn ir_select_wait(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, table: Int, nonblocking: Bool, span: Span) -> Int Never! {
+    result_ty :: ir_subst(m, ty)
+    fields :: if ir_untag(result_ty) == .Tuple(items) -> items else -> { return ir_fail_slot(&b, span, "select producing {ir_type_name(result_ty)}") }
+    members :: ir_tuple_members(&m, p, fields) ?? return ir_type_fail(&b, span, result_ty)
+    if members.len() != 2 -> return ir_fail_slot(&b, span, "select producing {ir_type_name(result_ty)}")
+    receivers := [Int]{}
+    durations := [Int]{}
+    if !ir_select_table(p, b, table, &receivers, &durations) -> return ir_fail_slot(&b, span, "select over a non-canonical readiness table")
+    payload :: ir_select_payload_type(result_ty)
+    receiver_list_ty :: Type.List{element: Type.Apply{name: "Receiver", args: [Type]{payload}}}
+    recvs :: ir_list_literal(&m, p, &b, receiver_list_ty, receivers, span)
+    if ir_failed(b) || recvs < 0 -> return -1
+    int_row :: ir_value_type(&m, p, Type.Int) ?? return ir_type_fail(&b, span, Type.Int)
+    nanoseconds := [Int]{}
+    loop duration in durations {
+        value :: ir_expr(&m, p, &b, duration)
+        if ir_failed(b) || value < 0 -> return -1
+        &nanoseconds.push(ir_route(&m, p, &b, "jet_duration_ns_value", [Int]{value}, [Bool]{true}, Type.Int, span))
+        if ir_failed(b) -> return -1
+        ir_release(&m, &b, value)
+    }
+    timer_list_ty :: Type.List{element: Type.Int}
+    timer_row :: ir_value_type(&m, p, timer_list_ty) ?? return ir_type_fail(&b, span, timer_list_ty)
+    timers :: ir_list_from(&m, p, &b, timer_row, int_row, nanoseconds)
+    if ir_failed(b) -> return -1
+    row :: ir_value_type(&m, p, result_ty) ?? return ir_type_fail(&b, span, result_ty)
+    storage :: ir_fresh_temp(&m, &b, row)
+    ir_emit(&b.f, IROp.StackAddress, storage, m.types[row].size, 8, -1, b.line)
+    arm :: ir_address_at(&m, &b, storage, members[0].offset)
+    value :: ir_address_at(&m, &b, storage, members[1].offset)
+    mode :: ir_word_const(&m, &b, if nonblocking -> 1 else -> 0)
+    _ :: ir_runtime(&m, &b, "jet_rt_native_select_wait", [Int]{recvs, timers, mode, arm, value}, -1)
+    ir_release(&m, &b, recvs)
+    ir_release(&m, &b, timers)
+    storage
+}
+
+// The received value's type of a select over `ty`: through Result/Option
+// wrappers to the `Task<T>` payload T; any other type is its own payload.
+fn ir_select_payload_type(ty: Type) -> Type Never! {
+    if ir_untag(ty) == {
+        .Result(ok, _) | .Option(ok) -> ir_select_payload_type(ok)
+        .Apply(name, args) -> if name == "Task" && args.len() == 1 -> args[0] else -> ty
+        else -> ty
+    }
+}
+
+// The receivers and timer durations of a readiness table, latest arm first;
+// false for any other builder.
+fn ir_select_table(p: IRProgram, b: IRBuilder, table: Int, receivers: &[Int], durations: &[Int]) -> Bool Never! {
+    if ir_body_node(p, b, table).kind == {
+        .SelectStart -> return true
+        .SelectRecv(previous, channel) -> {
+            &receivers.push(channel.copy())
+            return ir_select_table(p, b, previous, &receivers, &durations)
+        }
+        .SelectAfter(previous, duration, value) -> {
+            if value != None -> return false
+            &durations.push(duration.copy())
+            return ir_select_table(p, b, previous, &receivers, &durations)
+        }
+        else -> return false
+    }
+}

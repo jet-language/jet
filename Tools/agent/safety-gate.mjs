@@ -121,9 +121,9 @@ export function runGate({ out, artifacts, seed = 4, count = 50, prepareOnly = fa
   if (!goldenCases.length) add("golden-corpus", "fail", "empty golden coverage");
   const native = manifest.native_safety;
   for (const tier of TIERS) {
-    for (const [kind, cases, features, caseList, digest] of [
-      ["fuzz", corpus.cases, corpus.features, corpus.caseList, corpus.sha256],
-      ["golden", goldenCases, join(repo, "Examples/features"), goldenList, goldenHash],
+    for (const [kind, cases, digest] of [
+      ["fuzz", corpus.cases, corpus.sha256],
+      ["golden", goldenCases, goldenHash],
     ]) {
       const input = native?.tiers?.[tier]?.[kind];
       const name = `${tier}-${kind}`;
@@ -149,12 +149,11 @@ export function runGate({ out, artifacts, seed = 4, count = 50, prepareOnly = fa
         }
         if (runtime.language !== "Jet") add(`${name}-rust-free-runtime`, "gap", `runtime language ${runtime.language ?? "unspecified"}`);
         if (receipt.frontend_language !== "Jet" || receipt.compiler_language !== "Jet") add(`${name}-rust-free-compiler`, "gap", "compiler/front-end still depends on Rust");
-        const sanitize = command(`${name}-sanitize`, process.execPath, [join(repo, "Compiler/JetBackend/Tests/run-sanitized.mjs"), input.directory, "--case-list", caseList, "--runtime-library", runtime.library], { JET_GOLDEN_FEATURES: features });
-        add(`${name}-sanitize`, sanitize.status === 0 ? "pass" : sanitize.status === 1 ? "fail" : "gap", `exit ${sanitize.status ?? sanitize.signal ?? sanitize.error?.code}; ${name}-sanitize.log`);
+        add(`${name}-sanitize`, "gap", "no native code sanitizer on the JetIR backend");
       } catch (error) { add(name, "gap", error.message); }
     }
   }
-  // These are not provided by LIR/Sanitize today; never call ASan full I1 proof.
+  // No native producer provides these today; never call ASan full I1 proof.
   for (const gap of ADDITIONAL_COVERAGE) {
     if (!coverageReceipt(native?.additional_coverage?.[gap], manifest.dev_head, gap)) summary.gaps.push(gap);
   }

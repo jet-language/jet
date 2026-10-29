@@ -1,7 +1,7 @@
 package {
     name: "effects_determinism"
     version: "0.1.0"
-    authority: { holds: { allow: [Exec, IO, Mem.Alloc, Time, Time.Wait] } }
+    authority: { allow: [Exec, IO, Mem.Alloc, Time, Time.Wait] }
 }
 // D-DET1/D-SHAPE8: an explicit empty effect bound is reproducible.
 //
@@ -35,7 +35,7 @@ fn two_rolls(rng: &RNG) -[]> String {
 fn coin_and_card(rng: &RNG) -[]> String {
     flip :: &rng.bool()
     cards :: ["A", "K", "Q", "J"]
-    drawn :: rng.pick(cards) ?? "none"
+    drawn :: &rng.pick(cards) ?? "none"
     return "flip={flip} card={drawn}"
 }
 
@@ -48,7 +48,7 @@ fn run() {
     // D-DET-CAPAPI: in-place deterministic shuffle (Fisher–Yates) — the list arg
     // needs `&`, the rng receiver needs `&` (every draw advances the stream).
     deck := [1, 2, 3, 4, 5]
-    rng.shuffle(&deck)
+    &rng.shuffle(&deck)
     print("deck={deck}")
     // D-DET-CAPAPI: the widened clock — absolute `advance`, and a `Duration`-based
     // `wait`. Fixed waits use exact duration literals.

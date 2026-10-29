@@ -1,0 +1,17 @@
+# tests/fmt.rs::fmt_simplify_rewrites_listed_fence_integers_to_a_range at tests/fmt.rs:1389; hand-port
+# Claim: fence range emitted, `<: 0..3 :>` or `<:0..3:>` (tests/fmt.rs:1394-1397)
+# Claim: listed integer run `0, 1, 2, 3` gone (tests/fmt.rs:1398-1401)
+# Claim: second simplify pass identical (tests/fmt.rs:1414-1417)
+# Not ported: AST equality via Lexer/Parser (tests/fmt.rs:1403-1413): Rust API
+fixture: fmt_simplify_rewrites_listed_fence_integers_to_a_range.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt --simplify fence/run.jet
+exit: 0 # tests/fmt.rs:1392 simplify succeeds
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:1394-1401 range present, list gone
+stdout: ~ "0..3" # tests/fmt.rs:1394-1401 range present, list gone
+stdout: !~ "0, 1, 2, 3" # tests/fmt.rs:1394-1401 range present, list gone
+step: jet fmt --simplify --check fence/run.jet
+exit: 0 # tests/fmt.rs:1414-1417 stable

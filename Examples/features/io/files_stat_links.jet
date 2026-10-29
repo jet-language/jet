@@ -1,0 +1,34 @@
+package {
+    name: "files_stat_links"
+    authority: { allow: [FS, FS.Read, FS.Write, IO, Mem.Alloc] }
+}
+
+// files.stat(path, links:) chooses what a final symbolic link means: by
+// default the link itself is described, `.Follow` describes its target (and
+// the target's hard-link count), `.Refuse` fails on a link. `files.is_file`
+// follows a final link, like `is_dir` and a shell's `test -f`.
+
+use core.files as files
+
+fn run() {
+    scratch :: files.temp_dir("stat-links")
+    target :: files.join(scratch.path, "target.txt")
+    files.write(target, "twelve bytes")
+    twin :: files.join(scratch.path, "twin.txt")
+    files.hard_link(target, twin)
+    link :: files.join(scratch.path, "link")
+    files.symlink(target, link)
+
+    own :: files.stat(link)
+    print("default: symlink={own.is_symlink} file={own.is_file}")
+    followed :: files.stat(link, links: .Follow)
+    print("follow: symlink={followed.is_symlink} file={followed.is_file} size={followed.size} links={followed.links}")
+    plain :: files.stat(target, links: .Refuse)
+    print("refuse on a file: size={plain.size} links={plain.links}")
+    if files.stat(link, links: .Refuse) == {
+        .Ok(_) -> print("refuse on a link: accepted")
+        .Err(error) -> print("refuse on a link: {error == .InvalidInput(_)}")
+    }
+    print("same file: {followed.id.inode == plain.id.inode}")
+    print("is_file follows the link: {files.is_file(link)} symlink={files.is_symlink(link)}")
+}

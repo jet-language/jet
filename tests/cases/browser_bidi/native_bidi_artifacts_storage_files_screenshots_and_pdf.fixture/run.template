@@ -1,0 +1,49 @@
+
+use core.web.browser as browser
+
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("ws://127.0.0.1:{free-port:artifacts}/session?token=ARTIFACT_SECRET", profile, timeout) ?? panic("connect")
+    session.allow_downloads("/tmp/jet-downloads") ?? panic("allow_downloads")
+    context :: session.context() ?? panic("context")
+    page :: context.page() ?? panic("page")
+    page.goto("https://example.test/app") ?? panic("goto")
+
+    page.set_cookie("session", "cookie-SECRET", "example.test") ?? panic("set_cookie")
+    cookie :: page.cookie("session") ?? panic("cookie")
+    print(cookie == "cookie-SECRET")
+    page.clear_cookies() ?? panic("clear_cookies")
+
+    page.storage_set("local", "token", "stored-SECRET") ?? panic("storage_set")
+    stored :: page.storage_get("local", "token") ?? panic("storage_get")
+    print(stored == "stored-SECRET")
+    page.storage_clear("local") ?? panic("storage_clear")
+    page.storage_set("session", "draft", "x") ?? panic("session set")
+    page.storage_clear("session") ?? panic("session clear")
+
+    upload :: page.get_by_css("input[type=file]")
+    upload.set_files("/tmp/upload-SECRET.txt") ?? panic("set_files")
+
+    png :: page.screenshot() ?? panic("screenshot")
+    print(png.len() > 0)
+    pdf :: page.pdf() ?? panic("pdf")
+    print(pdf.len() > 0)
+
+    session.subscribe("browsingContext.downloadWillBegin") ?? panic("subscribe")
+    event :: &session.next_event(timeout) ?? panic("next_event")
+    print(event.kind())
+    print(event.download_id())
+    hash :: event.suggested_filename_hash()
+    print(hash.len() == 16)
+    print(hash.contains("SECRET") == false)
+    print(event.url_hash().contains("SECRET") == false)
+
+    trace :: session.trace()
+    print(trace.redacted())
+    print(trace.summary().contains("SECRET") == false)
+    print("artifacts:ok")
+    page.close() ?? panic("page close")
+    context.close() ?? panic("context close")
+    session.close() ?? panic("session close")
+}

@@ -1,0 +1,2558 @@
+package {
+    name: "core.files"
+    version: "0.0.1"
+    edition: "2026"
+    description: "Filesystem handles, paths, and whole-file convenience."
+    license: "MIT"
+    outputs: {
+        files: .Library{ entry: files }
+    }
+}
+use core as core
+use core.text as unicode
+
+
+use core.sys as sys
+use core.process as process
+use __core_files_path_components as host_path
+use core.files.[__host_path_is_absolute, __host_path_join, __temp_path_sample, __temp_directory]
+// core.files — one filesystem surface.
+//
+// Whole-file helpers (`read`, `write`, `write_bytes`, `append_all`) and
+// streaming constructors (`open`, `create`, `append`) share this namespace.
+// `append_all` is the whole-file twin so it does not collide with a handle
+// `.append` method. Each filesystem call names the leaf it needs: reads and
+// queries are `-[FS.Read]>`, changes are `-[FS.Write]>`, and a call that does
+// both keeps `-[FS]>`; current-directory and environment helpers additionally
+// carry `-[Env]>`. Missing files,
+// permission denials, and type mismatches are `IOError`; nothing here panics
+// on a bad path.
+//
+// `exists` / `is_dir` return booleans rather than errors: a path that cannot
+// be observed is treated as absent. `walk` / `walk_files` / `walk_parallel`
+// take an optional ignore-file name (`.gitignore` style).
+//
+// The OS door is the typed `core.files` provider: open/read/write/stat,
+// directory, link, temp, lock, and metadata calls route through it. Walk,
+// glob, copy composition, and path math remain Jet.
+// Open readers, writers, temporary files and directories, and locks own their
+// provider resources until their lexical scope exits or they are consumed by
+// `close(^handle)`. A writer's explicit `flush()` remains fallible.
+// Directory copies preserve that boundary: only regular files are copied;
+// symlink and other special entries are never dereferenced.
+
+
+// The checked `Path{…}` literal: each hole's display text is one percent-
+// encoded path component, so its slashes and dot segments never become path
+// grammar.
+fn __path_literal(literals: [String], holes: [String]) -> Path Never! {
+    if literals.len() != holes.len() + 1 -> panic("typed Path literal and hole counts do not match")
+    text := literals[0].copy()
+    loop index in 0..<holes.len() -> text = "{text}{path_component_encode(holes[index])}{literals[index + 1]}"
+    Path.from(text)
+}
+
+fn path_component_encode(component: String) -> String Never! {
+    hex :: "0123456789ABCDEF".bytes()
+    dots :: component == "." || component == ".."
+    out := [U8]{}
+    loop byte in component.bytes() {
+        keep :: !dots && ((byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122})) || byte == (U8{45}) || byte == (U8{46}) || byte == (U8{95}) || byte == (U8{126}))
+        if keep {
+            &out.push(byte)
+        } else {
+            &out.push(U8{37})
+            &out.push(hex[Int.from_u8(byte) >> 4])
+            &out.push(hex[Int.from_u8(byte).bit_and(15)])
+        }
+    }
+    String.from_bytes(out) ?? panic("percent-encoded path text is ASCII")
+}
+
+struct DirEntry {
+    name: String
+    path: String
+    is_dir: Bool
+}
+
+/// One entry of `Directory.list`. `raw_name` is the exact
+/// name the system stores; `name_is_unicode` is false when those bytes are not
+/// valid UTF-8, and then `name` and `path` show each non-ASCII byte as U+FFFD,
+/// so only `raw_name` identifies the entry exactly.
+struct DirectoryEntry {
+    name: String
+    path: String
+    is_dir: Bool
+    raw_name: [U8]
+    name_is_unicode: Bool
+}
+
+/// The shown form of a name that is not valid UTF-8: ASCII bytes stay, every
+/// other byte becomes U+FFFD.
+fn replacement_name(raw: [U8]) -> String Never! {
+    shown := [U8]{}
+    loop byte in raw {
+        if byte < (U8{128}) {
+            &shown.push(byte)
+        } else {
+            &shown.push(U8{239})
+            &shown.push(U8{191})
+            &shown.push(U8{189})
+        }
+    }
+    String.from_bytes(shown) ?? ""
+}
+
+fn unicode_basename(raw: [U8]) -> String? Never! {
+    Val(String.from_bytes(raw) ?? return None)
+}
+
+fn raw_name_order(left: [U8], right: [U8]) -> Ordering Never! {
+    i := 0
+    loop i < left.len() && i < right.len() {
+        if left[i] < right[i] -> return .Less
+        if left[i] > right[i] -> return .Greater
+        i += 1
+    }
+    left.len() <=> right.len()
+}
+
+/// Whether `create` may replace an existing file.
+/// `Refuse` creates exclusively and reports `IOError.AlreadyExists`.
+enum CreateIfExists {
+    Replace
+    Refuse
+}
+
+/// Whether a call follows a final symbolic link. `Refuse`
+/// reports `IOError.InvalidInput` when the path ends in a link.
+enum LinkPolicy {
+    Follow
+    Refuse
+}
+
+/// What `rename` does when the target name exists.
+/// `Refuse` reports `IOError.AlreadyExists`; `Swap` exchanges both names in
+/// one step and reports `IOError.Unsupported` where the system cannot.
+enum RenameIfExists {
+    Replace
+    Refuse
+    Swap
+}
+
+/// A file's identity, its device plus its file number.
+/// Two paths name the same file exactly when their ids are equal.
+struct FileID {
+    device: Int
+    inode: Int
+}
+
+/// What `stat` reports about one directory entry. A final link is described
+/// itself, never its target. `owner` is None where the system has no numeric
+/// owner (Windows), and `created` is None where the file system keeps no
+/// birth time. Times are wall-clock `DateTime` values with nanosecond
+/// precision.
+struct Stat {
+    size: Int
+    kind: String
+    mode: Int
+    readonly: Bool
+    is_file: Bool
+    is_dir: Bool
+    is_symlink: Bool
+    id: FileID
+    links: Int
+    owner: Int?
+    /// Unix reports allocated 512-byte blocks multiplied by 512 with signed saturation; Windows and other non-Unix platforms report logical file length in bytes, not allocated space.
+    size_on_disk: Int
+    modified: DateTime
+    changed: DateTime
+    created: DateTime?
+}
+
+struct WalkEntry {
+    path: String
+    relative: String
+    is_dir: Bool
+    depth: Int
+}
+
+struct FileScope {
+    authority: Authority
+
+    /// Read only through the authority's descriptor-relative no-follow roots.
+    fn read(self, path: String) -[FS.Read]> String IOError! {
+        scoped_read(self, path)
+    }
+}
+
+struct MappedFile {
+    path: String
+    bytes: [U8]
+}
+
+struct TempDir {
+    path: String
+    is_dir: Bool
+}
+
+struct TempFile {
+    priv path: String
+}
+
+struct FileLock {
+    priv path: String
+}
+
+
+// The fd is guarded before it becomes the native FileLock carrier. Failed
+// opens, waits and identity checks therefore close without unlinking a name.
+// Close reads the consumed receiver in place. Rebinding it (`held := ^self`)
+// would make a second owner whose scope-end Close re-enters this one.
+struct __LockFd { fd: Int }
+impl __LockFd.Close {
+    fn close(^self) {
+        _ :: core.files.__lock_close(self.fd)
+    }
+}
+
+// The FileLock becomes the descriptor's one owner: the caller's guard is
+// disarmed in place (-1 closes nothing), so its scope-end Close never closes
+// the descriptor the FileLock now holds.
+fn lock_owner(path: ^String, fd: &__LockFd) -> FileLock Never! {
+    value :: fd.fd
+    fd.fd = -1
+    core.files.__lock_owner(^path, value)
+}
+
+// Private plain records preserve raw host facts without tuple/codec transports.
+struct __LockCall { value: Int, errno: Int, platform: Int }
+struct __LockIdentity {
+    device: Int, low: Int, high: Int,
+    regular: Bool, reparse: Bool, errno: Int, platform: Int
+}
+struct __LockWait {
+    acquired: Bool, timed_out: Bool, errno: Int,
+    platform: Int, deadline_ns: Int
+}
+
+/// An exclusive advisory lock on a held directory. Closing this owner releases
+/// the OS lock without removing any filesystem name.
+struct AdvisoryLock {
+    handle: Int
+}
+
+impl AdvisoryLock.Close {
+    fn close(^self) {
+        core.files.__close_directory(self.handle)
+    }
+}
+
+/// An open file for reading. `read_line`, `lines`, and `read(max)` advance
+/// one shared position; `read` returns up to `max` bytes and an empty list
+/// at end of file.
+struct FileReader {
+    path: String
+
+    /// What the open file is now (fstat). Comparing
+    /// `id` with a later `files.stat(path).id` shows whether the path was
+    /// replaced after the open.
+    fn stat(self) -[FS.Read]> Stat IOError! {
+        stat_from_row(core.files.__reader_stat(self))
+    }
+
+    fn read_line(&self) -[FS.Read]> String? IOError! {
+        __reader_read_line(&self)
+    }
+}
+
+/// An open file for writing. `write_line` and `write_all` are buffered;
+/// `flush` hands the bytes to the system and `fsync` also makes them durable.
+struct FileWriter {
+    path: String
+
+    /// What the open file is now (fstat). Bytes still
+    /// buffered are not counted until `flush` or `fsync`.
+    fn stat(self) -[FS.Read]> Stat IOError! {
+        stat_from_row(core.files.__writer_stat(self))
+    }
+
+    /// Set the open file's permission bits (0o0..0o7777) without naming its
+    /// path again. Windows keeps only the read-only flag.
+    fn set_mode(self, mode: Int) IOError! -[FS.Write]> {
+        core.files.__writer_set_mode(self, mode)
+    }
+}
+
+
+fn scope(authority: Authority) -[FS]> FileScope Never! { {authority: authority} }
+
+
+/// Open `path` for reading. `links: .Refuse` refuses a
+/// path that ends in a symbolic link. Every handle is close-on-exec.
+fn open(path: String | Path, links: LinkPolicy{.Follow}) -[FS.Read]> FileReader IOError! {
+    core.files.__open_reader(-1, path_text(path), link_code(links))
+}
+
+
+/// Open `path` for writing from empty. `if_exists:
+/// .Refuse` creates exclusively; `mode` sets a new file's permission bits
+/// before the process umask and leaves an existing file's bits alone.
+fn create(path: String | Path, if_exists: CreateIfExists{.Replace}, mode: Int?{None}, links: LinkPolicy{.Follow}) -[FS.Write]> FileWriter IOError! {
+    core.files.__open_writer(-1, path_text(path), false, create_code(if_exists), mode ?? -1, link_code(links))
+}
+
+
+/// Open `path` for appending, creating it when missing.
+fn append(path: String | Path, mode: Int?{None}, links: LinkPolicy{.Follow}) -[FS.Write]> FileWriter IOError! {
+    core.files.__open_writer(-1, path_text(path), true, 0, mode ?? -1, link_code(links))
+}
+
+
+/// Path parameters take text or a `Path`, the same shape as every other
+/// `core.files` path operation.
+fn path_text(path: String | Path) -> String Never! {
+    if path == {
+        .String(text) -> text.copy()
+        .Path(held) -> held.to_string()
+    }
+}
+
+
+fn link_code(links: LinkPolicy) -> Int Never! {
+    if links == .Refuse -> return 1
+    0
+}
+
+
+fn create_code(if_exists: CreateIfExists) -> Int Never! {
+    if if_exists == .Refuse -> return 1
+    0
+}
+
+
+fn rename_code(if_exists: RenameIfExists) -> Int Never! {
+    if if_exists == .Refuse -> return 1
+    if if_exists == .Swap -> return 2
+    0
+}
+
+
+/// A directory held open. It keeps working after its path
+/// is renamed or removed. Every method takes a relative name made of plain
+/// parts separated by `/`; each part is opened without following a link, and
+/// `..`, `.`, empty parts, and absolute names are refused with
+/// `IOError.InvalidInput`. The handle is close-on-exec and closes when it
+/// leaves scope or at `close(^directory)`.
+struct Directory {
+    path: String
+    handle: Int
+
+    /// Open the regular file `name` for reading.
+    fn open(self, name: String) -[FS.Read]> FileReader IOError! {
+        held_name(self.path, name, false)
+        core.files.__open_reader(self.handle, name, 1)
+    }
+
+    /// Create the file `name`, with the same labels as `files.create`.
+    fn create(self, name: String, if_exists: CreateIfExists{.Replace}, mode: Int?{None}) -[FS.Write]> FileWriter IOError! {
+        held_name(self.path, name, true)
+        core.files.__open_writer(self.handle, name, false, create_code(if_exists), mode ?? -1, 1)
+    }
+
+    /// Hold the directory `name` inside this one.
+    fn open_directory(self, name: String) -[FS.Read]> Directory IOError! {
+        held_name(self.path, name, false)
+        key :: core.files.__open_directory(self.handle, name)
+        Ok(Directory{path: join(self.path, name), handle: key})
+    }
+
+    /// Create the directory `name` and hold it. An existing name reports
+    /// `IOError.AlreadyExists`.
+    fn create_directory(self, name: String, mode: Int?{None}) -[FS.Read, FS.Write]> Directory IOError! {
+        held_name(self.path, name, true)
+        core.files.__create_directory(self.handle, name, mode ?? -1)
+        key :: core.files.__open_directory(self.handle, name)
+        Ok(Directory{path: join(self.path, name), handle: key})
+    }
+
+    /// The entries in raw-name byte order. A link to a directory has
+    /// `is_dir: false`. `raw_name` holds the entry's exact name bytes and
+    /// `name_is_unicode` says whether they are valid UTF-8; when they are not,
+    /// `name` (and `path`) show each non-ASCII byte as U+FFFD.
+    fn list(self) -[FS.Read]> [DirectoryEntry] IOError! {
+        rows :: core.files.__list_directory(self.handle)
+        out := [DirectoryEntry]{}
+        loop row in rows {
+            raw := [U8]{}
+            i := 1
+            loop i < row.len() {
+                &raw.push(row[i])
+                i += 1
+            }
+            text :: unicode_basename(raw)
+            unicode :: text != None
+            name :: text ?? replacement_name(raw)
+            &out.push(DirectoryEntry{
+                name: name,
+                path: join(self.path, name),
+                is_dir: row[0] == (U8{1}),
+                raw_name: raw,
+                name_is_unicode: unicode,
+            })
+        }
+        &out.sort_by((left: DirectoryEntry, right: DirectoryEntry) -> raw_name_order(left.raw_name, right.raw_name))
+        Ok(out)
+    }
+
+    /// Describe the held directory itself.
+    fn stat(self) -[FS.Read]> Stat IOError! {
+        row :: core.files.__stat_at(self.handle, "", false)
+        Ok(stat_from_row(row))
+    }
+
+    /// Describe the entry `name` without following a final link.
+    fn entry_stat(self, name: String) -[FS.Read]> Stat IOError! {
+        held_name(self.path, name, false)
+        row :: core.files.__stat_at(self.handle, name, false)
+        Ok(stat_from_row(row))
+    }
+
+    /// The text stored in the link `name`, exactly as stored.
+    fn read_link(self, name: String) -[FS.Read]> String IOError! {
+        held_name(self.path, name, false)
+        core.files.__read_link_at(self.handle, name)
+    }
+
+    /// Rename `from` to `to`, both inside this directory unless `into` names
+    /// the directory that receives `to`. `if_exists` follows `files.rename`.
+    fn rename(self, from: String, to: String, into: Directory?{None}, if_exists: RenameIfExists{.Replace}) IOError! -[FS.Write]> {
+        held_name(self.path, from, true)
+        target := self.handle
+        target_path := self.path
+        if into == {
+            Val(other) -> {
+                target = other.handle
+                target_path = other.path
+            }
+            else -> {}
+        }
+        held_name(target_path, to, true)
+        core.files.__rename_at(self.handle, from, target, to, rename_code(if_exists))
+    }
+
+    /// Remove the non-directory entry `name`; a link is removed, not followed.
+    fn remove(self, name: String) IOError! -[FS.Write]> {
+        held_name(self.path, name, true)
+        core.files.__remove_at(self.handle, name, false)
+    }
+
+    /// Remove the empty directory `name`.
+    fn remove_directory(self, name: String) IOError! -[FS.Write]> {
+        held_name(self.path, name, true)
+        core.files.__remove_at(self.handle, name, true)
+    }
+
+    /// Flush the held directory so earlier renames inside it are durable.
+    fn fsync(self) IOError! -[FS.Write]> { core.files.__fsync_directory(self.handle) }
+
+    /// Acquire an exclusive, nonblocking flock on this directory's identity.
+    /// An independent descriptor owns the lock until the returned owner closes,
+    /// even if the directory is renamed or this Directory is closed.
+    fn lock(self) -[FS.Read, FS.Write]> AdvisoryLock IOError! {
+        key :: core.files.__open_directory(self.handle, ".")
+        if core.files.__flock(key, 6) == {
+            .Ok(_) -> Ok(AdvisoryLock{handle: key})
+            .Err(error) -> {
+                core.files.__close_directory(key)
+                Err(error)
+            }
+        }
+    }
+
+    /// Pass this directory to the process `spec` starts, open at descriptor
+    /// `at` (3 or more): the child inherits a duplicate, so renaming or
+    /// closing the directory here afterwards does not change what it sees.
+    /// A slot `spec` already passes is `IOError.InvalidInput`.
+    fn pass_to(self, spec: ProcessSpec, at: Int) -[FS, Exec, Env]> ProcessSpec IOError! {
+        process_directory(spec, self, at, false)
+    }
+}
+
+// Compiler-private store bridge, not a public filesystem API. The store
+// validates the plain destination name and interprets errno (including EXDEV).
+#Unsafe("the compiler store passes a live FileReader and Directory, with one NUL-free plain destination name; no source pathname is reopened") fn compiler_link_held(source: FileReader, into: Directory, name: String) -[FS.Write]> (available: Bool, held: Bool, value: Int, errno: Int) Never! {
+    core.files.jet_files_link_reader_at_raw(source, into.handle, name)
+}
+
+// Compiler-private process bridge. The borrowed Directory stays live through
+// the raw fd duplication; only the duplicate enters the ProcessSpec carrier.
+#Unsafe("compiler store owns the explicit child descriptor slot and retains the held Directory until the process leaf duplicates its descriptor") fn compiler_with_process_directory(spec: ProcessSpec, directory: Directory, child_fd: Int, as_cwd: Bool) -[FS, Exec, Env]> ProcessSpec IOError! {
+    process_directory(spec, directory, child_fd, as_cwd)
+}
+
+// Duplicate the held directory into `spec` at `child_fd`, optionally as the
+// child's working directory. The Directory is borrowed through the
+// duplication, so a later rename or close here never changes the child's view.
+fn process_directory(spec: ProcessSpec, directory: Directory, child_fd: Int, as_cwd: Bool) -[FS, Exec, Env]> ProcessSpec IOError! {
+    context :: IOContext{operation: .Resolve, resource: Val(directory.path), os_code: None, cause: None}
+    if child_fd < 3 || child_fd > 2147483646 {
+        return Err(IOError.InvalidInput(IOContext{operation: .Resolve, resource: Val(directory.path), os_code: None,
+            cause: Val("the inherited directory descriptor must be between 3 and 2147483646")}))
+    }
+    held :: core.files.__directory_fd(directory.handle)
+    if !held.available -> return Err(IOError.Unsupported(context))
+    if !held.held -> return Err(IOError.Closed(context))
+    row :: core.process.__with_directory_raw(spec, held.fd, child_fd, as_cwd)
+    if !row.available -> return Err(IOError.Unsupported(context))
+    if row.errno != 0 {
+        return Err(IOError.Other(IOContext{operation: .Resolve, resource: Val(directory.path),
+            os_code: Val(row.errno), cause: Val(core.sys.__errno_text(row.errno))}))
+    }
+    if row.assigned_fd != child_fd {
+        return Err(IOError.InvalidInput(IOContext{operation: .Resolve, resource: Val(directory.path), os_code: None,
+            cause: Val("the requested inherited directory descriptor slot is already occupied")}))
+    }
+    Ok(row.spec)
+}
+
+#Test("compiler process directories retain authority after rename and close") {
+    if sys.name() == "linux" {
+        root :: mktemp("process-held-directory-test")
+        destination_path :: join(root, "destination")
+        source_path :: join(root, "source")
+        create_dir_all(destination_path) ?? panic("destination")
+        create_dir_all(source_path) ?? panic("source")
+        write(join(destination_path, "marker.txt"), "held destination\n") ?? panic("marker")
+        write(join(source_path, "source.txt"), "held source\n") ?? panic("source marker")
+        destination :: open_directory(destination_path) ?? panic("hold destination")
+        source :: open_directory(source_path) ?? panic("hold source")
+        initial :: process.cmd(["sh", "-c", "cat marker.txt; cat /proc/self/fd/199/source.txt"])
+            .cwd("/missing-lexical-process-directory")
+        in_destination :: compiler_with_process_directory(initial, destination, 198, true) ?? panic("attach destination")
+        with_source :: compiler_with_process_directory(in_destination, source, 199, false) ?? panic("attach source")
+        assert(compiler_with_process_directory(process.cmd(["sh", "-c", "exit 0"]), destination, 198, true) == .Err(.InvalidInput(_)))
+        close(^destination)
+        close(^source)
+        rename(destination_path, join(root, "moved-destination")) ?? panic("rename destination")
+        rename(source_path, join(root, "moved-source")) ?? panic("rename source")
+        create_dir(destination_path) ?? panic("replacement destination")
+        create_dir(source_path) ?? panic("replacement source")
+        write(join(destination_path, "marker.txt"), "wrong destination\n") ?? panic("replacement marker")
+        write(join(source_path, "source.txt"), "wrong source\n") ?? panic("replacement source marker")
+        receipt :: with_source.run() ?? panic("run held directories")
+        assert(receipt.success)
+        assert(receipt.output == "held destination\nheld source\n")
+        remove_all(root) ?? panic("cleanup")
+    }
+}
+
+
+impl Directory.Close {
+    fn close(^self) {
+        core.files.__close_directory(self.handle)
+    }
+}
+
+
+/// Hold the directory at `path`. The last part must be a
+/// real directory, not a link.
+fn open_directory(path: String) -[FS.Read]> Directory IOError! {
+    key :: core.files.__open_directory(-1, path)
+    Ok(Directory{path: path.copy(), handle: key})
+}
+
+
+fn held_name_error(shown: String, write: Bool, why: String) -> IOError Never! {
+    if write {
+        return IOError.InvalidInput(IOContext{
+            operation: .Write,
+            resource: Val(shown),
+            os_code: None,
+            cause: Val(why),
+        })
+    }
+    IOError.InvalidInput(IOContext{
+        operation: .Read,
+        resource: Val(shown),
+        os_code: None,
+        cause: Val(why),
+    })
+}
+
+
+// A held-directory name is plain parts separated by `/`.
+fn held_name(base: String, name: String, write: Bool) IOError! {
+    shown :: join(base.copy(), name.copy())
+    raw :: (name.copy()).bytes()
+    if raw.len() == 0 -> return Err(held_name_error(shown, write, "the name is empty; pass a relative name such as `pkg/data`"))
+    if is_abs_impl(name.copy()) -> return Err(held_name_error(shown, write, "the name is absolute; a held directory takes a relative name"))
+    start := 0
+    i := 0
+    loop i <= raw.len() {
+        if i == raw.len() || raw[i] == (U8{47}) || raw[i] == (U8{92}) {
+            part :: slice_path(name.copy(), start, i)
+            if part == "" -> return Err(held_name_error(shown, write, "the name has an empty part; remove the doubled or trailing `/`"))
+            if part == "." || part == ".." -> return Err(held_name_error(shown, write, "the part `{part}` is refused; a held directory takes only plain names, so open the parent directory instead"))
+            start = i + 1
+        }
+        i = i + 1
+    }
+}
+
+
+fn stat_kind(code: Int) -> String Never! {
+    if code == 0 -> return "file"
+    if code == 1 -> return "dir"
+    if code == 2 -> return "symlink"
+    "other"
+}
+
+
+// The provider row order: kind, size, mode, readonly, device, inode, links,
+// owner (-1: none), size_on_disk, modified_ns, changed_ns, created present,
+// created_ns.
+fn stat_from_row(row: [Int]) -> Stat Never! {
+    owner := Int?{None}
+    if row[7] >= 0 -> owner = Val(row[7])
+    created := DateTime?{None}
+    if row[11] == 1 -> created = Val(core.time.from_unix_nanoseconds(row[12]))
+    Stat{
+        size: row[1],
+        kind: stat_kind(row[0]),
+        mode: row[2],
+        readonly: row[3] == 1,
+        is_file: row[0] == 0,
+        is_dir: row[0] == 1,
+        is_symlink: row[0] == 2,
+        id: FileID{device: row[4], inode: row[5]},
+        links: row[6],
+        owner: owner,
+        size_on_disk: row[8],
+        modified: core.time.from_unix_nanoseconds(row[9]),
+        changed: core.time.from_unix_nanoseconds(row[10]),
+        created: created,
+    }
+}
+
+
+/// The extended-attribute names on `path` itself, in
+/// sorted order. A final link is never followed. Windows and file systems
+/// without attributes report none.
+fn extended_attribute_names(path: String) -[FS.Read]> [String] IOError! { core.files.__xattr_names(path) }
+
+
+/// One extended-attribute value, or None when absent.
+fn extended_attribute(path: String, name: String) -[FS.Read]> [U8]? IOError! {
+    core.files.__xattr_get(path, name)
+}
+
+
+/// Write one extended-attribute value on `path` itself.
+/// Windows and file systems without attributes report `IOError.Unsupported`.
+fn set_extended_attribute(path: String, name: String, value: [U8]) IOError! -[FS.Write]> {
+    core.files.__xattr_set(path, name, value)
+}
+
+
+
+fn io_err(operation: String, path: String, message: String) -> IOError Never! {
+    if operation == "write" || operation == "mkdir" || operation == "truncate" {
+        return IOError.InvalidInput(IOContext{
+            operation: .Write,
+            resource: Val(path),
+            os_code: None,
+            cause: Val(message),
+        })
+    }
+    if operation == "resolve" || operation == "home" || operation == "samefile" {
+        return IOError.InvalidInput(IOContext{
+            operation: .Resolve,
+            resource: Val(path),
+            os_code: None,
+            cause: Val(message),
+        })
+    }
+    IOError.InvalidInput(IOContext{
+        operation: .Read,
+        resource: Val(path),
+        os_code: None,
+        cause: Val(message),
+    })
+}
+
+
+// Public checkpoints precede OS work exactly once, not once per raw leaf.
+fn file_fault(operation_path: String, operation: IOOperation, path: String) IOError! {
+    if core.testing.__fault_should_fail(operation_path) {
+        return Err(IOError.Other(IOContext{
+            operation: operation.copy(), resource: Val(path), os_code: None,
+            cause: Val("fault injected: {operation_path}"),
+        }))
+    }
+    Ok()
+}
+
+// Boolean metadata probes answer `false` for any failed probe, so an injected
+// FS.Read fault (the same checkpoint `stat` takes) answers `false` too.
+fn read_probe_fault() -> Bool Never! { core.testing.__fault_should_fail("FS.Read") }
+
+fn file_writer_refusal(path: String) IOError! -[FS.Write]> {
+    if core.files.__writer_refusal(path) == {
+        .None -> {}
+        .Val(error) -> return Err(error)
+    }
+    Ok()
+}
+
+fn read_bytes(path: String) -[FS.Read]> [U8] IOError! {
+    file_fault("FS.Read", .Read, path)
+    core.files.__read_bytes_os(path)
+}
+
+
+fn read(path: String | Path) -[FS.Read]> String IOError! {
+    source :: path_text(path)
+    bytes :: read_bytes(source)
+    Ok(String.from_bytes(bytes) ?? return Err(io_err("read", source, "stream did not contain valid UTF-8")))
+}
+
+
+fn map(path: String | Path) -[FS.Read]> MappedFile IOError! {
+    text :: path_text(path)
+    files8_preflight("FS.Read", .Read, text)
+    core.files.__map_raw(text)
+}
+
+
+fn write(path: String | Path, text: String) IOError! -[FS.Write]> {
+    target :: path_text(path)
+    file_fault("FS.Write", .Write, target)
+    core.files.__write_bytes_os(target, text.bytes())
+}
+
+
+fn write_bytes(path: String, bytes: [U8]) IOError! -[FS.Write]> {
+    file_writer_refusal(path)
+    file_fault("FS.Write", .Write, path)
+    core.files.__write_bytes_os(path, bytes)
+}
+
+
+fn append_all(path: String | Path, text: String) IOError! -[FS.Write]> {
+    target :: path_text(path)
+    file_fault("FS.Write", .Write, target)
+    core.files.__append_bytes_os(target, text.bytes())
+}
+
+
+fn write_atomic(path: String, bytes: [U8]) IOError! -[FS.Write]> {
+    file_writer_refusal(path)
+    file_fault("FS.Write", .Write, path)
+    platform :: file_path_platform()
+    target :: host_path.from_text(path, platform)
+    parent_span :: host_path.parent_span(target)
+    // A bare relative name ("data.bin") has an empty parent: the current directory.
+    parent :: if parent_span == {
+        .None -> host_path.from_text(".", platform)
+        .Val(extent) -> if extent.end == extent.start -> host_path.from_text(".", platform) else -> host_path.owned_span(target, extent)
+    }
+    parent_text :: String.from_bytes(parent.encoded) ?? panic("UTF-8 path span")
+    pid :: core.files.__atomic_pid()
+    loop sequence in 0..<128 {
+        candidate := parent.copy()
+        host_path.push(&candidate, host_path.from_text(".jet_tmp_{pid}_{sequence}", platform))
+        candidate_text :: String.from_bytes(candidate.encoded) ?? panic("UTF-8 temporary path")
+        if core.files.__atomic_reserve(path, candidate_text) == {
+            .Err(error) -> {
+                if error == {
+                    .AlreadyExists(_) -> {}
+                    else -> { return Err(error) }
+                }
+            }
+            .Ok(handle) -> {
+                if core.files.__atomic_finish(handle, bytes, path, candidate_text) == {
+                    .Err(error) -> {
+                        _ :: core.files.__atomic_remove(candidate_text)
+                        core.files.__atomic_close(handle)
+                        return Err(error)
+                    }
+                    .Ok(_) -> {}
+                }
+                core.files.__atomic_close(handle)
+                if core.files.__atomic_rename(candidate_text, path) == {
+                    .Err(error) -> {
+                        _ :: core.files.__atomic_remove(candidate_text)
+                        return Err(error)
+                    }
+                    .Ok(_) -> {}
+                }
+                return core.files.__atomic_sync_parent(parent_text, path)
+            }
+        }
+    }
+    Err(IOError.Other(IOContext{
+        operation: .Write, resource: Val(path), os_code: None,
+        cause: Val("could not reserve an atomic-write temporary file"),
+    }))
+}
+
+
+fn read_at(path: String, offset: Int, count: Int) -[FS.Read]> [U8] IOError! {
+    file_fault("FS.Read", .Read, path)
+    core.files.__read_at_os(path, if offset < 0 -> 0 else -> offset, if count < 0 -> 0 else -> count)
+}
+
+
+fn write_at(path: String, offset: Int, bytes: [U8]) IOError! -[FS.Write]> {
+    file_writer_refusal(path)
+    file_fault("FS.Write", .Write, path)
+    core.files.__write_at_os(path, if offset < 0 -> 0 else -> offset, bytes)
+}
+
+
+fn fsync(path: String | Path) IOError! -[FS.Write]> {
+    text :: path_text(path)
+    files8_preflight("FS.Write", .Flush, text)
+    core.files.__fsync_raw(text)
+}
+
+
+fn exists_impl(path: String) -> Bool Never! {
+    (core.files.__stat_mode_raw(path) ?? -1) >= 0
+}
+
+
+fn exists(path: String | Path) -[FS]> Bool Never! {
+    if read_probe_fault() -> return false
+    exists_impl(path_text(path))
+}
+
+
+fn is_dir(path: String | Path) -[FS.Read]> Bool Never! {
+    if read_probe_fault() -> return false
+    text :: path_text(path)
+    core.files.__metadata_directory(text) ?? false
+}
+
+
+/// Describe `path`. By default a final symbolic link is described itself;
+/// `links: .Follow` describes what it points to, and `links: .Refuse`
+/// reports `IOError.InvalidInput` when the path ends in a link.
+fn stat(path: String | Path, links: LinkPolicy?{None}) -[FS.Read]> Stat IOError! {
+    text :: path_text(path)
+    file_fault("FS.Read", .Read, text)
+    follow :: links == .Val(.Follow)
+    info :: stat_from_row(core.files.__stat_at(-1, text, follow))
+    if links == .Val(.Refuse) && info.is_symlink {
+        return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(text), os_code: None, cause: Val("path ends in a symbolic link")}))
+    }
+    Ok(info)
+}
+
+
+/// The same description as `stat`; neither follows a final link.
+fn lstat(path: String | Path) -[FS.Read]> Stat IOError! { stat(path) }
+
+
+fn set_mode(path: String | Path, mode: Int) IOError! -[FS.Write]> {
+    text :: path_text(path)
+    files8_preflight("FS.Write", .Write, text)
+    if core.files.__os_family() == "unix" {
+        if !files8_u32(mode) -> return Err(files8_other(.Write, Val(text), "file mode must be between 0 and u32::MAX"))
+    } else if mode != 0 && mode != 1 {
+        return Err(files8_other(.Write, Val(text), "file mode must contain only the readonly bit on this platform"))
+    }
+    core.files.__set_mode_raw(text, mode)
+}
+
+fn chown(path: String | Path, owner: Int, group: Int) IOError! -[FS.Write]> {
+    text :: path_text(path)
+    if core.files.__os_family() != "unix" -> return Err(files8_other(.Write, None, "chown is unavailable on this platform"))
+    if owner != -1 && !files8_u32(owner) -> return Err(files8_other(.Write, Val(text), "owner must be -1 or a non-negative u32"))
+    if group != -1 && !files8_u32(group) -> return Err(files8_other(.Write, Val(text), "group must be -1 or a non-negative u32"))
+    loop byte in text.bytes() {
+        if byte == (U8{0}) -> return Err(files8_other(.Write, Val(text), "path contains an interior NUL"))
+    }
+    core.files.__chown_raw(text, owner, group)
+}
+
+fn is_fifo(path: String | Path) -[FS.Read]> Bool IOError! {
+    text :: path_text(path)
+    files8_preflight("FS.Read", .Read, text)
+    mode :: core.files.__stat_mode_raw(text)
+    Ok((mode.bit_and(61440)) == 4096)
+}
+
+fn files8_u32(value: Int) -> Bool Never! { value >= 0 && value <= 4294967295 }
+
+fn files8_other(operation: IOOperation, resource: String?, cause: String) -> IOError Never! {
+    IOError.Other(IOContext{operation: operation, resource: resource, os_code: None, cause: Val(cause)})
+}
+
+fn files8_preflight(probe: String, operation: IOOperation, path: String) IOError! {
+    if core.files.__fault_should_fail(probe) -> return Err(files8_other(operation, Val(path), "fault injected: {probe}"))
+    Ok(())
+}
+
+
+fn anchor_for_parts(drive: String, absolute: Bool) -> String Never! {
+    if drive.bytes().len() > 0 -> return drive.copy()
+    if absolute -> return "/"
+    ""
+}
+
+
+fn join_parts(parts: [String]) -> String Never! {
+    s := ""
+    first := true
+    loop p in parts {
+        if p.bytes().len() == 0 -> next
+        if first {
+            s = p
+            first = false
+        } else { s = "{s}/{p}" }
+    }
+    s
+}
+
+
+fn compose(anchor: String, parts: [String]) -> String Never! {
+    s :: join_parts(parts)
+    if anchor == "/" {
+        if s.bytes().len() == 0 -> return "/"
+        return "/{s}"
+    }
+    if anchor.bytes().len() > 0 {
+        if s.bytes().len() == 0 -> return "{anchor}/"
+        return "{anchor}/{s}"
+    }
+    if s.bytes().len() == 0 -> return "."
+    s
+}
+
+
+fn is_letter(b: U8) -> Bool Never! {
+    n :: b
+    (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
+}
+
+
+fn is_abs_impl(path: String) -> Bool Never! {
+    raw :: path.bytes()
+    if raw.len() == 0 -> return false
+    if raw[0] == (U8{47}) || raw[0] == (U8{92}) -> return true
+    raw.len() >= 2 && is_letter(raw[0]) && raw[1] == (U8{58})
+}
+
+fn is_abs(path: String) -> Bool Never! { is_abs_impl(path) }
+
+
+fn is_separator(b: U8) -> Bool Never! { b == (U8{47}) || b == (U8{92}) }
+
+
+fn slice(raw: [U8], start: Int, end: Int) -> String Never! {
+    out := [U8]{}
+    i := start
+    loop {
+        if i >= end || i < 0 || i >= raw.len() -> return String.from_bytes(out) ?? ""
+        &out.push(raw[i])
+        i = i + 1
+    }
+}
+
+
+fn split_slash_impl(path: String) -> [String] Never! {
+    raw :: path.bytes()
+    out := [String]{}
+    start := 0
+    i := 0
+    loop i < raw.len() {
+        n :: raw[i]
+        if n == 47 || n == 92 {
+            &out.push(slice(raw, start, i))
+            start = i + 1
+        }
+        i = i + 1
+    }
+    &out.push(slice(raw, start, raw.len()))
+    out
+}
+
+fn split_slash(path: String) -> [String] Never! { split_slash_impl(path) }
+
+
+fn collapse_impl(path: String) -> String Never! {
+    raw :: path.bytes()
+    if raw.len() == 0 -> return "."
+    absolute := is_abs_impl(path)
+    drive := ""
+    start := 0
+    if raw.len() >= 2 && is_letter(raw[0]) && raw[1] == (U8{58}) {
+        drive = slice(raw, 0, 2)
+        start = 2
+        if start < raw.len() && is_separator(raw[start]) -> start = start + 1
+    } else if absolute {
+        start = 1
+        loop start < raw.len() && is_separator(raw[start]) -> start = start + 1
+    }
+    tail :: slice(raw, start, raw.len())
+    out := [String]{}
+    loop p in split_slash_impl(tail) {
+        if p == "" || p == "." -> next
+        if p == ".." {
+            if out.len() > 0 {
+                prev :: out[out.len() - 1]
+                if prev != ".." {
+                    _ :: &out.pop()
+                    next
+                }
+            }
+            if !absolute -> &out.push("..")
+            next
+        }
+        &out.push(p)
+    }
+    compose(anchor_for_parts(drive, absolute), out)
+}
+
+fn collapse(path: String) -> String Never! { collapse_impl(path) }
+
+
+fn strip_leading_separators(path: String) -> String Never! {
+    raw :: path.bytes()
+    i := 0
+    loop i < raw.len() && is_separator(raw[i]) -> i = i + 1
+    slice(raw, i, raw.len())
+}
+
+
+fn join_impl(a: String, b: String) -> String Never! {
+    if b.bytes().len() == 0 -> return a.copy()
+    if is_abs_impl(b) -> return b.copy()
+    if a.bytes().len() == 0 -> return b.copy()
+    clean_b :: strip_leading_separators(b)
+    if clean_b.bytes().len() == 0 -> return a.copy()
+    last :: a.bytes()[a.bytes().len() - 1]
+    if is_separator(last) -> return "{a}{clean_b}"
+    "{a}/{clean_b}"
+}
+
+fn join(a: String, b: String) -> String Never! { join_impl(a, b) }
+
+
+fn absolute(path: String | Path) -[FS, Env]> String IOError! {
+    text :: path_text(path)
+    if __host_path_is_absolute(text.copy()) -> return Ok(text)
+    cwd :: sys.current_dir()
+    Ok(__host_path_join(cwd, text))
+}
+
+fn temp_prefix(prefix: String) -> String Never! {
+    out := [U8]{}
+    loop byte in prefix.bytes() {
+        // Continuation bytes belong to the scalar whose lead byte emitted `_`.
+        if byte >= (U8{128}) && byte < (U8{192}) -> next
+        ascii :: (byte >= (U8{48}) && byte <= (U8{57})) ||
+            (byte >= (U8{65}) && byte <= (U8{90})) ||
+            (byte >= (U8{97}) && byte <= (U8{122}))
+        &out.push(if ascii -> byte else -> U8{95})
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn mktemp(prefix: String) -[FS, Env, Time]> String Never! {
+    clean :: temp_prefix(prefix)
+    row :: __temp_path_sample()
+    nanos :: if row.clock_available -> row.nanos else -> "0"
+    pid :: sys.getpid()
+    __host_path_join(__temp_directory(), "{clean}_{pid}_{nanos}")
+}
+
+#Test("temporary path prefixes replace each non-ASCII scalar once") {
+    assert(temp_prefix("Az09-é🌍/") == "Az09____")
+    assert(temp_prefix("") == "")
+}
+
+
+fn canonicalize(path: String | Path) -[FS.Read]> String IOError! {
+    text :: path_text(path)
+    files8_preflight("FS.Read", .Read, text)
+    core.files.__canonicalize_raw(text)
+}
+
+
+fn list_dir(path: String | Path) -[FS.Read]> [DirEntry] IOError! {
+    text :: path_text(path)
+    files8_preflight("FS.Read", .Read, text)
+    core.files.__list_dir_raw(text)
+}
+
+
+fn create_dir(path: String | Path) IOError! -[FS.Write]> {
+    target :: path_text(path)
+    file_fault("FS.Write", .Write, target)
+    core.files.__create_dirs_os(target)
+}
+
+
+fn dirname_impl(path: String) -> String Never! {
+    raw :: path.bytes()
+    if raw.len() == 0 -> return ""
+    end := raw.len()
+    loop end > 1 && is_separator(raw[end - 1]) {
+        end = end - 1
+    }
+    if end == 0 -> return "/"
+    i := end - 1
+    loop i >= 0 {
+        if is_separator(raw[i]) {
+            if i == 0 -> return "/"
+            prefix := slice(raw, 0, i)
+            if prefix.bytes().len() == 2 && prefix.bytes()[1] == (U8{58}) {
+                return "{prefix}/"
+            }
+            return prefix
+        }
+        i = i - 1
+    }
+    if end >= 2 && is_letter(raw[0]) && raw[1] == (U8{58}) -> return slice(raw, 0, 2)
+    ""
+}
+
+fn dirname(path: String) -> String Never! { dirname_impl(path) }
+
+
+fn create_dir_all(path: String) IOError! -[FS]> {
+    file_fault("FS.Write", .Write, path)
+    core.files.__create_dirs_os(path)
+}
+
+
+fn remove(path: String | Path) IOError! -[FS.Write]> {
+    text :: path_text(path)
+    files8_preflight("FS.Write", .Write, text)
+    core.files.__remove_raw(text)
+}
+
+
+fn remove_dir(path: String | Path) IOError! -[FS.Write]> {
+    text :: path_text(path)
+    files8_preflight("FS.Write", .Write, text)
+    core.files.__remove_dir_raw(text)
+}
+
+
+fn remove_all(path: String | Path) IOError! -[FS]> {
+    text :: path_text(path)
+    files8_preflight("FS.Write", .Write, text)
+    directory :: core.files.__metadata_directory(text) ?? false
+    core.files.__remove_all_raw(text, directory)
+}
+
+fn copy(from: String | Path, to: String | Path) IOError! -[FS]> {
+    source :: path_text(from)
+    target :: path_text(to)
+    files8_preflight("FS.Read", .Read, source)
+    files8_preflight("FS.Write", .Write, target)
+    core.files.__copy_raw(source, target)
+}
+
+
+fn copy_file_impl(from: String, to: String) IOError! -[FS]> {
+    bytes :: read_bytes(from)
+    parent :: dirname_impl(to)
+    if parent.bytes().len() > 0 -> create_dir_all(parent)
+    write_bytes(to.copy(), bytes)
+}
+
+
+fn copy_dir(from: String | Path, to: String | Path) IOError! -[FS]> {
+    source :: path_text(from)
+    destination :: path_text(to)
+    files8_preflight("FS.Read", .Read, source)
+    files8_preflight("FS.Write", .Write, destination)
+    context :: core.files.__entries_context(source, destination, true)
+    _guard :: core.mem.scope.guard(() -> core.files.__entries_close(context))
+    entries_copy_tree(context, 0, source)
+}
+
+fn entries_copy_tree(context: Int, directory: Int, resource: String) IOError! -[FS]> {
+    created :: core.files.__entries_mkdir(context, directory)
+    if created.cause != None -> return Err(walk_error(.Write, created.kind, created.code, created.cause, resource))
+    opened :: core.files.__entries_read_dir(context, directory)
+    if opened.cause != None -> return Err(walk_error(.Read, opened.kind, opened.code, opened.cause, resource))
+    loop {
+        entry :: core.files.__entries_next(context, directory)
+        if entry.cause != None -> return Err(walk_error(.Read, entry.kind, entry.code, entry.cause, resource))
+        if entry.end -> break
+        kind :: core.files.__entries_file_type(context, entry.child)
+        if kind.cause != None -> return Err(walk_error(.Read, kind.kind, kind.code, kind.cause, resource))
+        if kind.directory {
+            entries_copy_tree(context, entry.child, resource)
+        } else if kind.file {
+            copied :: core.files.__entries_copy(context, entry.child)
+            if copied.cause != None -> return Err(walk_error(.Write, copied.kind, copied.code, copied.cause, resource))
+        }
+        core.files.__entries_release(context, entry.child)
+    }
+    Ok()
+}
+
+
+/// Rename `from` to `to`. `if_exists: .Replace`
+/// replaces an existing target, `.Refuse` reports `IOError.AlreadyExists`,
+/// and `.Swap` exchanges the two names in one step (both must exist).
+/// Follow with `fsync(dirname(to))` to make the rename durable.
+fn rename(from: String | Path, to: String | Path, if_exists: RenameIfExists{.Replace}) IOError! -[FS.Write]> {
+    core.files.__rename_at(-1, path_text(from), -1, path_text(to), rename_code(if_exists))
+}
+
+
+/// Create `link` as a symbolic link naming `original`. The link text is stored
+/// as given and is not resolved; later path operations follow it, so lexical
+/// `Path.is_within` cannot see an escape through a link — compare
+/// `canonicalize` results instead.
+fn symlink(original: String | Path, link: String | Path) IOError! -[FS.Write]> {
+    source :: path_text(original)
+    target :: path_text(link)
+    files8_preflight("FS.Write", .Write, target)
+    platform :: core.files.__os_family()
+    if platform != "unix" && platform != "windows" -> return Err(files8_other(.Write, Val(target), "symbolic links are unavailable on this platform"))
+    directory := false
+    if platform == "windows" -> directory = core.files.__symlink_directory_raw(source)
+    core.files.__symlink_raw(source, target, directory)
+}
+
+
+fn hard_link(original: String | Path, link: String | Path) IOError! -[FS.Write]> {
+    source :: path_text(original)
+    target :: path_text(link)
+    files8_preflight("FS.Write", .Write, target)
+    core.files.__hard_link_raw(source, target)
+}
+ 
+fn is_socket(path: String | Path) -[FS.Read]> Bool IOError! {
+    text :: path_text(path)
+    files8_preflight("FS.Read", .Read, text)
+    mode :: core.files.__stat_mode_raw(text)
+    Ok((mode.bit_and(61440)) == 49152)
+}
+
+
+fn read_link(path: String) -[FS.Read]> String IOError! {
+    file_fault("FS.Read", .Read, path)
+    core.files.__read_link_os(path)
+}
+
+
+fn split_lines(text: String) -> [String] Never! {
+    raw :: text.bytes()
+    out := [String]{}
+    start := 0
+    i := 0
+    loop i < raw.len() {
+        if raw[i] == (U8{10}) {
+            line := slice(raw, start, i)
+            if line.bytes().len() > 0 && line.bytes()[line.bytes().len() - 1] == (U8{13}) {
+                line = slice(line.bytes(), 0, line.bytes().len() - 1)
+            }
+            &out.push(line)
+            start = i + 1
+        }
+        i = i + 1
+    }
+    if start < raw.len() -> &out.push(slice(raw, start, raw.len()))
+    out
+}
+
+
+fn trim(text: String) -> String Never! {
+    raw :: text.bytes()
+    a := 0
+    b := raw.len()
+    loop a < b {
+        n :: raw[a]
+        if n == 32 || n == 9 -> a = a + 1 else -> break
+    }
+    loop b > a {
+        n :: raw[b - 1]
+        if n == 32 || n == 9 -> b = b - 1 else { break }
+    }
+    slice(raw, a, b)
+}
+
+
+fn glob_bytes(pat: [U8], pi: Int, name: [U8], ni: Int) -> Bool Never! {
+    if pi >= pat.len() -> return ni >= name.len()
+    if pat[pi] == (U8{42}) {
+        if glob_bytes(pat, pi + 1, name, ni) -> return true
+        if ni < name.len() -> return glob_bytes(pat, pi, name, ni + 1)
+        return false
+    }
+    if ni >= name.len() -> return false
+    if pat[pi] == (U8{63}) -> return glob_bytes(pat, pi + 1, name, ni + 1)
+    if pat[pi] == (U8{91}) {
+        j := pi + 1
+        negated := false
+        if j < pat.len() && (pat[j] == (U8{33}) || pat[j] == (U8{94})) {
+            negated = true
+            j = j + 1
+        }
+        matched := false
+        closed := false
+        loop j < pat.len() {
+            if pat[j] == (U8{93}) {
+                closed = true
+                break
+            }
+            if j + 2 < pat.len() && pat[j + 1] == (U8{45}) && pat[j + 2] != (U8{93}) {
+                if name[ni] >= pat[j] && name[ni] <= pat[j + 2] -> matched = true
+                j = j + 3
+            } else {
+                if name[ni] == pat[j] -> matched = true
+                j = j + 1
+            }
+        }
+        if !closed -> return pat[pi] == name[ni] && glob_bytes(pat, pi + 1, name, ni + 1)
+        if negated -> matched = !matched
+        if !matched -> return false
+        return glob_bytes(pat, j + 1, name, ni + 1)
+    }
+    if pat[pi] == name[ni] -> return glob_bytes(pat, pi + 1, name, ni + 1)
+    false
+}
+
+
+fn glob_seg(pat: String, name: String) -> Bool Never! { glob_bytes(pat.bytes(), 0, name.bytes(), 0) }
+
+
+fn glob_parts(pat: [String], pi: Int, tgt: [String], ti: Int) -> Bool Never! {
+    if pi >= pat.len() -> return ti >= tgt.len()
+    if pat[pi] == "**" {
+        if glob_parts(pat, pi + 1, tgt, ti) -> return true
+        if ti < tgt.len() -> return glob_parts(pat, pi, tgt, ti + 1)
+        return false
+    }
+    if ti >= tgt.len() -> return false
+    if !glob_seg(pat[pi], tgt[ti]) -> return false
+    glob_parts(pat, pi + 1, tgt, ti + 1)
+}
+
+
+fn glob_parts_for(path: String) -> [String] Never! {
+    raw :: path.bytes()
+    out := [String]{}
+    drive := ""
+    absolute := is_abs_impl(path)
+    start := 0
+    if raw.len() >= 2 && is_letter(raw[0]) && raw[1] == (U8{58}) {
+        drive = slice(raw, 0, 2)
+        start = 2
+        if start < raw.len() && is_separator(raw[start]) -> start = start + 1
+    } else if absolute {
+        &out.push("/")
+        start = 1
+        loop start < raw.len() && is_separator(raw[start]) -> start = start + 1
+    }
+    if drive.bytes().len() > 0 -> &out.push(drive)
+    loop p in split_slash_impl(slice(raw, start, raw.len())) {
+        if p.bytes().len() > 0 -> &out.push(p)
+    }
+    out
+}
+
+
+fn glob_match_impl(pattern: String, path: String) -> Bool Never! {
+    pp :: glob_parts_for(pattern)
+    tt :: glob_parts_for(path)
+    glob_parts(pp, 0, tt, 0)
+}
+
+fn glob_match(pattern: String, path: String) -> Bool Never! { glob_match_impl(pattern, path) }
+
+
+fn has_separator(path: String) -> Bool Never! {
+    loop b in path.bytes() {
+        if is_separator(b) -> return true
+    }
+    false
+}
+
+
+fn anchor_of(path: String) -> String Never! {
+    raw :: path.bytes()
+    if raw.len() >= 2 && is_letter(raw[0]) && raw[1] == (U8{58}) -> return slice(raw, 0, 2)
+    if raw.len() > 0 && is_separator(raw[0]) -> return "/"
+    ""
+}
+
+
+fn path_parts(path: String) -> [String] Never! {
+    raw :: path.bytes()
+    start := 0
+    if raw.len() >= 2 && is_letter(raw[0]) && raw[1] == (U8{58}) {
+        start = 2
+        if start < raw.len() && is_separator(raw[start]) -> start = start + 1
+    } else if raw.len() > 0 && is_separator(raw[0]) {
+        start = 1
+        loop start < raw.len() && is_separator(raw[start]) -> start = start + 1
+    }
+    out := [String]{}
+    loop p in split_slash_impl(slice(raw, start, raw.len())) {
+        if p.bytes().len() > 0 -> &out.push(p)
+    }
+    out
+}
+
+
+fn relative_impl(path: String, start: String) -> String Never! {
+    a :: collapse_impl(path)
+    b :: collapse_impl(start)
+    if anchor_of(a) != anchor_of(b) -> return a
+    ap :: path_parts(a)
+    bp :: path_parts(b)
+    i := 0
+    loop i < ap.len() && i < bp.len() {
+        if ap[i] != bp[i] -> break
+        i = i + 1
+    }
+    out := [String]{}
+    j := i
+    loop j < bp.len() {
+        &out.push("..")
+        j = j + 1
+    }
+    loop i < ap.len() {
+        &out.push(ap[i])
+        i = i + 1
+    }
+    s :: join_parts(out)
+    if s.bytes().len() == 0 -> return "."
+    s
+}
+
+fn relative(path: String, start: String) -> String Never! { relative_impl(path, start) }
+
+
+fn walk_error(operation: IOOperation, kind: Int, code: Int?, cause: String?, resource: String) -> IOError Never! {
+    context :: IOContext{operation: operation, resource: Val(resource), os_code: code, cause: cause}
+    if kind == {
+        1 -> IOError.InvalidInput(context)
+        2 -> IOError.NotFound(context)
+        3 -> IOError.PermissionDenied(context)
+        4 -> IOError.TimedOut(context)
+        5 -> IOError.Closed(context)
+        6 -> IOError.AlreadyExists(context)
+        7 -> IOError.Unsupported(context)
+        else -> IOError.Other(context)
+    }
+}
+
+fn walk_validate(context: Int, directory: Int, root: String) IOError! -[FS]> {
+    source :: core.files.__walk_validation_path(context, directory)
+    loop ancestor in core.files.__walk_ancestors(context, source) {
+        metadata :: core.files.__walk_metadata(context, ancestor)
+        if metadata.cause != None -> return Err(walk_error(.Read, metadata.kind, metadata.code, metadata.cause, root))
+        if metadata.symlink {
+            path :: core.files.__walk_shown(context, ancestor)
+            return Err(walk_error(.Read, 3, None, Val("filesystem walk path contains symlink: {path}"), root))
+        }
+    }
+    metadata :: core.files.__walk_metadata(context, source)
+    if metadata.cause != None -> return Err(walk_error(.Read, metadata.kind, metadata.code, metadata.cause, root))
+    if !metadata.directory {
+        path :: core.files.__walk_shown(context, source)
+        return Err(walk_error(.Read, 0, None, Val("filesystem walk root is not a directory: {path}"), root))
+    }
+    Ok(())
+}
+
+fn walk_batch(context: Int, directory: Int, depth: Int, root: String, ignore: String?, files_only: Bool) -[FS]> (entries: [WalkEntry], children: [Int]) IOError! {
+    walk_validate(context, directory, root)
+    if ignore != None {
+        rules :: core.files.__walk_rules(context, directory, ignore)
+        if rules.cause != None -> return Err(walk_error(.Read, rules.kind, rules.code, rules.cause, core.files.__walk_shown(context, directory)))
+    }
+    opened :: core.files.__walk_read_dir(context, directory)
+    if opened.cause != None -> return Err(walk_error(.Read, opened.kind, opened.code, opened.cause, root))
+    entries := [WalkEntry]{}
+    children := [Int]{}
+    loop {
+        entry :: core.files.__walk_next(context, directory)
+        if entry.cause != None -> return Err(walk_error(.Read, entry.kind, entry.code, entry.cause, root))
+        if entry.end -> break
+        skipped := false
+        if ignore != None {
+            skipped = entry.ignore_file || core.files.__walk_ignored(context, directory, entry.relative, entry.directory)
+        }
+        if skipped -> next
+        if !files_only || (!entry.directory && entry.file) {
+            &entries.push(WalkEntry{path: entry.path, relative: entry.relative, is_dir: entry.directory, depth: depth})
+        }
+        if entry.directory {
+            if ignore != None -> core.files.__walk_inherit(context, entry.child, directory)
+            &children.push(entry.child)
+        }
+    }
+    Ok((entries: entries, children: children))
+}
+
+fn walk_impl(root: String, ignore: String?, files_only: Bool) -[FS]> [WalkEntry] IOError! {
+    files8_preflight("FS.Read", .Read, root)
+    context :: core.files.__walk_context(root, ignore ?? "", ignore != None)
+    _guard :: core.mem.scope.guard(() -> core.files.__walk_close(context))
+    walk_validate(context, 0, root)
+    if ignore != None -> core.files.__walk_matcher_new(context)
+    queue := [(directory: Int, depth: Int)]{(directory: 0, depth: 0)}
+    cursor := 0
+    out := [WalkEntry]{}
+    first_error := IOError?{None}
+    error_directory := -1
+    loop cursor < queue.len() {
+        pending :: queue[cursor]
+        cursor += 1
+        if walk_batch(context, pending.directory, pending.depth, root, ignore, files_only) == {
+            .Ok(batch) -> {
+                loop entry in batch.entries -> &out.push(entry)
+                loop child in batch.children -> &queue.push((directory: child, depth: pending.depth + 1))
+            }
+            .Err(error) -> {
+                if error_directory == -1 || core.files.__walk_before(context, pending.directory, error_directory) {
+                    error_directory = pending.directory
+                    first_error = Val(error)
+                }
+            }
+        }
+    }
+    if ^first_error == .Val(error) -> return Err(^error)
+    &out.sort_by((left: WalkEntry, right: WalkEntry) -> left.path <=> right.path)
+    Ok(out)
+}
+
+
+fn walk(root: String | Path, ignore: String?) -[FS]> [WalkEntry] IOError! {
+    walk_impl(path_text(root), ignore, false)
+}
+
+
+fn walk_parallel(root: String | Path, ignore: String?) -[FS]> [WalkEntry] IOError! {
+    walk_impl(path_text(root), ignore, false)
+}
+
+
+fn walk_files(root: String | Path, ignore: String?) -[FS]> [WalkEntry] IOError! {
+    walk_impl(path_text(root), ignore, true)
+}
+
+
+
+
+// Match the native byte grammar: '*' crosses separators, '?' is one byte,
+// brackets have no special meaning. Backtracking retains byte indexes only.
+fn entries_glob_match(pattern: [U8], path: [U8]) -> Bool Never! {
+    p := 0
+    t := 0
+    star := -1
+    restart := 0
+    loop t < path.len() {
+        if p < pattern.len() && (pattern[p] == (U8{63}) || (pattern[p] != (U8{42}) && pattern[p] == path[t])) {
+            p += 1
+            t += 1
+        } else if p < pattern.len() && pattern[p] == (U8{42}) {
+            star = p
+            p += 1
+            restart = t
+        } else if star >= 0 {
+            restart += 1
+            t = restart
+            p = star + 1
+        } else { return false }
+    }
+    loop p < pattern.len() && pattern[p] == (U8{42}) -> p += 1
+    p == pattern.len()
+}
+
+fn entries_glob_root(pattern: String, separator: U8) -> String Never! {
+    bytes :: pattern.bytes()
+    last := -1
+    loop index in 0..<bytes.len() {
+        if bytes[index] == (U8{42}) || bytes[index] == (U8{63}) -> break
+        if bytes[index] == separator -> last = index
+    }
+    if last <= 0 -> "." else -> slice(bytes, 0, last)
+}
+
+fn entries_glob_tree(context: Int, directory: Int, resource: String, output: &[String]) IOError! -[FS]> {
+    opened :: core.files.__entries_read_dir(context, directory)
+    if opened.cause != None -> return Err(walk_error(.Read, opened.kind, opened.code, opened.cause, resource))
+    children := [Int]{}
+    // Native collect fails on iteration errors before inspecting any file_type.
+    loop {
+        entry :: core.files.__entries_next(context, directory)
+        if entry.cause != None -> return Err(walk_error(.Read, entry.kind, entry.code, entry.cause, resource))
+        if entry.end -> break
+        &children.push(entry.child)
+    }
+    &children.sort_by((left: Int, right: Int) -> {
+        if core.files.__entries_before(context, left, right) -> return Ordering.Less
+        if core.files.__entries_before(context, right, left) -> return Ordering.Greater
+        Ordering.Equal
+    })
+    loop child in children {
+        &output.push(core.files.__entries_shown(context, child))
+        kind :: core.files.__entries_file_type(context, child)
+        if kind.cause != None -> return Err(walk_error(.Read, kind.kind, kind.code, kind.cause, resource))
+        if kind.directory -> entries_glob_tree(context, child, resource, &output)
+        core.files.__entries_release(context, child)
+    }
+    Ok()
+}
+
+fn glob(pattern: String | Path) -[FS]> [String] IOError! {
+    resource :: path_text(pattern)
+    files8_preflight("FS.Read", .Read, resource)
+    separator :: if core.files.__os_family() == "windows" -> U8{92} else -> U8{47}
+    root :: entries_glob_root(resource, separator)
+    context :: core.files.__entries_context(root, "", false)
+    _guard :: core.mem.scope.guard(() -> core.files.__entries_close(context))
+    paths := [String]{}
+    entries_glob_tree(context, 0, resource, &paths)
+    bytes :: resource.bytes()
+    matches := [String]{}
+    loop path in paths { if entries_glob_match(bytes, path.bytes()) -> &matches.push(path) }
+    &matches.sort()
+    Ok(matches)
+}
+
+
+fn temp_dir(prefix: String) -[FS]> TempDir IOError! {
+    path :: files_temp_path(prefix)
+    files8_preflight("FS.Write", .Write, path)
+    core.files.__temp_dir_raw(^path)
+}
+
+fn mkdtemp(prefix: String) -[FS]> String IOError! {
+    path :: files_temp_path(prefix)
+    files8_preflight("FS.Write", .Write, path)
+    core.files.__mkdtemp_raw(^path)
+}
+
+fn files_temp_path(prefix: String) -[FS]> String Never! {
+    clean :: temp_prefix(prefix)
+    clock :: core.files.__temp_clock_raw()
+    nanos :: if clock.clock_available -> clock.nanos else -> "0"
+    pid :: core.files.__process_id_raw()
+    __host_path_join(core.files.__temp_directory_raw(), "{clean}_{pid}_{nanos}")
+}
+
+
+fn temp_file(prefix: String) -[FS]> TempFile IOError! {
+    path :: files_temp_path(prefix)
+    files8_preflight("FS.Write", .Write, path)
+    core.files.__temp_file_raw(^path)
+}
+
+
+/// Wait for an exclusive operating-system lock. A missing
+/// lock file is created owner-only; a final symbolic link is refused. Closing
+/// the returned owner releases the lock but never removes the lock file.
+/// `timeout` bounds acquisition; omitting it waits without limit.
+fn lock(path: String | Path, timeout: Duration?{None}) -[FS, Env]> FileLock IOError! {
+    text :: path_text(path)
+    files8_preflight("FS.Write", .Write, text)
+    lock_path(text)
+    bounded :: timeout != None
+    ns := 0
+    if timeout == .Val(duration) -> ns = duration.ns
+    deadline := 0
+    loop {
+        fd := lock_open(text)
+        waited :: core.files.__lock_wait(fd.fd, ns, bounded, deadline)
+        deadline = waited.deadline_ns
+        if waited.timed_out -> return Err(lock_timeout(text))
+        if !waited.acquired -> return Err(lock_errno(text, waited.errno, waited.platform))
+        if lock_current(text, fd.fd) -> return Ok(lock_owner(^text, &fd))
+        // A replacement never inherits this claim. Scope exit closes the old
+        // inode before the next open; every retry retains the original deadline.
+    }
+}
+
+/// Return None only when another owner holds the exclusive system lock.
+/// Missing paths are created as with `lock`; other failures remain errors.
+fn try_lock(path: String | Path) -[FS, Env]> FileLock? IOError! {
+    text :: path_text(path)
+    files8_preflight("FS.Write", .Write, text)
+    lock_path(text)
+    loop {
+        fd := lock_open(text)
+        result :: core.files.__lock_try(fd.fd)
+        if result.value != 0 {
+            if lock_contended(result.errno, result.platform) -> return Ok(None)
+            return Err(lock_errno(text, result.errno, result.platform))
+        }
+        if lock_current(text, fd.fd) -> return Ok(Val(lock_owner(^text, &fd)))
+    }
+}
+
+fn lock_context(path: String, code: Int?, cause: String) -> IOContext Never! {
+    IOContext{operation: .Write, resource: Val(path), os_code: code, cause: Val(cause)}
+}
+
+fn lock_path(path: String) IOError! {
+    loop byte in path.bytes() {
+        if byte == (U8{0}) -> return Err(IOError.InvalidInput(lock_context(path, None, "the lock path contains NUL; pass a filesystem path without NUL")))
+    }
+}
+
+fn lock_timeout(path: String) -> IOError Never! {
+    IOError.TimedOut(lock_context(path, None, "timed out waiting for an exclusive file lock; retry or allow a longer timeout"))
+}
+
+// Contention: Linux EWOULDBLOCK=EAGAIN(11), macOS EWOULDBLOCK=EAGAIN(35),
+// Windows ERROR_LOCK_VIOLATION(33). RuntimePolicy/Lock/unix.rs:160-169 and
+// windows.rs:249-269 use those same kernel results.
+fn lock_contended(code: Int, platform: Int) -> Bool Never! {
+    (platform == 1 && code == 11) || (platform == 2 && code == 35) || (platform == 3 && code == 33)
+}
+
+// Project native errno exactly as jet_std::io_error_at
+// (JetStd/JSONDyn.rs:2-34) projects std::io::ErrorKind. Unknown kinds stay
+// Other. In particular EBADF/ERROR_INVALID_HANDLE are NOT Closed: the shared
+// mapper reserves Closed for NotConnected/BrokenPipe.
+fn lock_errno(path: String, code: Int, platform: Int) -> IOError Never! {
+    if platform == 0 -> return IOError.Unsupported(lock_context(path, None, "file locking is unavailable on this operating system"))
+    context :: lock_context(path, Val(code), core.sys.__errno_text(code))
+    if platform == 3 {
+        // std sys/io/error/windows.rs decode_error_kind (blob 6056f177),
+        // constants in windows/c/windows_sys.rs (blob 0c865494).
+        if code == 2 || code == 3 || code == 15 || code == 53 || code == 67 -> return IOError.NotFound(context)
+        if code == 5 || code == 10013 -> return IOError.PermissionDenied(context)
+        if code == 80 || code == 183 -> return IOError.AlreadyExists(context)
+        if code == 87 || code == 131 || code == 10022 -> return IOError.InvalidInput(context)
+        if code == 109 || code == 232 || code == 10057 || code == 10058 -> return IOError.Closed(context)
+        if code == 121 || code == 258 || code == 594 || code == 995 || code == 1053 || code == 1121 || code == 1460 ||
+            code == 5910 || code == 7012 || code == 7040 || code == 8014 || code == 8226 || code == 9705 ||
+            code == 10060 || code == 13805 || code == 15402 || code == 15403 -> return IOError.TimedOut(context)
+        // FILEERROR1: ERROR_NOT_SUPPORTED(50); std: ERROR_CALL_NOT_IMPLEMENTED(120).
+        if code == 50 || code == 120 -> return IOError.Unsupported(context)
+    } else {
+        if code == 2 -> return IOError.NotFound(context)
+        // std sys/io/error/unix.rs decode_error_kind (blob 5f60abf9);
+        // Linux rows also observed against rust 1.97.1's installed decoder.
+        if code == 1 || code == 13 -> return IOError.PermissionDenied(context)
+        if code == 22 -> return IOError.InvalidInput(context)
+        if code == 17 -> return IOError.AlreadyExists(context)
+        if code == 32 || (platform == 1 && code == 107) || (platform == 2 && code == 57) -> return IOError.Closed(context)
+        if (platform == 1 && code == 110) || (platform == 2 && code == 60) -> return IOError.TimedOut(context)
+        // JSONDyn.rs:14-22: Unsupported override plus std ENOSYS.
+        if (platform == 1 && (code == 38 || code == 95)) || (platform == 2 && (code == 45 || code == 78 || code == 102)) -> return IOError.Unsupported(context)
+        // Existing no-follow-open rule, FileHandles.rs:381-395.
+        if (platform == 1 && code == 40) || (platform == 2 && code == 62) {
+            return IOError.InvalidInput(lock_context(path, Val(code), "the final lock path is a symbolic link; use a regular lock file"))
+        }
+    }
+    IOError.Other(context)
+}
+
+fn lock_open(path: String) -[FS, Env]> __LockFd IOError! {
+    opened :: core.files.__lock_open(path)
+    if opened.value < 0 -> return Err(lock_errno(path, opened.errno, opened.platform))
+    fd :: __LockFd{fd: opened.value}
+    identity :: core.files.__lock_fd_identity(fd.fd)
+    if identity.errno != 0 -> return Err(lock_errno(path, identity.errno, identity.platform))
+    if !identity.regular || identity.reparse {
+        return Err(IOError.InvalidInput(lock_context(path, None, "the lock path must name a regular file, not a directory or link")))
+    }
+    Ok(^fd)
+}
+
+fn lock_current(path: String, fd: Int) -[FS, Env]> Bool IOError! {
+    held :: core.files.__lock_fd_identity(fd)
+    if held.errno != 0 -> return Err(lock_errno(path, held.errno, held.platform))
+    current :: core.files.__lock_path_identity(path)
+    // Disappearance and replacement release and reopen. Other lookup failures
+    // are real errors, never mistaken for contention or an absent attribute.
+    if current.errno != 0 {
+        if (current.platform == 3 && (current.errno == 2 || current.errno == 3)) || (current.platform != 3 && current.errno == 2) -> return Ok(false)
+        return Err(lock_errno(path, current.errno, current.platform))
+    }
+    Ok(current.regular && !current.reparse && held.device == current.device && held.low == current.low && held.high == current.high)
+}
+
+
+fn basename(path: String) -> String Never! {
+    raw :: path.bytes()
+    i := raw.len() - 1
+    loop i >= 0 {
+        if raw[i] == (U8{47}) || raw[i] == (U8{92}) -> return slice(raw, i + 1, raw.len())
+        i = i - 1
+    }
+    path.copy()
+}
+
+
+fn suffix(path: String) -> String Never! {
+    name :: basename(path)
+    raw :: name.bytes()
+    i := raw.len() - 1
+    loop i > 0 {
+        if raw[i] == (U8{46}) -> return slice(raw, i, raw.len())
+        i = i - 1
+    }
+    ""
+}
+
+
+fn stem(path: String) -> String Never! {
+    name :: basename(path)
+    raw :: name.bytes()
+    i := raw.len() - 1
+    loop i > 0 {
+        if raw[i] == (U8{46}) -> return slice(raw, 0, i)
+        i = i - 1
+    }
+    name
+}
+
+
+fn with_suffix(path: String, next: String) -> String Never! {
+    dir :: dirname(path)
+    base :: stem(path)
+    joined :: "{base}{next}"
+    if dir.bytes().len() == 0 -> return joined
+    join(dir, joined)
+}
+
+
+fn with_name(path: String, name: String) -> String Never! {
+    dir :: dirname(path)
+    if dir.bytes().len() == 0 -> return name.copy()
+    join(dir, name)
+}
+
+
+fn is_absolute(path: String) -> Bool Never! { is_abs(path) }
+
+
+// Like `is_dir` and a shell's `test -f`, a final link is followed: a link to a
+// file is a file. A PATH search relies on this, since package managers install
+// tools as links.
+fn is_file_impl(path: String) -> Bool Never! {
+    row :: core.files.__stat_at(-1, path, true) ?? return false
+    row[0] == 0
+}
+
+fn is_file(path: String) -[FS]> Bool Never! {
+    if read_probe_fault() -> return false
+    is_file_impl(path)
+}
+
+
+fn is_symlink(path: String) -[FS]> Bool Never! {
+    if read_probe_fault() -> return false
+    row :: core.files.__stat_at(-1, path, false) ?? return false
+    row[0] == 2
+}
+
+
+fn cwd() -[FS, Env]> String IOError! { sys.current_dir() }
+
+
+fn home() -[FS, Env]> String IOError! {
+    core.sys.home_dir() ?? return Err(io_err("home", "", "home directory unavailable"))
+}
+
+
+fn expanduser(path: String) -[FS, Env]> String IOError! {
+    raw :: path.bytes()
+    if raw.len() == 0 || raw[0] != (U8{126}) -> return Ok(path.copy())
+    h :: home()
+    if raw.len() == 1 -> return Ok(h)
+    if raw[1] == (U8{47}) || raw[1] == (U8{92}) -> return Ok(join_impl(h, slice(raw, 2, raw.len())))
+    Ok(path.copy())
+}
+
+
+fn touch(path: String) IOError! -[FS]> {
+    if exists_impl(path) {
+        core.files.fsync(path)
+        return Ok()
+    }
+    parent :: dirname_impl(path)
+    if parent.bytes().len() > 0 -> create_dir_all(parent)
+    write_bytes(path, [U8]{})
+}
+
+
+fn relocate(from: String, to: String) IOError! -[FS]> { rename(from, to) }
+
+
+/// Python-compatible spelling for an atomic replacement rename.
+fn replace(from: String, to: String) IOError! -[FS]> { relocate(from, to) }
+
+
+/// Return `path` relative to `start`, using the same normalized path rules.
+fn relativeto(path: String, start: String) -> String Never! { relative(path, start) }
+
+
+/// Python-compatible spelling for `set_mode`.
+fn chmod(path: String, mode: Int) IOError! -[FS]> { core.files.set_mode(path, mode) }
+
+
+/// Copy the bytes of `from` to `to`, creating missing parent directories.
+/// Unlike Python's `shutil.copy2`, permission bits and timestamps are not
+/// copied: the new file takes the default mode.
+fn copy2(from: String, to: String) IOError! -[FS]> { copy_file_impl(from, to) }
+
+
+/// Python-compatible spelling for a single-file copy.
+fn copyfile(from: String, to: String) IOError! -[FS]> { copy2(from, to) }
+
+
+/// Create one directory, or all missing parents when `parents` is true.
+fn mkdir(path: String, parents: Bool) IOError! -[FS]> {
+    if parents -> return create_dir_all(path)
+    create_dir(path)
+}
+
+
+fn rmdir(path: String) IOError! -[FS]> { core.files.remove_dir(path) }
+
+
+fn unlink(path: String) IOError! -[FS]> { core.files.remove(path) }
+
+
+fn joinpath(a: String, b: String) -> String Never! { join(a, b) }
+
+
+/// Python `os` spellings backed by the same checked filesystem surface.
+fn getcwd() -[FS, Env]> String IOError! { cwd() }
+
+
+fn chdir(path: String) IOError! -[FS, Env]> { sys.set_current_dir(path) }
+
+
+fn scandir(path: String) -[FS]> [DirEntry] IOError! { core.files.list_dir(path) }
+
+
+fn gettempdir() -[Env]> String Never! { sys.temp_dir() }
+
+
+fn getenv(name: String) -[Env]> String? Never! { sys.get(name) }
+
+
+fn read_lines(path: String) -[FS]> [String] IOError! {
+    text :: read(path)
+    Ok(split_lines(text))
+}
+
+
+fn write_lines(path: String, lines: [String]) IOError! -[FS]> {
+    s := ""
+    loop line in lines -> s = "{s}{line}\n"
+    write(path, s)
+}
+
+
+fn commonpath(paths: [String]) -> String Never! {
+    if paths.len() == 0 -> return ""
+    first :: collapse_impl(paths[0])
+    anchor := anchor_of(first)
+    parts := path_parts(first)
+    loop p in paths {
+        cur :: collapse_impl(p)
+        if anchor_of(cur) != anchor -> return ""
+        next :: path_parts(cur)
+        n := parts.len()
+        if next.len() < n -> n = next.len()
+        k := 0
+        loop k < n {
+            if parts[k] != next[k] -> break
+            k = k + 1
+        }
+        kept := [String]{}
+        i := 0
+        loop i < k {
+            &kept.push(parts[i])
+            i = i + 1
+        }
+        parts = kept
+    }
+    compose(anchor, parts)
+}
+
+
+fn fnmatch(name: String, pattern: String) -> Bool Never! { glob_match(pattern, name) }
+
+
+fn split_path_env(text: String) -> [String] Never! {
+    raw :: text.bytes()
+    out := [String]{}
+    start := 0
+    i := 0
+    sep := 58
+    loop b in raw {
+        if b == (U8{59}) {
+            sep = 59
+            break
+        }
+    }
+    loop i <= raw.len() {
+        n := 0
+        if i < raw.len() -> n = raw[i]
+        if i == raw.len() || n == sep {
+            &out.push(slice(raw, start, i))
+            start = i + 1
+        }
+        i = i + 1
+    }
+    out
+}
+
+
+fn which(name: String) -[FS, Env]> String? Never! {
+    if is_abs_impl(name) {
+        if is_file_impl(name) -> return Val(name.copy())
+        return None
+    }
+    path_var :: sys.get("PATH") ?? ""
+    loop dir in split_path_env(path_var) {
+        base := dir
+        if base.bytes().len() == 0 -> base = "."
+        cand :: join_impl(base, name)
+        if is_file_impl(cand) -> return Val(cand)
+    }
+    None
+}
+
+
+fn slice_path(text: String, start: Int, end: Int) -> String Never! {
+    raw :: text.bytes()
+    out := [U8]{}
+    i := start
+    loop {
+        if i >= end || i < 0 || i >= raw.len() -> return String.from_bytes(out) ?? ""
+        &out.push(raw[i])
+        i = i + 1
+    }
+}
+
+
+fn splitext(path: String) -> (ext: String, root: String) Never! {
+    ext :: suffix(path)
+    if ext.bytes().len() == 0 -> return (root: path.copy(), ext: "")
+    root :: slice_path(path, 0, path.bytes().len() - ext.bytes().len())
+    (root: root, ext: ext)
+}
+
+
+fn split(path: String) -> (dir: String, name: String) Never! {
+    (dir: dirname(path), name: basename(path))
+}
+
+
+fn normpath(path: String) -> String Never! { collapse(path) }
+
+
+fn getsize(path: String) -[FS]> Int IOError! {
+    s :: stat(path)
+    Ok(s.size)
+}
+
+
+fn getmtime(path: String) -[FS]> Int IOError! {
+    file_fault("FS.Read", .Read, path)
+    row :: core.files.__stat_at(-1, path, false)
+    Ok(row[9] /% 1000000)
+}
+
+
+fn lexists(path: String) -[FS]> Bool Never! { exists_impl(path) || is_symlink(path) }
+
+
+/// Whether `a` and `b` name the same file (equal ids).
+fn samefile(a: String, b: String) -[FS]> Bool IOError! {
+    left :: stat(a)
+    right :: stat(b)
+    Ok(left.id.device == right.id.device && left.id.inode == right.id.inode)
+}
+
+
+fn commonprefix(paths: [String]) -> String Never! {
+    if paths.len() == 0 -> return ""
+    pref := paths[0].copy()
+    loop p in paths {
+        n := pref.bytes().len()
+        if p.bytes().len() < n -> n = p.bytes().len()
+        i := 0
+        loop i < n {
+            if pref.bytes()[i] != p.bytes()[i] -> break
+            i = i + 1
+        }
+        pref = slice_path(pref, 0, i)
+    }
+    pref
+}
+
+
+fn expandvars(path: String) -[Env]> String IOError! {
+    raw :: path.bytes()
+    out := ""
+    i := 0
+    loop i < raw.len() {
+        if raw[i] == (U8{36}) {
+            i = i + 1
+            braced := false
+            if i < raw.len() && raw[i] == (U8{123}) {
+                braced = true
+                i = i + 1
+            }
+            start := i
+            loop i < raw.len() {
+                n :: raw[i]
+                if braced && n == 125 -> break
+                letter := (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95 || (n >= 48 && n <= 57)
+                if !braced && !letter -> break
+                i = i + 1
+            }
+            key :: slice_path(path, start, i)
+            if braced && i < raw.len() && raw[i] == (U8{125}) -> i = i + 1
+            val :: sys.get(key) ?? ""
+            out = "{out}{val}"
+            next
+        }
+        out = "{out}{String.from_bytes([U8]{raw[i]}) ?? ""}"
+        i = i + 1
+    }
+    Ok(out)
+}
+
+
+fn move(from: String, to: String) IOError! -[FS]> { rename(from, to) }
+
+
+fn rmtree(path: String) IOError! -[FS]> { core.files.remove_all(path) }
+
+
+fn makedirs(path: String) IOError! -[FS]> { create_dir_all(path) }
+
+
+fn listdir(path: String) -[FS]> [String] IOError! {
+    entries :: core.files.list_dir(path)
+    out := [String]{}
+    loop e in entries -> &out.push(e.name)
+    Ok(out)
+}
+
+
+fn glob_recursive(pattern: String) -[FS]> [String] IOError! { core.files.glob(pattern) }
+
+
+fn fnmatch_filter(names: [String], pattern: String) -> [String] Never! {
+    out := [String]{}
+    loop n in names {
+        if fnmatch(n, pattern) -> &out.push(n)
+    }
+    out
+}
+
+
+fn is_mount(path: String) -[FS]> Bool Never! {
+    if !core.files.is_dir(path.copy()) -> return false
+    parent :: dirname(path)
+    if parent == path -> return true
+    false
+}
+
+
+fn ensure_parent(path: String) IOError! -[FS]> { create_dir_all(dirname_impl(path)) }
+
+
+fn slice_bytes(raw: [U8], start: Int, end: Int) -> [U8] Never! {
+    out := [U8]{}
+    i := start
+    loop {
+        if i >= end || i < 0 || i >= raw.len() -> return out
+        &out.push(raw[i])
+        i = i + 1
+    }
+}
+
+
+fn readdir(path: String) -[FS]> [DirEntry] IOError! { core.files.list_dir(path) }
+
+
+fn walkdir(root: String, ignore: String?) -[FS]> [WalkEntry] IOError! { walk_impl(root, ignore, false) }
+
+
+fn truncate(path: String, size: Int) IOError! -[FS]> {
+    if size < 0 -> return Err(io_err("truncate", path, "negative size"))
+    bytes :: read_bytes(path.copy())
+    if size < bytes.len() {
+        write_bytes(path.copy(), slice_bytes(bytes, 0, size))
+    } else {
+        out := bytes
+        loop out.len() < size -> &out.push(U8{0})
+        write_bytes(path.copy(), out)
+    }
+}
+
+
+fn createdirectory(path: String) IOError! -[FS]> { create_dir(path) }
+
+
+fn filesize(path: String) -[FS]> Int IOError! {
+    info :: stat(path)
+    Ok(info.size)
+}
+
+
+fn delete(path: String) IOError! -[FS]> { core.files.remove(path) }
+
+
+fn cp(from: String, to: String) IOError! -[FS]> { copy2(from, to) }
+
+
+fn rm(path: String) IOError! -[FS]> { core.files.remove(path) }
+
+
+fn realpath(path: String) -[FS, Env]> String IOError! { core.files.canonicalize(path) }
+
+
+fn pwd() -[FS, Env]> String IOError! { cwd() }
+
+
+fn tmpdir(prefix: String) -[FS]> String IOError! {
+    temp :: core.files.temp_dir(prefix)
+    Ok(temp.path)
+}
+
+
+fn topath(path: String) -[FS, Env]> String IOError! { core.files.canonicalize(path) }
+
+
+fn cd(path: String) IOError! -[FS, Env]> { sys.set_current_dir(path) }
+
+
+#Test("whole-file policy preserves UTF-8 error text and negative range clamping") {
+    root :: mktemp("whole-file-source-policy")
+    path :: join(root, "data")
+    write_bytes(path, [U8]{255}) ?? panic("write invalid UTF-8")
+    if read(path) == {
+        .Err(.InvalidInput(context)) -> {
+            assert_eq(context.operation, .Read)
+            assert_eq(context.resource, Val(path))
+            assert_eq(context.os_code, None)
+            assert_eq(context.cause, Val("stream did not contain valid UTF-8"))
+        }
+        else -> assert(false)
+    }
+    write(path, "abc") ?? panic("write text")
+    assert_eq(read_at(path, -1, -1) ?? panic("empty range"), [U8]{})
+    assert_eq(read_at(path, -1, 1) ?? panic("clamped offset"), [U8]{97})
+    write_at(path, -1, [U8]{120}) ?? panic("clamped write")
+    append_all(path, "d") ?? panic("append text")
+    assert_eq(read(path) ?? panic("read text"), "xbcd")
+    create_dir(join(root, "one/two")) ?? panic("recursive create_dir parity")
+    create_dir_all(join(root, "one/two")) ?? panic("existing directory")
+    remove_all(root) ?? panic("cleanup whole-file source policy")
+}
+
+fn file_path_platform() -> host_path.PathPlatform Never! {
+    if core.files.__path_windows() -> .Windows else -> .Unix
+}
+
+fn scope_denied(path: String) -> IOError Never! {
+    IOError.PermissionDenied(IOContext{
+        operation: .Read, resource: Val(path), os_code: None,
+        cause: Val("path is outside the granted FS.Read root"),
+    })
+}
+
+fn scope_relative(path: host_path.OSPath, requested: String) -> String IOError! {
+    cursor := host_path.components(path)
+    normalized := [U8]{}
+    loop {
+        part :: host_path.next(path, &cursor) ?? break
+        if part.kind != .CurDir {
+            if part.kind != .Normal -> return Err(scope_denied(requested))
+            if normalized.len() > 0 -> &normalized.push(host_path.main_separator(path.platform))
+            loop i in part.span.start..<part.span.end -> &normalized.push(path.encoded[i])
+        }
+    }
+    if normalized.len() == 0 -> return Err(scope_denied(requested))
+    Ok(String.from_bytes(normalized) ?? panic("UTF-8 relative path components"))
+}
+
+fn scoped_read(scope: FileScope, path: String) -[FS.Read]> String IOError! {
+    file_fault("FS.Read", .Read, path)
+    platform :: file_path_platform()
+    requested :: host_path.from_text(path, platform)
+    absolute :: host_path.is_absolute(requested)
+    roots :: core.files.__scope_roots(scope)
+    last := scope_denied(path)
+    loop index in 0..<roots.len() {
+        relative := Val(requested)
+        if absolute {
+            relative = None
+            if roots[index].absolute {
+                root :: host_path.OSPath{encoded: roots[index].encoded, platform: platform}
+                if host_path.strip_prefix_span(requested, root) == .Val(extent) {
+                    relative = Val(host_path.owned_span(requested, extent))
+                }
+            }
+        }
+        if relative == .Val(selected) {
+            relative_text :: scope_relative(selected, path)
+            if core.files.__scope_read_at(scope, index, relative_text, path) == {
+                .Err(error) -> last = error
+                .Ok(bytes) -> {
+                    text :: String.from_bytes(bytes) ?? return Err(io_err("read", path, file_utf8_error(bytes)))
+                    return Ok(text)
+                }
+            }
+        }
+    }
+    Err(last)
+}
+
+// std::str::Utf8Error's exact Display text; scoped reads used from_utf8,
+// unlike whole-file reads, whose read_to_string error has a fixed cause.
+fn file_utf8_error(bytes: [U8]) -> String Never! {
+    at := 0
+    loop at < bytes.len() {
+        lead :: Int.from_u8(bytes[at])
+        width := if lead < 128 -> 1 else -> 0
+        low := 128
+        high := 191
+        if lead >= 194 && lead <= 223 -> width = 2
+        if lead >= 224 && lead <= 239 {
+            width = 3
+            if lead == 224 -> low = 160
+            if lead == 237 -> high = 159
+        }
+        if lead >= 240 && lead <= 244 {
+            width = 4
+            if lead == 240 -> low = 144
+            if lead == 244 -> high = 143
+        }
+        if width == 0 -> return "invalid utf-8 sequence of 1 bytes from index {at}"
+        loop part in 1..<width {
+            if at + part >= bytes.len() -> return "incomplete utf-8 byte sequence from index {at}"
+            byte :: Int.from_u8(bytes[at + part])
+            valid :: if part == 1 -> byte >= low && byte <= high else -> byte >= 128 && byte <= 191
+            if !valid -> return "invalid utf-8 sequence of {part} bytes from index {at}"
+        }
+        at += width
+    }
+    panic("UTF-8 error requested for valid bytes")
+}
+
+#Test("scoped read UTF-8 causes retain Rust offset and invalid-length text") {
+    assert_eq(file_utf8_error([U8]{65, 255}), "invalid utf-8 sequence of 1 bytes from index 1")
+    assert_eq(file_utf8_error([U8]{226, 130, 65}), "invalid utf-8 sequence of 2 bytes from index 0")
+    assert_eq(file_utf8_error([U8]{240, 144, 128}), "incomplete utf-8 byte sequence from index 0")
+}
+
+#Test("scoped lexical policy rejects parents and empty names before OS work") {
+    unix :: host_path.PathPlatform.Unix
+    assert_eq(scope_relative(host_path.from_text("./a//./b", unix), "x") ?? panic("normal path"), "a/b")
+    if scope_relative(host_path.from_text("a/../b", unix), "x") == { .Err(_) -> {} .Ok(_) -> assert(false) }
+    if scope_relative(host_path.from_text(".", unix), "x") == { .Err(_) -> {} .Ok(_) -> assert(false) }
+}
+
+// FileStream.rs:91-118 is the exact contract. The existing BufReader owns
+// refill/position and retries Interrupted reads; the source owns the public
+// fault checkpoint, EOF, UTF-8 error and file-specific terminator trimming.
+fn __reader_read_line(reader: &FileReader) -[FS.Read]> String? IOError! {
+    if core.testing.__fault_should_fail("FS.Read") {
+        return Err(IOError.Other(IOContext{
+            operation: .Read, resource: Val(core.files.__reader_path(reader)),
+            os_code: None, cause: Val("fault injected: FS.Read"),
+        }))
+    }
+    bytes := core.files.__reader_line_bytes(&reader)
+    if bytes.len() == 0 -> return Ok(None)
+    trim_file_line(&bytes)
+    text :: String.from_bytes(^bytes) ?? return Err(io_err("read", core.files.__reader_path(reader), "stream did not contain valid UTF-8"))
+    Ok(Val(text))
+}
+
+fn trim_file_line(bytes: &[U8]) Never! {
+    loop bytes.len() > 0 {
+        last :: bytes[bytes.len() - 1]
+        if last != (U8{10}) && last != (U8{13}) -> break
+        _ :: &bytes.pop()
+    }
+}
+
+#Test("file read_line trims every trailing CR/LF including unterminated final CR") {
+    final := [U8]{108, 97, 115, 116, 13}
+    trim_file_line(&final)
+    assert_eq(String.from_bytes(final), Val("last"))
+    repeated := [U8]{120, 13, 13, 10}
+    trim_file_line(&repeated)
+    assert_eq(String.from_bytes(repeated), Val("x"))
+}
+
+#Test("filesystem u32 policy preserves chown and permission boundaries") {
+    assert(!files8_u32(-1))
+    assert(files8_u32(0))
+    assert(files8_u32(4294967295))
+    assert(!files8_u32(4294967296))
+    assert(((4096).bit_and(61440)) == 4096)
+    assert(((8192).bit_and(61440)) != 4096)
+    assert(((32768).bit_and(61440)) != 4096)
+}
+
+#Test("walk owns zero-based depth, path sorting and inherited ignore rules") {
+    directory :: core.files.temp_dir("walk_source").expect("temporary walk directory")
+    child :: join(directory.path, "nested")
+    create_dir(child).expect("nested directory")
+    write(join(directory.path, "visible"), "root").expect("root file")
+    write(join(directory.path, "hidden"), "hidden").expect("ignored file")
+    write(join(directory.path, ".gitignore"), "hidden\n").expect("root rules")
+    write(join(child, "visible"), "nested").expect("nested file")
+    write(join(child, "hidden"), "hidden").expect("inherited ignored file")
+    rows :: walk(directory.path, Val(".gitignore")).expect("walk")
+    assert_eq(rows.len(), 3)
+    assert_eq(rows[0].relative, "nested")
+    assert_eq(rows[0].depth, 0)
+    assert(rows[0].is_dir)
+    assert_eq(rows[1].relative, join("nested", "visible"))
+    assert_eq(rows[1].depth, 1)
+    assert_eq(rows[2].relative, "visible")
+    assert_eq(rows[2].depth, 0)
+    files :: walk_files(directory.path, Val(".gitignore")).expect("walk files")
+    assert_eq(files.len(), 2)
+    loop entry in files -> assert(!entry.is_dir)
+}
+
+#Test("walk validates an empty spelling but reads the actual empty root") {
+    if walk("", None) == {
+        .Ok(_) -> assert(false)
+        .Err(_) -> {}
+    }
+}
+
+#Test("walk rejects regular-file roots with the native cause") {
+    file :: temp_file("walk_root").expect("temporary walk root")
+    if walk(file.path, None) == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> {
+            if error == {
+                .Other(context) -> assert_eq(context.cause, Val("filesystem walk root is not a directory: {file.path}"))
+                else -> assert(false)
+            }
+        }
+    }
+}
+
+
+#Test("glob keeps the native byte grammar and prefix base") {
+    assert(entries_glob_match("*.txt".bytes(), "./sub/deep.txt".bytes()))
+    assert(entries_glob_match("./?".bytes(), "./q".bytes()))
+    assert(!entries_glob_match("./?".bytes(), "./é".bytes()))
+    assert(entries_glob_match("./[x]".bytes(), "./[x]".bytes()))
+    assert(!entries_glob_match("./[x]".bytes(), "./x".bytes()))
+    assert(entries_glob_match("*a".bytes(), "*ba".bytes()))
+    assert_eq(entries_glob_root("literal", U8{47}), ".")
+    assert_eq(entries_glob_root("/literal", U8{47}), ".")
+    assert_eq(entries_glob_root("dir/*.txt", U8{47}), "dir")
+    assert_eq(entries_glob_root("dir\\*.txt", U8{92}), "dir")
+}
+
+#Test("copy directory preserves nested regular files and skips symlink entries") {
+    root :: mktemp("entries-copy-kat")
+    source :: join(root, "source")
+    destination :: join(root, "destination")
+    create_dir_all(join(source, "nested")) ?? panic("nested source")
+    write(join(source, "top.txt"), "top") ?? panic("top")
+    write(join(source, "nested/deep.txt"), "deep") ?? panic("deep")
+    if core.files.__os_family() == "unix" -> symlink("nested", join(source, "link")) ?? panic("symlink")
+    copy_dir(Path.from(source), Path.from(destination)) ?? panic("copy")
+    assert_eq(read(join(destination, "top.txt")) ?? panic("copied top"), "top")
+    assert_eq(read(join(destination, "nested/deep.txt")) ?? panic("copied deep"), "deep")
+    assert(!exists(join(destination, "link")))
+    remove_all(root) ?? panic("cleanup")
+}
+
+#Test("glob DFS uses native shown paths, literal brackets and a byte wildcard") {
+    root :: mktemp("entries-glob-kat")
+    create_dir_all(join(root, "sub")) ?? panic("sub")
+    write(join(root, "top.txt"), "top") ?? panic("top")
+    write(join(root, "sub/deep.txt"), "deep") ?? panic("deep")
+    write(join(root, "q"), "question") ?? panic("q")
+    write(join(root, "[x]"), "literal") ?? panic("literal")
+    expected := [String]{join(root, "sub/deep.txt"), join(root, "top.txt")}
+    &expected.sort()
+    assert_eq(glob(Path.from(join(root, "*.txt"))) ?? panic("star"), expected)
+    assert_eq(glob(join(root, "?")) ?? panic("question"), [String]{join(root, "q")})
+    assert_eq(glob(join(root, "[x]")) ?? panic("literal"), [String]{join(root, "[x]")})
+    remove_all(root) ?? panic("cleanup")
+}
+
+#Test("entries error projection retains source operation and top-level resource") {
+    context :: IOContext{operation: .Write, resource: Val("source"), os_code: Val(17), cause: Val("existing destination")}
+    assert_eq(walk_error(.Write, 6, Val(17), Val("existing destination"), "source"), IOError.AlreadyExists(context))
+    assert_eq(walk_error(.Read, 7, None, Val("unsupported"), "pattern"),
+        IOError.Unsupported(IOContext{operation: .Read, resource: Val("pattern"), os_code: None, cause: Val("unsupported")}))
+}
+
+
+// #4750: every path metadata probe takes the FS.Read checkpoint. Setup uses
+// only FS.Write, so each schedule selects exactly the probe under test; the
+// injected branch prints a marker a captured `jet test` run can find.
+fn metadata_fault_fixture(prefix: String) -[FS]> (dir: String, file: String, link: String)? Never! {
+    root :: temp_dir(prefix) ?? return None
+    file :: join(root.path, "file")
+    write(file, "x") ?? return None
+    link :: join(root.path, "link")
+    symlink(file, link) ?? return None
+    Val((dir: root.path.copy(), file: file, link: link))
+}
+
+fn metadata_fault_seen(probe: String, error: IOError) {
+    if error == {
+        .Other(context) -> assert_eq(context.cause, Val("fault injected: FS.Read"))
+        else -> assert(false)
+    }
+    print("files fault observed: {probe}")
+}
+
+#Test(faults: [FS.Read]) fn files_stat_takes_the_read_fault() {
+    fixture :: metadata_fault_fixture("stat_fault") ?? return
+    if stat(fixture.file) == {
+        .Ok(info) -> assert_eq(info.size, 1)
+        .Err(error) -> metadata_fault_seen("stat", error)
+    }
+}
+
+#Test(faults: [FS.Read]) fn files_getmtime_takes_the_read_fault() {
+    fixture :: metadata_fault_fixture("mtime_fault") ?? return
+    if getmtime(fixture.file) == {
+        .Ok(_) -> {}
+        .Err(error) -> metadata_fault_seen("getmtime", error)
+    }
+}
+
+#Test(faults: [FS.Read]) fn files_exists_takes_the_read_fault() {
+    fixture :: metadata_fault_fixture("exists_fault") ?? return
+    if !exists(fixture.file) -> print("files fault observed: exists")
+}
+
+#Test(faults: [FS.Read]) fn files_is_dir_takes_the_read_fault() {
+    fixture :: metadata_fault_fixture("is_dir_fault") ?? return
+    if !is_dir(fixture.dir) -> print("files fault observed: is_dir")
+}
+
+#Test(faults: [FS.Read]) fn files_is_file_takes_the_read_fault() {
+    fixture :: metadata_fault_fixture("is_file_fault") ?? return
+    if !is_file(fixture.file) -> print("files fault observed: is_file")
+}
+
+#Test(faults: [FS.Read]) fn files_is_symlink_takes_the_read_fault() {
+    fixture :: metadata_fault_fixture("is_symlink_fault") ?? return
+    if !is_symlink(fixture.link) -> print("files fault observed: is_symlink")
+}

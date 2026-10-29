@@ -86,13 +86,14 @@ fn cli_seal_project_producer_records(verification: &StoreVerification, roots: Ha
     store_list_checked(&verification, roots) ?? return Err(CLIError.Other("could not finalize sealed closure state: {err.message()}"))
 }
 
-// Warm verified realizations by their original reference.
-fn cli_index_warm_realizations(warm: [VerifiedRealization]) -> [String: [VerifiedRealization]] Never! {
+// Warm verified realizations by their original reference, taken over from
+// the receipt's list.
+fn cli_index_warm_realizations(^warm: [VerifiedRealization]) -> [String: [VerifiedRealization]] Never! {
     indexed := [String: [VerifiedRealization]]{}
-    loop realized in warm {
+    loop realized in ^warm {
         reference :: realized.original_reference()
-        bucket := indexed.get(reference) ?? [VerifiedRealization]{}
-        &bucket.push(realized)
+        bucket := &indexed.remove(reference) ?? [VerifiedRealization]{}
+        &bucket.push(^realized)
         indexed[reference] = bucket
     }
     indexed
@@ -100,22 +101,18 @@ fn cli_index_warm_realizations(warm: [VerifiedRealization]) -> [String: [Verifie
 
 // Take the last warm realization recorded for `reference`.
 fn cli_take_warm_realization(warm: &[String: [VerifiedRealization]], reference: String) -> VerifiedRealization? Never! {
-    bucket := warm.get(reference) ?? return None
+    bucket := &warm.remove(reference) ?? return None
     realized :: &bucket.pop() ?? return None
-    if bucket.len() == 0 {
-        _ := &warm.remove(reference)
-    } else {
-        warm[reference] = bucket
-    }
+    if bucket.len() > 0 -> warm[reference] = bucket
     Val(realized)
 }
 
 // A native dev tool: the flake definition name, the command, and the
-// repository-relative binary it projects.
+// environment variable naming the admitted binary it projects.
 struct NativeDevTool {
     definition: String
     command: String
-    relative_binary: String
+    variable: String
 }
 
 // The target condition of a native output fact.
@@ -140,17 +137,18 @@ struct NativeOutputFact {
     platform: NativeOutputPlatform
 }
 
-CLI_NATIVE_OUTPUT_FACTS :: prep { [NativeOutputFact]{
+CLI_NATIVE_OUTPUT_FACTS :: comptime { [NativeOutputFact]{
     {package: "tzdata", relative: "share/zoneinfo", variable: "TZDIR", platform: NativeOutputPlatform.Any},
     {package: "vulkan-loader", relative: "lib", variable: "LD_LIBRARY_PATH", platform: NativeOutputPlatform.Linux},
     {package: "raylib", relative: "lib", variable: "LD_LIBRARY_PATH", platform: NativeOutputPlatform.Linux}
 } }
 
-// The two repo-local dev tools are native projections of the cargo-built
-// binaries, not realized packages, and get no generated shell wrapper.
-CLI_NATIVE_DEV_TOOLS :: prep { [NativeDevTool]{
-    {definition: "jetDev", command: "jet", relative_binary: "target/debug/jet"},
-    {definition: "jetpackDev", command: "jetpack", relative_binary: "target/debug/jetpack"}
+// The two repo dev tools project the admitted native binaries named by $JET
+// and $JETPACK (flake.nix `mkJetDevBin`), not realized packages, and get no
+// generated shell wrapper.
+CLI_NATIVE_DEV_TOOLS :: comptime { [NativeDevTool]{
+    {definition: "jetDev", command: "jet", variable: "JET"},
+    {definition: "jetpackDev", command: "jetpack", variable: "JETPACK"}
 } }
 
 enum NativeActivation {
@@ -171,9 +169,9 @@ struct NativeEnvironmentProjection {
     activation: NativeActivation
     nix_shell_scratch: NixShellScratch
 
-    fn from_realized(project_root: String, realized: [(name: String, output: String)], inherited_loader_path: String?) -[Env]> NativeEnvironmentProjection Never! {
+    fn from_realized(project_root: String, realized: [(name: String, output: String)], dev_tools: [(command: String, binary: String)], inherited_loader_path: String?) -[Env]> NativeEnvironmentProjection Never! {
         native_bin_dirs := [String]{}
-        loop tool in cli_native_dev_tool_paths(project_root) {
+        loop tool in dev_tools {
             directory :: files.dirname(tool.binary)
             if !native_bin_dirs.contains(directory) -> &native_bin_dirs.push(directory)
         }
@@ -228,16 +226,30 @@ fn cli_native_output_path(realized: [(name: String, output: String)], fact: Nati
     None
 }
 
-fn cli_native_dev_tool_paths(project_root: String) -> [(command: String, binary: String)] Never! {
+// The admitted dev tool binaries among `bound` (variable -> binary); an unset
+// or empty variable projects nothing.
+fn cli_native_dev_tool_paths(bound: [String: String]) -> [(command: String, binary: String)] Never! {
     tools := [(command: String, binary: String)]{}
-    loop tool in CLI_NATIVE_DEV_TOOLS -> &tools.push((command: tool.command, binary: files.join(project_root, tool.relative_binary)))
+    loop tool in CLI_NATIVE_DEV_TOOLS {
+        binary :: bound.get(tool.variable) ?? next
+        if binary != "" -> &tools.push((command: tool.command, binary: binary))
+    }
     tools
 }
 
+// The dev tool variables as the host binds them.
+fn cli_native_dev_tool_bindings() -[Env]> [String: String] Never! {
+    bound := [String: String]{}
+    loop tool in CLI_NATIVE_DEV_TOOLS {
+        if sys.get(tool.variable) == .Val(binary) -> bound[tool.variable] = binary
+    }
+    bound
+}
+
 // Native projection for the repository dev-shell contract, derived from
-// the project root and realized package outputs.
-fn cli_native_environment_projection(project_root: String, realized: [(name: String, output: String)], inherited_loader_path: String?) -[Env]> NativeEnvironmentProjection Never! {
-    NativeEnvironmentProjection.from_realized(project_root, realized, inherited_loader_path)
+// the project root, the admitted dev tools, and realized package outputs.
+fn cli_native_environment_projection(project_root: String, realized: [(name: String, output: String)], dev_tools: [(command: String, binary: String)], inherited_loader_path: String?) -[Env]> NativeEnvironmentProjection Never! {
+    NativeEnvironmentProjection.from_realized(project_root, realized, dev_tools, inherited_loader_path)
 }
 
 // Realize every ref in `plan` and compose the shell env. A realization
@@ -258,8 +270,7 @@ fn cli_compose_env_scoped_with_stats(verification: &StoreVerification, theme: Th
 }
 
 // Whether the warm realizations cover every ref and adapter of the plan.
-fn cli_warm_complete(warm: [String: [VerifiedRealization]]?, plan: RunPlan) -> Bool Never! {
-    realized :: warm ?? return false
+fn cli_warm_complete(warm: [String: [VerifiedRealization]], plan: RunPlan) -> Bool Never! {
     required := [String: Int]{}
     loop spec in plan.refs -> required[spec.raw] = (required.get(spec.raw) ?? 0) + 1
     loop adapter in plan.adapters {
@@ -267,8 +278,7 @@ fn cli_warm_complete(warm: [String: [VerifiedRealization]]?, plan: RunPlan) -> B
         required[reference] = (required.get(reference) ?? 0) + 1
     }
     loop entry in required {
-        available :: realized.get(entry.key) ?? return false
-        if available.len() < entry.value -> return false
+        if !warm.has_key(entry.key) || warm[entry.key].len() < entry.value -> return false
     }
     true
 }
@@ -276,20 +286,27 @@ fn cli_warm_complete(warm: [String: [VerifiedRealization]]?, plan: RunPlan) -> B
 // The composer with optional warm realizations from a verified environment
 // receipt. Cold or partial project composition still collects selections
 // for the receipt and producer sealing.
-fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool, warm: [VerifiedRealization]?, collect_stats: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (env: ShellEnv, stats: EnvReadyStats) CLIError! {
-    warm_realizations := if warm == {
-        .Val(list) -> Val(cli_index_warm_realizations(list))
-        .None -> None
+fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool, ^warm: [VerifiedRealization]?, collect_stats: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (env: ShellEnv, stats: EnvReadyStats) CLIError! {
+    warm_given :: warm != None
+    warm_pool := if ^warm == {
+        .Val(list) -> cli_index_warm_realizations(^list)
+        .None -> [String: [VerifiedRealization]]{}
     }
-    warm_complete :: cli_warm_complete(warm_realizations, plan)
+    warm_complete :: warm_given && cli_warm_complete(warm_pool, plan)
     project_scope :: scope == RealizeScope.Project
     needs_stats :: collect_stats || (project_scope && !warm_complete)
     lock_diff := if project_scope && !warm_complete -> CLILockDiffGuard.new(theme, plan.project_root) else -> CLILockDiffGuard.inactive(theme)
-    defer close(^lock_diff)
     if confirm_download && !warm_complete {
-        download_plan :: cli_reject_unprompted_acquisition(&verification, theme, roots, flags, plan, scope)
-        &lock_diff.set_sizes(cli_sizes_from_plan(download_plan))
+        if cli_reject_unprompted_acquisition(&verification, theme, roots, flags, plan, scope) == {
+            .Ok(download_plan) -> &lock_diff.set_sizes(cli_sizes_from_plan(download_plan))
+            .Err(error) -> {
+                close(^lock_diff)
+                return Err(error)
+            }
+        }
     }
+    // The sizes are fixed before the guard is handed to its deferred close.
+    defer close(^lock_diff)
     cli_enforce_required_sandbox_policy(theme, flags.json)
     if cli_validate_integration_facts(plan) == {
         .Err(error) -> {
@@ -300,11 +317,14 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
     }
     bin_dirs := [String]{}
     if project_scope {
-        profile_bin :: cli_dev_shell_projection(&verification, plan.project_root, plan.environment) ?? {
-            theme.error_coded("E1335", "the active package profile cannot project into the dev shell", err.message(), "build and switch the named package profile, then retry the shell")
-            return Err(CLIError.Reported(EXIT_USAGE))
+        if cli_dev_shell_projection(&verification, plan.project_root, plan.environment) == {
+            .Val(path) -> &bin_dirs.push(path)
+            .None -> {}
+            .Err(error) -> {
+                theme.error_coded("E1335", "the active package profile cannot project into the dev shell", error.message(), "build and switch the named package profile, then retry the shell")
+                return Err(CLIError.Reported(EXIT_USAGE))
+            }
         }
-        if profile_bin == .Val(path) -> &bin_dirs.push(path)
     }
     provider_vars := [String: [String]]{}
     provider_var_order := [String]{}
@@ -330,15 +350,7 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
     loop spec in plan.refs {
         if live_tty -> &live.set_aggregate_status("Resolving {spec.package}", completed_steps, total_steps)
         style :: if live_mode -> RowStyle.Silent else -> RowStyle.Ready
-        warm_hit :: if warm_realizations == {
-            .Val(index) -> {
-                pool := index
-                taken :: cli_take_warm_realization(&pool, spec.raw)
-                warm_realizations = Val(pool)
-                taken
-            }
-            .None -> None
-        }
+        warm_hit :: cli_take_warm_realization(&warm_pool, spec.raw)
         step_outcome :: if warm_hit == {
             .Val(realized) -> {
                 parts :: ^realized.into_parts()
@@ -404,15 +416,7 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
         &live.clear()
         if total_steps > 1 && !warm_complete -> theme.progress_chain("Adapt", plan.refs.len() + index + 1, total_steps, adapter.name, "adapter")
         warm_reference :: "adapt:{adapter.name}:{adapter.source}"
-        warm_hit :: if warm_realizations == {
-            .Val(pool_index) -> {
-                pool := pool_index
-                taken :: cli_take_warm_realization(&pool, warm_reference)
-                warm_realizations = Val(pool)
-                taken
-            }
-            .None -> None
-        }
+        warm_hit :: cli_take_warm_realization(&warm_pool, warm_reference)
         adapter_outcome :: if warm_hit == {
             .Val(realized) -> {
                 parts :: ^realized.into_parts()
@@ -453,7 +457,7 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
         theme.error_coded("E1333", "a language pack tool is missing from the realized environment", "missing required language tools: {missing_language_tools.join(", ")}", "realize the pack's declared packages again, or remove the language selection until its tools are available")
         return Err(CLIError.Reported(EXIT_USAGE))
     }
-    native_projection :: if project_scope -> Val(cli_native_environment_projection(plan.project_root, realized_outputs, sys.get("LD_LIBRARY_PATH"))) else -> None
+    native_projection :: if project_scope -> Val(cli_native_environment_projection(plan.project_root, realized_outputs, cli_native_dev_tool_paths(cli_native_dev_tool_bindings()), sys.get("LD_LIBRARY_PATH"))) else -> None
     if native_projection == .Val(projection) {
         loop dir in projection.bin_dirs() -> &bin_dirs.push(dir)
     }
@@ -536,7 +540,7 @@ struct ProviderMetadataFile {
     variable: String
 }
 
-CLI_PROVIDER_METADATA_FILES :: prep { [ProviderMetadataFile]{
+CLI_PROVIDER_METADATA_FILES :: comptime { [ProviderMetadataFile]{
     {file: "lua-path", variable: "LUA_PATH"},
     {file: "lua-cpath", variable: "LUA_CPATH"},
     {file: "gem-home", variable: "GEM_HOME"},
@@ -658,7 +662,7 @@ fn cli_validate_integration_host_check(check: String, target: String) CLIError! 
 }
 
 // A checked dotenv snapshot, narrowed to `allow` when it names keys.
-fn cli_read_dotenv_snapshot(root: String, relative: String, allow: [String]) -[FS]> [String: String] CLIError! {
+fn cli_read_dotenv_snapshot(root: String, relative: String, allow: [String]) -[FS, Env]> [String: String] CLIError! {
     bytes :: envmodel_checked_dotenv_snapshot(root, relative) ?? return Err(CLIError.InvalidData(err.message))
     values :: cli_read_dotenv(bytes)
     if allow.len() == 0 -> return Ok(values)

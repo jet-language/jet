@@ -1,6 +1,6 @@
 # Runtime-only unit for E2 export lowering and narrow runtime checks.
-# Runtime-only sources stay out of the compiler aggregate; explicitly listed
-# shared sources (such as OS/Linux.jet) also join Compiler/Bootstrap/sources.list.
+# Runtime-only sources stay out of the compiler; explicitly listed shared
+# sources (such as OS/Linux.jet) are also members of the compiler's packages.
 Compiler/JetBackend/Source/OS/Linux.jet
 Compiler/JetBackend/Source/RealtimeABI.jet
 Compiler/JetBackend/Source/ErrLayout.jet
@@ -73,7 +73,6 @@ Compiler/JetRuntime/Source/TaskStatus.jet
 Compiler/JetRuntime/Source/SimdLaneHandles.jet
 Compiler/JetBackend/Source/ByteHandlesABI.jet
 Compiler/JetRuntime/Source/ByteHandles.jet
-Compiler/JetRuntime/Source/RowPolicyHandles.jet
 Compiler/JetRuntime/Source/EventEnumHandles.jet
 Compiler/JetRuntime/Source/Events.jet
 Compiler/JetRuntime/Source/DataLimits.jet
@@ -87,6 +86,7 @@ Compiler/JetRuntime/Source/ProcessExecutionReceipt.jet
 Compiler/JetRuntime/Source/ProcessExecutionLimits.jet
 Compiler/JetRuntime/Source/ProcessExecutionRoutes.jet
 Compiler/JetRuntime/Source/ProcessExecutionCollect.jet
+Compiler/JetRuntime/Source/ProcessPipeline.jet
 Compiler/JetRuntime/Source/ProcessExecutionCarriers.jet
 Compiler/JetRuntime/Source/EnvOverlay.jet
 Compiler/JetRuntime/Source/EnvRoutes.jet
@@ -103,6 +103,7 @@ Compiler/JetRuntime/Source/Condition.jet
 Compiler/JetRuntime/Source/SchedulerMessages.jet
 Compiler/JetRuntime/Source/Scheduler.jet
 Compiler/JetRuntime/Source/Comptime.jet
+Compiler/JetRuntime/Source/ComptimeServe.jet
 Compiler/JetRuntime/Source/Parallel.jet
 Compiler/JetRuntime/Source/Deadline.jet
 Compiler/JetBackend/Source/TaskOutcomeABI.jet
@@ -111,12 +112,12 @@ Compiler/JetRuntime/Source/TaskGroup.jet
 Compiler/JetRuntime/Source/TestMessages.jet
 Compiler/JetRuntime/Source/Test.jet
 Compiler/JetRuntime/Source/TestCapture.jet
+Compiler/JetRuntime/Source/TestHarness.jet
 Compiler/JetRuntime/Source/TestSuite.jet
 Compiler/JetRuntime/Source/Host.jet
 Compiler/JetRuntime/Source/HostProcess.jet
 Compiler/JetRuntime/Source/HostEnums.jet
 Compiler/JetRuntime/Source/HostIO.jet
-Compiler/JetRuntime/Source/TLSCarriers.jet
 Compiler/JetRuntime/Source/HostErrors.jet
 Compiler/JetRuntime/Source/HostStartup.jet
 Compiler/JetRuntime/Source/LogicalEnvironment.jet
@@ -132,6 +133,7 @@ Compiler/JetRuntime/Source/IpAddrShow.jet
 Compiler/JetRuntime/Source/NetRoutes.jet
 Compiler/JetRuntime/Source/NetHandleRoutes.jet
 Compiler/JetRuntime/Source/NetUnixConnect.jet
+Compiler/JetRuntime/Source/NetUnix.jet
 Compiler/JetRuntime/Source/HostTime.jet
 Compiler/JetRuntime/Source/HostFiles.jet
 Compiler/JetRuntime/Source/HostSpawn.jet
@@ -141,9 +143,6 @@ Compiler/JetRuntime/Source/Secret.jet
 Compiler/JetBackend/Source/EncodingABI.jet
 Compiler/JetRuntime/Source/EncodingErrors.jet
 Compiler/JetRuntime/Source/NetReadiness.jet
-Compiler/JetRuntime/Source/DbConnectionHandle.jet
-Compiler/JetRuntime/Source/TLSStreamHandle.jet
-Compiler/JetRuntime/Source/DbScopeHandle.jet
 Compiler/JetRuntime/Source/DeliveryHandle.jet
 Compiler/JetRuntime/Source/TCPStreamFields.jet
 Compiler/JetRuntime/Source/MailAddress.jet
@@ -261,10 +260,7 @@ Compiler/JetRuntime/Source/EmailError.jet
 Compiler/JetRuntime/Source/EmailTrust.jet
 Compiler/JetRuntime/Source/GeometryGlue.jet
 Compiler/JetRuntime/Source/HTTPBody.jet
-Compiler/JetRuntime/Source/HTTPCompress.jet
 Compiler/JetRuntime/Source/HTTPCookieJar.jet
-Compiler/JetRuntime/Source/HTTPCorsOrigins.jet
-Compiler/JetRuntime/Source/HTTPCorsPolicy.jet
 Compiler/JetRuntime/Source/HTTPErrors.jet
 Compiler/JetRuntime/Source/HTTPHeaders.jet
 Compiler/JetRuntime/Source/HTTPPrimitives.jet
@@ -272,9 +268,9 @@ Compiler/JetRuntime/Source/HTTPProxy.jet
 Compiler/JetRuntime/Source/HTTPRedirect.jet
 Compiler/JetRuntime/Source/HTTPRetry.jet
 Compiler/JetRuntime/Source/HTTPServerTls.jet
-Compiler/JetRuntime/Source/HTTPShutdownReport.jet
 Compiler/JetRuntime/Source/HostStartupOutputFacts.jet
 Compiler/JetRuntime/Source/MathGlue.jet
+Compiler/JetRuntime/Source/ClockHandle.jet
 Compiler/JetRuntime/Source/MemStorage.jet
 Compiler/JetRuntime/Source/NativeByteList.jet
 Compiler/JetRuntime/Source/NativeLayout.jet
@@ -303,3 +299,25 @@ Compiler/JetRuntime/Source/VaultTestHooks.jet
 Compiler/JetRuntime/Source/WorldHandleGlue.jet
 Compiler/JetRuntime/Source/XMLGlue.jet
 Compiler/JetRuntime/Source/DataPublicText.jet
+Compiler/JetRuntime/Source/RouteSys.jet
+Compiler/JetRuntime/Source/RouteTerm.jet
+Compiler/JetRuntime/Source/ProcessSignal.jet
+Compiler/JetRuntime/Source/Fault.jet
+Compiler/JetRuntime/Source/RouteTesting.jet
+Compiler/JetRuntime/Source/RouteBrowser.jet
+Compiler/JetRuntime/Source/RoutePath.jet
+Compiler/JetRuntime/Source/RoutePrecise.jet
+Compiler/JetRuntime/Source/RouteWatcher.jet
+Compiler/JetRuntime/Source/RouteNet.jet
+Compiler/JetRuntime/Source/RouteDns.jet
+Compiler/JetRuntime/Source/RouteAMath.jet
+Compiler/JetRuntime/Source/RouteALog.jet
+Compiler/JetRuntime/Source/RouteAFiles.jet
+Compiler/JetRuntime/Source/RouteAEncoding.jet
+Compiler/JetRuntime/Source/RouteACore.jet
+Compiler/JetRuntime/Source/RouteACrypto.jet
+Compiler/JetRuntime/Source/RouteAMail.jet
+Compiler/JetRuntime/Source/RouteAInterval.jet
+Compiler/JetRuntime/Source/RouteAGame.jet
+Compiler/JetRuntime/Source/RouteAFont.jet
+Compiler/JetRuntime/Source/RouteWeb.jet

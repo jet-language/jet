@@ -1,0 +1,53 @@
+#!/usr/bin/env jet
+// Mark queue packets deferred (owner 03:50: CoreLib/Prelude to be discussed; JIT retiring per D-EXEC1).
+// Usage: jet run Tools/agent/port/Defer.jet
+use core.files as files
+use core.process as process
+use core.term as term
+
+fn die(message: String) -> Never {
+    term.eprint(message)
+    process.exit(1)
+}
+
+fn run() {
+    home :: process.env_get("HOME") ?? die("HOME is not set")
+    wave :: "{home}/.cache/jet-dev/port/wave"
+    placed_text :: files.read("{wave}/PLACED.tsv") ?? die("cannot read {wave}/PLACED.tsv")
+    claims_text :: files.read("{wave}/CLAIMS.tsv") ?? die("cannot read {wave}/CLAIMS.tsv")
+
+    claims := [String:String]{}
+    loop line in claims_text.split("\n").to_list() {
+        if line == "" -> next
+        cols :: line.split("\t").to_list()
+        status :: if cols.len() > 2 -> cols[2].copy() else -> ""
+        claims[cols[0].copy()] = status
+    }
+
+    ids := [String]{}
+    seen := [String:Bool]{}
+    loop (index, line) in placed_text.split("\n").to_list() {
+        if index == 0 || line == "" -> next
+        cols :: line.split("\t").to_list()
+        if cols.len() < 4 -> next
+        rust :: cols[3].copy()
+        if !rust.starts_with("crates/jet-codegen/src/Prelude/") && !rust.starts_with("crates/jet-jit/") -> next
+        id :: cols[0].copy()
+        if seen.get(id) != None -> next
+        seen[id.copy()] = true
+        &ids.push(id)
+    }
+
+    stamp :: process.cmd(["date", "+%T"]).run() ?? die("cannot run date")
+    if stamp.code != 0 -> die("date failed")
+    t :: stamp.output.trim()
+    deferred := 0
+    loop id in ids {
+        st :: claims.get(id) ?? ""
+        if st == "done" || st == "claimed" -> next
+        line :: "{id}\tMain\tdeferred\t{t}\towner 03:50: CoreLib/Prelude discussion pending; jet-jit retiring (D-EXEC1)\n"
+        files.append_all("{wave}/CLAIMS.tsv", line) ?? die("cannot append {wave}/CLAIMS.tsv")
+        deferred += 1
+    }
+    term.print("{{\"matchedPackets\":{ids.len()},\"deferredNow\":{deferred}}}")
+}

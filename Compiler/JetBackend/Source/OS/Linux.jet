@@ -18,20 +18,53 @@
 // Docs/research/jet-backend-design-2026-10-01.md.
 use core.mem
 
-OS_SYS_READ :: prep { 0 }
-OS_SYS_WRITE :: prep { 1 }
-OS_SYS_MMAP :: prep { 9 }
-OS_SYS_MPROTECT :: prep { 10 }
-OS_SYS_MUNMAP :: prep { 11 }
-OS_SYS_EXIT_GROUP :: prep { 231 }
+OS_SYS_READ :: 0
+OS_SYS_WRITE :: 1
+OS_SYS_CLOSE :: 3
+OS_SYS_MMAP :: 9
+OS_SYS_MPROTECT :: 10
+OS_SYS_MUNMAP :: 11
+OS_SYS_BRK :: 12
+OS_SYS_RT_SIGACTION :: 13
+OS_SYS_RT_SIGPROCMASK :: 14
+OS_SYS_PREAD64 :: 17
+OS_SYS_DUP2 :: 33
+OS_SYS_NANOSLEEP :: 35
+OS_SYS_GETPID :: 39
+OS_SYS_EXECVE :: 59
+OS_SYS_FORK :: 57
+OS_SYS_WAIT4 :: 61
+OS_SYS_KILL :: 62
+OS_SYS_FCNTL :: 72
+OS_SYS_SIGALTSTACK :: 131
+OS_SYS_PRCTL :: 157
+OS_SYS_ARCH_PRCTL :: 158
+OS_SYS_EXIT_GROUP :: 231
+OS_SYS_OPENAT :: 257
+OS_SYS_PRLIMIT64 :: 302
+OS_SYS_GETRANDOM :: 318
+OS_SYS_MEMFD_CREATE :: 319
+OS_SYS_CLOSE_RANGE :: 436
 
-OS_PROT_READ :: prep { 1 }
-OS_PROT_WRITE :: prep { 2 }
-OS_PROT_EXEC :: prep { 4 }
+OS_PROT_READ :: 1
+OS_PROT_WRITE :: 2
+OS_PROT_EXEC :: 4
 
-OS_PAGE_SIZE :: prep { 4096 }
+OS_PAGE_SIZE :: 4096
 
-OS_MAP_PRIVATE_ANONYMOUS :: prep { 0x22 }
+OS_MAP_PRIVATE :: 0x02
+OS_MAP_PRIVATE_ANONYMOUS :: 0x22
+OS_MAP_NORESERVE :: 0x4000
+// Map exactly at the address, replacing what the caller had mapped there.
+OS_MAP_FIXED :: 0x10
+// Map exactly at the hint or fail with EEXIST; never replace a mapping.
+OS_MAP_FIXED_NOREPLACE :: 0x100000
+
+OS_AT_FDCWD :: -100
+OS_O_RDONLY_CLOEXEC :: 0x80000
+
+OS_EEXIST :: 17
+OS_EINTR :: 4
 
 // One raw system call with up to six arguments. Every input is pushed before
 // any argument register is written, so the operands may live in any register;
@@ -236,7 +269,6 @@ fn os_call_address_three_unit(address: Int, first: Int, second: Int, third: Int)
     """
 }
 
-
 #[Unsafe("calls machine code; the caller holds the mapping and its checked one-word Unit System V signature"), FFI(asm)]
 fn os_call_address_one_unit(address: Int, first: Int) {
     """
@@ -261,57 +293,6 @@ fn os_call_address_two_unit(address: Int, first: Int, second: Int) {
     call r11
     ; clobbers rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8, xmm9, xmm10, xmm11, xmm12, xmm13, xmm14, xmm15
     """
-}
-
-
-#[Unsafe("dlopen reads the NUL-terminated path at `path`"), FFI(c)]
-fn os_dl_open(path: Int) -> Int {
-    """
-    void *dlopen(const char *path, int flags);
-    int64_t os_dl_open(int64_t path) { return (int64_t)dlopen((const char *)path, 2); }
-    """
-}
-
-#[Unsafe("dlsym reads the NUL-terminated name at `name`"), FFI(c)]
-fn os_dl_symbol(library: Int, name: Int) -> Int {
-    """
-    void *dlsym(void *library, const char *name);
-    int64_t os_dl_symbol(int64_t library, int64_t name) { return (int64_t)dlsym((void *)library, (const char *)name); }
-    """
-}
-
-// `text` as a NUL-terminated string in a fresh mapping of
-// `os_page_round(text.len() + 1)` bytes, or 0.
-fn os_c_string(text: String) -> Int {
-    address :: os_map(text.len() + 1, OS_PROT_READ + OS_PROT_WRITE)
-    if os_failed(address) -> return 0
-    os_copy_in(address, text.bytes())
-    address
-}
-
-// Load the shared library at `path` into the process, binding every symbol
-// now. Returns its handle, or 0.
-fn os_library_open(path: String) -> Int {
-    name :: os_c_string(path)
-    if name == 0 -> return 0
-    library := 0
-    #Unsafe("`name` is a NUL-terminated copy of `path`") {
-        library = os_dl_open(name)
-    }
-    _ := os_unmap(name, path.len() + 1)
-    library
-}
-
-// The address of the exported symbol `symbol` of `library`, or 0.
-fn os_library_symbol(library: Int, symbol: String) -> Int {
-    name :: os_c_string(symbol)
-    if name == 0 -> return 0
-    address := 0
-    #Unsafe("`name` is a NUL-terminated copy of `symbol`; dlsym only reads the library's symbol table") {
-        address = os_dl_symbol(library, name)
-    }
-    _ := os_unmap(name, symbol.len() + 1)
-    address
 }
 
 // Runtime leaves use machine words, never exact Int: an allocator must not
@@ -663,9 +644,12 @@ fn os_call_address_two_i64(address: I64, first: I64, second: I64) -> I64 {
     """
 }
 
-// Fixture-only until libc leaves the pack: raw clone does not construct musl's
-// FS TLS or set __libc.threaded. Child stack is [entry,arg] and has a guard page;
-// parent/child TID words live until the kernel's CHILD_CLEARTID and join finish.
+// Raw clone runs the child at entry(arg) on the supplied stack [entry,arg]
+// and exits 0 if entry returns. It does not construct musl's FS TLS or set
+// __libc.threaded, so a thread made this way stays fixture-only until libc
+// leaves the pack; the spawn child (HostSpawn.jet spawn_vfork) only runs raw
+// syscalls before execve. A thread's stack has a guard page; parent/child TID
+// words live until the kernel's CHILD_CLEARTID and join finish.
 #[Unsafe("raw clone child runs only Jet/syscall code, never Rust or musl; supplied stack contains entry and argument"), FFI(asm)]
 fn os_clone_i64(flags: I64, stack: I64, parent_tid: I64, child_tid: I64) -> I64 {
     """
@@ -834,7 +818,6 @@ fn os_call5_i64(address: I64, a: I64, b: I64, c: I64, d: I64, e: I64) -> I64 {
     """
 }
 
-
 // Linux AT_EMPTY_PATH refers to the held source inode (FileHandles.rs), never
 // reopens an old pathname. The borrowed empty path is one stack-local zero.
 #[Unsafe("source and directory are live owned descriptors, name is terminated; linkat borrows a stack-local empty path and retains no pointer"), FFI(asm)]
@@ -858,7 +841,6 @@ fn os_link_fd_i64(source: I64, directory: I64, name: I64) -> I64 {
     """
 }
 
-
 #[Unsafe("ioctl reads one stack-local machine word with the supplied audited request and live fd; it retains no pointer and all pushes are balanced"), FFI(asm)]
 fn os_ioctl_word_i64(fd: I64, request: I64, word: I64) -> I64 {
     """
@@ -877,7 +859,6 @@ fn os_ioctl_word_i64(fd: I64, request: I64, word: I64) -> I64 {
     ; clobbers rcx, r11, rdi, rsi, rdx
     """
 }
-
 
 // Translate Linux stat144 to the portable 128-byte scalar StatFacts row.
 // Offsets: dev0 ino8 mode16 nlink24 uid32 gid40 rdev48 size56;
@@ -983,9 +964,8 @@ fn os_stat_facts_i64(number: I64, object: I64, output: I64) -> I64 {
     }
 }
 
-
-// Lower/Closures.jet:291-315 indirect calls require a closure header and pass
-// it as argument zero; a C void(void) entry address is not that representation.
+// An indirect call of a function value passes its closure header as argument
+// zero; a C void(void) entry address is not that representation.
 #[Unsafe("calls a checked System V void(void) process entry that remains executable for the entire call"), FFI(asm)]
 fn os_call0_unit(address: I64) {
     """
@@ -995,7 +975,6 @@ fn os_call0_unit(address: I64) {
     ; clobbers rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11
     """
 }
-
 
 #[Unsafe("directory and path identify a source-approved statx object; output lends three writable words; the zeroed 256-byte statx stack buffer never escapes"), FFI(asm)]
 fn os_statx_created_i64(directory: I64, path: I64, flags: I64, output: I64) -> I64 {

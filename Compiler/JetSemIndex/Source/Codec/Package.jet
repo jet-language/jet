@@ -5,11 +5,15 @@
 // model, resolver, or JSON parser. Presentation preserves Rust field order,
 // explicit nulls, raw number spelling, authored paths and vector duplicates.
 // S18 alone owns json_strings/json_string_array (145–154) and json_span.
-use jet_foundation.[foundation_json_quote, status_value_from_json_number_atom]
+use jet_foundation.[foundation_json_quote]
 use core.text as semindex_package_text
 // CP-REPORT-STATUS-API public visibility/provider gate: the actual canonical
 // Compiler Foundation Report owns these types, never the stale Jetpack copy.
-use jet_foundation.[StatusValue, StatusFields, ReportError]
+use jet_pkg_model.[
+    ConfigFacts, DepSource, EnvironmentFact, MemberRef, OutputFact, OutputPayload, OverlayPolicy,
+    PackageAuthority, PackageFacts, ServiceFact, TrustDecision, pkg_dep_display_redacted,
+]
+use jetpack_foundation.[ReportError, StatusFields]
 
 fn semindex_json_instance(value: InstanceFact) -> String Never! {
     provenance :: loop origins in value.argument_provenance -> semindex_json_string_array(origins)
@@ -95,7 +99,7 @@ fn semindex_json_package_authority(authority: PackageAuthority) -> String Never!
         &providers.push("{foundation_json_quote(provider.provider)}:{{\"registry\":{foundation_json_quote(provider.registry)},\"allow\":{semindex_json_string_array(provider.allow)},\"deny\":{semindex_json_string_array(provider.deny)}}}")
     }
     // Rust's wire deliberately omits the model's needs field.
-    "{{\"holds\":{{\"allow\":{semindex_json_optional_strings(authority.holds.allow)},\"deny\":{semindex_json_optional_strings(authority.holds.deny)}}},\"grants\":{{{grants.join(",")}}},\"trust\":{trust},\"providers\":{{{providers.join(",")}}}}}"
+    "{{\"allow\":{semindex_json_optional_strings(authority.allow)},\"deny\":{semindex_json_optional_strings(authority.deny)},\"grants\":{{{grants.join(",")}}},\"trust\":{trust},\"providers\":{{{providers.join(",")}}}}}"
 }
 
 // Rust json_string_map/json_service/json_services.
@@ -327,7 +331,7 @@ fn semindex_status_package_authority(authority: PackageAuthority) -> StatusValue
             .with("allow", semindex_status_strings(provider.allow)).with("deny", semindex_status_strings(provider.deny))))
     }
     Ok(StatusValue.Object(StatusFields.new()
-        .with("holds", StatusValue.Object(StatusFields.new().with("allow", semindex_status_optional_strings(authority.holds.allow)).with("deny", semindex_status_optional_strings(authority.holds.deny))))
+        .with("allow", semindex_status_optional_strings(authority.allow)).with("deny", semindex_status_optional_strings(authority.deny))
         .with("grants", StatusValue.Object(grants)).with("trust", trust).with("providers", StatusValue.Object(providers))))
 }
 fn semindex_status_string_map(values: [String: String]) -> StatusValue ReportError! {

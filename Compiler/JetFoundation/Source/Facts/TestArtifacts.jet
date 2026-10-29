@@ -1,0 +1,83 @@
+enum TTestKind { Unit Property }
+
+struct TTestParamFact {
+    index: Int
+    name: String
+    span: Span
+    ty: Type
+    convention: AccessConvention
+    label: String
+    zone: ParamZone
+    variadic: Bool
+    default_present: Bool
+}
+
+struct TTestFact {
+    key: String
+    function: TFunctionRef
+    name: String
+    span: Span
+    kind: TTestKind
+    parameters: [TTestParamFact]
+    faults: [String]
+    expected_failure: Bool
+    contract_generated: Bool
+    eligibility: TFunctionRef?
+    generation_unavailable_reason: String?
+}
+
+struct TOutputCheckFact {
+    key: String
+    name: String
+    function: TFunctionRef
+}
+
+fn checked_test_artifact_key(module_identity: String, test: TestDef) -> String Never! {
+    name := test.name ?? "anonymous"
+    local := "test::{name}@{test.span.start}..{test.span.end}"
+    if module_identity == "" -> local else -> "{module_identity}::{local}"
+}
+
+fn checked_test_artifact_function_ref(module_identity: String, test: TestDef) -> TFunctionRef Never! {
+    key := checked_test_artifact_key(module_identity, test)
+    TFunctionRef{
+        key: key,
+        module_identity: module_identity,
+        name: key,
+        span: test.span,
+        visibility: TVisibility.Private,
+    }
+}
+
+fn checked_test_artifact_fact(module_identity: String, test: TestDef) -> TTestFact Never! {
+    parameters := [TTestParamFact]{}
+    index := 0
+    loop parameter in test.params {
+        &parameters.push(TTestParamFact{
+            index: index,
+            name: parameter.name,
+            span: parameter.name_span,
+            ty: parameter.ty,
+            convention: parameter.convention,
+            label: parameter.public_label.map((label) -> label.name) ?? parameter.name,
+            zone: parameter.zone,
+            variadic: parameter.variadic,
+            default_present: parameter.default != None,
+        })
+        index += 1
+    }
+    key := checked_test_artifact_key(module_identity, test)
+    TTestFact{
+        key: key,
+        function: checked_test_artifact_function_ref(module_identity, test),
+        name: test.name ?? key,
+        span: test.span,
+        kind: if test.params.len() == 0 -> TTestKind.Unit else -> TTestKind.Property,
+        parameters: parameters,
+        faults: test.faults,
+        expected_failure: test.expected_fail,
+        contract_generated: false,
+        eligibility: None,
+        generation_unavailable_reason: None,
+    }
+}

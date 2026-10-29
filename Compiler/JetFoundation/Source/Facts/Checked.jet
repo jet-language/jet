@@ -1,0 +1,866 @@
+// Checked facts that sema attaches to checked bodies and that IR lowering reads: codec traits,
+// shared lifetimes, authority decisions, component descriptors, typed literal heads, copy facts.
+
+struct TraitID { value: U64 }
+
+fn trait_ref_id(identity: String) -> TraitID Never! { TraitID{value: stable_id("trait", identity)} }
+
+enum SerdeCodec { Encode Decode }
+
+struct TraitRef { id: TraitID, name: String }
+
+fn trait_ref_named(name: String) -> TraitRef Never! {
+    TraitRef{id: trait_ref_id(name), name: name}
+}
+
+// The registered native Codec definitions, shared by checking and lowering.
+fn builtin_codec_trait_name(codec: SerdeCodec) -> String Never! {
+    if codec == {
+        .Encode -> "Encode"
+        .Decode -> "Decode"
+    }
+}
+
+fn builtin_codec_trait_ref(codec: SerdeCodec) -> TraitRef Never! {
+    trait_ref_named(builtin_codec_trait_name(codec))
+}
+
+struct HostImportFact {
+    id: String
+    operation: String
+    required_right: String
+    parameter_type_ids: [String]
+    result_type_id: String?
+}
+
+struct AuthorityDecision {
+    import: HostImportFact
+    authority_argument: Int?
+    inherited: Bool
+}
+
+// Core publication sites use the same Global path as module storage. The
+// initializer declaration, not a callsite, supplies their identity.
+enum SharedLifetime { Process World Thread Attempt }
+
+fn shared_lifetime_core_member(name: String) -> SharedLifetime? Never! {
+    if name == {
+        "__process_shared" -> Val(SharedLifetime.Process)
+        "__world_shared" -> Val(SharedLifetime.World)
+        "__thread_shared" -> Val(SharedLifetime.Thread)
+        "__attempt_shared" -> Val(SharedLifetime.Attempt)
+        else -> None
+    }
+}
+
+// Both decimals are canonical BigInt keys, so sign, digit count, then lexical
+// order compare their exact numeric values without parsing or allocating limbs.
+fn big_integer_key_compare(left: String, right: String) -> Int Never! {
+    left_negative :: left.starts_with("-")
+    right_negative :: right.starts_with("-")
+    if left_negative != right_negative -> return if left_negative -> -1 else -> 1
+    order :: if left.len() < right.len() -> -1 else -> if left.len() > right.len() -> 1 else -> if left < right -> -1 else -> if left > right -> 1 else -> 0
+    if left_negative -> -order else -> order
+}
+
+enum ComponentTypeDescriptor {
+    Int
+    Float
+    Bool
+    String
+    List(inner: ComponentTypeDescriptor)
+    Option(inner: ComponentTypeDescriptor)
+    Result(ok: ComponentTypeDescriptor, err: ComponentTypeDescriptor)
+    Record(name: String, fields: [ComponentTypeField])
+}
+
+struct ComponentTypeField {
+    index: Int
+    name: String
+    ty: ComponentTypeDescriptor
+}
+
+struct ComponentSignatureDescriptor {
+    params: [ComponentTypeDescriptor]
+    result: ComponentTypeDescriptor
+}
+
+enum HTTPRouteMethod { Get Post Put Delete Patch Head Options }
+
+enum TypedHeadKind { SQL HTML Sh URL Path DateTime }
+
+// The shared boundary-head classification, mirrored by Syntax::typed_head_kind.
+fn typed_head_kind_of(head: Type) -> TypedHeadKind? {
+    if head == {
+        .Named(name) -> {
+            if name == "SQL" -> return Val(TypedHeadKind.SQL)
+            if name == "HTML" -> return Val(TypedHeadKind.HTML)
+            if name == "Sh" -> return Val(TypedHeadKind.Sh)
+            if name == "URL" -> return Val(TypedHeadKind.URL)
+            if name == "Path" -> return Val(TypedHeadKind.Path)
+            if name == "DateTime" -> return Val(TypedHeadKind.DateTime)
+        }
+        else -> {}
+    }
+    None
+}
+
+// The Core module whose runtime serves a boundary typed head (its usage and
+// linkage key), not necessarily a record of the same type.
+fn boundary_head_owner_module(name: String) -> String? {
+    if name == "Path" -> return Val("core.files")
+    boundary_head_carrier_module(name)
+}
+
+// The Core module whose same-named record is the built-in value. Path stays
+// the native boundary carrier, distinct from core.files.path's record.
+fn boundary_head_carrier_module(name: String) -> String? {
+    if name == "URL" -> return Val("core.net.url")
+    if name == "DateTime" -> return Val("core.time")
+    if name == "HTML" -> return Val("core.text.html")
+    if name == "Sh" -> return Val("core.process")
+    if name == "SQL" -> return Val("core.db")
+    None
+}
+
+struct TypedHeadLiteralConstructor {
+    module_name: String
+    member: String
+}
+
+// The Core function that builds a holed `Head{"…{x}…"}` literal from its
+// literal pieces and hole values. DateTime literals have no holes.
+fn typed_head_literal_constructor(kind: TypedHeadKind) -> TypedHeadLiteralConstructor? {
+    if kind == {
+        .URL -> Val(TypedHeadLiteralConstructor{module_name: "core.net.url", member: "literal"})
+        .Path -> Val(TypedHeadLiteralConstructor{module_name: "core.files", member: "__path_literal"})
+        .HTML -> Val(TypedHeadLiteralConstructor{module_name: "core.text.html", member: "__html_literal"})
+        .Sh -> Val(TypedHeadLiteralConstructor{module_name: "core.process", member: "__sh_literal"})
+        .SQL -> Val(TypedHeadLiteralConstructor{module_name: "core.db", member: "__sql_literal"})
+        .DateTime -> None
+    }
+}
+
+// #4318: why a checked clone duplicates its operand. Every copy carries the
+// sema decision that made it; lowering and backends never print a clone
+// without one.
+enum CopyFact { Explicit Materialize Share Scalar ViewMaterialize }
+
+// Checked facts sema publishes beside each function's flat body (Facts/Body.jet):
+// locals, method and call facts, constants, type and impl rows. The checker's
+// own expression tree is private to JetSema (Sema/Tree.jet).
+
+enum TAddressLifetime {
+    Stack
+    Heap
+    Static
+    Borrowed
+    Foreign
+    Unknown
+}
+
+struct TIntegerBounds {
+    lo: Int
+    hi: Int
+}
+
+fn integer_bounds_exact(value: Int) -> TIntegerBounds Never! {
+    TIntegerBounds{lo: value, hi: value}
+}
+
+struct TLocal {
+    name: String
+    symbol_id: SymbolID?{None}
+    span: Span
+    generated: Bool
+    deref: Bool
+    address_lifetime: TAddressLifetime?
+    persist_key: String?
+    persist_ty: Type?
+    mutable: Bool
+    string_bytes_source: TLocal?
+    integer_bounds: TIntegerBounds?
+    uninit_scalar: Bool
+    uninit_fixed: Bool
+    // The checked `^p` of a match payload binding whose subject sema marked
+    // partially moved (sema_ownership_move_pattern_payload): lowering may
+    // take the payload out of the subject's storage instead of copying it.
+    payload_take: Bool{false}
+    // A read-only binding of a place (`x :: rows[i]`) that reads the place
+    // itself instead of a copy: sema proved neither the binding nor the
+    // variable the place reads is written, moved or captured while it lives
+    // (JetSema Ownership/PlaceBorrows.jet).
+    place_borrow: Bool{false}
+}
+
+fn checked_user_local(name: String, span: Span) -> TLocal Never! {
+    TLocal{name: name, span: span, generated: false, deref: false, address_lifetime: None, persist_key: None, persist_ty: None, mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false}
+}
+
+fn checked_symbol_local(name: String, span: Span, symbol_id: SymbolID) -> TLocal Never! {
+    local := checked_user_local(name, span)
+    local.symbol_id = Val(symbol_id)
+    local
+}
+
+fn checked_generated_local(name: String, span: Span) -> TLocal Never! {
+    TLocal{name: name, span: span, generated: true, deref: false, address_lifetime: None, persist_key: None, persist_ty: None, mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false}
+}
+
+fn checked_persistent_local(name: String, module_name: String, ty: Type, span: Span) -> TLocal Never! {
+    TLocal{name: name, span: span, generated: false, deref: false, address_lifetime: Val(TAddressLifetime.Static), persist_key: Val("{module_name}::{name}"), persist_ty: Val(ty), mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false}
+}
+
+enum TBinaryOp {
+    Add
+    Sub
+    Mul
+    Div
+    FloorDiv
+    Mod
+    Rem
+    Pow
+    BitAnd
+    BitOr
+    BitXor
+    Shl
+    Shr
+    Eq
+    Ne
+    Lt
+    Gt
+    Le
+    Ge
+    Compare
+    And
+    Or
+}
+
+enum TUnaryOp {
+    Neg
+    Not
+}
+
+enum TIndexKind {
+    List
+    Range
+    FixedListProof
+    Map
+    Lane(name: String)
+    User(name: String)
+    LayoutField(name: String)
+    Pool
+}
+
+enum TStrFormat {
+    Display
+    Debug
+    Pretty
+    Fixed(digits: Int)
+    Grouped(digits: Int)
+    Hex(digits: Int)
+    Pad(width: Int, fill: String)
+    PadLeft(width: Int, fill: String)
+    Sci(digits: Int)
+    Percent(digits: Int)
+    Bin
+    Oct
+    Unit(format: TUnitFormat)
+}
+
+enum TUnitFormat {
+    Symbol
+    Name
+    Bare
+}
+
+struct TFnCoerce {
+    ty: Type
+    already_boxed: Bool
+}
+
+struct TFieldRef {
+    owner: SymbolID?
+    field: SymbolID
+    name: String
+    ty: Type
+    boxed: Bool
+}
+
+enum TAllocCtor {
+    Arena
+    Bump
+    Pool
+    Fixed(size: Int)
+    FixedOver
+}
+
+enum TPatternPosition {
+    Binding
+    Arm
+}
+
+struct TPatternBindingFact {
+    name: String
+    span: Span
+    ty: Type
+    mutable: Bool
+    symbol_id: SymbolID?
+}
+
+struct TListPatternRest {
+    name: String?
+    span: Span
+}
+
+enum TTextPatternPart {
+    Literal(value: String)
+    Hole(name: String, ty: Type, span: Span)
+}
+
+enum TBinaryPatternPart {
+    Literal(value: [U8])
+    Bits(name: String, width: Int, big_endian: Bool, ty: Type, span: Span)
+    Rest(name: String, ty: Type, span: Span)
+}
+
+enum TLetWrapper {
+    Plain
+    AutomaticRoot
+}
+
+enum TLetTy {
+    Inferred
+    StrView
+    Annotated(ty: Type, wrapper: TLetWrapper)
+}
+
+struct TGCPromotion {
+    span: Span
+    scope: String
+    policy_provenance: String
+    reason: String
+    edges: [TGCPromotionEdge]
+    collection_len: Int?
+}
+
+struct TGCPromotionEdge {
+    binding: String
+    slot: String
+    group: Int
+}
+
+enum TContractKind { Pre Post }
+
+enum TContractDisposition { Check Proven Stripped }
+
+struct TContractResult {
+    carrier_ty: Type
+    binding_ty: Type
+    carrier_local: TLocal
+    binding_local: TLocal
+    mode: TContractResultMode
+}
+
+struct TDestructureBinding {
+    local: TLocal
+    field: String
+}
+
+struct TTransactionSnapshot {
+    local: TLocal
+    rollback_type: Type?
+    snapshot_method: TMethodRef?
+    restore_method: TMethodRef?
+}
+
+struct TUnsafeGate {
+    file: String
+    line: Int
+    reason: String
+    enabled: Bool
+    fenced: Bool
+}
+
+enum TUnitRoundingMode {
+    TowardZero
+    Floor
+    Ceiling
+    NearestEven
+}
+
+// One row of a function's expression-type column: the type of the nodes
+// whose `id` is `id`, as its index in the tree's `types` (type_table_intern).
+struct TExprType {
+    id: Int
+    ty: Int
+}
+
+struct TIntegerWidth {
+    signed: Bool
+    bits: Int
+}
+
+enum TBranchClass {
+    Enum
+    DenseInt
+}
+
+enum TForInMethod {
+    Chars
+    LinesFile
+    LinesStdin
+    LinesProcessStream
+    ChannelReceiver
+    EncodingReader(reader_type: String)
+    Iterable(coll_type: String, iter_type: String, iter_symbol: String, next_symbol: String, item_type: Type)
+}
+
+enum TPreludeArg {
+    Jet(ty: Type)
+    HostUsize
+}
+
+enum TStaticOwner {
+    User(name: String)
+    Prelude(rooted: Bool, path: String, generics: [TPreludeArg])
+}
+
+enum TOptionProbe {
+    Unwrap
+    Field(name: String)
+}
+
+enum TClosureOp {
+    EditDisjoint
+    Map
+    MapMut
+    TryMap
+    Filter
+    TryFilter
+    Each
+    EachMut
+    EachMap
+    MapAny
+    MapAll
+    MapFilter
+    MapMap
+    MapFold
+    MapFlatMap
+    ListBinarySearchBy
+    ListMinMaxBy
+    Find
+    Any
+    BagAny
+    All
+    CountWhere
+    SortBy
+    SortByDesc
+    TrySortBy
+    TrySortByDesc
+    SortByCompare
+    Reduce
+    TakeWhile
+    SkipWhile
+    FlatMap
+    Scan
+    Position
+    MinBy
+    MaxBy
+    Fold
+    GroupBy
+    CountBy
+    UpdateFirst
+    Partition
+    DedupBy
+    IsSortedBy
+    ChunkWhile
+    FilterMap
+    ParaMap
+    ParaFilter
+    ParaPartition
+    ParaFold
+    OptionMap
+    ViewFold
+    ViewMap
+}
+
+enum THardwareCall {
+    RegisterRead(profile_id: String, block: String, register: String, width: RegisterWidth)
+    RegisterWrite(profile_id: String, block: String, register: String, width: RegisterWidth)
+    DMAStart(profile_id: String, channel: String, buffer_ty: Type)
+    DMAWait(profile_id: String, channel: String, buffer_ty: Type)
+}
+
+struct TCanonicalField {
+    name: String
+    ty: Type
+}
+
+enum TListRemoveMode {
+    Value
+    Slot
+    Dynamic
+}
+
+enum TZipMode {
+    Strict
+    Short
+    Pad
+}
+
+enum TZipFillMode {
+    DefaultNone
+    Common
+    Columns
+}
+
+enum TBuiltinOp {
+    AtomicMethod(method: String)
+    LenString
+    LenList
+    IsEmpty
+    Push
+    ListTryNew
+    ListTryWithCapacity
+    TryPush
+    TryReserve
+    TryInsertMap
+    TryStringPush
+    Pop
+    PriorityQueuePop
+    InsertMap
+    AddNewMap
+    MapSetDefault
+    MapUpdate
+    MapMerge
+    MapMergeWith
+    InsertList
+    RemoveMap
+    RemoveList(line: Int, mode: TListRemoveMode)
+    CountList
+    Counts
+    ExtendList
+    ConcatList
+    GetMap
+    GetList
+    First
+    Last
+    Contains
+    IndexOf
+    Reverse
+    SwapList
+    Sort
+    SortDesc
+    OrderingThen
+    OrderingReverse
+    JoinSep
+    Sum(float: Bool, f32: Bool)
+    Product(float: Bool)
+    Min(float: Bool)
+    Max(float: Bool)
+    Flatten
+    Intersperse
+    Unzip
+    Clear
+    Chars
+    Bytes(owned: Bool)
+    StringFromBytes
+    StringFromBytesLossy
+    Trim
+    TrimStart
+    TrimEnd
+    PadStart
+    PadEnd
+    StringIndexOf
+    StringCount
+    StringIsAlphabetic
+    StringIsNumeric
+    StringIsWhitespace
+    StringIsASCII
+    StringToTitle
+    StringMethod(method: String)
+    StringSplitOnce
+    StringCutLast
+    Split
+    Lines
+    ParseInt
+    ParseFloat
+    IntToRadix
+    IntFromRadix
+    StartsWith
+    EndsWith
+    Replace
+    ToUpper
+    ToLower
+    ToASCIILower
+    ToASCIIUpper
+    Repeat
+    Slice(line: Int)
+    After
+    Before
+    TrimView
+    AfterView
+    BeforeView
+    Keys
+    Values
+    ContainsKey
+    ToString
+    Take
+    Skip
+    IterToList
+    IterCollect
+    ListLazy
+    StepBy
+    Dedup
+    Chunks
+    Windows
+    IterRepeat
+    IterCycle
+    IterDropLast
+    IterNext
+    IterShuffle
+    IterIsSorted
+    IterLastIndexOf
+    IterAverage(float: Bool)
+    IterCompare
+    IterSplit
+    ListSlice
+    ListEqual
+    ListBinarySearch
+    ListUnion
+    ListIntersection
+    ListDifference
+    ListRandom
+    ListMinMax
+    MapEqual
+    MapFirst
+    MapToList
+    MapTopN
+    MapMin
+    MapMax
+    MapIntersection
+    MapSliceKeys
+    MapFromKeys
+    MapContainsValue
+    MapPopFirst
+    ListReplace
+    Indexed
+    Indexes
+    Zip(mode: TZipMode, fields: [String], flatten: Bool, input_count: Int, fill_mode: TZipFillMode, field_types: [Type])
+    OptionZip(elem_ty: Type)
+    SetFrom
+    SetInsert
+    SetUpdate
+    SetDifferenceUpdate
+    SetIntersectionUpdate
+    SetSymmetricDifferenceUpdate
+    SetRemove
+    SetToList
+    SetUnion
+    SetIntersection
+    SetDifference
+    SetSymmetricDifference
+    SetIsSubset
+    SetIsSuperset
+    SetIsDisjoint
+    SetEqual
+    SetCapacity
+    SetFirst
+    SetValues
+    SetPop
+    SetReplace
+    SetSort
+    SetShuffle
+    SortedSetFrom
+    SortedSetInsert
+    SortedSetRemove
+    SortedSetToList
+    SortedSetUnion
+    SortedSetIntersection
+    SortedSetDifference
+    SortedSetSymmetricDifference
+    SortedSetIsSubset
+    SortedSetIsSuperset
+    SortedSetIsDisjoint
+    PriorityQueueFrom
+    PriorityQueuePeek
+    PriorityQueueToSortedList
+    PriorityQueueRemove(line: Int, mode: TListRemoveMode)
+    LRUPut
+    LRUAddNew
+    LRUGet
+    LRURemove
+    LRUCapacity
+    LRUKeys
+    BitSetAdd
+    BitSetRemove
+    BitSetCount
+    BitSetToList
+    ByteBufferFrom
+    ByteBufferWrite(method: String)
+    ByteBufferToBytes
+    ByteBufferMethod(method: String)
+    ByteBufferWithCapacity
+    BagAdd
+    BagRemove
+    BagHas
+    BagCount
+    DequePushFront
+    DequePushBack
+    DequePopFront
+    DequePopBack
+    DequePeekFront
+    DequePeekBack
+    DequeCapacity
+    DequeContains
+    DequeGet
+    DequeDelete
+    DequeToList
+    DequeJoin
+    DequeReverse
+    DequeSplit
+    DequeFrom
+    TryCollect
+    ViewNew(line: Int)
+    SplitWrite
+    GetDisjointWrite
+}
+
+struct TMethodRef {
+    symbol: SymbolID
+    name: String
+    mangled: Bool
+    trait_owner: SymbolID?
+    operator_identity: String?
+}
+
+enum TNumericOp {
+    Predicate(name: String)
+    BitCount(method: String, width: Int)
+    CastAs(dst_rust: String)
+    CheckedIntToFloat(source_signed: Bool, target_f32: Bool, line: Int)
+    CheckedIntToFixed(host_kind: Int, line: Int)
+    TryFrom(host_kind: Int)
+    FloatToInt(host_kind: Int)
+    FloatNarrow
+    InlineRange(lo: Int, hi: Int, fallible: Bool)
+    ToShow
+    EuclideanDiv
+    EuclideanRem
+}
+
+struct TPanicLoc {
+    file: String
+    source_line: String
+    line: Int
+    column: Int
+    caret: Int
+    function: String
+    locals: [TPanicLocal]
+}
+
+struct TPanicLocal {
+    display_name: String
+    local: TLocal
+}
+
+enum TTryConvert {
+    NoConversion
+    Never
+    DefaultErr
+    Typed(fn_name: String, source: Type, target: Type)
+    WidenUnion(enum_name: String, tag: String)
+}
+
+enum TFailureCarrier {
+    Infallible
+    Result(success: Type, error: Type)
+    Optional(value: Type)
+    Diverges(value: Type)
+}
+
+struct TCaptureFacts {
+    escapes: Bool
+    needs_fn_mut: Bool
+    mutable: [String]
+    cloned: [String]
+    frozen: [String]
+    materialized: [String]
+    moved: [String]
+}
+
+struct TCapture {
+    source: String
+    local: TLocal
+    ty: Type
+}
+
+struct TWebParamReconstruction {
+    local: TLocal
+    ty: Type
+    fields: [TWebParamField]
+}
+
+struct TWebParamField {
+    field: String
+    parameter: String
+    ty: Type
+}
+
+struct TOriginProjection {
+    receiver: String?
+    span: Span
+    value: TComptimeValue
+}
+
+// A `todo` goal checked in a function body: its source and the card naming
+// the expected type, which is kept apart from the fallback type used to keep
+// checking an unconstrained `todo`.
+struct TTypedGoal {
+    span: Span
+    expected: String
+}
+
+enum TContractResultMode { Direct ResultPayload OptionPayload }
+
+enum TSerdeCodec { Encode Decode }
+
+enum TFuncKind {
+    TopLevel
+    Method(self_convention: AccessConvention?, owner_type: Type)
+    TraitMethod(is_unsafe: Bool, self_convention: AccessConvention?, owner_type: Type, trait_name: SymbolID, serde_codec: TSerdeCodec?)
+}
+
+enum TCostKind {
+    ViewMaterialization
+    CollectionCopyOnWrite
+    ExactIntSpill
+    OutcomeConstruction
+    RepresentationFallback
+}
+
+enum TCostState {
+    SemanticRemainder
+    OptimizerRemoved
+}
+
+// The index in the tree's `types` that a body's sorted rows
+// (BodyTree.expr_types) file for node id `id`.
+fn checked_expr_type_id(rows: [TExprType], id: Int) -> Int? Never! {
+    low := 0
+    high := rows.len()
+    loop low < high {
+        middle :: (low + high) /% 2
+        if rows[middle].id < id -> low = middle + 1 else -> high = middle
+    }
+    if low < rows.len() && rows[low].id == id -> return Val(rows[low].ty)
+    None
+}
+
+// The first function-local id the checker hands out (sema_check_record_expr_id).
+TEXPR_FIRST_LOCAL_ID :: -2
+
+// The first flat-local id the flattener (body_flat_expr) hands a node the
+// checker gave no id, far below the checker's function-local ids.
+TEXPR_FIRST_FLAT_ID :: -549755813888

@@ -10,12 +10,13 @@ use core.sys.host.os_path_ingress as lsp_env_sys
 use core.process.host.native_process as lsp_env_process
 use jet_foundation.[foundation_parse_protocol_json, foundation_json_quote]
 use jetpack.[ENV_FILE, env_hook_find_env_root]
+use jetpack_foundation.[ENV_FILE]
 
-LSP_ENVIRONMENT_RESOURCE_URI :: prep { "jet://environment" }
-LSP_ENVIRONMENT_RESOURCE_MIME_TYPE :: prep { "application/json" }
+LSP_ENVIRONMENT_RESOURCE_URI :: "jet://environment"
+LSP_ENVIRONMENT_RESOURCE_MIME_TYPE :: "application/json"
 // Foundation's strict protocol JSON limit is 1 MiB (JSON.rs); the original
 // resource caps raw stdout BEFORE UTF8 decoding, trimming, or JSON parsing.
-LSP_MAX_ENVIRONMENT_RESOURCE_TEXT_BYTES :: prep { 1048576 / 4 }
+LSP_MAX_ENVIRONMENT_RESOURCE_TEXT_BYTES :: comptime { 1048576 / 4 }
 
 #Error
 enum LSPEnvironmentResourceReadError {

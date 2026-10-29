@@ -1,6 +1,8 @@
 # PORT tests/core_crypto_foundations.rs:123-137.
-# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+# Owner ruling #4276: an immutable module constant with computed elements is
+# tried at build time and folds; it was E0622 before the ruling, which this
+# case's name still records.
 fixture: module_array_constants_reject_computed_elements_in_sema.fixture
-step: jet check main.jet
-exit: nonzero
-stdout+stderr: ~ "E0622"
+step: jet run main.jet
+exit: 0
+stdout: = "[3]\n"

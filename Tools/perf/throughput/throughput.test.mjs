@@ -21,7 +21,7 @@ test('mixed is deterministic, sized by code lines, and pinned', () => {
   assert.ok(a.stats.code_lines >= 2000);
   assert.equal(countLines(a.files['main.jet']).code, a.stats.code_lines);
   assert.match(a.expected, /^mixed checksum \d+ sections \d+\n$/);
-  assert.match(a.files['main.jet'], /prep \{/);
+  assert.match(a.files['main.jet'], /comptime \{/);
   assert.match(a.files['main.jet'], /fn pick_m0<T>/);
   assert.match(a.files['main.jet'], /\.map\(\(value\) ->/);
   for (const [id, pin] of Object.entries(PINS.programs)) {

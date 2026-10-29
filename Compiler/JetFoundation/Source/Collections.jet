@@ -1,9 +1,9 @@
-// Canonical structural collection contracts shared by Source Sema and TIR lowering.
+// Canonical structural collection contracts shared by Source Sema and IR lowering.
 // Zip and para_* are intentionally owned by their dedicated checkers.
 //
 // Every collection and Iter operation is one checked row in
 // COLLECTION_OPERATIONS. Arity, receiver access, argument and callback shapes,
-// the result projection, the TIR operation, the Mem effect and the documented
+// the result projection, the checked operation, the Mem effect and the documented
 // law are all read from that row; no other table repeats them. Each row names
 // one COLLECTION_LAWS entry that states its timing, result ownership, callback
 // count and order, stop-item consumption, failure channel and buffering.
@@ -186,8 +186,9 @@ enum CollectionResult {
     DisjointUnit
 }
 
-// TIR producer. Fixed operations carry their TIR op; the others select one from
-// the checked callback and element facts at the call site.
+// The checked operation a row produces. Fixed operations carry their builtin
+// or closure op; the others select one from the checked callback and element
+// facts at the call site.
 enum CollectionOp {
     Builtin(op: TBuiltinOp)
     Closure(op: TClosureOp)
@@ -290,7 +291,7 @@ struct SemaCollectionMethodContract {
 }
 
 // BEGIN COLLECTION LAWS
-COLLECTION_LAWS :: prep { [CollectionLawFacts]{
+COLLECTION_LAWS :: comptime { [CollectionLawFacts]{
     {law: CollectionLaw.Measure, timing: "eager", result: "a fresh scalar", callbacks: "none", stop: "an iterator receiver is consumed whole", failure: "none", buffering: "none"},
     {law: CollectionLaw.Lookup, timing: "eager", result: "an optional copy of the found item or index", callbacks: "none", stop: "an iterator receiver is consumed and cannot be resumed", failure: "absence is None", buffering: "none"},
     {law: CollectionLaw.Mutate, timing: "eager, in place", result: "Unit, a Bool, or the displaced item", callbacks: "none", stop: "not applicable", failure: "absence is None; no error channel", buffering: "the receiver's own storage"},
@@ -316,7 +317,7 @@ COLLECTION_LAWS :: prep { [CollectionLawFacts]{
 // END COLLECTION LAWS
 
 // BEGIN COLLECTION OPERATIONS
-COLLECTION_OPERATIONS :: prep { [CollectionOperationRow]{
+COLLECTION_OPERATIONS :: comptime { [CollectionOperationRow]{
     {receivers: CollectionReceivers.Set, name: "map", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.ItemFn}, result: CollectionResult.ListMapped, op: CollectionOp.SetMap, law: CollectionLaw.Visit, empty: "empty list", status: CollectionStatus.Current},
     {receivers: CollectionReceivers.Set, name: "filter", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.ItemFn}, result: CollectionResult.ListFiltered, op: CollectionOp.SetFilter, law: CollectionLaw.Visit, empty: "empty list", status: CollectionStatus.Current},
     {receivers: CollectionReceivers.Set, name: "each", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.ItemFn}, result: CollectionResult.Unit, op: CollectionOp.SetEach, law: CollectionLaw.Each, empty: "Unit", status: CollectionStatus.Current},
@@ -651,13 +652,11 @@ fn collection_arg_is_callback(arg: CollectionArg) -> Bool Never! {
     }
 }
 
-// E0106: the same reserved vocabulary as Rust Collections::RESERVED_TYPES.
-// Source-owned Core declarations are admitted by registration, not by weakening
-// this predicate for users or for unrelated Core modules.
-// BEGIN GENERATED RESERVED TYPES
-// Source: crates/jet-foundation/src/Collections.rs; regenerate with gen-core-tables.mjs --write
+// E0106: the reserved built-in type vocabulary, frozen at the Rust-removal
+// cutover from the bootstrap's Collections::RESERVED_TYPES; this table is its
+// only home. Source-owned Core declarations are admitted by registration, not
+// by weakening this predicate for users or for unrelated Core modules.
 SEMA_RESERVED_TYPES :: [String]{"HashMap", "BTreeMap", "Map", "Char", "Bits", "Bytes", "Set", "Rank", "PriorityQueue", "Cache", "Iter", "ViewIter", "MemoStats", "RemoveBy", "Ordering", "Range", "SharedGuard", "Shared.Weak", "Condition", "Tally", "Queue", "Decimal", "Duration", "DurationUnit", "RangeError", "ExpiringValue", "Authority", "Validate", "BuildContext", "BuildPlan", "BuildAction", "BuildTarget", "BuildToolchain", "BuildProbe", "BuildSigningIdentity", "BuildError", "ProgramInfo", "Cell", "CellReadGuard", "CellEditGuard", "Unit"}
-// END GENERATED RESERVED TYPES
 fn sema_reserved_type_name(name: String) -> Bool Never! {
     SEMA_RESERVED_TYPES.contains(name)
 }
@@ -782,13 +781,16 @@ fn sema_collection_method_argument_type(contract: SemaCollectionMethodContract, 
 }
 
 // Result-returning set and sequence filters preserve the error type and require Bool success.
+// A callback's Option or Result is unwrapped only where the runtime takes
+// its payload apart: filter_map keeps a present or Ok payload as it is (an
+// Option payload stays an Option), and a Result callback ends a map at its
+// first error. Everywhere else the callback's type is the value's type.
 fn sema_collection_method_result_type(contract: SemaCollectionMethodContract, callback_return: Type?, seed: Type?) -> Type? {
     element := sema_collection_kind_element(contract.kind)
     key := sema_collection_kind_key(contract.kind)
     family := sema_collection_family(contract.kind)
     eager := family == CollectionReceivers.List || family == CollectionReceivers.View
     callback :: callback_return ?? Type.Named{name: "Unit"}
-    success := if callback == {.Result(ok, _) | .Option(ok) -> ok else -> callback}
     if contract.row.result == {
         .Unit -> Val(Type.Named{name: "Unit"})
         .Bool -> Val(Type.Bool)
@@ -812,18 +814,21 @@ fn sema_collection_method_result_type(contract: SemaCollectionMethodContract, ca
         .AllocOptionValue -> Val(Type.Result{ok: Type.Option{inner: element}, err: Type.Named{name: "AllocError"}})
         .Lazy -> Val(sema_collection_output_iter(contract, element))
         .LazyChunks -> Val(sema_collection_output_iter(contract, Type.List{element: element}))
-        .LazyIndexed -> Val(sema_collection_output_iter(contract, Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "index", ty: Type.Int}, TypeTupleField{name: "item", ty: element}}}))
+        .LazyIndexed -> Val(sema_collection_output_iter(contract, Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "idx", ty: Type.Int}, TypeTupleField{name: "item", ty: element}}}))
         .LazyIndexes -> Val(sema_collection_output_iter(contract, Type.Int))
         .LazyScan -> Val(sema_collection_output_iter(contract, callback))
         .LazyFilterMap -> {
-            mapped := if success == {.Option(inner) -> inner else -> success}
-            Val(sema_collection_output_iter(contract, mapped))
-        }
-        .Mapped -> {
-            mapped := if eager -> Type.List{element: success} else -> sema_collection_output_iter(contract, success)
             if callback == {
-                .Result(_, err) -> Val(Type.Result{ok: mapped, err: err})
-                else -> Val(mapped)
+                .Option(payload) | .Result(payload, _) -> Val(sema_collection_output_iter(contract, payload))
+                else -> None
+            }
+        }
+        // A Result callback's error ends the mapping (`[U] E!`); any other
+        // callback, an Option one included, is the element type itself.
+        .Mapped -> {
+            if callback == {
+                .Result(ok, err) -> Val(Type.Result{ok: if eager -> Type.List{element: ok} else -> sema_collection_output_iter(contract, ok), err: err})
+                else -> Val(if eager -> Type.List{element: callback} else -> sema_collection_output_iter(contract, callback))
             }
         }
         .Filtered -> {
@@ -832,7 +837,7 @@ fn sema_collection_method_result_type(contract: SemaCollectionMethodContract, ca
         }
         .ListMapped -> {
             if callback == {
-                .Result(_, err) -> Val(Type.Result{ok: Type.List{element: success}, err: err})
+                .Result(ok, err) -> Val(Type.Result{ok: Type.List{element: ok}, err: err})
                 else -> Val(Type.List{element: callback})
             }
         }
@@ -907,7 +912,7 @@ fn sema_collection_filtered(filtered: Type, callback: Type) -> Type? {
 
 // `literal_remove_mode` is the removal mode a literal `RemoveBy` selector fixed;
 // only a run-time selector keeps the dynamic two-kernel removal.
-fn sema_collection_method_operation(contract: SemaCollectionMethodContract, argument_count: Int, literal_remove_mode: TListRemoveMode?, line: Int, callback_return: Type?, callback_mutable: Bool, comparator: Bool, tuple_struct: String) -> SemaCollectionOperation Never! {
+fn sema_collection_method_operation(contract: SemaCollectionMethodContract, argument_count: Int, literal_remove_mode: TListRemoveMode?, line: Int, callback_return: Type?, callback_mutable: Bool, comparator: Bool) -> SemaCollectionOperation Never! {
     element := sema_collection_kind_element(contract.kind)
     is_view := sema_collection_family(contract.kind) == CollectionReceivers.View
     is_float := element == Type.Float || element == Type.Float32
@@ -955,17 +960,17 @@ fn sema_collection_method_operation(contract: SemaCollectionMethodContract, argu
         .Min -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.Min{float: is_float}}
         .Max -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.Max{float: is_float}}
         .Average -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.IterAverage{float: is_float}}
-        .Indexed -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.Indexed{tuple_struct: tuple_struct}}
-        .Unzip -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.Unzip{tuple_struct: tuple_struct}}
-        .Split -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.IterSplit{tuple_struct: tuple_struct}}
-        .SplitWrite -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.SplitWrite{tuple_struct: tuple_struct}}
-        .Partition -> SemaCollectionOperation.Closure{operation: TClosureOp.Partition{tuple_struct: tuple_struct}}
+        .Indexed -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.Indexed}
+        .Unzip -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.Unzip}
+        .Split -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.IterSplit}
+        .SplitWrite -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.SplitWrite}
+        .Partition -> SemaCollectionOperation.Closure{operation: TClosureOp.Partition}
         .ListRemove -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.RemoveList{line: line, mode: remove_mode}}
         .PriorityQueueRemove -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.PriorityQueueRemove{line: line, mode: remove_mode}}
         .MapMerge -> SemaCollectionOperation.Builtin{operation: if argument_count == 2 -> TBuiltinOp.MapMergeWith else -> TBuiltinOp.MapMerge}
-        .MapTopN -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.MapTopN{tuple_struct: tuple_struct}}
-        .MapToList -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.MapToList{tuple_struct: tuple_struct}}
-        .ListMinMax -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.ListMinMax{tuple_struct: tuple_struct}}
-        .ListMinMaxBy -> SemaCollectionOperation.Closure{operation: TClosureOp.ListMinMaxBy{tuple_struct: tuple_struct}}
+        .MapTopN -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.MapTopN}
+        .MapToList -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.MapToList}
+        .ListMinMax -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.ListMinMax}
+        .ListMinMaxBy -> SemaCollectionOperation.Closure{operation: TClosureOp.ListMinMaxBy}
     }
 }

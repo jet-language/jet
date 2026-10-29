@@ -3,6 +3,12 @@
 // (tests/fixtures/nix-compat/stage-a-flake.expected.json) are the literals
 // asserted below. Claims that write project files wait for the file
 // boundary.
+use jetpack_trust.[
+    FlakeComposition, FlakeGraph, FlakeOutputKind, LockInput, SemanticLockFile, TrustError,
+    trust_flake_find_node, trust_flake_lock_node_name, trust_json_object, trust_json_parse,
+    trust_json_string_field, trust_parse_semantic_lock, trust_text_replace_all,
+    trust_write_semantic_lock,
+]
 
 fn trust_test_flake(text: String) -> FlakeGraph {
     FlakeGraph.parse("flake.nix", text) ?? panic("flake should parse")
@@ -45,7 +51,7 @@ fn trust_test_json_object(text: String) -> [String: Dyn] {
     }
 }
 
-TRUST_TEST_STAGE_A_FLAKE :: prep { `{
+TRUST_TEST_STAGE_A_FLAKE :: comptime { `{
   inputs = {
     nixpkgs.url = "nixpkgs";
     flake-utils.url = "github:numtide/flake-utils";
@@ -56,7 +62,7 @@ TRUST_TEST_STAGE_A_FLAKE :: prep { `{
 }
 ` }
 
-TRUST_TEST_STAGE_A_LOCK :: prep { `{
+TRUST_TEST_STAGE_A_LOCK :: comptime { `{
   "nodes": {
     "flake-utils": {
       "inputs": {

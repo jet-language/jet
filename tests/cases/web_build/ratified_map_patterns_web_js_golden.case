@@ -1,0 +1,11 @@
+# tests/web_build.rs::ratified_map_patterns_web_js_golden at tests/web_build.rs:5709; hand-port
+# Claim: builds Examples/features/patterns/map_patterns.jet with #Target(JS) and compares its JS output to the golden (tests/web_build.rs:5679-5694)
+# Fixture migrated: prepends #Target(JS) on line 1, as the Rust helper does (tests/web_build.rs:5679)
+# Not ported: run_web_app (node JS runtime) is not reachable from the jet CLI; only the web build is observed
+fixture: ratified_map_patterns_web_js_golden.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build --target web main.jet
+exit: 0 # tests/web_build.rs:5684-5694 JS web build of map_patterns succeeds
+stderr: !~ "E2104" # tests/web_build.rs:5684-5694 JS web build of map_patterns succeeds

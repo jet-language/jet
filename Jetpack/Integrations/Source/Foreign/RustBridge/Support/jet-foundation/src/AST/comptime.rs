@@ -1,0 +1,2465 @@
+use super::{AccessConvention, BinOp, Expr, Lambda, ParamZone, Type};
+use crate::EncodingJson::{json_unsupported, EncodingError};
+use crate::Names::{mangle, mangle_path};
+use std::any::Any;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+use std::fmt::Write as _;
+
+#[allow(dead_code)]
+mod map_key_semantics {
+    include!("../../included/MapKey.rs");
+}
+
+/// D-MEM-VIEWRET1=B: compiler-inferred public owner of a returned/stored view.
+/// Parameter positions are stable across renames and generic instantiation.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ViewSource {
+    Receiver,
+    Parameter(usize),
+    Static { module_path: String, name: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ViewSourceProjection {
+    Field(String),
+    Index,
+    Range,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ViewSourcePath {
+    pub source: ViewSource,
+    pub projections: Vec<ViewSourceProjection>,
+}
+
+/// D-FAILURE-FOUNDATION1=A: the effective failure contract carried by a
+/// callable signature. The source spelling is intentionally projected into
+/// this fact instead of being rediscovered by each consumer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FailureContract {
+    /// No error domain was written. The callable still has the shared default
+    /// route, with `success` describing the value side of the carrier.
+    Default { success: Type, error: Type },
+    /// The declaration chose the optional-success view (`?T`). Optional
+    /// absence is already the complete carrier, so it must not acquire the
+    /// callable default `Err` domain as a nested result.
+    Optional { success: Type },
+    /// The declaration chose the uninhabited return carrier (`Never`).
+    /// Unlike `!Never`, this is a successful return slot with no values.
+    DeclaredNever,
+    /// An explicit failure domain was declared on the callable.
+    Explicit { success: Type, error: Type },
+    Converted {
+        success: Type,
+        source: Type,
+        target: Type,
+    },
+    /// The declaration proves that no reachable failure remains (`!Never`).
+    ProvenUnreachable { success: Type },
+    /// #3708 (D-FAILURE-FOUNDATION1=A: "Sema removes it when impossible"):
+    /// no contract was written and sema proved the body's failure set empty.
+    /// Same carrier as `ProvenUnreachable`; only the provenance differs.
+    InferredNever { success: Type },
+    /// D-FAIL-INFER-UNION1=A: no contract was written and sema inferred the
+    /// typed failures that can reach the function. `error` is one member or
+    /// the union of every member (the general `Err` among them when an
+    /// untyped failure also reaches it).
+    Inferred { success: Type, error: Type },
+}
+
+impl FailureContract {
+    pub fn from_return_type(return_type: Option<&Type>) -> Self {
+        match return_type {
+            Some(Type::Named(name)) if name == crate::Syntax::TYPE_NEVER => Self::DeclaredNever,
+            Some(Type::Result { ok, err }) if matches!(err.as_ref(), Type::Named(name) if name == crate::Syntax::TYPE_NEVER) => {
+                Self::ProvenUnreachable {
+                    success: ok.as_ref().clone(),
+                }
+            }
+            Some(Type::Result { ok, err }) => Self::Explicit {
+                success: ok.as_ref().clone(),
+                error: err.as_ref().clone(),
+            },
+            Some(Type::Option(success)) => Self::Optional {
+                success: success.as_ref().clone(),
+            },
+            Some(success) => Self::Default {
+                success: success.clone(),
+                error: Type::Named(crate::Syntax::TYPE_ERR.to_string()),
+            },
+            None => Self::Default {
+                success: Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()),
+                error: Type::Named(crate::Syntax::TYPE_ERR.to_string()),
+            },
+        }
+    }
+
+    pub fn effective_type(&self) -> Type {
+        match self {
+            Self::DeclaredNever => Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
+            Self::Default { success, error }
+            | Self::Explicit { success, error }
+            | Self::Inferred { success, error } => Type::Result {
+                ok: Box::new(success.clone()),
+                err: Box::new(error.clone()),
+            },
+            Self::Optional { success } => Type::Option(Box::new(success.clone())),
+            Self::Converted {
+                success, target, ..
+            } => Type::Result {
+                ok: Box::new(success.clone()),
+                err: Box::new(target.clone()),
+            },
+            Self::ProvenUnreachable { success } | Self::InferredNever { success } => Type::Result {
+                ok: Box::new(success.clone()),
+                err: Box::new(Type::Named(crate::Syntax::TYPE_NEVER.to_string())),
+            },
+        }
+    }
+
+    pub fn is_default(&self) -> bool {
+        matches!(self, Self::Default { .. })
+    }
+
+    pub fn is_explicit(&self) -> bool {
+        matches!(self, Self::Explicit { .. })
+    }
+
+    /// An empty failure set, written (`Never!`) or inferred.
+    pub fn is_proven_unreachable(&self) -> bool {
+        matches!(self, Self::ProvenUnreachable { .. } | Self::InferredNever { .. })
+    }
+
+    /// Stable human/tooling projection of where the effective failure route
+    /// came from.  Consumers must use this fact instead of reconstructing
+    /// provenance from the rendered `Result` type.
+    pub fn source(&self) -> String {
+        match self {
+            Self::Default { .. } => "implicit default !Err".to_string(),
+            Self::Optional { .. } => "optional success".to_string(),
+            Self::Explicit { error, .. } => {
+                format!("explicit !{}", error.name())
+            }
+            Self::Converted { source, target, .. } => {
+                format!("converted {} -> {}", source.name(), target.name())
+            }
+            Self::DeclaredNever => "declared Never return".to_string(),
+            Self::ProvenUnreachable { .. } => "explicit !Never (proven unreachable)".to_string(),
+            Self::InferredNever { .. } => "inferred: none".to_string(),
+            Self::Inferred { error, .. } => format!("inferred: {}", error.name()),
+        }
+    }
+}
+
+
+/// D-MEMPROVENANCE2=A: one returned-view slot may come from any source path
+/// in this bounded, deterministic set. Access stays a property of the slot:
+/// every path must provide the same read or write capability.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ViewProvenance {
+    pub sources: BTreeSet<ViewSourcePath>,
+    pub mutable: bool,
+}
+
+/// Canonical returned-view contract keyed by the output slot that contains the
+/// view. An empty path is a direct `View` return; aggregate slots use their
+/// nested field path. BTreeMap makes API fingerprints and fixed points stable.
+pub type ViewProvenanceMap = BTreeMap<Vec<String>, ViewProvenance>;
+
+/// Shared, replaceable view summary used by the body-analysis fixed point.
+/// A plain `OnceLock` freezes the first partial result in recursive call
+/// graphs; this cell publishes each larger iteration until convergence.
+#[derive(Debug, Clone, Default)]
+pub struct ViewProvenanceCell(std::sync::Arc<std::sync::RwLock<Option<ViewProvenanceMap>>>);
+
+impl ViewProvenanceCell {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn get(&self) -> Option<ViewProvenanceMap> {
+        self.0
+            .read()
+            .expect("view provenance lock poisoned")
+            .clone()
+    }
+
+    pub fn set(&self, provenance: ViewProvenanceMap) {
+        *self.0.write().expect("view provenance lock poisoned") = Some(provenance);
+    }
+}
+
+pub fn canonical_view_provenance_map(map: &ViewProvenanceMap) -> String {
+    map.iter()
+        .map(|(path, provenance)| {
+            let slot = if path.is_empty() {
+                "$".to_string()
+            } else {
+                path.join(".")
+            };
+            format!("{slot}={}", provenance.canonical())
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+/// D-STRUCT-LIFE1=A: one lifecycle marker payload shared by user declarations
+/// and compiler-owned Core marker applications.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Deprecation {
+    pub since: String,
+    pub replacement: String,
+    pub removed_in: Option<String>,
+}
+
+impl ViewProvenance {
+    pub fn canonical(&self) -> String {
+        let access = if self.mutable { "write" } else { "read" };
+        if let Some(source) = self
+            .sources
+            .iter()
+            .next()
+            .filter(|_| self.sources.len() == 1)
+        {
+            let canonical = source.canonical();
+            let (owner, path) = canonical
+                .split_once(";path:")
+                .expect("view source canonical form includes a path");
+            return format!("{owner};access:{access};path:{path}");
+        }
+        let sources = self
+            .sources
+            .iter()
+            .map(ViewSourcePath::canonical)
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("one_of({sources});access:{access}")
+    }
+}
+
+impl ViewSourcePath {
+    pub fn canonical(&self) -> String {
+        let source = match &self.source {
+            ViewSource::Receiver => "receiver".to_string(),
+            ViewSource::Parameter(index) => format!("parameter:{index}"),
+            ViewSource::Static { module_path, name } => format!("static:{module_path}::{name}"),
+        };
+        let path = self
+            .projections
+            .iter()
+            .map(|projection| match projection {
+                ViewSourceProjection::Field(name) => format!("field:{name}"),
+                ViewSourceProjection::Index => "index".to_string(),
+                ViewSourceProjection::Range => "range".to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join("/");
+        format!("{source};path:{path}")
+    }
+}
+
+/// Semantic signature of a function — the compiler's internal view after
+/// registration. Lives in `AST` so that `Traits`, `Codegen`, and `Sema` can
+/// all depend on it without creating cycles.
+#[derive(Debug, Clone)]
+pub struct FuncSig {
+    pub params: Vec<(AccessConvention, Type)>,
+    /// D-CALLDUAL1=E: the function has a `#Root` first parameter and may be
+    /// selected by the receiver-first call spelling.
+    pub root_param: bool,
+    pub return_type: Option<Type>,
+    /// D-STRUCT-LIFE1=A: the declaration's retiring marker, if any.
+    pub deprecation: Option<Deprecation>,
+    /// Sema-proved stable source for a returned view. Callers compose the
+    /// parameter index onto the corresponding actual argument place.
+    pub return_view_provenance: ViewProvenanceCell,
+    /// S50: declared in `extern rust`, implemented by the FFI bridge.
+    pub is_extern: bool,
+    /// S58 (E2-M13): `#Unsafe fn` — calling it requires an enclosing `#Unsafe`
+    /// block (E3103).
+    pub is_unsafe: bool,
+    /// S60 (E2-M16): `pure fn` — this function is free of ambient I/O and
+    /// non-determinism. Call sites inside a `pure fn` must also be pure (E3401).
+    pub is_pure: bool,
+    /// D-MEMO1=A: sema-proved function-result cache configuration. `Some(None)`
+    /// is the explicit `#Memo(bound: none)` form.
+    pub memo_bound: Option<Option<usize>>,
+    /// D-CABI-CALLBACK1: body contains only allocation-free, panic-free scalar
+    /// computation and has no generic parameters or runtime/global access.
+    pub is_foreign_thread_safe: bool,
+    /// Compatibility bit for the retired sanitizer spelling.
+    pub is_sanitizer: bool,
+    /// D-MUSTUSE1 (c18iwxqx): `#MustUse fn` / method — return value cannot be
+    /// silently ignored as a bare expression statement (E0419).
+    pub is_must_use: bool,
+    /// Card #436: true only for a C-boundary extern fn (`#Extern`/`#Bindgen
+    /// module c.<lib>`, `CModule`), false for everything else including
+    /// `extern rust`. A `String` argument to one of these crosses through
+    /// `CString::new` in codegen — which fails on an embedded NUL byte — so
+    /// call-site checking (E3211, `direct_calls.rs`) only applies here.
+    pub is_c_abi: bool,
+    /// D-CABI-PLATFORM1: explicit alternate ABI; such functions are direct-call-only.
+    pub c_abi_name: Option<String>,
+    /// D-FFI-CALLBACK2=A: generated callback lifecycle metadata. These fields
+    /// are absent for ordinary C function-pointer callbacks.
+    pub callback_transport: Option<String>,
+    pub callback_plan_digest: Option<String>,
+    pub callback_identity: Option<String>,
+    /// Narrow compiler-owned effect for a generated foreign binding. `None`
+    /// keeps ordinary extern calls maximally effectful.
+    pub foreign_effect_root: Option<String>,
+    /// D-BOUND-UNDO1=A: compensating function attached to a foreign binding.
+    pub undo: Option<String>,
+    /// S61: parameter names and default-value presence, parallel to `params`.
+    /// Empty for extern/built-in functions.
+    pub param_info: Vec<(String, bool)>,
+    /// D-APILABEL1=A: the public call contract, parallel to `params` — the
+    /// label a caller writes and the zone that decides whether they may (or
+    /// must) write it. It is projected as a callable obligation; the local
+    /// names in `param_info` are not. Empty alongside `param_info`.
+    pub param_call: Vec<(String, ParamZone)>,
+    /// D-DEFAULT-SHAPE1=B: default expressions for parameters that have them, parallel to `params`.
+    pub defaults: Vec<Option<Expr>>,
+    /// D-VARIADIC1: parallel to `params` — true when that parameter is variadic.
+    pub param_variadic: Vec<bool>,
+    /// D-ANY-JAI1/D-VARARGBOUND1 (c7jaiany): the trailing variadic parameter's
+    /// resolved trait-bound list (`Param::variadic_trait_bounds`), or `None` for
+    /// a non-variadic function or a plain D-VARIADIC1 homogeneous-concrete-type
+    /// variadic. Call-site checking (E1313) and codegen's per-arity
+    /// monomorphization both key off this.
+    pub variadic_bounds: Option<Vec<String>>,
+    /// D-MEMPROVENANCE3=A: parallel to `params` — optional `from` source names
+    /// on each parameter (call-boundary requirement).
+    pub param_view_from_names: Vec<Option<Vec<String>>>,
+    /// D-CALLPOLICY1=E: declaration default policy chain. `apply` replaces
+    /// this value exactly, including the empty bare-function chain.
+    pub callable_policies: crate::AST::CallablePolicyChain,
+}
+
+impl FuncSig {
+    /// Project the one failure fact consumed by sema, tooling, and codegen.
+    pub fn failure_contract(&self) -> FailureContract {
+        FailureContract::from_return_type(self.return_type.as_ref())
+    }
+
+    /// Return the single Result-shaped carrier even when the source omitted a
+    /// return contract. Engines must consume the projected type, not recreate
+    /// the default in an adapter.
+    pub fn effective_return_type(&self) -> Type {
+        self.failure_contract().effective_type()
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared data types — placed in AST so every seam crate can depend on them
+// without creating cross-seam dep cycles.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── CtValue / CtKey ──────────────────────────────────────────────────────────
+
+/// Width-preserving compile-time float. Every operation stays in its native
+/// Rust width so tier-0 never computes in f64 and casts afterward (D-FLOATW1).
+#[derive(Clone, Copy, PartialEq)]
+pub enum CtFloat {
+    F32(f32),
+    F64(f64),
+}
+
+impl fmt::Debug for CtFloat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::F32(value) => value.fmt(f),
+            Self::F64(value) => value.fmt(f),
+        }
+    }
+}
+
+macro_rules! unary_math {
+    ($value:expr, $method:ident) => {
+        match $value {
+            CtFloat::F32(value) => CtFloat::F32(value.$method()),
+            CtFloat::F64(value) => CtFloat::F64(value.$method()),
+        }
+    };
+}
+
+macro_rules! binary_math {
+    ($left:expr, $right:expr, $method:ident) => {
+        match ($left, $right) {
+            (CtFloat::F32(left), CtFloat::F32(right)) => Some(CtFloat::F32(left.$method(right))),
+            (CtFloat::F64(left), CtFloat::F64(right)) => Some(CtFloat::F64(left.$method(right))),
+            _ => None,
+        }
+    };
+}
+
+impl CtFloat {
+    pub fn literal(value: f64, is_f32: bool) -> Self {
+        if is_f32 {
+            Self::F32(value as f32)
+        } else {
+            Self::F64(value)
+        }
+    }
+
+    pub fn f32(value: f32) -> Self {
+        Self::F32(value)
+    }
+
+    pub fn f64(value: f64) -> Self {
+        Self::F64(value)
+    }
+
+    pub fn jet_type(self) -> Type {
+        match self {
+            Self::F32(_) => Type::Float32,
+            Self::F64(_) => Type::Float,
+        }
+    }
+
+    pub fn render(self) -> String {
+        format!("{self:?}")
+    }
+
+    pub fn to_json(self) -> Result<String, EncodingError> {
+        let mut out = String::new();
+        self.append_json(&mut out)?;
+        Ok(out)
+    }
+
+    fn append_json(self, out: &mut String) -> Result<(), EncodingError> {
+        if !self.as_f64().is_finite() {
+            return Err(json_unsupported("JSON cannot encode a non-finite Float"));
+        }
+        write!(out, "{self:?}").unwrap();
+        Ok(())
+    }
+
+    pub fn serialize(self) -> String {
+        match self {
+            Self::F32(value) => serialize_float(value, "f32", "f32"),
+            Self::F64(value) => serialize_float(value, "f64", "f64"),
+        }
+    }
+
+    pub fn as_f64(self) -> f64 {
+        match self {
+            Self::F32(value) => value as f64,
+            Self::F64(value) => value,
+        }
+    }
+
+    pub fn as_f32(self) -> f32 {
+        match self {
+            Self::F32(value) => value,
+            Self::F64(value) => value as f32,
+        }
+    }
+
+    pub fn neg(self) -> Self {
+        match self {
+            Self::F32(value) => Self::F32(-value),
+            Self::F64(value) => Self::F64(-value),
+        }
+    }
+
+    pub fn binop(self, op: BinOp, other: Self) -> Option<Self> {
+        match (self, other) {
+            (Self::F32(left), Self::F32(right)) => Some(Self::F32(match op {
+                BinOp::Add => left + right,
+                BinOp::Sub => left - right,
+                BinOp::Mul => left * right,
+                BinOp::Div => left / right,
+                // D-EXPSEM1=A: `^` on floats is the floating-point power.
+                BinOp::Pow => left.powf(right),
+                _ => return None,
+            })),
+            (Self::F64(left), Self::F64(right)) => Some(Self::F64(match op {
+                BinOp::Add => left + right,
+                BinOp::Sub => left - right,
+                BinOp::Mul => left * right,
+                BinOp::Div => left / right,
+                // D-EXPSEM1=A: `^` on floats is the floating-point power.
+                BinOp::Pow => left.powf(right),
+                _ => return None,
+            })),
+            _ => None,
+        }
+    }
+
+    pub fn partial_cmp(self, other: Self) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (Self::F32(left), Self::F32(right)) => left.partial_cmp(&right),
+            (Self::F64(left), Self::F64(right)) => left.partial_cmp(&right),
+            _ => None,
+        }
+    }
+
+    pub fn abs(self) -> Self {
+        match self {
+            Self::F32(value) => Self::F32(value.abs()),
+            Self::F64(value) => Self::F64(value.abs()),
+        }
+    }
+
+    pub fn is_nan(self) -> bool {
+        match self {
+            Self::F32(value) => value.is_nan(),
+            Self::F64(value) => value.is_nan(),
+        }
+    }
+
+    pub fn is_infinite(self) -> bool {
+        match self {
+            Self::F32(value) => value.is_infinite(),
+            Self::F64(value) => value.is_infinite(),
+        }
+    }
+
+    pub fn is_finite(self) -> bool {
+        match self {
+            Self::F32(value) => value.is_finite(),
+            Self::F64(value) => value.is_finite(),
+        }
+    }
+
+    pub fn round_i64(self) -> i64 {
+        match self {
+            Self::F32(value) => value.round() as i64,
+            Self::F64(value) => value.round() as i64,
+        }
+    }
+
+    pub fn trunc_i64(self) -> i64 {
+        match self {
+            Self::F32(value) => value.trunc() as i64,
+            Self::F64(value) => value.trunc() as i64,
+        }
+    }
+
+    pub fn sign(self) -> i64 {
+        match self {
+            Self::F32(value) => i64::from(value > 0.0) - i64::from(value < 0.0),
+            Self::F64(value) => i64::from(value > 0.0) - i64::from(value < 0.0),
+        }
+    }
+
+    pub fn sqrt(self) -> Self {
+        unary_math!(self, sqrt)
+    }
+    pub fn floor(self) -> Self {
+        unary_math!(self, floor)
+    }
+    pub fn ceil(self) -> Self {
+        unary_math!(self, ceil)
+    }
+    pub fn log2(self) -> Self {
+        unary_math!(self, log2)
+    }
+    pub fn log10(self) -> Self {
+        unary_math!(self, log10)
+    }
+    pub fn sin(self) -> Self {
+        unary_math!(self, sin)
+    }
+    pub fn cos(self) -> Self {
+        unary_math!(self, cos)
+    }
+    pub fn tan(self) -> Self {
+        unary_math!(self, tan)
+    }
+    pub fn asin(self) -> Self {
+        unary_math!(self, asin)
+    }
+    pub fn acos(self) -> Self {
+        unary_math!(self, acos)
+    }
+    pub fn atan(self) -> Self {
+        unary_math!(self, atan)
+    }
+    pub fn sinh(self) -> Self {
+        unary_math!(self, sinh)
+    }
+    pub fn cosh(self) -> Self {
+        unary_math!(self, cosh)
+    }
+    pub fn tanh(self) -> Self {
+        unary_math!(self, tanh)
+    }
+    pub fn exp(self) -> Self {
+        unary_math!(self, exp)
+    }
+    pub fn ln(self) -> Self {
+        unary_math!(self, ln)
+    }
+    pub fn trunc(self) -> Self {
+        unary_math!(self, trunc)
+    }
+    pub fn fract(self) -> Self {
+        unary_math!(self, fract)
+    }
+    pub fn acosh(self) -> Self {
+        unary_math!(self, acosh)
+    }
+    pub fn asinh(self) -> Self {
+        unary_math!(self, asinh)
+    }
+    pub fn atanh(self) -> Self {
+        unary_math!(self, atanh)
+    }
+    pub fn cbrt(self) -> Self {
+        unary_math!(self, cbrt)
+    }
+    pub fn exp2(self) -> Self {
+        unary_math!(self, exp2)
+    }
+    pub fn exp_m1(self) -> Self {
+        unary_math!(self, exp_m1)
+    }
+    pub fn ln_1p(self) -> Self {
+        unary_math!(self, ln_1p)
+    }
+    pub fn signum(self) -> Self {
+        unary_math!(self, signum)
+    }
+    pub fn to_degrees(self) -> Self {
+        unary_math!(self, to_degrees)
+    }
+    pub fn to_radians(self) -> Self {
+        unary_math!(self, to_radians)
+    }
+
+    pub fn powf(self, other: Self) -> Option<Self> {
+        binary_math!(self, other, powf)
+    }
+    pub fn min(self, other: Self) -> Option<Self> {
+        binary_math!(self, other, min)
+    }
+    pub fn max(self, other: Self) -> Option<Self> {
+        binary_math!(self, other, max)
+    }
+    pub fn atan2(self, other: Self) -> Option<Self> {
+        binary_math!(self, other, atan2)
+    }
+    pub fn hypot(self, other: Self) -> Option<Self> {
+        binary_math!(self, other, hypot)
+    }
+    pub fn copysign(self, other: Self) -> Option<Self> {
+        binary_math!(self, other, copysign)
+    }
+    pub fn log(self, other: Self) -> Option<Self> {
+        binary_math!(self, other, log)
+    }
+
+    /// One rounding for a multiply and an add together, so the product keeps
+    /// its full width before the sum. Mixing widths is refused, as it is for
+    /// every other width-generic operation.
+    pub fn mul_add(self, factor: Self, addend: Self) -> Option<Self> {
+        match (self, factor, addend) {
+            (CtFloat::F64(a), CtFloat::F64(b), CtFloat::F64(c)) => {
+                Some(CtFloat::F64(a.mul_add(b, c)))
+            }
+            (CtFloat::F32(a), CtFloat::F32(b), CtFloat::F32(c)) => {
+                Some(CtFloat::F32(a.mul_add(b, c)))
+            }
+            _ => None,
+        }
+    }
+
+    pub fn clamp(self, low: Self, high: Self) -> Option<Self> {
+        match (self, low, high) {
+            (Self::F32(value), Self::F32(low), Self::F32(high)) => {
+                Some(Self::F32(value.clamp(low, high)))
+            }
+            (Self::F64(value), Self::F64(low), Self::F64(high)) => {
+                Some(Self::F64(value.clamp(low, high)))
+            }
+            _ => None,
+        }
+    }
+
+    pub fn lerp(self, other: Self, t: Self) -> Option<Self> {
+        match (self, other, t) {
+            (Self::F32(left), Self::F32(right), Self::F32(t)) => {
+                Some(Self::F32(left + (right - left) * t))
+            }
+            (Self::F64(left), Self::F64(right), Self::F64(t)) => {
+                Some(Self::F64(left + (right - left) * t))
+            }
+            _ => None,
+        }
+    }
+}
+
+fn serialize_float<T: fmt::Debug + PartialOrd + Copy>(
+    value: T,
+    suffix: &str,
+    module: &str,
+) -> String
+where
+    f64: From<T>,
+{
+    let widened = f64::from(value);
+    if widened.is_nan() {
+        format!("{module}::NAN")
+    } else if widened == f64::INFINITY {
+        format!("{module}::INFINITY")
+    } else if widened == f64::NEG_INFINITY {
+        format!("{module}::NEG_INFINITY")
+    } else {
+        format!("{value:?}{suffix}")
+    }
+}
+
+/// A fully-evaluated compile-time value.
+#[derive(Clone, Debug)]
+pub enum CtValue {
+    Int(i64),
+    Float(CtFloat),
+    Bool(bool),
+    Char(char),
+    Str(String),
+    /// D-INTBIG1: spilled storage for an exact default `Int`. This remains an
+    /// implementation carrier only; its language type is `Int`, not `BigInt`.
+    BigInt(crate::Numeric::CtBigInt),
+    /// `[U8]` byte buffer (D-CTIO1 `embed_bytes`).
+    Bytes(Vec<u8>),
+    List(Vec<CtValue>),
+    Map(BTreeMap<CtKey, CtValue>),
+    Struct {
+        type_name: String,
+        fields: Vec<(String, CtValue)>,
+    },
+    Enum {
+        type_name: String,
+        variant: String,
+        args: Vec<(Option<String>, CtValue)>,
+    },
+    /// D-FAIL-CARRIER1=A — the payload side of the one outcome carrier. `?T`
+    /// and `T !E` are two views of this carrier, so a present payload has one
+    /// spelling, not one per view. Mirrors the prelude's `Ok` on
+    /// `JetOutcome<T, E>`.
+    Present(Box<CtValue>),
+    /// D-FAIL-CARRIER1=A — the stop side of the one outcome carrier. The report
+    /// says whether the stop is clean or told.
+    Failed(CtReport),
+    Unit,
+    /// c139 JIT/interpreter-parity: a lambda value (`(x) -> x > 3`) captured
+    /// at the point it's created, so the interpreter can invoke it later —
+    /// passed to a higher-order method (`.filter`/`.map`/`.each`/`.sort_by`/
+    /// `Option.lift2`), stored, or returned. See `ClosureData` below.
+    Closure(std::sync::Arc<ClosureData>),
+}
+
+impl PartialEq for CtValue {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Int(left), Self::Int(right)) => left == right,
+            (Self::Float(left), Self::Float(right)) => left == right,
+            (Self::Bool(left), Self::Bool(right)) => left == right,
+            (Self::Char(left), Self::Char(right)) => left == right,
+            (Self::Str(left), Self::Str(right)) => left == right,
+            (Self::BigInt(left), Self::BigInt(right)) => left == right,
+            (Self::Bytes(left), Self::Bytes(right)) => left == right,
+            (Self::List(left), Self::List(right)) => left == right,
+            (Self::Map(left), Self::Map(right)) => left == right,
+            (
+                Self::Struct {
+                    type_name: left_type,
+                    fields: left_fields,
+                },
+                Self::Struct {
+                    type_name: right_type,
+                    fields: right_fields,
+                },
+            ) => {
+                left_type == right_type
+                    && left_fields
+                        .iter()
+                        .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name))
+                        .eq(right_fields
+                            .iter()
+                            .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name)))
+            }
+            (
+                Self::Enum {
+                    type_name: left_type,
+                    variant: left_variant,
+                    args: left_args,
+                },
+                Self::Enum {
+                    type_name: right_type,
+                    variant: right_variant,
+                    args: right_args,
+                },
+            ) => {
+                left_type == right_type && left_variant == right_variant && left_args == right_args
+            }
+            (Self::Present(left), Self::Present(right)) => left == right,
+            (Self::Failed(left), Self::Failed(right)) => left == right,
+            (Self::Unit, Self::Unit) => true,
+            (Self::Closure(left), Self::Closure(right)) => left == right,
+            _ => false,
+        }
+    }
+}
+
+/// D-FAIL-CARRIER1=A — the report on the stop side of the one outcome carrier.
+///
+/// `?T` and `T !E` stop the same way; they differ only in what the report has
+/// to say. A clean report says nothing but the payload it lacks, and is the
+/// comptime twin of the prelude's zero-sized `JetAbsent`. A told report is the
+/// error value on `T !E`'s stop side.
+#[derive(Clone, Debug, PartialEq)]
+pub enum CtReport {
+    /// The clean report: an absence, which is not a failure.
+    Clean(Box<Type>),
+    /// The told report: the failure the caller reads.
+    Told(Box<CtValue>),
+}
+
+const ERROR_METADATA_TYPE: &str = "__jet_ErrorMetadata";
+const ERROR_CONTEXT_TYPE: &str = "__jet_ErrorContextFrame";
+const ERROR_CONVERSION_TYPE: &str = "__jet_ErrorConversion";
+const ERROR_DETAILS_TYPE: &str = "__jet_ErrorDetails";
+const ERROR_FIELD_TYPE: &str = "__jet_ErrorField";
+const ERROR_SPAN_TYPE: &str = "__jet_ErrorSpan";
+
+/// Compiler-only storage for the fields that the Prelude keeps beside the
+/// public `Err` fields. It uses the existing memo-storage lane so structural
+/// values, JSON, and generated web constants never expose this adapter data.
+fn error_metadata_storage_name() -> String {
+    crate::Syntax::memo_storage_name("error_metadata")
+}
+
+fn error_metadata_value(error: &crate::Outcome::JetErr) -> Option<CtValue> {
+    let typed_identity = crate::Outcome::jet_err_typed_identity(error);
+    let context = crate::Outcome::jet_err_context(error);
+    let conversions = crate::Outcome::jet_err_conversions(error);
+    let details = crate::Outcome::jet_err_details(error);
+    if typed_identity.is_none() && context.is_empty() && conversions.is_empty() && details.is_none() {
+        return None;
+    }
+
+    let typed_identity = match typed_identity {
+        Some(identity) => CtValue::Present(Box::new(CtValue::Str(identity))),
+        None => CtValue::absent(Type::String),
+    };
+    let context = CtValue::List(
+        context
+            .into_iter()
+            .map(|frame| CtValue::Struct {
+                type_name: ERROR_CONTEXT_TYPE.to_string(),
+                fields: vec![
+                    ("text".to_string(), CtValue::Str(frame.text)),
+                    ("file".to_string(), CtValue::Str(frame.file)),
+                    ("line".to_string(), CtValue::Int(i64::from(frame.line))),
+                ],
+            })
+            .collect(),
+    );
+    let conversions = CtValue::List(
+        conversions
+            .into_iter()
+            .map(|conversion| CtValue::Struct {
+                type_name: ERROR_CONVERSION_TYPE.to_string(),
+                fields: vec![
+                    ("source".to_string(), CtValue::Str(conversion.source)),
+                    ("target".to_string(), CtValue::Str(conversion.target)),
+                ],
+            })
+            .collect(),
+    );
+    let mut fields = vec![
+        ("typed_identity".to_string(), typed_identity),
+        ("context_frames".to_string(), context),
+        ("conversion_history".to_string(), conversions),
+    ];
+    if let Some(details) = details {
+        let source_span = details.source_span.map_or_else(
+            || CtValue::absent(Type::Named(ERROR_SPAN_TYPE.to_string())),
+            |span| {
+                CtValue::Present(Box::new(CtValue::Struct {
+                    type_name: ERROR_SPAN_TYPE.to_string(),
+                    fields: vec![
+                        ("start".to_string(), CtValue::Int(span.start as i64)),
+                        ("end".to_string(), CtValue::Int(span.end as i64)),
+                    ],
+                }))
+            },
+        );
+        let detail_fields = CtValue::List(
+            details
+                .fields
+                .into_iter()
+                .map(|field| CtValue::Struct {
+                    type_name: ERROR_FIELD_TYPE.to_string(),
+                    fields: vec![
+                        ("name".to_string(), CtValue::Str(field.name)),
+                        ("value".to_string(), CtValue::Str(field.value)),
+                    ],
+                })
+                .collect(),
+        );
+        fields.push((
+            "details".to_string(),
+            CtValue::Present(Box::new(CtValue::Struct {
+                type_name: ERROR_DETAILS_TYPE.to_string(),
+                fields: vec![
+                    ("variant".to_string(), CtValue::Str(details.variant)),
+                    ("fields".to_string(), detail_fields),
+                    ("source_span".to_string(), source_span),
+                ],
+            })),
+        ));
+    }
+    Some(CtValue::Struct {
+        type_name: ERROR_METADATA_TYPE.to_string(),
+        fields,
+    })
+}
+
+fn decode_error_details(value: &CtValue) -> Option<crate::Outcome::JetErrorDetails> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != ERROR_DETAILS_TYPE {
+        return None;
+    }
+    let field = |name: &str| {
+        fields
+            .iter()
+            .find(|(field, _)| field == name)
+            .map(|(_, value)| value)
+    };
+    let CtValue::Str(variant) = field("variant")? else {
+        return None;
+    };
+    let CtValue::List(detail_fields) = field("fields")? else {
+        return None;
+    };
+    let detail_fields = detail_fields
+        .iter()
+        .map(|detail| {
+            let CtValue::Struct { type_name, fields } = detail else {
+                return None;
+            };
+            if type_name != ERROR_FIELD_TYPE {
+                return None;
+            }
+            let value = |name: &str| {
+                fields
+                    .iter()
+                    .find(|(field, _)| field == name)
+                    .map(|(_, value)| value)
+            };
+            let CtValue::Str(name) = value("name")? else {
+                return None;
+            };
+            let CtValue::Str(value) = value("value")? else {
+                return None;
+            };
+            Some(crate::Outcome::JetErrorField {
+                name: name.clone(),
+                value: value.clone(),
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let source_span = match field("source_span")? {
+        CtValue::Present(value) => {
+            let CtValue::Struct { type_name, fields } = value.as_ref() else {
+                return None;
+            };
+            if type_name != ERROR_SPAN_TYPE {
+                return None;
+            }
+            let value = |name: &str| {
+                fields
+                    .iter()
+                    .find(|(field, _)| field == name)
+                    .map(|(_, value)| value)
+            };
+            let CtValue::Int(start) = value("start")? else {
+                return None;
+            };
+            let CtValue::Int(end) = value("end")? else {
+                return None;
+            };
+            Some(crate::Outcome::JetErrorSpan {
+                start: usize::try_from(*start).ok()?,
+                end: usize::try_from(*end).ok()?,
+            })
+        }
+        CtValue::Failed(CtReport::Clean(_)) => None,
+        _ => return None,
+    };
+    Some(crate::Outcome::JetErrorDetails {
+        variant: variant.clone(),
+        fields: detail_fields,
+        source_span,
+    })
+}
+
+fn decode_error_metadata(
+    value: &CtValue,
+) -> Option<(
+    Option<String>,
+    Vec<crate::Outcome::JetErrorContextFrame>,
+    Vec<crate::Outcome::JetErrorConversion>,
+    Option<crate::Outcome::JetErrorDetails>,
+)> {
+    let CtValue::Struct { type_name, fields } = value else {
+        return None;
+    };
+    if type_name != ERROR_METADATA_TYPE {
+        return None;
+    }
+    let field = |name: &str| {
+        fields
+            .iter()
+            .find(|(field, _)| field == name)
+            .map(|(_, value)| value)
+    };
+    let typed_identity = match field("typed_identity")? {
+        CtValue::Present(value) => match value.as_ref() {
+            CtValue::Str(identity) => Some(identity.clone()),
+            _ => return None,
+        },
+        CtValue::Failed(CtReport::Clean(_)) => None,
+        _ => return None,
+    };
+    let context_frames = match field("context_frames")? {
+        CtValue::List(frames) => frames
+            .iter()
+            .map(|frame| {
+                let CtValue::Struct { type_name, fields } = frame else {
+                    return None;
+                };
+                if type_name != ERROR_CONTEXT_TYPE {
+                    return None;
+                }
+                let field = |name: &str| {
+                    fields
+                        .iter()
+                        .find(|(field, _)| field == name)
+                        .map(|(_, value)| value)
+                };
+                let CtValue::Str(text) = field("text")? else {
+                    return None;
+                };
+                let CtValue::Str(file) = field("file")? else {
+                    return None;
+                };
+                let CtValue::Int(line) = field("line")? else {
+                    return None;
+                };
+                Some(crate::Outcome::JetErrorContextFrame {
+                    text: text.clone(),
+                    file: file.clone(),
+                    line: u32::try_from(*line).ok()?,
+                })
+            })
+            .collect::<Option<Vec<_>>>()?,
+        _ => return None,
+    };
+    let conversion_history = match field("conversion_history")? {
+        CtValue::List(conversions) => conversions
+            .iter()
+            .map(|conversion| {
+                let CtValue::Struct { type_name, fields } = conversion else {
+                    return None;
+                };
+                if type_name != ERROR_CONVERSION_TYPE {
+                    return None;
+                }
+                let field = |name: &str| {
+                    fields
+                        .iter()
+                        .find(|(field, _)| field == name)
+                        .map(|(_, value)| value)
+                };
+                let CtValue::Str(source) = field("source")? else {
+                    return None;
+                };
+                let CtValue::Str(target) = field("target")? else {
+                    return None;
+                };
+                Some(crate::Outcome::JetErrorConversion {
+                    source: source.clone(),
+                    target: target.clone(),
+                })
+            })
+            .collect::<Option<Vec<_>>>()?,
+        _ => return None,
+    };
+    let details = match field("details") {
+        Some(CtValue::Present(value)) => Some(decode_error_details(value)?),
+        Some(CtValue::Failed(CtReport::Clean(_))) | None => None,
+        _ => return None,
+    };
+    Some((
+        typed_identity,
+        context_frames,
+        conversion_history,
+        details,
+    ))
+}
+
+impl CtValue {
+    /// Stop with a clean report: the `?T` view of the carrier, where the
+    /// missing payload would have had type `ty`.
+    pub fn absent(ty: impl Into<Box<Type>>) -> CtValue {
+        CtValue::Failed(CtReport::Clean(ty.into()))
+    }
+
+    /// Stop with a told report: the `T !E` view of the carrier.
+    pub fn failed(report: Box<CtValue>) -> CtValue {
+        CtValue::Failed(CtReport::Told(report))
+    }
+
+    /// Does this outcome carry a payload?
+    pub fn is_present(&self) -> bool {
+        matches!(self, CtValue::Present(_))
+    }
+
+    /// Did this outcome stop with a clean report?
+    pub fn is_clean_stop(&self) -> bool {
+        matches!(self, CtValue::Failed(CtReport::Clean(_)))
+    }
+
+    /// The told report, when this outcome stopped with one.
+    pub fn told_report(&self) -> Option<&CtValue> {
+        match self {
+            CtValue::Failed(CtReport::Told(report)) => Some(report),
+            _ => None,
+        }
+    }
+
+    /// Interpreter/deopt adapter for D-FAIL-ERROR1=A. This only marshals the
+    /// checked TIR shape; construction, field meaning, and rendering stay in
+    /// the shared Prelude's `JetErr` implementation.
+    pub fn to_jet_err(&self) -> Option<crate::Outcome::JetErr> {
+        use crate::Outcome::{jet_err, jet_err_add_context, jet_err_record_conversion, JetAbsent};
+
+        // D-FAIL-ERROR1=A: an anonymous error union is only a carrier view;
+        // unwrap its single member so the report edge sees the same structured
+        // error that entered the union.
+        if let CtValue::Failed(CtReport::Told(error)) = self {
+            return error.to_jet_err();
+        }
+        if let CtValue::Enum { args, .. } = self {
+            return (args.len() == 1)
+                .then(|| args[0].1.to_jet_err())
+                .flatten();
+        }
+        let CtValue::Struct { type_name, fields } = self else {
+            return None;
+        };
+        if type_name != crate::Syntax::TYPE_ERR {
+            return None;
+        }
+        let field = |name: &str| {
+            fields
+                .iter()
+                .find(|(field, _)| field == name)
+                .map(|(_, value)| value)
+        };
+        let CtValue::Str(message) = field("message")? else {
+            return None;
+        };
+        let code = match field("code") {
+            Some(CtValue::Present(value)) => match value.as_ref() {
+                CtValue::Str(code) => Ok(code.clone()),
+                _ => return None,
+            },
+            Some(CtValue::Failed(CtReport::Clean(_))) => Err(JetAbsent),
+            _ => return None,
+        };
+        let cause = match field("cause") {
+            Some(CtValue::Present(value)) => value.to_jet_err().ok_or(JetAbsent),
+            Some(CtValue::Failed(CtReport::Clean(_))) => Err(JetAbsent),
+            _ => return None,
+        };
+        let metadata = match field(&error_metadata_storage_name()) {
+            Some(value) => Some(decode_error_metadata(value)?),
+            None => None,
+        };
+        let mut error = match metadata
+            .as_ref()
+            .and_then(|(identity, _, _, _)| identity.clone())
+        {
+            Some(identity) => crate::Outcome::jet_err_with_identity(
+                message.clone(),
+                code,
+                cause,
+                identity,
+            ),
+            None => jet_err(message.clone(), code, cause),
+        };
+        if let Some((_, context_frames, conversion_history, details)) = metadata {
+            for frame in context_frames {
+                jet_err_add_context(&mut error, frame.text, frame.file, frame.line);
+            }
+            for conversion in conversion_history {
+                jet_err_record_conversion(&mut error, conversion.source, conversion.target);
+            }
+            if let Some(details) = details {
+                crate::Outcome::jet_err_set_details(&mut error, details);
+            }
+        }
+        Some(error)
+    }
+
+    /// Interpreter/deopt adapter from the Prelude-owned error shape. This is
+    /// the inverse of `to_jet_err`; it does not recreate error semantics.
+    pub fn from_jet_err(error: &crate::Outcome::JetErr) -> CtValue {
+        let code = match crate::Outcome::jet_err_code(error) {
+            Ok(code) => CtValue::Present(Box::new(CtValue::Str(code))),
+            Err(_) => CtValue::absent(Type::String),
+        };
+        let cause = match crate::Outcome::jet_err_cause(error) {
+            Ok(cause) => CtValue::Present(Box::new(CtValue::from_jet_err(&cause))),
+            Err(_) => CtValue::absent(Type::Named(crate::Syntax::TYPE_ERR.to_string())),
+        };
+        let mut fields = vec![
+            (
+                "message".to_string(),
+                CtValue::Str(crate::Outcome::jet_err_message(error)),
+            ),
+            ("code".to_string(), code),
+            ("cause".to_string(), cause),
+        ];
+        if let Some(metadata) = error_metadata_value(error) {
+            fields.push((error_metadata_storage_name(), metadata));
+        }
+        CtValue::Struct {
+            type_name: crate::Syntax::TYPE_ERR.to_string(),
+            fields,
+        }
+    }
+
+    /// Add one structured context frame to a default error carried by the
+    /// interpreter. The round trip uses the shared Prelude carrier; it never
+    /// parses or rebuilds error meaning from display text.
+    pub fn add_error_context(
+        &mut self,
+        text: String,
+        file: String,
+        line: u32,
+    ) -> bool {
+        let CtValue::Failed(CtReport::Told(error)) = self else {
+            return false;
+        };
+        let Some(mut jet_error) = error.to_jet_err() else {
+            return false;
+        };
+        crate::Outcome::jet_err_add_context(&mut jet_error, text, file, line);
+        *error = Box::new(CtValue::from_jet_err(&jet_error));
+        true
+    }
+}
+
+/// A compiler-private opaque value that can cross the `CtValue` boundary while
+/// retaining identity. It is deliberately not a language value: only code
+/// that created the token can downcast it.
+#[derive(Clone)]
+pub struct CtOpaque(std::sync::Arc<dyn Any + Send + Sync>);
+
+impl CtOpaque {
+    pub fn new<T: Any + Send + Sync>(value: T) -> Self {
+        Self(std::sync::Arc::new(value))
+    }
+
+    pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
+        self.0.downcast_ref::<T>()
+    }
+}
+
+impl fmt::Debug for CtOpaque {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("<opaque>")
+    }
+}
+
+/// c139: a closure's captured state — the AST `Lambda` node plus every
+/// binding in scope where it was created (a tree-walker over-captures rather
+/// than tracking free variables, which is simpler and behaviorally
+/// equivalent here). `PartialEq` is reference identity (the `Arc`'s shared
+/// allocation address) rather than structural — closures aren't
+/// meaningfully comparable, and nothing in the language surface needs them
+/// to be; deriving `PartialEq` on the whole AST just to satisfy `CtValue`'s
+/// derive would be a much larger, unrelated change. `Arc` (not `Rc`) so
+/// `CtValue` stays `Send + Sync`, matching every other variant.
+#[derive(Clone, Debug)]
+pub struct ClosureData {
+    pub lambda: Lambda,
+    pub captured: std::collections::HashMap<String, CtValue>,
+    /// Contextual return type retained by tier-0 when a lambda is bound as a
+    /// typed function value. Parsed comptime bodies run before full sema body
+    /// elaboration, so the value boundary is the width authority here.
+    pub return_type: Option<Type>,
+    /// Compiler-private identity carrier for values that need to retain a
+    /// shared runtime handle across the `CtValue` boundary.
+    pub opaque: Option<CtOpaque>,
+}
+
+impl PartialEq for ClosureData {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self, other)
+    }
+}
+
+/// Orderable map key (S38: maps are `BTreeMap`, so keys must be `Ord`).
+#[derive(Clone, Debug)]
+pub enum CtKey {
+    Int(i64),
+    BigInt(crate::Numeric::CtBigInt),
+    Str(String),
+    Bool(bool),
+    Char(char),
+    /// D-MAP-KEY1: tuple keys retain their named fields for value round-trips;
+    /// comparison delegates to the shared Prelude carrier below.
+    Tuple(Vec<(String, CtKey)>),
+    /// D-MAP-KEY1: struct metadata is retained for value round-trips;
+    /// comparison uses the recursively encoded field values.
+    Struct {
+        type_name: String,
+        fields: Vec<(String, CtKey)>,
+    },
+    /// D-MAP-KEY1: payload-free enum variants are already complete values.
+    Enum {
+        type_name: String,
+        variant: String,
+    },
+}
+
+impl CtKey {
+    fn map_key(&self) -> map_key_semantics::JetMapKey {
+        match self {
+            CtKey::Int(value) => map_key_semantics::JetMapKey::Int(*value),
+            CtKey::BigInt(value) => map_key_semantics::JetMapKey::BigInt {
+                negative: value.negative,
+                limbs: value.limbs.clone(),
+            },
+            CtKey::Str(value) => map_key_semantics::JetMapKey::String(value.clone()),
+            CtKey::Bool(value) => map_key_semantics::JetMapKey::Bool(*value),
+            CtKey::Char(value) => map_key_semantics::JetMapKey::Char(*value),
+            CtKey::Tuple(fields) | CtKey::Struct { fields, .. } => {
+                map_key_semantics::JetMapKey::Record(
+                    fields.iter().map(|(_, value)| value.map_key()).collect(),
+                )
+            }
+            // The map type fixes the enum, so the variant is the complete
+            // value-bearing part of this key adapter.
+            CtKey::Enum { variant, .. } => map_key_semantics::JetMapKey::String(variant.clone()),
+        }
+    }
+}
+
+impl PartialEq for CtKey {
+    fn eq(&self, other: &Self) -> bool {
+        map_key_semantics::jet_map_key_cmp(&self.map_key(), &other.map_key())
+            == std::cmp::Ordering::Equal
+    }
+}
+
+impl Eq for CtKey {}
+
+impl PartialOrd for CtKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for CtKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        map_key_semantics::jet_map_key_cmp(&self.map_key(), &other.map_key())
+    }
+}
+
+impl CtKey {
+    pub fn from_value(v: CtValue) -> Option<CtKey> {
+        match v {
+            CtValue::Int(n) => Some(CtKey::Int(n)),
+            // Exact Int arithmetic spills values outside the evaluator's
+            // fast i64 carrier into BigInt. If the spill still fits i64,
+            // canonicalize it to the same key used by direct Int values.
+            CtValue::BigInt(value) => Some(match value.try_i64() {
+                Some(number) => CtKey::Int(number),
+                None => CtKey::BigInt(value),
+            }),
+            CtValue::Str(s) => Some(CtKey::Str(s)),
+            CtValue::Bool(b) => Some(CtKey::Bool(b)),
+            CtValue::Char(c) => Some(CtKey::Char(c)),
+            CtValue::Struct { type_name, fields } => {
+                let fields = fields
+                    .into_iter()
+                    .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name))
+                    .map(|(name, value)| Some((name, CtKey::from_value(value)?)))
+                    .collect::<Option<Vec<_>>>()?;
+                if type_name == "tuple"
+                    || type_name.starts_with("JetTup_")
+                    || type_name.starts_with('(')
+                {
+                    Some(CtKey::Tuple(fields))
+                } else {
+                    Some(CtKey::Struct { type_name, fields })
+                }
+            }
+            CtValue::Enum {
+                type_name,
+                variant,
+                args,
+            } if !type_name.is_empty() && args.is_empty() => {
+                Some(CtKey::Enum { type_name, variant })
+            }
+            _ => None,
+        }
+    }
+    pub fn to_value(&self) -> CtValue {
+        match self {
+            CtKey::Int(n) => CtValue::Int(*n),
+            CtKey::BigInt(value) => CtValue::BigInt(value.clone()),
+            CtKey::Str(s) => CtValue::Str(s.clone()),
+            CtKey::Bool(b) => CtValue::Bool(*b),
+            CtKey::Char(c) => CtValue::Char(*c),
+            CtKey::Tuple(fields) => CtValue::Struct {
+                type_name: "tuple".to_string(),
+                fields: fields
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.to_value()))
+                    .collect(),
+            },
+            CtKey::Struct { type_name, fields } => CtValue::Struct {
+                type_name: type_name.clone(),
+                fields: fields
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.to_value()))
+                    .collect(),
+            },
+            CtKey::Enum { type_name, variant } => CtValue::Enum {
+                type_name: type_name.clone(),
+                variant: variant.clone(),
+                args: Vec::new(),
+            },
+        }
+    }
+    pub(crate) fn jet_type(&self) -> Type {
+        match self {
+            CtKey::Int(_) | CtKey::BigInt(_) => Type::Int,
+            CtKey::Str(_) => Type::String,
+            CtKey::Bool(_) => Type::Bool,
+            CtKey::Char(_) => Type::Char,
+            CtKey::Tuple(fields) => Type::Tuple(
+                fields
+                    .iter()
+                    .map(|(name, value)| (name.clone(), Box::new(value.jet_type())))
+                    .collect(),
+            ),
+            CtKey::Struct { type_name, .. } | CtKey::Enum { type_name, .. } => {
+                Type::Named(type_name.clone())
+            }
+        }
+    }
+    pub(crate) fn jet_show(&self) -> String {
+        self.to_value().jet_show()
+    }
+}
+
+impl CtValue {
+    pub fn jet_type(&self) -> Type {
+        match self {
+            CtValue::Int(_) => Type::Int,
+            CtValue::Float(value) => value.jet_type(),
+            CtValue::Bool(_) => Type::Bool,
+            CtValue::Char(_) => Type::Char,
+            CtValue::Str(_) => Type::String,
+            CtValue::BigInt(_) => Type::Int,
+            CtValue::Bytes(_) => Type::List(Box::new(Type::IntN {
+                signed: false,
+                bits: 8,
+            })),
+            CtValue::List(xs) => {
+                let inner = xs.first().map(|x| x.jet_type()).unwrap_or(Type::Int);
+                Type::List(Box::new(inner))
+            }
+            CtValue::Map(m) => {
+                let (k, v) = m
+                    .iter()
+                    .next()
+                    .map(|(k, v)| (k.jet_type(), v.jet_type()))
+                    .unwrap_or((Type::String, Type::Int));
+                Type::Map {
+                    key: Box::new(k),
+                    key_span: None,
+                    value: Box::new(v),
+                }
+            }
+            // D-FAIL-CARRIER1=A: a payload alone does not say which view of the
+            // carrier a caller asked for, so the optional view — the one with
+            // the clean report — is the answer. Sema owns the declared type;
+            // this is only the value's own shape.
+            CtValue::Present(inner) => Type::Option(Box::new(inner.jet_type())),
+            CtValue::Failed(CtReport::Clean(t)) => Type::Option(t.clone()),
+            CtValue::Failed(CtReport::Told(e)) => Type::Result {
+                ok: Box::new(Type::Int),
+                err: Box::new(e.jet_type()),
+            },
+            CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } => {
+                Type::Named(type_name.clone())
+            }
+            CtValue::Unit => Type::Named(String::new()),
+            // c139: no return-type info is threaded to a closure value at
+            // runtime (the interpreter is untyped past sema); the exact
+            // signature is never read back from `jet_type()` for a closure
+            // in practice (unlike `None(Type)`, which needs it to pick an
+            // empty list/option's element type).
+            CtValue::Closure(_) => Type::Fn {
+                params: Vec::new(),
+                ret: None,
+                effect_bound: None,
+                return_view_provenance: None,
+                param_contract: None,
+                call_metadata: None,
+            },
+        }
+    }
+
+    /// Resolve the payload type for a `?T` carrier without inventing a type
+    /// for an empty list. Sema's resolved return type is authoritative; an
+    /// erased adapter must report a missing type instead of guessing.
+    pub fn resolved_option_element_type(resolved_ret: Option<&Type>) -> Option<Type> {
+        match resolved_ret {
+            Some(Type::Option(inner)) => Some((**inner).clone()),
+            _ => None,
+        }
+    }
+
+    pub fn jet_show(&self) -> String {
+        match self {
+            CtValue::Int(n) => n.to_string(),
+            CtValue::Float(value) => value.render(),
+            CtValue::Bool(b) => b.to_string(),
+            CtValue::Char(c) => c.to_string(),
+            CtValue::Str(s) => s.clone(),
+            CtValue::BigInt(b) => b.to_string_rep(),
+            CtValue::Bytes(bs) => {
+                let parts: Vec<String> = bs.iter().map(|b| b.to_string()).collect();
+                format!("[{}]", parts.join(", "))
+            }
+            CtValue::List(xs) => {
+                let parts: Vec<String> = xs.iter().map(|x| x.jet_show()).collect();
+                format!("[{}]", parts.join(", "))
+            }
+            CtValue::Map(m) => {
+                let parts: Vec<String> = m
+                    .iter()
+                    .map(|(k, v)| format!("{}: {}", k.jet_show(), v.jet_show()))
+                    .collect();
+                format!("[{}]", parts.join(", "))
+            }
+            CtValue::Present(v) => v.jet_show(),
+            CtValue::Failed(CtReport::Clean(_)) => "null".to_string(),
+            CtValue::Failed(CtReport::Told(_)) => "err".to_string(),
+            CtValue::Struct { type_name, fields } => {
+                if type_name == crate::Syntax::TYPE_ERR {
+                    if let Some(error) = self.to_jet_err() {
+                        return crate::Outcome::jet_render_err(&error);
+                    }
+                }
+                // AOT `JetShow` for user structs is `format!("{:?}", self)`
+                // (`Codegen::Items`) → `__jet_Name { __jet_field: … }`. Match that
+                // here (I2 / #777 corpus differential).
+                let filtered: Vec<(String, CtValue)> = fields
+                    .iter()
+                    .filter(|(n, _)| {
+                        !crate::Syntax::is_memo_storage_name(n)
+                            && !(type_name == "Tensor" && n == "__jet_tensor_handle")
+                    })
+                    .cloned()
+                    .collect();
+                CtValue::Struct {
+                    type_name: type_name.clone(),
+                    fields: filtered,
+                }
+                .debug_rust()
+            }
+            CtValue::Enum {
+                type_name,
+                variant,
+                args,
+            } if type_name == "Loadable" => match (variant.as_str(), args.first()) {
+                ("Idle" | "Loading", _) => variant.clone(),
+                ("Loaded" | "Failed", Some((_, value))) => {
+                    format!("{}({})", variant, value.jet_show())
+                }
+                _ => variant.clone(),
+            },
+            // The compiled program's Rust `#[derive(Debug)]` output for a user
+            // enum: the variant's Rust identifier is `__jet_<Variant>` (S34,
+            // `Codegen::mangle_path`), and a payload prints tuple-style with
+            // each arg in Rust `{:?}` form — matching that exactly here keeps
+            // `jet dev` byte-identical to the compiled binary (I2).
+            CtValue::Enum { variant, args, .. } => {
+                let mangled = mangle_path(variant);
+                if args.is_empty() {
+                    mangled
+                } else if args.iter().all(|(label, _)| label.is_some()) {
+                    let parts: Vec<String> = args
+                        .iter()
+                        .map(|(label, v)| {
+                            format!("{}: {}", label.as_deref().unwrap_or(""), v.debug_rust())
+                        })
+                        .collect();
+                    format!("{} {{ {} }}", mangled, parts.join(", "))
+                } else {
+                    let parts: Vec<String> = args.iter().map(|(_, v)| v.debug_rust()).collect();
+                    format!("{}({})", mangled, parts.join(", "))
+                }
+            }
+            CtValue::Unit => String::new(),
+            // c139: never reached in practice — a closure is a callable, not
+            // a printable value, so no example interpolates one directly.
+            CtValue::Closure(_) => "<closure>".to_string(),
+        }
+    }
+
+    /// Rust `{:?}` (Debug) rendering of this value — used to format a value
+    /// nested inside an enum-variant payload the same way the compiled
+    /// program's derived `Debug` impl would (I2). Distinct from `jet_show`,
+    /// which is the user-facing `Display`-style rendering `print` uses at the
+    /// top level (e.g. an unquoted string).
+    pub fn debug_rust(&self) -> String {
+        match self {
+            CtValue::Int(n) => n.to_string(),
+            CtValue::Float(value) => value.render(),
+            CtValue::Bool(b) => b.to_string(),
+            CtValue::Char(c) => format!("{:?}", c),
+            CtValue::Str(s) => format!("{:?}", s),
+            CtValue::BigInt(b) => b.to_string_rep(),
+            CtValue::Bytes(bs) => format!("{:?}", bs),
+            CtValue::List(xs) => {
+                let parts: Vec<String> = xs.iter().map(|x| x.debug_rust()).collect();
+                format!("[{}]", parts.join(", "))
+            }
+            CtValue::Map(m) => {
+                let parts: Vec<String> = m
+                    .iter()
+                    .map(|(k, v)| format!("{}: {}", k.to_value().debug_rust(), v.debug_rust()))
+                    .collect();
+                format!("{{{}}}", parts.join(", "))
+            }
+            // D-FAIL-CARRIER1=A: one carrier, so one pair of Rust spellings.
+            CtValue::Present(v) => format!("Ok({})", v.debug_rust()),
+            CtValue::Failed(CtReport::Clean(_)) => "Err(JetAbsent)".to_string(),
+            CtValue::Failed(CtReport::Told(v)) => format!("Err({})", v.debug_rust()),
+            CtValue::Struct { type_name, fields } => {
+                let ty = crate::Syntax::generated_suffix(type_name);
+                let mangled = crate::Names::mangle_path(ty);
+                let fields = fields
+                    .iter()
+                    .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name))
+                    .collect::<Vec<_>>();
+                if fields.is_empty() {
+                    mangled
+                } else {
+                    let parts: Vec<String> = fields
+                        .iter()
+                        .map(|(n, v)| {
+                            let field = crate::Syntax::generated_suffix(n);
+                            format!("{}: {}", ct_mangle(field), v.debug_rust())
+                        })
+                        .collect();
+                    format!("{} {{ {} }}", mangled, parts.join(", "))
+                }
+            }
+            CtValue::Enum {
+                type_name,
+                variant,
+                args,
+            } if type_name == "Loadable" => match (variant.as_str(), args.first()) {
+                ("Idle" | "Loading", _) => variant.clone(),
+                ("Loaded" | "Failed", Some((_, value))) => {
+                    format!("{}({})", variant, value.debug_rust())
+                }
+                _ => variant.clone(),
+            },
+            CtValue::Enum { variant, args, .. } => {
+                let mangled = mangle_path(variant);
+                if args.is_empty() {
+                    mangled
+                } else if args.iter().all(|(label, _)| label.is_some()) {
+                    let parts: Vec<String> = args
+                        .iter()
+                        .map(|(label, v)| {
+                            format!("{}: {}", label.as_deref().unwrap_or(""), v.debug_rust())
+                        })
+                        .collect();
+                    format!("{} {{ {} }}", mangled, parts.join(", "))
+                } else {
+                    let parts: Vec<String> = args.iter().map(|(_, v)| v.debug_rust()).collect();
+                    format!("{}({})", mangled, parts.join(", "))
+                }
+            }
+            CtValue::Unit => "()".to_string(),
+            CtValue::Closure(_) => "<closure>".to_string(),
+        }
+    }
+
+    pub fn render_pretty(&self) -> String {
+        let mut out = String::new();
+        self.render_pretty_inner(&mut out, 0);
+        out
+    }
+
+    fn render_pretty_inner(&self, out: &mut String, depth: usize) {
+        let indent = "  ".repeat(depth);
+        let inner_indent = "  ".repeat(depth + 1);
+        match self {
+            CtValue::Int(n) => out.push_str(&n.to_string()),
+            CtValue::Float(value) => out.push_str(&value.render()),
+            CtValue::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+            CtValue::Char(c) => {
+                out.push('\'');
+                out.push(*c);
+                out.push('\'');
+            }
+            CtValue::Str(s) => {
+                out.push('"');
+                out.push_str(s);
+                out.push('"');
+            }
+            CtValue::BigInt(b) => out.push_str(&b.to_string_rep()),
+            CtValue::Bytes(bs) => {
+                let parts: Vec<String> = bs.iter().map(|b| b.to_string()).collect();
+                out.push('[');
+                out.push_str(&parts.join(", "));
+                out.push(']');
+            }
+            CtValue::List(xs) => {
+                if xs.is_empty() {
+                    out.push_str("[]");
+                } else {
+                    out.push_str("[\n");
+                    for item in xs {
+                        out.push_str(&inner_indent);
+                        item.render_pretty_inner(out, depth + 1);
+                        out.push_str(",\n");
+                    }
+                    out.push_str(&indent);
+                    out.push(']');
+                }
+            }
+            CtValue::Map(m) => {
+                if m.is_empty() {
+                    out.push_str("{}");
+                } else {
+                    out.push_str("{\n");
+                    for (k, v) in m {
+                        out.push_str(&inner_indent);
+                        out.push_str(&k.jet_show());
+                        out.push_str(": ");
+                        v.render_pretty_inner(out, depth + 1);
+                        out.push_str(",\n");
+                    }
+                    out.push_str(&indent);
+                    out.push('}');
+                }
+            }
+            CtValue::Struct { type_name, fields } => {
+                let fields = fields
+                    .iter()
+                    .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name))
+                    .collect::<Vec<_>>();
+                if fields.is_empty() {
+                    out.push_str(type_name);
+                    out.push_str(" {}");
+                } else {
+                    out.push_str(type_name);
+                    out.push_str(" {\n");
+                    for (name, value) in fields {
+                        out.push_str(&inner_indent);
+                        out.push_str(name);
+                        out.push_str(": ");
+                        value.render_pretty_inner(out, depth + 1);
+                        out.push_str(",\n");
+                    }
+                    out.push_str(&indent);
+                    out.push('}');
+                }
+            }
+            CtValue::Enum { type_name, .. } if type_name == "Loadable" => {
+                out.push_str(&self.jet_show())
+            }
+            CtValue::Enum {
+                type_name,
+                variant,
+                args,
+            } => {
+                out.push_str(type_name);
+                out.push_str("::");
+                out.push_str(variant);
+                if !args.is_empty() {
+                    out.push('(');
+                    let mut first = true;
+                    for (label, v) in args {
+                        if !first {
+                            out.push_str(", ");
+                        }
+                        first = false;
+                        if let Some(lbl) = label {
+                            out.push_str(lbl);
+                            out.push_str(": ");
+                        }
+                        v.render_pretty_inner(out, depth);
+                    }
+                    out.push(')');
+                }
+            }
+            // D-FAIL-CARRIER1=A: one carrier, so one pair of spellings.
+            CtValue::Present(v) => {
+                out.push_str("Ok(");
+                v.render_pretty_inner(out, depth);
+                out.push(')');
+            }
+            CtValue::Failed(CtReport::Clean(_)) => out.push_str("Err(JetAbsent)"),
+            CtValue::Failed(CtReport::Told(e)) => {
+                out.push_str("Err(");
+                e.render_pretty_inner(out, depth);
+                out.push(')');
+            }
+            CtValue::Unit => out.push_str("()"),
+            CtValue::Closure(_) => out.push_str("<closure>"),
+        }
+    }
+
+    pub fn to_json(&self) -> Result<String, EncodingError> {
+        let mut out = String::new();
+        self.append_json(&mut out)?;
+        Ok(out)
+    }
+
+    pub fn append_json(&self, out: &mut String) -> Result<(), EncodingError> {
+        match self {
+            CtValue::Int(n) => write!(out, "{n}").unwrap(),
+            CtValue::Float(value) => value.append_json(out)?,
+            CtValue::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+            CtValue::Char(c) => {
+                let mut bytes = [0; 4];
+                crate::JSON::append_quote(out, c.encode_utf8(&mut bytes));
+            }
+            CtValue::Str(s) => crate::JSON::append_quote(out, s),
+            // BigInt remains explicit text, preserving arbitrary precision.
+            CtValue::BigInt(b) => crate::JSON::append_quote(out, &b.to_string_rep()),
+            CtValue::Bytes(bs) => {
+                out.push('[');
+                for (index, byte) in bs.iter().enumerate() {
+                    if index != 0 { out.push(','); }
+                    write!(out, "{byte}").unwrap();
+                }
+                out.push(']');
+            }
+            CtValue::List(xs) => {
+                out.push('[');
+                for (index, value) in xs.iter().enumerate() {
+                    if index != 0 { out.push(','); }
+                    value.append_json(out)?;
+                }
+                out.push(']');
+            }
+            CtValue::Map(entries) => {
+                out.push('{');
+                for (index, (key, value)) in entries.iter().enumerate() {
+                    let CtKey::Str(key) = key else {
+                        return Err(json_unsupported("JSON cannot encode non-text map keys"));
+                    };
+                    if index != 0 { out.push(','); }
+                    crate::JSON::append_quote(out, key);
+                    out.push(':');
+                    value.append_json(out)?;
+                }
+                out.push('}');
+            }
+            CtValue::Struct { fields, .. } => {
+                out.push('{');
+                let mut first = true;
+                for (name, value) in fields {
+                    if crate::Syntax::is_memo_storage_name(name) { continue; }
+                    if !first { out.push(','); }
+                    first = false;
+                    crate::JSON::append_quote(out, name);
+                    out.push(':');
+                    value.append_json(out)?;
+                }
+                out.push('}');
+            }
+            CtValue::Enum { variant, args, .. } => {
+                if args.is_empty() {
+                    crate::JSON::append_quote(out, variant);
+                } else {
+                    let labeled = args.iter().all(|(label, _)| label.is_some());
+                    out.push('{');
+                    crate::JSON::append_quote(out, variant);
+                    out.push(':');
+                    out.push(if labeled { '{' } else { '[' });
+                    for (index, (label, value)) in args.iter().enumerate() {
+                        if index != 0 { out.push(','); }
+                        if labeled {
+                            crate::JSON::append_quote(out, label.as_deref().unwrap());
+                            out.push(':');
+                        }
+                        value.append_json(out)?;
+                    }
+                    out.push(if labeled { '}' } else { ']' });
+                    out.push('}');
+                }
+            }
+            // D-FAIL-CARRIER1=A: present payloads encode as themselves.
+            CtValue::Present(value) => value.append_json(out)?,
+            CtValue::Failed(CtReport::Told(error)) => {
+                out.push_str("{\"err\":");
+                error.append_json(out)?;
+                out.push('}');
+            }
+            CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit | CtValue::Closure(_) => {
+                out.push_str("null");
+            }
+        }
+        Ok(())
+    }
+
+    pub fn serialize(&self) -> String {
+        match self {
+            CtValue::Int(n) if *n < -(1i64 << 62) || *n > (1i64 << 62) - 1 => {
+                // An oversized exact `Int` is a packed Prelude value. Use the
+                // string constructor so i64::MIN never becomes an invalid
+                // unary-negative Rust literal and every spill gets one key
+                // representation at the generated boundary.
+                format!("jet_std::jet_int_from_str({:?}).unwrap()", n.to_string())
+            }
+            CtValue::Int(n) => format!("{}i64", n),
+            CtValue::Float(value) => value.serialize(),
+            CtValue::Bool(b) => b.to_string(),
+            CtValue::Char(c) => format!("{:?}", c),
+            CtValue::Str(s) => format!("{:?}.to_string()", s),
+            // A spilled exact `Int` is baked through the same packed Prelude
+            // constructor used by runtime arithmetic; codegen never rebuilds
+            // limbs itself (I3).
+            CtValue::BigInt(b) => format!(
+                "jet_std::jet_int_from_str({:?}).unwrap()",
+                b.to_string_rep()
+            ),
+            CtValue::Bytes(bs) => {
+                let parts: Vec<String> = bs.iter().map(|b| format!("{}u8", b)).collect();
+                format!("vec![{}]", parts.join(", "))
+            }
+            CtValue::List(xs) => {
+                let parts: Vec<String> = xs.iter().map(|x| x.serialize()).collect();
+                format!("vec![{}]", parts.join(", "))
+            }
+            CtValue::Map(m) => {
+                if m.is_empty() {
+                    "JetMap::new()".to_string()
+                } else {
+                    let mut s = String::from("{ let mut _m = JetMap::new(); ");
+                    for (k, v) in m {
+                        s.push_str(&format!(
+                            "jet_map_insert(&mut _m, ({}), {}); ",
+                            k.to_value().serialize(),
+                            v.serialize()
+                        ));
+                    }
+                    s.push_str("_m }");
+                    s
+                }
+            }
+            // D-FAIL-CARRIER1=A: one carrier, so one pair of Rust spellings.
+            CtValue::Present(v) => format!("Ok({})", v.serialize()),
+            CtValue::Failed(CtReport::Clean(_)) => "Err(JetAbsent)".to_string(),
+            CtValue::Failed(CtReport::Told(e)) => format!("Err({})", e.serialize()),
+            CtValue::Struct { type_name, fields } => {
+                // D-TYPE2-DEFAULT1: Fraction and Decimal are compiler-owned
+                // Prelude carriers, not generated user structs. Rebuild them
+                // through the same constructors as runtime exact arithmetic;
+                // a `__jet_Fraction { ... }` literal would violate I2 because
+                // no user struct with that name exists in generated Rust.
+                if type_name == crate::Syntax::TYPE_FRACTION {
+                    let fraction = crate::Numeric::CtFraction::from_value(self)
+                        .expect("comptime Fraction must have its carrier fields");
+                    return format!(
+                        "jet_fraction_from_parts(jet_std::jet_int_from_str({:?}).unwrap(), jet_std::jet_int_from_str({:?}).unwrap())",
+                        fraction.numerator.to_string_rep(),
+                        fraction.denominator.to_string_rep()
+                    );
+                }
+                if type_name == crate::Syntax::TYPE_DECIMAL {
+                    let decimal = crate::Numeric::CtDecimal::from_value(self)
+                        .expect("comptime Decimal must have its carrier fields");
+                    return format!(
+                        "jet_decimal_from_str(&{:?}.to_string())",
+                        decimal.to_string_rep()
+                    );
+                }
+                let parts: Vec<String> = fields
+                    .iter()
+                    .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name))
+                    .map(|(n, v)| {
+                        let field = match type_name.as_str() {
+                            "Range"
+                            | "DimensionInfo"
+                            | "DimensionAxis"
+                            | "StateRef"
+                            | "StateInfo"
+                            | "EffectInfo"
+                            | "OriginInfo" => n.clone(),
+                            _ => ct_mangle(n),
+                        };
+                        let value = if type_name == "OriginInfo"
+                            && matches!(n.as_str(), "source" | "line" | "column")
+                        {
+                            match v {
+                                CtValue::Present(value) => {
+                                    format!("Some({})", value.serialize())
+                                }
+                                CtValue::Failed(CtReport::Clean(_)) => "None".to_string(),
+                                _ => v.serialize(),
+                            }
+                        } else {
+                            v.serialize()
+                        };
+                        format!("{field}: {value}")
+                    })
+                    .collect();
+                let rust_type = match type_name.as_str() {
+                    "Range" => "JetRange".to_string(),
+                    "DimensionInfo" => "JetDimensionInfo".to_string(),
+                    "DimensionAxis" => "JetDimensionAxis".to_string(),
+                    "StateRef" => "JetStateRef".to_string(),
+                    "StateInfo" => "JetStateInfo".to_string(),
+                    "EffectInfo" => "JetEffectInfo".to_string(),
+                    "OriginInfo" => "crate::JetOriginInfo".to_string(),
+                    _ => mangle_path(type_name),
+                };
+                if type_name == "Range" {
+                    format!("{rust_type} {{ {}, exclusive: false }}", parts.join(", "))
+                } else {
+                    format!("{rust_type} {{ {} }}", parts.join(", "))
+                }
+            }
+            CtValue::Enum {
+                type_name,
+                variant,
+                args,
+            } if type_name == "RemoveBy" => {
+                debug_assert!(args.is_empty(), "RemoveBy variants are unit values");
+                format!("JetRemoveBy::{}", crate::Syntax::generated_suffix(variant))
+            }
+            CtValue::Enum {
+                type_name,
+                variant,
+                args,
+            } if type_name == "Loadable" => match (variant.as_str(), args.first()) {
+                ("Idle", _) => "JetLoadable::<(), ()>::Idle".to_string(),
+                ("Loading", _) => "JetLoadable::<(), ()>::Loading".to_string(),
+                ("Loaded", Some((_, value))) => {
+                    format!("JetLoadable::<_, ()>::Loaded({})", value.serialize())
+                }
+                ("Failed", Some((_, value))) => {
+                    format!("JetLoadable::<(), _>::Failed({})", value.serialize())
+                }
+                _ => unreachable!("invalid Loadable comptime value"),
+            },
+            CtValue::Enum {
+                type_name,
+                variant,
+                args,
+            } => {
+                // Anonymous unions use compiler-owned bare Rust variants;
+                // ordinary user enums keep the `__jet_` namespace prefix.
+                let variant = if type_name.starts_with("__JetUnion_") {
+                    variant.clone()
+                } else {
+                    ct_mangle(variant)
+                };
+                let prefix = format!("{}::{}", mangle_path(type_name), variant);
+                if args.is_empty() {
+                    prefix
+                } else if args.iter().all(|(label, _)| label.is_none()) {
+                    let parts: Vec<String> = args.iter().map(|(_, v)| v.serialize()).collect();
+                    format!("{}({})", prefix, parts.join(", "))
+                } else {
+                    let parts: Vec<String> = args
+                        .iter()
+                        .filter_map(|(label, v)| {
+                            label
+                                .as_ref()
+                                .map(|name| format!("{}: {}", ct_mangle(name), v.serialize()))
+                        })
+                        .collect();
+                    format!("{} {{ {} }}", prefix, parts.join(", "))
+                }
+            }
+            CtValue::Unit => "()".to_string(),
+            // c139: a closure can't be baked into a Rust literal — but it
+            // also can't reach here: a `comptime` binding's value must be an
+            // encodable type (sema rejects a function-typed `comptime` const
+            // before evaluation), and this method exists only to serialize a
+            // `comptime` binding's final value for codegen.
+            CtValue::Closure(_) => {
+                unreachable!("a closure value can't be a comptime binding's serialized result")
+            }
+        }
+    }
+}
+
+fn ct_mangle(name: &str) -> String {
+    mangle(name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CtFloat, CtKey, CtReport, CtValue, FailureContract, FuncSig};
+    use crate::AST::{BinOp, Type};
+
+    #[test]
+    fn comptime_map_keys_accept_every_int() {
+        use super::CtKey;
+        use crate::Numeric::CtBigInt;
+        use std::collections::BTreeMap;
+        let mut map = BTreeMap::new();
+        for decimal in ["18446744073709551615", "-9223372036854775809", "0"] {
+            let value = CtValue::BigInt(CtBigInt::from_str(decimal).unwrap());
+            let key = CtKey::from_value(value.clone()).expect("every Int is a map key");
+            assert_eq!(key.to_value().jet_show(), value.jet_show());
+            map.insert(key, decimal);
+        }
+        assert_eq!(map.values().copied().collect::<Vec<_>>(),
+            ["-9223372036854775809", "0", "18446744073709551615"]);
+        assert!(matches!(CtKey::from_value(CtValue::BigInt(CtBigInt::from_int(0))),
+            Some(CtKey::Int(0))));
+    }
+
+    #[test]
+    fn exact_integer_key_order_and_hash_use_canonical_numeric_values() {
+        use super::CtKey;
+        use crate::MIR::MirConstKey;
+        use crate::Numeric::CtBigInt;
+        use std::collections::{BTreeMap, HashSet};
+        let decimals = [
+            "-100000000000000000000000000000000000000000",
+            "-9223372036854775810", "-9223372036854775809",
+            "-9223372036854775808", "0", "9223372036854775807",
+            "9223372036854775808", "9223372036854775809",
+            "100000000000000000000000000000000000000000",
+        ];
+        let mut ct = BTreeMap::new();
+        let mut mir = BTreeMap::new();
+        for decimal in decimals.iter().rev() {
+            let number = CtBigInt::from_str(decimal).unwrap();
+            let key = CtKey::from_value(CtValue::BigInt(number.clone())).unwrap();
+            let mir_key = MirConstKey::from_bigint(&number);
+            ct.insert(key, *decimal);
+            mir.insert(mir_key, *decimal);
+        }
+        assert_eq!(ct.values().copied().collect::<Vec<_>>(), decimals);
+        assert_eq!(mir.values().copied().collect::<Vec<_>>(), decimals);
+        let canonical = MirConstKey::from_bigint(&CtBigInt::from_str("+0009223372036854775808").unwrap());
+        let mut hash = HashSet::new();
+        assert!(hash.insert(canonical));
+        assert!(!hash.insert(MirConstKey::from_bigint(&CtBigInt::from_str("9223372036854775808").unwrap())));
+        assert_eq!(MirConstKey::from_bigint(&CtBigInt::from_str("-0000").unwrap()), MirConstKey::Int(0));
+        let nested = CtValue::Struct {
+            type_name: "tuple".to_string(),
+            fields: vec![("key".to_string(), CtValue::BigInt(CtBigInt::from_str(decimals[0]).unwrap()))],
+        };
+        assert_eq!(CtKey::from_value(nested.clone()).unwrap().to_value(), nested);
+    }
+
+    #[test]
+    fn ct_float_preserves_width_native_equality_and_rounding() {
+        let rounded = CtFloat::f32(16_777_217.0);
+        let wide = CtFloat::f64(16_777_217.0);
+
+        assert_eq!(rounded.jet_type(), Type::Float32);
+        assert_eq!(wide.jet_type(), Type::Float);
+        assert_ne!(rounded, wide);
+        assert_eq!(rounded.render(), "16777216.0");
+        assert_eq!(rounded.binop(BinOp::Add, CtFloat::f32(1.0)), Some(rounded));
+        assert_eq!(CtFloat::f32(0.0), CtFloat::f32(-0.0));
+        assert_ne!(CtFloat::f32(f32::NAN), CtFloat::f32(f32::NAN));
+    }
+
+    #[test]
+    fn ct_float_render_json_and_rust_serialization_are_width_native() {
+        let nested = CtValue::List(vec![
+            CtValue::Float(CtFloat::f32(16_777_217.0)),
+            CtValue::Float(CtFloat::f64(16_777_217.0)),
+        ]);
+
+        assert_eq!(format!("{:?}", CtFloat::f32(-0.0)), "-0.0");
+        assert_eq!(CtValue::Float(CtFloat::f32(1.0)).to_json().unwrap(), "1.0");
+        assert_eq!(nested.to_json().unwrap(), "[16777216.0,16777217.0]");
+        assert_eq!(nested.serialize(), "vec![16777216.0f32, 16777217.0f64]");
+        assert_eq!(CtFloat::f32(f32::NAN).serialize(), "f32::NAN");
+        assert_eq!(
+            CtFloat::f64(f64::NEG_INFINITY).serialize(),
+            "f64::NEG_INFINITY"
+        );
+    }
+
+    fn require_json_unsupported(value: &CtValue, reason: &str) {
+        use crate::EncodingJson::{EncodingErrorKind, EncodingFormat};
+        let error = value.to_json().expect_err("unsupported JSON must not emit a value");
+        assert_eq!(error.format, EncodingFormat::JSON);
+        assert_eq!(error.kind, EncodingErrorKind::Unsupported);
+        assert_eq!(error.reason, reason);
+        assert_eq!(error.byte_offset, 0);
+        assert!(error.line.is_err() && error.column.is_err() && error.cause.is_err());
+        assert_eq!(error.path, "$");
+    }
+
+    #[test]
+    fn comptime_json_rejects_nonfinite_floats_and_propagates_nested_errors() {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for number in [CtFloat::f32(value as f32), CtFloat::f64(value)] {
+                let error = number.to_json().unwrap_err();
+                assert_eq!(error.reason, "JSON cannot encode a non-finite Float");
+                let value = CtValue::Float(number);
+                for nested in [
+                    value.clone(),
+                    CtValue::List(vec![value.clone()]),
+                    CtValue::Map([(CtKey::Str("value".into()), value.clone())].into()),
+                    CtValue::Struct { type_name: "Sample".into(), fields: vec![("value".into(), value.clone())] },
+                    CtValue::Enum { type_name: "Sample".into(), variant: "Value".into(), args: vec![(Some("value".into()), value.clone())] },
+                    CtValue::Present(Box::new(value.clone())),
+                    CtValue::Failed(CtReport::Told(Box::new(value))),
+                ] {
+                    require_json_unsupported(&nested, "JSON cannot encode a non-finite Float");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn comptime_json_rejects_every_nontext_map_key_without_coercion() {
+        for key in [
+            CtKey::Int(1), CtKey::Bool(true), CtKey::Char('a'),
+            CtKey::Tuple(Vec::new()),
+            CtKey::Struct { type_name: "Key".into(), fields: Vec::new() },
+            CtKey::Enum { type_name: "Key".into(), variant: "Value".into() },
+        ] {
+            let value = CtValue::Map([(key, CtValue::Int(2))].into());
+            require_json_unsupported(&value, "JSON cannot encode non-text map keys");
+            require_json_unsupported(&CtValue::List(vec![value]), "JSON cannot encode non-text map keys");
+        }
+    }
+
+    #[test]
+    fn comptime_json_char_and_c0_escaping_matches_text_and_is_lowercase() {
+        let expected = [
+            "\\u0000", "\\u0001", "\\u0002", "\\u0003", "\\u0004", "\\u0005", "\\u0006", "\\u0007",
+            "\\u0008", "\\t", "\\n", "\\u000b", "\\u000c", "\\r", "\\u000e", "\\u000f",
+            "\\u0010", "\\u0011", "\\u0012", "\\u0013", "\\u0014", "\\u0015", "\\u0016", "\\u0017",
+            "\\u0018", "\\u0019", "\\u001a", "\\u001b", "\\u001c", "\\u001d", "\\u001e", "\\u001f",
+        ];
+        for (code, escaped) in expected.iter().enumerate() {
+            let character = char::from_u32(code as u32).unwrap();
+            let encoded = CtValue::Char(character).to_json().unwrap();
+            assert_eq!(encoded, format!("\"{escaped}\""));
+            assert_eq!(encoded, CtValue::Str(character.to_string()).to_json().unwrap());
+            assert_eq!(crate::JSON::parse(&encoded).unwrap(), crate::Dyn::Dyn::Text(character.to_string()));
+        }
+        for (character, escaped) in [('"', "\\\""), ('\\', "\\\\"), ('λ', "λ"), ('😀', "😀")] {
+            assert_eq!(CtValue::Char(character).to_json().unwrap(), format!("\"{escaped}\""));
+        }
+        let text: String = (0..32).map(|code| char::from_u32(code).unwrap()).collect();
+        assert_eq!(CtValue::Str(text).to_json().unwrap(), format!("\"{}\"", expected.join("")));
+    }
+
+    #[test]
+    fn comptime_json_escapes_object_names_and_enum_labels() {
+        let value = CtValue::Struct { type_name: "Sample".into(), fields: vec![("a\"\u{001f}".into(), CtValue::Int(1))] };
+        assert_eq!(value.to_json().unwrap(), "{\"a\\\"\\u001f\":1}");
+        let value = CtValue::Enum { type_name: "Sample".into(), variant: "v\"".into(), args: vec![(Some("x\u{0001}".into()), CtValue::Int(2))] };
+        assert_eq!(value.to_json().unwrap(), "{\"v\\\"\":{\"x\\u0001\":2}}");
+        let value = CtValue::Map([(CtKey::Str("x\u{0001}".into()), CtValue::Int(2))].into());
+        assert_eq!(value.to_json().unwrap(), "{\"x\\u0001\":2}");
+    }
+
+    #[test]
+    fn ct_json_rejects_non_finite_floats_and_non_text_map_keys() {
+        use crate::EncodingJson::{EncodingErrorKind, EncodingFormat};
+        for float in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for value in [
+                CtValue::Float(CtFloat::f64(float)),
+                CtValue::List(vec![CtValue::Float(CtFloat::f64(float))]),
+            ] {
+                let error = value.to_json().unwrap_err();
+                assert_eq!(error.format, EncodingFormat::JSON);
+                assert_eq!(error.kind, EncodingErrorKind::Unsupported);
+                assert_eq!(error.reason, "JSON cannot encode a non-finite Float");
+                assert_eq!(error.path, "$");
+                assert_eq!(error.byte_offset, 0);
+                assert!(error.line.is_err() && error.column.is_err() && error.cause.is_err());
+            }
+        }
+        let map = CtValue::Map([(CtKey::Int(1), CtValue::Int(2))].into_iter().collect());
+        let error = map.to_json().unwrap_err();
+        assert_eq!(error.kind, EncodingErrorKind::Unsupported);
+        assert_eq!(error.reason, "JSON cannot encode non-text map keys");
+    }
+
+    #[test]
+    fn ct_json_quotes_char_c0_and_field_names() {
+        for character in ['"', '\\', '\0', '\u{001f}', '\n', '\r', '\t'] {
+            let text = character.to_string();
+            let encoded = CtValue::Char(character).to_json().unwrap();
+            assert_eq!(encoded, crate::EncodingJson::quote_json(&text));
+            assert_eq!(
+                crate::JSON::parse(&encoded).unwrap(),
+                crate::Dyn::Dyn::Text(text)
+            );
+        }
+        let controls: String = (0..32).map(|byte| char::from(byte)).collect();
+        let encoded = CtValue::Str(controls.clone()).to_json().unwrap();
+        assert!(encoded.contains("\\u001f"));
+        assert_eq!(
+            crate::JSON::parse(&encoded).unwrap(),
+            crate::Dyn::Dyn::Text(controls)
+        );
+        let value = CtValue::Struct {
+            type_name: "Quoted".into(),
+            fields: vec![("a\"\\\0".into(), CtValue::Int(1))],
+        };
+        assert_eq!(value.to_json().unwrap(), "{\"a\\\"\\\\\\u0000\":1}");
+    }
+
+    #[test]
+    fn loadable_uses_aot_debug_inside_user_enum_payload() {
+        let loaded = CtValue::Enum {
+            type_name: "Loadable".to_string(),
+            variant: "Loaded".to_string(),
+            args: vec![(None, CtValue::Int(7))],
+        };
+        let wrapped = CtValue::Enum {
+            type_name: "Wrapper".to_string(),
+            variant: "Ready".to_string(),
+            args: vec![(None, loaded)],
+        };
+
+        assert_eq!(wrapped.jet_show(), "__jet_Ready(Loaded(7))");
+    }
+
+    #[test]
+    fn anonymous_union_serialization_uses_bare_generated_variant() {
+        let value = CtValue::Enum {
+            type_name: "__JetUnion_Int_String".to_string(),
+            variant: "Int".to_string(),
+            args: vec![(None, CtValue::Int(3))],
+        };
+
+        assert_eq!(
+            value.serialize(),
+            "__jet__u_uJetUnion_uInt_uString::Int(3i64)"
+        );
+    }
+
+    #[test]
+    fn default_err_ct_value_uses_the_prelude_shape_and_renderer() {
+        let cause = CtValue::Struct {
+            type_name: crate::Syntax::TYPE_ERR.to_string(),
+            fields: vec![
+                ("message".to_string(), CtValue::Str("bad input".to_string())),
+                ("code".to_string(), CtValue::absent(Type::String)),
+                (
+                    "cause".to_string(),
+                    CtValue::absent(Type::Named(crate::Syntax::TYPE_ERR.to_string())),
+                ),
+            ],
+        };
+        let value = CtValue::Struct {
+            type_name: crate::Syntax::TYPE_ERR.to_string(),
+            fields: vec![
+                (
+                    "message".to_string(),
+                    CtValue::Str("config failed".to_string()),
+                ),
+                (
+                    "code".to_string(),
+                    CtValue::Present(Box::new(CtValue::Str("CFG404".to_string()))),
+                ),
+                ("cause".to_string(), CtValue::Present(Box::new(cause))),
+            ],
+        };
+
+        let error = value.to_jet_err().expect("checked Err shape must marshal");
+        assert_eq!(crate::Outcome::jet_err_message(&error), "config failed");
+        assert_eq!(
+            value.jet_show(),
+            "Error [CFG404]: config failed\n  cause: bad input"
+        );
+        assert_eq!(CtValue::from_jet_err(&error), value);
+    }
+
+    #[test]
+    fn callable_failure_contract_projects_one_carrier() {
+        let default = FailureContract::from_return_type(None);
+        assert!(default.is_default());
+        assert!(matches!(
+            default.effective_type(),
+            Type::Result { ref ok, ref err }
+                if matches!(ok.as_ref(), Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE)
+                    && matches!(err.as_ref(), Type::Named(name) if name == crate::Syntax::TYPE_ERR)
+        ));
+
+        let explicit = FailureContract::from_return_type(Some(&Type::Result {
+            ok: Box::new(Type::Int),
+            err: Box::new(Type::Named("IOError".to_string())),
+        }));
+        assert!(explicit.is_explicit());
+        assert!(matches!(
+            explicit.effective_type(),
+            Type::Result { ref ok, ref err }
+                if matches!(ok.as_ref(), Type::Int)
+                    && matches!(err.as_ref(), Type::Named(name) if name == "IOError")
+        ));
+
+        let never = FailureContract::from_return_type(Some(&Type::Result {
+            ok: Box::new(Type::Int),
+            err: Box::new(Type::Named(crate::Syntax::TYPE_NEVER.to_string())),
+        }));
+        assert!(never.is_proven_unreachable());
+
+        let sig = FuncSig {
+            params: Vec::new(),
+            root_param: false,
+            return_type: None,
+            deprecation: None,
+            return_view_provenance: super::ViewProvenanceCell::new(),
+            is_extern: false,
+            is_unsafe: false,
+            is_pure: false,
+            memo_bound: None,
+            is_foreign_thread_safe: false,
+            is_sanitizer: false,
+            is_must_use: false,
+            is_c_abi: false,
+            c_abi_name: None,
+            callback_transport: None,
+            callback_plan_digest: None,
+            callback_identity: None,
+            foreign_effect_root: None,
+            undo: None,
+            param_info: Vec::new(),
+            param_call: Vec::new(),
+            defaults: Vec::new(),
+            param_variadic: Vec::new(),
+            variadic_bounds: None,
+            param_view_from_names: Vec::new(),
+            callable_policies: Default::default(),
+        };
+        assert!(sig.failure_contract().is_default());
+        assert!(sig.effective_return_type().is_fallible());
+    }
+}

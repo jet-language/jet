@@ -1,0 +1,23 @@
+# tests/jetpack_hangar_store_v2.rs::hangar_export_import_rekeys_and_rejects_corruption_without_mutation at tests/jetpack_hangar_store_v2.rs:695; hand-port
+# Claim: export prints export: and object(s) on stderr and writes the archive (rs:745-747)
+# Claim: import with --key from the source trust dir exits 0 (rs:751-768)
+# Claim: repeated import exits 0 (rs:818-823)
+# Fixture migrated: source and destination roots are fixture-relative: source uses jetpack, destination uses dest-root via env
+# Not ported: corrupted-archive import expecting exit 2 and Hangar import failed (rs:837-857): needs byte mutation of the archive, not expressible as a step
+# Not ported: Store::find_by_reference/closure_graph/receipt asserts (rs:779-811,824-827,858-863): Rust API
+fixture: hangar_export_import_rekeys_and_rejects_corruption_without_mutation.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jetpack hangar ingest source --name portable --ref portable@fixture --no-color
+exit: 0 # rs:700-714 exit 0
+step: jet hangar export portable@fixture --to portable.hangar --yes --no-color
+exit: 0 # rs:731-746
+stderr: ~ "export: " # rs:731-746
+stderr: ~ " object(s)" # rs:731-746
+step: jet hangar import portable.hangar --key jetpack/trust/hangar.key --yes --no-color
+env: JETPACK_ROOT=dest-root
+exit: 0 # rs:753-768 exit 0
+step: jet hangar import portable.hangar --key jetpack/trust/hangar.key --yes --no-color
+env: JETPACK_ROOT=dest-root
+exit: 0 # rs:818-823 repeat exit 0

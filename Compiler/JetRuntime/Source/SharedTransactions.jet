@@ -293,3 +293,84 @@ fn stm_merge(parent: I64, first: I64) {
     stm_finish(state)
     if exhausted -> shared_revision_stop()
 }
+
+// #Transact rollback hooks (#5477; JetIR BuildTransact.jet ir_transaction_walk).
+// Each `on_rollback` hook runs under a root control of its own, so it is
+// masked from the cancellation, deadline or stop that is unwinding the frame,
+// and a failure inside it (a panic, a trap, its deadline) stops only the hook:
+// the hook's frames leave by their stop edges and the failure is taken here,
+// never fatal, so the remaining hooks and the frame's cleanup still run. The
+// hook's own deadline is TRANSACTION_HOOK_DEADLINE_MS, observed like any
+// #Context deadline at the hook's wait points. Frame56: control save32,
+// deadline save16, control48.
+TRANSACTION_HOOK_DEADLINE_MS :: I64{5000}
+
+#Export(c) fn jet_rt_transaction_hook_enter() -> I64 {
+    frame :: jet_rt_alloc(I64{56}, I64{8})
+    control :: scheduler_control_new()
+    // No SCHEDULER_SCOPE_INHERITED_STOP: a panic in the hook while a stop
+    // unwinds the frame is the hook's own failure, not a double panic.
+    sync_store(control + I64{104}, SCHEDULER_SCOPE_ROOT)
+    scheduler_control_enter(control, frame)
+    sync_store(thread_base() + I64{64}, I64{0})
+    jet_ctx_push_deadline(wrapping(jet_std_time_now() + TRANSACTION_HOOK_DEADLINE_MS), frame + I64{32})
+    sync_store(frame + I64{48}, control)
+    frame
+}
+
+#Export(c) fn jet_rt_transaction_hook_leave(frame: I64) {
+    control :: sync_load(frame + I64{48})
+    jet_ctx_pop_deadline(frame + I64{32})
+    record :: scheduler_control_take_stop(control)
+    scheduler_control_leave(frame)
+    scheduler_control_drop(control)
+    jet_rt_free(frame, I64{56}, I64{8})
+    if (record != I64{0}) -> transaction_hook_failed(record)
+}
+
+// A hook's failure is a secondary failure: appended to the report of the
+// stop that is unwinding the frame when there is one (the root writes it
+// after that report's own text), else written to stderr now and the program
+// goes on (a propagated error or an early return has no report).
+fn transaction_hook_failed(record: I64) {
+    rendered :: sync_load(record + I64{48}) != I64{0}
+    report := scheduler_stop_take_message(record)
+    scheduler_stop_drop(record)
+    if (report == I64{0}) -> report = scheduler_text_empty()
+    if !rendered {
+        line :: scheduler_text_concat(report, rt_static_text("\n"))
+        jet_rt_string_drop(report)
+        report = line
+    }
+    text :: scheduler_text_concat(rt_static_text("while rolling back, this also failed:\n"), report)
+    jet_rt_string_drop(report)
+    control :: scheduler_control_current()
+    if (control != I64{0}) {
+        sync_mutex_lock(control + I64{72})
+        primary :: sync_load(control + I64{40})
+        if (primary != I64{0}) {
+            old :: sync_load(primary + I64{40})
+            joined := I64{0}
+            if {
+                (old == I64{0}) -> joined = text
+                (sync_load(primary + I64{48}) != I64{0}) -> joined = scheduler_text_concat(old, text)
+                else -> {
+                    separated :: scheduler_text_concat(old, rt_static_text("\n"))
+                    joined = scheduler_text_concat(separated, text)
+                    jet_rt_string_drop(separated)
+                }
+            }
+            sync_store(primary + I64{40}, joined)
+            sync_mutex_unlock(control + I64{72})
+            if (old != I64{0}) {
+                jet_rt_string_drop(old)
+                jet_rt_string_drop(text)
+            }
+            return
+        }
+        sync_mutex_unlock(control + I64{72})
+    }
+    jet_rt_stdout_flush()
+    trap_write_handle(text)
+    jet_rt_string_drop(text)
+}

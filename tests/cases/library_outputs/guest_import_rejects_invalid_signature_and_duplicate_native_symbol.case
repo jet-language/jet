@@ -1,0 +1,27 @@
+# tests/library_outputs.rs::guest_import_rejects_invalid_signature_and_duplicate_native_symbol at tests/library_outputs.rs:701; hand-port
+# jet::compile_library is `jet build --lib`; each variant is the guest_import_library package with library.jet replaced.
+fixture: guest_import_rejects_invalid_signature_and_duplicate_native_symbol.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build --lib v1/library.jet
+exit: 1 # tests/library_outputs.rs:710 invalid guest import signature is rejected
+stderr: ~ "Error [E3203]" # tests/library_outputs.rs:710 invalid guest import signature
+step: jet build --lib v2/library.jet
+exit: 1 # tests/library_outputs.rs:723 capability guest import is rejected
+stderr: ~ "Error [E1341]" # tests/library_outputs.rs:723 capability guest import
+stderr: ~ "hidden C bridge" # tests/library_outputs.rs:723 capability guest import
+step: jet build --lib v3/library.jet
+exit: 1 # tests/library_outputs.rs:737 C-layout guest import is rejected
+stderr: ~ "Error [E1341]" # tests/library_outputs.rs:737 C-layout guest import
+stderr: ~ "hidden C bridge" # tests/library_outputs.rs:737 C-layout guest import
+step: jet build --lib v4/library.jet
+exit: 1 # tests/library_outputs.rs:751 duplicate guest native symbol is rejected
+stderr: ~ "Error [E1341]" # tests/library_outputs.rs:751 duplicate guest native symbol
+stderr: ~ "Guest imports" # tests/library_outputs.rs:751 duplicate guest native symbol
+stderr: ~ "same C symbol" # tests/library_outputs.rs:751 duplicate guest native symbol
+step: jet build --lib v5/library.jet
+exit: 1 # tests/library_outputs.rs:768 C-module and guest import collision is rejected
+stderr: ~ "Error [E1341]" # tests/library_outputs.rs:768 C-module and guest import collision
+stderr: ~ "C module imports" # tests/library_outputs.rs:768 C-module and guest import collision
+stderr: ~ "same C symbol" # tests/library_outputs.rs:768 C-module and guest import collision

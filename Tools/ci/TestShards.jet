@@ -1,0 +1,145 @@
+#!/usr/bin/env jet
+// Native test-suite inventory, sharded across CI jobs.
+// Usage: jet Tools/ci/TestShards.jet SHARD_INDEX SHARD_COUNT
+//
+// The complete native suite set is fixed here: golden, ui, cases, registries.
+// Each suite is one row of the inventory; the runner that executes a suite owns
+// its contents. A new suite must be added to SUITES, the single place that
+// decides what CI can shard.
+//
+// Assignment is weighted longest-processing-time first: rows sorted by weight
+// (heaviest first, then by name), each given to the currently lightest shard.
+// Suites have no measured cost yet, so every suite carries DEFAULT_WEIGHT and
+// the split is an even count; measured per-suite seconds slot in as weights.
+//
+// Output: the selected shard's suite IDs, one per line, sorted (a set, kept
+// diffable). Standard error reports the predicted load and spread.
+use core.process as process
+use core.term as term
+
+SUITES :: [String]{"golden", "ui", "cases", "registries"}
+
+// Seconds charged to a suite with no measured cost.
+DEFAULT_WEIGHT :: 30
+
+struct WeightedItem {
+    weight: Int
+    item: String
+}
+
+struct ShardPlan {
+    selected: [String]
+    summary: String
+}
+
+#Error
+struct ShardError {
+    message: String
+    code: Int
+}
+
+fn is_digits(text: String) -> Bool Never! {
+    if text == "" -> return false
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        if code < 48 || code > 57 -> return false
+    }
+    true
+}
+
+fn digits_value(text: String) -> Int Never! {
+    value := 0
+    loop byte in text.bytes() -> value = value * 10 + Int.from_u8(byte) - 48
+    value
+}
+
+fn two_digits(value: Int) -> String Never! { if value < 10 -> "0{value}" else -> "{value}" }
+
+// The items `shard_index` of `shard_count` receives, and the load summary
+// (which names the shard as its arguments spelled it).
+fn weighted_shards(items: [WeightedItem], shard_index: Int, shard_count: Int, index_text: String, count_text: String) -> ShardPlan Never! {
+    ordered := items
+    &ordered.sort_by((left: WeightedItem, right: WeightedItem) -> (right.weight <=> left.weight).then(left.item <=> right.item))
+    loads := [Int]{}
+    loop _ in 0..<shard_count -> &loads.push(0)
+    selected := [String]{}
+    selected_seconds := 0
+    loop row in ordered {
+        lightest := 0
+        loop shard in 1..<shard_count {
+            if loads[shard] < loads[lightest] -> lightest = shard
+        }
+        loads[lightest] = loads[lightest] + row.weight
+        if lightest == shard_index {
+            &selected.push(row.item)
+            selected_seconds += row.weight
+        }
+    }
+    heaviest := loads[0]
+    lightest_load := loads[0]
+    loop load in loads {
+        if load > heaviest -> heaviest = load
+        if load < lightest_load -> lightest_load = load
+    }
+    spread := "n/a"
+    if lightest_load > 0 {
+        hundredths :: heaviest * 100 /% lightest_load
+        spread = "{hundredths /% 100}.{two_digits(hundredths % 100)}x"
+    }
+    load_words := [String]{}
+    loop load in loads -> &load_words.push("{load}")
+    summary :: "weighted-shards: shard {index_text}/{count_text} selected {selected.len()} of {items.len()} items, predicted {selected_seconds}s (shard loads: {load_words.join(" ")}; spread {heaviest}s/{lightest_load}s = {spread})"
+    ShardPlan{selected: selected, summary: summary}
+}
+
+fn shard_plan(args: [String]) -> ShardPlan ShardError! {
+    if args.len() != 2 -> return Err(ShardError{message: "usage: TestShards.jet SHARD_INDEX SHARD_COUNT", code: 64})
+    index_text :: args[0]
+    count_text :: args[1]
+    if !is_digits(count_text) -> return Err(ShardError{message: "error: SHARD_COUNT must be a positive integer, got '{count_text}'", code: 64})
+    shard_count :: digits_value(count_text)
+    if shard_count < 1 -> return Err(ShardError{message: "error: SHARD_COUNT must be >= 1, got '{count_text}'", code: 64})
+    if !is_digits(index_text) -> return Err(ShardError{message: "error: SHARD_INDEX must be a non-negative integer, got '{index_text}'", code: 64})
+    shard_index :: digits_value(index_text)
+    if shard_index >= shard_count -> return Err(ShardError{message: "error: SHARD_INDEX ({index_text}) must be < SHARD_COUNT ({count_text})", code: 64})
+    items := [WeightedItem]{}
+    loop suite in SUITES -> &items.push(WeightedItem{weight: DEFAULT_WEIGHT, item: suite})
+    plan :: weighted_shards(items, shard_index, shard_count, index_text, count_text)
+    selected := plan.selected
+    &selected.sort()
+    Ok(ShardPlan{selected: selected, summary: plan.summary})
+}
+
+fn run() {
+    if shard_plan(process.args()) == {
+        .Ok(plan) -> {
+            term.eprint(plan.summary)
+            loop suite in plan.selected -> print(suite)
+        }
+        .Err(error) -> {
+            term.eprint(error.message)
+            process.exit(error.code)
+        }
+    }
+}
+
+fn plan_text(args: [String]) -> String Never! {
+    if shard_plan(args) == {
+        .Ok(plan) -> "{plan.selected.join(",")} | {plan.summary}"
+        .Err(error) -> "{error.code}: {error.message}"
+    }
+}
+
+#Test("every suite lands on exactly one shard and the summary names the loads") {
+    assert_eq(plan_text([String]{"0", "1"}), "cases,golden,registries,ui | weighted-shards: shard 0/1 selected 4 of 4 items, predicted 120s (shard loads: 120; spread 120s/120s = 1.00x)")
+    assert_eq(plan_text([String]{"1", "3"}), "golden | weighted-shards: shard 1/3 selected 1 of 4 items, predicted 30s (shard loads: 60 30 30; spread 60s/30s = 2.00x)")
+    assert_eq(plan_text([String]{"4", "5"}), " | weighted-shards: shard 4/5 selected 0 of 4 items, predicted 0s (shard loads: 30 30 30 30 0; spread 30s/0s = n/a)")
+}
+
+#Test("malformed shard arguments are usage errors") {
+    assert_eq(plan_text([String]{"2", "2"}), "64: error: SHARD_INDEX (2) must be < SHARD_COUNT (2)")
+    assert_eq(plan_text([String]{"0", "0"}), "64: error: SHARD_COUNT must be >= 1, got '0'")
+    assert_eq(plan_text([String]{"-1", "2"}), "64: error: SHARD_INDEX must be a non-negative integer, got '-1'")
+    assert_eq(plan_text([String]{"0"}), "64: usage: TestShards.jet SHARD_INDEX SHARD_COUNT")
+    assert_eq(plan_text([String]{"01", "02"}), "golden,ui | weighted-shards: shard 01/02 selected 2 of 4 items, predicted 60s (shard loads: 60 60; spread 60s/60s = 1.00x)")
+}

@@ -3,7 +3,7 @@
 // package or output, the strict core source-tree fingerprint, and the core
 // recipe identity with its toolchain and normalized manifest semantics.
 
-PROVIDER_CORE_TREE_SCHEMA :: prep { "jet-core-source-tree-v2" }
+PROVIDER_CORE_TREE_SCHEMA :: "jet-core-source-tree-v2"
 
 // The canonical Package that owns a request: its root and parsed facts.
 struct CanonicalPackage {
@@ -41,9 +41,13 @@ fn provider_find_canonical_package(repo: String, requested: String) -[FS, Env]> 
 }
 
 fn provider_load_canonical_facts(dir: String, marker: String) -[FS, Env]> PackageFacts ProviderReason! {
-    loaded :: PackageFacts.load(dir) ?? return Err(ProviderReason{message: "canonical Package {marker} is invalid: {err.message()}"})
-    facts :: loaded ?? return Err(ProviderReason{message: "canonical Package {marker} could not be read"})
-    Ok(facts)
+    if PackageFacts.load(dir) == {
+        .Ok(loaded) -> {
+            facts :: loaded ?? return Err(ProviderReason{message: "canonical Package {marker} could not be read"})
+            Ok(facts)
+        }
+        .Err(error) -> Err(ProviderReason{message: "canonical Package {marker} is invalid: {error.message()}"})
+    }
 }
 
 fn provider_collect_canonical_packages(repo: String, members: [MemberRef], requested: String, out: &[CanonicalPackage]) ProviderReason! -[FS, Env]> {
@@ -115,7 +119,7 @@ fn provider_cargo_version_digest(cargo: String) -[Env, Exec, Time.Wait]> String 
 // Strict, path-independent identity of a core source closure. Unreadable,
 // non-file, and symlink nodes are refused instead of hashing a narrower tree
 // and reusing a stale object.
-fn provider_core_tree_fingerprint(root: String) -[FS]> String ProviderReason! {
+fn provider_core_tree_fingerprint(root: String) -[FS, Env]> String ProviderReason! {
     provider_validate_core_source_tree(root)
     found := [(relative: String, path: String)]{}
     provider_collect_core_files(root, "", &found)
@@ -205,36 +209,48 @@ fn provider_canonical_package_semantics(facts: PackageFacts) -> String Never! {
     "canonical-package-facts-v1:{pkg_facts_semantic_text(facts)}"
 }
 
+// The Rust `Debug` spelling of a target, the sort key of the normalized
+// manifest semantics.
+fn provider_target_debug_name(target: PackageTarget) -> String Never! {
+    if target == {
+        .Library -> "Library"
+        .Executable -> "Executable"
+        .Test -> "Test"
+        .Example -> "Example"
+        .Plugin(export) -> "Plugin {{ export: {pkg_debug_opt_str(export)} }}"
+    }
+}
+
 // The legacy manifest's semantics with every unordered collection sorted, so
 // declaration order never changes the identity.
 fn provider_normalized_manifest_semantics(manifest: PackageFacts?) -> String Never! {
     facts := manifest ?? return "manifest=absent"
     &facts.packages.sort_by(entry -> entry.name)
     loop index in 0..<facts.packages.len() {
-        &facts.packages[index].targets.sort_by(target -> target.debug_name())
+        &facts.packages[index].targets.sort_by(target -> provider_target_debug_name(target))
     }
     &facts.build_profiles.sort_by(profile -> profile.name)
     &facts.authority.grants.sort_by(grant -> grant.package)
     loop index in 0..<facts.authority.grants.len() -> &facts.authority.grants[index].rights.sort()
-    if facts.authority.holds.allow == {
+    if facts.authority.allow == {
         .Val(effects) -> {
             sorted := effects
             &sorted.sort()
-            facts.authority.holds.allow = Val(sorted)
+            facts.authority.allow = Val(sorted)
         }
         .None -> {}
     }
-    if facts.authority.holds.deny == {
+    if facts.authority.deny == {
         .Val(effects) -> {
             sorted := effects
             &sorted.sort()
-            facts.authority.holds.deny = Val(sorted)
+            facts.authority.deny = Val(sorted)
         }
         .None -> {}
     }
     facts.grants = facts.authority.grants
-    facts.effects_allow = facts.authority.holds.allow
-    facts.effects_deny = facts.authority.holds.deny
+    facts.effects_allow = facts.authority.allow
+    facts.effects_deny = facts.authority.deny
     if facts.authority.trust == {
         .Val(policy) -> {
             sorted := policy

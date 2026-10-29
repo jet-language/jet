@@ -1,0 +1,8 @@
+# tests/refutable_test_bind.rs::a_test_without_a_route_does_not_bind_pattern_names at tests/refutable_test_bind.rs:67; hand-port
+fixture: a_test_without_a_route_does_not_bind_pattern_names.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check refutable_test_bind_no_route.jet --json
+exit: 1 # tests/refutable_test_bind.rs:76 is rejected
+json: stdout doc $.reports[?code="E0107"] #>= 1 # tests/refutable_test_bind.rs:76 reports E0107

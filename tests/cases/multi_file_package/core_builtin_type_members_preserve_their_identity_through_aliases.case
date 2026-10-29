@@ -1,0 +1,14 @@
+# tests/multi_file_package.rs::core_builtin_type_members_preserve_their_identity_through_aliases at tests/multi_file_package.rs:19; hand-port
+# Claim: core.encoding Dyn imported `as Tree` keeps identity: tree_weight(Tree.Int(7)) == 7 (tests/multi_file_package.rs:20-23)
+# Claim: stdout equals Examples/features/expected/modules/core_type_imports.out, "core carriers\n7" (tests/multi_file_package.rs:22)
+# Not ported: interpreter tier: no CLI route on the seed (`jet run --interpret` is E2102)
+fixture: core_builtin_type_members_preserve_their_identity_through_aliases.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run core_type_imports.jet
+exit: 0 # tests/multi_file_package.rs:22 default tier golden
+stdout: = core_builtin_type_members_preserve_their_identity_through_aliases-1.out # tests/multi_file_package.rs:22 default tier golden
+step: jet run --release core_type_imports.jet
+exit: 0 # tests/multi_file_package.rs:22 AOT/release tier golden
+stdout: = core_builtin_type_members_preserve_their_identity_through_aliases-2.out # tests/multi_file_package.rs:22 AOT/release tier golden

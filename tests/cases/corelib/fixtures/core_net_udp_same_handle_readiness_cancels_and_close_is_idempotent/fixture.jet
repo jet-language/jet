@@ -6,7 +6,7 @@ use core.time as time
 fn run() {
     socket :: net.udp_bind("127.0.0.1:0") ?? panic("bind")
     interest :: NetReadyInterest.Read
-    (ready_tx, ready_rx) :: channel<Int>()
+    { sender: ready_tx, receiver: ready_rx } :: channel<Int>()
     waiter :: task {
         ready_tx.send(1)
         if socket.ready(interest, deadline: Duration.seconds(1) ?? panic("deadline")) == {

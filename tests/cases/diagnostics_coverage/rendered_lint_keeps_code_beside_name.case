@@ -1,0 +1,11 @@
+# tests/diagnostics_coverage.rs::rendered_lint_keeps_code_beside_name at tests/diagnostics_coverage.rs:643; hand-port
+# Claim: L0302 renders as Warning [L0302] (same_enum_guard_table): with code beside lint name (tests/diagnostics_coverage.rs:646-649), observed via jet check of the tests/ui/lint_policy_l0302 closed-enum guard table with no deny policy
+# Not ported: Diagnostic::from_row("L0302", &[], None).render(...) direct Rust call: Rust-only API; CLI render is the equivalent
+fixture: rendered_lint_keeps_code_beside_name.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check run.jet
+env: NO_COLOR=1
+exit: 0 # tests/diagnostics_coverage.rs:647 rendered starts with Warning [L0302] (same_enum_guard_table):
+stderr: ~ "Warning [L0302] (same_enum_guard_table):" # tests/diagnostics_coverage.rs:647 rendered starts with Warning [L0302] (same_enum_guard_table):

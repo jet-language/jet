@@ -1,0 +1,42 @@
+# Claim: first debug build exits 0 and does not replay a receipt
+# Claim: second identical debug build exits 0 and prints up to date
+# Claim: second build stdout equals the first
+# Claim: built binary prints receipt-replay
+# Not ported: rustc argv log comparison: reads generated rustc argv
+# Not ported: jet_store last_build_record node checks: Rust jet_store API
+# Not ported: binary mtime check: the fixture cannot read mtime portably in a sh step
+fixture: second_identical_build_replays_receipt.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: sh {work}/step-1.sh
+exit: 0 # shell temp roots
+step: jet build main.jet --profile=debug
+env: JET_STORE_DIR=store
+env: JET_STORE_CAP_BYTES=21474836480
+env: JET_STORE_RESERVE_BYTES=2147483648
+env: NO_COLOR=1
+env: RUSTC_LINKER=cc
+env: NIX_BUILD_TOP=nix-shell.first
+env: TMPDIR=nix-shell.first
+env: TMP=nix-shell.first
+env: TEMP=nix-shell.first
+env: TEMPDIR=nix-shell.first
+exit: 0 # first build does the work
+stderr: !~ "up to date:" # first build does the work
+step: jet build main.jet --profile=debug
+env: JET_STORE_DIR=store
+env: JET_STORE_CAP_BYTES=21474836480
+env: JET_STORE_RESERVE_BYTES=2147483648
+env: NO_COLOR=1
+env: RUSTC_LINKER=cc
+env: NIX_BUILD_TOP=nix-shell.second
+env: TMPDIR=nix-shell.second
+env: TMP=nix-shell.second
+env: TEMP=nix-shell.second
+env: TEMPDIR=nix-shell.second
+exit: 0 # second build replays receipt
+stderr: ~ "up to date: " # second build replays receipt
+step: built
+exit: 0 # built binary output
+stdout: = "receipt-replay\n" # built binary output

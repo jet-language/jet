@@ -525,7 +525,7 @@ struct RuntimeFileInput { path: String; is_dir: Bool }
 // Rust: crates/jet-devserver/src/WatchService.rs:1160
 RUNTIME_FILE_INPUT_METHODS :: [(_0: "copy", _1: false), (_0: "copy_dir", _1: true), (_0: "exists", _1: false), (_0: "is_dir", _1: true), (_0: "list_dir", _1: true),
     (_0: "read", _1: false), (_0: "read_bytes", _1: false), (_0: "walk", _1: true), (_0: "walk_parallel", _1: true), (_0: "glob", _1: false), (_0: "stat", _1: false),
-    (_0: "fixture", _1: false), (_0: "golden", _1: false), (_0: "corpus", _1: true)]
+    (_0: "fixture", _1: false), (_0: "golden", _1: false), (_0: "corpus", _1: true), (_0: "corpus_entries", _1: true)]
 // Rust: crates/jet-devserver/src/WatchService.rs:1177
 fn runtime_file_inputs(source: String) -> [RuntimeFileInput] {
     inputs := [String:Bool]{}; bytes :: source.as_bytes()
@@ -828,6 +828,10 @@ fn change_kind_name(kind: ChangeKind) -> String { if kind == {
 // Persist remains at the shared runtime-heap owner.
 use jet_foundation.Persist.[PersistEntry, PersistIdentity, PersistOutcome, PersistRejectReason, PersistStore]
 use jet_foundation.Persist as Persist
+use jet_pkg_model.[Manifest]
+use jet_foundation.[Diagnostic, foundation_json_escape]
+use jetpack_foundation.[PACKAGE_FILE]
+use core.files.[OSPath]
 // Rust: crates/jet-devserver/src/WatchService.rs:1869
 struct SessionSnapshot {
     generation: U64; artifact_token: String; source_id: String; build_id: String; revision: String; world_id: String; persist: PersistStore

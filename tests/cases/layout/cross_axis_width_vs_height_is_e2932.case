@@ -1,0 +1,9 @@
+# tests/layout.rs::cross_axis_width_vs_height_is_e2932 at tests/layout.rs:162; hand-port
+fixture: cross_axis_width_vs_height_is_e2932.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check fixture.jet --json
+exit: 1 # tests/layout.rs:170 is rejected
+json: stdout doc $.reports[?severity="error"] #= 1 # tests/layout.rs:170 the errors are exactly E2932
+json: stdout doc $.reports[?code="E2932"] #= 1 # tests/layout.rs:170 reports E2932

@@ -1,15 +1,20 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { canonicalJson, sha256 } from "./hardening-repro.mjs";
-import {
-  canonicalJson as proofCanonicalJson,
-  digestBytes as proofDigestBytes,
-  digestText as proofDigestText,
-} from "./compiler-proof.mjs";
+
+// Candidate records carry `sha256-<hex>` digests.
+function digestBytes(bytes) {
+  return `sha256-${createHash("sha256").update(bytes).digest("hex")}`;
+}
+
+function digestText(text) {
+  return digestBytes(Buffer.from(text, "utf8"));
+}
 
 export const SURFACE_SCHEMA = "jet.hardening.surface.v1";
 export const SURFACE_SCHEMA_VERSION = 1;
@@ -54,7 +59,7 @@ const CAPABILITY_PATHS = Object.freeze({
   ],
   core: [
     "crates/jet-foundation/src/CoreModuleExports.rs",
-    "crates/jet-codegen/src/Prelude/Core.jet",
+    "Compiler/Prelude/Core.jet",
     "crates/jet-foundation/src/Syntax/core_calls.rs",
     "crates/jet-sema/src/Sema/CheckerCoreLib/module_items.rs",
     "crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs",
@@ -68,7 +73,7 @@ const CAPABILITY_PATHS = Object.freeze({
   ],
   build: [
     "crates/jet-foundation/src/BuildEffects.rs",
-    "crates/jet-codegen/src/Prelude/Effects.jet",
+    "Compiler/Prelude/Effects.jet",
     "crates/jet-pkg-model/src/Package/Blocks.rs",
   ],
   package: [
@@ -170,9 +175,6 @@ export const CANDIDATE_DEPENDENCY_KEYS = Object.freeze([
   "configuration",
   "generated_artifact",
   "target_tool",
-  "proof_model",
-  "proof_checker",
-  "proof_artifact",
   "consumed_test_oracle",
   "behavior",
   "performance",
@@ -189,9 +191,6 @@ const CANDIDATE_FILE_DEPENDENCIES = new Set([
   "configuration",
   "generated_artifact",
   "target_tool",
-  "proof_model",
-  "proof_checker",
-  "proof_artifact",
   "binary",
   "documentation",
 ]);
@@ -200,17 +199,6 @@ const CANDIDATE_WORKLOAD_REPORT_LABELS = Object.freeze([
   "linux-x86_64",
   "macos-x86_64",
   "windows-x86_64",
-]);
-const CANDIDATE_COMPILER_STAGES = Object.freeze([
-  "semantics",
-  "source",
-  "checking",
-  "comptime",
-  "lowering",
-  "optimization",
-  "adapters",
-  "prelude",
-  "runtime",
 ]);
 const CANDIDATE_DEPENDENCY_STATES = new Set([
   "available",
@@ -237,18 +225,6 @@ const CANDIDATE_CLAIM_STATES = new Set([
   "owner-ratified-not-applicable",
 ]);
 const CANDIDATE_GREEN_STATES = new Set(["green", "passed", "qualified", "ready"]);
-const CANDIDATE_PROOF_POSITIVE_STATES = new Set([
-  "passed",
-  "qualified",
-  "proved",
-  "valid",
-  "complete",
-  "observed",
-  "verified",
-  "matched",
-  "accepted",
-  "rejected",
-]);
 
 function candidateDigest(value) {
   if (typeof value !== "string") return null;
@@ -298,7 +274,7 @@ function candidateComparableIdentity(value, key) {
 }
 
 function candidateDependencyDigest(dependencies) {
-  return proofDigestText(proofCanonicalJson(dependencies));
+  return digestText(canonicalJson(dependencies));
 }
 
 export function candidateContentDigest(candidate) {
@@ -306,16 +282,15 @@ export function candidateContentDigest(candidate) {
   const content = cloneJson(candidate);
   delete content.content_digest;
   if (isRecord(content.candidate_identity)) delete content.candidate_identity.record_sha256;
-  return proofDigestText(proofCanonicalJson(content));
+  return digestText(canonicalJson(content));
 }
 
 function candidateRecordDigest(candidate) {
   if (!isRecord(candidate)) throw new Error("candidate is not an object");
   const record = cloneJson(candidate);
   delete record.content_digest;
-  record.compiler_proof = null;
   if (isRecord(record.candidate_identity)) delete record.candidate_identity.record_sha256;
-  return proofDigestText(proofCanonicalJson(record));
+  return digestText(canonicalJson(record));
 }
 
 function candidateDefaultId(commit, source) {
@@ -476,20 +451,20 @@ export function readCandidateWorkloadReportRelation(reportRoot) {
   const commit = reports[0].identity.candidate_commit;
   const sourceSha = candidateDigest(reports[0].identity.source_closure_sha256);
   const configurationSha = candidateDigest(reports[0].identity.contract_sha256);
-  const compilerSha = proofDigestText(proofCanonicalJson(
+  const compilerSha = digestText(canonicalJson(
     reports.map((report) => ({
       label: report.label,
       sha256: candidateDigest(report.identity.jet_binary_sha256),
     })),
   ));
-  const targetToolSha = proofDigestText(proofCanonicalJson(
+  const targetToolSha = digestText(canonicalJson(
     reports.map((report) => ({
       label: report.label,
       platform: report.identity.platform,
       launcher_sha256: candidateDigest(report.identity.peer_launcher_sha256),
     })),
   ));
-  const reportSha = proofDigestText(proofCanonicalJson(
+  const reportSha = digestText(canonicalJson(
     reports.map((report) => ({
       label: report.label,
       report_sha256: candidateDigest(report.review.report_sha256),
@@ -497,7 +472,7 @@ export function readCandidateWorkloadReportRelation(reportRoot) {
   ));
   const generatorPath = resolve(DEFAULT_ROOT, "Tools/ci/compiled-workload-runner.mjs");
   if (!existsSync(generatorPath)) throw new Error("candidate workload generator is missing");
-  const generatorSha = proofDigestBytes(readFileSync(generatorPath));
+  const generatorSha = digestBytes(readFileSync(generatorPath));
   const reportRootPath = relative(DEFAULT_ROOT, resolve(reportRoot)).split("\\").join("/");
   const reportEvidence = {
     status: "passed",
@@ -543,7 +518,6 @@ export function buildCandidateRecord({
   dependencies = {},
   claims = [],
   historicalReceipts = [],
-  compilerProof = null,
   prerelease = null,
   status = "blocked",
   evidence = {},
@@ -585,7 +559,6 @@ export function buildCandidateRecord({
     dependencies: normalizedDependencies,
     claims: normalizedClaims,
     historical_receipts: normalizedReceipts,
-    compiler_proof: compilerProof ? cloneJson(compilerProof) : null,
     evidence: isRecord(evidence) ? cloneJson(evidence) : {},
     content_digest: null,
   };
@@ -618,253 +591,6 @@ function candidateObservedDependencies(current, currentDependencies) {
   return null;
 }
 
-function candidateComposition(candidate, composition) {
-  if (composition) return composition;
-  if (isRecord(candidate?.compiler_proof)) return candidate.compiler_proof;
-  if (isRecord(candidate?.proof?.composition)) return candidate.proof.composition;
-  return null;
-}
-
-function candidateCompositionIdentityMatches(composition, candidateIdentity) {
-  const composed = composition?.candidate_identity;
-  if (!isRecord(composed) || !isRecord(candidateIdentity)) return false;
-  const fields = [
-    ["id", ["id"]],
-    ["commit", ["commit"]],
-    ["source_content_sha256", ["source_content_sha256"]],
-    ["record_sha256", ["record_sha256"]],
-    ["compiler_sha256", ["compiler_sha256"]],
-    ["configuration_sha256", ["configuration_sha256"]],
-    ["target_tool_sha256", ["target_tool_sha256"]],
-    ["dependency_sha256", ["dependency_sha256"]],
-  ];
-  return fields.every(([field, names]) => {
-    const expected = candidateIdentity[field];
-    if (expected === null || expected === undefined) return false;
-    const actual = names.map((name) => composed[name]).find((value) => value !== undefined && value !== null);
-    return actual === expected;
-  });
-}
-
-function candidateDependencyIdentityMatches(actual, expected) {
-  return isRecord(actual)
-    && isRecord(expected)
-    && actual.id === expected.id
-    && actual.status === expected.status
-    && actual.sha256 === expected.sha256;
-}
-
-function candidateCompositionErrors(composition, candidate) {
-  const errors = [];
-  if (!isRecord(composition)) {
-    errors.push("candidate compiler proof is missing");
-    return errors;
-  }
-  if (composition.schema !== "jet.compiler-proof-composition.v1") {
-    errors.push("candidate compiler proof schema is invalid");
-  }
-  if (composition.schema_version !== 1) errors.push("candidate compiler proof schema_version is invalid");
-  if (composition.status !== "qualified") errors.push(`candidate compiler proof is ${composition.status || "unknown"}`);
-  const compositionProofObject = composition.proof_object;
-  if (!isRecord(compositionProofObject)
-    || compositionProofObject.schema !== "jet.compiler-proof-object.v1"
-    || !CANDIDATE_PROOF_POSITIVE_STATES.has(compositionProofObject.status)
-    || !isRecord(compositionProofObject.artifact)
-    || typeof compositionProofObject.artifact.path !== "string"
-    || compositionProofObject.artifact.path.length === 0
-    || !validCandidateDigest(compositionProofObject.artifact.sha256)
-    || !isRecord(compositionProofObject.replay_ref)
-    || typeof compositionProofObject.replay_ref.path !== "string"
-    || compositionProofObject.replay_ref.path.length === 0
-    || typeof compositionProofObject.replay_ref.claim_id !== "string"
-    || compositionProofObject.replay_ref.claim_id.length === 0
-    || !isRecord(compositionProofObject.authority)
-    || compositionProofObject.authority.authority_key !== "compiler-proof.composition"
-    || compositionProofObject.authority.obligation_id !== "compiler-proof.composition-candidate") {
-    errors.push("candidate compiler proof composed replay proof object is missing or not approved");
-  }
-  const expectedProofArtifact = candidate.dependencies?.proof_artifact;
-  if (!isRecord(expectedProofArtifact)
-    || compositionProofObject?.artifact?.path !== expectedProofArtifact.path
-    || candidateDigest(compositionProofObject?.artifact?.sha256) !== candidateDigest(expectedProofArtifact.sha256)) {
-    errors.push("candidate compiler proof composed replay artifact does not match candidate proof artifact");
-  }
-  if (!candidateCompositionIdentityMatches(composition, candidate.candidate_identity)) {
-    errors.push("candidate compiler proof identity does not match candidate");
-  }
-  if (!isRecord(composition.relation)) errors.push("candidate compiler proof relation is missing");
-  else {
-    if (composition.relation.schema !== "jet.compiler-refinement.v1") errors.push("candidate compiler proof relation schema is invalid");
-    if (canonicalJson(composition.relation.stage_order) !== canonicalJson([...CANDIDATE_COMPILER_STAGES])) {
-      errors.push("candidate compiler proof relation stage order is not canonical");
-    }
-    const relationStages = Array.isArray(composition.relation.stages)
-      ? composition.relation.stages.map((row) => typeof row === "string" ? row : row?.stage)
-      : null;
-    if (!relationStages || canonicalJson(relationStages) !== canonicalJson([...CANDIDATE_COMPILER_STAGES])) {
-      errors.push("candidate compiler proof relation stages are not canonical");
-    }
-  }
-  const stages = composition.stage_evidence;
-  if (!Array.isArray(stages)) {
-    errors.push("candidate compiler proof stage evidence is missing");
-  } else {
-    if (stages.length !== CANDIDATE_COMPILER_STAGES.length
-      || stages.some((row, index) => row?.stage !== CANDIDATE_COMPILER_STAGES[index])) {
-      errors.push("candidate compiler proof stage evidence is not in canonical order");
-    }
-    const seen = new Set();
-    for (const stage of CANDIDATE_COMPILER_STAGES) {
-      const rows = stages.filter((row) => row?.stage === stage);
-      if (rows.length !== 1) {
-        errors.push(`candidate compiler proof stage evidence missing or duplicated: ${stage}`);
-        continue;
-      }
-      const row = rows[0];
-      seen.add(stage);
-      if (!Object.hasOwn(row, "result") || !isRecord(row.result)) {
-        errors.push(`candidate compiler proof stage result is missing or invalid: ${stage}`);
-      }
-      if (!Object.hasOwn(row, "result_sha256") || !validCandidateDigest(row.result_sha256)) {
-        errors.push(`candidate compiler proof stage result digest is missing: ${stage}`);
-      } else if (!isRecord(row.result)
-        || row.result_sha256 !== proofDigestText(proofCanonicalJson(row.result))) {
-        errors.push(`candidate compiler proof stage result digest is stale: ${stage}`);
-      }
-      if (row.status && !CANDIDATE_PROOF_POSITIVE_STATES.has(row.status)) {
-        errors.push(`candidate compiler proof stage ${stage} is ${row.status}`);
-      }
-      if (row.result?.status && !CANDIDATE_PROOF_POSITIVE_STATES.has(row.result.status)) {
-        errors.push(`candidate compiler proof stage result ${stage} is ${row.result.status}`);
-      }
-      for (const field of ["identity", "proof_object", "coverage", "relation"]) {
-        if (!Object.hasOwn(row, field) || row[field] === null || row[field] === undefined) {
-          errors.push(`candidate compiler proof stage ${stage} is missing ${field}`);
-        }
-      }
-      const proofObject = row.proof_object;
-      const proofPayload = proofObject?.artifact
-        || proofObject?.evidence
-        || proofObject?.replay_ref
-        || proofObject?.replay;
-      if (!isRecord(proofObject)
-        || typeof proofObject.schema !== "string"
-        || proofObject.schema.length === 0
-        || !CANDIDATE_PROOF_POSITIVE_STATES.has(proofObject.status)
-        || !isRecord(proofPayload)) {
-        errors.push(`candidate compiler proof stage ${stage} proof object is not verified`);
-      }
-      const coverageStatus = row.coverage?.status ?? row.coverage?.qualification;
-      if (!["qualified", "proved", "passed", "complete"].includes(coverageStatus)) {
-        errors.push(`candidate compiler proof stage ${stage} coverage is unavailable`);
-      }
-      if (row.relation?.status !== undefined && !CANDIDATE_PROOF_POSITIVE_STATES.has(row.relation.status)) {
-        errors.push(`candidate compiler proof stage ${stage} relation is unavailable`);
-      }
-      if (!isRecord(proofObject?.replay_ref)
-        || typeof proofObject.replay_ref.path !== "string"
-        || proofObject.replay_ref.path.length === 0
-        || typeof proofObject.replay_ref.claim_id !== "string"
-        || proofObject.replay_ref.claim_id.length === 0) {
-        errors.push(`candidate compiler proof stage ${stage} replay reference is not verified`);
-      }
-      for (const field of ["source", "model", "proof", "checker", "compiler_artifact", "candidate_binary", "target", "configuration", "candidate"]) {
-        if (!isRecord(row.identity?.[field])) errors.push(`candidate compiler proof stage ${stage} identity is missing ${field}`);
-      }
-      const stageDependencies = {
-        source: "source",
-        model: "proof_model",
-        proof: "proof_artifact",
-        checker: "proof_checker",
-        compiler_artifact: "compiler",
-        candidate_binary: "binary",
-        target: "target_tool",
-        configuration: "configuration",
-      };
-      for (const [field, dependencyKey] of Object.entries(stageDependencies)) {
-        if (!candidateDependencyIdentityMatches(row.identity?.[field], candidate.dependencies?.[dependencyKey])) {
-          errors.push(`candidate compiler proof stage ${stage} identity does not match dependency: ${dependencyKey}`);
-        }
-      }
-      const candidateStage = row.identity?.candidate;
-      if (!isRecord(candidateStage)
-        || !candidateCompositionIdentityMatches({ candidate_identity: candidateStage }, candidate.candidate_identity)) {
-        errors.push(`candidate compiler proof stage ${stage} identity does not match candidate`);
-      }
-    }
-    for (const stage of stages) {
-      if (!CANDIDATE_COMPILER_STAGES.includes(stage?.stage)) errors.push(`candidate compiler proof has unknown stage: ${stage?.stage || "missing"}`);
-    }
-    if (seen.size !== CANDIDATE_COMPILER_STAGES.length) errors.push("candidate compiler proof does not cover every required stage");
-  }
-  for (const field of ["supported_program_acceptance", "correct_rejection", "preservation", "foreign_assumptions"]) {
-    if (!Object.hasOwn(composition, field)) errors.push(`candidate compiler proof is missing ${field}`);
-  }
-  const acceptance = composition.supported_program_acceptance;
-  if (!CANDIDATE_PROOF_POSITIVE_STATES.has(acceptance?.status)
-    || !Array.isArray(acceptance?.modes)
-    || acceptance.modes.length === 0
-    || !isRecord(acceptance?.evidence_ref)
-    || typeof acceptance.evidence_ref.stage !== "string"
-    || typeof acceptance.evidence_ref.case_id !== "string") {
-    errors.push("candidate compiler proof supported-program acceptance is unavailable");
-  } else {
-    for (const mode of acceptance.modes) {
-      if (!isRecord(mode)
-        || typeof mode.mode !== "string"
-        || !CANDIDATE_PROOF_POSITIVE_STATES.has(mode.status)
-        || mode.accepted !== true
-        || !isRecord(mode.observations)
-        || mode.observations.result === undefined
-        || !Number.isInteger(mode.exit_code)
-        || mode.exit_code !== 0
-        || mode.source_sha256 !== candidate.candidate_identity.source_content_sha256
-        || mode.candidate_identity_sha256 !== candidate.candidate_identity.record_sha256) {
-        errors.push(`candidate compiler proof supported-program acceptance mode is invalid: ${mode?.mode || "unknown"}`);
-      }
-    }
-  }
-  const rejection = composition.correct_rejection;
-  if (!CANDIDATE_PROOF_POSITIVE_STATES.has(rejection?.status)
-    || rejection.accepted !== false
-    || !Array.isArray(rejection.modes)
-    || rejection.modes.length === 0
-    || rejection.source_sha256 !== candidate.candidate_identity.source_content_sha256
-    || rejection.candidate_identity_sha256 !== candidate.candidate_identity.record_sha256
-    || !isRecord(rejection.evidence_ref)
-    || typeof rejection.evidence_ref.stage !== "string"
-    || typeof rejection.evidence_ref.case_id !== "string") {
-    errors.push("candidate compiler proof correct-rejection evidence is unavailable");
-  } else {
-    for (const mode of rejection.modes) {
-      if (!isRecord(mode)
-        || typeof mode.mode !== "string"
-        || !CANDIDATE_PROOF_POSITIVE_STATES.has(mode.status)
-        || mode.accepted !== false
-        || !isRecord(mode.diagnostic)
-        || typeof mode.diagnostic.code !== "string"
-        || (!isRecord(mode.diagnostic.span) && typeof mode.diagnostic.span !== "string")
-        || typeof mode.diagnostic.reason !== "string"
-        || !isRecord(mode.observations)
-        || (mode.observations.result === undefined && mode.result === undefined)
-        || !Number.isInteger(mode.exit_code)
-        || mode.exit_code === 0) {
-        errors.push(`candidate compiler proof correct-rejection mode is invalid: ${mode?.mode || "unknown"}`);
-      }
-    }
-  }
-  if (!CANDIDATE_PROOF_POSITIVE_STATES.has(composition.preservation?.status)
-    || composition.preservation.source_sha256 !== candidate.candidate_identity.source_content_sha256
-    || composition.preservation.candidate_identity_sha256 !== candidate.candidate_identity.record_sha256) {
-    errors.push("candidate compiler proof preservation evidence is unavailable");
-  }
-  if (!Array.isArray(composition.foreign_assumptions) || composition.foreign_assumptions.length === 0) {
-    errors.push("candidate compiler proof foreign assumptions are invalid");
-  }
-
-  return errors;
-}
-
 function candidateClaimEvidence(claim, errors) {
   const evidence = isRecord(claim.evidence) ? claim.evidence : null;
   if (!evidence) {
@@ -891,7 +617,6 @@ export function validateCandidateRecord(candidate, {
   sourceCommit = null,
   sourceSnapshotHash = null,
   binarySha256 = null,
-  composition = null,
   requireQualified = false,
   requireReleaseClaim = false,
   releaseChannel = null,
@@ -1045,8 +770,6 @@ export function validateCandidateRecord(candidate, {
       if (CANDIDATE_GREEN_STATES.has(claim.status)) candidateClaimEvidence(claim, errors);
     }
   }
-  const proof = candidateComposition(candidate, composition);
-  for (const error of candidateCompositionErrors(proof, candidate)) errors.push(error);
   const release = dependencies.release_claim;
   if (requireReleaseClaim || releaseChannel !== null) {
     if (!release) errors.push("candidate release claim is missing");
@@ -1094,44 +817,6 @@ export function validateCandidateRecord(candidate, {
   };
 }
 
-export function verifyCandidateComposition(path, { root = DEFAULT_ROOT, candidate = null } = {}) {
-  const resolvedRoot = resolve(root);
-  const resolvedPath = resolve(resolvedRoot, path);
-  const relativePath = relative(resolvedRoot, resolvedPath).split("\\").join("/");
-  if (!relativePath || relativePath === ".." || relativePath.startsWith("../")) {
-    return { ok: false, result: null, errors: ["candidate composition path escapes project root"] };
-  }
-  const driver = resolve(resolvedRoot, "Tools/agent/compiler-proof.mjs");
-  if (!existsSync(driver)) return { ok: false, result: null, errors: [`candidate composition driver is missing: ${driver}`] };
-  const child = spawnSync(process.execPath, [driver, "--compose", relativePath, "--json"], {
-    cwd: resolvedRoot,
-    encoding: "utf8",
-    timeout: 15 * 60 * 1000,
-    maxBuffer: 64 * 1024 * 1024,
-    env: { ...process.env, LC_ALL: "C", LANG: "C", NO_COLOR: "1", CLICOLOR: "0" },
-  });
-  let result = null;
-  try {
-    result = JSON.parse(child.stdout || "");
-  } catch (error) {
-    return { ok: false, result: null, errors: [`candidate composition checker returned non-JSON output: ${error.message}`] };
-  }
-  const errors = [];
-  if (result?.schema !== "jet.compiler-proof-composition-check.v1" || result?.stage !== "composition") {
-    errors.push("candidate composition checker returned an unexpected schema");
-  }
-  if (child.error) errors.push(`candidate composition checker could not start: ${child.error.message}`);
-  if (child.status !== 0) errors.push(`candidate composition checker exited ${child.status ?? "unknown"}`);
-  if (result?.status !== "qualified") errors.push(`candidate composition result is ${result?.status || "unknown"}`);
-  if (result?.proof_boundary?.universal_proof !== false) errors.push("candidate composition proof boundary is not conditional");
-  const expected = candidate?.candidate_identity;
-  const actual = result?.candidate_identity;
-  for (const field of ["id", "commit", "source_content_sha256", "record_sha256", "compiler_sha256", "configuration_sha256", "target_tool_sha256", "dependency_sha256"]) {
-    if (expected && actual?.[field] !== expected[field]) errors.push(`candidate composition identity differs: ${field}`);
-  }
-  return { ok: errors.length === 0, result, errors };
-}
-
 export function readCandidateRecord(path, options = {}) {
   if (typeof path !== "string" || path.length === 0) fail("candidate path is required");
   if (!existsSync(path)) fail(`unreadable candidate: ${path}`);
@@ -1141,13 +826,8 @@ export function readCandidateRecord(path, options = {}) {
   } catch (error) {
     fail(`unreadable candidate ${path}: ${error.message}`);
   }
-  const { verifyComposition = true, compositionRoot = DEFAULT_ROOT, ...validationOptions } = options;
-  const validation = validateCandidateRecord(candidate, validationOptions);
+  const validation = validateCandidateRecord(candidate, options);
   if (!validation.ok) fail(validation.errors.join("\n"));
-  if (verifyComposition) {
-    const composition = verifyCandidateComposition(path, { root: compositionRoot, candidate });
-    if (!composition.ok) fail(composition.errors.join("\n"));
-  }
   return candidate;
 
 }
@@ -1196,138 +876,40 @@ export function invalidateCandidateClaims(candidate, substitutions = {}) {
   return next;
 }
 
-function candidateFixtureComposition(candidate, dependencies) {
-  const identity = candidate.candidate_identity;
-  const stage_evidence = CANDIDATE_COMPILER_STAGES.map((stage) => {
-    const result = { status: "qualified", stage };
-    return {
-      stage,
-      result,
-      result_sha256: proofDigestText(proofCanonicalJson(result)),
-      identity: {
-        source: dependencies.source,
-        model: dependencies.proof_model,
-        proof: dependencies.proof_artifact,
-        checker: dependencies.proof_checker,
-        compiler_artifact: dependencies.compiler,
-        candidate_binary: dependencies.binary,
-        target: dependencies.target_tool,
-        configuration: dependencies.configuration,
-        candidate: identity,
-      },
-      proof_object: { schema: "jet.compiler-proof-object.v1", status: "qualified", artifact: { path: "fixture-proof", sha256: dependencies.proof_artifact.sha256 }, checker: dependencies.proof_checker, replay_ref: { path: "fixture-replay.json", claim_id: `${stage}-fixture` }, replay: { schema: "jet.compiler-proof-replay.v1", status: "passed" } },
-      coverage: { status: "qualified", obligations: [`${stage}-obligation`] },
-      relation: { status: "qualified", preserves: ["value", "error", "effect"] },
-    };
-  });
-  return {
-    schema: "jet.compiler-proof-composition.v1",
-    schema_version: 1,
-    status: "qualified",
-    proof_object: {
-      schema: "jet.compiler-proof-object.v1",
-      status: "qualified",
-      artifact: { path: "fixture-proof", sha256: dependencies.proof_artifact.sha256 },
-      replay_ref: { path: "tests/compiler-proof/toolchain/manifest.json", claim_id: "compiler-proof.composition-candidate" },
-      authority: { authority_key: "compiler-proof.composition", obligation_id: "compiler-proof.composition-candidate" },
-    },
-    candidate_identity: {
-      id: identity.id,
-      commit: identity.commit,
-      source_content_sha256: identity.source_content_sha256,
-      record_sha256: identity.record_sha256,
-      compiler_sha256: identity.compiler_sha256,
-      configuration_sha256: identity.configuration_sha256,
-      target_tool_sha256: identity.target_tool_sha256,
-      dependency_sha256: identity.dependency_sha256,
-    },
-    relation: {
-      schema: "jet.compiler-refinement.v1",
-      stage_order: [...CANDIDATE_COMPILER_STAGES],
-      representations: [],
-      edges: [],
-      observation_alphabet: ["value", "error", "effect"],
-      preservation_dimensions: ["value", "error", "effect"],
-      stages: [...CANDIDATE_COMPILER_STAGES],
-    },
-    stage_evidence,
-    supported_program_acceptance: {
-      status: "passed",
-      modes: ["aot", "interpreter"].map((mode) => ({
-        mode,
-        status: "passed",
-        accepted: true,
-        observations: { status: "passed", result: { status: "passed" } },
-        exit_code: 0,
-        source_sha256: identity.source_content_sha256,
-        candidate_identity_sha256: identity.record_sha256,
-      })),
-      evidence_ref: { stage: "semantics", case_id: "fixture-programs" },
-    },
-    correct_rejection: {
-      status: "passed",
-      accepted: false,
-      modes: ["aot", "interpreter"].map((mode) => ({
-        mode,
-        status: "passed",
-        accepted: false,
-        diagnostic: { code: "E-fixture", span: "fixture:1:1", reason: "fixture rejection" },
-        observations: { status: "passed" },
-        result: { status: "rejected" },
-        exit_code: 1,
-      })),
-      source_sha256: identity.source_content_sha256,
-      candidate_identity_sha256: identity.record_sha256,
-      evidence_ref: { stage: "checking", case_id: "fixture-rejection" },
-    },
-    preservation: {
-      status: "passed",
-      source_sha256: identity.source_content_sha256,
-      candidate_identity_sha256: identity.record_sha256,
-      evidence_ref: { stage: "runtime", case_id: "fixture-preservation" },
-    },
-    foreign_assumptions: [{ id: "fixture-foreign", status: "assumed", universal_proof: false, statement: "fixture foreign premise", boundary: "fixture boundary" }],
-  };
-}
-
 function candidateFixture() {
   const dependencies = Object.fromEntries(CANDIDATE_DEPENDENCY_KEYS.map((key) => [key, {
     id: `fixture-${key}`,
-    sha256: proofDigestText(`dependency:${key}`),
+    sha256: digestText(`dependency:${key}`),
     status: "available",
     commit: "fixture-commit",
     ...(CANDIDATE_FILE_DEPENDENCIES.has(key) ? { path: `fixture/${key}` } : {}),
-    ...(key === "source" ? { content_sha256: proofDigestText("fixture-source") } : {}),
+    ...(key === "source" ? { content_sha256: digestText("fixture-source") } : {}),
     ...(key === "release_claim" ? { claim_status: "passed", channel: "prerelease" } : {}),
   }]));
   const claims = [
-    { id: "proof", kind: "proof", status: "passed", required: true, dependencies: ["source", "generator", "compiler", "configuration", "generated_artifact", "target_tool", "proof_model", "proof_checker", "proof_artifact"], evidence: { status: "passed", valid_count: 1 } },
-    { id: "behavior", kind: "behavior", status: "passed", required: true, dependencies: ["source", "compiler", "target_tool", "binary", "consumed_test_oracle"], evidence: { status: "passed", valid_count: 1 } },
+    { id: "behavior", kind: "behavior", status: "passed", required: true, dependencies: ["source", "generator", "compiler", "configuration", "generated_artifact", "target_tool", "binary", "consumed_test_oracle"], evidence: { status: "passed", valid_count: 1 } },
     { id: "performance", kind: "performance", status: "passed", required: true, dependencies: ["source", "compiler", "target_tool", "binary", "performance"], evidence: { status: "passed", valid_count: 1 } },
     { id: "platform", kind: "platform", status: "passed", required: true, dependencies: ["source", "compiler", "target_tool", "binary", "platform"], evidence: { status: "passed", valid_count: 1 } },
     { id: "owner", kind: "owner", status: "passed", required: true, dependencies: ["documentation", "owner_acceptance", "release_claim"], evidence: { status: "passed", valid_count: 1 } },
   ];
-  const candidate = buildCandidateRecord({
+  return buildCandidateRecord({
     candidateId: "fixture-candidate",
     commit: "fixture-commit",
     dependencies,
     claims,
-    historicalReceipts: [{ id: "historical-fixture", identity: { id: "old", sha256: proofDigestText("old") } }],
+    historicalReceipts: [{ id: "historical-fixture", identity: { id: "old", sha256: digestText("old") } }],
     status: "qualified",
   });
-  candidate.compiler_proof = candidateFixtureComposition(candidate, candidate.dependencies);
-  candidate.content_digest = candidateContentDigest(candidate);
-  return candidate;
 }
 
 export function candidateNegativeControls() {
   const base = candidateFixture();
   const controls = [];
-  for (const key of ["source", "generator", "proof_model", "proof_checker", "target_tool", "binary", "documentation", "release_claim"]) {
+  for (const key of ["source", "generator", "target_tool", "binary", "documentation", "release_claim"]) {
     const replacement = {
       ...(base.dependencies[key] || {}),
       id: `substituted-${key}`,
-      sha256: proofDigestText(`substituted:${key}`),
+      sha256: digestText(`substituted:${key}`),
     };
     if (key === "release_claim") replacement.claim_status = "failed";
     const candidate = invalidateCandidateClaims(base, { [key]: replacement });
@@ -4067,31 +3649,19 @@ function candidateBuild(args) {
     dependencies: input.dependencies,
     claims: input.claims,
     historicalReceipts: input.historical_receipts ?? input.historicalReceipts,
-    compilerProof: input.compiler_proof ?? input.composition,
     prerelease: input.prerelease,
     status: input.status,
     evidence: input.evidence,
   });
   mkdirSync(dirname(resolve(outputPath)), { recursive: true });
   writeFileSync(outputPath, `${JSON.stringify(candidate, null, 2)}\n`);
-  let validation = validateCandidateRecord(candidate, {
+  const validation = validateCandidateRecord(candidate, {
     requireQualified: args.includes("--require-qualified"),
     requireReleaseClaim: args.includes("--require-release-claim"),
     releaseChannel: args.includes("--release-channel")
       ? args[args.indexOf("--release-channel") + 1]
       : null,
   });
-  if (validation.ok) {
-    const composition = verifyCandidateComposition(outputPath, { candidate });
-    if (!composition.ok) {
-      validation = {
-        ...validation,
-        ok: false,
-        status: "BLOCKED",
-        errors: [...validation.errors, ...composition.errors],
-      };
-    }
-  }
   console.log(`candidate: wrote ${outputPath}; ${candidate.status.toUpperCase()}`);
   if (!validation.ok) {
     for (const error of validation.errors) console.error(`candidate: ${error}`);

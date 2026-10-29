@@ -52,7 +52,7 @@ exercise the declared commands, provide a built executable (the default is
 `jet` on `PATH`):
 
 ```sh
-python3 Tools/adoption/validate.py --execute-playbook --jet target/debug/jet
+python3 Tools/adoption/validate.py --execute-playbook --jet "$JET"
 ```
 
 The executor copies the clean project to a temporary directory for every

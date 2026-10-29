@@ -1,7 +1,22 @@
 // Manifestless script admission reuses PackageModel's offline selector,
 // resolver, tree identity and teaching diagnostics. No package manifest is
 // synthesized, and no provider, compiler subprocess or network is consulted.
-use jet_driver.JetDriverScriptDependency
+use jet_driver.[JetDriverScriptDependency]
+use jet_pkg_model.[
+    InlineDep, InlineDepUnresolved, PKG_INLINE_DEPS_FIXTURES_ENV, PackageFacts,
+    pkg_inline_deps_collect, pkg_inline_deps_e1253, pkg_inline_deps_numeric_version,
+    pkg_inline_deps_resolve, pkg_inline_deps_valid_package_name,
+]
+use jet_driver.[
+    JET_DRIVER_EXIT_USER_ERROR, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot,
+    JetDriverVerbOutput,
+]
+use jet_foundation.[AppAuthorizedDirectory, Diagnostic, diagnostic_render_all]
+use jetpack_foundation.[
+    FoundationDirectoryAuthority, TreeHashError, foundation_open_directory_authority,
+]
+use core.files as cli_files
+use core.sys as cli_sys
 
 fn jet_cli_script_dependency_error(path: String, source: String, dep: InlineDep, reason: InlineDepUnresolved, color: Bool) -> JetDriverVerbOutput Never! {
     JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(path, source, [Diagnostic]{pkg_inline_deps_e1253(dep, reason)}, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}

@@ -1,10 +1,10 @@
 // Source/CmdStructure.rs: checked NameLedger and structure slice of GateLedger.
 // Registry/Core views are generated from canonical Facts.jet and Core.jet.
 use jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileResult, JetDriverVerbOutput, JetDriverCompileMode, jet_driver_present_diagnostics, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
-use jet_foundation.[CoreLeafKind, CoreModuleTypeExport, MIRStructureFact, MIRStructureFactKind, MIRNameFacts, GateLedger, GateKind, Span, Diagnostic, diagnostic_render_all, name_ledger_from_facts]
-use jet_sema.sema_gate_append_structure
+use jet_foundation.[CoreModuleTypeExport, StructureFact, StructureFactKind, NameFacts, GateLedger, GateKind, Span, Diagnostic, diagnostic_render_all, name_ledger_from_facts]
+use jet_sema.[sema_gate_append_structure]
 
-fn jet_cli_structure_kind(kind: MIRStructureFactKind) -> String Never! {
+fn jet_cli_structure_kind(kind: StructureFactKind) -> String Never! {
     if kind == {
         .Liveness -> "liveness"
         .Lifecycle -> "lifecycle"
@@ -12,7 +12,7 @@ fn jet_cli_structure_kind(kind: MIRStructureFactKind) -> String Never! {
     }
 }
 
-fn jet_cli_structure_registry(kind: MIRStructureFactKind) -> String Never! {
+fn jet_cli_structure_registry(kind: StructureFactKind) -> String Never! {
     leaf :: if kind == {
         .Liveness -> "Liveness"
         .Lifecycle -> "Lifecycle"
@@ -27,7 +27,7 @@ fn jet_cli_structure_span(span: Span) -> JetCLIStatusValue Never! {
     jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("start", jet_cli_status_int(span.start)), jet_cli_status_field("end", jet_cli_status_int(span.end))})
 }
 
-fn jet_cli_structure_facts(result: JetDriverCompileResult) -> [MIRStructureFact] Never! {
+fn jet_cli_structure_facts(result: JetDriverCompileResult) -> [StructureFact] Never! {
     loop doc in result.doc_modules {
         storage :: doc.name_ledger ?? next
         permit :: storage.guard_read()
@@ -35,13 +35,10 @@ fn jet_cli_structure_facts(result: JetDriverCompileResult) -> [MIRStructureFact]
         // through a guard view) and the caller gets its own list.
         return permit.value.facts.structure_facts.copy()
     }
-    // copy: the structure facts stay in the compile result's program (owner: `result`, a read
-    // parameter: no move out of it, E0201) and the caller gets its own list.
-    if result.mir == .Val(program) -> return program.names.structure_facts.copy()
     result.structure_facts
 }
 
-fn jet_cli_structure_report(facts: [MIRStructureFact], ledger: GateLedger, json: Bool) -> String Never! {
+fn jet_cli_structure_report(facts: [StructureFact], ledger: GateLedger, json: Bool) -> String Never! {
     gates :: loop entry in ledger.rows if entry.kind == GateKind.Structure -> entry
     if json {
         rows :: loop row in JET_CLI_STRUCTURE_ROWS -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(row.name)), jet_cli_status_field("safe_direction", jet_cli_status_text(row.safe_direction)), jet_cli_status_field("gates", jet_cli_status_texts(row.gates))})
@@ -111,7 +108,7 @@ fn jet_cli_structure_core(json: Bool) -> JetDriverVerbOutput Never! {
 // A checked result ends the process behind `notice` (jet_cli_finish).
 fn jet_cli_structure_host(file: String, color: Bool, json: Bool, threads: Int?, notice: String) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled :: jet_cli_compile_file(file, color, false, threads, JetDriverCompileMode.Doc)
+    compiled :: jet_cli_compile_file(file, color, threads, JetDriverCompileMode.Doc)
     if compiled == {
         .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> jet_cli_finish(jet_cli_inspect_noticed(notice, jet_cli_structure_result(file, color, json, result, snapshot)))
@@ -133,7 +130,7 @@ fn jet_cli_structure_result(file: String, color: Bool, json: Bool, result: JetDr
     }
     if errors.len() > 0 {
         ledger = GateLedger{}
-        names :: name_ledger_from_facts(MIRNameFacts{modules: [], declarations: [], aliases: [], references: [], structure_facts: facts})
+        names :: name_ledger_from_facts(NameFacts{modules: [], declarations: [], aliases: [], references: [], structure_facts: facts})
         sema_gate_append_structure(&ledger, names)
         // Rust preserves any published structure facts on frontend failure.
         stdout := if facts.len() > 0 -> jet_cli_structure_report(facts, ledger, json) else -> ""

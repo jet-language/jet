@@ -1,8 +1,24 @@
 // Claims ported from crates/jet-pkg-model/src/FFI.rs #[cfg(test)] modules
-// `inline_asm_target_tests` and `tests`. The `http_server_tls_persist_tests`
-// and `net_tls_close_tests` modules `include!` the embedded Rust runtimes and
-// test that Rust code itself; they belong with those runtimes, not the Jet
-// generator.
+// `inline_asm_target_tests` and `tests`.
+use jetpack_integrations.[
+    CRecordDefinitions, ExternEntry, FFI_BRIDGE_ARTIFACTS_SCHEMA, FFI_JET_FOUNDATION_SOURCE_SCHEMA,
+    InlineEntry, InlineNativeToolchain, JetFoundationSources, NativeTool, RustBridgeKeyInputs,
+    RustBridgeNeeds, pkg_ffi_asm_stack_inputs, pkg_ffi_bridge_artifact_integrity_diagnostic,
+    pkg_ffi_cargo_metadata_has_compile_time_code, pkg_ffi_emit_asm_wrapper,
+    pkg_ffi_emit_c_wrapper_fn, pkg_ffi_emit_cabi_trampoline, pkg_ffi_emit_cargo_toml,
+    pkg_ffi_emit_inline_build_rs, pkg_ffi_emit_inline_wrapper_fn, pkg_ffi_emit_native_inline_source,
+    pkg_ffi_emit_wrapper_lib_with_handles, pkg_ffi_foreign_descriptor_stamp,
+    pkg_ffi_foundation_include_closure, pkg_ffi_foundation_input_digest,
+    pkg_ffi_inline_asm_target_diagnostic, pkg_ffi_jet_foundation_mounts,
+    pkg_ffi_needs_parquet_provider, pkg_ffi_normalize_ffi_generated_source_line, pkg_ffi_nul_joined,
+    pkg_ffi_rust_include_paths, pkg_ffi_rust_type,
+]
+use jet_foundation.[
+    AccessConvention, Dimension, DimensionAxis, InlineAsmContract, InlineAsmOutput, TagMarker, Type,
+]
+use jet_pkg_model.[
+    FFIHandleFact, FFILinkClosure, ForeignIdentityBuilder, ForeignLanguage, pkg_sha256_hex,
+]
 
 // The Rust test-only `emit_wrapper_lib`: no handle or C-record facts.
 fn pkg_ffi_test_wrapper_lib(entries: [ExternEntry], needs: RustBridgeNeeds) -> String Never! {

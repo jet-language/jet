@@ -1,0 +1,13 @@
+use core.tasks as tasks
+use core.time as time
+fn run() {
+    { sender: ready_sender, receiver: ready } :: channel<Int>()
+    slow :: task {
+        ready_sender.send(1)
+        time.sleep(200ms)
+        print(99)
+    }
+    ready.receive() ?? panic("closed")
+    slow.cancel()
+    slow.detach()
+}

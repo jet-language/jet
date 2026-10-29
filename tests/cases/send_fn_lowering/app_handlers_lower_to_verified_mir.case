@@ -1,0 +1,13 @@
+# tests/send_fn_mir_lowering.rs::app_handlers_lower_to_verified_mir at tests/send_fn_mir_lowering.rs:97; hand-port
+# Every App route/page/action/form/pending handler is a SendFn carrier: the program checks clean and its build lowers
+# through the MIR legality verifier without an internal compiler error.
+fixture: app_handlers_lower_to_verified_mir.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet check main.jet
+exit: 0 # tests/send_fn_mir_lowering.rs:79 no sema errors
+step: jet build --target web main.jet
+exit: 0 # tests/send_fn_mir_lowering.rs:86-91 MIR lowering succeeds and validates
+stderr: !~ "internal compiler error" # tests/send_fn_mir_lowering.rs:87 lowering does not fail

@@ -5,7 +5,7 @@ fn evidence_codec_error(message: String) -> EvidenceCodecError Never! {
     EvidenceCodecError{message: message}
 }
 
-fn evidence_derivation_method_code(value: MIRDerivationMethod) -> Int Never! {
+fn evidence_derivation_method_code(value: DerivationMethod) -> Int Never! {
     if value == {
         .StaticDerivation -> 0
         .FormalProof -> 1
@@ -15,18 +15,18 @@ fn evidence_derivation_method_code(value: MIRDerivationMethod) -> Int Never! {
     }
 }
 
-fn evidence_derivation_method_from_code(code: Int) -> MIRDerivationMethod EvidenceCodecError! {
+fn evidence_derivation_method_from_code(code: Int) -> DerivationMethod EvidenceCodecError! {
     if code == {
-        0 -> Ok(MIRDerivationMethod.StaticDerivation)
-        1 -> Ok(MIRDerivationMethod.FormalProof)
-        2 -> Ok(MIRDerivationMethod.RecordedExecution)
-        3 -> Ok(MIRDerivationMethod.SampledAgreement)
-        4 -> Ok(MIRDerivationMethod.ExternalAssumption)
+        0 -> Ok(DerivationMethod.StaticDerivation)
+        1 -> Ok(DerivationMethod.FormalProof)
+        2 -> Ok(DerivationMethod.RecordedExecution)
+        3 -> Ok(DerivationMethod.SampledAgreement)
+        4 -> Ok(DerivationMethod.ExternalAssumption)
         else -> Err(evidence_codec_error("unknown derivation method {code}"))
     }
 }
 
-fn evidence_derivation_disposition_code(value: MIRDerivationDisposition) -> Int Never! {
+fn evidence_derivation_disposition_code(value: DerivationDisposition) -> Int Never! {
     if value == {
         .Current -> 0
         .Stale -> 1
@@ -39,16 +39,16 @@ fn evidence_derivation_disposition_code(value: MIRDerivationDisposition) -> Int 
     }
 }
 
-fn evidence_derivation_disposition_from_code(code: Int) -> MIRDerivationDisposition EvidenceCodecError! {
+fn evidence_derivation_disposition_from_code(code: Int) -> DerivationDisposition EvidenceCodecError! {
     if code == {
-        0 -> Ok(MIRDerivationDisposition.Current)
-        1 -> Ok(MIRDerivationDisposition.Stale)
-        2 -> Ok(MIRDerivationDisposition.Expired)
-        3 -> Ok(MIRDerivationDisposition.Redacted)
-        4 -> Ok(MIRDerivationDisposition.Unavailable)
-        5 -> Ok(MIRDerivationDisposition.Unsupported)
-        6 -> Ok(MIRDerivationDisposition.BudgetExhausted)
-        7 -> Ok(MIRDerivationDisposition.Unknown)
+        0 -> Ok(DerivationDisposition.Current)
+        1 -> Ok(DerivationDisposition.Stale)
+        2 -> Ok(DerivationDisposition.Expired)
+        3 -> Ok(DerivationDisposition.Redacted)
+        4 -> Ok(DerivationDisposition.Unavailable)
+        5 -> Ok(DerivationDisposition.Unsupported)
+        6 -> Ok(DerivationDisposition.BudgetExhausted)
+        7 -> Ok(DerivationDisposition.Unknown)
         else -> Err(evidence_codec_error("unknown derivation disposition {code}"))
     }
 }

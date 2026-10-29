@@ -1,0 +1,29 @@
+#Layout(columnar)
+struct P {
+    x: Float
+    mass: Float
+}
+fn total(ps: [P]) -> Float {
+    s := Float{0.0}
+    loop p in ps {
+        s = s + p.mass
+    }
+    return s
+}
+fn particle_energy(ps: [P]) -> Float {
+    total := Float{0.0}
+    loop i in 0..<ps.len() {
+        total += ps[i].x * ps[i].mass
+    }
+    return total
+}
+
+fn run() {
+    ps := [P]{ P{ x: 0.0, mass: 1.0 }, P{ x: 1.0, mass: 2.0 } }
+    ps.push(P{ x: 2.0, mass: 3.0 })
+    print(ps.len())
+    print(ps[2].x)
+    print(ps[1].mass)
+    print(total(ps))
+    print(particle_energy(ps))
+}

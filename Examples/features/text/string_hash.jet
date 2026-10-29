@@ -1,0 +1,30 @@
+// `s.hash()` is a non-cryptographic U64 of the string's UTF-8 bytes. Equal
+// strings hash equal within one run, so the value can key a hash table; the
+// raw value may change across runs and compiler versions, so this example
+// prints only the relations, never a hash.
+COMPILE_WORD :: "compile"
+SAME_AT_COMPILE_TIME :: comptime { same_spelling_same_hash() }
+
+fn same_spelling_same_hash() -> Bool {
+    literal :: "compile time"
+    built :: "{COMPILE_WORD} time"
+    return literal.hash() == built.hash()
+}
+
+fn run() {
+    word :: "jet"
+    prefix :: "je"
+    built :: "{prefix}t"
+    print(word.hash() == built.hash())
+    print(word.hash() != "jets".hash())
+    emoji :: "😀"
+    accented :: "é{emoji}"
+    print("é😀".hash() == accented.hash())
+    empty :: ""
+    rebuilt_empty :: "{empty}"
+    print("".hash() == rebuilt_empty.hash())
+    head :: "a string that spans several"
+    long :: "{head} eight-byte machine words"
+    print("a string that spans several eight-byte machine words".hash() == long.hash())
+    print(SAME_AT_COMPILE_TIME)
+}

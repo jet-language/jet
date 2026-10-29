@@ -1,0 +1,54 @@
+
+use core.files as files
+
+fn make_writer_path(path: String) -> String {
+    writer :: files.create(path) ?? panic("create")
+    print(writer.path == path)
+    writer.write_line("payload") ?? panic("write")
+    &writer.flush() ?? panic("flush")
+    writer.path
+}
+
+fn make_reader_path(path: String) -> String {
+    reader := files.open(path) ?? panic("open")
+    line :: &reader.read_line() ?? panic("read")
+    print(line == "payload")
+    reader.path
+}
+
+fn make_temp_dir_path() -> String {
+    temp_dir :: files.temp_dir("opaque-handles-dir") ?? panic("temp dir")
+    temp_dir.path
+}
+
+fn make_temp_file_path() -> String {
+    temp_file :: files.temp_file("opaque-handles-file") ?? panic("temp file")
+    temp_file.path
+}
+
+fn make_lock_path(path: String) -> String {
+    lock :: files.lock(path) ?? panic("lock")
+    lock.path
+}
+
+fn run() {
+    root :: "scratch"
+    files.create_dir_all(root) ?? panic("root")
+    path :: files.join(root, "value.txt")
+
+    writer_path :: make_writer_path(path)
+    print(writer_path == path)
+    reader_path :: make_reader_path(path)
+    print(reader_path == path)
+    print((files.read(path) ?? panic("read")) == "payload\n")
+
+    temp_dir_path :: make_temp_dir_path()
+    print(temp_dir_path.bytes().len() > 0 && !files.exists(temp_dir_path))
+    temp_file_path :: make_temp_file_path()
+    print(temp_file_path.bytes().len() > 0 && !files.exists(temp_file_path))
+
+    lock_path :: files.join(root, "value.lock")
+    shown_lock_path :: make_lock_path(lock_path)
+    print(shown_lock_path == lock_path)
+    print(files.exists(lock_path))
+}

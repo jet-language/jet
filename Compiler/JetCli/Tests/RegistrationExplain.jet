@@ -1,5 +1,11 @@
 // Actual Rust reference envelopes, plus the full non-writer fact/truth lookup.
-fn run() Never! {
+use jet_cli.[
+    jet_cli_explain_registration, jet_cli_registration_fact_explanation,
+    jet_cli_registration_truth_explanation,
+]
+use jet_foundation.[REGISTRATION_FACT_ROWS, REGISTRATION_TRUTH_ROWS]
+
+#Test("registration_explain") {
     expected :: "{{\"schema\":\"jet.status/v1\",\"action\":\"explain\",\"ok\":true,\"reports\":[],\"code\":\"Flow\",\"stage\":\"registration table\",\"what\":\"attaches to a value.\",\"why\":\"facts tighten silently in the `gain` direction; loosening one is always written\",\"fix\":\"nothing loosens this row; read it and act on what it says\",\"example\":null}}\n"
     flow :: jet_cli_explain_registration("Flow", false, true) ?? panic("registered Flow")
     if flow == {

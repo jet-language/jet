@@ -1,0 +1,10 @@
+# tests/tir_none_argument_type.rs::none_argument_to_core_source_call_takes_its_parameter_type at tests/tir_none_argument_type.rs:14; hand-port
+# `files.walk_files(directory, None) ?? return ...`: the absent `ignore: String?` argument types from its parameter.
+# The original checked with no error and lowered the program for the native executable (then asserted on Rust
+# MIR types, which went with the Rust backend). Here: `jet check` is clean and `jet build` lowers it natively.
+fixture: none_argument_to_core_source_call_takes_its_parameter_type.fixture
+env: NO_COLOR=1
+step: jet check main.jet
+exit: 0
+step: jet build main.jet
+exit: 0

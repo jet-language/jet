@@ -8,7 +8,6 @@ import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {phase, W} from './s5-lib.mjs';
 import {readSharedPack} from './shared-publications.mjs';
-import {consumePrepared} from './prepared.mjs';
 
 const P = phase('fixtures'), {D, start, blocked} = P;
 const node = process.execPath, T = 'Compiler/JetRuntime/Tests';
@@ -21,9 +20,7 @@ if (P.ready) {
   catch (error) { blocked('shared-runtime-publication', error.message); P.ready = false; }
 }
 const provenance = path.join(RT, 'provenance.json');
-const goldens = process.env.S5_GOLDENS, results = path.join(goldens, 'results.tsv');
 const inputs = process.env.S5_INPUTS;
-const baseline = '/mnt/jetscratch/candidates/NativeLead3/nat-n7full.results.tsv';
 const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const sys = ['-lpthread', '-ldl', '-lm'];
 const env = {JET: jet, JET_RUNTIME_JET_OBJECT: object, JET_RUNTIME_PACK: pack,
@@ -38,9 +35,9 @@ for (const line of fs.readFileSync(path.join(driverDirectory, 'parked-modes.tsv'
   parked.get(runner).push({mode, verdict: 'UNCOVERED', because, tower, lastReceipt, receiptScope});
 }
 if (!P.ready) {
-  blocked('fixtures-prerequisites', 'successful same-pin build/runtime/golden receipts are required');
-  const helpers = new Set(['report-literals.mjs', 'golden-results.mjs']);
-  const retiredOnly = new Set(['freeze-ed25519-fixtures.mjs', 'freeze-entropy-fixtures.mjs', 'freeze-hash-fixtures.mjs', 'freeze-os-entropy-fixtures.mjs', 'freeze-pbkdf2-fixtures.mjs', 'freeze-sha3-fixtures.mjs', 'run-utf8-corpus.mjs']);
+  blocked('fixtures-prerequisites', 'successful same-pin build/runtime receipts are required');
+  const helpers = new Set(['report-literals.mjs']);
+  const retiredOnly = new Set(['run-utf8-corpus.mjs']);
   for (const file of fs.readdirSync(path.join(W, T)).filter(file => file.endsWith('.mjs') && !helpers.has(file))) P.runner(file, retiredOnly.has(file) ? [] : ['fixtures-prerequisites'], parked.get(file) ?? []);
   P.runner('Compiler/JetBackend/Tests/test-native-test-host.mjs', ['fixtures-prerequisites'], parked.get('Compiler/JetBackend/Tests/test-native-test-host.mjs') ?? []);
   P.finish(); process.exit(process.exitCode);
@@ -54,22 +51,13 @@ else try {
   if (changed.length || new Set(manifest.files.map(file => file.path)).size !== 14) throw Error('immutable preserved input digest/inventory mismatch');
   sealedInputs = true; P.receipt('frozen-inputs', 'PASS', {manifest: path.join(inputs, 'manifest.json'), files: manifest.files.map(({path, sha256}) => ({path, sha256}))});
 } catch (error) { blocked('frozen-inputs', error.message); }
-let sharedResults = false, goldenPublication = null;
-const goldenReceipt = path.join(goldens, 'native-goldens-provenance.json');
-if (!fs.existsSync(goldenReceipt) || !fs.existsSync(results)) blocked('shared-native-results', 'single native golden union receipt absent');
-else try {
-  const receipt = JSON.parse(fs.readFileSync(goldenReceipt, 'utf8'));
-  if (receipt.head !== P.head || receipt.backend !== 'jet-native' || receipt.resultsSha256 !== hash(results) || !fs.existsSync(pack) || receipt.packSha256 !== hash(pack) || !fs.existsSync(jetc0) || receipt.compilerSha256 !== hash(jetc0)) throw Error('native golden source/compiler/pack/result provenance mismatch');
-  goldenPublication = receipt; sharedResults = true;
-  P.receipt('shared-native-results', 'PASS', {receipt: goldenReceipt, resultsSha256: receipt.resultsSha256});
-} catch (error) { blocked('shared-native-results', error.message); }
 const charOracle = inputs ? path.join(inputs, 'char-debug-goldens.bin') : out('absent-char-oracle');
 const fmtExpected = inputs ? path.join(inputs, 'fmt-expected.out') : out('absent-fmt-expected');
 const witnessDir = out('witnesses'); fs.mkdirSync(witnessDir);
 const binary = name => path.join(witnessDir, name);
 const add = (runner, commands, needs = [], extra = {}) => registry.set(`${runner}.mjs`, {commands, needs, extra});
 const modes = (runner, names, needs = [], directory = runner) => add(runner, names.map(mode => r(runner, out(directory), mode)), needs);
-const front = [jetc0, jet], runtime = [object, provenance], nativeGoldens = [...front, ...runtime, pack, results];
+const front = [jetc0, jet], runtime = [object, provenance];
 
 modes('run-channel-fixtures', ['assemble','assemble-stm','assemble-sync','assemble-observe','assemble-publication','lower','link','link-stm','run-stm','link-sync','run-sync','link-observe','run-observe','link-publication','run-publication','link-weak','run-weak','run','fatal','perf'], front);
 for (const runner of ['run-atomic-fixtures','run-crypto-fixtures','run-parallel-fixtures','run-scheduler-fixtures','run-testsuite-fixtures']) modes(runner, ['assemble','lower','audit','link','run'], front);
@@ -84,14 +72,7 @@ for (const runner of ['run-cabi-driver','run-alloc-parity','run-compiler-needed-
 add('run-main-fixtures', ['link','run'].map(mode => r('run-main-fixtures', out('main-fixtures'), mode, object)), runtime);
 add('check-object', [r('check-object', object, out('object-audit'))], runtime);
 add('check-runtime', [r('check-runtime', out('check-runtime'), '--assemble-only'), r('check-runtime', out('check-runtime-full'))], front);
-for (const runner of ['check-lists-native','check-collections-census','check-int-hazard-cutover','test-route-abi','test-generic-route-schema','test-native-route-handles','test-native-route-records']) add(runner, [r(runner)]);
-for (const runner of ['run-text-goldens','run-collections-goldens','run-trap-goldens']) add(runner, [r(runner, out(runner), baseline, '--results', results)], nativeGoldens);
-for (const runner of ['run-int-goldens','run-unicode-goldens']) add(runner, [r(runner, out(runner), '--results', results)], nativeGoldens);
-add('run-host-goldens', [{prepared: 'host', directory: out('host-goldens')}, r('run-host-goldens', out('host-goldens'), 'native', '--results', results)], nativeGoldens);
-add('run-scan-goldens', [r('run-scan-goldens', out('scan-goldens'), results)], nativeGoldens);
-add('run-display-goldens', [{prepared: 'display', directory: out('display-goldens')}, r('run-display-goldens', out('display-goldens'), '--object', object, '--pack', pack, '--provenance', provenance, '--results', results)], nativeGoldens);
-registry.get('run-display-goldens.mjs').missingOracleSteps = [1];
-registry.get('run-display-goldens.mjs').needsByStep = [[], nativeGoldens];
+for (const runner of ['test-route-abi','test-native-route-handles','test-native-route-records']) add(runner, [r(runner)]);
 add('run-fmt-parity', [r('run-fmt-parity', 'prepare', out('fmt-parity'), fmtExpected), r('run-fmt-parity', 'compare', out('fmt-parity'), jet, fmtExpected)], [...front, fmtExpected]);
 add('run-test-runtime', [r('run-test-runtime', out('test-runtime'), object, jet)], [...runtime, jet]);
 add('run-native-layout', [r('run-native-layout', '--native', out('native-layout'), object)], runtime);
@@ -133,7 +114,7 @@ const official = JSON.parse(fs.readFileSync(path.join(W,T,'Ed25519OfficialVector
 await start('official-rfc8032-input',[node,'--input-type=module','-e',`import fs from 'node:fs';import crypto from 'node:crypto';const response=await fetch('https://www.rfc-editor.org/rfc/rfc8032.txt');if(!response.ok)throw Error('RFC8032 fetch '+response.status);const bytes=Buffer.from(await response.arrayBuffer());if(crypto.createHash('sha256').update(bytes).digest('hex')!==${JSON.stringify(official.sourceSha256)})throw Error('official RFC8032 bytes changed');fs.writeFileSync(${JSON.stringify(out('rfc8032.txt'))},bytes);`]);
 add('freeze-age-fixtures',[r('freeze-age-fixtures',inputs?path.join(inputs,'age-rust'):out('absent-age-rust'),out('absent-age-testkit'),out('age-generated.json'))]);
 registry.get('freeze-age-fixtures.mjs').missingOracle = true;
-for (const runner of ['freeze-ed25519-fixtures','freeze-entropy-fixtures','freeze-hash-fixtures','freeze-os-entropy-fixtures','freeze-pbkdf2-fixtures','freeze-sha3-fixtures','run-utf8-corpus']) add(runner,[]);
+add('run-utf8-corpus',[]);
 for (const file of fs.readdirSync(path.join(W,T)).filter(file=>file.endsWith('.test.mjs'))) registry.set(file,{commands:[[node,'--test',`${T}/${file}`]],needs:[],extra:{}});
 // Follow-ups depend on actual binaries/results of earlier runners.
 add('run-http-body-perf',[r('run-http-body-perf',out('http-body-perf'),path.join(out('run-http-body'),'http-body.hosted'))],[path.join(out('run-http-body'),'http-body.hosted')]);
@@ -158,7 +139,7 @@ async function execute(file) {
   const definition=registry.get(file), names=[];executed.set(file,names);
   for(const [index,argv]of definition.commands.entries()) {
     const name=`${file.replace(/\.mjs$/,'')}-${index}`;names.push(name);
-    if(definition.missingOracle||definition.missingOracleSteps?.includes(index)) {
+    if(definition.missingOracle) {
       names.pop();
       const evidence={mode:name,because:'Rust oracle retired; required historical capture not preserved (owner #38(b)/#59)',cardRequired:true};
       P.receipt(name,'UNCOVERED',evidence);
@@ -167,18 +148,9 @@ async function execute(file) {
       parked.get(file).push({verdict:'UNCOVERED',...evidence});
       continue;
     }
-    if (argv.prepared) {
-      try {
-        if (!sharedResults) throw Error('successful same-pin golden receipt absent');
-        const files = consumePrepared(path.join(goldens, 'plans', argv.prepared), argv.directory, goldenPublication.prepared?.[argv.prepared]);
-        P.receipt(name, 'PASS', {receipt: goldenReceipt, producerStep: `plan-${argv.prepared}`, files});
-      } catch (error) { blocked(name, error.message); }
-      continue;
-    }
-    const needs=definition.needsByStep?.[index]??definition.needs;
+    const needs=definition.needs;
     const absent=needs.filter(file=>!fs.existsSync(file));
-    if(needs.includes(results)&&!sharedResults)blocked(name,'same-pin native golden union absent or unsealed');
-    else if((needs.includes(charOracle)||needs.includes(fmtExpected))&&!sealedInputs)blocked(name,'preserved frozen inputs absent or unsealed');
+    if((needs.includes(charOracle)||needs.includes(fmtExpected))&&!sealedInputs)blocked(name,'preserved frozen inputs absent or unsealed');
     else if(absent.length)blocked(name,`required inputs absent: ${absent.join(', ')}`);
     else await start(name,['timeout','--kill-after=10s','3000s',...argv],{...env,...definition.extra});
   }
@@ -199,7 +171,7 @@ for(const [file,row]of [['test-unit-runtime.mjs',unit],['Compiler/JetBackend/Tes
 }
 // Fail closed on any present runner missing from the registry; library helpers
 // are not executable runners. Removed parked runners retain UNCOVERED rows.
-const helpers=new Set(['report-literals.mjs','golden-results.mjs']);
+const helpers=new Set(['report-literals.mjs']);
 for(const file of fs.readdirSync(path.join(W,T)).filter(file=>file.endsWith('.mjs')&&!helpers.has(file)))if(!registry.has(file)){
   const name=`unmapped-${file}`;blocked(name,'runtime runner has no canonical S5 argv mapping');executed.set(file,[name]);
 }

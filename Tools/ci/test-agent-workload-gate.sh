@@ -73,7 +73,7 @@ check missing-report 1 "$tmp/missing.tsv" | grep -Fq 'missing report'
 mkdir "$tmp/reports"
 cp "$report" "$tmp/reports/linux.tsv"
 awk -F '\t' -v OFS='\t' '$1 == "1" {$2 = "macos"; $3 = "any"} {print}' "$report" >"$tmp/reports/macos.tsv"
-matrix_output=$(bash Tools/ci/agent-workload-matrix.sh "$tmp/reports" 2>&1)
+matrix_output=$(jet run Tools/ci/AgentWorkloadMatrix.jet -- "$tmp/reports" 2>&1)
 printf '%s\n' "$matrix_output" | grep -Fq 'agent workload matrix: pass required_os=2'
 
 echo "agent workload gate self-check: pass"

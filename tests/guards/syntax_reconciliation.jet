@@ -1,8 +1,9 @@
 use core.files as s2_syntax_files_api
 use core.text.parse as s2_syntax_parse
 
-// DATA and document subclaims of tests/syntax_reconciliation.rs.
-// Rust-source law assertions retire; lexical/registry oracles remain compiler-lib.
+// Live docs, examples, UI fixtures, Core and agent memory never reintroduce
+// retired syntax spellings. The lexer-backed `Dyn` surface check lives in
+// tests/guards/dyn_surface; lexical and registry oracles stay compiler unit tests.
 // Plain helpers make the author check cover assertion bodies (#4790).
 fn s2_syntax_paths(root: String) -> [String] {
     out := [String]{}
@@ -30,7 +31,7 @@ fn s2_syntax_paths(root: String) -> [String] {
 fn s2_syntax_skip(path: String) -> Bool {
     parts :: path.split("/").to_list()
     name :: parts[parts.len() - 1]
-    path.contains("/target/") || name.starts_with("retired_") || name.contains("_retired_") || name.ends_with("_retired") || path.ends_with(".published.snapshot") || path.ends_with("tests/syntax_reconciliation.rs") || path.ends_with("Docs/spec/syntax-decisions.md")
+    path.contains("/target/") || name.starts_with("retired_") || name.contains("_retired_") || name.ends_with("_retired") || path.ends_with(".published.snapshot") || path.ends_with("Docs/spec/syntax-decisions.md")
 }
 fn s2_syntax_forbidden(line: String, needle: String) -> Bool {
     if needle != "List<" && needle != "List[" && needle != "Map<" -> return line.contains(needle)
@@ -72,8 +73,9 @@ fn s2_syntax_old_binding(line: String) -> Bool {
 }
 
 fn s2_syntax_live_surface_has_no_retired_spellings() {
-    roots :: [String]{"AGENTS.md", "CLAUDE.md", "Docs/spec", "Docs/spec/reference/syntax-surface.jet", "Source", "crates", "Examples", "tests/ui"}
+    roots :: [String]{"AGENTS.md", "CLAUDE.md", "Docs/spec", "Docs/spec/reference/syntax-surface.jet", "Core", "Examples", "tests/ui"}
     forbidden :: [String]{"@unsafe", "@audit", "@extern", "@bindgen", "#extern", "#bindgen", "#layout", "#grant", "#context", "#test", "#pure", "pure fn", "#todo", "List<", "List[", "Map<", "#[Serialize", "Serialize]", "#[Deserialize", "Deserialize]", "core.json", "use jet.", "use std.", "?continue", "?break", "?return", "comptime val "}
+    failures := [String]{}
     loop root in roots {
         loop path in s2_syntax_paths(root) {
             if path.ends_with(".rs") || s2_syntax_skip(path) -> next
@@ -81,11 +83,12 @@ fn s2_syntax_live_surface_has_no_retired_spellings() {
             loop (index, line) in source.lines() {
                 loop needle in forbidden {
                     if needle == "pure fn" && !path.starts_with("Docs") -> next
-                    assert(!s2_syntax_forbidden(line, needle), "{path}:{index + 1} contains retired {needle}")
+                    if s2_syntax_forbidden(line, needle) -> &failures.push("{path}:{index + 1} contains retired {needle}")
                 }
             }
         }
     }
+    assert(failures.is_empty(), "retired syntax found:\n{failures.join("\n")}")
 }
 #Test("live_surface_has_no_retired_spellings") {
     s2_syntax_live_surface_has_no_retired_spellings()
@@ -128,19 +131,24 @@ fn s2_syntax_proposal_marker_census_matches_syntax_registry() {
 }
 
 fn s2_syntax_old_binding_migration_paths_stay_removed() {
-    roots :: [String]{"crates/jet-foundation/src/Syntax.rs", "crates/jet-parser/src/Parser", "Source/FixEngine.rs", "Source/LSP", "Docs/spec/reference/syntax-surface.jet", "Tools/editors/vscode/README.md", "Tools/editors/zed/README.md", "tests/cli", "tests/lsp", "tests/ui"}
+    roots :: [String]{"Compiler/JetFoundation/Data/Syntax", "Compiler/JetParser/Source/Parser", "Compiler/JetDriver/Source/FixEngine.jet", "Compiler/JetLSP/Source", "Docs/spec/reference/syntax-surface.jet", "Tools/editors/vscode/README.md", "Tools/editors/zed/README.md", "tests/cli", "tests/lsp", "tests/ui"}
     codes :: [String]{"E0009", "E0010", "E0985"}
+    failures := [String]{}
     loop root in roots {
         loop path in s2_syntax_paths(root) {
             if path.ends_with(".rs") || s2_syntax_skip(path) -> next
             source :: s2_syntax_files_api.read(path) ?? next
             loop (index, line) in source.lines() {
                 allowed :: path.ends_with("tests/ui/foreign_declaration_binding.jet") && s2_syntax_old_binding(line)
-                loop code in codes -> assert(!line.contains(code) || allowed, "{path}:{index + 1} contains retired binding diagnostic {code}")
-                assert(!s2_syntax_old_binding(line) || allowed, "{path}:{index + 1} contains retired binding spelling")
+                if allowed -> next
+                loop code in codes {
+                    if line.contains(code) -> &failures.push("{path}:{index + 1} contains retired binding diagnostic {code}")
+                }
+                if s2_syntax_old_binding(line) -> &failures.push("{path}:{index + 1} contains retired binding spelling")
             }
         }
     }
+    assert(failures.is_empty(), "retired binding paths found:\n{failures.join("\n")}")
 }
 #Test("old_binding_migration_paths_stay_removed") {
     s2_syntax_old_binding_migration_paths_stay_removed()
@@ -167,7 +175,7 @@ fn s2_syntax_ratified_unshipped_spellings_are_listed_and_triaged() {
     assert(spec.contains("retires S74's pattern-left refutable binding"), "S74 source evidence missing")
     disposition_0 :: "retired by D-CHOOSE-TEST1; card #1652"
     assert(disposition_0.contains("card #") && (disposition_0.contains("retired") || disposition_0.contains("deferred") || disposition_0.contains("tracked")))
-    assert(spec.contains("ratified-but-unbuilt `.Button.{{ }}` UI-tree spelling"), "D-ONCE-UITREE1 source evidence missing")
+    assert(spec.contains("ratified-but-unbuilt `.Button{{ }}` UI-tree spelling"), "D-ONCE-UITREE1 source evidence missing")
     disposition_1 :: "deferred to the architecture result; card #1588 via #1736"
     assert(disposition_1.contains("card #") && (disposition_1.contains("retired") || disposition_1.contains("deferred") || disposition_1.contains("tracked")))
     assert(reference.contains("# RATIFIED, NOT YET IMPLEMENTED (S56)"), "S56 source evidence missing")
@@ -286,17 +294,21 @@ fn s2_syntax_module_internal_is_discovery_not_access_control() {
 }
 
 fn s2_syntax_artifact_extensions_are_one_closed_kind_specific_family() {
-    roots :: [String]{"Source", "crates", "Examples", "tests", "Docs"}
+    roots :: [String]{"Compiler", "Core", "Jetpack", "Examples", "tests", "Docs"}
     retired :: [String]{".jproof", ".jtrace", ".jreplay"}
+    failures := [String]{}
     loop root in roots {
         loop path in s2_syntax_paths(root) {
             if path.ends_with(".rs") || path.ends_with("tests/guards/syntax_reconciliation.jet") -> next
             source :: s2_syntax_files_api.read(path) ?? next
             loop (index, line) in source.lines() {
-                loop suffix in retired -> assert(!line.contains(suffix) || line.contains("jet.jproof"), "{path}:{index + 1} retains retired artifact suffix {suffix}")
+                loop suffix in retired {
+                    if line.contains(suffix) && !line.contains("jet.jproof") -> &failures.push("{path}:{index + 1} retains retired artifact suffix {suffix}")
+                }
             }
         }
     }
+    assert(failures.is_empty(), "retired artifact suffixes found:\n{failures.join("\n")}")
 }
 #Test("artifact_extensions_are_one_closed_kind_specific_family") {
     s2_syntax_artifact_extensions_are_one_closed_kind_specific_family()

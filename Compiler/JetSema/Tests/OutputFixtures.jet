@@ -1,5 +1,21 @@
 // Checked Output contracts use the production parser, registration graph and
 // resolver. Cases collect independent failures; no mock links or second checker.
+use jet_sema.[
+    SemaBuildFacts, SemaComptimeFunctionResult, SemaComptimeItemValue, SemaEffectModuleInput,
+    SemaForeignProviderInput, SemaOutputIntent, SemaRegistrationForeignHandleFacts,
+    SemaRegistrationGraph, SemaRegistrationHostHooks, SemaRegistrationImportEdge,
+    SemaRegistrationModuleInput, SemaRegistrationPackagePolicy, SemaSourceOrigin, SemaSourceSegment,
+    sema_collect_comptime_declarations, sema_comptime_effect_sources, sema_effect_trait_bounds,
+    sema_effect_prepare_modules, sema_effects_check_modules, sema_finalize_registration_graph, sema_has_error_since,
+    sema_output_resolve, sema_registration_module_index, sema_registration_prepare_graph,
+]
+use jet_parser.[parse_source]
+use jet_driver.[jet_driver_canonical_effect_module]
+use jet_foundation.[
+    OutputCallableAuthority, Span, SymbolKind, Type, compiler_threads_single,
+    failure_contract_of_function, jet_target_machine_hosted, name_mangle, symbol_id,
+]
+
 fn output_fixture_graph(label: String, source: String, effects_source: String, failures: &[String]) -> SemaRegistrationGraph? {
     parsed := parse_source(source.bytes())
     if sema_has_error_since(parsed.diagnostics, 0) {
@@ -12,7 +28,7 @@ fn output_fixture_graph(label: String, source: String, effects_source: String, f
     }
     facts :: SemaBuildFacts{package_name: "output-fixture", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
     input :: SemaRegistrationModuleInput{package_identity: "output-fixture", module_identity: "output-fixture::main", module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source}
-    Val(sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationImportEdge]{}, "output-fixture", "output-fixture::main", canonical.module_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false))
+    Val(sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationImportEdge]{}, "output-fixture", "output-fixture::main", canonical.module_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single()))
 }
 
 fn output_fixture_case(label: String, source: String, effects_source: String, intent: SemaOutputIntent, address: String?, expected_codes: [String], expected_selected: [String], failures: &[String]) {
@@ -44,8 +60,8 @@ fn output_fixture_solved_effects(effects_source: String, failures: &[String]) {
         &failures.push("solved effect publication: Output resolution failed {output_diagnostics:Debug}")
         return
     }
-    hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
-    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, None)
+    hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}
+    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None)
     checked := sema_finalize_registration_graph(graph, None, ^stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None, None)
     if !checked.complete {
         &failures.push("solved effect publication: real body/effect check failed {checked.diagnostics:Debug}")
@@ -99,7 +115,8 @@ fn output_fixture_solved_effects(effects_source: String, failures: &[String]) {
         })
     }
     &effect_inputs.reverse()
-    republished :: sema_effects_check_modules(&checked.modules, effect_inputs, [String]{"Mem.Alloc", "Mem.Rc"}, compiler_threads_single())
+    prepared := sema_effect_prepare_modules(checked.modules, effect_inputs, graph.decls)
+    republished :: sema_effects_check_modules(&checked.modules, effect_inputs, ^prepared, [String]{"Mem.Alloc", "Mem.Rc"}, [Bool]{}, graph.decls, compiler_threads_single())
     if republished.memory_declarations.len() != 2 -> &failures.push("in-place effect publication: manifest memory declarations duplicated")
     function_count := 0
     loop module_row in checked.modules -> function_count += module_row.functions.len()
@@ -154,7 +171,7 @@ fn output_fixture_visibility(label: String, main_source: String, bank_source: St
     effect_identity :: canonical.module_identity.copy()
     &inputs.push(canonical)
     facts :: SemaBuildFacts{package_name: main_package.copy(), package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
-    graph := sema_registration_prepare_graph(inputs, edges, main_package, "{main_package}::main", effect_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false)
+    graph := sema_registration_prepare_graph(inputs, edges, main_package, "{main_package}::main", effect_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single())
     if !graph.complete || graph.internal_problem != None || sema_has_error_since(graph.diagnostics, 0) {
         &failures.push("{label}: ordinary registration failed {graph.diagnostics:Debug}")
         return
@@ -251,6 +268,6 @@ fn output_fixture_run(effects_source: String) Never! {
     if failures.len() > 0 -> panic("OutputFixtures collected {failures.len()} failures:\n{failures.join("\n")}")
 }
 
-fn run() {
+#Test("output_fixtures") {
     output_fixture_run("effect IO\n")
 }

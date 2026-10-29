@@ -1,7 +1,12 @@
 // BrowserTrace.rs relay consumer. Compiler-produced identities/maps, never
 // re-opened browser source files, are the attribution authority.
 use core.encoding.hex as perf_hex
-use jet_foundation.[TraceBrowser, SourceIdentity, TraceSourceMap, mir_sha256_hex]
+use jet_foundation.[TraceBrowser, SourceIdentity, TraceSourceMap, sha256_hex, JetSymbolRef]
+use core.encoding.json as perf_json
+use core.text as perf_text
+use core.files as perf_files
+use core.sys as perf_sys
+use core.encoding.[Dyn]
 
 struct JetCLIPerfBrowser { rows: [TraceBrowser], sources: [SourceIdentity], source_maps: [TraceSourceMap], truncated: Bool }
 fn jet_cli_perf_hex_text(value: String) -> String JetCLIReadError! {
@@ -66,7 +71,7 @@ fn jet_cli_perf_browser_decode(text: String, pid: Int, started: String) -> JetCL
     maps := [TraceSourceMap]{}
     if jet_cli_perf_optional(header, "source_map") == .Val(encoded) {
         map :: jet_cli_perf_hex_text(jet_cli_perf_text(encoded))
-        &maps.push(TraceSourceMap{kind: "js", path: "app.js", sha256: mir_sha256_hex(map), map: map})
+        &maps.push(TraceSourceMap{kind: "js", path: "app.js", sha256: sha256_hex(map), map: map})
     }
     rows := [TraceBrowser]{}
     truncated := false

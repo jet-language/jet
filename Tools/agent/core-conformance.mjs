@@ -15,7 +15,7 @@ import { dirname, join, relative, resolve } from "node:path";
 /*
  * Registry-driven Core conformance corpus (#2286).
  *
- * CoreModuleExports.rs is the denominator consumed by sema. The corpus is not
+ * CORE_MODULE_EXPORTS (CoreCallRows.jet) is the denominator consumed by sema. The corpus is not
  * guessed from fixed_sigs.rs or core_calls.rs: an exported operation without a
  * second route still needs a witness or a named carve-out.
  * Recipes below are only small, known-good seeds. Hard or effectful operations
@@ -28,7 +28,7 @@ import { dirname, join, relative, resolve } from "node:path";
  */
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const MODULE_EXPORTS = join(ROOT, "crates/jet-foundation/src/CoreModuleExports.rs");
+const MODULE_EXPORTS = join(ROOT, "Compiler/JetFoundation/Source/Registry/CoreCallRows.jet");
 const CORPUS = join(ROOT, "tests/conformance/corpus");
 const EXCLUSIONS = join(ROOT, "tests/conformance/exclusions.tsv");
 
@@ -259,8 +259,8 @@ fn run() {
   ["core.net.tls.unwrap", `// core-conformance: core.net.tls.unwrap
 use core.net.tls as tls
 
-fn run() {
-    print(tls.unwrap(tls.TLSStream{fd: 0, host: "example.test", port: 443}).peer_port())
+fn run() -[Net]> {
+    print(tls.unwrap(TLSStream{}) == .Err(_))
 }
 `],
 ]);
@@ -619,27 +619,20 @@ function escapedRegExp(value) {
 
 function moduleItems() {
   const source = withoutComments(readFileSync(MODULE_EXPORTS, "utf8"));
-  const members = new Map();
-  const arrays = /const\s+(CORE_MODULE_\d+_MEMBERS)\s*:\s*&\[&str\]\s*=\s*&\[([^\]]*)\];/g;
-  for (const match of source.matchAll(arrays)) {
+  const table = source.match(/^CORE_MODULE_EXPORTS :: \[CoreModuleExportNames\]\{\n([\s\S]*?)\n\}/m)?.[1];
+  if (!table) throw new Error("missing CORE_MODULE_EXPORTS table");
+  const out = new Map();
+  const rows = table.split("\n").filter((line) => line.trim());
+  for (const line of rows) {
+    const match = /^\s*CoreModuleExportNames\{module_name: "([^"]+)", members: \[String\]\{([^}]*)\}, type_exports: \[String\]\{[^}]*\}\},?$/.exec(line);
+    if (!match) throw new Error(`unparsed Core export row: ${line.trim().slice(0, 120)}`);
     const names = quoted(match[2]);
     const values = new Set(names);
-    if (values.size !== names.length || members.has(match[1])) {
-      throw new Error(`duplicate Core export members in ${match[1]}`);
-    }
-    members.set(match[1], values);
-  }
-  const out = new Map();
-  const modules = /CoreModuleDeclaration\s*\{\s*module:\s*"([^"]+)",\s*members:\s*(CORE_MODULE_\d+_MEMBERS),/g;
-  for (const match of source.matchAll(modules)) {
-    const values = members.get(match[2]);
-    if (!values) throw new Error(`missing Core export members for ${match[1]}`);
+    if (values.size !== names.length) throw new Error(`duplicate Core export members in ${match[1]}`);
     if (out.has(match[1])) throw new Error(`duplicate Core module ${match[1]}`);
     out.set(match[1], values);
   }
-  if (out.size === 0 || out.size !== members.size) {
-    throw new Error("Core export declarations do not account for every member table");
-  }
+  if (out.size === 0) throw new Error("Core export table has no modules");
   return out;
 }
 

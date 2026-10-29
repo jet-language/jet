@@ -1,0 +1,16 @@
+
+#Post(result > 0, "post sees the successful payload")
+fn counted(value: Int) -> Int {
+    print("body:{value}")
+    if value > 0 {
+        return value
+    }
+    return Err("sentinel")
+}
+
+fn run() {
+    good :: counted(7)
+    good ? value -> print("good:{value}") ! error -> print("good-error:{error.message}")
+    bad :: counted(0)
+    bad ? value -> print("bad:{value}") ! error -> print("bad-error:{error.message}")
+}

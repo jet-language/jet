@@ -1,6 +1,9 @@
 // Source/CmdInspect.rs run_output: only canonical sema-selected Output facts.
 use jet_driver.[JetDriverCompileRequest, JetDriverOutputQueryResult, JetDriverVerbOutput, jet_driver_output_query, jet_driver_present_diagnostics, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
-use jet_foundation.[OutputKind, ResolvedOutput, type_name, failure_contract_effective_type, failure_contract_source, diagnostic_render_all]
+use jet_foundation.[
+    OutputKind, ResolvedOutput, type_name, failure_contract_effective_type, failure_contract_source,
+    diagnostic_render_all, SourceFile,
+]
 fn jet_cli_output_kind(kind: OutputKind) -> String Never! {
     if kind == {
         .Library -> "Library"
@@ -49,7 +52,7 @@ fn jet_cli_output_host(request: ^JetDriverCompileRequest, address: String?, file
     sources := request.authorized_sources
     query :: jet_driver_output_query(^request, address)
     if !query.compile.complete || query.compile.internal_problem != None {
-        diagnostics :: jet_driver_present_diagnostics(query.compile.diagnostics, sources, [MIRSourceFile]{})
+        diagnostics :: jet_driver_present_diagnostics(query.compile.diagnostics, sources, [SourceFile]{})
         report :: if json -> jet_cli_reports_status_json("inspect", false, jet_cli_report_cwd(), file, "", diagnostics) else -> diagnostic_render_all(file, "", diagnostics, false)
         return JetDriverVerbOutput{stdout: if json -> report else -> "", stderr: if json -> "" else -> report, exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }

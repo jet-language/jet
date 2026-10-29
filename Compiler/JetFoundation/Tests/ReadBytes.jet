@@ -1,11 +1,17 @@
 // Assemble with the canonical Compiler unit, replacing its host entry.
 // These literal byte-input fixtures do not prove a String storage projection,
 // native activation, allocation counts, or failure-close behavior.
+use jet_foundation.[
+    diagnostic_codepoint_at, diagnostic_utf8_width, foundation_append_read_bytes,
+    foundation_read_bytes_at, foundation_read_bytes_len, foundation_read_bytes_scalar_at,
+    foundation_utf8_lead_width, foundation_utf8_width,
+]
+
 fn read_bytes_require(ok: Bool, message: String) Never! {
     if !ok -> panic("READ bytes: {message}")
 }
 
-fn run() Never! {
+#Test("read_bytes") {
     source :: [U8]{65, 0, 10, 13, 9, 27, 127, 194, 128, 194, 159, 226, 128, 168, 226, 128, 169, 240, 159, 152, 128, 244, 143, 191, 191}
     starts :: [Int]{0, 1, 2, 3, 4, 5, 6, 7, 9, 11, 14, 17, 21}
     codepoints :: [Int]{65, 0, 10, 13, 9, 27, 127, 128, 159, 8232, 8233, 128512, 1114111}

@@ -1,0 +1,10 @@
+Error [E3401]: `compute` calls the impure function `format`
+  --> tests/ui/pure/pure_fn_inferred_interpolation_and_io_is_e3401.jet:6:45
+    |
+  6 | fn compute(value: Int) -[]> String { return format(value) }
+    |                                             ^^^^^^
+ Why: `format` is impure, but `compute` declares `-[]>`
+ Fix: Remove the call from `compute`, or drop the `-[]>` bound from `compute` so its effects are inferred
+ Denial: pure
+ Call chain: compute → format
+More: jet-lang.dev/e/E3401

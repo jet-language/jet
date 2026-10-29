@@ -20,12 +20,12 @@ function field(code, name) {
   if (!value) throw new Error(`missing ${code}.${name}`);
   return JSON.parse(value[1]).replaceAll("{{", "{").replaceAll("}}", "}");
 }
-// The native TLS refusal is defined once, in the lowering that reports it at
+// The native TLS refusal is defined once, in the IR route table that reports it at
 // compile time; the runtime's stop and String-error leaves use this projection.
 function nativeTlsRefusal() {
-  const routes = readFileSync(resolve(root, "Compiler/JetBackend/Source/Lower/Routes.jet"), "utf8");
-  const value = /\nfn lower_tls_transport_message\(\) -> String Never! \{\n    ("(?:[^"\\]|\\.)*")\n\}/.exec(routes);
-  if (!value) throw new Error("missing Lower/Routes.jet lower_tls_transport_message literal");
+  const routes = readFileSync(resolve(root, "Compiler/JetIR/Source/RouteCarriers.jet"), "utf8");
+  const value = /\nfn ir_tls_transport_message\(\) -> String Never! \{\n    ("(?:[^"\\]|\\.)*")\n\}/.exec(routes);
+  if (!value) throw new Error("missing RouteCarriers.jet ir_tls_transport_message literal");
   const text = JSON.parse(value[1]);
   if (!/^[\x20-\x7e]+$/.test(text)) throw new Error("native TLS refusal must be printable ASCII for word projection");
   return text;
@@ -53,6 +53,12 @@ for (const code of ["E3001", "E3010", "E3011", "E0128"]) {
   source += emit(`trap_footer_${code.toLowerCase()}`, ` Why: ${why}\n Fix: ${fix}\nMore: jet-lang.dev/e/${code}\n`) + "\n";
 }
 source += emit("trap_invalid_layout_head", `Stop [E3001]: ${field("E3001", "what").replace("{msg}", "invalid box layout")}\n  --> <core.prelude>:0\n`);
+// A host stop whose code has no active runtime row renders the host form
+// of RuntimeDiagnosticCore.rs jet_write_runtime_stop; the code word sits
+// between these two literals and after the tail.
+for (const code of ["E2805"]) {
+  if (field(code, "stage").includes("runtime")) throw new Error(`${code} is an active runtime row; its stop renders the row, not the host form`);
+}
 const literals = {
   header_panic: "Stop [E3001]: " + field("E3001", "what").split("{msg}")[0],
   header_numeric: "Stop [E3010]: " + field("E3010", "what").split("{msg}")[0],
@@ -83,6 +89,11 @@ const literals = {
   list_head: "the list has ",
   list_position: " items, so position ",
   list_end: " doesn't exist`\n  --> <core.prelude>:0\n",
+  // `bounds: report` (JetRuntime jet_rt_report_list_bounds): the failed
+  // check's line, then its file and line; the program goes on.
+  report_list_head: "bounds report: the list has ",
+  report_list_at: " doesn't exist (",
+  report_list_end: ")\n",
   unreachable: "internal error: entered unreachable code: ",
   locals: "locals: ",
   todo: "#Todo at ",
@@ -99,6 +110,8 @@ const literals = {
   inclusive: "inclusive",
   range_end: ")`\n",
   native_tls: nativeTlsRefusal(),
+  inactive_row_head: "Internal error: runtime diagnostic `",
+  inactive_row_tail: "` is not an active runtime row\n Why: Jet could not resolve this stop through the active diagnostic registry\n Fix: report this as a Jet compiler or host defect\nMore: jet-lang.dev/e/",
 };
 for (const [name, text] of Object.entries(literals)) source += "\n" + emit(`trap_msg_${name}`, text);
 // Retype the canonical Debug interval table at generation time. Runtime
@@ -109,8 +122,8 @@ if (!boundaries) throw new Error("missing Rust Debug scalar interval table");
 const values = boundaries[1].match(/\d+/gu).map(Number);
 if (values.length % 2 || values.some((value, i) => i && value < values[i - 1])) throw new Error("invalid Rust Debug intervals");
 source += "\n// Canonical Text/RustDebug.jet intervals, retyped to machine words.\n";
-source += `TRAP_DEBUG_RANGE_COUNT :: prep { I64{${values.length / 2}} }\n`;
-source += "TRAP_DEBUG_RANGES :: prep { [I64]{\n";
+source += `TRAP_DEBUG_RANGE_COUNT :: comptime { I64{${values.length / 2}} }\n`;
+source += "TRAP_DEBUG_RANGES :: comptime { [I64]{\n";
 for (let i = 0; i < values.length; i += 12) source += `    ${values.slice(i, i + 12).map((n) => `I64{${n}}`).join(", ")},\n`;
 source += "} }\n";
 // Both projections use the same canonical facts. Scoped private generation

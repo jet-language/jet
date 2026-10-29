@@ -1,0 +1,618 @@
+#!/usr/bin/env jet
+// The agent workload corpus gate and its native OS matrix check.
+// Usage (from the repository root):
+//   jet Tools/ci/AgentWorkloads.jet                    run the corpus (needs JET)
+//   jet Tools/ci/AgentWorkloads.jet --check REPORT     validate one per-host report
+//   jet Tools/ci/AgentWorkloads.jet matrix REPORT_DIR  one passing report per required OS
+use core.crypto as crypto
+use core.files as files
+use core.process as process
+use core.term as term
+
+fn run() {
+    args :: process.args()
+    code :: if args.len() > 0 && args[0] == "matrix" -> matrix_main(args[1..<args.len()]) else -> gate_main(args)
+    if code != 0 -> process.exit(code)
+}
+
+// Run the agent workload corpus, write its per-task report, and reject Jet
+// regressions. `--check REPORT` validates one per-host report against the
+// frozen baseline, OS matrix, corpus manifest and policy contract, reporting
+// every problem.
+
+MANIFEST_PATH :: "tests/agent_workloads/manifest.tsv"
+POLICY_PATH :: "tests/agent_workloads/policy.tsv"
+BASELINE_PATH :: "tests/agent_workloads/jet_baseline.tsv"
+DEFAULT_REPORT_PATH :: "Docs/audits/agent-workload-corpus-report.tsv"
+
+BASELINE_HEADER :: "version\ttask_id\tjet_status\tloss_owner"
+MATRIX_HEADER :: "version\tos\tarch_policy\trequirement\tadapters\treason"
+MANIFEST_HEADER :: "version\ttask_id\tdomain\tcase\tdeclared_outcome\tinput\texpected\tauthority\tadapters\tplatforms\tevidence\ttower_card\tloss_cards"
+REPORT_HEADER :: "version\tos\tarch\ttask\tdomain\tcase\tjet\tbash\tpython\tnode\tjet_vs_baselines\tloss_owner\trun_exit\tjet_source_tokens\tbash_source_tokens\tpython_source_tokens\tnode_source_tokens\tjet_cold_ns\tbash_cold_ns\tpython_cold_ns\tnode_cold_ns\tjet_warm_ns\tbash_warm_ns\tpython_warm_ns\tnode_warm_ns\tpolicy_digest"
+
+// The frozen inputs one report is checked against; a None text is unreadable.
+struct GateInputs {
+    baseline: String?
+    matrix: String?
+    manifest: String?
+    policy_digest: String
+}
+
+// The records of a text file: its lines, without the empty piece a final
+// newline leaves.
+fn records(text: String) -> [String] Never! {
+    if text == "" -> return [String]{}
+    lines := pieces(text, "\n")
+    if text.ends_with("\n") -> _ :: &lines.pop()
+    lines
+}
+
+fn all_bytes(value: String, low: Int, high: Int) -> Bool Never! {
+    if value == "" -> return false
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        if code < low || code > high -> return false
+    }
+    true
+}
+
+fn nonnegative_integer(value: String) -> Bool Never! { all_bytes(value, 48, 57) }
+
+fn lower_hex64(value: String) -> Bool Never! {
+    if value.bytes().len() != 64 -> return false
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        if !(code >= 48 && code <= 57) && !(code >= 97 && code <= 102) -> return false
+    }
+    true
+}
+
+fn is_blank(line: String) -> Bool Never! {
+    loop byte in line.bytes() {
+        code :: Int.from_u8(byte)
+        if code != 32 && (code < 9 || code > 13) -> return false
+    }
+    true
+}
+
+// `kind=#<card>` or `kind=non-goal:<reason>` pairs joined by `;`.
+fn owner_ok(value: String) -> Bool Never! {
+    if value == "" -> return false
+    loop part in pieces(value, ";") {
+        pair :: pieces(part, "=")
+        if pair.len() != 2 -> return false
+        target :: pair[1].copy()
+        card :: target.starts_with("#") && nonnegative_integer(String.from_bytes_lossy(target.bytes()[1..<target.bytes().len()]))
+        non_goal :: target.starts_with("non-goal:") && target.bytes().len() > 9
+        if !card && !non_goal -> return false
+    }
+    true
+}
+
+fn adapters_ok(value: String) -> Bool Never! {
+    loop adapter in pieces(value, ",") {
+        if adapter != "jet" && adapter != "bash" && adapter != "python" && adapter != "node" -> return false
+    }
+    true
+}
+
+fn adapter_status(value: String) -> Bool Never! { value == "pass" || value == "loss" || value == "missing" }
+
+// Every problem of `report` against `inputs`, in the order they are found.
+fn report_problems(report: String, inputs: GateInputs) -> [String] Never! {
+    problems := [String]{}
+    baseline_tasks := [String]{}
+    baseline_status := [String:String]{}
+    baseline_owner := [String:String]{}
+    baseline_seen := [String:Bool]{}
+    baseline_lines :: records(inputs.baseline ?? "")
+    if inputs.baseline == None || baseline_lines.len() == 0 || baseline_lines[0] != BASELINE_HEADER -> &problems.push("baseline schema drifted")
+    loop (index, line) in baseline_lines {
+        if index == 0 || line == "" -> next
+        fields :: pieces(line, "\t")
+        if fields.len() != 4 || fields[0] != "1" || fields[2] != "pass" {
+            &problems.push("bad Jet baseline row: {line}")
+            next
+        }
+        id :: fields[1].copy()
+        if baseline_seen.get(id) != None -> &problems.push("duplicate Jet baseline task: {id}")
+        baseline_seen[id.copy()] = true
+        if !owner_ok(fields[3]) -> &problems.push("Jet baseline loss has no card or ratified non-goal: {id}")
+        &baseline_tasks.push(id.copy())
+        baseline_status[id.copy()] = fields[2].copy()
+        baseline_owner[id] = fields[3].copy()
+    }
+    matrix_requirement := [String:String]{}
+    matrix_arch := [String:String]{}
+    matrix_count := 0
+    matrix_lines :: records(inputs.matrix ?? "")
+    if inputs.matrix == None || matrix_lines.len() == 0 || matrix_lines[0] != MATRIX_HEADER -> &problems.push("native OS matrix schema drifted")
+    loop (index, line) in matrix_lines {
+        if index == 0 || line == "" -> next
+        fields :: pieces(line, "\t")
+        if fields.len() != 6 || fields[0] != "1" {
+            &problems.push("bad native OS matrix row: {line}")
+            next
+        }
+        if fields[1] == "" || fields[2] == "" || (fields[3] != "required" && fields[3] != "excluded") || !adapters_ok(fields[4]) || fields[5] == "" -> &problems.push("bad native OS matrix metadata: {line}")
+        os :: fields[1].copy()
+        if matrix_requirement.get(os) != None -> &problems.push("duplicate native OS matrix row: {os}")
+        matrix_requirement[os.copy()] = fields[3].copy()
+        matrix_arch[os] = fields[2].copy()
+        matrix_count += 1
+    }
+    manifest_domain := [String:String]{}
+    manifest_case := [String:String]{}
+    manifest_owner := [String:String]{}
+    manifest_count := 0
+    manifest_lines :: records(inputs.manifest ?? "")
+    if inputs.manifest == None || manifest_lines.len() == 0 || manifest_lines[0] != MANIFEST_HEADER -> &problems.push("corpus manifest schema drifted")
+    loop (index, line) in manifest_lines {
+        if index == 0 || line == "" -> next
+        fields :: pieces(line, "\t")
+        if fields.len() != 13 || fields[0] != "1" {
+            &problems.push("bad corpus manifest row: {line}")
+            next
+        }
+        id :: fields[1].copy()
+        if manifest_domain.get(id) != None -> &problems.push("duplicate corpus manifest task: {id}")
+        manifest_domain[id.copy()] = fields[2].copy()
+        manifest_case[id.copy()] = fields[3].copy()
+        manifest_owner[id.copy()] = fields[12].copy()
+        if !owner_ok(fields[12]) -> &problems.push("bad manifest loss owner: {id}")
+        manifest_count += 1
+    }
+    if baseline_tasks.len() == 0 -> &problems.push("Jet baseline is empty or missing")
+    if matrix_count == 0 -> &problems.push("native OS matrix is empty or missing")
+    if manifest_count == 0 -> &problems.push("corpus manifest is empty or missing")
+
+    header_seen := false
+    host_os := ""
+    host_arch := ""
+    report_digest := ""
+    seen := [String:Bool]{}
+    current := [String:String]{}
+    current_tasks := [String]{}
+    current_owner := [String:String]{}
+    loop line in records(report) {
+        if line.starts_with("#") || is_blank(line) -> next
+        if !header_seen {
+            if line != REPORT_HEADER -> &problems.push("report schema drifted")
+            header_seen = true
+            next
+        }
+        f :: pieces(line, "\t")
+        if f.len() != 26 || f[0] != "1" {
+            &problems.push("bad report row: {line}")
+            next
+        }
+        if host_os == "" {
+            host_os = f[1].copy()
+            host_arch = f[2].copy()
+        }
+        if f[1] != host_os || f[2] != host_arch -> &problems.push("report mixes OS or architecture")
+        id :: f[3].copy()
+        if seen.get(id) != None -> &problems.push("duplicate report task: {id}")
+        seen[id.copy()] = true
+        if manifest_domain.get(id) == {
+            .Val(domain) -> {
+                if f[4] != domain || f[5] != (manifest_case.get(id) ?? "") -> &problems.push("task metadata drifted: {id}")
+                if f[11] != (manifest_owner.get(id) ?? "") -> &problems.push("loss owner drifted from manifest: {id}")
+            }
+            .None -> &problems.push("report has unknown task: {id}")
+        }
+        if !adapter_status(f[6]) || !adapter_status(f[7]) || !adapter_status(f[8]) || !adapter_status(f[9]) -> &problems.push("bad adapter status: {id}")
+        if f[10] != "pass" && f[10] != "loss" -> &problems.push("bad corpus score: {id}")
+        if current.get(id) == None -> &current_tasks.push(id.copy())
+        current[id.copy()] = f[6].copy()
+        current_owner[id.copy()] = f[11].copy()
+        if f[12] != "0" -> &problems.push("corpus command exited {f[12]}: {id}")
+        expected_score :: if f[12] == "0" && f[6] == "pass" && f[7] == "pass" && f[8] == "pass" && f[9] == "pass" -> "pass" else -> "loss"
+        if f[10] != expected_score -> &problems.push("corpus score drifted: {id}")
+        if f[6] == "loss" && !owner_ok(f[11]) -> &problems.push("Jet loss has no card or ratified non-goal: {id}")
+        if !nonnegative_integer(f[12]) -> &problems.push("bad corpus exit code: {id}")
+        loop metric in 14..<26 {
+            if !nonnegative_integer(f[metric - 1]) -> &problems.push("bad report metric in {id}: column={metric}")
+        }
+        if !lower_hex64(f[25]) {
+            &problems.push("bad policy digest: {id}")
+        } else if f[25] != inputs.policy_digest {
+            &problems.push("policy digest is not the frozen policy: {id}")
+        }
+        if report_digest == "" {
+            report_digest = f[25].copy()
+        } else if f[25] != report_digest {
+            &problems.push("policy digest drifted: {id}")
+        }
+    }
+
+    if !header_seen {
+        &problems.push("report has no header")
+    } else if host_os == "" {
+        &problems.push("report has no task rows")
+    } else {
+        requirement :: matrix_requirement.get(host_os) ?? ""
+        if matrix_requirement.get(host_os) == None {
+            &problems.push("OS is absent from frozen matrix: {host_os}")
+        } else if requirement != "required" {
+            &problems.push("OS is excluded by frozen matrix: {host_os}")
+        } else {
+            arch :: matrix_arch.get(host_os) ?? ""
+            if arch != "any" && arch != host_arch -> &problems.push("architecture {host_arch} is not allowed for {host_os}")
+        }
+    }
+    loop id in baseline_tasks {
+        owner :: baseline_owner.get(id) ?? ""
+        if manifest_owner.get(id) == {
+            .Val(manifest) -> {
+                if owner != manifest -> &problems.push("Jet baseline loss owner drifted from manifest: {id}")
+            }
+            .None -> &problems.push("Jet baseline names unknown task: {id}")
+        }
+        if current.get(id) == {
+            .Val(status) -> {
+                if (baseline_status.get(id) ?? "") == "pass" && status != "pass" -> &problems.push("Jet regression: task={id} baseline=pass current={status} owner={owner}")
+            }
+            .None -> &problems.push("report is missing baseline task: {id}")
+        }
+        if owner != (current_owner.get(id) ?? "") -> &problems.push("loss owner drifted: {id}")
+    }
+    loop id in current_tasks {
+        if manifest_domain.get(id) == None -> &problems.push("report has unknown task: {id}")
+    }
+    if baseline_tasks.len() != manifest_count -> &problems.push("Jet baseline task count drifted")
+    if current_tasks.len() != manifest_count -> &problems.push("report task count drifted")
+    problems
+}
+
+fn read_text(path: String) -[FS]> String? Never! {
+    if files.read(path) == {
+        .Ok(text) -> Val(text)
+        .Err(_) -> None
+    }
+}
+
+// An environment override, or `fallback` when it is unset or empty.
+fn env_or(name: String, fallback: String) -[Env]> String Never! {
+    value :: process.env_get(name) ?? return fallback.copy()
+    if value == "" -> return fallback.copy()
+    value
+}
+
+fn repository_root() -[FS, Env]> String Never! {
+    if files.cwd() == {
+        .Ok(cwd) -> cwd
+        .Err(_) -> "."
+    }
+}
+
+// The frozen inputs under `root`; the policy digest covers its text without
+// the final newline.
+fn frozen_inputs(root: String, policy_text: String) -[FS, Env]> GateInputs Never! {
+    policy := policy_text
+    if policy.ends_with("\n") -> policy = String.from_bytes_lossy(policy.bytes()[0..<policy.bytes().len() - 1])
+    GateInputs{
+        baseline: read_text(env_or("JET_AGENT_WORKLOAD_BASELINE", "{root}/{BASELINE_PATH}")),
+        matrix: read_text("{root}/{MATRIX_PATH}"),
+        manifest: read_text("{root}/{MANIFEST_PATH}"),
+        policy_digest: crypto.sha256(policy.bytes()).hex(),
+    }
+}
+
+// Validates `report`; 0 after its pass line, 1 after every problem.
+fn gate_check(report: String) -[FS, Env, IO, Time.Wait]> Int Never! {
+    root :: repository_root()
+    if !files.is_file(report) {
+        term.eprint("agent workload gate: missing report {report}")
+        return 1
+    }
+    policy_path :: "{root}/{POLICY_PATH}"
+    if !files.is_file(policy_path) {
+        term.eprint("agent workload gate: missing policy contract {policy_path}")
+        return 1
+    }
+    policy_text :: awk_input(policy_path) ?? return 2
+    report_text :: awk_input(report) ?? return 2
+    inputs :: frozen_inputs(root, policy_text)
+    problems :: report_problems(report_text, inputs)
+    loop problem in problems -> term.eprint("agent workload gate: {problem}")
+    if problems.len() > 0 -> return 1
+    print("agent workload gate: pass report={report}")
+    0
+}
+
+// A regular file awk reads as its input: an unreadable one stops awk with its
+// fatal message (exit 2), as the shell gate did.
+fn awk_input(path: String) -[FS, IO, Time.Wait]> String? Never! {
+    if files.read(path) == {
+        .Ok(text) -> return Val(text)
+        .Err(error) -> {
+            reason :: if error == .PermissionDenied(_) -> "Permission denied" else -> "{error}"
+            term.eprint("awk: fatal: cannot open file `{path}' for reading: {reason}")
+            return None
+        }
+    }
+}
+
+fn uncovered(reason: String) -[IO, Time.Wait]> Int Never! {
+    term.eprint("UNCOVERED surface=agent-workloads cardRequired=true card=#769 reason={reason}")
+    1
+}
+
+fn passthrough(receipt: ProcessReceipt) Never! -[IO]> {
+    out := term.stdout()
+    &out.write(receipt.output).drop("corpus stdout")
+    errors := term.stderr()
+    &errors.write(receipt.errors).drop("corpus stderr")
+}
+
+fn gate_usage() -[IO, Time.Wait]> Int Never! {
+    term.eprint("usage: jet Tools/ci/AgentWorkloads.jet [--check REPORT]")
+    64
+}
+
+// Runs the corpus through the testkit with the JET binary. No per-task
+// report mapping exists for its results yet, so the run ends UNCOVERED and the
+// committed report is preserved.
+fn gate_main(args: [String]) -[FS, Env, Exec, IO, Time.Wait]> Int Never! {
+    if args.len() > 0 && args[0] == "--check" {
+        if args.len() != 2 -> return gate_usage()
+        return gate_check(args[1])
+    }
+    if args.len() != 0 -> return gate_usage()
+    root :: repository_root()
+    report :: env_or("JET_AGENT_WORKLOAD_REPORT", "{root}/{DEFAULT_REPORT_PATH}")
+    home :: process.env_get("HOME") ?? ""
+    scratch :: env_or("JET_AGENT_WORKLOAD_SCRATCH_DIR", env_or("TMPDIR", "{home}/.cache/jet-dev/scratch"))
+    report_parent :: if report.rfind("/") > 0 -> String.from_bytes_lossy(report.bytes()[0..<report.rfind("/")]) else -> "."
+    created :: process.cmd([String]{"mkdir", "-p", scratch.copy(), report_parent}).run() ?? return uncovered("cannot create {scratch}")
+    if created.code != 0 {
+        passthrough(created)
+        return 1
+    }
+    made :: process.cmd([String]{"mktemp", "-d", "{scratch}/agent-workload-gate.XXXXXX"}).run() ?? return uncovered("cannot create a run directory under {scratch}")
+    if made.code != 0 {
+        passthrough(made)
+        return 1
+    }
+    run_dir :: made.output.trim()
+    code :: gate_corpus(root, scratch, run_dir.copy(), report)
+    files.remove_all(run_dir).drop("the run directory is scratch")
+    code
+}
+
+fn gate_corpus(root: String, scratch: String, run_dir: String, report: String) -[FS, Env, Exec, IO, Time.Wait]> Int Never! {
+    jet :: process.env_get("JET") ?? ""
+    if jet == "" -> return uncovered("JET must name an executable jet binary")
+    executable :: process.cmd([String]{"test", "-x", jet.copy()}).run() ?? return uncovered("JET must name an executable jet binary")
+    if executable.code != 0 -> return uncovered("JET must name an executable jet binary")
+    receipt :: process.cmd([String]{jet.copy(), "test", "{root}/Tools/testkit", "suite cases", "--capture=all", "--color=never"})
+        .env("JET", jet)
+        .env("TESTKIT_ARGS", "--filter agent_workloads")
+        .env("JET_TEST_SCRATCH_DIR", scratch)
+        .env("JET_CI_EVIDENCE_DIR", run_dir)
+        .stdout(.Inherit)
+        .stderr(.Inherit)
+        .run() ?? return uncovered("jet test Tools/testkit (suite cases, agent_workloads) could not start")
+    if receipt.code != 0 -> return uncovered("jet test Tools/testkit (suite cases, agent_workloads) exited {receipt.code}")
+    uncovered("testkit results have no mapping to the per-task agent workload report; {report} preserved")
+}
+
+fn gate_inputs_for_test() -> GateInputs Never! {
+    GateInputs{
+        baseline: Val("{BASELINE_HEADER}\n1\ttask-a\tpass\tdefault-run=#1\n"),
+        matrix: Val("{MATRIX_HEADER}\n1\tlinux\tx86_64\trequired\tjet,bash\tnative\n1\twindows\tany\texcluded\tjet\tnot-native\n"),
+        manifest: Val("{MANIFEST_HEADER}\n1\ttask-a\tdomain\tcase\tpass\ti\te\ta\tjet\tlinux\tev\t#1\tdefault-run=#1\n"),
+        policy_digest: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    }
+}
+
+fn report_row(os: String, jet: String, score: String, owner: String) -> String Never! {
+    "1\t{os}\tx86_64\ttask-a\tdomain\tcase\t{jet}\tpass\tpass\tpass\t{score}\t{owner}\t0\t1\t1\t1\t1\t1\t1\t1\t1\t1\t1\t1\t1\t0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+}
+
+#Test("a consistent report has no problems; a Jet loss is a regression") {
+    passing_row :: report_row("linux", "pass", "pass", "default-run=#1")
+    passing :: "# generated\n{REPORT_HEADER}\n{passing_row}\n"
+    assert_eq(report_problems(passing, gate_inputs_for_test()).join("|"), "")
+    losing_row :: report_row("linux", "loss", "loss", "default-run=#1")
+    losing :: "{REPORT_HEADER}\n{losing_row}\n"
+    assert_eq(report_problems(losing, gate_inputs_for_test()).join("|"), "Jet regression: task=task-a baseline=pass current=loss owner=default-run=#1")
+}
+
+#Test("the frozen matrix and owners are checked; every problem is reported") {
+    excluded_row :: report_row("windows", "pass", "pass", "default-run=#9")
+    excluded :: "{REPORT_HEADER}\n{excluded_row}\n"
+    assert_eq(report_problems(excluded, gate_inputs_for_test()).join("|"), "loss owner drifted from manifest: task-a|OS is excluded by frozen matrix: windows|loss owner drifted: task-a")
+    assert_eq(report_problems("", gate_inputs_for_test()).join("|"), "report has no header|report is missing baseline task: task-a|loss owner drifted: task-a|report task count drifted")
+    assert(owner_ok("default-run=#688;wall-time=non-goal:slow"))
+    assert(!owner_ok("default-run=#688;"))
+    assert(!owner_ok("default-run=688"))
+}
+
+// The frozen corpus as one passing linux report row per manifest task, as
+// fields; row `target` (or every row when "") gets `value` in 1-based `column`.
+fn corpus_rows(manifest: String, digest: String, target: String, column: Int, value: String) -> [[String]] Never! {
+    rows := [[String]]{}
+    loop (index, line) in records(manifest) {
+        if index == 0 -> next
+        source :: pieces(line, "\t")
+        row := [String]{"1", "linux", "x86_64", source[1].copy(), source[2].copy(), source[3].copy(), "pass", "pass", "pass", "pass", "pass", source[12].copy(), "0"}
+        loop _ in 0..<12 -> &row.push("1")
+        &row.push(digest.copy())
+        if column > 0 && (target == "" || row[3] == target) -> row[column - 1] = value.copy()
+        &rows.push(row)
+    }
+    rows
+}
+
+fn corpus_report(rows: [[String]]) -> String Never! {
+    lines := [String]{"# generated by the AgentWorkloads #Test", REPORT_HEADER}
+    loop row in rows -> &lines.push(row.join("\t"))
+    body :: lines.join("\n")
+    "{body}\n"
+}
+
+fn corpus_problems(target: String, column: Int, value: String) -[FS, Env]> String Never! {
+    inputs :: frozen_inputs(".", read_text(POLICY_PATH) ?? "")
+    manifest :: read_text(MANIFEST_PATH) ?? ""
+    report_problems(corpus_report(corpus_rows(manifest, inputs.policy_digest, target, column, value)), inputs).join("\n")
+}
+
+#Test("the frozen corpus passes; each single drift is reported") {
+    assert_eq(corpus_problems("", 0, ""), "")
+    marker :: "repository-marker-scan"
+    regression :: corpus_problems(marker, 7, "loss")
+    assert(regression.contains("Jet regression: task=repository-marker-scan"))
+    assert(corpus_problems(marker, 12, "default-run=#999").contains("loss owner drifted from manifest: repository-marker-scan"))
+    assert(corpus_problems("", 2, "windows").contains("OS is excluded by frozen matrix: windows"))
+    assert(corpus_problems("", 26, "0000000000000000000000000000000000000000000000000000000000000000").contains("policy digest is not the frozen policy"))
+    assert(corpus_problems(marker, 13, "1").contains("corpus command exited 1"))
+    assert(corpus_problems(marker, 8, "loss").contains("corpus score drifted: repository-marker-scan"))
+    assert_eq(gate_check("tests/agent_workloads/absent-report.tsv"), 1)
+}
+
+#Test("the matrix passes with one passing report per required OS") {
+    made :: process.cmd([String]{"mktemp", "-d"}).run() ?? panic("no scratch directory: {err}")
+    directory :: made.output.trim()
+    inputs :: frozen_inputs(".", read_text(POLICY_PATH) ?? "")
+    manifest :: read_text(MANIFEST_PATH) ?? ""
+    files.write("{directory}/linux.tsv", corpus_report(corpus_rows(manifest, inputs.policy_digest, "", 0, ""))) ?? panic("cannot write the linux report")
+    mac_rows := corpus_rows(manifest, inputs.policy_digest, "", 2, "macos")
+    loop index in 0..<mac_rows.len() -> mac_rows[index][2] = "any"
+    files.write("{directory}/macos.tsv", corpus_report(mac_rows)) ?? panic("cannot write the macos report")
+    code :: matrix_main([String]{directory.copy()})
+    files.remove_all(directory).drop("the matrix reports are scratch")
+    assert_eq(code, 0)
+}
+
+// The native OS matrix check: every `required` row of the frozen OS matrix
+// needs `<REPORT_DIR>/<os>.tsv`, declaring that OS on its first data row and
+// passing the gate's report check. Every row is checked; the result is 1 when
+// any check failed.
+
+MATRIX_PATH :: "tests/agent_workloads/native_os_matrix.tsv"
+
+struct MatrixRow {
+    version: String
+    os: String
+    requirement: String
+}
+
+// Every `separator`-separated piece of `text`, the piece after the last one included.
+fn pieces(text: String, separator: String) -> [String] Never! {
+    out := [String]{}
+    loop piece in text.split(separator) -> &out.push(piece)
+    out
+}
+
+// The rows a shell `while IFS=$'\t' read -r ...` loop sees: complete lines
+// only, fields split on runs of tabs.
+fn matrix_rows(text: String) -> [MatrixRow] Never! {
+    rows := [MatrixRow]{}
+    lines :: pieces(text, "\n")
+    complete :: lines.len() - 1
+    loop (index, line) in lines {
+        if index >= complete -> break
+        fields := [String]{}
+        loop field in line.split("\t") {
+            if field != "" -> &fields.push(field)
+        }
+        version :: if fields.len() > 0 -> fields[0].copy() else -> ""
+        os :: if fields.len() > 1 -> fields[1].copy() else -> ""
+        requirement :: if fields.len() > 3 -> fields[3].copy() else -> ""
+        &rows.push(MatrixRow{version: version, os: os, requirement: requirement})
+    }
+    rows
+}
+
+// The OS field of the report's first row that is neither a comment nor the
+// header (awk -F '\t' '$1 !~ /^#/ && $1 != "version" { print $2; exit }').
+fn report_os(text: String) -> String Never! {
+    lines :: pieces(text, "\n")
+    records :: if text.ends_with("\n") -> lines.len() - 1 else -> lines.len()
+    loop (index, line) in lines {
+        if index >= records -> break
+        fields :: pieces(line, "\t")
+        first :: fields[0].copy()
+        if first.starts_with("#") || first == "version" -> next
+        if fields.len() > 1 -> return fields[1].copy()
+        return ""
+    }
+    ""
+}
+
+fn absolute_dir(path: String) -[FS, Env]> String Never! {
+    if path.starts_with("/") -> return path.copy()
+    if files.cwd() == {
+        .Ok(cwd) -> "{cwd}/{path}"
+        .Err(_) -> path.copy()
+    }
+}
+
+// The gate's own verdict for one report, with its pass line.
+fn gate_passes(report: String) -[FS, Env, IO, Time.Wait]> Bool Never! {
+    gate_check(report) == 0
+}
+
+fn matrix_main(args: [String]) -[FS, Env, Exec, IO, Time.Wait]> Int Never! {
+    if args.len() != 1 {
+        term.eprint("usage: jet Tools/ci/AgentWorkloads.jet matrix REPORT_DIR")
+        return 64
+    }
+    report_dir :: absolute_dir(args[0])
+    matrix := ""
+    if files.read(MATRIX_PATH) == {
+        .Ok(text) -> matrix = text
+        .Err(error) -> {
+            term.eprint("agent workload matrix: cannot read {MATRIX_PATH}: {error}")
+            return 1
+        }
+    }
+    failed := false
+    required := 0
+    loop row in matrix_rows(matrix) {
+        if row.version != "1" || row.requirement != "required" -> next
+        required += 1
+        report :: "{report_dir}/{row.os}.tsv"
+        if !files.is_file(report) {
+            term.eprint("agent workload matrix: missing required report {report}")
+            failed = true
+            next
+        }
+        report_text := ""
+        if files.read(report) == {
+            .Ok(text) -> report_text = text
+            .Err(_) -> {}
+        }
+        declared :: report_os(report_text)
+        if declared != row.os {
+            term.eprint("agent workload matrix: {report} declares OS '{declared}', expected '{row.os}'")
+            failed = true
+            next
+        }
+        if !gate_passes(report) -> failed = true
+    }
+    if required == 0 {
+        term.eprint("agent workload matrix: frozen matrix has no required OS")
+        return 1
+    }
+    if failed -> return 1
+    print("agent workload matrix: pass required_os={required} report_dir={report_dir}")
+    0
+}
+
+#Test("matrix rows are complete lines with tab runs as one separator") {
+    rows :: matrix_rows("version\tos\tarch\trequirement\n1\tlinux\tx86_64\trequired\tjet\tnative\n1\t\tmacos\tany\trequired\n1\twindows\tany\texcluded")
+    assert_eq(rows.len(), 3)
+    assert_eq(rows[1].os, "linux")
+    assert_eq(rows[1].requirement, "required")
+    assert_eq(rows[2].os, "macos")
+    assert_eq(rows[2].requirement, "required")
+}
+
+#Test("the report OS is the first data row's second field") {
+    assert_eq(report_os("# generated\nversion\tos\n1\tlinux\tx86_64\n1\tmacos\n"), "linux")
+    assert_eq(report_os("# only\nversion\tos\n"), "")
+    assert_eq(report_os("version\tos\n\n1\tlinux\n"), "")
+}

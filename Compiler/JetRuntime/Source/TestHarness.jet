@@ -1,0 +1,75 @@
+// The native test harness boundary: unit invocation, the task adapter, and the
+// record-file I/O the generated harness main uses. Tests run in order on the
+// calling thread: spawn runs the unit and parks its outcome, join hands it on.
+// A fault that ends the process is attributed by the host's fatal-child rerun.
+
+// `invoke(env)` returns null for success or one owned diagnostic String. It
+// runs under its own root, as jet_rt_main runs the entry (Main.jet): a stop in
+// the test (a panic, a failed assert) is published there, every generated
+// frame leaves by its stop edge, and the stop's rendered report is the test's
+// failure; the stopped invoke wrote no result. A stop without a report
+// (process.exit) ends the process: it is published again on the enclosing root.
+#Export(c) fn jet_rt_test_unit(name: I64, expected: Bool, env: I64, invoke: I64) -> I64 {
+    jet_rt_test_capture_begin()
+    jet_rt_testing_clear_failure()
+    save :: jet_rt_alloc(I64{40}, I64{8})
+    root :: jet_rt_root_begin(save)
+    returned :: coll_call1(invoke, env)
+    record :: jet_rt_root_take_stop(root, save + I64{32})
+    jet_rt_root_leave(root, save)
+    error := returned
+    if (record != I64{0}) {
+        error = scheduler_stop_take_message(record)
+        scheduler_stop_drop(record)
+        if (error == I64{0}) {
+            _ := jet_rt_root_publish_rendered(I64{0}, I64{0}, trap_word(save + I64{32}))
+            error = test_text_new(I64{0})
+        }
+    }
+    jet_rt_free(save, I64{40}, I64{8})
+    stdout :: jet_rt_test_capture_take()
+    skipped :: jet_rt_test_take_whole_skip()
+    jet_rt_test_unit_outcome(name, expected, skipped, stdout, error)
+}
+
+// `invoke(env)` returns one owned outcome; `release(env)` runs shielded once.
+#Export(c) fn jet_rt_test_spawn(env: I64, invoke: I64, release: I64) -> I64 {
+    outcome :: coll_call1(invoke, env)
+    jet_scheduler_shield_enter()
+    coll_call1_unit(release, env)
+    jet_scheduler_shield_leave()
+    cell :: jet_rt_alloc(I64{8}, I64{8})
+    rt_text_store(cell, outcome)
+    cell
+}
+
+#Export(c) fn jet_rt_test_join(cell: I64) -> I64 {
+    outcome :: rt_text_word(cell)
+    jet_rt_free(cell, I64{8}, I64{8})
+    outcome
+}
+
+// 1 after appending all of `text` to `path`, or 0 with the IOError in `error`.
+#Export(c) fn jet_rt_test_append(path: I64, text: I64, error: I64) -> I64 {
+    jet_files_append_bytes_os(path, rt_text_data(text), rt_text_len(text), error)
+}
+
+// 1 with the file's text stored through `ok`, or 0 with the IOError in `error`.
+// The harness wrote this file itself, so its bytes are the text it appended.
+#Export(c) fn jet_rt_test_read(path: I64, ok: I64, error: I64) -> I64 {
+    cells :: jet_rt_alloc(I64{16}, I64{8})
+    if (jet_files_read_bytes_os(path, cells, cells + I64{8}, error) == I64{0}) {
+        jet_rt_free(cells, I64{16}, I64{8})
+        return I64{0}
+    }
+    data :: rt_text_word(cells)
+    length :: rt_text_word(cells + I64{8})
+    jet_rt_free(cells, I64{16}, I64{8})
+    rt_text_store(ok, rt_text_copy(data, length))
+    if (length != I64{0}) -> jet_rt_free(data, length, I64{8})
+    I64{1}
+}
+
+#Export(c) fn jet_rt_test_eprint(message: I64) {
+    _ :: host_stdio_text_failure(message, true, true, true)
+}

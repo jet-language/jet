@@ -1,28 +1,33 @@
-# Port of tests/guard_selftest.rs:61-64 -> tests/unsafe_ratchet.rs:129-199; ALL six stages preserved.
+# Port of tests/guard_selftest.rs:61-64 -> tests/unsafe_ratchet.rs:129-201; all seven stages preserved.
 # PENDING-GRAMMAR: concat (TestW3b batch two). Transitional Node debt in NODE-DEBT.tsv.
 requires: tool:node
 fixture: fixtures/ratchet
-copy: laundering.txt Core/sys/sys.jet
+copy: laundering.txt Core/Sys/Sys.jet
 step: node {root}/Tools/agent/check-unsafe-ratchet.mjs --root {work} --baseline {work}/safety.md --update
 exit: nonzero
 stderr: ~ "fn fork opens #Unsafe" # original predicate
-copy: ungated.txt Core/sys/sys.jet
+copy: defaults.txt Core/Sys/Sys.jet
+step: node {root}/Tools/agent/check-unsafe-ratchet.mjs --root {work} --baseline {work}/safety.md --update
+exit: nonzero
+stderr: ~ "fn default_gated opens #Unsafe" # original predicate: default-value braces belong to the parameter list
+stderr: !~ "fn default_plain" # original predicate
+copy: ungated.txt Core/Sys/Sys.jet
 step: node {root}/Tools/agent/check-unsafe-ratchet.mjs --root {work} --baseline {work}/safety.md --update
 exit: nonzero
 stderr: ~ "POSIX control outside an audited #Unsafe gate" # original predicate
-copy: audited.txt Core/sys/sys.jet
+copy: audited.txt Core/Sys/Sys.jet
 step: node {root}/Tools/agent/check-unsafe-ratchet.mjs --root {work} --baseline {work}/safety.md --update
 exit: 0
 step: node {root}/Tools/agent/check-unsafe-ratchet.mjs --root {work} --baseline {work}/safety.md
 exit: 0
-copy: laundering.txt Core/sys/sys.jet
+copy: laundering.txt Core/Sys/Sys.jet
 copy: safety.md prior-baseline.txt
 concat: safety.md prior-baseline.txt abstraction.txt
 step: node {root}/Tools/agent/check-unsafe-ratchet.mjs --root {work} --baseline {work}/safety.md --update
 exit: 0
 step: node {root}/Tools/agent/check-unsafe-ratchet.mjs --root {work} --baseline {work}/safety.md
 exit: 0
-copy: audited.txt Core/sys/sys.jet
+copy: audited.txt Core/Sys/Sys.jet
 step: node {root}/Tools/agent/check-unsafe-ratchet.mjs --root {work} --baseline {work}/safety.md --update
 exit: any # original predicate: seed_allowing_corelib asserts stdout only
 stdout: ~ "baseline updated" # original predicate

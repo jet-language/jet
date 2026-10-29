@@ -1,7 +1,5 @@
-// CmdInspect.rs run_inspect_live / run_decisions_live and LiveInspect::render.
+// CmdInspect.rs run_inspect_live and LiveInspect::render.
 // Every output comes from the validated retained snapshot, never source guesses.
-use jet_foundation.[MIRDecisionIdentity, MIRDecisionRow, MIRDecisionKind, MIRDecisionDisposition, Span, stable_id]
-use jet_optimizer.mir_decision_ledger_from_rows
 
 fn jet_cli_live_text(snapshot: JetCLILiveSnapshot) -> String Never! {
     event_lines := snapshot.events
@@ -74,42 +72,4 @@ fn jet_cli_live_json_report(snapshot: JetCLILiveSnapshot, plane: String) -> Stri
     &fields.push(jet_cli_status_field("values", jet_cli_status_array(values)))
     &fields.push(jet_cli_status_field("shapes", jet_cli_status_array(shapes)))
     "{jet_cli_status_render("inspect.{plane}", true, fields)}\n"
-}
-fn jet_cli_live_unavailable_ledger(snapshot: JetCLILiveSnapshot) -> MIRDecisionLedger Never! {
-    identity :: MIRDecisionIdentity{source: snapshot.source_id, configuration: snapshot.build_id, profile: "live", target: snapshot.world_id, implementation: snapshot.protocol, artifact: "pid:{snapshot.pid}", run: snapshot.revision}
-    reason :: "the live runtime produced no compiler decision ledger for this run"
-    row :: MIRDecisionRow{id: stable_id("mir-decision", "tier|unavailable|0|0|0|live-decision-ledger|{reason}"), kind: MIRDecisionKind.Tier, disposition: MIRDecisionDisposition.Unavailable, function: None, function_name: "", span: Span{start: 0, end: 0}, rule: "live-decision-ledger", reason: reason, producer: "live.inspect", evidence: "runtime-snapshot", edit: None, derivation: None, identity: None, evidence_method: None, derivation_disposition: None}
-    mir_decision_ledger_from_rows(identity, [MIRDecisionRow]{row})
-}
-fn jet_cli_live_decisions_report(snapshot: JetCLILiveSnapshot, json: Bool) -> String Never! {
-    status :: if snapshot.decisions == None -> "unavailable" else -> "current"
-    ledger :: snapshot.decisions ?? jet_cli_live_unavailable_ledger(snapshot)
-    if !json {
-        text := "decisions: scope=live pid={snapshot.pid} source={snapshot.source_id} build={snapshot.build_id} revision={snapshot.revision} world={snapshot.world_id} record_status={status} retention=bounded redaction=transport-safe\n"
-        loop row in ledger.rows {
-            reference :: if row.derivation == .Val(value) -> value.id else -> "unavailable"
-            disposition :: if row.derivation_disposition == .Val(value) -> jet_cli_optimization_derivation(value) else -> "unknown"
-            text = "{text}decision kind={jet_cli_optimization_kind(row.kind)} disposition={jet_cli_optimization_disposition(row.disposition)} derivation_disposition={disposition} derivation_ref={reference} reason={row.reason} producer={row.producer}\n"
-        }
-        return text
-    }
-    rows := [JetCLIStatusValue]{}
-    counts := [String:Int]{}
-    loop row in ledger.rows {
-        &rows.push(jet_cli_optimization_decision(row))
-        kind :: jet_cli_optimization_kind(row.kind)
-        counts[kind] = (counts.get(kind) ?? 0) + 1
-    }
-    kinds := [JetCLIStatusField]{}
-    loop kind in ([String]{"tier", "inline", "vectorize", "parallel", "copy", "bounds", "deopt", "unreachable", "loop-invariant"}) {
-        count :: counts.get(kind) ?? 0
-        &kinds.push(jet_cli_status_field(kind, jet_cli_status_object([jet_cli_status_field("status", jet_cli_status_text(if count == 0 -> "not-applicable" else -> "present")), jet_cli_status_field("rows", jet_cli_status_int(count))])))
-    }
-    fields := jet_cli_live_identity_fields(snapshot)
-    &fields.push(jet_cli_status_field("record_status", jet_cli_status_text(status)))
-    &fields.push(jet_cli_status_field("retention", jet_cli_status_text("bounded")))
-    &fields.push(jet_cli_status_field("redaction", jet_cli_status_text("transport-safe")))
-    &fields.push(jet_cli_status_field("rows", jet_cli_status_array(rows)))
-    &fields.push(jet_cli_status_field("kinds", jet_cli_status_object(kinds)))
-    "{jet_cli_status_render("inspect.decisions", true, fields)}\n"
 }

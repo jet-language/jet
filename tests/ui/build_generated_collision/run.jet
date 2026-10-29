@@ -1,12 +1,12 @@
 // @programmable_build
 use "./.jet/generated/main/collision" as handwritten
 
-fn build(b: BuildContext) -> BuildPlan {
+fn build(b: Build) {
     b.generate("collision") {
         fn collision() -> String { "generated" }
     }?
     app :: b.add_executable("app", ["main.jet", ".jet/generated/main/collision.jet"], [])?
-    return b.plan(app)
+    b.default(app)
 }
 
 fn run() { print(handwritten.collision()) }

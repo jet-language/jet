@@ -3,6 +3,12 @@
 // `ConfigFacts` is a typed contribution to it. Both are plain data: parsing is
 // structural (PackageParse.jet), composition deterministic (Compose.jet), and
 // filesystem resolution goes through the authority resolver (PackageLoad.jet).
+use jetpack_foundation.[OUTPUT_FIELD_BINDINGS, OUTPUT_FIELD_LOADABLE, OUTPUT_FIELD_NATIVE]
+use jet_foundation.[
+    EvidenceFacet, EvidenceKind, EvidenceOutcome, EvidenceRecord, AllocatorPolicy,
+    RuntimeLayer, PolicyDeclaration, evidence_outcome_is_failure,
+    evidence_record_is_expected_failure, evidence_record_is_unexpected_pass,
+]
 
 enum PackageOutputKind {
     Library
@@ -298,7 +304,7 @@ struct PackagePolicyException {
 }
 
 // The package's non-memory governance
-// namespace. Memory denials live in `authority.holds.deny`.
+// namespace. Memory denials live in `authority.deny`.
 struct PackagePolicy {
     declarations: [PolicyDeclaration]
     // `None` means no `lints:` block at all.
@@ -373,7 +379,9 @@ struct PolicyTightenError {
 
 // Package-scope authority facts.
 struct PackageAuthority {
-    holds: AuthorityHolds
+    // The package's own bound; `None` = not written.
+    allow: [String]?
+    deny: [String]?
     // Guest-declared requirements, never a host grant.
     needs: [String]
     grants: [PackageGrant]
@@ -381,7 +389,7 @@ struct PackageAuthority {
     providers: [ProviderAuthority]
 
     fn default() -> PackageAuthority Never! {
-        PackageAuthority{holds: AuthorityHolds.default(), needs: [String]{}, grants: [PackageGrant]{}, trust: None, providers: [ProviderAuthority]{}}
+        PackageAuthority{allow: None, deny: None, needs: [String]{}, grants: [PackageGrant]{}, trust: None, providers: [ProviderAuthority]{}}
     }
 }
 
@@ -414,10 +422,10 @@ struct PackageFacts {
     license: String?
     repository: String?
     // The hosted whole-program allocator.
-    allocator: MIRAllocatorPolicy
+    allocator: AllocatorPolicy
     targets: PackageTargets
     // Optional runtime ceiling.
-    layer: MIRRuntimeLayer?
+    layer: RuntimeLayer?
     deps: [String: DepSource]
     // Package-level development mode.
     dev: DevPolicy
@@ -430,7 +438,7 @@ struct PackageFacts {
     build_profiles: [BuildProfileDef]
     // Standing capabilities granted to this package's `fn build`.
     build_allow: [String]
-    // Whether `authority.holds` is present at all.
+    // Whether `authority` is present at all.
     effects_enabled: Bool
     effects_allow: [String]?
     effects_deny: [String]?
@@ -458,7 +466,7 @@ struct PackageFacts {
             description: None,
             license: None,
             repository: None,
-            allocator: MIRAllocatorPolicy.HostedDefault,
+            allocator: AllocatorPolicy.HostedDefault,
             targets: PackageTargets.empty(),
             layer: None,
             deps: [String: DepSource]{},

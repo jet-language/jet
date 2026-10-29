@@ -13,10 +13,24 @@
 // (Apply); `fn(A,B)` and `fn(A,B;R)` (no effect row or call metadata);
 // `(name:T,…)` tuple; `callback` (`core_host_callback_type`); any other name
 // is Named. The first row whose module and member match wins; no row is None.
+// The lookup splits the table at `\n{module_name} `, so only that module's
+// rows are copied out and parsed; every other row is passed over by the
+// runtime search.
 fn core_sig_row_lookup(rows: String, module_name: String, member: String) -> CoreTypedCallSignature? {
     prefix :: "{module_name} "
-    loop line in rows.split("\n") {
-        if !line.starts_with(prefix) -> next
+    separator :: "\n{prefix}"
+    first := true
+    loop chunk in rows.split(separator) {
+        // The text before the first separator holds a row of this module only
+        // when the table starts with the module; that row keeps its prefix.
+        at_start := false
+        if first {
+            first = false
+            if !rows.starts_with(prefix) -> next
+            at_start = true
+        }
+        head :: if chunk.split_once("\n") == .Val(parts) -> parts.before else -> chunk
+        line :: if at_start -> head else -> "{prefix}{head}"
         fields :: line.split(" ").to_list()
         if (fields.len() != 4 && fields.len() != 5) || !core_sig_one_of(member, fields[1].split("|").to_list()) -> next
         parameters := [CoreCallTypedParameter]{}
@@ -215,7 +229,7 @@ fn core_sig_row_atom_at(bytes: [U8], start: Int) -> CoreSigRowType Never! {
 fn core_platform_fixed_signature(module_name: String, member: String) -> CoreTypedCallSignature? {
     rows :: """
 core.auth __state_load - [u8]
-core.auth __state_replace [u8],[u8] Bool
+core.auth __state_replace [u8],^[u8] Bool
 core.files __read_bytes_os String Result<[u8],IOError>
 core.files __write_bytes_os|__append_bytes_os String,[u8] Result<Unit,IOError>
 core.files __create_dirs_os String Result<Unit,IOError>
@@ -253,31 +267,10 @@ core.process __stdout_line_bytes ProcessStdoutStream Result<[u8],IOError>
 core.process __stderr_line_bytes ProcessStderrStream Result<[u8],IOError>
 core.net __unix_connect_host String Result<UnixStream,NetError>
 core.net __unix_connect_deadline_host String,Duration Result<UnixStream,NetError>
-core.net.tls __client_stream ^TCPStream,String Result<TLSStream,IOError>
-core.net.tls __client_deadline ^TCPStream,String,Duration Result<TLSStream,NetError>
-core.net.tls __client_config_deadline ^TCPStream,String,TLSClientConfig,Duration Result<TLSStream,NetError>
-core.http.server __serve String,HTTPMux,HTTPServerTLS?,Duration? Result<Unit,HTTPError>
-core.http.server __bind String,HTTPMux,HTTPServerTLS?,Duration? Result<HTTPServer,HTTPError>
-core.http.server __static_files HTTPMux,String,String,Bool?,Bool?,Bool? Unit
-core.http.server __middleware HTTPMux,^fn(HTTPHandler;HTTPHandler) Unit
 core.http __router - HTTPRouter
-core.http __parse String HTTPRequest
 core.http __dispatch HTTPRouter,HTTPRequest Result<HTTPResponse,HTTPError>
-core.net.tls __read &TLSStream,Int Result<[u8],IOError>
-core.net.tls __write &TLSStream,[u8] Result<Int,IOError>
-core.net.tls __write_all &TLSStream,[u8] Result<Unit,IOError>
 core.net.ws __connect String Result<WsConn,WsError>
 core.net.ws __upgrade HTTPRequest Result<WsConn,WsError>
-core.http.client __get String Result<HTTPResponse,HTTPError>
-core.http.client __post String,String Result<HTTPResponse,HTTPError>
-core.http.client __request String,String HTTPRequest
-core.http.server __mux - HTTPMux
-core.http.server __serve_once String,HTTPMux Result<Unit,HTTPError>
-core.http.server __serve_once_listener TCPListener,HTTPMux Result<Unit,HTTPError>
-core.http.server __static_file String,String Result<HTTPResponse,HTTPError>
-core.http.server __static_file_range HTTPRequest,String,String Result<HTTPResponse,HTTPError>
-core.http.server __cors HTTPMux,HTTPCorsPolicy Unit
-core.http.server __request_id HTTPMux Unit
 core.term __stdio_write String,Bool,Bool,Bool String?
 core.term __stdio_bytes [u8],Bool,Bool String?
 core.term __stdio_flush Bool String?
@@ -369,33 +362,7 @@ core.web __openapi_inputs HTTPRouter Result<[OpenApiRouteInput],String>
 core.web __openapi_render ^[OpenApiRouteInput],^String,^String,^[OpenApiServer] Result<String,String>
 core.web __contract_stop String Never
 core.web __live_stats_snapshot - (queries:Int,active:Int,refreshing:Int,evictions:u64,invalidations:u64,ws_pushes:u64)?
-core.web.store __transact WebStore<T>,^String,^[String],^fn(T;()) WebStoreTransaction<T> T
 core.web.store __facts_snapshot WebStore<T> (generation:u64,cursor:u64,history_length:Int,history_limit:Int,event_length:Int,history_enabled:Bool) T
-core.web.table __columns WebTable<T> [WebTableColumn<T>] T
-core.web.table __replace_columns WebTable<T>,^[WebTableColumn<T>] WebTable<T> T
-core.web.table __state WebTable<T> WebTableState T
-core.web.table __set_state WebTable<T>,^WebTableState - T
-core.web.table __alias WebTable<T> WebTable<T> T
-core.web.table __has_loader WebTable<T> Bool T
-core.web.table __invoke_loader WebTable<T>,^WebTableState Result<WebTablePage<T>,String> T
-core.web.table __generation WebTable<T>,^Bool u64 T
-core.web.table __query_facts WebTableState (index:Int,size:Int,server:Bool,sort:(column:String,descending:Bool)?,filter:(column:String,value:String)?)
-core.web.table __state_equal WebTableState,WebTableState Bool
-core.web.table __page_facts WebTablePage<T> (total:Int,index:Int,size:Int,count:Int,rows:Int,keys:Int) T
-core.web.table __commit_keys WebTable<T>,WebTablePage<T>,^fn(Int,[String];Result<(),String>) Result<(),String> T
-core.web.table __loading_store WebTable<T>,^Bool - T
-core.web.table __error_store WebTable<T>,^String - T
-core.web.table __page_store WebTable<T>,^WebTablePage<T>? - T
-core.web.table __state_store WebTable<T>,^WebTableState - T
-core.web.table __has_key WebTable<T> Bool T
-core.web.table __page_accessor_keys WebTable<T>,^WebTablePage<T> WebTablePage<T> T
-core.web.table __page_keys WebTablePage<T> [String] T
-core.web.table __page_replace_keys ^WebTablePage<T>,^[String] WebTablePage<T> T
-core.web.table __column_info WebTableColumn<T> (name:String,cell_type:String) T
-core.web.table __cell WebTableColumn<T>,T String T
-core.web.table __rows WebTable<T> [T] T
-core.web.table __row_key WebTable<T>,T String T
-core.web.table __make_page ^[T],^[String],^Int,^Int,^Int,^Int WebTablePage<T> T
 core.files __walk_context String,String,Bool Int
 core.files __walk_close|__walk_matcher_new Int Unit
 core.files __walk_validation_path Int,Int Int
@@ -478,6 +445,7 @@ core.net socket_host|socket_to_string SocketAddr String
 core.net socket_port SocketAddr Int
 core.net tcp_listen_addr|__tcp_listen_addr SocketAddr Result<TCPListener,NetError>
 core.net tcp_accept|__tcp_accept TCPListener Result<TCPStream,NetError>
+core.net __tcp_fd TCPStream Int
 core.net tcp_connect|__tcp_connect String Result<TCPStream,NetError>
 core.net tcp_connect_addr|__tcp_connect_addr SocketAddr Result<TCPStream,NetError>
 core.net tcp_connect_timeout|__tcp_connect_timeout SocketAddr,Int Result<TCPStream,NetError>
@@ -506,7 +474,7 @@ core.net ttl|__ttl TCPStream Result<Int,NetError>
 core.net set_ttl|__set_ttl &TCPStream,Int Result<Unit,NetError>
 core.net socket_type TCPStream String
 core.net sendfile &TCPStream,String Result<Int,NetError>
-core.net tcp_reply|__tcp_reply ^TCPStream,String,String Result<Unit,NetError>
+core.net tcp_reply ^TCPStream,String,String Result<Unit,NetError>
 core.net udp_bind|__udp_bind String Result<UDPSocket,NetError>
 core.net udp_bind_addr|__udp_bind_addr SocketAddr Result<UDPSocket,NetError>
 core.net udp_local_addr|__udp_local_addr UDPSocket Result<SocketAddr,NetError>
@@ -567,10 +535,11 @@ core.http get String Result<HTTPResponse,HTTPError>
 core.http post String,String Result<HTTPResponse,HTTPError>
 core.http.server bind String,HTTPMux,HTTPServerTLS?,Duration? Result<HTTPServer,HTTPError>
 core.http.server serve String,HTTPMux,HTTPServerTLS?,Duration? Result<Unit,HTTPError>
+core.http.server static_files HTTPMux,String,String,Bool?,Bool?,Bool? Unit
 core.regex flags Bool,Bool,Bool RegexFlags
 core.regex escape String String
-core.regex compile String Result<Regex,String>
-core.regex compile_with String,RegexFlags Result<Regex,String>
+core.regex compile|regex String Result<Regex,RegexError>
+core.regex compile_with String,RegexFlags Result<Regex,RegexError>
 core.regex is_match|full_match|fullmatch Regex,String Bool
 core.regex match|search Regex,String Match?
 core.regex find Regex,String String?
@@ -615,21 +584,11 @@ core.game.raylib gamepad_down|__gamepad_down Int,String Bool
 core.game.raylib gamepad_axis|__gamepad_axis Int,String Float
 core.game.raylib load_texture_atlas|__load_texture_atlas String RaylibTextureAtlas
 core.game.raylib draw_sprite|__draw_sprite RaylibTextureAtlas,String,Int,Int -
-core.db open|__open String DBConnection
-core.db open_memory|__open_memory - DBConnection
-core.db pool|__pool String,Int Result<DBPool,DBError>
-core.db policy|__policy String,String Result<RowPolicy,DBError>
-core.db policy_audit|__policy_audit DBScope String
 core.db row_value [String:DBValue],String Result<DBValue,DBError>
 core.db row_int [String:DBValue],String Result<Int,DBError>
 core.db row_float [String:DBValue],String Result<Float,DBError>
 core.db row_text [String:DBValue],String Result<String,DBError>
 core.db row_bool [String:DBValue],String Result<Bool,DBError>
-core.db transaction|__transaction|migrate|__migrate DBScope,String,[SQL] Result<Int,DBError>
-core.db __queue_raw_open String u64
-core.db __queue_raw_close|__queue_raw_begin|__queue_raw_commit|__queue_raw_rollback u64 Bool
-core.db __queue_raw_execute u64,String,[DBValue] Result<Int,DBError>
-core.db __queue_raw_query u64,String,[DBValue] Result<[[String:DBValue]],DBError>
 core.jobs __publish_parts Int,String,String,String,String Unit
 core.jobs __sleep_ms Int Unit
 core.files __create_dir_all_raw String Result<Unit,IOError>

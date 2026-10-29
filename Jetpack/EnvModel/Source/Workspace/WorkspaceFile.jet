@@ -17,6 +17,30 @@
 //   E0995: the file has no `module workspace { … }` body
 //   E0996: `members:` evaluated to something other than a list of strings
 //   E0997: `find("…")` in `members:` points at a missing directory
+use jet_pkg_model.[
+    AuthorityError,
+    AuthorityResolver,
+    ComptimeInput,
+    OverlayError,
+    OverlayPolicy,
+    WorkspaceDeclarationCache,
+    WorkspacePlan,
+    WorkspacePlanMember,
+    WorkspaceSource,
+    WorkspaceSourceRole,
+    pkg_e0995_no_workspace_module,
+    pkg_parse_workspace_policy,
+    pkg_sha256_hex,
+    pkg_strip_overlay_policy,
+]
+use jet_foundation.[
+    CtValue, Diagnostic, Expr, Func, Item, ModuleDecl, Span, comptime_walk_calls,
+    diagnostic_from_registry, expr_span,
+]
+use jet_lexer.[lex]
+use jet_parser.[parse_lexed_with_source, parser_line_starts]
+use jetpack_foundation.[BUILTIN_FIND, NS_WORKSPACE, PACKAGE_FILE]
+use core.files as files
 
 // A workspace source and the plan evaluated from its still-open snapshot.
 struct WorkspaceSnapshot {
@@ -69,7 +93,7 @@ fn envmodel_workspace_load_checked_with_resolver(cache: &WorkspaceDeclarationCac
     source :: resolved ?? return Ok(None)
     resolver.revalidate_source(source)
     if source.role != WorkspaceSourceRole.Index -> return Ok(None)
-    Ok(Val(envmodel_workspace_load_checked_source(resolver, source)))
+    Ok(Val(envmodel_workspace_load_checked_source(resolver, ^source)))
 }
 
 // Evaluate an index from the same checked source snapshot selected by a
@@ -88,7 +112,7 @@ fn envmodel_workspace_load_checked_source(resolver: AuthorityResolver, expected:
 // Project Package membership into the historical workspace-plan read model.
 // The Package parser and checked member resolver remain the sole authority;
 // this is a view for callers that still need member ordering/selection.
-fn envmodel_workspace_evaluate_package_source(source: WorkspaceSource, resolver: AuthorityResolver) -[FS]> WorkspacePlan EnvModelEvalError! {
+fn envmodel_workspace_evaluate_package_source(source: WorkspaceSource, resolver: AuthorityResolver) -[FS, Env]> WorkspacePlan EnvModelEvalError! {
     package :: resolver.checked_package(".")
     checked_members :: package.facts.checked_members_in(resolver, package.member.directory)
     members := [WorkspacePlanMember]{}
@@ -293,7 +317,7 @@ struct WorkspaceMemberIdentity {
 
 // Membership law: member paths are physical identities inside the root,
 // names are unique, and a member cannot introduce another member list.
-fn envmodel_workspace_validate_member_path(rel_path: String, resolver: AuthorityResolver, members: [WorkspacePlanMember], span: Span?) -[FS]> WorkspaceMemberIdentity EnvModelEvalError! {
+fn envmodel_workspace_validate_member_path(rel_path: String, resolver: AuthorityResolver, members: [WorkspacePlanMember], span: Span?) -[FS, Env]> WorkspaceMemberIdentity EnvModelEvalError! {
     if envmodel_workspace_escapes_root(rel_path) {
         return Err(envmodel_error(
             "E1322",
@@ -387,7 +411,7 @@ fn envmodel_workspace_eval_members_expr(expr: Expr, src: String, base_dir: Strin
     // manifest helper is separate from comptime `find(glob) -> [String]`,
     // which records matched file hashes for ordinary Jet comptime bindings.
     if expr == {
-        .Call(call) && call.name == BUILTIN_FIND -> {
+        .Call(call, _) && call.name == BUILTIN_FIND -> {
             span :: call.name_span
             if call.args.len() == 0 {
                 return Err(envmodel_error(
@@ -434,7 +458,10 @@ fn envmodel_workspace_member_path_string(value: CtValue) -> String? Never! {
     if value == {
         .Str(text) -> Val(text)
         .Present(inner) -> envmodel_workspace_member_path_string(inner)
-        .Bytes(bytes) -> String.from_bytes(bytes)
+        .Bytes(bytes) -> if String.from_bytes(bytes) == {
+            .Ok(text) -> Val(text)
+            .Err(_) -> None
+        }
         else -> None
     }
 }
@@ -442,7 +469,7 @@ fn envmodel_workspace_member_path_string(value: CtValue) -> String? Never! {
 // A plain string literal with no interpolation.
 fn envmodel_workspace_literal_string(expr: Expr) -> String? Never! {
     parts :: if expr == {
-        .Str(literal_parts, _) -> literal_parts
+        .Str(literal_parts, _, _) -> literal_parts
         else -> { return None }
     }
     text := [String]{}
@@ -485,7 +512,7 @@ fn envmodel_workspace_string_list(value: CtValue, span: Span) -> [String] EnvMod
 
 // ── find("./dir"): package discovery ──
 
-fn envmodel_workspace_validate_find_scan_dir(raw: String, resolver: AuthorityResolver, span: Span) -[FS]> String EnvModelEvalError! {
+fn envmodel_workspace_validate_find_scan_dir(raw: String, resolver: AuthorityResolver, span: Span) -[FS, Env]> String EnvModelEvalError! {
     if raw == "" || envmodel_workspace_escapes_root(raw) {
         return Err(envmodel_error(
             "E1322",
@@ -508,7 +535,7 @@ fn envmodel_workspace_validate_find_scan_dir(raw: String, resolver: AuthorityRes
 // `Path::strip_prefix("./")`: drop one leading `.` component, else unchanged.
 fn envmodel_workspace_strip_cur_dir(raw: String) -> String Never! {
     components :: envmodel_path_components(raw)
-    if components.len() == 0 || components[0] != EnvPathComponent.CurDir -> return raw
+    if components.len() == 0 || components[0] != EnvPathComponent.CurDir -> return raw.copy()
     rest := [String]{}
     loop component in components {
         if component == .Normal(segment) -> &rest.push(segment)
@@ -518,7 +545,7 @@ fn envmodel_workspace_strip_cur_dir(raw: String) -> String Never! {
 
 // Immediate subdirectories of `scan_dir` holding a canonical `package.jet`,
 // as workspace-relative paths in the resolver's deterministic order.
-fn envmodel_workspace_find_package_dirs(scan_dir: String, resolver: AuthorityResolver, span: Span) -[FS]> [String] EnvModelEvalError! {
+fn envmodel_workspace_find_package_dirs(scan_dir: String, resolver: AuthorityResolver, span: Span) -[FS, Env]> [String] EnvModelEvalError! {
     discovered :: if resolver.discover_members(scan_dir) == {
         .Ok(found) -> found
         .Err(error) -> { return Err(envmodel_workspace_authority_error(error, Val(span))) }

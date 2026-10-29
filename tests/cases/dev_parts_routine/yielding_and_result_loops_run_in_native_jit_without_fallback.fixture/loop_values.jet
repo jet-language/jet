@@ -1,0 +1,115 @@
+fn find(xs: [Int]) -> Int {
+    found :: loop {
+        loop x in xs {
+            if x > 2 -> break(found, x)
+        }
+        break -1
+    }
+    found
+}
+
+fn outer_result() -> Int {
+    result :: loop {
+        ignored :: loop {
+            break(result, 9)
+        }
+        break 0
+    }
+    result
+}
+
+fn identity(value: Int) -> Int { value }
+
+fn nested_binary_exit() -> Int {
+    result :: loop {
+        ignored :: (loop {
+            break(result, 11)
+            break 1
+        }) + 2
+        break 0
+    }
+    result
+}
+
+fn nested_call_exit() -> Int {
+    result :: loop {
+        ignored :: identity(loop {
+            break(result, 12)
+            break 1
+        })
+        break 0
+    }
+    result
+}
+
+fn nested_condition_exit() -> Int {
+    result :: loop {
+        if (loop {
+            break(result, 13)
+            break 1
+        }) > 0 {
+            break 0
+        }
+        break -1
+    }
+    result
+}
+
+fn counted_init_exit() -> Int {
+    result :: loop {
+        loop i := (loop {
+            break(result, 14)
+            break 0
+        }), i < 1 {
+            i += 1
+        }
+        break 0
+    }
+    result
+}
+
+fn counted_step_exit() -> Int {
+    result :: loop {
+        loop i := 0, i < 2 {
+            i = (loop {
+                break(result, 15)
+                break 0
+            })
+        }
+        break 0
+    }
+    result
+}
+
+fn value_if_exit() -> Int {
+    result :: loop {
+        ignored :: if true -> {
+            break(result, 16)
+            0
+        } else -> 0
+        break 0
+    }
+    result
+}
+
+fn run() {
+    xs :: [Int]{ 1, 2, 3, 4 }
+    doubled :: loop x in xs -> x * 2
+    outer :: loop x in xs {
+        ignored :: loop {
+            if x == 1 -> next(outer)
+            if x == 2 -> break(outer)
+            break 0
+        }
+        print(ignored)
+    }
+    print(find(xs))
+    print(doubled)
+    print(outer_result())
+    print(nested_binary_exit())
+    print(nested_call_exit())
+    print(nested_condition_exit())
+    print(counted_init_exit())
+    print(counted_step_exit())
+    print(value_if_exit())
+}

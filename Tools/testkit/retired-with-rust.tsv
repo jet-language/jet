@@ -8,7 +8,6 @@ tests/cases/allocator_families/try_allocation_example_reports_exhaustion_as_a_va
 tests/cases/build_entry/build_entry_program_runs_the_same_on_every_tier.case	Retired with Rust: build/run/exit/stdout/stderr assertions are guarded by rustc availability.
 tests/cases/cffi/concurrent_processes_share_one_bridge_build_per_key.case	PRODUCT INTEROP RED: mandatory native user Rust bridge concurrency acceptance; not retired.
 tests/cases/cffi/unresolvable_crate_reports_the_same_e0704_on_run_and_build.case	PRODUCT INTEROP RED: mandatory native user Rust resolution error acceptance; not retired.
-tests/cases/cli_parts_expand/plugin_missing_wasm_tools_is_e1259.case	Retired with Rust: requires rustc for the plugin Wasm toolchain scenario.
 tests/cases/cli_parts_surface/target_equals_and_space_forms_match_for_build_run_and_dev.case	Retired with Rust: requires rustc for target spelling coverage.
 tests/cases/comptime_cli_parity/command_override_examples_match_aot_default_run_and_interpreter.case	Retired with Rust: requires rustc for command override tier coverage.
 tests/cases/failure_tier_parity/core_net_error_conversion_renders_in_resident_jit.case	Retired with Rust: AOT error conversion assertions are guarded by rustc availability.
@@ -25,7 +24,7 @@ tests/cases/release_gates/ga_feature_size_budgets.case	Retired with Rust: requir
 tests/cases/release_gates/small_profile_binary_is_smaller_than_default.case	Retired with Rust: requires rustc for Rust-linked profile size comparisons.
 tests/cases/run_entry/module_globals_and_explicit_run_keep_statement_order.case	Retired with Rust: AOT statement-order assertions are guarded by rustc availability.
 tests/cases/run_entry/typed_entry_error_pins_the_declared_family.case	Retired with Rust: AOT typed-entry assertions are guarded by rustc availability.
-tests/cases/tir_core_and_closures/parallel_collection_adapters_work_in_imported_modules.case	Retired with Rust: requires rustc for imported parallel adapter coverage.
+tests/cases/core_and_closures/parallel_collection_adapters_work_in_imported_modules.case	Retired with Rust: requires rustc for imported parallel adapter coverage.
 tests/cases/web_build/jet_cli_explicit_native_target_runs_web_default_natively.case	Retired with Rust: requires rustc and explicitly executes rustc -vV.
 tests/cases/web_build/jet_cli_html_marker_missing_file_is_an_error.case	Retired with Rust: requires rustc for Web HTML marker diagnostics.
 tests/cases/web_build/jet_cli_html_marker_rejects_absolute_path.case	Retired with Rust: requires rustc for Web HTML absolute-path diagnostics.
@@ -38,6 +37,31 @@ tests/cases/web_build/jet_cli_uses_explicit_html_marker.case	Retired with Rust: 
 tests/cases/web_build/jet_cli_web_build_succeeds.case	Retired with Rust: requires rustc for the former Web build pipeline.
 tests/cases/web_build/web_build_publishes_maps_and_release_omits_them.case	Retired with Rust: requires rustc for Web build source-map profiles.
 tests/cases/web_dev/tanstack_start_dev_reference_loop_recovers_last_good_browser_state.case	Retired with Rust: requires rustc for the previous browser reference loop.
-Compiler/JetBackend/Tests/AllpartsSeed.jet	Retired with Rust: emit-allparts-runtime.mjs:20 tests jet emit --rust and the Rust runtime source emitter being deleted.
-Compiler/JetBackend/Tests/CoreParentSeedFixtures.jet	Retired with Rust: test-core-parent-seed.mjs:39-55 splices Bootstrap/Host/Native.rs and compiles the splice with rustc.
-Compiler/JetBackend/Tests/FrontFeed.jet	Retired with Rust: run-front-feed.mjs and FrontFeed.jet:439-447 use a Rust-front differential oracle; owner directive 38 retires Rust as an oracle.
+tests/tir_collections_and_methods.rs::card_2269_wordfreq_source_uses_ascii_whitespace_scan	asserts only substrings of the generated Rust (Rust-backend codegen shape); no Jet-observable expectation
+tests/selfhost_terminators.rs::jet_policy_matches_bounded_reference_and_downstream_parser	Retired with Rust: differential against the Rust reference lexer/parser through the Rust TerminatorDriver hook; Jet's lexer is the only lexer now.
+tests/selfhost_terminators.rs::scoped_candidate_reaches_overlay_loader_parser_and_checked_mir	Retired with Rust: observes the Rust loader calling an injected TerminatorDriver callback; no Jet driver-injection seam exists.
+tests/selfhost_terminators.rs::callback_evaluator_and_event_abi_failures_are_not_reference_fallbacks	Retired with Rust: failure modes of the Rust TerminatorDriver callback/MirValue event ABI, which left with the Rust lexer.
+tests/selfhost_terminators.rs::scoped_driver_restores_outer_candidate_after_nested_unwind	Retired with Rust: Rust thread-local driver scope and catch_unwind restoration; no Jet counterpart.
+tests/selfhost_terminators.rs::six_policy_mutations_are_killed_through_candidate_event_application	Retired with Rust: mutation injection applied through the Rust candidate-event hook against the Rust reference lexer.
+tests/golden.rs::host_timing_oracles_reject_receipt_and_non_timing_drift	Retired with Rust: tolerance oracle inside the Rust golden harness (cargo test); the Jet golden runner Tools/testkit/Golden.jet compares exact streams and has no timing oracle to test.
+tests/golden.rs::audit_region_check_rejects_a_missing_sentry	Retired with Rust: checks generated Rust text for jet_mem::jet_sentry_scope calls per #Unsafe region; the native backend emits no Rust.
+tests/golden.rs::audit_region_source_scan_uses_jet_strings_and_markers	Retired with Rust: helper of the Rust golden harness audit that pairs #Unsafe regions with generated-Rust sentries; nothing consumes the scan without that Rust output.
+tests/build_sandbox.rs::native_windows_appcontainer_hermetic_build_allows_declared_output	Retired with Rust: Windows AppContainer sandbox; Windows support is frozen and Jet has no AppContainer backend.
+tests/build_sandbox.rs::native_windows_appcontainer_hermetic_build_rejects_host_write	Retired with Rust: Windows AppContainer sandbox; Windows support is frozen and Jet has no AppContainer backend.
+tests/jetpack_services.rs::production_catalog_service_worker	Retired with Rust: #[ignore] cargo re-exec worker for the Rust catalog test; Jetpack/CLI/Tests/ServicesCatalogProcess.jet runs the catalog plans directly.
+tests/allocator_families.rs::arena_bump_and_slab_have_distinct_aligned_drop_and_retention_laws	Retired with Rust: rustc-compiled harness over the Rust jet_mem JetArena/JetBump/JetPool crate types.
+tests/allocator_families.rs::fault_scheduler_reaches_allocator_try_alloc	Retired with Rust: rustc-compiled harness over the Rust jet_fault scheduler and jet_mem::JetFixed.
+tests/allocator_families.rs::program_allocator_kernel_caps_fallible_allocations	Retired with Rust: rustc-compiled harness over the Rust JetProgramAllocator GlobalAlloc impl.
+tests/allocator_families.rs::hosted_allocator_reservations_are_cumulative_and_released	Retired with Rust: rustc-compiled harness over the Rust host program allocator reservation API.
+tests/auto_derive_policy.rs::complex_unit_literals_use_registered_native_root_with_prefix	Retired with Rust: asserts generated Rust text (runtime::JetComplex) from the Rust AOT emitter.
+tests/auto_derive_policy.rs::checked_dkim_config_uses_the_native_head_with_any_root_prefix	Retired with Rust: asserts generated Rust text (jet_email::DkimConfig) from the Rust AOT emitter.
+tests/auto_derive_policy.rs::view_materialization_borrows_the_source_at_the_kernel_boundary	Retired with Rust: asserts borrow shape of generated Rust jet_view_copy calls from the Rust AOT emitter.
+tests/ban_jetpack_unwrap_expect.rs::jetpack_production_has_no_unwrap_or_expect	Retired with Rust: lexical scan of the Rust crate crates/jetpack/src for unwrap()/expect(); that crate is deleted and Jetpack is Jet source, which has no unwrap/expect methods.
+tests/ban_jetpack_unwrap_expect.rs::scanner_detects_production_and_seeded_gate_failure	Retired with Rust: self-test of the Rust-token scanner behind the crates/jetpack/src unwrap/expect ban; nothing scans Rust once that crate is gone.
+tests/corelib_parts/runtime.rs::native_backend_stop_and_euclid_exports	links a Rust driver (tests/fixtures/runtime_c_abi_driver.rs) against the generated Rust runtime rlib; Rust-backend C-ABI only
+tests/corelib_parts/email.rs::core_email_smtp_reply_parser_bounds_and_tls_auth_order_are_real	unit-tests the Rust runtime prelude crates/jet-codegen/src/Prelude/CoreLib/Email.rs (jet_email SMTP state machine) in-process; that Rust runtime goes with Rust
+tests/corelib_parts/email.rs::core_email_smtp_transaction_starttls_auth_rcpt_and_data_are_real	unit-tests the Rust runtime prelude crates/jet-codegen/src/Prelude/CoreLib/Email.rs (jet_email SMTP state machine) in-process; that Rust runtime goes with Rust
+tests/corelib_parts/email.rs::core_email_smtp_transaction_require_all_and_delivery_unknown_are_honest	unit-tests the Rust runtime prelude crates/jet-codegen/src/Prelude/CoreLib/Email.rs (jet_email SMTP state machine) in-process; that Rust runtime goes with Rust
+tests/corelib_parts/net.rs::core_net_dns_platform_resolver_parsers_accept_native_fixtures	unit-tests the Rust runtime prelude crates/jet-codegen/src/Prelude/CoreLib/Top/DNSResolverPolicy.rs parsers in-process; that Rust runtime goes with Rust
+tests/corelib_parts/net.rs::core_net_dns_platform_resolver_parsers_reject_noise_and_malformed_entries	unit-tests the Rust runtime prelude crates/jet-codegen/src/Prelude/CoreLib/Top/DNSResolverPolicy.rs parsers in-process; that Rust runtime goes with Rust
+tests/encoding_edition.rs::lifecycle_marker_metadata_erases_before_web_codegen	asserts substrings of the generated web Rust (wasm_rust) and its JS glue from in-process compile_web_with_path; generated-Rust shape

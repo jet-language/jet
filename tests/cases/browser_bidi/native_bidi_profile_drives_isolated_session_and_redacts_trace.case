@@ -1,0 +1,25 @@
+# tests/browser_bidi.rs::native_bidi_profile_drives_isolated_session_and_redacts_trace at tests/browser_bidi.rs:936; hand-port (mock BiDi endpoint: tests/fixtures/browser_bidi_mock.mjs on a {free-port}; the program is tests/fixtures/browser_bidi.jet (include_str!))
+fixture: native_bidi_profile_drives_isolated_session_and_redacts_trace.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+requires: tool:node
+write: browser_bidi.jet native_bidi_profile_drives_isolated_session_and_redacts_trace.fixture/run.template
+step: jet build browser_bidi.jet
+exit: 0
+session mock raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:mock} mock.json
+sleep: 500ms
+step run: built
+exit: 0
+stdout: ~ "abilities:true:true:bidi-2025.5" # original predicate: stdout.contains
+stdout: ~ "event:log.entryAdded" # original predicate: stdout.contains
+stdout: ~ "raw:{\"message\":\"ready\",\"ready\":true}" # original predicate: stdout.contains
+stdout: ~ "cdp:{}" # original predicate: stdout.contains
+stdout: ~ "trace:" # original predicate: stdout.contains
+stdout: ~ ":true:" # original predicate: stdout.contains
+stdout: !~ "TOP_SECRET" # original predicate: !stdout.contains
+stdout: !~ "SECRET PAGE DATA" # original predicate: !stdout.contains
+close mock
+exit: 0 # original server.join().unwrap(): the mock thread finished without a panic
+stdout: = native_bidi_profile_drives_isolated_session_and_redacts_trace.1.out # original assert_eq!(server.join().unwrap(), [..])

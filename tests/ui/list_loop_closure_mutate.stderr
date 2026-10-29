@@ -1,0 +1,8 @@
+Error [E0507]: While the loop is reading `v`, nothing may change it
+  --> list_loop_closure_mutate.jet:5:9
+    |
+  5 |         grow(x)
+    |         ^^^^
+ Why: The loop reads `v` across its body, so calling `grow`, which writes `v` through its capture, can change the visited domain, element order, or termination.
+ Fix: Choose the collection intent explicitly: use a separate result when the original traversal should stay unchanged; snapshot `v` and iterate the fixed original set when only the original values belong in the traversal; or use an explicit work queue when newly added values should be visited. Do not use index traversal unless its fixed domain and result meaning are intended.
+More: jet-lang.dev/e/E0507

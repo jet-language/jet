@@ -9,14 +9,12 @@ use jet_foundation.[
     FunctionDefaultRef,
     ParamZone,
     Span,
-    TExpr,
-    TExprKind,
     TFailureCarrier,
-    THandleOp,
     Type,
     type_identity_equal,
     core_source_owns_type,
     type_name,
+    core_identity_module,
 ]
 
 struct SemaCallGeometryTransformParts {
@@ -30,7 +28,7 @@ struct SemaCallGeometryTransformParts {
 fn sema_geometry_nominal_leaf(name: String) -> String Never! {
     if !core_source_owns_type(name) -> return name.copy()
     parts :: name.split("::").to_list()
-    if parts.len() >= 2 && parts[parts.len() - 2] == "Core/math/math.jet" -> return parts[parts.len() - 1].copy()
+    if parts.len() >= 2 && core_identity_module(name) == (Val("core.math")) -> return parts[parts.len() - 1].copy()
     name.copy()
 }
 
@@ -301,11 +299,10 @@ fn sema_call_try_geometry(receiver: Expr, receiver_value: TExpr, method: String,
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
-
 #Test("Geometry declaration identity matches only source-owned Core nominals") {
-    owner :: "<corelib>/Core/math::Core/math/math.jet::ScreenPoint"
+    owner :: "<corelib>/core.math::ScreenPoint"
     assert_eq(sema_geometry_nominal_leaf(owner), "ScreenPoint")
     assert_eq(sema_geometry_nominal_leaf("user::ScreenPoint"), "user::ScreenPoint")
     restored :: sema_geometry_restore_owner(Type.Result{ok: Type.Apply{name: "Transform", args: [Type]{Type.Named{name: "World"}, Type.Named{name: "Screen"}}}, err: Type.Named{name: "TransformError"}}, Type.Named{name: owner})
-    assert_eq(restored, Type.Result{ok: Type.Apply{name: "<corelib>/Core/math::Core/math/math.jet::Transform", args: [Type]{Type.Named{name: "World"}, Type.Named{name: "Screen"}}}, err: Type.Named{name: "<corelib>/Core/math::Core/math/math.jet::TransformError"}})
+    assert_eq(restored, Type.Result{ok: Type.Apply{name: "<corelib>/core.math::Transform", args: [Type]{Type.Named{name: "World"}, Type.Named{name: "Screen"}}}, err: Type.Named{name: "<corelib>/core.math::TransformError"}})
 }

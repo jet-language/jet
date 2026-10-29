@@ -1,0 +1,19 @@
+# tests/unit_family.rs::rounded_conversion_honors_mode_digits_affinity_and_fallibility at tests/unit_family.rs:678; hand-port
+# Claim: rounding modes/digits/affinity print the Rust-expected 16 values (tests/unit_family.rs:723)
+# Claim: negative digits: exit 1, empty stdout, E3002 error with trail (tests/unit_family.rs:741-tests/unit_family.rs:744)
+# Fixture migrated: negative-digits fixture file kept under name rounded_negative_digits.jet so trail line matches
+# Not ported: Rust `have_rustc()` gate (tests/unit_family.rs:679): obsolete rustc backend gate
+fixture: rounded_conversion_honors_mode_digits_affinity_and_fallibility.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main/main.jet
+exit: 0 # rounding modes/digits/affinity print the Rust-expected 16 values (tests/unit_family.rs:723)
+stdout: = rounded_conversion_honors_mode_digits_affinity_and_fallibility-1.out # rounding modes/digits/affinity print the Rust-expected 16 values (tests/unit_family.rs:723)
+step: jet run negative/rounded_negative_digits.jet
+exit: 1 # rounding modes/digits/affinity print the Rust-expected 16 values (tests/unit_family.rs:723)
+stdout: = "" # rounding modes/digits/affinity print the Rust-expected 16 values (tests/unit_family.rs:723)
+stderr: ~ "Error: rounded unit conversion needs nonnegative digits" # rounding modes/digits/affinity print the Rust-expected 16 values (tests/unit_family.rs:723)
+stderr: ~ "Trail [E3002] (1 hop via ?, origin first):" # rounding modes/digits/affinity print the Rust-expected 16 values (tests/unit_family.rs:723)
+stderr: ~ " 1. run (" # rounding modes/digits/affinity print the Rust-expected 16 values (tests/unit_family.rs:723)
+stderr: ~ "rounded_negative_digits.jet:5)" # rounding modes/digits/affinity print the Rust-expected 16 values (tests/unit_family.rs:723)

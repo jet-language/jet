@@ -1,18 +1,18 @@
 #!/usr/bin/env node
 // D-OPENTABLE1=D: generate the checked-in views of the declarations that have
-// a readable Jet twin.  The declarations stay in Prelude; Rust files are
-// projections and the source hash makes a stale projection a build error.
+// a readable Jet twin. The declarations stay in Compiler/Prelude and
+// Compiler/JetFoundation; --check rejects a stale view.
 //
 // Usage:
 //   node Tools/agent/gen-core-tables.mjs --check
 //   node Tools/agent/gen-core-tables.mjs --write
 //
 // Core module and dispatcher rendering is shared with
-// check-core-surface-ledger.mjs.  This file owns the cross-table cutover and
-// effect projections; it must not grow a second Core parser or renderer.
+// check-core-surface-ledger.mjs. This file checks the effect declarations and
+// owns the collection-operation reference projection; it must not grow a
+// second Core parser or renderer.
 
-import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -22,13 +22,10 @@ import {
   validateGeneratedViews,
   writeCoreViews,
 } from "./check-core-surface-ledger.mjs";
-import { CORE_RECORD_ROWS_PATH, generatedCoreRecordRows } from "./core-record-rows.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const EFFECT_SOURCE_PATH = "crates/jet-codegen/src/Prelude/Effects.jet";
-const EFFECTS_PATH = "crates/jet-foundation/src/Effects.rs";
-const BUILD_EFFECTS_PATH = "crates/jet-foundation/src/BuildEffects.rs";
-const CORE_SOURCE_PATH = "crates/jet-codegen/src/Prelude/Core.jet";
+const EFFECT_SOURCE_PATH = "Compiler/Prelude/Effects.jet";
+const CORE_SOURCE_PATH = "Compiler/Prelude/Core.jet";
 // D-ONE-OPERATIONS1=A: the collection operation rows are authored once in
 // Jet; the Core reference tables are their projection.
 const OPERATIONS_SOURCE_PATH = "Compiler/JetFoundation/Source/Collections.jet";
@@ -36,20 +33,14 @@ const OPERATIONS_DOC_PATH = "Docs/spec/reference/core-library.md";
 const OPERATIONS_BEGIN = "<!-- BEGIN GENERATED COLLECTION OPERATIONS -->";
 const OPERATIONS_END = "<!-- END GENERATED COLLECTION OPERATIONS -->";
 
-const RESERVED_SOURCE_PATH = "crates/jet-foundation/src/Collections.rs";
-const RESERVED_BEGIN = "// BEGIN GENERATED RESERVED TYPES";
-const RESERVED_END = "// END GENERATED RESERVED TYPES";
-const EFFECT_BEGIN = "// BEGIN GENERATED EFFECT DECLARATIONS";
-const EFFECT_END = "// END GENERATED EFFECT DECLARATIONS";
-const BUILD_EFFECT_BEGIN = "// BEGIN GENERATED BUILD EFFECT DECLARATIONS";
-const BUILD_EFFECT_END = "// END GENERATED BUILD EFFECT DECLARATIONS";
-
 // Build authority intentionally remains the existing ten-effect projection.
 // FFI, Browser, and Secret are runtime authority roots, not build grants.
 const BUILD_EFFECT_NAMES = [
   "Net", "FS", "IO", "DB", "Time", "Rand", "Env", "Exec", "Log", "GPU",
 ];
-const INTERNAL_EFFECT_NAMES = ["Panic", "Mem"];
+// The deny-only roots: declared with the rest of the vocabulary, refused by a
+// policy but never granted.
+const DENY_ONLY_ROOT_NAMES = ["Mem", "Panic"];
 
 function file(rel) {
   return path.join(ROOT, rel);
@@ -57,10 +48,6 @@ function file(rel) {
 
 function read(rel) {
   return readFileSync(file(rel), "utf8");
-}
-
-function sha256(source) {
-  return createHash("sha256").update(source).digest("hex");
 }
 
 function fail(message) {
@@ -103,9 +90,9 @@ function parseEffects(source) {
     .filter((declaration) => !declaration.name.includes("."))
     .map((declaration) => declaration.name);
   const rootSet = new Set(roots);
-  for (const internal of INTERNAL_EFFECT_NAMES) {
-    if (rootSet.has(internal)) {
-      fail(`${EFFECT_SOURCE_PATH}: ${internal} is compiler-internal and cannot be declared`);
+  for (const denyOnly of DENY_ONLY_ROOT_NAMES) {
+    if (!rootSet.has(denyOnly)) {
+      fail(`${EFFECT_SOURCE_PATH}: deny-only root ${denyOnly} is not declared`);
     }
   }
   for (const build of BUILD_EFFECT_NAMES) {
@@ -122,13 +109,6 @@ function parseEffects(source) {
     fail(`${EFFECT_SOURCE_PATH}: irreversible declarations must be FS.Write, Net, Exec, and FFI`);
   }
   return { declarations, roots };
-}
-
-function rustName(name) {
-  if (!/^[A-Z][A-Za-z0-9]*$/.test(name)) {
-    fail(`effect root cannot be represented as a Rust variant: ${name}`);
-  }
-  return name;
 }
 
 function replaceSection(source, begin, end, replacement, rel) {
@@ -152,111 +132,6 @@ function readSection(source, begin, end, rel) {
   return source.slice(start, finish + end.length);
 }
 
-function generatedEffects(source, facts) {
-  const hash = sha256(source);
-  const variants = [];
-  for (const root of facts.roots.map(rustName)) {
-    if (root === "FFI") variants.push("Panic");
-    variants.push(root);
-  }
-  if (!variants.includes("Panic")) variants.push("Panic");
-  if (!variants.includes("Mem")) variants.push("Mem");
-  const lines = [
-    EFFECT_BEGIN,
-    `// Source: ${EFFECT_SOURCE_PATH}`,
-    `// Source SHA-256: ${hash}`,
-    'pub const EFFECT_SOURCE: &str = include_str!("../../jet-codegen/src/Prelude/Effects.jet");',
-    "use std::sync::LazyLock;",
-    "",
-    "#[derive(Debug, Clone, Copy, PartialEq, Eq)]",
-    "pub struct EffectDeclaration {",
-    "    pub name: &'static str,",
-    "    pub irreversible: bool,",
-    "}",
-    "",
-    "pub static EFFECT_DECLARATIONS: LazyLock<Vec<EffectDeclaration>> = LazyLock::new(|| vec![",
-  ];
-  for (const declaration of facts.declarations) {
-    lines.push(`    EffectDeclaration { name: "${declaration.name}", irreversible: ${declaration.irreversible} },`);
-  }
-  lines.push("]);", "");
-  lines.push("pub static EFFECT_ROOTS: LazyLock<Vec<&'static str>> = LazyLock::new(|| {");
-  lines.push("    EFFECT_DECLARATIONS");
-  lines.push("        .iter()");
-  lines.push("        .map(|declaration| declaration.name)");
-  lines.push("        .filter(|root| !root.contains('.'))");
-  lines.push("        .collect()");
-  lines.push("});", "");
-
-  lines.push("pub fn effect_declarations() -> &'static [EffectDeclaration] {");
-  lines.push("    EFFECT_DECLARATIONS.as_slice()");
-  lines.push("}", "");
-  lines.push("#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]");
-  lines.push("pub enum Effect {");
-  for (const variant of variants) lines.push(`    ${variant},`);
-  lines.push("}", "", "impl Effect {");
-  lines.push("    pub const fn name(self) -> &'static str {");
-  lines.push("        match self {");
-  for (const variant of variants) lines.push(`            Self::${variant} => "${variant}",`);
-  lines.push("        }", "    }", "");
-  lines.push("    pub fn parse(root: &str) -> Option<Self> {");
-  lines.push("        let canonical = crate::Authority::parse_root(root)?;");
-  lines.push("        if canonical != root {");
-  lines.push("            return None;");
-  lines.push("        }");
-  lines.push("        Some(match canonical {");
-  for (const variant of variants) lines.push(`            "${variant}" => Self::${variant},`);
-  lines.push("            _ => return None,", "        })", "    }");
-  lines.push("", "    pub fn all() -> crate::Authority::Holds {");
-  lines.push("        EFFECT_ROOTS");
-  lines.push("            .iter()");
-  lines.push("            .map(|root| (*root).to_string())");
-  lines.push("            .collect()", "    }");
-  lines.push("}", EFFECT_END);
-  return lines.join("\n");
-}
-
-function generatedBuildEffects(source, facts) {
-  const hash = sha256(source);
-  const lines = [
-    BUILD_EFFECT_BEGIN,
-    `// Source: ${EFFECT_SOURCE_PATH}`,
-    `// Source SHA-256: ${hash}`,
-    "#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]",
-    "pub enum BuildEffect {",
-  ];
-  for (const name of BUILD_EFFECT_NAMES) lines.push(`    ${rustName(name)},`);
-  lines.push("}", "", "impl BuildEffect {");
-  lines.push(`    pub const ALL: [Self; ${BUILD_EFFECT_NAMES.length}] = [`);
-  for (const name of BUILD_EFFECT_NAMES) lines.push(`        Self::${rustName(name)},`);
-  lines.push("    ];", "");
-  lines.push("    pub const fn name(self) -> &'static str {");
-  lines.push("        match self {");
-  for (const name of BUILD_EFFECT_NAMES) lines.push(`            Self::${rustName(name)} => "${name}",`);
-  lines.push("        }", "    }", "");
-  lines.push("    pub const fn flag(self) -> &'static str {");
-  lines.push("        match self {");
-  for (const name of BUILD_EFFECT_NAMES) {
-    lines.push(`            Self::${rustName(name)} => "${name.toLowerCase()}",`);
-  }
-  lines.push("        }", "    }", "");
-  lines.push("    pub fn parse(value: &str) -> Option<Self> {");
-  lines.push("        if value.contains('.') {");
-  lines.push("            return None;");
-  lines.push("        }");
-  lines.push("        let canonical = crate::Authority::parse_root(value)?;");
-  lines.push("        Self::ALL");
-  lines.push("            .into_iter()");
-  lines.push("            .find(|effect| canonical == effect.name())", "    }", "}");
-  // Keep facts as an explicit input to make it impossible to silently emit a
-  // build projection from a source that was parsed but not root-checked.
-  if (!facts.roots.some((root) => BUILD_EFFECT_NAMES.includes(root))) {
-    fail(`${EFFECT_SOURCE_PATH}: no build roots available`);
-  }
-  lines.push(BUILD_EFFECT_END);
-  return lines.join("\n");
-}
-
 function ensureCoreNames() {
   const core = coreSourceFacts();
   if (!core.modules.some((entry) => entry.module === "core.tasks")) {
@@ -266,45 +141,6 @@ function ensureCoreNames() {
     fail(`${CORE_SOURCE_PATH}: retired core.task alias is still declared`);
   }
   return core;
-}
-
-function checkEffects(source, facts) {
-  const expected = generatedEffects(source, facts);
-  const actual = read(EFFECTS_PATH);
-  const projection = readSection(actual, EFFECT_BEGIN, EFFECT_END, EFFECTS_PATH);
-  if (projection !== expected) {
-    fail(`${EFFECTS_PATH} is stale; run --write to regenerate from ${EFFECT_SOURCE_PATH}`);
-  }
-  const expectedBuild = generatedBuildEffects(source, facts);
-  const actualBuild = read(BUILD_EFFECTS_PATH);
-  const buildProjection = readSection(
-    actualBuild,
-    BUILD_EFFECT_BEGIN,
-    BUILD_EFFECT_END,
-    BUILD_EFFECTS_PATH,
-  );
-  if (buildProjection !== expectedBuild) {
-    fail(`${BUILD_EFFECTS_PATH} is stale; run --write to regenerate from ${EFFECT_SOURCE_PATH}`);
-  }
-}
-
-function writeEffects(source, facts) {
-  const effects = replaceSection(
-    read(EFFECTS_PATH),
-    EFFECT_BEGIN,
-    EFFECT_END,
-    generatedEffects(source, facts),
-    EFFECTS_PATH,
-  );
-  writeFileSync(file(EFFECTS_PATH), effects);
-  const buildEffects = replaceSection(
-    read(BUILD_EFFECTS_PATH),
-    BUILD_EFFECT_BEGIN,
-    BUILD_EFFECT_END,
-    generatedBuildEffects(source, facts),
-    BUILD_EFFECTS_PATH,
-  );
-  writeFileSync(file(BUILD_EFFECTS_PATH), buildEffects);
 }
 
 // Collection operation rows: one `CollectionOperationRow{...}` or
@@ -414,79 +250,22 @@ function writeOperationContract() {
   writeFileSync(file(OPERATIONS_DOC_PATH), doc);
 }
 
-// Core record field and struct-literal rows for the Jet compiler, projected
-// from the Rust sema record tables (Tools/agent/core-record-rows.mjs).
-function checkCoreRecordRows() {
-  if (!existsSync(file(CORE_RECORD_ROWS_PATH)) || read(CORE_RECORD_ROWS_PATH) !== generatedCoreRecordRows(ROOT)) {
-    fail(`${CORE_RECORD_ROWS_PATH} is stale; run gen-core-tables.mjs --write`);
-  }
-}
-
-function writeCoreRecordRows() {
-  writeFileSync(file(CORE_RECORD_ROWS_PATH), generatedCoreRecordRows(ROOT));
-}
-// E0106 shares the seed's reserved vocabulary; Core ownership remains a
-// registration fact, not an exception in either table.
-function generatedReservedTypes() {
-  const constants = new Map();
-  const syntax = file("crates/jet-foundation/src/Syntax");
-  for (const name of readdirSync(syntax).filter(name => name.endsWith(".rs"))) {
-    for (const match of readFileSync(path.join(syntax, name), "utf8").matchAll(/pub const (\w+): &str = "([^"]+)";/g)) {
-      constants.set(match[1], match[2]);
-    }
-  }
-  const source = read(RESERVED_SOURCE_PATH);
-  const body = source.match(/pub const RESERVED_TYPES: &\[&str\] = &\[([\s\S]*?)\];/)?.[1];
-  if (!body) fail(`${RESERVED_SOURCE_PATH}: missing RESERVED_TYPES`);
-  const names = body.replace(/\/\/[^\n]*/g, "").split(",").map(value => value.trim()).filter(Boolean).map(value => {
-    if (/^"[^"]+"$/.test(value)) return JSON.parse(value);
-    const key = value.match(/^Syntax::(\w+)$/)?.[1];
-    if (!key || !constants.has(key)) fail(`${RESERVED_SOURCE_PATH}: unresolved reserved type ${value}`);
-    return constants.get(key);
-  });
-  return [RESERVED_BEGIN, `// Source: ${RESERVED_SOURCE_PATH}; regenerate with gen-core-tables.mjs --write`,
-    `SEMA_RESERVED_TYPES :: [String]{${names.map(name => JSON.stringify(name)).join(", ")}}`, RESERVED_END].join("\n");
-}
-
-function checkReservedTypes() {
-  if (readSection(read(OPERATIONS_SOURCE_PATH), RESERVED_BEGIN, RESERVED_END, OPERATIONS_SOURCE_PATH) !== generatedReservedTypes()) {
-    fail(`${OPERATIONS_SOURCE_PATH}: reserved types are stale; run gen-core-tables.mjs --write`);
-  }
-}
-
-function writeReservedTypes() {
-  writeFileSync(file(OPERATIONS_SOURCE_PATH), replaceSection(read(OPERATIONS_SOURCE_PATH),
-    RESERVED_BEGIN, RESERVED_END, generatedReservedTypes(), OPERATIONS_SOURCE_PATH));
-}
-
-
 function check() {
-  const source = read(EFFECT_SOURCE_PATH);
-  const facts = parseEffects(source);
+  parseEffects(read(EFFECT_SOURCE_PATH));
   const core = ensureCoreNames();
-  validatePublicDispatcher(core, publicDispatcherRows());
-  checkEffects(source, facts);
+  validatePublicDispatcher(core, publicDispatcherRows(core));
   checkOperationContract();
-  checkReservedTypes();
-  const coreSource = read(CORE_SOURCE_PATH);
-  validateGeneratedViews(coreSource, core);
-  checkCoreRecordRows();
+  validateGeneratedViews(read(CORE_SOURCE_PATH), core);
   process.stdout.write("open tables: generated views are current\n");
 }
 
 function write() {
-  const source = read(EFFECT_SOURCE_PATH);
-  const facts = parseEffects(source);
+  parseEffects(read(EFFECT_SOURCE_PATH));
   const core = ensureCoreNames();
-  writeEffects(source, facts);
   writeOperationContract();
-  writeReservedTypes();
-  // CoreModuleExports.rs and RingLayer.rs use the existing Core generator;
-  // this coordinator never reimplements that schema.
   writeCoreViews();
-  writeCoreRecordRows();
-  validatePublicDispatcher(core, publicDispatcherRows());
-  process.stdout.write("wrote effect and Core generated views\n");
+  validatePublicDispatcher(core, publicDispatcherRows(core));
+  process.stdout.write("wrote Core generated views\n");
 }
 
 function usage() {
@@ -505,10 +284,3 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     process.exitCode = 1;
   }
 }
-
-export {
-  parseEffects,
-  generatedEffects,
-  generatedBuildEffects,
-  replaceSection,
-};

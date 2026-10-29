@@ -1,10 +1,10 @@
 // Shared native List header geometry and ownership; never Rust Vec layouts.
 // Sequence stops remain the canonical foreign index/capacity stops in Trap.
 // Existing native List ABI (Collections.jet:1-3); holders own their shell.
-DATA_SEQUENCE_BYTES :: prep { I64{24} }
-DATA_SEQUENCE_LENGTH :: prep { I64{0} }
-DATA_SEQUENCE_CAPACITY :: prep { I64{8} }
-DATA_SEQUENCE_DATA :: prep { I64{16} }
+DATA_SEQUENCE_BYTES :: I64{24}
+DATA_SEQUENCE_LENGTH :: I64{0}
+DATA_SEQUENCE_CAPACITY :: I64{8}
+DATA_SEQUENCE_DATA :: I64{16}
 fn data_sequence_new(capacity: I64, stride: I64) -> I64 {
     if (capacity < I64{0} || capacity > I64{9223372036854775807} /% stride) -> rt_seq_capacity_overflow_stop()
     header :: jet_rt_alloc(DATA_SEQUENCE_BYTES, I64{8})

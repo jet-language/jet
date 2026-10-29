@@ -10,8 +10,8 @@
 // identity is the ratified Stat identity the per-platform
 // flags and the unsupported-platform fallback are Core's responsibility.
 
-STORE_PINNED_PRIVATE_MODE :: prep { 0o700 }
-STORE_PINNED_FILE_MODE :: prep { 0o600 }
+STORE_PINNED_PRIVATE_MODE :: 0o700
+STORE_PINNED_FILE_MODE :: 0o600
 
 struct PinnedLifecycleDirectory {
     priv directory: Directory
@@ -56,7 +56,7 @@ struct PinnedLifecycleDirectory {
     // At most `maximum` member names of the held directory.
     fn names(self, maximum: Int) -[FS]> [String] StoreError! {
         names := [String]{}
-        entries :: &self.directory.list()
+        entries :: self.directory.list()
         loop entry in entries {
             if names.len() >= maximum -> break
             &names.push(entry.name)

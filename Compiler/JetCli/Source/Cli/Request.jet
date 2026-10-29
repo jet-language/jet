@@ -9,11 +9,13 @@ use core.files as cli_files
 use core.sys as cli_sys
 use jet_foundation.[
     AppAuthorizedDirectory,
+    BuildOptions,
     AppAuthorizedDirectoryEntry,
     CompilerThreads,
     CompilerTraceSink,
     CORE_SOURCE_OWNED_ROWS,
-    MIRArtifactBuildMode,
+    compiler_take_rows,
+    compiler_transfer_rows,
     foundation_json_quote,
 ]
 use jet_driver.[
@@ -22,41 +24,51 @@ use jet_driver.[
     JetDriverAuthorizedSourceSnapshot,
     JetDriverCompileMode,
     JetDriverBuildEntry,
-    JetDriverBuildInputs,
     JetDriverBuildPath,
     JetDriverBuildInputError,
     JetDriverCompileRequest,
     JetDriverCompileResult,
     JetDriverKeepGoing,
-    JetDriverCompileTarget,
+    JetDriverLoweringInputs,
+    JetDriverLoweringInputsResult,
     JetDriverCoreSource,
+    JetDriverCoreSourceReader,
+    JetDriverComptimeInputLog,
     JetDriverHostFacts,
     JetDriverVerbOutput,
     JET_DRIVER_EXIT_USER_ERROR,
     jet_driver_compile,
-    jet_driver_compile_mir,
     jet_driver_compile_keep_going,
+    jet_driver_lowering_inputs,
+    jet_driver_checked_declarations,
+    jet_driver_c_symbol,
     jet_driver_compile_escaped_failure,
     jet_driver_shared_build_inputs,
     jet_driver_shared_build_http_inputs,
+    jet_driver_core_text_file,
+    JetDriverScriptDependency,
 ]
 use jet_eval.[
+    JetEvalConfig,
+    JetEvalNativeImageReader,
+    JetEvalNativeSession,
     jet_eval_default_config,
+    jet_eval_native_session,
 ]
-use jet_backend.[x64_runtime_library, x64_runtime_export_abi_json, x64_link_runtime_pack]
+use jet_backend.[x64_link_runtime_image, x64_link_runtime_pack]
+use jet_ir.[IRLibraryExportRow, ir_build_library, ir_export_abi_json, ir_opt_options, ir_optimize_module, ir_x64_compile_module, ir_x64_library_object]
+use jet_pkg_model.[BuildStamp, DepSpec, PackageFacts, pkg_lock_load, pkg_manifest_parse, pkg_to_manifest]
 
-// The production CLI and bootstrap observer share the driver's all-phases
-// implementation. A diagnostic trap is a failed compile, never an artifact.
+// The production CLI's compile, under the driver's all-phases collector when
+// JET_KEEP_GOING=1. A diagnostic trap is a failed compile, never an artifact.
 // `trace_sink` traces the keep-going report write (`keepgoing.report`).
-fn jet_cli_compile_request(request: ^JetDriverCompileRequest, emit_rust: Bool, trace_sink: JetCLITraceSink?{None}) -> JetDriverCompileResult {
-    if !jet_cli_keep_going_enabled() {
-        return if emit_rust -> jet_driver_compile(^request) else -> jet_driver_compile_mir(^request)
-    }
+fn jet_cli_compile_request(request: ^JetDriverCompileRequest, trace_sink: JetCLITraceSink?{None}) -> JetDriverCompileResult {
+    if !jet_cli_keep_going_enabled() -> return jet_driver_compile(^request)
     skip := [String]{}
     loop row in (cli_sys.get("JET_KEEP_GOING_SKIP") ?? "").split(",").to_list() {
         if row.trim().len() > 0 -> &skip.push(row.trim())
     }
-    result := jet_driver_compile_keep_going(^request, JetDriverKeepGoing{skip: skip}, emit_rust)
+    result := jet_driver_compile_keep_going(^request, JetDriverKeepGoing{skip: skip})
     if result.keep_going_rows.len() > 0 -> result.complete = false
     if trace_sink == .Val(sink) -> sink.begin("keepgoing.report", "", -1, -1)
     problem :: jet_cli_keep_going_report(result.keep_going_rows)
@@ -65,8 +77,25 @@ fn jet_cli_compile_request(request: ^JetDriverCompileRequest, emit_rust: Bool, t
     result
 }
 
-// JET_KEEP_GOING=1 selects the all-phases collector (here and in the
-// bootstrap native feed, Compiler/Bootstrap/Host/Entry.jet).
+// jet_cli_compile_request for the native executable route: the compile
+// stopped before lowering, with the checked inputs the route builds from
+// (Pipeline `jet_driver_lowering_inputs`), under the same keep-going collector.
+fn jet_cli_lowering_inputs(request: ^JetDriverCompileRequest, trace_sink: JetCLITraceSink?) -> JetDriverLoweringInputsResult {
+    if !jet_cli_keep_going_enabled() -> return jet_driver_lowering_inputs(request, None)
+    skip := [String]{}
+    loop row in (cli_sys.get("JET_KEEP_GOING_SKIP") ?? "").split(",").to_list() {
+        if row.trim().len() > 0 -> &skip.push(row.trim())
+    }
+    front := jet_driver_lowering_inputs(request, Val(JetDriverKeepGoing{skip: skip}))
+    if front.compile.keep_going_rows.len() > 0 -> front.compile.complete = false
+    if trace_sink == .Val(sink) -> sink.begin("keepgoing.report", "", -1, -1)
+    problem :: jet_cli_keep_going_report(front.compile.keep_going_rows)
+    if trace_sink == .Val(sink) -> sink.end("keepgoing.report", front.compile.keep_going_rows.len())
+    if problem != "" -> return JetDriverLoweringInputsResult{compile: jet_driver_compile_escaped_failure(problem), inputs: None}
+    front
+}
+
+// JET_KEEP_GOING=1 selects the all-phases collector.
 fn jet_cli_keep_going_enabled() -> Bool Never! {
     (cli_sys.get("JET_KEEP_GOING") ?? "") == "1"
 }
@@ -82,26 +111,61 @@ fn jet_cli_keep_going_report(rows: [String]) -> String {
     ""
 }
 
-// Packaging uses the ordinary hosted source loader and checked NativeLibrary
-// MIR. The private environment seam is shared with the bootstrap observer;
-// neither Tests.rs factories nor emitted Rust enter object/pack production.
-fn jet_cli_runtime_library(result: ^JetDriverCompileResult, prefix: String) -> JetDriverCompileResult {
+// Appends `rows` to the JET_KEEP_GOING_REPORT census the front end wrote
+// (jet_cli_keep_going_report); the write's failure text, else "".
+fn jet_cli_keep_going_append(rows: [String]) -> String Never! {
+    report :: cli_sys.get("JET_KEEP_GOING_REPORT") ?? return ""
+    text :: rows.join("\n")
+    problem :: jet_cli_trace_append(report, "{text}\n") ?? return ""
+    "cannot append to the compiler failure census `{report}`: {problem}"
+}
+
+// Packaging uses the ordinary hosted source loader: the checked
+// NativeLibrary program (the compile stopped before lowering, without an
+// entry) built as IR from its `#Export(c)` rows (ir_build_library) at O1
+// and written as `{prefix}.o` with its export list and ABI receipt.
+fn jet_cli_runtime_library(front: ^JetDriverLoweringInputsResult, prefix: String, compiler_threads: CompilerThreads) -> JetDriverCompileResult {
+    owned := ^front
+    result := ^owned.compile
     if !result.complete || result.internal_problem != None -> return result
-    program :: result.mir ?? return jet_driver_compile_escaped_failure("the runtime front end returned no checked MIR")
+    checked := ^owned.inputs ?? return jet_driver_compile_escaped_failure("the runtime front end returned no checked inputs")
+    if checked.entry_key != None -> return jet_driver_compile_escaped_failure("runtime feed requires a checked NativeLibrary artifact")
     lifecycle_path :: cli_sys.get("JET_FRONT_LIBRARY_LIFECYCLE") ?? return jet_driver_compile_escaped_failure("runtime packaging requires the lifecycle list")
     lifecycle_text :: cli_files.read(lifecycle_path) ?? return jet_driver_compile_escaped_failure("cannot read runtime lifecycle list: {err}")
-    library :: x64_runtime_library(program, lifecycle_text.split("\n").to_list())
-    if library.object.errors.len() > 0 {
-        cli_files.write("{prefix}.issues", library.object.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime library findings: {err}")
-        return jet_driver_compile_escaped_failure("runtime library lowering failed; see {prefix}.issues")
+    rows :: loop row in checked.c_exports -> IRLibraryExportRow{key: row.key, symbol: jet_driver_c_symbol(row.name)}
+    declarations := jet_driver_checked_declarations(&checked)
+    library := ir_build_library(^checked.functions, checked.decls, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, rows, lifecycle_text.split("\n").to_list())
+    issues := compiler_take_rows<String>(&library.errors)
+    loop failure in library.failures -> &issues.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
+    if issues.len() == 0 {
+        // The memory term is read now: the front end before this holds most of it.
+        threads :: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
+        _ := ir_optimize_module(&library.program, ir_opt_options(1), threads)
+        compiled := ir_x64_compile_module(^library.program, threads)
+        object := ir_x64_library_object(^compiled, library.exports, true)
+        if object.errors.len() == 0 {
+            cli_files.write_bytes("{prefix}.o", object.bytes) ?? return jet_driver_compile_escaped_failure("cannot write runtime object: {err}")
+            // Sorted: `jet run` binary-searches it (Host.jet jet_cli_runtime_exports_mark).
+            symbols := loop row in library.exports -> row.symbol
+            &symbols.sort()
+            cli_files.write("{prefix}.exports", symbols.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime exports: {err}")
+            cli_files.write("{prefix}.abi.json", ir_export_abi_json(library.abis)) ?? return jet_driver_compile_escaped_failure("cannot write runtime ABI: {err}")
+            return jet_cli_runtime_pack(^result, prefix, ^object.bytes)
+        }
+        compiler_transfer_rows<String>(&issues, &object.errors)
     }
-    cli_files.write_bytes("{prefix}.o", library.object.bytes) ?? return jet_driver_compile_escaped_failure("cannot write runtime object: {err}")
-    symbols :: loop row in library.exports -> row.symbol
-    cli_files.write("{prefix}.exports", symbols.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime exports: {err}")
-    cli_files.write("{prefix}.abi.json", x64_runtime_export_abi_json(library.export_abis)) ?? return jet_driver_compile_escaped_failure("cannot write runtime ABI: {err}")
+    cli_files.write("{prefix}.issues", issues.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime library findings: {err}")
+    jet_driver_compile_escaped_failure("runtime library lowering failed; see {prefix}.issues")
+}
+
+// JET_FRONT_RUNTIME_PACK_OUTPUT: links the runtime library object `object`
+// with the platform inputs into the Rust-free runtime pack, and
+// JET_FRONT_RUNTIME_IMAGE_OUTPUT: the pack prelinked at the run base, which
+// `jet run` binds programs to (Image/RuntimePack.jet x64_link_runtime_image).
+fn jet_cli_runtime_pack(result: ^JetDriverCompileResult, prefix: String, object: ^[U8]) -> JetDriverCompileResult {
     if cli_sys.get("JET_FRONT_RUNTIME_PACK_OUTPUT") == .Val(pack_path) {
         names := [String]{"{prefix}.o"}
-        bytes := [[U8]]{library.object.bytes}
+        bytes := [[U8]]{^object}
         loop path in (cli_sys.get("JET_FRONT_RUNTIME_PLATFORM_INPUTS") ?? "").split("\n").to_list() {
             if path.trim() == "" -> next
             input :: cli_files.read_bytes(path) ?? return jet_driver_compile_escaped_failure("cannot read runtime platform input `{path}`: {err}")
@@ -117,6 +181,14 @@ fn jet_cli_runtime_library(result: ^JetDriverCompileResult, prefix: String) -> J
             return jet_driver_compile_escaped_failure("runtime pack linking failed; see {prefix}.pack-issues")
         }
         cli_files.write_bytes(pack_path, linked.bytes) ?? return jet_driver_compile_escaped_failure("cannot write runtime pack: {err}")
+        if cli_sys.get("JET_FRONT_RUNTIME_IMAGE_OUTPUT") == .Val(image_path) {
+            image :: x64_link_runtime_image(pack_path, linked.bytes.copy())
+            if image.errors.len() > 0 {
+                cli_files.write("{prefix}.pack-issues", image.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime image findings: {err}")
+                return jet_driver_compile_escaped_failure("runtime image linking failed; see {prefix}.pack-issues")
+            }
+            cli_files.write_bytes(image_path, image.bytes) ?? return jet_driver_compile_escaped_failure("cannot write runtime image: {err}")
+        }
     }
     result
 }
@@ -124,17 +196,14 @@ fn jet_cli_runtime_library(result: ^JetDriverCompileResult, prefix: String) -> J
 // Names the Jet toolchain source tree: the directory that holds `Core/`. The
 // Rust host embeds those bodies; the Jet host reads them from this tree.
 JET_CLI_TOOLCHAIN_ROOT_ENV :: "JET_TOOLCHAIN_ROOT"
-// This compiler's identity override (`name@version#<source id>`), for tests and
-// for compilers built before the identity was embedded; else the embedded one.
+// This compiler's identity (`name@version#<source id>`). The toolchain launcher and every
+// chain stage set it; a compiler built by `jet build Compiler` carries no identity of its own.
 JET_CLI_COMPILER_IDENTITY_ENV :: "JET_COMPILER_IDENTITY"
 
-// The running compiler's identity: JET_COMPILER_IDENTITY when set, else the
-// identity its assembly embedded (JET_CLI_BUILT_COMPILER_IDENTITY); None in an
-// unassembled tree with no override.
+// The running compiler's identity: JET_COMPILER_IDENTITY; None when it is unset.
 fn jet_cli_compiler_identity() -> String? Never! {
     if cli_sys.get(JET_CLI_COMPILER_IDENTITY_ENV) == .Val(value) -> return Val(value)
-    if JET_CLI_BUILT_COMPILER_IDENTITY == "" -> return None
-    Val(JET_CLI_BUILT_COMPILER_IDENTITY)
+    None
 }
 
 // crates/jet-foundation/src/SHA256.rs `MAX_TREE_DEPTH`.
@@ -292,6 +361,9 @@ fn jet_cli_walk_held_sources(root: String, relative: String, depth: Int, held: c
         budget.files += 1
         if !jet_cli_build_read_same_file(stat, read.stat) -> return Val("`{path}` changed while it was held")
         source :: String.from_bytes(^read.bytes) ?? return Val("cannot read `{path}`: file is not valid UTF-8")
+        // A script (a `#!/...` launch line) is a standalone program wherever
+        // it lives, never a member of the package around it.
+        if jet_cli_is_script(source) -> next
         &files.push(JetDriverAuthorizedSourceFile{path: path, relative_path: child, identity: jet_cli_identity_key("file", read.stat), source: source})
     }
     None
@@ -532,7 +604,6 @@ fn jet_cli_path_dependency_roots(roots: &[JetDriverAuthorizedSourceRoot], color:
     None
 }
 
-
 // The nearest directory at or above `entry_path` that holds `package.jet`, or
 // the entry's own directory for a loose file.
 fn jet_cli_source_root(entry_path: String) -[FS]> String Never! {
@@ -569,16 +640,16 @@ fn jet_cli_memory_available() -[FS]> Int? Never! {
     }
     loop {
         directory :: "/sys/fs/cgroup{path}"
-        limit :: jet_cli_cgroup_bytes("{directory}/memory.max")
-        used :: jet_cli_cgroup_bytes("{directory}/memory.current")
-        if limit == .Val(max) && used == .Val(current) {
-            headroom :: if max > current -> max - current else -> 0
-            if headroom < available -> available = headroom
+        // A level whose memory.max is `max` bounds nothing; its usage isn't read.
+        if jet_cli_cgroup_bytes("{directory}/memory.max") == .Val(max) {
+            if jet_cli_cgroup_bytes("{directory}/memory.current") == .Val(current) {
+                headroom :: if max > current -> max - current else -> 0
+                if headroom < available -> available = headroom
+            }
         }
         if path == "" || path == "/" -> break
-        cut := path.len() - 1
-        loop cut > 0 && path.slice(cut..<(cut + 1)) != "/" -> cut -= 1
-        path = path.slice(0..<cut)
+        cut :: path.rfind("/")
+        path = if cut > 0 -> path.slice(0, cut) else -> ""
     }
     Val(available)
 }
@@ -604,47 +675,179 @@ fn jet_cli_cgroup_bytes(file: String) -[FS]> Int? Never! {
     Val(bytes)
 }
 
-// The Core library rows with their bodies, read from the toolchain tree that
-// `JET_TOOLCHAIN_ROOT` names, or the refusal that stops the request.
+// The compiler's thread default: one thread per physical core this process
+// may run on. Linux lists the CPUs the process may use in `/proc/self/status`
+// (`Cpus_allowed_list`) and the SMT siblings of each CPU in
+// `/sys/devices/system/cpu/cpuN/topology/thread_siblings_list`; an allowed
+// CPU and its siblings are one core, so only the first allowed CPU of each
+// core is read. The default is the measured-best count: today a compile past
+// one thread per core spends more CPU time for no wall time (#5472). When
+// the per-stage SMT acceptance shows all hardware threads (32 on a 16-core
+// SMT host) beating one per core, the default becomes all hardware threads.
+// `logical`, the count of CPUs the process may use, is the answer when the
+// host can't tell, and the default never exceeds it.
+fn jet_cli_physical_cores(logical: Int) -[FS]> Int Never! {
+    status :: cli_files.read("/proc/self/status") ?? return logical
+    allowed := [Int]{}
+    loop line in status.lines() {
+        if line.starts_with("Cpus_allowed_list:") -> allowed = jet_cli_cpu_list(line.slice(18..<line.len()).trim()) ?? return logical
+    }
+    covered := [Int]{}
+    cores := 0
+    loop cpu in allowed {
+        if covered.contains(cpu) -> next
+        siblings :: cli_files.read("/sys/devices/system/cpu/cpu{cpu}/topology/thread_siblings_list") ?? return logical
+        &covered.extend(jet_cli_cpu_list(siblings.trim()) ?? return logical)
+        cores += 1
+    }
+    if cores < 1 || cores > logical -> return logical
+    cores
+}
+
+// The CPUs of a Linux CPU list (`0-3,8-11`, `0,2`); `None` when it is not one.
+fn jet_cli_cpu_list(text: String) -> [Int]? Never! {
+    cpus := [Int]{}
+    loop part in text.split(",") {
+        if part == "" -> next
+        bounds :: part.split("-").to_list()
+        first :: Int.parse(bounds[0]) ?? return None
+        last :: if bounds.len() == 2 -> Int.parse(bounds[1]) ?? return None else -> first
+        loop cpu in first..<(last + 1) {
+            &cpus.push(cpu)
+        }
+    }
+    Val(cpus)
+}
+
+// The compiler's thread default once other work is counted: one thread per
+// physical core (jet_cli_physical_cores), but never more than the CPUs other
+// processes leave free at start. `/proc/stat`'s `procs_running` line counts
+// the runnable threads at this instant, this thread among them; the others
+// spread over the host's online CPUs, so their share of the `logical` CPUs
+// this process may use counts as busy. A quiet host gets every physical
+// core; on an SMT host the default shrinks only once fewer CPUs than
+// physical cores are free, since a busy core's sibling still runs a compiler
+// thread. An unreadable file leaves the physical-core count.
+fn jet_cli_default_threads(logical: Int) -[FS]> Int Never! {
+    physical :: jet_cli_physical_cores(logical)
+    stat :: cli_files.read("/proc/stat") ?? return physical
+    online_list :: cli_files.read("/sys/devices/system/cpu/online") ?? return physical
+    online :: jet_cli_cpu_list(online_list.trim()) ?? return physical
+    jet_cli_threads_left(physical, logical, online.len(), stat)
+}
+
+// At most `physical` threads, and at most the `logical` CPUs this process may
+// use less the busy share of them that `stat` (the text of `/proc/stat`)
+// shows across `online` CPUs; at least one. `physical` when `stat` has no
+// `procs_running` count.
+fn jet_cli_threads_left(physical: Int, logical: Int, online: Int, stat: String) -> Int Never! {
+    running := -1
+    loop line in stat.lines() {
+        if line.starts_with("procs_running ") -> running = Int.parse(line.slice(14..<line.len()).trim()) ?? -1
+    }
+    if running < 0 -> return physical
+    others :: if running > 1 -> running - 1 else -> 0
+    spread :: if online < logical -> logical else -> online
+    free :: logical - others * logical /% spread
+    if free < 1 -> return 1
+    if free < physical -> return free
+    physical
+}
+
+// The Core library rows of the toolchain tree that `JET_TOOLCHAIN_ROOT`
+// names, or the refusal that stops the request. Each body is read when the
+// compile first schedules its row (jet_driver_core_text_file), so a compile
+// reads only the Core files its imports reach; every file is checked to be
+// present here, so a missing one still refuses the request up front.
+// `checked` says the caller already found every row a regular file (the
+// `jet run` keeper's toolchain read), so they aren't checked twice.
 enum JetCLICoreSources {
     Loaded(sources: [JetDriverCoreSource])
     Missing(what: String, fix: String)
 }
 
-fn jet_cli_core_sources() -> JetCLICoreSources Never! {
+fn jet_cli_core_sources(checked: Bool) -> JetCLICoreSources Never! {
     toolchain :: cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) ?? return JetCLICoreSources.Missing{what: "`{JET_CLI_TOOLCHAIN_ROOT_ENV}` is not set, so the Core library sources can't be found", fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`"}
     core_sources := [JetDriverCoreSource]{}
     loop row in CORE_SOURCE_OWNED_ROWS {
         core_path :: jet_cli_authority_path(toolchain, row.path)
-        body :: cli_files.read(core_path) ?? return JetCLICoreSources.Missing{what: "can't read the Core library source `{core_path}`", fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`"}
-        &core_sources.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, source: body})
+        if !checked && !cli_files.is_file(core_path) -> return JetCLICoreSources.Missing{what: "can't read the Core library source `{core_path}`", fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`"}
+        &core_sources.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, text: jet_driver_core_text_file(core_path, JetCLICoreSourceReader{})})
     }
     JetCLICoreSources.Loaded{sources: core_sources}
 }
 
+// The CLI's read of one Core file for jet_driver_core_text_file.
+struct JetCLICoreSourceReader {}
+
+impl JetCLICoreSourceReader.JetDriverCoreSourceReader {
+    fn read(self, file: String) -[FS.Read]> String? {
+        text :: cli_files.read(file) ?? return None
+        Val(text)
+    }
+}
+
 // The driver request for `snapshot` on this host: the Core rows, the
-// canonical effect source, the host facts, and at most `threads` compiler
-// threads (`None` admits threads automatically).
+// canonical effect source, the host facts, the lock's build stamp, and at
+// most `threads` compiler threads (`None` admits threads automatically, up
+// to one per physical core).
 fn jet_cli_driver_request(snapshot: JetDriverAuthorizedSourceSnapshot, core_sources: [JetDriverCoreSource], threads: Int?, mode: JetDriverCompileMode) -> JetDriverCompileRequest Never! {
     os :: cli_sys.name()
+    cores :: cli_sys.cpu_count()
+    stamp :: jet_cli_build_stamp(snapshot)
     JetDriverCompileRequest{
         authorized_sources: snapshot,
         canonical_effect_source: JET_CLI_EFFECT_SOURCE,
         core_sources: core_sources,
         host_facts: JetDriverHostFacts{target_triple: Val(jet_cli_host_triple(cli_sys.arch(), os)), active_os: Val(os), compiler_identity: jet_cli_compiler_identity()},
-        eval_config: jet_eval_default_config(),
-        target: JetDriverCompileTarget.Native,
+        eval_config: jet_cli_eval_config(),
         record_store: None,
         trace_sink: None,
-        // Dev verification knob (the bootstrap host's
-        // JET_BOOTSTRAP_MIR_LINT_EVERY_PASS): JET_MIR_LINT_EVERY_PASS=1 checks
-        // legality and MIR Lint after every optimizer pass, and a failure names
-        // the pass and carries the rejected function's MIR.
-        mir_lint_every_pass: (cli_sys.get("JET_MIR_LINT_EVERY_PASS") ?? "") == "1",
-        compiler_threads: CompilerThreads{cap: threads, cores: cli_sys.cpu_count(), memory_available: jet_cli_memory_available()},
+        compiler_threads: CompilerThreads{cap: Val(threads ?? jet_cli_default_threads(cores)), cores: cores, memory_available: jet_cli_memory_available()},
         mode: mode,
         build_inputs: Val(jet_driver_shared_build_inputs(JetCLIBuildInputs{})),
         build_http_inputs: Val(jet_driver_shared_build_http_inputs(JetCLIBuildHTTPInputs{})),
+        build_stamp: stamp,
+    }
+}
+
+// The `[build.stamp]` of the entry root's `.jet/lock` (Lock.rs `build_stamp`
+// over `load`). A missing or unparsable lock, or one without a stamp, is None:
+// the compile keeps the driver's default stamp and never captures a fresh one
+// from git and the clock.
+fn jet_cli_build_stamp(snapshot: JetDriverAuthorizedSourceSnapshot) -[FS]> BuildStamp? {
+    loop root in snapshot.roots {
+        if root.identity != snapshot.entry_root_identity -> next
+        lock := pkg_lock_load(root.canonical_path) ?? return None
+        return ^lock.build_stamp
+    }
+    None
+}
+
+// The evaluator configuration of a CLI compile: compile-time code runs
+// natively over the toolchain's runtime image (jet_cli_native_session).
+fn jet_cli_eval_config() -> JetEvalConfig Never! {
+    config := jet_eval_default_config()
+    config.native = jet_cli_native_session()
+    config
+}
+
+// The compile's native children over the runtime image beside the pack,
+// read only when compile-time code first runs; None when this toolchain
+// has none.
+fn jet_cli_native_session() -> Shared<JetEvalNativeSession>? Never! {
+    runtime_dir :: jet_cli_runtime_dir()
+    key :: jet_cli_runtime_key(runtime_dir) ?? return None
+    Val(jet_eval_native_session("{runtime_dir}/{key}/{JET_CLI_RUNTIME_IMAGE_FILE}", JetCLINativeImageReader{}))
+}
+
+// The CLI's read of the runtime image for jet_eval_native_session.
+struct JetCLINativeImageReader {}
+
+impl JetCLINativeImageReader.JetEvalNativeImageReader {
+    fn read(self, file: String) -[FS.Read]> [U8]? {
+        bytes :: cli_files.read_bytes(file) ?? return None
+        Val(bytes)
     }
 }
 
@@ -850,16 +1053,13 @@ fn jet_cli_build_resolve(path: String) -[FS.Read]> JetDriverBuildPath JetCLIRead
 
 // Build the request for `file` (the entry as the user named it) and run the
 // Jet compiler on it in `mode` with at most `threads` compiler threads
-// (`--threads N`; `None` admits threads automatically). `emit_rust` asks for
-// explicit Rust emission queries; native builds/runs/tests stop at checked MIR
-// with the same diagnostics, then use the native backend's existing optimizer.
+// (`--threads N`; `None` admits threads automatically).
 // Untraced: only the compiling verbs trace (`jet_cli_compile_entry`).
 // `jet_driver_compile` declares no effect row or failure (its Eval host
 // adapter makes dynamic calls with no effect bound), so this function and the
-// host verbs above it stay unannotated, like the bootstrap entry
-// (Compiler/Bootstrap/Host/Entry.jet).
-fn jet_cli_compile_file(file: String, color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode) -> JetCLICompiled {
-    jet_cli_compile_entry(file, color, emit_rust, threads, mode, None, None)
+// host verbs above it stay unannotated.
+fn jet_cli_compile_file(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode) -> JetCLICompiled {
+    jet_cli_compile_entry(file, color, threads, mode, None, None)
 }
 
 // One file's bytes as a compile sees them in place of the disk copy, or as a
@@ -874,10 +1074,10 @@ struct JetCLIOverlay {
 // policy-marked copy of the entry; nothing is written), traced through
 // `trace_sink`: the process's one sink, which `jet_cli_main` opens for
 // `build`, `run`, `check`, `test` and `emit` (`--trace`, JET_TRACE_FILE).
-fn jet_cli_compile_entry(file: String, color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
+fn jet_cli_compile_entry(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
     overlays := [JetCLIOverlay]{}
     if entry_source == .Val(replacement) -> &overlays.push(JetCLIOverlay{path: file, source: replacement})
-    jet_cli_compile_overlays(file, file, overlays, color, emit_rust, threads, mode, trace_sink)
+    jet_cli_compile_overlays(file, file, overlays, color, threads, mode, trace_sink)
 }
 
 // An overlay or entry path as the snapshot spells it: the canonical path of a
@@ -941,55 +1141,113 @@ enum JetCLIPrepared {
     Refused(output: JetDriverVerbOutput)
 }
 
+// The authorized source snapshot of a compile, before the Core sources join
+// it, or the refusal that stopped taking it.
+enum JetCLISnapshotted {
+    Held(snapshot: JetDriverAuthorizedSourceSnapshot)
+    Refused(output: JetDriverVerbOutput)
+}
+
 fn jet_cli_prepare_refused(what: String, fix: String, color: Bool) -> JetCLIPrepared Never! {
-    JetCLIPrepared.Refused{output: JetDriverVerbOutput{
+    JetCLIPrepared.Refused{output: jet_cli_prepare_refusal(what, fix, color)}
+}
+
+fn jet_cli_snapshot_refused(what: String, fix: String, color: Bool) -> JetCLISnapshotted Never! {
+    JetCLISnapshotted.Refused{output: jet_cli_prepare_refusal(what, fix, color)}
+}
+
+fn jet_cli_prepare_refusal(what: String, fix: String, color: Bool) -> JetDriverVerbOutput Never! {
+    JetDriverVerbOutput{
         stdout: "",
         stderr: jet_cli_report("E2105", what, jet_cli_why("E2105"), fix, color),
         exit_code: JET_DRIVER_EXIT_USER_ERROR,
-    }}
+    }
 }
 
 // The checked sources under `anchor`'s source root with `overlays` laid over
 // them, compiled with `entry` as the entry. An overlay replaces the bytes of a
 // walked file, or adds an absent `.jet` file the walk would have read; the
-// source loader and its authorization stay the one in this file.
-fn jet_cli_compile_overlays(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
-    jet_cli_compile_for_target(anchor, entry, overlays, color, emit_rust, threads, mode, JetDriverCompileTarget.Native, false, trace_sink)
+// source loader and its authorization stay the one in this file. The source
+// walk is the `sources` span; the request carries `trace_sink` into the
+// driver's phases.
+fn jet_cli_compile_overlays(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
+    if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
+    prepared :: jet_cli_prepare_overlays(anchor, entry, overlays, color, threads, mode)
+    if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
+    jet_cli_compile_prepared(^prepared, None, trace_sink)
 }
 
-// Sandbox and native targets use the same authorized source snapshot. The
-// source walk is the `sources` span; the request carries `trace_sink` into
-// the driver's phases, and its result back to the native backend.
-// `release` is Rust CmdCompile `select_native_profile` for `--release` (or
-// `--profile release`): the compile runs under the `release` profile, whose
-// MIR artifact mode is Release (Driver `mir_artifact_build_mode_for`).
-fn jet_cli_compile_for_target(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, emit_rust: Bool, threads: Int?, mode: JetDriverCompileMode, target: JetDriverCompileTarget, release: Bool, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
-    if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
-    if jet_cli_prepare_overlays(anchor, entry, overlays, color, threads, mode) == {
-        .Refused(output) -> {
-            if trace_sink == .Val(sink) -> sink.end("sources", -1)
-            return JetCLICompiled.Refused{output: output}
-        }
+// How many source files a prepared compile authorizes; -1 for a refusal.
+fn jet_cli_prepared_file_count(prepared: JetCLIPrepared) -> Int Never! {
+    if prepared == {
+        .Prepared(_, snapshot) -> jet_cli_snapshot_file_count(snapshot)
+        .Refused(_) -> -1
+    }
+}
+
+// Compile `prepared` (`jet_cli_compile_overlays`). `input_log`, when given,
+// records every comptime input file the compile reads (`embed_file`,
+// `embed_bytes`, `find`).
+fn jet_cli_compile_prepared(prepared: ^JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
+    if ^prepared == {
+        .Refused(output) -> JetCLICompiled.Refused{output: output}
         .Prepared(request, snapshot) -> {
-            if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_snapshot_file_count(snapshot))
             selected := request
-            selected.target = target
             selected.trace_sink = jet_cli_trace_boxed(trace_sink)
-            if release {
-                selected.profile = "release"
-                selected.build_mode = MIRArtifactBuildMode.Release
-            }
-            library_prefix :: if target == .Native -> cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT") else -> None
+            // copy: the caller keeps its handle on the one shared log.
+            selected.comptime_input_log = input_log.copy()
+            library_prefix :: cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT")
             // copy: a three-field row; the request moves into the compiler below.
             compiler_threads :: selected.compiler_threads.copy()
-            result := jet_cli_compile_request(^selected, emit_rust && library_prefix == None, trace_sink)
-            if library_prefix == .Val(prefix) -> result = jet_cli_runtime_library(^result, prefix)
+            result := if library_prefix == .Val(prefix) -> jet_cli_runtime_library(jet_cli_lowering_inputs(^selected, trace_sink), prefix, compiler_threads) else -> jet_cli_compile_request(^selected, trace_sink)
             // The host's phases after the compile (Host.jet's native backend
             // route) trace through the same sink, which the result carries,
             // and compile on the request's threads.
             result.trace_sink = jet_cli_trace_boxed(trace_sink)
             result.compiler_threads = compiler_threads
-            return JetCLICompiled.Compiled{result: result, snapshot: snapshot}
+            JetCLICompiled.Compiled{result: result, snapshot: snapshot}
+        }
+    }
+}
+
+// The checked compile of an executable (`jet build`, `jet run`, a script,
+// `jet dev`): the driver's compile stopped before lowering, with the checked
+// inputs the native route builds from (Host.jet jet_cli_native_executable).
+enum JetCLIExecutableCompiled {
+    // `inputs` is None when the compile stopped before lowering; the result's
+    // diagnostics say why. `snapshot` as in JetCLICompiled.Compiled.
+    Checked(result: JetDriverCompileResult, inputs: JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot)
+    Refused(output: JetDriverVerbOutput)
+}
+
+// The executable compile of `file` (its source walk is the `sources` span).
+fn jet_cli_compile_executable_file(file: String, color: Bool, threads: Int?, options: BuildOptions, trace_sink: JetCLITraceSink?) -> JetCLIExecutableCompiled {
+    if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
+    prepared :: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Program)
+    if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
+    jet_cli_compile_executable(^prepared, options, None, trace_sink)
+}
+
+// jet_cli_compile_prepared for the native executable route under the build
+// `options`: their selected profile is the front end's (`$build.profile`, its
+// package.jet settings); `input_log` as there.
+fn jet_cli_compile_executable(prepared: ^JetCLIPrepared, options: BuildOptions, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?) -> JetCLIExecutableCompiled {
+    if ^prepared == {
+        .Refused(output) -> JetCLIExecutableCompiled.Refused{output: output}
+        .Prepared(request, snapshot) -> {
+            selected := request
+            selected.trace_sink = jet_cli_trace_boxed(trace_sink)
+            // copy: the caller keeps its handle on the one shared log.
+            selected.comptime_input_log = input_log.copy()
+            if options.profile != "" -> selected.profile = options.profile
+            // copy: a three-field row; the request moves into the compiler below.
+            compiler_threads :: selected.compiler_threads.copy()
+            front := jet_cli_lowering_inputs(^selected, trace_sink)
+            // The native route traces through the same sink and builds on the
+            // request's threads (Host.jet jet_cli_native_executable).
+            front.compile.trace_sink = jet_cli_trace_boxed(trace_sink)
+            front.compile.compiler_threads = compiler_threads
+            JetCLIExecutableCompiled.Checked{result: ^front.compile, inputs: ^front.inputs, snapshot: snapshot}
         }
     }
 }
@@ -1005,32 +1263,67 @@ fn jet_cli_snapshot_file_count(snapshot: JetDriverAuthorizedSourceSnapshot) -> I
 // compiling it: load-only queries (schema, source explain, gates) run the
 // driver's source query over exactly the sources a compile would see.
 fn jet_cli_prepare_overlays(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode) -> JetCLIPrepared {
-    anchor_path :: cli_files.realpath(anchor) ?? return jet_cli_prepare_refused("can't securely read the file `{anchor}`", "check the spelling, or run jet from the folder that contains it", color)
-    root :: jet_cli_source_root(anchor_path)
-    root_stat :: cli_files.stat(root) ?? return jet_cli_prepare_refused("can't securely read the source root `{root}`", "check that the directory exists and is readable", color)
+    if jet_cli_prepare_snapshot(anchor, entry, overlays, color) == {
+        .Refused(output) -> JetCLIPrepared.Refused{output: output}
+        .Held(snapshot) -> jet_cli_prepare_request(snapshot, color, threads, mode, false)
+    }
+}
+
+// The request that compiles `snapshot` against the Core sources of this
+// toolchain; `core_checked` as jet_cli_core_sources's `checked`.
+fn jet_cli_prepare_request(snapshot: JetDriverAuthorizedSourceSnapshot, color: Bool, threads: Int?, mode: JetDriverCompileMode, core_checked: Bool) -> JetCLIPrepared {
+    core_sources :: if jet_cli_core_sources(core_checked) == {
+        .Loaded(sources) -> sources
+        .Missing(what, fix) -> { return jet_cli_prepare_refused(what, fix, color) }
+    }
+    JetCLIPrepared.Prepared{request: jet_cli_driver_request(snapshot, core_sources, threads, mode), snapshot: snapshot}
+}
+
+// Whether the entry at `entry_path` (or its overlay) is a script: its first
+// line is a `#!/...` launch line (Authority.jet `jet_cli_is_script`).
+fn jet_cli_entry_is_script(entry_path: String, overlays: [JetCLIOverlay]) -[FS, Env]> Bool Never! {
+    loop overlay in overlays {
+        if jet_cli_overlay_path(overlay.path) == entry_path -> return jet_cli_is_script(overlay.source)
+    }
+    reader :: cli_files.open(entry_path, .Refuse) ?? return false
+    head :: reader.read(3) ?? return false
+    head == "#!/".bytes()
+}
+
+// The authorized source snapshot `jet_cli_prepare_overlays` compiles. A script
+// is a standalone program wherever it lives: its snapshot is the script alone,
+// rooted at its own directory, never the package around it.
+fn jet_cli_prepare_snapshot(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool) -> JetCLISnapshotted {
+    anchor_path :: cli_files.realpath(anchor) ?? return jet_cli_snapshot_refused("can't securely read the file `{anchor}`", "check the spelling, or run jet from the folder that contains it", color)
+    entry_path :: jet_cli_overlay_path(entry)
+    script :: jet_cli_entry_is_script(entry_path, overlays)
+    root :: if script -> jet_cli_parent(entry_path) ?? "/" else -> jet_cli_source_root(anchor_path)
+    root_stat :: cli_files.stat(root) ?? return jet_cli_snapshot_refused("can't securely read the source root `{root}`", "check that the directory exists and is readable", color)
     files := [JetDriverAuthorizedSourceFile]{}
     directories := [AppAuthorizedDirectory]{}
     budget := JetCLISourceBudget{entries: 0, bytes: 0, files: 0}
-    if jet_cli_walk_sources(root, "", 0, &files, &directories, true, &budget) == .Val(problem) {
-        return jet_cli_prepare_refused("can't securely read the sources under `{root}`: {problem}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
+    if !script {
+        if jet_cli_walk_sources(root, "", 0, &files, &directories, true, &budget) == .Val(problem) {
+            return jet_cli_snapshot_refused("can't securely read the sources under `{root}`: {problem}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
+        }
     }
     prefix :: if root == "/" -> "/" else -> "{root}/"
-    entry_path :: jet_cli_overlay_path(entry)
     // An explicitly selected entry is a source whatever its suffix (`jet self
-    // devtools reduce` and `ice-report` compile the input under its own name);
-    // the walk's placement, link, stat and read rules still hold for it.
-    if !entry_path.ends_with(".jet") && entry_path.starts_with(prefix) {
+    // devtools reduce` and `ice-report` compile the input under its own name),
+    // and so is a script, which the walk leaves out; the walk's placement,
+    // link, stat and read rules still hold for it.
+    if (script || !entry_path.ends_with(".jet")) && entry_path.starts_with(prefix) {
         relative :: entry_path.slice(prefix.len()..<entry_path.len())
         if !jet_cli_outside_walk(root, relative) {
-            stat :: cli_files.stat(entry_path) ?? return jet_cli_prepare_refused("can't securely read the sources under `{root}`: cannot inspect `{entry_path}`: {err}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
-            if stat.is_symlink -> return jet_cli_prepare_refused("can't securely read the sources under `{root}`: `{entry_path}` is a symbolic link", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
+            stat :: cli_files.stat(entry_path) ?? return jet_cli_snapshot_refused("can't securely read the sources under `{root}`: cannot inspect `{entry_path}`: {err}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
+            if stat.is_symlink -> return jet_cli_snapshot_refused("can't securely read the sources under `{root}`: `{entry_path}` is a symbolic link", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
             if stat.is_file {
-                limit :: jet_cli_source_read_limit(budget, stat.size, entry_path) ?? return jet_cli_prepare_refused(err.message, "reduce the source tree size", color)
-                read :: jet_cli_read_rooted_source(root, relative, limit) ?? return jet_cli_prepare_refused("can't securely read the sources under `{root}`: cannot read `{entry_path}`: {err.message}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
-                if !jet_cli_build_read_same_file(stat, read.stat) -> return jet_cli_prepare_refused("`{entry_path}` changed while it was held", "retry with a stable source tree", color)
+                limit :: jet_cli_source_read_limit(budget, stat.size, entry_path) ?? return jet_cli_snapshot_refused(err.message, "reduce the source tree size", color)
+                read :: jet_cli_read_rooted_source(root, relative, limit) ?? return jet_cli_snapshot_refused("can't securely read the sources under `{root}`: cannot read `{entry_path}`: {err.message}", "remove the symbolic link or unreadable file, or check a file outside this tree", color)
+                if !jet_cli_build_read_same_file(stat, read.stat) -> return jet_cli_snapshot_refused("`{entry_path}` changed while it was held", "retry with a stable source tree", color)
                 budget.bytes += read.stat.size
                 budget.files += 1
-                source :: String.from_bytes(^read.bytes) ?? return jet_cli_prepare_refused("cannot read `{entry_path}`: file is not valid UTF-8", "save the source as UTF-8", color)
+                source :: String.from_bytes(^read.bytes) ?? return jet_cli_snapshot_refused("cannot read `{entry_path}`: file is not valid UTF-8", "save the source as UTF-8", color)
                 files = jet_cli_insert_source(^files, JetDriverAuthorizedSourceFile{path: entry_path, relative_path: relative, identity: jet_cli_identity_key("file", read.stat), source: source})
             }
         }
@@ -1040,17 +1333,17 @@ fn jet_cli_prepare_overlays(anchor: String, entry: String, overlays: [JetCLIOver
         replaced := false
         loop index in 0..<files.len() {
             if files[index].path != path -> next
-            _ :: jet_cli_replace_source_budget(&budget, files[index].source, overlay.source, path) ?? return jet_cli_prepare_refused(err.message, "reduce the source tree size", color)
+            _ :: jet_cli_replace_source_budget(&budget, files[index].source, overlay.source, path) ?? return jet_cli_snapshot_refused(err.message, "reduce the source tree size", color)
             files[index].source = overlay.source
             replaced = true
         }
         if replaced -> next
         relative :: if path.starts_with(prefix) -> path.slice(prefix.len()..<path.len()) else -> ""
         if relative == "" || cli_files.exists(path) || !relative.ends_with(".jet") || jet_cli_outside_walk(root, relative) {
-            return jet_cli_prepare_refused("`{overlay.path}` is not a checked source file of `{root}`", "check a `.jet` file that is not inside a skipped or nested project directory", color)
+            return jet_cli_snapshot_refused("`{overlay.path}` is not a checked source file of `{root}`", "check a `.jet` file that is not inside a skipped or nested project directory", color)
         }
         size :: overlay.source.count_bytes()
-        _ :: jet_cli_source_read_limit(budget, size, path) ?? return jet_cli_prepare_refused(err.message, "reduce the source tree size", color)
+        _ :: jet_cli_source_read_limit(budget, size, path) ?? return jet_cli_snapshot_refused(err.message, "reduce the source tree size", color)
         budget.bytes += size
         budget.files += 1
         added :: JetDriverAuthorizedSourceFile{path: path, relative_path: relative, identity: "authority-file-v1;kind=overlay;length={size};modified_ns=none;device=none;inode=none", source: overlay.source}
@@ -1061,30 +1354,25 @@ fn jet_cli_prepare_overlays(anchor: String, entry: String, overlays: [JetCLIOver
         if file.path == entry_path -> entry_found = true
     }
     if !entry_found {
-        return jet_cli_prepare_refused("`{entry}` is not a checked source file of `{root}`", "check a `.jet` file that is not inside a skipped or nested project directory", color)
+        return jet_cli_snapshot_refused("`{entry}` is not a checked source file of `{root}`", "check a `.jet` file that is not inside a skipped or nested project directory", color)
     }
     caches := [JetDriverAuthorizedSourceFile]{}
     if jet_cli_foreign_cache_files(root, &caches, &budget) == .Val(problem) {
-        return jet_cli_prepare_refused("can't securely read the foreign bindings under `{root}`: {problem}", "remove the symbolic link or unreadable file, or regenerate the bindings with `jet bind`", color)
+        return jet_cli_snapshot_refused("can't securely read the foreign bindings under `{root}`: {problem}", "remove the symbolic link or unreadable file, or regenerate the bindings with `jet bind`", color)
     }
-    core_sources :: if jet_cli_core_sources() == {
-        .Loaded(sources) -> sources
-        .Missing(what, fix) -> { return jet_cli_prepare_refused(what, fix, color) }
-    }
-    current_root :: cli_files.stat(root) ?? return jet_cli_prepare_refused("cannot revalidate source root `{root}`: {err}", "retry with a stable source tree", color)
-    if !current_root.is_dir || current_root.is_symlink || current_root.id != root_stat.id -> return jet_cli_prepare_refused("source root `{root}` changed while it was held", "retry with a stable source tree", color)
+    current_root :: cli_files.stat(root) ?? return jet_cli_snapshot_refused("cannot revalidate source root `{root}`: {err}", "retry with a stable source tree", color)
+    if !current_root.is_dir || current_root.is_symlink || current_root.id != root_stat.id -> return jet_cli_snapshot_refused("source root `{root}` changed while it was held", "retry with a stable source tree", color)
     root_identity :: jet_cli_identity_key("directory", root_stat)
     roots := [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: root, identity: root_identity, allow_hardlinks: false, files: files, foreign_cache_files: caches, directories: directories}}
     script_dependencies := [JetDriverScriptDependency]{}
-    if jet_cli_script_dependency_roots(&roots, entry_path, &script_dependencies, color) == .Val(refusal) -> return JetCLIPrepared.Refused{output: refusal}
-    if jet_cli_path_dependency_roots(&roots, color) == .Val(refusal) -> return JetCLIPrepared.Refused{output: refusal}
-    snapshot :: JetDriverAuthorizedSourceSnapshot{
+    if jet_cli_script_dependency_roots(&roots, entry_path, &script_dependencies, color) == .Val(refusal) -> return JetCLISnapshotted.Refused{output: refusal}
+    if jet_cli_path_dependency_roots(&roots, color) == .Val(refusal) -> return JetCLISnapshotted.Refused{output: refusal}
+    JetCLISnapshotted.Held{snapshot: JetDriverAuthorizedSourceSnapshot{
         roots: roots,
         entry_root_identity: root_identity,
         entry_path: entry_path,
         script_dependencies: script_dependencies,
-    }
-    JetCLIPrepared.Prepared{request: jet_cli_driver_request(snapshot, core_sources, threads, mode), snapshot: snapshot}
+    }}
 }
 
 // ---- The compiler's streaming trace: `--trace[=FILE]` and JET_TRACE_FILE ----
@@ -1093,15 +1381,19 @@ fn jet_cli_prepare_overlays(anchor: String, entry: String, overlays: [JetCLIOver
 // (Compiler/JetFoundation/Source/Trace.jet) itself. A file target receives
 // the Chrome trace-event lines the Rust host's writer produces
 // (crates/jet-driver/src/Trace.rs): the `[` header, `process_name`,
-// `trace.start` (`unix_ms`, `functions`), one `B`/`E` event per span with
+// `trace.start` (`unix_ms`, `functions`), one `B`/`E` event per span, with
 // `rss_kb`/`peak_rss_kb` (VmRSS/VmHWM) and the span's CPU time (`cpu_ns` of
 // its thread, `proc_cpu_ns` of every thread, `majflt` major faults; this
-// writer only) on every close and a `memory` counter after a phase,
-// throttled `C` progress events, `<phase>.<name>`
-// counter events, and `JET_PHASE_COUNTERS` stderr lines when that variable is
-// set, so Tools/perf and Tools/agent read either compiler's trace. `-` or
-// `stderr` streams one readable line per event to stderr instead. Every line
-// is written as soon as its event happens, so a running compile can be
+// writer only) on every phase close and a `memory` counter after a phase,
+// while an item's close (`begin_item`, or an indexed `begin`) carries only
+// its thread's `cpu_ns`, and nested phases closer than
+// JET_CLI_TRACE_PROCESS_MS share one process read, so per-item events stay
+// cheap; throttled `C` progress events,
+// `<phase>.<name>` counter events, and `JET_PHASE_COUNTERS` stderr lines
+// when that variable is set, so Tools/perf and Tools/agent read either
+// compiler's trace. `-` or `stderr` streams one readable line per event to
+// stderr instead. The target stays open for the whole compile and every line
+// is flushed as soon as its event happens, so a running compile can be
 // followed. A failed write stops the trace, never the compile. The sink's
 // calls stay inside the trait's FS row: monotonic time is `/proc/uptime`
 // (CLOCK_BOOTTIME, 10 ms resolution) and stderr is written as `/dev/stderr`.
@@ -1112,21 +1404,33 @@ JET_CLI_TRACE_STDERR :: "/dev/stderr"
 // Minimum spacing of the progress events of one kind; the last item is
 // always written (Trace.rs `PROGRESS_INTERVAL`).
 JET_CLI_TRACE_PROGRESS_MS :: 200
+// A progress kind reads the clock on its first call and then once every this
+// many calls (and on its last item), so a per-item kind costs no clock read
+// per item.
+JET_CLI_TRACE_PROGRESS_STRIDE :: 16
+// A phase span's begin or end below the top level reuses the process's clocks
+// and memory read this recently (ms), so steps that repeat per item (a
+// comptime item's `comptime.apply`) share one `/proc/self` read.
+JET_CLI_TRACE_PROCESS_MS :: 50
 
-// One open span: its kind, the label it shows, when it began (µs), and the
-// CPU clocks and fault count when it began.
+// One open span: its kind, the label it shows, when it began (µs), the CPU
+// clocks and fault count when it began, and whether it is one item's
+// (`begin_item`, or an indexed `begin`), which reads only its thread's CPU
+// clock.
 struct JetCLITraceSpan {
     kind: String
     label: String
     start_us: Int
     start: JetCLITraceUsage
+    item: Bool
 }
 
 // CPU time in ns of the calling thread (`/proc/thread-self/schedstat`: the
 // scheduler's exact run time) and of the whole process (`/proc/self/stat`
 // utime + stime, in 10 ms clock ticks), and the process's major page faults;
-// -1 where unreadable. A span reports the difference between its end and its
-// begin; begin and end run on the same thread (spans nest per thread).
+// -1 where unreadable or not read. A span reports the difference between its
+// end and its begin; begin and end run on the same thread (spans nest per
+// thread).
 struct JetCLITraceUsage {
     cpu_ns: Int
     proc_cpu_ns: Int
@@ -1136,10 +1440,19 @@ struct JetCLITraceUsage {
 struct JetCLITraceState {
     // False after a failed write: the trace stops, the compile does not.
     writing: Bool
+    // The target, open for appending from the trace's start.
+    writer: cli_files.FileWriter
     // Open spans per thread (kernel thread id), innermost last.
     stacks: [Int:[JetCLITraceSpan]]
     // When each progress kind was last written (uptime ms).
     progress_at: [String:Int]
+    // How many times each progress kind was reported.
+    progress_calls: [String:Int]
+    // The last read of the process's clocks and faults (`cpu_ns` -1) and
+    // memory, and when it was taken (uptime ms, -1 before the first).
+    process: JetCLITraceUsage
+    memory: JetCLITraceMemory?
+    process_ms: Int
 }
 
 struct JetCLITraceSink {
@@ -1197,6 +1510,11 @@ fn jet_cli_trace_sink(requested: String?) -> JetCLITraceSink? {
             return None
         }
     }
+    // The target stays open: every event appends to the same open file.
+    writer :: cli_files.append(target) ?? {
+        _ :: jet_cli_trace_append(JET_CLI_TRACE_STDERR, "jet: cannot write the compiler trace `{chosen}`: {err}\n")
+        return None
+    }
     Val(JetCLITraceSink{
         target: target,
         human: human,
@@ -1205,7 +1523,16 @@ fn jet_cli_trace_sink(requested: String?) -> JetCLITraceSink? {
         main_thread: jet_cli_trace_thread(),
         functions: functions,
         phase_counters: (cli_sys.get(JET_CLI_PHASE_COUNTERS_ENV) ?? "") != "",
-        state: shared JetCLITraceState{writing: true, stacks: [Int:[JetCLITraceSpan]]{}, progress_at: [String:Int]{}},
+        state: shared JetCLITraceState{
+            writing: true,
+            writer: writer,
+            stacks: [Int:[JetCLITraceSpan]]{},
+            progress_at: [String:Int]{},
+            progress_calls: [String:Int]{},
+            process: JetCLITraceUsage{cpu_ns: -1, proc_cpu_ns: -1, majflt: -1},
+            memory: None,
+            process_ms: -1,
+        },
     })
 }
 
@@ -1226,33 +1553,20 @@ fn jet_cli_trace_object(sink: ^JetCLITraceSink) -> CompilerTraceSink Never! {
 
 impl JetCLITraceSink.CompilerTraceSink {
     fn begin(self, name: String, detail: String, index: Int, total: Int) Never! -[FS]> {
-        ts :: jet_cli_trace_micros(self.start_ms)
-        thread :: jet_cli_trace_thread()
-        label :: if detail == "" -> name else -> detail
-        start :: jet_cli_trace_usage()
-        permit := self.state.guard_edit()
-        if !permit.value.writing -> return
-        stack := permit.value.stacks.get(thread) ?? [JetCLITraceSpan]{}
-        line := ""
-        if self.human {
-            item :: if detail == "" -> "" else -> " {detail}"
-            line = "{jet_cli_trace_prefix(self, ts, thread, stack.len())}> {name}{item}{jet_cli_trace_place(index, total)}\n"
-        } else {
-            if !permit.value.stacks.has_key(thread) -> line = jet_cli_trace_thread_name(self.pid, thread)
-            args :: if index >= 0 -> ",\"args\":{{\"index\":{index},\"total\":{total}}}" else -> ""
-            line = "{line}{jet_cli_trace_head(label, Val(name), "B", ts, self.pid, thread)}{args}}},\n"
-        }
-        &stack.push(JetCLITraceSpan{kind: name, label: label, start_us: ts, start: start})
-        permit.value.stacks[thread] = stack
-        jet_cli_trace_write(self.target, &permit.value, line)
+        args :: if index >= 0 -> ",\"args\":{{\"index\":{index},\"total\":{total}}}" else -> ""
+        jet_cli_trace_open(self, name, detail, args, jet_cli_trace_place(index, total), index >= 0)
+    }
+
+    fn begin_item(self, name: String, file: String, item: String) Never! -[FS]> {
+        args :: ",\"args\":{{\"file\":{foundation_json_quote(file)},\"item\":{foundation_json_quote(item)}}}"
+        jet_cli_trace_open(self, name, item, args, " ({file})", true)
     }
 
     // Closes the innermost open span of kind `name` on this thread, and any
     // deeper span an early return left open; no open span of that kind on
     // this thread writes nothing.
     fn end(self, name: String, items: Int) Never! -[FS]> {
-        usage :: jet_cli_trace_usage()
-        memory :: jet_cli_trace_memory()
+        cpu_ns :: jet_cli_trace_thread_cpu_ns()
         ts :: jet_cli_trace_micros(self.start_ms)
         thread :: jet_cli_trace_thread()
         permit := self.state.guard_edit()
@@ -1267,7 +1581,14 @@ impl JetCLITraceSink.CompilerTraceSink {
             line = "{line}{jet_cli_trace_close_line(self, abandoned, false, -1, None, None, ts, thread, stack.len())}"
         }
         closed :: &stack.pop() ?? return
-        spent :: jet_cli_trace_usage_since(closed.start, usage)
+        // Only a phase's close reads the process's clocks and memory.
+        memory := JetCLITraceMemory?{None}
+        now := JetCLITraceUsage{cpu_ns: cpu_ns, proc_cpu_ns: -1, majflt: -1}
+        if !closed.item {
+            now = jet_cli_trace_process(&permit.value, self.start_ms + ts /% 1000, cpu_ns, stack.len() == 0)
+            memory = permit.value.memory
+        }
+        spent :: jet_cli_trace_usage_since(closed.start, now)
         line = "{line}{jet_cli_trace_close_line(self, closed, true, items, memory, Val(spent), ts, thread, stack.len())}"
         permit.value.stacks[thread] = stack
         jet_cli_trace_write(self.target, &permit.value, line)
@@ -1278,15 +1599,16 @@ impl JetCLITraceSink.CompilerTraceSink {
             self.counter(name, done)
             return
         }
+        last_item :: total > 0 && done + 1 >= total
+        if !jet_cli_trace_progress_due(self.state, name, last_item) -> return
         now :: jet_cli_trace_uptime_ms()
-        thread :: jet_cli_trace_thread()
         permit := self.state.guard_edit()
         if !permit.value.writing -> return
-        last_item :: total > 0 && done + 1 >= total
         if permit.value.progress_at.get(name) == .Val(previous) {
             if !last_item && now - previous < JET_CLI_TRACE_PROGRESS_MS -> return
         }
         permit.value.progress_at[name] = now
+        thread :: jet_cli_trace_thread()
         ts :: if now > self.start_ms -> (now - self.start_ms) * 1000 else -> 0
         line := ""
         if self.human {
@@ -1327,6 +1649,42 @@ impl JetCLITraceSink {
             _ :: jet_cli_trace_append(JET_CLI_TRACE_STDERR, "JET_PHASE_COUNTERS {{\"phase\":{foundation_json_quote(phase)},{foundation_json_quote(counter_name)}:{value}}}\n")
         }
     }
+}
+
+// Counts one report of progress kind `name`: true on its first call, every
+// JET_CLI_TRACE_PROGRESS_STRIDE-th call after, and on its last item.
+fn jet_cli_trace_progress_due(state: Shared<JetCLITraceState>, name: String, last_item: Bool) -> Bool {
+    permit := state.guard_edit()
+    calls :: permit.value.progress_calls.get(name) ?? 0
+    permit.value.progress_calls[name] = calls + 1
+    last_item || calls % JET_CLI_TRACE_PROGRESS_STRIDE == 0
+}
+
+// Opens a span of kind `name` labelled `detail` (`name` when empty): its `B`
+// event carries `args` (`,"args":{...}` or ""), its readable line `place`.
+// An `item` span (one comptime item, or one indexed unit of a phase) reads
+// only its thread's CPU clock, so a phase of many items stays cheap to trace.
+fn jet_cli_trace_open(sink: JetCLITraceSink, name: String, detail: String, args: String, place: String, item: Bool) Never! -[FS]> {
+    ts :: jet_cli_trace_micros(sink.start_ms)
+    thread :: jet_cli_trace_thread()
+    label :: if detail == "" -> name else -> detail
+    cpu_ns :: jet_cli_trace_thread_cpu_ns()
+    permit := sink.state.guard_edit()
+    if !permit.value.writing -> return
+    stack := permit.value.stacks.get(thread) ?? [JetCLITraceSpan]{}
+    start := JetCLITraceUsage{cpu_ns: cpu_ns, proc_cpu_ns: -1, majflt: -1}
+    if !item -> start = jet_cli_trace_process(&permit.value, sink.start_ms + ts /% 1000, cpu_ns, stack.len() == 0)
+    line := ""
+    if sink.human {
+        shown :: if detail == "" -> "" else -> " {detail}"
+        line = "{jet_cli_trace_prefix(sink, ts, thread, stack.len())}> {name}{shown}{place}\n"
+    } else {
+        if !permit.value.stacks.has_key(thread) -> line = jet_cli_trace_thread_name(sink.pid, thread)
+        line = "{line}{jet_cli_trace_head(label, Val(name), "B", ts, sink.pid, thread)}{args}}},\n"
+    }
+    &stack.push(JetCLITraceSpan{kind: name, label: label, start_us: ts, start: start, item: item})
+    permit.value.stacks[thread] = stack
+    jet_cli_trace_write(sink.target, &permit.value, line)
 }
 
 // A span's close. Machine form: its `E` event (with args only for the span
@@ -1423,27 +1781,55 @@ fn jet_cli_trace_micros(start_ms: Int) -> Int Never! {
 }
 
 // Milliseconds since boot from `/proc/uptime` (`12345.67 …`, CLOCK_BOOTTIME),
-// the trace's monotonic clock; 0 when it cannot be read.
+// the trace's monotonic clock; 0 when it cannot be read. Every span's begin
+// and end reads it, so it is scanned in place, never split.
 fn jet_cli_trace_uptime_ms() -> Int Never! {
     text :: cli_files.read("/proc/uptime") ?? return 0
-    loop field in text.split(" ") {
-        parts :: field.split(".").to_list()
-        if parts.len() != 2 -> return 0
-        fraction := parts[1]
-        loop fraction.len() < 3 -> fraction = "{fraction}0"
-        seconds :: Int.parse(parts[0]) ?? return 0
-        millis :: Int.parse(fraction.slice(0..<3)) ?? return 0
-        return seconds * 1000 + millis
+    bytes :: text.bytes()
+    point := 0
+    loop point < bytes.len() && bytes[point] != (U8{46}) {
+        if bytes[point] == (U8{32}) -> return 0
+        point += 1
     }
-    0
+    seconds :: jet_cli_trace_number(bytes, 0, point)
+    if seconds < 0 || point >= bytes.len() -> return 0
+    end := point + 1
+    loop end < bytes.len() && bytes[end] != (U8{32}) && bytes[end] != (U8{10}) {
+        if bytes[end] == (U8{46}) -> return 0
+        end += 1
+    }
+    if end > point + 1 && jet_cli_trace_number(bytes, point + 1, end) < 0 -> return 0
+    // The first three fraction digits, zero-padded: `.67` is 670 ms.
+    millis := 0
+    loop index in 0..<3 {
+        digit :: if point + 1 + index < end -> Int.from_u8(bytes[point + 1 + index]) - 48 else -> 0
+        millis = millis * 10 + digit
+    }
+    seconds * 1000 + millis
+}
+
+// The decimal number `bytes[from..<to]`, or -1 when it is empty or holds a
+// non-digit.
+fn jet_cli_trace_number(bytes: [U8], from: Int, to: Int) -> Int Never! {
+    if from >= to -> return -1
+    value := 0
+    loop index in from..<to {
+        code :: Int.from_u8(bytes[index])
+        if code < 48 || code > 57 -> return -1
+        value = value * 10 + code - 48
+    }
+    value
 }
 
 // The calling thread's kernel id, from `/proc/thread-self` (`<pid>/task/<tid>`).
 fn jet_cli_trace_thread() -> Int Never! {
     link :: cli_files.read_link("/proc/thread-self") ?? return 0
-    parts :: link.split("/").to_list()
-    if parts.len() == 0 -> return 0
-    Int.parse(parts[parts.len() - 1]) ?? 0
+    bytes :: link.bytes()
+    start := bytes.len()
+    loop start > 0 && bytes[start - 1] != (U8{47}) -> start -= 1
+    number :: jet_cli_trace_number(bytes, start, bytes.len())
+    if number < 0 -> return 0
+    number
 }
 
 fn jet_cli_trace_memory() -> JetCLITraceMemory? Never! {
@@ -1473,16 +1859,19 @@ fn jet_cli_trace_status_kb(line: String) -> Int Never! {
 // Linux ABI): 10 ms each.
 JET_CLI_TRACE_NS_PER_TICK :: 10000000
 
-// The CPU clocks and major fault count a span starts from and ends at.
-fn jet_cli_trace_usage() -> JetCLITraceUsage Never! {
+// The calling thread's CPU time in ns, -1 when unreadable:
+// `<run ns> <wait ns> <timeslices>`, whose first field is the thread's.
+fn jet_cli_trace_thread_cpu_ns() -> Int Never! {
+    schedstat :: cli_files.read("/proc/thread-self/schedstat") ?? return -1
+    bytes :: schedstat.bytes()
+    end := 0
+    loop end < bytes.len() && bytes[end] != (U8{32}) && bytes[end] != (U8{10}) -> end += 1
+    jet_cli_trace_number(bytes, 0, end)
+}
+
+// The process's CPU clock and major fault count (`cpu_ns` -1).
+fn jet_cli_trace_process_usage() -> JetCLITraceUsage Never! {
     usage := JetCLITraceUsage{cpu_ns: -1, proc_cpu_ns: -1, majflt: -1}
-    // `<run ns> <wait ns> <timeslices>`: the first field is the thread's CPU time.
-    if cli_files.read("/proc/thread-self/schedstat") == .Ok(schedstat) {
-        loop field in schedstat.trim().split(" ") {
-            usage.cpu_ns = Int.parse(field) ?? -1
-            break
-        }
-    }
     // `pid (comm) state …`: the fields after the last `)` start at field 3
     // (state), so majflt (12), utime (14) and stime (15) are 9, 11 and 12.
     text :: cli_files.read("/proc/self/stat") ?? return usage
@@ -1500,6 +1889,19 @@ fn jet_cli_trace_usage() -> JetCLITraceUsage Never! {
     usage
 }
 
+// A phase span's usage at uptime `now_ms` with its thread's `cpu_ns`, and
+// `state.memory` set: the process's clocks, faults and memory read again
+// when `fresh` (a top-level span) or when the last read is
+// JET_CLI_TRACE_PROCESS_MS old, else the last read's.
+fn jet_cli_trace_process(state: &JetCLITraceState, now_ms: Int, cpu_ns: Int, fresh: Bool) -> JetCLITraceUsage Never! {
+    if fresh || state.process_ms < 0 || now_ms - state.process_ms >= JET_CLI_TRACE_PROCESS_MS {
+        state.process = jet_cli_trace_process_usage()
+        state.memory = jet_cli_trace_memory()
+        state.process_ms = now_ms
+    }
+    JetCLITraceUsage{cpu_ns: cpu_ns, proc_cpu_ns: state.process.proc_cpu_ns, majflt: state.process.majflt}
+}
+
 // What a span spent between `start` and `now`; -1 where either is unknown.
 fn jet_cli_trace_usage_since(start: JetCLITraceUsage, now: JetCLITraceUsage) -> JetCLITraceUsage Never! {
     JetCLITraceUsage{
@@ -1509,11 +1911,18 @@ fn jet_cli_trace_usage_since(start: JetCLITraceUsage, now: JetCLITraceUsage) -> 
     }
 }
 
-// Writes one event's text; the first failure stops the trace.
+// Writes one event's text to the open target and flushes it, so every event
+// is in the file when the call returns; the first failure stops the trace.
 fn jet_cli_trace_write(target: String, state: &JetCLITraceState, text: String) Never! {
-    problem :: jet_cli_trace_append(target, text) ?? return
+    problem :: jet_cli_trace_put(state.writer, text) ?? return
     state.writing = false
     _ :: jet_cli_trace_append(JET_CLI_TRACE_STDERR, "jet: the compiler trace stopped: writing `{target}` failed: {problem}\n")
+}
+
+fn jet_cli_trace_put(writer: cli_files.FileWriter, text: String) -> String? Never! {
+    writer.write_all(text.bytes()) ?? return Val("{err}")
+    writer.flush() ?? return Val("{err}")
+    None
 }
 
 // Appends `text` (each call opens, writes, flushes and closes, so every event
@@ -1531,9 +1940,3 @@ fn jet_cli_trace_create(target: String, text: String) -> String? Never! {
     cli_files.write(target, text) ?? return Val("{err}")
     None
 }
-
-// The identity (`name@version#<compiler_source_id>`) of the source this compiler
-// was built from. The native assembler (Tools/agent/native-compiler.mjs) writes
-// it into the assembled unit; "" in a tree it did not assemble. It stays the
-// last line of this file, so that rewrite moves no other byte of this file.
-JET_CLI_BUILT_COMPILER_IDENTITY :: ""

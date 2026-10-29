@@ -7,16 +7,16 @@
 // Jet paths are text: a NAR name or link target that is not UTF-8 is
 // reported as not representable on this host.
 
-STORE_NAR_MAGIC :: prep { "nix-archive-1" }
+STORE_NAR_MAGIC :: "nix-archive-1"
 // Sanity bounds only: the transfer itself is capped by the signed narinfo
 // size. Real nixpkgs NARs exceed 1 GiB.
-STORE_MAX_NAR_BYTES :: prep { 17179869184 }
-STORE_NAR_MAX_NODE_BYTES :: prep { 4294967296 }
-STORE_NAR_MAX_NODES :: prep { 1000000 }
-STORE_NAR_MAX_DEPTH :: prep { 256 }
-STORE_NAR_MAX_NAME_BYTES :: prep { 4096 }
-STORE_NAR_MAX_INFO_BYTES :: prep { 1048576 }
-STORE_NAR_CHUNK_BYTES :: prep { 65536 }
+STORE_MAX_NAR_BYTES :: 17179869184
+STORE_NAR_MAX_NODE_BYTES :: 4294967296
+STORE_NAR_MAX_NODES :: 1000000
+STORE_NAR_MAX_DEPTH :: 256
+STORE_NAR_MAX_NAME_BYTES :: 4096
+STORE_NAR_MAX_INFO_BYTES :: 1048576
+STORE_NAR_CHUNK_BYTES :: 65536
 
 store_nar_stage_sequence := 0
 
@@ -38,11 +38,44 @@ struct NarDirectoryEntry {
     node: NarNode
 }
 
-// A byte source for streaming decode (an `io.Reader` such as a file handle or
-// a `zstd.reader`): `read(limit)` returns at most `limit` bytes and `[]` at
-// the end of the data; cache sources also emit terminal progress while reading.
+// A byte source for streaming decode: an open file, a Zstandard stream over
+// one, or a caller's reader (cache sources emit terminal progress while
+// reading). `read(limit)` returns at most `limit` bytes and `[]` at the end of
+// the data.
+// workaround #5940(d,e): an enum, not an escaping closure owning the reader.
+enum NarByteInput {
+    File(FileReader)
+    Zstd(ZstdReader)
+    Reader(fn(Int) -[IO, FS, Net, Env, Time.Wait]> [U8] IOError!)
+}
+
 struct NarByteSource {
-    read: fn(Int) -[IO, FS, Net, Env, Time.Wait]> [U8] IOError!
+    priv input: NarByteInput
+
+    fn file(^reader: FileReader) -> NarByteSource Never! {
+        NarByteSource{input: NarByteInput.File(^reader)}
+    }
+
+    fn zstd(^reader: ZstdReader) -> NarByteSource Never! {
+        NarByteSource{input: NarByteInput.Zstd(^reader)}
+    }
+
+    fn reader(read: ^fn(Int) -[IO, FS, Net, Env, Time.Wait]> [U8] IOError!) -> NarByteSource Never! {
+        NarByteSource{input: NarByteInput.Reader(^read)}
+    }
+
+    fn read(&self, limit: Int) -[IO, FS, Net, Env, Time.Wait]> [U8] IOError! {
+        if &self.input == {
+            .File(file) -> file.read(limit)
+            .Zstd(decoder) -> {
+                if &decoder.read(limit) == {
+                    .Ok(bytes) -> Ok(bytes)
+                    .Err(error) -> Err(IOError.InvalidInput(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("zstd stream is corrupt: {error}")}))
+                }
+            }
+            .Reader(read) -> read(limit)
+        }
+    }
 }
 
 fn store_nar_invalid(message: String) -> StoreError Never! {
@@ -295,20 +328,20 @@ fn store_nar_bytes_less(left: [U8], right: [U8]) -> Bool Never! {
 // Decode a NAR directly from a bounded source into a fresh destination.
 // Metadata is bounded separately and regular-file contents are copied in
 // fixed-size chunks; the whole archive is never retained in memory.
-fn store_read_nar_stream(source: NarByteSource, destination: String, expected_nar_size: Int) -> NarStats StoreError! {
-    store_read_nar_stream_with_mode(source, destination, expected_nar_size, false)
+fn store_read_nar_stream(source: ^NarByteSource, destination: String, expected_nar_size: Int) -> NarStats StoreError! {
+    store_read_nar_stream_with_mode(^source, destination, expected_nar_size, false)
 }
 
 // Read a NAR with the POSIX-only allowances used by standard Nix cache
 // admission. Native ingest keeps the strict wrapper above.
-fn store_read_nar_stream_with_mode(source: NarByteSource, destination: String, expected_nar_size: Int, allow_nix_store_symlinks: Bool) -> NarStats StoreError! {
+fn store_read_nar_stream_with_mode(source: ^NarByteSource, destination: String, expected_nar_size: Int, allow_nix_store_symlinks: Bool) -> NarStats StoreError! {
     if expected_nar_size <= 0 -> return Err(store_nar_invalid("NAR stream size must be nonzero"))
     if files.lexists(destination) -> return Err(store_nar_invalid("NAR stream destination already exists"))
     parent :: files.dirname(destination)
     if parent == "" -> return Err(store_nar_invalid("NAR stream destination has no parent"))
     store_nar_validate_destination_parent(parent)
     files.create_dir_all(parent)
-    reader := NarStreamReader{source: source, limit: expected_nar_size + 1, bytes: 0, hasher: crypto.new(), allow_nix_store_symlinks: allow_nix_store_symlinks, nodes: 0}
+    reader := NarStreamReader{source: ^source, limit: expected_nar_size + 1, bytes: 0, hasher: crypto.new(), allow_nix_store_symlinks: allow_nix_store_symlinks, nodes: 0}
     stats :: store_nar_stream_decode(&reader, destination, expected_nar_size) ? value -> value ! error -> {
         store_nar_remove_tree(destination).drop("a failed stream destination is removed best-effort")
         return Err(error)
@@ -336,7 +369,7 @@ struct NarStreamReader {
     fn read_some(&self, wanted: Int) -> [U8] StoreError! {
         allowed :: self.limit - self.bytes
         if allowed <= 0 -> return Ok([U8]{})
-        chunk :: self.source.read(if wanted < allowed -> wanted else -> allowed)
+        chunk :: &self.source.read(if wanted < allowed -> wanted else -> allowed)
         self.bytes = self.bytes + chunk.len()
         crypto.update(&self.hasher, chunk)
         Ok(chunk)

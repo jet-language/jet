@@ -15,10 +15,10 @@ test('six phases use functions, never generic registration type arguments', () =
     ['JetSema::sema_registration_graph', 'registration'],
     ['JetSema::sema_function_check', 'sema check'],
     ['JetEval::jet_eval_machine', 'comptime'],
-    ['JetCodegen::jet_codegen_lower_type_definition', 'lowering'],
-    ['JetCodegen::jet_codegen_emit_value', 'lowering'],
-    ['JetOptimizer::mir_pass_fold_function_constants', 'optimization'],
-    ['JetCodegen::jet_rust_emit_program', 'emission'],
+    ['JetIR::ir_build_function', 'lowering'],
+    ['JetIR::ir_opt_fold_constants', 'optimization'],
+    ['JetIR::ir_x64_select_call', 'emission'],
+    ['JetBackend::x64_encode_instruction', 'emission'],
   ];
   for (const [frame, phase] of cases) assert.equal(classify(['malloc', frame]), phase);
   assert.equal(classify(['clone<JetSema::SemaRegistrationGraph>', 'JetSema::sema_function_check']), 'sema check');

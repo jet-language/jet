@@ -1,0 +1,8 @@
+Error [E0627]: This compile-time code reads `GOPHER`, which is only known at startup
+  --> tests/ui/comptime_reads_startup_constant.jet:9:21
+    |
+  9 | TABLE :: comptime { [Int]{GOPHER, 1} }
+    |                     ^^^^^^^^^^^^^^^^
+ Why: `GOPHER` could not be folded while building (its value reads the outside world, or computing it failed), so the program computes it at startup, before `fn run`; compile-time code runs while building, before that value exists
+ Fix: Compute the value at runtime instead, or make `GOPHER` foldable: a pure expression that evaluates without failing
+More: jet-lang.dev/e/E0627

@@ -1,0 +1,10 @@
+# Claim: a resource local passed as a read argument out of declaration order (reordered labels, a skipped default before a written argument, on a function or a method) is not closed by the call; it closes exactly once at its owner's scope end, on the release AOT and default jet run tiers
+fixture: out_of_order_read_argument_closes_its_resource_once.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run --release run.jet
+exit: 0 # release AOT
+stdout: = "reordered a\nagain a\nskipped b 2\nskipped again b 2\nmethod c -\nmethod again c -\nend\nclose c\nclose b\nclose a\n" # release AOT
+step: jet run run.jet
+exit: 0 # default jet run
+stdout: = "reordered a\nagain a\nskipped b 2\nskipped again b 2\nmethod c -\nmethod again c -\nend\nclose c\nclose b\nclose a\n" # default jet run

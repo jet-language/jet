@@ -1,0 +1,34 @@
+
+#Error enum TextError { Bad }
+
+Pattern :: distinct String
+
+impl Pattern.CheckedText {
+    type Error = TextError
+
+    fn check(text: String) TextError! -[]> {
+        if text == "" { return Err(TextError.Bad) }
+        return Ok(())
+    }
+
+    fn encode_hole<T: Printable>(value: T) -[]> String {
+        return "{value}"
+    }
+}
+
+
+trait Sink {
+    fn put(self, value: Pattern)
+}
+
+struct Worker {}
+
+impl Worker.Sink {
+    fn put(self, value: Pattern) {}
+}
+
+fn run() {
+    worker :: Worker{}
+    plain :: "plain"
+    worker.put(plain)
+}

@@ -2,12 +2,13 @@
 // `[[source_map]]`, and `[[semantic_record]]` blocks after a version line.
 // Records are written in semantic-key order, inputs and source maps in
 // field order, so equal locks always produce equal bytes.
+use jet_foundation.[Record]
 
-SEMANTIC_LOCK_VERSION_KEY :: prep { "semantic-lock-version" }
-SEMANTIC_LOCK_RECORD_HEADER :: prep { "[[semantic_record]]" }
-SEMANTIC_LOCK_RATIONALE_HEADER :: prep { "[[semantic_record.rationale]]" }
-SEMANTIC_LOCK_INPUT_HEADER :: prep { "[[lock_input]]" }
-SEMANTIC_LOCK_SOURCE_MAP_HEADER :: prep { "[[source_map]]" }
+SEMANTIC_LOCK_VERSION_KEY :: "semantic-lock-version"
+SEMANTIC_LOCK_RECORD_HEADER :: "[[semantic_record]]"
+SEMANTIC_LOCK_RATIONALE_HEADER :: "[[semantic_record.rationale]]"
+SEMANTIC_LOCK_INPUT_HEADER :: "[[lock_input]]"
+SEMANTIC_LOCK_SOURCE_MAP_HEADER :: "[[source_map]]"
 
 // The block a header line opens.
 enum SemanticLockSection {
@@ -261,7 +262,7 @@ fn trust_parse_semantic_lock(raw: String) -> SemanticLockFile Never! {
         if line == "" || line.starts_with("#") -> next
         if SemanticLockSection.from_header(line) == {
             .Val(section) -> {
-                reader.open(section)
+                &reader.open(section)
                 next
             }
             .None -> {}

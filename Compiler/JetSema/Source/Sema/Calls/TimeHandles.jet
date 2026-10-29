@@ -1,5 +1,6 @@
 // Checked deterministic time/random handles and the built-in Duration methods.
 use jet_foundation.[
+    AST_NODE_GENERATED,
     AccessConvention,
     CallArg,
     Diagnostic,
@@ -10,15 +11,14 @@ use jet_foundation.[
     ParamZone,
     Span,
     StrPart,
-    TExpr,
-    TExprKind,
     TLetTy,
-    TStmt,
     TFailureCarrier,
-    THandleOp,
     TagMarker,
     Type,
+    expr_span,
     type_name,
+    core_identity_is,
+    checked_symbol_local,
 ]
 
 fn sema_time_named(name: String) -> Type Never! {
@@ -196,9 +196,18 @@ fn sema_time_rng_generic_result(method: String, element: Type) -> Type Never! {
     }
 }
 
+// Rust `finish_rng_generic`: the receiver's root binding must be writable
+// (every draw advances the stream); the call site needs no `&` mark.
 fn sema_time_rng_generic_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     updated_args := args
-    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Write, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if sema_expr_place_root_ident(receiver) == .Val(root) {
+        if sema_scope_resolve_index(scopes, root) == .Val(index) {
+            if !scopes.bindings[index].mutable && scopes.bindings[index].access != AccessConvention.Write {
+                &diagnostics.push(sema_error("E0202", expr_span(receiver), "cannot draw from `{root}` — it does not have the write-access marker `&`; required before calling `.{method}()`", "every `RNG` draw advances the stream, so the receiver needs the write-access marker `&`", "declare `{root} := ...`, or pass the rng with the write-access marker `&`: `&{root}`"))
+            }
+        }
+    }
+    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     required_arity :: sema_time_rng_generic_arity(method)
     if updated_args.len() != required_arity {
         &diagnostics.push(sema_error("E0104", span, "`.{method}()` takes {required_arity} argument(s), got {updated_args.len()}", "this `RNG` draw operates on a list and optional draw parameter", if {
@@ -264,11 +273,11 @@ fn sema_time_rng_generic_method(receiver: Expr, receiver_value: TExpr, method: S
 }
 
 fn sema_time_default_string(value: String, span: Span) -> Expr Never! {
-    Expr.Str{parts: [StrPart]{StrPart.Lit{text: value}}, span: span}
+    Expr.Str{parts: [StrPart]{StrPart.Lit{text: value}}, span: span, id: AST_NODE_GENERATED}
 }
 
 fn sema_time_default_int(value: Int, span: Span) -> Expr Never! {
-    Expr.Int{value: value, span: span, width: None, raw: Val("{value}")}
+    Expr.Int{value: value, span: span, width: None, raw: Val("{value}"), id: AST_NODE_GENERATED}
 }
 
 fn sema_time_contract_param(label: String, ty: Type, default: Expr?) -> SemaCallParam Never! {
@@ -332,7 +341,7 @@ fn sema_time_civil_method(receiver: Expr, receiver_value: TExpr, owner: String, 
             borrowed :: sema_ownership_places_from_expr_in_state(receiver, scopes, &state).len() > 0
             pin_slot :: -typed.values.len() - 1
             symbol :: sema_call_binder_ref_symbol(environment, program, sema_scope_function_owner_key(scopes), typed.binder_site, pin_slot, "receiver", receiver_value.ty, span)
-            local := tir_symbol_local("binder_ref_{typed.binder_site}_{pin_slot}", span, symbol.id)
+            local := checked_symbol_local("binder_ref_{typed.binder_site}_{pin_slot}", span, symbol.id)
             local.generated = true
             local.deref = borrowed
             init := receiver_value
@@ -359,25 +368,37 @@ fn sema_call_try_time_static_method(owner: String, method: String, args: [CallAr
         if method == "new" && updated_args.len() == 1 {
             result := Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.DeterministicClock}, inner: sema_time_named("Clock")}
             if !sema_time_record_intrinsic(result, "", "Clock.new", span, environment, program, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-            source := sema_call_try_static_method(Expr.Ident{name: "Clock", span: span}, method, span, [Type]{}, [Type]{}, updated_args, span, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            source := sema_call_try_static_method(Expr.Ident{name: "Clock", span: span, id: AST_NODE_GENERATED}, method, span, [Type]{}, [Type]{}, updated_args, span, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             value := source.value ?? return SemaMethodSpecialCheck{handled: true, value: None}
-            value.ty = result
-            return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+            return SemaMethodSpecialCheck{handled: true, value: sema_time_clock_retagged(^value, result, expected, environment, program, &diagnostics)}
         }
         if method == "system" && updated_args.len() == 0 {
             result := Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.SystemClock}, inner: sema_time_named("Clock")}
             if !sema_time_record_intrinsic(result, "Time", "Clock.system", span, environment, program, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-            source := sema_call_try_static_method(Expr.Ident{name: "Clock", span: span}, method, span, [Type]{}, [Type]{}, updated_args, span, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            source := sema_call_try_static_method(Expr.Ident{name: "Clock", span: span, id: AST_NODE_GENERATED}, method, span, [Type]{}, [Type]{}, updated_args, span, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             value := source.value ?? return SemaMethodSpecialCheck{handled: true, value: None}
-            value.ty = result
-            return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+            return SemaMethodSpecialCheck{handled: true, value: sema_time_clock_retagged(^value, result, expected, environment, program, &diagnostics)}
         }
         if method == "now" && updated_args.len() == 0 {
-            constructor :: Expr.MethodCall{receiver: Expr.Ident{name: "Instant", span: span}, method: "__now", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, recv_type: None, resolved_ret: None}
+            constructor :: Expr.MethodCall{receiver: Expr.Ident{name: "Instant", span: span, id: AST_NODE_GENERATED}, method: "__now", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
             return SemaMethodSpecialCheck{handled: true, value: sema_check_expression(constructor, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)}
         }
     }
     SemaMethodSpecialCheck{handled: false, value: None}
+}
+
+// The source constructor's `Clock Never!` keeps its carrier: only the success
+// slot takes the clock tag, so the call root still propagates (unwraps) the
+// Result the callee returns instead of reading it as a bare Clock.
+fn sema_time_clock_retagged(value: ^TExpr, tagged: Type, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
+    retagged := ^value
+    if retagged.ty == .Result(_, err) {
+        // copy: `err` is a payload of `retagged.ty`, which the new Type.Result replaces
+        tir_expr_retype(&retagged, Type.Result{ok: tagged, err: err.copy()})
+        return Val(retagged)
+    }
+    tir_expr_retype(&retagged, tagged)
+    sema_expr_expected(retagged, expected, environment, program, &diagnostics)
 }
 
 fn sema_call_try_time_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
@@ -388,7 +409,65 @@ fn sema_call_try_time_handle_method(receiver: Expr, receiver_value: TExpr, metho
         if method != "round" -> return sema_time_duration_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return sema_time_civil_method(receiver, receiver_value, receiver_name, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
+    if sema_time_testing_handle_is(receiver_name, "DeterministicWorld") -> return sema_time_world_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if sema_time_testing_handle_is(receiver_name, "HistoryRNG") -> return sema_time_history_rng_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     SemaMethodSpecialCheck{handled: false, value: None}
+}
+
+// The runtime-owned `core.testing` handles keep their bare leaf; a
+// canonical Core identity names the same handle.
+fn sema_time_testing_handle_is(name: String, leaf: String) -> Bool Never! {
+    name == leaf || core_identity_is(name, "core.testing", leaf)
+}
+
+// One fixed built-in handle method: its TIR operation, checked result and
+// declared argument types.
+struct SemaTimeHandleContract {
+    operation: THandleOp
+    result: Type
+    required: [Type]
+}
+
+// Rust `deterministic_world_method_return` (jet-foundation
+// Collections.rs:2042) with the TIR ops of `handle_method_op`
+// (subset/handles.rs:191-194). The world is read through its receiver, and
+// Rust gives its arguments no declared type, so `advance(2s)` checks its
+// argument as written.
+fn sema_time_world_contract(method: String, argc: Int) -> SemaTimeHandleContract? {
+    return if {
+        method == "now" && argc == 0 -> Val(SemaTimeHandleContract{operation: THandleOp.WorldNow, result: Type.Int, required: [Type]{}})
+        method == "advance" && argc == 1 -> Val(SemaTimeHandleContract{operation: THandleOp.WorldAdvance, result: Type.Int, required: [Type]{}})
+        method == "wait_idle" && argc == 0 -> Val(SemaTimeHandleContract{operation: THandleOp.WorldWaitIdle, result: sema_time_named("Unit"), required: [Type]{}})
+        method == "history" && argc == 0 -> Val(SemaTimeHandleContract{operation: THandleOp.WorldHistory, result: Type.String, required: [Type]{}})
+        else -> None
+    }
+}
+
+fn sema_time_world_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    contract :: sema_time_world_contract(method, args.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    values :: sema_time_untyped_values(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    sema_time_finish_handle(receiver_value, contract.operation, values, contract.result, "", "DeterministicWorld.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
+}
+
+// Rust `history_rng_method_return` / `builtin_method_arg_types`
+// (Collections.rs:2086, 3856): `next_u64()` and `below(bound: U64)` both
+// advance the stream, so the receiver needs edit access
+// (`builtin_method_mutates`, Collections.rs:2884).
+fn sema_time_history_rng_contract(method: String, argc: Int) -> SemaTimeHandleContract? {
+    u64 :: Type.IntN{signed: false, bits: 64}
+    return if {
+        method == "next_u64" && argc == 0 -> Val(SemaTimeHandleContract{operation: THandleOp.HistoryRNGNextU64, result: u64, required: [Type]{}})
+        method == "below" && argc == 1 -> Val(SemaTimeHandleContract{operation: THandleOp.HistoryRNGBelow, result: u64, required: [Type]{u64}})
+        else -> None
+    }
+}
+
+fn sema_time_history_rng_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    contract :: sema_time_history_rng_contract(method, args.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    values :: sema_time_check_values(args, contract.required, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_time_check_method_ownership(receiver, method, args, contract.required, AccessConvention.Write, span, &scopes, &state, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    sema_time_finish_handle(receiver_value, contract.operation, values, contract.result, "", "HistoryRNG.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
 }
 
 // Rust `duration_method_return` / `builtin_method_arg_types` (
@@ -416,17 +495,9 @@ fn sema_time_duration_args(method: String) -> [Type] Never! {
     }
 }
 
-// Rust `handle_method_op`: a written `.Unit` argument of `.in(…)` names its
-// unit on the operation.
-fn sema_time_duration_op(method: String, args: [CallArg]) -> THandleOp Never! {
+fn sema_time_duration_op(method: String) -> THandleOp Never! {
     return if {
-        method == "in" -> {
-            unit := String?{None}
-            // The argument has already checked as a `DurationUnit`, so a
-            // written `.Unit` is one of its variants.
-            if args[0].expr == .EnumLit(_, variant, _, _, _, _) -> unit = Val(variant)
-            THandleOp.DurationIn{unit: unit}
-        }
+        method == "in" -> THandleOp.DurationIn
         method == "is_zero" -> THandleOp.DurationIsZero
         method == "total_seconds" -> THandleOp.DurationTotalSeconds
         method == "difference" -> THandleOp.DurationDifference
@@ -442,5 +513,5 @@ fn sema_time_duration_method(receiver: Expr, receiver_value: TExpr, method: Stri
     required :: sema_time_duration_args(method)
     values :: sema_time_check_values(args, required, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_time_check_method_ownership(receiver, method, args, required, AccessConvention.Read, span, &scopes, &state, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    sema_time_finish_handle(receiver_value, sema_time_duration_op(method, args), values, result, "", "Duration.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
+    sema_time_finish_handle(receiver_value, sema_time_duration_op(method), values, result, "", "Duration.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
 }

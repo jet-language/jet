@@ -10,7 +10,7 @@ use jet_foundation.[
     NamedSpan,
     Span,
     Type,
-    mir_sha256_hex_bytes,
+    sha256_hex_bytes,
 ]
 use jet_lexer.[
     TOKEN_DOT,
@@ -155,14 +155,14 @@ fn parser_c_module_callback_metadata(function: ^ExternFn, lib: String) -> Extern
     &digest_bytes.push(U8{0})
     loop byte in identity.bytes() -> &digest_bytes.push(byte)
     updated.callback_transport = Val(transport)
-    updated.callback_plan_digest = Val(mir_sha256_hex_bytes(digest_bytes))
+    updated.callback_plan_digest = Val(sha256_hex_bytes(digest_bytes))
     updated.callback_identity = Val(identity)
     updated
 }
 
 fn parser_foreign_marker_name(marker: Marker, index: Int) -> NamedSpan? {
     value :: parser_marker_expression(marker, index) ?? return None
-    if value == { .Ident(name, span) -> Val(NamedSpan{name: name, span: span}) else -> None }
+    if value == { .Ident(name, span, _) -> Val(NamedSpan{name: name, span: span}) else -> None }
 }
 
 fn parser_parse_extern_fn(state: &JetParserState, allow_missing_semicolon: Bool) -> ExternFn {

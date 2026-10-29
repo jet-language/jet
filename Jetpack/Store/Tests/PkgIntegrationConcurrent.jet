@@ -44,7 +44,7 @@ fn store_concurrent_original() {
     right :: files.tmpdir("concurrent-build-right-") ?? panic("right scratch")
     scratches :: [String]{left, right}
     loop scratch in scratches {
-        files.write(files.join(scratch, "package.jet"), "name: \"concurrent-build\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ allow: [IO] }} }}\n") ?? panic("package source")
+        files.write(files.join(scratch, "package.jet"), "name: \"concurrent-build\"\nversion: \"0.1.0\"\nauthority: {{ allow: [IO] }}\n") ?? panic("package source")
         files.write(files.join(scratch, "main.jet"), "\nfn run() {{\n    print(\"shared store\")\n}}\n") ?? panic("main source")
     }
     store :: files.join(left, "store")
@@ -55,10 +55,10 @@ fn store_concurrent_original() {
     right_child := store_concurrent_build_spec(jet, right, store).spawn() ?? panic("spawn right concurrent build")
     time.sleep(time.duration_ms(3000))
     files.write(files.join(store, "release"), "release") ?? panic("release holder")
-    holder_result :: &holder.wait() ?? panic("join holder")
+    holder_result :: holder.wait() ?? panic("join holder")
     assert(holder_result.success, "holder failed: {holder_result.output} {holder_result.errors}")
-    left_build :: &left_child.wait() ?? panic("wait left build")
-    right_build :: &right_child.wait() ?? panic("wait right build")
+    left_build :: left_child.wait() ?? panic("wait left build")
+    right_build :: right_child.wait() ?? panic("wait right build")
     assert(left_build.success, "left concurrent build failed: {left_build.output} {left_build.errors}")
     assert(right_build.success, "right concurrent build failed: {right_build.output} {right_build.errors}")
     loop scratch in scratches {
@@ -106,7 +106,7 @@ fn store_concurrent_fresh_original() {
                 .stdout(.Capture).stderr(.Capture).spawn() ?? panic("spawn fresh store opener"))
         }
         loop at in 0..<children.len() {
-            opened :: &children[at].wait() ?? panic("wait fresh store opener")
+            opened :: children[at].wait() ?? panic("wait fresh store opener")
             assert(opened.success, "round {round}: a concurrent open of a fresh store failed: {opened.output} {opened.errors}")
         }
         loop name in ([String]{"cas", "ac", "lto", "locks", "leases", "quarantine", "build-records/records"}) {

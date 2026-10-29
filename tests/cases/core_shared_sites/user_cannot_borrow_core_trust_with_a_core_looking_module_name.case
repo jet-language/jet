@@ -1,0 +1,16 @@
+# tests/core_shared_sites.rs::user_cannot_borrow_core_trust_with_a_core_looking_module_name at tests/core_shared_sites.rs:65; hand-port
+fixture: user_cannot_borrow_core_trust_with_a_core_looking_module_name.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check process/main.jet
+exit: nonzero
+stderr: ~ "[E0067]" # original: the user seam is refused with E0067
+step: jet check world/main.jet
+exit: nonzero
+stderr: ~ "[E0067]" # original: the user seam is refused with E0067
+step: jet check thread/main.jet
+exit: nonzero
+stderr: ~ "[E0067]" # original: the user seam is refused with E0067
+step: jet check attempt/main.jet
+exit: nonzero
+stderr: ~ "[E0067]" # original: the user seam is refused with E0067

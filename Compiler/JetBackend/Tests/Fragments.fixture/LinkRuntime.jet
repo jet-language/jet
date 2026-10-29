@@ -1,0 +1,166 @@
+// Link relocatable objects with the prebuilt runtime into a static
+// executable with the in-process linker (Image/StaticLink.jet), the way
+// `jet build` does, or build the runtime pack (Image/RuntimePack.jet) from
+// the Jet runtime object and C platform dependencies, or build the runtime
+// image from a pack and bind a program object to it (Image/MemoryLink.jet);
+// report read/link/write times.
+// Assembled with its sources into `unit.jet` by run-link.mjs.
+//
+//     jet run unit.jet -- <output> <input>...
+//     jet run unit.jet -- --pack <output> <Jet object> <C platform input>...
+//     jet run unit.jet -- --image <output> <runtime pack>
+//     jet run unit.jet -- --bind <output> <runtime image> <program object>
+//     jet run unit.jet -- --image-compare <runtime pack> <runtime image>
+//
+// Link inputs are relocatable objects (the program's, a runtime pack) and
+// static archives, told apart by their magic bytes. Pack inputs require a
+// standalone Jet runtime object; archives only satisfy its C dependencies.
+// `--image-compare` checks the image's loaded bytes against the ordinary
+// link of the pack at the same base with every export kept and a stub
+// `main` after the runtime: they may differ only in the ELF and program
+// headers and at the image's `main` places.
+use jet_backend.[x64_link_executable, x64_link_runtime_image, x64_link_runtime_pack, x64_link_with_runtime_image]
+use core.files as files
+use core.process as process
+use core.time as time
+
+fn lr_status(args: [String]) -> Int {
+    mode :: if args.len() > 0 && args[0].starts_with("--") -> args[0] else -> ""
+    if mode == "--image-compare" {
+        if args.len() != 3 {
+            print("usage: unit.jet --image-compare <runtime pack> <runtime image>")
+            return 64
+        }
+        return lr_image_compare(args[1], args[2])
+    }
+    first :: if mode == "" -> 0 else -> 1
+    if args.len() < first + 2 || (mode == "--image" && args.len() != 3) || (mode == "--bind" && args.len() != 4) {
+        print("usage: unit.jet [--pack | --image | --bind] <output> <input>...")
+        return 64
+    }
+    output :: args[first]
+    names := [String]{}
+    bufs := [[U8]]{}
+    read_started :: time.instant()
+    loop index in first + 1..<args.len() {
+        &names.push(args[index])
+        &bufs.push(files.read_bytes(args[index]) ?? {
+            print("cannot read {args[index]}")
+            return 66
+        })
+    }
+    read_ms :: read_started.elapsed_millis()
+    started :: time.instant()
+    // Names program objects may call directly besides the runtime's C ABI:
+    // the memory primitives and libgcc's backtrace walk (the unwind probe).
+    extra_roots :: [String]{"memcpy", "memmove", "memset", "memcmp", "_Unwind_Backtrace"}
+    result := X64ExecutableResult{bytes: [U8]{}, errors: [String]{}}
+    if mode == "--pack" {
+        result = x64_link_runtime_pack(names, ^bufs, extra_roots)
+    } else if mode == "--image" {
+        pack :: &bufs.pop() ?? return 66
+        result = x64_link_runtime_image(names[0], ^pack)
+    } else if mode == "--bind" {
+        program :: &bufs.pop() ?? return 66
+        image :: &bufs.pop() ?? return 66
+        result = x64_link_with_runtime_image(names[1], ^program, ^image)
+    } else {
+        result = x64_link_executable(names, ^bufs, LINK_BASE, compiler_threads_single())
+    }
+    link_ms :: started.elapsed_millis()
+    if result.errors.len() > 0 {
+        loop error in result.errors -> print("link: {error}")
+        return 1
+    }
+    write_started :: time.instant()
+    files.write_bytes(output, result.bytes) ?? {
+        print("cannot write {output}")
+        return 73
+    }
+    if mode != "--pack" {
+        files.set_mode(output, 0o755) ?? {
+            print("cannot make {output} executable")
+            return 73
+        }
+    }
+    write_ms :: write_started.elapsed_millis()
+    print("linked {output}: {result.bytes.len()} bytes; read {read_ms} ms, link {link_ms} ms, write {write_ms} ms")
+    0
+}
+
+fn lr_image_compare(pack_path: String, image_path: String) -> Int {
+    pack :: files.read_bytes(pack_path) ?? {
+        print("cannot read {pack_path}")
+        return 66
+    }
+    image :: files.read_bytes(image_path) ?? {
+        print("cannot read {image_path}")
+        return 66
+    }
+    exports := [String]{}
+    p := link_context(^[[U8]]{pack.copy()}, LINK_RUN_BASE)
+    link_load_inputs(&p, [String]{pack_path})
+    loop g in 0..<p.g_name.len() {
+        if p.g_kind[g] == LINK_G_FILE && p.g_alias[g] < 0 && p.g_section[g] >= 0 -> &exports.push(p.g_name[g])
+    }
+    stub := link_synth()
+    link_synth_function(&stub, "main")
+    link_synth_code(&stub, [Int]{0xc3})
+    request :: X64ResidentLinkRequest?{Val(X64ResidentLinkRequest{runtime_input: 0, callable_exports: exports})}
+    linked :: link_executable_image([String]{pack_path, "stub.o"}, ^[[U8]]{pack.copy(), link_synth_object(stub)}, LINK_RUN_BASE, ^request, compiler_threads_single())
+    reference :: linked.image.bytes
+    if linked.image.errors.len() > 0 {
+        loop error in linked.image.errors -> print("reference link: {error}")
+        return 1
+    }
+    c := link_context(^[[U8]]{[U8]{}, image.copy()}, LINK_RUN_BASE)
+    view :: link_image_view(&c, 1, 0, 0)
+    if c.errors.len() > 0 {
+        loop error in c.errors -> print("image: {error}")
+        return 1
+    }
+    headers :: LINK_EHDR_SIZE + LINK_PHDR_SIZE * view.phnum
+    header_bytes := 0
+    site_bytes := 0
+    gap_bytes := 0
+    unexplained := 0
+    loop at in 0..<view.load_end {
+        if at < reference.len() && reference[at] == image[at] -> next
+        if at < headers {
+            header_bytes += 1
+            next
+        }
+        // Padding between the image's segments is not loaded (the reference
+        // has its stub `main` there).
+        loaded := false
+        loop k in 0..<view.phnum {
+            h :: view.phoff + LINK_PHDR_SIZE * k
+            offset :: link_s64(c.bufs, 1, h + 8)
+            if link_u32(c.bufs, 1, h) == 1 && at >= offset && at < offset + link_s64(c.bufs, 1, h + 32) -> loaded = true
+        }
+        if !loaded {
+            gap_bytes += 1
+            next
+        }
+        site := false
+        loop k in 0..<view.sites.len().div_euclid(3) {
+            start :: view.sites[3 * k] - view.base
+            width :: if view.sites[3 * k + 1] == LINK_R_64 -> 8 else -> 4
+            if at >= start && at < start + width -> site = true
+        }
+        if site {
+            site_bytes += 1
+            next
+        }
+        if unexplained < 20 -> print("unexplained difference at offset {at} (address {view.base + at})")
+        unexplained += 1
+    }
+    print("image {image_path}: {view.load_end} loaded bytes at base {view.base}, {view.sites.len().div_euclid(3)} `main` places; reference {reference.len()} bytes")
+    print("differences: {header_bytes} header bytes, {site_bytes} `main` place bytes, {gap_bytes} unloaded padding bytes, {unexplained} unexplained")
+    if unexplained > 0 -> return 1
+    0
+}
+
+fn run() {
+    process.exit(lr_status(process.args()))
+}

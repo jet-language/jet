@@ -2,13 +2,12 @@
 // Every Rust `Fmt` method `name` is the free function `jfmt_name(&f, …)`; the
 // shared state, comment attachment and comma-list helpers live in Formatter.jet.
 use jet_foundation.[
+    AST_NODE_GENERATED,
     BinOp,
     BindName,
     BindPattern,
     Binding,
-    Call,
     CallArg,
-    ContextField,
     Expr,
     FencedNames,
     FencedStatement,
@@ -17,16 +16,14 @@ use jet_foundation.[
     Marker,
     NameRange,
     NamedSpan,
-    Pattern,
     PolicyDeclaration,
     PolicyKey,
     PolicyValue,
     Span,
     Stmt,
-    StrPart,
     SwitchArm,
-    TupleField,
     expr_span,
+    type_name,
 ]
 use jet_lexer.[
     TOKEN_BLOCK_COMMENT,
@@ -155,6 +152,8 @@ fn jfmt_policy_key_name(key: PolicyKey) -> String Never! {
         .PrecisionDemotion -> "precision_demotion"
         .Structure -> "structure"
         .LintAllow -> "lint_allow"
+        .CheckRemoval -> "check_removal"
+        .LinkOverride -> "link_override"
         .ScopedGC -> "gc"
         .ExplicitUnits -> "explicit_units"
         .Copies -> "copies"
@@ -216,7 +215,7 @@ fn jfmt_block_marker(stmt: Stmt, policies: [PolicyDeclaration]) -> JetFmtBlockMa
                     else -> false
                 }
                 if !tracked -> next
-                &args.push(JetFmtMarkerArgument.Expr{label: Val("obligations"), value: Expr.Ident{name: jfmt_policy_value_display(declaration.value), span: span}})
+                &args.push(JetFmtMarkerArgument.Expr{label: Val("obligations"), value: Expr.Ident{name: jfmt_policy_value_display(declaration.value), span: span, id: AST_NODE_GENERATED}})
                 break
             }
             Val(JetFmtBlockMarker{name: "Unsafe", negated: false, args: args})
@@ -260,7 +259,7 @@ fn jfmt_block_marker(stmt: Stmt, policies: [PolicyDeclaration]) -> JetFmtBlockMa
 // Rust `AST::readiness_head`.
 fn jfmt_readiness_head_of(expr: Expr) -> JetFmtReadinessHead? Never! {
     if expr == {
-        .TupleLit(fields, _, _) -> {
+        .TupleLit(fields, _, _, _) -> {
             if fields.len() != 1 -> return None
             if fields[0].name == parser_select_after_field() -> return Val(JetFmtReadinessHead.After{duration: fields[0].value})
             Val(JetFmtReadinessHead.Receive{binding: fields[0].name, source: fields[0].value})
@@ -314,7 +313,7 @@ fn jfmt_uses_classic_if_spelling(bytes: [U8], if_span: Span, first_condition: Sp
 fn jfmt_expr_without_parens(expr: Expr) -> Expr Never! {
     current := expr
     loop {
-        if current == .Paren(inner, _) {
+        if current == .Paren(inner, _, _) {
             current = inner
         } else {
             break
@@ -671,15 +670,15 @@ fn jfmt_fmt_stmt(f: &JetFmt, stmt: Stmt) {
         }
         .Expr(e) -> {
             unsafe_assert :: if e == {
-                .Call(call) -> call.name == "__jet_unsafe_assert"
+                .Call(call, _) -> call.name == "__jet_unsafe_assert"
                 else -> false
             }
             if unsafe_assert {
-                if e == .Call(call) {
+                if e == .Call(call, _) {
                     jfmt_write(&f, "assert")
                     loop index in 0..<call.args.len() {
                         jfmt_write(&f, if index == 0 -> " " else -> ", ")
-                        if call.args[index].expr == .Ident(name, _) -> jfmt_write(&f, name)
+                        if call.args[index].expr == .Ident(name, _, _) -> jfmt_write(&f, name)
                     }
                 }
             } else {
@@ -842,14 +841,14 @@ fn jfmt_fmt_stmt(f: &JetFmt, stmt: Stmt) {
         }
         // `#FX(Net, DB) { … }` effect-restriction region.
         .AuthorityScope(_, _, _, body, _) -> jfmt_fmt_body(&f, body)
-        // `prep { … }` shared-preparation block.
+        // `comptime { … }` shared-preparation block.
         .ComptimeBlock(body, is_template_loop, _) -> {
-            // A template loop prints as `prep loop …`.
+            // A template loop prints as `comptime loop …`.
             if is_template_loop && body.len() == 1 {
-                jfmt_write(&f, "prep ")
+                jfmt_write(&f, "comptime ")
                 jfmt_fmt_stmt(&f, body[0])
             } else {
-                jfmt_write(&f, "prep {{")
+                jfmt_write(&f, "comptime {{")
                 jfmt_newline(&f)
                 f.indent += 1
                 jfmt_fmt_block_stmts(&f, body)
@@ -857,9 +856,9 @@ fn jfmt_fmt_stmt(f: &JetFmt, stmt: Stmt) {
                 jfmt_end_block(&f)
             }
         }
-        // Format like `if` with a `prep` lead.
+        // Format like `if` with a `comptime` lead.
         .ComptimeIf(cond, _, then_body, else_body, _, _) -> {
-            jfmt_write(&f, "prep if ")
+            jfmt_write(&f, "comptime if ")
             jfmt_fmt_cond(&f, cond)
             jfmt_write(&f, " {{")
             jfmt_newline(&f)
@@ -876,11 +875,11 @@ fn jfmt_fmt_stmt(f: &JetFmt, stmt: Stmt) {
                 jfmt_end_block(&f)
             }
         }
-        // `prep if $build.os == { … }` — the OS-dispatch
+        // `comptime if $build.os == { … }` — the OS-dispatch
         // switch. Formats exactly like a `Stmt::Switch` (arm grammar)
-        // with a `prep if` lead.
+        // with a `comptime if` lead.
         .ComptimeSwitch(subject, arms, else_body, _) -> {
-            jfmt_write(&f, "prep if ")
+            jfmt_write(&f, "comptime if ")
             jfmt_fmt_dispatch(&f, subject, arms, else_body, true)
         }
         // `#Context(field: value, …) { … }`.
@@ -908,7 +907,7 @@ fn jfmt_fmt_stmt(f: &JetFmt, stmt: Stmt) {
                     arg_span :: expr_span(arg)
                     jfmt_comma_before(&f, index, multiline, arg_span.start)
                     single_field := false
-                    if arg == .TupleLit(fields, _, _) {
+                    if arg == .TupleLit(fields, _, _, _) {
                         if fields.len() == 1 {
                             jfmt_write(&f, fields[0].name)
                             jfmt_write(&f, ": ")
@@ -1067,7 +1066,7 @@ fn jfmt_fmt_effect_loop_body(f: &JetFmt, body: [Stmt], header_end: Int, arrow_bo
 
 // Render a dispatch body
 // `OP { arm -> … [else -> …] }` (the caller has already written the `if` /
-// `prep if` lead). Shared by `Stmt::Switch` and `Stmt::ComptimeSwitch`.
+// `comptime if` lead). Shared by `Stmt::Switch` and `Stmt::ComptimeSwitch`.
 fn jfmt_fmt_dispatch(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, force_arm_blocks: Bool) {
     table_op :: jfmt_dispatch_op_from_source(f, subject) ?? jfmt_dispatch_op(f, subject, arms)
     jfmt_fmt_expr(&f, subject, JFMT_PREC_OR_FALLBACK)
@@ -1214,7 +1213,7 @@ fn jfmt_fmt_classic_switch(f: &JetFmt, arms: [SwitchArm], else_body: [Stmt]?) {
         preserve_loop_exit_braces :: jfmt_authored_braced_loop_exit(f, arm.body)
         jfmt_fmt_cond(&f, arm.cond)
         paren_cond :: if arm.cond == {
-            .Paren(_, _) -> true
+            .Paren(_, _, _) -> true
             else -> false
         }
         jfmt_fmt_control_body_after_header(&f, arm.body, paren_cond || preserve_loop_exit_braces)
@@ -1332,11 +1331,11 @@ fn jfmt_fmt_control_body_after_header(f: &JetFmt, body: [Stmt], force_braces: Bo
 
 fn jfmt_arm_head_starts_with_dot(cond: Expr) -> Bool Never! {
     if cond == {
-        .PatternTest(_, pattern, _) -> if pattern == {
+        .PatternTest(_, pattern, _, _) -> if pattern == {
             .Variant(_, _, _, _) -> true
             else -> false
         }
-        .Binary(_, left, _, _) -> jfmt_arm_head_starts_with_dot(left)
+        .Binary(_, left, _, _, _) -> jfmt_arm_head_starts_with_dot(left)
         else -> false
     }
 }
@@ -1377,7 +1376,7 @@ fn jfmt_fmt_switch_cond(f: &JetFmt, subject: Expr, table_op: BinOp, cond: Expr, 
         return
     }
     if cond == {
-        .Binary(op, lhs, rhs, _) -> {
+        .Binary(op, lhs, rhs, _, _) -> {
             if op == BinOp.And || op == BinOp.Or {
                 my_prec :: jfmt_prec_of_bin(op)
                 needs_paren :: prec > my_prec
@@ -1402,14 +1401,14 @@ fn jfmt_fmt_switch_cond(f: &JetFmt, subject: Expr, table_op: BinOp, cond: Expr, 
         }
         // A pattern arm head is bare — the comparison marker on the
         // `if` already binds it to the subject.
-        .PatternTest(_, pattern, _) -> jfmt_fmt_pattern(&f, pattern)
+        .PatternTest(_, pattern, _, _) -> jfmt_fmt_pattern(&f, pattern)
         else -> jfmt_fmt_expr(&f, cond, prec)
     }
 }
 
 fn jfmt_switch_cond_slot(op: BinOp, child: Expr, base: Int) -> Int Never! {
     if op == BinOp.Or {
-        if child == .Binary(child_op, _, _, _) {
+        if child == .Binary(child_op, _, _, _, _) {
             if child_op == BinOp.And -> return jfmt_prec_add_rhs(jfmt_prec_of_bin(BinOp.And))
         }
     }
@@ -1444,7 +1443,7 @@ fn jfmt_dispatch_op(f: JetFmt, subject: Expr, arms: [SwitchArm]) -> BinOp Never!
 }
 
 fn jfmt_collect_dispatch_ops(f: JetFmt, subject: Expr, e: Expr, found: &BinOp?) Never! {
-    if e == .Binary(op, lhs, rhs, _) {
+    if e == .Binary(op, lhs, rhs, _, _) {
         if jfmt_bin_op_is_comparison(op) && jfmt_same_subject(f, lhs, subject) {
             // Mixed predicate + distributed leaves keep the first distributed
             // OP only when source was unavailable.
@@ -1458,14 +1457,14 @@ fn jfmt_collect_dispatch_ops(f: JetFmt, subject: Expr, e: Expr, found: &BinOp?) 
 
 // True when `e` is an Or tree whose every leaf is `subject table_op value`.
 fn jfmt_is_all_subject_alts(f: JetFmt, subject: Expr, table_op: BinOp, e: Expr) -> Bool Never! {
-    if e == .Binary(op, lhs, rhs, _) {
+    if e == .Binary(op, lhs, rhs, _, _) {
         if op == BinOp.Or -> return jfmt_is_subject_alt_leaf(f, subject, table_op, lhs) && jfmt_is_subject_alt_leaf(f, subject, table_op, rhs)
     }
     false
 }
 
 fn jfmt_is_subject_alt_leaf(f: JetFmt, subject: Expr, table_op: BinOp, e: Expr) -> Bool Never! {
-    if e == .Binary(op, lhs, rhs, _) {
+    if e == .Binary(op, lhs, rhs, _, _) {
         if op == table_op -> return jfmt_same_subject(f, lhs, subject)
         if op == BinOp.Or -> return jfmt_is_subject_alt_leaf(f, subject, table_op, lhs) && jfmt_is_subject_alt_leaf(f, subject, table_op, rhs)
     }
@@ -1474,7 +1473,7 @@ fn jfmt_is_subject_alt_leaf(f: JetFmt, subject: Expr, table_op: BinOp, e: Expr) 
 
 // Emit alternates with `|` separators (caller adds outer parens if needed).
 fn jfmt_fmt_arm_alternates(f: &JetFmt, subject: Expr, table_op: BinOp, e: Expr) {
-    if e == .Binary(op, lhs, rhs, _) {
+    if e == .Binary(op, lhs, rhs, _, _) {
         if op == BinOp.Or {
             jfmt_fmt_arm_alternates(&f, subject, table_op, lhs)
             jfmt_write(&f, " | ")
@@ -1499,7 +1498,7 @@ fn jfmt_fmt_arm_alternates(f: &JetFmt, subject: Expr, table_op: BinOp, e: Expr) 
 // right edge is still the anchor's end, which truncates a call's argument
 // list, so two heads differing only inside those parens still compare equal.
 fn jfmt_same_subject(f: JetFmt, a: Expr, subject: Expr) -> Bool Never! {
-    if a == .Ident(name, _) {
+    if a == .Ident(name, _, _) {
         if name == "it" -> return true
     }
     a_start :: jfmt_expr_start(a)
@@ -1516,7 +1515,7 @@ fn jfmt_same_subject(f: JetFmt, a: Expr, subject: Expr) -> Bool Never! {
 fn jfmt_fmt_refutable_subject(f: &JetFmt, expr: Expr) {
     unwrapped :: jfmt_expr_without_parens(expr)
     postfix :: if unwrapped == {
-        .Call(_) | .CallValue(_, _, _) | .MethodCall(_, _, _, _, _, _, _, _) | .Field(_, _, _) | .OptField(_, _, _, _, _) | .Index(_, _, _, _) | .Slice(_, _, _, _, _) -> true
+        .Call(_, _) | .CallValue(_, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) -> true
         else -> false
     }
     if postfix {
@@ -1533,7 +1532,7 @@ fn jfmt_fmt_binding(f: &JetFmt, b: Binding) {
     }
     loop marker in b.markers -> jfmt_write(&f, "#{marker.name} ")
     // Compile time is always the explicit
-    // `name :: prep { value }`.
+    // `name :: comptime { value }`.
     if b.is_comptime {
         jfmt_write(&f, b.name)
         jfmt_write(&f, " :: ")
@@ -1579,9 +1578,9 @@ fn jfmt_fmt_binding(f: &JetFmt, b: Binding) {
 }
 
 // The prepared value of a compile-time binding,
-// `prep { value }`.
+// `comptime { value }`.
 fn jfmt_fmt_prepared_value(f: &JetFmt, value: Expr) {
-    jfmt_write(&f, "prep {{ ")
+    jfmt_write(&f, "comptime {{ ")
     jfmt_fmt_expr(&f, value, JFMT_PREC_OR_FALLBACK)
     jfmt_write(&f, " }}")
 }
@@ -1620,9 +1619,27 @@ fn jfmt_fmt_bind_pattern(f: &JetFmt, pat: BindPattern) {
             jfmt_write(&f, "]")
         }
         .Tuple(elems, _) -> {
-            jfmt_write(&f, "(")
-            jfmt_fmt_bind_names(&f, elems)
-            jfmt_write(&f, ")")
+            renamed := false
+            loop elem in elems {
+                if elem.rename != None -> renamed = true
+            }
+            if !renamed {
+                jfmt_write(&f, "(")
+                jfmt_fmt_bind_names(&f, elems)
+                jfmt_write(&f, ")")
+                return
+            }
+            // `{ member: local, … }` renames tuple members.
+            jfmt_write(&f, "{{ ")
+            loop index in 0..<elems.len() {
+                if index > 0 -> jfmt_write(&f, ", ")
+                jfmt_write(&f, elems[index].name)
+                if elems[index].rename == .Val(rename) {
+                    jfmt_write(&f, ": ")
+                    jfmt_write(&f, rename.name)
+                }
+            }
+            jfmt_write(&f, " }}")
         }
         .Refutable(_, _, _, _) -> panic("refutable bindings use statement syntax")
     }
@@ -1653,7 +1670,7 @@ fn jfmt_fmt_lvalue(f: &JetFmt, lv: LValue) {
 // `Ident` equal to `layout_name`, method is `h`/`v`, exactly two
 // single-literal `Str` args); anything else is left as-is.
 fn jfmt_single_str_lit(e: Expr) -> String? Never! {
-    if e == .Str(parts, _) {
+    if e == .Str(parts, _, _) {
         if parts.len() == 1 {
             if parts[0] == .Lit(text) -> return Val(text)
         }
@@ -1689,16 +1706,16 @@ fn jfmt_resugar_layout_args(layout_name: String, args: [CallArg]) -> [CallArg] N
 }
 
 fn jfmt_resugar_layout_expr(layout_name: String, e: Expr) -> Expr Never! {
-    if e == .MethodCall(receiver, method, method_span, _, _, args, _, _) {
+    if e == .MethodCall(receiver, method, method_span, _, _, args, _) {
         if (method == "h" || method == "v") && args.len() == 2 {
-            if receiver == .Ident(recv_name, recv_span) {
+            if receiver == .Ident(recv_name, recv_span, _) {
                 if recv_name == layout_name {
                     box_name :: jfmt_single_str_lit(args[0].expr)
                     anchor :: jfmt_single_str_lit(args[1].expr)
                     if box_name == .Val(box_text) {
                         if anchor == .Val(anchor_text) {
                             shown :: if box_text == layout_name -> "self" else -> box_text
-                            return Expr.Field{base: Expr.Ident{name: shown, span: recv_span}, member: anchor_text, span: method_span}
+                            return Expr.Field{base: Expr.Ident{name: shown, span: recv_span, id: AST_NODE_GENERATED}, member: anchor_text, span: method_span, id: AST_NODE_GENERATED}
                         }
                     }
                 }
@@ -1706,15 +1723,14 @@ fn jfmt_resugar_layout_expr(layout_name: String, e: Expr) -> Expr Never! {
         }
     }
     if e == {
-        .Binary(op, l, r, span) -> Expr.Binary{op: op, left: jfmt_resugar_layout_expr(layout_name, l), right: jfmt_resugar_layout_expr(layout_name, r), span: span}
-        .Unary(op, x, span) -> Expr.Unary{op: op, operand: jfmt_resugar_layout_expr(layout_name, x), span: span}
-        .Field(base, field, span) -> Expr.Field{base: jfmt_resugar_layout_expr(layout_name, base), member: field, span: span}
-        // copy: `recv_type` and `resolved_ret` are payloads of read parameter `e`, which keeps the originals; the new Expr.MethodCall's fields own `recv_type` and `resolved_ret`
-        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret) -> Expr.MethodCall{receiver: jfmt_resugar_layout_expr(layout_name, receiver), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: jfmt_resugar_layout_args(layout_name, args), recv_type: recv_type.copy(), resolved_ret: resolved_ret.copy()}
-        .Call(call) -> {
+        .Binary(op, l, r, span, node) -> Expr.Binary{op: op, left: jfmt_resugar_layout_expr(layout_name, l), right: jfmt_resugar_layout_expr(layout_name, r), span: span, id: node}
+        .Unary(op, x, span, node) -> Expr.Unary{op: op, operand: jfmt_resugar_layout_expr(layout_name, x), span: span, id: node}
+        .Field(base, field, span, node) -> Expr.Field{base: jfmt_resugar_layout_expr(layout_name, base), member: field, span: span, id: node}
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, node) -> Expr.MethodCall{receiver: jfmt_resugar_layout_expr(layout_name, receiver), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: jfmt_resugar_layout_args(layout_name, args), id: node}
+        .Call(call, node) -> {
             call2 := call
             call2.args = jfmt_resugar_layout_args(layout_name, call.args)
-            Expr.Call{call: call2}
+            Expr.Call{call: call2, id: node}
         }
         // copy: a read-parameter rewriter returns an expression with no layout to resugar unchanged
         // as a new tree (owner: the result) while the caller keeps the input (owner: the read

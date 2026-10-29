@@ -1,6 +1,10 @@
 // Source scanning for package entries (Package/mod.rs): top-level function
 // lines, the compiler-owned `fn build` shape, and the in-project import graph
 // that output references follow. Paths are `/`-separated strings.
+use jet_foundation.[Func, ImportDecl, ImportKind, Program, Type]
+use jetpack_foundation.[BUILD_ENTRY_FN, PACKAGE_FILE, TYPE_BUILD_CONTEXT]
+use jet_lexer.[lex]
+use jet_parser.[parse_lexed]
 
 // One parsed package source file.
 struct ParsedSource {
@@ -317,7 +321,7 @@ fn pkg_scalar_width(raw: [U8], at: Int) -> Int Never! {
     }
 }
 
-// `Sema::is_build_entry`: `fn build(b: BuildContext)`.
+// `Sema::is_build_entry`: `fn build(b: Build)`.
 fn pkg_is_build_entry(function: Func) -> Bool Never! {
     function.name == BUILD_ENTRY_FN && function.params.len() == 1 && function.params[0].ty == Type.Named{name: TYPE_BUILD_CONTEXT}
 }

@@ -2,6 +2,7 @@
 // The entry-selection assertion instead calls the actual completed checker once.
 use jet_foundation.[Func, Item, Span, StringMapEntry, JobRegistry, ast_func, ast_job_metadata]
 use jet_driver.[JetDriverCompileMode, JetDriverAuthorizedSourceSnapshot, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceFile, JetDriverCoreSource, jet_driver_checked_projection]
+use jet_cli.[jet_cli_driver_request]
 
 fn jobs_metadata_function(name: String, internal: Bool) -> Func Never! {
     span :: Span{start: 0, end: 0}
@@ -48,7 +49,7 @@ fn jobs_metadata_actual_entry() {
     assert(registry.completion_words().join(" ") == "own_job")
     assert(registry.find("helper_job") == None)
 }
-fn run() {
+#Test("jobs_metadata") {
     registry :: JobRegistry.from_items([Item]{.Func(jobs_metadata_function("Visible", false)), .Func(jobs_metadata_function("Hidden", true))})
     visible_json :: `{"schema":"jet.status/v1","action":"jobs","ok":true,"reports":[],"jobs":[{"name":"Visible","scope":"ship","doc":null,"arguments":[],"schedule":null,"after":["pre"],"inputs":["src"],"outputs":["out"],"packages":["dep"],"cwd":"sub","skip":{"kind":"always","reason":"because"},"cache":"shared","limits":{"a":"1","z":"2"},"parallel":2}]}`
     assert(jet_cli_jobs_metadata_json(registry) == "{visible_json}\n")

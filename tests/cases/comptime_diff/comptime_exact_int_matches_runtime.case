@@ -1,0 +1,57 @@
+# tests/comptime_diff.rs::comptime_exact_int_matches_runtime at tests/comptime_diff.rs:443; hand-port
+# The six exact-Int expressions of CASES the original filtered for (its assert_eq over that list is kept by construction).
+# Each source is the original check_comptime_src program after its parity framing (framed_comptime_src): the
+# comptime value and the AOT runtime value print as hex, one line each, and must be byte-identical
+# (the frame helpers drop the double underscore: E0067 reserves it outside generated sources).
+# The original also asserted no `unsafe` in the generated Rust; that is generated-Rust shape and is not ported.
+fixture: comptime_exact_int_matches_runtime.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build source0/comptime_diff.jet
+exit: 0
+step aot0: built
+exit: 0
+stdout: lines = 2 # original parse_parity_output: one comptime line and one runtime line
+capture: comptime0 = text stdout.line(0)
+capture: runtime0 = text stdout.line(1)
+cap:comptime0: = "{cap:runtime0}"
+step: jet build source1/comptime_diff.jet
+exit: 0
+step aot1: built
+exit: 0
+stdout: lines = 2 # original parse_parity_output: one comptime line and one runtime line
+capture: comptime1 = text stdout.line(0)
+capture: runtime1 = text stdout.line(1)
+cap:comptime1: = "{cap:runtime1}"
+step: jet build source2/comptime_diff.jet
+exit: 0
+step aot2: built
+exit: 0
+stdout: lines = 2 # original parse_parity_output: one comptime line and one runtime line
+capture: comptime2 = text stdout.line(0)
+capture: runtime2 = text stdout.line(1)
+cap:comptime2: = "{cap:runtime2}"
+step: jet build source3/comptime_diff.jet
+exit: 0
+step aot3: built
+exit: 0
+stdout: lines = 2 # original parse_parity_output: one comptime line and one runtime line
+capture: comptime3 = text stdout.line(0)
+capture: runtime3 = text stdout.line(1)
+cap:comptime3: = "{cap:runtime3}"
+step: jet build source4/comptime_diff.jet
+exit: 0
+step aot4: built
+exit: 0
+stdout: lines = 2 # original parse_parity_output: one comptime line and one runtime line
+capture: comptime4 = text stdout.line(0)
+capture: runtime4 = text stdout.line(1)
+cap:comptime4: = "{cap:runtime4}"
+step: jet build source5/comptime_diff.jet
+exit: 0
+step aot5: built
+exit: 0
+stdout: lines = 2 # original parse_parity_output: one comptime line and one runtime line
+capture: comptime5 = text stdout.line(0)
+capture: runtime5 = text stdout.line(1)
+cap:comptime5: = "{cap:runtime5}"

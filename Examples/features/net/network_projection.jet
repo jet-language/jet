@@ -1,7 +1,7 @@
 // D-NETWORK1: loopback TCP/UDP, readiness, typed addresses, and DNS records.
 package {
     name: "network_projection"
-    authority: { holds: { allow: [IO, Mem.Alloc, Net, Time.Wait] } }
+    authority: { allow: [IO, Mem.Alloc, Net, Time.Wait] }
 }
 
 use core.net as net
@@ -16,7 +16,7 @@ fn run() {
     address :: net.listener_local_socket_addr(listener) ?? return
     port :: net.socket_port(address)
     client :: net.tcp_connect_addr(address) ?? return
-    server :: net.tcp_accept(listener) ?? return
+    server := net.tcp_accept(listener) ?? return
     timeout_client :: net.tcp_connect_timeout(address, 1000) ?? return
     happy_client :: net.tcp_connect_happy("127.0.0.1", port, 1000) ?? return
     local_address :: net.tcp_local_addr(client) ?? return

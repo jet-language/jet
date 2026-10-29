@@ -1,15 +1,59 @@
-# PORT tests/suite_goldens.rs20-73; current live corpus, exact literal expected bytes.
-# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four). No snapshot blessing.
-copy: {root}/Examples/suites suite
-mkdir: cache
-capture: n = entries suite ext = "jet" name != "package.jet"
-cap:n: = 8
-for file suite ext = "jet" name != "package.jet" sorted as story
-step: jet run {story.path}
-env: JETPACK_ENV=1
-env: JET_STORE_DIR={work}/cache
-env: NO_COLOR=1
-unset: JETPACK_ENV_DIR
+# Each Examples/suites/*.jet (package.jet excluded, 8 stories) must run with success and match Examples/suites/expected/<stem>.out byte-for-byte.
+step: bash -c 'test "$(ls {root}/Examples/suites/*.jet | grep -vc /package.jet$)" = 8'
 exit: 0
-stdout: = {work}/suite/expected/{story.stem}.out
-end for
+step: jet run {root}/Examples/suites/dispatch.jet
+env: JETPACK_ENV=1
+unset: JETPACK_ENV_DIR
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}
+exit: 0
+stdout: = {root}/Examples/suites/expected/dispatch.out
+step: jet run {root}/Examples/suites/expense_report.jet
+env: JETPACK_ENV=1
+unset: JETPACK_ENV_DIR
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}
+exit: 0
+stdout: = {root}/Examples/suites/expected/expense_report.out
+step: jet run {root}/Examples/suites/failure.jet
+env: JETPACK_ENV=1
+unset: JETPACK_ENV_DIR
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}
+exit: 0
+stdout: = {root}/Examples/suites/expected/failure.out
+step: jet run {root}/Examples/suites/finite_state.jet
+env: JETPACK_ENV=1
+unset: JETPACK_ENV_DIR
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}
+exit: 0
+stdout: = {root}/Examples/suites/expected/finite_state.out
+step: jet run {root}/Examples/suites/inventory_reorder.jet
+env: JETPACK_ENV=1
+unset: JETPACK_ENV_DIR
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}
+exit: 0
+stdout: = {root}/Examples/suites/expected/inventory_reorder.out
+step: jet run {root}/Examples/suites/ownership.jet
+env: JETPACK_ENV=1
+unset: JETPACK_ENV_DIR
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}
+exit: 0
+stdout: = {root}/Examples/suites/expected/ownership.out
+step: jet run {root}/Examples/suites/support_queue.jet
+env: JETPACK_ENV=1
+unset: JETPACK_ENV_DIR
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}
+exit: 0
+stdout: = {root}/Examples/suites/expected/support_queue.out
+step: jet run {root}/Examples/suites/wire_output.jet
+env: JETPACK_ENV=1
+unset: JETPACK_ENV_DIR
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}
+exit: 0
+stdout: = {root}/Examples/suites/expected/wire_output.out

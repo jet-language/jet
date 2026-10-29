@@ -4,23 +4,22 @@
 // not maintain a second registry: module lookup remains SemaScopeTable's job,
 // while cross-module and Core candidates are supplied by Registration.
 use jet_foundation.[
-AccessConvention,
-CallArg,
-Diagnostic,
-EffectRowEntry,
-Expr,
-FunctionDefaultRef,
-Span,
-Symbol,
-SymbolID,
-SymbolKind,
-TExpr,
-TFailureCarrier,
-TGenericParam,
-TMethodRef,
-Type,
-diagnostic_registry_row,
-type_name,
+    AccessConvention,
+    CallArg,
+    Diagnostic,
+    EffectRowEntry,
+    Expr,
+    FunctionDefaultRef,
+    Span,
+    Symbol,
+    SymbolID,
+    SymbolKind,
+    TFailureCarrier,
+    TGenericParam,
+    TMethodRef,
+    Type,
+    diagnostic_registry_row,
+    type_name,
 ]
 
 struct SemaCallFacts {
@@ -125,7 +124,7 @@ fn sema_call_unknown_function(name: String, span: Span) -> Diagnostic {
 }
 
 fn sema_call_not_callable(name: String, ty: Type, span: Span) -> Diagnostic {
-    sema_error("E0803", span, "`{name}` is {type_name(ty)}, not a function", "a direct call target must have a function type", "call a function or use a function value with a callable type")
+    sema_error("E0803", span, "`{name}` is {sema_type_show(ty)}, not a function", "a direct call target must have a function type", "call a function or use a function value with a callable type")
 }
 
 // Parentheses call functions and lambdas only. A value binding
@@ -138,6 +137,7 @@ fn sema_call_not_callable_value(name: String, ty: Type, environment: SemaScopeEn
         .Apply(type_name, _) -> type_name
         else -> ""
     }
+    described :: if owner != "" -> shown else -> sema_type_show(ty)
     found := [String]{}
     if owner != "" {
         loop declaration_index in 0..<environment.declarations.len() {
@@ -166,12 +166,22 @@ fn sema_call_not_callable_value(name: String, ty: Type, environment: SemaScopeEn
     loop method in found {
         if methods.len() == 0 || methods[methods.len() - 1] != method -> &methods.push(method)
     }
-    if methods.len() == 0 -> return sema_error("E0803", span, "`{name}` is {shown}, not a function", "parentheses call functions and lambdas only", "remove the parentheses after `{name}`, or bind a function or lambda to call")
-    sema_error("E0803", span, "`{name}` is {shown}, not a function", "parentheses call functions and lambdas only; `{shown}` has the methods {methods.join(", ")}", "call one of its methods, such as `{name}.{methods[0]}(…)`, or write a method that returns a lambda")
+    if methods.len() == 0 -> return sema_error("E0803", span, "`{name}` is {described}, not a function", "parentheses call functions and lambdas only", "remove the parentheses after `{name}`, or bind a function or lambda to call")
+    sema_error("E0803", span, "`{name}` is {described}, not a function", "parentheses call functions and lambdas only; `{shown}` has the methods {methods.join(", ")}", "call one of its methods, such as `{name}.{methods[0]}(…)`, or write a method that returns a lambda")
 }
 
 fn sema_call_generic_count_diagnostic(name: String, expected: Int, actual: Int, span: Span) -> Diagnostic {
     sema_error("E0119", span, "`{name}` expects {expected} type argument{if expected == 1 -> "" else -> "s"}, got {actual}", "generic parameters and call-site type arguments have to line up", "provide exactly the declared type arguments")
+}
+
+// Rust direct_calls.rs (explicit call-site type arguments of a direct call).
+fn sema_call_direct_type_arg_count_diagnostic(name: String, expected: Int, actual: Int, span: Span) -> Diagnostic {
+    plural :: if expected == 1 -> "" else -> "s"
+    sema_error("E0119", span, "`{name}` expects {expected} type argument{plural}, got {actual}", "a generic call must provide one type for every declared type parameter", "write {name} with {expected} type argument{plural}")
+}
+
+fn sema_call_not_generic_diagnostic(name: String, span: Span) -> Diagnostic {
+    sema_error("E0119", span, "`{name}` is not generic", "only functions declared with type parameters accept call-site type arguments", "call {name} without type arguments")
 }
 
 // An explicit `Never` type argument may fill
@@ -223,25 +233,16 @@ fn sema_call_never_type_args_valid(signature: Type, generic_params: [SemaInferen
     true
 }
 
-// Rust `infer_call` (`direct_calls.rs`): a declared function named `name`
-// (`funcs.get(name)`) is the call target even when a nearer value binding
-// shares the name; only without one does the nearer binding decide.
-fn sema_call_declared_function_index(scopes: SemaScopeTable, name: String) -> Int? {
-    slot :: scopes.name_slots.get(name) ?? return None
-    found := Int?{None}
-    loop index in scopes.name_positions[slot] {
-        if scopes.bindings[index].symbol.kind == SymbolKind.Function -> found = Val(index)
-    }
-    found
-}
-
+// A call resolves a lexical value binding before a same-named file function,
+// so the nearest binding of `name` decides. A value binding that is not a
+// function is E0803 even when a declared function of the same name is visible
+// further out.
 fn sema_call_resolve_direct(name: String, type_args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaCallDirectTarget? {
     nearest :: sema_scope_resolve_index(scopes, name) ?? {
         &diagnostics.push(sema_call_unknown_function(name, span))
         return None
     }
-    index :: if scopes.bindings[nearest].symbol.kind == SymbolKind.Function -> nearest else -> sema_call_declared_function_index(scopes, name) ?? nearest
-    symbol :: sema_scope_binding_symbol(environment, scopes, index)
+    symbol :: sema_scope_binding_symbol(environment, scopes, nearest)
     if symbol.kind != SymbolKind.Function {
         ty :: symbol.ty ?? {
             &diagnostics.push(sema_call_not_callable(name, Type.Named{name: "Unknown"}, span))
@@ -264,7 +265,7 @@ fn sema_call_resolve_direct(name: String, type_args: [Type], environment: SemaSc
     generic_params :: sema_inference_type_params(generic_params_source)
     if generic_params.len() == 0 {
         if type_args.len() > 0 {
-            &diagnostics.push(sema_call_generic_count_diagnostic(name, 0, type_args.len(), span))
+            &diagnostics.push(sema_call_not_generic_diagnostic(name, span))
             return None
         }
         return SemaCallDirectTarget{symbol: symbol, signature: signature, type_args: [Type]{}, generic_params: [SemaInferenceTypeParam]{}, generic_substitutions: [SemaInferenceBinding]{}, generic_evidence: [SemaInferenceBoundEvidence]{}}
@@ -273,7 +274,7 @@ fn sema_call_resolve_direct(name: String, type_args: [Type], environment: SemaSc
         return SemaCallDirectTarget{symbol: symbol, signature: signature, type_args: [Type]{}, generic_params: generic_params, generic_substitutions: [SemaInferenceBinding]{}, generic_evidence: [SemaInferenceBoundEvidence]{}}
     }
     if type_args.len() != generic_params.len() {
-        &diagnostics.push(sema_call_generic_count_diagnostic(name, generic_params.len(), type_args.len(), span))
+        &diagnostics.push(sema_call_direct_type_arg_count_diagnostic(name, generic_params.len(), type_args.len(), span))
         return None
     }
     if !sema_call_never_type_args_valid(signature, generic_params, type_args, span, &diagnostics) {
@@ -288,6 +289,20 @@ fn sema_call_resolve_direct(name: String, type_args: [Type], environment: SemaSc
     result :: sema_infer_validate_explicit(program.registration_graph, &context, type_args, span, &diagnostics) ?? return None
     specialized :: sema_inference_substitute_type_bindings(signature, result.substitutions)
     SemaCallDirectTarget{symbol: symbol, signature: specialized, type_args: result.type_args, generic_params: generic_params, generic_substitutions: result.substitutions, generic_evidence: result.evidence}
+}
+
+// Rust direct_calls.rs:2354-2375: a call whose type-argument count doesn't
+// match leaves the callee's type parameters unbound, and its arguments are
+// still checked against the declared parameter types. The declared signature
+// when `type_args` is that mismatch, else None.
+fn sema_call_direct_type_arg_mismatch_signature(name: String, type_args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Type? {
+    if type_args.len() == 0 -> return None
+    nearest :: sema_scope_resolve_index(scopes, name) ?? return None
+    symbol :: sema_scope_binding_symbol(environment, scopes, nearest)
+    if symbol.kind != SymbolKind.Function -> return None
+    generic_params :: sema_inference_type_params(sema_scope_declaration_function_type_params(environment, program, symbol.id))
+    if generic_params.len() == 0 || generic_params.len() == type_args.len() -> return None
+    symbol.ty
 }
 
 fn sema_call_direct_target_generic_ready(target: SemaCallDirectTarget, diagnostics: &[Diagnostic], span: Span) -> Bool {
@@ -331,7 +346,7 @@ fn sema_call_direct_target_from_registration(function: SemaRegistrationFunction,
     generic_params :: sema_inference_registration_params(function.generic_params)
     if generic_params.len() == 0 {
         if type_args.len() > 0 {
-            &diagnostics.push(sema_error("E0119", span, "`{function.symbol.name}` is not generic", "only a registered generic callable accepts type arguments", "remove the explicit type arguments"))
+            &diagnostics.push(sema_call_not_generic_diagnostic(function.symbol.name, span))
             return None
         }
         return SemaCallDirectTarget{symbol: function.symbol, signature: function.signature, type_args: [Type]{}, generic_params: [SemaInferenceTypeParam]{}, generic_substitutions: [SemaInferenceBinding]{}, generic_evidence: [SemaInferenceBoundEvidence]{}}
@@ -429,7 +444,7 @@ fn sema_call_resolve_method(receiver_type: Type, method: String, args: [CallArg]
             &diagnostics.push(diagnostic)
             return None
         }
-        &diagnostics.push(sema_error("E0311", span, "`{method}` isn't a method on this value", "method resolution found no candidate with a compatible receiver", "use a registered method for this receiver type"))
+        &diagnostics.push(sema_call_missing_method_diagnostic(receiver_type, method, args.len(), span, environment, program))
         return None
     }
     shape_matches :: loop candidate in receiver_matches if sema_call_method_shape_matches(candidate, method, args, span) -> candidate

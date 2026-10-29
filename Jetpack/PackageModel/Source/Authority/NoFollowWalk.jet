@@ -1,16 +1,19 @@
 // Bounded no-follow directory walking for the authority resolver
 // (jet-pkg-model Authority.rs `WalkBudget`, `read_sorted_entries`,
 // `has_authority_candidate`, shared-directory discovery rules).
+use jetpack_foundation.[FILE_EXT]
+use core.files as files
+use core.sys as sys
 
 // jet_foundation::SHA256 tree bounds shared by every authority walk.
-PKG_MAX_TREE_FILE_BYTES :: prep { 536870912 }
-PKG_MAX_TREE_TOTAL_BYTES :: prep { 4294967296 }
-PKG_MAX_TREE_FILES :: prep { 1000000 }
-PKG_MAX_TREE_NODES :: prep { 2000000 }
-PKG_MAX_TREE_DEPTH :: prep { 256 }
+PKG_MAX_TREE_FILE_BYTES :: 536870912
+PKG_MAX_TREE_TOTAL_BYTES :: 4294967296
+PKG_MAX_TREE_FILES :: 1000000
+PKG_MAX_TREE_NODES :: 2000000
+PKG_MAX_TREE_DEPTH :: 256
 
 // Directory names a source walk never descends into.
-AUTHORITY_SOURCE_WALK_SKIPPED :: prep { [String]{"target", "build", "node_modules", "bin"} }
+AUTHORITY_SOURCE_WALK_SKIPPED :: [String]{"target", "build", "node_modules", "bin"}
 
 // One directory entry observed without following links.
 struct AuthorityEntry {

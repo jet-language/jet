@@ -1,4 +1,11 @@
 // Claims ported from crates/jet-pkg-model/src/Bindgen.rs #[cfg(test)].
+use jet_pkg_model.[
+    BinderDescriptor, BinderStatus, ForeignLanguage, pkg_bytes_text, pkg_cbind_find,
+    pkg_foreign_binders,
+]
+use jet_lexer.[lex_generated]
+use jet_parser.[parse_lexed]
+use jetpack_integrations.[pkg_generator_registry, pkg_renderer_canonical_for, pkg_renderer_for]
 
 // Non-overlapping occurrences of `needle` in `text` (`str::matches(..).count()`).
 fn pkg_test_plan_count(text: String, needle: String) -> Int Never! {
@@ -53,7 +60,7 @@ fn pkg_test_plan_source_parses(source: String) -> Bool Never! {
 }
 
 #Test("binding plan registry covers each message renderer once") {
-    registry :: PKG_GENERATOR_REGISTRY
+    registry :: pkg_generator_registry()
     registered := 0
     loop renderer in registry {
         if pkg_renderer_canonical_for(renderer) != None -> registered += 1

@@ -19,20 +19,7 @@ use jet_foundation.[
     FrameReuse,
     FrameSchedule,
     FrameTransfer,
-    MIRDerivationMethod,
-    MIRDerivationRef,
-    MIRFrameCompletion,
-    MIRFrameDependency,
-    MIRFrameOperation,
-    MIRFrameRetention,
-    MIRFrameReuse,
-    MIRFrameSchedule,
-    MIRFrameTransfer,
-    MIRResourceAccess,
-    MIRResourceAccessMode,
-    MIRResourceIdentity,
-    MIRResourceLayout,
-    MIRResourceRegion,
+    DerivationMethod,
     ResourceAccess,
     ResourceAccessMode,
     ResourceIdentity,
@@ -54,7 +41,6 @@ struct SemaFrameScheduleFacts {
     explanation: String?
     derivation_record: DerivationRecord?
     derivation: DerivationRef?
-    mir_derivation: MIRDerivationRef?
     error: String?
 }
 
@@ -146,14 +132,14 @@ fn sema_frame_checked_call_operation(name: String, args: [CallArg], signature_ac
 
 fn sema_frame_resource_identity(expression: Expr) -> ResourceIdentity? {
     if expression == {
-        .Paren(inner, _) | .Place(inner, _, _) | .Copy(inner, _) -> return sema_frame_resource_identity(inner)
-        .Ident(name, _) -> return Val(ResourceIdentity.Named{name: name})
-        .Field(base, _, _) -> return sema_frame_resource_identity(base)
-        .Index(base, _, _, _) | .Slice(base, _, _, _, _) -> {
+        .Paren(inner, _, _) | .Place(inner, _, _, _) | .Copy(inner, _, _) -> return sema_frame_resource_identity(inner)
+        .Ident(name, _, _) -> return Val(ResourceIdentity.Named{name: name})
+        .Field(base, _, _, _) -> return sema_frame_resource_identity(base)
+        .Index(base, _, _, _, _) | .Slice(base, _, _, _, _, _) -> {
             identity :: sema_frame_resource_identity(base) ?? return Val(ResourceIdentity.Unknown)
             return Val(identity)
         }
-        .Call(_) | .MethodCall(_, _, _, _, _, _, _, _) | .CallValue(_, _, _) -> return Val(ResourceIdentity.Unknown)
+        .Call(_, _) | .MethodCall(_, _, _, _, _, _, _) | .CallValue(_, _, _, _) -> return Val(ResourceIdentity.Unknown)
         else -> None
     }
 }
@@ -173,7 +159,6 @@ fn sema_frame_access_convention(convention: AccessConvention) -> ResourceAccessM
         .Move -> ResourceAccessMode.Move
     }
 }
-
 
 struct SemaFrameDMABinding {
     transfer_name: String
@@ -217,7 +202,7 @@ fn sema_frame_hardware_dma_bind_start(start: SemaFrameDMABinding, transfer_name:
 
 fn sema_frame_hardware_dma_start(receiver: Expr, args: [CallArg], source_index: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaFrameHardwareCall Never! {
     is_dma_receiver := if receiver == {
-        .Ident(name, _) -> name == "dma"
+        .Ident(name, _, _) -> name == "dma"
         else -> false
     }
     if !is_dma_receiver || args.len() != 2 -> return SemaFrameHardwareCall{operation: None, dma_start: None}
@@ -316,29 +301,27 @@ fn sema_frame_schedule_build(operations: [FrameOperation]) -> SemaFrameScheduleB
 }
 
 fn sema_frame_schedule_produce(operations: [FrameOperation], environment: SemaScopeEnvironment, program: SemaProgramTables, source_bytes: String, lambda_start: Int) -> SemaFrameScheduleFacts {
-    if operations.len() == 0 -> return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, mir_derivation: None, error: None}
+    if operations.len() == 0 -> return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, error: None}
     built := sema_frame_schedule_build(operations)
-    if built.schedule == None -> return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, mir_derivation: None, error: built.error}
+    if built.schedule == None -> return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, error: built.error}
     if program.registration_graph == .Val(graph) {
-        module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, mir_derivation: None, error: Val("frame schedule derivation requires registered module identity")}
+        module_index :: sema_registration_module_index(graph, environment.module_identity) ?? return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, error: Val("frame schedule derivation requires registered module identity")}
         module_path := graph.modules[module_index].module_path
         schedule :: built.schedule ?? FrameSchedule{operations: [FrameOperation]{}, dependencies: [FrameDependency]{}, transfers: [FrameTransfer]{}, reuse: [FrameReuse]{}, retentions: [FrameRetention]{}, conservative: [String]{}}
         premises := [String]{}
         loop operation in schedule.operations -> &premises.push("{operation.name}@{operation.source_index}")
         identity := derivation_identity(module_path, "", "", source_bytes)
-        record := derivation_record("{module_path}::on_frame@{lambda_start}", "checked frame resource schedule", "jet-sema", MIRDerivationMethod.StaticDerivation, "checked-frame-accesses", premises, identity)
-        record = derivation_record_with_payload(^record, DerivationPayload.FrameSchedule{schedule: sema_frame_schedule_to_mir(schedule)})
-        mir_reference := derivation_record_reference(record)
+        record := derivation_record("{module_path}::on_frame@{lambda_start}", "checked frame resource schedule", "jet-sema", DerivationMethod.StaticDerivation, "checked-frame-accesses", premises, identity)
+        record = derivation_record_with_payload(^record, DerivationPayload.FrameSchedule{schedule: schedule})
         return SemaFrameScheduleFacts{
             schedule: Val(schedule),
             explanation: Val(sema_frame_schedule_explain(schedule)),
             derivation_record: Val(record),
-            derivation: Val(DerivationRef{id: mir_reference.id}),
-            mir_derivation: Val(mir_reference),
+            derivation: Val(derivation_record_reference(record)),
             error: None,
         }
     }
-    SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, mir_derivation: None, error: Val("frame schedule derivation requires registered module identity")}
+    SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, error: Val("frame schedule derivation requires registered module identity")}
 }
 
 fn sema_frame_schedule_validate(operations: [FrameOperation]) -> String? {
@@ -753,55 +736,4 @@ fn sema_frame_schedule_explain(schedule: FrameSchedule) -> String Never! {
     loop reason in schedule.conservative -> &lines.push("  conservative: {reason}")
     if schedule.dependencies.len() == 0 -> &lines.push("  no conflicting resource accesses")
     lines.join("\n")
-}
-
-fn sema_frame_schedule_to_mir(schedule: FrameSchedule) -> MIRFrameSchedule Never! {
-    operations := [MIRFrameOperation]{}
-    dependencies := [MIRFrameDependency]{}
-    transfers := [MIRFrameTransfer]{}
-    reuse := [MIRFrameReuse]{}
-    retentions := [MIRFrameRetention]{}
-    loop operation in schedule.operations {
-        accesses := [MIRResourceAccess]{}
-        loop access in operation.accesses -> &accesses.push(sema_frame_access_to_mir(access))
-        &operations.push(MIRFrameOperation{name: operation.name, source_index: operation.source_index, accesses: accesses, completion: sema_frame_completion_to_mir(operation.completion), completion_provider: operation.completion_provider, external_effect: operation.external_effect})
-    }
-    loop row in schedule.dependencies -> &dependencies.push(MIRFrameDependency{before: row.before, after: row.after, resource: row.resource, reason: row.reason})
-    loop row in schedule.transfers -> &transfers.push(MIRFrameTransfer{before: row.before, after: row.after, resource: row.resource, from_device: row.from_device, to_device: row.to_device})
-    loop row in schedule.reuse -> &reuse.push(MIRFrameReuse{previous_resource: row.previous_resource, next_resource: row.next_resource, previous_last_use: row.previous_last_use, next_first_use: row.next_first_use, legal: row.legal, reason: row.reason})
-    loop row in schedule.retentions -> &retentions.push(MIRFrameRetention{resource: row.resource, operation: row.operation, owner: row.owner, completion_token: row.completion_token, completed: row.completed})
-    MIRFrameSchedule{operations: operations, dependencies: dependencies, transfers: transfers, reuse: reuse, retentions: retentions, conservative: schedule.conservative}
-}
-
-fn sema_frame_access_to_mir(access: ResourceAccess) -> MIRResourceAccess Never! {
-    resource := if access.resource == {
-        .Named(name) -> MIRResourceIdentity.Named{name: name}
-        .Unknown -> MIRResourceIdentity.Unknown
-    }
-    mode := if access.mode == {
-        .Read -> MIRResourceAccessMode.Read
-        .Write -> MIRResourceAccessMode.Write
-        .Move -> MIRResourceAccessMode.Move
-    }
-    region := if access.region == {
-        .Whole -> MIRResourceRegion.Whole
-        .Bytes(start, length) -> MIRResourceRegion.Bytes{start: start, length: length}
-        .Unknown -> MIRResourceRegion.Unknown
-    }
-    layout := if {
-        access.layout == None -> None
-        else -> {
-            value :: access.layout ?? ResourceLayout{size: 0, align: 0, layout: "", device: ""}
-            Val(MIRResourceLayout{size: value.size, align: value.align, layout: value.layout, device: value.device})
-        }
-    }
-    MIRResourceAccess{resource: resource, mode: mode, region: region, layout: layout, temporary: access.temporary}
-}
-
-fn sema_frame_completion_to_mir(completion: FrameCompletion) -> MIRFrameCompletion Never! {
-    if completion == {
-        .Synchronous -> MIRFrameCompletion.Synchronous
-        .Pending(token) -> MIRFrameCompletion.Pending{token: token}
-        .Event(token) -> MIRFrameCompletion.Event{token: token}
-    }
 }

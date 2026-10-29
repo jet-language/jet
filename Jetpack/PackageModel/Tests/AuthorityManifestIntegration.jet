@@ -1,5 +1,11 @@
 // Source/predicate port of tests/authority_manifest.rs168-320 + cli_parts/inspect.rs294-302.
 // Reuses actual PackageModel parser/policy; no fake parser, bridge, or new production API.
+use jet_foundation.[Diagnostic, Span, policy_key_name]
+use jet_pkg_model.[
+    EffectBudgetWitness, Manifest, PackageEffects, PackageFacts, PackagePolicy,
+    ProvenanceRequirement, pkg_effect_enforce,
+]
+
 fn s1_authority_manifest_error(text: String) -> Diagnostic {
     if Manifest.parse("package.jet", text) == {
         .Err(error) -> return error.diagnostic
@@ -8,7 +14,7 @@ fn s1_authority_manifest_error(text: String) -> Diagnostic {
 }
 
 #Test("malformed_authority_fields_share_e1221") {
-    blocks :: [String]{"authority: {{ holds: {{ allow: [NotAnAuthority] }} }}", "authority: {{ grants: {{ \"dep\": [NotAnAuthority] }} }}", "authority: {{ trust: {{ default: maybe }} }}", "authority: {{ providers: {{ nix: {{ deny: [\"openssl-1.0\"] }} }} }}"}
+    blocks :: [String]{"authority: {{ allow: [NotAnAuthority] }}", "authority: {{ grants: {{ \"dep\": [NotAnAuthority] }} }}", "authority: {{ trust: {{ default: maybe }} }}", "authority: {{ providers: {{ nix: {{ deny: [\"openssl-1.0\"] }} }} }}"}
     loop block in blocks {
         diagnostic :: s1_authority_manifest_error("name: \"demo\"\nversion: \"0.1.0\"\n{block}\n")
         assert_eq(diagnostic.code, "E1221")
@@ -28,31 +34,31 @@ fn s1_authority_manifest_error(text: String) -> Diagnostic {
 }
 
 #Test("policy_keeps_unsafe_mode_and_package_floors") {
-    facts :: PackageFacts.parse("\nname: \"demo\"\nversion: \"0.1.0\"\npolicy: {{ unsafe: .Forbid, gc: true, explicit_units: true, copies: .Explicit, sentries: .On }}\nauthority: {{ holds: {{ deny: [Mem.Alloc] }} }}\n", "package.jet") ?? panic("policy floors")
+    facts :: PackageFacts.parse("\nname: \"demo\"\nversion: \"0.1.0\"\npolicy: {{ unsafe: .Forbid, gc: true, explicit_units: true, copies: .Explicit, sentries: .On }}\nauthority: {{ deny: [Mem.Alloc] }}\n", "package.jet") ?? panic("policy floors")
     keys := [String]{}
     loop declaration in facts.policy.declarations -> &keys.push(policy_key_name(declaration.key))
     assert_eq(keys, [String]{"unsafe", "gc", "explicit_units", "copies", "sentries"})
-    assert_eq(facts.authority.holds.deny, Val([String]{"Mem.Alloc"}))
+    assert_eq(facts.authority.deny, Val([String]{"Mem.Alloc"}))
     assert_eq(facts.authority.trust, None)
     assert(facts.authority.providers.is_empty())
     retired :: [String]{"policy: {{ no_alloc: true }}", "policy: {{ zero_rc: true }}", "policy: {{ arena_bounded: 65536 }}"}
     loop block in retired {
         diagnostic :: s1_authority_manifest_error("name: \"demo\"\nversion: \"0.1.0\"\n{block}\n")
         assert_eq(diagnostic.code, "E1206")
-        assert(diagnostic.why.contains("authority.holds"))
-        assert(diagnostic.fix.contains("authority.holds"))
+        assert(diagnostic.why.contains("authority"))
+        assert(diagnostic.fix.contains("authority"))
     }
 }
 
 #Test("retired_effect_budget_names_authority_holds") {
     diagnostic :: s1_authority_manifest_error("name: \"demo\"\nversion: \"0.1.0\"\neffects: {{ deny: [Net] }}\n")
     assert_eq(diagnostic.code, "E1206")
-    assert(diagnostic.why.contains("authority.holds"))
-    assert(diagnostic.fix.contains("authority.holds"))
+    assert(diagnostic.why.contains("authority"))
+    assert(diagnostic.fix.contains("authority"))
 }
 
 #Test("e1220_keeps_dependency_and_effect_provenance_after_key_move") {
-    manifest :: PackageFacts.parse("name: \"demo\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ allow: [FS] }} }}\n", "package.jet") ?? panic("authority holds")
+    manifest :: PackageFacts.parse("name: \"demo\"\nversion: \"0.1.0\"\nauthority: {{ allow: [FS] }}\n", "package.jet") ?? panic("authority holds")
     entries :: [PackageEffects]{PackageEffects{name: "netdep", effects: [String]{"Net"}, effect_sites: [String: String]{}, effect_witnesses: [String: EffectBudgetWitness]{}, panic_sites: [String]{}, boundary_span: Val(Span{start: 4, end: 12})}}
     diagnostics :: pkg_effect_enforce(entries, manifest)
     assert_eq(diagnostics.len(), 1)
@@ -60,15 +66,15 @@ fn s1_authority_manifest_error(text: String) -> Diagnostic {
     assert_eq(diagnostic.code, "E1220")
     assert(diagnostic.what.contains("netdep"))
     assert(diagnostic.what.contains("Net"))
-    assert(diagnostic.why.contains("authority.holds"))
-    assert(diagnostic.fix.contains("authority.holds.allow"))
+    assert(diagnostic.why.contains("authority"))
+    assert(diagnostic.fix.contains("authority.allow"))
     assert(diagnostic.fix.contains("authority.grants"))
     assert_eq(diagnostic.span, None)
 }
 
 #Test("i9_parser_reads_one_authority_block") {
-    facts :: PackageFacts.parse("\nname: \"authority_tiers\"\nversion: \"0.1.0\"\nauthority: {{\n    holds: {{ allow: [IO], deny: [Exec] }},\n    grants: {{ \"image-codec\": [FS.Read] }},\n    trust: {{ default: prompt, ci: {{ prompt: deny }}, services: {{ stripe: allow }}, require: none }},\n    providers: {{ nix: {{ registry: \"nixpkgs\", deny: [\"openssl-1.0\"] }} }},\n}}\n", "package.jet") ?? panic("authority")
-    assert_eq(facts.authority.holds.allow, Val([String]{"IO"}))
+    facts :: PackageFacts.parse("\nname: \"authority_tiers\"\nversion: \"0.1.0\"\nauthority: {{\n    allow: [IO], deny: [Exec],\n    grants: {{ \"image-codec\": [FS.Read] }},\n    trust: {{ default: prompt, ci: {{ prompt: deny }}, services: {{ stripe: allow }}, require: none }},\n    providers: {{ nix: {{ registry: \"nixpkgs\", deny: [\"openssl-1.0\"] }} }},\n}}\n", "package.jet") ?? panic("authority")
+    assert_eq(facts.authority.allow, Val([String]{"IO"}))
     assert_eq(facts.authority.grants.len(), 1)
     requirement := ProvenanceRequirement?{None}
     if facts.authority.trust == {

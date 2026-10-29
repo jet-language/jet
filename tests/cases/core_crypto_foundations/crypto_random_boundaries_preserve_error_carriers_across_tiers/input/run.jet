@@ -1,0 +1,36 @@
+
+use core.crypto as crypto
+use core.crypto.random as random
+
+fn run() {
+    if random.token_hex(-1) == {
+        .Err(.Length) -> print("hex:length")
+        else -> print("hex:wrong-error")
+    }
+    if random.token_urlsafe(-1) == {
+        .Err(.Length) -> print("url:length")
+        else -> print("url:wrong-error")
+    }
+    if random.token_hex(0) == {
+        .Ok(value) -> print(value == "")
+        else -> print(false)
+    }
+    if random.token_urlsafe(0) == {
+        .Ok(value) -> print(value == "")
+        else -> print(false)
+    }
+    if random.int_range(4, 4) == {
+        .Err(.Length) -> print("range:length")
+        else -> print("range:wrong-error")
+    }
+    if random.int_range(0, 18446744073709551617) == {
+        .Err(.Length) -> print("range:wide")
+        else -> print("range:wrong-error")
+    }
+
+    print(crypto.constant_time_equal_bytes([U8]{1, 2, 3}, [U8]{1, 2, 3}))
+    print(crypto.constant_time_equal_bytes([U8]{1, 2, 3}, [U8]{1, 2, 4}))
+    print(crypto.constant_time_equal_bytes([U8]{1, 2, 3}, [U8]{1, 2}))
+    print(random.compare_digest([U8]{}, [U8]{}))
+    print(random.compare_digest([U8]{1}, [U8]{}))
+}

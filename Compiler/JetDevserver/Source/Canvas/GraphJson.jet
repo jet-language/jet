@@ -10,6 +10,7 @@ use jet_devserver.Canvas.GraphProjection.[GraphBuilder, InlineRec, NodeRec, PinR
 use jet_devserver.Canvas.ValidationJson.[attr_bounds, attr_span, attr_string, json_str, json_strs, span_json]
 // Rust: crates/jet-devserver/src/Canvas/graph_json.rs:11
 use jet_devserver.Canvas.NodeCatalog as node_catalog
+use jet_foundation.[NameLedger, Span, name_start]
 
 // Rust: crates/jet-devserver/src/Canvas/graph_json.rs:14
 fn add_node(g: &GraphBuilder, id: String, descriptor_id: String, title: String, span: SourceSpan, x: I32, y: I32, badges: [String], affordances: [String]) {
@@ -282,7 +283,7 @@ fn stmt_execution_anchor(stmt: AST.Stmt) -> SourceSpan? {
 // Rust: crates/jet-devserver/src/Canvas/graph_json.rs:615
 fn expr_execution_anchor(expr: AST.Expr) -> SourceSpan {
     if expr is {
-        .Call(call) -> call.name_span.into()
+        .Call(call, _) -> call.name_span.into()
         .MethodCall(method_span: method_span, ..) -> method_span.into()
         .Try(_, span, ..) -> span.into()
         .OrFallback(value: value, ..) -> expr_execution_anchor(value)

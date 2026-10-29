@@ -3,11 +3,22 @@
 // identity binds the executable bytes, the reported Nix version, the locked
 // nixpkgs revision, the target system, the attribute path and the canonical
 // project-lock digest before a fallback evaluation may be constructed.
+use core.encoding.json as json
+use core.files as files
+use core.sys as sys
+use core.process as process
+use jet_pkg_model.[
+    LockFile, pkg_json_render, pkg_lock_parse, pkg_lock_path, pkg_lock_write, pkg_sha256_hex,
+]
+use jetpack_foundation.[REF_SOURCE_JETPACK, REF_SOURCE_NIXPKGS]
+use jetpack_nix_eval.[
+    nixeval_is_ascii_alphanumeric, nixeval_is_ascii_digit, nixeval_is_required_system,
+]
 
-NIX_FALLBACK_PROVENANCE_SCHEMA :: prep { "jetpack-nix-fallback-v1" }
-NIX_LOCKED_NIXPKGS_PREFIX :: prep { "github:NixOS/nixpkgs#" }
-NIX_FALLBACK_PROVENANCE_FIELDS :: prep { [String]{"schema", "executable", "executable_sha256", "version", "nixpkgs_revision", "system", "attr", "lock_sha256"} }
-NIX_VERSION_OUTPUT_PREFIX :: prep { "nix (Nix) " }
+NIX_FALLBACK_PROVENANCE_SCHEMA :: "jetpack-nix-fallback-v1"
+NIX_LOCKED_NIXPKGS_PREFIX :: "github:NixOS/nixpkgs#"
+NIX_FALLBACK_PROVENANCE_FIELDS :: [String]{"schema", "executable", "executable_sha256", "version", "nixpkgs_revision", "system", "attr", "lock_sha256"}
+NIX_VERSION_OUTPUT_PREFIX :: "nix (Nix) "
 
 // All inputs that identify one permitted local Nix fallback evaluation.
 struct NixFallbackIdentity {
@@ -100,13 +111,13 @@ struct NixFallbackIdentity {
         loop segment in self.attr -> &attrs.push(Dyn.Text(segment))
         pkg_json_render(Dyn.Object([
             "schema": Dyn.Text(NIX_FALLBACK_PROVENANCE_SCHEMA),
-            "executable": Dyn.Text(self.executable),
-            "executable_sha256": Dyn.Text(self.executable_sha256),
-            "version": Dyn.Text(self.version),
-            "nixpkgs_revision": Dyn.Text(self.nixpkgs_revision),
-            "system": Dyn.Text(self.system),
+            "executable": Dyn.Text(self.executable.copy()),
+            "executable_sha256": Dyn.Text(self.executable_sha256.copy()),
+            "version": Dyn.Text(self.version.copy()),
+            "nixpkgs_revision": Dyn.Text(self.nixpkgs_revision.copy()),
+            "system": Dyn.Text(self.system.copy()),
             "attr": Dyn.Array(attrs),
-            "lock_sha256": Dyn.Text(self.lock_sha256),
+            "lock_sha256": Dyn.Text(self.lock_sha256.copy()),
         ]))
     }
 

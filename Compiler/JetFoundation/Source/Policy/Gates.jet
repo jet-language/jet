@@ -1,5 +1,4 @@
 // Invocation gates are transport, not a second policy resolver.
-use jet_foundation.[PolicyKey, PolicyValue, PolicyScope, PolicyDeclaration, EffectivePolicy, PolicyError, Span, policy_resolve, policy_key_is_audited_gate]
 
 struct GateSet {
     allowed: [PolicyKey]{[PolicyKey]{}}
@@ -13,6 +12,35 @@ fn policy_gate_allows(gates: GateSet, key: PolicyKey) -> Bool Never! {
         .Ok(_) -> true
         .Err(_) -> false
     }
+}
+
+fn policy_gate_set_is_empty(gates: GateSet) -> Bool Never! {
+    gates.allowed.is_empty()
+}
+
+#Error
+struct PolicyGateParseError { message: String }
+
+// One `--gate name=allow` argument: the audited gate it opens.
+fn policy_gate_parse(spec: String) -> PolicyKey PolicyGateParseError! {
+    raw :: spec.bytes()
+    split := -1
+    loop (index, byte) in raw {
+        if Int.from_u8(byte) == 61 {
+            split = index
+            break
+        }
+    }
+    if split < 0 -> return Err(PolicyGateParseError{message: "use `--gate name=allow`"})
+    name :: (String.from_bytes(raw[0..<split]) ?? "").trim()
+    value :: (String.from_bytes(raw[split + 1..<raw.len()]) ?? "").trim()
+    key :: policy_key_parse(name) ?? return Err(PolicyGateParseError{message: "`{name}` is not an audited gate"})
+    if !policy_key_is_audited_gate(key) || value != "allow" -> return Err(PolicyGateParseError{message: "`--gate {spec}` must name an audited gate with `=allow`"})
+    if policy_resolve(key, [PolicyDeclaration]{policy_invocation_declaration(key)}) == {
+        .Ok(_) -> {}
+        .Err(error) -> return Err(PolicyGateParseError{message: "invalid gate `{spec}`: {error:Debug}"})
+    }
+    Ok(key)
 }
 
 fn policy_invocation_declaration(key: PolicyKey) -> PolicyDeclaration Never! {

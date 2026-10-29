@@ -1,0 +1,12 @@
+# tests/browser_bidi.rs::native_bidi_io_handle_methods_record_net_effect at tests/browser_bidi.rs:696; hand-port
+fixture: native_bidi_io_handle_methods_record_net_effect.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step validators: jet check run.jet
+cwd: validators
+exit: 0 # original jet::compile(validators).expect(..): profile and timeout validation stay pure
+step io: jet check io.jet
+exit: nonzero
+stderr: count "Error [E0740]" = 24 # original predicate: diags.filter(code == "E0740").count() >= 24

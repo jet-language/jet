@@ -7,13 +7,13 @@
 // (`SandboxPolicy`) lives in Foundation/SandboxPolicy.jet.
 
 // Test override: `available` or `unavailable` replaces the native probe.
-SANDBOX_FAKE_ENV :: prep { "JETPACK_FAKE_SANDBOX" }
-SANDBOX_NOT_ENFORCED :: prep { "not-enforced" }
-SANDBOX_REQUIRED_MESSAGE :: prep { "build sandboxing is required but unavailable" }
-SANDBOX_REQUIRED_FIX :: prep { "provide a trusted substitute or approved remote builder, or enable the native sandbox, then retry" }
-SANDBOX_FALLBACK_MESSAGE :: prep { "build sandboxing unavailable; local executable actions will be refused after substitution/remote resolution" }
-SANDBOX_FALLBACK_WARNING :: prep { "build sandboxing is unavailable; local executable actions will be refused after substitution/remote resolution" }
-SANDBOX_FALLBACK_FIX :: prep { "provide a trusted substitute or approved remote builder, or enable the native sandbox" }
+SANDBOX_FAKE_ENV :: "JETPACK_FAKE_SANDBOX"
+SANDBOX_NOT_ENFORCED :: "not-enforced"
+SANDBOX_REQUIRED_MESSAGE :: "build sandboxing is required but unavailable"
+SANDBOX_REQUIRED_FIX :: "provide a trusted substitute or approved remote builder, or enable the native sandbox, then retry"
+SANDBOX_FALLBACK_MESSAGE :: "build sandboxing unavailable; local executable actions will be refused after substitution/remote resolution"
+SANDBOX_FALLBACK_WARNING :: "build sandboxing is unavailable; local executable actions will be refused after substitution/remote resolution"
+SANDBOX_FALLBACK_FIX :: "provide a trusted substitute or approved remote builder, or enable the native sandbox"
 
 enum SandboxLevel {
     Strong
@@ -88,13 +88,13 @@ fn env_sandbox_json(code: String, severity: String, status: SandboxStatus) -> St
     refusal :: code == "E1275"
     fields := [String: Dyn]{}
     fields["schema_version"] = Dyn.Text("1")
-    fields["code"] = Dyn.Text(code)
-    fields["severity"] = Dyn.Text(severity)
+    fields["code"] = Dyn.Text(code.copy())
+    fields["severity"] = Dyn.Text(severity.copy())
     fields["message"] = Dyn.Text(if refusal -> SANDBOX_REQUIRED_MESSAGE else -> SANDBOX_FALLBACK_MESSAGE)
-    fields["why"] = Dyn.Text(status.reason)
-    fields["policy"] = Dyn.Text(status.policy)
+    fields["why"] = Dyn.Text(status.reason.copy())
+    fields["policy"] = Dyn.Text(status.policy.copy())
     fields["fix"] = Dyn.Text(if refusal -> SANDBOX_REQUIRED_FIX else -> SANDBOX_FALLBACK_FIX)
-    fields["mechanism"] = Dyn.Text(status.mechanism)
+    fields["mechanism"] = Dyn.Text(status.mechanism.copy())
     json.to_string_pretty(Dyn.Object(fields))
 }
 

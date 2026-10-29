@@ -1,0 +1,19 @@
+# Claim: jet check of the 40-variant program exits 0
+# Claim: jet check of the 160-variant program exits 0
+# Not ported: wall-time ratio 4N within 5x of N: timing is not a deterministic CLI assertion
+fixture: wide_enum_derive_check_scales_linearly.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+cwd: small
+env: JET_RECEIPT_BYPASS=1
+env: JET_STORE_DIR=store
+env: NO_COLOR=1
+exit: 0 # N=40 check
+step: jet check main.jet
+cwd: large
+env: JET_RECEIPT_BYPASS=1
+env: JET_STORE_DIR=store
+env: NO_COLOR=1
+exit: 0 # N=160 check

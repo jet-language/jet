@@ -39,7 +39,10 @@ fn env_workspace_lock_write_locked(cache: &WorkspaceDeclarationCache, workspace_
         lock = pkg_lock_parse(raw) ?? return Err(env_workspace_lock_invalid("existing lock is malformed: {err.message()}"))
     }
     lock.version = PKG_LOCK_VERSION
-    source :: resolver.resolve_workspace_source(&cache) ?? return Err(env_workspace_lock_invalid("workspace authority cannot be resolved: {err.message()}"))
+    source :: if resolver.resolve_workspace_source(&cache) == {
+        .Ok(found) -> found
+        .Err(error) -> { return Err(env_workspace_lock_invalid("workspace authority cannot be resolved: {error.message()}")) }
+    }
     if source == {
         .Val(checked) -> {
             if checked.role != WorkspaceSourceRole.Index {

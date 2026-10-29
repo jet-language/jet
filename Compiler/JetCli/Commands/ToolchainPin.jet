@@ -1,0 +1,19 @@
+// main.rs run_update_jet (7507-7522) uses the existing Trust pin mover and
+// canonical package lock writer. Unlike CmdPkg's dependency status, this human
+// status goes to stderr and is suppressed by --json/--quiet. Typed pin
+// diagnostics always remain diagnostics on stderr, even in machine mode.
+use jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, JetDriverVerbOutput]
+use jetpack_trust.[trust_pin_move]
+use jet_foundation.[diagnostic_render]
+
+fn jet_cli_update_jet_pin(root: String, channel: String?, running_version: String, color: Bool, json: Bool, quiet: Bool) -[FS, Env, Exec, Time, Time.Wait]> JetDriverVerbOutput Never! {
+    if trust_pin_move(root, channel, running_version) == {
+        .Ok(message) -> JetDriverVerbOutput{stdout: "", stderr: if !json && !quiet -> "{message}\n" else -> "", exit_code: JET_DRIVER_EXIT_OK}
+        .Err(error) -> {
+            // All three pin producers return Pin: classify_channel,
+            // resolve_channel, and the existing lock-write projection.
+            diagnostic :: if error == .Pin(report) -> report else -> panic("self-toolchain pin producer returned a non-pin error")
+            JetDriverVerbOutput{stdout: "", stderr: diagnostic_render(diagnostic, "", "", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        }
+    }
+}

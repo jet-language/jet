@@ -10,12 +10,9 @@ use jet_foundation.[
     InternalTag,
     ParamZone,
     Span,
-    TExpr,
-    TExprKind,
-    THandleOp,
-    THostCall,
     TagMarker,
     Type,
+    core_identity_in_module,
     type_name,
 ]
 
@@ -31,6 +28,8 @@ fn sema_call_reflection_secret_leaf(name: String) -> Bool Never! {
     leaf == "Secret" || leaf == "SigningKey" || leaf == "X25519SecretKey" || leaf == "SharedSecret"
 }
 
+// A Core crypto secret: tagged by a registry signature, or named by its
+// canonical source identity (`<corelib>/core.crypto::Secret`).
 fn sema_call_reflection_secret_bearing(ty: Type) -> Bool Never! {
     if ty == {
         .Tagged(marker, inner) -> {
@@ -40,6 +39,7 @@ fn sema_call_reflection_secret_bearing(ty: Type) -> Bool Never! {
             }
             return sema_call_reflection_secret_bearing(inner)
         }
+        .Named(name) -> core_identity_in_module(name, "core.crypto") && sema_call_reflection_secret_leaf(name)
         else -> false
     }
 }
@@ -65,10 +65,10 @@ fn sema_call_reflection_core_shown(name: String) -> Bool Never! {
 
 fn sema_call_reflection_bound(ty: Type, bound: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
-        if sema_type_bound_satisfied_with_generics(graph, ty, bound, environment.module_identity, environment.generic_params) == (Val(true)) -> return true
+        if sema_type_bound_satisfied_at(graph, ty, bound, sema_scope_caller_row(environment, graph), environment.generic_params) == (Val(true)) -> return true
         // Imported nominal capabilities belong to their declaring registry. A
         // caller need not import the trait name as well as the displayed type.
-        owner :: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return false
+        owner :: sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) ?? return false
         nominal :: graph.modules[owner.module_index].nominals[owner.row]
         sema_type_bound_satisfied_with_generics(graph, nominal.ty, bound, nominal.symbol.module_name, environment.generic_params) ?? false
     } else {
@@ -79,7 +79,34 @@ fn sema_call_reflection_bound(ty: Type, bound: String, environment: SemaScopeEnv
 fn sema_call_reflection_named_displayable(name: String, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     // S80 the Prelude-owned default error shows its message.
     if sema_call_reflection_core_shown(name) || sema_call_reflection_leaf_name(name) == "Err" -> return true
+    if sema_call_reflection_synthetic_printable(name) -> return true
     sema_call_reflection_bound(ty, "Display", environment, program) || sema_call_reflection_bound(ty, "Printable", environment, program)
+}
+
+// Rust `TraitRegistry::register_synthetic_display_debug`: the Core values the
+// trait registry admits as `Printable` with no source impl (their Prelude
+// `JetShow` hooks, every SIMD lane and the linear-algebra values), and the
+// Core types it registers a `Display` impl for.
+fn sema_call_reflection_synthetic_printable(name: String) -> Bool Never! {
+    leaf :: sema_call_reflection_leaf_name(name)
+    if sema_core_is_math_type(leaf) -> return true
+    if leaf == {
+        "ArgsSpec" | "AriaRole" | "Bits" | "BuildError" | "BrowserError" | "Bytes" | "Clock" | "DataError" |
+        "DataTracked" | "DataWatch" | "DataWatchStatus" | "Dyn" | "DBValue" | "DBLease" | "DBPoolReceipt" | "Date" |
+        "DateTime" | "Decimal" | "FieldError" | "DirEntry" | "DNSSRV" | "Duration" | "EncodingError" | "EmailError" |
+        "EnvError" | "EventResult" | "Field" | "FileLock" | "GameAssets" | "GameBackend" | "GameFrame" | "GameImage" |
+        "GameInputMap" | "GameInputSnapshot" | "GameReplay" | "GameScene" | "GameSound" | "HTTPError" | "HTTPHeaderName" |
+        "HTTPHeaderValue" | "HTTPMethod" | "HTTPRequest" | "HTTPResponse" | "HTTPRouter" | "HTTPStatus" | "HTTPVersion" |
+        "ID" | "Instant" | "IOError" | "IPAddr" | "JSON" | "Key" | "LocalDate" | "LocalTime" | "Cache" | "Measurement" |
+        "MIME" | "NetError" | "ParsedArgs" | "Path" | "Period" | "Point" | "Pool" | "ProcessChild" | "ProcessReceipt" |
+        "ProcessResult" | "ProcessSpec" | "Quat" | "Range" | "RangeError" | "Rect" | "ReflectField" | "ReflectValue" |
+        "Regex" | "RegexFlags" | "RegexMatch" | "RNG" | "Size" | "SocketAddr" | "Solver" | "Stat" | "Stopwatch" | "Test" |
+        "TcpListener" | "TcpStream" | "TempDir" | "TempFile" | "TextError" | "PluginError" | "TLSStream" | "TLSVersion" |
+        "UDPPacket" | "UdpSocket" | "UnixListener" | "UnixStream" | "URL" | "UTF8Error" | "Value" | "Zone" | "ZonedDateTime" |
+        "ComputeDevice" | "SyncText" | "SyncCounter" | "SyncMap" | "SyncList" | "ServiceRestart" | "ServiceDelivery" |
+        "ServiceRuntime" | "ServiceStateStore" -> true
+        else -> false
+    }
 }
 
 fn sema_call_reflection_is_displayable(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
@@ -129,9 +156,10 @@ fn sema_call_reflection_has_name(names: [String], wanted: String) -> Bool Never!
 
 // Apply the runtime reflection gate after the normal Core argument checker has
 // inferred the value. This keeps argument evaluation and ownership in the
-// ordinary call path while centralizing secret/display diagnostics.
+// ordinary call path while centralizing secret/display diagnostics. A value
+// reflects exactly where bare `"{x}"` interpolation shows it.
 fn sema_call_reflection_validate_value(value: TExpr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
-    if sema_call_reflection_is_displayable(value.ty, environment, program) -> return true
+    if sema_expression_displayable(value.ty, environment, program) -> return true
     if value.ty == .Named(name) && sema_call_reflection_leaf_name(name) == "Unit" -> return true
     if {
         sema_call_reflection_secret_bearing(value.ty) -> {
@@ -216,7 +244,6 @@ fn sema_call_try_reflection_metadata_method(
     value := sema_tir_node(result_type, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: typed.values}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
-
 
 fn sema_call_reflection_handle_operation(owner: String, method: String) -> THandleOp? {
     if owner == "Value" {

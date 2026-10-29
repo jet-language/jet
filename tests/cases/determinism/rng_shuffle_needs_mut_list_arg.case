@@ -1,0 +1,8 @@
+# tests/determinism.rs::rng_shuffle_needs_mut_list_arg at tests/determinism.rs:626; hand-port
+fixture: rng_shuffle_needs_mut_list_arg.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet --json
+exit: 1 # tests/determinism.rs:642 is rejected
+json: stdout doc $.reports[?code="E0202"] #>= 1 # tests/determinism.rs:642 reports E0202

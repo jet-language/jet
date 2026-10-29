@@ -1,0 +1,17 @@
+# Port of tests/web_app_graph.rs:264-302; runtime PENDING-SAME-HEAD.
+# Exact serializer crates/jet-foundation/src/App.rs474-795 (routes485-520, actions619-650, queries711-717, stores727, mounts735-750, policy769-791).
+# Wrapper $.web_app Source/CmdDevTools.rs4177-4184.
+# KNOWN-FAILING #4830: Jet Compiler/JetCli/Source/Cli/Front.jet829 returns not_ported.
+fixture: render_modes_mount_and_island.fixture
+# PENDING-GRAMMAR(batch-four scalar has); exact Vec::contains semantics approved by TestLead1.
+step: jet explain --web-graph app.jet --json
+exit: 0
+json: stdout doc $.web_app.hydration = "release-keep-server"
+json: stdout doc $.web_app.mounts #= 1
+json: stdout doc $.web_app.mounts[0].prefix = "/plugins"
+json: stdout doc $.web_app.mounts[0].effects = ["Net"]
+json: stdout doc $.web_app.mounts[0].security = ["csrf"]
+json: stdout doc $.web_app.policy.cache has "revalidate"
+json: stdout doc $.web_app.policy.split has "dash"
+json: stdout doc $.web_app.routes[?render in ["ssg","stream","island"]] #>= 1
+

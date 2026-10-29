@@ -18,14 +18,15 @@ use jet_foundation.[
     DIAGNOSTIC_ERROR,
     Diagnostic,
     DiagnosticRegistryFix,
+    MARKER_SOURCE,
     TAppliedRule,
     diagnostic_registry_rows,
     diagnostic_render_all,
     marker_source_read,
 ]
-use jet_parser.[
-    parse_source,
-]
+use jet_pkg_model.[WorkspaceDeclarationCache]
+use jetpack_foundation.[CONFIG_FILE, ENV_FILE]
+use jet_env_model.[envmodel_evaluate_env]
 
 // `argv` is the normalized argv with its `--` tail (main.rs `raw`), `jet_argv`
 // the words before `--`, and `args` their positional words.
@@ -121,7 +122,7 @@ fn jet_cli_inspect_b_error(code: String, what: String, color: Bool, json: Bool, 
 JET_CLI_KEYWORD_LIST :: [String]{
     "fn", "pub", "priv", "use", "as", "extern", "rust", "module", "if", "else", "loop", "in", "break", "next",
     "return", "yield", "defer", "struct", "enum", "alias", "impl", "policy", "wrap", "trait", "tag",
-    "effect", "derive", "prep", "fact", "distinct", "migration", "rename", "add", "remove", "change", "via",
+    "effect", "derive", "comptime", "fact", "distinct", "migration", "rename", "add", "remove", "change", "via",
     "self", "Unsafe", "Impure", "Context", "task", "freeze", "shared", "Transact", "Job", "Test",
     "Todo", "State", "Transition", "state", "protocol", "client", "server", "marker", "validate",
     "check", "true", "false", "None", "it",
@@ -219,20 +220,10 @@ fn jet_cli_reserved(json: Bool) -> JetCLIPlan Never! {
 // (Source/CmdInspect.rs `run_digest`): the one-file language surface used by
 // agents, projected from the compiler registries.
 
-// The Prelude marker declarations, read from the toolchain source tree (the
-// Rust host embeds the same file; MarkerSource.rs `MARKER_SOURCE`).
-JET_CLI_MARKER_SOURCE_PATH :: "crates/jet-codegen/src/Prelude/Markers.jet"
-
 // One topic: a byte range of the full digest.
 struct JetCLIDigestSlice {
     topic: String
     bytes: String
-}
-
-// The digest, or the report that stopped it.
-enum JetCLIDigestText {
-    Text(text: String)
-    Failed(plan: JetCLIPlan)
 }
 
 fn jet_cli_digest_section(title: String, body: String) -> String Never! {
@@ -353,12 +344,8 @@ fn jet_cli_digest_core_module_text() -> String Never! {
 }
 
 // CmdInspect.rs `llm_digest`.
-fn jet_cli_llm_digest(color: Bool, json: Bool) -[FS, Env]> JetCLIDigestText Never! {
-    fix :: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/` and `crates/`"
-    toolchain :: cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) ?? return JetCLIDigestText.Failed{plan: jet_cli_inspect_b_fail("E2105", "`{JET_CLI_TOOLCHAIN_ROOT_ENV}` is not set, so the marker registry can't be read", fix, color, json, JET_DRIVER_EXIT_USER_ERROR)}
-    path :: jet_cli_authority_path(toolchain, JET_CLI_MARKER_SOURCE_PATH)
-    markers :: cli_files.read(path) ?? return JetCLIDigestText.Failed{plan: jet_cli_inspect_b_fail("E2105", "can't read the marker registry `{path}`: {err}", fix, color, json, JET_DRIVER_EXIT_USER_ERROR)}
-    marker_text :: jet_cli_digest_marker_text(marker_source_read(markers))
+fn jet_cli_llm_digest() -> String Never! {
+    marker_text :: jet_cli_digest_marker_text(marker_source_read(MARKER_SOURCE))
     idiom_suites_lines :: [String]{
         "Each idiom has one executable, golden-backed source of truth under `Examples/suites/`.",
         "",
@@ -416,7 +403,7 @@ fn jet_cli_llm_digest(color: Bool, json: Bool) -[FS, Env]> JetCLIDigestText Neve
         jet_cli_digest_section("Diagnostics", diagnostic_body),
     }
     out :: sections.join("\n")
-    JetCLIDigestText.Text{text: "{jet_cli_inspect_trim_end(out)}\n"}
+    "{jet_cli_inspect_trim_end(out)}\n"
 }
 
 // Rust `str::trim_end` over ASCII whitespace.
@@ -549,11 +536,7 @@ fn jet_cli_digest(options: [String], color: Bool, json: Bool) -[FS, Env]> JetCLI
         }
         index += 1
     }
-    digest := ""
-    if jet_cli_llm_digest(color, json) == {
-        .Text(text) -> digest = text
-        .Failed(plan) -> return plan
-    }
+    digest :: jet_cli_llm_digest()
     if !list_topics && topic == None -> return jet_cli_digest_emit(digest, json)
     slices :: jet_cli_digest_slices(digest)
     if list_topics {

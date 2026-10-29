@@ -5,6 +5,9 @@
 // std-only generated C bridge owns JNI invocation. The JVM is created lazily
 // in-process. Java objects cross as bounded global-reference handles; Jet can
 // borrow them for calls and consumes them through `close`.
+use core.files as files
+use core.sys as sys
+
 
 // A JVM binding also names the directory holding the embeddable `libjvm`.
 struct JavaBindResult {
@@ -15,7 +18,7 @@ struct JavaBindResult {
     provenance: String
 }
 
-PKG_JAVA_TOOL_ACTION :: prep { "rejected the JVM binding input" }
+PKG_JAVA_TOOL_ACTION :: "rejected the JVM binding input"
 
 // The JVM scalar shapes the JNI boundary accepts.
 enum JavaScalar {
@@ -339,7 +342,7 @@ fn pkg_java_c_escape(value: String) -> String Never! {
 
 // The lazy-JVM prelude of the JNI bridge. Holes: `abi` and the c-escaped
 // `classes` class path.
-PKG_JAVA_BRIDGE_C :: prep { ```#include <jni.h>
+PKG_JAVA_BRIDGE_C :: comptime { ```#include <jni.h>
 #include <stdint.h>
 #include <pthread.h>
 #include <stdlib.h>

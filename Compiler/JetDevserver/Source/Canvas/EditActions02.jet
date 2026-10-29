@@ -1,9 +1,10 @@
 
 use jet_parser.AST.[Stmt, Expr, Item, ProgramBundle, LValue]
-use jet_foundation.[SourceSpan, Severity]
+use jet_foundation.[Expr, Item, LValue, Marker, Stmt]
 use jet_driver.Driver.[check_file]
 use jet_fixer.FixEngine.[FixEngine]
-use jet_semindex.[SymbolKind]
+use jet_semindex.[SourceSpan]
+use core.files.[OSPath]
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1815
 struct StatementLoc { anchor: SourceSpan; source: SourceSpan; full: SourceSpan; block: [USize]; index: USize; is_guard: Bool; is_expr: Bool; guard_span: SourceSpan? }
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1826
@@ -143,13 +144,13 @@ fn find_expression_selection_in_block(stmts: [Stmt], target: SourceSpan, src: St
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2196
 fn source_expression_span(src: String, expr: &Expr) -> SourceSpan {
     start := if expr == {
-        .Call(call) -> call.name_span.start, .MethodCall { receiver, .. } -> source_expression_span(src, receiver).start
+        .Call(call, _) -> call.name_span.start, .MethodCall { receiver, .. } -> source_expression_span(src, receiver).start
         .Try(inner, ..) | .OrFallback { value: inner, .. } -> source_expression_span(src, inner).start
-        .Paren(_, span) -> span.start, _ -> expr.span().start
+        .Paren(_, span, _) -> span.start, _ -> expr.span().start
     }
     fallback_end := expr.span().end
     end := if expr == {
-        .Call(call) -> call_source_end(src, call.name_span.end, fallback_end)
+        .Call(call, _) -> call_source_end(src, call.name_span.end, fallback_end)
         .MethodCall { method_span, .. } -> call_source_end(src, method_span.end, fallback_end)
         .Try(inner, span, ..) -> {
             end := source_expression_span(src, inner).end.max(span.end)
@@ -196,11 +197,11 @@ fn find_exec_insertion(src: String, stmts: &[Stmt], node_span: SourceSpan, pin_n
         if same_span(source, node_span) || same_span(anchor, node_span) {
             if execution_terminates(stmt) -> return .Err(edit_error("ambiguous", "Canvas cannot add a convergence step after an early exit"))
             full := stmt_text_span(src, stmt)
-            return .Ok(.Val(ExecInsertion { offset: full.end, indent: indentation_at(src, full.start), owner: full, branch: false }))
+            return .Val(ExecInsertion { offset: full.end, indent: indentation_at(src, full.start), owner: full, branch: false })
         }
-        if find_exec_insertion_in_children(src, stmt, node_span, pin_name)? == .Val(found) -> return .Ok(.Val(found))
+        if find_exec_insertion_in_children(src, stmt, node_span, pin_name)? == .Val(found) -> return .Val(found)
     }
-    .Ok(.None)
+    .None
 }
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2334
 fn exec_branch_node_matches(stmt: Stmt, node_span: SourceSpan) -> Bool {
@@ -275,15 +276,15 @@ fn find_exec_insertion_in_children(src: String, stmt: &Stmt, node_span: SourceSp
         .Live { body, .. } | .AssumeDet { body, .. } | .Transact { body, .. } | .ScopeMember { body, .. } -> find_exec_insertion(src, body, node_span, pin_name)
         .Switch { arms, else_body, .. } | .ComptimeSwitch { arms, else_body, .. } -> {
             loop arm in arms {
-                if find_exec_insertion(src, arm.body, node_span, pin_name)? == .Val(found) -> return .Ok(.Val(found))
+                if find_exec_insertion(src, arm.body, node_span, pin_name)? == .Val(found) -> return .Val(found)
             }
             else_body.as_deref().map((body) -> find_exec_insertion(src, body, node_span, pin_name)).transpose().map((found) -> found.flatten())
         }
         .ComptimeIf { then_body, else_body, .. } -> {
-            if find_exec_insertion(src, then_body, node_span, pin_name)? == .Val(found) -> return .Ok(.Val(found))
+            if find_exec_insertion(src, then_body, node_span, pin_name)? == .Val(found) -> return .Val(found)
             else_body.as_deref().map((body) -> find_exec_insertion(src, body, node_span, pin_name)).transpose().map((found) -> found.flatten())
         }
-        else -> .Ok(.None)
+        else -> .None
     }
 }
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:2530
@@ -764,37 +765,37 @@ fn find_multi_input_in_lvalue(target: &LValue, node_span: SourceSpan, out: &Mult
 fn find_multi_input_in_expr(expr: &Expr, node_span: SourceSpan, out: &MultiInputTarget?) {
     if out.is_some() -> return
     if expr == {
-        .ListLit(items, span) && same_span(span.into(), node_span) -> out = .Val(.List { span: span.into(), item_spans: items.iter().map((item) -> item.span().into()).collect() })
+        .ListLit(items, span, _) && same_span(span.into(), node_span) -> out = .Val(.List { span: span.into(), item_spans: items.iter().map((item) -> item.span().into()).collect() })
         else -> walk_expr_children_for_multi_input(expr, node_span, out)
     }
 }
 // Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:3663
 fn walk_expr_children_for_multi_input(expr: &Expr, node_span: SourceSpan, out: &MultiInputTarget?) {
     if expr == {
-        .Call(c) -> { loop arg in c.args -> find_multi_input_in_expr(arg.expr, node_span, out) }
+        .Call(c, _) -> { loop arg in c.args -> find_multi_input_in_expr(arg.expr, node_span, out) }
         .MethodCall { receiver, args, .. } -> {
             find_multi_input_in_expr(receiver, node_span, out)
             loop arg in args -> find_multi_input_in_expr(arg.expr, node_span, out)
         }
-        .ListLit(items, _) -> { loop item in items -> find_multi_input_in_expr(item, node_span, out) }
+        .ListLit(items, _, _) -> { loop item in items -> find_multi_input_in_expr(item, node_span, out) }
         .Index { base, index, .. } -> { find_multi_input_in_expr(base, node_span, out); find_multi_input_in_expr(index, node_span, out) }
         .Slice { base, start, end, range, .. } -> {
             find_multi_input_in_expr(base, node_span, out)
             if range == .Val(range) { find_multi_input_in_expr(range, node_span, out) } else { find_multi_input_in_expr(start, node_span, out); find_multi_input_in_expr(end, node_span, out) }
         }
-        .MapLit(items, _) -> {
+        .MapLit(items, _, _) -> {
             loop (key, value) in items { find_multi_input_in_expr(key, node_span, out); find_multi_input_in_expr(value, node_span, out) }
         }
-        .Binary(_, left, right, _) -> { find_multi_input_in_expr(left, node_span, out); find_multi_input_in_expr(right, node_span, out) }
-        .Unary(_, expr, _) | .Try(expr, ..) | .Present(expr, _) | .Ok(expr, _) | .Err(expr, _) |
-        .Paren(expr, _) | .Copy(expr, _) | .Field(expr, _, _) | .RawOf(expr, _) | .Tainted(expr, _, _) -> find_multi_input_in_expr(expr, node_span, out)
+        .Binary(_, left, right, _, _) -> { find_multi_input_in_expr(left, node_span, out); find_multi_input_in_expr(right, node_span, out) }
+        .Unary(_, expr, _, _) | .Try(expr, ..) | .Present(expr, _, _) | .Ok(expr, _, _) | .Err(expr, _, _) |
+        .Paren(expr, _, _) | .Copy(expr, _, _) | .Field(expr, _, _, _) | .RawOf(expr, _, _) | .Tainted(expr, _, _, _) -> find_multi_input_in_expr(expr, node_span, out)
         .PatternTest { subject, .. } -> find_multi_input_in_expr(subject, node_span, out)
         .If { cond, then_body, then_value, else_body, else_value, .. } -> {
             find_multi_input_in_expr(cond, node_span, out); find_multi_input_target(then_body, node_span, out)
             find_multi_input_in_expr(then_value, node_span, out); find_multi_input_target(else_body, node_span, out)
             find_multi_input_in_expr(else_value, node_span, out)
         }
-        .TupleLit(items, _, _) -> { loop (_, item) in items -> find_multi_input_in_expr(item, node_span, out) }
+        .TupleLit(items, _, _, _) -> { loop (_, item) in items -> find_multi_input_in_expr(item, node_span, out) }
         .StructLit { fields, .. } -> { for (_, _, value) in fields -> find_multi_input_in_expr(value, node_span, out) }
         .EnumLit { args, .. } -> {
             loop arg in args {

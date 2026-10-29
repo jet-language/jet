@@ -3,6 +3,9 @@
 // themselves only while their ownership record is unchanged, lease and owner
 // line parsing, and the checksummed access journal that orders pruning (Rust
 // `jet_store` Lease, StoreLock, LeaseRecord, JournalState, owner liveness).
+use jet_pkg_model.[pkg_bytes_starts_with, pkg_bytes_text, pkg_sha256_hex]
+use core.sys as sys
+use core.files as files
 
 // Ownership identity recorded in lock and lease files. PID alone is not
 // sufficient because a later process may reuse it.
@@ -274,7 +277,7 @@ fn store_artifact_parse_journal_line(line: [U8]) -> ArtifactJournalRecord? Never
 
 // Bytes read from the journal's end to find its final line. A line is one
 // wire key plus a few short fields, far below this.
-STORE_ARTIFACT_JOURNAL_TAIL_WINDOW :: prep { 65536 }
+STORE_ARTIFACT_JOURNAL_TAIL_WINDOW :: 65536
 
 // The journal's last sequence number, read from its final line alone (Rust
 // journal_tail_sequence). Every append numbers after the previous maximum and

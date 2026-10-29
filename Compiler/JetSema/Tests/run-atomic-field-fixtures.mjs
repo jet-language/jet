@@ -17,7 +17,7 @@ if (mode === "assemble") {
     // Reuse the canonical whole-production fixture assembler, replacing only
     // its fixture tail; no shadow checker or duplicate constructor is compiled.
     const assembled = readFileSync(join(out, "unsafe-obligations/src/compiler.jet"), "utf8");
-    const oldFixture = readFileSync(join(repo, "Compiler/JetSema/Tests/UnsafeObligations.jet"), "utf8");
+    const oldFixture = readFileSync(join(repo, "Compiler/JetSema/Tests/UnsafeObligations.fixture/UnsafeObligations.jet"), "utf8");
     if (!assembled.endsWith(oldFixture)) throw Error("production fixture boundary changed");
     const production = assembled.slice(0, -oldFixture.length);
     const quote = text => JSON.stringify(text).replaceAll("{", "{{").replaceAll("}", "}}");
@@ -26,7 +26,7 @@ if (mode === "assemble") {
     const project = join(out, "atomic-fields");
     mkdirSync(join(project, "src"), { recursive: true });
     writeFileSync(join(project, "src/compiler.jet"), production + fixture + `\nfn run() {\n${calls}\n    print("atomic-field parity: ${cases.length} cases")\n}\n`);
-    writeFileSync(join(project, "package.jet"), 'name: "atomic_fields"\nversion: "0.1.0"\nauthority: { holds: { allow: [IO, Mem.Alloc, Mem.Rc, Time.Wait] } }\n');
+    writeFileSync(join(project, "package.jet"), 'name: "atomic_fields"\nversion: "0.1.0"\nauthority: { allow: [IO, Mem.Alloc, Mem.Rc, Time.Wait] }\n');
     console.log(join(project, "src/compiler.jet"));
 } else {
     const receipts = [];

@@ -1,6 +1,6 @@
 // Source/LSP/Server.rs:5272–5465,5577–5697,5744–5775,5933–5952.
 // Position/URI own the UTF-16 and file URI kernels. No second document state.
-use jet_foundation.[Span, ProgramBundle, diagnostic_utf8_width]
+use jet_foundation.[Span, diagnostic_utf8_width, type_name]
 use jet_lexer.[Token, TOKEN_IDENT]
 use core.text.runtime.kernel_unicode_string as lsp_source_text
 use core.files.runtime.kernel_path_components as lsp_source_path
@@ -8,9 +8,10 @@ use core.sys.target.[selected_family, NativeTargetFamily]
 
 use core.files.runtime.kernel_path_components.[OSPath, PathPlatform]
 use core.files.host.retained_descriptor as lsp_source_io
-use jet_driver.[JetDriverCompilerCheckResult, jet_driver_compiler_check_loaded_module_rows, jet_driver_find_package_root_checked]
+use jet_driver.[JetDriverCompilerCheckResult]
 use jet_sema.[SemaCompilerModuleSource]
 use jetpack.[PackageIndex, env_discovery_load]
+use jet_devserver.[project_root]
 
 // Native gates #4494/#4392/#4483/#4500: retained_descriptor.canonicalize and
 // exists over OSPath must be the real Core OS owners. No textual fallback
@@ -165,7 +166,7 @@ fn lsp_load_discovery_index(path: String, platform: PathPlatform) -[FS]> Package
     loop {
         // dir originates solely from the UTF-8 input, never native display.
         text :: lsp_source_path.to_str(dir) ?? panic("UTF-8 parent must remain UTF-8")
-        if env_discovery_load(text) == .Ok(.Val(index)) -> return Val(index)
+        if env_discovery_load(text) == .Val(index) -> return Val(index)
         extent :: lsp_source_path.parent_span(dir) ?? break
         dir = lsp_source_path.owned_span(dir, extent)
     }

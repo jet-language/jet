@@ -1,5 +1,18 @@
 // tests/jetpack_trust_root.rs integration assertions, not the TrustRoot unit suite.
 // Runtime UNRUN. Exact constants, typed error variants, records, and boundaries.
+use jetpack_trust_root.[
+    BoundIdentity, CacheProvenance, CacheReceipt, IdentityKind, MetadataRole, PublicTrustKey,
+    PublisherIdentity, RootBootstrap, SignedMetadata, SnapshotMetaEntry, SnapshotMetadata,
+    TUFRootMetadata, TargetMeta, TargetsMetadata, TimestampMetadata, TrustEngine, TrustFixtureRoot,
+    TrustKey, TrustRootPolicy, TrustSignature, TrustedClock, trust_allow_cache_witness,
+    trust_canonical_root, trust_canonical_snapshot, trust_canonical_targets,
+    trust_fixture_threshold_root, trust_is_cache_witness_allowed, trust_public_trust_manifest,
+    trust_sign_root, trust_sign_snapshot, trust_sign_targets, trust_sign_timestamp,
+]
+use jetpack_trust.[TrustGrant, trust_add_grant, trust_gate_build_identity]
+use jetpack_foundation.[Theme]
+use core.crypto as crypto
+use core.files as files
 
 #Test("trust_publication_exporter_rejects_the_test_index_key") {
     rejected :: if PublicTrustKey.from_nix_line("index", "jet-test-index-v1:{"A".repeat(43)}=") == {
@@ -230,8 +243,8 @@ fn pkg_integration_trust_boot(fixture: TrustFixtureRoot, signed_root: SignedMeta
     scratch :: files.temp_dir("jetpack-core-build-trust-it") ?? panic("scratch directory")
     dir :: scratch.path
     store :: files.join(dir, "trust")
-    assert(trust_add_grant(store, TrustGrant{authority: "build", subject: "build-sha256:trusted", scope: "repo"}))
+    assert(trust_add_grant(store, dir, TrustGrant{authority: "build", subject: "build-sha256:trusted", scope: "repo"}) ?? panic("grant"))
     hostile_identity :: "build-sha256:trusted\n$(touch core-build-pwned)"
-    assert(trust_gate_build_identity(Theme.plain(), store, hostile_identity, false) != None)
+    assert(trust_gate_build_identity(Theme.plain(), store, dir, hostile_identity, false) != None)
     assert(!files.exists(files.join(dir, "core-build-pwned")))
 }

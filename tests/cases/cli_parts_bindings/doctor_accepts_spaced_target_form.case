@@ -1,14 +1,5 @@
-# Port of tests/cli_parts/bindings.rs:370-393 and fake_rustc_fixture.
-# PENDING-GRAMMAR: copy action, step environment and unconstrained exit.
-# Pending kit mode-preserve fix.
-requires: os:unix
-fixture: fixtures/fake_rustc_good
-mkdir: sysroot/lib/rustlib/wasm32-unknown-unknown/lib
-copy: std.txt sysroot/lib/rustlib/wasm32-unknown-unknown/lib/libstd.rlib
-step: jet self doctor --target web
-env: PATH={work}/bin
-env: HOME={work}
-env: JET_FAKE_SYSROOT={work}/sysroot
-exit: any # Original asserts structure only; host-dependent status.
-stdout: ~ web: Jet web backend target # Report contains nondeterministic host paths/cache counts; preserve original assertion.
-stdout: ~ wasm32-unknown-unknown/lib # Same host-dependent report; preserve original proven-component assertion.
+# Port of tests/cli_parts/bindings.rs:370-393: `--target <machine>` (spaced form) selects a declared target machine.
+# PENDING-GRAMMAR: unconstrained exit.
+step: jet self doctor --target sensor
+exit: any # Host-dependent status: the rest of the report checks this machine's tools.
+stdout: ~ board.sensor_v1: declared target machine (thumbv7em-none-eabihf) # Report contains host paths and cache counts.

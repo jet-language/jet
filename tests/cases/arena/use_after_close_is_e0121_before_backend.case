@@ -1,0 +1,9 @@
+# tests/arena.rs::use_after_close_is_e0121_before_backend at tests/arena.rs:198; hand-port
+fixture: use_after_close_is_e0121_before_backend.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check fixture.jet --json
+exit: 1 # tests/arena.rs:209 is rejected
+json: stdout doc $.reports[?severity="error"] #= 1 # tests/arena.rs:209 the errors are exactly E0121
+json: stdout doc $.reports[?code="E0121"] #= 1 # tests/arena.rs:209 reports E0121

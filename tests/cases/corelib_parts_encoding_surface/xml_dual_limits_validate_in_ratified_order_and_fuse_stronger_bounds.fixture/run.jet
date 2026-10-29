@@ -1,0 +1,119 @@
+
+use core.encoding as encoding
+use core.encoding.xml as xml
+use core.files as files
+
+fn run() {
+    // EncodingLimits fail first even when XMLLimits are also illegal.
+    enc_bad := encoding.EncodingLimits.safe()
+    enc_bad.buffer_bytes = 1
+    xml_bad := xml.XMLParseOptions.safe()
+    xml_bad.limits.max_depth = 0
+    input1 :: files.open("probe.xml") ?? panic("open1")
+    if xml.reader(^input1, enc_bad, xml_bad) == {
+        .Ok(_) -> { print("accepted") }
+        .Err(error) -> {
+            print(error.format == encoding.EncodingFormat.XML)
+            print(error.kind == encoding.EncodingErrorKind.Limit)
+            print(error.byte_offset)
+            print(error.line ?? -1)
+            print(error.column ?? -1)
+            print(error.path)
+            print(error.reason)
+        }
+    }
+
+    // EncodingLimits ok → XMLLimits field order: max_depth before max_nodes.
+    enc_ok := encoding.EncodingLimits.safe()
+    xml_depth := xml.XMLParseOptions.safe()
+    xml_depth.limits.max_depth = 0
+    xml_depth.limits.max_nodes = 0
+    input2 :: files.open("probe.xml") ?? panic("open2")
+    if xml.reader(^input2, enc_ok, xml_depth) == {
+        .Ok(_) -> { print("accepted") }
+        .Err(error) -> {
+            print(error.format == encoding.EncodingFormat.XML)
+            print(error.kind == encoding.EncodingErrorKind.Limit)
+            print(error.byte_offset)
+            print(error.line ?? -1)
+            print(error.column ?? -1)
+            print(error.path)
+            print(error.reason)
+        }
+    }
+
+    // Cross-field XMLLimits after ranges.
+    enc_ok2 := encoding.EncodingLimits.safe()
+    xml_cross := xml.XMLParseOptions.safe()
+    xml_cross.limits.max_depth = 2
+    xml_cross.limits.max_entity_depth = 3
+    input3 :: files.open("probe.xml") ?? panic("open3")
+    if xml.reader(^input3, enc_ok2, xml_cross) == {
+        .Ok(_) -> { print("accepted") }
+        .Err(error) -> {
+            print(error.format == encoding.EncodingFormat.XML)
+            print(error.kind == encoding.EncodingErrorKind.Limit)
+            print(error.byte_offset)
+            print(error.line ?? -1)
+            print(error.column ?? -1)
+            print(error.path)
+            print(error.reason)
+        }
+    }
+
+    // Encoding depth tighter than XML depth: error names the fused bound.
+    // XMLLimits must be self-valid before EncodingLimits fusion.
+    enc_tight := encoding.EncodingLimits.safe()
+    enc_tight.max_depth = 2
+    xml_loose := xml.XMLParseOptions.safe()
+    xml_loose.limits.max_depth = 8
+    xml_loose.limits.max_entity_depth = 8
+    input4 :: files.open("probe.xml") ?? panic("open4")
+    reader :: xml.reader(^input4, enc_tight, xml_loose) ?? panic("fused reader")
+    loop true {
+        result :: reader.next()
+        if result == {
+            .Ok(maybe) -> {
+                if maybe == {
+                    Val(_) -> {}
+                    None -> {
+                        print("depth-missed")
+                        break
+                    }
+                }
+            }
+            .Err(error) -> {
+                print(error.kind == encoding.EncodingErrorKind.Limit)
+                print(error.reason)
+                break
+            }
+        }
+    }
+
+    // XML depth tighter than Encoding depth.
+    enc_loose := encoding.EncodingLimits.safe()
+    xml_tight := xml.XMLParseOptions.safe()
+    xml_tight.limits.max_depth = 1
+    xml_tight.limits.max_entity_depth = 1
+    deep_input :: files.open("probe.xml") ?? panic("open deep")
+    deep_reader :: xml.reader(^deep_input, enc_loose, xml_tight) ?? panic("xml-tight reader")
+    loop true {
+        result :: deep_reader.next()
+        if result == {
+            .Ok(maybe) -> {
+                if maybe == {
+                    Val(_) -> {}
+                    None -> {
+                        print("xml-depth-missed")
+                        break
+                    }
+                }
+            }
+            .Err(error) -> {
+                print(error.kind == encoding.EncodingErrorKind.Limit)
+                print(error.reason)
+                break
+            }
+        }
+    }
+}

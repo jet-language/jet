@@ -94,3 +94,12 @@ fn foundation_core_argument_menus(effect_roots: [String], builtin_tags: [String]
     })
     Val(menus)
 }
+
+// The canonical rule-argument declaration named `name` among the projected
+// menus, never a raw Core enum slot.
+fn rule_arg_declaration(name: String, menus: [TAppliedRuleArgumentMenu]) -> TAppliedRuleArgumentMenu? Never! {
+    loop menu in menus {
+        if menu.name == name -> return Val(menu.copy())
+    }
+    None
+}

@@ -126,7 +126,11 @@ fn cli_env_export_activate(verification: &StoreVerification, cache: &WorkspaceDe
             return Err(keep)
         }
     }
-    secret_identity :: trust_secrets_validation_identity(root, plan.secrets, plan.environment.active_environment) ?? None
+    secret_identity :: if trust_secrets_validation_identity(root, plan.secrets, plan.environment.active_environment) == {
+        .Val(identity) -> Val(identity)
+        .None -> None
+        .Err(_) -> None
+    }
     previous_receipt :: cli_read_env_entry_receipt(root)
     reuse_verified_store :: cli_receipt_secret_matches(previous_receipt, secret_identity)
     cli_validate_declared_secrets_with_reuse(theme, root, plan.secrets, plan.environment.active_environment, reuse_verified_store) ?? return Err(keep)
@@ -140,10 +144,18 @@ fn cli_env_export_activate(verification: &StoreVerification, cache: &WorkspaceDe
     warm := [VerifiedRealization]?{None}
     if receipt_matches_plan {
         receipt :: previous_receipt ?? panic("a matching receipt exists")
-        warm = store_reuse_verified_environment(&verification, roots, receipt.stamp, root, fingerprints.definition, inherited_loader_path, receipt.packages, local_catalog) ?? None
+        warm = if store_reuse_verified_environment(&verification, roots, receipt.stamp, root, fingerprints.definition, inherited_loader_path, receipt.packages, local_catalog) == {
+            .Val(found) -> Val(found)
+            .None -> None
+            .Err(_) -> None
+        }
         if warm == None {
             expectations :: cli_environment_member_expectations(&verification, roots, root, parsed.flags, plan)
-            warm = store_reuse_verified_environment_members(&verification, roots, receipt.packages, expectations, local_catalog) ?? None
+            warm = if store_reuse_verified_environment_members(&verification, roots, receipt.packages, expectations, local_catalog) == {
+                .Val(found) -> Val(found)
+                .None -> None
+                .Err(_) -> None
+            }
         }
     }
     warm_reused :: cli_warm_realizations_complete(plan, warm)
@@ -155,15 +167,15 @@ fn cli_env_export_activate(verification: &StoreVerification, cache: &WorkspaceDe
             return Err(keep)
         }
     }
-    composed :: cli_compose_env_scoped_with_warm(&verification, theme, roots, parsed.flags, plan, RealizeScope.Project, false, warm, !warm_reused) ?? return Err(keep)
-    env :: composed.env
+    composed :: cli_compose_env_scoped_with_warm(&verification, theme, roots, parsed.flags, plan, RealizeScope.Project, false, ^warm, !warm_reused) ?? return Err(keep)
+    env := composed.env
     // Reconcile the source graph after realization. If a prompt races an
     // edit, keep the prior activation and let the next prompt retry the new
     // hash instead of emitting a plan assembled from mixed revisions.
     if env_hook_definition_fingerprint_with_selections(root, parsed.flags.preset, parsed.flags.environment) != target_hash -> return Err(keep)
     plan_hash :: target_hash ?? ""
     entry :: cli_find_project_entry(root)
-    cli_run_lifecycle_hooks_silent(&verification, &cache, theme, parsed, roots, root, entry, env, plan.environment.lifecycle.on_enter, "on_enter") ?? return Err(keep)
+    cli_run_lifecycle_hooks_silent(&verification, &cache, theme, parsed, roots, root, entry, &env, plan.environment.lifecycle.on_enter, "on_enter") ?? return Err(keep)
     if env_hook_definition_fingerprint_with_selections(root, parsed.flags.preset, parsed.flags.environment) != target_hash -> return Err(keep)
     script := ""
     if active -> script = env_hook_render_unload(kind, base_path)
@@ -186,9 +198,7 @@ fn cli_env_export_activate(verification: &StoreVerification, cache: &WorkspaceDe
     }
     script = "{script}{rendered}"
     if !warm_reused {
-        if cli_record_env_entry_receipt(theme, root, roots, fingerprints.definition, inherited_loader_path, secret_identity ?? "", composed.stats) == .Err(error) {
-            theme.detail("couldn't record env entry: {error.message()}")
-        }
+        cli_record_env_entry_receipt(theme, root, roots, fingerprints.definition, inherited_loader_path, secret_identity ?? "", composed.stats) ?? theme.detail("couldn't record env entry: {err.message()}")
     }
     if watched_reload_ready -> env_hook_clear_watch_reload(root)
     Ok(script)

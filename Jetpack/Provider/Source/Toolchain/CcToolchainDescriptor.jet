@@ -13,24 +13,24 @@
 // the source fingerprint, and the producer facts. Hangar verification lives in
 // CcToolchainHangar.jet and acquisition in CcToolchainAcquisition.jet.
 
-CC_TOOLCHAIN_PACKAGE :: prep { "cc-toolchain" }
-CC_TOOLCHAIN_SOURCE :: prep { "jetpack" }
-CC_TOOLCHAIN_RECIPE_ID :: prep { "jet-cc-toolchain-v1" }
-CC_TOOLCHAIN_PRODUCER :: prep { "jet-cc" }
-CC_TOOLCHAIN_NIX_PRODUCER :: prep { "nix" }
-CC_TOOLCHAIN_SCHEMA :: prep { "1" }
-CC_TOOLCHAIN_FIXTURE_MANIFEST :: prep { "jet-cc-toolchain" }
-CC_TOOLCHAIN_FIXTURE_LAYOUT :: prep { "fixture-v1" }
-CC_TOOLCHAIN_NIX_LAYOUT :: prep { "nix-index-hangar-v1" }
-CC_TOOLCHAIN_VIRTUAL_BASE :: prep { "/jet/toolchains" }
-CC_TOOLCHAIN_NIX_STORE_PREFIX :: prep { "/nix/store/" }
-CC_TOOLCHAIN_MAX_MANIFEST_BYTES :: prep { 1048576 }
-CC_TOOLCHAIN_MAX_BUNDLE_NODES :: prep { 250000 }
-CC_TOOLCHAIN_MAX_BUNDLE_BYTES :: prep { 8589934592 }
-CC_TOOLCHAIN_MAX_NIX_OBJECTS :: prep { 250000 }
-CC_TOOLCHAIN_MAX_MARKER_BYTES :: prep { 16384 }
-CC_TOOLCHAIN_MAX_TARGET_BYTES :: prep { 128 }
-CC_TOOLCHAIN_MAX_STORE_NAME_BYTES :: prep { 256 }
+CC_TOOLCHAIN_PACKAGE :: "cc-toolchain"
+CC_TOOLCHAIN_SOURCE :: "jetpack"
+CC_TOOLCHAIN_RECIPE_ID :: "jet-cc-toolchain-v1"
+CC_TOOLCHAIN_PRODUCER :: "jet-cc"
+CC_TOOLCHAIN_NIX_PRODUCER :: "nix"
+CC_TOOLCHAIN_SCHEMA :: "1"
+CC_TOOLCHAIN_FIXTURE_MANIFEST :: "jet-cc-toolchain"
+CC_TOOLCHAIN_FIXTURE_LAYOUT :: "fixture-v1"
+CC_TOOLCHAIN_NIX_LAYOUT :: "nix-index-hangar-v1"
+CC_TOOLCHAIN_VIRTUAL_BASE :: "/jet/toolchains"
+CC_TOOLCHAIN_NIX_STORE_PREFIX :: "/nix/store/"
+CC_TOOLCHAIN_MAX_MANIFEST_BYTES :: 1048576
+CC_TOOLCHAIN_MAX_BUNDLE_NODES :: 250000
+CC_TOOLCHAIN_MAX_BUNDLE_BYTES :: 8589934592
+CC_TOOLCHAIN_MAX_NIX_OBJECTS :: 250000
+CC_TOOLCHAIN_MAX_MARKER_BYTES :: 16384
+CC_TOOLCHAIN_MAX_TARGET_BYTES :: 128
+CC_TOOLCHAIN_MAX_STORE_NAME_BYTES :: 256
 
 // This rule acquisition record.
 //
@@ -66,7 +66,7 @@ struct CcNixAcquisitionRecord {
 // The first production record is scoped to the platform for which the signed
 // feed publishes both `gcc` and `lld` outputs. Another target needs another
 // signed index/cache record, not a host-PATH guess or a copied sysroot.
-CC_NIX_ACQUISITION_RECORDS :: prep { [CcNixAcquisitionRecord]{
+CC_NIX_ACQUISITION_RECORDS :: comptime { [CcNixAcquisitionRecord]{
     {
         id: "jet-cc-nixos-unstable-e5bdc4a4-x86_64-linux-v1",
         channel: "nixos-unstable",
@@ -211,31 +211,6 @@ struct CcToolchainDescriptor {
 
     fn cache_identity(self, ctx: ProviderCtx) -[FS, Env]> CacheIdentity Never! {
         provider_plain_cache_identity(self.source_fingerprint(), CC_TOOLCHAIN_RECIPE_ID, ctx)
-    }
-
-    // The declared-only toolchain spec the build executor consumes: every tool
-    // is a virtual path under read-only mounts of the verified Hangar objects.
-    fn toolchain_spec(self) -> ToolchainSpec Never! {
-        provenance :: BuildProvenance.jetpack_dependency("{CC_TOOLCHAIN_PACKAGE}@{CC_TOOLCHAIN_SOURCE}", LockRecord.new("hangar", self.bundle_sha256))
-        spec := ToolchainSpec.target(self.target, provenance)
-        spec = spec.with_host_triple(self.host)
-        spec = spec.with_sdk(SDKIdentity.new("jet-cc", self.version, provenance))
-        spec = spec.with_linker(LinkerIdentity.new("{self.linker}@{self.linker_sha256}", provenance))
-        spec = spec.with_sysroot(SysrootIdentity.new(self.sysroot, self.sysroot_sha256, provenance))
-        spec = spec.with_tool("cc", self.compiler_virtual_path())
-        spec = spec.with_tool("c++", self.cxx_virtual_path())
-        spec = spec.with_tool("ld", self.linker_virtual_path())
-        spec = spec.declared_only()
-        if self.is_nix_layout() {
-            loop mount in self.mounts {
-                spec = spec.with_read_only_mount_identity(mount.source, mount.destination, mount.digest)
-            }
-            spec = spec.with_read_only_mount_identity(self.compiler_root, self.role_virtual_root(CcToolchainRole.Compiler), self.bundle_sha256)
-            spec = spec.with_read_only_mount_identity(self.linker_root, self.role_virtual_root(CcToolchainRole.Linker), self.linker_root_digest())
-            spec = spec.with_read_only_mount_identity(self.sysroot_root, self.role_virtual_root(CcToolchainRole.Sysroot), self.sysroot_sha256)
-            return spec
-        }
-        spec.with_read_only_mount_identity(self.root, self.virtual_root(), self.bundle_sha256)
     }
 
     fn is_nix_layout(self) -> Bool Never! {
@@ -544,7 +519,8 @@ fn provider_cc_is_cc_record(producer: ProducerRecord) -> Bool Never! {
     layout :: producer.facts.get("cc.layout") ?? ""
     if producer.provider == CC_TOOLCHAIN_PRODUCER -> return layout == CC_TOOLCHAIN_FIXTURE_LAYOUT
     if producer.provider == CC_TOOLCHAIN_NIX_PRODUCER {
-        return layout == CC_TOOLCHAIN_NIX_LAYOUT && producer.facts.get("cc.producer") == .Val(producer_name) && producer_name == CC_TOOLCHAIN_PRODUCER
+        // workaround #5940(c): no `== Val(CONST)`.
+        return layout == CC_TOOLCHAIN_NIX_LAYOUT && (producer.facts.get("cc.producer") ?? "") == CC_TOOLCHAIN_PRODUCER
     }
     false
 }

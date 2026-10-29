@@ -1,0 +1,30 @@
+# tests/diagnostics_coverage.rs::registered_config_and_cli_snapshots_keep_row_identity at tests/diagnostics_coverage.rs:668; hand-port
+# Claim: E1206 snapshot (tests/ui/lint_policy_code_name.stderr) keeps E1206 What/Why/Fix with code L0302 and name same_enum_guard_table (tests/diagnostics_coverage.rs:669-673)
+# Claim: E0043 snapshot (tests/ui/cli_e0043_install.stderr) keeps its registered row (tests/diagnostics_coverage.rs:674)
+# Claim: E1219 snapshot (tests/ui/cli_e1219_unknown_profile.stderr) keeps its registered row with name turbo (tests/diagnostics_coverage.rs:675-679)
+# Not ported: assert_ui_snapshot_matches_row byte-equal compare against Registry rendered What/Why/Fix: Rust-only Registry::diagnostic API; CLI-observable substance (code, name, fix text, More link) is asserted per step
+fixture: registered_config_and_cli_snapshots_keep_row_identity.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+cwd: lint
+env: NO_COLOR=1
+exit: 1 # E1206 snapshot (tests/ui/lint_policy_code_name.stderr) keeps E1206 What/Why/Fix with code L0302 and name same_enum_guard_table (tests/diagnostics_coverage.rs:669-673)
+stderr: ~ "Error [E1206]" # E1206 snapshot (tests/ui/lint_policy_code_name.stderr) keeps E1206 What/Why/Fix with code L0302 and name same_enum_guard_table (tests/diagnostics_coverage.rs:669-673)
+stderr: ~ "takes a lint name, not diagnostic code `L0302`" # E1206 snapshot (tests/ui/lint_policy_code_name.stderr) keeps E1206 What/Why/Fix with code L0302 and name same_enum_guard_table (tests/diagnostics_coverage.rs:669-673)
+stderr: ~ "Replace `L0302` with `same_enum_guard_table`" # E1206 snapshot (tests/ui/lint_policy_code_name.stderr) keeps E1206 What/Why/Fix with code L0302 and name same_enum_guard_table (tests/diagnostics_coverage.rs:669-673)
+stderr: ~ "More: jet-lang.dev/e/E1206" # E1206 snapshot (tests/ui/lint_policy_code_name.stderr) keeps E1206 What/Why/Fix with code L0302 and name same_enum_guard_table (tests/diagnostics_coverage.rs:669-673)
+step: jet install
+cwd: plain
+env: NO_COLOR=1
+exit: 1 # E1206 snapshot (tests/ui/lint_policy_code_name.stderr) keeps E1206 What/Why/Fix with code L0302 and name same_enum_guard_table (tests/diagnostics_coverage.rs:669-673)
+stderr: ~ "Error [E0043]" # E1206 snapshot (tests/ui/lint_policy_code_name.stderr) keeps E1206 What/Why/Fix with code L0302 and name same_enum_guard_table (tests/diagnostics_coverage.rs:669-673)
+stderr: ~ "jet install" # E1206 snapshot (tests/ui/lint_policy_code_name.stderr) keeps E1206 What/Why/Fix with code L0302 and name same_enum_guard_table (tests/diagnostics_coverage.rs:669-673)
+stderr: ~ "More: jet-lang.dev/e/E0043" # E1206 snapshot (tests/ui/lint_policy_code_name.stderr) keeps E1206 What/Why/Fix with code L0302 and name same_enum_guard_table (tests/diagnostics_coverage.rs:669-673)
+step: jet build --profile=turbo main.jet
+cwd: plain
+env: NO_COLOR=1
+exit: 1 # E1206 snapshot (tests/ui/lint_policy_code_name.stderr) keeps E1206 What/Why/Fix with code L0302 and name same_enum_guard_table (tests/diagnostics_coverage.rs:669-673)
+stderr: ~ "Error [E1219]" # E1206 snapshot (tests/ui/lint_policy_code_name.stderr) keeps E1206 What/Why/Fix with code L0302 and name same_enum_guard_table (tests/diagnostics_coverage.rs:669-673)
+stderr: ~ "turbo" # E1206 snapshot (tests/ui/lint_policy_code_name.stderr) keeps E1206 What/Why/Fix with code L0302 and name same_enum_guard_table (tests/diagnostics_coverage.rs:669-673)

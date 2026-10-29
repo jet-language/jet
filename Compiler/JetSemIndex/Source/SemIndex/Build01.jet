@@ -102,11 +102,11 @@ fn structural_span_add(offset: Int, extra: Int) -> Int {
 // Rust: crates/jet-semindex/src/Build.rs:1212
 fn structural_expr_span(expr: Expr) -> Span {
     if expr == {
-        .Call(call) -> {
+        .Call(call, _) -> {
             end :: if call.args.is_empty() -> structural_span_add(call.name_span.end, 2) else -> structural_span_add(structural_expr_span(call.args[call.args.len() - 1].expr).end, 1)
             Span{start: call.name_span.start, end: end}
         }
-        .MethodCall(receiver, _, method_span, _, _, args, _, _) -> {
+        .MethodCall(receiver, _, method_span, _, _, args, _) -> {
             end :: if args.is_empty() -> structural_span_add(method_span.end, 2) else -> structural_span_add(structural_expr_span(args[args.len() - 1].expr).end, 1)
             Span{start: structural_expr_span(receiver).start, end: end}
         }

@@ -1,15 +1,15 @@
 // Exact tests/agent_workloads.rs reviewed four corpus/schema guards.
 // Constants below come from the original Rust definitions, not corpus-derived expectations.
-S4_REVIEW_HEADER :: prep { "version\ttask_id\tdomain\tcase\tdeclared_outcome\tinput\texpected\tauthority\tadapters\tplatforms\tevidence\ttower_card\tloss_cards" }
-S4_REVIEW_BASELINE_HEADER :: prep { "version\trun_id\tmachine\tadapter\ttask_id\texpressibility\tfinding\tinput_sha256\texpected_sha256\texit_code\tsource_tokens\tstdout_file\tstdout_sha256\tstderr_file\tstderr_sha256\tcold_ns\twarm_ns\twarm_stdout_sha256\twarm_stderr_sha256\toutput_stable\tscoring\ttool_version\tpolicy_digest" }
-S4_REVIEW_DOMAIN_SCORING :: prep { "#769:v1;exit=0;stdout=exact;cold=recorded;warm=equal;input=unchanged;scratch=closed" }
-S4_REVIEW_DOMAIN_CONTRACT_HEADER :: prep { "version\ttask_id\tallowed_dependencies\tmachine_spec\tvariant\tscoring" }
-S4_REVIEW_COMPILED_RECEIPT_HEADER :: prep { "version\ttask_id\tlanguage\tsource_sha256\tinput_sha256\texpected_sha256\toutput_sha256\thostile_input_sha256\thostile_output_sha256\tenvironment\tmachine\ttool_version\tcommand\tpeer_commit\texit_code\thostile_exit_code\tpeer_launcher_path\tpeer_launcher_version\tpeer_launcher_sha256\tauthority" }
-S4_REVIEW_PEER_LAUNCH_CONTRACT :: prep { "compiled-workload-peer-isolation-v1" }
-S4_REVIEW_POLICY_FIELDS :: prep { [String]{"version", "plan", "launch_transaction", "descendants", "limits", "outputs", "receipt", "authority"} }
-S4_REVIEW_BASELINE_ADAPTERS :: prep { [String]{"bash", "python", "node"} }
-S4_REVIEW_ADAPTER_EXTENSIONS :: prep { [String]{"jet", "bash", "py", "mjs"} }
-S4_REVIEW_EXPECTED_TASKS :: prep { [[String]]{[String]{"repository-marker-scan", "repository-search-and-edit", "success", "exit=0;stdout=exact"},
+S4_REVIEW_HEADER :: comptime { "version\ttask_id\tdomain\tcase\tdeclared_outcome\tinput\texpected\tauthority\tadapters\tplatforms\tevidence\ttower_card\tloss_cards" }
+S4_REVIEW_BASELINE_HEADER :: comptime { "version\trun_id\tmachine\tadapter\ttask_id\texpressibility\tfinding\tinput_sha256\texpected_sha256\texit_code\tsource_tokens\tstdout_file\tstdout_sha256\tstderr_file\tstderr_sha256\tcold_ns\twarm_ns\twarm_stdout_sha256\twarm_stderr_sha256\toutput_stable\tscoring\ttool_version\tpolicy_digest" }
+S4_REVIEW_DOMAIN_SCORING :: comptime { "#769:v1;exit=0;stdout=exact;cold=recorded;warm=equal;input=unchanged;scratch=closed" }
+S4_REVIEW_DOMAIN_CONTRACT_HEADER :: comptime { "version\ttask_id\tallowed_dependencies\tmachine_spec\tvariant\tscoring" }
+S4_REVIEW_COMPILED_RECEIPT_HEADER :: comptime { "version\ttask_id\tlanguage\tsource_sha256\tinput_sha256\texpected_sha256\toutput_sha256\thostile_input_sha256\thostile_output_sha256\tenvironment\tmachine\ttool_version\tcommand\tpeer_commit\texit_code\thostile_exit_code\tpeer_launcher_path\tpeer_launcher_version\tpeer_launcher_sha256\tauthority" }
+S4_REVIEW_PEER_LAUNCH_CONTRACT :: comptime { "compiled-workload-peer-isolation-v1" }
+S4_REVIEW_POLICY_FIELDS :: comptime { [String]{"version", "plan", "launch_transaction", "descendants", "limits", "outputs", "receipt", "authority"} }
+S4_REVIEW_BASELINE_ADAPTERS :: comptime { [String]{"bash", "python", "node"} }
+S4_REVIEW_ADAPTER_EXTENSIONS :: comptime { [String]{"jet", "bash", "py", "mjs"} }
+S4_REVIEW_EXPECTED_TASKS :: comptime { [[String]]{[String]{"repository-marker-scan", "repository-search-and-edit", "success", "exit=0;stdout=exact"},
 [String]{"repository-marker-scan-empty", "repository-search-and-edit", "hostile-empty", "exit=0;stdout=exact"},
 [String]{"repository-semantic-inspection", "repository-search-and-edit", "semantic-index", "exit=0;stdout=exact"},
 [String]{"repository-semantic-edit", "repository-search-and-edit", "semantic-rename-with-decoys", "exit=0;stdout=exact"},
@@ -38,7 +38,7 @@ S4_REVIEW_EXPECTED_TASKS :: prep { [[String]]{[String]{"repository-marker-scan",
 [String]{"interactive-terminal-closed", "interactive-terminals", "hostile-closed-session", "exit=0;stdout=exact"},
 [String]{"service-lifecycle-roundtrip", "service-lifecycle", "up-health-wait-logs-down", "exit=0;stdout=exact"},
 [String]{"service-lifecycle-readiness-timeout", "service-lifecycle", "hostile-readiness-timeout", "exit=0;stdout=exact"}} }
-S4_REVIEW_EXPECTED_DOMAIN_CONTRACT :: prep { [[String]]{[String]{"build-test-failure-recovery", "jet=Core:files,process,sys,time;bash=bash,coreutils;python=stdlib-pathlib,stdlib-subprocess;node=stdlib-fs,stdlib-child-process", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"},
+S4_REVIEW_EXPECTED_DOMAIN_CONTRACT :: comptime { [[String]]{[String]{"build-test-failure-recovery", "jet=Core:files,process,sys,time;bash=bash,coreutils;python=stdlib-pathlib,stdlib-subprocess;node=stdlib-fs,stdlib-child-process", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"},
 [String]{"process-batch-success", "jet=Core:files,process,time;bash=bash,coreutils;python=stdlib-pathlib,stdlib-subprocess;node=stdlib-fs,stdlib-child-process", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "normal"},
 [String]{"process-batch-large-stderr", "jet=Core:files,process,time;bash=bash,coreutils;python=stdlib-pathlib,stdlib-subprocess;node=stdlib-fs,stdlib-child-process", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"},
 [String]{"process-batch-timeout-recovery", "jet=Core:files,process,time;bash=bash,coreutils;python=stdlib-pathlib,stdlib-subprocess;node=stdlib-fs,stdlib-child-process", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"},

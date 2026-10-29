@@ -687,17 +687,6 @@ use core.sys.target.[selected_family, selected_os]
     out :: run_transcript_with_flags(["use core.process as process", "#FX(authority: Exec, IO) {{\n    restricted :: authority.without(\"Exec\")\n    process.run([\"printf\", \"should-not-run\"], restricted)\n}}"], none, ["exec"], [])
     assert(out.contains("E1803"), "the narrowed boundary value was ignored: {out}")
 }
-// Rust: tests/repl.rs:1664
-#Test("repl_interrupt_signal_paths_cover_apple_and_bsd_unix") {
-    terminal :: fs.read_to_string(OSPath.from(env.manifest_dir()).join("crates/jet-repl/src/Term.rs")).unwrap()
-    evaluation_path :: terminal.split("pub struct EvaluationInterruptGuard").nth(1).and_then(source -> source.split("/// One decoded input event.").next()).expect("evaluation interrupt implementation")
-    assert(evaluation_path.contains("#[cfg(unix)]"), "raw evaluation interrupt must compile on POSIX Unix")
-    assert(!evaluation_path.contains("target_os = \"linux\""), "raw evaluation interrupt must not exclude Apple or BSD")
-    methods :: fs.read_to_string(OSPath.from(env.manifest_dir()).join("crates/jet-comptime/src/Comptime/Methods/repl_process.rs")).unwrap()
-    forwarding_path :: methods.split("static REPL_CHILD_GROUP").nth(1).and_then(source -> source.split("// ---------------------------------------------------------------------------").next()).expect("runtime child interrupt forwarding implementation")
-    assert(forwarding_path.contains("#[cfg(unix)]"), "runtime child forwarding must compile on POSIX Unix")
-    assert(!forwarding_path.contains("target_os = \"linux\""), "runtime child forwarding must not exclude Apple or BSD")
-}
 // Rust: tests/repl.rs:1698
 #Test("repl_tty_ctrl_c_reaches_child_group_and_restores_input") {
     if selected_os() != "linux" -> return

@@ -1,0 +1,18 @@
+fn overflow_view() -> String {
+    hi :: U8{ 200 }
+    lo :: U8{ 100 }
+    fallback :: U8{ 0 }
+    wrapped :: wrapping(hi + lo)
+    saturated :: saturating(hi + lo)
+    checked_miss :: checked(hi + lo) ?? fallback
+    scratch :: 1
+    consume(scratch)
+    return "{wrapped}|{saturated}|{checked_miss}"
+}
+EXPECTED :: comptime { overflow_view() }
+
+fn run() {
+    actual :: overflow_view()
+    print("{EXPECTED}")
+    print("{actual}")
+}

@@ -1,4 +1,8 @@
 // D-WEBAPP1=D: minimal full-stack application builder smoke example.
+package {
+    name: "app_hello"
+    authority: { allow: [Browser, Net] }
+}
 use core.web as web
 #Target(Web)
 
@@ -6,8 +10,8 @@ fn home() -> WebPage { web.page("Hello", "world") }
 
 fn save() { print("saved") }
 
-fn run() -> App {
-    return web.app()
+fn run() {
+    web.app()
         .route("/", home)
         .action("save", save)
         .security("csp")
@@ -15,4 +19,5 @@ fn run() -> App {
         .a11y("wcag")
         .adapter("node")
         .csr()
+        .serve()
 }

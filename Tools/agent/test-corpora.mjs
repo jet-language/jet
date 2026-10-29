@@ -56,7 +56,7 @@ export function uiInvocation(source, file, suite = 'ui') {
   const has = (name) => directives.has(name), arg = (name) => directives.get(name);
   // These fixtures manufacture typed internal facts, or require a compile mode
   // not exposed by the public CLI. Never silently substitute `jet check`.
-  const internal = ['lint_policy_config', 'env_facet_missing', 'workspace_lock_e1202', 'jetlib_version_mismatch', 'jetlib_effect_refused', 'library_invalid_binding', 'command_override_conflict', 'parent_control_cancel', 'ambiguous_call', 'generated_source', 'no-os', 'gate', 'build_grants', 'build_locked', 'sandbox_missing_wasm_tools', 'jetpack_hangar_digest_mismatch', 'jetpack_e1250', 'jetpack_retired_environment_flag', 'jetpack_retired_store_verbs', 'programmable_build', 'plugin_target', 'web_target', 'target', 'cost_cli'];
+  const internal = ['lint_policy_config', 'env_facet_missing', 'workspace_lock_e1202', 'jetlib_version_mismatch', 'jetlib_effect_refused', 'library_invalid_binding', 'command_override_conflict', 'parent_control_cancel', 'ambiguous_call', 'generated_source', 'no-os', 'gate', 'build_grants', 'build_locked', 'jetpack_hangar_digest_mismatch', 'jetpack_e1250', 'jetpack_retired_environment_flag', 'jetpack_retired_store_verbs', 'programmable_build', 'web_target', 'target', 'cost_cli'];
   const unavailable = internal.filter(has);
   if (unavailable.length) return { refused: `missing CLI fixture API: ${unavailable.join(', ')}` };
   let args = ['check', file], cwdParent = false, command = 'jet', stdin = '';
@@ -68,15 +68,13 @@ export function uiInvocation(source, file, suite = 'ui') {
   else if (has('cli_e1219')) args = ['build', file, '--profile=turbo'];
   else if (has('retired_gate_flag')) args = ['run', file, '--allow-impure'];
   else if (has('cli_build')) args = ['build', file];
-  else if (has('sandbox_effect')) args = ['build', file, '--target=sandbox'];
   else if (has('web_run') || has('run_cli')) args = ['run', file];
-  else if (has('dev_interpreter')) args = ['run', '--interpret', file];
   else if (has('complexity_cli')) args = ['lint', '--complexity', file, `--max=${arg('complexity_cli').split(/\s+/u)[1]}`];
   else if (has('repl_deny')) { args = ['repl', '--deny=FS']; stdin = source.split('\n').filter((line) => line.trim() && !line.trimStart().startsWith('//')).concat(':quit').join('\n'); }
-  const supported = new Set(['check_cli', 'all_diags', 'typed_settings_cli', 'cli_e0043', 'cli_e2101', 'cli_e1219', 'retired_gate_flag', 'cli_build', 'sandbox_effect', 'web_run', 'run_cli', 'dev_interpreter', 'complexity_cli', 'repl_deny', 'compiler_extension']);
+  const supported = new Set(['check_cli', 'all_diags', 'typed_settings_cli', 'cli_e0043', 'cli_e2101', 'cli_e1219', 'retired_gate_flag', 'cli_build', 'web_run', 'run_cli', 'complexity_cli', 'repl_deny', 'compiler_extension']);
   const unknown = [...directives.keys()].filter((name) => !supported.has(name));
   if (unknown.length) return { refused: `unported fixture directives: ${unknown.join(', ')}` };
-  const direct = ['check_cli', 'typed_settings_cli', 'cli_e0043', 'cli_e2101', 'cli_e1219', 'retired_gate_flag', 'cli_build', 'sandbox_effect', 'web_run', 'run_cli', 'dev_interpreter', 'complexity_cli', 'repl_deny'].some(has);
+  const direct = ['check_cli', 'typed_settings_cli', 'cli_e0043', 'cli_e2101', 'cli_e1219', 'retired_gate_flag', 'cli_build', 'web_run', 'run_cli', 'complexity_cli', 'repl_deny'].some(has);
   return { args, cwdParent, command, stdin, extension: arg('compiler_extension'), suite, direct, allDiags: has('all_diags') || basename(file) === 'workspace.jet' };
 }
 

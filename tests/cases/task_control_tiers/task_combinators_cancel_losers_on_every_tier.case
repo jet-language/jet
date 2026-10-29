@@ -1,0 +1,14 @@
+# tests/task_control_tiers.rs::task_combinators_cancel_losers_on_every_tier at tests/task_control_tiers.rs:409; hand-port
+# The forced-interpreter run retires: jet has no interpreter tier (`jet run --interpret` is E2102); the default run keeps the claim.
+fixture: task_combinators_cancel_losers_on_every_tier.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step r1: jet run r1/main.jet
+exit: 0
+stdout: = "1\n1\n1\n1\n" # tests/task_control_tiers.rs:420 run_default_multi
+step: jet build r2/task_loser_cleanup.jet
+exit: 0
+step r2aot: built
+exit: 0
+stdout: = "1\n1\n1\n1\n" # tests/task_control_tiers.rs:425 build_and_run

@@ -4,9 +4,9 @@ This page is the registry for environment variables that configure Jet tools,
 generated Jet programs, and repository verification. It is for users writing
 reproducible automation and maintainers passing explicit state to child
 processes. Command-line flags remain the normal user interface. The executable
-name checks are in [`tests/syntax_reconciliation.rs`](../../../tests/syntax_reconciliation.rs),
+name checks are in [`tests/guards/syntax_reconciliation.jet`](../../../tests/guards/syntax_reconciliation.jet),
 the effect surface is
-[`crates/jet-foundation/src/Syntax/effects_surface.rs`](../../../crates/jet-foundation/src/Syntax/effects_surface.rs),
+[`EffectsSurface.jet`](../../../Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet),
 and the verification defaults are in
 [`Tools/agent/verify-full.sh`](../../../Tools/agent/verify-full.sh).
 
@@ -54,14 +54,16 @@ one exists instead of adding another spelling for the same job.
 | --- | --- | --- |
 | `JET_CANDIDATE_COMPILER` | executable path | Names the candidate compiler (for example the self-hosted `jetc0`). When set, `Tools/agent/verify-full.sh` runs `Tools/agent/compiler-diff.mjs` (canary, then all corpora) against the reference compiler. |
 | `JET_CANVAS_PREREQUISITES` | `strict` | Makes Canvas scenario verification fail instead of skip when a prerequisite is absent. |
+| `JET_CHECKED_ALLOC` | `1` | **Internal** debugging aid for generated programs, read once at process start: every runtime heap block carries a canary, a tail guard and its allocating call chain, freed payloads are poisoned and quarantined, and a double free, foreign free, wrong-layout free, write past the end or write after free aborts with a report naming the call sites (`Compiler/JetRuntime/Source/Alloc.jet`, checked mode). Off, it costs one branch per allocation and free. |
+| `JET_PERF_MAP` | `1` | **Internal** profiling aid for `jet run` and `jet dev`: before a program runs from memory, jet writes `/tmp/perf-<pid>.map` from its image's symbol table, so `perf report` shows its function names (`Compiler/JetBackend/Source/Image/Loader.jet`, `x64_image_perf_map`). Unset, nothing is written. |
 | `JET_CFFI_ABI` | ABI name | Selects the C-ABI matrix row. Companion `JET_CFFI_CC`, `JET_CFFI_AR`, `JET_CFFI_RUSTC`, `JET_CFFI_RUST_TARGET`, `JET_CFFI_RUST_LINKER`, and `JET_CFFI_RUNNER` name that row's tools and target. |
 | `JET_GOLDEN_FILTER` | repository-relative example substring | Selects one golden example. |
-| `JET_REFERENCE_COMPILER` | executable path | Names the pinned reference compiler for `Tools/agent/compiler-diff.mjs`; defaults to `target/debug/jet`. |
+| `JET_REFERENCE_COMPILER` | executable path | Names the pinned reference compiler for `Tools/agent/compiler-diff.mjs`; defaults to `$JET`. |
 | `JET_REQUIRE_RUSTC` | `1` | Fails tests when rustc is unavailable instead of skipping rustc-backed proof. |
 | `JET_TEST_JOBS` | positive integer | Sets the repository test-process budget; `Tools/agent/verify-full.sh` defaults it to 6. |
 | `JET_UI_FILTER` | repository-relative fixture substring | Selects UI diagnostic or lint fixtures. |
 | `JET_UPDATE_GOLDEN` | `1` | Updates the existing expected channel for the selected golden example; requires `JET_GOLDEN_FILTER`. |
-| `JET_UPDATE_SNAPSHOTS` | `1` | Updates compiler-owned snapshot output in explicitly supported workflows; review the diff immediately. |
+| `JET_UPDATE_SNAPSHOTS` | `1` | Updates compiler-owned snapshot output in explicitly supported workflows, and the files `core.testing.snap` and `core.testing.golden` compare against (`jet test -u` sets it); review the diff immediately. |
 | `JET_VERIFY_TMPDIR` | path | Overrides the temporary root used by verification scenarios. |
 
 Golden stdout remains exact except for probes whose subject is a real host

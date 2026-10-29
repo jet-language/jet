@@ -1,0 +1,12 @@
+# tests/ownership.rs::unmarked_take_argument_moves_at_last_use at tests/ownership.rs:37; hand-port
+# Claim: jet check of a last-use `consume(msg)` with an unmarked take argument exits 0 (tests/ownership.rs:48)
+# Claim: the last use moves without an error, so no copy is required (tests/ownership.rs:48-53)
+# Fixture migrated: none: source is the verbatim Rust raw string
+# Not ported: the Rust assertion that the generated rust text has no msg.clone() (tests/ownership.rs:49-53): jet check exposes no generated-rust output
+fixture: unmarked_take_argument_moves_at_last_use.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check main.jet
+exit: 0 # tests/ownership.rs:48 jet::compile ok
+stderr: !~ "E0209" # tests/ownership.rs:48 jet::compile ok

@@ -1,0 +1,190 @@
+// core.font shaping on the static native runtime: Core/HostServices.rs:1891
+// jet_font_shape_raw through the default headless host (:2404-2417), whose
+// jet_font_shape_with_fallback (:927-1006) validates the request and then
+// reaches the HarfBuzz kernel. That kernel dlopens libharfbuzz
+// (HostServices.rs:228-533), which a static musl executable cannot do, so
+// every valid request is the host's CapabilityUnavailable fallback:
+// jet_font_shape_fallback (:188-217). Errors are the host error's Debug text.
+
+// FontFace24: family0, size bits8, style index16. Glyph48: id0 cluster8, x16
+// y24 advance_x32 advance_y40 (Float bits). GlyphRun64: glyphs List24 of
+// inline Glyph48 at 0, advance_x24 advance_y32, shaper index40,
+// deterministic48, approximate56.
+FONT_FACE_BYTES :: I64{24}
+FONT_GLYPH_BYTES :: I64{48}
+FONT_RUN_BYTES :: I64{64}
+
+fn font_error(err: I64, message: I64) -> I64 {
+    rt_text_store(err, jet_rt_string_clone(message))
+    I64{0}
+}
+
+#Export(c) fn jet_font_shape_raw(text: I64, face: I64, ok: I64, err: I64) -> I64 {
+    size :: rt_f64_from_bits(rt_text_word(face + I64{8}))
+    if !(size > Float{0.0} && size - size == Float{0.0}) -> return font_error(err, rt_static_text("InvalidRequest(\"font size must be finite and positive\")"))
+    data :: rt_text_data(text)
+    length :: rt_text_len(text)
+    if (length > I64{2147483647}) -> return font_error(err, rt_static_text("InvalidRequest(\"font text exceeds the supported input size\")"))
+    count := I64{0}
+    at := I64{0}
+    loop at < length {
+        count += I64{1}
+        at += rt_text_width(data + at)
+    }
+    run :: jet_rt_alloc(FONT_RUN_BYTES, I64{8})
+    thread_zero(run, FONT_RUN_BYTES)
+    glyphs :: mail_list_init(count, FONT_GLYPH_BYTES, run)
+    advance_x := Float{0.0}
+    index := I64{0}
+    at = I64{0}
+    loop at < length {
+        scalar :: encoding_scalar_at(data, at)
+        advance :: if (scalar == I64{10}) -> Float{0.0} else if (scalar < I64{128}) -> size * Float{0.6} else -> size
+        glyph :: glyphs + index * FONT_GLYPH_BYTES
+        rt_text_store(glyph, scalar)
+        rt_text_store(glyph + I64{8}, at)
+        rt_text_store(glyph + I64{16}, rt_f64_bits(advance_x))
+        rt_text_store(glyph + I64{24}, rt_f64_bits(Float{0.0}))
+        rt_text_store(glyph + I64{32}, rt_f64_bits(advance))
+        rt_text_store(glyph + I64{40}, rt_f64_bits(Float{0.0}))
+        advance_x = advance_x + advance
+        index += I64{1}
+        at += rt_text_width(data + at)
+    }
+    rt_text_store(run + I64{24}, rt_f64_bits(advance_x))
+    rt_text_store(run + I64{32}, rt_f64_bits(Float{0.0}))
+    rt_text_store(run + I64{40}, I64{1})
+    rt_text_store(run + I64{48}, I64{1})
+    rt_text_store(run + I64{56}, I64{1})
+    rt_text_store(ok, run)
+    I64{1}
+}
+
+fn font_float_eq(left: I64, right: I64) -> Bool { rt_f64_from_bits(rt_text_word(left)) == rt_f64_from_bits(rt_text_word(right)) }
+
+// FontFace record (family=Text, size=Float, style=Tag.JetFontStyle).
+#Export(c) fn jet_rt_record_new_jet_font_face(family: I64, size: F64, style: I64) -> I64 {
+    result :: jet_rt_alloc(FONT_FACE_BYTES, I64{8})
+    rt_text_store(result, jet_rt_string_clone(family))
+    rt_text_store(result + I64{8}, rt_f64_bits(size))
+    rt_text_store(result + I64{16}, style)
+    result
+}
+#Export(c) fn jet_rt_record_get_jet_font_face_family(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value)) }
+#Export(c) fn jet_rt_record_get_jet_font_face_size(value: I64) -> F64 { rt_f64_from_bits(rt_text_word(value + I64{8})) }
+#Export(c) fn jet_rt_record_get_jet_font_face_style(value: I64) -> I64 { rt_text_word(value + I64{16}) }
+#Export(c) fn jet_rt_handle_clone_jet_font_face(value: I64) -> I64 {
+    jet_rt_record_new_jet_font_face(rt_text_word(value), rt_f64_from_bits(rt_text_word(value + I64{8})), rt_text_word(value + I64{16}))
+}
+#Export(c) fn jet_rt_handle_drop_jet_font_face(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(rt_text_word(value))
+    jet_rt_free(value, FONT_FACE_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_font_face(left: I64, right: I64) -> Bool {
+    jet_rt_string_eq(rt_text_word(left), rt_text_word(right)) && font_float_eq(left + I64{8}, right + I64{8}) && rt_text_word(left + I64{16}) == rt_text_word(right + I64{16})
+}
+
+// FontStyle and GlyphShaper handles own the shared one-word enum allocation.
+#Export(c) fn jet_rt_handle_clone_jet_font_style(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_font_style(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_font_style(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
+#Export(c) fn jet_rt_handle_clone_jet_glyph_shaper(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_glyph_shaper(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_glyph_shaper(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
+
+// Glyph record (id, cluster: Int; x, y, advance_x, advance_y: Float).
+#Export(c) fn jet_rt_record_new_jet_glyph(id: I64, cluster: I64, x: F64, y: F64, advance_x: F64, advance_y: F64) -> I64 {
+    native_id :: jet_int_owned_to_i64(id)
+    native_cluster :: jet_int_owned_to_i64(cluster)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    result :: jet_rt_alloc(FONT_GLYPH_BYTES, I64{8})
+    rt_text_store(result, native_id)
+    rt_text_store(result + I64{8}, native_cluster)
+    rt_text_store(result + I64{16}, rt_f64_bits(x))
+    rt_text_store(result + I64{24}, rt_f64_bits(y))
+    rt_text_store(result + I64{32}, rt_f64_bits(advance_x))
+    rt_text_store(result + I64{40}, rt_f64_bits(advance_y))
+    result
+}
+#Export(c) fn jet_rt_record_get_jet_glyph_id(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value)) }
+#Export(c) fn jet_rt_record_get_jet_glyph_cluster(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{8})) }
+#Export(c) fn jet_rt_record_get_jet_glyph_x(value: I64) -> F64 { rt_f64_from_bits(rt_text_word(value + I64{16})) }
+#Export(c) fn jet_rt_record_get_jet_glyph_y(value: I64) -> F64 { rt_f64_from_bits(rt_text_word(value + I64{24})) }
+#Export(c) fn jet_rt_record_get_jet_glyph_advance_x(value: I64) -> F64 { rt_f64_from_bits(rt_text_word(value + I64{32})) }
+#Export(c) fn jet_rt_record_get_jet_glyph_advance_y(value: I64) -> F64 { rt_f64_from_bits(rt_text_word(value + I64{40})) }
+#Export(c) fn jet_rt_handle_clone_jet_glyph(value: I64) -> I64 {
+    result :: jet_rt_alloc(FONT_GLYPH_BYTES, I64{8})
+    coll_copy(value, result, FONT_GLYPH_BYTES)
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_glyph(value: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, FONT_GLYPH_BYTES, I64{8})
+}
+fn font_glyph_eq(left: I64, right: I64) -> Bool {
+    rt_text_word(left) == rt_text_word(right) && rt_text_word(left + I64{8}) == rt_text_word(right + I64{8}) &&
+        font_float_eq(left + I64{16}, right + I64{16}) && font_float_eq(left + I64{24}, right + I64{24}) &&
+        font_float_eq(left + I64{32}, right + I64{32}) && font_float_eq(left + I64{40}, right + I64{40})
+}
+#Export(c) fn jet_rt_handle_eq_jet_glyph(left: I64, right: I64) -> Bool { font_glyph_eq(left, right) }
+
+// Glyph sequences hold inline Glyph48 elements; get lends the element, push
+// moves the handle's words and frees its shell.
+#Export(c) fn jet_rt_record_seq_list_rec_jet_glyph_new(capacity: I64) -> I64 { data_sequence_new(capacity, FONT_GLYPH_BYTES) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_glyph_len(value: I64) -> I64 { rt_text_word(value + DATA_SEQUENCE_LENGTH) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_glyph_get(value: I64, index: I64) -> I64 { data_sequence_slot(value, index, FONT_GLYPH_BYTES) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_glyph_push(value: I64, item: I64) {
+    slot :: data_sequence_reserve(value, FONT_GLYPH_BYTES)
+    coll_copy(item, slot, FONT_GLYPH_BYTES)
+    jet_rt_free(item, FONT_GLYPH_BYTES, I64{8})
+    rt_text_store(value + DATA_SEQUENCE_LENGTH, rt_text_word(value + DATA_SEQUENCE_LENGTH) + I64{1})
+}
+
+// GlyphRun record (glyphs=List.Rec.JetGlyph, advance_x, advance_y: Float,
+// shaper=Tag.JetGlyphShaper, deterministic, approximate: Flag). The
+// constructor consumes the glyph sequence's shell; `glyphs` lends the header.
+#Export(c) fn jet_rt_record_new_jet_glyph_run(glyphs: I64, advance_x: F64, advance_y: F64, shaper: I64, deterministic: U8, approximate: U8) -> I64 {
+    result :: jet_rt_alloc(FONT_RUN_BYTES, I64{8})
+    coll_copy(glyphs, result, DATA_SEQUENCE_BYTES)
+    jet_rt_free(glyphs, DATA_SEQUENCE_BYTES, I64{8})
+    rt_text_store(result + I64{24}, rt_f64_bits(advance_x))
+    rt_text_store(result + I64{32}, rt_f64_bits(advance_y))
+    rt_text_store(result + I64{40}, shaper)
+    rt_text_store(result + I64{48}, if (deterministic != U8{0}) -> I64{1} else -> I64{0})
+    rt_text_store(result + I64{56}, if (approximate != U8{0}) -> I64{1} else -> I64{0})
+    result
+}
+#Export(c) fn jet_rt_record_get_jet_glyph_run_glyphs(value: I64) -> I64 { value }
+#Export(c) fn jet_rt_record_get_jet_glyph_run_advance_x(value: I64) -> F64 { rt_f64_from_bits(rt_text_word(value + I64{24})) }
+#Export(c) fn jet_rt_record_get_jet_glyph_run_advance_y(value: I64) -> F64 { rt_f64_from_bits(rt_text_word(value + I64{32})) }
+#Export(c) fn jet_rt_record_get_jet_glyph_run_shaper(value: I64) -> I64 { rt_text_word(value + I64{40}) }
+#Export(c) fn jet_rt_record_get_jet_glyph_run_deterministic(value: I64) -> Bool { rt_text_word(value + I64{48}) != I64{0} }
+#Export(c) fn jet_rt_record_get_jet_glyph_run_approximate(value: I64) -> Bool { rt_text_word(value + I64{56}) != I64{0} }
+#Export(c) fn jet_rt_handle_clone_jet_glyph_run(value: I64) -> I64 {
+    result :: jet_rt_alloc(FONT_RUN_BYTES, I64{8})
+    coll_copy(value, result, FONT_RUN_BYTES)
+    length :: rt_text_word(value + DATA_SEQUENCE_LENGTH)
+    glyphs :: mail_list_init(length, FONT_GLYPH_BYTES, result)
+    coll_copy(rt_text_word(value + DATA_SEQUENCE_DATA), glyphs, length * FONT_GLYPH_BYTES)
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_glyph_run(value: I64) {
+    if (value == I64{0}) -> return
+    capacity :: rt_text_word(value + DATA_SEQUENCE_CAPACITY)
+    if (capacity != I64{0}) -> jet_rt_free(rt_text_word(value + DATA_SEQUENCE_DATA), capacity * FONT_GLYPH_BYTES, I64{8})
+    jet_rt_free(value, FONT_RUN_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_glyph_run(left: I64, right: I64) -> Bool {
+    length :: rt_text_word(left + DATA_SEQUENCE_LENGTH)
+    if (length != rt_text_word(right + DATA_SEQUENCE_LENGTH)) -> return false
+    a :: rt_text_word(left + DATA_SEQUENCE_DATA)
+    b :: rt_text_word(right + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        if !font_glyph_eq(a + at * FONT_GLYPH_BYTES, b + at * FONT_GLYPH_BYTES) -> return false
+        at += I64{1}
+    }
+    font_float_eq(left + I64{24}, right + I64{24}) && font_float_eq(left + I64{32}, right + I64{32}) &&
+        rt_text_word(left + I64{40}) == rt_text_word(right + I64{40}) &&
+        rt_text_word(left + I64{48}) == rt_text_word(right + I64{48}) && rt_text_word(left + I64{56}) == rt_text_word(right + I64{56})
+}

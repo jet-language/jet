@@ -1,0 +1,12 @@
+# tests/comptime_core_pure_parity.rs::public_transcript_composes_email_and_codecs_exactly at tests/comptime_core_pure_parity.rs:581; hand-port
+# The original read the in-process REPL transcript (the comptime evaluator). `jet repl` is E2104 in the
+# Jet-hosted CLI, so each transcript value is evaluated by that comptime evaluator through `prep` and
+# printed; stdout must equal the original exact values, in transcript order.
+# The original `Ok(_)`/`Err(_)` arms now take the leading `.` (E0367). The REPL's `name :: value` bindings
+# are restated inside each `prep` block that reads them (module bindings must be literals, E0622).
+fixture: public_transcript_composes_email_and_codecs_exactly.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: = public_transcript_composes_email_and_codecs_exactly.1.out

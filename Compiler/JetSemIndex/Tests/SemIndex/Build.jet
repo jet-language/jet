@@ -160,14 +160,14 @@ fn semindex_build_test_operation(path: String, start: Int, end: Int) -> Arithmet
         semindex_build_test_hover("main.jet", 6, 8, "struct Café"),
     }
     facts := PackageFacts.default()
-    facts.authority.holds.allow = Val([String]{"Net"})
-    facts.authority.holds.deny = Val([String]{"IO"})
+    facts.authority.allow = Val([String]{"Net"})
+    facts.authority.deny = Val([String]{"IO"})
     &db.attach_package_facts(^facts)
     projection :: db.index.effect_projection
     assert_eq(projection.required_effects, [String]{"IO"})
     assert_eq(projection.granted_effects, [String]{"Net"})
     assert_eq(projection.denied_effects, [String]{"IO"})
-    assert_eq(projection.authority, "package.jet authority.holds")
+    assert_eq(projection.authority, "package.jet authority")
     assert(db.index.package_facts != None)
     assert_eq(db.defs.len(), 1)
     assert_eq(db.defs[0].identity, "instance:retained")
@@ -478,9 +478,9 @@ fn semindex_build_test_checked_definition_derivations(index: SemIndex) {
             if record.subject != fact.stable_id -> next
             assert_eq(record.claim, fact.human_identity)
             assert_eq(record.producer, "jet-sema")
-            assert_eq(record.method, MIRDerivationMethod.StaticDerivation)
+            assert_eq(record.method, DerivationMethod.StaticDerivation)
             assert_eq(record.rule, "checked-definition")
-            expected :: derivation_record(fact.stable_id, fact.human_identity, "jet-sema", MIRDerivationMethod.StaticDerivation, "checked-definition", [String]{fact.signature_id, fact.content_id}, derivation_identity(fact.content_id, fact.signature_id, "", fact.module_path))
+            expected :: derivation_record(fact.stable_id, fact.human_identity, "jet-sema", DerivationMethod.StaticDerivation, "checked-definition", [String]{fact.signature_id, fact.content_id}, derivation_identity(fact.content_id, fact.signature_id, "", fact.module_path))
             assert_eq(record.premises, expected.premises)
             assert_eq(record.id, expected.id)
             assert_eq(record.identity, derivation_identity(fact.content_id, fact.signature_id, "", fact.module_path))

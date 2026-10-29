@@ -5,12 +5,14 @@
 // references stay package-lock facts, so this projection returns only
 // workspace identity and membership. The write path lives with the
 // Environment area's project lock.
+use jetpack_foundation.[UNIFIED_LOCK_FILE]
+use core.files as files
 
 // The lock file path within the workspace root.
-PKG_WORKSPACE_LOCK :: prep { UNIFIED_LOCK_FILE }
+PKG_WORKSPACE_LOCK :: comptime { UNIFIED_LOCK_FILE }
 
 // The digest recorded when a workspace lock has no workspace source.
-PKG_NO_WORKSPACE_SOURCE :: prep { "no-workspace-source" }
+PKG_NO_WORKSPACE_SOURCE :: "no-workspace-source"
 
 // Workspace facts from `.jet/lock` in `workspace_root`. None when the file
 // is absent, malformed, stale, or missing the identity fields a safe

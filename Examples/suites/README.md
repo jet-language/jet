@@ -21,14 +21,15 @@ From the repository root, exercise an individual source with the checked-out
 compiler:
 
 ```sh
-target/debug/jet run Examples/suites/expense_report.jet
+jet run Examples/suites/expense_report.jet
 ```
 
-The suite checker in [`tests/suite_goldens.rs`](../../tests/suite_goldens.rs)
-defines the accepted layout: it enumerates the top-level `.jet` files (apart
-from `package.jet`), requires the matching `.out`, runs each source with
-`jet run`, and compares stdout byte for byte. The table above mirrors that
-source-level contract; it does not replace the checker.
+The suite case
+[`tests/cases/suite_goldens/user_story_suite_matches_expected_output.case`](../../tests/cases/suite_goldens/user_story_suite_matches_expected_output.case)
+defines the accepted layout: eight top-level `.jet` files (apart from
+`package.jet`), each with a matching `.out`; it runs each source with `jet run`
+and compares stdout byte for byte. The table above mirrors that source-level
+contract; it does not replace the case.
 
 A fixture can be useful as a design example before it is accepted by the
 current compiler. If a direct run reports a source or library diagnostic,

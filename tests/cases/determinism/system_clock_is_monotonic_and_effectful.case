@@ -1,0 +1,19 @@
+# tests/determinism.rs::system_clock_is_monotonic_and_effectful at tests/determinism.rs:106; hand-port
+fixture: system_clock_is_monotonic_and_effectful.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check pure/main.jet --json
+exit: 1 # tests/determinism.rs:114 Clock.system must carry Time
+json: stdout doc $.reports[?code="E3403"] #>= 1 # tests/determinism.rs:115 E3403
+step: jet check launder/main.jet --json
+exit: 1 # tests/determinism.rs:131 a system Clock must not enter pure code
+json: stdout doc $.reports[?code="E3403"] #>= 2 # tests/determinism.rs:132-135 both direct and return-type laundering fail
+step: jet run runtime/main.jet
+stdin: null
+exit: 0 # tests/determinism.rs:186 jet run succeeds
+stdout: = "true\ntrue\ntrue\ntrue\n1000\n6000\n7\n10\n" # tests/determinism.rs:191 monotonic system clock, copied manual clocks
+step: jet run --release runtime/main.jet
+stdin: null
+exit: 0 # tests/determinism.rs:186 jet --release run succeeds
+stdout: = "true\ntrue\ntrue\ntrue\n1000\n6000\n7\n10\n" # tests/determinism.rs:191 monotonic system clock, copied manual clocks

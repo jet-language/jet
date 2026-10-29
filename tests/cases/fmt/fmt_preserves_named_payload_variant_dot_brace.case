@@ -1,0 +1,16 @@
+# tests/fmt.rs::fmt_preserves_named_payload_variant_dot_brace at tests/fmt.rs:1701; hand-port
+# Claim: `.Text.{ text: "hi" }` keeps the `.Text{` spelling (tests/fmt.rs:1716-1718)
+# Claim: `.Box.{ width: 10 }` keeps the `.Box{` spelling (tests/fmt.rs:1719-1723)
+# Claim: Rust also checks byte-stability on re-format (tests/fmt.rs:1724-1728, not re-read)
+fixture: fmt_preserves_named_payload_variant_dot_brace.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt run.jet
+exit: 0 # tests/fmt.rs:1715 formats
+step: sh {work}/step-2.sh
+exit: 0 # tests/fmt.rs:1716-1723 `.Text{` and `.Box{` spellings present
+stdout: ~ ".Text{" # tests/fmt.rs:1716-1723 `.Text{` and `.Box{` spellings present
+stdout: ~ ".Box{" # tests/fmt.rs:1716-1723 `.Text{` and `.Box{` spellings present
+step: jet fmt --check run.jet
+exit: 0 # tests/fmt.rs:1724-1728 stable

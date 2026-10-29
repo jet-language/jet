@@ -1,0 +1,13 @@
+# tests/dev_parts/routine.rs::unsafe_blocks_are_evaluated_by_canonical_mir_with_live_sentries at tests/dev_parts/routine.rs:3554; hand-port (the forced-interpreter tier is carried by `jet run`; the Jet CLI has no interpreter flag; the jet::Loader::load_entry smoke over Examples/features/memory/rawptr is a Rust crate API with no CLI surface)
+fixture: unsafe_blocks_are_evaluated_by_canonical_mir_with_live_sentries.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step dev: jet run fault.jet
+exit: 70
+stderr: ~ "Runtime fault [R0801]" # original predicate: stderr.contains
+stderr: ~ "mapped address is valid and aligned" # original predicate: stderr.contains
+stderr: ~ "no live allocation contains this address" # original predicate: stderr.contains
+stderr: ~ "obligation `valid_ptr` was not met on this run" # original predicate: stderr.contains
+stdout: empty

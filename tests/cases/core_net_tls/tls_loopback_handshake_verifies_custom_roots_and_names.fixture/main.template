@@ -1,0 +1,67 @@
+// A real loopback handshake through the vendored Mbed TLS engine against the
+// case's OpenSSL `s_server -rev` (it answers each line reversed): the client
+// trusts only the checked-in test CA, and the verified identity, application
+// bytes, close_notify, TLS 1.2 bounds and certificate failures are observable.
+use core.files as files
+use core.net as net
+use core.net.tls as tls
+
+fn connect(name: String, config: ClientConfig) -[Net, Time.Wait]> TLSStream NetError! {
+    tcp := net.tcp_connect("127.0.0.1:{free-port:tls}") ?? panic("connect")
+    tls.client(^tcp, server_name: name, config: config, deadline: 5s)
+}
+
+fn exchange(&secure: TLSStream) -[Net, Time.Wait]> String {
+    secure.write_all("ping\n".bytes(), deadline: 5s) ?? panic("write: {err}")
+    reply := [U8]{}
+    loop reply.len() < 5 {
+        chunk :: secure.read(64, deadline: 5s) ?? panic("read: {err}")
+        if chunk.len() == 0 -> panic("early end of stream")
+        loop b in chunk -> &reply.push(b)
+    }
+    (String.from_bytes(reply) ?? panic("UTF-8 reply")).trim()
+}
+
+fn report(result: TLSStream NetError!) {
+    if result == {
+        .Ok(_) -> print("unexpected handshake success")
+        .Err(err) -> print("{err}")
+    }
+}
+
+fn run() {
+    ca :: files.read_bytes("ca.pem") ?? panic("CA fixture")
+    roots :: tls.RootCertificates.from_pem(ca) ?? panic("validate CA")
+    trusted :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("trust policy")
+    config :: trusted.with_alpn(["http/1.1"]) ?? panic("alpn policy")
+
+    secure := connect("localhost", config) ?? panic("TLS handshake: {err}")
+    peer :: secure.peer_identity()
+    print(peer.verified_server_name)
+    print(peer.leaf.subject)
+    print(peer.leaf.issuer)
+    print(peer.leaf.dns_names.join(","))
+    print(peer.leaf.valid_from_unix_ms)
+    print(peer.leaf.valid_until_unix_ms)
+    print(peer.certificate_chain.len())
+    print(peer.leaf.sha256.len() == 32 && peer.certificate_chain[0].sha256 == peer.leaf.sha256)
+    print(peer.leaf.spki_sha256.len() == 32)
+    print(tls.version_name(peer.tls_version))
+    print(peer.cipher_suite.starts_with("TLS13_"))
+    print(exchange(&secure))
+    secure.close() ?? panic("close: {err}")
+    print(secure.close() == .Ok(_))
+    print(secure.write_all("late".bytes(), deadline: 5s) == .Err(_))
+
+    tls12 :: config.with_version_bounds(min: TLSVersion.TLS12, max: TLSVersion.TLS12) ?? panic("version policy")
+    older := connect("localhost", tls12) ?? panic("TLS 1.2 handshake: {err}")
+    print(tls.version_name(older.peer_identity().tls_version))
+    print(older.peer_identity().cipher_suite.starts_with("TLS_ECDHE_RSA_WITH_"))
+    print(exchange(&older))
+    older.close() ?? panic("close TLS 1.2: {err}")
+
+    // The leaf names only `localhost`; the default trust (SSL_CERT_FILE here)
+    // does not contain the test CA.
+    report(connect("127.0.0.1", config))
+    report(connect("localhost", tls.ClientConfig.default()))
+}

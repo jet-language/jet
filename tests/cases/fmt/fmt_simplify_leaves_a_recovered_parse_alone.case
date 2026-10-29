@@ -1,0 +1,18 @@
+# tests/fmt.rs::fmt_simplify_leaves_a_recovered_parse_alone at tests/fmt.rs:1224; hand-port
+# Claim: simplify output equals plain output on a parse-invalid source (tests/fmt.rs:1233-1239)
+# Claim: simplify does not rewrite `:: 42` on the recovered source (tests/fmt.rs:1240-1243)
+# Fixture migrated: broken source written as a literal (tests/ui/control_body_needs_braces.jet appended, content identical)
+fixture: fmt_simplify_leaves_a_recovered_parse_alone.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt rec/broken_a.jet
+exit: 0 # tests/fmt.rs:1233 plain format of recovered source succeeds
+step: jet fmt --simplify rec/broken_b.jet
+exit: 0 # tests/fmt.rs:1234-1235 simplify succeeds
+step: sh {work}/step-3.sh
+exit: 0 # tests/fmt.rs:1236-1239 simplified == plain
+stdout: = "SAME\n" # tests/fmt.rs:1236-1239 simplified == plain
+step: sh {work}/step-4.sh
+exit: 0 # tests/fmt.rs:1240-1243
+stdout: !~ ":: 42" # tests/fmt.rs:1240-1243

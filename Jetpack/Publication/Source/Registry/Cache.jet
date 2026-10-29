@@ -88,7 +88,7 @@ fn publication_acquire_registry_lock(parent: String, name: String, delay_ms: Int
         close(^writer)
         return Ok(PublicationRegistryMarkerLock{authority: authority, name: name})
     }
-    Err(IOError.TimedOut(publication_registry_trust_context(path, busy)))
+    Err(publication_read_error(.TimedOut, path, busy))
 }
 
 fn publication_validate_existing_index_clone(registry: PublicationRegistryConfig, dir: String, transport: PublicationRegistryTransport) -[FS, Env, Exec, Time.Wait]> Bool PublicationDiagnosticError! {

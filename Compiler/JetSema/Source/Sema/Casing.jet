@@ -35,13 +35,10 @@ use jet_foundation.[
     sema_casing_has_case,
     sema_casing_is_upper,
     sema_casing_is_lower,
-    sema_casing_is_alphabetic,
-    sema_casing_is_alphanumeric,
     sema_casing_join,
     sema_casing_split_words,
     diagnostic_with_edit,
 ]
-
 
 fn sema_casing_check(name: String, span: Span, category: String, case: SemaNameCase, diagnostics: &[Diagnostic]) {
     // Compiler-reserved names have their own diagnostic.
@@ -52,19 +49,21 @@ fn sema_casing_check(name: String, span: Span, category: String, case: SemaNameC
         .Screaming -> "ALL_CAPS"
     }
     fixed :: sema_casing_canonical(name, case)
+    // The respelling can equal the name (`type_`): never suggest identical text.
+    fix :: if fixed == name -> "rename it: a name can't end with `_`, so pick another word" else -> "rename it to `{fixed}`"
     &diagnostics.push(sema_error(
         "E0357",
         span,
         "{category} `{name}` must be {expected}",
         "Jet enforces PascalCase for type-like names, snake_case for value-like names, and ALL_CAPS (SCREAMING_SNAKE_CASE) for module-global constants",
-        "rename it to `{fixed}`",
+        fix,
     ))
 }
 
 // This rule applied acronym lexicon: every initials-formed word in current
 // Jet names, in canonical caps. Mirrors `ACRONYMS` in
 // crates/jet-foundation/src/Syntax/acronyms.rs.
-SEMA_CASING_ACRONYMS :: prep { [String]{
+SEMA_CASING_ACRONYMS :: comptime { [String]{
     "AABB", "ABI", "AES", "ALPN", "ANSI", "AOT", "API", "ASCII", "AST", "BPE", "CAS", "CBOR",
     "CDP", "CFG", "CI", "CLI", "CMS", "CPU", "CSR", "CSS", "CSV", "DB", "DKIM", "DMA", "DNS",
     "DSL", "DTD", "EOF", "FFI", "FS", "GC", "GPIO", "GPU", "HLL", "HMAC", "HSM", "HTML", "HTTP",
@@ -165,7 +164,7 @@ fn sema_casing_screaming(name: String, span: Span, category: String, diagnostics
     }
 }
 
-// A `<prep N: Int>` number parameter is rejected with E0390 by
+// A `<comptime N: Int>` number parameter is rejected with E0390 by
 // registration, so it has no type-parameter casing to check.
 fn sema_casing_type_parameter(parameter: TypeParam, diagnostics: &[Diagnostic]) {
     if parameter.prep != None -> return
@@ -539,29 +538,29 @@ fn sema_casing_typed_literal(body: TypedLitBody, diagnostics: &[Diagnostic]) {
 
 fn sema_casing_expr(expr: Expr, diagnostics: &[Diagnostic]) {
     if expr == {
-        .Str(parts, _) -> {
+        .Str(parts, _, _) -> {
             loop part in parts {
                 if part == .Interp(value, _) -> sema_casing_expr(value, &diagnostics)
             }
         }
-        .StrMatchLit(parts, _) -> sema_casing_str_match_holes(parts, &diagnostics)
-        .BinMatchLit(parts, _) -> sema_casing_bin_match_holes(parts, &diagnostics)
-        .Call(call) -> sema_casing_call_args(call.args, &diagnostics)
-        .Unary(_, inner, _) | .Deref(inner, _) | .RawOf(inner, _) | .Copy(inner, _) | .Place(inner, _, _) | .Field(inner, _, _) | .Tainted(inner, _, _) | .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) | .Paren(inner, _) | .Spread(inner, _) -> sema_casing_expr(inner, &diagnostics)
-        .Try(inner, _, _, context) -> {
+        .StrMatchLit(parts, _, _) -> sema_casing_str_match_holes(parts, &diagnostics)
+        .BinMatchLit(parts, _, _) -> sema_casing_bin_match_holes(parts, &diagnostics)
+        .Call(call, _) -> sema_casing_call_args(call.args, &diagnostics)
+        .Unary(_, inner, _, _) | .Deref(inner, _, _) | .RawOf(inner, _, _) | .Copy(inner, _, _) | .Place(inner, _, _, _) | .Field(inner, _, _, _) | .Tainted(inner, _, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .Paren(inner, _, _) | .Spread(inner, _, _) -> sema_casing_expr(inner, &diagnostics)
+        .Try(inner, _, _, context, _) -> {
             sema_casing_expr(inner, &diagnostics)
             if context == .Val(note) -> sema_casing_expr(note, &diagnostics)
         }
-        .MemberSpread(base, _, _) | .OptField(base, _, _, _, _) -> sema_casing_expr(base, &diagnostics)
-        .MethodCall(receiver, _, _, _, _, args, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .MemberSpread(base, _, _, _) | .OptField(base, _, _, _, _, _) -> sema_casing_expr(base, &diagnostics)
+        .MethodCall(receiver, _, _, _, _, args, _) | .OptMethodCall(receiver, _, _, _, args, _, _) -> {
             sema_casing_expr(receiver, &diagnostics)
             sema_casing_call_args(args, &diagnostics)
         }
-        .StructLit(_, _, _, _, fields, _, _) -> {
+        .StructLit(_, _, _, _, fields, _, _, _) -> {
             loop field in fields -> sema_casing_expr(field.value, &diagnostics)
         }
-        .TypedLit(_, body, _) -> sema_casing_typed_literal(body, &diagnostics)
-        .EnumLit(_, _, _, args, _, _) -> {
+        .TypedLit(_, body, _, _) -> sema_casing_typed_literal(body, &diagnostics)
+        .EnumLit(_, _, _, args, _, _, _) -> {
             loop arg in args {
                 if arg == {
                     .Positional(value) -> sema_casing_expr(value, &diagnostics)
@@ -569,7 +568,7 @@ fn sema_casing_expr(expr: Expr, diagnostics: &[Diagnostic]) {
                 }
             }
         }
-        .OrFallback(value, fallback, _, _) -> {
+        .OrFallback(value, fallback, _, _, _) -> {
             sema_casing_expr(value, &diagnostics)
             if fallback == {
                 .Value(other) -> sema_casing_expr(other, &diagnostics)
@@ -584,31 +583,31 @@ fn sema_casing_expr(expr: Expr, diagnostics: &[Diagnostic]) {
                 else -> {}
             }
         }
-        .PatternTest(subject, tested, _) -> {
+        .PatternTest(subject, tested, _, _) -> {
             sema_casing_expr(subject, &diagnostics)
             sema_casing_pattern(tested, &diagnostics)
         }
-        .Binary(_, left, right, _) -> {
+        .Binary(_, left, right, _, _) -> {
             sema_casing_expr(left, &diagnostics)
             sema_casing_expr(right, &diagnostics)
         }
-        .CompareChain(operands, _, _, _) | .ListLit(operands, _) -> {
+        .CompareChain(operands, _, _, _, _) | .ListLit(operands, _, _) -> {
             loop value in operands -> sema_casing_expr(value, &diagnostics)
         }
-        .TupleLit(fields, _, _) -> {
+        .TupleLit(fields, _, _, _) -> {
             loop field in fields -> sema_casing_expr(field.value, &diagnostics)
         }
-        .MapLit(entries, _) -> {
+        .MapLit(entries, _, _) -> {
             loop entry in entries {
                 sema_casing_expr(entry.key, &diagnostics)
                 sema_casing_expr(entry.value, &diagnostics)
             }
         }
-        .Index(base, index, _, _) -> {
+        .Index(base, index, _, _, _) -> {
             sema_casing_expr(base, &diagnostics)
             sema_casing_expr(index, &diagnostics)
         }
-        .Slice(base, start, end, range, _) -> {
+        .Slice(base, start, end, range, _, _) -> {
             sema_casing_expr(base, &diagnostics)
             if range == {
                 .Val(value) -> sema_casing_expr(value, &diagnostics)
@@ -618,29 +617,29 @@ fn sema_casing_expr(expr: Expr, diagnostics: &[Diagnostic]) {
                 }
             }
         }
-        .Range(start, end, _, _) -> {
+        .Range(start, end, _, _, _) -> {
             sema_casing_expr(start, &diagnostics)
             sema_casing_expr(end, &diagnostics)
         }
-        .CallValue(callee, args, _) -> {
+        .CallValue(callee, args, _, _) -> {
             sema_casing_expr(callee, &diagnostics)
             sema_casing_call_args(args, &diagnostics)
         }
-        .Lambda(lambda) -> {
+        .Lambda(lambda, _) -> {
             loop parameter in lambda.params -> sema_casing_snake(parameter.name, parameter.name_span, "lambda parameter", &diagnostics)
             if lambda.body == {
                 .Expr(value) -> sema_casing_expr(value, &diagnostics)
                 .Block(body) -> sema_casing_stmts(body, &diagnostics)
             }
         }
-        .If(cond, then_body, then_value, else_body, else_value, _) -> {
+        .If(cond, then_body, then_value, else_body, else_value, _, _) -> {
             sema_casing_expr(cond, &diagnostics)
             sema_casing_stmts(then_body, &diagnostics)
             sema_casing_expr(then_value, &diagnostics)
             sema_casing_stmts(else_body, &diagnostics)
             sema_casing_expr(else_value, &diagnostics)
         }
-        .PtrFromAddr(_, _, _, addr, _) -> sema_casing_expr(addr, &diagnostics)
+        .PtrFromAddr(_, _, _, addr, _, _) -> sema_casing_expr(addr, &diagnostics)
         else -> {}
     }
 }

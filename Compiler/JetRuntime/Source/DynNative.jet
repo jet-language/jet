@@ -4,6 +4,9 @@
 // value offset,element bytes], ordered Null Bool Int Float Number Text Bytes
 // DateTime Array Object. Source declaration order and recursive wrappers need
 // not equal runtime tags/layout. Both directions borrow input and clone owners.
+// A native List payload is its inline [len, cap, data] header at the payload
+// address (in the node, or in its wrapper box); a runtime tree's sequence is
+// a pointer to a separately allocated header.
 // Main's cutover ruling excludes DateTime: compiler JSON never produces it;
 // its ZonedDateTime projection requires richer schema facts, not reinterpretation.
 // This is the registered E3001 panic route, with an explicit stable message.
@@ -66,13 +69,15 @@ fn compiler_dyn_sequence_from_native(schema: I64, row: I64, native: I64, kind: I
     row :: compiler_dyn_row(schema, kind)
     address :: compiler_dyn_native_payload(row, native)
     if (kind == DATA_TREE_BOOL) -> return data_tree_new(kind, if (rt_text_byte(address) != I64{0}) -> I64{1} else -> I64{0})
+    if (kind == DATA_TREE_BYTE_LIST || kind >= DATA_TREE_ARRAY) {
+        sequence :: compiler_dyn_sequence_from_native(schema, row, address, kind)
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+        return data_tree_new(kind, sequence)
+    }
     payload :: data_tree_word(address)
     if (kind == DATA_TREE_INT) -> return data_tree_new(kind, jet_rt_int_clone(payload))
     if (kind == DATA_TREE_FLOAT) -> return data_tree_new(kind, payload)
-    if (kind == DATA_TREE_NUMBER || kind == DATA_TREE_TEXT) -> return data_tree_new(kind, jet_rt_string_clone(payload))
-    sequence :: compiler_dyn_sequence_from_native(schema, row, payload, kind)
-    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
-    data_tree_new(kind, sequence)
+    data_tree_new(kind, jet_rt_string_clone(payload))
 }
 fn compiler_dyn_sequence_to_native(schema: I64, row: I64, sequence: I64, kind: I64) -> I64 {
     length :: data_tree_word(sequence + DATA_SEQUENCE_LENGTH)
@@ -98,7 +103,7 @@ fn compiler_dyn_sequence_to_native(schema: I64, row: I64, sequence: I64, kind: I
         at += I64{1}
         data_tree_store(result + DATA_SEQUENCE_LENGTH, at)
         if (kind != DATA_TREE_BYTE_LIST && jet_scheduler_native_propagate() != I64{0}) {
-            compiler_dyn_native_sequence_drop(schema, row, result, kind)
+            compiler_dyn_native_sequence_drop(schema, row, result, kind, true)
             return I64{0}
         }
     }
@@ -141,14 +146,17 @@ fn compiler_dyn_sequence_to_native(schema: I64, row: I64, sequence: I64, kind: I
             jet_rt_free(native, bytes, I64{8})
             return I64{0}
         }
-        data_tree_store(address, converted)
+        // The header moves into the inline payload; its shell is released.
+        coll_copy(converted, address, DATA_SEQUENCE_BYTES)
+        jet_rt_free(converted, DATA_SEQUENCE_BYTES, I64{8})
     }
     native
 }
 
 // Private owner cleanup for partially initialized native sequences and fixture
 // storage. Normal returned native values use the compiler's generated drop glue.
-fn compiler_dyn_native_sequence_drop(schema: I64, row: I64, sequence: I64, kind: I64) {
+// `shell` frees a separately allocated header; an inline payload header has none.
+fn compiler_dyn_native_sequence_drop(schema: I64, row: I64, sequence: I64, kind: I64, shell: Bool) {
     length :: data_tree_word(sequence + DATA_SEQUENCE_LENGTH)
     capacity :: data_tree_word(sequence + DATA_SEQUENCE_CAPACITY)
     data :: data_tree_word(sequence + DATA_SEQUENCE_DATA)
@@ -165,7 +173,7 @@ fn compiler_dyn_native_sequence_drop(schema: I64, row: I64, sequence: I64, kind:
         at += I64{1}
     }
     if (capacity != I64{0}) -> jet_rt_free(data, capacity * stride, I64{8})
-    jet_rt_free(sequence, DATA_SEQUENCE_BYTES, I64{8})
+    if shell -> jet_rt_free(sequence, DATA_SEQUENCE_BYTES, I64{8})
 }
 fn compiler_dyn_native_drop(schema: I64, native: I64) {
     if (native == I64{0}) -> return
@@ -178,7 +186,7 @@ fn compiler_dyn_native_drop(schema: I64, native: I64) {
         } else if (kind == DATA_TREE_NUMBER || kind == DATA_TREE_TEXT) {
             jet_rt_string_drop(data_tree_word(address))
         } else if (kind == DATA_TREE_BYTE_LIST || kind >= DATA_TREE_ARRAY) {
-            compiler_dyn_native_sequence_drop(schema, row, data_tree_word(address), kind)
+            compiler_dyn_native_sequence_drop(schema, row, address, kind, false)
         }
         if (data_tree_word(row + I64{16}) != I64{0}) -> jet_rt_free(address, data_tree_word(row + I64{24}), I64{8})
     }

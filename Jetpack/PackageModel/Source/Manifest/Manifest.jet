@@ -3,24 +3,34 @@
 // checks, release status and the version banner, the comment-preserving edit
 // entry points, and every manifest diagnostic (E12xx).
 use core.files as manifest_core_files
+use jet_foundation.[
+    Diagnostic, AllocatorPolicy, RuntimeLayer, Span, diagnostic_from_registry,
+    diagnostic_registry_row,
+]
+use jetpack_foundation.[
+    BINARY_NAME, FILE_EXT, LANG_NAME, MANIFEST_BLOCK_AUTHORITY, MANIFEST_FIELD_EDITION,
+    PACKAGE_FIELD_KIND_REMOVED, PACKAGE_FIELD_TARGETS, PACKAGE_FILE, TARGET_EXAMPLE,
+    TARGET_EXECUTABLE, TARGET_FIELD_ENTRY, TARGET_FIELD_NAME, TARGET_LIBRARY, TARGET_SANDBOX,
+    TARGET_TEST,
+]
 
 // The compiler's version string for E1208 toolchain checks (CARGO_PKG_VERSION
 // of the Rust jet-pkg-model crate).
-COMPILER_VERSION :: prep { "0.1.0" }
+COMPILER_VERSION :: "0.1.0"
 
 // Supported editions, oldest to newest; the last is the newest stable.
-LATEST_EDITION :: prep { "2028" }
-SUPPORTED_EDITIONS :: prep { [String]{"2026", "2027", "2028"} }
+LATEST_EDITION :: "2028"
+SUPPORTED_EDITIONS :: [String]{"2026", "2027", "2028"}
 
 // The registry-protocol version this toolchain speaks.
-REGISTRY_COMPAT :: prep { "1" }
+REGISTRY_COMPAT :: "1"
 
-CURRENT_RELEASE_CHANNEL :: prep { "prerelease" }
-CURRENT_RELEASE_DISPOSITION :: prep { "current" }
-CURRENT_RELEASE_READINESS :: prep { "not-ready" }
-RELEASE_COMPATIBILITY_POLICY :: prep { "future-1.0" }
-RELEASE_COMPATIBILITY_POLICY_DISPOSITION :: prep { "planned" }
-RELEASE_COMPATIBILITY_POLICY_ACTIVE :: prep { false }
+CURRENT_RELEASE_CHANNEL :: "prerelease"
+CURRENT_RELEASE_DISPOSITION :: "current"
+CURRENT_RELEASE_READINESS :: "not-ready"
+RELEASE_COMPATIBILITY_POLICY :: "future-1.0"
+RELEASE_COMPATIBILITY_POLICY_DISPOSITION :: "planned"
+RELEASE_COMPATIBILITY_POLICY_ACTIVE :: false
 
 // The current release identity, independent of the package SemVer.
 struct ReleaseStatus {
@@ -131,9 +141,9 @@ struct PackageMeta {
     license: String?
     repository: String?
     // Optional runtime ceiling from `runtime:`.
-    layer: MIRRuntimeLayer?
+    layer: RuntimeLayer?
     // Selected hosted whole-program allocator.
-    allocator: MIRAllocatorPolicy
+    allocator: AllocatorPolicy
 }
 
 enum DepSpec {
@@ -305,11 +315,11 @@ fn pkg_manifest_parse_diagnostic(path: String, error: PackageParseError) -> Diag
             "`{field}` moved into `{replacement}` in the one `authority:` block.",
             "write `{replacement}` inside `authority: {{ … }}`")
         .BadMemoryPolicy(detail) -> {
-            if detail.contains("is not a memory floor") || detail.contains("memory floors belong in `authority.holds.deny`") {
+            if detail.contains("is not a memory floor") || detail.contains("memory floors belong in `authority.deny`") {
                 return diagnostic_from_registry("E1206", None,
                     "`{PACKAGE_FILE}` names an unknown memory floor",
-                    "{detail}; memory floors belong in `authority.holds.deny`.",
-                    "write the denial in `authority.holds.deny` inside `authority: {{ holds: {{ deny: […] }} }}`")
+                    "{detail}; memory floors belong in `authority.deny`.",
+                    "write the denial in `authority.deny` inside `authority: {{ deny: […] }}`")
             }
             pkg_e1206("memory policy is malformed: {detail}")
         }
@@ -339,7 +349,7 @@ fn pkg_e1221(detail: String) -> Diagnostic Never! {
     diagnostic_from_registry("E1221", None,
         "`{PACKAGE_FILE}` has a malformed `{MANIFEST_BLOCK_AUTHORITY}` block",
         detail,
-        "`{MANIFEST_BLOCK_AUTHORITY}: {{ holds: {{ allow: […], deny: […] }}, grants: {{ \"dep\": […] }}, trust: {{ … }}, providers: {{ … }} }}` is the one package authority block; rights use the thirteen grantable roots, `FFI` and its language leaves (`FFI.Go`, `FFI.Py`, `FFI.Octave`), plus deny-only `Panic`/`Mem`")
+        "`{MANIFEST_BLOCK_AUTHORITY}: {{ allow: […], deny: […], grants: {{ \"dep\": […] }}, trust: {{ … }}, providers: {{ … }} }}` is the one package authority block; rights use the thirteen grantable roots, `FFI` and its language leaves (`FFI.Go`, `FFI.Py`, `FFI.Octave`), plus deny-only `Panic`/`Mem`")
 }
 
 fn pkg_e1206(detail: String) -> Diagnostic Never! {
@@ -389,23 +399,6 @@ fn pkg_e1213(file: String, name: String, paths: [String]) -> Diagnostic Never! {
         "`{PACKAGE_FILE}` declares package `{name}` but `module {name}` is ambiguous",
         "`module {name}` was found in multiple files: {paths.join(", ")}; each package name must map to exactly one module",
         "rename one of the conflicting `module {name}` declarations so each package has a unique name")
-}
-
-// E1258 a sandbox uses an effect its `authority.needs`
-// does not cover.
-fn pkg_e1258(effects: String) -> Diagnostic Never! {
-    diagnostic_from_registry("E1258", None,
-        "a sandbox effect is not declared",
-        "this package builds as `target: sandbox` and uses: {effects}. Every non-memory effect must be covered by the package's canonical `authority.needs` declaration before a host import can be registered.",
-        "declare each required canonical right in `authority.needs`, or remove the effectful call from the sandbox guest")
-}
-
-// E1259 the sandbox's wasm32 Component build failed.
-fn pkg_e1259(detail: String) -> Diagnostic Never! {
-    diagnostic_from_registry("E1259", None,
-        "couldn't build the sandbox's WASM Component",
-        detail,
-        "make sure `rustc` supports `--target wasm32-unknown-unknown` and `wasm-tools` is on PATH (both ship in the project's `nix develop` shell)")
 }
 
 // `--profile=<name>` names no blessed or declared profile.

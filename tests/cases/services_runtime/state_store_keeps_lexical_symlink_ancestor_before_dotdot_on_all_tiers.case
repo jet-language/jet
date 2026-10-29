@@ -1,0 +1,14 @@
+# tests/services_runtime.rs::state_store_keeps_lexical_symlink_ancestor_before_dotdot_on_all_tiers at tests/services_runtime.rs:2464; hand-port
+# Claim: a lexical symlink ancestor before .. is refused with the symlink-parent policy reason (tests/services_runtime.rs:2473-2477)
+# Fixture migrated: the Rust absolute scratch root becomes fixture-relative link/../store; the link is created by a sh -c ln -s real link step before the run
+# Fixture migrated: the inline package authority grant is dropped; package tir supplies FS.Read, IO, Mem.Alloc
+# Not ported: the Rust std fs::create_dir and symlink setup is replaced by sh -c steps
+fixture: state_store_keeps_lexical_symlink_ancestor_before_dotdot_on_all_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: sh {work}/step-1.sh
+exit: 0 # tests/services_runtime.rs:2466-2467
+step: jet run main.jet
+exit: 0 # tests/services_runtime.rs:2480
+stdout: = "true\n" # tests/services_runtime.rs:2480

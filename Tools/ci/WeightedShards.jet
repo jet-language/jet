@@ -1,0 +1,175 @@
+#!/usr/bin/env jet
+// Shared weighted LPT assignment.
+// Usage: jet Tools/ci/WeightedShards.jet SHARD_INDEX SHARD_COUNT < rows
+//
+// Reads tab-separated rows from stdin, `<weight>\t<item>` (the item may contain
+// tabs; leading and repeated separator tabs are skipped as a shell `read` does,
+// and a last row without a newline is not a row). Emits the items assigned to
+// SHARD_INDEX: rows heaviest first, ties by item, each given to the currently
+// lightest shard. Standard error reports the predicted load and spread.
+// Items order by bytes; the shell original orders them with `sort`'s locale
+// collation, which agrees for items without punctuation or case differences.
+use core.process as process
+use core.term as term
+
+struct WeightedRow {
+    weight: Int
+    item: String
+}
+
+#Error
+struct ShardError {
+    message: String
+    code: Int
+}
+
+fn is_digits(text: String) -> Bool Never! {
+    if text == "" -> return false
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        if code < 48 || code > 57 -> return false
+    }
+    true
+}
+
+fn digits_value(text: String) -> Int Never! {
+    value := 0
+    loop byte in text.bytes() -> value = value * 10 + Int.from_u8(byte) - 48
+    value
+}
+
+fn two_digits(value: Int) -> String Never! { if value < 10 -> "0{value}" else -> "{value}" }
+
+fn bytes_text(bytes: [U8], from: Int, to: Int) -> String Never! {
+    if from >= to -> return ""
+    String.from_bytes_lossy(bytes[from..<to])
+}
+
+// One input line split as `IFS=$'\t' read -r weight item` splits it: tabs
+// around and between the two fields are skipped, the item keeps inner tabs.
+fn split_row(line: [U8]) -> (weight: String, item: String) Never! {
+    tab :: U8{9}
+    start := 0
+    loop start < line.len() && line[start] == tab -> start += 1
+    at := start
+    loop at < line.len() && line[at] != tab -> at += 1
+    weight :: bytes_text(line, start, at)
+    loop at < line.len() && line[at] == tab -> at += 1
+    end := line.len()
+    loop end > at && line[end - 1] == tab -> end -= 1
+    (weight: weight, item: bytes_text(line, at, end))
+}
+
+fn parse_rows(input: String) -> [WeightedRow] ShardError! {
+    rows := [WeightedRow]{}
+    bytes :: input.bytes()
+    line_start := 0
+    loop at in 0..<bytes.len() {
+        if Int.from_u8(bytes[at]) != 10 -> next
+        fields :: split_row(bytes[line_start..<at])
+        line_start = at + 1
+        if fields.weight == "" || fields.item == "" -> return Err(ShardError{message: "error: weighted shard input rows must be '<weight>\\t<item>'", code: 65})
+        if !is_digits(fields.weight) -> return Err(ShardError{message: "error: weighted shard input has non-integer weight '{fields.weight}'", code: 65})
+        &rows.push(WeightedRow{weight: digits_value(fields.weight), item: fields.item})
+    }
+    Ok(rows)
+}
+
+struct ShardPlan {
+    selected: [String]
+    summary: String
+}
+
+fn assign(rows: [WeightedRow], shard_index: Int, shard_count: Int, index_text: String, count_text: String) -> ShardPlan Never! {
+    ordered := rows
+    &ordered.sort_by((left: WeightedRow, right: WeightedRow) -> (right.weight <=> left.weight).then(left.item <=> right.item))
+    loads := [Int]{}
+    loop _ in 0..<shard_count -> &loads.push(0)
+    selected := [String]{}
+    selected_seconds := 0
+    loop row in ordered {
+        lightest := 0
+        loop shard in 1..<shard_count {
+            if loads[shard] < loads[lightest] -> lightest = shard
+        }
+        loads[lightest] = loads[lightest] + row.weight
+        if lightest == shard_index {
+            &selected.push(row.item)
+            selected_seconds += row.weight
+        }
+    }
+    heaviest := loads[0]
+    lightest_load := loads[0]
+    loop load in loads {
+        if load > heaviest -> heaviest = load
+        if load < lightest_load -> lightest_load = load
+    }
+    spread := "n/a"
+    if lightest_load > 0 {
+        hundredths :: heaviest * 100 /% lightest_load
+        spread = "{hundredths /% 100}.{two_digits(hundredths % 100)}x"
+    }
+    load_words := [String]{}
+    loop load in loads -> &load_words.push("{load}")
+    summary :: "weighted-shards: shard {index_text}/{count_text} selected {selected.len()} of {rows.len()} items, predicted {selected_seconds}s (shard loads: {load_words.join(" ")}; spread {heaviest}s/{lightest_load}s = {spread})"
+    ShardPlan{selected: selected, summary: summary}
+}
+
+fn shard_counts(args: [String]) -> (index: Int, count: Int) ShardError! {
+    if args.len() != 2 -> return Err(ShardError{message: "usage: WeightedShards.jet SHARD_INDEX SHARD_COUNT", code: 64})
+    index_text :: args[0]
+    count_text :: args[1]
+    if !is_digits(count_text) -> return Err(ShardError{message: "error: SHARD_COUNT must be a positive integer, got '{count_text}'", code: 64})
+    shard_count :: digits_value(count_text)
+    if shard_count < 1 -> return Err(ShardError{message: "error: SHARD_COUNT must be >= 1, got '{count_text}'", code: 64})
+    if !is_digits(index_text) -> return Err(ShardError{message: "error: SHARD_INDEX must be a non-negative integer, got '{index_text}'", code: 64})
+    shard_index :: digits_value(index_text)
+    if shard_index >= shard_count -> return Err(ShardError{message: "error: SHARD_INDEX ({index_text}) must be < SHARD_COUNT ({count_text})", code: 64})
+    Ok((index: shard_index, count: shard_count))
+}
+
+fn fail(error: ShardError) {
+    term.eprint(error.message)
+    process.exit(error.code)
+}
+
+fn run() {
+    args :: process.args()
+    counts :: shard_counts(args) ?? {
+        fail(err)
+        return
+    }
+    input :: term.read_all_input() ?? {
+        term.eprint("weighted-shards: cannot read stdin: {err}")
+        process.exit(1)
+        return
+    }
+    rows :: parse_rows(input) ?? {
+        fail(err)
+        return
+    }
+    plan :: assign(rows, counts.index, counts.count, args[0], args[1])
+    loop item in plan.selected -> print(item)
+    term.eprint(plan.summary)
+}
+
+fn plan_text(args: [String], input: String) -> String Never! {
+    counts :: shard_counts(args) ?? return "{err.code}: {err.message}"
+    rows :: parse_rows(input) ?? return "{err.code}: {err.message}"
+    plan :: assign(rows, counts.index, counts.count, args[0], args[1])
+    "{plan.selected.join(",")} | {plan.summary}"
+}
+
+#Test("rows go heaviest first to the lightest shard; the summary names the loads") {
+    input :: "30\tgolden\n30\tui\n30\tcases\n30\tregistries\n"
+    assert_eq(plan_text([String]{"1", "3"}, input), "golden | weighted-shards: shard 1/3 selected 1 of 4 items, predicted 30s (shard loads: 60 30 30; spread 60s/30s = 2.00x)")
+    assert_eq(plan_text([String]{"0", "2"}, "5\ta\n\t9\t\tb\tc\t\n7\tz"), "b\tc | weighted-shards: shard 0/2 selected 1 of 2 items, predicted 9s (shard loads: 9 5; spread 9s/5s = 1.80x)")
+    assert_eq(plan_text([String]{"0", "1"}, ""), " | weighted-shards: shard 0/1 selected 0 of 0 items, predicted 0s (shard loads: 0; spread 0s/0s = n/a)")
+}
+
+#Test("malformed rows and arguments are refused") {
+    assert_eq(plan_text([String]{"0", "1"}, "5\n"), "65: error: weighted shard input rows must be '<weight>\\t<item>'")
+    assert_eq(plan_text([String]{"0", "1"}, "x5\ta\n"), "65: error: weighted shard input has non-integer weight 'x5'")
+    assert_eq(plan_text([String]{"2", "2"}, ""), "64: error: SHARD_INDEX (2) must be < SHARD_COUNT (2)")
+    assert_eq(plan_text([String]{"0"}, ""), "64: usage: WeightedShards.jet SHARD_INDEX SHARD_COUNT")
+}

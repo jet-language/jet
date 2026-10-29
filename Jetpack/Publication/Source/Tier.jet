@@ -1,9 +1,7 @@
-// Canonical index trust carriers and review receipts: Source/Publish/Tier.rs
-// :9-232,310-337. Community/advisory gate composition is owned by publication policy.
-enum PublicationRegistryTier {
-    Core
-    Community
-}
+// Index review receipts and gate carriers: Source/Publish/Tier.rs
+// :9-232,310-337. The registry tier itself is jet_pkg_model's
+// (Registry/RegistryIdentity.jet). Community/advisory gate composition is
+// owned by publication policy.
 enum PublicationGateState {
     Passed
     Blocked
@@ -17,22 +15,6 @@ struct PublicationGateStatus {
     review: PublicationGateState
 }
 
-fn publication_tier_label(tier: PublicationRegistryTier) -> String Never! {
-    if tier == {
-        .Core -> "core"
-        .Community -> "community"
-    }
-}
-fn publication_parse_tier(value: String) -> PublicationRegistryTier? Never! {
-    if value.trim().to_ascii_lower() == {
-        "core" -> Val(PublicationRegistryTier.Core)
-        "community" -> Val(PublicationRegistryTier.Community)
-        else -> None
-    }
-}
-fn publication_tier_from_environment() -[Env]> PublicationRegistryTier Never! {
-    publication_parse_tier(sys.get("JET_REGISTRY_TIER") ?? "") ?? PublicationRegistryTier.Core
-}
 fn publication_gate_label(state: PublicationGateState) -> String Never! {
     if state == {
         .Passed -> "passed"

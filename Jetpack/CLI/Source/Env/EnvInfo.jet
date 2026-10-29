@@ -132,7 +132,7 @@ fn cli_env_info_service_json(service: DevServicePlan) -> Dyn Never! {
     loop item in service.extra -> &extra.push(Dyn.Object(["name": Dyn.Text(item.name), "value": Dyn.Text(item.value)]))
     readiness :: service.ready != None || service.ready_probe != None || service.ports.len() > 0
     Dyn.Object([
-        "name": Dyn.Text(service.name),
+        "name": Dyn.Text(service.name.copy()),
         "enabled": Dyn.Bool(service.enable),
         "ports": Dyn.Array(ports),
         "readiness": Dyn.Bool(readiness),
@@ -379,7 +379,7 @@ fn cli_env_info_json(plan: RunPlan, preset: String, selected_presets: [String], 
         ]))
     }
     report := [String: Dyn]{}
-    report["preset"] = Dyn.Text(preset)
+    report["preset"] = Dyn.Text(preset.copy())
     report["selected_presets"] = cli_json_texts(selected_presets)
     report["applied_presets"] = cli_json_texts(applied_presets)
     report["presets"] = cli_json_texts(preset_names)

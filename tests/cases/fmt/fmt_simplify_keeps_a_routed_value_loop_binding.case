@@ -1,0 +1,24 @@
+# tests/fmt.rs::fmt_simplify_keeps_a_routed_value_loop_binding at tests/fmt.rs:1247; hand-port
+# Claim: simplify fires on answer: `fn answer() -> Int { 42 }` (tests/fmt.rs:1261-1263)
+# Claim: search fn tail identical between plain and simplified output (tests/fmt.rs:1265-1273)
+# Claim: simplify output stable (tests/fmt.rs:1274-1279)
+# Fixture migrated: plain output copied to plain.out with cp before the simplify pass
+# Fixture migrated: tail comparison shell prints a non-fatal "Invalid environment variable name" warning on stderr; the SAME check still passes
+fixture: fmt_simplify_keeps_a_routed_value_loop_binding.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt loop/run.jet
+exit: 0 # tests/fmt.rs:1257 plain format
+step: cp loop/run.jet loop/plain.out
+exit: 0 # tests/fmt.rs:1257-1258 keep plain output
+step: jet fmt --simplify loop/run.jet
+exit: 0 # tests/fmt.rs:1258 simplify succeeds
+step: sh {work}/step-4.sh
+exit: 0 # tests/fmt.rs:1261-1263
+stdout: ~ "fn answer() -> Int { 42 }" # tests/fmt.rs:1261-1263
+step: sh {work}/step-5.sh
+exit: 0 # tests/fmt.rs:1269-1273 search tail equal to plain
+stdout: = "SAME\n" # tests/fmt.rs:1269-1273 search tail equal to plain
+step: jet fmt --simplify --check loop/run.jet
+exit: 0 # tests/fmt.rs:1274-1279 simplify output stable

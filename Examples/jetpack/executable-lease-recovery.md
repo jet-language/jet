@@ -4,9 +4,9 @@ Jetpack records an executable lease while a managed process tree can still
 use an executable or one of its snapshots. `jetpack audit` observes those
 leases; `jetpack hangar recover` is the explicit reclaim operation. The
 implementation is in
-[`ExecutableLease.rs`](../../crates/jetpack/src/RuntimePolicy/ExecutableLease.rs),
+[`ExecutableLeaseState.jet`](../../Jetpack/Store/Source/Lease/ExecutableLeaseState.jet),
 with the audit surface in
-[`package_hangar_vendor.rs`](../../crates/jetpack/src/CLI/package_hangar_vendor.rs).
+[`VendorAuditCommands.jet`](../../Jetpack/CLI/Source/Commands/VendorAuditCommands.jet).
 
 ## Inspect before reclaiming
 
@@ -46,8 +46,8 @@ agree:
 The owner lock authenticates the handoff. The container-lifetime lock is held
 by the process tree, so a descendant keeps the executable protected even after
 the original owner exits. See
-[`RuntimePolicy.rs`](../../crates/jetpack/src/RuntimePolicy.rs) and
-[`Store.rs`](../../crates/jetpack/src/Store.rs) for those boundaries.
+[`ExecutableLeaseProtocol.jet`](../../Jetpack/Store/Source/Lease/ExecutableLeaseProtocol.jet) and
+[`Jetpack/Environment/Source/RuntimePolicy`](../../Jetpack/Environment/Source/RuntimePolicy/) for those boundaries.
 
 Interrupted generations and stale snapshots are eligible only when they are no
 longer protected. Descendant-protected snapshots remain intact. Recovery also

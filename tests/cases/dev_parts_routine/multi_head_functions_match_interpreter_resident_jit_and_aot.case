@@ -1,0 +1,18 @@
+# tests/dev_parts/routine.rs::multi_head_functions_match_interpreter_resident_jit_and_aot at tests/dev_parts/routine.rs:5143; hand-port (the forced-interpreter tier is carried by `jet run`; the Jet CLI has no interpreter flag; the original has no literal output, so the tiers are held to the `jet run` bytes)
+fixture: multi_head_functions_match_interpreter_resident_jit_and_aot.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step run: jet run multi_head.jet
+exit: 0
+stderr: empty
+step: jet build multi_head.jet
+exit: 0
+step aot: built
+exit: == run
+stdout: == run
+stderr: == run
+step dev: jet dev multi_head.jet --watch=off --quiet
+exit: 0
+stdout: == run

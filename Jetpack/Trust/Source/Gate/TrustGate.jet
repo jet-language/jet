@@ -4,8 +4,17 @@
 // silently; a non-terminal stdin gets a clean E1255 (never a hung prompt);
 // a terminal gets a summary and a y/N prompt whose "yes" persists a grant.
 // `--trust` never persists anything.
+use jetpack_foundation.[TRUST_SCOPE_REPO, TRUST_SCOPE_USER, Theme]
+use jet_pkg_model.[
+    PackageFacts, PackageGateError, RefSpec, SourceTable, TrustDecision, pkg_check_project_gate,
+]
+use jet_env_model.[EnvironmentFacts, SecretSpec]
+use jet_foundation.[PolicyKey]
+use core.sys as sys
+use core.term as term
+use core.files as files
 
-TRUST_GATE_REFUSED :: prep { 2 }
+TRUST_GATE_REFUSED :: 2
 
 // Rust `gate`: a declared env keyed by `trust_env_definition_hash`.
 fn trust_gate(theme: Theme, store: String, project_dir: String, refs: [RefSpec], table: SourceTable, secrets: [SecretSpec], bypass: Bool) -[IO, FS, Env, Time.Wait]> Int? {
@@ -116,8 +125,7 @@ fn trust_gate_with_hash(theme: Theme, store: String, project_dir: String, refs: 
 // decision under CI when set, else the default. An unreadable package
 // manifest has no policy.
 fn trust_project_policy_decision(project_dir: String) -[FS, Env]> TrustDecision? {
-    loaded :: PackageFacts.load(project_dir) ?? return None
-    facts :: loaded ?? return None
+    facts :: PackageFacts.load(project_dir) ?? return None
     policy :: facts.authority.trust ?? return None
     if sys.get("CI") != None && policy.ci_prompt != None -> return policy.ci_prompt
     policy.default

@@ -1,0 +1,128 @@
+// (Rust `Protocol.rs` `expand_module_protocols`): a `protocol Name { … }`
+// declares an ordered message exchange. Before registration it becomes two
+// `#SingleUse` handle structs, `Name.Client` and `Name.Server`, with one state
+// per exchange step, and `#Transition` impl methods: the sending side's
+// `message(self, fields…)` and the receiving side's `recv_message(self)`. The
+// fragment goes through the ordinary front end; one that does not parse is
+// E0153 at the protocol's name.
+use jet_foundation.[
+    Diagnostic,
+    Func,
+    Item,
+    ProtocolDecl,
+    ProtocolDirection,
+    ProtocolMessage,
+    type_name,
+]
+use jet_parser.[
+    parse_source,
+]
+
+// The generated items enter just before their protocol declaration.
+fn sema_protocols_expand(items: &[Item], diagnostics: &[Diagnostic]) {
+    has_protocol :: loop item in items {
+        if item == .ProtocolDecl(_) -> break true
+    } ?? false
+    if !has_protocol -> return
+    expanded := [Item]{}
+    loop item in items {
+        if item == .ProtocolDecl(declaration) {
+            parsed :: parse_source(sema_protocol_source(declaration).bytes())
+            if parsed.diagnostics.len() > 0 {
+                &diagnostics.push(sema_error("E0153", declaration.name_span, "protocol `{declaration.name}` failed to expand into handle types", "the compiler generates `#SingleUse` `.Client`/`.Server` stubs from the protocol block — a fragment did not parse", "check the protocol declaration for typos; if this persists, file a bug"))
+            } else {
+                generated := parsed.program.items
+                sema_protocol_mark_generated(&generated)
+                loop value in generated -> &expanded.push(value)
+            }
+        }
+        &expanded.push(item)
+    }
+    loop items.len() > 0 -> _ := &items.pop()
+    loop item in expanded -> &items.push(item)
+}
+
+// The generated transition methods are compiler scaffolding: they keep their
+// declared returns raw.
+fn sema_protocol_mark_generated(items: &[Item]) Never! {
+    loop index in 0..<items.len() {
+        if items[index] == {
+            .Impl(definition) -> {
+                updated := definition
+                sema_protocol_mark_methods(&updated.methods)
+                items[index] = Item.Impl{value: updated}
+            }
+            .Struct(definition) -> {
+                updated := definition
+                sema_protocol_mark_methods(&updated.methods)
+                items[index] = Item.Struct{value: updated}
+            }
+            .Enum(definition) -> {
+                updated := definition
+                sema_protocol_mark_methods(&updated.methods)
+                items[index] = Item.Enum{value: updated}
+            }
+            else -> {}
+        }
+    }
+}
+
+fn sema_protocol_mark_methods(methods: &[Func]) Never! {
+    loop index in 0..<methods.len() {
+        if methods[index].state_transition != None -> methods[index].compiler_generated = true
+    }
+}
+
+fn sema_protocol_source(declaration: ProtocolDecl) -> String Never! {
+    client :: "{declaration.name}.Client"
+    server :: "{declaration.name}.Server"
+    states :: loop index in 0..<(declaration.messages.len() + 1) -> "S{index}"
+    state_list :: states.join(", ")
+    out := [String]{}
+    &out.push("#SingleUse struct {client} {{\n    state {{ {state_list} }}\n\n    _token: Int\n}}\n\n")
+    &out.push("#SingleUse struct {server} {{\n    state {{ {state_list} }}\n\n    _token: Int\n}}\n\n")
+    &out.push("impl {client} {{\n")
+    &out.push("    #Transition(_, S0) fn client() -> {client} {{ {{_token: 0}} }}\n\n")
+    loop (index, message) in declaration.messages {
+        terminal :: index + 1 == declaration.messages.len()
+        if message.direction == ProtocolDirection.ClientToServer {
+            &out.push(sema_protocol_send_method(client, states, index, message, terminal))
+        } else {
+            &out.push(sema_protocol_recv_method(client, states, index, message, terminal))
+        }
+    }
+    &out.push("}}\n\n")
+    &out.push("impl {server} {{\n")
+    &out.push("    #Transition(_, S0) fn server() -> {server} {{ {{_token: 0}} }}\n\n")
+    loop (index, message) in declaration.messages {
+        terminal :: index + 1 == declaration.messages.len()
+        if message.direction == ProtocolDirection.ClientToServer {
+            &out.push(sema_protocol_recv_method(server, states, index, message, terminal))
+        } else {
+            &out.push(sema_protocol_send_method(server, states, index, message, terminal))
+        }
+    }
+    &out.push("}}")
+    out.join("")
+}
+
+fn sema_protocol_send_method(handle: String, states: [String], index: Int, message: ProtocolMessage, terminal: Bool) -> String Never! {
+    from :: states[index]
+    to :: states[index + 1]
+    fields :: sema_protocol_fields(message)
+    suffix :: if fields == "" -> "" else -> ", {fields}"
+    if terminal -> return "    #Transition({from}, {to}) fn {message.name}(self: ^{handle}{suffix}) {{}}\n\n"
+    "    #Transition({from}, {to}) fn {message.name}(self: ^{handle}{suffix}) -> {handle} Err! {{ Ok(self) }}\n\n"
+}
+
+fn sema_protocol_recv_method(handle: String, states: [String], index: Int, message: ProtocolMessage, terminal: Bool) -> String Never! {
+    from :: states[index]
+    to :: states[index + 1]
+    if terminal -> return "    #Transition({from}, {to}) fn recv_{message.name}(self: ^{handle}) {{}}\n\n"
+    "    #Transition({from}, {to}) fn recv_{message.name}(self: ^{handle}) -> {handle} Err! {{ Ok(self) }}\n\n"
+}
+
+fn sema_protocol_fields(message: ProtocolMessage) -> String Never! {
+    parts :: loop field in message.fields -> "{field.name}: {type_name(field.ty)}"
+    parts.join(", ")
+}

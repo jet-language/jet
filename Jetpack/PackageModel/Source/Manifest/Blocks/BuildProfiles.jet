@@ -1,6 +1,12 @@
 // `build: { … }` named build profiles and `build.allow` standing effects
 // plus the `dev:` development policy
 // (Package/Blocks.rs).
+use jetpack_foundation.[
+    BUILD_CTOR, BUILD_FIELD_ALLOW, BUILD_FIELD_DEBUG_INFO, BUILD_FIELD_OPTIMIZE, BUILD_FIELD_PANIC,
+    BUILD_FIELD_SETTINGS, BUILD_FIELD_SMALL, BUILD_OPTIMIZE_BASIC, BUILD_OPTIMIZE_FULL,
+    BUILD_OPTIMIZE_NONE, BUILD_PANIC_ABORT, BUILD_PANIC_UNWIND, BUILD_PROFILE_RELEASE,
+]
+use jet_foundation.[BuildOptionKind, BuildOptionRow, JetReleaseInspect, authority_root, build_option_accepts, build_option_list_value, build_option_profile_hint, build_option_refusal, build_option_row]
 
 // Rust `BuildOptimize::None` is spelled `Off`: `None` is reserved in Jet.
 enum BuildOptimize {
@@ -257,7 +263,18 @@ fn pkg_parse_build_profile(name: String, value: String) -> BuildProfileDef Packa
                     profile.settings[setting.key] = pkg_unquote(setting.value)
                 }
             }
-            else -> return Err(PackageParseError.Composition("build profile `{name}` has an unknown field `{key}` (allowed: optimize, debug_info, small, panic, inspect, game_development_stripping, game_cook_mode, settings)"))
+            else -> {
+                // Another row of the build-option table (JET_BUILD_OPTIONS,
+                // `bounds: off`): the CLI resolves it with the profile layer.
+                if build_option_row(key) == .Val(row) {
+                    chosen :: pkg_build_option_value(row, field.value) ?? return Err(PackageParseError.Composition("build profile `{name}` field `{key}:` needs {build_option_profile_hint(row)}"))
+                    if !build_option_accepts(row, chosen) -> return Err(PackageParseError.Composition("build profile `{name}` has an unknown `{key}:` value `{chosen}` — use {build_option_profile_hint(row)}"))
+                } else if build_option_refusal(key) == .Val(refusal) {
+                    return Err(PackageParseError.Composition("build profile `{name}` field `{key}` isn't a build option: {refusal.law}"))
+                } else {
+                    return Err(PackageParseError.Composition("build profile `{name}` has an unknown field `{key}` (allowed: optimize, debug_info, small, panic, inspect, game_development_stripping, game_cook_mode, settings, or a build option such as bounds)"))
+                }
+            }
         }
     }
     selected :: optimize_value ?? return Err(PackageParseError.Composition("build profile `{name}` is missing `optimize: none|basic|full`"))
@@ -271,6 +288,22 @@ fn pkg_parse_build_profile(name: String, value: String) -> BuildProfileDef Packa
         return Err(PackageParseError.Composition("build profile `{name}` is missing `optimize: none|basic|full`"))
     }
     Ok(profile)
+}
+
+// A build-option profile field's value as the row holds it: the word or
+// string, or for a List row the strings of `["a", "b"]` joined by newlines
+// (build_option_list_value); None when a List row's field is no such list.
+fn pkg_build_option_value(row: BuildOptionRow, written: String) -> String? {
+    if row.kind != BuildOptionKind.List -> return Val(pkg_unquote(written))
+    body :: pkg_strip_wrapped(written.trim(), "[", "]") ?? return None
+    items := [String]{}
+    loop piece in pkg_top_level_commas(body) {
+        item :: piece.trim()
+        if item == "" -> next
+        if !item.starts_with("\"") -> return None
+        &items.push(pkg_unquote(item))
+    }
+    Val(build_option_list_value(items))
 }
 
 // `build: { allow: #(FS, Exec) }`.

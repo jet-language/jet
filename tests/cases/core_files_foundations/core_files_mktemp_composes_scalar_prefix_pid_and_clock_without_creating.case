@@ -1,0 +1,26 @@
+# tests/core_files_foundations.rs::core_files_mktemp_composes_scalar_prefix_pid_and_clock_without_creating at tests/core_files_foundations.rs:297; hand-port
+# Claim: basename starts with "A_____{pid}_" for prefix "Aé🌍-/" (tests/core_files_foundations.rs:305)
+# Claim: generated path is absolute (tests/core_files_foundations.rs:306)
+# Claim: generated path does not exist on disk (tests/core_files_foundations.rs:307)
+# Claim: default run and AOT build agree (tests/core_files_foundations.rs:310)
+# Claim: release run agrees (tests/core_files_foundations.rs:311)
+# Fixture migrated: Rust `~generated` move-marker removed (E0003: `~` is not a Jet value expression)
+fixture: core_files_mktemp_composes_scalar_prefix_pid_and_clock_without_creating.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: rm -rf fixture
+exit: 0 # tests/core_files_foundations.rs:297 fresh fixture root per tier
+step: jet run main.jet
+exit: 0 # tests/core_files_foundations.rs:297 default tier stdout
+stdout: = core_files_mktemp_composes_scalar_prefix_pid_and_clock_without_creating-2.out # tests/core_files_foundations.rs:297 default tier stdout
+step: rm -rf fixture
+exit: 0 # tests/core_files_foundations.rs:297 fresh fixture root per tier
+step: jet build main.jet
+exit: 0 # tests/core_files_foundations.rs:297 AOT tier builds
+step: built
+exit: 0 # tests/core_files_foundations.rs:297 AOT tier stdout equals default
+stdout: = core_files_mktemp_composes_scalar_prefix_pid_and_clock_without_creating-5.out # tests/core_files_foundations.rs:297 AOT tier stdout equals default
+step: jet run --release main.jet
+exit: 0 # tests/core_files_foundations.rs:311 release tier stdout
+stdout: = core_files_mktemp_composes_scalar_prefix_pid_and_clock_without_creating-6.out # tests/core_files_foundations.rs:311 release tier stdout
