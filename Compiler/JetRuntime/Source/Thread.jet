@@ -1,10 +1,10 @@
 // Jet threads and dynamic TLS. GS belongs exclusively to Jet; FS remains
 // musl's TLS until libc exit. The interim pthread imports die when musl leaves
 // the pack (U4 end); raw clone is implemented below but used only by fixtures.
-// TCB (448 bytes, align64), append-only runtime layout; owner per slot:
+// TCB (context_tcb_bytes(), align64), append-only runtime layout; owner per slot:
 // @0 Thread self; @8 Thread tid; @16 Scheduler current control;
 // @24 Scheduler shield; @32 Scheduler wait boundary; @40 Deadline boundary;
-// @48 Deadline presence; @56 Deadline ms; @64 Scheduler native body active;
+// @48 Context current record pointer; @56 reserved; @64 Scheduler native body active;
 // @72 Sync park slot; @80 Task completion frames List*;
 // @88 Task compensation stack List*; @96 Deadline owner deadlines;
 // @104 World current lease; @112 World flags; @120 World park slot;
@@ -19,7 +19,7 @@
 // all raw U64 bit carriers. Comptime scope saves Scheduler's four words at
 // @288 previous control, @296 shield, @304 wait boundary, @312 body active.
 // Appended Alloc thread cache: @320 + 16 per class 32..4096, each
-// [cached head block][cached count] (Alloc.jet alloc_cache_row).
+// [cached head block][cached count] (Alloc.jet alloc_cache_row); @448 root Context record.
 // Slot200 provenance: before this append, the 26b5c5911 source map reserves
 // 192/200. Searching I64{192}/I64{200} across Thread, Scheduler, Task,
 // TaskGroup, Deadline, World, TestCapture and Sync finds no TCB access:
@@ -75,8 +75,9 @@ fn thread_tid() -> I64 {
 }
 
 fn thread_new_tcb(tid: I64) -> I64 {
-    tcb :: jet_rt_alloc(I64{448}, I64{64})
-    thread_zero(tcb, I64{448})
+    tcb :: jet_rt_alloc(context_tcb_bytes(), I64{64})
+    thread_zero(tcb, context_tcb_bytes())
+    context_tcb_install_root(tcb)
     sync_store(tcb, tcb)
     sync_store(tcb + I64{8}, tid)
     tcb
@@ -323,7 +324,7 @@ fn thread_tls_destroy(table: I64, key: I64, attempt_only: Bool) -> Bool {
     alloc_cache_flush()
     thread_unregister_tcb(tcb)
     thread_set_base(thread_detached_base())
-    jet_rt_free(tcb, I64{448}, I64{64})
+    jet_rt_free(tcb, context_tcb_bytes(), I64{64})
 }
 
 // RuntimeLower alone replaces this body with FunctionAddress of the checked

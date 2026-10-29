@@ -3386,42 +3386,42 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 254,
+      "line": 255,
       "column": 9,
       "reason": "the registry owns this live closure header whose code accepts header and one I64 value"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 344,
+      "line": 345,
       "column": 5,
       "reason": "the caller transferred a System V I64->I64 code address and one argument to this thread"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 361,
+      "line": 362,
       "column": 5,
       "reason": "getrlimit(RLIMIT_STACK) writes its two-word record into the owned 16-byte scratch and retains no pointer"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 413,
+      "line": 414,
       "column": 5,
       "reason": "fresh raw clone stack mapping with a PROT_NONE first-page guard; child may call only Jet/syscall code, never musl/Rust with inherited FS"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 430,
+      "line": 431,
       "column": 5,
       "reason": "guarded stack is seeded with Jet-only entry/arg; TID word is live until join; flags share VM, FS, FILES, SIGHAND, THREAD, SYSVSEM and enable parent-set/child-clear TID"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Thread.jet",
-      "line": 445,
+      "line": 446,
       "column": 9,
       "reason": "kernel CHILD_CLEARTID clears this live word and wakes a non-private futex; recheck handles exit-before-wait and EINTR"
     },
@@ -5682,9 +5682,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Jetpack",
       "file": "Jetpack/Publication/Tests/Sign.jet",
-      "line": 165,
+      "line": 164,
       "column": 5,
-      "reason": "each address names a live element of the owned secret buffer for its one volatile store (#6117)"
+      "reason": "original signing secret-erasure acceptance requires the Core volatile in-place wipe provider (#3597)"
     },
     {
       "package": "Jetpack",
@@ -8916,12 +8916,12 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Thread.jet | 55:5 | "every caller has attached before running Jet TLS code; an unattached thread's GS names the readable zero word, which the allocator alone treats as no TCB" |
 | Compiler | Compiler/JetRuntime/Source/Thread.jet | 65:5 | "GS is reserved for Jet and base is a live self-addressed TCB or the detached zero word" |
 | Compiler | Compiler/JetRuntime/Source/Thread.jet | 72:5 | "gettid identifies this thread without reading its inherited GS" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 254:9 | "the registry owns this live closure header whose code accepts header and one I64 value" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 344:5 | "the caller transferred a System V I64-&gt;I64 code address and one argument to this thread" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 361:5 | "getrlimit(RLIMIT_STACK) writes its two-word record into the owned 16-byte scratch and retains no pointer" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 413:5 | "fresh raw clone stack mapping with a PROT_NONE first-page guard; child may call only Jet/syscall code, never musl/Rust with inherited FS" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 430:5 | "guarded stack is seeded with Jet-only entry/arg; TID word is live until join; flags share VM, FS, FILES, SIGHAND, THREAD, SYSVSEM and enable parent-set/child-clear TID" |
-| Compiler | Compiler/JetRuntime/Source/Thread.jet | 445:9 | "kernel CHILD_CLEARTID clears this live word and wakes a non-private futex; recheck handles exit-before-wait and EINTR" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 255:9 | "the registry owns this live closure header whose code accepts header and one I64 value" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 345:5 | "the caller transferred a System V I64-&gt;I64 code address and one argument to this thread" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 362:5 | "getrlimit(RLIMIT_STACK) writes its two-word record into the owned 16-byte scratch and retains no pointer" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 414:5 | "fresh raw clone stack mapping with a PROT_NONE first-page guard; child may call only Jet/syscall code, never musl/Rust with inherited FS" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 431:5 | "guarded stack is seeded with Jet-only entry/arg; TID word is live until join; flags share VM, FS, FILES, SIGHAND, THREAD, SYSVSEM and enable parent-set/child-clear TID" |
+| Compiler | Compiler/JetRuntime/Source/Thread.jet | 446:9 | "kernel CHILD_CLEARTID clears this live word and wakes a non-private futex; recheck handles exit-before-wait and EINTR" |
 | Compiler | Compiler/JetRuntime/Source/TimeGlue.jet | 4:5 | "borrows an initialized aligned word inside a native time carrier" |
 | Compiler | Compiler/JetRuntime/Source/TimeGlue.jet | 7:5 | "owns a writable aligned word inside a fresh native time carrier" |
 | Compiler | Compiler/JetRuntime/Source/Trap.jet | 8:5 | "the caller borrows an initialized word of a live JetText or static require descriptor" |
@@ -9244,7 +9244,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Jetpack | Jetpack/Publication/Source/Sign.jet | 113:5 | "import the protected seed into Core signing without a second raw-secret copy; close the temporary Core Secret on success and failure" |
 | Jetpack | Jetpack/Publication/Source/Sign.jet | 137:5 | "package author signatures require Core's strict Ed25519 verification; no raw verifier or helper process" |
 | Jetpack | Jetpack/Publication/Tests/Index.jet | 265:5 | "the test owns the planted lock file it ages" |
-| Jetpack | Jetpack/Publication/Tests/Sign.jet | 165:5 | "each address names a live element of the owned secret buffer for its one volatile store (#6117)" |
+| Jetpack | Jetpack/Publication/Tests/Sign.jet | 164:5 | "original signing secret-erasure acceptance requires the Core volatile in-place wipe provider (#3597)" |
 | Jetpack | Jetpack/Store/Tests/ClosureGraph.jet | 59:13 | "the test owns the journal file it just wrote" |
 | Jetpack | Jetpack/Store/Tests/Seal.jet | 31:5 | "the store test owns the fixture file whose mtime it pins" |
 | Tools | Tools/agent-eval/domain-foundations/area-embedded/pkg/mmio_fixed.jet | 4:5 | "board.sensor_v1 GPIO register 0x40000100 is a volatile MMIO word" |
