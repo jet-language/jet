@@ -1074,8 +1074,14 @@ fn utc() -> Zone Never! {
     data :: ZoneData{transitions: [ZoneTransition]{}, infos: [ZoneInfo]{ZoneInfo{offset: 0, is_dst: false}}}
     Zone{name_value: "UTC", data: data}
 }
+// The fixed-offset zone a `±HH:MM` offset names; a zero offset is UTC.
+fn civil_fixed_zone(offset: Int) -> Zone Never! {
+    if offset == 0 -> return utc()
+    Zone{name_value: civil_offset(offset), data: ZoneData{transitions: [ZoneTransition]{}, infos: [ZoneInfo]{ZoneInfo{offset: offset, is_dst: false}}}}
+}
 fn zone(name: String) -[Env, FS.Read]> Zone TimeError! {
     if name == "UTC" || name == "Etc/UTC" || name == "Z" -> return Ok(utc())
+    if name.starts_with("+") || name.starts_with("-") -> return Ok(civil_fixed_zone(civil_parse_offset(name)))
     if name.contains("..") || name.starts_with("/") || name.starts_with("\\") -> return Err(TimeError{reason: "invalid time zone name: {name}"})
     rel := name.copy()
     loop rel.starts_with("posix/") -> rel = civil_slice(rel.bytes(), 6, rel.bytes().len())
@@ -1682,11 +1688,7 @@ fn civil_dyn_datetime(text: String) -> ZonedDateTime? Never! {
         return None
     }
     seconds :: civil_utc(new(year, month, day), civil_time(hour, minute, second, 0)) - offset
-    zone := utc()
-    if offset != 0 {
-        zone = Zone{name_value: civil_offset(offset), data: ZoneData{transitions: [ZoneTransition]{}, infos: [ZoneInfo]{ZoneInfo{offset: offset, is_dst: false}}}}
-    }
-    Val(zoned(civil_timestamp(seconds, nanos, second == 60), zone))
+    Val(zoned(civil_timestamp(seconds, nanos, second == 60), civil_fixed_zone(offset)))
 }
 
 impl DateTime {

@@ -263,6 +263,19 @@ fn display_float(value: Float, debug: Bool) -> I64 {
 
 #Export(c) fn jet_rt_float_debug(value: Float) -> I64 { display_float(value, true) }
 
+// A unit value's magnitude: the Float's Debug text without an incidental
+// trailing `.0` (`6.0` shows `6`; `2.5` and `1e16` keep their spelling).
+#Export(c) fn jet_fmt_quantity(value: Float) -> I64 {
+    text :: display_float(value, true)
+    length :: rt_text_len(text)
+    data :: rt_text_data(text)
+    if (length < I64{2} || rt_text_byte(data + length - I64{2}) != I64{46} || rt_text_byte(data + length - I64{1}) != I64{48}) -> return text
+    trimmed :: rt_text_builder_with_capacity(length - I64{2})
+    rt_text_append(trimmed, data, length - I64{2})
+    jet_rt_string_drop(text)
+    trimmed
+}
+
 // Raw binary32 ABI: upper bits are ignored; both exports return owned E4 text.
 // Rust f32 Display is fixed decimal without a mandatory .0; Debug preserves
 // .0 and uses scientific notation outside [f32(1e-4), f32(1e16)).

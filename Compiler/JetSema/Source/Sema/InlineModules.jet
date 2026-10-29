@@ -129,6 +129,10 @@ struct SemaInlineRewrite {
     // A module's own `use limits.[MAX]` over a file module alias.
     qualified: [String:SemaInlineTarget]
     locals: [String]
+    // Trait-bounded variadic functions -> their fixed parameter count; each
+    // call renames to its arity's function, whose arities are noted in order.
+    variadic: [String:Int]
+    variadic_arities: [String:[Int]]
     diagnostics: [Diagnostic]
 }
 
@@ -342,7 +346,7 @@ fn sema_inline_file_binds_module(file_imports: [ImportDecl], alias: String, name
 // `rewrite_inline_calls_expr` and the checker's inline-module call routes).
 
 fn sema_inline_rewrite_empty() -> SemaInlineRewrite Never! {
-    SemaInlineRewrite{types: [String:Type]{}, values: [String:Expr]{}, sibling_module: "", siblings: [String:Bool]{}, modules: [SemaInlineModuleSurface]{}, imported: [String:SemaInlineFunctionBinding]{}, qualified: [String:SemaInlineTarget]{}, locals: [String]{}, diagnostics: [Diagnostic]{}}
+    SemaInlineRewrite{types: [String:Type]{}, values: [String:Expr]{}, sibling_module: "", siblings: [String:Bool]{}, modules: [SemaInlineModuleSurface]{}, imported: [String:SemaInlineFunctionBinding]{}, qualified: [String:SemaInlineTarget]{}, locals: [String]{}, variadic: [String:Int]{}, variadic_arities: [String:[Int]]{}, diagnostics: [Diagnostic]{}}
 }
 
 fn sema_inline_is_local(rewrite: SemaInlineRewrite, name: String) -> Bool Never! {
@@ -644,6 +648,11 @@ fn sema_inline_rewrite_expr(rewrite: &SemaInlineRewrite, expression: Expr) -> Ex
                 rewrite.siblings.get(call.name) != None -> updated.name = sema_inline_member_name(rewrite.sibling_module, call.name)
                 !sema_inline_is_local(rewrite, call.name) && rewrite.imported.get(call.name) != None -> updated.name = (rewrite.imported.get(call.name) ?? panic("a bound inline import lost its row")).semantic_name
                 else -> {}
+            }
+            if !sema_inline_is_local(rewrite, call.name) {
+                if rewrite.variadic.get(call.name) == .Val(fixed) {
+                    if call.args.len() >= fixed -> updated.name = sema_inline_note_variadic_arity(&rewrite, call.name, call.args.len() - fixed)
+                }
             }
             updated.type_args = sema_inline_rewrite_types(rewrite, call.type_args)
             updated.args = sema_inline_rewrite_call_args(&rewrite, call.args)

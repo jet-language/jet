@@ -1207,6 +1207,12 @@ fn sema_type_builtin_bound_satisfied(graph: SemaRegistrationGraph, actual_resolv
 fn sema_type_builtin_bound_satisfied_nominal(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, bound_name: String) -> Bool? {
     // A caller that sees no declared `Close` reaches the same provider owners.
     if bound_name == "Close" && sema_type_provider_close_owner(nominal) -> return Val(true)
+    // `Renderable` is anything interpolatable: a nominal that shows through
+    // Display or Printable, or implements Renderable itself.
+    if bound_name == "Renderable" {
+        if sema_type_builtin_bound_satisfied_nominal(graph, nominal, "Display") == (Val(true)) -> return Val(true)
+        if sema_type_builtin_bound_satisfied_nominal(graph, nominal, "Printable") == (Val(true)) -> return Val(true)
+    }
     unresolved_impl := false
     loop module_index in 0..<graph.modules.len() {
         loop impl_index in 0..<graph.modules[module_index].impls.len() {
@@ -1264,6 +1270,9 @@ fn sema_type_bound_satisfied_at(graph: SemaRegistrationGraph, actual: Type, boun
     if structural != None -> return structural
     generic_satisfied := sema_type_generic_bound_satisfied(graph, actual_resolved, bound_name, caller, generic_params)
     if generic_satisfied != None -> return generic_satisfied
+    // An exact number (a `3.5` literal is a Decimal) interpolates through its
+    // Core Display, so it is Renderable even where core.math declares no row.
+    if bound_name == "Renderable" && actual_resolved == .Named(name) && (name == "Decimal" || name == "Fraction") -> return Val(true)
     // Rust `TraitRegistry::implements_trait`: a scalar satisfies the builtin
     // trait family by name even where Core declares the trait (`Encode`); a
     // scalar has no nominal row to carry an impl.

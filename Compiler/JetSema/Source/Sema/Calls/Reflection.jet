@@ -23,6 +23,44 @@ fn sema_call_reflection_leaf_name(name: String) -> String Never! {
     if dotted.len() > 0 -> dotted[dotted.len() - 1] else -> canonical
 }
 
+// `reflect.of(x)` carries its checked names to the IR as text after the
+// value: the type name and canonical path (`module.Type`, the ledger
+// `T.reflect()` reads), then each stored struct field's name, type name and
+// path.
+fn sema_call_reflection_name_args(ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> [TExpr] {
+    names :: sema_call_reflection_type_names(ty, environment, program)
+    args := [TExpr]{sema_call_reflection_text(names.type_name, span), sema_call_reflection_text(names.path, span)}
+    definition :: sema_http_route_find_struct(environment, program, ty, environment.module_identity) ?? return args
+    loop field in definition.fields {
+        if field.computed != None -> next
+        field_ty :: sema_shared_access_field_type(ty, field.name, environment, program, &scopes) ?? next
+        field_names :: sema_call_reflection_type_names(field_ty, environment, program)
+        &args.push(sema_call_reflection_text(field.name, span))
+        &args.push(sema_call_reflection_text(field_names.type_name, span))
+        &args.push(sema_call_reflection_text(field_names.path, span))
+    }
+    args
+}
+
+// A nominal type reflects as its declared name and `module.Name` path (the
+// module path as an identifier: `reflect-value.jet` is `reflect_value`); any
+// other type as its written spelling for both.
+fn sema_call_reflection_type_names(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> (type_name: String, path: String) {
+    if program.registration_graph == .Val(graph) {
+        if sema_type_resolve_nominal_row(graph, ty, environment.module_identity) == .Val(row) {
+            name :: graph.modules[row.module_index].nominals[row.row].symbol.name
+            if graph.modules[row.module_index].module_path == "" -> return (type_name: name, path: name)
+            return (type_name: name, path: "{graph.modules[row.module_index].module_path.replace("-", "_")}.{name}")
+        }
+    }
+    shown :: type_name(ty)
+    (type_name: shown, path: shown)
+}
+
+fn sema_call_reflection_text(text: String, span: Span) -> TExpr Never! {
+    sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: text}}}, span)
+}
+
 fn sema_call_reflection_secret_leaf(name: String) -> Bool Never! {
     leaf :: sema_call_reflection_leaf_name(name)
     leaf == "Secret" || leaf == "SigningKey" || leaf == "X25519SecretKey" || leaf == "SharedSecret"
@@ -80,7 +118,12 @@ fn sema_call_reflection_named_displayable(name: String, ty: Type, environment: S
     // S80 the Prelude-owned default error shows its message.
     if sema_call_reflection_core_shown(name) || sema_call_reflection_leaf_name(name) == "Err" -> return true
     if sema_call_reflection_synthetic_printable(name) -> return true
-    sema_call_reflection_bound(ty, "Display", environment, program) || sema_call_reflection_bound(ty, "Printable", environment, program)
+    if sema_call_reflection_bound(ty, "Display", environment, program) || sema_call_reflection_bound(ty, "Printable", environment, program) -> return true
+    // A generic parameter bound by `Renderable` is anything interpolatable.
+    loop param in environment.generic_params {
+        if param.name == name -> return sema_call_reflection_bound(ty, "Renderable", environment, program)
+    }
+    false
 }
 
 // Rust `TraitRegistry::register_synthetic_display_debug`: the Core values the

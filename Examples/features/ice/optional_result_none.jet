@@ -17,16 +17,13 @@ fn tail_none() -> [String]? Missing! {
 fn explicit_ok() -> String? Missing! {
     Ok(None)
 }
-fn run() {
-    first :: explicit_none() ?? panic("unexpected error")
-    second :: fallback_none(None) ?? panic("unexpected error")
-    third :: tail_none() ?? panic("unexpected error")
-    fourth :: explicit_ok() ?? panic("unexpected error")
-    present :: fallback_none(Val(7)) ?? panic("unexpected error")
-    print(first == None)
-    print(second == None)
-    print(third == None)
-    print(fourth == None)
-    claim :: present ?? panic("missing claim")
+// `??` handles absence and failure together, so the `None` checks test the
+// optional success directly and let `Missing` propagate.
+fn run() Missing! {
+    print(explicit_none() == .None)
+    print(fallback_none(None) == .None)
+    print(tail_none() == .None)
+    print(explicit_ok() == .None)
+    claim :: fallback_none(Val(7)) ?? panic("missing claim")
     print(claim.text)
 }

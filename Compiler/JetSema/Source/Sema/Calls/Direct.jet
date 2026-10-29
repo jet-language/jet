@@ -584,6 +584,7 @@ fn sema_call_try_term_core_call(record: CoreCallRecord, args: [CallArg], span: S
     if record.member == {
         "eprint" -> sema_call_check_term_eprint(record, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         "input" -> sema_call_check_term_input(record, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        "progress" -> if args.len() == 1 -> SemaDirectSpecialCheck{handled: false, value: None} else -> sema_call_check_term_progress_iter(args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         else -> SemaDirectSpecialCheck{handled: false, value: None}
     }
 }
@@ -636,6 +637,36 @@ fn sema_call_check_term_input(record: CoreCallRecord, args: [CallArg], span: Spa
     SemaDirectSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics)}
 }
 
+// Rust core_call.rs `("core.term", "progress")` over a sequence: a List or
+// Iter source with a description and an optional template is the
+// `progress_iter` row, which hands the items on as the loop pulls them. A
+// List is read through its `lazy()` iterator; a missing template is empty.
+fn sema_call_check_term_progress_iter(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    record :: core_call("core.term", "progress_iter") ?? return SemaDirectSpecialCheck{handled: false, value: None}
+    if args.len() > 3 {
+        &diagnostics.push(sema_error("E0104", span, "`progress` expects at most 3 arguments, got {args.len()}", "a progress source takes its items, a description and a template", "check the call to `progress`"))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    source :: sema_check_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    items :: sema_call_collections_list_as_iter(source, span)
+    is_iter :: if items.ty == .Apply(name, _) -> name == "Iter" else -> false
+    if !is_iter {
+        &diagnostics.push(sema_error("E0108", expr_span(args[0].expr), "`progress` with a description reads a List or an Iter, not `{type_name(items.ty)}`", "the described progress form reports each item the loop pulls", "pass the items to report, or call `progress(label)` alone"))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    result :: items.ty.copy()
+    if !sema_stmt_move_direct(args[0].expr, &state, scopes, "`progress`", &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+    values := [TExpr]{items}
+    loop index in 1..<args.len() {
+        text :: sema_check_expression(args[index].expr, Val(Type.String), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        &values.push(text)
+    }
+    loop values.len() < 3 -> &values.push(sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{}}, span))
+    if !sema_call_core_record_effects(record, span, [Type]{}, result, TFailureCarrier.Infallible, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+    value :: sema_call_core_tree(record, values, span, [Type]{}, [Bool]{false, false, false}, result, TFailureCarrier.Infallible, None, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    SemaDirectSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics)}
+}
+
 // Rust core_call.rs `("core.reflect", "of")`: the compiler-owned reflection
 // intrinsic has no typed Source contract. Its one argument is legal wherever
 // `"{x}"` interpolation is (or a Unit), and the call yields the runtime
@@ -651,7 +682,12 @@ fn sema_call_try_reflect_core_call(record: CoreCallRecord, args: [CallArg], span
     if !sema_call_reflection_validate_value(checked, expr_span(args[0].expr), environment, program, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     result :: Type.Named{name: "Value"}
     if !sema_call_core_record_effects(record, span, [Type]{}, result, TFailureCarrier.Infallible, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
-    SemaDirectSpecialCheck{handled: true, value: sema_call_core_tree(record, [TExpr]{checked}, span, [Type]{}, [Bool]{false}, result, TFailureCarrier.Infallible, expected, environment, program, &diagnostics)}
+    names :: sema_call_reflection_name_args(checked.ty, span, environment, program, &scopes)
+    values := [TExpr]{checked}
+    &values.extend(names)
+    widen_to_vec :: loop _ in values -> false
+    value := sema_tree_node(result, TExprKind.CoreCall{record: record, args: values, source_span: span, type_args: [Type]{}, widen_to_vec: widen_to_vec, fallibility: TFailureCarrier.Infallible}, span)
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
 // `panic(message)` stops with one String message; the stop is a `Never`
@@ -842,6 +878,9 @@ fn sema_call_core_direct_checked(call: Call, expected: Type?, environment: SemaS
         member = imported.item ?? return SemaDirectSpecialCheck{handled: false, value: None}
     }
     module_name :: sema_call_core_import_module(environment, program, alias) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+    if sema_call_core_math_exact_crossing(module_name, member, call.args, environment, program, &scopes, &state, &tail_store, &context) == .Val(crossed) {
+        return sema_call_try_core_direct_call(Call{name: call.name, name_span: call.name_span, type_args: call.type_args, args: crossed}, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
     guard := sema_call_try_scope_guard(module_name, member, alias, call.name_span, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if guard.handled -> return guard
     mount := sema_call_try_ui_mount(module_name, member, alias, call.name_span, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)

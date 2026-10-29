@@ -226,8 +226,7 @@ fn sema_expression_measurement_inner(ty: Type, environment: SemaScopeEnvironment
     if name != "Measurement" && name != "core.units::Measurement" && !(core_source_owns_type(name) && core_identity_is(name, "core.units", "Measurement")) -> return None
     nominal_row :: sema_type_resolve_nominal_row(graph, resolved, environment.module_identity)
     if nominal_row == .Val(row) {
-        owner :: graph.modules[row.module_index].nominals[row.row]
-        if owner.symbol.module_name != "core.units" || owner.symbol.name != "Measurement" -> return None
+        if graph.modules[row.module_index].module_name != "core.units" || graph.modules[row.module_index].nominals[row.row].symbol.name != "Measurement" -> return None
     }
     if nominal_row == None && name != "Measurement" && !core_source_owns_type(name) -> return None
     if resolved == {
@@ -238,6 +237,11 @@ fn sema_expression_measurement_inner(ty: Type, environment: SemaScopeEnvironment
     }
     }
     None
+}
+
+fn sema_expression_is_float_measurement(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    inner :: sema_expression_measurement_inner(ty, environment, program) ?? return false
+    inner == Type.Float
 }
 
 fn sema_expression_measurement_source_call(function: String, values: [TExpr], result_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr? {

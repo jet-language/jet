@@ -88,13 +88,14 @@ fn ir_precise_source_family(name: String, owner: String, prefix: String) -> Bool
 }
 
 // A precise operation (Int.abs and the Fraction, Decimal and Complex
-// registry; Float has no source helper) lowers to its `Core/Math/Math.jet`
-// helper by name from sites with no keyed call: registered
-// `core.math.fraction`/`decimal` constructors, constants and synthesized
-// operations. That closed registry is rooted, not every `__` helper in the
-// file.
+// registry; Float has no source helper) or a fallible unit conversion lowers
+// to its `Core/Math/Math.jet` helper by name from sites with no keyed call:
+// registered `core.math.fraction`/`decimal` constructors, constants,
+// synthesized operations and checked unit conversions. That closed registry
+// is rooted, not every `__` helper in the file.
 fn ir_precise_source_name(name: String) -> Bool Never! {
     if (ir_precise_source_helper("Int", "abs") ?? "") == name -> return true
+    if name == ir_unit_conversion_helper(false) || name == ir_unit_conversion_helper(true) -> return true
     ir_precise_source_family(name, "Fraction", "__fraction_") || ir_precise_source_family(name, "Decimal", "__decimal_") || ir_precise_source_family(name, "Complex", "__complex_")
 }
 
@@ -291,12 +292,13 @@ fn ir_core_reach_expr_children(tree: BodyTree, expression: Int, pending: &[Int])
 }
 
 // The `Core/Math/Math.jet` helper one checked expression lowers to by name: a
-// precise operation, `Int.abs`, or a registered
-// `core.math.fraction`/`decimal` constructor.
+// precise operation, `Int.abs`, a registered `core.math.fraction`/`decimal`
+// constructor, or a fallible unit conversion.
 fn ir_precise_expr_helper(expression: BodyNode) -> String? Never! {
     if expression.kind == {
+        .UnitConvert(_, _, _, rounding, fallible, _, _, _) -> if fallible -> Val(ir_unit_conversion_helper(rounding != None)) else -> None
         .PreciseBuiltin(owner, operation, _) -> ir_precise_source_helper(owner, operation)
-        .MathBuiltin(owner, operation, _) -> if owner == "Int" -> ir_precise_source_helper(owner, operation) else -> None
+        .MathBuiltin(owner, operation, _) -> if owner == "Int" || owner == "Complex" -> ir_precise_source_helper(owner, operation) else -> None
         .CoreCall(record, _, _, _, _, _) -> {
             canonical :: ir_canonical_core_record(record)
             if canonical.module_name != "core.math" -> return None

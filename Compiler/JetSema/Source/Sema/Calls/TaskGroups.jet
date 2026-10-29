@@ -74,7 +74,6 @@ struct SemaTaskGroupState {
     in_spawn: Bool
     spawn_group_floor: Int
     scoped_loan_read_reported: Bool
-    current_binding: String?
     time_effects: [TEffectSpan]
     // (Rust `current_binding_name` / `task_spawn_binding_name`):
     // the binding whose initializer is being checked, and the binding a task
@@ -97,7 +96,6 @@ fn sema_taskgroup_state_init() -> SemaTaskGroupState Never! {
         in_spawn: false,
         spawn_group_floor: 0,
         scoped_loan_read_reported: false,
-        current_binding: None,
         time_effects: [TEffectSpan]{},
     }
 }
@@ -131,7 +129,6 @@ fn sema_taskgroup_state_snapshot(source: SemaTaskGroupState) -> SemaTaskGroupSta
         in_spawn: source.in_spawn,
         spawn_group_floor: source.spawn_group_floor,
         scoped_loan_read_reported: source.scoped_loan_read_reported,
-        current_binding: source.current_binding,
         time_effects: effects,
         binding_name: source.binding_name,
         spawn_binding: source.spawn_binding,
@@ -201,12 +198,6 @@ fn sema_taskgroup_active_lexical_name(state: SemaTaskGroupState) -> String? {
     None
 }
 
-fn sema_taskgroup_set_current_binding(context: &SemaCheckContext, name: String?) -> String? {
-    previous := context.taskgroups.current_binding
-    context.taskgroups.current_binding = name
-    previous
-}
-
 // (Rust `report_unsendable` in a task spawn context): an E1102 at a
 // task capture or result records the task binding, so `.detach()` reports the
 // right refusal: a view borrow is E1106, any other sendability failure E1103.
@@ -238,11 +229,11 @@ fn sema_taskgroup_merge_time_effects(context: &SemaCheckContext, effects: [TEffe
     }
 }
 
-fn sema_taskgroup_register_spawn(context: &SemaCheckContext, group_name: String, span: Span) Never! {
+fn sema_taskgroup_register_spawn(context: &SemaCheckContext, group_name: String, binding: String?, span: Span) Never! {
     index :: sema_taskgroup_stack_index(context.taskgroups, group_name) ?? return
     if context.taskgroups.in_spawn && index < context.taskgroups.spawn_group_floor -> return
     &context.taskgroups.stack[index].pending.push(SemaTaskGroupPendingSpawn{
-        binding: context.taskgroups.current_binding,
+        binding: binding,
         span: span,
     })
 }
@@ -424,10 +415,10 @@ fn sema_taskgroup_task_element(ty: Type) -> Type? {
 }
 
 fn sema_taskgroup_check_discarded_arguments(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
-    saved_binding := context.taskgroups.current_binding
-    context.taskgroups.current_binding = None
+    saved_binding := context.taskgroups.binding_name
+    context.taskgroups.binding_name = None
     loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    context.taskgroups.current_binding = saved_binding
+    context.taskgroups.binding_name = saved_binding
 }
 
 fn sema_taskgroup_check_arity(args: [CallArg], expected: Int, label: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
@@ -667,10 +658,10 @@ fn sema_taskgroup_check_branches(args: [CallArg], span: Span, method: String, al
         &diagnostics.push(sema_error("E1112", expr_span(args[0].expr), "`{method}` needs at least one task branch", "a task-group combinator cannot wait for an empty set", "give it one or more task branches"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    saved_binding := context.taskgroups.current_binding
-    context.taskgroups.current_binding = None
+    saved_binding := context.taskgroups.binding_name
+    context.taskgroups.binding_name = None
     branches := sema_check_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    context.taskgroups.current_binding = saved_binding
+    context.taskgroups.binding_name = saved_binding
     values :: branches ?? return SemaMethodSpecialCheck{handled: true, value: None}
     result_ty := Type?{None}
     if values.ty == {
@@ -722,13 +713,11 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: Type?, envi
     if !sema_taskgroup_check_arity(args, 1, "task", span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     saved_in_spawn := context.taskgroups.in_spawn
     saved_floor := context.taskgroups.spawn_group_floor
-    saved_binding := context.taskgroups.current_binding
     saved_binding_name := context.taskgroups.binding_name
     saved_spawn_binding := context.taskgroups.spawn_binding
     saved_spawn_body := context.taskgroups.spawn_body
     context.taskgroups.in_spawn = true
     context.taskgroups.spawn_group_floor = context.taskgroups.stack.len()
-    context.taskgroups.current_binding = None
     context.taskgroups.spawn_binding = saved_binding_name
     context.taskgroups.binding_name = None
     context.taskgroups.spawn_body = if args[0].expr == {.Lambda(_, _) -> true else -> false}
@@ -736,7 +725,6 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: Type?, envi
     context.taskgroups.spawn_body = saved_spawn_body
     context.taskgroups.in_spawn = saved_in_spawn
     context.taskgroups.spawn_group_floor = saved_floor
-    context.taskgroups.current_binding = saved_binding
     context.taskgroups.binding_name = saved_binding_name
     context.taskgroups.spawn_binding = saved_spawn_binding
     body :: checked_body ?? return SemaMethodSpecialCheck{handled: true, value: None}
@@ -773,7 +761,7 @@ fn sema_taskgroup_check_spawn(args: [CallArg], span: Span, expected: Type?, envi
     if group != None {
         index :: sema_taskgroup_active_index(context.taskgroups) ?? 0
         group_name := context.taskgroups.stack[index].name
-        sema_taskgroup_register_spawn(&context, group_name, span)
+        sema_taskgroup_register_spawn(&context, group_name, saved_binding_name, span)
     }
     checked := sema_expr_expected(value, expected, environment, program, &diagnostics)
     return SemaMethodSpecialCheck{handled: true, value: checked}

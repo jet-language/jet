@@ -606,19 +606,33 @@ fn parser_report_bare_variant(state: &JetParserState, token: Token, payload: Str
     parser_add_error_code(&state, "E0367", token.span, "pattern `{name}` needs a leading `.`", "match patterns take a leading dot so the name isn't read as a variable or call", "write `.{name}{payload}`")
 }
 
+// Rust `pattern_item`: one payload slot, list item or map value. A bare
+// lowercase name binds, `_` skips, `lo..hi` tests a range, a nested shape
+// tests inside, and any other expression is a value compared with `==`.
 fn parser_parse_pattern_slot(state: &JetParserState, depth: Int) -> PatSlot {
     start :: parser_current(&state)
     // S31: a leading-dot pattern nests inside the payload slot.
     if start.kind == TOKEN_DOT -> return PatSlot.Nested{pattern: parser_parse_pattern(&state, depth + 1, true).pattern}
-    if start.kind == TOKEN_INT {
+    if start.kind == TOKEN_INT && parser_kind_at(&state, 1) == TOKEN_DOT_DOT && parser_kind_at(&state, 2) == TOKEN_INT {
         parser_bump(&state)
         low :: parser_integer(state, start) ?? 0
-        parser_expect(&state, TOKEN_DOT_DOT, "`..` after the lower bound of a range pattern")
-        high :: parser_expect(&state, TOKEN_INT, "an integer at the end of a pattern range")
+        parser_bump(&state)
+        high :: parser_bump(&state)
         return PatSlot.Range{lo: low, hi: parser_integer(state, high) ?? low}
     }
-    name :: parser_expect_name(&state, "in a variant binding")
-    if parser_value(state, name) == "_" -> PatSlot.Wildcard else -> PatSlot.Bind{name: parser_value(state, name), span: name.span}
+    if start.kind == TOKEN_IDENT && parser_bind_slot_end(parser_kind_at(&state, 1)) {
+        name :: parser_value(state, start)
+        if name == "_" {
+            parser_bump(&state)
+            return PatSlot.Wildcard
+        }
+        if !parser_pascal_name(name) && !parser_constant_name(name) {
+            parser_bump(&state)
+            return PatSlot.Bind{name: name, span: start.span}
+        }
+    }
+    if parser_struct_field_nested_pattern_ahead(&state) -> return PatSlot.Nested{pattern: parser_parse_struct_field_nested_pattern(&state, depth + 1).pattern}
+    PatSlot.Value{value: parser_parse_expression_no_struct_lit(&state, depth + 1).expr}
 }
 
 // In a condition, where `{` usually opens the body,

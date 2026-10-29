@@ -976,7 +976,7 @@ fn jetc_verify_output(input: JetcFd, writer: jetc.Writer, length: Int) FileCrypt
     // Exact equality also verifies every original recipient stanza, ephemeral
     // key and header tag, without retaining writer ephemeral private material.
     if !constant_time_equal_bytes(prefix.bytes, writer.prefix) -> return Err(.OpenFailed)
-    reader := jetc.Reader{header_hash: writer.header_hash, key: Secret{bytes: writer.key.bytes.copy()},
+    reader := jetc.ChunkReader{header_hash: writer.header_hash, key: Secret{bytes: writer.key.bytes.copy()},
         nonce_prefix: writer.nonce_prefix, remaining: metadata.len - writer.prefix.len(), index: 1, final: false}
     loop reader.remaining > 0 {
         jetc_cancel_checkpoint()

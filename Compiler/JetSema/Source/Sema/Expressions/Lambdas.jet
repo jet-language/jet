@@ -1881,7 +1881,6 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
             checked_block :: sema_check_statements(statement_body, statement_return, environment, program, &lambda_scopes, &lambda_state, &tail_store, &lambda_context, &diagnostics, 0)
             lambda_context.value_tail_span = saved_value_tail
             sema_ownership_keep_share_found(&state, lambda_state)
-            sema_single_use_check_scope_end(lambda_state, &diagnostics)
             if !checked_block.complete {
                 loop reason in lambda_context.incomplete_reasons -> sema_check_unsupported(&context, "closure body: {reason}")
                 return None
@@ -1904,6 +1903,9 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
                     body_result_ty = sema_expression_lambda_block_value_type(checked_body, body_expected ?? Type.Named{name: "Unit"})
                 }
             }
+            // The duty check closes the body after its tail line, which may
+            // consume a binding (`^task.join()`).
+            sema_single_use_check_scope_end(lambda_state, &diagnostics)
             executable = Val(TLambdaBody.Block{body: checked_body})
         }
     }

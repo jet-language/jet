@@ -8,6 +8,7 @@ use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
     CORE_SOURCE_OWNED_ROWS,
+    CallArg,
     CallContractRow,
     CallablePolicy,
     CallablePolicyChain,
@@ -69,7 +70,10 @@ use jet_foundation.[
     UnitScaleProvenance,
     UserPolicyDecl,
     Variant,
+    Stmt,
     VariantPayload,
+    ast_empty_call_arg_flags,
+    ast_func,
     ast_program,
     compiler_apply_order,
     compiler_threads_admit,
@@ -100,6 +104,7 @@ use jet_foundation.[
     type_identity_key,
     type_name,
     type_with_effective_fn_returns,
+    unit_family_distinct_defs,
     CModule,
     TCompilerBuiltin,
 ]
@@ -2089,6 +2094,16 @@ fn sema_registration_add_root(module_row: &SemaRegistrationModule, item: Item, s
             if value.is_persist -> &module_row.persist_roots.push(symbol.id.key)
             &module_row.constants.push(SemaRegistrationConstant{symbol: symbol, declaration: value, ty: value.ty, identity_key: "{module_row.module_identity}:{value.name}"})
         }
+        // Each member type a unit family declared in this module mints
+        // registers as its own distinct declaration, so `Usd.from_float(...)`
+        // and `CelsiusPoint` resolve. The standard core.units families every
+        // module sees keep their one canonical owner.
+        .UnitFamily(family) -> {
+            if family.resolved_owner == Val("core.units") -> return true
+            loop definition in unit_family_distinct_defs(family) {
+                _ := sema_registration_add_root(&module_row, Item.Distinct{value: definition}, source_file, source_origin, source_segments, &diagnostics)
+            }
+        }
         else -> {}
     }
     true
@@ -2513,10 +2528,15 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     // Each rewrite below updates the program in place and leaves it
     // untouched (uncopied) when it has nothing to rewrite.
     sema_generic_modules_expand(&module_row.program, module_row.module_identity, templates)
+    // Ordered multi-head declarations fold into one ordinary enum pattern
+    // table before inline lifting and registration see the items.
+    sema_head_patterns_fold_items(&module_row.program.items, &diagnostics)
     // Inline modules give their members one lifted identity
     // (types beside the module, top-level member functions by member name)
     // and resolve `module.f(...)` and `use module.[f]` before registration.
     module_row.inline_bindings = sema_inline_modules_lower(&module_row.program, &diagnostics)
+    // Trait-bounded variadics become one closed function per called arity.
+    sema_variadic_bounds_expand(&module_row.program)
     sema_policy_materialize(&module_row.program, policies, module_row.module_identity, module_row.source_file, module_row.source_origin, module_row.source_segments, &diagnostics)
     // Root `comptime loop` declarations expand first, so every
     // generated impl, conversion, and test registers as a written item.
@@ -2556,6 +2576,8 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     // S62 delegation and D-LIB2 default bodies become written impl methods
     // before registration (TraitImpls.jet).
     sema_trait_impls_synthesize(&module_row.program.items)
+    // A return type naming a fallible alias is written as its expansion.
+    sema_registration_expand_fallible_aliases(&module_row.program.items)
     row_source_file :: module_row.source_file.copy()
     row_source_origin :: module_row.source_origin.copy()
     row_source_segments :: module_row.source_segments.copy()
@@ -2618,6 +2640,77 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     sema_attach_diagnostic_source_locations(&diagnostics, 0, module_row.source_segments)
     loop diagnostic in diagnostics -> &reported.push(diagnostic)
     ^module_row
+}
+
+// A transparent alias of a fallible type (`alias Parsed<T> :: T AppError!`)
+// carries the function's failure contract, which is read from the written
+// return type: a return type naming such an alias is written as its
+// expansion, so `-> Parsed<Int>` has the contract of `-> Int AppError!`.
+fn sema_registration_expand_fallible_aliases(items: &[Item]) Never! {
+    aliases := [TypeAliasDef]{}
+    loop item in items {
+        if item == .TypeAlias(definition) {
+            if definition.target == .Result(_, _) -> &aliases.push(definition)
+        }
+    }
+    if aliases.len() == 0 -> return
+    loop index in 0..<items.len() {
+        replacement := Item?{None}
+        if items[index] == {
+            .Func(definition) -> {
+                if sema_registration_fallible_alias_return(aliases, definition.return_type) == .Val(expanded) {
+                    updated := definition
+                    updated.return_type = Val(expanded)
+                    replacement = Val(Item.Func{value: updated})
+                }
+            }
+            .Impl(definition) -> {
+                updated := definition
+                if sema_registration_fallible_alias_methods(aliases, &updated.methods) -> replacement = Val(Item.Impl{value: updated})
+            }
+            .Struct(definition) -> {
+                updated := definition
+                changed := sema_registration_fallible_alias_methods(aliases, &updated.methods)
+                loop block_index in 0..<updated.trait_impls.len() {
+                    if sema_registration_fallible_alias_methods(aliases, &updated.trait_impls[block_index].methods) -> changed = true
+                }
+                if changed -> replacement = Val(Item.Struct{value: updated})
+            }
+            else -> {}
+        }
+        if replacement == .Val(item) -> items[index] = item
+    }
+}
+
+fn sema_registration_fallible_alias_methods(aliases: [TypeAliasDef], methods: &[Func]) -> Bool Never! {
+    changed := false
+    loop index in 0..<methods.len() {
+        if sema_registration_fallible_alias_return(aliases, methods[index].return_type) == .Val(expanded) {
+            methods[index].return_type = Val(expanded)
+            changed = true
+        }
+    }
+    changed
+}
+
+fn sema_registration_fallible_alias_return(aliases: [TypeAliasDef], return_type: Type?) -> Type? Never! {
+    written :: return_type ?? return None
+    name := ""
+    args := [Type]{}
+    if written == {
+        .Named(head) -> name = head
+        .Apply(head, applied) -> {
+            name = head
+            args = applied
+        }
+        else -> return None
+    }
+    loop alias in aliases {
+        if alias.name != name || alias.type_params.len() != args.len() -> next
+        names :: loop parameter in alias.type_params -> parameter.name
+        return Val(sema_inference_substitute_type(alias.target, names, args))
+    }
+    None
 }
 
 // A compiler thread is admitted for at least this many bytes of module
@@ -3547,7 +3640,7 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
                 resolved :: sema_registration_resolve_export(graph, export_index, item.original, source_identity, source_package, [String]{})
                 if resolved == {
                     .Val(export) -> {
-                        duplicate :: sema_registration_module_has_name(graph.modules[module_index], local) || sema_registration_module_has_import_name(graph.modules[module_index], local) || (namespace_binds && sema_registration_namespace_owner(graph, module_index, local) != None)
+                        duplicate :: sema_registration_module_has_name(graph.modules[module_index], local) || sema_registration_module_has_import_name(graph.modules[module_index], local) || (namespace_binds && sema_registration_namespace_function_owner(graph, module_index, local))
                         if {
                             duplicate -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_defined_twice(local, "imported names share the module namespace", declaration.span))
                             else -> {
@@ -3570,7 +3663,7 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
                         // Foreign (no Jet declaration); calls route through
                         // the module's Core call records (Calls/Direct.jet).
                         if (target_name == "core" || target_name.starts_with("core.")) && core_module_has_member(target_name, item.original) && sema_registration_direct_symbol(graph.modules[target_index], item.original) == None {
-                            if sema_registration_module_has_name(graph.modules[module_index], local) || sema_registration_module_has_import_name(graph.modules[module_index], local) || (namespace_binds && sema_registration_namespace_owner(graph, module_index, local) != None) {
+                            if sema_registration_module_has_name(graph.modules[module_index], local) || sema_registration_module_has_import_name(graph.modules[module_index], local) || (namespace_binds && sema_registration_namespace_function_owner(graph, module_index, local)) {
                                 sema_registration_push_graph_diagnostic(&graph, module_index, sema_defined_twice(local, "imported names share the module namespace", declaration.span))
                                 next
                             }
@@ -3596,7 +3689,7 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
                 }
             }
             else -> {
-                duplicate :: sema_registration_module_has_name(graph.modules[module_index], declaration.alias) || sema_registration_module_has_import_name(graph.modules[module_index], declaration.alias) || (namespace_binds && sema_registration_namespace_owner(graph, module_index, declaration.alias) != None)
+                duplicate :: sema_registration_module_has_name(graph.modules[module_index], declaration.alias) || sema_registration_module_has_import_name(graph.modules[module_index], declaration.alias)
                 if {
                     duplicate -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_defined_twice(declaration.alias, "imported names share the module namespace", declaration.alias_span))
                     else -> {
@@ -3614,8 +3707,9 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
 // A package name binds after the module's own declarations
 // and the imports registered before the package names (`import_count` of
 // them), as Rust consults `namespace_owner` last. A name one of those already
-// binds stays theirs; the package binding of it is refused (E0105), reported
-// at the declaration or import that holds the name.
+// binds stays theirs. A declaration of a package name is refused (E0105), and
+// so is an imported item of a package function's name; a module alias or an
+// imported type shadows the package name, as in Rust.
 fn sema_registration_namespace_collisions(graph: &SemaRegistrationGraph, module_index: Int, import_count: Int) {
     if graph.modules[module_index].namespace_slot < 0 -> return
     loop position in 0..<graph.modules[module_index].symbols.len() {
@@ -3626,12 +3720,20 @@ fn sema_registration_namespace_collisions(graph: &SemaRegistrationGraph, module_
     }
     loop import_index in 0..<import_count {
         loop binding_index in 0..<graph.modules[module_index].imports[import_index].bindings.len() {
+            if graph.modules[module_index].imports[import_index].bindings[binding_index].symbol.kind == .Import -> next
             local :: graph.modules[module_index].imports[import_index].bindings[binding_index].local
-            if sema_registration_namespace_owner(graph, module_index, local) == None -> next
+            if !sema_registration_namespace_function_owner(graph, module_index, local) -> next
             span :: graph.modules[module_index].imports[import_index].declaration.span
             sema_registration_push_graph_diagnostic(&graph, module_index, sema_defined_twice(local, "imported names share the module namespace", span))
         }
     }
+}
+
+// Whether `name` is a package function another member of `module_index`'s
+// package declares: an imported item of that name is ambiguous (E0105).
+fn sema_registration_namespace_function_owner(graph: SemaRegistrationGraph, module_index: Int, name: String) -> Bool Never! {
+    owner :: sema_registration_namespace_owner(graph, module_index, name) ?? return false
+    graph.modules[owner.module_index].symbols[owner.row].kind == .Function
 }
 
 fn sema_registration_module_has_nominal_name(module_row: SemaRegistrationModule, name: String) -> Bool Never! {

@@ -718,6 +718,19 @@ fn sema_failure_callee_inferred_never(callee: SemaFailureCallee?, program: SemaP
     false
 }
 
+// A generator's declared `Stream<T>` is its protocol, not a failure carrier:
+// its call only builds the stream, so it never enters the failure rail.
+fn sema_failure_callee_is_generator(callee: SemaFailureCallee?, program: SemaProgramTables) -> Bool Never! {
+    found :: callee ?? return false
+    if program.registration_graph == .Val(graph) {
+        row :: sema_registration_callable_row(graph, found.key) ?? return false
+        if row == .Function(module_index, index) {
+            if graph.modules[module_index].functions[index].declaration.return_type == .Val(.Apply(name, args)) -> return name == "Stream" && args.len() == 1
+        }
+    }
+    false
+}
+
 // E2404: no declared route from the operand's failure domain to the caller's.
 // The `failure-domain:` detail keys the bundle-level one-root dedupe.
 fn sema_failure_domain_mismatch(expr: Expr?, span: Span, source: Type, target: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext) -> Diagnostic {
@@ -783,6 +796,7 @@ fn sema_expression_propagation_conversion(operand_ty: Type, source_expr: Expr?, 
                 return Val(TTryConvert.Never)
             }
             callee :: sema_failure_callee(source_expr, environment, program, scopes)
+            if sema_failure_callee_is_generator(callee, program) -> return Val(TTryConvert.Never)
             sema_failure_record_edge(callee, &context)
             // A callback whose expected return row is a plain value has no
             // failure route of its own: an unannotated callee's failure is an

@@ -245,10 +245,7 @@ fn sema_value_method_precise_result(owner: String, method: String, argc: Int) ->
 }
 
 fn sema_value_method_precise(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    owner :: if sema_expr_unwrap_tag(receiver_value.ty) == {
-        .Named(name) -> name
-        else -> ""
-    }
+    owner :: sema_expr_precise_name(sema_expr_unwrap_tag(receiver_value.ty)) ?? ""
     result :: sema_value_method_precise_result(owner, method, args.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_value_method_check_labels(method, args, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     typed := [TExpr]{}

@@ -92,8 +92,14 @@ fn sema_call_collections_check_argument(argument: CallArg, method: String, index
     return None
 }
 
+// A total callback value (`T Never!`, a lambda bound without an expected
+// type) cannot fail: the adapter takes its success, as a direct call does.
 fn sema_call_collections_callback_return(value: TExpr) -> Type Never! {
-    sema_call_signature_return(value.ty) ?? Type.Named{name: "Unit"}
+    returned :: sema_call_signature_return(value.ty) ?? Type.Named{name: "Unit"}
+    if returned == .Result(ok, err) {
+        if err == (Type.Named{name: "Never"}) -> return ok.copy()
+    }
+    returned
 }
 
 // A callable value handed to an eager sequence adapter keeps its checked

@@ -999,7 +999,7 @@ fn sema_call_distinct_conversion_failed() -> SemaMethodSpecialCheck Never! {
 // type's bounds here (E0135); a runtime value makes the range type's
 // conversion fallible, which a binding then reports (E0136).
 fn sema_call_try_distinct_conversion(owner: Symbol, display_name: String, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    facts :: sema_expr_distinct_facts(Type.Named{name: display_name}, environment, program, &scopes) ?? return sema_call_distinct_conversion_unhandled()
+    facts :: sema_expr_declared_distinct_facts(Type.Named{name: display_name}, true, environment, program, &scopes) ?? return sema_call_distinct_conversion_unhandled()
     numeric_row :: sema_call_distinct_numeric_row(facts.base, method)
     if numeric_row == None && (sema_expr_is_numeric(facts.base) || method != sema_call_distinct_base_method(facts.base)) -> return sema_call_distinct_conversion_unhandled()
     callee :: "{display_name}.{method}"

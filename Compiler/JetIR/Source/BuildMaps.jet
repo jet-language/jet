@@ -545,6 +545,67 @@ fn ir_map_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: S
         ir_release(&m, &b, other)
         return Val(target)
     }
+    // `contains_value(v)`: whether an entry's value equals `v`.
+    if symbol == "jet_map_contains_value" {
+        if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(&b, span, "Map contains_value without a value"))
+        needle :: ir_adapt(&m, p, &b, operands[1], shape.value.ty, span)
+        if ir_failed(b) -> return Val(-1)
+        bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+        found :: ir_temp(&m, &b, bool_row)
+        ir_emit(&b.f, IROp.Const, found, 0, -1, -1, b.line)
+        walk :: ir_walk_open(&m, &b, subject, shape.entry)
+        value :: ir_load_at(&m, &b, walk.item, shape.value.offset, shape.value.ty)
+        same :: ir_route_equal(&m, p, &b, value, needle, span)
+        if ir_failed(b) -> return Val(-1)
+        ir_open_if(&b.f, same, b.line)
+        ir_emit(&b.f, IROp.Const, found, 1, -1, -1, b.line)
+        ir_emit(&b.f, IROp.Br, -1, 2, -1, -1, b.line)
+        ir_end(&b.f, b.line)
+        ir_walk_close(&m, &b, walk)
+        ir_release(&m, &b, needle)
+        return Val(found)
+    }
+    // `pop_first()`: the least key's entry leaves the map, its value the
+    // result; None when the map is empty.
+    if symbol == "jet_map_pop_first" {
+        if operands.len() != 1 -> return Val(ir_fail_slot(&b, span, "Map pop_first with {operands.len() - 1} arguments"))
+        option_row :: ir_value_type(&m, p, Type.Option{inner: shape.value_ty}) ?? return Val(ir_fail_slot(&b, span, "map builtin {symbol} result"))
+        result :: ir_fresh_temp(&m, &b, option_row)
+        ir_option_none(&m, &b, result)
+        length :: ir_load_word(&m, &b, subject, 0)
+        zero :: ir_word_const(&m, &b, 0)
+        present :: ir_bool_op(&m, &b, IROp.Gt, length, zero)
+        ir_open_if(&b.f, present, b.line)
+        data :: ir_load_word(&m, &b, subject, 16)
+        least :: ir_load_at(&m, &b, data, shape.key.offset, shape.key.ty)
+        probe :: ir_copy_value(&m, p, &b, least, span)
+        removed :: ir_map_call(&m, p, &b, row, "map.remove", [Int]{subject, probe}, option_row)
+        ir_option_set(&m, &b, result, removed)
+        ir_release(&m, &b, probe)
+        ir_end(&b.f, b.line)
+        return Val(result)
+    }
+    // `slice(keys)`: a new Map of copies of the entries under the listed keys.
+    if symbol == "jet_map_slice_keys_kernel" {
+        if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(&b, span, "Map slice without keys"))
+        keys :: operands[1]
+        keys_name :: ir_type_name(m.types[b.f.slot_type[keys]].ty)
+        if ir_list_element(&m, p, b, keys) != Val(shape.key.ty) -> return Val(ir_fail_slot(&b, span, "Map slice keys of {keys_name}"))
+        target :: ir_list_empty(&m, &b, row)
+        word_row :: ir_word_row(&m)
+        walk :: ir_walk_open(&m, &b, keys, shape.key.ty)
+        found :: ir_map_call(&m, p, &b, row, "map.find", [Int]{subject, walk.item}, word_row)
+        none :: ir_word_const(&m, &b, 0)
+        held :: ir_bool_op(&m, &b, IROp.Ge, found, none)
+        ir_open_if(&b.f, held, b.line)
+        entries :: ir_load_word(&m, &b, subject, 16)
+        entry :: ir_element_address(&m, &b, entries, found, shape.stride)
+        value :: ir_load_at(&m, &b, entry, shape.value.offset, shape.value.ty)
+        ir_map_set(&m, p, &b, row, target, walk.item, value)
+        ir_end(&b.f, b.line)
+        ir_walk_close(&m, &b, walk)
+        return Val(target)
+    }
     keyed :: symbol == "jet_map_has_key" || symbol == "jet_map_get_opt" || symbol == "jet_map_pop_kernel"
     if !keyed && symbol != "jet_map_insert" && symbol != "jet_map_add_new" -> return None
     if operands.len() < 2 || operands[1] < 0 -> return Val(ir_fail_slot(&b, span, "map builtin {symbol} without a key"))

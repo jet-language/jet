@@ -1674,6 +1674,13 @@ IR_RUNTIME_ROUTES :: comptime { [IRRoute]{
     IRRoute{symbol: "jet_rt_string_data", export: "jet_rt_string_data", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Text}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Word}},
     IRRoute{symbol: "jet_process_stream_line_bytes_raw", export: "jet_process_stream_line_bytes_raw", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "ProcessStdoutStream"}}, result: IRRouteResult.Result{ok: IRRouteCarrier.List{elem: IRRouteCarrier.Word}, err: IRRouteCarrier.Handle{name: "IOError"}}},
     IRRoute{symbol: "jet_std::JetCondition::new", export: "jet_rt_native_condition_new", native_lists: true, params: [IRRouteCarrier]{}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetCondition"}}},
+    IRRoute{symbol: "JetBitSet::new", export: "jet_rt_native_bits_new", native_lists: true, params: [IRRouteCarrier]{}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetBitSet"}}},
+    IRRoute{symbol: "jet_jit_reflect_type_name", export: "jet_rt_record_get_jet_reflect_value_type_name", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "Value"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Text}},
+    IRRoute{symbol: "jet_jit_reflect_path", export: "jet_rt_record_get_jet_reflect_value_path", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "Value"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Text}},
+    IRRoute{symbol: "jet_jit_reflect_display", export: "jet_rt_record_get_jet_reflect_value_display", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "Value"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Text}},
+    IRRoute{symbol: "jet_jit_reflect_fields", export: "jet_rt_reflect_value_fields", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "Value"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.List{elem: IRRouteCarrier.Handle{name: "Field"}}}},
+    IRRoute{symbol: "jet_jit_reflect_field_name", export: "jet_rt_record_get_jet_reflect_field_name", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "Field"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Text}},
+    IRRoute{symbol: "jet_jit_reflect_field_value", export: "jet_rt_record_get_jet_reflect_field_value", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "Field"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "Value"}}},
 } }
 
 // #5001: each table below is read in place, and its lookup is keyed: the
@@ -1694,6 +1701,7 @@ fn ir_key_row(keys: [String], rows: [Int], key: String) -> Int? Never! {
 }
 
 IR_RUNTIME_ROUTE_KEYS :: comptime { [String]{
+    "JetBitSet::new",
     "JetByteBuffer::capacity",
     "JetByteBuffer::from",
     "JetByteBuffer::to_bytes",
@@ -2087,6 +2095,12 @@ IR_RUNTIME_ROUTE_KEYS :: comptime { [String]{
     "jet_iter_indexes",
     "jet_iter_string_rsplit",
     "jet_iter_string_split",
+    "jet_jit_reflect_display",
+    "jet_jit_reflect_field_name",
+    "jet_jit_reflect_field_value",
+    "jet_jit_reflect_fields",
+    "jet_jit_reflect_path",
+    "jet_jit_reflect_type_name",
     "jet_job_queue_publish_parts",
     "jet_job_queue_sleep_ms",
     "jet_journey_frame_text",
@@ -3323,6 +3337,7 @@ IR_RUNTIME_ROUTE_KEYS :: comptime { [String]{
     "service_authority_validate_directory",
 } }
 IR_RUNTIME_ROUTE_KEY_ROWS :: comptime { [Int]{
+    1627,
     1389,
     1390,
     1391,
@@ -3716,6 +3731,12 @@ IR_RUNTIME_ROUTE_KEY_ROWS :: comptime { [Int]{
     246,
     247,
     248,
+    1630,
+    1632,
+    1633,
+    1631,
+    1629,
+    1628,
     249,
     250,
     251,

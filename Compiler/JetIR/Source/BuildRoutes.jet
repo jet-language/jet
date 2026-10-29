@@ -761,6 +761,7 @@ fn ir_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int
     if operation == .PriorityQueueFrom || ir_priority_queue_element(receiver_ty) != None {
         return ir_priority_queue_builtin(&m, p, &b, ty, operation, subject, operands, span)
     }
+    if ir_tally_element(receiver_ty) != None -> return ir_tally_builtin(&m, p, &b, ty, operation, subject, operands, span)
     if ir_map_entry_type(receiver_ty) != None {
         map_route :: ir_builtin_route_plan(operation, receiver_ty, ty, ir_failure_carrier_for_type(ty))
         if ir_map_builtin(&m, p, &b, ty, map_route.symbol, subject, operands, span) == .Val(result) -> return result
@@ -780,14 +781,14 @@ fn ir_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int
                 ir_release(&m, &b, subject)
                 return empty
             }
-            .Push -> {
+            .Push | .DequePushBack -> {
                 if operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(&b, span, "push without a value")
                 value :: ir_adapt(&m, p, &b, operands[1], element, span)
                 if ir_failed(b) -> return -1
                 ir_list_push(&m, p, &b, subject, element, value)
                 return -1
             }
-            .Reverse -> {
+            .Reverse | .DequeReverse -> {
                 ir_list_reverse(&m, &b, subject, element)
                 return -1
             }
@@ -847,13 +848,14 @@ fn ir_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int
                 return selected
             }
             .Indexed -> return ir_list_indexed(&m, p, &b, ty, subject, element, span)
+            .ListMinMax -> return ir_list_min_max(&m, p, &b, ty, subject, element, span)
             .SortDesc -> return ir_list_sort(&m, p, &b, subject, element, true, span)
             .RemoveList(_, mode) -> {
                 if operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(&b, span, "remove without an operand")
                 if mode == .Dynamic -> return ir_fail_slot(&b, span, "remove with a dynamic mode")
                 return ir_list_remove(&m, p, &b, ty, subject, element, operands[1], mode == .Slot, span)
             }
-            .JoinSep -> {
+            .JoinSep | .DequeJoin -> {
                 if operands.len() != 2 -> return ir_fail_slot(&b, span, "join without a separator")
                 separator :: operands[1]
                 pointer_row :: ir_pointer_row(&m)
@@ -871,6 +873,38 @@ fn ir_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int
                 joined :: ir_runtime(&m, &b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
                 loop operand in operands -> ir_release(&m, &b, operand)
                 return joined
+            }
+            .DequePushFront -> {
+                if operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(&b, span, "push_front without a value")
+                front :: ir_int_constant(&m, &b, int_row, 0)
+                ir_list_insert(&m, p, &b, subject, element, front, operands[1], span)
+                return -1
+            }
+            .DequePopFront -> return ir_queue_pop_front(&m, p, &b, ty, subject, element, span)
+            .DequePopBack -> return ir_list_pop(&m, p, &b, ty, subject, element, span)
+            .DequePeekFront | .DequePeekBack | .DequeContains | .DequeGet -> {
+                symbol :: if operation == {
+                    .DequePeekFront -> "jet_list_first"
+                    .DequePeekBack -> "jet_list_last"
+                    .DequeContains -> "jet_list_contains"
+                    else -> "jet_list_get_opt"
+                }
+                result :: ir_list_route(&m, p, &b, symbol, operands, ty, span)
+                loop operand in operands -> ir_release(&m, &b, operand)
+                return result
+            }
+            .DequeToList -> return ir_copy_value(&m, p, &b, subject, span)
+            .DequeCapacity -> return ir_load_at(&m, &b, subject, 8, int_row)
+            .DequeDelete -> {
+                if operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(&b, span, "delete without a value")
+                removed_ty :: Type.Option{inner: m.types[element].ty.copy()}
+                removed :: ir_list_remove(&m, p, &b, removed_ty, subject, element, operands[1], false, span)
+                ir_release(&m, &b, removed)
+                return -1
+            }
+            .DequeSplit -> {
+                if operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(&b, span, "split without a position")
+                return ir_queue_split(&m, p, &b, ty, subject, element, operands[1], span)
             }
             else -> {}
         }
@@ -894,6 +928,138 @@ fn ir_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int
         }
     }
     ir_builtin_route(&m, p, &b, ty, receiver_ty, operation, operands, span)
+}
+
+// `q.pop_front()`: the first element moves into an Option box and the rest
+// move down one slot; None for an empty Queue.
+fn ir_queue_pop_front(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int, row: Int, span: Span) -> Int Never! {
+    option_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    result :: ir_fresh_temp(&m, &b, option_row)
+    ir_option_none(&m, &b, result)
+    length :: ir_load_word(&m, &b, list, 0)
+    zero :: ir_word_const(&m, &b, 0)
+    nonempty :: ir_bool_op(&m, &b, IROp.Gt, length, zero)
+    ir_open_if(&b.f, nonempty, b.line)
+    stride :: ir_list_stride(m, row)
+    width :: ir_word_const(&m, &b, stride)
+    data :: ir_load_word(&m, &b, list, 16)
+    taken :: ir_element_option(&m, p, &b, data, row, option_row, true)
+    ir_option_set(&m, &b, result, taken)
+    one :: ir_word_const(&m, &b, 1)
+    rest :: ir_word_op(&m, &b, IROp.Sub, length, one)
+    moved :: ir_word_op(&m, &b, IROp.Mul, rest, width)
+    second :: ir_word_op(&m, &b, IROp.Add, data, width)
+    _ :: ir_runtime(&m, &b, "jet_rt_mem_move", [Int]{data, second, moved}, -1)
+    ir_emit(&b.f, IROp.Store, -1, list, 0, rest, b.line)
+    ir_end(&b.f, b.line)
+    result
+}
+
+// `q.split(at)`: the elements from `at` on move, in order, into a new Queue
+// and the receiver keeps those before it; `at` clamps into 0...len, an exact
+// Int past the native range included.
+fn ir_queue_split(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int, row: Int, at: Int, span: Span) -> Int Never! {
+    result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    int_row :: ir_type_row(&m, Type.Int) ?? 0
+    word_row :: ir_word_row(&m)
+    length :: ir_load_word(&m, &b, list, 0)
+    length_int :: ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{length}, int_row)
+    zero_int :: ir_int_constant(&m, &b, int_row, 0)
+    cut :: ir_temp(&m, &b, word_row)
+    ir_emit(&b.f, IROp.Copy, cut, length, -1, -1, b.line)
+    below :: ir_bool_op(&m, &b, IROp.Lt, at, zero_int)
+    ir_open_if(&b.f, below, b.line)
+    ir_emit(&b.f, IROp.Const, cut, 0, -1, -1, b.line)
+    ir_else(&b.f, b.line)
+    inside :: ir_bool_op(&m, &b, IROp.Lt, at, length_int)
+    ir_open_if(&b.f, inside, b.line)
+    native :: ir_native_index(&m, &b, at, span)
+    if ir_failed(b) -> return -1
+    ir_emit(&b.f, IROp.Copy, cut, native, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+    ir_release(&m, &b, length_int)
+    // The tail, windowed in place, moves into the new Queue.
+    count :: ir_word_op(&m, &b, IROp.Sub, length, cut)
+    window :: ir_out_slot(&m, &b, 3)
+    zero :: ir_word_const(&m, &b, 0)
+    ir_emit(&b.f, IROp.Store, -1, window, 0, count, b.line)
+    ir_emit(&b.f, IROp.Store, -1, window, 8, zero, b.line)
+    data :: ir_load_word(&m, &b, list, 16)
+    stride :: ir_list_stride(m, row)
+    tail :: ir_element_address(&m, &b, data, cut, stride)
+    ir_emit(&b.f, IROp.Store, -1, window, 16, tail, b.line)
+    out :: ir_list_empty(&m, &b, result_row)
+    ir_list_append(&m, p, &b, out, row, window, true)
+    ir_emit(&b.f, IROp.Store, -1, list, 0, cut, b.line)
+    out
+}
+
+// A Tally builtin over its ordered Map<T, Int> carrier: `add(x)` counts `x`
+// once more, `remove(x)` once less (its entry goes at zero, an absent `x`
+// stays absent), `count(x)` is its count (0 when absent), `has(x)` whether it
+// is counted, and `len()` / `is_empty()` read the distinct elements.
+fn ir_tally_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, operation: TBuiltinOp, tally: Int, operands: [Int], span: Span) -> Int Never! {
+    row :: b.f.slot_type[tally]
+    shape :: ir_map_shape(&m, p, row) ?? return ir_fail_slot(&b, span, "Tally builtin {ir_builtin_name(operation)} on {ir_type_name(m.types[row].ty)}")
+    int_row :: ir_type_row(&m, Type.Int) ?? 0
+    if operation == .LenList || operation == .IsEmpty {
+        length :: ir_load_word(&m, &b, tally, 0)
+        zero :: ir_word_const(&m, &b, 0)
+        distinct :: if operation == .IsEmpty -> ir_bool_op(&m, &b, IROp.Eq, length, zero) else -> ir_load_at(&m, &b, tally, 0, int_row)
+        ir_release(&m, &b, tally)
+        return distinct
+    }
+    keyed :: operation == .BagAdd || operation == .BagRemove || operation == .BagCount || operation == .BagHas
+    if !keyed || operands.len() != 2 || operands[1] < 0 -> return ir_fail_slot(&b, span, "Tally builtin {ir_builtin_name(operation)}")
+    key :: ir_adapt(&m, p, &b, operands[1], shape.key.ty, span)
+    if ir_failed(b) -> return -1
+    word_row :: ir_word_row(&m)
+    found :: ir_map_call(&m, p, &b, row, "map.find", [Int]{tally, key}, word_row)
+    zero :: ir_word_const(&m, &b, 0)
+    present :: ir_bool_op(&m, &b, IROp.Ge, found, zero)
+    if operation == .BagHas {
+        ir_release(&m, &b, key)
+        ir_release(&m, &b, tally)
+        return present
+    }
+    result := -1
+    if operation == .BagCount {
+        result = ir_fresh_temp(&m, &b, int_row)
+        ir_emit(&b.f, IROp.Const, result, 0, -1, -1, b.line)
+    }
+    ir_open_if(&b.f, present, b.line)
+    entries :: ir_load_word(&m, &b, tally, 16)
+    entry :: ir_element_address(&m, &b, entries, found, shape.stride)
+    count :: ir_load_at(&m, &b, entry, shape.value.offset, shape.value.ty)
+    one :: ir_int_constant(&m, &b, shape.value.ty, 1)
+    if operation == .BagCount {
+        ir_emit(&b.f, IROp.Copy, result, count, -1, -1, b.line)
+    } else if operation == .BagAdd {
+        next :: ir_temp(&m, &b, shape.value.ty)
+        ir_emit(&b.f, IROp.Add, next, count, one, IR_OVERFLOW_TRAP, b.line)
+        ir_emit(&b.f, IROp.Store, -1, entry, shape.value.offset, next, b.line)
+    } else {
+        last :: ir_bool_op(&m, &b, IROp.Le, count, one)
+        ir_open_if(&b.f, last, b.line)
+        option_row :: ir_value_type(&m, p, Type.Option{inner: shape.value_ty}) ?? return ir_fail_slot(&b, span, "Tally remove result")
+        removed :: ir_map_call(&m, p, &b, row, "map.remove", [Int]{tally, key}, option_row)
+        ir_release(&m, &b, removed)
+        ir_else(&b.f, b.line)
+        next :: ir_temp(&m, &b, shape.value.ty)
+        ir_emit(&b.f, IROp.Sub, next, count, one, IR_OVERFLOW_TRAP, b.line)
+        ir_emit(&b.f, IROp.Store, -1, entry, shape.value.offset, next, b.line)
+        ir_end(&b.f, b.line)
+    }
+    if operation == .BagAdd {
+        ir_else(&b.f, b.line)
+        first :: ir_int_constant(&m, &b, shape.value.ty, 1)
+        ir_map_set(&m, p, &b, row, tally, key, first)
+    }
+    ir_end(&b.f, b.line)
+    ir_release(&m, &b, key)
+    if operation == .BagCount -> ir_release(&m, &b, tally)
+    result
 }
 
 // `list.indexed()`: an Iter over the (index, item) pair of each element, in
@@ -939,11 +1105,13 @@ fn ir_builtin_route(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
         }
     }
     if operation == {
-        .ListMinMax | .Indexed | .MapToList | .IterSplit | .ToString
+        .ListMinMax | .Indexed | .MapToList | .ToString
         | .RemoveList(_, _) -> return ir_fail_slot(&b, span, "builtin {ir_builtin_name(operation)}")
         else -> {}
     }
-    if checked_builtin_mutates_receiver(operation) -> return ir_fail_slot(&b, span, "mutating builtin {ir_builtin_name(operation)} on {receiver_ty}")
+    // A runtime handle receiver is written through the value behind it (a
+    // HandleMut route operand); no other receiver has a write route here.
+    if checked_builtin_mutates_receiver(operation) && !ir_is_handle(m, b.f.slot_type[operands[0]]) -> return ir_fail_slot(&b, span, "mutating builtin {ir_builtin_name(operation)} on {receiver_ty}")
     route :: ir_builtin_route_plan(operation, receiver_ty, ty, ir_failure_carrier_for_type(ty))
     if route.arity != operands.len() -> return ir_fail_slot(&b, span, "builtin {ir_builtin_name(operation)} with {operands.len()} of {route.arity} operands")
     if ir_list_value_builtin(&m, p, &b, ty, route.symbol, operands, span) == .Val(expanded) -> return expanded
@@ -1337,6 +1505,7 @@ fn ir_closure_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
     receiver_ty :: ir_ty(p, b, receiver)
     if operation == .OptionMap -> return ir_option_map(&m, p, &b, ty, receiver, args, span)
     if ir_lazy_closure_receiver(receiver_ty, operation) -> return ir_lazy_closure_method(&m, p, &b, ty, receiver, operation, args, span)
+    if operation == .EachMap || operation == .MapAny || operation == .MapAll || operation == .MapFilter || operation == .MapMap || operation == .MapFold || operation == .BagAny -> return ir_closure_map_method(&m, p, &b, ty, receiver, operation, args, span)
     // A Float fold whose step is exactly `(acc, x) -> acc + x` adds in the
     // same fixed lane tree as `sum`, with the seed in lane 0.
     if (operation == .Fold || operation == .ViewFold) && args.len() == 2 && ir_float_add_fold_step(p, b, args[1]) {
@@ -1392,6 +1561,87 @@ fn ir_float_add_fold_step(p: IRProgram, b: IRBuilder, callback: Int) -> Bool Nev
         }
     }
     false
+}
+
+// The Map closure method `operation`: each entry, in key order, lends its
+// key and value to the closure. `filter` keeps copies of the accepted
+// entries, `map` pairs a copy of each key with the closure's value, and
+// `fold(initial, f)` threads the accumulator through `f(acc, key, value)`.
+fn ir_closure_map_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: TClosureOp, args: [Int], span: Span) -> Int Never! {
+    map :: ir_expr(&m, p, &b, receiver)
+    if ir_failed(b) || map < 0 -> return -1
+    row :: b.f.slot_type[map]
+    shape :: ir_map_shape(&m, p, row) ?? return ir_fail_slot(&b, span, "closure method {ir_closure_op_name(operation)} on {ir_type_name(m.types[row].ty)}")
+    operands := [Int]{}
+    loop arg in args {
+        slot :: ir_expr(&m, p, &b, arg)
+        if ir_failed(b) -> return -1
+        &operands.push(slot)
+    }
+    if operands.len() == 0 -> return ir_fail_slot(&b, span, "closure method without a closure")
+    callback :: operands[operands.len() - 1]
+    callback_ty :: ir_ty(p, b, args[args.len() - 1])
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    result_row :: if ir_unit_type(ty) -> -1 else -> ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    result := -1
+    if operation == .MapFold {
+        if operands.len() != 2 -> return ir_fail_slot(&b, span, "fold without an initial value")
+        result = ir_temp(&m, &b, result_row)
+        initial :: ir_adapt(&m, p, &b, operands[0], result_row, span)
+        seed :: if ir_kind_of(m, b, initial) == .Aggregate && !b.fresh[initial] -> ir_copy_value(&m, p, &b, initial, span) else -> initial
+        ir_store(&m, p, &b, result, seed)
+    } else if operation == .MapAny || operation == .MapAll || operation == .BagAny {
+        result = ir_temp(&m, &b, bool_row)
+        ir_emit(&b.f, IROp.Const, result, if operation == .MapAll -> 1 else -> 0, -1, -1, b.line)
+    } else if operation == .MapFilter || operation == .MapMap {
+        result = ir_list_empty(&m, &b, result_row)
+    }
+    mapped_shape :: if operation == .MapMap -> ir_map_shape(&m, p, result_row) ?? return ir_fail_slot(&b, span, "map result {ir_type_name(ty)}") else -> shape
+    walk :: ir_walk_open(&m, &b, map, shape.entry)
+    key :: ir_load_at(&m, &b, walk.item, shape.key.offset, shape.key.ty)
+    value :: ir_load_at(&m, &b, walk.item, shape.value.offset, shape.value.ty)
+    if operation == {
+        .EachMap -> { _ :: ir_call_closure(&m, &b, callback, [Int]{key, value}, -1) }
+        .MapAny | .MapAll | .BagAny -> {
+            // A Tally's `any` lends each counted element alone.
+            lent :: if operation == .BagAny -> [Int]{key} else -> [Int]{key, value}
+            test :: ir_call_callback(&m, p, &b, callback, callback_ty, lent, bool_row, span)
+            decided := test
+            if operation == .MapAll {
+                no :: ir_int_constant(&m, &b, bool_row, 0)
+                decided = ir_bool_op(&m, &b, IROp.Eq, test, no)
+            }
+            ir_open_if(&b.f, decided, b.line)
+            ir_emit(&b.f, IROp.Const, result, if operation == .MapAll -> 0 else -> 1, -1, -1, b.line)
+            ir_emit(&b.f, IROp.Br, -1, 2, -1, -1, b.line)
+            ir_end(&b.f, b.line)
+        }
+        .MapFilter -> {
+            keep :: ir_call_callback(&m, p, &b, callback, callback_ty, [Int]{key, value}, bool_row, span)
+            ir_open_if(&b.f, keep, b.line)
+            ir_map_set(&m, p, &b, result_row, result, key, value)
+            ir_end(&b.f, b.line)
+        }
+        .MapMap -> {
+            mapped :: ir_call_callback(&m, p, &b, callback, callback_ty, [Int]{key, value}, mapped_shape.value.ty, span)
+            ir_map_set(&m, p, &b, result_row, result, key, mapped)
+        }
+        else -> {
+            next_value :: ir_call_callback(&m, p, &b, callback, callback_ty, [Int]{result, key, value}, result_row, span)
+            if ir_has_drop(m, b, result) -> ir_emit(&b.f, IROp.Drop, -1, result, -1, -1, b.line)
+            if ir_kind_of(m, b, result) == .Aggregate {
+                ir_emit(&b.f, IROp.CopyBytes, -1, result, next_value, m.types[result_row].size, b.line)
+                b.fresh[next_value] = false
+            } else {
+                ir_store(&m, p, &b, result, next_value)
+            }
+        }
+    }
+    ir_walk_close(&m, &b, walk)
+    if operation == .MapFold -> b.fresh[result] = true
+    // The method only lends its closures.
+    loop slot in operands -> ir_release_closure(&m, &b, slot)
+    result
 }
 
 // The List closure method `operation` over `list` (elements `element`) with
@@ -1491,7 +1741,7 @@ fn ir_closure_list_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, l
             seed :: if ir_kind_of(m, b, initial) == .Aggregate && !b.fresh[initial] -> ir_copy_value(&m, p, &b, initial, span) else -> initial
             ir_store(&m, p, &b, accumulator, seed)
             walk :: ir_walk_open(&m, &b, list, element)
-            next_value :: ir_call_closure(&m, &b, callback, [Int]{accumulator, walk.item}, result_row)
+            next_value :: ir_call_callback(&m, p, &b, callback, callback_ty, [Int]{accumulator, walk.item}, result_row, span)
             // The step's value replaces the accumulator's, whose old value
             // ends; an aggregate's bytes move into the accumulator's own
             // storage (rebound to the step's result storage, the next step
@@ -2602,6 +2852,21 @@ fn ir_route_inline(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inpu
     if name == "std::collections::BinaryHeap::new" {
         return Val(ir_priority_queue_new(&m, p, &b, inputs, result, span))
     }
+    // `Queue.new()` / `Tally.new()`: an empty List / Map carrier.
+    if (name == "std::collections::VecDeque::new" && ir_queue_element(result) != None) || (name == "std::collections::HashMap::new" && ir_tally_element(result) != None) {
+        row :: ir_value_type(&m, p, result) ?? return Val(ir_type_fail(&b, span, result))
+        return Val(ir_list_empty(&m, &b, row))
+    }
+    // `Queue.init(xs)`: the List's elements, front to back; a List the
+    // caller still holds is copied.
+    if name == "jet_deque_from" {
+        row :: ir_value_type(&m, p, result) ?? return Val(ir_type_fail(&b, span, result))
+        if inputs.len() != 1 || inputs[0] < 0 -> return Val(ir_fail_slot(&b, span, "Queue.init with {inputs.len()} arguments"))
+        source_name :: ir_type_name(m.types[b.f.slot_type[inputs[0]]].ty)
+        if b.f.slot_type[inputs[0]] != row -> return Val(ir_fail_slot(&b, span, "Queue.init of {source_name}"))
+        if b.fresh[inputs[0]] -> return Val(inputs[0])
+        return Val(ir_copy_value(&m, p, &b, inputs[0], span))
+    }
     if name == "std::collections::HashSet::new" || name == "std::collections::BTreeSet::new" {
         return Val(ir_set_new(&m, p, &b, inputs, result, span))
     }
@@ -2638,7 +2903,7 @@ fn ir_route_inline(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inpu
         return Val(-1)
     }
     strings :: name == "jet_unicode_split_once" || name == "jet_unicode_cut_last"
-    lists :: name == "jet_list_get_opt" || name == "jet_list_first" || name == "jet_list_last" || name == "jet_list_slice" || name == "jet_list_index_of" || name == "jet_list_sum" || name == "jet_list_sum_fixed_f64" || name == "jet_list_product" || name == "jet_list_contains" || name == "jet_list_equal" || name == "jet_list_replace" || name == "jet_list_starts_with" || name == "jet_list_ends_with" || name == "jet_list_min" || name == "jet_list_max" || name == "jet_list_flatten"
+    lists :: name == "jet_list_get_opt" || name == "jet_list_first" || name == "jet_list_last" || name == "jet_list_slice" || name == "jet_list_index_of" || name == "jet_list_sum" || name == "jet_list_sum_fixed_f64" || name == "jet_list_product" || name == "jet_list_contains" || name == "jet_list_equal" || name == "jet_list_replace" || name == "jet_list_starts_with" || name == "jet_list_ends_with" || name == "jet_list_min" || name == "jet_list_max" || name == "jet_list_flatten" || name == "jet_list_count" || name == "jet_list_counts" || name == "jet_list_union" || name == "jet_list_intersection" || name == "jet_list_difference" || name == "jet_list_random"
     if !strings && !lists -> return None
     loop slot in inputs {
         if slot < 0 -> return Val(ir_fail_slot(&b, span, "runtime route {name} argument without a value"))
@@ -2656,14 +2921,15 @@ fn ir_route_inline(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inpu
 // `xs.product()`: the exact Int sum from 0 / product from 1, in order; `xs ==
 // ys` (list_equal): equal lengths and elements; `xs.replace(i, v)`: a copy
 // whose in-range slot holds `v`, an index outside the List dropping `v`;
-// `xs.starts_with(ys)` / `xs.ends_with(ys)`, `xs.min()` / `xs.max()` and
-// `xs.flatten()` below.
+// `xs.starts_with(ys)` / `xs.ends_with(ys)`, `xs.min()` / `xs.max()`,
+// `xs.flatten()`, `xs.count(item)`, `xs.counts()`, `xs.union(ys)` /
+// `xs.intersection(ys)` / `xs.difference(ys)` and `xs.random()` below.
 fn ir_list_route(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inputs: [Int], result: Type, span: Span) -> Int Never! {
     list :: inputs[0]
     shown :: ir_type_name(m.types[b.f.slot_type[list]].ty)
     row :: ir_list_element(&m, p, b, list) ?? return ir_fail_slot(&b, span, "runtime route {name} on {shown}")
     reducing :: name == "jet_list_sum" || name == "jet_list_product"
-    single :: reducing || name == "jet_list_sum_fixed_f64" || name == "jet_list_first" || name == "jet_list_last" || name == "jet_list_min" || name == "jet_list_max" || name == "jet_list_flatten"
+    single :: reducing || name == "jet_list_sum_fixed_f64" || name == "jet_list_first" || name == "jet_list_last" || name == "jet_list_min" || name == "jet_list_max" || name == "jet_list_flatten" || name == "jet_list_counts" || name == "jet_list_random"
     expected :: if single -> 1 else if name == "jet_list_replace" || name == "jet_list_slice" -> 3 else -> 2
     if inputs.len() != expected -> return ir_fail_slot(&b, span, "runtime route {name} takes {expected} arguments, not {inputs.len()}")
     stride :: ir_list_stride(m, row)
@@ -2702,6 +2968,34 @@ fn ir_list_route(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inputs
     }
     if name == "jet_list_min" || name == "jet_list_max" -> return ir_list_extreme(&m, p, &b, list, row, result_row, name == "jet_list_max", span)
     if name == "jet_list_flatten" -> return ir_list_flatten(&m, p, &b, list, row, result_row, span)
+    if name == "jet_list_counts" -> return ir_list_counts(&m, p, &b, list, row, result_row, span)
+    if name == "jet_list_random" -> return ir_list_random(&m, p, &b, list, row, result_row)
+    if name == "jet_list_union" || name == "jet_list_intersection" || name == "jet_list_difference" {
+        other :: inputs[1]
+        if ir_list_element(&m, p, b, other) != Val(row) {
+            other_name :: ir_type_name(m.types[b.f.slot_type[other]].ty)
+            return ir_fail_slot(&b, span, "runtime route {name} of {shown} and {other_name}")
+        }
+        return ir_list_combine(&m, p, &b, name, list, other, row, result_row, span)
+    }
+    if name == "jet_list_count" {
+        needle :: ir_adapt(&m, p, &b, inputs[1], row, span)
+        if ir_failed(b) -> return -1
+        total :: ir_fresh_temp(&m, &b, result_row)
+        ir_emit(&b.f, IROp.Const, total, 0, -1, -1, b.line)
+        one :: ir_int_constant(&m, &b, result_row, 1)
+        walk :: ir_walk_open(&m, &b, list, row)
+        same :: ir_route_equal(&m, p, &b, walk.item, needle, span)
+        if ir_failed(b) -> return -1
+        ir_open_if(&b.f, same, b.line)
+        next_total :: ir_fresh_temp(&m, &b, result_row)
+        ir_emit(&b.f, IROp.Add, next_total, total, one, IR_OVERFLOW_TRAP, b.line)
+        ir_emit(&b.f, IROp.Move, total, next_total, -1, -1, b.line)
+        b.fresh[next_total] = false
+        ir_end(&b.f, b.line)
+        ir_walk_close(&m, &b, walk)
+        return total
+    }
     found :: ir_fresh_temp(&m, &b, result_row)
     ir_option_none(&m, &b, found)
     if name == "jet_list_get_opt" || name == "jet_list_first" || name == "jet_list_last" {
@@ -2746,6 +3040,108 @@ fn ir_list_route(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inputs
     ir_emit(&b.f, IROp.Br, -1, 2, -1, -1, b.line)
     ir_end(&b.f, b.line)
     ir_walk_close(&m, &b, walk)
+    found
+}
+
+// Whether an element of `list` (element row `row`) equals `item`.
+fn ir_list_holds(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, item: Int, span: Span) -> Int Never! {
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    found :: ir_temp(&m, &b, bool_row)
+    ir_emit(&b.f, IROp.Const, found, 0, -1, -1, b.line)
+    walk :: ir_walk_open(&m, &b, list, row)
+    same :: ir_route_equal(&m, p, &b, walk.item, item, span)
+    if ir_failed(b) -> return -1
+    ir_open_if(&b.f, same, b.line)
+    ir_emit(&b.f, IROp.Const, found, 1, -1, -1, b.line)
+    ir_emit(&b.f, IROp.Br, -1, 2, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_walk_close(&m, &b, walk)
+    found
+}
+
+// `xs.union(ys)`: copies of `xs`, then of each element of `ys` not yet in the
+// result; `xs.intersection(ys)`: copies of the elements of `xs` in `ys`, each
+// once; `xs.difference(ys)`: copies of the elements of `xs` not in `ys`. All
+// keep `xs`'s order.
+fn ir_list_combine(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, list: Int, other: Int, row: Int, result_row: Int, span: Span) -> Int Never! {
+    out :: ir_list_empty(&m, &b, result_row)
+    walk :: ir_walk_open(&m, &b, list, row)
+    if name == "jet_list_union" {
+        ir_list_push(&m, p, &b, out, row, walk.item)
+    } else {
+        shared :: ir_list_holds(&m, p, &b, other, row, walk.item, span)
+        if ir_failed(b) -> return -1
+        ir_open_if(&b.f, shared, b.line)
+        if name == "jet_list_intersection" {
+            seen :: ir_list_holds(&m, p, &b, out, row, walk.item, span)
+            if ir_failed(b) -> return -1
+            ir_open_if(&b.f, seen, b.line)
+            ir_else(&b.f, b.line)
+            ir_list_push(&m, p, &b, out, row, walk.item)
+            ir_end(&b.f, b.line)
+        } else {
+            ir_else(&b.f, b.line)
+            ir_list_push(&m, p, &b, out, row, walk.item)
+        }
+        ir_end(&b.f, b.line)
+    }
+    ir_walk_close(&m, &b, walk)
+    if name == "jet_list_union" {
+        added :: ir_walk_open(&m, &b, other, row)
+        seen :: ir_list_holds(&m, p, &b, out, row, added.item, span)
+        if ir_failed(b) -> return -1
+        ir_open_if(&b.f, seen, b.line)
+        ir_else(&b.f, b.line)
+        ir_list_push(&m, p, &b, out, row, added.item)
+        ir_end(&b.f, b.line)
+        ir_walk_close(&m, &b, added)
+    }
+    out
+}
+
+// `xs.counts()`: each distinct element (a copy) under the number of times it
+// occurs; the Map keeps its keys ascending.
+fn ir_list_counts(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, result_row: Int, span: Span) -> Int Never! {
+    shape :: ir_map_shape(&m, p, result_row) ?? return ir_fail_slot(&b, span, "counts into {ir_type_name(m.types[result_row].ty)}")
+    word_row :: ir_word_row(&m)
+    result :: ir_list_empty(&m, &b, result_row)
+    zero :: ir_word_const(&m, &b, 0)
+    one :: ir_int_constant(&m, &b, shape.value.ty, 1)
+    walk :: ir_walk_open(&m, &b, list, row)
+    found :: ir_map_call(&m, p, &b, result_row, "map.find", [Int]{result, walk.item}, word_row)
+    present :: ir_bool_op(&m, &b, IROp.Ge, found, zero)
+    ir_open_if(&b.f, present, b.line)
+    entries :: ir_load_word(&m, &b, result, 16)
+    entry :: ir_element_address(&m, &b, entries, found, shape.stride)
+    count :: ir_load_at(&m, &b, entry, shape.value.offset, shape.value.ty)
+    next :: ir_temp(&m, &b, shape.value.ty)
+    ir_emit(&b.f, IROp.Add, next, count, one, IR_OVERFLOW_TRAP, b.line)
+    ir_emit(&b.f, IROp.Store, -1, entry, shape.value.offset, next, b.line)
+    ir_else(&b.f, b.line)
+    ir_map_set(&m, p, &b, result_row, result, walk.item, one)
+    ir_end(&b.f, b.line)
+    ir_walk_close(&m, &b, walk)
+    result
+}
+
+// `xs.random()`: a copy of the element the runtime's fixed-seed draw picks
+// (one LCG step from 0xC0FFEE42, its high bits modulo the length), None when
+// the List is empty.
+fn ir_list_random(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, result_row: Int) -> Int Never! {
+    found :: ir_fresh_temp(&m, &b, result_row)
+    ir_option_none(&m, &b, found)
+    length :: ir_load_word(&m, &b, list, 0)
+    zero :: ir_word_const(&m, &b, 0)
+    present :: ir_bool_op(&m, &b, IROp.Gt, length, zero)
+    ir_open_if(&b.f, present, b.line)
+    draw :: ir_word_const(&m, &b, 341392534)
+    index :: ir_word_op(&m, &b, IROp.Rem, draw, length)
+    elements :: ir_load_word(&m, &b, list, 16)
+    stride :: ir_list_stride(m, row)
+    address :: ir_element_address(&m, &b, elements, index, stride)
+    copied :: ir_element_option(&m, p, &b, address, row, result_row, false)
+    ir_option_set(&m, &b, found, copied)
+    ir_end(&b.f, b.line)
     found
 }
 
@@ -3363,13 +3759,14 @@ fn ir_route_symbol(symbol: String) -> String Never! {
 // The routes ir_route_inline builds in place instead of calling the runtime;
 // ir_route_labeled reaches it only for these.
 IR_ROUTES_INLINE :: comptime { [String]{
-    "std::collections::BinaryHeap::new", "std::collections::HashSet::new", "std::collections::BTreeSet::new",
+    "std::collections::BinaryHeap::new", "std::collections::HashSet::new", "std::collections::BTreeSet::new", "std::collections::VecDeque::new", "std::collections::HashMap::new", "jet_deque_from",
     "jet_eq", "jet_map_from_keys_kernel", "jet_map_from_keys_int", "jet_map_from_keys_composite",
     "jet_ordering_then", "jet_ordering_reverse", "jet_std::JetShared::new", "jet_std::JetCell::new", "jet_std::JetPool::new", "jet_std_os_atexit",
     "jet_unicode_split_once", "jet_unicode_cut_last",
     "jet_list_get_opt", "jet_list_first", "jet_list_last", "jet_list_slice", "jet_list_index_of", "jet_list_sum",
     "jet_list_sum_fixed_f64", "jet_list_product", "jet_list_contains", "jet_list_equal", "jet_list_replace",
     "jet_list_starts_with", "jet_list_ends_with", "jet_list_min", "jet_list_max", "jet_list_flatten",
+    "jet_list_count", "jet_list_counts", "jet_list_union", "jet_list_intersection", "jet_list_difference", "jet_list_random",
 } }
 
 // Whether the builder lowers a Core call of route `name` itself, with no
@@ -3418,7 +3815,13 @@ fn ir_route_plain(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, arg
     }
     row :: ir_value_type(&m, p, result) ?? return ir_type_fail(&b, span, result)
     if carrier == .List(element) {
-        if element == .Handle(_) -> return ir_fail_slot(&b, span, "runtime route {export} List of {element} result")
+        if element == .Handle(_) {
+            // A buffer of runtime handle words; a record the program lays
+            // out itself would need converting per element.
+            item :: if ir_untag(result) == .List(inner) -> inner else -> { return ir_fail_slot(&b, span, "runtime route {export} List of {element} result") }
+            item_row :: ir_value_type(&m, p, item) ?? return ir_type_fail(&b, span, item)
+            if !ir_is_handle(m, item_row) -> return ir_fail_slot(&b, span, "runtime route {export} List of {element} result")
+        }
         out :: ir_out_slot(&m, &b, 1)
         call_args := args
         &call_args.push(out)
@@ -3916,6 +4319,67 @@ fn ir_route_result(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, ar
     boxed
 }
 
+// `reflect.of(value, type_name, path, (field, field_type_name, field_path)...)`:
+// sema hands the checked names as text after the value. The Value record
+// carries the value's Display text and one Value per stored field (a
+// field's own Value lists no fields).
+fn ir_reflect_of(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [Int], span: Span) -> Int Never! {
+    if args.len() < 3 || (args.len() - 3) % 3 != 0 -> return ir_fail_slot(&b, span, "reflect.of without its checked names")
+    result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    pointer_row :: ir_pointer_row(&m)
+    value_ty :: ir_ty(p, b, args[0])
+    value :: ir_expr(&m, p, &b, args[0])
+    if ir_failed(b) -> return -1
+    display :: ir_render(&m, p, &b, value_ty, value, IRRender.Display, span)
+    if ir_failed(b) || display < 0 -> return -1
+    count :: (args.len() - 3).div_euclid(3)
+    capacity :: ir_word_const(&m, &b, count)
+    fields :: ir_runtime(&m, &b, "jet_rt_record_seq_list_rec_jet_reflect_field_new", [Int]{capacity}, pointer_row)
+    loop index in 0..<count {
+        at :: 3 + index * 3
+        name :: ir_reflect_literal(p, b, args[at])
+        field_ty :: ir_declared_field_type(m, p, value_ty, name) ?? return ir_fail_slot(&b, span, "reflect.of field {name} of {ir_type_name(value_ty)}")
+        if value < 0 || ir_kind_of(m, b, value) != .Aggregate -> return ir_fail_slot(&b, span, "reflect.of field {name} of {ir_type_name(value_ty)}")
+        member :: ir_member_of(&m, p, b, value, name) ?? return ir_fail_slot(&b, span, "reflect.of field {name} of {ir_type_name(value_ty)}")
+        read :: ir_member_read(&m, &b, value, member)
+        shown :: ir_render(&m, p, &b, field_ty, read, IRRender.Display, span)
+        if ir_failed(b) || shown < 0 -> return -1
+        field_name :: ir_expr(&m, p, &b, args[at])
+        field_type_name :: ir_expr(&m, p, &b, args[at + 1])
+        field_path :: ir_expr(&m, p, &b, args[at + 2])
+        if ir_failed(b) -> return -1
+        none :: ir_word_const(&m, &b, 0)
+        empty :: ir_runtime(&m, &b, "jet_rt_record_seq_list_rec_jet_reflect_field_new", [Int]{none}, pointer_row)
+        field_value :: ir_runtime(&m, &b, "jet_rt_record_new_jet_reflect_value", [Int]{field_type_name, field_path, shown, empty}, pointer_row)
+        field :: ir_runtime(&m, &b, "jet_rt_record_new_jet_reflect_field", [Int]{field_name, field_value}, pointer_row)
+        _ :: ir_runtime(&m, &b, "jet_rt_record_seq_list_rec_jet_reflect_field_push", [Int]{fields, field}, -1)
+        ir_release(&m, &b, shown)
+        ir_release(&m, &b, field_name)
+        ir_release(&m, &b, field_type_name)
+        ir_release(&m, &b, field_path)
+    }
+    type_text :: ir_expr(&m, p, &b, args[1])
+    path_text :: ir_expr(&m, p, &b, args[2])
+    if ir_failed(b) -> return -1
+    result :: ir_runtime(&m, &b, "jet_rt_record_new_jet_reflect_value", [Int]{type_text, path_text, display, fields}, result_row)
+    ir_release(&m, &b, display)
+    ir_release(&m, &b, type_text)
+    ir_release(&m, &b, path_text)
+    ir_release(&m, &b, value)
+    result
+}
+
+// The text of a literal String argument node.
+fn ir_reflect_literal(p: IRProgram, b: IRBuilder, node: Int) -> String Never! {
+    text := ""
+    if ir_body_node(p, b, node).kind == .StrLit(parts) {
+        loop part in parts {
+            if part == .Literal(piece) -> text = "{text}{piece}"
+        }
+    }
+    text
+}
+
 // A Core call: its checked arguments to the record's runtime route.
 fn ir_core_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: CoreCallRecord, args: [Int], type_args: [Type], widen: [Bool], span: Span) -> Int Never! {
     canonical :: ir_canonical_core_record(record)
@@ -3944,6 +4408,7 @@ fn ir_core_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: Cor
     if symbol == "jet_raw_object_from_entries" -> return ir_object_from_entries(&m, p, &b, ty, args, span)
     if symbol == "jet_raw_object_entries_view" -> return ir_object_entries_view(&m, p, &b, ty, args, span)
     if symbol == "jet_testing_world" -> return ir_testing_world(&m, p, &b, args, span)
+    if symbol == "jet_reflect_of" -> return ir_reflect_of(&m, p, &b, ty, args, span)
     if ir_lazy_core_call(&m, p, &b, symbol, ty, args, span) == .Val(result) -> return result
     slots := [Int]{}
     borrow_mask :: canonical.signature.borrow_mask

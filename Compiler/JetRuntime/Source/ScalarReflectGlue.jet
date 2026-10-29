@@ -158,6 +158,15 @@ fn reflect_sequence_drop(sequence: I64) {
 #Export(c) fn jet_rt_record_get_jet_reflect_value_path(value: I64) -> I64 { jet_rt_string_clone(scalar_reflect_word(value + REFLECT_VALUE_PATH)) }
 #Export(c) fn jet_rt_record_get_jet_reflect_value_display(value: I64) -> I64 { jet_rt_string_clone(scalar_reflect_word(value + REFLECT_VALUE_DISPLAY)) }
 #Export(c) fn jet_rt_record_get_jet_reflect_value_fields(value: I64) -> I64 { scalar_reflect_word(value + REFLECT_VALUE_FIELDS) }
+// `value.fields()` as a List route result: an owned copy of the fields the
+// getter above lends, its data through `out` and its length returned.
+#Export(c) fn jet_rt_reflect_value_fields(value: I64, out: I64) -> I64 {
+    owned :: reflect_sequence_clone(scalar_reflect_word(value + REFLECT_VALUE_FIELDS))
+    length :: scalar_reflect_word(owned + DATA_SEQUENCE_LENGTH)
+    scalar_reflect_store(out, scalar_reflect_word(owned + DATA_SEQUENCE_DATA))
+    jet_rt_free(owned, DATA_SEQUENCE_BYTES, I64{8})
+    length
+}
 #Export(c) fn jet_rt_handle_show_jet_reflect_value(value: I64) -> I64 {
     // Reflect56-59: Value(type_name), not its display text or nested fields.
     target :: jet_rt_string_builder_new()

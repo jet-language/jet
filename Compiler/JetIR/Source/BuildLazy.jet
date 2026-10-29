@@ -635,10 +635,10 @@ fn ir_lazy_route(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, ty: 
         return out
     }
     source_ty :: ir_lazy_slot_type(m, b, source)
-    list_collects :: symbol == "jet_list_try_collect" && ir_untag(source_ty) == .List(_)
+    list_source :: (symbol == "jet_list_try_collect" || symbol == "jet_iter_split_at") && ir_untag(source_ty) == .List(_)
     element := ir_iter_element(source_ty)
     handle := source
-    if list_collects {
+    if list_source {
         if ir_untag(source_ty) == .List(inner) -> element = Val(inner)
         handle = ir_lazy_from_list(&m, p, &b, source, pointer_row, span)
         if handle < 0 -> return -1
@@ -1010,13 +1010,18 @@ fn ir_lazy_next(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: I
 // over and is an owned binding of the loop's scope, dropped when the scope
 // closes or the function returns. Each step copies the current item into
 // frame storage the body borrows; the advance drops it.
-fn ir_lazy_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection: Int, body: [Int], span: Span) Never! {
+fn ir_lazy_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection: Int, step: Int?, body: [Int], span: Span) Never! {
     collection_ty :: ir_ty(p, b, collection)
     element_ty :: ir_iter_element(collection_ty) ?? return ir_fail(&b, span, "loop over {ir_type_name(collection_ty)}")
     row :: ir_value_type(&m, p, element_ty) ?? return ir_fail(&b, span, "type {ir_type_name(element_ty)}")
     source :: ir_expr(&m, p, &b, collection)
     if ir_failed(b) || source < 0 -> return
-    ir_lazy_walk_source(&m, p, &b, label, variable, variable_two, source, row, body, span)
+    stride := -1
+    if step == .Val(node) {
+        stride = ir_expr(&m, p, &b, node)
+        if ir_failed(b) || stride < 0 -> return
+    }
+    ir_lazy_walk_source(&m, p, &b, label, variable, variable_two, source, row, stride, body, span)
 }
 
 // `loop line in reader.lines()` / `loop line in io.stdin().lines()` /
@@ -1058,7 +1063,7 @@ fn ir_lines_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, vari
     ir_emit(&b.f, IROp.Store, -1, adapter, 24, clone_address, b.line)
     source :: ir_runtime(&m, &b, export, [Int]{adapter, moved, meta}, iter_row)
     ir_release(&m, &b, handle)
-    ir_lazy_walk_source(&m, p, &b, label, variable, variable_two, source, row, body, span)
+    ir_lazy_walk_source(&m, p, &b, label, variable, variable_two, source, row, -1, body, span)
 }
 
 // lazy.line_next(payload, output) -> 0 at end, 1 with the moved line in
@@ -1164,7 +1169,10 @@ fn ir_line_clone_body(m: &IRModule, p: IRProgram, a: &IRBuilder, handle_ty: Type
 }
 
 // The cursor walk of the Iter in `source`, whose items have type row `row`.
-fn ir_lazy_walk_source(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, source: Int, row: Int, body: [Int], span: Span) Never! {
+// With a `stride` slot (`loop x in items, n`) the body runs on every n-th
+// item from the first; the items between are still pulled, as step_by pulls
+// them.
+fn ir_lazy_walk_source(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, source: Int, row: Int, stride: Int, body: [Int], span: Span) Never! {
     pointer_row :: ir_pointer_row(&m)
     word_row :: ir_word_row(&m)
     int_row :: ir_type_row(&m, Type.Int) ?? 0
@@ -1178,6 +1186,7 @@ fn ir_lazy_walk_source(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?
     b.fresh[cursor] = false
     &b.bindings.push(IRBinding{name: "", slot: cursor, owned: true})
     index :: ir_word_const(&m, &b, 0)
+    countdown :: if stride >= 0 -> ir_word_const(&m, &b, 0) else -> -1
     exit :: ir_open(&b.f, IROp.Block, b.line)
     _ :: ir_open(&b.f, IROp.Loop, b.line)
     present :: ir_runtime(&m, &b, "jet_rt_native_iter_cursor_test", [Int]{cursor}, word_row)
@@ -1186,6 +1195,14 @@ fn ir_lazy_walk_source(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?
     step_block :: ir_open(&b.f, IROp.Block, b.line)
     mark :: b.bindings.len()
     &b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: mark})
+    if countdown >= 0 {
+        between :: ir_bool_op(&m, &b, IROp.Ne, countdown, zero)
+        ir_open_if(&b.f, between, b.line)
+        skip :: ir_depth(b.f, step_block)
+        ir_emit(&b.f, IROp.Br, -1, skip, -1, -1, b.line)
+        ir_end(&b.f, b.line)
+        ir_emit(&b.f, IROp.Copy, countdown, stride, -1, -1, b.line)
+    }
     item := -1
     if has_value {
         slot :: ir_temp(&m, &b, pointer_row)
@@ -1209,6 +1226,7 @@ fn ir_lazy_walk_source(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?
     ir_stmts(&m, p, &b, body)
     _ :: &b.loops.pop()
     ir_end(&b.f, b.line)
+    if countdown >= 0 -> ir_emit(&b.f, IROp.Sub, countdown, countdown, one, IR_OVERFLOW_WRAP, b.line)
     _ :: ir_runtime(&m, &b, "jet_rt_native_iter_cursor_advance", [Int]{cursor}, -1)
     ir_emit(&b.f, IROp.Add, index, index, one, IR_OVERFLOW_WRAP, b.line)
     ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)

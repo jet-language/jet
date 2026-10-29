@@ -5,6 +5,8 @@ use jet_foundation.[
     BodyExpr,
     BodyTree,
     FnBody,
+    NodeKind,
+    TBuiltinOp,
     jet_ring_core_module_layer,
     jet_ring_layer_name,
     jet_ring_prelude_closure_layer,
@@ -82,6 +84,7 @@ use jet_foundation.[
     compiler_transfer_rows,
     expr_span,
     symbol_id,
+    type_simd_lane_arity,
     checked_symbol_local,
     checked_test_artifact_fact,
     type_name,
@@ -4979,6 +4982,10 @@ fn sema_check_registration_module_tail(owned_run: ^SemaModuleCheckRun, environme
         loop index in injected_from..<module_result.functions.len() -> &module_result.injected_function_keys.push(module_result.functions[index].key)
     }
     sema_check_registration_module_foreign(environment, program, module_index, &module_result)
+    if run.check_bodies {
+        sema_check_unbuilt_generators(program, module_index, &module_result)
+        sema_check_unbuilt_runtime_uses(program, module_index, &module_result)
+    }
     if trace_sink == .Val(sink) {
         sink.progress("counters.{counter_phase}.items_scanned", run.items_scanned, -1)
         sink.progress("counters.{counter_phase}.functions_checked", run.functions_checked, -1)
@@ -4986,6 +4993,110 @@ fn sema_check_registration_module_tail(owned_run: ^SemaModuleCheckRun, environme
         sink.progress("counters.{counter_phase}.impl_rows_scanned", run.impl_rows_scanned, -1)
     }
     ^module_result
+}
+
+// A generator (a function declared `Stream<T>`) has no IR lowering yet:
+// E2104 at each one in a source module, card #6108, once the module has no
+// other error, so a generator's own diagnostics still read as written.
+fn sema_check_unbuilt_generators(program: SemaProgramTables, module_index: Int, module_result: &SemaGraphModuleResult) {
+    if sema_has_error_since(module_result.diagnostics, 0) -> return
+    if program.registration_graph == .Val(graph) {
+        if sema_module_is_core_source(graph.modules[module_index].module_identity) -> return
+        loop item in graph.modules[module_index].program.items {
+            if item == .Func(func) && sema_function_is_generator(func.return_type) {
+                module_result.complete = false
+                &module_result.diagnostics.push(sema_error("E2104", func.name_span, "generator `{func.name}` is not built yet", "This `jet` has no implementation of generators (`Stream<T>` functions) yet, and no other `jet` can run them.", "Return a list or an `Iter` for now; generators need their Jet implementation first (card #6108)."))
+                &module_result.incomplete_reasons.push("generator `{func.name}` is not built yet (card #6108)")
+            }
+        }
+    }
+}
+
+fn sema_function_is_generator(return_type: Type?) -> Bool Never! {
+    if return_type == .Val(declared) {
+        if declared == .Result(ok, _) -> return sema_type_is_stream(ok)
+        return sema_type_is_stream(declared)
+    }
+    false
+}
+
+fn sema_type_is_stream(ty: Type) -> Bool Never! {
+    if ty == .Apply(name, _) -> return name == "Stream"
+    false
+}
+
+// E2104 at the first use in a source module of each Core value facility
+// whose Jet runtime is not ported yet (sema_unbuilt_runtime_use,
+// sema_unbuilt_core_source_call), naming its card, once the module has no
+// other error, so its own diagnostics still read as written. An unbuilt Core
+// call is refused at the call instead (sema_call_core_unbuilt_settle).
+fn sema_check_unbuilt_runtime_uses(program: SemaProgramTables, module_index: Int, module_result: &SemaGraphModuleResult) {
+    if sema_has_error_since(module_result.diagnostics, 0) -> return
+    if program.registration_graph == .Val(graph) {
+        if sema_module_is_core_source(graph.modules[module_index].module_identity) -> return
+        hits := [Diagnostic]{}
+        reasons := [String]{}
+        loop function in module_result.functions {
+            loop node in function.tree.nodes {
+                unbuilt :: sema_unbuilt_runtime_use(node.kind) ?? next
+                sema_unbuilt_runtime_note(unbuilt, node.span, &hits, &reasons)
+            }
+        }
+        loop fact in module_result.call_facts {
+            callee :: fact.callee ?? next
+            unbuilt :: sema_unbuilt_core_source_call(callee.key) ?? next
+            sema_unbuilt_runtime_note(unbuilt, fact.span, &hits, &reasons)
+        }
+        if hits.len() == 0 -> return
+        module_result.complete = false
+        &module_result.diagnostics.extend(hits)
+        &module_result.incomplete_reasons.extend(reasons)
+    }
+}
+
+// The facility's E2104 at its first use (`reasons` holds one per facility).
+fn sema_unbuilt_runtime_note(unbuilt: (name: String, feature: String, card: Int), span: Span, hits: &[Diagnostic], reasons: &[String]) Never! {
+    reason :: "{unbuilt.name} is not built yet (card #{unbuilt.card})"
+    if reasons.contains(reason) -> return
+    &reasons.push(reason)
+    &hits.push(sema_error("E2104", span, "{unbuilt.name} is not built yet", "This `jet` has no implementation of {unbuilt.feature} yet, and no other `jet` can run it.", "Leave {unbuilt.name} out for now; {unbuilt.feature} needs its Jet implementation first (card #{unbuilt.card})."))
+}
+
+// A call of a source-owned Core function whose runtime no `jet` has yet.
+fn sema_unbuilt_core_source_call(key: String) -> (name: String, feature: String, card: Int)? Never! {
+    if key.ends_with("<corelib>/core.tasks::after") || key.ends_with("<corelib>/core.tasks::interval") -> return Val((name: "`tasks` timer channels", feature: "the typed timer channel runtime (`tasks.after`, `tasks.interval`)", card: 5991))
+    None
+}
+
+// A checked node whose runtime no `jet` has yet: what it uses, the feature
+// that needs porting, and its card.
+fn sema_unbuilt_runtime_use(kind: NodeKind) -> (name: String, feature: String, card: Int)? Never! {
+    bytes :: (name: "`Bytes`", feature: "the `Bytes` buffer runtime", card: 5991)
+    if kind == .MathBuiltin(type_name, _, _) {
+        if type_simd_lane_arity(type_name) != None -> return Val((name: "SIMD lane vectors (`{type_name}`)", feature: "the SIMD lane runtime", card: 5984))
+        return None
+    }
+    if kind == {
+        .BuiltinMethod(_, operation, _) -> if sema_unbuilt_byte_buffer_op(operation) -> return Val(bytes)
+        .StaticCall(owner, _, _, _, _) -> if owner == .Prelude(_, path, _) && path == "JetByteBuffer" -> return Val(bytes)
+        .HandleMethod(_, operation, _) -> {
+            if operation == .PathWalk -> return Val((name: "`Path.walk`", feature: "the directory walk runtime", card: 5991))
+            if operation == .ProcessSpecMethod(method, _) && method == "abilities" -> return Val((name: "`ProcessSpec.abilities`", feature: "the process ability runtime", card: 5993))
+        }
+        else -> {}
+    }
+    None
+}
+
+fn sema_unbuilt_byte_buffer_op(operation: TBuiltinOp) -> Bool Never! {
+    if operation == {
+        .ByteBufferFrom -> true
+        .ByteBufferWrite(_) -> true
+        .ByteBufferToBytes -> true
+        .ByteBufferMethod(_) -> true
+        .ByteBufferWithCapacity -> true
+        else -> false
+    }
 }
 
 // sema_check_registration_module reports `sema.bodies` progress every this

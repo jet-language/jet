@@ -919,6 +919,7 @@ fn sema_collection_method_result_type(contract: SemaCollectionMethodContract, ca
         .TryCollected -> {
             if element == {
                 .Result(ok, err) -> Val(Type.Result{ok: Type.List{element: ok}, err: err})
+                .Option(inner) -> Val(Type.Option{inner: Type.List{element: inner}})
                 else -> None
             }
         }

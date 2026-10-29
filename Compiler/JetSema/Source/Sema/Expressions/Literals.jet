@@ -2,14 +2,18 @@
 use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
+    Call,
+    CallArg,
     Diagnostic,
     Expr,
     ExprMember,
     ExprPair,
     IndexKind,
     NodeKind,
+    OrFallback,
     QuantityKind,
     Span,
+    StrPart,
     SymbolKind,
     TBinaryOp,
     TupleField,
@@ -17,6 +21,7 @@ use jet_foundation.[
     TypeTupleField,
     UnOp,
     UnitRatio,
+    ast_empty_call_arg_flags,
     expr_span,
     measure_expression,
     measure_literal_value,
@@ -850,6 +855,12 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
         }
         else -> {}
     }
+    // A type with an `Index` impl reads `base[key]` as its `get(key)`, and a
+    // key it has no value for stops the program like a missing map key.
+    if result_ty == None && sema_expression_index_hook(environment, program, base_ty, "Index") {
+        read :: Expr.OrFallback{value: sema_expression_index_hook_call(base, "get", [Expr]{index}, span), fallback: OrFallback.Value{value: Expr.Call{call: Call{name: "panic", name_span: span, type_args: [Type]{}, args: [CallArg]{sema_expression_index_hook_arg(Expr.Str{parts: [StrPart]{StrPart.Lit{text: "index miss"}}, span: span, id: AST_NODE_GENERATED})}}, id: AST_NODE_GENERATED}}, is_option: false, span: span, id: AST_NODE_GENERATED}
+        return sema_check_expression(read, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
     if result_ty == None {
         &diagnostics.push(sema_error("E0505", span, "only lists and maps can be indexed, not {type_name(checked_base.ty)}", "indexing needs a collection with a declared element or value type", "use `[ ]` on a List or Map"))
         return None
@@ -857,6 +868,35 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
     kind :: sema_expression_index_kind(resolved_kind, base_ty)
     value :: sema_tree_node(result_ty ?? Type.Named{name: "Unit"}, TExprKind.Index{base: checked_base, index: checked_index, kind: kind, access: AccessConvention.Read, checked_call: None, location: sema_expression_panic_location(environment, program, scopes, span)}, span)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
+}
+
+// Whether the nominal `ty` has an impl of the index hook trait `trait_name`
+// (`Index` or `IndexMut`).
+fn sema_expression_index_hook(environment: SemaScopeEnvironment, program: SemaProgramTables, ty: Type, trait_name: String) -> Bool {
+    if ty == {
+        .Named(_) | .Apply(_, _) -> {}
+        else -> return false
+    }
+    graph :: program.registration_graph ?? return false
+    row :: sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) ?? return false
+    identity :: graph.modules[row.module_index].nominals[row.row].identity_key
+    loop module_row in graph.modules {
+        loop implementation in module_row.impls {
+            if implementation.trait_name == (Val(trait_name)) && implementation.target_identity_key == identity -> return true
+        }
+    }
+    false
+}
+
+// `receiver.method(args…)`, a generated hook call.
+fn sema_expression_index_hook_call(receiver: Expr, method: String, args: [Expr], span: Span) -> Expr Never! {
+    call_args := [CallArg]{}
+    loop value in args -> &call_args.push(sema_expression_index_hook_arg(value))
+    Expr.MethodCall{receiver: receiver, method: method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: call_args, id: AST_NODE_GENERATED}
+}
+
+fn sema_expression_index_hook_arg(value: Expr) -> CallArg Never! {
+    CallArg{convention: AccessConvention.Read, expr: value, span: expr_span(value), flags: ast_empty_call_arg_flags(), label: None, spread: false}
 }
 
 // An index whose type is its own: a name or a literal that writes its type.

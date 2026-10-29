@@ -5021,6 +5021,23 @@ fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Spa
         }
         else -> {}
     }
+    // `base[key] = value` on a type with an `Index` impl is its `IndexMut`
+    // `set(key, value)`.
+    if target == .Index(hook_base, hook_index, hook_span, _) {
+        if sema_stmt_return_known_type(hook_base, environment, scopes) == .Val(hook_ty) {
+            if sema_expression_index_hook(environment, program, hook_ty, "Index") {
+                if !sema_expression_index_hook(environment, program, hook_ty, "IndexMut") {
+                    shown :: type_name(hook_ty)
+                    &diagnostics.push(sema_error("E0505", hook_span, "`{shown}` can be read with `[ ]` but not written — it has no `IndexMut` impl", "bracket assignment needs `impl Type.IndexMut {{ fn set(&self, k, v) }}` with the write-access marker `&`", "use `.set(key, value)` instead, or add `impl {shown}.IndexMut`"))
+                    return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "projected_assignment index hook")
+                }
+                receiver :: Expr.Place{value: hook_base, access: PlaceAccess.Write, span: expr_span(hook_base), id: AST_NODE_GENERATED}
+                call :: sema_expression_index_hook_call(receiver, "set", [Expr]{hook_index, expr}, hook_span)
+                checked :: sema_check_expression(call, Val(Type.Named{name: "Unit"}), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "projected_assignment index hook set")
+                return Val(TStmt.ExprStmt{value: checked, span: Span{start: hook_span.start, end: expr_span(expr).end}})
+            }
+        }
+    }
     // E1108: `xs[i].field = …` on a columnar list would write a
     // gathered copy, not the column.
     if target == .Field(field_base, field, field_span) && field_base == .Index(indexed_base, _, _, _, _) && sema_stmt_for_in_expr_root_ident(indexed_base) == .Val(root) {

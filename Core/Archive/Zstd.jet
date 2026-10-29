@@ -280,7 +280,7 @@ fn zframe_header(data: [U8], start: Int) -> ZFrame? ZstdFileError! {
         if content_bytes == 2 -> content += 256
     }
     if single -> window = content
-    if window > C_WINDOW_MAX -> return Err(ZstdFileError.Unsupported)
+    if window > C_WINDOW_MAX || content > C_OUTPUT_MAX -> return Err(ZstdFileError.Unsupported)
     Ok(Val(ZFrame{size: size, content: content, window: window, checksum: descriptor.bit_and(4) != 0}))
 }
 

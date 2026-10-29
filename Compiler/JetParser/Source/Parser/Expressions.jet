@@ -491,7 +491,9 @@ fn parser_parse_typed_literal_body(state: &JetParserState, head: Type?, start: S
     record_head := if head == {
         None -> true
         Val(ty) -> if ty == {
-            .Named(name) -> name != "Layout"
+            // A constraint `Layout{…}` body holds comparisons, never
+            // `field:` entries, so a user record named `Layout` stays a record.
+            .Named(name) -> name != "Layout" || (parser_kind_at(&state, 1) == TOKEN_IDENT && parser_kind_at(&state, 2) == TOKEN_COLON)
             .Apply(_, _) -> true
             else -> false
         }

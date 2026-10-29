@@ -52,6 +52,7 @@ use jet_lexer.[
     TOKEN_DOT,
     TOKEN_EOF,
     TOKEN_EQ,
+    TOKEN_HASH,
     TOKEN_IDENT,
     TOKEN_LBRACE,
     TOKEN_LBRACKET,
@@ -375,10 +376,14 @@ fn jet_driver_validate_authority_fields(tokens: [Token], tables: TokenTables, op
             // `trust` (D-AUTHORITY-MANIFEST1, `require:` from D-BOUND-PROV1) is
             // Jetpack's: fetch, verified reuse and the lock enforce it, so the
             // compiler accepts the record. `grants` and `providers` have no
-            // enforcing consumer yet and stay refused rather than silently inert.
+            // enforcing consumer yet and stay refused rather than silently inert;
+            // an empty `grants: {}` excepts nothing, so it is enforced as written.
             if field == {
                 "allow" | "deny" | "needs" | "trust" -> {}
-                "grants" | "providers" -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.{field}` is not supported by the current compiler package-policy boundary"))
+                "grants" -> {
+                    if !jet_driver_authority_empty_record(tokens, index + 2, close_index) -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.grants` is not supported by the current compiler package-policy boundary"))
+                }
+                "providers" -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.providers` is not supported by the current compiler package-policy boundary"))
                 "holds" -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.holds` is gone: write `allow:` and `deny:` directly inside `authority:`"))
                 else -> &diagnostics.push(jet_driver_authority_diagnostic(span, "unknown `authority` field `{field}` - allowed: `allow`, `deny`, `needs`, `trust`"))
             }
@@ -388,6 +393,14 @@ fn jet_driver_validate_authority_fields(tokens: [Token], tables: TokenTables, op
             if nesting > 0 -> nesting -= 1
         }
     }
+}
+
+// `{` at `start`, then only comments, then its `}` before `limit`.
+fn jet_driver_authority_empty_record(tokens: [Token], start: Int, limit: Int) -> Bool Never! {
+    if start >= limit || tokens[start].kind != TOKEN_LBRACE -> return false
+    index := start + 1
+    loop index < limit && (tokens[index].kind == TOKEN_LINE_COMMENT || tokens[index].kind == TOKEN_BLOCK_COMMENT) -> index += 1
+    index < limit && tokens[index].kind == TOKEN_RBRACE
 }
 
 fn jet_driver_valid_dependency_name(name: String) -> Bool Never! {
@@ -3130,6 +3143,9 @@ struct JetDriverCoreIdentifierDemand {
     // An interpolation selector (`{x:Fixed(3)}`): it lowers to its
     // `Core/Text/Fmt.jet` formatter, so that source module loads.
     format_selector: Bool{false}
+    // A `#UnitFamily` declaration: its explicit conversions lower to their
+    // `Core/Math/Math.jet` exact-conversion helpers, so core.math loads.
+    unit_family: Bool{false}
     // Rust sema checks a qualified `core.<module>.<member>` call through a root
     // `use core as core` alias by its fixed typed row and lowers it to the
     // member's Core ABI host function (fixed_sigs.rs:5488 hmac_sha256,
@@ -3168,6 +3184,7 @@ struct JetDriverCoreDemandNames {
     regex_name: Int
     pattern_matches_name: Int
     pattern_match_name: Int
+    unit_family_name: Int
     bare: [Int]
     bare_alias: [Int]
     // Per name id of the table: the CORE_BARE_SOURCE_MODULES row whose name
@@ -3209,7 +3226,7 @@ fn jet_driver_core_demand_names(tables: TokenTables) -> JetDriverCoreDemandNames
             if id >= 0 && !core_segments.contains(id) -> &core_segments.push(id)
         }
     }
-    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), regex_name: jet_driver_core_demand_name(tables, "Regex"), pattern_matches_name: jet_driver_core_demand_name(tables, "matches"), pattern_match_name: jet_driver_core_demand_name(tables, "match"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments}
+    JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), regex_name: jet_driver_core_demand_name(tables, "Regex"), pattern_matches_name: jet_driver_core_demand_name(tables, "matches"), pattern_match_name: jet_driver_core_demand_name(tables, "match"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments}
 }
 
 fn jet_driver_core_demand_bare_row(rows: &[Int], id: Int, at: Int) Never! {
@@ -3239,6 +3256,7 @@ fn jet_driver_collect_core_identifier_demand_ids(tokens: [Token], tables: TokenT
                 if previous >= from && (tokens[previous].kind == TOKEN_DOT || tokens[previous].kind == TOKEN_QUESTION_DOT) -> demand.math_abs_receiver = true
             }
             if name == names.regex_name && index + 1 < to && tokens[index + 1].kind == TOKEN_LBRACE -> demand.regex_source = true
+            if name == names.unit_family_name && index > from && tokens[index - 1].kind == TOKEN_HASH -> demand.unit_family = true
             if (name == names.pattern_matches_name || name == names.pattern_match_name) && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.regex_source = true
             if index + 4 < to && tokens[index + 1].kind == TOKEN_DOT && tokens[index + 2].kind == TOKEN_IDENT && tokens[index + 3].kind == TOKEN_DOT && tokens[index + 4].kind == TOKEN_IDENT && (index == from || tokens[index - 1].kind != TOKEN_DOT) && names.core_segments.contains(name_index(tokens[index + 2].decoded)) {
                 path :: "{token_decoded(tables, tokens[index])}.{token_decoded(tables, tokens[index + 2])}"
@@ -3342,6 +3360,7 @@ fn jet_driver_collect_core_identifier_demand_threads(input: ^Lexed, runs: [Int],
         if output.math_abs_receiver -> demand.math_abs_receiver = true
         if output.regex_source -> demand.regex_source = true
         if output.format_selector -> demand.format_selector = true
+        if output.unit_family -> demand.unit_family = true
         loop bare in output.bare_names {
             if !demand.bare_names.contains(bare) -> &demand.bare_names.push(bare)
         }
@@ -4163,7 +4182,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
                 }
             }
         }
-        if demand.math_abs_receiver {
+        if demand.math_abs_receiver || demand.unit_family {
             if !bare_modules.contains("core.math") -> &bare_modules.push("core.math")
             owner_index :: jet_driver_core_unit(&source_units, &queued, &pending, &generated_records, request.core_sources, "core.math", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, &diagnostics)
             if owner_index == .Val(index) {

@@ -227,8 +227,9 @@ fn task_run(child: I64) {
         _ := coll_call2(sync_load(child + I64{72}), sync_load(child + I64{64}), sync_load(child + I64{48}))
         if (jet_scheduler_native_propagate() == I64{0}) -> sync_store(child + I64{56}, I64{1})
     }
+    finished :: jet_scheduler_native_status()
     // Mint cleanup provenance while the actual Task frame is still active.
-    cleanup :: jet_rt_session_cleanup_enter(jet_scheduler_native_status())
+    cleanup :: jet_rt_session_cleanup_enter(finished)
     scheduler_body_leave(body)
     jet_scheduler_shield_enter()
     release_cleanup :: jet_rt_session_cleanup_enter(jet_scheduler_native_status())
@@ -237,7 +238,10 @@ fn task_run(child: I64) {
     jet_rt_session_cleanup_leave(release_cleanup)
     scheduler_task_completion_end(frame)
     if (sync_load(child + I64{144}) != I64{0}) -> task_group_release(sync_load(child + I64{136}))
-    status :: jet_scheduler_native_status()
+    // A cancellation the release shield's exit delivers once the body has
+    // finished comes too late to stop it: the task keeps the body's outcome.
+    late_cancel :: finished == I64{0} && jet_scheduler_native_status() == I64{1}
+    status :: if late_cancel -> I64{0} else -> jet_scheduler_native_status()
     sync_store(child + I64{32}, status)
     if (status != I64{0} && sync_load(child + I64{56}) != I64{0}) {
         jet_scheduler_shield_enter()
@@ -246,8 +250,8 @@ fn task_run(child: I64) {
         sync_store(child + I64{56}, I64{0})
         scheduler_shield_leave_finished()
         jet_rt_session_cleanup_leave(result_cleanup)
+        sync_store(child + I64{32}, jet_scheduler_native_status())
     }
-    sync_store(child + I64{32}, jet_scheduler_native_status())
     jet_rt_session_cleanup_leave(cleanup)
     jet_rt_observe_task_finish(sync_load(control + I64{56}))
     if (world != I64{0}) {

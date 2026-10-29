@@ -166,7 +166,7 @@ fn sema_call_core_record_import_reference(environment: SemaScopeEnvironment, pro
 }
 
 // Rust core_call expert policy: a raw `core.crypto.expert` primitive, or a
-// `core.crypto.vault` key-material operation other than the safe `get`,
+// `core.crypto.vault` key-material operation outside the typed lifecycle,
 // runs only inside an audited `#Unsafe` region. The call already resolved
 // through the module's import, so the region is the remaining gate.
 fn sema_call_core_crypto_expert_gate(module_name: String, member: String, span: Span, context: SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
@@ -175,7 +175,7 @@ fn sema_call_core_crypto_expert_gate(module_name: String, member: String, span: 
         &diagnostics.push(sema_error("E0510", span, "`core.crypto.expert.{member}` requires an audited `#Unsafe` region", "raw crypto primitives may only run inside an explicit expert-tier gate (I1)", "wrap the call in `#Unsafe(\"crypto expert: …\") {{ … }}` or use `crypto.seal`/`open` instead"))
         return
     }
-    if module_name == "core.crypto.vault" && member != "get" {
+    if module_name == "core.crypto.vault" && !sema_call_core_vault_safe_member(member) {
         &diagnostics.push(sema_error("E0510", span, "`{module_name}.{member}` requires an audited `#Unsafe` region", "raw key import may only run inside an explicit expert-tier gate (I1)", "wrap the call in `#Unsafe(\"vault key import: …\") {{ … }}`"))
     }
 }
@@ -206,6 +206,10 @@ fn sema_call_core_unbuilt(module_name: String, member: String) -> (feature: Stri
     if (module_name == "app" || module_name == "core.web") && (member == "live" || member == "live_get" || member == "live_show" || member == "live_stats" || member == "subscribe" || member == "signal_push") {
         return Val((feature: "the live query runtime (`app.live` queries and their subscriptions)", card: 6104))
     }
+    if module_name == "core.args" && member == "spec" -> return Val((feature: "the `core.args` spec builder runtime", card: 5991))
+    if module_name == "core.sys" && member == "decode" -> return Val((feature: "typed environment decoding (`core.sys.decode`)", card: 5992))
+    if module_name == "core.process" && member == "pipeline" -> return Val((feature: "the process pipeline runtime", card: 5993))
+    if module_name == "core.mod" && member == "load" -> return Val((feature: "the module loader runtime and its grants", card: 5993))
     None
 }
 
@@ -237,6 +241,18 @@ fn sema_call_core_unbuilt_settle(unbuilt: SemaCoreUnbuiltCall?, before: Int, dia
     missing :: sema_call_core_unbuilt(call.module_name, call.member) ?? return
     short :: call.module_name.slice(call.module_name.rfind(".") + 1, call.module_name.len())
     &diagnostics.push(sema_error("E2104", call.span, "`{short}.{call.member}` is not built yet", "This `jet` has no implementation of {missing.feature} yet, and no other `jet` can check or run it.", "Remove the `{short}.{call.member}` call for now; {missing.feature} needs its Jet implementation first (card #{missing.card})."))
+}
+
+// The typed vault surface: the safe `get` read and the KeyRef lifecycle, whose
+// source bodies hold their own audited regions.
+fn sema_call_core_vault_safe_member(member: String) -> Bool Never! {
+    if member == {
+        "get" | "current" | "versions" | "load" | "status" -> true
+        "prepare_generate" | "prepare_store" | "prepare_rotate" | "prepare_retire" | "prepare_revoke" -> true
+        "authorize_write" | "commit_generate" | "commit_store" | "commit_rotate" | "commit_retire" | "commit_revoke" -> true
+        "export_to_recipients" | "export_to_passphrase" | "prepare_import_wrapped" | "authorize_wrapped_import" | "commit_import_wrapped" -> true
+        else -> false
+    }
 }
 
 fn sema_call_core_source_target(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: String, member: String, type_args: [Type], span: Span, registered_source_target: Bool, diagnostics: &[Diagnostic]) -> SemaCallDirectTarget? {
@@ -706,6 +722,43 @@ fn sema_call_try_core_math_float_class(module_name: String, member: String, type
     SemaDirectSpecialCheck{handled: true, value: None}
 }
 
+// Rust core_call.rs `exact_rational_math_approx`: a core.math function whose
+// result leaves the rationals takes an exact Fraction or Decimal argument
+// across its one boundary into Float, as `value.to_float()`. The other math
+// calls keep their exact contracts. None when no argument crosses.
+fn sema_call_core_math_exact_crossing(module_name: String, member: String, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> [CallArg]? {
+    if module_name != "core.math" -> return None
+    if member == {
+        "sqrt" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sinh" | "cosh" | "tanh" | "exp" | "ln" | "log2" | "log10" | "acosh" | "asinh" | "atanh" | "cbrt" | "exp2" | "exp_m1" | "ln_1p" | "degrees" | "radians" | "atan2" | "hypot" | "lerp" | "copysign" | "log" | "fma" | "muladd" -> {}
+        else -> return None
+    }
+    exact := [Bool]{}
+    any := false
+    loop argument in args {
+        // A written numeral adopts Float from the parameter itself.
+        literal :: if argument.expr == {
+            .Float(_, _, _, _, _) | .Int(_, _, _, _, _) -> true
+            else -> false
+        }
+        crosses := false
+        if !literal {
+            probe_diagnostics := [Diagnostic]{}
+            probed :: sema_probe_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics)
+            if probed == .Val(value) -> crosses = value.ty == (Type.Named{name: "Fraction"}) || value.ty == (Type.Named{name: "Decimal"})
+        }
+        &exact.push(crosses)
+        if crosses -> any = true
+    }
+    if !any -> return None
+    crossed := [CallArg]{}
+    loop (index, argument) in args {
+        updated := argument
+        if exact[index] -> updated.expr = Expr.MethodCall{receiver: argument.expr.copy(), method: "to_float", method_span: argument.span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
+        &crossed.push(updated)
+    }
+    Val(crossed)
+}
+
 // Width selection is the existing checked mathematical normalization; it is
 // separate from source forwarding and never widens F32 values. A typed
 // `json.decode<T>` / `toml.decode<T>` / `yaml.decode<T>` runs its module's
@@ -760,7 +813,7 @@ fn sema_call_core_tree(record: CoreCallRecord, args: [TExpr], span: Span, type_a
         &diagnostics.push(sema_error("E0104", span, "`{record.module_name}.{record.member}` expects {range} argument(s), got {args.len()}", "the registered Core call arity is fixed", "provide the registered number of arguments"))
         return None
     }
-    if record.module_name == "core.math" && record.member == "sqrt" && args.len() == 1 && args[0].ty == (Type.Apply{name: "Measurement", args: [Type]{Type.Float}}) {
+    if record.module_name == "core.math" && record.member == "sqrt" && args.len() == 1 && sema_expression_is_float_measurement(args[0].ty, environment, program) {
         value :: sema_expression_measurement_source_call("__measurement_sqrt", args, result_type, span, environment, program) ?? return None
         return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
@@ -925,7 +978,7 @@ fn sema_call_core_type_constraint_satisfied(constraint: CoreCallTypeConstraint, 
         .FloatingOrExact -> sema_call_core_math_float_type(ty) || sema_call_core_math_exact_type(ty)
         .SquareRootInput -> {
             if sema_call_core_math_float_type(ty) || sema_call_core_math_exact_type(ty) -> return true
-            return if ty == {.Apply(name, args) -> name == "Measurement" && args == [Type]{Type.Float} else -> false}
+            return sema_expression_is_float_measurement(ty, environment, program)
         }
         .Comparable -> sema_type_comparable(environment, program, ty)
         .Debuggable -> {

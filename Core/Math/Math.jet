@@ -1184,6 +1184,179 @@ fn __decimal_from_float(value: Float) -> Decimal Never! {
     __decimal_try_fraction(__fraction_from_float(value)) ?? panic("Float is not finite")
 }
 
+// A checked unit conversion (Rust ExactUnitConversion.rs): `value` times the
+// declared exact `scale`, plus `offset`, each a "numerator/denominator" ratio
+// text, as one exact Fraction.
+fn __unit_converted(value: Float, scale: String, offset: String) -> Fraction Never! {
+    __fraction_add(__fraction_mul(__fraction_from_float(value), __unit_ratio(scale)), __unit_ratio(offset))
+}
+fn __unit_ratio(text: String) -> Fraction Never! {
+    parts :: text.split("/").to_list()
+    __fraction_from_parts(__unit_ratio_part(parts[0]), __unit_ratio_part(parts[1]))
+}
+fn __unit_ratio_part(text: String) -> Int Never! {
+    negative := false
+    total := 0
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        if code == 45 -> negative = true
+        else -> total = total * 10 + (code - 48)
+    }
+    if negative -> -total else -> total
+}
+// The Float exactly equal to `ratio`, or None when no finite Float is: its
+// reduced denominator is a power of two and its odd part fits 53 bits, at
+// an exponent no finer than 2^-1074 and below 2^1024.
+fn __unit_exact_float(ratio: Fraction) -> Float? Never! {
+    if ratio.num_value == 0 -> return Val(0.0)
+    odd := abs(ratio.num_value)
+    shift := 0
+    rest := ratio.den_value
+    loop rest %% 2 == 0 {
+        rest = rest /% 2
+        shift -= 1
+    }
+    if rest != 1 -> return None
+    loop odd %% 2 == 0 {
+        odd = odd /% 2
+        shift += 1
+    }
+    if odd >= exact_power(2, 53) || shift < -1074 -> return None
+    width := 0
+    remaining := odd
+    loop remaining > 0 {
+        remaining = remaining /% 2
+        width += 1
+    }
+    if shift + width > 1024 -> return None
+    value := Float{odd}
+    loop shift > 0 {
+        value = value * 2.0
+        shift -= 1
+    }
+    loop shift < 0 {
+        value = value * 0.5
+        shift += 1
+    }
+    Val(if ratio.num_value < 0 -> -value else -> value)
+}
+// `numerator / denominator` (a positive denominator) as an Int under
+// `mode`: 0 toward zero, 1 floor, 2 ceiling, 3 nearest with ties to even.
+fn __unit_rounded_integer(numerator: Int, denominator: Int, mode: Int) -> Int Never! {
+    magnitude :: abs(numerator)
+    quotient := magnitude /% denominator
+    remainder :: magnitude %% denominator
+    negative :: numerator < 0
+    increment :: if mode == {
+        1 -> negative && remainder != 0
+        2 -> !negative && numerator != 0 && remainder != 0
+        3 -> remainder * 2 > denominator || (remainder * 2 == denominator && quotient %% 2 != 0)
+        else -> false
+    }
+    if increment -> quotient += 1
+    if negative -> -quotient else -> quotient
+}
+// -1, 0 or 1 as `left` is below, at or above `right`.
+fn __unit_ratio_compare(left: Fraction, right: Fraction) -> Int Never! {
+    difference :: left.num_value * right.den_value - right.num_value * left.den_value
+    if difference < 0 -> -1 else -> if difference > 0 -> 1 else -> 0
+}
+// The bits of the largest finite nonnegative Float at or below the positive
+// `ratio`.
+fn __unit_float_floor_bits(ratio: Fraction) -> Int Never! {
+    low := 0
+    high := 9218868437227405311
+    loop low < high {
+        middle :: low + (high - low) /% 2 + 1
+        if __unit_ratio_compare(ratio, __fraction_from_float(from_bits(middle))) >= 0 -> low = middle
+        else -> high = middle - 1
+    }
+    low
+}
+// -1, 0 or 1 as `left * 10^power` is below, at or above `right` (both
+// nonnegative; a zero `left` is below): digit counts first, so a huge
+// `power` builds no power of ten.
+fn __unit_compare_times_power10(left: Int, right: Int, power: Int) -> Int Never! {
+    if left == 0 -> return -1
+    left_width :: "{left}".len()
+    right_width :: "{right}".len()
+    if left_width + power != right_width -> return if left_width + power < right_width -> -1 else -> 1
+    scale :: exact_power(10, power)
+    head :: right /% scale
+    if left != head -> return if left < head -> -1 else -> 1
+    if right %% scale == 0 -> 0 else -> -1
+}
+// -1, 0 or 1 as the distance from `ratio` to `candidate` (doubled when
+// `half_step`) times 10^digits is below, at or above one.
+fn __unit_candidate_distance(ratio: Fraction, candidate: Float, digits: Int, half_step: Bool) -> Int Never! {
+    exact :: __fraction_from_float(candidate)
+    difference := abs(ratio.num_value * exact.den_value - exact.num_value * ratio.den_value)
+    if half_step -> difference = difference * 2
+    __unit_compare_times_power10(difference, ratio.den_value * exact.den_value, digits)
+}
+// Rounding to more decimal places than any finite Float has (`digits` past
+// 1074): the Float neighbors of `ratio` decide, without a power of ten
+// proportional to `digits`.
+fn __unit_huge_precision_rounded(ratio: Fraction, mode: Int, digits: Int) -> Float? Never! {
+    if ratio.num_value == 0 -> return Val(0.0)
+    negative :: ratio.num_value < 0
+    magnitude :: Fraction{num_value: abs(ratio.num_value), den_value: ratio.den_value}
+    floor_bits :: __unit_float_floor_bits(magnitude)
+    floor :: from_bits(floor_bits)
+    if __unit_ratio_compare(magnitude, __fraction_from_float(floor)) == 0 -> return Val(if negative -> -floor else -> floor)
+    ceiling :: if floor_bits < 9218868437227405311 -> Val(from_bits(floor_bits + 1)) else -> Float?{None}
+    lower := Float?{None}
+    upper := Float?{None}
+    if negative {
+        if ceiling == .Val(above) -> lower = Val(-above)
+        upper = Val(-floor)
+    } else {
+        lower = Val(floor)
+        upper = ceiling
+    }
+    if mode == 3 {
+        if lower == .Val(candidate) {
+            if __unit_candidate_distance(ratio, candidate, digits, true) <= 0 -> return Val(candidate)
+        }
+        if upper == .Val(candidate) {
+            if __unit_candidate_distance(ratio, candidate, digits, true) <= 0 -> return Val(candidate)
+        }
+        return None
+    }
+    directed :: if mode == 2 || (mode == 0 && negative) -> upper else -> lower
+    if directed == .Val(candidate) {
+        if __unit_candidate_distance(ratio, candidate, digits, false) < 0 -> return Val(candidate)
+    }
+    None
+}
+// An explicit unit conversion (`Kelvin.from_celsius(x)`): the converted
+// value only when it is an integer some Float holds exactly, else `failure`.
+// The IR's UnitConvert calls it with the conversion's String failure.
+fn __unit_conversion_exact<E>(value: Float, scale: String, offset: String, failure: E) -> Float E! {
+    if !is_finite(value) -> return Err(failure)
+    converted :: __unit_converted(value, scale, offset)
+    if converted.den_value != 1 -> return Err(failure)
+    if __unit_exact_float(converted) == .Val(result) -> return Ok(result)
+    Err(failure)
+}
+// A rounded unit conversion (`Kelvin.from_celsius_rounded(x, mode, digits:)`):
+// the converted value rounded under `mode` to `digits` decimal places, when
+// some Float holds that decimal exactly; else `failure` (`negative_digits`
+// for negative `digits`).
+fn __unit_conversion_rounded<E>(value: Float, scale: String, offset: String, mode: Int, digits: Int, negative_digits: E, failure: E) -> Float E! {
+    if digits < 0 -> return Err(negative_digits)
+    if !is_finite(value) -> return Err(failure)
+    converted :: __unit_converted(value, scale, offset)
+    if digits > 1074 {
+        if __unit_huge_precision_rounded(converted, mode, digits) == .Val(result) -> return Ok(result)
+        return Err(failure)
+    }
+    power :: exact_power(10, digits)
+    integer :: __unit_rounded_integer(converted.num_value * power, converted.den_value, mode)
+    if __unit_exact_float(__fraction_from_parts(integer, power)) == .Val(result) -> return Ok(result)
+    Err(failure)
+}
+
 #Test("Exact binary conversion and finite decimal denominator policy") {
     fraction :: __fraction_from_float(0.1)
     assert_eq(fraction.numerator(), 3602879701896397)

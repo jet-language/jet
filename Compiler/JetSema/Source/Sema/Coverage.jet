@@ -448,6 +448,12 @@ fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Span, 
     }
     missing = sema_coverage_nested_witnesses(subject_ty, missing, table.shapes, environment, program)
     if missing.len() == 0 -> return
+    // A case with several payload fields, one of them nested
+    // (`.FailedToFetch{url, cause: .BadURL(why)}`), is proved column by column.
+    if sema_coverage_any_multi_field_nested(table.shapes) {
+        rows :: loop shape in table.shapes -> SemaPatternCoverageRow{cells: [SemaPatternCoverageCell]{SemaPatternCoverageCell.Shape{shape: shape}}}
+        if sema_pattern_matrix_complete(rows, [Type]{subject_ty}, environment, program) -> return
+    }
     names :: missing.join(", ")
     if multi_head {
         &diagnostics.push(sema_error("E0307", span, "this multi-head function doesn't cover every case — missing: {names}", "each multi-head head covers one argument shape, so every variant must appear once", "add a head for: {names}"))
@@ -1009,6 +1015,31 @@ fn sema_pattern_matrix_needed(shape: TPatternShape) -> Bool Never! {
             }
             false
         }
+        else -> false
+    }
+}
+
+fn sema_coverage_any_multi_field_nested(shapes: [TPatternShape]) -> Bool Never! {
+    loop shape in shapes {
+        if sema_coverage_multi_field_nested(shape) -> return true
+    }
+    false
+}
+
+// Whether `shape` holds, at any depth, a case pattern with more than one
+// payload field where one field is itself a nested pattern.
+fn sema_coverage_multi_field_nested(shape: TPatternShape) -> Bool Never! {
+    if shape == {
+        .Variant(_, slots, _, _) -> {
+            loop slot in slots {
+                if slot == .Nested(inner) {
+                    if slots.len() > 1 || sema_coverage_multi_field_nested(inner.shape) -> return true
+                }
+            }
+            false
+        }
+        .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> if inner == .Val(nested) -> sema_coverage_multi_field_nested(nested.shape) else -> false
+        .Or(alternatives, _) -> sema_coverage_any_multi_field_nested(alternatives)
         else -> false
     }
 }

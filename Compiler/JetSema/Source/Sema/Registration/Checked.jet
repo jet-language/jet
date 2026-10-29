@@ -92,12 +92,49 @@ use jet_foundation.[
     jet_target_layout_from_machine,
     type_identity_equal,
     type_name,
+    unit_family_distinct_defs,
     CModule,
 ]
 use jet_parser.[parser_guest_import_symbol]
 
 fn sema_checked_module_key(module_row: SemaRegistrationModule, name: String) -> String Never! {
     if module_row.module_identity == "" -> name else -> "{module_row.module_identity}::{name}"
+}
+
+// The member types of a standard core.units family every module sees. They
+// register no nominal (one canonical owner across modules), so each module
+// carries them as checked Float distincts for lowering.
+fn sema_checked_standard_unit_defs(module_row: SemaRegistrationModule, family: UnitFamilyDef, rows: &[TTypeDef]) Never! {
+    if family.resolved_owner != Val("core.units") -> return
+    loop definition in unit_family_distinct_defs(family) {
+        derives := [String]{}
+        loop named in definition.derives -> &derives.push(named.name)
+        &rows.push(TTypeDef{
+            module_identity: module_row.module_identity,
+            key: sema_checked_module_key(module_row, definition.name),
+            name: definition.name,
+            span: definition.name_span,
+            public: definition.is_pub,
+            package_public: definition.is_package_pub,
+            generic_params: [TGenericParam]{},
+            boxed_edges: [String]{},
+            derives: derives,
+            auto_derive_default: false,
+            auto_printable: false,
+            published_schema: false,
+            single_use: false,
+            must_use: false,
+            layout: None,
+            c_layout_tag: None,
+            enum_layout: None,
+            layout_alignment: None,
+            serde: [TSerdeAttribute]{},
+            cli_bindings: [TCLIBinding]{},
+            ownership: TDeclarationOwnership.Owned,
+            compiler_builtin: None,
+            kind: TTypeDefKind.Distinct{base: Type.Float, range: None},
+        })
+    }
 }
 
 fn sema_checked_visibility(value: Int) -> TVisibility Never! {
@@ -2651,7 +2688,9 @@ fn sema_checked_type_def(graph: SemaRegistrationGraph, boxed: [String:[String]],
         .TypeAlias(value) -> kind = Val(TTypeDefKind.Alias{target: sema_checked_qualify_type_with_generics(graph, value.target, module_row.module_identity, generic_params)})
         .UnitFamily(value) -> {
             members :: loop member in value.members -> member.name
-            kind = Val(TTypeDefKind.UnitFamily{members: members})
+            base := String?{None}
+            if value.base == .Val(named) -> base = Val(named.name)
+            kind = Val(TTypeDefKind.UnitFamily{members: members, base: base})
         }
         else -> return None
     }
@@ -2680,67 +2719,6 @@ fn sema_checked_type_def(graph: SemaRegistrationGraph, boxed: [String:[String]],
         compiler_builtin: sema_registration_compiler_builtin_marker(nominal),
         boxed_edges: boxed_edges,
         kind: type_kind,
-    }
-}
-
-fn sema_checked_unit_type_name(name: String) -> String Never! {
-    output := ""
-    loop piece in name.split("_") {
-        if piece == "" -> next
-        bytes := piece.bytes()
-        if bytes.len() == 0 -> next
-        code :: Int.from_u8(bytes[0])
-        if code >= 97 && code <= 122 -> bytes[0] = U8{code - 32}
-        output = "{output}{String.from_bytes(bytes) ?? piece}"
-    }
-    if output == "" -> name else -> output
-}
-
-fn sema_checked_unit_member_defs(module_row: SemaRegistrationModule, definition: UnitFamilyDef, rows: &[TTypeDef]) Never! {
-    owner_name :: definition.resolved_owner ?? ""
-    if definition.family == "Time" && owner_name == "core.units" -> return
-    affine := definition.base != None
-    if affine {
-        affine = loop member in definition.members {
-            if member.offset.numerator != 0 -> break true
-        } ?? false
-    }
-    loop member in definition.members {
-        base_name :: sema_checked_unit_type_name(member.name)
-        names :: if affine -> [String]{"{base_name}Point", "{base_name}Delta"} else -> [String]{base_name}
-        loop name in names {
-            derives := [String]{}
-            if name.ends_with("Delta") || !affine -> &derives.push("Numeric") else -> &derives.push("Comparable")
-            if definition.resolved_dimension != None {
-                &derives.push("Encode")
-                &derives.push("Decode")
-            }
-            &rows.push(TTypeDef{
-                module_identity: module_row.module_identity,
-                key: sema_checked_module_key(module_row, name),
-                name: name,
-                span: member.name_span,
-                public: definition.is_pub,
-                package_public: definition.is_package_pub,
-                generic_params: [TGenericParam]{},
-                boxed_edges: [String]{},
-                derives: derives,
-                auto_derive_default: false,
-                auto_printable: false,
-                published_schema: false,
-                single_use: false,
-                must_use: false,
-                layout: None,
-                c_layout_tag: None,
-                enum_layout: None,
-                layout_alignment: None,
-                serde: [TSerdeAttribute]{},
-                cli_bindings: [TCLIBinding]{},
-                ownership: TDeclarationOwnership.Owned,
-                compiler_builtin: None,
-                kind: TTypeDefKind.Distinct{base: Type.Float, range: None},
-            })
-        }
     }
 }
 
@@ -3758,7 +3736,7 @@ fn sema_checked_declaration_facts(graph: SemaRegistrationGraph, module_index: In
         definition :: sema_checked_type_def(graph, boxed, module_row, layout_engine, nominal, &diagnostics)
         if definition == .Val(value) -> &type_defs.push(value)
         if source_item == .Val(item) {
-            if item == .UnitFamily(value) -> sema_checked_unit_member_defs(module_row, value, &type_defs)
+            if item == .UnitFamily(value) -> sema_checked_standard_unit_defs(module_row, value, &type_defs)
             sema_checked_add_nested_impls(graph, module_row, item, &impls)
         }
     }

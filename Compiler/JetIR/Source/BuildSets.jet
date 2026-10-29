@@ -179,6 +179,23 @@ fn ir_set_list(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapShape, set
     out
 }
 
+// Inserts into `target` a copy of each key of `from` that `probe` holds
+// (`held`) or lacks, in `from`'s order.
+fn ir_set_keep_keys(m: &IRModule, p: IRProgram, b: &IRBuilder, set_row: Int, shape: IRMapShape, from: Int, probe: Int, target: Int, held: Bool, span: Span) Never! {
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    word_row :: ir_word_row(&m)
+    walk :: ir_walk_open(&m, &b, from, shape.key.ty)
+    found :: ir_set_call(&m, p, &b, set_row, "set.find", [Int]{probe, walk.item}, word_row)
+    none :: ir_word_const(&m, &b, 0)
+    keep :: ir_bool_op(&m, &b, if held -> IROp.Ge else -> IROp.Lt, found, none)
+    ir_open_if(&b.f, keep, b.line)
+    key :: ir_copy_value(&m, p, &b, walk.item, span)
+    _ :: ir_set_call(&m, p, &b, set_row, "set.insert", [Int]{target, key}, bool_row)
+    b.fresh[key] = false
+    ir_end(&b.f, b.line)
+    ir_walk_close(&m, &b, walk)
+}
+
 // `rank.first()` / `rank.last()`: a copy of the least (greatest) key in an
 // Option box, None when the Rank is empty.
 fn ir_set_end(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMapShape, set: Int, last: Bool, span: Span) -> Int Never! {
@@ -258,14 +275,21 @@ fn ir_set_symbol(symbol: String) -> String Never! {
         "jet_sorted_set_remove" -> "jet_set_remove"
         "jet_sorted_set_union" -> "jet_set_union"
         "jet_sorted_set_intersection" -> "jet_set_intersection"
+        "jet_sorted_set_difference" -> "jet_set_difference"
+        "jet_sorted_set_symmetric_difference" -> "jet_set_symmetric_difference"
+        "jet_sorted_set_is_subset" -> "jet_set_is_subset"
+        "jet_sorted_set_is_superset" -> "jet_set_is_superset"
+        "jet_sorted_set_is_disjoint" -> "jet_set_is_disjoint"
         "std::collections::BTreeSet::contains" -> "jet_set_has"
         else -> symbol
     }
 }
 
-// A Set builtin by its route symbol: from, len, capacity, is_empty, to_list,
-// sort, values, has, insert/add, remove, pop, replace, equal, union and
-// intersection; None when the builder does not lower `symbol` on Sets.
+// A Set builtin by its route symbol: from, len, capacity, is_empty, first,
+// last, max, shuffle, to_list, sort, values, has, insert/add, remove, pop,
+// replace, equal, union, intersection, difference, symmetric_difference,
+// is_subset, is_superset and is_disjoint; None when the builder does not
+// lower `symbol` on Sets.
 fn ir_set_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: String, subject: Int, operands: [Int], span: Span) -> Int? Never! {
     symbol :: ir_set_symbol(route)
     if symbol == "jet_set_from" || symbol == "jet_iter_to_set" {
@@ -283,9 +307,29 @@ fn ir_set_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: St
         zero :: ir_word_const(&m, &b, 0)
         return Val(ir_bool_op(&m, &b, IROp.Eq, length, zero))
     }
-    if route == "jet_sorted_set_first" || route == "jet_sorted_set_last" {
+    // A Set's first key is its least, as its iteration order is ascending.
+    if symbol == "jet_set_first" || symbol == "jet_set_last" || symbol == "jet_set_max" {
         if operands.len() != 1 -> return None
-        return Val(ir_set_end(&m, p, &b, ty, shape, subject, route == "jet_sorted_set_last", span))
+        return Val(ir_set_end(&m, p, &b, ty, shape, subject, symbol != "jet_set_first", span))
+    }
+    // `shuffle()`: a fresh List of copies of the keys in the Iter shuffle's order.
+    if symbol == "jet_set_shuffle" {
+        if operands.len() != 1 -> return None
+        list_row :: ir_value_type(&m, p, ty) ?? return Val(ir_type_fail(&b, span, ty))
+        iter_ty :: Type.Apply{name: "Iter", args: [Type]{shape.entry_ty.copy()}}
+        iter_row :: ir_value_type(&m, p, iter_ty) ?? return Val(ir_type_fail(&b, span, iter_ty))
+        items :: ir_set_list(&m, p, &b, shape, subject, list_row)
+        meta :: ir_lazy_meta(&m, p, &b, shape.entry_ty, span)
+        if meta < 0 -> return Val(-1)
+        moved :: ir_lazy_moved(&m, &b, items)
+        source :: ir_runtime(&m, &b, "jet_rt_native_iter_from_list", [Int]{items, meta, moved}, iter_row)
+        shuffled :: ir_runtime(&m, &b, "jet_rt_native_iter_shuffle", [Int]{source}, iter_row)
+        ir_lazy_consumed(&m, &b, source)
+        out :: ir_list_empty(&m, &b, list_row)
+        _ :: ir_runtime(&m, &b, "jet_rt_native_iter_to_list", [Int]{shuffled, out}, -1)
+        ir_lazy_consumed(&m, &b, shuffled)
+        b.fresh[out] = true
+        return Val(out)
     }
     if symbol == "jet_set_to_list" || symbol == "jet_set_sort" || symbol == "jet_set_values" {
         if operands.len() != 1 -> return None
@@ -304,38 +348,56 @@ fn ir_set_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: St
         return Val(ir_set_call(&m, p, &b, set_row, "set.equal", [Int]{subject, operands[1]}, bool_row))
     }
     // `union(other)` is a copy of the receiver with a copy of each key of
-    // `other` inserted; `intersection(other)` a new Set of copies of the
-    // receiver's keys `other` holds too, in the receiver's order.
-    if symbol == "jet_set_union" || symbol == "jet_set_intersection" {
+    // `other` inserted; `intersection(other)` (`difference(other)`) a new Set
+    // of copies of the receiver's keys `other` holds (lacks), in the
+    // receiver's order; `symmetric_difference(other)` the difference both ways.
+    if symbol == "jet_set_union" || symbol == "jet_set_intersection" || symbol == "jet_set_difference" || symbol == "jet_set_symmetric_difference" {
         if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(&b, span, "Set {route} without an operand"))
         other :: ir_adapt(&m, p, &b, operands[1], set_row, span)
         if ir_failed(b) -> return Val(-1)
-        bool_row :: ir_type_row(&m, Type.Bool) ?? 0
-        union :: symbol == "jet_set_union"
         target := -1
-        if union {
+        if symbol == "jet_set_union" {
             target = ir_copy_value(&m, p, &b, subject, span)
             // The copy shares the receiver's buffer until it is its own.
             ir_make_unique(&m, p, &b, target)
+            bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+            walk :: ir_walk_open(&m, &b, other, shape.key.ty)
+            key :: ir_copy_value(&m, p, &b, walk.item, span)
+            _ :: ir_set_call(&m, p, &b, set_row, "set.insert", [Int]{target, key}, bool_row)
+            b.fresh[key] = false
+            ir_walk_close(&m, &b, walk)
         } else {
             target = ir_list_empty(&m, &b, set_row)
+            ir_set_keep_keys(&m, p, &b, set_row, shape, subject, other, target, symbol == "jet_set_intersection", span)
+            if symbol == "jet_set_symmetric_difference" -> ir_set_keep_keys(&m, p, &b, set_row, shape, other, subject, target, false, span)
         }
-        walk :: ir_walk_open(&m, &b, if union -> other else -> subject, shape.key.ty)
-        if !union {
-            word_row :: ir_word_row(&m)
-            found :: ir_set_call(&m, p, &b, set_row, "set.find", [Int]{other, walk.item}, word_row)
-            none :: ir_word_const(&m, &b, 0)
-            shared :: ir_bool_op(&m, &b, IROp.Ge, found, none)
-            ir_open_if(&b.f, shared, b.line)
-        }
-        key :: ir_copy_value(&m, p, &b, walk.item, span)
-        _ :: ir_set_call(&m, p, &b, set_row, "set.insert", [Int]{target, key}, bool_row)
-        b.fresh[key] = false
-        if !union -> ir_end(&b.f, b.line)
-        ir_walk_close(&m, &b, walk)
         ir_release(&m, &b, other)
         b.fresh[target] = true
         return Val(target)
+    }
+    // `is_subset(other)`: `other` holds every receiver key; `is_superset(other)`
+    // the converse; `is_disjoint(other)`: it holds none of them.
+    if symbol == "jet_set_is_subset" || symbol == "jet_set_is_superset" || symbol == "jet_set_is_disjoint" {
+        if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(&b, span, "Set {route} without an operand"))
+        other :: ir_adapt(&m, p, &b, operands[1], set_row, span)
+        if ir_failed(b) -> return Val(-1)
+        superset :: symbol == "jet_set_is_superset"
+        bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+        word_row :: ir_word_row(&m)
+        result :: ir_temp(&m, &b, bool_row)
+        yes :: ir_int_constant(&m, &b, bool_row, 1)
+        ir_emit(&b.f, IROp.Copy, result, yes, -1, -1, b.line)
+        walk :: ir_walk_open(&m, &b, if superset -> other else -> subject, shape.key.ty)
+        found :: ir_set_call(&m, p, &b, set_row, "set.find", [Int]{if superset -> subject else -> other, walk.item}, word_row)
+        none :: ir_word_const(&m, &b, 0)
+        broken :: ir_bool_op(&m, &b, if symbol == "jet_set_is_disjoint" -> IROp.Ge else -> IROp.Lt, found, none)
+        ir_open_if(&b.f, broken, b.line)
+        no :: ir_int_constant(&m, &b, bool_row, 0)
+        ir_emit(&b.f, IROp.Copy, result, no, -1, -1, b.line)
+        ir_end(&b.f, b.line)
+        ir_walk_close(&m, &b, walk)
+        ir_release(&m, &b, other)
+        return Val(result)
     }
     keyed :: symbol == "jet_set_remove" || symbol == "jet_set_pop_kernel" || symbol == "jet_set_replace_kernel"
     if !keyed && symbol != "jet_set_has" && symbol != "jet_set_insert" -> return None
