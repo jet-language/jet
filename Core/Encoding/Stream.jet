@@ -868,7 +868,10 @@ fn text_from_bytes(bytes: ^[U8]) -> String EncodingError! {
 
 fn byte_at(text: String, index: Int) -> U8 Never! {
     length :: text.count_bytes()
-    if index < 0 || index >= length -> panic("the list has {length} items, so position {index} doesn't exist")
+    if index < 0 || index >= length {
+        noun :: if length == 1 -> "item" else -> "items"
+        panic("the list has {length} {noun}, so position {index} doesn't exist")
+    }
     result := U8{0}
     #Unsafe("the byte position was checked against this String's storage length") {
         result = encoding.__string_byte(text, U64{index})

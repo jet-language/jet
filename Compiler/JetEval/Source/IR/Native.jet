@@ -679,7 +679,8 @@ fn jet_eval_native_stop(s: &JetEvalIRState, kind: Int, a: Int, b: Int, c: Int, d
     }
     if kind == X64_COMPTIME_STOP_LIST_BOUNDS {
         index :: jet_eval_ir_int_value(&s, b) ?? return
-        jet_eval_ir_source_fail(&s, "the list has {a} items, so position {index} doesn't exist")
+        noun :: if a == 1 -> "item" else -> "items"
+        jet_eval_ir_source_fail(&s, "the list has {a} {noun}, so position {index} doesn't exist")
         return
     }
     // A `panic`/`assert`/`require` stop (Trap.jet jet_rt_require_stop), which

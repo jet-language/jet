@@ -178,7 +178,7 @@ static const char *expected_reason(int64_t mode) {
         return range_reason;
     }
     if (mode == 2 || (mode >= 33 && mode <= 36)) return numeric_reason;
-    if (mode == 3) return "the list has 1 items, so position 1 doesn't exist";
+    if (mode == 3) return "the list has 1 item, so position 1 doesn't exist";
     if (mode == 4) return "the list has 9223372036854775807 items, so position -9223372036854775808 doesn't exist";
     if (mode >= 5 && mode <= 17) return range_reason;
     if ((mode >= 18 && mode <= 25) || mode == 30 || mode == 31) return overflow_reason;

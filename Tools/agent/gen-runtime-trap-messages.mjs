@@ -87,7 +87,10 @@ const literals = {
   divide_zero: "divided by zero",
   native_index_range: "native Int argument exceeds host range",
   list_head: "the list has ",
-  list_position: " items, so position ",
+  // "1 item", otherwise "N items" (JetRuntime trap_list_count).
+  list_item: " item",
+  list_plural: "s",
+  list_position: ", so position ",
   list_end: " doesn't exist`\n  --> <core.prelude>:0\n",
   // `bounds: report` (JetRuntime jet_rt_report_list_bounds): the failed
   // check's line, then its file and line; the program goes on.
