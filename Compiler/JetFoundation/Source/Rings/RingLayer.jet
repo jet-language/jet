@@ -53,6 +53,7 @@ fn jet_ring_dependency_rows() -> [JetRingDependencyRow] Never! {
         {module_name: "core.encoding.json", dependencies: [String]{"core.encoding", "core.math"}},
         {module_name: "core.encoding.jsonl", dependencies: [String]{"core.encoding", "core.encoding.json"}},
         {module_name: "core.encoding.toml", dependencies: [String]{"core.encoding"}},
+        {module_name: "core.encoding.validate", dependencies: [String]{"core.encoding"}},
         {module_name: "core.encoding.xml", dependencies: [String]{"core.encoding"}},
         {module_name: "core.event", dependencies: [String]{"core.mem"}},
         {module_name: "core.files", dependencies: [String]{"core.text", "core.sys"}},
@@ -153,7 +154,7 @@ fn jet_ring_parse_manifest_layer(value: String) -> RuntimeLayer? {
 fn jet_ring_layer_of_module(module_name: String) -> RuntimeLayer Never! {
     if module_name == {
         "core" | "core.prelude" | "core.math" | "core.units" | "core.perf" | "core.mem.scope" -> RuntimeLayer.Core
-        "core.mem" | "core.math.random" | "core.crypto" | "core.crypto.random" | "core.crypto.uuid" | "core.crypto.vault" | "core.encoding" | "core.encoding.json" | "core.encoding.jsonl" | "core.encoding.csv" | "core.encoding.toml" | "core.encoding.yaml" | "core.encoding.xml" | "core.encoding.cbor" | "core.encoding.hex" | "core.encoding.base64" | "core.encoding.base32" | "core.text" | "core.text.fmt" | "core.reflect" | "core.compiler" | "core.game" | "core.reactive.loadable" | "core.event" | "core.compute" | "core.compute.solve" | "core.time.expiring" | "core.reactive" | "core.data" | "core.data.plot" | "core.data.sketch.hll" | "core.data.sketch.tdigest" | "core.data.sketch.cms" | "core.data.sketch.reservoir" | "core.log" | "core.regex" | "core.net.url" | "core.net.mime" -> RuntimeLayer.Alloc
+        "core.mem" | "core.math.random" | "core.crypto" | "core.crypto.random" | "core.crypto.uuid" | "core.crypto.vault" | "core.encoding" | "core.encoding.json" | "core.encoding.jsonl" | "core.encoding.csv" | "core.encoding.toml" | "core.encoding.validate" | "core.encoding.yaml" | "core.encoding.xml" | "core.encoding.cbor" | "core.encoding.hex" | "core.encoding.base64" | "core.encoding.base32" | "core.text" | "core.text.fmt" | "core.reflect" | "core.compiler" | "core.game" | "core.reactive.loadable" | "core.event" | "core.compute" | "core.compute.solve" | "core.time.expiring" | "core.reactive" | "core.data" | "core.data.plot" | "core.data.sketch.hll" | "core.data.sketch.tdigest" | "core.data.sketch.cms" | "core.data.sketch.reservoir" | "core.log" | "core.regex" | "core.net.url" | "core.net.mime" -> RuntimeLayer.Alloc
         else -> RuntimeLayer.Std
     }
 }

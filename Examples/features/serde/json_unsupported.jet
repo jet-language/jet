@@ -28,7 +28,7 @@ fn reject(label: String, number: Float) {
     if json.dump(tree) == .Ok(_) -> panic("non-finite dump accepted")
     if json.to_string_pretty(tree) == .Ok(_) -> panic("non-finite pretty accepted")
     leaf :: Dyn.Float(number)
-    assert_eq(leaf.show(), number.show())
+    assert_eq("{leaf}", "{number}")
     print("display: {number} {leaf}")
 }
 
@@ -46,7 +46,7 @@ fn run() {
     controls :: String.from_bytes(bytes) ?? panic("C0 text")
     wire :: json.to_string(controls) ?? panic("C0 JSON")
     assert_eq(wire, C0_EXPECTED)
-    assert_eq(json.parse(wire) ?? panic("C0 round trip"), Dyn.Text(controls))
+    assert((json.parse(wire) ?? panic("C0 round trip")) == Dyn.Text(controls))
     print("C0 lowercase: {wire.contains("\\u001f") && !wire.contains("\\u001F")}")
     bad :: Dyn.Float(math.nan())
     if jsonl.to_string([Dyn]{Dyn.Int(12), bad}) == {

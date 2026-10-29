@@ -859,15 +859,25 @@ fn sema_web_form_method_member(method: String, arity: Int) -> String? Never! {
 fn sema_call_try_web_form_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver_value.ty != (Type.Named{name: "WebFormTyped"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
     member :: sema_web_form_method_member(method, args.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    record :: sema_call_core_record("core.web.forms", member, args.len() + 1, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    signature :: core_call_typed_signature("core.web.forms", member, args.len() + 1) ?? {
+    updated_args := args
+    // D-DX-FORM1=A: `form.validate(.field, on: timing, with: check)` binds its
+    // two labels; the leading-dot field selector lowers to the ABI field name.
+    if member == "typed_validate_field" {
+        if !sema_services_bind_labels("WebFormTyped.validate", &updated_args, [String]{"", "on", "with"}, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        loop index in 0..<updated_args.len() {
+            updated_args[index].label = None
+        }
+        if sema_web_form_field_selector(updated_args[0], &diagnostics) == .Val(selector) -> updated_args[0] = selector
+    }
+    record :: sema_call_core_record("core.web.forms", member, updated_args.len() + 1, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    signature :: core_call_typed_signature("core.web.forms", member, updated_args.len() + 1) ?? {
         &diagnostics.push(sema_error("E0904", span, "`core.web.forms.{member}` has no typed call contract", "the opaque form method uses its canonical native route", "provide the registered Core typed signature"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     all_params :: sema_call_core_parameter_records(signature, [Type]{}, span, false)
     params := [SemaCallParam]{}
     loop (index, parameter) in all_params { if index > 0 -> &params.push(parameter) }
-    checked :: sema_network_handle_checked_args(method, params, args, Val(receiver), AccessConvention.Read, false, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    checked :: sema_network_handle_checked_args(method, params, updated_args, Val(receiver), AccessConvention.Read, false, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     values := [TExpr]{receiver_value}
     implicit_clones := [Bool]{false}
     loop argument in checked {
@@ -879,4 +889,32 @@ fn sema_call_try_web_form_method(receiver: Expr, receiver_value: TExpr, method: 
     if !sema_call_core_record_effects(record, span, [Type]{}, result, fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     value :: sema_call_core_tree(record, values, span, [Type]{}, implicit_clones, result, fallibility, expected, environment, program, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(value)}
+}
+
+// A leading-dot form field selector (`.carrier`) names one model field; the
+// typed-form runtime checks the name against its derived schema, so the
+// selector lowers to the ABI field-name String. A lower-case selector parses
+// as a bare member chain, an upper-case one as a leading-dot enum literal.
+// None for any other argument.
+fn sema_web_form_field_selector(argument: CallArg, diagnostics: &[Diagnostic]) -> CallArg? {
+    if argument.expr == .Field(base, member, member_span, _) {
+        if !sema_expr_is_bare_subject(base) -> return None
+        return Val(sema_web_form_selector_name(member, member_span, argument, &diagnostics))
+    }
+    if argument.expr == .EnumLit(type_name, variant, _, payload, leading_dot, literal_span, _) {
+        if !leading_dot || type_name != "" -> return None
+        if payload.len() > 0 {
+            &diagnostics.push(sema_error("E0112", literal_span, "form field selector `.{variant}` cannot carry payload arguments", "a leading-dot form selector names one field and does not construct an enum variant", "write `.{variant}` without parentheses"))
+        }
+        return Val(sema_web_form_selector_name(variant, literal_span, argument, &diagnostics))
+    }
+    None
+}
+
+fn sema_web_form_selector_name(field: String, selector_span: Span, argument: CallArg, diagnostics: &[Diagnostic]) -> CallArg {
+    if argument.convention == AccessConvention.Move {
+        &diagnostics.push(sema_error("E0203", argument.span, "a value was passed with the move marker `^` to a parameter that does not consume", "form field selectors are compiler-owned names; validation reads the field", "remove the move marker `^` here"))
+    }
+    CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: field}}, span: selector_span, id: AST_NODE_GENERATED},
+        span: argument.span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
 }

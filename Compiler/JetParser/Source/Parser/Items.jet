@@ -250,6 +250,10 @@ fn parser_parse_item_or_import(state: &JetParserState) -> ParsedItemOrImport {
             value :: parser_parse_tag_policy(&state, modifiers)
             return ParsedItemOrImport{item: Val(value), import: None, handled: true}
         }
+        parser_migration_ahead(&state) -> {
+            value :: parser_parse_migration(&state)
+            return ParsedItemOrImport{item: Val(Item.Migration{value: value}), import: None, handled: true}
+        }
         parser_item_declaration_ahead_at(&state, 0) && parser_extern_ahead(&state) -> {
             value :: parser_parse_extern_rust(&state)
             return ParsedItemOrImport{item: Val(value), import: None, handled: true}

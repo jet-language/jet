@@ -1,19 +1,31 @@
-// core.encoding.xml profile: well-formed XML 1.0 data parsing without DTDs.
-// Each case is one cell of the supported/unsupported table. The parser never
-// fetches external resources and never executes markup; it is a data parser,
-// not an HTML parser and not a renderer.
+// core.encoding.xml profile: well-formed XML 1.0 data parsing (D-ENCXML1).
+// Each case is one cell of the supported/unsupported table. The node tree is
+// lossless: a doctype and entity references round-trip as written, and the
+// parser never fetches external resources, expands undeclared entities, or
+// executes markup; it is a data parser, not an HTML parser and not a renderer.
+// Rejections report the closed `XMLReason`.
 use core.encoding.xml as xml
+
+fn reason_name(kind: xml.XMLReason) -> String {
+    if kind == {
+        .InvalidEncoding -> "InvalidEncoding"
+        .Malformed -> "Malformed"
+        .MismatchedTag -> "MismatchedTag"
+        .InvalidName -> "InvalidName"
+        .Namespace -> "Namespace"
+        .DuplicateAttribute -> "DuplicateAttribute"
+        .Entity -> "Entity"
+        .EntityCycle -> "EntityCycle"
+        .Limit -> "Limit"
+        .Canonicalization -> "Canonicalization"
+        .Shape -> "Shape"
+        .Unsupported -> "Unsupported"
+    }
+}
 
 fn show(label: String, text: String) {
     tree :: xml.parse(text) ?? {
-        kind :: if err.kind == {
-            .Syntax -> "Syntax"
-            .Truncated -> "Truncated"
-            .Unsupported -> "Unsupported"
-            .Limit -> "Limit"
-            .IO -> "IO"
-            .State -> "State"
-        }
+        kind :: reason_name(err.kind)
         print("{label}: rejected {kind}: {err.reason}")
         return
     }
@@ -40,14 +52,7 @@ fn run() {
     show("html void tag", "<p>line<br>next</p>")
     loop depth in [256, 257, 10000] {
         tree :: xml.parse(nested(depth)) ?? {
-            kind :: if err.kind == {
-                .Syntax -> "Syntax"
-                .Truncated -> "Truncated"
-                .Unsupported -> "Unsupported"
-                .Limit -> "Limit"
-                .IO -> "IO"
-                .State -> "State"
-            }
+            kind :: reason_name(err.kind)
             print("depth {depth}: rejected {kind}: {err.reason}")
             next
         }

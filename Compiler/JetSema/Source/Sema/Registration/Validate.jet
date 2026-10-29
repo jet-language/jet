@@ -9,6 +9,8 @@
 // (sema_serde_items_struct_decode_body).
 use jet_foundation.[
     AST_NODE_GENERATED,
+    AccessConvention,
+    CallArg,
     Diagnostic,
     Expr,
     Func,
@@ -19,10 +21,14 @@ use jet_foundation.[
     PlaceAccess,
     Span,
     Stmt,
+    StrPart,
     StructDef,
     Type,
+    ast_empty_call_arg_flags,
     ast_func,
     ast_visit_expr,
+    core_record_field,
+    core_source_is_validate,
 ]
 
 // The rule statement's name (Syntax `VALIDATE_CHECK_FN`).
@@ -155,4 +161,61 @@ fn sema_validate_note_name(fields: [String:Bool], found: &[String], expression: 
         if fields.get(name) == None || found.contains(name) -> return
         &found.push(name.copy())
     }
+}
+
+// D-VALIDATE1=A: on the Core `Validate<T>` builder (`Validate.over(value)`),
+// `.check(condition, at: field, "message")` is the block's rule. `at:` must
+// be a bare field of `T`; the Core method receives that field's name, so the
+// rule comes back as three positional arguments. A malformed rule reports its
+// one problem and gives None.
+fn sema_validate_over_receiver(receiver: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? Never! {
+    if receiver == .Apply(_, args) {
+        // copy: the validated type is a payload of read parameter `receiver`
+        if args.len() == 1 && core_source_is_validate(sema_expr_receiver_nominal_identity(environment, program, receiver)) -> return Val(args[0].copy())
+    }
+    None
+}
+
+fn sema_validate_over_rule(subject: Type, args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> [CallArg]? {
+    if args.len() != 3 -> return sema_validate_over_refuse(sema_validate_e0353(span), &diagnostics)
+    if args[0].label != None -> return sema_validate_over_refuse(sema_validate_e0353(args[0].span), &diagnostics)
+    at_label :: args[1].label ?? return sema_validate_over_refuse(sema_validate_e0353(args[1].span), &diagnostics)
+    if at_label.name != "at" -> return sema_validate_over_refuse(sema_validate_e0353(args[1].span), &diagnostics)
+    if args[2].label != None -> return sema_validate_over_refuse(sema_validate_e0353(args[2].span), &diagnostics)
+    if args[1].expr == .Ident(name, name_span, _) {
+        if !sema_validate_over_has_field(subject, name, environment, program, &scopes) -> return sema_validate_over_refuse(sema_validate_e0354(name, name_span), &diagnostics)
+        rule := args
+        // copy: the field name is a payload of read parameter `args`; the rewritten rule owns its String
+        rule[1] = CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: name.copy()}}, span: name_span, id: AST_NODE_GENERATED},
+            span: args[1].span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+        return Val(rule)
+    }
+    sema_validate_over_refuse(sema_validate_e0353(args[1].span), &diagnostics)
+}
+
+fn sema_validate_over_refuse(diagnostic: ^Diagnostic, diagnostics: &[Diagnostic]) -> [CallArg]? Never! {
+    &diagnostics.push(diagnostic)
+    None
+}
+
+// Whether `name` is a declared field of the validated type: a struct's own
+// field, or a builtin Core record's field row.
+fn sema_validate_over_has_field(subject: Type, name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Bool {
+    owner_name :: if subject == {
+        .Named(type_name) -> type_name
+        .Apply(type_name, _) -> type_name
+        else -> ""
+    }
+    if owner_name == "" -> return false
+    owner := sema_expression_type_symbol(&scopes, environment, program, owner_name)
+    if owner == None -> owner = sema_expression_carrier_type_symbol(environment, program, owner_name)
+    if owner == .Val(owner_symbol) {
+        if sema_scope_declaration_struct(environment, program, owner_symbol.id) == .Val(shape) {
+            loop field in shape.fields {
+                if field.name == name -> return true
+            }
+            return false
+        }
+    }
+    core_record_field(owner_name, name) != None
 }

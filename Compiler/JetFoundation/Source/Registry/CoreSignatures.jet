@@ -193,6 +193,10 @@ fn core_call_parameter_contract(module_name: String, member: String) -> [CoreCal
             core_param_required("address"), core_param_required("mux"),
             core_param_optional("tls", ParamZone.LabelOnly, absent), core_param_optional("deadline", ParamZone.LabelOnly, absent),
         })
+        // `http.serve(mux, deadline: d)` binds the loopback server (D-FOUND-LIFECYCLE1).
+        module_name == "core.http" && member == "serve" -> Val([CoreCallParameterContract]{
+            core_param_required("mux"), core_param_required_label("deadline"),
+        })
         module_name == "core.http.server" && member == "static_files" -> Val([CoreCallParameterContract]{
             core_param_required("mux"), core_param_required("prefix"), core_param_required("root"),
             core_param_optional("index", ParamZone.LabelOnly, absent), core_param_optional("dotfiles", ParamZone.LabelOnly, absent),

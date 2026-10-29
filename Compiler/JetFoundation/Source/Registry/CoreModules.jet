@@ -160,6 +160,14 @@ CORE_SOURCE_HTTP_MESSAGE_OWNERS :: [CoreSourceOwnedType]{
     {path: "Core/Http/Http.jet", name: "HTTPRequest"},
     {path: "Core/Http/Http.jet", name: "HTTPResponse"},
 }
+// D-VALIDATE1=A: the use-site rule builder whose `check(…, at: field, …)`
+// Sema checks against the validated type's fields.
+CORE_SOURCE_VALIDATE_OWNER :: [CoreSourceOwnedType]{
+    {path: "Core/Encoding/Validate.jet", name: "Validate"},
+}
+fn core_source_is_validate(identity: String) -> Bool Never! {
+    core_source_owns_type_in(CORE_SOURCE_VALIDATE_OWNER, identity)
+}
 
 // Whether `method` at `nargs` may target a reserved source method, so the
 // caller resolves the receiver's checked identity first.
@@ -240,6 +248,7 @@ CORE_BARE_SOURCE_MODULES :: [CoreBareSourceModule]{
     {name: "Clock", module_name: "core.time"},
     {name: "measurement", module_name: "core.units"},
     {name: "keep", module_name: "core.prelude"},
+    {name: "Validate", module_name: "core.encoding.validate"},
 }
 fn core_bare_source_module(name: String) -> String? Never! {
     loop row in CORE_BARE_SOURCE_MODULES {

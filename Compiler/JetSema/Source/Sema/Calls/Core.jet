@@ -180,12 +180,43 @@ fn sema_call_core_crypto_expert_gate(module_name: String, member: String, span: 
     }
 }
 
+// A Core call whose implementation no `jet` has yet (R2(b)): the feature it
+// needs and the card that ports it. Its runtime is missing, so building the
+// call would stop inside the compiler; sema reports E2104 at the call instead.
+fn sema_call_core_unbuilt(module_name: String, member: String) -> (feature: String, card: Int)? Never! {
+    if module_name == "core.service" && member == "tree" -> return Val((feature: "the service tree runtime (workers, delivery and supervision)", card: 4957))
+    if module_name == "core.ui" && (member == "preview" || member == "playground") {
+        return Val((feature: "UI previews and playgrounds (their types and viewport rendering)", card: 4189))
+    }
+    if (module_name == "app" || module_name == "core.web") && (member == "live" || member == "live_get" || member == "live_show" || member == "live_stats" || member == "subscribe" || member == "signal_push") {
+        return Val((feature: "the live query runtime (`app.live` queries and their subscriptions)", card: 6104))
+    }
+    None
+}
+
+// E2104 at a user call of an unbuilt Core feature (sema_call_core_unbuilt),
+// once per call: a Core row call and a source-owned call both pass here.
+// Core's own source may still name it; only a call from user code is refused.
+fn sema_call_core_unbuilt_gate(module_name: String, member: String, span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) Never! {
+    if environment.module_identity.starts_with("<corelib>/") -> return
+    unbuilt :: sema_call_core_unbuilt(module_name, member) ?? return
+    loop diagnostic in diagnostics {
+        if diagnostic.code != "E2104" -> next
+        if diagnostic.span == .Val(seen) {
+            if seen.start == span.start && seen.end == span.end -> return
+        }
+    }
+    short :: module_name.slice(module_name.rfind(".") + 1, module_name.len())
+    &diagnostics.push(sema_error("E2104", span, "`{short}.{member}` is not built yet", "This `jet` has no implementation of {unbuilt.feature} yet, and no other `jet` can check or run it.", "Remove the `{short}.{member}` call for now; {unbuilt.feature} needs its Jet implementation first (card #{unbuilt.card})."))
+}
+
 fn sema_call_core_source_target(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: String, member: String, type_args: [Type], span: Span, registered_source_target: Bool, diagnostics: &[Diagnostic]) -> SemaCallDirectTarget? {
     if program.registration_graph == .Val(graph) {
     module_index :: sema_registration_module_index(graph, module_identity) ?? return None
     // Module rows are read in place; binding one would copy its whole program.
     source_name :: graph.modules[module_index].module_name
     if sema_call_core_module_identity(environment, program, source_name) != Val(module_identity) -> return None
+    sema_call_core_unbuilt_gate(source_name, member, span, environment, &diagnostics)
     // `core.http.client.request` is checked by its Core row (Rust
     // core_call.rs: a `URL` or String target, sema_call_http_transport), and
     // that checked row then executes the source `request` declaration.
@@ -254,6 +285,9 @@ fn sema_call_try_source_module_call(alias: String, alias_span: Span, member: Str
     if !sema_call_core_record_import_reference(environment, program, scopes, imported, alias_span, &context) -> return unhandled
     if program.registration_graph == .Val(graph) {
     module_index :: sema_registration_module_index(graph, imported.module_identity) ?? return unhandled
+    // A Core source module imported by its bare name (`use app`) is called
+    // here, not through the Core module-method route.
+    if graph.modules[module_index].module_identity.starts_with("<corelib>/") -> sema_call_core_unbuilt_gate(graph.modules[module_index].module_name, member, span, environment, &diagnostics)
     failed :: SemaMethodSpecialCheck{handled: true, value: None}
     export :: sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{}) ?? {
         if sema_registration_direct_symbol(graph.modules[module_index], member) != None {

@@ -3174,8 +3174,9 @@ struct JetDriverCoreDemandNames {
     // or alias it is, -1 for none, -2 when it names two rows (the scan then
     // checks every row), so a bare name costs one lookup per identifier.
     bare_rows: [Int]
-    // Ids of the first segments of the Core module paths (`files` for
-    // `core.files`), for the qualified-path demand.
+    // Ids of the segments of the Core module paths (`files` for `core.files`,
+    // `encoding` and `json` for `core.encoding.json`), for the qualified-path
+    // demand.
     core_segments: [Int]
 }
 
@@ -3203,8 +3204,10 @@ fn jet_driver_core_demand_names(tables: TokenTables) -> JetDriverCoreDemandNames
     loop row in CORE_MODULE_EXPORTS {
         parts :: row.module_name.split(".").to_list()
         if parts.len() < 2 || parts[0] != "core" -> next
-        id :: jet_driver_core_demand_name(tables, parts[1])
-        if id >= 0 && !core_segments.contains(id) -> &core_segments.push(id)
+        loop at in 1..<parts.len() {
+            id :: jet_driver_core_demand_name(tables, parts[at])
+            if id >= 0 && !core_segments.contains(id) -> &core_segments.push(id)
+        }
     }
     JetDriverCoreDemandNames{or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), regex_name: jet_driver_core_demand_name(tables, "Regex"), pattern_matches_name: jet_driver_core_demand_name(tables, "matches"), pattern_match_name: jet_driver_core_demand_name(tables, "match"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments}
 }
@@ -4307,18 +4310,35 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
         }
         // The qualified-path demand (JetDriverCoreIdentifierDemand.core_paths):
         // a chain whose head is a root `core` alias of this unit names the
-        // Core source module that owns the called member.
+        // Core source module that owns the called member; a chain whose head
+        // aliases a Core module (`use core.encoding`, then
+        // `encoding.json.parse`) names that module's submodule.
         if demand.core_paths.len() > 0 {
             root_aliases := [String]{}
+            module_aliases := [String]{}
+            module_paths := [String]{}
             loop scoped in scoped_imports {
                 if scoped.declaration.kind == .Module(imported, _) {
-                    if imported == "core" -> &root_aliases.push(scoped.declaration.alias)
+                    if imported == "core" {
+                        &root_aliases.push(scoped.declaration.alias)
+                    } else if imported.starts_with("core.") {
+                        &module_aliases.push(scoped.declaration.alias)
+                        &module_paths.push(imported)
+                    }
                 }
             }
             loop path in demand.core_paths {
                 parts :: path.split(".").to_list()
-                if !root_aliases.contains(parts[0]) -> next
-                module_name :: "core.{parts[1..<parts.len()].join(".")}"
+                rest :: parts[1..<parts.len()].join(".")
+                module_name := ""
+                if root_aliases.contains(parts[0]) {
+                    module_name = "core.{rest}"
+                } else {
+                    loop at in 0..<module_aliases.len() {
+                        if module_aliases[at] == parts[0] -> module_name = "{module_paths[at]}.{rest}"
+                    }
+                }
+                if module_name == "" -> next
                 sourced := false
                 loop row in request.core_sources {
                     if row.owner == "" && row.module_name == module_name && (!row.runtime || importer_core) -> sourced = true

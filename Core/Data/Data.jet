@@ -765,12 +765,19 @@ fn locator_format(locator: String) -> String DataError! {
     }
 }
 
-fn csv<T: Decode>(text: String) -> [T] [FieldError]! {
-    csv_codec.decode<T>(text)
+// Typed CSV and JSON input report one DataError (kind Decode) that keeps
+// every field failure of the codec decode.
+fn data_decode_error(errors: [FieldError], operation: String) -> DataError Never! {
+    reasons :: loop error in errors -> if error.path == "" -> error.reason else -> "{error.path}: {error.reason}"
+    data_error(DataErrorKind.Decode, reasons.join("; "), operation)
 }
 
-fn json<T: Decode>(text: String) -> [T] [FieldError]! {
-    json_codec.decode<[T]>(text)
+fn csv<T: Decode>(text: String) -> [T] DataError! {
+    csv_codec.decode<T>(text) ?? return Err(data_decode_error(err, "data.csv"))
+}
+
+fn json<T: Decode>(text: String) -> [T] DataError! {
+    json_codec.decode<[T]>(text) ?? return Err(data_decode_error(err, "data.json"))
 }
 
 #Test("typed data JSON reuses exact number decoding") {

@@ -3205,6 +3205,10 @@ fn sema_check_registration_module_program(environment: SemaScopeEnvironment, pro
                 // (`env.*`, `perf.*`, `dev`, `workspace`) carries no checked
                 // body; its contributions are validated by their own passes.
                 .Module(_) -> {}
+                // A `migration` block has no checked body of its own: the
+                // derived decode of its published-schema struct replays it
+                // (Registration/SerdeItems.jet, D-MIGRATE4).
+                .Migration(_) -> {}
                 .Test(test) -> {
                     if test.name == .Val(test_name) {
                         if test_names.get(test_name) != None || sema_scope_resolve_index(scopes, test_name) != None {

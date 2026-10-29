@@ -839,6 +839,7 @@ fn sema_call_try_core_direct_call(call: Call, expected: Type?, environment: Sema
     mount := sema_call_try_ui_mount(module_name, member, alias, call.name_span, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if mount.handled -> return mount
     sema_call_core_crypto_expert_gate(module_name, member, call.name_span, context, &diagnostics)
+    sema_call_core_unbuilt_gate(module_name, member, call.name_span, environment, &diagnostics)
     if sema_call_core_variadic_print(environment, program, scopes, alias, member, call.args.len(), call.name_span, &context) -> return sema_call_check_ambient_print(call, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     diagnostics_before := diagnostics.len()
     route := sema_call_core_resolve_import_route(environment, program, scopes, alias, member, call.type_args, call.args.len(), sema_call_core_first_is_move(call.args), call.name_span, call.name_span, &context, &diagnostics)

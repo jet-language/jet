@@ -439,6 +439,9 @@ fn sema_expression_call_expected(value: TExpr, expected: Type?, environment: Sem
             offered :: sema_expr_expected_type(success, environment, program)
             compatible :: sema_expr_expected_assignable(required, offered, environment, program) ?? return None
             if !compatible {
+                // D-OPT-LIFT1: a `T` success fills a `T?` slot; the
+                // propagated payload is lifted by `sema_expression_auto_propagate`.
+                if sema_expr_optional_lift_type(required, offered, environment, program) == .Val(_) -> return Val(value)
                 &diagnostics.push(sema_type_mismatch(required, offered, value.span))
                 return None
             }

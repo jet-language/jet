@@ -1278,7 +1278,8 @@ fn sema_type_bound_satisfied_at(graph: SemaRegistrationGraph, actual: Type, boun
 }
 
 // A list, fixed array, or optional value is codable exactly when its
-// element is, and a map when its key and value are; the dynamic `Dyn` is
+// element is, a map when its key and value are, and an anonymous union when
+// every member is (it codes through its structural enum); the dynamic `Dyn` is
 // the codec tree itself (Rust `TraitRegistry::type_implements_trait`).
 fn sema_type_codec_structural_bound(graph: SemaRegistrationGraph, actual_resolved: Type, bound_name: String, caller: Int, generic_params: [TGenericParam]) -> Bool? {
     if bound_name != "Encode" && bound_name != "Decode" && bound_name != "Serialize" -> return None
@@ -1288,6 +1289,13 @@ fn sema_type_codec_structural_bound(graph: SemaRegistrationGraph, actual_resolve
             key_satisfied :: sema_type_bound_satisfied_at(graph, key, bound_name, caller, generic_params) ?? return None
             if !key_satisfied -> return Val(false)
             return sema_type_bound_satisfied_at(graph, value, bound_name, caller, generic_params)
+        }
+        .Union(members) -> {
+            loop member in members {
+                member_satisfied :: sema_type_bound_satisfied_at(graph, member, bound_name, caller, generic_params) ?? return None
+                if !member_satisfied -> return Val(false)
+            }
+            return Val(true)
         }
         .Named(name) -> {
             if name == "Dyn" || name == "DateTime" || name == "ZonedDateTime" || name == "JSON" || name == "TOML" || name == "YAML" || name == "CSV" -> return Val(true)

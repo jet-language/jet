@@ -3082,6 +3082,7 @@ fn sema_expr_try_core_module_method(receiver: Expr, method: String, method_span:
     mount := sema_call_try_ui_mount(module_name, method, alias, alias_span, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if mount.handled -> return SemaMethodSpecialCheck{handled: true, value: mount.value}
     sema_call_core_crypto_expert_gate(module_name, method, method_span, context, &diagnostics)
+    sema_call_core_unbuilt_gate(module_name, method, method_span, environment, &diagnostics)
     if !nested && sema_call_core_variadic_print(environment, program, scopes, alias, method, args.len(), alias_span, &context) {
         printed := sema_call_check_ambient_print(Call{name: "{alias}.{method}", name_span: method_span, type_args: type_args, args: args}, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: printed.value}
@@ -3462,6 +3463,15 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
     if take_pattern.handled -> return take_pattern.value
     zip := sema_expression_zip_method(receiver, receiver_value, method, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if zip.handled -> return zip.value
+    // D-VALIDATE1=A: a `Validate.over(value)` rule binds `at:` to a field of
+    // the validated type, then checks as the Core builder method.
+    if method == SEMA_VALIDATE_CHECK && sema_validate_over_receiver(receiver_value.ty, environment, program) == .Val(subject) {
+        rule :: sema_validate_over_rule(subject, args, method_span, environment, program, &scopes, &diagnostics) ?? {
+            sema_data_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            return None
+        }
+        return sema_expr_check_declared_method(receiver, receiver_value, method, routed_method, method_span, owner_type_args, type_args, rule, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
     // A declared nominal owns the methods it declares, even when its leaf
     // spells a builtin carrier such as Core's `URL` or `MIME`; builtin handle
     // routes apply only when no declared method matches.

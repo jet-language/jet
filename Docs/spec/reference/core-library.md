@@ -2741,6 +2741,7 @@ public typed-text carrier.
 `#Codable` requests both directions; `#Encode` and `#Decode` request one-way derivation, and derivation is compiler-owned rather than macro- or reflection-driven (`D-SERDE1–8`). Typed `decode<T>` produces `T ![FieldError]` (or `[T] ![FieldError]` for CSV); each failure preserves its path and reason, and generic codec bounds are injected at the use site (`D-GENERIC-CALL1`; `D-SERDE6`; `D-SERDE9–12`). Hand-written codecs use the same `Encode`/`Decode` protocol and field-path accumulation (`D-SERDE2`; `D-SERDE13–16`).
 
 Validation can be declared as `validate { check(...) }`: all failed checks accumulate, and conditions and messages are purity-checked (`D-VALIDATE1`; `D-FIELDPOL1`; `S60/E3401`).
+The use-site escape is the bare Core builder `Validate.over(value)` (declared in `core.encoding.validate`, which the bare name loads on demand): `.check(condition, at: field, "message")` takes the same rule shape, where `at:` must name a field of the validated type (E0353/E0354). `.finish()` returns `T ![FieldError]` with every failed rule (`D-VALIDATE1`).
 
 The concrete format sources live under
 [`Core/Encoding/`](../../../Core/Encoding/), and typed CSV/JSON convenience

@@ -6905,8 +6905,9 @@ Two files with the same words give the same address and fail E2807 naming both.
 Addresses are derived once at build time and requests match exactly, with no
 lowercasing or redirects. `jet new route --path /order-items` writes
 `Routes/OrderItems.jet` with the `.routes(from: "Routes")` opt-in. The
-`#Server.Get("/path")` page override waits on the `core.http.server.Get`
-marker (D-HTTP-ROUTE-EXPOSE1), which is not implemented yet.
+`core.http.server.Get` marker (D-HTTP-ROUTE-EXPOSE1) tags methods of a
+`mux.mount(value)` struct; the `#Server.Get("/path")` page override that reuses
+it is not implemented yet.
 
 **D-COMPUTE1=D — one Core compute family**: `core.compute` owns eager,
 fusion, differentiation, placement, and expert device/buffer/stream/kernel work

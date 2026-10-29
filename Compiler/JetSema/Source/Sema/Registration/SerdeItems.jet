@@ -17,6 +17,7 @@ use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
     BinOp,
+    Call,
     CallArg,
     CtValue,
     Diagnostic,
@@ -33,6 +34,7 @@ use jet_foundation.[
     Item,
     LValue,
     Marker,
+    MigrationDecl,
     NamedSpan,
     NamedType,
     OrFallback,
@@ -90,7 +92,10 @@ fn sema_serde_expand_builtin_items(items: &[Item]) {
                 // generated span. (A non-constant default, E2414, is folded
                 // and reported after registration.)
                 if encode && !sema_serde_items_generated(encode_impls) && sema_serde_items_struct_valid(items, facts, definition, "Encode", auto_encode) -> &generated.push(sema_serde_items_struct_encode(definition, span))
-                if decode && !sema_serde_items_generated(decode_impls) && sema_serde_items_struct_valid(items, facts, definition, "Decode", auto_decode) -> &generated.push(sema_serde_items_struct_decode(definition, span))
+                if decode && !sema_serde_items_generated(decode_impls) && sema_serde_items_struct_valid(items, facts, definition, "Decode", auto_decode) {
+                    &generated.push(sema_serde_items_struct_decode(definition, span))
+                    loop helper in sema_serde_items_migration_helpers(definition, items, span) -> &generated.push(helper)
+                }
             }
             .Enum(definition) -> {
                 encode_impls :: sema_serde_items_impl_flags(facts, definition.name, "Encode")
@@ -351,7 +356,11 @@ fn sema_serde_items_codec_body(items: [Item], position: Int, trait_name: String,
     encode :: trait_name == "Encode"
     if items[position] == {
         .Struct(definition) -> {
-            body :: if encode -> sema_serde_items_struct_encode_body(definition, span) else -> sema_serde_items_struct_decode_body(definition, items, span)
+            body :: if {
+                encode -> sema_serde_items_struct_encode_body(definition, span)
+                sema_serde_items_migration_blocks(definition, items).len() > 0 -> sema_serde_items_migration_decode_body(definition, span)
+                else -> sema_serde_items_struct_decode_body(definition, items, span)
+            }
             return Val(SemaSerdeCodecBody{body: body, wire: sema_serde_items_struct_wire(definition)})
         }
         .Enum(definition) -> {
@@ -461,7 +470,11 @@ fn sema_serde_items_ordered_encode_fields(definition: StructDef, fields: [Field]
 }
 
 fn sema_serde_items_push_pair(pairs: String, key: String, value: Expr, pair_type: Type, span: Span) -> Stmt Never! {
-    row :: Expr.TupleLit{fields: [TupleField]{TupleField{name: "key", value: sema_serde_items_string(key, span)}, TupleField{name: "value", value: value}}, span: span, ty: Val(pair_type.copy()), id: AST_NODE_GENERATED}
+    sema_serde_items_push_row(pairs, sema_serde_items_string(key, span), value, pair_type, span)
+}
+
+fn sema_serde_items_push_row(pairs: String, key: Expr, value: Expr, pair_type: Type, span: Span) -> Stmt Never! {
+    row :: Expr.TupleLit{fields: [TupleField]{TupleField{name: "key", value: key}, TupleField{name: "value", value: value}}, span: span, ty: Val(pair_type.copy()), id: AST_NODE_GENERATED}
     Stmt.Expr{expr: sema_serde_items_method_call(sema_serde_items_ident(pairs, span), "push", [Expr]{row}, span)}
 }
 
@@ -717,6 +730,210 @@ fn sema_serde_items_struct_decode_body(definition: StructDef, items: [Item], spa
     &body.push(sema_serde_items_if(sema_serde_items_method_call(sema_serde_items_ident("jet_serde_errors", span), "is_empty", [Expr]{}, span), success, span))
     &body.push(sema_serde_items_return(Expr.Err{value: sema_serde_items_ident("jet_serde_errors", span), span: span, id: AST_NODE_GENERATED}, span))
     body
+}
+
+// ---------------------------------------------------------------------------
+// Published-schema migration (Rust `struct_migration_decode`, D-MIGRATE4): a
+// decodable `#PublishedSchema` struct with `migration` blocks decodes silently
+// from every historical shape through ordinary generated items. Its `decode`
+// runs the current-shape decode first; when that fails, the walk helper
+// matches the object's key set against each historical shape (newest first,
+// exact set), applies the remaining migration steps in order, and the
+// current-shape decode runs once more on the migrated object. No match returns
+// the current-shape failures. Each step is linear in the object's entries.
+
+// The `migration` blocks of a non-generic `#PublishedSchema` struct, in source
+// order. Empty (no migration chain) when a `change` has no converter: E0910
+// reports that block.
+fn sema_serde_items_migration_blocks(definition: StructDef, items: [Item]) -> [MigrationDecl] Never! {
+    blocks := [MigrationDecl]{}
+    if !sema_schema_published(definition) || definition.type_params.len() > 0 -> return blocks
+    loop item in items {
+        if item == .Migration(block) && block.type_name == definition.name {
+            loop operation in block.ops {
+                if operation == .Change(_, _, _, _, _, _, converter, _, _) && converter == None -> return [MigrationDecl]{}
+            }
+            // copy: the block stays an item of the module.
+            &blocks.push(block.copy())
+        }
+    }
+    blocks
+}
+
+fn sema_serde_items_migration_current(definition: StructDef) -> String Never! {
+    "jet_serde_decode_current_{definition.name}"
+}
+
+fn sema_serde_items_migration_walk(definition: StructDef) -> String Never! {
+    "jet_serde_migrate_{definition.name}"
+}
+
+fn sema_serde_items_migration_op_name(kind: String, definition: StructDef, block_index: Int, field: String) -> String Never! {
+    "jet_serde_migrate_{kind}_{definition.name}_{block_index}_{field}"
+}
+
+// The free functions a migrating decode calls: the current-shape decode, the
+// historical-shape walk, and one function per `add` default and `change`
+// converter. Each takes a distinct source span, so no two share a function
+// memory key.
+fn sema_serde_items_migration_helpers(definition: StructDef, items: [Item], span: Span) -> [Item] Never! {
+    blocks :: sema_serde_items_migration_blocks(definition, items)
+    helpers := [Item]{}
+    if blocks.len() == 0 -> return helpers
+    target :: sema_data_result(Type.Named{name: definition.name}, sema_data_decode_error())
+    current := sema_serde_items_method(sema_serde_items_migration_current(definition), [TypeParam]{}, [Param]{sema_serde_items_param("tree", sema_dyn_type(), span)}, target, blocks[0].type_span)
+    current.body = sema_serde_items_struct_decode_body(definition, items, span)
+    &helpers.push(Item.Func{value: current})
+    walk := sema_serde_items_method(sema_serde_items_migration_walk(definition), [TypeParam]{}, [Param]{sema_serde_items_param("tree", sema_dyn_type(), span)}, Type.Option{inner: sema_dyn_type()}, blocks[0].span)
+    walk.body = sema_serde_items_migration_walk_body(definition, blocks, span)
+    &helpers.push(Item.Func{value: walk})
+    loop (block_index, block) in blocks {
+        loop operation in block.ops {
+            if operation == {
+                .Add(field, _, ty, _, default, default_span, _) -> {
+                    function := sema_migration_default_function(sema_serde_items_migration_op_name("add", definition, block_index, field), ty, default, default_span)
+                    function.compiler_generated = true
+                    &helpers.push(Item.Func{value: function})
+                }
+                .Change(field, _, from_ty, _, to_ty, _, converter, converter_span, _) -> {
+                    if converter == .Val(value) {
+                        function := sema_migration_converter_function(sema_serde_items_migration_op_name("conv", definition, block_index, field), from_ty, to_ty, value, converter_span ?? block.span)
+                        function.compiler_generated = true
+                        &helpers.push(Item.Func{value: function})
+                    }
+                }
+                else -> {}
+            }
+        }
+    }
+    helpers
+}
+
+// The derived `decode` of a migrating struct: the current shape, else the
+// migrated object's current-shape decode, else the current-shape failures.
+fn sema_serde_items_migration_decode_body(definition: StructDef, span: Span) -> [Stmt] Never! {
+    current :: sema_serde_items_migration_current(definition)
+    target :: sema_data_result(Type.Named{name: definition.name}, sema_data_decode_error())
+    migrated :: [Stmt]{
+        sema_serde_items_binding("jet_serde_migrated_value", Val(target), sema_serde_items_free_call(current, [Expr]{sema_serde_items_ident("jet_serde_migrated", span)}, span), false, span),
+        sema_serde_items_return(sema_serde_items_ident("jet_serde_migrated_value", span), span),
+    }
+    failed :: [Stmt]{
+        sema_serde_items_binding("jet_serde_walked", None, sema_serde_items_free_call(sema_serde_items_migration_walk(definition), [Expr]{sema_serde_items_ident("tree", span)}, span), false, span),
+        sema_serde_items_pattern_switch(sema_serde_items_ident("jet_serde_walked", span), "Val", [String]{"jet_serde_migrated"}, migrated, Val([Stmt]{}), span),
+        sema_serde_items_return(Expr.Err{value: sema_serde_items_ident("jet_serde_current_errors", span), span: span, id: AST_NODE_GENERATED}, span),
+    }
+    [Stmt]{
+        sema_serde_items_binding("jet_serde_current", None, sema_serde_items_free_call(current, [Expr]{sema_serde_items_ident("tree", span)}, span), false, span),
+        sema_serde_items_result_switch(sema_serde_items_ident("jet_serde_current", span), "jet_serde_value", [Stmt]{sema_serde_items_return(Expr.Ok{value: sema_serde_items_ident("jet_serde_value", span), span: span, id: AST_NODE_GENERATED}, span)}, "jet_serde_current_errors", failed, span),
+        sema_serde_items_return(Expr.Err{value: Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}, span: span, id: AST_NODE_GENERATED}, span),
+    }
+}
+
+// The walk helper's body over the ordered entry list `jet_serde_entries`.
+fn sema_serde_items_migration_walk_body(definition: StructDef, blocks: [MigrationDecl], span: Span) -> [Stmt] Never! {
+    entries :: "jet_serde_entries"
+    style :: sema_migration_rename_all(definition)
+    steps := [[Stmt]]{}
+    loop (block_index, block) in blocks {
+        ops := [Stmt]{}
+        loop operation in block.ops {
+            if operation == {
+                .Rename(from, _, to, _) -> &ops.push(sema_serde_items_migration_rekey(entries, sema_migration_json_key(definition, style, from), Val(sema_migration_json_key(definition, style, to)), span))
+                .Remove(field, _) -> &ops.push(sema_serde_items_migration_rekey(entries, sema_migration_json_key(definition, style, field), None, span))
+                .Add(field, _, _, _, _, _, _) -> {
+                    value :: sema_serde_items_method_call(sema_serde_items_free_call(sema_serde_items_migration_op_name("add", definition, block_index, field), [Expr]{}, span), "encode", [Expr]{}, span)
+                    &ops.push(sema_serde_items_push_pair(entries, sema_migration_json_key(definition, style, field), value, sema_serde_items_pair_type(), span))
+                }
+                .Change(field, _, from_ty, _, _, _, _, _, _) -> &ops.push(sema_serde_items_migration_change(entries, sema_migration_json_key(definition, style, field), from_ty, sema_serde_items_migration_op_name("conv", definition, block_index, field), span))
+            }
+        }
+        &steps.push(ops)
+    }
+    body := [Stmt]{
+        sema_serde_items_binding(entries, Val(sema_data_object_pairs_type()), Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}, true, span),
+        sema_serde_items_binding("jet_serde_is_object", Val(Type.Bool), Expr.Bool{value: false, span: span, id: AST_NODE_GENERATED}, true, span),
+        sema_serde_items_pattern_switch(sema_serde_items_copy(sema_serde_items_ident("tree", span), span), "Object", [String]{"jet_serde_object"}, [Stmt]{
+            sema_serde_items_assign_local(entries, sema_serde_items_copy(sema_serde_items_ident("jet_serde_object", span), span), span),
+            sema_serde_items_assign_local("jet_serde_is_object", Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, span),
+        }, Val([Stmt]{}), span),
+        sema_serde_items_if(sema_serde_items_not(sema_serde_items_ident("jet_serde_is_object", span), span), [Stmt]{sema_serde_items_return(Expr.Absent{span: span, id: AST_NODE_GENERATED}, span)}, span),
+        sema_serde_items_binding("jet_serde_keys", Val(Type.List{element: Type.String}), Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}, true, span),
+        sema_serde_items_for_each("jet_serde_pair", sema_serde_items_ident(entries, span), [Stmt]{Stmt.Expr{expr: sema_serde_items_method_call(sema_serde_items_ident("jet_serde_keys", span), "push", [Expr]{sema_serde_items_copy(sema_serde_items_field_read("jet_serde_pair", "key", span), span)}, span)}}, span),
+    }
+    shapes :: sema_migration_canonical_shape(definition, blocks).historical
+    index := shapes.len() - 1
+    loop index >= 0 {
+        keys :: shapes[index]
+        shape_test := Expr.Binary{op: BinOp.Eq, left: sema_serde_items_method_call(sema_serde_items_ident("jet_serde_keys", span), "len", [Expr]{}, span), right: Expr.Int{value: keys.len(), span: span, width: None, raw: None, id: AST_NODE_GENERATED}, span: span, id: AST_NODE_GENERATED}
+        loop key in keys {
+            shape_test = Expr.Binary{op: BinOp.And, left: shape_test, right: sema_serde_items_method_call(sema_serde_items_ident("jet_serde_keys", span), "contains", [Expr]{sema_serde_items_string(key, span)}, span), span: span, id: AST_NODE_GENERATED}
+        }
+        walked := [Stmt]{}
+        loop step in index..<steps.len() {
+            // copy: every older shape replays this block's statements.
+            loop statement in steps[step] -> &walked.push(statement.copy())
+        }
+        &walked.push(sema_serde_items_return(Expr.Present{value: sema_serde_items_dyn_variant("Object", [Expr]{sema_serde_items_ident(entries, span)}, span), span: span, id: AST_NODE_GENERATED}, span))
+        &body.push(sema_serde_items_if(shape_test, walked, span))
+        index -= 1
+    }
+    &body.push(sema_serde_items_return(Expr.Absent{span: span, id: AST_NODE_GENERATED}, span))
+    body
+}
+
+fn sema_serde_items_pair_type() -> Type Never! {
+    if sema_data_object_pairs_type() == {
+        .List(element) -> element
+        else -> panic("the ordered Object payload is a list")
+    }
+}
+
+// One `rename` (`to` present) or `remove` over the entry list: rebuild it with
+// the `key` entry renamed to `to` or dropped.
+fn sema_serde_items_migration_rekey(entries: String, key: String, to: String?, span: Span) -> Stmt Never! {
+    next_entries :: "jet_serde_next"
+    keep :: sema_serde_items_push_row(next_entries, sema_serde_items_copy(sema_serde_items_field_read("jet_serde_pair", "key", span), span), sema_serde_items_copy(sema_serde_items_field_read("jet_serde_pair", "value", span), span), sema_serde_items_pair_type(), span)
+    is_key :: Expr.Binary{op: BinOp.Eq, left: sema_serde_items_field_read("jet_serde_pair", "key", span), right: sema_serde_items_string(key, span), span: span, id: AST_NODE_GENERATED}
+    visit :: if to == {
+        .Val(renamed) -> {
+            row :: sema_serde_items_push_pair(next_entries, renamed, sema_serde_items_copy(sema_serde_items_field_read("jet_serde_pair", "value", span), span), sema_serde_items_pair_type(), span)
+            Stmt.Switch{subject: Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, arms: [SwitchArm]{SwitchArm{cond: is_key, body: [Stmt]{row}, span: span}}, else_body: Val([Stmt]{keep}), span: span}
+        }
+        .None -> sema_serde_items_if(sema_serde_items_not(is_key, span), [Stmt]{keep}, span)
+    }
+    sema_serde_items_migration_rebuild(entries, next_entries, visit, span)
+}
+
+// One `change` over the entry list: the `key` entry's old value decodes as
+// `from_ty`, the converter makes the new value, and it encodes in place. An
+// old value that does not decode leaves the object unmigrated.
+fn sema_serde_items_migration_change(entries: String, key: String, from_ty: Type, converter: String, span: Span) -> Stmt Never! {
+    changed :: "jet_serde_changed"
+    keep :: sema_serde_items_push_row(changed, sema_serde_items_copy(sema_serde_items_field_read("jet_serde_pair", "key", span), span), sema_serde_items_copy(sema_serde_items_field_read("jet_serde_pair", "value", span), span), sema_serde_items_pair_type(), span)
+    converted :: sema_serde_items_method_call(sema_serde_items_free_call(converter, [Expr]{sema_serde_items_copy(sema_serde_items_ident("jet_serde_old_value", span), span)}, span), "encode", [Expr]{}, span)
+    convert :: [Stmt]{
+        sema_serde_items_binding("jet_serde_old", None, sema_serde_items_decode_call(sema_serde_items_copy(sema_serde_items_field_read("jet_serde_pair", "value", span), span), from_ty, span), false, span),
+        sema_serde_items_result_switch(sema_serde_items_ident("jet_serde_old", span), "jet_serde_old_value", [Stmt]{sema_serde_items_push_pair(changed, key, converted, sema_serde_items_pair_type(), span)}, "jet_serde_change_errors", [Stmt]{sema_serde_items_return(Expr.Absent{span: span, id: AST_NODE_GENERATED}, span)}, span),
+    }
+    is_key :: Expr.Binary{op: BinOp.Eq, left: sema_serde_items_field_read("jet_serde_pair", "key", span), right: sema_serde_items_string(key, span), span: span, id: AST_NODE_GENERATED}
+    visit :: Stmt.Switch{subject: Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, arms: [SwitchArm]{SwitchArm{cond: is_key, body: convert, span: span}}, else_body: Val([Stmt]{keep}), span: span}
+    sema_serde_items_migration_rebuild(entries, changed, visit, span)
+}
+
+// `{ next := []; loop jet_serde_pair in entries { visit }; entries = next }`.
+fn sema_serde_items_migration_rebuild(entries: String, next_entries: String, visit: Stmt, span: Span) -> Stmt Never! {
+    sema_serde_items_if(Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, [Stmt]{
+        sema_serde_items_binding(next_entries, Val(sema_data_object_pairs_type()), Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}, true, span),
+        sema_serde_items_for_each("jet_serde_pair", sema_serde_items_ident(entries, span), [Stmt]{visit}, span),
+        sema_serde_items_assign_local(entries, sema_serde_items_ident(next_entries, span), span),
+    }, span)
+}
+
+fn sema_serde_items_free_call(name: String, args: [Expr], span: Span) -> Expr Never! {
+    call_args := [CallArg]{}
+    loop argument in args -> &call_args.push(sema_serde_items_arg(argument, span))
+    Expr.Call{call: Call{name: name, name_span: span, type_args: [Type]{}, args: call_args}, id: AST_NODE_GENERATED}
 }
 
 // ---------------------------------------------------------------------------
