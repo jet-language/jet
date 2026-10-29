@@ -34,7 +34,7 @@ use jet_foundation.[
 #Test("policy explanation marks the last declaration effective at file:line:col") {
     outer :: PolicyDeclaration{key: PolicyKey.Unsafe, value: PolicyValue.Forbid, scope: PolicyScope.Package, span: Span{start: 1, end: 4}, target: None, source: "package.jet"}
     inner :: PolicyDeclaration{key: PolicyKey.Unsafe, value: PolicyValue.Forbid, scope: PolicyScope.Function, span: Span{start: 13, end: 20}, target: None, source: "run.jet"}
-    sources :: [PolicySourceText]{PolicySourceText{path: "run.jet", text: diagnostic_source_text("fn run() {\n  #Policy(unsafe: .Forbid)\n}\n")}}
+    sources :: [PolicySourceText]{PolicySourceText{path: "run.jet", text: diagnostic_source_text("fn run() {{\n  #Policy(unsafe: .Forbid)\n}}\n")}}
     text :: policy_explain(EffectivePolicy{key: PolicyKey.Unsafe, value: PolicyValue.Forbid, provenance: [PolicyDeclaration]{outer, inner}}, sources)
     lines :: text.split("\n").to_list()
     assert_eq(lines.len(), 3)

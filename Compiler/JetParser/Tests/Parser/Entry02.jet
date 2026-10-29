@@ -31,8 +31,8 @@ fn entry02_unit_result(ty: Type?, error_name: String) -> Bool {
         assert(method == parser_test_task_name("race"))
         if args[0].expr == .ListLit(branches, _, _) {
             assert(branches.len() == 2)
-            assert(if branches[0] == { .MethodCall(_, spawn, _, _, _, aa, _) -> spawn == parser_test_task_name("spawn") && if aa[0].expr == { .Lambda(lambda) -> if lambda.body == { .Expr(.MethodCall(_, inner, _, _, _, _, _)) -> inner == parser_test_task_name("all") else -> false } else -> false } else -> false })
-            assert(if branches[1] == { .MethodCall(_, spawn, _, _, _, aa, _) -> spawn == parser_test_task_name("spawn") && if aa[0].expr == { .Lambda(lambda) -> if lambda.body == { .Block(_) -> true else -> false } else -> false } else -> false })
+            assert(if branches[0] == { .MethodCall(_, spawn, _, _, _, aa, _) -> spawn == parser_test_task_name("spawn") && if aa[0].expr == { .Lambda(lambda, _) -> if lambda.body == { .Expr(.MethodCall(_, inner, _, _, _, _, _)) -> inner == parser_test_task_name("all") else -> false } else -> false } else -> false })
+            assert(if branches[1] == { .MethodCall(_, spawn, _, _, _, aa, _) -> spawn == parser_test_task_name("spawn") && if aa[0].expr == { .Lambda(lambda, _) -> if lambda.body == { .Block(_) -> true else -> false } else -> false } else -> false })
         } else { panic("expected task.race branch list") }
     } else { panic("expected task.race method call") }
 }
