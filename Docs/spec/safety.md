@@ -5682,9 +5682,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Jetpack",
       "file": "Jetpack/Publication/Tests/Sign.jet",
-      "line": 164,
+      "line": 165,
       "column": 5,
-      "reason": "original signing secret-erasure acceptance requires the Core volatile in-place wipe provider (#3597)"
+      "reason": "each address names a live element of the owned secret buffer for its one volatile store (#6117)"
     },
     {
       "package": "Jetpack",
@@ -9244,7 +9244,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Jetpack | Jetpack/Publication/Source/Sign.jet | 113:5 | "import the protected seed into Core signing without a second raw-secret copy; close the temporary Core Secret on success and failure" |
 | Jetpack | Jetpack/Publication/Source/Sign.jet | 137:5 | "package author signatures require Core's strict Ed25519 verification; no raw verifier or helper process" |
 | Jetpack | Jetpack/Publication/Tests/Index.jet | 265:5 | "the test owns the planted lock file it ages" |
-| Jetpack | Jetpack/Publication/Tests/Sign.jet | 164:5 | "original signing secret-erasure acceptance requires the Core volatile in-place wipe provider (#3597)" |
+| Jetpack | Jetpack/Publication/Tests/Sign.jet | 165:5 | "each address names a live element of the owned secret buffer for its one volatile store (#6117)" |
 | Jetpack | Jetpack/Store/Tests/ClosureGraph.jet | 59:13 | "the test owns the journal file it just wrote" |
 | Jetpack | Jetpack/Store/Tests/Seal.jet | 31:5 | "the store test owns the fixture file whose mtime it pins" |
 | Tools | Tools/agent-eval/domain-foundations/area-embedded/pkg/mmio_fixed.jet | 4:5 | "board.sensor_v1 GPIO register 0x40000100 is a volatile MMIO word" |
