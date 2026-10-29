@@ -2343,9 +2343,9 @@ sigil assignment superseded by D-VERDICT-732-1)*: every typed rule uses the
 single `#Rule` mechanism. Non-rule `#` constructs remain unchanged: effect sets
 `#(FS)`, fixed lists
 `[T#N]`, package selectors `pkg#1.2.3`, and the compile-time value `#Caller()`.
-Later rulings assign `@name` to known-value splice, `@[ … ]@` to statement
-expansion, and `T.@layout` to the compiler-known layout projection (D-ONCE-AT1=D
-and D-FENCE-GLYPH1=A supersede the former `$` spellings).
+Later rulings assign `$name` to known-value splice (D-NAME-SPLICE1=B), `<: … :>`
+to statement expansion (D-FENCE2=A), and `T.$layout` to the compiler-known
+layout projection (D-COMPILER-NS1=A); the `@` and older `$` spellings are retired.
 
 **D-MARKERMOVE1/2/3 — Plane assignments** *(spelling reconciled by
 D-VERDICT-732-1)*: on `#`: `MustUse`,
@@ -2467,7 +2467,7 @@ and strips from release output. Both attach to statements only; item position is
 E0342, expression position is E0343, and doubled switch attributes are E0344.
 Names introduced inside the marker body do not escape. Bare `build.profile` is
 not a user-typeable comptime value; the registered fact spelling is
-`@build.profile`.
+`$build.profile` (D-BUILD-FACT3=A).
 
 **D-CANVASMETA1=B — Canvas metadata attribute**: `#Meta(category: "Movement",
 tunable)` attaches to bindings and functions; at top level it may also attach to
@@ -3168,7 +3168,8 @@ binders), so `-[!FFI]>` prohibits every foreign language at once. `Panic` and
 `Mem` remain deny-only rows and are not grantable roots. Amended by
 D-EFFTREE1 and D-AUTHORITY-ROOTS1: a root may be dotted into an open leaf path
 (`FS.Read`) and ancestor matching is subsumption; old flat FFI language roots
-are retired. `effect <Name>` user declarations remain reserved, unminted.
+are retired. D-EFFECT-DECL1=A made `effect Root.Leaf` leaf declarations live; a
+new user root stays unminted (E0119).
 
 **D-AUTH-AMBIENT2=A — Waiting is deny-only**: the exact `Time.Wait` leaf
 remains an inferred reachability fact and can be prohibited with
@@ -3245,10 +3246,10 @@ fn twice(n: Int) -> Int { n * 2 }
 fn load(path: String) -> String { core.files.read(path) }
 // API snapshot: load -[FS.Read]> String
 
-fn bounded(path: String) String -[FS.Read]> { core.files.read(path) }
-fn hash(text: String) Int -[]> { text.length() }
+fn bounded(path: String) -[FS.Read]> String { core.files.read(path) }
+fn hash(text: String) -[]> Int { text.length() }
 
-trait Renderer { fn render(self) Image -[GPU]> }
+trait Renderer { fn render(self) -[GPU]> Image }
 ```
 
 **D-PROP1 / D-PROP2 — Prohibition**: `-[!Net]>` — the fn and every reachable
@@ -3392,7 +3393,7 @@ Constant: `COMPTIME_MARK` in
 `Examples/features/comptime/comptime_block.jet` and `comptime_if.jet`.
 
 **D-LAYOUT-FACTS1=B — Compiler-owned type facts** *(spelling amended by
-D-ONCE-AT1=D)*: `T.@layout`, `T.@name` and `T.@fields` are one closed spelling,
+D-COMPILER-NS1=A)*: `T.$layout`, `T.$name` and `T.$fields` are one closed spelling,
 each projecting the matching
 `TypeInfo` member. The mark after `.` is not a general user-member escape:
 any other marked member reports E0302 and names the three facts.
@@ -3451,16 +3452,16 @@ generation, while runtime field values are never replaced by pre-stringified
 copies. The difference is therefore an intentional projection boundary, not a
 second metadata model.
 
-**D-LAYOUT-FACTS1=B — Focused compiler facts use `@`** *(ratified
-2026-08-03, spelling amended by D-ONCE-AT1=D)*: `T.@layout` is exactly the
+**D-LAYOUT-FACTS1=B — Focused compiler facts use `$`** *(ratified
+2026-08-03, spelling amended by D-COMPILER-NS1=A)*: `T.$layout` is exactly the
 focused projection of `T.reflect().layout`, not a second metadata model. Users
-cannot declare `@` members.
-members. Layout exposes kind, optional size/alignment/stride, target,
+cannot declare `$` members.
+Layout exposes kind, optional size/alignment/stride, target,
 guarantee, source, fields, and typed `[.field]` selection. Field byte facts are
 computed by one target-aware compiler engine for Jet-owned physical layouts
 (`c`, `columnar`, and fixed-width scalar members); they remain optional when
 physical layout is not guaranteed. Completion visibly groups
-`@layout` as a compiler fact; hover, rename, navigation, diagnostics,
+`$layout` as a compiler fact; hover, rename, navigation, diagnostics,
 `jet inspect expand --facts layout`, and JSON project the same model.
 
 **D-METADERIVE1 — User derives**: `derive T.Wire { … }` (old
@@ -3679,8 +3680,8 @@ E1109); `columnar [T]` type-position reserved (E1107); deferred surface ops
 E1108; serialization-transparent. **D-REPRC1**: `#Layout(c)` = C repr in the
 same family (growable field under it = compile error).
 **D-PLACE1=A — Layout alignment and lock-free scalar cells** *(ratified)*:
-reuse the one `T.@layout` fact, including its exact
-`T.@layout.size` and `T.@layout.alignment` projections; no `size_of` or
+reuse the one `T.$layout` fact, including its exact
+`T.$layout.size` and `T.$layout.alignment` projections; no `size_of` or
 `align_of` aliases enter the language. `#Layout(c, align(N))` puts alignment
 inside the existing layout family. The portable form accepts positive
 power-of-two byte values from 1 through 1048576 inclusive. The explicit
@@ -3994,7 +3995,7 @@ inputs (`{parameter}`), the single integer return is anchored by
 Every declared parameter must be referenced and exactly one return anchor is
 required. Requires `use core.mem`
 plus an enclosing `#Unsafe("reason")` (S58); outside the gate is E0208-class.
-Target variants select via the existing `@if @build.os ==` /
+Target variants select via the existing `comptime if $build.os ==` /
 `#Target` machinery. Lowering emits Rust `asm!` so rustc verifies
 register/clobber facts per target; every user-facing error stays a Jet
 diagnostic (I2). `core.mem.intrinsics` may wrap popular cases as named
@@ -5222,18 +5223,19 @@ page (explicit > sibling `<stem>.html` > generated; missing path = build
 error). `OS.*` gates a single `impl` block (item-scoped), not a file/module —
 `E-OSTARGET-MIXED-AXIS`/`E-OSTARGET-UNMATCHED-CALL` enforce it.
 **D-OSTARGET2 (=B, ratified 2026-07-03, c2qj06uq)**: ungated code reaches
-the surviving OS-gated impl through a comptime dispatch on `@build.os` — a
+the surviving OS-gated impl through a comptime dispatch on `$build.os` — a
 compiler-known comptime value matched with `.Linux`/`.MacOS`/`.Windows`
 arms; non-matching arms are discarded before OS-gating checks run.
 fn-level `#Target(OS.*)` gating (option A) rejected.
 *Shipped spelling (2026-07-03):* the ballot wrote the dispatch loosely as `match
-@build.os { … }`; reconciled to Jet's one canonical branching form (D-IF1/D-IF3
-`if subject == { }` if-table) with the existing `@if` lead (D-WHEN1) —
+@build.os { … }` (now `$build.os`, D-BUILD-FACT3=A); reconciled to Jet's one
+canonical branching form (D-IF1/D-IF3 `if subject == { }` if-table) with the
+`comptime if` lead (D-WHEN1, respelled from `@if` by card #3662) —
 **no `match` keyword was added** (I8). Statement-position dispatch:
 
 ```jet
 fn run() {
-    comptime if @build.os == {
+    comptime if $build.os == {
         .Linux   -> { b :: LinuxBackend{ name: "gtk" }    print(b.label()) }
         .MacOS   -> { b :: MacOSBackend{ name: "appkit" } print(b.label()) }
         .Windows -> { b :: WinBackend{ name: "win32" }    print(b.label()) }
@@ -5241,9 +5243,9 @@ fn run() {
 }
 ```
 
-`@build.os` resolves to `ProgramBundle.active_os` (the `--target=<triple>` OS
+`$build.os` resolves to `ProgramBundle.active_os` (the `--target=<triple>` OS
 bucket, host OS when omitted; a web/wasm target falls back to the host per
-`OSTarget::active`). Sema desugars the dispatch into an `@if` chain
+`OSTarget::active`). Sema desugars the dispatch into a `comptime if` chain
 (D-WHEN1/D-WHEN2 machinery) as the *first* step of `check_bundle`, folding to
 the arm matching `active_os` and discarding the rest before any OS-gating
 check, type-check, or codegen sees a body — so constructing an OS-gated type
@@ -5251,9 +5253,9 @@ inside the taken arm is legal and dead arms never trip
 `E-OSTARGET-UNMATCHED-CALL`. **Exhaustiveness** is build-independent: the arm
 set must cover `.Linux`, `.MacOS`, and `.Windows`, or carry an `else` — missing
 an OS with no `else` is `E-OSTARGET-DISPATCH-EXHAUSTIVE` (so the same source
-compiles or fails identically on every platform). A non-`@build.os` subject is
+compiles or fails identically on every platform). A non-`$build.os` subject is
 `E-OSTARGET-BUILD-CONTEXT`; a non-OS arm head is `E-OSTARGET-DISPATCH-ARM`.
-`@build.os` is meaningful *only* as this dispatch's subject — `build` is not a
+`$build.os` is meaningful *only* as this dispatch's subject — `build` is not a
 reserved word, so anywhere else it is an ordinary identifier (undefined at
 runtime → E0107), never a magic runtime value.
 **D-UIDEVSHELL1 (=A, ratified 2026-07-03, c2qj06uq)**: Phase 8 native
@@ -5267,8 +5269,8 @@ handle, `set_text`/`set_size`/`set_color` mutate a live widget, `on_click(id,
 handler)` wires a button, `present(title)` opens the window and runs the GLib
 loop. The flagship example is a live counter — a button click sets a
 `reactive.signal` and the `ui.reactive_render` effect updates the label text
-in place (the shipped reactive core, I8). Selected by the shipped `@if
-@build.os` dispatch (D-OSTARGET2=B) and emitted only on a Linux target; all gtk
+in place (the shipped reactive core, I8). Selected by the shipped `comptime if
+$build.os` dispatch (D-OSTARGET2=B) and emitted only on a Linux target; all gtk
 C-ABI calls are confined to the vetted `jet_gtk` prelude module (I1 — user
 code writes no low-level tier). The native link (`-lgtk-4 …`) is named by `use
 c.gtk4` through the S59 `pkg-config gtk4` path; a missing gtk4 at build time is
@@ -7789,7 +7791,7 @@ declaration registry; `#SQL<Row>` and `#HTML { … }` use their declared `.Block
 rows. The old marker-only DSL whitelist is retired by the syntax-chore lane.
 
 **2026-08-13 — D-CONF-MODULE1=A** *(card #1524)*: declared profile settings
-seed the shared typed build-fact snapshot. A closed `@build.settings.<name>`
+seed the shared typed build-fact snapshot. A closed `$build.settings.<name>`
 expression is folded by the same Tier-0 evaluator used for generic-module
 value arguments, and its normalized value is part of the existing instance
 fingerprint. Semantic instance facts retain the profile and declaration

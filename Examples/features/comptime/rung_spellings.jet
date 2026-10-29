@@ -1,0 +1,37 @@
+package {
+    name: "rung_spellings"
+    authority: { allow: [FS.Read, IO] }
+}
+
+// The current spellings of the compile-time and effect rungs the ratified
+// prose names (ladder audit L-24, card #6059): a compiler fact is a `$`
+// member (`T.$layout`, `$build.os`, D-COMPILER-NS1=A), the effect row sits
+// between the inputs and the result (D-SIG-AFTER1=A), and an effect leaf
+// declaration is live (D-EFFECT-DECL1=A). The retired `T.@layout` is E0302
+// and `@build.os` teaches `$build.os` (E-OSTARGET-BUILD-CONTEXT).
+use core.files as files
+
+effect FS.Read
+
+#Layout(c)
+struct Point {
+    x: Int
+    y: Int
+}
+
+POINT_LAYOUT :: comptime { Point.$layout }
+
+fn bounded(path: String) -[FS.Read]> String { files.read(path) ?? "" }
+
+fn hash(text: String) -[]> Int { text.len() }
+
+fn run() {
+    comptime if $build.os == {
+        .Linux -> print("os: linux")
+        .MacOS -> print("os: macos")
+        .Windows -> print("os: windows")
+    }
+    print("point size: {POINT_LAYOUT.size}")
+    print("hash: {hash("abc")}")
+    print("bounded: {bounded("/nonexistent/rung_spellings").len()}")
+}
