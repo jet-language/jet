@@ -1946,12 +1946,29 @@ fn ir_defer_close(m: &IRModule, p: IRProgram, b: &IRBuilder, close: Int, span: S
     if !ir_has_drop(m, b, binding.slot) -> ir_fail(&b, span, "deferred close of {local.name}, which neither closes nor drops")
 }
 
+// An `ArgsSpec` / `ParsedArgs` method (D-ARGS1) calls its Core/Args/Args.jet
+// helper (CoreReach.jet ir_args_helper) with the receiver first.
+fn ir_args_method(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, helper: String, args: [Int], span: Span) -> Int Never! {
+    key := ""
+    loop (index, function) in p.functions {
+        if function.name == helper && ir_args_source(function.module_identity, function.source_file, function.kind, function.name) && ir_function_row(p, function.key) == (Val(index)) {
+            key = function.key.copy()
+            break
+        }
+    }
+    if key == "" -> return ir_fail_slot(&b, span, "core.args method: Core/Args/Args.jet {helper} is outside the checked program")
+    call_args := [BodyCallArg]{ir_codec_arg(receiver)}
+    loop value in args -> &call_args.push(ir_codec_arg(value))
+    ir_call(&m, p, &b, key, [Type]{}, -1, [IRWriteBack]{}, call_args, span)
+}
+
 // A runtime-handle method: the receiver then the arguments cross the
 // operation's closed Prelude route; a static constructor (`Path.from`) passes
 // its arguments only. Forms with their own builders (Task, channel and
 // Transaction handles, the native Dyn tree, HTTP, Serde, DB, ...) and
 // closure, mutating or frame-scheduled forms are not built here.
 fn ir_handle_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int Never! {
+    if ir_args_helper(operation) == .Val(helper) -> return ir_args_method(&m, p, &b, receiver, helper, args, span)
     if operation == .TaskDetach -> return ir_task_detach(&m, p, &b, receiver, span)
     if operation == .TaskJoin -> return ir_task_join(&m, p, &b, ty, receiver, span)
     if operation == .TaskPause || operation == .TaskResume || operation == .TaskCancel -> return ir_task_control(&m, p, &b, receiver, operation, args, span)
@@ -4323,7 +4340,7 @@ fn ir_journey_hop(m: &IRModule, p: IRProgram, b: &IRBuilder, site: IRTrySite, er
     if site.fresh {
         _ :: ir_runtime(&m, &b, "jet_journey_reset", [Int]{}, -1)
     }
-    if !framed && ir_core_function(b) -> return error
+    if !framed && (ir_core_function(b) || ir_cli_entry_function(b)) -> return error
     values := ir_journey_site(&m, p, &b, site.file, site.line, site.function, span)
     if ir_failed(b) -> return -1
     note := -1
@@ -4356,6 +4373,13 @@ fn ir_journey_hop(m: &IRModule, p: IRProgram, b: &IRBuilder, site: IRTrySite, er
 // key or source).
 fn ir_core_function(b: IRBuilder) -> Bool Never! {
     b.f.key.starts_with("<corelib>/") || b.f.source_file.starts_with("<corelib>/")
+}
+
+// Whether the function being built is the generated typed-CLI entry
+// (`__jet_cli_run`, D-SHAPE-CLI1): its dispatch to the user's `run` or command
+// hands the user's failure on unchanged, so, like Core, it is no journey hop.
+fn ir_cli_entry_function(b: IRBuilder) -> Bool Never! {
+    b.f.key.ends_with("::__jet_cli_run")
 }
 
 // Whether `Err(error)` in the function being built is Core library code

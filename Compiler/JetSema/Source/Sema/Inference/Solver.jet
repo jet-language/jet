@@ -325,8 +325,16 @@ fn sema_infer_validate_explicit(graph: SemaRegistrationGraph?, context: &SemaInf
         sema_inference_unresolved_diagnostic(context.type_params[0], span, &diagnostics)
         return None
     }
+    // A written type argument names a type as the caller's module sees it:
+    // the instance carries its declaration identity, so a bare `ReadFrame`
+    // instantiated in another module is still the caller's ReadFrame.
+    written := type_args
+    if graph == .Val(registered) {
+        caller :: sema_type_module_row(registered, context.caller_module_identity)
+        written = loop ty in type_args -> sema_type_resolve_declared_recursive(registered, ty, caller, context.lexical_generic_params)
+    }
     bindings := [SemaInferenceBinding]{}
-    if !sema_inference_prepare_explicit(&context, type_args, &bindings, span, &diagnostics) -> return None
+    if !sema_inference_prepare_explicit(&context, written, &bindings, span, &diagnostics) -> return None
     evidence :: sema_inference_validate_bounds(graph, &context, bindings, span, &diagnostics) ?? return None
     resolved_args :: sema_inference_type_args(&context, bindings) ?? return None
     Val(SemaInferenceResult{substitutions: sema_inference_declared_bindings(bindings), type_args: resolved_args, parameters: [Type]{}, return_type: None, evidence: sema_inference_declared_evidence(evidence), complete: true, compatible: true})

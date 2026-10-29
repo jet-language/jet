@@ -686,15 +686,17 @@ fn sema_validate_service_handler_graph(modules: [SemaGraphModuleResult]) -> [Dia
     diagnostics
 }
 
-// The checked #Job identity is normalized BEFORE the registered source target.
-// This is the same compiler-owned contract as Rust CheckerInfer/calls/
+// The checked type name of the Core nominal `leaf` that `module_name`
+// declares: its qualified source name, or the leaf for a compiler-owned
+// nominal. The checked #Job identity is normalized BEFORE the registered
+// source target, the same compiler-owned contract as Rust CheckerInfer/calls/
 // method_calls.rs: enqueue/delay are not string-selected public operations.
-fn sema_job_queue_nominal(environment: SemaScopeEnvironment, program: SemaProgramTables, leaf: String) -> String Never! {
+fn sema_core_module_nominal(program: SemaProgramTables, module_name: String, leaf: String) -> String Never! {
     if program.registration_graph == .Val(graph) {
     loop module_index in 0..<graph.modules.len() {
-        if graph.modules[module_index].module_name != "core.jobs" -> next
+        if graph.modules[module_index].module_name != module_name -> next
         loop nominal_index in 0..<graph.modules[module_index].nominals.len() {
-            // Read in place: binding the row copied each core.jobs nominal.
+            // Read in place: binding the row copied each module nominal.
             if graph.modules[module_index].nominals[nominal_index].symbol.name == leaf {
                 if graph.modules[module_index].nominals[nominal_index].compiler_owned -> return leaf.copy()
                 return "{graph.modules[module_index].nominals[nominal_index].symbol.module_name}::{leaf}"
@@ -773,7 +775,7 @@ fn sema_call_try_job_queue_method(receiver: Expr, receiver_value: TExpr, method:
     // native mutable carrier. Receiver ownership has already been checked.
     normalized :: [TExpr]{receiver_value, sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: job_name}}}, job_span), payload, last}
     record :: sema_call_core_receiver_record(Type.Named{name: "JobQueue"}, method, normalized.len(), span, &diagnostics) ?? return failed
-    result_type :: sema_services_result_type(Type.Named{name: sema_job_queue_nominal(environment, program, "JobQueueReceipt")})
+    result_type :: sema_services_result_type(Type.Named{name: sema_core_module_nominal(program, "core.jobs", "JobQueueReceipt")})
     failure :: sema_services_result_carrier(result_type)
     if !sema_call_core_record_effects(record, span, [Type]{payload_type}, result_type, failure, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return failed
     sema_services_record_direct_effect(environment, program, &scopes, &context, "Time", "JobQueue.{method}", span, &diagnostics)

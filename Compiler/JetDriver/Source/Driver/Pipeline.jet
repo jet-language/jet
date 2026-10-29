@@ -516,12 +516,19 @@ fn jet_driver_function_key_count(functions: [FnBody], key: String) -> Int Never!
 }
 
 // jet_driver_default_run_entry over the checked functions: the entry
-// module's `fn run`, when it takes no parameter.
+// module's `fn run`, when it takes no parameter, else the generated
+// `__jet_cli_run` of a typed `fn run(args: T)` (D-SHAPE-CLI1).
 fn jet_driver_default_run_key(load: JetDriverLoadResult, functions: [FnBody]) -> String? Never! {
     key :: symbol_id(SymbolKind.Function, load.entry_module_identity, "", "run").key
+    typed_key :: symbol_id(SymbolKind.Function, load.entry_module_identity, "", "__jet_cli_run").key
+    typed := false
+    loop function in functions {
+        if function.key == typed_key && function.params.len() == 0 -> typed = true
+    }
     loop function in functions {
         if function.key != key -> next
         if function.params.len() == 0 -> return Val(key)
+        if function.params.len() == 1 && typed -> return Val(typed_key)
         return None
     }
     None
@@ -3840,6 +3847,10 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
 // call edges. The maximal row an open-world call (an unannotated function
 // value, an extern) seeds into `solved` is a ceiling fact (E0743), not a
 // required right, so it never widens the authority the application must hold.
+// The generated typed-CLI entry `__jet_cli_run` (D-SHAPE-CLI1) reads argv and
+// its env fallbacks, prints help and exits on a refusal through Core; that
+// parse is the toolchain's, as the Rust runtime parse was, so only the user
+// functions it dispatches to contribute required effects.
 fn jet_driver_required_effects(functions: [FnBody], entry_key: String, startup_keys: [String]) -> [String] Never! {
     // Each key's first row: a hashed map, only looked up.
     by_key :: ir_first_function_rows(functions)
@@ -3855,9 +3866,14 @@ fn jet_driver_required_effects(functions: [FnBody], entry_key: String, startup_k
         index :: &pending.pop() ?? break
         if seen[index] -> next
         seen[index] = true
-        loop effect_name in functions[index].effects.direct -> &required.push(effect_name)
+        cli_entry :: functions[index].name == "__jet_cli_run" && functions[index].key == entry_key
+        if !cli_entry {
+            loop effect_name in functions[index].effects.direct -> &required.push(effect_name)
+        }
         loop edge in functions[index].effects.call_edges {
-            if name_rows_get_text(by_key, edge) == .Val(callee) -> &pending.push(callee)
+            callee :: name_rows_get_text(by_key, edge) ?? next
+            if cli_entry && functions[callee].module_name.starts_with("core.") -> next
+            &pending.push(callee)
         }
     }
     required

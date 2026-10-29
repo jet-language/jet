@@ -85,6 +85,10 @@ use jet_sema.[
     SemaRegistrationImportEdge,
     SemaSourceOrigin,
     SemaSourceSegment,
+    sema_cli_entry_expand,
+    sema_cli_entry_expand_imported,
+    sema_cli_entry_run_type,
+    sema_cli_entry_struct,
     sema_effect_builtin_leaf_unknown,
     sema_effect_parse_name,
     sema_effect_root,
@@ -3443,7 +3447,9 @@ fn jet_driver_parse_user_unit_threads(text: String, retain_demand: Bool, threads
     lines :: lexed.line_starts.len() - 1
     scanned := jet_driver_collect_core_identifier_demand_threads(^lexed.lexed, lexed.runs, retain_demand, true, threads)
     demand := ^scanned.demand
-    parsed :: parse_lexed_with_source_threads(^scanned.lexed, source, lexed.line_starts, lexed.runs, threads)
+    parsed := parse_lexed_with_source_threads(^scanned.lexed, source, lexed.line_starts, lexed.runs, threads)
+    // D-SHAPE-CLI1: a typed `fn run(args: T)` gets its generated argv entry.
+    if !jet_driver_has_errors(parsed.diagnostics) -> sema_cli_entry_expand(&parsed.program)
     JetDriverParsedUnit{parsed: ^parsed, demand: ^demand, lines: lines, tokens: tokens, line_starts: ^lexed.line_starts}
 }
 
@@ -4524,6 +4530,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
     if !jet_driver_has_errors(diagnostics) && !jet_driver_bind_package_namespaces(&modules, source_units, catalog.packages, request.authorized_sources.roots, request.core_sources, &diagnostics, request.compiler_threads) {
         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
     }
+    jet_driver_expand_imported_cli_entry(&modules, source_units, entry_module_identity)
     modules = jet_driver_order_core_modules(^modules, source_units, request.core_sources, bare_modules)
     jet_driver_fill_line_starts(request, &source_units)
     provenance :: jet_driver_collect_source_files(request.authorized_sources, source_units, modules, generated_records)
@@ -4549,6 +4556,27 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
         complete: complete,
         run_member_paths: run_member_paths,
     }
+}
+
+// D-SHAPE-CLI1: a typed entry `fn run(args: T)` whose `#CLI` struct `T`
+// another loaded user module declares gets its generated entry once every
+// module has loaded (sema_cli_entry_expand_imported).
+fn jet_driver_expand_imported_cli_entry(modules: &[JetDriverLoadedModule], source_units: [JetDriverSourceUnit], entry_module_identity: String) {
+    entry := -1
+    loop index in 0..<modules.len() {
+        if modules[index].module_identity == entry_module_identity -> entry = index
+    }
+    if entry < 0 -> return
+    type_name :: sema_cli_entry_run_type(modules[entry].program.items) ?? return
+    imported := [Item]{}
+    loop index in 0..<modules.len() {
+        if index == entry || jet_driver_unit_is_core(source_units[modules[index].source_unit_index]) -> next
+        if sema_cli_entry_struct(modules[index].program.items, type_name) == .Val(_) {
+            loop item in modules[index].program.items -> &imported.push(item.copy())
+        }
+    }
+    if imported.len() == 0 -> return
+    sema_cli_entry_expand_imported(&modules[entry].program, imported)
 }
 
 // The member files of the entry package (a `package.jet` namespace) that

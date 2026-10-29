@@ -67,11 +67,9 @@ use jet_lexer.[
     TOKEN_HASH,
     TOKEN_IDENT,
     TOKEN_INT,
-    TOKEN_KW_COPY,
     TOKEN_KW_IF,
     TOKEN_KW_IT,
     TOKEN_KW_LOOP,
-    TOKEN_KW_MOVE,
     TOKEN_KW_TAG,
     TOKEN_KW_USE,
     TOKEN_LBRACE,
@@ -1780,8 +1778,13 @@ fn parser_parse_postfix(state: &JetParserState, initial: ^ParsedExpr, depth: Int
                 expression = ParsedExpr{expr: Expr.Field{base: ^expression.expr, member: "0", span: span, id: parser_node_id(&state)}, span: span}
                 next
             }
-            member :: if parser_current_kind(&state) == TOKEN_KW_COPY || parser_current_kind(&state) == TOKEN_KW_MOVE -> parser_bump(&state) else -> parser_expect_name(&state, "after the field-access operator")
-            member_name :: if member.kind == TOKEN_KW_COPY || member.kind == TOKEN_KW_MOVE -> parser_text(state, member) else -> parser_value(state, member)
+            // After `.` or `?.` a member is a name even when the word is a
+            // keyword elsewhere (`x.copy()`, `reactive.effect(…)`): no keyword
+            // syntax starts at a member position.
+            next_token :: parser_current(&state)
+            keyword_member :: parser_is_keyword_token(state, next_token)
+            member :: if keyword_member -> parser_bump(&state) else -> parser_expect_name(&state, "after the field-access operator")
+            member_name :: if keyword_member -> parser_text(state, member) else -> parser_value(state, member)
             span := parser_cover(expression.span, member.span)
             // A field access is spanned at its member name, as in the
             // reference; `span` covers the base too.

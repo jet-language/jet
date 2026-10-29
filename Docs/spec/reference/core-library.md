@@ -1697,15 +1697,15 @@ fn run() {
 | `spec.subcommand(name, help, spec)` | `ArgsSpec` | Add a named nested command specification. |
 | `spec.description(text)` / `spec.version(text)` | `ArgsSpec` | Add help text or enable `--version`. |
 | `spec.help()` / `spec.completion(shell)` | `String` | Render help or shell completion text. |
-| `spec.parse(argv)` | `ParsedArgs !String` | Parse without exiting, suitable for tests and custom errors. |
+| `spec.parse(argv)` | `ParsedArgs !Err` | Parse without exiting, suitable for tests and custom errors. |
 | `spec.parse_or_exit(argv)` | `ParsedArgs` | Handle `--help` and usage errors through process exit. |
 | `parsed.flag(name)` / `parsed.option(name)` | `Bool` / `?String` | Read a boolean or optional string value. |
 | `parsed.option_int(name)` / `parsed.option_float(name)` | `?Int` / `?Float` | Read a typed numeric option. |
 | `parsed.options(name)` / `parsed.positional(index)` | `[String]` / `?String` | Read repeated values or a zero-based positional. |
 | `parsed.subcommand()` | `?String` | Read the matched subcommand name. |
 
-`--help` and `--version` are recognized automatically. `parse` returns an error
-string rather than exiting; `parse_or_exit` prints help and exits zero for
+`--help` and `--version` are recognized automatically. `parse` returns an `Err`
+whose message is the refusal text rather than exiting; `parse_or_exit` prints help and exits zero for
 `--help`, or prints usage and exits two for invalid arguments. The decoder also
 handles `--key=value`, `--key value`, `--flag`, `--no-flag`, clustered short
 flags, negative numeric values, and `--` as the end-of-options marker.

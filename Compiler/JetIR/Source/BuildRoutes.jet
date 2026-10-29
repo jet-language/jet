@@ -4414,6 +4414,7 @@ fn ir_core_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: Cor
     if symbol == "jet_raw_object_from_entries" -> return ir_object_from_entries(&m, p, &b, ty, args, span)
     if symbol == "jet_raw_object_entries_view" -> return ir_object_entries_view(&m, p, &b, ty, args, span)
     if symbol == "jet_testing_world" -> return ir_testing_world(&m, p, &b, args, span)
+    if symbol == "jet_task_timeout_duration_ns" -> return ir_task_timeout(&m, p, &b, args, span)
     if symbol == "jet_reflect_of" -> return ir_reflect_of(&m, p, &b, ty, args, span)
     if symbol == "jet_plugin_load" -> return ir_plugin_load(&m, p, &b, ty, args, span)
     if ir_lazy_core_call(&m, p, &b, symbol, ty, args, span) == .Val(result) -> return result
@@ -4517,6 +4518,22 @@ fn ir_testing_world(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], span
     out :: ir_out_slot(&m, &b, 1)
     _ :: ir_runtime(&m, &b, "jet_testing_world", [Int]{closure, invoke, out}, -1)
     ir_release(&m, &b, closure)
+    return -1
+}
+
+// `task.timeout(duration)`: the Duration's exact-Int nanoseconds, narrowed
+// to I64, install the task deadline (Deadline.jet jet_task_timeout_duration_ns).
+fn ir_task_timeout(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], span: Span) -> Int Never! {
+    if args.len() != 1 -> return ir_fail_slot(&b, span, "task.timeout with {args.len()} arguments")
+    duration :: ir_expr(&m, p, &b, args[0])
+    if ir_failed(b) || duration < 0 -> return -1
+    record :: ir_word_record(m, p, b.f.slot_type[duration]) ?? return ir_fail_slot(&b, span, "task.timeout of a value without the Duration word record")
+    int_row :: ir_type_row(&m, Type.Int) ?? 0
+    nanos :: ir_runtime(&m, &b, record.getter, [Int]{duration}, int_row)
+    ir_release(&m, &b, duration)
+    native :: ir_core_native_int(&m, &b, nanos, span)
+    if ir_failed(b) -> return -1
+    _ :: ir_runtime(&m, &b, "jet_task_timeout_duration_ns", [Int]{native}, -1)
     return -1
 }
 

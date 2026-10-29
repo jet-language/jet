@@ -1,0 +1,297 @@
+// D-SHAPE-CLI1 / D-CLIFLAG1: the typed entry `fn run(args: T)` over a `#CLI`
+// struct `T`. The compiler appends `fn __jet_cli_run()`, which builds the
+// D-ARGS1 spec of `T` with the `core.args` `__cli_*` helpers, parses
+// `process.argv()` and then calls `run` (or, when `T` declares commands, the
+// selected command). The driver picks `__jet_cli_run` as the entry of such a
+// program. A `T` of the entry file expands right after that file parses; an
+// imported `T` gets the entry's imports then and its wrapper once every module
+// has loaded. The spec follows Rust `command_schema_with_items` (CLISchema.rs)
+// and the entry follows Rust `jet_cli_entry` (MIRRust.rs). A program the
+// `#CLI` checks refuse (E1305/E1345) gets no wrapper; the checks report it.
+use core.text as unicode
+use jet_foundation.[
+    Expr,
+    Item,
+    Marker,
+    Param,
+    Program,
+    StructDef,
+    Type,
+]
+use jet_parser.[
+    parse_generated_source,
+]
+
+SEMA_CLI_ENTRY_NAME :: "__jet_cli_run"
+SEMA_CLI_ENTRY_IMPORTS :: "use core.args as __jet_cli_args\nuse core.process as __jet_cli_process\nuse core.term as __jet_cli_term\n"
+
+// Parse-time step for the entry file. The fragment lexes as generated code:
+// its `__` names are the compiler's.
+fn sema_cli_entry_expand(program: &Program) {
+    type_name :: sema_cli_entry_run_type(program.items) ?? return
+    entry := ""
+    local := false
+    if sema_cli_entry_struct(program.items, type_name) == .Val(definition) {
+        entry = sema_cli_entry_source(definition, program.items) ?? return
+        local = true
+    }
+    parsed :: parse_generated_source("{SEMA_CLI_ENTRY_IMPORTS}\n{entry}".bytes())
+    if parsed.diagnostics.len() > 0 -> return
+    loop declaration in parsed.program.imports -> &program.imports.push(declaration)
+    loop item in parsed.program.items -> &program.items.push(item)
+    loop name in parsed.program.used_import_names -> &program.used_import_names.push(name)
+    // An imported `T` uses these aliases from the wrapper added after loading.
+    if !local {
+        aliases :: [String]{"__jet_cli_args", "__jet_cli_process", "__jet_cli_term"}
+        loop name in aliases -> &program.used_import_names.push(name)
+    }
+}
+
+// Post-load step for a `T` imported into the entry file: `imported` holds the
+// items of the other loaded user modules.
+fn sema_cli_entry_expand_imported(program: &Program, imported: [Item]) {
+    type_name :: sema_cli_entry_run_type(program.items) ?? return
+    if sema_cli_entry_struct(program.items, type_name) == .Val(_) -> return
+    definition :: sema_cli_entry_struct(imported, type_name) ?? return
+    bindings := imported.copy()
+    loop item in program.items -> &bindings.push(item.copy())
+    entry :: sema_cli_entry_source(definition, bindings) ?? return
+    parsed :: parse_generated_source(entry.bytes())
+    if parsed.diagnostics.len() > 0 -> return
+    loop item in parsed.program.items -> &program.items.push(item)
+}
+
+// The parameter type name of a one-parameter `run` without a wrapper yet.
+fn sema_cli_entry_run_type(items: [Item]) -> String? {
+    entry_type := String?{None}
+    loop item in items {
+        if item == .Func(function) {
+            if function.name == SEMA_CLI_ENTRY_NAME -> return None
+            if function.name == "run" && function.params.len() == 1 -> entry_type = sema_registration_cli_named_leaf(function.params[0].ty)
+        }
+    }
+    entry_type
+}
+
+// The `#CLI` struct `type_name` among `items`.
+fn sema_cli_entry_struct(items: [Item], type_name: String) -> StructDef? {
+    loop item in items {
+        if item == .Struct(definition) && definition.name == type_name {
+            loop derive_item in definition.derives {
+                if derive_item.name == "CLI" -> return Val(definition)
+            }
+        }
+    }
+    None
+}
+
+// The wrapper function of `definition`; `items` hold its bound functions.
+fn sema_cli_entry_source(definition: StructDef, items: [Item]) -> String? {
+    standard :: sema_registration_cli_standard(definition.type_markers)
+    description :: sema_cli_entry_doc(definition.type_markers)
+    version :: if standard -> "$package.version" else -> "\"\""
+    lines := [String]{"    __spec := __jet_cli_args.__cli_spec({sema_cli_entry_text(description ?? "")}, {description != None}, {version}, {standard})"}
+    literal := [String]{}
+    assigned := [String]{}
+    loop field in definition.fields {
+        if field.computed != None -> next
+        kind :: sema_registration_cli_field_kind(field) ?? return None
+        flag :: sema_checked_field_shape_names(definition, field).args
+        name :: sema_cli_entry_text(flag)
+        help :: sema_cli_entry_doc(field.serde_markers) ?? "value for --{flag}"
+        short :: sema_cli_entry_marker_text(field.serde_markers, "Short") ?? ""
+        env :: sema_cli_entry_marker_text(field.serde_markers, "Env") ?? ""
+        flag_only :: sema_registration_cli_marker(field.serde_markers, "Flag") != None
+        if kind == {
+            .Flag -> {
+                &lines.push("    __jet_cli_args.__cli_input(&__spec, {sema_cli_entry_input(flag, short, help, true, Type.Bool, None, env, false, false)})")
+                &literal.push("{field.name}: __jet_cli_args.__cli_flag(__parsed, {name})")
+            }
+            .OptionalOption -> {
+                inner :: if field.ty == .Option(value) -> value else -> field.ty
+                value :: sema_cli_entry_optional(inner, flag) ?? return None
+                &lines.push("    __jet_cli_args.__cli_input(&__spec, {sema_cli_entry_input(flag, short, help, false, inner, None, env, false, false)})")
+                &literal.push("{field.name}: {value}")
+            }
+            .DefaultedOption -> {
+                default :: if field.default == .Val(expr) -> sema_cli_entry_default(expr) else -> String?{None}
+                value :: sema_cli_entry_value(field.ty, flag) ?? return None
+                &lines.push("    __jet_cli_args.__cli_input(&__spec, {sema_cli_entry_input(flag, short, help, false, field.ty, default, env, false, false)})")
+                &assigned.push("    if __jet_cli_args.__cli_has(__parsed, {name}) -> __args.{field.name} = {value}")
+            }
+            .RequiredOption -> {
+                value :: sema_cli_entry_value(field.ty, flag) ?? return None
+                &lines.push("    __jet_cli_args.__cli_input(&__spec, {sema_cli_entry_input(flag, short, help, false, field.ty, None, env, true, !flag_only)})")
+                &literal.push("{field.name}: {value}")
+            }
+        }
+    }
+    computed := [String]{}
+    loop field in definition.fields {
+        if field.computed != None -> &computed.push(sema_computed_field_getter(field.name))
+    }
+    commands := [String]{}
+    loop function in definition.methods {
+        if computed.contains(function.name) -> next
+        has_self :: loop param in function.params {
+            if param.name == "self" -> break true
+        } ?? false
+        callee :: if has_self -> "__args.{function.name}" else -> "{definition.name}.{function.name}"
+        command :: sema_cli_entry_command(unicode.lower(function.name), sema_cli_entry_doc(function.markers), function.params, "", callee) ?? return None
+        loop line in command.spec -> &lines.push(line)
+        &commands.push(command.call)
+    }
+    loop binding in definition.cli_bindings {
+        target :: sema_registration_cli_binding_target(items, binding.target) ?? return None
+        command :: sema_cli_entry_command(unicode.lower(binding.name), sema_cli_entry_doc(binding.markers), target.params, definition.name, target.name) ?? return None
+        loop line in command.spec -> &lines.push(line)
+        &commands.push(command.call)
+    }
+    &lines.push("    __parsed :: __jet_cli_args.__cli_parse(__spec, __jet_cli_process.argv())")
+    &lines.push("    __status :: __jet_cli_args.__cli_status(__parsed)")
+    &lines.push("    if __status == 0 {{")
+    &lines.push("        print(__jet_cli_args.__cli_message(__parsed))")
+    &lines.push("        return")
+    &lines.push("    }}")
+    &lines.push("    if __status > 0 {{")
+    &lines.push("        __jet_cli_term.eprint(__jet_cli_args.__cli_message(__parsed))")
+    &lines.push("        __jet_cli_process.exit(__status)")
+    &lines.push("    }}")
+    binder :: if assigned.len() > 0 -> ":=" else -> "::"
+    &lines.push("    __args {binder} {definition.name}{{{literal.join(", ")}}}")
+    loop line in assigned -> &lines.push(line)
+    if commands.len() == 0 {
+        &lines.push("    run(__args)")
+    } else {
+        &lines.push("    __command :: __jet_cli_args.__cli_command_name(__parsed)")
+        loop call in commands -> &lines.push(call)
+    }
+    Val("fn {SEMA_CLI_ENTRY_NAME}() {{\n{lines.join("\n")}\n}}\n")
+}
+
+// One command: its spec lines and its dispatch arm. A bound function's first
+// parameter of the program type `shared_type` receives the shared program
+// value (Rust `command_payload_params`); every other parameter is one input.
+fn sema_cli_entry_command(command: String, description: String?, params: [Param], shared_type: String, callee: String) -> (spec: [String], call: String)? {
+    spec := [String]{"    __jet_cli_args.__cli_command(&__spec, {sema_cli_entry_text(command)}, {sema_cli_entry_text(description ?? "")}, {description != None})"}
+    arguments := [String]{}
+    loop (index, param) in params {
+        if param.name == "self" -> next
+        leaf :: sema_registration_cli_named_leaf(param.ty) ?? ""
+        if shared_type.bytes().len() > 0 && index == 0 && leaf == shared_type {
+            &arguments.push("__args")
+            next
+        }
+        label := param.name
+        labeled := false
+        if param.public_label == .Val(public) && public.name != "_" {
+            label = public.name
+            labeled = true
+        }
+        flag :: label.replace("_", "-")
+        help :: "value for --{flag}"
+        value := ""
+        if param.ty == .Bool {
+            &spec.push("    __jet_cli_args.__cli_command_input(&__spec, {sema_cli_entry_input(flag, "", help, true, Type.Bool, None, "", false, false)})")
+            value = "__jet_cli_args.__cli_flag(__parsed, {sema_cli_entry_text(flag)})"
+        } else if param.ty == .Option(inner) {
+            &spec.push("    __jet_cli_args.__cli_command_input(&__spec, {sema_cli_entry_input(flag, "", help, false, inner, None, "", false, false)})")
+            value = sema_cli_entry_optional(inner, flag) ?? return None
+        } else {
+            default := String?{None}
+            if param.default == .Val(expr) {
+                default = Val(sema_cli_entry_default(expr) ?? return None)
+            }
+            required :: default == None
+            &spec.push("    __jet_cli_args.__cli_command_input(&__spec, {sema_cli_entry_input(flag, "", help, false, param.ty, default, "", required, required)})")
+            value = sema_cli_entry_value(param.ty, flag) ?? return None
+        }
+        if labeled {
+            &arguments.push("{label}: {value}")
+        } else {
+            &arguments.push(value)
+        }
+    }
+    call :: "    if __command == {sema_cli_entry_text(command)} {{\n        {callee}({arguments.join(", ")})\n        return\n    }}"
+    Val((spec: spec, call: call))
+}
+
+// The `__cli_input` arguments after the spec: name, short, help, metavar,
+// flag, value kind, default, has-default, env, required, positional.
+fn sema_cli_entry_input(flag: String, short: String, help: String, is_flag: Bool, ty: Type, default: String?, env: String, required: Bool, positional: Bool) -> String Never! {
+    meta :: if is_flag -> "" else -> unicode.upper(flag.replace("-", "_"))
+    "{sema_cli_entry_text(flag)}, {sema_cli_entry_text(short)}, {sema_cli_entry_text(help)}, {sema_cli_entry_text(meta)}, {is_flag}, {sema_cli_entry_kind(ty)}, {sema_cli_entry_text(default ?? "")}, {default != None}, {sema_cli_entry_text(env)}, {required}, {positional}"
+}
+
+// `core.args` CLI_TEXT 0, CLI_INT 1, CLI_FLOAT 2, CLI_BOOL 4.
+fn sema_cli_entry_kind(ty: Type) -> Int Never! {
+    if ty == {
+        .Int | .InlineRange(_, _, _) -> 1
+        .Float -> 2
+        .Bool -> 4
+        else -> 0
+    }
+}
+
+// The decoded value of a present scalar input named `flag`.
+fn sema_cli_entry_value(ty: Type, flag: String) -> String? {
+    name :: sema_cli_entry_text(flag)
+    if ty == {
+        .Int | .InlineRange(_, _, _) -> return Val("__jet_cli_args.__cli_int(__parsed, {name})")
+        .Float -> return Val("__jet_cli_args.__cli_float(__parsed, {name})")
+        .Bool -> return Val("__jet_cli_args.__cli_bool(__parsed, {name})")
+        .String -> return Val("__jet_cli_args.__cli_text(__parsed, {name})")
+        .Named(type_name) -> {
+            if type_name == "Path" -> return Val("Path.from(__jet_cli_args.__cli_text(__parsed, {name}))")
+        }
+        else -> {}
+    }
+    None
+}
+
+// The decoded value of an optional scalar input named `flag`, `None` when
+// absent.
+fn sema_cli_entry_optional(ty: Type, flag: String) -> String? {
+    name :: sema_cli_entry_text(flag)
+    if ty == {
+        .Int | .InlineRange(_, _, _) -> return Val("__jet_cli_args.__cli_int_opt(__parsed, {name})")
+        .Float -> return Val("__jet_cli_args.__cli_float_opt(__parsed, {name})")
+        .Bool -> return Val("__jet_cli_args.__cli_bool_opt(__parsed, {name})")
+        .String -> return Val("__jet_cli_args.__cli_text_opt(__parsed, {name})")
+        .Named(type_name) -> {
+            if type_name == "Path" -> return Val("if __jet_cli_args.__cli_has(__parsed, {name}) -> Path?{{Val(Path.from(__jet_cli_args.__cli_text(__parsed, {name})))}} else -> Path?{{None}}")
+        }
+        else -> {}
+    }
+    None
+}
+
+// Rust `expr_default`: the help and fallback text of a literal default.
+fn sema_cli_entry_default(expr: Expr) -> String? {
+    current :: sema_registration_cli_without_parens(expr)
+    if current == {
+        .Int(value, _, _, _, _) -> return Val("{value}")
+        .Float(value, _, _, raw, _) -> return Val(raw ?? "{value}")
+        .Bool(value, _, _) -> return Val("{value}")
+        .Str(parts, _, _) -> {
+            if parts.len() == 1 && parts[0] == .Lit(text) -> return Val(text)
+        }
+        else -> {}
+    }
+    None
+}
+
+fn sema_cli_entry_doc(markers: [Marker]) -> String? {
+    sema_cli_entry_marker_text(markers, "Doc")
+}
+
+fn sema_cli_entry_marker_text(markers: [Marker], name: String) -> String? {
+    marker :: sema_registration_cli_marker(markers, name) ?? return None
+    sema_registration_cli_marker_string(marker)
+}
+
+// `text` as a Jet string literal.
+fn sema_cli_entry_text(text: String) -> String Never! {
+    escaped :: text.replace("\\", "\\\\").replace("\"", "\\\"").replace("{{", "{{{{").replace("}}", "}}}}").replace("\n", "\\n")
+    "\"{escaped}\""
+}

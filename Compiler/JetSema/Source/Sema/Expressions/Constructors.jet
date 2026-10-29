@@ -1312,6 +1312,13 @@ fn sema_expression_checked_text_literal(head: Type, source_head: Type?, body: Ty
             return SemaExpressionCheckedTextLiteral{handled: true, value: None}
         }
     }
+    // A hole the compiler cannot know (a local, a parameter, a call) makes
+    // the complete text a run-time value: it is built and checked when the
+    // literal runs. Only constant holes are checked here, before the program runs.
+    if !sema_expression_checked_text_holes_constant(parts, scopes) {
+        value :: sema_expression_checked_text_runtime(head, target.owner.name, checked, span, environment, program, scopes) ?? return SemaExpressionCheckedTextLiteral{handled: true, value: None}
+        return SemaExpressionCheckedTextLiteral{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+    }
     if program.registration_graph == .Val(graph) {
     functions := sema_comptime_reachable_function_keys(graph, context.call_facts)
     reachable := [String]{}
@@ -1367,6 +1374,62 @@ fn sema_expression_checked_text_literal(head: Type, source_head: Type?, body: Ty
     return SemaExpressionCheckedTextLiteral{handled: true, value: sema_expr_expected(result, expected, environment, program, &diagnostics)}
     }
     SemaExpressionCheckedTextLiteral{handled: true, value: None}
+}
+
+// Whether every hole of a checked text body is known before the program
+// runs: literals, constants, and operators over them.
+fn sema_expression_checked_text_holes_constant(parts: [StrPart], scopes: SemaScopeTable) -> Bool Never! {
+    loop part in parts {
+        if part == .Interp(value, _) {
+            if !sema_expression_checked_text_constant(value, scopes) -> return false
+        }
+    }
+    true
+}
+
+fn sema_expression_checked_text_constant(value: Expr, scopes: SemaScopeTable) -> Bool Never! {
+    if value == {
+        .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Char(_, _, _) | .Unit(_, _) -> true
+        .Str(parts, _, _) -> sema_expression_checked_text_holes_constant(parts, scopes)
+        .Paren(inner, _, _) | .Unary(_, inner, _, _) -> sema_expression_checked_text_constant(inner, scopes)
+        .Binary(_, left, right, _, _) -> sema_expression_checked_text_constant(left, scopes) && sema_expression_checked_text_constant(right, scopes)
+        .Ident(name, _, _) -> {
+            index :: sema_scope_resolve_index(scopes, name) ?? return false
+            scopes.bindings[index].symbol.kind == SymbolKind.Constant
+        }
+        else -> false
+    }
+}
+
+// A checked text literal with a run-time hole: the encoded complete text is
+// bound once, the type's ordinary `check` runs on it, and a rejection stops
+// the program at the literal (E3001), so every value of the type passed its
+// checker. The checker call is `checked`, the static `Type.check(text)`.
+fn sema_expression_checked_text_runtime(head: Type, head_name: String, checked: TExpr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> TExpr? {
+    accepted_type :: if checked.ty == {.Result(ok, _) -> ok else -> { return None }}
+    source_local :: checked_generated_local("__checked_text_source_{span.start}", span, Type.String)
+    source_value :: sema_tree_node(Type.String, TExprKind.Local{local: source_local}, span)
+    original := TExpr?{None}
+    checker_call := TExpr?{None}
+    if checked.kind == .Call(callee, type_args, args) {
+        if args.len() == 1 {
+            original = Val(args[0].value)
+            checker_args := args
+            checker_args[0].value = source_value
+            checker_call = Val(sema_tree_node(checked.ty, TExprKind.Call{callee: callee, type_args: type_args, args: checker_args}, span))
+        }
+    }
+    source_init :: original ?? return None
+    checker :: checker_call ?? return None
+    message :: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "{head_name}.check rejected the complete text of this {head_name} literal"}}}, span)
+    fallback :: TOrFallback.Panic{message: message, location: sema_expression_panic_location(environment, program, scopes, span)}
+    accepted :: sema_tree_node(accepted_type, TExprKind.OrFallback{value: checker, fallback: fallback, ambient_err: None}, span)
+    wrapped :: sema_tree_node(head, TExprKind.DistinctCtor{argument: sema_tree_node(Type.String, TExprKind.Move{value: source_value}, span)}, span)
+    Val(sema_tree_node(head, TExprKind.InlineBlock{body: [TStmt]{
+        TStmt.Let{local: source_local, let_ty: TLetTy.Annotated{ty: Type.String, wrapper: TLetWrapper.Plain}, init: source_init, gc_promotion: None, gc_transferred: false, span: span},
+        TStmt.ExprStmt{value: accepted, span: span},
+        TStmt.ExprStmt{value: wrapped, span: span},
+    }}, span))
 }
 
 // The bytes a `[U8]{"…"}` body spells. ASCII text contributes

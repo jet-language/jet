@@ -298,6 +298,10 @@ struct SemaOwnershipState {
     // are published under: a nested call's View result keeps its source
     // lent as an argument of the enclosing call.
     call_views: [Int:[SemaCallReturnViewFact]]{[Int:[SemaCallReturnViewFact]]{}}
+    // Keys of the bindings a checked path read, including a path that leaves
+    // (`return`, `break`). A fork rollback drops a leaving path's references,
+    // but its reads are still uses for L0101/L0102.
+    used_keys: [String:Bool]{[String:Bool]{}}
 }
 
 // First/last declaration rows and total reference/write counts for one key.
@@ -531,6 +535,7 @@ fn sema_ownership_state_snapshot(source: SemaOwnershipState) -> SemaOwnershipSta
     snapshot.anchors = source.anchors
     snapshot.forks = source.forks
     snapshot.trail = source.trail
+    snapshot.used_keys = source.used_keys
     snapshot
 }
 
@@ -1029,6 +1034,8 @@ fn sema_ownership_note_reference(state: &SemaOwnershipState, name: String, use_s
         declaration_index = sema_ownership_declaration_index(&state, def_key)
     }
     fact_index :: declaration_index ?? return false
+    // Only an open fork can roll this reference back.
+    if state.forks > 0 -> state.used_keys[def_key] = true
     // Between joins a reference counts on the binding's last row; the first
     // row of the key owns the canonical recount, so any other row and that
     // first row both leave it.
@@ -1060,7 +1067,7 @@ fn sema_ownership_note_place_reference(state: &SemaOwnershipState, expr: Expr, p
 
 fn sema_ownership_finalize_references(state: &SemaOwnershipState, diagnostics: &[Diagnostic]) {
     loop fact in state.declarations {
-        if fact.references == 0 && !fact.ambient && !sema_ownership_intentional_name(fact.name) && !sema_ownership_flow_narrowing(state, fact) {
+        if fact.references == 0 && state.used_keys.get(fact.key) == None && !fact.ambient && !sema_ownership_intentional_name(fact.name) && !sema_ownership_flow_narrowing(state, fact) {
             // Rust `CheckerReferences::emit_unused_binding_lints`: the
             // registry row wording, with the `_name` rename as the edit.
             what := "Local binding `{fact.name}` is never read."
@@ -5643,6 +5650,8 @@ fn sema_ownership_join_paths(state: &SemaOwnershipState, before: SemaOwnershipSt
     joined :: sema_ownership_path_join(before, fork, sema_ownership_fork_path(then_state, fork), sema_ownership_fork_path(else_state, fork), has_else, state.share_found)
     sema_ownership_state_restore_path(&state, before)
     sema_ownership_fork_apply(&state, joined)
+    loop (key, _) in then_state.used_keys -> state.used_keys[key] = true
+    loop (key, _) in else_state.used_keys -> state.used_keys[key] = true
 }
 
 // This rule branch merge (Rust `UninitState::merge_paths`): a binding left

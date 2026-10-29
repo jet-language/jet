@@ -1,0 +1,18 @@
+// A member name after `.` may be a word that is a keyword elsewhere, as in the
+// ratified `reactive.effect(…)` (D-REACT1): `p.effect` is a field access, so
+// the error is sema's missing field, not a parse error. At the start of an
+// item, `effect` still declares an effect.
+effect Log.Audit
+
+struct Point {
+    x: Int
+    y: Int
+}
+
+fn audit() -[Log.Audit]> {}
+
+fn run() {
+    audit()
+    p :: Point{x: 1, y: 2}
+    print(p.effect)
+}

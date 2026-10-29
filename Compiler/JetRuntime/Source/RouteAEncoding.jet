@@ -337,6 +337,82 @@ fn encoding_flush(writer: I64) -> I64 {
     I64{1}
 }
 
+// next_read_cap: the read plan (last entry repeats), else one byte under
+// JET_ENC_HOSTILE_READ_ONE, else the fixed chunk.
+fn encoding_hostile_read_cap(state: I64, length: I64) -> I64 {
+    count :: rt_text_word(state + I64{144})
+    if (count != I64{0}) {
+        index :: rt_text_word(state + I64{160})
+        cap :: rt_text_word(rt_text_word(state + I64{136}) + (if (index < count) -> index else -> count - I64{1}) * I64{8})
+        if (index < count) -> rt_text_store(state + I64{160}, index + I64{1})
+        bounded :: if (cap < length) -> cap else -> length
+        return if (bounded < ENCODING_IO_CHUNK) -> bounded else -> ENCODING_IO_CHUNK
+    }
+    if (rt_text_word(state + I64{8}) != I64{0}) -> return if (length < I64{1}) -> length else -> I64{1}
+    if (length < ENCODING_IO_CHUNK) -> length else -> ENCODING_IO_CHUNK
+}
+
+// One read on the reader's FD72 (no EINTR retry, as BufReader::read): the
+// count, or -1 with the EncodingCause stored at `cause`.
+fn encoding_fd_read(reader: I64, bytes: I64, length: I64, cause: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{32}, I64{8})
+    count :: jet_fd_read_raw(reader, bytes, length, scratch)
+    code :: rt_text_word(scratch + I64{8})
+    jet_rt_free(scratch, I64{32}, I64{8})
+    if (count >= I64{0}) -> return count
+    // fd_read_error's only custom fact is a failed flush of pending output.
+    rt_text_store(cause, if (code == I64{0}) -> encoding_cause_custom(rt_static_text("WriteZero"), rt_static_text("failed to write the buffered data")) else -> encoding_cause_errno(code))
+    I64{-1}
+}
+
+// EncodingHostileIo.rs:227 jet_encoding_file_read: the count, or -1 with the
+// EncodingCause stored at `cause`.
+fn encoding_file_read(reader: I64, bytes: I64, length: I64, cause: I64) -> I64 {
+    if jet_fault_should_fail(rt_static_text("FS.Read")) {
+        rt_text_store(cause, encoding_cause_custom(rt_static_text("Other"), rt_static_text("fault injected: FS.Read")))
+        return I64{-1}
+    }
+    state :: encoding_hostile_state()
+    if (state == I64{0}) -> return encoding_fd_read(reader, bytes, if (length < ENCODING_IO_CHUNK) -> length else -> ENCODING_IO_CHUNK, cause)
+    rt_text_store(state + I64{72}, rt_text_word(state + I64{72}) + I64{1})
+    pending :: rt_text_word(state + I64{24})
+    if (pending != I64{0}) {
+        rt_text_store(state + I64{112}, rt_text_word(state + I64{112}) + I64{1})
+        rt_text_store(state + I64{24}, pending - I64{1})
+        rt_text_store(cause, encoding_cause_custom(rt_static_text("Interrupted"), rt_static_text("operation interrupted")))
+        return I64{-1}
+    }
+    limited :: rt_text_word(state + I64{40}) != I64{0}
+    limit :: rt_text_word(state + I64{48})
+    if (limited && !alloc_unsigned_less(rt_text_word(state + I64{120}), limit)) {
+        rt_text_store(cause, encoding_hostile_fail_cause())
+        return I64{-1}
+    }
+    count :: encoding_fd_read(reader, bytes, encoding_hostile_read_cap(state, length), cause)
+    if (count <= I64{0}) -> return count
+    total :: rt_text_word(state + I64{120}) + count
+    rt_text_store(state + I64{120}, total)
+    rt_text_store(state + I64{96}, rt_text_word(state + I64{96}) + count)
+    if (limited && alloc_unsigned_less(limit, total)) {
+        rt_text_store(cause, encoding_hostile_fail_cause())
+        return I64{-1}
+    }
+    count
+}
+
+// EncodingStream.rs:4228: one byte, None at end of input.
+#Export(c) fn jet_raw_encoding_read_byte(reader: I64, some: I64, value: I64, error: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{16}, I64{8})
+    count :: encoding_file_read(reader, scratch, I64{1}, scratch + I64{8})
+    byte :: rt_text_byte(scratch)
+    cause :: rt_text_word(scratch + I64{8})
+    jet_rt_free(scratch, I64{16}, I64{8})
+    if (count < I64{0}) -> return encoding_fail(cause, error)
+    rt_text_store(some, if (count == I64{0}) -> I64{0} else -> I64{1})
+    if (count != I64{0}) -> rt_text_store(value, byte)
+    I64{1}
+}
+
 // DataStats.rs:11: std::fs::metadata (stat, following links) of the raw path
 // bytes; a NUL is std's CString refusal.
 #Export(c) fn jet_data_host_path_is_file(data: I64, length: I64, ok: I64, error: I64) -> I64 {

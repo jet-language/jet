@@ -1,0 +1,44 @@
+// A parameter or local read only as the subject of an `if x == { … }` table,
+// or only on a path that leaves, is used. Only `unused` is reported.
+enum Format { JSON CSV MsgPack }
+
+fn extension(format: Format) -> String {
+    if format == {
+        .MsgPack -> return "msgpack"
+        else -> return "other"
+    }
+}
+
+fn pair(outer: Format, inner: Format) -> String {
+    if outer == {
+        .JSON -> {
+            if inner == {
+                .CSV -> return "json/csv"
+                else -> return "json/other"
+            }
+        }
+        else -> return "other"
+    }
+}
+
+fn early(ready: Bool, value: Int, unused: Int) -> Int {
+    if ready {
+        return value
+    }
+    0
+}
+
+fn local_subject(ready: Bool) -> String {
+    format :: if ready -> Format.MsgPack else -> Format.CSV
+    if format == {
+        .MsgPack -> return "msgpack"
+        else -> return "other"
+    }
+}
+
+fn run() {
+    print(extension(Format.MsgPack))
+    print(pair(Format.JSON, Format.CSV))
+    print(early(true, 1, 2))
+    print(local_subject(false))
+}

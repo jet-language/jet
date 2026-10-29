@@ -26,6 +26,15 @@ fn jet_ctx_deadline_ms() -> I64 { sync_load(context_current() + CONTEXT_DEADLINE
         sync_store(context_current() + CONTEXT_DEADLINE_MS, deadline_ms)
     }
 }
+// D-TYPE2-TIME1=A `task.timeout(duration)`: the task deadline becomes the
+// earlier of the installed one and now plus the Duration's whole
+// milliseconds, a negative delay counting as none (Rust
+// jet_task_timeout_duration_ns).
+#Export(c) fn jet_task_timeout_duration_ns(nanos: I64) {
+    millis :: if (nanos <= I64{0}) -> I64{0} else -> nanos /% I64{1000000}
+    now :: jet_std_time_now()
+    jet_ctx_set_deadline_min(if (now > I64{9223372036854775807} - millis) -> I64{9223372036854775807} else -> now + millis)
+}
 
 // Rust str::parse has no whitespace trimming, accepts one leading '+'; signed
 // parsing also accepts '-'. out is an exclusively borrowed word. Negative
