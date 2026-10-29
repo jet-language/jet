@@ -77,3 +77,130 @@ fn ir_opt_stops_poll(f: IRFunction, keys: [String], at: Int) -> Bool Never! {
 fn ir_opt_stops_drops(code: &IROptCode, f: IRFunction, start: Int, end: Int) Never! {
     loop k in start..<end -> ir_opt_code_put(&code, f.op[k], f.dst[k], f.a[k], f.b[k], f.c[k], f.code_line[k])
 }
+
+// Polls folded into a later one (O1, O2, after inlining, before the stop
+// points move after their calls). A poll that checks no call (since the
+// last check only an inlined body, arithmetic or other stop points, and no
+// stop edge of the constructs just closed lands on it) can observe only a
+// stop another task asked for, which a later poll observes as well. When
+// every path from it reaches such a poll, with no Loop, Return or branch
+// on the way that could skip it, the earlier one goes: a stop asked for
+// meanwhile is delivered a little later, at the later stop point, while
+// every stop a call or a trap publishes is still taken where it was.
+fn ir_opt_fold_polls(f: &IRFunction, keys: [String]) Never! {
+    folded := false
+    loop at in 0..<f.op.len() {
+        if !ir_opt_stops_poll(f, keys, at) || ir_opt_polls_checks_call(f, keys, at) -> next
+        end :: f.c[at + 1]
+        if !ir_opt_polls_reach(f, keys, end + 1) -> next
+        loop k in at..<(end + 1) -> f.op[k] = IROp.Nop
+        folded = true
+    }
+    if folded -> ir_opt_compact(&f)
+}
+
+// Whether the poll at `at` checks a call: walking back to the first call
+// that is no stop point's or the first construct opened, a call met first,
+// or a construct closed on the way holding a stop edge that branches (an
+// inlined body handing its callee's stop on to the poll after it).
+fn ir_opt_polls_checks_call(f: IRFunction, keys: [String], at: Int) -> Bool Never! {
+    k := at - 1
+    loop k >= 0 {
+        op :: f.op[k]
+        if op == .End {
+            if ir_opt_polls_hands_on(f, f.a[k], k) -> return true
+            k = f.a[k] - 1
+            next
+        }
+        if (op == .Call && !ir_opt_polls_stop_call(keys, f.a[k])) || op == .CallRuntime || op == .CallIndirect -> return true
+        if op == .Block || op == .Loop || op == .If || op == .Else -> return false
+        k -= 1
+    }
+    false
+}
+
+// Whether `callee` is a stop point's own call: the poll or the trap.
+fn ir_opt_polls_stop_call(keys: [String], callee: Int) -> Bool Never! {
+    callee >= 0 && callee < keys.len() && (keys[callee] == IR_STOP_POLL_KEY || keys[callee] == IR_STOP_TRAP_KEY)
+}
+
+// Whether a stop edge (an If testing what a call just returned) from
+// `start` to `end` branches rather than ending in a Return.
+fn ir_opt_polls_hands_on(f: IRFunction, start: Int, end: Int) -> Bool Never! {
+    loop k in start..<end {
+        if k == 0 || f.op[k] != .If || f.b[k] >= 0 || ir_opt_dead_end(f, k) >= 0 -> next
+        call :: f.op[k - 1]
+        if (call != .Call && call != .CallRuntime && call != .CallIndirect) || f.a[k] != f.dst[k - 1] -> next
+        loop j in (k + 1)..<f.c[k] {
+            if f.op[j] == .Br || f.op[j] == .BrIf -> return true
+        }
+    }
+    false
+}
+
+// Whether every path from `start` reaches a poll outside any construct
+// opened on the way. A construct closing goes on after it (a Loop's ends
+// the search), an Else on after its If, a Br leaving the constructs opened
+// on after the End it lands on; a poll counts only past every such End a
+// branch skipped to. A Loop, Return, Unreachable or a branch back to a
+// Loop's head ends the search. Edges that never come back
+// (ir_opt_dead_end: a trap's or failure's cleanup) are passed over.
+fn ir_opt_polls_reach(f: IRFunction, keys: [String], start: Int) -> Bool Never! {
+    depth := 0
+    past := -1
+    at := start
+    loop at < f.op.len() {
+        exit :: ir_opt_dead_end(f, at)
+        if exit > at {
+            at = exit + 1
+            next
+        }
+        op :: f.op[at]
+        if depth == 0 && at > past && ir_opt_stops_poll(f, keys, at) -> return true
+        if op == .Loop || op == .Return || op == .Unreachable -> return false
+        if op == .Block || op == .If {
+            depth += 1
+        } else if op == .Else {
+            if depth == 0 -> at = f.a[at] - 1
+        } else if op == .End {
+            if depth == 0 && f.op[f.a[at]] == .Loop -> return false
+            if depth > 0 -> depth -= 1
+        } else if op == .Br || op == .BrIf {
+            level :: if op == .Br -> f.a[at] else -> f.b[at]
+            if level >= depth {
+                target :: ir_opt_polls_br_end(f, at, level)
+                if target < 0 -> return false
+                if op == .Br && depth == 0 {
+                    at = target
+                } else if target > past {
+                    past = target
+                }
+            }
+        }
+        at += 1
+    }
+    false
+}
+
+// The End a Br at `at` with depth `level` lands after, or -1 when it
+// targets a Loop (a jump back to its head).
+fn ir_opt_polls_br_end(f: IRFunction, at: Int, level: Int) -> Int Never! {
+    open := 0
+    left := level
+    k := at + 1
+    loop k < f.op.len() {
+        op :: f.op[k]
+        if op == .Block || op == .Loop || op == .If {
+            open += 1
+        } else if op == .End {
+            if open > 0 {
+                open -= 1
+            } else {
+                if left == 0 -> return if f.op[f.a[k]] == .Loop -> -1 else -> k
+                left -= 1
+            }
+        }
+        k += 1
+    }
+    -1
+}

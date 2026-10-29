@@ -1833,6 +1833,9 @@ fn ir_x64_select_at(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Alloc
 fn ir_x64_select(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64Tables, at: Int) Never! {
     op :: f.op[at]
     dst :: f.dst[at]
+    // A frame address's write emits nothing: every read addresses rbp.
+    written :: ir_x64_write(f, at)
+    if written >= 0 && al.frames[written] != 0 -> return
     if op == {
         .Nop -> {}
         .Const -> ir_x64_const(&e, m, f, al, at)
@@ -1894,7 +1897,6 @@ fn ir_x64_select(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
         .Offset -> ir_x64_offset(&e, m, f, al, at)
         .CopyBytes -> ir_x64_copy(&e, m, f, al, at)
         .StackAddress -> {
-            if al.frames[dst] != 0 -> return
             x64_lea(&e.code, X64_RAX, X64_RBP, al.stack[at])
             ir_x64_store(&e, m, f, al, dst, X64_RAX)
         }

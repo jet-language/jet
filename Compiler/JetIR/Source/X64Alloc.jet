@@ -86,10 +86,11 @@ struct IRX64Allocation {
     consts: [Bool]
     values: [Int]
     // Per slot: the rbp displacement of the storage a frame address (a
-    // General temporary whose only write is a StackAddress) points at, 0 for
-    // any other slot: it has no place, its StackAddress emits nothing, a
-    // Load, Store, Offset or CopyBytes through it addresses rbp directly and
-    // any other read is a `lea`.
+    // General temporary whose only write is a StackAddress, or a copy, move
+    // or in-bounds Offset of a frame address) points at, 0 for any other
+    // slot: it has no place, its write emits nothing, a Load, Store, Offset
+    // or CopyBytes through it addresses rbp directly and any other read is a
+    // `lea`.
     frames: [Int]
     // Per slot: the first and last instruction index of its live range
     // (-1 for a parameter's start); start > end when it is never referenced.
@@ -253,6 +254,38 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
         &values.push(if constant -> f.a[at] else -> 0)
         &addressed.push(slot >= f.param_count && f.slot_kind[slot] == .Temp && writes[slot] == 1 && f.op[at] == .StackAddress && classes[slot] == .General)
     }
+    // Frame addresses derived from one: per slot the StackAddress slot it
+    // points into (-1: none) and how far. Each derived slot is written once,
+    // so it holds that address wherever it is read.
+    roots := [Int]{}
+    shifts := [Int]{}
+    loop slot in 0..<count {
+        &roots.push(if addressed[slot] -> slot else -> -1)
+        &shifts.push(0)
+    }
+    derived := true
+    loop derived {
+        derived = false
+        loop slot in 0..<count {
+            at :: last_write[slot]
+            if roots[slot] >= 0 || at < 0 || slot < f.param_count || f.slot_kind[slot] != .Temp || writes[slot] != 1 || classes[slot] != .General -> next
+            op :: f.op[at]
+            if op != .Copy && op != .Move && op != .Offset -> next
+            source :: f.a[at]
+            if source < 0 || source >= count || roots[source] < 0 -> next
+            // A Copy that clones (ir_x64_transfer) makes a value of its own.
+            row :: m.types[f.slot_type[source]]
+            if op == .Copy && row.drop != "" && row.kind != .Aggregate -> next
+            root :: roots[source]
+            shift :: shifts[source] + (if op == .Offset -> f.b[at] else -> 0)
+            // Only inside the storage: a displacement of 0 would be no frame.
+            if shift < 0 || shift >= ir_x64_storage_size(f, last_write[root]) -> next
+            roots[slot] = root
+            shifts[slot] = shift
+            addressed[slot] = true
+            derived = true
+        }
+    }
     // Loops, as (start, end) instruction pairs, and their nest: per
     // instruction the innermost loop holding it (in its body or as its End;
     // a Loop instruction itself sits in the enclosing loop) and the loop it
@@ -360,7 +393,7 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
         disp := 0
         op :: f.op[at]
         if op == .StackAddress {
-            size :: if f.a[at] > 0 -> f.a[at] else -> 8
+            size :: ir_x64_storage_size(f, at)
             align :: if f.b[at] > 16 -> 16 else if f.b[at] < 1 -> 1 else -> f.b[at]
             depth = ir_x64_align(depth + size, align)
             disp = 0 - depth
@@ -378,10 +411,15 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
         &stack.push(disp)
     }
     frames := [Int]{}
-    loop slot in 0..<count -> &frames.push(if addressed[slot] -> stack[last_write[slot]] else -> 0)
+    loop slot in 0..<count -> &frames.push(if roots[slot] >= 0 -> stack[last_write[roots[slot]]] + shifts[slot] else -> 0)
     total :: ir_x64_align(depth, 16)
     frame_bytes :: total - 8 * kept.len()
     IRX64Allocation{regs: ^regs, xmms: ^xmms, xmm_slots: ^xmm_slots, homes: ^homes, consts: ^consts, values: ^values, frames: ^frames, starts: ^starts, ends: ^ends, stack: ^stack, saved: ^kept, frame_bytes: frame_bytes, result_home: result_home}
+}
+
+// The bytes of the storage the StackAddress at `at` reserves.
+fn ir_x64_storage_size(f: IRFunction, at: Int) -> Int Never! {
+    if f.a[at] > 0 -> f.a[at] else -> 8
 }
 
 // Linear scan of the `eligible` slots over the registers of `pool`, by start

@@ -8,7 +8,9 @@
 //
 // The list is a frame header: storage (StackAddress) written once, or a
 // slot moved from it once, whose buffer is stored before the Loop in a
-// region around it (so the header holds a list wherever the Loop starts).
+// region around it (so the header holds a list wherever the Loop starts);
+// or a parameter's header the function never rebinds (a `&` list, which
+// holds the caller's list from the start).
 // A Loop can make its buffer shared again when it reads the header other
 // than by a Load, another such call or a store keeping the buffer its own
 // (of the length or capacity, or of a buffer fresh from jet_rt_alloc, as
@@ -21,7 +23,7 @@ fn ir_opt_hoist_unique(m: IRModule, f: &IRFunction, keys: [String]) -> Int Never
     facts :: ir_opt_facts(f)
     // The header each slot names (-1: none).
     root := [Int]{}
-    loop _ in 0..<count -> &root.push(-1)
+    loop slot in 0..<count -> &root.push(if slot < f.param_count && facts.defs[slot] == 1 -> slot else -> -1)
     loop at in 0..<f.op.len() {
         dst :: f.dst[at]
         if dst < f.param_count || dst >= count || facts.defs[dst] != 1 -> next
@@ -114,8 +116,9 @@ fn ir_opt_unique_header(f: IRFunction, keys: [String], root: [Int], at: Int) -> 
 }
 
 // Whether the buffer of `header` is stored before the Loop at `opener`, in
-// a region around it.
+// a region around it; a parameter's header holds one from the start.
 fn ir_opt_header_ready(f: IRFunction, facts: OptFacts, root: [Int], header: Int, opener: Int) -> Bool Never! {
+    if header < f.param_count -> return true
     loop at in 0..<opener {
         if f.op[at] != .Store || f.b[at] != 16 || f.a[at] < 0 || root[f.a[at]] != header -> next
         if ir_opt_encloses(facts, facts.region[at], facts.region[opener]) -> return true

@@ -408,8 +408,9 @@ fn ir_opt_calls_route(m: IRModule, f: IRFunction, at: Int, route: String) -> Boo
 // callees' final bodies (`bodies`; the drop glue it calls, OptGlue.jet, and
 // a glue call left is a Drop again), then Simplify, at level 2 scalar
 // replacement, Simplify again and the SSA round trip, and last the stop
-// points after their calls. Hoisting, glue and stops match callees by
-// `keys` (every function's key), never by a body a wave may hold. With
+// points: polls folded into the next, then moved after their calls.
+// Hoisting, glue and stops match callees by `keys` (every function's key),
+// never by a body a wave may hold. With
 // `options.verify`, IR Lint (`lint`, Lint.jet) checks the body as the
 // passes get it and after each pass, until one breaks it: that pass's rows
 // go to the report.
@@ -447,6 +448,7 @@ fn ir_opt_function(m: IRModule, bodies: [[IRFunction]], keys: [String], f: ^IRFu
         }
     }
     if ir_opt_enabled(options, "stops") {
+        ir_opt_fold_polls(&out, keys)
         ir_opt_stops_after_calls(&out, m, keys)
         if checking -> _ := ir_opt_lint(m, lint, out, "stops", &report)
     }
