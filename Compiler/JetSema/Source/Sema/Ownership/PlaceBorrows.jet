@@ -337,16 +337,6 @@ fn sema_place_borrow_census_expr(value: TExpr, arena: BodyTree, census: &SemaPla
             sema_place_borrow_census_list(else_body, arena, &census)
             return sema_place_borrow_census_expr(else_value, arena, &census)
         }
-        .ResultHandler(subject, ok_pattern, ok_body, ok_value, err_pattern, err_body, err_value, terminal) -> {
-            sema_place_borrow_census_expr(subject, arena, &census)
-            sema_place_borrow_census_pattern(ok_pattern, arena, &census)
-            sema_place_borrow_census_list(ok_body, arena, &census)
-            sema_place_borrow_census_expr(ok_value, arena, &census)
-            sema_place_borrow_census_pattern(err_pattern, arena, &census)
-            sema_place_borrow_census_list(err_body, arena, &census)
-            sema_place_borrow_census_expr(err_value, arena, &census)
-            return sema_place_borrow_census_expr(terminal, arena, &census)
-        }
         else -> {}
     }
     tree_each_expr_child(value, (child: TExpr) -> sema_place_borrow_census_expr(child, arena, &census))
@@ -517,16 +507,6 @@ fn sema_place_borrow_census_row(tree: BodyTree, index: Int, census: &SemaPlaceBo
             sema_place_borrow_census_row(tree, then_value, &census)
             sema_place_borrow_census_row_list(tree, else_body, &census)
             return sema_place_borrow_census_row(tree, else_value, &census)
-        }
-        .ResultHandler(subject, ok_pattern, ok_body, ok_value, err_pattern, err_body, err_value, terminal) -> {
-            sema_place_borrow_census_row(tree, subject, &census)
-            sema_place_borrow_census_row_pattern(tree, ok_pattern, &census)
-            sema_place_borrow_census_row_list(tree, ok_body, &census)
-            sema_place_borrow_census_row(tree, ok_value, &census)
-            sema_place_borrow_census_row_pattern(tree, err_pattern, &census)
-            sema_place_borrow_census_row_list(tree, err_body, &census)
-            sema_place_borrow_census_row(tree, err_value, &census)
-            return sema_place_borrow_census_row(tree, terminal, &census)
         }
         else -> {}
     }

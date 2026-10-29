@@ -1684,9 +1684,7 @@ fn sema_expr_unit_conversion_method(fact: SemaRegistrationUnitFact) -> String Ne
 fn sema_expr_unit_concrete_value(value: TExpr, context: SemaCheckContext) -> Float? {
     if value.kind == {
         .IntLit(number, _) -> return Val(Float.from_int(number))
-        .Flat(index) -> {
-            if context.arena.tree.nodes[index - context.arena.tree.node_base].kind == .FloatLit(number) -> return Val(number)
-        }
+        .Flat(index) -> return sema_expr_unit_concrete_node(index, context)
         .CtLit(comptime_value) -> {
             if comptime_value == {
                 .Int(number) -> return Val(Float.from_int(number))
@@ -1700,30 +1698,28 @@ fn sema_expr_unit_concrete_value(value: TExpr, context: SemaCheckContext) -> Flo
                 return Val(-concrete)
             }
         }
-        .UnitConvert(argument, _, _, _, _, _, _, _) -> return sema_expr_unit_concrete_value(argument, context)
+        .UnitConvert(argument, _, _, _, _, _, _, _) | .DistinctCtor(argument) -> return sema_expr_unit_concrete_value(argument, context)
         .MethodCall(_, method, _, args) -> {
-            if method.name == "from_float" && args.len() == 1 {
-                argument := args[0].value
-                if argument.kind == {
-                    .Flat(index) -> {
-                        if context.arena.tree.nodes[index - context.arena.tree.node_base].kind == .FloatLit(number) -> return Val(number)
-                    }
-                    .IntLit(number, _) -> return Val(Float.from_int(number))
-                    .Unary(op, operand) -> {
-                        if op == TUnaryOp.Neg {
-                            if operand.kind == {
-                                .Flat(index) -> {
-                                    if context.arena.tree.nodes[index - context.arena.tree.node_base].kind == .FloatLit(number) -> return Val(-number)
-                                }
-                                .IntLit(number, _) -> return Val(-Float.from_int(number))
-                                else -> {}
-                            }
-                        }
-                    }
-                    else -> {}
-                }
+            if method.name == "from_float" && args.len() == 1 -> return sema_expr_unit_concrete_value(args[0].value, context)
+        }
+        else -> {}
+    }
+    None
+}
+
+// The literal value behind arena row `index`: a numeric literal, its negation,
+// or a distinct conversion (`Double.from_float(-1.0)`) of one.
+fn sema_expr_unit_concrete_node(index: Int, context: SemaCheckContext) -> Float? {
+    if context.arena.tree.nodes[index - context.arena.tree.node_base].kind == {
+        .FloatLit(number) -> return Val(number)
+        .IntLit(number, _) -> return Val(Float.from_int(number))
+        .Unary(op, operand) -> {
+            if op == TUnaryOp.Neg {
+                concrete :: sema_expr_unit_concrete_node(operand, context) ?? return None
+                return Val(-concrete)
             }
         }
+        .DistinctConvert(_, argument, _, _, _) | .DistinctCtor(argument) -> return sema_expr_unit_concrete_node(argument, context)
         else -> {}
     }
     None
@@ -1780,6 +1776,25 @@ fn sema_expr_unit_conversion_gate(value: TExpr, source: SemaRegistrationUnitFact
 fn sema_expr_unit_conversion_pair_allowed(left_value: TExpr, left: SemaRegistrationUnitFact, left_destination: SemaRegistrationUnitFact, right_value: TExpr, right: SemaRegistrationUnitFact, right_destination: SemaRegistrationUnitFact, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     if !sema_expr_unit_conversion_gate(left_value, left, left_destination, span, environment, program, &scopes, context, &diagnostics) -> return false
     sema_expr_unit_conversion_gate(right_value, right, right_destination, span, environment, program, &scopes, context, &diagnostics)
+}
+
+// Rust `implicitly_convert_unit`: a unit value offered where another unit of
+// the same family, dimension and kind is required converts implicitly.
+fn sema_expr_unit_implicit_applies(required: Type, offered: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    destination :: sema_expr_unit_fact(required, environment, program) ?? return false
+    source :: sema_expr_unit_fact(offered, environment, program) ?? return false
+    source.name != destination.name && source.package == destination.package && source.family == destination.family && source.kind == destination.kind && sema_expr_unit_dimensions_equal(source.dimension, destination.dimension)
+}
+
+// The converted value, or None once the conversion gate has reported why the
+// implicit conversion is refused (E0127).
+fn sema_expr_unit_implicit_conversion(value: TExpr, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    destination :: sema_expr_unit_fact(required, environment, program) ?? return None
+    source :: sema_expr_unit_fact(value.ty, environment, program) ?? return None
+    span :: value.span
+    if !sema_expr_unit_conversion_gate(value, source, destination, span, environment, program, &scopes, context, &diagnostics) -> return None
+    line :: sema_source_line_at(environment.source_segments, span) ?? 0
+    Val(sema_expr_unit_conversion(value, source, destination, span, line, environment, program))
 }
 
 fn sema_expr_unit_ratio_is_finite(value: UnitRatio) -> Bool {

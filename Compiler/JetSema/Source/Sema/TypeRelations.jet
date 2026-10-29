@@ -1018,6 +1018,9 @@ fn sema_type_graph_is_checked_text_impl(graph: SemaRegistrationGraph, implementa
     if resolved == None {
         name :: implementation.trait_name ?? return false
         resolved = sema_type_graph_trait_symbol(graph, implementation.source_module_identity, name)
+        // No visible declaration shadows the name: the impl names the
+        // compiler-owned trait every module sees.
+        if resolved == None -> return name == "CheckedText"
     }
     trait_symbol :: resolved ?? return false
     if trait_symbol.kind != SymbolKind.Trait || trait_symbol.name != "CheckedText" -> return false

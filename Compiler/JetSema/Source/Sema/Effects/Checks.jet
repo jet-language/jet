@@ -3067,16 +3067,6 @@ fn sema_effect_walk_expr_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode]
             sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, tree, else_body)
             sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, else_value)
         }
-        .ResultHandler(subject, ok_pattern, ok_body, ok_value, err_pattern, err_body, err_value, terminal) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, subject)
-            sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller, tree, ok_pattern.shape)
-            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, tree, ok_body)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, ok_value)
-            sema_effect_walk_pattern_children(walk, &nodes, facts, &diagnostics, caller, tree, err_pattern.shape)
-            sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, tree, err_body)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, err_value)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, terminal)
-        }
         .OrFallback(value, fallback, _) -> {
             sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, value)
             if fallback == {

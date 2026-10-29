@@ -1,0 +1,116 @@
+trait Shape {
+    fn area(self) -> Int
+}
+
+struct Square {
+    side: Int
+}
+
+impl Square.Shape {
+    fn area(self) -> Int { self.side * self.side }
+}
+
+// A trait-valued field.
+struct Holder {
+    label: String
+    shape: Shape
+}
+
+// A trait-value field read through a borrowed struct.
+fn holder_area(holder: Holder) -> Int {
+    holder.shape.area()
+}
+
+// A user Debug impl inside a container deriving Debug.
+struct Token {
+    value: Int
+}
+
+impl Token.Debug {
+    fn debug(self) -> String { "tok#{self.value}" }
+}
+
+#Debug
+struct Bag {
+    token: Token
+    items: [Token]
+}
+
+// An enum with a String payload.
+#[Printable, Debug]
+enum Problem {
+    BadDigit(text: String)
+    Empty
+}
+
+// A record with a list of tuples.
+#[Printable, Debug]
+struct Pairs {
+    rows: [(name: String, count: Int)]
+}
+
+// Struct, fieldless-enum and nested composite map keys.
+struct Point {
+    x: Int
+    y: Int
+}
+
+enum Color {
+    Red
+    Green
+}
+
+struct Tile {
+    at: Point
+    color: Color
+}
+
+// A phantom generic parameter.
+struct Tagged<T> {
+    name: String
+}
+
+struct Unused {
+    never: Int
+}
+
+fn order(left: Int, right: Int) -> Ordering {
+    if left < right -> return Ordering.Less
+    if left > right -> return Ordering.Greater
+    Ordering.Equal
+}
+
+fn run() {
+    holder :: Holder{label: "sq", shape: Square{side: 3}}
+    print("{holder.label} {holder_area(holder)}")
+
+    bag :: Bag{token: Token{value: 1}, items: [Token{value: 2}, Token{value: 3}]}
+    print("{bag:Debug}")
+
+    bad :: Problem.BadDigit{text: "x7"}
+    print("{bad}")
+    print("{bad:Debug}")
+    print("{Problem.Empty}")
+
+    pairs :: Pairs{rows: [(name: "a", count: 1), (name: "b", count: 2)]}
+    print("{pairs}")
+    print("{pairs:Debug}")
+    tuple :: (name: "t", n: 4, ok: true)
+    print("{tuple} {tuple:Debug}")
+
+    assert_eq(Val((name: "a", count: 1)), Val((name: "a", count: 1)))
+    assert_eq(order(1, 2), Ordering.Less)
+    print("asserts ok")
+
+    by_point := [Point:String]{}
+    by_point[Point{x: 1, y: 2}] = "p12"
+    by_color := [Color:Int]{}
+    by_color[Color.Red] = 1
+    by_color[Color.Green] = 2
+    by_cell := [Tile:Int]{}
+    by_cell[Tile{at: Point{x: 0, y: 0}, color: Color.Green}] = 7
+    print("{by_point[Point{x: 1, y: 2}]} {by_color[Color.Green]} {by_cell[Tile{at: Point{x: 0, y: 0}, color: Color.Green}]} {by_color.len()}")
+
+    tagged :: Tagged<Int>{name: "phantom"}
+    print(tagged.name)
+}

@@ -1,9 +1,9 @@
-// Private compiler numeric services.  The Source Sema asks the configured
-// native service for exact unit conversion proofs; arithmetic remains owned by
-// Foundation's canonical unit kernel.
+// Private compiler numeric services: exact unit conversion proofs through the
+// service the host installs (sema_numeric_unit_conversion_exact_service).
 use jet_foundation.[
     UnitRatio,
 ]
+use core.math as math
 
 enum SemaNumericUnitConversionProof {
     Exact(value: Float)
@@ -99,4 +99,71 @@ fn sema_numeric_unit_conversion_exact(access: SemaHostHookAccess?, value: Float,
     callback :: hooks.numeric_unit_conversion_exact ?? return SemaNumericUnitConversionProof.Unavailable
     result :: callback(value, "{scale.numerator}", "{scale.denominator}", "{offset.numerator}", "{offset.denominator}") ?? return SemaNumericUnitConversionProof.Inexact
     SemaNumericUnitConversionProof.Exact{value: result}
+}
+
+// The exact unit conversion service the host installs: `value * scale +
+// offset`, each ratio given as numerator and denominator text, when that is
+// an integer some Float holds exactly; else None.
+fn sema_numeric_unit_conversion_exact_service(value: Float, scale_numerator: String, scale_denominator: String, offset_numerator: String, offset_denominator: String) -[]> Float? {
+    if !math.is_finite(value) -> return None
+    // `value` is exactly `top / bottom`, `bottom` a power of two.
+    bits :: math.to_bits(value)
+    exponent :: (bits >> 52).bit_and(2047)
+    top := bits.bit_and(4503599627370495)
+    power := -1074
+    if exponent != 0 {
+        top = top.bit_or(4503599627370496)
+        power = exponent - 1075
+    }
+    bottom := 1
+    loop power > 0 {
+        top = top * 2
+        power -= 1
+    }
+    loop power < 0 {
+        bottom = bottom * 2
+        power += 1
+    }
+    if value < 0.0 -> top = -top
+    numerator := top * sema_numeric_ratio_part(scale_numerator) * sema_numeric_ratio_part(offset_denominator) + sema_numeric_ratio_part(offset_numerator) * bottom * sema_numeric_ratio_part(scale_denominator)
+    denominator := bottom * sema_numeric_ratio_part(scale_denominator) * sema_numeric_ratio_part(offset_denominator)
+    if denominator == 0 -> return None
+    if denominator < 0 {
+        numerator = -numerator
+        denominator = -denominator
+    }
+    if numerator %% denominator != 0 -> return None
+    converted :: numerator /% denominator
+    if converted == 0 -> return Val(0.0)
+    // A Float holds the integer when its odd part fits 53 bits below 2^1024.
+    odd := if converted < 0 -> -converted else -> converted
+    shift := 0
+    loop odd %% 2 == 0 {
+        odd = odd /% 2
+        shift += 1
+    }
+    width := 0
+    remaining := odd
+    loop remaining > 0 {
+        remaining = remaining /% 2
+        width += 1
+    }
+    if width > 53 || shift + width > 1024 -> return None
+    result := Float.from_int(odd)
+    loop shift > 0 {
+        result = result * 2.0
+        shift -= 1
+    }
+    Val(if converted < 0 -> -result else -> result)
+}
+
+fn sema_numeric_ratio_part(text: String) -[]> Int {
+    negative := false
+    total := 0
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        if code == 45 -> negative = true
+        else -> total = total * 10 + (code - 48)
+    }
+    if negative -> -total else -> total
 }

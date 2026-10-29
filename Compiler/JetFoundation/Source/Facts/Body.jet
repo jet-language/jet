@@ -313,7 +313,6 @@ enum NodeKind {
     DecodeUnder(segment: Int, inner: Int)
     BuiltinMethod(receiver: Int, operation: TBuiltinOp, args: [Int])
     IfExpr(cond: BodyIfCond, then_body: [Int], then_value: Int, else_body: [Int], else_value: Int)
-    ResultHandler(subject: Int, ok_pattern: BodyPattern, ok_body: [Int], ok_value: Int, err_pattern: BodyPattern, err_body: [Int], err_value: Int, terminal: Int)
     RawOf(value: Int)
     InvariantViolation(construct: String, span: Span)
     DistinctRaw(value: Int)
@@ -1446,20 +1445,6 @@ fn body_each_node_kind_child(tree: BodyTree, value: NodeKind, visit: fn(Int) -[M
                 body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
             }
             visit(f4)
-        }
-        .ResultHandler(f0, f1, f2, f3, f4, f5, f6, f7) -> {
-            visit(f0)
-            body_each_pattern_child(tree, f1, visit)
-            loop item in f2 {
-                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
-            }
-            visit(f3)
-            body_each_pattern_child(tree, f4, visit)
-            loop item in f5 {
-                body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], visit)
-            }
-            visit(f6)
-            visit(f7)
         }
         .RawOf(f0) -> {
             visit(f0)

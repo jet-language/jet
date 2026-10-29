@@ -336,7 +336,6 @@ enum TExprKind {
     StaticCall(owner: TStaticOwner, owner_type: Type?, method: TMethodRef, type_args: [Type], args: [TCallArg])
     BuiltinMethod(receiver: TExpr, operation: TBuiltinOp, args: [TExpr])
     IfExpr(cond: TIfCond, then_body: [TStmt], then_value: TExpr, else_body: [TStmt], else_value: TExpr)
-    ResultHandler(subject: TExpr, ok_pattern: TPattern, ok_body: [TStmt], ok_value: TExpr, err_pattern: TPattern, err_body: [TStmt], err_value: TExpr, terminal: TExpr)
     RawOf(value: TExpr)
     DistinctRaw(value: TExpr)
     Present(value: TExpr)
@@ -1238,16 +1237,6 @@ fn tree_each_expr_child(expression: TExpr, visit: fn(TExpr) -[Mem.Alloc, Mem.Rc,
             visit(then_value)
             tree_each_stmt_list_child(else_body, visit)
             visit(else_value)
-        }
-        .ResultHandler(subject, ok_pattern, ok_body, ok_value, err_pattern, err_body, err_value, terminal) -> {
-            visit(subject)
-            tree_each_pattern_child(ok_pattern, visit)
-            tree_each_stmt_list_child(ok_body, visit)
-            visit(ok_value)
-            tree_each_pattern_child(err_pattern, visit)
-            tree_each_stmt_list_child(err_body, visit)
-            visit(err_value)
-            visit(terminal)
         }
         .OrFallback(value, fallback, _) -> {
             visit(value)

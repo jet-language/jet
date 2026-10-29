@@ -259,10 +259,21 @@ fn parser_parse_expression_restricted(state: &JetParserState, minimum: Int, dept
         }
 
         if operator == TOKEN_EQ_EQ && parser_comparison_pattern_rhs_ahead(&state) {
+            // Rust `try_named_struct_pattern`: a `Point{…}` head that does
+            // not read as a pattern (`Envelope{ badge: dep.Badge{ … } }`) is
+            // the struct value it spells.
+            named :: parser_named_struct_pattern_ahead(&state)
+            saved_position :: state.position
+            saved_diagnostics :: state.diagnostics.len()
+            saved_blocks :: state.block_spans.len()
+            saved_else_arms :: state.else_arms.len()
             pattern :: parser_parse_pattern(&state, depth + 1, allow_struct_lit)
-            span := parser_cover(left.span, pattern.span)
-            left = ParsedExpr{expr: Expr.PatternTest{subject: ^left.expr, pattern: pattern.pattern, span: span, id: parser_node_id(&state)}, span: span}
-            next
+            if !named || !parser_error_since(state, saved_diagnostics) {
+                span := parser_cover(left.span, pattern.span)
+                left = ParsedExpr{expr: Expr.PatternTest{subject: ^left.expr, pattern: pattern.pattern, span: span, id: parser_node_id(&state)}, span: span}
+                next
+            }
+            parser_rewind(&state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
         }
 
         right := parser_parse_expression_restricted(&state, precedence + 1, depth + 1, allow_struct_lit, stop_before_comparison)

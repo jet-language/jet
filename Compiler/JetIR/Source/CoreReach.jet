@@ -249,7 +249,7 @@ fn ir_core_reach_expr_keys(tree: BodyTree, expression: Int, functions: [FnBody],
         .DecodeUnder(_, _) -> ir_core_reach_add(&keys, source_keys.get("__decode_under") ?? "")
         .InlineBlock(body) -> ir_core_reach_stmt_keys(tree, body, functions, &keys)
         .Lambda(value) -> ir_core_reach_lambda_keys(tree, value, functions, &keys)
-        .IfExpr(_, then_body, _, else_body, _) | .ResultHandler(_, _, then_body, _, _, else_body, _, _) -> {
+        .IfExpr(_, then_body, _, else_body, _) -> {
             ir_core_reach_stmt_keys(tree, then_body, functions, &keys)
             ir_core_reach_stmt_keys(tree, else_body, functions, &keys)
         }

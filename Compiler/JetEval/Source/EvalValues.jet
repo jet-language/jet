@@ -10,6 +10,7 @@ use jet_foundation.[
 use jet_sema.[
     SemaRegistrationHostHooks,
     sema_checked_const_char,
+    sema_numeric_unit_conversion_exact_service,
 ]
 
 enum JetEvalErrorKind { Source Compiler Unsupported Fuel Ownership Effect ComptimePanic }
@@ -84,7 +85,7 @@ struct JetEvalConfig {
 }
 
 fn jet_eval_default_config() -> JetEvalConfig Never! {
-    JetEvalConfig{fuel: 10000000, max_call_depth: 1024, max_collection_len: 1000000, globals: [String:TComptimeValue]{}, runtime_execution: false, host_hooks: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}}
+    JetEvalConfig{fuel: 10000000, max_call_depth: 1024, max_collection_len: 1000000, globals: [String:TComptimeValue]{}, runtime_execution: false, host_hooks: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: Val(sema_numeric_unit_conversion_exact_service)}}
 }
 
 // Read-fork a fresh runtime configuration before an owning request is moved.

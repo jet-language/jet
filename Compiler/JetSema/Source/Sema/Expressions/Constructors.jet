@@ -1145,7 +1145,10 @@ fn sema_expression_checked_text_static_method_call(receiver: Expr, method_name: 
         args: args,
     }
     checked :: sema_call_check_direct_target_owned(&state, direct, call, [SemaCallDefaultValue]{}, if method_name == "from" -> None else -> expected, environment, program, &scopes, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if method_name == "encode_hole" && checked.value.ty != Type.String {
+    // The registered signature keeps its declared spelling (`-[]> String`
+    // reads back as the named `String`) and the default failure route.
+    hole_type :: if checked.value.ty == {.Result(ok, _) -> ok else -> checked.value.ty}
+    if method_name == "encode_hole" && hole_type != Type.String && hole_type != (Type.Named{name: "String"}) {
         &diagnostics.push(sema_error("E0112", method_span, "a checked text hole encoder must return String", "every interpolation is passed through the type's pure `encode_hole` method before it reaches the checker", "make `encode_hole` return a String"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -1160,7 +1163,7 @@ fn sema_expression_checked_text_static_method_call(receiver: Expr, method_name: 
     &context.call_return_views.push(SemaCallReturnView{span: method_span, facts: checked.return_view_facts})
     if !sema_expr_record_call_fact(environment, program, &scopes, &context, method_span, checked, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     if method_name == "from" {
-        value :: sema_expression_checked_text_from(target, type_name, checked.value, method_span, &context) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        value :: sema_expression_checked_text_from(target, type_name, checked.value, method_span) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
     }
     SemaMethodSpecialCheck{handled: true, value: Val(checked.value)}
@@ -1168,7 +1171,7 @@ fn sema_expression_checked_text_static_method_call(receiver: Expr, method_name: 
 
 // Preserve the ordinary checker error while moving the original text into the
 // nominal wrapper on success. The argument and the checker each execute once.
-fn sema_expression_checked_text_from(target: SemaExpressionCheckedTextTarget, type_name: String, checked: TExpr, span: Span, context: &SemaCheckContext) -> TExpr? {
+fn sema_expression_checked_text_from(target: SemaExpressionCheckedTextTarget, type_name: String, checked: TExpr, span: Span) -> TExpr? {
     error_type :: if checked.ty == {.Result(_, error) -> error else -> { return None }}
     source_local :: checked_generated_local("__checked_text_source_{span.start}", span, Type.String)
     error_local :: checked_generated_local("__checked_text_error_{span.start}", span, error_type)
@@ -1188,14 +1191,6 @@ fn sema_expression_checked_text_from(target: SemaExpressionCheckedTextTarget, ty
     nominal :: Type.Named{name: type_name}
     result_type :: Type.Result{ok: nominal, err: error_type}
     wrapped :: sema_tree_node(nominal, TExprKind.DistinctCtor{argument: sema_tree_node(Type.String, TExprKind.Move{value: source_value}, span)}, span)
-    ok_pattern :: TPattern{
-        shape: TPatternShape.Ok{binding: "_", binding_span: span, inner: None, span: span},
-        bindings: [TPatternBindingFact]{},
-        enum_type: None,
-        position: TPatternPosition.Arm,
-        mutable: false,
-        boxed: false,
-    }
     err_pattern :: TPattern{
         shape: TPatternShape.Err{binding: error_local.name, binding_span: span, inner: None, span: span},
         bindings: [TPatternBindingFact]{TPatternBindingFact{name: error_local.name, span: span, ty: error_type, mutable: false, symbol_id: None}},
@@ -1205,19 +1200,18 @@ fn sema_expression_checked_text_from(target: SemaExpressionCheckedTextTarget, ty
         boxed: false,
     }
     error_value :: sema_tree_node(error_type, TExprKind.Local{local: error_local}, span)
-    handler :: sema_tree_node(result_type, TExprKind.ResultHandler{
-        subject: checker,
-        ok_pattern: ok_pattern,
-        ok_body: [TStmt]{},
-        ok_value: sema_tree_node(result_type, TExprKind.Ok{value: wrapped}, span),
-        err_pattern: err_pattern,
-        err_body: [TStmt]{},
-        err_value: sema_tree_node(result_type, TExprKind.Err{value: error_value}, span),
-        terminal: sema_node(&context, result_type, NodeKind.Never{reason: "CheckedText.check has exactly Ok and Err outcomes"}, span),
+    // An ordinary `if` on the checker's Err arm: the lowering already owns
+    // pattern conditions, so the outcome needs no node of its own.
+    outcome :: sema_tree_node(result_type, TExprKind.IfExpr{
+        cond: TIfCond.IfLet{pattern: err_pattern, subj: checker},
+        then_body: [TStmt]{},
+        then_value: sema_tree_node(result_type, TExprKind.Err{value: error_value}, span),
+        else_body: [TStmt]{},
+        else_value: sema_tree_node(result_type, TExprKind.Ok{value: wrapped}, span),
     }, span)
     Val(sema_tree_node(result_type, TExprKind.InlineBlock{body: [TStmt]{
         TStmt.Let{local: source_local, let_ty: TLetTy.Annotated{ty: Type.String, wrapper: TLetWrapper.Plain}, init: source_init, gc_promotion: None, gc_transferred: false, span: span},
-        TStmt.ExprStmt{value: handler, span: span},
+        TStmt.ExprStmt{value: outcome, span: span},
     }}, span))
 }
 
@@ -1302,7 +1296,9 @@ fn sema_expression_checked_text_literal(head: Type, source_head: Type?, body: Ty
     interrupt_handler_start := context.hardware_use.interrupt_handlers.len()
     dma_operation_start := context.hardware_use.dma_operations.len()
     unresolved_hardware_start := context.hardware_use.unresolved_references.len()
-    checked :: sema_check_expression(check_call, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaExpressionCheckedTextLiteral{handled: true, value: None}
+    // The literal consumes the checker's Result itself: the call root keeps
+    // its carrier instead of propagating into the enclosing function.
+    checked :: sema_check_expression_carrier(check_call, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaExpressionCheckedTextLiteral{handled: true, value: None}
     text :: if checked.kind == {
         .Call(_, _, args) -> if {
             args.len() == 1 -> args[0].value
@@ -1951,6 +1947,11 @@ fn sema_expression_typed_literal(head: Type?, body: TypedLitBody, span: Span, ex
             needs_conversion := (checked.ty == Type.Int && (if result_head == {.IntN(_, _) -> true else -> false})) || (sema_expr_is_integer(checked.ty) && (result_head == Type.Float || result_head == Type.Float32)) || (checked.ty == Type.Float && result_head == Type.Float32) || sema_expression_typed_literal_fixed_conversion(checked.ty, result_head)
             if needs_conversion {
                 converted = sema_expr_numeric_literal_conversion(checked, result_head, value_span, line, &diagnostics) ?? return None
+            }
+            // `Millimeter{ 4meter }` converts another unit of the family.
+            if sema_expr_unit_implicit_applies(result_head, converted.ty, environment, program) {
+                unit_value :: sema_expr_unit_implicit_conversion(converted, result_head, environment, program, &scopes, context, &diagnostics) ?? return None
+                return sema_expr_expected_owned(^unit_value, expected, environment, program, &diagnostics)
             }
             if sema_expression_typed_literal_distinct_mismatch(result_head, converted, environment, program, &scopes, &diagnostics) -> return None
             typed :: sema_expr_expected(converted, Val(result_head), environment, program, &diagnostics) ?? return None

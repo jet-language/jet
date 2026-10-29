@@ -352,8 +352,11 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
         // A borrowed trait parameter lends the original concrete storage.
         // Expected-type coercion would instead construct an owned TraitBox.
         borrowed_trait :: trait_parameter && parameter.convention != AccessConvention.Move
+        // A unit parameter checks its argument on its own, so another unit of
+        // its family can convert into it below.
+        unit_parameter :: sema_expr_unit_fact(required, environment, program) != None
         argument_expected := Type?{None}
-        if !self_typed && !borrowed_trait -> argument_expected = Val(required)
+        if !self_typed && !borrowed_trait && !unit_parameter -> argument_expected = Val(required)
         diagnostic_start :: diagnostics.len()
         checked_argument :: if {
             default_in_owner -> sema_call_check_owner_default(^owner_scope, args[index], argument_expected, parameter, abi, apply_lambda_escape_override, environment, program, &tail_store, &context, span, &binder_keys, &diagnostics)
@@ -373,8 +376,16 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
             next
         }
         if parameter.convention == AccessConvention.Move && !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, context, &diagnostics, args[index].convention == AccessConvention.Move) -> return None
-        value :: if self_typed -> sema_stmt_numeric_slot_value(checked_value, required, environment, program, &diagnostics) ?? return None else -> checked_value
-        compatible :: if trait_parameter && parameter.convention == AccessConvention.Write -> type_identity_equal(required, sema_call_resolved_type(value.ty, environment, program)) else -> sema_call_type_assignable(required_declared, value.ty, environment, program) ?? return None
+        value := if self_typed -> sema_stmt_numeric_slot_value(checked_value, required, environment, program, &diagnostics) ?? return None else -> checked_value
+        compatible := if trait_parameter && parameter.convention == AccessConvention.Write -> type_identity_equal(required, sema_call_resolved_type(value.ty, environment, program)) else -> sema_call_type_assignable(required_declared, value.ty, environment, program) ?? return None
+        if !compatible && sema_expr_unit_implicit_applies(required, value.ty, environment, program) {
+            converted :: sema_expr_unit_implicit_conversion(value, required, environment, program, &scopes, context, &diagnostics) ?? {
+                complete = false
+                next
+            }
+            value = converted
+            compatible = true
+        }
         if !compatible {
             // (Rust `check_variadic_bound_tail`,
             // E1313): a trait-bounded variadic argument is checked against

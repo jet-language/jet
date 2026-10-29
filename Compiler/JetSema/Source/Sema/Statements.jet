@@ -4292,16 +4292,6 @@ fn sema_stmt_tree_expr_touches_shared(value: TExpr, arena: BodyTree) -> Bool Nev
             if sema_stmt_tree_statements_touch_shared(else_body, arena) -> return true
             return sema_stmt_tree_expr_touches_shared(else_value, arena)
         }
-        .ResultHandler(subject, ok_pattern, ok_body, ok_value, err_pattern, err_body, err_value, terminal) -> {
-            if sema_stmt_tree_expr_touches_shared(subject, arena) -> return true
-            if sema_stmt_tree_pattern_touches_shared(ok_pattern, arena) -> return true
-            if sema_stmt_tree_statements_touch_shared(ok_body, arena) -> return true
-            if sema_stmt_tree_expr_touches_shared(ok_value, arena) -> return true
-            if sema_stmt_tree_pattern_touches_shared(err_pattern, arena) -> return true
-            if sema_stmt_tree_statements_touch_shared(err_body, arena) -> return true
-            if sema_stmt_tree_expr_touches_shared(err_value, arena) -> return true
-            return sema_stmt_tree_expr_touches_shared(terminal, arena)
-        }
         .SharedGuardWait(guard, condition, _) -> {
             if sema_stmt_tree_expr_touches_shared(guard, arena) -> return true
             return sema_stmt_tree_expr_touches_shared(condition, arena)
@@ -4486,16 +4476,6 @@ fn sema_stmt_row_touches_shared(tree: BodyTree, index: Int) -> Bool Never! {
             if sema_stmt_row_touches_shared(tree, then_value) -> return true
             if sema_stmt_rows_touch_shared(tree, else_body) -> return true
             return sema_stmt_row_touches_shared(tree, else_value)
-        }
-        .ResultHandler(subject, ok_pattern, ok_body, ok_value, err_pattern, err_body, err_value, terminal) -> {
-            if sema_stmt_row_touches_shared(tree, subject) -> return true
-            if sema_stmt_row_pattern_touches_shared(tree, ok_pattern) -> return true
-            if sema_stmt_rows_touch_shared(tree, ok_body) -> return true
-            if sema_stmt_row_touches_shared(tree, ok_value) -> return true
-            if sema_stmt_row_pattern_touches_shared(tree, err_pattern) -> return true
-            if sema_stmt_rows_touch_shared(tree, err_body) -> return true
-            if sema_stmt_row_touches_shared(tree, err_value) -> return true
-            return sema_stmt_row_touches_shared(tree, terminal)
         }
         .SharedGuardWait(guard, condition, _) -> {
             if sema_stmt_row_touches_shared(tree, guard) -> return true

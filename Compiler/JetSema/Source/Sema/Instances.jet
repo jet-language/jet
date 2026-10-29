@@ -234,10 +234,6 @@ fn sema_fact_node(tree: &BodyTree, kind: NodeKind) Never! {
             }
         }
         .IfExpr(condition, _, _, _, _) -> sema_fact_condition(&tree, condition)
-        .ResultHandler(_, ok_pattern, _, _, err_pattern, _, _, _) -> {
-            sema_fact_pattern(&tree, ok_pattern)
-            sema_fact_pattern(&tree, err_pattern)
-        }
         .PatternMatches(_, pattern) -> sema_fact_pattern(&tree, pattern)
         .OrFallback(_, _, ambient_err) -> {
             if ambient_err == .Val(local) -> sema_fact_local(&tree, local)
