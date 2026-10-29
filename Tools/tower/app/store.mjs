@@ -16,6 +16,7 @@
 // Everything else is an agent's, inert, or done. #516: there is no
 // greenlight/activate gate — a fresh card lands straight in an agent lane;
 // the owner's only confirmation mechanism is ratifying a decision ballot.
+import { basename, join } from 'node:path';
 import {
   backupRequiredAt, dataFile, historyFile, projectRoot,
   readJSON, withDirectoryAuthority, writeJSON, newId, today, now,
@@ -73,6 +74,28 @@ function writeJSONHeld(root, name, value) {
   root.writeAtomic(name, JSON.stringify(value, null, 2) + '\n');
 }
 
+// history.json is only ever replaced by an atomic rename, so while the file
+// and the newest history backup this process made both keep their identity,
+// that backup still holds the exact pre-write bytes. Most writes never touch
+// the archive, so they reuse it instead of copying the whole archive again.
+let reusableHistoryBackup = null; // { dir, source, name, backup }
+const fileKey = (st) => st ? `${st.dev}:${st.ino}:${st.size}:${st.mtimeMs}:${st.ctimeMs}` : null;
+
+function historyBackupAt(root, archive, keep, backups) {
+  const source = fileKey(root.tryStat('history.json'));
+  const last = reusableHistoryBackup;
+  if (last && source && last.dir === root.expectedPath && last.source === source) {
+    const st = backups.tryStat(last.name);
+    if (st?.isFile() && st.nlink === 1 && fileKey(st) === last.backup)
+      return join(root.expectedPath, 'backups', last.name);
+  }
+  reusableHistoryBackup = null;
+  const path = backupRequiredAt(root, archive, keep, backups);
+  const name = basename(path);
+  reusableHistoryBackup = { dir: root.expectedPath, source, name, backup: fileKey(backups.tryStat(name)) };
+  return path;
+}
+
 function withStorePairTransaction(dataDir, liveFile, config, work, prepare = null) {
   const archive = historyFile(dataDir);
   return withDirectoryAuthority(dataDir, root => {
@@ -85,7 +108,7 @@ function withStorePairTransaction(dataDir, liveFile, config, work, prepare = nul
       if (removeEmptyHistory) writeJSONHeld(root, 'history.json', emptyHistory());
       const prepared = prepare ? prepare(root, backupAuthority) : undefined;
       const liveBackup = backupRequiredAt(root, liveFile, config.backups, backupAuthority);
-      const historyBackup = backupRequiredAt(root, archive, config.backups, backupAuthority);
+      const historyBackup = historyBackupAt(root, archive, config.backups, backupAuthority);
       beginRepairTransaction(dataDir, {
         liveBackup,
         historyBackup,
@@ -155,18 +178,35 @@ export function openStore(dataDir) {
   };
   const sameBytes = (left, right) => (left === null && right === null)
     || (!!left && !!right && left.equals(right));
-  const pairSnapshotAt = (root, heldBackups = null, parse = true) => {
+  // The parsed history.json this process last read or committed, keyed by the
+  // file's identity. Every history write is an atomic rename (a new inode), so
+  // an unchanged key under the store lock means unchanged bytes. A transaction
+  // takes the cached object (fn may mutate it); only a committed mutate puts it
+  // back, so a failed or foreign write can never leave a stale copy behind.
+  let historyCache = null;
+  const pairSnapshotAt = (root, heldBackups = null, parse = true, cachedHistory = null) => {
     const pendingBefore = hasPendingRepairAt(root, heldBackups);
     const live = snapshotAt(root, 'tower.json', empty(config.project), 'live store', parse);
-    const history = snapshotAt(root, 'history.json', emptyHistory(), 'history store', parse);
+    const history = cachedHistory
+      ? { bytes: null, value: cachedHistory.value, cached: true }
+      : snapshotAt(root, 'history.json', emptyHistory(), 'history store', parse);
     const pendingAfter = hasPendingRepairAt(root, heldBackups);
     root.guard('read board pair');
     return { pending: pendingBefore || pendingAfter, live, history };
   };
   const preparedPairAt = (root, heldBackups = null) => {
-    const pair = pairSnapshotAt(root, heldBackups);
+    const cached = historyCache;
+    historyCache = null;
+    const key = fileKey(root.tryStat('history.json'));
+    const pair = pairSnapshotAt(root, heldBackups, true, cached && key && cached.key === key ? cached : null);
     if (pair.pending) fail('E_CONFLICT', 'repair transaction is still pending; retry the operation');
     validateStoredState(pair.live.value, 'live store');
+    if (pair.history.cached) {
+      // Already validated and migrated when it was read or written.
+      const state = normalize(pair.live.value, null, false);
+      syncMilestones(state, undefined, pair.history.value.cards);
+      return { state, history: pair.history.value, historyMigrated: false, historyCached: true };
+    }
     validateStoredHistory(pair.history.value, 'history store');
     const history = { ...emptyHistory(), ...pair.history.value };
     let historyMigrated = false;
@@ -257,24 +297,36 @@ export function openStore(dataDir) {
   // `expectRev` (optional) enables optimistic concurrency for API callers.
   const mutateLocked = (fn, { expectRev } = {}) => {
     recoverPendingRepairLocked(dataDir);
-    return withStorePairTransaction(dataDir, file, config, (root, pair) => {
+    let committedHistory = null;
+    const out = withStorePairTransaction(dataDir, file, config, (root, pair) => {
       const s = pair.state;
       if (expectRev != null && Number(expectRev) !== s.meta.rev)
         fail('E_CONFLICT', `stale rev: expected ${expectRev}, store is at ${s.meta.rev} — re-read state and retry`);
       const history = pair.history;
-      const historyBefore = JSON.stringify(history);
-      const result = fn(s, config, history);
-      if (pair.historyMigrated || JSON.stringify(history) !== historyBefore) writeJSONHeld(root, 'history.json', history);
+      // Most writes never look at the archive. fn sees history through a view
+      // that snapshots it on first touch, so only a write that touches it pays
+      // for the before/after comparison.
+      let historyBefore = null;
+      const touch = () => { historyBefore ??= JSON.stringify(history); };
+      const historyView = new Proxy(history, Object.fromEntries(Reflect.ownKeys(Reflect)
+        .filter(k => typeof Reflect[k] === 'function')
+        .map(k => [k, (...args) => { touch(); return Reflect[k](...args); }])));
+      const result = fn(s, config, historyView);
+      let historyWritten = pair.historyMigrated || (historyBefore !== null && JSON.stringify(history) !== historyBefore);
+      if (historyWritten) writeJSONHeld(root, 'history.json', history);
       // #461: single chokepoint — every write gets a chance to retire aged-out
       // cards/decisions/events to history.json before tower.json is persisted.
       syncMilestones(s, undefined, history.cards);
-      retire(s, config, dataDir, history, root);
+      historyWritten = retire(s, config, dataDir, history, root) || historyWritten;
       validateStoredState(s, 'live store');
-      validateStoredHistory(history, 'history store');
+      if (historyWritten || !pair.historyCached) validateStoredHistory(history, 'history store');
       s.meta.rev += 1;
       writeJSONHeld(root, 'tower.json', s);
+      committedHistory = { key: fileKey(root.tryStat('history.json')), value: history };
       return { result, state: s };
     }, preparedPairAt);
+    if (committedHistory?.key) historyCache = committedHistory;
+    return out;
   };
   const mutate = (fn, options) => withLock(file, () => mutateLocked(fn, options));
   // Same write, but waits for the lock without blocking the event loop
@@ -571,11 +623,13 @@ export function loadHistoryRaw(dataDir) {
   return { ...emptyHistory(), ...raw };
 }
 
-// Treat a 'YYYY-MM-DD' stamp as UTC midnight; "older than N days" = more
+// Treat a 'YYYY-MM-DD' stamp (decisions' ratifiedAt) as UTC midnight and a
+// full ISO timestamp (cards' `updated`) as itself; "older than N days" = more
 // than N*86400000ms have elapsed since then.
 function isOlderThanDays(dateStr, days) {
   if (!dateStr) return false;
-  const t = Date.parse(`${dateStr}T00:00:00Z`);
+  const text = String(dateStr);
+  const t = Date.parse(text.length === 10 ? `${text}T00:00:00Z` : text);
   if (Number.isNaN(t)) return false;
   return (Date.now() - t) > days * 86_400_000;
 }
@@ -591,6 +645,9 @@ function hasUnclearedCompletion(card, cursor) {
 }
 
 const LIVE_EVENTS = 500;
+// Archiving rewrites all of history.json, so overflow moves in batches rather
+// than one event per write.
+const EVENT_ARCHIVE_BATCH = 100;
 
 // The one retirement chokepoint (called only from `mutate`, right after the
 // caller's fn() runs, before the write). Idempotent: an id already present
@@ -600,8 +657,9 @@ const LIVE_EVENTS = 500;
 function retire(s, config, dataDir, history = null, root = null) {
   const days = config.retireAfterDays ?? 3;
   const h = history || loadHistoryRaw(dataDir);
-  const hasCard = (id) => h.cards.some(x => x.id === id);
-  const hasDecision = (id) => h.decisions.some(x => x.id === id);
+  let cardIds = null, decisionIds = null;
+  const hasCard = (id) => (cardIds ||= new Set(h.cards.map(x => x.id))).has(id);
+  const hasDecision = (id) => (decisionIds ||= new Set(h.decisions.map(x => x.id))).has(id);
   let dirty = false;
 
   // (b) done cards aged out: card + ALL its live decisions + questions
@@ -646,9 +704,10 @@ function retire(s, config, dataDir, history = null, root = null) {
     s.decisions = s.decisions.filter(d => !standaloneIds.has(d.id));
   }
 
-  // (c) events: keep the newest 500 live; archive the overflow (oldest-first
-  // within the archived batch, appended to the tail of the ledger).
-  if (s.events.length > LIVE_EVENTS) {
+  // (c) events: keep the newest 500 live; once a batch of overflow builds up,
+  // archive it (oldest-first within the archived batch, appended to the tail
+  // of the ledger).
+  if (s.events.length > LIVE_EVENTS + EVENT_ARCHIVE_BATCH) {
     const overflow = s.events.slice(LIVE_EVENTS).reverse();
     h.events.push(...overflow);
     s.events = s.events.slice(0, LIVE_EVENTS);
@@ -659,6 +718,7 @@ function retire(s, config, dataDir, history = null, root = null) {
     if (root) writeJSONHeld(root, 'history.json', h);
     else writeJSON(historyFile(dataDir), h);
   }
+  return dirty;
 }
 
 // Accept a card by id or tracking number in a history{cards} bag.
