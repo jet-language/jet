@@ -2109,7 +2109,7 @@ calling them. Source-owned Core wrappers preserve these same constraints.
 | Function | Returns | Description |
 | --- | --- | --- |
 | `math.acos(x)`, `acosh(x)`, `asin(x)`, `asinh(x)`, `atan(x)`, `atan2(y, x)`, `atanh(x)` | `Float` | Inverse trigonometric and hyperbolic functions. The extended float family is part of the shared math surface (D-CORESURFACE1). |
-| `math.abs(value: Int)` / `math.abs_float(value: Float)` | `Int` / `Float` | Absolute value for integer or floating-point input. |
+| `math.abs(value)` / `math.abs_float(value: Float)` | the argument type (`Float` for `Complex`) | Absolute value of an `Int`, `Float`, `F32`, `I64` or `Complex`. On `Float` and `F32` it clears the sign bit, so `-0.0` gives `+0.0` and a negative NaN loses its sign; on `I64` it is fixed-width negation, which stops with E3010 at `I64.MIN`. |
 | `math.copy(value: Float)` | `Float` | Return the floating-point value unchanged, including its IEEE representation. |
 | `math.min(a: Int, b: Int)` / `math.max(a: Int, b: Int)` | `Int` | Integer extrema. |
 | `math.clamp(value, lo, hi)` | `Int` | Clamp an integer; reversed bounds are accepted by swapping the bounds. |

@@ -1,0 +1,37 @@
+use core.math as math
+
+// `math.abs` keeps the argument's type. On Float and F32 it clears the sign
+// bit, so -0.0 becomes +0.0 and a negative NaN loses its sign; on I64 it is
+// fixed-width negation, which stops at I64.MIN (typed_abs_i64_min).
+fn run() {
+    negative_zero :: Float{-0.0}
+    print(math.to_bits(negative_zero) < 0)
+    print(math.to_bits(math.abs(negative_zero)))
+    print(math.abs(Float{-2.5}))
+    print(math.abs(Float{3.25}))
+    negative_nan :: math.copysign(math.nan(), -1.0)
+    print(math.to_bits(negative_nan) < 0)
+    magnitude :: math.abs(negative_nan)
+    print(math.is_nan(magnitude))
+    print(math.to_bits(magnitude) < 0)
+    print(math.abs(-math.infinity()) == math.infinity())
+
+    small :: F32{-1.5}
+    print(math.abs(small))
+    print(math.abs(F32{2.0}) == F32{2.0})
+    f32_zero :: math.abs(F32{-0.0})
+    print(math.to_bits(Float.from_f32(f32_zero)))
+    zero32 :: F32{0.0}
+    quiet :: zero32 / zero32
+    quiet_negative :: math.to_bits(Float.from_f32(quiet)) < 0
+    f32_nan :: if quiet_negative -> quiet else -> -quiet
+    print(math.to_bits(Float.from_f32(f32_nan)) < 0)
+    f32_magnitude :: math.abs(f32_nan)
+    print(math.is_nan(f32_magnitude))
+    print(math.to_bits(Float.from_f32(f32_magnitude)) < 0)
+
+    print(math.abs(I64{-5}))
+    print(math.abs(I64{7}))
+    print(math.abs(I64.MAX) == I64.MAX)
+    print(math.abs(I64.MIN + I64{1}) == I64.MAX)
+}

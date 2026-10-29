@@ -1,0 +1,34 @@
+// Fixed-width signed division in each overflow mode, the I64 minimum as a
+// literal, and unsigned comparisons at the top of U64. MIN / -1 is the one
+// signed division that overflows: wrapping gives MIN back, saturating gives
+// MAX, checked gives null.
+fn run() {
+    min8 :: I8{-128}
+    minus :: I8{-1}
+    print(wrapping(min8 / minus))
+    print(saturating(min8 / minus))
+    print(checked(min8 / minus) ?? I8{0})
+    print(wrapping(I32{-7} / I32{2}))
+    print(saturating(I16{-9} / I16{2}))
+    print(checked(I64{100} / I64{-7}) ?? I64{0})
+    zero :: I32{0}
+    print(checked(I32{5} / zero) == None)
+
+    // The I64 minimum is written directly; one step below wraps to the maximum.
+    low :: I64{-9223372036854775808}
+    print(low)
+    print(low == I64.MIN)
+    print(wrapping(low - I64{1}) == I64.MAX)
+    print(checked(low - I64{1}) == None)
+    print(low + I64{1})
+
+    // U64 constants compare as unsigned: the maximum is above every small value.
+    print(U64.MAX > U64{1})
+    print(U64.MAX < U64{1})
+    print(U64{18446744073709551615} >= U64{2})
+    top :: U64.MAX
+    small :: U64{5}
+    print(top > small)
+    print(top.checked_add(small) == None)
+    print(U8{60}.checked_add(U8{60}) ?? U8{0})
+}

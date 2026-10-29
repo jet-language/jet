@@ -678,11 +678,12 @@ fn sema_call_core_check_typed_argument(value: TExpr, expected: Type, environment
     sema_expr_expected(typed, Val(expected), environment, program, &diagnostics)
 }
 
-// Rust core_call.rs `("core.math", "abs")`: `abs` takes Int, Float or F32
+// Rust core_call.rs `("core.math", "abs")`: `abs` takes Int, Float, F32, I64
 // and Complex, returning the argument type (Float for Complex).
-// The Int form stays the routed source `abs`; a float or Complex argument is
-// the MathBuiltin `abs` that Rust `lower_core_math_abs` lowers it to, which is
-// the route `Complex.abs` already takes. Anything else is not handled here.
+// The Int form stays the routed source `abs`; any other argument is the
+// MathBuiltin `abs`, which lowers to its Core/Math source helper (`fabs`,
+// `__abs_f32`, `__abs_i64`, the Complex magnitude). Anything else is not
+// handled here.
 fn sema_call_try_core_math_abs(module_name: String, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     unhandled :: SemaDirectSpecialCheck{handled: false, value: None}
     if module_name != "core.math" || member != "abs" || args.len() != 1 || type_args.len() != 0 || args[0].label != None -> return unhandled
@@ -694,6 +695,10 @@ fn sema_call_try_core_math_abs(module_name: String, member: String, type_args: [
     if probed.ty == Type.Float32 {
         type_name = "F32"
         result_ty = Type.Float32
+    }
+    if probed.ty == (Type.IntN{signed: true, bits: 64}) {
+        type_name = "I64"
+        result_ty = Type.IntN{signed: true, bits: 64}
     }
     if probed.ty == (Type.Named{name: "Complex"}) -> type_name = "Complex"
     if type_name == "" -> return unhandled
