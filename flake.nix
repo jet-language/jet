@@ -155,6 +155,10 @@
           ];
 
           shellHook = ''
+            # nix develop exports TMPDIR after exec, so this shell's environ
+            # never names it: hold it open for the shell's lifetime (children
+            # inherit the descriptor) so clean-nix-tmp.sh sees it as live.
+            [ ! -d "''${TMPDIR:-}" ] || exec {jet_nix_tmp_fd}<"$TMPDIR"
             if repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
               export JET_ROOT="$repo_root"
             else
@@ -270,6 +274,10 @@
           ];
 
           shellHook = ''
+            # nix develop exports TMPDIR after exec, so this shell's environ
+            # never names it: hold it open for the shell's lifetime (children
+            # inherit the descriptor) so clean-nix-tmp.sh sees it as live.
+            [ ! -d "''${TMPDIR:-}" ] || exec {jet_nix_tmp_fd}<"$TMPDIR"
             if repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
               export JET_ROOT="$repo_root"
             else
