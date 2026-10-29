@@ -943,10 +943,23 @@ fn sema_inline_rewrite_params(rewrite: &SemaInlineRewrite, params: [Param]) -> [
     mapped
 }
 
+// A bound names a trait the rewrite may rename (`<M: Native>` inside an
+// instance whose `Native` became the generated nominal).
+fn sema_inline_rewrite_type_params(rewrite: SemaInlineRewrite, params: [TypeParam]) -> [TypeParam] Never! {
+    mapped := [TypeParam]{}
+    loop param in params {
+        updated := param
+        updated.bounds = loop bound in param.bounds -> sema_inline_mapped_name(rewrite, bound)
+        &mapped.push(updated)
+    }
+    mapped
+}
+
 // Rust `specialize_func` / `specialize_function_types` plus the call routes.
 fn sema_inline_rewrite_func(rewrite: &SemaInlineRewrite, function: Func) -> Func Never! {
     updated := function
     saved :: rewrite.locals.len()
+    updated.type_params = sema_inline_rewrite_type_params(rewrite, function.type_params)
     updated.params = sema_inline_rewrite_params(&rewrite, function.params)
     updated.return_type = sema_inline_rewrite_optional_type(rewrite, function.return_type)
     updated.markers = sema_inline_rewrite_markers(&rewrite, function.markers)
@@ -990,6 +1003,7 @@ fn sema_inline_rewrite_trait_blocks(rewrite: &SemaInlineRewrite, blocks: [TraitI
 fn sema_inline_rewrite_struct(rewrite: &SemaInlineRewrite, definition: StructDef, alias: String) -> StructDef Never! {
     updated := definition
     if alias != "" -> updated.name = sema_inline_type_name(alias, definition.name)
+    updated.type_params = sema_inline_rewrite_type_params(rewrite, definition.type_params)
     fields := [Field]{}
     loop field_index in 0..<definition.fields.len() {
         mapped := definition.fields[field_index]
@@ -1011,6 +1025,7 @@ fn sema_inline_rewrite_struct(rewrite: &SemaInlineRewrite, definition: StructDef
 fn sema_inline_rewrite_enum(rewrite: &SemaInlineRewrite, definition: EnumDef, alias: String) -> EnumDef Never! {
     updated := definition
     if alias != "" -> updated.name = sema_inline_type_name(alias, definition.name)
+    updated.type_params = sema_inline_rewrite_type_params(rewrite, definition.type_params)
     variants := [Variant]{}
     loop variant_index in 0..<definition.variants.len() {
         mapped := definition.variants[variant_index]

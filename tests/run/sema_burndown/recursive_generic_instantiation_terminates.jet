@@ -1,0 +1,107 @@
+// #4390: generic instantiation terminates when a generic type reaches itself
+// through a map of a generic value (the QueryEngine<T> unit, the GC port's
+// GCState<O>) or through its own field (Tree<T>). Each instance is keyed by
+// its type identity, so a cycle reuses the instance already in flight.
+struct Subject {
+    name: String
+}
+
+struct Key {
+    subject: Subject
+    rev: Int
+}
+
+struct Memo<T> {
+    value: T
+    deps: [Key]
+    rev: Int
+}
+
+struct QueryEngine<T> {
+    memos: [Key: Memo<T>]
+    revision: Int
+
+    fn new() -> QueryEngine<T> { QueryEngine<T>{memos: [Key: Memo<T>]{}, revision: 0} }
+
+    fn put(&self, key: Key, value: T, deps: [Key]) {
+        self.memos[key] = Memo<T>{value: value, deps: deps, rev: self.revision}
+    }
+
+    fn memo_key_valid(self, key: Key, depth: Int) -> Bool {
+        if depth > 8 -> return false
+        entry :: self.memos.get(key) ?? return false
+        self.memo_entry_valid(entry, depth + 1)
+    }
+
+    fn memo_entry_valid(self, entry: Memo<T>, depth: Int) -> Bool {
+        loop dep in entry.deps {
+            if !self.memo_key_valid(dep, depth) -> return false
+        }
+        entry.rev <= self.revision
+    }
+
+    fn size(self) -> Int { self.memos.len() }
+}
+
+struct GCEntry<O> {
+    object: O
+    marked: Bool
+}
+
+struct GCState<O> {
+    entries: [U64: GCEntry<O>]
+
+    fn new() -> GCState<O> { GCState<O>{entries: [U64: GCEntry<O>]{}} }
+
+    fn insert(&self, id: U64, object: O) { self.entries[id] = GCEntry<O>{object: object, marked: false} }
+
+    fn count(self) -> Int { self.entries.len() }
+}
+
+struct GCTestObject {
+    n: Int
+}
+
+struct Tree<T> {
+    value: T
+    children: [Tree<T>]
+
+    fn count(self) -> Int {
+        total := 1
+        loop child in self.children {
+            total += child.count()
+        }
+        total
+    }
+}
+
+fn depth<T>(tree: Tree<T>) -> Int {
+    best := 0
+    loop child in tree.children {
+        d :: depth<T>(child)
+        if d > best -> best = d
+    }
+    best + 1
+}
+
+fn key(name: String, rev: Int) -> Key { Key{subject: Subject{name: name}, rev: rev} }
+
+fn run() {
+    empty :: QueryEngine<Int>.new()
+    print(empty.size())
+    engine := QueryEngine<String>.new()
+    &engine.put(key("a", 1), "A", [Key]{})
+    &engine.put(key("b", 1), "B", [Key]{key("a", 1)})
+    print(engine.size())
+    print(engine.memo_key_valid(key("b", 1), 0))
+    print(engine.memo_key_valid(key("c", 1), 0))
+    state := GCState<GCTestObject>.new()
+    &state.insert(U64{1}, GCTestObject{n: 3})
+    &state.insert(U64{2}, GCTestObject{n: 4})
+    print(state.count())
+    leaf :: Tree<String>{value: "b", children: [Tree<String>]{}}
+    middle :: Tree<String>{value: "m", children: [Tree<String>]{leaf}}
+    root :: Tree<String>{value: "a", children: [Tree<String>]{middle, leaf.copy()}}
+    print(root.count())
+    print(depth(root))
+}

@@ -1,0 +1,96 @@
+// #4401: a generic module specialized by a provider type keeps its type
+// parameters and bounds (`N: Native`), and the file names the instance's
+// members through the instance alias: in a struct field, in an impl head that
+// implements a file trait for an instance type (`impl seam_m8.Handle.Labelled`),
+// and in an impl head that implements an instance trait for a file type
+// (`impl Provider.gc_m8.Native`, D-IMPLDOT1). A bound inside an instance or an
+// inline module names that module's own trait (`<W: Native>`).
+trait Native {
+    fn strong_count(self) -> Int
+}
+
+trait Labelled {
+    fn label(self) -> String
+}
+
+struct Provider {
+    count: Int
+}
+
+impl Provider.Native {
+    fn strong_count(self) -> Int { self.count }
+}
+
+module seam<N: Native> {
+    struct Handle {
+        native: N
+    }
+
+    impl Handle.Native {
+        fn strong_count(self) -> Int { self.native.strong_count() * 10 }
+    }
+
+    fn strong_count(value: N) -> Int { value.strong_count() }
+
+    fn bounded<M: Native>(value: M) -> Int { value.strong_count() + 1 }
+
+    fn via_bound(value: N) -> Int { bounded(value) + bounded(Handle{native: value}) }
+}
+
+module seam_m8 :: seam<Provider>
+
+module seam_alias :: seam_m8
+
+struct Outer {
+    inner: seam_m8.Handle
+    others: [seam_alias.Handle]
+}
+
+impl seam_m8.Handle.Labelled {
+    fn label(self) -> String { "handle {self.native.strong_count()}" }
+}
+
+module gc<O>(scale: Int) {
+    trait Native {
+        fn strong_count(self) -> Int
+    }
+
+    fn weighted<W: Native>(value: W) -> Int { value.strong_count() * scale }
+
+    fn count_of(values: [O]) -> Int { values.len() }
+}
+
+module gc_m8 :: gc<Provider>(3)
+
+module plain {
+    trait Native {
+        fn strong_count(self) -> Int
+    }
+
+    struct Box {
+        count: Int
+    }
+
+    impl Box.Native {
+        fn strong_count(self) -> Int { self.count }
+    }
+
+    fn doubled<N: Native>(value: N) -> Int { value.strong_count() * 2 }
+}
+
+impl Outer.gc_m8.Native {
+    fn strong_count(self) -> Int { self.inner.strong_count() + self.others.len() }
+}
+
+fn run() {
+    p :: Provider{count: 3}
+    print(seam_m8.strong_count(p))
+    print(seam_m8.via_bound(Provider{count: 4}))
+    h :: seam_m8.Handle{native: Provider{count: 5}}
+    print(h.label())
+    outer :: Outer{inner: h, others: [seam_alias.Handle]{seam_alias.Handle{native: Provider{count: 6}}}}
+    print(outer.inner.strong_count())
+    print(gc_m8.weighted(outer))
+    print(plain.doubled(plain.Box{count: 8}))
+    print(gc_m8.count_of([Provider]{p, Provider{count: 7}}))
+}

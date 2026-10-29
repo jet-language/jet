@@ -965,6 +965,7 @@ fn sema_generic_modules_rewritten_items(program: Program, module_identity: Strin
             if declaration == {
                 .Struct(definition) -> &names.push(definition.name)
                 .Enum(definition) -> &names.push(definition.name)
+                .Trait(definition) -> &names.push(definition.name)
                 else -> {}
             }
             &declarations.push(declaration)
@@ -982,8 +983,8 @@ fn sema_generic_modules_rewritten_items(program: Program, module_identity: Strin
         }
         projections[name] = canonical
     }
-    // `three_ints.Buffer` and a projected `alias.Type` name the instance's
-    // generated nominal.
+    // `three_ints.Buffer`, `m8.Native` and a projected `alias.Type` name the
+    // instance's generated nominal.
     projection := sema_inline_rewrite_empty()
     loop name in expanded_names -> sema_genmod_project_types(&projection, name, name, nominals)
     loop name in projected_names {
@@ -998,8 +999,8 @@ fn sema_generic_modules_rewritten_items(program: Program, module_identity: Strin
                 next
             }
         }
-        if item == .Func(function) {
-            &rewritten.push(Item.Func{value: sema_genmod_project_function(function, projections, projected_names, projection)})
+        if sema_genmod_project_item(item, projections, projected_names, projection) == .Val(projected) {
+            &rewritten.push(projected)
             next
         }
         &rewritten.push(item)
@@ -1029,19 +1030,68 @@ fn sema_genmod_project_types(rewrite: &SemaInlineRewrite, alias: String, canonic
     }
 }
 
-// Rust's projection rewrite of each top-level function: a projected alias
-// reads as its canonical instance, then projected member types resolve.
-fn sema_genmod_project_function(function: Func, projections: [String:String], projected_names: [String], projection: SemaInlineRewrite) -> Func {
-    updated := function
+// Rust projected only top-level functions. Every top-level declaration that
+// can name an instance member projects the same way: a field
+// `inner: m8.Handle`, an `impl m8.Handle.Show` or `impl Provider.m8.Native`
+// head, a method or test body. A projected alias first reads as its canonical
+// instance, then projected member types resolve. None: `item` names nothing.
+fn sema_genmod_project_item(item: Item, projections: [String:String], projected_names: [String], projection: SemaInlineRewrite) -> Item? {
+    if item == {
+        .Func(_) | .Struct(_) | .Enum(_) | .Trait(_) | .Impl(_) | .ErrorConv(_) | .Test(_) -> {}
+        else -> return None
+    }
+    updated := item
     loop name in projected_names {
         canonical :: projections.get(name) ?? next
         calls := sema_inline_rewrite_empty()
         calls.sibling_module = canonical
         calls.siblings[name] = true
-        updated = sema_inline_rewrite_func(&calls, updated)
+        updated = sema_genmod_rewrite_item(&calls, updated)
     }
     types := projection
-    sema_inline_rewrite_func(&types, updated)
+    Val(sema_genmod_rewrite_item(&types, updated))
+}
+
+fn sema_genmod_rewrite_item(rewrite: &SemaInlineRewrite, item: Item) -> Item {
+    if item == {
+        .Func(function) -> Item.Func{value: sema_inline_rewrite_func(&rewrite, function)}
+        .Struct(definition) -> Item.Struct{value: sema_inline_rewrite_struct(&rewrite, definition, "")}
+        .Enum(definition) -> Item.Enum{value: sema_inline_rewrite_enum(&rewrite, definition, "")}
+        .Trait(definition) -> Item.Trait{value: sema_inline_rewrite_trait(&rewrite, definition)}
+        .Impl(definition) -> {
+            head :: sema_genmod_impl_head(rewrite, definition)
+            Item.Impl{value: sema_inline_rewrite_impl(&rewrite, head)}
+        }
+        .ErrorConv(definition) -> Item.ErrorConv{value: sema_inline_rewrite_error_conv(&rewrite, definition)}
+        .Test(definition) -> {
+            updated := definition
+            saved :: rewrite.locals.len()
+            updated.params = sema_inline_rewrite_params(&rewrite, definition.params)
+            updated.body = sema_inline_rewrite_stmts(&rewrite, definition.body)
+            sema_inline_restore_locals(&rewrite, saved)
+            Item.Test{value: updated}
+        }
+        // copy: sema_genmod_project_item admits only the kinds above.
+        else -> item.copy()
+    }
+}
+
+// D-IMPLDOT1 for an instance alias: the parser reads `impl Provider.m8.Native`
+// as type `Provider.m8` and trait `Native`; when `m8.Native` names an
+// instance's trait, the alias binds to the trait instead.
+fn sema_genmod_impl_head(rewrite: SemaInlineRewrite, definition: ImplDef) -> ImplDef {
+    updated := definition
+    trait_name :: definition.trait_name ?? return updated
+    segments :: definition.type_name.split(".").to_list()
+    if segments.len() < 2 -> return updated
+    alias :: segments[segments.len() - 1]
+    qualified :: "{alias}.{trait_name}"
+    if rewrite.types.get(qualified) == None -> return updated
+    owner := segments[0]
+    loop index in 1..<(segments.len() - 1) -> owner = "{owner}.{segments[index]}"
+    updated.type_name = owner
+    updated.trait_name = Val(qualified)
+    updated
 }
 
 // Rust `resolve_args` over the arguments the checks accept: type arguments as
