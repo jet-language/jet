@@ -2383,6 +2383,20 @@ fn parser_parse_impl(state: &JetParserState) -> Item {
         parser_bump(&state)
         &parts.push(parser_expect_name(&state, "after `.` in `impl`"))
     }
+    // `impl Stack<T> {` from other languages: an impl names its type bare and
+    // its methods already see the struct's type parameters.
+    if parser_current_kind(&state) == TOKEN_LT && !parser_aborting(&state) {
+        open :: parser_current(&state).span
+        _ :: parser_parse_type_params(&state)
+        written := parser_value(state, parts[0])
+        loop index in 1..<parts.len() -> written = "{written}.{parser_value(state, parts[index])}"
+        params_span :: Span{start: open.start, end: parser_prev_token_end(state)}
+        parser_add_error_code_edit(&state, "E0003", params_span, "`impl {written}` takes no type parameters", "an impl of a generic type names the type bare; its methods already see the type's parameters", "write `impl {written} {{`", TextEdit{span: params_span, new_text: ""})
+        loop parser_current_kind(&state) == TOKEN_DOT && !parser_aborting(&state) {
+            parser_bump(&state)
+            &parts.push(parser_expect_name(&state, "after `.` in `impl`"))
+        }
+    }
     first :: parts[0]
     count :: parts.len()
     is_error_conversion :: parser_current_kind(&state) == TOKEN_UNIFIED_ARROW

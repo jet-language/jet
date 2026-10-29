@@ -1,0 +1,20 @@
+# #5967: forms typed from other languages are refused with a Fix that
+# names the Jet spelling. Pins the four refusals that already teach.
+fixture: refusals_from_other_languages_teach_the_jet_spelling.fixture
+env: NO_COLOR=1
+step: jet check power.jet
+exit: 1
+stderr: ~ "Error [E0396]" # `**` is refused
+stderr: ~ "Fix: Write `base.pow(exponent)`" # the Fix spells `.pow()`
+step: jet check positional_variant.jet
+exit: 1
+stderr: ~ "Error [E0003]: A positional enum variant can carry only one value" # two positional payloads are refused
+stderr: ~ "Fix: Name each field, for example `Hit(text: String, count: Int)`" # the Fix spells named fields
+step: jet check positional_destructure.jet
+exit: 1
+stderr: ~ "Error [E0313]" # positional destructuring is refused
+stderr: ~ "Fix: Name the members, `(sender, receiver) :: …`, or rename them" # the Fix spells by-name destructuring
+step: jet check inclusive_index_range.jet
+exit: 1
+stderr: ~ "Error [E0364]" # an inclusive range to len() is refused
+stderr: ~ "`0..<xs.len()`" # the Fix spells the half-open range

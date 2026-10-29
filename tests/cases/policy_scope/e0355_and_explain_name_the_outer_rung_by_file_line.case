@@ -1,0 +1,19 @@
+# #6052 (ladder L-14, audit probes p01 and p05): `jet explain <policy> <file>`
+# shows each rung of the chain at file:line:col, and E0355 names the outer
+# rung a widening inner declaration collides with when that rung is in the
+# package manifest.
+fixture: e0355_and_explain_name_the_outer_rung_by_file_line.fixture
+env: NO_COLOR=1
+step: jet explain copies block.jet
+exit: 0
+stdout: ~ "copies = .Explicit" # the effective value
+stdout: ~ "[shadowed] module .Explicit at block.jet:1:1" # the module rung at file:line:col
+stdout: ~ "[effective] block .Explicit at block.jet:3:5" # the block rung at file:line:col
+stdout+stderr: !~ "block.jet:0..26" # no byte span
+step: jet check run.jet
+cwd: pkg
+exit: 1
+stderr: ~ "Error [E0355]: Invalid effective `sentries` policy" # the widening is refused
+stderr: ~ "run.jet:4:5" # at the inner declaration
+stderr: ~ " Outer: the package rung sets `sentries: .Off` in " # the outer rung is named
+stderr: ~ "package.jet" # by its manifest file

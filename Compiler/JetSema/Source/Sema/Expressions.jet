@@ -2805,6 +2805,11 @@ fn sema_expr_local_call_span(call: Call) -> Span Never! {
 }
 
 fn sema_expr_check_declared_direct_call(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    // `Float(n)` from other languages: a number type is built with braces.
+    if call.type_args.len() == 0 && call.args.len() == 1 && SEMA_NUMBER_TYPE_NAMES.contains(call.name) && sema_scope_resolve_index(scopes, call.name) == None {
+        &diagnostics.push(sema_error("E0102", call.name_span, "`{call.name}` is a number type, not a function", "Jet builds a value of a number type with braces; parentheses call a function", "write `{call.name}{{{sema_expr_number_type_argument_text(call.args[0].expr)}}}`"))
+        return None
+    }
     scopes.ownership_call_depth += 1
     target :: sema_call_resolve_direct(call.name, call.type_args, environment, program, &scopes, call.name_span, &diagnostics) ?? {
         scopes.ownership_call_depth -= 1
@@ -2817,6 +2822,20 @@ fn sema_expr_check_declared_direct_call(call: Call, expected: Type?, environment
     &context.call_return_views.push(SemaCallReturnView{span: call.name_span, facts: value.return_view_facts})
     if !sema_expr_record_call_fact(environment, program, &scopes, &context, call.name_span, value, &diagnostics) -> return None
     Val(value.value)
+}
+
+// The built-in number types `Name(value)` is refused for (Jet: `Name{value}`).
+SEMA_NUMBER_TYPE_NAMES :: comptime { [String]{"Int", "Float", "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64", "F32", "F64"} }
+
+// The argument as the Fix spells it: a name or literal as written, any other
+// expression elided.
+fn sema_expr_number_type_argument_text(expr: Expr) -> String Never! {
+    if expr == {
+        .Ident(name, _, _) -> name
+        .Int(value, _, _, raw, _) -> raw ?? "{value}"
+        .Float(value, _, _, raw, _) -> raw ?? "{value}"
+        else -> "…"
+    }
 }
 
 // Rust direct_calls.rs:2354-2375 then :2815: after a type-argument count

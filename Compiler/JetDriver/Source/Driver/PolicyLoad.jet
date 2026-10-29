@@ -1,7 +1,7 @@
 // Loaded policy facts (Rust Loader.rs read_load): the canonical Package
 // reader owns package vocabulary/values; Foundation owns the one policy ladder.
 // The bootstrap unit already includes Jetpack's PackageModel source closure.
-use jet_foundation.[Diagnostic, PolicyDeclaration, PolicyError, PolicyKey, PolicyScope, Program, POLICY_RULES, diagnostic_with_source_path, policy_key_name, policy_resolve]
+use jet_foundation.[Diagnostic, PolicyDeclaration, PolicyError, PolicyKey, PolicyScope, Program, POLICY_RULES, Span, diagnostic_with_detail, diagnostic_with_label, diagnostic_with_source_path, policy_key_name, policy_resolve, policy_scope_name, policy_value_display]
 use jet_pkg_model.[
     PackageParseError, PackagePolicy, pkg_parse_package_policy, pkg_record_body,
     pkg_retired_record_head_spans,
@@ -15,12 +15,25 @@ fn jet_driver_read_package_policy(value: String) -> PackagePolicy PackageParseEr
     Ok(policy)
 }
 
+// E0355 for a refused ladder, naming the outer rung it collides with: a
+// label on that declaration when it is in this file, else an `Outer:` line
+// naming its file (the package manifest, the organization policy).
 fn jet_driver_policy_ladder_diagnostic(key: PolicyKey, error: PolicyError, path: String) -> Diagnostic Never! {
-    span :: if error == {
-        .ProhibitedScope(_, _, span) | .Widening(_, _, _, span) -> span
-        .Conflict(_, _, _, second) -> second
+    diagnostic :: diagnostic_with_source_path(jet_driver_diagnostic("E0355", jet_driver_policy_error_span(error), "invalid effective `{policy_key_name(key)}` policy", "package, module, function, and block declarations share one ladder; inner declarations may not conflict with or widen an outer safety constraint", "remove the conflict or tighten the inner declaration"), path, 0)
+    outer :: if error == {
+        .ProhibitedScope(_, _, _) -> { return diagnostic }
+        .Conflict(_, _, _, _, outer_site) | .Widening(_, _, _, _, outer_site) -> outer_site
     }
-    diagnostic_with_source_path(jet_driver_diagnostic("E0355", span, "invalid effective `{policy_key_name(key)}` policy", "package, module, function, and block declarations share one ladder; inner declarations may not conflict with or widen an outer safety constraint", "remove the conflict or tighten the inner declaration"), path, 0)
+    rung :: "the {policy_scope_name(outer.scope)} rung sets `{policy_key_name(key)}: {policy_value_display(outer.value)}`"
+    if outer.source == path && outer.span.end > outer.span.start -> return diagnostic_with_label(^diagnostic, outer.span, "{rung} here")
+    diagnostic_with_detail(^diagnostic, " Outer: {rung} in {outer.source}")
+}
+
+fn jet_driver_policy_error_span(error: PolicyError) -> Span Never! {
+    if error == {
+        .ProhibitedScope(_, _, span) | .Widening(_, _, _, span, _) -> span
+        .Conflict(_, _, _, second, _) -> second
+    }
 }
 
 fn jet_driver_policy_outer(scope: PolicyScope) -> Bool Never! {

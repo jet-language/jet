@@ -1,5 +1,5 @@
 // Rust envelope and byte-offset facts captured in SolCLI9/policy-capture.
-use jet_foundation.[PolicyDeclaration, PolicyKey, PolicyValue, PolicyScope, Span]
+use jet_foundation.[PolicyDeclaration, PolicyKey, PolicyValue, PolicyScope, PolicySourceText, Span, diagnostic_source_text]
 use jet_cli.[
     jet_cli_explain_marker_offset, jet_cli_explain_marker_site, jet_cli_explain_policy_lookup,
     jet_cli_explanation_output,
@@ -14,13 +14,14 @@ use jet_cli.[
  }
  source :: "é\nsecond\nthird"
  if jet_cli_explain_marker_offset(source, U64{1}) != 0 || jet_cli_explain_marker_offset(source, U64{2}) != 3 || jet_cli_explain_marker_offset(source, U64{3}) != 10 || jet_cli_explain_marker_offset(source, U64.MAX) != source.bytes().len() -> panic("offsets are UTF-8 bytes; beyond last line is EOF")
- declaration :: PolicyDeclaration{key: PolicyKey.Copies, value: PolicyValue.Explicit, scope: PolicyScope.Module, span: Span{start: 0, end: 26}, target: None, source: "policy.jet"}
- explanation :: jet_cli_explain_policy_lookup(PolicyKey.Copies, [PolicyDeclaration]{declaration}) ?? panic("effective copies")
- expected :: "{{\"schema\":\"jet.status/v1\",\"action\":\"explain\",\"ok\":true,\"reports\":[],\"code\":\"copies\",\"stage\":\"policy\",\"what\":\"copies = .Explicit\\n  [effective] module .Explicit at policy.jet:0..26\",\"why\":\"the nearest applicable declaration wins subject to the registry's tightening and conflict rules\",\"fix\":\"change the nearest declaration, or remove it to inherit the next outer value\",\"example\":null}}\n"
+ declaration :: PolicyDeclaration{key: PolicyKey.Copies, value: PolicyValue.Explicit, scope: PolicyScope.Module, span: Span{start: 7, end: 33}, target: None, source: "policy.jet"}
+ sources :: [PolicySourceText]{PolicySourceText{path: "policy.jet", text: diagnostic_source_text("// top\n#Policy(copies: .Explicit)\n")}}
+ explanation :: jet_cli_explain_policy_lookup(PolicyKey.Copies, [PolicyDeclaration]{declaration}, sources) ?? panic("effective copies")
+ expected :: "{{\"schema\":\"jet.status/v1\",\"action\":\"explain\",\"ok\":true,\"reports\":[],\"code\":\"copies\",\"stage\":\"policy\",\"what\":\"copies = .Explicit\\n  [effective] module .Explicit at policy.jet:2:1\",\"why\":\"the nearest applicable declaration wins subject to the registry's tightening and conflict rules\",\"fix\":\"change the nearest declaration, or remove it to inherit the next outer value\",\"example\":null}}\n"
  if jet_cli_explanation_output(explanation, false, true) == {
  .Done(output) -> { if output.stdout != expected || output.stderr != "" || output.exit_code != 0 -> panic("exact Rust policy envelope") }
  else -> panic("policy projection is a renderable")
  }
- if jet_cli_explain_policy_lookup(PolicyKey.Unsafe, [PolicyDeclaration]{declaration}) != None -> panic("no effective writer")
- if jet_cli_explain_policy_lookup(PolicyKey.Copies, [PolicyDeclaration]{declaration, declaration}) != None -> panic("resolver conflicts remain no-effective-declaration")
+ if jet_cli_explain_policy_lookup(PolicyKey.Unsafe, [PolicyDeclaration]{declaration}, sources) != None -> panic("no effective writer")
+ if jet_cli_explain_policy_lookup(PolicyKey.Copies, [PolicyDeclaration]{declaration, declaration}, sources) != None -> panic("resolver conflicts remain no-effective-declaration")
 }

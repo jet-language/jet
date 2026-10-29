@@ -1,7 +1,7 @@
 // CmdDevTools.rs run_explain_policy/run_explain_marker over the canonical
 // authorized load-only query. No semantic check is used for these essays.
 use jet_driver.[JetDriverSourceQueryResult, JET_DRIVER_EXIT_USER_ERROR]
-use jet_foundation.[DiagnosticExplanation, EffectivePolicy, PolicyDeclaration, PolicyKey, PolicyScope, policy_key_name, policy_resolve, policy_scope_name, policy_value_display]
+use jet_foundation.[DiagnosticExplanation, PolicyDeclaration, PolicyKey, PolicyScope, PolicySourceText, diagnostic_source_text, policy_explain, policy_key_name, policy_resolve]
 
 struct JetCLIMarkerSite {
  file: String
@@ -23,16 +23,9 @@ fn jet_cli_explain_marker_site(site: String) -> JetCLIMarkerSite JetCLIReadError
  Err(jet_cli_read_error("marker site must be `<file>:<line>`"))
 }
 
-fn jet_cli_explain_policy_render(effective: EffectivePolicy) -> String Never! {
- text := "{policy_key_name(effective.key)} = {policy_value_display(effective.value)}"
- loop (index, declaration) in effective.provenance {
- status :: if index + 1 == effective.provenance.len() -> "effective" else -> "shadowed"
- text = "{text}\n  [{status}] {policy_scope_name(declaration.scope)} {policy_value_display(declaration.value)} at {declaration.source}:{declaration.span.start}..{declaration.span.end}"
- }
- text
-}
-
-fn jet_cli_explain_policy_lookup(key: PolicyKey, declarations: [PolicyDeclaration]) -> DiagnosticExplanation? Never! {
+// `sources` holds the text of the files the declarations name, so the chain
+// reads `file:line:col`.
+fn jet_cli_explain_policy_lookup(key: PolicyKey, declarations: [PolicyDeclaration], sources: [PolicySourceText]) -> DiagnosticExplanation? Never! {
  effective :: if policy_resolve(key, declarations) == {
  .Val(value) -> value
  .None -> { return None }
@@ -41,7 +34,7 @@ fn jet_cli_explain_policy_lookup(key: PolicyKey, declarations: [PolicyDeclaratio
  name :: policy_key_name(key)
  Val(DiagnosticExplanation{
  code: name, stage: "policy", meaning: "effective scoped policy `{name}`",
- what: Val(jet_cli_explain_policy_render(effective)),
+ what: Val(policy_explain(effective, sources)),
  why: Val("the nearest applicable declaration wins subject to the registry's tightening and conflict rules"),
  fix: Val("change the nearest declaration, or remove it to inherit the next outer value"),
  example: None,
@@ -87,7 +80,14 @@ fn jet_cli_explain_loaded_policy(key: PolicyKey, loaded: JetDriverSourceQueryRes
  }
  }
  }
- explanation :: jet_cli_explain_policy_lookup(key, declarations) ?? {
+ sources := [PolicySourceText]{}
+ loop source_module in loaded.modules {
+ named :: loop declaration in declarations {
+ if declaration.source == source_module.path -> break true
+ } ?? false
+ if named -> &sources.push(PolicySourceText{path: source_module.path, text: diagnostic_source_text(source_module.source)})
+ }
+ explanation :: jet_cli_explain_policy_lookup(key, declarations, sources) ?? {
  name :: policy_key_name(key)
  if site == .Val(location) -> return jet_cli_fail("E2104", "`{name}` has no effective declaration at {location}", jet_cli_why("E2104"), "correct the named argument or input, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
  return jet_cli_fail("E2104", "policy `{name}` has no effective declaration", "the policy has no applicable writer at this source site", "add one registered policy declaration or explain a concrete marker site", color, JET_DRIVER_EXIT_USER_ERROR)
