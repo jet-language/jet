@@ -50,12 +50,14 @@ fn ir_build_function(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody
 }
 
 // A parameter (or receiver) slot bound to `name`: a write parameter of a
-// non-aggregate type is the address of the caller's variable.
+// non-aggregate type is the address of the caller's variable. It is marked
+// `write` so an escaping closure that writes it (a `scope.guard` callback)
+// holds that address, not a copy of the value.
 fn ir_param_slot(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, write: Bool, owned: Bool, name: String) -> Int? Never! {
     row :: ir_value_type(&m, p, ty) ?? return None
     if write && m.types[row].kind != .Aggregate {
         slot :: ir_new_slot(&b, ir_pointer_row(&m), IRSlotKind.Param, ir_intern_name(&m, name))
-        &b.bindings.push(IRBinding{name: name, slot: slot, indirect: row})
+        &b.bindings.push(IRBinding{name: name, slot: slot, indirect: row, write: true})
         return Val(slot)
     }
     slot :: ir_new_slot(&b, row, IRSlotKind.Param, ir_intern_name(&m, name))
