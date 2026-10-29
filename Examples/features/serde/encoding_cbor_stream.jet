@@ -30,8 +30,8 @@ fn run() (EncodingError | IOError)! {
     input :: files.open(path) ?? return
     reader := cbor.reader(^input) ?? return
     loop {
-        item :: &reader.next() ?? return Err(err)
-        _value :: item ?? break
+        // A failed read propagates; `??` handles the end of the stream.
+        _value :: &reader.next() ?? break
         print("event")
     }
     print("eof")

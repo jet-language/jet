@@ -1428,7 +1428,7 @@ fn sema_derive_stmt_span(stmt: Stmt) -> Span Never! {
     if stmt == {
         .Expr(value) -> expr_span(value)
         .Val(binding) -> binding.name_span
-        .Return(_, span) -> span
+        .Return(_, span) | .Switch(_, _, _, span) -> span
         else -> Span{start: 0, end: 0}
     }
 }
@@ -1453,6 +1453,34 @@ fn sema_derive_exec_stmts(expansion: &SemaDeriveExpansion, stmts: [Stmt]) Never!
 fn sema_derive_exec_stmt(expansion: &SemaDeriveExpansion, stmt: Stmt) Never! {
     if stmt == {
         .Expr(value) -> sema_derive_exec_expr(&expansion, value)
+        // A statement `if` parses as a subjectless arm table (`true`
+        // subject): the first arm whose known-time condition holds runs.
+        .Switch(subject, arms, else_body, span) -> {
+            subjectless := false
+            if subject == .Bool(value, _, _) -> subjectless = value
+            if !subjectless {
+                sema_derive_fail(&expansion, sema_derive_unsupported(span, "a template arm table with a subject"))
+                return
+            }
+            loop arm in arms {
+                selected :: sema_derive_static_value(expansion, arm.cond) ?? {
+                    sema_derive_fail(&expansion, sema_derive_unsupported(expr_span(arm.cond), "a template `if` condition that is not a known-time value"))
+                    return
+                }
+                taken := false
+                if selected == .Bool(flag) {
+                    taken = flag
+                } else {
+                    sema_derive_fail(&expansion, sema_derive_unsupported(expr_span(arm.cond), "a template `if` condition that is not a Bool"))
+                    return
+                }
+                if taken {
+                    sema_derive_exec_stmts(&expansion, arm.body)
+                    return
+                }
+            }
+            if else_body == .Val(body) -> sema_derive_exec_stmts(&expansion, body)
+        }
         .Val(binding) -> {
             value :: sema_derive_static_value(expansion, binding.init) ?? {
                 failure :: sema_derive_binding_failure(expansion, binding.name_span, binding.init)

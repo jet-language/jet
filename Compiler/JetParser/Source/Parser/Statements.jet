@@ -1801,6 +1801,21 @@ fn parser_parse_marked_statement(state: &JetParserState) -> Stmt {
     }
     marker_span :: parser_cover(hash.span, end)
     marker :: Marker{name: parser_value(state, name), negated: negated, name_span: name.span, args: marker_args, arg_labels: labels, span: marker_span, ct: None}
+    // `#Track name :: value` and `#Meta(…) name :: value` mark the local
+    // binding they prefix (D-TRACK-ORIGIN1=A, D-CANVASMETA1=B).
+    if (word == "Track" || word == "Meta") && parser_current_kind(&state) == TOKEN_IDENT {
+        binding_kind :: parser_kind_at(&state, 1)
+        if binding_kind == TOKEN_COLON_EQ || binding_kind == TOKEN_COLON_COLON || binding_kind == TOKEN_COLON {
+            statement :: parser_parse_binding_statement(&state)
+            if statement == .Val(binding) {
+                // copy: the parsed binding is rebuilt to carry its marker.
+                marked := binding.copy()
+                &marked.markers.push(marker)
+                return Stmt.Val{binding: marked}
+            }
+            return statement
+        }
+    }
     // S82: an allowance attaches to one ordinary statement,
     // not an invented block node. Its target stays for sema and gate audit.
     if word == "allow" {

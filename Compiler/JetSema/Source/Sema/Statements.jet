@@ -3646,10 +3646,11 @@ fn sema_stmt_owning_view_init(init: ^TExpr, binding: Binding, environment: SemaS
     sema_tir_node(facts.target, TExprKind.MaterializeView{value: init}, span)
 }
 
-// A `::` initializer that is a field or element projection of a name this
-// scope knows (`root.field`, `root[i].field`, parenthesized): the binding
+// A `::` initializer that is a field or element projection of a value name
+// this scope knows (`root.field`, `root[i].field`, parenthesized): the binding
 // reads it through a view. A whole name (`x :: y`) is the share-or-move rule
-// instead, and a range (`xs[a..b]`) is already a typed View.
+// instead, and a range (`xs[a..b]`) is already a typed View. A type, module
+// or import path (`Mode.Off`, `encoding.DataEvent.Null`) builds a new value.
 fn sema_stmt_binding_reads_projection(init: Expr, scopes: SemaScopeTable) -> Bool Never! {
     if init == {
         .Paren(inner, _, _) -> sema_stmt_binding_reads_projection(inner, scopes)
@@ -3661,7 +3662,11 @@ fn sema_stmt_binding_reads_projection(init: Expr, scopes: SemaScopeTable) -> Boo
         }
         .Field(base, _, _, _) | .Index(base, _, _, _, _) -> {
             root :: sema_stmt_for_in_expr_root_ident(base) ?? return false
-            sema_scope_resolve_index(scopes, root) != None
+            index :: sema_scope_resolve_index(scopes, root) ?? return false
+            if scopes.bindings[index].symbol.kind == {
+                .Local | .Parameter | .Constant -> true
+                else -> false
+            }
         }
         else -> false
     }

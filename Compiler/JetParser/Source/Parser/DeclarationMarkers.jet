@@ -233,16 +233,20 @@ fn parser_layout_marker_span(markers: [Marker], grouped: Bool, layout: StructLay
 }
 
 // Rust `BoundRuleArguments::parameter_for_source`: the parameter each written
-// argument binds, positional ones first and labeled ones by name. None when
-// the arguments do not fit the parameter list; no diagnostic is reported here.
-fn parser_marker_binding_slots(marker: Marker, names: [String]) -> [Int]? {
+// argument binds, positional ones first and labeled ones by name. A bare
+// identifier naming one of `flags` (`#Meta(category: "Movement", tunable)`)
+// binds that parameter wherever it is written. None when the arguments do not
+// fit the parameter list; no diagnostic is reported here.
+fn parser_marker_binding_slots(marker: Marker, names: [String], flags: [String]) -> [Int]? {
     taken := [Bool]{}
     loop _ in 0..<names.len() -> &taken.push(false)
     slots := [Int]{}
     positional := 0
     saw_named := false
     loop index in 0..<marker.args.len() {
-        label :: parser_marker_label(marker, index)
+        label := parser_marker_label(marker, index)
+        // copy: the flag word is read from the marker; the label owns its text.
+        if label == "" && parser_marker_expression(marker, index) == .Val(value) && value == .Ident(word, _, _) && flags.contains(word) -> label = word.copy()
         parameter := -1
         if label != "" {
             saw_named = true
@@ -270,7 +274,7 @@ fn parser_marker_binding_slots(marker: Marker, names: [String]) -> [Int]? {
 // Rust `marker_argument_bindings`: the argument bound to each named
 // parameter. None when the arguments do not fit the parameter list.
 fn parser_marker_bindings(marker: Marker, names: [String]) -> [Expr?]? {
-    slots :: parser_marker_binding_slots(marker, names) ?? return None
+    slots :: parser_marker_binding_slots(marker, names, [String]{}) ?? return None
     values := [Expr?]{}
     loop _ in 0..<names.len() -> &values.push(None)
     loop (index, parameter) in slots -> values[parameter] = parser_marker_expression(marker, index)
@@ -356,7 +360,7 @@ fn parser_maturity_tag(value: Expr) -> MaturityTag? Never! {
 // E0352. None after arguments that do not bind (fatal E0930).
 fn parser_meta_attr_from_marker(state: &JetParserState, marker: Marker) -> MetaAttr? {
     names :: [String]{"category", "tunable", "maturity"}
-    slots :: parser_marker_binding_slots(marker, names) ?? {
+    slots :: parser_marker_binding_slots(marker, names, [String]{"tunable"}) ?? {
         parser_marker_shape_fatal(&state, marker)
         return None
     }

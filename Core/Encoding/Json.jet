@@ -33,6 +33,7 @@
 use core as core
 use core.encoding.[DataEvent, Dyn, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
 use core.files.[FileWriter]
+use core.encoding.base64 as base64
 use core.math as math
 use __core_encoding_stream as stream
 
@@ -921,14 +922,8 @@ fn write_json(out: &[U8], value: Dyn, pretty: Bool, indent: Int) EncodingError! 
     if value == {
         .Null -> write_ascii(&out, "null")
         .Number(text) -> write_ascii(&out, text)
-        .Bytes(bytes) -> {
-            &out.push(U8{91})
-            loop index in 0..<bytes.len() {
-                if index > 0 -> &out.push(U8{44})
-                write_ascii(&out, "{bytes[index]}")
-            }
-            &out.push(U8{93})
-        }
+        // Bytes render as standard padded base64 text (encoding-decisions.md).
+        .Bytes(bytes) -> write_json_string(&out, base64.encode(bytes))
         .Bool(v) -> {
             if v -> write_ascii(&out, "true")
             else -> write_ascii(&out, "false")
