@@ -1,10 +1,9 @@
 use core.encoding.xml as xml
 fn xml_shape_reason(tree: Dyn) -> String {
-    if xml.canonical(tree, xml.XMLCanonical{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) == {
-        Ok(_) -> return "unexpected success"
-        Err(error) -> return error.reason
+    _ :: xml.canonical(tree, xml.XMLCanonical{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) ?? {
+        return err.reason
     }
-    return "unreachable"
+    return "unexpected success"
 }
 EXPECTED :: comptime { xml_shape_reason(Dyn.Float(1.5)) }
 

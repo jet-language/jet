@@ -50,7 +50,8 @@ fn run() (Closed | IOError | NetError | RangeError | TaskFailure)! {
     _sent :: net.udp_send_bytes_to(udp_client, "pong".bytes(), udp_addr) ?? panic("udp send")
     packet :: net.udp_receive(udp_server, 128) ?? panic("udp receive")
     print("udp:{net.udp_packet_bytes(packet)}:{net.udp_packet_original_len(packet)}:{net.udp_packet_truncated(packet)}")
-    path :: "{os.temp_dir()}/jet-socket-echo-{time.now()}.sock"
+    // A Unix socket path must fit `sun_path` (108 bytes), so keep the name short.
+    path :: "{os.temp_dir()}/jse-{os.pid()}.sock"
     unix_listener :: net.unix_listen(path) ?? panic("unix listen")
     { sender: unix_tx, receiver: unix_rx } :: channel<String>()
     unix_task :: task {

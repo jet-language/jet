@@ -1,4 +1,7 @@
-
+package {
+    name: "core_email_mailer_surface"
+    authority: { allow: [Env, Net] }
+}
 use core.email as email
 use core.crypto as crypto
 
@@ -11,7 +14,7 @@ fn run() {
         private_key: dkim_key,
         signed_headers: ["from", "subject", "mime-version", "content-type"],
     }
-    auth :: SMTPAuth{ .Password{ username: "mailer", password: password } }
+    auth :: SMTPAuth.Password{ username: "mailer", password: password }
     config :: email.SMTPConfig{
         host: "localhost",
         port: 465,
@@ -22,13 +25,13 @@ fn run() {
         limits: email.Limits.safe(),
         dkim: Val(dkim),
     }
-    mailer :: email.smtp(config) ?? panic("mailer config")
+    mailer := email.smtp(config) ?? panic("mailer config")
     env_mailer :: email.smtp_from_env() ?? panic("environment mailer config")
     sender :: email.address("sender@example.com") ?? panic("sender")
     recipient :: email.address("recipient@example.net") ?? panic("recipient")
     message :: email.message(sender, [recipient], [Address]{}, "subject", "body", HTML{""}, [Attachment]{}) ?? panic("message")
     if false {
-        report :: mailer.send(message) ?? panic("send")
+        report :: &mailer.send(^message) ?? panic("send")
         print(report.response_code)
     }
     print("mailer-ready")

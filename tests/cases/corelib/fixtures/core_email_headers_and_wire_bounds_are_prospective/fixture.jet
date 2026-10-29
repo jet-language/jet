@@ -33,11 +33,22 @@ fn test_headers_fit(wire: String, include_folded: Bool) {
         }
     }
 }
+// True when core.email refuses the message; the original matched `.Err(_)`.
+fn test_message_rejected(sender: email.Address, to: [email.Address], subject: String, body: String, attachments: [email.Attachment]) -> Bool {
+    _ :: email.message(sender, to, [email.Address]{}, subject, body, HTML{""}, attachments) ?? return true
+    false
+}
+// True when core.email refuses the attachment; the original matched `.Err(_)`.
+fn test_attachment_rejected(filename: String) -> Bool {
+    _ :: email.attachment(filename, "application/octet-stream", [U8]{}) ?? return true
+    false
+}
 
 #Test("core_email_headers_and_wire_bounds_are_prospective") {
     quoted :: email.address("\"Doe, \\\"Ada\\\"\" <ada@example.net>") ?? panic("quoted")
     _quoted_local :: email.address("\"a@b\"@example.net") ?? panic("quoted local rejected")
-    unicode_name :: test_repeat("界", 120) + " <mara@example.com>"
+    unicode_display :: test_repeat("界", 120)
+    unicode_name :: "{unicode_display} <mara@example.com>"
     from :: email.address(unicode_name) ?? panic("unicode from")
     message :: email.message(from, [quoted], [email.Address]{}, test_repeat("界", 120), "plain", HTML{""}, [email.Attachment]{}) ?? panic("message")
     wire :: test_wire(message)
@@ -51,27 +62,17 @@ fn test_headers_fit(wire: String, include_folded: Bool) {
     at_body_limit :: test_repeat("x", 1048576)
     _at_body_limit :: email.message(sender, [recipient], [email.Address]{}, "subject", at_body_limit, HTML{""}, [email.Attachment]{}) ?? panic("at body limit rejected")
     over_body_limit :: test_repeat("x", 1048577)
-    if email.message(sender, [recipient], [email.Address]{}, "subject", over_body_limit, HTML{""}, [email.Attachment]{}) == {
-        .Ok(_) -> panic("over body limit accepted")
-        .Err(_) -> { _ :: 0 }
-    }
+    assert(test_message_rejected(sender, [recipient], "subject", over_body_limit, [email.Attachment]{}), "over body limit accepted")
     max_subject :: test_repeat("s", 998 - "Subject: ".bytes().len() - 2)
     _max_subject :: email.message(sender, [recipient], [email.Address]{}, max_subject, "body", HTML{""}, [email.Attachment]{}) ?? panic("maximum physical subject rejected")
-    if email.message(sender, [recipient], [email.Address]{}, max_subject + "s", "body", HTML{""}, [email.Attachment]{}) == {
-        .Ok(_) -> panic("over physical subject accepted")
-        .Err(_) -> { _ :: 0 }
-    }
-    _filename900 :: email.attachment(test_repeat("a", 900) + ".txt", "application/octet-stream", [U8]{}) ?? panic("900-byte filename rejected")
-    if email.attachment(test_repeat("a", 960) + ".txt", "application/octet-stream", [U8]{}) == {
-        .Ok(_) -> panic("960-byte filename accepted")
-        .Err(_) -> { _ :: 0 }
-    }
+    assert(test_message_rejected(sender, [recipient], "{max_subject}s", "body", [email.Attachment]{}), "over physical subject accepted")
+    name900 :: test_repeat("a", 900)
+    _filename900 :: email.attachment("{name900}.txt", "application/octet-stream", [U8]{}) ?? panic("900-byte filename rejected")
+    name960 :: test_repeat("a", 960)
+    assert(test_attachment_rejected("{name960}.txt"), "960-byte filename accepted")
     tiny :: email.attachment("tiny.bin", "application/octet-stream", [U8]{0}) ?? panic("tiny")
     attachments := [email.Attachment]{}
     loop _i in 0..<65 -> &attachments.push(tiny)
     to :: email.address("to@example.com") ?? panic("to")
-    if email.message(sender, [to], [email.Address]{}, "subject", "body", HTML{""}, attachments) == {
-        .Ok(_) -> panic("MAX_ATTACHMENTS+1 accepted")
-        .Err(_) -> { _ :: 0 }
-    }
+    assert(test_message_rejected(sender, [to], "subject", "body", attachments), "MAX_ATTACHMENTS+1 accepted")
 }
