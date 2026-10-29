@@ -296,14 +296,18 @@ fn test_scope_quoted(builder: I64, text: I64) {
     test_text_drop(quoted)
 }
 
+// Rust Outcome.rs:2502-2524: a stop meets the expectation when its code and
+// raw message (never rendered text) match; a region that never stopped fails.
+fn test_scope_expectation_met(expected: I64, expected_message: I64, code: I64, message: I64) -> Bool {
+    if (code == I64{0}) -> return false
+    code_matches :: expected == I64{0} || jet_rt_string_eq(expected, code)
+    code_matches && (expected_message == I64{0} || jet_string_contains(message, expected_message))
+}
+
 // Rust Outcome.rs:2502-2524. Raw stop message substring, never rendered text.
 #Export(c) fn jet_rt_test_expect_fail_error(expected: I64, expected_message: I64, code: I64, message: I64) -> I64 {
+    if test_scope_expectation_met(expected, expected_message, code, message) -> return I64{0}
     stopped :: code != I64{0}
-    if stopped {
-        code_matches :: expected == I64{0} || jet_rt_string_eq(expected, code)
-        message_matches :: expected_message == I64{0} || jet_string_contains(message, expected_message)
-        if code_matches && message_matches -> return I64{0}
-    }
     result :: jet_rt_string_builder_new()
     test_scope_msg_expected(result)
     if (expected != I64{0}) {
@@ -347,7 +351,15 @@ fn test_scope_catch(output: I64, native: Bool) -> Bool {
     row :: data + index * I64{8}
     scope :: trap_word(row)
     code :: trap_word(row + I64{24})
-    error :: jet_rt_test_expect_fail_error(trap_word(row + I64{8}), trap_word(row + I64{16}), code, trap_word(row + I64{32}))
+    expected :: trap_word(row + I64{8})
+    expected_message :: trap_word(row + I64{16})
+    message :: trap_word(row + I64{32})
+    met :: test_scope_expectation_met(expected, expected_message, code, message)
+    // A mismatch replaces the original stop, not first-stop-wins rejection.
+    // Natively that stop is still pending here, and a pending stop cuts every
+    // text push short, so it is discarded before the replacement is built.
+    if (!met && native) -> scheduler_control_discard_stop(scheduler_control_current())
+    error :: if met -> I64{0} else -> jet_rt_test_expect_fail_error(expected, expected_message, code, message)
     trap_store(row + I64{24}, I64{0})
     at := index
     loop at < trap_word(frames) {
@@ -367,8 +379,6 @@ fn test_scope_catch(output: I64, native: Bool) -> Bool {
     if (error != I64{0}) {
         test_text_drop(code)
         trap_store(state + I64{80}, I64{1})
-        // A mismatch replaces the original stop, not first-stop-wins rejection.
-        if native -> scheduler_control_discard_stop(scheduler_control_current())
         test_scope_fail(error)
         return false
     }

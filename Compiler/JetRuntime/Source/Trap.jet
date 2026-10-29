@@ -562,20 +562,22 @@ fn trap_rich(file: I64, line: I64, function: I64, source: I64, column: I64, care
 
 fn trap_require_stop(kind: I64, descriptor: I64, message: I64, left: I64, right: I64, locals: I64) {
     comptime_serve_stop(I64{4}, kind, message, left, right)
-    if (jet_rt_stop_domain() == I64{2}) {
-        // Same raw task message as trap_rich; equality stops carry their text.
-        raw := message
-        if (kind == I64{1}) {
-            raw = jet_rt_string_builder_new()
-            trap_build_msg_expected(raw)
-            jet_rt_string_builder_push(raw, right)
-            trap_build_msg_got(raw)
-            jet_rt_string_builder_push(raw, left)
-        }
-        published :: rt_task_panic_publish(trap_word(raw), trap_word(raw + I64{8}), I64{0})
-        if (kind == I64{1}) -> jet_rt_string_drop(raw)
-        if published -> return
+    // Same raw task message as trap_rich; equality stops carry their text.
+    // Every domain offers it to rt_task_panic_publish, which records the raw
+    // stop on each open `.expect_fail` frame before it checks for a task: a
+    // root test body (domain 1) renders below, and its region's
+    // jet_rt_test_catch_for_scope must still see the stop (#6196).
+    raw := message
+    if (kind == I64{1}) {
+        raw = jet_rt_string_builder_new()
+        trap_build_msg_expected(raw)
+        jet_rt_string_builder_push(raw, right)
+        trap_build_msg_got(raw)
+        jet_rt_string_builder_push(raw, left)
     }
+    published :: rt_task_panic_publish(trap_word(raw), trap_word(raw + I64{8}), I64{0})
+    if (kind == I64{1}) -> jet_rt_string_drop(raw)
+    if published -> return
     trap_header(I64{0})
     if {
         (kind == I64{1}) -> {
