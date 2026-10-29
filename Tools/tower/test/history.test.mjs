@@ -90,6 +90,35 @@ test('ratified decision retires once its card is done and aged past the buffer',
   assert.ok(h.decisions.find(d => d.id === 'D-1'));
 });
 
+test('a done card stamped with a full ISO timestamp retires once aged past the buffer', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'owner' }, cfg));
+  // cards carry full timestamps in `updated`; day stamps must not be the only form that ages
+  st.mutate((s) => { s.cards[0].updated = `${OLD}T12:00:00.000Z`; });
+  st.mutate((s, cfg) => db.setDigestCursor(s));
+  assert.equal(st.load().cards.length, 0, 'done+aged card must retire');
+  assert.ok(st.loadHistory().cards.find(c => c.num === 1));
+});
+
+test('a cached archive never hides another writer or a failed write', () => {
+  const st = fresh();
+  const other = openStore(st.dataDir);
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  st.mutate((s, cfg) => db.addCard(s, { title: 'B' }, cfg)); // st now holds a cached archive
+  // another process archives #1
+  other.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'owner' }, cfg));
+  other.mutate((s) => { s.cards.find(c => c.num === 1).updated = `${OLD}T12:00:00.000Z`; });
+  other.mutate((s) => db.setDigestCursor(s));
+  const seen = st.mutate((s, cfg, history) => history.cards.map(c => c.num)).result;
+  assert.deepEqual(seen, [1], 'the first handle must see the archive the other wrote');
+  // a write that edits the archive and then fails must leave no trace
+  assert.throws(() => st.mutate((s, cfg, history) => { history.cards.length = 0; throw new Error('boom'); }), /boom/);
+  const after = st.mutate((s, cfg, history) => history.cards.map(c => c.num)).result;
+  assert.deepEqual(after, [1], 'a failed write must not leak into the next one');
+  assert.equal(st.loadHistory().cards.length, 1);
+});
+
 // ---- 3. card retires with its decisions + questions --------------------------
 
 test('card retires together with ALL its decisions and questions', () => {
@@ -199,13 +228,14 @@ test('a retired card is findable via loadHistory once gone from live cards', () 
 
 // ---- 6. events overflow -------------------------------------------------------
 
-test('events beyond the newest 500 archive to history.events', () => {
+test('events beyond the newest 500 archive to history.events in batches of 100', () => {
   const st = fresh();
-  for (let i = 0; i < 520; i++) st.mutate((s, cfg) => db.addCard(s, { title: 'c' + i }, cfg));
-  const s = st.load();
-  assert.equal(s.events.length, 500, 'live events cap at 500');
-  const h = st.loadHistory();
-  assert.equal(h.events.length, 20, 'the 20-event overflow archived, one per write past the cap');
+  for (let i = 0; i < 600; i++) st.mutate((s, cfg) => db.addCard(s, { title: 'c' + i }, cfg));
+  assert.equal(st.load().events.length, 600, 'up to 100 events past the cap stay live');
+  assert.equal(existsSync(historyFile(st.dataDir)), false, 'no archive write before the batch fills');
+  st.mutate((s, cfg) => db.addCard(s, { title: 'last' }, cfg));
+  assert.equal(st.load().events.length, 500, 'live events trim back to 500');
+  assert.equal(st.loadHistory().events.length, 101, 'the whole overflow archived in one write');
 });
 
 // ---- 7. real-board-copy migration test ----------------------------------------

@@ -119,9 +119,10 @@ export const configFile = (dir) => (dir ? join(dir, 'config.json') : null);
 export const historyFile = (dir) => (dir ? join(dir, 'history.json') : null);
 
 // JSON is a board-control-plane input, not an unbounded generic file read.
-// The real board is currently well below this limit; the bound leaves room for
-// growth while making a hostile live/history/backup file finite.
-export const MAX_JSON_BYTES = 64 * 1024 * 1024;
+// The archive (history.json) holds every retired card and passed 60 MB in
+// 2026-10; the bound leaves room for years of growth while keeping a hostile
+// live/history/backup file finite (and below V8's string limit).
+export const MAX_JSON_BYTES = 256 * 1024 * 1024;
 
 const FD_ROOT = process.platform === 'linux' ? '/proc/self/fd' : '/dev/fd';
 const DIRECTORY_FLAGS = constants.O_RDONLY | (constants.O_DIRECTORY || 0)
