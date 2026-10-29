@@ -405,3 +405,14 @@ fn ir_task_join(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, rece
     ir_lazy_consumed(&m, &b, handle)
     boxed
 }
+
+// `#Reactive { body }`: an effect over no tracked signal, so its body runs
+// once, now, as its closure: the box holds the captures the checker chose
+// (a copy of each root it reads), and retires after the run.
+fn ir_reactive_run(m: &IRModule, p: IRProgram, b: &IRBuilder, executable: BodyLambda, span: Span) Never! {
+    closure_ty :: ir_lambda_function_type(executable)
+    env :: ir_lambda(&m, p, &b, closure_ty, executable, span)
+    if ir_failed(b) || env < 0 -> return
+    _ :: ir_call_closure(&m, &b, env, [Int]{}, -1)
+    ir_release_closure(&m, &b, env)
+}

@@ -3065,6 +3065,14 @@ fn sema_expr_core_module_receiver_path(receiver: Expr) -> SemaExprCoreReceiverPa
 }
 
 fn sema_expr_try_core_module_method(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
+    before :: diagnostics.len()
+    unbuilt := SemaCoreUnbuiltCall?{None}
+    checked :: sema_expr_core_module_method_checked(receiver, method, method_span, type_args, args, expected, environment, program, &scopes, &state, &tail_store, &context, &unbuilt, &diagnostics)
+    if checked.handled -> sema_call_core_unbuilt_settle(unbuilt, before, &diagnostics)
+    checked
+}
+
+fn sema_expr_core_module_method_checked(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, unbuilt: &SemaCoreUnbuiltCall?, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
     path :: sema_expr_core_module_receiver_path(receiver) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     alias :: path.alias
     alias_span :: path.alias_span
@@ -3082,7 +3090,7 @@ fn sema_expr_try_core_module_method(receiver: Expr, method: String, method_span:
     mount := sema_call_try_ui_mount(module_name, method, alias, alias_span, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if mount.handled -> return SemaMethodSpecialCheck{handled: true, value: mount.value}
     sema_call_core_crypto_expert_gate(module_name, method, method_span, context, &diagnostics)
-    sema_call_core_unbuilt_gate(module_name, method, method_span, environment, &diagnostics)
+    sema_call_core_unbuilt_note(module_name, method, method_span, environment, &unbuilt)
     if !nested && sema_call_core_variadic_print(environment, program, scopes, alias, method, args.len(), alias_span, &context) {
         printed := sema_call_check_ambient_print(Call{name: "{alias}.{method}", name_span: method_span, type_args: type_args, args: args}, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: printed.value}
