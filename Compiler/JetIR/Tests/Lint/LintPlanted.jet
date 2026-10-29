@@ -272,12 +272,10 @@ fn lp_lint(rule: String) -> [IRLintFinding] {
 }
 
 // The Core rows whose arity disagrees with their runtime route (IR Lint
-// rule core.arity). core.data.loader.authority is a Core source function
-// (Core/Data/Loader.jet `authority<T>(loader)`); its registry row names
-// jet_data_loader_authority, the two-Text runtime route of another
-// operation. The list is exact, so a new row or a fixed one fails here
-// until it is updated.
-LP_CORE_ARITY :: comptime { [String]{"core.data.loader.authority"} }
+// rule core.arity). None does: a Core source function such as
+// core.data.loader.authority is a source-owned row with no route. The list
+// is exact, so a new row fails here until it is listed.
+LP_CORE_ARITY :: comptime { [String]{} }
 
 // The registry rows that differ from LP_CORE_ARITY, each printed.
 fn lp_core_failures(core: [IRLintFinding]) -> Int {
