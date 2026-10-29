@@ -149,16 +149,29 @@ fn ip_is_ipv4(addr: IPAddr) -> Bool Never! {
     #Unsafe("read the native IP address discriminant") { return core.net.__ip_is_v4(addr) }
 }
 
+// The first of `socket_addrs(host, port)`.
 fn socket_addr(host: String, port: Int) -[Net, Time.Wait]> SocketAddr NetError! {
-    if !valid_host_text(host) -> return Err(net_err("socket_addr", host, "socket host is empty or contains invalid bytes"))
-    if !valid_port(port) -> return Err(net_err("socket_addr", host, "port must be in 0..=65535"))
+    addresses :: resolve_socket_addrs("socket_addr", host, port) ?? return Err(err)
+    Ok(addresses[0])
+}
+
+// Every address `host:port` names, in the platform resolver's order and
+// unfiltered; a numeric host is its one address without a lookup. An empty
+// answer is an error, so the list is never empty.
+fn socket_addrs(host: String, port: Int) -[Net, Time.Wait]> [SocketAddr] NetError! {
+    resolve_socket_addrs("socket_addrs", host, port)
+}
+
+fn resolve_socket_addrs(operation: String, host: String, port: Int) -[Net, Time.Wait]> [SocketAddr] NetError! {
+    if !valid_host_text(host) -> return Err(net_err(operation, host, "socket host is empty or contains invalid bytes"))
+    if !valid_port(port) -> return Err(net_err(operation, host, "port must be in 0..=65535"))
     host_text := host
     if contains_byte(host, 58) && !starts_with(host, "[") -> host_text = "[{host}]"
     text :: "{host_text}:{port}"
-    if socket_addr_parse(text) == .Ok(address) -> return Ok(address)
+    if socket_addr_parse(text) == .Ok(address) -> return Ok([SocketAddr]{address})
     port16 :: U16{port}
     if core.net.__resolve_ordered(host_text, port16) == {
-        .Ok(addresses) -> resolve_first(text, addresses)
+        .Ok(addresses) -> resolve_all(text, addresses)
         .Err(error) -> Err(resolve_error(text, error))
     }
 }
@@ -730,14 +743,14 @@ fn net_err(op: String, addr: String, message: String) -> NetError Never! {
     })
 }
 
-fn resolve_first(text: String, addresses: [SocketAddr]) -> SocketAddr NetError! {
-    if addresses.len() > 0 -> return Ok(addresses[0])
+fn resolve_all(text: String, addresses: [SocketAddr]) -> [SocketAddr] NetError! {
+    if addresses.len() > 0 -> return Ok(addresses)
     Err(resolve_error(text, __ResolveError{kind: 0, has_os_code: false, os_code: 0, message: "no address"}))
 }
 
 // Raw platform resolver errors carry no address or operation policy.
 // Keep these kinds aligned with jet_net_io_error; the platform preserves
-// every answer's order and Core alone selects the first socket address.
+// every answer's order and Core keeps it.
 fn resolve_error(text: String, error: __ResolveError) -> NetError Never! {
     detail :: NetErrorDetail{
         operation: "resolve socket address",
@@ -901,13 +914,15 @@ fn slice_bytes(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     }
 }
 
-#Test("ordered resolver chooses the first answer and rejects empty success") {
+#Test("ordered resolver keeps every answer in order and rejects empty success") {
     expected_address :: Val("example.test:443")
     first :: socket_addr_parse("[::1]:443") ?? panic("first answer")
     second :: socket_addr_parse("127.0.0.1:443") ?? panic("second answer")
-    chosen :: resolve_first("example.test:443", [SocketAddr]{first, second}) ?? panic("ordered answers")
-    assert(socket_to_string(chosen) == "[::1]:443")
-    if resolve_first("example.test:443", [SocketAddr]{}) == {
+    chosen :: resolve_all("example.test:443", [SocketAddr]{first, second}) ?? panic("ordered answers")
+    assert(chosen.len() == 2)
+    assert(socket_to_string(chosen[0]) == "[::1]:443")
+    assert(socket_to_string(chosen[1]) == "127.0.0.1:443")
+    if resolve_all("example.test:443", [SocketAddr]{}) == {
         .Err(.Other(detail)) -> {
             assert(detail.operation == "resolve socket address")
             assert(detail.address == expected_address)

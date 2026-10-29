@@ -4010,20 +4010,22 @@ UTF-8 decoding. Compiler-private, audited leaves transfer only native address
 representation; they do not choose validation, defaults, or error policy.
 `SRVRecord` is explicitly assembled from resolver fields.
 
-`socket_addr` checks the port range `0..=65535` and parses numeric IPv4/IPv6
-addresses in Jet. Ordinary host names use the platform resolver, including its
-configured name-service sources; answers retain platform order and the first
-answer is selected without sorting or deduplication. An empty successful
-answer reports the existing “no address” network error, rather than a fabricated
-address. Explicit `DnsResolver.at` lookups remain separate from ordinary
-platform resolution.
+`socket_addrs` checks the port range `0..=65535` and parses numeric IPv4/IPv6
+addresses in Jet; a numeric host is its one address, without a lookup. Ordinary
+host names use the platform resolver, including its configured name-service
+sources; every answer is returned in platform order, without sorting,
+deduplication or filtering. An empty successful answer reports the existing
+“no address” network error rather than an empty list, so the list is never
+empty. `socket_addr` is the first element of `socket_addrs`. Explicit
+`DnsResolver.at` lookups remain separate from ordinary platform resolution.
 
 | Signature | Result | Description |
 |---|---|---|
 | `gethostname() -[Env]> String` | text | Read the local host name. |
 | `ip_addr(text: String) -> IPAddr !NetError` | address | Parse an IP address. |
 | `ip_to_string(addr: IPAddr) -> String` / `ip_is_ipv4(addr: IPAddr) -> Bool` | text/Boolean | Render an address or test its family. |
-| `socket_addr(host: String, port: Int) -[Net]> SocketAddr !NetError` | address | Build an address after checking the port. |
+| `socket_addrs(host: String, port: Int) -[Net, Time.Wait]> [SocketAddr] !NetError` | addresses | Every address the host names, in resolver order. |
+| `socket_addr(host: String, port: Int) -[Net, Time.Wait]> SocketAddr !NetError` | address | The first of `socket_addrs`. |
 | `socket_addr_parse(text: String) -> SocketAddr !NetError` | address | Parse a rendered socket address. |
 | `socket_host(addr: SocketAddr) -> String` / `socket_port(addr) -> Int` | scalar | Read address components. |
 | `socket_to_string(addr: SocketAddr) -> String` / `socket_type(stream: TCPStream) -> String` | text | Render an address or identify a stream. |
@@ -4123,6 +4125,34 @@ requirements as their public operations.
 not narrowed to a path-only source wrapper. Unix and TLS byte/text wrappers use
 the native access contract: reads and writes borrow the named stream with `&`,
 not a copied local handle.
+
+### `core.net.ip` — IPv4/IPv6 values and address classes
+
+`core.net.ip` parses, renders and classifies `IPv4` and `IPv6` values and IPv4
+networks. The implementation is [`Core/Net/Ip.jet`](../../../Core/Net/Ip.jet).
+Two address classes are distinct:
+
+- **Reachable** (`is_global`, `ipv6_is_global`) follows the IANA IPv4 and IPv6
+  Special-Purpose Address Registries (IPv6 registry updated 2025-10-09): an
+  address is global unless a registry row marks it not globally reachable,
+  with the more-specific reachable rows (for example `2001:3::/32` and
+  `2001:20::/28`) as exceptions. 6to4 `2002::/16` and NAT64 `64:ff9b::/96`
+  are reachable; IPv4-mapped `::ffff:0:0/96`, `64:ff9b:1::/48`, Teredo inside
+  `2001::/23`, documentation `2001:db8::/32` and `3fff::/20`, and `5f00::/16`
+  are not.
+- **Safe to fetch** (`is_public_destination`, `ipv6_is_public_destination`)
+  is stricter and requires the reachable class as well. IPv4 also refuses
+  `0/8`, `10/8`, carrier-grade NAT `100.64/10`, `127/8`, `169.254/16`,
+  `172.16/12`, all of `192.0.0/24`, `192.0.2/24`, `192.168/16`,
+  benchmarking `198.18/15`, `198.51.100/24`, `203.0.113/24` and everything
+  from `224/4` up. An IPv4-mapped IPv6 address takes the IPv4 rule; any other
+  IPv6 address must be in `2000::/3` (refusing every NAT64 prefix) and must
+  not be 6to4 or Teredo.
+
+| Signature | Result | Description |
+|---|---|---|
+| `is_global(addr: IPv4) -> Bool` / `ipv6_is_global(addr: IPv6) -> Bool` | Boolean | Reachable per the IANA registries. |
+| `is_public_destination(addr: IPv4) -> Bool` / `ipv6_is_public_destination(addr: IPv6) -> Bool` | Boolean | Safe to fetch: the strict outbound class. |
 
 ### `core.net.tls` — TLS stream wrapper
 
