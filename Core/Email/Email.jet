@@ -1,5 +1,5 @@
-// SMTP defaults and environment configuration are Core policy, not host policy.
-// Transport and private message carriers retain the registered provider boundary.
+// SMTP defaults, environment configuration and the message carriers are Core
+// policy and Core records; only the SMTP transport crosses into the runtime.
 use core as core
 use core.sys as sys
 use core.crypto.[Secret]
@@ -160,8 +160,7 @@ fn smtp_from_env() -[Env, Net]> Mailer EmailError! {
         else -> {}
     }
     config :: SMTPConfig{host: host, port: port, security: security, auth: auth, recipient_policy: recipient_policy, trust: trust, limits: limits_safe(), dkim: dkim}
-    validate_smtp_config(config) ? unit -> unit ! error -> return Err(error)
-    core.email.smtp(config)
+    smtp(config)
 }
 
 // Seed oracle: Prelude/CoreLib/Email.rs:168-184. First invalid field wins.
@@ -216,6 +215,73 @@ fn validate_smtp_config(config: SMTPConfig) EmailError! {
         validate_dkim_config(dkim) ? unit -> unit ! error -> return Err(error)
     }
     Ok()
+}
+
+// Seed oracle: Prelude/CoreLib/Email.rs:285-301 (smtp_bytes). Config
+// validation wins, then the DKIM key length, then the password encoding.
+fn smtp(config: SMTPConfig) -> Mailer EmailError! {
+    validate_smtp_config(config) ? unit -> unit ! error -> return Err(error)
+    if config.dkim == .Val(dkim) {
+        if secret_length(dkim.private_key) != 32 ->
+            return Err(construction_error("dkim", "private_key must contain exactly 32 bytes"))
+    }
+    if config.auth == .Password(_, password) {
+        if !secret_utf8(password) -> return Err(construction_error("auth", "SMTP password must be UTF-8"))
+    }
+    // copy: the Mailer owns its configuration; the caller keeps the borrowed one.
+    owned :: config.copy()
+    Ok(Mailer{config: ^owned})
+}
+
+fn secret_length(secret: Secret) -> Int Never! {
+    length := 0
+    #Unsafe("SMTP construction: read only the DKIM key length, never its bytes") {
+        length = secret.bytes.len()
+    }
+    length
+}
+
+fn secret_utf8(secret: Secret) -> Bool Never! {
+    valid := false
+    #Unsafe("SMTP construction: validate the password encoding in place, without copying it") {
+        valid = strict_utf8(secret.bytes)
+    }
+    valid
+}
+
+// Rust std::str::from_utf8 law: no overlong forms, surrogates or scalars above
+// U+10FFFF. Reads the borrowed bytes in place, so secret material is not copied.
+fn strict_utf8(bytes: [U8]) -> Bool Never! {
+    at := 0
+    loop at < bytes.len() {
+        lead :: Int.from_u8(bytes[at])
+        if lead < 128 {
+            at += 1
+            next
+        }
+        width :: if lead >= 194 && lead <= 223 -> 2 else if lead >= 224 && lead <= 239 -> 3 else if lead >= 240 && lead <= 244 -> 4 else -> 0
+        if width == 0 || at + width > bytes.len() -> return false
+        second :: Int.from_u8(bytes[at + 1])
+        low :: if lead == 224 -> 160 else if lead == 240 -> 144 else -> 128
+        high :: if lead == 237 -> 159 else if lead == 244 -> 143 else -> 191
+        if second < low || second > high -> return false
+        loop offset in 2..<width {
+            continuation :: Int.from_u8(bytes[at + offset])
+            if continuation < 128 || continuation > 191 -> return false
+        }
+        at += width
+    }
+    true
+}
+
+#Test("SMTP password encoding follows strict UTF-8") {
+    assert(strict_utf8("pässwörd ☕ 𝄞".bytes()))
+    assert(!strict_utf8([U8]{U8{192}, U8{128}}))
+    assert(!strict_utf8([U8]{U8{224}, U8{128}, U8{128}}))
+    assert(!strict_utf8([U8]{U8{237}, U8{160}, U8{128}}))
+    assert(!strict_utf8([U8]{U8{244}, U8{144}, U8{128}, U8{128}}))
+    assert(!strict_utf8([U8]{U8{226}, U8{130}}))
+    assert(!strict_utf8([U8]{U8{97}, U8{255}}))
 }
 
 // Seed oracle: Prelude/CoreLib/Email.rs:341-346.
@@ -615,7 +681,7 @@ fn address(input: String) -> Address EmailError! {
         return Err(construction_error("InvalidAddress", "display address must have one final `<mailbox>`"))
     }
     validate_mailbox(mailbox) ? unit -> unit ! error -> return Err(error)
-    Ok(core.email.__address_parts(^display, ^mailbox))
+    Ok(Address{display: ^display, mailbox: ^mailbox})
 }
 
 fn physical_header_len(name: String, value_len: Int) EmailError! {
@@ -660,11 +726,11 @@ fn attachment(filename: String, mime: String, bytes: [U8]) -> Attachment EmailEr
     physical_header_len("Content-Disposition", "attachment; filename*=UTF-8''".bytes().len() + percent_encoded_len(filename)) ? unit -> unit ! error -> return Err(error)
     if bytes.len() > 26214400 ->
         return Err(construction_error("LimitExceeded", "attachment exceeds 26214400 bytes"))
-    // Public builders borrow; transfer explicit owned copies to the carrier.
+    // Public builders borrow; the record owns explicit copies.
     owned_filename :: filename.copy()
     owned_mime :: ascii_lower(mime)
     owned_bytes :: bytes.copy()
-    Ok(core.email.__attachment_parts(^owned_filename, ^owned_mime, ^owned_bytes))
+    Ok(Attachment{filename: ^owned_filename, mime: ^owned_mime, bytes: ^owned_bytes})
 }
 
 fn envelope(from: Address, recipients: [Address]) -> Envelope EmailError! {
@@ -674,7 +740,7 @@ fn envelope(from: Address, recipients: [Address]) -> Envelope EmailError! {
         return Err(construction_error("envelope", "email envelope exceeds 100 recipients"))
     owned_from :: from.copy()
     owned_recipients :: recipients.copy()
-    Ok(core.email.__envelope_parts(^owned_from, ^owned_recipients))
+    Ok(Envelope{from: ^owned_from, recipients: ^owned_recipients})
 }
 
 #Test("email address grammar preserves quoted local and display rules") {
@@ -698,8 +764,7 @@ fn envelope(from: Address, recipients: [Address]) -> Envelope EmailError! {
 
 fn crlf() -> String Never! { byte_text([U8]{U8{13}, U8{10}}) }
 
-// The private views borrow the native carriers as one record, never as a
-// collection of per-field host calls. All MIME policy below is source-owned.
+// Every MIME policy below reads the Core records directly.
 fn ascii_text(value: String) -> Bool Never! {
     loop byte in value.bytes() { if Int.from_u8(byte) > 127 -> return false }
     true
@@ -755,13 +820,12 @@ fn safe_phrase(display: String) -> Bool Never! {
 }
 
 fn rendered_address(address: Address) -> String Never! {
-    parts :: core.email.__address_view(address)
-    if parts.display == .Val(display) {
+    if address.display == .Val(display) {
         shown :: if !ascii_text(display) -> encoded_header(display) else if safe_phrase(display) -> display else ->
             "\"{display.replace("\\", "\\\\").replace("\"", "\\\"")}\""
-        return "{shown} <{parts.mailbox}>"
+        return "{shown} <{address.mailbox}>"
     }
-    parts.mailbox
+    address.mailbox
 }
 
 fn rendered_addresses(addresses: [Address], name: String) -> String Never! {
@@ -846,17 +910,16 @@ fn encoded_header_size(value: String) -> Int Never! {
 }
 
 fn rendered_address_size(address: Address) -> Int Never! {
-    parts :: core.email.__address_view(address)
-    if parts.display == .Val(display) {
-        if !ascii_text(display) -> return encoded_header_size(display) + parts.mailbox.bytes().len() + 3
+    if address.display == .Val(display) {
+        if !ascii_text(display) -> return encoded_header_size(display) + address.mailbox.bytes().len() + 3
         length := display.bytes().len()
         if !safe_phrase(display) {
             length += 2
             loop byte in display.bytes() { if byte == (U8{92}) || byte == (U8{34}) -> length += 1 }
         }
-        return length + parts.mailbox.bytes().len() + 3
+        return length + address.mailbox.bytes().len() + 3
     }
-    parts.mailbox.bytes().len()
+    address.mailbox.bytes().len()
 }
 
 fn message(from: Address, to: [Address], bcc: [Address], subject: String, text: String, html: HTML, attachments: [Attachment]) -> Message EmailError! {
@@ -874,8 +937,7 @@ fn message(from: Address, to: [Address], bcc: [Address], subject: String, text: 
     upper += base64_lines_size(text.bytes().len()) + 256
     upper += base64_lines_size(html_text.bytes().len()) + 256
     loop attachment in attachments {
-        parts :: core.email.__attachment_view(attachment)
-        upper += base64_lines_size(parts.bytes.len()) + parts.mime.bytes().len() + percent_encoded_len(parts.filename) + 512
+        upper += base64_lines_size(attachment.bytes.len()) + attachment.mime.bytes().len() + percent_encoded_len(attachment.filename) + 512
     }
     upper += attachments.len() * 256
     if upper > 33554432 -> return Err(construction_error("LimitExceeded", "serialized message exceeds 33554432 bytes"))
@@ -887,7 +949,7 @@ fn message(from: Address, to: [Address], bcc: [Address], subject: String, text: 
     loop address in bcc -> &recipients.push(address)
     // Recipient bounds are checked above; transfer this fresh list directly.
     owned_from :: from.copy()
-    checked_envelope :: core.email.__envelope_parts(^owned_from, ^recipients)
+    checked_envelope :: Envelope{from: ^owned_from, recipients: ^recipients}
     message_from :: from.copy()
     message_to :: to.copy()
     message_bcc :: bcc.copy()
@@ -895,7 +957,21 @@ fn message(from: Address, to: [Address], bcc: [Address], subject: String, text: 
     message_text :: text.copy()
     message_html :: html_text.copy()
     message_attachments :: attachments.copy()
-    Ok(core.email.__message_parts(^message_from, ^message_to, ^message_bcc, ^message_subject, ^message_text, ^message_html, ^message_attachments, ^checked_envelope, ^upper))
+    Ok(Message{from: ^message_from, to: ^message_to, bcc: ^message_bcc, subject: ^message_subject, text: ^message_text, html: ^message_html, attachments: ^message_attachments, envelope: ^checked_envelope, wire_upper: upper})
+}
+
+// Seed oracle: Email.rs:1665-1676 (impl Message). A replacement envelope
+// changes only SMTP routing; every MIME header and body stays as checked.
+impl Message {
+    fn envelope(self) -> Envelope Never! { self.envelope.copy() }
+
+    fn with_envelope(self, envelope: Envelope) -> Message EmailError! {
+        if envelope.recipients.len() == 0 || envelope.recipients.len() > 100 ->
+            return Err(construction_error("with_envelope", "email envelope recipient count is outside the supported range"))
+        replaced := self.copy()
+        replaced.envelope = envelope.copy()
+        Ok(replaced)
+    }
 }
 
 fn mime_lines(bytes: [U8]) -> String Never! {
@@ -927,13 +1003,13 @@ fn percent_encode(value: String) -> String Never! {
     byte_text(out)
 }
 
-fn mime_boundary(message: __EmailMessageView, label: String) -> String Never! {
+fn mime_boundary(message: Message, label: String) -> String Never! {
     state := core.crypto.sha256(label.bytes()).bytes
     index := 1
     // Absorb in the native order without introducing a host-side hash policy.
-    inputs := [String]{message.subject, message.text, message.html, core.email.__address_view(message.from).mailbox}
-    loop address in message.to -> &inputs.push(core.email.__address_view(address).mailbox)
-    loop address in message.bcc -> &inputs.push(core.email.__address_view(address).mailbox)
+    inputs := [String]{message.subject, message.text, message.html, message.from.mailbox}
+    loop address in message.to -> &inputs.push(address.mailbox)
+    loop address in message.bcc -> &inputs.push(address.mailbox)
     loop input in inputs {
         digest :: core.crypto.sha256(input.bytes()).bytes
         loop slot in 0..<32 {
@@ -945,7 +1021,7 @@ fn mime_boundary(message: __EmailMessageView, label: String) -> String Never! {
         index = (index + 1).bit_and(255)
     }
     loop attachment in message.attachments {
-        digest :: core.crypto.sha256(core.email.__attachment_view(attachment).bytes).bytes
+        digest :: core.crypto.sha256(attachment.bytes).bytes
         loop slot in 0..<32 {
             sum :: (Int.from_u8(state[slot]) + Int.from_u8(digest[(slot + index) %% 32])).bit_and(255)
             shift :: index %% 7
@@ -970,7 +1046,7 @@ fn mime_text(mime: String, body: String) -> String EmailError! {
     Ok("{first}{second}{crlf()}{mime_lines(body.bytes())}")
 }
 
-fn mime_body(message: __EmailMessageView, alternative: String) -> String EmailError! {
+fn mime_body(message: Message, alternative: String) -> String EmailError! {
     if message.html.bytes().len() == 0 -> return mime_text("text/plain", message.text)
     if message.text.bytes().len() == 0 -> return mime_text("text/html", message.html)
     first :: header("Content-Type", "multipart/alternative; boundary=\"{alternative}\"") ? value -> value ! error -> return Err(error)
@@ -980,23 +1056,21 @@ fn mime_body(message: __EmailMessageView, alternative: String) -> String EmailEr
 }
 
 fn serialize(message: Message) -> [U8] EmailError! {
-    parts :: core.email.__message_view(message)
-    mixed :: mime_boundary(parts, "mixed")
-    alternative :: mime_boundary(parts, "alternative")
-    from :: header("From", rendered_address(parts.from)) ? value -> value ! error -> return Err(error)
-    to :: header("To", rendered_addresses(parts.to, "To")) ? value -> value ! error -> return Err(error)
-    subject :: header("Subject", encoded_header(parts.subject)) ? value -> value ! error -> return Err(error)
+    mixed :: mime_boundary(message, "mixed")
+    alternative :: mime_boundary(message, "alternative")
+    from :: header("From", rendered_address(message.from)) ? value -> value ! error -> return Err(error)
+    to :: header("To", rendered_addresses(message.to, "To")) ? value -> value ! error -> return Err(error)
+    subject :: header("Subject", encoded_header(message.subject)) ? value -> value ! error -> return Err(error)
     version :: header("MIME-Version", "1.0") ? value -> value ! error -> return Err(error)
     out := "{from}{to}{subject}{version}"
-    if parts.attachments.len() == 0 {
-        body :: mime_body(parts, alternative) ? value -> value ! error -> return Err(error)
+    if message.attachments.len() == 0 {
+        body :: mime_body(message, alternative) ? value -> value ! error -> return Err(error)
         out += body
     } else {
         content :: header("Content-Type", "multipart/mixed; boundary=\"{mixed}\"") ? value -> value ! error -> return Err(error)
-        body :: mime_body(parts, alternative) ? value -> value ! error -> return Err(error)
+        body :: mime_body(message, alternative) ? value -> value ! error -> return Err(error)
         out += "{content}{crlf()}--{mixed}{crlf()}{body}"
-        loop attachment in parts.attachments {
-            item :: core.email.__attachment_view(attachment)
+        loop item in message.attachments {
             content_type :: header("Content-Type", item.mime) ? value -> value ! error -> return Err(error)
             transfer :: header("Content-Transfer-Encoding", "base64") ? value -> value ! error -> return Err(error)
             disposition :: header("Content-Disposition", "attachment; filename*=UTF-8''{percent_encode(item.filename)}") ? value -> value ! error -> return Err(error)
@@ -1004,7 +1078,7 @@ fn serialize(message: Message) -> [U8] EmailError! {
         }
         out += "{crlf()}--{mixed}--{crlf()}"
     }
-    if out.bytes().len() > parts.wire_upper || out.bytes().len() > 33554432 ->
+    if out.bytes().len() > message.wire_upper || out.bytes().len() > 33554432 ->
         return Err(construction_error("LimitExceeded", "serialized message exceeded its checked wire bound"))
     Ok(out.bytes())
 }
@@ -1022,10 +1096,9 @@ fn serialize(message: Message) -> [U8] EmailError! {
     wire :: serialize(checked) ?? panic("serialize")
     assert_eq(wire.len(), 2608)
     assert_eq(core.crypto.sha256(wire).hex(), "84e5a41ec770d155e40626b8b7f76693c77d21a2d0391dcc1f9cc1848859cdc3")
-    parts :: core.email.__message_view(checked)
-    assert_eq(parts.wire_upper, 7096)
-    assert_eq(mime_boundary(parts, "mixed"), "jet-mixed-8b6aec880cb8ae134157bef1c0404a99cfc0158252d2577c")
-    assert_eq(mime_boundary(parts, "alternative"), "jet-alternative-e1468ba8f335b57a8c1313344654588b4006c6157ce7c68d")
+    assert_eq(checked.wire_upper, 7096)
+    assert_eq(mime_boundary(checked, "mixed"), "jet-mixed-8b6aec880cb8ae134157bef1c0404a99cfc0158252d2577c")
+    assert_eq(mime_boundary(checked, "alternative"), "jet-alternative-e1468ba8f335b57a8c1313344654588b4006c6157ce7c68d")
     assert_eq(encoded_header_size("é".repeat(30)), 111)
 }
 

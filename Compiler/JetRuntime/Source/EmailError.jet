@@ -57,3 +57,61 @@ fn email_error_code_eq(left: I64, right: I64) -> Bool {
     if !email_error_code_eq(encoding_word(left + EMAIL_ERROR_CODE), encoding_word(right + EMAIL_ERROR_CODE)) -> return false
     jet_rt_string_eq(encoding_word(left + EMAIL_ERROR_REASON), encoding_word(right + EMAIL_ERROR_REASON))
 }
+// Email.rs:88-107 (JetShow, JetDisplay): "email {operation} failed ({kind}):
+// {reason}", then " — server {server}" and " — code {code}" when present.
+fn email_error_kind(target: I64, ordinal: I64) {
+    if {
+        (ordinal == I64{0}) -> {
+            rt_text_push_word(target, I64{8247611994986671939}, I64{8})
+            rt_text_push_word(target, I64{474315584609}, I64{5}) // Configuration
+        }
+        (ordinal == I64{1}) -> rt_text_push_word(target, I64{5459524}, I64{3}) // DNS
+        (ordinal == I64{2}) -> rt_text_push_word(target, I64{32760384594014019}, I64{7}) // Connect
+        (ordinal == I64{3}) -> rt_text_push_word(target, I64{5459028}, I64{3}) // TLS
+        (ordinal == I64{4}) -> rt_text_push_word(target, I64{1752462657}, I64{4}) // Auth
+        (ordinal == I64{5}) -> rt_text_push_word(target, I64{7813573208857080400}, I64{8}) // Protocol
+        (ordinal == I64{6}) -> rt_text_push_word(target, I64{7234316346692625746}, I64{8}) // Rejected
+        (ordinal == I64{7}) -> {
+            rt_text_push_word(target, I64{7954880261313884756}, I64{8})
+            rt_text_push_word(target, I64{116}, I64{1}) // Transient
+        }
+        (ordinal == I64{8}) -> rt_text_push_word(target, I64{8391700773291780436}, I64{8}) // TimedOut
+        (ordinal == I64{9}) -> {
+            rt_text_push_word(target, I64{7308335478031147331}, I64{8})
+            rt_text_push_word(target, I64{100}, I64{1}) // Cancelled
+        }
+        else -> {
+            rt_text_push_word(target, I64{8751168585183552836}, I64{8})
+            rt_text_push_word(target, I64{31093567915781717}, I64{7}) // DeliveryUnknown
+        }
+    }
+}
+#Export(c) fn jet_rt_handle_show_error(value: I64) -> I64 {
+    ordinal :: email_error_tag(value)
+    target :: jet_rt_string_builder_new()
+    rt_text_push_word(target, I64{35649996549477}, I64{6}) // email
+    jet_rt_string_builder_push(target, encoding_word(value + EMAIL_ERROR_OPERATION))
+    rt_text_push_word(target, I64{2334102023183623712}, I64{8})
+    rt_text_push_word(target, I64{40}, I64{1}) //  failed (
+    email_error_kind(target, ordinal)
+    rt_text_push_word(target, I64{2112041}, I64{3}) // ):
+    jet_rt_string_builder_push(target, encoding_word(value + EMAIL_ERROR_REASON))
+    server :: encoding_word(value + EMAIL_ERROR_SERVER)
+    if (server != I64{0}) {
+        rt_text_push_scalar(target, I64{32})
+        rt_text_push_scalar(target, I64{8212}) // U+2014
+        rt_text_push_word(target, I64{2338042715958506272}, I64{8}) //  server
+        jet_rt_string_builder_push(target, encoding_word(server))
+    }
+    code :: encoding_word(value + EMAIL_ERROR_CODE)
+    if (code != INT_OPTION_NONE) {
+        rt_text_push_scalar(target, I64{32})
+        rt_text_push_scalar(target, I64{8212}) // U+2014
+        rt_text_push_word(target, I64{35619848807200}, I64{6}) //  code
+        text :: jet_rt_int_to_string(code)
+        jet_rt_string_builder_push(target, text)
+        jet_rt_string_drop(text)
+    }
+    jet_rt_string_builder_finish(target)
+}
+#Export(c) fn jet_rt_handle_display_error(value: I64) -> I64 { jet_rt_handle_show_error(value) }

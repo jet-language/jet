@@ -1,32 +1,7 @@
-// core.email carrier marshaling after Core source validated construction:
-// CoreLib/Email.rs:1615-1621 attachment_parts/envelope_parts, plus the
-// Address and Envelope record glue their routes cross with. Native layouts
-// are MailAddress.jet's Address16, MailAttachment.jet's Attachment40 and
-// MailEnvelope.jet's Envelope40 (inline Address16, inline Address List24).
-
-// Email.rs:1615: Attachment { filename, mime, bytes } from borrowed inputs.
-#Export(c) fn attachment_parts(filename: I64, mime: I64, data: I64, length: I64) -> I64 {
-    result :: jet_rt_alloc(MAIL_ATTACHMENT_BYTES, I64{8})
-    rt_text_store(result, jet_rt_string_clone(filename))
-    rt_text_store(result + I64{8}, jet_rt_string_clone(mime))
-    count :: if (length <= I64{0} || data == I64{0}) -> I64{0} else -> length
-    bytes :: mail_list_init(count, RT_HOST_U8_STRIDE, result + I64{16})
-    at := I64{0}
-    loop at < count {
-        host_u8_put(bytes, at, host_u8_get(data, at))
-        at += I64{1}
-    }
-    result
-}
-
-// Email.rs:1619: Envelope { from, recipients } from a borrowed Address and a
-// borrowed buffer of Address handles.
-#Export(c) fn envelope_parts(from: I64, recipients: I64, count: I64) -> I64 {
-    result :: jet_rt_alloc(MAIL_ENVELOPE_BYTES, I64{8})
-    mail_address_copy_into(from, result)
-    mail_address_list_from_slots_into(recipients, count, result + MAIL_ADDRESS_BYTES)
-    result
-}
+// core.email record glue: the Address and Envelope records a route crosses
+// with. Core/Email/Email.jet builds and reads the carriers itself. Native
+// layouts are MailAddress.jet's Address16, MailAttachment.jet's Attachment40
+// and MailEnvelope.jet's Envelope40 (inline Address16, inline Address List24).
 
 // Address record (display=OptText, mailbox=Text): the constructor borrows the
 // optional display box and the mailbox; getters return owned clones.

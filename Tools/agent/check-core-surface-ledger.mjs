@@ -1194,7 +1194,7 @@ const CORE_CALL_COVERAGE = {
 function corePureRouteValue(expression, context) {
   const match = expression.trim().match(/^CoreCallPureRoute::([A-Za-z][A-Za-z0-9_]*)$/);
   const variants = new Set([
-    "None", "Mime", "Email", "EncodingXml", "Time", "Math", "Date",
+    "None", "Mime", "EncodingXml", "Time", "Math", "Date",
     "DateTime", "SketchHll", "SketchTDigest", "SketchCms", "SketchReservoir", "Ui",
     "Raylib", "Io", "Net", "Crypto",
   ]);

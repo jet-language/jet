@@ -113,11 +113,11 @@ assert.throws(() => parseRuntimeExports("// runtime-init: 65536\n#Export(c) fn j
     for (const [, name] of carriers.matchAll(/List\{elem: IRRouteCarrier\.Handle\{name: "([^"]+)"\}\}/g)) if (schemas.has(name)) recordLists.add(symbol);
   }
   // Seed (Rust) adapters always exchanged handle buffers; the Jet-owned rows
-  // (jet_dyn_field, jet_rt_codec_*, jet_std_fs_list_dir_raw, message_parts)
+  // (jet_dyn_field, jet_rt_codec_*, jet_std_fs_list_dir_raw)
   // build or read the same shape.
   const reviewed = [
     "jet_binary_pattern_match", "jet_dyn_at", "jet_dyn_bool", "jet_dyn_field", "jet_dyn_float", "jet_dyn_int", "jet_dyn_text",
-    "jet_email::envelope", "jet_email::envelope_parts", "jet_email::message_parts", "jet_log_record_emit_raw",
+    "jet_log_record_emit_raw",
     "jet_net_dns_srv", "jet_net_dns_srv_at_lookup", "jet_net_dns_srv_lookup",
     "jet_ring_log_debug_fields", "jet_ring_log_error_fields", "jet_ring_log_info_fields", "jet_ring_log_warn_fields",
     "jet_rt_codec_decode_bool", "jet_rt_codec_decode_char", "jet_rt_codec_decode_float", "jet_rt_codec_decode_i16", "jet_rt_codec_decode_i32",

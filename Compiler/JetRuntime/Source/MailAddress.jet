@@ -1,5 +1,5 @@
 // Email.rs:118-122; native Address16 owns nullable display0 and mailbox8.
-// Inline owners are shared by Message and Envelope, without child heap shells.
+// Inline owners are shared with Envelope, without child heap shells.
 MAIL_ADDRESS_BYTES :: I64{16}
 fn mail_address_copy_into(value: I64, target: I64) {
     display :: rt_text_word(value)
@@ -35,16 +35,6 @@ fn mail_address_list_copy_into(value: I64, target: I64) {
     at := I64{0}
     loop at < length {
         mail_address_copy_into(source + at * MAIL_ADDRESS_BYTES, data + at * MAIL_ADDRESS_BYTES)
-        at += I64{1}
-    }
-}
-// CAbiRoutes.rs:26-29: nonpositive length or null slot pointer is an empty list.
-fn mail_address_list_from_slots_into(slots: I64, count: I64, target: I64) {
-    length :: if (count <= I64{0} || slots == I64{0}) -> I64{0} else -> count
-    data :: mail_list_init(length, MAIL_ADDRESS_BYTES, target)
-    at := I64{0}
-    loop at < length {
-        mail_address_copy_into(rt_text_word(slots + at * I64{8}), data + at * MAIL_ADDRESS_BYTES)
         at += I64{1}
     }
 }

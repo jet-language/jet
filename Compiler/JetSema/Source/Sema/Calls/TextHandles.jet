@@ -1,4 +1,4 @@
-// Checked producers for typed Email values. `Regex`/`Match` (`core.regex`),
+// Checked producer for the typed Email `Mailer.send`. `Regex`/`Match` (`core.regex`),
 // `URL` and `MIME` (`core.net.url`/`core.net.mime`) are source records: their
 // documented fields and methods resolve through the declarations, with no
 // handle twins.
@@ -22,13 +22,13 @@ fn sema_text_handle_result(ok: Type, err: Type) -> Type Never! {
 }
 
 fn sema_text_handle_owner_module(owner: String) -> String Never! {
-    if owner == "Message" || owner == "Mailer" -> return "core.email"
+    if owner == "Mailer" -> return "core.email"
     ""
 }
 
-// A Core owner reaches sema either by its bare leaf (`Message`) or by the
+// A Core owner reaches sema either by its bare leaf (`Mailer`) or by the
 // canonical identity Registration gives a source-declared Core nominal
-// (`<corelib>/core.email::Message`); both name the same owner.
+// (`<corelib>/core.email::Mailer`); both name the same owner.
 fn sema_text_handle_nominal_owner(ty: Type) -> String? {
     if ty == {
         .Named(name) -> Val(sema_text_handle_owner_leaf(name))
@@ -39,9 +39,7 @@ fn sema_text_handle_nominal_owner(ty: Type) -> String? {
 }
 
 fn sema_text_handle_owner_leaf(name: String) -> String Never! {
-    loop leaf in ([String]{"Message", "Mailer"}) {
-        if core_identity_is(name, sema_text_handle_owner_module(leaf), leaf) -> return leaf
-    }
+    if core_identity_is(name, sema_text_handle_owner_module("Mailer"), "Mailer") -> return "Mailer"
     name.copy()
 }
 
@@ -72,8 +70,6 @@ fn sema_text_handle_is_canonical(receiver_type: Type, owner: String, environment
 }
 
 fn sema_email_handle_spec(owner: String, method: String, argc: Int) -> SemaNetworkHandleSpec? {
-    if owner == "Message" && method == "envelope" && argc == 0 -> return Val(SemaNetworkHandleSpec{operation: THandleOp.EmailMethod{method: method}, result_type: Type.Named{name: "Envelope"}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, callback_non_escaping: false, effect_name: Val("")})
-    if owner == "Message" && method == "with_envelope" && argc == 1 -> return Val(SemaNetworkHandleSpec{operation: THandleOp.EmailMethod{method: method}, result_type: sema_text_handle_result(Type.Named{name: "Message"}, Type.Named{name: "EmailError"}), params: [SemaCallParam]{sema_text_handle_parameter("envelope", Type.Named{name: "Envelope"})}, receiver_convention: AccessConvention.Read, callback_non_escaping: false, effect_name: Val("")})
     if owner == "Mailer" && method == "send" && argc == 1 -> return Val(SemaNetworkHandleSpec{operation: THandleOp.EmailMethod{method: method}, result_type: sema_text_handle_result(Type.Named{name: "SendReport"}, Type.Named{name: "EmailError"}), params: [SemaCallParam]{sema_network_handle_argument_move("message", Type.Named{name: "Message"})}, receiver_convention: AccessConvention.Write, callback_non_escaping: false, effect_name: None})
     None
 }
@@ -83,13 +79,11 @@ fn sema_email_handle_spec(owner: String, method: String, argc: Int) -> SemaNetwo
 // Prelude symbol or an Email effect row that the native method contract lacks.
 fn sema_call_try_email_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     owner :: sema_text_handle_nominal_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    if (owner != "Message" && owner != "Mailer") || !sema_text_handle_is_canonical(receiver_value.ty, owner, environment, program) -> return SemaMethodSpecialCheck{handled: false, value: None}
-    if (owner == "Message" && method != "envelope" && method != "with_envelope") || (owner == "Mailer" && method != "send") -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if owner != "Mailer" || method != "send" || !sema_text_handle_is_canonical(receiver_value.ty, owner, environment, program) -> return SemaMethodSpecialCheck{handled: false, value: None}
     spec := sema_email_handle_spec(owner, method, args.len())
     if spec == None {
         sema_network_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        expected_count := if method == "envelope" -> 0 else -> 1
-        &diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", expected_count, args.len(), false, span))
+        &diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", 1, args.len(), false, span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     signature :: spec ?? SemaNetworkHandleSpec{operation: THandleOp.EmailMethod{method: method}, result_type: Type.Named{name: "Unit"}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, callback_non_escaping: false, effect_name: Val("")}
