@@ -67,11 +67,6 @@ struct RustBridgeKeyInputs {
         &identity.field("needs_regex", pkg_bridge_flag(needs.regex))
         if needs.regex -> &identity.field("regex_runtime", "ring".bytes())
         &identity.field("needs_archive", pkg_bridge_flag(needs.archive))
-        &identity.field("needs_parquet", pkg_bridge_flag(needs.parquet))
-        if needs.parquet {
-            &identity.field("parquet_runtime", FFI_PARQUET_RUNTIME.bytes())
-            loop spec in pkg_ffi_parquet_crate_specs() -> &identity.field("parquet_dependency", "{spec.name}={spec.version}".bytes())
-        }
         &identity.field("needs_compress", pkg_bridge_flag(needs.compress))
         &identity.field("needs_plugin", pkg_bridge_flag(needs.plugin))
         loop need in pkg_ffi_sorted_unique(self.authority_needs) -> &identity.field("authority_need", need.bytes())
@@ -87,10 +82,6 @@ struct RustBridgeKeyInputs {
         &identity.field("link_closure", self.link_closure.stable_key().bytes())
         identity.finish()
     }
-}
-
-fn pkg_ffi_parquet_crate_specs() -> [FFICrateSpec] Never! {
-    [FFICrateSpec]{FFI_PARQUET_CRATE_SPEC, FFI_ARROW_ARRAY_CRATE_SPEC, FFI_ARROW_DATA_CRATE_SPEC, FFI_ARROW_SCHEMA_CRATE_SPEC, FFI_ARROW_SELECT_CRATE_SPEC, FFI_BYTES_CRATE_SPEC}
 }
 
 fn pkg_ffi_identity_entry(identity: &ForeignIdentityBuilder, entry: ExternEntry) Never! {

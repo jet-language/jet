@@ -82,13 +82,10 @@ fn pkg_ffi_build_bridge(entries: [ExternEntry], needs: RustBridgeNeeds) -[FS, En
 // The Cargo dependency map the entries and providers need.
 fn pkg_ffi_bridge_deps(entries: [ExternEntry], needs: RustBridgeNeeds) -[FS, Env]> [String: String] RustBridgeError! {
     deps := pkg_ffi_collect_crate_deps(entries)
-    specs := [FFICrateSpec]{}
-    if needs.parquet {
-        loop spec in pkg_ffi_parquet_crate_specs() -> &specs.push(spec)
+    if needs.plugin {
+        deps[FFI_WASMTIME_CRATE_SPEC.name] = FFI_WASMTIME_CRATE_SPEC.version
+        deps["jet-foundation"] = pkg_ffi_jet_foundation_crate_path()
     }
-    if needs.plugin -> &specs.push(FFI_WASMTIME_CRATE_SPEC)
-    loop spec in specs -> deps[spec.name] = spec.version
-    if needs.parquet || needs.plugin -> deps["jet-foundation"] = pkg_ffi_jet_foundation_crate_path()
     Ok(deps)
 }
 
@@ -133,7 +130,7 @@ fn pkg_ffi_build_bridge_full(request: RustBridgeBuild) -[FS, Env, Exec, Time, Ti
     deps :: pkg_ffi_bridge_deps(entries, needs)
     native_toolchain :: pkg_ffi_inline_native_toolchain(entries, selected_target)
     foundation_sources := JetFoundationSources?{None}
-    if needs.parquet || needs.plugin -> foundation_sources = Val(pkg_ffi_jet_foundation_sources())
+    if needs.plugin -> foundation_sources = Val(pkg_ffi_jet_foundation_sources())
     foundation_digest := String?{None}
     if foundation_sources == .Val(sources) -> foundation_digest = Val(sources.digest)
     rust_toolchain :: pkg_ffi_native_toolchain_identity()

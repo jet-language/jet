@@ -332,7 +332,7 @@ fn plugin_declared_authority_needs() -> Result<Vec<String>, String> {
 }
 
 fn plugin_load_import_fact() -> HostImportFact {
-    jet_foundation::MIR::plugin_authority_import_fact()
+    jet_foundation::Authority::plugin_authority_import_fact()
 }
 
 fn plugin_import_right(path: &str) -> Option<&'static str> {
@@ -606,10 +606,10 @@ fn plugin_host_read(
     })?;
     let mut last_error = None;
     for (root, relative) in candidates {
-        match jet_foundation::SHA256::read_file_nofollow_at_root(
+        match jet_foundation::RootedFiles::read_file_nofollow_at_root(
             &root,
             &relative,
-            jet_foundation::SHA256::MAX_TREE_FILE_BYTES,
+            jet_foundation::RootedFiles::MAX_TREE_FILE_BYTES,
         ) {
             Ok(bytes) => {
                 return plugin_set_io_text_result(import, results, bytes, Some(path))
@@ -671,7 +671,7 @@ fn plugin_host_write(
     })?;
     let mut last_error = None;
     for (root, relative) in candidates {
-        match jet_foundation::SHA256::write_file_nofollow_at_root(&root, &relative, &contents) {
+        match jet_foundation::RootedFiles::write_file_nofollow_at_root(&root, &relative, &contents) {
             Ok(()) => return plugin_set_io_unit_result(import, results).map_err(user_error),
             Err(error) => {
                 last_error = Some(error);
@@ -1122,10 +1122,10 @@ fn plugin_read_module(
     let candidates = plugin_scoped_candidates(path, authority, "FS.Read")?;
     let mut last_error = None;
     for (root, relative) in candidates {
-        match jet_foundation::SHA256::read_file_nofollow_at_root(
+        match jet_foundation::RootedFiles::read_file_nofollow_at_root(
             &root,
             &relative,
-            jet_foundation::SHA256::MAX_TREE_FILE_BYTES,
+            jet_foundation::RootedFiles::MAX_TREE_FILE_BYTES,
         ) {
             Ok(bytes) => return Ok(bytes),
             Err(error) => {

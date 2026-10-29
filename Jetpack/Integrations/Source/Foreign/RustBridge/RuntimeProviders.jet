@@ -1,14 +1,13 @@
 // Core runtime providers carried by the hidden cargo FFI bridge, ported from
 // jet_pkg_model::FFI.
 //
-// Some Core surfaces (core.data Parquet readers and core.plugin)
-// are backed by hand-written Rust runtimes that live only in the generated
-// bridge crate (I6: never in the compiler). This file decides which
-// providers a program needs, pins the crates they use and embeds the
-// runtime sources.
+// `core.plugin` is backed by a hand-written Rust runtime that lives only
+// in the generated bridge crate (I6: never in the compiler). This file
+// decides whether a program needs it, pins the crates it uses and embeds
+// the runtime sources.
 
 use jetpack_foundation.[
-    FFI_JET_FOUNDATION_CRATE_PATH, FFI_JET_UNICODE_CRATE_PATH, NativeSandboxMount,
+    FFI_JET_FOUNDATION_CRATE_PATH, NativeSandboxMount,
     foundation_jet_source_root, foundation_try_tree_hash,
 ]
 use core.files as files
@@ -23,13 +22,6 @@ struct FFICrateSpec {
     version: String
 }
 
-// Official Arrow Rust reader closure for `core.data` Parquet sources
-FFI_PARQUET_CRATE_SPEC :: FFICrateSpec{name: "parquet", version: "59.3.0"}
-FFI_ARROW_ARRAY_CRATE_SPEC :: FFICrateSpec{name: "arrow-array", version: "59.3.0"}
-FFI_ARROW_DATA_CRATE_SPEC :: FFICrateSpec{name: "arrow-data", version: "59.3.0"}
-FFI_ARROW_SCHEMA_CRATE_SPEC :: FFICrateSpec{name: "arrow-schema", version: "59.3.0"}
-FFI_ARROW_SELECT_CRATE_SPEC :: FFICrateSpec{name: "arrow-select", version: "59.3.0"}
-FFI_BYTES_CRATE_SPEC :: FFICrateSpec{name: "bytes", version: "1"}
 // `wasmtime` backs sandboxed Component Model hosts (
 // ); the pin matches the approved Cranelift generation.
 FFI_WASMTIME_CRATE_SPEC :: FFICrateSpec{name: "wasmtime", version: "25"}
@@ -42,18 +34,11 @@ struct FFIFeaturedDep {
 }
 
 FFI_FEATURED_DEPS :: comptime { [FFIFeaturedDep]{
-    {name: "arrow-array", toml: "{{ version = \"=59.3.0\", default-features = false }}"},
-    {name: "arrow-data", toml: "{{ version = \"=59.3.0\", default-features = false }}"},
-    {name: "arrow-schema", toml: "{{ version = \"=59.3.0\", default-features = false }}"},
-    {name: "arrow-select", toml: "{{ version = \"=59.3.0\", default-features = false }}"},
-    {name: "bytes", toml: "{{ version = \"1\", default-features = false }}"},
-    {name: "parquet", toml: "{{ version = \"=59.3.0\", default-features = false, features = [\"arrow\", \"brotli\", \"flate2-zlib-rs\", \"lz4\", \"simdutf8\", \"snap\", \"zstd\"] }}"},
     {name: "wasmtime", toml: "{{ version = \"25\", features = [\"component-model\"] }}"}
 } }
 
 // The hand-written Rust runtimes emitted into the bridge crate. Each is the
 // only code that touches its pinned crates.
-FFI_PARQUET_RUNTIME :: comptime { embed_file("Runtime/Parquet.rs") }
 // Application plugin loader.
 FFI_PLUGIN_RUNTIME :: comptime { embed_file("Runtime/Plugin.rs") }
 // Compiler-extension host runtime same wasmtime substrate,
@@ -67,21 +52,17 @@ FFI_COMPILER_EXTENSION_RUNTIME :: comptime { embed_file("Runtime/CompilerExtensi
 struct RustBridgeNeeds {
     regex: Bool
     archive: Bool
-    parquet: Bool
     compress: Bool
     plugin: Bool
 
     fn none() -> RustBridgeNeeds Never! {
-        RustBridgeNeeds{regex: false, archive: false, parquet: false, compress: false, plugin: false}
+        RustBridgeNeeds{regex: false, archive: false, compress: false, plugin: false}
     }
 
     // The providers the program's reached Core surfaces select.
     fn from_used_core(used_core: [String]) -> RustBridgeNeeds Never! {
         needs := RustBridgeNeeds.none()
         loop usage in used_core {
-            // Byte-source loader calls select the Parquet
-            // provider; bare dependency-closure module rows do not.
-            if pkg_ffi_needs_parquet_provider(usage) -> needs.parquet = true
             // (c81): the sandboxed plugin loader.
             if usage == "core.plugin" || usage.starts_with("core.plugin::") || usage.starts_with("core.plugin.") -> needs.plugin = true
         }
@@ -89,24 +70,17 @@ struct RustBridgeNeeds {
     }
 
     fn any(self) -> Bool Never! {
-        self.regex || self.archive || self.parquet || self.compress || self.plugin
+        self.regex || self.archive || self.compress || self.plugin
     }
-}
-
-// A direct `core.data` loader call (not a bare module row).
-fn pkg_ffi_needs_parquet_provider(usage: String) -> Bool Never! {
-    parts :: usage.split_once("::") ?? return false
-    parts.before == "core.data" || parts.before.starts_with("core.data.")
 }
 
 // Fingerprint and project the transitive Rust include closure, not a second
 // manually maintained list of Prelude inputs.
-FFI_JET_FOUNDATION_SOURCE_SCHEMA :: "jet-ffi-foundation-source-v4"
+FFI_JET_FOUNDATION_SOURCE_SCHEMA :: "jet-ffi-foundation-source-v5"
 
 struct JetFoundationSources {
     root: String
     foundation: String
-    unicode: String
     inputs: [String]
     digest: String
 }
@@ -275,10 +249,9 @@ fn pkg_ffi_foundation_rust_sources(directory: String) -[FS]> [String] ForeignBri
     paths
 }
 
-fn pkg_ffi_foundation_include_closure(root: String, foundation: String, unicode: String) -[FS]> [String] ForeignBridgeError! {
+fn pkg_ffi_foundation_include_closure(root: String, foundation: String) -[FS]> [String] ForeignBridgeError! {
     pending := [(source: String, manifest: String)]{}
     loop path in pkg_ffi_foundation_rust_sources(foundation) -> &pending.push((source: path, manifest: foundation))
-    loop path in pkg_ffi_foundation_rust_sources(unicode) -> &pending.push((source: path, manifest: unicode))
     seen := [(source: String, manifest: String)]{}
     external := [String]{}
     index := 0
@@ -297,7 +270,7 @@ fn pkg_ffi_foundation_include_closure(root: String, foundation: String, unicode:
             if stat.is_symlink || !stat.is_file -> return Err(pkg_bridge_error("Rust include `{candidate}` is not a regular file"))
             path :: files.canonicalize(candidate) ?? return Err(pkg_bridge_error("canonicalize Rust include `{candidate}`: {err}"))
             if !path.starts_with("{root}/") -> return Err(pkg_bridge_error("Rust include `{path}` escapes the source root"))
-            if !path.starts_with("{foundation}/") && !path.starts_with("{unicode}/") && !external.contains(path) -> &external.push(path)
+            if !path.starts_with("{foundation}/") && !external.contains(path) -> &external.push(path)
             next_item :: (source: path, manifest: manifest)
             if !seen.contains(next_item) -> &pending.push(next_item)
         }
@@ -338,20 +311,17 @@ fn pkg_ffi_nul_joined(relative: String, digest: String) -> [U8] Never! {
 fn pkg_ffi_jet_foundation_sources() -[FS, Env]> JetFoundationSources ForeignBridgeError! {
     root :: foundation_jet_source_root() ?? return Err(pkg_bridge_error("{err}"))
     foundation :: pkg_ffi_verified_source_directory(files.join(root, FFI_JET_FOUNDATION_CRATE_PATH), "crate")
-    unicode :: pkg_ffi_verified_source_directory(files.join(root, FFI_JET_UNICODE_CRATE_PATH), "unicode crate")
     canonical_root :: files.canonicalize(root) ?? return Err(pkg_bridge_error("canonicalize foundation root: {err}"))
-    inputs :: pkg_ffi_foundation_include_closure(canonical_root, foundation, unicode)
+    inputs :: pkg_ffi_foundation_include_closure(canonical_root, foundation)
     foundation_tree :: foundation_try_tree_hash(foundation) ?? return Err(pkg_bridge_error("could not fingerprint jet-foundation source: {err.message()}"))
-    unicode_tree :: foundation_try_tree_hash(unicode) ?? return Err(pkg_bridge_error("could not fingerprint jet-unicode source: {err.message()}"))
     identity := ForeignIdentityBuilder.new(FFI_JET_FOUNDATION_SOURCE_SCHEMA)
     &identity.field("foundation-tree", foundation_tree.bytes())
-    &identity.field("unicode-tree", unicode_tree.bytes())
     loop path in inputs {
         relative :: path.removeprefix("{canonical_root}/")
         digest :: pkg_ffi_foundation_input_digest(canonical_root, relative, "include")
         &identity.field("include-input", pkg_ffi_nul_joined(relative, digest))
     }
-    Ok(JetFoundationSources{root: canonical_root, foundation: foundation, unicode: unicode, inputs: inputs, digest: identity.finish()})
+    Ok(JetFoundationSources{root: canonical_root, foundation: foundation, inputs: inputs, digest: identity.finish()})
 }
 
 // Copy one included foundation input into the Linux source-closure stage.
@@ -365,7 +335,7 @@ fn pkg_ffi_stage_foundation_input(source_root: String, relative: String, destina
 }
 
 // Linux projects only discovered external inputs at their original root,
-// followed by the two complete path crates. Other adapters cannot remap paths.
+// followed by the complete path crate. Other adapters cannot remap paths.
 fn pkg_ffi_jet_foundation_mounts(cache_root: String, sources: JetFoundationSources) -[FS, Env]> [NativeSandboxMount] ForeignBridgeError! {
     mounts := [NativeSandboxMount]{}
     if {
@@ -378,10 +348,9 @@ fn pkg_ffi_jet_foundation_mounts(cache_root: String, sources: JetFoundationSourc
             loop path in sources.inputs {
                 pkg_ffi_stage_foundation_input(sources.root, path.removeprefix("{sources.root}/"), closure_root, "include")
             }
-            // Parent is read-only before the two crate binds: precreate only
-            // their empty destinations, never copy or expose unrelated inputs.
+            // Parent is read-only before the crate bind: precreate only its
+            // empty destination, never copy or expose unrelated inputs.
             files.create_dir_all(files.join(closure_root, sources.foundation.removeprefix("{sources.root}/"))) ?? return Err(pkg_bridge_error("create foundation crate mount point: {err}"))
-            files.create_dir_all(files.join(closure_root, sources.unicode.removeprefix("{sources.root}/"))) ?? return Err(pkg_bridge_error("create unicode crate mount point: {err}"))
             &mounts.push(NativeSandboxMount{source: closure_root, destination: sources.root})
         }
         else -> {
@@ -396,6 +365,5 @@ fn pkg_ffi_jet_foundation_mounts(cache_root: String, sources: JetFoundationSourc
         }
     }
     &mounts.push(NativeSandboxMount{source: sources.foundation, destination: sources.foundation})
-    &mounts.push(NativeSandboxMount{source: sources.unicode, destination: sources.unicode})
     Ok(mounts)
 }
