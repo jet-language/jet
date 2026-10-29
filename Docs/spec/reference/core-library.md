@@ -4176,6 +4176,11 @@ requires the explicit `SQL.raw` escape. Database operations carry `DB` (and,
 when they wait, `Time.Wait`) effects. The module source is
 [`Core/Db/Db.jet`](../../../Core/Db/Db.jet).
 The backend-neutral driver/policy boundary keeps query operations and the user policy attached to the typed scope (`D-DBDRIVER1=A`; `D-DBPOLICY-BIND1=A`).
+A row policy constrains only the rows of its own table: inside a policy scope,
+SQL that targets no table (`SELECT 1`) or another table runs unchanged, SQL on
+the policy's table must name it as its one simple target and gets the policy
+predicate, and SQL that reads the policy's table any other way (a join or
+subquery from another table) is refused.
 
 | Signature | Result | Description |
 |---|---|---|

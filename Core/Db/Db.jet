@@ -613,8 +613,15 @@ fn __policy_apply(sql: SQL, policy: RowPolicy, user: String, allow_schema: Bool)
         return Err(__db_error("row policy supports SELECT, INSERT, UPDATE, and DELETE only"))
     }
     target :: __sql_target_index(tokens, kind)
-    if target < 0 || tokens[target].word != __sql_lower_text(policy.table) {
-        return Err(__db_error("policy scope targets table `{policy.table}`"))
+    table :: __sql_lower_text(policy.table)
+    // A row policy constrains the rows of its own table (#6070). SQL that
+    // targets no table (`SELECT 1`) or another table runs unchanged, unless it
+    // names the policy's table anywhere (a join, a subquery, a column read),
+    // which would read its rows past the policy.
+    if target < 0 || tokens[target].word != table {
+        if __sql_word_index(tokens, table) >= 0 -> return Err(__db_error("policy-scoped SQL that reads `{policy.table}` must target it as its one simple table"))
+        // copy: the caller keeps its SQL value; the scope runs this one.
+        return Ok(sql.copy())
     }
     if !__sql_simple_target(raw, tokens, kind) -> return Err(__db_error("policy-scoped SQL must name one simple target table without joins or subqueries"))
     if !policy.owner -> return Ok(sql.copy())
@@ -1834,8 +1841,17 @@ fn __driver_cache_parity_probe() Never! {
     assert_eq(same.text, "SELECT * FROM tasks LIMIT 1")
     schema :: __policy_apply(__sql_raw("CREATE TABLE tasks (owner TEXT)"), open, "alice", true) ?? panic("schema")
     assert_eq(schema.text, "CREATE TABLE tasks (owner TEXT)")
+    // SQL that targets no table or another table runs unchanged (#6070).
+    outside_sql :: [String]{"SELECT 1", "SELECT title FROM other WHERE id = 1", "INSERT INTO other (title) VALUES ('x')"}
+    loop text in outside_sql {
+        outside :: __policy_apply(__sql_raw(text), owned, "alice", false) ?? panic("outside `{text}`")
+        assert_eq(outside.text, text)
+        assert_eq(outside.values.len(), 0)
+    }
     rejected :: [(sql: String, message: String)]{
-        (sql: "SELECT title FROM other", message: "policy scope targets table `tasks`"),
+        (sql: "SELECT title FROM other JOIN tasks", message: "policy-scoped SQL that reads `tasks` must target it as its one simple table"),
+        (sql: "SELECT title FROM other WHERE owner IN (SELECT owner FROM tasks)", message: "policy-scoped SQL that reads `tasks` must target it as its one simple table"),
+        (sql: "SELECT 1 FROM main.tasks", message: "policy-scoped SQL that reads `tasks` must target it as its one simple table"),
         (sql: "SELECT 1 FROM tasks; DROP TABLE tasks", message: "policy-scoped SQL must be one statement without control characters"),
         (sql: "SELECT * FROM tasks -- note", message: "policy-scoped SQL cannot contain comments"),
         (sql: "CREATE TABLE tasks (x)", message: "schema and transaction-control SQL is only allowed in db.migrate or through the scope transaction controls"),
