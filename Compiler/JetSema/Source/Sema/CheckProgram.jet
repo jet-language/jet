@@ -4996,11 +4996,19 @@ fn sema_check_registration_module_tail(owned_run: ^SemaModuleCheckRun, environme
     ^module_result
 }
 
+// Whether this compile refuses what no `jet` has built yet (the "not built
+// yet" E2104). The refusal keeps an unported runtime out of the IR, and
+// `jet check` lowers nothing, so only build, run and test refuse.
+fn sema_refuses_unbuilt(program: SemaProgramTables) -> Bool Never! {
+    if program.registration_graph == .Val(graph) -> return !graph.check_tests
+    true
+}
+
 // A generator (a function declared `Stream<T>`) has no IR lowering yet:
 // E2104 at each one in a source module, card #6108, once the module has no
 // other error, so a generator's own diagnostics still read as written.
 fn sema_check_unbuilt_generators(program: SemaProgramTables, module_index: Int, module_result: &SemaGraphModuleResult) {
-    if sema_has_error_since(module_result.diagnostics, 0) -> return
+    if !sema_refuses_unbuilt(program) || sema_has_error_since(module_result.diagnostics, 0) -> return
     if program.registration_graph == .Val(graph) {
         if sema_module_is_core_source(graph.modules[module_index].module_identity) -> return
         loop item in graph.modules[module_index].program.items {
@@ -5032,7 +5040,7 @@ fn sema_type_is_stream(ty: Type) -> Bool Never! {
 // other error, so its own diagnostics still read as written. An unbuilt Core
 // call is refused at the call instead (sema_call_core_unbuilt_settle).
 fn sema_check_unbuilt_runtime_uses(program: SemaProgramTables, module_index: Int, module_result: &SemaGraphModuleResult) {
-    if sema_has_error_since(module_result.diagnostics, 0) -> return
+    if !sema_refuses_unbuilt(program) || sema_has_error_since(module_result.diagnostics, 0) -> return
     if program.registration_graph == .Val(graph) {
         if sema_module_is_core_source(graph.modules[module_index].module_identity) -> return
         hits := [Diagnostic]{}

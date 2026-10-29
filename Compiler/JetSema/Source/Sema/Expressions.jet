@@ -3148,7 +3148,7 @@ fn sema_expr_core_module_method_checked(receiver: Expr, method: String, method_s
     mount := sema_call_try_ui_mount(module_name, method, alias, alias_span, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if mount.handled -> return SemaMethodSpecialCheck{handled: true, value: mount.value}
     sema_call_core_crypto_expert_gate(module_name, method, method_span, context, &diagnostics)
-    sema_call_core_unbuilt_note(module_name, method, method_span, environment, &unbuilt)
+    sema_call_core_unbuilt_note(module_name, method, method_span, environment, program, &unbuilt)
     if !nested && sema_call_core_variadic_print(environment, program, scopes, alias, method, args.len(), alias_span, &context) {
         printed := sema_call_check_ambient_print(Call{name: "{alias}.{method}", name_span: method_span, type_args: type_args, args: args}, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: printed.value}

@@ -1,27 +1,21 @@
-use core.data as data
-
-struct Ticket {
-    team: String
-    minutes: Float
+package {
+    name: "gap"
+    authority: { allow: [GPU] }
 }
+
+use core.compute as compute
 
 fn nine() {
-    rows :: [Ticket]{Ticket{team: "Core", minutes: 9.0}, Ticket{team: "Tools", minutes: 4.0}}
-    picked :: data.query(rows)
-        .filter(t -> t.minutes >= 5.0)
-        .collect() ?? panic("filter")
-    print(picked.len())
+    row :: compute.vec(9, 1.0) ?? panic("vec")
+    print("made")
 }
 
-#Test("nine prints its count") {
+#Test("nine makes its vector") {
     nine()
 }
 
 fn run() {
     nine()
-    rows :: [Ticket]{Ticket{team: "Core", minutes: 4.0}}
-    picked :: data.query(rows)
-        .filter(t -> t.minutes >= 1.0)
-        .collect() ?? panic("filter")
-    print(picked.len())
+    row :: compute.vec(2, 1.0) ?? panic("vec")
+    print("made")
 }

@@ -1,0 +1,27 @@
+# A Core call no `jet` has built yet (E2104 "not built yet") is refused only by
+# a compile that lowers it: `jet check` lowers nothing and passes, while
+# `jet build` refuses the call at its site, citing the card that ports it.
+fixture: fixtures/unbuilt_core_calls
+step: jet check signal.jet
+exit: 0
+stderr: !~ "E2104" # check mode lowers nothing, so nothing is refused
+
+step: jet build signal.jet
+exit: 1
+stderr: ~ "Error [E2104]: `reactive.signal` is not built yet" # build still refuses the unported reactive runtime
+stderr: ~ "card #6099" # the refusal names the card that ports it
+
+step: jet check query.jet
+exit: 0
+stderr: !~ "E2104" # check mode lowers nothing, so nothing is refused
+
+step: jet build query.jet
+exit: 1
+stderr: ~ "Error [E2104]: `data.query` is not built yet" # the Query chain never reaches the IR builder
+stderr: ~ "card #6130" # the refusal names the card that ports it
+stderr: !~ "internal compiler error" # a refused call is a user diagnostic, not a backend gap
+
+step: jet build schema.jet
+exit: 1
+stderr: ~ "Error [E2104]: `data.schema` is not built yet" # data.schema<T> still calls itself
+stderr: ~ "card #6130" # the refusal names the card that ports it

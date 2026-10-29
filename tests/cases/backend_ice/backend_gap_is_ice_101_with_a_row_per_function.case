@@ -1,16 +1,16 @@
 # AGENTS.md I2 (#6065): a construct the IR builder can't lower is a compiler
 # fault, never a user diagnostic. Each faulty function is one census row
 # naming its pass, and one run reports every such function.
-# A `data.query(...).collect()` generic Core call is a known backend gap
-# (#5992; F32 `math.sqrt`, #5653, now lowers); when it lands, point this
-# case at another open gap.
+# A `compute.vec` call (the `core.compute` runtime route jet_compute_vec) is a
+# known backend gap (`data.query(...).collect()` was, until sema refused it
+# under #6130); when it lands, point this case at another open gap.
 fixture: fixtures/backend_gap
 step: jet build gap.jet
 exit: 101
 stderr: ~ "internal compiler error: the Jet backend failed on `gap.jet`: 2 compiler faults:" # one report counts every row
 stderr: ~ "ir.build unlowered: run [" # the entry's row names its pass and rule
 stderr: ~ "ir.build unlowered: nine [" # the callee's row comes from the same run
-stderr: ~ "generic Core call .collect" # the builder's own message stays in the row
+stderr: ~ "runtime route jet_compute_vec" # the builder's own message stays in the row
 stderr: !~ "E2104" # a backend gap is never a user diagnostic
 step: jet run gap.jet
 exit: 101
