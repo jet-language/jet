@@ -225,6 +225,12 @@ function tail(path, lines = 8) {
     return readFileSync(path, 'utf8').split('\n').filter(Boolean).slice(-lines).join(' | ').slice(0, 600);
 }
 
+// Test fixtures leave read-only directories behind; make the tree writable before removing it.
+function removeTree(dir) {
+    if (existsSync(dir)) spawnSync("chmod", ["-R", "u+w", dir]);
+    rmSync(dir, { recursive: true, force: true });
+}
+
 function exportCommit(sha, dir) {
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
@@ -467,7 +473,7 @@ async function suiteRun(ctx, side, suite, extra = []) {
         if (!existsSync(file) && result.rc === 2 && /no matching corpus entries/.test(readFileSync(log, 'utf8'))) continue;
         if (!existsSync(file)) { errors.push(`${tag} rc=${result.rc}${result.timedOut ? ' (timed out)' : ''} wrote no results: ${tail(log, 3)}`); continue; }
         rows.push(...JSON.parse(readFileSync(file, 'utf8')).results);
-        rmSync(join(ctx.work, 'kit', `scratch-${tag}`), { recursive: true, force: true });
+        removeTree(join(ctx.work, 'kit', `scratch-${tag}`));
     }
     return errors.length ? { error: errors.join('; '), rows } : { rows };
 }
@@ -624,7 +630,7 @@ function printCommands(ctx, released, plan) {
 async function release(options, pre) {
     const { seeds, workRoot, sha, release } = pre;
     const work = join(workRoot, sha.slice(0, 12));
-    rmSync(work, { recursive: true, force: true });
+    removeTree(work);
     for (const dir of ['logs', 'evidence', 'kit', 'tmp']) mkdirSync(join(work, dir), { recursive: true });
     LOG = join(work, 'release.log');
     const env = { ...process.env, JET_PACK_MUSL_LIB: pre.musl, TMPDIR: join(work, 'tmp') };
@@ -650,7 +656,7 @@ async function release(options, pre) {
     const plan = mergePlan(ctx);
     const verdict = gate.failed().length === 0 ? 'PASS' : 'FAIL';
     writeFileSync(join(work, 'REPORT.md'), report(ctx, gate, verdict, plan));
-    for (const dir of [ctx.tree, ctx.releaseTree, join(work, 'pack')]) rmSync(dir, { recursive: true, force: true });
+    for (const dir of [ctx.tree, ctx.releaseTree, join(work, 'pack')]) removeTree(dir);
     if (verdict !== 'PASS') {
         process.stdout.write(`FAIL: ${ctx.next} not released; ${seeds} is unchanged. ${gate.failed().map(row => `${row.check} ${row.status}`).join(', ')}. Report: ${join(work, 'REPORT.md')}\n`);
         return 1;
