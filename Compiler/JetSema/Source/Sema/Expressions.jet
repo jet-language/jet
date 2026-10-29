@@ -2724,9 +2724,7 @@ fn sema_expr_check_direct_call(call: Call, expected: Type?, environment: SemaSco
     // A callable parameter or local wins over a same-named declared, Core or
     // ambient function.
     if sema_expr_callable_local_index(environment, scopes, call.name) != None {
-        value_end := call.name_span.end
-        if call.args.len() > 0 -> value_end = expr_span(call.args[call.args.len() - 1].expr).end
-        return sema_expr_check_indirect_call(Expr.Ident{name: call.name, span: call.name_span, id: AST_NODE_GENERATED}, call.args, Span{start: call.name_span.start, end: value_end}, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return sema_expr_check_indirect_call(Expr.Ident{name: call.name, span: call.name_span, id: AST_NODE_GENERATED}, call.args, sema_expr_local_call_span(call), expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     // A loaded declaration owns the call even when Core also imports the name.
     if sema_expr_declared_function_named(scopes, call.name) {
@@ -2753,6 +2751,14 @@ fn sema_expr_check_direct_call(call: Call, expected: Type?, environment: SemaSco
         return Val(value)
     }
     sema_expr_check_declared_direct_call(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+}
+
+// The span a call through a callable local is checked and published at: its
+// name through its last argument.
+fn sema_expr_local_call_span(call: Call) -> Span Never! {
+    value_end := call.name_span.end
+    if call.args.len() > 0 -> value_end = expr_span(call.args[call.args.len() - 1].expr).end
+    Span{start: call.name_span.start, end: value_end}
 }
 
 fn sema_expr_check_declared_direct_call(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {

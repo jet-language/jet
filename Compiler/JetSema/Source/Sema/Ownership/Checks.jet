@@ -123,6 +123,10 @@ struct SemaOwnershipMoveOrigin {
     // `^`, when this move is that lambda binding's call. A later call
     // reports E0121 naming the capture (Rust `moved_use_diagnostic`).
     once_capture: String?{None}
+    // The scope depth of the `defer close(^name)` that made this move. The
+    // value leaves when that scope exits: until then later statements still
+    // read it and only another move is refused.
+    deferred_depth: Int?{None}
 }
 
 // A lambda whose body takes a captured name with `^`.
@@ -900,6 +904,10 @@ fn sema_ownership_leave_scope(state: &SemaOwnershipState) Never! {
     remaining_moves := [SemaOwnershipMovedPlace]{}
     loop moved in state.moved {
         if !sema_ownership_key_declared_from(state, moved.place.root_key, depth) -> &remaining_moves.push(moved)
+    }
+    // A deferred `close` of this scope has now taken its value.
+    loop index in 0..<remaining_moves.len() {
+        if remaining_moves[index].origin.deferred_depth == .Val(deferred) && deferred >= depth -> remaining_moves[index].origin.deferred_depth = None
     }
     state.moved = remaining_moves
 
@@ -2193,9 +2201,23 @@ fn sema_ownership_close_reference(state: &SemaOwnershipState, place: SemaOwnersh
 
 fn sema_ownership_place_moved(state: &SemaOwnershipState, place: SemaOwnershipPlace) -> SemaOwnershipMovedPlace? {
     loop moved in state.moved {
-        if sema_ownership_places_overlap(moved.place, place) -> return Val(moved)
+        if moved.origin.deferred_depth == None && sema_ownership_places_overlap(moved.place, place) -> return Val(moved)
     }
     None
+}
+
+// The deferred `close` that takes `place` when its scope exits.
+fn sema_ownership_place_deferred(state: &SemaOwnershipState, place: SemaOwnershipPlace) -> SemaOwnershipMovedPlace? {
+    loop moved in state.moved {
+        if moved.origin.deferred_depth != None && sema_ownership_places_overlap(moved.place, place) -> return Val(moved)
+    }
+    None
+}
+
+// The moves a `defer close(^name)` just recorded from `moved_before` on happen
+// when the current scope exits.
+fn sema_ownership_defer_moves(state: &SemaOwnershipState, moved_before: Int) Never! {
+    loop index in moved_before..<state.moved.len() -> state.moved[index].origin.deferred_depth = Val(state.scope_depth)
 }
 
 // An unmarked move site that a later use reached checks
@@ -2485,7 +2507,7 @@ fn sema_ownership_check_root_base_use(state: &SemaOwnershipState, expr: Expr, sc
 
 fn sema_ownership_place_moved_ancestor(state: SemaOwnershipState, place: SemaOwnershipPlace) -> SemaOwnershipMovedPlace? {
     loop moved in state.moved {
-        if sema_ownership_place_extends(moved.place, place) -> return Val(moved)
+        if moved.origin.deferred_depth == None && sema_ownership_place_extends(moved.place, place) -> return Val(moved)
     }
     None
 }
@@ -2842,11 +2864,20 @@ fn sema_ownership_mark_move_as(state: &SemaOwnershipState, expr: Expr, scopes: S
     // itself (E0201); a consuming call or receiver records its move like any
     // owner.
     if sema_ownership_report_own_place_moved(&state, expr, scopes, &diagnostics) -> return false
-    borrowed :: sema_ownership_write_view_exists_for_expr(&state, expr, scopes)
+    // A whole `ViewMut` carrier moves the window itself, not the storage it
+    // edits: its loan travels with the value, as `Edit{values: selected}`,
+    // so the move touches the carrier's own place only.
+    carrier :: sema_ownership_expr_is_view_mut_carrier(expr, binding)
+    if carrier -> places = sema_ownership_moved_record_places(expr, places, scopes, true)
+    borrowed :: !carrier && sema_ownership_write_view_exists_for_expr(&state, expr, scopes)
     loop place in places {
         if !unmarked && sema_ownership_reject_partial_static_move(&state, place, expr, &diagnostics) -> return false
         if sema_ownership_place_moved(&state, place) == .Val(origin) {
             sema_ownership_report_moved(&state, origin, place, expr_span(expr), &diagnostics)
+            return false
+        }
+        if sema_ownership_place_deferred(&state, place) == .Val(deferred) {
+            &diagnostics.push(sema_ownership_diag_moved(sema_ownership_place_name(deferred.place), deferred.origin, expr_span(expr)))
             return false
         }
         if borrowed {
@@ -2877,6 +2908,15 @@ fn sema_ownership_mark_move_as(state: &SemaOwnershipState, expr: Expr, scopes: S
     }
     loop place in places -> sema_ownership_note_place_reference(&state, expr, place, expr_span(expr), scopes, SemaOwnershipReferenceKind.Move)
     true
+}
+
+fn sema_ownership_expr_is_view_mut_carrier(expr: Expr, binding: SemaScopeBinding?) -> Bool Never! {
+    if expr == .Ident(_, _, _) {
+        info :: binding ?? return false
+        ty :: info.symbol.ty ?? return false
+        if ty == .Apply(name, _) -> return name == "ViewMut"
+    }
+    false
 }
 
 // Rust `note_move_if_direct_ident` keys an unmarked move on the binding

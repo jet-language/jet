@@ -2885,7 +2885,8 @@ fn sema_checked_validate_impl(graph: SemaRegistrationGraph, module_row: SemaRegi
             }
         }
         actual :: found ?? next
-        compatible :: sema_type_assignable_in_graph(graph, graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods[expected_index].signature, actual.signature, module_row.module_identity)
+        expected_signature :: graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods[expected_index].signature
+        compatible :: sema_type_assignable_in_graph(graph, expected_signature, sema_checked_impl_signature(expected_signature, actual.signature), module_row.module_identity)
         mismatch :: if compatible == {
             .Val(value) -> !value
             else -> graph.complete
@@ -2900,6 +2901,15 @@ fn sema_checked_validate_impl(graph: SemaRegistrationGraph, module_row: SemaRegi
             &diagnostics.push(sema_error("E0913", associated.symbol.span, "associated type `{associated.symbol.name}` is not resolved for this impl", "associated types are checked against one trait implementation", "declare the associated type in the trait and provide one concrete value"))
         }
     }
+}
+
+// An impl method that writes no effect row keeps its inferred row, which the
+// trait bound checks (E0742); only its parameters and return must match here.
+fn sema_checked_impl_signature(expected: Type, actual: Type) -> Type Never! {
+    if actual == .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) {
+        if effect_bound == None && expected == .Fn(_, _, wanted, _, _, _) -> return Type.Fn{params: params, ret: ret, effect_bound: wanted, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
+    }
+    actual.copy()
 }
 
 // Rust `TraitRegistry` coherence (orphan rule). Top-level

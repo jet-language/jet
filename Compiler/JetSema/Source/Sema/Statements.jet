@@ -2207,7 +2207,12 @@ fn sema_stmt_call_return_views_at(span: Span, context: SemaCheckContext) -> [Sem
 
 fn sema_stmt_call_return_views_for_expr(expr: Expr, context: SemaCheckContext) -> [SemaCallReturnViewFact] {
     if expr == {
-        .Call(call, _) -> return sema_stmt_call_return_views_at(call.name_span, context)
+        .Call(call, _) -> {
+            direct :: sema_stmt_call_return_views_at(call.name_span, context)
+            if direct.len() > 0 -> return direct
+            // A call through a callable local publishes at its whole span.
+            return sema_stmt_call_return_views_at(sema_expr_local_call_span(call), context)
+        }
         .MethodCall(_, _, method_span, _, _, _, _) | .OptMethodCall(_, _, method_span, _, _, _, _) -> return sema_stmt_call_return_views_at(method_span, context)
         .CallValue(_, _, span, _) -> return sema_stmt_call_return_views_at(span, context)
         .Paren(value, _, _) | .Place(value, _, _, _) | .Tainted(value, _, _, _) | .Try(value, _, _, _, _) | .Present(value, _, _) | .Ok(value, _, _) | .OrFallback(value, _, _, _, _) -> return sema_stmt_call_return_views_for_expr(value, context)
@@ -4699,7 +4704,9 @@ fn sema_stmt_check_defer_close(close: Expr, span: Span, environment: SemaScopeEn
                     shown := type_name(value.ty)
                     &diagnostics.push(sema_error("E0905", expr_span(argument.expr), "`{shown}` isn't `Close`", "`{shown}` would need to implement `Close` before it can be used here", "write `impl {shown}.Close {{ … }}` with every required method"))
                 }
+                moved_before := state.moved.len()
                 if !sema_stmt_move_direct(argument.expr, &state, scopes, "the deferred `close`", &diagnostics) || !close_valid -> return None
+                sema_ownership_defer_moves(&state, moved_before)
                 closed := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Close{value: value}, span)
                 return Val(TStmt.DeferClose{close: closed, resource: resource_id, span: span})
             }

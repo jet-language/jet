@@ -312,7 +312,10 @@ fn sema_expression_list_elements(elements: [Expr], expected_element: Type?, envi
                 &element_types.push(Val(spread_element))
             }
             else -> {
-                checked :: if expected_element != None -> sema_check_expression(element, expected_element, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(element, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                // A `[View<str>]` item reads a string view as itself, as a
+                // `View<str>` field does.
+                string_view :: if expected_element == .Val(required) -> sema_stmt_string_view_type(required) else -> false
+                checked :: if string_view -> sema_string_view_check_field(element, expected_element ?? Type.String, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else if expected_element != None -> sema_check_expression(element, expected_element, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(element, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 value :: checked ?? return None
                 if !sema_copy_site_check_guard_owned(value, environment, program, scopes, context, &diagnostics, false) -> return None
                 if !sema_copy_site_refuse_borrowed_copy(element, "the list literal", environment, program, scopes, context, &diagnostics) -> return None

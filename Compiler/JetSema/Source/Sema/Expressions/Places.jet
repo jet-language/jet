@@ -326,6 +326,15 @@ fn sema_expression_field_owner_type(environment: SemaScopeEnvironment, program: 
 }
 
 fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    // An allocator view (`fixed.alloc(Point{…})`) holds its value in place,
+    // so its fields are the held value's fields.
+    if base.ty == .Tagged(marker, inner) {
+        if marker == (TagMarker.Internal{internal_tag: InternalTag.AllocatorView}) {
+            viewed := base
+            viewed.ty = inner
+            return sema_expression_field_checked(viewed, member, span, expected, environment, program, &scopes, &context, &diagnostics)
+        }
+    }
     if base.ty == .Tuple(_) {
         tuple_field :: sema_expression_tuple_field(base, member, span, &diagnostics) ?? return None
         tuple_owner :: type_name(base.ty)

@@ -577,6 +577,13 @@ fn sema_call_try_builtin_static(owner: String, module_name: String, method: Stri
     loop index in 0..<owner_type_args.len() {
         &bindings.push(SemaInferenceBinding{name: row.type_params[index], ty: sema_call_resolved_type(owner_type_args[index], environment, program), source: "builtin static owner"})
     }
+    // With no owner type arguments written, an expected result
+    // (`line_starts: Cell.new(None)` for a `Cell<[Int]?>` field) names them,
+    // so an argument that needs its type (`None`) checks against it.
+    if owner_type_args.len() == 0 && expected == .Val(wanted) {
+        seeded := [SemaInferenceBinding]{}
+        if sema_call_builtin_static_bind(row.return_type, sema_call_resolved_type(wanted, environment, program), row, &seeded) -> bindings = seeded
+    }
     if row.owner_rule == BuiltinStaticOwnerRule.AtomicScalar && !jet_target_layout_atomic_scalar_type(bindings[0].ty) {
         &diagnostics.push(sema_error("E0311", span, "`Atomic<{type_name(bindings[0].ty)}>` has no static method `{method}`", "`Atomic<T>` holds one lock-free scalar: Bool, Int, or a 32- or 64-bit integer", "use a supported scalar, or `Shared<T>` for other values"))
         sema_call_builtin_static_discard(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)

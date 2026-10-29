@@ -1553,7 +1553,9 @@ fn parser_parse_postfix(state: &JetParserState, initial: ^ParsedExpr, depth: Int
                 .Field(_, member, _, _) -> if parser_turbofish_ahead(&state, TOKEN_LBRACE) -> member else -> ""
                 else -> ""
             }
-            if allow_struct_lit && owner_type_args.len() == 0 && parser_pascal_name(literal_name) {
+            // An adjacent `Owner<T>.` names a generic owner even where a
+            // struct literal can't start (`if List<Int>.try_new() == {`).
+            if owner_type_args.len() == 0 && parser_pascal_name(literal_name) && (allow_struct_lit || parser_turbofish_ahead(&state, TOKEN_DOT)) {
                 owner_type_args = parser_parse_call_type_args(&state, depth + 1)
                 next
             }
