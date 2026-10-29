@@ -415,6 +415,9 @@ fn ir_stmt_body(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never
                 .Local(local) -> ir_lookup_local(b, local) ?? { return ir_fail(&b, span, "assignment to unknown local {local.name}") }
                 .Expr(_) -> { return ir_fail(&b, span, "assignment place") }
             }
+            if op == None {
+                if ir_self_append(&m, p, &b, binding, value, span) -> return
+            }
             right :: ir_expr(&m, p, &b, value)
             if ir_failed(b) -> return
             current :: ir_read_binding(&m, &b, binding)
@@ -2531,6 +2534,80 @@ fn ir_string(m: &IRModule, p: IRProgram, b: &IRBuilder, parts: [BodyStrPart], sp
     }
     string_row :: ir_string_row(&m)
     ir_runtime(&m, &b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
+}
+
+// `s = "{s}…"` on a String the variable still owns: the rest of the text is
+// appended in place, as `s += "…"` is, so a self-append loop is linear, not a
+// copy of the whole text per step. The rest must not read `s`; it is built
+// before the old value is consumed. False when the assignment is any other
+// shape, and nothing was emitted.
+fn ir_self_append(m: &IRModule, p: IRProgram, b: &IRBuilder, binding: IRBinding, value: Int, span: Span) -> Bool Never! {
+    if binding.indirect >= 0 || binding.write || ir_kind_of(m, b, binding.slot) != .String -> return false
+    if !ir_owned_binding(b, binding.slot) || ir_live_flag(b, binding.slot) >= 0 -> return false
+    node :: ir_body_node(p, b, value)
+    parts :: if node.kind == {
+        .StrLit(text_parts) -> text_parts
+        else -> { return false }
+    }
+    if parts.len() < 2 -> return false
+    if parts[0] == .Interpolation(_, format) {
+        if format != .Display -> return false
+    }
+    head :: if parts[0] == {
+        .Interpolation(first, _) -> first
+        else -> { return false }
+    }
+    if ir_ty(p, b, head) != Type.String -> return false
+    head_node :: ir_body_node(p, b, head)
+    head_local :: if head_node.kind == {
+        .Local(local) -> local
+        else -> { return false }
+    }
+    head_binding :: ir_lookup_local(b, head_local) ?? return false
+    if head_binding.slot != binding.slot -> return false
+    rest := [BodyStrPart]{}
+    loop index in 1..<parts.len() {
+        part :: parts[index]
+        if part == .Interpolation(part_value, _) {
+            if ir_mentions_slot(p, b, part_value, binding.slot) -> return false
+        }
+        &rest.push(part)
+    }
+    text :: ir_string(&m, p, &b, rest, span)
+    if ir_failed(b) || text < 0 -> return true
+    current :: ir_read_binding(&m, &b, binding)
+    row :: b.f.slot_type[binding.slot]
+    appended :: ir_runtime(&m, &b, "jet_rt_string_append", [Int]{current, text}, row)
+    ir_release(&m, &b, text)
+    if ir_failed(b) -> return true
+    ir_store(&m, p, &b, binding.slot, appended)
+    if binding.owned -> ir_reown(&b, binding)
+    true
+}
+
+// Whether `expression` or anything inside it names the variable in `slot`.
+fn ir_mentions_slot(p: IRProgram, b: IRBuilder, expression: Int, slot: Int) -> Bool Never! {
+    found := false
+    ir_note_slot_mention(p, b, expression, slot, &found)
+    found
+}
+
+fn ir_note_slot_mention(p: IRProgram, b: IRBuilder, expression: Int, slot: Int, found: &Bool) Never! {
+    if found -> return
+    node :: ir_body_node(p, b, expression)
+    if node.kind == .Local(local) {
+        if ir_lookup_local(b, local) == .Val(named) {
+            if named.slot == slot {
+                found = true
+                return
+            }
+        }
+    }
+    if b.row >= 0 {
+        body_each_expr_child(p.functions[b.row].tree, node, (child: Int) -> ir_note_slot_mention(p, b, child, slot, &found))
+    } else {
+        body_each_expr_child(b.made, node, (child: Int) -> ir_note_slot_mention(p, b, child, slot, &found))
+    }
 }
 
 // `print(value)`: its shown text to stdout with a line end and a flush
