@@ -1,0 +1,11 @@
+use core.files as files
+
+fn build(b: Build) -[Exec, FS]> {
+    #Impure("declare a stamp action") {
+        action :: b.action("stamp", ["impure.jet"], ["stamp.txt"], ["sh", "-c", "printf ok > stamp.txt"], ["Exec", "FS"])
+        app :: b.add_executable("probe_app", ["impure.jet"], [action])
+        b.default(app)
+    }
+}
+
+fn run() { print(files.exists("stamp.txt")) }

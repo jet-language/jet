@@ -638,13 +638,20 @@ fn jet_eval_compiler_services_checked(input: JetCompilerServicesCheckedInput) ->
     JetCompilerServicesCheckedFacts{value: value, semantic_index_complete: !has_errors && index.complete}
 }
 
+// The build context's whole-program view, or the first producer fact it lacks.
+enum JetCompilerServicesProgramInfo {
+    Ready(value: TComptimeValue)
+    Missing(fact: String)
+}
+
 // The build context reads this immutable, fully checked whole-program view.
 // Reuse the same TypeInfo, FunctionInfo and semantic-index producers as the
-// compiler API; a missing producer fact refuses the snapshot.
-fn jet_eval_compiler_services_program_info(registration: SemaRegistrationGraph, graph: SemaGraphResult, source: String, module_sources: [SemaCompilerModuleSource]) -> TComptimeValue? {
-    if !registration.complete || !graph.complete -> return None
+// compiler API; a missing producer fact refuses the snapshot and is named.
+fn jet_eval_compiler_services_program_info(registration: SemaRegistrationGraph, graph: SemaGraphResult, source: String, module_sources: [SemaCompilerModuleSource]) -> JetCompilerServicesProgramInfo {
+    if !registration.complete -> return .Missing(fact: "the registration graph is incomplete")
+    if !graph.complete -> return .Missing(fact: "the checked graph is incomplete")
     index :: sema_compiler_semantic_index_from_checked(registration, graph, source, module_sources)
-    if !index.complete -> return None
+    if !index.complete -> return .Missing(fact: "semantic index: {index.missing}")
     catalog :: TAppliedRuleCatalog{rows: [TAppliedRule]{}, argument_menus: [TAppliedRuleArgumentMenu]{}}
     types := [TComptimeValue]{}
     functions := [TComptimeValue]{}
@@ -652,7 +659,7 @@ fn jet_eval_compiler_services_program_info(registration: SemaRegistrationGraph, 
     loop module_row in registration.modules {
         checked := SemaGraphModuleResult?{None}
         loop candidate in graph.modules { if candidate.module_identity == module_row.module_identity -> checked = Val(candidate) }
-        if checked == None -> return None
+        if checked == None -> return .Missing(fact: "module `{module_row.module_identity}` has no checked result")
         package_types := [TComptimeValue]{}
         package_functions := [TComptimeValue]{}
         loop item in module_row.program.items {
@@ -663,7 +670,7 @@ fn jet_eval_compiler_services_program_info(registration: SemaRegistrationGraph, 
                 .Distinct(definition) -> name = Val(definition.name)
                 .Func(function) -> {
                     if function.name == "build" -> next
-                    key :: jet_eval_compiler_services_function_key(function, module_row) ?? return None
+                    key :: jet_eval_compiler_services_function_key(function, module_row) ?? return .Missing(fact: "function `{module_row.module_identity}::{function.name}` is not registered")
                     value :: jet_eval_compiler_services_function_info(function, module_row, checked, Val(key))
                     &functions.push(value)
                     &package_functions.push(value)
@@ -671,7 +678,7 @@ fn jet_eval_compiler_services_program_info(registration: SemaRegistrationGraph, 
                 else -> {}
             }
             if name == .Val(type_name) {
-                value :: sema_comptime_reflection_type_info(registration, module_row.module_identity, type_name, catalog) ?? return None
+                value :: sema_comptime_reflection_type_info(registration, module_row.module_identity, type_name, catalog) ?? return .Missing(fact: "type `{module_row.module_identity}::{type_name}` has no TypeInfo")
                 &types.push(value)
                 &package_types.push(value)
             }
@@ -692,10 +699,10 @@ fn jet_eval_compiler_services_program_info(registration: SemaRegistrationGraph, 
         loop name in ([String]{"definitions", "references", "calls", "structural_nodes"}) {
             value := TComptimeValue?{None}
             loop field in index_fields { if field.name == name -> value = Val(field.value) }
-            &fields.push(TComptimeField{name: if name == "calls" -> "call_edges" else -> name, value: value ?? return None})
+            &fields.push(TComptimeField{name: if name == "calls" -> "call_edges" else -> name, value: value ?? return .Missing(fact: "the semantic index has no `{name}`")})
         }
-    } else { return None }
-    Val(TComptimeValue.Struct{type_name: "ProgramInfo", fields: fields})
+    } else { return .Missing(fact: "the semantic index is not a struct") }
+    .Ready(value: TComptimeValue.Struct{type_name: "ProgramInfo", fields: fields})
 }
 // Package and build call sites must consume Jetpack's typed host query result;
 // this helper deliberately defines no package view, lock/profile, or graph facts.

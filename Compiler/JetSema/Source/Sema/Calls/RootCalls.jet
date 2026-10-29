@@ -100,6 +100,18 @@ fn sema_root_call_imported(method: String, receiver: Type?, environment: SemaSco
     targets
 }
 
+// Whether the receiver's own type declares `method` (Rust
+// `resolve_method_sig`): an inherent or trait method of its registered
+// nominal or of a Core source impl, found as an ordinary method call finds
+// it. A receiver with no registered owner declares none.
+fn sema_root_call_owner_declares(receiver_type: Type, method: String, method_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Bool {
+    graph :: program.registration_graph ?? return false
+    receiver_name :: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver_type)) ?? return false
+    if graph.source_impl_owner_modules.get(receiver_name) == None && sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(receiver_name)).len() == 0 -> return false
+    probe := [Diagnostic]{}
+    sema_expr_registration_method_candidates(graph, receiver_type, method, [Type]{}, [Type]{}, method_span, environment, program, &scopes, &probe).len() > 0
+}
+
 // The receiver-first call `receiver.method(args)` when `method` names a
 // `#Root` function that accepts the receiver; unhandled otherwise.
 fn sema_root_call_try(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
@@ -117,7 +129,7 @@ fn sema_root_call_try(receiver: Expr, method: String, method_span: Span, type_ar
     loop imported in sema_root_call_imported(method, Val(receiver_type), environment, program) -> &candidates.push(imported)
     if candidates.len() == 0 -> return unhandled
     failed :: SemaMethodSpecialCheck{handled: true, value: None}
-    if sema_expr_declares_nominal_method(environment, program, receiver_type, method, true) {
+    if sema_root_call_owner_declares(receiver_type, method, method_span, environment, program, &scopes) {
         &diagnostics.push(sema_error("E0105", method_span, "dot call `.{method}()` conflicts with a method on `{type_name(receiver_type)}`", "a `#Root` function cannot silently compete with a real instance method", "rename the `#Root` function or call it as `{method}(value, …)`"))
         loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return failed
