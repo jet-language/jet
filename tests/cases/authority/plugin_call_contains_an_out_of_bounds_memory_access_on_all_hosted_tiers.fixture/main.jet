@@ -1,0 +1,33 @@
+use core.plugin as plugin
+
+fn contained(name: String, err: PluginError) {
+    if err == {
+        .Guest(fault) -> {
+            assert(fault.export == name)
+            assert(fault.message.contains("out of bounds memory access"))
+            assert(fault.frames.len() > 0 && fault.frames.len() <= 32)
+            assert(fault.frames[0].function == name)
+            print("{name}:contained")
+        }
+        else -> assert(false)
+    }
+}
+
+fn run() {
+    policy :: Authority.from_rights(["FS.Read:."])
+    reader :: plugin.load("out_of_bounds.wat", policy)
+    _peeked :: reader.peek() ?? {
+        contained("peek", err)
+        0
+    }
+    writer :: plugin.load("out_of_bounds.wat", policy)
+    _poked :: writer.poke() ?? {
+        contained("poke", err)
+        0
+    }
+    fresh :: plugin.load("out_of_bounds.wat", policy)
+    value :: fresh.ok() ?? panic("in-bounds call failed")
+    assert(value == 7)
+    print("ok:{value}")
+    print("host:still-running")
+}

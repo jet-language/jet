@@ -433,6 +433,8 @@ await writeFile(mapPath, `${JSON.stringify({
     line_starts,
   })),
   files: mapped,
+  // Each staged embed_file copy and the repository file it came from.
+  embedded_files: [...embeddedFiles].map(([copy, target]) => ({ copy: `src/${copy}`, source_file: relative(sourceRootDir, target).split(sep).join("/") })),
   tests: testNames.map(({ name }) => name),
 }, null, 2)}\n`, "utf8");
 console.log(`assembled ${units.length} Jet sources (${mode}, ${testNames.length} test claims) into ${unitPath}`);
