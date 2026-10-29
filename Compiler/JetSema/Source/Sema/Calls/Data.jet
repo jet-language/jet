@@ -30,33 +30,6 @@ fn sema_dyn_type() -> Type Never! { Type.Named{name: "Dyn"} }
 fn sema_data_decode_error() -> Type Never! { Type.List{element: Type.Named{name: "FieldError"}} }
 fn sema_data_result(ok: Type, err: Type) -> Type Never! { Type.Result{ok: ok, err: err} }
 
-// An anonymous union codes through its structural enum (D-META-AUTO1), but
-// the IR has no codec lowering for it yet (card #6105): E2104 at each codec
-// use whose type holds one, so `jet` never hands the IR a codec it can't
-// build. A nominal reaches a union only through its own codec body, which
-// is checked as such a use itself.
-fn sema_data_union_codec_unbuilt(ty: Type, span: Span) -> Diagnostic? {
-    if !sema_data_mentions_union(ty) -> return None
-    shown :: type_name(ty)
-    Val(sema_error("E2104", span, "A codec for the anonymous union in `{shown}` is not built yet", "This `jet` has no implementation of codecs for anonymous unions yet, and no other `jet` can check or run it.", "Encode or decode a named enum in place of `{shown}` for now; codecs for anonymous unions need their Jet implementation first (card #6105)."))
-}
-
-fn sema_data_mentions_union(ty: Type) -> Bool Never! {
-    if ty == {
-        .Union(_) -> return true
-        .List(inner) | .Option(inner) | .Shared(inner) | .FixedList(inner, _) | .Tagged(_, inner) -> return sema_data_mentions_union(inner)
-        .Map(key, _, value) -> return sema_data_mentions_union(key) || sema_data_mentions_union(value)
-        .Result(ok, err) -> return sema_data_mentions_union(ok) || sema_data_mentions_union(err)
-        .Apply(_, args) -> {
-            loop arg in args {
-                if sema_data_mentions_union(arg) -> return true
-            }
-        }
-        else -> {}
-    }
-    false
-}
-
 fn sema_data_nominal_is(name: String, leaf: String) -> Bool Never! {
     name == leaf || (core_identity_in_module(name, "core.data") && name.ends_with("::{leaf}"))
 }
@@ -237,10 +210,6 @@ fn sema_data_check_encode(receiver: Expr, receiver_value: TExpr, args: [CallArg]
         sema_data_arity_diagnostic("encode", 0, args.len(), span, &diagnostics)
         sema_data_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if type_args.len() != 0 -> sema_data_check_explicit_type_args("encode", type_args, 0, span, &diagnostics)
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    if sema_data_union_codec_unbuilt(receiver_value.ty, span) == .Val(unbuilt) {
-        &diagnostics.push(unbuilt)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if !sema_serde_type_is_admissible(environment, program, receiver_value.ty, SemaSerdeDirection.Encode) {
@@ -636,10 +605,6 @@ fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: Stri
                     if !sema_data_check_explicit_type_args("Dyn.decode<T>", type_args, 1, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
                     target := type_args[0]
                     if program.registration_graph == .Val(graph) -> target = sema_type_resolve_declared_with_generics(graph, target, environment.module_identity, environment.generic_params)
-                    if sema_data_union_codec_unbuilt(target, span) == .Val(unbuilt) {
-                        &diagnostics.push(unbuilt)
-                        return SemaMethodSpecialCheck{handled: true, value: None}
-                    }
                     if !sema_serde_type_is_admissible(environment, program, target, SemaSerdeDirection.Decode) {
                         &diagnostics.push(sema_error("E0905", span, "`{type_name(target)}` does not implement `Decode`", "`Dyn.decode<T>()` can only call the target type's Decode contract", "derive `Decode` on this type, or write its Decode implementation"))
                     }
@@ -1071,10 +1036,6 @@ fn sema_data_core_try_decode(module_name: String, member: String, args: [CallArg
         return Val(SemaDirectSpecialCheck{handled: true, value: Val(result)})
     }
     target :: sema_data_core_target_type(type_args, member, span, environment, program, &diagnostics) ?? return Val(SemaDirectSpecialCheck{handled: true, value: None})
-    if sema_data_union_codec_unbuilt(target, span) == .Val(unbuilt) {
-        &diagnostics.push(unbuilt)
-        return Val(SemaDirectSpecialCheck{handled: true, value: None})
-    }
     if !sema_serde_type_is_admissible(environment, program, target, SemaSerdeDirection.Decode) {
         &diagnostics.push(sema_error("E0905", span, "`{type_name(target)}` does not implement `Decode`", "`{module_name}.{member}<T>` can only decode into a type with the registered Decode contract", "derive `Decode` on this type, or write its Decode implementation"))
     }

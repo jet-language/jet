@@ -211,12 +211,6 @@ fn sema_inference_validate_bounds(graph: SemaRegistrationGraph?, context: &SemaI
                 return None
             }
             &evidence.push(SemaInferenceBoundEvidence{param: parameter.name, actual: concrete, bound: bound, satisfied: satisfied, source: span})
-            if satisfied && (bound == "Encode" || bound == "Decode") {
-                if sema_data_union_codec_unbuilt(concrete, span) == .Val(unbuilt) {
-                    &diagnostics.push(unbuilt)
-                    return None
-                }
-            }
             if !satisfied {
                 name :: type_name(concrete)
                 row :: diagnostic_registry_row("E0905") ?? panic("E0905 must have a registry row")
