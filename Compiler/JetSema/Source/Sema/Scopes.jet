@@ -102,6 +102,9 @@ struct SemaScopeBinding {
     // write into another cell can see the stored value is built in place
     // (SharedCycles.jet).
     fresh_cell: Expr?{None}
+    // L0517: a `::` name bound to `path.normalize().to_string()` holds the
+    // text of a typed normalized Path (sema_stmt_note_normalized_path_text).
+    normalized_path_text: Bool{false}
 }
 
 struct SemaOriginFact {
@@ -595,6 +598,11 @@ struct SemaCheckContext {
     // reference's callback `ret`.
     callback_return_open: Bool{false}
     callback_return_row: Type?{None}
+    // An expected callback whose return row is a plain value (`fn(T, T) ->
+    // Ordering`): it has no failure route, so a call of an unannotated
+    // function in it is a failure obligation the bundle solve settles, as in
+    // a named `T Never!` function, rather than the callback's carrier.
+    callback_return_closed: Bool{false}
     // The enclosing callable's written failure contract, for E2404 provenance.
     failure_contract_source: String
     // The enclosing named callable, for the return verdicts.
@@ -1091,6 +1099,7 @@ fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext Nev
         failure_inference: source.failure_inference,
         inferred_failure_carrier: source.inferred_failure_carrier,
         callback_return_open: source.callback_return_open,
+        callback_return_closed: source.callback_return_closed,
         callback_return_row: source.callback_return_row,
         failure_contract_source: source.failure_contract_source,
         function_name: source.function_name,
@@ -1232,6 +1241,7 @@ fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMark Ne
             failure_inference: context.failure_inference,
             inferred_failure_carrier: context.inferred_failure_carrier,
             callback_return_open: context.callback_return_open,
+            callback_return_closed: context.callback_return_closed,
             callback_return_row: context.callback_return_row,
             failure_contract_source: context.failure_contract_source,
             function_name: context.function_name,
@@ -1327,6 +1337,7 @@ fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckContex
     context.failure_inference = saved.failure_inference
     context.inferred_failure_carrier = saved.inferred_failure_carrier
     context.callback_return_open = saved.callback_return_open
+    context.callback_return_closed = saved.callback_return_closed
     context.callback_return_row = saved.callback_return_row
     context.failure_contract_source = saved.failure_contract_source
     context.function_name = saved.function_name

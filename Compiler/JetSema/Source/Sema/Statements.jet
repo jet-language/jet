@@ -3605,6 +3605,7 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     sema_single_use_note_binding(&state, symbol, environment, program)
     if binding.name == "_" -> sema_single_use_check_discard(init.ty, binding.name_span, context.taskgroups.in_spawn, environment, program, &diagnostics)
     sema_stmt_track_origin(binding, environment, program, &scopes)
+    sema_stmt_note_normalized_path_text(binding, init, &scopes)
     _ := sema_hardware_bind_pending_dma_transfer(binding_expr, symbol, &scopes)
     view_diagnostics_before :: diagnostics.len()
     // An owning copy of a read view (`entries := stream.object_entries(tree)`)
@@ -3819,6 +3820,31 @@ fn sema_stmt_track_origin(binding: Binding, environment: SemaScopeEnvironment, p
         line: sema_source_line_at(environment.source_segments, binding.name_span),
         column: sema_source_column_at(environment.source_segments, binding.name_span),
     })
+}
+
+// L0517 (D-PATH-CONTAINMENT1=A): `name :: path.normalize().to_string()`
+// binds the text of a typed normalized Path, so a string-prefix containment
+// check written over two such names is reported (sema_expr_lint_path_prefix).
+fn sema_stmt_note_normalized_path_text(binding: Binding, init: TExpr, scopes: &SemaScopeTable) Never! {
+    if binding.mutable || binding.name.len() == 0 || binding.name == "_" -> return
+    if init.kind == .HandleMethod(receiver, operation, _) {
+        if !sema_stmt_is_path_op(operation, false) -> return
+        if receiver.kind == .HandleMethod(_, inner, _) {
+            if !sema_stmt_is_path_op(inner, true) -> return
+            index :: sema_scope_resolve_index(scopes, binding.name) ?? return
+            sema_scope_note_binding_edit(&scopes, index)
+            scopes.bindings[index].normalized_path_text = true
+        }
+    }
+}
+
+// `Path.normalize()` when `normalize`, else `Path.to_string()`.
+fn sema_stmt_is_path_op(operation: THandleOp, normalize: Bool) -> Bool Never! {
+    if operation == {
+        .PathNormalize -> normalize
+        .PathToString -> !normalize
+        else -> false
+    }
 }
 
 // `name :: comptime { value }` in a body is compile-time code
@@ -4047,13 +4073,19 @@ fn sema_stmt_compound_widens(source: Type, target: Type) -> Bool {
 // Rust `Stmt::Assign` and call arguments infer the value with the slot type
 // only as a hint, then widen a narrower numeric value into the slot
 // (`n = bytes[i]` with `n: Int`, `f(id.value)` of `U64` into `Int`). A name,
-// field, or index read has its own type whatever the hint, so it checks
-// without one and `sema_stmt_numeric_slot_value` fits it into the slot.
+// field, or index read, and a typed literal with a written numeric head
+// (`F32{1.5}` into a `Float` parameter), has its own type whatever the hint,
+// so it checks without one and `sema_stmt_numeric_slot_value` fits it into
+// the slot (D-NUMWIDEN-CROSS1=E).
 fn sema_stmt_numeric_slot_self_typed(expr: Expr, required: Type) -> Bool Never! {
     if !sema_expr_is_numeric(required) -> return false
     if expr == {
         .Ident(_, _, _) | .Field(_, _, _, _) | .Index(_, _, _, _, _) -> return true
         .Paren(inner, _, _) -> return sema_stmt_numeric_slot_self_typed(inner, required)
+        .TypedLit(head, _, _, _) -> {
+            if head == .Val(written) -> return sema_expr_is_numeric(written)
+            return false
+        }
         else -> return false
     }
 }

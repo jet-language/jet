@@ -457,7 +457,13 @@ fn jet_cli_ice_trap(census: &[JetDriverIceRow], program: &IRModule, key: String,
 // JET_KEEP_GOING the rows also go to JET_KEEP_GOING_REPORT after the front
 // end's.
 fn jet_cli_ice_census(file: String, census: [JetDriverIceRow]) -[FS, Env]> JetDriverVerbOutput Never! {
-    text :: "the Jet backend failed on `{file}`: {jet_driver_ice_text(census)}"
+    jet_cli_ice_report("the Jet backend failed on `{file}`", census)
+}
+
+// `summary` and every census row, exit 101 (the rows also reach
+// JET_KEEP_GOING_REPORT under JET_KEEP_GOING).
+fn jet_cli_ice_report(summary: String, census: [JetDriverIceRow]) -[FS, Env]> JetDriverVerbOutput Never! {
+    text :: "{summary}: {jet_driver_ice_text(census)}"
     if !jet_cli_keep_going_enabled() -> return jet_cli_ice(text)
     rows :: loop row in census -> jet_driver_ice_keep_going_row(row)
     problem :: jet_cli_keep_going_append(rows)
@@ -1599,16 +1605,24 @@ fn jet_cli_new_failed(code: String, what: String, fix: String, color: Bool) -> J
 // `jet new <name>` (CmdCompile.rs `run_new`): the folder and `.jet/`, then
 // package.jet, the lock, run.jet, the `overrides` command homes, and
 // .gitignore, each a failure of its own; the status lines go to stderr.
+// Every Jet file goes through the formatter first, so a fresh project already
+// passes `jet fmt --check`; a template the formatter rejects is a compiler fault.
 fn jet_cli_new_project(name: String, template: String, annotated: Bool, quiet: Bool, color: Bool) -> JetDriverVerbOutput {
     write_failed :: "correct the named problem, then run the command again"
+    manifest :: jet_cli_fmt_format_source(jet_cli_new_manifest(name, template, annotated), "{name}/package.jet", false, false, color)
+    if manifest.report != None || manifest.diagnostics.len() > 0 -> return jet_cli_ice("the `jet new` package.jet template does not format")
+    run_source :: jet_cli_fmt_format_source(jet_cli_new_run_source(template), "{name}/run.jet", false, false, color)
+    if run_source.report != None || run_source.diagnostics.len() > 0 -> return jet_cli_ice("the `jet new` run.jet template `{template}` does not format")
     cli_files.create_dir_all("{name}/.jet") ?? return jet_cli_new_failed("E2105", "couldn't create `{name}`/.jet: {err}", write_failed, color)
-    cli_files.write("{name}/package.jet", jet_cli_new_manifest(name, template, annotated)) ?? return jet_cli_new_failed("E2105", "couldn't write package.jet: {err}", write_failed, color)
+    cli_files.write("{name}/package.jet", manifest.text) ?? return jet_cli_new_failed("E2105", "couldn't write package.jet: {err}", write_failed, color)
     cli_files.write("{name}/.jet/lock", jet_cli_new_lock(name)) ?? return jet_cli_new_failed("E1206", "couldn't write .jet/lock", "check the project lock permissions: could not write `.jet/lock`: {err}", color)
-    cli_files.write("{name}/run.jet", jet_cli_new_run_source(template)) ?? return jet_cli_new_failed("E2105", "couldn't write run.jet: {err}", write_failed, color)
+    cli_files.write("{name}/run.jet", run_source.text) ?? return jet_cli_new_failed("E2105", "couldn't write run.jet: {err}", write_failed, color)
     homes := [String]{}
     if template == "overrides" {
         loop home in JET_CLI_NEW_COMMAND_HOMES {
-            cli_files.write("{name}/{home[0]}", home[1]) ?? return jet_cli_new_failed("E2105", "couldn't write {home[0]}: {err}", write_failed, color)
+            home_source :: jet_cli_fmt_format_source(home[1], "{name}/{home[0]}", false, false, color)
+            if home_source.report != None || home_source.diagnostics.len() > 0 -> return jet_cli_ice("the `jet new` {home[0]} template does not format")
+            cli_files.write("{name}/{home[0]}", home_source.text) ?? return jet_cli_new_failed("E2105", "couldn't write {home[0]}: {err}", write_failed, color)
             &homes.push(home[0])
         }
     }

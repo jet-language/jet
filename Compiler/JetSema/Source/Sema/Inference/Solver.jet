@@ -174,9 +174,14 @@ fn sema_inference_unify_inner(context: SemaInferenceContext, expected: Type, fou
     }
 }
 
-fn sema_inference_bound_value(graph: SemaRegistrationGraph?, context: &SemaInferenceContext, actual: Type, bound: String) -> Bool? {
-    if graph == .Val(graph_value) -> return sema_type_bound_satisfied_with_generics(graph_value, actual, bound, context.caller_module_identity, context.lexical_generic_params)
-    None
+// A bound names a trait of the callee's declaring module (`bound_module`),
+// which the caller need not see (`Transform.point<P: GeometryPoint>` called
+// from user code); the actual type resolves where the caller wrote it.
+fn sema_inference_bound_value(graph: SemaRegistrationGraph?, context: &SemaInferenceContext, actual: Type, bound: String, bound_module: String) -> Bool? {
+    graph_value :: graph ?? return None
+    if bound_module == "" || bound_module == context.caller_module_identity -> return sema_type_bound_satisfied_with_generics(graph_value, actual, bound, context.caller_module_identity, context.lexical_generic_params)
+    resolved :: sema_type_resolve_declared_recursive(graph_value, actual, sema_type_module_row(graph_value, context.caller_module_identity), context.lexical_generic_params)
+    sema_type_bound_satisfied_with_generics(graph_value, resolved, bound, bound_module, context.lexical_generic_params)
 }
 
 fn sema_inference_assignable(graph: SemaRegistrationGraph?, context: SemaInferenceContext, required: Type, offered: Type) -> Bool Never! {
@@ -201,7 +206,7 @@ fn sema_inference_validate_bounds(graph: SemaRegistrationGraph?, context: &SemaI
         actual :: sema_inference_binding_at(bindings, parameter.name) ?? return None
         concrete :: sema_inference_substitute_type_bindings(actual.ty, bindings)
         loop bound in parameter.bounds {
-            satisfied :: sema_inference_bound_value(graph, &context, concrete, bound) ?? {
+            satisfied :: sema_inference_bound_value(graph, &context, concrete, bound, parameter.bound_module) ?? {
                 &diagnostics.push(sema_error("E0904", span, "cannot resolve bound `{bound}` for `{parameter.name}`", "generic checking needs the registered trait or nominal implementation", "make the declaration's Registration graph available before this call"))
                 return None
             }

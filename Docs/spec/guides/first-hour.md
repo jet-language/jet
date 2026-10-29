@@ -81,9 +81,7 @@ The generated `run.jet` prints a greeting and carries one smoke `#Test`:
 ```jet
 fn greeting(name: String) -> String { "hello, {name}" }
 
-fn run() {
-    print(greeting("world"))
-}
+fn run() { print(greeting("world")) }
 
 #Test("the greeting stays stable") {
     assert_eq(greeting("world"), "hello, world")

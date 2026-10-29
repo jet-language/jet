@@ -1,53 +1,26 @@
-Warning [L0101] (unused_local_binding): Local binding `err` is never read.
+Warning [L0516] (message_text): The default HTTP body text limit is passed through a lower-level body call
   --> tests/ui_lint/message_text.jet:2:13
     |
   2 |     body :: req.body().text(1048576) ?? "fallback"
-    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: A binding that no later expression reads adds dead code and may hide a computed result that should have been used.
- Fix: Remove the binding when its initializer is side-effect free, or rename `err` to `_err` when the value must be computed.
-More: jet-lang.dev/e/L0101
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: `request.text()` and `response.text()` already read the body with the same default cap as `body().text(1048576)`
+ Fix: Replace `body().text(1048576)` with `text()`
+More: jet-lang.dev/e/L0516
 
-Warning [L0101] (unused_local_binding): Local binding `err` is never read.
-  --> tests/ui_lint/message_text.jet:3:16
-    |
-  3 |     smaller :: req.body().text(1024) ?? "fallback"
-    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: A binding that no later expression reads adds dead code and may hide a computed result that should have been used.
- Fix: Remove the binding when its initializer is side-effect free, or rename `err` to `_err` when the value must be computed.
-More: jet-lang.dev/e/L0101
-
-Warning [L0101] (unused_local_binding): Local binding `err` is never read.
-  --> tests/ui_lint/message_text.jet:6:93
-    |
-  6 |     #allow(message_text, "the fixture exercises suppression of this occurrence") allowed :: req.body().text(1048576) ?? "fallback"
-    |                                                                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: A binding that no later expression reads adds dead code and may hide a computed result that should have been used.
- Fix: Remove the binding when its initializer is side-effect free, or rename `err` to `_err` when the value must be computed.
-More: jet-lang.dev/e/L0101
-
-Warning [L0101] (unused_local_binding): Local binding `err` is never read.
+Warning [L0516] (message_text): The default HTTP body text limit is passed through a lower-level body call
   --> tests/ui_lint/message_text.jet:14:5
     |
  14 |     response.body().text(1048576) ?? "fallback"
-    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: A binding that no later expression reads adds dead code and may hide a computed result that should have been used.
- Fix: Remove the binding when its initializer is side-effect free, or rename `err` to `_err` when the value must be computed.
-More: jet-lang.dev/e/L0101
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: `request.text()` and `response.text()` already read the body with the same default cap as `body().text(1048576)`
+ Fix: Replace `body().text(1048576)` with `text()`
+More: jet-lang.dev/e/L0516
 
-Warning [L0101] (unused_local_binding): Local binding `err` is never read.
-  --> tests/ui_lint/message_text.jet:18:5
-    |
- 18 |     req.body().bytes(1048576) ?? []
-    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: A binding that no later expression reads adds dead code and may hide a computed result that should have been used.
- Fix: Remove the binding when its initializer is side-effect free, or rename `err` to `_err` when the value must be computed.
-More: jet-lang.dev/e/L0101
-
-Warning [L0101] (unused_local_binding): Local binding `err` is never read.
+Warning [L0516] (message_text): The default HTTP body text limit is passed through a lower-level body call
   --> tests/ui_lint/message_text.jet:5:22
     |
   5 |     from_constant :: req.body().text(exact) ?? "fallback"
-    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
- Why: A binding that no later expression reads adds dead code and may hide a computed result that should have been used.
- Fix: Remove the binding when its initializer is side-effect free, or rename `err` to `_err` when the value must be computed.
-More: jet-lang.dev/e/L0101
+    |                      ^^^^^^^^^^^^^^^^^^^^^^
+ Why: `request.text()` and `response.text()` already read the body with the same default cap as `body().text(1048576)`
+ Fix: Replace `body().text(1048576)` with `text()`
+More: jet-lang.dev/e/L0516

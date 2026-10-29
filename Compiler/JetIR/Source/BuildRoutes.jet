@@ -1976,6 +1976,10 @@ fn ir_closure_sort(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: In
     err_row :: ir_value_type(&m, p, err_ty) ?? return ir_type_fail(&b, span, err_ty)
     kind :: ir_map_key_kind(m, key_row)
     if by_key && kind == "" -> return ir_fail_slot(&b, span, "sort_by with a {ir_type_name(key_ty)} key")
+    // An owning key that closes retires through its Close glue rather than
+    // a plain drop.
+    close_glue :: if by_key -> ir_close_glue(&m, p, &b, key_row, false, span) else -> -1
+    if ir_failed(b) -> return -1
     // A comparator value of a `Ordering Never!` function hands back its
     // Result carrier (ir_function_value); the order is its Ok payload.
     order_ty :: ir_never_carrier_success(ret) ?? ret
@@ -2018,7 +2022,13 @@ fn ir_closure_sort(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: In
     fill_at :: ir_element_address(&m, &b, order, fill.index, 8)
     ir_emit(&b.f, IROp.Store, -1, fill_at, 0, fill.index, b.line)
     if by_key {
+        // The key callback's stop point is the sort's own: a key Stop retires
+        // exactly the initialized prefix (ir_sort_key_stop).
+        stopping :: b.stopping
+        b.stopping = true
         called :: ir_call_closure(&m, &b, callback, [Int]{fill.item}, ret_row)
+        b.stopping = stopping
+        ir_sort_key_stop(&m, &b, keys, key_row, key_stride, computed, close_glue, [(data: Int, bytes: Int)]{(data: order, bytes: order_bytes), (data: keys, bytes: key_bytes)})
         b.fresh[called] = false
         key_address :: ir_element_address(&m, &b, keys, fill.index, key_stride)
         if fallible {
@@ -2155,6 +2165,16 @@ fn ir_closure_sort(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: In
     ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
     ir_end(&b.f, b.line)
     ir_end(&b.f, b.line)
+    // Every comparison has completed: owning keys retire in sorted key order.
+    if close_glue >= 0 {
+        retired :: ir_count_open(&m, &b, length)
+        sorted_at :: ir_element_address(&m, &b, source, retired, 8)
+        origin_key :: ir_load_word(&m, &b, sorted_at, 0)
+        retired_at :: ir_element_address(&m, &b, keys, origin_key, key_stride)
+        retiring :: ir_load_at(&m, &b, retired_at, 0, key_row)
+        ir_close_call(&b, close_glue, retiring)
+        ir_count_close(&m, &b, retired)
+    }
 
     // The elements move to their sorted places (source[new] = old) through
     // a scratch buffer.
@@ -2176,21 +2196,66 @@ fn ir_closure_sort(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: In
         success :: ir_result_box(&m, p, &b, ty, true, -1)
         ir_emit(&b.f, IROp.Copy, outcome, success, -1, -1, b.line)
     }
+    // A key's Err retires only the initialized prefix, in input order.
+    if close_glue >= 0 {
+        ir_else(&b.f, b.line)
+        ir_sort_keys_close(&m, &b, keys, key_row, key_stride, computed, close_glue)
+    }
     ir_end(&b.f, b.line)
 
-    // Every computed key is dropped with the buffers.
-    if by_key && m.types[key_row].drop != "" {
-        dropped :: ir_count_open(&m, &b, computed)
-        stale_at :: ir_element_address(&m, &b, keys, dropped, key_stride)
-        stale :: ir_load_at(&m, &b, stale_at, 0, key_row)
-        ir_emit(&b.f, IROp.Drop, -1, stale, -1, -1, b.line)
-        ir_count_close(&m, &b, dropped)
-    }
+    // Every computed key, closed or not, is dropped with the buffers.
+    if by_key -> ir_sort_keys_drop(&m, &b, keys, key_row, key_stride, computed)
     ir_free(&m, &b, order, order_bytes)
     if by_key -> ir_free(&m, &b, keys, key_bytes)
     if ir_is_result(ty) -> return outcome
     b.fresh[outcome] = false
     return -1
+}
+
+// Closes keys[0..count] (each `key_stride` bytes, type row `key_row`) in
+// input order through Close glue `glue`.
+fn ir_sort_keys_close(m: &IRModule, b: &IRBuilder, keys: Int, key_row: Int, key_stride: Int, count: Int, glue: Int) Never! {
+    at :: ir_count_open(&m, &b, count)
+    address :: ir_element_address(&m, &b, keys, at, key_stride)
+    key :: ir_load_at(&m, &b, address, 0, key_row)
+    ir_close_call(&b, glue, key)
+    ir_count_close(&m, &b, at)
+}
+
+// Drops keys[0..count] in input order when their type drops.
+fn ir_sort_keys_drop(m: &IRModule, b: &IRBuilder, keys: Int, key_row: Int, key_stride: Int, count: Int) Never! {
+    if m.types[key_row].drop == "" -> return
+    at :: ir_count_open(&m, &b, count)
+    address :: ir_element_address(&m, &b, keys, at, key_stride)
+    key :: ir_load_at(&m, &b, address, 0, key_row)
+    ir_emit(&b.f, IROp.Drop, -1, key, -1, -1, b.line)
+    ir_count_close(&m, &b, at)
+}
+
+// The stop point after a key callback (ir_stop_point): a stop first closes
+// and drops the keys computed before it (`count`, in input order) and frees
+// the sort's buffers, then leaves by the stop edge.
+fn ir_sort_key_stop(m: &IRModule, b: &IRBuilder, keys: Int, key_row: Int, key_stride: Int, count: Int, glue: Int, buffers: [(data: Int, bytes: Int)]) Never! {
+    if !m.stop_points || b.stopping -> return
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    stopped :: ir_temp(&m, &b, bool_row)
+    poll :: ir_stop_poll(&m, IR_STOP_POLL_KEY)
+    start :: ir_args(&b.f, [Int]{})
+    ir_emit(&b.f, IROp.Call, stopped, poll, start, 0, b.line)
+    ir_open_if(&b.f, stopped, b.line)
+    b.stopping = true
+    word_row :: ir_word_row(&m)
+    saved :: ir_runtime(&m, &b, "jet_rt_cleanup_enter", [Int]{}, word_row)
+    if glue >= 0 -> ir_sort_keys_close(&m, &b, keys, key_row, key_stride, count, glue)
+    ir_sort_keys_drop(&m, &b, keys, key_row, key_stride, count)
+    loop buffer in buffers {
+        ir_free(&m, &b, buffer.data, buffer.bytes)
+    }
+    _ :: ir_runtime(&m, &b, "jet_rt_cleanup_leave", [Int]{saved}, -1)
+    b.stopping = false
+    ir_stop_catches(&m, &b)
+    ir_stop_return(&m, &b)
+    ir_end(&b.f, b.line)
 }
 
 // min(width, remaining) as a native word.

@@ -27,12 +27,31 @@ fn pkg_format_source(text: String, origin: String) -> String PackageFormatError!
     }
     entries :: pkg_top_level_entries(text)
     if entries.len() == 0 -> return Err(PackageFormatError{message: "Package or Config source has no fields"})
-    formatted := [String]{}
-    loop entry in entries -> &formatted.push(pkg_format_package_entry(entry, 0))
     separator :: if pkg_package_top_level_comma(text) != None -> ",\n" else -> "\n"
-    body := formatted.join(separator)
+    // A blank line between two top-level fields stays (one at most): it
+    // groups the manifest the way its author wrote it (`deps: {}` apart).
+    body := ""
+    cursor := 0
+    loop (index, entry) in entries {
+        found :: pkg_binder_tail(text, cursor).find(entry)
+        start :: if found < 0 -> cursor else -> cursor + found
+        if index > 0 {
+            body = "{body}{separator}"
+            if pkg_format_newlines(pkg_binder_slice(text, cursor, start)) > 1 -> body = "{body}\n"
+        }
+        body = "{body}{pkg_format_package_entry(entry, 0)}"
+        if found >= 0 -> cursor = start + entry.bytes().len()
+    }
     if pkg_package_has_trailing_top_level_comma(text) -> body = "{body},"
     Ok("{body}\n")
+}
+
+fn pkg_format_newlines(gap: String) -> Int Never! {
+    count := 0
+    loop byte in gap.bytes() {
+        if byte == (U8{10}) -> count += 1
+    }
+    count
 }
 
 fn pkg_trim_entry_terminators(value: String) -> String Never! {

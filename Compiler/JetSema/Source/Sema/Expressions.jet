@@ -401,10 +401,15 @@ fn sema_expr_numeric_literal_conversion(value: TExpr, target: Type, span: Span, 
     sema_expr_numeric_conversion(value, target, span, line)
 }
 
+// The exact number a type is, by identity: the root name a literal carries
+// (`Decimal`) and the canonical Core identity a `core.math` hook returns
+// (`core.math::Decimal`) are one type.
 fn sema_expr_precise_name(ty: Type) -> String? {
     if ty == {
         .Named(name) -> {
-            if name == "Decimal" || name == "Fraction" || name == "Complex" -> return Val(name)
+            leaf := name
+            if name.cut_last("::") == .Val(parts) && core_source_owns_type(name) -> leaf = parts.after
+            if leaf == "Decimal" || leaf == "Fraction" || leaf == "Complex" -> return Val(leaf)
         }
         else -> {}
     }
@@ -698,7 +703,10 @@ fn sema_expr_operator_nominal_impl_candidates(graph: SemaRegistrationGraph, impl
     if !sema_expr_operator_target_matches(implementation, nominal) -> return
     if implementation.trait_name != (Val(trait_name)) -> return
     if require_commutative && implementation.operator_marker != (Val(OperatorMarker.Commutative)) -> return
-    qualified_rhs :: sema_inference_substitute_type_bindings(implementation.operator_rhs ?? owner_type, substitutions)
+    // The authored right-hand type resolves in the impl's module, like the
+    // source blocks' (`impl Point2.Add(Delta2<T, Space>)` matched against a
+    // canonical `core.math::Delta2<Float, World>` operand).
+    qualified_rhs :: if implementation.operator_rhs == .Val(authored) -> sema_inference_substitute_type_bindings(sema_type_resolve_declared(graph, authored, implementation.source_module_identity), substitutions) else -> owner_type
     if !sema_expr_operator_rhs_matches(Val(qualified_rhs), rhs_type) -> return
     trait_symbol := implementation.trait_symbol
     if trait_symbol == None -> trait_symbol = sema_type_graph_trait_symbol(graph, implementation.source_module_identity, trait_name)
@@ -3464,6 +3472,7 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
     context.allow_string_view_read = previous_string_view_read
     scopes.ownership_call_depth -= 1
     receiver_value :: receiver_checked ?? return None
+    if method == "text" -> sema_expr_lint_default_body_text(receiver, receiver_value.ty, args, scopes, &diagnostics)
     // `.call(...)` on a function-typed receiver is the builtin
     // call projection, checked exactly like calling the value directly
     // (mirrors Rust CheckerInfer/calls/method_calls.rs METHOD_CALL on Type::Fn).
@@ -4030,7 +4039,109 @@ fn sema_expr_missing_operator_hook(op: BinOp, owner: Type, span: Span) -> Diagno
     sema_error("E0360", span, "no `{sema_expr_binary_name(op)}` operator is defined for `{name}`", "user arithmetic dispatches only through one `impl {name}.{trait_name}` hook", "implement `{name}.{trait_name}`, or call a named method")
 }
 
+// L0516 (D-HTTP-TEXT1=A): `request.body().text(limit)` with the default
+// limit repeats what `request.text()` / `response.text()` already do.
+// The default is Core/Http/Http.jet `C_MAX_BODY_BYTES`.
+SEMA_HTTP_DEFAULT_TEXT_LIMIT :: 1048576
+
+fn sema_expr_lint_default_body_text(receiver: Expr, receiver_type: Type, args: [CallArg], scopes: SemaScopeTable, diagnostics: &[Diagnostic]) Never! {
+    if args.len() != 1 -> return
+    start := 0
+    if receiver == .MethodCall(owner, receiver_method, _, _, _, _, _) {
+        if receiver_method != "body" -> return
+        start = expr_span(owner).start
+    } else {
+        return
+    }
+    if receiver_type == .Named(name) {
+        if sema_call_reflection_leaf_name(name) != "Body" -> return
+    } else {
+        return
+    }
+    limit :: sema_expr_lint_int_constant(args[0].expr, scopes) ?? return
+    if limit != SEMA_HTTP_DEFAULT_TEXT_LIMIT -> return
+    span :: Span{start: start, end: expr_span(args[0].expr).end + 1}
+    &diagnostics.push(sema_lint("L0516", span, "The default HTTP body text limit is passed through a lower-level body call", "`request.text()` and `response.text()` already read the body with the same default cap as `body().text({SEMA_HTTP_DEFAULT_TEXT_LIMIT})`", "Replace `body().text({SEMA_HTTP_DEFAULT_TEXT_LIMIT})` with `text()`"))
+}
+
+// An integer a lint can read without running code: a literal, a product of
+// such integers, or a `name :: comptime { … }` local already folded.
+fn sema_expr_lint_int_constant(expr: Expr, scopes: SemaScopeTable) -> Int? {
+    if expr == {
+        .Int(value, _, _, _, _) -> { return Val(value) }
+        .Paren(inner, _, _) -> { return sema_expr_lint_int_constant(inner, scopes) }
+        .Binary(op, left, right, _, _) -> {
+            if op != BinOp.Mul -> return None
+            lhs :: sema_expr_lint_int_constant(left, scopes) ?? return None
+            rhs :: sema_expr_lint_int_constant(right, scopes) ?? return None
+            return Val(lhs * rhs)
+        }
+        .Ident(name, _, _) -> {
+            index :: sema_scope_resolve_index(scopes, name) ?? return None
+            if scopes.bindings[index].prepared == .Val(known) {
+                if known == .Int(value) -> return Val(value)
+            }
+            return None
+        }
+        else -> { return None }
+    }
+}
+
+// L0517 (D-PATH-CONTAINMENT1=A): `child != base && !child.starts_with("{base}/")`
+// over the texts of two typed normalized Paths repeats the separator-aware
+// lexical containment `Path.is_within()` owns.
+fn sema_expr_lint_path_prefix(op: BinOp, left: Expr, right: Expr, span: Span, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) Never! {
+    if op != BinOp.And -> return
+    child := ""
+    base := ""
+    if left == .Binary(left_op, left_child, left_base, _, _) {
+        if left_op != BinOp.Ne -> return
+        child = sema_expr_lint_ident(left_child)
+        base = sema_expr_lint_ident(left_base)
+    }
+    if child == "" || base == "" -> return
+    if right == .Unary(right_op, call, _, _) {
+        if right_op != UnOp.Not -> return
+        if call == .MethodCall(call_receiver, call_method, _, _, _, call_args, _) {
+            if call_method != "starts_with" || call_args.len() != 1 || sema_expr_lint_ident(call_receiver) != child -> return
+            if !sema_expr_lint_dir_prefix(call_args[0].expr, base) -> return
+        } else {
+            return
+        }
+    } else {
+        return
+    }
+    if !sema_expr_lint_normalized_path_text(child, scopes) || !sema_expr_lint_normalized_path_text(base, scopes) -> return
+    &diagnostics.push(sema_lint("L0517", span, "A typed normalized Path is checked with a string prefix", "`Path.is_within()` owns separator-aware lexical containment; converting both paths to strings repeats that policy", "Replace the string comparison with `Path.is_within()`"))
+}
+
+// `"{base}/"`: the text of `base` followed by one separator.
+fn sema_expr_lint_dir_prefix(expr: Expr, base: String) -> Bool Never! {
+    if expr == .Str(parts, _, _) {
+        if parts.len() != 2 -> return false
+        if parts[0] == .Interp(part, _) {
+            if sema_expr_lint_ident(part) != base -> return false
+        } else {
+            return false
+        }
+        if parts[1] == .Lit(text) -> return text == "/"
+    }
+    false
+}
+
+fn sema_expr_lint_ident(expr: Expr) -> String Never! {
+    // copy: the name is returned past the read-only `expr` it lives in.
+    if expr == .Ident(name, _, _) -> return name.copy()
+    ""
+}
+
+fn sema_expr_lint_normalized_path_text(name: String, scopes: SemaScopeTable) -> Bool Never! {
+    index :: sema_scope_resolve_index(scopes, name) ?? return false
+    scopes.bindings[index].normalized_path_text
+}
+
 fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    sema_expr_lint_path_prefix(op, left, right, span, scopes, &diagnostics)
     checked_lhs := sema_check_expression(left, sema_expr_decimal_lhs_expected(op, left, right, expected, environment, program, &scopes, &state, &tail_store, &context), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     rhs_expected := Type?{None}
     if {
@@ -4736,7 +4847,9 @@ fn sema_expr_subject_shorthand(expr: Expr, expected: Type?, context: SemaCheckCo
         span :: expr_span(expr)
         chain :: sema_expr_bare_member_chain_text(expr)
         if context.subject_shorthand_depth > 0 -> &diagnostics.push(sema_lint("L0512", span, "subject shorthand `{chain}` is nested inside another subject shorthand", "implicit subjects become hard to track when shorthand scopes nest", "rewrite it with a named binding: `(item) -> item{chain}`"))
-        subject :: "__jet_subject"
+        // A nested shorthand's subject is its own parameter: Jet names never
+        // shadow, so each nesting depth spells a distinct generated name.
+        subject :: if context.subject_shorthand_depth == 0 -> "__jet_subject" else -> "__jet_subject_{context.subject_shorthand_depth}"
         // The reference spans the parameter at the chain's node (its last
         // member); the subject the chain reads is spanned at its leading `.`,
         // and a name resolves only at or after its declaration, so the

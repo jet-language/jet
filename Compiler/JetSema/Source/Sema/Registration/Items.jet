@@ -304,6 +304,8 @@ struct SemaRegistrationGenericParam {
     bounds: [String]
     span: Span
     identity_key: String
+    // The declaring module, where the bounds' trait names resolve.
+    module_identity: String
 }
 
 struct SemaRegistrationParameter {
@@ -921,7 +923,9 @@ fn sema_registration_generic_identity(owner_key: String, params: [SemaRegistrati
     "{owner_key}<{parts.join(",")}>"
 }
 
-fn sema_registration_generic_params(type_params: [TypeParam], owner_key: String, diagnostics: &[Diagnostic]) -> [SemaRegistrationGenericParam] {
+// `module_identity` is the declaring module: the bounds' trait names resolve
+// there, whichever module calls the declaration.
+fn sema_registration_generic_params(type_params: [TypeParam], owner_key: String, module_identity: String, diagnostics: &[Diagnostic]) -> [SemaRegistrationGenericParam] {
     params := [SemaRegistrationGenericParam]{}
     loop (index, parameter) in type_params {
         // `<comptime N: Int>` parses into `TypeParam.prep`, but
@@ -946,6 +950,7 @@ fn sema_registration_generic_params(type_params: [TypeParam], owner_key: String,
             bounds: parameter.bounds,
             span: parameter.name_span,
             identity_key: "{owner_key}<{index}:{parameter.name}[{bound_key}]>",
+            module_identity: module_identity,
         })
     }
     params
@@ -1152,7 +1157,7 @@ fn sema_registration_function(func: Func, raw_protocol_return: Bool, module_iden
         ty: Val(signature),
         visibility: visibility,
     }
-    generic_params :: sema_registration_generic_params(func.type_params, symbol.id.key, &diagnostics)
+    generic_params :: sema_registration_generic_params(func.type_params, symbol.id.key, module_identity, &diagnostics)
     generic_identity_key :: sema_registration_generic_identity(symbol.id.key, generic_params)
     abi :: sema_registration_callable_abi_for_func(func)
     parameters :: sema_registration_function_parameters(func, module_identity, symbol.id, signature)
@@ -1654,7 +1659,7 @@ fn sema_registration_nominal(item: Item, module_identity: String, fallback_sourc
         .Struct(definition) -> {
             ty :: sema_registration_nominal_type(definition.name, definition.type_params)
             symbol :: sema_registration_named_symbol(module_identity, definition.name, definition.name_span, SymbolKind.Type, Val(ty), definition.is_pub, definition.is_package_pub)
-            generic_params :: sema_registration_generic_params(definition.type_params, symbol.id.key, &diagnostics)
+            generic_params :: sema_registration_generic_params(definition.type_params, symbol.id.key, module_identity, &diagnostics)
             generic_identity_key :: sema_registration_generic_identity(symbol.id.key, generic_params)
             methods := [SemaRegistrationFunction]{}
             loop method in definition.methods -> &methods.push(sema_registration_function(method, false, module_identity, Val(symbol.id), fallback_source_file, fallback_source_origin, source_segments, &diagnostics))
@@ -1670,7 +1675,7 @@ fn sema_registration_nominal(item: Item, module_identity: String, fallback_sourc
         .Enum(definition) -> {
             ty :: sema_registration_nominal_type(definition.name, definition.type_params)
             symbol :: sema_registration_named_symbol(module_identity, definition.name, definition.name_span, SymbolKind.Type, Val(ty), definition.is_pub, definition.is_package_pub)
-            generic_params :: sema_registration_generic_params(definition.type_params, symbol.id.key, &diagnostics)
+            generic_params :: sema_registration_generic_params(definition.type_params, symbol.id.key, module_identity, &diagnostics)
             generic_identity_key :: sema_registration_generic_identity(symbol.id.key, generic_params)
             methods := [SemaRegistrationFunction]{}
             loop method in definition.methods -> &methods.push(sema_registration_function(method, false, module_identity, Val(symbol.id), fallback_source_file, fallback_source_origin, source_segments, &diagnostics))
@@ -1692,7 +1697,7 @@ fn sema_registration_nominal(item: Item, module_identity: String, fallback_sourc
         .TypeAlias(definition) -> {
             ty :: sema_registration_nominal_type(definition.name, definition.type_params)
             symbol :: sema_registration_named_symbol(module_identity, definition.name, definition.name_span, SymbolKind.Type, Val(ty), definition.is_pub, definition.is_package_pub)
-            generic_params :: sema_registration_generic_params(definition.type_params, symbol.id.key, &diagnostics)
+            generic_params :: sema_registration_generic_params(definition.type_params, symbol.id.key, module_identity, &diagnostics)
             Val(SemaRegistrationNominal{symbol: symbol, kind: SemaRegistrationNominalKind.TypeAlias, source: SemaRegistrationNominalSource.SourceAST{value: item}, ty: ty, identity: type_identity(ty), identity_key: sema_registration_identity_key(module_identity, ty), generic_params: generic_params, generic_identity_key: sema_registration_generic_identity(symbol.id.key, generic_params), fields: [SemaRegistrationField]{}, variants: [SemaRegistrationVariant]{}, methods: [SemaRegistrationFunction]{}, trait_methods: [SemaRegistrationTraitMethod]{}, compiler_owned: false, generated_provenance: None})
         }
         .Trait(definition) -> {

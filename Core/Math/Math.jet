@@ -997,6 +997,7 @@ impl Fraction {
     fn numerator(self) -> Int Never! { __fraction_numerator(self) }
     fn denominator(self) -> Int Never! { __fraction_denominator(self) }
     fn to_string(self) -> String Never! { __fraction_to_string(self) }
+    fn to_float(self) -> Float Never! { __fraction_to_float(self) }
     fn is_zero(self) -> Bool Never! { __fraction_is_zero(self) }
 }
 impl Fraction.Add {
@@ -2038,9 +2039,16 @@ fn __complex_div(left: Complex, right: Complex) -> Complex Never! {
     denominator :: right.real * right.real + right.imaginary * right.imaginary
     __complex_from_parts((left.real * right.real + left.imaginary * right.imaginary) / denominator, (left.imaginary * right.real - left.real * right.imaginary) / denominator)
 }
+// A part renders in the shortest display spelling: a whole value drops its
+// ".0" (`3 - 0i`, not `3.0 - 0.0i`).
+fn __complex_part_text(value: Float) -> String Never! {
+    text :: "{value}"
+    if text.ends_with(".0") && text.cut_last(".") == .Val(parts) -> return parts.before
+    text
+}
 fn __complex_to_string(value: Complex) -> String Never! {
     sign :: if sign_bit(value.imaginary) -> "-" else -> "+"
-    "{value.real} {sign} {abs_float(value.imaginary)}i"
+    "{__complex_part_text(value.real)} {sign} {__complex_part_text(abs_float(value.imaginary))}i"
 }
 impl Decimal.Display {
     fn display(self) -> String { __decimal_to_string(self) }
@@ -2050,6 +2058,23 @@ impl Fraction.Display {
 }
 impl Complex.Display {
     fn display(self) -> String { __complex_to_string(self) }
+}
+// Complex has no order (D-TRAIT-OVERLOAD1=A); its arithmetic hooks and its
+// magnitude are source methods like Fraction's and Decimal's.
+impl Complex {
+    fn abs(self) -> Float Never! { __complex_abs(self) }
+}
+impl Complex.Add {
+    fn add(self, rhs: Complex) -> Complex Never! { __complex_add(self, rhs) }
+}
+impl Complex.Sub {
+    fn sub(self, rhs: Complex) -> Complex Never! { __complex_sub(self, rhs) }
+}
+impl Complex.Mul {
+    fn mul(self, rhs: Complex) -> Complex Never! { __complex_mul(self, rhs) }
+}
+impl Complex.Div {
+    fn div(self, rhs: Complex) -> Complex Never! { __complex_div(self, rhs) }
 }
 
 #Test("Source exact rendering preserves decimal scale and quotient form") {

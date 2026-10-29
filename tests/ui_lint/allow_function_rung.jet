@@ -1,0 +1,23 @@
+// D-LINTPOLICY1 function rung (ladder L-09): `#allow(lint, "why")` on a
+// function silences that lint in the whole body, and only that lint.
+#allow(subject_shorthand_nesting, "the fixture exercises the function rung")
+fn allowed_lengths(words: [[String]]) -> [[Int]] {
+    words.map(.map(.len()))
+}
+
+#allow(float_money, "a different lint leaves this one reported")
+fn other_lint(words: [[String]]) -> [[Int]] {
+    words.map(.map(.len()))
+}
+
+struct Price {
+    #allow(float_money, "the fixture exercises the field rung")
+    amount: Float
+}
+
+fn run() {
+    words :: [["a", "bb"]]
+    print(allowed_lengths(words))
+    print(other_lint(words))
+    print(Price{amount: 2.5}.amount)
+}

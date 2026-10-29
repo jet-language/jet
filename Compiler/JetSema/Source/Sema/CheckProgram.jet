@@ -8658,10 +8658,13 @@ fn sema_finalize_graph(resolved: ^SemaRegistrationGraph, trail: &SemaGraphTrail,
     if trace_sink == .Val(sink) -> sink.end("sema.names", names.references.len())
     // Core modules are checked in the same bundle so their errors keep the
     // program honest, but Core is library source: its lints are not the
-    // user's to act on and never reach user output.
+    // user's to act on and never reach user output. A lint inside a site
+    // `#allow` for it is the author's recorded decision (LintAllowances.jet).
+    allowances := [SemaLintAllowance]{}
+    loop source_module in final_graph.modules -> sema_lint_allowances(source_module.program, source_module.source_segments, &allowances)
     reported := [Diagnostic]{}
     loop diagnostic in diagnostics {
-        if !sema_core_source_lint(diagnostic) -> &reported.push(diagnostic)
+        if !sema_core_source_lint(diagnostic) && !sema_lint_allowed(diagnostic, allowances) -> &reported.push(diagnostic)
     }
     diagnostics = reported
     programs := [Program]{}

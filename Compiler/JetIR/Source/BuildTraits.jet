@@ -41,7 +41,9 @@ fn ir_trait_receiver(m: IRModule, p: IRProgram, receiver: Type, method: TMethodR
 
 // The function a method call names: its own checked row, else the trait
 // implementation of the concrete receiver (a bounded generic's receiver is
-// concrete per instance).
+// concrete per instance). An implementation for the receiver's exact type
+// wins; else the generic owner's (`impl Point2.Trait` for a `Point2<Float, W>`
+// receiver), whose instance the call builds from the receiver's arguments.
 fn ir_method_key(m: IRModule, p: IRProgram, receiver: Type, method: TMethodRef) -> String Never! {
     if ir_function_row(p, method.symbol.key) != None -> return method.symbol.key.copy()
     owner :: method.trait_owner ?? return method.symbol.key.copy()
@@ -51,7 +53,20 @@ fn ir_method_key(m: IRModule, p: IRProgram, receiver: Type, method: TMethodRef) 
         implementer :: ir_trait_implementer(p, row, owner) ?? next
         if ir_trait_identity(p, implementer) == concrete -> return p.functions[row].key.copy()
     }
+    head :: ir_trait_head_identity(p, receiver) ?? return method.symbol.key.copy()
+    loop row in candidates {
+        implementer :: ir_trait_implementer(p, row, owner) ?? next
+        implementer_head :: ir_trait_head_identity(p, implementer) ?? ir_trait_identity(p, implementer)
+        if implementer_head == head -> return p.functions[row].key.copy()
+    }
     method.symbol.key.copy()
+}
+
+// The identity of generic application `ty`'s nominal head, None for any
+// other type.
+fn ir_trait_head_identity(p: IRProgram, ty: Type) -> String? Never! {
+    if ir_untag(ty) == .Apply(name, _) -> return Val(ir_trait_identity(p, Type.Named{name: name.copy()}))
+    None
 }
 
 // The concrete owner of function `row` when it implements a method of the

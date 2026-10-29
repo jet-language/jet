@@ -1988,12 +1988,13 @@ fn sema_expression_typed_literal_float_to_integer(head: Type, offered: Type, spa
 
 // Integer heads own an explicit conversion, including narrowing fixed carriers.
 // A changed result annotation alone cannot change the value's representation.
+// A `Float` head widens an `F32` value (D-NUMWIDEN-CROSS1=E).
 fn sema_expression_typed_literal_fixed_conversion(source: Type, head: Type) -> Bool {
     if source == .IntN(_, _) {
         if head == Type.Int -> return true
         if head == .IntN(_, _) -> return source != head
     }
-    false
+    source == Type.Float32 && head == Type.Float
 }
 
 // `Float{0.5}` / `F32{-1.5}`: the machine-float head is the decimal literal's

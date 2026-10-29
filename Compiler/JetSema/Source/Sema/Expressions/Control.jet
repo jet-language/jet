@@ -784,6 +784,14 @@ fn sema_expression_propagation_conversion(operand_ty: Type, source_expr: Expr?, 
             }
             callee :: sema_failure_callee(source_expr, environment, program, scopes)
             sema_failure_record_edge(callee, &context)
+            // A callback whose expected return row is a plain value has no
+            // failure route of its own: an unannotated callee's failure is an
+            // obligation the bundle failure solve settles, as in a named
+            // `T Never!` body, never the callback's inferred carrier.
+            if context.callback_return_closed && context.inferred_failure_carrier == None && scopes.failure_carrier == None && callee == .Val(found) && found.inferable {
+                &diagnostics.push(sema_failure_no_carrier(error, span, implicit))
+                return sema_failure_defer_obligation(callee, &diagnostics)
+            }
             target :: sema_failure_parent_error(error, scopes, &context) ?? {
                 &diagnostics.push(sema_failure_no_carrier(error, span, implicit))
                 return sema_failure_defer_obligation(callee, &diagnostics)

@@ -376,8 +376,10 @@ fn sema_function_header_supported(function: Func, context: &SemaCheckContext) ->
         // `#WasmExport` marker is the parsed `function.web_marker`, which
         // WebPartition.jet checks. A `#State`/`#Transition` marker is the
         // parsed `function.state_requires`/`state_transition`, which
-        // StateFacts.jet validates and Typestate.jet checks at each call.
-        if sema_function_header_marker_projected(marker.name) || (marker.name == "Reactive" && function.is_reactive) || (marker.name == "Kernel" && function.kernel != None) || marker.name == "Memo" || ((marker.name == "Target" || marker.name == "WasmExport") && function.web_marker != None) || (marker.name == "State" && function.state_requires != None) || (marker.name == "Transition" && function.state_transition != None) || sema_marker_is_guest_export(marker) -> next
+        // StateFacts.jet validates and Typestate.jet checks at each call. An
+        // `#allow(lint, "why")` is a lint allowance over the body
+        // (LintAllowances.jet), validated by MarkerRules.
+        if sema_function_header_marker_projected(marker.name) || (marker.name == "Reactive" && function.is_reactive) || (marker.name == "Kernel" && function.kernel != None) || marker.name == "Memo" || marker.name == "allow" || ((marker.name == "Target" || marker.name == "WasmExport") && function.web_marker != None) || (marker.name == "State" && function.state_requires != None) || (marker.name == "Transition" && function.state_transition != None) || sema_marker_is_guest_export(marker) -> next
         // A user-declared marker is metadata its declaration describes; it
         // has no compiler meaning for the body check or lowering to read.
         if marker.declaration_module != None -> next

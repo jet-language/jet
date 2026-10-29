@@ -38,6 +38,13 @@ fn scalar_range_exclusive(value: I64) -> Bool { (scalar_reflect_word(value + SCA
 #Export(c) fn jet_rt_record_get_jet_range_start(value: I64) -> I64 { jet_int_owned_from_i64(scalar_reflect_word(value + SCALAR_RANGE_START)) }
 #Export(c) fn jet_rt_record_get_jet_range_end(value: I64) -> I64 { jet_int_owned_from_i64(scalar_reflect_word(value + SCALAR_RANGE_END)) }
 #Export(c) fn jet_rt_record_get_jet_range_exclusive(value: I64) -> Bool { scalar_range_exclusive(value) }
+// `band.contains(n)` on a `Range` value: the record's native bounds against
+// the owned Int `carrier`.
+#Export(c) fn jet_range_value_contains(value: I64, carrier: I64) -> Bool {
+    needle :: jet_int_owned_to_i64(carrier)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return false
+    jet_range_contains(scalar_reflect_word(value + SCALAR_RANGE_START), scalar_reflect_word(value + SCALAR_RANGE_END), if scalar_range_exclusive(value) -> U8{1} else -> U8{0}, needle)
+}
 #Export(c) fn jet_rt_handle_show_jet_range(value: I64) -> I64 {
     // Values76-106 -> RangeBounds70-71 -> StructuralDebug91-120/310-319.
     target :: jet_rt_string_builder_new()

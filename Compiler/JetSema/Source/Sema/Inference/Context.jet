@@ -16,6 +16,9 @@ struct SemaInferenceTypeParam {
     bounds: [String]
     span: Span
     identity_key: String
+    // The declaring module, where `bounds` name their traits ("": the
+    // caller's own declaration or a Core signature's unbounded parameter).
+    bound_module: String
 }
 
 struct SemaInferenceBinding {
@@ -61,12 +64,12 @@ struct SemaInferenceResult {
 }
 
 fn sema_inference_type_params(parameters: [TypeParam]) -> [SemaInferenceTypeParam] Never! {
-    result :: loop parameter in parameters -> SemaInferenceTypeParam{name: parameter.name, bounds: parameter.bounds, span: parameter.name_span, identity_key: ""}
+    result :: loop parameter in parameters -> SemaInferenceTypeParam{name: parameter.name, bounds: parameter.bounds, span: parameter.name_span, identity_key: "", bound_module: ""}
     result
 }
 
 fn sema_inference_registration_params(parameters: [SemaRegistrationGenericParam]) -> [SemaInferenceTypeParam] Never! {
-    result :: loop parameter in parameters -> SemaInferenceTypeParam{name: parameter.name, bounds: parameter.bounds, span: parameter.span, identity_key: parameter.identity_key}
+    result :: loop parameter in parameters -> SemaInferenceTypeParam{name: parameter.name, bounds: parameter.bounds, span: parameter.span, identity_key: parameter.identity_key, bound_module: parameter.module_identity}
     result
 }
 

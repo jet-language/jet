@@ -257,6 +257,19 @@ fn jet_driver_compiler_check_source_bytes(load: JetDriverLoadResult, path: Strin
     found
 }
 
+// The loaded text of the entry module's source unit; None unless exactly one
+// loaded module is the entry and its unit has exactly one loaded text.
+fn jet_driver_compiler_check_entry_source(load: JetDriverLoadResult) -> String? {
+    found := String?{None}
+    loop loaded_module in load.modules {
+        if loaded_module.module_identity != load.entry_module_identity -> next
+        if found != None -> return None
+        if loaded_module.source_unit_index < 0 || loaded_module.source_unit_index >= load.source_units.len() -> return None
+        found = Val(jet_driver_compiler_check_source_bytes(load, load.source_units[loaded_module.source_unit_index].path) ?? return None)
+    }
+    found
+}
+
 // Path -> position of its first loaded source text, built once per compile so
 // each module reads its text without rescanning the file list.
 fn jet_driver_source_file_positions(files: [SourceFile]) -> [String:Int] Never! {
@@ -356,7 +369,10 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
             // Retained products use the canonical registration/Doc ownership
             // bijection, including ABI catalog units without physical source.
             // Only the actual entry is replaced by the prepared parser's program.
-            entry_source :: jet_driver_compiler_check_source_bytes(load, input.request.authorized_sources.entry_path) ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the compiler query source is not the exact loaded entry or a loaded module source is missing"))
+            // The entry is the loaded entry module's own source unit, the row
+            // the module-source bijection reads (its loaded path is the
+            // unit's, which need not spell the authorized entry path).
+            entry_source :: jet_driver_compiler_check_entry_source(load) ?? return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the compiler query source is not the exact loaded entry or a loaded module source is missing"))
             if entry_source != input.parsed.source || (input.parsed.compiler_source.len() > 0 && input.parsed.compiler_source.len() != entry_source.len()) {
                 return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val("the compiler query source is not the exact loaded entry or a loaded module source is missing"))
             }
