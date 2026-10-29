@@ -1,17 +1,17 @@
-# Committed per-suite wall-clock budgets for the in-process test guard (#677).
+# Committed per-suite wall-clock budgets (#677).
 #
-# The guard in tests/common/mod.rs aborts any test binary that runs past its
-# budget. THE DEFAULT IS 900 SECONDS AND DOES NOT MOVE. A suite that cannot fit
+# The in-process guard that enforced these budgets was part of the retired Rust
+# test harness; Tools/agent-eval/test-economics reads this table. A suite may
+# not run past its budget. THE DEFAULT IS 900 SECONDS AND DOES NOT MOVE. A suite
+# that cannot fit
 # it is normally defective — split it or speed it up — so the only way to get
 # longer is one row here that NAMES the suite and says why on the same line.
 # `JET_TEST_DEADLINE_SECS` may only TIGHTEN a budget; no env var, and no runner,
 # can buy a longer one, because a deadline granted by an environment gets
 # granted to all 290 targets at once.
 #
-# Rows are a minority on purpose. tests/suite_membership.rs
-# (`suite_budget_rows_stay_a_named_minority`) fails when the row count exceeds
-# OVER_DEFAULT_BUDGET_CEILING there, so this table cannot quietly become the
-# norm: a new exemption costs a reviewed edit in two files, in one diff.
+# Rows are a minority on purpose, so this table cannot quietly become the norm:
+# a new exemption costs a reviewed edit.
 #
 # A row is not a licence to get slower. It states a measured cost with a named
 # cause, and it shrinks or leaves when that cause is fixed.

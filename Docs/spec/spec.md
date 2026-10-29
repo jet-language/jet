@@ -2875,7 +2875,8 @@ pkg-config with a bare `-l` fallback; a `c@"path"` dependency supplies local
 include/library/link information. Otherwise pkg-config is queried and E3201
 reports a missing link identity. Link flags are resolved at build time.
 
-The end-to-end C binding checks are in [`tests/cffi.rs`](../../tests/cffi.rs).
+The end-to-end C binding checks are in
+[`tests/cases/cffi/`](../../tests/cases/cffi/).
 
 ### C++ ABI
 
@@ -3799,7 +3800,8 @@ quick-fixes use `Diagnostic.edit`. Formatting is available through `jet fmt`
 (I6, S14).
 The server's protocol loop accepts JSON-RPC requests and emits framed
 `Content-Length` responses; clients do not need a second compiler process.
-The LSP integration coverage is in `tests/lsp.rs`.
+The LSP integration coverage is in `Compiler/JetLSP/Tests/Integration/` and
+`tests/cases/lsp/`.
 
 The VS Code/Cursor client in `Tools/editors/vscode/` provides the TextMate grammar
 and LSP transport. `install.sh` packages the extension. Server discovery uses

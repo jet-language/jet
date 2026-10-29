@@ -45,11 +45,18 @@ use common.[Scratch]
     init :: read_msg(&stdout)
     advertised :: advertised_capabilities(init)
     assert(!advertised.is_empty(), "initialize response did not expose capabilities: {init}")
-    source :: fs.read_to_string(OSPath.from(env.manifest_dir()).join("tests/lsp.rs")).expect("read capability coverage reference")
+    // A capability is covered by a Jet #Test in Compiler/JetLSP/Tests/Integration/*Tests.jet
+    // or by a testkit case tests/cases/lsp/<marker>.case.
+    root :: OSPath.from(env.manifest_dir())
+    sources := fs.read_dir(root.join("Compiler/JetLSP/Tests/Integration")).expect("read LSP integration tests").filter_map(e -> e.ok().map(e -> e.path()))
+        .filter(p -> p.file_name().and_then(n -> n.to_str()).map(n -> n.ends_with("Tests.jet")) == Some(true)).collect()
+    sources.sort()
+    source :: sources.iter().map(p -> fs.read_to_string(p).expect("read LSP integration test source")).collect().join("\n")
     loop cap in advertised {
         marker :: LSP_CAPABILITY_COVERAGE.iter().find_map((covered, marker) -> if covered == cap -> marker else -> none)
             .unwrap_or_else(() -> panic("advertised capability `{cap}` lacks coverage entry"))
-        assert(source.contains(marker), "coverage marker `{marker}` for `{cap}` is not present in tests/lsp.rs")
+        covered :: source.contains("#Test(\"{marker}\")") || root.join("tests/cases/lsp/{marker}.case").exists()
+        assert(covered, "coverage test `{marker}` for `{cap}` is neither a #Test in Compiler/JetLSP/Tests/Integration/*Tests.jet nor tests/cases/lsp/{marker}.case")
     }
     send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}")
     _ :: read_msg(&stdout)

@@ -1482,8 +1482,8 @@ target, generated sources, and schema.
 
 Generated wrappers keep ownership, errors, layout, callbacks, and task crossings
 explicit. Safe Jet cannot acquire an ungated unsafe operation through a bridge.
-Executable bridge proof is in `tests/cffi.rs`, the scoped C++ system proof, and
-the feature goldens run by `Tools/testkit/Golden.jet`.
+Executable bridge proof is in `tests/cases/cffi/`, the scoped C++ system proof,
+and the feature goldens run by `Tools/testkit/Golden.jet`.
 
 ### Jet as guest: embedding contract
 
@@ -1619,7 +1619,8 @@ discovered sources with at most eight workers and consumes them in stable
 order. The server records cancellation concurrently with
 request execution and replaces a cancelled in-flight result with JSON-RPC
 `-32800`. D-LSP2 requires every advertised LSP feature to have named coverage
-in `tests/lsp.rs`; the server must not advertise speculative features.
+in `Compiler/JetLSP/Tests/Integration/` or `tests/cases/lsp/`; the server must
+not advertise speculative features.
 
 ### Compiler-speed evidence boundary (#666)
 

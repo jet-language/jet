@@ -13,9 +13,7 @@ proof tier.
 Prelude files are embedded in the compiler. After changing one, rebuild before
 running a smoke test, then invoke the binary from that build. Keep the program
 and its stores on an isolated disk-backed path; a wrapper or cached executable
-can otherwise exercise a different revision. The
-[`tests/common`](../../../tests/common/) helpers show the repository's
-isolation conventions.
+can otherwise exercise a different revision.
 
 A registry declaration does not prove dispatch. Exercise the real caller,
 consume its result, and check the observable value or effect. A bind-and-

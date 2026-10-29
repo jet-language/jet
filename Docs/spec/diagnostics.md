@@ -4,7 +4,7 @@ This page is the contract for user-facing diagnostics and their projections. It
 covers registry ownership, terminal/LSP/machine rendering, the no-OS E3301
 contract, and the checks for changing a diagnostic. The canonical source is
 `Compiler/Prelude/Diagnostics.jet`; executable checks include
-`tests/cross.rs`, `tests/ui/`, and `tests/diagnostics_coverage.rs`.
+`tests/cross.rs`, `tests/ui/`, and `tests/cases/diagnostics_coverage/`.
 
 ## One registry, many projections
 
@@ -176,9 +176,8 @@ remains explicit.
 `jet explain <CODE>` resolves the same registry rows offline through
 [`Explain.jet`](../../Compiler/JetCli/Source/Cli/Explain.jet). The website is another
 projection of that data: [`Docs/site/generate.jet`](../site/generate.jet) writes
-the error index and [`tests/diagnostic_pages.rs`](../../tests/diagnostic_pages.rs)
-renders each code page from registry rows and snapshots. Neither CLI help nor a
-website page is an alternate diagnostic catalog.
+the error index and renders each code page from registry rows and snapshots.
+Neither CLI help nor a website page is an alternate diagnostic catalog.
 
 `jet explain <token>` answers a sigil or operator from the syntax dictionary
 ([`SyntaxDictionaryData.jet`](../../Compiler/JetCli/Source/Cli/SyntaxDictionaryData.jet)) in
