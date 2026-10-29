@@ -394,7 +394,17 @@ fn sema_inline_rewrite_type(rewrite: SemaInlineRewrite, ty: Type) -> Type Never!
             loop param in params -> &mapped.push(sema_inline_rewrite_type(rewrite, param))
             Type.Fn{params: mapped, ret: ret.map((value) -> sema_inline_rewrite_type(rewrite, value)), effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
         }
-        .Apply(name, args) -> Type.Apply{name: name, args: sema_inline_rewrite_types(rewrite, args)}
+        // A generic member's head renames like a plain member
+        // (`Holder<Int>` -> `M5PlainHolder<Int>`).
+        .Apply(name, args) -> {
+            head := name
+            if rewrite.types.get(name) == .Val(.Named(mapped)) {
+                head = mapped
+            } else if rewrite.qualified.get(name) == .Val(target) {
+                head = "{target.module_alias}.{target.member}"
+            }
+            Type.Apply{name: head, args: sema_inline_rewrite_types(rewrite, args)}
+        }
         .Tuple(fields) -> {
             mapped := [TypeTupleField]{}
             loop field in fields -> &mapped.push(TypeTupleField{name: field.name, ty: sema_inline_rewrite_type(rewrite, field.ty)})
@@ -1215,6 +1225,15 @@ fn sema_inline_rewrite_exported(items: [Item], rewrite: &SemaInlineRewrite) -> [
     loop item in items {
         if item == {
             .Func(function) -> &mapped.push(Item.Func{value: sema_inline_rewrite_func(&rewrite, function)})
+            // D-IMPLDOT1: an impl head names member types and traits by their
+            // module path (`impl inner.Loud.inner.Shout`), so it binds to the
+            // hoisted declarations the module's own impls bind to.
+            .Impl(definition) -> {
+                updated := definition
+                updated.type_name = sema_inline_mapped_name(rewrite, definition.type_name)
+                if definition.trait_name == .Val(trait_name) -> updated.trait_name = Val(sema_inline_mapped_name(rewrite, trait_name))
+                &mapped.push(Item.Impl{value: updated})
+            }
             .CodeModule(definition) -> {
                 updated := definition
                 if definition.body == .Val(body) -> updated.body = Val(sema_inline_rewrite_exported(body, &rewrite))

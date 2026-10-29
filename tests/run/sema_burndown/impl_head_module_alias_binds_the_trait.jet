@@ -1,0 +1,44 @@
+// #6170 (D-IMPLDOT1): in an `impl` head, a module alias binds to the segment
+// after it. `impl Local.inner.Shout` implements `inner.Shout` for `Local`;
+// before, the parser read type `Local.inner` and trait `Shout`, and the impl
+// failed E0902. A module-qualified type keeps its trait
+// (`impl inner.Loud.Mine`), and both alias segments may appear
+// (`impl inner.Loud.inner.Shout`).
+module inner {
+    trait Shout {
+        fn shout(self) -> String
+    }
+
+    struct Loud {
+        level: Int
+    }
+
+    fn announce<S: Shout>(value: S) -> String { value.shout() }
+}
+
+trait Mine {
+    fn mine(self) -> Int
+}
+
+struct Local {
+    n: Int
+}
+
+impl Local.inner.Shout {
+    fn shout(self) -> String { "LOCAL {self.n}" }
+}
+
+impl inner.Loud.Mine {
+    fn mine(self) -> Int { self.level * 10 }
+}
+
+impl inner.Loud.inner.Shout {
+    fn shout(self) -> String { "LOUD {self.level}" }
+}
+
+fn run() {
+    print(Local{n: 1}.shout())
+    print(inner.Loud{level: 2}.mine())
+    print(inner.announce(inner.Loud{level: 3}))
+    print(inner.announce(Local{n: 4}))
+}

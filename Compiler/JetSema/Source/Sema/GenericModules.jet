@@ -1058,10 +1058,7 @@ fn sema_genmod_rewrite_item(rewrite: &SemaInlineRewrite, item: Item) -> Item {
         .Struct(definition) -> Item.Struct{value: sema_inline_rewrite_struct(&rewrite, definition, "")}
         .Enum(definition) -> Item.Enum{value: sema_inline_rewrite_enum(&rewrite, definition, "")}
         .Trait(definition) -> Item.Trait{value: sema_inline_rewrite_trait(&rewrite, definition)}
-        .Impl(definition) -> {
-            head :: sema_genmod_impl_head(rewrite, definition)
-            Item.Impl{value: sema_inline_rewrite_impl(&rewrite, head)}
-        }
+        .Impl(definition) -> Item.Impl{value: sema_inline_rewrite_impl(&rewrite, definition)}
         .ErrorConv(definition) -> Item.ErrorConv{value: sema_inline_rewrite_error_conv(&rewrite, definition)}
         .Test(definition) -> {
             updated := definition
@@ -1074,24 +1071,6 @@ fn sema_genmod_rewrite_item(rewrite: &SemaInlineRewrite, item: Item) -> Item {
         // copy: sema_genmod_project_item admits only the kinds above.
         else -> item.copy()
     }
-}
-
-// D-IMPLDOT1 for an instance alias: the parser reads `impl Provider.m8.Native`
-// as type `Provider.m8` and trait `Native`; when `m8.Native` names an
-// instance's trait, the alias binds to the trait instead.
-fn sema_genmod_impl_head(rewrite: SemaInlineRewrite, definition: ImplDef) -> ImplDef {
-    updated := definition
-    trait_name :: definition.trait_name ?? return updated
-    segments :: definition.type_name.split(".").to_list()
-    if segments.len() < 2 -> return updated
-    alias :: segments[segments.len() - 1]
-    qualified :: "{alias}.{trait_name}"
-    if rewrite.types.get(qualified) == None -> return updated
-    owner := segments[0]
-    loop index in 1..<(segments.len() - 1) -> owner = "{owner}.{segments[index]}"
-    updated.type_name = owner
-    updated.trait_name = Val(qualified)
-    updated
 }
 
 // Rust `resolve_args` over the arguments the checks accept: type arguments as

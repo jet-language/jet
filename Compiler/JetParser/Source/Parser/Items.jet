@@ -2402,10 +2402,18 @@ fn parser_parse_impl(state: &JetParserState) -> Item {
     is_error_conversion :: parser_current_kind(&state) == TOKEN_UNIFIED_ARROW
     is_protocol_impl :: count == 2 && (parser_value(state, parts[1]) == "Client" || parser_value(state, parts[1]) == "Server") && parser_current_kind(&state) == TOKEN_LBRACE
     literal_capability :: count >= 3 && parser_value(state, parts[count - 2]) == "Literal" && (parser_value(state, parts[count - 1]) == "Int" || parser_value(state, parts[count - 1]) == "Float")
-    owner_count :: if {
+    owner_count := if {
         count == 1 || is_error_conversion || is_protocol_impl -> count
         literal_capability -> count - 2
         else -> count - 1
+    }
+    // D-IMPLDOT1: a module or package alias (a snake_case segment) binds to
+    // the segment after it, so `impl Local.labels.Named` implements
+    // `labels.Named` for `Local`.
+    if !literal_capability {
+        loop owner_count > 1 && owner_count < count && !parser_pascal_name(parser_value(state, parts[owner_count - 1])) {
+            owner_count -= 1
+        }
     }
     type_name := parser_value(state, first)
     loop index in 1..<owner_count -> type_name = "{type_name}.{parser_value(state, parts[index])}"

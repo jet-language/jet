@@ -1,0 +1,15 @@
+# #6170 (D-IMPLDOT1): an impl head names its trait through a package alias, a
+# module alias and a generic-module instance alias, on jet run and AOT.
+fixture: impl_head_alias_binds_the_trait.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step default: jet run run.jet
+exit: 0
+stdout: = "local 2\nLOCAL 2\n20\n"
+step: jet build run.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: == default
+stderr: == default
