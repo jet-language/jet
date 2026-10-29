@@ -100,7 +100,8 @@ fn nix_test_signed_fixture_at(endpoint: String) -[FS]> NixTestSignedFixture {
     responses["{endpoint}/v1/nixpkgs-unstable/manifest.json.sig.json"] = manifest_sidecar
     responses[target.url] = built.compressed
     responses[target.signature_url] = sidecar
-    public_key :: crypto.expert.ed25519_public(seed) ?? panic("test public key")
+    signer :: crypto.SigningKey.from_bytes(seed) ?? panic("test public key")
+    public_key :: signer.public_key().bytes
     NixTestSignedFixture{root, responses, public_key}
 }
 
