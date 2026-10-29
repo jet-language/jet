@@ -702,6 +702,8 @@ packages live under `Jetpack/`.
 | `JetParser` | tokens to AST, formatter | yes (E00xx) |
 | `JetSema` | all semantic checks, collects all front-end diagnostics | yes (E01xx+) |
 | `JetIR` | the slot IR: builder from the checked program, optimizer, x86-64 selection | **never** |
+| `JetWasm` | the plugin engine's WebAssembly front end: core module and Component Model data model, binary decoders, WAT reader, core validator | **never** (errors are load faults carried to run time) |
+| `JetPlugin` | the plugin link step: translates each loaded Component into JetIR functions, canonical-ABI thunks and a descriptor | **never** (a failed translation becomes the load fault) |
 | `JetBackend` | native code generation, object and image writing | **never** (a failure is an ICE, R5) |
 | `JetEval` | in-process evaluator for comptime and the REPL | no user-facing surface by itself |
 | `JetRuntime` | the native runtime linked into every program | no |
@@ -1673,34 +1675,62 @@ and the function-extract helper returns no action. Other non-scalar parameters
 and results stay unsupported until sema supplies a complete ownership contract
 for reads, writes, takes, and returned values.
 
-## Application plugin host boundary (D-PLUGIN1 / D-PLUGIN-EXPORT1 / D-DEP-WASM1)
+## Application plugin host boundary (D-PLUGIN1 / D-PLUGIN-EXPORT1 / #4717)
 
 An application sandbox is a prebuilt WASM Component Model guest loaded by the
 `core.plugin` host; the compiler has no sandbox build target. The native library boundary is
-different: a native library is trusted code and has no Wasmtime sandbox or
-implicit capability reduction. Both surfaces keep the same checked export
-shape, but only the Component path makes an isolation guarantee.
+different: a native library is trusted code and has no sandbox or implicit
+capability reduction. Both surfaces keep the same checked export shape, but
+only the Component path makes an isolation guarantee.
 
-The Component loader reads the module below the caller's canonical,
-resource-scoped `FS.Read` authority, then preflights every import as a typed
-`HostImportFact`. The declared `authority.needs` and the one authority lent to
-the load must cover each fact before the linker registers it or instantiation
-can occur. An unknown or denied import fails closed; no adapter can reach the
-filesystem, network, process, or another external effect first. An empty
-grant is explicit zero authority, never an ambient fallback. Host adapters
-re-check the typed decision at the call edge and apply the same resource scope
-to path/endpoint arguments.
+The plugin engine is Jet end to end; no Rust crate, Cargo bridge or Wasmtime
+is involved. Three stages own it:
 
-The host applies fuel, linear-memory, table, wire-size, and wall-call budgets.
-The failure envelope records which budget was actually consumed; a guest
-memory/table request is not relabeled as fuel exhaustion, and an oversized
-wire is rejected before an unbounded host encoding. A call trap is classified
-as user/guest failure, denied authority, budget exhaustion, or internal host
-defect from typed boundary state, not by parsing backend error text.
+- `Compiler/JetWasm` is the front end: the core module and Component Model
+  data model, the binary decoders, the WAT text reader and the core
+  validator. It never executes guest code.
+- `Compiler/JetPlugin` is the build-time link step. For every literal
+  `plugin.load(path, …)` it reads the artifact (a relative path under the
+  package root), flattens the Component
+  (core instances, aliases, `canon lift`/`canon lower`), validates each core
+  module and translates every core function into ordinary JetIR functions of
+  the program. Each translated function checks fuel, call depth and memory
+  bounds inline; exports and lowered imports become canonical-ABI thunks,
+  `call_indirect` goes through one dispatcher per signature class, and a
+  descriptor blob records the exports, imports, memories, tables, globals,
+  segments and function names. A component it cannot translate becomes a
+  descriptor whose load fails with the translation error.
+- `Compiler/JetRuntime/Source/PluginHost.jet` is the one host interface. It
+  owns the instance state (linear memory, tables, globals, fuel, depth,
+  frames), the canonical ABI lifting and lowering, host imports, budgets and
+  failure envelopes. Translated guest code reaches the host only through the
+  `jet_plugin_*` helpers; nothing else crosses the boundary.
+
+The guest runs in the host process (D-PLUGIN-ENGINE-PROC1 is open; option A, a
+seccomp'd child process, swaps in behind the same host interface). Isolation
+comes from the translation: guest code addresses only its own bounds-checked
+linear memory and tables, and reaches effects only through admitted imports.
+
+At run time the loader reads the artifact below the caller's canonical,
+resource-scoped `FS.Read` authority and refuses it unless the bytes equal the
+ones the program was built with, so a changed artifact asks for a rebuild
+instead of running stale code. It then preflights every import: the one
+authority lent to the load must cover each import's right family before
+anything runs. An unknown or denied import fails closed; no adapter can reach
+the filesystem, network, process, or another external effect first. An empty
+grant is explicit zero authority, never an ambient fallback. The host adapter
+re-checks the decision at the call edge and applies the same resource scope to
+path arguments; the implemented adapter is the scoped `FS.Read` text read.
+
+The host applies fuel, linear-memory, table and call-depth budgets. The
+failure envelope records which budget was actually consumed; a guest
+memory/table request is not relabeled as fuel exhaustion. A call trap is
+classified as user/guest failure, denied authority, budget exhaustion, or
+internal host defect from typed boundary state, not by parsing error text.
 D-PLUGIN-FAILURE1=A carries that cause as `core.plugin.PluginError`, with the
 export name, original display message, and up to 32 innermost-first Wasm frames.
-Budget failures name Fuel, Memory, Table, Time, or the 16 MiB Wire limit. A
-`PluginFrame` locates the function by name (empty without a name section), the
+Budget failures name Fuel, Memory or Table. A `PluginFrame` locates the
+function by name (the name section's, else the export's, else empty), the
 Wasm `component` it ran in, and the offset; debug-file/line loading is
 intentionally outside this transport. Failures before guest execution carry no
 frames. A failed load leaves a handle whose first call returns the load fault
@@ -1712,14 +1742,10 @@ execution routes: default `jet run` and release/AOT `--release`. Each route is
 required; unavailable release tooling is not a passing or skipped authority
 witness.
 
-Handles and Wasmtime stores are owner-thread state. Cross-thread use and
-unload of an active call are rejected by the existing handle boundary, and
-nested host/guest entry is explicitly rejected rather than borrowing the
-thread-local store map recursively. Bounded external adapters (network and
-process) use the same call deadline; cancellation stops the deadline worker
-before the store becomes idle. Component values are copied while the call
-owns guest memory and before `post_return`; no borrowed guest or host view
-escapes its call/owner.
+A handle is owner-thread state. Nested host/guest entry is rejected rather
+than re-entering an active instance. Component values are copied while the
+call owns guest memory and before `post_return`; no borrowed guest or host
+view escapes its call/owner.
 A failed guest returns a Jet error frame and keeps any failure scoped to its
 own instance; unrelated native work is not terminated.
 
@@ -1737,7 +1763,15 @@ only semantic authority (I2/I3).
 The boundary owner is
 [`CompilerExtension.jet`](../../Jetpack/Integrations/Source/CompilerExtension/CompilerExtension.jet),
 which owns the versioned snapshot, response validation, and lifecycle.
-Ordinary `jet` processes never link or initialize Wasmtime.
+Ordinary `jet` processes never load a compiler-extension guest.
+
+**Host status.** The sibling host verb reads and checks the snapshot, then
+fails closed: no guest code runs. The plugin engine (see the application
+plugin host boundary) translates a Component at build time from a literal
+artifact path, so it cannot load the runtime-chosen component that
+`JET_COMPILER_EXTENSION` names. The Rust/Wasmtime host that used to serve this
+verb is retired with the rest of the Rust plugin runtime. The protocol,
+limits and lifecycle below are the contract a host must meet.
 
 The WIT world is `compiler-extension-v1`
 (`package jet:compiler-extension@0.1.0`, export `analyze`), distinct from
@@ -1775,21 +1809,20 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
 
 - **Defaults:** fuel `10_000_000`, memory `16 MiB`, table `10_000`, findings
   `256`, edits `64`, response `256 KiB`, wall budget `timeout_ms=2000`.
-  Loader applies fuel + `StoreLimits`; each `analyze` arms wasmtime epoch
-  interruption and ticks the engine after `timeout_ms` (fail-closed interrupt
-  trap). Snapshot declares the same caps.
+  A host applies fuel, memory and table limits and interrupts `analyze` after
+  `timeout_ms` (fail-closed interrupt trap). Snapshot declares the same caps.
 - **Trust:** v1 admits only `untrusted` components (zero host imports).
-- **Deterministic sandbox (D-DX5-HOOK1):** the host linker registers no
+- **Deterministic sandbox (D-DX5-HOOK1):** the host registers no
   imports, so guests get no ambient clock, random, filesystem, network, or
   process. Components that declare any host import (for example WASI random
-  or clocks) fail closed at load — Jet-owned `E:` wire, no session commit,
+  or clocks) fail closed at load — a Jet-owned message, no session commit,
   no rustc leak. Pure guests over a frozen snapshot are the only admitted
   shape; the host never supplies nondeterminism sources.
 - **Lifecycle:** `ExtensionSession` Idle → Loaded → Closed. `stage_response`
   validates without commit; `rollback` discards staged output only (an
   accepted commit latch stays final — restage requires a new session);
-  `close(close_guest)` invokes the WASM host closer
-  (`jet_compiler_extension_close`) so guest Store/memory is dropped.
+  `close(close_guest)` invokes the host's guest closer so guest
+  memory is dropped.
   Uncommitted work never reaches sema or codegen.
 - **Process IPC:** when configured, `jet-driver` resolves `jetpack` only beside
   the current Jet executable (never PATH), invokes hidden versioned verb
@@ -1798,14 +1831,10 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   Stderr is capped at `64 KiB`; the outer process deadline is `5000ms` and
   kills a stuck/crashed host. Nonzero exit, malformed output, timeout, and
   missing sibling all map to Jet-owned E1402.
-- **E2E harness (C4 technical):** `Jetpack/CLI/Tests/CompilerExtensionHost.jet`
-  loads real `compiler-extension-v1` component fixtures under
-  `tests/fixtures/compiler_extension/` through the compiled compiler-extension
-  host. Proves one custom-lint finding
-  round-trip, fail-closed crash / malformed / incompatible / fuel-exhaust /
-  WASI-random-import guests, wall-clock epoch `timeout_ms` interrupt, and
-  byte-identical re-analyze of a pure guest (Jet-owned `E:` wires; no rustc
-  leak; no auto-commit).
+- **E2E harness:** `Jetpack/CLI/Tests/CompilerExtensionHost.jet` drives the
+  hidden host verb and pins its fail-closed answer: a snapshot that decodes
+  is refused with the host-unavailable message and a nonzero exit, and no
+  guest runs.
 - **Post-sema driver wire:** when `JET_COMPILER_EXTENSION` names a component
   path (expert env registration — no new user syntax until a spelling ballot),
   `jet-driver::CompilerExtensionHook` freezes a typed snapshot after sema,

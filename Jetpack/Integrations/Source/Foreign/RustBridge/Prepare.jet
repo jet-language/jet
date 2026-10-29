@@ -1,8 +1,8 @@
 // Prepare the hidden cargo FFI bridge for a checked program, ported from
 // jet_pkg_model::FFI. Returns `None` when the program has no foreign
-// declarations and uses no bridge-backed Core surface. Archive containers
-// and stream codecs are compiled from their canonical Jet source modules and
-// never activate the bridge; the compiler itself stays dependency-free (I6).
+// declarations. No Core surface activates the bridge: archive containers,
+// stream codecs and the plugin engine are compiled Jet; the compiler itself
+// stays dependency-free (I6).
 
 // The bridge for the host target (`JET_BUILD_TARGET` or rustc's host).
 fn pkg_ffi_prepare(program: RustBridgeProgram) -[FS, Env, Exec, Time, Time.Wait]> FFILink? RustBridgeError! {
@@ -27,7 +27,6 @@ fn pkg_ffi_prepare_for_target(program: RustBridgeProgram, target: String) -[FS, 
         if wasm && entry.inline != None -> next
         &entries.push(entry)
     }
-    needs :: RustBridgeNeeds.from_used_core(program.used_core)
     // Link discovery is independent of bridge eligibility: a C surface made
     // only from local Jet types still resolves its declared provider and
     // reports E3201 when the provider is absent.
@@ -37,7 +36,7 @@ fn pkg_ffi_prepare_for_target(program: RustBridgeProgram, target: String) -[FS, 
         if program.entry >= 0 && program.entry < program.modules.len() -> entry_path = Val(program.modules[program.entry].path)
         c_link_args = pkg_cffi_rustc_link_args_for_target_with_entry(program.cffi, program.project_root, target, entry_path) ?? return Err(RustBridgeError{diagnostics: err.diagnostics})
     }
-    if entries.len() == 0 && !needs.any() -> return Ok(None)
+    if entries.len() == 0 -> return Ok(None)
     uses_c_abi := false
     loop entry in entries {
         if entry.c_abi -> uses_c_abi = true
@@ -45,8 +44,6 @@ fn pkg_ffi_prepare_for_target(program: RustBridgeProgram, target: String) -[FS, 
     native_link_args :: if uses_c_abi -> c_link_args else -> [String]{}
     link :: pkg_ffi_build_bridge_full(RustBridgeBuild{
         entries: entries,
-        needs: needs,
-        authority_needs: program.authority_needs,
         handle_facts: program.cffi.handle_facts,
         record_defs: record_defs,
         link_closure: program.cffi.link_closure,

@@ -1,1 +1,1 @@
-ln -s ../outside/target.wat allowed/link.wat
+ln -s ../outside allowed/linked

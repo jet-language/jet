@@ -1,28 +1,25 @@
 // Claims ported from crates/jet-pkg-model/src/FFI.rs #[cfg(test)] modules
 // `inline_asm_target_tests` and `tests`.
 use jetpack_integrations.[
-    CRecordDefinitions, ExternEntry, FFI_BRIDGE_ARTIFACTS_SCHEMA, FFI_JET_FOUNDATION_SOURCE_SCHEMA,
-    InlineEntry, InlineNativeToolchain, JetFoundationSources, NativeTool, RustBridgeKeyInputs,
-    RustBridgeNeeds, pkg_ffi_asm_stack_inputs, pkg_ffi_bridge_artifact_integrity_diagnostic,
-    pkg_ffi_cargo_metadata_has_compile_time_code, pkg_ffi_emit_asm_wrapper,
-    pkg_ffi_emit_c_wrapper_fn, pkg_ffi_emit_cabi_trampoline, pkg_ffi_emit_cargo_toml,
-    pkg_ffi_emit_inline_build_rs, pkg_ffi_emit_inline_wrapper_fn, pkg_ffi_emit_native_inline_source,
-    pkg_ffi_emit_wrapper_lib_with_handles, pkg_ffi_foreign_descriptor_stamp,
-    pkg_ffi_foundation_include_closure, pkg_ffi_foundation_input_digest,
-    pkg_ffi_inline_asm_target_diagnostic, pkg_ffi_jet_foundation_mounts,
-    pkg_ffi_normalize_ffi_generated_source_line, pkg_ffi_nul_joined,
-    pkg_ffi_rust_include_paths, pkg_ffi_rust_type,
+    CRecordDefinitions, ExternEntry, FFI_BRIDGE_ARTIFACTS_SCHEMA, InlineEntry, InlineNativeToolchain,
+    NativeTool, RustBridgeKeyInputs, pkg_ffi_asm_stack_inputs,
+    pkg_ffi_bridge_artifact_integrity_diagnostic, pkg_ffi_cargo_metadata_has_compile_time_code,
+    pkg_ffi_emit_asm_wrapper, pkg_ffi_emit_c_wrapper_fn, pkg_ffi_emit_cabi_trampoline,
+    pkg_ffi_emit_cargo_toml, pkg_ffi_emit_inline_build_rs, pkg_ffi_emit_inline_wrapper_fn,
+    pkg_ffi_emit_native_inline_source, pkg_ffi_emit_wrapper_lib_with_handles,
+    pkg_ffi_foreign_descriptor_stamp, pkg_ffi_inline_asm_target_diagnostic,
+    pkg_ffi_normalize_ffi_generated_source_line, pkg_ffi_rust_type,
 ]
 use jet_foundation.[
     AccessConvention, Dimension, DimensionAxis, InlineAsmContract, InlineAsmOutput, TagMarker, Type,
 ]
 use jet_pkg_model.[
-    FFIHandleFact, FFILinkClosure, ForeignIdentityBuilder, ForeignLanguage, pkg_sha256_hex,
+    FFIHandleFact, FFILinkClosure, ForeignLanguage, pkg_sha256_hex,
 ]
 
 // The Rust test-only `emit_wrapper_lib`: no handle or C-record facts.
-fn pkg_ffi_test_wrapper_lib(entries: [ExternEntry], needs: RustBridgeNeeds) -> String Never! {
-    pkg_ffi_emit_wrapper_lib_with_handles(entries, needs, [String]{}, CRecordDefinitions.empty())
+fn pkg_ffi_test_wrapper_lib(entries: [ExternEntry]) -> String Never! {
+    pkg_ffi_emit_wrapper_lib_with_handles(entries, [String]{}, CRecordDefinitions.empty())
 }
 
 fn pkg_ffi_test_entry(jet_name: String, rust_path: String, params: [(convention: AccessConvention, ty: Type)], param_names: [String], return_type: Type?, line_hint: String) -> ExternEntry Never! {
@@ -37,7 +34,7 @@ fn pkg_ffi_test_asm_entry() -> ExternEntry Never! {
 }
 
 fn pkg_ffi_test_key(entries: [ExternEntry], target: String, native_toolchain: InlineNativeToolchain?) -[FS]> String Never! {
-    RustBridgeKeyInputs{entries: entries, deps: [String: String]{}, needs: RustBridgeNeeds.none(), authority_needs: [String]{}, handle_facts: [FFIHandleFact]{}, record_source: "", link_closure: FFILinkClosure.empty(), selected_target: target, rust_toolchain: "rustc-test-toolchain", native_toolchain: native_toolchain, native_link_args: [String]{}, foundation_source_digest: None}.cache_key()
+    RustBridgeKeyInputs{entries: entries, deps: [String: String]{}, handle_facts: [FFIHandleFact]{}, record_source: "", link_closure: FFILinkClosure.empty(), selected_target: target, rust_toolchain: "rustc-test-toolchain", native_toolchain: native_toolchain, native_link_args: [String]{}}.cache_key()
 }
 
 fn pkg_ffi_test_occurrences(text: String, needle: String) -> Int Never! {
@@ -194,7 +191,7 @@ dependencies = [
 
 #Test("generated rust bridge carries the canonical descriptor stamp") {
     entry :: pkg_ffi_test_entry("rust_max", "std::cmp::max", [(convention: AccessConvention, ty: Type)]{(convention: AccessConvention.Read, ty: Type.Int)}, [String]{"value"}, Val(Type.Int), "extern rust rust_max")
-    source :: pkg_ffi_test_wrapper_lib([ExternEntry]{entry}, RustBridgeNeeds.none())
+    source :: pkg_ffi_test_wrapper_lib([ExternEntry]{entry})
     assert(source.contains("// jet-ffi-descriptor={pkg_ffi_foreign_descriptor_stamp(ForeignLanguage.Rust)}"))
 }
 
@@ -203,7 +200,7 @@ dependencies = [
     root :: files.join(scratch.path, "crate")
     target :: files.join(scratch.path, "target")
     files.create_dir_all(files.join(root, "src")) ?? panic("create nested manifest source")
-    files.write(files.join(root, "Cargo.toml"), pkg_ffi_emit_cargo_toml("nested_ffi_probe", [String: String]{}, false, None)) ?? panic("write generated nested manifest")
+    files.write(files.join(root, "Cargo.toml"), pkg_ffi_emit_cargo_toml("nested_ffi_probe", [String: String]{}, false)) ?? panic("write generated nested manifest")
     files.write(files.join(root, "src/lib.rs"), "fn probe() -> i64 {{ 7 }}\n") ?? panic("write generated nested source")
     receipt :: process.cmd([String]{"cargo", "build", "--offline", "--manifest-path", files.join(root, "Cargo.toml"), "--target-dir", target}).run() ?? panic("run cargo for generated nested manifest")
     assert(receipt.success)
@@ -213,12 +210,12 @@ dependencies = [
     entry := pkg_ffi_test_entry("open", "jet_com_office_open", [(convention: AccessConvention, ty: Type)]{}, [String]{}, Val(Type.Int), "`open` in COM module `jet_com_office`")
     entry.c_abi = true
     entry.c_module = true
-    source :: pkg_ffi_test_wrapper_lib([ExternEntry]{entry}, RustBridgeNeeds.none())
+    source :: pkg_ffi_test_wrapper_lib([ExternEntry]{entry})
     assert(source.contains("// jet-ffi-descriptor={pkg_ffi_foreign_descriptor_stamp(ForeignLanguage.Com)}"))
 }
 
 #Test("generated bridge reports through host callback") {
-    source :: pkg_ffi_test_wrapper_lib([ExternEntry]{}, RustBridgeNeeds.none())
+    source :: pkg_ffi_test_wrapper_lib([ExternEntry]{})
     assert(source.contains("pub extern \"C\" fn jet_ffi_set_reporter"))
     assert(source.contains("pub extern \"C\" fn jet_ffi_clear_panic_hook"))
     assert(source.contains("pub extern \"C\" fn jet_ffi_take_failure"))
@@ -392,7 +389,7 @@ dependencies = [
         source :: pkg_ffi_emit_cabi_trampoline(entry, [String]{}, CRecordDefinitions.empty()) ?? panic("mutable scalar trampoline")
         assert(source.contains("fn {entry.wrapper_name}_native(p0: *mut {cases[index].native});"))
     }
-    generated :: pkg_ffi_test_wrapper_lib([ExternEntry]{scalar}, RustBridgeNeeds.none())
+    generated :: pkg_ffi_test_wrapper_lib([ExternEntry]{scalar})
     assert(generated.contains("jet_ffi_out_scalar_cabi"))
     nominal := scalar
     nominal.params = [(convention: AccessConvention, ty: Type)]{(convention: AccessConvention.Read, ty: Type.Named{name: "Nominal"})}
@@ -404,59 +401,4 @@ dependencies = [
     string_source :: pkg_ffi_emit_cabi_trampoline(string_entry, [String]{}, CRecordDefinitions.empty()) ?? panic("string trampoline")
     assert(string_source.contains("fn jet_ffi_out_string_native(p0: *mut std::os::raw::c_char);"))
     assert(string_source.contains("p0_ptr as *mut std::os::raw::c_char"))
-}
-
-#Test("foundation includes ignore comments and literals and resolve manifest concat") {
-    source :: `// include!("missing-comment.rs");
-/* outer /* include_str!("missing-nested.jet"); */ */
-const TEXT: &str = "include!(\"missing-string.rs\")";
-const RAW: &str = r##"include!("missing-raw.rs")"##;
-fn lifetime<'a>() {}
-include ! ("first.rs");
-include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../Compiler/registry.jet"));
-include_bytes!(r#"bytes.bin"#);
-include!(concat!(env!("OUT_DIR"), "/generated.rs"));
-`
-    assert_eq(pkg_ffi_rust_include_paths(source, "/repo/crates/foundation") ?? panic("includes"),
-        [String]{"first.rs", "/repo/crates/foundation/../../Compiler/registry.jet", "bytes.bin"})
-    assert_eq(pkg_ffi_rust_include_paths(`include!("escaped\\path.rs"); include!("second.rs");`, "") ?? panic("escaped"),
-        [String]{"escaped\\path.rs", "second.rs"})
-    assert(pkg_ffi_rust_include_paths(`include!(unknown_path());`, "") == .Err(_))
-}
-
-#Test("foundation source closure discovers new nested inputs and cycles without a whitelist") {
-    scratch :: files.temp_dir("ffi-include-closure") ?? panic("scratch")
-    root :: files.canonicalize(scratch.path) ?? panic("root")
-    foundation :: files.join(root, "crates/foundation")
-    external :: files.join(root, "Compiler/Registry")
-    files.create_dir_all(files.join(foundation, "src")) ?? panic("foundation")
-    files.create_dir_all(external) ?? panic("external")
-    files.write(files.join(foundation, "src/lib.rs"), `include!("../../../Compiler/Registry/new.rs");`) ?? panic("entry")
-    files.write(files.join(foundation, "build.rs"), `const DATA: &[u8] = include_bytes!("../../Compiler/Registry/build-data.jet");`) ?? panic("build script input")
-    files.write(files.join(external, "build-data.jet"), "build data") ?? panic("build data")
-    files.write(files.join(external, "new.rs"), `include!("nested.rs"); include_str!("law.jet");`) ?? panic("new")
-    files.write(files.join(external, "nested.rs"), `include!("new.rs");`) ?? panic("cycle")
-    files.write(files.join(external, "law.jet"), "ratified") ?? panic("law")
-    inputs :: pkg_ffi_foundation_include_closure(root, foundation) ?? panic("closure")
-    assert_eq(inputs, [String]{files.join(external, "build-data.jet"), files.join(external, "law.jet"), files.join(external, "nested.rs"), files.join(external, "new.rs")})
-    identity := ForeignIdentityBuilder.new(FFI_JET_FOUNDATION_SOURCE_SCHEMA)
-    loop path in inputs {
-        relative :: path.removeprefix("{root}/")
-        digest :: pkg_ffi_foundation_input_digest(root, relative, "include") ?? panic("digest")
-        &identity.field("include-input", pkg_ffi_nul_joined(relative, digest))
-    }
-    sources :: JetFoundationSources{root: root, foundation: foundation, inputs: inputs, digest: identity.finish()}
-    mounts :: pkg_ffi_jet_foundation_mounts(files.join(root, "cache"), sources) ?? panic("mounts")
-    assert(mounts.len() >= 2)
-    if sys.is_linux() {
-        staged :: files.join(root, "cache/.jet-foundation-source-closure/Compiler/Registry")
-        assert_eq(files.read(files.join(staged, "law.jet")) ?? panic("staged law"), "ratified")
-        assert_eq(mounts[0].destination, root)
-        closure :: files.join(root, "cache/.jet-foundation-source-closure")
-        foundation_stage :: files.join(closure, "crates/foundation")
-        assert((files.stat(foundation_stage) ?? panic("foundation mount point")).is_dir)
-        assert(!files.lexists(files.join(foundation_stage, "src/lib.rs")))
-    }
-    files.write(files.join(external, "nested.rs"), `include!("missing.rs");`) ?? panic("missing input")
-    assert(pkg_ffi_foundation_include_closure(root, foundation) == .Err(_))
 }

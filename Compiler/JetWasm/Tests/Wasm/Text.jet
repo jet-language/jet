@@ -1,0 +1,156 @@
+use jet_wasm.[WasmComponent, WasmCtype, WasmModule, WASM_CT_NONE, wasm_decode_component, wasm_decode_module, wasm_load_component, wasm_prim_name, wasm_text_to_binary, wasm_validate_module]
+
+// A value or type reference rendered structurally, so two encodings that
+// number their hoisted types differently still compare equal.
+fn text_type_ref(space: [WasmCtype], index: Int, depth: Int) -> String Never! {
+    if index == WASM_CT_NONE -> return "_"
+    if index < 0 -> return wasm_prim_name(index)
+    if index >= space.len() || depth > 16 -> return "#{index}"
+    text_ctype(space, space[index], depth + 1)
+}
+
+fn text_ctype(space: [WasmCtype], ty: WasmCtype, depth: Int) -> String Never! {
+    inner :: if ty.inner.len() > 0 -> ty.inner else -> space
+    parts := [String]{}
+    loop k in 0..<ty.types.len() {
+        name :: if k < ty.names.len() -> ty.names[k] else -> ""
+        &parts.push("{name}:{text_type_ref(inner, ty.types[k], depth)}")
+    }
+    "k{ty.kind}({parts.join(",")} ok={text_type_ref(space, ty.ok, depth)} err={text_type_ref(space, ty.err, depth)})"
+}
+
+fn text_module(m: WasmModule) -> String Never! {
+    lines := [String]{}
+    loop ty in m.types -> &lines.push("type {ty.render()}")
+    loop entry in m.imports -> &lines.push("import {entry.module_name} {entry.name} {entry.kind} {entry.type_index} {entry.table} {entry.memory} {entry.global}")
+    &lines.push("funcs {m.funcs}")
+    loop table in m.tables -> &lines.push("table {table.elem} {table.limits.min} {table.limits.max}")
+    loop memory in m.memories -> &lines.push("memory {memory.min} {memory.max}")
+    loop global in m.globals -> &lines.push("global {global.ty.value} {global.ty.mutable} {global.init.op} {global.init.value}")
+    loop entry in m.exports -> &lines.push("export {entry.name} {entry.kind} {entry.index}")
+    &lines.push("start {m.start}")
+    loop elem in m.elems -> &lines.push("elem {elem.mode} {elem.table} {elem.offset.op} {elem.offset.value} {elem.elem_type} {elem.items}")
+    loop data in m.datas -> &lines.push("data {data.mode} {data.memory} {data.offset.op} {data.offset.value} {data.bytes}")
+    loop code in m.codes -> &lines.push("code {code.locals} {code.op} {code.a} {code.b} {code.tables}")
+    lines.join("\n")
+}
+
+fn text_options(o: jet_wasm.WasmCanonOptions) -> String Never! {
+    "enc={o.encoding} mem={o.memory} realloc={o.realloc} post={o.post_return}"
+}
+
+fn text_component(c: WasmComponent) -> String Never! {
+    lines := [String]{}
+    loop m in c.modules -> &lines.push("module\n{text_module(m)}")
+    loop inst in c.core_instances -> &lines.push("core instance {inst.source} {inst.arg_names} {inst.arg_instances} {inst.export_names} {inst.export_sorts} {inst.export_indexes}")
+    loop item in c.core_funcs -> &lines.push("core func {item.origin} {item.instance} {item.name} {item.target} {text_options(item.options)}")
+    loop item in c.core_memories -> &lines.push("core memory {item.origin} {item.instance} {item.name}")
+    loop item in c.core_tables -> &lines.push("core table {item.origin} {item.instance} {item.name}")
+    loop item in c.core_globals -> &lines.push("core global {item.origin} {item.instance} {item.name}")
+    loop item in c.funcs {
+        ty :: if item.type_index >= 0 -> text_type_ref(c.types, item.type_index, 0) else -> "-"
+        &lines.push("func {item.origin} {item.target} {ty} {item.instance} {item.name} {text_options(item.options)}")
+    }
+    loop item in c.instances -> &lines.push("instance {item.origin} {item.target} {text_type_ref(c.types, item.type_index, 0)}")
+    loop entry in c.imports -> &lines.push("import {entry.name} {entry.kind} {text_type_ref(c.types, entry.type_index, 0)}")
+    loop entry in c.exports {
+        ty :: if c.func_type(entry.index) == .Val(func) -> text_ctype(c.types, func, 0) else -> "-"
+        &lines.push("export {entry.name} {entry.sort} {entry.index} {ty}")
+    }
+    lines.join("\n")
+}
+
+// The rendered component a text artifact encodes to, or its error.
+fn text_rendered(text: String) -> String Never! {
+    if wasm_text_to_binary(text) == {
+        .Ok(binary) -> {
+            if wasm_decode_component(^binary) == {
+                .Ok(component) -> {
+                    loop core in component.modules {
+                        if wasm_validate_module(core) == .Err(error) -> return "validate: {error.render()}"
+                    }
+                    text_component(component)
+                }
+                .Err(error) -> "decode: {error.render()}"
+            }
+        }
+        .Err(error) -> "text: {error.render()}"
+    }
+}
+
+fn text_binary_rendered(bytes: ^[U8]) -> String Never! {
+    if wasm_decode_component(^bytes) == {
+        .Ok(component) -> text_component(component)
+        .Err(error) -> "decode: {error.render()}"
+    }
+}
+
+fn text_error(text: String) -> String Never! {
+    if wasm_text_to_binary(text) == {
+        .Ok(_) -> "ok"
+        .Err(error) -> error.render()
+    }
+}
+
+fn text_fixture(path: String) -[FS.Read, Env]> String {
+    String.from_bytes(fixture(path)) ?? panic("fixture {path} is not UTF-8")
+}
+
+#Test("text compiler extensions decode to the same model as their binaries") {
+    names :: [String]{"lint_no_x", "crash", "fuel_loop", "incompatible", "malformed", "imports_random"}
+    loop name in names {
+        text :: text_rendered(text_fixture("tests/fixtures/compiler_extension/{name}.wat"))
+        binary :: text_binary_rendered(^extension(name))
+        assert(text.contains("\ncode ") && text.contains("\nexport "), "{name}: {text}")
+        assert_eq(text, binary)
+    }
+}
+
+#Test("every shipped text guest converts, decodes and validates") {
+    paths :: [String]{
+        "Examples/features/packages/plugin_failure/failure_guest.wat",
+        "tests/cases/authority/plugin_call_rejects_an_overlarge_argument_list_before_guest_execution.fixture/large_args.wat",
+        "tests/cases/authority/plugin_call_rejects_an_overlarge_frame_for_a_zero_param_export.fixture/zero_param.wat",
+        "tests/cases/authority/plugin_call_rejects_linear_memory_growth_beyond_the_cap_on_all_hosted_tiers.fixture/linear_memory.wat",
+        "tests/cases/authority/plugin_call_rejects_table_growth_beyond_the_cap_on_all_hosted_tiers.fixture/table.wat",
+        "tests/cases/authority/plugin_call_stops_a_non_terminating_component_on_all_hosted_tiers.fixture/non_terminating.wat",
+        "tests/cases/authority/plugin_failure_propagation_records_the_host_call_line_on_all_tiers.fixture/failure_guest.wat",
+        "tests/cases/authority/plugin_load_rejects_a_symlink_outside_the_granted_read_root.fixture/outside/target.wat",
+    }
+    loop path in paths {
+        rendered :: text_rendered(text_fixture(path))
+        assert(!rendered.starts_with("text:") && !rendered.starts_with("decode:") && !rendered.starts_with("validate:"), "{path}: {rendered}")
+    }
+}
+
+#Test("a loaded artifact may be text or binary") {
+    text :: fixture("tests/fixtures/compiler_extension/lint_no_x.wat")
+    if wasm_load_component(^text) == {
+        .Ok(component) -> assert_eq(text_component(component), text_binary_rendered(^extension("lint_no_x")))
+        .Err(error) -> panic("load: {error.render()}")
+    }
+}
+
+#Test("core text modules encode plain and folded instructions alike") {
+    plain :: "(module (func $f (param $x i32) (result i32) block $out local.get $x br_if $out i32.const 7 drop end local.get $x i32.const 1 i32.add))"
+    folded :: "(module (func $f (param $x i32) (result i32) (block $out (br_if $out (local.get $x)) (drop (i32.const 7))) (i32.add (local.get $x) (i32.const 1))))"
+    plain_bytes :: wasm_text_to_binary(plain) ?? panic("plain: {err.render()}")
+    folded_bytes :: wasm_text_to_binary(folded) ?? panic("folded: {err.render()}")
+    assert_eq(plain_bytes, folded_bytes)
+    decoded :: wasm_decode_module(^plain_bytes) ?? panic("decode: {err.render()}")
+    assert_eq(decoded.codes[0].op, [Int]{0x02, 0x20, 0x0d, 0x41, 0x1a, 0x0b, 0x20, 0x41, 0x6a, 0x0b})
+    assert_eq(decoded.codes[0].a, [Int]{-64, 0, 0, 7, 0, 0, 0, 1, 0, 0})
+}
+
+#Test("bad text reports the construct at its byte offset") {
+    assert_eq(text_error("(module (func i32.frobnicate))"), "unknown instruction `i32.frobnicate` (at byte 14)")
+    assert_eq(text_error("(module (func br $nowhere))"), "unknown label `$nowhere` (at byte 17)")
+    assert_eq(text_error("(module (func (local.get $y)))"), "unknown local `$y` (at byte 25)")
+    assert_eq(text_error("(module (func (call $g)))"), "unknown func `$g` (at byte 20)")
+    assert_eq(text_error("(module (func f32.const 1.5))"), "f32 constants are not supported by the text front end (at byte 24)")
+    assert_eq(text_error("(module (func (i32.const 1))"), "unclosed `(` (at byte 0)")
+    assert_eq(text_error("(module \"x\n\")"), "newline in string (at byte 10)")
+    assert_eq(text_error("(component (component))"), "unsupported component field `(component ...)` (at byte 11)")
+    assert_eq(text_error("(module) (module)"), "expected one `(component ...)` or `(module ...)` form (at byte 0)")
+    assert_eq(text_error("(module (func (param v128)))"), "SIMD (v128) is not supported by the plugin engine (at byte 21)")
+}

@@ -256,3 +256,57 @@ fn sema_plugin_interface_by_identity(facts: SemaPluginInterfaceFacts, identity: 
     }
     None
 }
+
+// One `.jet/cache/api/plugin__<stem>.api` snapshot as the driver read it:
+// `stem` is the artifact stem (`mathkit`), `text` the file's exact bytes.
+struct SemaPluginSnapshot {
+    stem: String
+    text: String
+}
+
+// The frozen interfaces of a project's plugin snapshots. Each snapshot names
+// its artifact by stem (`plugin__mathkit` for `…/mathkit.wasm`); its identity
+// pins the snapshot bytes, so a changed interface is a different type. An
+// export line is `fn name(a: T, …) R [-[effects]>]`. A line that does not
+// parse leaves the facts incomplete instead of guessing a signature.
+fn sema_plugin_interface_facts(snapshots: [SemaPluginSnapshot]) -> SemaPluginInterfaceFacts Never! {
+    interfaces := [SemaPluginInterface]{}
+    aliases := [SemaPluginArtifactAlias]{}
+    complete := true
+    digests := ""
+    loop snapshot in snapshots {
+        stem :: snapshot.stem
+        digest :: sema_plugin_sha256(snapshot.text)
+        identity :: sema_plugin_identity(stem, digest)
+        exports := [SemaPluginInterfaceExport]{}
+        loop raw in snapshot.text.split("\n") {
+            line :: raw.trim()
+            if !line.starts_with("fn ") -> next
+            export :: sema_plugin_snapshot_export(line) ?? {
+                complete = false
+                next
+            }
+            sema_plugin_put_export(&exports, export)
+        }
+        sema_plugin_sort_exports(&exports)
+        sema_plugin_put_interface(&interfaces, SemaPluginInterface{artifact: stem, identity: identity, digest: digest, exports: exports})
+        sema_plugin_put_alias(&aliases, stem, identity)
+        digests = "{digests}{identity}\n"
+    }
+    sema_plugin_sort_interfaces(&interfaces)
+    SemaPluginInterfaceFacts{interfaces: interfaces, artifacts: aliases, digest: sema_plugin_sha256(digests), complete: complete}
+}
+
+fn sema_plugin_snapshot_export(line: String) -> SemaPluginInterfaceExport? {
+    source :: sema_plugin_snapshot_signature_source(line) ?? return None
+    parsed :: parse_source(source.bytes())
+    if parsed.diagnostics.len() != 0 || parsed.program.items.len() != 1 -> return None
+    if parsed.program.items[0] == {
+        .Func(function) -> {
+            params :: loop parameter in function.params -> SemaPluginExportParam{convention: parameter.convention, ty: parameter.ty}
+            signature :: line.split(" -[").to_list()[0].trim()
+            return Val(SemaPluginInterfaceExport{name: function.name, signature: signature, params: params, return_type: sema_plugin_export_boundary_return_type(function)})
+        }
+        else -> return None
+    }
+}

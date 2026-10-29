@@ -5,6 +5,7 @@
 use jet_foundation.[AccessConvention, BinEndian, BinMatchPart, DeclID, Span, StrMatchPart, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, BodyCallArg, TCanonicalField, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, BodyEnumArg, BodyEnumPayload, NodeKind, TForInMethod, FnBody, TFuncKind, BodyHandleOp, BodyIfCond, BodyLambda, BodyListSpreadPart, TLocal, BodyMatchArm, TMethodRef, BodyMixedArm, BodyNestedPattern, TNumericOp, BodyOrFallback, TPanicLoc, BodyPattern, BodyPatternBinding, BodyPatternShape, BodyRangeArm, BodyRequireKind, TStaticOwner, BodyStrPart, BodyStructFieldValue, TTextPatternPart, TTryConvert, TypeTupleField, measure_literal_value, body_each_expr_child, body_each_stmt_child, body_stmt, checked_generated_local, checked_user_local, name_rows_set, name_rows_value, type_carrier_identity, StmtKind]
 
 use jet_foundation.[AutoVectorizationFacts]
+use jet_foundation.[ComponentSignatureDescriptor, ComponentTypeDescriptor]
 use jet_backend.[ERR_CONTEXT, ERR_CONTEXT_BYTES, ERR_CONVERSIONS, ERR_CONVERSION_BYTES, ERR_DETAILS, ERR_DETAILS_BYTES, ERR_DETAILS_END, ERR_DETAILS_FIELDS, ERR_DETAILS_HAS_SPAN, ERR_DETAILS_START, ERR_DETAILS_VARIANT, ERR_FIELD_BYTES, ERR_IDENTITY]
 
 fn ir_build_function(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody) Never! {
@@ -1962,8 +1963,9 @@ fn ir_handle_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     if operation == .SerdeEncode -> return ir_serde_encode(&m, p, &b, ty, receiver, span)
     if operation == .CursorTakePattern(text_parts, canonical) -> return ir_take_pattern(&m, p, &b, ty, receiver, false, text_parts, [BinMatchPart]{}, canonical, span)
     if operation == .ReaderTakePattern(binary_parts, canonical) -> return ir_take_pattern(&m, p, &b, ty, receiver, true, [StrMatchPart]{}, binary_parts, canonical, span)
+    if operation == .PluginInvoke(export_name, signature) -> return ir_plugin_invoke(&m, p, &b, ty, receiver, export_name, signature, args, span)
     dedicated :: if operation == {
-        .Hardware(_) | .EmailMethod(_) | .PluginInvoke(_, _) | .MathMethod(_, _, _) -> true
+        .Hardware(_) | .EmailMethod(_) | .MathMethod(_, _, _) -> true
         .HTTPClientMethod(_, _) | .HTTPRouterRegister(_, _, _, _, _, _) | .HTTPServerMethod(_, _) -> true
         .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .DynDecode(_) -> true
         // ir_dyn_method lowered key lookups, indexing, keys, path writes,
@@ -2058,6 +2060,47 @@ fn ir_handle_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     }
     result :: if ir_unit_type(ty) || ir_never_type(ty) -> Type.Named{name: "Unit"} else -> ty
     ir_route(&m, p, &b, route.symbol, inputs, route.borrow_mask, result, span)
+}
+
+// `plugin.export(args…)`: each argument joins the plugin's pending call
+// arguments (jet_plugin_arg_<kind>), then the call route runs the export by
+// its checked name and answers its `Result<T, PluginError>`.
+fn ir_plugin_invoke(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, export_name: String, signature: ComponentSignatureDescriptor, args: [Int], span: Span) -> Int Never! {
+    if signature.params.len() != args.len() -> return ir_fail_slot(&b, span, "plugin export {export_name} with {args.len()} of {signature.params.len()} arguments")
+    plugin :: ir_expr(&m, p, &b, receiver)
+    if ir_failed(b) || plugin < 0 -> return -1
+    owned :: b.fresh[plugin]
+    b.fresh[plugin] = false
+    unit :: Type.Named{name: "Unit"}
+    loop (index, arg) in args {
+        kind :: ir_plugin_value_kind(signature.params[index]) ?? return ir_fail_slot(&b, span, "plugin export {export_name} compound Component argument {index + 1}")
+        value :: ir_expr(&m, p, &b, arg)
+        if ir_failed(b) || value < 0 -> return -1
+        _ :: ir_route(&m, p, &b, "jet_plugin_arg_{kind}", [Int]{plugin, value}, [Bool]{true, true}, unit.copy(), span)
+        if ir_failed(b) -> return -1
+    }
+    b.fresh[plugin] = owned
+    ok :: if ir_untag(ty) == .Result(success, _) -> success else -> { return ir_fail_slot(&b, span, "plugin export {export_name} as {ir_type_name(ty)}") }
+    symbol :: if ir_unit_type(ok) -> "jet_plugin_call" else -> {
+        kind :: ir_plugin_value_kind(signature.result) ?? return ir_fail_slot(&b, span, "plugin export {export_name} compound Component result")
+        "jet_plugin_call_{kind}"
+    }
+    string_row :: ir_string_row(&m)
+    name :: ir_temp(&m, &b, string_row)
+    ir_emit(&b.f, IROp.ConstText, name, ir_intern_text(&m, export_name), -1, -1, b.line)
+    ir_route(&m, p, &b, symbol, [Int]{plugin, name}, [Bool]{true, true}, ty, span)
+}
+
+// The plugin call route suffix of a Component scalar; None for a compound
+// value, which no plugin route carries.
+fn ir_plugin_value_kind(descriptor: ComponentTypeDescriptor) -> String? Never! {
+    if descriptor == {
+        .Int -> Val("int")
+        .Float -> Val("float")
+        .Bool -> Val("bool")
+        .String -> Val("text")
+        else -> None
+    }
 }
 
 // `d * n`, `n * d` and `d / n` (sema's DurationScale and DurationDivide): the

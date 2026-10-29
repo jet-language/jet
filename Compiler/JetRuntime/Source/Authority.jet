@@ -139,6 +139,22 @@ fn authority_narrow_failure(requested: I64) -> I64 {
     rt_text_store(result + DATA_SEQUENCE_LENGTH, kept)
     result
 }
+// The one Authority wire encoder: the sorted rights joined with LF, with no
+// trailing LF (Authority.rs:164). A process policy and the checked plugin
+// boundary both send this text.
+#Export(c) fn jet_authority_to_wire(value: I64) -> I64 {
+    result :: jet_rt_string_builder_new()
+    length :: rt_text_word(value + DATA_SEQUENCE_LENGTH)
+    data :: rt_text_word(value + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        if at != (I64{0}) -> rt_text_push_word(result, I64{10}, I64{1})
+        right :: rt_text_word(data + at * I64{8})
+        rt_text_append(result, rt_text_data(right), rt_text_len(right))
+        at += I64{1}
+    }
+    result
+}
 // The seed workspace rights are defined once, directly in the final owners.
 fn authority_workspace_right(write: Bool) -> I64 {
     text :: rt_text_builder_with_capacity(if write -> I64{19} else -> I64{12})

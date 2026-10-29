@@ -235,6 +235,10 @@ fn sema_call_try_builtin_method(receiver: Expr, receiver_value: TExpr, method: S
     if measurement.handled -> return measurement
     authority :: sema_call_try_authority_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if authority.handled -> return authority
+    if program.registration_graph == .Val(graph) {
+        plugin :: sema_call_try_plugin_method(receiver, receiver_value, method, args, span, expected, graph.plugin_facts, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        if plugin.handled -> return plugin
+    }
     transaction :: sema_call_try_transaction_hook(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if transaction.handled -> return transaction
     sema_call_try_builtin_host_route(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)

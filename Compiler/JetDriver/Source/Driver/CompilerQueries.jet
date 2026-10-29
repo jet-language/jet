@@ -407,6 +407,7 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
         input.request.compiler_threads,
     )
     if input.retain_projection -> registration.retain_programs = true
+    registration.plugin_facts = jet_driver_plugin_facts(input.request)
     if input.request.mode == JetDriverCompileMode.Test -> registration.test_mode = true
     if input.request.mode == JetDriverCompileMode.Check -> registration.check_tests = true
     output_intent :: if input.request.mode == JetDriverCompileMode.Test -> SemaOutputIntent.Test else -> input.request.output_intent

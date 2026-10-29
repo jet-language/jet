@@ -1,0 +1,173 @@
+// Byte-level reading of the WebAssembly binary format: a bounded cursor over
+// one buffer, LEB128 integers, IEEE bit patterns and UTF-8 names. Every read
+// is checked against the cursor's end, so a truncated or overlong encoding is
+// a WasmError at its offset, never a read past the buffer.
+
+#Error
+struct WasmError {
+    message: String
+    offset: Int
+
+    fn new(message: String, offset: Int) -> WasmError Never! {
+        WasmError{message: message, offset: offset}
+    }
+
+    fn render(self) -> String Never! {
+        if self.offset < 0 -> return self.message.copy()
+        "{self.message} (at byte {self.offset})"
+    }
+}
+
+TWO_32 :: 4294967296
+TWO_63 :: 9223372036854775808
+TWO_64 :: 18446744073709551616
+
+// A signed value of `bits` bits (two's complement) from its unsigned pattern.
+fn wasm_signed(value: Int, bits: Int) -> Int Never! {
+    half :: 1 << (bits - 1)
+    if value >= half -> value - (1 << bits) else -> value
+}
+
+// The unsigned pattern of `bits` bits of a signed or unsigned value.
+fn wasm_unsigned(value: Int, bits: Int) -> Int Never! {
+    full :: 1 << bits
+    wrapped := value % full
+    if wrapped < 0 -> wrapped += full
+    wrapped
+}
+
+// Lowercase hexadecimal digits of a non-negative value (for diagnostics).
+fn wasm_hex(value: Int) -> String Never! {
+    digits :: "0123456789abcdef".bytes()
+    out := [U8]{}
+    rest := value
+    loop {
+        &out.insert(0, digits[rest % 16])
+        rest /%= 16
+        if rest == 0 -> break
+    }
+    String.from_bytes(out) ?? ""
+}
+
+struct WasmReader {
+    bytes: [U8]
+    at: Int
+    end: Int
+
+    fn new(bytes: ^[U8]) -> WasmReader Never! {
+        count :: bytes.len()
+        WasmReader{bytes: bytes, at: 0, end: count}
+    }
+
+    fn done(self) -> Bool Never! {
+        self.at >= self.end
+    }
+
+    fn fail(self, message: String) -> WasmError Never! {
+        WasmError.new(message, self.at)
+    }
+
+    fn byte(&self) -> Int WasmError! {
+        if self.at >= self.end -> return Err(WasmError.new("unexpected end of section or function", self.at))
+        value :: Int.from_u8(self.bytes[self.at])
+        self.at += 1
+        Ok(value)
+    }
+
+    fn peek(self) -> Int? {
+        if self.at >= self.end -> return None
+        Val(Int.from_u8(self.bytes[self.at]))
+    }
+
+    // An unsigned LEB128 value of at most `bits` bits.
+    fn unsigned(&self, bits: Int) -> Int WasmError! {
+        start :: self.at
+        result := 0
+        shift := 0
+        loop shift < bits {
+            b :: &self.byte() ?? return Err(WasmError.new("unexpected end of LEB128 integer", start))
+            result = result.bit_or((b.bit_and(0x7f)) << shift)
+            shift += 7
+            if b.bit_and(0x80) == 0 {
+                if result >= (1 << bits) -> return Err(WasmError.new("integer too large", start))
+                return Ok(result)
+            }
+        }
+        Err(WasmError.new("integer representation too long", start))
+    }
+
+    // A signed LEB128 value of at most `bits` bits.
+    fn signed(&self, bits: Int) -> Int WasmError! {
+        start :: self.at
+        result := 0
+        shift := 0
+        loop shift < bits {
+            b :: &self.byte() ?? return Err(WasmError.new("unexpected end of LEB128 integer", start))
+            result = result.bit_or((b.bit_and(0x7f)) << shift)
+            shift += 7
+            if b.bit_and(0x80) == 0 {
+                if b.bit_and(0x40) != 0 -> result -= 1 << shift
+                low :: 0 - (1 << (bits - 1))
+                high :: 1 << (bits - 1)
+                if result < low || result >= high -> return Err(WasmError.new("integer too large", start))
+                return Ok(result)
+            }
+        }
+        Err(WasmError.new("integer representation too long", start))
+    }
+
+    fn u32(&self) -> Int WasmError! {
+        &self.unsigned(32)
+    }
+
+    // A little-endian fixed-width unsigned pattern of `count` bytes.
+    fn fixed(&self, count: Int) -> Int WasmError! {
+        if self.end - self.at < count -> return Err(WasmError.new("unexpected end of fixed-width value", self.at))
+        value := 0
+        loop k in 0..<count -> value = value.bit_or(Int.from_u8(self.bytes[self.at + k]) << (8 * k))
+        self.at += count
+        Ok(value)
+    }
+
+    fn slice(&self, count: Int) -> [U8] WasmError! {
+        if count < 0 || self.end - self.at < count -> return Err(WasmError.new("length out of bounds", self.at))
+        slice :: self.bytes[self.at..<(self.at + count)]
+        self.at += count
+        Ok(slice)
+    }
+
+    fn name(&self) -> String WasmError! {
+        start :: self.at
+        count :: &self.u32()
+        raw :: &self.slice(count)
+        String.from_bytes(raw) ?? return Err(WasmError.new("malformed UTF-8 encoding", start))
+    }
+}
+
+// Writing the binary format (the text reader's data segments and tests).
+fn wasm_put_unsigned(out: &[U8], value: Int) Never! {
+    rest := value
+    more := true
+    loop more {
+        b :: rest.bit_and(0x7f)
+        rest >>= 7
+        more = rest != 0
+        &out.push(U8{if more -> b.bit_or(0x80) else -> b})
+    }
+}
+
+fn wasm_put_signed(out: &[U8], value: Int) Never! {
+    rest := value
+    more := true
+    loop more {
+        b :: rest.bit_and(0x7f)
+        rest >>= 7
+        more = !((rest == 0 && b.bit_and(0x40) == 0) || (rest == -1 && b.bit_and(0x40) != 0))
+        &out.push(U8{if more -> b.bit_or(0x80) else -> b})
+    }
+}
+
+fn wasm_put_fixed(out: &[U8], value: Int, count: Int) Never! {
+    pattern :: wasm_unsigned(value, 8 * count)
+    loop k in 0..<count -> &out.push(U8{(pattern >> (8 * k)).bit_and(255)})
+}

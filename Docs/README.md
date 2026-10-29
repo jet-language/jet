@@ -38,6 +38,7 @@ strategic guidance document.
 - [Adding an example](spec/contributing/examples.md)
 - [Technical traps](spec/contributing/agent-engineering.md)
 - [Security closure](spec/contributing/security-closure.md)
+- [Rebuilding Jet from a seed](spec/contributing/bootstrap.md)
 
 ## Where current behavior lives
 

@@ -25,11 +25,13 @@
 // clean: they are the expensive part (AGENTS.md, expensive launches are gated).
 //
 // Pass: writes SEEDS/a0_NNN (the next number) with jet, jet-runtime/, jetpack, toolchain/,
-// IDENTITY, SOURCE, SHA256SUMS, current.env, RELEASE.json, RELEASE.md, MERGE_MSG, TAG_MSG
-// and evidence/, then prints the commands for Main: make it current (jet-use), merge it to
-// master as `Merge dev: a0_NNN <summary>`, tag it and push. Fail: SEEDS is unchanged; the
-// evidence stays in the work directory. The tool never repoints `current`, merges, tags or
-// pushes. One release run at a time (a lock in the work root); the run takes one
+// IDENTITY, SOURCE, SHA256SUMS, current.env, RELEASE.json, RELEASE.md, MERGE_MSG, TAG_MSG,
+// evidence/ and the seed asset jet-a0_NNN-<platform>-<arch>.tar.gz (+ .sha256), then prints
+// the commands for Main: make it current (jet-use), merge it to master as
+// `Merge dev: a0_NNN <summary>`, tag it, push and publish the seed asset as the tag's GitHub
+// release (Docs/spec/contributing/bootstrap.md). Fail: SEEDS is unchanged; the evidence stays
+// in the work directory. The tool never repoints `current`, merges, tags, pushes or
+// publishes. One release run at a time (a lock in the work root); the run takes one
 // build-slot.sh slot. --filter narrows the suites for dry runs of the tool itself: such a
 // run is never a release (RELEASE.json scope `filtered`, which jet-use refuses).
 //
@@ -85,6 +87,11 @@ export function nextReleaseName(names) {
     const numbers = names.map(name => /^a0_(\d{3})$/.exec(name)).filter(Boolean).map(match => Number(match[1]));
     const next = (numbers.length ? Math.max(...numbers) : 0) + 1;
     return `a0_${String(next).padStart(3, '0')}`;
+}
+
+// The release asset holding one host's seed: jet, jetpack, jet-runtime/, IDENTITY and SHA256SUMS.
+export function seedAssetName(release, platform = process.platform, arch = process.arch) {
+    return `jet-${release}-${platform}-${arch}.tar.gz`;
 }
 
 // Disposition lines: suite TAB case TAB tier|* TAB #card TAB reason. A line starting with `#` is a comment.
@@ -603,6 +610,11 @@ function assemble(ctx, gate, plan) {
     }, null, 2)}\n`);
     writeFileSync(join(temp, 'RELEASE.md'), report(ctx, gate, 'PASS', plan));
     writeFileSync(join(temp, 'SHA256SUMS'), sumsOf(temp, ['jet', 'jetpack', 'jet-runtime', 'IDENTITY']));
+    const asset = seedAssetName(next);
+    const packed = spawnSync('tar', ['--sort=name', '--owner=0', '--group=0', '--numeric-owner', '--mtime=@0', '--use-compress-program=gzip -n', '-cf', asset,
+        ...['jet', 'jetpack', 'jet-runtime', 'IDENTITY', 'SHA256SUMS'].filter(name => existsSync(join(temp, name)))], { cwd: temp, encoding: 'utf8' });
+    if (packed.status !== 0) throw Error(`packing ${asset} failed: ${packed.stderr}`);
+    writeFileSync(join(temp, `${asset}.sha256`), `${sha256File(join(temp, asset))}  ${asset}\n`);
     if (existsSync(dest)) throw Error(`${dest} appeared while assembling; ${temp} is left for inspection`);
     renameSync(temp, dest);
     return { dest, summary, scope };
@@ -622,8 +634,11 @@ function printCommands(ctx, released, plan) {
         lines.push('  git commit --no-edit');
     }
     lines.push(`  git tag -a ${ctx.next} -F ${dest}/TAG_MSG ${ctx.sha}`);
-    if (plan.fastForward) lines.push(`  git push origin master ${ctx.next}`);
-    else lines.push(`  # do not push: origin/master ${plan.origin.slice(0, 10)} is not an ancestor of ${ctx.sha.slice(0, 10)}, so the push would not fast-forward. Release a newer dev commit instead; never force-push master.`);
+    if (plan.fastForward) {
+        const asset = join(dest, seedAssetName(ctx.next));
+        lines.push(`  git push origin master ${ctx.next}`);
+        lines.push(`  gh release create ${ctx.next} --verify-tag --title ${ctx.next} -F ${dest}/TAG_MSG ${asset} ${asset}.sha256`);
+    } else lines.push(`  # do not push: origin/master ${plan.origin.slice(0, 10)} is not an ancestor of ${ctx.sha.slice(0, 10)}, so the push would not fast-forward. Release a newer dev commit instead; never force-push master.`);
     process.stdout.write(`${lines.join('\n')}\n`);
 }
 

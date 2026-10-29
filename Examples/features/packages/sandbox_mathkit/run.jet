@@ -4,13 +4,13 @@
 // the HOST, an ordinary native Jet program. Loading
 // and calling the sandbox never needs `#Unsafe` (I1). This particular guest
 // declares no host imports; a Component that does declare one is preflighted
-// against the guest's `authority.needs` and this host's narrowed Authority
-// before linker registration or guest execution.
+// against this host's narrowed Authority before guest execution. Plugin
+// calls run guest code, so the package grants `Exec`.
 use core.plugin as plugin
 
 fn run() {
     policy :: Authority.from_rights(["FS.Read:repo"])
-    mathkit :: plugin.load("Examples/features/packages/sandbox_mathkit/mathkit.wasm", policy)
+    mathkit :: plugin.load("mathkit.wasm", policy)
     area :: mathkit.scale(6.0, 7.0) ?? panic("scale failed")
     print("scale(6, 7) = {area}")
     diag :: mathkit.hypot(3.0, 4.0) ?? panic("hypot failed")

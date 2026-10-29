@@ -24,8 +24,6 @@ use jet_pkg_model.[
 // One bridge build request.
 struct RustBridgeBuild {
     entries: [ExternEntry]
-    needs: RustBridgeNeeds
-    authority_needs: [String]
     handle_facts: [FFIHandleFact]
     record_defs: CRecordDefinitions
     link_closure: FFILinkClosure
@@ -75,18 +73,8 @@ impl FFIBuildLock.Close {
 }
 
 // The bridge for the host target with no C facts (Rust `build_bridge`).
-fn pkg_ffi_build_bridge(entries: [ExternEntry], needs: RustBridgeNeeds) -[FS, Env, Exec, Time, Time.Wait]> FFILink RustBridgeError! {
-    pkg_ffi_build_bridge_full(RustBridgeBuild{entries: entries, needs: needs, authority_needs: [String]{}, handle_facts: [FFIHandleFact]{}, record_defs: CRecordDefinitions.empty(), link_closure: FFILinkClosure.empty(), native_link_args: [String]{}, selected_target: pkg_ffi_host_target(), project_root: None})
-}
-
-// The Cargo dependency map the entries and providers need.
-fn pkg_ffi_bridge_deps(entries: [ExternEntry], needs: RustBridgeNeeds) -[FS, Env]> [String: String] RustBridgeError! {
-    deps := pkg_ffi_collect_crate_deps(entries)
-    if needs.plugin {
-        deps[FFI_WASMTIME_CRATE_SPEC.name] = FFI_WASMTIME_CRATE_SPEC.version
-        deps["jet-foundation"] = pkg_ffi_jet_foundation_crate_path()
-    }
-    Ok(deps)
+fn pkg_ffi_build_bridge(entries: [ExternEntry]) -[FS, Env, Exec, Time, Time.Wait]> FFILink RustBridgeError! {
+    pkg_ffi_build_bridge_full(RustBridgeBuild{entries: entries, handle_facts: [FFIHandleFact]{}, record_defs: CRecordDefinitions.empty(), link_closure: FFILinkClosure.empty(), native_link_args: [String]{}, selected_target: pkg_ffi_host_target(), project_root: None})
 }
 
 fn pkg_ffi_link_for(request: RustBridgeBuild, key: String, paths: BridgePaths, cdylib: String) -> FFILink Never! {
@@ -125,16 +113,11 @@ fn pkg_ffi_sandbox_unavailable(detail: String) -> RustBridgeError Never! {
 
 fn pkg_ffi_build_bridge_full(request: RustBridgeBuild) -[FS, Env, Exec, Time, Time.Wait]> FFILink RustBridgeError! {
     entries :: request.entries
-    needs :: request.needs
     selected_target :: request.selected_target
-    deps :: pkg_ffi_bridge_deps(entries, needs)
+    deps :: pkg_ffi_collect_crate_deps(entries)
     native_toolchain :: pkg_ffi_inline_native_toolchain(entries, selected_target)
-    foundation_sources := JetFoundationSources?{None}
-    if needs.plugin -> foundation_sources = Val(pkg_ffi_jet_foundation_sources())
-    foundation_digest := String?{None}
-    if foundation_sources == .Val(sources) -> foundation_digest = Val(sources.digest)
     rust_toolchain :: pkg_ffi_native_toolchain_identity()
-    key :: RustBridgeKeyInputs{entries: entries, deps: deps, needs: needs, authority_needs: request.authority_needs, handle_facts: request.handle_facts, record_source: request.record_defs.source, link_closure: request.link_closure, selected_target: selected_target, rust_toolchain: rust_toolchain, native_toolchain: native_toolchain, native_link_args: request.native_link_args, foundation_source_digest: foundation_digest}.cache_key()
+    key :: RustBridgeKeyInputs{entries: entries, deps: deps, handle_facts: request.handle_facts, record_source: request.record_defs.source, link_closure: request.link_closure, selected_target: selected_target, rust_toolchain: rust_toolchain, native_toolchain: native_toolchain, native_link_args: request.native_link_args}.cache_key()
     // #2075: `cache_root` owns this key's build inputs; its outputs land in a
     // Cargo target dir shared by every key with the same build identity.
     paths :: pkg_ffi_bridge_paths(key, selected_target, request.native_link_args, rust_toolchain)
@@ -158,7 +141,7 @@ fn pkg_ffi_build_bridge_full(request: RustBridgeBuild) -[FS, Env, Exec, Time, Ti
     metadata :: pkg_ffi_cargo_metadata(cargo_path, manifest) ?? return Err(pkg_ffi_single_error(pkg_ffi_cargo_bridge_failure_diagnostic(pkg_ffi_first_dependency(deps), err.message)))
     compile_time_code :: pkg_ffi_cargo_metadata_has_compile_time_code(metadata, paths.crate_name) ?? return Err(pkg_ffi_single_error(pkg_ffi_cargo_bridge_failure_diagnostic(pkg_ffi_first_dependency(deps), err.message)))
     files.create_dir_all(paths.target_dir) ?? return Err(pkg_ffi_tool_error("couldn't create the FFI target folder: {err}"))
-    sandboxed :: pkg_ffi_run_sandboxed_cargo(cargo_path, selected_target, paths, request.native_link_args, foundation_sources)
+    sandboxed :: pkg_ffi_run_sandboxed_cargo(cargo_path, selected_target, paths, request.native_link_args)
     receipt :: CargoBridgeReceipt{sandbox_class: sandboxed.mechanism, sandbox_policy: sandboxed.policy, compile_time_code: compile_time_code}
     if !sandboxed.receipt.success -> return Err(pkg_ffi_single_error(pkg_ffi_cargo_failure(entries, deps, sandboxed.receipt.errors)))
     if !files.is_file(paths.rlib) -> return Err(pkg_ffi_tool_error("FFI build finished but `{paths.rlib}` is missing"))
@@ -173,7 +156,6 @@ fn pkg_ffi_build_bridge_full(request: RustBridgeBuild) -[FS, Env, Exec, Time, Ti
 // and build script, and wrapper library. Returns the manifest path.
 fn pkg_ffi_write_bridge_sources(request: RustBridgeBuild, deps: [String: String], paths: BridgePaths, native_toolchain: InlineNativeToolchain?) -[FS, Env]> String RustBridgeError! {
     entries :: request.entries
-    needs :: request.needs
     src_dir :: files.join(paths.cache_root, "src")
     files.create_dir_all(src_dir) ?? return Err(pkg_ffi_tool_error("couldn't create the FFI build folder: {err}"))
     manifest :: files.join(paths.cache_root, "Cargo.toml")
@@ -182,9 +164,7 @@ fn pkg_ffi_write_bridge_sources(request: RustBridgeBuild, deps: [String: String]
         lang :: entry.inline_lang() ?? next
         if lang == "c" || lang == "cpp" -> has_native = true
     }
-    foundation_path := String?{None}
-    if deps.has_key("jet-foundation") -> foundation_path = Val(pkg_ffi_jet_foundation_crate_path())
-    files.write(manifest, pkg_ffi_emit_cargo_toml(paths.crate_name, deps, has_native, foundation_path)) ?? return Err(pkg_ffi_tool_error("couldn't write the FFI manifest: {err}"))
+    files.write(manifest, pkg_ffi_emit_cargo_toml(paths.crate_name, deps, has_native)) ?? return Err(pkg_ffi_tool_error("couldn't write the FFI manifest: {err}"))
     if has_native {
         toolchain :: native_toolchain ?? panic("native entries resolve a native toolchain")
         files.write(files.join(paths.cache_root, "build.rs"), pkg_ffi_emit_inline_build_rs(entries, toolchain)) ?? return Err(pkg_ffi_tool_error("couldn't write the inline FFI build script: {err}"))
@@ -198,23 +178,14 @@ fn pkg_ffi_write_bridge_sources(request: RustBridgeBuild, deps: [String: String]
     loop fact in request.handle_facts {
         if !handle_names.contains(fact.jet_name) -> &handle_names.push(fact.jet_name)
     }
-    wrapper_source := pkg_ffi_emit_wrapper_lib_with_handles(entries, needs, handle_names, request.record_defs)
-    // The hidden host receives the checked package
-    // declaration as data; it never reparses package.jet or invents needs.
-    if needs.plugin -> wrapper_source = "{wrapper_source}{pkg_ffi_plugin_authority_source(request.authority_needs)}"
+    wrapper_source :: pkg_ffi_emit_wrapper_lib_with_handles(entries, handle_names, request.record_defs)
     files.write(files.join(src_dir, "lib.rs"), wrapper_source) ?? return Err(pkg_ffi_tool_error("couldn't write the FFI wrappers: {err}"))
     Ok(manifest)
 }
 
-fn pkg_ffi_plugin_authority_source(authority_needs: [String]) -> String Never! {
-    rows := ""
-    loop need in authority_needs -> rows = "{rows}    {pkg_ffi_rust_debug_string(need)},\n"
-    "\nconst JET_PLUGIN_DECLARED_AUTHORITY_NEEDS: &[&str] = &[\n{rows}];\nfn jet_plugin_declared_authority_needs() -> Result<Vec<String>, String> {{\nOk(JET_PLUGIN_DECLARED_AUTHORITY_NEEDS\n.iter()\n.map(|need| (*need).to_string())\n.collect())\n}}\n"
-}
-
 // Run `cargo build --release --target <t>` in the native sandbox, with the
-// user's Cargo registry and the jet-foundation sources mounted read-only.
-fn pkg_ffi_run_sandboxed_cargo(cargo_path: String, selected_target: String, paths: BridgePaths, native_link_args: [String], foundation_sources: JetFoundationSources?) -[FS, Env, Exec, Time.Wait]> NativeSandboxOutput RustBridgeError! {
+// user's Cargo registry mounted read-only.
+fn pkg_ffi_run_sandboxed_cargo(cargo_path: String, selected_target: String, paths: BridgePaths, native_link_args: [String]) -[FS, Env, Exec, Time.Wait]> NativeSandboxOutput RustBridgeError! {
     cargo_args :: [String]{"build", "--keep-going", "--release", "--target", selected_target, "--manifest-path", "/work/source/Cargo.toml"}
     sandbox_env := [String: String]{}
     sandbox_env["CARGO_HOME"] = "/work/output/cargo-home"
@@ -228,10 +199,6 @@ fn pkg_ffi_run_sandboxed_cargo(cargo_path: String, selected_target: String, path
     mounts := [NativeSandboxMount]{}
     if files.canonicalize(files.join(cargo_home, "registry")) == .Ok(registry) {
         if files.is_dir(registry) -> &mounts.push(NativeSandboxMount{source: registry, destination: "/work/output/cargo-home/registry"})
-    }
-    if foundation_sources == .Val(sources) {
-        foundation_mounts :: pkg_ffi_jet_foundation_mounts(paths.cache_root, sources)
-        loop mount in foundation_mounts -> &mounts.push(mount)
     }
     // U+001F joins Cargo's encoded rustflags.
     if native_link_args.len() > 0 -> sandbox_env["CARGO_ENCODED_RUSTFLAGS"] = native_link_args.join(String.from_bytes([U8]{U8{31}}) ?? "")

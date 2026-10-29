@@ -3381,6 +3381,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     jet_driver_trace_lookup_counters(request.trace_sink, "register", register_lookups, SemaLookupCounters{module_lookups: 0, name_lookups: 0})
     if kg.enabled -> registration_graph.keep_going = true
     if request.mode == JetDriverCompileMode.Test -> registration_graph.test_mode = true
+    registration_graph.plugin_facts = jet_driver_plugin_facts(request)
     if request.mode == JetDriverCompileMode.Check -> registration_graph.check_tests = true
     if checked_projection || request.mode == JetDriverCompileMode.Doc -> registration_graph.retain_programs = true
     if registration_graph.internal_problem != None {

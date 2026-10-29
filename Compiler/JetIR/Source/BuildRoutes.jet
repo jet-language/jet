@@ -1,7 +1,7 @@
 // The IR builder's runtime routes: Core calls and builtin methods through
 // the route table (argument and result carriers, payloads).
 
-use jet_foundation.[CoreCallRecord, Span, SymbolID, Type, TypeTupleField, TBuiltinOp, BodyCallArg, BodyHandleOp, TCapture, TCaptureFacts, TClosureOp, TEffectFacts, TEffectSpan, NodeKind, TFailureCarrier, BodyFnValueKind, BodyLambda, BodyLambdaBody, TTryConvert, core_call_native_return_labels, checked_builtin_mutates_receiver, checked_generated_local, type_carrier_identity, BodyEnumArg, BodyEnumPayload, decl_id_index]
+use jet_foundation.[CoreCallRecord, Span, SymbolID, Type, TypeTupleField, TBuiltinOp, BodyCallArg, BodyHandleOp, TCapture, TCaptureFacts, TClosureOp, TEffectFacts, TEffectSpan, NodeKind, TFailureCarrier, BodyFnValueKind, BodyLambda, BodyLambdaBody, TTryConvert, core_call_native_return_labels, checked_builtin_mutates_receiver, checked_generated_local, type_carrier_identity, BodyEnumArg, BodyEnumPayload, decl_id_index, name_rows_set, name_rows_value]
 
 // `list.push(value)`: grows the buffer to twice its capacity (at least 4)
 // when full, then stores the element at `len`.
@@ -4415,6 +4415,7 @@ fn ir_core_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: Cor
     if symbol == "jet_raw_object_entries_view" -> return ir_object_entries_view(&m, p, &b, ty, args, span)
     if symbol == "jet_testing_world" -> return ir_testing_world(&m, p, &b, args, span)
     if symbol == "jet_reflect_of" -> return ir_reflect_of(&m, p, &b, ty, args, span)
+    if symbol == "jet_plugin_load" -> return ir_plugin_load(&m, p, &b, ty, args, span)
     if ir_lazy_core_call(&m, p, &b, symbol, ty, args, span) == .Val(result) -> return result
     slots := [Int]{}
     borrow_mask :: canonical.signature.borrow_mask
@@ -4439,6 +4440,65 @@ fn ir_core_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: Cor
     result :: if ir_unit_type(ty) || ir_never_type(ty) -> Type.Named{name: "Unit"} else -> ty
     labels :: core_call_native_return_labels(canonical.module_name, canonical.member)
     ir_route_labeled(&m, p, &b, symbol, slots, borrow_mask, result, labels, span)
+}
+
+// The guest entry of a literal plugin artifact: `#plugin.guest<artifact>`,
+// `(op, instance, area) -> Word`. The builder emits a placeholder answering
+// 0 (no guest); the build's plugin link step (JetPlugin) gives it the
+// translated Component's body before the program is emitted.
+IR_PLUGIN_GUEST_PREFIX :: "#plugin.guest<"
+
+fn ir_plugin_guest(m: &IRModule, artifact: String) -> Int Never! {
+    key :: "{IR_PLUGIN_GUEST_PREFIX}{artifact}>"
+    known :: name_rows_value(m.function_rows, key) ?? -1
+    if known >= 0 -> return known
+    id :: m.functions.len()
+    &m.functions.push(ir_hashed_function("plugin.guest", key, "jet_ir_plugin_guest_", "", 0))
+    name_rows_set(&m.function_rows, key, id)
+    a := ir_builder_new(m.functions[id].copy())
+    word_row :: ir_word_row(&m)
+    a.f.result = word_row
+    _ :: ir_new_slot(&a, word_row, IRSlotKind.Param, ir_intern_name(&m, "op"))
+    _ :: ir_new_slot(&a, word_row, IRSlotKind.Param, ir_intern_name(&m, "instance"))
+    _ :: ir_new_slot(&a, word_row, IRSlotKind.Param, ir_intern_name(&m, "area"))
+    none :: ir_word_const(&m, &a, 0)
+    ir_emit(&a.f, IROp.Return, -1, none, -1, -1, a.line)
+    m.functions[id] = ^a.f
+    id
+}
+
+// `plugin.load(artifact, authority)`: the load route also takes the address
+// of the literal artifact's guest entry (ir_plugin_guest; 0 for an artifact
+// only known at run time, which loads as a guest failure).
+fn ir_plugin_load(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [Int], span: Span) -> Int Never! {
+    if args.len() != 2 -> return ir_fail_slot(&b, span, "plugin.load with {args.len()} arguments")
+    literal := ""
+    known := false
+    artifact := args[0]
+    if ir_body_node(p, b, artifact).kind == .Borrow(place, _) -> artifact = place
+    if ir_body_node(p, b, artifact).kind == .StrLit(parts) {
+        known = true
+        loop part in parts {
+            if part == {
+                .Literal(text) -> literal = "{literal}{text}"
+                .Interpolation(_, _) -> known = false
+            }
+        }
+    }
+    path :: ir_expr(&m, p, &b, args[0])
+    if ir_failed(b) -> return -1
+    wire :: ir_expr(&m, p, &b, args[1])
+    if ir_failed(b) -> return -1
+    word_row :: ir_word_row(&m)
+    entry :: ir_temp(&m, &b, word_row)
+    if known {
+        guest :: ir_plugin_guest(&m, literal)
+        address :: ir_lazy_address(&m, &b, guest)
+        ir_emit(&b.f, IROp.Copy, entry, address, -1, -1, b.line)
+    } else {
+        ir_emit(&b.f, IROp.Const, entry, 0, -1, -1, b.line)
+    }
+    ir_route(&m, p, &b, "jet_plugin_load", [Int]{path, wire, entry}, [Bool]{true, true, true}, ty, span)
 }
 
 // `testing.world(world -> …)`: jet_testing_world installs a deterministic

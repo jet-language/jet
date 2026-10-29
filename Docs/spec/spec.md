@@ -4533,8 +4533,12 @@ The `packages/sandbox_mathkit` golden exercises `Bool` results and UTF-8 text
 round trips, including a non-ASCII name; its checked-in interface snapshot
 lists every named export used by the host.
 
-The loader reads the component under explicit resource-scoped `FS.Read`
-authority and preflights every declared WIT import. The guest's
+The path is a literal. The compiler reads a relative path under the package
+root, beside `.jet/cache/api/`, and builds the guest into the host. At load the
+host reads the same path from its working directory, so it runs from the
+package root. The loader reads the component under explicit resource-scoped
+`FS.Read` authority, checks that it matches the built guest, and preflights
+every declared WIT import. The guest's
 `authority.needs` and the narrowed host authority must cover each import before
 linking or instantiation. Unknown, wrong-shape, missing, or denied imports fail
 closed before guest code runs. A guest with no declared imports has an explicit
@@ -4542,6 +4546,9 @@ empty capability set, never an ambient fallback. Registered imports re-check
 the same typed decision at the call edge and retain resource scope. Failure is a
 clean `Err`, not a host crash. Guest-local `Mem` effects support Component text
 ABI values but do not grant host capabilities.
+The narrowed authority crosses the host boundary as its wire text (the sorted
+rights, one per line). The compiler inserts that conversion once at the
+`plugin.load` call; no source, Core source included, may name it (E0510).
 Each export call returns `T PluginError!` (D-PLUGIN-FAILURE1=A). Match `Guest`,
 `Denied`, `Budget(limit, fault)`, or `Defect` rather than reading the display text.
 The `PluginFault` retains the export, message, and bounded guest frames, each a

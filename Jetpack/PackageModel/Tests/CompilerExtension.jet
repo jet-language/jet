@@ -1,7 +1,7 @@
 // Claims ported from crates/jet-pkg-model/src/CompilerExtension.rs
 // #[cfg(test)]. `host_reuses_jet_pkg_model_wasmtime_substrate` inspected the
-// Rust Wasmtime host source; the Jet host is Core `plugin`, so it has no
-// counterpart here.
+// retired Rust Wasmtime host source, so it has no counterpart here; the Jet
+// compiler-extension host fails closed (CompilerExtensionHost.jet).
 use jetpack_integrations.[
     AnalyzeResponse, EXTENSION_ANALYZE_EXPORT, EXTENSION_APPLICATION_PLUGIN_WORLD,
     EXTENSION_PACKAGE_NAME, EXTENSION_PROTOCOL_VERSION, EXTENSION_STAGE, EXTENSION_WORLD_NAME,
@@ -10,8 +10,7 @@ use jetpack_integrations.[
     PluginMechanism, SpanFact, SymbolFact,
     TypeFact, TypeFactShape, TypedSnapshot, pkg_extension_is_application_plugin_world,
     pkg_extension_is_compiler_extension_world, pkg_extension_mechanism,
-    pkg_extension_message_exposes_rustc, pkg_extension_negotiate_abilities,
-    pkg_extension_parse_analyze_result, pkg_extension_parse_load_result, pkg_extension_wit_world,
+    pkg_extension_negotiate_abilities, pkg_extension_wit_world,
 ]
 use jet_foundation.[HostImportFact]
 use jet_pkg_model.[PKG_JSON_MAX_DEPTH, PKG_JSON_MAX_PROTOCOL_BYTES]
@@ -257,26 +256,4 @@ fn pkg_test_extension_too_deep() -> String {
     assert_eq(limits.max_edits, 64)
     assert_eq(limits.max_response_bytes, 262144)
     assert_eq(limits.timeout_ms, 2000)
-}
-
-#Test("load and analyze wire parsers round trip and reject errors") {
-    assert_eq(pkg_extension_parse_load_result("O:42") ?? panic("load wire"), 42)
-    if pkg_extension_parse_load_result("E:couldn't load") == {
-        .Ok(_) -> panic("an E: wire is an error")
-        .Err(error) -> {
-            assert(error.message.contains("couldn't load"))
-            assert(!pkg_extension_message_exposes_rustc(error.message))
-        }
-    }
-    bytes :: "{{\"protocol\":1}}".bytes()
-    wire :: "O:{bytes.len()}:{hex.encode(bytes)}"
-    assert_eq(pkg_extension_parse_analyze_result(wire) ?? panic("analyze wire"), bytes)
-    if pkg_extension_parse_analyze_result("E:calling `analyze` trapped: all fuel") == {
-        .Ok(_) -> panic("an E: wire is an error")
-        .Err(error) -> {
-            assert(error.message.contains("trapped"))
-            assert(!pkg_extension_message_exposes_rustc(error.message))
-        }
-    }
-    assert(pkg_extension_message_exposes_rustc("rustc error[E0308]"))
 }

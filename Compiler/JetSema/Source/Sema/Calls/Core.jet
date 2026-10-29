@@ -790,10 +790,11 @@ fn sema_call_core_typed_decode_module(module_name: String) -> Bool Never! {
     module_name == "core.encoding.json" || module_name == "core.encoding.toml" || module_name == "core.encoding.yaml"
 }
 
-fn sema_call_core_source_arguments(record: CoreCallRecord, args: [TExpr], params: [SemaCallParam], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> [TCallArg] Never! {
+fn sema_call_core_source_arguments(args: [TExpr], params: [SemaCallParam], environment: SemaScopeEnvironment, program: SemaProgramTables) -> [TCallArg] Never! {
     result := [TCallArg]{}
     loop index in 0..<args.len() {
-        value :: sema_call_core_materialize_authority_boundary(record, index, args[index], span)
+        // copy: the source call owns its argument; the Core call's checked argument stays the caller's.
+        value :: args[index].copy()
         param :: params[index]
         &result.push(TCallArg{value: value, template_items: [SymbolID]{},
             borrow: param.convention == AccessConvention.Read && !sema_call_is_scalar(value.ty),
@@ -806,7 +807,18 @@ fn sema_call_core_source_arguments(record: CoreCallRecord, args: [TExpr], params
     result
 }
 
+// A checked Core call. `plugin.load` takes its Authority across the checked
+// boundary as the wire text: the conversion materializes once, here, for the
+// source call and the Core call alike.
 fn sema_call_core_tree(record: CoreCallRecord, args: [TExpr], span: Span, type_args: [Type], widen_to_vec: [Bool], result_type: Type, fallibility: TFailureCarrier, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
+    if args.len() > 1 && core_call_authority_boundary_at(record, 1) {
+        wired :: loop index in 0..<args.len() -> sema_call_core_materialize_authority_boundary(record, index, args[index], span)
+        return sema_call_core_tree_checked(record, wired, span, type_args, widen_to_vec, result_type, fallibility, expected, environment, program, &diagnostics)
+    }
+    sema_call_core_tree_checked(record, args, span, type_args, widen_to_vec, result_type, fallibility, expected, environment, program, &diagnostics)
+}
+
+fn sema_call_core_tree_checked(record: CoreCallRecord, args: [TExpr], span: Span, type_args: [Type], widen_to_vec: [Bool], result_type: Type, fallibility: TFailureCarrier, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
     process_run_boundary :: record.module_name == "core.process" && record.member == "run" && args.len() == record.signature.arity + 1
     if !core_call_accepts_arity(record, args.len()) && !process_run_boundary {
         maximum := record.signature.max_arity
@@ -864,7 +876,7 @@ fn sema_call_core_tree(record: CoreCallRecord, args: [TExpr], span: Span, type_a
             &diagnostics.push(sema_error("E0902", span, "source-owned Core target `{member}` has the wrong normalized arity", "the checked source signature must accept every normalized argument", "use the matching Core source export"))
             return None
         }
-        source_args :: sema_call_core_source_arguments(record, args, params, span, environment, program)
+        source_args :: sema_call_core_source_arguments(args, params, environment, program)
         callee :: sema_call_callee_decl(program, target.symbol.id, span, &diagnostics) ?? return None
         value :: sema_tree_node(result_type, TExprKind.Call{callee: callee, type_args: type_args, args: source_args}, span)
         return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
@@ -1147,6 +1159,10 @@ fn sema_call_core_materialize_authority_boundary(record: CoreCallRecord, index: 
 
 fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if !sema_pin_check_call(record.module_name, record.member, args, &diagnostics) -> return None
+    if record.module_name == "core.plugin" && record.member == "__authority_to_wire" {
+        &diagnostics.push(sema_error("E0510", span, "Authority wire conversion is compiler-private", "only the checked plugin boundary inserts this conversion", "use core.plugin.load with a tightened Authority"))
+        return None
+    }
     if record.module_name == "core.term" && (record.member == "__stdio_write" || record.member == "__stdio_bytes" || record.member == "__stdio_flush" || record.member == "__stdio_fault" || record.member == "__stdout_terminal" || record.member == "__stderr_terminal" || record.member == "__stdin_line") {
         if !environment.source_file.starts_with("<corelib>/") || !environment.module_name.starts_with("core.") {
             &diagnostics.push(sema_error("E0510", span, "stdio raw leaves are compiler-private", "raw stdio operations are restricted to checked Core source", "use the public core.term API"))
@@ -1227,10 +1243,11 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
             &values.push(argument.value)
         }
     }
-    result_type :: sema_call_core_result_type(signature, resolved_type_args, values) ?? {
+    declared_result :: sema_call_core_result_type(signature, resolved_type_args, values) ?? {
         &diagnostics.push(sema_error("E0904", span, "`{canonical_record.module_name}.{canonical_record.member}` did not resolve a result type", "the typed Core result rule must produce the value shape written into the checked tree", "complete the source typed return contract"))
         return None
     }
+    result_type :: sema_call_core_plugin_load_type(canonical_record, values, declared_result, program)
     // Rust `core_call_expr` / `checked_core_type_args`: the CoreCall carrier is
     // derived from the checked result type (`TFailureCarrier::from_checked_type`:
     // only a Result or Option result can fail), and its type arguments are the

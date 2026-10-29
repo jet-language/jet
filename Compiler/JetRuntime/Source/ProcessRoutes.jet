@@ -55,24 +55,10 @@ fn process_route_stream_mode(mode: I64) {
     // The zeroed private directory tail is the original empty inherited Vec.
     result
 }
-fn process_route_authority_wire(authority: I64) -> I64 {
-    // Authority.rs164: sorted BTreeSet rights joined with LF, no trailing LF.
-    result :: jet_rt_string_builder_new()
-    length :: encoding_word(authority + DATA_SEQUENCE_LENGTH)
-    data :: encoding_word(authority + DATA_SEQUENCE_DATA)
-    index := I64{0}
-    loop index < length {
-        if index != (I64{0}) -> rt_text_push_word(result, I64{10}, I64{1})
-        text :: encoding_word(data + index * DATA_TREE_ELEMENT_BYTES)
-        rt_text_append(result, rt_text_data(text), rt_text_len(text))
-        index += I64{1}
-    }
-    result
-}
 #Export(c) fn jet_std_process_spec_under(value: I64, authority: I64) -> I64 {
     result :: jet_rt_handle_clone_process_spec(value)
     jet_rt_string_drop(encoding_word(result + PROCESS_SPEC_POLICY_WIRE))
-    encoding_store(result + PROCESS_SPEC_POLICY_WIRE, process_route_authority_wire(authority))
+    encoding_store(result + PROCESS_SPEC_POLICY_WIRE, jet_authority_to_wire(authority))
     encoding_store(result + PROCESS_SPEC_ENV_CLEAR, I64{1})
     result
 }

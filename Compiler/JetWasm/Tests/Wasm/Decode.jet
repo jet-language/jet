@@ -1,0 +1,145 @@
+use jet_wasm.[
+    WASM_CT_FUNC, WASM_CT_INSTANCE, WASM_EXTERN_MEMORY, WASM_I32, WASM_I64, WASM_F64, WASM_ORIGIN_ALIAS, WASM_ORIGIN_LIFT,
+    WASM_ORIGIN_LOWER, WASM_PRIM_F64, WASM_PRIM_S64, WASM_PRIM_STRING, WASM_SORT_FUNC, WASM_SORT_INSTANCE, WASM_ENCODING_UTF8,
+    WasmComponent, WasmModule, wasm_decode_component, wasm_decode_module, wasm_is_component,
+]
+
+fn component_of(bytes: ^[U8]) -> WasmComponent Never! {
+    if wasm_decode_component(^bytes) == {
+        .Ok(component) -> component
+        .Err(error) -> panic("decode failed: {error.render()}")
+    }
+}
+
+fn component_failure(bytes: ^[U8]) -> String Never! {
+    if wasm_decode_component(^bytes) == {
+        .Ok(_) -> ""
+        .Err(error) -> error.render()
+    }
+}
+
+fn raw_module_failure(values: [Int]) -> String Never! {
+    bytes :: loop value in values -> U8{value}
+    if wasm_decode_module(^bytes) == {
+        .Ok(_) -> ""
+        .Err(error) -> error.render()
+    }
+}
+
+// The decode failure of a module with the standard header followed by `sections`.
+fn module_failure(sections: [Int]) -> String Never! {
+    values := [Int]{0, 0x61, 0x73, 0x6d, 1, 0, 0, 0}
+    loop value in sections -> &values.push(value)
+    raw_module_failure(values)
+}
+
+#Test("the mathkit component decodes: one core module, its instance, aliases, lifts and exports") {
+    bytes :: mathkit()
+    assert(wasm_is_component(bytes))
+    component :: component_of(bytes)
+    assert_eq(component.modules.len(), 1)
+    core :: component.modules[0]
+    assert_eq(core.types.len(), 12)
+    assert_eq(core.funcs.len(), 83)
+    assert_eq(core.codes.len(), 83)
+    assert_eq(core.tables.len(), 1)
+    assert_eq(core.tables[0].limits.min, 29)
+    assert_eq(core.memories.len(), 1)
+    assert_eq(core.memories[0].min, 17)
+    assert_eq(core.globals.len(), 1)
+    assert(core.globals[0].ty.mutable)
+    assert_eq(core.globals[0].init.value, 1048576)
+    assert_eq(core.exports.len(), 8)
+    memory :: core.export_named("memory") ?? panic("memory export")
+    assert_eq(memory.kind, WASM_EXTERN_MEMORY)
+    gcd :: core.export_named("gcd") ?? panic("gcd export")
+    gcd_type :: core.function_type(gcd.index) ?? panic("gcd type")
+    assert_eq(core.types[gcd_type].params, [Int]{WASM_I64, WASM_I64})
+    assert_eq(core.types[gcd_type].results, [Int]{WASM_I64})
+    assert_eq(core.function_name(gcd.index), "gcd")
+    assert_eq(core.elems.len(), 1)
+    assert_eq(core.datas.len(), 1)
+    assert_eq(component.core_instances.len(), 1)
+    assert_eq(component.core_instances[0].source, 0)
+    assert_eq(component.core_memories.len(), 1)
+    assert_eq(component.core_memories[0].name, "memory")
+    names :: loop entry in component.exports -> entry.name
+    assert_eq(names, [String]{"scale", "hypot", "gcd", "is-enabled", "greet"})
+    greet :: component.export_named("greet") ?? panic("greet export")
+    assert_eq(greet.sort, WASM_SORT_FUNC)
+    lift :: component.funcs[greet.index]
+    assert_eq(lift.origin, WASM_ORIGIN_LIFT)
+    assert_eq(component.core_funcs[lift.target].origin, WASM_ORIGIN_ALIAS)
+    assert_eq(component.core_funcs[lift.target].name, "greet")
+    assert_eq(lift.options.encoding, WASM_ENCODING_UTF8)
+    assert_eq(component.core_funcs[lift.options.post_return].name, "cabi_post_greet")
+    assert_eq(component.core_funcs[lift.options.realloc].name, "cabi_realloc")
+    greet_type :: component.func_type(greet.index) ?? panic("greet type")
+    assert_eq(greet_type.kind, WASM_CT_FUNC)
+    assert_eq(greet_type.types, [Int]{WASM_PRIM_STRING})
+    assert_eq(greet_type.ok, WASM_PRIM_STRING)
+    hypot_type :: component.func_type((component.export_named("hypot") ?? panic("hypot")).index) ?? panic("hypot type")
+    assert_eq(hypot_type.names, [String]{"p0", "p1"})
+    assert_eq(hypot_type.types, [Int]{WASM_PRIM_F64, WASM_PRIM_F64})
+    gcd_lift_type :: component.func_type((component.export_named("gcd") ?? panic("gcd")).index) ?? panic("gcd type")
+    assert_eq(gcd_lift_type.ok, WASM_PRIM_S64)
+}
+
+#Test("every function body of the mathkit module decodes to a closed instruction list") {
+    component :: component_of(mathkit())
+    core :: component.modules[0]
+    total := 0
+    loop code in core.codes {
+        assert(code.op.len() > 0)
+        assert_eq(code.op[code.op.len() - 1], 0x0b)
+        assert_eq(code.op.len(), code.a.len())
+        assert_eq(code.op.len(), code.at.len())
+        total += code.op.len()
+    }
+    assert(total > 3000)
+}
+
+#Test("the compiler-extension fixtures decode, and the random import is visible as an instance import") {
+    names :: [String]{"lint_no_x", "crash", "fuel_loop", "incompatible", "malformed"}
+    loop name in names {
+        component :: component_of(extension(name))
+        assert(component.modules.len() >= 1)
+    }
+    random :: component_of(extension("imports_random"))
+    assert_eq(random.imports.len(), 1)
+    assert_eq(random.imports[0].name, "wasi:random/random@0.2.0")
+    assert_eq(random.imports[0].kind, WASM_SORT_INSTANCE)
+    instance_type :: random.types[random.imports[0].type_index]
+    assert_eq(instance_type.kind, WASM_CT_INSTANCE)
+    assert_eq(instance_type.names, [String]{"get-random-u64"})
+    analyze :: random.export_named("analyze") ?? panic("analyze export")
+    assert_eq(analyze.sort, WASM_SORT_FUNC)
+}
+
+#Test("text and non-component inputs fail with the component diagnostic") {
+    assert_eq(component_failure(fixture("Examples/features/packages/plugin_failure/malformed_guest.wasm")), "not a WebAssembly Component: magic header not detected (at byte 0)")
+    assert_eq(component_failure(fixture("Examples/features/foundations/capabilities/guest/hostile/capability_guest.wasm")), "not a WebAssembly Component: magic header not detected (at byte 0)")
+    core_header :: [U8]{U8{0}, U8{0x61}, U8{0x73}, U8{0x6d}, U8{1}, U8{0}, U8{0}, U8{0}}
+    assert_eq(component_failure(core_header), "not a WebAssembly Component: this is a core module (at byte 4)")
+}
+
+#Test("core module structure errors name the offending byte") {
+    assert_eq(module_failure([Int]{}), "")
+    assert_eq(raw_module_failure([Int]{0, 0x61, 0x73, 0x6e, 1, 0, 0, 0}), "magic header not detected: not a WebAssembly binary (at byte 0)")
+    // A type section claiming more bytes than remain.
+    assert_eq(module_failure([Int]{1, 9, 1}), "section size mismatch: unexpected end (at byte 10)")
+    // Sections out of order: function (3) before type (1).
+    assert_eq(module_failure([Int]{3, 1, 0, 1, 1, 0}), "section 1 out of order (at byte 11)")
+    // A function section without a code section.
+    assert_eq(module_failure([Int]{1, 4, 1, 0x60, 0, 0, 3, 2, 1, 0}), "function and code section have inconsistent lengths (at byte 18)")
+    // A v128 parameter.
+    assert_eq(module_failure([Int]{1, 5, 1, 0x60, 1, 0x7b, 0}), "SIMD (v128) is not supported by the plugin engine (at byte 13)")
+    // A shared memory.
+    assert_eq(module_failure([Int]{5, 4, 1, 3, 1, 1}), "shared memory (threads) is not supported by the plugin engine (at byte 11)")
+    // A body using the SIMD prefix: type () -> (), one function, body `0xfd end`.
+    assert_eq(module_failure([Int]{1, 4, 1, 0x60, 0, 0, 3, 2, 1, 0, 10, 5, 1, 3, 0, 0xfd, 0x0b}), "SIMD instructions are not supported by the plugin engine (at byte 23)")
+    // A tail call.
+    assert_eq(module_failure([Int]{1, 4, 1, 0x60, 0, 0, 3, 2, 1, 0, 10, 6, 1, 4, 0, 0x12, 0, 0x0b}), "tail calls are not supported by the plugin engine (at byte 23)")
+    // A body missing its final `end`.
+    assert_eq(module_failure([Int]{1, 4, 1, 0x60, 0, 0, 3, 2, 1, 0, 10, 4, 1, 2, 0, 0x01}), "unexpected end of function body: missing `end` (at byte 24)")
+}

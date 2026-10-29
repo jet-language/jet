@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { compareSuites, jetpackKeys, mergeTreeConflicts, nextReleaseName, parseArgs, parseChainResult, parseDispositions } from './release-compiler.mjs';
+import { compareSuites, jetpackKeys, mergeTreeConflicts, nextReleaseName, parseArgs, parseChainResult, parseDispositions, seedAssetName } from './release-compiler.mjs';
 
 const row = (id, tier, status, suite = 'ui') => ({ suite, case: id, tier, status, detail: '' });
 
 test('the next release name follows the highest a0_NNN', () => {
     assert.equal(nextReleaseName(['a0_005', 'a0_020', 'round-d', 'current', '.a0_021.assembling-7']), 'a0_021');
     assert.equal(nextReleaseName([]), 'a0_001');
+});
+
+test('the seed asset names the release and the host it runs on', () => {
+    assert.equal(seedAssetName('a0_022', 'linux', 'x64'), 'jet-a0_022-linux-x64.tar.gz');
 });
 
 test('options collect every problem at once', () => {

@@ -36,8 +36,6 @@ struct CargoBridgeReceipt {
 struct RustBridgeKeyInputs {
     entries: [ExternEntry]
     deps: [String: String]
-    needs: RustBridgeNeeds
-    authority_needs: [String]
     handle_facts: [FFIHandleFact]
     record_source: String
     link_closure: FFILinkClosure
@@ -46,17 +44,14 @@ struct RustBridgeKeyInputs {
     rust_toolchain: String
     native_toolchain: InlineNativeToolchain?
     native_link_args: [String]
-    foundation_source_digest: String?
 
     // The content-addressed key: every field that can change the generated
     // crate, its dependency graph, or the toolchain that builds it.
     fn cache_key(self) -[FS]> String Never! {
-        needs :: self.needs
         identity := ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
         &identity.field("descriptor_schema", FFI_INLINE_BRIDGE_SCHEMA.bytes())
         &identity.field("c-record-source", self.record_source.bytes())
         &identity.field("selected_target", self.selected_target.bytes())
-        if self.foundation_source_digest == .Val(digest) -> &identity.field("jet-foundation-source", digest.bytes())
         &identity.field("rust_toolchain", self.rust_toolchain.bytes())
         if self.native_toolchain == .Val(toolchain) {
             &identity.field("inline_toolchain", pkg_ffi_inline_toolchain_identity(toolchain).bytes())
@@ -64,13 +59,6 @@ struct RustBridgeKeyInputs {
         }
         loop argument in self.native_link_args -> &identity.field("rustflag", argument.bytes())
         pkg_ffi_identity_static_link_inputs(&identity, self.native_link_args)
-        &identity.field("needs_regex", pkg_bridge_flag(needs.regex))
-        if needs.regex -> &identity.field("regex_runtime", "ring".bytes())
-        &identity.field("needs_archive", pkg_bridge_flag(needs.archive))
-        &identity.field("needs_compress", pkg_bridge_flag(needs.compress))
-        &identity.field("needs_plugin", pkg_bridge_flag(needs.plugin))
-        loop need in pkg_ffi_sorted_unique(self.authority_needs) -> &identity.field("authority_need", need.bytes())
-        if needs.plugin -> &identity.field("plugin_runtime", FFI_PLUGIN_RUNTIME.bytes())
         loop name in pkg_ffi_sorted_keys(self.deps) {
             &identity.field("dependency", name.bytes())
             &identity.field("dependency_version", self.deps[name].bytes())
