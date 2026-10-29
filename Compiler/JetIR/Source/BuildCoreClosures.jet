@@ -355,8 +355,7 @@ fn ir_alloc_new(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, ctor: TAllo
 fn ir_task_detach(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, span: Span) -> Int Never! {
     handle :: ir_expr(&m, p, &b, receiver)
     if ir_failed(b) || handle < 0 -> return -1
-    _ :: ir_runtime(&m, &b, "jet_rt_native_task_detach", [Int]{handle}, -1)
-    ir_lazy_consumed(&m, &b, handle)
+    _ :: ir_lazy_runtime(&m, &b, "jet_rt_native_task_detach", [Int]{handle}, -1, handle)
     return -1
 }
 

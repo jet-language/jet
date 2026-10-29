@@ -52,6 +52,7 @@ fn family_worker(family: Int, started: Sender<Int>, blocked: Receiver<Int>) -> B
         n
     }
     if family == 6 -> return [1, 2, 3].lazy().dedup_by(stop).to_list().len() > 0
+    if family == 14 -> return [1, 2, 3].map(stop).len() > 0
     values :: [1, 2, 3].lazy().map(stop)
     if family == {
         0 -> {
@@ -107,7 +108,7 @@ fn run() {
         }
     }
     loop_block_tx.close()
-    loop family in 0..<14 {
+    loop family in 0..<15 {
         { sender: family_start_tx, receiver: family_start_rx } :: channel<Int>(capacity: 1)
         { sender: family_block_tx, receiver: family_block_rx } :: channel<Int>(capacity: 1)
         family_task :: task family_worker(family, family_start_tx, family_block_rx)

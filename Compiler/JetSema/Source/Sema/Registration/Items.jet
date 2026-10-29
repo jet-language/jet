@@ -2535,6 +2535,9 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     // Each struct's `validate { … }` block becomes its
     // generated `T.validate(value)` before any declaration is registered.
     sema_validate_blocks(&module_row.program.items, &diagnostics)
+    // Each computed field becomes its generated getter method, which a
+    // read of the field calls.
+    sema_derive_computed_getters(&module_row.program.items)
     // Declared conversions register once per module and become
     // their checked conversion routines before any declaration is resolved.
     sema_error_conversion_items(&module_row.program.items, module_row.namespace_refs, &diagnostics)
@@ -2808,7 +2811,7 @@ fn sema_registration_cli_items(items: [Item], diagnostics: &[Diagnostic]) {
             loop function in definition.methods {
                 computed := false
                 loop field in definition.fields {
-                    if field.computed != None && field.name == function.name -> computed = true
+                    if field.computed != None && sema_computed_field_getter(field.name) == function.name -> computed = true
                 }
                 if computed -> next
                 command_count += 1

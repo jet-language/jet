@@ -314,6 +314,15 @@ function jet_list_try_filter(xs, f) {
   return { tag: "Ok", values: [out] };
 }
 
+function jet_list_try_each(xs, f) {
+  const values = xs && xs.__jet_iter ? xs.to_list() : xs;
+  for (const value of values) {
+    const result = f(value);
+    if (result && result.tag === "Err") return result;
+  }
+  return jet_outcome_ok(null);
+}
+
 function jet_iter_try_map(view, f) {
   const source = jet_iter_source(view);
   const out = [];

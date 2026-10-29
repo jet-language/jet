@@ -1673,6 +1673,7 @@ IR_RUNTIME_ROUTES :: comptime { [IRRoute]{
     IRRoute{symbol: "jet_rt_string_byte_len", export: "jet_rt_string_byte_len", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Text}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Word}},
     IRRoute{symbol: "jet_rt_string_data", export: "jet_rt_string_data", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Text}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Word}},
     IRRoute{symbol: "jet_process_stream_line_bytes_raw", export: "jet_process_stream_line_bytes_raw", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "ProcessStdoutStream"}}, result: IRRouteResult.Result{ok: IRRouteCarrier.List{elem: IRRouteCarrier.Word}, err: IRRouteCarrier.Handle{name: "IOError"}}},
+    IRRoute{symbol: "jet_std::JetCondition::new", export: "jet_rt_native_condition_new", native_lists: true, params: [IRRouteCarrier]{}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetCondition"}}},
 } }
 
 // #5001: each table below is read in place, and its lookup is keyed: the
@@ -2781,6 +2782,7 @@ IR_RUNTIME_ROUTE_KEYS :: comptime { [String]{
     "jet_stats_zscore",
     "jet_std::DataLimits::safe",
     "jet_std::EncodingLimits::safe",
+    "jet_std::JetCondition::new",
     "jet_std::JetCondition::notify_all",
     "jet_std::JetCondition::notify_one",
     "jet_std::JetEventPolicy::sync",
@@ -4409,6 +4411,7 @@ IR_RUNTIME_ROUTE_KEY_ROWS :: comptime { [Int]{
     856,
     1037,
     1038,
+    1626,
     1083,
     1084,
     1085,
@@ -5606,6 +5609,7 @@ IR_RUNTIME_HANDLES :: comptime { [IRRuntimeHandle]{
     IRRuntimeHandle{jet_name: "ZonedDateTime", runtime: "JetZonedDateTime", clone: true, display: true, show: true, debug: true, eq: true},
     IRRuntimeHandle{jet_name: "UnixListener", runtime: "JetUnixListener", clone: true, display: false, show: false, debug: false, eq: false},
     IRRuntimeHandle{jet_name: "UDPSocket", runtime: "JetUDPSocket", clone: true, display: false, show: true, debug: false, eq: false},
+    IRRuntimeHandle{jet_name: "Condition", runtime: "JetCondition", clone: true, display: false, show: false, debug: false, eq: false},
 } }
 
 // Opaque native providers: physical ownership ABI only, no Rust schema.
@@ -5881,6 +5885,7 @@ IR_RUNTIME_HANDLE_KEYS :: comptime { [String]{
     "Clock",
     "Closed",
     "Complex",
+    "Condition",
     "Constraint",
     "Counter",
     "Cursor",
@@ -6521,6 +6526,7 @@ IR_RUNTIME_HANDLE_KEY_ROWS :: comptime { [Int]{
     284,
     285,
     286,
+    638,
     287,
     288,
     291,

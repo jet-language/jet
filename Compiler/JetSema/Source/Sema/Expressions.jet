@@ -3133,6 +3133,13 @@ fn sema_expr_try_method_static_routes(receiver: Expr, method: String, method_spa
         http := sema_call_try_http_static(receiver, method, owner_type_args, type_args, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if http.handled -> return http
     }
+    // `mem.address_of(place)` names the module itself as its receiver.
+    if receiver == .Ident(name, _, _) {
+        if sema_expr_core_module_alias_visible(name, scopes) {
+            memory := sema_call_try_memory_static(receiver, method, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            if memory.handled -> return memory
+        }
+    }
 
     owner := if receiver == {.Ident(name, _, _) -> name else -> ""}
     // `alias.Type.method(...)` names the same Core owner as bare `Type` when the
@@ -3724,10 +3731,34 @@ fn sema_expr_check_ident(name: String, span: Span, expected: Type?, environment:
         result = sema_expr_expected(value, expected, environment, program, &diagnostics)
     }
     if kind == SymbolKind.Constant || kind == SymbolKind.Function {
-        value :: sema_node(&context, ty, NodeKind.ConstRef{symbol: scopes.bindings[index].symbol.id}, span)
+        value_ty :: if kind == SymbolKind.Function -> sema_function_value_type(program, ty, scopes.bindings[index].symbol.module_name) else -> ty
+        value :: sema_node(&context, value_ty, NodeKind.ConstRef{symbol: scopes.bindings[index].symbol.id}, span)
         result = sema_expr_expected(value, expected, environment, program, &diagnostics)
     }
     result
+}
+
+// A function's symbol type spells its parameter and result types as its
+// declaration writes them; a written trait name there is a trait value, as
+// in the function's own checked signature, so the function value carries it
+// as one.
+fn sema_function_value_type(program: SemaProgramTables, ty: Type, module_name: String) -> Type Never! {
+    if program.registration_graph == .Val(graph) {
+        names := [String]{}
+        sema_public_failure_collect_named(ty, &names)
+        found := [String]{}
+        actuals := [Type]{}
+        loop name in names {
+            if found.contains(name) -> next
+            resolved :: sema_type_resolve_declared(graph, Type.Named{name: name}, module_name)
+            if resolved == .TraitObject(_) {
+                &found.push(name)
+                &actuals.push(resolved)
+            }
+        }
+        if found.len() > 0 -> return sema_inference_substitute_type(ty, found, actuals)
+    }
+    ty.copy()
 }
 
 fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {

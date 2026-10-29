@@ -174,13 +174,74 @@ fn shared_revision_begin(shared: I64, revision: I64) -> Bool {
     shared_borrow_unpin(shared)
 }
 
+// `shared.try_replace(snapshot, value)`: under the edit permit, a snapshot
+// of this cell (`owner`) taken at its current committed `revision` publishes
+// the value at `slot` (its bytes move in, the old value is dropped) as the
+// next revision: 1. A stale snapshot leaves the cell and its revision as they
+// are and the value stays the caller's: 0.
+#Export(c) fn jet_rt_native_shared_try_replace(shared: I64, owner: I64, revision: I64, slot: I64) -> I64 {
+    if !shared_borrow_pin(shared) -> return I64{0}
+    shared_acquire(shared, true)
+    current :: sync_load(shared + I64{48})
+    if (current == I64{-1}) {
+        shared_release(shared, true)
+        shared_borrow_unpin(shared)
+        shared_revision_stop()
+        return I64{0}
+    }
+    published := I64{0}
+    if owner == shared && current == revision {
+        payload :: sync_load(shared + I64{64})
+        drop_code :: sync_load(shared + I64{80})
+        if drop_code != (I64{0}) -> _ := coll_call1(drop_code, payload)
+        coll_copy(slot, payload, coll_payload(sync_load(shared + I64{56})))
+        sync_store(shared + I64{48}, wrapping(revision + I64{1}))
+        published = I64{1}
+    }
+    shared_release(shared, true)
+    shared_borrow_unpin(shared)
+    published
+}
+
 // Root guard: one retained cell owner and one canonical permit, no heap token.
 // Cell allocations are 8-aligned. Condition wait writes cell|1 into the
 // caller's token slot when reacquisition fails; its owner remains until drop.
 // An unheld guard's access must stop, while drop must not release another permit.
+// A projected guard (`guard.map`/`guard.split`) is a 24-byte heap token tagged
+// bit1: the guard it projects at 0 (a root or another token), the byte offset
+// it adds to that guard's payload at 8, and its holders at 16 (the token both
+// halves of a split project has two). The last holder's drop releases the
+// guard it projects.
 fn shared_guard_cell(guard: I64) -> I64 { guard.bit_and(I64{-2}) }
 
 fn shared_guard_held(guard: I64) -> Bool { guard != I64{0} && (guard.bit_and(I64{1})) == I64{0} }
+
+fn shared_guard_projected(guard: I64) -> Bool { (guard.bit_and(I64{2})) != I64{0} }
+
+fn shared_guard_token(guard: I64) -> I64 { guard.bit_and(I64{-4}) }
+
+// The root guard a guard projects.
+fn shared_guard_root(guard: I64) -> I64 {
+    root := guard
+    loop shared_guard_projected(root) {
+        root = sync_load(shared_guard_token(root))
+    }
+    root
+}
+
+// Gives up one holder of a projected guard; a token whose last holder this
+// was is freed and its own guard given up in turn. The root guard left to
+// release, or 0 when a holder remains.
+fn shared_guard_unproject(guard: I64) -> I64 {
+    current := guard
+    loop shared_guard_projected(current) {
+        token :: shared_guard_token(current)
+        if (sync_add(token + I64{16}, I64{-1}) != I64{1}) -> return I64{0}
+        current = sync_load(token)
+        jet_rt_free(token, I64{24}, I64{8})
+    }
+    current
+}
 
 fn shared_guard_invalid() {
     text :: scheduler_text_new(I64{34})
@@ -195,12 +256,41 @@ fn shared_guard_invalid() {
 }
 
 fn shared_guard_payload(guard: I64) -> I64 {
-    if !shared_guard_held(guard) {
+    offset := I64{0}
+    root := guard
+    loop shared_guard_projected(root) {
+        token :: shared_guard_token(root)
+        offset = wrapping(offset + sync_load(token + I64{8}))
+        root = sync_load(token)
+    }
+    if !shared_guard_held(root) {
         shared_guard_invalid()
         return I64{0}
     }
-    sync_load(shared_guard_cell(guard) + I64{64})
+    wrapping(sync_load(shared_guard_cell(root) + I64{64}) + offset)
 }
+
+// `guard.map(value -> value.field)`: a guard lending the stored field at
+// byte `offset` of what `guard` lends; it takes `guard` over.
+#Export(c) fn jet_rt_native_shared_guard_project(guard: I64, offset: I64) -> I64 {
+    token :: jet_rt_alloc(I64{24}, I64{8})
+    sync_store(token, guard)
+    sync_store(token + I64{8}, offset)
+    sync_store(token + I64{16}, I64{1})
+    token.bit_or(I64{2})
+}
+
+// The guard both halves of `guard.split(...)` project: `guard` itself, held
+// until both halves drop. Each half is a jet_rt_native_shared_guard_project
+// of it.
+#Export(c) fn jet_rt_native_shared_guard_share(guard: I64) -> I64 {
+    token :: jet_rt_alloc(I64{24}, I64{8})
+    sync_store(token, guard)
+    sync_store(token + I64{8}, I64{0})
+    sync_store(token + I64{16}, I64{2})
+    token.bit_or(I64{2})
+}
+
 #Export(c) fn jet_rt_native_shared_guard_read(shared: I64) -> I64 {
     shared_retain(shared)
     shared_acquire(shared, false)
@@ -222,22 +312,27 @@ fn shared_guard_payload(guard: I64) -> I64 {
 #Export(c) fn jet_rt_native_shared_edit_guard_edit(guard: I64) -> I64 { shared_guard_payload(guard) }
 
 #Export(c) fn jet_rt_native_shared_guard_revision(guard: I64) -> I64 {
-    if !shared_guard_held(guard) {
+    root :: shared_guard_root(guard)
+    if !shared_guard_held(root) {
         shared_guard_invalid()
         return I64{0}
     }
-    sync_load(shared_guard_cell(guard) + I64{48})
+    sync_load(shared_guard_cell(root) + I64{48})
 }
 
 #Export(c) fn jet_rt_native_shared_read_guard_drop(guard: I64) {
-    cell :: shared_guard_cell(guard)
-    if shared_guard_held(guard) -> shared_release(cell, false)
+    root :: shared_guard_unproject(guard)
+    if root == (I64{0}) -> return
+    cell :: shared_guard_cell(root)
+    if shared_guard_held(root) -> shared_release(cell, false)
     jet_rt_native_shared_drop(cell)
 }
 
 #Export(c) fn jet_rt_native_shared_edit_guard_drop(guard: I64) {
-    cell :: shared_guard_cell(guard)
-    if !shared_guard_held(guard) {
+    root :: shared_guard_unproject(guard)
+    if root == (I64{0}) -> return
+    cell :: shared_guard_cell(root)
+    if !shared_guard_held(root) {
         jet_rt_native_shared_drop(cell)
         return
     }

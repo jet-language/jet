@@ -5008,6 +5008,21 @@ fn sema_stmt_check_projected_assignment(target: LValue, op: BinOp?, op_span: Spa
     sema_stmt_check_place_assignment(target, ^place, op, op_span, expr, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
+// An index or field write whose path passes through a `ViewMut` value edits
+// the window's owner, not the carrier: `borrowed.values[0] = 3` with
+// `values: ViewMut<Int>` needs no write marker on `borrowed`.
+fn sema_stmt_place_writes_through_view(place: TExpr) -> Bool Never! {
+    if place.kind == {
+        .Index(base, _, _, _, _, _) | .Field(base, _) -> {
+            if sema_expr_unwrap_tag(base.ty) == .Apply(name, _) {
+                if name == "ViewMut" -> return true
+            }
+            sema_stmt_place_writes_through_view(base)
+        }
+        else -> false
+    }
+}
+
 // The write of `expr` (combined by `op`) through the checked `place` of `target`.
 fn sema_stmt_check_place_assignment(target: LValue, checked_place: ^TExpr, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     exit_diagnostics :: diagnostics.len()
@@ -5088,7 +5103,7 @@ fn sema_stmt_check_place_assignment(target: LValue, checked_place: ^TExpr, op: B
         tree_op = Val(sema_stmt_binary_type(operator))
     }
     sema_ownership_release_value_only_views(&state, target, &tail_store, &context)
-    if !sema_ownership_check_lvalue_write(&state, target, scopes, &diagnostics) -> return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 6")
+    if !sema_ownership_check_lvalue_write_as(&state, target, !sema_stmt_place_writes_through_view(place), scopes, &diagnostics) -> return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 6")
     if !sema_stmt_move_direct(expr, &state, scopes, "the assignment", &diagnostics) -> return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 7")
     // A compound update under an `#Arithmetic` policy reads the place as a
     // value (sema_stmt_policy_compound), before it becomes the write.
@@ -5647,7 +5662,7 @@ fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: 
     // rail, so it proves its owners as the success view it is.
     recorded_value := value
     recorded_ty := checked.ty
-    if sema_stmt_return_is_view_boundary(return_type) && checked.ty == .Result(ok_ty, _) {
+    if sema_stmt_return_success_is_view(return_type) && checked.ty == .Result(ok_ty, _) {
         if value == .Ok(ok_value, _, _) {
             recorded_value = ok_value
             recorded_ty = ok_ty
@@ -5658,7 +5673,7 @@ fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: 
         }
     }
     failure_exit := false
-    if sema_stmt_return_is_view_boundary(return_type) {
+    if sema_stmt_return_success_is_view(return_type) {
         if value == .Err(_, _, _) -> failure_exit = true
         if value == .Call(err_call, _) {
             if err_call.name == "Err" && err_call.args.len() == 1 -> failure_exit = true
@@ -5702,6 +5717,15 @@ fn sema_stmt_return_is_view_boundary(return_type: Type?) -> Bool Never! {
     declared :: return_type ?? return false
     success :: if declared == .Result(ok, _) -> ok else -> declared
     if success == .Apply(name, _) -> return name == "View" && !sema_stmt_string_view_type(success)
+    false
+}
+
+// The declared success type is a window, `View<T>` or `ViewMut<T>` (not the
+// string view `View<str>`), whose owners a return proves on its success rail.
+fn sema_stmt_return_success_is_view(return_type: Type?) -> Bool Never! {
+    declared :: return_type ?? return false
+    success :: if declared == .Result(ok, _) -> ok else -> declared
+    if success == .Apply(name, _) -> return (name == "View" || name == "ViewMut") && !sema_stmt_string_view_type(success)
     false
 }
 

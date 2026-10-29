@@ -448,6 +448,8 @@ fn sema_inline_value_at(value: Expr, span: Span) -> Expr Never! {
         .Bool(flag, _, node) -> Expr.Bool{value: flag, span: span, id: node}
         .Char(text, _, node) -> Expr.Char{value: text, span: span, id: node}
         .Str(parts, _, node) -> Expr.Str{parts: parts, span: span, id: node}
+        .Ident(name, _, node) -> Expr.Ident{name: name, span: span, id: node}
+        .Field(base, member, _, node) -> Expr.Field{base: sema_inline_value_at(base, span), member: member, span: span, id: node}
         .EnumLit(type_name, variant, _, args, leading_dot, _, node) -> Expr.EnumLit{type_name: type_name, variant: variant, variant_span: None, args: args, leading_dot: leading_dot, span: span, id: node}
         // copy: the re-spanned value is a new owned Expr. Other kinds keep `value`, a module
         // constant's expression that the constant table keeps for every other use site.
@@ -612,7 +614,7 @@ fn sema_inline_rewrite_expr(rewrite: &SemaInlineRewrite, expression: Expr) -> Ex
         .Slice(base, start, end, range, span, node) -> return Expr.Slice{base: sema_inline_rewrite_expr(&rewrite, base), start: sema_inline_rewrite_expr(&rewrite, start), end: sema_inline_rewrite_expr(&rewrite, end), range: sema_inline_rewrite_optional_expr(&rewrite, range), span: span, id: node}
         .Range(start, end, exclusive, span, node) -> return Expr.Range{start: sema_inline_rewrite_expr(&rewrite, start), end: sema_inline_rewrite_expr(&rewrite, end), exclusive: exclusive, span: span, id: node}
         .Ident(name, span, node) -> {
-            if rewrite.values.get(name) == .Val(value) -> return sema_inline_value_at(value, span)
+            if !sema_inline_is_local(rewrite, name) && rewrite.values.get(name) == .Val(value) -> return sema_inline_value_at(value, span)
             // Rust `rewrite_inline_calls_expr`: a sibling named as a value
             // becomes the module name, which name lookup then rejects.
             if rewrite.siblings.get(name) != None -> return Expr.Ident{name: rewrite.sibling_module, span: span, id: node}

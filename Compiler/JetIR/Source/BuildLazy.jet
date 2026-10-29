@@ -1269,6 +1269,118 @@ fn ir_shared_guard(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
     guard
 }
 
+// What a `SharedSnapshot<T, U>` is laid out as: a retained handle of the
+// cell it was captured from, the committed revision it saw, and the
+// captured value.
+fn ir_shared_snapshot_carrier(inner: Type, captured: Type) -> Type Never! {
+    Type.Tuple{fields: [TypeTupleField]{
+        TypeTupleField{name: "owner", ty: Type.Shared{inner: inner}},
+        TypeTupleField{name: "revision", ty: Type.IntN{signed: true, bits: 64}},
+        TypeTupleField{name: "value", ty: captured},
+    }}
+}
+
+// The `T` and captured `U` of a `SharedSnapshot<T, U>`.
+fn ir_shared_snapshot_args(ty: Type) -> [Type]? Never! {
+    if ir_untag(ty) == .Apply(name, args) {
+        if name == "SharedSnapshot" && args.len() == 2 -> return Val(args.copy())
+    }
+    None
+}
+
+// `shared.capture()` / `shared.capture(value -> projection)`: under one read
+// permit, an owned copy of the value (or the projection's result) paired
+// with the committed revision it was read at.
+fn ir_shared_capture(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
+    snapshot_args :: ir_shared_snapshot_args(ty) ?? return ir_fail_slot(&b, span, "Shared capture producing {ir_type_name(ty)}")
+    captured_ty :: snapshot_args[1].copy()
+    receiver_ty :: ir_ty(p, b, receiver)
+    inner :: if ir_untag(receiver_ty) == .Shared(value) -> value else -> { return ir_fail_slot(&b, span, "Shared capture of {ir_type_name(receiver_ty)}") }
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    inner_row :: ir_value_type(&m, p, inner) ?? return ir_type_fail(&b, span, inner)
+    captured_row :: ir_value_type(&m, p, captured_ty) ?? return ir_type_fail(&b, span, captured_ty)
+    owner :: ir_member_of_row(&m, p, row, "owner") ?? return ir_type_fail(&b, span, ty)
+    revision_member :: ir_member_of_row(&m, p, row, "revision") ?? return ir_type_fail(&b, span, ty)
+    value_member :: ir_member_of_row(&m, p, row, "value") ?? return ir_type_fail(&b, span, ty)
+    shared :: ir_expr(&m, p, &b, receiver)
+    if ir_failed(b) || shared < 0 -> return -1
+    closure := -1
+    if args.len() == 1 {
+        closure = ir_expr(&m, p, &b, args[0])
+        if ir_failed(b) || closure < 0 -> return -1
+    }
+    pointer_row :: ir_pointer_row(&m)
+    word_row :: ir_word_row(&m)
+    permit :: ir_runtime(&m, &b, "jet_rt_native_shared_guard_read", [Int]{shared}, pointer_row)
+    payload :: ir_runtime(&m, &b, "jet_rt_native_shared_read_guard_deref", [Int]{permit}, pointer_row)
+    revision :: ir_runtime(&m, &b, "jet_rt_native_shared_guard_revision", [Int]{permit}, word_row)
+    view :: ir_load_at(&m, &b, payload, 0, inner_row)
+    value := -1
+    if closure >= 0 {
+        closure_ty :: ir_ty(p, b, args[0])
+        value = ir_call_callback(&m, p, &b, closure, closure_ty, [Int]{view}, captured_row, span)
+        if ir_failed(b) -> return -1
+        value = ir_own(&m, p, &b, value)
+    } else if view >= 0 {
+        value = ir_copy_value(&m, p, &b, view, span)
+    }
+    _ :: ir_runtime(&m, &b, "jet_rt_native_shared_read_guard_drop", [Int]{permit}, -1)
+    snapshot :: ir_fresh_temp(&m, &b, row)
+    ir_emit(&b.f, IROp.StackAddress, snapshot, m.types[row].size, 8, -1, b.line)
+    handle :: ir_runtime(&m, &b, "jet_rt_native_shared_clone", [Int]{shared}, owner.ty)
+    ir_store_at(&m, p, &b, snapshot, owner.offset, handle)
+    ir_emit(&b.f, IROp.Store, -1, snapshot, revision_member.offset, revision, b.line)
+    if value >= 0 {
+        b.fresh[value] = true
+        ir_store_at(&m, p, &b, snapshot, value_member.offset, value)
+    }
+    if closure >= 0 -> ir_release(&m, &b, closure)
+    ir_release(&m, &b, shared)
+    snapshot
+}
+
+// `shared.try_replace(snapshot, value)`: the runtime publishes the value
+// only when the snapshot was captured from this cell at its current committed
+// revision (jet_rt_native_shared_try_replace); a rejected value is dropped
+// here. The snapshot is consumed either way. Exhausted revisions stop in the
+// runtime, so the result is always `Ok`.
+fn ir_shared_try_replace(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
+    if args.len() != 2 -> return ir_fail_slot(&b, span, "Shared try_replace with {args.len()} arguments")
+    receiver_ty :: ir_ty(p, b, receiver)
+    inner :: if ir_untag(receiver_ty) == .Shared(value) -> value else -> { return ir_fail_slot(&b, span, "Shared try_replace on {ir_type_name(receiver_ty)}") }
+    inner_row :: ir_value_type(&m, p, inner) ?? return ir_type_fail(&b, span, inner)
+    snapshot_ty :: ir_ty(p, b, args[0])
+    snapshot_row :: ir_value_type(&m, p, snapshot_ty) ?? return ir_type_fail(&b, span, snapshot_ty)
+    owner :: ir_member_of_row(&m, p, snapshot_row, "owner") ?? return ir_type_fail(&b, span, snapshot_ty)
+    revision_member :: ir_member_of_row(&m, p, snapshot_row, "revision") ?? return ir_type_fail(&b, span, snapshot_ty)
+    shared :: ir_expr(&m, p, &b, receiver)
+    if ir_failed(b) || shared < 0 -> return -1
+    taken :: ir_expr(&m, p, &b, args[0])
+    if ir_failed(b) || taken < 0 -> return -1
+    snapshot :: ir_own(&m, p, &b, taken)
+    value :: ir_value_as(&m, p, &b, args[1], inner_row, span)
+    if ir_failed(b) -> return -1
+    owned :: ir_own(&m, p, &b, value)
+    slot :: ir_lazy_value_slot(&m, &b, owned)
+    pointer_row :: ir_pointer_row(&m)
+    word_row :: ir_word_row(&m)
+    cell :: ir_load_at(&m, &b, snapshot, owner.offset, pointer_row)
+    revision :: ir_load_at(&m, &b, snapshot, revision_member.offset, word_row)
+    published :: ir_runtime(&m, &b, "jet_rt_native_shared_try_replace", [Int]{shared, cell, revision, slot}, word_row)
+    zero :: ir_word_const(&m, &b, 0)
+    if owned >= 0 && ir_has_drop(m, b, owned) {
+        rejected :: ir_bool_op(&m, &b, IROp.Eq, published, zero)
+        ir_open_if(&b.f, rejected, b.line)
+        ir_emit(&b.f, IROp.Drop, -1, owned, -1, -1, b.line)
+        ir_end(&b.f, b.line)
+    }
+    if owned >= 0 -> b.fresh[owned] = false
+    accepted :: ir_bool_op(&m, &b, IROp.Ne, published, zero)
+    ir_release(&m, &b, snapshot)
+    ir_release(&m, &b, shared)
+    ir_result_box(&m, p, &b, ty, true, accepted)
+}
+
 // `shared.field` (the SharedAccess.jet desugar to `shared.read` with a
 // one-parameter callback; a write through the cell desugars to `shared.edit`): the runtime takes the read lock and runs the
 // closure through lazy.callback over the cell's slot; the callback writes its

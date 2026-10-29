@@ -228,8 +228,7 @@ fn ir_set_from(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, source: Int,
     if ir_iter_element(source_ty) != None {
         list_row :: ir_value_type(&m, p, Type.List{element: elem}) ?? return ir_fail_slot(&b, span, "type [{ir_type_name(elem)}]")
         list = ir_list_empty(&m, &b, list_row)
-        _ :: ir_runtime(&m, &b, "jet_rt_native_iter_to_list", [Int]{source, list}, -1)
-        ir_lazy_consumed(&m, &b, source)
+        _ :: ir_lazy_runtime(&m, &b, "jet_rt_native_iter_to_list", [Int]{source, list}, -1, source)
         moved = true
     } else if ir_list_element(&m, p, b, source) != Val(shape.key.ty) {
         return ir_fail_slot(&b, span, "Set construction source {ir_type_name(source_ty)} is not its element List")

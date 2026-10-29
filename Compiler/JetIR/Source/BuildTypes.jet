@@ -201,6 +201,17 @@ fn ir_value_type_laid(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) ->
         drop :: if editable -> "jet_rt_native_shared_edit_guard_drop" else -> "jet_rt_native_shared_read_guard_drop"
         return Val(ir_intern_type(&m, "{drop}:{type_carrier_identity(ty)}", ir_owned_layout(IRTypeKind.Pointer, ty, drop, "")))
     }
+    if ty == .Apply(name, args) {
+        // A `Pool<T>` and its `ID<T>`s as BuildPools.jet lays them out.
+        if name == "Pool" && args.len() == 1 -> return ir_value_type_in(&m, p, ir_pool_carrier(args[0].copy()), laying)
+        if name == "ID" && args.len() == 1 -> return ir_value_type_in(&m, p, ir_pool_id_carrier(), laying)
+        if name == "SharedSnapshot" && args.len() == 2 -> return ir_value_type_in(&m, p, ir_shared_snapshot_carrier(args[0].copy(), args[1].copy()), laying)
+    }
+    // A `SharedRevisionError` is never built: an exhausted revision stops in
+    // the runtime. It is laid out as its message would be.
+    if ty == .Named(name) {
+        if name == "SharedRevisionError" -> return ir_value_type_in(&m, p, Type.String, laying)
+    }
     if ty == .Tagged(_, inner) -> return ir_value_type_in(&m, p, inner, laying)
     if ty == .InlineRange(base, _, _) -> return ir_value_type_in(&m, p, base, laying)
     if ir_local_cell_inner(ty) != None {

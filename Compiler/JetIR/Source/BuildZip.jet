@@ -54,8 +54,7 @@ fn ir_zip(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, ar
             release :: mapped.release
             iter_row :: ir_value_type(&m, p, Type.Apply{name: "Iter", args: [Type]{target}}) ?? return ir_type_fail(&b, span, target)
             source :: columns[index]
-            columns[index] = ir_runtime(&m, &b, "jet_rt_native_iter_map", [Int]{source, mapped.closure, mapped.callback, release, meta}, iter_row)
-            ir_lazy_consumed(&m, &b, source)
+            columns[index] = ir_lazy_runtime(&m, &b, "jet_rt_native_iter_map", [Int]{source, mapped.closure, mapped.callback, release, meta}, iter_row, source)
             absent_node :: ir_node(&b, target, NodeKind.Absent, span)
             absent :: ir_expr(&m, p, &b, absent_node)
             if ir_failed(b) || absent < 0 -> return -1

@@ -503,6 +503,7 @@ fn sema_expression_field(field: Expr, base: Expr, member: String, span: Span, ex
     if checked_base_value == .Val(probe_value) {
         rewritten := sema_shared_access_desugar_field_read(base, member, span, probe_value.ty)
         if rewritten == None -> rewritten = sema_expression_rows_view(base, member, span, probe_value.ty, environment, program, &scopes)
+        if rewritten == None -> rewritten = sema_expression_computed_field_read(base, member, span, probe_value.ty, environment, program, &scopes)
         if rewritten == None {
             swizzle :: sema_expression_core_vector_swizzle(base, member, span, probe_value.ty, environment, program, &diagnostics)
             if swizzle.invalid -> return None
@@ -565,6 +566,26 @@ fn sema_expression_rows_view(base: Expr, member: String, span: Span, ty: Type, e
     meta.collecting_loop = true
     lambda :: Lambda{take_names: [NamedSpan]{}, params: [LambdaParam]{}, effects: None, body: LambdaBody.Block{body: [Stmt]{walk}}, span: span, meta: meta}
     Val(Expr.CallValue{callee: Expr.Lambda{lambda: lambda, id: AST_NODE_GENERATED}, args: [CallArg]{}, span: span, id: AST_NODE_GENERATED})
+}
+
+// `value.name` for a computed field `name: T -> formula` of a struct: a call
+// of its generated getter (Registration `sema_derive_computed_getters`).
+// None for a stored field or any other base.
+fn sema_expression_computed_field_read(base: Expr, member: String, span: Span, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Expr? {
+    owner_name := ""
+    if sema_expr_unwrap_tag(ty) == {
+        .Named(name) -> owner_name = name
+        .Apply(name, _) -> owner_name = name
+        else -> return None
+    }
+    owner :: sema_expression_type_symbol(&scopes, environment, program, owner_name) ?? return None
+    definition :: sema_scope_declaration_struct(environment, program, owner.id) ?? return None
+    loop field in definition.fields {
+        if field.name != member -> next
+        if field.computed == None -> return None
+        return Val(Expr.MethodCall{receiver: base.copy(), method: sema_computed_field_getter(member), method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED})
+    }
+    None
 }
 
 fn sema_expression_struct_static_member_error(type_name: String, member: String, states: [String], span: Span) -> Diagnostic Never! {

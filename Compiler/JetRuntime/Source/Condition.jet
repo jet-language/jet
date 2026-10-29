@@ -147,7 +147,9 @@ fn condition_reacquire(cell: I64) -> Bool {
 // no initialized String owner and must propagate before the caller reads it.
 #Export(c) fn jet_rt_native_shared_guard_wait(guard_slot: I64, editable: I64, condition: I64, env: I64, invoke: I64, failure_out: I64) -> I64 {
     guard :: sync_load(guard_slot)
-    if !shared_guard_held(guard) {
+    // A projected guard shares its permit (a split's other half may still
+    // lend part of the value), so it never gives the permit up to wait.
+    if !shared_guard_held(guard) || shared_guard_projected(guard) {
         shared_guard_invalid()
         return jet_rt_session_propagate()
     }

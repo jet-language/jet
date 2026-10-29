@@ -2163,7 +2163,7 @@ fn sema_ownership_open_write_reference(state: &SemaOwnershipState, expr: Expr, s
         &diagnostics.push(sema_ownership_diag_read_shared_guard_write(span))
         return false
     }
-    if !has_view && !info.mutable && info.access != AccessConvention.Write && !sema_ownership_binding_is_edit_shared_guard(info) {
+    if !has_view && !info.mutable && info.access != AccessConvention.Write && !sema_ownership_binding_is_edit_shared_guard(info) && !sema_ownership_writes_through_view_type(expr, info.symbol.ty) {
         // Rust `validate_write_place`: a parameter is E0205, a local E0202.
         if info.symbol.kind == SymbolKind.Parameter {
             param_ty :: info.symbol.ty ?? Type.Named{name: "Unit"}
@@ -2458,12 +2458,21 @@ fn sema_ownership_check_use(state: &SemaOwnershipState, expr: Expr, scopes: Sema
             return false
         }
         conflict :: sema_ownership_active_loan_conflict_for_expr(&state, place, AccessConvention.Read, expr, scopes)
-        if conflict != None {
-            &diagnostics.push(sema_ownership_diag_alias(sema_ownership_place_name(place), true, expr_span(expr)))
-            return false
+        if conflict == .Val(loan) {
+            // A window's own bounds and indexes are read before it opens.
+            if !sema_ownership_window_operand_read(loan, expr_span(expr)) {
+                &diagnostics.push(sema_ownership_diag_alias(sema_ownership_place_name(place), true, expr_span(expr)))
+                return false
+            }
         }
     }
     true
+}
+
+// True when `span` lies inside the statement window `loan` is opening: an
+// operand of that window, read before it opens.
+fn sema_ownership_window_operand_read(loan: SemaOwnershipLoan, span: Span) -> Bool Never! {
+    loan.statement_window && span.start >= loan.span.start && span.end <= loan.span.end
 }
 
 // Rust `reject_moved_expr_use` reads the written place without chasing a
@@ -4911,6 +4920,28 @@ fn sema_ownership_check_nested_call_value(state: &SemaOwnershipState, value: Exp
     sema_ownership_check_expression(&state, value, scopes, &diagnostics)
 }
 
+// The values a window's place path reads besides its root: every range bound
+// and element index on the way to the window.
+fn sema_ownership_check_window_operands(state: &SemaOwnershipState, place: Expr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    if place == {
+        .Paren(value, _, _) -> sema_ownership_check_window_operands(&state, value, scopes, &diagnostics)
+        .Field(base, _, _, _) -> sema_ownership_check_window_operands(&state, base, scopes, &diagnostics)
+        .Index(base, index, _, _, _) -> {
+            valid := sema_ownership_check_window_operands(&state, base, scopes, &diagnostics)
+            if !sema_ownership_check_expression(&state, index, scopes, &diagnostics) -> valid = false
+            valid
+        }
+        .Slice(base, start, end, range, _, _) -> {
+            valid := sema_ownership_check_window_operands(&state, base, scopes, &diagnostics)
+            if !sema_ownership_check_expression(&state, start, scopes, &diagnostics) -> valid = false
+            if !sema_ownership_check_expression(&state, end, scopes, &diagnostics) -> valid = false
+            if range != None && !sema_ownership_check_expression(&state, range, scopes, &diagnostics) -> valid = false
+            valid
+        }
+        else -> true
+    }
+}
+
 fn sema_ownership_check_expression(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     if expr == {
         // As the expression check notes it (sema_expression_ident): only a
@@ -4964,6 +4995,9 @@ fn sema_ownership_check_expression(state: &SemaOwnershipState, expr: Expr, scope
             // (#3714): a take mark on a bare place is an
             // exact move, which the expression check records; it opens no view.
             if access == PlaceAccess.Take || sema_ownership_places_from_expr_in_state(value, scopes, &state).len() == 0 -> return sema_ownership_check_expression(&state, value, scopes, &diagnostics)
+            // A write window's bounds and indexes are read before it opens:
+            // `&data[0..<data.len()]` reads `data`, then lends it.
+            if access == PlaceAccess.Write && !sema_ownership_check_window_operands(&state, value, scopes, &diagnostics) -> return false
             first_seq :: state.next_seq
             opened :: if access == PlaceAccess.Write -> sema_ownership_open_write_reference(&state, value, expr_span(expr), scopes, &diagnostics) else -> sema_ownership_open_reference_for_expr(&state, value, AccessConvention.Read, expr_span(expr), scopes, &diagnostics)
             loop index in 0..<state.loans.len() {
@@ -5759,13 +5793,19 @@ fn sema_ownership_check_assignment(state: &SemaOwnershipState, target: LValue, v
 }
 
 fn sema_ownership_check_lvalue_write(state: &SemaOwnershipState, target: LValue, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    sema_ownership_check_lvalue_write_as(&state, target, true, scopes, &diagnostics)
+}
+
+// `capability` false: the write edits a window's owner, so the target's
+// root binding needs no write capability of its own.
+fn sema_ownership_check_lvalue_write_as(state: &SemaOwnershipState, target: LValue, capability: Bool, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     if target == {
-        .Local(name, span) -> sema_ownership_check_write(&state, Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}, "be assigned", scopes, &diagnostics)
+        .Local(name, span) -> sema_ownership_check_write_as(&state, Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}, "be assigned", capability, scopes, &diagnostics)
         // copy: `base` is a payload of read parameter `target`, which keeps the original; field `base` of the new Expr.Field owns this one
-        .Field(base, field, span) -> sema_ownership_check_write(&state, Expr.Field{base: base.copy(), member: field, span: span, id: AST_NODE_GENERATED}, "be assigned", scopes, &diagnostics)
+        .Field(base, field, span) -> sema_ownership_check_write_as(&state, Expr.Field{base: base.copy(), member: field, span: span, id: AST_NODE_GENERATED}, "be assigned", capability, scopes, &diagnostics)
         .Index(base, index, span, kind) -> {
             if !sema_ownership_check_expression(&state, index, scopes, &diagnostics) -> return false
-            sema_ownership_check_write(&state, Expr.Index{base: base, index: index, span: span, kind: kind, id: AST_NODE_GENERATED}, "be assigned", scopes, &diagnostics)
+            sema_ownership_check_write_as(&state, Expr.Index{base: base, index: index, span: span, kind: kind, id: AST_NODE_GENERATED}, "be assigned", capability, scopes, &diagnostics)
         }
     }
 }

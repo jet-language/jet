@@ -112,8 +112,8 @@ fn ir_cell_params(m: &IRModule, b: &IRBuilder) Never! {
 
 // The names of the variables that live in frame cells from their
 // declaration: those a closure in `body` captures to write and those whose
-// raw address `*x` is taken. None when no node `body` can reach is a closure
-// or a raw address (most functions).
+// raw address `*x` or `mem.address_of(x)` is taken. None when no node
+// `body` can reach is a closure or a raw address (most functions).
 fn ir_mutable_captures(p: IRProgram, b: IRBuilder, body: [Int]) -> [String] Never! {
     names := [String]{}
     if !ir_nodes_have_cells(b.made.nodes) && (b.row < 0 || !ir_nodes_have_cells(p.functions[b.row].tree.nodes)) -> return names
@@ -140,6 +140,13 @@ fn ir_collect_mutable_captures(p: IRProgram, b: IRBuilder, expression: Int, name
             if !names.contains(local.name) -> &names.push(local.name)
         }
     }
+    if node.kind == .RawAddressOf(place) {
+        if place == .Expr(value) {
+            if ir_body_node(p, b, value).kind == .Local(local) {
+                if !names.contains(local.name) -> &names.push(local.name)
+            }
+        }
+    }
     if b.row >= 0 {
         body_each_expr_child(p.functions[b.row].tree, node, (child: Int) -> ir_collect_mutable_captures(p, b, child, &names))
     } else {
@@ -149,7 +156,7 @@ fn ir_collect_mutable_captures(p: IRProgram, b: IRBuilder, expression: Int, name
 
 fn ir_nodes_have_cells(nodes: [BodyNode]) -> Bool Never! {
     loop node in nodes {
-        if node.kind == .Lambda(_) || node.kind == .RawOf(_) -> return true
+        if node.kind == .Lambda(_) || node.kind == .RawOf(_) || node.kind == .RawAddressOf(_) -> return true
     }
     false
 }
@@ -1527,6 +1534,9 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
             return read
         }
         .SharedGuardValue(guard) -> return ir_shared_guard_value(&m, p, &b, expression_ty, guard, span)
+        .SharedGuardMap(guard, path, _) -> return ir_shared_guard_map(&m, p, &b, expression_ty, guard, path, span)
+        .SharedGuardSplit(guard, first, second, _) -> return ir_shared_guard_split(&m, p, &b, expression_ty, guard, first, second, span)
+        .PoolSlot(pool, id, _, _, line, source_line) -> return ir_pool_slot(&m, p, &b, expression_ty, pool, id, line, source_line, span)
         .HostCall(call) -> {
             if call == .SwitchSubjectValue {
                 subject :: if b.subjects.len() > 0 -> b.subjects[b.subjects.len() - 1] else -> -1
@@ -1563,11 +1573,15 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
                 if kind == .Unwrap -> return ir_option_unwrap(&m, p, &b, inner, span)
             }
             if call == .Method(receiver, method, args) {
+                receiver_ty :: ir_ty(p, b, receiver)
+                if ir_pool_inner(receiver_ty) != None -> return ir_pool_method(&m, p, &b, expression_ty, receiver, method, args, span)
                 if ir_untag(ir_ty(p, b, receiver)) == .Shared(_) {
                     if (method == "guard_read" || method == "guard_edit") && args.len() == 0 -> return ir_shared_guard(&m, p, &b, expression_ty, receiver, method == "guard_edit", span)
                     if method == "shared.read" || method == "shared.edit" -> return ir_shared_read(&m, p, &b, expression_ty, receiver, args, method, if method == "shared.edit" -> "jet_rt_native_shared_edit" else -> "jet_rt_native_shared_read", span)
                     if method == "same" && args.len() == 1 -> return ir_shared_same(&m, p, &b, receiver, args[0], span)
                     if (method == "downgrade" || method == "strong_count") && args.len() == 0 -> return ir_shared_owner_word(&m, p, &b, expression_ty, receiver, method, span)
+                    if method == "capture" && args.len() <= 1 -> return ir_shared_capture(&m, p, &b, expression_ty, receiver, args, span)
+                    if method == "try_replace" -> return ir_shared_try_replace(&m, p, &b, expression_ty, receiver, args, span)
                 }
                 if ir_shared_weak(ir_ty(p, b, receiver)) && method == "upgrade" && args.len() == 0 -> return ir_shared_upgrade(&m, p, &b, expression_ty, receiver, span)
                 if ir_cell_value_type(ir_ty(p, b, receiver)) != None -> return ir_cell_method(&m, p, &b, expression_ty, receiver, method, args, span)
@@ -1688,9 +1702,13 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
         // extraction are the value itself (a Transparent convert).
         .DistinctCtor(argument) | .DistinctRaw(argument) -> return ir_expr(&m, p, &b, argument)
         .DistinctConvert(_, argument, operation, range, fallible) -> return ir_distinct_convert(&m, p, &b, expression_ty, argument, operation, range, fallible, span)
+        .SharedGuardWait(guard, condition, predicate) -> return ir_shared_guard_wait(&m, p, &b, expression_ty, guard, condition, predicate, span)
+        .ConditionNotify(condition, all) -> return ir_condition_notify(&m, p, &b, condition, all)
         .AllocNew(ctor, args) -> return ir_alloc_new(&m, p, &b, expression_ty, ctor, args, span)
         .RawOf(value) -> return ir_raw_of(&m, p, &b, expression_ty, value, span)
         .Deref(value) -> return ir_raw_deref(&m, p, &b, expression_ty, value, span)
+        .RawAddressOf(place) -> return ir_raw_address_of(&m, p, &b, expression_ty, place, span)
+        .PtrFromAddr(address, _) -> return ir_ptr_from_addr(&m, p, &b, expression_ty, address, span)
         else -> {
             kind_name :: ir_expr_kind_name(ir_body_node(p, b, expression).kind)
             return ir_fail_slot(&b, span, "expression {kind_name}")
@@ -1737,6 +1755,39 @@ fn ir_raw_deref(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int,
     pointer :: ir_expr(&m, p, &b, value)
     if ir_failed(b) || pointer < 0 -> return -1
     ir_load_at(&m, &b, pointer, 0, row)
+}
+
+// `mem.address_of(place)`: the numeric address of the place's storage. A
+// pointee `p.*` is the pointer itself; any other place is its write address
+// (ir_place_address), which must be the storage, never a scratch cell.
+fn ir_raw_address_of(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, place: BodyPlace, span: Span) -> Int Never! {
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    value :: if place == {
+        .Expr(value) -> value
+        .Local(local) -> { return ir_fail_slot(&b, span, "raw address of local {local.name}") }
+    }
+    address := -1
+    if ir_body_node(p, b, value).kind == .Deref(pointer) {
+        address = ir_expr(&m, p, &b, pointer)
+    } else {
+        backs := [IRWriteBack]{}
+        address = ir_place_address(&m, p, &b, value, &backs, span)
+        if backs.len() > 0 -> return ir_fail_slot(&b, span, "raw address of a scalar local outside a frame cell")
+    }
+    if ir_failed(b) || address < 0 -> return -1
+    result :: ir_temp(&m, &b, row)
+    ir_emit(&b.f, IROp.Copy, result, address, -1, -1, b.line)
+    result
+}
+
+// `Ptr<T>.from_addr(address)`: the numeric address as a raw pointer.
+fn ir_ptr_from_addr(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, address: Int, span: Span) -> Int Never! {
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    value :: ir_expr(&m, p, &b, address)
+    if ir_failed(b) || value < 0 -> return -1
+    result :: ir_temp(&m, &b, row)
+    ir_emit(&b.f, IROp.Copy, result, value, -1, -1, b.line)
+    result
 }
 
 // `consume(x)` (a Drop of `^x`, a move to nowhere): the value's cleanup runs
@@ -2792,6 +2843,7 @@ fn ir_place_needs_address(m: &IRModule, p: IRProgram, b: IRBuilder, place: Int) 
         .Move(inner) -> return ir_place_needs_address(&m, p, b, inner)
         .Field(receiver, field) -> return ir_place_boxed_member(&m, p, b, receiver, field.name) || ir_place_needs_address(&m, p, b, receiver)
         .Index(_, _, kind, _, _, _) -> return kind == .List || kind == .FixedListProof || kind == .Map
+        .PoolSlot(_, _, _, _, _, _) -> return true
         else -> return false
     }
 }
@@ -2865,6 +2917,16 @@ fn ir_place_address(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, backs
         // `&guard.value`: the cell's slot itself, written in place.
         payload :: ir_shared_guard_payload(&m, p, &b, guard, span)
         if payload < 0 -> return -1
+        row :: ir_value_type(&m, p, place_ty) ?? return ir_type_fail(&b, span, place_ty)
+        pointer_row :: ir_pointer_row(&m)
+        address :: if m.types[row].kind == .Aggregate -> ir_temp(&m, &b, row) else -> ir_temp(&m, &b, pointer_row)
+        ir_emit(&b.f, IROp.Offset, address, payload, 0, -1, b.line)
+        return address
+    }
+    if ir_body_node(p, b, place).kind == .PoolSlot(pool, id, _, _, line, source_line) {
+        // `&pool[id]`: the live value's own storage, written in place.
+        payload :: ir_pool_slot_address(&m, p, &b, pool, id, line, source_line, span)
+        if ir_failed(b) || payload < 0 -> return -1
         row :: ir_value_type(&m, p, place_ty) ?? return ir_type_fail(&b, span, place_ty)
         pointer_row :: ir_pointer_row(&m)
         address :: if m.types[row].kind == .Aggregate -> ir_temp(&m, &b, row) else -> ir_temp(&m, &b, pointer_row)
