@@ -186,7 +186,7 @@ fn decode_order(req: HTTPRequest) -> OrderRequest HTTPError! {
     return req.json<OrderRequest>()
 }
 
-fn role_allowed(req: HTTPRequest, session_id: String, expected_role: String, now: Int) Bool Never! -[DB, Time]> {
+fn role_allowed(req: HTTPRequest, session_id: String, expected_role: String, now: Int) -[DB, Time]> Bool {
     policy :: session_policy()
     provided :: session_value(req, policy)
     if provided == "" || provided != session_id -> return false
@@ -196,7 +196,7 @@ fn role_allowed(req: HTTPRequest, session_id: String, expected_role: String, now
     return true
 }
 
-fn issue_session(user: String, password: String, now: Int, ttl_ms: Int) String Never! -[DB, Time]> {
+fn issue_session(user: String, password: String, now: Int, ttl_ms: Int) -[DB, Time]> String {
     session :: auth.password_login(user, password, now, ttl_ms) ?? return ""
     return auth.session_id(session)
 }
@@ -252,7 +252,7 @@ fn pool_fixture(path: String) -> PoolReceipt {
 }
 
 
-fn queue_state(delivery: ^Delivery) String Never! -[DB]> {
+fn queue_state(delivery: ^Delivery) -[DB]> String {
     state :: delivery.status() ?? return "unknown"
     if state == {
         .Pending -> return "pending"
