@@ -14,20 +14,20 @@ typedef struct { Text *name, *value; } Field;
 typedef struct { Text *variant; List fields; W has_span, start, end; } Details;
 typedef struct Err { Text *message, *code; struct Err *cause; Text *identity; List context, conversions; Details *details; } Err;
 _Static_assert(sizeof(Err)==88 && sizeof(Details)==56 && sizeof(Context)==24 && sizeof(Conversion)==16 && sizeof(Field)==16,"canonical native error ABI");
-typedef struct { Text *function, *file; W line, column; Text *note; W count; } Hop;
+typedef struct { Text *function, *file; W line, column; Text *note; W count; Text *source; } Hop;
 typedef struct { Hop *origin; List hops; } Journey;
-_Static_assert(sizeof(Hop)==48 && sizeof(Journey)==32,"canonical native Journey ABI");
+_Static_assert(sizeof(Hop)==56 && sizeof(Journey)==32,"canonical native Journey ABI");
 extern Text *jet_journey_render_styled(Journey *,bool,W);
 extern Journey *jet_rt_native_journey_new(void);
 extern Journey *jet_rt_native_journey_clone(Journey *);
 extern void jet_rt_native_journey_drop(Journey *);
 extern void jet_rt_native_journey_reset(Journey *);
-extern void jet_rt_native_journey_origin(Journey *,Text *,W,W,Text *);
-extern void jet_rt_native_journey_frame(Journey *,Text *,W,W,Text *,Text *);
+extern void jet_rt_native_journey_origin(Journey *,Text *,W,W,Text *,Text *);
+extern void jet_rt_native_journey_frame(Journey *,Text *,W,W,Text *,Text *,Text *);
 extern Journey *jet_rt_native_journey_take(Journey **);
 extern void jet_rt_native_journey_adopt(Journey *,Journey *);
 extern W jet_rt_journey_destructor(W,Journey *);
-extern Err *jet_rt_native_err_context_frame(Err *,Journey *,Text *,W,W,Text *,Text *);
+extern Err *jet_rt_native_err_context_frame(Err *,Journey *,Text *,W,W,Text *,Text *,Text *);
 extern void *jet_rt_alloc(W,W);
 extern Text *jet_rt_string_from_static(const char *,W);
 extern void jet_rt_string_drop(Text *);
@@ -60,7 +60,7 @@ static void journey_goldens(void) {
     Text file=borrowed("Examples/features/errors/error_context.jet");
     Text empty=borrowed(""), a=borrowed("read_raw"), b=borrowed("parse_config"), c=borrowed("load_config"), d=borrowed("run");
     Text n1=borrowed("reading raw config"), n2=borrowed("loading config app.toml");
-    Hop origin={&a,&file,4,1,&empty,1}, first={&b,&file,7,1,&n1,1}, second={&c,&file,12,1,&n2,1}, third={&d,&file,16,1,&empty,1};
+    Hop origin={&a,&file,4,1,&empty,1,&empty}, first={&b,&file,7,1,&n1,1,&empty}, second={&c,&file,12,1,&n2,1,&empty}, third={&d,&file,16,1,&empty,1,&empty};
     Hop *hops[]={&first,&second,&third}; Journey journey={&origin,{3,3,hops}};
     const char *plain=
         "  failed here: read_raw (Examples/features/errors/error_context.jet:4)\n"
@@ -97,52 +97,60 @@ static void journey_goldens(void) {
     }
     equal(colored,expected);
     file=borrowed("a.jet"); a=borrowed("g"); b=borrowed("f"); n1=borrowed("a very long note");
-    origin=(Hop){&a,&file,1,1,&empty,1}; first=(Hop){&b,&file,2,1,&n1,1}; journey.hops.length=1;
+    origin=(Hop){&a,&file,1,1,&empty,1,&empty}; first=(Hop){&b,&file,2,1,&n1,1,&empty}; journey.hops.length=1;
     equal(jet_journey_render_styled(&journey,false,30),
         "  failed here: g (a.jet:1)\n Trail [E3002] (1 hop):\n  1. f (a.jet:2) — a very lon…\n");
     first.count=4; n1=empty;
     equal(jet_journey_render_styled(&journey,false,0),
         "  failed here: g (a.jet:1)\n Trail [E3002] (4 hops via ?, origin first):\n  1. f (a.jet:2) ×4\n");
+    // #6014: each hop's trimmed source line under its header, cut to width.
+    Text s0=borrowed("return Err(\"empty\")"), s1=borrowed("n :: g()");
+    origin.source=&s0; first.source=&s1; first.count=1;
+    equal(jet_journey_render_styled(&journey,false,0),
+        "  failed here: g (a.jet:1)\n      return Err(\"empty\")\n Trail [E3002] (1 hop via ?, origin first):\n  1. f (a.jet:2)\n      n :: g()\n");
+    equal(jet_journey_render_styled(&journey,false,20),
+        "  failed here: g (a.jet:1)\n      return Err(\"e…\n Trail [E3002] (1 hop):\n  1. f (a.jet:2)\n      n :: g()\n");
     equal(jet_journey_render_styled(NULL,false,80),"");
 }
 static void journey_ownership(void) {
     Journey *value=jet_rt_native_journey_new();
-    Text *file=text("a.jet"), *function=text("g"), *next=text("f"), *note=text("first"), *ignored=text("ignored");
+    Text *file=text("a.jet"), *function=text("g"), *next=text("f"), *note=text("first"), *ignored=text("ignored"), *source=text("n :: g()");
     // A first call failure becomes origin; an explicit new origin resets it.
-    jet_rt_native_journey_frame(value,file,1,7,function,note);
+    jet_rt_native_journey_frame(value,file,1,7,function,source,note);
     assert(value->origin && value->origin->column==7 && !value->hops.length);
-    jet_rt_native_journey_origin(value,file,1,8,function);
+    jet_rt_native_journey_origin(value,file,1,8,function,source);
     assert(!value->origin->note->length && value->origin->column==8);
-    jet_rt_native_journey_frame(value,file,2,9,next,note);
-    jet_rt_native_journey_frame(value,file,2,99,next,ignored);
+    jet_rt_native_journey_frame(value,file,2,9,next,source,note);
+    jet_rt_native_journey_frame(value,file,2,99,next,source,ignored);
     assert(value->hops.length==1);
     Hop *held=((Hop **)value->hops.data)[0];
+    assert(held->source->length==8 && !memcmp(held->source->data,"n :: g()",8));
     assert(held->count==2 && held->column==9 && held->note->length==5 && !memcmp(held->note->data,"first",5));
     Journey *clone=jet_rt_native_journey_clone(value);
     assert(clone!=value && clone->origin!=value->origin && clone->hops.data!=value->hops.data);
-    assert(((Hop **)clone->hops.data)[0]!=held && ((Hop **)clone->hops.data)[0]->count==2);
+    assert(((Hop **)clone->hops.data)[0]!=held && ((Hop **)clone->hops.data)[0]->count==2 && ((Hop **)clone->hops.data)[0]->source->length==8);
     jet_rt_native_journey_drop(value);
     equal(jet_journey_render_styled(clone,false,0),
-        "  failed here: g (a.jet:1)\n Trail [E3002] (2 hops via ?, origin first):\n  1. f (a.jet:2) ×2 — first\n");
+        "  failed here: g (a.jet:1)\n      n :: g()\n Trail [E3002] (2 hops via ?, origin first):\n  1. f (a.jet:2) ×2 — first\n      n :: g()\n");
     Journey *carried=jet_rt_native_journey_new();
     // A carried origin replaces an old handled failure; all source children
     // move, not clone. The native caller drops neither carried nor its hops.
-    jet_rt_native_journey_origin(carried,file,10,1,function);
-    jet_rt_native_journey_frame(carried,file,11,1,next,note);
+    jet_rt_native_journey_origin(carried,file,10,1,function,source);
+    jet_rt_native_journey_frame(carried,file,11,1,next,source,note);
     Hop *moved_origin=carried->origin;
     jet_rt_native_journey_adopt(clone,carried);
     assert(clone->origin==moved_origin && clone->hops.length==1);
     carried=jet_rt_native_journey_new(); // No origin: incoming same-site collapse
     Hop *transferred=jet_rt_alloc(sizeof(*transferred),8);
-    *transferred=(Hop){text("f"),text("a.jet"),11,99,text("discarded"),3};
+    *transferred=(Hop){text("f"),text("a.jet"),11,99,text("discarded"),3,text("")};
     Hop **column=jet_rt_alloc(sizeof(*column),8); *column=transferred;
     carried->hops=(List){1,1,column};
     jet_rt_native_journey_adopt(clone,carried);
     assert(((Hop **)clone->hops.data)[0]->count==4);
     equal(jet_journey_render_styled(clone,false,0),
-        "  failed here: g (a.jet:10)\n Trail [E3002] (4 hops via ?, origin first):\n  1. f (a.jet:11) ×4 — first\n");
+        "  failed here: g (a.jet:10)\n      n :: g()\n Trail [E3002] (4 hops via ?, origin first):\n  1. f (a.jet:11) ×4 — first\n      n :: g()\n");
     Text *message=text("error"); Err *error=jet_err_from_message(message); jet_rt_string_drop(message);
-    Err *context=jet_rt_native_err_context_frame(error,clone,file,12,3,next,note);
+    Err *context=jet_rt_native_err_context_frame(error,clone,file,12,3,next,source,note);
     assert(!error->context.length && context->context.length==1);
     jet_rt_handle_drop_jet_err(error);
     jet_rt_native_journey_reset(clone);
@@ -152,7 +160,7 @@ static void journey_ownership(void) {
     equal(jet_render_err(context),"Error: error\n  context (a.jet:12): first");
     jet_rt_handle_drop_jet_err(context);
     jet_rt_string_drop(file); jet_rt_string_drop(function); jet_rt_string_drop(next);
-    jet_rt_string_drop(note); jet_rt_string_drop(ignored);
+    jet_rt_string_drop(note); jet_rt_string_drop(ignored); jet_rt_string_drop(source);
     assert(jet_rt_program_allocator_fact(2)==0);
 }
 int main(void) {

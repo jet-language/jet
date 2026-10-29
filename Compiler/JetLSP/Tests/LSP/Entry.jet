@@ -372,6 +372,27 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(!hints.iter().any((hint) -> { hint.label == "low: " || hint.label == "high: " }), "written labels must not receive duplicate ghost text: {hints:Debug}")
 }
 
+// #6014 C3: a `?` hint right after each of the 4 calls whose failure passes up
+// automatically; the explicit `?`, the `?(note)` and the `??`-handled call
+// get none.
+#Test("inlay_hints_mark_each_automatic_propagation") {
+    src :: "fn parse(raw: String) -> Int {{\n    if raw == \"\" -> return Err(\"empty\")\n    7\n}}\nfn run() {{\n    a :: parse(\"1\")\n    b :: parse(\"2\")\n    c :: parse(\"3\")?\n    d :: parse(\"4\") ?? 0\n    e :: parse(\"5\")?(\"five\")\n    print(parse(\"6\"))\n    print(a + b + c + d + e + parse(\"7\"))\n}}\n"
+    (project, diagnostics, maybe_bundle, facts) :: check_test_document(src)
+    assert(diagnostics.iter().all((d) -> { d.severity != Severity.Error }), "propagation fixture should check: {diagnostics:Debug}")
+    db :: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
+    marks := [Int]{}
+    loop hint in db.inlay_hints_for(project.entry()) {
+        if hint[0].label == "?" -> &marks.push(hint[0].span.end)
+    }
+    &marks.sort()
+    expected := [Int]{}
+    loop call in ([String]{"parse(\"1\")", "parse(\"2\")", "parse(\"6\")", "parse(\"7\")"}) {
+        start :: src.find(call) ?? panic("fixture call {call}")
+        &expected.push(start + call.bytes().len())
+    }
+    assert_eq(marks, expected)
+}
+
 // Rust: Source/LSP/mod.rs:721
 #Test("inlay_and_hover_for_inferred_struct_lit_from_place") {
     src :: "struct Point {{ x: Int y: Int }}\nfn run() {{\n    p := Point{{ x: 1, y: 2 }}\n    p = {{ x: 3, y: 4 }}\n}}\n"

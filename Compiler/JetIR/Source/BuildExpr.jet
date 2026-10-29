@@ -3773,8 +3773,9 @@ fn ir_try_starts_failure(p: IRProgram, b: IRBuilder, operand: Int) -> Bool Never
 }
 
 // `value?`: the success payload, or the failure handed back to the caller. A
-// plain `T Never!` call result is its own success. At a journey `site` the
-// success edge drops the journey an earlier, handled failure left.
+// plain `T Never!` call result is its own success. The success edge does no
+// journey work: a handled failure's journey is dropped where it is handled
+// (ir_or_fallback) or replaced by the next failure's start.
 fn ir_try(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, conversion: TTryConvert, site: IRTrySite?, span: Span) -> Int Never! {
     value_ty :: ir_ty(p, b, value)
     subject :: ir_expr(&m, p, &b, value)
@@ -3802,9 +3803,6 @@ fn ir_try_slot(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, carrier:
         ir_end(&b.f, b.line)
         if ir_failed(b) -> return -1
         b.fresh[subject] = was_fresh
-        if site != None {
-            _ :: ir_runtime(&m, &b, "jet_journey_reset", [Int]{}, -1)
-        }
         ok_row :: ir_value_type(&m, p, ok_ty) ?? return ir_type_fail(&b, span, ok_ty)
         if owned_subject -> return ir_box_take(&m, p, &b, subject, 8, ok_row)
         return ir_load_at(&m, &b, subject, 8, ok_row)
@@ -3820,9 +3818,6 @@ fn ir_try_slot(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, carrier:
         ir_end(&b.f, b.line)
         if ir_failed(b) -> return -1
         b.fresh[subject] = was_fresh
-        if site != None {
-            _ :: ir_runtime(&m, &b, "jet_journey_reset", [Int]{}, -1)
-        }
         inner_row :: ir_value_type(&m, p, inner) ?? return ir_type_fail(&b, span, inner)
         if owned_subject -> return ir_box_take(&m, p, &b, subject, 0, inner_row)
         return ir_option_payload(&m, &b, subject, inner_row)
@@ -3831,7 +3826,8 @@ fn ir_try_slot(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, carrier:
 }
 
 // The journey routes' source-site arguments in ABI order: file, line, column,
-// function; the column is that of `span` in the building function's source.
+// function, source; the column is that of `span` in the building function's
+// source and `source` the site line's trimmed text ("" outside checked sources).
 fn ir_journey_site(m: &IRModule, p: IRProgram, b: &IRBuilder, file: String, line: Int, function: String, span: Span) -> [Int] Never! {
     if line < 1 || line > 4294967295 {
         ir_fail(&b, span, "journey site line {line} is outside the supported source range")
@@ -3848,7 +3844,10 @@ fn ir_journey_site(m: &IRModule, p: IRProgram, b: &IRBuilder, file: String, line
     column_word :: ir_word_const(&m, &b, column)
     function_text :: ir_temp(&m, &b, string_row)
     ir_emit(&b.f, IROp.ConstText, function_text, ir_intern_text(&m, function), -1, -1, b.line)
-    [Int]{file_text, line_word, column_word, function_text}
+    source :: ir_source_line_text(p, file, line) ?? ""
+    source_text :: ir_temp(&m, &b, string_row)
+    ir_emit(&b.f, IROp.ConstText, source_text, ir_intern_text(&m, source.trim()), -1, -1, b.line)
+    [Int]{file_text, line_word, column_word, function_text, source_text}
 }
 
 // A returned `Err(...)` at `span` starts the journey at the span's line. Core
@@ -4056,6 +4055,11 @@ fn ir_or_fallback(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: In
         ir_release(&m, &b, payload)
     }
     ir_else(&b.f, b.line)
+    // A failure handled here ends its journey: drop it before the fallback
+    // runs, off the success edge (#6014).
+    if is_result {
+        _ :: ir_runtime(&m, &b, "jet_journey_reset", [Int]{}, -1)
+    }
     // The fallback sees the failure's error under the ambient binding.
     mark :: b.bindings.len()
     if ambient == .Val(local) {

@@ -1,4 +1,4 @@
-// Outcome.rs:1097-1254. Pure renderer over canonical Journey32/Hop48;
+// Outcome.rs:1097-1254. Pure renderer over canonical Journey32/Hop56;
 // width0 means no column budget. Unicode scalars count as columns, not bytes.
 fn journey_digits(number: I64) -> I64 {
     value := number
@@ -107,6 +107,31 @@ fn journey_hop_line(out: I64, hop: I64, index: I64, width: I64, budget: I64, col
         }
         rt_text_append(out, note_data, note_at)
         if truncated -> rt_text_push_scalar(out, I64{8230})
+    }
+    journey_color_end(out, color)
+    journey_source_line(out, hop, width, color)
+}
+// #6014: the hop's trimmed source line under its header, indented six
+// columns; none outside checked sources. A width budget keeps it to one row.
+fn journey_source_line(out: I64, hop: I64, width: I64, color: Bool) {
+    source :: rt_text_word(hop + HOP_SOURCE)
+    length :: rt_text_len(source)
+    if (length == I64{0}) -> return
+    journey_color_start(out, color)
+    rt_text_push_word(out, I64{35322350018592}, I64{6})
+    data :: rt_text_data(source)
+    if (width != I64{0} && jet_char_len(source) + I64{6} > width) {
+        shown :: if (width > I64{7}) -> width - I64{7} else -> I64{0}
+        at := I64{0}
+        chars := I64{0}
+        loop chars < shown {
+            at += rt_text_width(data + at)
+            chars += I64{1}
+        }
+        rt_text_append(out, data, at)
+        rt_text_push_scalar(out, I64{8230})
+    } else {
+        rt_text_append(out, data, length)
     }
     journey_color_end(out, color)
 }

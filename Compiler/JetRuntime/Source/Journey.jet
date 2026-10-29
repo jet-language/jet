@@ -5,6 +5,7 @@ fn journey_hop_drop(hop: I64) {
     jet_rt_string_drop(rt_text_word(hop + HOP_FUNCTION))
     jet_rt_string_drop(rt_text_word(hop + HOP_FILE))
     jet_rt_string_drop(rt_text_word(hop + HOP_NOTE))
+    jet_rt_string_drop(rt_text_word(hop + HOP_SOURCE))
     jet_rt_free(hop, HOP_BYTES, I64{8})
 }
 fn journey_hop_clone(hop: I64) -> I64 {
@@ -16,9 +17,10 @@ fn journey_hop_clone(hop: I64) -> I64 {
     rt_text_store(result + HOP_COLUMN, rt_text_word(hop + HOP_COLUMN))
     rt_text_store(result + HOP_NOTE, jet_rt_string_clone(rt_text_word(hop + HOP_NOTE)))
     rt_text_store(result + HOP_COUNT, rt_text_word(hop + HOP_COUNT))
+    rt_text_store(result + HOP_SOURCE, jet_rt_string_clone(rt_text_word(hop + HOP_SOURCE)))
     result
 }
-fn journey_hop_new(file: I64, line: I64, column: I64, function: I64, note: I64) -> I64 {
+fn journey_hop_new(file: I64, line: I64, column: I64, function: I64, source: I64, note: I64) -> I64 {
     hop :: jet_rt_alloc(HOP_BYTES, I64{8})
     rt_text_store(hop + HOP_FUNCTION, jet_rt_string_clone(function))
     rt_text_store(hop + HOP_FILE, jet_rt_string_clone(file))
@@ -26,6 +28,7 @@ fn journey_hop_new(file: I64, line: I64, column: I64, function: I64, note: I64) 
     rt_text_store(hop + HOP_COLUMN, column.bit_and(I64{4294967295}))
     rt_text_store(hop + HOP_NOTE, if (note == I64{0}) -> jet_rt_string_builder_new() else -> jet_rt_string_clone(note))
     rt_text_store(hop + HOP_COUNT, I64{1})
+    rt_text_store(hop + HOP_SOURCE, if (source == I64{0}) -> jet_rt_string_builder_new() else -> jet_rt_string_clone(source))
     hop
 }
 #Export(c) fn jet_rt_native_journey_new() -> I64 {
@@ -79,14 +82,14 @@ fn journey_hops_clear(value: I64) {
 fn journey_same_site(hop: I64, file: I64, line: I64, function: I64) -> Bool {
     rt_text_word(hop + HOP_LINE) == (line.bit_and(I64{4294967295})) && err_text_eq(rt_text_word(hop + HOP_FILE), file) && err_text_eq(rt_text_word(hop + HOP_FUNCTION), function)
 }
-#Export(c) fn jet_rt_native_journey_origin(value: I64, file: I64, line: I64, column: I64, function: I64) {
+#Export(c) fn jet_rt_native_journey_origin(value: I64, file: I64, line: I64, column: I64, function: I64, source: I64) {
     jet_rt_native_journey_reset(value)
-    rt_text_store(value + JOURNEY_ORIGIN, journey_hop_new(file, line, column, function, I64{0}))
+    rt_text_store(value + JOURNEY_ORIGIN, journey_hop_new(file, line, column, function, source, I64{0}))
 }
-#Export(c) fn jet_rt_native_journey_frame(value: I64, file: I64, line: I64, column: I64, function: I64, note: I64) {
+#Export(c) fn jet_rt_native_journey_frame(value: I64, file: I64, line: I64, column: I64, function: I64, source: I64, note: I64) {
     count :: rt_text_word(value + JOURNEY_HOPS)
     if (rt_text_word(value + JOURNEY_ORIGIN) == I64{0} && count == I64{0}) {
-        rt_text_store(value + JOURNEY_ORIGIN, journey_hop_new(file, line, column, function, note))
+        rt_text_store(value + JOURNEY_ORIGIN, journey_hop_new(file, line, column, function, source, note))
         return
     }
     if (count != I64{0}) {
@@ -97,7 +100,7 @@ fn journey_same_site(hop: I64, file: I64, line: I64, function: I64) -> Bool {
         }
     }
     row :: err_rows_append(value + JOURNEY_HOPS, I64{8})
-    rt_text_store(row, journey_hop_new(file, line, column, function, note))
+    rt_text_store(row, journey_hop_new(file, line, column, function, source, note))
 }
 // TAKE the caller's explicit slot once; a second take yields null.
 #Export(c) fn jet_rt_native_journey_take(slot: I64) -> I64 {
@@ -143,12 +146,12 @@ fn journey_same_site(hop: I64, file: I64, line: I64, function: I64) -> Bool {
 }
 // The generated route borrows the original error; context is retained in the
 // cloned Err88 independently of the execution journey.
-#Export(c) fn jet_rt_native_err_context_frame(value: I64, journey: I64, file: I64, line: I64, column: I64, function: I64, note: I64) -> I64 {
+#Export(c) fn jet_rt_native_err_context_frame(value: I64, journey: I64, file: I64, line: I64, column: I64, function: I64, source: I64, note: I64) -> I64 {
     result :: jet_rt_handle_clone_jet_err(value)
     row :: err_rows_append(result + ERR_CONTEXT, ERR_CONTEXT_BYTES)
     rt_text_store(row, jet_rt_string_clone(note))
     rt_text_store(row + I64{8}, jet_rt_string_clone(file))
     rt_text_store(row + I64{16}, line.bit_and(I64{4294967295}))
-    jet_rt_native_journey_frame(journey, file, line, column, function, note)
+    jet_rt_native_journey_frame(journey, file, line, column, function, source, note)
     result
 }

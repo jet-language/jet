@@ -73,12 +73,37 @@ fn semindex_build_symbol_db(registration: SemaRegistrationGraph, checked: SemaGr
         semindex_apply_inferred_effect_rows(&db, module_index, module_ref.program.items, source.alias, source.display, checked.effect_facts)
     }
     semindex_add_import_alias_definitions(&db, registration, checked.effect_facts.name_ledger, module_sources, loaded_module_rows)
+    semindex_add_propagation_hints(&db, checked, module_sources, loaded_module_rows)
     semindex_add_state_graph_hovers(&db, registration, checked.effect_facts, module_sources, loaded_module_rows)
     semindex_add_breadcrumb_hints(&db)
     &db.finalize_index(registration, checked, module_sources, loaded_module_rows, effect_program, effect_summaries)
     &db.refresh_effect_hovers()
     db.symbols = semindex_build_semantic_symbol_index(db, registration, checked.effect_facts.name_ledger, module_sources, loaded_module_rows)
     db
+}
+
+// #6014: a `?` hint after every call whose failure passes up automatically.
+// Sema marks such a call root with a note-less TryWithContext (explicit `?`
+// is a Try, `?(note)` carries its note); the checked bodies are the source,
+// never a second reading of the AST. A generic body's instances share spans.
+fn semindex_add_propagation_hints(db: &SymbolDB, checked: SemaGraphResult, module_sources: [SemaCompilerModuleSource], loaded_module_rows: [Int]) Never! {
+    loop source_index in loaded_module_rows {
+        source :: module_sources[source_index]
+        seen := [Int:Bool]{}
+        loop checked_module in checked.modules {
+            if checked_module.module_identity != source.module_identity -> next
+            loop function in checked_module.functions {
+                if function.synthetic -> next
+                loop node in function.tree.nodes {
+                    if node.kind == .TryWithContext(_, note, _, _, _, _) {
+                        if note != None || seen.get(node.span.end) != None -> next
+                        seen[node.span.end] = true
+                        &db.inlay.push(InlayHint{span: Span{start: node.span.end, end: node.span.end}, module_path: source.display.copy(), label: "?"})
+                    }
+                }
+            }
+        }
+    }
 }
 
 // Declaration indices retain item/state order without copying the checked AST's

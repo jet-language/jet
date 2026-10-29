@@ -30,11 +30,11 @@ fn journey_tls_value() -> I64 {
     }
     held
 }
-#Export(c) fn jet_journey_origin(file: I64, line: I64, column: I64, function: I64) {
-    jet_rt_native_journey_origin(journey_tls_value(), file, line, column, function)
+#Export(c) fn jet_journey_origin(file: I64, line: I64, column: I64, function: I64, source: I64) {
+    jet_rt_native_journey_origin(journey_tls_value(), file, line, column, function, source)
 }
-#Export(c) fn jet_journey_frame_text(file: I64, line: I64, column: I64, function: I64, note: I64) {
-    jet_rt_native_journey_frame(journey_tls_value(), file, line, column, function, note)
+#Export(c) fn jet_journey_frame_text(file: I64, line: I64, column: I64, function: I64, source: I64, note: I64) {
+    jet_rt_native_journey_frame(journey_tls_value(), file, line, column, function, source, note)
 }
 #Export(c) fn jet_journey_reset() {
     held :: jet_rt_tls_get(journey_tls_key)
@@ -46,8 +46,8 @@ fn journey_tls_value() -> I64 {
     held
 }
 #Export(c) fn jet_journey_adopt(carried: I64) { jet_rt_native_journey_adopt(journey_tls_value(), carried) }
-#Export(c) fn jet_err_with_context_frame(error: I64, file: I64, line: I64, column: I64, function: I64, note: I64) -> I64 {
-    jet_rt_native_err_context_frame(error, journey_tls_value(), file, line, column, function, note)
+#Export(c) fn jet_err_with_context_frame(error: I64, file: I64, line: I64, column: I64, function: I64, source: I64, note: I64) -> I64 {
+    jet_rt_native_err_context_frame(error, journey_tls_value(), file, line, column, function, source, note)
 }
 #Export(c) fn jet_report_use_wire() { sync_store(journey_report_wire_word, I64{1}) }
 
