@@ -3666,18 +3666,18 @@ boundary. The renderer consumes those facts instead of copying the route list.
 | `auth_oauth(auth: Auth, client_id: String) -> Auth` | auth | Add OAuth client identity to an auth carrier. |
 | `auth_routes(auth: Auth) -> [String]` | paths | Return authentication route paths. |
 | `auth_show(auth: Auth) -> String` | text | Render the source auth summary. |
-| `live(key: String, data: String) -> LiveQuery` | query | Create a live-query carrier. |
-| `subscribe(key: String) -> LiveQuery` | query | Create a subscribed live-query carrier. |
-| `invalidate(key: String) -> Int` / `transact_invalidate(key: String) -> Int` | token | Create invalidation tokens. |
-| `live_get(q: LiveQuery) -> String` / `live_show(q: LiveQuery) -> String` | text | Read or display live-query data. |
-| `live_stats() -> String` | text | Read provider live-query statistics. |
-| `signal_push(q: LiveQuery, payload: String) -> LiveQuery` | query | Push data and advance query generation. |
+| `live(key: String, data: String) -> LiveQuery` | query | Register the live query for footprint `key` (its `,`/`;`/space-separated dependency paths) with initial value `data`; a footprint already registered returns its query. |
+| `subscribe(key: String) -> LiveQuery` | query | Register the live query for the external source `key` (footprint `ext:{key}`). |
+| `invalidate(key: String) -> Int` / `transact_invalidate(key: String) -> Int` | count | Mark every live query whose footprint meets `key`'s paths (equal, or a dotted ancestor or descendant) dirty with a new generation and return how many; `transact_invalidate` does so for each path of a committed write set. -1 when `key` is not a valid footprint. |
+| `live_get(q: LiveQuery) -> String` / `live_show(q: LiveQuery) -> String` | text | Read the query's current value, or display its id, footprint, generation and dirty state. |
+| `live_stats() -> String` | text | Report the registry's query count, its 1024-query limit, evictions and invalidations. |
+| `signal_push(q: LiveQuery, payload: String) -> LiveQuery` | query | Publish `payload` as the query's value: a new, clean generation. |
 | `sync(key: String, data: String) -> String` | text | Format a synchronized key/value update. |
 
-`app` and `core.web` live-query operations retain the same runtime-owned
-registry as database and data-loader consumers. `LiveQuery` is an opaque
-identity, not a source record snapshot; invalidation, generations, statistics,
-and sync-session publication always inspect or mutate that one registry.
+`app` and `core.web` live-query operations share one process-wide registry.
+`LiveQuery` is an identity, not a snapshot of the record: reads, invalidation,
+generations and statistics always inspect or mutate that one registry. A full
+registry evicts its oldest query.
 
 `core.web` delegates HTTP transport to `core.http`; route handlers should use
 that typed request/response contract rather than opening sockets directly.

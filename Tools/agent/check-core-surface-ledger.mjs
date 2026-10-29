@@ -1356,7 +1356,9 @@ function coreCallEffectFor(moduleName, member) {
   if (moduleName === "core.files" && coreCallOneOf(member, ["__host_path_is_absolute", "__host_path_join", "__fault_should_fail", "__os_family", "__path_windows", "__atomic_pid", "__scope_roots", "__reader_path"])) return null;
   if (moduleName === "core.log" && member === "__metric_publish") return null;
   if (moduleName === "core.devtools" && member === "__publish_payload") return null;
-  if (moduleName === "core.web" && coreCallOneOf(member, ["__openapi_inputs", "__openapi_render", "__contract_stop", "__live_stats_snapshot"])) return null;
+  if (moduleName === "core.web" && coreCallOneOf(member, ["__openapi_inputs", "__openapi_render", "__contract_stop"])) return null;
+  // The live-query registry is in-process state (Core/Web/Web.jet), not a browser API.
+  if (moduleName === "core.web" && coreCallOneOf(member, ["__live_load", "__live_replace", "live", "subscribe", "invalidate", "transact_invalidate", "live_get", "live_show", "live_stats", "signal_push"])) return null;
   if (moduleName === "core.web.store" && member === "__facts_snapshot") return null;
   if (moduleName === "core.mod" && coreCallOneOf(member, ["__supported", "__os",
     "__parse_context", "__check_context", "__context_name", "__context_digest", "__exports_count", "__export_info", "__finish_context"])) return null;

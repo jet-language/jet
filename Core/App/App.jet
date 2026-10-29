@@ -9,9 +9,10 @@ package {
     }
 }
 AUTH_MAX_PROVIDERS :: 64
-// Process-wide live queries and sync sessions retain runtime-owned identity.
-// Source publishes the vocabulary and delegates to that one ambient registry.
+// Live queries are core.web's process-wide registry: `app` names the same
+// queries. Sync sessions retain runtime-owned identity.
 use app as provider
+use core.web as web
 
 #Error
 enum AppError {
@@ -31,7 +32,7 @@ struct Session {
     expires_at: Int
 }
 
-use provider.[LiveQuery]
+use core.web.[LiveQuery]
 fn auth(users_table: String) -> Auth Never! {
     Auth{users_table: canonical_table(users_table), providers: [String]{}}
 }
@@ -85,21 +86,21 @@ fn canonical_providers(values: [String]) -> [String] {
     providers
 }
 
-fn live(key: String, data: String) -> LiveQuery Never! { provider.live(key, data) }
+fn live(key: String, data: String) -> LiveQuery Never! { web.live(key, data) }
 
-fn live_get(q: LiveQuery) -> String Never! { provider.live_get(q) }
+fn live_get(q: LiveQuery) -> String Never! { web.live_get(q) }
 
-fn live_show(q: LiveQuery) -> String Never! { provider.live_show(q) }
+fn live_show(q: LiveQuery) -> String Never! { web.live_show(q) }
 
-fn live_stats() -> String Never! { provider.live_stats() }
+fn live_stats() -> String Never! { web.live_stats() }
 
-fn subscribe(source: String) -> LiveQuery Never! { provider.subscribe(source) }
+fn subscribe(source: String) -> LiveQuery Never! { web.subscribe(source) }
 
-fn invalidate(footprint: String) -> Int Never! { provider.invalidate(footprint) }
+fn invalidate(footprint: String) -> Int Never! { web.invalidate(footprint) }
 
-fn transact_invalidate(write_set: String) -> Int Never! { provider.transact_invalidate(write_set) }
+fn transact_invalidate(write_set: String) -> Int Never! { web.transact_invalidate(write_set) }
 
-fn signal_push(q: LiveQuery, payload: String) -> LiveQuery Never! { provider.signal_push(q, payload) }
+fn signal_push(q: LiveQuery, payload: String) -> LiveQuery Never! { web.signal_push(q, payload) }
 
 fn sync(doc_show: String, over: String) -> String Never! { provider.sync(doc_show, over: over) }
 
