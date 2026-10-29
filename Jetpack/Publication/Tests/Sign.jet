@@ -150,7 +150,7 @@ fn publication_sign_test_root(label: String) -[FS, Env]> String Never! {
     files.remove_all(root) ?? panic("cleanup")
 }
 
-// Original Sign.rs :499, retained behind Core #3597. The existing consuming
+// Original Sign.rs :499, retained behind Core #6117. The existing consuming
 // Close wipe cannot be observed through a moved owner. Core must provide the
 // audited in-place volatile wipe contract for this assertion; assignments of
 // zero bytes in Jet would not prove the optimizer-resistant secret erase.
@@ -161,7 +161,7 @@ fn publication_sign_test_root(label: String) -[FS, Env]> String Never! {
         &secret.push(U8{165})
         &expected.push(U8{0})
     }
-    #Unsafe("original signing secret-erasure acceptance requires the Core volatile in-place wipe provider (#3597)") {
+    #Unsafe("original signing secret-erasure acceptance requires the Core volatile in-place wipe provider (#6117)") {
         publication_sign_expert.zeroize(&secret)
     }
     assert_eq(secret, expected)

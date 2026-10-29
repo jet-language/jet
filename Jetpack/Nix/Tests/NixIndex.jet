@@ -239,7 +239,8 @@ fn nix_test_generation_rejected(client: NixIndexClient, generation: Int, issued:
     endpoint :: "http://{address}"
     endpoint_path :: files.join(root, "config/nix-index-v1.endpoint")
     files.write(endpoint_path, "{endpoint}\n") ?? panic("endpoint")
-    public_key :: crypto.expert.ed25519_public(nix_test_seed(7)) ?? panic("public key")
+    signer :: crypto.SigningKey.from_bytes(nix_test_seed(7)) ?? panic("signing seed")
+    public_key :: signer.public_key().bytes
     files.write(files.join(root, "trust/nix-index-v1.ed25519.pub"), "fixture-index-signer-v1:{base64.encode(public_key)}\n") ?? panic("trust key")
     client :: NixIndexClient.from_roots_with_mode(HangarRoots{root, dev_mode: false}, false) ?? panic("configured client")
     // A later rewrite must not change the held endpoint of this client.
@@ -304,7 +305,7 @@ fn nix_test_generation_rejected(client: NixIndexClient, generation: Int, issued:
     assert(report.contains("\"indexed\":[[\"ripgrep\"]]"))
     assert(report.contains("\"notIndexed\":[{{"))
     assert(report.contains("missing-narinfo"))
-    assert(pkg_json_object(parsed) != None)
+    assert(pkg_json_object(parsed) == .Val(_))
 }
 
 #Test("nix index differential oracle accepts nix output map") {
@@ -329,7 +330,8 @@ fn nix_test_generation_rejected(client: NixIndexClient, generation: Int, issued:
     built :: nix_index_canonical_test_index("nixpkgs-unstable", NIX_TEST_INDEX_REVISION, "x86_64-linux", 1, [NixIndexRecord]{nix_test_ripgrep_record()}, [NixIndexCoverageMiss]{}) ?? panic("test index")
     sidecar :: nix_index_signature_sidecar("test-key", nix_test_sign(seed, nix_index_producer_signature_request(built.decoded)))
     signature :: NixIndexSignature.parse(sidecar) ?? panic("sidecar")
-    public_key :: crypto.VerifyKey{bytes: crypto.expert.ed25519_public(seed) ?? panic("public key")}
+    signer :: crypto.SigningKey.from_bytes(seed) ?? panic("signing seed")
+    public_key :: signer.public_key()
     nix_index_verify_index_signature(public_key, "test-key", signature, built.decoded) ?? panic("the real bytes verify")
     forged := built.decoded
     position :: forged.len() - 2
@@ -403,7 +405,8 @@ fn nix_test_generation_rejected(client: NixIndexClient, generation: Int, issued:
     seed :: nix_test_seed(7)
     bytes :: "{{}}".bytes()
     drifted :: NixIndexSignature{schema: 0, key_id: "test-key", algorithm: "ed25519", signature: base64.encode(nix_test_sign(seed, nix_index_manifest_signature_request(bytes)))}
-    public_key :: crypto.VerifyKey{bytes: crypto.expert.ed25519_public(seed) ?? panic("public key")}
+    signer :: crypto.SigningKey.from_bytes(seed) ?? panic("signing seed")
+    public_key :: signer.public_key()
     if nix_index_verify_manifest_signature(public_key, "test-key", drifted.canonical_bytes(), bytes) == {
         .Ok(_) -> panic("a drifted signature schema must be rejected")
         else -> {}
@@ -414,7 +417,7 @@ fn nix_test_generation_rejected(client: NixIndexClient, generation: Int, issued:
     fixture :: nix_test_signed_fixture_at(NIX_TEST_LOOPBACK_ENDPOINT)
     client :: nix_test_signed_client(fixture, NIX_TEST_LOOPBACK_ENDPOINT, fixture.responses, NixIndexClock.Fixed(NIX_TEST_FIXTURE_NOW), false)
     _ :: client.resolve(nix_test_ripgrep_key()) ?? panic("signed resolution")
-    state :: client.load_highest_generation("nixpkgs-unstable") ?? panic("rollback state")
+    state :: client.load_highest_generation("nixpkgs-unstable") ? found -> found ! error -> panic("rollback state")
     highest :: state ?? panic("recorded generation")
     assert_eq(highest.generation, 1)
     targets :: files.join(files.join(files.join(files.join(fixture.root, NIX_INDEX_ROOT), "targets"), NIX_TEST_INDEX_REVISION), "x86_64-linux")

@@ -572,7 +572,8 @@ use jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
     src :: "base :: comptime {{ 100 }}\nmodule system.web {{ target: linux.x64, options: [tuning.retries: 9] }}\nmodule fleet.prod {{ hosts: {{ web1: system.web.{{ options: [tuning.retries: base + 1], base: 4 }}, web2: system.web }} }}\n"
     plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("fleet override evaluates")
     assert_eq(plan.systems[0].options[0].value, "9")
-    host :: plan.fleets[0].hosts[0]
+    fleets :: envmodel_test_host_groups(src, false)
+    host :: fleets[0].hosts[0]
     override_plan :: host.overrides ?? panic("the first host has typed overrides")
     options :: if override_plan.fields[0].value == {
         .Options(values) -> values
@@ -580,8 +581,8 @@ use jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
     }
     assert_eq(options[0].value, "5")
     assert_eq(override_plan.fields[1].value, HostOverrideValue.Value{value: CtValue.Int{value: 4}})
-    assert_eq(plan.fleets[0].hosts[1].overrides, None)
-    assert_eq(plan.fleets[0].hosts[1].override_source, None)
+    assert(fleets[0].hosts[1].overrides == None)
+    assert(fleets[0].hosts[1].override_source == None)
 }
 
 #Test("fleet host service override rejects non boolean enable") {
@@ -594,8 +595,7 @@ use jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
 
 #Test("vmtest host overrides share fleet typed evaluation") {
     src :: "module system.web {{ target: linux.x64 }}\nmodule vmtest.boot {{ hosts: {{ machine: system.web.{{ region: base + 2, base: 40 }} }} }}\n"
-    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("VM host override evaluates")
-    override_plan :: plan.vmtests[0].hosts[0].overrides ?? panic("VM host has typed overrides")
+    override_plan :: envmodel_test_host_groups(src, true)[0].hosts[0].overrides ?? panic("VM host has typed overrides")
     assert_eq(override_plan.fields[0].value, HostOverrideValue.Value{value: CtValue.Int{value: 42}})
     assert_eq(override_plan.provenance[0].field, "region")
     assert_eq(override_plan.provenance[0].dependencies, [String]{"base"})

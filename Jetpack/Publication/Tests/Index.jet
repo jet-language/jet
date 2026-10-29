@@ -193,8 +193,8 @@ fn publication_index_test_root(label: String) -[FS, Env]> String Never! {
 #Test("publication index find_entry_matches_exact_version") {
     repo :: publication_index_test_root("find")
     publication_write_index_entry(repo, publication_index_test_entry("textkit", "1.0.0", false)) ?? panic("write")
-    assert((publication_find_entry(repo, "textkit", "1.0.0") ?? panic("find")) != None)
-    assert_eq(publication_find_entry(repo, "textkit", "9.9.9") ?? panic("find absent"), None)
+    assert((publication_find_entry(repo, "textkit", "1.0.0") ? found -> found ! error -> panic("find")) == .Val(_))
+    assert((publication_find_entry(repo, "textkit", "9.9.9") ? found -> found ! error -> panic("find absent")) == None)
     files.remove_all(repo) ?? panic("cleanup")
 }
 #Test("publication index mark_yanked_flips_in_place_never_deletes") {
@@ -223,7 +223,7 @@ fn publication_index_test_root(label: String) -[FS, Env]> String Never! {
     repo :: publication_index_test_root("malformed")
     path :: publication_index_entry_path(repo, "textkit") ?? panic("path")
     files.create_dir_all(files.dirname(path)) ?? panic("directory")
-    files.write(path, "{malformed}\n") ?? panic("fixture")
+    files.write(path, "{{malformed}}\n") ?? panic("fixture")
     if publication_read_entries(repo, "textkit") == {
         .Err(error) -> assert(error == .InvalidInput(_))
         .Ok(_) -> panic("malformed read accepted")
@@ -405,6 +405,6 @@ fn publication_index_test_root(label: String) -[FS, Env]> String Never! {
         .Err(error) -> assert("{error}".contains("SBOM evidence was not staged"))
         .Ok(_) -> panic("index exposed without SBOM")
     }
-    assert_eq(publication_find_entry(repo, "ref-kit", "1.0.0") ?? panic("find"), None)
+    assert((publication_find_entry(repo, "ref-kit", "1.0.0") ? found -> found ! error -> panic("find")) == None)
     files.remove_all(root) ?? panic("cleanup")
 }

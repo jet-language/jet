@@ -14,7 +14,7 @@ use jet_env_model.[envmodel_workspace_evaluate, envmodel_workspace_load]
     envmodel_test_write_package(dir, "", "name: \"root\"\nmembers: [\"packages/hello\", \"packages/ranker\"]\n")
     files.write(files.join(dir, "workspace.jet"), "module workspace {{ members: 1 }}\n") ?? panic("stale workspace source")
     cache := WorkspaceDeclarationCache.new()
-    plan :: (envmodel_workspace_load(&cache, dir) ?? panic("membership load")) ?? panic("membership present")
+    plan :: envmodel_workspace_load(&cache, dir) ?? panic("membership load")
     assert_eq(envmodel_test_member_names(plan), [String]{"hello", "ranker"})
     source :: files.read(files.join(dir, "package.jet")) ?? panic("manifest bytes")
     assert_eq(plan.source_digest, pkg_sha256_hex(source.bytes()))
@@ -26,7 +26,7 @@ use jet_env_model.[envmodel_workspace_evaluate, envmodel_workspace_load]
 }
 
 #Test("committed_monorepo_example_indexes_and_addresses_members") {
-    root :: s2_workspace_sys.env("JET_TEST_ROOT") ?? "."
+    root :: s2_workspace_sys.get("JET_TEST_ROOT") ?? "."
     dir :: files.join(root, "Examples/features/packages/monorepo")
     source :: files.read(files.join(dir, "workspace.jet")) ?? panic("committed workspace source")
     plan :: envmodel_workspace_evaluate(source, dir) ?? panic("committed workspace evaluation")

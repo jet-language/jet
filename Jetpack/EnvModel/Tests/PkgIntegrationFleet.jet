@@ -25,9 +25,9 @@ use jet_env_model.[envmodel_evaluate_env]
 
 #Test("fleet valid independent host projection; overrides remain ledger-only") {
     source :: "\nmodule system.web {{ target: linux.x64 }}\nmodule fleet.prod {{\n    hosts: {{\n        web1: system.web.{{ region: \"us-east\" }},\n        web2: system.web,\n    }}\n}}\n"
-    plan :: envmodel_evaluate_env(source, envmodel_test_base_dir()) ?? panic("valid fleet evaluates")
-    assert_eq(plan.fleets.len(), 1)
-    fleet :: plan.fleets[0]
+    fleets :: envmodel_test_host_groups(source, false)
+    assert_eq(fleets.len(), 1)
+    fleet :: fleets[0]
     assert_eq(fleet.name, "prod")
     assert_eq(fleet.hosts.len(), 2)
     assert_eq(fleet.hosts[0].system, "web")

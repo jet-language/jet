@@ -164,7 +164,7 @@ fn pkg_test_package_effects(name: String, effects: [String], sites: [String: Str
     assert(projection.denied_effects.contains("Panic"))
     assert_eq(projection.authority, "package.jet authority")
     assert(projection.undecided().contains("Net"))
-    json :: pkg_render_effect_projection_json(projection)
+    json :: pkg_render_effect_projection_json(projection) ?? panic("render projection json")
     field_values :: [String]{"required_effects", "granted_effects", "denied_effects", "authority"}
     loop field in field_values -> assert(json.contains("\"{field}\""))
 }
@@ -256,7 +256,7 @@ fn pkg_test_package_effects(name: String, effects: [String], sites: [String: Str
     raw :: source.bytes()
     fixed :: "{pkg_bytes_text(raw, 0, edit.span.start)}{edit.new_text}{pkg_bytes_text(raw, edit.span.end, raw.len())}"
     assert(fixed.starts_with("// tool header\npackage {{\n    name: \"gradient\"\n"))
-    parsed :: PackageFacts.parse_inline(fixed, "gradient.jet") ?? panic("the inserted carrier parses")
+    parsed :: PackageFacts.parse_inline(fixed, "gradient.jet") ? found -> found ! error -> panic("the inserted carrier parses")
     inline :: parsed ?? panic("the inserted carrier is leading")
     assert(pkg_project_application_effects(required, Val(inline.facts)).is_allowed())
     denied :: pkg_application_policy_diagnostic(projection, [String]{"FS"}, Val(ScriptEntry{path: "gradient.jet", source: source, command: "run"}))

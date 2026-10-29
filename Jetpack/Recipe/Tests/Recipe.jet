@@ -117,17 +117,17 @@ fn recipe_test_has_stage_leftover(base: String) -[FS]> Bool {
     quoted_marker :: marker.replace("'", "'\\''")
     ctx :: RecipeBuildContext{source_dir: src, output_root: out, tools: [String: String]{"sh": shell}, fetch_cache: files.join(base, "cache"), offline: false}
     recipe :: BuildRecipe{steps: [BuildStep]{BuildStep.Exec{tool: "sh", args: [String]{"-c", "printf ok > \"$JET_BUILD_OUTPUT/ok\"; printf escaped > '{quoted_marker}' || :"}}}}
-    result :: recipe_run(recipe, ctx, None)
     status :: foundation_native_sandbox_status()
-    if status.available {
-        report :: result ?? panic("native recipe sandbox should run")
-        expected :: if sys.is_linux() -> "linux-bwrap" else -> "macos-seatbelt"
-        assert_eq(report.sandbox_class, expected)
-        assert_eq(files.read(files.join(out, "ok")) ?? panic("sandbox output"), "ok")
-    } else {
-        if result == {
-            .Ok(_) -> panic("an unavailable sandbox must refuse")
-            .Err(error) -> assert_eq(error.code, "E1275")
+    if recipe_run(recipe, ctx, None) == {
+        .Ok(report) -> {
+            assert(status.available, "an unavailable sandbox must refuse")
+            expected :: if sys.is_linux() -> "linux-bwrap" else -> "macos-seatbelt"
+            assert_eq(report.sandbox_class, expected)
+            assert_eq(files.read(files.join(out, "ok")) ?? panic("sandbox output"), "ok")
+        }
+        .Err(error) -> {
+            assert(!status.available, "native recipe sandbox should run")
+            assert_eq(error.code, "E1275")
         }
     }
     assert(!files.exists(marker))

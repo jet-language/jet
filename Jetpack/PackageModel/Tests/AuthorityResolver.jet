@@ -35,7 +35,7 @@ fn pkg_test_authority_snapshot_probe(resolver: AuthorityResolver, path: String, 
     root :: files.join(parent, "project")
     files.create_dir_all(root) ?? panic("mkdir")
     files.write(files.join(root, "run.jet"), "fn run() {{}}\n") ?? panic("write")
-    opened :: AuthorityResolver.open_for_authority_walk(root) ?? panic("open for walk")
+    opened :: AuthorityResolver.open_for_authority_walk(root) ? found -> found ! error -> panic("open for walk")
     resolver :: opened ?? panic("a source directory is an authority candidate")
     assert_eq(resolver.root, files.canonicalize(root) ?? panic("canonicalize"))
     if sys.is_unix() {
@@ -45,7 +45,7 @@ fn pkg_test_authority_snapshot_probe(resolver: AuthorityResolver, path: String, 
         files.create_dir_all(shared) ?? panic("mkdir shared")
         files.write(files.join(shared, "noise.jet"), "fn run() {{}}\n") ?? panic("write noise")
         files.set_mode(shared, 0o777) ?? panic("chmod 777")
-        shared_walk :: AuthorityResolver.open_for_authority_walk(shared) ?? panic("walk shared")
+        shared_walk :: AuthorityResolver.open_for_authority_walk(shared) ? found -> found ! error -> panic("walk shared")
         // Shared temp must stay discovery space.
         assert(shared_walk == None)
         files.set_mode(shared, 0o700) ?? panic("chmod 700")
@@ -63,7 +63,7 @@ fn pkg_test_authority_snapshot_probe(resolver: AuthorityResolver, path: String, 
     files.create_dir_all(root) ?? panic("mkdir")
     files.write(files.join(root, "workspace.jet"), "module workspace {{}}\n") ?? panic("write")
     files.set_mode(root, 0o777) ?? panic("chmod 777")
-    walk :: AuthorityResolver.open_for_authority_walk(root) ?? panic("walk")
+    walk :: AuthorityResolver.open_for_authority_walk(root) ? found -> found ! error -> panic("walk")
     assert(walk == None)
     files.set_mode(root, 0o700) ?? panic("chmod 700")
     files.remove_all(root) ?? panic("cleanup")

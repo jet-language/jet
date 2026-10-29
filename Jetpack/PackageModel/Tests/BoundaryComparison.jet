@@ -104,7 +104,7 @@ fn pkg_boundary_test_receipt_error(receipt: ForeignSourceReceipt) -> String Neve
     assert_eq(observation_relation_as_str(ObservationRelation.TypedEquality), "typed_equality")
     assert_eq(observation_relation_as_str(ObservationRelation.OrderedEffects), "ordered_effects")
     assert_eq(observation_relation_as_str(ObservationRelation.TypedFailure), "typed_failure")
-    assert_eq(observation_relation_as_str(ObservationRelation.Custom("oracle")), "oracle")
+    assert_eq(observation_relation_as_str(ObservationRelation.Custom{name: "oracle"}), "oracle")
 }
 
 #Test("boundary matched comparison preserves both raw sides evidence and replay assumptions") {
@@ -129,7 +129,7 @@ fn pkg_boundary_test_receipt_error(receipt: ForeignSourceReceipt) -> String Neve
     statuses :: [ComparisonStatus]{ComparisonStatus.Empty, ComparisonStatus.Unsupported, ComparisonStatus.Unavailable, ComparisonStatus.Timeout, ComparisonStatus.Cancelled, ComparisonStatus.InvalidOracle, ComparisonStatus.Contaminated}
     loop status in statuses {
         contract := pkg_boundary_test_contract(ForeignLanguage.Py)
-        record :: pkg_boundary_test_terminal(ObservationRelation.Custom("oracle"), status, "terminal reason")
+        record :: pkg_boundary_test_terminal(ObservationRelation.Custom{name: "oracle"}, status, "terminal reason")
         &contract.record_comparison(record, None) ?? panic("terminal")
         &contract.record_comparison(record, None) ?? panic("terminal twice")
         assert_eq(contract.observations.len(), 0)

@@ -238,16 +238,16 @@ fn env_shell_test_read_marker(marker: String, shell: String, output: String) {
     assert(!bash.contains(hostile))
     assert(bash.contains("printf \"%s\" \"$JETPACK_PROMPT_LABEL\""))
     bash_check := process.cmd([String]{"bash", "-n"}).stdin(.Stream).spawn() ?? panic("spawn bash -n")
-    &bash_check.stdin.write(bash) ?? panic("write bash rc")
-    &bash_check.stdin.close() ?? panic("close bash rc")
+    bash_check.stdin.write(bash) ?? panic("write bash rc")
+    bash_check.stdin.close()
     assert((bash_check.wait() ?? panic("wait bash -n")).success)
 
     fish :: env_shell_fish_init(hostile, PromptPathMode.Short, PromptStripMode.Off)
     assert(!fish.contains(hostile))
     assert(fish.contains("printf '%s ' \"$JETPACK_PROMPT_LABEL\""))
     fish_check := process.cmd([String]{"fish", "-n"}).stdin(.Stream).spawn() ?? panic("spawn fish -n")
-    &fish_check.stdin.write(fish) ?? panic("write fish init")
-    &fish_check.stdin.close() ?? panic("close fish init")
+    fish_check.stdin.write(fish) ?? panic("write fish init")
+    fish_check.stdin.close()
     assert((fish_check.wait() ?? panic("wait fish -n")).success)
 
     zsh :: env_shell_zsh_rc(hostile, PromptPathMode.Short, PromptStripMode.Off)
@@ -371,7 +371,8 @@ fn env_shell_test_read_marker(marker: String, shell: String, output: String) {
 #Test("run command returns child status") {
     env := env_shell_test_env([String]{})
     assert_eq(&env.run_command([String]{"true"}), 0)
-    assert(&env.run_command([String]{"false"}) != 0)
+    failed :: &env.run_command([String]{"false"})
+    assert(failed != 0)
 }
 
 #Test("run command exposes bin on path") {

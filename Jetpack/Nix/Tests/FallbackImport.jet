@@ -93,7 +93,7 @@ fn nix_test_criterion8_record() -> Dyn {
 }
 
 #Test("nix fallback record import retains the criterion 8 document") {
-    state :: nix_fallback_import_record(nix_test_criterion8_record()) ?? panic("criterion 8 record must import")
+    state :: nix_fallback_import_record(nix_test_criterion8_record()) ? found -> found ! error -> panic("criterion 8 record must import")
     facts :: (state ?? panic("criterion 8 record is a fallback record")).facts
     document :: `{"drvPath":"/nix/store/0fixture00000000000000000000-greet.drv","outputs":{"out":"/staging/greet"},"jetpackImport":{"closedGraph":{"root":{"dependencies":[]}},"selectedOutputs":{"out":"/staging/greet"},"dependencies":[],"sources":[],"hashes":{"out":"output-hash"},"losses":[],"proof":{"source":"criterion-8"},"recipe":{"kind":"compatibility"},"lock":{"system":"x86_64-linux"}}}`
     assert_eq(facts.get("nix.fallback.schema"), Val("jetpack.nix-fallback.v1"))
@@ -115,8 +115,8 @@ fn nix_test_criterion8_record() -> Dyn {
 
 #Test("nix fallback record import reads an unwrapped root and skips the plain build shape") {
     plain :: Dyn.Object(["drvPath": Dyn.Text("/nix/store/x-greet.drv"), "outputs": Dyn.Object(["out": Dyn.Text("/nix/store/x-greet")])])
-    assert_eq(nix_fallback_import_record(plain) ?? panic("plain build shape is not an error"), None)
-    unwrapped :: nix_fallback_import_record(nix_test_criterion8_import()) ?? panic("unwrapped record must import")
+    assert((nix_fallback_import_record(plain) ? found -> found ! error -> panic("plain build shape is not an error")) == None)
+    unwrapped :: nix_fallback_import_record(nix_test_criterion8_import()) ? found -> found ! error -> panic("unwrapped record must import")
     facts :: (unwrapped ?? panic("unwrapped projections mark a fallback record")).facts
     assert_eq(facts.get("nix.fallback.graph"), Val(`{"root":{"dependencies":[]}}`))
     assert_eq(facts.get("nix.fallback.lock"), Val(`{"system":"x86_64-linux"}`))

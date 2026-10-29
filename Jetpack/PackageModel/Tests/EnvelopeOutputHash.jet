@@ -392,12 +392,13 @@ fn pkg_test_reference_encode_node(path: String, rel: String, out: &[U8], links: 
         files.remove_all(dir) ?? panic("cleanup")
         return
     }
-    result :: pkg_try_output_hash_of(dir)
-    files.set_mode(dir, 0o700) ?? panic("chmod 700")
-    if result == {
-        .Ok(_) -> panic("an unreadable output must be refused")
-        .Err(error) -> assert(error.message().contains("cannot snapshot directory"))
+    refusal :: if pkg_try_output_hash_of(dir) == {
+        .Ok(_) -> ""
+        .Err(error) -> error.message()
     }
+    files.set_mode(dir, 0o700) ?? panic("chmod 700")
+    assert(refusal != "", "an unreadable output must be refused")
+    assert(refusal.contains("cannot snapshot directory"))
     files.remove_all(dir) ?? panic("cleanup")
 }
 

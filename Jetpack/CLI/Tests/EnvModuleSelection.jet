@@ -18,8 +18,8 @@ fn cli_test_criterion_root() -[FS, Env]> String {
     }
     loop entry in cases {
         child := cli_test_jetpack(entry.args).cwd(project).env("JETPACK_ROOT", root).env("SHELL", "/bin/bash").stdin(.Stream).spawn() ?? panic("spawn jetpack env")
-        &child.stdin.write("printf '%s\\n' \"$PS1\"\nexit\n") ?? panic("write shell input")
-        &child.stdin.close() ?? panic("close shell input")
+        child.stdin.write("printf '%s\\n' \"$PS1\"\nexit\n") ?? panic("write shell input")
+        child.stdin.close()
         receipt :: child.wait() ?? panic("wait for jetpack env")
         assert(receipt.success, "args={entry.args}\nstdout={receipt.output}\nstderr={receipt.errors}")
         assert(receipt.output.contains(entry.prompt), "args={entry.args}\nprompt={entry.prompt}\nstdout={receipt.output}\nstderr={receipt.errors}")

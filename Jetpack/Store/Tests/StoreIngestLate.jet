@@ -195,7 +195,7 @@ fn store_test_validate_hit(verification: &StoreVerification, roots: HangarRoots,
 
 #Test("store ingest rejects semantic xattr without platform artifact kind") {
     verification := StoreVerification.new()
-    if sys.os() != "linux" -> return
+    if !sys.is_linux() -> return
     roots :: store_test_temp_roots()
     source :: files.join(roots.root, "xattr-src")
     files.create_dir_all(source) ?? panic("dir")
@@ -214,7 +214,7 @@ fn store_test_validate_hit(verification: &StoreVerification, roots: HangarRoots,
 
 #Test("store ingest keeps semantic xattr with platform artifact kind") {
     verification := StoreVerification.new()
-    if sys.os() != "linux" -> return
+    if !sys.is_linux() -> return
     roots :: store_test_temp_roots()
     source :: files.join(roots.root, "xattr-ok")
     files.create_dir_all(source) ?? panic("dir")
@@ -239,7 +239,7 @@ fn store_test_validate_hit(verification: &StoreVerification, roots: HangarRoots,
 
 #Test("store ingest rejects semantic directory xattr without platform kind") {
     verification := StoreVerification.new()
-    if sys.os() != "linux" -> return
+    if !sys.is_linux() -> return
     roots :: store_test_temp_roots()
     source :: files.join(roots.root, "xattr-directory-reject")
     files.create_dir_all(source) ?? panic("dir")
@@ -253,7 +253,7 @@ fn store_test_validate_hit(verification: &StoreVerification, roots: HangarRoots,
 
 #Test("store ingest symlink xattr is nofollow rejected digested and copied") {
     verification := StoreVerification.new()
-    if sys.os() != "macos" -> return
+    if !sys.is_macos() -> return
     roots :: store_test_temp_roots()
     source :: files.join(roots.root, "xattr-symlink")
     files.create_dir_all(source) ?? panic("dir")

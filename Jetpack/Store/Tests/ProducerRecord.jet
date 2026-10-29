@@ -17,7 +17,8 @@ fn store_test_producer_record() -> ProducerRecord Never! {
     assert(ProducerRecord.decode(encoded.trim_end()) == .Err(_))
     assert(ProducerRecord.decode("{encoded} ") == .Err(_))
     assert(ProducerRecord.decode("{encoded}\n") == .Err(_))
-    duplicate :: encoded.replace_first("checksum\t", "70726f7669646572\t78\nchecksum\t")
+    halves :: store_text_split_last(encoded, "checksum\t") ?? panic("encoded record has a checksum")
+    duplicate :: "{halves.before}70726f7669646572\t78\nchecksum\t{halves.after}"
     assert(ProducerRecord.decode(duplicate) == .Err(_))
 }
 

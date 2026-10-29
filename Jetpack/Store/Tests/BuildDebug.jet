@@ -34,7 +34,7 @@ fn recipe_debug_test_root(label: String) -[Env, Rand]> String {
     files.write(files.join(outside, "live"), "must survive") ?? panic("live file")
     files.symlink(outside, files.join(source, "escape")) ?? panic("escape link")
     attempt := BuildAttempt.new("pkg", "pkg@1", "fixture", "recipe", "source")
-    if attempt.preserve_scratch(root, source, files.join(root, "missing-output")) == {
+    if &attempt.preserve_scratch(root, source, files.join(root, "missing-output")) == {
         .Ok(_) -> panic("a symlinked source must stop scratch preservation")
         .Err(_) -> {}
     }

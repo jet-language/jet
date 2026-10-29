@@ -87,9 +87,9 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
 #Test("store broker archive response round trips success and missing status") {
     encoded :: store_broker_encode_archive_response("archive".bytes()) ?? panic("encode")
     reader := BrokerWireReader.memory(encoded)
-    assert_eq(store_broker_read_archive_response(&reader) ?? panic("parse"), Val("archive".bytes()))
+    assert_eq(store_broker_read_archive_response(&reader) ? found -> found ! error -> panic("parse"), Val("archive".bytes()))
     missing := BrokerWireReader.memory("{STORE_BROKER_RESPONSE_MAGIC}\nstatus=missing\n\n".bytes())
-    assert_eq(store_broker_read_archive_response(&missing) ?? panic("parse missing"), [U8]?{None})
+    assert_eq(store_broker_read_archive_response(&missing) ? found -> found ! error -> panic("parse missing"), [U8]?{None})
 }
 
 #Test("store broker configured paths must stay inside the installed boundary") {
@@ -224,8 +224,8 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
     refusing :: store_broker_test_serve_once(&verification, wrong_socket, config)
     client := net.unix_connect(wrong_socket) ?? panic("connect")
     request :: store_broker_encode_write_request(binding, "wrong-credential", archive) ?? panic("encode")
-    net.unix_write_all_bytes(client, request).drop("the broker may close first")
-    net.unix_close(client).drop("client close")
+    net.unix_write_all_bytes(&client, request).drop("the broker may close first")
+    net.unix_close(&client).drop("client close")
     failure :: refusing.join() ?? panic("broker task")
     assert(failure.contains("credential is invalid"))
     assert(store_find_by_reference(&verification, shared, entry.reference) == None)
@@ -243,7 +243,11 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
     reader_config :: store_broker_test_configure(reader)
     reading :: store_broker_test_serve_once(&verification, reader_config.socket, config)
     expectation :: CacheExpectation{identity: entry.cache_identity, owned_output: None, allow_unsigned_local: true}
-    reused :: store_reuse_shared_entry(&verification, reader, entry.reference, expectation) ?? panic("reuse") ?? panic("authenticated broker read should return the published entry")
+    reused :: if store_reuse_shared_entry(&verification, reader, entry.reference, expectation) == {
+        .Val(found) -> found
+        .None -> panic("authenticated broker read should return the published entry")
+        .Err(_) -> panic("reuse")
+    }
     assert_eq(reading.join() ?? panic("broker task"), "")
     assert_eq(reused.envelope.output_hash, entry.envelope.output_hash)
     store_verify_hangar_object(&verification, reader, reused) ?? panic("verify reused")
@@ -255,8 +259,8 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
     rejecting :: store_broker_test_serve_once(&verification, corrupt_socket, config)
     corrupt_client := net.unix_connect(corrupt_socket) ?? panic("connect")
     corrupt_request :: store_broker_encode_write_request(binding, STORE_BROKER_PRIVATE_OWNER, corrupted) ?? panic("encode")
-    net.unix_write_all_bytes(corrupt_client, corrupt_request).drop("the broker may close first")
-    net.unix_close(corrupt_client).drop("client close")
+    net.unix_write_all_bytes(&corrupt_client, corrupt_request).drop("the broker may close first")
+    net.unix_close(&corrupt_client).drop("client close")
     assert((rejecting.join() ?? panic("broker task")) != "")
     still :: store_find_by_reference(&verification, shared, entry.reference) ?? panic("still published")
     assert_eq(still.id, published.id)
@@ -285,10 +289,10 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
     config :: store_broker_test_configure(local)
     listener :: net.unix_listen(config.socket) ?? panic("listen")
     broker :: task {
-        loop _ in 0..<2 {
-            stream := net.unix_accept(listener) ?? panic("accept")
-            store_broker_serve_peer(&verification, ^stream, config, store_broker_current_uid() ?? panic("current uid")) ?? panic("serve")
-        }
+        first := net.unix_accept(listener) ?? panic("accept")
+        store_broker_serve_peer(&verification, ^first, config, store_broker_current_uid() ?? panic("current uid")) ?? panic("serve")
+        second := net.unix_accept(listener) ?? panic("accept")
+        store_broker_serve_peer(&verification, ^second, config, store_broker_current_uid() ?? panic("current uid")) ?? panic("serve")
     }
     realized :: store_realize_verified(&verification, local, store_broker_test_ctx(local), RealizeRequest.Package{spec: spec, table: table}) ?? panic("realize")
     assert(realized.source_state() == SourceState.Built)
@@ -381,13 +385,13 @@ fn store_broker_test_ctx(roots: HangarRoots) -> ProviderCtx Never! {
     socket :: files.join(roots.root, "peer.sock")
     listener :: net.unix_listen(socket) ?? panic("listen")
     accepting :: task { net.unix_accept(listener) }
-    client :: net.unix_connect(socket) ?? panic("connect")
-    stream := accepting.join() ?? panic("accept task") ?? panic("accept")
+    client := net.unix_connect(socket) ?? panic("connect")
+    stream := accepting.join() ?? panic("accept")
     config :: store_broker_test_configure(HangarRoots.at(files.join(roots.root, "served")))
     if store_broker_serve_connection(&verification, ^stream, config) == {
         .Ok(_) -> panic("a connection without kernel peer credentials must be refused")
         .Err(error) -> assert(error == .Unsupported(_) && error.message().contains("peer's credentials"), "unexpected peer refusal: {error.message()}")
     }
-    net.unix_close(client).drop("client close")
+    net.unix_close(&client).drop("client close")
     store_test_drop_roots(roots)
 }

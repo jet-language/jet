@@ -956,7 +956,7 @@ fn sema_incremental_begin(cache: SemaIncrementalCache, graph: SemaRegistrationGr
     headers :: sema_incremental_module_headers(graph.modules)
     imports :: sema_incremental_import_headers(graph.imports)
     header_text :: "{headers:Debug}"
-    input :: "package={graph.package_identity:Debug};entry={graph.entry_module_identity:Debug};effects={graph.canonical_effect_module_identity:Debug};target={graph.target_machine:Debug};build={graph.build_facts:Debug};headers={header_text};module_rows={graph.module_rows:Debug};edges={graph.edges:Debug};providers={graph.foreign_providers:Debug};core_owners={graph.core_builtin_owner_facts:Debug};imports={imports:Debug};units={graph.unit_facts:Debug};internal={graph.internal_problem:Debug};diagnostics={graph.diagnostics:Debug};complete={graph.complete:Debug};callables={graph.callables:Debug};nominal_slots={graph.nominal_row_slots:Debug};nominal_buckets={graph.nominal_row_buckets:Debug};impl_slots={graph.impl_row_slots:Debug};impl_buckets={graph.impl_row_buckets:Debug};nominal_symbols={graph.nominal_symbol_rows:Debug};builtins={graph.compiler_builtin_rows:Debug};trait_slots={graph.impl_trait_slots:Debug};trait_buckets={graph.impl_trait_buckets:Debug};traits_indexed={graph.impl_traits_indexed:Debug};keep_going={graph.keep_going:Debug};test_mode={graph.test_mode:Debug};retain_programs={graph.retain_programs:Debug};values={values:Debug};comptime={comptime_functions:Debug};types={checked_types:Debug}"
+    input :: "package={graph.package_identity:Debug};entry={graph.entry_module_identity:Debug};effects={graph.canonical_effect_module_identity:Debug};target={graph.target_machine:Debug};build={graph.build_facts:Debug};headers={header_text};module_rows={graph.module_rows:Debug};edges={graph.edges:Debug};providers={graph.foreign_providers:Debug};core_owners={graph.core_builtin_owner_facts:Debug};imports={imports:Debug};units={graph.unit_facts:Debug};internal={graph.internal_problem:Debug};diagnostics={graph.diagnostics:Debug};complete={graph.complete:Debug};callables={graph.callables:Debug};nominal_slots={graph.nominal_row_slots:Debug};nominal_buckets={graph.nominal_row_buckets:Debug};impl_slots={graph.impl_row_slots:Debug};impl_buckets={graph.impl_row_buckets:Debug};nominal_symbols={graph.nominal_symbol_rows:Debug};builtins={graph.compiler_builtin_rows:Debug};trait_slots={graph.impl_trait_slots:Debug};trait_buckets={graph.impl_trait_buckets:Debug};traits_indexed={graph.impl_traits_indexed:Debug};keep_going={graph.keep_going:Debug};test_mode={graph.test_mode:Debug};check_tests={graph.check_tests:Debug};retain_programs={graph.retain_programs:Debug};values={values:Debug};comptime={comptime_functions:Debug};types={checked_types:Debug}"
     permit := cache.state.guard_edit()
     if permit.value.frozen == input -> return
     permit.value.generation += 1
@@ -3302,10 +3302,11 @@ fn sema_check_registration_module_foreign(environment: SemaScopeEnvironment, pro
 fn sema_check_registration_module_test(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, item_index: Int, scopes: SemaScopeTable, host_hooks: SemaHostHookAccess?, module_result: &SemaGraphModuleResult) {
     if program.registration_graph == .Val(graph) {
         if graph.modules[module_index].program.items[item_index] == .Test(test) {
-            if graph.test_mode && test.name != None {
+            if (graph.test_mode || graph.check_tests) && test.name != None {
                 loop diagnostic in sema_property_param_diagnostics(test) -> &module_result.diagnostics.push(diagnostic)
                 checked_test :: sema_check_test_function(test, environment, program, scopes, host_hooks)
                 loop diagnostic in checked_test.diagnostics -> &module_result.diagnostics.push(diagnostic)
+                if !graph.test_mode -> return
                 loop fact in checked_test.call_facts -> &module_result.call_facts.push(fact)
                 loop request in checked_test.comptime_requests -> &module_result.comptime_requests.push(request)
                 loop reference in checked_test.name_references -> &module_result.name_references.push(reference)

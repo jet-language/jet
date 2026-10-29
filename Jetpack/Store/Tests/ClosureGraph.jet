@@ -231,12 +231,12 @@ fn store_test_register_entry_locked(verification: &StoreVerification, roots: Han
         files.remove_all(object) ?? panic("remove object")
         disappeared = true
     }
-    registered :: store_test_register_with_hook(&verification, roots, ingested.entry, disappear)
-    assert(disappeared)
-    if registered == {
+    refused :: if store_test_register_with_hook(&verification, roots, ingested.entry, disappear) == {
         .Ok(_) -> panic("a disappearing output must fail registration")
-        .Err(error) -> assert(error.message().contains("does not exist"))
+        .Err(error) -> error.message().contains("does not exist")
     }
+    assert(disappeared)
+    assert(refused)
     assert_eq((store_journal_transaction_paths(store_journal_dir(roots)) ?? panic("paths")).len(), 0)
     assert_eq((store_list_checked(&verification, roots) ?? panic("listing")).len(), 0)
     assert_eq((store_closure_graph(&verification, roots) ?? panic("graph")).records.len(), 0)
@@ -363,7 +363,7 @@ fn store_test_assert_hashed_at_most_once(verification: &StoreVerification, entri
     assert_eq(objects[entry.named_outputs["unmapped"]].path, files.join(object_root, entry.named_outputs["unmapped"]))
     assert_eq(objects[dependency_digest].path, dependency)
     assert(!objects[dependency_digest].external)
-    assert_eq(descriptor.record.outputs, entry.named_outputs)
+    assert(descriptor.record.outputs == entry.named_outputs)
     assert_eq(descriptor.record.references, store_sorted_unique(entry.references))
     assert_eq(entry.producer_record, producer.encode())
 

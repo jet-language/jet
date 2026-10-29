@@ -2,8 +2,8 @@
 use jetpack_foundation.[PACKAGE_FILE]
 use jet_pkg_model.[EntryContribution, FactValue]
 use jet_env_model.[
-    EnvModelEvalError, EnvPlan, EnvironmentIntegration, EvaluatedModule, IntegrationKind,
-    PackageProfilePlan,
+    EnvModelEvalError, EnvPlan, EnvironmentIntegration, EvaluatedModule, FleetPlan, IntegrationKind,
+    PackageProfilePlan, envmodel_evaluate_env, envmodel_evaluate_source,
 ]
 use jet_foundation.[Diagnostic, diagnostic_render_all]
 
@@ -104,4 +104,18 @@ fn envmodel_test_check_snapshot(code: String, rendered_raw: String) -[FS, Env]> 
     }
     expected :: files.read(path) ?? panic("missing diagnostic snapshot {path}")
     assert_eq(rendered, expected)
+}
+
+// EnvPlan carries no fleet or vmtest captures: `envmodel_evaluate_env`
+// cross-checks each host's system, and the evaluated modules keep the groups.
+fn envmodel_test_host_groups(source: String, vmtests: Bool) -[Env, Exec, FS]> [FleetPlan] {
+    base :: envmodel_test_base_dir()
+    _ :: envmodel_evaluate_env(source, base) ?? panic("the host environment evaluates")
+    modules :: envmodel_evaluate_source(source, base) ?? panic("the host source evaluates")
+    groups := [FleetPlan]{}
+    loop evaluated in modules {
+        captured :: if vmtests -> evaluated.vmtests else -> evaluated.fleets
+        loop group in captured -> &groups.push(group)
+    }
+    groups
 }

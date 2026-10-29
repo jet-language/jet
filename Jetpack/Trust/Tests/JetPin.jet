@@ -69,7 +69,7 @@ fn trust_pin_test_code(result: String TrustError!) -> String {
 #Test("classify channel rejects ranges with E1249") {
     rejected :: [String]{">=1.0.0", "^1.2", "1", "", "0.", "1.x", "Main"}
     loop bad in rejected {
-        assert_eq(trust_pin_test_code(trust_pin_classify_channel(bad)), "E1249", "should reject {bad}")
+        assert(trust_pin_test_code(trust_pin_classify_channel(bad)) == "E1249", "should reject {bad}")
     }
 }
 
@@ -137,7 +137,7 @@ fn trust_pin_test_code(result: String TrustError!) -> String {
     sys.set(TOOLCHAIN_EXEC_MARKER_ENV, "0.4.0")
     assert(trust_pin_decide(root, "0.4.0", false) == .RunNative)
     sys.unset(TOOLCHAIN_EXEC_MARKER_ENV) ?? panic("unset marker")
-    sys.unset(TOOLCHAIN_OBJECT_ENV) ?? panic("unset object")
+    _ :: sys.unset(TOOLCHAIN_OBJECT_ENV) ?? panic("unset object")
 }
 
 #Test("matched version runs native") {

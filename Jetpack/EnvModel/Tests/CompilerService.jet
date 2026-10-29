@@ -34,7 +34,7 @@ fn envmodel_service_test_constant(source: String) -> (expr: Expr, funcs: [String
     source :: "fn double(x: Int) -> Int {{ x * 2 }}\nVALUE :: double(PORT)\n"
     fixture :: envmodel_service_test_constant(source)
     globals := [String: CtValue]{}
-    globals["PORT"] = CtValue.Int(21)
+    globals["PORT"] = CtValue.Int{value: 21}
     program :: jet_config_program(fixture.expr, source, fixture.funcs, globals) ?? panic("the config value program builds")
     assert(program.contains("fn double(x: Int) -> Int {{ x * 2 }}"), program)
     assert(program.contains("JET_CONFIG_GLOBAL_0 :: 21"), program)
@@ -65,7 +65,7 @@ fn envmodel_service_test_constant(source: String) -> (expr: Expr, funcs: [String
 }
 
 #Test("compiler service is not asked for a plain literal") {
-    cases :: [(source: String, expected: CtValue)]{(source: "VALUE :: 42\n", expected: CtValue.Int(42)), (source: "VALUE :: \"text\"\n", expected: CtValue.Str("text")), (source: "VALUE :: (true)\n", expected: CtValue.Bool(true))}
+    cases :: [(source: String, expected: CtValue)]{(source: "VALUE :: 42\n", expected: CtValue.Int{value: 42}), (source: "VALUE :: \"text\"\n", expected: CtValue.Str{value: "text"}), (source: "VALUE :: (true)\n", expected: CtValue.Bool{value: true})}
     loop row in cases {
         fixture :: envmodel_service_test_constant(row.source)
         value :: comptime_evaluate(fixture.expr, row.source, fixture.funcs, "/nonexistent", [String: CtValue]{}) ?? panic("a literal is its own value: {err.diagnostic.what}")

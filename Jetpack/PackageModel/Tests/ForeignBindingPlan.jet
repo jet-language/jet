@@ -70,7 +70,7 @@ fn pkg_test_plan_source_parses(source: String) -> Bool Never! {
     binders :: pkg_foreign_binders()
     matched := 0
     loop descriptor in binders {
-        if pkg_renderer_for(descriptor) != None -> matched += 1
+        if pkg_renderer_for(descriptor) == .Val(_) -> matched += 1
     }
     // The canonical active binder registry and the generator registry agree.
     assert_eq(matched, registry.len())

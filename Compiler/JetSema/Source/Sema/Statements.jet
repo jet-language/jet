@@ -4823,6 +4823,8 @@ fn sema_stmt_check_scope_member(name: String, args: [Expr], args_span: Span?, bo
         "setup" -> {
             if args.len() == 0 {
                 kind = Val(TScopeMemberKind.Setup)
+            } else {
+                &diagnostics.push(sema_error("E0617", args_span ?? span, "`.setup` takes no arguments", "`.setup` marks a region; it has nothing to configure", "write `.setup {{ … }}`"))
             }
         }
         "expect_fail" -> {
@@ -4862,10 +4864,6 @@ fn sema_stmt_check_scope_member(name: String, args: [Expr], args_span: Span?, bo
                     else -> valid = false
                 }
             }
-            if {
-                valid -> kind = Val(TScopeMemberKind.ExpectFail{code: code, message: message})
-                else -> &diagnostics.push(sema_error("E0617", args_span ?? span, "`.expect_fail` takes an optional runtime stop code and `message: \"text\"`", "the code names a registered E30xx stop; the message is a non-empty string literal matched as a case-sensitive substring", "write `.expect_fail {{ … }}`, `.expect_fail(E3010) {{ … }}`, or `.expect_fail(E3001, message: \"reason\") {{ … }}`"))
-            }
             if valid -> kind = Val(TScopeMemberKind.ExpectFail{code: code, message: message})
             else -> &diagnostics.push(sema_error("E0617", args_span ?? span,
                 "`.expect_fail` takes an optional runtime stop code and `message: \"text\"`",
@@ -4873,17 +4871,28 @@ fn sema_stmt_check_scope_member(name: String, args: [Expr], args_span: Span?, bo
                 "write `.expect_fail {{ … }}`, `.expect_fail(E3010) {{ … }}`, or `.expect_fail(E3001, message: \"reason\") {{ … }}`"))
         }
         "timeout" -> {
+            // One argument the ordinary checker types as a Duration; any other
+            // shape is the member's own E0617, not a type mismatch.
             if args.len() == 1 {
-                duration := sema_check_expression(args[0], Val(Type.Named{name: "Duration"}), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-                if duration == {
-                    .Val(typed) -> kind = Val(TScopeMemberKind.Timeout{duration: typed})
-                    .None -> {}
+                checked := [Diagnostic]{}
+                duration := sema_check_expression(args[0], Val(Type.Named{name: "Duration"}), environment, program, &scopes, &state, &tail_store, &context, &checked)
+                if !sema_has_error_since(checked, 0) {
+                    loop diagnostic in checked -> &diagnostics.push(diagnostic)
+                    if duration == .Val(typed) -> kind = Val(TScopeMemberKind.Timeout{duration: typed})
                 }
+            }
+            if kind == None {
+                &diagnostics.push(sema_error("E0617", args_span ?? span,
+                    "`.timeout` needs exactly one duration",
+                    "the region must complete within a time budget, written as a duration value",
+                    "write `.timeout(500ms) {{ … }}` or bind that value first (`ns`/`us`/`ms`/`s`/`min`/`h`/`d`)"))
             }
         }
         "measure" -> {
             if args.len() == 0 {
                 kind = Val(TScopeMemberKind.Measure)
+            } else {
+                &diagnostics.push(sema_error("E0617", args_span ?? span, "`.measure` takes no arguments", "`.measure` is a selection marker for the test measurement mode", "write `.measure {{ … }}`"))
             }
         }
         "skip" -> {
@@ -4897,6 +4906,7 @@ fn sema_stmt_check_scope_member(name: String, args: [Expr], args_span: Span?, bo
                 }
                 else -> {}
             }
+            if kind == None -> &diagnostics.push(sema_error("E0617", args_span ?? span, "`.skip` takes at most one reason string", "`.skip` optionally records why the region is skipped", "write `.skip {{ … }}` or `.skip(\"reason\") {{ … }}`"))
         }
         else -> {}
     }

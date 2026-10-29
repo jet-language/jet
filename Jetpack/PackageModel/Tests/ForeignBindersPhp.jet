@@ -35,7 +35,7 @@ class Hidden { function method($input) {} }
         print(PKG_PHP_TEST_SKIP)
         return
     }
-    php :: found ?? ""
+    php :: found
     names :: pkg_binders_test_php_discover(php, PKG_PHP_TEST_STATIC_SOURCE, 0) ?? panic("static PHP discovery succeeds")
     assert_eq(names, [String]{"price_cart"})
 }
@@ -46,7 +46,7 @@ class Hidden { function method($input) {} }
         print(PKG_PHP_TEST_SKIP)
         return
     }
-    php :: found ?? ""
+    php :: found
     sources :: [String]{
         "<?php function bad(&$input) {{}}",
         "<?php function bad(...$input) {{}}",
@@ -85,7 +85,7 @@ class Hidden { function method($input) {} }
         print(PKG_PHP_TEST_SKIP)
         return
     }
-    php :: found ?? ""
+    php :: found
     dir :: files.join(sys.temp_dir(), "jet_php_worker_{sys.pid()}_0")
     files.create_dir_all(dir) ?? panic("create PHP worker directory")
     worker_path :: files.join(dir, "worker.php")

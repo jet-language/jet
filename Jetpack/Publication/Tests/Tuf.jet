@@ -98,7 +98,7 @@ fn publication_tuf_test_root(label: String) -[FS, Env]> String Never! {
     wire :: "{publication_tuf_sparse_unsigned("p", entries, referrers, "root", "aa")}signature=sig\n"
     parsed :: publication_tuf_parse_sparse_metadata(wire, "p") ?? panic("sparse roundtrip")
     assert_eq(parsed.entries, entries)
-    assert_eq(parsed.referrers, referrers)
+    assert(parsed.referrers == referrers)
     assert_eq(parsed.signature, "sig")
     if publication_tuf_parse_sparse_metadata(wire, "q") == .Ok(_) -> panic("name substitution accepted")
     loop hostile in ([String]{wire.replace("jet-tuf-sparse-v2", "unknown"), "{wire}name=70\n", "{wire}future=x\n", "{wire}malformed\n", wire.replace("name=70", "name=ff"), wire.replace("name=70", "name=0"), wire.replace("name=70\n", ""), "{wire}referrer={publication_tuf_hex.encode("1\tdifferent".bytes())}\n"}) {
@@ -406,7 +406,10 @@ fn publication_tuf_test_command(root: String, project: String, bare: String, sto
     loop stored in store_list(&verification, roots) {
         if stored.name == "textkit" && stored.version == "1.2.0" -> same = Val(stored.out)
     }
-    assert_eq(same, Val(entry.out), "locked consumption must reuse the same immutable Hangar object")
+    if same == {
+        .Val(out) -> assert(out == entry.out, "locked consumption must reuse the same immutable Hangar object")
+        .None -> panic("locked consumption must reuse the same immutable Hangar object")
+    }
     offline :: publication_tuf_test_command(root, consumer, bare, store, [String]{"fetch", "--offline"}).env("JET_REGISTRY_URL", "file://{root}/must-not-be-read.git").run() ?? panic("offline fetch")
     assert(offline.success, offline.errors)
     files.remove_all(root) ?? panic("cleanup")
@@ -438,16 +441,15 @@ fn publication_tuf_test_command(root: String, project: String, bare: String, sto
 #Test("publication tuf checkpoint lock cleanup preserves action refusal") {
     root :: publication_tuf_test_root("checkpoint-lock")
     state :: files.join(root, "accepted.state")
-    action :: () -> {
-        files.write(state, "accepted")
-    }
-    publication_tuf_with_checkpoint_lock(state, action) ?? panic("checkpoint lock")
+    accepted_state :: state.copy()
+    publication_tuf_with_checkpoint_lock(state, () -> {
+        files.write(accepted_state, "accepted")
+    }) ?? panic("checkpoint lock")
     assert_eq(files.read(state) ?? panic("read accepted"), "accepted")
     assert(!files.exists(files.join(root, "accepted.lock")))
-    refusal :: () -> {
+    if publication_tuf_with_checkpoint_lock(state, () -> {
         return Err(publication_tuf_invalid("deliberate checkpoint action refusal"))
-    }
-    if publication_tuf_with_checkpoint_lock(state, refusal) == {
+    }) == {
         .Ok(_) -> panic("checkpoint action refusal suppressed")
         .Err(error) -> assert("{error}".contains("deliberate checkpoint action refusal"))
     }

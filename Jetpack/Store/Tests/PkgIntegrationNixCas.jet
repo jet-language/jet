@@ -263,7 +263,7 @@ fn s3cas_ctx(roots: HangarRoots, project: String) -> ProviderCtx {
     warm_entry := warm.metadata()
     warm_entry.realized_at = 0
     warm_entry.last_used_at = 0
-    assert_eq(warm_entry, expected, "warm replay changed lock identity")
+    assert(warm_entry == expected, "warm replay changed lock identity")
     copied_project :: (files.temp_dir("nix-cas-copied-project") ?? panic("copied project")).path
     copied_bundle :: files.join(copied_project, ".jet/nix-cas")
     files.create_dir_all(copied_bundle) ?? panic("copied bundle dir")
@@ -279,7 +279,7 @@ fn s3cas_ctx(roots: HangarRoots, project: String) -> ProviderCtx {
     expected_identity.out = ""
     expected_identity.bin = ""
     expected_identity.rlib = ""
-    assert_eq(copied_identity, expected_identity, "copied repository changed locked replay identity")
+    assert(copied_identity == expected_identity, "copied repository changed locked replay identity")
     exported :: store_export_nix_cas_bundle(&verification, destination, nix_entry.reference) ?? panic("Nix export")
     assert(s3cas_find(exported.bytes, absolute_target.bytes(), 0) >= 0, "Nix CAS export must retain the absolute target as link data")
     if store_export_unsigned_archive(&verification, destination, nix_entry.reference, false) == {

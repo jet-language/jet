@@ -75,11 +75,11 @@ fn pkg_source_store_test_root(label: String) -[FS, Env]> String Never! {
         files.symlink(files.join(root, "external"), files.join(source_path, ".ignored")) ?? panic("symlink fixture")
         source :: foundation_open_directory_authority(source_path) ?? panic("hold source")
         assert(pkg_source_snapshot_into(source, foundation_open_directory_authority(snapshots_path, true) ?? panic("hold snapshots")) == .Err(_))
-        assert_eq((files.read_dir(snapshots_path) ?? panic("failed stage list")).len(), 0)
+        assert_eq((files.list_dir(snapshots_path) ?? panic("failed stage list")).len(), 0)
         files.remove(files.join(source_path, ".ignored")) ?? panic("remove symlink")
         files.hard_link(files.join(root, "external"), files.join(source_path, ".ignored")) ?? panic("hardlink fixture")
         assert(pkg_source_snapshot_into(source, foundation_open_directory_authority(snapshots_path, true) ?? panic("hold snapshots")) == .Err(_))
-        assert_eq((files.read_dir(snapshots_path) ?? panic("failed stage list")).len(), 0)
+        assert_eq((files.list_dir(snapshots_path) ?? panic("failed stage list")).len(), 0)
         files.remove_all(root) ?? panic("fixture cleanup")
     }
 }

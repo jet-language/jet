@@ -148,10 +148,10 @@ fn publication_oci_test_write_outcome(path: String, payload: String) -[FS, Env, 
     loop attempt in 0..<16 {
         path :: files.join(repo, "blob-{publication_registry_unique_suffix()}-{attempt}")
         left :: task {
-            return publication_oci_test_write_outcome(path, "left")
+            publication_oci_test_write_outcome(path, "left")
         }
         right :: task {
-            return publication_oci_test_write_outcome(path, "right")
+            publication_oci_test_write_outcome(path, "right")
         }
         a :: left.join() ?? panic("join left")
         b :: right.join() ?? panic("join right")
@@ -281,10 +281,11 @@ fn publication_oci_test_evidence(repo: String, entry: PublicationIndexEntry) -[F
         assert_eq("{actual}", "{failure}")
     }
     files.remove(path) ?? panic("remove winner")
-    if foundation_write_file_nofollow_at_root(repo, "blob", "winner".bytes(), Val(() -[FS, Env]> { return Err(publication_read_error(.Other, path, "validation refused after fsync")) }), FoundationPublicationPolicy{create: .CreateNew}) == {
-        .Err(error) -> {
-            assert_eq(error.phase, FoundationPublicationPhase.ValidateSource)
-            assert(error.error == .Other(_))
+    refused_path :: path.copy()
+    if foundation_write_file_nofollow_at_root(repo, "blob", "winner".bytes(), Val(() -[FS, Env]> { return Err(publication_read_error(.Other, refused_path, "validation refused after fsync")) }), FoundationPublicationPolicy{create: .CreateNew}) == {
+        .Err(refusal) -> {
+            assert_eq(refusal.phase, FoundationPublicationPhase.ValidateSource)
+            assert(refusal.error == .Other(_))
         }
         .Ok(_) -> panic("validation refusal must prevent publication")
     }

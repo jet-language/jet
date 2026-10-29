@@ -241,7 +241,10 @@ fn pkg_test_extension_too_deep() -> String {
     &session.on_loaded(42) ?? panic("load")
     assert(&session.close(handle -> handle == 42))
     assert_eq(session.phase(), ExtensionSessionPhase.Closed)
-    assert(!&session.close(_ -> panic("the closer must not run without a handle")))
+    assert(!&session.close(_ -> {
+        assert(false, "the closer must not run without a handle")
+        false
+    }))
 }
 
 #Test("trust and limits defaults are exact") {

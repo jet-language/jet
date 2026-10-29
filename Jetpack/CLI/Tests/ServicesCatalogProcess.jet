@@ -81,7 +81,7 @@ fn cli_test_catalog_worker(claim: ServicesClaim, tools: String, fake: FakeSystem
             else -> panic("unexpected catalog service {name}")
         }
         files.write(files.join(service_dir, ".stopping"), "test\n") ?? panic("request supervisor stop")
-        receipt :: &supervisor.wait() ?? panic("wait for catalog supervisor")
+        receipt :: supervisor.wait() ?? panic("wait for catalog supervisor")
         assert(receipt.success, "catalog worker failed: stdout={receipt.output} stderr={receipt.errors}")
         cli_test_wait_for_missing(files.join(service_dir, "pid"))
     }
@@ -110,7 +110,7 @@ fn cli_test_catalog_worker(claim: ServicesClaim, tools: String, fake: FakeSystem
     tools :: files.tmpdir("jet-minio-port-conflict-tools-") ?? panic("claim tool scratch")
     cli_test_install_catalog_tools(tools)
     blocker :: net.tcp_listen("127.0.0.1:0") ?? panic("bind the blocking listener")
-    port :: (net.listener_local_socket_addr(blocker) ?? panic("read the blocking listener address")).port
+    port :: net.socket_port(net.listener_local_socket_addr(blocker) ?? panic("read the blocking listener address"))
     fake :: claim.fake ?? panic("Linux claims install the fake systemd")
     receipt :: cli_test_catalog_worker(claim, tools, fake, "minio", port).run() ?? panic("run minio worker")
     service_dir :: claim.service_dir("minio")
@@ -121,7 +121,7 @@ fn cli_test_catalog_worker(claim: ServicesClaim, tools: String, fake: FakeSystem
     lifecycle :: files.read(files.join(service_dir, "lifecycle")) ?? panic("read lifecycle")
     assert(lifecycle.contains("phase=failed"), lifecycle)
     assert(lifecycle.contains("recovery=startup-failed"), lifecycle)
-    close(^blocker)
+    blocker.drop("the blocking listener is released once the worker has failed")
     files.remove_all(tools).drop("scratch cleanup is best-effort")
     claim.remove()
 }

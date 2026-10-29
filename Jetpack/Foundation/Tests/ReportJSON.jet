@@ -35,5 +35,9 @@ use jetpack_foundation.[
     line :: envelope.json_line() ?? panic("finite status JSON line")
     assert_eq(line, "{text}\n")
     tree :: report_json_codec.parse(text) ?? panic("finite status JSON parses")
-    assert_eq(tree.field("value") ?? panic("status value"), Dyn.Float(1.25))
+    value :: tree.field("value") ?? panic("status value")
+    if value == {
+        .Float(number) -> assert(number == 1.25)
+        else -> panic("status value must stay a float")
+    }
 }

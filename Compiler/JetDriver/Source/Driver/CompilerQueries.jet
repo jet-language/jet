@@ -408,6 +408,7 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
     )
     if input.retain_projection -> registration.retain_programs = true
     if input.request.mode == JetDriverCompileMode.Test -> registration.test_mode = true
+    if input.request.mode == JetDriverCompileMode.Check -> registration.check_tests = true
     output_intent :: if input.request.mode == JetDriverCompileMode.Test -> SemaOutputIntent.Test else -> input.request.output_intent
     output_diagnostics :: sema_output_resolve(&registration, output_intent, input.request.output_address)
     loop diagnostic in output_diagnostics -> &registration.diagnostics.push(diagnostic)
