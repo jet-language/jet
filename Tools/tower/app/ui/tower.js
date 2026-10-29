@@ -2710,23 +2710,45 @@ function viewPapercuts() {
 }
 
 // ---- GOALS: long-term aims that cards point at ------------------------------
-// Read-only. A goal has no phase and never blocks work; each section lists the
-// live cards linked to it and where they stand.
+// A goal has no phase and never blocks work; each section lists the live cards
+// linked to it and where they stand. The owner adds, edits, logs, achieves and
+// drops goals here; agents link cards with `tower card update --goals`.
 let goalFilter = 'active';   // 'active' | 'all'
+let goalEditing = null;      // goal id whose edit form is open, or 'new'
+function goalForm(g) {
+  const form = el(`<div class="goal__form">
+      <input class="goal__in" data-keep="goal-title:${esc(g?.id || 'new')}" placeholder="Goal title" value="${esc(g?.title || '')}">
+      <textarea class="goal__in" rows="3" data-keep="goal-body:${esc(g?.id || 'new')}" placeholder="What success means">${esc(g?.body || '')}</textarea>
+      <div class="goal__acts"><button class="btn btn--red btn--sm" data-save>${g ? 'Save' : 'Add goal'}</button>
+        <button class="btn btn--ghost btn--sm" data-cancel>Cancel</button></div>
+    </div>`);
+  $('[data-save]', form).addEventListener('click', async () => {
+    const title = $('input', form).value.trim(), body = $('textarea', form).value;
+    if (!title) return toast('a goal needs a title', true);
+    const saved = g ? await api('goal/update', { id: g.id, title, body, by: 'owner' })
+      : await api('goal/add', { title, body, by: 'owner' });
+    if (saved) { goalEditing = null; viewGoals(); }
+  });
+  $('[data-cancel]', form).addEventListener('click', () => { goalEditing = null; viewGoals(); });
+  return form;
+}
 function viewGoals() {
   const v = $('#view');
   const all = S.goals || [];
   const active = all.filter(g => g.status === 'active');
   const list = goalFilter === 'active' ? active : all;
   v.innerHTML = `<div class="viewhead"><h1 class="h1">Goals</h1>
-      <span class="viewhead__sub">long-term aims cards work toward — <b>${active.length}</b> active</span>
+      <span class="viewhead__sub">long-term aims cards work toward — <b>${active.length}</b> active, ${all.length - active.length} achieved or dropped</span>
       <div class="viewhead__actions">
+        <button class="btn btn--red" id="goal-new">New goal</button>
         <button class="btn btn--ghost" id="goal-filter">${goalFilter === 'active' ? 'Show all' : 'Active only'}</button>
       </div></div>
     <div id="goal-list"></div>`;
   $('#goal-filter').addEventListener('click', () => { goalFilter = goalFilter === 'active' ? 'all' : 'active'; viewGoals(); });
+  $('#goal-new').addEventListener('click', () => { goalEditing = 'new'; viewGoals(); });
   const body = $('#goal-list');
-  if (!list.length) {
+  if (goalEditing === 'new') body.appendChild(goalForm(null));
+  if (!list.length && goalEditing !== 'new') {
     body.appendChild(el(`<div class="empty"><div class="empty__glyph">◎</div><div>${goalFilter === 'active'
       ? 'No active goals.' : 'No goals recorded yet.'}</div></div>`));
     return;
@@ -2740,10 +2762,20 @@ function viewGoals() {
           <span class="goal__t">${esc(g.title)}</span>
           ${g.status === 'active' ? '' : `<span class="chip">${esc(g.status)}</span>`}
           <span class="viewhead__sub">${done}/${cards.length} linked cards done</span>
+          <span class="goal__acts">
+            <button class="btn btn--ghost btn--sm" data-edit>Edit</button>
+            ${g.status === 'active'
+              ? '<button class="btn btn--ghost btn--sm" data-status="achieved">Achieved</button><button class="btn btn--ghost btn--sm" data-status="dropped">Remove</button>'
+              : '<button class="btn btn--ghost btn--sm" data-status="active">Reactivate</button>'}
+          </span>
         </div>
-        ${g.body ? `<div class="goal__body">${esc(g.body)}</div>` : ''}
       </section>`);
-    if (!cards.length) section.appendChild(el('<div class="idea__note">No cards linked yet.</div>'));
+    $('[data-edit]', section).addEventListener('click', () => { goalEditing = goalEditing === g.id ? null : g.id; viewGoals(); });
+    section.querySelectorAll('[data-status]').forEach(b => b.addEventListener('click', () =>
+      api('goal/update', { id: g.id, status: b.dataset.status, by: 'owner' })));
+    if (goalEditing === g.id) section.appendChild(goalForm(g));
+    else if (g.body) section.appendChild(el(`<div class="goal__body">${esc(g.body)}</div>`));
+    if (!cards.length) section.appendChild(el('<div class="idea__note">No cards linked yet. Agents link them with <code>tower card update #N --goals ' + esc(g.id) + '</code>.</div>'));
     for (const c of cards) {
       const row = el(`<div class="idea" title="open card">
           <span class="num">${ticket(c)}</span>
@@ -2753,11 +2785,17 @@ function viewGoals() {
       row.addEventListener('click', () => showDetail(c.id));
       section.appendChild(row);
     }
+    const log = el(`<div class="goal__log"><div class="qadd"><input data-keep="goal-log:${esc(g.id)}" placeholder="Log progress or a note on this goal…"><button class="btn btn--red btn--sm">Log</button></div></div>`);
+    const post = async () => { const i = $('input', log); const t = i.value.trim(); if (!t) return; i.value = ''; await api('goal/update', { id: g.id, logEntry: t, by: 'owner' }); };
+    $('button', log).addEventListener('click', post);
+    $('input', log).addEventListener('keydown', e => { if (e.key === 'Enter') post(); });
+    for (const entry of (g.log || []).slice(0, 5))
+      log.appendChild(el(`<div class="idea__note">${esc(entry.at)} · ${esc(entry.by)}: ${esc(entry.text)}</div>`));
+    section.appendChild(log);
     body.appendChild(section);
   }
 }
 
-// ---- render + routing -----------------------------------------------------------
 const RENDER = { now: viewNow, board: viewBoard, papercuts: viewPapercuts, goals: viewGoals, guidance: viewGuidance, gauntlet: viewGauntlet, docs: viewDocs };
 function renderView() {
   try { (RENDER[VIEW] || viewNow)(); }
