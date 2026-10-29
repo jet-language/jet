@@ -318,12 +318,12 @@ fn ir_alloc_new(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, ctor: TAllo
         element_row :: ir_value_type(&m, p, element_ty) ?? return ir_type_fail(&b, span, element_ty)
         buffer :: ir_expr(&m, p, &b, args[0].value)
         if ir_failed(b) || buffer < 0 -> return -1
-        count :: ir_load_word(&m, &b, buffer, 0)
+        count :: ir_list_length(&m, &b, buffer)
         stride_bytes :: ir_list_stride(m, element_row)
         stride :: ir_word_const(&m, &b, stride_bytes)
         length :: ir_temp(&m, &b, word_row)
         ir_emit(&b.f, IROp.Mul, length, count, stride, IR_OVERFLOW_WRAP, b.line)
-        data :: ir_load_word(&m, &b, buffer, 16)
+        data :: ir_list_data(&m, &b, buffer)
         return ir_runtime(&m, &b, "jet_rt_mem_fixed_storage_over", [Int]{data, length}, row)
     }
     if args.len() > 1 -> return ir_fail_slot(&b, span, "allocator constructor with {args.len()} arguments")

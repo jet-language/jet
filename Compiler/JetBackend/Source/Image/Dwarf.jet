@@ -419,12 +419,24 @@ fn dwarf_location(location: X64DebugLocation, indirect: Bool) -> [U8] Never! {
     expr := [U8]{}
     if location == {
         .Register(reg) -> {
+            // DW_OP_reg0 + n / DW_OP_breg0 + n name registers below 32;
+            // DW_OP_regx / DW_OP_bregx the rest (xmm15 is 32).
+            number :: x64_dwarf_register(reg)
             if {
-                indirect -> {
-                    dwarf_u8(&expr, 0x70 + x64_dwarf_register(reg))
+                indirect && number < 32 -> {
+                    dwarf_u8(&expr, 0x70 + number)
                     dwarf_sleb(&expr, 0)
                 }
-                else -> dwarf_u8(&expr, 0x50 + x64_dwarf_register(reg))
+                indirect -> {
+                    dwarf_u8(&expr, 0x92)
+                    dwarf_uleb(&expr, number)
+                    dwarf_sleb(&expr, 0)
+                }
+                number < 32 -> dwarf_u8(&expr, 0x50 + number)
+                else -> {
+                    dwarf_u8(&expr, 0x90)
+                    dwarf_uleb(&expr, number)
+                }
             }
         }
         .Frame(offset) -> {

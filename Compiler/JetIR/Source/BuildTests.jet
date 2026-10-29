@@ -325,6 +325,15 @@ fn ir_test_generate(m: &IRModule, p: IRProgram, b: &IRBuilder, ctx: Int, ty: Typ
     if untagged == .FixedList(element, measure) {
         length :: measure_literal_value(measure) ?? return ir_fail_slot(&b, span, "a property input of {ir_type_name(ty)} without a literal length")
         count :: ir_word_const(&m, &b, length)
+        // An inline `[T#N]` takes the elements of a drawn List.
+        if ir_fixed_list_row(&m, p, row) == .Val(list_row) {
+            drawn :: ir_test_generate_list(&m, p, &b, ctx, list_row, element, count, span)
+            if ir_failed(b) || drawn < 0 -> return -1
+            storage :: ir_fresh_temp(&m, &b, row)
+            ir_emit(&b.f, IROp.StackAddress, storage, m.types[row].size, 8, -1, b.line)
+            ir_fixed_store_back(&m, p, &b, storage, drawn)
+            return storage
+        }
         return ir_test_generate_list(&m, p, &b, ctx, row, element, count, span)
     }
     if untagged == .Option(inner) {

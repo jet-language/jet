@@ -715,8 +715,12 @@ their contracts are defined (D-REPRC1).
 ## Fixed-size lists
 
 `[T#N]` refines a list to exactly `N` elements of type `T`. Destructuring must
-use exactly `N` names. At code generation the representation is `Vec<T>`, as
-for `[T]` (S76).
+use exactly `N` names. When `N` is a literal and `T` is plain data (`Bool`,
+`Char`, `Float`, `Float32`, a fixed-width integer, or a struct, tuple or fixed
+list of those), code generation stores the `N` elements inline, with no heap
+storage; any other `[T#N]` has the list representation of `[T]` (S76). Either
+way a fixed list is a value: assignment and a by-value parameter copy its
+elements, and a `&` parameter writes the caller's.
 
 ```ebnf
 type_fixed_list = "[" type "#" int_literal "]" ;

@@ -2,7 +2,7 @@
 // (structs, enums, carriers, handles), operators and comparisons, value
 // rendering (Display/Show/Debug) and numeric conversions.
 
-use jet_foundation.[CORE_ENUM_ROWS, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TDeclarationOwnership, TField, FnBody, TGenericParam, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_source_owns_type, name_rows_set, name_rows_value, type_carrier_identity, type_name, type_table_intern, type_union_member_tag]
+use jet_foundation.[CORE_ENUM_ROWS, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TDeclarationOwnership, TField, FnBody, TGenericParam, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_source_owns_type, measure_literal_value, name_rows_set, name_rows_value, type_carrier_identity, type_name, type_table_intern, type_union_member_tag]
 use jet_sema.[sema_type_def_instance_type]
 
 // A rendered type's identity: its declaration key when it names one (every
@@ -282,8 +282,18 @@ fn ir_value_type_laid(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) ->
         if !ir_pointee_lays_out(&m, p, element, laying) -> return None
         return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 24, 8, IRClass.Pointer, false, 64, "")))
     }
-    if ty == .FixedList(element, _) {
-        // `[T#N]` is carried as the List of its N elements.
+    if ty == .FixedList(element, measure) {
+        // `[T#N]` of plain elements is carried inline (ir_fixed_shape); any
+        // other is the List of its N elements.
+        if measure_literal_value(measure) == .Val(count) {
+            if ir_value_type_in(&m, p, element, laying) == .Val(element_row) {
+                if ir_fixed_plain(m, element_row) {
+                    size :: ir_align8(count * ir_list_stride(m, element_row))
+                    key :: "[{type_carrier_identity(element)}#{count}]"
+                    return Val(ir_intern_type(&m, key, ir_layout(IRTypeKind.Aggregate, ty, size, 8, IRClass.Pointer, false, 64, "")))
+                }
+            }
+        }
         return ir_value_type_in(&m, p, Type.List{element: element}, laying)
     }
     if ty == .Shared(_) {
@@ -1562,7 +1572,7 @@ fn ir_render_push(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot:
         return
     }
     if ir_map_entry_type(ty) != None -> return ir_render_map(&m, p, &b, builder, slot, mode, span)
-    list_element :: if ir_untag(ty) == .List(element) -> Val(element.copy()) else -> ir_view_element(ty)
+    list_element :: if ir_sequence_element(ty) == .Val(element) -> Val(element) else -> ir_view_element(ty)
     if list_element == .Val(element) {
         ir_render_list(&m, p, &b, builder, slot, element, mode, span)
         return
@@ -2162,11 +2172,11 @@ fn ir_order_into(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int,
         ir_end(&b.f, b.line)
         return
     }
-    if ty == .List(element) {
+    if ir_sequence_element(ty) == .Val(element) {
         element_row :: ir_value_type(&m, p, element) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
         stride :: ir_list_stride(m, element_row)
-        length :: ir_load_word(&m, &b, left, 0)
-        right_length :: ir_load_word(&m, &b, right, 0)
+        length :: ir_list_length(&m, &b, left)
+        right_length :: ir_list_length(&m, &b, right)
         shorter :: ir_bool_op(&m, &b, IROp.Lt, right_length, length)
         word_row :: ir_word_row(&m)
         common :: ir_temp(&m, &b, word_row)
@@ -2174,8 +2184,8 @@ fn ir_order_into(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int,
         ir_open_if(&b.f, shorter, b.line)
         ir_emit(&b.f, IROp.Copy, common, right_length, -1, -1, b.line)
         ir_end(&b.f, b.line)
-        left_data :: ir_load_word(&m, &b, left, 16)
-        right_data :: ir_load_word(&m, &b, right, 16)
+        left_data :: ir_list_data(&m, &b, left)
+        right_data :: ir_list_data(&m, &b, right)
         index :: ir_word_const(&m, &b, 0)
         done :: ir_open(&b.f, IROp.Block, b.line)
         _ :: ir_open(&b.f, IROp.Loop, b.line)
@@ -2478,17 +2488,17 @@ fn ir_equal_into(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, left: Int,
         ir_end(&b.f, b.line)
         return
     }
-    element_ty :: if ty == .List(element) -> Val(element.copy()) else if ir_view_element(ty) == .Val(element) -> Val(element) else -> ir_map_entry_type(ty)
+    element_ty :: if ir_sequence_element(ty) == .Val(element) -> Val(element) else if ir_view_element(ty) == .Val(element) -> Val(element) else -> ir_map_entry_type(ty)
     if element_ty == .Val(element) {
         // Equal lengths, then every element (a Map's entries) in order.
         element_row :: ir_value_type(&m, p, element) ?? return ir_fail(&b, span, "comparison of {ir_type_name(ty)}")
         stride :: ir_list_stride(m, element_row)
-        length :: ir_load_word(&m, &b, left, 0)
-        right_length :: ir_load_word(&m, &b, right, 0)
+        length :: ir_list_length(&m, &b, left)
+        right_length :: ir_list_length(&m, &b, right)
         same_length :: ir_bool_op(&m, &b, IROp.Eq, length, right_length)
         ir_exit_unless(&m, &b, same_length, differ)
-        left_data :: ir_load_word(&m, &b, left, 16)
-        right_data :: ir_load_word(&m, &b, right, 16)
+        left_data :: ir_list_data(&m, &b, left)
+        right_data :: ir_list_data(&m, &b, right)
         index :: ir_word_const(&m, &b, 0)
         done :: ir_open(&b.f, IROp.Block, b.line)
         _ :: ir_open(&b.f, IROp.Loop, b.line)
@@ -3207,6 +3217,71 @@ fn ir_list_element_of(m: &IRModule, p: IRProgram, list_row: Int) -> Int? Never! 
     if ir_view_element(ty) == .Val(element) -> return ir_value_type(&m, p, element)
     if ir_map_entry_type(ty) == .Val(entry) -> return ir_value_type(&m, p, entry)
     None
+}
+
+// A `[T#N]` of a literal length N whose elements are plain data (no drop,
+// no clone: Floats, fixed-width integers, Bools, Chars, records of those)
+// is carried inline: an aggregate whose element `i` lies at `i * stride` of
+// its own address, copied byte for byte as a record of plain fields is.
+// Index reads and writes, walks and `len` use that storage directly; any
+// other List operation gets a List copy of it (ir_fixed_bridge).
+struct IRFixedShape { element: Int, count: Int, stride: Int }
+
+// The inline shape of the type row `row`; None for any other row (a List,
+// or a `[T#N]` carried as one).
+fn ir_fixed_shape(m: &IRModule, p: IRProgram, row: Int) -> IRFixedShape? Never! {
+    count :: ir_fixed_count(m, row) ?? return None
+    if ir_untag(m.types[row].ty) == .FixedList(element, _) {
+        element_row :: ir_value_type(&m, p, element) ?? return None
+        return Val(IRFixedShape{element: element_row, count: count, stride: ir_list_stride(m, element_row)})
+    }
+    None
+}
+
+// The length N of the inline `[T#N]` type row `row`; None for any other row.
+fn ir_fixed_count(m: IRModule, row: Int) -> Int? Never! {
+    if m.types[row].kind != .Aggregate -> return None
+    if ir_untag(m.types[row].ty) == .FixedList(_, measure) -> return measure_literal_value(measure)
+    None
+}
+
+// The List type row of the elements of the inline `[T#N]` type row `row`
+// (ir_fixed_bridge); None for any other row.
+fn ir_fixed_list_row(m: &IRModule, p: IRProgram, row: Int) -> Int? Never! {
+    if ir_fixed_count(m, row) == None -> return None
+    if ir_untag(m.types[row].ty) == .FixedList(element, _) -> return ir_value_type(&m, p, Type.List{element: element.copy()})
+    None
+}
+
+// `slot` where a List is wanted: an inline `[T#N]` is a List copy of it
+// (ir_fixed_bridge), any other value is itself.
+fn ir_list_operand(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span: Span) -> Int Never! {
+    if slot < 0 -> return slot
+    list_row :: ir_fixed_list_row(&m, p, b.f.slot_type[slot]) ?? return slot
+    ir_fixed_bridge(&m, p, &b, slot, list_row, span)
+}
+
+// The element type of a List or fixed List `ty`.
+fn ir_sequence_element(ty: Type) -> Type? Never! {
+    if ir_untag(ty) == {
+        .List(element) | .FixedList(element, _) -> Val(element.copy())
+        else -> None
+    }
+}
+
+// Whether an element of type row `row` is plain data `[T#N]` holds inline.
+fn ir_fixed_plain(m: IRModule, row: Int) -> Bool Never! {
+    if m.types[row].drop != "" || m.types[row].clone != "" -> return false
+    kind :: m.types[row].kind
+    kind == .Bool || kind == .Word || kind == .Float || kind == .Float32 || kind == .Char || kind == .Aggregate
+}
+
+// The element type row of a List slot or an inline `[T#N]` slot: the rows
+// whose elements lie at a data address, index * stride (ir_list_data).
+fn ir_list_item(m: &IRModule, p: IRProgram, b: IRBuilder, list: Int) -> Int? Never! {
+    row :: b.f.slot_type[list]
+    if ir_fixed_shape(&m, p, row) == .Val(shape) -> return Val(shape.element)
+    ir_list_element_of(&m, p, row)
 }
 
 // A `View<str>`: text, carried as a String.

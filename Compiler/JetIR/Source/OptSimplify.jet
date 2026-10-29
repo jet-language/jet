@@ -476,7 +476,7 @@ fn ir_opt_propagate(m: IRModule, f: &IRFunction, facts: OptFacts, report: &IROpt
 fn ir_opt_rename_reads(f: &IRFunction, at: Int, replace: [Int]) Never! {
     op :: f.op[at]
     if op == {
-        .Copy | .Move | .Drop | .Close | .Neg | .Not | .Convert | .Load | .Offset | .If | .BrIf -> f.a[at] = ir_opt_renamed(replace, f.a[at])
+        .Copy | .Move | .Drop | .Close | .Neg | .Not | .Sqrt | .Convert | .Load | .Offset | .If | .BrIf -> f.a[at] = ir_opt_renamed(replace, f.a[at])
         .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Concat | .CopyBytes -> {
             f.a[at] = ir_opt_renamed(replace, f.a[at])
             f.b[at] = ir_opt_renamed(replace, f.b[at])
@@ -542,7 +542,7 @@ fn ir_opt_coalesce(f: &IRFunction, facts: OptFacts, report: &IROptReport) -> Int
 fn ir_opt_removable(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     op :: f.op[at]
     if op == {
-        .Const | .ConstText | .ConstBigInt | .DataAddress | .FunctionAddress | .StackAddress | .Offset | .Load | .Not | .Convert | .Concat | .Copy | .Move -> return true
+        .Const | .ConstText | .ConstBigInt | .DataAddress | .FunctionAddress | .StackAddress | .Offset | .Load | .Not | .Sqrt | .Convert | .Concat | .Copy | .Move -> return true
         .Eq | .Ne | .Lt | .Le | .Gt | .Ge -> return true
         .Add | .Sub | .Mul | .Neg | .BitAnd | .BitOr | .BitXor | .Div | .Shl | .Shr -> {
             kind :: ir_opt_type(m, f, f.a[at]).kind

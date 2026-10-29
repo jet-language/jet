@@ -2287,6 +2287,12 @@ fn ir_adapt(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, span
         if ir_untag(member_ty) == .Union(_) -> widens = false
         if widens -> return ir_union_box(&m, p, &b, slot, member_ty, union_ty, span)
     }
+    // An inline `[T#N]` where a `[T]` is wanted is a List copy of it; no
+    // other value stands for an inline `[T#N]`.
+    have_fixed :: ir_fixed_count(m, have) != None
+    want_fixed :: ir_fixed_count(m, row) != None
+    if have_fixed && !want_fixed && ir_list_element_of(&m, p, row) != None -> return ir_fixed_bridge(&m, p, &b, slot, row, span)
+    if have_fixed != want_fixed -> return ir_fail_slot(&b, span, "a value of {ir_type_name(m.types[have].ty)} where {ir_type_name(m.types[row].ty)} is expected")
     if m.types[have].kind == m.types[row].kind && m.types[have].size == m.types[row].size -> return slot
     ir_fail_slot(&b, span, "a value of {ir_type_name(m.types[have].ty)} where {ir_type_name(m.types[row].ty)} is expected")
 }
@@ -2439,6 +2445,25 @@ fn ir_element_address(m: &IRModule, b: &IRBuilder, data: Int, index: Int, stride
     ir_word_op(&m, &b, IROp.Add, data, offset)
 }
 
+// The address of the elements of the list at `list` as a native word: a
+// List's data word, an inline `[T#N]`'s own storage (ir_fixed_shape).
+fn ir_list_data(m: &IRModule, b: &IRBuilder, list: Int) -> Int Never! {
+    if ir_fixed_count(m, b.f.slot_type[list]) != None {
+        word_row :: ir_word_row(&m)
+        data :: ir_temp(&m, &b, word_row)
+        ir_emit(&b.f, IROp.Offset, data, list, 0, -1, b.line)
+        return data
+    }
+    ir_load_word(&m, &b, list, 16)
+}
+
+// The length of the list at `list` as a native word: a List's len word, an
+// inline `[T#N]`'s N.
+fn ir_list_length(m: &IRModule, b: &IRBuilder, list: Int) -> Int Never! {
+    if ir_fixed_count(m, b.f.slot_type[list]) == .Val(count) -> return ir_word_const(&m, &b, count)
+    ir_load_word(&m, &b, list, 0)
+}
+
 // An open walk over a list: its native index and the element at it.
 struct IRWalk { index: Int, item: Int }
 
@@ -2446,8 +2471,8 @@ struct IRWalk { index: Int, item: Int }
 // ir_walk_close advances and closes it.
 fn ir_walk_open(m: &IRModule, b: &IRBuilder, list: Int, row: Int) -> IRWalk Never! {
     stride :: ir_list_stride(m, row)
-    length :: ir_load_word(&m, &b, list, 0)
-    data :: ir_load_word(&m, &b, list, 16)
+    length :: ir_list_length(&m, &b, list)
+    data :: ir_list_data(&m, &b, list)
     index :: ir_word_const(&m, &b, 0)
     exit :: ir_open(&b.f, IROp.Block, b.line)
     _ :: ir_open(&b.f, IROp.Loop, b.line)
@@ -2466,10 +2491,16 @@ fn ir_walk_close(m: &IRModule, b: &IRBuilder, walk: IRWalk) Never! {
     ir_end(&b.f, b.line)
 }
 
-// A List of the element slots `elements` in fresh frame storage.
+// A List of the element slots `elements` in fresh frame storage (an inline
+// `[T#N]` holds them in that storage itself).
 fn ir_list_from(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, element_row: Int, elements: [Int]) -> Int Never! {
     stride :: ir_list_stride(m, element_row)
     storage :: ir_fresh_temp(&m, &b, row)
+    if ir_fixed_count(m, row) != None {
+        ir_emit(&b.f, IROp.StackAddress, storage, m.types[row].size, 8, -1, b.line)
+        loop (index, slot) in elements -> ir_store_at(&m, p, &b, storage, index * stride, slot)
+        return storage
+    }
     ir_emit(&b.f, IROp.StackAddress, storage, 24, 8, -1, b.line)
     count :: ir_word_const(&m, &b, elements.len())
     ir_emit(&b.f, IROp.Store, -1, storage, 0, count, b.line)
@@ -2483,6 +2514,43 @@ fn ir_list_from(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, element_row
     loop (index, slot) in elements -> ir_store_at(&m, p, &b, data, index * stride, slot)
     ir_emit(&b.f, IROp.Store, -1, storage, 16, data, b.line)
     storage
+}
+
+// The inline `[T#N]` at `slot` as a new List of the List type row `row`
+// holding a copy of its N elements.
+fn ir_fixed_bridge(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, span: Span) -> Int Never! {
+    have :: b.f.slot_type[slot]
+    count :: ir_fixed_count(m, have) ?? return ir_fail_slot(&b, span, "a List copy of {ir_type_name(m.types[have].ty)}")
+    element_row :: ir_list_element_of(&m, p, row) ?? return ir_fail_slot(&b, span, "a List copy as {ir_type_name(m.types[row].ty)}")
+    bytes :: count * ir_list_stride(m, element_row)
+    storage :: ir_fresh_temp(&m, &b, row)
+    ir_emit(&b.f, IROp.StackAddress, storage, 24, 8, -1, b.line)
+    length :: ir_word_const(&m, &b, count)
+    ir_emit(&b.f, IROp.Store, -1, storage, 0, length, b.line)
+    ir_emit(&b.f, IROp.Store, -1, storage, 8, length, b.line)
+    if count == 0 {
+        none :: ir_word_const(&m, &b, 0)
+        ir_emit(&b.f, IROp.Store, -1, storage, 16, none, b.line)
+        return storage
+    }
+    data :: ir_list_buffer_alloc(&m, &b, bytes)
+    source :: ir_list_data(&m, &b, slot)
+    ir_emit(&b.f, IROp.CopyBytes, -1, data, source, bytes, b.line)
+    ir_emit(&b.f, IROp.Store, -1, storage, 16, data, b.line)
+    storage
+}
+
+// The elements of `bridge`, an ir_fixed_bridge List a write went through,
+// back into the inline `[T#N]` at `slot`; then the List ends.
+fn ir_fixed_store_back(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, bridge: Int) Never! {
+    count :: ir_fixed_count(m, b.f.slot_type[slot]) ?? return
+    element_row :: ir_list_element_of(&m, p, b.f.slot_type[bridge]) ?? return
+    if count > 0 {
+        data :: ir_load_word(&m, &b, bridge, 16)
+        target :: ir_list_data(&m, &b, slot)
+        ir_emit(&b.f, IROp.CopyBytes, -1, target, data, count * ir_list_stride(m, element_row), b.line)
+    }
+    ir_release(&m, &b, bridge)
 }
 
 // An exact Int list position as a native word (jet_int_owned_to_i64).
@@ -2500,16 +2568,28 @@ fn ir_native_index(m: &IRModule, b: &IRBuilder, position: Int, span: Span) -> In
 // The address of element `index` of the list at `list`, after the bounds
 // check (ir_list_bounds_stop). An access at an index sema's loop proof keeps
 // inside its fixed list (IRBuilder.proven_index) has no check: the proof is
-// the check.
+// the check. A literal index inside an inline `[T#N]` is its element's
+// fixed offset.
 fn ir_checked_element(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, index: Int, row: Int, span: Span) -> Int Never! {
     proof :: b.proven_index.get(index) ?? -1
+    if ir_fixed_count(m, b.f.slot_type[list]) == .Val(count) {
+        if ir_body_node(p, b, index).kind == .IntLit(value, _) {
+            if value >= 0 && value < count {
+                if proof >= 0 -> b.f.loop_proofs[proof].lowered += 1
+                word_row :: ir_word_row(&m)
+                address :: ir_temp(&m, &b, word_row)
+                ir_emit(&b.f, IROp.Offset, address, list, value * ir_list_stride(m, row), -1, b.line)
+                return address
+            }
+        }
+    }
     position :: ir_expr(&m, p, &b, index)
     if ir_failed(b) || position < 0 -> return -1
     native :: ir_native_index(&m, &b, position, span)
     if ir_failed(b) -> return -1
     if proof >= 0 {
         b.f.loop_proofs[proof].lowered += 1
-        data :: ir_load_word(&m, &b, list, 16)
+        data :: ir_list_data(&m, &b, list)
         stride :: ir_list_stride(m, row)
         return ir_element_address(&m, &b, data, native, stride)
     }
@@ -2521,7 +2601,7 @@ fn ir_checked_element(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, inde
 // stops at a failed check, Report reports it and goes on, Off has none.
 fn ir_checked_address(m: &IRModule, b: &IRBuilder, list: Int, native: Int, row: Int) -> Int Never! {
     if b.bounds != .Off {
-        length :: ir_load_word(&m, &b, list, 0)
+        length :: ir_list_length(&m, &b, list)
         bad :: ir_index_order(&m, &b, IROp.Ge, native, length)
         ir_open_if(&b.f, bad, b.line)
         if b.bounds == .Report {
@@ -2531,7 +2611,7 @@ fn ir_checked_address(m: &IRModule, b: &IRBuilder, list: Int, native: Int, row: 
         }
         ir_end(&b.f, b.line)
     }
-    data :: ir_load_word(&m, &b, list, 16)
+    data :: ir_list_data(&m, &b, list)
     stride :: ir_list_stride(m, row)
     ir_element_address(&m, &b, data, native, stride)
 }

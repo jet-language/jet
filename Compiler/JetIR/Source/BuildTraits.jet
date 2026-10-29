@@ -178,8 +178,14 @@ fn ir_trait_call(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, metho
         value :: ir_call(&m, p, &b, target.key, [Type]{}, self_slot, [IRWriteBack]{}, args, span)
         if ir_failed(b) -> return -1
         if result >= 0 && value >= 0 {
-            ir_emit(&b.f, IROp.Copy, result, value, -1, -1, b.line)
+            // One implementation may return its plain success where another
+            // returns the `T Never!` carrier (ir_plain_return).
+            result_row :: b.f.slot_type[result]
+            adapted :: ir_adapt(&m, p, &b, value, result_row, span)
+            if ir_failed(b) -> return -1
+            ir_emit(&b.f, IROp.Copy, result, adapted, -1, -1, b.line)
             b.fresh[value] = false
+            b.fresh[adapted] = false
         }
         ir_else(&b.f, b.line)
     }

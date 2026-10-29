@@ -1,10 +1,14 @@
 // Slot homes and linear-scan register allocation for x86-64 selection.
 //
 // Every slot that holds a value has one place for the whole function: a
-// callee-saved register (rbx, r12-r15) for the whole of its live range, or its
-// frame home. Selection then uses rax, rcx, rdx, rsi, rdi, r8-r11 and xmm0-7 as
-// scratch inside one instruction only, so a call never needs a value saved
-// around it and structured control never needs moves on its edges.
+// register for the whole of its live range, or its frame home. A General
+// slot's register is callee-saved (rbx, r12-r15); a Float slot's is one of
+// xmm8-xmm15, which the C ABI lets a call clobber, so around every call
+// inside its range the slot is stored to its home and loaded back
+// (X64Select.jet ir_x64_call_out), except a stop poll's, which keeps them.
+// Selection then uses rax, rcx, rdx, rsi, rdi, r8-r11 and xmm0-7 as scratch
+// inside one instruction only, and structured control never needs moves on
+// its edges.
 //
 // A slot's live range is the span of instruction indexes that reference it
 // (parameters start at -1, before the first instruction). Because control is
@@ -21,8 +25,10 @@
 // of calls that return an aggregate, rounded so rsp stays 16-byte aligned
 // at every call.
 
-// Callee-saved registers handed to slots, in preference order.
+// Callee-saved registers handed to General slots, in preference order.
 IR_X64_SLOT_REGISTERS :: [Int]{3, 12, 13, 14, 15}
+// The xmm registers handed to Float slots.
+IR_X64_XMM_REGISTERS :: [Int]{8, 9, 10, 11, 12, 13, 14, 15}
 IR_X64_LOOP_WEIGHT :: 16
 
 // How a slot's value is held.
@@ -33,7 +39,8 @@ enum IRX64Class {
     // integers, Char, String, raw and owned pointers, and an aggregate's
     // pointer to its bytes).
     General
-    // Float bits (Float32 zero-extended) in an 8-byte home.
+    // Float bits in an xmm register (a Float32 in its low half) or an 8-byte
+    // home (a Float32 zero-extended).
     Float
 }
 
@@ -64,10 +71,14 @@ fn ir_x64_row_class(m: IRModule, row: Int) -> IRX64Class Never! {
 }
 
 struct IRX64Allocation {
-    // Per slot: the callee-saved register holding it, -1 for its frame home.
+    // Per slot: the callee-saved register holding it, -1 for none.
     regs: [Int]
-    // Per slot: the rbp displacement of its frame home (0 for a register
-    // slot, a constant slot, a frame address or a Unit slot).
+    // Per slot: the xmm register holding a Float slot, -1 for none; and the
+    // slots holding one, in slot order.
+    xmms: [Int]
+    xmm_slots: [Int]
+    // Per slot: the rbp displacement of its frame home (0 for a slot in a
+    // callee-saved register, a constant slot, a frame address or a Unit slot).
     homes: [Int]
     // Per slot: whether it is a constant (a General temporary whose only
     // write is a Const): it has no place, every read is its immediate
@@ -109,7 +120,7 @@ IR_X64_READS_RESULT :: 6
 
 fn ir_x64_read_form(op: IROp) -> Int Never! {
     if op == {
-        .Copy | .Move | .Drop | .Close | .Neg | .Not | .Convert | .Load | .Offset | .If | .BrIf -> IR_X64_READS_A
+        .Copy | .Move | .Drop | .Close | .Neg | .Not | .Sqrt | .Convert | .Load | .Offset | .If | .BrIf -> IR_X64_READS_A
         .Add | .Sub | .Mul | .Div | .Rem | .FloorDiv | .Mod | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Eq | .Ne | .Lt | .Le | .Gt | .Ge | .Concat | .CopyBytes -> IR_X64_READS_AB
         .Call | .CallRuntime -> IR_X64_READS_ARGS
         .CallIndirect -> IR_X64_READS_A_ARGS
@@ -305,66 +316,20 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
         }
     }
 
-    // Linear scan over the General slots, by start then slot: one sort of
-    // the keys (start + 1) * count + slot (a parameter starts at -1).
-    regs := [Int]{}
-    loop _ in 0..<count -> &regs.push(-1)
-    keys := [Int]{}
+    // Linear scan: the General slots over the callee-saved registers, the
+    // Float slots over xmm8-xmm15.
+    general :: loop slot in 0..<count -> starts[slot] <= ends[slot] && !consts[slot] && !addressed[slot] && classes[slot] == .General
+    floating :: loop slot in 0..<count -> starts[slot] <= ends[slot] && classes[slot] == .Float
+    regs :: ir_x64_scan(starts, ends, weights, general, IR_X64_SLOT_REGISTERS)
+    xmms :: ir_x64_scan(starts, ends, weights, floating, IR_X64_XMM_REGISTERS)
+    xmm_slots := [Int]{}
     loop slot in 0..<count {
-        if starts[slot] > ends[slot] || consts[slot] || addressed[slot] -> next
-        if classes[slot] != .General -> next
-        &keys.push((starts[slot] + 1) * count + slot)
+        if xmms[slot] >= 0 -> &xmm_slots.push(slot)
     }
-    &keys.sort()
-    order :: loop key in keys -> key %% count
-    pool :: IR_X64_SLOT_REGISTERS
-    owners := [Int]{}
-    loop _ in 0..<pool.len() -> &owners.push(-1)
-    used := [Bool]{}
-    loop _ in 0..<pool.len() -> &used.push(false)
-    loop slot in order {
-        start :: starts[slot]
-        // Expire ranges that ended before this one starts.
-        loop row in 0..<pool.len() {
-            owner :: owners[row]
-            if owner >= 0 && ends[owner] < start -> owners[row] = -1
-        }
-        free := -1
-        loop row in 0..<pool.len() {
-            if free < 0 && owners[row] < 0 -> free = row
-        }
-        if free >= 0 {
-            owners[free] = slot
-            regs[slot] = pool[free]
-            used[free] = true
-            next
-        }
-        // Every register is taken: the range with the least spill weight
-        // (the one ending last among equals) stays in its home.
-        victim := -1
-        loop row in 0..<pool.len() {
-            if victim < 0 {
-                victim = row
-                next
-            }
-            lighter :: weights[owners[row]] < weights[owners[victim]]
-            if lighter || (weights[owners[row]] == weights[owners[victim]] && ends[owners[row]] > ends[owners[victim]]) -> victim = row
-        }
-        loser :: owners[victim]
-        if weights[loser] < weights[slot] || (weights[loser] == weights[slot] && ends[loser] > ends[slot]) {
-            regs[loser] = -1
-            owners[victim] = slot
-            regs[slot] = pool[victim]
-        }
-    }
-    saved := [Int]{}
-    loop row in 0..<pool.len() {
-        if used[row] -> &saved.push(pool[row])
-    }
-    // A stolen register may leave its first owner's push unused; keep only
-    // registers some slot ends up with.
+    // The callee-saved registers some slot ends up with (a stolen register
+    // may hold none), in push order.
     kept := [Int]{}
-    loop reg in saved {
+    loop reg in IR_X64_SLOT_REGISTERS {
         holds := false
         loop slot in 0..<count {
             if regs[slot] == reg -> holds = true
@@ -373,7 +338,8 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     }
 
     // Frame homes below the saved registers, for the referenced slots
-    // without a register or a constant.
+    // without a callee-saved register or a constant (a Float slot in an xmm
+    // register keeps its home across the calls it lives through).
     depth := 8 * kept.len()
     homes := [Int]{}
     loop slot in 0..<count {
@@ -415,5 +381,53 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     loop slot in 0..<count -> &frames.push(if addressed[slot] -> stack[last_write[slot]] else -> 0)
     total :: ir_x64_align(depth, 16)
     frame_bytes :: total - 8 * kept.len()
-    IRX64Allocation{regs: ^regs, homes: ^homes, consts: ^consts, values: ^values, frames: ^frames, starts: ^starts, ends: ^ends, stack: ^stack, saved: ^kept, frame_bytes: frame_bytes, result_home: result_home}
+    IRX64Allocation{regs: ^regs, xmms: ^xmms, xmm_slots: ^xmm_slots, homes: ^homes, consts: ^consts, values: ^values, frames: ^frames, starts: ^starts, ends: ^ends, stack: ^stack, saved: ^kept, frame_bytes: frame_bytes, result_home: result_home}
+}
+
+// Linear scan of the `eligible` slots over the registers of `pool`, by start
+// then slot: one sort of the keys (start + 1) * count + slot (a parameter
+// starts at -1). When every register is taken, the range with the least
+// spill weight (the one ending last among equals) stays in its home. Per
+// slot: its register, -1 for none.
+fn ir_x64_scan(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], pool: [Int]) -> [Int] Never! {
+    count :: starts.len()
+    regs := [Int]{}
+    loop _ in 0..<count -> &regs.push(-1)
+    keys := [Int]{}
+    loop slot in 0..<count {
+        if eligible[slot] -> &keys.push((starts[slot] + 1) * count + slot)
+    }
+    &keys.sort()
+    owners := [Int]{}
+    loop _ in 0..<pool.len() -> &owners.push(-1)
+    loop key in keys {
+        slot :: key %% count
+        start :: starts[slot]
+        // Expire ranges that ended before this one starts.
+        loop row in 0..<pool.len() {
+            owner :: owners[row]
+            if owner >= 0 && ends[owner] < start -> owners[row] = -1
+        }
+        free := -1
+        loop row in 0..<pool.len() {
+            if free < 0 && owners[row] < 0 -> free = row
+        }
+        if free >= 0 {
+            owners[free] = slot
+            regs[slot] = pool[free]
+            next
+        }
+        victim := 0
+        loop row in 1..<pool.len() {
+            lighter :: weights[owners[row]] < weights[owners[victim]]
+            if lighter || (weights[owners[row]] == weights[owners[victim]] && ends[owners[row]] > ends[owners[victim]]) -> victim = row
+        }
+        loser :: owners[victim]
+        if weights[loser] < weights[slot] || (weights[loser] == weights[slot] && ends[loser] > ends[slot]) {
+            regs[loser] = -1
+            owners[victim] = slot
+            regs[slot] = pool[victim]
+        }
+    }
+    regs
 }

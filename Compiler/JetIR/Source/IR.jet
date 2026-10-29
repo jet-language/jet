@@ -26,6 +26,8 @@
 //                                              Float is IEEE
 //   Eq Ne Lt Le Gt Ge                          dst(Bool) a=left b=right
 //   Neg Not                                    dst  a=operand
+//   Sqrt         dst  a=operand                IEEE square root of a Float or
+//                                              Float32 (correctly rounded)
 //   Convert      dst  a=operand                numeric conversion by the slot
 //                                              types: Float/Float32 to a Word
 //                                              truncates toward zero (signed
@@ -122,6 +124,7 @@ enum IROp {
     BrIf
     Return
     Unreachable
+    Sqrt
 }
 
 // Overflow policy of an arithmetic op on a fixed-width integer (`c`).
@@ -583,6 +586,7 @@ fn ir_op_name(op: IROp) -> String Never! {
         .BrIf -> "br_if"
         .Return -> "return"
         .Unreachable -> "unreachable"
+        .Sqrt -> "sqrt"
     }
 }
 
@@ -638,6 +642,7 @@ fn ir_op_code(op: IROp) -> Int Never! {
         .BrIf -> 46
         .Return -> 47
         .Unreachable -> 48
+        .Sqrt -> 49
     }
 }
 

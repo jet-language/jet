@@ -530,8 +530,10 @@ fn ir_lazy_slot_type(m: IRModule, b: IRBuilder, slot: Int) -> Type Never! {
 }
 
 // `list.lazy()`: an Iter over the List's elements; a fresh List's header is
-// taken over, any other's elements are cloned.
-fn ir_lazy_from_list(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, span: Span) -> Int Never! {
+// taken over, any other's elements are cloned. An inline `[T#N]` gives a
+// fresh List copy of it (ir_list_operand).
+fn ir_lazy_from_list(m: &IRModule, p: IRProgram, b: &IRBuilder, lent: Int, row: Int, span: Span) -> Int Never! {
+    list :: ir_list_operand(&m, p, &b, lent, span)
     list_ty :: ir_lazy_slot_type(m, b, list)
     element := Type?{None}
     if ir_untag(list_ty) == .List(inner) -> element = Val(inner)

@@ -443,16 +443,33 @@ fn x64_float_store(code: &[U8], single: Bool, base: Int, disp: Int, src: Int) Ne
     x64_modrm_mem(&code, src, base, disp)
 }
 
-enum X64FloatOp { Add Sub Mul Div }
+// movups xmm, [base + disp] (0F 10 /r), or the reverse store (0F 11 /r):
+// all sixteen bytes, unaligned.
+fn x64_vector_load(code: &[U8], dst: Int, base: Int, disp: Int) Never! {
+    if dst >= 8 || base >= 8 -> x64_rex(&code, false, dst, base)
+    x64_byte(&code, 0x0f)
+    x64_byte(&code, 0x10)
+    x64_modrm_mem(&code, dst, base, disp)
+}
 
-// addsd/subsd/mulsd/divsd dst, src (F2 0F 58|5C|59|5E /r), or with `single`
-// addss/subss/mulss/divss (F3 0F 58|5C|59|5E /r).
+fn x64_vector_store(code: &[U8], base: Int, disp: Int, src: Int) Never! {
+    if src >= 8 || base >= 8 -> x64_rex(&code, false, src, base)
+    x64_byte(&code, 0x0f)
+    x64_byte(&code, 0x11)
+    x64_modrm_mem(&code, src, base, disp)
+}
+
+enum X64FloatOp { Add Sub Mul Div Sqrt }
+
+// addsd/subsd/mulsd/divsd/sqrtsd dst, src (F2 0F 58|5C|59|5E|51 /r), or with
+// `single` addss/subss/mulss/divss/sqrtss (F3 0F 58|5C|59|5E|51 /r).
 fn x64_float_op(code: &[U8], op: X64FloatOp, single: Bool, dst: Int, src: Int) Never! {
     opcode :: if op == {
         .Add -> 0x58
         .Sub -> 0x5c
         .Mul -> 0x59
         .Div -> 0x5e
+        .Sqrt -> 0x51
     }
     x64_sse(&code, if single -> 0xf3 else -> 0xf2, false, opcode, dst, src)
 }
@@ -480,3 +497,14 @@ fn x64_cvtss2sd(code: &[U8], dst: Int, src: Int) Never! { x64_sse(&code, 0xf3, f
 
 // cvtsd2ss xmm, xmm (F2 0F 5A /r): rounds to nearest (MXCSR default).
 fn x64_cvtsd2ss(code: &[U8], dst: Int, src: Int) Never! { x64_sse(&code, 0xf2, false, 0x5a, dst, src) }
+
+// movaps dst, src (0F 28 /r): the whole register.
+fn x64_movaps(code: &[U8], dst: Int, src: Int) Never! { x64_sse(&code, 0, false, 0x28, dst, src) }
+
+// movq xmm, r64 (66 REX.W 0F 6E /r), or with `single` movd xmm, r32
+// (66 0F 6E /r): the bits into the low lane, the rest of xmm zeroed.
+fn x64_movq_to_xmm(code: &[U8], single: Bool, xmm: Int, reg: Int) Never! { x64_sse(&code, 0x66, !single, 0x6e, xmm, reg) }
+
+// movq r64, xmm (66 REX.W 0F 7E /r), or with `single` movd r32, xmm
+// (66 0F 7E /r), which zero-extends into the whole register.
+fn x64_movq_from_xmm(code: &[U8], single: Bool, reg: Int, xmm: Int) Never! { x64_sse(&code, 0x66, !single, 0x7e, xmm, reg) }

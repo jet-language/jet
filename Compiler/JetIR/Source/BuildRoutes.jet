@@ -740,12 +740,39 @@ fn ir_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int
     subject :: if mutates -> ir_write_base(&m, p, &b, receiver, span) else -> ir_expr(&m, p, &b, receiver)
     if ir_failed(b) -> return -1
     if subject < 0 -> return ir_fail_slot(&b, span, "builtin {ir_builtin_name(operation)} on a Unit receiver")
+    // An inline `[T#N]` receiver: its length is N; any other operation goes
+    // through a List copy of it, whose elements a write puts back.
+    if ir_fixed_count(m, b.f.slot_type[subject]) == .Val(count) {
+        if operation == .LenList {
+            int_row :: ir_type_row(&m, Type.Int) ?? 0
+            return ir_int_constant(&m, &b, int_row, count)
+        }
+        if operation == .IsEmpty {
+            bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+            return ir_int_constant(&m, &b, bool_row, if count == 0 -> 1 else -> 0)
+        }
+        list_row :: ir_fixed_list_row(&m, p, b.f.slot_type[subject]) ?? return ir_type_fail(&b, span, receiver_ty)
+        bridge :: ir_fixed_bridge(&m, p, &b, subject, list_row, span)
+        result :: ir_builtin_on(&m, p, &b, ty, receiver_ty, operation, bridge, mutates, args, span)
+        if mutates {
+            ir_fixed_store_back(&m, p, &b, subject, bridge)
+        } else {
+            ir_release(&m, &b, bridge)
+        }
+        return result
+    }
+    ir_builtin_on(&m, p, &b, ty, receiver_ty, operation, subject, mutates, args, span)
+}
+
+// ir_builtin on the receiver value (or write place) `subject`.
+fn ir_builtin_on(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver_ty: Type, operation: TBuiltinOp, subject: Int, mutates: Bool, args: [Int], span: Span) -> Int Never! {
     kind :: ir_kind_of(m, b, subject)
     element := -1
     if ir_list_element(&m, p, b, subject) == .Val(row) -> element = row
     operands := [Int]{subject}
     loop arg in args {
-        slot :: ir_expr(&m, p, &b, arg)
+        value :: ir_expr(&m, p, &b, arg)
+        slot :: ir_list_operand(&m, p, &b, value, span)
         if ir_failed(b) -> return -1
         &operands.push(slot)
     }
@@ -1509,14 +1536,18 @@ fn ir_closure_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
     // A Float fold whose step is exactly `(acc, x) -> acc + x` adds in the
     // same fixed lane tree as `sum`, with the seed in lane 0.
     if (operation == .Fold || operation == .ViewFold) && args.len() == 2 && ir_float_add_fold_step(p, b, args[1]) {
-        folded :: ir_expr(&m, p, &b, receiver)
-        if ir_failed(b) || folded < 0 -> return -1
+        lent :: ir_expr(&m, p, &b, receiver)
+        if ir_failed(b) || lent < 0 -> return -1
+        folded :: ir_list_operand(&m, p, &b, lent, span)
         folded_element :: ir_list_element(&m, p, b, folded) ?? return ir_fail_slot(&b, span, "closure method fold on {ir_type_name(receiver_ty)}")
         if m.types[folded_element].kind == .Float {
             seed :: ir_expr(&m, p, &b, args[0])
             if ir_failed(b) || seed < 0 -> return -1
-            return ir_list_sum_fixed(&m, &b, folded, folded_element, seed, span)
+            sum :: ir_list_sum_fixed(&m, &b, folded, folded_element, seed, span)
+            if folded != lent -> ir_release(&m, &b, folded)
+            return sum
         }
+        if folded != lent -> ir_release(&m, &b, folded)
     }
     // The in-place methods write the List's own buffer, reached as a write
     // place (ir_builtin's receiver).
@@ -1524,8 +1555,11 @@ fn ir_closure_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
         .UpdateFirst | .SortBy | .SortByDesc | .TrySortBy | .TrySortByDesc | .SortByCompare | .MapMut | .EditDisjoint | .DedupBy -> true
         else -> false
     }
-    list :: if in_place -> ir_write_base(&m, p, &b, receiver, span) else -> ir_expr(&m, p, &b, receiver)
-    if ir_failed(b) || list < 0 -> return -1
+    place :: if in_place -> ir_write_base(&m, p, &b, receiver, span) else -> ir_expr(&m, p, &b, receiver)
+    if ir_failed(b) || place < 0 -> return -1
+    // An inline `[T#N]` is lent as a List copy, whose elements an in-place
+    // method puts back.
+    list :: ir_list_operand(&m, p, &b, place, span)
     element :: ir_list_element(&m, p, b, list) ?? return ir_fail_slot(&b, span, "closure method {ir_closure_op_name(operation)} on {ir_type_name(receiver_ty)}")
     if in_place -> ir_make_unique(&m, p, &b, list)
     operands := [Int]{}
@@ -1539,6 +1573,13 @@ fn ir_closure_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
     result :: if parallel -> ir_closure_parallel(&m, p, &b, ty, list, element, operation, operands, args, span) else -> ir_closure_list_method(&m, p, &b, ty, list, element, operation, operands, args, span)
     // The method only lends its closures.
     loop slot in operands -> ir_release_closure(&m, &b, slot)
+    if list != place {
+        if in_place {
+            ir_fixed_store_back(&m, p, &b, place, list)
+        } else {
+            ir_release(&m, &b, list)
+        }
+    }
     result
 }
 
@@ -2902,6 +2943,15 @@ fn ir_route_inline(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inpu
         b.fresh[handler] = false
         return Val(-1)
     }
+    // `math.sqrt(x)`: the IEEE square root, one instruction.
+    if name == "jet_std_math_sqrt" {
+        if inputs.len() != 1 || inputs[0] < 0 -> return Val(ir_fail_slot(&b, span, "sqrt with {inputs.len()} arguments"))
+        row :: b.f.slot_type[inputs[0]]
+        if m.types[row].kind != .Float -> return Val(ir_fail_slot(&b, span, "sqrt of {ir_type_name(m.types[row].ty)}"))
+        root :: ir_temp(&m, &b, row)
+        ir_emit(&b.f, IROp.Sqrt, root, inputs[0], -1, -1, b.line)
+        return Val(root)
+    }
     strings :: name == "jet_unicode_split_once" || name == "jet_unicode_cut_last"
     lists :: name == "jet_list_get_opt" || name == "jet_list_first" || name == "jet_list_last" || name == "jet_list_slice" || name == "jet_list_index_of" || name == "jet_list_sum" || name == "jet_list_sum_fixed_f64" || name == "jet_list_product" || name == "jet_list_contains" || name == "jet_list_equal" || name == "jet_list_replace" || name == "jet_list_starts_with" || name == "jet_list_ends_with" || name == "jet_list_min" || name == "jet_list_max" || name == "jet_list_flatten" || name == "jet_list_count" || name == "jet_list_counts" || name == "jet_list_union" || name == "jet_list_intersection" || name == "jet_list_difference" || name == "jet_list_random"
     if !strings && !lists -> return None
@@ -3559,7 +3609,13 @@ fn ir_route_labeled(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, i
     if route.params.len() != inputs.len() -> return ir_fail_slot(&b, span, "runtime route {name} takes {route.params.len()} arguments, not {inputs.len()}")
     args := [Int]{}
     loop (index, slot) in inputs {
-        &args.push(if index < borrowed.len() && !borrowed[index] -> ir_own(&m, p, &b, slot) else -> slot)
+        // A consumed inline `[T#N]` crosses as a List copy of it.
+        if index < borrowed.len() && !borrowed[index] {
+            owned :: ir_list_operand(&m, p, &b, slot, span)
+            &args.push(ir_own(&m, p, &b, owned))
+        } else {
+            &args.push(slot)
+        }
     }
     lowered := [Int]{}
     temporaries := [Int]{}
@@ -3619,7 +3675,7 @@ fn ir_route_labeled(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, i
             .List(element) -> {
                 // A nested List (List<List<U8>>) crosses like any List: its
                 // buffer holds the inline 24-byte element headers.
-                item_row :: ir_list_element(&m, p, b, slot) ?? return ir_fail_slot(&b, span, "runtime route {name} List argument of {shown}")
+                item_row :: ir_list_item(&m, p, b, slot) ?? return ir_fail_slot(&b, span, "runtime route {name} List argument of {shown}")
                 if element == .Handle(handle_name) {
                     item :: if ir_untag(shown) == .List(inner) -> inner else -> { return ir_fail_slot(&b, span, "runtime route {name} List of {element}") }
                     if ir_record_runtime(&m, p, item) == .Val(record) {
@@ -3641,8 +3697,8 @@ fn ir_route_labeled(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, i
                     held :: ir_handle_runtime(p, item_name) ?? return ir_fail_slot(&b, span, "runtime route {name} List of {element}")
                     if !ir_is_handle(m, item_row) || held.runtime != handle_name -> return ir_fail_slot(&b, span, "runtime route {name} List of {element}")
                 }
-                &lowered.push(ir_load_word(&m, &b, slot, 16))
-                &lowered.push(ir_load_word(&m, &b, slot, 0))
+                &lowered.push(ir_list_data(&m, &b, slot))
+                &lowered.push(ir_list_length(&m, &b, slot))
             }
             .Handle(_) | .HandleMut(_) -> {
                 // The checked Dyn enum crosses as a runtime tree built for
@@ -3767,7 +3823,7 @@ fn ir_route_symbol(symbol: String) -> String Never! {
 IR_ROUTES_INLINE :: comptime { [String]{
     "std::collections::BinaryHeap::new", "std::collections::HashSet::new", "std::collections::BTreeSet::new", "std::collections::VecDeque::new", "std::collections::HashMap::new", "jet_deque_from",
     "jet_eq", "jet_map_from_keys_kernel", "jet_map_from_keys_int", "jet_map_from_keys_composite",
-    "jet_ordering_then", "jet_ordering_reverse", "jet_std::JetShared::new", "jet_std::JetCell::new", "jet_std::JetPool::new", "jet_std_os_atexit",
+    "jet_ordering_then", "jet_ordering_reverse", "jet_std::JetShared::new", "jet_std::JetCell::new", "jet_std::JetPool::new", "jet_std_os_atexit", "jet_std_math_sqrt",
     "jet_unicode_split_once", "jet_unicode_cut_last",
     "jet_list_get_opt", "jet_list_first", "jet_list_last", "jet_list_slice", "jet_list_index_of", "jet_list_sum",
     "jet_list_sum_fixed_f64", "jet_list_product", "jet_list_contains", "jet_list_equal", "jet_list_replace",

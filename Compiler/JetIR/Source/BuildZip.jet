@@ -182,7 +182,7 @@ fn ir_unzip(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, receiver
     columns := [Int]{}
     element_rows := [Int]{}
     loop field in columns_shape {
-        element :: ir_zip_list_element(field.ty) ?? return ir_fail_slot(&b, span, "builtin Unzip column {field.name} of {ir_type_name(field.ty)}")
+        element :: ir_sequence_element(field.ty) ?? return ir_fail_slot(&b, span, "builtin Unzip column {field.name} of {ir_type_name(field.ty)}")
         column_row :: ir_value_type(&m, p, field.ty) ?? return ir_type_fail(&b, span, field.ty)
         element_row :: ir_value_type(&m, p, element) ?? return ir_type_fail(&b, span, element)
         &columns.push(ir_list_from(&m, p, &b, column_row, element_row, [Int]{}))
@@ -213,15 +213,8 @@ fn ir_unzip(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, receiver
 
 // A zip input's element: a List's, a fixed List's or an Iter's.
 fn ir_zip_element(ty: Type) -> Type? Never! {
-    if ir_zip_list_element(ty) == .Val(element) -> return Val(element)
+    if ir_sequence_element(ty) == .Val(element) -> return Val(element)
     ir_iter_element(ty)
-}
-
-fn ir_zip_list_element(ty: Type) -> Type? Never! {
-    if ir_untag(ty) == {
-        .List(element) | .FixedList(element, _) -> Val(element.copy())
-        else -> None
-    }
 }
 
 fn ir_zip_tuple_field(ty: Type, name: String) -> Type? Never! {
