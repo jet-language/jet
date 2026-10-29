@@ -1644,25 +1644,6 @@ const JET_WEBGPU_SUM_SHADER = `struct Params { len: u32, rows: u32, inner: u32, 
   for (var i: u32 = 0u; i < p.len; i = i + 1u) { total = total + a[i]; } out[0] = total;
 }`;
 
-const JET_WEBGPU_MSE_SHADER = `struct Params { len: u32, rows: u32, inner: u32, cols: u32, scalar: u32 };
-@group(0) @binding(0) var<storage, read> a: array<f32>;
-@group(0) @binding(1) var<storage, read> b: array<f32>;
-@group(0) @binding(2) var<storage, read_write> out: array<f32>;
-@group(0) @binding(3) var<uniform> p: Params;
-@compute @workgroup_size(1) fn main() { var total: f32 = 0.0;
-  for (var i: u32 = 0u; i < p.len; i = i + 1u) { let d = a[i] - b[i]; total = total + d * d; }
-  out[0] = total / f32(p.len);
-}`;
-
-const JET_WEBGPU_SGD_SHADER = `struct Params { len: u32, rows: u32, inner: u32, cols: u32, scalar: u32 };
-@group(0) @binding(0) var<storage, read> a: array<f32>;
-@group(0) @binding(1) var<storage, read> b: array<f32>;
-@group(0) @binding(2) var<storage, read_write> out: array<f32>;
-@group(0) @binding(3) var<uniform> p: Params;
-@compute @workgroup_size(64) fn main(@builtin(global_invocation_id) id: vec3<u32>) {
-  let i = id.x; if (i >= p.len) { return; } out[i] = a[i] - bitcast<f32>(p.scalar) * b[i];
-}`;
-
 function jet_compute_web_f32_values(values, label) {
   const out = Float32Array.from(values);
   if (!Array.from(out).every(Number.isFinite)) throw new Error(`${label} exceeds finite F32 precision`);
@@ -1820,50 +1801,6 @@ async function jet_compute_web_sum(tensor) {
   return jet_compute_web_tensor([1], [sum], "cpu", tensor.profile, "policy=explicit;selected=cpu;ability=cpu-oracle");
 }
 
-async function jet_compute_web_mse(left, right) {
-  jet_compute_web_same_device(left, right, "mse_loss");
-  if (left.shape.length !== right.shape.length || left.shape.some((v, i) => v !== right.shape[i])) throw new Error("mse_loss requires matching shapes");
-  const length = jet_compute_web_numel(left.shape);
-  if (!length) throw new Error("mse_loss requires non-empty tensors");
-  if (left.device === "webgpu") {
-    const output = await jet_compute_webgpu_dispatch(JET_WEBGPU_MSE_SHADER, "mse", [await jet_compute_web_buffer(left), await jet_compute_web_buffer(right)], [length, 0, 0, 0, 0], 1);
-    const result = jet_compute_web_tensor([1], null, "webgpu", JET_WEBGPU_PROFILE, "algorithm=webgpu-mse;arithmetic=f32;reduction=ordered");
-    result.buffer = output;
-    return result;
-  }
-  const a = await jet_compute_web_values(left); const b = await jet_compute_web_values(right);
-  let total = 0;
-  for (let i = 0; i < length; i += 1) {
-    const difference = left.profile === JET_WEBGPU_PROFILE
-      ? Math.fround(Math.fround(a[i]) - Math.fround(b[i]))
-      : a[i] - b[i];
-    const next = left.profile === JET_WEBGPU_PROFILE
-      ? Math.fround(Math.fround(total) + Math.fround(difference * difference))
-      : total + difference * difference;
-    total = next;
-  }
-  return jet_compute_web_tensor([1], [total / length], "cpu", left.profile, "policy=explicit;selected=cpu;ability=cpu-oracle");
-}
-
-async function jet_compute_web_sgd(parameter, gradient, rate) {
-  jet_compute_web_same_device(parameter, gradient, "sgd_step");
-  const scalar = jet_compute_web_float(rate, "sgd_step learning rate");
-  if (!Number.isFinite(scalar) || scalar < 0) throw new Error("sgd_step learning rate must be finite and non-negative");
-  if (parameter.shape.length !== gradient.shape.length || parameter.shape.some((v, i) => v !== gradient.shape[i])) throw new Error("sgd_step requires matching shapes");
-  if (parameter.device === "webgpu") {
-    const bits = new ArrayBuffer(4); new DataView(bits).setFloat32(0, scalar, true);
-    const output = await jet_compute_webgpu_dispatch(JET_WEBGPU_SGD_SHADER, "sgd", [await jet_compute_web_buffer(parameter), await jet_compute_web_buffer(gradient)], [jet_compute_web_numel(parameter.shape), 0, 0, 0, new DataView(bits).getUint32(0, true)], jet_compute_web_numel(parameter.shape));
-    const result = jet_compute_web_tensor(parameter.shape, null, "webgpu", JET_WEBGPU_PROFILE, "algorithm=webgpu-sgd;arithmetic=f32");
-    result.buffer = output;
-    return result;
-  }
-  const a = await jet_compute_web_values(parameter); const b = await jet_compute_web_values(gradient);
-  const output = a.map((value, i) => parameter.profile === JET_WEBGPU_PROFILE
-    ? Math.fround(Math.fround(value) - Math.fround(Math.fround(scalar) * Math.fround(b[i])))
-    : value - scalar * b[i]);
-  return jet_compute_web_tensor(parameter.shape, output, "cpu", parameter.profile, "policy=explicit;selected=cpu;ability=cpu-oracle");
-}
-
 async function jet_compute_web_set(tensor, indices, value) {
   const values = await jet_compute_web_values(tensor);
   const coords = Array.from(indices, (index) => jet_compute_web_num(index, "Tensor index"));
@@ -1916,8 +1853,6 @@ async function jet_compute_web_call(method, args) {
       case "on_device": return jet_compute_web_ok(await jet_compute_web_upload(args[0], args[1]));
       case "transfer": return jet_compute_web_ok(await jet_compute_web_transfer(args[0], args[1]));
       case "sum_axis": { const axis = jet_compute_web_num(args[1], "reduction axis"); if (args[0].shape.length !== 1 || axis !== 0) throw new Error("WebGPU sum_axis currently supports ranked vector reduction only"); return jet_compute_web_ok(await jet_compute_web_sum(args[0])); }
-      case "mse_loss": return jet_compute_web_ok(await jet_compute_web_mse(args[0], args[1]));
-      case "sgd_step": return jet_compute_web_ok(await jet_compute_web_sgd(args[0], args[1], args[2]));
       case "stream_new": return { device: "cpu", profile: JET_WEBGPU_CPU_PROFILE, id: "cpu-stream" };
       case "stream_new_on": { const device = args[0]; if (device.kind !== "cpu" && device.kind !== "webgpu") throw new Error(`${device.kind} stream is unavailable in the browser WebGPU provider`); if (device.kind === "webgpu") await jet_compute_webgpu_device(); return jet_compute_web_ok({ device: device.kind, profile: device.profile, id: `${device.kind}-stream` }); }
       case "stream_sync": if (args[0].device === "webgpu") await (await jet_compute_webgpu_device()).queue.onSubmittedWorkDone(); return jet_compute_web_ok(undefined);

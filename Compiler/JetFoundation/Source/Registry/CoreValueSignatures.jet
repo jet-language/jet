@@ -106,7 +106,7 @@ fn core_value_fixed_signature(module_name: String, member: String) -> CoreTypedC
                 core_sig_positional(Type.Int, read), core_sig_positional(Type.Float, read),
             }, Val(core_sig_result(tensor, compute_error))))
         }
-        if core_sig_one_of(member, [String]{"add", "mul", "matmul", "sub", "div", "maximum", "minimum", "solve", "mse_loss", "sparse_mv", "matmul_f32_tile"}) {
+        if core_sig_one_of(member, [String]{"add", "mul", "matmul", "sub", "div", "maximum", "minimum", "solve", "sparse_mv", "matmul_f32_tile"}) {
             if core_sig_one_of(member, [String]{"sparse_mv"}) {
                 return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
                     core_sig_positional(sparse_tensor, read), core_sig_positional(tensor, read),
@@ -227,12 +227,6 @@ fn core_value_fixed_signature(module_name: String, member: String) -> CoreTypedC
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
                 core_sig_positional(tensor, read),
             }, Val(core_sig_result(Type.String, compute_error))))
-        }
-        if member == "sgd_step" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(tensor, read), core_sig_positional(tensor, read),
-                core_sig_positional(Type.Float, read),
-            }, Val(core_sig_result(tensor, compute_error))))
         }
         if member == "deserialize" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{

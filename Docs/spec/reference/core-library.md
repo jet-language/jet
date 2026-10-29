@@ -4298,8 +4298,6 @@ those bounds and the enclosing source location, rather than a copied slice.
 | `abs`, `negate`, `exp`, `log`, `sqrt` | tensor | Apply checked elementwise math. |
 | `matmul(a, b) -> Tensor !ComputeError` / `matmul_f32_tile(a, b) -> Tensor !ComputeError` | tensor | Multiply compatible matrices under a profile. |
 | `sum_axis(tensor, axis: Int) -> Tensor !ComputeError` | tensor | Reduce one axis. |
-| `mse_loss(pred, target) -> Tensor !ComputeError` | tensor | Compute a one-element mean-squared-error tensor. |
-| `sgd_step(weights, grad, lr: Float) -> Tensor !ComputeError` | tensor | Apply a value-based SGD step. |
 | `value_and_gradient(pred, target) -> VJPRun !ComputeError`, `vjp(pred, target) -> VJPRun !ComputeError` | result | Evaluate the fixed MSE value and gradient. |
 | `gradient(pred, target) -> Tensor !ComputeError`, `jvp(pred, target, tangent) -> Tensor !ComputeError` | tensor | Return gradient or tangent result for that contract. |
 | `det(tensor) -> Float !ComputeError`, `inv(tensor) -> Tensor !ComputeError`, `solve(a, b) -> Tensor !ComputeError` | linear algebra | Perform checked square-matrix operations. |
