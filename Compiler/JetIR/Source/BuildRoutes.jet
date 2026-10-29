@@ -596,7 +596,7 @@ fn ir_allocator_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rece
     ir_release(&m, &b, handle)
     if !fallible {
         ir_store_at(&m, p, &b, reserved, 0, owned)
-        view :: ir_load_at(&m, &b, reserved, 0, view_row)
+        view :: ir_allocator_view(&m, &b, reserved, view_row)
         if view >= 0 -> b.fresh[view] = false
         return view
     }
@@ -621,7 +621,7 @@ fn ir_allocator_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rece
     b.fresh[failed] = false
     ir_else(&b.f, b.line)
     ir_store_at(&m, p, &b, reserved, 0, owned)
-    view :: ir_load_at(&m, &b, reserved, 0, view_row)
+    view :: ir_allocator_view(&m, &b, reserved, view_row)
     if view >= 0 -> b.fresh[view] = false
     accepted :: ir_result_box(&m, p, &b, ty, true, view)
     ir_emit(&b.f, IROp.Copy, result, accepted, -1, -1, b.line)
@@ -3849,26 +3849,6 @@ fn ir_route_result(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, ar
     ir_end(&b.f, b.line)
     b.fresh[boxed] = true
     boxed
-}
-
-// `core.mem.volatile_read<T>(pointer)` / `core.mem.volatile_write<T>(pointer,
-// value)`: one load or store of T at the pointer. The written value moves
-// into the pointee.
-fn ir_core_volatile(m: &IRModule, p: IRProgram, b: &IRBuilder, member: String, args: [Int], type_args: [Type], span: Span) -> Int Never! {
-    writes :: member == "volatile_write"
-    arity :: if writes -> 2 else -> 1
-    if type_args.len() != 1 || args.len() != arity -> return ir_fail_slot(&b, span, "core.mem.{member} without its checked element type and arguments")
-    element_ty :: type_args[0].copy()
-    row :: ir_value_type(&m, p, element_ty) ?? return ir_type_fail(&b, span, element_ty)
-    pointer :: ir_expr(&m, p, &b, args[0])
-    if ir_failed(b) || pointer < 0 -> return -1
-    if !writes -> return ir_load_at(&m, &b, pointer, 0, row)
-    value := ir_expr(&m, p, &b, args[1])
-    if ir_failed(b) -> return -1
-    drops :: m.types[row].drop != ""
-    if value >= 0 && drops && !b.fresh[value] -> value = ir_clone(&m, &b, value, row)
-    ir_store_at(&m, p, &b, pointer, 0, value)
-    return -1
 }
 
 // A Core call: its checked arguments to the record's runtime route.

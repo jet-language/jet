@@ -949,7 +949,8 @@ fn jet_cli_native_level(options: BuildOptions) -> Int Never! {
 // the modules of the built package (the compile's package identity). Every
 // other module, a dependency's or Core's, keeps the fatal check its writer
 // built it with. `dead_code: keep` builds every function of those modules;
-// `backtrace` goes to the runtime.
+// `backtrace` goes to the runtime, and so does a counting `allocator:`
+// policy of the entry package with its cap.
 fn jet_cli_ir_checks(result: JetDriverCompileResult, inputs: JetDriverLoweringInputs, options: BuildOptions) -> IRChecks Never! {
     bounds :: build_options_value(options, "bounds")
     dead_code :: build_options_value(options, "dead_code")
@@ -959,7 +960,9 @@ fn jet_cli_ir_checks(result: JetDriverCompileResult, inputs: JetDriverLoweringIn
             if graph_module.package_identity == result.package_identity -> modules[graph_module.module_identity.copy()] = true
         }
     }
-    ir_checks_of(bounds, build_options_value(options, "backtrace"), dead_code, modules)
+    checks := ir_checks_of(bounds, build_options_value(options, "backtrace"), dead_code, modules)
+    if result.allocator == .Counting(cap) -> checks.counting = Val(if cap == .Val(size) -> size.bytes else -> 0)
+    checks
 }
 
 // D-GATE-LAW1: a resolved build option value that removes a runtime check

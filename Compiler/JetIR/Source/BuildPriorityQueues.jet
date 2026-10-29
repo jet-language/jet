@@ -334,13 +334,15 @@ fn ir_float_total_key(m: &IRModule, a: &IRBuilder, address: Int) -> Int Never! {
     key
 }
 
-// `xs.sort()` / `xs.sort_desc()` on the List at `list` in place: the element
-// needs a native order.
+// `xs.sort()` / `xs.sort_desc()` on the List at `list` in place, or on a
+// write window over a list's range (a View header over the owner's storage):
+// the element needs a native order.
 fn ir_list_sort(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, elem_row: Int, descending: Bool, span: Span) -> Int Never! {
     list_row :: b.f.slot_type[list]
     list_ty :: m.types[list_row].ty
     is_list :: if ir_untag(list_ty) == {
         .List(_) -> true
+        .Apply(name, args) -> (name == "View" || name == "ViewMut") && args.len() == 1
         else -> false
     }
     if !is_list -> return ir_fail_slot(&b, span, "sort of {ir_type_name(list_ty)}")

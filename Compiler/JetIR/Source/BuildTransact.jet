@@ -18,8 +18,20 @@ use jet_foundation.[Span, SymbolID, BodyCallArg, BodyContextGuard, NodeKind, Bod
 // `shield` set and nothing else: an early exit leaves the session Shield.
 // A `#Context(deadline: …)` block is a frame with only `deadline`, the
 // two-word save area of the deadline it replaced (-1: none): an early exit
-// restores that deadline.
-struct IRTxFrame { handle: Int, stm: Int, snapshots: [IRTxSnapshot], loops: Int, shield: Bool, deadline: Int }
+// restores that deadline. An `#Unsafe` scope is a frame with only `sentry`,
+// the save area of the sentry gate it replaced, and a function taking raw
+// addresses one with only `sentry_frame`, its sentry stack frame
+// (BuildSentry.jet): an early exit leaves them.
+struct IRTxFrame {
+    handle: Int
+    stm: Int
+    snapshots: [IRTxSnapshot]
+    loops: Int
+    shield: Bool
+    deadline: Int
+    sentry: Int{-1}
+    sentry_frame: Int{-1}
+}
 
 // A saved value: `local` gets `saved` (of type `saved_ty`) back on an early
 // exit, through `restore` of its Rollback implementation `rollback` when it
@@ -337,16 +349,51 @@ fn ir_tx_unwind(m: &IRModule, p: IRProgram, b: &IRBuilder, loops: Int, span: Spa
                 ir_emit(&b.f, IROp.Drop, -1, frame.handle, -1, -1, b.line)
                 ir_emit(&b.f, IROp.Const, frame.handle, 0, -1, -1, b.line)
             }
-            if frame.shield {
-                _ :: ir_runtime(&m, &b, "jet_rt_session_shield_leave", [Int]{}, -1)
-            }
-            if frame.deadline >= 0 {
-                _ :: ir_runtime(&m, &b, "jet_ctx_pop_deadline", [Int]{frame.deadline}, -1)
-            }
+            ir_tx_leave_scopes(&m, &b, frame)
         }
         index -= 1
     }
     b.transactions = open
+}
+
+// The runtime scopes an early exit out of `frame` leaves: the session
+// Shield, the replaced deadline, the replaced sentry gate and the sentry
+// stack frame.
+fn ir_tx_leave_scopes(m: &IRModule, b: &IRBuilder, frame: IRTxFrame) Never! {
+    if frame.shield {
+        _ :: ir_runtime(&m, &b, "jet_rt_session_shield_leave", [Int]{}, -1)
+    }
+    if frame.deadline >= 0 {
+        _ :: ir_runtime(&m, &b, "jet_ctx_pop_deadline", [Int]{frame.deadline}, -1)
+    }
+    if frame.sentry >= 0 {
+        _ :: ir_runtime(&m, &b, "jet_rt_sentry_scope_leave", [Int]{frame.sentry}, -1)
+    }
+    if frame.sentry_frame >= 0 {
+        _ :: ir_runtime(&m, &b, "jet_rt_sentry_frame_leave", [Int]{frame.sentry_frame}, -1)
+    }
+}
+
+// Whether a frame opened at or above `base` holds state a caught stop
+// cannot leave in place (a handle, an Stm, snapshots, a Shield or a
+// deadline); sentry frames only need leaving (ir_tx_leave_sentries).
+fn ir_tx_frames_hold_state(frames: [IRTxFrame], base: Int) -> Bool Never! {
+    loop index in base..<frames.len() {
+        frame :: frames[index]
+        if frame.handle >= 0 || frame.stm >= 0 || frame.snapshots.len() > 0 || frame.shield || frame.deadline >= 0 -> return true
+    }
+    false
+}
+
+// A caught stop leaving the sentry frames opened at or above `base`,
+// innermost first.
+fn ir_tx_leave_sentries(m: &IRModule, b: &IRBuilder, base: Int) Never! {
+    frames :: b.transactions
+    index := frames.len() - 1
+    loop index >= base {
+        ir_tx_leave_scopes(&m, &b, frames[index])
+        index -= 1
+    }
 }
 
 // A return of `slot` (-1: nothing): the open contract scope's `post` clauses

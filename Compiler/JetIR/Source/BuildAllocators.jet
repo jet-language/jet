@@ -1,0 +1,49 @@
+use jet_foundation.[InternalTag, Span, TagMarker, TLocal, Type]
+
+// ---------------------------------------------------------------------------
+// Views of the core.mem allocators (Arena, Bump, Pool, Fixed; built by
+// ir_allocator_method). The view `alloc(v)` answers reads the value in the
+// storage the allocator reserved, and a variable bound to the view aliases
+// that storage (ir_bind_view).
+
+// The view of the value of type row `row` at `address`: a read of it there,
+// owned by the allocator, which remembers its storage (b.views).
+fn ir_allocator_view(m: &IRModule, b: &IRBuilder, address: Int, row: Int) -> Int Never! {
+    view :: ir_load_at(&m, &b, address, 0, row)
+    if view >= 0 -> b.views[view] = address
+    view
+}
+
+// A variable bound to an allocator view aliases the allocator's storage, as
+// a scalar write window aliases its place: a read loads the value there and
+// the variable owns nothing. False when `value` is no view.
+fn ir_bind_view(m: &IRModule, b: &IRBuilder, local: TLocal, value: Int) -> Bool Never! {
+    address :: b.views.get(value) ?? return false
+    symbol :: if local.symbol_id == .Val(id) -> id.key else -> ""
+    row :: b.f.slot_type[value]
+    if ir_kind_of(m, b, value) == .Aggregate {
+        &b.bindings.push(IRBinding{name: local.name, slot: value, symbol: symbol})
+    } else {
+        &b.bindings.push(IRBinding{name: local.name, slot: address, indirect: row, symbol: symbol})
+    }
+    true
+}
+
+// The storage address of allocator view `value` (a node of a view type): a
+// view variable's alias, or the storage a view temporary was read from.
+fn ir_view_address(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, span: Span) -> Int Never! {
+    if ir_body_node(p, b, value).kind == .Local(local) {
+        binding :: ir_lookup_local(b, local) ?? return ir_fail_slot(&b, span, "allocator view of unknown local {local.name}")
+        if binding.indirect >= 0 || ir_kind_of(m, b, binding.slot) == .Aggregate -> return binding.slot
+        return ir_fail_slot(&b, span, "allocator view {local.name} without its storage")
+    }
+    slot :: ir_expr(&m, p, &b, value)
+    if ir_failed(b) || slot < 0 -> return -1
+    b.views.get(slot) ?? ir_fail_slot(&b, span, "allocator view without its storage")
+}
+
+// Whether checked type `ty` is an allocator view.
+fn ir_allocator_view_type(ty: Type) -> Bool Never! {
+    if ty == .Tagged(marker, _) -> return marker == (TagMarker.Internal{internal_tag: InternalTag.AllocatorView})
+    false
+}

@@ -2489,6 +2489,7 @@ fn sema_expr_record_call_fact(environment: SemaScopeEnvironment, program: SemaPr
         facts: checked.facts,
         discarded: false,
         foreign_effect_root: foreign_effect_root,
+        unsafe_foreign_name: sema_expr_call_unsafe_foreign_name(program, callee, foreign_effect_root),
     })
     // Demand: a codec call requires the generated codec it reaches, and a
     // call of a demand-checked derived method requires its body.
@@ -2516,6 +2517,19 @@ fn sema_expr_call_foreign_effect_root(program: SemaProgramTables, callee: Symbol
     if program.registration_graph == .Val(graph) {
         abi :: sema_registration_callable_abi(graph, symbol) ?? return None
         if abi.is_extern -> return abi.foreign_effect_root
+    }
+    None
+}
+
+// The name of an `#Unsafe` inline foreign callee (`#[Unsafe("…"), FFI(c)]`),
+// whose every call needs an audited region (E3103); None for any other
+// callee.
+fn sema_expr_call_unsafe_foreign_name(program: SemaProgramTables, callee: SymbolID?, foreign_effect_root: String?) -> String? {
+    if foreign_effect_root == None -> return None
+    symbol :: callee ?? return None
+    if program.registration_graph == .Val(graph) {
+        declaration :: sema_registration_callable_declaration(graph, symbol) ?? return None
+        if declaration.inline_foreign != None && declaration.is_unsafe -> return Val(declaration.name)
     }
     None
 }

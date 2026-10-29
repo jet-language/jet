@@ -65,10 +65,11 @@ fn ir_copy_fixup_body(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: I
         return
     }
     if ir_counted_entry(&m, p, row) != None {
-        // A frozen buffer (capacity 0: static, window, empty) has no owners.
+        // A frozen buffer (capacity 0: static, read window, empty) and a write
+        // window (capacity -1) have no owners.
         capacity :: ir_load_word(&m, &b, at, 8)
         zero :: ir_word_const(&m, &b, 0)
-        counted :: ir_bool_op(&m, &b, IROp.Ne, capacity, zero)
+        counted :: ir_bool_op(&m, &b, IROp.Gt, capacity, zero)
         ir_open_if(&b.f, counted, b.line)
         data :: ir_load_word(&m, &b, at, 16)
         _ :: ir_runtime(&m, &b, "jet_rt_block_retain", [Int]{data}, -1)
@@ -150,8 +151,9 @@ fn ir_wrapper_drop(m: &IRModule, b: &IRBuilder, at: Int, member: IRMember) Never
 // Counted buffers: a List, Map, Set or PriorityQueue header owns its buffer
 // through the runtime's count word (Refcount.jet). A copy retains the buffer,
 // a write first makes it unique, and the last owner's drop drops the elements
-// and frees it. A buffer of capacity 0 is frozen (a static, a window, an
-// empty header) and never counted or freed.
+// and frees it. A buffer of capacity 0 is frozen (a static, a read window, an
+// empty header) and one of capacity -1 is a write window over an owner's
+// range; neither is counted or freed.
 
 // The element row of a type row whose value is a counted buffer header,
 // None for any other (a View shares its owner's buffer uncounted).
@@ -524,7 +526,7 @@ fn ir_drop_glue(m: &IRModule, p: IRProgram, row: Int) Never! {
     } else if ir_counted_entry(&m, p, row) == .Val(entry) {
         capacity :: ir_load_word(&m, &a, at, 8)
         zero :: ir_word_const(&m, &a, 0)
-        counted :: ir_bool_op(&m, &a, IROp.Ne, capacity, zero)
+        counted :: ir_bool_op(&m, &a, IROp.Gt, capacity, zero)
         ir_open_if(&a.f, counted, a.line)
         length :: ir_load_word(&m, &a, at, 0)
         data :: ir_load_word(&m, &a, at, 16)
@@ -579,7 +581,7 @@ fn ir_release_buffer(m: &IRModule, b: &IRBuilder, entry: Int, data: Int, length:
 // last owner frees it without dropping them (they live on in the new one).
 fn ir_release_moved_buffer(m: &IRModule, b: &IRBuilder, data: Int, capacity: Int, stride: Int) Never! {
     zero :: ir_word_const(&m, &b, 0)
-    counted :: ir_bool_op(&m, &b, IROp.Ne, capacity, zero)
+    counted :: ir_bool_op(&m, &b, IROp.Gt, capacity, zero)
     ir_open_if(&b.f, counted, b.line)
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
     last :: ir_runtime(&m, &b, "jet_rt_block_release", [Int]{data}, bool_row)
@@ -604,9 +606,10 @@ fn ir_make_unique(m: &IRModule, p: IRProgram, b: &IRBuilder, header: Int) Never!
 }
 
 // The IR function making the counted buffer of its header parameter (type row
-// `row`) unique: a sole owner, or an empty frozen header, writes in place;
-// any other buffer is replaced by a copy (capacity kept, or the length when
-// frozen) whose elements gain an owner, and the old buffer loses one.
+// `row`) unique: a sole owner, an empty frozen header, or a write window over
+// an owner's range (capacity -1, BuildExpr.jet ir_write_window) writes in
+// place; any other buffer is replaced by a copy (capacity kept, or the length
+// when frozen) whose elements gain an owner, and the old buffer loses one.
 fn ir_unique_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int Never! {
     helper_key :: "#unique<{ir_row_key(m, row)}>"
     known :: name_rows_value(m.function_rows, helper_key) ?? -1
@@ -622,6 +625,10 @@ fn ir_unique_helper(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int 
     data :: ir_load_word(&m, &a, header, 16)
     zero :: ir_word_const(&m, &a, 0)
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    window :: ir_bool_op(&m, &a, IROp.Lt, capacity, zero)
+    ir_open_if(&a.f, window, a.line)
+    ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
+    ir_end(&a.f, a.line)
     counted :: ir_bool_op(&m, &a, IROp.Ne, capacity, zero)
     ir_open_if(&a.f, counted, a.line)
     sole :: ir_runtime(&m, &a, "jet_rt_block_unique", [Int]{data}, bool_row)

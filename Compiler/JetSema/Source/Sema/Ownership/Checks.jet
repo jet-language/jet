@@ -1652,8 +1652,14 @@ fn sema_ownership_record_binding_view(state: &SemaOwnershipState, binding: Bindi
     }
     valid := true
     loop place in places {
+        parent :: sema_ownership_reborrow_parent(state, producer.source, place, producer.access, scopes)
         loan_seq := sema_ownership_matching_loan_seq(&state, place, producer.span)
-        if !sema_ownership_record_view_fact_inner(&state, binding.name, binding.name_span, place, [String]{}, producer.access, scopes, loan_seq) -> valid = false
+        if !sema_ownership_record_view_fact_inner(&state, binding.name, binding.name_span, place, [String]{}, producer.access, scopes, loan_seq) {
+            valid = false
+            next
+        }
+        recorded :: state.views.len() - 1
+        state.views[recorded].reborrow_parent = parent
     }
     valid
 }
@@ -2063,18 +2069,23 @@ fn sema_ownership_view_open_deferred(state: SemaOwnershipState, span: Span) -> B
 
 // Rust `record_view_with_exemptions`: a new view conflicts with a live view
 // over an overlapping place when either of them writes; the binding being
-// recorded and its own earlier facts for the same slot are alternatives.
-fn sema_ownership_check_binding_view_conflicts(state: &SemaOwnershipState, carrier: String, carrier_span: Span, places: [SemaOwnershipPlace], access: AccessConvention, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
-    key :: sema_ownership_carrier_key(scopes, carrier, carrier_span) ?? return
+// recorded and its own earlier facts for the same slot are alternatives, and
+// a window opened through a live view reborrows that view's lineage. False
+// when the open conflicts (its E0212 is pushed).
+fn sema_ownership_check_binding_view_conflicts(state: &SemaOwnershipState, carrier: String, carrier_span: Span, source: Expr, places: [SemaOwnershipPlace], access: AccessConvention, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    key :: sema_ownership_carrier_key(scopes, carrier, carrier_span) ?? return true
     loop place in places {
+        parent :: sema_ownership_reborrow_parent(state, source, place, access, scopes)
         loop fact in state.views {
             if !fact.active || fact.invalidated || fact.carrier_key == key -> next
+            if sema_ownership_is_reborrow_lineage(state, fact, parent) -> next
             if (fact.access == AccessConvention.Write || access == AccessConvention.Write) && sema_ownership_places_overlap(fact.source, place) {
                 &diagnostics.push(sema_error("E0212", carrier_span, "`{sema_ownership_place_name(place)}` already has a live view that conflicts with `{carrier}`", "many read views may overlap, but an exclusive mutable view cannot overlap any other live view", "finish using the earlier view before creating this one, or make an owned copy"))
-                return
+                return false
             }
         }
     }
+    true
 }
 
 // The `&place` elements of a list literal whose element type is `ViewMut`:
@@ -2544,6 +2555,30 @@ fn sema_ownership_view_descends_from(state: SemaOwnershipState, child: SemaOwner
             }
         }
         parent = next_parent
+    }
+    false
+}
+
+// The live view a window opened through a view carrier reborrows:
+// `&edit[a..<b]` over the write view `edit` takes over edit's loan, and
+// `view[a..<b]` narrows the read view `view`. -1 when `source` does not step
+// through a live view over `place` that grants `access`.
+fn sema_ownership_reborrow_parent(state: SemaOwnershipState, source: Expr, place: SemaOwnershipPlace, access: AccessConvention, scopes: SemaScopeTable) -> Int Never! {
+    parent := -1
+    loop fact in state.views {
+        if !fact.active || fact.invalidated -> next
+        if access == AccessConvention.Write && fact.access != AccessConvention.Write -> next
+        if sema_ownership_view_fact_matches_expr(fact, source, scopes) && sema_ownership_place_extends(fact.source, place) -> parent = fact.seq
+    }
+    parent
+}
+
+// Whether `fact` is the reborrow parent `parent` or one of its ancestors.
+fn sema_ownership_is_reborrow_lineage(state: SemaOwnershipState, fact: SemaOwnershipViewFact, parent: Int) -> Bool Never! {
+    if parent < 0 -> return false
+    if fact.seq == parent -> return true
+    loop candidate in state.views {
+        if candidate.seq == parent && candidate.active && !candidate.invalidated -> return sema_ownership_view_descends_from(state, candidate, fact.seq)
     }
     false
 }

@@ -331,7 +331,18 @@ fn sentry_checked_fault(fault: I64, start: I64, alignment: I64) -> I64 {
 #Export(c) fn jet_rt_sentry_read(start: I64, bytes: I64, alignment: I64) -> I64 {
     fault :: jet_rt_sentry_check(start, bytes, alignment, I64{1})
     if (fault != I64{0}) {
-        sentry_stop(fault, start, alignment, I64{0}, false)
+        sentry_stop(fault, start, alignment, I64{0}, false, services_msg_sentry_read())
+        return I64{0}
+    }
+    start
+}
+// A named raw access (`volatile_read`, `volatile_write`): the strict check
+// of jet_rt_sentry_read, whose fault report names the operation, the static
+// text at `operation` (`operation_len` bytes).
+#Export(c) fn jet_rt_sentry_access(start: I64, bytes: I64, alignment: I64, operation: I64, operation_len: I64) -> I64 {
+    fault :: jet_rt_sentry_check(start, bytes, alignment, I64{1})
+    if (fault != I64{0}) {
+        sentry_stop(fault, start, alignment, I64{0}, false, rt_text_copy(operation, operation_len))
         return I64{0}
     }
     start
@@ -521,8 +532,9 @@ fn sentry_report(fault: I64, operation: I64, obligation: I64, component: I64, fe
     report
 }
 // A sentry stop records the raw fault detail (never the
-// rendered report) on every active expectation frame before it stops.
-fn sentry_stop(fault: I64, start: I64, alignment: I64, component: I64, fenced: Bool) {
+// rendered report) on every active expectation frame before it stops. The
+// report names `operation`, an owned text.
+fn sentry_stop(fault: I64, start: I64, alignment: I64, component: I64, fenced: Bool, operation: I64) {
     detail :: sentry_detail(fault, start, alignment)
     code :: if {
         (sentry_code(fault) == I64{2}) -> TEST_SCOPE_R0802
@@ -533,7 +545,6 @@ fn sentry_stop(fault: I64, start: I64, alignment: I64, component: I64, fenced: B
     jet_rt_string_drop(detail)
     domain :: jet_rt_stop_domain()
     if (domain != I64{0}) -> _ := scheduler_panic_check()
-    operation :: services_msg_sentry_read()
     obligation :: services_msg_sentry_valid_ptr()
     gate :: sentry_gate_name()
     report :: sentry_report(fault, operation, obligation, component, fenced, gate)

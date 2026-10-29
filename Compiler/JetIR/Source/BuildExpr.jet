@@ -46,6 +46,8 @@ fn ir_build_function(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody
     captured :: ir_mutable_captures(p, b, function.body)
     b.cells = ir_window_cells(&m, p, b, captured)
     ir_cell_params(&m, &b)
+    ir_sentry_frame(&m, p, &b)
+    if ir_failed(b) -> return
     ir_stmts(&m, p, &b, function.body)
     if ir_failed(b) || b.failures.len() > 0 -> return
     ir_return_fallthrough(&m, p, &b)
@@ -416,6 +418,20 @@ fn ir_stmt_body(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never
             right :: ir_expr(&m, p, &b, value)
             if ir_failed(b) -> return
             current :: ir_read_binding(&m, &b, binding)
+            // `s += text` on a String the variable still owns appends in
+            // place: jet_rt_string_append consumes the old value, so building
+            // a text by repeated `+=` is linear, not a copy per step.
+            if op == .Val(binary) {
+                if binary == .Add && binding.indirect < 0 && !binding.write && ir_kind_of(m, b, current) == .String && ir_ty(p, b, value) == Type.String && ir_owned_binding(b, binding.slot) && ir_live_flag(b, binding.slot) < 0 {
+                    row :: b.f.slot_type[binding.slot]
+                    appended :: ir_runtime(&m, &b, "jet_rt_string_append", [Int]{current, right}, row)
+                    ir_release(&m, &b, right)
+                    if ir_failed(b) -> return
+                    ir_store(&m, p, &b, binding.slot, appended)
+                    if binding.owned -> ir_reown(&b, binding)
+                    return
+                }
+            }
             result := right
             if op == .Val(binary) {
                 left_ty :: m.types[b.f.slot_type[current]].ty
@@ -623,9 +639,12 @@ fn ir_stmt_body(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never
             if ir_iter_element(ir_ty(p, b, collection)) != None -> return ir_lazy_walk(&m, p, &b, label, variable, variable_two, collection, body, span)
             ir_list_walk(&m, p, &b, label, variable, variable_two, collection, body, span)
         }
-        // Scopes whose markers lower to nothing outside a sentry build: their
-        // body runs as a plain scope.
-        .DebugOnly(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Live(body, _) -> ir_stmts(&m, p, &b, body)
+        // Scopes whose markers lower to nothing: their body runs as a plain
+        // scope.
+        .DebugOnly(body, _) | .Live(body, _) -> ir_stmts(&m, p, &b, body)
+        .Unsafe(gate, body) -> ir_unsafe_scope(&m, p, &b, gate, body)
+        .UnsafeBlock(gate, body, _) -> ir_unsafe_scope(&m, p, &b, gate, body)
+        .SentryPolicy(enabled, body, _) -> ir_sentry_policy(&m, p, &b, enabled, body)
         // An `#Impure` body is a plain scope whose build host calls may
         // touch the ambient world (ir_host_method).
         .Impure(body, _) -> {
@@ -694,6 +713,7 @@ fn ir_refutable_bind(m: &IRModule, p: IRProgram, b: &IRBuilder, pattern: BodyPat
 // cell from here on.
 fn ir_bind_local(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, value: Int, span: Span) Never! {
     _ :: ir_binder_holds(&m, p, &b, local, value, span)
+    if ir_bind_view(&m, &b, local, value) -> return
     ty :: b.f.slot_type[value]
     slot :: ir_new_slot(&b, ty, IRSlotKind.Local, ir_intern_name(&m, local.name))
     ir_store(&m, p, &b, slot, value)
@@ -1718,7 +1738,8 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
 
 // `*x`: the address of variable `x`'s value. An aggregate variable is its
 // storage; any other lives in a frame cell from its declaration
-// (ir_mutable_captures), so reads and writes of `x` and of `p.*` meet.
+// (ir_mutable_captures), so reads and writes of `x` and of `p.*` meet. The
+// storage joins the function's sentry frame (ir_sentry_register).
 fn ir_raw_of(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, span: Span) -> Int Never! {
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     if ir_body_node(p, b, value).kind == .Local(local) {
@@ -1726,6 +1747,8 @@ fn ir_raw_of(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, sp
         if binding.indirect < 0 && ir_kind_of(m, b, binding.slot) != .Aggregate -> return ir_fail_slot(&b, span, "raw address of local {local.name} outside a frame cell")
         pointer :: ir_temp(&m, &b, row)
         ir_emit(&b.f, IROp.Offset, pointer, binding.slot, 0, -1, b.line)
+        value_row :: if binding.indirect >= 0 -> binding.indirect else -> b.f.slot_type[binding.slot]
+        ir_sentry_register(&m, p, &b, pointer, value_row)
         return pointer
     }
     ir_fail_slot(&b, span, "raw address of a temporary")
@@ -1748,18 +1771,25 @@ fn ir_option_unwrap(m: &IRModule, p: IRProgram, b: &IRBuilder, inner: Int, span:
     owned
 }
 
-// `p.*`: the value at raw pointer `p`, read in place; the pointee's owner
-// keeps it, so a consumer takes its own copy.
+// `p.*`: the value at raw pointer `p`, read in place once the sentry passes
+// it; the pointee's owner keeps it, so a consumer takes its own copy.
 fn ir_raw_deref(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, span: Span) -> Int Never! {
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    if ir_allocator_view_type(ir_ty(p, b, value)) {
+        storage :: ir_view_address(&m, p, &b, value, span)
+        if ir_failed(b) || storage < 0 -> return -1
+        return ir_load_at(&m, &b, storage, 0, row)
+    }
     pointer :: ir_expr(&m, p, &b, value)
     if ir_failed(b) || pointer < 0 -> return -1
-    ir_load_at(&m, &b, pointer, 0, row)
+    address :: ir_sentry_access(&m, p, &b, pointer, row, "")
+    ir_load_at(&m, &b, address, 0, row)
 }
 
 // `mem.address_of(place)`: the numeric address of the place's storage. A
 // pointee `p.*` is the pointer itself; any other place is its write address
-// (ir_place_address), which must be the storage, never a scratch cell.
+// (ir_place_address), which must be the storage, never a scratch cell, and
+// joins the function's sentry frame (ir_sentry_register).
 fn ir_raw_address_of(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, place: BodyPlace, span: Span) -> Int Never! {
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     value :: if place == {
@@ -1768,11 +1798,16 @@ fn ir_raw_address_of(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, place:
     }
     address := -1
     if ir_body_node(p, b, value).kind == .Deref(pointer) {
-        address = ir_expr(&m, p, &b, pointer)
+        address = if ir_allocator_view_type(ir_ty(p, b, pointer)) -> ir_view_address(&m, p, &b, pointer, span) else -> ir_expr(&m, p, &b, pointer)
     } else {
         backs := [IRWriteBack]{}
         address = ir_place_address(&m, p, &b, value, &backs, span)
         if backs.len() > 0 -> return ir_fail_slot(&b, span, "raw address of a scalar local outside a frame cell")
+        if !ir_failed(b) && address >= 0 {
+            place_ty :: ir_ty(p, b, value)
+            place_row :: ir_value_type(&m, p, place_ty) ?? return ir_type_fail(&b, span, place_ty)
+            ir_sentry_register(&m, p, &b, address, place_row)
+        }
     }
     if ir_failed(b) || address < 0 -> return -1
     result :: ir_temp(&m, &b, row)
@@ -2940,6 +2975,15 @@ fn ir_place_address(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, backs
         if p.constant_defs[at].is_storage && p.constant_defs[at].init == None {
             definition :: p.constant_defs[at]
             return ir_storage_address(&m, p, &b, definition, span)
+        }
+    }
+    // `f(&xs[a..b])`: the write window over the list's range, a list of
+    // fixed length the callee edits in place.
+    if ir_body_node(p, b, place).kind == .Slice(base, start, end, range, location) {
+        list_ty :: ir_ty(p, b, base)
+        if ir_untag(list_ty) == .List(_) {
+            list_row :: ir_value_type(&m, p, list_ty) ?? return ir_type_fail(&b, span, list_ty)
+            return ir_write_window(&m, p, &b, list_row, base, start, end, range, location, span)
         }
     }
     // `f(make())` into a write parameter: the call's fresh aggregate result is
@@ -4557,6 +4601,30 @@ fn ir_slice(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: Int, star
     owned
 }
 
+// A write window over `base[start..end]` of type row `row`: the owner's list
+// is made its own first (ir_make_unique), so the window's writes reach the
+// owner's storage in place and no other holder sees them. Its capacity -1
+// marks the window (BuildOwn.jet): a callee's writes through it skip the
+// copy-on-write, and it is never counted or freed. The window's fixed
+// length keeps a callee from growing it.
+fn ir_write_window(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, base: Int, start: Int, end: Int, range: Int?, location: TPanicLoc, span: Span) -> Int Never! {
+    backs := [IRWriteBack]{}
+    list :: ir_place_address(&m, p, &b, base, &backs, span)
+    if ir_failed(b) || list < 0 -> return -1
+    base_ty :: ir_ty(p, b, base)
+    if backs.len() > 0 || ir_kind_of(m, b, list) != .Aggregate -> return ir_fail_slot(&b, span, "write window into {ir_type_name(base_ty)}")
+    ir_make_unique(&m, p, &b, list)
+    element_row :: ir_list_element(&m, p, b, list) ?? return ir_fail_slot(&b, span, "write window into {ir_type_name(base_ty)}")
+    bounds :: ir_slice_bounds(&m, p, &b, start, end, range, false, span)
+    if ir_failed(b) || bounds.len() != 3 -> return -1
+    if location.line > 0 -> b.line = location.line
+    window :: ir_list_window(&m, &b, row, list, element_row, bounds, location.line, true)
+    if ir_failed(b) || window < 0 -> return -1
+    unowned :: ir_word_const(&m, &b, -1)
+    ir_emit(&b.f, IROp.Store, -1, window, 8, unowned, b.line)
+    window
+}
+
 // The window header of a List or View `source` over the native `bounds`: the
 // runtime checks them and picks the stop; a View's window keeps borrowing the
 // source buffer.
@@ -4700,8 +4768,12 @@ fn ir_borrow(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, ac
     }
     if access == .Write {
         if ir_body_node(p, b, value).kind == .Slice(base, start, end, range, location) {
-            view_ty :: if ir_untag(ir_ty(p, b, base)) == .List(element) -> Type.Apply{name: "View", args: [Type]{element}} else -> ty
-            return ir_slice(&m, p, &b, view_ty, base, start, end, range, location, span)
+            if ir_untag(ir_ty(p, b, base)) == .List(element) {
+                view_ty :: Type.Apply{name: "View", args: [Type]{element}}
+                view_row :: ir_value_type(&m, p, view_ty) ?? return ir_type_fail(&b, span, view_ty)
+                return ir_write_window(&m, p, &b, view_row, base, start, end, range, location, span)
+            }
+            return ir_slice(&m, p, &b, ty, base, start, end, range, location, span)
         }
         // An inline Int? is written in place: the window's payload is the
         // word at the place (ir_bind_pending), which a variable keeps in a

@@ -2576,9 +2576,12 @@ fn sema_stmt_record_binding_views(binding: Binding, init_ty: Type, scopes: SemaS
             &diagnostics.push(sema_error("E0213", expr_span(binding.init), "a window must start from a place", "only a name followed by fields, indexes, or one range has stable storage to read or edit without copying", "bind the call or temporary to a name first, then take a window into that name"))
             return false
         }
+        // A window whose open is rejected holds no loan: the binding stays,
+        // but later uses of it are not judged against the conflict already
+        // reported.
         if sema_ownership_view_producer(binding.init) == .Val(producer) {
             producer_places :: sema_ownership_places_from_expr_in_state(producer.source, scopes, &state)
-            sema_ownership_check_binding_view_conflicts(&state, binding.name, binding.name_span, producer_places, producer.access, scopes, &diagnostics)
+            if !sema_ownership_check_binding_view_conflicts(&state, binding.name, binding.name_span, producer.source, producer_places, producer.access, scopes, &diagnostics) -> return true
         }
         return sema_ownership_record_binding_view(&state, binding, scopes)
     }
@@ -2589,7 +2592,7 @@ fn sema_stmt_record_binding_views(binding: Binding, init_ty: Type, scopes: SemaS
         _ := sema_ownership_record_view_returns(&state, [SemaOwnershipPlace]{}, access, [String]{}, context.return_view_receiver_key, context.return_view_parameter_keys, scopes, &empty_provenance, expr_span(binding.init), &diagnostics)
         return false
     }
-    if !binding.mutable && sema_stmt_is_bare_range_place(binding.init, scopes, &state) -> sema_ownership_check_binding_view_conflicts(&state, binding.name, binding.name_span, places, access, scopes, &diagnostics)
+    if !binding.mutable && sema_stmt_is_bare_range_place(binding.init, scopes, &state) && !sema_ownership_check_binding_view_conflicts(&state, binding.name, binding.name_span, binding.init, places, access, scopes, &diagnostics) -> return true
     fact := SemaOwnershipCallViewFact{output_path: [String]{}, access: access, places: places}
     sema_ownership_record_call_view_batch(&state, binding.name, binding.name_span, [SemaOwnershipCallViewFact]{fact}, scopes)
 }

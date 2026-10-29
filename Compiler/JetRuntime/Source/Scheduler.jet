@@ -895,7 +895,9 @@ fn scheduler_get() -> I64 {
 // Job32B: next0 code8 arg16 blocking24. code0 is a native Task callback.
 // The job wakes an idle worker, else starts one more while fewer than the
 // pool size run. Unsigned pool sizes above i64::MAX are attempted just as
-// Rust does, failing at pthread_create.
+// Rust does, failing at pthread_create. Every idle compensation worker wakes
+// too: a reserve worker cannot take a blocking job, so waking only one could
+// leave the job to a worker that never sees it.
 fn scheduler_submit(code: I64, argument: I64, blocking: Bool) {
     root :: scheduler_get()
     job :: jet_rt_alloc(I64{32}, I64{8})
@@ -920,7 +922,7 @@ fn scheduler_submit(code: I64, argument: I64, blocking: Bool) {
         }
         else -> {}
     }
-    sync_cond_notify_one(root + I64{32})
+    sync_cond_notify_all(root + I64{32})
     sync_mutex_unlock(root)
     if start -> scheduler_start_worker(root, I64{0})
 }
@@ -965,7 +967,9 @@ fn scheduler_pop(root: I64, allow_blocking: Bool) -> I64 {
         job :: scheduler_pop(root, !reserve)
         if (job == I64{0}) {
             if compensation {
-                _ := sync_cond_wait(root + I64{32}, root, sync_deadline(I64{2000000}))
+                // A submitted job, a blocking wait that ends, and shutdown
+                // each notify this condition under the root lock.
+                _ := sync_cond_wait(root + I64{32}, root, I64{-1})
             } else {
                 sync_store(root + I64{120}, sync_load(root + I64{120}) + I64{1})
                 _ := sync_cond_wait(root + I64{24}, root, I64{-1})

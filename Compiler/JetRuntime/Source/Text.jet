@@ -354,6 +354,25 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
     header
 }
 
+// `left += right` on a variable that owns `left`: this owner is consumed. A
+// sole heap owner appends in place and grows its buffer geometrically
+// (rt_text_reserve_extra), so building a text by repeated `+=` is linear. A
+// shared or static `left` keeps its bytes: the result is a fresh owner (as
+// jet_rt_string_concat) and this owner of `left` is released. On a stop
+// `left` is still owned by the variable and the result is 0.
+#Export(c) fn jet_rt_string_append(left: I64, right: I64) -> I64 {
+    if (rt_text_immortal(left) || !jet_rt_rc_unique(left - I64{8})) {
+        joined :: jet_rt_string_concat(left, right)
+        if (joined == I64{0}) -> return I64{0}
+        jet_rt_string_drop(left)
+        return joined
+    }
+    before :: rt_text_len(left)
+    rt_text_append(left, rt_text_data(right), rt_text_len(right))
+    if (rt_text_len(left) == before && rt_text_len(right) != I64{0}) -> return I64{0}
+    left
+}
+
 // Release one owner; the last owner frees the buffer and the block. Static
 // rt_static_text headers are immortal and never freed.
 #Export(c) fn jet_rt_string_drop(value: I64) {

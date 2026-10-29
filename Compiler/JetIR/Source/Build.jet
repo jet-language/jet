@@ -77,6 +77,9 @@ struct IRBuilder {
     // The address a write window's inline Int? subject was read from, by
     // the subject slot (BuildExpr.jet ir_borrow): its payload binds there.
     windows: [Int:Int]{[Int:Int]{}}
+    // The allocator storage an allocator view was read from, by the view
+    // slot (BuildAllocators.jet): a variable bound to the view aliases it.
+    views: [Int:Int]{[Int:Int]{}}
     line: Int
     error: String
     error_span: Span
@@ -185,6 +188,11 @@ struct IRChecks {
     modules: [String:Bool]
     backtrace: IRBacktrace
     keep: Bool
+    // The entry package's `allocator:` policy: Val(cap) wraps the system
+    // heap in the counting allocator capped at `cap` bytes (0: no cap), so a
+    // fallible allocation past the cap fails (ir_entry_function passes it to
+    // jet_rt_program_allocator_configure); None keeps the system heap.
+    counting: Int?{None}
 }
 
 // The `backtrace` build option: what a native fault report prints after its
@@ -280,6 +288,11 @@ struct IRProgram {
     // call that can deliver one (IRModule.stop_points); false only for the
     // runtime library (ir_build_library).
     stop_points: Bool{true}
+    // Whether `#Unsafe` scopes enter the runtime sentry and raw accesses are
+    // checked by it (BuildSentry.jet): true for a program or test image
+    // (ir_build_program, ir_build_tests); false for the runtime library the
+    // sentry is part of and for compile-time evaluation.
+    sentries: Bool{false}
     // The ordinal of each `task` spawn site among its file's spawn sites in
     // source order, by "{source file}:{span start}" (ir_spawn_sites): the
     // "spawn site N" of task reports.
@@ -1007,6 +1020,7 @@ fn ir_symbol_name(function: FnBody) -> String Never! {
 fn ir_build_program(functions: ^[FnBody], decls: DeclTable, type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], entry_key: String, checks: IRChecks, threads: CompilerThreads) -> IRBuildResult Never! {
     p := ir_program_new(^functions, decls, ^type_defs, ^impls, ^sources, ^constants)
     p.checks = checks
+    p.sentries = true
     ir_foreign_index(&p, ^foreign, decls)
     row :: ir_function_row(p, entry_key) ?? {
         failures := [IRBuildFailure]{IRBuildFailure{key: entry_key, name: entry_key, message: "the entry function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}}}
@@ -1052,11 +1066,13 @@ fn ir_build_roots_in(program: ^IRProgram, root_keys: [String], threads: Compiler
 IR_STARTUP_FUNCTION_PREFIX :: "__startup_"
 
 // The function the executable starts: `entry` itself when it takes nothing,
-// returns nothing, the program computes no constant at startup and the
-// `backtrace` build option is the stock `full`, otherwise a generated `entry`
-// function. It first passes a `brief` or `off` backtrace to the runtime
-// (jet_rt_fault_backtrace, the IRBacktrace word), computes every constant
-// computed at startup (p.startup, through ir_startup_guard), then calls
+// returns nothing, the program computes no constant at startup, the
+// `backtrace` build option is the stock `full` and the program allocator the
+// system heap, otherwise a generated `entry` function. It first passes a
+// `brief` or `off` backtrace to the runtime (jet_rt_fault_backtrace, the
+// IRBacktrace word) and a counting program allocator's cap
+// (jet_rt_program_allocator_configure, IRChecks.counting), computes every
+// constant computed at startup (p.startup, through ir_startup_guard), then calls
 // `entry` and handles its failure carrier: an `Err` ends the process with the
 // error's report and exit status 1 (the default `Err` through
 // jet_rt_entry_error_exit_err, any other error through its Printable text and
@@ -1064,7 +1080,7 @@ IR_STARTUP_FUNCTION_PREFIX :: "__startup_"
 // drops the result and returns.
 fn ir_entry_function(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuildFailure]) -> Int Never! {
     row :: m.functions[entry].result
-    if m.functions[entry].param_count > 0 || (row < 0 && p.startup.len() == 0 && p.checks.backtrace == .Full) -> return entry
+    if m.functions[entry].param_count > 0 || (row < 0 && p.startup.len() == 0 && p.checks.backtrace == .Full && p.checks.counting == None) -> return entry
     ty :: if row >= 0 -> m.types[row].ty.copy() else -> Type.Named{name: "Unit"}
     key :: "{m.functions[entry].key}#entry"
     id :: m.functions.len()
@@ -1077,6 +1093,11 @@ fn ir_entry_function(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuild
         mode :: if p.checks.backtrace == .Brief -> 1 else -> 2
         word :: ir_word_const(&m, &b, mode)
         _ :: ir_runtime(&m, &b, "jet_rt_fault_backtrace", [Int]{word}, -1)
+    }
+    if p.checks.counting == .Val(cap) {
+        counting :: ir_word_const(&m, &b, 1)
+        limit :: ir_word_const(&m, &b, cap)
+        _ :: ir_runtime(&m, &b, "jet_rt_program_allocator_configure", [Int]{counting, limit}, -1)
     }
     loop constant_key in p.startup {
         at :: p.constants.get(constant_key) ?? next
@@ -1781,6 +1802,7 @@ fn ir_route_can_stop(symbol: String) -> Bool Never! {
         "jet_rt_string_from_static" | "jet_rt_string_byte_len" | "jet_rt_string_compare" | "jet_journey_reset" -> false
         "jet_rt_cleanup_enter" | "jet_rt_cleanup_leave" | "jet_rt_session_propagate" | "jet_rt_session_status" -> false
         "jet_ctx_push_deadline" | "jet_ctx_pop_deadline" -> false
+        "jet_rt_sentry_scope_enter" | "jet_rt_sentry_policy_enter" | "jet_rt_sentry_scope_leave" | "jet_rt_sentry_frame_enter" | "jet_rt_sentry_frame_leave" | "jet_rt_sentry_register_stack_allocation" -> false
         "jet_rt_native_closure_retain" | "jet_rt_native_closure_unref" -> false
         "jet_rt_native_shared_downgrade" | "jet_rt_native_shared_weak_upgrade" | "jet_rt_shared_owner_strong_count" -> false
         // A rollback hook's failure is taken by _leave (BuildTransact.jet ir_transaction_walk).
@@ -1852,12 +1874,13 @@ fn ir_stop_catches(m: &IRModule, b: &IRBuilder) Never! {
     loop index >= 0 {
         frame :: b.catches[index]
         index -= 1
-        if b.transactions.len() > frame.transactions {
+        if ir_tx_frames_hold_state(b.transactions, frame.transactions) {
             ir_fail(&b, Span{start: 0, end: 0}, "an `.expect_fail` stop edge out of a #Transact block")
             break
         }
         caught :: ir_runtime(&m, &b, "jet_rt_test_catch_for_scope", [Int]{frame.scope}, bool_row)
         ir_open_if(&b.f, caught, b.line)
+        ir_tx_leave_sentries(&m, &b, frame.transactions)
         saved :: ir_runtime(&m, &b, "jet_rt_cleanup_enter", [Int]{}, word_row)
         states :: ir_own_states(b, b.bindings.len())
         ir_drop_bindings(&m, &b, frame.mark)
@@ -1925,12 +1948,7 @@ fn ir_stop_return(m: &IRModule, b: &IRBuilder) Never! {
                 ir_emit(&b.f, IROp.Drop, -1, frame.handle, -1, -1, b.line)
                 ir_emit(&b.f, IROp.Const, frame.handle, 0, -1, -1, b.line)
             }
-            if frame.shield {
-                _ :: ir_runtime(&m, &b, "jet_rt_session_shield_leave", [Int]{}, -1)
-            }
-            if frame.deadline >= 0 {
-                _ :: ir_runtime(&m, &b, "jet_ctx_pop_deadline", [Int]{frame.deadline}, -1)
-            }
+            ir_tx_leave_scopes(&m, &b, frame)
         }
         b.transactions = open
         ir_drop_bindings(&m, &b, 0)

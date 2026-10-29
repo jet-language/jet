@@ -619,6 +619,17 @@ struct JetDriverCompileResult {
     // The entry package's member files that declare a top-level `fn run`,
     // from the load's parse (JetDriverLoadResult.run_member_paths).
     run_member_paths: [String]{[String]{}}
+    // The entry package's `allocator:` policy (jet_driver_entry_allocator).
+    allocator: AllocatorPolicy{AllocatorPolicy.HostedDefault}
+}
+
+// The `allocator:` policy of the entry package of `load`
+// (jet_driver_parse_program_allocator); the system heap when it has none.
+fn jet_driver_entry_allocator(load: JetDriverLoadResult) -> AllocatorPolicy Never! {
+    loop package in load.packages {
+        if package.identity == load.package_identity -> return package.allocator_policy
+    }
+    AllocatorPolicy.HostedDefault
 }
 
 // The compiler-internal all-phases diagnostic mode (`JET_KEEP_GOING=1`, read

@@ -256,6 +256,14 @@ fn sema_expression_deref(value: Expr, span: Span, expected: Type?, environment: 
             return sema_expr_expected_owned(^result, expected, environment, program, &diagnostics)
         }
     }
+    // An allocator view (`arena.alloc(v)`) reaches its value in the
+    // allocator's storage: `view.*` is that value's place.
+    if checked.ty == .Tagged(marker, inner) {
+        if marker == (TagMarker.Internal{internal_tag: InternalTag.AllocatorView}) {
+            result :: sema_tree_node(inner, TExprKind.Deref{value: checked}, span)
+            return sema_expr_expected_owned(^result, expected, environment, program, &diagnostics)
+        }
+    }
     &diagnostics.push(sema_error("E0112", span, "dereference needs a Ptr value", "only a checked pointer carries an element type through `.*`", "use a Ptr<T> value here"))
     None
 }

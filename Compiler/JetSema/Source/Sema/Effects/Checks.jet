@@ -1517,6 +1517,9 @@ fn sema_effect_check_unsafe_expr(nodes: &[SemaEffectNode], facts: SemaEffectCall
             if facts.modules[caller.module_index].facts[position].callee == .Val(callee) {
                 if facts.unsafe_names.get(callee.key) == .Val(name) -> sema_effect_require_unsafe_call(name, true, audited, node.span, &diagnostics)
             }
+            if facts.modules[caller.module_index].facts[position].unsafe_foreign_name == .Val(foreign) {
+                _ :: sema_effect_require_unsafe_call(foreign, true, audited, node.span, &diagnostics)
+            }
         }
     }
     if node.kind == {
@@ -2366,9 +2369,10 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
     }
     node_by_decl := sema_effect_nodes_by_decl(node_by_key, owned_prepared.node_decls, decls.rows.len())
     calls := SemaEffectCallIndex{modules: ^owned_prepared.calls, node_by_key: ^node_by_key, trait_implementers: ^trait_implementers, trait_impls: ^trait_impls, close_methods: ^close_methods, unsafe_names: ^unsafe_names, node_by_decl: ^node_by_decl, node_keys: ^node_keys}
-    any_unsafe :: loop node in nodes {
+    unsafe_node :: loop node in nodes {
         if node.is_unsafe -> break true
     } ?? false
+    any_unsafe :: unsafe_node || sema_effect_calls_any_unsafe_foreign(calls.modules)
     calls = sema_effect_collect_threads(&modules, inputs, &nodes, ^calls, any_unsafe, &diagnostics, threads)
     callers :: sema_effect_callers(nodes, calls.node_by_key)
     solved :: sema_effect_solve(nodes, callers)
@@ -2592,11 +2596,22 @@ fn sema_effect_collect_module(functions: [FnBody], module_row: SemaEffectModuleI
 fn sema_effect_collect_one(nodes: &[SemaEffectNode], node_index: Int, function: FnBody, calls: SemaEffectCallIndex, module_index: Int, any_unsafe: Bool, diagnostics: &[Diagnostic]) {
     sema_effect_collect_function(&nodes, node_index, function, calls, module_index, &diagnostics)
     // A call needs an audited region only when its callee is an
-    // `#Unsafe` function; with none in the graph the walk finds nothing.
+    // `#Unsafe` function or inline foreign function; with none in the graph
+    // the walk finds nothing.
     if any_unsafe {
         audited := function.is_unsafe && (function.unsafe_gate.map((gate) -> gate.enabled) ?? false)
         sema_effect_check_unsafe_statements_tree(&nodes, calls, sema_effect_caller_slot(calls, module_index, function.key), function.tree, function.body, audited, &diagnostics)
     }
+}
+
+// Whether any call site names an `#Unsafe` inline foreign callee.
+fn sema_effect_calls_any_unsafe_foreign(modules: [SemaEffectModuleCalls]) -> Bool Never! {
+    loop module_calls in modules {
+        loop fact in module_calls.facts {
+            if fact.unsafe_foreign_name != None -> return true
+        }
+    }
+    false
 }
 
 // A compiler thread is admitted for at least this many bytes of function

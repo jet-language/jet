@@ -46,6 +46,7 @@ struct IRTestHarness { tests: [IRTestCase], checks: [IROutputCheck], serial: Boo
 fn ir_build_tests(functions: ^[FnBody], decls: DeclTable, type_defs: ^[TTypeDef], impls: ^[TImplDef], sources: ^[String:String], constants: ^[TConstantDef], foreign: ^[SemaCheckedForeignFunction], harness: IRTestHarness, checks: IRChecks) -> IRBuildResult Never! {
     p := ir_program_new(^functions, decls, ^type_defs, ^impls, ^sources, ^constants)
     p.checks = checks
+    p.sentries = true
     ir_foreign_index(&p, ^foreign, decls)
     m := ir_module_for(p)
     failures := [IRBuildFailure]{}
