@@ -791,13 +791,13 @@ fn sema_serde_items_migration_helpers(definition: StructDef, items: [Item], span
         loop operation in block.ops {
             if operation == {
                 .Add(field, _, ty, _, default, default_span, _) -> {
-                    function := sema_migration_default_function(sema_serde_items_migration_op_name("add", definition, block_index, field), ty, default, default_span)
+                    function := sema_migration_default_function(sema_serde_items_migration_op_name("add", definition, block_index, field), sema_serde_items_migration_total(ty), default, default_span)
                     function.compiler_generated = true
                     &helpers.push(Item.Func{value: function})
                 }
                 .Change(field, _, from_ty, _, to_ty, _, converter, converter_span, _) -> {
                     if converter == .Val(value) {
-                        function := sema_migration_converter_function(sema_serde_items_migration_op_name("conv", definition, block_index, field), from_ty, to_ty, value, converter_span ?? block.span)
+                        function := sema_migration_converter_function(sema_serde_items_migration_op_name("conv", definition, block_index, field), from_ty, sema_serde_items_migration_total(to_ty), value, converter_span ?? block.span)
                         function.compiler_generated = true
                         &helpers.push(Item.Func{value: function})
                     }
@@ -807,6 +807,14 @@ fn sema_serde_items_migration_helpers(definition: StructDef, items: [Item], span
         }
     }
     helpers
+}
+
+// The return type of an `add` default or `change` converter helper. A
+// compiler-generated function is not a failure-inference candidate, so its
+// default contract would stay fallible and the walk's inline `.encode()` of
+// the call would see a Result; the helper states `T Never!` instead.
+fn sema_serde_items_migration_total(ty: Type) -> Type Never! {
+    Type.Result{ok: ty.copy(), err: Type.Named{name: "Never"}}
 }
 
 // The derived `decode` of a migrating struct: the current shape, else the
