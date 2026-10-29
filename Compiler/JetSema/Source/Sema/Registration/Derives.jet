@@ -637,8 +637,11 @@ fn sema_derive_payload_owner_for_subject(expansion: SemaDeriveExpansion, subject
     sema_derive_side_payload_owner(expansion, side, variant)
 }
 
-fn sema_derive_fill_variant_bindings(expansion: SemaDeriveExpansion, variant: String, bindings: [PatSlot], span: Span, subject: Expr?) -> [PatSlot] Never! {
-    if bindings.len() != 0 -> return bindings.copy()
+// Only a spliced variant (`.$left`) binds the reflected variant's payload: a
+// literal variant in the template (`.Equal` of `Ordering`) names its own enum,
+// even when the deriving type has a variant of the same name.
+fn sema_derive_fill_variant_bindings(expansion: SemaDeriveExpansion, variant: String, bindings: [PatSlot], span: Span, subject: Expr?, spliced: Bool) -> [PatSlot] Never! {
+    if bindings.len() != 0 || !spliced -> return bindings.copy()
     payload :: sema_derive_variant_payload_fields(expansion, variant) ?? return bindings.copy()
     owner :: sema_derive_payload_owner_for_subject(expansion, subject, variant)
     filled := [PatSlot]{}
@@ -676,7 +679,7 @@ fn sema_derive_expand_pattern(expansion: &SemaDeriveExpansion, pattern: Pattern,
         .StrMatch(parts, span) -> Pattern.StrMatch{parts: sema_derive_expand_str_match_parts(&expansion, parts), span: span}
         .Variant(variant, bindings, leading_dot, span) -> {
             expanded_variant :: sema_derive_expand_name(&expansion, variant, span)
-            Pattern.Variant{variant: expanded_variant, bindings: sema_derive_fill_variant_bindings(expansion, expanded_variant, bindings, span, subject), leading_dot: leading_dot, span: span}
+            Pattern.Variant{variant: expanded_variant, bindings: sema_derive_fill_variant_bindings(expansion, expanded_variant, bindings, span, subject, variant.starts_with("$")), leading_dot: leading_dot, span: span}
         }
         // copy: the derive template pattern is expanded once per deriving declaration, so the
         // template keeps its node and an unexpanded node is copied into this expansion.
@@ -695,8 +698,8 @@ fn sema_derive_expand_str_match_parts(expansion: &SemaDeriveExpansion, parts: [S
     expanded
 }
 
-fn sema_derive_pattern_test_from_enum_lit(expansion: SemaDeriveExpansion, subject: Expr, variant: String, args: [EnumLitArg], span: Span) -> Expr Never! {
-    bindings := sema_derive_fill_variant_bindings(expansion, variant, [PatSlot]{}, span, Val(subject))
+fn sema_derive_pattern_test_from_enum_lit(expansion: SemaDeriveExpansion, subject: Expr, variant: String, args: [EnumLitArg], span: Span, spliced: Bool) -> Expr Never! {
+    bindings := sema_derive_fill_variant_bindings(expansion, variant, [PatSlot]{}, span, Val(subject), spliced)
     if bindings.len() == 0 {
         loop arg in args {
             value :: if arg == {
@@ -710,15 +713,16 @@ fn sema_derive_pattern_test_from_enum_lit(expansion: SemaDeriveExpansion, subjec
 }
 
 // Rust `coerce_derive_enum_arm`: an enum-literal arm of a reflected switch is a
-// variant pattern over the switch subject.
-fn sema_derive_coerce_enum_arm(expansion: SemaDeriveExpansion, cond: Expr, subject: Expr) -> Expr Never! {
+// variant pattern over the switch subject. `spliced` says the template arm
+// named a reflected variant (`.$left`), not a literal one.
+fn sema_derive_coerce_enum_arm(expansion: SemaDeriveExpansion, cond: Expr, subject: Expr, spliced: Bool) -> Expr Never! {
     if cond == {
-        .EnumLit(_, variant, _, args, _, span, _) -> sema_derive_pattern_test_from_enum_lit(expansion, subject, variant, args, span)
+        .EnumLit(_, variant, _, args, _, span, _) -> sema_derive_pattern_test_from_enum_lit(expansion, subject, variant, args, span, spliced)
         .Binary(op, _, right, _, _) -> {
             // copy: the derive template condition is expanded once per deriving declaration, so the
             // template keeps `cond` and a non-equality condition is copied into this expansion.
             if op != BinOp.Eq -> return cond.copy()
-            if right == .EnumLit(_, variant, _, args, _, span, _) -> return sema_derive_pattern_test_from_enum_lit(expansion, subject, variant, args, span)
+            if right == .EnumLit(_, variant, _, args, _, span, _) -> return sema_derive_pattern_test_from_enum_lit(expansion, subject, variant, args, span, spliced)
             // copy: the derive template condition is expanded once per deriving declaration, so the
             // template keeps `cond` and an uncoerced condition is copied into this expansion.
             cond.copy()
@@ -727,6 +731,15 @@ fn sema_derive_coerce_enum_arm(expansion: SemaDeriveExpansion, cond: Expr, subje
         // template keeps `cond` and a non-binary condition is copied into this expansion.
         else -> cond.copy()
     }
+}
+
+// The template arm condition names a spliced variant: `.$left` or `== .$left`.
+fn sema_derive_cond_splices_variant(cond: Expr) -> Bool Never! {
+    if cond == .EnumLit(_, variant, _, _, _, _, _) -> return variant.starts_with("$")
+    if cond == .Binary(op, _, right, _, _) {
+        if op == BinOp.Eq && right == .EnumLit(_, variant, _, _, _, _, _) -> return variant.starts_with("$")
+    }
+    false
 }
 
 // ---------------------------------------------------------------------------
@@ -941,7 +954,7 @@ fn sema_derive_expand_enum_lit(expansion: &SemaDeriveExpansion, type_name: Strin
             .Named(label, value) -> &expanded_args.push(EnumLitArg.Named{label: label, expr: sema_derive_expand_expr(&expansion, value)})
         }
     }
-    if expanded_args.len() == 0 {
+    if expanded_args.len() == 0 && variant.starts_with("$") {
         if sema_derive_variant_payload_fields(expansion, variant) == .Val(payload) {
             owner :: sema_derive_payload_binding_owner(expansion, variant)
             loop field in payload {
@@ -1099,7 +1112,7 @@ fn sema_derive_expand_arms(expansion: &SemaDeriveExpansion, subject: Expr, arms:
     expanded := [SwitchArm]{}
     loop arm in arms {
         cond := sema_derive_expand_expr(&expansion, arm.cond)
-        cond = sema_derive_coerce_enum_arm(expansion, cond, subject)
+        cond = sema_derive_coerce_enum_arm(expansion, cond, subject, sema_derive_cond_splices_variant(arm.cond))
         if cond == .PatternTest(test_subject, pattern, test_span, _) {
             cond = Expr.PatternTest{subject: test_subject, pattern: sema_derive_expand_pattern(&expansion, pattern, Val(test_subject)), span: test_span, id: AST_NODE_GENERATED}
         }

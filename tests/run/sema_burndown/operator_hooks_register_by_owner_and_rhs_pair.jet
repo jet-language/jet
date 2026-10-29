@@ -1,0 +1,38 @@
+// #4374: an operator hook registers under its owner and right-hand type, so
+// one owner carries `Add` for itself and `Add(Int)` side by side, and each
+// call site dispatches by the operand pair (the duplicate-pair refusal is
+// tests/ui/operator_duplicate_hook.jet).
+struct Ratio {
+    num: Int
+    den: Int
+}
+
+impl Ratio.Add {
+    fn add(self, rhs: Ratio) -> Ratio { return Ratio{num: self.num * rhs.den + rhs.num * self.den, den: self.den * rhs.den} }
+}
+
+impl Ratio.Add(Int) #Commutative {
+    fn add(self, rhs: Int) -> Ratio { return Ratio{num: self.num + rhs * self.den, den: self.den} }
+}
+
+impl Ratio.Mul {
+    fn mul(self, rhs: Ratio) -> Ratio { return Ratio{num: self.num * rhs.num, den: self.den * rhs.den} }
+}
+
+impl Ratio.Mul(Int) {
+    fn mul(self, rhs: Int) -> Ratio { return Ratio{num: self.num * rhs, den: self.den} }
+}
+
+fn show(r: Ratio) -> String {
+    "{r.num}/{r.den}"
+}
+
+fn run() {
+    half :: Ratio{num: 1, den: 2}
+    third :: Ratio{num: 1, den: 3}
+    print(show(half + third))
+    print(show(half + 1))
+    print(show(2 + third))
+    print(show(half * third))
+    print(show(third * 4))
+}

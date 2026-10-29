@@ -736,7 +736,18 @@ fn sema_call_perf_static(method: String, type_args: [Type], args: [CallArg], spa
 fn sema_call_static_source_owner(receiver: Expr, method: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Symbol? Never! {
     owner_name :: if receiver == {
         .Ident(name, _, _) -> {
-            if sema_scope_resolve_index(scopes, name) == .Val(index) -> return Val(sema_scope_binding_symbol(environment, scopes, index))
+            if sema_scope_resolve_index(scopes, name) == .Val(index) {
+                symbol :: sema_scope_binding_symbol(environment, scopes, index)
+                // An imported alias (`use core.encoding.hex.[HexError]`) is a
+                // module-scope binding of the alias symbol; its statics are the
+                // target's, as for the qualified spelling below.
+                if symbol.kind == SymbolKind.Type && program.registration_graph == .Val(graph) {
+                    if sema_type_graph_nominal_row(graph, symbol.id.key) == .Val(row) {
+                        if sema_call_static_alias_target(graph, row) == .Val(target) -> return Val(sema_resolved_symbol(graph, target))
+                    }
+                }
+                return Val(symbol)
+            }
             name
         }
         .Field(base, leaf, _, _) -> {
@@ -751,11 +762,7 @@ fn sema_call_static_source_owner(receiver: Expr, method: String, environment: Se
         if sema_resolved_kind(graph, found) != SymbolKind.Type -> return None
         resolved := found
         row := sema_type_graph_resolved_nominal_row(graph, found) ?? return None
-        // A plain alias (`alias Date :: LocalDate`) names its target's statics.
-        alias_row :: graph.modules[row.module_index].nominals[row.row]
-        if alias_row.kind == SemaRegistrationNominalKind.TypeAlias && alias_row.generic_params.len() == 0 && alias_row.source == .SourceAST(item) && item == .TypeAlias(definition) && definition.target == .Named(target_name) {
-            target :: sema_type_graph_lookup_symbol(graph, graph.modules[row.module_index].module_identity, target_name) ?? return None
-            if sema_resolved_kind(graph, target) != SymbolKind.Type -> return None
+        if sema_call_static_alias_target(graph, row) == .Val(target) {
             row = sema_type_graph_resolved_nominal_row(graph, target) ?? return None
             resolved = target
         }
@@ -765,6 +772,18 @@ fn sema_call_static_source_owner(receiver: Expr, method: String, environment: Se
     } else {
         return None
     }
+}
+
+// A plain alias (`alias Date :: LocalDate`) names its target's statics: the
+// target type of the nominal at `row` when that nominal is one.
+fn sema_call_static_alias_target(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef) -> SemaRegistrationResolvedSymbol? {
+    alias_row :: graph.modules[row.module_index].nominals[row.row]
+    if alias_row.kind == SemaRegistrationNominalKind.TypeAlias && alias_row.generic_params.len() == 0 && alias_row.source == .SourceAST(item) && item == .TypeAlias(definition) && definition.target == .Named(target_name) {
+        target :: sema_type_graph_lookup_symbol(graph, graph.modules[row.module_index].module_identity, target_name) ?? return None
+        if sema_resolved_kind(graph, target) != SymbolKind.Type -> return None
+        return Val(target)
+    }
+    None
 }
 
 // Rust options_rng.rs:19-135 check_option_lift2 (method_calls.rs:3559):
