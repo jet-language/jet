@@ -1,4 +1,4 @@
-// Shared headless core.game.raylib adapter for MIR Web.
+// Shared headless core.game.raylib adapter for IR Web.
 // Native display/input remains the AOT bridge; browser calls preserve the same
 // typed carriers, no-input defaults, and sprite transcript shape.
 

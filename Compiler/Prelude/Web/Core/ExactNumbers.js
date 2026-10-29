@@ -206,7 +206,7 @@ function jet_decimal_to_string(value) {
 }
 
 // D-WRAP-SCOPE1=A / I9: the web fixed-width arithmetic rule lives in the
-// embedded numeric Prelude. Web.rs only marshals TIR operands to this door.
+// embedded numeric Prelude. The Web lowering only marshals checked operands to this door.
 function jet_fixed_policy_step(raw, bits, signed, mode, file, line) {
   const min = signed ? -(1n << BigInt(bits - 1)) : 0n;
   const max = signed ? (1n << BigInt(bits - 1)) - 1n : (1n << BigInt(bits)) - 1n;

@@ -222,7 +222,7 @@ function jet_float_display(value) {
 }
 
 // D-DISPLAY-SHAPE / I9: print uses the Prelude's JetShow collection rule.
-// Keep it separate from Display. MIR Web supplies checked aggregate facts in
+// Keep it separate from Display. IR Web supplies checked aggregate facts in
 // `__jet_print_type_facts`; values without those facts keep their carrier
 // spelling instead of gaining a runtime-derived Printable implementation.
 function jet_show(value) {
@@ -576,7 +576,7 @@ function jet_split_top_level(value) {
 }
 
 // D-CARRIER1: checked effect-carrier projections. The field ID is consumed
-// by MIR and selects one of these canonical kernels before JavaScript runs.
+// by IR and selects one of these canonical kernels before JavaScript runs.
 function jet_carrier_report(outcome) {
   if (outcome == null || typeof outcome !== "object") {
     throw new Error("invalid Web carrier outcome");
@@ -605,7 +605,7 @@ function jet_notes(outcome) {
   if (!Array.isArray(report.notes)) throw new Error("carrier report has no notes value");
   return report.notes.slice();
 }
-// Canonical typed Dyn decoding and accessors for the Web adapter. MIR
+// Canonical typed Dyn decoding and accessors for the Web adapter. IR
 // supplies a checked shape descriptor; conversion and FieldError policy stay
 // with the other value carriers in this Prelude module.
 function jet_codec_decode_ok(value) {

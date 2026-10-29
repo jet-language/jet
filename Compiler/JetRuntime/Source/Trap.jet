@@ -1,5 +1,5 @@
 // Native process-edge stops. Core.rs and RuntimeDiagnosticCore.rs are the
-// behavioral reference: registered stops exit 70; MIR Never is a defect (101).
+// behavioral reference: registered stops exit 70; IR Never is a defect (101).
 // Text handles borrow the one E4 JetText ABI: [ptr, byte length, capacity],
 // three 8-byte words. No String/Vec Rust layout is read here. These exports
 // replace the corresponding Rust exports when E2 cuts the pack over.
@@ -428,7 +428,7 @@ fn trap_host_fault(message: I64, length: I64) {
     trap_defect_exit(I64{101})
 }
 
-// MIR Never is not a program-side stop. The Rust host's thread/source/backtrace
+// IR Never is not a program-side stop. The Rust host's thread/source/backtrace
 // prefix is not Jet semantics; preserve the unreachable! body and status 101.
 #Export(c) fn jet_rt_unreachable(reason: I64, length: I64) {
     comptime_serve_stop(I64{1}, reason, length, I64{0}, I64{0})

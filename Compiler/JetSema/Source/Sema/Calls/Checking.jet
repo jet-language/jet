@@ -608,16 +608,16 @@ fn sema_call_pin_binder_arguments(typed: SemaCallTypedArguments, params: [SemaCa
         borrowed :: (lowered[index].borrow || lowered[index].mut_borrow) && place_value
         if borrowed {
             access :: if lowered[index].mut_borrow -> AccessConvention.Write else -> AccessConvention.Read
-            init = sema_tir_node(original.ty, TExprKind.Borrow{place: init, access: access}, original.span)
+            init = sema_tree_node(original.ty, TExprKind.Borrow{place: init, access: access}, original.span)
         }
         symbol :: sema_call_binder_ref_symbol(environment, program, owner, typed.binder_site, pin_slot, params[slot].name, original.ty, span)
         local := checked_symbol_local("binder_ref_{typed.binder_site}_{pin_slot}", span, symbol.id, original.ty)
         local.generated = true
         local.mutable = lowered[index].mut_borrow
         local.deref = borrowed
-        local_value :: sema_tir_node(original.ty, TExprKind.Local{local: local}, original.span)
+        local_value :: sema_tree_node(original.ty, TExprKind.Local{local: local}, original.span)
         moves_pin :: params[slot].convention == AccessConvention.Move || (params[slot].variadic && !lowered[index].spread)
-        lowered[index].value = if moves_pin -> sema_tir_node(original.ty, TExprKind.Move{value: local_value}, original.span) else -> local_value
+        lowered[index].value = if moves_pin -> sema_tree_node(original.ty, TExprKind.Move{value: local_value}, original.span) else -> local_value
         &bindings.push(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: span})
     }
     bindings
@@ -631,7 +631,7 @@ fn sema_call_with_binder_pins(pins: ^[TStmt], call_value: ^TExpr, span: Span) ->
     ty :: call_value.ty.copy()
     body := pins
     &body.push(TStmt.ExprStmt{value: call_value, span: span})
-    sema_tir_node(ty, TExprKind.InlineBlock{body: body}, span)
+    sema_tree_node(ty, TExprKind.InlineBlock{body: body}, span)
 }
 
 // The place a `^`-marked call argument moves exactly: a field read, or a
@@ -673,7 +673,7 @@ fn sema_call_marked_move_value(state: &SemaOwnershipState, taken: Bool, expr: Ex
     payload :: sema_ownership_move_pattern_payload(&state, expr, Span{start: start - 1, end: start}, scopes, &diagnostics)
     if payload < 0 -> return None
     moved :: if payload > 0 -> sema_expression_payload_take(^value) else -> ^value
-    Val(sema_tir_node(moved.ty, TExprKind.Move{value: moved}, moved.span))
+    Val(sema_tree_node(moved.ty, TExprKind.Move{value: moved}, moved.span))
 }
 
 fn sema_call_widen_union(required: Type, offered: Type) -> Type? {
@@ -716,7 +716,7 @@ fn sema_call_lower_bound_arguments(typed: SemaCallTypedArguments, params: [SemaC
     lowered
 }
 
-// Normalize the checked rest slot once, before publishing TIR. BuildList
+// Normalize the checked rest slot once, before publishing the checked tree. BuildList
 // owns scalar elements; ListSpread clones spread elements through the same
 // checked Clone/effect mechanism as a written list literal.
 fn sema_call_prepare_variadic_elements(typed: SemaCallTypedArguments, params: [SemaCallParam], args: [CallArg], lowered: &[TCallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
@@ -730,10 +730,10 @@ fn sema_call_prepare_variadic_elements(typed: SemaCallTypedArguments, params: [S
             // The boundary copy itself clones the fixed list's elements.
             // Do not first clone the array and then clone that copy again.
             if !sema_expression_list_check_clone(value.ty, value.span, environment, program, &context, &diagnostics) -> return false
-            if args[index].convention == AccessConvention.Move -> value = sema_tir_node(value.ty, TExprKind.Move{value: value}, value.span)
-            value = sema_tir_node(typed.required_types[index], TExprKind.MaterializeView{value: value}, value.span)
+            if args[index].convention == AccessConvention.Move -> value = sema_tree_node(value.ty, TExprKind.Move{value: value}, value.span)
+            value = sema_tree_node(typed.required_types[index], TExprKind.MaterializeView{value: value}, value.span)
         } else if args[index].convention == AccessConvention.Move {
-            value = sema_tir_node(value.ty, TExprKind.Move{value: value}, value.span)
+            value = sema_tree_node(value.ty, TExprKind.Move{value: value}, value.span)
         } else if lowered[index].spread {
             // A lone spread is a direct List borrow; mixed spread cloning is
             // judged below on the canonical ListSpread, not on its List root.
@@ -754,10 +754,10 @@ fn sema_call_prepare_variadic_elements(typed: SemaCallTypedArguments, params: [S
             copies_place :: places.len() > 0 && (borrowed || !sema_ownership_unmarked_moves_name(args[index].expr) || sema_ownership_is_share_site(state, args[index].span))
             if copies_place {
                 if !sema_expression_list_check_clone(value.ty, value.span, environment, program, &context, &diagnostics) -> return false
-                value = sema_tir_node(value.ty, TExprKind.Clone{value: value, fact: CopyFact.Materialize}, value.span)
+                value = sema_tree_node(value.ty, TExprKind.Clone{value: value, fact: CopyFact.Materialize}, value.span)
             } else {
                 if !sema_ownership_mark_unmarked_move(&state, args[index].expr, scopes, "the variadic list", &diagnostics) -> return false
-                value = sema_tir_node(value.ty, TExprKind.Move{value: value}, value.span)
+                value = sema_tree_node(value.ty, TExprKind.Move{value: value}, value.span)
             }
         }
         lowered[index].value = ^value
@@ -807,7 +807,7 @@ fn sema_call_pack_variadic_arguments(typed: SemaCallTypedArguments, params: [Sem
             loop argument in tail -> &values.push(argument.value)
             kind = TExprKind.List{values: ^values, trait_coercion: None}
         }
-        value :: sema_tir_expr(list_ty, kind, span)
+        value :: sema_tree_expr(list_ty, kind, span)
         &packed.push(TCallArg{
             value: ^value, template_items: [SymbolID]{},
             borrow: params[slot].convention == AccessConvention.Read,

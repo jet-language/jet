@@ -457,7 +457,7 @@ fn sema_call_core_first_is_move(args: [CallArg]) -> Bool Never! {
 
 fn sema_call_core_native_resource_consumer(module_name: String, member: String, first_is_move: Bool) -> Bool Never! {
     // #4747: the fixed floating constraint preserves Float/F32 inference.
-    // The checked TIR call below selects the reserved source wrapper.
+    // The checked-tree call below selects the reserved source wrapper.
     (module_name == "core.math" && (member == "cmp" || member == "is_finite" || member == "sqrt")) ||
     ((module_name == "core.encoding.json" || module_name == "core.encoding.jsonl") && member == "reader" && first_is_move) ||
         (module_name == "core.net.tls" && member == "client" && first_is_move) ||
@@ -623,7 +623,7 @@ fn sema_call_try_core_math_abs(module_name: String, member: String, type_args: [
     if probed.ty == (Type.Named{name: "Complex"}) -> type_name = "Complex"
     if type_name == "" -> return unhandled
     value :: sema_check_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    magnitude :: sema_tir_node(result_ty, TExprKind.MathBuiltin{type_name: type_name, function: "abs", args: [TExpr]{value}}, span)
+    magnitude :: sema_tree_node(result_ty, TExprKind.MathBuiltin{type_name: type_name, function: "abs", args: [TExpr]{value}}, span)
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(magnitude, expected, environment, program, &diagnostics)}
 }
 
@@ -687,7 +687,7 @@ fn sema_call_core_source_arguments(record: CoreCallRecord, args: [TExpr], params
     result
 }
 
-fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, type_args: [Type], widen_to_vec: [Bool], result_type: Type, fallibility: TFailureCarrier, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_core_tree(record: CoreCallRecord, args: [TExpr], span: Span, type_args: [Type], widen_to_vec: [Bool], result_type: Type, fallibility: TFailureCarrier, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
     process_run_boundary :: record.module_name == "core.process" && record.member == "run" && args.len() == record.signature.arity + 1
     if !core_call_accepts_arity(record, args.len()) && !process_run_boundary {
         maximum := record.signature.max_arity
@@ -747,10 +747,10 @@ fn sema_call_core_tir(record: CoreCallRecord, args: [TExpr], span: Span, type_ar
         }
         source_args :: sema_call_core_source_arguments(record, args, params, span, environment, program)
         callee :: sema_call_callee_decl(program, target.symbol.id, span, &diagnostics) ?? return None
-        value :: sema_tir_node(result_type, TExprKind.Call{callee: callee, type_args: type_args, args: source_args}, span)
+        value :: sema_tree_node(result_type, TExprKind.Call{callee: callee, type_args: type_args, args: source_args}, span)
         return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
-    value := sema_tir_node(result_type, TExprKind.CoreCall{record: record, args: args, source_span: span, type_args: type_args, widen_to_vec: widen_to_vec, fallibility: fallibility}, span)
+    value := sema_tree_node(result_type, TExprKind.CoreCall{record: record, args: args, source_span: span, type_args: type_args, widen_to_vec: widen_to_vec, fallibility: fallibility}, span)
     // Rust (fallible.rs `infer_or_fallback`) passes the slot type to a call
     // only as an inference hint: a Core call that returns `Never` produces no
     // value, and the enclosing `??` or branch accepts its divergence.
@@ -766,7 +766,7 @@ fn sema_call_core_math_source(member: String, value: TExpr, registered: Bool, sp
     target :: sema_call_core_source_target(environment, program, identity, member, [Type]{}, span, registered, &diagnostics) ?? return None
     callee :: sema_call_callee_decl(program, target.symbol.id, span, &diagnostics) ?? return None
     argument :: TCallArg{value: value, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
-    Val(sema_tir_node(Type.Float, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{argument}}, span))
+    Val(sema_tree_node(Type.Float, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{argument}}, span))
 }
 
 fn sema_call_core_effect_name(effect_kind: Effect) -> String Never! {
@@ -1020,7 +1020,7 @@ fn sema_call_core_materialize_authority_boundary(record: CoreCallRecord, index: 
     // `value`, the caller's checked argument (a read parameter), which the caller keeps.
     if !core_call_authority_boundary_at(record, index) -> return value.copy()
     wire :: core_call("core.plugin", "__authority_to_wire") ?? panic("checked Authority wire row is missing")
-    sema_tir_node(Type.String, TExprKind.CoreCall{record: wire, args: [TExpr]{value},
+    sema_tree_node(Type.String, TExprKind.CoreCall{record: wire, args: [TExpr]{value},
         source_span: span, type_args: [Type]{}, widen_to_vec: [Bool]{false},
         fallibility: TFailureCarrier.Infallible}, span)
 }
@@ -1102,13 +1102,13 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
         if argument.mut_borrow {
             ty :: argument.value.ty.copy()
             at :: argument.value.span
-            &values.push(sema_tir_node(ty, TExprKind.Borrow{place: argument.value, access: AccessConvention.Write}, at))
+            &values.push(sema_tree_node(ty, TExprKind.Borrow{place: argument.value, access: AccessConvention.Write}, at))
         } else {
             &values.push(argument.value)
         }
     }
     result_type :: sema_call_core_result_type(signature, resolved_type_args, values) ?? {
-        &diagnostics.push(sema_error("E0904", span, "`{canonical_record.module_name}.{canonical_record.member}` did not resolve a result type", "the typed Core result rule must produce the value shape written into TIR", "complete the source typed return contract"))
+        &diagnostics.push(sema_error("E0904", span, "`{canonical_record.module_name}.{canonical_record.member}` did not resolve a result type", "the typed Core result rule must produce the value shape written into the checked tree", "complete the source typed return contract"))
         return None
     }
     // Rust `core_call_expr` / `checked_core_type_args`: the CoreCall carrier is
@@ -1125,7 +1125,7 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
         facts :: sema_call_return_view_facts(callable, None, args, binding, scopes, &state, span)
         &context.call_return_views.push(SemaCallReturnView{span: span, facts: facts})
     }
-    value :: sema_call_core_tir(canonical_record, values, span, type_args, loop _ in values -> false, result_type, fallibility, None, environment, program, &diagnostics) ?? return None
+    value :: sema_call_core_tree(canonical_record, values, span, type_args, loop _ in values -> false, result_type, fallibility, None, environment, program, &diagnostics) ?? return None
     sema_expression_call_expected(sema_call_with_binder_pins(^pins, ^value, span), expected, environment, program, context, &diagnostics)
 }
 

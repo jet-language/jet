@@ -1,5 +1,5 @@
 // D-OPTGC1: the Web representation of the checked automatic-root boundary.
-// MIR supplies the root, callback, edge values, and stable edit site. This
+// IR supplies the root, callback, edge values, and stable edit site. This
 // module owns only the runtime container mechanics; it does not rediscover
 // collection policy from names or source text.
 function jet_gc_root(root) {

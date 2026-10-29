@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Real Root ABI/lifetime witness only; MIR lexical Close has its own fixture.
+// Real Root ABI/lifetime witness only; IR lexical Close has its own fixture.
 // An optional single mode is a rehearsal, never a full-suite receipt.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -66,4 +66,4 @@ for (const mode of selected ? [selected] : modes) {
   records.push(record);
 }
 writeFileSync(join(out, 'root-cleanup-results.json'), JSON.stringify({ scope: selected ? 'single-mode-rehearsal' : 'full-ABI-lifetime-suite', binary: resolve(binary), modes: records }, null, 2) + '\n');
-console.log(`${selected ? 'Root rehearsal' : 'Root ABI/lifetime suite'}: ${records.length} passed; no MIR Close claim`);
+console.log(`${selected ? 'Root rehearsal' : 'Root ABI/lifetime suite'}: ${records.length} passed; no IR Close claim`);

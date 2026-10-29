@@ -3919,7 +3919,7 @@ fn sema_ownership_note_lambda(state: &SemaOwnershipState, body: SemaOwnershipSta
     loop (key, value) in body.lambda_facts -> state.lambda_facts[key] = value.copy()
     loop (key, value) in body.receiver_accesses -> state.receiver_accesses[key] = value.copy()
     loop (key, value) in body.place_types -> state.place_types[key] = value.copy()
-    // copy: the capture name lists stay with `facts`, the checked lambda's own TIR facts.
+    // copy: the capture name lists stay with `facts`, the checked lambda's own checked-tree facts.
     state.lambda_facts[sema_ownership_span_key(span)] = SemaOwnershipLambdaFacts{escapes: facts.escapes, needs_fn_mut: facts.needs_fn_mut, cloned: facts.cloned.copy(), moved: facts.moved.copy()}
 }
 

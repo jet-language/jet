@@ -1,6 +1,6 @@
 // D-TEXT-WASM1: text policy stays in the compiled Rust Prelude. This file
 // only marshals JavaScript strings through its checked UTF-8 buffer ABI and
-// restores the ordinary Web carriers used by MIR dispatch.
+// restores the ordinary Web carriers used by IR dispatch.
 const JET_TEXT_WASM_MAX_U32 = 0xffffffff;
 const JET_TEXT_WASM_ENCODER = new TextEncoder();
 const JET_TEXT_WASM_DECODER = new TextDecoder("utf-8", { fatal: true });
@@ -117,7 +117,7 @@ function jet_cursor_take_pattern(cursor, parts, fields) {
   return jet_outcome_ok(fields.length === 0 ? undefined : value);
 }
 // D-BINPAT1 / I9: mirror the Foundation bit scanner for Web byte-pattern
-// matches. The checked MIR route supplies only literal, bit-field, and rest
+// matches. The checked IR route supplies only literal, bit-field, and rest
 // descriptors, so captures stay in source order and misses leave no carrier.
 function jet_binary_pattern_match(subject, parts) {
   let bytes;

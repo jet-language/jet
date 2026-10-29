@@ -1,4 +1,4 @@
-// Lexical helpers for static self-host inventories; not a replacement for MIR.
+// Lexical helpers for static self-host inventories; not a replacement for the compiler IR.
 export function codeOnly(text) {
   let result = "", at = 0, blockDepth = 0;
   while (at < text.length) {

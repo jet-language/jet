@@ -56,7 +56,7 @@ struct SemaCallDirectTarget {
 
 // Registration supplies one row for every viable method/trait/Core candidate.
 // `signature` includes the receiver at `receiver_offset`; `method` is the
-// canonical TIR reference and is never reconstructed from source spelling.
+// canonical checked-tree reference and is never reconstructed from source spelling.
 struct SemaCallMethodCandidate {
     method: TMethodRef
     signature: Type
@@ -526,7 +526,7 @@ fn sema_call_trait_signature_with_receiver(signature: Type, receiver_type: Type)
 // Rust `infer_method_call` (trait-object and bounded-generic dispatch, via
 // `check_trait_method_args`): the call exposes the method's declared success
 // value, as `checked_return_types(..).0`. The trait ABI keeps the effective
-// failure carrier, which MIR lowering propagates at the call (Rust
+// failure carrier, which IR lowering propagates at the call (Rust
 // `tir_to_mir_expr` MethodCall), so a declared `-> Bool` never auto-propagates
 // an implicit `Err` in the caller. With no written return the call keeps the
 // registered `Unit Err!` (or a raw protocol's `Unit`).

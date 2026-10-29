@@ -1,5 +1,5 @@
 // Scoped-GC escape facts are decided from the source policy ladder before
-// statement lowering, then carried into TIR without backend reconstruction.
+// statement lowering, then carried into the checked tree without backend reconstruction.
 use jet_foundation.[
     Binding,
     Diagnostic,
@@ -473,7 +473,7 @@ fn sema_function_memory_owner(kind: TFuncKind) -> String Never! {
     }
 }
 
-fn sema_function_memory_tir_promotion(promotion: GCPromotion) -> TGCPromotion Never! {
+fn sema_function_memory_tree_promotion(promotion: GCPromotion) -> TGCPromotion Never! {
     edges := [TGCPromotionEdge]{}
     loop edge in promotion.edges {
         &edges.push(TGCPromotionEdge{binding: edge.binding, slot: edge.slot, group: edge.group})

@@ -1,4 +1,4 @@
-// Typed pattern validation and canonical TIR conversion.
+// Typed pattern validation and canonical checked-tree conversion.
 //
 // Pattern checking deliberately consumes an already checked TExpr.  The
 // expression checker owns subject inference; this file owns only pattern
@@ -362,7 +362,7 @@ fn sema_pattern_range_valid(ty: Type, lo: Int, hi: Int, span: Span, diagnostics:
     }
 }
 
-fn sema_pattern_slot_facts(slots: [PatSlot], expected: [Type], variant: String, range_forbidden: Bool, env: SemaScopeEnvironment, program: SemaProgramTables, writes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, mutable: Bool, diagnostics: &[Diagnostic], facts: &[TPatternBindingFact], tir_bindings: &[TPatternBinding]) -> Bool {
+fn sema_pattern_slot_facts(slots: [PatSlot], expected: [Type], variant: String, range_forbidden: Bool, env: SemaScopeEnvironment, program: SemaProgramTables, writes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, mutable: Bool, diagnostics: &[Diagnostic], facts: &[TPatternBindingFact], tree_bindings: &[TPatternBinding]) -> Bool {
     complete := true
     loop (index, slot) in slots {
         has_type :: index < expected.len()
@@ -374,9 +374,9 @@ fn sema_pattern_slot_facts(slots: [PatSlot], expected: [Type], variant: String, 
                         complete = false
                     }
                 }
-                &tir_bindings.push(sema_pattern_binding_shape(name, binding_span))
+                &tree_bindings.push(sema_pattern_binding_shape(name, binding_span))
             }
-            .Wildcard -> &tir_bindings.push(TPatternBinding.Wildcard)
+            .Wildcard -> &tree_bindings.push(TPatternBinding.Wildcard)
             .Range(lo, hi) -> {
                 if {
                     !has_type -> complete = false
@@ -386,7 +386,7 @@ fn sema_pattern_slot_facts(slots: [PatSlot], expected: [Type], variant: String, 
                     }
                     !sema_pattern_range_valid(expected[index], lo, hi, span, &diagnostics) -> complete = false
                 }
-                &tir_bindings.push(TPatternBinding.Range{lo: lo, hi: hi})
+                &tree_bindings.push(TPatternBinding.Range{lo: lo, hi: hi})
             }
             // S31: a nested pattern is normalized and validated against the
             // slot's payload type; its bindings join this pattern's.
@@ -395,7 +395,7 @@ fn sema_pattern_slot_facts(slots: [PatSlot], expected: [Type], variant: String, 
                     nested_check :: sema_pattern_validate_nested(expected[index], nested, env, program, &writes, &state, &tail_store, &context, &diagnostics, mutable)
                     if !nested_check.complete -> complete = false
                     loop fact in nested_check.bindings -> &facts.push(fact)
-                    &tir_bindings.push(TPatternBinding.Nested{pattern: TNestedPattern{shape: nested_check.shape, enum_type: nested_check.enum_type}})
+                    &tree_bindings.push(TPatternBinding.Nested{pattern: TNestedPattern{shape: nested_check.shape, enum_type: nested_check.enum_type}})
                 } else {
                     complete = false
                 }
@@ -408,7 +408,7 @@ fn sema_pattern_slot_facts(slots: [PatSlot], expected: [Type], variant: String, 
                             &diagnostics.push(sema_type_mismatch(expected[index], typed.ty, typed.span))
                             complete = false
                         }
-                        &tir_bindings.push(TPatternBinding.Value{value: typed})
+                        &tree_bindings.push(TPatternBinding.Value{value: typed})
                     } else {
                         complete = false
                     }
@@ -542,10 +542,10 @@ fn sema_pattern_validate_variant(subject_ty: Type, variant: String, written_slot
     if fact_enum == .Val(validation) -> return validation
     payload :: sema_pattern_payload(subject_ty, variant, env, program, span, &diagnostics)
     facts := [TPatternBindingFact]{}
-    tir_bindings := [TPatternBinding]{}
+    tree_bindings := [TPatternBinding]{}
     complete := payload.known
     if !payload.known {
-        return SemaPatternValidation{shape: TPatternShape.Variant{variant: variant, bindings: tir_bindings, leading_dot: leading_dot, span: span}, enum_type: payload.owner, bindings: facts, complete: false}
+        return SemaPatternValidation{shape: TPatternShape.Variant{variant: variant, bindings: tree_bindings, leading_dot: leading_dot, span: span}, enum_type: payload.owner, bindings: facts, complete: false}
     }
     slots := written_slots
     if named && !payload.group {
@@ -554,12 +554,12 @@ fn sema_pattern_validate_variant(subject_ty: Type, variant: String, written_slot
                 .Named(fields) -> slots = sema_pattern_place_named_slots(written_slots, fields, variant, span, &diagnostics)
                 else -> {
                     &diagnostics.push(sema_pattern_unnamed_payload_error(variant, written_slots, payload.types.len(), span))
-                    return SemaPatternValidation{shape: TPatternShape.Variant{variant: variant, bindings: tir_bindings, leading_dot: leading_dot, span: span}, enum_type: payload.owner, bindings: facts, complete: false}
+                    return SemaPatternValidation{shape: TPatternShape.Variant{variant: variant, bindings: tree_bindings, leading_dot: leading_dot, span: span}, enum_type: payload.owner, bindings: facts, complete: false}
                 }
             }
             .None -> {
                 &diagnostics.push(sema_pattern_unnamed_payload_error(variant, written_slots, payload.types.len(), span))
-                return SemaPatternValidation{shape: TPatternShape.Variant{variant: variant, bindings: tir_bindings, leading_dot: leading_dot, span: span}, enum_type: payload.owner, bindings: facts, complete: false}
+                return SemaPatternValidation{shape: TPatternShape.Variant{variant: variant, bindings: tree_bindings, leading_dot: leading_dot, span: span}, enum_type: payload.owner, bindings: facts, complete: false}
             }
         }
     }
@@ -571,10 +571,10 @@ fn sema_pattern_validate_variant(subject_ty: Type, variant: String, written_slot
             }
         }
         else -> {
-            if !sema_pattern_slot_facts(slots, payload.types, variant, payload.range_forbidden, env, program, &writes, &state, &tail_store, &context, span, mutable, &diagnostics, &facts, &tir_bindings) -> complete = false
+            if !sema_pattern_slot_facts(slots, payload.types, variant, payload.range_forbidden, env, program, &writes, &state, &tail_store, &context, span, mutable, &diagnostics, &facts, &tree_bindings) -> complete = false
         }
     }
-    SemaPatternValidation{shape: TPatternShape.Variant{variant: variant, bindings: tir_bindings, leading_dot: leading_dot, span: span}, enum_type: payload.owner, bindings: facts, complete: complete}
+    SemaPatternValidation{shape: TPatternShape.Variant{variant: variant, bindings: tree_bindings, leading_dot: leading_dot, span: span}, enum_type: payload.owner, bindings: facts, complete: complete}
 }
 
 fn sema_pattern_invalid_value(span: Span, context: &SemaCheckContext) -> TExpr Never! {
@@ -600,7 +600,7 @@ fn sema_pattern_struct(subject_ty: Type, fields: [StructPatField], rest: Span?, 
         .Value(field_name, _, _) | .Nested(field_name, _, _) -> field_name
     }
     facts := [TPatternBindingFact]{}
-    tir_fields := [TPatternField]{}
+    tree_fields := [TPatternField]{}
     complete := is_struct
     nominal_args :: sema_pattern_subject_args(subject_ty)
     generic_names :: loop parameter in nominal.generic_params -> parameter.name
@@ -631,7 +631,7 @@ fn sema_pattern_struct(subject_ty: Type, fields: [StructPatField], rest: Span?, 
             if field == {
                 .Bind(_, _, local, local_span) -> {
                     &facts.push(sema_pattern_fact(local, local_span, resolved_ty, mutable))
-                    &tir_fields.push(TPatternField.Bind{field: field_name, local: local, span: local_span})
+                    &tree_fields.push(TPatternField.Bind{field: field_name, local: local, span: local_span})
                 }
                 .Value(_, field_span, value) -> {
                     checked :: sema_check_expression(value, Val(resolved_ty), env, program, &writes, &state, &tail_store, &context, &diagnostics)
@@ -641,11 +641,11 @@ fn sema_pattern_struct(subject_ty: Type, fields: [StructPatField], rest: Span?, 
                                 &diagnostics.push(sema_type_mismatch(resolved_ty, typed.ty, typed.span))
                                 complete = false
                             }
-                            &tir_fields.push(TPatternField.Value{field: field_name, value: typed, span: field_span})
+                            &tree_fields.push(TPatternField.Value{field: field_name, value: typed, span: field_span})
                         }
                         .None -> {
                             complete = false
-                            &tir_fields.push(TPatternField.Value{field: field_name, value: sema_pattern_invalid_value(field_span, &context), span: field_span})
+                            &tree_fields.push(TPatternField.Value{field: field_name, value: sema_pattern_invalid_value(field_span, &context), span: field_span})
                         }
                     }
                 }
@@ -653,7 +653,7 @@ fn sema_pattern_struct(subject_ty: Type, fields: [StructPatField], rest: Span?, 
                     checked :: sema_pattern_validate_nested(resolved_ty, nested, env, program, &writes, &state, &tail_store, &context, &diagnostics, mutable)
                     if !checked.complete -> complete = false
                     loop fact in checked.bindings -> &facts.push(fact)
-                    &tir_fields.push(TPatternField.Nested{field: field_name, pattern: TNestedPattern{shape: checked.shape, enum_type: checked.enum_type}, span: field_span})
+                    &tree_fields.push(TPatternField.Nested{field: field_name, pattern: TNestedPattern{shape: checked.shape, enum_type: checked.enum_type}, span: field_span})
                 }
             }
         }
@@ -668,7 +668,7 @@ fn sema_pattern_struct(subject_ty: Type, fields: [StructPatField], rest: Span?, 
             complete = false
         }
     }
-    return SemaPatternValidation{shape: TPatternShape.Struct{fields: tir_fields, span: span}, enum_type: None, bindings: facts, complete: complete}
+    return SemaPatternValidation{shape: TPatternShape.Struct{fields: tree_fields, span: span}, enum_type: None, bindings: facts, complete: complete}
     }
     &diagnostics.push(sema_error("E0313", span, "a struct pattern needs the declaration graph", "struct patterns read registered fields", "resolve the subject declaration before matching it"))
     SemaPatternValidation{shape: TPatternShape.Struct{fields: [TPatternField]{}, span: span}, enum_type: None, bindings: [TPatternBindingFact]{}, complete: false}
@@ -783,7 +783,7 @@ fn sema_pattern_map(subject_ty: Type, entries: [MapPatEntry], rest: Span?, span:
             complete = false
             next
         }, env, program, context)
-        if tir_pattern_key_identity(key, context) == .Val(identity) {
+        if tree_pattern_key_identity(key, context) == .Val(identity) {
             if keys.contains(identity) {
                 &diagnostics.push(sema_error("E0117", entry.span, "this map pattern repeats a key", "each key can appear only once in a pattern", "remove the repeated key"))
                 complete = false

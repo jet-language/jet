@@ -24,7 +24,7 @@ use jet_foundation.[
 ]
 
 // S58: an inert numeric address is a place operation, not a by-value
-// forwarding function. Keep the caller's storage identity through TIR.
+// forwarding function. Keep the caller's storage identity through the checked tree.
 fn sema_call_memory_address_of(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if args.len() != 1 {
         &diagnostics.push(sema_error("E0104", span, "`address_of` expects 1 argument, got {args.len()}", "an address names one value's storage", "pass the value whose address is needed"))
@@ -32,7 +32,7 @@ fn sema_call_memory_address_of(args: [CallArg], span: Span, expected: Type?, env
         return None
     }
     value :: sema_check_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    sema_expr_expected_owned(sema_tir_node(Type.Int, TExprKind.RawAddressOf{place: TPlace.Expr{value: value}}, span), expected, environment, program, &diagnostics)
+    sema_expr_expected_owned(sema_tree_node(Type.Int, TExprKind.RawAddressOf{place: TPlace.Expr{value: value}}, span), expected, environment, program, &diagnostics)
 }
 
 fn sema_call_memory_allocator_name(ty: Type) -> String? {
@@ -227,14 +227,14 @@ fn sema_call_try_memory_static(receiver: Expr, method: String, args: [CallArg], 
                 }
                 index += 1
             }
-            tir_args := [TCallArg]{}
+            tree_args := [TCallArg]{}
             index = 0
             loop index < values.len() {
                 borrowed := name == "Fixed" && method == "over"
-                &tir_args.push(sema_call_memory_call_arg(args[index], values[index], borrowed, borrowed))
+                &tree_args.push(sema_call_memory_call_arg(args[index], values[index], borrowed, borrowed))
                 index += 1
             }
-            value := sema_tir_node(Type.Named{name: name}, TExprKind.AllocNew{ctor: constructor, args: tir_args}, span)
+            value := sema_tree_node(Type.Named{name: name}, TExprKind.AllocNew{ctor: constructor, args: tree_args}, span)
             return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
         }
         else -> { return SemaMethodSpecialCheck{handled: false, value: None} }
@@ -278,7 +278,7 @@ fn sema_call_memory_allocator_method(receiver: Expr, receiver_value: TExpr, name
             places := sema_ownership_places_from_expr_in_state(receiver, scopes, &state)
             loop place in places -> sema_ownership_invalidate_view_owner(&state, place, "reset", span)
         }
-        value := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.AllocReset, args: [TExpr]{}}, span)
+        value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.AllocReset, args: [TExpr]{}}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
     }
     payload :: sema_check_expression(updated_args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
@@ -291,7 +291,7 @@ fn sema_call_memory_allocator_method(receiver: Expr, receiver_value: TExpr, name
     result := if method == "try_alloc" -> Type.Result{ok: view, err: Type.Named{name: "AllocError"}} else -> view
     operation := if method == "try_alloc" -> THandleOp.AllocTryAlloc else -> THandleOp.AllocAlloc
     if !sema_call_memory_record_allocator_effect(name, method, result, span, environment, program, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    value := sema_tir_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{payload}}, span)
+    value := sema_tree_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{payload}}, span)
     return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
@@ -364,7 +364,7 @@ fn sema_call_memory_guard_ast_projection(expression: Expr) -> [String]? {
     return Val(fields)
 }
 
-fn sema_call_memory_guard_tir_projection(value: TExpr, parameter: String) -> [TFieldRef]? {
+fn sema_call_memory_guard_tree_projection(value: TExpr, parameter: String) -> [TFieldRef]? {
     lambda_value :: if value.kind == {
         // copy: `found` is a payload of read parameter `value`, which keeps the original; the Val carrier owns this one
         .Lambda(found) -> Val(found.copy())
@@ -451,7 +451,7 @@ fn sema_call_memory_shared_guard_method(receiver: Expr, receiver_value: TExpr, g
             if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
             // Waiting blocks until a notify; it reads no clock.
             if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "SharedGuard.wait", span, [EffectRowEntry]{EffectRowEntry{name: "Time.Wait", span: span}}, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-            value := sema_tir_node(Type.Result{ok: Type.Named{name: "Unit"}, err: Type.String}, TExprKind.SharedGuardWait{guard: receiver_value, condition: condition, predicate: lambda}, span)
+            value := sema_tree_node(Type.Result{ok: Type.Named{name: "Unit"}, err: Type.String}, TExprKind.SharedGuardWait{guard: receiver_value, condition: condition, predicate: lambda}, span)
             return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
         }
         &diagnostics.push(sema_error("E0112", args[1].span, "`SharedGuard.wait` predicate must be a lambda", "wait rechecks the predicate after each wake", "write `value -> predicate`"))
@@ -480,7 +480,7 @@ fn sema_call_memory_shared_guard_method(receiver: Expr, receiver_value: TExpr, g
             .Lambda(lambda, _) -> lambda.params[0].name
             else -> ""
         }
-        path :: sema_call_memory_guard_tir_projection(callback, parameter_name)
+        path :: sema_call_memory_guard_tree_projection(callback, parameter_name)
         path_valid := path != None
         if path_valid -> path_valid = sema_call_memory_guard_projection_stored(path ?? [TFieldRef]{}, environment, program)
         if !path_valid {

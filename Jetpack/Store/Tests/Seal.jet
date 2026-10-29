@@ -171,7 +171,7 @@ fn store_test_make_writable(path: String) Never! {
 }
 
 // Rust COMMAND_MEMO semantics, exercised without native filesystem leaves.
-// #4454: generated MIR takes an owner value slot twice; keep this real case.
+// #4454: generated IR takes an owner value slot twice; keep this real case.
 #Test("store verification owner keeps armed memo shared and invocation isolated") {
     verification := StoreVerification.new()
     other := StoreVerification.new()
@@ -196,7 +196,7 @@ fn store_test_make_writable(path: String) Never! {
 
 // Rust VERIFIED_DIGESTS/hash-count ownership: invalidation drops all kinds for
 // one path, while resetting observation counts never removes a cached digest.
-// #4454: generated MIR takes an owner value slot twice; keep this real case.
+// #4454: generated IR takes an owner value slot twice; keep this real case.
 #Test("store verification owner separates digest kinds counts and invalidation") {
     verification := StoreVerification.new()
     stamp :: DigestStamp{device: 1, inode: 2, size: 3, modified_ns: 4}
@@ -235,7 +235,7 @@ fn store_test_set_census_enabled(verification: &StoreVerification, enabled: Bool
 
 // Rust census_note/census_report: disabled census is absent, enabled counts
 // include every check, and the rendered descending rows stop at fifteen.
-// #4454: generated MIR takes an owner value slot twice; keep this real case.
+// #4454: generated IR takes an owner value slot twice; keep this real case.
 #Test("store verification census counts checks and bounds descending report") {
     verification := StoreVerification.new()
     store_test_set_census_enabled(&verification, false)

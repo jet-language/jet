@@ -1,6 +1,6 @@
 // Module-level declaration registration followed by function body checking.
 // The result explicitly reports when a source form lies beyond this checker
-// slice so consumers cannot treat its TIR as a complete semantic program.
+// slice so consumers cannot treat its checked tree as a complete semantic program.
 use jet_foundation.[
     BodyExpr,
     BodyTree,
@@ -2142,7 +2142,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     sema_place_borrow_function(&body, params, place_borrow_receiver, context.arena.tree)
     target :: sema_function_target_applicability(func)
     memo :: sema_function_header_memo_config(func)
-    tir := TFunc{
+    built := TFunc{
         name: func.name,
         module_name: module_name,
         module_identity: module_identity,
@@ -2186,7 +2186,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     // The checker's tree ends here, as the function's flat body; nodes the
     // checker gave no id take flat-local ones.
     SemaFunctionResult{
-        value: Val(body_flat_function(tir, context.arena.tree)),
+        value: Val(body_flat_function(built, context.arena.tree)),
         complete: true,
         exact_int_reachable: context.exact_int_reachable,
         copy_events: context.copy_events.copy(),
@@ -5393,13 +5393,13 @@ fn sema_name_add_item(facts: &NameFacts, module_index: Int, module_path: String,
     }
 }
 
-fn sema_name_tir_visibility(value: TVisibility) -> NameVisibility Never! {
+fn sema_name_tree_visibility(value: TVisibility) -> NameVisibility Never! {
     if value == TVisibility.Public -> return NameVisibility.Public
     if value == TVisibility.Package -> return NameVisibility.Package
     NameVisibility.Private
 }
 
-fn sema_name_add_tir_declarations(facts: &NameFacts, module_index: Int, module_path: String, declarations: TDeclarationFacts) Never! {
+fn sema_name_add_tree_declarations(facts: &NameFacts, module_index: Int, module_path: String, declarations: TDeclarationFacts) Never! {
     loop definition in declarations.type_defs {
         name := definition.name
         path := sema_name_scoped_path(module_path, name)
@@ -5418,7 +5418,7 @@ fn sema_name_add_tir_declarations(facts: &NameFacts, module_index: Int, module_p
     loop trait_definition in declarations.traits {
         name := trait_definition.name
         path := sema_name_scoped_path(module_path, name)
-        visibility := sema_name_tir_visibility(trait_definition.visibility)
+        visibility := sema_name_tree_visibility(trait_definition.visibility)
         sema_name_add_declaration(&facts, module_index, name, path, "trait", trait_definition.span, visibility)
         loop method in trait_definition.methods -> sema_name_add_declaration(&facts, module_index, "{name}.{method.name}", "{path}.{method.name}", "method", method.span, visibility)
     }
@@ -5456,7 +5456,7 @@ fn sema_name_part_facts(graph: SemaRegistrationGraph, modules: [SemaGraphModuleR
     loop module_index < to {
         source :: graph.modules[module_index]
         checked :: modules[module_index]
-        sema_name_add_tir_declarations(&facts, module_index, source.module_path, checked.declarations)
+        sema_name_add_tree_declarations(&facts, module_index, source.module_path, checked.declarations)
         loop item in source.program.items -> sema_name_add_item(&facts, module_index, source.module_path, "", item)
         sema_name_add_display_paths(&facts, module_index, source.module_path, source.program.items)
         loop import in source.imports {

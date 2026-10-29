@@ -86,15 +86,15 @@ use jet_foundation.[
 
 // A checked node of `kind`. The kind moves in: callers build it as a literal
 // around their checked children, and copying it copied the whole subtree.
-fn sema_tir_node(ty: Type, kind: ^TExprKind, span: Span) -> TExpr Never! {
+fn sema_tree_node(ty: Type, kind: ^TExprKind, span: Span) -> TExpr Never! {
     // copy: node types are shared with the caller's checked children and context.
     TExpr{ty: ty.copy(), kind: ^kind, span: span}
 }
 
 // The read form, for a caller that keeps reading its kind.
-fn sema_tir_expr(ty: Type, kind: TExprKind, span: Span) -> TExpr Never! {
+fn sema_tree_expr(ty: Type, kind: TExprKind, span: Span) -> TExpr Never! {
     // copy: the caller keeps `kind`; the node owns its own.
-    sema_tir_node(ty, kind.copy(), span)
+    sema_tree_node(ty, kind.copy(), span)
 }
 
 // A checked node of `kind` built flat: a row of the context's arena, whose
@@ -148,7 +148,7 @@ fn sema_expr_arithmetic_policy_value(policy: ArithmeticPolicyFact, operation: Ar
         .Mul -> "mul"
         .Pow -> "pow"
     }
-    sema_tir_node(ty, TExprKind.OverflowOpt{prefix: prefix, operation: name, line: line, lhs: lhs, rhs: rhs}, span)
+    sema_tree_node(ty, TExprKind.OverflowOpt{prefix: prefix, operation: name, line: line, lhs: lhs, rhs: rhs}, span)
 }
 
 fn sema_expr_unwrap_tag(ty: Type) -> Type Never! {
@@ -338,7 +338,7 @@ fn sema_expr_integer_literal_value(value: TExpr) -> Int? {
     if value.kind == {
         .IntLit(number, width) -> if width == None -> return Val(number)
         // A literal beyond i64 is a BigInt constant with its exact decimal.
-        .CtLit(_) -> return tir_expr_literal_integer(value)
+        .CtLit(_) -> return tree_expr_literal_integer(value)
         .Unary(operator, operand) -> {
             if operator == TUnaryOp.Neg {
                 inner :: sema_expr_integer_literal_value(operand) ?? return None
@@ -414,13 +414,13 @@ fn sema_expr_precise_name(ty: Type) -> String? {
 fn sema_expr_precise_integer(value: TExpr, type_name_value: String, span: Span) -> TExpr? {
     literal :: sema_expr_integer_literal_value(value) ?? return None
     if type_name_value == "Fraction" {
-        one := sema_tir_node(Type.Int, TExprKind.IntLit{value: 1, width: None}, span)
+        one := sema_tree_node(Type.Int, TExprKind.IntLit{value: 1, width: None}, span)
         numerator :: sema_expr_unbounded_integer_literal(literal, span)
-        return Val(sema_tir_node(Type.Named{name: "Fraction"}, TExprKind.PreciseBuiltin{type_name: "Fraction", function: "from_parts", args: [TExpr]{numerator, one}}, span))
+        return Val(sema_tree_node(Type.Named{name: "Fraction"}, TExprKind.PreciseBuiltin{type_name: "Fraction", function: "from_parts", args: [TExpr]{numerator, one}}, span))
     }
     if type_name_value == "Decimal" {
-        text := sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "{literal}"}}}, span)
-        return Val(sema_tir_node(Type.Named{name: "Decimal"}, TExprKind.PreciseBuiltin{type_name: "Decimal", function: "from_str", args: [TExpr]{text}}, span))
+        text := sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "{literal}"}}}, span)
+        return Val(sema_tree_node(Type.Named{name: "Decimal"}, TExprKind.PreciseBuiltin{type_name: "Decimal", function: "from_str", args: [TExpr]{text}}, span))
     }
     None
 }
@@ -429,7 +429,7 @@ fn sema_expr_precise_complex(value: TExpr, span: Span, line: Int, context: &Sema
     if !sema_expr_is_numeric(value.ty) -> return None
     real :: sema_expr_numeric_literal_conversion(value, Type.Float, span, line, &diagnostics) ?? return None
     imaginary := sema_node(&context, Type.Float, NodeKind.FloatLit{value: 0.0}, span)
-    Val(sema_tir_node(Type.Named{name: "Complex"}, TExprKind.PreciseBuiltin{type_name: "Complex", function: "from_parts", args: [TExpr]{real, imaginary}}, span))
+    Val(sema_tree_node(Type.Named{name: "Complex"}, TExprKind.PreciseBuiltin{type_name: "Complex", function: "from_parts", args: [TExpr]{real, imaginary}}, span))
 }
 
 fn sema_expr_operator_trait(op: BinOp) -> String? {
@@ -526,10 +526,10 @@ fn sema_expr_operator_ordering_variant(op: BinOp) -> String Never! {
 
 fn sema_expr_operator_ordering_test(op: BinOp, comparison: TExpr, span: Span, line: Int) -> TExpr Never! {
     variant := sema_expr_operator_ordering_variant(op)
-    ordering := sema_tir_node(Type.Named{name: "Ordering"}, TExprKind.EnumLit{enum_type: "Ordering", variant: variant, payload: TEnumPayload.Unit}, span)
+    ordering := sema_tree_node(Type.Named{name: "Ordering"}, TExprKind.EnumLit{enum_type: "Ordering", variant: variant, payload: TEnumPayload.Unit}, span)
     test_op := TBinaryOp.Eq
     if op == BinOp.Le || op == BinOp.Ge || op == BinOp.Ne -> test_op = TBinaryOp.Ne
-    sema_tir_node(Type.Bool, TExprKind.Binary{op: test_op, overflow: false, line: line, lhs: comparison, rhs: ordering}, span)
+    sema_tree_node(Type.Bool, TExprKind.Binary{op: test_op, overflow: false, line: line, lhs: comparison, rhs: ordering}, span)
 }
 fn sema_expr_check_operator(op: BinOp, left: Expr, right: Expr, lhs: TExpr, rhs: TExpr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], line: Int) -> TExpr? {
     resolution := SemaExprOperatorResolution?{None}
@@ -601,7 +601,7 @@ fn sema_expr_check_operator(op: BinOp, left: Expr, right: Expr, lhs: TExpr, rhs:
             return sema_expr_expected_owned(^result, expected, environment, program, &diagnostics)
         }
         if op == BinOp.Ne {
-            result := sema_tir_node(Type.Bool, TExprKind.Unary{op: TUnaryOp.Not, operand: value}, span)
+            result := sema_tree_node(Type.Bool, TExprKind.Unary{op: TUnaryOp.Not, operand: value}, span)
             return sema_expr_expected_owned(^result, expected, environment, program, &diagnostics)
         }
     }
@@ -783,7 +783,7 @@ fn sema_expr_operator_function_candidate(graph: SemaRegistrationGraph, function:
     &candidates.push(SemaExprOperatorResolution{candidate: candidate, receiver_is_left: true})
 }
 
-fn sema_expr_tir_binary_op(op: BinOp) -> TBinaryOp Never! {
+fn sema_expr_tree_binary_op(op: BinOp) -> TBinaryOp Never! {
     if op == {
         .Add -> TBinaryOp.Add
         .Sub -> TBinaryOp.Sub
@@ -914,7 +914,7 @@ fn sema_expr_op_mismatch(op: BinOp, lhs: Type, rhs: Type, span: Span) -> Diagnos
     sema_error("E0109", span, "{label} can't compare or combine {sema_type_show(lhs)} and {sema_type_show(rhs)}", "the operator has no built-in rule and no user-defined `impl Type.Trait` hook for this operand pair", "use a supported operand pair, call a named method, or implement the operator's hook trait on your own type for this pair")
 }
 
-fn sema_expr_tir_unit_format(format: UnitFormat) -> TUnitFormat Never! {
+fn sema_expr_tree_unit_format(format: UnitFormat) -> TUnitFormat Never! {
     if format == {
         .Symbol -> TUnitFormat.Symbol
         .Name -> TUnitFormat.Name
@@ -936,7 +936,7 @@ fn sema_expr_string_format(format: StrFormat) -> TStrFormat Never! {
         .Percent(digits) -> TStrFormat.Percent{digits: digits}
         .Bin -> TStrFormat.Bin
         .Oct -> TStrFormat.Oct
-        .Unit(unit_format) -> TStrFormat.Unit{format: sema_expr_tir_unit_format(unit_format)}
+        .Unit(unit_format) -> TStrFormat.Unit{format: sema_expr_tree_unit_format(unit_format)}
     }
 }
 
@@ -969,7 +969,7 @@ fn sema_expr_expected_trait_coercion(value: ^TExpr, required: Type, offered: Typ
             if bounds.len() != 1 -> return updated
             if offered == .TraitObject(_) -> return updated
             source := updated
-            tir_expr_retype(&updated, required)
+            tree_expr_retype(&updated, required)
             updated.kind = TExprKind.TraitBox{value: source, target: required}
             return updated
         }
@@ -985,7 +985,7 @@ fn sema_expr_expected_trait_coercion(value: ^TExpr, required: Type, offered: Typ
 fn sema_expr_optional_lift(value: TExpr, required: Type, offered: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr? {
     lifted_type :: sema_expr_optional_lift_type(required, offered, environment, program) ?? return None
     // copy: the caller keeps its operand; the lifted node owns its own.
-    Val(sema_tir_node(lifted_type, TExprKind.Present{value: value.copy()}, value.span))
+    Val(sema_tree_node(lifted_type, TExprKind.Present{value: value.copy()}, value.span))
 }
 
 // The optional type a value of type `offered` lifts to under `required`, or
@@ -1045,14 +1045,14 @@ fn sema_expr_expected_owned(value: ^TExpr, expected: Type?, environment: SemaSco
         }
         span :: owned.span
         if owned.kind == .Map(entries) {
-            payload :: sema_tir_node(owned.ty, TExprKind.MapLit{entries: entries}, span)
-            return Val(sema_tir_node(required, TExprKind.JSONLit{variant: "Object", arg: Val(payload), clone_arg: false}, span))
+            payload :: sema_tree_node(owned.ty, TExprKind.MapLit{entries: entries}, span)
+            return Val(sema_tree_node(required, TExprKind.JSONLit{variant: "Object", arg: Val(payload), clone_arg: false}, span))
         }
-        return Val(sema_tir_node(required, TExprKind.HandleMethod{receiver: ^owned, operation: THandleOp.SerdeEncode, args: [TExpr]{}}, span))
+        return Val(sema_tree_node(required, TExprKind.HandleMethod{receiver: ^owned, operation: THandleOp.SerdeEncode, args: [TExpr]{}}, span))
     }
     if sema_expr_optional_lift_type(required, offered, environment, program) == .Val(lifted_type) {
         span :: owned.span
-        return Val(sema_tir_node(lifted_type, TExprKind.Present{value: ^owned}, span))
+        return Val(sema_tree_node(lifted_type, TExprKind.Present{value: ^owned}, span))
     }
     if sema_expr_strict_zone_erased(required, offered, environment, program) {
         &diagnostics.push(sema_error("E0771", owned.span, "this needs {sema_type_show(required)}, but the function value is {sema_type_show(offered)}", "public labels and parameter zones are part of a function's callable type", "use `{type_name(required)}` here"))
@@ -1205,8 +1205,8 @@ fn sema_expr_check_precise_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span,
         sema_expr_precise_error(op, lhs.ty, rhs.ty, span, &diagnostics)
         return None
     }
-    value := sema_tir_node(result_ty, TExprKind.PreciseBuiltin{type_name: precise_name, function: operation, args: [TExpr]{left, right}}, span)
-    if op == BinOp.Ne -> return Val(sema_tir_node(Type.Bool, TExprKind.Unary{op: TUnaryOp.Not, operand: value}, span))
+    value := sema_tree_node(result_ty, TExprKind.PreciseBuiltin{type_name: precise_name, function: operation, args: [TExpr]{left, right}}, span)
+    if op == BinOp.Ne -> return Val(sema_tree_node(Type.Bool, TExprKind.Unary{op: TUnaryOp.Not, operand: value}, span))
     Val(value)
 }
 fn sema_expr_is_math_type_name(name: String) -> Bool Never! {
@@ -1264,7 +1264,7 @@ fn sema_expr_math_scalar_result(op: BinOp, math_name: String, scalar: Type) -> T
 fn sema_expr_math_scalar_to_float(value: TExpr, span: Span, line: Int, diagnostics: &[Diagnostic]) -> TExpr? {
     if value.ty == Type.Float || value.ty == Type.Float32 || value.ty == (Type.Named{name: "F64"}) -> return Val(value)
     if value.ty == (Type.Named{name: "Decimal"}) || value.ty == (Type.Named{name: "Fraction"}) {
-        return Val(sema_tir_node(Type.Float, TExprKind.PreciseBuiltin{type_name: type_name(value.ty), function: "to_float", args: [TExpr]{value}}, span))
+        return Val(sema_tree_node(Type.Float, TExprKind.PreciseBuiltin{type_name: type_name(value.ty), function: "to_float", args: [TExpr]{value}}, span))
     }
     sema_expr_numeric_literal_conversion(value, Type.Float, span, line, &diagnostics)
 }
@@ -1286,21 +1286,21 @@ fn sema_expr_check_math_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, li
         if op == BinOp.Div -> function = "div"
         if op == BinOp.Eq -> function = "equal"
         if op == BinOp.Ne -> function = "equal"
-        value := sema_tir_node(result, TExprKind.MathBuiltin{type_name: left_name ?? "", function: function, args: [TExpr]{lhs, rhs}}, span)
-        if op == BinOp.Ne -> return Val(sema_tir_node(Type.Bool, TExprKind.Unary{op: TUnaryOp.Not, operand: value}, span))
+        value := sema_tree_node(result, TExprKind.MathBuiltin{type_name: left_name ?? "", function: function, args: [TExpr]{lhs, rhs}}, span)
+        if op == BinOp.Ne -> return Val(sema_tree_node(Type.Bool, TExprKind.Unary{op: TUnaryOp.Not, operand: value}, span))
         return Val(value)
     }
     if left_math {
         scalar_result := sema_expr_math_scalar_result(op, left_name ?? "", rhs.ty) ?? return None
         scalar :: sema_expr_math_scalar_to_float(rhs, span, line, &diagnostics) ?? return None
         function := if op == BinOp.Mul -> "mul" else -> "div"
-        return Val(sema_tir_node(scalar_result, TExprKind.MathBuiltin{type_name: left_name ?? "", function: function, args: [TExpr]{lhs, scalar}}, span))
+        return Val(sema_tree_node(scalar_result, TExprKind.MathBuiltin{type_name: left_name ?? "", function: function, args: [TExpr]{lhs, scalar}}, span))
     }
     scalar_result := sema_expr_math_scalar_result(op, right_name ?? "", lhs.ty) ?? return None
     scalar :: sema_expr_math_scalar_to_float(lhs, span, line, &diagnostics) ?? return None
     right_name_value := right_name ?? ""
     function := if op == BinOp.Mul -> "mul_{right_name_value}" else -> "div_{right_name_value}"
-    Val(sema_tir_node(scalar_result, TExprKind.MathBuiltin{type_name: "Float", function: function, args: [TExpr]{scalar, rhs}}, span))
+    Val(sema_tree_node(scalar_result, TExprKind.MathBuiltin{type_name: "Float", function: function, args: [TExpr]{scalar, rhs}}, span))
 }
 fn sema_expr_geometry_is_point(ty: Type) -> Bool Never! {
     if ty == {
@@ -1454,13 +1454,13 @@ fn sema_expr_check_geometry_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span
     if op == BinOp.Eq || op == BinOp.Ne {
         test_op := TBinaryOp.Eq
         if op == BinOp.Ne -> test_op = TBinaryOp.Ne
-        value := sema_tir_node(Type.Bool, TExprKind.Binary{op: test_op, overflow: false, line: line, lhs: lhs, rhs: rhs}, span)
+        value := sema_tree_node(Type.Bool, TExprKind.Binary{op: test_op, overflow: false, line: line, lhs: lhs, rhs: rhs}, span)
         return Val(value)
     }
     if op == BinOp.Add || op == BinOp.Sub {
         function := "add"
         if op == BinOp.Sub -> function = "sub"
-        value := sema_tir_node(result, TExprKind.MathBuiltin{type_name: sema_expr_geometry_name(lhs.ty), function: function, args: [TExpr]{lhs, rhs}}, span)
+        value := sema_tree_node(result, TExprKind.MathBuiltin{type_name: sema_expr_geometry_name(lhs.ty), function: function, args: [TExpr]{lhs, rhs}}, span)
         return Val(value)
     }
     sema_expr_geometry_diagnostic(op, lhs.ty, rhs.ty, span, &diagnostics)
@@ -1471,10 +1471,10 @@ fn sema_expr_check_duration_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span
     if lhs.ty == (Type.Named{name: "Duration"}) && rhs.ty == Type.Int && (op == BinOp.Mul || op == BinOp.Div) {
         operation := THandleOp.DurationScale
         if op == BinOp.Div -> operation = THandleOp.DurationDivide
-        return Val(sema_tir_node(Type.Named{name: "Duration"}, TExprKind.HandleMethod{receiver: lhs, operation: operation, args: [TExpr]{rhs}}, span))
+        return Val(sema_tree_node(Type.Named{name: "Duration"}, TExprKind.HandleMethod{receiver: lhs, operation: operation, args: [TExpr]{rhs}}, span))
     }
     if lhs.ty == Type.Int && rhs.ty == (Type.Named{name: "Duration"}) && op == BinOp.Mul {
-        return Val(sema_tir_node(Type.Named{name: "Duration"}, TExprKind.HandleMethod{receiver: rhs, operation: THandleOp.DurationScale, args: [TExpr]{lhs}}, span))
+        return Val(sema_tree_node(Type.Named{name: "Duration"}, TExprKind.HandleMethod{receiver: rhs, operation: THandleOp.DurationScale, args: [TExpr]{lhs}}, span))
     }
     None
 }
@@ -1485,7 +1485,7 @@ fn sema_expr_check_time_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, li
     if op == BinOp.Eq || op == BinOp.Ne || op == BinOp.Lt || op == BinOp.Gt || op == BinOp.Le || op == BinOp.Ge || op == BinOp.Compare {
         if lhs.ty != rhs.ty -> return None
         result_ty := if op == BinOp.Compare -> Type.Named{name: "Ordering"} else -> Type.Bool
-        return Val(sema_tir_node(result_ty, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span))
+        return Val(sema_tree_node(result_ty, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span))
     }
     result := Type?{None}
     if {
@@ -1501,7 +1501,7 @@ fn sema_expr_check_time_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, li
         }
     }
     result_ty :: result ?? return None
-    Val(sema_tir_node(result_ty, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span))
+    Val(sema_tree_node(result_ty, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span))
 }
 
 struct SemaExprDistinctFacts {
@@ -1583,11 +1583,11 @@ fn sema_expr_check_distinct_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span
         if distinct.range != None {
             _ := sema_scope_require_knowledge_gate(&scopes, SemaKnowledgePlane.Range, SemaKnowledgeGate.BoundedArithmetic, span, &diagnostics)
             base := distinct.base
-            effective_lhs = sema_tir_node(base, TExprKind.DistinctRaw{value: lhs}, span)
-            effective_rhs = sema_tir_node(base, TExprKind.DistinctRaw{value: rhs}, span)
+            effective_lhs = sema_tree_node(base, TExprKind.DistinctRaw{value: lhs}, span)
+            effective_rhs = sema_tree_node(base, TExprKind.DistinctRaw{value: rhs}, span)
             result_ty = base
         }
-        return Val(sema_tir_node(result_ty, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: effective_lhs, rhs: effective_rhs}, span))
+        return Val(sema_tree_node(result_ty, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: effective_lhs, rhs: effective_rhs}, span))
     }
     if op == BinOp.Eq || op == BinOp.Ne {
         if !sema_expr_distinct_same(lhs.ty, rhs.ty, left_facts, right_facts) {
@@ -1595,7 +1595,7 @@ fn sema_expr_check_distinct_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span
             &diagnostics.push(sema_error("E0128", span, "a `{type_name(lhs.ty)}` can't be compared with a `{type_name(rhs.ty)}`", "`{distinct.name}` is a distinct type; it only compares equal to another `{distinct.name}`", "use `.raw()` to compare the underlying values, or construct a `{distinct.name}`"))
             return None
         }
-        return Val(sema_tir_node(Type.Bool, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span))
+        return Val(sema_tree_node(Type.Bool, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span))
     }
     None
 }
@@ -1812,7 +1812,7 @@ fn sema_expr_unit_counterpart(fact: SemaRegistrationUnitFact, kind: QuantityKind
 }
 
 fn sema_expr_unit_raw(value: TExpr, span: Span) -> TExpr Never! {
-    sema_tir_node(Type.Float, TExprKind.DistinctRaw{value: value}, span)
+    sema_tree_node(Type.Float, TExprKind.DistinctRaw{value: value}, span)
 }
 
 fn sema_expr_unit_measured_relative_uncertainty(fact: SemaRegistrationUnitFact) -> Float? {
@@ -1845,7 +1845,7 @@ fn sema_expr_unit_conversion(value: TExpr, source: SemaRegistrationUnitFact, des
     scale :: sema_expr_unit_ratio_div(source.scale, destination.scale) ?? UnitRatio{numerator: 1, denominator: 1}
     offset := sema_expr_unit_ratio_div(sema_expr_unit_ratio_sub(source.offset, destination.offset), destination.scale) ?? UnitRatio{numerator: 0, denominator: 1}
     relative_uncertainty := sema_expr_unit_relative_uncertainty(source, destination)
-    sema_tir_node(Type.Named{name: destination.name}, TExprKind.UnitConvert{argument: value, scale: sema_expr_unit_ratio_text(scale), offset: sema_expr_unit_ratio_text(offset), rounding: None, fallible: false, relative_uncertainty: relative_uncertainty, file: environment.source_file, line: line}, span)
+    sema_tree_node(Type.Named{name: destination.name}, TExprKind.UnitConvert{argument: value, scale: sema_expr_unit_ratio_text(scale), offset: sema_expr_unit_ratio_text(offset), rounding: None, fallible: false, relative_uncertainty: relative_uncertainty, file: environment.source_file, line: line}, span)
 }
 
 fn sema_expr_unit_arithmetic_mismatch(op: BinOp, lhs: Type, rhs: Type, span: Span, diagnostics: &[Diagnostic]) {
@@ -1867,17 +1867,17 @@ fn sema_expr_unit_is_scalable(fact: SemaRegistrationUnitFact) -> Bool Never! {
 fn sema_expr_unit_binary_result(op: BinOp, lhs: TExpr, rhs: TExpr, left_fact: SemaRegistrationUnitFact, right_fact: SemaRegistrationUnitFact, destination: SemaRegistrationUnitFact, span: Span, line: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr Never! {
     left_value := sema_expr_unit_raw(sema_expr_unit_conversion(lhs, left_fact, destination, span, line, environment, program), span)
     right_value := sema_expr_unit_raw(sema_expr_unit_conversion(rhs, right_fact, destination, span, line, environment, program), span)
-    raw := sema_tir_node(Type.Float, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: left_value, rhs: right_value}, span)
+    raw := sema_tree_node(Type.Float, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: left_value, rhs: right_value}, span)
     if op == BinOp.Eq || op == BinOp.Ne || op == BinOp.Lt || op == BinOp.Gt || op == BinOp.Le || op == BinOp.Ge {
-        return sema_tir_expr(Type.Bool, raw.kind, span)
+        return sema_tree_expr(Type.Bool, raw.kind, span)
     }
-    if op == BinOp.Compare -> return sema_tir_expr(Type.Named{name: "Ordering"}, raw.kind, span)
+    if op == BinOp.Compare -> return sema_tree_expr(Type.Named{name: "Ordering"}, raw.kind, span)
     sema_expr_unit_wrap_raw(raw, destination, span, line, environment, program)
 }
 
 fn sema_expr_unit_wrap_raw(value: TExpr, fact: SemaRegistrationUnitFact, span: Span, line: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr Never! {
     relative_uncertainty := sema_expr_unit_measured_relative_uncertainty(fact)
-    sema_tir_node(Type.Named{name: fact.name}, TExprKind.UnitConvert{argument: value, scale: "1/1", offset: "0/1", rounding: None, fallible: false, relative_uncertainty: relative_uncertainty, file: environment.source_file, line: line}, span)
+    sema_tree_node(Type.Named{name: fact.name}, TExprKind.UnitConvert{argument: value, scale: "1/1", offset: "0/1", rounding: None, fallible: false, relative_uncertainty: relative_uncertainty, file: environment.source_file, line: line}, span)
 }
 
 fn sema_expr_unit_dimensions_equal(left: Dimension?, right: Dimension?) -> Bool Never! {
@@ -1892,7 +1892,7 @@ fn sema_expr_unit_dimension_overflow(op: BinOp, span: Span, diagnostics: &[Diagn
 fn sema_expr_unit_mixed_result(op: BinOp, lhs: TExpr, rhs: TExpr, left_source: SemaRegistrationUnitFact, left_destination: SemaRegistrationUnitFact, right_source: SemaRegistrationUnitFact, right_destination: SemaRegistrationUnitFact, result_ty: Type, span: Span, line: Int, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr Never! {
     left_value := sema_expr_unit_raw(sema_expr_unit_conversion(lhs, left_source, left_destination, span, line, environment, program), span)
     right_value := sema_expr_unit_raw(sema_expr_unit_conversion(rhs, right_source, right_destination, span, line, environment, program), span)
-    raw := sema_tir_node(Type.Float, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: left_value, rhs: right_value}, span)
+    raw := sema_tree_node(Type.Float, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: left_value, rhs: right_value}, span)
     result_fact := sema_expr_unit_fact(result_ty, environment, program) ?? left_destination
     sema_expr_unit_wrap_raw(raw, result_fact, span, line, environment, program)
 }
@@ -1912,7 +1912,7 @@ fn sema_expr_check_unit_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, li
                 return None
             }
             scalar :: sema_expr_numeric_conversion(rhs, Type.Float, span, line) ?? return None
-            raw := sema_tir_node(Type.Float, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: sema_expr_unit_raw(lhs, span), rhs: scalar}, span)
+            raw := sema_tree_node(Type.Float, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: sema_expr_unit_raw(lhs, span), rhs: scalar}, span)
             return Val(sema_expr_unit_wrap_raw(raw, fact, span, line, environment, program))
         }
         if right_fact != None && left_fact == None && sema_expr_is_numeric(lhs.ty) {
@@ -1922,7 +1922,7 @@ fn sema_expr_check_unit_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, li
                 return None
             }
             scalar :: sema_expr_numeric_conversion(lhs, Type.Float, span, line) ?? return None
-            raw := sema_tir_node(Type.Float, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: scalar, rhs: sema_expr_unit_raw(rhs, span)}, span)
+            raw := sema_tree_node(Type.Float, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: scalar, rhs: sema_expr_unit_raw(rhs, span)}, span)
             return Val(sema_expr_unit_wrap_raw(raw, fact, span, line, environment, program))
         }
         if left_fact != None && right_fact != None {
@@ -1938,9 +1938,9 @@ fn sema_expr_check_unit_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, li
             }
             raw_lhs := sema_expr_unit_raw(lhs, span)
             raw_rhs := sema_expr_unit_raw(rhs, span)
-            raw := sema_tir_node(Type.Float, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: raw_lhs, rhs: raw_rhs}, span)
+            raw := sema_tree_node(Type.Float, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: raw_lhs, rhs: raw_rhs}, span)
             if dimensions.axes.len() == 0 -> return Val(raw)
-            return Val(sema_tir_expr(Type.Quantity{base: Type.Float, dimension: dimensions}, raw.kind, span))
+            return Val(sema_tree_expr(Type.Quantity{base: Type.Float, dimension: dimensions}, raw.kind, span))
         }
         if left_dimension != None || right_dimension != None {
             left_point := false
@@ -1969,9 +1969,9 @@ fn sema_expr_check_unit_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, li
             }
             left_value := if sema_expr_unit_fact(lhs.ty, environment, program) != None -> sema_expr_unit_raw(lhs, span) else -> lhs
             right_value := if sema_expr_unit_fact(rhs.ty, environment, program) != None -> sema_expr_unit_raw(rhs, span) else -> rhs
-            raw := sema_tir_node(Type.Float, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: left_value, rhs: right_value}, span)
+            raw := sema_tree_node(Type.Float, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: left_value, rhs: right_value}, span)
             if dimensions.axes.len() == 0 -> return Val(raw)
-            return Val(sema_tir_expr(Type.Quantity{base: Type.Float, dimension: dimensions}, raw.kind, span))
+            return Val(sema_tree_expr(Type.Quantity{base: Type.Float, dimension: dimensions}, raw.kind, span))
         }
     }
 
@@ -2034,7 +2034,7 @@ fn sema_expr_check_unit_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span, li
             }
             if type_identity_equal(lhs.ty, rhs.ty) {
                 result_ty := if op == BinOp.Compare -> Type.Named{name: "Ordering"} else -> if op == BinOp.Eq || op == BinOp.Ne || op == BinOp.Lt || op == BinOp.Gt || op == BinOp.Le || op == BinOp.Ge -> Type.Bool else -> lhs.ty
-                return Val(sema_tir_node(result_ty, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span))
+                return Val(sema_tree_node(result_ty, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span))
             }
             sema_expr_unit_arithmetic_mismatch(op, lhs.ty, rhs.ty, span, &diagnostics)
             return None
@@ -2142,7 +2142,7 @@ fn sema_expr_unbounded_integer_literal(value: Int, span: Span) -> TExpr Never! {
 // A literal outside the i64 range keeps its exact value as a
 // BigInt constant (Rust TIR `CtLit(BigInt)`); a fixed-width one crosses the
 // checked Int-to-fixed conversion, as in Rust's lowering.
-fn sema_expr_int_literal_tir(value: Int, ty: Type, width: TIntegerWidth?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr? {
+fn sema_expr_int_literal_tree(value: Int, ty: Type, width: TIntegerWidth?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr? {
     if value >= -9223372036854775807 - 1 && value <= 9223372036854775807 {
         return Val(TExpr{ty: ty, kind: TExprKind.IntLit{value: value, width: width}, span: span})
     }
@@ -2169,23 +2169,23 @@ fn sema_expr_integer_literal(value: Int, width: IntegerWidth?, expected: Type?, 
     if width == None && expected != None {
         contextual_expected :: expected
         if contextual_expected == Type.Float || contextual_expected == Type.Float32 {
-            literal :: sema_expr_int_literal_tir(value, Type.Int, None, span, environment, program) ?? return None
+            literal :: sema_expr_int_literal_tree(value, Type.Int, None, span, environment, program) ?? return None
             return sema_expr_numeric_literal_conversion(literal, contextual_expected, span, sema_source_line_at(environment.source_segments, span) ?? 0, &diagnostics)
         }
     }
     ty := Type.Int
-    tir_width := TIntegerWidth?{None}
+    tree_width := TIntegerWidth?{None}
     if {
         width != None -> {
             literal_width :: width
             ty = Type.IntN{signed: literal_width.signed, bits: literal_width.bits}
-            tir_width = Val(TIntegerWidth{signed: literal_width.signed, bits: literal_width.bits})
+            tree_width = Val(TIntegerWidth{signed: literal_width.signed, bits: literal_width.bits})
         }
         expected != None -> {
             contextual :: expected
             if contextual == .IntN(signed, bits) {
                 ty = contextual
-                tir_width = Val(TIntegerWidth{signed: signed, bits: bits})
+                tree_width = Val(TIntegerWidth{signed: signed, bits: bits})
             }
             if sema_expr_literal_range(contextual, environment, program) == .Val(range) {
                 if value < range.lo || value > range.hi {
@@ -2206,7 +2206,7 @@ fn sema_expr_integer_literal(value: Int, width: IntegerWidth?, expected: Type?, 
         }
         else -> {}
     }
-    bounded :: sema_expr_int_literal_tir(value, ty, tir_width, span, environment, program) ?? return None
+    bounded :: sema_expr_int_literal_tree(value, ty, tree_width, span, environment, program) ?? return None
     sema_expr_expected(bounded, expected, environment, program, &diagnostics)
 }
 
@@ -2216,23 +2216,23 @@ fn sema_expr_negative_integer(value: Int, width: IntegerWidth?, expected: Type?,
     if width == None && expected != None {
         contextual_expected :: expected
         if contextual_expected == Type.Float || contextual_expected == Type.Float32 {
-            literal :: sema_expr_int_literal_tir(-value, Type.Int, None, span, environment, program) ?? return None
+            literal :: sema_expr_int_literal_tree(-value, Type.Int, None, span, environment, program) ?? return None
             return sema_expr_numeric_literal_conversion(literal, contextual_expected, span, sema_source_line_at(environment.source_segments, span) ?? 0, &diagnostics)
         }
     }
     ty := Type.Int
-    tir_width := TIntegerWidth?{None}
+    tree_width := TIntegerWidth?{None}
     if {
         width != None -> {
             literal_width :: width
             ty = Type.IntN{signed: literal_width.signed, bits: literal_width.bits}
-            tir_width = Val(TIntegerWidth{signed: literal_width.signed, bits: literal_width.bits})
+            tree_width = Val(TIntegerWidth{signed: literal_width.signed, bits: literal_width.bits})
         }
         expected != None -> {
             contextual :: expected
             if contextual == .IntN(signed, bits) {
                 ty = contextual
-                tir_width = Val(TIntegerWidth{signed: signed, bits: bits})
+                tree_width = Val(TIntegerWidth{signed: signed, bits: bits})
             }
             if sema_expr_literal_range(contextual, environment, program) == .Val(range) {
                 if -value < range.lo || -value > range.hi {
@@ -2254,13 +2254,13 @@ fn sema_expr_negative_integer(value: Int, width: IntegerWidth?, expected: Type?,
             // The width's minimum has no positive operand to negate (`I8{-128}`):
             // it is one exact literal.
             if !sema_expr_integer_fits(value, signed, bits) {
-                minimum :: sema_expr_int_literal_tir(negated, ty, tir_width, span, environment, program) ?? return None
+                minimum :: sema_expr_int_literal_tree(negated, ty, tree_width, span, environment, program) ?? return None
                 return sema_expr_expected(minimum, expected, environment, program, &diagnostics)
             }
         }
         else -> {}
     }
-    operand :: sema_expr_int_literal_tir(value, ty, tir_width, span, environment, program) ?? return None
+    operand :: sema_expr_int_literal_tree(value, ty, tree_width, span, environment, program) ?? return None
     bounded :: TExpr{ty: ty, kind: TExprKind.Unary{op: TUnaryOp.Neg, operand: operand}, span: span}
     sema_expr_expected(bounded, expected, environment, program, &diagnostics)
 }
@@ -2502,7 +2502,7 @@ fn sema_expr_record_call_fact(environment: SemaScopeEnvironment, program: SemaPr
     if !sema_expr_comptime_target_declared(environment, program, &scopes, symbol) -> return true
     target :: sema_expr_comptime_target(environment, program, &scopes, symbol) ?? return true
     args :: sema_expr_comptime_call_args(checked.value, context) ?? {
-        &diagnostics.push(sema_error("E0956", span, "compile-time call `{target.path}` needs compile-time value arguments", "the deferred MIR evaluator receives only canonical TComptimeValue arguments", "pass supported compile-time values to this call"))
+        &diagnostics.push(sema_error("E0956", span, "compile-time call `{target.path}` needs compile-time value arguments", "the deferred IR evaluator receives only canonical TComptimeValue arguments", "pass supported compile-time values to this call"))
         return false
     }
     &context.comptime_requests.push(SemaComptimeRequest{callee_key: symbol.key, module_identity: target.module_identity, args: args, span: span, checked_text: None})
@@ -2947,7 +2947,7 @@ fn sema_expr_try_explicit_unit_method(receiver: Expr, method: String, method_spa
     relative_uncertainty := sema_expr_unit_relative_uncertainty(source_fact, destination_fact)
     line := sema_source_line_at(environment.source_segments, conversion_span) ?? 0
     scalar_ty :: if measured_crossing -> Type.Result{ok: Type.Float, err: Type.String} else -> result_ty
-    value := sema_tir_node(scalar_ty, TExprKind.UnitConvert{argument: source_value, scale: sema_expr_unit_ratio_text(scale), offset: sema_expr_unit_ratio_text(offset), rounding: rounding, fallible: true, relative_uncertainty: None, file: environment.source_file, line: line}, conversion_span)
+    value := sema_tree_node(scalar_ty, TExprKind.UnitConvert{argument: source_value, scale: sema_expr_unit_ratio_text(scale), offset: sema_expr_unit_ratio_text(offset), rounding: rounding, fallible: true, relative_uncertainty: None, file: environment.source_file, line: line}, conversion_span)
     if measured_crossing {
         relative :: sema_node(&context, Type.Float, NodeKind.FloatLit{value: relative_uncertainty ?? 0.0}, conversion_span)
         value = sema_expression_measurement_source_call("__measurement_result", [TExpr]{value, relative}, result_ty, conversion_span, environment, program) ?? return SemaMethodSpecialCheck{handled: true, value: None}
@@ -2980,7 +2980,7 @@ fn sema_expr_check_take_pattern_method(receiver: Expr, receiver_value: TExpr, me
                 ok_ty := if tuple_fields.len() == 0 -> Type.Named{name: "Unit"} else -> Type.Tuple{fields: tuple_fields}
                 result_ty := Type.Result{ok: ok_ty, err: Type.String}
                 operation := THandleOp.CursorTakePattern{parts: parts, canonical: canonical}
-                value := sema_tir_node(result_ty, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
+                value := sema_tree_node(result_ty, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
                 checked := sema_expr_expected(value, expected, environment, program, &diagnostics)
                 return SemaMethodSpecialCheck{handled: true, value: checked}
             }
@@ -3004,7 +3004,7 @@ fn sema_expr_check_take_pattern_method(receiver: Expr, receiver_value: TExpr, me
             ok_ty := if tuple_fields.len() == 0 -> Type.Named{name: "Unit"} else -> Type.Tuple{fields: tuple_fields}
             result_ty := Type.Result{ok: ok_ty, err: Type.String}
             operation := THandleOp.ReaderTakePattern{parts: parts, canonical: canonical}
-            value := sema_tir_node(result_ty, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
+            value := sema_tree_node(result_ty, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{}}, span)
             checked := sema_expr_expected(value, expected, environment, program, &diagnostics)
             return SemaMethodSpecialCheck{handled: true, value: checked}
         }
@@ -3268,7 +3268,7 @@ fn sema_expr_try_method_special_routes(receiver: Expr, receiver_value: TExpr, me
     // Complex is not Numeric; its magnitude is its own
     // `abs` method (a Float), lowered to the MathBuiltin route `math.abs` uses.
     if receiver_value.ty == (Type.Named{name: "Complex"}) && method == "abs" && args.len() == 0 {
-        magnitude := sema_tir_node(Type.Float, TExprKind.MathBuiltin{type_name: "Complex", function: "abs", args: [TExpr]{receiver_value}}, span)
+        magnitude := sema_tree_node(Type.Float, TExprKind.MathBuiltin{type_name: "Complex", function: "abs", args: [TExpr]{receiver_value}}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(magnitude, expected, environment, program, &diagnostics)}
     }
     game := sema_call_try_game_method(receiver, receiver_value, method, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -3664,12 +3664,12 @@ fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environ
 }
 
 fn sema_expr_check_string(parts: [StrPart], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    tir_parts := [TStrPart]{}
+    tree_parts := [TStrPart]{}
     index := 0
     loop index < parts.len() {
         if parts[index] == {
-            .Lit(text) -> &tir_parts.push(TStrPart.Literal{text: text})
-            .Byte(value) -> &tir_parts.push(TStrPart.Literal{text: sema_expr_byte_text(value)})
+            .Lit(text) -> &tree_parts.push(TStrPart.Literal{text: text})
+            .Byte(value) -> &tree_parts.push(TStrPart.Literal{text: sema_expr_byte_text(value)})
             .Interp(value, format) -> {
                 // Interpolation reads a string view through Display.
                 previous_string_view_read := context.allow_string_view_read
@@ -3690,12 +3690,12 @@ fn sema_expr_check_string(parts: [StrPart], span: Span, expected: Type?, environ
                 }
                 if !debug_family && format != StrFormat.Display && !sema_expr_check_format_selector(checked, format, environment, program, &diagnostics) -> return None
                 formatted :: if format == StrFormat.Display && sema_expr_measurement_type(checked.ty) -> sema_expression_measurement_source_call("__measurement_show", [TExpr]{checked}, Type.String, checked.span, environment, program) ?? return None else -> checked
-                &tir_parts.push(TStrPart.Interpolation{value: formatted, format: sema_expr_string_format(format)})
+                &tree_parts.push(TStrPart.Interpolation{value: formatted, format: sema_expr_string_format(format)})
             }
         }
         index += 1
     }
-    sema_expr_expected_owned(sema_tir_node(Type.String, TExprKind.StrLit{parts: tir_parts}, span), expected, environment, program, &diagnostics)
+    sema_expr_expected_owned(sema_tree_node(Type.String, TExprKind.StrLit{parts: tree_parts}, span), expected, environment, program, &diagnostics)
 }
 
 fn sema_expr_check_ident(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -3762,14 +3762,14 @@ fn sema_expr_check_unary(op: UnOp, operand: Expr, expected: Type?, span: Span, e
             return None
         }
         result_ty := sema_expr_numeric_base(value.ty)
-        return sema_expr_expected_owned(sema_tir_node(result_ty, TExprKind.Unary{op: TUnaryOp.Neg, operand: value}, span), expected, environment, program, &diagnostics)
+        return sema_expr_expected_owned(sema_tree_node(result_ty, TExprKind.Unary{op: TUnaryOp.Neg, operand: value}, span), expected, environment, program, &diagnostics)
     }
     if sema_dyn_is_type(sema_expr_expected_type(value.ty, environment, program)) {
         &diagnostics.push(sema_dyn_condition_error(span))
         return None
     }
     if value.ty == Type.Bool {
-        return sema_expr_expected_owned(sema_tir_node(Type.Bool, TExprKind.Unary{op: TUnaryOp.Not, operand: value}, span), expected, environment, program, &diagnostics)
+        return sema_expr_expected_owned(sema_tree_node(Type.Bool, TExprKind.Unary{op: TUnaryOp.Not, operand: value}, span), expected, environment, program, &diagnostics)
     }
     if sema_expr_is_integer(value.ty) {
         &diagnostics.push(sema_error("E0398", span, "`!` needs Bool; use `bit_not` to flip integer bits", "marks express ownership and outcomes; arithmetic uses named methods", "write `value.bit_not()` for an integer, or compare the value to produce Bool"))
@@ -3813,8 +3813,8 @@ fn sema_expr_union_machine_float(members: [Type]) -> Type? Never! {
 }
 
 fn sema_expr_decimal_literal(text: String, span: Span) -> TExpr Never! {
-    spelling :: sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: text}}}, span)
-    sema_tir_node(Type.Named{name: "Decimal"}, TExprKind.PreciseBuiltin{type_name: "Decimal", function: "from_str", args: [TExpr]{spelling}}, span)
+    spelling :: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: text}}}, span)
+    sema_tree_node(Type.Named{name: "Decimal"}, TExprKind.PreciseBuiltin{type_name: "Decimal", function: "from_str", args: [TExpr]{spelling}}, span)
 }
 
 fn sema_expr_float_literal(value: Float, is_f32: Bool, raw: String?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -4008,18 +4008,18 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
         dynamic_right :: sema_expr_expected(rhs, Val(sema_dyn_type()), environment, program, &diagnostics) ?? return None
         ty :: if arithmetic -> sema_dyn_type() else -> Type.Bool
         if equality {
-            value :: sema_tir_node(ty, TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: dynamic_left, rhs: dynamic_right}, span)
+            value :: sema_tree_node(ty, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: dynamic_left, rhs: dynamic_right}, span)
             return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
         }
         site :: "{sema_dyn_site(left)} {sema_expr_binary_name(op)} {sema_dyn_site(right)}"
         location :: sema_expression_panic_location(environment, program, scopes, span)
         operation :: if arithmetic -> THandleOp.DynBinary{op: sema_expr_binary_name(op), site: site, location: location} else -> THandleOp.DynCompare{op: sema_expr_binary_name(op), site: site, location: location}
-        value :: sema_tir_node(ty, TExprKind.HandleMethod{receiver: dynamic_left, operation: operation, args: [TExpr]{dynamic_right}}, span)
+        value :: sema_tree_node(ty, TExprKind.HandleMethod{receiver: dynamic_left, operation: operation, args: [TExpr]{dynamic_right}}, span)
         return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
     if op == BinOp.And || op == BinOp.Or {
         ty :: sema_expr_binary_type(op, lhs.ty, rhs.ty, span, &diagnostics) ?? return None
-        value :: TExpr{ty: ty, kind: TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span: span}
+        value :: TExpr{ty: ty, kind: TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span: span}
         if sema_expr_expected_keeps(value.ty, expected) -> return Val(value)
         return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
@@ -4027,7 +4027,7 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
     // `Int / Int` is the exact Fraction quotient; IR stops a zero divisor at
     // the operator (`Fraction.from_parts` names the same parts with no operator).
     if op == BinOp.Div && lhs.ty == Type.Int && rhs.ty == Type.Int {
-        value := sema_tir_node(Type.Named{name: "Fraction"}, TExprKind.PreciseBuiltin{type_name: "Fraction", function: "quotient", args: [TExpr]{lhs, rhs}}, span)
+        value := sema_tree_node(Type.Named{name: "Fraction"}, TExprKind.PreciseBuiltin{type_name: "Fraction", function: "quotient", args: [TExpr]{lhs, rhs}}, span)
         return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
     // (Rust `infer_binary`, E2512): `Matrix * Matrix`
@@ -4212,15 +4212,15 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
     if (op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div) && (sema_expr_is_integer(effective_lhs.ty) || sema_expr_is_integer(effective_rhs.ty)) -> overflow = true
     if op == BinOp.Pow && sema_expr_is_integer(effective_lhs.ty) -> overflow = true
     if (op == BinOp.Shl || op == BinOp.Shr) && sema_expr_is_integer(effective_lhs.ty) -> overflow = true
-    // Built and kept in place (sema_tir_expr and sema_expr_expected copy
+    // Built and kept in place (sema_tree_expr and sema_expr_expected copy
     // their borrowed value, and with it both operand trees, at every level).
-    value :: TExpr{ty: ty, kind: TExprKind.Binary{op: sema_expr_tir_binary_op(op), overflow: overflow, line: line, lhs: effective_lhs, rhs: effective_rhs}, span: span}
+    value :: TExpr{ty: ty, kind: TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: overflow, line: line, lhs: effective_lhs, rhs: effective_rhs}, span: span}
     if sema_expr_expected_keeps(value.ty, expected) -> return Val(value)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
 
 fn sema_expr_reject_unlowered(span: Span, diagnostics: &[Diagnostic]) -> TExpr? {
-    &diagnostics.push(sema_error("E0119", span, "this expression has no dependency-closed TIR lowering yet", "the checker refuses to invent a successful type or discard expression metadata", "use a supported expression form in this checker path"))
+    &diagnostics.push(sema_error("E0119", span, "this expression has no dependency-closed checked-tree lowering yet", "the checker refuses to invent a successful type or discard expression metadata", "use a supported expression form in this checker path"))
     None
 }
 
@@ -4236,7 +4236,7 @@ fn sema_expr_copy_string_view(value: Expr, scopes: &SemaScopeTable) -> Bool Neve
 }
 
 // `share`: a share site (sema_expr_check_shared_identifier),
-// whose copy MIR records with the Share fact, not the authored `.copy()`.
+// whose copy IR records with the Share fact, not the authored `.copy()`.
 fn sema_expr_check_copy_typed(checked: TExpr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, diagnostics: &[Diagnostic], string_view: Bool, share: Bool) -> TExpr? {
     facts := sema_copy_classify(checked.ty, SemaCopyIntent.Explicit, environment, program, context.generic_params, string_view)
     effect_name := sema_copy_effect_name(facts)
@@ -4257,7 +4257,7 @@ fn sema_expr_check_copy_typed(checked: TExpr, span: Span, expected: Type?, envir
         .MaterializeView -> result_kind = TExprKind.MaterializeView{value: checked}
         else -> {}
     }
-    sema_expr_expected_owned(sema_tir_expr(facts.target, result_kind, span), expected, environment, program, &diagnostics)
+    sema_expr_expected_owned(sema_tree_expr(facts.target, result_kind, span), expected, environment, program, &diagnostics)
 }
 
 fn sema_expr_check_copy(value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -4273,8 +4273,8 @@ fn sema_expr_check_copy(value: Expr, span: Span, expected: Type?, environment: S
 }
 
 // An unmarked move site that a later use reached is a
-// share. It checks like the authored copy `name.copy()`; MIR records it as a Share
-// copy, the clone the TIR read paths can elide like any sema-inserted copy.
+// share. It checks like the authored copy `name.copy()`; IR records it as a Share
+// copy, the clone the checked-tree read paths can elide like any sema-inserted copy.
 fn sema_expr_check_shared_identifier(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     previous_borrow := context.borrow_ctx
     previous_string_view_read := context.allow_string_view_read
@@ -4329,13 +4329,13 @@ fn sema_expr_check_pointer_from_address(alias: String, alias_span: Span, element
     }
     if forbidden -> return None
     pointer := Type.Apply{name: "Ptr", args: [Type]{element}}
-    sema_expr_expected_owned(sema_tir_node(pointer, TExprKind.PtrFromAddr{address: checked, element: element}, span), expected, environment, program, &diagnostics)
+    sema_expr_expected_owned(sema_tree_node(pointer, TExprKind.PtrFromAddr{address: checked, element: element}, span), expected, environment, program, &diagnostics)
 }
 
 fn sema_expr_check_comptime_name(name: String, span: Span, embedded: CtValue?, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if embedded == .Val(value) {
         if value == .Int(number) {
-            literal :: sema_expr_int_literal_tir(number, Type.Int, None, span, environment, program) ?? return None
+            literal :: sema_expr_int_literal_tree(number, Type.Int, None, span, environment, program) ?? return None
             return sema_expr_expected_owned(^literal, expected, environment, program, &diagnostics)
         }
         ty := sema_expr_expected_type(ast_comptime_value_type(value), environment, program)
@@ -4356,7 +4356,7 @@ fn sema_expr_check_comptime_name(name: String, span: Span, embedded: CtValue?, e
             .Enum(type_name, variant, args) -> if args.len() == 0 -> TExprKind.EnumLit{enum_type: type_name, variant: variant, payload: TEnumPayload.Unit} else -> TExprKind.CtLit{value: sema_checked_comptime(value) ?? return None}
             else -> TExprKind.CtLit{value: sema_checked_comptime(value) ?? return None}
         }
-        return sema_expr_expected_owned(sema_tir_expr(ty, kind, span), expected, environment, program, &diagnostics)
+        return sema_expr_expected_owned(sema_tree_expr(ty, kind, span), expected, environment, program, &diagnostics)
     }
     if sema_scope_resolve_index(scopes, name) == None {
         if scopes.comptime_execution_depth == 0 -> &diagnostics.push(sema_unknown_name_in(name, span, scopes))
@@ -4492,7 +4492,7 @@ fn sema_check_expression_cold(expr: Expr, expected: Type?, environment: SemaScop
             checked :: sema_check_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
             if forbidden -> return None
             pointer := Type.Apply{name: "Ptr", args: [Type]{checked.ty}}
-            sema_expr_expected_owned(sema_tir_node(pointer, TExprKind.RawOf{value: checked}, span), expected, environment, program, &diagnostics)
+            sema_expr_expected_owned(sema_tree_node(pointer, TExprKind.RawOf{value: checked}, span), expected, environment, program, &diagnostics)
         }
         .PtrFromAddr(alias, alias_span, element, address, span, _) -> sema_expr_check_pointer_from_address(alias, alias_span, element, address, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         .Tainted(value, tag_value, span, _) -> {
@@ -4592,7 +4592,7 @@ fn sema_expr_check_pattern_test(subject: Expr, pattern: Pattern, span: Span, exp
     if sema_pattern_test_reused_payload_name(pattern, scopes, &diagnostics) -> return None
     checked_pattern := sema_check_pattern(checked_subject, pattern, TPatternPosition.Arm, false, false, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     checked :: checked_pattern.checked ?? return None
-    sema_expr_expected_owned(sema_tir_node(Type.Bool, TExprKind.PatternMatches{subject: checked.subject, pattern: checked.pattern}, span), expected, environment, program, &diagnostics)
+    sema_expr_expected_owned(sema_tree_node(Type.Bool, TExprKind.PatternMatches{subject: checked.subject, pattern: checked.pattern}, span), expected, environment, program, &diagnostics)
 }
 
 // The deepest source nesting sema checks; the parser enforces the same

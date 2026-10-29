@@ -85,7 +85,7 @@ fn sema_reactive_call_fact(environment: SemaScopeEnvironment, program: SemaProgr
 }
 
 fn sema_reactive_core_call_value(record: CoreCallRecord, args: [TExpr], span: Span, type_args: [Type], result_type: Type, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    value :: sema_call_core_tir(record, args, span, type_args, [Bool]{}, result_type, sema_call_failure_carrier(Val(result_type)), expected, environment, program, &diagnostics) ?? return None
+    value :: sema_call_core_tree(record, args, span, type_args, [Bool]{}, result_type, sema_call_failure_carrier(Val(result_type)), expected, environment, program, &diagnostics) ?? return None
     if !sema_call_core_record_effects(record, span, type_args, result_type, sema_call_failure_carrier(Val(result_type)), [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return None
     Val(value)
 }
@@ -129,7 +129,7 @@ fn sema_reactive_check_retained_lambda(kind: String, argument: CallArg, expected
 
 fn sema_reactive_direct_closure(kind: String, lambda: TLambda, result_type: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, type_args: [Type], diagnostics: &[Diagnostic]) -> TExpr? {
     closure_kind :: if kind == "effect" -> TCoreClosureKind.ReactiveEffect{executable: lambda} else -> TCoreClosureKind.ReactiveDerived{executable: lambda}
-    value := sema_tir_node(result_type, TExprKind.CoreClosureCall{kind: closure_kind}, span)
+    value := sema_tree_node(result_type, TExprKind.CoreClosureCall{kind: closure_kind}, span)
     checked :: sema_expr_expected(value, expected, environment, program, &diagnostics) ?? return None
     if !sema_reactive_call_fact(environment, program, &scopes, &context, "core.reactive.{kind}", span, result_type, type_args, "", &diagnostics) -> return None
     Val(checked)
@@ -271,7 +271,7 @@ fn sema_call_try_reactive_handle_method(receiver: Expr, receiver_value: TExpr, m
         method == "set" -> THandleOp.ReactiveSet
         else -> THandleOp.ReactiveGet
     }
-    value := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: checked_args}, span)
+    value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: checked_args}, span)
     checked :: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }

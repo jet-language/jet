@@ -577,7 +577,7 @@ fn sema_effect_transaction_wall_diagnostic(api: String, effect_name: String, spa
 }
 
 // Check a call's declared effect row at the authored-transaction wall. The
-// caller supplies the canonical API spelling because TIR call nodes may no
+// caller supplies the canonical API spelling because checked-tree call nodes may no
 // longer retain the registration module/member pair.
 fn sema_effect_check_transaction_wall(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, effect_row: [EffectRowEntry]?, api: String, span: Span, diagnostics: &[Diagnostic]) -> Bool? {
     if scopes.transaction_wall_depth <= 0 -> return Val(true)
@@ -1526,7 +1526,7 @@ fn sema_effect_check_unsafe_expr(nodes: &[SemaEffectNode], facts: SemaEffectCall
                     sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, inner, false, &diagnostics)
                 }
                 .Block(body) -> {
-                    sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, body, false, &diagnostics)
+                    sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, body, false, &diagnostics)
                 }
             }
             return
@@ -1554,7 +1554,7 @@ fn sema_effect_check_unsafe_contracts(nodes: &[SemaEffectNode], facts: SemaEffec
     }
 }
 
-fn sema_effect_check_unsafe_statements_tir(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, caller: SemaEffectCaller, tree: BodyTree, statements: [Int], audited: Bool, diagnostics: &[Diagnostic]) {
+fn sema_effect_check_unsafe_statements_tree(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, caller: SemaEffectCaller, tree: BodyTree, statements: [Int], audited: Bool, diagnostics: &[Diagnostic]) {
     loop statement in statements {
         if tree.stmts[statement] == {
             .Contract(contract) -> {
@@ -1563,13 +1563,13 @@ fn sema_effect_check_unsafe_statements_tir(nodes: &[SemaEffectNode], facts: Sema
             }
             .ContractScope(pre, body, post, _, _) -> {
                 sema_effect_check_unsafe_contracts(&nodes, facts, caller, tree, pre, audited, &diagnostics)
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, body, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, body, audited, &diagnostics)
                 sema_effect_check_unsafe_contracts(&nodes, facts, caller, tree, post, audited, &diagnostics)
             }
             .Let(_, _, init, _, _, _) | .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) | .ListDestructure(_, init, _, _, _, _) -> sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, init, audited, &diagnostics)
             .RefutableBind(_, init, fallback, _) -> {
                 sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, init, audited, &diagnostics)
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, fallback, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, fallback, audited, &diagnostics)
             }
             .Assign(place, _, value, _, _) -> {
                 if place == {
@@ -1581,76 +1581,76 @@ fn sema_effect_check_unsafe_statements_tir(nodes: &[SemaEffectNode], facts: Sema
                 sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, value, audited, &diagnostics)
             }
             .CountedLoop(_, init, condition, step, _, body, _) -> {
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, [Int]{init}, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, [Int]{init}, audited, &diagnostics)
                 sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, condition, audited, &diagnostics)
-                if step == .Val(step_statement) -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, [Int]{step_statement}, audited, &diagnostics)
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, body, audited, &diagnostics)
+                if step == .Val(step_statement) -> sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, [Int]{step_statement}, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, body, audited, &diagnostics)
             }
             .ForRange(_, _, start, end, step, _, body, _, _) -> {
                 sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, start, audited, &diagnostics)
                 sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, end, audited, &diagnostics)
                 if step == .Val(step_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, step_value, audited, &diagnostics)
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, body, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, body, audited, &diagnostics)
             }
             .Range(_, _, source, start, end, step, _, _, body, _) -> {
                 if source == .Val(source_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, source_value, audited, &diagnostics)
                 sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, start, audited, &diagnostics)
                 sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, end, audited, &diagnostics)
                 if step == .Val(step_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, step_value, audited, &diagnostics)
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, body, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, body, audited, &diagnostics)
             }
             .ExprStmt(value, _) | .DeferClose(value, _, _) -> sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, value, audited, &diagnostics)
             .TaskGroup(_, limit, body, _) -> {
                 if limit == .Val(limit_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, limit_value, audited, &diagnostics)
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, body, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, body, audited, &diagnostics)
             }
             .If(condition, then_body, else_body, _, _) -> {
                 sema_effect_check_unsafe_condition(&nodes, facts, caller, tree, condition, audited, &diagnostics)
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, then_body, audited, &diagnostics)
-                if else_body == .Val(else_statements) -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, else_statements, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, then_body, audited, &diagnostics)
+                if else_body == .Val(else_statements) -> sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, else_statements, audited, &diagnostics)
             }
-            .Loop(_, body, _) -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, body, audited, &diagnostics)
+            .Loop(_, body, _) -> sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, body, audited, &diagnostics)
             .While(_, condition, body, _) -> {
                 sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, condition, audited, &diagnostics)
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, body, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, body, audited, &diagnostics)
             }
             .BreakValue(_, value, _) -> sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, value, audited, &diagnostics)
             .Match(subject, arms, _, _) -> {
                 sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, subject, audited, &diagnostics)
-                loop arm in arms -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, arm.body, audited, &diagnostics)
+                loop arm in arms -> sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, arm.body, audited, &diagnostics)
             }
             .EnumMatch(scrutinee, arms, else_body, _, _) -> {
                 sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, scrutinee, audited, &diagnostics)
-                loop arm in arms -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, arm.body, audited, &diagnostics)
-                if else_body == .Val(else_statements) -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, else_statements, audited, &diagnostics)
+                loop arm in arms -> sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, arm.body, audited, &diagnostics)
+                if else_body == .Val(else_statements) -> sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, else_statements, audited, &diagnostics)
             }
             .RangeSwitch(subject, arms, else_body, _) -> {
                 sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, subject, audited, &diagnostics)
-                loop arm in arms -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, arm.body, audited, &diagnostics)
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, else_body, audited, &diagnostics)
+                loop arm in arms -> sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, arm.body, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, else_body, audited, &diagnostics)
             }
             .ForIn(_, _, _, source, collection, step, _, _, _, _, body, _) -> {
                 sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, source, audited, &diagnostics)
                 sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, collection, audited, &diagnostics)
                 if step == .Val(step_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, step_value, audited, &diagnostics)
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, body, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, body, audited, &diagnostics)
             }
             .Inline(body, _) | .DebugOnly(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> {
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, body, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, body, audited, &diagnostics)
             }
             .MixedSwitch(subject, _, arms, else_body, _) -> {
                 sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, subject, audited, &diagnostics)
                 loop arm in arms {
                     sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, arm.condition, audited, &diagnostics)
-                    sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, arm.body, audited, &diagnostics)
+                    sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, arm.body, audited, &diagnostics)
                 }
-                if else_body == .Val(else_statements) -> sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, else_statements, audited, &diagnostics)
+                if else_body == .Val(else_statements) -> sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, else_statements, audited, &diagnostics)
             }
             .Unsafe(_, body) | .UnsafeBlock(_, body, _) -> {
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, body, true, &diagnostics)
+                sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, body, true, &diagnostics)
             }
             .SentryPolicy(_, body, _) | .Impure(body, _) -> {
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, body, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, body, audited, &diagnostics)
             }
             .Reactive(executable, _) -> {
                 if executable.executable == {
@@ -1658,26 +1658,26 @@ fn sema_effect_check_unsafe_statements_tir(nodes: &[SemaEffectNode], facts: Sema
                         sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, value, false, &diagnostics)
                     }
                     .Block(body) -> {
-                        sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, body, false, &diagnostics)
+                        sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, body, false, &diagnostics)
                     }
                 }
             }
             .Layout(_, _, body, _) -> {
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, body, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, body, audited, &diagnostics)
             }
             .ContextBlock(guards, body, _) -> {
                 loop guard in guards -> sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, guard.value, audited, &diagnostics)
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, body, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, body, audited, &diagnostics)
             }
             .ScopeMember(_, body, _) -> {
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, body, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, body, audited, &diagnostics)
             }
             .Transact(_, _, _, body, _) -> {
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, body, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, body, audited, &diagnostics)
             }
             .GCEdit(_, _, _, _, index_temp, nested, _) -> {
                 if index_temp == .Val(index_value) -> sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, index_value, audited, &diagnostics)
-                sema_effect_check_unsafe_statements_tir(&nodes, facts, caller, tree, [Int]{nested}, audited, &diagnostics)
+                sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, [Int]{nested}, audited, &diagnostics)
             }
             else -> {
                 sema_effect_walk_stmt_children(SemaEffectWalk.Unsafe{audited: audited}, &nodes, facts, &diagnostics, caller, tree, tree.stmts[statement])
@@ -2595,7 +2595,7 @@ fn sema_effect_collect_one(nodes: &[SemaEffectNode], node_index: Int, function: 
     // `#Unsafe` function; with none in the graph the walk finds nothing.
     if any_unsafe {
         audited := function.is_unsafe && (function.unsafe_gate.map((gate) -> gate.enabled) ?? false)
-        sema_effect_check_unsafe_statements_tir(&nodes, calls, sema_effect_caller_slot(calls, module_index, function.key), function.tree, function.body, audited, &diagnostics)
+        sema_effect_check_unsafe_statements_tree(&nodes, calls, sema_effect_caller_slot(calls, module_index, function.key), function.tree, function.body, audited, &diagnostics)
     }
 }
 
@@ -3171,7 +3171,7 @@ fn sema_effect_walk_stmt_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode]
         }
         .DeferClose(close, _, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, close)
         // An else-if chain is one `If` per `else`, whose children are exactly
-        // tir_else_children_into's order.
+        // tree_else_children_into's order.
         .If(condition, then_body, else_body, _, _) -> {
             sema_effect_walk_if_cond_children(walk, &nodes, facts, &diagnostics, caller, tree, condition)
             sema_effect_walk_stmt_list_children(walk, &nodes, facts, &diagnostics, caller, tree, then_body)

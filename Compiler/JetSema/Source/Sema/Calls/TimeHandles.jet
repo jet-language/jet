@@ -101,7 +101,7 @@ fn sema_time_check_method_ownership(receiver: Expr, method: String, args: [CallA
 
 fn sema_time_finish_handle(receiver: TExpr, operation: THandleOp, args: [TExpr], result: Type, effect_name: String, api: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
     if !sema_time_record_intrinsic(result, effect_name, api, span, environment, program, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    value := sema_tir_node(result, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
+    value := sema_tree_node(result, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
     checked := sema_expr_expected(value, expected, environment, program, &diagnostics)
     SemaMethodSpecialCheck{handled: true, value: checked}
 }
@@ -267,7 +267,7 @@ fn sema_time_rng_generic_method(receiver: Expr, receiver_value: TExpr, method: S
         else -> THandleOp.RNGShuffle
     }
     if !sema_time_record_intrinsic(result, "Rand", "RNG.{method}", span, environment, program, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    value := sema_tir_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: values}, span)
+    value := sema_tree_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: values}, span)
     checked := sema_expr_expected(value, expected, environment, program, &diagnostics)
     return SemaMethodSpecialCheck{handled: true, value: checked}
 }
@@ -345,9 +345,9 @@ fn sema_time_civil_method(receiver: Expr, receiver_value: TExpr, owner: String, 
             local.generated = true
             local.deref = borrowed
             init := receiver_value
-            if borrowed -> init = sema_tir_node(init.ty, TExprKind.Borrow{place: init, access: AccessConvention.Read}, init.span)
+            if borrowed -> init = sema_tree_node(init.ty, TExprKind.Borrow{place: init, access: AccessConvention.Read}, init.span)
             &pins.push(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: init, gc_promotion: None, gc_transferred: false, span: span})
-            pinned_receiver = sema_tir_node(receiver_value.ty, TExprKind.Local{local: local}, receiver_value.span)
+            pinned_receiver = sema_tree_node(receiver_value.ty, TExprKind.Local{local: local}, receiver_value.span)
         }
         loop pin in sema_call_pin_binder_arguments(typed, params, &lowered, environment, program, scopes, span) -> &pins.push(pin)
         packed :: sema_call_pack_variadic_arguments(typed, params, lowered, environment, program, &context, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
@@ -394,10 +394,10 @@ fn sema_time_clock_retagged(value: ^TExpr, tagged: Type, expected: Type?, enviro
     retagged := ^value
     if retagged.ty == .Result(_, err) {
         // copy: `err` is a payload of `retagged.ty`, which the new Type.Result replaces
-        tir_expr_retype(&retagged, Type.Result{ok: tagged, err: err.copy()})
+        tree_expr_retype(&retagged, Type.Result{ok: tagged, err: err.copy()})
         return Val(retagged)
     }
-    tir_expr_retype(&retagged, tagged)
+    tree_expr_retype(&retagged, tagged)
     sema_expr_expected(retagged, expected, environment, program, &diagnostics)
 }
 
@@ -420,7 +420,7 @@ fn sema_time_testing_handle_is(name: String, leaf: String) -> Bool Never! {
     name == leaf || core_identity_is(name, "core.testing", leaf)
 }
 
-// One fixed built-in handle method: its TIR operation, checked result and
+// One fixed built-in handle method: its checked-tree operation, checked result and
 // declared argument types.
 struct SemaTimeHandleContract {
     operation: THandleOp
@@ -429,7 +429,7 @@ struct SemaTimeHandleContract {
 }
 
 // Rust `deterministic_world_method_return` (jet-foundation
-// Collections.rs:2042) with the TIR ops of `handle_method_op`
+// Collections.rs:2042) with the checked-tree ops of `handle_method_op`
 // (subset/handles.rs:191-194). The world is read through its receiver, and
 // Rust gives its arguments no declared type, so `advance(2s)` checks its
 // argument as written.

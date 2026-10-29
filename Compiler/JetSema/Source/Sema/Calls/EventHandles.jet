@@ -120,7 +120,7 @@ fn sema_call_try_event_handle_method(receiver: Expr, receiver_value: TExpr, meth
         handler :: sema_expression_lambda_host_callback_stored(args[args.len() - 1].expr, Val(sema_event_handler_type(payload)), false, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         &values.push(handler)
     }
-    value := sema_tir_node(shape.result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.EventMethod{method: method}, args: values}, span)
+    value := sema_tree_node(shape.result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.EventMethod{method: method}, args: values}, span)
     checked :: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }

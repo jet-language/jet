@@ -1,5 +1,5 @@
 /* REAL Jet objects only, linked with -Wl,--wrap=jet_rt_free.
- * Layout mirrors DataABI.jet private carriers, never Rust/source/MIR.
+ * Layout mirrors DataABI.jet private carriers, never Rust/source/IR.
  * Rust derive Clone/PartialEq cites: DataPlot.rs:359-366,409-413,585-593,
  * 834-840,885-890,1046-1052,1080-1087,1181-1187. */
 #include <assert.h>

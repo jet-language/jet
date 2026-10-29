@@ -1,7 +1,7 @@
-// Checked declaration producers for the canonical TIR declaration schema.
+// Checked declaration producers for the canonical checked declaration schema.
 //
 // Registration owns the source-identity and graph facts used here.  This file
-// is intentionally the only producer of TDeclarationFacts: TIR consumers get
+// is intentionally the only producer of TDeclarationFacts: checked-tree consumers get
 // resolved types, callable keys, storage/layout markers, and recursive edges
 // without looking back through raw AST declarations or guessing defaults.
 use jet_foundation.[
@@ -1496,7 +1496,7 @@ fn sema_checked_foreign_row(graph: SemaRegistrationGraph, module_row: SemaRegist
     module_identity :: module_row.module_identity
     key :: if rust_owner -> sema_checked_foreign_key(module_identity, registered.declaration.rust_path) else -> sema_checked_foreign_key(module_identity, registered.declaration.name)
     symbol :: if rust_owner -> key else -> registered.declaration.rust_path
-    // A Rust crate is resolved by the foreign-crate build, not by a MIR link
+    // A Rust crate is resolved by the foreign-crate build, not by an IR link
     // unit; only C providers own link rows.
     link_key :: if rust_owner -> None else -> Val("c::{registered.foreign_library}")
     close_key :: sema_checked_foreign_registered_close_key(module_row, registered.declaration.close)
@@ -1692,7 +1692,7 @@ fn sema_checked_declaration_params(graph: SemaRegistrationGraph, caller_module: 
 
 fn sema_checked_trait_method_key(module_row: SemaRegistrationModule, trait_name: String, method: TraitMethodSig) -> String Never! {
     // Trait defaults are registered under their source callable key, matching
-    // the canonical TIR producer.  Implementations use the owner-qualified
+    // the canonical checked-tree producer.  Implementations use the owner-qualified
     // key below and never infer this from a parameter name.
     "{module_row.module_identity}::{method.name}"
 }
@@ -3431,7 +3431,7 @@ fn sema_checked_module_scalar_literal(value: Expr) -> Bool Never! {
 fn sema_checked_constant(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, definition: ConstDef, diagnostics: &[Diagnostic]) -> TConstantDef? {
     value :: definition.ct ?? return None
     checked_value :: sema_checked_comptime(value) ?? {
-        &diagnostics.push(sema_error("E0109", definition.span, "this constant value is not representable in checked TIR", "module constants need a closed compile-time value", "use a supported scalar, string, byte-list, or closed aggregate literal"))
+        &diagnostics.push(sema_error("E0109", definition.span, "this constant value is not representable in the checked tree", "module constants need a closed compile-time value", "use a supported scalar, string, byte-list, or closed aggregate literal"))
         return None
     }
     if !sema_checked_runtime_constant_supported(definition, value) {

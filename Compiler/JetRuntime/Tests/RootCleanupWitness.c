@@ -1,5 +1,5 @@
 /* Real Root/StopCleanup providers; C supplies only callbacks and assertions.
- * This is an ABI/lifetime witness, not evidence of MIR lexical Close lowering.
+ * This is an ABI/lifetime witness, not evidence of IR lexical Close lowering.
  * White-box corruption cases are explicitly named and test host-defect gates. */
 #include <assert.h>
 #include <stdbool.h>

@@ -1,7 +1,7 @@
 /* Real composed Jet native exports only. Link --wrap=jet_rt_free.
  * denied mode must take the canonical Jet panic exit70 with the exact E0712
  * message (seed exit101 is a registered seed defect, not a parity claim).
- * Workspace is called directly here; MIR reachability is separately regen-owed. */
+ * Workspace is called directly here; IR reachability is separately regen-owed. */
 #include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>

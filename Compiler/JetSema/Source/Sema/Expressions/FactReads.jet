@@ -221,7 +221,7 @@ fn sema_fact_enum_literal(enum_name: String, variant: String, args: [EnumLitArg]
         &diagnostics.push(diagnostic)
         return sema_fact_read_failed()
     }
-    value :: sema_tir_node(ty, TExprKind.EnumLit{enum_type: enum_name, variant: variant, payload: TEnumPayload.Unit}, span)
+    value :: sema_tree_node(ty, TExprKind.EnumLit{enum_type: enum_name, variant: variant, payload: TEnumPayload.Unit}, span)
     SemaFactReadCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
@@ -592,7 +592,7 @@ fn sema_fact_reflection_field(base: TExpr, member: String, span: Span, context: 
     if !sema_fact_constant_path(base, context) -> return None
     field_ty :: sema_fact_reflection_field_type(owner_name, member) ?? return None
     reference :: TFieldRef{owner: None, field: symbol_id(SymbolKind.Field, "", owner_name, member), name: member, ty: field_ty, boxed: false}
-    Val(sema_tir_node(field_ty, TExprKind.Field{receiver: base, field: reference}, span))
+    Val(sema_tree_node(field_ty, TExprKind.Field{receiver: base, field: reference}, span))
 }
 
 fn sema_fact_path_text(base: Expr, member: String) -> String? {
@@ -780,14 +780,14 @@ fn sema_fact_prepared_expr(value: TComptimeValue, ty: Type, span: Span, environm
     if value == .Int(number) {
         width := TIntegerWidth?{None}
         if sema_expr_numeric_base(ty) == .IntN(signed, bits) -> width = Val(TIntegerWidth{signed: signed, bits: bits})
-        return sema_expr_int_literal_tir(number, ty, width, span, environment, program)
+        return sema_expr_int_literal_tree(number, ty, width, span, environment, program)
     }
     if value == .Bool(flag) -> return Val(sema_node(&context, ty, NodeKind.BoolLit{value: flag}, span))
     kind :: if value == {
         .String(text) -> TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: text}}}
         else -> TExprKind.CtLit{value: value}
     }
-    sema_tir_expr(ty, kind, span)
+    sema_tree_expr(ty, kind, span)
 }
 
 // The value of a checked prepared-constant path over a literal compile-time
@@ -1042,14 +1042,14 @@ fn sema_fact_read_check(base: Expr, member: String, span: Span, expected: Type?,
                 local_ty :: bound.ty ?? return sema_fact_read_no_value(member, span, &diagnostics)
                 problem :: sema_ownership_crossing_problem_for_name(name, local_ty, SemaSendCrossing.TaskCapture, true, environment, program, scopes, state, context)
                 value :: sema_fact_known("SendabilityInfo", problem == None)
-                return SemaFactReadCheck{handled: true, value: sema_expr_expected_owned(sema_tir_node(sema_fact_named("SendabilityInfo"), TExprKind.CtLit{value: value}, span), expected, environment, program, &diagnostics)}
+                return SemaFactReadCheck{handled: true, value: sema_expr_expected_owned(sema_tree_node(sema_fact_named("SendabilityInfo"), TExprKind.CtLit{value: value}, span), expected, environment, program, &diagnostics)}
             }
             if read == FactRead.Movedness {
                 moved := false
                 place :: sema_ownership_place_from_expr_inner(base, scopes)
                 if place == .Val(found) -> moved = sema_ownership_place_moved(&state, found) != None
                 value :: sema_fact_known("MovednessInfo", moved)
-                return SemaFactReadCheck{handled: true, value: sema_expr_expected_owned(sema_tir_node(sema_fact_named("MovednessInfo"), TExprKind.CtLit{value: value}, span), expected, environment, program, &diagnostics)}
+                return SemaFactReadCheck{handled: true, value: sema_expr_expected_owned(sema_tree_node(sema_fact_named("MovednessInfo"), TExprKind.CtLit{value: value}, span), expected, environment, program, &diagnostics)}
             }
             if read == FactRead.Origin {
                 binding_index :: index ?? return sema_fact_read_failed()
@@ -1057,7 +1057,7 @@ fn sema_fact_read_check(base: Expr, member: String, span: Span, expected: Type?,
                 place :: sema_ownership_place_from_expr_inner(base, scopes)
                 if place == .Val(found) && sema_ownership_place_moved(&state, found) != None -> origin = None
                 value :: sema_fact_local_origin(origin)
-                return SemaFactReadCheck{handled: true, value: sema_expr_expected_owned(sema_tir_node(sema_fact_optional("OriginInfo"), TExprKind.CtLit{value: value}, span), expected, environment, program, &diagnostics)}
+                return SemaFactReadCheck{handled: true, value: sema_expr_expected_owned(sema_tree_node(sema_fact_optional("OriginInfo"), TExprKind.CtLit{value: value}, span), expected, environment, program, &diagnostics)}
             }
             if read == FactRead.Origin {
                 binding_index :: index ?? return sema_fact_read_failed()
@@ -1065,7 +1065,7 @@ fn sema_fact_read_check(base: Expr, member: String, span: Span, expected: Type?,
                 place :: sema_ownership_place_from_expr_inner(base, scopes)
                 if place == .Val(found) && sema_ownership_place_moved(&state, found) != None -> origin = None
                 value :: sema_fact_local_origin(origin)
-                return SemaFactReadCheck{handled: true, value: sema_expr_expected_owned(sema_tir_node(sema_fact_optional("OriginInfo"), TExprKind.CtLit{value: value}, span), expected, environment, program, &diagnostics)}
+                return SemaFactReadCheck{handled: true, value: sema_expr_expected_owned(sema_tree_node(sema_fact_optional("OriginInfo"), TExprKind.CtLit{value: value}, span), expected, environment, program, &diagnostics)}
             }
             if read == FactRead.Layout || read == FactRead.Name || read == FactRead.Fields -> return sema_fact_read_unhandled()
             return sema_fact_read_no_value(member, span, &diagnostics)
@@ -1075,7 +1075,7 @@ fn sema_fact_read_check(base: Expr, member: String, span: Span, expected: Type?,
                 if read == FactRead.Layout || read == FactRead.Name || read == FactRead.Fields -> return sema_fact_read_unhandled()
                 return sema_fact_read_no_value(member, span, &diagnostics)
             }
-            folded :: sema_tir_node(resolved.ty, TExprKind.CtLit{value: resolved.value}, span)
+            folded :: sema_tree_node(resolved.ty, TExprKind.CtLit{value: resolved.value}, span)
             return SemaFactReadCheck{handled: true, value: sema_expr_expected(folded, expected, environment, program, &diagnostics)}
         }
     }
@@ -1084,7 +1084,7 @@ fn sema_fact_read_check(base: Expr, member: String, span: Span, expected: Type?,
     if base == .Field(_, _, _, _) && (read == FactRead.Layout || read == FactRead.Name || read == FactRead.Fields) {
         if sema_fact_expr_path(base) == .Val(path) {
             if sema_fact_subject_value(read, path, None, environment, program) == .Val(resolved) {
-                folded :: sema_tir_node(resolved.ty, TExprKind.CtLit{value: resolved.value}, span)
+                folded :: sema_tree_node(resolved.ty, TExprKind.CtLit{value: resolved.value}, span)
                 return SemaFactReadCheck{handled: true, value: sema_expr_expected(folded, expected, environment, program, &diagnostics)}
             }
         }
@@ -1094,12 +1094,12 @@ fn sema_fact_read_check(base: Expr, member: String, span: Span, expected: Type?,
     if aggregate_ty == .Val(ty) {
         if checked_base.kind == .CtLit(aggregate) {
             value :: sema_fact_reflected_field(aggregate, member) ?? return sema_fact_read_no_value(member, span, &diagnostics)
-            return SemaFactReadCheck{handled: true, value: sema_expr_expected_owned(sema_tir_node(ty, TExprKind.CtLit{value: value}, span), expected, environment, program, &diagnostics)}
+            return SemaFactReadCheck{handled: true, value: sema_expr_expected_owned(sema_tree_node(ty, TExprKind.CtLit{value: value}, span), expected, environment, program, &diagnostics)}
         }
         if sema_fact_constant_path(checked_base, context) {
             owner_name :: type_name(checked_base.ty)
             reference :: TFieldRef{owner: None, field: symbol_id(SymbolKind.Field, "", owner_name, member), name: member, ty: ty, boxed: false}
-            return SemaFactReadCheck{handled: true, value: sema_expr_expected_owned(sema_tir_node(ty, TExprKind.Field{receiver: checked_base, field: reference}, span), expected, environment, program, &diagnostics)}
+            return SemaFactReadCheck{handled: true, value: sema_expr_expected_owned(sema_tree_node(ty, TExprKind.Field{receiver: checked_base, field: reference}, span), expected, environment, program, &diagnostics)}
         }
         return sema_fact_read_no_value(member, span, &diagnostics)
     }

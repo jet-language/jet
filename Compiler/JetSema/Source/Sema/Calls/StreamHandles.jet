@@ -350,7 +350,7 @@ fn sema_stream_handle_checked_args(callee: String, params: [SemaCallParam], args
 }
 
 fn sema_stream_handle_finish(receiver: TExpr, operation: THandleOp, args: [TExpr], result_type: Type, effect_name: String, api: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
-    value := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
+    value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
     checked :: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_stream_handle_effect_fact(environment, program, &scopes, &context, api, span, result_type, effect_name, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
@@ -363,7 +363,7 @@ fn sema_stream_handle_method_ref(owner: String, method: String) -> TMethodRef Ne
 
 fn sema_stream_handle_lines_value(receiver: TExpr, owner: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
     result_type := if owner == "FileReader" -> Type.Named{name: "FileLines"} else -> Type.Named{name: "StdinLines"}
-    value := sema_tir_node(result_type, TExprKind.MethodCall{receiver: receiver, method: sema_stream_handle_method_ref(owner, "lines"), type_args: [Type]{}, args: [TCallArg]{}}, span)
+    value := sema_tree_node(result_type, TExprKind.MethodCall{receiver: receiver, method: sema_stream_handle_method_ref(owner, "lines"), type_args: [Type]{}, args: [TCallArg]{}}, span)
     checked :: sema_expr_expected(value, expected, environment, program, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     // Rust `receiver_effect_leaf`: `FileReader.lines` waits; `StdinHandle`
     // records no handle effect.
@@ -498,11 +498,11 @@ fn sema_call_try_stream_handle_static(owner: String, method: String, args: [Call
     if owner == "Reader" && owned_reader && values.len() == 1 {
         if values[0].kind == {
             .Move(_) -> {}
-            else -> values[0] = sema_tir_node(values[0].ty, TExprKind.Move{value: values[0]}, values[0].span)
+            else -> values[0] = sema_tree_node(values[0].ty, TExprKind.Move{value: values[0]}, values[0].span)
         }
     }
     unit_receiver := sema_node(&context, Type.Named{name: "Unit"}, NodeKind.Unit, span)
-    value := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: unit_receiver, operation: operation, args: values}, span)
+    value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: unit_receiver, operation: operation, args: values}, span)
     checked :: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_stream_handle_effect_fact(environment, program, &scopes, &context, "{owner}.{method}", span, result_type, effect_name, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
@@ -533,9 +533,9 @@ fn sema_call_try_core_file_path_field(base: TExpr, member: String, span: Span, e
     &context.name_references.push(SemaNameReferenceFact{span: span, symbol: field_symbol, kind: "field"})
     reference := TFieldRef{owner: Val(owner_id), field: field_id, name: member, ty: Type.String, boxed: false}
     value := if {
-        owner == "FileReader" -> sema_tir_node(Type.String, TExprKind.HandleMethod{receiver: base, operation: THandleOp.FileReaderPath, args: [TExpr]{}}, span)
-        owner == "FileWriter" -> sema_tir_node(Type.String, TExprKind.HandleMethod{receiver: base, operation: THandleOp.FileWriterPath, args: [TExpr]{}}, span)
-        else -> sema_tir_node(Type.String, TExprKind.Field{receiver: base, field: reference}, span)
+        owner == "FileReader" -> sema_tree_node(Type.String, TExprKind.HandleMethod{receiver: base, operation: THandleOp.FileReaderPath, args: [TExpr]{}}, span)
+        owner == "FileWriter" -> sema_tree_node(Type.String, TExprKind.HandleMethod{receiver: base, operation: THandleOp.FileWriterPath, args: [TExpr]{}}, span)
+        else -> sema_tree_node(Type.String, TExprKind.Field{receiver: base, field: reference}, span)
     }
     if owner == "FileReader" || owner == "FileWriter" {
         if !sema_stream_handle_effect_fact(environment, program, &scopes, &context, "{owner}.path", span, Type.String, "", &diagnostics) -> return None

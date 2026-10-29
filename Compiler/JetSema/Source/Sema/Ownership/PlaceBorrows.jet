@@ -291,7 +291,7 @@ fn sema_place_borrow_census_stmt(statement: TStmt, arena: BodyTree, census: &Sem
         .ContractScope(_, body, _, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) | .TaskGroup(_, _, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) -> sema_place_borrow_census_list(body, arena, &census)
         else -> {}
     }
-    tir_each_stmt_child(statement, (child: TExpr) -> sema_place_borrow_census_expr(child, arena, &census))
+    tree_each_stmt_child(statement, (child: TExpr) -> sema_place_borrow_census_expr(child, arena, &census))
 }
 
 fn sema_place_borrow_census_cond(condition: TIfCond, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
@@ -309,7 +309,7 @@ fn sema_place_borrow_census_cond(condition: TIfCond, arena: BodyTree, census: &S
 }
 
 fn sema_place_borrow_census_pattern(pattern: TPattern, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
-    tir_each_pattern_child(pattern, (child: TExpr) -> sema_place_borrow_census_expr(child, arena, &census))
+    tree_each_pattern_child(pattern, (child: TExpr) -> sema_place_borrow_census_expr(child, arena, &census))
 }
 
 fn sema_place_borrow_census_expr(value: TExpr, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
@@ -349,7 +349,7 @@ fn sema_place_borrow_census_expr(value: TExpr, arena: BodyTree, census: &SemaPla
         }
         else -> {}
     }
-    tir_each_expr_child(value, (child: TExpr) -> sema_place_borrow_census_expr(child, arena, &census))
+    tree_each_expr_child(value, (child: TExpr) -> sema_place_borrow_census_expr(child, arena, &census))
 }
 
 // A closure captures what it names.
@@ -358,7 +358,7 @@ fn sema_place_borrow_census_lambda(lambda: TLambda, arena: BodyTree, census: &Se
         _ := &census.names.add(capture.source, true)
         _ := &census.names.add(capture.local.name, true)
     }
-    tir_each_lambda_child(lambda, (child: TExpr) -> sema_place_borrow_census_names(child, arena, &census))
+    tree_each_lambda_child(lambda, (child: TExpr) -> sema_place_borrow_census_names(child, arena, &census))
 }
 
 fn sema_place_borrow_census_names(value: TExpr, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
@@ -373,7 +373,7 @@ fn sema_place_borrow_census_names(value: TExpr, arena: BodyTree, census: &SemaPl
         }
         else -> {}
     }
-    tir_each_expr_child(value, (child: TExpr) -> sema_place_borrow_census_names(child, arena, &census))
+    tree_each_expr_child(value, (child: TExpr) -> sema_place_borrow_census_names(child, arena, &census))
 }
 
 // The census rows of a flat node: sema_place_borrow_census_list,

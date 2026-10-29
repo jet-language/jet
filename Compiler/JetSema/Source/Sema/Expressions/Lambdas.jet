@@ -993,7 +993,7 @@ fn sema_expression_lambda_collect_reference_keys(state: &SemaOwnershipState, fir
     }
 }
 
-fn sema_expression_lambda_collect_tir_capture_local(local: TLocal, frame: Int, scopes: &SemaScopeTable, keys: &[String]) Never! {
+fn sema_expression_lambda_collect_tree_capture_local(local: TLocal, frame: Int, scopes: &SemaScopeTable, keys: &[String]) Never! {
     if local.symbol_id == None -> return
     symbol :: local.symbol_id ?? return
     if sema_expression_lambda_outer_binding_key(symbol.key, frame, &scopes) != None {
@@ -1001,281 +1001,281 @@ fn sema_expression_lambda_collect_tir_capture_local(local: TLocal, frame: Int, s
     }
 }
 
-fn sema_expression_lambda_collect_tir_place(place: TPlace, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
+fn sema_expression_lambda_collect_tree_place(place: TPlace, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
     if place == {
-        .Local(local) -> sema_expression_lambda_collect_tir_capture_local(local, frame, &scopes, &keys)
-        .Expr(value) -> sema_expression_lambda_collect_tir_expr(value, frame, &scopes, &keys)
+        .Local(local) -> sema_expression_lambda_collect_tree_capture_local(local, frame, &scopes, &keys)
+        .Expr(value) -> sema_expression_lambda_collect_tree_expr(value, frame, &scopes, &keys)
     }
 }
 
-fn sema_expression_lambda_collect_tir_optional_expr(value: TExpr?, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
+fn sema_expression_lambda_collect_tree_optional_expr(value: TExpr?, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
     if value != None {
         actual :: value
-        sema_expression_lambda_collect_tir_expr(actual, frame, &scopes, &keys)
+        sema_expression_lambda_collect_tree_expr(actual, frame, &scopes, &keys)
     }
 }
 
-fn sema_expression_lambda_collect_tir_optional_statement(value: TStmt?, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
+fn sema_expression_lambda_collect_tree_optional_statement(value: TStmt?, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
     if value != None {
         actual :: value
-        sema_expression_lambda_collect_tir_statements([TStmt]{actual}, frame, &scopes, &keys)
+        sema_expression_lambda_collect_tree_statements([TStmt]{actual}, frame, &scopes, &keys)
     }
 }
 
-fn sema_expression_lambda_collect_tir_condition(condition: TIfCond, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
+fn sema_expression_lambda_collect_tree_condition(condition: TIfCond, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
     if condition == {
-        .Plain(value) -> sema_expression_lambda_collect_tir_expr(value, frame, &scopes, &keys)
+        .Plain(value) -> sema_expression_lambda_collect_tree_expr(value, frame, &scopes, &keys)
         .And(left, right) -> {
-            sema_expression_lambda_collect_tir_condition(left, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_condition(right, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_condition(left, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_condition(right, frame, &scopes, &keys)
         }
-        .IfLet(_, subject) -> sema_expression_lambda_collect_tir_expr(subject, frame, &scopes, &keys)
+        .IfLet(_, subject) -> sema_expression_lambda_collect_tree_expr(subject, frame, &scopes, &keys)
     }
 }
 
-fn sema_expression_lambda_collect_tir_lambda(lambda: TLambda, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
+fn sema_expression_lambda_collect_tree_lambda(lambda: TLambda, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
     loop capture in lambda.captures {
-        sema_expression_lambda_collect_tir_capture_local(capture.local, frame, &scopes, &keys)
+        sema_expression_lambda_collect_tree_capture_local(capture.local, frame, &scopes, &keys)
     }
     if lambda.executable == {
-        .Expr(value) -> sema_expression_lambda_collect_tir_expr(value, frame, &scopes, &keys)
-        .Block(body) -> sema_expression_lambda_collect_tir_statements(body, frame, &scopes, &keys)
+        .Expr(value) -> sema_expression_lambda_collect_tree_expr(value, frame, &scopes, &keys)
+        .Block(body) -> sema_expression_lambda_collect_tree_statements(body, frame, &scopes, &keys)
     }
 }
 
-fn sema_expression_lambda_collect_tir_optional_lambda(lambda: TLambda?, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
+fn sema_expression_lambda_collect_tree_optional_lambda(lambda: TLambda?, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
     if lambda != None {
         value :: lambda
-        sema_expression_lambda_collect_tir_lambda(value, frame, &scopes, &keys)
+        sema_expression_lambda_collect_tree_lambda(value, frame, &scopes, &keys)
     }
 }
 
-fn sema_expression_lambda_collect_tir_fn_value(kind: TFnValueKind, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
+fn sema_expression_lambda_collect_tree_fn_value(kind: TFnValueKind, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
     if kind == {
-        .NamedFn(_, lambda) -> sema_expression_lambda_collect_tir_optional_lambda(lambda, frame, &scopes, &keys)
+        .NamedFn(_, lambda) -> sema_expression_lambda_collect_tree_optional_lambda(lambda, frame, &scopes, &keys)
         .Call(callee, args) -> {
-            sema_expression_lambda_collect_tir_expr(callee, frame, &scopes, &keys)
-            loop argument in args -> sema_expression_lambda_collect_tir_expr(argument.value, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(callee, frame, &scopes, &keys)
+            loop argument in args -> sema_expression_lambda_collect_tree_expr(argument.value, frame, &scopes, &keys)
         }
         .Policy(_, args, _, _, captures, callee) -> {
-            loop argument in args -> sema_expression_lambda_collect_tir_expr(argument.value, frame, &scopes, &keys)
-            loop capture in captures -> sema_expression_lambda_collect_tir_capture_local(capture.local, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_expr(callee, frame, &scopes, &keys)
+            loop argument in args -> sema_expression_lambda_collect_tree_expr(argument.value, frame, &scopes, &keys)
+            loop capture in captures -> sema_expression_lambda_collect_tree_capture_local(capture.local, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(callee, frame, &scopes, &keys)
         }
-        .Send(value) -> sema_expression_lambda_collect_tir_expr(value, frame, &scopes, &keys)
+        .Send(value) -> sema_expression_lambda_collect_tree_expr(value, frame, &scopes, &keys)
     }
 }
 
-fn sema_expression_lambda_collect_tir_core_closure(kind: TCoreClosureKind, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
+fn sema_expression_lambda_collect_tree_core_closure(kind: TCoreClosureKind, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
     if kind == {
         .Spawn(group, _, _, executable) -> {
-            sema_expression_lambda_collect_tir_optional_expr(group, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_lambda(executable, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_optional_expr(group, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_lambda(executable, frame, &scopes, &keys)
         }
         .Realtime(rate, frames, executable) -> {
-            sema_expression_lambda_collect_tir_expr(rate, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_expr(frames, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_lambda(executable, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(rate, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(frames, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_lambda(executable, frame, &scopes, &keys)
         }
-        .Guard(executable) -> sema_expression_lambda_collect_tir_lambda(executable, frame, &scopes, &keys)
-        .OnCommit(_, executable) | .OnRollback(_, executable) -> sema_expression_lambda_collect_tir_lambda(executable, frame, &scopes, &keys)
+        .Guard(executable) -> sema_expression_lambda_collect_tree_lambda(executable, frame, &scopes, &keys)
+        .OnCommit(_, executable) | .OnRollback(_, executable) -> sema_expression_lambda_collect_tree_lambda(executable, frame, &scopes, &keys)
         .UIButtonOnClick(label, shortcut, accessible, executable) -> {
-            sema_expression_lambda_collect_tir_expr(label, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_expr(shortcut, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_expr(accessible, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_lambda(executable, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(label, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(shortcut, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(accessible, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_lambda(executable, frame, &scopes, &keys)
         }
         .UITextInputOnDrop(state, ime, executable) -> {
-            sema_expression_lambda_collect_tir_expr(state, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_expr(ime, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_lambda(executable, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(state, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(ime, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_lambda(executable, frame, &scopes, &keys)
         }
-        .ReactiveDerived(executable) | .ReactiveEffect(executable) | .UIReactiveRender(executable) -> sema_expression_lambda_collect_tir_lambda(executable, frame, &scopes, &keys)
+        .ReactiveDerived(executable) | .ReactiveEffect(executable) | .UIReactiveRender(executable) -> sema_expression_lambda_collect_tree_lambda(executable, frame, &scopes, &keys)
     }
 }
 
-fn sema_expression_lambda_collect_tir_fallback(fallback: TOrFallback, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
+fn sema_expression_lambda_collect_tree_fallback(fallback: TOrFallback, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
     if fallback == {
-        .Value(value) -> sema_expression_lambda_collect_tir_expr(value, frame, &scopes, &keys)
-        .Return(value) -> sema_expression_lambda_collect_tir_optional_expr(value, frame, &scopes, &keys)
-        .Panic(message, _) -> sema_expression_lambda_collect_tir_expr(message, frame, &scopes, &keys)
+        .Value(value) -> sema_expression_lambda_collect_tree_expr(value, frame, &scopes, &keys)
+        .Return(value) -> sema_expression_lambda_collect_tree_optional_expr(value, frame, &scopes, &keys)
+        .Panic(message, _) -> sema_expression_lambda_collect_tree_expr(message, frame, &scopes, &keys)
         else -> {}
     }
 }
 
-fn sema_expression_lambda_collect_tir_expr(value: TExpr, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
+fn sema_expression_lambda_collect_tree_expr(value: TExpr, frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
     if value.kind == {
-        .Local(local) -> sema_expression_lambda_collect_tir_capture_local(local, frame, &scopes, &keys)
-        .Call(_, _, args) -> loop argument in args -> sema_expression_lambda_collect_tir_expr(argument.value, frame, &scopes, &keys)
+        .Local(local) -> sema_expression_lambda_collect_tree_capture_local(local, frame, &scopes, &keys)
+        .Call(_, _, args) -> loop argument in args -> sema_expression_lambda_collect_tree_expr(argument.value, frame, &scopes, &keys)
         .IndirectCall(callee, _, args, _) -> {
-            sema_expression_lambda_collect_tir_expr(callee, frame, &scopes, &keys)
-            loop argument in args -> sema_expression_lambda_collect_tir_expr(argument.value, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(callee, frame, &scopes, &keys)
+            loop argument in args -> sema_expression_lambda_collect_tree_expr(argument.value, frame, &scopes, &keys)
         }
         .MethodCall(receiver, _, _, args) -> {
-            sema_expression_lambda_collect_tir_expr(receiver, frame, &scopes, &keys)
-            loop argument in args -> sema_expression_lambda_collect_tir_expr(argument.value, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(receiver, frame, &scopes, &keys)
+            loop argument in args -> sema_expression_lambda_collect_tree_expr(argument.value, frame, &scopes, &keys)
         }
-        .OptField(base, _, _) -> sema_expression_lambda_collect_tir_expr(base, frame, &scopes, &keys)
+        .OptField(base, _, _) -> sema_expression_lambda_collect_tree_expr(base, frame, &scopes, &keys)
         .OptMethodCall(base, _, call, _) -> {
-            sema_expression_lambda_collect_tir_expr(base, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_expr(call, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(base, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(call, frame, &scopes, &keys)
         }
-        .Lambda(lambda) -> sema_expression_lambda_collect_tir_lambda(lambda, frame, &scopes, &keys)
-        .InlineBlock(body) -> sema_expression_lambda_collect_tir_statements(body, frame, &scopes, &keys)
+        .Lambda(lambda) -> sema_expression_lambda_collect_tree_lambda(lambda, frame, &scopes, &keys)
+        .InlineBlock(body) -> sema_expression_lambda_collect_tree_statements(body, frame, &scopes, &keys)
         .Binary(_, _, _, left, right) -> {
-            sema_expression_lambda_collect_tir_expr(left, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_expr(right, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(left, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(right, frame, &scopes, &keys)
         }
-        .CompareChain(values, _, _) -> loop item in values -> sema_expression_lambda_collect_tir_expr(item, frame, &scopes, &keys)
-        .Unary(_, operand) -> sema_expression_lambda_collect_tir_expr(operand, frame, &scopes, &keys)
-        .Field(receiver, _) -> sema_expression_lambda_collect_tir_expr(receiver, frame, &scopes, &keys)
+        .CompareChain(values, _, _) -> loop item in values -> sema_expression_lambda_collect_tree_expr(item, frame, &scopes, &keys)
+        .Unary(_, operand) -> sema_expression_lambda_collect_tree_expr(operand, frame, &scopes, &keys)
+        .Field(receiver, _) -> sema_expression_lambda_collect_tree_expr(receiver, frame, &scopes, &keys)
         .Index(base, index, _, _, _, _) -> {
-            sema_expression_lambda_collect_tir_expr(base, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_expr(index, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(base, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(index, frame, &scopes, &keys)
         }
         .Slice(base, start, end, range, _) -> {
-            sema_expression_lambda_collect_tir_expr(base, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_expr(start, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_expr(end, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_optional_expr(range, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(base, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(start, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(end, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_optional_expr(range, frame, &scopes, &keys)
         }
         .Range(start, end, _) -> {
-            sema_expression_lambda_collect_tir_expr(start, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_expr(end, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(start, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(end, frame, &scopes, &keys)
         }
-        .Tuple(values) -> loop item in values -> sema_expression_lambda_collect_tir_expr(item, frame, &scopes, &keys)
-        .List(values, _) -> loop item in values -> sema_expression_lambda_collect_tir_expr(item, frame, &scopes, &keys)
+        .Tuple(values) -> loop item in values -> sema_expression_lambda_collect_tree_expr(item, frame, &scopes, &keys)
+        .List(values, _) -> loop item in values -> sema_expression_lambda_collect_tree_expr(item, frame, &scopes, &keys)
         .Map(entries) -> loop entry in entries {
-            sema_expression_lambda_collect_tir_expr(entry.key, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_expr(entry.value, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(entry.key, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(entry.value, frame, &scopes, &keys)
         }
-        .Try(item, _, _) | .Clone(item, _) | .ExplicitCopy(item) | .MaterializeView(item) | .Move(item) | .Deref(item) | .RawOf(item) | .Present(item) | .Ok(item) | .Err(item) -> sema_expression_lambda_collect_tir_expr(item, frame, &scopes, &keys)
+        .Try(item, _, _) | .Clone(item, _) | .ExplicitCopy(item) | .MaterializeView(item) | .Move(item) | .Deref(item) | .RawOf(item) | .Present(item) | .Ok(item) | .Err(item) -> sema_expression_lambda_collect_tree_expr(item, frame, &scopes, &keys)
         .TryWithContext(inner, note, _, _, _, _) -> {
-            sema_expression_lambda_collect_tir_expr(inner, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_optional_expr(note, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(inner, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_optional_expr(note, frame, &scopes, &keys)
         }
-        .Borrow(place, _) -> sema_expression_lambda_collect_tir_expr(place, frame, &scopes, &keys)
-        .RawAddressOf(place) -> sema_expression_lambda_collect_tir_place(place, frame, &scopes, &keys)
-        .PtrFromAddr(address, _) | .LayoutLiteral(address) -> sema_expression_lambda_collect_tir_expr(address, frame, &scopes, &keys)
+        .Borrow(place, _) -> sema_expression_lambda_collect_tree_expr(place, frame, &scopes, &keys)
+        .RawAddressOf(place) -> sema_expression_lambda_collect_tree_place(place, frame, &scopes, &keys)
+        .PtrFromAddr(address, _) | .LayoutLiteral(address) -> sema_expression_lambda_collect_tree_expr(address, frame, &scopes, &keys)
         .LayoutCompare(_, left, right) -> {
-            sema_expression_lambda_collect_tir_expr(left, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_expr(right, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(left, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(right, frame, &scopes, &keys)
         }
         .IfExpr(condition, then_body, then_value, else_body, else_value) -> {
-            sema_expression_lambda_collect_tir_condition(condition, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_statements(then_body, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_expr(then_value, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_statements(else_body, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_expr(else_value, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_condition(condition, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_statements(then_body, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(then_value, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_statements(else_body, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(else_value, frame, &scopes, &keys)
         }
         .OrFallback(inner, fallback, _) -> {
-            sema_expression_lambda_collect_tir_expr(inner, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_fallback(fallback, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(inner, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_fallback(fallback, frame, &scopes, &keys)
         }
         .BuiltinMethod(receiver, _, args) -> {
-            sema_expression_lambda_collect_tir_expr(receiver, frame, &scopes, &keys)
-            loop argument in args -> sema_expression_lambda_collect_tir_expr(argument, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(receiver, frame, &scopes, &keys)
+            loop argument in args -> sema_expression_lambda_collect_tree_expr(argument, frame, &scopes, &keys)
         }
         .ClosureMethod(receiver, _, args) -> {
-            sema_expression_lambda_collect_tir_expr(receiver, frame, &scopes, &keys)
-            loop argument in args -> sema_expression_lambda_collect_tir_expr(argument, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(receiver, frame, &scopes, &keys)
+            loop argument in args -> sema_expression_lambda_collect_tree_expr(argument, frame, &scopes, &keys)
         }
         .HandleMethod(receiver, _, args) -> {
-            sema_expression_lambda_collect_tir_expr(receiver, frame, &scopes, &keys)
-            loop argument in args -> sema_expression_lambda_collect_tir_expr(argument, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(receiver, frame, &scopes, &keys)
+            loop argument in args -> sema_expression_lambda_collect_tree_expr(argument, frame, &scopes, &keys)
         }
-        .NumericMethod(receiver, _) -> sema_expression_lambda_collect_tir_expr(receiver, frame, &scopes, &keys)
+        .NumericMethod(receiver, _) -> sema_expression_lambda_collect_tree_expr(receiver, frame, &scopes, &keys)
         .NumericBinaryMethod(receiver, _, argument) -> {
-            sema_expression_lambda_collect_tir_expr(receiver, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_expr(argument, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(receiver, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(argument, frame, &scopes, &keys)
         }
-        .CoreClosureCall(kind) -> sema_expression_lambda_collect_tir_core_closure(kind, frame, &scopes, &keys)
-        .TaskGroupAll(tasks) | .TaskGroupRace(tasks) | .TaskGroupAny(tasks) -> sema_expression_lambda_collect_tir_expr(tasks, frame, &scopes, &keys)
+        .CoreClosureCall(kind) -> sema_expression_lambda_collect_tree_core_closure(kind, frame, &scopes, &keys)
+        .TaskGroupAll(tasks) | .TaskGroupRace(tasks) | .TaskGroupAny(tasks) -> sema_expression_lambda_collect_tree_expr(tasks, frame, &scopes, &keys)
         .SelectRecv(builder, channel) -> {
-            sema_expression_lambda_collect_tir_expr(builder, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_expr(channel, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(builder, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(channel, frame, &scopes, &keys)
         }
         .SelectAfter(builder, duration, after_value) -> {
-            sema_expression_lambda_collect_tir_expr(builder, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_expr(duration, frame, &scopes, &keys)
-            sema_expression_lambda_collect_tir_optional_expr(after_value, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(builder, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_expr(duration, frame, &scopes, &keys)
+            sema_expression_lambda_collect_tree_optional_expr(after_value, frame, &scopes, &keys)
         }
-        .FnValue(kind) -> sema_expression_lambda_collect_tir_fn_value(kind, frame, &scopes, &keys)
+        .FnValue(kind) -> sema_expression_lambda_collect_tree_fn_value(kind, frame, &scopes, &keys)
         else -> {}
     }
 }
 
-fn sema_expression_lambda_collect_tir_statements(statements: [TStmt], frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
+fn sema_expression_lambda_collect_tree_statements(statements: [TStmt], frame: Int, scopes: &SemaScopeTable, keys: &[String]) {
     loop statement in statements {
         if statement == {
-            .Let(_, _, init, _, _, _) -> sema_expression_lambda_collect_tir_expr(init, frame, &scopes, &keys)
+            .Let(_, _, init, _, _, _) -> sema_expression_lambda_collect_tree_expr(init, frame, &scopes, &keys)
             .RefutableBind(_, init, fallback, _) -> {
-                sema_expression_lambda_collect_tir_expr(init, frame, &scopes, &keys)
-                sema_expression_lambda_collect_tir_statements(fallback, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_expr(init, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_statements(fallback, frame, &scopes, &keys)
             }
             .Assign(place, _, value, _, _) -> {
-                sema_expression_lambda_collect_tir_place(place, frame, &scopes, &keys)
-                sema_expression_lambda_collect_tir_expr(value, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_place(place, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_expr(value, frame, &scopes, &keys)
             }
-            .ExprStmt(value, _) -> sema_expression_lambda_collect_tir_expr(value, frame, &scopes, &keys)
+            .ExprStmt(value, _) -> sema_expression_lambda_collect_tree_expr(value, frame, &scopes, &keys)
             .CountedLoop(_, init, condition, step, _, body, _) -> {
-                sema_expression_lambda_collect_tir_statements([TStmt]{init}, frame, &scopes, &keys)
-                sema_expression_lambda_collect_tir_expr(condition, frame, &scopes, &keys)
-                sema_expression_lambda_collect_tir_optional_statement(step, frame, &scopes, &keys)
-                sema_expression_lambda_collect_tir_statements(body, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_statements([TStmt]{init}, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_expr(condition, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_optional_statement(step, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_statements(body, frame, &scopes, &keys)
             }
             .ForRange(_, _, start, end, step, _, body, _, _) -> {
-                sema_expression_lambda_collect_tir_expr(start, frame, &scopes, &keys)
-                sema_expression_lambda_collect_tir_expr(end, frame, &scopes, &keys)
-                sema_expression_lambda_collect_tir_optional_expr(step, frame, &scopes, &keys)
-                sema_expression_lambda_collect_tir_statements(body, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_expr(start, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_expr(end, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_optional_expr(step, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_statements(body, frame, &scopes, &keys)
             }
             .Range(_, _, source, start, end, step, _, _, body, _) -> {
-                sema_expression_lambda_collect_tir_optional_expr(source, frame, &scopes, &keys)
-                sema_expression_lambda_collect_tir_expr(start, frame, &scopes, &keys)
-                sema_expression_lambda_collect_tir_expr(end, frame, &scopes, &keys)
-                sema_expression_lambda_collect_tir_optional_expr(step, frame, &scopes, &keys)
-                sema_expression_lambda_collect_tir_statements(body, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_optional_expr(source, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_expr(start, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_expr(end, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_optional_expr(step, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_statements(body, frame, &scopes, &keys)
             }
             .If(condition, then_body, else_body, _, _) -> {
-                sema_expression_lambda_collect_tir_condition(condition, frame, &scopes, &keys)
-                sema_expression_lambda_collect_tir_statements(then_body, frame, &scopes, &keys)
-                if else_body == .Val(else_statements) -> sema_expression_lambda_collect_tir_statements(else_statements, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_condition(condition, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_statements(then_body, frame, &scopes, &keys)
+                if else_body == .Val(else_statements) -> sema_expression_lambda_collect_tree_statements(else_statements, frame, &scopes, &keys)
             }
-            .Loop(_, body, _) -> sema_expression_lambda_collect_tir_statements(body, frame, &scopes, &keys)
+            .Loop(_, body, _) -> sema_expression_lambda_collect_tree_statements(body, frame, &scopes, &keys)
             .While(_, condition, body, _) -> {
-                sema_expression_lambda_collect_tir_expr(condition, frame, &scopes, &keys)
-                sema_expression_lambda_collect_tir_statements(body, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_expr(condition, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_statements(body, frame, &scopes, &keys)
             }
             .TaskGroup(_, limit, body, _) -> {
-                sema_expression_lambda_collect_tir_optional_expr(limit, frame, &scopes, &keys)
-                sema_expression_lambda_collect_tir_statements(body, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_optional_expr(limit, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_statements(body, frame, &scopes, &keys)
             }
-            .Inline(body, _) | .DebugOnly(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> sema_expression_lambda_collect_tir_statements(body, frame, &scopes, &keys)
-            .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Impure(body, _) | .ScopeMember(_, body, _) -> sema_expression_lambda_collect_tir_statements(body, frame, &scopes, &keys)
-            .Reactive(executable, _) -> sema_expression_lambda_collect_tir_lambda(executable, frame, &scopes, &keys)
-            .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .Transact(_, _, _, body, _) -> sema_expression_lambda_collect_tir_statements(body, frame, &scopes, &keys)
+            .Inline(body, _) | .DebugOnly(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> sema_expression_lambda_collect_tree_statements(body, frame, &scopes, &keys)
+            .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Impure(body, _) | .ScopeMember(_, body, _) -> sema_expression_lambda_collect_tree_statements(body, frame, &scopes, &keys)
+            .Reactive(executable, _) -> sema_expression_lambda_collect_tree_lambda(executable, frame, &scopes, &keys)
+            .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .Transact(_, _, _, body, _) -> sema_expression_lambda_collect_tree_statements(body, frame, &scopes, &keys)
             .Match(subject, arms, _, _) -> {
-                sema_expression_lambda_collect_tir_expr(subject, frame, &scopes, &keys)
-                loop arm in arms -> sema_expression_lambda_collect_tir_statements(arm.body, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_expr(subject, frame, &scopes, &keys)
+                loop arm in arms -> sema_expression_lambda_collect_tree_statements(arm.body, frame, &scopes, &keys)
             }
             .EnumMatch(scrutinee, arms, else_body, _, _) -> {
-                sema_expression_lambda_collect_tir_expr(scrutinee, frame, &scopes, &keys)
-                loop arm in arms -> sema_expression_lambda_collect_tir_statements(arm.body, frame, &scopes, &keys)
-                if else_body == .Val(else_statements) -> sema_expression_lambda_collect_tir_statements(else_statements, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_expr(scrutinee, frame, &scopes, &keys)
+                loop arm in arms -> sema_expression_lambda_collect_tree_statements(arm.body, frame, &scopes, &keys)
+                if else_body == .Val(else_statements) -> sema_expression_lambda_collect_tree_statements(else_statements, frame, &scopes, &keys)
             }
             .RangeSwitch(subject, arms, else_body, _) -> {
-                sema_expression_lambda_collect_tir_expr(subject, frame, &scopes, &keys)
-                loop arm in arms -> sema_expression_lambda_collect_tir_statements(arm.body, frame, &scopes, &keys)
-                sema_expression_lambda_collect_tir_statements(else_body, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_expr(subject, frame, &scopes, &keys)
+                loop arm in arms -> sema_expression_lambda_collect_tree_statements(arm.body, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_statements(else_body, frame, &scopes, &keys)
             }
             .MixedSwitch(subject, _, arms, else_body, _) -> {
-                sema_expression_lambda_collect_tir_expr(subject, frame, &scopes, &keys)
+                sema_expression_lambda_collect_tree_expr(subject, frame, &scopes, &keys)
                 loop arm in arms {
-                    sema_expression_lambda_collect_tir_expr(arm.condition, frame, &scopes, &keys)
-                    sema_expression_lambda_collect_tir_statements(arm.body, frame, &scopes, &keys)
+                    sema_expression_lambda_collect_tree_expr(arm.condition, frame, &scopes, &keys)
+                    sema_expression_lambda_collect_tree_statements(arm.body, frame, &scopes, &keys)
                 }
-                if else_body != None -> sema_expression_lambda_collect_tir_statements(else_body, frame, &scopes, &keys)
+                if else_body != None -> sema_expression_lambda_collect_tree_statements(else_body, frame, &scopes, &keys)
             }
             else -> {}
         }
@@ -1884,7 +1884,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
                 loop reason in lambda_context.incomplete_reasons -> sema_check_unsupported(&context, "closure body: {reason}")
                 return None
             }
-            if !inline_loop && body_expected != None && (body_expected ?? Type.Named{name: "Unit"}) != (Type.Named{name: "Unit"}) && tail_source == None && sema_stmt_tir_block_can_fall_through(checked_block.value) && !sema_stmt_block_definitely_returns(statements) {
+            if !inline_loop && body_expected != None && (body_expected ?? Type.Named{name: "Unit"}) != (Type.Named{name: "Unit"}) && tail_source == None && sema_stmt_tree_block_can_fall_through(checked_block.value) && !sema_stmt_block_definitely_returns(statements) {
                 &diagnostics.push(sema_error("E0113", lambda.span, "this block closure can fall through without returning its value", "a non-Unit closure needs a return on every reachable path", "return a value from every path or make the closure return Unit"))
                 return None
             }
@@ -2013,8 +2013,8 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     mutable_keys := [String]{}
     sema_expression_lambda_collect_reference_keys(&lambda_state, first_reference, frame, &lambda_scopes, &capture_keys, &mutable_keys)
     if executable_value == {
-        .Expr(value) -> sema_expression_lambda_collect_tir_expr(value, frame, &lambda_scopes, &capture_keys)
-        .Block(body) -> sema_expression_lambda_collect_tir_statements(body, frame, &lambda_scopes, &capture_keys)
+        .Expr(value) -> sema_expression_lambda_collect_tree_expr(value, frame, &lambda_scopes, &capture_keys)
+        .Block(body) -> sema_expression_lambda_collect_tree_statements(body, frame, &lambda_scopes, &capture_keys)
     }
     lambda_work.meta.cloned_captures = [String]{}
     lambda_work.meta.frozen_captures = [String]{}
@@ -2215,7 +2215,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
         frozen_captures: lambda_work.meta.frozen_captures,
         uses_stack_sentry: false,
     }
-    result := sema_tir_node(fn_ty, TExprKind.Lambda{value: lambda_value}, lambda.span)
+    result := sema_tree_node(fn_ty, TExprKind.Lambda{value: lambda_value}, lambda.span)
     checked :: if (host_callback || open_result) && expected_ret == None -> result else -> sema_expr_expected(result, expected, environment, program, &diagnostics) ?? return None
     if inline_loop {
         sema_scope_leave(&lambda_scopes, &lambda_state)
@@ -2270,7 +2270,7 @@ fn sema_expression_lambda_lift_value(value: TExpr, carrier: Type) -> TExpr Never
         if value.ty == .Result(value_ok, value_err) {
             if value_err == (Type.Named{name: "Err"}) && type_identity_equal(value_ok, carrier_ok) {
                 rehomed := value
-                tir_expr_retype(&rehomed, carrier)
+                tree_expr_retype(&rehomed, carrier)
                 return rehomed
             }
             // copy: the lifted value is a new owned TExpr. Here it equals `value`, the lambda's
@@ -2280,7 +2280,7 @@ fn sema_expression_lambda_lift_value(value: TExpr, carrier: Type) -> TExpr Never
         // copy: the lifted value is a new owned TExpr. A Never tail equals `value`, the lambda's
         // checked tail (a read parameter), which the caller keeps.
         if value.ty == (Type.Named{name: "Never"}) -> return value.copy()
-        return sema_tir_node(carrier, TExprKind.Ok{value: value}, value.span)
+        return sema_tree_node(carrier, TExprKind.Ok{value: value}, value.span)
     }
     // copy: the lifted value is a new owned TExpr. Otherwise it equals `value`, the lambda's
     // checked tail (a read parameter), which the caller keeps.

@@ -1,4 +1,4 @@
-// Static route contracts are checked before HTTPRouterRegister reaches TIR.
+// Static route contracts are checked before HTTPRouterRegister reaches the checked tree.
 use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
@@ -1063,8 +1063,8 @@ fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: Stri
         params := [SemaCallParam]{SemaCallParam{label: "path", name: "path", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}, SemaCallParam{label: "handler", name: "handler", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Move, ty: Val(handler_type), variadic: false}}
         ownership := sema_ownership_check_method_call(&state, "{receiver_name}.{method}", receiver, AccessConvention.Read, params, &updated_args, scopes, span, &diagnostics)
         if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
-        path_names_for_tir := [String]{}
-        loop parameter in handler_shape.params -> &path_names_for_tir.push(parameter.name)
+        path_names_for_tree := [String]{}
+        loop parameter in handler_shape.params -> &path_names_for_tree.push(parameter.name)
         line :: sema_source_line_at(environment.source_segments, span) ?? 1
         body_type := sema_http_route_find_json_body(handler_shape.body, request_names)
         if body_type == .Val(body_ty) {
@@ -1098,17 +1098,17 @@ fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: Stri
         if receiver_name == "HTTPMux" {
             verb :: sema_check_expression(Expr.Str{parts: [StrPart]{StrPart.Lit{text: sema_http_route_method_name(method)}}, span: span, id: AST_NODE_GENERATED}, Val(Type.String), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             route_args := [TCallArg]{
-                sema_call_http_static_tir_arg(verb, sema_call_http_core_synthetic_arg(updated_args[0].expr, span)),
-                sema_call_http_static_tir_arg(path_value, updated_args[0]),
-                sema_call_http_static_tir_arg(callback, updated_args[1]),
+                sema_call_http_static_tree_arg(verb, sema_call_http_core_synthetic_arg(updated_args[0].expr, span)),
+                sema_call_http_static_tree_arg(path_value, updated_args[0]),
+                sema_call_http_static_tree_arg(callback, updated_args[1]),
             }
             return sema_call_http_mux_source_call(receiver_value, "__route", route_args, span, expected, environment, program, &scopes, &context, &diagnostics)
         }
-        route_handler := sema_tir_node(callback.ty, TExprKind.FnValue{kind: TFnValueKind.Send{value: callback}}, callback.span)
-        operation := THandleOp.HTTPRouterRegister{verb: sema_http_route_verb(method), handler: route_handler, file: environment.source_file, line: line, handler_param_names: path_names_for_tir, contract_json: contract}
-        tir := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{path_value}}, span)
-        sema_call_http_router_effect(tir.ty, span, environment, program, &scopes, &context, &diagnostics)
-        return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(tir, expected, environment, program, &diagnostics)}
+        route_handler := sema_tree_node(callback.ty, TExprKind.FnValue{kind: TFnValueKind.Send{value: callback}}, callback.span)
+        operation := THandleOp.HTTPRouterRegister{verb: sema_http_route_verb(method), handler: route_handler, file: environment.source_file, line: line, handler_param_names: path_names_for_tree, contract_json: contract}
+        built := sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: [TExpr]{path_value}}, span)
+        sema_call_http_router_effect(built.ty, span, environment, program, &scopes, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, environment, program, &diagnostics)}
     }
     SemaMethodSpecialCheck{handled: true, value: None}
 }

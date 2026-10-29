@@ -83,7 +83,7 @@ fn sema_call_math_reduce_error(span: Span, what: String, why: String, fix: Strin
 }
 
 // Rust D-REDUCE-VALUE1: `v.reduce(.Op)` takes one Core `ReduceOp` value; the
-// operation is carried on the method, so the TIR call has no value arguments.
+// operation is carried on the method, so the checked call has no value arguments.
 fn sema_call_math_lane_reduce(receiver: Expr, receiver_value: TExpr, name: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     failed :: SemaMethodSpecialCheck{handled: true, value: None}
     if args.len() != 1 {
@@ -115,7 +115,7 @@ fn sema_call_math_lane_reduce(receiver: Expr, receiver_value: TExpr, name: Strin
     }
     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return failed
     result :: sema_call_math_scalar_type(name)
-    value :: sema_tir_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.MathMethod{type_name: name, method: "reduce", reduce_op: Val(operation)}, args: [TExpr]{}}, span)
+    value :: sema_tree_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.MathMethod{type_name: name, method: "reduce", reduce_op: Val(operation)}, args: [TExpr]{}}, span)
     if !sema_effect_record_intrinsic_fact(environment, program, &scopes, &context, "{name}.reduce", span, sema_call_geometry_call_facts(result), &diagnostics) -> return failed
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
@@ -144,7 +144,7 @@ fn sema_call_try_math_method(receiver: Expr, receiver_value: TExpr, method: Stri
     }
     if !complete -> return failed
     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return failed
-    value :: sema_tir_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.MathMethod{type_name: name, method: method, reduce_op: None}, args: values}, span)
+    value :: sema_tree_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.MathMethod{type_name: name, method: method, reduce_op: None}, args: values}, span)
     if !sema_effect_record_intrinsic_fact(environment, program, &scopes, &context, "{name}.{method}", span, sema_call_geometry_call_facts(result), &diagnostics) -> return failed
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
@@ -164,7 +164,7 @@ fn sema_call_try_math_static(owner: String, method: String, args: [CallArg], spa
         &diagnostics.push(sema_error("E0128", expr_span(args[0].expr), "`{name}.{method}()` expects a `{type_name(wanted)}`, got `{type_name(checked.ty)}`", "`{name}.{method}` builds a `{name}` from a `{type_name(wanted)}`", "pass a `{type_name(wanted)}` value"))
         return failed
     }
-    value :: sema_tir_node(self_type, TExprKind.MathBuiltin{type_name: name, function: method, args: [TExpr]{checked}}, span)
+    value :: sema_tree_node(self_type, TExprKind.MathBuiltin{type_name: name, function: method, args: [TExpr]{checked}}, span)
     if !sema_effect_record_intrinsic_fact(environment, program, &scopes, &context, "{name}.{method}", span, sema_call_geometry_call_facts(self_type), &diagnostics) -> return failed
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }

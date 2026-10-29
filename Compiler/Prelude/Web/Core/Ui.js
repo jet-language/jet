@@ -1141,7 +1141,7 @@ async function jet_ui_web_harfbuzz_imports() {
 
 // rustc may retain unused HostServices externs in an unoptimized Web module.
 // Supply linkage-only imports without loading HarfBuzz; a call is an internal
-// compiler error because MIR reachability proved font shaping unreachable.
+// compiler error because IR reachability proved font shaping unreachable.
 function jet_ui_web_unreachable_harfbuzz_imports() {
   const unavailable = (name) => () => {
     throw new Error(`unreachable Web font-shaping import called: ${name}`);

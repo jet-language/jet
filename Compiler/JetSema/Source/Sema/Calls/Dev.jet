@@ -44,7 +44,7 @@ fn sema_call_try_dev_context_method(receiver: Expr, receiver_value: TExpr, metho
             &diagnostics.push(sema_error("E0308", argument.span, "`Dev.reload` takes `.Restart` or `.Hot`", "the reload mode is one of the two dev loop behaviours", "write `d.reload(.Restart)` or `d.reload(.Hot)`"))
             return failed
         }
-        value = Val(sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: mode}}}, argument.span))
+        value = Val(sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: mode}}}, argument.span))
     } else {
         required :: if method == "watch" -> Type.String else -> Type.Int
         checked :: sema_check_expression(argument.expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return failed
@@ -59,6 +59,6 @@ fn sema_call_try_dev_context_method(receiver: Expr, receiver_value: TExpr, metho
     ordinary := [CallArg]{argument}
     ownership :: sema_ownership_check_method_call(&state, "Dev.{method}", receiver, AccessConvention.Read, params, &ordinary, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return failed
-    result :: sema_tir_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: [TExpr]{value ?? return failed}}}, span)
+    result :: sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: [TExpr]{value ?? return failed}}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(result, expected, environment, program, &diagnostics)}
 }
