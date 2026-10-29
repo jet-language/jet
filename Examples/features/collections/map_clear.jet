@@ -1,0 +1,21 @@
+// `clear()` empties a Map in place: its entries drop, and later inserts reuse
+// it, including a Map that is a field reached through a mutable binding.
+struct Memo {
+    armed: Bool
+    seen: [String: [String]]
+}
+
+fn run() {
+    memo := Memo{armed: true, seen: [String: [String]]{}}
+    memo.seen["a"] = ["x", "y"]
+    memo.seen["b"] = ["z"]
+    print("before: {memo.seen.len()}")
+    memo.armed = false
+    &memo.seen.clear()
+    print("after: {memo.seen.len()} {memo.seen.get("a") == None} {memo.armed}")
+    memo.seen["c"] = ["w"]
+    print("reuse: {memo.seen.len()} {memo.seen.keys().to_list()}")
+    counts := [Int: Int]{1: 2, 3: 4}
+    &counts.clear()
+    print("ints: {counts.len()} {counts.is_empty()}")
+}

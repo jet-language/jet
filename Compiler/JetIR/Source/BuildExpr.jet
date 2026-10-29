@@ -1881,11 +1881,33 @@ fn ir_payload_binding(m: IRModule, b: IRBuilder, carrier: Int) -> Bool Never! {
 // `close(^x)`: a Core file owner, an arena or a handle closes by its drop; a
 // type's own Close method runs through the variable's close glue, which its
 // scope then no longer runs. Either way it is `consume(x)` with a Unit
-// result.
+// result. A part of a value (`close(^self.source)` in a Close method) runs
+// its close glue in place, as a variable bound to it would
+// (`source := ^self.source; close(^source)`): the part's owner keeps its
+// buffers, and a closing owner no longer closes that part.
 fn ir_close_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, inner: Int, span: Span) -> Int Never! {
     if !ir_unit_type(ty) -> return ir_fail_slot(&b, span, "close with a {ir_type_name(ty)} result")
     value :: if ir_body_node(p, b, inner).kind == .Move(moved) -> moved else -> inner
-    ir_drop_value(&m, p, &b, value, span)
+    if ir_body_node(p, b, value).kind == .Local(_) -> return ir_drop_value(&m, p, &b, value, span)
+    slot :: ir_expr(&m, p, &b, value)
+    if ir_failed(b) || slot < 0 -> return -1
+    if !b.fresh[slot] {
+        row :: b.f.slot_type[slot]
+        glue :: ir_close_glue(&m, p, &b, row, false, span)
+        if ir_failed(b) -> return -1
+        if glue < 0 {
+            if !ir_has_drop(m, b, slot) -> return -1
+            held :: ir_type_name(ir_ty(p, b, value))
+            return ir_fail_slot(&b, span, "close of a held {held}, which only its owner's drop closes")
+        }
+        ir_close_call(&b, glue, slot)
+        ir_close_disarm(&b, slot)
+        return -1
+    }
+    if !ir_has_drop(m, b, slot) -> return -1
+    ir_emit(&b.f, IROp.Drop, -1, slot, -1, -1, b.line)
+    b.fresh[slot] = false
+    return -1
 }
 
 // `defer close(^x)`: the resource closes at every exit of its scope, before

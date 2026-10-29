@@ -785,14 +785,15 @@ fn ir_type_def(p: IRProgram, name: String) -> Int? Never! {
     p.type_rows.get(name)
 }
 
-// `ty` with each nominal head spelled by its type row's key: a type named by
-// its key (`module.Name`) and by its name (`Name`) is one type, so two
-// checked types are the same type when their keyed spellings are equal. A
-// nominal with no type row (a runtime or host carrier) keeps its spelling.
+// `ty` with each nominal head spelled by its identity key (ir_identity_key): a
+// type named by its key (`module.Name`) and by its name (`Name`) is one type,
+// so two checked types are the same type when their keyed spellings are
+// equal. A nominal with no type row (a runtime or host carrier) keeps its
+// spelling.
 fn ir_keyed_nominals(p: IRProgram, ty: Type) -> Type Never! {
     if ty == {
-        .Named(name) -> Type.Named{name: ir_nominal_key(p, name)}
-        .Apply(name, args) -> Type.Apply{name: ir_nominal_key(p, name), args: loop arg in args -> ir_keyed_nominals(p, arg)}
+        .Named(name) -> Type.Named{name: ir_identity_key(p, name)}
+        .Apply(name, args) -> Type.Apply{name: ir_identity_key(p, name), args: loop arg in args -> ir_keyed_nominals(p, arg)}
         .List(inner) -> Type.List{element: ir_keyed_nominals(p, inner)}
         .Shared(inner) -> Type.Shared{inner: ir_keyed_nominals(p, inner)}
         .Option(inner) -> Type.Option{inner: ir_keyed_nominals(p, inner)}
@@ -814,6 +815,18 @@ fn ir_keyed_nominals(p: IRProgram, ty: Type) -> Type Never! {
 fn ir_nominal_key(p: IRProgram, name: String) -> String Never! {
     row :: ir_type_def(p, name) ?? return name.copy()
     p.types[row].key.copy()
+}
+
+// ir_nominal_key for type identity: a Core declaration of a compiler-owned
+// row's leaf (Core's `enum NetError` beside the runtime `NetError` a platform
+// signature names) keys as that leaf, so the two spellings of one Core type
+// are one type.
+fn ir_identity_key(p: IRProgram, name: String) -> String Never! {
+    key :: ir_nominal_key(p, name)
+    if !key.starts_with("<corelib>/") -> return key
+    leaf :: ir_short_name(key)
+    if ir_type_def(p, leaf) == .Val(owned) && p.types[owned].key == leaf -> return leaf
+    key
 }
 
 // The IR id of the checked function `key` applied to `type_args` (concrete

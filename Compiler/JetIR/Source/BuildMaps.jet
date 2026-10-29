@@ -479,6 +479,19 @@ fn ir_map_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, symbol: S
         if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(&b, span, "Map top_n without a count"))
         return Val(ir_map_top_n(&m, p, &b, ty, shape, subject, operands[1], span))
     }
+    // `clear()`: each entry drops and the map is left empty; its buffer stays
+    // for later inserts, as the priority queue's `clear` does.
+    if symbol == "std::collections::HashMap::clear" {
+        if operands.len() != 1 -> return Val(ir_fail_slot(&b, span, "Map clear with {operands.len() - 1} arguments"))
+        if m.types[shape.entry].drop != "" {
+            walk :: ir_walk_open(&m, &b, subject, shape.entry)
+            ir_emit(&b.f, IROp.Drop, -1, walk.item, -1, -1, b.line)
+            ir_walk_close(&m, &b, walk)
+        }
+        zero :: ir_word_const(&m, &b, 0)
+        ir_emit(&b.f, IROp.Store, -1, subject, 0, zero, b.line)
+        return Val(-1)
+    }
     // `equal(other)` is the maps' equality; `merge(other)` is a copy of the
     // receiver with each entry of `other`, in key order, set as a copy: the
     // right side wins.

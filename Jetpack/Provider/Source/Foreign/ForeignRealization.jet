@@ -177,7 +177,7 @@ fn provider_write_verified_file(destination: String, bytes: [U8]) ProviderError!
     digest :: pkg_sha256_hex(bytes)
     temporary :: files.join(parent, ".{file_name}.{sys.pid()}-{provider_prefix(digest, 12)}.tmp")
     writer :: files.create(temporary, if_exists: .Refuse) ?? return Err(ProviderError.ForeignProjection("could not stage binding {temporary}: {err}"))
-    if provider_write_synced(writer, bytes) == {
+    if provider_write_synced(^writer, bytes) == {
         .Ok(_) -> {}
         .Err(error) -> {
             files.remove(temporary).drop("the failed write is reported; the temporary file may already be gone")
@@ -193,7 +193,7 @@ fn provider_write_verified_file(destination: String, bytes: [U8]) ProviderError!
     }
 }
 
-fn provider_write_synced(writer: FileWriter, bytes: [U8]) IOError! -[FS]> {
+fn provider_write_synced(writer: ^FileWriter, bytes: [U8]) IOError! -[FS]> {
     writer.write_all(bytes)
     writer.fsync()
     close(^writer)

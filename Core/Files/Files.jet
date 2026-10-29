@@ -2225,9 +2225,10 @@ fn realpath(path: String) -[FS, Env]> String IOError! { core.files.canonicalize(
 fn pwd() -[FS, Env]> String IOError! { cwd() }
 
 
+/// A fresh directory under the system temp directory that stays until the caller removes it.
+/// `temp_dir` is the form that removes its directory when the `TempDir` drops.
 fn tmpdir(prefix: String) -[FS]> String IOError! {
-    temp :: core.files.temp_dir(prefix)
-    Ok(temp.path)
+    mkdtemp(prefix)
 }
 
 

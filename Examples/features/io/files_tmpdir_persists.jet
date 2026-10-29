@@ -1,0 +1,25 @@
+// `files.tmpdir` returns the path of a fresh directory that stays until the
+// caller removes it, so a helper can return it and later writes land in it.
+package {
+    name: "files_tmpdir_persists"
+    authority: { allow: [FS, FS.Read, FS.Write, IO, Mem.Alloc] }
+}
+
+use core.files as files
+
+fn scratch(label: String) -[FS]> String {
+    files.tmpdir("jet-tmpdir-{label}-") ?? panic("tmpdir")
+}
+
+fn run() {
+    dir :: scratch("persists")
+    print("directory after return: {files.is_dir(dir)}")
+    note :: files.join(dir, "note.txt")
+    files.write(note, "kept") ?? panic("write into the tmpdir")
+    print("read back: {files.read(note) ?? panic("read")}")
+    other :: scratch("persists")
+    print("second call is a new directory: {other != dir}")
+    files.remove_all(dir) ?? panic("remove")
+    files.remove_all(other) ?? panic("remove other")
+    print("removed by the caller: {!files.exists(dir)}")
+}
