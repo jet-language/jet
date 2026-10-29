@@ -185,9 +185,13 @@ fn core_source_receiver_method(identity: String, method: String, nargs: Int) -> 
 
 // Exact Rust CoreModuleExports table: an established bare spelling's
 // declaring source owner, never a general public-alias re-export mechanism.
+// `declared` is set when the prelude renames the declaration (`Date` is
+// `pub use core.time.[LocalDate as Date]`); otherwise the bare spelling is the
+// declared name.
 struct CoreBareSourceModule {
     name: String
     module_name: String
+    declared: String{""}
 }
 CORE_BARE_SOURCE_MODULES :: [CoreBareSourceModule]{
     {name: "URL", module_name: "core.net.url"},
@@ -212,7 +216,7 @@ CORE_BARE_SOURCE_MODULES :: [CoreBareSourceModule]{
     {name: "HTTPCorsPolicy", module_name: "core.http.server"},
     {name: "HTTPCorsOrigins", module_name: "core.http.server"},
     {name: "Perf", module_name: "core.perf"},
-    {name: "RNG", module_name: "core.testing"},
+    {name: "RNG", module_name: "core.math.random"},
     {name: "Vec2", module_name: "core.math"},
     {name: "Vec3", module_name: "core.math"},
     {name: "Vec4", module_name: "core.math"},
@@ -244,7 +248,7 @@ CORE_BARE_SOURCE_MODULES :: [CoreBareSourceModule]{
     {name: "read_file", module_name: "core.files"},
     {name: "write_file", module_name: "core.files"},
     {name: "file_exists", module_name: "core.files"},
-    {name: "Date", module_name: "core.time"},
+    {name: "Date", module_name: "core.time", declared: "LocalDate"},
     {name: "Clock", module_name: "core.time"},
     {name: "measurement", module_name: "core.units"},
     {name: "keep", module_name: "core.prelude"},
@@ -253,6 +257,15 @@ CORE_BARE_SOURCE_MODULES :: [CoreBareSourceModule]{
 fn core_bare_source_module(name: String) -> String? Never! {
     loop row in CORE_BARE_SOURCE_MODULES {
         if row.name == name -> return Val(row.module_name)
+    }
+    None
+}
+
+// The Core type a prelude rename spells bare (`Date` -> `LocalDate`), when
+// `name` is one.
+fn core_bare_source_declared(name: String) -> String? Never! {
+    loop row in CORE_BARE_SOURCE_MODULES {
+        if row.name == name && row.declared != "" -> return Val(row.declared)
     }
     None
 }

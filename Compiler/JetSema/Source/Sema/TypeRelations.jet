@@ -29,6 +29,7 @@ use jet_foundation.[
     ViewSource,
     ViewSourcePath,
     ViewSourceProjection,
+    core_bare_source_declared,
     core_bare_source_module,
     core_module_export,
     core_root_type,
@@ -834,6 +835,8 @@ fn sema_type_graph_lookup_symbol_at(graph: SemaRegistrationGraph, caller: Int, n
     // Local declarations and explicit imports have already won above.
     bare_owner :: core_bare_source_module(name)
     if bare_owner == .Val(owner_name) {
+        // A prelude rename (`LocalDate as Date`) names the declared type.
+        if core_bare_source_declared(name) == .Val(declared) -> return sema_type_graph_bare_rename(graph, declared, owner_name)
         loop row in sema_registration_nominal_rows_named(graph, name) {
             // The module and nominal are passed as places: binding the module
             // copied it whole per row.
@@ -853,6 +856,17 @@ fn sema_type_graph_bare_alias(module_row: SemaRegistrationModule, nominal: SemaR
         || nominal.generic_params.len() != 0
         || nominal.symbol.visibility < 2 -> return None
     Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Nominal{module_index: row.module_index, row: row.row}, source_module_identity: module_row.module_identity, target_module_identity: module_row.module_identity, visibility: nominal.symbol.visibility, nominal_row: Val(row)})
+}
+
+// The Core declaration `declared` of `owner_name` that a prelude rename spells
+// bare.
+fn sema_type_graph_bare_rename(graph: SemaRegistrationGraph, declared: String, owner_name: String) -> SemaRegistrationResolvedSymbol? Never! {
+    loop row in sema_registration_nominal_rows_named(graph, declared) {
+        if graph.modules[row.module_index].module_name != owner_name || !graph.modules[row.module_index].module_identity.starts_with("<corelib>/") -> next
+        identity :: graph.modules[row.module_index].module_identity
+        return Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Nominal{module_index: row.module_index, row: row.row}, source_module_identity: identity, target_module_identity: identity, visibility: graph.modules[row.module_index].nominals[row.row].symbol.visibility, nominal_row: Val(row)})
+    }
+    None
 }
 
 // Rust `struct_owner_module`'s tail: a bare type name the caller neither

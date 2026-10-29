@@ -1,7 +1,8 @@
 use jet_devserver.TerminalHost.[JET_DEVTOOLS_PROTOCOL, TerminalAction, TerminalFactValue, TerminalHost, TerminalHostAccess, TerminalHostCapabilities, TerminalHostConfig, TerminalHostEvent, TerminalHostFact, TerminalViewport, strip_ansi]
 use jet_devserver.Devtools.[JetDevtoolsEnvelope, JetDevtoolsEvent, JetDevtoolsPanelId]
 use jet_devserver.Devtools.catalog.[descriptors]
-use jet_devserver.Session.[DevtoolsProjection, DevtoolsSelectionFact, DevtoolsStatusFact, DevtoolsSessionState, DevtoolsCommandCapabilities]
+use jet_devserver.Session.[DevtoolsProjection, DevtoolsSelectionFact, DevtoolsStatusFact, DevtoolsCommandCapabilities]
+use jet_foundation.Devtools.[JetDevtoolsLifecycleState]
 
 // Rust: crates/jet-devserver/src/TerminalHost.rs:2040
 fn event(sequence: U64, panel_id: JetDevtoolsPanelId, kind: String, entity: String) -> TerminalHostEvent {
@@ -33,7 +34,7 @@ fn projection() -> DevtoolsProjection {
     assert_eq(frame.revision, "revision-a")
     assert_eq(frame.cursor, .Val(1))
     assert_eq(frame.observed_at, .Val(1234))
-    assert_eq(frame.status.as_ref().map((status) -> status.state), .Val(DevtoolsSessionState.Ready))
+    assert_eq(frame.status.as_ref().map((status) -> status.state), .Val(JetDevtoolsLifecycleState.Ready))
     event :: host.events().next().unwrap()
     assert_eq(event.observed_at, 1200)
     assert_eq(event.facts[0].value, .Val(TerminalFactValue.Text("{{\"accepted\":true}}")))

@@ -2,7 +2,7 @@
 // HTTP-facing adapter for the typed browser devtools host.
 use std.collections.[VecDeque]
 use jet_foundation.Dyn.[Dyn]
-use jet_foundation.Devtools.[jet_observe_live_value_update]
+use jet_foundation.Devtools.[JetDevtoolsLifecycleState, jet_observe_live_value_update]
 use jet_foundation.DevtoolsControl.[JetDevtoolsCommandReceipt]
 use jet_foundation.JSON.[foundation_json_escape, parse_json_with_limit]
 use jet_foundation.[
@@ -10,7 +10,7 @@ use jet_foundation.[
 ]
 use jet_devserver.BrowserHost.[BrowserActionGrant, BrowserDock, BrowserHost, BrowserHostAction, BrowserHostEffect, BrowserHostError, BrowserHostEvent, BrowserHtmlElement, BrowserNode, BrowserNodeKind, BrowserPanelFact, BrowserPanelView, BrowserPlacement, BrowserReconnectCursor, BrowserSelection, BrowserSessionState, BrowserSourceGrant, BrowserSourceLocation, MAX_BROWSER_TEXT, MAX_BROWSER_VALUE]
 use jet_devserver.Devtools.[JetDevtoolsHostKind, JetDevtoolsPanelCapability, JetDevtoolsPanelProjection]
-use jet_devserver.Session.[DevtoolsProjection, DevtoolsSessionState, DevtoolsStatusFact, ResidentDevSession, JET_DEVTOOLS_PROTOCOL]
+use jet_devserver.Session.[DevtoolsProjection, DevtoolsStatusFact, ResidentDevSession, JET_DEVTOOLS_PROTOCOL]
 use jet_devserver.WebModuleSwap.[WebFocusFact, WebFormDraftFact, WebIslandFact, WebModuleSwapReceipt, WebModuleSwapSnapshot, WebModuleSwapState, WebModuleSwapStateFact, WebQueryCacheFact, WebScrollFact, WebSignalFact, WebStateValue, WebStoreFact]
 use jet_devserver.[MAX_REQUEST_BODY_BYTES]
 use core.encoding.[Dyn]
@@ -135,7 +135,7 @@ fn bounded_optional(value: String?, limit: USize) -> String? {
     })
 }
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:300
-fn browser_session_state(state: DevtoolsSessionState) -> BrowserSessionState {
+fn browser_session_state(state: JetDevtoolsLifecycleState) -> BrowserSessionState {
     if state == { .Starting | .Ready -> .Idle, .Building -> .Building, .Error -> .BuildFailed
         .Unavailable | .Stopped -> .RuntimeFailure }
 }
@@ -895,7 +895,7 @@ fn status_json(output: &String, status: &DevtoolsStatusFact) {
     output.push('}')
 }
 // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1761
-fn devtools_state_as_str(state: DevtoolsSessionState) -> String {
+fn devtools_state_as_str(state: JetDevtoolsLifecycleState) -> String {
     if state == {
         .Starting -> "starting"
         .Building -> "building"

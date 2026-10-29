@@ -223,6 +223,10 @@ fn parser_parse_item_or_import(state: &JetParserState) -> ParsedItemOrImport {
             value :: parser_parse_distinct(&state, modifiers)
             return ParsedItemOrImport{item: Val(value), import: None, handled: true}
         }
+        parser_type_alias_ahead_at(&state, 0) -> {
+            value :: parser_parse_type_alias(&state, modifiers)
+            return ParsedItemOrImport{item: Val(Item.TypeAlias{value: value}), import: None, handled: true}
+        }
         parser_state_section_ahead(&state) -> {
             section_start :: parser_current(&state).span
             section := parser_parse_state_section(&state, "", section_start)
@@ -280,8 +284,10 @@ fn parser_parse_item_or_import(state: &JetParserState) -> ParsedItemOrImport {
             return ParsedItemOrImport{item: Val(Item.TemplateLoop{value: value}), import: None, handled: true}
         }
         // An ALL_CAPS `NAME :: value` in an inline module body is a module
-        // constant; file scope routes it as a module binding before reaching here.
-        parser_marked_const_ahead(&state, 0) -> {
+        // constant, and so is `Name :: path` until sema reads what the path
+        // names (#6176); file scope routes both as module bindings before
+        // reaching here.
+        parser_marked_const_ahead(&state, 0) || parser_path_binding_ahead_at(&state, 0) -> {
             value :: parser_parse_const(&state, modifiers)
             return ParsedItemOrImport{item: Val(Item.Const{value: value}), import: None, handled: true}
         }
@@ -315,10 +321,6 @@ fn parser_parse_item_or_import(state: &JetParserState) -> ParsedItemOrImport {
         token.kind == TOKEN_KW_DERIVE -> {
             value :: parser_parse_user_derive(&state) ?? return ParsedItemOrImport{item: None, import: None, handled: true}
             return ParsedItemOrImport{item: Val(Item.UserDerive{value: value}), import: None, handled: true}
-        }
-        token.kind == TOKEN_IDENT && parser_value(state, token) == "alias" -> {
-            value :: parser_parse_type_alias(&state, modifiers)
-            return ParsedItemOrImport{item: Val(Item.TypeAlias{value: value}), import: None, handled: true}
         }
     }
     ParsedItemOrImport{item: None, import: None, handled: false}
@@ -2234,9 +2236,9 @@ fn parser_parse_persist_binding(state: &JetParserState) -> Item? {
     Val(Item.Const{value: definition})
 }
 
+// `Name :: Type` / `Name<T> :: Type<T>` (parser_type_alias_ahead_at).
 fn parser_parse_type_alias(state: &JetParserState, modifiers: ParsedItemModifiers) -> TypeAliasDef {
-    start :: parser_bump(&state)
-    name :: parser_expect_name(&state, "after `alias`")
+    name :: parser_bump(&state)
     type_params := parser_parse_type_params(&state)
     parser_expect(&state, TOKEN_COLON_COLON, "`::` before the aliased type")
     target := if {
@@ -2249,7 +2251,7 @@ fn parser_parse_type_alias(state: &JetParserState, modifiers: ParsedItemModifier
         else -> parser_parse_type(&state, 0)
     }
     parser_finish_statement(&state)
-    TypeAliasDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, type_params: ^type_params, target: target.ty, target_span: target.span, span: parser_cover(start.span, target.span)}
+    TypeAliasDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, type_params: ^type_params, target: target.ty, target_span: target.span, span: parser_cover(name.span, target.span)}
 }
 
 fn parser_apply_type_markers(value: &StructDef, markers: [Marker]) Never! {

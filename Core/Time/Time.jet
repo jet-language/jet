@@ -537,7 +537,6 @@ impl TimeError {
     fn new(reason: String) -> TimeError Never! { TimeError{reason: reason} }
 }
 struct LocalDate { date_y: Int, date_m: Int, date_d: Int }
-alias Date :: LocalDate
 struct LocalTime { hour_value: Int, minute_value: Int, second_value: Int, nanos: Int }
 struct DateTime { secs: Int, nanos: Int, leap_second: Bool }
 struct Period { years_value: Int, months_value: Int, days_value: Int }
@@ -1792,7 +1791,7 @@ impl Instant {
 }
 
 #Test("Civil codecs retain their permissive wire policy separately from public parsers") {
-    date :: Dyn.Text("2024-2-29").decode<Date>() ?? panic("Date codec")
+    date :: Dyn.Text("2024-2-29").decode<LocalDate>() ?? panic("Date codec")
     assert_eq(date.to_string(), "2024-02-29")
     assert_eq(date.encode(), Dyn.Text("2024-02-29"))
     t :: Dyn.Text("1:2:3").decode<LocalTime>() ?? panic("LocalTime codec")
@@ -1834,7 +1833,7 @@ impl Instant {
 }
 
 #Test("Date alias receivers retain projections and ISO year boundaries") {
-    date :: Date{new(2021, 1, 1)}
+    date :: LocalDate{new(2021, 1, 1)}
     assert_eq(date.year(), 2021)
     assert_eq(date.month(), 1)
     assert_eq(date.day(), 1)
@@ -1852,7 +1851,7 @@ impl Instant {
 }
 
 #Test("Date alias arithmetic preserves leap clamps and signed periods") {
-    date :: Date{new(2024, 2, 29)}
+    date :: LocalDate{new(2024, 2, 29)}
     assert_eq(date.quarter_of_year(), 1)
     assert_eq(new(2024, 12, 1).quarter_of_year(), 4)
     assert_eq(date.days_in_month(), 29)
@@ -1869,7 +1868,7 @@ impl Instant {
 }
 
 #Test("Date alias truncation formatting and rounded differences preserve errors") {
-    date :: Date{new(2024, 2, 29)}
+    date :: LocalDate{new(2024, 2, 29)}
     assert_eq(date.truncate("year"), new(2024, 1, 1))
     assert_eq(date.truncate("month"), new(2024, 2, 1))
     assert_eq(date.truncate("unknown"), date)

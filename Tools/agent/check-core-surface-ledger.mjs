@@ -1903,7 +1903,7 @@ function ownedWrapperRuntimeUnit(source, module, member) {
   if (start < 0) return null;
   let end = start + 1;
   while (end < lines.length &&
-      !/^(?:priv\s+)?(?:fn|struct|enum|alias|impl|module|trait)\b|^#/.test(lines[end])) {
+      !/^(?:priv\s+)?(?:fn|struct|enum|impl|module|trait)\b|^[A-Za-z_][A-Za-z0-9_]*(?:<[^>]*>)?\s*::|^#/.test(lines[end])) {
     end += 1;
   }
   const body = lines.slice(start, end).join("\n");
@@ -2263,9 +2263,11 @@ function parseCoreSource(source, root = ROOT) {
           sourceModule.module + "." + member + "` target `" + target + "` at line " + sourceModule.sourceLine);
       }
     }
+    // A type alias is `Name :: Type` or `Name<T> :: Type<T>`; a column-0
+    // constant matches too, which only widens this existence check.
     const sourceTypes = new Set(Array.from(
-      readSource(sourceModule.path).matchAll(/^(?:struct|enum|alias)\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
-    ).map(function (match) { return match[1]; }));
+      readSource(sourceModule.path).matchAll(/^(?:(?:struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)|([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]*>)?\s*::)/gm),
+    ).map(function (match) { return match[1] ?? match[2]; }));
     for (const type of sourceModule.ownedTypes) {
       if (!sourceTypes.has(type)) {
         throw new Error("Core source module does not declare owned type `" +

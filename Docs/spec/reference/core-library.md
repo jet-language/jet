@@ -2511,7 +2511,9 @@ particular call uses UTC or bundled web data. `now`, `now_utc`, `today`,
 The civil carriers (`Date`/`LocalDate`, `LocalTime`, `DateTime`, `Period`,
 `Zone`, `ZonedDateTime`, and `Instant`) and their arithmetic, parsing,
 formatting, and text codecs are implemented in `Core/Time/Time.jet` on all
-tiers. `Date` aliases `LocalDate`; immutable zone tables are plain values,
+tiers. `Date` is the prelude's name for `LocalDate`
+(`pub use core.time.[LocalDate as Date]`); `core.time` declares only
+`LocalDate`. Immutable zone tables are plain values,
 copied with their zone, and borrowed reads need no shared-memory guard or
 `Time.Wait` effect. Native seams supply raw clock samples, environment values
 and TZif bytes. `sleep` resolves to its loaded source declaration before

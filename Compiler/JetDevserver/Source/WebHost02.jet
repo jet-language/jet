@@ -588,8 +588,7 @@ module secure_output_windows {
     use std.os.windows.ffi.[OsStrExt]
     use std.os.windows.fs.[OpenOptionsExt]
     use std.os.windows.io.[AsRawHandle]
-    // Rust: crates/jet-devserver/src/WebHost.rs:2930
-    alias Handle :: *U8
+    // Rust: crates/jet-devserver/src/WebHost.rs:2930 `Handle` is `*U8`
     // Rust: crates/jet-devserver/src/WebHost.rs:2931
     GENERIC_READ :: 0x80000000
     // Rust: crates/jet-devserver/src/WebHost.rs:2932
@@ -619,16 +618,16 @@ module secure_output_windows {
     struct FileAttributeTagInfo { attributes: U32; reparse_tag: U32 }
     // Rust: crates/jet-devserver/src/WebHost.rs:2951
     #Repr(C)
-    struct FileRenameInfo { replace_if_exists: I32; root_directory: Handle; file_name_length: U32; file_name: [U16; 1] }
+    struct FileRenameInfo { replace_if_exists: I32; root_directory: *U8; file_name_length: U32; file_name: [U16; 1] }
     // Rust: crates/jet-devserver/src/WebHost.rs:2959
     #Repr(C)
     struct FileDispositionInfo { delete_file: U8 }
     // Rust: crates/jet-devserver/src/WebHost.rs:2964
-    #FFI(system) fn GetFileInformationByHandleEx(file: Handle, class: I32, info: *U8, size: U32) -> I32
+    #FFI(system) fn GetFileInformationByHandleEx(file: *U8, class: I32, info: *U8, size: U32) -> I32
     // Rust: crates/jet-devserver/src/WebHost.rs:2970
-    #FFI(system) fn GetFinalPathNameByHandleW(file: Handle, path: *U16, path_len: U32, flags: U32) -> U32
+    #FFI(system) fn GetFinalPathNameByHandleW(file: *U8, path: *U16, path_len: U32, flags: U32) -> U32
     // Rust: crates/jet-devserver/src/WebHost.rs:2976
-    #FFI(system) fn SetFileInformationByHandle(file: Handle, class: I32, info: *U8, size: U32) -> I32
+    #FFI(system) fn SetFileInformationByHandle(file: *U8, class: I32, info: *U8, size: U32) -> I32
     // Rust: crates/jet-devserver/src/WebHost.rs:2985
     struct Directory { path: OSPath; file: File; final_path: String }
     // Rust: crates/jet-devserver/src/WebHost.rs:2991

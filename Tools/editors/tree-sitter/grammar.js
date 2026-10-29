@@ -14,7 +14,7 @@
 
 // BEGIN GENERATED JET SYNTAX HIGHLIGHTS
 const JET_HIGHLIGHT_KEYWORD_CONTROL = ["after", "break", "defer", "else", "if", "in", "loop", "next", "return", "task", "task.all", "task.any", "task.group", "task.race", "yield"];
-const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Context", "Impure", "Reactive", "Scrub", "State", "Test", "Todo", "Transact", "Transition", "Unsafe", "add", "alias", "as", "change", "client", "derive", "distinct", "effect", "enum", "extern", "fact", "fn", "impl", "marker", "migration", "module", "policy", "priv", "protocol", "pub", "remove", "rename", "rust", "server", "state", "struct", "tag", "trait", "use", "validate", "via", "wrap"];
+const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Context", "Impure", "Reactive", "Scrub", "State", "Test", "Todo", "Transact", "Transition", "Unsafe", "add", "as", "change", "client", "derive", "distinct", "effect", "enum", "extern", "fact", "fn", "impl", "marker", "migration", "module", "policy", "priv", "protocol", "pub", "remove", "rename", "rust", "server", "state", "struct", "tag", "trait", "use", "validate", "via", "wrap"];
 const JET_HIGHLIGHT_KEYWORD_OWNERSHIP = ["uninit"];
 const JET_HIGHLIGHT_KEYWORD_OTHER = ["$build", "$package", "$phase", "$program", "@SOURCE", "@TYPES", "comptime", "it", "self", "shared"];
 const JET_HIGHLIGHT_LITERAL = ["Cancelled", "DeadlineBlown", "None", "Panicked", "Val", "false", "true"];
@@ -255,7 +255,7 @@ module.exports = grammar({
     _head_part: ($) =>
       choice($.type_parameters, $.paren_expr, $.bracket_expr, $.identifier, $.type_identifier, $.primitive_type, $.attribute, ".", ":", ",", "|", "+", "="),
 
-    // Contextual declaration words (`state`, `protocol`, `marker`, `alias`,
+    // Contextual declaration words (`state`, `protocol`, `marker`,
     // `migration`, `policy`, `client`, `server`, …) directly before a type name.
     decl_head: ($) =>
       prec(

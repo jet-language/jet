@@ -641,7 +641,7 @@ function newJetIndex(ref) {
     suffixTypes: new Map(),
     // `Owner::method` -> loc, for fns declared directly in an impl/struct/enum body.
     methods: new Map(),
-    // `alias A :: B` -> B
+    // `A :: B` (type alias, #6176) -> B
     aliases: new Map(),
     // lowercased type name with underscores removed -> files defining it
     typeFiles: new Map(),
@@ -723,7 +723,7 @@ function scanJet(file, text, idx, primary) {
 
     const om = /^\s*(?:pub\s+)?(?:impl|struct|enum|interface|trait)\s+([A-Za-z_]\w*)/.exec(c);
     if (om) pendingOwner = om[1];
-    const am = /^\s*(?:pub\s+)?alias\s+([A-Za-z_]\w*)\s*::\s*([A-Za-z_]\w*)/.exec(c);
+    const am = /^\s*(?:pub\s+)?([A-Z]\w*)\s*::\s*(?!distinct\b)([A-Z]\w*)\s*$/.exec(c);
     if (am && !idx.aliases.has(am[1])) idx.aliases.set(am[1], am[2]);
     const top = ownerStack.length ? ownerStack[ownerStack.length - 1] : null;
     const owner = om ? om[1] : top && top.depth === depth ? top.name : null;

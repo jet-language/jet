@@ -174,6 +174,7 @@ param    = [ "#Root" ] ( [ "&" | "^" ] "self"
              [ "{" expr "}" ] ) ;
 module-binding = [ "#Track" ] ident ( "::" | ":=" ) expr NL ;
 comptime = "@" ident "::" expr NL ;
+alias    = ident [ type-params ] "::" type NL ;
 stmt     = binding | assign | if | loop | "break" | "next"
          | "return" [ expr ] | result-handler | expr ;
 pattern  = ident | ".{" ident { "," ident } [ "," ".." ] "}"
@@ -190,6 +191,13 @@ binding sigil. Types ride values (`Type{…}` or an expected-type-inferred
 `name: Type := value` forms are retired (D-BIND-BARE1=A).
 View-typed parameters may add `from owner` or `from owner | other_owner`; the
 names identify sibling owners in the published provenance relation.
+
+An `alias` and a constant share the `name :: …` spelling; meaning, never
+casing, separates them. A declaration with type parameters, or whose right side
+parses only as a type, is an alias. A bare path right side (`RNG ::
+random.RNG`, `MAX :: other.MAX`) is resolved: it is an alias when the path
+names a type and a constant otherwise, and ordinary scoping decides a name that
+is both. `alias` is not a keyword (D-TYPEALIAS1, #6176).
 
 `if` and `loop` also have expression forms. The essential productions are:
 

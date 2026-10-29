@@ -2168,7 +2168,7 @@ fn sema_registration_value_type_rules(module_row: SemaRegistrationModule, item: 
         }
         .TypeAlias(definition) -> {
             if definition.type_params.len() == 0 && !(definition.target == .Named(_)) {
-                &diagnostics.push(sema_error("E0324", definition.name_span, "a type alias needs type parameters — write `alias Name<T> :: …`", "transparent `alias` is only for shortening generic spellings", "for a distinct type name over a primitive, use `struct Name(BaseType)` instead"))
+                &diagnostics.push(sema_error("E0324", definition.name_span, "a type alias needs type parameters — write `Name<T> :: …`", "a transparent type alias is only for shortening generic spellings", "for a distinct type name over a primitive, use `struct Name(BaseType)` instead"))
                 return false
             }
         }
@@ -2650,7 +2650,7 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     ^module_row
 }
 
-// A transparent alias of a fallible type (`alias Parsed<T> :: T AppError!`)
+// A transparent alias of a fallible type (`Parsed<T> :: T AppError!`)
 // carries the function's failure contract, which is read from the written
 // return type: a return type naming such an alias is written as its
 // expansion, so `-> Parsed<Int>` has the contract of `-> Int AppError!`.
@@ -3845,6 +3845,9 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
         sema_units_inject(&prepared_inputs[index], units_catalog, units_names, units_mentions[index])
     }
     sema_units_resolve(&prepared_inputs, edges, &diagnostics)
+    // #6176: a `Name :: path` binding whose path names a type is a type
+    // alias; it is rewritten before markers bind or casing reads the items.
+    sema_alias_classify_inputs(&prepared_inputs, edges)
     // Rust CheckInner `bind_marker_applications`: a directly used imported
     // marker binds to its declaring module before any module registers.
     // Each program binds in place; its bindings read every input in place.

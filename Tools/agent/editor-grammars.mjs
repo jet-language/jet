@@ -100,7 +100,7 @@ const GLOBAL_KEYWORDS = new Set([
 // words parsed as named nodes would make the whole language fail to load.
 const ZED_ANONYMOUS_WORDS = new Set([
   "Bool", "Char", "Err", "F32", "F64", "Float", "I16", "I32", "I64", "I8", "Int", "List", "Map",
-  "String", "Test", "U16", "U32", "U64", "U8", "add", "alias", "as", "break", "change", "comptime",
+  "String", "Test", "U16", "U32", "U64", "U8", "add", "as", "break", "change", "comptime",
   "continue", "copy", "defer", "derive", "distinct", "else", "enum", "extern", "false", "fn", "if",
   "impl", "in", "loop", "marker", "migration", "module", "pub", "remove", "rename", "return", "rust",
   "self", "state", "step", "struct", "tag", "task", "trait", "true", "use", "via",

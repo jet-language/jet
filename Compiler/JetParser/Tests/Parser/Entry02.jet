@@ -259,7 +259,7 @@ fn entry02_unit_result(ty: Type?, error_name: String) -> Bool {
 }
 // Rust: crates/jet-parser/src/Parser/mod.rs:2667
 #Test("fallible_type_sigil_is_valid_in_all_type_positions") {
-    p :: entry02_program("struct Holder {{\nvalue: Int? IOError!\nnested: [Int (DbError | TimeoutError)!]\ncallback: fn(Int? IOError!) -> Int (DbError | TimeoutError)!\n}}\nalias Box<T> :: T? IOError!\nfn fetch(value: Int? IOError!) -> Box<Int? IOError!> {{ value }}\nfn run() {{}}\n")
+    p :: entry02_program("struct Holder {{\nvalue: Int? IOError!\nnested: [Int (DbError | TimeoutError)!]\ncallback: fn(Int? IOError!) -> Int (DbError | TimeoutError)!\n}}\nBox<T> :: T? IOError!\nfn fetch(value: Int? IOError!) -> Box<Int? IOError!> {{ value }}\nfn run() {{}}\n")
     assert(loop item in p.items { if item == .Struct(_) -> break true } ?? false)
     holder :: entry02_struct(p, "Holder")
     assert(holder.fields[0].ty == Type.Result{ok: Type.Option{inner: Type.Int}, err: Type.Named{name: "IOError"}})
@@ -283,7 +283,7 @@ fn entry02_unit_result(ty: Type?, error_name: String) -> Bool {
 }
 // Rust: crates/jet-parser/src/Parser/mod.rs:2809
 #Test("suffix_contract_reaches_nested_general_type_positions") {
-    p :: entry02_program("struct Holder {{\nmap: [String: IOError!]\ntuple: (entry: Entry? StoreError!, failure: Err!)\ncallback: fn(Int? StoreError!) IOError!\n}}\nalias Callback :: fn(Int? StoreError!) IOError!\nfn run() {{}}\n")
+    p :: entry02_program("struct Holder {{\nmap: [String: IOError!]\ntuple: (entry: Entry? StoreError!, failure: Err!)\ncallback: fn(Int? StoreError!) IOError!\n}}\nCallback :: fn(Int? StoreError!) IOError!\nfn run() {{}}\n")
     holder :: entry02_struct(p, "Holder")
     assert(if holder.fields[0].ty == { .Map(_, _, value) -> entry02_unit_result(Val(value), "IOError") else -> false })
     assert(if holder.fields[1].ty == { .Tuple(fields) -> fields.len() >= 2 && fields[0].name == "entry" && if fields[0].ty == { .Result(_, _) -> fields[1].name == "failure" && entry02_unit_result(Val(fields[1].ty), "Err") else -> false } else -> false })
@@ -301,16 +301,16 @@ fn entry02_unit_result(ty: Type?, error_name: String) -> Bool {
 }
 // Rust: crates/jet-parser/src/Parser/mod.rs:2912
 #Test("retired_infix_failure_spelling_is_not_accepted") {
-    _ :: entry02_errors("alias Old :: Int? ! IOError\n")
+    _ :: entry02_errors("Old :: Int? ! IOError\n")
 }
 // Rust: crates/jet-parser/src/Parser/mod.rs:2910 (an error suffix alone has a unit success type)
 #Test("unit_failure_suffix_is_accepted_in_aliases") {
-    target :: entry02_alias(entry02_program("alias Failure :: String!\n"), "Failure").target
+    target :: entry02_alias(entry02_program("Failure :: String!\n"), "Failure").target
     assert(target == Type.Result{ok: Type.Named{name: "Unit"}, err: Type.String})
 }
 // Rust: crates/jet-parser/src/Parser/mod.rs:2928
 #Test("retired_unit_infix_failure_spelling_is_not_accepted") {
-    loop source in ["fn save() ! IOError {{}}\n", "alias OldFn :: fn() ! IOError\n"] -> _ :: entry02_errors(source)
+    loop source in ["fn save() ! IOError {{}}\n", "OldFn :: fn() ! IOError\n"] -> _ :: entry02_errors(source)
 }
 // Rust: crates/jet-parser/src/Parser/mod.rs:2940
 #Test("unit_fallible_signatures_format_without_arrow") {

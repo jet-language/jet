@@ -1161,7 +1161,7 @@ fn parser_item_ahead(state: &JetParserState) -> Bool Never! {
         parser_template_loop_ahead(&state) -> true
         parser_is_item_keyword(kind) -> true
         kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV -> true
-        token.kind == TOKEN_IDENT && parser_value(state, token) == "alias" -> true
+        parser_type_alias_ahead_at(&state, 0) -> true
         token.kind == TOKEN_IDENT && parser_value(state, token) == "private" -> parser_foreign_private_ahead(&state)
         kind == TOKEN_HASH -> parser_hash_leads_to_item(&state)
         else -> false
@@ -1255,5 +1255,5 @@ fn parser_hash_leads_to_item(state: &JetParserState) -> Bool Never! {
     }
     loop parser_kind_at(&state, offset) == TOKEN_SEMI -> offset += 1
     kind :: parser_kind_at(&state, offset)
-    parser_item_declaration_ahead_at(&state, offset) || parser_marked_const_ahead(&state, offset) || parser_is_item_keyword(kind) || (kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV) || (kind == TOKEN_IDENT && parser_value_at(&state, offset) == "alias")
+    parser_item_declaration_ahead_at(&state, offset) || parser_marked_const_ahead(&state, offset) || parser_type_alias_ahead_at(&state, offset) || parser_is_item_keyword(kind) || (kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV)
 }

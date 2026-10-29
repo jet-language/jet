@@ -1453,7 +1453,8 @@ length + inner_diameter
 // fix: Millimeter.from_meter(length)
 ```
 
-**D-TYPEALIAS1 — Aliases**: `alias X :: Y` transparent aliases, scoped to
+**D-TYPEALIAS1 — Aliases**: `X :: Y` transparent aliases (written `alias X ::
+Y` until the 2026-10-29 owner ruling below), scoped to
 shortening generic spellings only — not primitive/unit newtypes (use
 `distinct`). **D-TYPE-ALIAS-CANON1** + **D-LISTMAP-CANON1=A** + **D-MAPSPACE1=A**: `[T]`, `[K:V]`, `*T`
 are the only default container/pointer spellings; `List<T>`/`Map<K,V>`/`Ptr<T>`
@@ -1470,9 +1471,23 @@ canonical executable proof is `Examples/features/types/type_alias.jet` with
 Aliases preserve the target's construction syntax: an alias of a struct
 constructs the struct, including substituted generic field types. A parameter
 the target never names is accepted and its argument is discarded
-(`alias P<T> :: Point` makes `P<Int>` mean `Point`). Alias expansion must
+(`P<T> :: Point` makes `P<Int>` mean `Point`). Alias expansion must
 terminate; E0394 reports a cyclic declaration chain before signature or
 expression checking can recurse through it.
+
+**Owner ruling 2026-10-29 (#6176; amends D-TYPEALIAS1 and D-ALIAS-OP1)**: the
+`alias` keyword is removed. A type alias is an ordinary `::` declaration at
+file or module scope: `MyNewType :: MyOldType`, and `P<T> :: Point<T>` for a
+generic one. Meaning decides, never casing: a declaration with type parameters
+is an alias; a right side that only parses as a type (`[Int]`, `Box<T>`,
+`A | B`, `(Int) -> Int`) is an alias; a bare path right side (`RNG ::
+random.RNG`, `MAX :: other.MAX`) is classified by name resolution — an alias
+when the path names a type, a constant otherwise, with ordinary scoping deciding
+a name that is both. `Name :: distinct Base` still declares a new nominal type.
+`alias` is an ordinary identifier; `alias X :: Y` is an ordinary parse error
+with no legacy diagnostic. Expansion, E0324, E0394 and discarded parameters are
+unchanged. Core's former `Date :: LocalDate` is the prelude rename
+`pub use core.time.[LocalDate as Date]`.
 
 **D-INTBIG1=A** *(ratified 2026-08-05, card #1436; amends D-NUMOPS1)*:
 `Int` is the exact arbitrary-precision whole-number default. Small values use a
