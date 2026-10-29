@@ -2909,7 +2909,7 @@ fn sema_check_registered_raw_protocol_return(job: SemaBodyJob, module_index: Int
     panic("a registered Jet body check lost its owning graph")
 }
 
-// Rust TIR `lower_trait_method`: a `Close` or `Rollback` impl method is a raw
+// Rust reference lowering `lower_trait_method`: a `Close` or `Rollback` impl method is a raw
 // protocol ABI (`fn close(self)`), so its lowered return is the declared one
 // (Unit when omitted) even though sema checks its body on the failure rail.
 fn sema_check_protocol_unit_trait(trait_name: String?) -> Bool Never! {
@@ -8369,7 +8369,7 @@ fn sema_failure_recheck_modules(modules: [SemaGraphModuleResult], unions: SemaFa
 
 // #3708 / #3740: the Rust reference checks every body once and reconciles the
 // `T Never!` projection afterwards (Completion.rs `solve_inferred_failure`,
-// mir.rs `is_result_carrier`, `plain_named_fn_value`). A module checked
+// the Rust reference's `is_result_carrier`, `plain_named_fn_value`). A module checked
 // before the solve projected `projected` takes it here: each projected
 // function's checked signature names the `T Never!` carrier, and a dropped
 // call to one is a discarded result (E0433). Its call sites

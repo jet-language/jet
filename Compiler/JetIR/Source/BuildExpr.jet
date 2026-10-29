@@ -3152,32 +3152,130 @@ fn ir_receiver_access(kind: TFuncKind) -> String Never! {
 // ---------------------------------------------------------------------------
 // The default `Err`: the runtime's own JetErr handle.
 
-// `Err{message, code, cause, ...}`: the fields in source order, then
-// jet_rt_record_new_jet_err(message, code, cause), which clones the message
-// and the code box's text and takes the cause handle out of its Option box.
-// Any other field (the private metadata) is evaluated and released: the
-// runtime keeps its own fresh state.
+// The checked declarations behind the native JetErr (JetBackend/ErrLayout.jet):
+// Err, then each compiler-owned record its fields reach, in the order a walk
+// of those fields first reaches it, with its fields in declaration order. Err's
+// private metadata is the identity, context, conversion and details words; a
+// context frame, conversion and detail field are the runtime's Context24,
+// Conversion16 and Field16 rows, and a detail span its has_span/start/end words.
+struct IRErrABIRecord {
+    name: String
+    fields: [String]
+}
+
+IR_DEFAULT_ERR_ABI :: comptime { [IRErrABIRecord]{
+    {name: "Err", fields: [String]{"message: String", "code: String?", "cause: Err?", "__jet___memo_error_metadata: __jet_ErrorMetadata"}},
+    {name: "__jet_ErrorMetadata", fields: [String]{"typed_identity: String?", "context_frames: [__jet_ErrorContextFrame]", "conversion_history: [__jet_ErrorConversion]", "details: __jet_ErrorDetails?"}},
+    {name: "__jet_ErrorContextFrame", fields: [String]{"text: String", "file: String", "line: Int"}},
+    {name: "__jet_ErrorConversion", fields: [String]{"source: String", "target: String"}},
+    {name: "__jet_ErrorDetails", fields: [String]{"variant: String", "fields: [__jet_ErrorField]", "source_span: __jet_ErrorSpan?"}},
+    {name: "__jet_ErrorField", fields: [String]{"name: String", "value: String"}},
+    {name: "__jet_ErrorSpan", fields: [String]{"start: Int", "end: Int"}},
+} }
+
+// A field type as IR_DEFAULT_ERR_ABI spells it: a nominal type by its declared
+// name, `T?` and `[T]` around it.
+fn ir_err_abi_spelling(p: IRProgram, ty: Type) -> String Never! {
+    plain :: ir_untag(ty)
+    if plain == {
+        .Option(inner) -> "{ir_err_abi_spelling(p, inner)}?"
+        .List(element) -> "[{ir_err_abi_spelling(p, element)}]"
+        else -> ir_error_spelling(p, plain)
+    }
+}
+
+// The checked declaration a field of type `ty` stores: its nominal type under
+// any `T?` or `[T]`.
+fn ir_err_abi_record_row(p: IRProgram, ty: Type) -> Int? Never! {
+    plain :: ir_untag(ty)
+    if plain == {
+        .Option(inner) -> ir_err_abi_record_row(p, inner)
+        .List(element) -> ir_err_abi_record_row(p, element)
+        .Named(name) -> ir_type_def(p, name)
+        else -> None
+    }
+}
+
+// Where the checked declaration of the default Err `ty`, and the records its
+// fields reach, leave the native JetErr layout; None when each declares
+// exactly the fields the runtime stores.
+fn ir_default_err_drift(p: IRProgram, ty: Type) -> String? Never! {
+    name :: ir_nominal_name(ir_untag(ty)) ?? return Val("{ir_type_name(ty)} is no nominal type")
+    rows := [Int]{ir_type_def(p, name) ?? return Val("{name} has no checked declaration")}
+    loop index in 0..<IR_DEFAULT_ERR_ABI.len() {
+        record :: IR_DEFAULT_ERR_ABI[index]
+        if index >= rows.len() -> return Val("no checked field reaches {record.name}")
+        definition :: p.types[rows[index]]
+        if definition.name != record.name -> return Val("{definition.name} stands where {record.name} belongs")
+        fields := [TField]{}
+        if definition.kind == {
+            .Struct(declared, _) -> fields = declared.copy()
+            else -> return Val("{record.name} is no struct")
+        }
+        spelled :: loop field in fields -> "{field.name}: {ir_err_abi_spelling(p, field.ty)}"
+        if spelled != record.fields -> return Val("{record.name} declares ({spelled.join(", ")}), the native layout stores ({record.fields.join(", ")})")
+        loop field in fields {
+            if ir_err_abi_record_row(p, field.ty) == .Val(owned) {
+                known := false
+                loop row in rows {
+                    if row == owned -> known = true
+                }
+                if !known -> &rows.push(owned)
+            }
+        }
+    }
+    if rows.len() != IR_DEFAULT_ERR_ABI.len() -> return Val("its fields reach {rows.len()} records, the native layout stores {IR_DEFAULT_ERR_ABI.len()}")
+    None
+}
+
+// Whether expression `value` is the declared `__jet_ErrorMetadata` default:
+// no identity, context frame, conversion or details, the state a fresh native
+// JetErr already holds. E0067 keeps any other metadata out of program source.
+fn ir_default_err_fresh_metadata(p: IRProgram, b: IRBuilder, value: Int) -> Bool Never! {
+    node :: ir_body_node(p, b, value)
+    if node.kind == .StructLit(fields) {
+        if fields.len() != 4 -> return false
+        loop field in fields {
+            empty :: if ir_body_node(p, b, field.value).kind == {
+                .Absent -> true
+                .ListLit(values) -> values.len() == 0
+                .List(values, _) -> values.len() == 0
+                else -> false
+            }
+            if !empty -> return false
+        }
+        return true
+    }
+    false
+}
+
+// `Err{message, code, cause, metadata}`: the fields the checked declaration
+// orders (ir_default_err_drift), then jet_rt_record_new_jet_err(message, code,
+// cause), which clones the message and the code box's text and takes the
+// cause handle out of its Option box. The metadata is the declared default,
+// which the fresh JetErr already holds.
 fn ir_default_err_literal(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, fields: [BodyStructFieldValue], span: Span) -> Int Never! {
+    if ir_default_err_drift(p, ty) == .Val(drift) -> return ir_fail_slot(&b, span, "the default Err declaration against the native JetErr: {drift}")
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     message := -1
     code := -1
     cause := -1
-    others := [Int]{}
     loop field in fields {
+        if field.field.name == "__jet___memo_error_metadata" {
+            if !ir_default_err_fresh_metadata(p, b, field.value) -> return ir_fail_slot(&b, span, "default Err metadata other than its declared default")
+            next
+        }
         value :: ir_expr(&m, p, &b, field.value)
         if ir_failed(b) -> return -1
         if field.field.name == "message" {
             message = value
         } else if field.field.name == "code" {
             code = value
-        } else if field.field.name == "cause" {
-            cause = value
         } else {
-            &others.push(value)
+            cause = value
         }
     }
     if message < 0 || code < 0 || cause < 0 -> return ir_fail_slot(&b, span, "default Err literal without message, code and cause")
-    loop other in others -> ir_release(&m, &b, other)
     // The cause handle: moved out of an owned box (the box is freed), cloned
     // out of a borrowed one.
     pointer_row :: ir_pointer_row(&m)
@@ -3203,11 +3301,12 @@ fn ir_default_err_literal(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, f
     result
 }
 
-// `error.message` / `.code` / `.cause` of a default `Err`: an owned copy
-// through jet_rt_record_get_jet_err_<field>; an optional field's getter
-// writes its payload to an out word and reports presence, and the value gets
-// a new box.
+// `error.message` / `.code` / `.cause` of a default `Err` (fields the checked
+// declaration orders, ir_default_err_drift): an owned copy through
+// jet_rt_record_get_jet_err_<field>; an optional field's getter writes its
+// payload to an out word and reports presence, and the value gets a new box.
 fn ir_default_err_field(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, name: String, span: Span) -> Int Never! {
+    if ir_default_err_drift(p, ir_ty(p, b, receiver)) == .Val(drift) -> return ir_fail_slot(&b, span, "the default Err declaration against the native JetErr: {drift}")
     if name != "message" && name != "code" && name != "cause" -> return ir_fail_slot(&b, span, "field {name} of the default Err")
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     error :: ir_expr(&m, p, &b, receiver)

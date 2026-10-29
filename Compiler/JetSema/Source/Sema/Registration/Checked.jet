@@ -201,7 +201,7 @@ fn sema_checked_marker_text_label(marker: Marker, label: String) -> String? {
     None
 }
 
-// Rust: tir_to_mir_types.rs::lower_derive_names drops the `#CLI` marker; it
+// Rust reference lowering: `lower_derive_names` drops the `#CLI` marker; it
 // is a CLI entry fact, not a derived trait.
 fn sema_checked_derive_names(derives: [NamedSpan]) -> [String] Never! {
     names := [String]{}
@@ -211,10 +211,10 @@ fn sema_checked_derive_names(derives: [NamedSpan]) -> [String] Never! {
     names
 }
 
-// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs::lower_derive_names
+// Rust reference lowering: `lower_derive_names`
 // / has_generated_block. The automatic Debug selection and sema's
 // structural Equatable and Comparable providers (compiler-generated blocks on
-// the type) reach MIR as derives, which the Rust printer lowers to `JetDebug`,
+// the type) reach the lowered program as derives, which the Rust printer lowers to `JetDebug`,
 // native `PartialEq`, and the native `Eq`/`PartialOrd`/`Ord` an ordered map key
 // needs.
 fn sema_checked_type_derive_names(derives: [NamedSpan], definition: Item, auto_debug: Bool) -> [String] Never! {
@@ -225,7 +225,7 @@ fn sema_checked_type_derive_names(derives: [NamedSpan], definition: Item, auto_d
     names
 }
 
-// Rust: tir_to_mir_types.rs::has_generated_block: any builtin structural
+// Rust reference lowering: `has_generated_block`: any builtin structural
 // provider sema attached to a struct or enum.
 fn sema_checked_has_generated_block(definition: Item, trait_name: String) -> Bool Never! {
     if definition == {
@@ -2437,7 +2437,7 @@ fn sema_checked_generic_params(graph: SemaRegistrationGraph, module_row: SemaReg
 }
 
 // A type row names each method by its function's SymbolId key, the key its
-// checked FnBody carries (Rust tir_to_mir_types.rs::resolve_type_methods
+// checked FnBody carries (the Rust reference lowering's `resolve_type_methods`
 // resolves these through the checked function registry).
 fn sema_checked_nominal_methods(definition: Item, methods: [SemaRegistrationFunction]) -> [String] Never! {
     keys := [String]{}
@@ -2634,7 +2634,7 @@ fn sema_checked_type_def(graph: SemaRegistrationGraph, boxed: [String:[String]],
     boxed_edges := sema_checked_boxed_edges(graph, boxed, module_row.module_identity, definition)
     if nominal.compiler_owned -> boxed_edges = [String]{}
     derives := [String]{}
-    // Rust tir_to_mir_types lower_struct/lower_enum: the declaration's
+    // Rust reference lowering lower_struct/lower_enum: the declaration's
     // structural auto-derive selection (`TypeMetadata`) supplies the
     // auto-Printable fact and the automatic Debug derive.
     auto_derives :: sema_type_metadata_auto_derives(definition, module_row.declared_trait_impls)

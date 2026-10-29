@@ -1,0 +1,34 @@
+// L0532: an integer division whose divisor is a literal or constant-folded
+// zero stops every run with E3010, in a binary operator and in a compound
+// update. A divisor that may be nonzero, a divisor too large for the token's
+// fast path, or a Float dividend is left alone.
+fn broken(n: Int) -> Int {
+    whole :: n /% 0
+    rest :: n % (3 - 3)
+    sign :: n %% -(2 * 0)
+    whole + rest + sign
+}
+
+fn exact(n: Int) -> String {
+    "{n / 0}"
+}
+
+fn shrink(n: Int) -> Int {
+    m := n
+    m %= 1 - 1
+    m /%= 4
+    m
+}
+
+fn spread(n: Int, parts: Int) -> Int {
+    n /% parts + n /% 2 + n % (2 * 3) + n /% 100000000000000000000000000000000
+}
+
+fn scaled(x: Float) -> Float {
+    x / 0.0
+}
+
+fn run() {
+    print(spread(12, 4))
+    print(scaled(1.0) > 0.0)
+}

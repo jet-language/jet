@@ -1328,7 +1328,7 @@ fn sema_stmt_for_in_plain_place(expression: Expr) -> Bool Never! {
 
 // #4318 §4 stable loop source: the root name of a source that is a plain
 // place, `xs` or `a.b.xs`. A user `.copy()` copy, a call, or an index is not one.
-// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs::stable_loop_source_root
+// Rust reference lowering: `stable_loop_source_root`.
 fn sema_stmt_for_in_stable_root(expression: Expr) -> String? {
     if expression == {
         .Ident(name, _, _) -> return Val(name)
@@ -1361,7 +1361,7 @@ fn sema_stmt_for_in_body_mentions(state: SemaOwnershipState, references_before: 
 
 // True when the checked loop body names the definition `key` on any path,
 // as Rust's syntactic test does (`block_free_var_reads(body)` in
-// crates/jet-codegen/src/Codegen/TIR/lower/statements.rs). The ownership
+// the Rust reference lowering). The ownership
 // references above miss an arm that does not fall through, whose branch
 // state is dropped: `loop x in s.xs { if c { f(&s, x); return } }` looked
 // stable, lowered an in-place walk, and rustc rejected the `&mut s` call
@@ -1555,7 +1555,7 @@ fn sema_stmt_for_in_row_stmt_assigns(tree: BodyTree, item: Int, key: String) -> 
 
 // True when the loop body leaves the source root `key` unchanged, so the
 // loop may walk the source in place, as Rust's
-// crates/jet-codegen/src/Codegen/TIR/lower/statements.rs::loop_body_keeps_source
+// reference lowering's `loop_body_keeps_source`
 // decides. A body that never names the root qualifies. A body that names it
 // qualifies only when every reference it adds to the root is a read, it
 // never assigns, write-borrows or captures the root, and it never leaves the
@@ -2723,7 +2723,7 @@ fn sema_stmt_destructure_moves_field(ty: Type, pattern: BindPattern, environment
 // literal, a take or an explicit copy) moves every field out of it, so
 // `(a, b) :: f()` never copies a field. Only a place initializer (a name,
 // field, index or view) keeps its value and copies fields out.
-// Rust: crates/jet-codegen/src/Codegen/TIR/lower/statements.rs::destructure_init_is_temporary
+// Rust reference lowering: `destructure_init_is_temporary`.
 fn sema_stmt_destructure_init_is_temporary(init: Expr) -> Bool Never! {
     if init == {
         .Paren(inner, _, _) -> sema_stmt_destructure_init_is_temporary(inner)
@@ -3903,9 +3903,10 @@ fn sema_stmt_check_prepared_binding(binding: Binding, environment: SemaScopeEnvi
 // Rust `Stmt::Assign` with a compound op checks the update value against the
 // place type: `text += "…"` appends to a String place (the binary `+`
 // itself is not text joining, which stays E0109); every other compound op
-// keeps its binary operator typing.
-fn sema_stmt_compound_result(op: BinOp, place: Type, offered: Type, span: Span, diagnostics: &[Diagnostic]) -> Type? {
+// keeps its binary operator typing, and `n /%= 0` its zero-divisor lint.
+fn sema_stmt_compound_result(op: BinOp, place: Type, offered: Type, value: Expr, span: Span, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Type? {
     if op == BinOp.Add && place == Type.String && offered == Type.String -> return Val(Type.String)
+    sema_expr_lint_zero_divisor(op, value, place, offered, span, scopes, &diagnostics)
     sema_expr_binary_type(op, place, offered, span, &diagnostics)
 }
 
@@ -3964,7 +3965,7 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
     tree_op := TBinaryOp?{None}
     if op != None {
         operator :: op
-        result :: sema_stmt_compound_result(operator, required, checked.ty, op_span, &diagnostics) ?? return None
+        result :: sema_stmt_compound_result(operator, required, checked.ty, expr, op_span, scopes, &diagnostics) ?? return None
         if !sema_type_assignable(required, result) {
             &diagnostics.push(sema_slot_holds_mismatch("`{name}`", "binding", required, result, name_span))
             return None
@@ -4019,7 +4020,7 @@ fn sema_stmt_module_storage_binding(environment: SemaScopeEnvironment, program: 
 
 // Rust `Stmt::Assign` on a module-level mutable binding: the value checks
 // against the declared place type, and the write lands in the binding's
-// persistent storage cell (Rust TIR `persistent_local`).
+// persistent storage cell (the Rust reference lowering's `persistent_local`).
 fn sema_stmt_check_module_storage_assignment(symbol: Symbol, name: String, name_span: Span, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     required :: symbol.ty ?? {
         // An unchecked module binding already carries its initializer's report.
@@ -4038,7 +4039,7 @@ fn sema_stmt_check_module_storage_assignment(symbol: Symbol, name: String, name_
     tree_op := TBinaryOp?{None}
     if op != None {
         operator :: op
-        result :: sema_stmt_compound_result(operator, required, checked.ty, op_span, &diagnostics) ?? return None
+        result :: sema_stmt_compound_result(operator, required, checked.ty, expr, op_span, scopes, &diagnostics) ?? return None
         if !sema_type_assignable(required, result) {
             &diagnostics.push(sema_type_mismatch(required, result, op_span))
             return None
@@ -5143,7 +5144,7 @@ fn sema_stmt_check_place_assignment(target: LValue, checked_place: ^TExpr, op: B
     tree_op := TBinaryOp?{None}
     if op != None {
         operator :: op
-        result :: sema_stmt_compound_result(operator, place.ty, checked.ty, op_span, &diagnostics) ?? return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 11")
+        result :: sema_stmt_compound_result(operator, place.ty, checked.ty, expr, op_span, scopes, &diagnostics) ?? return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 11")
         if !sema_type_assignable(place.ty, result) {
             &diagnostics.push(if target == .Field(_, member, _) -> sema_slot_holds_mismatch("field `{member}`", "field", place.ty, result, op_span) else -> sema_type_mismatch(place.ty, result, op_span))
             return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 16")

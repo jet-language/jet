@@ -413,7 +413,7 @@ fn sema_call_math_scalar_type(name: String) -> Type Never! {
 // `Decimal("12.34")` `Complex(re, im)` and
 // `Vec3(x, y, z)`-style math constructors each argument
 // is checked against its component type in order and the call becomes the
-// type's precise or math builtin, as Rust TIR lowering builds it.
+// type's precise or math builtin, as the Rust reference lowering builds it.
 fn sema_call_check_value_constructor(call: Call, type_name_value: String, components: [Type], math: Bool, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if call.args.len() != components.len() {
         what := if {
@@ -577,7 +577,7 @@ fn sema_call_check_ambient_input(call: Call, expected: Type?, environment: SemaS
 // Rust core_call.rs `("core.term", "eprint")` / `("core.term", "input")`:
 // fixed rows with no typed Source contract. `eprint` is variadic: every
 // printable argument joins, one per line, into the row's single stderr write
-// (Rust TIR `join_print_args`); `input` takes an optional String prompt and
+// (the Rust reference lowering's `join_print_args`); `input` takes an optional String prompt and
 // returns `Result<String, IOError>`.
 fn sema_call_try_term_core_call(record: CoreCallRecord, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if record.module_name != "core.term" -> return SemaDirectSpecialCheck{handled: false, value: None}

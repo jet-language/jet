@@ -132,7 +132,7 @@ fn sema_arena_take_back(context: &SemaCheckContext, rows: ^BodyFlat) Never! {
     compiler_transfer_rows<StmtKind>(&context.arena.tree.stmts, &nested.tree.stmts)
 }
 
-// (Rust `policy_call` and its TIR lowering): under the
+// (Rust `policy_call` and its lowering): under the
 // function's `#Arithmetic(mode)` a fixed-width `+`, `-`, `*`, `**` or signed
 // negation lowers through that mode's overflow route; `Checked` is the
 // trapping policy route.
@@ -2172,14 +2172,14 @@ fn sema_expr_negative_int_power(base: TExpr, exponent: TExpr, line: Int, span: S
 }
 
 // Every synthesized unbounded literal shares the native i64/BigInt boundary;
-// Jet's exact Int carrier is wider than Rust's CtValue.Int and TIR IntLit.
+// Jet's exact Int carrier is wider than Rust's CtValue.Int and its lowered IntLit.
 fn sema_expr_unbounded_integer_literal(value: Int, span: Span) -> TExpr Never! {
     kind :: if value >= -9223372036854775807 - 1 && value <= 9223372036854775807 -> TExprKind.IntLit{value: value, width: None} else -> TExprKind.CtLit{value: TComptimeValue.BigInt{decimal: "{value}"}}
     TExpr{ty: Type.Int, kind: kind, span: span}
 }
 
 // A literal outside the i64 range keeps its exact value as a
-// BigInt constant (Rust TIR `CtLit(BigInt)`); a fixed-width one crosses the
+// BigInt constant (the Rust reference lowering's `CtLit(BigInt)`); a fixed-width one crosses the
 // checked Int-to-fixed conversion, as in Rust's lowering.
 fn sema_expr_int_literal_tree(value: Int, ty: Type, width: TIntegerWidth?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TExpr? {
     if value >= -9223372036854775807 - 1 && value <= 9223372036854775807 {
@@ -2688,7 +2688,7 @@ fn sema_expr_receiver_nominal_identity(environment: SemaScopeEnvironment, progra
 // True only when a declared nominal method collides with a builtin handle
 // method of the same owner leaf and name (Core's `URL`/`MIME`, or a user type
 // spelled like a handle carrier); every other declared method keeps the
-// special routes, as in the Rust TIR lowering's handle_method_op gate.
+// special routes, as in the Rust reference lowering's handle_method_op gate.
 fn sema_expr_declares_nominal_method(environment: SemaScopeEnvironment, program: SemaProgramTables, receiver_type: Type, method: String, needs_receiver: Bool) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
     // A resolved receiver carries its canonical identity (`module::URL`).
@@ -4115,17 +4115,27 @@ fn sema_expr_lint_default_body_text(receiver: Expr, receiver_type: Type, args: [
     &diagnostics.push(sema_lint("L0516", span, "The default HTTP body text limit is passed through a lower-level body call", "`request.text()` and `response.text()` already read the body with the same default cap as `body().text({SEMA_HTTP_DEFAULT_TEXT_LIMIT})`", "Replace `body().text({SEMA_HTTP_DEFAULT_TEXT_LIMIT})` with `text()`"))
 }
 
-// An integer a lint can read without running code: a literal, a product of
-// such integers, or a `name :: comptime { … }` local already folded.
+// An integer a lint can read without running code: a literal, a sum,
+// difference, product or negation of such integers, or a
+// `name :: comptime { … }` local already folded.
 fn sema_expr_lint_int_constant(expr: Expr, scopes: SemaScopeTable) -> Int? {
     if expr == {
-        .Int(value, _, _, _, _) -> { return Val(value) }
+        .Int(value, _, _, raw, _) -> { return Val(sema_expr_exact_integer_literal(value, raw)) }
         .Paren(inner, _, _) -> { return sema_expr_lint_int_constant(inner, scopes) }
+        .Unary(op, operand, _, _) -> {
+            if op != UnOp.Neg -> return None
+            value :: sema_expr_lint_int_constant(operand, scopes) ?? return None
+            return Val(-value)
+        }
         .Binary(op, left, right, _, _) -> {
-            if op != BinOp.Mul -> return None
+            if op != BinOp.Add && op != BinOp.Sub && op != BinOp.Mul -> return None
             lhs :: sema_expr_lint_int_constant(left, scopes) ?? return None
             rhs :: sema_expr_lint_int_constant(right, scopes) ?? return None
-            return Val(lhs * rhs)
+            if op == {
+                .Add -> return Val(lhs + rhs)
+                .Sub -> return Val(lhs - rhs)
+                else -> return Val(lhs * rhs)
+            }
         }
         .Ident(name, _, _) -> {
             index :: sema_scope_resolve_index(scopes, name) ?? return None
@@ -4191,6 +4201,23 @@ fn sema_expr_lint_normalized_path_text(name: String, scopes: SemaScopeTable) -> 
     scopes.bindings[index].normalized_path_text
 }
 
+// L0532: an integer `/`, `/%`, `%` or `%%` whose divisor is a literal or
+// constant-folded zero stops every run with E3010. Only integer operands are
+// read; Float, Decimal and unit carriers keep their own zero rules.
+fn sema_expr_lint_zero_divisor(op: BinOp, right: Expr, dividend: Type, divisor: Type, span: Span, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) Never! {
+    if op != BinOp.Div && op != BinOp.FloorDiv && op != BinOp.Mod && op != BinOp.Rem -> return
+    spelling :: if op == {
+        .Div -> "/"
+        .FloorDiv -> "/%"
+        .Mod -> "%"
+        else -> "%%"
+    }
+    if !sema_expr_is_integer(dividend) || !sema_expr_is_integer(divisor) -> return
+    value :: sema_expr_lint_int_constant(right, scopes) ?? return
+    if value != 0 -> return
+    &diagnostics.push(sema_lint("L0532", span, "This `{spelling}` always divides by zero", "The divisor folds to 0 at compile time, so every run of this line stops with E3010 (divided by zero)", "Divide by a value that can't be zero, or check the divisor and handle zero before dividing"))
+}
+
 fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     sema_expr_lint_path_prefix(op, left, right, span, scopes, &diagnostics)
     checked_lhs := sema_check_expression(left, sema_expr_decimal_lhs_expected(op, left, right, expected, environment, program, &scopes, &state, &tail_store, &context), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
@@ -4249,6 +4276,7 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
         return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
     }
 
+    sema_expr_lint_zero_divisor(op, right, lhs.ty, rhs.ty, span, scopes, &diagnostics)
     // `Int / Int` is the exact Fraction quotient; IR stops a zero divisor at
     // the operator (`Fraction.from_parts` names the same parts with no operator).
     if op == BinOp.Div && lhs.ty == Type.Int && rhs.ty == Type.Int {

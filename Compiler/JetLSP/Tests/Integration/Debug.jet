@@ -1,7 +1,7 @@
 // Rust: tests/debug.rs:1-33
 // This rule real scripted source debugger and production DAP wire journeys.
 use tests.common.[Scratch, unique_tmp]
-use tests.tir_support.[write_test_package, TIR_TEST_PACKAGE]
+use tests.case_fixture.[write_test_package, CASE_FIXTURE_PACKAGE]
 use jet_foundation.Dyn.[Dyn]
 use jet_foundation.JSON.[json_get, json_str, parse_json]
 use std.[fs, process, thread, env]
@@ -30,7 +30,7 @@ struct Fixture {
 fn fixture(tag_ref: String, src: String) -> Fixture {
     scratch :: Scratch.new("jet_debug_{tag_ref}")
     dir :: scratch.path
-    write_test_package(dir, TIR_TEST_PACKAGE)
+    write_test_package(dir, CASE_FIXTURE_PACKAGE)
     p :: dir.join("jet_debug_{tag_ref}.jet")
     f := fs.File.create(p).unwrap()
     &f.write_all(src.bytes()).unwrap()
@@ -56,7 +56,7 @@ fn have(tool: String) -> Bool {
 fn native_fixture(tag_ref: String, src: String) -> Fixture {
     scratch :: Scratch.new("jet_debug_native_{tag_ref}")
     dir :: scratch.path
-    write_test_package(dir, TIR_TEST_PACKAGE)
+    write_test_package(dir, CASE_FIXTURE_PACKAGE)
     p :: dir.join("jet_debug_native_{tag_ref}.jet")
     fs.write(p, src).unwrap()
     Fixture{path: p.to_string_lossy().to_string(), scratch: ^scratch}
@@ -166,7 +166,7 @@ fn linux_process_state(pid: U32) -> String? {
 fn spawn_attachable_native_target(binary: OSPath, tag_ref: String) -> Child {
     root :: unique_tmp("jet_debug_attach_authorizer_{tag_ref}")
     fs.create_dir_all(root).unwrap()
-    write_test_package(root, TIR_TEST_PACKAGE)
+    write_test_package(root, CASE_FIXTURE_PACKAGE)
     source :: root.join("authorizer.jet")
     helper :: root.join("build/authorizer")
     // Rust: tests/debug.rs:831-849 — audited helper, translated in full.
