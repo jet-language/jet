@@ -1,0 +1,45 @@
+// core.math constants: PI, E, TAU, INFINITY and NAN are comptime values,
+// read as `math.PI`, never called. `circle` reads them from another module.
+use core.math as math
+module circle
+
+// A comptime block can read them like any other constant.
+EULER_SQUARED :: comptime { math.E * math.E }
+
+// A generic call in a comptime block infers its type argument from them too.
+LARGER :: comptime { larger(math.PI, math.E) }
+
+fn larger<T: Comparable>(first: T, second: T) -> T {
+    if first > second -> first else -> second
+}
+
+fn run() {
+    print(math.PI)
+    print(math.E)
+    print(math.TAU == Float{2.0} * math.PI)
+    print(EULER_SQUARED == math.E * math.E)
+    print(LARGER == math.PI)
+
+    // From the `circle` module, at run time and as its own constants.
+    print(circle.area(Float{1.0}) == math.PI)
+    print(circle.circumference(Float{0.5}) == math.PI)
+    print(circle.FULL_TURN == math.TAU)
+    print(circle.QUARTER_TURN * Float{4.0} == math.TAU)
+
+    // Infinity orders above every finite value; its negation below.
+    print(math.INFINITY)
+    print(-math.INFINITY)
+    print(math.INFINITY > Float{1.0e308})
+    print(-math.INFINITY < Float{-1.0e308})
+    print(math.INFINITY == math.INFINITY)
+    print(math.is_inf(math.INFINITY))
+    print(math.is_finite(math.INFINITY))
+
+    // NaN compares unequal to everything, itself included: test it with is_nan.
+    nan :: math.NAN
+    print(nan == nan)
+    print(nan != nan)
+    print(nan < Float{1.0} || nan >= Float{1.0})
+    print(math.is_nan(math.NAN))
+    print(math.is_nan(math.INFINITY - math.INFINITY))
+}

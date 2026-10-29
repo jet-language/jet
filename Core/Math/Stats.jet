@@ -104,9 +104,9 @@ fn compensated_sum(xs: [Float]) -> Float Never! {
         }
         acc = t
     }
-    if positive_inf && negative_inf -> return math.nan()
-    if positive_inf -> return math.infinity()
-    if negative_inf -> return -math.infinity()
+    if positive_inf && negative_inf -> return math.NAN
+    if positive_inf -> return math.INFINITY
+    if negative_inf -> return -math.INFINITY
     acc + correction
 }
 
@@ -478,7 +478,7 @@ fn kde(xs: [Float], bandwidth: Float) -> [Float] Never! {
     if xs.len() == 0 || invalid_sample(xs) || nonfinite(bandwidth) || bandwidth <= (Float{0.0}) {
         return out
     }
-    normalizer :: (Float{1.0}) / ((Float{xs.len()}) * bandwidth * sqrt_value((Float{2.0}) * math.pi()))
+    normalizer :: (Float{1.0}) / ((Float{xs.len()}) * bandwidth * sqrt_value((Float{2.0}) * math.PI))
     loop point in xs {
         total := Float{0.0}
         loop value in xs {

@@ -247,6 +247,18 @@ fn jet_eval_native_start(c: &JetEvalNativeChild, session: JetEvalNativeSession, 
     true
 }
 
+// Ends both children of `session` (EXIT, then wait4) once its compile is
+// done; a later batch spawns a fresh one. An unreaped child would outlive
+// the compile, and a program `jet run` starts in this process would reap it
+// through its own `wait()`.
+fn jet_eval_native_session_close(session: Shared<JetEvalNativeSession>) {
+    cells :: session.guard_read()
+    sealed := cells.value.sealed.guard_edit()
+    x64_comptime_close(&sealed.value.child)
+    runtime := cells.value.runtime.guard_edit()
+    x64_comptime_close(&runtime.value.child)
+}
+
 // The entry program: `__jet_comptime_main` hands the runtime's server its
 // table, whose one entry is the SIGSYS handler `__jet_comptime_refusal`.
 fn jet_eval_native_entry_module() -> IRModule {

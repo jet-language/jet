@@ -67,8 +67,6 @@ struct Options {
 
 // ---- JavaScript number semantics -------------------------------------------
 
-fn nan() -> Float Never! { math.nan() }
-
 fn finite(value: Float) -> Bool Never! { math.is_finite(value) }
 
 fn pow_int(base: Int, exponent: Int) -> Int Never! {
@@ -271,8 +269,8 @@ fn digit_value(code: Int, radix: Int) -> Int Never! {
 fn number_from_text(raw: String) -> Float Never! {
     text :: js_trim(raw)
     if text == "" -> return ZERO
-    if text == "Infinity" || text == "+Infinity" -> return math.infinity()
-    if text == "-Infinity" -> return -math.infinity()
+    if text == "Infinity" || text == "+Infinity" -> return math.INFINITY
+    if text == "-Infinity" -> return -math.INFINITY
     bytes :: text.bytes()
     if bytes.len() > 2 && Int.from_u8(bytes[0]) == 48 {
         marker :: Int.from_u8(bytes[1])
@@ -286,10 +284,10 @@ fn number_from_text(raw: String) -> Float Never! {
             value := 0
             loop at in 2..<bytes.len() {
                 digit :: digit_value(Int.from_u8(bytes[at]), radix)
-                if digit < 0 -> return nan()
+                if digit < 0 -> return math.NAN
                 value = value * radix + digit
             }
-            return Float.parse("{value}") ?? nan()
+            return Float.parse("{value}") ?? math.NAN
         }
     }
     // [+-] (digits [. digits?] | . digits) ([eE] [+-] digits)?
@@ -312,7 +310,7 @@ fn number_from_text(raw: String) -> Float Never! {
             at += 1
         }
     }
-    if whole == "" && fraction == "" -> return nan()
+    if whole == "" && fraction == "" -> return math.NAN
     exponent := "0"
     if at < bytes.len() && (Int.from_u8(bytes[at]) == 101 || Int.from_u8(bytes[at]) == 69) {
         at += 1
@@ -326,12 +324,12 @@ fn number_from_text(raw: String) -> Float Never! {
             digits = "{digits}{String.from_bytes_lossy(bytes[at..<at + 1])}"
             at += 1
         }
-        if digits == "" -> return nan()
+        if digits == "" -> return math.NAN
         exponent = "{exponent_sign}{digits}"
     }
-    if at != bytes.len() -> return nan()
+    if at != bytes.len() -> return math.NAN
     canonical :: "{sign}{if whole == "" -> "0" else -> whole}.{if fraction == "" -> "0" else -> fraction}e{exponent}"
-    Float.parse(canonical) ?? nan()
+    Float.parse(canonical) ?? math.NAN
 }
 
 // ---- Dyn access with JavaScript reads ---------------------------------------
@@ -360,9 +358,9 @@ fn number(value: Dyn?) -> Float? Never! {
     if value == {
         .Val(inner) -> {
             if inner == {
-                .Int(whole) -> Val(Float.parse("{whole}") ?? nan())
+                .Int(whole) -> Val(Float.parse("{whole}") ?? math.NAN)
                 .Float(real) -> Val(real)
-                .Number(lexeme) -> Val(Float.parse(lexeme) ?? nan())
+                .Number(lexeme) -> Val(Float.parse(lexeme) ?? math.NAN)
                 else -> None
             }
         }
@@ -374,7 +372,7 @@ fn number_field(value: Dyn, key: String) -> Float? Never! { number(field(value, 
 
 // A JSON value's field as a number; NaN when absent or not a number
 // (JavaScript arithmetic on `undefined`).
-fn number_or_nan(value: Dyn, key: String) -> Float Never! { number_field(value, key) ?? nan() }
+fn number_or_nan(value: Dyn, key: String) -> Float Never! { number_field(value, key) ?? math.NAN }
 
 // String(value) for a JSON value (`undefined` when absent).
 fn js_string(value: Dyn?) -> String Never! {
@@ -382,9 +380,9 @@ fn js_string(value: Dyn?) -> String Never! {
         .Val(inner) -> {
             if inner == {
                 .Text(text) -> text
-                .Int(_) -> js_number(number(value) ?? nan())
+                .Int(_) -> js_number(number(value) ?? math.NAN)
                 .Float(real) -> js_number(real)
-                .Number(_) -> js_number(number(value) ?? nan())
+                .Number(_) -> js_number(number(value) ?? math.NAN)
                 .Bool(flag) -> if flag -> "true" else -> "false"
                 .Null -> "null"
                 .Array(items) -> {
@@ -427,7 +425,7 @@ fn truthy(value: Dyn?) -> Bool Never! {
                 .Int(whole) -> whole != 0
                 .Float(real) -> real != ZERO && !math.is_nan(real)
                 .Number(_) -> {
-                    real :: number(value) ?? nan()
+                    real :: number(value) ?? math.NAN
                     real != ZERO && !math.is_nan(real)
                 }
                 else -> true
@@ -453,9 +451,9 @@ fn map_key(value: Dyn?, unique: Int) -> String Never! {
         .Val(inner) -> {
             if inner == {
                 .Text(text) -> "s:{text}"
-                .Int(_) -> "n:{js_number(number(value) ?? nan())}"
+                .Int(_) -> "n:{js_number(number(value) ?? math.NAN)}"
                 .Float(real) -> "n:{js_number(real)}"
-                .Number(_) -> "n:{js_number(number(value) ?? nan())}"
+                .Number(_) -> "n:{js_number(number(value) ?? math.NAN)}"
                 .Bool(flag) -> "b:{flag}"
                 .Null -> "null"
                 else -> "o:{unique}"
@@ -605,8 +603,8 @@ fn collect(events: [Dyn]) -> Trace Never! {
                     label: js_string(name_value),
                     label_is_text: name_text != None,
                     label_sort: label_sort,
-                    start: ts ?? nan(),
-                    end: nan(),
+                    start: ts ?? math.NAN,
+                    end: math.NAN,
                     closed: false,
                     args: Dyn.Null,
                     ancestors: stacks[at],
@@ -616,7 +614,7 @@ fn collect(events: [Dyn]) -> Trace Never! {
                 if stacks[at].len() == 0 -> next
                 index :: stacks[at][stacks[at].len() - 1]
                 _ := &stacks[at].pop()
-                spans[index].end = ts ?? nan()
+                spans[index].end = ts ?? math.NAN
                 spans[index].closed = true
                 spans[index].args = field(event, "args") ?? Dyn.Null
             }
@@ -811,7 +809,7 @@ fn report(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! {
     lines_counter :: js_string(field(budget, "lines_counter"))
     lines_counter_is_text :: text_of(field(budget, "lines_counter")) != None
     if !options.lines_given && lines_counter_is_text && counter_value(trace, lines_counter) != None {
-        lines = counter_value(trace, lines_counter) ?? nan()
+        lines = counter_value(trace, lines_counter) ?? math.NAN
         lines_source = "trace counter {lines_counter}"
     } else if !options.lines_given {
         lines = number_or_nan(budget, "default_lines")
@@ -910,9 +908,9 @@ fn report(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! {
             counter_name :: field(unit, "counter")
             counter_at :: if text_of(counter_name) == .Val(name) -> counter_index(trace.counters, "s:{name}") else -> -1
             has_value :: counter_at >= 0
-            value :: if has_value -> trace.counters[counter_at].value else -> nan()
+            value :: if has_value -> trace.counters[counter_at].value else -> math.NAN
             limit_value :: number_field(field(unit, "budget") ?? Dyn.Null, column)
-            per_unit :: if has_value && value != ZERO && !math.is_nan(value) && entry.present -> entry.ns / value else -> nan()
+            per_unit :: if has_value && value != ZERO && !math.is_nan(value) && entry.present -> entry.ns / value else -> math.NAN
             status := "-"
             if !has_value {
                 status = "no counter"
@@ -1125,16 +1123,16 @@ fn tail(cells: [String], from: Int, to: Int) -> String Never! {
 }
 
 #Test("numbers print as JavaScript prints them") {
-    assert_eq(fixed(Float.parse("0.125") ?? nan(), 2), "0.13")
-    assert_eq(fixed(Float.parse("2.5") ?? nan(), 0), "3")
-    assert_eq(fixed(Float.parse("-0.004") ?? nan(), 2), "-0.00")
-    assert_eq(fixed(Float.parse("1.005") ?? nan(), 2), "1.00")
-    assert_eq(grouped(Float.parse("1234567.5") ?? nan()), "1,234,568")
-    assert_eq(grouped(Float.parse("-0.3") ?? nan()), "-0")
-    assert_eq(grouped(Float.parse("-2.5") ?? nan()), "-2")
-    assert_eq(js_number(Float.parse("1e21") ?? nan()), "1e+21")
-    assert_eq(js_number(Float.parse("0.0000001") ?? nan()), "1e-7")
-    assert_eq(js_number(Float.parse("123.5") ?? nan()), "123.5")
+    assert_eq(fixed(Float.parse("0.125") ?? math.NAN, 2), "0.13")
+    assert_eq(fixed(Float.parse("2.5") ?? math.NAN, 0), "3")
+    assert_eq(fixed(Float.parse("-0.004") ?? math.NAN, 2), "-0.00")
+    assert_eq(fixed(Float.parse("1.005") ?? math.NAN, 2), "1.00")
+    assert_eq(grouped(Float.parse("1234567.5") ?? math.NAN), "1,234,568")
+    assert_eq(grouped(Float.parse("-0.3") ?? math.NAN), "-0")
+    assert_eq(grouped(Float.parse("-2.5") ?? math.NAN), "-2")
+    assert_eq(js_number(Float.parse("1e21") ?? math.NAN), "1e+21")
+    assert_eq(js_number(Float.parse("0.0000001") ?? math.NAN), "1e-7")
+    assert_eq(js_number(Float.parse("123.5") ?? math.NAN), "123.5")
     assert_eq(js_number(number_from_text(" 0x10 ")), "16")
     assert(math.is_nan(number_from_text("12abc")))
     assert_eq(js_number(number_from_text("")), "0")

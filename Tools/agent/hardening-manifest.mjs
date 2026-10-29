@@ -95,7 +95,6 @@ const CAPABILITY_MODE_ORDER = Object.freeze([
 ]);
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = resolve(SCRIPT_DIR, "../..");
-const VALUE_NAMES = new Set(["pi", "e", "tau", "infinity", "nan"]);
 const KIND_ORDER = Object.freeze(["module_call", "receiver_method", "field", "nominal_type"]);
 const KIND_PREFIX = Object.freeze({
   module_call: "module:",
@@ -1326,7 +1325,7 @@ function sourceMembership(root) {
   const fallbackCalls = [];
   const moduleNames = new Set(modules.keys());
   for (const [module, names] of modules) for (const name of names) {
-    if (!/^[A-Z]/.test(name) && !VALUE_NAMES.has(name) && !moduleNames.has(`${module}.${name}`)) {
+    if (!/^[A-Z]/.test(name) && !moduleNames.has(`${module}.${name}`)) {
       fallbackCalls.push(`${module}.${name}`);
     }
   }

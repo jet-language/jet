@@ -287,7 +287,7 @@ fn core_sig_math_fixed(module_name: String, member: String) -> CoreTypedCallSign
         if core_sig_one_of(member, [String]{"clamp_float", "hypot3"}) {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(float, read), core_sig_positional(float, read), core_sig_positional(float, read)}, Val(float)))
         }
-        if core_sig_one_of(member, [String]{"tau_const", "random"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(float)))
+        if member == "random" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(float)))
         if core_sig_one_of(member, [String]{"gcd_many", "lcm_many", "sum_int", "prod_int"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_int, read)}, Val(integer)))
         if member == "powmod" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(Type.Option{inner: integer})))
         if member == "abs_diff" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(integer)))
@@ -418,7 +418,6 @@ fn core_sig_numeric_or_default(module_name: String, member: String) -> CoreTyped
     if member == "radix" -> return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{core_sig_positional(t, read)}, Val(integer), core_sig_type_parameter("T", CoreCallTypeConstraint.Numeric)))
     if core_sig_one_of(member, [String]{"is_normal", "is_subnormal", "is_canonical", "is_signed", "is_zero", "is_integer", "sign_bit"}) -> return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{core_sig_positional(t, read)}, Val(boolean), core_sig_type_parameter("T", CoreCallTypeConstraint.Floating)))
     if core_sig_one_of(member, [String]{"next_up", "next_down", "copy", "cot", "inv", "erf", "erfc", "gamma", "lgamma", "logb", "significand", "ulp"}) -> return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{core_sig_positional(t, read)}, Val(t), core_sig_type_parameter("T", CoreCallTypeConstraint.Floating)))
-    if member == "zero" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(float)))
     if member == "round" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(float, read)}, Val(integer)))
     if core_sig_one_of(member, [String]{"gcd", "lcm", "saturating_add", "saturating_sub", "saturating_mul"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(integer)))
     if core_sig_one_of(member, [String]{"atan2", "hypot", "copysign", "log"}) {
@@ -437,7 +436,6 @@ fn core_sig_numeric_or_default(module_name: String, member: String) -> CoreTyped
     if member == "isclose" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(float, read), core_sig_positional(float, read), core_sig_positional(float, read), core_sig_positional(float, read)}, Val(boolean)))
     if member == "dist" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.List{element: float}, read), core_sig_positional(Type.List{element: float}, read)}, Val(float)))
     if core_sig_one_of(member, [String]{"comb", "perm"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read), core_sig_positional(integer, read)}, Val(Type.Option{inner: integer})))
-    if core_sig_one_of(member, [String]{"pi", "e"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(float)))
     if core_sig_one_of(member, [String]{"is_nan", "is_inf", "is_finite", "isnan", "isinf", "isfinite"}) -> return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{core_sig_positional(t, read)}, Val(boolean), core_sig_type_parameter("T", CoreCallTypeConstraint.Floating)))
     if core_sig_one_of(member, [String]{"is_even", "is_odd"}) -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(integer, read)}, Val(boolean)))
     if member == "fsum" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.List{element: float}, read)}, Val(float)))

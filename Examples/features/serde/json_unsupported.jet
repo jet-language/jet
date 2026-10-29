@@ -5,7 +5,7 @@ use core.math as math
 // A comptime value runs on the build's implicit `Err` rail: an unhandled
 // failure fails the build, so this one handles the failure itself.
 COMPTIME_UNSUPPORTED :: comptime {
-    if json.to_string(Dyn.Float(math.nan())) == {
+    if json.to_string(Dyn.Float(math.NAN)) == {
         .Ok(_) -> "accepted"
         .Err(error) -> if error.format == .JSON && error.kind == .Unsupported -> error.reason else -> "another error"
     }
@@ -36,9 +36,9 @@ fn run() {
     assert_eq(COMPTIME_UNSUPPORTED, "JSON cannot encode a non-finite Float")
     print("comptime: {COMPTIME_UNSUPPORTED}")
     assert_eq(COMPTIME_CHAR, json.to_string('\n') ?? panic("Char JSON parity"))
-    reject("nan", math.nan())
-    reject("positive infinity", math.infinity())
-    reject("negative infinity", -math.infinity())
+    reject("nan", math.NAN)
+    reject("positive infinity", math.INFINITY)
+    reject("negative infinity", -math.INFINITY)
     print("aliases: rejected")
     print("Char: {json.to_string('\n') ?? panic("Char JSON")}")
     bytes := [U8]{}
@@ -48,7 +48,7 @@ fn run() {
     assert_eq(wire, C0_EXPECTED)
     assert((json.parse(wire) ?? panic("C0 round trip")) == Dyn.Text(controls))
     print("C0 lowercase: {wire.contains("\\u001f") && !wire.contains("\\u001F")}")
-    bad :: Dyn.Float(math.nan())
+    bad :: Dyn.Float(math.NAN)
     if jsonl.to_string([Dyn]{Dyn.Int(12), bad}) == {
         .Ok(_) -> panic("non-finite JSONL accepted")
         .Err(error) -> {

@@ -153,6 +153,7 @@ use jet_eval.[
     jet_eval_compiler_services_program_info,
     jet_eval_native_load,
     jet_eval_native_run,
+    jet_eval_native_session_close,
 ]
 
 fn jet_driver_source_location_for_load_module(load: JetDriverLoadResult, module_identity: String, site: Span) -> SemaSourceLocation? {
@@ -3180,6 +3181,8 @@ fn jet_driver_compile_stages(request: JetDriverCompileRequest, kg: &JetDriverKee
     load := jet_driver_load(request)
     if request.trace_sink == .Val(sink) -> sink.end("load", load.modules.len())
     result := jet_driver_compile_loaded_stages(request, &kg, ^load, checked_projection, &capture)
+    // The compile is over: no comptime child may outlive it (Native.jet).
+    if request.eval_config.native == .Val(session) -> jet_eval_native_session_close(session)
     jet_driver_trace_released(request.trace_sink)
     result
 }

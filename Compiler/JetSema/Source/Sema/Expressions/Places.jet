@@ -469,10 +469,17 @@ fn sema_expression_field(field: Expr, base: Expr, member: String, span: Span, ex
         return sema_expression_enum_literal(path.enum_name, [Type]{}, path.variant, [EnumLitArg]{}, false, Val(member_span), span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     // Rust `infer_field` (imports arm): `alias.NAME` where `alias` is a
-    // whole-module import reads that module's constant `NAME`.
+    // whole-module import reads that module's constant `NAME`, and
+    // `core.math.NAME` through `use core as core` the nested module's.
     if base == .Ident(alias, _, _) {
-        module_constant :: sema_expression_module_constant(alias, member, span, expected, environment, program, &scopes, &context, &diagnostics)
+        module_constant :: sema_expression_module_constant(alias, member, member_span, span, expected, environment, program, &scopes, &context, &diagnostics)
         if module_constant.handled -> return module_constant.value
+    }
+    if base == .Field(root, nested, _, _) {
+        if root == .Ident(alias, _, _) {
+            nested_constant :: sema_expression_core_nested_constant(alias, nested, member, member_span, span, expected, environment, program, &scopes, &context, &diagnostics)
+            if nested_constant.handled -> return nested_constant.value
+        }
     }
     // Rust `infer_field` (static-owner arm): `Type.member` on a declared
     // struct reads no value. A typestate label is a compile-time fact, and
@@ -605,25 +612,89 @@ fn sema_expression_struct_static_member_error(type_name: String, member: String,
 
 // `alias.NAME` through a whole-module import `alias` (Rust `infer_field`:
 // `modules[member_owner].consts.get(member)`): a ConstRef to the target
-// module's constant, typed by its staged value. A constant whose value has
-// not landed is a dependency wait (the reference names it) and, after the
-// comptime run, a recorded incomplete reason.
-fn sema_expression_module_constant(alias: String, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+// module's constant, typed by its staged value. A name the module does not
+// export is the call path's import-member report, not an untyped base.
+fn sema_expression_module_constant(alias: String, member: String, member_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     index :: sema_scope_resolve_index(scopes, alias) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if scopes.bindings[index].symbol.kind != SymbolKind.Import -> return SemaMethodSpecialCheck{handled: false, value: None}
     if program.registration_graph == .Val(graph) {
-        resolved :: sema_registration_lookup_qualified(graph, environment.module_identity, alias, member) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-        if sema_resolved_kind(graph, resolved) != SymbolKind.Constant -> return SemaMethodSpecialCheck{handled: false, value: None}
-        symbol :: sema_resolved_symbol(graph, resolved)
-        &context.name_references.push(SemaNameReferenceFact{span: span, symbol: symbol, kind: "const"})
-        ty :: symbol.ty ?? {
-            sema_check_unsupported(&context, "constant `{alias}.{member}` (read at offset {span.start}) has no staged compile-time value")
+        resolved :: sema_registration_lookup_qualified(graph, environment.module_identity, alias, member) ?? {
+            unknown :: sema_expression_module_member_unknown(graph, environment.module_identity, alias, member, member_span) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+            &diagnostics.push(unknown)
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
-        value :: sema_node(&context, ty, NodeKind.ConstRef{symbol: symbol.id}, span)
-        return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+        return sema_expression_module_constant_read(graph, resolved, "{alias}.{member}", span, expected, environment, program, &context, &diagnostics)
     }
     SemaMethodSpecialCheck{handled: false, value: None}
+}
+
+// `core.math.NAME` through `use core as core`: the nested Core module's
+// constant, read as `math.NAME` reads it through `use core.math as math`.
+fn sema_expression_core_nested_constant(alias: String, nested: String, member: String, member_span: Span, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    unhandled :: SemaMethodSpecialCheck{handled: false, value: None}
+    index :: sema_scope_resolve_index(scopes, alias) ?? return unhandled
+    if scopes.bindings[index].symbol.kind != SymbolKind.Import -> return unhandled
+    target :: sema_call_core_import_target(environment, program, alias) ?? return unhandled
+    if target.item != None -> return unhandled
+    module_name :: "{target.module_name}.{nested}"
+    module_identity :: sema_call_core_module_identity(environment, program, module_name) ?? return unhandled
+    if program.registration_graph == .Val(graph) {
+        module_index :: sema_registration_module_index(graph, module_identity) ?? return unhandled
+        export :: sema_registration_resolve_export(graph, module_index, member, environment.module_identity, environment.package_identity, [String]{}) ?? {
+            &diagnostics.push(sema_expression_core_member_unknown(graph.modules[module_index], member, member_span))
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+        resolved :: SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: export.symbol}, source_module_identity: export.source_module_identity, target_module_identity: module_identity, visibility: export.visibility}
+        return sema_expression_module_constant_read(graph, resolved, "{alias}.{nested}.{member}", span, expected, environment, program, &context, &diagnostics)
+    }
+    unhandled
+}
+
+// The read of a resolved module member: a constant is a ConstRef typed by its
+// staged value. A constant whose value has not landed is a dependency wait
+// (the reference names it) and, after the comptime run, a recorded
+// incomplete reason. Any other member kind is not a constant read.
+fn sema_expression_module_constant_read(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol, label: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if sema_resolved_kind(graph, resolved) != SymbolKind.Constant -> return SemaMethodSpecialCheck{handled: false, value: None}
+    symbol :: sema_resolved_symbol(graph, resolved)
+    &context.name_references.push(SemaNameReferenceFact{span: span, symbol: symbol, kind: "const"})
+    ty :: symbol.ty ?? {
+        sema_check_unsupported(&context, "constant `{label}` (read at offset {span.start}) has no staged compile-time value")
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    value :: sema_node(&context, ty, NodeKind.ConstRef{symbol: symbol.id}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+}
+
+// The report for `alias.member` when the whole-module import `alias` names
+// a module without `member`, as the call path reports `alias.member(..)`:
+// E1004 for a Core module, E0605 for a private item and E0102 otherwise.
+// None when `alias` is not a whole-module import (a binding with no
+// declaration, as `sema_call_source_import_target` reads it).
+fn sema_expression_module_member_unknown(graph: SemaRegistrationGraph, module_identity: String, alias: String, member: String, member_span: Span) -> Diagnostic? {
+    module_index :: sema_registration_module_index(graph, module_identity) ?? return None
+    loop import in graph.modules[module_index].imports {
+        loop binding in import.bindings {
+            if binding.local != alias || binding.symbol.kind != SymbolKind.Import || binding.declaration != None -> next
+            target_index :: sema_registration_module_index(graph, binding.target_module_identity) ?? return None
+            target :: graph.modules[target_index]
+            if target.module_identity.starts_with("<corelib>/") -> return Val(sema_expression_core_member_unknown(target, member, member_span))
+            if sema_registration_direct_symbol(target, member) != None -> return Val(sema_error("E0605", member_span, "`{alias}.{member}` is private to its module", "a `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module", "use `{alias}.{member}` from inside its module, or remove `priv` from its module or field"))
+            return Val(sema_call_import_member_unknown(member, member_span))
+        }
+    }
+    None
+}
+
+// E1004 for a Core module value read: a constant spelled in another case
+// (`math.pi` for `PI`) is the suggestion, ahead of the module's call menu.
+fn sema_expression_core_member_unknown(module_row: SemaRegistrationModule, member: String, member_span: Span) -> Diagnostic {
+    loop symbol in module_row.symbols {
+        if symbol.kind != SymbolKind.Constant || symbol.name == member || symbol.name.lower() != member.lower() -> next
+        diagnostic :: sema_error("E1004", member_span, "`{module_row.module_name}` has no item `{member}`", "standard library modules expose a fixed set of public items", "did you mean `{symbol.name}`?")
+        return diagnostic_with_edit(diagnostic, TextEdit{span: member_span, new_text: symbol.name})
+    }
+    sema_call_core_unknown_item(module_row.module_name, member, member_span)
 }
 
 // A swizzle read on a Core vector (`v.x`, `v.zyx`) is a call of the

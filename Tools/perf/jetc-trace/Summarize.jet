@@ -28,8 +28,6 @@ HUNDRED_MILLION :: Float{100000000.0}
 
 // ---- JavaScript number semantics -------------------------------------------
 
-fn nan() -> Float Never! { math.nan() }
-
 fn finite(value: Float) -> Bool Never! { math.is_finite(value) }
 
 fn pow_int(base: Int, exponent: Int) -> Int Never! {
@@ -232,8 +230,8 @@ fn digit_value(code: Int, radix: Int) -> Int Never! {
 fn number_from_text(raw: String) -> Float Never! {
     text :: js_trim(raw)
     if text == "" -> return ZERO
-    if text == "Infinity" || text == "+Infinity" -> return math.infinity()
-    if text == "-Infinity" -> return -math.infinity()
+    if text == "Infinity" || text == "+Infinity" -> return math.INFINITY
+    if text == "-Infinity" -> return -math.INFINITY
     bytes :: text.bytes()
     if bytes.len() > 2 && Int.from_u8(bytes[0]) == 48 {
         marker :: Int.from_u8(bytes[1])
@@ -247,10 +245,10 @@ fn number_from_text(raw: String) -> Float Never! {
             value := 0
             loop at in 2..<bytes.len() {
                 digit :: digit_value(Int.from_u8(bytes[at]), radix)
-                if digit < 0 -> return nan()
+                if digit < 0 -> return math.NAN
                 value = value * radix + digit
             }
-            return Float.parse("{value}") ?? nan()
+            return Float.parse("{value}") ?? math.NAN
         }
     }
     // [+-] (digits [. digits?] | . digits) ([eE] [+-] digits)?
@@ -273,7 +271,7 @@ fn number_from_text(raw: String) -> Float Never! {
             at += 1
         }
     }
-    if whole == "" && fraction == "" -> return nan()
+    if whole == "" && fraction == "" -> return math.NAN
     exponent := "0"
     if at < bytes.len() && (Int.from_u8(bytes[at]) == 101 || Int.from_u8(bytes[at]) == 69) {
         at += 1
@@ -287,12 +285,12 @@ fn number_from_text(raw: String) -> Float Never! {
             digits = "{digits}{String.from_bytes_lossy(bytes[at..<at + 1])}"
             at += 1
         }
-        if digits == "" -> return nan()
+        if digits == "" -> return math.NAN
         exponent = "{exponent_sign}{digits}"
     }
-    if at != bytes.len() -> return nan()
+    if at != bytes.len() -> return math.NAN
     canonical :: "{sign}{if whole == "" -> "0" else -> whole}.{if fraction == "" -> "0" else -> fraction}e{exponent}"
-    Float.parse(canonical) ?? nan()
+    Float.parse(canonical) ?? math.NAN
 }
 
 // ---- Dyn access with JavaScript reads ---------------------------------------
@@ -321,9 +319,9 @@ fn number(value: Dyn?) -> Float? Never! {
     if value == {
         .Val(inner) -> {
             if inner == {
-                .Int(whole) -> Val(Float.parse("{whole}") ?? nan())
+                .Int(whole) -> Val(Float.parse("{whole}") ?? math.NAN)
                 .Float(real) -> Val(real)
-                .Number(lexeme) -> Val(Float.parse(lexeme) ?? nan())
+                .Number(lexeme) -> Val(Float.parse(lexeme) ?? math.NAN)
                 else -> None
             }
         }
@@ -335,7 +333,7 @@ fn number_field(value: Dyn, key: String) -> Float? Never! { number(field(value, 
 
 // A JSON value's field as a number; NaN when absent or not a number
 // (JavaScript arithmetic on `undefined`).
-fn number_or_nan(value: Dyn, key: String) -> Float Never! { number_field(value, key) ?? nan() }
+fn number_or_nan(value: Dyn, key: String) -> Float Never! { number_field(value, key) ?? math.NAN }
 
 // String(value) for a JSON value (`undefined` when absent).
 fn js_string(value: Dyn?) -> String Never! {
@@ -343,9 +341,9 @@ fn js_string(value: Dyn?) -> String Never! {
         .Val(inner) -> {
             if inner == {
                 .Text(text) -> text
-                .Int(_) -> js_number(number(value) ?? nan())
+                .Int(_) -> js_number(number(value) ?? math.NAN)
                 .Float(real) -> js_number(real)
-                .Number(_) -> js_number(number(value) ?? nan())
+                .Number(_) -> js_number(number(value) ?? math.NAN)
                 .Bool(flag) -> if flag -> "true" else -> "false"
                 .Null -> "null"
                 .Array(items) -> {
@@ -388,7 +386,7 @@ fn truthy(value: Dyn?) -> Bool Never! {
                 .Int(whole) -> whole != 0
                 .Float(real) -> real != ZERO && !math.is_nan(real)
                 .Number(_) -> {
-                    real :: number(value) ?? nan()
+                    real :: number(value) ?? math.NAN
                     real != ZERO && !math.is_nan(real)
                 }
                 else -> true
@@ -414,9 +412,9 @@ fn map_key(value: Dyn?, unique: Int) -> String Never! {
         .Val(inner) -> {
             if inner == {
                 .Text(text) -> "s:{text}"
-                .Int(_) -> "n:{js_number(number(value) ?? nan())}"
+                .Int(_) -> "n:{js_number(number(value) ?? math.NAN)}"
                 .Float(real) -> "n:{js_number(real)}"
-                .Number(_) -> "n:{js_number(number(value) ?? nan())}"
+                .Number(_) -> "n:{js_number(number(value) ?? math.NAN)}"
                 .Bool(flag) -> "b:{flag}"
                 .Null -> "null"
                 else -> "o:{unique}"
@@ -512,7 +510,7 @@ struct Summary {
 
 // Math.max: NaN wins.
 fn js_max(left: Float, right: Float) -> Float Never! {
-    if math.is_nan(left) || math.is_nan(right) -> return nan()
+    if math.is_nan(left) || math.is_nan(right) -> return math.NAN
     if right > left -> right else -> left
 }
 
@@ -542,7 +540,7 @@ fn progress_index(progress: [Progress], key: String) -> Int Never! {
 // non-number reads as NaN.
 fn number_or(value: Dyn?, fallback: Float) -> Float Never! {
     if !present(value) -> return fallback
-    number(value) ?? nan()
+    number(value) ?? math.NAN
 }
 
 fn summarize(events: [Dyn]) -> Summary Never! {
@@ -560,7 +558,7 @@ fn summarize(events: [Dyn]) -> Summary Never! {
         if text_of(field(event, "name")) == .Val(name) {
             if name == "trace.start" {
                 unix :: field(field(event, "args") ?? Dyn.Null, "unix_ms")
-                start_unix_ms = if present(unix) -> Val(number(unix) ?? nan()) else -> None
+                start_unix_ms = if present(unix) -> Val(number(unix) ?? math.NAN) else -> None
             }
         }
         tid :: field(event, "tid")
@@ -574,7 +572,7 @@ fn summarize(events: [Dyn]) -> Summary Never! {
             at = threads.len() - 1
         }
         phase :: text_of(field(event, "ph")) ?? ""
-        ts :: ts_value ?? nan()
+        ts :: ts_value ?? math.NAN
         args :: field(event, "args")
         if phase == "B" {
             category :: field(event, "cat")
@@ -607,7 +605,7 @@ fn summarize(events: [Dyn]) -> Summary Never! {
                 kinds[row].peak_kb = js_max(kinds[row].peak_kb, peak)
                 peak_kb = Val(js_max(peak_kb ?? ZERO, peak))
                 rss :: field(event_args, "rss_kb")
-                rss_kb = if present(rss) -> Val(number(rss) ?? nan()) else -> None
+                rss_kb = if present(rss) -> Val(number(rss) ?? math.NAN) else -> None
             }
         } else if phase == "C" {
             name_value :: field(event, "name")
@@ -692,7 +690,7 @@ fn render(text: String, now_ms: Int) -> String Never! {
     &lines.push("")
     stale_text := ""
     if summary.start_unix_ms == .Val(start) {
-        now :: Float.parse("{now_ms}") ?? nan()
+        now :: Float.parse("{now_ms}") ?? math.NAN
         stale :: (now - (start + summary.last_ts / THOUSAND)) / THOUSAND
         stale_text = ", last event {js_fixed(stale, 0)} s ago"
     }

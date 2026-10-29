@@ -2063,8 +2063,9 @@ captured or inherited streams (D-PROCESS-SESSION1=A, D-PROCESS-SESSION2=D).
 
 `core.math` supplies integer operations, IEEE floating-point wrappers, numeric
 predicates, checked and saturating arithmetic, and elementary functions. The
-floating-point constant-like values are functions, so use `math.pi()` and
-`math.e()` rather than treating them as fields.
+floating-point constants `math.PI`, `math.E`, `math.TAU`, `math.INFINITY` and
+`math.NAN` are comptime values read as fields, not calls, so they also work in
+`comptime` contexts.
 The numeric `/%` operator rounds division toward negative infinity for both
 exact `Int` and floating-point operands (`-7 /% 2` is `-4`). Its in-place
 form is `/%=`, and whole-number floor division pairs with floored `%`.
@@ -2079,7 +2080,7 @@ an `abs` method nor a Core identity to a same-spelled user type.
 use core.math as math
 
 fn run() {
-    angle := math.pi() / 4.0
+    angle := math.PI / 4.0
     print(math.sin_cos(angle))
     print(math.checked_add(2, 3) ?? 0)
     print(math.is_finite(math.sqrt(2.0)))
@@ -2138,8 +2139,8 @@ calling them. Source-owned Core wrappers preserve these same constraints.
 | `math.next_up(x)` / `next_down(x)` / `next_after(x, toward)` / `nextafter(x, toward)` | `Float` | Move to an adjacent representable value. |
 | `math.significand(x)` / `math.ulp(x)` | `Float` | Return the significand or unit in the last place. |
 | `math.ilogb(x)` / `math.ldexp(x, exponent)` / `math.scaleb(x, exponent)` / `math.radix(x)` | `?Int` or `Float` | Inspect or scale the floating-point exponent and radix. |
-| `math.pi()` / `math.e()` / `math.tau()` / `math.tau_const()` | `Float` | Mathematical constants exposed as functions. |
-| `math.infinity()` / `math.nan()` / `math.zero()` | `Float` | Construct the corresponding special floating-point values. |
+| `math.PI` / `math.E` / `math.TAU` | `Float` | Mathematical constants, declared as comptime values (`PI :: Float{…}`); usable in `comptime` contexts. |
+| `math.INFINITY` / `math.NAN` | `Float` | The IEEE-754 special values `1.0 / 0.0` and `0.0 / 0.0`, as comptime constants. `NAN` compares unequal to every value, itself included; test it with `math.is_nan`. |
 | `math.round(x)` | `Int` | Round to the nearest integer, with ties away from zero. |
 | `math.to_bits(x)` / `math.from_bits(bits)` | integer bits / `Float` | Convert between a floating value and its bit representation. |
 | `math.sin_cos(x)` | `(cos: Float, sin: Float)` | Compute cosine and sine together. |

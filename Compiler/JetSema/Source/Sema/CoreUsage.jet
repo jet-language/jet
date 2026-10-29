@@ -966,11 +966,6 @@ fn sema_core_collect_expr(expr: Expr, imports: [SemaCoreImport], registered: [St
         .Field(base, member, span, _) -> {
             if base == {
                 .Ident(alias, _, _) -> {
-                    row :: sema_core_import_find(imports, alias)
-                    if row != None {
-                        imported := row
-                        if imported.module_name == "core.math" && member == "pi" -> sema_core_note_usage(&used, &spans, "core.math::pi", Val(span))
-                    }
                     if sema_core_is_data_type(alias) && member == "Null" -> sema_core_note_usage(&used, &spans, "core::json", Val(span))
                 }
                 else -> {}
