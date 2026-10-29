@@ -188,15 +188,27 @@ fn jet_cli_native_test_width(cores: Int, available: Int?) -> Int Never! {
     width
 }
 
+// A selected child's outcome. A child that streamed its record and then died
+// (E3013 parked tasks at process exit, a teardown fault) fails that test with
+// the fatal text: the process outlived the body, so the record alone isn't
+// the test's whole outcome.
 fn jet_native_test_one(test: JetNativeTestCase, receipt: ProcessReceipt, path: String) -> String Err! {
     records :: jet_native_test_read_records(path, receipt)
-    if records.len() == 1 {
-        if records[0].function != test.id -> return Err("selected native child returned another test's outcome")
+    if records.len() > 1 -> return Err("selected native child returned multiple outcomes")
+    if records.len() == 1 && records[0].function != test.id -> return Err("selected native child returned another test's outcome")
+    if receipt.success {
+        if records.len() == 0 -> return Err("selected native child completed without its outcome")
         return Ok(records[0].wire)
     }
-    if records.len() > 1 -> return Err("selected native child returned multiple outcomes")
-    if receipt.success -> return Err("selected native child completed without its outcome")
     Ok(jet_native_test_failure(test, receipt))
+}
+
+// The outcome a rerun child settles. After a batch that streamed every
+// outcome before dying, a child that ran clean keeps the batch's outcome (it
+// observed the batch's state); a child that died keeps its fatal outcome.
+fn jet_native_test_settle(outcomes: &[U64:String], streamed: [U64:String], id: U64, wire: String, success: Bool) Never! {
+    kept :: if success -> streamed.get(id) ?? wire else -> wire
+    &outcomes.add(id, kept).drop("only missing tests are retried")
 }
 
 // `spec` is the caller's already-configured test ProcessSpec, preserving every
@@ -222,7 +234,17 @@ fn jet_cli_native_test_run(spec: ProcessSpec, tests: [JetNativeTestCase], check_
         if outcomes.get(test.id) == None -> &missing.push(test)
     }
     if missing.len() > 0 && batch.success -> return Err("native test executable completed without every selected outcome")
-    if missing.len() == 0 && !batch.success -> return Err("native test executable failed after streaming every selected outcome: {batch.errors}")
+    // Every outcome streamed, then the batch died: no record names the
+    // culprit, so each selected test reruns alone (jet_native_test_settle).
+    exit_fatal :: missing.len() == 0 && !batch.success
+    streamed := [U64:String]{}
+    if exit_fatal {
+        loop test in tests {
+            &streamed.add(test.id, outcomes.get(test.id) ?? "").drop("selected test functions are unique")
+            &missing.push(test)
+        }
+        outcomes = [U64:String]{}
+    }
     fatal_attributed := batch.success
     if serial {
         loop test in missing {
@@ -236,11 +258,11 @@ fn jet_cli_native_test_run(spec: ProcessSpec, tests: [JetNativeTestCase], check_
             if !receipt.success -> fatal_attributed = true
             // A fatal receipt's raw streams already live inside its failure
             // outcome. Successful tests' uncaptured streams remain separate.
-            if receipt.success {
+            if receipt.success && !exit_fatal {
                 &outputs.push(receipt.output)
                 &errors.push(receipt.errors)
             }
-            &outcomes.add(test.id, wire).drop("only missing tests are retried")
+            jet_native_test_settle(&outcomes, streamed, test.id, wire, receipt.success)
         }
     } else {
         // Children run in waves of `width`, reaped in test order, so every
@@ -278,11 +300,11 @@ fn jet_cli_native_test_run(spec: ProcessSpec, tests: [JetNativeTestCase], check_
                     next
                 }
                 if !receipt.success -> fatal_attributed = true
-                if receipt.success {
+                if receipt.success && !exit_fatal {
                     &outputs.push(receipt.output)
                     &errors.push(receipt.errors)
                 }
-                &outcomes.add(running.test.id, wire).drop("only missing tests are retried")
+                jet_native_test_settle(&outcomes, streamed, running.test.id, wire, receipt.success)
             }
             start = end
         }
@@ -290,10 +312,16 @@ fn jet_cli_native_test_run(spec: ProcessSpec, tests: [JetNativeTestCase], check_
         if wait_error == .Val(error) -> return Err(error)
     }
     // A non-reproducing fatal batch cannot honestly be attributed to a test,
-    // nor converted to a successful run just because the reruns passed.
-    if !fatal_attributed -> return Err("native test batch failed fatally but no individually selected child reproduced the failure; the run is not successful")
+    // nor converted to a successful run just because the reruns passed. One
+    // that died only after streaming every outcome keeps those outcomes and
+    // fails the run with a record of its own.
+    if !fatal_attributed && !exit_fatal -> return Err("native test batch failed fatally but no individually selected child reproduced the failure; the run is not successful")
     wires := [String]{}
     loop test in tests -> &wires.push(outcomes.get(test.id) ?? return Err("native test aggregation lost an outcome"))
+    if exit_fatal && !fatal_attributed {
+        name :: "native test process exit"
+        &wires.push("0 {name.bytes().len()} 0 {batch.errors.bytes().len()} -\n{name}{batch.errors}")
+    }
     if !batch.success && check_names.len() > 0 {
         report :: unrun_check_report()
         // The batch's state died with its process. Never rerun a check in the

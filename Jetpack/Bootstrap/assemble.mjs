@@ -400,10 +400,13 @@ for (const entry of units) {
 
 if (mode === "run") {
   // One driver prints the same claim ledger the AOT harness proves, so a
-  // failure on either tier names the same claim.
-  append("// [jetpack-bootstrap generated: default-tier test driver]\nfn run() {\n");
-  for (const { name, fnName } of testNames) append(`    ${fnName}()\n    print("pass ${name}")\n`);
-  append(`    print("jetpack-bootstrap: ${testNames.length} claims passed")\n}\n`);
+  // failure on either tier names the same claim. A failing claim stops the
+  // process (E3001); check.sh resumes after it with JETPACK_CLAIM_FROM set to
+  // the next claim's index, so one run reports every failing claim.
+  append("// [jetpack-bootstrap generated: default-tier test driver]\nuse core.sys as jetpack_bootstrap_sys\nfn run() {\n");
+  append(`    from :: Int.parse(jetpack_bootstrap_sys.get("JETPACK_CLAIM_FROM") ?? "0") ?? 0\n`);
+  for (const [index, { name, fnName }] of testNames.entries()) append(`    if from <= ${index} {\n        ${fnName}()\n        print("pass ${name}")\n    }\n`);
+  append(`    print("jetpack-bootstrap: claims done")\n}\n`);
 }
 if (mode === "publication") {
   // Preserve the publisher's typed failure for the canonical entry reporter.

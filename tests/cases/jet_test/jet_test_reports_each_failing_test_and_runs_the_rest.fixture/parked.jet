@@ -1,0 +1,24 @@
+// #6185: one test fails an assert and another leaves a detached task parked on
+// a full channel, so the test process dies at exit (E3013) after every outcome
+// has streamed. The run still reports each test, and the tests after either
+// culprit run and pass.
+use core.tasks as tasks
+
+#Test("before the failures") { assert(true) }
+
+#Test("fails an assert") { assert_eq(1 + 1, 3) }
+
+#Test("between the failures") { assert(true) }
+
+#Test("leaves a parked task") {
+    (sender, receiver) :: channel<Int>(1)
+    sender.send(1)
+    blocked :: task ^sender {
+        sender.send(2)
+        receiver.close()
+    }
+    ^blocked.detach()
+    tasks.yield_now()
+}
+
+#Test("after the failures") { assert(true) }

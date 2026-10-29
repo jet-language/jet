@@ -276,15 +276,32 @@ if (( overall != 0 )); then echo "--- errors by source file ($scratch/check-erro
 if (( with_tests == 1 && overall == 0 )); then
   node "$bootstrap/assemble.mjs" run
   unit_record run
-  if bounded run "$check_mem" 1800 "$scratch/run/project" "$jet" run src/jetpack.jet; then
-    expected="$(node -e 'console.log(require(process.argv[1]).tests.length)' "$scratch/run/jetpack.map.json")"
-    if ! grep -qx "jetpack-bootstrap: $expected claims passed" "$scratch/run.log"; then
-      echo "jetpack-bootstrap: default tier did not report all $expected claims" >&2
-      overall=1
+  # Collect-all: a failing claim stops the driver with E3001 (exit 70) right
+  # after its predecessors' `pass` lines; it is recorded as failed and the
+  # driver resumes at the next claim (JETPACK_CLAIM_FROM). Any other stop
+  # (ICE, timeout, memory cap) can't be attributed to a claim and ends the tier.
+  expected="$(node -e 'console.log(require(process.argv[1]).tests.length)' "$scratch/run/jetpack.map.json")"
+  from=0 label=run run_failed=0 run_passed=0
+  while :; do
+    run_status=0
+    JETPACK_CLAIM_FROM="$from" bounded "$label" "$check_mem" 1800 "$scratch/run/project" "$jet" run src/jetpack.jet || run_status=$?
+    segment="$(grep -c '^pass ' "$scratch/$label.log" || true)"
+    run_passed=$(( run_passed + segment ))
+    if (( run_status == 0 )) && grep -qx 'jetpack-bootstrap: claims done' "$scratch/$label.log"; then break; fi
+    stopped=$(( from + segment ))
+    if (( run_status != 70 || stopped >= expected )); then
+      echo "jetpack-bootstrap: default tier stopped (exit $run_status) without a claim to attribute it to" >&2
+      run_failed=$(( run_failed + 1 ))
+      break
     fi
-  else
-    overall=1
-  fi
+    echo "fail $(node -e 'console.log(require(process.argv[1]).tests[Number(process.argv[2])])' "$scratch/run/jetpack.map.json" "$stopped")"
+    run_failed=$(( run_failed + 1 ))
+    from=$(( stopped + 1 ))
+    (( from < expected )) || break
+    label="run-from-$from"
+  done
+  echo "jetpack-bootstrap: default tier: $run_passed of $expected claims passed, $run_failed failed"
+  (( run_failed == 0 && run_passed == expected )) || overall=1
   rm -rf "$scratch/run/project/.jet/build"
 
   node "$bootstrap/assemble.mjs" aot
