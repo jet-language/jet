@@ -1,7 +1,7 @@
 // Core runtime providers carried by the hidden cargo FFI bridge, ported from
 // jet_pkg_model::FFI.
 //
-// Some Core surfaces (core.db, core.data Parquet readers and core.plugin)
+// Some Core surfaces (core.data Parquet readers and core.plugin)
 // are backed by hand-written Rust runtimes that live only in the generated
 // bridge crate (I6: never in the compiler). This file decides which
 // providers a program needs, pins the crates they use and embeds the
@@ -23,8 +23,6 @@ struct FFICrateSpec {
     version: String
 }
 
-// The `rusqlite` crate that backs `core.db`.
-FFI_DB_CRATE_SPEC :: FFICrateSpec{name: "rusqlite", version: "0.31"}
 // Official Arrow Rust reader closure for `core.data` Parquet sources
 FFI_PARQUET_CRATE_SPEC :: FFICrateSpec{name: "parquet", version: "59.3.0"}
 FFI_ARROW_ARRAY_CRATE_SPEC :: FFICrateSpec{name: "arrow-array", version: "59.3.0"}
@@ -50,13 +48,11 @@ FFI_FEATURED_DEPS :: comptime { [FFIFeaturedDep]{
     {name: "arrow-select", toml: "{{ version = \"=59.3.0\", default-features = false }}"},
     {name: "bytes", toml: "{{ version = \"1\", default-features = false }}"},
     {name: "parquet", toml: "{{ version = \"=59.3.0\", default-features = false, features = [\"arrow\", \"brotli\", \"flate2-zlib-rs\", \"lz4\", \"simdutf8\", \"snap\", \"zstd\"] }}"},
-    {name: "rusqlite", toml: "{{ version = \"0.31\", features = [\"bundled\", \"hooks\"] }}"},
     {name: "wasmtime", toml: "{{ version = \"25\", features = [\"component-model\"] }}"}
 } }
 
 // The hand-written Rust runtimes emitted into the bridge crate. Each is the
 // only code that touches its pinned crates.
-FFI_DB_RUNTIME :: comptime { embed_file("Runtime/DB.rs") }
 FFI_PARQUET_RUNTIME :: comptime { embed_file("Runtime/Parquet.rs") }
 // Application plugin loader.
 FFI_PLUGIN_RUNTIME :: comptime { embed_file("Runtime/Plugin.rs") }
@@ -71,20 +67,18 @@ FFI_COMPILER_EXTENSION_RUNTIME :: comptime { embed_file("Runtime/CompilerExtensi
 struct RustBridgeNeeds {
     regex: Bool
     archive: Bool
-    db: Bool
     parquet: Bool
     compress: Bool
     plugin: Bool
 
     fn none() -> RustBridgeNeeds Never! {
-        RustBridgeNeeds{regex: false, archive: false, db: false, parquet: false, compress: false, plugin: false}
+        RustBridgeNeeds{regex: false, archive: false, parquet: false, compress: false, plugin: false}
     }
 
     // The providers the program's reached Core surfaces select.
     fn from_used_core(used_core: [String]) -> RustBridgeNeeds Never! {
         needs := RustBridgeNeeds.none()
         loop usage in used_core {
-            if usage == "core.db" || usage.starts_with("core.db::") -> needs.db = true
             // Byte-source loader calls select the Parquet
             // provider; bare dependency-closure module rows do not.
             if pkg_ffi_needs_parquet_provider(usage) -> needs.parquet = true
@@ -95,7 +89,7 @@ struct RustBridgeNeeds {
     }
 
     fn any(self) -> Bool Never! {
-        self.regex || self.archive || self.db || self.parquet || self.compress || self.plugin
+        self.regex || self.archive || self.parquet || self.compress || self.plugin
     }
 }
 

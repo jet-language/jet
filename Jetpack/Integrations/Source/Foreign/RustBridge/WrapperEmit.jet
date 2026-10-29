@@ -159,8 +159,6 @@ fn pkg_ffi_emit_wrapper_lib_with_handles(entries: [ExternEntry], needs: RustBrid
     out = "{out}{record_defs.source}"
     loop descriptor in pkg_ffi_foreign_descriptor_stamps(entries) -> out = "{out}// jet-ffi-descriptor={descriptor}\n"
     if entries.len() > 0 -> out = "{out}\n"
-    // The database runtime is the only place `rusqlite` is touched.
-    if needs.db -> out = "{out}{pkg_ffi_runtime_mod("__jet_db", "{FFI_DB_RUNTIME}\n")}"
     // The Parquet/Arrow closure registers its C export with Foundation.
     if needs.parquet -> out = "{out}{pkg_ffi_runtime_mod("__jet_parquet", "{FFI_PARQUET_RUNTIME}\n")}"
     // The application `core.plugin` host; the compiler-extension

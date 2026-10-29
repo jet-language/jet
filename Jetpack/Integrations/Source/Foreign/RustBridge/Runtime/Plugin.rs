@@ -14,12 +14,12 @@
 // root. A plugin with no declared/imported capability still runs with a
 // zero-grant scope (I1).
 //
-// Handles and stores are owner-thread state in a thread-local HashMap,
-// mirroring `DB.rs`. Handle 0 is the error sentinel (never a live plugin
+// Handles and stores are owner-thread state in a thread-local HashMap.
+// Handle 0 is the error sentinel (never a live plugin
 // instance). Nested host/guest entry and unload during a call are rejected,
 // so a guest failure cannot unwind unrelated host work.
 //
-// Wire protocol (mirrors `DB.rs`'s tagged-length encoding for leaves and uses
+// Wire protocol (tagged-length encoding for leaves and
 // canonical recursive component values for aggregates):
 // `I<len>:<int>`, `F<len>:<float>`, `B<len>:<true|false>`, `T<len>:<utf8>`,
 // `L<count>:<values>`, `R<count>:<field-name><value>`, `Q<count>:<values>`,

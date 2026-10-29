@@ -83,7 +83,6 @@ fn pkg_ffi_build_bridge(entries: [ExternEntry], needs: RustBridgeNeeds) -[FS, En
 fn pkg_ffi_bridge_deps(entries: [ExternEntry], needs: RustBridgeNeeds) -[FS, Env]> [String: String] RustBridgeError! {
     deps := pkg_ffi_collect_crate_deps(entries)
     specs := [FFICrateSpec]{}
-    if needs.db -> &specs.push(FFI_DB_CRATE_SPEC)
     if needs.parquet {
         loop spec in pkg_ffi_parquet_crate_specs() -> &specs.push(spec)
     }
