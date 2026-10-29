@@ -2710,11 +2710,12 @@ function viewPapercuts() {
 }
 
 // ---- GOALS: long-term aims that cards point at ------------------------------
-// A goal has no phase and never blocks work; each section lists the live cards
-// linked to it and where they stand. The owner adds, edits, logs, achieves and
-// drops goals here; agents link cards with `tower card update --goals`.
+// A goal has no phase and never blocks work. The tab shows each goal's title
+// and description with add, edit, achieve and remove; a goal's linked cards
+// show only on request. Agents link cards with `tower card update --goals`.
 let goalFilter = 'active';   // 'active' | 'all'
 let goalEditing = null;      // goal id whose edit form is open, or 'new'
+const goalCardsOpen = new Set();  // goal ids whose linked cards are shown
 function goalForm(g) {
   const form = el(`<div class="goal__form">
       <input class="goal__in" data-keep="goal-title:${esc(g?.id || 'new')}" placeholder="Goal title" value="${esc(g?.title || '')}">
@@ -2755,13 +2756,11 @@ function viewGoals() {
   }
   for (const g of list) {
     const cards = g.cards || [];
-    const done = cards.filter(c => c.phase === 'done').length;
     const section = el(`<section class="goal">
         <div class="goal__head">
           <span class="num">${esc(g.id)}</span>
           <span class="goal__t">${esc(g.title)}</span>
           ${g.status === 'active' ? '' : `<span class="chip">${esc(g.status)}</span>`}
-          <span class="viewhead__sub">${done}/${cards.length} linked cards done</span>
           <span class="goal__acts">
             <button class="btn btn--ghost btn--sm" data-edit>Edit</button>
             ${g.status === 'active'
@@ -2775,8 +2774,12 @@ function viewGoals() {
       api('goal/update', { id: g.id, status: b.dataset.status, by: 'owner' })));
     if (goalEditing === g.id) section.appendChild(goalForm(g));
     else if (g.body) section.appendChild(el(`<div class="goal__body">${esc(g.body)}</div>`));
-    if (!cards.length) section.appendChild(el('<div class="idea__note">No cards linked yet. Agents link them with <code>tower card update #N --goals ' + esc(g.id) + '</code>.</div>'));
-    for (const c of cards) {
+    if (cards.length) {
+      const toggle = el(`<button class="btn btn--ghost btn--sm goal__cards">${goalCardsOpen.has(g.id) ? 'Hide' : 'Show'} ${cards.length} linked cards</button>`);
+      toggle.addEventListener('click', () => { goalCardsOpen.has(g.id) ? goalCardsOpen.delete(g.id) : goalCardsOpen.add(g.id); viewGoals(); });
+      section.appendChild(toggle);
+    }
+    if (goalCardsOpen.has(g.id)) for (const c of cards) {
       const row = el(`<div class="idea" title="open card">
           <span class="num">${ticket(c)}</span>
           <span class="idea__t">${esc(c.title)}</span>
@@ -2785,13 +2788,6 @@ function viewGoals() {
       row.addEventListener('click', () => showDetail(c.id));
       section.appendChild(row);
     }
-    const log = el(`<div class="goal__log"><div class="qadd"><input data-keep="goal-log:${esc(g.id)}" placeholder="Log progress or a note on this goal…"><button class="btn btn--red btn--sm">Log</button></div></div>`);
-    const post = async () => { const i = $('input', log); const t = i.value.trim(); if (!t) return; i.value = ''; await api('goal/update', { id: g.id, logEntry: t, by: 'owner' }); };
-    $('button', log).addEventListener('click', post);
-    $('input', log).addEventListener('keydown', e => { if (e.key === 'Enter') post(); });
-    for (const entry of (g.log || []).slice(0, 5))
-      log.appendChild(el(`<div class="idea__note">${esc(entry.at)} · ${esc(entry.by)}: ${esc(entry.text)}</div>`));
-    section.appendChild(log);
     body.appendChild(section);
   }
 }
