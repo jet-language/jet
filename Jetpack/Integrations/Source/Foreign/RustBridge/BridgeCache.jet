@@ -74,19 +74,10 @@ struct RustBridgeKeyInputs {
             &identity.field("parquet_runtime", FFI_PARQUET_RUNTIME.bytes())
             loop spec in pkg_ffi_parquet_crate_specs() -> &identity.field("parquet_dependency", "{spec.name}={spec.version}".bytes())
         }
-        &identity.field("needs_crypto", pkg_bridge_flag(needs.crypto))
-        if needs.crypto -> pkg_ffi_identity_crypto_runtimes(&identity)
         &identity.field("needs_compress", pkg_bridge_flag(needs.compress))
         &identity.field("needs_plugin", pkg_bridge_flag(needs.plugin))
         loop need in pkg_ffi_sorted_unique(self.authority_needs) -> &identity.field("authority_need", need.bytes())
         if needs.plugin -> &identity.field("plugin_runtime", FFI_PLUGIN_RUNTIME.bytes())
-        &identity.field("needs_secrets", pkg_bridge_flag(needs.secrets))
-        if needs.secrets {
-            &identity.field("unicode_tables_runtime", FFI_UNICODE_TABLES_RUNTIME.bytes())
-            &identity.field("vault_nfc_runtime", FFI_VAULT_NFC_RUNTIME.bytes())
-            &identity.field("secrets_runtime", FFI_SECRETS_RUNTIME.bytes())
-            &identity.field("vault_key_wrap_runtime", FFI_VAULT_KEY_WRAP_RUNTIME.bytes())
-        }
         loop name in pkg_ffi_sorted_keys(self.deps) {
             &identity.field("dependency", name.bytes())
             &identity.field("dependency_version", self.deps[name].bytes())
@@ -102,22 +93,6 @@ struct RustBridgeKeyInputs {
 
 fn pkg_ffi_parquet_crate_specs() -> [FFICrateSpec] Never! {
     [FFICrateSpec]{FFI_PARQUET_CRATE_SPEC, FFI_ARROW_ARRAY_CRATE_SPEC, FFI_ARROW_DATA_CRATE_SPEC, FFI_ARROW_SCHEMA_CRATE_SPEC, FFI_ARROW_SELECT_CRATE_SPEC, FFI_BYTES_CRATE_SPEC}
-}
-
-fn pkg_ffi_identity_crypto_runtimes(identity: &ForeignIdentityBuilder) Never! {
-    &identity.field("standalone_outcome_runtime", pkg_ffi_standalone_outcome_runtime().bytes())
-    &identity.field("encoding_errors_runtime", FFI_ENCODING_ERRORS_RUNTIME.bytes())
-    &identity.field("dyn_runtime", FFI_DYN_RUNTIME.bytes())
-    &identity.field("encoding_json_runtime", FFI_ENCODING_JSON_RUNTIME.bytes())
-    &identity.field("encoding_types_runtime", FFI_ENCODING_TYPES_RUNTIME.bytes())
-    &identity.field("encoding_error_runtime", FFI_ENCODING_ERROR_RUNTIME.bytes())
-    &identity.field("json_number_runtime", FFI_JSON_NUMBER_RUNTIME.bytes())
-    &identity.field("runtime_diagnostic_core", FFI_RUNTIME_DIAGNOSTIC_CORE.bytes())
-    &identity.field("crypto_runtime", FFI_CRYPTO_RUNTIME.bytes())
-    &identity.field("crypto_entropy_runtime", FFI_CRYPTO_ENTROPY_RUNTIME.bytes())
-    // The helper is a separately cached binary: its closed status protocol
-    // and cleanup behavior invalidate old cache entries too.
-    &identity.field("crypto_helper_runtime", pkg_ffi_emit_crypto_helper_bin("jet_ffi_cache_key").bytes())
 }
 
 fn pkg_ffi_identity_entry(identity: &ForeignIdentityBuilder, entry: ExternEntry) Never! {
@@ -209,13 +184,13 @@ fn pkg_ffi_identity_static_link_inputs(identity: &ForeignIdentityBuilder, args: 
 }
 
 // Where one bridge cache key lives on disk. The one owner of that layout,
-// so the builder and the health check cannot drift apart (I8).
+// so the builder and the cache checks cannot drift apart (I8).
 //
 // `target_dir` (`<ffi cache>/deps/<build-identity hash>/`) is the Cargo
 // target dir shared by every key built with the same toolchain, target,
 // profile, and rustflags: the dependency graph compiles once instead of once
-// per key (#2075). Every artifact name embeds the key, including the helper
-// bins, so nothing collides in the shared dir.
+// per key (#2075). Every artifact name embeds the key, so nothing collides in
+// the shared dir.
 struct BridgePaths {
     // Per-key inputs and lock.
     cache_root: String
@@ -226,8 +201,6 @@ struct BridgePaths {
     // digest sidecar that blesses it.
     target: String
     rlib: String
-    crypto_helper: String
-    secrets_helper: String
     target_deps_dir: String
     host_deps_dir: String
     provenance: String
@@ -243,8 +216,6 @@ fn pkg_ffi_bridge_paths(key: String, selected_target: String, native_link_args: 
         target_dir: target_dir,
         target: target,
         rlib: files.join(target, "lib{crate_name}.rlib"),
-        crypto_helper: files.join(target, pkg_ffi_crypto_helper_bin_name(key)),
-        secrets_helper: files.join(target, pkg_ffi_secrets_helper_bin_name(key)),
         target_deps_dir: files.join(target, "deps"),
         host_deps_dir: files.join(target_dir, "release/deps"),
         provenance: files.join(target, "{crate_name}.provenance")
@@ -263,16 +234,6 @@ fn pkg_ffi_shared_target_dir(selected_target: String, native_link_args: [String]
     files.join(files.join(pkg_ffi_cache_dir(), "deps"), identity.finish())
 }
 
-// Bin targets Cargo uplifts into the shared release dir; keyed because the
-// dir is shared and the uplift path is the bin's name.
-fn pkg_ffi_crypto_helper_bin_name(key: String) -> String Never! {
-    "jet-crypto-helper-{key}"
-}
-
-fn pkg_ffi_secrets_helper_bin_name(key: String) -> String Never! {
-    "jet-secrets-helper-{key}"
-}
-
 // Whether `path` is `root` or lies beneath it (component-wise prefix).
 fn pkg_ffi_path_within(root: String, path: String) -> Bool Never! {
     path == root || path.starts_with("{root.removesuffix("/")}/")
@@ -288,20 +249,12 @@ fn pkg_ffi_bridge_cdylib(target: String, crate_name: String) -[FS]> String? Neve
     None
 }
 
-// The complete artifact set of one key (rlib, cdylib, requested helpers),
-// or `None` when any is missing or escapes the shared target dir.
-fn pkg_ffi_bridge_artifact_paths(rlib: String, target: String, crate_name: String, helper_bin: String?, secrets_helper_bin: String?) -[FS]> [String]? Never! {
+// The complete artifact set of one key (rlib, cdylib), or `None` when any
+// is missing or escapes the shared target dir.
+fn pkg_ffi_bridge_artifact_paths(rlib: String, target: String, crate_name: String) -[FS]> [String]? Never! {
     if !files.is_file(rlib) -> return None
     cdylib :: pkg_ffi_bridge_cdylib(target, crate_name) ?? return None
-    paths := [String]{rlib, cdylib}
-    if helper_bin == .Val(helper) {
-        if !files.is_file(helper) -> return None
-        &paths.push(helper)
-    }
-    if secrets_helper_bin == .Val(helper) {
-        if !files.is_file(helper) -> return None
-        &paths.push(helper)
-    }
+    paths :: [String]{rlib, cdylib}
     loop path in paths {
         if !pkg_ffi_path_within(target, path) -> return None
     }
@@ -310,11 +263,9 @@ fn pkg_ffi_bridge_artifact_paths(rlib: String, target: String, crate_name: Strin
 
 // A missing or invalid manifest must not let Cargo bless an old or corrupt
 // output in place: remove only this exact key's link products.
-fn pkg_ffi_invalidate_bridge_artifacts(rlib: String, target: String, crate_name: String, helper_bin: String?, secrets_helper_bin: String?) Never! -[FS]> {
+fn pkg_ffi_invalidate_bridge_artifacts(rlib: String, target: String, crate_name: String) Never! -[FS]> {
     stem :: "lib{crate_name}"
-    paths := [String]{rlib, files.join(target, "{stem}.so"), files.join(target, "{stem}.dylib"), files.join(target, "{crate_name}.dll"), files.join(target, "{crate_name}.wasm"), pkg_ffi_bridge_manifest_path(target, crate_name), pkg_ffi_bridge_provenance_path(target, crate_name)}
-    if helper_bin == .Val(helper) -> &paths.push(helper)
-    if secrets_helper_bin == .Val(helper) -> &paths.push(helper)
+    paths :: [String]{rlib, files.join(target, "{stem}.so"), files.join(target, "{stem}.dylib"), files.join(target, "{crate_name}.dll"), files.join(target, "{crate_name}.wasm"), pkg_ffi_bridge_manifest_path(target, crate_name), pkg_ffi_bridge_provenance_path(target, crate_name)}
     loop path in paths -> files.remove(path).drop("an absent artifact is already invalidated")
 }
 

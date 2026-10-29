@@ -391,7 +391,7 @@ fn cli_doctor_keys_dir() -[Env]> String Never! {
     files.join(home, ".jet/keys")
 }
 
-fn cli_doctor_check_signing_key() -[FS, Env, Exec, Time.Wait]> DoctorCheck Never! {
+fn cli_doctor_check_signing_key() -[FS, Env]> DoctorCheck Never! {
     registry :: sys.get("JET_REGISTRY_NAME") ?? "jet"
     secret :: files.join(cli_doctor_keys_dir(), "{registry}.ed25519")
     public :: files.join(cli_doctor_keys_dir(), "{registry}.ed25519.pub")
@@ -405,7 +405,7 @@ fn cli_doctor_check_signing_key() -[FS, Env, Exec, Time.Wait]> DoctorCheck Never
             if matches -> return DoctorCheck.ok("signing", "signing key for `{registry}` is present and matches its public key")
             DoctorCheck.broken("signing", "signing key for `{registry}` does not match its public key", "restore the matching public key from backup or rotate the pair deliberately")
         }
-        .Err(_) -> DoctorCheck.degraded("signing", "signing key for `{registry}` could not be cryptographically checked", "check the signing bridge, then rerun `jetpack doctor`")
+        .Err(_) -> DoctorCheck.degraded("signing", "signing key for `{registry}` could not be cryptographically checked", "check that the key files are readable, then rerun `jetpack doctor`")
     }
 }
 
@@ -417,45 +417,19 @@ fn cli_doctor_is_ascii_hex(value: String) -> Bool Never! {
     true
 }
 
-// The signing bridge could not answer.
+// The key pair could not be read into Core Ed25519 keys.
 #Error
-struct DoctorSigningBridgeError {
+struct DoctorSigningKeyError {
     detail: String
 }
 
-// Sign a fixed challenge with the secret seed through the cached crypto
-// helper and verify it against the public key.
-fn cli_doctor_key_pair_matches(secret: String, public_hex: String) -[FS, Env, Exec, Time.Wait]> Bool DoctorSigningBridgeError! {
-    seed :: files.read_bytes(secret) ?? return Err(DoctorSigningBridgeError{detail: "{err}"})
-    helper :: pkg_ffi_cached_crypto_helper_path()
-    if !files.is_file(helper) -> return Err(DoctorSigningBridgeError{detail: "crypto helper is not built"})
-    challenge :: cli_doctor_hex("jetpack-doctor-keypair-v1".bytes())
-    signature :: cli_doctor_run_crypto_helper(helper, "sign {cli_doctor_hex(seed)} {challenge}")
-    Ok(cli_doctor_run_crypto_helper_status(helper, "verify {public_hex} {challenge} {signature}") == 0)
-}
-
-// The helper's trimmed stdout for one command written to its stdin.
-fn cli_doctor_run_crypto_helper(helper: String, command: String) -[Exec, Time.Wait]> String DoctorSigningBridgeError! {
-    receipt :: cli_doctor_crypto_helper_receipt(helper, command)
-    if !receipt.success -> return Err(DoctorSigningBridgeError{detail: "crypto helper failed"})
-    Ok(receipt.output.trim())
-}
-
-// The helper's exit code for one command written to its stdin (-1 when it
-// ended by a signal).
-fn cli_doctor_run_crypto_helper_status(helper: String, command: String) -[Exec, Time.Wait]> Int DoctorSigningBridgeError! {
-    receipt :: cli_doctor_crypto_helper_receipt(helper, command)
-    if receipt.signal != None -> return Ok(-1)
-    Ok(receipt.code)
-}
-
-fn cli_doctor_crypto_helper_receipt(helper: String, command: String) -[Exec, Time.Wait]> ProcessReceipt DoctorSigningBridgeError! {
-    child :: process.cmd([String]{helper}).stdin(.Stream).stdout(.Capture).stderr(.Capture).spawn() ?? return Err(DoctorSigningBridgeError{detail: "{err}"})
-    child.stdin.write(command) ?? return Err(DoctorSigningBridgeError{detail: "{err}"})
-    child.stdin.close()
-    child.wait() ?? return Err(DoctorSigningBridgeError{detail: "{err}"})
-}
-
-fn cli_doctor_hex(bytes: [U8]) -> String Never! {
-    sha256_hex_bytes(bytes) ?? panic("hex rendering failed")
+// Derive the public key from the secret seed with Core Ed25519 and compare
+// it with the stored public key.
+fn cli_doctor_key_pair_matches(secret: String, public_hex: String) -[FS]> Bool DoctorSigningKeyError! {
+    seed :: files.read_bytes(secret) ?? return Err(DoctorSigningKeyError{detail: "{err}"})
+    public :: hex.decode(public_hex) ?? return Err(DoctorSigningKeyError{detail: "{err}"})
+    key :: crypto.SigningKey.from_bytes(seed) ?? return Err(DoctorSigningKeyError{detail: "{err}"})
+    matches :: key.public_key().bytes == public
+    close(^key)
+    Ok(matches)
 }

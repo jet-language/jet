@@ -147,8 +147,8 @@ fn pkg_ffi_featured_dep(name: String) -> String? Never! {
 // One embedded runtime inside its own module with a glob re-export: each
 // fragment carries its own top-level `use` lines, so two of them at the
 // crate root would be a duplicate-import error (rustc E0252, I2), while every
-// pub item, including the `*_impl` fns the helper binaries call, stays
-// visible at the crate root. `#[no_mangle]` symbols export unchanged.
+// pub item stays visible at the crate root. `#[no_mangle]` symbols export
+// unchanged.
 fn pkg_ffi_runtime_mod(name: String, body: String) -> String Never! {
     "mod {name} {{\n{body}}}\npub use {name}::*;\n"
 }
@@ -163,7 +163,6 @@ fn pkg_ffi_emit_wrapper_lib_with_handles(entries: [ExternEntry], needs: RustBrid
     if needs.db -> out = "{out}{pkg_ffi_runtime_mod("__jet_db", "{FFI_DB_RUNTIME}\n")}"
     // The Parquet/Arrow closure registers its C export with Foundation.
     if needs.parquet -> out = "{out}{pkg_ffi_runtime_mod("__jet_parquet", "{FFI_PARQUET_RUNTIME}\n")}"
-    if needs.crypto || needs.secrets -> out = "{out}{pkg_ffi_crypto_modules(needs)}"
     // The application `core.plugin` host; the compiler-extension
     // host is a separate runtime.
     if needs.plugin -> out = "{out}{pkg_ffi_runtime_mod("__jet_plugin", "{FFI_PLUGIN_RUNTIME}\n")}"
@@ -191,31 +190,6 @@ fn pkg_ffi_entry_wrapper(entry: ExternEntry, names: [String], record_defs: CReco
     if entry.c_abi && !entry.has_list() && !entry.has_write() -> return pkg_ffi_emit_c_wrapper_fn(entry, names, record_defs)
     if !entry.c_abi -> return pkg_ffi_emit_wrapper_fn(entry, names)
     ""
-}
-
-// The crypto and secrets runtimes. Outcome's standalone projection keeps its
-// JSON decoding seam; those modules stay at the crate root because the
-// embedded sources refer to them through `crate::`/`super::`. Crypto and
-// secrets share one module: the secrets runtime resolves the entropy
-// provider through a sibling `use jet_crypto_entropy::…`.
-fn pkg_ffi_crypto_modules(needs: RustBridgeNeeds) -> String Never! {
-    out := ""
-    if needs.crypto {
-        roots :: [(name: String, source: String)]{
-            (name: "jet_encoding_errors", source: FFI_ENCODING_ERRORS_RUNTIME),
-            (name: "jet_json_number", source: FFI_JSON_NUMBER_RUNTIME),
-            (name: "Dyn", source: FFI_DYN_RUNTIME),
-            (name: "EncodingJson", source: FFI_ENCODING_JSON_RUNTIME.replace(FFI_ENCODING_TYPES_INCLUDE, FFI_ENCODING_TYPES_RUNTIME).replace(FFI_ENCODING_ERROR_INCLUDE, FFI_ENCODING_ERROR_RUNTIME).replace("crate::Outcome::", "crate::__jet_crypto::")),
-            (name: "RuntimeDiagnosticCore", source: FFI_RUNTIME_DIAGNOSTIC_CORE)
-        }
-        loop root in roots -> out = "{out}mod {root.name} {{\n{root.source}\n}}\n"
-    }
-    body := ""
-    // The crypto runtime is the only place RustCrypto is touched.
-    if needs.crypto -> body = "{body}{pkg_ffi_standalone_outcome_runtime()}\n{FFI_CRYPTO_ENTROPY_RUNTIME}\nuse jet_crypto_entropy::{{jet_crypto_entropy_fill, JetCryptoEntropyError}};\n{FFI_CRYPTO_RUNTIME}\n"
-    // U13 the secrets runtime is the only place `age` is touched.
-    if needs.secrets -> body = "{body}{FFI_UNICODE_TABLES_RUNTIME}\n{FFI_VAULT_NFC_RUNTIME}\n{FFI_SECRETS_RUNTIME}\n{FFI_VAULT_KEY_WRAP_RUNTIME}\n"
-    "{out}{pkg_ffi_runtime_mod("__jet_crypto", body)}"
 }
 
 // `FfiCallbackEvent<T>`'s payload type.

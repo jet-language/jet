@@ -142,3 +142,15 @@ fn cli_doctor_test_trees_equal(left: [DoctorTreeNode], right: [DoctorTreeNode]) 
     assert(!files.exists(root))
     files.remove_all(scratch) ?? panic("remove scratch")
 }
+
+#Test("doctor key pair check derives the public key with Core Ed25519") {
+    scratch :: cli_doctor_test_scratch("signing")
+    secret :: files.join(scratch, "jet.ed25519")
+    // RFC 8032 section 7.1 TEST 1 seed and public key; TEST 2's public key
+    // is a well-formed key that does not belong to this seed.
+    seed :: hex.decode("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60") ?? panic("decode seed")
+    files.write_bytes(secret, seed) ?? panic("write seed")
+    assert_eq(cli_doctor_key_pair_matches(secret, "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a") ?? panic("check matching pair"), true)
+    assert_eq(cli_doctor_key_pair_matches(secret, "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c") ?? panic("check mismatched pair"), false)
+    files.remove_all(scratch) ?? panic("remove scratch")
+}
