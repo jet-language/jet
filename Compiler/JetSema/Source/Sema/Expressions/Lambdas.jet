@@ -2080,7 +2080,9 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
             local.integer_bounds = binding.integer_bounds
             &captures.push(TCapture{source: binding.symbol.name, local: local, ty: capture_ty})
             if sema_ownership_frozen_for_key(state, key) != None -> sema_expression_lambda_append_name(&lambda_work.meta.frozen_captures, binding.symbol.name)
-            sema_cell_guard_check_capture(binding.symbol.name, capture_ty, lambda.span, &diagnostics)
+            // A non-escaping lambda borrows its captures inside their scope, so
+            // only an escaping one can carry a Cell guard's loan past it.
+            if escapes -> sema_cell_guard_check_capture(binding.symbol.name, capture_ty, lambda.span, &diagnostics)
             explicit_move := sema_expression_lambda_name_contains(lambda_work.meta.moved_captures, binding.symbol.name)
             is_view := sema_expression_lambda_is_view_type(capture_ty, binding.string_view)
             borrowed := binding.symbol.kind == SymbolKind.Parameter && binding.access != AccessConvention.Move

@@ -1425,7 +1425,8 @@ Dropping a guard releases its loan on normal return, early return, and panic
 unwind. `map` projects one field and `split` creates two disjoint projected
 edit guards. A cell guard can cross a direct helper or named tuple but cannot be
 stored in a user struct, enum, list, fixed list, map, option, result, union, or
-lambda. `Cell`, `CellReadGuard`, and `CellEditGuard` cannot cross a task,
+escaping lambda; a lambda that does not escape borrows the guard inside its
+scope and may read it. `Cell`, `CellReadGuard`, and `CellEditGuard` cannot cross a task,
 channel, `Shared`, task-group, or parallel-adapter boundary; use `Shared<T>` for
 synchronized cross-boundary state (D-LOCALCELL1=A).
 

@@ -1,0 +1,18 @@
+// A lambda passed to a direct parameter never outlives the guard it
+// captures, so the capture holds no loan past the guard's scope.
+fn apply(f: fn() -> Int) -> Int {
+    return f()
+}
+
+fn run() {
+    cell :: Cell.new(1)
+    guard :: cell.guard_read()
+    xs :: [1, 2, 3]
+    total :: xs.map(x -> x + guard.get()).sum()
+    print(total)
+}
+
+fn read_once(cell: Cell<Int>) -> Int {
+    guard :: cell.guard_read()
+    return apply(() -> guard.get())
+}

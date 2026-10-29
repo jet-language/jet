@@ -82,6 +82,33 @@ fn sema_liveness_note_import(program: Program, foreign_aliases: [String], name: 
     sema_liveness_verdict("L0103", name, source, span, "import is never read", diagnostic_with_edit(diagnostic, edit), &verdicts)
 }
 
+// An inline `#FFI(asm)` body is the `core.mem` import's reader: the import is
+// its discovery gate (E3102), so it stays live though no Jet name spells it.
+// The gate import is found the way `sema_function_header_inline_has_core_mem`
+// finds it.
+fn sema_liveness_inline_asm_gate_aliases(module_row: SemaRegistrationModule, aliases: &[String]) Never! {
+    has_asm := false
+    loop function in module_row.functions {
+        if function.declaration.inline_foreign == .Val(inline) {
+            if sema_checked_ascii_lower(inline.lang) == "asm" -> has_asm = true
+        }
+    }
+    if !has_asm -> return
+    loop declaration in module_row.program.imports {
+        if declaration.kind == {
+            .Module(name, _) -> {
+                if name == "core.mem" -> &aliases.push(declaration.alias)
+            }
+            .Unqualified(module_alias, _, items, _, _) -> {
+                loop item in items {
+                    if module_alias == "core.mem" || "{module_alias}.{item.original}" == "core.mem" -> &aliases.push(sema_registration_import_local(item))
+                }
+            }
+            else -> {}
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // (Rust `Bundle/Liveness.rs`): L0104 reports a private
 // top-level function that no reference reaches from outside its own body (a
@@ -197,6 +224,7 @@ fn sema_liveness_structure(graph: SemaRegistrationGraph, modules: [SemaGraphModu
             if edge.source_module_identity != module_row.module_identity -> next
             if edge.foreign_binding == .Val(binding) -> &foreign_aliases.push(binding.alias)
         }
+        sema_liveness_inline_asm_gate_aliases(module_row, &foreign_aliases)
         sema_liveness_unused_imports(module_row.program, foreign_aliases, module_row.module_path, &verdicts)
         loop function in module_row.functions {
             symbol :: function.symbol
