@@ -49,6 +49,16 @@ fn checked_test_artifact_function_ref(module_identity: String, test: TestDef) ->
     }
 }
 
+// D-TEST-XFAIL1=A (Rust CheckerMarkers.rs materialize_test_expected_fail):
+// the checked `expected_fail:` marker argument is the test's flag. As with
+// the test name, only a literal argument is materialized here.
+fn checked_test_expected_fail(test: TestDef) -> Bool Never! {
+    if test.expected_fail_expr == .Val(expression) {
+        if expression == .Bool(value, _, _) -> return value
+    }
+    test.expected_fail
+}
+
 fn checked_test_artifact_fact(module_identity: String, test: TestDef) -> TTestFact Never! {
     parameters := [TTestParamFact]{}
     index := 0
@@ -75,7 +85,7 @@ fn checked_test_artifact_fact(module_identity: String, test: TestDef) -> TTestFa
         kind: if test.params.len() == 0 -> TTestKind.Unit else -> TTestKind.Property,
         parameters: parameters,
         faults: test.faults,
-        expected_failure: test.expected_fail,
+        expected_failure: checked_test_expected_fail(test),
         contract_generated: false,
         eligibility: None,
         generation_unavailable_reason: None,
