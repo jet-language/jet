@@ -2854,6 +2854,10 @@ fn sema_checked_validate_impl(graph: SemaRegistrationGraph, module_row: SemaRegi
             &diagnostics.push(sema_error("E0906", implementation.declaration.type_span, "`impl …: {trait_name}` is missing {listed}", "every `{trait_name}` method must appear in the impl block", "add the missing method signatures and bodies"))
         }
     }
+    // The trait writes its associated types abstractly (`-> Elem`); the impl
+    // writes the concrete types it binds (`type Elem = Int`, `-> Int`).
+    associated_names :: loop associated in implementation.associated_types -> associated.symbol.name
+    associated_types :: loop associated in implementation.associated_types -> associated.ty.copy()
     loop expected_index in 0..<graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods.len() {
         found := SemaRegistrationFunction?{None}
         loop actual in implementation.methods {
@@ -2863,7 +2867,8 @@ fn sema_checked_validate_impl(graph: SemaRegistrationGraph, module_row: SemaRegi
             }
         }
         actual :: found ?? next
-        expected_signature :: graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods[expected_index].signature
+        declared_signature :: graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods[expected_index].signature
+        expected_signature :: if associated_names.len() > 0 -> sema_inference_substitute_type(declared_signature, associated_names, associated_types) else -> declared_signature.copy()
         compatible :: sema_type_assignable_in_graph(graph, expected_signature, sema_checked_impl_signature(expected_signature, actual.signature), module_row.module_identity)
         mismatch :: if compatible == {
             .Val(value) -> !value
