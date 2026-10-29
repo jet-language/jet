@@ -385,19 +385,6 @@ fn sema_comparability_check_binary(op: BinOp, lhs: TExpr, rhs: TExpr, span: Span
     SemaComparabilityBinary{handled: true, value: Val(sema_tree_node(result_ty, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: lhs, rhs: rhs}, span))}
 }
 
-// Rust `core.math` `min`/`max`/`clamp` (E0905, reported at the first
-// argument). Other Comparable-constrained Core members keep the canonical
-// constraint wording.
-fn sema_comparability_core_error(member: String, span: Span) -> Diagnostic? {
-    why := if {
-        member == "min" || member == "max" -> "min/max compare their two arguments"
-        member == "clamp" -> "clamp compares the value with its lower and upper bounds"
-        else -> ""
-    }
-    if why == "" -> return None
-    Val(sema_error("E0905", span, "`{member}` needs comparable values", why, "use Int, Float, String, Char, Bool, or a comparable type"))
-}
-
 // Rust `map_key_type_eligible` (E0502): map keys are ordered
 // values. Scalars and tuples of keys qualify, and a nominal qualifies when it
 // is a struct whose fields all qualify or an enum without payloads. A nominal

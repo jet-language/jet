@@ -12,7 +12,7 @@ enum CoreCallDefault {
     StaticEnum(type_name: String, variant: String)
 }
 
-enum CoreCallTypeConstraint { Any Numeric Integer Floating FloatingOrExact SquareRootInput Comparable Debuggable VaultKey }
+enum CoreCallTypeConstraint { Any Numeric Integer Floating FloatingOrExact SquareRootInput Debuggable VaultKey }
 
 enum CoreCallResultRule {
     Declared
@@ -350,16 +350,6 @@ fn core_sig_numeric_or_default(module_name: String, member: String) -> CoreTyped
     boolean :: Type.Bool
     t :: core_sig_named("T")
     if module_name != "core.math" -> return None
-    if core_sig_one_of(member, [String]{"min", "max"}) {
-        return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{
-            core_sig_positional(t, read), core_sig_positional(t, read),
-        }, Val(t), core_sig_type_parameter("T", CoreCallTypeConstraint.Comparable)))
-    }
-    if member == "clamp" {
-        return Val(core_sig_generic(module_name, member, [CoreCallTypedParameter]{
-            core_sig_positional(t, read), core_sig_positional(t, read), core_sig_positional(t, read),
-        }, Val(t), core_sig_type_parameter("T", CoreCallTypeConstraint.Comparable)))
-    }
     if member == "abs" {
         return Val(core_sig_generic_with_result_rule(module_name, member,
             [CoreCallTypedParameter]{core_sig_positional(t, read)}, None,

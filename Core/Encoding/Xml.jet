@@ -3,7 +3,7 @@
 use core.encoding.[Dyn, EncodingCause, EncodingError, EncodingErrorKind, EncodingLimits]
 use core.encoding as encoding
 use core.files.[FileReader]
-use core.prelude.[min_int, max_int]
+use core.prelude.[min, max]
 use core.mem as mem
 use __core_encoding_stream as stream
 use __core_encoding_xml_engine as engine
@@ -183,7 +183,7 @@ struct XMLReader {
                 if !self.allocation.charge(prospective) -> return &self.fail(heap_error(self.total))
                 value :: engine.stream_event_value(event)
                 full :: value_heap_cost(value)
-                extra :: max_int(full - prospective, 0)
+                extra :: max(full - prospective, 0)
                 if !self.allocation.charge(extra) {
                     self.allocation.release(prospective)
                     return &self.fail(heap_error(self.total))
@@ -194,7 +194,7 @@ struct XMLReader {
             if self.eof -> return None
             read_bytes := self.limits.buffer_bytes
             if self.limits.max_total_bytes == .Val(maximum) {
-                read_bytes = min_int(read_bytes, max_int(maximum - self.total, 0) + 1)
+                read_bytes = min(read_bytes, max(maximum - self.total, 0) + 1)
             }
             bytes := [U8]{}
             if !stream.reserve(self.allocation, &bytes, read_bytes) -> return &self.fail(heap_error(self.total))
@@ -237,9 +237,9 @@ fn reader(input: ^FileReader, limits: EncodingLimits, xml: XMLParseOptions{XMLPa
     }
     options := kernel.parse_options(xml)
     options.limits.validate() ?? return Err(stream_error(err))
-    options.limits.max_depth = min_int(options.limits.max_depth, limits.max_depth)
-    options.limits.max_entity_depth = min_int(min_int(options.limits.max_entity_depth, limits.max_expansion_depth), options.limits.max_depth)
-    options.limits.max_entity_replacement_bytes = min_int(min_int(options.limits.max_entity_replacement_bytes, limits.max_expansion_bytes), options.limits.max_text_bytes)
+    options.limits.max_depth = min(options.limits.max_depth, limits.max_depth)
+    options.limits.max_entity_depth = min(options.limits.max_entity_depth, limits.max_expansion_depth, options.limits.max_depth)
+    options.limits.max_entity_replacement_bytes = min(options.limits.max_entity_replacement_bytes, limits.max_expansion_bytes, options.limits.max_text_bytes)
     scanner :: engine.StreamScanner.new(limits.max_item_bytes, options) ?? return Err(stream_error(err))
     XMLReader{input: input, limits: limits, scanner: scanner, terminal: None, total: 0, eof: false, allocation: stream.budget(limits)}
 }

@@ -334,6 +334,16 @@ retaining that enum's source-owned identity. `#NoPrelude` disables the readable
 prelude aliases for that file, so use the qualified Core call instead
 (D-NAME-ALIAS1=A, D-PRELUDEX1=A).
 
+`min(a, b, ...rest)`, `max(a, b, ...rest)`, and `clamp(x, lo, hi)` are prelude
+functions over one ordered type `T: Comparable`: Int and the sized integers,
+Float and F32, Decimal, Duration, Instant, String, Char, or a type that
+implements Comparable. `min` and `max` take two or more arguments and return
+the first least or greatest one. A NaN argument is the result of all three,
+since NaN orders against nothing; `core.math.min_float` and `max_float` are the
+Float pair that skips a NaN operand. `clamp` accepts reversed bounds, so
+`clamp(x, 10, 0)` clamps to `0..=10`. They are ordinary Core generics
+(`core.prelude`), so they evaluate at compile time (`LIMIT :: max(4, CORES)`).
+
 Automatic Core source loading and readable-prelude alias injection use identifiers
 from the canonical lexer, including code inside string interpolation.
 Text inside string literals, raw/foreign payloads, and comments is data, not

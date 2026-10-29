@@ -141,7 +141,8 @@ program and preserve the original error when propagation is intended.
 ## 5. Forty common library verbs
 
 These are the common operation names to reach for. Import the shown core module
-with `use core.<module> as <alias>` and call `<alias>.<verb>(...)`.
+with `use core.<module> as <alias>` and call `<alias>.<verb>(...)`. The ordered
+extrema `min`, `max` and `clamp` are prelude names and need no import.
 
 1. `term.print`  2. `term.eprint`  3. `term.input`  4. `term.readline`
 5. `term.read_all_input`  6. `files.read`  7. `files.write`
@@ -150,8 +151,8 @@ with `use core.<module> as <alias>` and call `<alias>.<verb>(...)`.
 15. `process.cmd`  16. `sys.get`  17. `sys.set`  18. `json.parse`
 19. `json.decode`  20. `json.to_string`  21. `csv.parse`  22. `csv.to_string`
 23. `text.trim`  24. `text.lower`  25. `text.upper`  26. `text.splitn`
-27. `regex.compile`  28. `regex.replace`  29. `math.abs`  30. `math.min`
-31. `math.max`  32. `math.round`  33. `math.sqrt`  34. `time.now`
+27. `regex.compile`  28. `regex.replace`  29. `math.abs`  30. `math.floor`
+31. `math.ceil`  32. `math.round`  33. `math.sqrt`  34. `time.now`
 35. `time.sleep`  36. `net.tcp_listen`  37. `net.tcp_connect`  38. `http.get`
 39. `http.post`  40. `http.serve`
 

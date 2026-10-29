@@ -2112,8 +2112,6 @@ calling them. Source-owned Core wrappers preserve these same constraints.
 | `math.acos(x)`, `acosh(x)`, `asin(x)`, `asinh(x)`, `atan(x)`, `atan2(y, x)`, `atanh(x)` | `Float` | Inverse trigonometric and hyperbolic functions. The extended float family is part of the shared math surface (D-CORESURFACE1). |
 | `math.abs(value)` / `math.abs_float(value: Float)` | the argument type (`Float` for `Complex`) | Absolute value of an `Int`, `Float`, `F32`, `I64` or `Complex`. On `Float` and `F32` it clears the sign bit, so `-0.0` gives `+0.0` and a negative NaN loses its sign; on `I64` it is fixed-width negation, which stops with E3010 at `I64.MIN`. |
 | `math.copy(value: Float)` | `Float` | Return the floating-point value unchanged, including its IEEE representation. |
-| `math.min(a: Int, b: Int)` / `math.max(a: Int, b: Int)` | `Int` | Integer extrema. |
-| `math.clamp(value, lo, hi)` | `Int` | Clamp an integer; reversed bounds are accepted by swapping the bounds. |
 | `math.is_even(value)` / `math.is_odd(value)` | `Bool` | Test integer parity. |
 | `math.sign(value: Int)` | `Int` | Return `-1`, `0`, or `1` for a negative, zero, or positive integer. |
 | `math.isqrt(value)` | `?Int` | Return the integer square root when the input is nonnegative. |
@@ -3348,7 +3346,8 @@ constant evaluation; they are not alternate syntax for bindings. See
 | `const_int(value: Int, ignored: Int) -> Int` | integer | Select the first integer in a constant-evaluation expression. |
 | `const_bool(value: Bool, ignored: Bool) -> Bool` | Boolean | Select the first Boolean in a constant-evaluation expression. |
 | `not_bool(value: Bool) -> Bool` | Boolean | Negate a Boolean. |
-| `min_int(a: Int, b: Int) -> Int` / `max_int(a: Int, b: Int) -> Int` | integer | Select the smaller or larger integer. |
+| `min<T: Comparable>(a: T, b: T, rest: ...T) -> T` / `max<T: Comparable>(a: T, b: T, rest: ...T) -> T` | `T` | The first least or greatest of two or more ordered values; a NaN argument is the result. Prelude names: no import. |
+| `clamp<T: Comparable>(x: T, lo: T, hi: T) -> T` | `T` | Clamp `x` to the bounds; reversed bounds are accepted, and a NaN argument is the result. Prelude name: no import. |
 `keep` is the approved use-site identity sink when measurement must observe a value (`D-BENCH-KEEP1=A`).
 
 ### `core.testing` — deterministic test helpers

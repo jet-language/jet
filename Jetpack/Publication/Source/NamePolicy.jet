@@ -73,7 +73,7 @@ fn publication_assess_name(name: String, existing_names: [String]) -> Publicatio
 // findings, and distance ties use the original name's UTF-8 lexical ordering.
 fn publication_assess_name_with_thresholds(name: String, existing_names: [String], thresholds: PublicationNamePolicyThresholds) -> PublicationNamePolicyDecision Never! {
     warn_distance :: thresholds.warn_distance
-    block_distance :: math.min(thresholds.block_distance, warn_distance)
+    block_distance :: min(thresholds.block_distance, warn_distance)
     skeleton :: publication_confusable_skeleton(name)
     loop suffix in PUBLICATION_RESERVED_SUFFIXES {
         if skeleton.ends_with(suffix) -> return PublicationNamePolicyDecision.Block(PublicationNamePolicyFinding.ReservedSuffix(suffix))
@@ -116,7 +116,7 @@ fn publication_assess_name_with_thresholds(name: String, existing_names: [String
 // Rust edit_distance / edit_distance_at_most: two rows, with a band for the
 // bounded policy query. Reuse row storage instead of allocating once per scalar.
 fn publication_edit_distance(left: String, right: String) -> Int Never! {
-    limit :: math.max(left.len(), right.len())
+    limit :: max(left.len(), right.len())
     publication_edit_distance_at_most(left, right, limit) ?? panic("Levenshtein distance cannot exceed the maximum scalar length")
 }
 
@@ -133,13 +133,13 @@ fn publication_edit_distance_at_most(left: String, right: String, limit: Int) ->
     loop row in 0..<a.len() {
         loop column in 0..<(b.len() + 1) -> current[column] = limit + 1
         current[0] = row + 1
-        start :: math.max(row - limit, 0)
-        end :: math.min(row + limit + 1, b.len())
+        start :: max(row - limit, 0)
+        end :: min(row + limit + 1, b.len())
         loop column in start..<end {
-            current[column + 1] = if a[row] == b[column] -> previous[column] else -> 1 + math.min(math.min(previous[column], previous[column + 1]), current[column])
+            current[column + 1] = if a[row] == b[column] -> previous[column] else -> 1 + min(min(previous[column], previous[column + 1]), current[column])
         }
         minimum := limit + 1
-        loop value in current -> minimum = math.min(minimum, value)
+        loop value in current -> minimum = min(minimum, value)
         if minimum > limit -> return None
         swap :: previous
         previous = current

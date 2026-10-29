@@ -18,7 +18,7 @@
 use core.encoding.[Dyn]
 use core.encoding as encoding
 use core.text as unicode
-use core.math as math
+use core.prelude.[min, max]
 use __core_encoding_stream as stream
 
 struct DocumentStart { encoding: Dyn, bom: Dyn }
@@ -719,7 +719,7 @@ fn parse_document_with(source: String, options: ParseOptions) -> Dyn XMLFault! {
 // Rust: crates/jet-foundation/src/XmlPull.rs:1218
 fn parse_document_bytes_with(bytes: [U8], options: ParseOptions) -> Dyn XMLFault! {
     options.limits.validate() ?? return Err(err)
-    scanner := StreamScanner.new(math.max(bytes.len(), 4), options) ?? return Err(err)
+    scanner := StreamScanner.new(max(bytes.len(), 4), options) ?? return Err(err)
     &scanner.push(bytes[0..<bytes.len()]) ?? return Err(err)
     &scanner.finish_input() ?? return Err(err)
     events := [Dyn]{}
@@ -1854,7 +1854,7 @@ impl XMLFault {
     }
     // Rust: crates/jet-foundation/src/XmlPull.rs:4742
     fn located(self: ^XMLFault, source: View<U8>, path: ^String) -> XMLFault Never! {
-        offset :: math.min(self.offset, source.len())
+        offset :: min(self.offset, source.len())
         line := 1
         column := 1
         cursor := 0
@@ -2215,7 +2215,7 @@ impl StreamScanner {
             .None -> { return Err(&self.fail(XMLFault.at_kind(self.wire_consumed, Reason.Malformed, "XML token produced no event"))) }
             .Err(fault) -> {
                 error := ^fault
-                local_scalars :: scalar_count(scanner.source[0..<scanner.source.len()], math.min(error.offset, scanner.source.len()))
+                local_scalars :: scalar_count(scanner.source[0..<scanner.source.len()], min(error.offset, scanner.source.len()))
                 error.offset = self.wire_consumed
                 loop index in 0..<local_scalars -> error.offset += token.scalar_bytes[index]
                 local_line :: error.line ?? 1

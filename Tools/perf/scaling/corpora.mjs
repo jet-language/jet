@@ -281,7 +281,7 @@ function imports(n, r) {
   const entries = [];
   for (let i = 0; i < n; i++) {
     files[`services/service_${i}.jet`] = [...CORE_IMPORTS, '',
-      `fn service_${i}_value(seed: Int) -> Int { math.max(seed % 13, ${r.int(1, 12)}) + math.min(seed, ${r.int(1, 99)}) }`, ''].join('\n');
+      `fn service_${i}_value(seed: Int) -> Int { max(seed % 13, ${r.int(1, 12)}) + math.abs_diff(seed, ${r.int(1, 99)}) }`, ''].join('\n');
     entries.push(`service_${i}_value`);
   }
   return finish('imports', files, consumerTree(files, entries, 'imports'));

@@ -10,36 +10,13 @@ package {
 }
 use core as core
 use core.math.random as ambient_random
+use core.prelude.[min, max, clamp]
 fn abs(n: Int) -> Int Never! {
     if n < 0 -> return -n
     n
 }
 
 fn abs_float(n: Float) -> Float Never! { core.math.fabs(n) }
-
-
-fn min(a: Int, b: Int) -> Int Never! {
-    if a < b -> return a
-    b
-}
-
-fn max(a: Int, b: Int) -> Int Never! {
-    if a > b -> return a
-    b
-}
-
-fn clamp(x: Int, lo: Int, hi: Int) -> Int Never! {
-    lower := lo
-    upper := hi
-    if lower > upper {
-        swap := lower
-        lower = upper
-        upper = swap
-    }
-    if x < lower -> return lower
-    if x > upper -> return upper
-    x
-}
 
 fn is_even(n: Int) -> Bool Never! { n % 2 == 0 }
 fn is_odd(n: Int) -> Bool Never! { n % 2 != 0 }

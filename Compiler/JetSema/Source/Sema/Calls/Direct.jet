@@ -319,6 +319,12 @@ fn sema_call_try_ambient_prelude(call: Call, expected: Type?, environment: SemaS
         }
         // The benchmark identity sink `keep(value)` calls `core.prelude.keep`.
         "keep" -> sema_call_ambient_source_alias(call, "core.prelude", "keep", expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        // The readable prelude's ordered extrema call their `core.prelude`
+        // generics (`min(a, b, ...rest)`, `max(...)`, `clamp(x, lo, hi)`).
+        "min" | "max" | "clamp" -> {
+            if sema_module_no_prelude(environment, program) -> return SemaDirectSpecialCheck{handled: false, value: None}
+            sema_call_ambient_source_alias(call, "core.prelude", call.name, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        }
         "Decimal" -> sema_call_check_value_constructor(call, "Decimal", [Type]{Type.String}, false, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         "Complex" -> sema_call_check_value_constructor(call, "Complex", [Type]{Type.Float, Type.Float}, false, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         else -> {

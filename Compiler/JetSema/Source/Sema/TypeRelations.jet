@@ -1213,6 +1213,9 @@ fn sema_type_builtin_bound_satisfied(graph: SemaRegistrationGraph, actual_resolv
         .Named(name) -> {
             if sema_type_name_is_generic(generic_params, name) -> return None
             if (name == "Decimal" || name == "Fraction") && (bound_name == "Numeric" || bound_name == "Add" || bound_name == "Sub" || bound_name == "Mul" || bound_name == "Comparable") -> return Val(true)
+            // `Duration` is the compiler-owned time carrier: its `==` and
+            // ordering are built in, and it has no nominal row to carry an impl.
+            if name == "Duration" && structural -> return Val(true)
         }
         else -> {}
     }
