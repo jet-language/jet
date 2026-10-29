@@ -3621,19 +3621,25 @@ fn ir_route_labeled(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, i
                 // buffer holds the inline 24-byte element headers.
                 item_row :: ir_list_element(&m, p, b, slot) ?? return ir_fail_slot(&b, span, "runtime route {name} List argument of {shown}")
                 if element == .Handle(handle_name) {
-                    // A List of records the program lays out itself crosses
-                    // as a buffer of runtime record handles, one per element,
-                    // dropped with the buffer after the call
-                    // (list.record_handles).
                     item :: if ir_untag(shown) == .List(inner) -> inner else -> { return ir_fail_slot(&b, span, "runtime route {name} List of {element}") }
-                    record :: ir_record_runtime(&m, p, item) ?? return ir_fail_slot(&b, span, "runtime route {name} List of {element}")
-                    if record.runtime != handle_name -> return ir_fail_slot(&b, span, "runtime route {name} List of {element}")
-                    handles :: ir_record_handles(&m, p, &b, slot, item, item_row, span)
-                    if handles < 0 -> return -1
-                    &lowered.push(handles)
-                    &lowered.push(ir_load_word(&m, &b, slot, 0))
-                    &record_lists.push(IRRecordHandles{list: slot, item_row: item_row, handles: handles, drop: "jet_rt_handle_drop_{runtime_abi_atom(record.runtime)}"})
-                    next
+                    if ir_record_runtime(&m, p, item) == .Val(record) {
+                        // A List of records the program lays out itself
+                        // crosses as a buffer of runtime record handles, one
+                        // per element, dropped with the buffer after the call
+                        // (list.record_handles).
+                        if record.runtime != handle_name -> return ir_fail_slot(&b, span, "runtime route {name} List of {element}")
+                        handles :: ir_record_handles(&m, p, &b, slot, item, item_row, span)
+                        if handles < 0 -> return -1
+                        &lowered.push(handles)
+                        &lowered.push(ir_load_word(&m, &b, slot, 0))
+                        &record_lists.push(IRRecordHandles{list: slot, item_row: item_row, handles: handles, drop: "jet_rt_handle_drop_{runtime_abi_atom(record.runtime)}"})
+                        next
+                    }
+                    // A List of runtime handles is already the buffer of
+                    // handle words the route borrows.
+                    item_name :: ir_nominal_name(ir_untag(item)) ?? return ir_fail_slot(&b, span, "runtime route {name} List of {element}")
+                    held :: ir_handle_runtime(p, item_name) ?? return ir_fail_slot(&b, span, "runtime route {name} List of {element}")
+                    if !ir_is_handle(m, item_row) || held.runtime != handle_name -> return ir_fail_slot(&b, span, "runtime route {name} List of {element}")
                 }
                 &lowered.push(ir_load_word(&m, &b, slot, 16))
                 &lowered.push(ir_load_word(&m, &b, slot, 0))

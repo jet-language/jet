@@ -1,26 +1,5 @@
-// Preview.rs88-112 Device+Viewport; WebVirtual.rs292-309 VirtualPlan.
-// Private data snapshots only, not signal-backed viewport resources.
-#Export(c) fn jet_rt_handle_clone_jet_ui_preview_viewport(value: I64) -> I64 {
-    kind :: ui_carrier_word(value + UI_PREVIEW_DEVICE)
-    result :: jet_rt_alloc(UI_PREVIEW_BYTES, I64{8})
-    ui_carrier_store(result + UI_PREVIEW_DEVICE, kind)
-    ui_carrier_store(result + UI_PREVIEW_CUSTOM, if (kind == I64{3}) -> jet_rt_string_clone(ui_carrier_word(value + UI_PREVIEW_CUSTOM)) else -> I64{0})
-    ui_carrier_store(result + UI_PREVIEW_WIDTH, ui_carrier_word(value + UI_PREVIEW_WIDTH).bit_and(I64{4294967295}))
-    ui_carrier_store(result + UI_PREVIEW_HEIGHT, ui_carrier_word(value + UI_PREVIEW_HEIGHT).bit_and(I64{4294967295}))
-    ui_carrier_store(result + UI_PREVIEW_SCALE, ui_carrier_word(value + UI_PREVIEW_SCALE).bit_and(I64{65535}))
-    result
-}
-#Export(c) fn jet_rt_handle_drop_jet_ui_preview_viewport(value: I64) {
-    if (value == I64{0}) -> return
-    if (ui_carrier_word(value + UI_PREVIEW_DEVICE) == I64{3}) -> jet_rt_string_drop(ui_carrier_word(value + UI_PREVIEW_CUSTOM))
-    jet_rt_free(value, UI_PREVIEW_BYTES, I64{8})
-}
-#Export(c) fn jet_rt_handle_eq_jet_ui_preview_viewport(a: I64, b: I64) -> Bool {
-    kind :: ui_carrier_word(a + UI_PREVIEW_DEVICE)
-    if (kind != ui_carrier_word(b + UI_PREVIEW_DEVICE)) -> return false
-    if (kind == I64{3} && !jet_rt_string_eq(ui_carrier_word(a + UI_PREVIEW_CUSTOM), ui_carrier_word(b + UI_PREVIEW_CUSTOM))) -> return false
-    (ui_carrier_word(a + UI_PREVIEW_WIDTH).bit_and(I64{4294967295})) == (ui_carrier_word(b + UI_PREVIEW_WIDTH).bit_and(I64{4294967295})) && (ui_carrier_word(a + UI_PREVIEW_HEIGHT).bit_and(I64{4294967295})) == (ui_carrier_word(b + UI_PREVIEW_HEIGHT).bit_and(I64{4294967295})) && (ui_carrier_word(a + UI_PREVIEW_SCALE).bit_and(I64{65535})) == (ui_carrier_word(b + UI_PREVIEW_SCALE).bit_and(I64{65535}))
-}
+// WebVirtual.rs292-309 VirtualPlan.
+// A private data snapshot only, not a signal-backed viewport resource.
 fn ui_virtual_measurements_clone(value: I64) -> I64 {
     length :: ui_carrier_word(value + DATA_SEQUENCE_LENGTH)
     result :: data_sequence_new(length, UI_VIRTUAL_PAIR_BYTES)

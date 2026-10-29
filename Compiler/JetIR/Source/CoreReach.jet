@@ -21,6 +21,7 @@ use jet_foundation.[
     compiler_threads_partition,
     compiler_transfer_rows,
     TStrFormat,
+    TTryConvert,
     core_identity_in_module,
 ]
 use jet_foundation.[DeclTable, NameRows, Span, Type, decl_table_find, name_rows, name_rows_get_text, name_rows_set_first]
@@ -327,9 +328,10 @@ fn ir_precise_helper_names(tree: BodyTree, roots: [Int], body: [Int]) -> [String
 // The precise helpers one checked expression and every expression below it
 // lower to, each added once, read in place (body_each_expr_child).
 // Functions an expression tree names that Sema records no call fact for: a
-// function named as a value (`probe: pkg_lua_render_probe`), and a direct call
+// function named as a value (`probe: pkg_lua_render_probe`), a direct call
 // Sema rewrote to its Core source function (`math.sqrt(x)` checks as the
-// `core.math.sqrt` Core row, then calls `Core/Math/Math.jet` `sqrt`). A
+// `core.math.sqrt` Core row, then calls `Core/Math/Math.jet` `sqrt`), and the
+// declared error conversion a `?` calls (`impl Source -> Target`). A
 // compile-time body queues each for lowering itself. Each key once, in tree order.
 fn ir_named_function_keys(tree: BodyTree, roots: [Int], body: [Int], decls: DeclTable) -> [String] Never! {
     keys := [String]{}
@@ -350,9 +352,17 @@ fn ir_named_function_tree(tree: BodyTree, expression: Int, keys: &[String], decl
             key :: decls.rows[callee.row].key
             if key.starts_with("function:") && !keys.contains(key) -> &keys.push(key)
         }
+        .Try(_, conversion, _) -> ir_named_conversion_key(conversion, &keys)
+        .TryWithContext(_, _, conversion, _, _, _) -> ir_named_conversion_key(conversion, &keys)
         else -> {}
     }
     body_each_expr_child(tree, node, (child: Int) -> ir_named_function_tree(tree, child, &keys, decls))
+}
+
+fn ir_named_conversion_key(conversion: TTryConvert, keys: &[String]) Never! {
+    if conversion == .Typed(key, _, _) {
+        if !keys.contains(key) -> &keys.push(key)
+    }
 }
 
 // A Fraction division also tests its divisor (ir_precise_division).

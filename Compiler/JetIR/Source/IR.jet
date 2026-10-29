@@ -196,6 +196,41 @@ struct IRFunction {
     asm: IRAsmLeaf?
     inline_always: Bool
     symbol_hash: U64
+    // The counted loops of this body sema's loop proof covers, as built
+    // (ir_range_loop).
+    loop_proofs: [IRLoopProof]{[IRLoopProof]{}}
+}
+
+// One counted loop sema proved (AutoVectorizationFacts, JetSema
+// LoopFacts.jet), as its function's build lowered it: its line and index,
+// the facts sema recorded, how many list accesses sema proved in bounds
+// (`recorded`) and how many of those the build lowered with no bounds check
+// (`lowered`). A loop lowers one scalar round per index.
+struct IRLoopProof {
+    line: Int
+    local: String
+    extent: Int
+    element: String
+    no_aliasing: Bool
+    no_early_exit: Bool
+    effect_free: Bool
+    independent: Bool
+    recorded: Int
+    lowered: Int
+}
+
+// One row per loop proof of `m`'s functions (`jet inspect decisions`, taken
+// before the optimizer inlines any): where the loop is, the facts sema
+// recorded, and how it lowered.
+fn ir_loop_proof_rows(m: IRModule) -> [String] Never! {
+    rows := [String]{}
+    loop function in m.functions {
+        loop proof in function.loop_proofs {
+            facts :: "aliasing-free {proof.no_aliasing}, no early exit {proof.no_early_exit}, effect-free {proof.effect_free}, independent {proof.independent}"
+            &rows.push("loop {function.name} {function.source_file}:{proof.line} `{proof.local}` below {proof.extent} of {proof.element}: {facts}; lowered scalar, proven accesses {proof.recorded}, unchecked {proof.lowered}")
+        }
+    }
+    rows
 }
 
 // An assembled `#FFI(asm)` template: its bytes, the register operand i is

@@ -73,6 +73,36 @@ struct SizeConstraint {
     max_height: Float
 }
 
+// The size a preview or playground renders at and the device class it
+// stands for; `phone`, `tablet` and `desktop` build the presets.
+struct UIPreviewViewport {
+    device: UIPreviewDevice
+    width: Int
+    height: Int
+    scale: Int
+}
+
+// A named preview or playground. Its registry keeps `body` and calls it each
+// time the preview renders.
+struct UIPreview {
+    kind: UIPreviewKind
+    name: String
+    viewport: UIPreviewViewport
+    body: fn() -> UINode
+}
+
+// One program's previews or playgrounds: at most 64, each with its own name.
+struct UIPreviewRegistry {
+    entries: [UIPreview]
+}
+
+#Error
+enum UIPreviewError {
+    EmptyName
+    TooManyPreviews
+    DuplicatePreview(String)
+    UnknownPreview(String)
+}
 
 enum InputEvent {
     Key(code: String)
@@ -113,9 +143,30 @@ fn text(value: String) -> UINode Never! {
     transfer_node(value, width, 1.0, Val(UIAriaRole.Label), UINodeKind.Text, [UINode]{}, None)
 }
 
-fn desktop() -> UIPreviewViewport Never! { transfer_viewport(2, 1280, 800, 1) }
-fn phone() -> UIPreviewViewport Never! { transfer_viewport(0, 390, 844, 2) }
-fn tablet() -> UIPreviewViewport Never! { transfer_viewport(1, 834, 1119, 2) }
+fn desktop() -> UIPreviewViewport Never! { UIPreviewViewport{device: .Desktop, width: 1280, height: 800, scale: 1} }
+fn phone() -> UIPreviewViewport Never! { UIPreviewViewport{device: .Phone, width: 390, height: 844, scale: 2} }
+fn tablet() -> UIPreviewViewport Never! { UIPreviewViewport{device: .Tablet, width: 834, height: 1119, scale: 2} }
+
+// A preview renders in the desktop viewport unless `viewport:` names another.
+fn preview(name: String, ^body: fn() -> UINode, *, viewport: UIPreviewViewport?{None}) -> UIPreview Never! {
+    UIPreview{kind: .Preview, name: name, viewport: viewport ?? desktop(), body: body}
+}
+fn playground(name: String, ^body: fn() -> UINode, *, viewport: UIPreviewViewport?{None}) -> UIPreview Never! {
+    UIPreview{kind: .Playground, name: name, viewport: viewport ?? desktop(), body: body}
+}
+
+fn previews(^entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError! { preview_registry(^entries) }
+fn playgrounds(^entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError! { preview_registry(^entries) }
+
+impl UIPreviewRegistry {
+    // Builds the node tree of the preview named `name`.
+    fn render(self, name: String) -> UINode UIPreviewError! {
+        loop entry in self.entries {
+            if entry.name == name -> return Ok((entry.body)())
+        }
+        Err(UIPreviewError.UnknownPreview(name))
+    }
+}
 
 fn key_event(code: String) -> InputEvent Never! { InputEvent.Key{code: code} }
 fn resize_event(width: Float, height: Float) -> InputEvent Never! {
@@ -194,10 +245,15 @@ fn transfer_node(label: String, width: Float, height: Float, role: UIAriaRole?, 
     }
 }
 
-fn transfer_viewport(device: Int, width: Int, height: Int, scale: Int) -> UIPreviewViewport Never! {
-    #Unsafe("Core UI viewport transfer: source supplies a valid device and bounded positive dimensions") {
-        return core.ui.__viewport_transfer(device, width, height, scale)
+fn preview_registry(^entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError! {
+    if entries.len() > 64 -> return Err(UIPreviewError.TooManyPreviews)
+    loop (index, entry) in entries {
+        if entry.name == "" -> return Err(UIPreviewError.EmptyName)
+        loop earlier in 0..<index {
+            if entries[earlier].name == entry.name -> return Err(UIPreviewError.DuplicatePreview(entry.name.copy()))
+        }
     }
+    Ok(UIPreviewRegistry{entries: entries})
 }
 
 #Test("UI aria role constructors") {
@@ -210,4 +266,32 @@ fn transfer_viewport(device: Int, width: Int, height: Int, scale: Int) -> UIPrev
 #Test("UI event constructors preserve named payloads") {
     assert(key_event("Enter") == InputEvent.Key{code: "Enter"})
     assert(resize_event(640.0, 480.0) == InputEvent.Resize{size: Size{width: 640.0, height: 480.0}})
+}
+
+#Test("UI previews keep their viewport and registries reject unusable names") {
+    assert(phone() == UIPreviewViewport{device: .Phone, width: 390, height: 844, scale: 2})
+    assert(preview("card", () -> text("card")).viewport == desktop())
+    lab :: playground("lab", () -> text("lab"), viewport: tablet())
+    assert(lab.kind == UIPreviewKind.Playground && lab.viewport == tablet())
+    if previews([preview("card", () -> text("a")), preview("card", () -> text("b"))]) == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert(error == UIPreviewError.DuplicatePreview("card"))
+    }
+    if playgrounds([playground("", () -> text("blank"))]) == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert(error == UIPreviewError.EmptyName)
+    }
+    if previews([preview("card", () -> text("card"))]) == {
+        .Ok(registry) -> {
+            if registry.render("missing") == {
+                .Ok(_) -> assert(false)
+                .Err(error) -> assert(error == UIPreviewError.UnknownPreview("missing"))
+            }
+            if registry.render("card") == {
+                .Ok(_) -> {}
+                .Err(_) -> assert(false)
+            }
+        }
+        .Err(_) -> assert(false)
+    }
 }

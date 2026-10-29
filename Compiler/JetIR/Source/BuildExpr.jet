@@ -4,6 +4,9 @@
 
 use jet_foundation.[AccessConvention, BinEndian, BinMatchPart, DeclID, Span, StrMatchPart, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, BodyCallArg, TCanonicalField, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, BodyEnumArg, BodyEnumPayload, NodeKind, TForInMethod, FnBody, TFuncKind, BodyHandleOp, BodyIfCond, BodyLambda, BodyListSpreadPart, TLocal, BodyMatchArm, TMethodRef, BodyMixedArm, BodyNestedPattern, TNumericOp, BodyOrFallback, TPanicLoc, BodyPattern, BodyPatternBinding, BodyPatternShape, BodyRangeArm, BodyRequireKind, TStaticOwner, BodyStrPart, BodyStructFieldValue, TTextPatternPart, TTryConvert, TypeTupleField, measure_literal_value, body_each_expr_child, body_each_stmt_child, body_stmt, checked_generated_local, checked_user_local, name_rows_set, name_rows_value, type_carrier_identity, StmtKind]
 
+use jet_foundation.[AutoVectorizationFacts]
+use jet_backend.[ERR_CONTEXT, ERR_CONTEXT_BYTES, ERR_CONVERSIONS, ERR_CONVERSION_BYTES, ERR_DETAILS, ERR_DETAILS_BYTES, ERR_DETAILS_END, ERR_DETAILS_FIELDS, ERR_DETAILS_HAS_SPAN, ERR_DETAILS_START, ERR_DETAILS_VARIANT, ERR_FIELD_BYTES, ERR_IDENTITY]
+
 fn ir_build_function(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody) Never! {
     b.line = function.line
     if function.generic_params.len() > 0 && b.instance.args.len() == 0 -> return ir_fail(&b, function.source_span, "generic function without type arguments")
@@ -549,10 +552,10 @@ fn ir_stmt_body(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never
             ir_end(&b.f, b.line)
             ir_end(&b.f, b.line)
         }
-        .ForRange(label, local, start, end, step, exclusive, body, _, span) -> ir_range_loop(&m, p, &b, label, local, start, end, step, exclusive, body, span)
-        .Range(label, variable, source, start, end, step, exclusive, _, body, span) -> {
+        .ForRange(label, local, start, end, step, exclusive, body, vectorization, span) -> ir_range_loop(&m, p, &b, label, local, start, end, step, exclusive, body, vectorization, span)
+        .Range(label, variable, source, start, end, step, exclusive, vectorization, body, span) -> {
             if source == .Val(collection) -> return ir_range_value_loop(&m, p, &b, label, variable, collection, step, body, span)
-            ir_range_loop(&m, p, &b, label, variable, start, end, step, exclusive, body, span)
+            ir_range_loop(&m, p, &b, label, variable, start, end, step, exclusive, body, vectorization, span)
         }
         .Break(label, span) -> {
             frame :: ir_loop_frame(b, label) ?? return ir_fail(&b, span, "break outside a loop")
@@ -1141,8 +1144,11 @@ fn ir_loop_frame(b: IRBuilder, label: String?) -> IRLoopFrame? Never! {
 // / jet_loop_range_has_next): the bounds and step are evaluated once; a zero
 // step stops the program; a positive step walks up to the end, a negative one
 // down to it. A literal step fixes the direction; a computed one tests its
-// sign each round. `next` leaves the body's Block to the step.
-fn ir_range_loop(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, local: TLocal, start: Int, end: Int, step: Int?, exclusive: Bool, body: [Int], span: Span) Never! {
+// sign each round. `next` leaves the body's Block to the step. Sema's loop
+// proof (`vectorization`, JetSema LoopFacts.jet) is recorded on the function
+// (IRFunction.loop_proofs), and the body's accesses at its proven indexes
+// build without a bounds check (ir_checked_element).
+fn ir_range_loop(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, local: TLocal, start: Int, end: Int, step: Int?, exclusive: Bool, body: [Int], vectorization: AutoVectorizationFacts?, span: Span) Never! {
     start_ty :: ir_ty(p, b, start)
     end_ty :: ir_ty(p, b, end)
     if start_ty != Type.Int || end_ty != Type.Int -> return ir_fail(&b, span, "range loop over {ir_type_name(start_ty)}")
@@ -1202,7 +1208,16 @@ fn ir_range_loop(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, loca
     ir_exit_unless(&m, &b, test, exit)
     step_block :: ir_open(&b.f, IROp.Block, b.line)
     &b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len()})
-    ir_stmts(&m, p, &b, body)
+    if vectorization == .Val(facts) {
+        proof :: b.f.loop_proofs.len()
+        line :: ir_source_line_of(p, b.f.source_file, span.start) ?? b.line
+        &b.f.loop_proofs.push(IRLoopProof{line: line, local: local.name.copy(), extent: facts.extent ?? -1, element: ir_type_name(facts.element_type), no_aliasing: facts.no_aliasing, no_early_exit: facts.no_early_exit, effect_free: facts.effect_free_body, independent: facts.no_cross_iteration_deps, recorded: facts.proven_indexes.len(), lowered: 0})
+        loop index in facts.proven_indexes -> b.proven_index[index] = proof
+        ir_stmts(&m, p, &b, body)
+        loop index in facts.proven_indexes -> b.proven_index[index] = -1
+    } else {
+        ir_stmts(&m, p, &b, body)
+    }
     _ :: &b.loops.pop()
     ir_end(&b.f, b.line)
     ir_emit(&b.f, IROp.Add, counter, counter, by, IR_OVERFLOW_TRAP, b.line)
@@ -3276,8 +3291,14 @@ fn ir_default_err_literal(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, f
         }
     }
     if message < 0 || code < 0 || cause < 0 -> return ir_fail_slot(&b, span, "default Err literal without message, code and cause")
-    // The cause handle: moved out of an owned box (the box is freed), cloned
-    // out of a borrowed one.
+    ir_default_err_new(&m, &b, row, message, code, cause)
+}
+
+// A fresh JetErr of type row `row` through jet_rt_record_new_jet_err(message,
+// code, cause), which clones the message and the code box's text and takes the
+// cause handle out of its Option box: moved out of an owned box (the box is
+// freed), cloned out of a borrowed one.
+fn ir_default_err_new(m: &IRModule, b: &IRBuilder, row: Int, message: Int, code: Int, cause: Int) -> Int Never! {
     pointer_row :: ir_pointer_row(&m)
     taken :: ir_temp(&m, &b, pointer_row)
     ir_emit(&b.f, IROp.Const, taken, 0, -1, -1, b.line)
@@ -5536,7 +5557,10 @@ fn ir_comptime(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: TComp
             }
             return ir_fail_slot(&b, span, "list constant of {ir_type_name(ty)}")
         }
-        .Struct(_, fields) -> return ir_comptime_struct(&m, p, &b, ty, row, fields, span)
+        .Struct(_, fields) -> {
+            if ir_default_err(p, ty) -> return ir_comptime_default_err(&m, p, &b, ty, row, fields, span)
+            return ir_comptime_struct(&m, p, &b, ty, row, fields, span)
+        }
         .Map(entries) -> return ir_comptime_map(&m, p, &b, ty, row, entries, span)
         .Enum(_, variant, args) -> return ir_comptime_enum(&m, p, &b, ty, row, variant, args, span)
         .Bytes(bytes) -> return ir_comptime_bytes(&m, p, &b, ty, row, bytes, span)
@@ -5605,6 +5629,111 @@ fn ir_comptime_struct(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, row: 
         if value >= 0 -> ir_member_write(&m, p, &b, storage, member, value)
     }
     storage
+}
+
+// A default Err constant (ir_default_err): a fresh JetErr from its message,
+// code and cause (ir_default_err_new), then its metadata record's words at
+// the native layout's offsets (JetBackend ErrLayout.jet), which
+// ir_default_err_drift holds the checked declaration to: the typed identity,
+// the context frame and conversion rows, and the details box.
+fn ir_comptime_default_err(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, row: Int, fields: [TComptimeField], span: Span) -> Int Never! {
+    if ir_default_err_drift(p, ty) == .Val(drift) -> return ir_fail_slot(&b, span, "the default Err declaration against the native JetErr: {drift}")
+    absent_text :: TComptimeValue.Failed{report: .Clean{ty: Type.String}}
+    message_value :: ir_comptime_field(fields, "message") ?? return ir_fail_slot(&b, span, "default Err constant without a message")
+    message :: ir_comptime(&m, p, &b, Type.String, message_value, span)
+    code :: ir_comptime(&m, p, &b, Type.Option{inner: Type.String}, ir_comptime_field(fields, "code") ?? absent_text.copy(), span)
+    cause :: ir_comptime(&m, p, &b, Type.Option{inner: ty.copy()}, ir_comptime_field(fields, "cause") ?? TComptimeValue.Failed{report: .Clean{ty: ty.copy()}}, span)
+    if ir_failed(b) -> return -1
+    error :: ir_default_err_new(&m, &b, row, message, code, cause)
+    metadata_value :: ir_comptime_field(fields, "__jet___memo_error_metadata") ?? return error
+    metadata :: if metadata_value == {
+        .Struct(_, rows) -> rows
+        else -> { return ir_fail_slot(&b, span, "default Err metadata constant {ir_comptime_name(metadata_value)}") }
+    }
+    if ir_comptime_field(metadata, "typed_identity") == .Val(.Present(identity)) {
+        ir_comptime_err_text(&m, p, &b, error, Int.from_i64(ERR_IDENTITY), identity, span)
+    }
+    frames :: ir_comptime_field(metadata, "context_frames") ?? TComptimeValue.List{values: []}
+    ir_comptime_err_rows(&m, p, &b, error, Int.from_i64(ERR_CONTEXT), Int.from_i64(ERR_CONTEXT_BYTES), frames, [String]{"text", "file"}, Val("line"), span)
+    conversions :: ir_comptime_field(metadata, "conversion_history") ?? TComptimeValue.List{values: []}
+    ir_comptime_err_rows(&m, p, &b, error, Int.from_i64(ERR_CONVERSIONS), Int.from_i64(ERR_CONVERSION_BYTES), conversions, [String]{"source", "target"}, None, span)
+    if ir_comptime_field(metadata, "details") == .Val(.Present(details_value)) {
+        details :: if details_value == {
+            .Struct(_, rows) -> rows
+            else -> { return ir_fail_slot(&b, span, "default Err details constant {ir_comptime_name(details_value)}") }
+        }
+        holder :: ir_list_buffer_alloc(&m, &b, Int.from_i64(ERR_DETAILS_BYTES))
+        variant :: ir_comptime_field(details, "variant") ?? absent_text.copy()
+        ir_comptime_err_text(&m, p, &b, holder, Int.from_i64(ERR_DETAILS_VARIANT), variant, span)
+        detail_fields :: ir_comptime_field(details, "fields") ?? TComptimeValue.List{values: []}
+        ir_comptime_err_rows(&m, p, &b, holder, Int.from_i64(ERR_DETAILS_FIELDS), Int.from_i64(ERR_FIELD_BYTES), detail_fields, [String]{"name", "value"}, None, span)
+        has_span := 0
+        start := 0
+        end := 0
+        if ir_comptime_field(details, "source_span") == .Val(.Present(.Struct(_, bounds))) {
+            has_span = 1
+            if ir_comptime_field(bounds, "start") == .Val(.Int(number)) -> start = number
+            if ir_comptime_field(bounds, "end") == .Val(.Int(number)) -> end = number
+        }
+        ir_comptime_err_word(&m, p, &b, holder, Int.from_i64(ERR_DETAILS_HAS_SPAN), has_span)
+        ir_comptime_err_word(&m, p, &b, holder, Int.from_i64(ERR_DETAILS_START), start)
+        ir_comptime_err_word(&m, p, &b, holder, Int.from_i64(ERR_DETAILS_END), end)
+        ir_store_at(&m, p, &b, error, Int.from_i64(ERR_DETAILS), holder)
+    }
+    if ir_failed(b) -> return -1
+    error
+}
+
+// The value of field `name` among a compile-time record's `fields`.
+fn ir_comptime_field(fields: [TComptimeField], name: String) -> TComptimeValue? Never! {
+    loop field in fields {
+        if field.name == name -> return Val(field.value.copy())
+    }
+    None
+}
+
+// Stores the String constant `text` at byte `at` of `base`.
+fn ir_comptime_err_text(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, at: Int, text: TComptimeValue, span: Span) Never! {
+    value :: ir_comptime(&m, p, &b, Type.String, text, span)
+    if value >= 0 -> ir_store_at(&m, p, &b, base, at, value)
+}
+
+// Stores the machine word `word` at byte `at` of `base`.
+fn ir_comptime_err_word(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, at: Int, word: Int) Never! {
+    value :: ir_word_const(&m, &b, word)
+    ir_store_at(&m, p, &b, base, at, value)
+}
+
+// The rows `items` (a List of records) as the native inline List at byte `at`
+// of `base` (length, capacity, data): a buffer of `stride`-byte rows, each the
+// texts `texts` names in order, then the Int `number` names.
+fn ir_comptime_err_rows(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, at: Int, stride: Int, items: TComptimeValue, texts: [String], number: String?, span: Span) Never! {
+    rows :: if items == {
+        .List(values) -> values
+        else -> { return ir_fail(&b, span, "default Err metadata rows {ir_comptime_name(items)}") }
+    }
+    count :: rows.len()
+    buffer :: if count == 0 -> ir_word_const(&m, &b, 0) else -> ir_list_buffer_alloc(&m, &b, count * stride)
+    loop (index, item) in rows {
+        fields :: if item == {
+            .Struct(_, values) -> values
+            else -> { return ir_fail(&b, span, "default Err metadata row {ir_comptime_name(item)}") }
+        }
+        loop (position, name) in texts {
+            text :: ir_comptime_field(fields, name) ?? return ir_fail(&b, span, "default Err metadata row without {name}")
+            ir_comptime_err_text(&m, p, &b, buffer, index * stride + position * 8, text, span)
+        }
+        if number == .Val(name) {
+            word :: if ir_comptime_field(fields, name) == {
+                .Val(.Int(value)) -> value
+                else -> { return ir_fail(&b, span, "default Err metadata row without {name}") }
+            }
+            ir_comptime_err_word(&m, p, &b, buffer, index * stride + texts.len() * 8, word)
+        }
+    }
+    ir_comptime_err_word(&m, p, &b, base, at, count)
+    ir_comptime_err_word(&m, p, &b, base, at + 8, count)
+    ir_store_at(&m, p, &b, base, at + 16, buffer)
 }
 
 // An enum constant: a payload-free enum's variant index, else a new box

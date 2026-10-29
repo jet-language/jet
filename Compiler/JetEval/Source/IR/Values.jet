@@ -5,7 +5,8 @@
 // Present, None as a clean failure and Err as a told one, a fixed-width
 // integer as an Int.
 use jet_foundation.[DeclTable, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeKeyField, TComptimeMapEntry, TComptimeReport, TComptimeValue, TConstantDef, TImplDef, TTypeDef, Type, compiler_threads_single, checked_comptime_integer_key, name_rows_value, type_name, FnBody]
-use jet_ir.[IRBuildFailure, IRMember, IRModule, IRProgram, IR_OPTION_INT_NONE, ir_build_roots_in, ir_declared_field_type, ir_enum_def, ir_host_value_row, ir_list_stride, ir_map_shape, ir_option_inline, ir_program_bind, ir_program_new, ir_program_put_constant, ir_row_args, ir_struct_members, ir_tuple_members, ir_type_args, ir_type_def, ir_untag, ir_value_type, ir_variant_members]
+use jet_ir.[IRBuildFailure, IRMember, IRModule, IRProgram, IR_OPTION_INT_NONE, ir_build_roots_in, ir_declared_field_type, ir_default_err, ir_default_err_drift, ir_enum_def, ir_host_value_row, ir_list_stride, ir_map_shape, ir_option_inline, ir_program_bind, ir_program_new, ir_program_put_constant, ir_row_args, ir_struct_members, ir_tuple_members, ir_type_args, ir_type_def, ir_untag, ir_value_type, ir_variant_members]
+use jet_backend.[ERR_CAUSE, ERR_CODE, ERR_CONTEXT, ERR_CONTEXT_BYTES, ERR_CONVERSIONS, ERR_CONVERSION_BYTES, ERR_DETAILS, ERR_DETAILS_END, ERR_DETAILS_FIELDS, ERR_DETAILS_HAS_SPAN, ERR_DETAILS_START, ERR_DETAILS_VARIANT, ERR_FIELD_BYTES, ERR_IDENTITY, ERR_MESSAGE]
 
 // What one IR evaluation produced: its value (when it completed with data),
 // the failure it reports, and its output.
@@ -145,6 +146,7 @@ fn jet_eval_ir_data(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, r
                 args :: ir_row_args(m, row)
                 return jet_eval_ir_enum_data(&m, p, &s, definition, args, discriminant, word, true)
             }
+            if ir_default_err(p, checked) -> return jet_eval_ir_err_data(&s, p, checked, word)
             return jet_eval_ir_transport_fail(&s, checked)
         }
         .Aggregate -> {
@@ -201,6 +203,96 @@ fn jet_eval_ir_data(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, r
 fn jet_eval_ir_transport_fail(s: &JetEvalIRState, ty: Type) -> TComptimeValue? Never! {
     jet_eval_ir_unsupported(&s, "materializing an IR value of type {type_name(ty)}")
     None
+}
+
+// A default Err read back from its native JetErr (JetBackend ErrLayout.jet)
+// as the record its checked declaration spells, which ir_default_err_drift
+// holds to that layout: message, code, cause and the metadata record (typed
+// identity, context frames, conversion history, details).
+fn jet_eval_ir_err_data(s: &JetEvalIRState, p: IRProgram, ty: Type, error: Int) -> TComptimeValue? {
+    if ir_default_err_drift(p, ty) == .Val(drift) {
+        jet_eval_ir_problem(&s, "the default Err declaration against the native JetErr: {drift}")
+        return None
+    }
+    message :: jet_eval_ir_err_text(&s, error, ERR_MESSAGE) ?? return None
+    code :: jet_eval_ir_err_optional_text(&s, error, ERR_CODE) ?? return None
+    cause_word :: jet_eval_ir_read_word(&s, error + Int.from_i64(ERR_CAUSE)) ?? return None
+    cause :: if cause_word == 0 -> TComptimeValue.Failed{report: TComptimeReport.Clean{ty: ty.copy()}} else -> TComptimeValue.Present{value: jet_eval_ir_err_data(&s, p, ty, cause_word) ?? return None}
+    identity :: jet_eval_ir_err_optional_text(&s, error, ERR_IDENTITY) ?? return None
+    frames :: jet_eval_ir_err_rows(&s, error + Int.from_i64(ERR_CONTEXT), Int.from_i64(ERR_CONTEXT_BYTES), "__jet_ErrorContextFrame", [String]{"text", "file"}, Val("line")) ?? return None
+    conversions :: jet_eval_ir_err_rows(&s, error + Int.from_i64(ERR_CONVERSIONS), Int.from_i64(ERR_CONVERSION_BYTES), "__jet_ErrorConversion", [String]{"source", "target"}, None) ?? return None
+    details_word :: jet_eval_ir_read_word(&s, error + Int.from_i64(ERR_DETAILS)) ?? return None
+    details := TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "__jet_ErrorDetails"}}}
+    if details_word != 0 {
+        variant :: jet_eval_ir_err_text(&s, details_word, ERR_DETAILS_VARIANT) ?? return None
+        fields :: jet_eval_ir_err_rows(&s, details_word + Int.from_i64(ERR_DETAILS_FIELDS), Int.from_i64(ERR_FIELD_BYTES), "__jet_ErrorField", [String]{"name", "value"}, None) ?? return None
+        has_span :: jet_eval_ir_read_word(&s, details_word + Int.from_i64(ERR_DETAILS_HAS_SPAN)) ?? return None
+        source_span := TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "__jet_ErrorSpan"}}}
+        if has_span != 0 {
+            start :: jet_eval_ir_read_word(&s, details_word + Int.from_i64(ERR_DETAILS_START)) ?? return None
+            end :: jet_eval_ir_read_word(&s, details_word + Int.from_i64(ERR_DETAILS_END)) ?? return None
+            source_span = TComptimeValue.Present{value: TComptimeValue.Struct{type_name: "__jet_ErrorSpan", fields: [TComptimeField]{
+                {name: "start", value: TComptimeValue.Int{value: start}},
+                {name: "end", value: TComptimeValue.Int{value: end}},
+            }}}
+        }
+        details = TComptimeValue.Present{value: TComptimeValue.Struct{type_name: "__jet_ErrorDetails", fields: [TComptimeField]{
+            {name: "variant", value: variant},
+            {name: "fields", value: fields},
+            {name: "source_span", value: source_span},
+        }}}
+    }
+    metadata :: TComptimeValue.Struct{type_name: "__jet_ErrorMetadata", fields: [TComptimeField]{
+        {name: "typed_identity", value: identity},
+        {name: "context_frames", value: frames},
+        {name: "conversion_history", value: conversions},
+        {name: "details", value: details},
+    }}
+    Val(TComptimeValue.Struct{type_name: type_name(ty), fields: [TComptimeField]{
+        {name: "message", value: message},
+        {name: "code", value: code},
+        {name: "cause", value: cause},
+        {name: "__jet___memo_error_metadata", value: metadata},
+    }})
+}
+
+// The String whose header word is at byte `offset` of `base`.
+fn jet_eval_ir_err_text(s: &JetEvalIRState, base: Int, offset: I64) -> TComptimeValue? {
+    header :: jet_eval_ir_read_word(&s, base + Int.from_i64(offset)) ?? return None
+    text :: jet_eval_ir_text(&s, header) ?? return None
+    Val(TComptimeValue.String{value: text})
+}
+
+// The `String?` whose header word (0: none) is at byte `offset` of `base`.
+fn jet_eval_ir_err_optional_text(s: &JetEvalIRState, base: Int, offset: I64) -> TComptimeValue? {
+    header :: jet_eval_ir_read_word(&s, base + Int.from_i64(offset)) ?? return None
+    if header == 0 -> return Val(TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.String}})
+    text :: jet_eval_ir_text(&s, header) ?? return None
+    Val(TComptimeValue.Present{value: TComptimeValue.String{value: text}})
+}
+
+// The native inline List at `list` (length, capacity, data) of `stride`-byte
+// rows, each read as a `record` of the texts `texts` names in order, then the
+// Int `number` names.
+fn jet_eval_ir_err_rows(s: &JetEvalIRState, list: Int, stride: Int, record: String, texts: [String], number: String?) -> TComptimeValue? {
+    count :: jet_eval_ir_read_word(&s, list) ?? return None
+    data :: jet_eval_ir_read_word(&s, list + 16) ?? return None
+    rows := [TComptimeValue]{}
+    loop index in 0..<count {
+        row :: data + index * stride
+        fields := [TComptimeField]{}
+        loop (position, name) in texts {
+            header :: jet_eval_ir_read_word(&s, row + position * 8) ?? return None
+            text :: jet_eval_ir_text(&s, header) ?? return None
+            &fields.push(TComptimeField{name: name.copy(), value: TComptimeValue.String{value: text}})
+        }
+        if number == .Val(name) {
+            word :: jet_eval_ir_read_word(&s, row + texts.len() * 8) ?? return None
+            &fields.push(TComptimeField{name: name.copy(), value: TComptimeValue.Int{value: word}})
+        }
+        &rows.push(TComptimeValue.Struct{type_name: record.copy(), fields: ^fields})
+    }
+    Val(TComptimeValue.List{values: ^rows})
 }
 
 // The map key of `value`, a key of type `ty` read back (the inverse of

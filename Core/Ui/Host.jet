@@ -36,17 +36,14 @@ enum UIFSAccess {
 
 #Error
 enum UIHostError {
-    Cancelled
-    Headless
-    Denied
-    Missing
+    Cancelled(UICancellation)
+    CapabilityUnavailable(capability: String)
+    CapabilityDenied(capability: UICapability)
     InvalidRequest(String)
-    CapabilityUnavailable
-    CapabilityDenied
-    HostFailure
+    HostFailure(service: String, message: String)
     ResourceDenied(String)
-    ShortcutConflict
-    QueueFull
+    ShortcutConflict(shortcut: UIShortcut, existing_action: String)
+    QueueFull(service: String)
 }
 
 struct UICapabilityFact {
@@ -119,8 +116,10 @@ struct UINodeID {
 }
 
 struct UIAccessibilityProjection {
-    lines: [String]
+    node: UINodeID
+    metadata: UIAccessibility
 }
+
 struct UIShortcutBinding {
     shortcut: UIShortcut
     action: String

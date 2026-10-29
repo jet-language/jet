@@ -3507,9 +3507,11 @@ The IME capability is spelled `UI.IME`, alongside `UI.Keyboard` and
 | `node(label: String, width: Float, height: Float) -> UINode` | node | Construct a sized node. |
 | `box(children: [UINode]) -> UINode` | node | Group child nodes. |
 | `text(value: String) -> UINode` | node | Construct a text node. |
-| `preview(name: String, viewport: ?UIPreviewViewport, body: fn() -> UINode) -> UIPreview` | preview | Describe a named preview. |
-| `playground(name: String, viewport: ?UIPreviewViewport, body: fn() -> UINode) -> UIPreview` | preview | Describe a named interactive playground. |
-| `desktop() -> UIPreviewViewport`, `phone() -> UIPreviewViewport`, `tablet() -> UIPreviewViewport` | viewport | Select standard preview dimensions. |
+| `preview(name: String, body: fn() -> UINode, *, viewport: UIPreviewViewport?) -> UIPreview` | preview | Describe a named preview; `viewport:` defaults to `desktop()`. |
+| `playground(name: String, body: fn() -> UINode, *, viewport: UIPreviewViewport?) -> UIPreview` | preview | Describe a named interactive playground; `viewport:` defaults to `desktop()`. |
+| `previews(entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError!`, `playgrounds(entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError!` | registry | Register at most 64 previews, each with a non-empty unique name. |
+| `UIPreviewRegistry.render(name: String) -> UINode UIPreviewError!` | node | Call the named preview's body. |
+| `desktop() -> UIPreviewViewport`, `phone() -> UIPreviewViewport`, `tablet() -> UIPreviewViewport` | viewport | Select standard preview dimensions: 1280×800 at scale 1, 390×844 at scale 2, 834×1119 at scale 2. |
 | `key_event(code: String) -> InputEvent` | event | Create `InputEvent.Key{code: code}`. |
 | `resize_event(width: Float, height: Float) -> InputEvent` | event | Create `InputEvent.Resize{size: Size{width: width, height: height}}`. |
 | `reactive_render(body: fn())` | — | Ask the provider to render a reactive body. |
@@ -3521,9 +3523,13 @@ The IME capability is spelled `UI.IME`, alongside `UI.Keyboard` and
 | `node_role(label: String, width: Float, height: Float, role: UIAriaRole) -> UINode` | node | Construct a node with a role. |
 | `node_shortcut(n: UINode, shortcut: UIShortcut) -> UINode` | node | Attach a shortcut descriptor. |
 
-Preview viewport arguments keep the single optional carrier inserted by the
-checker; lowering does not wrap an already promoted argument again. Preview and
-playground registries can be imported directly as `core.ui.[previews, playgrounds]`.
+`UIPreviewViewport` is `{device: UIPreviewDevice, width: Int, height: Int,
+scale: Int}` and `UIPreview` is `{kind: UIPreviewKind, name: String, viewport:
+UIPreviewViewport, body: fn() -> UINode}`; both are plain Jet values on every
+tier. Registration fails with `UIPreviewError.EmptyName`, `.TooManyPreviews`,
+or `.DuplicatePreview(name)`; rendering an unregistered name fails with
+`.UnknownPreview(name)`. Preview and playground registries can be imported
+directly as `core.ui.[previews, playgrounds]`.
 Host file-dialog, clipboard, shortcut, accessibility, and IME consumers declare
 their corresponding `UI.*` authority needs and use the current failure carrier;
 IME polling yields an optional event after host failure propagation.
@@ -3543,9 +3549,16 @@ unchanged. Lexical filesystem grants and accessibility metadata construction
 are Jet policy, not host facade calls.
 Terminal/GTK backend allocation, shortcut registration/dispatch, and host
 accessibility attach/project also enter their Jet public functions first.
-`attach` preserves its public `Unit !UIHostError` contract: Core discards the
-private provider's returned canonical node only on success and propagates
-the same typed host error on failure.
+`attach` returns the provider's canonical node with the metadata attached,
+`UINode UIHostError!`, and propagates the typed host error on failure.
+`project` returns `UIAccessibilityProjection{node: UINodeID, metadata:
+UIAccessibility}` when the node carries metadata.
+`UIHostError` has the variants `Cancelled(UICancellation)`,
+`CapabilityUnavailable(capability: String)`, `CapabilityDenied(capability:
+UICapability)`, `InvalidRequest(String)`, `HostFailure(service: String,
+message: String)`, `ResourceDenied(String)`, `ShortcutConflict(shortcut:
+UIShortcut, existing_action: String)`, and `QueueFull(service: String)`; a
+headless host reports `Cancelled(.Headless)`.
 TUI capability selection, ASCII-only case folding, encoded-OS flag semantics,
 dimension parsing, and defaults are Jet policy. The private environment-byte
 leaf samples the same startup facts; the shared terminal leaf remains the

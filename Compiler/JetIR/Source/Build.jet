@@ -141,6 +141,11 @@ struct IRBuilder {
     // What a failed bounds check of this body does (ir_checked_address):
     // the program's mode in a function of a module IRChecks names, else Fatal.
     bounds: IRBoundsMode{IRBoundsMode.Fatal}
+    // The index nodes (AutoVectorizationFacts.proven_indexes) of the loops
+    // being built (ir_range_loop), each with the row of its loop's proof
+    // (IRFunction.loop_proofs; -1: the loop is done): the access at such an
+    // index has no bounds check (ir_checked_element).
+    proven_index: [Int:Int]{[Int:Int]{}}
     // Guards taken by a temporary in the statement being built
     // (`store.guard_edit().value.items[key] = text`): their permits end with
     // the statement (ir_stmt).
@@ -2493,12 +2498,21 @@ fn ir_native_index(m: &IRModule, b: &IRBuilder, position: Int, span: Span) -> In
 }
 
 // The address of element `index` of the list at `list`, after the bounds
-// check (ir_list_bounds_stop).
+// check (ir_list_bounds_stop). An access at an index sema's loop proof keeps
+// inside its fixed list (IRBuilder.proven_index) has no check: the proof is
+// the check.
 fn ir_checked_element(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, index: Int, row: Int, span: Span) -> Int Never! {
+    proof :: b.proven_index.get(index) ?? -1
     position :: ir_expr(&m, p, &b, index)
     if ir_failed(b) || position < 0 -> return -1
     native :: ir_native_index(&m, &b, position, span)
     if ir_failed(b) -> return -1
+    if proof >= 0 {
+        b.f.loop_proofs[proof].lowered += 1
+        data :: ir_load_word(&m, &b, list, 16)
+        stride :: ir_list_stride(m, row)
+        return ir_element_address(&m, &b, data, native, stride)
+    }
     ir_checked_address(&m, &b, list, native, row)
 }
 

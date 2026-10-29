@@ -2145,6 +2145,12 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     sema_place_borrow_function(&body, params, place_borrow_receiver, context.arena.tree)
     target :: sema_function_target_applicability(func)
     memo :: sema_function_header_memo_config(func)
+    // `#Scalar` keeps every loop of the body on the scalar path: its loops
+    // record no loop proof (LoopFacts.jet).
+    scalar := false
+    loop marker in func.markers {
+        if marker.name == "Scalar" -> scalar = true
+    }
     built := TFunc{
         name: func.name,
         module_name: module_name,
@@ -2179,7 +2185,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         body: ^body,
         is_inline: func.is_inline,
         is_inline_always: func.is_inline_always,
-        is_scalar: false,
+        is_scalar: scalar,
         kernel_proof: None,
         uses_stack_sentry: false,
         kind: function_kind,

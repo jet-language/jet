@@ -209,10 +209,10 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1175,
+  "total": 1174,
   "counts": {
     "Compiler": 530,
-    "Core": 204,
+    "Core": 203,
     "Examples": 39,
     "Jetpack": 10,
     "Tools": 8,
@@ -5255,7 +5255,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Ui/Host/Accessibility.jet",
-      "line": 16,
+      "line": 13,
       "column": 5,
       "reason": "Core accessibility projects metadata from the canonical node, never a second provider tree"
     },
@@ -5304,51 +5304,44 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Ui/Ui.jet",
-      "line": 127,
+      "line": 178,
       "column": 5,
       "reason": "Core creates the real retained GTK renderer through the registered host allocation boundary"
     },
     {
       "package": "Core",
       "file": "Core/Ui/Ui.jet",
-      "line": 132,
+      "line": 183,
       "column": 5,
       "reason": "Core creates the real retained terminal renderer through the registered host allocation boundary"
     },
     {
       "package": "Core",
       "file": "Core/Ui/Ui.jet",
-      "line": 137,
+      "line": 188,
       "column": 5,
       "reason": "Core creates the real retained null renderer through the registered host allocation boundary"
     },
     {
       "package": "Core",
       "file": "Core/Ui/Ui.jet",
-      "line": 148,
+      "line": 199,
       "column": 5,
       "reason": "Core UI accessibility slot transfer: explicitly present validated metadata"
     },
     {
       "package": "Core",
       "file": "Core/Ui/Ui.jet",
-      "line": 165,
+      "line": 216,
       "column": 5,
       "reason": "Core UI shortcut slot transfer: explicitly present validated shortcut"
     },
     {
       "package": "Core",
       "file": "Core/Ui/Ui.jet",
-      "line": 192,
+      "line": 243,
       "column": 5,
       "reason": "Core UI host slot transfer: audited kind, role, explicit absent slots, and normalized style words"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Ui/Ui.jet",
-      "line": 198,
-      "column": 5,
-      "reason": "Core UI viewport transfer: source supplies a valid device and bounded positive dimensions"
     },
     {
       "package": "Core",
@@ -8453,12 +8446,12 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | crate/package | regions |
 | --- | ---: |
 | Compiler | 530 |
-| Core | 204 |
+| Core | 203 |
 | Examples | 39 |
 | Jetpack | 10 |
 | Tools | 8 |
 | tests | 384 |
-| **total** | **1175** |
+| **total** | **1174** |
 
 ### Regions
 
@@ -9183,20 +9176,19 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Ui/Host.jet | 166:5 | "Core UI save dialog crosses the current provider boundary with the original typed request" |
 | Core | Core/Ui/Host.jet | 180:5 | "Core UI dialog request transfer: validated grant and explicit absent directory, filter list, and multiple-selection slot" |
 | Core | Core/Ui/Host/Accessibility.jet | 7:5 | "Core accessibility attaches metadata to the canonical node through the current retained provider" |
-| Core | Core/Ui/Host/Accessibility.jet | 16:5 | "Core accessibility projects metadata from the canonical node, never a second provider tree" |
+| Core | Core/Ui/Host/Accessibility.jet | 13:5 | "Core accessibility projects metadata from the canonical node, never a second provider tree" |
 | Core | Core/Ui/Host/Clipboard.jet | 6:5 | "Core clipboard reads through the current retained provider; the raw host owns platform access" |
 | Core | Core/Ui/Host/Clipboard.jet | 12:5 | "Core clipboard transfers the exact UTF-8 text to the current retained provider" |
 | Core | Core/Ui/Host/DragDrop.jet | 33:5 | "Core drag/drop consumes one typed event from the current retained provider queue" |
 | Core | Core/Ui/Host/Ime.jet | 25:5 | "Core IME consumes one typed event from the current retained provider queue" |
 | Core | Core/Ui/Host/Shortcuts.jet | 11:5 | "Core shortcut registration uses the current retained provider's canonical action registry" |
 | Core | Core/Ui/Host/Shortcuts.jet | 17:5 | "Core shortcut dispatch uses the current retained provider's canonical action registry" |
-| Core | Core/Ui/Ui.jet | 127:5 | "Core creates the real retained GTK renderer through the registered host allocation boundary" |
-| Core | Core/Ui/Ui.jet | 132:5 | "Core creates the real retained terminal renderer through the registered host allocation boundary" |
-| Core | Core/Ui/Ui.jet | 137:5 | "Core creates the real retained null renderer through the registered host allocation boundary" |
-| Core | Core/Ui/Ui.jet | 148:5 | "Core UI accessibility slot transfer: explicitly present validated metadata" |
-| Core | Core/Ui/Ui.jet | 165:5 | "Core UI shortcut slot transfer: explicitly present validated shortcut" |
-| Core | Core/Ui/Ui.jet | 192:5 | "Core UI host slot transfer: audited kind, role, explicit absent slots, and normalized style words" |
-| Core | Core/Ui/Ui.jet | 198:5 | "Core UI viewport transfer: source supplies a valid device and bounded positive dimensions" |
+| Core | Core/Ui/Ui.jet | 178:5 | "Core creates the real retained GTK renderer through the registered host allocation boundary" |
+| Core | Core/Ui/Ui.jet | 183:5 | "Core creates the real retained terminal renderer through the registered host allocation boundary" |
+| Core | Core/Ui/Ui.jet | 188:5 | "Core creates the real retained null renderer through the registered host allocation boundary" |
+| Core | Core/Ui/Ui.jet | 199:5 | "Core UI accessibility slot transfer: explicitly present validated metadata" |
+| Core | Core/Ui/Ui.jet | 216:5 | "Core UI shortcut slot transfer: explicitly present validated shortcut" |
+| Core | Core/Ui/Ui.jet | 243:5 | "Core UI host slot transfer: audited kind, role, explicit absent slots, and normalized style words" |
 | Core | Core/Vendor/Sqlite3/Fixture/run.jet | 17:5 | "exclusive out-slots hold SQLite pointers; zero words mean null, SQL is NUL-terminated for each borrowed call, and each live pointer is finalized/closed once" |
 | Examples | Examples/features/crypto/crypto_migration.jet | 31:5 | "AES-256-GCM protocol interoperability" |
 | Examples | Examples/features/crypto/crypto_suite.jet | 36:5 | "known-answer check reads the RFC 7748 shared secret" |
@@ -9826,8 +9818,8 @@ the function body; they do not exempt a wrapper from the proof requirement.
   {"file":"Core/Ui/Host.jet","function":"capabilities","proof":"The host.jet:154-155 __capabilities gate dispatches to jet_ui_host_capabilities (Core/HostServices.rs:1838-1840), which queries capability_facts through jet_ui_with_current_host. In the repaired scope (7ee5e69a8, :1786-1820), only jet_ui_with_host owns the private lifetime-bound guard: TLS stores the address of its live stack-held host reference without transmute, and Drop restores the predecessor before that reference/host borrow ends, including unwinding; safe callers cannot obtain or forget the guard. :1822-1834 hold the mutable TLS borrow across the callback, refusing recursive access and nested installation before another host reference is made; the default host also stays mutably borrowed. No caller address is accepted and the result is copied capability bits (:74-76), not a host reference."},
   {"file":"Core/Ui/Host.jet","function":"open_file","proof":"host.jet:160-161 moves the typed request into __open_file, whose jet_ui_host_open_file provider (Core/HostServices.rs:1841-1845) calls jet_ui_open_file under jet_ui_with_current_host. The private lifetime-bound scope at :1786-1820 is owned only by jet_ui_with_host, keeps its stack-held host reference live without transmute, and restores predecessor TLS before the frame/host borrow ends on return or unwind; safe callers cannot leak its guard. The mutable TLS borrow at :1822-1834 stays held throughout the provider, so re-entry or nested installation fails before minting another host reference (the default host is borrowed too). Ui.rs:217-227 retain a request clone and validate the returned selection against it before success. Caller requests contain typed owned values, not host addresses; the result owns granted paths (:1348-1350) and exports no scoped host borrow."},
   {"file":"Core/Ui/Host.jet","function":"save_file","proof":"host.jet:166-167 moves its typed request into __save_file; jet_ui_host_save_file (Core/HostServices.rs:1846-1850) invokes jet_ui_save_file under jet_ui_with_current_host. :1786-1820 confine the lifetime-bound guard to jet_ui_with_host, store only its live stack-held host-reference address without transmute, and restore predecessor TLS before that frame/host borrow ends, including unwind; safe callers never receive a forgettable guard. :1822-1834 keep the mutable TLS borrow across the call, rejecting recursive access or nested installation before a second host reference exists, with a borrowed default host when none is installed. Ui.rs:231-241 retain the original request clone for validating the returned save selection. Arbitrary typed requests cannot supply a raw host pointer, and successful selections own their granted paths rather than borrowing host storage."},
-  {"file":"Core/Ui/Host/Accessibility.jet","function":"attach","proof":"accessibility.jet:7-11 consumes typed node/metadata via __attach. Its jet_ui_host_attach_accessibility provider (Ui.rs:283-293) owns the node, lends it exclusively to host.attach_accessibility only inside jet_ui_with_current_host, and returns the owned node or error; the source discards the successful node and returns unit. Core/HostServices.rs:1786-1820 give jet_ui_with_host sole ownership of a private lifetime-bound guard, storing the live stack-held host-reference address without transmute and restoring predecessor TLS before the frame/host borrow ends on return or unwind, so callers cannot forget the guard. :1822-1834 retain the mutable TLS borrow across attachment, refusing re-entry and nested installation before another host reference can alias it, and borrow the default host when applicable. Neither caller-selected metadata nor the unit/error result can export a node or host borrow."},
-  {"file":"Core/Ui/Host/Accessibility.jet","function":"project","proof":"accessibility.jet:16-17 passes typed node/id to __project; jet_ui_host_project_accessibility (Ui.rs:295-300) owns the node and lends it read-only during host.project_accessibility inside jet_ui_with_current_host. Core/HostServices.rs:1786-1820 confine the private lifetime-bound guard to jet_ui_with_host: its stack-held host reference remains live without a lifetime transmute, and predecessor TLS is restored before the frame/host borrow ends even on unwind; no safe caller can obtain or leak the guard. :1822-1834 hold the mutable TLS borrow for the entire projection, rejecting recursive access or nested installation before a second host reference, with a live default-host borrow otherwise. The id is a typed identity, not a host address; the optional projection owns node id and metadata (:1673-1676), never a reference into the consumed node or scoped host."},
+  {"file":"Core/Ui/Host/Accessibility.jet","function":"attach","proof":"accessibility.jet:7-9 consumes typed node/metadata via __attach. Its jet_ui_host_attach_accessibility provider (Ui.rs:283-293) owns the node, lends it exclusively to host.attach_accessibility only inside jet_ui_with_current_host, and returns the owned node or error; the source returns that owned canonical node or the typed host error unchanged. Core/HostServices.rs:1786-1820 give jet_ui_with_host sole ownership of a private lifetime-bound guard, storing the live stack-held host-reference address without transmute and restoring predecessor TLS before the frame/host borrow ends on return or unwind, so callers cannot forget the guard. :1822-1834 retain the mutable TLS borrow across attachment, refusing re-entry and nested installation before another host reference can alias it, and borrow the default host when applicable. Neither caller-selected metadata nor the owned node/error result can export a host borrow."},
+  {"file":"Core/Ui/Host/Accessibility.jet","function":"project","proof":"accessibility.jet:13-14 passes typed node/id to __project; jet_ui_host_project_accessibility (Ui.rs:295-300) owns the node and lends it read-only during host.project_accessibility inside jet_ui_with_current_host. Core/HostServices.rs:1786-1820 confine the private lifetime-bound guard to jet_ui_with_host: its stack-held host reference remains live without a lifetime transmute, and predecessor TLS is restored before the frame/host borrow ends even on unwind; no safe caller can obtain or leak the guard. :1822-1834 hold the mutable TLS borrow for the entire projection, rejecting recursive access or nested installation before a second host reference, with a live default-host borrow otherwise. The id is a typed identity, not a host address; the optional projection owns node id and metadata (:1673-1676), never a reference into the consumed node or scoped host."},
   {"file":"Core/Ui/Host/Clipboard.jet","function":"read_text","proof":"clipboard.jet:6-7 invokes __read_text without caller memory; jet_ui_host_clipboard_read_text (Core/HostServices.rs:1852-1854) reaches host.read_clipboard_text via Ui.rs:243-247 inside jet_ui_with_current_host. The private lifetime-bound guard at :1786-1820 is owned only by jet_ui_with_host, points TLS at its live stack-held host reference without transmute, and restores predecessor TLS before that frame/host borrow ends on return or unwind; safe callers cannot forget it. :1822-1834 keep the mutable TLS borrow across the read, refusing recursive host access or nested installation before a second host reference is created and borrowing the default host otherwise. The returned clipboard carrier owns its String and optional range (:1368-1371), so dropping the host cannot invalidate returned text."},
   {"file":"Core/Ui/Host/Clipboard.jet","function":"write_text","proof":"clipboard.jet:12-13 lends a valid String to __write_text; jet_ui_host_clipboard_write_text (Core/HostServices.rs:1856-1860) copies that str into an owned String before passing it to host.write_clipboard_text inside jet_ui_with_current_host. :1786-1820 confine the lifetime-bound guard to jet_ui_with_host, retaining its live stack-held host reference without transmute and restoring predecessor TLS before the frame/host borrow ends on return or unwind; safe callers never receive a forgettable guard. :1822-1834 hold the mutable TLS borrow across writing, rejecting re-entry or nested installation before another host reference is formed and keeping the default host borrowed otherwise. The host receives owned UTF-8 text, not a caller buffer pointer, and the result contains only a copied character count (:1374-1376) or owned error, never a scoped borrow."},
   {"file":"Core/Ui/Host/DragDrop.jet","function":"poll","proof":"drag_drop.jet:33-34 calls __poll with no caller-selected address; jet_ui_host_drag_poll (Core/HostServices.rs:1867-1869) invokes host.poll_drag_event inside jet_ui_with_current_host. The private lifetime-bound scope at :1786-1820 belongs only to jet_ui_with_host, which keeps its stack-held host reference live without transmute and restores predecessor TLS before the frame/host borrow ends on return or unwind; safe callers cannot obtain/leak its guard. :1822-1834 hold the mutable TLS borrow across polling, refusing recursive access or nested installation before a second host reference exists and borrowing the default host otherwise. The optional typed drag event is returned by value, with owned item storage rather than a host queue reference; no host borrow escapes even when the queue is empty or the provider errors."},
@@ -9840,7 +9832,6 @@ the function body; they do not exempt a wrapper from the proof requirement.
   {"file":"Core/Ui/Ui.jet","function":"node_accessibility","proof":"ui.jet:148 calls __accessibility_transfer with typed UINode/UIAccessibility and the explicit present=true flag. Ui.rs:302-308 only assign Some(metadata) to the owning node then return that node; no discriminant reinterpretation, unchecked index, callback invocation or current-host access occurs. Caller metadata remains an initialized typed record and the result owns its Strings/lists rather than borrowing source storage."},
   {"file":"Core/Ui/Ui.jet","function":"node_shortcut","proof":"ui.jet:165 passes initialized typed node/shortcut with present=true to __shortcut_transfer. Its provider Ui.rs:311-317 only stores the typed shortcut in the node's Option and returns the owning node, with no scoped-host dispatch or raw address access. Any valid typed shortcut therefore preserves layout/lifetimes, and no native registry borrow escapes."},
   {"file":"Core/Ui/Ui.jet","function":"transfer_node","proof":"__node_transfer trusts numeric role/kind/absence/style representations (Ui.rs:1938-1985). ui.jet:173-184 derives role solely as -1 or0..3 and kind solely as0..4 from typed enums. :185-192 couples color presence to initialized text, fixes all six absent-slot bits to63, and marks style absent with zero initialized words. Native :1987-2002 own the copied label/color and typed children, never dereferencing caller addresses. Width/height are stored floats, not memory lengths; invalid geometry cannot cause an unchecked allocation transfer here."},
-  {"file":"Core/Ui/Ui.jet","function":"transfer_viewport","proof":"__viewport_transfer converts numeric device/dimensions/scale to native enum/u32/u16 (Core/Preview.rs:895-908). The local helper's only callers ui.jet:115-117 supply device tags0,1,2, positive dimensions390..1280/800..1119 and scale1 or2; each fits its native width and all fields are initialized before the gate(:197-198). It accesses no current host and returns an owning plain viewport rather than a pointer or borrowed resource; arbitrary external numbers cannot reach this local transfer."},
   {"file":"Core/Vendor/Sqlite3/Fixture/run.jet","function":"run","proof":"The no-argument fixture supplies only fixed SQL and an in-memory database name. Exclusive U64 out-slots start at zero; successful sqlite3_open_v2 and sqlite3_prepare_v2 checks dominate all database/statement uses. SQLite owns the resulting handles; the fixture never forges an address, lends a callback, or exposes a handle to callers. It steps the statement before reading column zero, finalizes it once before closing the database once, and uses neither afterward. Borrowed String storage remains live for each synchronous call; any failed operation stops before further handle use."},
   {"file": "Core/Sys/Sys.jet", "function": "getpgid", "proof": "A read-only POSIX query: it changes no process state, touches no memory the caller owns, and returns an Int or IOError."},
   {"file": "Core/Sys/Sys.jet", "function": "getsid", "proof": "A read-only POSIX query: it changes no process state, touches no memory the caller owns, and returns an Int or IOError."}

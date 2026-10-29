@@ -918,6 +918,11 @@ under `--release` or the `release`/`hardened` profiles. It reports what the
 passes changed (instructions before and after, inlined and direct calls, folds,
 fused compares, coalesced copies, removed dead and unreachable code, scalar
 replaced aggregates) and names each function the IR builder could not build.
+It also lists, as built before any pass, each counted loop sema's loop proof
+covers (`loop <function> <file>:<line>`): the proved extent and element type,
+the aliasing, early-exit, effect and cross-iteration verdicts, how many list
+accesses sema proved in bounds and how many of them the build lowered with no
+bounds check. Each loop lowers one scalar round per index.
 
 Live inspection consumes only the runtime's private `jet.live.v1` snapshot.
 Its no-follow read retains one file descriptor, checks its regular-file type,
@@ -934,7 +939,8 @@ transport by the strict Core JSON parser. This intentionally does not preserve
 the retired host's first-scalar/last-container duplicate-key behavior.
 
 The CLI's `inspect.decisions` status carries the optimizer report's counts as
-fields and the unbuilt functions as text rows.
+fields, and the unbuilt functions and the loop proofs (`loop_proofs`) as text
+rows.
 
 The shared WatchGraph starts from the compiler loader's actual physical input
 paths, adds checked project sidecars, recursively referenced HTML/CSS/JS assets,

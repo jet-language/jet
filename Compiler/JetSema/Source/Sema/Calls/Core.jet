@@ -197,9 +197,6 @@ fn sema_call_core_unbuilt(module_name: String, member: String) -> (feature: Stri
     if module_name == "core.net.ws" && (member == "connect" || member == "upgrade") {
         return Val((feature: "the WebSocket runtime (connections and messages)", card: 4957))
     }
-    if module_name == "core.ui" && (member == "preview" || member == "playground") {
-        return Val((feature: "UI previews and playgrounds (their types and viewport rendering)", card: 4189))
-    }
     if module_name == "core.args" && member == "spec" -> return Val((feature: "the `core.args` spec builder runtime", card: 5991))
     if module_name == "core.sys" && member == "decode" -> return Val((feature: "typed environment decoding (`core.sys.decode`)", card: 5992))
     if module_name == "core.process" && member == "pipeline" -> return Val((feature: "the process pipeline runtime", card: 5993))
@@ -1196,7 +1193,7 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
     if canonical_record.module_name == "core.sys" && context.unsafe_depth == 0 && sema_call_core_posix_control(canonical_record.member) {
         &diagnostics.push(sema_error("E3101", span, "`core.sys.{canonical_record.member}` requires an audited `#Unsafe` region", "POSIX process and session control can change credentials, signals, and process topology (I1)", "wrap the call in `#Unsafe(\"posix {canonical_record.member}: …\") {{ … }}` and gate the host OS with `comptime if $build.os` / `#Target(OS.*)`"))
     }
-    if context.unsafe_depth == 0 && ((canonical_record.module_name == "core.ui" && (canonical_record.member == "__node_transfer" || canonical_record.member == "__viewport_transfer" || canonical_record.member == "__accessibility_transfer" || canonical_record.member == "__shortcut_transfer")) || (canonical_record.module_name == "core.ui.host" && canonical_record.member == "__request_transfer")) {
+    if context.unsafe_depth == 0 && ((canonical_record.module_name == "core.ui" && (canonical_record.member == "__node_transfer" || canonical_record.member == "__accessibility_transfer" || canonical_record.member == "__shortcut_transfer")) || (canonical_record.module_name == "core.ui.host" && canonical_record.member == "__request_transfer")) {
         &diagnostics.push(sema_error("E3101", span, "`{canonical_record.module_name}.{canonical_record.member}` requires an audited `#Unsafe` region", "raw host carrier transfer trusts the Core packer's validated tags, words, and retained slots", "use the safe `core.ui` constructors, or wrap a vetted Core transfer in `#Unsafe(\"UI carrier transfer: …\") {{ … }}`"))
     }
     actual_accesses :: loop argument in args -> argument.convention
