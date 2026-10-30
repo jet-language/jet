@@ -216,3 +216,69 @@ fn sema_casing_canonical(name: String, case: SemaNameCase) -> String {
     }
     "{leading}{out}"
 }
+
+// The applied acronym lexicon: every initials-formed word in current
+// Jet names, in canonical caps. Mirrors `ACRONYMS` in
+// Compiler/JetFoundation/Data/Syntax/Acronyms.jet.
+SEMA_CASING_ACRONYMS :: comptime { [String]{
+    "AABB", "ABI", "AES", "ALPN", "ANSI", "AOT", "API", "ASCII", "AST", "BPE", "CAS", "CBOR",
+    "CDP", "CFG", "CI", "CLI", "CMS", "CPU", "CSR", "CSS", "CSV", "DB", "DKIM", "DMA", "DNS",
+    "DSL", "DTD", "EOF", "FFI", "FS", "GC", "GPIO", "GPU", "HLL", "HMAC", "HSM", "HTML", "HTTP",
+    "ID", "IME", "IO", "IP", "IR", "JIT", "JS", "JSON", "JSONL", "JVM", "KDF", "KMS", "LRU",
+    "LSP", "LTO", "LWW", "MCP", "MIME", "MMIO", "OCI", "OS", "PEM", "PID", "PM", "PNG",
+    "RGA", "RGB", "RNG", "RPC", "RSA", "SDK", "SHA", "SMTP", "SPSC", "SQL", "SRI", "SRV", "SSG",
+    "SSH", "SSR", "SVD", "SVG", "TCP", "TLS", "TOML", "TTY", "TUF", "TUI", "UART", "UDP",
+    "UI", "URI", "URL", "UTF", "UUID", "VJP", "VM", "XML", "YAML",
+} }
+
+fn sema_casing_is_digit(scalar: String) -> Bool {
+    code :: sema_casing_ascii_code(scalar)
+    code >= 48 && code <= 57
+}
+
+// One PascalCase word: a lexicon acronym (plus trailing digits) in caps, a
+// fixed compound spelling, or the word unchanged. Coined contractions stay.
+fn sema_casing_acronym_word(word: String) -> String {
+    if word == "Wasm" || word == "Bindgen" -> return word.copy()
+    lower :: unicode.lower(word)
+    if lower == "macos" -> return "MacOS"
+    if lower == "ipv4" -> return "IPv4"
+    if lower == "ipv6" -> return "IPv6"
+    scalars :: unicode.scalars(word)
+    letters := scalars.len()
+    loop letters > 0 && sema_casing_is_digit(scalars[letters - 1]) -> letters -= 1
+    if letters == 0 -> return word.copy()
+    head :: unicode.upper(sema_casing_join(scalars, 0, letters))
+    loop acronym in SEMA_CASING_ACRONYMS {
+        if acronym == head -> return "{head}{sema_casing_join(scalars, letters, scalars.len())}"
+    }
+    word.copy()
+}
+
+// Respell every word of a PascalCase name (`HttpUrlId` -> `HTTPURLID`).
+// ALL_CAPS and snake_case names are value-like and stay unchanged.
+fn sema_casing_acronym_name(name: String) -> String {
+    scalars :: unicode.scalars(name)
+    if scalars.len() == 0 || !sema_casing_is_upper(scalars[0]) -> return name.copy()
+    has_lower := false
+    loop scalar in scalars {
+        if sema_casing_is_lower(scalar) -> has_lower = true
+    }
+    if !has_lower -> return name.copy()
+    segments := [String]{}
+    loop segment in name.split("_") {
+        out := ""
+        loop word in sema_casing_split_words(segment) -> out = "{out}{sema_casing_acronym_word(word)}"
+        &segments.push(out)
+    }
+    segments.join("_")
+}
+
+// D-MARKER-CASE1=A: a marker's library part is PascalCase. Each segment of
+// an import alias or module path is written as its PascalCase spelling with
+// acronyms in caps (`server` -> `Server`, `http_client` -> `HTTPClient`).
+fn sema_casing_marker_qualifier(path: String) -> String {
+    segments := [String]{}
+    loop segment in path.split(".") -> &segments.push(sema_casing_acronym_name(sema_casing_canonical(segment, SemaNameCase.Pascal)))
+    segments.join(".")
+}

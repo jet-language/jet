@@ -46,6 +46,8 @@ use jet_driver.[
     jet_driver_shared_build_inputs,
     jet_driver_shared_build_http_inputs,
     jet_driver_core_text_file,
+    jet_driver_dependency_selector,
+    jet_driver_version_selector_matches,
     JetDriverScriptDependency,
 ]
 use jet_eval.[
@@ -566,9 +568,11 @@ fn jet_cli_path_dependency_escape(name: String, relative: String, parent: String
     JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E1206", "path dependency `{name}` escapes its parent package", "the path `{relative}` resolves outside the declaring package directory `{parent}`", "use a relative path below the declaring package directory", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
 
-// Authorize each path root once, in dependency-name order. The driver's
-// catalog still owns dependency binding and semantic diagnostics; this host
-// only reads trees the declared graph permits. No provider or network is run.
+// Authorize each path root once, in dependency-name order, and each version
+// dependency's first-party battery (jet_cli_first_party_battery). The
+// driver's catalog still owns dependency binding and semantic diagnostics;
+// this host only reads trees the declared graph permits. No provider or
+// network is run.
 fn jet_cli_path_dependency_roots(roots: &[JetDriverAuthorizedSourceRoot], color: Bool) -[FS, Env]> JetDriverVerbOutput? Never! {
     entry :: roots[0].canonical_path
     root_reach :: jet_cli_root_path_reach(entry, jet_cli_root_dependencies(roots[0]))
@@ -579,6 +583,13 @@ fn jet_cli_path_dependency_roots(roots: &[JetDriverAuthorizedSourceRoot], color:
         names := dependencies.keys().to_list()
         &names.sort()
         loop name in names {
+            if dependencies[name] == .Registry(source) {
+                // No battery leaves the dependency unbound: the driver emits
+                // E0603 at the declaration.
+                battery :: jet_cli_first_party_battery(name, source) ?? next
+                if jet_cli_authorize_dependency_root(&roots, battery, color) == .Val(refusal) -> return Val(refusal)
+                next
+            }
             if dependencies[name] == .Path(relative) {
                 path :: jet_cli_report_path(Val(parent), relative)
                 canonical :: cli_files.realpath(path) ?? ""
@@ -592,28 +603,54 @@ fn jet_cli_path_dependency_roots(roots: &[JetDriverAuthorizedSourceRoot], color:
                 if index != 0 && !declared_by_root && !jet_cli_dependency_within(canonical, parent) {
                     return Val(jet_cli_path_dependency_escape(name, relative, parent, color))
                 }
-                found := false
-                loop existing in roots {
-                    if existing.canonical_path == canonical -> found = true
-                }
-                if found -> next
-                stat :: cli_files.stat(canonical) ?? next
-                if !stat.is_dir -> next
-                files := [JetDriverAuthorizedSourceFile]{}
-                directories := [AppAuthorizedDirectory]{}
-                caches := [JetDriverAuthorizedSourceFile]{}
-                budget := JetCLISourceBudget{entries: 0, bytes: 0, files: 0}
-                if jet_cli_walk_sources(canonical, "", 0, &files, &directories, true, &budget) == .Val(problem) {
-                    return Val(JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "can't securely read the sources under `{canonical}`: {problem}", jet_cli_why("E2105"), "remove the symbolic link or unreadable file, or check a file outside this tree", color), exit_code: JET_DRIVER_EXIT_USER_ERROR})
-                }
-                if jet_cli_foreign_cache_files(canonical, &caches, &budget) == .Val(problem) {
-                    return Val(JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "can't securely read the foreign bindings under `{canonical}`: {problem}", jet_cli_why("E2105"), "remove the symbolic link or unreadable file, or regenerate the bindings with `jet bind`", color), exit_code: JET_DRIVER_EXIT_USER_ERROR})
-                }
-                &roots.push(JetDriverAuthorizedSourceRoot{canonical_path: canonical, identity: jet_cli_identity_key("directory", stat), allow_hardlinks: false, files: files, foreign_cache_files: caches, directories: directories})
+                if jet_cli_authorize_dependency_root(&roots, canonical, color) == .Val(refusal) -> return Val(refusal)
             }
         }
         index += 1
     }
+    None
+}
+
+// The toolchain directory of the first-party batteries.
+JET_CLI_BATTERIES_DIR :: "Jetpack/Provider/Batteries"
+
+// The canonical root of the first-party battery a version dependency `name`
+// (`source`, its selector) names, or None. Like the Rust jetpack's embedded
+// batteries registry (crates/jetpack/build.rs generated
+// batteries_registry.rs from crates/jetpack/batteries/*), the toolchain
+// ships the batteries: `$JET_TOOLCHAIN_ROOT/Jetpack/Provider/Batteries/<name>`
+// resolves only when its package.jet declares that name and a version the
+// selector matches.
+fn jet_cli_first_party_battery(name: String, source: String) -[FS, Env]> String? Never! {
+    selector :: jet_driver_dependency_selector(source, name) ?? return None
+    toolchain :: cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) ?? return None
+    directory :: jet_cli_authority_path(toolchain, "{JET_CLI_BATTERIES_DIR}/{name}")
+    manifest_path :: jet_cli_authority_path(directory, "package.jet")
+    text :: cli_files.read(manifest_path) ?? return None
+    manifest :: pkg_manifest_parse(manifest_path, text) ?? return None
+    if manifest.package.name != name || !(jet_driver_version_selector_matches(selector, manifest.package.version) ?? false) -> return None
+    Val(cli_files.realpath(directory) ?? return None)
+}
+
+// Authorizes the directory `canonical` as one more source root unless a root
+// already holds it; the refusal when its tree can't be read securely.
+fn jet_cli_authorize_dependency_root(roots: &[JetDriverAuthorizedSourceRoot], canonical: String, color: Bool) -[FS]> JetDriverVerbOutput? Never! {
+    loop existing in roots {
+        if existing.canonical_path == canonical -> return None
+    }
+    stat :: cli_files.stat(canonical) ?? return None
+    if !stat.is_dir -> return None
+    files := [JetDriverAuthorizedSourceFile]{}
+    directories := [AppAuthorizedDirectory]{}
+    caches := [JetDriverAuthorizedSourceFile]{}
+    budget := JetCLISourceBudget{entries: 0, bytes: 0, files: 0}
+    if jet_cli_walk_sources(canonical, "", 0, &files, &directories, true, &budget) == .Val(problem) {
+        return Val(JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "can't securely read the sources under `{canonical}`: {problem}", jet_cli_why("E2105"), "remove the symbolic link or unreadable file, or check a file outside this tree", color), exit_code: JET_DRIVER_EXIT_USER_ERROR})
+    }
+    if jet_cli_foreign_cache_files(canonical, &caches, &budget) == .Val(problem) {
+        return Val(JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "can't securely read the foreign bindings under `{canonical}`: {problem}", jet_cli_why("E2105"), "remove the symbolic link or unreadable file, or regenerate the bindings with `jet bind`", color), exit_code: JET_DRIVER_EXIT_USER_ERROR})
+    }
+    &roots.push(JetDriverAuthorizedSourceRoot{canonical_path: canonical, identity: jet_cli_identity_key("directory", stat), allow_hardlinks: false, files: files, foreign_cache_files: caches, directories: directories})
     None
 }
 

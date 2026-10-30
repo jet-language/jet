@@ -97,9 +97,11 @@ vocabulary](vocabulary.md).
   retired markers and other named groups cannot be hidden inside it
   (D-MARKER-GROUP1=A).
   Markers declared by the current module may be bare; imported markers always
-  name their local import alias, as in `#web.Get(...)`. Group members bind in
-  the declaring module, not in whichever module applies the group. A public
-  group cannot publish a private member (D-MARKER-MODULE1=A).
+  name their local import alias in PascalCase, acronyms in caps, as in
+  `#Web.Get(...)` through `use core.http.server as web` (D-MARKER-CASE1=A);
+  a lowercase library part is E0087. Group members bind in the declaring
+  module, not in whichever module applies the group. A public group cannot
+  publish a private member (D-MARKER-MODULE1=A).
 - Decimal `Int` and `Float` literals are exact arbitrary-precision values.
   A decimal `Float` has digits on both sides of `.`, with an optional `e` or
   `E` exponent. `_` may separate digits. `0x`, `0o`, and `0b` introduce

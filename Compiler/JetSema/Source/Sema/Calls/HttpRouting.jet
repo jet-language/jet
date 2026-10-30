@@ -23,6 +23,7 @@ use jet_foundation.[
     ast_empty_call_arg_flags,
     ast_empty_lambda_meta,
     core_source_receiver_method,
+    expr_span,
     type_name,
 ]
 
@@ -1006,13 +1007,29 @@ fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: Stri
                 }
             }
         }
+        // A route handler takes at most one HTTPRequest: a second one is not a
+        // binding question but a handler that does not have the route
+        // handler's type, reported as the lambda/argument mismatch it is.
+        if request_names.len() > 1 {
+            request_ty :: sema_call_resolved_type(Type.Named{name: "HTTPRequest"}, environment, program)
+            required :: Type.Fn{params: [Type]{request_ty}, ret: Val(Type.Result{ok: Type.Named{name: "HTTPResponse"}, err: Type.Named{name: "HTTPError"}}), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+            // Rust expect_core_arg: the handler is checked against the route
+            // handler type, and a type it still does not have is E0112.
+            handler_value :: sema_expression_lambda_host_callback(updated_args[1].expr, Val(required), false, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+            if sema_call_host_callback_assignable(required, handler_value.ty, environment, program) == (.Val(false)) {
+                &diagnostics.push(sema_error("E0112", expr_span(updated_args[1].expr), "`{method}` wants {sema_type_show(required)} for argument 2, but this is {sema_type_show(handler_value.ty)}", "every argument must match its parameter's type", sema_type_fix_hint(required, handler_value.ty)))
+            }
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
         handler_issue := ""
+        issue_why := "path placeholders bind by name; GET/HEAD remainder is query data and non-GET inputs need an explicit body model"
+        issue_fix := "rename the handler input, add the matching path placeholder, or decode a body with `req.json<T>()`"
+        issue_span := updated_args[1].span
         if dynamic {
             loop parameter in typed {
                 if !sema_serde_type_is_admissible(environment, program, parameter.ty, SemaSerdeDirection.Decode) -> handler_issue = "dynamic HTTP route input `{parameter.name}` cannot decode text into handler type `{type_name(parameter.ty)}`"
             }
         }
-        if request_names.len() > 1 -> handler_issue = "HTTP route `{pattern}` has more than one HTTPRequest input"
         seen := [String]{}
         loop parameter in handler_shape.params {
             loop existing in seen {
@@ -1023,13 +1040,23 @@ fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: Stri
             }
             &seen.push(parameter.name)
         }
+        // A path field's binding is a property of the route path, so its
+        // diagnostics point at the path string.
         loop field in path_fields {
             matches := 0
             loop parameter in typed { if parameter.name == field.name -> matches = matches + 1 }
-            if matches != 1 -> handler_issue = "HTTP route `{pattern}` path field `{field.name}` does not have exactly one typed handler input"
+            if matches != 1 {
+                handler_issue = "HTTP route `{pattern}` path field `{field.name}` does not have exactly one typed handler input"
+                issue_why = "path placeholders are bound by name before request decoding"
+                issue_fix = "declare one `{field.name}: T` handler input"
+                issue_span = updated_args[0].span
+            }
             loop parameter in typed {
                 if parameter.name == field.name && !sema_serde_type_is_admissible(environment, program, parameter.ty, SemaSerdeDirection.Decode) {
                     handler_issue = "HTTP route `{pattern}` path field `{field.name}` cannot decode text into handler type `{type_name(parameter.ty)}`"
+                    issue_why = "path parameters use the same checked Decode capability as request decoding"
+                    issue_fix = "give `{type_name(parameter.ty)}` a `Decode` implementation, or use a decodable parameter type"
+                    issue_span = updated_args[0].span
                 }
             }
         }
@@ -1040,12 +1067,18 @@ fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: Stri
             found_path := false
             loop path_name in path_names { if path_name == parameter.name -> found_path = true }
             if !found_path {
-                if method == "get" || method == "head" || dynamic -> &query_names.push(parameter.name)
-                else -> handler_issue = "HTTP route `{pattern}` has unbound non-GET handler input `{parameter.name}`"
+                if method == "get" || method == "head" || dynamic {
+                    &query_names.push(parameter.name)
+                } else {
+                    handler_issue = "HTTP route `{pattern}` has unbound non-GET handler input `{parameter.name}`"
+                    issue_why = "path placeholders bind by name; GET/HEAD remainder is query data and non-GET inputs need an explicit body model"
+                    issue_fix = "rename the handler input, add the matching path placeholder, or decode a body with `req.json<T>()`"
+                    issue_span = updated_args[1].span
+                }
             }
         }
         if handler_issue != "" {
-            &diagnostics.push(sema_error("E2805", updated_args[1].span, handler_issue, "path placeholders bind by name; GET/HEAD remainder is query data and non-GET inputs need an explicit body model", "rename the handler input, add the matching path placeholder, or decode a body with `req.json<T>()`"))
+            &diagnostics.push(sema_error("E2805", issue_span, handler_issue, issue_why, issue_fix))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         result := Type.Result{ok: Type.Named{name: "HTTPResponse"}, err: Type.Named{name: "HTTPError"}}

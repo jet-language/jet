@@ -1989,6 +1989,14 @@ fn jet_driver_find_module_import_target(
     dependency :: jet_driver_find_dependency(source_package, path_parts[0])
     if dependency == .Val(selected_dependency) {
         if selected_dependency.target_root_index < 0 {
+            // A version dependency resolves only to the toolchain's
+            // first-party battery of its name (the CLI's
+            // jet_cli_first_party_battery, after the Rust jetpack's embedded
+            // batteries registry).
+            if selected_dependency.script_version == None && jet_driver_dependency_selector(selected_dependency.source, selected_dependency.name) == .Val(selector) {
+                &diagnostics.push(jet_driver_diagnostic("E0603", span, "the version dependency `{selected_dependency.name}` (`{selector}`) has no matching first-party battery", "a version dependency resolves only to the toolchain's battery `Jetpack/Provider/Batteries/{selected_dependency.name}`, whose package.jet declares that name and a version the selector matches", "depend on a first-party battery by its name and version, or use a path dependency such as `./{selected_dependency.name}`"))
+                return None
+            }
             &diagnostics.push(jet_driver_diagnostic("E0603", span, "the declared package dependency has no matching authorized root", "dependency roots are selected only from the native source snapshot", "include exactly one matching package root in the authorized source request"))
             return None
         }

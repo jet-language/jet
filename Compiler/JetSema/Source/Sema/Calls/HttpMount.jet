@@ -25,6 +25,7 @@ use jet_foundation.[
     body_each_stmt_child,
     body_node,
     body_type,
+    expr_span,
     symbol_id,
     checked_symbol_local,
     type_name,
@@ -109,7 +110,7 @@ fn sema_call_http_mount(receiver: Expr, receiver_value: TExpr, args: [CallArg], 
                             if registered.declaration.name == method.name -> meta.http_route_source = Val(registered.symbol.id.key)
                         }
                         handler :: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: params, effects: None, body: LambdaBody.Expr{value: invocation}, span: marker.span, meta: meta}, id: AST_NODE_GENERATED}
-                        registration :: sema_call_try_http_router(receiver, sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), verb, [CallArg]{sema_http_mount_arg(path, marker.span), sema_http_mount_arg(handler, marker.span)}, marker.span, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                        registration :: sema_call_try_http_router(receiver, sema_tree_node(receiver_value.ty, TExprKind.Local{local: mux_local}, span), verb, [CallArg]{sema_http_mount_arg(path, expr_span(path)), sema_http_mount_arg(handler, marker.span)}, marker.span, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                         if registration.value == .Val(value) -> &body.push(TStmt.ExprStmt{value: value, span: marker.span})
                     }
                 }
@@ -118,7 +119,7 @@ fn sema_call_http_mount(receiver: Expr, receiver_value: TExpr, args: [CallArg], 
                 panic("mount has no registration graph")
             }
         } else {
-            &diagnostics.push(sema_error("E2805", args[0].span, "mux.mount needs an ordinary struct, not `{type_name(value_ty)}`", "only the explicitly mounted struct's tagged methods contribute routes", "pass a struct value with #server.Get or another core.http.server verb marker"))
+            &diagnostics.push(sema_error("E2805", args[0].span, "mux.mount needs an ordinary struct, not `{type_name(value_ty)}`", "only the explicitly mounted struct's tagged methods contribute routes", "pass a struct value with #Server.Get or another core.http.server verb marker"))
         }
     }
     sema_single_use_leave_scope(&scopes, &state, &diagnostics)

@@ -1733,9 +1733,15 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
         }
     }
     if lambda.effects != None -> expected_effects = lambda.effects
-    if expected_params != None && lambda.params.len() != (expected_params ?? [Type]{}).len() {
-        &diagnostics.push(sema_error("E0104", lambda.span, "this lambda has {lambda.params.len()} parameters, but {(expected_params ?? [Type]{}).len()} were expected", "function values have a fixed parameter count", "match the expected function type"))
-        return None
+    // Rust lambdas.rs: the arity mismatch is reported and the lambda is still
+    // checked under its own parameters, so the caller sees its real type and
+    // reports the argument mismatch against its own parameter.
+    arity_reported := false
+    if expected_params == .Val(required_params) && lambda.params.len() != required_params.len() {
+        parameter_word :: if lambda.params.len() == 1 -> "parameter" else -> "parameters"
+        expected_verb :: if required_params.len() == 1 -> "was" else -> "were"
+        &diagnostics.push(sema_error("E0104", lambda.span, "this lambda has {lambda.params.len()} {parameter_word}, but {required_params.len()} {expected_verb} expected", "parameter count must match the function type at this spot", "add or remove parameters, or fix the surrounding type"))
+        arity_reported = true
     }
 
     // Host callback bodies and explicitly escaping hooks are checked outside
@@ -2274,7 +2280,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
         uses_stack_sentry: false,
     }
     result := sema_tree_node(fn_ty, TExprKind.Lambda{value: lambda_value}, lambda.span)
-    checked :: if (host_callback || open_result) && expected_ret == None -> result else -> sema_expr_expected(result, expected, environment, program, &diagnostics) ?? return None
+    checked :: if arity_reported || ((host_callback || open_result) && expected_ret == None) -> result else -> sema_expr_expected(result, expected, environment, program, &diagnostics) ?? return None
     if inline_loop {
         sema_scope_leave(&lambda_scopes, &lambda_state)
         sema_ownership_join_paths(&state, lambda_parent_state, lambda_state, lambda_parent_state, true)
