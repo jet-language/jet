@@ -1269,7 +1269,7 @@ fn run() {
 
 | API | Result | Description |
 | --- | --- | --- |
-| `sha256(bytes)` / `sha512(bytes)` / `blake3(bytes)` | `Digest256` / `Digest512` | Produce typed digests; use `.hex()` or `.as_bytes()`. |
+| `sha256(input)` / `sha512(bytes)` / `blake3(bytes)` | `Digest256` / `Digest512` | Produce typed digests; use `.hex()` or `.as_bytes()`. `sha256` takes `[U8] \| String`; a `String` hashes its UTF-8 bytes. |
 | `sha1(bytes)` / `sha224(bytes)` / `sha384(bytes)` | `String` | Produce legacy SHA hex digests; SHA-1 remains for UUID v5 and legacy checks. |
 | `sha3_224` / `sha3_256` / `sha3_384` / `sha3_512` | `String` | Produce SHA-3 hex digests. |
 | `hmac_sha256(key, data)` | `[U8]` | Produce HMAC-SHA256 bytes. |

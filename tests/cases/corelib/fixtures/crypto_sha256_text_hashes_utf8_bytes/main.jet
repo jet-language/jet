@@ -1,0 +1,14 @@
+// crypto.sha256 takes `[U8] | String`; text hashes its UTF-8 bytes.
+use core.crypto as crypto
+
+fn run() {
+    text :: crypto.sha256("hello").hex()
+    bytes :: crypto.sha256("hello".bytes()).hex()
+    print("text  {text}")
+    print("bytes {bytes}")
+    print("same {text == bytes}")
+    // A non-ASCII string hashes its UTF-8 encoding, not its characters.
+    accented :: crypto.sha256("é").hex()
+    print("utf8 {accented == crypto.sha256([U8]{0xC3, 0xA9}).hex()}")
+    print("empty {crypto.sha256("").hex()}")
+}
