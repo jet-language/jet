@@ -140,6 +140,7 @@ use jet_foundation.[
     name_rows,
     name_rows_get_text,
     name_rows_set_first,
+    ast_job_metadata,
 ]
 use jet_parser.[
     parse_source,
@@ -2629,6 +2630,34 @@ fn jet_driver_c_export_rows(graph: SemaRegistrationGraph, entry_module_identity:
     rows
 }
 
+// One `#Job` function of the entry module that argv can select
+// (D-JOB-SUBCMD1=C): its symbol key, its name (the program word that selects
+// it) and whether it is `#Job(.Ship)`, the only scope a release binary
+// exposes. `.Internal` jobs never reach argv, so they have no row.
+struct JetDriverJobRow {
+    key: String
+    name: String
+    shipped: Bool
+}
+
+// The entry module's argv-selectable jobs in declaration order, read from
+// the registration graph as jet_driver_c_export_rows reads its exports. Only
+// a job without parameters is selectable: typed job arguments
+// (D-CLIFLAG1) are not built.
+fn jet_driver_job_rows(graph: SemaRegistrationGraph, entry_module_identity: String) -> [JetDriverJobRow] Never! {
+    rows := [JetDriverJobRow]{}
+    loop registration_module in graph.modules {
+        if registration_module.module_identity != entry_module_identity -> next
+        loop row in registration_module.functions {
+            if !row.declaration.is_job || row.declaration.params.len() > 0 -> next
+            metadata :: row.declaration.job_metadata ?? ast_job_metadata()
+            if metadata.scope == .Internal -> next
+            &rows.push(JetDriverJobRow{key: row.symbol.id.key, name: row.declaration.name, shipped: metadata.scope == .Ship})
+        }
+    }
+    rows
+}
+
 // The Rust foreign facts of the registration graph a compile kept past IR
 // lowering; a compile that released it had no `extern rust` function, whose
 // facts are empty (jet_driver_rust_foreign_present).
@@ -2917,7 +2946,8 @@ struct JetDriverCheckedProjectionCapture {
 // the entry module; the key of the executable entry
 // (jet_driver_resolve_entry_key), None for a program without one; the entry
 // module's `#Export(c)` rows (jet_driver_c_export_rows), the exports of a
-// library. A Test compile has no entry: it carries the tests and Check
+// library, and its argv-selectable jobs (jet_driver_job_rows). A Test
+// compile has no entry: it carries the tests and Check
 // Outputs its harness runs (jet_driver_test_plan) instead.
 struct JetDriverLoweringInputs {
     functions: [FnBody]
@@ -2930,6 +2960,8 @@ struct JetDriverLoweringInputs {
     tests: [TTestFact]{[TTestFact]{}}
     output_checks: [TOutputCheckFact]{[TOutputCheckFact]{}}
     c_exports: [JetDriverCExportRow]{[JetDriverCExportRow]{}}
+    // The entry module's argv-selectable jobs (jet_driver_job_rows).
+    jobs: [JetDriverJobRow]{[JetDriverJobRow]{}}
 }
 
 struct JetDriverLoweringInputsResult {
@@ -3772,6 +3804,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     // table moves on with the checked functions, whose direct calls name it.
     jet_driver_trace_step_begin(request.trace_sink, "driver.prelower.registration")
     c_export_rows :: jet_driver_c_export_rows(registration_graph, load.entry_module_identity)
+    job_rows :: jet_driver_job_rows(registration_graph, load.entry_module_identity)
     decls := ^registration_graph.decls
     registration_graph.decls = DeclTable{}
     late_registration := SemaRegistrationGraph?{None}
@@ -3833,7 +3866,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         loop file in load.source_files {
             if sources.get(file.path) == None -> sources[file.path] = file.source
         }
-        capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: ^sema_functions, modules: ^runtime_semantic_modules, decls: ^decls, sources: ^sources, entry_module_identity: load.entry_module_identity, entry_key: entry_key, tests: ^tests, output_checks: ^output_checks, c_exports: c_export_rows.copy()})
+        capture.lowering_inputs = Val(JetDriverLoweringInputs{functions: ^sema_functions, modules: ^runtime_semantic_modules, decls: ^decls, sources: ^sources, entry_module_identity: load.entry_module_identity, entry_key: entry_key, tests: ^tests, output_checks: ^output_checks, c_exports: c_export_rows.copy(), jobs: job_rows.copy()})
     }
     result := jet_driver_compile_result(load, load.diagnostics, None, true, trace)
     result.entry_effects = ^entry_effects

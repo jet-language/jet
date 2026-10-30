@@ -195,6 +195,24 @@ fn host_startup_list(bytes: I64, length: I64, output: I64) {
     }
 }
 
+// D-JOB-SUBCMD1=C: 1 when the program's first word (argv[1]) is the
+// `length` bytes at `data`, the name of a job the entry function runs in
+// place of `fn run` (JetIR ir_entry_function); 0 otherwise.
+#Export(c) fn jet_rt_entry_job_selected(data: I64, length: I64) -> I64 {
+    host_arguments_require()
+    if (host_argc < I64{2}) { return I64{0} }
+    bytes :: host_argument_bytes(I64{1})
+    if (host_startup_byte_length(bytes) != length) { return I64{0} }
+    #Unsafe("argv[1] is an immutable startup string of `length` bytes; data lends the job name's static bytes") {
+        at := I64{0}
+        loop at < length {
+            if (os_load_u8(wrapping(bytes + at)) != os_load_u8(wrapping(data + at))) { return I64{0} }
+            at = wrapping(at + I64{1})
+        }
+    }
+    I64{1}
+}
+
 // FSIoEnvOsTesting.rs jet_std_io_args: std::env::args().collect(), argv[0]
 // first, through the generated list-out ABI (an exact count*8 buffer of owned
 // Text words, 0 when empty). Args::next unwraps into_string, so a non-UTF-8

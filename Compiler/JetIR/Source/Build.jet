@@ -201,6 +201,18 @@ struct IRChecks {
     // fallible allocation past the cap fails (ir_entry_function passes it to
     // jet_rt_program_allocator_configure); None keeps the system heap.
     counting: Int?{None}
+    // D-JOB-SUBCMD1=C: the jobs the program's first word can select ahead of
+    // the entry; the entry function calls each (ir_entry_function).
+    jobs: [IRJob]{[IRJob]{}}
+}
+
+// An argv-selectable job: the checked function `key` that the program word
+// `name` runs instead of the entry. A `stripped` job is one a release build
+// does not ship (any but `#Job(.Ship)`): its word is an unknown command.
+struct IRJob {
+    key: String
+    name: String
+    stripped: Bool
 }
 
 // The `backtrace` build option: what a native fault report prints after its
@@ -1088,20 +1100,18 @@ IR_STARTUP_FUNCTION_PREFIX :: "__startup_"
 
 // The function the executable starts: `entry` itself when it takes nothing,
 // returns nothing, the program computes no constant at startup, the
-// `backtrace` build option is the stock `full` and the program allocator the
-// system heap, otherwise a generated `entry` function. It first passes a
-// `brief` or `off` backtrace to the runtime (jet_rt_fault_backtrace, the
-// IRBacktrace word) and a counting program allocator's cap
-// (jet_rt_program_allocator_configure, IRChecks.counting), computes every
-// constant computed at startup (p.startup, through ir_startup_guard), then calls
-// `entry` and handles its failure carrier: an `Err` ends the process with the
-// error's report and exit status 1 (the default `Err` through
-// jet_rt_entry_error_exit_err, any other error through its Printable text and
-// jet_rt_entry_error_exit), a `None` with "entry returned no value"; success
-// drops the result and returns.
+// `backtrace` build option is the stock `full`, the program allocator the
+// system heap and no job is selectable, otherwise a generated `entry`
+// function. It first passes a `brief` or `off` backtrace to the runtime
+// (jet_rt_fault_backtrace, the IRBacktrace word) and a counting program
+// allocator's cap (jet_rt_program_allocator_configure, IRChecks.counting),
+// computes every constant computed at startup (p.startup, through
+// ir_startup_guard), then runs the job the program's first word names
+// (D-JOB-SUBCMD1=C, jet_rt_entry_job_selected over IRChecks.jobs) or else
+// `entry`, through ir_entry_call.
 fn ir_entry_function(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuildFailure]) -> Int Never! {
     row :: m.functions[entry].result
-    if m.functions[entry].param_count > 0 || (row < 0 && p.startup.len() == 0 && p.checks.backtrace == .Full && p.checks.counting == None) -> return entry
+    if m.functions[entry].param_count > 0 || (row < 0 && p.startup.len() == 0 && p.checks.backtrace == .Full && p.checks.counting == None && p.checks.jobs.len() == 0) -> return entry
     ty :: if row >= 0 -> m.types[row].ty.copy() else -> Type.Named{name: "Unit"}
     key :: "{m.functions[entry].key}#entry"
     id :: m.functions.len()
@@ -1131,9 +1141,60 @@ fn ir_entry_function(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuild
         guard_operands :: ir_args(&b.f, [Int]{})
         ir_emit(&b.f, IROp.Call, -1, guard, guard_operands, 0, b.line)
     }
+    loop job in p.checks.jobs -> ir_entry_job(&m, p, &b, job, span)
+    ir_entry_call(&m, p, &b, entry, row, ty, span)
+    ir_emit(&b.f, IROp.Return, -1, -1, -1, -1, b.line)
+    if b.error != "" {
+        &failures.push(IRBuildFailure{key: key, name: "entry", message: b.error, source_file: m.functions[entry].source_file, span: b.error_span})
+    }
+    ir_resolve_deferred(&m, p, &b)
+    m.functions[id] = ^b.f
+    id
+}
+
+// The branch of the entry function that runs `job` when the program's first
+// word names it, and returns. A job a release build strips (`job.stripped`)
+// is not built: its word ends the process with the unknown-command report
+// and the `#Job(.Ship)` fix.
+fn ir_entry_job(m: &IRModule, p: IRProgram, b: &IRBuilder, job: IRJob, span: Span) Never! {
+    job_row :: ir_function_row(p, job.key) ?? return ir_fail(&b, span, "the job {job.name} is not among the checked functions")
+    function :: p.functions[job_row]
+    name :: ir_static_text(&m, &b, job.name)
+    word_row :: ir_word_row(&m)
+    selected :: ir_runtime(&m, &b, "jet_rt_entry_job_selected", name, word_row)
+    zero :: ir_word_const(&m, &b, 0)
+    chosen :: ir_bool_op(&m, &b, IROp.Ne, selected, zero)
+    ir_open_if(&b.f, chosen, b.line)
+    if job.stripped {
+        message :: ir_static_text(&m, &b, "unknown command `{job.name}`: a release binary runs only `#Job(.Ship)` jobs; mark `{job.name}` `#Job(.Ship)` to ship it")
+        string_row :: ir_string_row(&m)
+        text :: ir_runtime(&m, &b, "jet_rt_string_from_static", message, string_row)
+        _ :: ir_runtime(&m, &b, "jet_rt_entry_error_exit", [Int]{text}, -1)
+        ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+    } else {
+        declared :: if function.ret == .Val(written) -> Val(ir_fact(p, &b, written, function.source_span)) else -> Type?{None}
+        job_ty :: ir_executable_return_in(function, declared) ?? Type.Named{name: "Unit"}
+        job_result := -1
+        if !ir_unit_type(job_ty) && !ir_never_type(job_ty) {
+            job_result = ir_value_type(&m, p, job_ty) ?? return ir_fail(&b, function.source_span, "job result type {ir_type_name(job_ty)}")
+        }
+        callee :: ir_function_row_id(&m, p, job_row, [Type]{}) ?? return ir_fail(&b, function.source_span, "the job {job.name}")
+        ir_entry_call(&m, p, &b, callee, job_result, job_ty, span)
+        ir_emit(&b.f, IROp.Return, -1, -1, -1, -1, b.line)
+    }
+    ir_end(&b.f, b.line)
+}
+
+// Calls the program's start `callee` (the entry or a selected job) with
+// result row `row` (-1: none) of type `ty`, and handles its failure carrier:
+// an `Err` ends the process with the error's report and exit status 1 (the
+// default `Err` through jet_rt_entry_error_exit_err, any other error through
+// its Printable text and jet_rt_entry_error_exit), a `None` with "entry
+// returned no value"; success drops the result.
+fn ir_entry_call(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, row: Int, ty: Type, span: Span) Never! {
     result :: if row >= 0 -> ir_fresh_temp(&m, &b, row) else -> -1
     operands :: ir_args(&b.f, [Int]{})
-    ir_emit(&b.f, IROp.Call, result, entry, operands, 0, b.line)
+    ir_emit(&b.f, IROp.Call, result, callee, operands, 0, b.line)
     ir_stop_check(&m, &b)
     if ir_untag(ty) == {
         .Result(_, err_ty) -> {
@@ -1171,13 +1232,6 @@ fn ir_entry_function(m: &IRModule, p: IRProgram, entry: Int, failures: &[IRBuild
         else -> {}
     }
     if result >= 0 -> ir_release(&m, &b, result)
-    ir_emit(&b.f, IROp.Return, -1, -1, -1, -1, b.line)
-    if b.error != "" {
-        &failures.push(IRBuildFailure{key: key, name: "entry", message: b.error, source_file: m.functions[entry].source_file, span: b.error_span})
-    }
-    ir_resolve_deferred(&m, p, &b)
-    m.functions[id] = ^b.f
-    id
 }
 
 // Builds every checked non-generic function (a library or a coverage
