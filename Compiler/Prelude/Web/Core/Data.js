@@ -220,9 +220,6 @@ function jet_data_track_replace(tracked, key, row, typeArgs = []) {
 function jet_data_track_remove(tracked, key, typeArgs = []) {
   return jet_data_web_invoke("track_remove", [tracked, key], jet_data_web_type_args(typeArgs));
 }
-function jet_data_csv_reader(input, limits, typeArgs = []) {
-  return jet_data_web_invoke("csv_reader", [input, limits], jet_data_web_type_args(typeArgs));
-}
 function jet_data_json_reader(input, limits, typeArgs = []) {
   return jet_data_web_invoke("json_reader", [input, limits], jet_data_web_type_args(typeArgs));
 }

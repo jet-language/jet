@@ -9,8 +9,8 @@
 // from the start of the text, and `path` starts with the record index among
 // non-blank records (`/2/name`).
 //
-// `parse`, `first`, `count_rows`, and `reader(text)` operate on text the caller
-// already holds. The bounded file reader consumes a `^files.FileReader`.
+// `parse`, `first`, and `count_rows` operate on text the caller already holds.
+// The bounded `reader` consumes a `^files.FileReader`. (D-ENCSTREAM-SURFACE1=A)
 //
 // `to_string` writes one compact JSON value per record and a trailing newline so
 // concatenation of documents stays a valid JSONL stream. There is no pretty
@@ -18,7 +18,7 @@
 use core.encoding.[Dyn, EncodingError, EncodingFormat, EncodingLimits]
 use core.encoding.json as json
 use __core_encoding_stream as stream
-use core.files.[FileWriter]
+use core.files.[FileReader, FileWriter]
 
 /// Bounded JSONL output uses the native-shipped delayed-LF policy in Jet.
 struct JSONLWriter {
@@ -33,10 +33,27 @@ fn writer(target: ^FileWriter, limits: EncodingLimits{EncodingLimits.safe()}) -[
     Ok(JSONLWriter{output: ^output})
 }
 
+/// A bounded pull reader over a consumed file: one nonblank record per `next()`.
+/// The source pull engine owns framing, limits and sticky errors.
+fn reader(input: ^FileReader, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> JSONLReader EncodingError! {
+    source :: stream.jsonl_reader(^input, limits, false) ?? {
+        error := err
+        error.format = .JSONL
+        return Err(error)
+    }
+    Ok(JSONLReader{input: ^source})
+}
+
+struct JSONLReader {
+    input: stream.JSONLinesPull
+
+    fn next(&self) -[IO, Time.Wait]> Dyn? EncodingError! { &self.input.next() }
+}
+
 /// Parse every non-empty record as JSON. Allocates one `Dyn` per record.
 fn parse(text: String) -> [Dyn] EncodingError! {
     rows := [Dyn]{}
-    cursor := reader(text)
+    cursor := records(text)
     loop {
         row :: &cursor.next()
         if row == None -> break
@@ -59,7 +76,9 @@ fn to_string(rows: [Dyn]) -> String EncodingError! {
     Ok(text)
 }
 
-struct JSONLReader {
+// The record cursor of the whole-text calls: it parses no record beyond the
+// last one requested.
+struct JSONLRecords {
     text: String
     offset: Int
     line: Int
@@ -76,7 +95,7 @@ struct JSONLReader {
     }
 }
 
-impl JSONLReader {
+impl JSONLRecords {
     fn next_record(&self) -> JSONLRecord? Never! {
         if self.offset >= self.text.count_bytes() -> return None
         start :: self.offset
@@ -98,10 +117,9 @@ impl JSONLReader {
     }
 }
 
-fn reader(text: String) -> JSONLReader Never! {
-    JSONLReader{text: text, offset: 0, line: 1, records_read: 0}
+fn records(text: String) -> JSONLRecords Never! {
+    JSONLRecords{text: text, offset: 0, line: 1, records_read: 0}
 }
-
 
 fn loads(text: String) -> [Dyn] EncodingError! { parse(text) }
 
@@ -144,7 +162,7 @@ fn append_line(text: String, value: Dyn) -> String EncodingError! {
 }
 
 fn first(text: String) -> Dyn? EncodingError! {
-    cursor := reader(text)
+    cursor := records(text)
     &cursor.next()
 }
 

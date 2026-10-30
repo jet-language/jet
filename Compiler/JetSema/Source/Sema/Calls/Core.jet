@@ -564,7 +564,6 @@ fn sema_call_core_native_resource_consumer(module_name: String, member: String, 
     // #4747: the fixed floating constraint preserves Float/F32 inference.
     // The checked-tree call below selects the reserved source wrapper.
     (module_name == "core.math" && (member == "cmp" || member == "is_finite" || member == "sqrt")) ||
-    ((module_name == "core.encoding.json" || module_name == "core.encoding.jsonl") && member == "reader" && first_is_move) ||
         (module_name == "core.net.tls" && member == "client" && first_is_move) ||
         // Worker alone keeps checked fn() inference; its source slot is opaque.
         (module_name == "core.service" && member == "worker")
@@ -1257,8 +1256,9 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
         }
     }
     if record.module_name == "core.encoding" && (record.member == "__text_cells_enter" || record.member == "__text_cells_leave") {
-        if !environment.source_file.starts_with("<corelib>/") || environment.module_name != "core.encoding.csv" {
-            &diagnostics.push(sema_error("E0510", span, "CSV text-cell leaves are compiler-private", "raw CSV text-cell decode mechanics are restricted to Core CSV source", "use csv.decode<T>"))
+        // Core CSV decode and the typed `core.data.csv_reader` rows share the scope.
+        if !environment.source_file.starts_with("<corelib>/") || (environment.module_name != "core.encoding.csv" && environment.module_name != "core.data") {
+            &diagnostics.push(sema_error("E0510", span, "CSV text-cell leaves are compiler-private", "raw CSV text-cell decode mechanics are restricted to Core CSV and typed data source", "use csv.decode<T>"))
             return None
         }
     }
@@ -1487,7 +1487,6 @@ fn sema_call_core_identity_value(value: TExpr, type_args: [Type], expected: Type
     loop row in CORE_CALLS {
         loop moved in moves {
             previous :: (row.module_name == "core.math" && (row.member == "cmp" || row.member == "is_finite")) ||
-                ((row.module_name == "core.encoding.json" || row.module_name == "core.encoding.jsonl") && row.member == "reader" && moved) ||
                 (row.module_name == "core.net.tls" && row.member == "client" && moved)
             worker :: row.module_name == "core.service" && row.member == "worker"
             assert(sema_call_core_native_resource_consumer(row.module_name, row.member, moved) == (previous || worker))

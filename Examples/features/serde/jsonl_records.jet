@@ -1,5 +1,5 @@
 // JSONL record boundaries over text you already hold (`jsonl.parse`,
-// `jsonl.reader(text)`): one complete JSON value per line, `\r\n` accepted,
+// `jsonl.first`): one complete JSON value per line, `\r\n` accepted,
 // blank lines skipped. Two values on one line are a syntax error, not two
 // records, and an unfinished final record is truncated. Errors carry the
 // record index in `path` plus the stream line and byte offset.
@@ -23,28 +23,9 @@ fn whole(label: String, text: String) {
     print("{label}: {rows.len()} records")
 }
 
-// Two good records, then the multi-root line stops the reader.
-fn read_all(text: String) {
-    records := jsonl.reader(text)
-    loop _ in 0..<3 {
-        if &records.next() == {
-            .Val(row) -> {
-                print("reader: {json.canonical(row) ?? panic("canonical")}")
-            }
-            .None -> return
-            .Err(error) -> {
-                line :: error.line ?? 0
-                print("reader: {kind_name(error.kind)} at `{error.path}` line {line} byte {error.byte_offset}: {error.reason}")
-                return
-            }
-        }
-    }
-}
-
 // Stopping after the first record parses nothing past it.
 fn first_only(text: String) {
-    records := jsonl.reader(text)
-    row :: &records.next() ?? panic("first record")
+    row :: jsonl.first(text) ?? panic("first record")
     print("early exit after {json.canonical(row) ?? panic("canonical")}")
 }
 
@@ -55,6 +36,5 @@ fn run() {
     whole("partial final record", "{{\"a\":1}}\n{{\"c\":")
     whole("clean", "{{\"a\":1}}{cr}\n\n{{\"b\":2}}")
     print("count: {jsonl.count_rows(stream)}")
-    read_all(stream)
     first_only(stream)
 }

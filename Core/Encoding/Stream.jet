@@ -164,6 +164,11 @@ struct JSONPull {
     terminal: EncodingError?
     allocation: AllocationBudget
     output_heap: Int
+    // Strict readers retain each open object's keys to reject a repeated
+    // key; `seen_starts` marks where each open object's keys begin.
+    allow_duplicates: Bool
+    seen_keys: [String]
+    seen_starts: [Int]
 
     fn next(&self) -[IO, Time.Wait]> DataEvent? EncodingError! {
         if self.terminal == .Val(first) -> return Err(first)
@@ -204,8 +209,20 @@ struct JSONPull {
             }
         }
         self.frames = [ReadFrame]{}
+        loop key in self.seen_keys -> bytes += key.count_bytes() + mem.__type_size<String>()
+        self.seen_keys = [String]{}
+        self.seen_starts = [Int]{}
         self.allocation.release(bytes + self.output_heap)
         self.output_heap = 0
+    }
+
+    fn close_seen(&self) Never! {
+        if self.allow_duplicates -> return
+        start :: &self.seen_starts.pop() ?? panic("matched JSON object key set")
+        loop self.seen_keys.len() > start {
+            key :: &self.seen_keys.pop() ?? panic("retained JSON object key")
+            self.allocation.release(key.count_bytes() + mem.__type_size<String>())
+        }
     }
 
     fn error(self, kind: EncodingErrorKind, reason: String) -> EncodingError Never! {
@@ -446,6 +463,7 @@ struct JSONPull {
                 return Ok(DataEvent.ArrayStart)
             }
             &self.push_frame(.ObjectKeyOrEnd(true))
+            if !self.allow_duplicates -> &self.seen_starts.push(self.seen_keys.len())
             return Ok(DataEvent.ObjectStart)
         }
         if byte == (U8{45}) || (byte >= (U8{48}) && byte <= (U8{57})) -> return &self.number(byte)
@@ -514,12 +532,25 @@ struct JSONPull {
                         if !first -> return Err(self.error(.Syntax, "expected an object key after `,`"))
                         _ :: &self.consume()
                         _ :: &self.frames.pop()
+                        &self.close_seen()
                         return Ok(Val(DataEvent.ObjectEnd))
                     }
                     if !first && byte == None -> return Err(self.error(.Truncated, "unterminated JSON object"))
                     if byte != (Val(U8{34})) -> return Err(self.error(.Syntax, "expected a quoted object key"))
                     key :: &self.read_string()
                     heap :: key.count_bytes()
+                    if !self.allow_duplicates {
+                        start :: self.seen_starts[self.seen_starts.len() - 1]
+                        loop index in start..<self.seen_keys.len() {
+                            if self.seen_keys[index] == key {
+                                error := self.error(.Syntax, "duplicate object key `{key}`")
+                                error.path = "{self.path()}[{quote_path(key)}]"
+                                return Err(error)
+                            }
+                        }
+                        if !self.allocation.charge(heap + mem.__type_size<String>()) -> return Err(self.item_error("string"))
+                        &self.seen_keys.push(key.copy())
+                    }
                     if !self.allocation.charge(heap) -> return Err(self.item_error("string"))
                     self.frames[count - 1] = .ObjectColonValue{key: key.copy(), key_heap: U64{heap}}
                     return Ok(Val(DataEvent.Key(key)))
@@ -547,6 +578,7 @@ struct JSONPull {
                     } else if byte == (Val(U8{125})) {
                         _ :: &self.consume()
                         _ :: &self.frames.pop()
+                        &self.close_seen()
                         self.allocation.release(Int.from_u64(heap))
                         return Ok(Val(DataEvent.ObjectEnd))
                     } else {
@@ -651,9 +683,9 @@ fn fold_reserve<T>(parser: JSONPull, values: &[T], heap: &FoldBudget) EncodingEr
     heap.tracked += mem.__list_capacity<T>(values) * mem.__type_size<T>() - old
 }
 
-fn json_reader(input: ^FileReader, limits: EncodingLimits) -> JSONPull EncodingError! {
+fn json_reader(input: ^FileReader, limits: EncodingLimits, allow_duplicates: Bool) -> JSONPull EncodingError! {
     validate_limits(limits)
-    Ok(JSONPull{input: input, limits: limits, total: 0, offset: 0, line: 1, column: 1, lookahead: None, frames: [ReadFrame]{}, root_started: false, eof: false, record_mode: false, typed_numbers: false, terminal: None, allocation: budget(limits), output_heap: 0})
+    Ok(JSONPull{input: input, limits: limits, total: 0, offset: 0, line: 1, column: 1, lookahead: None, frames: [ReadFrame]{}, root_started: false, eof: false, record_mode: false, typed_numbers: false, terminal: None, allocation: budget(limits), output_heap: 0, allow_duplicates: allow_duplicates, seen_keys: [String]{}, seen_starts: [Int]{}})
 }
 
 fn valid_number(bytes: [U8]) -> Bool Never! {
@@ -1576,7 +1608,8 @@ struct JSONLinesPull {
 }
 
 fn jsonl_reader(input: ^FileReader, limits: EncodingLimits, typed_numbers: Bool) -> JSONLinesPull EncodingError! {
-    parser := json_reader(^input, limits) ?? return Err(err)
+    // The record fold rejects a repeated key itself while building each record.
+    parser := json_reader(^input, limits, true) ?? return Err(err)
     parser.record_mode = true
     parser.typed_numbers = typed_numbers
     Ok(JSONLinesPull{parser: parser, record_index: 0, terminal: None})

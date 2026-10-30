@@ -11,7 +11,9 @@ struct Record {
 fn run() {
     input :: files.open("/dev/null") ?? panic("open")
     limits := data.DataLimits.safe()
-    reader :: data.csv_reader<Record>(^input, limits) ?? panic("reader")
-    first :: stream.next(&reader) ?? panic("next")
-    print(first == None)
+    reader := data.csv_reader<Record>(^input, limits) ?? panic("reader")
+    if stream.next(&reader) == {
+        .Ok(first) -> print(first == None)
+        .Err(error) -> panic("next: {error}")
+    }
 }

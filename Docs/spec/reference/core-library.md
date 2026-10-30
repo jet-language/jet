@@ -1331,7 +1331,7 @@ use core.crypto.vault as vault
 
 fn provision() -[Secret, IO]> {
     plan :: vault.prepare_generate<crypto.SigningKey>("release") ?? return
-    write :: vault.authorize_write(&plan, "create release signer") ?? return
+    write :: vault.authorize_write(plan, "create release signer") ?? return
     key_ref :: vault.commit_generate(^write, ^plan) ?? return
     print("created {key_ref}")
 }
@@ -2732,7 +2732,7 @@ syntax is rejected. Typed `decode<T>` checks numbers when projecting into `T`;
 quoted numbers stay text. Compact output retains insertion order, pretty output
 uses two-space indentation, and `canonical` is RFC 8785 JCS with UTF-16 key
 order. `parse`, `decode`, and `reader` reject a repeated object name with its
-path and position; the `_allow_duplicates` siblings are the explicit opt-in.
+path and position; `parse_allow_duplicates` is the explicit opt-in.
 The reader enforces depth `256` and a maximum item size of `16,777,216` bytes.
 
 | Function or type | Returns | Description |
@@ -2746,14 +2746,10 @@ The reader enforces depth `256` and a maximum item size of `16,777,216` bytes.
 | `json.pointer(tree, path)` | `Dyn !EncodingError` | Select by RFC 6901 JSON Pointer; a missing member or bad step is a located error, JSON `null` is a value. |
 | `json.patch(doc, ops)` / `patch_with_limits(doc, ops, limits)` | `Dyn !EncodingError` | Apply an RFC 6902 operation array atomically; `doc` is unchanged on failure. |
 | `json.events(value)` | `[DataEvent]` | Produce the canonical event sequence for a tree. |
-| `json.reader(text)` / `reader_allow_duplicates(text)` | `JSONReader` | Pull events over text already held in memory; the duplicate-permitting reader reports each key occurrence. Its `next()` returns `DataEvent !EncodingError`, including an error after exhaustion. |
-| `json.reader(^input, limits)` / `json.writer(^output, limits, canonical)` | `JSONReader !EncodingError` / `JSONWriter !EncodingError` | Construct bounded file-backed event streams. |
+| `json.reader(^input, limits)` / `reader_allow_duplicates(^input, limits)` | `JSONReader !EncodingError` | Construct a bounded file-backed event stream. `reader` fails with a sticky `Syntax` error at a repeated object name; `reader_allow_duplicates` reports each occurrence as its own `Key` event. |
+| `json.writer(^output, limits, canonical)` | `JSONWriter !EncodingError` | Construct a bounded file-backed event writer. |
 | `JSONReader.next()` | `?DataEvent !EncodingError` | Return the next event or stable end-of-input. |
 | `JSONWriter.write(event)` / `flush()` / `finish()` | `Unit !EncodingError` | Write events, flush output, or validate and finish the stream. |
-
-The text and file overloads retain separate checked layouts. A consumed
-`^FileReader` selects the bounded file contract; a `String` selects the source
-text parser. Neither overload constructs the other overload's handle.
 
 Typed `core.data.json<T>` reuses the source JSON parser while retaining exact
 number lexemes until `Decode<T>` selects the destination representation. Its
@@ -2775,7 +2771,6 @@ is retained and counts as nonblank (only spaces and tabs make a blank record).
 | `jsonl.count_rows(text)` | `Int` | Count nonblank rows. |
 | `jsonl.append_line(text, value)` | `String` | Append one encoded row. |
 | `jsonl.first(text)` | `?Dyn !EncodingError` | Return the first nonblank row. |
-| `jsonl.reader(text)` | `JSONLReader` | Pull one nonblank record at a time from text already in memory; parse no record beyond the last requested one. |
 | `jsonl.reader(^input, limits)` / `jsonl.writer(^output, limits)` | `JSONLReader !EncodingError` / `JSONLWriter !EncodingError` | Construct bounded file-backed line streams. |
 | `JSONLReader.next()` | `?Dyn !EncodingError` | Return the next row or stable end-of-input. |
 | `JSONLWriter.write(value)` / `flush()` / `finish()` | `Unit !EncodingError` | Write records, flush output, or finish the stream. |
@@ -2792,7 +2787,8 @@ The filesystem query helper decodes header-named records into a typed query;
 it is distinct from the physical row parser.
 The public file-backed `CSVReader` and `CSVWriter` are ordinary source-owned
 holders, not native resource-table handles. The typed `core.data.csv_reader<T>`
-stream retains its separate native callback carrier.
+is Core source over the same `CSVReader`: each `next` reads one record (the
+header on the first pull) and decodes it, so rows stream one at a time.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |

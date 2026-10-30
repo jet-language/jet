@@ -16,6 +16,7 @@ use core.encoding as encoding
 use core.encoding.[EncodingError, EncodingLimits]
 use core.encoding.json as json_codec
 use core.encoding.csv as csv_codec
+use core.encoding.csv.[CSVReader]
 use __core_encoding_stream as encoding_stream
 use core.crypto.[sha256]
 use core.sys as sys
@@ -311,14 +312,35 @@ fn data_watch_status_text(status: DataWatchStatus) -> String Never! {
     "DataWatchStatus{{mode: {status.mode}, revision: {status.revision}, retained_rows: {status.retained_rows}, recomputations: {status.recomputations}, active: {status.active}, generation: {status.generation}, dirty: {status.dirty}, error: {status.error}, freshness_ms: {status.freshness_ms}, invalidation_cause: {status.invalidation_cause}, refreshing: {status.refreshing}, cancelled: {status.cancelled}}}"
 }
 
+// A stream is a one-shot cursor (core-library.md `core.data.stream`): the
+// owned `items` come first, then the rows of the optional pull source.
 struct DataStream<T> {
     items: [T]
     index: Int
     cancelled: Bool
+    __source: Shared<__StreamSource<T>>?
 }
 
+// The pull side of a file-backed stream (Rust `DataStream` with its inner
+// reader, `terminal` and `eof`). `pull` reads and decodes one row; a failure
+// stays latched in `terminal`, and `ahead` keeps rows that `len` read early.
+struct __StreamSource<T> {
+    pull: fn() -> T? DataError!
+    max_output_rows: Int
+    ahead: [T]
+    ahead_index: Int
+    terminal: DataError?
+    done: Bool
+}
 
-
+// The CSV record cursor behind `csv_reader<T>`; the first record is the
+// header and is read on the first pull.
+struct __CSVRowSource {
+    records: CSVReader
+    header: [String]
+    started: Bool
+    row: Int
+}
 
 struct DataPivotCell {
     row_key: String
@@ -725,14 +747,126 @@ fn __query_stream<T>(source: DataStream<T>) -> Query<T> Never! {
         if reader.cancelled -> return Err(data_error(DataErrorKind.State, "stream was cancelled", "data.stream"))
         limits := DataLimits.safe()
         out := [T]{}
-        if reader.index < 0 -> reader.index = 0
-        loop reader.index < reader.items.len() {
-            if out.len() >= limits.max_output_rows -> return Err(data_error(DataErrorKind.Limit, "max_output_rows {limits.max_output_rows} exceeded", "collect"))
-            &out.push(reader.items[reader.index].copy())
-            reader.index = reader.index + 1
+        loop {
+            if __stream_pull<T>(&reader) == {
+                .Ok(item) -> {
+                    row :: item ?? return Ok(out)
+                    if out.len() >= limits.max_output_rows -> return Err(data_error(DataErrorKind.Limit, "max_output_rows {limits.max_output_rows} exceeded", "collect"))
+                    &out.push(row)
+                }
+                .Err(failure) -> return Err(failure)
+            }
         }
         Ok(out)
     })
+}
+
+// The next row of a stream: its owned items first, then its pull source.
+// End of input is a stable `None`; a source failure stays latched.
+fn __stream_pull<T>(stream: &DataStream<T>) -> T? DataError! {
+    if stream.cancelled -> return Err(data_error(DataErrorKind.State, "stream was cancelled", "data.stream"))
+    if stream.index < 0 -> stream.index = 0
+    if stream.index < stream.items.len() {
+        value :: stream.items[stream.index].copy()
+        stream.index = stream.index + 1
+        return Ok(Val(value))
+    }
+    if stream.__source == {
+        .Val(source) -> {
+            cell := source.guard_edit()
+            if cell.value.ahead_index < cell.value.ahead.len() {
+                value :: cell.value.ahead[cell.value.ahead_index].copy()
+                cell.value.ahead_index = cell.value.ahead_index + 1
+                return Ok(Val(value))
+            }
+            if cell.value.terminal == {
+                .Val(failure) -> return Err(failure.copy())
+                else -> {}
+            }
+            if cell.value.done -> return Ok(None)
+            if cell.value.pull() == {
+                .Ok(item) -> {
+                    row :: item ?? {
+                        cell.value.done = true
+                        return Ok(None)
+                    }
+                    return Ok(Val(row))
+                }
+                .Err(failure) -> {
+                    cell.value.terminal = Val(failure.copy())
+                    return Err(failure)
+                }
+            }
+        }
+        else -> return Ok(None)
+    }
+}
+
+// `stream.collect`: the remaining rows, bounded by the source's
+// `max_output_rows`; crossing fails before the crossing row is kept, and
+// the failure stays latched (Rust `jet_data_stream_collect`).
+fn __stream_collect<T>(stream: &DataStream<T>) -> [T] DataError! {
+    limit :: if stream.__source == {
+        .Val(source) -> source.guard_read().value.max_output_rows
+        else -> -1
+    }
+    out := [T]{}
+    loop {
+        item :: __stream_pull<T>(&stream)
+        row :: item ?? return Ok(out)
+        if limit >= 0 && out.len() >= limit {
+            failure :: data_error(DataErrorKind.Limit, "max_output_rows {limit} exceeded", "collect")
+            if stream.__source == {
+                .Val(source) -> {
+                    cell := source.guard_edit()
+                    cell.value.terminal = Val(failure.copy())
+                }
+                else -> {}
+            }
+            return Err(failure)
+        }
+        &out.push(row)
+    }
+}
+
+// `stream.len`: the rows still to come. A pull source reads its remaining
+// rows ahead into `ahead` so that no row changes owner; a failure while
+// reading ahead is latched for the pull after those rows.
+fn __stream_remaining<T>(stream: DataStream<T>) -> Int Never! {
+    if stream.cancelled -> return 0
+    start :: if stream.index < 0 -> 0 else -> stream.index
+    remaining := stream.items.len() - start
+    if remaining < 0 -> remaining = 0
+    if stream.__source == {
+        .Val(source) -> {
+            cell := source.guard_edit()
+            reading := !cell.value.done
+            if cell.value.terminal == {
+                .Val(_) -> reading = false
+                else -> {}
+            }
+            loop reading {
+                if cell.value.pull() == {
+                    .Ok(item) -> {
+                        if item == {
+                            .Val(row) -> &cell.value.ahead.push(row)
+                            else -> {
+                                cell.value.done = true
+                                reading = false
+                            }
+                        }
+                    }
+                    .Err(failure) -> {
+                        cell.value.terminal = Val(failure)
+                        reading = false
+                    }
+                }
+            }
+            remaining = remaining + cell.value.ahead.len() - cell.value.ahead_index
+        }
+        else -> {}
+    }
+    remaining
 }
 
 // `data.query(tracked)` and `tracked.query()`: a reusable scan of the
@@ -1356,8 +1490,94 @@ fn json<T: Decode>(text: String) -> [T] DataError! {
     assert_eq(rows, [Int]{9007199254740993, 100, -9007199254740993})
 }
 
-fn csv_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -> DataStream<T> DataError! {
-    core.data.csv_reader<T>(^reader, limits)
+// Typed CSV rows over a consumed file (Rust `jet_data_csv_reader` and
+// `jet_data_stream_scan`). The stream pulls one record at a time: the first
+// record names the fields, and every later record must carry exactly that
+// many. A row failure carries its 1-based data row and stays latched.
+fn csv_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -[FS, IO]> DataStream<T> DataError! {
+    if !valid_encoding_limits(limits.encoding) {
+        return Err(data_error(DataErrorKind.Limit, "encoding limits are outside their safe ranges", "DataLimits"))
+    }
+    if limits.max_groups <= 0 || limits.max_sort_rows <= 0 || limits.max_join_rows <= 0 || limits.max_output_rows <= 0 {
+        return Err(data_error(DataErrorKind.InvalidArgument, "data limits must be positive", "DataLimits"))
+    }
+    records :: csv_codec.reader(^reader, limits.encoding) ?? return Err(data_from_encoding("csv_reader", None, err))
+    state :: shared __CSVRowSource{records: ^records, header: [String]{}, started: false, row: 0}
+    source :: shared __StreamSource<T>{
+        pull: () -> csv_reader_next<T>(state),
+        max_output_rows: limits.max_output_rows,
+        ahead: [T]{},
+        ahead_index: 0,
+        terminal: None,
+        done: false,
+    }
+    Ok(DataStream<T>{items: [T]{}, index: 0, cancelled: false, __source: Val(source)})
+}
+
+// One pull of `csv_reader<T>`: the header on the first pull, then one data
+// record decoded to `T`; `None` at end of input.
+fn csv_reader_next<T: Decode>(state: Shared<__CSVRowSource>) -> T? DataError! {
+    cell := state.guard_edit()
+    if !cell.value.started {
+        cell.value.started = true
+        if &cell.value.records.next() == {
+            .Ok(first) -> {
+                named :: first ?? return Ok(None)
+                cell.value.header = named.fields.copy()
+            }
+            .Err(failure) -> return Err(data_from_encoding("csv_reader", None, failure))
+        }
+    }
+    if &cell.value.records.next() == {
+        .Ok(next) -> {
+            record :: next ?? return Ok(None)
+            cell.value.row = cell.value.row + 1
+            if csv_reader_row<T>(cell.value.header, record.fields, cell.value.row) == {
+                .Ok(row) -> return Ok(Val(row))
+                .Err(failure) -> return Err(failure)
+            }
+        }
+        .Err(failure) -> return Err(data_from_encoding("csv_reader", Val(cell.value.row + 1), failure))
+    }
+}
+
+// One data record as header-named Text cells (Rust
+// `jet_data_stream_decode_csv_row`). The cells decode as text, so a
+// `Float` field reads "10.0".
+fn csv_reader_row<T: Decode>(header: [String], fields: [String], row: Int) -> T DataError! {
+    if fields.len() != header.len() {
+        error := data_error(DataErrorKind.Decode, "CSV row has {fields.len()} fields; expected {header.len()}", "csv_reader")
+        error.row = Val(row)
+        return Err(error)
+    }
+    entries := [(key: String, value: Dyn)]{}
+    loop column in 0..<header.len() -> &entries.push((key: header[column].copy(), value: Dyn.Text(fields[column].copy())))
+    tree :: encoding_stream.object_from_entries(^entries)
+    previous :: encoding.__text_cells_enter()
+    if tree.decode<T>() == {
+        .Ok(value) -> {
+            encoding.__text_cells_leave(previous)
+            return Ok(value)
+        }
+        .Err(failures) -> {
+            encoding.__text_cells_leave(previous)
+            error := data_decode_error(failures, "csv_reader")
+            error.row = Val(row)
+            return Err(error)
+        }
+    }
+}
+
+// An encoding failure keeps its kind family, column and cause (Rust
+// `jet_data_from_encoding`).
+fn data_from_encoding(operation: String, row: Int?, cause: EncodingError) -> DataError Never! {
+    kind :: if cause.kind == {
+        .Limit -> DataErrorKind.Limit
+        .IO -> DataErrorKind.IO
+        .State -> DataErrorKind.State
+        else -> DataErrorKind.Decode
+    }
+    DataError{kind: kind, operation: operation, row: row, column: cause.column, index: None, reason: cause.reason.copy(), cause: Val(cause)}
 }
 
 fn json_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -> DataStream<T> DataError! {
@@ -1412,7 +1632,8 @@ fn sum(values: [Float]) -> Float DataError! {
 fn mean(values: [Float]) -> Float DataError! {
     if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "mean of empty data is undefined", "mean"))
     total := Float{0.0}
-    if compensated_sum(values, "mean") == {
+    // Rust `jet_data_mean_checked` reports its summation failures as `sum`.
+    if compensated_sum(values, "sum") == {
         .Ok(value) -> total = value
         .Err(error) -> return Err(error)
     }
@@ -1483,7 +1704,7 @@ fn median(values: [Float]) -> Float DataError! {
 
 fn quantile(values: [Float], q: Float) -> Float DataError! {
     if nonfinite(q) || q < (Float{0.0}) || q > (Float{1.0}) {
-        return Err(data_error(DataErrorKind.InvalidArgument, "quantile q must be in 0.0 through 1.0", "quantile"))
+        return Err(data_error(DataErrorKind.InvalidArgument, "quantile q must be a finite value in 0.0 through 1.0", "quantile"))
     }
     if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "quantile of empty data is undefined", "quantile"))
     limits := DataLimits.safe()
@@ -2021,10 +2242,12 @@ fn compensated_sum_range(values: [Float], start: Int, end: Int, operation: Strin
             return Err(data_error_at(DataErrorKind.NonFinite, "numeric input must be finite", operation, index))
         }
         next_total := total + value
+        // Rust `jet_data_neumaier_sum`: the lost low part is formed before it
+        // joins the running correction.
         if math.fabs(total) >= math.fabs(value) {
-            correction = correction + (total - next_total) + value
+            correction = correction + ((total - next_total) + value)
         } else {
-            correction = correction + (value - next_total) + total
+            correction = correction + ((value - next_total) + total)
         }
         total = next_total
         if nonfinite(total) || nonfinite(correction) {

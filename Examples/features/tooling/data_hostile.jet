@@ -121,7 +121,9 @@ fn run() {
     escaped :: svg.contains("&lt;script&gt;") && svg.contains("&amp;") && svg.contains("&quot;")
     print("hostile_svg_escaped: {escaped}")
 
-    // Large / limit: tightened max_groups fails as typed Limit.
+    // Large / limit: the reader's tightened DataLimits bound only the stream;
+    // `query(rows)` over the collected `[T]` receives no limits, so the
+    // grouped mean of two services succeeds (core-library.md `query(rows)`).
     root :: testing.temp_dir("jet-data-hostile")
     path :: Path.from(root).join("events.csv").to_string()
     files.write(path, "service,latency_ms\napi,10.0\napi,20.0\ndb,5.0\napi,30.0\n") ?? panic("write")

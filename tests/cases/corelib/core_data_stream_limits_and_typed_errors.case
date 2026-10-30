@@ -1,7 +1,16 @@
-# Port of tests/corelib_parts/http_data.rs::core_data_stream_limits_and_typed_errors; original guest source preserved.
+# Port of tests/corelib_parts/http_data.rs::core_data_stream_limits_and_typed_errors; original guest source preserved
+# except `reader ::` -> `reader :=`: `stream.next(&reader)` writes through the
+# binding, and `::` binds a value that never changes (D-BIND1,
+# syntax-decisions.md:21-22; spec.md:1169-1170).
 # ORACLE-LITERAL: tests/corelib_parts/http_data.rs:1203.
+# Line 2 departs from the oracle literal ("Limit query.group_by.mean"): the rows
+# are collected to [T] before data.query(rows), which takes no limits
+# (core-library.md `query(rows)`, `stream.collect` -> [T], DataLimits.safe()).
+# The build grants FS.Read on the command line: the guest has no package block,
+# and an undecided required effect stops with E1803 outside a terminal
+# (spec.md:1774-1784, D-AUTH-AMBIENT1, D-ECO-INLINEPACKAGE1).
 fixture: fixtures/core_data_stream_limits_and_typed_errors
 write: guest.jet fixtures/core_data_stream_limits_and_typed_errors/fixture.template
-step: jet build guest.jet
+step: jet build --allow=FS.Read guest.jet
 step: built
 stdout: = core_data_stream_limits_and_typed_errors.out

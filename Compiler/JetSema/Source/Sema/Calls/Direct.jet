@@ -927,6 +927,8 @@ fn sema_call_core_direct_checked(call: Call, expected: Type?, environment: SemaS
             if float_class.handled -> return float_class
             f32_math :: sema_call_try_core_math_f32(module_name, member, call.type_args, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             if f32_math.handled -> return f32_math
+            compute_alias :: sema_call_try_compute_alias(module_name, member, target, call.type_args, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            if compute_alias.handled -> return SemaDirectSpecialCheck{handled: true, value: compute_alias.value}
             scopes.ownership_call_depth += 1
             value := sema_call_core_check_source_owned(target, call.name, call.type_args, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             scopes.ownership_call_depth -= 1

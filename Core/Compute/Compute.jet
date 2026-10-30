@@ -9,10 +9,416 @@ package {
     }
 }
 
-// core.compute publishes the ranked compute vocabulary. Storage, placement,
-// autodiff traces, streams, and execution receipts have one owner: the shared
-// compute provider. The registered functions bind these opaque carriers in
-// both compiler halves; there is no second Vec-backed tensor implementation.
-// Construct tensors and inspect them through the core.compute operations.
+// core.compute publishes the ranked compute vocabulary, and this source is
+// its CPU oracle (core-library.md `core.compute`). The registered `Tensor`
+// record is the one storage carrier: row-major `data` of `shape`, the
+// selected `device`, its `numeric_profile` and the `requested` device; no
+// second storage record exists. Every operation validates its inputs, builds
+// a fresh row-major tensor and reports a failure as a ComputeError. `Auto`
+// selects the CPU oracle; a tensor on any other device has no provider here
+// and is rejected with ComputeError.Device rather than computed on the CPU.
 
-use core.compute.[ComputeDevice, ComputeError, ComputeStream, SparseTensor, Tensor, VJPRun]
+use core.compute.[ComputeDevice, ComputeError, ComputeStream, SparseTensor, VJPRun]
+use core.math as math
+
+MAX_ELEMENTS :: 16777216
+INT_MAX :: 9223372036854775807
+PROFILE_F64 :: "F64Strict+Reproducible"
+PROFILE_F32 :: "F32Strict+Reproducible"
+
+fn zeros(shape: [Int]) -> Tensor ComputeError! { filled(shape, 0.0, "Auto") }
+
+fn ones(shape: [Int]) -> Tensor ComputeError! { filled(shape, 1.0, "Auto") }
+
+fn full(shape: [Int], value: Float) -> Tensor ComputeError! { filled(shape, value, "Auto") }
+
+fn from_list(values: [Float]) -> Tensor ComputeError! {
+    loop value in values {
+        if !math.is_finite(value) -> return Err(ComputeError.Arithmetic)
+    }
+    shape :: [Int]{values.len()}
+    _ := storage_len(shape)
+    Ok(Tensor{shape: shape, data: values.copy(), device: "CPU", numeric_profile: PROFILE_F64, requested: "Auto"})
+}
+
+// The Vec and Matrix aliases share the Tensor storage law (D-COMPUTE-TYPE1)
+// and request the CPU explicitly.
+fn vec(length: Int, value: Float) -> Tensor ComputeError! {
+    if length < 0 -> return Err(ComputeError.Shape)
+    filled([Int]{length}, value, "CPU")
+}
+
+fn matrix(rows: Int, cols: Int, value: Float) -> Tensor ComputeError! {
+    if rows < 0 || cols < 0 -> return Err(ComputeError.Shape)
+    filled([Int]{rows, cols}, value, "CPU")
+}
+
+fn shape(tensor: Tensor) -> [Int] Never! { tensor.shape.copy() }
+
+fn rank(tensor: Tensor) -> Int Never! { tensor.shape.len() }
+
+// The element count, or 0 for a shape with a negative axis or a count past
+// the Int range.
+fn numel(tensor: Tensor) -> Int Never! {
+    n := 1
+    loop dim in tensor.shape {
+        if dim < 0 -> return 0
+        if dim != 0 && n > INT_MAX /% dim -> return 0
+        n = n * dim
+    }
+    n
+}
+
+fn to_list(tensor: Tensor) -> [Float] Never! { tensor.data.copy() }
+
+fn device(tensor: Tensor) -> String Never! { tensor.device.copy() }
+
+// The placement receipt: the requested and selected device, the backend
+// that owns the storage, its numeric profile and abilities, and the policy
+// that selected it.
+fn placement(tensor: Tensor) -> String Never! {
+    selected :: tensor.device
+    profile :: tensor.numeric_profile
+    lower :: device_key(selected)
+    accelerator :: lower != "cpu"
+    backend :: if accelerator -> lower.copy() else -> "cpu-oracle"
+    version :: if lower == {
+        "cuda" -> "driver"
+        "metal" | "vulkan" -> "system"
+        "webgpu" -> "browser"
+        else -> "builtin"
+    }
+    cache :: if accelerator -> "runtime" else -> "none"
+    ability :: if accelerator -> "{lower}.f32" else if profile == PROFILE_F32 -> "cpu-oracle.f32" else -> "cpu-oracle.f64"
+    reason :: if tensor.requested == "Auto" -> "policy=auto; selected=cpu; ability={ability}" else -> "policy=explicit; selected={lower}; ability={ability}"
+    "Placement(requested={tensor.requested}, selected={selected}, backend={backend}, version={version}, profile={profile}, cache={cache}, abilities={quoted(abilities(accelerator, profile))}, reason={reason})"
+}
+
+fn get(tensor: Tensor, index: [Int]) -> Float ComputeError! {
+    _ := checked(tensor)
+    at :: offset(tensor, index)
+    Ok(tensor.data[at])
+}
+
+fn set(tensor: &Tensor, index: [Int], value: Float) ComputeError! {
+    if !math.is_finite(value) -> return Err(ComputeError.Arithmetic)
+    if tensor.numeric_profile == PROFILE_F32 && !f32_exact(value) -> return Err(ComputeError.Arithmetic)
+    _ := checked(tensor)
+    at :: offset(tensor, index)
+    tensor.data[at] = value
+}
+
+fn reshape(tensor: Tensor, new_shape: [Int]) -> Tensor ComputeError! {
+    _ := checked(tensor)
+    n :: storage_len(new_shape)
+    if n != tensor.data.len() -> return Err(ComputeError.Shape)
+    Ok(like(tensor, new_shape.copy(), tensor.data.copy()))
+}
+
+fn broadcast_to(tensor: Tensor, new_shape: [Int]) -> Tensor ComputeError! {
+    out :: broadcast_shape(tensor.shape, new_shape)
+    if out != new_shape -> return Err(ComputeError.Shape)
+    _ := checked(tensor)
+    data :: expand(tensor, new_shape)
+    Ok(like(tensor, new_shape.copy(), data))
+}
+
+fn transpose(tensor: Tensor) -> Tensor ComputeError! {
+    _ := checked(tensor)
+    if tensor.shape.len() != 2 -> return Err(ComputeError.RankMismatch)
+    rows :: tensor.shape[0]
+    cols :: tensor.shape[1]
+    data := [Float]{}
+    loop col in 0..<cols {
+        loop row in 0..<rows -> &data.push(tensor.data[row * cols + col])
+    }
+    Ok(like(tensor, [Int]{cols, rows}, data))
+}
+
+// Sum over `axis`; the result drops that axis, and a rank-one input sums to
+// shape [1].
+fn sum_axis(tensor: Tensor, axis: Int) -> Tensor ComputeError! {
+    _ := checked(tensor)
+    if axis < 0 || axis >= tensor.shape.len() -> return Err(ComputeError.OutOfBounds)
+    out_shape := [Int]{}
+    outer := 1
+    inner := 1
+    loop (index, dim) in tensor.shape {
+        if index == axis -> next
+        &out_shape.push(dim)
+        if index < axis -> outer = outer * dim else -> inner = inner * dim
+    }
+    if out_shape.len() == 0 -> &out_shape.push(1)
+    extent :: tensor.shape[axis]
+    f32 :: tensor.numeric_profile == PROFILE_F32
+    data := [Float]{}
+    loop o in 0..<outer {
+        loop i in 0..<inner {
+            sum := Float{0.0}
+            loop k in 0..<extent {
+                sum = narrow(tensor.data[(o * extent + k) * inner + i] + sum, f32)
+            }
+            &data.push(sum)
+        }
+    }
+    Ok(like(tensor, ^out_shape, data))
+}
+
+fn add(a: Tensor, b: Tensor) -> Tensor ComputeError! { binary("add", a, b) }
+
+fn sub(a: Tensor, b: Tensor) -> Tensor ComputeError! { binary("sub", a, b) }
+
+fn mul(a: Tensor, b: Tensor) -> Tensor ComputeError! { binary("mul", a, b) }
+
+fn div(a: Tensor, b: Tensor) -> Tensor ComputeError! { binary("div", a, b) }
+
+fn maximum(a: Tensor, b: Tensor) -> Tensor ComputeError! { binary("maximum", a, b) }
+
+fn minimum(a: Tensor, b: Tensor) -> Tensor ComputeError! { binary("minimum", a, b) }
+
+fn negate(tensor: Tensor) -> Tensor ComputeError! { unary("negate", tensor) }
+
+fn abs(tensor: Tensor) -> Tensor ComputeError! { unary("abs", tensor) }
+
+fn exp(tensor: Tensor) -> Tensor ComputeError! { unary("exp", tensor) }
+
+fn log(tensor: Tensor) -> Tensor ComputeError! { unary("log", tensor) }
+
+fn sqrt(tensor: Tensor) -> Tensor ComputeError! { unary("sqrt", tensor) }
+
+fn matmul(a: Tensor, b: Tensor) -> Tensor ComputeError! {
+    if a.shape.len() != 2 || b.shape.len() != 2 -> return Err(ComputeError.RankMismatch)
+    _ := checked(a)
+    _ := checked(b)
+    same_contract(a, b)
+    rows :: a.shape[0]
+    inner :: a.shape[1]
+    cols :: b.shape[1]
+    if inner != b.shape[0] -> return Err(ComputeError.RankMismatch)
+    out_shape :: [Int]{rows, cols}
+    _ := storage_len(out_shape)
+    f32 :: a.numeric_profile == PROFILE_F32
+    data := [Float]{}
+    loop i in 0..<rows {
+        loop j in 0..<cols {
+            sum := Float{0.0}
+            loop t in 0..<inner {
+                product :: a.data[i * inner + t] * b.data[t * cols + j]
+                sum = if f32 -> narrow(narrow(product, true) + sum, true) else -> sum + product
+                if !math.is_finite(sum) -> return Err(ComputeError.Arithmetic)
+            }
+            &data.push(sum)
+        }
+    }
+    Ok(like(a, out_shape.copy(), data))
+}
+
+fn filled(shape: [Int], value: Float, requested: String) -> Tensor ComputeError! {
+    if !math.is_finite(value) -> return Err(ComputeError.Arithmetic)
+    n :: storage_len(shape)
+    data := [Float]{}
+    loop _ in 0..<n -> &data.push(value)
+    Ok(Tensor{shape: shape.copy(), data: data, device: "CPU", numeric_profile: PROFILE_F64, requested: requested.copy()})
+}
+
+// A result tensor of `shape` and `data` with `source`'s placement.
+fn like(source: Tensor, shape: ^[Int], data: ^[Float]) -> Tensor Never! {
+    Tensor{shape: shape, data: data, device: source.device.copy(), numeric_profile: source.numeric_profile.copy(), requested: source.requested.copy()}
+}
+
+// The row-major storage length of `shape`: at least one axis, no negative
+// axis, every stride an Int, at most MAX_ELEMENTS elements.
+fn storage_len(shape: [Int]) -> Int ComputeError! {
+    if shape.len() == 0 -> return Err(ComputeError.Shape)
+    loop dim in shape {
+        if dim < 0 || dim > MAX_ELEMENTS -> return Err(ComputeError.Shape)
+    }
+    stride := 1
+    loop k in 1..<shape.len() {
+        dim :: shape[shape.len() - k]
+        if dim != 0 && stride > INT_MAX /% dim -> return Err(ComputeError.Shape)
+        stride = stride * dim
+    }
+    first :: shape[0]
+    if first != 0 && stride > MAX_ELEMENTS /% first -> return Err(ComputeError.Shape)
+    Ok(stride * first)
+}
+
+// Validate `tensor` and return its element count: a known device, request
+// and profile, storage matching the shape, finite values the profile holds.
+// Only the CPU oracle owns storage here, so any other device is rejected.
+fn checked(tensor: Tensor) -> Int ComputeError! {
+    if !["Auto", "CPU", "Metal", "CUDA", "Vulkan", "WebGPU"].contains(tensor.requested) -> return Err(ComputeError.Device)
+    if tensor.numeric_profile != PROFILE_F64 && tensor.numeric_profile != PROFILE_F32 -> return Err(ComputeError.Device)
+    if tensor.device != "CPU" -> return Err(ComputeError.Device)
+    if tensor.requested != "Auto" && tensor.requested != "CPU" -> return Err(ComputeError.Device)
+    n :: storage_len(tensor.shape)
+    if tensor.data.len() != n -> return Err(ComputeError.Shape)
+    f32 :: tensor.numeric_profile == PROFILE_F32
+    loop value in tensor.data {
+        if !math.is_finite(value) -> return Err(ComputeError.Arithmetic)
+        if f32 && !f32_exact(value) -> return Err(ComputeError.Arithmetic)
+    }
+    Ok(n)
+}
+
+fn same_contract(a: Tensor, b: Tensor) ComputeError! {
+    if a.device != b.device -> return Err(ComputeError.Device)
+    if a.numeric_profile != b.numeric_profile -> return Err(ComputeError.Device)
+    return
+}
+
+// The flat row-major offset of `index`, one in-range coordinate per axis.
+fn offset(tensor: Tensor, index: [Int]) -> Int ComputeError! {
+    if index.len() != tensor.shape.len() -> return Err(ComputeError.RankMismatch)
+    at := 0
+    loop (axis, coordinate) in index {
+        dim :: tensor.shape[axis]
+        if coordinate < 0 || coordinate >= dim -> return Err(ComputeError.OutOfBounds)
+        at = at * dim + coordinate
+    }
+    Ok(at)
+}
+
+// The shape two operands broadcast to: aligned from the last axis, equal
+// extents stay and a 1 expands to the other extent.
+fn broadcast_shape(a: [Int], b: [Int]) -> [Int] ComputeError! {
+    if a.len() == 0 || b.len() == 0 -> return Err(ComputeError.Shape)
+    loop dim in a {
+        if dim < 0 -> return Err(ComputeError.Shape)
+    }
+    loop dim in b {
+        if dim < 0 -> return Err(ComputeError.Shape)
+    }
+    rank :: if a.len() > b.len() -> a.len() else -> b.len()
+    out := [Int]{}
+    loop axis in 0..<rank {
+        da :: if axis < rank - a.len() -> 1 else -> a[axis - (rank - a.len())]
+        db :: if axis < rank - b.len() -> 1 else -> b[axis - (rank - b.len())]
+        if da == db || db == 1 {
+            &out.push(da)
+        } else if da == 1 {
+            &out.push(db)
+        } else {
+            return Err(ComputeError.RankMismatch)
+        }
+    }
+    _ := storage_len(out)
+    Ok(out)
+}
+
+// The values of `tensor` broadcast to `target`, row-major.
+fn expand(tensor: Tensor, target: [Int]) -> [Float] ComputeError! {
+    source_rank :: tensor.shape.len()
+    rank :: target.len()
+    if source_rank == 0 || source_rank > rank -> return Err(ComputeError.RankMismatch)
+    if broadcast_shape(tensor.shape, target) != target -> return Err(ComputeError.Shape)
+    n :: storage_len(target)
+    lead :: rank - source_rank
+    strides := [Int]{}
+    loop _ in 0..<rank -> &strides.push(0)
+    stride := 1
+    loop k in 0..<source_rank {
+        source_axis :: source_rank - 1 - k
+        dim :: tensor.shape[source_axis]
+        if dim != 1 || target[lead + source_axis] == 1 -> strides[lead + source_axis] = stride
+        stride = stride * dim
+    }
+    out := [Float]{}
+    loop flat in 0..<n {
+        remainder := flat
+        at := 0
+        loop k in 0..<rank {
+            axis :: rank - 1 - k
+            dim :: target[axis]
+            at = at + (remainder % dim) * strides[axis]
+            remainder = remainder /% dim
+        }
+        &out.push(tensor.data[at])
+    }
+    Ok(out)
+}
+
+fn binary(op: String, a: Tensor, b: Tensor) -> Tensor ComputeError! {
+    _ := checked(a)
+    _ := checked(b)
+    same_contract(a, b)
+    shape :: broadcast_shape(a.shape, b.shape)
+    left :: expand(a, shape)
+    right :: expand(b, shape)
+    f32 :: a.numeric_profile == PROFILE_F32
+    data := [Float]{}
+    loop (index, x) in left {
+        y :: right[index]
+        if op == "div" && y == 0.0 -> return Err(ComputeError.Arithmetic)
+        value :: if op == {
+            "add" -> x + y
+            "sub" -> x - y
+            "mul" -> x * y
+            "div" -> x / y
+            "maximum" -> if y > x -> y else -> x
+            else -> if y < x -> y else -> x
+        }
+        &data.push(narrow(value, f32))
+    }
+    Ok(like(a, shape.copy(), data))
+}
+
+fn unary(op: String, tensor: Tensor) -> Tensor ComputeError! {
+    _ := checked(tensor)
+    f32 :: tensor.numeric_profile == PROFILE_F32
+    data := [Float]{}
+    loop x in tensor.data {
+        if op == "log" && x <= 0.0 -> return Err(ComputeError.Arithmetic)
+        if op == "sqrt" && x < 0.0 -> return Err(ComputeError.Arithmetic)
+        value :: if op == {
+            "negate" -> -x
+            "abs" -> math.fabs(x)
+            "exp" -> math.exp(x)
+            "log" -> math.ln(x)
+            else -> math.sqrt(x)
+        }
+        &data.push(narrow(value, f32))
+    }
+    Ok(like(tensor, tensor.shape.copy(), data))
+}
+
+// `value` as the profile stores it: finite, and rounded to the nearest F32
+// under the F32 profile.
+fn narrow(value: Float, f32: Bool) -> Float ComputeError! {
+    if !math.is_finite(value) -> return Err(ComputeError.Arithmetic)
+    if !f32 -> return value
+    single :: F32.from_float(value) ?? return Err(ComputeError.Arithmetic)
+    rounded :: Float.from_f32(single)
+    if !math.is_finite(rounded) -> return Err(ComputeError.Arithmetic)
+    rounded
+}
+
+fn f32_exact(value: Float) -> Bool Never! {
+    single :: F32.from_float(value) ?? return false
+    Float.from_f32(single) == value
+}
+
+fn device_key(device: String) -> String Never! {
+    if device == {
+        "Metal" -> "metal"
+        "CUDA" -> "cuda"
+        "Vulkan" -> "vulkan"
+        "WebGPU" -> "webgpu"
+        else -> "cpu"
+    }
+}
+
+// The registered abilities of the backend serving `profile`.
+fn abilities(accelerator: Bool, profile: String) -> [String] Never! {
+    if accelerator -> return [String]{"ranked-storage", "strided-view", "checked-bounds", "f32-arithmetic", "reproducible-reduction", "elementwise", "matmul", "device-buffer", "stream", "differential-oracle"}
+    if profile == PROFILE_F32 -> return [String]{"ranked-storage", "strided-view", "checked-bounds", "f32-arithmetic", "cpu-simd-dispatch", "simd-tail", "blocked-matmul", "differential-oracle"}
+    if profile == PROFILE_F64 -> return [String]{"ranked-storage", "strided-view", "checked-bounds", "reproducible-reduction", "differential-oracle"}
+    [String]{}
+}
+
+// `["a", "b"]`: each name in double quotes.
+fn quoted(names: [String]) -> String Never! {
+    parts :: loop name in names -> "\"{name}\""
+    "[{parts.join(", ")}]"
+}
