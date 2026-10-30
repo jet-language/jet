@@ -636,7 +636,7 @@ fn kit_steps_parse(source: String) -> KitPlan {
         if key == "limit" {
             bounds :: kit_steps_words(value) ?? []
             if bounds.len() == 0 {
-                plan.error = "line {line_number}: limit needs time or memory"
+                plan.error = "line {line_number}: limit needs time, memory or resident"
                 return plan
             }
             loop bound in bounds {
@@ -647,8 +647,8 @@ fn kit_steps_parse(source: String) -> KitPlan {
                 }
                 name :: kit_steps_byte_slice(bound, 0, equals)
                 amount :: Int.parse(kit_steps_byte_slice(bound, equals + 1, bound.count_bytes())) ?? 0
-                if amount <= 0 || (name != "time" && name != "memory") {
-                    plan.error = "line {line_number}: invalid positive time/memory limit"
+                if amount <= 0 || (name != "time" && name != "memory" && name != "resident") {
+                    plan.error = "line {line_number}: invalid positive time/memory/resident limit"
                     return plan
                 }
                 if name == "time" {
@@ -657,12 +657,23 @@ fn kit_steps_parse(source: String) -> KitPlan {
                         return plan
                     }
                     plan.steps[i].limit_time = amount
-                } else {
+                } else if name == "memory" {
                     if plan.steps[i].limit_memory != 0 {
                         plan.error = "line {line_number}: duplicate memory limit"
                         return plan
                     }
                     plan.steps[i].limit_memory = amount
+                } else {
+                    // Only a foreground step runs under the resident watcher.
+                    if plan.steps[i].action == "spawn" || plan.steps[i].action == "session" {
+                        plan.error = "line {line_number}: a resident limit needs a foreground step"
+                        return plan
+                    }
+                    if plan.steps[i].limit_resident != 0 {
+                        plan.error = "line {line_number}: duplicate resident limit"
+                        return plan
+                    }
+                    plan.steps[i].limit_resident = amount
                 }
             }
             next
@@ -956,12 +967,20 @@ fn kit_steps_policy(step: KitStep, env: KitEnv) -> KitEnv? {
     if step.duration > 0 -> policy.timeout = time.duration_ns(step.duration)
     if step.limit_time > 0 -> policy.timeout = Duration.seconds(step.limit_time) ?? return None
     if step.limit_memory > 0 -> policy.memory_limit = step.limit_memory
+    // `limit: resident=` (KiB) bounds the step's whole process tree: the
+    // programs a `jet run`/`jet test` step builds run as its grandchildren.
+    if step.limit_resident > 0 {
+        bytes :: step.limit_resident * 1024
+        if policy.resident_limit == 0 || bytes < policy.resident_limit -> policy.resident_limit = bytes
+        policy.resident_tree = true
+    }
     Val(policy)
 }
 
 fn kit_steps_failure(step: KitStep, result: KitRun) -> KitVerdict? {
     if step.limit_time > 0 && (result.timed_out || result.limit_hit == "time") -> return Val(kit_expect_verdict("FAIL", "limit hit: time={step.limit_time}s"))
     if step.limit_memory > 0 && result.limit_hit == "memory" -> return Val(kit_expect_verdict("FAIL", "limit hit: memory={step.limit_memory}KiB"))
+    if step.limit_resident > 0 && result.limit_hit == "memory" -> return Val(kit_expect_verdict("FAIL", "limit hit: resident={step.limit_resident}KiB"))
     isolated :: kit_no_nix_failure(step, result)
     if isolated != None -> return isolated
     if result.code == 101 && (Int.parse(step.exit) ?? -1) == 101 && result.error == "" && !result.timed_out && result.signal == None -> return None

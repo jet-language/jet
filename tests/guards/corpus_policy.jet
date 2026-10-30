@@ -32,8 +32,11 @@ struct PolicyOccurrence { file: String, rule: String, site: String }
 struct PolicyError { message: String }
 
 // Compiler/token offsets and the Rust adapter's slices are UTF-8 byte offsets.
-fn policy_slice_bytes(text: String, start: Int, end: Int) -> String {
-    raw :: text.bytes()
+fn policy_slice_bytes(text: String, start: Int, end: Int) -> String { policy_slice_raw(text.bytes(), start, end) }
+
+// The same slice of an already indexed text: a scan over one text indexes it
+// once instead of copying it per slice (#6301).
+fn policy_slice_raw(raw: [U8], start: Int, end: Int) -> String {
     assert(start >= 0 && end >= start && end <= raw.len(), "valid corpus byte span")
     if start == end -> return ""
     String.from_bytes(raw[start..(end - 1)]) ?? panic("corpus byte span must end on UTF-8 boundaries")

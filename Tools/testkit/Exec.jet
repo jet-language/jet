@@ -121,7 +121,7 @@ fn kit_exec_invoke_with_env(env: KitEnv, argv: [String], cwd: String, scratch: S
     started :: time.instant()
     child := kit_exec_spec(env, argv, cwd, scratch, overlay).spawn() ?? return kit_exec_failed("spawn: {err}")
     { sender: done, receiver: watching } :: channel<Int>()
-    watcher :: task kit_exec_watch_resident(if env.resident_limit > 0 -> child.id() else -> 0, env.resident_limit, watching)
+    watcher :: task kit_exec_watch_resident(if env.resident_limit > 0 -> child.id() else -> 0, env.resident_limit, env.resident_tree, watching)
     // Empty input writes nothing: a child that exits before the kit reaches its
     // stdin closed the pipe, which is no error when there was nothing to send.
     input_error := ""
@@ -147,18 +147,24 @@ fn kit_exec_invoke_with_env(env: KitEnv, argv: [String], cwd: String, scratch: S
 // The run-wide memory guard counts resident memory, not address space: a
 // RLIMIT_AS limit fails thread-stack reservations long before the child uses
 // that memory. Polls VmRSS every 100 ms and kills the child above `limit`
-// bytes; true when it did. A case's `limit: memory=` keeps Core memory_limit.
-fn kit_exec_watch_resident(pid: Int, limit: Int, done: Receiver<Int>) -> Bool Never! {
+// bytes; true when it did. Under `tree` (a case's `limit: resident=`) it sums
+// the child and its live descendants and kills them all. A case's
+// `limit: memory=` keeps Core memory_limit.
+fn kit_exec_watch_resident(pid: Int, limit: Int, tree: Bool, done: Receiver<Int>) -> Bool Never! {
     if pid <= 0 -> return false
-    path :: "/proc/{pid}/status"
     tick := 0
     loop {
         if done.is_ready() -> return false
         if tick % 10 == 0 {
-            status :: files.read(path) ?? return false
-            if kit_exec_resident_bytes(status) > limit {
+            pids := [Int]{}
+            used :: kit_exec_tree_resident(pid, tree, &pids)
+            if pids.len() == 0 -> return false
+            if used > limit {
                 #Unsafe("the testkit stops its own step child at the resident-memory guard") {
                     sys.kill(pid, 9) ?? return false
+                    loop descendant in pids {
+                        if descendant != pid -> sys.kill(descendant, 9).drop("a descendant may exit before its signal")
+                    }
                 }
                 return true
             }
@@ -167,6 +173,32 @@ fn kit_exec_watch_resident(pid: Int, limit: Int, done: Receiver<Int>) -> Bool Ne
         time.sleep(10ms)
     }
     false
+}
+
+// The resident bytes of `pid`, plus under `tree` those of its live descendants
+// (`/proc/<pid>/task/<tid>/children`); `pids` lists every process counted,
+// none when `pid` itself is gone.
+fn kit_exec_tree_resident(pid: Int, tree: Bool, pids: &[Int]) -> Int Never! {
+    used := 0
+    queue := [Int]{pid}
+    at := 0
+    loop at < queue.len() {
+        current :: queue[at]
+        at += 1
+        status :: files.read("/proc/{current}/status") ?? next
+        used += kit_exec_resident_bytes(status)
+        &pids.push(current)
+        if !tree -> next
+        threads :: files.list_dir("/proc/{current}/task") ?? next
+        loop thread in threads {
+            children :: files.read(files.join(thread.path, "children")) ?? next
+            loop word in children.split(" ") {
+                child :: Int.parse(word.trim().copy()) ?? next
+                &queue.push(child)
+            }
+        }
+    }
+    used
 }
 
 fn kit_exec_resident_bytes(status: String) -> Int { kit_exec_kib_field(status, "VmRSS:") }

@@ -109,8 +109,11 @@ struct KitEnv {
     timeout: Duration
     // A case's `limit: memory=`, Core memory_limit semantics; 0 is none.
     memory_limit: Int
-    // Run-wide resident-memory (VmRSS) guard in bytes; 0 is none.
+    // Run-wide resident-memory (VmRSS) guard in bytes; 0 is none. A case's
+    // `limit: resident=` tightens it and sets `resident_tree`.
     resident_limit: Int{0}
+    // Count the child's live descendants too, not only the child.
+    resident_tree: Bool{false}
     env_clear: Bool{false}
     version: String{""}
     version_error: String{""}
@@ -353,6 +356,7 @@ struct KitStep {
     instruction: String{""}
     limit_time: Int{0}
     limit_memory: Int{0}
+    limit_resident: Int{0}
     isolate: String{""}
     isolate_network: String{"disabled"}
     env_clear: Bool{false}
