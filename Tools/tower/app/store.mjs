@@ -2158,13 +2158,13 @@ function proseDensityGaps(label, text) {
   // Markdown code examples are not prose sentences. Keep the prose around them.
   let fence = null;
   const prose = String(text).split('\n').map(line => {
-    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    const opener = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
     if (fence) {
-      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && !marker[2].trim()) fence = null;
+      if (opener && opener[1][0] === fence[0] && opener[1].length >= fence.length && !opener[2].trim()) fence = null;
       return '';
     }
-    if (marker && !(marker[1][0] === '`' && marker[2].includes('`'))) {
-      fence = marker[1];
+    if (opener && !(opener[1][0] === '`' && opener[2].includes('`'))) {
+      fence = opener[1];
       return '';
     }
     return line;

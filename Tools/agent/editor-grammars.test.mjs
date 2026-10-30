@@ -11,6 +11,7 @@ import {
   TARGETS,
   main,
   readActiveMarkers,
+  readAnonymousTokens,
   readHighlightTokens,
   renderTreeSitter,
   renderZed,
@@ -21,7 +22,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 function fixtureRoot() {
   const root = mkdtempSync(join(tmpdir(), "editor-grammars-"));
-  for (const path of ["Compiler/JetFoundation/Data/Syntax", "Compiler/Prelude/Markers.jet", ...TARGETS.map((t) => t.path)]) {
+  for (const path of ["Compiler/JetFoundation/Data/Syntax", "Compiler/Prelude/Markers.jet", "Tools/editors/tree-sitter/src/node-types.json", ...TARGETS.map((t) => t.path)]) {
     cpSync(join(ROOT, path), join(root, path), { recursive: true });
   }
   return root;
@@ -47,7 +48,20 @@ test("retired markers are not highlighted as active rules", () => {
     assert.ok(!names.includes("Zzretired"));
     const tokens = readHighlightTokens(root);
     assert.match(renderTreeSitter(tokens), /JET_HIGHLIGHT_MARKER_RULE = \[[^\n]*"Zzactive"/);
-    assert.doesNotMatch(renderZed(tokens), /Zzretired/);
+    assert.doesNotMatch(renderZed(tokens, readAnonymousTokens(root)), /Zzretired/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Zed literals are exactly the words tree-sitter parses as anonymous tokens", () => {
+  const root = fixtureRoot();
+  try {
+    const tokens = readHighlightTokens(root);
+    const anonymous = readAnonymousTokens(root);
+    assert.ok(!anonymous.has("comptime"), "the grammar parses `comptime` inside the named `keyword` token");
+    assert.doesNotMatch(renderZed(tokens, anonymous), /"comptime"/);
+    assert.match(renderZed(tokens, new Set([...anonymous, "comptime"])), /"comptime"/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

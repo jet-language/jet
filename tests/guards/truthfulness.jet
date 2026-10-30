@@ -88,8 +88,9 @@ fn s3_guard_docs_examples() {
     &paths.sort()
     loop path in paths {
         if s3_truth_files.is_dir(path) {
-            // Only top-level historical directories are excluded in Rust.
-            if path == "Docs/audits" || path == "Docs/proposals" -> next
+            // Rust excluded the top-level historical directories; dated
+            // evidence is the shared definition in retirement_ratchet.jet.
+            if guards_dated_evidence("{path}/") -> next
             nested :: s3_truth_md_paths(path)
             loop item in nested {
                 body :: s3_truth_files.read(item) ?? next
@@ -217,6 +218,8 @@ fn s3_guard_vocabulary_senses() {
             candidate :: s3_truth_files.canonicalize(s3_truth_files.join(s3_truth_files.dirname(source), target)) ?? next
             if candidate != docs_root && !candidate.starts_with("{docs_root}/") -> next
             if !candidate.ends_with(".md") || candidate.ends_with("/.md") -> next
+            // Dated evidence keeps its words as recorded (retirement_ratchet.jet).
+            if guards_dated_evidence("Docs{policy_slice_bytes(candidate, docs_root.count_bytes(), candidate.count_bytes())}") -> next
             if seen.get(candidate) ?? false -> next
             _ :: &seen.add(candidate, true)
             &targets.push(candidate)

@@ -1,5 +1,7 @@
 # Diagnostics
 
+Vocabulary: [Jet vocabulary](vocabulary.md).
+
 This page is the contract for user-facing diagnostics and their projections. It
 covers registry ownership, terminal/LSP/machine rendering, the no-OS E3301
 contract, and the checks for changing a diagnostic. The canonical source is

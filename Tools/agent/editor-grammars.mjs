@@ -4,7 +4,8 @@
 // Highlights.jet (JET_HIGHLIGHT_TOKENS) and Prelude/Markers.jet (active
 // `marker` rows) are the authority. This tool reads their Jet text and
 // replaces the BEGIN/END GENERATED JET SYNTAX HIGHLIGHTS block in each grammar;
-// it keeps no second token inventory.
+// it keeps no second token inventory. Which words tree-sitter parses as
+// anonymous literals comes from the generated src/node-types.json.
 //
 // Usage: node Tools/agent/editor-grammars.mjs [--check|--write]
 
@@ -16,6 +17,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const SYNTAX_DIR = "Compiler/JetFoundation/Data/Syntax";
 const HIGHLIGHTS = `${SYNTAX_DIR}/Highlights.jet`;
 const MARKERS = "Compiler/Prelude/Markers.jet";
+const NODE_TYPES = "Tools/editors/tree-sitter/src/node-types.json";
 const TABLE_RE = /^JET_HIGHLIGHT_TOKENS :: \[HighlightToken\]\{[\s\S]*?\n\}/m;
 const ROW_RE = /\{\s*text:\s*("(?:\\.|[^"\\])*"|[A-Za-z_][A-Za-z0-9_]*)\s*,\s*class:\s*HighlightClass\.([A-Za-z]+)\s*,?\s*\}/g;
 const STRING_CONST_RE = /^([A-Za-z_][A-Za-z0-9_]*)\s*::\s*("(?:\\.|[^"\\])*")\s*(?:\/\/.*)?$/gm;
@@ -95,17 +97,6 @@ const GLOBAL_KEYWORDS = new Set([
   "fn", "pub", "priv", "if", "else", "in", "break", "true", "false", "mutate", "move", "copy",
   "struct", "enum", "impl", "trait", "tag", "effect", "derive", "self", "it", "null", "const",
   "comptime", "return", "loop", "yield", "use", "extern", "module",
-]);
-// Zed validates query string literals against anonymous tree-sitter tokens;
-// words parsed as named nodes would make the whole language fail to load.
-// `comptime` is part of the named `keyword` token, so `(keyword) @keyword`
-// colors it.
-const ZED_ANONYMOUS_WORDS = new Set([
-  "Bool", "Char", "Err", "F32", "F64", "Float", "I16", "I32", "I64", "I8", "Int", "List", "Map",
-  "String", "Test", "U16", "U32", "U64", "U8", "add", "as", "break", "change",
-  "continue", "copy", "defer", "derive", "distinct", "else", "enum", "extern", "false", "fn", "if",
-  "impl", "in", "loop", "marker", "migration", "module", "pub", "remove", "rename", "return", "rust",
-  "self", "state", "step", "struct", "tag", "task", "trait", "true", "use", "via",
 ]);
 
 export const START = "BEGIN GENERATED JET SYNTAX HIGHLIGHTS";
@@ -196,6 +187,22 @@ export function readHighlightTokens(root = ROOT) {
   return tokens;
 }
 
+// Zed validates query string literals against anonymous tree-sitter tokens;
+// words parsed inside a named node (such as the `keyword` token) would make the
+// whole language fail to load. The anonymous node types tree-sitter generated
+// from grammar.js are therefore the only words a Zed query may name.
+export function readAnonymousTokens(root = ROOT) {
+  let nodes;
+  try {
+    nodes = JSON.parse(readSource(NODE_TYPES, root));
+  } catch (error) {
+    fail(`could not parse ${NODE_TYPES}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const anonymous = new Set(nodes.filter((node) => node.named === false).map((node) => node.type));
+  if (anonymous.size === 0) fail(`no anonymous node types in ${NODE_TYPES}`);
+  return anonymous;
+}
+
 const byText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
 function classTexts(tokens, cls) {
@@ -263,14 +270,14 @@ export function renderTreeSitter(tokens) {
   return `${out}// ${END}\n`;
 }
 
-export function renderZed(tokens) {
+export function renderZed(tokens, anonymous) {
   let out = `; ${START}\n`;
   for (const cls of EMIT_ORDER) {
     const texts = classTexts(tokens, cls);
     out += `; ${LABEL[cls]}: ${texts.join(" ")}\n`;
     if (cls === "MarkerRule") continue;
     const words = texts
-      .filter((s) => isWordToken(s) && ZED_ANONYMOUS_WORDS.has(s))
+      .filter((s) => isWordToken(s) && anonymous.has(s))
       .filter((s) => !KEYWORD_CLASSES.has(cls) || GLOBAL_KEYWORDS.has(s))
       .map((s) => `  ${JSON.stringify(s)}`);
     if (words.length > 0) out += `[\n${words.join("\n")}\n] ${ZED_CAPTURE[cls]}\n\n`;
@@ -316,8 +323,10 @@ export function main(argv = process.argv.slice(2), root = ROOT) {
     return 2;
   }
   let tokens;
+  let anonymous;
   try {
     tokens = readHighlightTokens(root);
+    anonymous = readAnonymousTokens(root);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     return 1;
@@ -329,7 +338,7 @@ export function main(argv = process.argv.slice(2), root = ROOT) {
     let next;
     try {
       current = readFileSync(file, "utf8");
-      next = replaceSection(current, target.render(tokens), target.path);
+      next = replaceSection(current, target.render(tokens, anonymous), target.path);
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));
       return 1;

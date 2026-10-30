@@ -1,5 +1,7 @@
 # Native Jet CoreLib contract
 
+Vocabulary: [Jet vocabulary](vocabulary.md).
+
 This specification is for Core maintainers, provider authors, and reviewers. It
 defines where Core owns semantics, where a host may provide a typed leaf, how
 capabilities and effects are exposed, and what evidence makes an export

@@ -1,9 +1,12 @@
 use core.files as s3_marker_files
 
 // Port of tests/marker_declarations.rs:62-149. The full source scan remains;
-// no textual predicate is replaced with a smaller sample or file allowlist.
+// no textual predicate is replaced with a smaller sample. The allowlist names
+// the rejection fixtures: the UI snapshot pair and the parser tests that assert
+// E0381 on the retired forms. Decision history and dated evidence
+// (retirement_ratchet.jet) record the forms as they were.
 fn s3_guard_retired_marker_forms() {
-    allowed :: [String]{"Docs/spec/syntax-decisions.md", "tests/ui/marker_decl_rejected_forms.jet", "tests/ui/marker_decl_rejected_forms.stderr"}
+    allowed :: [String]{"Docs/spec/syntax-decisions.md", "tests/ui/marker_decl_rejected_forms.jet", "tests/ui/marker_decl_rejected_forms.stderr", "Compiler/JetParser/Tests/Parser/Declarations.jet"}
     ignored :: [String]{".git", ".claude", ".opencode", ".tmp", ".jet", ".tower", ".agent-worktrees", "node_modules", "target", "build", ".cache", "cache", "dist", "result"}
     marker_head :: "mark"
     marker_tail :: "er "
@@ -41,7 +44,7 @@ fn s3_guard_retired_marker_forms() {
             loop path in allowed {
                 if relative == path -> skip = true
             }
-            if skip -> next
+            if skip || guards_dated_evidence(relative) -> next
             source :: s3_marker_files.read(entry.path) ?? next
             line_number := 0
             loop line in source.lines() {
