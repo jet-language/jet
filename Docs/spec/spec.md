@@ -736,6 +736,16 @@ blocks pay no chain cost, and CSV applies the chain per row (D-MIGRATE4=A).
 
 ### Struct layout
 
+A struct without `#Layout` is laid out by the compiler: its stored fields take
+offsets by descending alignment (declaration order among equals), each at its
+own alignment, and the struct rounds up to a multiple of 8 bytes, so
+`{U8, Int, U8, Int, U8}` takes 24 bytes. `T.$layout` reports the size,
+alignment and offsets the compiler chose, with guarantee `optimized`. A C
+declaration that follows them, with explicit padding fields, takes such a
+struct by reference: an `#Import` C function with a `&T` parameter receives the
+address of the value's own bytes when every field is a machine integer, float,
+`Bool`, or such a struct.
+
 `#Layout(c)` before a struct requests C layout and preserves field order for
 foreign sharing. Growable fields (`[T]`, `[K:V]`, and `String`) are rejected with
 E1104 because they have no stable C layout; fixed arrays `[T#N]` are allowed.

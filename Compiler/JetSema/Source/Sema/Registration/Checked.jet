@@ -892,6 +892,41 @@ fn sema_checked_foreign_type(graph: SemaRegistrationGraph, ty: Type, caller_modu
     }
 }
 
+// Whether a C function may take `&ty` as the address of the Jet value's own
+// bytes: a struct, of any layout, whose stored fields are machine integers,
+// floats, Bools or such structs. A C declaration that follows the struct's
+// `$layout` reads and writes those bytes in place.
+fn sema_checked_foreign_by_reference_struct(graph: SemaRegistrationGraph, ty: Type, caller_module: String, seen: [String]) -> Bool Never! {
+    qualified :: sema_checked_qualify_type(graph, ty, caller_module)
+    nominal_row :: sema_type_resolve_nominal_row(graph, qualified, caller_module) ?? return false
+    nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+    key :: nominal.symbol.id.key
+    if sema_checked_foreign_seen(seen, key) -> return false
+    next_seen := seen
+    &next_seen.push(key)
+    if nominal.source == .SourceAST(.Struct(definition)) {
+        if definition.type_params.len() > 0 -> return false
+        loop field in definition.fields {
+            if field.computed != None -> next
+            if !sema_checked_foreign_by_reference_field(graph, field.ty, nominal.symbol.module_name, next_seen) -> return false
+        }
+        return true
+    }
+    false
+}
+
+fn sema_checked_foreign_by_reference_field(graph: SemaRegistrationGraph, ty: Type, caller_module: String, seen: [String]) -> Bool Never! {
+    if sema_checked_qualify_type(graph, ty, caller_module) == {
+        .IntN(_, bits) -> bits == 8 || bits == 16 || bits == 32 || bits == 64
+        .Float | .Float32 | .Bool -> true
+        .Named(name) -> if name == {
+            "I8" | "I16" | "I32" | "I64" | "U8" | "U16" | "U32" | "U64" | "Float" | "F64" | "F32" | "Bool" -> true
+            else -> sema_checked_foreign_by_reference_struct(graph, ty, caller_module, seen)
+        }
+        else -> false
+    }
+}
+
 fn sema_checked_foreign_type_error(ty: Type, span: Span, c_abi: Bool) -> Diagnostic {
     if {
         c_abi -> sema_error("E3203", span, "`{type_name(ty)}` is not a C-compatible type for a foreign function parameter or return.", "`#Import` / `#Export` functions must use types with a stable C ABI at the edge.", "Use scalars, `String`, or a struct with C layout; pointers only through the gated tier.")
@@ -1079,7 +1114,7 @@ fn sema_checked_foreign_bridge_eligible(graph: SemaRegistrationGraph, module_ide
 fn sema_checked_foreign_signature(graph: SemaRegistrationGraph, module_identity: String, registered: SemaRegistrationForeignFunction, c_abi: Bool, handles: [SemaCheckedForeignHandle], diagnostics: &[Diagnostic]) -> Bool {
     valid := true
     loop parameter in registered.declaration.params {
-        if !sema_checked_foreign_type(graph, parameter.ty, module_identity, c_abi, registered.declaration.generated, handles, [String]{}) {
+        if !sema_checked_foreign_type(graph, parameter.ty, module_identity, c_abi, registered.declaration.generated, handles, [String]{}) && !(c_abi && parameter.convention == AccessConvention.Write && sema_checked_foreign_by_reference_struct(graph, parameter.ty, module_identity, [String]{})) {
             &diagnostics.push(sema_checked_foreign_type_error(parameter.ty, parameter.ty_span, c_abi))
             valid = false
         }

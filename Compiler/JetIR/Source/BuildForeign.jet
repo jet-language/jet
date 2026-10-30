@@ -24,9 +24,11 @@ fn ir_foreign_index(p: &IRProgram, foreign: ^[SemaCheckedForeignFunction], decls
 // A call of the foreign function `foreign`: a direct C function (C language
 // and ABI, no callback, close or undo adapter) whose arguments cross as C
 // scalars, an exact Int as its I64 (jet_int_owned_to_i64), a String as a
-// packed NUL-terminated copy freed after the call, and a written machine
-// scalar (`&U64`, `&I32`, `&F64`) as the address of its place, read back
-// after the call; the C result converts back.
+// packed NUL-terminated copy freed after the call, a written machine scalar
+// (`&U64`, `&I32`, `&F64`) as the address of its place, read back after the
+// call, and a written struct of machine scalars (`&Pair`) as the address of
+// its own bytes, which the C function reads and writes in place; the C result
+// converts back.
 fn ir_foreign_call(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction, args: [BodyCallArg], span: Span) -> Int Never! {
     if foreign.language == "asm" -> return ir_asm_call(&m, p, &b, foreign, args, span)
     if foreign.language != "c" || foreign.abi != "C" || foreign.callback_key != None || foreign.close_function_key != None || foreign.close_foreign_key != None || foreign.undo_function_key != None || foreign.symbol == "" {
@@ -61,6 +63,9 @@ fn ir_foreign_call(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheck
         if written {
             if m.types[row].kind == {
                 .Word | .Float -> {}
+                .Aggregate -> {
+                    if !ir_foreign_plain_struct(&m, p, row) -> return ir_fail_slot(&b, span, "foreign C out-parameter {param.name} has no native C ABI marshalling")
+                }
                 else -> return ir_fail_slot(&b, span, "foreign C out-parameter {param.name} has no native C ABI marshalling")
             }
             address :: ir_place_address(&m, p, &b, arg.value, &backs, span)
@@ -120,6 +125,26 @@ fn ir_foreign_call(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheck
     }
     loop value in values -> ir_release(&m, &b, value)
     dst
+}
+
+// Whether type row `row` is a struct whose bytes hold only machine scalars:
+// inline integer words, floats and Bools with no drop, and structs of them.
+fn ir_foreign_plain_struct(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
+    ty :: ir_untag(m.types[row].ty)
+    nominal :: ir_nominal_name(ty) ?? return false
+    definition :: ir_type_def(p, nominal) ?? return false
+    members :: ir_struct_members(&m, p, definition, ir_type_args(ty)) ?? return false
+    loop member in members {
+        if member.boxed || m.types[member.ty].drop != "" -> return false
+        if m.types[member.ty].kind == {
+            .Word | .Float | .Float32 | .Bool -> {}
+            .Aggregate -> {
+                if !ir_foreign_plain_struct(&m, p, member.ty) -> return false
+            }
+            else -> return false
+        }
+    }
+    true
 }
 
 // A call of the `#FFI(asm)` function `foreign`: a call of its leaf

@@ -1,7 +1,8 @@
 // Canonical target layout identity, profile contracts, and compiler-owned
 // physical layout facts. This module deliberately never asks a native layout
-// engine for an answer: only `#Layout(c)` and `#Layout(columnar)` declarations
-// receive concrete aggregate facts.
+// engine for an answer: `#Layout(c)` and `#Layout(columnar)` declarations
+// receive the facts of their declaration, and a struct without `#Layout`
+// receives the facts of the compiler's own placement (jet_target_layout_native_struct_facts).
 
 JET_TARGET_LAYOUT_FACT_VERSION :: "layout-facts-v2"
 
@@ -594,7 +595,7 @@ fn jet_target_layout_type_facts(engine: TargetLayoutEngine, ty: Type) -> ByteLay
 // Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::struct_facts_inner
 fn jet_target_layout_struct_facts_inner_named(engine: TargetLayoutEngine, definition: StructDef, identity: String, owner_qualified_name: String, query: &JetTargetLayoutQuery) -> LayoutFacts Never! {
     field_names :: loop field in definition.fields if field.computed == None -> field.name
-    layout :: definition.layout ?? return jet_target_layout_unknown(field_names)
+    layout :: definition.layout ?? return jet_target_layout_native_struct_facts(engine, definition, identity, &query)
     if !jet_target_layout_struct_layout_is_physical(layout) -> return jet_target_layout_unknown(field_names)
     if !jet_target_layout_enter(&query, identity) -> return jet_target_layout_unknown(field_names)
     names := [String]{}
@@ -609,6 +610,118 @@ fn jet_target_layout_struct_facts_inner_named(engine: TargetLayoutEngine, defini
     if layout == {
         .CAligned(alignment, _) -> jet_target_layout_aligned_struct_facts(facts, alignment)
         else -> facts
+    }
+}
+
+// The order in which members of alignments `aligns` take their offsets: by
+// descending alignment, declaration order among equals, when `reorder`;
+// declaration order otherwise. The native code generator places struct
+// members in this order, so its layout and these facts never disagree.
+fn jet_target_layout_member_order(aligns: [Int], reorder: Bool) -> [Int] Never! {
+    order := [Int]{}
+    loop index in 0..<aligns.len() {
+        at := order.len()
+        if reorder {
+            loop at > 0 && aligns[order[at - 1]] < aligns[index] -> at -= 1
+        }
+        &order.insert(at, index)
+    }
+    order
+}
+
+// The bytes the native code generator gives struct `definition`: a struct
+// without `#Layout` places its members by jet_target_layout_member_order, a
+// `#Layout` struct in declaration order. Each member sits at its alignment, a
+// nested struct or List member at 8; the struct is a multiple of 8 bytes, at
+// least 8, aligned to 8. Unknown when any member's bytes are.
+fn jet_target_layout_native_struct_facts(engine: TargetLayoutEngine, definition: StructDef, identity: String, query: &JetTargetLayoutQuery) -> LayoutFacts Never! {
+    names := [String]{}
+    types := [Type]{}
+    loop field in definition.fields {
+        if field.computed != None -> next
+        &names.push(field.name)
+        &types.push(field.ty)
+    }
+    if !jet_target_layout_enter(&query, identity) -> return jet_target_layout_unknown(names)
+    layouts := [ByteLayout]{}
+    loop ty in types {
+        layout :: jet_target_layout_native_type(engine, ty, identity, &query)
+        if layout == .Val(known) { &layouts.push(known) } else { break }
+    }
+    query.active[identity] = false
+    if layouts.len() != names.len() -> return jet_target_layout_unknown(names)
+    aligns :: loop layout in layouts -> layout.alignment
+    offsets := [Int]{}
+    loop _ in 0..<layouts.len() -> &offsets.push(0)
+    cursor := 0
+    loop index in jet_target_layout_member_order(aligns, definition.layout == None) {
+        if layouts[index].size > 0 -> cursor = jet_layout_align_up(cursor, layouts[index].alignment) ?? return jet_target_layout_unknown(names)
+        offsets[index] = cursor
+        cursor = jet_layout_checked_add(cursor, layouts[index].size) ?? return jet_target_layout_unknown(names)
+    }
+    end :: jet_layout_align_up(cursor, 8) ?? return jet_target_layout_unknown(names)
+    size :: if end < 8 -> 8 else -> end
+    fields :: loop index in 0..<names.len() -> FieldLayoutFacts{name: names[index], offset: Val(offsets[index]), size: Val(layouts[index].size), alignment: Val(layouts[index].alignment), stride: Val(layouts[index].stride)}
+    LayoutFacts{bytes: Val(ByteLayout{size: size, alignment: 8, stride: size}), fields: fields}
+}
+
+// The bytes a value of `ty` takes as a member of a struct the native code
+// generator lays out, None when unknown. Int, Float, Char, String, Option,
+// Result, enums and raw pointers are one word; an IntN packs into 1, 2, 4 or
+// 8 bytes; a List is its 24-byte header. Core declarations are carried by
+// the runtime, not by their declared fields, and stay unknown.
+fn jet_target_layout_native_type(engine: TargetLayoutEngine, ty: Type, owner_qualified_name: String, query: &JetTargetLayoutQuery) -> ByteLayout? {
+    if ty == {
+        .Int | .Float | .Char | .String | .Option(_) | .Result(_, _) -> Val(jet_target_layout_scalar(8))
+        .Bool -> Val(jet_target_layout_scalar(1))
+        .Float32 -> Val(jet_target_layout_scalar(4))
+        .IntN(_, bits) -> {
+            if bits < 1 || bits > 64 -> return None
+            Val(jet_target_layout_scalar(if bits <= 8 -> 1 else if bits <= 16 -> 2 else if bits <= 32 -> 4 else -> 8))
+        }
+        .List(_) -> Val(ByteLayout{size: 24, alignment: 8, stride: 24})
+        .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> jet_target_layout_native_type(engine, base, owner_qualified_name, &query)
+        .Named(name) -> jet_target_layout_native_named(engine, name, owner_qualified_name, &query)
+        .Apply(name, args) -> if name == "Ptr" && args.len() == 1 -> Val(jet_target_layout_scalar(8)) else -> None
+        else -> None
+    }
+}
+
+fn jet_target_layout_native_named(engine: TargetLayoutEngine, name: String, owner_qualified_name: String, query: &JetTargetLayoutQuery) -> ByteLayout? {
+    if jet_target_layout_numeric_type(name) == .Val(numeric) -> return jet_target_layout_native_type(engine, numeric, owner_qualified_name, &query)
+    if name == "Bool" -> return Val(jet_target_layout_scalar(1))
+    if name == "Char" || name == "String" -> return Val(jet_target_layout_scalar(8))
+    if name == "Unit" || name == "()" -> return Val(ByteLayout{size: 0, alignment: 1, stride: 0})
+    resolved_name :: jet_target_layout_resolved_name(engine, owner_qualified_name, name)
+    if jet_target_layout_numeric_type(resolved_name) == .Val(numeric_resolved) -> return jet_target_layout_native_type(engine, numeric_resolved, owner_qualified_name, &query)
+    if resolved_name == name && engine.item_positions.get(name) == .Val(position) {
+        return jet_target_layout_native_item(engine, engine.items[position], name, &query)
+    }
+    position :: engine.qualified_positions.get(resolved_name) ?? return None
+    if engine.qualified_items[position].module_identity.starts_with("<corelib>/") -> return None
+    jet_target_layout_native_item(engine, engine.qualified_items[position].item, engine.qualified_items[position].qualified_name, &query)
+}
+
+fn jet_target_layout_native_item(engine: TargetLayoutEngine, item: Item, identity: String, query: &JetTargetLayoutQuery) -> ByteLayout? {
+    if item == {
+        .Struct(definition) -> {
+            if definition.type_params.len() > 0 -> return None
+            jet_target_layout_native_struct_facts(engine, definition, identity, &query).bytes
+        }
+        .Enum(_) -> Val(jet_target_layout_scalar(8))
+        .Distinct(definition) -> {
+            if !jet_target_layout_enter(&query, identity) -> return None
+            bytes :: jet_target_layout_native_type(engine, definition.base, identity, &query)
+            query.active[identity] = false
+            bytes
+        }
+        .TypeAlias(definition) -> {
+            if definition.type_params.len() > 0 || !jet_target_layout_enter(&query, identity) -> return None
+            bytes :: jet_target_layout_native_type(engine, definition.target, identity, &query)
+            query.active[identity] = false
+            bytes
+        }
+        else -> None
     }
 }
 

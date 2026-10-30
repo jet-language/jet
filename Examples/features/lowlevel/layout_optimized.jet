@@ -1,0 +1,51 @@
+// A struct without `#Layout` is laid out by the compiler: its fields take
+// offsets by descending alignment (declaration order among equals), packed at
+// their own alignment, and the struct rounds up to a multiple of 8 bytes.
+// `$layout` reports the bytes the compiler chose. `#Layout(c)` keeps the
+// written order and C padding, as a C header declares it.
+struct Mixed {
+    a: U8
+    b: Int
+    c: U8
+    d: Int
+    e: U8
+}
+
+#Layout(c) struct CMixed {
+    a: U8
+    b: Int
+    c: U8
+    d: Int
+    e: U8
+}
+
+MIXED_SIZE :: comptime { Mixed.$layout.size ?? -1 }
+MIXED_ALIGNMENT :: comptime { Mixed.$layout.alignment ?? -1 }
+MIXED_GUARANTEE :: comptime { Mixed.$layout.guarantee }
+MIXED_A :: comptime { Mixed.$layout.fields[0].offset ?? -1 }
+MIXED_B :: comptime { Mixed.$layout.fields[1].offset ?? -1 }
+MIXED_C :: comptime { Mixed.$layout.fields[2].offset ?? -1 }
+MIXED_D :: comptime { Mixed.$layout.fields[3].offset ?? -1 }
+MIXED_E :: comptime { Mixed.$layout.fields[4].offset ?? -1 }
+C_SIZE :: comptime { CMixed.$layout.size ?? -1 }
+C_E :: comptime { CMixed.$layout.fields[4].offset ?? -1 }
+
+fn bump(value: &Mixed) {
+    value.a += U8{1}
+    value.b *= 2
+    value.c += U8{2}
+    value.d -= 5
+    value.e += U8{3}
+}
+
+fn run() {
+    print("Mixed: size {MIXED_SIZE}, alignment {MIXED_ALIGNMENT}, {MIXED_GUARANTEE}")
+    print("offsets: a {MIXED_A}, b {MIXED_B}, c {MIXED_C}, d {MIXED_D}, e {MIXED_E}")
+    print("CMixed: size {C_SIZE}, e at {C_E}")
+    values := [Mixed]{}
+    loop index in 0..<3 {
+        &values.push(Mixed{a: U8{index}, b: 10 * index, c: U8{100 + index}, d: 1000 + index, e: U8{250 - index}})
+    }
+    loop index in 0..<values.len() -> bump(&values[index])
+    loop value in values -> print("{value.a} {value.b} {value.c} {value.d} {value.e}")
+}

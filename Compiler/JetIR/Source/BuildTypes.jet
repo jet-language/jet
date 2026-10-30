@@ -2,7 +2,7 @@
 // (structs, enums, carriers, handles), operators and comparisons, value
 // rendering (Display/Show/Debug) and numeric conversions.
 
-use jet_foundation.[CORE_ENUM_ROWS, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TDeclarationOwnership, TField, FnBody, TGenericParam, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_source_owns_type, measure_literal_value, name_rows_set, name_rows_value, type_carrier_identity, type_name, type_table_intern, type_union_member_tag]
+use jet_foundation.[CORE_ENUM_ROWS, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TDeclarationOwnership, TField, FnBody, TGenericParam, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_source_owns_type, jet_target_layout_member_order, measure_literal_value, name_rows_set, name_rows_value, type_carrier_identity, type_name, type_table_intern, type_union_member_tag]
 use jet_sema.[sema_type_def_instance_type]
 
 // A rendered type's identity: its declaration key when it names one (every
@@ -1770,9 +1770,12 @@ fn ir_nominal_name(ty: Type) -> String? Never! {
 struct IRMember { name: String, offset: Int, ty: Int, boxed: Bool{false}, redact: Bool{false} }
 
 // The stored members of struct declaration `row` (applied to the instance
-// arguments `args`) at their natural offsets (each member at its own
-// alignment, computed fields take no bytes, a recursive edge is one pointer
-// to its wrapper box); None when a member cannot be laid out.
+// arguments `args`), in declaration order. Computed fields take no bytes and a
+// recursive edge is one pointer to its wrapper box. A struct without a
+// `#Layout` places its members by descending alignment (declaration order
+// among equals), each at its own alignment; a `#Layout` struct places them in
+// declaration order, as the foreign side declares them. None when a member
+// cannot be laid out.
 fn ir_struct_members(m: &IRModule, p: IRProgram, row: Int, args: [Type]) -> [IRMember]? Never! {
     // Memoized by the instance's arguments in the terms of the instance
     // being built, as its member types are laid out. A SharedGuard argument's
@@ -1796,7 +1799,8 @@ fn ir_struct_members_in(m: &IRModule, p: IRProgram, row: Int, args: [Type], layi
         inner := laying
         &inner.push(ir_instance_identity(definition.key, args))
         members := [IRMember]{}
-        offset := 0
+        sizes := [Int]{}
+        aligns := [Int]{}
         loop field in fields {
             if field.computed -> next
             field_ty :: sema_type_def_instance_type(p.types[row], args, field.ty)
@@ -1810,10 +1814,17 @@ fn ir_struct_members_in(m: &IRModule, p: IRProgram, row: Int, args: [Type], layi
             } else {
                 ty = ir_value_type_in(&m, p, field_ty, inner) ?? return None
             }
-            size :: if boxed -> 8 else -> m.types[ty].size
-            align :: if boxed || m.types[ty].kind == .Aggregate -> 8 else -> m.types[ty].align
+            &sizes.push(if boxed -> 8 else -> m.types[ty].size)
+            &aligns.push(if boxed || m.types[ty].kind == .Aggregate -> 8 else -> m.types[ty].align)
+            &members.push(IRMember{name: field.name, offset: 0, ty: ty, boxed: boxed, redact: field.redact})
+        }
+        order :: jet_target_layout_member_order(aligns, definition.layout == None)
+        offset := 0
+        loop index in order {
+            size :: sizes[index]
+            align :: aligns[index]
             if size > 0 && align > 0 && offset % align != 0 -> offset += align - offset % align
-            &members.push(IRMember{name: field.name, offset: offset, ty: ty, boxed: boxed, redact: field.redact})
+            members[index].offset = offset
             offset += size
         }
         return Val(members)
