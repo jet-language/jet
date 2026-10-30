@@ -2203,28 +2203,18 @@ fn jfmt_fmt_import(f: &JetFmt, imp: ImportDecl) {
 }
 
 fn jfmt_fmt_field(f: &JetFmt, field: Field, derives_decode: Bool) {
-    // Field rules share one inline `#[…]` group. Redact has a
-    // dedicated semantic bit, so fold it back into the same group here.
-    if field.redact || field.serde_markers.len() > 0 {
+    // Field rules share one inline `#[…]` group. `Redact` stays in that group
+    // where it was written; the parser also sets the field's `redact` bit.
+    if field.serde_markers.len() > 0 {
         jfmt_write(&f, "#")
-        count :: (if field.redact -> 1 else -> 0) + field.serde_markers.len()
+        count :: field.serde_markers.len()
         if count == 1 {
-            if field.redact {
-                jfmt_write(&f, "Redact")
-            } else {
-                jfmt_fmt_marker(&f, field.serde_markers[0])
-            }
+            jfmt_fmt_marker(&f, field.serde_markers[0])
         } else {
             jfmt_write(&f, "[")
             source :: jfmt_source_marker_group_span(f, field.name_span.start)
             multiline :: jfmt_comma_begin(&f, count, source)
             position := 0
-            if field.redact {
-                jfmt_comma_before(&f, position, multiline, field.name_span.start)
-                jfmt_write(&f, "Redact")
-                jfmt_comma_after(&f, multiline, field.name_span.end)
-                position += 1
-            }
             loop marker in field.serde_markers {
                 jfmt_comma_before(&f, position, multiline, marker.span.start)
                 jfmt_fmt_marker(&f, marker)

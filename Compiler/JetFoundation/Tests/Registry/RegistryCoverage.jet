@@ -2,7 +2,7 @@
 // and tests/marker_registry_coverage.rs (#6096, #5902 C4), run against the Jet
 // registries that replaced the Rust ones.
 use core.files as registry_coverage_files
-use jet_foundation.[DIAGNOSTIC_ERROR, DIAGNOSTIC_LINT, DiagnosticRegistryStatus, FOUNDATION_FACT_READ_ROWS, FactRead, MARKER_SOURCE, REGISTRATION_FACT_ROWS, REGISTRATION_TRUTH_ROWS, RegistrationFactTarget, diagnostic_explanation, diagnostic_registry_row, diagnostic_registry_rows, fact_read_reflection_kind, lint_code_for_name, lint_name_for_code, lint_registered_lints, marker_source_read]
+use jet_foundation.[DIAGNOSTIC_ERROR, DIAGNOSTIC_LINT, DiagnosticRegistryStatus, FOUNDATION_FACT_READ_ROWS, FactRead, MARKER_SOURCE, REGISTRATION_FACT_ROWS, REGISTRATION_TRUTH_ROWS, RegistrationFactTarget, diagnostic_explanation, diagnostic_registry_row, diagnostic_registry_rows, diagnostic_stage_is_registered, fact_read_reflection_kind, lint_code_for_name, lint_name_for_code, lint_registered_lints, marker_source_read]
 
 // tests/diagnostics_coverage.rs:571-589.
 fn registry_coverage_is_snake_case(name: String) -> Bool Never! {
@@ -101,6 +101,29 @@ fn registry_coverage_has(values: [String], value: String) -> Bool Never! {
     }
     assert(seen.len() > 100, "the typed diagnostic rows must be populated")
     assert_eq(duplicates.join("\n"), "")
+}
+
+// Every stage column holds one value of the closed stage set: in the generated
+// rows, and in their Prelude source, which also keeps the retired rows.
+#Test("every_diagnostic_stage_is_in_the_closed_set") {
+    unknown := [String]{}
+    loop row in diagnostic_registry_rows() {
+        if !diagnostic_stage_is_registered(row.stage) -> &unknown.push("{row.code}: `{row.stage}`")
+    }
+    source :: registry_coverage_files.read("Compiler/Prelude/Diagnostics.jet") ?? panic("read Compiler/Prelude/Diagnostics.jet: {err}")
+    count := 0
+    loop line in source.split("\n") {
+        if !line.starts_with("diagnostic\t") -> next
+        fields :: line.split("\t").to_list()
+        assert(fields.len() > 2, "diagnostic row without a stage: {line}")
+        count += 1
+        if !diagnostic_stage_is_registered(fields[2]) -> &unknown.push("Prelude {fields[1]}: `{fields[2]}`")
+    }
+    assert(count > 100, "the Prelude diagnostic rows must be readable")
+    assert_eq(unknown.join("\n"), "")
+    loop stage in ["parser", "compiler", "type", "sema/parse", "loader/jet", "jit", "retired", ""] {
+        assert(!diagnostic_stage_is_registered(stage), "`{stage}` must not be a registered stage")
+    }
 }
 
 // tests/diagnostics_coverage.rs:1947 (I4c): `jet explain` resolves every

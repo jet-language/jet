@@ -2237,8 +2237,10 @@ pub use wrap.wrap
 ```
 
 A public declaration that is not re-exported does not become part of the
-parent directory's surface. Re-exported calls retain the defining function's
-borrow and move rules. Examples covering file modules, inline modules,
+parent directory's surface, and neither does the child module itself:
+reaching it from outside, as `text.wrap.wrap("hi")`, reports **E0605**.
+Re-exported calls retain the defining function's borrow and move rules.
+Examples covering file modules, inline modules,
 qualified and grouped imports, and re-exports are in
 `Examples/features/modules/` (D-MOD4).
 

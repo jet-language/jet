@@ -46,6 +46,22 @@ impl DiagnosticRegistryRow {
     }
 }
 
+// The closed set of values a row's stage column may hold. A stage names the
+// part of the toolchain that reports the row; a joined value such as
+// `parse/sema` names every part that does. Status is its own column.
+DIAGNOSTIC_STAGES :: [String]{
+    "build", "comptime", "compile", "driver", "interp", "jet", "jetpack", "lex", "load",
+    "parse", "parse/sema", "repl", "runtime", "sema", "sema/build", "sema/jetpack",
+    "sema/runtime", "tooling",
+}
+
+fn diagnostic_stage_is_registered(stage: String) -> Bool Never! {
+    loop known in DIAGNOSTIC_STAGES {
+        if known == stage -> return true
+    }
+    false
+}
+
 fn diagnostic_byte_at(source: [U8], index: Int) -> Int Never! {
     if index < 0 || index >= source.len() -> return -1
     Int.from_u8(source[index])

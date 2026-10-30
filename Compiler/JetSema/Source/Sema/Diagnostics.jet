@@ -9,6 +9,7 @@ use jet_foundation.[
     Type,
     core_module_for_alias,
     diagnostic_from_registry,
+    diagnostic_registry_row,
     diagnostic_with_source_mapping,
     dimension_display_name,
     measure_expression,
@@ -201,6 +202,12 @@ fn sema_lint(code: String, span: Span, what: String, why: String, fix: String) -
 // L0511: a user binding or parameter spelled `err`.
 fn sema_err_shadow_lint(span: Span) -> Diagnostic {
     sema_lint("L0511", span, "Binding `err` shadows the fallback's ambient failure report", "`err` has a special meaning inside a fallible `??` fallback, so the same name is easy to misread as the report there", "Rename the binding, or use it outside a fallback")
+}
+
+// E0610: `use alias.item` whose alias names no module in scope.
+fn sema_unknown_module_alias(module_alias: String, span: Span) -> Diagnostic {
+    row :: diagnostic_registry_row("E0610") ?? panic("E0610 has no registry row")
+    sema_error("E0610", span, row.what.replace("{{alias}}", module_alias), row.why.replace("{{alias}}", module_alias), row.fix.replace("{{alias}}", module_alias))
 }
 
 fn sema_defined_twice_optional(name: String, why: String, span: Span?) -> Diagnostic {

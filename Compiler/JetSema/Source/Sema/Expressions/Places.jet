@@ -632,9 +632,30 @@ fn sema_expression_module_constant(alias: String, member: String, member_span: S
             &diagnostics.push(unknown)
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
+        unexposed :: sema_expression_module_file_child(graph, resolved, alias, member, member_span)
+        if unexposed == .Val(diagnostic) {
+            &diagnostics.push(diagnostic)
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
         return sema_expression_module_constant_read(graph, resolved, "{alias}.{member}", span, expected, environment, program, &context, &diagnostics)
     }
     SemaMethodSpecialCheck{handled: false, value: None}
+}
+
+// E0605 for `alias.child` where `child` is a file module that the imported
+// source module declares (`module child` with no body). A folder module offers
+// only what it re-exports, so its file modules are never reachable through it.
+// Core module paths such as `core.text.wrap` name published modules and keep
+// their own route.
+fn sema_expression_module_file_child(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol, alias: String, member: String, member_span: Span) -> Diagnostic? {
+    if resolved.target_module_identity.starts_with("<corelib>/") -> return None
+    owner_index :: sema_registration_module_index(graph, resolved.target_module_identity) ?? return None
+    loop declaration in graph.modules[owner_index].declarations {
+        if declaration == .CodeModule(definition) && definition.name == member && definition.body == None {
+            return Val(sema_error("E0605", member_span, "module `{alias}` does not expose its file module `{member}`", "a folder module offers other files only the items it re-exports, so its file modules stay inside it", "call an item that `{alias}` re-exports, or re-export the one you need in `{alias}` with `pub use {member}.item`"))
+        }
+    }
+    None
 }
 
 // `core.math.NAME` through `use core as core`: the nested Core module's

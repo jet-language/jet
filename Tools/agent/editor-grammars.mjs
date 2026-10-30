@@ -98,9 +98,11 @@ const GLOBAL_KEYWORDS = new Set([
 ]);
 // Zed validates query string literals against anonymous tree-sitter tokens;
 // words parsed as named nodes would make the whole language fail to load.
+// `comptime` is part of the named `keyword` token, so `(keyword) @keyword`
+// colors it.
 const ZED_ANONYMOUS_WORDS = new Set([
   "Bool", "Char", "Err", "F32", "F64", "Float", "I16", "I32", "I64", "I8", "Int", "List", "Map",
-  "String", "Test", "U16", "U32", "U64", "U8", "add", "as", "break", "change", "comptime",
+  "String", "Test", "U16", "U32", "U64", "U8", "add", "as", "break", "change",
   "continue", "copy", "defer", "derive", "distinct", "else", "enum", "extern", "false", "fn", "if",
   "impl", "in", "loop", "marker", "migration", "module", "pub", "remove", "rename", "return", "rust",
   "self", "state", "step", "struct", "tag", "task", "trait", "true", "use", "via",

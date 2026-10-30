@@ -1329,7 +1329,7 @@ fn sema_inline_bind_module_imports(definition: CodeModule, surfaces: [SemaInline
                     &bound_targets.push(SemaInlineTarget{module_alias: module_alias, member: item.original, qualified: true})
                     next
                 }
-                &rewrite.diagnostics.push(sema_error("E0610", module_alias_span, "no module named {module_alias} in scope", "the alias must refer to a module in the enclosing file", "import a module as {module_alias} before this use"))
+                &rewrite.diagnostics.push(sema_unknown_module_alias(module_alias, module_alias_span))
             }
             if rewrite.diagnostics.len() != group_start -> next
             loop (index, local) in bound_locals {

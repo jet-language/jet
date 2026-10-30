@@ -95,6 +95,7 @@ use jet_sema.[
     sema_registration_unit_family_type_names,
     sema_source_words,
     sema_source_wanted_words,
+    sema_unknown_module_alias,
 ]
 use jet_pkg_model.[
     PackageParseError, pkg_inline_deps_collect, pkg_inline_deps_is_pinned,
@@ -4526,7 +4527,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
                         }
                     }
                     selected_index :: target_index ?? {
-                        if core_module == None -> &diagnostics.push(jet_driver_diagnostic("E0610", module_alias_span, "no module named `{module_alias}` in scope", "the alias must refer to a module imported earlier in this file", "add `import … as {module_alias}`  before this `use`"))
+                        if core_module == None -> &diagnostics.push(sema_unknown_module_alias(module_alias, module_alias_span))
                         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
                         next
                     }
