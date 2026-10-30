@@ -331,6 +331,7 @@ fn ir_value_type_laid(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) ->
     if ir_channel_element(ty, "Sender") != None -> return Val(ir_channel_row(&m, ty, "Sender"))
     if ir_channel_element(ty, "Receiver") != None -> return Val(ir_channel_row(&m, ty, "Receiver"))
     if ir_event_type(ty) -> return Val(ir_event_row(&m, ty))
+    if ir_reactive_type(p, ty) -> return Val(ir_reactive_row(&m, p, ty))
     if ir_scope_guard_type(ty) -> return Val(ir_scope_guard_row(&m, ty))
     if ir_atomic_scalar(ty) == .Val(scalar) -> return Val(ir_atomic_row(&m, ty, ir_atomic_lane(scalar) ?? ""))
     // A raw pointer `*T` is a bare address: no drop and no copy fixup.

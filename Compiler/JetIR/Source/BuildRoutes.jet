@@ -4454,6 +4454,7 @@ fn ir_core_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: Cor
     if canonical.symbol == .Prelude(name) {
         if name == "jet_std::channel" || name == "jet_std::channel_bounded" -> return ir_channel_new(&m, p, &b, ty, name == "jet_std::channel_bounded", args, span)
         if name == "jet_std::JetEvent::with_policy" -> return ir_event_with_policy(&m, p, &b, ty, args, span)
+        if name == "jet_std::JetSignal::new" -> return ir_reactive_signal(&m, p, &b, ty, args, span)
     }
     if type_args.len() > 0 -> return ir_fail_slot(&b, span, "generic Core call {canonical.module_name}.{canonical.member}")
     loop flag in widen {

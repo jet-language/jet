@@ -676,7 +676,7 @@ fn ir_stmt_body(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never
             b.impure -= 1
         }
         .MixedSwitch(subject, _, arms, else_body, span) -> ir_mixed_switch(&m, p, &b, subject, arms, else_body, span)
-        .Reactive(executable, span) -> ir_reactive_run(&m, p, &b, executable, span)
+        .Reactive(executable, span) -> { _ :: ir_reactive_rooted(&m, p, &b, executable, span) }
         .Layout(_, _, _, span) -> ir_fail(&b, span, "statement Layout")
         .ContextBlock(guards, body, _) -> ir_context_block(&m, p, &b, guards, body)
         .Shield(body, _) -> ir_shield(&m, p, &b, body)
@@ -1562,6 +1562,7 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
         }
         .MaterializeView(value) -> return ir_materialize_view(&m, p, &b, expression_ty, value, span)
         .StructLit(fields) -> {
+            if ir_reactive_type(p, expression_ty) -> return ir_reactive_literal(&m, p, &b, expression_ty, fields, span)
             if ir_default_err(p, expression_ty) -> return ir_default_err_literal(&m, p, &b, expression_ty, fields, span)
             ty :: ir_value_type(&m, p, expression_ty) ?? return ir_type_fail(&b, span, expression_ty)
             if ir_word_record(m, p, ty) == .Val(record) {
@@ -1595,6 +1596,7 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
             return storage
         }
         .Field(receiver, field) -> {
+            if ir_reactive_type(p, ir_ty(p, b, receiver)) -> return ir_reactive_field(&m, p, &b, expression_ty, receiver, field.name, span)
             if ir_default_err(p, ir_ty(p, b, receiver)) -> return ir_default_err_field(&m, p, &b, expression_ty, receiver, field.name, span)
             base :: ir_expr(&m, p, &b, receiver)
             if ir_failed(b) -> return -1
@@ -2029,6 +2031,7 @@ fn ir_handle_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     if ir_dyn_method(&m, p, &b, ty, receiver, operation, args, span) == .Val(result) -> return result
     if ir_channel_method(&m, p, &b, ty, receiver, operation, args, span) == .Val(result) -> return result
     if ir_event_method(&m, p, &b, ty, receiver, operation, args, span) == .Val(result) -> return result
+    if ir_reactive_method(&m, p, &b, ty, receiver, operation, args, span) == .Val(result) -> return result
     if operation == .SerdeEncode -> return ir_serde_encode(&m, p, &b, ty, receiver, span)
     if operation == .CursorTakePattern(text_parts, canonical) -> return ir_take_pattern(&m, p, &b, ty, receiver, false, text_parts, [BinMatchPart]{}, canonical, span)
     if operation == .ReaderTakePattern(binary_parts, canonical) -> return ir_take_pattern(&m, p, &b, ty, receiver, true, [StrMatchPart]{}, binary_parts, canonical, span)

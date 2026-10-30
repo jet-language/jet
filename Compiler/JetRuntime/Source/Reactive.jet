@@ -1,0 +1,383 @@
+// Dependency-tracked reactive cells. One meaning with the Rust reference
+// crates/jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs:
+// ReactiveObserver :18-106, JetReactiveEffect :108-130, the per-thread
+// observer stack and root effects :132-138, JetSignal :211-295, JetDerived
+// :342-441, jet_reactive_effect / _rooted / _scope :443-466.
+// Signal<T>, Derived<T> and Computed<T> share the one cell carrier; Effect is
+// its observer handle. The Core fields (`value`, `version`, `last`, `active`)
+// are untracked reads of the same carriers.
+//
+// Cell64: refs0 meta8 (owned descriptor) payload16 (the value's slot; 0 while
+//   a derived has none) version24 subs{len32 cap40 data48} observer56 (a
+//   derived's own observer, owned by the cell; 0 for a signal)
+//   Sources count their subscribers (refs) but never own them: an owner (an
+//   Effect handle, a derived cell, the thread's root effects) disposes its
+//   observer when its last owner goes, which detaches it from every source
+//   (Rust: weak subscriptions).
+// Observer104: refs0 owners8 id16 active24 running32 env40 invoke48
+//   release56 deps{len64 cap72 data80} target88 (a derived's cell, not
+//   counted) last96
+//   invoke(env, out) is the lowering's lazy.callback of the `() -> T` body;
+//   release(env) frees the closure once. deps count each source cell.
+// Thread48: stack{len0 cap8 data16} roots{len24 cap32 data40}
+
+REACTIVE_CELL_BYTES :: I64{64}
+REACTIVE_OBSERVER_BYTES :: I64{104}
+REACTIVE_THREAD_BYTES :: I64{48}
+reactive_thread_key := I64{0}
+reactive_next_observer := I64{1}
+
+fn reactive_word(address: I64) -> I64 { trap_word(address) }
+fn reactive_store(address: I64, value: I64) { trap_store(address, value) }
+
+// runtime-init: 3
+#Export(c) fn jet_rt_reactive_init() {
+    if (reactive_thread_key != I64{0}) -> return
+    reactive_thread_key = jet_rt_tls_key_new(I64{0})
+}
+
+fn reactive_thread() -> I64 {
+    state :: jet_rt_tls_get(reactive_thread_key)
+    if (state != I64{0}) -> return state
+    fresh :: jet_rt_alloc(REACTIVE_THREAD_BYTES, I64{8})
+    coll_zero(fresh, REACTIVE_THREAD_BYTES)
+    jet_rt_tls_set(reactive_thread_key, fresh)
+    fresh
+}
+
+// The observer recomputing on this thread, 0 outside every observer.
+fn reactive_active_observer() -> I64 {
+    state :: jet_rt_tls_get(reactive_thread_key)
+    if (state == I64{0}) -> return I64{0}
+    length :: reactive_word(state)
+    if (length == I64{0}) -> return I64{0}
+    event_words_get(state, length - I64{1})
+}
+
+fn reactive_stopped() -> Bool { jet_rt_session_propagate() != I64{0} }
+
+fn reactive_release_closure(observer: I64) {
+    env :: reactive_word(observer + I64{40})
+    release :: reactive_word(observer + I64{56})
+    reactive_store(observer + I64{40}, I64{0})
+    reactive_store(observer + I64{48}, I64{0})
+    reactive_store(observer + I64{56}, I64{0})
+    event_release_closure(env, release)
+}
+
+fn reactive_observer_new(env: I64, invoke: I64, release: I64) -> I64 {
+    observer :: jet_rt_alloc(REACTIVE_OBSERVER_BYTES, I64{8})
+    coll_zero(observer, REACTIVE_OBSERVER_BYTES)
+    reactive_store(observer, I64{1})
+    reactive_store(observer + I64{8}, I64{1})
+    reactive_store(observer + I64{16}, reactive_next_observer)
+    reactive_next_observer = reactive_next_observer + I64{1}
+    reactive_store(observer + I64{24}, I64{1})
+    reactive_store(observer + I64{40}, env)
+    reactive_store(observer + I64{48}, invoke)
+    reactive_store(observer + I64{56}, release)
+    observer
+}
+
+fn reactive_observer_retain(observer: I64) {
+    reactive_store(observer, reactive_word(observer) + I64{1})
+}
+
+fn reactive_observer_release(observer: I64) {
+    refs :: reactive_word(observer) - I64{1}
+    reactive_store(observer, refs)
+    if (refs != I64{0}) -> return
+    reactive_clear_dependencies(observer)
+    reactive_release_closure(observer)
+    event_words_free(reactive_word(observer + I64{80}), reactive_word(observer + I64{72}))
+    jet_rt_free(observer, REACTIVE_OBSERVER_BYTES, I64{8})
+}
+
+// Detaches the observer from every source it read (Rust clear_dependencies).
+fn reactive_clear_dependencies(observer: I64) {
+    base :: observer + I64{64}
+    length :: reactive_word(base)
+    capacity :: reactive_word(base + I64{8})
+    data :: reactive_word(base + I64{16})
+    event_words_take(base)
+    at := I64{0}
+    loop at < length {
+        cell :: reactive_word(data + at * I64{8})
+        reactive_cell_unsubscribe(cell, observer)
+        reactive_cell_release(cell)
+        at += I64{1}
+    }
+    event_words_free(data, capacity)
+}
+
+fn reactive_cell_unsubscribe(cell: I64, observer: I64) {
+    base :: cell + I64{32}
+    length :: reactive_word(base)
+    at := I64{0}
+    loop at < length {
+        if (event_words_get(base, at) == observer) {
+            event_words_remove(base, at)
+            reactive_observer_release(observer)
+            return
+        }
+        at += I64{1}
+    }
+}
+
+// Rust dispose: the first owner to end the observer detaches it; a running
+// body keeps its closure until the run returns.
+fn reactive_observer_dispose(observer: I64) {
+    if (reactive_word(observer + I64{24}) == I64{0}) -> return
+    reactive_store(observer + I64{24}, I64{0})
+    reactive_clear_dependencies(observer)
+    if (reactive_word(observer + I64{32}) == I64{0}) -> reactive_release_closure(observer)
+}
+
+// Rust ReactiveObserver::run: an inactive or already running observer is
+// skipped; the body runs with the observer on top of the thread's stack, so
+// each source it reads subscribes it again. A derived's result replaces its
+// cell's value and notifies the cell's own subscribers.
+fn reactive_observer_run(observer: I64) {
+    if (reactive_word(observer + I64{24}) == I64{0} || reactive_word(observer + I64{32}) != I64{0}) -> return
+    invoke :: reactive_word(observer + I64{48})
+    if (invoke == I64{0}) -> return
+    reactive_store(observer + I64{32}, I64{1})
+    reactive_observer_retain(observer)
+    reactive_clear_dependencies(observer)
+    state :: reactive_thread()
+    event_words_push(state, observer)
+    target :: reactive_word(observer + I64{88})
+    out := I64{0}
+    if (target != I64{0}) -> out = coll_slot_new(reactive_word(target + I64{8}))
+    _ := coll_call2(invoke, reactive_word(observer + I64{40}), out)
+    event_words_remove(state, reactive_word(state) - I64{1})
+    stopped :: reactive_stopped()
+    reactive_store(observer + I64{32}, I64{0})
+    if (target != I64{0}) {
+        if (stopped || reactive_word(observer + I64{24}) == I64{0}) {
+            meta :: reactive_word(target + I64{8})
+            if stopped {
+                jet_rt_free(out, coll_size(meta), I64{8})
+            } else {
+                coll_slot_free(out, meta)
+            }
+        } else {
+            reactive_cell_replace(target, out)
+            reactive_cell_notify(target)
+        }
+    }
+    if (reactive_word(observer + I64{24}) == I64{0}) -> reactive_release_closure(observer)
+    reactive_observer_release(observer)
+}
+
+fn reactive_cell_new(meta: I64, version: I64) -> I64 {
+    cell :: jet_rt_alloc(REACTIVE_CELL_BYTES, I64{8})
+    coll_zero(cell, REACTIVE_CELL_BYTES)
+    reactive_store(cell, I64{1})
+    reactive_store(cell + I64{8}, coll_meta_copy(meta))
+    reactive_store(cell + I64{24}, version)
+    cell
+}
+
+fn reactive_cell_retain(cell: I64) {
+    reactive_store(cell, reactive_word(cell) + I64{1})
+}
+
+fn reactive_cell_release(cell: I64) {
+    refs :: reactive_word(cell) - I64{1}
+    reactive_store(cell, refs)
+    if (refs != I64{0}) -> return
+    observer :: reactive_word(cell + I64{56})
+    if (observer != I64{0}) {
+        reactive_store(observer + I64{88}, I64{0})
+        reactive_observer_dispose(observer)
+        reactive_observer_release(observer)
+    }
+    base :: cell + I64{32}
+    length :: reactive_word(base)
+    capacity :: reactive_word(base + I64{8})
+    data :: reactive_word(base + I64{16})
+    event_words_take(base)
+    at := I64{0}
+    loop at < length {
+        reactive_observer_release(reactive_word(data + at * I64{8}))
+        at += I64{1}
+    }
+    event_words_free(data, capacity)
+    meta :: reactive_word(cell + I64{8})
+    coll_slot_free(reactive_word(cell + I64{16}), meta)
+    coll_meta_drop(meta)
+    jet_rt_free(cell, REACTIVE_CELL_BYTES, I64{8})
+}
+
+// The new value's slot becomes the cell's; the old value is dropped.
+fn reactive_cell_replace(cell: I64, slot: I64) {
+    meta :: reactive_word(cell + I64{8})
+    previous :: reactive_word(cell + I64{16})
+    reactive_store(cell + I64{16}, slot)
+    reactive_store(cell + I64{24}, reactive_word(cell + I64{24}) + I64{1})
+    coll_slot_free(previous, meta)
+}
+
+// Runs a snapshot of the subscribers; a stop ends the propagation.
+fn reactive_cell_notify(cell: I64) {
+    base :: cell + I64{32}
+    length :: reactive_word(base)
+    if (length == I64{0}) -> return
+    snapshot :: jet_rt_alloc(length * I64{8}, I64{8})
+    at := I64{0}
+    loop at < length {
+        observer :: event_words_get(base, at)
+        reactive_observer_retain(observer)
+        reactive_store(snapshot + at * I64{8}, observer)
+        at += I64{1}
+    }
+    at = I64{0}
+    loop at < length {
+        observer :: reactive_word(snapshot + at * I64{8})
+        if !reactive_stopped() -> reactive_observer_run(observer)
+        reactive_observer_release(observer)
+        at += I64{1}
+    }
+    jet_rt_free(snapshot, length * I64{8}, I64{8})
+}
+
+// Rust get: the active observer subscribes once (deduplicated by identity)
+// and tracks the source for its next clear.
+fn reactive_cell_track(cell: I64) {
+    observer :: reactive_active_observer()
+    if (observer == I64{0}) -> return
+    base :: cell + I64{32}
+    length :: reactive_word(base)
+    at := I64{0}
+    loop at < length {
+        if (event_words_get(base, at) == observer) -> return
+        at += I64{1}
+    }
+    reactive_observer_retain(observer)
+    event_words_push(base, observer)
+    reactive_cell_retain(cell)
+    event_words_push(observer + I64{64}, cell)
+}
+
+// A copy of the cell's value written to `out`.
+fn reactive_cell_read(cell: I64, out: I64) {
+    meta :: reactive_word(cell + I64{8})
+    payload :: reactive_word(cell + I64{16})
+    if (payload == I64{0}) -> return
+    if (reactive_word(meta + I64{8}) == I64{0}) {
+        coll_copy(payload, out, coll_payload(meta))
+        return
+    }
+    coll_slot_clone(payload, out, meta)
+}
+
+// `reactive.signal(value)` and the `Signal<T>{value, version}` literal: the
+// cell takes over the value's bytes at `slot`; `version` is borrowed.
+#Export(c) fn jet_reactive_cell_new(slot: I64, meta: I64, version: I64) -> I64 {
+    cell :: reactive_cell_new(meta, jet_int_owned_to_i64(version))
+    owned :: reactive_word(cell + I64{8})
+    payload :: coll_slot_new(owned)
+    coll_copy(slot, payload, coll_payload(owned))
+    reactive_store(cell + I64{16}, payload)
+    cell
+}
+
+// `signal.get()` / `derived.get()`: tracked.
+#Export(c) fn jet_reactive_cell_get(cell: I64, out: I64) {
+    reactive_cell_track(cell)
+    reactive_cell_read(cell, out)
+}
+
+// `.value`: an untracked read.
+#Export(c) fn jet_reactive_cell_peek(cell: I64, out: I64) { reactive_cell_read(cell, out) }
+
+// `.version`: an owned exact Int.
+#Export(c) fn jet_reactive_cell_version(cell: I64) -> I64 { jet_int_owned_from_i64(reactive_word(cell + I64{24})) }
+
+// `signal.set(value)`: the cell takes over the value's bytes at `slot`, its
+// version advances, and its subscribers re-run.
+#Export(c) fn jet_reactive_cell_set(cell: I64, slot: I64) {
+    meta :: reactive_word(cell + I64{8})
+    payload :: coll_slot_new(meta)
+    coll_copy(slot, payload, coll_payload(meta))
+    reactive_cell_retain(cell)
+    reactive_cell_replace(cell, payload)
+    reactive_cell_notify(cell)
+    reactive_cell_release(cell)
+}
+
+#Export(c) fn jet_rt_handle_clone_jet_reactive_cell(cell: I64) -> I64 {
+    reactive_cell_retain(cell)
+    cell
+}
+
+#Export(c) fn jet_rt_handle_drop_jet_reactive_cell(cell: I64) {
+    if (cell != I64{0}) -> reactive_cell_release(cell)
+}
+
+// `reactive.derived(body)` / `reactive.computed(body)` (Rust JetDerived::new):
+// the initial value is computed once, then the cell's observer runs once
+// under observation to record its sources.
+#Export(c) fn jet_reactive_derived_new(env: I64, invoke: I64, release: I64, meta: I64) -> I64 {
+    cell :: reactive_cell_new(meta, I64{0})
+    owned :: reactive_word(cell + I64{8})
+    payload :: coll_slot_new(owned)
+    _ := coll_call2(invoke, env, payload)
+    if reactive_stopped() {
+        jet_rt_free(payload, coll_size(owned), I64{8})
+        event_release_closure(env, release)
+        return cell
+    }
+    reactive_store(cell + I64{16}, payload)
+    observer :: reactive_observer_new(env, invoke, release)
+    reactive_store(observer + I64{88}, cell)
+    reactive_store(cell + I64{56}, observer)
+    reactive_observer_run(observer)
+    reactive_store(cell + I64{24}, I64{0})
+    cell
+}
+
+// `reactive.effect(body)`: runs now, then again whenever a source it read
+// changes, until unsubscribed or its last Effect handle drops.
+#Export(c) fn jet_reactive_effect(env: I64, invoke: I64, release: I64) -> I64 {
+    observer :: reactive_observer_new(env, invoke, release)
+    reactive_observer_run(observer)
+    observer
+}
+
+// `#Reactive { body }` and `ui.reactive_render(body)`: an effect the thread
+// retains (Rust jet_reactive_effect_rooted / jet_reactive_scope).
+#Export(c) fn jet_reactive_effect_rooted(env: I64, invoke: I64, release: I64) {
+    observer :: reactive_observer_new(env, invoke, release)
+    event_words_push(reactive_thread() + I64{24}, observer)
+    reactive_observer_run(observer)
+}
+
+// The `Effect{last, active}` literal: an observer with no body.
+#Export(c) fn jet_reactive_effect_value(last: I64, active: Bool) -> I64 {
+    observer :: reactive_observer_new(I64{0}, I64{0}, I64{0})
+    reactive_store(observer + I64{24}, if active -> I64{1} else -> I64{0})
+    reactive_store(observer + I64{96}, jet_int_owned_to_i64(last))
+    observer
+}
+
+#Export(c) fn jet_reactive_effect_last(observer: I64) -> I64 { jet_int_owned_from_i64(reactive_word(observer + I64{96})) }
+
+#Export(c) fn jet_reactive_effect_active(observer: I64) -> Bool { reactive_word(observer + I64{24}) != I64{0} }
+
+#Export(c) fn jet_reactive_effect_unsubscribe(observer: I64) { reactive_observer_dispose(observer) }
+
+#Export(c) fn jet_rt_handle_clone_jet_reactive_effect(observer: I64) -> I64 {
+    reactive_store(observer + I64{8}, reactive_word(observer + I64{8}) + I64{1})
+    reactive_observer_retain(observer)
+    observer
+}
+
+#Export(c) fn jet_rt_handle_drop_jet_reactive_effect(observer: I64) {
+    if (observer == I64{0}) -> return
+    owners :: reactive_word(observer + I64{8}) - I64{1}
+    reactive_store(observer + I64{8}, owners)
+    if (owners == I64{0}) -> reactive_observer_dispose(observer)
+    reactive_observer_release(observer)
+}

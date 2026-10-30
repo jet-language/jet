@@ -401,9 +401,10 @@ fn ir_handle_ui_route(receiver: Type, method: String) -> IRHandleRoute? {
     if (method == "frame_lines" || method == "render_count") && name == "TUIBackend" -> member = method
     if method == "present" && name == "GtkBackend" -> member = "present"
     if member == "" -> return None
+    // The runtime borrows every input (UiBackends.jet), cloning what it keeps.
     mask := if method == {
-        "measure" | "layout" | "mount" -> [Bool]{true, false, false}
-        "paint" | "on_event" | "mount_default" | "set_focus_group" | "present" -> [Bool]{true, false}
+        "measure" | "layout" | "mount" -> [Bool]{true, true, true}
+        "paint" | "on_event" | "mount_default" | "set_focus_group" | "present" -> [Bool]{true, true}
         else -> [Bool]{true}
     }
     Val(ir_handle_core("core.ui", "{name}.{method}", "{backend}::{member}", mask, None))

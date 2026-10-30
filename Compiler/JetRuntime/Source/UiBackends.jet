@@ -1,0 +1,855 @@
+// Ui.rs:1209-1866 and UiGtk.rs:1340-2074: the null, TUI and GTK renderer
+// backends, their Rect/Size/InputEvent records, buttons and the click slots.
+//
+// A backend handle is one refcounted State216 its clones share (Rust's
+// Arc<Mutex<State>>): refs0 kind8 (0 null, 1 TUI, 2 GTK), layout frame
+// present16 x24 y32 w40 h48 (f64 bits), paint commands56 (owned texts),
+// focus nodes80 (owned UINodes), focused104 (-1 None), TUI grid data112
+// (one scalar word per cell) cols120 rows128, render count136, last node144,
+// unicode152, GTK availability160, GTK widget records168 (Record24: owned
+// path0, owned label8, widget kind16) and focus paths192 (owned texts).
+// Word vectors are len0 cap8 data16 (Events.jet event_words_*).
+//
+// A static runtime cannot dlopen libgtk-4 (RouteAGame.jet precedent), so
+// the GTK backend always takes the reference's no-display path: its widget
+// records keep the reconcile's paths and focus order, and `present` reports
+// the unavailable runtime unless JET_UI_HEADLESS opts into a headless run.
+UI_BACKEND_BYTES :: I64{216}
+UI_BACKEND_REFS :: I64{0}
+UI_BACKEND_KIND :: I64{8}
+UI_BACKEND_FRAME_PRESENT :: I64{16}
+UI_BACKEND_FRAME :: I64{24}
+UI_BACKEND_COMMANDS :: I64{56}
+UI_BACKEND_FOCUS :: I64{80}
+UI_BACKEND_FOCUSED :: I64{104}
+UI_BACKEND_GRID :: I64{112}
+UI_BACKEND_COLS :: I64{120}
+UI_BACKEND_ROWS :: I64{128}
+UI_BACKEND_RENDERS :: I64{136}
+UI_BACKEND_LAST_NODE :: I64{144}
+UI_BACKEND_UNICODE :: I64{152}
+UI_BACKEND_AVAILABILITY :: I64{160}
+UI_BACKEND_RECORDS :: I64{168}
+UI_BACKEND_FOCUS_PATHS :: I64{192}
+UI_BACKEND_NULL :: I64{0}
+UI_BACKEND_TUI :: I64{1}
+UI_BACKEND_GTK :: I64{2}
+UI_GTK_UNINITIALIZED :: I64{0}
+UI_GTK_HEADLESS :: I64{1}
+UI_GTK_UNAVAILABLE :: I64{2}
+UI_GTK_RECORD_BYTES :: I64{24}
+UI_KIND_TEXT :: I64{1}
+UI_KIND_BOX :: I64{2}
+UI_KIND_BUTTON :: I64{3}
+UI_KIND_TEXT_INPUT :: I64{4}
+UI_ROLE_BUTTON :: I64{0}
+UI_ROLE_TEXT_INPUT :: I64{1}
+UI_ROLE_CONTAINER :: I64{3}
+UI_RECT_BYTES :: I64{32}
+UI_SIZE_BYTES :: I64{16}
+UI_EVENT_RESULT_HANDLED :: I64{0}
+UI_EVENT_RESULT_IGNORED :: I64{1}
+
+// ---- Rect / Size / InputEvent records -------------------------------------
+
+#Export(c) fn jet_rt_record_new_jet_rect(x: Float, y: Float, width: Float, height: Float) -> I64 { ui_rect_new(x, y, width, height) }
+#Export(c) fn jet_rt_handle_drop_jet_rect(value: I64) { geometry_drop(value, UI_RECT_BYTES) }
+#Export(c) fn jet_rt_record_new_jet_size(width: Float, height: Float) -> I64 {
+    result :: jet_rt_alloc(UI_SIZE_BYTES, I64{8})
+    ui_carrier_store(result, rt_f64_bits(width))
+    ui_carrier_store(result + I64{8}, rt_f64_bits(height))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_size(value: I64) { geometry_drop(value, UI_SIZE_BYTES) }
+#Export(c) fn jet_rt_record_get_jet_size_width(value: I64) -> Float { ui_float_at(value) }
+#Export(c) fn jet_rt_record_get_jet_size_height(value: I64) -> Float { ui_float_at(value + I64{8}) }
+// Key borrows its code; Resize takes the Size record over (its two lanes
+// move inline, UiEvents.jet's layout).
+#Export(c) fn jet_rt_record_new_jet_input_event_key(code: I64) -> I64 {
+    result :: jet_rt_alloc(UI_EVENT_BYTES, I64{8})
+    ui_carrier_store(result + UI_EVENT_KIND, I64{0})
+    ui_carrier_store(result + UI_EVENT_FIRST, jet_rt_string_clone(code))
+    ui_carrier_store(result + UI_EVENT_SECOND, I64{0})
+    result
+}
+#Export(c) fn jet_rt_record_new_jet_input_event_resize(size: I64) -> I64 {
+    result :: jet_rt_alloc(UI_EVENT_BYTES, I64{8})
+    ui_carrier_store(result + UI_EVENT_KIND, I64{1})
+    ui_carrier_store(result + UI_EVENT_FIRST, ui_carrier_word(size))
+    ui_carrier_store(result + UI_EVENT_SECOND, ui_carrier_word(size + I64{8}))
+    geometry_drop(size, UI_SIZE_BYTES)
+    result
+}
+
+fn ui_float_at(address: I64) -> Float { rt_f64_from_bits(ui_carrier_word(address)) }
+fn ui_float_store(address: I64, value: Float) { ui_carrier_store(address, rt_f64_bits(value)) }
+fn ui_rect_new(x: Float, y: Float, width: Float, height: Float) -> I64 {
+    result :: jet_rt_alloc(UI_RECT_BYTES, I64{8})
+    ui_float_store(result, x)
+    ui_float_store(result + I64{8}, y)
+    ui_float_store(result + I64{16}, width)
+    ui_float_store(result + I64{24}, height)
+    result
+}
+
+// ---- Float helpers ----------------------------------------------------------
+
+// f64::max: a NaN side yields the other.
+fn ui_float_max(a: Float, b: Float) -> Float {
+    if (a != a) -> return b
+    if (b != b) -> return a
+    if (a > b) -> a else -> b
+}
+// f64::clamp, which panics unless min <= max.
+fn ui_float_clamp(value: Float, min: Float, max: Float) -> Float {
+    if !(min <= max) {
+        message :: jet_rt_string_builder_new()
+        ui_text_push_static(message, rt_static_text("min > max, or either was NaN. min = "))
+        ui_text_push_owned(message, display_float(min, true))
+        ui_text_push_static(message, rt_static_text(", max = "))
+        ui_text_push_owned(message, display_float(max, true))
+        jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
+    }
+    if (value < min) -> return min
+    if (value > max) -> return max
+    value
+}
+// `value as usize` for a value already floored at >= 0 (NaN saturates to 0).
+fn ui_float_index(value: Float) -> I64 {
+    if !(value >= Float{1.0}) -> return I64{0}
+    if (value >= Float{9223372036854775807.0}) -> return I64{9223372036854775807}
+    runtime_duration_float_word(compiler_math_trunc(value))
+}
+
+// ---- Text helpers -----------------------------------------------------------
+
+fn ui_text_push_static(target: I64, text: I64) { rt_text_append(target, rt_text_data(text), rt_text_len(text)) }
+fn ui_text_push_owned(target: I64, text: I64) {
+    rt_text_append(target, rt_text_data(text), rt_text_len(text))
+    jet_rt_string_drop(text)
+}
+fn ui_text_push_float(target: I64, value: Float) { ui_text_push_owned(target, display_float(value, false)) }
+// Rect.jet_show: {x:…,y:…,w:…,h:…}.
+fn ui_text_push_rect(target: I64, frame: I64) {
+    ui_text_push_static(target, rt_static_text("{{x:"))
+    ui_text_push_float(target, ui_float_at(frame))
+    ui_text_push_static(target, rt_static_text(",y:"))
+    ui_text_push_float(target, ui_float_at(frame + I64{8}))
+    ui_text_push_static(target, rt_static_text(",w:"))
+    ui_text_push_float(target, ui_float_at(frame + I64{16}))
+    ui_text_push_static(target, rt_static_text(",h:"))
+    ui_text_push_float(target, ui_float_at(frame + I64{24}))
+    ui_text_push_static(target, rt_static_text("}}"))
+}
+// TuiKernel.rs strip_ansi: an ESC starts an escape that ends after an ASCII
+// letter or '@'.
+fn ui_tui_strip_ansi(text: I64) -> I64 {
+    output :: jet_rt_string_builder_new()
+    data :: rt_text_data(text)
+    length :: rt_text_len(text)
+    at := I64{0}
+    escape := false
+    loop at < length {
+        width :: rt_text_width(data + at)
+        character :: rt_text_decode(data + at)
+        if escape {
+            if ((character >= I64{65} && character <= I64{90}) || (character >= I64{97} && character <= I64{122}) || character == I64{64}) -> escape = false
+        } else if (character == I64{27}) {
+            escape = true
+        } else {
+            rt_text_append(output, data + at, width)
+        }
+        at += width
+    }
+    jet_rt_string_builder_finish(output)
+}
+// TuiKernel.rs ascii (Core/Tui ascii_scalar): box drawing and arrows map to
+// ASCII, any other non-ASCII scalar to '?'.
+fn ui_tui_ascii_scalar(n: I64) -> I64 {
+    if (n == I64{0x2500} || n == I64{0x2501} || n == I64{0x2550}) -> return I64{45}
+    if (n == I64{0x2502} || n == I64{0x2503} || n == I64{0x2551}) -> return I64{124}
+    if (n == I64{0x250C} || n == I64{0x250F} || n == I64{0x2554} || n == I64{0x2510} || n == I64{0x2513} || n == I64{0x2557} || n == I64{0x2514} || n == I64{0x2517} || n == I64{0x255A} || n == I64{0x2518} || n == I64{0x251B} || n == I64{0x255D} || n == I64{0x251C} || n == I64{0x2524} || n == I64{0x252C} || n == I64{0x2534} || n == I64{0x253C} || n == I64{0x254B} || n == I64{0x256C}) -> return I64{43}
+    if (n == I64{0x2192} || n == I64{0x21D2} || n == I64{0x279C}) -> return I64{62}
+    if (n == I64{0x2190} || n == I64{0x21D0}) -> return I64{60}
+    if (n == I64{0x2191} || n == I64{0x21D1}) -> return I64{94}
+    if (n == I64{0x2193} || n == I64{0x21D3}) -> return I64{118}
+    if (n < I64{128}) -> return n
+    I64{63}
+}
+// TuiKernel.rs char_width (Core/Tui scalar_display_width).
+fn ui_tui_char_width(n: I64) -> I64 {
+    if (n < I64{32} || (n >= I64{0x7F} && n <= I64{0x9F}) || (n >= I64{0x0300} && n <= I64{0x036F}) || (n >= I64{0x0483} && n <= I64{0x0489}) || (n >= I64{0x0591} && n <= I64{0x05BD}) || (n >= I64{0x0610} && n <= I64{0x061A}) || (n >= I64{0x064B} && n <= I64{0x065F}) || (n >= I64{0x1AB0} && n <= I64{0x1AFF}) || (n >= I64{0x1DC0} && n <= I64{0x1DFF}) || (n >= I64{0x20D0} && n <= I64{0x20FF}) || (n >= I64{0xFE20} && n <= I64{0xFE2F})) -> return I64{0}
+    if ((n >= I64{0x1100} && n <= I64{0x115F}) || (n >= I64{0x2329} && n <= I64{0x232A}) || (n >= I64{0x2E80} && n <= I64{0x303E}) || (n >= I64{0x3040} && n <= I64{0xA4CF}) || (n >= I64{0xAC00} && n <= I64{0xD7A3}) || (n >= I64{0xF900} && n <= I64{0xFAFF}) || (n >= I64{0xFE10} && n <= I64{0xFE19}) || (n >= I64{0xFE30} && n <= I64{0xFE6F}) || (n >= I64{0xFF00} && n <= I64{0xFF60}) || (n >= I64{0xFFE0} && n <= I64{0xFFE6}) || (n >= I64{0x1F300} && n <= I64{0x1FAFF})) -> return I64{2}
+    I64{1}
+}
+// TuiKernel.rs display_width: the char widths of the ANSI-stripped text.
+fn ui_tui_display_width(text: I64) -> I64 {
+    stripped :: ui_tui_strip_ansi(text)
+    data :: rt_text_data(stripped)
+    length :: rt_text_len(stripped)
+    at := I64{0}
+    total := I64{0}
+    loop at < length {
+        total += ui_tui_char_width(rt_text_decode(data + at))
+        at += rt_text_width(data + at)
+    }
+    jet_rt_string_drop(stripped)
+    total
+}
+// str::eq_ignore_ascii_case(code, "tab").
+fn ui_key_is_tab(code: I64) -> Bool {
+    if (rt_text_len(code) != I64{3}) -> return false
+    data :: rt_text_data(code)
+    rt_text_byte(data).bit_or(I64{32}) == I64{116} && rt_text_byte(data + I64{1}).bit_or(I64{32}) == I64{97} && rt_text_byte(data + I64{2}).bit_or(I64{32}) == I64{98}
+}
+// jet_tui_env_flag: present and not "0".
+fn ui_env_flag(name: I64) -> Bool {
+    value :: host_environment_value(name)
+    if (value == I64{0}) -> return false
+    !(rt_text_byte(value) == I64{48} && rt_text_byte(value + I64{1}) == I64{0})
+}
+// jet_tui_capabilities().unicode: neither JET_TUI_ASCII nor TERM=dumb (any
+// ASCII case; env::var's invalid UTF-8 reads as unset).
+fn ui_tui_unicode() -> Bool {
+    if ui_env_flag(rt_static_text("JET_TUI_ASCII")) -> return false
+    term :: rt_env_get(rt_static_text("TERM"))
+    if (term == I64{0}) -> return true
+    dumb := rt_text_len(term) == I64{4}
+    if dumb {
+        data :: rt_text_data(term)
+        dumb = rt_text_byte(data).bit_or(I64{32}) == I64{100} && rt_text_byte(data + I64{1}).bit_or(I64{32}) == I64{117} && rt_text_byte(data + I64{2}).bit_or(I64{32}) == I64{109} && rt_text_byte(data + I64{3}).bit_or(I64{32}) == I64{98}
+    }
+    jet_rt_string_drop(term)
+    !dumb
+}
+
+// ---- Node readers -----------------------------------------------------------
+
+fn ui_node_kind(node: I64) -> I64 { ui_carrier_word(node + UI_NODE_KIND) }
+fn ui_node_role(node: I64) -> I64 { ui_carrier_word(node + UI_NODE_ROLE) }
+fn ui_node_width(node: I64) -> Float { ui_float_at(node + UI_NODE_WIDTH) }
+fn ui_node_height(node: I64) -> Float { ui_float_at(node + UI_NODE_HEIGHT) }
+fn ui_node_child_count(node: I64) -> I64 { ui_carrier_word(ui_carrier_word(node + UI_NODE_CHILDREN) + DATA_SEQUENCE_LENGTH) }
+fn ui_node_child(node: I64, index: I64) -> I64 { ui_carrier_word(ui_carrier_word(ui_carrier_word(node + UI_NODE_CHILDREN) + DATA_SEQUENCE_DATA) + index * UI_NODE_CHILD_BYTES) }
+fn ui_node_interactive(node: I64) -> Bool {
+    role :: ui_node_role(node)
+    role == UI_ROLE_BUTTON || role == UI_ROLE_TEXT_INPUT
+}
+
+// ---- Backend state ----------------------------------------------------------
+
+fn ui_backend_new(kind: I64) -> I64 {
+    state :: jet_rt_alloc(UI_BACKEND_BYTES, I64{8})
+    offset := I64{0}
+    loop offset < UI_BACKEND_BYTES {
+        ui_carrier_store(state + offset, I64{0})
+        offset += I64{8}
+    }
+    ui_carrier_store(state + UI_BACKEND_REFS, I64{1})
+    ui_carrier_store(state + UI_BACKEND_KIND, kind)
+    ui_carrier_store(state + UI_BACKEND_FOCUSED, I64{-1})
+    if (kind == UI_BACKEND_TUI) -> ui_carrier_store(state + UI_BACKEND_UNICODE, if ui_tui_unicode() -> I64{1} else -> I64{0})
+    state
+}
+fn ui_backend_retain(state: I64) -> I64 {
+    ui_carrier_store(state + UI_BACKEND_REFS, ui_carrier_word(state + UI_BACKEND_REFS) + I64{1})
+    state
+}
+fn ui_words_clear(base: I64, drop_kind: I64) {
+    length :: ui_carrier_word(base)
+    index := I64{0}
+    loop index < length {
+        word :: event_words_get(base, index)
+        if {
+            (drop_kind == I64{0}) -> jet_rt_string_drop(word)
+            (drop_kind == I64{1}) -> jet_rt_handle_drop_jet_ui_node(word)
+            else -> ui_gtk_record_drop(word)
+        }
+        index += I64{1}
+    }
+    ui_carrier_store(base, I64{0})
+}
+// `count` empty word vectors side by side, freed by the caller.
+fn ui_words_scratch(count: I64) -> I64 {
+    bytes :: count * I64{24}
+    base :: jet_rt_alloc(bytes, I64{8})
+    offset := I64{0}
+    loop offset < bytes {
+        ui_carrier_store(base + offset, I64{0})
+        offset += I64{8}
+    }
+    base
+}
+// Moves the vector at `from` over the emptied vector at `to`.
+fn ui_words_move(from: I64, to: I64) {
+    ui_carrier_store(to, ui_carrier_word(from))
+    ui_carrier_store(to + I64{8}, ui_carrier_word(from + I64{8}))
+    ui_carrier_store(to + I64{16}, ui_carrier_word(from + I64{16}))
+    event_words_take(from)
+}
+fn ui_words_free(base: I64, drop_kind: I64) {
+    ui_words_clear(base, drop_kind)
+    event_words_free(ui_carrier_word(base + I64{16}), ui_carrier_word(base + I64{8}))
+    event_words_take(base)
+}
+fn ui_backend_release(state: I64) {
+    if (state == I64{0}) -> return
+    refs :: ui_carrier_word(state + UI_BACKEND_REFS) - I64{1}
+    ui_carrier_store(state + UI_BACKEND_REFS, refs)
+    if (refs != I64{0}) -> return
+    ui_words_free(state + UI_BACKEND_COMMANDS, I64{0})
+    ui_words_free(state + UI_BACKEND_FOCUS, I64{1})
+    ui_words_free(state + UI_BACKEND_RECORDS, I64{2})
+    ui_words_free(state + UI_BACKEND_FOCUS_PATHS, I64{0})
+    ui_tui_grid_free(state)
+    last :: ui_carrier_word(state + UI_BACKEND_LAST_NODE)
+    if (last != I64{0}) -> jet_rt_handle_drop_jet_ui_node(last)
+    jet_rt_free(state, UI_BACKEND_BYTES, I64{8})
+}
+#Export(c) fn jet_ui_null() -> I64 { ui_backend_new(UI_BACKEND_NULL) }
+#Export(c) fn jet_ui_tui() -> I64 { ui_backend_new(UI_BACKEND_TUI) }
+#Export(c) fn jet_ui_gtk() -> I64 { ui_backend_new(UI_BACKEND_GTK) }
+#Export(c) fn jet_rt_handle_clone_jet_null_backend(state: I64) -> I64 { ui_backend_retain(state) }
+#Export(c) fn jet_rt_handle_drop_jet_null_backend(state: I64) { ui_backend_release(state) }
+#Export(c) fn jet_rt_handle_clone_jet_tui_backend(state: I64) -> I64 { ui_backend_retain(state) }
+#Export(c) fn jet_rt_handle_drop_jet_tui_backend(state: I64) { ui_backend_release(state) }
+#Export(c) fn jet_rt_handle_clone_jet_gtk_backend(state: I64) -> I64 { ui_backend_retain(state) }
+#Export(c) fn jet_rt_handle_drop_jet_gtk_backend(state: I64) { ui_backend_release(state) }
+
+// The paint frame: the layout frame, else the node's own size at the origin.
+fn ui_backend_paint_frame(state: I64, node: I64) -> I64 {
+    if (ui_carrier_word(state + UI_BACKEND_FRAME_PRESENT) != I64{0}) {
+        frame :: state + UI_BACKEND_FRAME
+        return ui_rect_new(ui_float_at(frame), ui_float_at(frame + I64{8}), ui_float_at(frame + I64{16}), ui_float_at(frame + I64{24}))
+    }
+    ui_rect_new(Float{0.0}, Float{0.0}, ui_node_width(node), ui_node_height(node))
+}
+fn ui_backend_set_frame(state: I64, x: Float, y: Float, width: Float, height: Float) {
+    ui_carrier_store(state + UI_BACKEND_FRAME_PRESENT, I64{1})
+    ui_float_store(state + UI_BACKEND_FRAME, x)
+    ui_float_store(state + UI_BACKEND_FRAME + I64{8}, y)
+    ui_float_store(state + UI_BACKEND_FRAME + I64{16}, width)
+    ui_float_store(state + UI_BACKEND_FRAME + I64{24}, height)
+}
+
+// ---- measure / layout -------------------------------------------------------
+
+// jet_ui_measure_tree: a Box is its widest child by its children's summed
+// heights, any other node its own size, clamped to the constraint.
+fn ui_measure(node: I64, constraint: I64) -> I64 {
+    width := ui_node_width(node)
+    height := ui_node_height(node)
+    if (ui_node_kind(node) == UI_KIND_BOX) {
+        width = Float{0.0}
+        height = Float{0.0}
+        count :: ui_node_child_count(node)
+        index := I64{0}
+        loop index < count {
+            child :: ui_node_child(node, index)
+            width = ui_float_max(width, ui_node_width(child))
+            height = height + ui_node_height(child)
+            index += I64{1}
+        }
+    }
+    clamped_width :: ui_float_clamp(width, ui_float_at(constraint + MATH_SIZE_MIN_WIDTH), ui_float_at(constraint + MATH_SIZE_MAX_WIDTH))
+    clamped_height :: ui_float_clamp(height, ui_float_at(constraint + MATH_SIZE_MIN_HEIGHT), ui_float_at(constraint + MATH_SIZE_MAX_HEIGHT))
+    jet_rt_record_new_jet_size(clamped_width, clamped_height)
+}
+fn ui_layout(state: I64, frame: I64) {
+    ui_backend_set_frame(state, ui_float_at(frame), ui_float_at(frame + I64{8}), ui_float_at(frame + I64{16}), ui_float_at(frame + I64{24}))
+    if (ui_carrier_word(state + UI_BACKEND_KIND) == UI_BACKEND_TUI) -> ui_tui_grid_reset(state, ui_float_at(frame + I64{16}), ui_float_at(frame + I64{24}))
+}
+
+// ---- paint ------------------------------------------------------------------
+
+// jet_ui_visit_tree: a Box stacks its children down its frame's width; every
+// other node is a leaf painted into its frame.
+fn ui_visit(state: I64, node: I64, x: Float, y: Float, width: Float, height: Float) {
+    if (ui_node_kind(node) == UI_KIND_BOX) {
+        at := y
+        count :: ui_node_child_count(node)
+        index := I64{0}
+        loop index < count {
+            child :: ui_node_child(node, index)
+            child_height :: ui_node_height(child)
+            ui_visit(state, child, x, at, width, child_height)
+            at = at + child_height
+            index += I64{1}
+        }
+        return
+    }
+    frame :: ui_rect_new(x, y, width, height)
+    if {
+        (ui_carrier_word(state + UI_BACKEND_KIND) == UI_BACKEND_TUI) -> ui_tui_write_label(state, frame, ui_carrier_word(node + UI_NODE_LABEL))
+        else -> ui_paint_leaf_commands(state, node, frame)
+    }
+    geometry_drop(frame, UI_RECT_BYTES)
+}
+// jet_ui_paint_tree's leaf: a fill (its color, else #000000) unless it is a
+// Text, then its text.
+fn ui_paint_leaf_commands(state: I64, node: I64, frame: I64) {
+    if (ui_node_kind(node) != UI_KIND_TEXT) {
+        fill :: jet_rt_string_builder_new()
+        ui_text_push_static(fill, rt_static_text("fill("))
+        ui_text_push_rect(fill, frame)
+        ui_text_push_static(fill, rt_static_text(", "))
+        color :: ui_carrier_word(node + UI_NODE_COLOR)
+        ui_text_push_static(fill, if (color == I64{0}) -> rt_static_text("#000000") else -> color)
+        ui_text_push_static(fill, rt_static_text(")"))
+        event_words_push(state + UI_BACKEND_COMMANDS, jet_rt_string_builder_finish(fill))
+    }
+    text :: jet_rt_string_builder_new()
+    ui_text_push_static(text, rt_static_text("text("))
+    ui_text_push_rect(text, frame)
+    ui_text_push_static(text, rt_static_text(", "))
+    ui_text_push_static(text, ui_carrier_word(node + UI_NODE_LABEL))
+    ui_text_push_static(text, rt_static_text(")"))
+    event_words_push(state + UI_BACKEND_COMMANDS, jet_rt_string_builder_finish(text))
+}
+// jet_ui_collect_focus: every interactive node, pre-order.
+fn ui_collect_focus(node: I64, out: I64) {
+    if ui_node_interactive(node) -> event_words_push(out, jet_rt_handle_clone_jet_ui_node(node))
+    count :: ui_node_child_count(node)
+    index := I64{0}
+    loop index < count {
+        ui_collect_focus(ui_node_child(node, index), out)
+        index += I64{1}
+    }
+}
+// The focus a paint found replaces the backend's and focuses its first node.
+fn ui_paint_focus(state: I64, node: I64) {
+    base :: ui_words_scratch(I64{1})
+    ui_collect_focus(node, base)
+    if (ui_carrier_word(base) != I64{0}) {
+        ui_words_free(state + UI_BACKEND_FOCUS, I64{1})
+        ui_words_move(base, state + UI_BACKEND_FOCUS)
+        ui_carrier_store(state + UI_BACKEND_FOCUSED, I64{0})
+    }
+    jet_rt_free(base, I64{24}, I64{8})
+}
+fn ui_paint(state: I64, node: I64) {
+    kind :: ui_carrier_word(state + UI_BACKEND_KIND)
+    frame :: ui_backend_paint_frame(state, node)
+    if (kind == UI_BACKEND_TUI) {
+        ui_carrier_store(state + UI_BACKEND_RENDERS, ui_carrier_word(state + UI_BACKEND_RENDERS) + I64{1})
+        last :: ui_carrier_word(state + UI_BACKEND_LAST_NODE)
+        if (last != I64{0}) -> jet_rt_handle_drop_jet_ui_node(last)
+        ui_carrier_store(state + UI_BACKEND_LAST_NODE, jet_rt_handle_clone_jet_ui_node(node))
+        if (ui_carrier_word(state + UI_BACKEND_ROWS) == I64{0}) -> ui_tui_grid_reset(state, ui_float_at(frame + I64{16}), ui_float_at(frame + I64{24}))
+        ui_tui_grid_blank(state)
+    }
+    ui_visit(state, node, ui_float_at(frame), ui_float_at(frame + I64{8}), ui_float_at(frame + I64{16}), ui_float_at(frame + I64{24}))
+    geometry_drop(frame, UI_RECT_BYTES)
+    if {
+        (kind == UI_BACKEND_GTK) -> ui_gtk_reconcile(state, node)
+        else -> ui_paint_focus(state, node)
+    }
+}
+
+// ---- TUI grid ---------------------------------------------------------------
+
+fn ui_tui_grid_free(state: I64) {
+    cells :: ui_carrier_word(state + UI_BACKEND_COLS) * ui_carrier_word(state + UI_BACKEND_ROWS)
+    if (cells != I64{0}) -> jet_rt_free(ui_carrier_word(state + UI_BACKEND_GRID), cells * I64{8}, I64{8})
+    ui_carrier_store(state + UI_BACKEND_GRID, I64{0})
+    ui_carrier_store(state + UI_BACKEND_COLS, I64{0})
+    ui_carrier_store(state + UI_BACKEND_ROWS, I64{0})
+}
+// tui_grid_dims + tui_blank_grid: floor(max(side, 1)) cells of ' '.
+fn ui_tui_grid_reset(state: I64, width: Float, height: Float) {
+    ui_tui_grid_free(state)
+    cols :: ui_float_index(ui_float_max(width, Float{1.0}))
+    rows :: ui_float_index(ui_float_max(height, Float{1.0}))
+    ui_carrier_store(state + UI_BACKEND_GRID, if (cols * rows == I64{0}) -> I64{0} else -> jet_rt_alloc(cols * rows * I64{8}, I64{8}))
+    ui_carrier_store(state + UI_BACKEND_COLS, cols)
+    ui_carrier_store(state + UI_BACKEND_ROWS, rows)
+    ui_tui_grid_blank(state)
+}
+fn ui_tui_grid_blank(state: I64) {
+    grid :: ui_carrier_word(state + UI_BACKEND_GRID)
+    cells :: ui_carrier_word(state + UI_BACKEND_COLS) * ui_carrier_word(state + UI_BACKEND_ROWS)
+    at := I64{0}
+    loop at < cells {
+        ui_carrier_store(grid + at * I64{8}, I64{32})
+        at += I64{1}
+    }
+}
+// tui_write_label: the ANSI-stripped label (ASCII-projected without unicode)
+// from the frame's clamped origin along its row; zero-width scalars are
+// skipped and a wide one blanks the cell after it.
+fn ui_tui_write_label(state: I64, frame: I64, label: I64) {
+    cols :: ui_carrier_word(state + UI_BACKEND_COLS)
+    rows :: ui_carrier_word(state + UI_BACKEND_ROWS)
+    grid :: ui_carrier_word(state + UI_BACKEND_GRID)
+    start_col :: ui_float_index(ui_float_max(ui_float_at(frame), Float{0.0}))
+    start_row :: ui_float_index(ui_float_max(ui_float_at(frame + I64{8}), Float{0.0}))
+    unicode :: ui_carrier_word(state + UI_BACKEND_UNICODE) != I64{0}
+    text :: ui_tui_strip_ansi(label)
+    data :: rt_text_data(text)
+    length :: rt_text_len(text)
+    col := start_col
+    at := I64{0}
+    loop at < length {
+        scalar :: rt_text_decode(data + at)
+        at += rt_text_width(data + at)
+        character :: if unicode -> scalar else -> ui_tui_ascii_scalar(scalar)
+        width :: ui_tui_char_width(character)
+        if (width == I64{0}) -> next
+        if (col < cols && start_row < rows) {
+            row :: grid + start_row * cols * I64{8}
+            ui_carrier_store(row + col * I64{8}, character)
+            if (width == I64{2} && col + I64{1} < cols) -> ui_carrier_store(row + (col + I64{1}) * I64{8}, I64{32})
+        }
+        col = if (col > I64{9223372036854775807} - width) -> I64{9223372036854775807} else -> col + width
+        if (col >= cols) -> break
+    }
+    jet_rt_string_drop(text)
+}
+
+// ---- GTK reconcile ----------------------------------------------------------
+
+// GtkState::widget_kind: 0 Box, 1 Label, 2 Button, 3 Entry.
+fn ui_gtk_widget_kind(node: I64) -> I64 {
+    kind :: ui_node_kind(node)
+    if (kind == UI_KIND_BOX) -> return I64{0}
+    if (kind == UI_KIND_BUTTON) -> return I64{2}
+    if (kind == UI_KIND_TEXT_INPUT) -> return I64{3}
+    role :: ui_node_role(node)
+    if (role == UI_ROLE_BUTTON) -> return I64{2}
+    if (role == UI_ROLE_TEXT_INPUT) -> return I64{3}
+    if (role == UI_ROLE_CONTAINER) -> return I64{0}
+    I64{1}
+}
+fn ui_gtk_record_drop(record: I64) {
+    jet_rt_string_drop(ui_carrier_word(record))
+    jet_rt_string_drop(ui_carrier_word(record + I64{8}))
+    jet_rt_free(record, UI_GTK_RECORD_BYTES, I64{8})
+}
+fn ui_gtk_record_find(state: I64, path: I64) -> I64 {
+    base :: state + UI_BACKEND_RECORDS
+    length :: ui_carrier_word(base)
+    index := I64{0}
+    loop index < length {
+        if jet_rt_string_eq(ui_carrier_word(event_words_get(base, index)), path) -> return index
+        index += I64{1}
+    }
+    I64{-1}
+}
+// Whether `path` is `root` or a path under it.
+fn ui_gtk_path_under(path: I64, root: I64) -> Bool {
+    if jet_rt_string_eq(path, root) -> return true
+    length :: rt_text_len(root)
+    if (rt_text_len(path) <= length) -> return false
+    if !rt_text_equal_bytes(rt_text_data(path), rt_text_data(root), length) -> return false
+    rt_text_byte(rt_text_data(path) + length) == I64{47}
+}
+fn ui_gtk_remove_records(state: I64, root: I64, live: I64, keep_live: Bool) {
+    base :: state + UI_BACKEND_RECORDS
+    index := ui_carrier_word(base)
+    zero :: I64{0}
+    loop index > zero {
+        index -= I64{1}
+        record :: event_words_get(base, index)
+        path :: ui_carrier_word(record)
+        doomed :: if keep_live -> !ui_gtk_live(live, path) else -> ui_gtk_path_under(path, root)
+        if doomed {
+            ui_gtk_record_drop(record)
+            event_words_remove(base, index)
+        }
+    }
+}
+fn ui_gtk_live(live: I64, path: I64) -> Bool {
+    length :: ui_carrier_word(live)
+    index := I64{0}
+    loop index < length {
+        if jet_rt_string_eq(event_words_get(live, index), path) -> return true
+        index += I64{1}
+    }
+    false
+}
+// GtkState::reconcile_node without a display: a widget record per path
+// (recreated when its kind changes), and the interactive nodes in order.
+fn ui_gtk_reconcile_node(state: I64, node: I64, path: I64, live: I64, focus_nodes: I64, focus_paths: I64) {
+    kind :: ui_gtk_widget_kind(node)
+    found := ui_gtk_record_find(state, path)
+    if (found >= I64{0} && ui_carrier_word(event_words_get(state + UI_BACKEND_RECORDS, found) + I64{16}) != kind) {
+        ui_gtk_remove_records(state, path, I64{0}, false)
+        found = I64{-1}
+    }
+    record := I64{0}
+    if {
+        (found >= I64{0}) -> { record = event_words_get(state + UI_BACKEND_RECORDS, found) }
+        else -> {
+            record = jet_rt_alloc(UI_GTK_RECORD_BYTES, I64{8})
+            ui_carrier_store(record, jet_rt_string_clone(path))
+            ui_carrier_store(record + I64{8}, jet_rt_string_builder_new())
+            ui_carrier_store(record + I64{16}, kind)
+            event_words_push(state + UI_BACKEND_RECORDS, record)
+        }
+    }
+    event_words_push(live, jet_rt_string_clone(path))
+    jet_rt_string_drop(ui_carrier_word(record + I64{8}))
+    ui_carrier_store(record + I64{8}, jet_rt_string_clone(ui_carrier_word(node + UI_NODE_LABEL)))
+    if ui_node_interactive(node) {
+        event_words_push(focus_nodes, jet_rt_handle_clone_jet_ui_node(node))
+        event_words_push(focus_paths, jet_rt_string_clone(path))
+    }
+    if (kind != I64{0}) -> return
+    count :: ui_node_child_count(node)
+    index := I64{0}
+    loop index < count {
+        child_path :: jet_rt_string_builder_new()
+        ui_text_push_static(child_path, path)
+        ui_text_push_static(child_path, rt_static_text("/"))
+        rt_text_push_number(child_path, index)
+        ui_gtk_reconcile_node(state, ui_node_child(node, index), child_path, live, focus_nodes, focus_paths)
+        jet_rt_string_drop(child_path)
+        index += I64{1}
+    }
+}
+fn ui_gtk_ensure_init(state: I64) {
+    if (ui_carrier_word(state + UI_BACKEND_AVAILABILITY) != UI_GTK_UNINITIALIZED) -> return
+    headless :: host_environment_value(rt_static_text("JET_UI_HEADLESS")) != I64{0}
+    ui_carrier_store(state + UI_BACKEND_AVAILABILITY, if headless -> UI_GTK_HEADLESS else -> UI_GTK_UNAVAILABLE)
+}
+// GtkState::paint after its commands: reconcile, prune the dead records and
+// keep focus on the previously focused path when it survives.
+fn ui_gtk_reconcile(state: I64, node: I64) {
+    ui_gtk_ensure_init(state)
+    focused :: ui_carrier_word(state + UI_BACKEND_FOCUSED)
+    paths :: state + UI_BACKEND_FOCUS_PATHS
+    previous :: if (focused >= I64{0} && focused < ui_carrier_word(paths)) -> jet_rt_string_clone(event_words_get(paths, focused)) else -> I64{0}
+    live :: ui_words_scratch(I64{3})
+    focus_nodes :: live + I64{24}
+    focus_paths :: live + I64{48}
+    ui_gtk_reconcile_node(state, node, rt_static_text("root"), live, focus_nodes, focus_paths)
+    ui_gtk_remove_records(state, I64{0}, live, true)
+    ui_words_free(live, I64{0})
+    next_focus := I64{-1}
+    if (previous != I64{0}) {
+        index := I64{0}
+        loop index < ui_carrier_word(focus_paths) {
+            if jet_rt_string_eq(event_words_get(focus_paths, index), previous) {
+                next_focus = index
+                break
+            }
+            index += I64{1}
+        }
+        jet_rt_string_drop(previous)
+    }
+    if (next_focus < I64{0} && ui_carrier_word(focus_paths) != I64{0}) -> next_focus = I64{0}
+    ui_carrier_store(state + UI_BACKEND_FOCUSED, next_focus)
+    ui_words_free(state + UI_BACKEND_FOCUS, I64{1})
+    ui_words_free(paths, I64{0})
+    ui_words_move(focus_nodes, state + UI_BACKEND_FOCUS)
+    ui_words_move(focus_paths, paths)
+    jet_rt_free(live, I64{72}, I64{8})
+}
+
+// ---- events -----------------------------------------------------------------
+
+fn ui_event_result(variant: I64) -> I64 {
+    result :: jet_rt_alloc(ENCODING_ENUM_BYTES, I64{8})
+    ui_carrier_store(result + ENCODING_ENUM_TAG, variant)
+    result
+}
+// on_event: Tab advances a non-empty focus ring; an empty key and a
+// non-positive resize are Ignored; a TUI resize relays its grid out.
+fn ui_on_event(state: I64, event: I64) -> I64 {
+    kind :: ui_carrier_word(event + UI_EVENT_KIND)
+    if (kind == I64{0}) {
+        code :: ui_carrier_word(event + UI_EVENT_FIRST)
+        count :: ui_carrier_word(state + UI_BACKEND_FOCUS)
+        if (ui_key_is_tab(code) && count != I64{0}) {
+            focused :: ui_carrier_word(state + UI_BACKEND_FOCUSED)
+            ui_carrier_store(state + UI_BACKEND_FOCUSED, if (focused < I64{0}) -> I64{0} else -> (focused + I64{1}) % count)
+            return ui_event_result(UI_EVENT_RESULT_HANDLED)
+        }
+        if (rt_text_len(code) == I64{0}) -> return ui_event_result(UI_EVENT_RESULT_IGNORED)
+        return ui_event_result(UI_EVENT_RESULT_HANDLED)
+    }
+    width :: ui_float_at(event + UI_EVENT_FIRST)
+    height :: ui_float_at(event + UI_EVENT_SECOND)
+    if (width <= Float{0.0} || height <= Float{0.0}) -> return ui_event_result(UI_EVENT_RESULT_IGNORED)
+    if (ui_carrier_word(state + UI_BACKEND_KIND) == UI_BACKEND_TUI) {
+        ui_backend_set_frame(state, Float{0.0}, Float{0.0}, width, height)
+        ui_tui_grid_reset(state, width, height)
+    }
+    ui_event_result(UI_EVENT_RESULT_HANDLED)
+}
+// set_focus_group: the nodes (borrowed, each cloned) become the focus ring,
+// focused at its first node. GTK also maps each to the first widget record
+// with its label.
+fn ui_set_focus_group(state: I64, data: I64, length: I64) {
+    ui_words_clear(state + UI_BACKEND_FOCUS, I64{1})
+    gtk :: ui_carrier_word(state + UI_BACKEND_KIND) == UI_BACKEND_GTK
+    if gtk -> ui_words_clear(state + UI_BACKEND_FOCUS_PATHS, I64{0})
+    index := I64{0}
+    loop index < length {
+        node :: ui_carrier_word(data + index * I64{8})
+        event_words_push(state + UI_BACKEND_FOCUS, jet_rt_handle_clone_jet_ui_node(node))
+        if gtk {
+            records :: state + UI_BACKEND_RECORDS
+            at := I64{0}
+            loop at < ui_carrier_word(records) {
+                record :: event_words_get(records, at)
+                if jet_rt_string_eq(ui_carrier_word(record + I64{8}), ui_carrier_word(node + UI_NODE_LABEL)) {
+                    event_words_push(state + UI_BACKEND_FOCUS_PATHS, jet_rt_string_clone(ui_carrier_word(record)))
+                    break
+                }
+                at += I64{1}
+            }
+        }
+        index += I64{1}
+    }
+    ui_carrier_store(state + UI_BACKEND_FOCUSED, if (length == I64{0}) -> I64{-1} else -> I64{0})
+}
+fn ui_focused_label(state: I64) -> I64 {
+    focused :: ui_carrier_word(state + UI_BACKEND_FOCUSED)
+    if (focused < I64{0} || focused >= ui_carrier_word(state + UI_BACKEND_FOCUS)) -> return jet_rt_string_builder_new()
+    jet_rt_string_clone(ui_carrier_word(event_words_get(state + UI_BACKEND_FOCUS, focused) + UI_NODE_LABEL))
+}
+// mount_node: measure, lay out at the origin and paint; the null and GTK
+// backends first clear their commands.
+fn ui_mount(state: I64, node: I64, min_width: Float, min_height: Float, max_width: Float, max_height: Float) {
+    if (ui_carrier_word(state + UI_BACKEND_KIND) != UI_BACKEND_TUI) -> ui_words_clear(state + UI_BACKEND_COMMANDS, I64{0})
+    constraint :: jet_rt_record_new_jet_size_constraint(min_width, min_height, max_width, max_height)
+    size :: ui_measure(node, constraint)
+    geometry_drop(constraint, MATH_SIZE_BYTES)
+    frame :: ui_rect_new(Float{0.0}, Float{0.0}, ui_float_at(size), ui_float_at(size + I64{8}))
+    geometry_drop(size, UI_SIZE_BYTES)
+    ui_layout(state, frame)
+    geometry_drop(frame, UI_RECT_BYTES)
+    ui_paint(state, node)
+}
+fn ui_mount_constraint(state: I64, node: I64, constraint: I64) {
+    ui_mount(state, node, ui_float_at(constraint + MATH_SIZE_MIN_WIDTH), ui_float_at(constraint + MATH_SIZE_MIN_HEIGHT), ui_float_at(constraint + MATH_SIZE_MAX_WIDTH), ui_float_at(constraint + MATH_SIZE_MAX_HEIGHT))
+}
+// DEFAULT_MOUNT_COLS × DEFAULT_MOUNT_ROWS; GTK's default viewport is 320×240.
+fn ui_mount_default(state: I64, node: I64) {
+    gtk :: ui_carrier_word(state + UI_BACKEND_KIND) == UI_BACKEND_GTK
+    ui_mount(state, node, Float{0.0}, Float{0.0}, if gtk -> Float{320.0} else -> Float{80.0}, if gtk -> Float{240.0} else -> Float{24.0})
+}
+// A List<String> result: fresh clones of the vector's texts.
+fn ui_text_words_output(base: I64, out_data: I64) -> I64 {
+    length :: ui_carrier_word(base)
+    result :: coll_i64_output(length, out_data)
+    index := I64{0}
+    loop index < length {
+        ui_carrier_store(result + index * I64{8}, jet_rt_string_clone(event_words_get(base, index)))
+        index += I64{1}
+    }
+    length
+}
+
+// ---- backend methods (route exports; every input is borrowed) ---------------
+
+#Export(c) fn jet_ui_null_measure_node(state: I64, node: I64, constraint: I64) -> I64 { ui_measure(node, constraint) }
+#Export(c) fn jet_ui_null_layout_node(state: I64, node: I64, frame: I64) { ui_layout(state, frame) }
+#Export(c) fn jet_ui_null_paint_node(state: I64, node: I64) { ui_paint(state, node) }
+#Export(c) fn jet_ui_null_mount_node(state: I64, node: I64, constraint: I64) { ui_mount_constraint(state, node, constraint) }
+#Export(c) fn jet_ui_null_mount_node_default(state: I64, node: I64) { ui_mount_default(state, node) }
+#Export(c) fn jet_ui_null_dispatch_event(state: I64, event: I64) -> I64 { ui_on_event(state, event) }
+#Export(c) fn jet_ui_null_set_focus_group(state: I64, data: I64, length: I64) { ui_set_focus_group(state, data, length) }
+#Export(c) fn jet_ui_null_focused_label(state: I64) -> I64 { ui_focused_label(state) }
+#Export(c) fn jet_ui_null_paint_commands(state: I64, out_data: I64) -> I64 { ui_text_words_output(state + UI_BACKEND_COMMANDS, out_data) }
+#Export(c) fn jet_ui_tui_measure_node(state: I64, node: I64, constraint: I64) -> I64 { ui_measure(node, constraint) }
+#Export(c) fn jet_ui_tui_layout_node(state: I64, node: I64, frame: I64) { ui_layout(state, frame) }
+#Export(c) fn jet_ui_tui_paint_node(state: I64, node: I64) { ui_paint(state, node) }
+#Export(c) fn jet_ui_tui_mount_node(state: I64, node: I64, constraint: I64) { ui_mount_constraint(state, node, constraint) }
+#Export(c) fn jet_ui_tui_mount_node_default(state: I64, node: I64) { ui_mount_default(state, node) }
+#Export(c) fn jet_ui_tui_dispatch_event(state: I64, event: I64) -> I64 { ui_on_event(state, event) }
+#Export(c) fn jet_ui_tui_set_focus_group(state: I64, data: I64, length: I64) { ui_set_focus_group(state, data, length) }
+#Export(c) fn jet_ui_tui_focused_label(state: I64) -> I64 { ui_focused_label(state) }
+#Export(c) fn jet_ui_tui_render_count(state: I64) -> I64 { jet_int_owned_from_i64(ui_carrier_word(state + UI_BACKEND_RENDERS)) }
+// frame_lines: each grid row, right-trimmed of Unicode white space.
+#Export(c) fn jet_ui_tui_frame_lines(state: I64, out_data: I64) -> I64 {
+    cols :: ui_carrier_word(state + UI_BACKEND_COLS)
+    rows :: ui_carrier_word(state + UI_BACKEND_ROWS)
+    grid :: ui_carrier_word(state + UI_BACKEND_GRID)
+    result :: coll_i64_output(rows, out_data)
+    row := I64{0}
+    loop row < rows {
+        cells :: grid + row * cols * I64{8}
+        end := cols
+        zero :: I64{0}
+        loop end > zero && unicode_is_white_space(ui_carrier_word(cells + (end - I64{1}) * I64{8})) {
+            end -= I64{1}
+        }
+        line :: jet_rt_string_builder_new()
+        col := I64{0}
+        loop col < end {
+            rt_text_push_scalar(line, ui_carrier_word(cells + col * I64{8}))
+            col += I64{1}
+        }
+        ui_carrier_store(result + row * I64{8}, jet_rt_string_builder_finish(line))
+        row += I64{1}
+    }
+    rows
+}
+#Export(c) fn jet_ui_gtk_measure_node(state: I64, node: I64, constraint: I64) -> I64 { ui_measure(node, constraint) }
+#Export(c) fn jet_ui_gtk_layout_node(state: I64, node: I64, frame: I64) { ui_layout(state, frame) }
+#Export(c) fn jet_ui_gtk_paint_node(state: I64, node: I64) { ui_paint(state, node) }
+#Export(c) fn jet_ui_gtk_mount_node(state: I64, node: I64, constraint: I64) { ui_mount_constraint(state, node, constraint) }
+#Export(c) fn jet_ui_gtk_mount_node_default(state: I64, node: I64) { ui_mount_default(state, node) }
+#Export(c) fn jet_ui_gtk_dispatch_event(state: I64, event: I64) -> I64 { ui_on_event(state, event) }
+#Export(c) fn jet_ui_gtk_set_focus_group(state: I64, data: I64, length: I64) { ui_set_focus_group(state, data, length) }
+#Export(c) fn jet_ui_gtk_focused_label(state: I64) -> I64 { ui_focused_label(state) }
+// JetGtkBackend::present without a display: report why no window opened
+// unless the run opted into headless, then return.
+#Export(c) fn jet_ui_gtk_present(state: I64, title: I64) {
+    ui_gtk_ensure_init(state)
+    if (ui_carrier_word(state + UI_BACKEND_AVAILABILITY) != UI_GTK_UNAVAILABLE) -> return
+    message :: rt_static_text("UI_UNSUPPORTED[gtk.runtime]: GTK4 runtime is unavailable; install GTK4 or set JET_UI_HEADLESS=1 only for an explicit headless run")
+    _ := host_stderr_line(rt_text_data(message), rt_text_len(message))
+}
+
+// ---- buttons and click slots ------------------------------------------------
+
+// jet_ui_register_click: ids from 1; each slot keeps its handler (env,
+// invoke, release) for the process, as the reference's registry does.
+ui_click_slots := I64{0}
+fn ui_register_click(env: I64, invoke: I64, release: I64) -> I64 {
+    if (ui_click_slots == I64{0}) -> ui_click_slots = ui_words_scratch(I64{1})
+    base :: ui_click_slots
+    event_words_push(base, env)
+    event_words_push(base, invoke)
+    event_words_push(base, release)
+    ui_carrier_word(base) / I64{3}
+}
+fn ui_button_node(label: I64) -> I64 {
+    node :: jet_rt_alloc(UI_NODE_BYTES, I64{8})
+    offset := I64{0}
+    loop offset < UI_NODE_BYTES {
+        ui_carrier_store(node + offset, I64{0})
+        offset += I64{8}
+    }
+    ui_carrier_store(node + UI_NODE_LABEL, jet_rt_string_clone(label))
+    ui_float_store(node + UI_NODE_WIDTH, Float{ui_tui_display_width(label)} + Float{4.0})
+    ui_float_store(node + UI_NODE_HEIGHT, Float{1.0})
+    ui_carrier_store(node + UI_NODE_ROLE, UI_ROLE_BUTTON)
+    ui_carrier_store(node + UI_NODE_KIND, UI_KIND_BUTTON)
+    ui_carrier_store(node + UI_NODE_CHILDREN, data_sequence_new(I64{0}, UI_NODE_CHILD_BYTES))
+    ui_carrier_store(node + UI_NODE_ABSENT_MASK, UI_NODE_OPTION_MASK)
+    node
+}
+#Export(c) fn jet_ui_button(label: I64) -> I64 { ui_button_node(label) }
+// jet_ui_button_on_click: the label, the optional shortcut and accessible
+// label (borrowed Option boxes, null when absent) and the handler closure,
+// which the click slot takes over.
+#Export(c) fn jet_ui_button_on_click(label: I64, shortcut: I64, accessible_label: I64, env: I64, invoke: I64, release: I64) -> I64 {
+    node :: ui_button_node(label)
+    if (shortcut != I64{0}) -> ui_carrier_store(node + UI_NODE_SHORTCUT, jet_rt_handle_clone_jet_ui_shortcut(ui_carrier_word(shortcut)))
+    if (accessible_label != I64{0}) {
+        accessibility :: jet_rt_alloc(UI_ACCESSIBILITY_BYTES, I64{8})
+        ui_carrier_store(accessibility + UI_ACCESSIBILITY_NAME, jet_rt_string_clone(ui_carrier_word(accessible_label)))
+        ui_carrier_store(accessibility + UI_ACCESSIBILITY_DESCRIPTION, I64{0})
+        ui_carrier_store(accessibility + UI_ACCESSIBILITY_LENGTH, I64{0})
+        ui_carrier_store(accessibility + UI_ACCESSIBILITY_CAPACITY, I64{0})
+        ui_carrier_store(accessibility + UI_ACCESSIBILITY_DATA, I64{0})
+        ui_carrier_store(node + UI_NODE_ACCESSIBILITY, accessibility)
+    }
+    ui_carrier_store(node + UI_NODE_CLICK_FN, ui_register_click(env, invoke, release))
+    ui_carrier_store(node + UI_NODE_ABSENT_MASK, UI_NODE_OPTION_MASK.bit_and(I64{-1} - UI_NODE_SLOT_CLICK))
+    node
+}

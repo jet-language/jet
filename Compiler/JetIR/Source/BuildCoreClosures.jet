@@ -192,6 +192,10 @@ fn ir_core_closure_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, kin
         .Guard(executable) -> return ir_scope_guard(&m, p, &b, ty, executable, span)
         .OnCommit(handle_name, executable) -> return ir_transaction_hook(&m, p, &b, handle_name, executable, true, span)
         .OnRollback(handle_name, executable) -> return ir_transaction_hook(&m, p, &b, handle_name, executable, false, span)
+        .ReactiveDerived(executable) -> return ir_reactive_derived(&m, p, &b, ty, executable, span)
+        .ReactiveEffect(executable) -> return ir_reactive_effect(&m, p, &b, ty, executable, span)
+        .UIReactiveRender(executable) -> return ir_reactive_rooted(&m, p, &b, executable, span)
+        .UIButtonOnClick(label, shortcut, accessible_label, executable) -> return ir_ui_button_click(&m, p, &b, ty, label, shortcut, accessible_label, executable, span)
         else -> return ir_fail_slot(&b, span, "Core closure call {ir_core_closure_name(kind)}")
     }
 }
@@ -403,15 +407,4 @@ fn ir_task_join(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, rece
     boxed :: ir_task_outcome(&m, p, &b, "jet_rt_native_task_join", [Int]{handle, flatten}, result_ty, err_ty, span)
     ir_lazy_consumed(&m, &b, handle)
     boxed
-}
-
-// `#Reactive { body }`: an effect over no tracked signal, so its body runs
-// once, now, as its closure: the box holds the captures the checker chose
-// (a copy of each root it reads), and retires after the run.
-fn ir_reactive_run(m: &IRModule, p: IRProgram, b: &IRBuilder, executable: BodyLambda, span: Span) Never! {
-    closure_ty :: ir_lambda_function_type(executable)
-    env :: ir_lambda(&m, p, &b, closure_ty, executable, span)
-    if ir_failed(b) || env < 0 -> return
-    _ :: ir_call_closure(&m, &b, env, [Int]{}, -1)
-    ir_release_closure(&m, &b, env)
 }
