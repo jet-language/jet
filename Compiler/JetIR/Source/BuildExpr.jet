@@ -1706,7 +1706,13 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
             return slot
         }
         .Ok(value) -> return ir_result_ctor(&m, p, &b, expression_ty, value, true, span)
-        .Err(value) -> return ir_result_ctor(&m, p, &b, expression_ty, value, false, span)
+        .Err(value) -> {
+            slot :: ir_result_ctor(&m, p, &b, expression_ty, value, false, span)
+            if ir_failed(b) || !b.origins.contains(expression) -> return slot
+            reraise :: ir_core_reraise(p, b, value)
+            ir_journey_origin(&m, p, &b, reraise, span)
+            return slot
+        }
         .Try(value, conversion, _) -> return ir_try(&m, p, &b, value, conversion, None, span)
         .TryWithContext(inner, note, conversion, file, line, function) -> {
             fresh :: ir_try_starts_failure(p, b, inner)
@@ -4352,10 +4358,18 @@ fn ir_return(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int?, span: Span)
         return
     }
     result_row :: b.f.result
+    returned_node :: ir_body_node(p, b, returned)
+    returns_err :: returned_node.kind == .Err(_)
+    // An `Err(...)` the tail of a valued `if` or block hands back starts its
+    // failure where it is built (the `.Err` arm of ir_expr).
+    tail_mark :: b.origins.len()
+    if !returns_err -> ir_tail_errs(p, &b, returned)
     slot :: ir_value_as(&m, p, &b, returned, result_row, span)
+    loop b.origins.len() > tail_mark {
+        _ :: &b.origins.pop()
+    }
     if ir_failed(b) -> return
     if slot < 0 -> return ir_fail(&b, span, "return of a value without a slot")
-    returned_node :: ir_body_node(p, b, returned)
     if returned_node.kind == .Err(error) {
         reraise :: ir_core_reraise(p, b, error)
         ir_journey_origin(&m, p, &b, reraise, returned_node.span)
@@ -4363,6 +4377,24 @@ fn ir_return(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int?, span: Span)
     }
     owned :: ir_own(&m, p, &b, slot)
     ir_return_slot(&m, p, &b, owned, span)
+}
+
+// The `Err(...)` values a returned valued `if` or block hands back from its
+// tails (an arm's last line), filed in `b.origins`: Rust lowers each such
+// arm as its own `return` (tir_to_mir_expr.rs `TExprKind::Err`).
+fn ir_tail_errs(p: IRProgram, b: &IRBuilder, expression: Int) Never! {
+    if ir_body_node(p, b, expression).kind == {
+        .Err(_) -> &b.origins.push(expression)
+        .IfExpr(_, _, then_value, _, else_value) -> {
+            ir_tail_errs(p, &b, then_value)
+            ir_tail_errs(p, &b, else_value)
+        }
+        .InlineBlock(body) -> {
+            if body.len() == 0 -> return
+            if ir_body_stmt(p, b, body[body.len() - 1]) == .ExprStmt(tail, _) -> ir_tail_errs(p, &b, tail)
+        }
+        else -> {}
+    }
 }
 
 // A `?` site that joins the failure's journey (TryWithContext): its source

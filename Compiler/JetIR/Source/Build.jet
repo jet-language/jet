@@ -161,6 +161,10 @@ struct IRBuilder {
     // A generator's producer body (BuildGenerator.jet): the slot holding its
     // runtime state, which each `yield` hands its value to (-1: no producer).
     generator: Int{-1}
+    // The `Err(...)` nodes a `return` being built hands back from the tail of
+    // a valued `if` or block (ir_return): building one starts its failure's
+    // journey there, as `return Err(...)` does.
+    origins: [Int]{[Int]{}}
 }
 
 // One failure of a body: its message and the span it names.
