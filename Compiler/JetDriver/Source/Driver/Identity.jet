@@ -1,7 +1,7 @@
 use core.build.[BuildGraphNode]
 // Source, module, and package identities remain separate at the driver boundary.
 use jet_sema.[SemaOutputIntent]
-use jet_pkg_model.[BuildStamp]
+use jet_pkg_model.[BuildStamp, LockedBuildContribution]
 use jet_foundation.[
     AppAuthorizedDirectory,
     CompilerThreads,
@@ -258,6 +258,10 @@ struct JetDriverCompileRequest {
     // (Lock.rs `build_stamp`): the provenance `$build.stamp.*` folds from.
     // None keeps the default stamp (jet_driver_build_facts).
     build_stamp: BuildStamp?{None}
+    // The `[[build.contribution]]` rows of that lock (D-CONF-SPLIT1): what
+    // `fn build` contributed to declared settings, which
+    // jet_driver_build_settings folds over the defaults and profile values.
+    build_contributions: [LockedBuildContribution]{[LockedBuildContribution]{}}
 }
 
 struct JetDriverGatePolicy {

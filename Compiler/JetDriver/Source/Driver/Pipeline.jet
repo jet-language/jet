@@ -147,6 +147,7 @@ use jet_parser.[
 ]
 
 use jet_eval.[JetEvalComptimeInputAdapter]
+use jet_pkg_model.[LockedBuildContribution]
 use jet_ir.[IRProgram, ir_first_function_rows, ir_precise_helper_names, ir_named_function_keys, ir_reachable_core_rows]
 use jet_eval.[
     JetEvalConfig,
@@ -574,7 +575,7 @@ fn jet_driver_build_facts(load: JetDriverLoadResult, request: JetDriverCompileRe
         if package.identity == load.package_identity {
             package_name = package.name
             package_version = package.version ?? ""
-            settings = jet_driver_build_settings(package, request.profile)
+            settings = jet_driver_build_settings(package, request.profile, request.build_contributions)
         }
     }
     if package_name.len() == 0 {
@@ -611,17 +612,45 @@ fn jet_driver_build_facts(load: JetDriverLoadResult, request: JetDriverCompileRe
 }
 
 // Each declared setting's value for `profile`: its default, then the value
-// the selected `build:` profile gives it.
-fn jet_driver_build_settings(package: JetDriverPackageInfo, profile: String) -> [SemaBuildSetting] Never! {
+// the selected `build:` profile gives it, then the value the package's
+// `fn build` contributed, as the lock records it (D-CONF-SPLIT1: the
+// function's environment layer is above the profile's optimization-bundle
+// layer).
+fn jet_driver_build_settings(package: JetDriverPackageInfo, profile: String, contributions: [LockedBuildContribution]) -> [SemaBuildSetting] Never! {
     settings := [SemaBuildSetting]{}
     loop setting in package.settings {
         value := setting.default
         loop entry in package.profile_settings {
             if entry.profile == profile && entry.name == setting.name -> value = entry.value
         }
+        key :: "Build.Settings.{setting.name}"
+        loop contribution in contributions {
+            if contribution.package != package.name || contribution.key != key || contribution.layer != "environment" -> next
+            value = jet_driver_locked_setting_text(contribution.value) ?? value
+        }
         &settings.push(SemaBuildSetting{name: setting.name, ty: setting.ty, value: value})
     }
     settings
+}
+
+// The manifest spelling of a locked contribution value, which the lock keeps
+// in its writer's Debug spelling (FactValue.debug_text): `Int(4)` is `4`,
+// `Bool(true)` `true`, `Char('c')` `'c'`, `Text("a")` `"a"` and
+// `Enum("Fast")` `Fast`. Any other value is no setting value (None).
+fn jet_driver_locked_setting_text(value: String) -> String? Never! {
+    open :: value.find("(")
+    if open < 0 || !value.ends_with(")") -> return None
+    bytes :: value.bytes()
+    kind :: String.from_bytes_lossy(bytes[0..<open])
+    body :: String.from_bytes_lossy(bytes[open + 1..<bytes.len() - 1])
+    if kind == {
+        "Bool" | "Int" | "Char" | "Text" -> Val(body)
+        "Enum" -> {
+            if body.count_bytes() < 2 || !body.starts_with("\"") || !body.ends_with("\"") -> return None
+            Val(String.from_bytes_lossy(body.bytes()[1..<body.count_bytes() - 1]))
+        }
+        else -> None
+    }
 }
 
 // Rust TARGET_MACHINE_NAMES and target_machine_by_name; restored45acf6f8f.

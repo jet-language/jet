@@ -4739,6 +4739,15 @@ retired `--emit-generated`) and the `fn build` call `b.write_generated(.On)`.
 Example:
 [`Examples/features/tooling/build_write_generated`](../../Examples/features/tooling/build_write_generated/run.jet).
 
+`b.contribute(name, value)` gives a value to a setting the package declares in
+`package.jet` (`settings: { cache_slots: Int = 1 }`). The manifest lists every
+setting and its type, and `fn build` only computes a value (D-CONF-SPLIT1).
+The project lock records each contribution as a `[[build.contribution]]` row,
+and every compile of the package reads those rows: `$build.settings.cache_slots`
+folds to the contributed value over the declared default and the selected
+profile's value. Example:
+[`Examples/features/packages/build_contribution`](../../Examples/features/packages/build_contribution/run.jet).
+
 Generation is additive with one owner per managed path. Generated modules are
 ordered in dependency rounds using ordinary quoted-file imports; a later round
 can observe an earlier one. The round count is bounded by generated-module
