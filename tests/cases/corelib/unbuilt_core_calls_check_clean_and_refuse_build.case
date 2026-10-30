@@ -10,18 +10,3 @@ step: jet build tree.jet
 exit: 1
 stderr: ~ "Error [E2104]: `service.tree` is not built yet" # build still refuses the unported service tree runtime
 stderr: ~ "card #4957" # the refusal names the card that ports it
-
-step: jet check query.jet
-exit: 0
-stderr: !~ "E2104" # check mode lowers nothing, so nothing is refused
-
-step: jet build query.jet
-exit: 1
-stderr: ~ "Error [E2104]: `data.query` is not built yet" # the Query chain never reaches the IR builder
-stderr: ~ "card #6130" # the refusal names the card that ports it
-stderr: !~ "internal compiler error" # a refused call is a user diagnostic, not a backend gap
-
-step: jet build schema.jet
-exit: 1
-stderr: ~ "Error [E2104]: `data.schema` is not built yet" # data.schema<T> still calls itself
-stderr: ~ "card #6130" # the refusal names the card that ports it

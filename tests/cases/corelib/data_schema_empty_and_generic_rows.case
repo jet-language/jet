@@ -1,0 +1,24 @@
+# data.schema<T> reads its columns from the row type, so an empty list and a
+# list of generic rows have the same columns as a filled list; every tier
+# prints the same columns.
+fixture: fixtures/data_schema_empty_and_generic_rows
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = data_schema_empty_and_generic_rows.out
+stderr: empty
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = data_schema_empty_and_generic_rows.out
+stderr: empty
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = data_schema_empty_and_generic_rows.out
+stderr: empty
+step: jet build --optimize=full main.jet
+exit: 0
+step aot2: built
+exit: 0
+stdout: = data_schema_empty_and_generic_rows.out

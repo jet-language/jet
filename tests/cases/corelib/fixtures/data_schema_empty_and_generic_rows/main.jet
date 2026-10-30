@@ -1,0 +1,41 @@
+package {
+    name: "data_schema_empty_and_generic_rows"
+}
+
+use core.data as data
+
+struct Ticket {
+    team: String
+    minutes: Float
+}
+
+struct Empty {
+
+}
+
+struct Box<T> {
+    value: T
+}
+
+struct Pair<A, B> {
+    left: A
+    right: B
+}
+
+fn show(label: String, cols: [data.DataColumn]) {
+    print("{label}:{cols.len()}")
+    loop c in cols {
+        print("  {c.name}:{c.type_name}")
+    }
+}
+
+fn run() {
+    show("empty_rows", data.schema([Ticket]{}))
+    show("rows", data.schema([Ticket]{Ticket{team: "Core", minutes: 4.0}}))
+    show("explicit", data.schema<Ticket>([Ticket]{}))
+    show("empty_struct", data.schema([Empty]{}))
+    show("generic_empty", data.schema([Box<Int>]{}))
+    show("generic_rows", data.schema([Box<String>]{Box<String>{value: "a"}, Box<String>{value: "b"}}))
+    show("generic_pair", data.schema([Pair<Int, Float>]{Pair<Int, Float>{left: 1, right: 2.5}}))
+    show("scalar", data.schema([Int]{1, 2, 3}))
+}

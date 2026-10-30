@@ -194,10 +194,6 @@ fn sema_call_core_unbuilt(module_name: String, member: String) -> (feature: Stri
     if module_name == "core.sys" && member == "decode" -> return Val((feature: "typed environment decoding (`core.sys.decode`)", card: 5992))
     if module_name == "core.process" && member == "pipeline" -> return Val((feature: "the process pipeline runtime", card: 5993))
     if module_name == "core.mod" && member == "load" -> return Val((feature: "the module loader runtime and its grants", card: 5993))
-    // Refusing `data.query` keeps the unported `Query` methods over user rows
-    // out of the IR; the Arrow `Query` (`arrow.query`) runs, so the methods
-    // themselves stay allowed. `data.schema<T>` still calls itself.
-    if module_name == "core.data" && (member == "query" || member == "schema") -> return Val((feature: "the `core.data` Query runtime (`data.query`, `data.schema` and the `Query` methods)", card: 6130))
     None
 }
 
@@ -1229,9 +1225,9 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
             return None
         }
     }
-    if record.module_name == "core.encoding" && (record.member == "__query_read_bounded" || record.member == "__query_validate_fields" || record.member == "__text_cells_enter" || record.member == "__text_cells_leave") {
+    if record.module_name == "core.encoding" && (record.member == "__text_cells_enter" || record.member == "__text_cells_leave") {
         if !environment.source_file.starts_with("<corelib>/") || environment.module_name != "core.encoding.csv" {
-            &diagnostics.push(sema_error("E0510", span, "CSV query and text-cell leaves are compiler-private", "raw CSV query and text-cell decode mechanics are restricted to Core CSV source", "use csv.query<T> or csv.decode<T>"))
+            &diagnostics.push(sema_error("E0510", span, "CSV text-cell leaves are compiler-private", "raw CSV text-cell decode mechanics are restricted to Core CSV source", "use csv.decode<T>"))
             return None
         }
     }

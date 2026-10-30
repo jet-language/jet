@@ -2858,8 +2858,9 @@ closure that consumes the object it must subsequently render.
 checked SQL. `data.query(rows)` and the SQL form produce the same carrier;
 `collect` materializes an ordinary `[T]`. Query operations retain typed
 callbacks and plan order. `inner_join` preserves duplicate-key multiplicity;
-`left_join` preserves every left row and uses `?R`; `group_by` produces
-`Group<K, V>`. `DataStream<T>` is one-shot and fallible, and `DataLoader<T>` is
+`left_join` preserves every left row and uses `?R`; `group_by` produces one
+`Group<K, V>` per key, in ascending key order, so `K` must be Comparable.
+`DataStream<T>` is one-shot and fallible, and `DataLoader<T>` is
 stateful and typed. There is no public `Table<T>`, `Series<T>`, `LazyFrame<T>`,
 or `DataGroup` carrier (D-QUERY-RETAIN1=A).
 

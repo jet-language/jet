@@ -5,6 +5,7 @@ use core.encoding.base64 as base64
 use __core_encoding_stream as stream
 use core.encoding as encoding
 use core.files.[FileReader, FileWriter]
+use core.files as files
 use core.mem as mem
 use core.data.[Query]
 use core.db.[SQL]
@@ -309,29 +310,25 @@ fn query<T: [Decode, Encode]>(path: String, sql: SQL) -[FS]> Query<T> [FieldErro
     text :: query_text(path) ?? return Err(err)
     physical :: typed_records(text) ?? return Err([FieldError]{FieldError{path: "", reason: err.reason}})
     header :: if physical.len() == 0 -> [String]{} else -> physical[0]
-    encoding.__query_validate_fields(header, sql) ?? return Err([FieldError]{FieldError{path: "", reason: err}})
+    core.data.__query_validate_fields(header, sql) ?? return Err(err)
     values :: decode<T>(text) ?? return Err(err)
     values.query(sql)
-}
-
-// A private plain record on the existing raw record rails, not a file handle.
-struct __QueryRead {
-    size: U64
-    bytes: [U8]
 }
 
 fn query_read_error(path: String, reason: String) -> [FieldError] Never! {
     [FieldError]{FieldError{path: "", reason: "could not read `{path}`: {reason}"}}
 }
 
+// An oversized file is refused from its reported size before any byte is read.
 fn query_text(path: String) -[FS]> String [FieldError]! {
     max :: 536870912
-    sample := encoding.__query_read_bounded(path, max) ?? return Err(query_read_error(path, err))
-    if sample.size > (U64{max}) -> return Err(query_read_error(path, "input exceeds the {max}-byte query bound"))
-    if sample.bytes.len() > max -> return Err(query_read_error(path, "input grew beyond the {max}-byte query bound"))
-    encoding.__utf8_validate(sample.bytes) ?? return Err(query_read_error(path, err))
+    info :: files.stat(path, links: .Follow) ?? return Err(query_read_error(path, "{err}"))
+    if info.size > max -> return Err(query_read_error(path, "input exceeds the {max}-byte query bound"))
+    bytes :: files.read_at(path, 0, max + 1) ?? return Err(query_read_error(path, "{err}"))
+    if bytes.len() > max -> return Err(query_read_error(path, "input grew beyond the {max}-byte query bound"))
+    encoding.__utf8_validate(bytes) ?? return Err(query_read_error(path, err))
     #Unsafe("the exact owned query bytes passed the shared strict UTF-8 validator") {
-        return Ok(encoding.__bytes_into_text(^sample.bytes))
+        return Ok(encoding.__bytes_into_text(^bytes))
     }
 }
 

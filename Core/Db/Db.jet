@@ -177,7 +177,7 @@ fn render_value(value: DBValue) -> String Never! {
     if value == {
         .Null -> "null"
         .Int(number) -> "{number}"
-        .Float(number) -> float_text(number)
+        .Float(number) -> __float_text(number)
         .Text(text) -> text
         .Bool(boolean) -> "{boolean}"
         .Blob(bytes) -> "{bytes}"
@@ -186,7 +186,7 @@ fn render_value(value: DBValue) -> String Never! {
 
 // SQL values use the shortest decimal f64 display spelling, not Jet's debug
 // spelling (which preserves ".0" and may use an exponent).
-fn float_text(value: Float) -> String Never! {
+fn __float_text(value: Float) -> String Never! {
     text :: "{value}"
     raw :: text.bytes()
     exponent_at := -1
@@ -1624,7 +1624,7 @@ fn cell_wire_width(value: DBValue) -> Int Never! {
     payload :: if value == {
         .Null -> 0
         .Int(number) -> decimal_width(number)
-        .Float(number) -> float_text(number).len()
+        .Float(number) -> __float_text(number).len()
         .Text(text) -> sqlite_mem.__string_byte_len(text)
         .Bool(_) -> 1
         .Blob(bytes) -> bytes.len() * 2

@@ -3969,6 +3969,41 @@ fn ir_numeric_cast(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, target
         ir_emit(&b.f, IROp.Convert, result, wide, -1, -1, b.line)
         return result
     }
+    // A fixed word to Float or Float32 (`Float.from_i64`) rounds to nearest,
+    // as the exact Int does. Convert reads the word as signed 64-bit, and a
+    // narrow word is extended by its own signedness, so only a U64 at or
+    // above 2^63 converts its upper 63 bits with the low bit kept sticky
+    // (round to odd), doubled: one rounding, as the exact value would get.
+    if source.kind == .Word && source.bits <= 64 && (destination.kind == .Float || destination.kind == .Float32) {
+        word_row :: ir_word_row(&m)
+        signed_word :: ir_copy_word(&m, &b, value, word_row)
+        result :: ir_temp(&m, &b, target)
+        if source.signed || source.bits < 64 {
+            ir_emit(&b.f, IROp.Convert, result, signed_word, -1, -1, b.line)
+            return result
+        }
+        signed_zero :: ir_const_like(&m, &b, signed_word, 0)
+        low_range :: ir_bool_op(&m, &b, IROp.Ge, signed_word, signed_zero)
+        ir_open_if(&b.f, low_range, b.line)
+        ir_emit(&b.f, IROp.Convert, result, signed_word, -1, -1, b.line)
+        ir_else(&b.f, b.line)
+        u64_row :: ir_type_row(&m, Type.IntN{signed: false, bits: 64}) ?? 0
+        magnitude :: ir_copy_word(&m, &b, value, u64_row)
+        one :: ir_const_like(&m, &b, magnitude, 1)
+        half :: ir_temp_like(&m, &b, magnitude)
+        ir_emit(&b.f, IROp.Shr, half, magnitude, one, IR_OVERFLOW_WRAP, b.line)
+        low_bit :: ir_temp_like(&m, &b, magnitude)
+        ir_emit(&b.f, IROp.BitAnd, low_bit, magnitude, one, IR_OVERFLOW_WRAP, b.line)
+        sticky :: ir_temp_like(&m, &b, magnitude)
+        ir_emit(&b.f, IROp.BitOr, sticky, half, low_bit, IR_OVERFLOW_WRAP, b.line)
+        sticky_word :: ir_copy_word(&m, &b, sticky, word_row)
+        half_float :: ir_temp(&m, &b, target)
+        ir_emit(&b.f, IROp.Convert, half_float, sticky_word, -1, -1, b.line)
+        // Doubling a float is exact.
+        ir_emit(&b.f, IROp.Add, result, half_float, half_float, IR_OVERFLOW_WRAP, b.line)
+        ir_end(&b.f, b.line)
+        return result
+    }
     // Float32 widens to Float exactly and Float narrows to Float32 by
     // rounding (`Float.from_f32`; IR Convert between the float rows).
     if (source.kind == .Float || source.kind == .Float32) && (destination.kind == .Float || destination.kind == .Float32) {

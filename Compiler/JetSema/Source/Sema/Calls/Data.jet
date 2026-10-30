@@ -21,6 +21,7 @@ use jet_foundation.[
     expr_source_span,
     expr_span,
     type_name,
+    type_unqualified_nominals,
     UnOp,
     core_identity_in_module,
     core_identity_is,
@@ -420,10 +421,13 @@ fn sema_data_try_query_method(receiver: Expr, receiver_value: TExpr, name: Strin
     typed := [TExpr]{receiver_value}
     call_type_args := [Type]{}
     result_type := Type.Named{name: "Unit"}
+    query_name :: sema_data_source_type_name(environment, program, "Query")
+    sum_value := Type.Int
     if receiver_type == "DataTracked" {
         key :: parameters[1]
         if method == "query" {
-            result_type = Type.Apply{name: "Query", args: [Type]{row}}
+            call_type_args = [Type]{row, key}
+            result_type = Type.Apply{name: query_name, args: [Type]{row}}
         } else {
             slots := if method == {
                 "insert" -> [Type]{row}
@@ -455,6 +459,7 @@ fn sema_data_try_query_method(receiver: Expr, receiver_value: TExpr, name: Strin
                 value :: sema_data_expect_core_arg(method, 0, callback_type, args[0], environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 if !sema_data_query_push_argument(args[0], value, &source_args, &argument_types, &typed) -> complete = false
             }
+            call_type_args = [Type]{row}
             result_type = Type.Apply{name: name, args: [Type]{row}}
         }
         if method == "map" || method == "min" || method == "max" {
@@ -464,6 +469,7 @@ fn sema_data_try_query_method(receiver: Expr, receiver_value: TExpr, name: Strin
                 if callback.result == .Val(found) -> value_type = found
                 if !sema_data_query_push_argument(args[0], callback.value, &source_args, &argument_types, &typed) -> complete = false
             }
+            call_type_args = [Type]{row, value_type}
             result_type = Type.Apply{name: name, args: [Type]{value_type}}
         }
         if method == "inner_join" || method == "left_join" {
@@ -496,13 +502,17 @@ fn sema_data_try_query_method(receiver: Expr, receiver_value: TExpr, name: Strin
                 if !sema_data_query_push_argument(args[2], right_key.value, &source_args, &argument_types, &typed) -> complete = false
             }
             joined_right :: if method == "left_join" -> Type.Option{inner: right_row} else -> right_row
-            result_type = Type.Apply{name: name, args: [Type]{Type.Apply{name: "DataJoin", args: [Type]{row, joined_right}}}}
+            call_type_args = [Type]{row, right_row}
+            result_type = Type.Apply{name: name, args: [Type]{Type.Apply{name: sema_data_source_type_name(environment, program, "DataJoin"), args: [Type]{row, joined_right}}}}
         }
         if method == "collect" {
             call_type_args = [Type]{row}
             result_type = sema_data_result(Type.List{element: row}, data_error)
         }
-        if method == "plan" -> result_type = Type.List{element: Type.String}
+        if method == "plan" {
+            call_type_args = [Type]{row}
+            result_type = Type.List{element: Type.String}
+        }
         if method == "group_by" {
             key := Type.String
             if args.len() > 0 {
@@ -510,7 +520,8 @@ fn sema_data_try_query_method(receiver: Expr, receiver_value: TExpr, name: Strin
                 if callback.result == .Val(found) -> key = found
                 if !sema_data_query_push_argument(args[0], callback.value, &source_args, &argument_types, &typed) -> complete = false
             }
-            result_type = Type.Apply{name: "DataGroupedQuery", args: [Type]{row, key}}
+            call_type_args = [Type]{row, key}
+            result_type = Type.Apply{name: sema_data_source_type_name(environment, program, "DataGroupedQuery"), args: [Type]{row, key}}
         }
         if method == "watch" -> result_type = Type.Result{ok: Type.Apply{name: "DataWatch", args: [Type]{row}}, err: data_error}
     }
@@ -531,6 +542,7 @@ fn sema_data_try_query_method(receiver: Expr, receiver_value: TExpr, name: Strin
                     complete = false
                 }
                 if value == .Val(found) -> value_type = found
+                sum_value = value_type
             } else {
                 if value == .Val(found) {
                     if found != Type.Float {
@@ -541,15 +553,27 @@ fn sema_data_try_query_method(receiver: Expr, receiver_value: TExpr, name: Strin
                 value_type = Type.Float
             }
         }
-        result_type = Type.Apply{name: "Query", args: [Type]{Type.Apply{name: "Group", args: [Type]{key, value_type}}}}
+        call_type_args = [Type]{row, key}
+        result_type = Type.Apply{name: query_name, args: [Type]{Type.Apply{name: sema_data_source_type_name(environment, program, "Group"), args: [Type]{key, value_type}}}}
     }
     if !complete -> return SemaMethodSpecialCheck{handled: true, value: None}
-    record :: core_receiver_method(receiver_type, method) ?? {
+    record := core_receiver_method(receiver_type, method) ?? {
         &diagnostics.push(sema_error("E0003", span, "checked query method `{method}` has no canonical receiver Core row", "every checked query method lowers onto its receiver Core row", "repair the Core registry receiver rows"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
+    // A grouped sum runs the source reducer of its value's numeric type.
+    if receiver_type == "DataGroupedQuery" && method == "sum" -> record.source_target = Val("core.data.{sema_data_group_sum_target(sum_value)}")
     value :: sema_data_core_emit(record, "{receiver_type}.{method}", source_args, argument_types, typed, call_type_args, result_type, span, expected, environment, program, &scopes, &state, &context, &diagnostics)
     SemaMethodSpecialCheck{handled: true, value: value}
+}
+
+fn sema_data_group_sum_target(value: Type) -> String Never! {
+    if value == {
+        .Float -> "__group_sum_float"
+        .Float32 -> "__group_sum_f32"
+        .IntN(signed, bits) -> if signed -> "__group_sum_i{bits}" else -> "__group_sum_u{bits}"
+        else -> "__group_sum_int"
+    }
 }
 
 // The compiler-owned receiver key of the checked-SQL list door (Rust
@@ -576,7 +600,7 @@ fn sema_data_check_list_query(receiver: Expr, receiver_value: TExpr, row: Type, 
     }
     source_args := [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}
     loop argument in args -> &source_args.push(argument)
-    result_type :: Type.Result{ok: Type.Apply{name: "Query", args: [Type]{row}}, err: sema_data_decode_error()}
+    result_type :: Type.Result{ok: Type.Apply{name: sema_data_source_type_name(environment, program, "Query"), args: [Type]{row}}, err: sema_data_decode_error()}
     value :: sema_data_core_emit(record, "query", source_args, [Type]{receiver_value.ty, sql}, [TExpr]{receiver_value, query}, [Type]{row}, result_type, span, expected, environment, program, &scopes, &state, &context, &diagnostics)
     SemaMethodSpecialCheck{handled: true, value: value}
 }
@@ -1471,10 +1495,11 @@ fn sema_call_try_data_core_call(module_name: String, member: String, args: [Call
             &typed.push(value)
         }
         record :: sema_call_core_record(module_name, member, args.len(), span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-        result_type := Type.Result{ok: Type.Apply{name: "Query", args: [Type]{row}}, err: Type.List{element: Type.Named{name: "FieldError"}}}
+        result_type := Type.Result{ok: Type.Apply{name: sema_data_source_type_name(environment, program, "Query"), args: [Type]{row}}, err: Type.List{element: Type.Named{name: "FieldError"}}}
         result :: sema_data_core_emit(record, "{module_name}.{member}", args, argument_types, typed, [Type]{row}, result_type, span, expected, environment, program, &scopes, &state, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         return SemaDirectSpecialCheck{handled: true, value: Val(result)}
     }
+    if module_name == "core.data" && member == "schema" -> return sema_data_check_schema(args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if (module_name == "core.data" && (member == "query" || member == "track")) || (module_name == "core.data.arrow" && (member == "import" || member == "query")) {
         if type_args.len() != 0 {
             sema_data_check_explicit_type_args("{module_name}.{member}", type_args, 0, span, &diagnostics)
@@ -1489,6 +1514,8 @@ fn sema_call_try_data_core_call(module_name: String, member: String, args: [Call
         }
         first :: sema_check_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         row := Type?{None}
+        query_source := String?{None}
+        query_type_args := [Type]{}
         first_expected := first.ty
         if {
             module_name == "core.data" && member == "track" -> {
@@ -1506,11 +1533,14 @@ fn sema_call_try_data_core_call(module_name: String, member: String, args: [Call
                     .List(element) -> row = Val(element)
                     .Apply(name, parameters) -> {
                         if {
-                            name == "DataTracked" && parameters.len() == 2 -> {
+                            sema_data_nominal_is(name, "DataTracked") && parameters.len() == 2 -> {
                                 row = Val(parameters[0])
+                                query_source = Val("core.data.__query_tracked")
+                                query_type_args = [Type]{parameters[0], parameters[1]}
                             }
-                            name == "DataStream" && parameters.len() == 1 -> {
+                            sema_data_nominal_is(name, "DataStream") && parameters.len() == 1 -> {
                                 row = Val(parameters[0])
+                                query_source = Val("core.data.__query_stream")
                             }
                         }
                     }
@@ -1551,14 +1581,92 @@ fn sema_call_try_data_core_call(module_name: String, member: String, args: [Call
             return SemaDirectSpecialCheck{handled: true, value: Val(result)}
         }
         row_type :: row ?? Type.Named{name: "Unit"}
+        if query_type_args.len() == 0 -> query_type_args = [Type]{row_type}
         result_type := if {
-            module_name == "core.data" -> Type.Apply{name: "Query", args: [Type]{row_type}}
+            module_name == "core.data" -> Type.Apply{name: sema_data_source_type_name(environment, program, "Query"), args: [Type]{row_type}}
             member == "import" -> first.ty
             else -> Type.Result{ok: Type.Apply{name: sema_data_source_type_name(environment, program, "Query"), args: [Type]{row_type}}, err: Type.Named{name: sema_data_source_type_name(environment, program, "DataError")}}
         }
-        record :: sema_call_core_record(module_name, member, args.len(), span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-        result :: sema_data_core_emit(record, "{module_name}.{member}", args, argument_types, typed, [Type]{row_type}, result_type, span, expected, environment, program, &scopes, &state, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        record := sema_call_core_record(module_name, member, args.len(), span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        // A tracked source or a stream enters the query through its own source.
+        if query_source == .Val(target) -> record.source_target = Val(target)
+        result :: sema_data_core_emit(record, "{module_name}.{member}", args, argument_types, typed, query_type_args, result_type, span, expected, environment, program, &scopes, &state, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         return SemaDirectSpecialCheck{handled: true, value: Val(result)}
     }
     SemaDirectSpecialCheck{handled: false, value: None}
 }
+
+// `data.schema(rows)` reads its columns from the row type: a struct row expands
+// into its stored fields with the row's type arguments substituted, any other
+// row is one `value` column. An explicit `data.schema<T>(rows)` checks `rows`
+// as `[T]`. The source schema receives the rows and the column names and type
+// names this check derives.
+fn sema_data_check_schema(args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if type_args.len() > 1 || args.len() != 1 {
+        if type_args.len() > 1 -> sema_data_check_explicit_type_args("core.data.schema", type_args, 1, span, &diagnostics)
+        if args.len() != 1 -> sema_data_arity_diagnostic("core.data.schema", 1, args.len(), span, &diagnostics)
+        sema_data_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    checked := TExpr?{None}
+    if type_args.len() == 1 {
+        // copy: the explicit row type stays in the caller's type argument list; the required list type owns this one
+        checked = sema_data_expect_core_arg("core.data.schema", 0, Type.List{element: type_args[0].copy()}, args[0], environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    } else {
+        checked = sema_check_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
+    rows :: checked ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    row :: if rows.ty == {
+        .List(element) -> element
+        else -> {
+            &diagnostics.push(sema_error("E0112", args[0].span, "`data.schema` needs a typed row list, not `{type_name(rows.ty)}`", "a schema reads the row type of a typed list", "pass a `[Row]` value"))
+            return SemaDirectSpecialCheck{handled: true, value: None}
+        }
+    }
+    columns :: sema_data_schema_columns(row, environment, program, &scopes)
+    texts :: Type.List{element: Type.String}
+    name_exprs := [Expr]{}
+    type_exprs := [Expr]{}
+    name_values := [TExpr]{}
+    type_values := [TExpr]{}
+    loop column in columns {
+        &name_exprs.push(Expr.Str{parts: [StrPart]{StrPart.Lit{text: column.name}}, span: span, id: AST_NODE_GENERATED})
+        &type_exprs.push(Expr.Str{parts: [StrPart]{StrPart.Lit{text: column.type_name}}, span: span, id: AST_NODE_GENERATED})
+        &name_values.push(sema_call_http_core_string(column.name, span))
+        &type_values.push(sema_call_http_core_string(column.type_name, span))
+    }
+    record := sema_call_core_record("core.data", "schema", 1, span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    record.signature = CoreCallSignature{arity: 3, max_arity: 3, borrow_mask: [Bool]{true, true, true}}
+    source_args :: [CallArg]{args[0], sema_call_http_core_synthetic_arg(Expr.ListLit{elements: name_exprs, span: span, id: AST_NODE_GENERATED}, span), sema_call_http_core_synthetic_arg(Expr.ListLit{elements: type_exprs, span: span, id: AST_NODE_GENERATED}, span)}
+    typed :: [TExpr]{rows, sema_tree_node(texts, TExprKind.ListLit{values: name_values}, span), sema_tree_node(texts, TExprKind.ListLit{values: type_values}, span)}
+    result_type :: Type.List{element: Type.Named{name: sema_data_source_type_name(environment, program, "DataColumn")}}
+    result :: sema_data_core_emit(record, "core.data.schema", source_args, [Type]{rows.ty, texts, texts}, typed, [Type]{row}, result_type, span, expected, environment, program, &scopes, &state, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    SemaDirectSpecialCheck{handled: true, value: Val(result)}
+}
+
+fn sema_data_schema_columns(row: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> [(name: String, type_name: String)] {
+    single :: [(name: String, type_name: String)]{(name: "value", type_name: sema_data_schema_type_name(row))}
+    owner_name :: if row == {
+        .Named(name) | .Apply(name, _) -> name
+        else -> { return single }
+    }
+    owner_args :: if row == {
+        .Apply(_, args) -> args
+        else -> [Type]{}
+    }
+    owner := sema_expression_type_symbol(&scopes, environment, program, owner_name)
+    if owner == None -> owner = sema_expression_carrier_type_symbol(environment, program, owner_name)
+    owner_symbol :: owner ?? return single
+    definition :: sema_scope_declaration_struct(environment, program, owner_symbol.id) ?? return single
+    names :: loop parameter in definition.type_params -> parameter.name
+    columns := [(name: String, type_name: String)]{}
+    loop field in definition.fields {
+        if field.computed != None -> next
+        field_type :: sema_inference_substitute_type(sema_expression_field_owner_type(environment, program, owner_symbol.module_name, field.ty, names), names, owner_args)
+        &columns.push((name: field.name, type_name: sema_data_schema_type_name(field_type)))
+    }
+    columns
+}
+
+// A column's type as its row declares it, without module qualifiers.
+fn sema_data_schema_type_name(ty: Type) -> String Never! { type_name(type_unqualified_nominals(ty)) }

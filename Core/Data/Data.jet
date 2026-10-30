@@ -19,6 +19,8 @@ use core.encoding.csv as csv_codec
 use __core_encoding_stream as encoding_stream
 use core.crypto.[sha256]
 use core.sys as sys
+use core.db.[SQL, DBValue]
+use core.db.sql as sql_kernel
 module arrow
 
 module loader
@@ -352,10 +354,34 @@ struct Group<K, V> {
     value: V
 }
 
+// Query<T> is the deferred operation carrier: `__steps` is the plan and the
+// shared cell holds the computation that materializes the rows on collect.
+// Row-list queries that only filter and sort may be collected again; every
+// other computation (map, extrema, joins, grouped reducers) is one-shot and
+// derived filter/sort queries share that one-shot state.
+struct __QueryCell<T> {
+    run: fn() -> [T] DataError!
+}
+
+struct __QueryState {
+    consumed: Bool
+}
+
 struct Query<T> {
-    rows: [T]
-    sql: String
-    operations: [String]
+    __steps: [String]
+    __one_shot: Bool
+    __state: Shared<__QueryState>
+    __cell: Shared<__QueryCell<T>>
+}
+
+struct __QueryKeyCell<T, K> {
+    key: fn(T) -> K DataError!
+}
+
+// `query.group_by(key)`: the grouped carrier its count/sum/mean reducers read.
+struct DataGroupedQuery<T, K> {
+    __query: Query<T>
+    __key: Shared<__QueryKeyCell<T, K>>
 }
 
 struct DataTracked<T, K> {
@@ -665,6 +691,551 @@ fn track<T, K>(rows: [T], _key: fn(T) -> K) -> DataTracked<T, K> DataError! {
     Ok(DataTracked<T, K>{snapshot: snapshot_from_rows<T>(rows)})
 }
 
+fn __query_make<T>(steps: [String], one_shot: Bool, run: ^fn() -> [T] DataError!) -> Query<T> Never! {
+    Query<T>{__steps: steps, __one_shot: one_shot, __state: shared __QueryState{consumed: false}, __cell: shared __QueryCell<T>{run: ^run}}
+}
+
+fn __query_steps(steps: [String], step: String) -> [String] Never! {
+    out := steps.copy()
+    &out.push(step)
+    out
+}
+
+// The rows a query produces, without the output bound of `collect`; a
+// one-shot computation runs at most once.
+fn __query_rows<T>(query: Query<T>) -> [T] DataError! {
+    if query.__one_shot {
+        state := query.__state.guard_edit()
+        if state.value.consumed -> return Err(data_error(DataErrorKind.State, "query has already been collected", "query.collect"))
+        state.value.consumed = true
+    }
+    cell :: query.__cell.guard_read()
+    cell.value.run()
+}
+
+// `data.query(rows)`: a reusable scan of an in-memory row list.
+fn query<T>(rows: [T]) -> Query<T> Never! {
+    __query_make<T>([String]{"scan"}, false, () -> Ok(rows.copy()))
+}
+
+// `data.query(stream)`: a one-shot read of the stream's remaining rows.
+fn __query_stream<T>(source: DataStream<T>) -> Query<T> Never! {
+    __query_make<T>([String]{"stream"}, true, () -> {
+        reader := source.copy()
+        if reader.cancelled -> return Err(data_error(DataErrorKind.State, "stream was cancelled", "data.stream"))
+        limits := DataLimits.safe()
+        out := [T]{}
+        if reader.index < 0 -> reader.index = 0
+        loop reader.index < reader.items.len() {
+            if out.len() >= limits.max_output_rows -> return Err(data_error(DataErrorKind.Limit, "max_output_rows {limits.max_output_rows} exceeded", "collect"))
+            &out.push(reader.items[reader.index].copy())
+            reader.index = reader.index + 1
+        }
+        Ok(out)
+    })
+}
+
+// `data.query(tracked)` and `tracked.query()`: a reusable scan of the
+// tracked snapshot rows.
+fn __query_tracked<T, K>(tracked: DataTracked<T, K>) -> Query<T> Never! {
+    __query_make<T>([String]{"track"}, false, () -> Ok(tracked.snapshot.value.copy()))
+}
+
+fn __query_plan<T>(query: Query<T>) -> [String] Never! { query.__steps.copy() }
+
+fn __query_collect<T>(query: Query<T>) -> [T] DataError! {
+    rows :: __query_rows<T>(query) ?? return Err(err)
+    limits := DataLimits.safe()
+    if rows.len() > limits.max_output_rows -> return Err(data_error(DataErrorKind.Limit, "max_output_rows {limits.max_output_rows} exceeded", "query.collect"))
+    Ok(rows)
+}
+
+fn __query_filter<T>(query: Query<T>, predicate: ^fn(T) -> Bool) -> Query<T> Never! {
+    __query_make<T>(__query_steps(query.__steps, "filter"), false, () -> {
+        rows :: __query_rows<T>(query) ?? return Err(err)
+        out := [T]{}
+        loop row in rows {
+            keep :: predicate(row.copy()) ?? return Err(data_error(DataErrorKind.State, "filter callback failed", "query.filter"))
+            if keep -> &out.push(row.copy())
+        }
+        Ok(out)
+    })
+}
+
+// A stable sort by the String key, bounded by `max_sort_rows`.
+fn __query_sort_by<T>(query: Query<T>, key: ^fn(T) -> String) -> Query<T> Never! {
+    __query_make<T>(__query_steps(query.__steps, "sort_by"), false, () -> {
+        rows :: __query_rows<T>(query) ?? return Err(err)
+        limits := DataLimits.safe()
+        if rows.len() > limits.max_sort_rows -> return Err(data_error(DataErrorKind.Limit, "max_sort_rows {limits.max_sort_rows} exceeded", "query.sort_by"))
+        keys := [String]{}
+        loop row in rows {
+            text :: key(row.copy()) ?? return Err(data_error(DataErrorKind.State, "sort key callback failed", "query.sort_by"))
+            &keys.push(text)
+        }
+        out := [T]{}
+        loop index in __query_merge_order(keys, false, false) -> &out.push(rows[index].copy())
+        Ok(out)
+    })
+}
+
+// Whether position `left` stays before position `right`. `sort_by` compares
+// its String keys and keeps equal keys in row order. An SQL ORDER BY compares
+// two numeric cells as numbers and any other pair as text, breaks ties by row
+// position, and reverses that whole order when descending.
+fn __query_order_before(keys: [String], left: Int, right: Int, sql_order: Bool, descending: Bool) -> Bool Never! {
+    if !sql_order -> return keys[left] <= keys[right]
+    order := 0
+    left_number :: __query_number(keys[left])
+    right_number :: __query_number(keys[right])
+    numeric := false
+    if left_number == .Val(a) {
+        if right_number == .Val(b) {
+            numeric = true
+            if a < b -> order = -1
+            if a > b -> order = 1
+        }
+    }
+    if !numeric {
+        if keys[left] < keys[right] -> order = -1
+        if keys[left] > keys[right] -> order = 1
+    }
+    if order == 0 -> order = if left < right -> -1 else -> 1
+    if descending -> order = -order
+    order < 0
+}
+
+fn __query_number(text: String) -> Float? Never! { Val(Float.parse(text) ?? return None) }
+
+// A bottom-up merge sort of the key positions.
+fn __query_merge_order(keys: [String], sql_order: Bool, descending: Bool) -> [Int] Never! {
+    count :: keys.len()
+    order := [Int]{}
+    loop index in 0..<count -> &order.push(index)
+    width := 1
+    loop width < count {
+        merged := [Int]{}
+        start := 0
+        loop start < count {
+            middle := start + width
+            if middle > count -> middle = count
+            end := start + width * 2
+            if end > count -> end = count
+            left := start
+            right := middle
+            loop left < middle || right < end {
+                take_left := right >= end
+                if !take_left && left < middle -> take_left = __query_order_before(keys, order[left], order[right], sql_order, descending)
+                if take_left {
+                    &merged.push(order[left])
+                    left = left + 1
+                } else {
+                    &merged.push(order[right])
+                    right = right + 1
+                }
+            }
+            start = end
+        }
+        order = merged
+        width = width * 2
+    }
+    order
+}
+
+fn __query_map<T, U>(query: Query<T>, mapper: ^fn(T) -> U) -> Query<U> Never! {
+    __query_make<U>(__query_steps(query.__steps, "map"), true, () -> {
+        rows :: __query_rows<T>(query) ?? return Err(err)
+        out := [U]{}
+        loop row in rows {
+            value :: mapper(row.copy()) ?? return Err(data_error(DataErrorKind.State, "map callback failed", "query.map"))
+            &out.push(value)
+        }
+        Ok(out)
+    })
+}
+
+// The first minimum or maximum key in row order; an empty query has none.
+fn __query_extreme<T, V: Comparable>(query: Query<T>, key: ^fn(T) -> V, maximum: Bool) -> Query<V> Never! {
+    step :: if maximum -> "max" else -> "min"
+    operation :: "query.{step}"
+    __query_make<V>(__query_steps(query.__steps, step), true, () -> {
+        rows :: __query_rows<T>(query) ?? return Err(err)
+        selected := [V]{}
+        loop row in rows {
+            candidate :: key(row.copy()) ?? return Err(data_error(DataErrorKind.State, "extreme key callback failed", operation))
+            if selected.len() == 0 {
+                &selected.push(candidate)
+            } else {
+                replace :: if maximum -> candidate > selected[0] else -> candidate < selected[0]
+                if replace -> selected[0] = candidate
+            }
+        }
+        if selected.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "empty query has no extreme", operation))
+        Ok(selected)
+    })
+}
+
+fn __query_min<T, V: Comparable>(query: Query<T>, key: ^fn(T) -> V) -> Query<V> Never! { __query_extreme<T, V>(query, ^key, false) }
+
+fn __query_max<T, V: Comparable>(query: Query<T>, key: ^fn(T) -> V) -> Query<V> Never! { __query_extreme<T, V>(query, ^key, true) }
+
+fn __query_inner_join<T, U>(left: Query<T>, right: Query<U>, left_key: ^fn(T) -> String, right_key: ^fn(U) -> String) -> Query<DataJoin<T, U>> Never! {
+    __query_make<DataJoin<T, U>>(__query_steps(left.__steps, "inner_join"), true, () -> {
+        left_rows :: __query_rows<T>(left) ?? return Err(err)
+        right_rows :: __query_rows<U>(right) ?? return Err(err)
+        inner_join<T, U>(left_rows, right_rows, left_key, right_key)
+    })
+}
+
+fn __query_left_join<T, U>(left: Query<T>, right: Query<U>, left_key: ^fn(T) -> String, right_key: ^fn(U) -> String) -> Query<DataJoin<T, U?>> Never! {
+    __query_make<DataJoin<T, U?>>(__query_steps(left.__steps, "left_join"), true, () -> {
+        left_rows :: __query_rows<T>(left) ?? return Err(err)
+        right_rows :: __query_rows<U>(right) ?? return Err(err)
+        left_join<T, U>(left_rows, right_rows, left_key, right_key)
+    })
+}
+
+fn __query_group_by<T, K>(query: Query<T>, key: ^fn(T) -> K) -> DataGroupedQuery<T, K> Never! {
+    DataGroupedQuery<T, K>{__query: query, __key: shared __QueryKeyCell<T, K>{key: (row: T) -> {
+        value :: key(row) ?? return Err(data_error(DataErrorKind.State, "group key callback failed", "query.group_by"))
+        Ok(value)
+    }}}
+}
+
+fn __group_steps<T, K>(grouped: DataGroupedQuery<T, K>, step: String) -> [String] Never! {
+    __query_steps(__query_steps(grouped.__query.__steps, "group_by"), step)
+}
+
+// Groups come out in ascending key order (a stable sort of the first-seen
+// groups); reaching `max_groups` fails before a new group is retained.
+fn __group_find<K: Comparable>(keys: [K], key: K) -> Int Never! {
+    loop index in 0..<keys.len() {
+        if (keys[index] <=> key) == Ordering.Equal -> return index
+    }
+    -1
+}
+
+fn __group_sorted<K: Comparable, V>(groups: [Group<K, V>]) -> [Group<K, V>] Never! {
+    out := groups
+    &out.sort_by((left: Group<K, V>, right: Group<K, V>) -> left.key <=> right.key)
+    out
+}
+
+fn __group_count<T, K: Comparable>(grouped: DataGroupedQuery<T, K>) -> Query<Group<K, Int>> Never! {
+    __query_make<Group<K, Int>>(__group_steps<T, K>(grouped, "count"), true, () -> {
+        rows :: __query_rows<T>(grouped.__query) ?? return Err(err)
+        limits := DataLimits.safe()
+        cell :: grouped.__key.guard_read()
+        keys := [K]{}
+        counts := [Int]{}
+        loop row in rows {
+            group_key :: cell.value.key(row.copy()) ?? return Err(err)
+            found :: __group_find<K>(keys, group_key)
+            if found >= 0 {
+                counts[found] = counts[found] + 1
+            } else {
+                if keys.len() >= limits.max_groups -> return Err(data_error(DataErrorKind.Limit, "max_groups {limits.max_groups} exceeded", "query.group_by.count"))
+                &keys.push(group_key)
+                &counts.push(1)
+            }
+        }
+        out := [Group<K, Int>]{}
+        loop index in 0..<keys.len() -> &out.push(Group<K, Int>{key: keys[index].copy(), value: counts[index]})
+        Ok(__group_sorted<K, Int>(out))
+    })
+}
+
+// Group sums keep the value callback's numeric type; each numeric domain
+// supplies its own addition to the shared reducer.
+fn __group_sum<T, K: Comparable, V>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> V, add: ^fn(V, V) -> V) -> Query<Group<K, V>> Never! {
+    __query_make<Group<K, V>>(__group_steps<T, K>(grouped, "sum"), true, () -> {
+        rows :: __query_rows<T>(grouped.__query) ?? return Err(err)
+        limits := DataLimits.safe()
+        cell :: grouped.__key.guard_read()
+        keys := [K]{}
+        totals := [V]{}
+        loop row in rows {
+            group_key :: cell.value.key(row.copy()) ?? return Err(err)
+            group_value :: value(row.copy()) ?? return Err(data_error(DataErrorKind.State, "group value callback failed", "query.group_by.sum"))
+            found :: __group_find<K>(keys, group_key)
+            if found >= 0 {
+                total :: add(totals[found].copy(), group_value) ?? return Err(data_error(DataErrorKind.Overflow, "group sum overflowed", "query.group_by.sum"))
+                totals[found] = total
+            } else {
+                if keys.len() >= limits.max_groups -> return Err(data_error(DataErrorKind.Limit, "max_groups {limits.max_groups} exceeded", "query.group_by.sum"))
+                &keys.push(group_key)
+                &totals.push(group_value)
+            }
+        }
+        if keys.len() > limits.max_output_rows -> return Err(data_error(DataErrorKind.Limit, "max_output_rows {limits.max_output_rows} exceeded", "query.group_by.sum"))
+        out := [Group<K, V>]{}
+        loop index in 0..<keys.len() -> &out.push(Group<K, V>{key: keys[index].copy(), value: totals[index].copy()})
+        Ok(__group_sorted<K, V>(out))
+    })
+}
+
+fn __group_sum_int<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> Int) -> Query<Group<K, Int>> Never! { __group_sum<T, K, Int>(grouped, ^value, (left: Int, right: Int) -> left + right) }
+fn __group_sum_float<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> Float) -> Query<Group<K, Float>> Never! { __group_sum<T, K, Float>(grouped, ^value, (left: Float, right: Float) -> left + right) }
+fn __group_sum_f32<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> F32) -> Query<Group<K, F32>> Never! { __group_sum<T, K, F32>(grouped, ^value, (left: F32, right: F32) -> left + right) }
+fn __group_sum_i8<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> I8) -> Query<Group<K, I8>> Never! { __group_sum<T, K, I8>(grouped, ^value, (left: I8, right: I8) -> left + right) }
+fn __group_sum_i16<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> I16) -> Query<Group<K, I16>> Never! { __group_sum<T, K, I16>(grouped, ^value, (left: I16, right: I16) -> left + right) }
+fn __group_sum_i32<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> I32) -> Query<Group<K, I32>> Never! { __group_sum<T, K, I32>(grouped, ^value, (left: I32, right: I32) -> left + right) }
+fn __group_sum_i64<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> I64) -> Query<Group<K, I64>> Never! { __group_sum<T, K, I64>(grouped, ^value, (left: I64, right: I64) -> left + right) }
+fn __group_sum_u8<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> U8) -> Query<Group<K, U8>> Never! { __group_sum<T, K, U8>(grouped, ^value, (left: U8, right: U8) -> left + right) }
+fn __group_sum_u16<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> U16) -> Query<Group<K, U16>> Never! { __group_sum<T, K, U16>(grouped, ^value, (left: U16, right: U16) -> left + right) }
+fn __group_sum_u32<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> U32) -> Query<Group<K, U32>> Never! { __group_sum<T, K, U32>(grouped, ^value, (left: U32, right: U32) -> left + right) }
+fn __group_sum_u64<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> U64) -> Query<Group<K, U64>> Never! { __group_sum<T, K, U64>(grouped, ^value, (left: U64, right: U64) -> left + right) }
+
+fn __group_mean<T, K: Comparable>(grouped: DataGroupedQuery<T, K>, value: ^fn(T) -> Float) -> Query<Group<K, Float>> Never! {
+    __query_make<Group<K, Float>>(__group_steps<T, K>(grouped, "mean"), true, () -> {
+        rows :: __query_rows<T>(grouped.__query) ?? return Err(err)
+        limits := DataLimits.safe()
+        cell :: grouped.__key.guard_read()
+        keys := [K]{}
+        totals := [Float]{}
+        counts := [Int]{}
+        loop row in rows {
+            group_key :: cell.value.key(row.copy()) ?? return Err(err)
+            group_value :: value(row.copy()) ?? return Err(data_error(DataErrorKind.State, "group value callback failed", "query.group_by.mean"))
+            if nonfinite(group_value) -> return Err(data_error(DataErrorKind.NonFinite, "group values must be finite", "query.group_by.mean"))
+            found :: __group_find<K>(keys, group_key)
+            if found >= 0 {
+                totals[found] = totals[found] + group_value
+                counts[found] = counts[found] + 1
+            } else {
+                if keys.len() >= limits.max_groups -> return Err(data_error(DataErrorKind.Limit, "max_groups {limits.max_groups} exceeded", "query.group_by.mean"))
+                &keys.push(group_key)
+                &totals.push(group_value)
+                &counts.push(1)
+            }
+        }
+        out := [Group<K, Float>]{}
+        loop index in 0..<keys.len() -> &out.push(Group<K, Float>{key: keys[index].copy(), value: totals[index] / Float{counts[index]}})
+        Ok(__group_sorted<K, Float>(out))
+    })
+}
+
+// `rows.query(sql)`: the rows encode to `Dyn` trees, the checked SQL binds its
+// one WHERE value after parsing, and every referenced field must exist in the
+// all-row schema. Only WHERE, ORDER BY and LIMIT select typed rows here; a
+// projection or grouping changes the row shape.
+fn __query_sql<T: Encode>(rows: [T], sql: SQL) -> Query<T> [FieldError]! {
+    trees := [Dyn]{}
+    loop row in rows -> &trees.push(row.encode())
+    spec :: __query_sql_spec(sql) ?? return Err(__query_field_error("{err}"))
+    core.db.sql.__validate_query_fields(spec, __query_sql_fields(trees), "analytics query") ?? return Err(__query_field_error("{err}"))
+    reshapes := spec.group_by.len() != 0 || spec.projection.len() != 1 || spec.projection[0] != sql_kernel.JetSQLSelectItem.Wildcard
+    loop item in spec.projection {
+        if item == .Aggregate(_, _, _) -> reshapes = true
+    }
+    if reshapes -> return Err(__query_field_error("SQL projection/grouping changes the row shape; use the Dyn query result"))
+    selected := [T]{}
+    loop index in __query_sql_select(trees, spec) -> &selected.push(rows[index].copy())
+    Ok(__query_make<T>([String]{"scan", "sql"}, false, () -> Ok(selected.copy())))
+}
+
+// The CSV header door of `csv.query`: every field the SQL names must be a
+// header column.
+fn __query_validate_fields(fields: [String], sql: SQL) [FieldError]! {
+    spec :: sql_kernel.parse_sql_query(sql.text) ?? return Err(__query_field_error("{err}"))
+    core.db.sql.__validate_query_fields(spec, fields, "analytics query") ?? return Err(__query_field_error("{err}"))
+    Ok()
+}
+
+fn __query_field_error(message: String) -> [FieldError] Never! {
+    [FieldError]{FieldError{path: "", reason: message}}
+}
+
+// The checked carrier binds after parsing, so a value cannot become query
+// syntax; the kernel has one scalar WHERE slot.
+fn __query_sql_spec(sql: SQL) -> sql_kernel.JetSQLQuery Err! {
+    spec := sql_kernel.parse_sql_query(sql.text) ?? return Err("{err}")
+    placeholder := false
+    if spec.filter == .Val(filter) -> placeholder = filter.value == "?"
+    if sql.values.len() == 0 {
+        if placeholder -> return Err("analytics query WHERE binding is missing")
+        return Ok(spec)
+    }
+    if !placeholder || sql.values.len() != 1 -> return Err("analytics query bindings do not match its WHERE value")
+    if sql.values[0] == .Blob(_) -> return Err("analytics query WHERE requires a scalar binding")
+    literal :: if sql.values[0] == {
+        .Null -> "null"
+        .Int(value) -> "{value}"
+        .Float(value) -> core.db.__float_text(value)
+        .Bool(value) -> "{value}"
+        .Text(value) -> "'{value.replace("'", "''")}'"
+        .Blob(_) -> ""
+    }
+    if spec.filter == .Val(filter) -> spec.filter = Val((field: filter.field.copy(), operator: filter.operator.copy(), value: literal))
+    Ok(spec)
+}
+
+// The all-row schema's field names: every object key of every row, and `$`
+// for a row that is not an object.
+fn __query_sql_fields(trees: [Dyn]) -> [String] Never! {
+    names := [String]{}
+    loop tree in trees {
+        if tree == .Object(_) {
+            loop entry in encoding_stream.object_entries(tree) -> &names.push(entry.key.copy())
+        } else {
+            &names.push("$")
+        }
+    }
+    names
+}
+
+// A cell's comparison text: text as is, scalars in their display form, null
+// empty, and any other value as compact JSON.
+fn __query_sql_cell(tree: Dyn, field: String) -> String? Never! {
+    if !(tree == .Object(_)) -> return None
+    loop entry in encoding_stream.object_entries(tree) {
+        if entry.key != field -> next
+        return Val(if entry.value == {
+            .Text(text) -> text.copy()
+            .Int(number) -> "{number}"
+            .Float(number) -> core.db.__float_text(number)
+            .Bool(flag) -> "{flag}"
+            .Null -> ""
+            else -> json_codec.to_string(entry.value) ?? ""
+        })
+    }
+    None
+}
+
+// WHERE keeps rows whose cell compares true, ORDER BY sorts the kept
+// positions, and LIMIT keeps a prefix.
+fn __query_sql_select(trees: [Dyn], spec: sql_kernel.JetSQLQuery) -> [Int] Never! {
+    selected := [Int]{}
+    loop index in 0..<trees.len() {
+        if spec.filter == .Val(filter) {
+            cell :: __query_sql_cell(trees[index], filter.field) ?? next
+            if !sql_kernel.compare_sql_cell(cell, filter.operator, filter.value) -> next
+        }
+        &selected.push(index)
+    }
+    if spec.order == .Val(order) {
+        keys := [String]{}
+        loop index in selected -> &keys.push(__query_sql_cell(trees[index], order.field) ?? "")
+        ordered := [Int]{}
+        loop position in __query_merge_order(keys, true, order.descending) -> &ordered.push(selected[position])
+        selected = ordered
+    }
+    if spec.limit == .Val(limit) {
+        kept := [Int]{}
+        loop index in selected {
+            if (U64.from_int(kept.len()) ?? U64{0}) >= limit -> break
+            &kept.push(index)
+        }
+        selected = kept
+    }
+    selected
+}
+
+// `data.schema(rows)`: sema passes the checked row type's column names and
+// type spellings (a scalar row is one `value` column), so empty rows still
+// describe their columns.
+fn __schema<T>(_rows: [T], names: [String], types: [String]) -> [DataColumn] Never! {
+    columns := [DataColumn]{}
+    loop index in 0..<names.len() {
+        &columns.push(DataColumn{id: __column_identity(names[index], types[index]), name: names[index].copy(), type_name: types[index].copy(), nullable: types[index].ends_with("?")})
+    }
+    columns
+}
+
+// A column identity: FNV-1a 64 over the length-delimited `name:type` key,
+// spelled `column-` and 16 lowercase hex digits.
+fn __column_identity(name: String, type_name: String) -> String Never! {
+    key :: "{name.bytes().len()}:{type_name}"
+    hash := U64{14695981039346656037}
+    loop byte in key.bytes() -> hash = (hash.bit_xor(U64.from_u8(byte))).wrapping_mul(U64{1099511628211})
+    digits :: "0123456789abcdef".bytes()
+    out := "column-".bytes()
+    loop index in 0..<16 {
+        shift :: U64.from_int(60 - index * 4) ?? U64{0}
+        &out.push(digits[Int.from_u64((hash >> shift).bit_and(U64{15}))])
+    }
+    String.from_bytes(out) ?? ""
+}
+
+#Codable
+struct __QueryTestSale {
+    item: String
+    cents: Int
+}
+
+fn __query_test_sales() -> [__QueryTestSale] Never! {
+    [__QueryTestSale]{__QueryTestSale{item: "tools", cents: 125}, __QueryTestSale{item: "core", cents: 40}, __QueryTestSale{item: "apps", cents: 80}, __QueryTestSale{item: "core", cents: 90}}
+}
+
+#Test("deferred queries filter, sort, map and group rows in key order") {
+    rows :: __query_test_sales()
+    big :: __query_filter<__QueryTestSale>(query<__QueryTestSale>(rows), sale -> sale.cents >= 80)
+    assert_eq(__query_plan<__QueryTestSale>(big), [String]{"scan", "filter"})
+    sorted :: __query_collect<__QueryTestSale>(__query_sort_by<__QueryTestSale>(big, sale -> sale.item)) ?? panic("sort_by")
+    assert_eq(sorted.len(), 3)
+    assert_eq(sorted[0].item, "apps")
+    assert_eq(sorted[1].cents, 90)
+    assert_eq(sorted[2].item, "tools")
+    assert_eq((__query_collect<__QueryTestSale>(big) ?? panic("reuse")).len(), 3)
+    mapped :: __query_map<__QueryTestSale, Int>(query<__QueryTestSale>(rows), sale -> sale.cents * 2)
+    assert_eq(__query_collect<Int>(mapped) ?? panic("map"), [Int]{250, 80, 160, 180})
+    if __query_collect<Int>(mapped) == .Ok(_) -> panic("a mapped query collects once")
+    assert_eq(__query_collect<Int>(__query_min<__QueryTestSale, Int>(query<__QueryTestSale>(rows), sale -> sale.cents)) ?? panic("min"), [Int]{40})
+    assert_eq(__query_collect<String>(__query_max<__QueryTestSale, String>(query<__QueryTestSale>(rows), sale -> sale.item)) ?? panic("max"), [String]{"tools"})
+    if __query_collect<Int>(__query_min<__QueryTestSale, Int>(query<__QueryTestSale>([__QueryTestSale]{}), sale -> sale.cents)) == .Ok(_) -> panic("an empty query has no minimum")
+    sums :: __query_collect<Group<String, Int>>(__group_sum_int<__QueryTestSale, String>(__query_group_by<__QueryTestSale, String>(query<__QueryTestSale>(rows), sale -> sale.item), sale -> sale.cents)) ?? panic("sum")
+    assert_eq(sums.len(), 3)
+    assert_eq(sums[0].key, "apps")
+    assert_eq(sums[2].key, "tools")
+    assert_eq(sums[1].key, "core")
+    assert_eq(sums[1].value, 130)
+    counts :: __query_collect<Group<String, Int>>(__group_count<__QueryTestSale, String>(__query_group_by<__QueryTestSale, String>(query<__QueryTestSale>(rows), sale -> sale.item))) ?? panic("count")
+    assert_eq(counts[1].value, 2)
+    means :: __query_collect<Group<String, Float>>(__group_mean<__QueryTestSale, String>(__query_group_by<__QueryTestSale, String>(query<__QueryTestSale>(rows), sale -> sale.item), sale -> Float{sale.cents})) ?? panic("mean")
+    assert_eq(means[1].value, 65.0)
+    joined :: __query_collect<DataJoin<__QueryTestSale, __QueryTestSale?>>(__query_left_join<__QueryTestSale, __QueryTestSale>(query<__QueryTestSale>(rows), query<__QueryTestSale>(sorted), sale -> sale.item, sale -> sale.item)) ?? panic("left_join")
+    assert_eq(joined.len(), 4)
+    assert(joined[1].right == None)
+}
+
+#Test("SQL row queries bind after parsing and keep typed rows") {
+    rows :: __query_test_sales()
+    selected :: __query_sql<__QueryTestSale>(rows, SQL{text: "SELECT * FROM sales WHERE cents > ? ORDER BY item", values: [DBValue]{.Int(50)}}) ?? panic("sql")
+    assert_eq(__query_plan<__QueryTestSale>(selected), [String]{"scan", "sql"})
+    got :: __query_collect<__QueryTestSale>(selected) ?? panic("collect")
+    assert_eq(got.len(), 3)
+    assert_eq(got[0].item, "apps")
+    assert_eq(got[1].cents, 90)
+    top :: __query_collect<__QueryTestSale>(__query_sql<__QueryTestSale>(rows, SQL{text: "SELECT * FROM sales ORDER BY cents DESC LIMIT 2", values: [DBValue]{}}) ?? panic("top")) ?? panic("top collect")
+    assert_eq(top.len(), 2)
+    assert_eq(top[0].cents, 125)
+    assert_eq(top[1].cents, 90)
+    quoted :: __query_collect<__QueryTestSale>(__query_sql<__QueryTestSale>(rows, SQL{text: "SELECT * FROM sales WHERE item = ?", values: [DBValue]{.Text("it's")}}) ?? panic("quoted")) ?? panic("quoted collect")
+    assert_eq(quoted.len(), 0)
+    refusals :: [String]{"SELECT * FROM sales WHERE missing = 1", "SELECT item FROM sales", "SELECT * FROM sales WHERE cents > ?"}
+    expected :: [String]{"analytics query references unknown field `missing`", "SQL projection/grouping changes the row shape; use the Dyn query result", "analytics query WHERE binding is missing"}
+    loop index in 0..<refusals.len() {
+        if __query_sql<__QueryTestSale>(rows, SQL{text: refusals[index], values: [DBValue]{}}) == {
+            .Ok(_) -> panic("SQL query should be refused")
+            .Err(errors) -> assert_eq(errors[0].reason, expected[index])
+        }
+    }
+    if __query_validate_fields([String]{"item"}, SQL{text: "SELECT * FROM sales ORDER BY cents", values: [DBValue]{}}) == {
+        .Ok(_) -> panic("an unknown header field should be refused")
+        .Err(errors) -> assert_eq(errors[0].reason, "analytics query references unknown field `cents`")
+    }
+}
+
+#Test("schema columns keep their order, nullability and column identity") {
+    columns :: __schema<Int>([Int]{}, [String]{"team", "minutes", "value"}, [String]{"String", "Float", "Int?"})
+    assert_eq(columns.len(), 3)
+    assert_eq(columns[0].id, "column-ed14b1fd5790663e")
+    assert_eq(columns[1].id, "column-52b8ce3bb4ec8b96")
+    assert_eq(columns[2].id, "column-727bb12c67abeab0")
+    assert(!columns[1].nullable)
+    assert(columns[2].nullable)
+}
+
 fn file<T>(path: String, format: String, limits: DataLimits) -> DataLoader<T> DataError! {
     make_loader<T>(DataLoaderKind.File, path, "", [String]{}, format, "local", limits)
 }
@@ -799,9 +1370,6 @@ fn snapshot<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSna
     }
     core.data.snapshot<T>(&loader)
 }
-
-
-fn schema<T>(rows: [T]) -> [DataColumn] Never! { core.data.schema<T>(rows) }
 
 fn count<T>(rows: [T]) -> Int Never! { rows.len() }
 
@@ -1132,40 +1700,50 @@ fn render<T>(plot: JetDataPlot<T>, backend: JetDataPlotBackend) -> JetDataPlotRe
     Ok(JetDataPlotRender{format: JetDataPlotRenderFormat.SVG, body: render_plot_svg(plan)})
 }
 
+// One row per group: the key, a bar of one `#` per count (at most 40), then
+// the count.
 fn bar_text(groups: [Group<String, Int>]) -> String DataError! {
-    labels := [String]{}
-    values := [Float]{}
+    _ :: validate_bar_counts(groups, "bar_text")
+    out := ""
     loop index in 0..<groups.len() {
         group :: groups[index]
-        if group.value < 0 {
-            return Err(data_error_at(DataErrorKind.InvalidArgument, "plot counts must be non-negative", "bar_text", index))
-        }
-        value := Float{group.value}
-        if nonfinite(value) {
-            return Err(data_error_at(DataErrorKind.Overflow, "plot count does not fit in a finite number", "bar_text", index))
-        }
-        &labels.push(group.key)
-        &values.push(value)
+        width :: if group.value > 40 -> 40 else -> group.value
+        bar := ""
+        loop _ in 0..<width -> bar = "{bar}#"
+        if index > 0 -> out = "{out}\n"
+        out = "{out}{group.key} | {bar} {group.value}"
     }
-    Ok(render_bar_text(labels, values))
+    Ok(out)
 }
 
+// A 320-wide chart: one 24px row per group, bars scaled to the largest count
+// over 200px, the count printed after each bar.
 fn bar_svg(groups: [Group<String, Int>]) -> String DataError! {
-    labels := [String]{}
-    values := [Float]{}
+    _ :: validate_bar_counts(groups, "bar_svg")
+    height :: 24 + 24 * groups.len()
+    maximum := 1
+    loop group in groups {
+        if group.value > maximum -> maximum = group.value
+    }
+    out := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"320\" height=\"{height}\" viewBox=\"0 0 320 {height}\"><rect width=\"320\" height=\"100%\" fill=\"white\"/>"
     loop index in 0..<groups.len() {
         group :: groups[index]
-        if group.value < 0 {
-            return Err(data_error_at(DataErrorKind.InvalidArgument, "plot counts must be non-negative", "bar_svg", index))
-        }
-        value := Float{group.value}
-        if nonfinite(value) {
-            return Err(data_error_at(DataErrorKind.Overflow, "plot count does not fit in a finite number", "bar_svg", index))
-        }
-        &labels.push(group.key)
-        &values.push(value)
+        y :: 18 + index * 24
+        bar_width :: math.round(Float{group.value} / Float{maximum} * Float{200.0})
+        out = "{out}<text x=\"8\" y=\"{y}\" font-family=\"monospace\" font-size=\"12\">{xml_escape(group.key)}</text>"
+        out = "{out}<rect x=\"96\" y=\"{y - 12}\" width=\"{bar_width}\" height=\"14\" fill=\"#2f6f73\"/>"
+        out = "{out}<text x=\"{104 + bar_width}\" y=\"{y}\" font-family=\"monospace\" font-size=\"12\">{group.value}</text>"
     }
-    Ok(render_bar_svg(labels, values))
+    Ok("{out}</svg>")
+}
+
+fn validate_bar_counts(groups: [Group<String, Int>], operation: String) DataError! {
+    loop index in 0..<groups.len() {
+        if groups[index].value < 0 {
+            return Err(data_error_at(DataErrorKind.InvalidArgument, "plot counts must be non-negative", operation, index))
+        }
+    }
+    Ok()
 }
 
 fn line_text(groups: [Group<String, Float>], options: DataLineOptions) -> String DataError! {
@@ -1697,11 +2275,13 @@ fn render_plot_svg(plan: JetDataPlotPlan) -> String Never! {
     render_bar_svg(plan.labels, plan.values)
 }
 
+// Points print with six decimals and SVG coordinates with three; -0.0 prints
+// as 0.
 fn render_line_options_text(labels: [String], values: [Float], options: DataLineOptions) -> String Never! {
     points := ""
     loop i in 0..<values.len() {
         if i > 0 -> points = "{points} -> "
-        points = "{points}{values[i]}"
+        points = "{points}{normalize_zero(values[i]):Fixed(6)}"
     }
     label_text := ""
     loop i in 0..<labels.len() {
@@ -1716,73 +2296,78 @@ fn render_line_options_text(labels: [String], values: [Float], options: DataLine
     out = "{out}line: style={options.style} color={options.color} markers={markers}"
     if options.reference != None {
         reference :: options.reference ?? Float{0.0}
-        out = "{out}\nreference: {reference}"
+        out = "{out}\nreference: {normalize_zero(reference):Fixed(6)}"
     }
     if options.legend.len() > 0 -> out = "{out}\nlegend: {options.legend}"
     out
 }
 
+// A 640x360 chart with a 64/24/44/52 margin. The value range spans the points
+// and the reference line; a flat range widens by one on each side.
 fn render_line_options_svg(labels: [String], values: [Float], options: DataLineOptions) -> String Never! {
-    n := labels.len()
-    w := 640
-    h := 360
-    left := 64
-    right := 24
-    top := 44
-    bottom := 52
-    plot_w := w - left - right
-    plot_h := h - top - bottom
+    n :: labels.len()
     minimum := Float{0.0}
-    maximum := Float{0.0}
+    maximum := Float{1.0}
+    if values.len() > 0 {
+        minimum = values[0]
+        maximum = values[0]
+    }
     loop value in values {
         if value < minimum -> minimum = value
         if value > maximum -> maximum = value
     }
     if options.reference != None {
         reference :: options.reference ?? Float{0.0}
+        if values.len() == 0 {
+            minimum = reference
+            maximum = reference
+        }
         if reference < minimum -> minimum = reference
         if reference > maximum -> maximum = reference
     }
-    if minimum == maximum {
+    if math.fabs(maximum - minimum) < 2.220446049250313e-16 {
         minimum = minimum - Float{1.0}
         maximum = maximum + Float{1.0}
     }
-    out := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{w}\" height=\"{h}\" viewBox=\"0 0 {w} {h}\"><title>{xml_escape(options.title)}</title><rect width=\"{w}\" height=\"{h}\" fill=\"white\"/>"
+    color :: xml_escape(options.color)
+    out := "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"640\" height=\"360\" viewBox=\"0 0 640 360\"><title>{xml_escape(options.title)}</title><rect width=\"640\" height=\"360\" fill=\"white\"/>"
+    out = "{out}<line x1=\"64\" y1=\"44\" x2=\"64\" y2=\"308\" stroke=\"#333\"/><line x1=\"64\" y1=\"308\" x2=\"616\" y2=\"308\" stroke=\"#333\"/>"
+    if options.reference != None {
+        reference :: options.reference ?? Float{0.0}
+        y :: line_plot_y(reference, minimum, maximum)
+        out = "{out}<line x1=\"64\" y1=\"{y:Fixed(3)}\" x2=\"616\" y2=\"{y:Fixed(3)}\" stroke=\"#888\" stroke-dasharray=\"4 4\"/>"
+    }
     points := ""
     loop i in 0..<n {
-        x := left + plot_w /% 2
-        if n > 1 -> x = left + plot_w * i /% (n - 1)
-        y := top + (Int.from_float((maximum - values[i]) * Float{plot_h} / (maximum - minimum)) ?? panic("plot coordinate must be finite"))
         if i > 0 -> points = "{points} "
-        points = "{points}{x},{y}"
+        points = "{points}{line_plot_x(i, n):Fixed(3)},{line_plot_y(values[i], minimum, maximum):Fixed(3)}"
     }
     dash := ""
     if options.style == "dashed" -> dash = " stroke-dasharray=\"8 5\""
     if options.style == "dotted" -> dash = " stroke-dasharray=\"2 5\""
-    out = "{out}<polyline fill=\"none\" stroke=\"{xml_escape(options.color)}\" stroke-width=\"2\"{dash} points=\"{points}\"/>"
+    out = "{out}<polyline fill=\"none\" stroke=\"{color}\" stroke-width=\"2\"{dash} points=\"{points}\"/>"
     if options.markers {
         loop i in 0..<n {
-            x := left + plot_w /% 2
-            if n > 1 -> x = left + plot_w * i /% (n - 1)
-            y := top + (Int.from_float((maximum - values[i]) * Float{plot_h} / (maximum - minimum)) ?? panic("plot coordinate must be finite"))
-            out = "{out}<circle cx=\"{x}\" cy=\"{y}\" r=\"4\" fill=\"{xml_escape(options.color)}\"/>"
+            out = "{out}<circle cx=\"{line_plot_x(i, n):Fixed(3)}\" cy=\"{line_plot_y(values[i], minimum, maximum):Fixed(3)}\" r=\"4\" fill=\"{color}\"/>"
         }
     }
-    if options.reference != None {
-        reference :: options.reference ?? Float{0.0}
-        y := top + (Int.from_float((maximum - reference) * Float{plot_h} / (maximum - minimum)) ?? panic("plot reference must be finite"))
-        out = "{out}<line x1=\"{left}\" y1=\"{y}\" x2=\"{w - right}\" y2=\"{y}\" stroke=\"#888\" stroke-dasharray=\"4 4\"/>"
-    }
     loop i in 0..<n {
-        x := left + plot_w /% 2
-        if n > 1 -> x = left + plot_w * i /% (n - 1)
-        out = "{out}<text x=\"{x}\" y=\"{h - bottom + 18}\" font-size=\"11\" text-anchor=\"middle\">{xml_escape(labels[i])}</text>"
+        out = "{out}<text x=\"{line_plot_x(i, n):Fixed(3)}\" y=\"326\" text-anchor=\"middle\" font-family=\"monospace\" font-size=\"11\">{xml_escape(labels[i])}</text>"
     }
-    out = "{out}<text x=\"{w /% 2}\" y=\"24\" text-anchor=\"middle\" font-size=\"16\">{xml_escape(options.title)}</text>"
-    out = "{out}<text x=\"{w /% 2}\" y=\"{h - 10}\" text-anchor=\"middle\" font-size=\"12\">{xml_escape(options.x_label)}</text>"
-    out = "{out}<text x=\"16\" y=\"{h /% 2}\" text-anchor=\"middle\" font-size=\"12\">{xml_escape(options.y_label)}</text>"
-    if options.legend.len() > 0 -> out = "{out}<text x=\"{w - right - 120}\" y=\"{top - 12}\" fill=\"{xml_escape(options.color)}\">{xml_escape(options.legend)}</text>"
+    out = "{out}<text x=\"320\" y=\"24\" text-anchor=\"middle\" font-family=\"sans-serif\" font-size=\"16\">{xml_escape(options.title)}</text>"
+    out = "{out}<text x=\"320\" y=\"350\" text-anchor=\"middle\" font-family=\"sans-serif\" font-size=\"12\">{xml_escape(options.x_label)}</text>"
+    out = "{out}<text x=\"16\" y=\"180\" text-anchor=\"middle\" transform=\"rotate(-90 16 180)\" font-family=\"sans-serif\" font-size=\"12\">{xml_escape(options.y_label)}</text>"
+    if options.legend.len() > 0 -> out = "{out}<text x=\"496\" y=\"32\" font-family=\"sans-serif\" font-size=\"12\" fill=\"{color}\">{xml_escape(options.legend)}</text>"
     "{out}</svg>"
+}
+
+fn line_plot_x(index: Int, count: Int) -> Float Never! {
+    if count <= 1 -> return Float{340.0}
+    Float{64.0} + Float{552.0} * Float{index} / Float{count - 1}
+}
+
+fn line_plot_y(value: Float, minimum: Float, maximum: Float) -> Float Never! {
+    Float{44.0} + (maximum - value) / (maximum - minimum) * Float{264.0}
 }
 
 fn xml_escape(text: String) -> String Never! {
