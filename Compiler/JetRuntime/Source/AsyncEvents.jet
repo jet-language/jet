@@ -1,0 +1,477 @@
+// Scheduler-backed typed events. One meaning with the Rust reference
+// crates/jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs:
+// JetDispatchReport :893-947, JetAsyncEntry :991-1003, JetAsyncEvent
+// :1015-1500. An AsyncEvent is shared across threads: every core field
+// below moves under the core's mutex, and the counts of cores, entries and
+// reports are atomic.
+//
+// AsyncCore160: refs0 owners8 lock16 listeners{len24 cap32 data40}
+//   queued{len48 cap56 data64} blocked{len72 cap80 data88} running96
+//   closed104 cancelled112 capacity120 overflow128 failure136 sequence144
+//   next_id152
+//   refs counts the handles, entries and scopes holding the core; owners
+//   counts the handles (Rust's owner Arc): the last owner hard-cancels.
+//   sequence is the futex word every state change bumps.
+// AsyncListener: the Listener64 layout (Events.jet); its refs move under the
+//   core lock. Its subscription has no EventCore (Rust JetSubscription::shared:
+//   the active flag is the state), so unsubscribe only clears the flag and
+//   the next registration or dispatch prunes the row.
+// AsyncEntry56: refs0 core8 phase16 payload24 meta32 report40 accepted48
+//   One emit_async: its task holds a count, and so does each list holding it.
+// DispatchReport32: refs0 accepted8 state16 delivered24
+
+ASYNC_PENDING :: I64{0}
+ASYNC_QUEUED :: I64{1}
+ASYNC_RUNNING :: I64{2}
+ASYNC_TERMINAL :: I64{3}
+
+// JetEventOverflow :822-826 and JetDispatchState :880-888 ordinals.
+ASYNC_BLOCK :: I64{0}
+ASYNC_DROP_NEWEST :: I64{1}
+ASYNC_DROP_OLDEST :: I64{2}
+DISPATCH_DELIVERED :: I64{0}
+DISPATCH_DROPPED_NEWEST :: I64{2}
+DISPATCH_DROPPED_OLDEST :: I64{3}
+DISPATCH_CLOSED :: I64{4}
+DISPATCH_CANCELLED :: I64{5}
+
+fn async_lock(core: I64) { sync_mutex_lock(core + I64{16}) }
+fn async_unlock(core: I64) { sync_mutex_unlock(core + I64{16}) }
+
+// Wakes every entry task waiting for its turn (Rust: each entry's wake slot).
+fn async_notify(core: I64) { sync_cond_notify_all(core + I64{144}) }
+
+// Waits, lock held, for the next state change; the lock is held again on
+// return. The wait is a blocking one for the scheduler's compensation.
+fn async_wait(core: I64) {
+    before :: sync_load(core + I64{144})
+    async_unlock(core)
+    scheduler_blocking_wait_enter()
+    _ := sync_wait(core + I64{144}, before, I64{-1})
+    scheduler_blocking_wait_leave()
+    async_lock(core)
+}
+
+// ---- DispatchReport --------------------------------------------------------
+
+fn dispatch_report_new(accepted: Bool, state: I64, delivered: I64) -> I64 {
+    report :: jet_rt_alloc(I64{32}, I64{8})
+    sync_store(report, I64{1})
+    sync_store(report + I64{8}, if accepted -> I64{1} else -> I64{0})
+    sync_store(report + I64{16}, state)
+    sync_store(report + I64{24}, delivered)
+    report
+}
+
+#Export(c) fn jet_rt_handle_clone_jet_dispatch_report(report: I64) -> I64 {
+    _ := sync_add(report, I64{1})
+    report
+}
+
+#Export(c) fn jet_rt_handle_drop_jet_dispatch_report(report: I64) {
+    if (report == I64{0}) -> return
+    if (sync_add(report, I64{-1}) == I64{1}) -> jet_rt_free(report, I64{32}, I64{8})
+}
+
+#Export(c) fn jet_dispatch_report_accepted(report: I64) -> Bool {
+    sync_load(report + I64{8}) != I64{0}
+}
+
+#Export(c) fn jet_dispatch_report_delivered_handlers(report: I64) -> I64 {
+    jet_int_owned_from_i64(sync_load(report + I64{24}))
+}
+
+// DispatchState is a payload-free program enum: its ordinal word.
+#Export(c) fn jet_dispatch_report_state(report: I64) -> I64 {
+    sync_load(report + I64{16})
+}
+
+// ---- AsyncEvent ------------------------------------------------------------
+
+// JetAsyncEvent::new :1055-1072 borrows its validated policy (Core source
+// rejects a capacity below 1 first); the FailurePolicy is its ordinal word.
+#Export(c) fn jet_async_event_new(policy: I64, failures: I64) -> I64 {
+    core :: jet_rt_alloc(I64{160}, I64{8})
+    coll_zero(core, I64{160})
+    sync_store(core, I64{1})
+    sync_store(core + I64{8}, I64{1})
+    sync_store(core + I64{120}, data_tree_word(policy + ASYNC_POLICY_CAPACITY))
+    sync_store(core + I64{128}, data_tree_word(policy + ASYNC_POLICY_OVERFLOW))
+    sync_store(core + I64{136}, failures)
+    core
+}
+
+fn async_core_retain(core: I64) { _ := sync_add(core, I64{1}) }
+
+// The last count frees the core: no entry or scope holds it any more, so
+// its queues are empty and only the listener rows remain.
+fn async_core_release(core: I64) {
+    if (sync_add(core, I64{-1}) != I64{1}) -> return
+    base :: core + I64{24}
+    length :: event_word(base)
+    data :: event_word(base + I64{16})
+    at := I64{0}
+    loop at < length {
+        event_listener_release(event_word(data + at * I64{8}))
+        at += I64{1}
+    }
+    event_words_free(data, event_word(base + I64{8}))
+    event_words_free(event_word(core + I64{64}), event_word(core + I64{56}))
+    event_words_free(event_word(core + I64{88}), event_word(core + I64{80}))
+    jet_rt_free(core, I64{160}, I64{8})
+}
+
+#Export(c) fn jet_rt_handle_clone_jet_async_event(core: I64) -> I64 {
+    _ := sync_add(core + I64{8}, I64{1})
+    async_core_retain(core)
+    core
+}
+
+// Drop for JetAsyncEvent :1040-1046: the last owner hard-cancels.
+#Export(c) fn jet_rt_handle_drop_jet_async_event(core: I64) {
+    if (core == I64{0}) -> return
+    if (sync_add(core + I64{8}, I64{-1}) == I64{1}) -> async_hard_cancel(core)
+    async_core_release(core)
+}
+
+// ---- Entries ---------------------------------------------------------------
+
+fn async_entry_retain(entry: I64) { _ := sync_add(entry, I64{1}) }
+
+fn async_entry_release(entry: I64) {
+    if (sync_add(entry, I64{-1}) != I64{1}) -> return
+    meta :: sync_load(entry + I64{32})
+    payload :: sync_load(entry + I64{24})
+    if (payload != I64{0}) -> coll_slot_free(payload, meta)
+    coll_meta_drop(meta)
+    jet_rt_handle_drop_jet_dispatch_report(sync_load(entry + I64{40}))
+    async_core_release(sync_load(entry + I64{8}))
+    jet_rt_free(entry, I64{56}, I64{8})
+}
+
+// Removes `entry` from the list at `base` and drops the list's count; the
+// caller holds its own count, so this is never the last.
+fn async_list_remove(base: I64, entry: I64) {
+    at := I64{0}
+    loop at < event_word(base) {
+        if (event_words_get(base, at) == entry) {
+            event_words_remove(base, at)
+            _ := sync_add(entry, I64{-1})
+            return
+        }
+        at += I64{1}
+    }
+}
+
+fn async_list_push(base: I64, entry: I64) {
+    async_entry_retain(entry)
+    event_words_push(base, entry)
+}
+
+// complete_entry :1271-1310, lock held: the entry turns terminal with its
+// report and its payload ends there; a terminal entry stays terminal.
+fn async_complete(entry: I64, accepted: Bool, state: I64, delivered: I64) {
+    if (sync_load(entry + I64{16}) == ASYNC_TERMINAL) -> return
+    sync_store(entry + I64{16}, ASYNC_TERMINAL)
+    sync_store(entry + I64{48}, if accepted -> I64{1} else -> I64{0})
+    sync_store(entry + I64{40}, dispatch_report_new(accepted, state, delivered))
+    payload :: sync_load(entry + I64{24})
+    sync_store(entry + I64{24}, I64{0})
+    if (payload != I64{0}) -> coll_slot_free(payload, sync_load(entry + I64{32}))
+}
+
+// hard_cancel_state :1316-1339: once; every queued and blocked entry ends
+// Cancelled (a queued one accepted).
+fn async_hard_cancel(core: I64) {
+    async_lock(core)
+    if (sync_load(core + I64{112}) != I64{0}) {
+        async_unlock(core)
+        return
+    }
+    sync_store(core + I64{112}, I64{1})
+    async_drain(core + I64{48}, true, DISPATCH_CANCELLED)
+    async_drain(core + I64{72}, false, DISPATCH_CANCELLED)
+    async_notify(core)
+    async_unlock(core)
+}
+
+// Completes and unlists every entry of the list at `base`, lock held.
+fn async_drain(base: I64, accepted: Bool, state: I64) {
+    length :: event_word(base)
+    data :: event_word(base + I64{16})
+    at := I64{0}
+    loop at < length {
+        entry :: event_word(data + at * I64{8})
+        async_complete(entry, accepted, state, I64{0})
+        _ := sync_add(entry, I64{-1})
+        at += I64{1}
+    }
+    event_store(base, I64{0})
+}
+
+// ---- Registration ----------------------------------------------------------
+
+// Keeps only listeners whose subscription is still active, lock held
+// (run_entry_inner :1477). A row's last count can drop here, which runs its
+// closure's release under the lock.
+fn async_prune_listeners(core: I64) {
+    base :: core + I64{24}
+    data :: event_word(base + I64{16})
+    kept := I64{0}
+    at := I64{0}
+    loop at < event_word(base) {
+        listener :: event_word(data + at * I64{8})
+        if event_sub_active(event_word(listener + I64{32})) {
+            event_store(data + kept * I64{8}, listener)
+            kept += I64{1}
+        } else {
+            event_listener_release(listener)
+        }
+        at += I64{1}
+    }
+    event_store(base, kept)
+}
+
+// JetAsyncEvent::add :1086-1128 (on / once / on_priority): the scope tracks
+// the subscription and the event's hard cancel; a cancelled scope returns
+// the subscription inactive and the handler is released unregistered.
+#Export(c) fn jet_async_event_listen(core: I64, scope: I64, priority: I64, once: I64, env: I64, invoke: I64, release: I64) -> I64 {
+    sub :: event_sub_new()
+    event_scope_track(scope, sub)
+    if !event_sub_active(sub) {
+        event_release_closure(env, release)
+        return sub
+    }
+    event_scope_track_hard_cancel(scope, core)
+    listener :: jet_rt_alloc(I64{64}, I64{8})
+    event_store(listener, I64{1})
+    event_store(listener + I64{16}, priority)
+    event_store(listener + I64{24}, if (once != I64{0}) -> I64{1} else -> I64{0})
+    event_store(listener + I64{32}, event_sub_retain(sub))
+    event_store(listener + I64{40}, env)
+    event_store(listener + I64{48}, invoke)
+    event_store(listener + I64{56}, release)
+    async_lock(core)
+    async_prune_listeners(core)
+    id :: sync_load(core + I64{152})
+    sync_store(core + I64{152}, id + I64{1})
+    event_store(listener + I64{8}, id)
+    event_words_push(core + I64{24}, listener)
+    async_unlock(core)
+    sub
+}
+
+// close :1500-1511: once; every blocked entry ends Closed, unaccepted.
+#Export(c) fn jet_async_event_close(core: I64) {
+    async_lock(core)
+    if (sync_load(core + I64{104}) == I64{0}) {
+        sync_store(core + I64{104}, I64{1})
+        async_drain(core + I64{72}, false, DISPATCH_CLOSED)
+        async_notify(core)
+    }
+    async_unlock(core)
+}
+
+fn async_count(core: I64, offset: I64) -> I64 {
+    async_lock(core)
+    count :: sync_load(core + offset)
+    async_unlock(core)
+    jet_int_owned_from_i64(count)
+}
+
+#Export(c) fn jet_async_event_queued_count(core: I64) -> I64 { async_count(core, I64{48}) }
+#Export(c) fn jet_async_event_running_count(core: I64) -> I64 { async_count(core, I64{96}) }
+#Export(c) fn jet_async_event_blocked_count(core: I64) -> I64 { async_count(core, I64{72}) }
+
+#Export(c) fn jet_async_event_listener_count(core: I64) -> I64 {
+    async_lock(core)
+    count :: event_active_listeners(core)
+    async_unlock(core)
+    jet_int_owned_from_i64(count)
+}
+
+// ---- Dispatch --------------------------------------------------------------
+
+// emit_async :1131-1140 and enqueue_async :1155-1250: the entry takes over
+// the moved payload's bytes at `payload` under a copy of `meta`, joins the
+// queue (or the blocked list, or ends at once by the overflow policy) and a
+// task runs it; the task's result is its DispatchReport under `report_meta`.
+#Export(c) fn jet_async_event_emit(core: I64, payload: I64, meta: I64, report_meta: I64) -> I64 {
+    entry :: jet_rt_alloc(I64{56}, I64{8})
+    coll_zero(entry, I64{56})
+    sync_store(entry, I64{1})
+    async_core_retain(core)
+    sync_store(entry + I64{8}, core)
+    owned :: coll_meta_copy(meta)
+    slot :: coll_slot_new(owned)
+    coll_copy(payload, slot, coll_payload(owned))
+    sync_store(entry + I64{24}, slot)
+    sync_store(entry + I64{32}, owned)
+    async_lock(core)
+    capacity :: sync_load(core + I64{120})
+    closed :: sync_load(core + I64{104}) != I64{0}
+    cancelled :: sync_load(core + I64{112}) != I64{0}
+    has_room :: event_word(core + I64{48}) < capacity
+    policy :: sync_load(core + I64{128})
+    if {
+        closed -> async_complete(entry, false, DISPATCH_CLOSED, I64{0})
+        cancelled -> async_complete(entry, false, DISPATCH_CANCELLED, I64{0})
+        has_room -> async_enqueue(core, entry)
+        policy == ASYNC_BLOCK -> async_list_push(core + I64{72}, entry)
+        policy == ASYNC_DROP_NEWEST -> async_complete(entry, false, DISPATCH_DROPPED_NEWEST, I64{0})
+        else -> {
+            if (event_word(core + I64{48}) != I64{0}) {
+                oldest :: event_words_get(core + I64{48}, I64{0})
+                event_words_remove(core + I64{48}, I64{0})
+                async_complete(oldest, true, DISPATCH_DROPPED_OLDEST, I64{0})
+                _ := sync_add(oldest, I64{-1})
+            }
+            async_enqueue(core, entry)
+        }
+    }
+    async_notify(core)
+    async_unlock(core)
+    jet_rt_native_task_spawn(I64{0}, rt_static_text(""), entry, rt_async_entry_invoke_address(), rt_async_entry_release_address(), report_meta)
+}
+
+fn async_enqueue(core: I64, entry: I64) {
+    sync_store(entry + I64{16}, ASYNC_QUEUED)
+    sync_store(entry + I64{48}, I64{1})
+    async_list_push(core + I64{48}, entry)
+}
+
+// RuntimeLower resolves these checked addresses through its sole intrinsic table.
+fn rt_async_entry_invoke_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+fn rt_async_entry_release_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
+// The entry task's body: its DispatchReport into the task's result slot.
+#Export(c) fn jet_async_entry_invoke(entry: I64, out: I64) -> I64 {
+    report :: async_entry_run(entry)
+    if (report != I64{0}) -> sync_store(out, report)
+    I64{0}
+}
+
+#Export(c) fn jet_async_entry_release(entry: I64) -> I64 {
+    async_entry_release(entry)
+    I64{0}
+}
+
+// run_entry_inner :1342-1497: the entry waits for its turn. A blocked entry
+// joins the queue once there is room (or ends Closed); the queue's front
+// runs when nothing else is running. Its due listeners are snapshot under
+// the lock in priority order (a once listener reserved by clearing its
+// flag), then each runs with the payload lent; the entry ends Delivered.
+// A stop delivered by a handler ends the task with no report.
+fn async_entry_run(entry: I64) -> I64 {
+    core :: sync_load(entry + I64{8})
+    async_lock(core)
+    loop {
+        phase :: sync_load(entry + I64{16})
+        if (phase == ASYNC_TERMINAL) {
+            report :: jet_rt_handle_clone_jet_dispatch_report(sync_load(entry + I64{40}))
+            async_unlock(core)
+            return report
+        }
+        if (sync_load(core + I64{112}) != I64{0}) {
+            async_complete(entry, sync_load(entry + I64{48}) != I64{0}, DISPATCH_CANCELLED, I64{0})
+            next
+        }
+        if (phase == ASYNC_PENDING) {
+            if (sync_load(core + I64{104}) != I64{0}) {
+                async_list_remove(core + I64{72}, entry)
+                async_complete(entry, false, DISPATCH_CLOSED, I64{0})
+                next
+            }
+            if (event_word(core + I64{48}) < sync_load(core + I64{120})) {
+                async_list_remove(core + I64{72}, entry)
+                async_enqueue(core, entry)
+            }
+        }
+        front :: event_word(core + I64{48}) != I64{0} && event_words_get(core + I64{48}, I64{0}) == entry
+        if (sync_load(entry + I64{16}) == ASYNC_QUEUED && sync_load(core + I64{96}) == I64{0} && front) {
+            return async_dispatch(core, entry)
+        }
+        async_wait(core)
+    }
+}
+
+// The listener rows due for one dispatch, lock held: each retained, ordered
+// by priority (highest first) then registration.
+fn async_snapshot(core: I64) -> I64 {
+    base :: core + I64{24}
+    length :: event_word(base)
+    snapshot :: jet_rt_alloc((length + I64{2}) * I64{8}, I64{8})
+    event_store(snapshot + I64{8}, length)
+    rows :: snapshot + I64{16}
+    count := I64{0}
+    at := I64{0}
+    loop at < length {
+        listener :: event_words_get(base, at)
+        sub :: event_word(listener + I64{32})
+        once :: event_word(listener + I64{24}) != I64{0}
+        due :: if once -> sync_cas(sub + I64{8}, I64{1}, I64{0}) == I64{1} else -> event_sub_active(sub)
+        if due {
+            event_listener_retain(listener)
+            event_snapshot_insert(rows, count, listener)
+            count += I64{1}
+        }
+        at += I64{1}
+    }
+    event_store(snapshot, count)
+    snapshot
+}
+
+// Runs the front entry, lock held on entry and released on return.
+fn async_dispatch(core: I64, entry: I64) -> I64 {
+    event_words_remove(core + I64{48}, I64{0})
+    sync_store(entry + I64{16}, ASYNC_RUNNING)
+    sync_store(core + I64{96}, I64{1})
+    snapshot :: async_snapshot(core)
+    payload :: sync_load(entry + I64{24})
+    sync_store(entry + I64{24}, I64{0})
+    async_notify(core)
+    async_unlock(core)
+    scratch :: jet_rt_alloc(I64{16}, I64{8})
+    coll_zero(scratch, I64{16})
+    delivered := I64{0}
+    stopped := false
+    count :: event_snapshot_count(snapshot)
+    at := I64{0}
+    loop at < count {
+        listener :: event_snapshot_get(snapshot, at)
+        once :: event_word(listener + I64{24}) != I64{0}
+        if !stopped && (once || event_sub_active(event_word(listener + I64{32}))) {
+            delivered += I64{1}
+            event_listener_call(listener, payload, scratch)
+            if (jet_rt_session_propagate() != I64{0}) -> stopped = true
+        }
+        at += I64{1}
+    }
+    jet_rt_free(scratch, I64{16}, I64{8})
+    coll_slot_free(payload, sync_load(entry + I64{32}))
+    async_lock(core)
+    at = I64{0}
+    loop at < count {
+        event_listener_release(event_snapshot_get(snapshot, at))
+        at += I64{1}
+    }
+    event_snapshot_free(snapshot)
+    sync_store(core + I64{96}, I64{0})
+    async_prune_listeners(core)
+    report := I64{0}
+    if stopped {
+        async_complete(entry, true, DISPATCH_CANCELLED, delivered)
+    } else {
+        async_complete(entry, true, DISPATCH_DELIVERED, delivered)
+        report = jet_rt_handle_clone_jet_dispatch_report(sync_load(entry + I64{40}))
+    }
+    // The queue's list count passes to the run, which ends here.
+    _ := sync_add(entry, I64{-1})
+    async_notify(core)
+    async_unlock(core)
+    report
+}

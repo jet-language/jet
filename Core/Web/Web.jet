@@ -10,8 +10,13 @@ package {
 }
 
 use core as core
+use core.http.[HTTPRequest, HTTPResponse]
+use core.http.server as http_server
 use core.encoding.json as live_json
 use core.reactive.loadable.[Loadable]
+// `web.form(Model, action: handler)` elaborates (in sema) into
+// core.web.forms values and calls, so core.web reaches that module.
+use core.web.forms.[WebFormTyped]
 
 // core.web — server-rendered apps on `core.http`.
 //
@@ -29,9 +34,645 @@ module store
 module table
 module virtual
 
-// App and WebPage are compiler-owned opaque graph carriers.
-// Their registered constructors (`web.app`, `web.page`) and builder methods
-// retain typed handlers; a plain record cannot stand in for that graph.
+// ── App: the full-stack application builder ──────────────────────────────
+//
+// `web.app()` starts one application graph; every builder call registers
+// into it and returns the builder, and copies share the graph. Sema writes
+// each registered handler as an adapter over `__AppCall`: the adapter
+// decodes the handler's typed route inputs (path parameters, the search
+// record or field, the loader data) and wraps its result as an `__AppReply`,
+// so the graph stores one handler shape. `serve` answers the graph over
+// `core.http.server`: each route is a GET page, each action, form or data
+// function a POST `/actions/<name>` server function, each mount a prefix,
+// and the first assets root `/assets`.
+
+/// A rendered page: its document title and its body markup.
+struct WebPage {
+    title: String
+    body: String
+}
+
+fn page(title: String, body: String) -> WebPage Never! { WebPage{title: title, body: body} }
+
+// One request into a handler adapter: the matched request and the route's
+// encoded loader data ("" when the route has no loader).
+struct __AppCall {
+    request: HTTPRequest
+    data: String
+}
+
+enum __AppReply {
+    Page(WebPage)
+    JSON(String)
+    Rejected(String)
+    Failed(String)
+}
+
+impl __AppCall {
+    fn __input<Target: Decode>(self, name: String) -> Target? { self.request.__route_input<Target>(name) }
+
+    fn __body<Target: Decode>(self) -[Net]> Target? Never! {
+        if self.request.json<Target>() == .Ok(value) -> return Val(value)
+        None
+    }
+
+    fn __data<Target: Decode>(self) -> Target? {
+        if self.data == "" -> return None
+        if live_json.decode<Target>(self.data) == .Ok(value) -> return Val(value)
+        None
+    }
+
+    fn __path(self) -> String Never! { self.request.path() }
+
+    fn __page(self, page: WebPage) -> __AppReply Never! { __AppReply.Page(page) }
+
+    fn __json<Value: Encode>(self, value: Value) -> __AppReply Never! {
+        text :: live_json.to_string(value.encode()) ?? return __AppReply.Failed("the handler result does not encode as JSON: {err}")
+        __AppReply.JSON(text)
+    }
+
+    fn __done(self) -> __AppReply Never! { __AppReply.JSON("null") }
+
+    fn __rejected(self, input: String) -> __AppReply Never! { __AppReply.Rejected("the {input} input is missing or does not decode") }
+
+    fn __failed(self, message: String) -> __AppReply Never! { __AppReply.Failed(message) }
+}
+
+struct __AppHandlerCell {
+    call: fn(__AppCall) -[Net, FS.Read]> __AppReply Err!
+}
+
+// A registered adapter. Copies share the one handler.
+struct __AppHandler {
+    __cell: Shared<__AppHandlerCell>
+}
+
+impl __AppHandler {
+    // A handler failure is the route's 500 answer, never the server's.
+    fn run(self, call: __AppCall) -[Net, FS.Read]> __AppReply Never! {
+        guard :: self.__cell.guard_read()
+        reply :: guard.value.call(call) ?? return __AppReply.Failed("the handler failed: {err}")
+        reply
+    }
+}
+
+fn __app_handler(call: ^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!) -> __AppHandler Never! {
+    __AppHandler{__cell: shared __AppHandlerCell{call: ^call}}
+}
+
+// One route and the facts its registration fixed. An empty identity string
+// is an absent boundary, loader or form.
+struct __AppRoute {
+    path: String
+    handler: __AppHandler
+    identity: String
+    binding: String
+    mode: String
+    explicit_mode: Bool
+    loader: __AppHandler?
+    loader_identity: String
+    loader_data_type: String
+    preload: Bool
+    pending: __AppHandler?
+    pending_identity: String
+    error: __AppHandler?
+    error_identity: String
+    form: String
+}
+
+// A server function (`handler` set) or the loader dependency row a loader
+// registration adds (`handler` None).
+struct __AppAction {
+    name: String
+    kind: String
+    handler: __AppHandler?
+    preload: Bool
+}
+
+struct __AppMount {
+    prefix: String
+    handler: __AppHandler
+    effects: [String]
+    security: [String]
+}
+
+struct __AppState {
+    routes: [__AppRoute]
+    actions: [__AppAction]
+    mounts: [__AppMount]
+    routes_from: [String]
+    not_found: __AppHandler?
+    security: [String]
+    assets: [String]
+    split: [String]
+    cache: [String]
+    a11y: [String]
+    adapters: [String]
+    hydration: String
+    // The render mode the next registered route takes.
+    mode: String
+    explicit_mode: Bool
+}
+
+/// One application graph: routes, server functions, mounts and policies.
+/// Copies share the one graph.
+struct App {
+    __state: Shared<__AppState>
+}
+
+fn app() -> App Never! {
+    App{__state: shared __AppState{
+        routes: [__AppRoute]{},
+        actions: [__AppAction]{},
+        mounts: [__AppMount]{},
+        routes_from: [String]{},
+        not_found: None,
+        security: [String]{},
+        assets: [String]{},
+        split: [String]{},
+        cache: [String]{},
+        a11y: [String]{},
+        adapters: [String]{},
+        hydration: "dev-overlay",
+        mode: "csr",
+        explicit_mode: false,
+    }}
+}
+
+impl App {
+    // `route`, `page` and `layout` land here with the handler's adapter, its
+    // name and its typed input binding.
+    fn __route(self, path: String, handler: ^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String, binding: String) -> App Never! {
+        guard := self.__state.guard_edit()
+        mode :: guard.value.mode.copy()
+        explicit :: guard.value.explicit_mode
+        route :: __AppRoute{
+            path: path, handler: __app_handler(^handler), identity: identity, binding: binding,
+            mode: mode, explicit_mode: explicit,
+            loader: None, loader_identity: "", loader_data_type: "", preload: false,
+            pending: None, pending_identity: "", error: None, error_identity: "", form: "",
+        }
+        &guard.value.routes.push(route)
+        self.copy()
+    }
+
+    // `pending`, `error` and `not_found`. A pending or error boundary belongs
+    // to the route registered just before it; not-found answers every
+    // unmatched navigation.
+    fn __boundary(self, kind: String, handler: ^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String) -> App Never! {
+        guard := self.__state.guard_edit()
+        boundary :: __app_handler(^handler)
+        if kind == "not_found" {
+            guard.value.not_found = Val(boundary)
+            return self.copy()
+        }
+        last :: guard.value.routes.len() - 1
+        if last < 0 -> panic("app boundary `{identity}` has no preceding route")
+        route := guard.value.routes[last].copy()
+        if kind == "pending" {
+            route.pending = Val(boundary)
+            route.pending_identity = identity
+        } else {
+            route.error = Val(boundary)
+            route.error_identity = identity
+        }
+        guard.value.routes[last] = route
+        self.copy()
+    }
+
+    // `action`, `form` and `data`: one POST server function each. The first
+    // action or form after a route is that route's form.
+    fn __action(self, kind: String, name: String, handler: ^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!) -> App Never! {
+        guard := self.__state.guard_edit()
+        last :: guard.value.routes.len() - 1
+        if last >= 0 && (kind == "action" || kind == "form") && guard.value.routes[last].form == "" {
+            route := guard.value.routes[last].copy()
+            route.form = name.copy()
+            guard.value.routes[last] = route
+        }
+        &guard.value.actions.push(__AppAction{name: name, kind: kind, handler: Val(__app_handler(^handler)), preload: false})
+        self.copy()
+    }
+
+    // `loader(route_handler, loader, preload)`: the route registered just
+    // before it loads its data through `handler` first.
+    fn __loader(self, handler: ^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String, data_type: String, preload: Bool) -> App Never! {
+        guard := self.__state.guard_edit()
+        last :: guard.value.routes.len() - 1
+        if last < 0 -> panic("app loader `{identity}` has no preceding route")
+        route := guard.value.routes[last].copy()
+        route.loader = Val(__app_handler(^handler))
+        route.loader_identity = identity
+        route.loader_data_type = data_type
+        route.preload = preload
+        dependency :: route.identity.copy()
+        guard.value.routes[last] = route
+        &guard.value.actions.push(__AppAction{name: dependency, kind: "loader", handler: None, preload: preload})
+        self.copy()
+    }
+
+    // `mount(prefix, handler[, effect[, policy]])`; "" is an absent effect or
+    // policy.
+    fn __mount(self, prefix: String, handler: ^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, effect_name: String, policy: String) -> App Never! {
+        effects := [String]{}
+        if effect_name != "" -> &effects.push(effect_name)
+        security := [String]{}
+        if policy != "" -> &security.push(policy)
+        guard := self.__state.guard_edit()
+        &guard.value.mounts.push(__AppMount{prefix: prefix, handler: __app_handler(^handler), effects: effects, security: security})
+        self.copy()
+    }
+
+    fn routes(self, from: String) -> App Never! {
+        guard := self.__state.guard_edit()
+        &guard.value.routes_from.push(from)
+        self.copy()
+    }
+
+    fn csr(self) -> App Never! { __app_mode(self, "csr") }
+    fn ssr(self) -> App Never! { __app_mode(self, "ssr") }
+    fn ssg(self) -> App Never! { __app_mode(self, "ssg") }
+    fn stream(self) -> App Never! { __app_mode(self, "stream") }
+    fn streaming(self) -> App Never! { __app_mode(self, "stream") }
+    fn island(self) -> App Never! { __app_mode(self, "island") }
+
+    fn hydration_dev(self) -> App Never! {
+        guard := self.__state.guard_edit()
+        guard.value.hydration = "dev-overlay"
+        self.copy()
+    }
+
+    fn hydration_release(self) -> App Never! {
+        guard := self.__state.guard_edit()
+        guard.value.hydration = "release-keep-server"
+        self.copy()
+    }
+
+    fn security(self, policy: String) -> App Never! {
+        guard := self.__state.guard_edit()
+        &guard.value.security.push(policy)
+        self.copy()
+    }
+
+    fn assets(self, path: String) -> App Never! {
+        guard := self.__state.guard_edit()
+        &guard.value.assets.push(path)
+        self.copy()
+    }
+
+    fn split(self, name: String) -> App Never! {
+        guard := self.__state.guard_edit()
+        &guard.value.split.push(name)
+        self.copy()
+    }
+
+    fn code_split(self, name: String) -> App Never! { self.split(name) }
+
+    fn cache(self, policy: String) -> App Never! {
+        guard := self.__state.guard_edit()
+        &guard.value.cache.push(policy)
+        self.copy()
+    }
+
+    fn a11y(self, policy: String) -> App Never! {
+        guard := self.__state.guard_edit()
+        &guard.value.a11y.push(policy)
+        self.copy()
+    }
+
+    fn adapter(self, name: String) -> App Never! {
+        guard := self.__state.guard_edit()
+        &guard.value.adapters.push(name)
+        self.copy()
+    }
+
+    fn facts_json(self) -> String Never! { __app_facts_json(self) }
+
+    // Serve on 127.0.0.1 until the process stops: on `JET_APP_PORT` when it
+    // holds a port, else on `port` (8080 for `serve()`).
+    fn serve(self, port: Int{8080}) Never! -[Env, Net, FS.Read, Time]> { __app_serve(self, __app_port(port)) }
+
+    fn serve_on(self, port: Int) Never! -[Env, Net, FS.Read, Time]> { __app_serve(self, __app_port(port)) }
+}
+
+fn __app_mode(app: App, mode: String) -> App Never! {
+    guard := app.__state.guard_edit()
+    guard.value.mode = mode
+    guard.value.explicit_mode = true
+    app.copy()
+}
+
+fn __app_state(app: App) -> __AppState Never! {
+    guard :: app.__state.guard_read()
+    guard.value.copy()
+}
+
+fn __app_port(fallback: Int) -> Int Never! {
+    raw :: core.sys.__env_value("JET_APP_PORT") ?? return fallback
+    text :: String.from_bytes(raw) ?? return fallback
+    port :: Int.parse(text) ?? return fallback
+    if port < 1 || port > 65535 -> return fallback
+    port
+}
+
+fn __app_serve(app: App, port: Int) Never! -[Net, FS.Read, Time]> {
+    if port < 1 || port > 65535 -> panic("web app port {port} is out of range")
+    state :: __app_state(app)
+    mux :: http_server.mux()
+    loop route in state.routes {
+        target :: app.copy()
+        path :: route.path.copy()
+        mux.__route("GET", route.path, (request: HTTPRequest) -> Ok(__app_page_response(target, path, request)))
+    }
+    loop action in state.actions {
+        if action.handler == .Val(handler) {
+            mux.__route("POST", "/actions/{action.name}", (request: HTTPRequest) -> Ok(__app_action_response(handler, request)))
+        }
+    }
+    loop mount in state.mounts {
+        base :: __app_trim_slashes(mount.prefix)
+        handler :: mount.handler.copy()
+        mux.__route("GET", "{base}/*jet_app_mount_path", (request: HTTPRequest) -> Ok(__app_mount_response(handler, request)))
+        mux.__route("POST", "{base}/*jet_app_mount_path", (request: HTTPRequest) -> Ok(__app_mount_response(handler, request)))
+    }
+    if state.assets.len() > 0 -> http_server.static_files(mux, "/assets", state.assets[0])
+    fallback :: app.copy()
+    mux.__route("GET", "/*jet_app_unmatched", (request: HTTPRequest) -> Ok(__app_not_found_response(fallback, request)))
+    server :: http_server.__bind_entry("127.0.0.1:{port}", mux, None, None) ?? panic("web app could not listen on 127.0.0.1:{port}: {err}")
+    _ :: server.serve() ?? panic("web app server failed: {err}")
+}
+
+fn __app_route(app: App, path: String) -> __AppRoute? Never! {
+    guard :: app.__state.guard_read()
+    loop route in guard.value.routes {
+        if route.path == path -> return Val(route.copy())
+    }
+    None
+}
+
+// A route request: run the route's loader, then its handler with the
+// loader's data; a failure renders the route's error boundary.
+fn __app_page_response(app: App, path: String, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    route :: __app_route(app, path) ?? return __app_html(500, WebPage{title: "Route error", body: "route `{path}` is not registered on the app graph"}, "")
+    call := __AppCall{request: request, data: ""}
+    if route.loader == .Val(loader) {
+        if loader.run(call) == {
+            .JSON(text) -> call.data = text
+            .Rejected(message) -> return __app_boundary(400, route.error, "Route error", message, call)
+            .Failed(message) -> return __app_boundary(500, route.error, "Route error", message, call)
+            .Page(_) -> return __app_boundary(500, route.error, "Route error", "the loader of `{path}` rendered a page instead of data", call)
+        }
+    }
+    if route.handler.run(call) == {
+        .Page(rendered) -> __app_html(200, rendered, __app_route_data(path, request.path, call.data))
+        .Rejected(message) -> __app_boundary(400, route.error, "Route error", message, call)
+        .Failed(message) -> __app_boundary(500, route.error, "Route error", message, call)
+        .JSON(_) -> __app_boundary(500, route.error, "Route error", "the handler of `{path}` returned data instead of a page", call)
+    }
+}
+
+fn __app_not_found_response(app: App, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    state :: __app_state(app)
+    __app_boundary(404, state.not_found, "Not found", "no web route matches `{request.path}`", __AppCall{request: request, data: ""})
+}
+
+// The boundary's page, or a page of `title` and `message` without one; a
+// boundary that fails itself shows both messages.
+fn __app_boundary(status: Int, boundary: __AppHandler?, title: String, message: String, call: __AppCall) -[Net, FS.Read]> HTTPResponse Never! {
+    handler :: boundary ?? return __app_html(status, WebPage{title: title, body: message}, "")
+    if handler.run(call) == {
+        .Page(rendered) -> __app_html(status, rendered, "")
+        .Rejected(failure) -> __app_html(status, WebPage{title: title, body: "{message}\n{failure}"}, "")
+        .Failed(failure) -> __app_html(status, WebPage{title: title, body: "{message}\n{failure}"}, "")
+        .JSON(_) -> __app_html(status, WebPage{title: title, body: message}, "")
+    }
+}
+
+fn __app_html(status: Int, rendered: WebPage, route_data: String) -> HTTPResponse Never! {
+    document :: "<!doctype html><html><head><meta charset=\"utf-8\"><title>{rendered.title}</title></head><body>{rendered.body}{route_data}</body></html>"
+    fields :: core.http.headers_set(core.http.headers(), "content-type", "text/html; charset=utf-8")
+    payload :: core.http.body_text(document)
+    http_server.response_body(status, ^payload, ^fields)
+}
+
+// The route identity and navigation status a served page publishes; the
+// body is the route's encoded loader data, `null` without a loader.
+fn __app_route_data(route: String, url: String, data: String) -> String Never! {
+    body :: if data == "" -> "null" else -> __app_script_safe(data)
+    "<script type=\"application/json\" id=\"jet-route-data\" data-route=\"{__app_html_attr(route)}\" data-url=\"{__app_html_attr(url)}\" data-status=\"ready\">{body}</script>"
+}
+
+// A server function call: same-origin POST only; the JSON result answers
+// with a content security policy.
+fn __app_action_response(handler: __AppHandler, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    if !__app_same_origin(request) -> return __app_json(403, __app_error_json("cross-origin server function call"))
+    if handler.run(__AppCall{request: request, data: ""}) == {
+        .JSON(text) -> __app_json(200, text)
+        .Rejected(message) -> __app_json(400, __app_error_json(message))
+        .Failed(message) -> __app_json(500, __app_error_json(message))
+        .Page(_) -> __app_json(500, __app_error_json("a server function rendered a page"))
+    }
+}
+
+fn __app_mount_response(handler: __AppHandler, request: HTTPRequest) -[Net, FS.Read]> HTTPResponse Never! {
+    if handler.run(__AppCall{request: request, data: ""}) == {
+        .JSON(text) -> __app_json(200, text)
+        .Page(rendered) -> __app_html(200, rendered, "")
+        .Rejected(message) -> __app_json(400, __app_error_json(message))
+        .Failed(message) -> __app_json(500, __app_error_json(message))
+    }
+}
+
+fn __app_json(status: Int, text: String) -> HTTPResponse Never! {
+    typed :: core.http.headers_set(core.http.headers(), "content-type", "application/json")
+    fields :: core.http.headers_set(typed, "content-security-policy", "default-src 'self'")
+    payload :: core.http.body_text(text)
+    http_server.response_body(status, ^payload, ^fields)
+}
+
+fn __app_error_json(message: String) -> String Never! { "{{\"error\":{__app_json_string(message)}}}" }
+
+// A request without an Origin header is same-origin; one with it must name
+// the Host it was sent to.
+fn __app_same_origin(request: HTTPRequest) -> Bool Never! {
+    origin :: request.header("origin") ?? return true
+    host :: request.header("host") ?? return false
+    plain :: "http://{host}"
+    secure :: "https://{host}"
+    origin == plain || origin == secure
+}
+
+fn __app_trim_slashes(prefix: String) -> String Never! {
+    raw :: prefix.bytes()
+    end := raw.len()
+    loop end > 0 && raw[end - 1] == (U8{47}) -> end = end - 1
+    String.from_bytes(raw.slice(0, end)) ?? ""
+}
+
+fn __app_push(out: &[U8], text: String) Never! {
+    loop byte in text.bytes() -> &out.push(byte)
+}
+
+fn __app_hex_digit(value: Int) -> U8 Never! {
+    digits :: "0123456789abcdef".bytes()
+    digits[value]
+}
+
+fn __app_json_string(value: String) -> String Never! {
+    out := [U8]{34}
+    loop byte in value.bytes() {
+        n :: Int.from_u8(byte)
+        if n == 34 || n == 92 {
+            &out.push(U8{92})
+            &out.push(byte)
+        } else if n == 10 {
+            __app_push(&out, "\\n")
+        } else if n == 13 {
+            __app_push(&out, "\\r")
+        } else if n == 9 {
+            __app_push(&out, "\\t")
+        } else if n < 32 {
+            __app_push(&out, "\\u00")
+            &out.push(__app_hex_digit(n >> 4))
+            &out.push(__app_hex_digit(n.bit_and(15)))
+        } else {
+            &out.push(byte)
+        }
+    }
+    &out.push(U8{34})
+    String.from_bytes(out) ?? ""
+}
+
+fn __app_html_attr(value: String) -> String Never! {
+    out := [U8]{}
+    loop byte in value.bytes() {
+        n :: Int.from_u8(byte)
+        if n == 38 {
+            __app_push(&out, "&amp;")
+        } else if n == 60 {
+            __app_push(&out, "&lt;")
+        } else if n == 62 {
+            __app_push(&out, "&gt;")
+        } else if n == 34 {
+            __app_push(&out, "&quot;")
+        } else {
+            &out.push(byte)
+        }
+    }
+    String.from_bytes(out) ?? ""
+}
+
+// JSON inside a `<script>` element: every `<` as `\u003c`.
+fn __app_script_safe(text: String) -> String Never! {
+    out := [U8]{}
+    loop byte in text.bytes() {
+        if byte == (U8{60}) {
+            __app_push(&out, "\\u003c")
+        } else {
+            &out.push(byte)
+        }
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn __app_json_list(values: [String]) -> String Never! {
+    items := [String]{}
+    loop value in values -> &items.push(__app_json_string(value))
+    "[{items.join(",")}]"
+}
+
+// The debug spelling of a string list (`["a", "b"]`) the policy rows use.
+fn __app_debug_list(values: [String]) -> String Never! {
+    items := [String]{}
+    loop value in values -> &items.push(__app_json_string(value))
+    "[{items.join(", ")}]"
+}
+
+fn __app_json_or_null(value: String) -> String Never! {
+    if value == "" -> return "null"
+    __app_json_string(value)
+}
+
+// FNV-1a 64 of `path\0handler`: the route's cache identity.
+fn __app_route_identity(path: String, handler: String) -> String Never! {
+    hash := U64{14695981039346656037}
+    bytes := path.bytes()
+    &bytes.push(U8{0})
+    loop byte in handler.bytes() -> &bytes.push(byte)
+    loop byte in bytes {
+        hash = (hash.bit_xor(U64{Int.from_u8(byte)})).wrapping_mul(U64{1099511628211})
+    }
+    out := [U8]{}
+    loop index in 0..<16 {
+        &out.push(__app_hex_digit(Int.from_u64((hash >> (60 - index * 4)).bit_and(U64{15}))))
+    }
+    "route-{String.from_bytes(out) ?? ""}"
+}
+
+// One route field of the binding sema serialized: `p:<name>=<Type>` is a
+// path parameter, `s=<codec>:<name>=<Type>[?],…` the search fields, `d` the
+// loader data.
+fn __app_field_json(name: String, ty: String, codec: String, required: Bool) -> String Never! {
+    "{{\"name\":{__app_json_string(name)},\"ty\":{__app_json_string(ty)},\"codec\":{__app_json_string(codec)},\"required\":{required},\"default\":null}}"
+}
+
+fn __app_search_field_json(item: String, codec: String) -> String Never! {
+    parts :: item.split("=").to_list()
+    if parts.len() != 2 -> panic("invalid app search field binding `{item}`")
+    raw :: parts[1].bytes()
+    optional :: raw.len() > 0 && raw[raw.len() - 1] == (U8{63})
+    ty :: if optional -> String.from_bytes(raw.slice(0, raw.len() - 1)) ?? "" else -> parts[1].copy()
+    __app_field_json(parts[0], ty, codec, !optional)
+}
+
+fn __app_route_facts_json(route: __AppRoute) -> String Never! {
+    path_params := [String]{}
+    search_params := [String]{}
+    search_codec := "query"
+    loop item in route.binding.split(";") {
+        if item == "" || item == "d" -> next
+        if item.starts_with("p:") {
+            field :: String.from_bytes(item.bytes().slice(2, item.bytes().len())) ?? ""
+            parts :: field.split("=").to_list()
+            if parts.len() != 2 -> panic("invalid app path binding `{item}`")
+            &path_params.push(__app_field_json(parts[0], parts[1], "path", true))
+        } else if item.starts_with("s=") {
+            spec :: String.from_bytes(item.bytes().slice(2, item.bytes().len())) ?? ""
+            pieces :: spec.split(":").to_list()
+            if pieces.len() != 2 -> panic("invalid app search binding `{item}`")
+            search_codec = pieces[0].copy()
+            loop field in pieces[1].split(",") {
+                if field != "" -> &search_params.push(__app_search_field_json(field, search_codec))
+            }
+        } else {
+            panic("invalid app route binding `{item}`")
+        }
+    }
+    identity :: __app_route_identity(route.path, route.identity)
+    loader_contract :: if route.loader_identity == "" -> "null" else -> "{{\"handler\":{__app_json_string(route.loader_identity)},\"data_type\":{__app_json_string(route.loader_data_type)},\"dependency\":{__app_json_string(route.identity)},\"preload\":{route.preload},\"cache_identity\":{__app_json_string(identity)}}}"
+    reason :: if route.explicit_mode -> __app_json_list([String]{"explicit render mode `{route.mode}`"}) else -> "[]"
+    override_mode :: if route.explicit_mode -> __app_json_string(route.mode) else -> "null"
+    "{{\"route_identity\":{__app_json_string(identity)},\"path_params\":[{path_params.join(",")}],\"search_params\":[{search_params.join(",")}],\"search_codec\":{__app_json_string(search_codec)},\"loader_contract\":{loader_contract},\"pending_boundary\":{__app_json_or_null(route.pending_identity)},\"not_found_boundary\":null,\"error_boundary\":{__app_json_or_null(route.error_identity)},\"mode\":{__app_json_string(route.mode)},\"reason\":{reason},\"effects\":[],\"interactive\":false,\"loader\":{__app_json_or_null(route.loader_identity)},\"form\":{__app_json_or_null(route.form)},\"cache\":\"unspecified\",\"override_mode\":{override_mode},\"pending_boundary_id\":null,\"island\":null}}"
+}
+
+fn __app_facts_json(app: App) -> String Never! {
+    state :: __app_state(app)
+    routes := [String]{}
+    loop route in state.routes {
+        &routes.push("    {{\"path\": {__app_json_string(route.path)}, \"handler\": {__app_json_string(route.identity)}, \"provenance\": \"runtime\", \"render_facts\": {__app_route_facts_json(route)}}}")
+    }
+    actions := [String]{}
+    loop action in state.actions {
+        server :: if action.handler == None -> "null" else -> "{{\"name\":{__app_json_string(action.name)},\"endpoint\":{__app_json_string("/actions/{action.name}")},\"method\":\"POST\",\"csrf\":\"same-origin\",\"middleware\":[]}}"
+        &actions.push("    {{\"name\": {__app_json_string(action.name)}, \"handler\": \"callable\", \"kind\": {__app_json_string(action.kind)}, \"preload\": {action.preload}, \"server_function\": {server}}}")
+    }
+    route_rows :: if routes.len() == 0 -> "" else -> "{routes.join(",\n")}\n"
+    action_rows :: if actions.len() == 0 -> "" else -> "{actions.join(",\n")}\n"
+    // The Jet query module keeps no process-wide registry, so the graph
+    // names no queries.
+    "{{\n  \"hydration\": {__app_json_string(state.hydration)},\n  \"shared_tir\": true,\n  \"routes\": [\n{route_rows}  ],\n  \"actions\": [\n{action_rows}  ],\n  \"queries\": [],\n  \"security\": {__app_debug_list(state.security)},\n  \"assets\": {__app_debug_list(state.assets)},\n  \"split\": {__app_debug_list(state.split)},\n  \"cache\": {__app_debug_list(state.cache)},\n  \"a11y\": {__app_debug_list(state.a11y)},\n  \"adapters\": {__app_debug_list(state.adapters)}\n}}"
+}
+
 
 struct WebEvent {
     path: String

@@ -6876,9 +6876,8 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
             .ContextBlock(fields, body, span) -> {
                 if !sema_stmt_check_context_block(fields, body, span, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth, &output) -> complete = false
             }
-            .Layout(_, _, _, span) -> {
-                complete = false
-                sema_check_unsupported(&context, "the {sema_stmt_scope_form_label(statements[index])} block at offset {span.start} is not supported by the self-hosted checker yet")
+            .Layout(name, name_span, body, span) -> {
+                if !sema_stmt_check_layout(name, name_span, body, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, &output) -> complete = false
             }
         }
         if statements[index] == {

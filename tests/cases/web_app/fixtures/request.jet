@@ -1,4 +1,8 @@
 // Transport ALGORITHM port of tests/web_app.rs:63-95; assertions stay in .case.
+package {
+    name: "s6_web_request"
+    authority: { allow: [Env, FS.Write, Net, Time] }
+}
 use core.net as net
 use core.time as time
 use core.files as files
@@ -27,11 +31,11 @@ fn run() {
             }
         }
     }
-    stream :: connected ?? panic("connected stream")
+    stream := connected ?? panic("connected stream")
     crlf :: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
     request :: "{method} {path} HTTP/1.1{crlf}Host: localhost{crlf}Connection: close{crlf}Content-Length: 0{crlf}{crlf}"
     stream.write_all(request.bytes()) ?? panic("request write")
-    net.tcp_shutdown(stream, NetShutdown.Write) ?? panic("finish request")
+    net.tcp_shutdown(&stream, NetShutdown.Write) ?? panic("finish request")
     bytes := [U8]{}
     complete := false
     reload :: sys.get("S6_WEB_RELOAD_APP")
@@ -41,9 +45,9 @@ fn run() {
         started :: time.instant()
         loop time.instant() - started < 250ms {
             remaining :: 250 - time.duration_as_ms(time.instant() - started)
-            net.set_read_timeout(stream, remaining) ?? panic("first window timeout")
+            net.set_read_timeout(&stream, remaining) ?? panic("first window timeout")
             failed := false
-            if net.tcp_read_bytes(stream, 8192) == {
+            if net.tcp_read_bytes(&stream, 8192) == {
                 .Ok(part) -> {
                     if part.len() == 0 {
                         assert(time.instant() - started >= 250ms, "reload endpoint fired without a source change")
@@ -65,9 +69,9 @@ fn run() {
         if reload != None {
             assert(time.instant() - changed < 10s, "reload response did not complete")
             remaining :: 10000 - time.duration_as_ms(time.instant() - changed)
-            net.set_read_timeout(stream, remaining) ?? panic("changed window timeout")
+            net.set_read_timeout(&stream, remaining) ?? panic("changed window timeout")
         }
-        part :: net.tcp_read_bytes(stream, 8192) ?? panic("response read")
+        part :: net.tcp_read_bytes(&stream, 8192) ?? panic("response read")
         if part.len() == 0 {
             complete = true
             if reload != None -> assert(time.instant() - changed <= 10s, "reload response completed after deadline")

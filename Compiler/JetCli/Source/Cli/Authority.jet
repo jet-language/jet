@@ -186,10 +186,23 @@ fn jet_cli_with_invocation(authority: &JetCLIAuthority, invocation: JetCLIInvoca
 // Required rights with no policy verdict. Deny-only rights (the Panic and Mem
 // roots and the Time.Wait leaf; jet-foundation Authority.rs `is_deny_only`)
 // may be denied but never need a grant (Authority.rs `undecided_effects`).
+// A right another undecided right covers is named once, by its parent
+// (`FS` beside `FS.Read`/`FS.Write` lists `FS` only).
 fn jet_cli_undecided(authority: JetCLIAuthority) -> [String] Never! {
-    rights := [String]{}
+    missing := [String]{}
     loop right in authority.required {
-        if !authority_is_deny_only(right) && jet_cli_answer(authority, right) == JetCLIVerdict.Missing -> &rights.push(right)
+        if !authority_is_deny_only(right) && jet_cli_answer(authority, right) == JetCLIVerdict.Missing && !missing.contains(right) -> &missing.push(right)
+    }
+    rights := [String]{}
+    loop right in missing {
+        covered := false
+        loop other in missing {
+            if other != right && jet_cli_right_covers(other, right) {
+                covered = true
+                break
+            }
+        }
+        if !covered -> &rights.push(right)
     }
     rights
 }

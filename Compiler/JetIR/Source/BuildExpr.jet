@@ -677,7 +677,7 @@ fn ir_stmt_body(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never
         }
         .MixedSwitch(subject, _, arms, else_body, span) -> ir_mixed_switch(&m, p, &b, subject, arms, else_body, span)
         .Reactive(executable, span) -> { _ :: ir_reactive_rooted(&m, p, &b, executable, span) }
-        .Layout(_, _, _, span) -> ir_fail(&b, span, "statement Layout")
+        .Layout(handle, label, body, span) -> ir_layout_statement(&m, p, &b, handle, label, body, span)
         .ContextBlock(guards, body, _) -> ir_context_block(&m, p, &b, guards, body)
         .Shield(body, _) -> ir_shield(&m, p, &b, body)
         .ScopeMember(kind, body, span) -> ir_scope_member(&m, p, &b, statement, kind, body, span)
@@ -1397,6 +1397,7 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
         }
         .Binary(op, overflow, line, lhs, rhs) -> {
             if line > 0 -> b.line = line
+            if ir_layout_value_type(expression_ty) -> return ir_layout_binary(&m, p, &b, expression_ty, op, lhs, rhs, span)
             if op == .And || op == .Or -> return ir_short_circuit(&m, p, &b, op == .And, lhs, rhs)
             if op == .Eq || op == .Ne {
                 if ir_tag_order_test(&m, p, &b, op == .Ne, lhs, rhs) == .Val(tested) -> return tested
@@ -1809,6 +1810,8 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
         .Deref(value) -> return ir_raw_deref(&m, p, &b, expression_ty, value, span)
         .RawAddressOf(place) -> return ir_raw_address_of(&m, p, &b, expression_ty, place, span)
         .PtrFromAddr(address, _) -> return ir_ptr_from_addr(&m, p, &b, expression_ty, address, span)
+        .LayoutLiteral(value) -> return ir_layout_literal(&m, p, &b, expression_ty, value, span)
+        .LayoutCompare(op, lhs, rhs) -> return ir_layout_compare(&m, p, &b, expression_ty, op, lhs, rhs, span)
         else -> {
             kind_name :: ir_expr_kind_name(ir_body_node(p, b, expression).kind)
             return ir_fail_slot(&b, span, "expression {kind_name}")
@@ -2031,6 +2034,7 @@ fn ir_handle_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     if ir_dyn_method(&m, p, &b, ty, receiver, operation, args, span) == .Val(result) -> return result
     if ir_channel_method(&m, p, &b, ty, receiver, operation, args, span) == .Val(result) -> return result
     if ir_event_method(&m, p, &b, ty, receiver, operation, args, span) == .Val(result) -> return result
+    if ir_layout_method(&m, p, &b, ty, receiver, operation, args, span) == .Val(result) -> return result
     if operation == .GameSceneOnFrame(_, _) -> return ir_game_on_frame(&m, p, &b, receiver, args, span)
     if ir_reactive_method(&m, p, &b, ty, receiver, operation, args, span) == .Val(result) -> return result
     if operation == .SerdeEncode -> return ir_serde_encode(&m, p, &b, ty, receiver, span)

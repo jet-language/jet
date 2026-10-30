@@ -3324,6 +3324,8 @@ fn sema_expr_try_method_special_routes(receiver: Expr, receiver_value: TExpr, me
     if http.handled -> return http
     web_form := sema_call_try_web_form_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if web_form.handled -> return web_form
+    layout := sema_call_try_layout_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if layout.handled -> return layout
     ui := sema_call_try_ui_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if ui.handled -> return ui
     stream := sema_call_try_stream_handle_method(receiver, receiver_value, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -4248,6 +4250,7 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
     checked_lhs := sema_check_expression(left, sema_expr_decimal_lhs_expected(op, left, right, expected, environment, program, &scopes, &state, &tail_store, &context), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     rhs_expected := Type?{None}
     if {
+        sema_expr_layout_compare_literal(op, checked_lhs.ty, right) -> rhs_expected = Val(Type.Float)
         sema_expr_decimal_literal_operand(right, false) -> rhs_expected = sema_expr_decimal_rhs_expected(op, checked_lhs.ty, environment, program)
         sema_expr_same_type_operator(op) && sema_expr_wants_expected_form(right) -> rhs_expected = Val(sema_expr_rhs_hint(op, checked_lhs.ty, right))
         else -> {}
@@ -4287,6 +4290,10 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
         return None
     }
     line :: sema_source_line_at(environment.source_segments, span) ?? return None
+    // `a.width + 16.0`, `a.right <= b.left`: layout values combine into
+    // layout values and compare into a Constraint (E2932 across axes).
+    layout :: sema_expr_check_layout_binary(op, lhs, rhs, span, line, expected, environment, program, &diagnostics)
+    if layout.handled -> return layout.value
     if sema_dyn_is_type(sema_expr_expected_type(lhs.ty, environment, program)) || sema_dyn_is_type(sema_expr_expected_type(rhs.ty, environment, program)) {
         if op == BinOp.And || op == BinOp.Or {
             &diagnostics.push(sema_dyn_condition_error(span))

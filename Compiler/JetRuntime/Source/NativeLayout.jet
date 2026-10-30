@@ -194,6 +194,16 @@ fn layout_resolve(inner: I64) {
     }
     result
 }
+// The compiled form of conflict(): the List<Text> buffer goes to `out` (none
+// for an empty List) and the length is returned; the IR's List header owns
+// the buffer.
+#Export(c) fn jet_rt_layout_conflict_into(handle: I64, out: I64) -> I64 {
+    list :: jet_rt_layout_conflict(handle)
+    length :: layout_word(list)
+    layout_put(out, if (length == I64{0}) -> I64{0} else -> layout_word(list + DATA_SEQUENCE_DATA))
+    jet_rt_free(list, DATA_SEQUENCE_BYTES, I64{8})
+    length
+}
 #Export(c) fn jet_rt_layout_value(handle: I64, expression: I64) -> Float {
     inner :: layout_word(handle)
     layout_resolve(inner)

@@ -18,7 +18,9 @@ fn mrc_catalog() -> TAppliedRuleCatalog {
 }
 
 // tests/marker_registry_coverage.rs:19-24: sites no source text can spell.
-fn mrc_site_is_source_renderable(site: String) -> Bool { site != "Package" && site != "Impl" && site != "Operation" && site != "Text" }
+// An operator impl spells the Impl site after its header
+// (`impl W.Add(Int) #Commutative { … }`).
+fn mrc_site_is_source_renderable(site: String) -> Bool { site != "Package" && site != "Operation" && site != "Text" }
 
 // tests/marker_registry_coverage.rs:28-44: one placeholder per parameter; a
 // closed menu offers its first variant.
@@ -89,6 +91,7 @@ fn mrc_program_at(marker: String, rule: TAppliedRule, site: String) -> String? {
         "Type" -> if marker.starts_with("#UnitFamily") -> return Val("{marker} {{ meter }}\n\nfn run() {{\n}}\n") else -> return Val("{marker}\nstruct W {{\n    a: Int\n}}\n\nfn run() {{\n}}\n")
         "Field" -> if marker.starts_with("#Short") || marker.starts_with("#Env") || marker.starts_with("#Flag") -> return Val("#CLI\nstruct W {{\n    {marker} a: String\n}}\n\nfn run() {{\n}}\n") else -> return Val("struct W {{\n    {marker} a: Int\n}}\n\nfn run() {{\n}}\n")
         "Variant" -> return Val("enum E {{\n    {marker} A\n    B\n}}\n\nfn run() {{\n}}\n")
+        "Impl" -> return Val("struct W {{\n    a: Int\n}}\n\nimpl W.Add(Int) {marker} {{\n    fn add(self, rhs: Int) -> W {{ return W{{a: self.a + rhs}} }}\n}}\n\nfn run() {{\n}}\n")
         "Block" -> return Val("fn run() {{\n    {marker} {{\n        print(\"ok\")\n    }}\n}}\n")
         "Statement" -> return Val("fn run() {{\n    {marker} print(\"ok\")\n}}\n")
         "Declaration" -> if marker.starts_with("#Persist") -> return Val("{marker} value := 1\n\nfn run() {{\n}}\n") else -> return Val("fn run() {{\n    {marker} value :: 1\n}}\n")

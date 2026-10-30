@@ -20,6 +20,7 @@ use jet_foundation.[
     RuleSite,
     Span,
     Stmt,
+    StrPart,
     SwitchArm,
     TupleField,
     Type,
@@ -1504,6 +1505,16 @@ fn parser_parse_binding_statement(state: &JetParserState) -> Stmt {
         }
     }
     value :: parser_parse_expression(&state, 1, 0)
+    // `name :: Layout{ … }` (Rust layout_ctor_binding): a typed-literal
+    // constraint body is the layout statement over its elements.
+    if parser_layout_elements(value.expr) == .Val(elements) {
+        binding_name :: parser_value(state, name)
+        if mutable -> parser_add_error_code(&state, "E0003", name.span, "a `Layout{{ … }}` binding is immutable", "`Layout` builds a solved layout handle once; mutate suggestions through `.suggest`, not the binding", "write `{binding_name} :: Layout{{ … }}`")
+        body := [Stmt]{}
+        loop element in elements -> &body.push(Stmt.Expr{expr: parser_desugar_layout_expr(&state, binding_name, element)})
+        parser_finish_statement(&state)
+        return Stmt.Layout{name: binding_name, name_span: name.span, body: body, span: parser_cover(name.span, value.span)}
+    }
     binding := ast_binding(parser_value(state, name), name.span, mutable, value.expr, Val(sigil.span))
     // `name := Type{ uninit }` — `uninit` only as the
     // whole typed-literal body, and only on a mutable binding. Sema proves
@@ -1518,6 +1529,74 @@ fn parser_parse_binding_statement(state: &JetParserState) -> Stmt {
     }
     parser_finish_statement(&state)
     Stmt.Val{binding: binding}
+}
+
+// The constraint elements of a `Layout{ … }` typed literal; None for any
+// other expression (a `Layout{ field: … }` record literal of a declared
+// `Layout` included).
+fn parser_layout_elements(expr: Expr) -> [Expr]? Never! {
+    if expr == .TypedLit(head, body, _, _) {
+        layout :: if head == .Val(ty) -> ty == (Type.Named{name: "Layout"}) else -> false
+        if !layout -> return None
+        if body == {
+            .Elements(elements) -> return Val(elements.copy())
+            .Value(element) -> return Val([Expr]{element.copy()})
+            .Empty -> return Val([Expr]{})
+            else -> return None
+        }
+    }
+    None
+}
+
+// Rust layout_anchor_method: the accessor of a horizontal (`left`, `right`,
+// `width`) or vertical (`top`, `bottom`, `height`) anchor.
+fn parser_layout_anchor_method(field: String) -> String? Never! {
+    if field == "left" || field == "right" || field == "width" -> return Val("h")
+    if field == "top" || field == "bottom" || field == "height" -> return Val("v")
+    None
+}
+
+fn parser_layout_text_arg(state: &JetParserState, text: String, span: Span) -> CallArg Never! {
+    CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: span, id: parser_node_id(&state)}, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+}
+
+fn parser_desugar_layout_args(state: &JetParserState, layout_name: String, args: [CallArg]) -> [CallArg] Never! {
+    out := [CallArg]{}
+    loop arg in args {
+        rewritten := arg.copy()
+        rewritten.expr = parser_desugar_layout_expr(&state, layout_name, arg.expr)
+        &out.push(rewritten)
+    }
+    out
+}
+
+// Rust desugar_layout_anchors: a structural parse-time rewrite. Inside
+// `name :: Layout{ … }`, a bare `box.anchor` read becomes
+// `name.h("box", "anchor")` / `name.v("box", "anchor")`, and `self.anchor`
+// names the container box after the binding; any other field access is left
+// to sema. The formatter's jfmt_resugar_layout_expr is its inverse.
+fn parser_desugar_layout_expr(state: &JetParserState, layout_name: String, e: Expr) -> Expr Never! {
+    if e == .Field(base, field, field_span, _) {
+        if base == .Ident(box_name, ident_span, _) {
+            if parser_layout_anchor_method(field) == .Val(method) {
+                box_text :: if box_name == "self" -> layout_name.copy() else -> box_name.copy()
+                args :: [CallArg]{parser_layout_text_arg(&state, box_text, ident_span), parser_layout_text_arg(&state, field.copy(), field_span)}
+                return Expr.MethodCall{receiver: Expr.Ident{name: layout_name.copy(), span: ident_span, id: parser_node_id(&state)}, method: method, method_span: field_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: args, id: parser_node_id(&state)}
+            }
+        }
+    }
+    if e == {
+        .Binary(op, l, r, span, node) -> Expr.Binary{op: op, left: parser_desugar_layout_expr(&state, layout_name, l), right: parser_desugar_layout_expr(&state, layout_name, r), span: span, id: node}
+        .Unary(op, x, span, node) -> Expr.Unary{op: op, operand: parser_desugar_layout_expr(&state, layout_name, x), span: span, id: node}
+        .Field(base, field, span, node) -> Expr.Field{base: parser_desugar_layout_expr(&state, layout_name, base), member: field, span: span, id: node}
+        .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, node) -> Expr.MethodCall{receiver: parser_desugar_layout_expr(&state, layout_name, receiver), method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: parser_desugar_layout_args(&state, layout_name, args), id: node}
+        .Call(call, node) -> {
+            rewritten := call.copy()
+            rewritten.args = parser_desugar_layout_args(&state, layout_name, call.args)
+            Expr.Call{call: rewritten, id: node}
+        }
+        else -> e.copy()
+    }
 }
 
 // The `uninit` span when a headed typed literal's whole

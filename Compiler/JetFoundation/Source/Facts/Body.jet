@@ -326,7 +326,6 @@ enum NodeKind {
     PatternMatches(subject: Int, pattern: BodyPattern)
     OptionLift2(function: Int, left: Int, right: Int)
     ClosureMethod(receiver: Int, operation: TClosureOp, args: [Int])
-    HostBorrowCallback(callable: Int, params: [Type])
     NumericMethod(receiver: Int, operation: TNumericOp)
     NumericBinaryMethod(receiver: Int, operation: TNumericOp, argument: Int)
     OverflowOpt(prefix: String, operation: String, line: Int, lhs: Int, rhs: Int)
@@ -651,7 +650,6 @@ enum BodyHandleOp {
     PathToString
     PathWalk
     UIBackendMethod(method: String)
-    AppMethod(method: String, args_len: Int)
     ServiceRuntimeSend
     ServiceRuntimeRetry
     ServiceRuntimeDeadLetter
@@ -1490,9 +1488,6 @@ fn body_each_node_kind_child(tree: BodyTree, value: NodeKind, visit: fn(Int) -[M
             loop item in f2 {
                 visit(item)
             }
-        }
-        .HostBorrowCallback(f0, _) -> {
-            visit(f0)
         }
         .NumericMethod(f0, _) -> {
             visit(f0)

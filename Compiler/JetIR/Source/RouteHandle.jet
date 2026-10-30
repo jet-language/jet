@@ -349,16 +349,6 @@ fn ir_handle_math_route(type_name: String, method: String, reduce_op: String?) -
     Val(ir_handle_h("{type_name}.{suffix}", "jet_math_{type_name}_{suffix}", mask, None))
 }
 
-fn ir_handle_layout_route(method: String) -> IRHandleRoute? {
-    if method == {
-        "h" | "v" | "suggest" -> return Val(ir_handle_core("core.layout", "layout.{method}", "jet_layout::Handle::{method}", [Bool]{true, false, false}, None))
-        "value" -> return Val(ir_handle_core("core.layout", "layout.value", "jet_layout::Handle::value", [Bool]{true, false}, None))
-        "is_feasible" | "conflict" -> return Val(ir_handle_core("core.layout", "layout.{method}", "jet_layout::Handle::{method}", [Bool]{true}, None))
-        "required" | "strong" | "medium" | "weak" -> return Val(ir_handle_core("core.layout", "layout.{method}", "jet_layout::Constraint::{method}", [Bool]{false}, None))
-        else -> return None
-    }
-}
-
 fn ir_handle_loadable_route(method: String) -> IRHandleRoute? {
     if method == {
         "is_loading" | "is_loaded" | "is_failed" | "is_idle" | "loaded" -> return Val(ir_handle_core("core.pending", "loadable.{method}", "JetLoadable::{method}", [Bool]{true}, None))
@@ -408,91 +398,6 @@ fn ir_handle_ui_route(receiver: Type, method: String) -> IRHandleRoute? {
         else -> [Bool]{true}
     }
     Val(ir_handle_core("core.ui", "{name}.{method}", "{backend}::{member}", mask, None))
-}
-
-fn ir_handle_app_route(method: String, source_arg_count: Int) -> IRHandleRoute? {
-    arity := 0
-    if method == {
-        "route" | "page" | "layout" | "form" -> {
-            if {
-                source_arg_count == 2 -> arity = 4
-                else -> {}
-            }
-        }
-        "loader" -> {
-            if {
-                source_arg_count == 2 -> arity = 4
-                source_arg_count == 3 -> arity = 5
-                else -> {}
-            }
-        }
-        "pending" | "not_found" | "error" -> {
-            if {
-                source_arg_count == 1 -> arity = 2
-                else -> {}
-            }
-        }
-        "action" -> {
-            if {
-                source_arg_count == 2 -> arity = 3
-                else -> {}
-            }
-        }
-        "data" -> {
-            if {
-                source_arg_count == 2 -> arity = 3
-                else -> {}
-            }
-        }
-        "mount" -> {
-            if {
-                source_arg_count == 2 -> arity = 3
-                source_arg_count == 3 -> arity = 4
-                source_arg_count == 4 -> arity = 5
-                else -> {}
-            }
-        }
-        "routes" | "security" | "assets" | "split" | "code_split" | "cache" | "a11y" | "adapter" -> {
-            if {
-                source_arg_count == 1 -> arity = 2
-                else -> {}
-            }
-        }
-        "csr" | "ssr" | "ssg" | "stream" | "streaming" | "island" | "hydration_dev" | "hydration_release" | "facts_json" -> {
-            if {
-                source_arg_count == 0 -> arity = 1
-                else -> {}
-            }
-        }
-        "serve" -> {
-            if {
-                source_arg_count == 0 -> arity = 1
-                source_arg_count == 1 -> arity = 2
-                else -> {}
-            }
-        }
-        "serve_on" -> {
-            if {
-                source_arg_count == 1 -> arity = 2
-                else -> {}
-            }
-        }
-        else -> {}
-    }
-    if arity == 0 -> return None
-    mask := [Bool]{}
-    index := 0
-    loop index < arity {
-        &mask.push(index == 0)
-        index += 1
-    }
-    route_effect := if method == "serve" || method == "serve_on" -> Val(Effect.Net) else -> None
-    symbol := "jet_app_{method}"
-    if method == "loader" && source_arg_count == 3 -> symbol = "jet_app_loader_preload"
-    if method == "mount" && source_arg_count == 3 -> symbol = "jet_app_mount_with_effect"
-    if method == "mount" && source_arg_count == 4 -> symbol = "jet_app_mount_with_policy"
-    if method == "serve" && source_arg_count == 1 -> symbol = "jet_app_serve_with_port"
-    Val(ir_handle_core("core.web.app", method, symbol, mask, route_effect))
 }
 
 fn ir_handle_civil_time_route(kind: String, method: String) -> IRHandleRoute? {
@@ -732,11 +637,9 @@ fn ir_handle_dynamic_route(operation: BodyHandleOp, receiver: Type, argument_cou
         .PreciseMethod(type_name, method) -> return ir_handle_precise_route(type_name, method)
         .MathMethod(type_name, method, reduce_op) -> return ir_handle_math_route(type_name, method, reduce_op)
         .EventMethod(method) -> return ir_handle_event_route(receiver, method, carrier)
-        .LayoutMethod(method) -> return ir_handle_layout_route(method)
         .LoadableMethod(method) -> return ir_handle_loadable_route(method)
         .UIBackendMethod(method) -> return ir_handle_ui_route(receiver, method)
         .CivilTimeMethod(kind, method) -> return ir_handle_civil_time_route(kind, method)
-        .AppMethod(method, source_arg_count) -> return ir_handle_app_route(method, source_arg_count)
         .ProcessChildMethod(method) -> {
             if method == {
                 "id" -> return Val(ir_handle_h("process.child.id", "jet_process_child_id", [Bool]{true}, None))

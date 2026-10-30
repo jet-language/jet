@@ -223,6 +223,7 @@ fn sema_expression_enum_declares_variant(enum_name: String, variant: String, env
     if owner == .Val(symbol) {
         if sema_scope_declaration_is(environment, program, symbol.id, SemaScopeDeclarationKind.Enum) -> return sema_scope_declaration_enum_declares(environment, program, symbol.id, variant)
     }
+    if enum_name == "HookDecision" -> return sema_expression_hook_decision_variants().contains(variant)
     core_enum_variant_payload(enum_name, variant) != None
 }
 
@@ -638,6 +639,12 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
     // compiler-owned fact enum value, which has no registered declaration.
     fact_enum :: sema_fact_enum_literal(resolved_name, variant, args, span, variant_span, expected, environment, program, &diagnostics)
     if fact_enum.handled -> return fact_enum.value
+    // `HookDecision.Transform(value)` / `HookDecision.Continue`: the
+    // compiler-owned generic hook decision takes its payload types from the
+    // expected `HookDecision<T, E>`, as its patterns do (Patterns.jet).
+    if resolved_name == "HookDecision" && sema_expression_type_symbol(&scopes, environment, program, resolved_name) == None {
+        return sema_expression_hook_decision_literal(variant, args, variant_span, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
     // Compiler-owned data cases have no user enum declaration metadata.
     // Route both qualified and contextual cases through the same payload
     // checker as the static-call spelling.
@@ -879,6 +886,44 @@ fn sema_expression_core_enum_literal(enum_name: String, display_name: String, va
     if core_enum_variant_labels(enum_name, variant) == .Val(labels) {
         return sema_expression_core_enum_named_literal(enum_name, display_name, variant, labels, payload_types, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
+    sema_expression_core_enum_positional_literal(enum_name, display_name, variant, payload_types, Type.Named{name: enum_name}, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+}
+
+fn sema_expression_hook_decision_variants() -> [String] Never! {
+    [String]{"Continue", "Transform", "Cancel", "Fail"}
+}
+
+// A `HookDecision` variant: `Transform` carries the hook's `T`, `Fail` its
+// `E`, and the other two are unit. The decision type is the expected
+// `HookDecision<T, E>` (a decision hook handler's result).
+fn sema_expression_hook_decision_literal(variant: String, args: [EnumLitArg], variant_span: Span?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    variants :: sema_expression_hook_decision_variants()
+    if !variants.contains(variant) {
+        &diagnostics.push(sema_enum_unknown_variant("HookDecision", variant, variants, span, variant_span))
+        return None
+    }
+    type_args := [Type]{}
+    if expected == .Val(wanted) {
+        if sema_expr_unwrap_tag(wanted) == .Apply(name, found) && name == "HookDecision" && found.len() == 2 -> type_args = found.copy()
+    }
+    if type_args.len() != 2 {
+        &diagnostics.push(sema_error("E0330", span, "can't infer the decision type for `HookDecision.{variant}`", "a hook decision takes its value and failure types from the decision hook it answers", "return it from a `DecisionHook<T, E>` handler"))
+        return None
+    }
+    payload_types := [Type]{}
+    if variant == "Transform" -> &payload_types.push(type_args[0])
+    if variant == "Fail" -> &payload_types.push(type_args[1])
+    if payload_types.len() == 0 && args.len() != 0 {
+        &diagnostics.push(sema_enum_unit_payload("HookDecision", variant, span))
+        return None
+    }
+    decision_ty :: Type.Apply{name: "HookDecision", args: type_args}
+    sema_expression_core_enum_positional_literal("HookDecision", "HookDecision", variant, payload_types, decision_ty, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+}
+
+// The positional payload of a Core enum variant without a source
+// declaration, checked against `payload_types`; the literal has `result_ty`.
+fn sema_expression_core_enum_positional_literal(enum_name: String, display_name: String, variant: String, payload_types: [Type], result_ty: Type, args: [EnumLitArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if args.len() != payload_types.len() {
         &diagnostics.push(sema_error("E0104", span, "variant `{variant}` expects {payload_types.len()} payload values", "this Core enum variant has positional payload fields", "pass exactly {payload_types.len()} values"))
         return None
@@ -909,7 +954,7 @@ fn sema_expression_core_enum_literal(enum_name: String, display_name: String, va
         &checked_args.push(TEnumArg{value: checked})
     }
     payload :: if checked_args.len() == 0 -> TEnumPayload.Unit else -> TEnumPayload.Positional{args: checked_args}
-    value :: sema_tree_node(Type.Named{name: enum_name}, TExprKind.EnumLit{enum_type: enum_name, variant: variant, payload: payload}, span)
+    value :: sema_tree_node(result_ty, TExprKind.EnumLit{enum_type: enum_name, variant: variant, payload: payload}, span)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
 

@@ -812,7 +812,6 @@ fn body_flat_handle_op_2(value: THandleOp, flat: &BodyFlat) -> BodyHandleOp Neve
         .PathToString -> BodyHandleOp.PathToString
         .PathWalk -> BodyHandleOp.PathWalk
         .UIBackendMethod(f_method) -> BodyHandleOp.UIBackendMethod{method: f_method}
-        .AppMethod(f_method, f_args_len) -> BodyHandleOp.AppMethod{method: f_method, args_len: f_args_len}
         .ServiceRuntimeSend -> BodyHandleOp.ServiceRuntimeSend
         .ServiceRuntimeRetry -> BodyHandleOp.ServiceRuntimeRetry
         .ServiceRuntimeDeadLetter -> BodyHandleOp.ServiceRuntimeDeadLetter
@@ -1345,7 +1344,6 @@ fn body_copy_expr_kind(value: NodeKind, flat: &BodyFlat) -> NodeKind Never! {
         .PatternMatches(f_subject, f_pattern) -> NodeKind.PatternMatches{subject: body_copy_expr(f_subject, &flat), pattern: body_copy_pattern(f_pattern, &flat)}
         .OptionLift2(f_function, f_left, f_right) -> NodeKind.OptionLift2{function: body_copy_expr(f_function, &flat), left: body_copy_expr(f_left, &flat), right: body_copy_expr(f_right, &flat)}
         .ClosureMethod(f_receiver, f_operation, f_args) -> NodeKind.ClosureMethod{receiver: body_copy_expr(f_receiver, &flat), operation: f_operation, args: body_copy_list_expr(f_args, &flat)}
-        .HostBorrowCallback(f_callable, f_params) -> NodeKind.HostBorrowCallback{callable: body_copy_expr(f_callable, &flat), params: f_params}
         .NumericMethod(f_receiver, f_operation) -> NodeKind.NumericMethod{receiver: body_copy_expr(f_receiver, &flat), operation: f_operation}
         .NumericBinaryMethod(f_receiver, f_operation, f_argument) -> NodeKind.NumericBinaryMethod{receiver: body_copy_expr(f_receiver, &flat), operation: f_operation, argument: body_copy_expr(f_argument, &flat)}
         .OverflowOpt(f_prefix, f_operation, f_line, f_lhs, f_rhs) -> NodeKind.OverflowOpt{prefix: f_prefix, operation: f_operation, line: f_line, lhs: body_copy_expr(f_lhs, &flat), rhs: body_copy_expr(f_rhs, &flat)}

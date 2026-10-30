@@ -1,0 +1,12 @@
+// @run_cli
+// #6289 / D-EFFTREE1: a temp directory needs the whole `FS` root while the
+// write and read need `FS.Write` and `FS.Read`. The parent covers its
+// children, so E1803 names `FS` once and the why line says it once.
+use core.files as fs
+
+fn run() {
+    dir :: fs.temp_dir("e1803-parent") ?? panic("no temp")
+    page :: fs.join(dir.path, "page.txt")
+    fs.write(page, "draft") ?? panic("no write")
+    print(fs.read(page) ?? "")
+}
