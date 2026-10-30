@@ -1,6 +1,8 @@
 # Claim: the err a ?? fallback declares is compiler-made, so L0101 never reports it, in a value
 # fallback, an early-return fallback, a Core call, or an #Unsafe fn called inside an #Unsafe block.
 # A user binding named err that is never read is still reported.
+# The fixture writes tail values rather than a final `return`, so L0530 (redundant_final_return)
+# reports nothing on the lines the predicates below rule out.
 fixture: fallback_err_is_never_an_unused_local.fixture
 env: NO_COLOR=1
 step: jet check main.jet
