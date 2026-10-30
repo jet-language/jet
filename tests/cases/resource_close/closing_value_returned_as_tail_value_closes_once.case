@@ -1,0 +1,14 @@
+# Claim: a closing value (a user Close type, and a struct holding a FileReader beside one) in an Option or Result closes exactly once when the variable holding it is the function's tail value, on o0, o1 and o2.
+# Hand-derived: one "close" line per value, printed when the caller's carrier ends.
+fixture: closing_values_close_once.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run --allow=FS.Read --optimize=none tail.jet
+exit: 0 # o0
+stdout: = closing_value_returned_as_tail_value_closes_once.out # o0
+step: jet run --allow=FS.Read --optimize=basic tail.jet
+exit: 0 # o1
+stdout: = closing_value_returned_as_tail_value_closes_once.out # o1
+step: jet run --allow=FS.Read --optimize=full tail.jet
+exit: 0 # o2
+stdout: = closing_value_returned_as_tail_value_closes_once.out # o2

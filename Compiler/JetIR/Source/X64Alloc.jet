@@ -362,7 +362,21 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     // Float slots over xmm8-xmm15.
     general :: loop slot in 0..<count -> starts[slot] <= ends[slot] && !consts[slot] && !addressed[slot] && classes[slot] == .General
     floating :: loop slot in 0..<count -> starts[slot] <= ends[slot] && classes[slot] == .Float
-    regs :: ir_x64_scan(starts, ends, weights, general, IR_X64_SLOT_REGISTERS)
+    regs := ir_x64_scan(starts, ends, weights, general, IR_X64_SLOT_REGISTERS)
+    // A copy that may share its source's register (ir_x64_aliases) takes it
+    // when the source has one; the register the scan gave the copy then
+    // goes unused for the copy's range. Sources are written first, so a
+    // chain settles from its start.
+    aliases :: ir_x64_aliases(m, f, starts, ends, last_write, writes, classes, consts, addressed)
+    settled := false
+    loop !settled {
+        settled = true
+        loop slot in 0..<count {
+            if aliases[slot] < 0 || regs[aliases[slot]] < 0 || regs[slot] == regs[aliases[slot]] -> next
+            regs[slot] = regs[aliases[slot]]
+            settled = false
+        }
+    }
     xmms :: ir_x64_scan(starts, ends, weights, floating, IR_X64_XMM_REGISTERS)
     xmm_slots := [Int]{}
     loop slot in 0..<count {
@@ -424,6 +438,43 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     total :: ir_x64_align(depth, 16)
     frame_bytes :: total - 8 * kept.len()
     IRX64Allocation{regs: ^regs, xmms: ^xmms, xmm_slots: ^xmm_slots, homes: ^homes, consts: ^consts, values: ^values, frames: ^frames, starts: ^starts, ends: ^ends, stack: ^stack, saved: ^kept, frame_bytes: frame_bytes, result_home: result_home, result_storage: result_storage}
+}
+
+// IR_X64_ALIAS_SPAN: the most instructions a copy's range may cover to
+// share its source's register.
+IR_X64_ALIAS_SPAN :: 256
+
+// Per slot, the slot whose register it shares (-1: none): a General slot
+// written once, first, by a Move, or by a Copy that does not clone, of a
+// General 8-byte slot that holds a register's worth (no constant or frame
+// address) and that, live across the copy's whole range, is not written
+// inside it. Both then hold the same bits wherever the copy is live, so one
+// register serves both and the copy is no instruction.
+fn ir_x64_aliases(m: IRModule, f: IRFunction, starts: [Int], ends: [Int], last_write: [Int], writes: [Int], classes: [IRX64Class], consts: [Bool], addressed: [Bool]) -> [Int] Never! {
+    count :: f.slot_type.len()
+    aliases := [Int]{}
+    loop slot in 0..<count {
+        &aliases.push(-1)
+        at :: last_write[slot]
+        if slot < f.param_count || at < 0 || writes[slot] != 1 || starts[slot] != at || ends[slot] - at > IR_X64_ALIAS_SPAN -> next
+        if classes[slot] != .General || consts[slot] || addressed[slot] || m.types[f.slot_type[slot]].size != 8 -> next
+        op :: f.op[at]
+        if op != .Move && op != .Copy -> next
+        source :: f.a[at]
+        if source < 0 || source >= count || source == slot || classes[source] != .General || consts[source] || addressed[source] -> next
+        row :: m.types[f.slot_type[source]]
+        if row.size != 8 || (op == .Copy && row.drop != "" && row.kind != .Aggregate && !ir_clone_shares(row.clone)) -> next
+        if starts[source] > at || ends[source] < ends[slot] -> next
+        written := false
+        loop k in (at + 1)..<(ends[slot] + 1) {
+            if ir_x64_write(f, k) == source {
+                written = true
+                break
+            }
+        }
+        if !written -> aliases[slot] = source
+    }
+    aliases
 }
 
 // The slot an aggregate-returning function builds its result in, when the

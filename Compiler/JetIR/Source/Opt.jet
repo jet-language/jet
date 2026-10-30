@@ -5,7 +5,8 @@
 // every function, replaces frame aggregates by their fields (`scalar`) and
 // simplifies again;
 // level 2 (`--release`) first hoists calls making a list's buffer its own
-// out of Loops (`unique`), also replaces frame aggregates whose address is
+// out of Loops and, for a `&` parameter only direct calls reach, into the
+// callers (`unique`), also replaces frame aggregates whose address is
 // only lent out (`promote`), copies counted loops behind a test of their
 // Int bound (`version`, OptVersion.jet) and runs each function through SSA
 // (Ssa.jet, SsaOut.jet). Both levels fold polls into later ones before
@@ -173,6 +174,11 @@ fn ir_optimize_module(m: &IRModule, options: IROptOptions, threads: CompilerThre
     lint :: if options.verify -> ir_lint_context(m) else -> ir_lint_context_none()
     functions := [IRFunction]{}
     compiler_transfer_rows<IRFunction>(&functions, &m.functions)
+    keys := [String]{}
+    loop f in functions -> &keys.push(f.key.copy())
+    // Before the call graph: the `#unique<..>` calls this moves into callers
+    // are edges of it.
+    if level >= 2 && ir_opt_enabled(options, "unique") -> report.unique_hoisted += ir_opt_unique_to_callers(m, &functions, keys)
     weights := [Int]{}
     loop f in functions -> &weights.push(1 + f.op.len())
     glue :: if ir_opt_enabled(options, "glue") -> ir_opt_glue_table(m) else -> [Int]{}
@@ -180,8 +186,6 @@ fn ir_optimize_module(m: &IRModule, options: IROptOptions, threads: CompilerThre
     report.direct_calls += ir_opt_prepare(&functions, weights, ^glue, threads, &calls)
     order :: ir_opt_bottom_up(calls)
     sites :: ir_opt_call_sites(calls)
-    keys := [String]{}
-    loop f in functions -> &keys.push(f.key.copy())
     total := 0
     loop weight in weights -> total += weight
     workers :: compiler_threads_admit(threads, functions.len(), total, IR_OPT_MIN_INSTRUCTIONS_PER_THREAD, 0, 0)
@@ -205,7 +209,7 @@ fn ir_optimize_module(m: &IRModule, options: IROptOptions, threads: CompilerThre
 
 // The passes read the module's type rows, moved out of `m` into a module of
 // their own, the ids of the runtime routes they know (ir_opt_routes) and
-// the trap poll's (OptRange.jet), by name.
+// the stop and trap polls' (OptRange.jet), by name.
 fn ir_opt_view(m: &IRModule) -> IRModule Never! {
     view := ir_module_new()
     compiler_transfer_rows<IRType>(&view.types, &m.types)
@@ -213,8 +217,11 @@ fn ir_opt_view(m: &IRModule) -> IRModule Never! {
         id :: name_rows_value(m.name_rows, route) ?? -1
         if id >= 0 -> name_rows_set(&view.name_rows, route, id)
     }
-    trap :: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
-    if trap >= 0 -> name_rows_set(&view.name_rows, IR_STOP_TRAP_KEY, trap)
+    points :: [String]{IR_STOP_POLL_KEY, IR_STOP_TRAP_KEY}
+    loop key in points {
+        id :: name_rows_value(m.function_rows, key) ?? -1
+        if id >= 0 -> name_rows_set(&view.name_rows, key, id)
+    }
     view
 }
 
@@ -507,7 +514,7 @@ fn ir_opt_ssa(m: IRModule, f: &IRFunction, options: IROptOptions, report: &IROpt
     }
     traps :: if ranges -> ir_range_traps(m, f) else -> 0
     facts := if ranges -> ir_opt_int_facts(m, &f, &s) else -> 0
-    // The trap polls the ranges dropped leave the form stale, and the values
+    // The stop points the ranges dropped leave the form stale, and the values
     // they kept unbounded at a join bounded now: one more round on a fresh
     // form.
     if facts > 0 && ir_range_traps(m, f) < traps {

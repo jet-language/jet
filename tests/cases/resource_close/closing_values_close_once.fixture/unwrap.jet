@@ -1,0 +1,99 @@
+// Each value below closes exactly once: `found :: held ?? return ...` binds the payload, which then moves out.
+use core.files as files
+
+struct Res { name: String }
+impl Res.Close {
+    fn close(^self) { print("close {self.name}") }
+}
+
+// Closes through the FileReader it holds, and the Res beside it.
+struct Checked {
+    tracer: Res
+    handle: files.FileReader
+}
+
+fn some_res(name: String) -> Res? { Val(Res{name: name}) }
+
+fn ok_res(name: String) -> Res Err! { Ok(Res{name: name}) }
+
+fn some_checked(name: String) -> Checked? {
+    handle :: files.open("data.txt") ?? return None
+    Val(Checked{tracer: Res{name: name}, handle: handle})
+}
+
+fn ok_checked(name: String) -> Checked Err! {
+    handle :: files.open("data.txt") ?? return Err("open")
+    Ok(Checked{tracer: Res{name: name}, handle: handle})
+}
+
+fn unwrap_option_res(name: String) -> Res? {
+    held :: some_res(name)
+    found :: held ?? return None
+    Val(^found)
+}
+
+fn check_option_res() {
+    if unwrap_option_res("unwrap option res") == {
+        .Val(got) -> print("got {got.name}")
+        .None -> print("none")
+    }
+}
+
+fn unwrap_result_res(name: String) -> Res Err! {
+    found :: ok_res(name) ?? return Err("missing")
+    Ok(^found)
+}
+
+fn check_result_res() {
+    if unwrap_result_res("unwrap result res") == {
+        .Ok(got) -> print("got {got.name}")
+        .Err(error) -> print("failed {error}")
+    }
+}
+
+fn unwrap_option_reader(name: String) -> Checked? {
+    held :: some_checked(name)
+    found :: held ?? return None
+    Val(^found)
+}
+
+fn check_option_reader() {
+    if unwrap_option_reader("unwrap option reader") == {
+        .Val(got) -> print("got {got.tracer.name}")
+        .None -> print("none")
+    }
+}
+
+fn unwrap_result_reader(name: String) -> Checked Err! {
+    found :: ok_checked(name) ?? return Err("missing")
+    Ok(^found)
+}
+
+fn check_result_reader() {
+    if unwrap_result_reader("unwrap result reader") == {
+        .Ok(got) -> print("got {got.tracer.name}")
+        .Err(error) -> print("failed {error}")
+    }
+}
+
+fn bound_res() {
+    held :: some_res("bound res")
+    found :: held ?? return
+    print("bound {found.name}")
+}
+
+fn bound_reader() {
+    held :: some_checked("bound reader")
+    found :: held ?? return
+    print("bound {found.tracer.name}")
+}
+
+fn run() {
+    check_option_res()
+    check_result_res()
+    check_option_reader()
+    check_result_reader()
+    bound_res()
+    bound_reader()
+    print("done")
+}

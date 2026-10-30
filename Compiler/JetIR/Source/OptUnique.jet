@@ -1,3 +1,5 @@
+use jet_foundation.[name_rows_value]
+
 // Uniqueness hoisting (O2), before inlining: a call making a local list's
 // counted buffer its own (the `#unique<..>` helper, ir_make_unique) moves
 // out of every Loop that cannot make the buffer shared again, to just
@@ -189,4 +191,162 @@ fn ir_opt_header_store_keeps(m: IRModule, f: IRFunction, facts: OptFacts, at: In
     value :: f.c[at]
     if value < f.param_count || facts.defs[value] != 1 -> return false
     ir_opt_calls_route(m, f, facts.def_at[value], "jet_rt_alloc")
+}
+
+// Uniqueness at the caller (O2, before the call graph is built). A
+// function's first step can be to make a `&` list parameter's buffer its
+// own: after hoisting, a `#unique<..>` call on the parameter that only Block
+// openers, other such calls and side-effect-free instructions writing no
+// parameter precede. If only direct Calls reach that function, each Call
+// makes that argument unique just before it instead. That is the same step
+// at the same point, so the callee keeps no test, and a caller that owns
+// the list outright can drop or hoist its own.
+// "Only direct Calls" means: the module is a program, not a library; the
+// function is not its entry, a type's drop or clone routine, or named by any
+// FunctionAddress; and every Call of it passes a header of the parameter's
+// own type row.
+// Returns the calls ir_opt_hoist_unique moved on the way.
+fn ir_opt_unique_to_callers(m: IRModule, functions: &[IRFunction], keys: [String]) -> Int Never! {
+    count :: functions.len()
+    if m.entry < 0 || m.entry >= count -> return 0
+    addressed := [Bool]{}
+    loop _ in 0..<count -> &addressed.push(false)
+    addressed[m.entry] = true
+    loop ty in m.types {
+        drop :: if ty.drop == "" -> -1 else -> name_rows_value(m.function_rows, ty.drop) ?? -1
+        if drop >= 0 && drop < count -> addressed[drop] = true
+        clone :: if ty.clone == "" -> -1 else -> name_rows_value(m.function_rows, ty.clone) ?? -1
+        if clone >= 0 && clone < count -> addressed[clone] = true
+    }
+    loop f in functions {
+        loop at in 0..<f.op.len() {
+            if f.op[at] == .FunctionAddress && f.a[at] >= 0 && f.a[at] < count -> addressed[f.a[at]] = true
+        }
+    }
+    // The candidates: callee, parameter, the call's index and its helper.
+    hoisted := 0
+    callees := [Int]{}
+    params := [Int]{}
+    sites := [Int]{}
+    helpers := [Int]{}
+    loop id in 0..<count {
+        if addressed[id] || !ir_opt_unique_on_param(functions[id], keys) -> next
+        hoisted += ir_opt_hoist_unique(m, &functions[id], keys)
+        ir_opt_entry_uniques(m, functions[id], keys, id, &callees, &params, &sites, &helpers)
+    }
+    if callees.len() == 0 -> return hoisted
+    ok := [Bool]{}
+    loop _ in callees -> &ok.push(true)
+    loop g in functions {
+        loop at in 0..<g.op.len() {
+            if g.op[at] != .Call -> next
+            loop k in 0..<callees.len() {
+                if callees[k] != g.a[at] || !ok[k] -> next
+                callee :: callees[k]
+                if g.c[at] != functions[callee].param_count {
+                    ok[k] = false
+                    next
+                }
+                arg :: g.args[g.b[at] + params[k]]
+                if arg < 0 || g.slot_type[arg] != functions[callee].slot_type[params[k]] -> ok[k] = false
+            }
+        }
+    }
+    loop k in 0..<callees.len() {
+        if ok[k] -> ir_opt_kill(&functions[callees[k]], sites[k])
+    }
+    loop id in 0..<count {
+        killed := false
+        loop k in 0..<callees.len() {
+            if ok[k] && callees[k] == id -> killed = true
+        }
+        if ir_opt_put_uniques(&functions[id], callees, params, helpers, ok) || killed -> ir_opt_compact(&functions[id])
+    }
+    hoisted
+}
+
+// The parameter instruction `at` makes unique by a `#unique<..>` call, else -1.
+fn ir_opt_unique_param(f: IRFunction, keys: [String], at: Int) -> Int Never! {
+    if f.op[at] != .Call || f.c[at] != 1 || f.dst[at] >= 0 -> return -1
+    callee :: f.a[at]
+    if callee < 0 || callee >= keys.len() || !keys[callee].starts_with("#unique<") -> return -1
+    slot :: f.args[f.b[at]]
+    if slot < 0 || slot >= f.param_count -> return -1
+    slot
+}
+
+// Whether `f` makes a parameter unique anywhere.
+fn ir_opt_unique_on_param(f: IRFunction, keys: [String]) -> Bool Never! {
+    loop at in 0..<f.op.len() {
+        if ir_opt_unique_param(f, keys, at) >= 0 -> return true
+    }
+    false
+}
+
+// The `#unique<..>` calls on parameters that function `id` (`f`) makes
+// first (ir_opt_unique_to_callers), appended to the candidate columns. A
+// parameter any instruction writes is never one.
+fn ir_opt_entry_uniques(m: IRModule, f: IRFunction, keys: [String], id: Int, callees: &[Int], params: &[Int], sites: &[Int], helpers: &[Int]) Never! {
+    taken := [Int]{}
+    at := 0
+    loop at < f.op.len() {
+        if f.op[at] == .Block {
+            at += 1
+            next
+        }
+        param :: ir_opt_unique_param(f, keys, at)
+        if param >= 0 {
+            if !taken.contains(param) && !ir_opt_param_written(f, param) {
+                &taken.push(param)
+                &callees.push(id)
+                &params.push(param)
+                &sites.push(at)
+                &helpers.push(f.a[at])
+            }
+            at += 1
+            next
+        }
+        if !ir_opt_removable(m, f, at) || (f.dst[at] >= 0 && f.dst[at] < f.param_count) -> break
+        at += 1
+    }
+}
+
+fn ir_opt_param_written(f: IRFunction, param: Int) -> Bool Never! {
+    loop at in 0..<f.op.len() {
+        if f.dst[at] == param -> return true
+    }
+    false
+}
+
+// Puts the `#unique<..>` call of each accepted candidate (`ok`) before each
+// Call of its callee in `f`, on that Call's argument. Returns whether any went in.
+fn ir_opt_put_uniques(f: &IRFunction, callees: [Int], params: [Int], helpers: [Int], ok: [Bool]) -> Bool Never! {
+    found := false
+    loop at in 0..<f.op.len() {
+        if f.op[at] != .Call -> next
+        loop k in 0..<callees.len() {
+            if ok[k] && callees[k] == f.a[at] -> found = true
+        }
+        if found -> break
+    }
+    if !found -> return false
+    code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
+    loop at in 0..<f.op.len() {
+        if f.op[at] == .Call {
+            loop k in 0..<callees.len() {
+                if !ok[k] || callees[k] != f.a[at] -> next
+                arg :: f.args[f.b[at] + params[k]]
+                start :: ir_args(&f, [Int]{arg})
+                ir_opt_code_put(&code, IROp.Call, -1, helpers[k], start, 1, f.code_line[at])
+            }
+        }
+        ir_opt_code_put(&code, f.op[at], f.dst[at], f.a[at], f.b[at], f.c[at], f.code_line[at])
+    }
+    f.op = ^code.op
+    f.dst = ^code.dst
+    f.a = ^code.a
+    f.b = ^code.b
+    f.c = ^code.c
+    f.code_line = ^code.line
+    true
 }

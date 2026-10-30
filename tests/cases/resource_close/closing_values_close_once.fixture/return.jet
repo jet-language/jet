@@ -1,0 +1,87 @@
+// Each value below closes exactly once: `return held` leaves while the variable is live.
+use core.files as files
+
+struct Res { name: String }
+impl Res.Close {
+    fn close(^self) { print("close {self.name}") }
+}
+
+// Closes through the FileReader it holds, and the Res beside it.
+struct Checked {
+    tracer: Res
+    handle: files.FileReader
+}
+
+fn some_res(name: String) -> Res? { Val(Res{name: name}) }
+
+fn ok_res(name: String) -> Res Err! { Ok(Res{name: name}) }
+
+fn some_checked(name: String) -> Checked? {
+    handle :: files.open("data.txt") ?? return None
+    Val(Checked{tracer: Res{name: name}, handle: handle})
+}
+
+fn ok_checked(name: String) -> Checked Err! {
+    handle :: files.open("data.txt") ?? return Err("open")
+    Ok(Checked{tracer: Res{name: name}, handle: handle})
+}
+
+fn return_option_res(name: String) -> Res? {
+    held :: some_res(name)
+    if name.len() > 0 -> return held
+    None
+}
+
+fn check_option_res() {
+    if return_option_res("return option res") == {
+        .Val(got) -> print("got {got.name}")
+        .None -> print("none")
+    }
+}
+
+fn return_result_res(name: String) -> Res Err! {
+    held :: ok_res(name)
+    if name.len() > 0 -> return held
+    Err("missing")
+}
+
+fn check_result_res() {
+    if return_result_res("return result res") == {
+        .Ok(got) -> print("got {got.name}")
+        .Err(error) -> print("failed {error}")
+    }
+}
+
+fn return_option_reader(name: String) -> Checked? {
+    held :: some_checked(name)
+    if name.len() > 0 -> return held
+    None
+}
+
+fn check_option_reader() {
+    if return_option_reader("return option reader") == {
+        .Val(got) -> print("got {got.tracer.name}")
+        .None -> print("none")
+    }
+}
+
+fn return_result_reader(name: String) -> Checked Err! {
+    held :: ok_checked(name)
+    if name.len() > 0 -> return held
+    Err("missing")
+}
+
+fn check_result_reader() {
+    if return_result_reader("return result reader") == {
+        .Ok(got) -> print("got {got.tracer.name}")
+        .Err(error) -> print("failed {error}")
+    }
+}
+
+fn run() {
+    check_option_res()
+    check_result_res()
+    check_option_reader()
+    check_result_reader()
+    print("done")
+}

@@ -25,16 +25,19 @@
 // nothing. For an Int whose range lies strictly inside the inline Ints: its
 // Drop is nothing (a Nop), its Copy is a Move, and jet_int_owned_to_i64 or
 // jet_rt_int_clone of it is a Move, as is jet_int_checked_fixed of it when
-// it lies inside the fixed-width kind; an Int Add, Sub or Mul whose operands
-// and result are inline, a Div, Rem, FloorDiv or Mod of inline operands by
-// a positive divisor, and an Int comparison of inline operands, are marked
-// IR_OVERFLOW_WRAP (X64Select: the plain i64 instruction, and for such a
-// division no divisor checks; the trap poll after the division, which
-// nothing can reach now, goes). A FloorDiv or Mod of a nonnegative
-// dividend by a positive divisor, inline or not, is the Div or Rem. A
+// it lies inside the fixed-width kind (the stop poll after that call, which
+// nothing can reach now, goes); an Int Add, Sub or Mul whose operands and
+// result are inline, a word Add, Sub or Mul whose operands and result are
+// inline and inside the word's type (an unsigned word's all nonnegative), a
+// Div, Rem, FloorDiv or Mod of inline Int operands by a positive divisor,
+// and an Int comparison of inline operands, are marked IR_OVERFLOW_WRAP
+// (X64Select: the plain instruction, and for such a division no divisor
+// checks; the trap poll after a word operation or the division, which
+// nothing can reach now, goes). A FloorDiv or Mod of a nonnegative dividend
+// by a positive divisor, Int or word, inline or not, is the Div or Rem. A
 // comparison the ranges decide becomes its constant. Returns the
-// rewritten instructions; `f` and `s` stay one SSA form but for the trap
-// polls gone (Opt.jet ir_opt_ssa then ranges the function once more).
+// rewritten instructions; `f` and `s` stay one SSA form but for the stop
+// points gone (Opt.jet ir_opt_ssa then ranges the function once more).
 
 use jet_foundation.[name_rows_value]
 
@@ -80,6 +83,9 @@ struct IRRanges {
     // compares it (else no branch narrows it).
     home: [Int]
     tested: [Bool]
+    // Per value: whether it is a load of a List header's length (its first
+    // word), a count of elements held in memory.
+    lengths: [Bool]
 }
 
 fn ir_range_top() -> IRRange Never! {
@@ -120,10 +126,17 @@ fn ir_range_wanted(m: IRModule, f: IRFunction) -> Bool Never! {
     false
 }
 
+// Whether instruction `at` loads a List header's length: its first word,
+// through a slot of a List type.
+fn ir_range_length_load(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
+    if f.op[at] != .Load || f.b[at] != 0 || f.a[at] < 0 || f.a[at] >= f.slot_type.len() -> return false
+    ir_untag(m.types[f.slot_type[f.a[at]]].ty) == .List(_)
+}
+
 fn ir_opt_int_facts(m: IRModule, f: &IRFunction, s: &IRSsa) -> Int Never! {
     count :: s.val_slot.len()
     if count == 0 || count > IR_RANGE_VALUES -> return 0
-    r := IRRanges{ranged: [Bool]{}, exact: [Bool]{}, unsigned: [Bool]{}, narrow: [Bool]{}, cap_lo: [Int]{}, cap_hi: [Int]{}, known: [Bool]{}, lo: [Int]{}, hi: [Int]{}, cond: [Int]{}, holds: [Bool]{}, up: [Int]{}, home: [Int]{}, tested: [Bool]{}}
+    r := IRRanges{ranged: [Bool]{}, exact: [Bool]{}, unsigned: [Bool]{}, narrow: [Bool]{}, cap_lo: [Int]{}, cap_hi: [Int]{}, known: [Bool]{}, lo: [Int]{}, hi: [Int]{}, cond: [Int]{}, holds: [Bool]{}, up: [Int]{}, home: [Int]{}, tested: [Bool]{}, lengths: [Bool]{}}
     any := false
     loop value in 0..<count {
         ty :: m.types[f.slot_type[s.val_slot[value]]]
@@ -154,6 +167,7 @@ fn ir_opt_int_facts(m: IRModule, f: &IRFunction, s: &IRSsa) -> Int Never! {
         home :: if kind == .Def -> s.block[s.val_at[value]] else if kind == .Phi -> s.join_block[s.phi_join[s.val_at[value]]] else -> 0
         &r.home.push(home)
         &r.tested.push(false)
+        &r.lengths.push((exact || word) && !narrow && kind == .Def && ir_range_length_load(m, f, s.val_at[value]))
     }
     if !any -> return 0
     loop _ in 0..<s.preds.len() {
@@ -192,7 +206,14 @@ fn ir_opt_int_facts(m: IRModule, f: &IRFunction, s: &IRSsa) -> Int Never! {
         round += 1
     }
     if changed -> return 0
-    // Descending rounds from the post-fixpoint.
+    // Descending rounds from the post-fixpoint, and again from the bounds
+    // of the counted loops' accumulators.
+    ir_range_descend(f, s, &r, count)
+    if ir_range_counted(f, s, &r) -> ir_range_descend(f, s, &r, count)
+    ir_range_rewrite(m, &f, &s, r)
+}
+
+fn ir_range_descend(f: IRFunction, s: IRSsa, r: &IRRanges, count: Int) Never! {
     loop _ in 0..<IR_RANGE_NARROW {
         loop value in 0..<count {
             if !r.ranged[value] || !r.known[value] || ir_ssa_find(s, value) != value -> next
@@ -202,7 +223,102 @@ fn ir_opt_int_facts(m: IRModule, f: &IRFunction, s: &IRSsa) -> Int Never! {
             if got.hi < r.hi[value] -> r.hi[value] = got.hi
         }
     }
-    ir_range_rewrite(m, &f, &s, r)
+}
+
+// The accumulators of counted loops: a signed phi still unbounded whose
+// join has two edges, on one of them (the back edge) its own value plus d,
+// where a bounded signed phi of the same join (the counter) gets its own
+// value plus 1. Each pass of the back edge adds 1 to the counter and d to
+// the accumulator, so after k passes the accumulator lies within its entry
+// value plus k times d's range, where k is at most the counter's high bound
+// less its entry's low bound. Returns whether any accumulator was bounded.
+fn ir_range_counted(f: IRFunction, s: IRSsa, r: &IRRanges) -> Bool Never! {
+    found := false
+    loop value in 0..<r.ranged.len() {
+        if !ir_range_counted_phi(s, r, value) || ir_range_bounded(IRRange{known: true, lo: r.lo[value], hi: r.hi[value]}) -> next
+        phi :: s.val_at[value]
+        join :: s.phi_join[phi]
+        if s.join_edges[join].len() != 2 -> next
+        loop back in 0..<2 {
+            add :: ir_range_step(f, s, r, value, ir_ssa_phi_arg(s, phi, back))
+            if add < 0 -> next
+            d :: ir_range_step_by(f, s, r, value, add)
+            if !d.known || !ir_range_bounded(d) -> next
+            entry :: 1 - back
+            start :: ir_range_at(f, s, r, ir_ssa_phi_arg(s, phi, entry), s.edge_block[s.join_edges[join][entry]])
+            if !start.known || !ir_range_bounded(start) -> next
+            passes :: ir_range_passes(f, s, r, join, back)
+            if passes < 0 -> next
+            lo :: start.lo + (if d.lo < 0 -> passes * d.lo else -> 0)
+            hi :: start.hi + (if d.hi > 0 -> passes * d.hi else -> 0)
+            if lo > r.lo[value] -> r.lo[value] = lo
+            if hi < r.hi[value] -> r.hi[value] = hi
+            found = true
+        }
+    }
+    found
+}
+
+// Whether value `value` is a known phi of a signed 64-bit word or an Int.
+fn ir_range_counted_phi(s: IRSsa, r: IRRanges, value: Int) -> Bool Never! {
+    r.ranged[value] && !r.narrow[value] && !r.unsigned[value] && r.known[value] && s.val_kind[value] == .Phi && ir_ssa_find(s, value) == value
+}
+
+// The most passes the back edge `back` of `join` can make in a row: over
+// the counters of the join (ir_range_counted), the fewest; -1 when none is.
+fn ir_range_passes(f: IRFunction, s: IRSsa, r: IRRanges, join: Int, back: Int) -> Int Never! {
+    best := -1
+    entry :: 1 - back
+    loop value in 0..<r.ranged.len() {
+        if !ir_range_counted_phi(s, r, value) || s.phi_join[s.val_at[value]] != join || !ir_range_bounded(IRRange{known: true, lo: r.lo[value], hi: r.hi[value]}) -> next
+        phi :: s.val_at[value]
+        add :: ir_range_step(f, s, r, value, ir_ssa_phi_arg(s, phi, back))
+        if add < 0 -> next
+        c :: ir_range_step_by(f, s, r, value, add)
+        if !c.known || c.lo != 1 || c.hi != 1 -> next
+        start :: ir_range_at(f, s, r, ir_ssa_phi_arg(s, phi, entry), s.edge_block[s.join_edges[join][entry]])
+        if !start.known || !ir_range_bounded(start) -> next
+        passes :: if r.hi[value] < start.lo -> 0 else -> r.hi[value] - start.lo
+        if best < 0 || passes < best -> best = passes
+    }
+    best
+}
+
+// The Add that value `used` holds, through Copies and Moves of its own kind,
+// when one of its operands is (so held) the phi `value`: its instruction,
+// else -1.
+fn ir_range_step(f: IRFunction, s: IRSsa, r: IRRanges, value: Int, used: Int) -> Int Never! {
+    if used < 0 -> return -1
+    held :: ir_range_held(f, s, r, ir_ssa_find(s, used))
+    if s.val_kind[held] != .Def -> return -1
+    at :: s.val_at[held]
+    if f.op[at] != .Add || s.use_a[at] < 0 || s.use_b[at] < 0 -> return -1
+    if ir_range_held(f, s, r, ir_ssa_find(s, s.use_a[at])) == value || ir_range_held(f, s, r, ir_ssa_find(s, s.use_b[at])) == value -> return at
+    return -1
+}
+
+// The range of the operand of Add `at` (ir_range_step) that is not phi
+// `value`, read where the Add is.
+fn ir_range_step_by(f: IRFunction, s: IRSsa, r: IRRanges, value: Int, at: Int) -> IRRange Never! {
+    other :: if ir_range_held(f, s, r, ir_ssa_find(s, s.use_a[at])) == value -> s.use_b[at] else -> s.use_a[at]
+    if !ir_range_has(s, r, other) -> return ir_range_none()
+    ir_range_at(f, s, r, other, s.block[at])
+}
+
+// The value `value` copies, through Copies and Moves between two Ints or
+// two signed 64-bit words.
+fn ir_range_held(f: IRFunction, s: IRSsa, r: IRRanges, value_in: Int) -> Int Never! {
+    value := value_in
+    steps := 0
+    loop steps < IR_RANGE_DEPTH && s.val_kind[value] == .Def {
+        at :: s.val_at[value]
+        if !(f.op[at] == .Copy || f.op[at] == .Move) || s.use_a[at] < 0 -> return value
+        from :: ir_ssa_find(s, s.use_a[at])
+        if !r.ranged[from] || r.narrow[from] || r.narrow[value] || r.unsigned[from] || r.unsigned[value] || r.exact[from] != r.exact[value] -> return value
+        value = from
+        steps += 1
+    }
+    value
 }
 
 // Each block entered through a decided branch: an If's arms, a BrIf's
@@ -215,6 +331,10 @@ fn ir_range_conditions(f: IRFunction, s: IRSsa, r: &IRRanges) Never! {
         if op == .If && s.use_a[at] >= 0 {
             ir_range_decide(f, s, &r, at + 1, s.use_a[at], true)
             if f.b[at] >= 0 && f.b[at] + 1 < f.op.len() -> ir_range_decide(f, s, &r, f.b[at] + 1, s.use_a[at], false)
+            // An If without an Else whose body never falls through (a stop
+            // point): the code after its End runs only when the condition
+            // failed (ir_range_decide's one-predecessor test).
+            if f.b[at] < 0 && f.c[at] + 1 < f.op.len() -> ir_range_decide(f, s, &r, f.c[at] + 1, s.use_a[at], false)
         }
         if op == .BrIf && s.use_a[at] >= 0 -> ir_range_decide(f, s, &r, at + 1, s.use_a[at], false)
     }
@@ -352,6 +472,8 @@ fn ir_range_write(f: IRFunction, s: IRSsa, r: IRRanges, value: Int) -> IRRange N
     kind :: s.val_kind[value]
     if kind == .Phi -> return ir_range_phi(f, s, r, s.val_at[value])
     if kind != .Def -> return ir_range_top()
+    // Memory holds fewer than 2^62 - 1 elements of any list.
+    if r.lengths[value] -> return ir_range_make(0, IR_RANGE_HIGH - 1)
     at :: s.val_at[value]
     block :: s.block[at]
     op :: f.op[at]
@@ -495,8 +617,12 @@ fn ir_range_rewrite(m: IRModule, f: &IRFunction, s: &IRSsa, r: IRRanges) -> Int 
     to_i64 :: name_rows_value(m.name_rows, "jet_int_owned_to_i64") ?? -2
     clone :: name_rows_value(m.name_rows, "jet_rt_int_clone") ?? -2
     fixed :: name_rows_value(m.name_rows, "jet_int_checked_fixed") ?? -2
+    poll :: name_rows_value(m.name_rows, IR_STOP_POLL_KEY) ?? -2
     trap :: name_rows_value(m.name_rows, IR_STOP_TRAP_KEY) ?? -2
     rewritten := 0
+    // Per value, the first load of the same read-only parameter word (-1:
+    // none), built at the first comparison the ranges leave open.
+    loads := [Int]{}
     loop at in 0..<f.op.len() {
         block :: s.block[at]
         if block < 0 -> next
@@ -513,28 +639,39 @@ fn ir_range_rewrite(m: IRModule, f: &IRFunction, s: &IRSsa, r: IRRanges) -> Int 
             rewritten += 1
             next
         }
-        if (op == .Add || op == .Sub || op == .Mul) && f.c[at] == IR_OVERFLOW_TRAP && ir_range_has(s, r, s.use_a[at]) && ir_range_has(s, r, s.use_b[at]) && r.exact[ir_ssa_find(s, s.use_a[at])] && r.exact[ir_ssa_find(s, s.use_b[at])] {
-            a :: ir_range_at(f, s, r, s.use_a[at], block)
-            b :: ir_range_at(f, s, r, s.use_b[at], block)
-            if !ir_range_inline(a) || !ir_range_inline(b) || !ir_range_inline(ir_range_binary(op, a, b)) -> next
+        if (op == .Add || op == .Sub || op == .Mul) && f.c[at] == IR_OVERFLOW_TRAP && ir_range_has(s, r, s.use_a[at]) && ir_range_has(s, r, s.use_b[at]) {
+            left :: ir_ssa_find(s, s.use_a[at])
+            right :: ir_ssa_find(s, s.use_b[at])
+            if r.exact[left] != r.exact[right] -> next
+            a :: ir_range_at(f, s, r, left, block)
+            b :: ir_range_at(f, s, r, right, block)
+            result :: ir_range_binary(op, a, b)
+            if !ir_range_inline(a) || !ir_range_inline(b) || !ir_range_inline(result) -> next
+            if !r.exact[left] && !ir_range_word_fits(r, left, a, b, result) -> next
             f.c[at] = IR_OVERFLOW_WRAP
             rewritten += 1
+            ir_range_drop_point(&f, trap, at + 1)
             next
         }
-        if (op == .Div || op == .Rem || op == .FloorDiv || op == .Mod) && f.c[at] == IR_OVERFLOW_TRAP && ir_range_has(s, r, s.use_a[at]) && ir_range_has(s, r, s.use_b[at]) && r.exact[ir_ssa_find(s, s.use_a[at])] && r.exact[ir_ssa_find(s, s.use_b[at])] {
-            a :: ir_range_at(f, s, r, s.use_a[at], block)
-            b :: ir_range_at(f, s, r, s.use_b[at], block)
+        if (op == .Div || op == .Rem || op == .FloorDiv || op == .Mod) && f.c[at] == IR_OVERFLOW_TRAP && ir_range_has(s, r, s.use_a[at]) && ir_range_has(s, r, s.use_b[at]) {
+            left :: ir_ssa_find(s, s.use_a[at])
+            right :: ir_ssa_find(s, s.use_b[at])
+            if r.exact[left] != r.exact[right] -> next
+            a :: ir_range_at(f, s, r, left, block)
+            b :: ir_range_at(f, s, r, right, block)
             // A nonnegative dividend's floored quotient and remainder by a
-            // positive divisor are its truncated ones, big or not.
+            // positive divisor are its truncated ones, big or not, word or
+            // not.
             if a.known && b.known && a.lo >= 0 && b.lo > 0 && op == .FloorDiv -> f.op[at] = .Div
             if a.known && b.known && a.lo >= 0 && b.lo > 0 && op == .Mod -> f.op[at] = .Rem
             if f.op[at] != op -> rewritten += 1
-            // By a positive divisor nothing stops, and the result is no
-            // larger than the dividend.
-            if !ir_range_inline(a) || !ir_range_inline(b) || b.lo <= 0 -> next
+            // An Int by a positive divisor: nothing stops, and the result is
+            // no larger than the dividend. (A word division keeps its
+            // divisor checks: X64Select skips them for an Int only.)
+            if !r.exact[left] || !ir_range_inline(a) || !ir_range_inline(b) || b.lo <= 0 -> next
             f.c[at] = IR_OVERFLOW_WRAP
             rewritten += 1
-            ir_range_drop_trap(&f, trap, at + 1)
+            ir_range_drop_point(&f, trap, at + 1)
             next
         }
         if ir_range_is_compare(op) && f.dst[at] >= 0 && ir_range_has(s, r, s.use_a[at]) && ir_range_has(s, r, s.use_b[at]) {
@@ -542,10 +679,13 @@ fn ir_range_rewrite(m: IRModule, f: &IRFunction, s: &IRSsa, r: IRRanges) -> Int 
             right :: ir_ssa_find(s, s.use_b[at])
             a :: ir_range_at(f, s, r, left, block)
             b :: ir_range_at(f, s, r, right, block)
-            if !ir_range_inline(a) || !ir_range_inline(b) -> next
             unsigned :: r.unsigned[left] || r.unsigned[right]
-            if unsigned && (a.lo < 0 || b.lo < 0) -> next
-            decided :: ir_range_decided(op, a, b)
+            ranged :: ir_range_inline(a) && ir_range_inline(b) && !(unsigned && (a.lo < 0 || b.lo < 0))
+            decided := if ranged -> ir_range_decided(op, a, b) else -> -1
+            if decided < 0 {
+                if loads.len() == 0 -> loads = ir_range_loads(m, f, s)
+                decided = ir_range_implied(f, s, r, loads, to_i64, op, left, right, block)
+            }
             if decided >= 0 {
                 f.op[at] = .Const
                 f.a[at] = decided
@@ -556,7 +696,7 @@ fn ir_range_rewrite(m: IRModule, f: &IRFunction, s: &IRSsa, r: IRRanges) -> Int 
                 rewritten += 1
                 next
             }
-            if r.exact[left] && r.exact[right] && f.c[at] != IR_OVERFLOW_WRAP {
+            if ranged && r.exact[left] && r.exact[right] && f.c[at] != IR_OVERFLOW_WRAP {
                 f.c[at] = IR_OVERFLOW_WRAP
                 rewritten += 1
             }
@@ -585,27 +725,196 @@ fn ir_range_rewrite(m: IRModule, f: &IRFunction, s: &IRSsa, r: IRRanges) -> Int 
             f.c[at] = -1
             s.use_a[at] = used
             rewritten += 1
+            // The call is gone, and with it the stop it could deliver.
+            ir_range_drop_point(&f, poll, at + 1)
         }
     }
     rewritten
 }
 
-// The trap poll at `at` (Build.jet ir_stop_trap: the call of `trap`, then
-// the If on what it returned, with no Else), if one is there, becomes Nops.
-fn ir_range_drop_trap(f: &IRFunction, trap: Int, at: Int) Never! {
-    if trap < 0 || at + 1 >= f.op.len() || f.op[at] != .Call || f.a[at] != trap || f.dst[at] < 0 -> return
+// Whether a word Add, Sub or Mul of `a` and `b` (inline ranges) into
+// `result` (inline) stays inside the type of value `left`: then neither
+// the 64-bit overflow nor a narrow word's range check can fire. An
+// unsigned word is read through its ranges only when nothing is negative.
+fn ir_range_word_fits(r: IRRanges, left: Int, a: IRRange, b: IRRange, result: IRRange) -> Bool Never! {
+    if result.lo < r.cap_lo[left] || result.hi > r.cap_hi[left] -> return false
+    !r.unsigned[left] || (a.lo >= 0 && b.lo >= 0 && result.lo >= 0)
+}
+
+// Per value, the first load of the same word of a parameter aggregate whose
+// word nothing in the function writes (-1: none). Only Loads, and Stores to
+// other words, reach such a parameter, so no one else (a `&` parameter is
+// exclusive) writes its bytes while the function runs, and two loads of
+// one offset read one value (a list's length tested by a loop and again by
+// an index check).
+fn ir_range_loads(m: IRModule, f: IRFunction, s: IRSsa) -> [Int] Never! {
+    count :: s.val_slot.len()
+    loads := [Int]{}
+    open := [Bool]{}
+    loop value in 0..<count {
+        &loads.push(-1)
+        &open.push(s.val_kind[value] == .Param && m.types[f.slot_type[s.val_slot[value]]].kind == .Aggregate)
+    }
+    // The words Stores write, as (base, offset) pairs.
+    stored_bases := [Int]{}
+    stored_offsets := [Int]{}
+    loop at in 0..<f.op.len() {
+        if f.op[at] == .Store && s.use_a[at] >= 0 {
+            &stored_bases.push(ir_ssa_find(s, s.use_a[at]))
+            &stored_offsets.push(f.b[at])
+        } else if f.op[at] != .Load && s.use_a[at] >= 0 {
+            open[ir_ssa_find(s, s.use_a[at])] = false
+        }
+        if s.use_b[at] >= 0 -> open[ir_ssa_find(s, s.use_b[at])] = false
+        if s.use_c[at] >= 0 -> open[ir_ssa_find(s, s.use_c[at])] = false
+    }
+    loop used in s.use_args {
+        if used >= 0 -> open[ir_ssa_find(s, used)] = false
+    }
+    bases := [Int]{}
+    offsets := [Int]{}
+    firsts := [Int]{}
+    loop at in 0..<f.op.len() {
+        if f.op[at] != .Load || s.block[at] < 0 || s.def[at] < 0 || s.use_a[at] < 0 || f.dst[at] < 0 -> next
+        base :: ir_ssa_find(s, s.use_a[at])
+        if !open[base] || m.types[f.slot_type[f.dst[at]]].size != 8 -> next
+        written := false
+        loop k in 0..<stored_bases.len() {
+            if stored_bases[k] == base && stored_offsets[k] > f.b[at] - 8 && stored_offsets[k] < f.b[at] + 8 -> written = true
+        }
+        if written -> next
+        value :: s.def[at]
+        first := value
+        loop k in 0..<bases.len() {
+            if bases[k] == base && offsets[k] == f.b[at] -> first = firsts[k]
+        }
+        if first == value {
+            &bases.push(base)
+            &offsets.push(f.b[at])
+            &firsts.push(value)
+        }
+        loads[value] = first
+    }
+    loads
+}
+
+// The value `used` reads, through the steps that keep its number: a Copy or
+// Move between two words of 64 bits, two Ints, or from an Int proven inline
+// into a word; jet_int_owned_to_i64, which returns only its operand's
+// number; a load of a read-only parameter word (ir_range_loads) as that
+// word's first load. A step lands only on a signed value, so the root's
+// number is the value's (an unsigned value's when the root is nonnegative).
+fn ir_range_root(f: IRFunction, s: IRSsa, r: IRRanges, loads: [Int], to_i64: Int, used: Int) -> Int Never! {
+    value := ir_ssa_find(s, used)
+    steps := 0
+    loop steps < IR_RANGE_DEPTH && s.val_kind[value] == .Def && !r.narrow[value] {
+        at :: s.val_at[value]
+        op :: f.op[at]
+        from := -1
+        if op == .Load {
+            first :: loads[value]
+            if first < 0 || first == value || !r.ranged[first] || r.unsigned[first] -> return value
+            return first
+        }
+        if (op == .Copy || op == .Move) && s.use_a[at] >= 0 {
+            from = ir_ssa_find(s, s.use_a[at])
+            if r.exact[from] && !r.exact[value] && !ir_range_inline(ir_range_at(f, s, r, from, s.block[at])) -> return value
+            if !r.exact[from] && r.exact[value] -> return value
+        }
+        if op == .CallRuntime && f.a[at] == to_i64 && f.c[at] == 1 && s.use_args[f.b[at]] >= 0 -> from = ir_ssa_find(s, s.use_args[f.b[at]])
+        if from < 0 || !r.ranged[from] || r.narrow[from] || r.unsigned[from] -> return value
+        value = from
+        steps += 1
+    }
+    value
+}
+
+// Whether the decided branches dominating `block` (ir_range_at's walk)
+// settle `left op right`: a deciding comparison of the same roots
+// (ir_range_root) and the relation it gives. 1 or 0; -1 when none does.
+fn ir_range_implied(f: IRFunction, s: IRSsa, r: IRRanges, loads: [Int], to_i64: Int, op: IROp, left: Int, right: Int, block: Int) -> Int Never! {
+    if block <= 0 -> return -1
+    l :: ir_range_root(f, s, r, loads, to_i64, left)
+    rr :: ir_range_root(f, s, r, loads, to_i64, right)
+    if l == rr -> return -1
+    unsigned :: r.unsigned[left] || r.unsigned[right]
+    at := r.up[block]
+    steps := 0
+    loop at > 0 && steps < IR_RANGE_DEPTH {
+        decided :: ir_range_implied_by(f, s, r, loads, to_i64, op, l, rr, unsigned, r.cond[at], r.holds[at])
+        if decided >= 0 -> return decided
+        at = if s.idom[at] >= 0 && s.idom[at] < at -> r.up[s.idom[at]] else -> -1
+        steps += 1
+    }
+    -1
+}
+
+// `l op rr` (roots; `unsigned`: the comparison reads unsigned words) under
+// condition `cond` holding or not: a signed comparison of the same roots.
+// Its relation carries to unsigned words when the operands are
+// nonnegative, or for `<` / `<=` when the smaller is (a negative larger one
+// is above every nonnegative word).
+fn ir_range_implied_by(f: IRFunction, s: IRSsa, r: IRRanges, loads: [Int], to_i64: Int, op: IROp, l: Int, rr: Int, unsigned: Bool, cond_in: Int, holds_in: Bool) -> Int Never! {
+    cond := cond_in
+    holds := holds_in
+    loop s.val_kind[cond] == .Def && f.op[s.val_at[cond]] == .Not && s.use_a[s.val_at[cond]] >= 0 {
+        cond = ir_ssa_find(s, s.use_a[s.val_at[cond]])
+        holds = !holds
+    }
+    if s.val_kind[cond] != .Def -> return -1
+    at :: s.val_at[cond]
+    if !ir_range_is_compare(f.op[at]) || s.use_a[at] < 0 || s.use_b[at] < 0 -> return -1
+    x :: ir_ssa_find(s, s.use_a[at])
+    y :: ir_ssa_find(s, s.use_b[at])
+    if !r.ranged[x] || !r.ranged[y] || r.unsigned[x] || r.unsigned[y] -> return -1
+    rx :: ir_range_root(f, s, r, loads, to_i64, x)
+    ry :: ir_range_root(f, s, r, loads, to_i64, y)
+    rel := if holds -> f.op[at] else -> ir_range_negate(f.op[at])
+    if rx == rr && ry == l {
+        rel = ir_range_swap(rel)
+    } else if rx != l || ry != rr {
+        return -1
+    }
+    if unsigned && rel != .Eq && rel != .Ne {
+        low_l :: r.known[l] && r.lo[l] >= 0
+        low_r :: r.known[rr] && r.lo[rr] >= 0
+        smaller_low :: if rel == .Lt || rel == .Le -> low_l else -> low_r
+        if !(low_l && low_r) && !smaller_low -> return -1
+    }
+    if ir_range_implies(rel, op) -> return 1
+    if ir_range_implies(rel, ir_range_negate(op)) -> return 0
+    return -1
+}
+
+// Whether `a rel b` makes `a op b` true.
+fn ir_range_implies(rel: IROp, op: IROp) -> Bool Never! {
+    if rel == op -> return true
+    if rel == {
+        .Lt -> op == .Le || op == .Ne
+        .Gt -> op == .Ge || op == .Ne
+        .Eq -> op == .Le || op == .Ge
+        else -> false
+    }
+}
+
+// The stop point at `at` (Build.jet ir_stop_point: the call of `key`, the
+// trap or the stop poll, then the If on what it returned, with no Else), if
+// one is there, becomes Nops.
+fn ir_range_drop_point(f: &IRFunction, key: Int, at: Int) Never! {
+    if key < 0 || at + 1 >= f.op.len() || f.op[at] != .Call || f.a[at] != key || f.dst[at] < 0 -> return
     branch :: at + 1
     if f.op[branch] != .If || f.a[branch] != f.dst[at] || f.b[branch] >= 0 -> return
     end :: f.c[branch]
     loop k in at..<(end + 1) -> ir_opt_kill(&f, k)
 }
 
-// How many calls of the trap poll `f` makes.
+// How many stop points (calls of the trap or the stop poll) `f` has.
 fn ir_range_traps(m: IRModule, f: IRFunction) -> Int Never! {
-    trap :: name_rows_value(m.name_rows, IR_STOP_TRAP_KEY) ?? return 0
+    poll :: name_rows_value(m.name_rows, IR_STOP_POLL_KEY) ?? -2
+    trap :: name_rows_value(m.name_rows, IR_STOP_TRAP_KEY) ?? -2
     count := 0
     loop at in 0..<f.op.len() {
-        if f.op[at] == .Call && f.a[at] == trap -> count += 1
+        if f.op[at] == .Call && (f.a[at] == trap || f.a[at] == poll) -> count += 1
     }
     count
 }
