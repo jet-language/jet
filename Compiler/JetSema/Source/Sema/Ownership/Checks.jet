@@ -2452,6 +2452,16 @@ fn sema_ownership_view_exists_for_expr(state: &SemaOwnershipState, expr: Expr, s
     false
 }
 
+// A live view whose window reads the storage of the binding `expr` names:
+// `alias :: bytes[0..1]` keeps `bytes` lent while `alias` is still used.
+fn sema_ownership_view_reads_binding(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable) -> Bool {
+    binding :: sema_ownership_binding_for_expr(&state, expr, scopes) ?? return false
+    loop view in state.views {
+        if view.active && view.source.root_key == binding.symbol.id.key -> return true
+    }
+    false
+}
+
 // A live write view carried by the expression's root name: a `&place`
 // pattern window (Rust `param_conv` `Write`) or a pin.
 fn sema_ownership_write_view_exists_for_expr(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable) -> Bool {

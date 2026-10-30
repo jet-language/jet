@@ -481,8 +481,10 @@ fn sema_call_try_stream_handle_static(owner: String, method: String, args: [Call
         if args.len() == 1 {
             if args[0].convention == AccessConvention.Move -> owned_reader = true
             if args[0].convention == AccessConvention.Read {
+                // A last use moves the bytes into the reader; a later use or
+                // a live view of them keeps the borrowing clone.
                 if args[0].expr == {
-                    .Ident(name, _, _) -> { owned_reader = !sema_ownership_name_live_after(name, &tail_store, &context) }
+                    .Ident(name, _, _) -> { owned_reader = !sema_ownership_name_live_after(name, &tail_store, &context) && !sema_ownership_view_reads_binding(&state, args[0].expr, scopes) }
                     else -> {}
                 }
             }

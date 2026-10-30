@@ -58,14 +58,20 @@ fn sema_casing_check(name: String, span: Span, category: String, case: SemaNameC
 // E0358: a type-like declaration keeps every lexicon acronym
 // in caps. The edit replaces the whole written name when the span covers it.
 fn sema_casing_acronyms(name: String, span: Span, diagnostics: &[Diagnostic]) {
-    if span.start == span.end -> return
+    if sema_casing_acronym_diagnostic(name, span) == .Val(diagnostic) -> &diagnostics.push(diagnostic)
+}
+
+// The E0358 for a type-like name that writes a lexicon acronym word-cased,
+// in a declaration or in a type position (`Id<Node>`, `HttpRequest`).
+fn sema_casing_acronym_diagnostic(name: String, span: Span) -> Diagnostic? {
+    if span.start == span.end -> return None
     parts := [String]{}
     loop segment in name.split(".") {
-        if !sema_casing_has_case(segment, SemaNameCase.Pascal) -> return
+        if !sema_casing_has_case(segment, SemaNameCase.Pascal) -> return None
         &parts.push(sema_casing_acronym_name(segment))
     }
     canonical :: parts.join(".")
-    if canonical == name -> return
+    if canonical == name -> return None
     diagnostic :: sema_error(
         "E0358",
         span,
@@ -73,11 +79,8 @@ fn sema_casing_acronyms(name: String, span: Span, diagnostics: &[Diagnostic]) {
         "Jet keeps acronyms fully capitalized inside PascalCase names",
         "write `{canonical}` instead of `{name}`",
     )
-    if span.end - span.start != name.bytes().len() {
-        &diagnostics.push(diagnostic)
-        return
-    }
-    &diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: canonical}))
+    if span.end - span.start != name.bytes().len() -> return Val(diagnostic)
+    Val(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: canonical}))
 }
 
 fn sema_casing_pascal(name: String, span: Span, category: String, diagnostics: &[Diagnostic]) {

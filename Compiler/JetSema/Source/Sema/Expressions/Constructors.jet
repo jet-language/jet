@@ -28,6 +28,7 @@ use jet_foundation.[
     TComptimeValue,
     TFieldRef,
     Type,
+    TypeParam,
     TypeTupleField,
     TypedLitBody,
     Variant,
@@ -355,6 +356,15 @@ fn sema_expression_struct_field_checked(fact: SemaStructFieldFact, field_value: 
     if !string_view -> sema_copy_site_check_field(field_value, environment, program, scopes, &tail_store, &context, &diagnostics)
     checked_value := if string_view -> sema_string_view_check_field(field_value, field_ty, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression_with_lambda_escapes(field_value, Val(expected_ty), environment, program, &scopes, &state, &tail_store, &context, Val(true), &diagnostics)
     checked :: checked_value ?? return None
+    sema_expression_struct_field_finish(fact, checked, field_value, field_reference_span, atomic_payload, owner, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+}
+
+// A checked field value against its field: ownership, the field type, the
+// move at this point of the literal's evaluation order, the field reference.
+fn sema_expression_struct_field_finish(fact: SemaStructFieldFact, checked: TExpr, field_value: Expr, field_reference_span: Span, atomic_payload: Bool, owner: Symbol, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStructFieldValue? {
+    field_ty :: fact.field_ty
+    expected_ty :: if atomic_payload -> sema_atomic_field_inner(field_ty) ?? field_ty else -> field_ty
+    string_view :: fact.string_view
     if !string_view && !sema_copy_site_check_guard_owned(checked, environment, program, scopes, context, &diagnostics, false) -> return None
     // A supported Atomic field checks its scalar initializer against the
     // scalar (`expected_ty`); the Atomic.new carrier is added below.
@@ -369,6 +379,31 @@ fn sema_expression_struct_field_checked(fact: SemaStructFieldFact, field_value: 
     reference.boxed = fact.boxed
     initialized :: if atomic_payload -> sema_atomic_field_initializer(field_ty, checked, field_value, &context) ?? return None else -> checked
     Val(TStructFieldValue{field: reference, value: initialized, boxed: reference.boxed})
+}
+
+// The owner's type arguments as far as `bindings` has inferred them; an
+// unbound parameter stays itself.
+fn sema_expression_struct_inferred_args(names: [String], bindings: [SemaInferenceBinding]) -> [Type] Never! {
+    args :: loop name in names -> (sema_inference_binding_at(bindings, name) ?? SemaInferenceBinding{name: name, ty: Type.Named{name: name}, source: ""}).ty
+    args
+}
+
+// A written field of a literal whose type arguments are inferred. A field
+// whose type still names an unbound parameter checks its value with no
+// expected type, and that value's type binds the parameter for the fields
+// after it.
+fn sema_expression_struct_field_inferred(field: Field, field_value: Expr, field_reference_span: Span, owner: Symbol, type_params: [TypeParam], bindings: &[SemaInferenceBinding], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStructFieldValue? {
+    names :: loop parameter in type_params -> parameter.name
+    declared :: sema_inference_substitute_type_bindings(sema_expression_field_owner_type(environment, program, owner.module_name, field.ty, names), bindings)
+    open :: loop parameter in type_params if sema_inference_binding_at(bindings, parameter.name) == None && sema_inference_type_mentions_param(declared, parameter.name) -> parameter
+    if open.len() == 0 -> return sema_expression_struct_field_value(field, field_value, field_reference_span, true, owner, names, sema_expression_struct_inferred_args(names, bindings), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    sema_copy_site_check_field(field_value, environment, program, scopes, &tail_store, &context, &diagnostics)
+    checked :: sema_check_expression_with_lambda_escapes(field_value, None, environment, program, &scopes, &state, &tail_store, &context, Val(true), &diagnostics) ?? return None
+    inference := sema_inference_context(environment.module_identity, environment.package_identity, sema_inference_type_params(open), environment.generic_params, None)
+    result :: sema_infer_callable(program.registration_graph, &inference, [Type]{declared}, None, [Type]{checked.ty}, [Type]{}, expr_span(field_value), &diagnostics) ?? return None
+    loop binding in result.substitutions -> &bindings.push(binding)
+    fact :: sema_expression_struct_field_fact(field, owner, names, sema_expression_struct_inferred_args(names, bindings), environment, program)
+    sema_expression_struct_field_finish(fact, checked, field_value, field_reference_span, true, owner, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
 // An omitted field's declared default. Written in another module, it checks in
@@ -490,7 +525,10 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
         .Apply(_, rows) -> rows
         else -> [Type]{}
     }
-    if args.len() != names.len() {
+    // `Top{value: 1}` writes no type arguments and has none to take from an
+    // expected type: its written fields infer them, as a call's arguments do.
+    inferring :: !inferred && type_args.len() == 0 && args.len() == 0 && names.len() > 0
+    if args.len() != names.len() && !inferring {
         &diagnostics.push(sema_error("E0104", span, "struct `{type_name(result_ty)}` has the wrong number of type arguments", "each declared type parameter needs one concrete argument", "provide one type argument for every generic parameter"))
         return None
     }
@@ -539,12 +577,16 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
     // Every written field is checked, so one literal reports all of its bad
     // values together.
     failed := false
+    // The type arguments the written fields have inferred so far.
+    bindings := [SemaInferenceBinding]{}
     loop (written, source) in fields {
         position :: positions[written]
         checked := TStructFieldValue?{None}
         if facts >= 0 {
             fact :: context.struct_field_facts[facts + position]
             checked = sema_expression_struct_field_checked(fact, source.value, source.name_span, true, owner, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        } else if inferring {
+            checked = sema_expression_struct_field_inferred(struct_def.fields[position], source.value, source.name_span, owner, struct_def.type_params, &bindings, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         } else {
             checked = sema_expression_struct_field_value(struct_def.fields[position], source.value, source.name_span, true, owner, names, args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         }
@@ -555,6 +597,20 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
         &values.push(checked ?? return None)
     }
     if failed -> return None
+    if inferring {
+        loop parameter in sema_inference_type_params(struct_def.type_params) {
+            binding :: sema_inference_binding_at(bindings, parameter.name) ?? {
+                sema_inference_unresolved_diagnostic(parameter, span, &diagnostics)
+                return None
+            }
+            &args.push(binding.ty)
+        }
+        head :: if result_ty == {
+            .Named(name) -> name
+            else -> type_name(result_ty)
+        }
+        result_ty = Type.Apply{name: head, args: args}
+    }
     loop (index, field) in struct_def.fields {
         if supplied[index] || field.computed != None -> next
         default_value :: field.default ?? {
@@ -579,6 +635,11 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
             else -> Type.TraitObject{bounds: [String]{trait_symbol.name}}
         }
         value = sema_tree_node(target, TExprKind.TraitBox{value: value, target: target}, span)
+    }
+    // An inferring literal checked against its own bare written head (`Top`,
+    // a typed literal's head) has no arguments to check against.
+    if inferring && expected == .Val(expected_ty) {
+        if expected_ty == .Named(expected_name) && expected_name == struct_name -> return Val(^value)
     }
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }

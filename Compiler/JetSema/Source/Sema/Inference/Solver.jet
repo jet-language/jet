@@ -76,7 +76,9 @@ fn sema_inference_solver_context(context: SemaInferenceContext, renames: [SemaIn
 }
 
 fn sema_inference_declared_bindings(bindings: [SemaInferenceBinding]) -> [SemaInferenceBinding] Never! {
-    declared :: loop binding in bindings -> SemaInferenceBinding{name: sema_inference_declared_name(binding.name), ty: binding.ty, source: binding.source}
+    // Each value is resolved against the solver's bindings, so it names only
+    // the caller's types and instantiation reads it as written.
+    declared :: loop binding in bindings -> SemaInferenceBinding{name: sema_inference_declared_name(binding.name), ty: sema_inference_resolve_type_bindings(binding.ty, bindings), source: binding.source}
     declared
 }
 
@@ -86,7 +88,7 @@ fn sema_inference_declared_evidence(evidence: [SemaInferenceBoundEvidence]) -> [
 }
 
 fn sema_inference_bind(context: SemaInferenceContext, bindings: &[SemaInferenceBinding], name: String, found: Type, source: String, conflict: &SemaInferenceConflict?) -> Bool Never! {
-    normalized :: sema_inference_substitute_type_bindings(found, bindings)
+    normalized :: sema_inference_resolve_type_bindings(found, bindings)
     if normalized == (Type.Named{name: name}) -> return true
     if sema_inference_type_contains_param(normalized, name, bindings) {
         sema_inference_conflict(&conflict, name, Type.Named{name: name}, "the generic declaration", normalized, source)
@@ -95,7 +97,7 @@ fn sema_inference_bind(context: SemaInferenceContext, bindings: &[SemaInferenceB
     existing_index :: sema_inference_binding_index(bindings, name)
     if existing_index == .Val(existing_at) {
         existing :: bindings[existing_at]
-        prior :: sema_inference_substitute_type_bindings(existing.ty, bindings)
+        prior :: sema_inference_resolve_type_bindings(existing.ty, bindings)
         if type_identity_equal(prior, normalized) -> return true
         sema_inference_conflict(&conflict, name, prior, existing.source, normalized, source)
         return false
@@ -112,8 +114,8 @@ fn sema_inference_unify_optional(context: SemaInferenceContext, left: Type?, rig
 }
 
 fn sema_inference_unify_inner(context: SemaInferenceContext, expected: Type, found: Type, bindings: &[SemaInferenceBinding], source: String, conflict: &SemaInferenceConflict?) -> Bool Never! {
-    left :: sema_inference_substitute_type_bindings(expected, bindings)
-    right :: sema_inference_substitute_type_bindings(found, bindings)
+    left :: sema_inference_resolve_type_bindings(expected, bindings)
+    right :: sema_inference_resolve_type_bindings(found, bindings)
     // Identical composite types still need their nested parameters bound.
     if left == .Named(name) {
         if sema_inference_parameter_index(context, name) != None -> return sema_inference_bind(context, &bindings, name, right, source, &conflict)
@@ -241,7 +243,7 @@ fn sema_inference_validate_bounds(graph: SemaRegistrationGraph?, context: &SemaI
     evidence := [SemaInferenceBoundEvidence]{}
     loop parameter in context.type_params {
         actual :: sema_inference_binding_at(bindings, parameter.name) ?? return None
-        concrete :: sema_inference_substitute_type_bindings(actual.ty, bindings)
+        concrete :: sema_inference_resolve_type_bindings(actual.ty, bindings)
         loop bound in parameter.bounds {
             satisfied :: sema_inference_bound_value(graph, &context, concrete, bound, parameter.bound_module) ?? {
                 &diagnostics.push(sema_error("E0904", span, "cannot resolve bound `{bound}` for `{sema_inference_declared_name(parameter.name)}`", "generic checking needs the registered trait or nominal implementation", "make the declaration's Registration graph available before this call"))
@@ -275,19 +277,19 @@ fn sema_inference_type_args(context: &SemaInferenceContext, bindings: [SemaInfer
     result := [Type]{}
     loop parameter in context.type_params {
         actual :: sema_inference_binding_at(bindings, parameter.name) ?? return None
-        &result.push(sema_inference_substitute_type_bindings(actual.ty, bindings))
+        &result.push(sema_inference_resolve_type_bindings(actual.ty, bindings))
     }
     Val(result)
 }
 
 fn sema_inference_specialized_parameters(parameters: [Type], bindings: [SemaInferenceBinding]) -> [Type] Never! {
-    specialized :: loop parameter in parameters -> sema_inference_substitute_type_bindings(parameter, bindings)
+    specialized :: loop parameter in parameters -> sema_inference_resolve_type_bindings(parameter, bindings)
     specialized
 }
 
 fn sema_inference_specialized_return(return_type: Type?, bindings: [SemaInferenceBinding]) -> Type? {
     declared :: return_type ?? return None
-    Val(sema_inference_substitute_type_bindings(declared, bindings))
+    Val(sema_inference_resolve_type_bindings(declared, bindings))
 }
 
 fn sema_inference_count_diagnostic(expected: Int, actual: Int, span: Span, diagnostics: &[Diagnostic]) {

@@ -530,7 +530,9 @@ fn sema_contract_result_ident_in_expr(expr: Expr) -> Span? {
     }
 }
 
-fn sema_contract_check_expr(expr: Expr, expected: Type, kind: String, forbid_result: Bool, check_purity: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+// `reads` gains the binding key of every name the condition reads: the check
+// runs on a snapshot of `state`, so the caller files those reads itself.
+fn sema_contract_check_expr(expr: Expr, expected: Type, kind: String, forbid_result: Bool, check_purity: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: SemaOwnershipState, reads: &[String:Bool], tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if forbid_result {
         if sema_contract_result_ident_in_expr(expr) == .Val(result_span) {
             &diagnostics.push(sema_error("E0144", result_span, "`result` isn't available in a `#Pre` condition", "`result` names the return value, which only exists once the function has returned — a `#Pre` condition runs at entry, before there is one", "use `result` only in a `#Post` condition"))
@@ -546,7 +548,9 @@ fn sema_contract_check_expr(expr: Expr, expected: Type, kind: String, forbid_res
     name_start :: checked_context.name_references.len()
     comptime_start :: checked_context.comptime_requests.len()
     copy_start :: checked_context.copy_events.len()
+    reference_start :: checked_state.references.len()
     value :: sema_check_expression(expr, None, environment, program, &checked_scopes, &checked_state, &tail_store, &checked_context, &diagnostics)
+    loop index in reference_start..<checked_state.references.len() -> reads[checked_state.references[index].def_key] = true
     valid := value != None
     if value == .Val(actual) {
         if actual.ty != expected {
@@ -665,10 +669,12 @@ fn sema_contract_check_function(func: Func, environment: SemaScopeEnvironment, p
     result :: sema_contract_result_for_function(declared_return, func.name_span, environment, program, sema_scope_function_owner_key(scopes))
     complete := true
     post := [TContract]{}
+    // A parameter a condition reads is used (L0102).
+    reads := [String:Bool]{}
     loop clause in func.pre {
-        condition :: sema_contract_check_expr(clause.cond, Type.Bool, "Pre", true, true, environment, program, scopes, state, &tail_store, &context, &diagnostics)
+        condition :: sema_contract_check_expr(clause.cond, Type.Bool, "Pre", true, true, environment, program, scopes, state, &reads, &tail_store, &context, &diagnostics)
         if condition == None -> complete = false
-        message :: sema_contract_check_expr(clause.message_expr, Type.String, "Pre", false, false, environment, program, scopes, state, &tail_store, &context, &diagnostics)
+        message :: sema_contract_check_expr(clause.message_expr, Type.String, "Pre", false, false, environment, program, scopes, state, &reads, &tail_store, &context, &diagnostics)
         if message == None -> complete = false
     }
     if func.post.len() > 0 {
@@ -685,9 +691,9 @@ fn sema_contract_check_function(func: Func, environment: SemaScopeEnvironment, p
             else -> {
                 sema_ownership_declare_binding(&post_state, result_symbol, false)
                 loop clause in func.post {
-                    condition :: sema_contract_check_expr(clause.cond, Type.Bool, "Post", false, true, environment, program, post_scopes, post_state, &tail_store, &context, &diagnostics)
+                    condition :: sema_contract_check_expr(clause.cond, Type.Bool, "Post", false, true, environment, program, post_scopes, post_state, &reads, &tail_store, &context, &diagnostics)
                     if condition == None -> complete = false
-                    message :: sema_contract_check_expr(clause.message_expr, Type.String, "Post", false, false, environment, program, post_scopes, post_state, &tail_store, &context, &diagnostics)
+                    message :: sema_contract_check_expr(clause.message_expr, Type.String, "Post", false, false, environment, program, post_scopes, post_state, &reads, &tail_store, &context, &diagnostics)
                     if message == None -> complete = false
                     if condition == .Val(condition_value) && message == .Val(message_value) {
                         &post.push(sema_contract_make(TContractKind.Post, condition_value, message_value, environment, program, clause.span, clause.span, context))
@@ -697,6 +703,7 @@ fn sema_contract_check_function(func: Func, environment: SemaScopeEnvironment, p
         }
         sema_scope_leave(&post_scopes, &post_state)
     }
+    loop (key, _) in reads -> state.used_keys[key] = true
     SemaContractDeclaration{complete: complete, post: post, result: result}
 }
 
@@ -872,10 +879,11 @@ fn sema_contract_check_call(func: Func, args: &[TCallArg], slots: [Int], call_sp
     // Every call site checks its own copy of the callee's clauses.
     fresh_expr_ids :: context.fresh_expr_ids
     context.fresh_expr_ids = true
+    reads := [String:Bool]{}
     loop clause in func.pre {
-        condition :: sema_contract_check_expr(clause.cond, Type.Bool, "Pre", false, true, environment, program, checked_scopes, checked_state, &tail_store, &context, &diagnostics)
+        condition :: sema_contract_check_expr(clause.cond, Type.Bool, "Pre", false, true, environment, program, checked_scopes, checked_state, &reads, &tail_store, &context, &diagnostics)
         if condition == None -> complete = false
-        message :: sema_contract_check_expr(clause.message_expr, Type.String, "Pre", false, false, environment, program, checked_scopes, checked_state, &tail_store, &context, &diagnostics)
+        message :: sema_contract_check_expr(clause.message_expr, Type.String, "Pre", false, false, environment, program, checked_scopes, checked_state, &reads, &tail_store, &context, &diagnostics)
         if message == None -> complete = false
         if condition == .Val(condition_value) && message == .Val(message_value) {
             &contracts.push(sema_contract_make(TContractKind.Pre, condition_value, message_value, environment, program, call_span, call_span, context))

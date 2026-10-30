@@ -1,0 +1,14 @@
+use core.process as process
+
+fn run() {
+    #FX(grant: Exec, IO) {
+        // `.under(grant)` delegates the grant to the specification, which is
+        // built on and run inside the block that grants it.
+        spec :: process.cmd(["printf", "ok"]).under(grant)
+        captured :: spec.stdout(.Capture).stderr(.Capture)
+        receipt :: captured.run() ?? panic("process")
+        print(receipt.output)
+        checked :: process.cmd(["true"]).stdout(.Capture).under(grant).run_checked() ?? panic("process")
+        print(checked.success)
+    }
+}

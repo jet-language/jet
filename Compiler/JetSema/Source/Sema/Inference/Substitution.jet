@@ -1,6 +1,14 @@
 // Structural type substitution shared by inference, calls, and nominal checks.
 // Function effects, labels, defaults, and view provenance are identity metadata;
 // they survive specialization unchanged while every nested Type is rewritten.
+//
+// Two readings of a binding list share one walker. Instantiation
+// (`sema_inference_substitute_type_bindings`) replaces every bound name at
+// once with its value as written: the values name the caller's types, and a
+// caller parameter that shares a callee parameter's name (`swapped<U, T>`
+// calling `pair<T, U>`) is not that callee parameter. Solving
+// (`sema_inference_resolve_type_bindings`) follows chains, because a solver
+// binding may name a solver parameter bound later.
 use jet_foundation.[
     Type,
     TypeTupleField,
@@ -31,10 +39,17 @@ fn sema_inference_binding_type(name: String, bindings: [SemaInferenceBinding], s
 // `seen` holds the parameter names being expanded on this path. A binding
 // whose value mentions its own name (a callee `T` bound to the caller's
 // `List<T>`) keeps that inner name as written, as Rust's single-pass
-// `substitute_type` does, instead of expanding it again without end.
-fn sema_inference_substitute_type_inner(ty: Type, bindings: [SemaInferenceBinding], seen: [String]) -> Type Never! {
+// `substitute_type` does, instead of expanding it again without end. Without
+// `chain` a bound name is replaced by its value as written.
+fn sema_inference_substitute_type_inner(ty: Type, bindings: [SemaInferenceBinding], seen: [String], chain: Bool) -> Type Never! {
     if ty == {
         .Named(name) -> {
+            if !chain {
+                // copy: the substituted type is a new owned Type; the binding and `ty` keep theirs.
+                if sema_inference_binding_at(bindings, name) == .Val(binding) -> return binding.ty.copy()
+                // copy: an unbound name is `ty` itself, a read parameter that stays in the signature.
+                return ty.copy()
+            }
             expanding :: loop seen_name in seen {
                 if seen_name == name -> break true
             } ?? false
@@ -49,38 +64,38 @@ fn sema_inference_substitute_type_inner(ty: Type, bindings: [SemaInferenceBindin
             if type_identity_equal(value, ty) -> return ty.copy()
             next_seen := seen
             &next_seen.push(name)
-            sema_inference_substitute_type_inner(value, bindings, next_seen)
+            sema_inference_substitute_type_inner(value, bindings, next_seen, chain)
         }
-        .List(inner) -> Type.List{element: sema_inference_substitute_type_inner(inner, bindings, seen)}
+        .List(inner) -> Type.List{element: sema_inference_substitute_type_inner(inner, bindings, seen, chain)}
         // copy: `key_span` is a payload of read parameter `ty`, which keeps the original; field `key_span` of the new Type.Map owns this one
-        .Map(key, key_span, value) -> Type.Map{key: sema_inference_substitute_type_inner(key, bindings, seen), key_span: key_span.copy(), value: sema_inference_substitute_type_inner(value, bindings, seen)}
-        .Shared(inner) -> Type.Shared{inner: sema_inference_substitute_type_inner(inner, bindings, seen)}
-        .Option(inner) -> Type.Option{inner: sema_inference_substitute_type_inner(inner, bindings, seen)}
-        .Result(ok, err) -> Type.Result{ok: sema_inference_substitute_type_inner(ok, bindings, seen), err: sema_inference_substitute_type_inner(err, bindings, seen)}
+        .Map(key, key_span, value) -> Type.Map{key: sema_inference_substitute_type_inner(key, bindings, seen, chain), key_span: key_span.copy(), value: sema_inference_substitute_type_inner(value, bindings, seen, chain)}
+        .Shared(inner) -> Type.Shared{inner: sema_inference_substitute_type_inner(inner, bindings, seen, chain)}
+        .Option(inner) -> Type.Option{inner: sema_inference_substitute_type_inner(inner, bindings, seen, chain)}
+        .Result(ok, err) -> Type.Result{ok: sema_inference_substitute_type_inner(ok, bindings, seen, chain), err: sema_inference_substitute_type_inner(err, bindings, seen, chain)}
         .Fn(params, ret, effects, contract, metadata, provenance) -> {
-            normalized :: loop param in params -> sema_inference_substitute_type_inner(param, bindings, seen)
-            normalized_ret :: if ret == .Val(declared) -> Val(sema_inference_substitute_type_inner(declared, bindings, seen)) else -> None
+            normalized :: loop param in params -> sema_inference_substitute_type_inner(param, bindings, seen, chain)
+            normalized_ret :: if ret == .Val(declared) -> Val(sema_inference_substitute_type_inner(declared, bindings, seen, chain)) else -> None
             Type.Fn{params: normalized, ret: normalized_ret, effect_bound: effects, param_contract: contract, call_metadata: metadata, return_view_provenance: provenance}
         }
         .Apply(name, args) -> {
-            normalized :: loop arg in args -> sema_inference_substitute_type_inner(arg, bindings, seen)
+            normalized :: loop arg in args -> sema_inference_substitute_type_inner(arg, bindings, seen, chain)
             Type.Apply{name: name, args: normalized}
         }
         .Tuple(fields) -> {
-            normalized :: loop field in fields -> TypeTupleField{name: field.name, ty: sema_inference_substitute_type_inner(field.ty, bindings, seen)}
+            normalized :: loop field in fields -> TypeTupleField{name: field.name, ty: sema_inference_substitute_type_inner(field.ty, bindings, seen, chain)}
             Type.Tuple{fields: normalized}
         }
         // copy: `length` is a payload of read parameter `ty`, which keeps the original; field `len` of the new Type.FixedList owns this one
-        .FixedList(element, length) -> Type.FixedList{elem: sema_inference_substitute_type_inner(element, bindings, seen), len: length.copy()}
-        .InlineRange(base, lo, hi) -> Type.InlineRange{base: sema_inference_substitute_type_inner(base, bindings, seen), lo: lo, hi: hi}
+        .FixedList(element, length) -> Type.FixedList{elem: sema_inference_substitute_type_inner(element, bindings, seen, chain), len: length.copy()}
+        .InlineRange(base, lo, hi) -> Type.InlineRange{base: sema_inference_substitute_type_inner(base, bindings, seen, chain), lo: lo, hi: hi}
         // copy: `marker` is a payload of read parameter `ty`, which keeps the original; field `marker` of the new Type.Tagged owns this one
-        .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: sema_inference_substitute_type_inner(inner, bindings, seen)}
+        .Tagged(marker, inner) -> Type.Tagged{marker: marker.copy(), inner: sema_inference_substitute_type_inner(inner, bindings, seen, chain)}
         .Union(members) -> {
-            normalized :: loop member in members -> sema_inference_substitute_type_inner(member, bindings, seen)
+            normalized :: loop member in members -> sema_inference_substitute_type_inner(member, bindings, seen, chain)
             Type.Union{members: normalized}
         }
         // copy: `dimension` is a payload of read parameter `ty`, which keeps the original; field `dimension` of the new Type.Quantity owns this one
-        .Quantity(base, dimension) -> Type.Quantity{base: sema_inference_substitute_type_inner(base, bindings, seen), dimension: dimension.copy()}
+        .Quantity(base, dimension) -> Type.Quantity{base: sema_inference_substitute_type_inner(base, bindings, seen, chain), dimension: dimension.copy()}
         else -> ty
     }
 }
@@ -88,50 +103,60 @@ fn sema_inference_substitute_type_inner(ty: Type, bindings: [SemaInferenceBindin
 fn sema_inference_substitute_type_bindings(ty: Type, bindings: [SemaInferenceBinding]) -> Type Never! {
     // copy: a type no binding changes is the input itself; one copy replaces
     // the rebuild that copied every part of it.
-    if bindings.len() == 0 || !sema_inference_type_changes(ty, bindings) -> return ty.copy()
-    sema_inference_substitute_type_inner(ty, bindings, [String]{})
+    if bindings.len() == 0 || !sema_inference_type_changes(ty, bindings, false) -> return ty.copy()
+    sema_inference_substitute_type_inner(ty, bindings, [String]{}, false)
+}
+
+fn sema_inference_resolve_type_bindings(ty: Type, bindings: [SemaInferenceBinding]) -> Type Never! {
+    // copy: as in sema_inference_substitute_type_bindings.
+    if bindings.len() == 0 || !sema_inference_type_changes(ty, bindings, true) -> return ty.copy()
+    sema_inference_substitute_type_inner(ty, bindings, [String]{}, true)
 }
 
 // Whether substituting `bindings` into `ty` changes it: some named part has a
 // binding that is not that name itself (the cases where
 // sema_inference_substitute_type_inner rewrites instead of keeping the part).
-fn sema_inference_type_changes(ty: Type, bindings: [SemaInferenceBinding]) -> Bool Never! {
+fn sema_inference_type_changes(ty: Type, bindings: [SemaInferenceBinding], chain: Bool) -> Bool Never! {
     if ty == {
         .Named(name) -> {
+            if !chain {
+                binding :: sema_inference_binding_at(bindings, name) ?? return false
+                return !type_identity_equal(binding.ty, ty)
+            }
             value :: sema_inference_binding_type(name, bindings, [String]{}) ?? return false
             return !type_identity_equal(value, ty)
         }
-        .List(inner) -> return sema_inference_type_changes(inner, bindings)
-        .Shared(inner) -> return sema_inference_type_changes(inner, bindings)
-        .Option(inner) -> return sema_inference_type_changes(inner, bindings)
-        .Tagged(_, inner) -> return sema_inference_type_changes(inner, bindings)
-        .Map(key, _, value) -> return sema_inference_type_changes(key, bindings) || sema_inference_type_changes(value, bindings)
-        .Result(ok, err) -> return sema_inference_type_changes(ok, bindings) || sema_inference_type_changes(err, bindings)
+        .List(inner) -> return sema_inference_type_changes(inner, bindings, chain)
+        .Shared(inner) -> return sema_inference_type_changes(inner, bindings, chain)
+        .Option(inner) -> return sema_inference_type_changes(inner, bindings, chain)
+        .Tagged(_, inner) -> return sema_inference_type_changes(inner, bindings, chain)
+        .Map(key, _, value) -> return sema_inference_type_changes(key, bindings, chain) || sema_inference_type_changes(value, bindings, chain)
+        .Result(ok, err) -> return sema_inference_type_changes(ok, bindings, chain) || sema_inference_type_changes(err, bindings, chain)
         .Fn(params, ret, _, _, _, _) -> {
             loop index in 0..<params.len() {
-                if sema_inference_type_changes(params[index], bindings) -> return true
+                if sema_inference_type_changes(params[index], bindings, chain) -> return true
             }
-            if ret == .Val(declared) -> return sema_inference_type_changes(declared, bindings)
+            if ret == .Val(declared) -> return sema_inference_type_changes(declared, bindings, chain)
             return false
         }
         .Apply(_, args) -> {
             loop index in 0..<args.len() {
-                if sema_inference_type_changes(args[index], bindings) -> return true
+                if sema_inference_type_changes(args[index], bindings, chain) -> return true
             }
             return false
         }
         .Tuple(fields) -> {
             loop index in 0..<fields.len() {
-                if sema_inference_type_changes(fields[index].ty, bindings) -> return true
+                if sema_inference_type_changes(fields[index].ty, bindings, chain) -> return true
             }
             return false
         }
-        .FixedList(element, _) -> return sema_inference_type_changes(element, bindings)
-        .InlineRange(base, _, _) -> return sema_inference_type_changes(base, bindings)
-        .Quantity(base, _) -> return sema_inference_type_changes(base, bindings)
+        .FixedList(element, _) -> return sema_inference_type_changes(element, bindings, chain)
+        .InlineRange(base, _, _) -> return sema_inference_type_changes(base, bindings, chain)
+        .Quantity(base, _) -> return sema_inference_type_changes(base, bindings, chain)
         .Union(members) -> {
             loop index in 0..<members.len() {
-                if sema_inference_type_changes(members[index], bindings) -> return true
+                if sema_inference_type_changes(members[index], bindings, chain) -> return true
             }
             return false
         }
@@ -144,14 +169,14 @@ fn sema_inference_substitute_type(ty: Type, names: [String], actuals: [Type]) ->
     sema_inference_substitute_type_bindings(ty, bindings)
 }
 
-// Whether `ty`, with the bindings applied once, still mentions the parameter
-// `name`. Substitution already follows binding chains, so the substituted
-// type is walked as written: substituting its parts again would re-expand a
-// name a binding keeps as written (`shared(T?{…})` inside `fn f<T>` binds the
-// builtin's `T` to the caller's `T?`) and never stop, which Rust's single-pass
-// `substitute_type` never does.
+// Whether `ty`, with the solver's bindings applied, still mentions the
+// parameter `name`. Resolution already follows binding chains, so the
+// resolved type is walked as written: resolving its parts again would
+// re-expand a name a binding keeps as written (`shared(T?{…})` inside
+// `fn f<T>` binds the builtin's `T` to the caller's `T?`) and never stop,
+// which Rust's single-pass `substitute_type` never does.
 fn sema_inference_type_contains_param(ty: Type, name: String, bindings: [SemaInferenceBinding]) -> Bool Never! {
-    sema_inference_type_mentions_param(sema_inference_substitute_type_bindings(ty, bindings), name)
+    sema_inference_type_mentions_param(sema_inference_resolve_type_bindings(ty, bindings), name)
 }
 
 fn sema_inference_type_mentions_param(ty: Type, name: String) -> Bool Never! {

@@ -8,9 +8,9 @@ struct Holder {
 
 fn run() {
     #FX(grant: Exec, IO) {
-        // Consume the authority-bound specification inside this #FX region;
-        // do not retain a command builder beyond the scoped grant.
-        result :: process.run_spec(process.cmd(["echo", "authority"]).under(grant)) ?? panic("authority process")
-        print(result.success)
+        // `.under(grant)` delegates the scoped grant to the specification, so
+        // the specification is built and run inside this #FX region.
+        result :: process.cmd(["printf", "authority"]).stdout(.Capture).stderr(.Capture).under(grant).run() ?? panic("authority process")
+        print(result.output)
     }
 }

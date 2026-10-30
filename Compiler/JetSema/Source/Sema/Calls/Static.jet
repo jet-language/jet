@@ -793,7 +793,9 @@ fn sema_call_static_source_owner(receiver: Expr, method: String, owner_type_args
         }
         .Field(base, leaf, _, _) -> {
             alias :: if base == {.Ident(name, _, _) -> name else -> { return None }}
-            if !sema_expr_core_module_alias_visible(alias, scopes) -> return None
+            // `core_alias.Type`, or a type declared under a qualified name
+            // (a protocol's `Payment.Client`) that no local binding shadows.
+            if !sema_expr_core_module_alias_visible(alias, scopes) && sema_scope_resolve_index(scopes, alias) != None -> return None
             "{alias}.{leaf}"
         }
         else -> { return None }

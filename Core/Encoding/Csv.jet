@@ -248,16 +248,21 @@ fn parse(text: String) -> Dyn EncodingError! {
     Ok(Dyn.Array(items))
 }
 
-fn to_string<T: Encode>(rows: [T]) -> String Never! {
-    if rows.len() == 0 -> return ""
-    first :: rows[0].encode()
+// `rows` is a list of row arrays or records, or the row-array tree `parse`
+// returns; each encodes to one array of rows, so `parse` round-trips.
+fn to_string<T: Encode>(rows: T) -> String Never! {
+    encoded :: rows.encode()
+    items :: if encoded == {
+        .Array(values) -> values
+        else -> panic("csv.to_string needs rows or records")
+    }
+    if items.len() == 0 -> return ""
     out := ""
-    if first == .Object(_) {
+    if items[0] == .Object(_) {
         header := [String]{}
-        loop entry in stream.object_entries(first) -> &header.push(entry.key)
+        loop entry in stream.object_entries(items[0]) -> &header.push(entry.key)
         out = encode_row(header)
-        loop i in 0..<rows.len() {
-            tree :: if i == 0 -> first else -> rows[i].encode()
+        loop tree in items {
             if !(tree == .Object(_)) -> panic("csv.to_string needs rows or records")
             fields := [String]{}
             loop key in header {
@@ -273,9 +278,8 @@ fn to_string<T: Encode>(rows: [T]) -> String Never! {
             out = "{out}\n{encode_row(fields)}"
         }
     } else {
-        loop i in 0..<rows.len() {
-            tree :: if i == 0 -> first else -> rows[i].encode()
-            if tree == {
+        loop i in 0..<items.len() {
+            if items[i] == {
                 .Array(cells) -> {
                     fields := [String]{}
                     loop cell in cells -> &fields.push(csv_cell(cell))

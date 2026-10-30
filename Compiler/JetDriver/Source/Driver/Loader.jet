@@ -4354,13 +4354,26 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
             module_aliases := [String]{}
             module_paths := [String]{}
             loop scoped in scoped_imports {
-                if scoped.declaration.kind == .Module(imported, _) {
-                    if imported == "core" {
-                        &root_aliases.push(scoped.declaration.alias)
-                    } else if imported.starts_with("core.") {
-                        &module_aliases.push(scoped.declaration.alias)
-                        &module_paths.push(imported)
+                if scoped.declaration.kind == {
+                    .Module(imported, _) -> {
+                        if imported == "core" {
+                            &root_aliases.push(scoped.declaration.alias)
+                        } else if imported.starts_with("core.") {
+                            &module_aliases.push(scoped.declaration.alias)
+                            &module_paths.push(imported)
+                        }
                     }
+                    // `use core.encoding` and `use core.[encoding]` bind the
+                    // Core module `core.encoding` by its leaf name.
+                    .Unqualified(module_alias, _, items, _, _) -> {
+                        if module_alias == "core" {
+                            loop item in items {
+                                &module_aliases.push(item.alias ?? item.original)
+                                &module_paths.push("core.{item.original}")
+                            }
+                        }
+                    }
+                    .File(_, _) -> {}
                 }
             }
             loop path in demand.core_paths {

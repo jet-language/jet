@@ -1979,7 +1979,11 @@ A specification can also carry `.timeout(duration)`, `.cpu_time_limit(value)`,
 The limits are part of the process plan and receipt. `.under(authority)`
 places the child under an `Authority`; `.plan()` returns the planned executable
 identity, redacted argument vector, input digest, policy digest, backend,
-authority, descendants, and limits without starting the child.
+authority, descendants, and limits without starting the child. Inside
+`#FX(grant: …) { … }`, `.under(grant)` delegates the scoped grant, so the
+specification it returns is scoped like the grant: build on it and run it
+(`.run()`, `.run_checked()`, `.plan()`) inside the block; storing, returning,
+or passing it is E0711.
 
 Resource-limit support is typed and fail-closed. Wall time and output limits
 are represented in the process policy. Native CPU-time, memory, and open-file
@@ -2826,7 +2830,7 @@ stream retains its separate native callback carrier.
 | --- | --- | --- |
 | `csv.rows(text, delimiter, header, skip_blank)` | `[CSVRow] !EncodingError` | Parse physical rows with explicit delimiter, header and blank-line policy. |
 | `csv.parse(text)` / `decode(text)` | `Dyn !EncodingError` | Parse rows as an array of arrays. |
-| `csv.to_string<T: Encode>(rows)` | `String` | Encode explicit row arrays or typed records; records use the first record's field order as the header. Rows are separated by LF, with no trailing LF. |
+| `csv.to_string<T: Encode>(rows)` | `String` | Encode explicit row arrays, typed records, or the array-of-arrays `Dyn` that `csv.parse` returns, so parsed rows round-trip; records use the first record's field order as the header. Rows are separated by LF, with no trailing LF. |
 | `csv.reader(^source, limits, delimiter, header, skip_blank)` / `csv.writer(^target, limits)` | `CSVReader !EncodingError -[FS]>` / `CSVWriter !EncodingError -[FS]>` | Construct incremental file-backed CSV objects. Reader defaults retain the header and blank records. |
 | `CSVReader.next()` | `?CSVRow !EncodingError -[IO]>` | Return the next physical row or stable end-of-input; errors retain their byte offset, physical location, and record/field path. |
 | `CSVWriter.write(^fields)` / `flush()` / `finish()` | `Unit !EncodingError -[IO]>` | Write comma-delimited string fields; CRLF is deferred until the next record or finish. Flush does not finish a record. |

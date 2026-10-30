@@ -645,14 +645,20 @@ fn sema_type_hole(span: Span) -> Diagnostic {
     sema_error("E0119", span, "`_` isn't a type", "a signature names every type; `_` is only a pattern wildcard", "write the type out; in a `T _!` return, name the error domain the body fails with, such as `Int ParseError!`")
 }
 
-// E0119: a written type name that names nothing.
+// E0119: a written type name that names nothing. A name that writes a
+// lexicon acronym word-cased (`HttpRequest`) gets E0358 with its spelling.
 fn sema_unknown_type_name(name: String, span: Span) -> Diagnostic {
-    sema_error("E0119", span, "there's no type called `{name}`", "the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)", "check the spelling, or define the struct or enum first")
+    sema_casing_acronym_diagnostic(name, span) ?? sema_error("E0119", span, "there's no type called `{name}`", "the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)", "check the spelling, or define the struct or enum first")
 }
 
 // E0119 twice for `Name<…>` where `Name` names nothing: the missing type,
-// then the type arguments it cannot take.
+// then the type arguments it cannot take. A word-cased acronym head
+// (`Id<Node>`) gets the one E0358 instead.
 fn sema_unknown_generic_type_name(name: String, span: Span, diagnostics: &[Diagnostic]) {
+    if sema_casing_acronym_diagnostic(name, span) == .Val(acronym) {
+        &diagnostics.push(acronym)
+        return
+    }
     &diagnostics.push(sema_error("E0119", span, "there's no type called `{name}`", "generic types must name a struct or enum you defined", "check the spelling, or define the type first"))
     &diagnostics.push(sema_error("E0119", span, "`{name}` isn't generic", "only types declared with type parameters accept `<…>`", "use `{name}` without type arguments"))
 }

@@ -1,0 +1,12 @@
+use core.process as process
+
+fn run() {
+    kept := process.cmd(["true"])
+    #FX(grant: Exec) {
+        // The specification carries the scoped grant, so it can't be stored
+        // past the block that grants it.
+        kept = process.cmd(["true"]).under(grant)
+    }
+    receipt :: kept.run_checked() ?? panic("process")
+    print(receipt.success)
+}

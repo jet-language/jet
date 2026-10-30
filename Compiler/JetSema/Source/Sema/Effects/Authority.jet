@@ -3,7 +3,10 @@
 // used in place: as the receiver of a method call, field access, `?`, deref
 // or index. Returning, storing, passing, capturing or otherwise using it as a
 // value lets revoked rights outlive the scope (E0711). Values derived through
-// `.with(…)`/`.without(…)` stay scoped too. Approved Core authority boundary
+// `.with(…)`/`.without(…)` stay scoped too, and so does the process
+// specification `spec.under(grant)` delegates the grant to: it may be built
+// on and run in place (`.run()`, `.run_checked()`, `.plan()` yield plain
+// data), never stored, returned, or passed. Approved Core authority boundary
 // arguments are delegations, not escapes.
 use jet_foundation.[
     CallArg,
@@ -46,7 +49,14 @@ fn sema_authority_exprs_escape(values: [Expr], handle: String) -> Span? {
 fn sema_authority_expr_escape(expr: Expr, handle: String) -> Span? {
     if expr == {
         .Ident(name, span, _) -> if name == handle -> Val(span) else -> None
-        .MethodCall(receiver, _, _, _, _, args, _) | .OptMethodCall(receiver, _, _, _, args, _, _) -> {
+        .MethodCall(receiver, method, _, _, _, args, _) -> {
+            if sema_authority_bare(receiver, handle) -> return sema_authority_args_escape(args, handle, false)
+            found :: sema_authority_expr_escape(receiver, handle)
+            if found != None -> return found
+            if sema_authority_delegation(method, args, handle, [String]{}) -> return None
+            sema_authority_args_escape(args, handle, true)
+        }
+        .OptMethodCall(receiver, _, _, _, args, _, _) -> {
             if sema_authority_bare(receiver, handle) -> return sema_authority_args_escape(args, handle, false)
             found :: sema_authority_expr_escape(receiver, handle)
             if found != None -> return found
@@ -303,11 +313,42 @@ fn sema_authority_narrowing_chain(expr: Expr, handle: String, aliases: [String])
     }
 }
 
+// `spec.under(grant)` delegates the grant (or a narrowing of it) to the
+// process specification it returns.
+fn sema_authority_delegation(method: String, args: [CallArg], handle: String, aliases: [String]) -> Bool Never! {
+    method == "under" && args.len() == 1 && sema_authority_chain_rooted(args[0].expr, handle, aliases)
+}
+
+// Running a process specification (`run`, `run_checked`, `plan`) yields
+// receipt or plan data, which holds no rights.
+fn sema_authority_spec_runs(method: String) -> Bool Never! {
+    method == "run" || method == "run_checked" || method == "plan"
+}
+
+// A process specification carrying the grant: a delegation, or any other
+// call chained on one (`.stdout(…)`, `.spawn()`). It is scoped like the
+// grant itself: used in place, never stored, returned, or passed.
+fn sema_authority_bound_spec(expr: Expr, handle: String, aliases: [String]) -> Bool Never! {
+    if expr == {
+        .Paren(inner, _, _) -> sema_authority_bound_spec(inner, handle, aliases)
+        .MethodCall(receiver, method, _, _, _, args, _) -> {
+            if sema_authority_delegation(method, args, handle, aliases) -> return true
+            !sema_authority_spec_runs(method) && sema_authority_bound_receiver(receiver, handle, aliases)
+        }
+        else -> false
+    }
+}
+
+fn sema_authority_bound_receiver(expr: Expr, handle: String, aliases: [String]) -> Bool Never! {
+    if expr == .Ident(name, _, _) -> return sema_authority_contains(aliases, name)
+    sema_authority_bound_spec(expr, handle, aliases)
+}
+
 // A derived Authority value in any value position, below the approved
 // boundary arguments.
 fn sema_authority_value_escape(expr: Expr, handle: String, aliases: [String]) -> Span? {
     if expr == .Ident(name, span, _) && sema_authority_contains(aliases, name) -> return Val(span)
-    if sema_authority_narrowing_chain(expr, handle, aliases) -> return Val(expr_span(expr))
+    if sema_authority_narrowing_chain(expr, handle, aliases) || sema_authority_bound_spec(expr, handle, aliases) -> return Val(expr_span(expr))
     if expr == {
         .Call(call, _) -> sema_authority_value_args_escape(call.args, handle, aliases)
         .CallValue(callee, args, _, _) -> {
@@ -315,7 +356,15 @@ fn sema_authority_value_escape(expr: Expr, handle: String, aliases: [String]) ->
             if found != None -> return found
             sema_authority_value_args_escape(args, handle, aliases)
         }
-        .MethodCall(receiver, _, _, _, _, args, _) | .OptMethodCall(receiver, _, _, _, args, _, _) -> {
+        .MethodCall(receiver, method, _, _, _, args, _) -> {
+            // Running a bound specification uses it in place.
+            if !(sema_authority_spec_runs(method) && sema_authority_bound_receiver(receiver, handle, aliases)) {
+                found :: sema_authority_value_escape(receiver, handle, aliases)
+                if found != None -> return found
+            }
+            sema_authority_value_args_escape(args, handle, aliases)
+        }
+        .OptMethodCall(receiver, _, _, _, args, _, _) -> {
             found :: sema_authority_value_escape(receiver, handle, aliases)
             if found != None -> return found
             sema_authority_value_args_escape(args, handle, aliases)
@@ -384,7 +433,7 @@ fn sema_authority_call_argument_escape(expr: Expr, handle: String, aliases: [Str
 }
 
 fn sema_authority_derived_binding(init: Expr, name: String, handle: String, aliases: &[String]) -> Span? {
-    if sema_authority_narrowing_chain(init, handle, aliases) {
+    if sema_authority_narrowing_chain(init, handle, aliases) || sema_authority_bound_spec(init, handle, aliases) {
         if name != "_" -> &aliases.push(name)
         return None
     }

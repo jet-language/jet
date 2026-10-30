@@ -107,8 +107,8 @@ fn sema_inference_bounds_checked(parameters: [SemaInferenceTypeParam], evidence:
                     expected :: sema_inference_binding_at(substitutions, parameter.name)
                     if expected == {
                         .Val(binding) -> {
-                            concrete := sema_inference_substitute_type_bindings(binding.ty, substitutions)
-                            if !type_identity_equal(row.actual, concrete) -> found = false
+                            // A result binding is already resolved (sema_inference_declared_bindings).
+                            if !type_identity_equal(row.actual, binding.ty) -> found = false
                         }
                         else -> {
                             found = false

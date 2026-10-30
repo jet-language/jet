@@ -1,0 +1,16 @@
+// A `Pool<T>` hands out `ID<T>` handles (D-ACRO-CASE1 spelling, #6248); an
+// entry can hold an optional handle to another entry of the same pool.
+struct Node {
+    text: String
+    left: ID<Node>?
+}
+
+fn run() {
+    world := Pool<Node>.new()
+    a :: world.add(Node{text: "a", left: None})
+    b :: world.add(Node{text: "b", left: None})
+    world[b].left = a
+    print(world[a].text)
+    if world[b].left == .Val(link) -> print(world[link].text)
+    print(world.ids().len())
+}
