@@ -1421,6 +1421,11 @@ fn scheduler_panic_check() -> Bool {
 // The published record stays the raw message (form 0).
 fn rt_task_panic_publish(message: I64, length: I64, code: I64) -> Bool {
     test_scope_record_coded_stop(code, message, length)
+    rt_task_panic_publish_recorded(message, length)
+}
+// The publication rail once the caller has recorded its own stop code
+// (Trap.jet jet_rt_coded_stop).
+fn rt_task_panic_publish_recorded(message: I64, length: I64) -> Bool {
     if (jet_rt_stop_domain() != I64{2}) -> return false
     if !scheduler_panic_check() -> return false
     text :: scheduler_text_new(length)

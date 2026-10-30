@@ -266,6 +266,47 @@ fn trap_process_stop(code: I64, message: I64, message_len: I64) {
     trap_simple(I64{1}, file, file_len, line, message, message_len)
 }
 
+// core.rt.__coded_stop(code, message): a Core library stop carrying its
+// registered diagnostic code (Core/Http/Server.jet E2804/E2805). The caller
+// renders the row's `what` into `message`; the Why/Fix footer is generated
+// from the same registry row (gen-runtime-trap-messages.mjs CODED_STOPS).
+// Program-side, so exit 70. A task body publishes the raw message. A code
+// with no generated footer is a Jet defect: the host form, exit 101.
+#Export(c) fn jet_rt_coded_stop(code: I64, message: I64) {
+    data :: rt_text_data(message)
+    length :: rt_text_len(message)
+    comptime_serve_stop(I64{1}, data, length, I64{0}, I64{0})
+    code_data :: rt_text_data(code)
+    code_length :: rt_text_len(code)
+    word_length :: if (code_length > I64{8}) -> I64{8} else -> code_length
+    word := I64{0}
+    at := I64{0}
+    loop at < word_length {
+        word = word.bit_or(host_u8_get(code_data, at) << (at * I64{8}))
+        at += I64{1}
+    }
+    test_scope_record_raw_stop(word, word_length, data, length)
+    if rt_task_panic_publish_recorded(data, length) -> return
+    trap_root_prepare()
+    jet_rt_stdout_flush()
+    if (code_length != I64{5} || !trap_coded_registered(word)) {
+        trap_msg_inactive_row_head()
+        trap_write(code_data, code_length)
+        trap_msg_inactive_row_tail()
+        trap_write(code_data, code_length)
+        trap_msg_newline()
+        trap_exit(I64{101})
+        return
+    }
+    trap_msg_coded_head()
+    trap_write(code_data, code_length)
+    trap_msg_coded_mid()
+    trap_write(data, length)
+    trap_msg_newline()
+    trap_coded_footer(word)
+    trap_exit(I64{70})
+}
+
 // FixedArithmetic.rs ShiftOutOfRange: "Shifting {left|right} by {count} bits
 // is out of range (this type is {bits} bits wide)". The count prints in the
 // shifted type's signedness (1 = unsigned), as the seed's i128 operand does.

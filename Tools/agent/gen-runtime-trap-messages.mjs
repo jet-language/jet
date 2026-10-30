@@ -59,6 +59,24 @@ source += emit("trap_invalid_layout_head", `Stop [E3001]: ${field("E3001", "what
 for (const code of ["E2805"]) {
   if (field(code, "stage").includes("runtime")) throw new Error(`${code} is an active runtime row; its stop renders the row, not the host form`);
 }
+// Core library stops that carry a registered code (core.rt.__coded_stop,
+// Trap.jet jet_rt_coded_stop): the caller renders the row's `what`; the
+// footer is the same row's Why/Fix. Codes are five-byte little-endian words.
+const CODED_STOPS = ["E2804", "E2805"];
+const codeWord = (code) => {
+  if (!/^E\d{4}$/.test(code)) throw new Error(`${code} is not a five-byte diagnostic code`);
+  let word = 0n;
+  for (let i = 0; i < code.length; i++) word |= BigInt(code.charCodeAt(i)) << BigInt(8 * i);
+  return word;
+};
+for (const code of CODED_STOPS) {
+  const why = field(code, "why");
+  const fix = field(code, "fix");
+  source += `\n// ${code} Why: ${why}\n// Fix: ${fix}\n`;
+  source += emit(`trap_footer_${code.toLowerCase()}`, ` Why: ${why}\n Fix: ${fix}\nMore: jet-lang.dev/e/${code}\n`);
+}
+source += `\nfn trap_coded_registered(code: I64) -> Bool {\n    ${CODED_STOPS.map((code) => `code == I64{${codeWord(code)}}`).join(" || ")}\n}\n`;
+source += `\nfn trap_coded_footer(code: I64) {\n    if {\n${CODED_STOPS.slice(0, -1).map((code) => `        (code == I64{${codeWord(code)}}) -> trap_footer_${code.toLowerCase()}()\n`).join("")}        else -> trap_footer_${CODED_STOPS.at(-1).toLowerCase()}()\n    }\n}\n`;
 const literals = {
   header_panic: "Stop [E3001]: " + field("E3001", "what").split("{msg}")[0],
   header_numeric: "Stop [E3010]: " + field("E3010", "what").split("{msg}")[0],
@@ -115,6 +133,8 @@ const literals = {
   native_tls: nativeTlsRefusal(),
   inactive_row_head: "Internal error: runtime diagnostic `",
   inactive_row_tail: "` is not an active runtime row\n Why: Jet could not resolve this stop through the active diagnostic registry\n Fix: report this as a Jet compiler or host defect\nMore: jet-lang.dev/e/",
+  coded_head: "Stop [",
+  coded_mid: "]: ",
 };
 for (const [name, text] of Object.entries(literals)) source += "\n" + emit(`trap_msg_${name}`, text);
 // Retype the canonical Debug interval table at generation time. Runtime

@@ -723,6 +723,30 @@ fn render_trap_messages(registry: String, routes: String, debug: String) -> Trap
         stage :: registry_field(registry, code, "stage") ?? return Err(err)
         if stage.contains("runtime") -> return Err(generator_fail("{code} is an active runtime row; its stop renders the row, not the host form"))
     }
+    // Core library stops that carry a registered code (core.rt.__coded_stop,
+    // Trap.jet jet_rt_coded_stop): the caller renders the row's `what`; the
+    // footer is the same row's Why/Fix. Codes are five-byte little-endian words.
+    coded_stops :: ["E2804", "E2805"]
+    registered := [String]{}
+    branches := ""
+    loop code in coded_stops {
+        if byte_len(code) != 5 || !code.starts_with("E") -> return Err(generator_fail("{code} is not a five-byte diagnostic code"))
+        why :: registry_field(registry, code, "why") ?? return Err(err)
+        fix :: registry_field(registry, code, "fix") ?? return Err(err)
+        source = "{source}\n// {code} Why: {why}\n// Fix: {fix}\n"
+        source = "{source}{emit("trap_footer_{code.lower()}", " Why: {why}\n Fix: {fix}\nMore: jet-lang.dev/e/{code}\n", "trap_write_word")}"
+        word := 0
+        scale := 1
+        loop byte in code.bytes() {
+            word += Int.from_u8(byte) * scale
+            scale *= 256
+        }
+        &registered.push("code == I64{{{word}}}")
+        if code != coded_stops[coded_stops.len() - 1] -> branches = "{branches}        (code == I64{{{word}}}) -> trap_footer_{code.lower()}()\n"
+    }
+    last_coded :: coded_stops[coded_stops.len() - 1].lower()
+    source = "{source}\nfn trap_coded_registered(code: I64) -> Bool {{\n    {registered.join(" || ")}\n}}\n"
+    source = "{source}\nfn trap_coded_footer(code: I64) {{\n    if {{\n{branches}        else -> trap_footer_{last_coded}()\n    }}\n}}\n"
     literals :: [MessageLiteral]{
         MessageLiteral{name: "header_panic", text: "Stop [E3001]: {before_hole(e3001_what)}"},
         MessageLiteral{name: "header_numeric", text: "Stop [E3010]: {before_hole(e3010_what)}"},
@@ -773,6 +797,8 @@ fn render_trap_messages(registry: String, routes: String, debug: String) -> Trap
         MessageLiteral{name: "native_tls", text: tls},
         MessageLiteral{name: "inactive_row_head", text: "Internal error: runtime diagnostic `"},
         MessageLiteral{name: "inactive_row_tail", text: "` is not an active runtime row\n Why: Jet could not resolve this stop through the active diagnostic registry\n Fix: report this as a Jet compiler or host defect\nMore: jet-lang.dev/e/"},
+        MessageLiteral{name: "coded_head", text: "Stop ["},
+        MessageLiteral{name: "coded_mid", text: "]: "},
     }
     loop literal in literals -> source = "{source}\n{emit("trap_msg_{literal.name}", literal.text, "trap_write_word")}"
     // Retype the canonical Debug interval table at generation time. Runtime
