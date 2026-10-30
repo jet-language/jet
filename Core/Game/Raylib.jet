@@ -5,15 +5,14 @@ use core as core
 // Window, input, drawing, and texture operations use the existing registered
 // raw host bindings. The descriptor-backed Jet FFI rail replaces those leaves
 // at native cutover; display availability is never fabricated by source.
+// A window crosses every bridge leaf as the runtime's RaylibWindow record
+// (UiRaylibMetadata.jet; HandlesRaylib.rs `RaylibWindow`): its size, title,
+// and whether a native display backs it.
 struct RaylibWindow {
     width: Int
     height: Int
     title: String
-    open: Bool
-    drawing: Bool
-    should_close: Bool
-    fps: Int
-    commands: [String]
+    native: Bool
 }
 
 struct RaylibColor {
