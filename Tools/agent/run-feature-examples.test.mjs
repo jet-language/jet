@@ -11,6 +11,8 @@ import {
   runArgs,
   runCwd,
   runProcess,
+  skipReason,
+  unmetRequirement,
   untilExpected,
   warningOnlyStderr,
   withoutWarningDiagnostics,
@@ -160,4 +162,24 @@ test("a `run: none` example passes once its output is the expected output", asyn
   assert.equal(run.stopped, true);
   assert.equal(classifyRun({ stem: "net/serve", path: "serve.jet" }, run, expected).status, "passed");
   assert.ok(Date.now() - started < 5000, "the serving example was stopped at its expected output");
+});
+
+test("a case whose host requirement is missing is skipped, as testkit SKIP-HOST", () => {
+  const host = { family: "unix", hasTool: (name) => name === "javac" || name === "sh", hasGtk4: () => false };
+  assert.equal(unmetRequirement(null, host), null);
+  assert.equal(unmetRequirement("requires: tool:go\nstep: jet check run.jet\n", host), "tool:go");
+  assert.equal(unmetRequirement("requires: tool:java|javac\n", host), null);
+  assert.equal(unmetRequirement("requires: tool:sh\nrequires: tool:bwrap\n", host), "tool:bwrap");
+  assert.equal(unmetRequirement("requires: gtk4\n", host), "gtk4");
+  assert.equal(unmetRequirement("requires: os:windows\n", host), "os:windows");
+  assert.equal(unmetRequirement("requires: os:unix\n", host), null);
+  assert.equal(unmetRequirement("requires: os:!windows\n", host), null);
+  assert.equal(unmetRequirement("requires: os:linux|unix\n", host), null);
+  assert.equal(unmetRequirement("requires: env:JET_RAYLIB_DISPLAY=1\n", host), null);
+  assert.equal(unmetRequirement("requires: probe something\nrequires: tool:go\n", host), "tool:go");
+  const entry = { stem: "lowlevel/polyglot_go", path: "/nonexistent/run.jet" };
+  const expected = { out: "ok\n", err: null, stderrOut: null };
+  assert.equal(skipReason(entry, expected, "requires: tool:go\n", host), "requires tool:go");
+  assert.equal(skipReason(entry, expected, "requires: tool:javac\n", host), null);
+  assert.equal(skipReason(entry, { out: null, err: null, stderrOut: null }, "requires: tool:go\n", host), "no native golden");
 });

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Focused native feature-example runner. Keep warnings separate from failures.
 import {
+  accessSync,
+  constants,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -9,8 +11,8 @@ import {
   realpathSync,
   rmSync,
 } from "node:fs";
-import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { spawn } from "node:child_process";
+import { basename, delimiter, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -214,11 +216,70 @@ function sourceHasTarget(entry, target) {
   return new RegExp(`^\\s*#(?:\\[)?Target\\(${target}\\)`, "mu").test(readFileSync(entry.path, "utf8"));
 }
 
-export function skipReason(entry, expected) {
+// A case's `requires:` lines name host capabilities, which testkit
+// `kit_exec_requires` checks before any step: when one is missing the
+// golden is SKIP-HOST, so the census skips it too instead of failing on the
+// host. The capability forms are `tool:a|b` (any alternative on PATH),
+// `gtk4` (pkg-config knows gtk4) and `os:X` (host family `unix` or
+// `windows`; `!` negates, `|` separates choices). Other forms (`env:`,
+// probes) select a run mode rather than a host capability, and the census
+// still runs the example in its default mode.
+// Returns the first unmet requirement, or null when the host meets them all.
+export function unmetRequirement(caseText, host = defaultHost()) {
+  if (caseText === null) return null;
+  for (const line of caseText.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("requires:")) continue;
+    const requirement = trimmed.slice("requires:".length).trim();
+    if (!capabilityMet(requirement, host)) return requirement;
+  }
+  return null;
+}
+
+function capabilityMet(requirement, host) {
+  if (requirement.startsWith("tool:")) return requirement.slice("tool:".length).split("|").some((name) => name !== "" && host.hasTool(name));
+  if (requirement === "gtk4") return host.hasGtk4();
+  if (requirement.startsWith("os:")) return hostMatches(host.family, requirement.slice("os:".length));
+  return true;
+}
+
+// testkit StepsRequirements.jet `kit_steps_host_matches`.
+function hostMatches(actual, choices) {
+  const negative = choices.startsWith("!");
+  const names = negative ? choices.slice(1) : choices;
+  return names.split("|").includes(actual) !== negative;
+}
+
+function defaultHost() {
+  return {
+    family: process.platform === "win32" ? "windows" : "unix",
+    hasTool: onPath,
+    hasGtk4: () => spawnSync("pkg-config", ["--exists", "gtk4"], { stdio: "ignore" }).status === 0,
+  };
+}
+
+function onPath(name) {
+  const extensions = process.platform === "win32" ? ["", ".exe", ".cmd", ".bat"] : [""];
+  for (const directory of (process.env.PATH ?? "").split(delimiter)) {
+    if (directory === "") continue;
+    for (const extension of extensions) {
+      try {
+        accessSync(join(directory, name + extension), constants.X_OK);
+        return true;
+      } catch {
+        // not in this directory
+      }
+    }
+  }
+  return false;
+}
+
+export function skipReason(entry, expected, caseText, host = defaultHost()) {
   if (nativeRunIsWebTarget(entry)) return "web-targeted native run";
   if (expected.out === null && expected.err === null) return "no native golden";
-  if (entry.stem.includes("polyglot_") && expected.out === null && expected.err === null) return "needs foreign binder";
   if (sourceHasTarget(entry, "Wasm") || sourceHasTarget(entry, "Browser")) return "web-targeted native run";
+  const unmet = unmetRequirement(caseText, host);
+  if (unmet !== null) return `requires ${unmet}`;
   return null;
 }
 
@@ -515,9 +576,9 @@ async function main() {
   try {
     const results = await mapLimit(entries, options.jobs, async (entry, slot) => {
       const expected = readExpected(entry.stem);
-      const skipped = skipReason(entry, expected);
-      if (skipped) return { stem: entry.stem, shown: entry.shown, status: "skipped", detail: skipped };
       const caseText = readCase(entry.stem);
+      const skipped = skipReason(entry, expected, caseText);
+      if (skipped) return { stem: entry.stem, shown: entry.shown, status: "skipped", detail: skipped };
       const runOptions = {
         store: join(scratch, "store", String(slot)),
         scratch,
