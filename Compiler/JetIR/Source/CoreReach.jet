@@ -16,6 +16,7 @@ use jet_foundation.[
     body_each_stmt_child,
     body_node,
     body_type,
+    checked_expr_type_id,
     compiler_take_rows,
     compiler_threads_admit,
     compiler_threads_failure_text,
@@ -338,12 +339,13 @@ fn ir_core_reach_expr_children(tree: BodyTree, expression: Int, pending: &[Int])
 }
 
 // The `Core/Math/Math.jet` helper one checked expression lowers to by name: a
-// precise operation, a typed `abs`, a registered `core.math.fraction`/`decimal`
-// constructor, or a fallible unit conversion.
+// precise operation or method, a typed `abs`, a registered
+// `core.math.fraction`/`decimal` constructor, or a fallible unit conversion.
 fn ir_precise_expr_helper(expression: BodyNode) -> String? Never! {
     if expression.kind == {
         .UnitConvert(_, _, _, rounding, fallible, _, _, _) -> if fallible -> Val(ir_unit_conversion_helper(rounding != None)) else -> None
         .PreciseBuiltin(owner, operation, _) -> ir_precise_source_helper(owner, operation)
+        .HandleMethod(_, operation, _) -> if operation == .PreciseMethod(owner, method) -> ir_precise_source_helper(owner, method) else -> None
         .MathBuiltin(owner, operation, _) -> if owner == "Int" || owner == "Complex" || operation == "abs" -> ir_precise_source_helper(owner, operation) else -> None
         .CoreCall(record, _, _, _, _, _) -> {
             canonical :: ir_canonical_core_record(record)
@@ -408,7 +410,10 @@ fn ir_named_conversion_key(conversion: TTryConvert, keys: &[String]) Never! {
     }
 }
 
-// A Fraction division also tests its divisor (ir_precise_division).
+// A Fraction division also tests its divisor (ir_precise_division). A value
+// of a precise type may render (an interpolation, `print`, a List's text),
+// and its rendering calls its owner's `to_string` helper by name
+// (ir_render_push).
 fn ir_precise_tree_names(tree: BodyTree, expression: Int, names: &[String]) Never! {
     node :: body_node(tree, expression)
     helper :: ir_precise_expr_helper(node)
@@ -421,7 +426,45 @@ fn ir_precise_tree_names(tree: BodyTree, expression: Int, names: &[String]) Neve
             if zero_test != "" && !names.contains(zero_test) -> &names.push(zero_test)
         }
     }
+    if checked_expr_type_id(tree.expr_types, expression) == .Val(type_id) {
+        owners := [String]{}
+        ir_precise_rendered_owners(tree.types.types[type_id], &owners)
+        loop owner in owners {
+            rendering :: ir_precise_source_helper(owner, "to_string") ?? next
+            if !names.contains(rendering) -> &names.push(rendering)
+        }
+    }
     body_each_expr_child(tree, node, (child: Int) -> ir_precise_tree_names(tree, child, &names))
+}
+
+// The core.math precise types (`Decimal`, `Fraction`, `Complex`) a value of
+// `ty` holds directly or as an element, each added once.
+fn ir_precise_rendered_owners(ty: Type, owners: &[String]) Never! {
+    if ty == {
+        .Named(name) -> {
+            short :: ir_short_name(name)
+            if short != "Decimal" && short != "Fraction" && short != "Complex" -> return
+            if name != short && !name.ends_with("core.math::{short}") && !name.ends_with("core.math.{short}") -> return
+            if !owners.contains(short) -> &owners.push(short)
+        }
+        .Apply(_, args) -> loop arg in args -> ir_precise_rendered_owners(arg, &owners)
+        .List(element) -> ir_precise_rendered_owners(element, &owners)
+        .FixedList(element, _) -> ir_precise_rendered_owners(element, &owners)
+        .Option(inner) -> ir_precise_rendered_owners(inner, &owners)
+        .Shared(inner) -> ir_precise_rendered_owners(inner, &owners)
+        .Tagged(_, inner) -> ir_precise_rendered_owners(inner, &owners)
+        .Map(key, _, value) -> {
+            ir_precise_rendered_owners(key, &owners)
+            ir_precise_rendered_owners(value, &owners)
+        }
+        .Result(ok, err) -> {
+            ir_precise_rendered_owners(ok, &owners)
+            ir_precise_rendered_owners(err, &owners)
+        }
+        .Tuple(fields) -> loop field in fields -> ir_precise_rendered_owners(field.ty, &owners)
+        .Union(members) -> loop member in members -> ir_precise_rendered_owners(member, &owners)
+        else -> {}
+    }
 }
 
 // Reachability precedes concrete instance lowering. A checked generic/operator
