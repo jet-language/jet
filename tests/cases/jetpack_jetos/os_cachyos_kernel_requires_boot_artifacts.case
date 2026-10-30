@@ -7,8 +7,7 @@ env: PATH=/usr/bin:/bin
 step diagnostic: jet os build box --no-color --offline
 cwd: project
 exit: 2
-capture: diagnostic = text stderr
-when diagnostic.stderr ~ "\n  error[E1282]": capture: diagnostic = text stderr.after_first("\n  error[E1282]").prepend("\n  error[E1282]")
+capture: diagnostic = text stderr.from_or_all("\n  error[E1282]")
 capture: expected = text file.trim_end expected.stderr
-cap:diagnostic.trim_end: = "{cap:expected}"
+cap:diagnostic.trim_end: = "{cap:expected}" # original assert_jetos_stderr_snapshot_trimmed compares trimmed text
 

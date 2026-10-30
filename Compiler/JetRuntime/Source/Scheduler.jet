@@ -330,6 +330,9 @@ fn scheduler_control_publish(control: I64, record: I64) -> Bool {
         scheduler_stop_drop(record)
         return false
     }
+    // jet_rt_main ends an entry stopped at the process root through this
+    // hook, which only a stop published there needs.
+    if (control == main_root_control && main_stopped_code == I64{0}) -> main_stopped_install(rt_main_stopped_address())
     sync_mutex_lock(control + I64{72})
     old :: sync_load(control + I64{32})
     // A task panic replaces an undelivered cancellation/deadline/budget.
@@ -730,7 +733,7 @@ fn scheduler_yield(wait_kind: I64, slot: I64, timeout_ns: I64) -> I64 {
 // taken yet; started counts the ordinary workers started.
 scheduler_root := I64{0}
 
-// runtime-init: 3
+// runtime-init: 3 when scheduler_root
 #Export(c) fn jet_rt_scheduler_init() {
     if (scheduler_root != I64{0}) -> return
     scheduler_root = jet_rt_alloc(I64{168}, I64{8})
@@ -753,6 +756,16 @@ fn rt_scheduler_worker_address() -> I64 {
 fn rt_scheduler_timer_address() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
+fn rt_scheduler_compensate_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
+// The compensation half of a blocking wait (jet_rt_scheduler_compensate),
+// zero until the first pool worker starts. A blocked thread can only starve
+// running jobs once a worker runs them, so a program that never starts one
+// (hello, a lock taken only by the main thread) links no pool start through
+// its waits.
+scheduler_compensate_code := I64{0}
 
 // usize::from_str accepts '+' and the full u64 range. Counts above i64::MAX
 // are returned as their bit pattern, not treated as an invalid override.
@@ -855,6 +868,7 @@ fn scheduler_reap_finished(root: I64) {
 // worker (which locks the root before it reads its handle) and shutdown both
 // see a complete record.
 fn scheduler_start_worker(root: I64, flags: I64) {
+    if (scheduler_compensate_code == I64{0}) -> scheduler_compensate_code = rt_scheduler_compensate_address()
     scheduler_reap_finished(root)
     record :: jet_rt_alloc(I64{16}, I64{8})
     sync_store(record, root.bit_or(flags))
@@ -992,8 +1006,13 @@ fn scheduler_pop(root: I64, allow_blocking: Bool) -> I64 {
     }
 }
 
+// A wait that blocks a scheduler-controlled thread counts as a blocking
+// wait and may start a compensation worker, once the pool has a worker
+// (scheduler_compensate_code). Every wait records whether it counted, so
+// its leave undoes exactly that.
 fn scheduler_blocking_wait_enter() {
-    active :: scheduler_control_current() != I64{0}
+    code :: scheduler_compensate_code
+    active :: code != I64{0} && scheduler_control_current() != I64{0}
     stack := sync_load(thread_base() + I64{88})
     if (stack == I64{0}) {
         stack = jet_rt_alloc(I64{24}, I64{8})
@@ -1001,7 +1020,12 @@ fn scheduler_blocking_wait_enter() {
         sync_store(thread_base() + I64{88}, stack)
     }
     scheduler_words_push(stack, if active -> I64{1} else -> I64{0})
-    if !active -> return
+    if active -> _ := coll_call1(code, I64{0})
+}
+
+// The counted half of scheduler_blocking_wait_enter, reached only through
+// scheduler_compensate_code.
+#Export(c) fn jet_rt_scheduler_compensate(_unused: I64) -> I64 {
     root :: scheduler_get()
     sync_mutex_lock(root)
     waits :: sync_load(root + I64{48}) + I64{1}
@@ -1023,6 +1047,7 @@ fn scheduler_blocking_wait_enter() {
     }
     sync_mutex_unlock(root)
     if (flags != I64{0}) -> scheduler_start_worker(root, flags)
+    I64{0}
 }
 
 fn scheduler_blocking_wait_leave() {

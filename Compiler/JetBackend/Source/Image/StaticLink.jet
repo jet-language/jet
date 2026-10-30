@@ -94,6 +94,9 @@ LINK_SHT_PREINIT_ARRAY :: 16
 LINK_SHT_GROUP :: 17
 LINK_SHT_SYMTAB_SHNDX :: 18
 LINK_SHT_X86_64_UNWIND :: 0x70000001
+// SHF_INFO_LINK: the section's sh_info names a section. On an init/fini
+// array it names the guard section the hook is conditional on (cond_roots).
+LINK_SHF_INFO_LINK :: 0x40
 
 // x86-64 relocation types (psABI).
 LINK_R_NONE :: 0
@@ -150,6 +153,12 @@ struct LinkContext {
     obj_sym_count: [Int]
     // Init/fini arrays and SHF_GNU_RETAIN sections: collection roots.
     roots: [Int]
+    // Conditional roots: an init/fini array section with SHF_INFO_LINK (a
+    // runtime lifecycle hook of a service, Image/Object.jet) is live exactly
+    // when the section its sh_info names is; per row, that array section and
+    // its guard section. A system linker ignores the flag and keeps the hook.
+    cond_roots: [Int]
+    cond_guards: [Int]
     // A section's RELA section when it is not the header right after it.
     rela: [Int:Int]
     discarded: [Int:Bool]
@@ -226,6 +235,7 @@ fn link_context(bufs: ^[[U8]], base: Int) -> LinkContext Never! {
         obj_name: [String]{}, obj_buffer: [Int]{}, obj_base: [Int]{}, obj_shoff: [Int]{}, obj_names: [Int]{},
         obj_symtab: [Int]{}, obj_strtab: [Int]{}, obj_shndx: [Int]{}, obj_count: [Int]{}, obj_first_global: [Int]{},
         obj_first_section: [Int]{}, obj_first_symbol: [Int]{}, obj_sym_count: [Int]{}, rela: [Int:Int]{}, discarded: [Int:Bool]{}, sym_global: [Int]{}, roots: [Int]{},
+        cond_roots: [Int]{}, cond_guards: [Int]{},
         g_index: [String:Int]{}, g_name: [String]{}, g_kind: [Int]{}, g_section: [Int]{}, g_value: [Int]{}, g_size: [Int]{},
         g_obj: [Int]{}, g_weak_def: [Bool]{}, g_strong_ref: [Bool]{}, g_alias: [Int]{}, g_addr: [Int]{},
         g_common_size: [Int]{}, g_common_align: [Int]{}, comdats: [String:Bool]{}, pending: [Int]{}, pending_head: 0,
@@ -587,7 +597,13 @@ fn link_load_object(c: &LinkContext, b: Int, base: Int, size: Int, name: String)
             &eh.push(k)
         }
         if kind == LINK_SHT_INIT_ARRAY || kind == LINK_SHT_FINI_ARRAY || kind == LINK_SHT_PREINIT_ARRAY || (link_u32(c.bufs, b, h + 8).bit_and(0x200000)) != 0 {
-            &c.roots.push(first + k)
+            guard :: link_u32(c.bufs, b, h + 44)
+            if kind != LINK_SHT_PREINIT_ARRAY && link_u32(c.bufs, b, h + 8).bit_and(LINK_SHF_INFO_LINK) != 0 && guard > 0 && guard < count {
+                &c.cond_roots.push(first + k)
+                &c.cond_guards.push(first + guard)
+            } else {
+                &c.roots.push(first + k)
+            }
         }
     }
     symtab_header :: shoff + 64 * symtab
@@ -1227,9 +1243,10 @@ fn link_mark_piece(c: &LinkContext, work: &[Int], piece: Int, skip_pc: Bool) Nev
 }
 
 // Mark everything reachable from the sections `entries`, the init/fini
-// arrays and retained sections, and the personality routines; then keep
-// exactly the FDEs of live sections. Each live section's relocations are
-// scanned once, for marking and for link_scan_reloc.
+// arrays and retained sections, and the personality routines, and each
+// conditional init/fini array once the section it links to is live, to a
+// fixpoint; then keep exactly the FDEs of live sections. Each live section's
+// relocations are scanned once, for marking and for link_scan_reloc.
 fn link_collect(c: &LinkContext, entries: [Int], linker_names: [String:Bool]) Never! {
     last :: c.obj_first_section.len() - 1
     sections :: if last < 0 -> 0 else -> c.obj_first_section[last] + c.obj_count[last]
@@ -1260,31 +1277,38 @@ fn link_collect(c: &LinkContext, entries: [Int], linker_names: [String:Bool]) Ne
     }
     reported := [Int:Bool]{}
     head := 0
-    loop head < work.len() {
-        s :: work[head].copy()
-        head += 1
-        obj :: link_obj_of(c, s)
-        b :: c.obj_buffer[obj].copy()
-        r :: link_rela_of(c, obj, s)
-        // Rows are scanned in the order they were marked.
-        &c.rel_base.push(c.rel_slot.len())
-        if r >= 0 {
-            count :: link_sec_size(c, obj, r).div_euclid(24)
-            table :: link_sec_offset(c, obj, r)
-            loop k in 0..<count {
-                at :: table + 24 * k
-                symbol :: link_u32(c.bufs, b, at + 12)
-                t :: link_target_section(c, obj, symbol)
-                link_mark(&c, &work, t)
-                slot :: link_scan_reloc(&c, &reported, linker_names, obj, s, at, symbol)
-                &c.rel_slot.push(slot)
+    loop {
+        loop head < work.len() {
+            s :: work[head].copy()
+            head += 1
+            obj :: link_obj_of(c, s)
+            b :: c.obj_buffer[obj].copy()
+            r :: link_rela_of(c, obj, s)
+            // Rows are scanned in the order they were marked.
+            &c.rel_base.push(c.rel_slot.len())
+            if r >= 0 {
+                count :: link_sec_size(c, obj, r).div_euclid(24)
+                table :: link_sec_offset(c, obj, r)
+                loop k in 0..<count {
+                    at :: table + 24 * k
+                    symbol :: link_u32(c.bufs, b, at + 12)
+                    t :: link_target_section(c, obj, symbol)
+                    link_mark(&c, &work, t)
+                    slot :: link_scan_reloc(&c, &reported, linker_names, obj, s, at, symbol)
+                    &c.rel_slot.push(slot)
+                }
+            }
+            fde := c.sec_fde[s].copy()
+            loop fde >= 0 {
+                link_mark_piece(&c, &work, fde, true)
+                fde = c.ep_next[fde]
             }
         }
-        fde := c.sec_fde[s].copy()
-        loop fde >= 0 {
-            link_mark_piece(&c, &work, fde, true)
-            fde = c.ep_next[fde]
+        loop index in 0..<c.cond_roots.len() {
+            root :: c.cond_roots[index].copy()
+            if link_live_row(c, c.cond_guards[index]) >= 0 -> link_mark(&c, &work, root)
         }
+        if head == work.len() -> break
     }
     loop piece in 0..<c.ep_sec.len() {
         if c.ep_cie[piece] >= 0 -> c.ep_keep[piece] = link_live_row(c, c.ep_target[piece]) >= 0

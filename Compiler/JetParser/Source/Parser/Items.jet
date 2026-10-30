@@ -18,6 +18,7 @@ use jet_foundation.[
     Expr,
     Field,
     Func,
+    ImplConstValue,
     ImplDef,
     ImportDecl,
     ImportKind,
@@ -47,6 +48,7 @@ use jet_foundation.[
     StructDef,
     TagDef,
     TextEdit,
+    TraitConstDecl,
     TraitDef,
     TraitMethodSig,
     TraitImplBlock,
@@ -122,6 +124,7 @@ use jet_lexer.[
     TOKEN_SLASH,
     TOKEN_STAR,
     TOKEN_STRING,
+    TOKEN_TILDE_TILDE,
     TOKEN_UNIFIED_ARROW,
     Token,
 ]
@@ -986,9 +989,13 @@ fn parser_parse_function(state: &JetParserState, modifiers: ParsedItemModifiers,
     func_name := if name.kind == TOKEN_KW_COPY -> parser_text(state, name) else -> parser_value(state, name)
     func_name_span := name.span
     external_type := NamedSpan?{None}
-    // `fn Type.method(` attaches an external method.
-    if parser_current_kind(&state) == TOKEN_DOT {
-        parser_bump(&state)
+    // `fn Type.method(` attaches an external method. The retired `~~`
+    // connector (D-EXTMETH1) still parses, so E0325 can teach the `.`.
+    if parser_current_kind(&state) == TOKEN_DOT || (parser_current_kind(&state) == TOKEN_TILDE_TILDE && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_kind_at(&state, 2) == TOKEN_LPAREN) {
+        connector :: parser_bump(&state)
+        if connector.kind == TOKEN_TILDE_TILDE {
+            parser_add_error_code(&state, "E0325", connector.span, "external methods attach with `.`, not `~~`", "the dot connector matches trait impls and ordinary member access", "write `fn {func_name}.method(...)`")
+        }
         method :: parser_expect_name(&state, "after `.` in an external method name")
         external_type = Val(NamedSpan{name: func_name, span: name.span})
         func_name = parser_value(state, method)
@@ -2068,8 +2075,8 @@ fn parser_parse_variant_payload(state: &JetParserState) -> VariantPayload {
 }
 
 // S28: `impl Trait { … }` inside a struct or enum body, with
-// associated types `type Name = Type` and 's one
-// parenthesized right-hand type on an operator trait.
+// associated types `type Name = Type`, trait constants `name :: value` and
+// one parenthesized right-hand type on an operator trait.
 fn parser_parse_trait_impl_block(state: &JetParserState) -> TraitImplBlock {
     parser_bump(&state)
     trait_name :: parser_expect_name(&state, "after `impl`")
@@ -2083,6 +2090,7 @@ fn parser_parse_trait_impl_block(state: &JetParserState) -> TraitImplBlock {
     parser_expect(&state, TOKEN_LBRACE, "`{{` to open the trait impl body")
     methods := [Func]{}
     assoc_types := [NamedType]{}
+    constants := [ImplConstValue]{}
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF && !parser_aborting(&state) {
         token :: parser_current(&state)
         if token.kind == TOKEN_SEMI {
@@ -2103,15 +2111,28 @@ fn parser_parse_trait_impl_block(state: &JetParserState) -> TraitImplBlock {
             &assoc_types.push(NamedType{name: parser_value(state, assoc), span: parser_cover(token.span, assoc.span), ty: ty.ty})
             next
         }
+        if token.kind == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON_COLON {
+            &constants.push(parser_parse_impl_constant(&state))
+            next
+        }
         if token.kind != TOKEN_KW_FN && token.kind != TOKEN_KW_PUB && token.kind != TOKEN_HASH && !parser_prep_fn_ahead(&state) {
             found :: parser_describe_token(state, token)
-            parser_add_error(&state, token.span, "expected the keyword `fn` to start a method, found {found}", "an impl body holds methods and associated types", "write a method with `fn`")
+            parser_add_error(&state, token.span, "expected the keyword `fn` to start a method, found {found}", "an impl body holds methods, associated types and trait constants", "write a method with `fn`, or a trait constant as `name :: value`")
             break
         }
         &methods.push(parser_parse_type_method(&state))
     }
     parser_expect(&state, TOKEN_RBRACE, "`}}` to close the trait impl body")
-    TraitImplBlock{trait_name: trait_text, trait_span: trait_name.span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: methods, compiler_generated: false, assoc_type_impls: assoc_types}
+    TraitImplBlock{trait_name: trait_text, trait_span: trait_name.span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: methods, compiler_generated: false, assoc_type_impls: assoc_types, constants: constants}
+}
+
+// `name :: value` in an impl body: the value of one trait constant.
+fn parser_parse_impl_constant(state: &JetParserState) -> ImplConstValue {
+    name_token :: parser_bump(&state)
+    parser_bump(&state)
+    value :: parser_parse_expression(&state, 1, 0)
+    parser_finish_statement(&state)
+    ImplConstValue{name: parser_value(state, name_token), name_span: name_token.span, value: value.expr, span: parser_cover(name_token.span, value.span)}
 }
 
 fn parser_parse_const(state: &JetParserState, modifiers: ParsedItemModifiers) -> ConstDef {
@@ -2287,6 +2308,7 @@ fn parser_parse_trait(state: &JetParserState, modifiers: ParsedItemModifiers) ->
     parser_expect(&state, TOKEN_LBRACE, "`{{` before trait members")
     methods := [TraitMethodSig]{}
     assoc_types := [NamedSpan]{}
+    constants := [TraitConstDecl]{}
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
         parser_skip_semicolons(&state)
         if parser_current_kind(&state) == TOKEN_RBRACE -> break
@@ -2303,6 +2325,23 @@ fn parser_parse_trait(state: &JetParserState, modifiers: ParsedItemModifiers) ->
                 &assoc_types.push(NamedSpan{name: parser_value(state, assoc), span: parser_cover(kw.span, assoc.span)})
                 parser_finish_statement(&state)
             }
+            // `name: Type`, or `name: Type{default}`: a trait constant.
+            parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON -> {
+                constant_name :: parser_bump(&state)
+                parser_bump(&state)
+                constant_type :: parser_parse_type(&state, 0)
+                default := Expr?{None}
+                end := constant_type.span
+                if parser_current_kind(&state) == TOKEN_LBRACE {
+                    parser_bump(&state)
+                    parsed_value :: parser_parse_expression(&state, 1, 0)
+                    close_default :: parser_expect(&state, TOKEN_RBRACE, "`}}` after a trait constant default")
+                    default = Val(parsed_value.expr)
+                    end = close_default.span
+                }
+                &constants.push(TraitConstDecl{name: parser_value(state, constant_name), name_span: constant_name.span, ty: constant_type.ty, ty_span: constant_type.span, default: ^default, span: parser_cover(constant_name.span, end)})
+                parser_finish_statement(&state)
+            }
             parser_current_kind(&state) == TOKEN_KW_FN -> {
                 method_modifiers := parser_parse_item_modifiers(&state, false)
                 parsed :: parser_parse_function(&state, method_modifiers, false)
@@ -2312,13 +2351,13 @@ fn parser_parse_trait(state: &JetParserState, modifiers: ParsedItemModifiers) ->
                 &methods.push(TraitMethodSig{name: method.name, name_span: method.name_span, params: method.params, return_type: method.return_type, span: method.span, default_body: ^default_body, is_pure: method.is_pure, declared_effects: method.declared_effects, return_view_provenance: method.return_view_provenance, declared_return_view_provenance: method.declared_return_view_provenance})
             }
             else -> {
-                parser_add_error_here(&state, "expected a trait method or associated type", "trait bodies declare callable requirements and associated types", "write `fn name(...)` or `type Name;`")
+                parser_add_error_here(&state, "expected a trait method, associated type or trait constant", "trait bodies declare callable requirements, associated types and compile-time constants", "write `fn name(...)`, `type Name` or `name: Type`")
                 parser_recover_statement(&state)
             }
         }
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after trait members")
-    TraitDef{span: parser_cover(modifiers.start_span, close.span), is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, supertraits: supertraits, assoc_types: assoc_types, methods: methods}
+    TraitDef{span: parser_cover(modifiers.start_span, close.span), is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, supertraits: supertraits, assoc_types: assoc_types, constants: constants, methods: methods}
 }
 
 // The trait bounds after a `:` (Rust `parse_trait_bounds`): a bracketed list
@@ -2466,11 +2505,12 @@ fn parser_parse_impl(state: &JetParserState) -> Item {
         parser_bump(&state)
         field :: parser_expect_name(&state, "after `using` for the delegation field")
         parser_finish_statement(&state)
-        return Item.Impl{value: ImplDef{span: parser_cover(start.span, field.span), type_name: type_name, type_span: type_span, trait_name: trait_name, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: [Func]{}, delegation_field: Val(parser_value(state, field)), assoc_type_impls: [NamedType]{}, is_generated_serde: false, os_target: None}}
+        return Item.Impl{value: ImplDef{span: parser_cover(start.span, field.span), type_name: type_name, type_span: type_span, trait_name: trait_name, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: [Func]{}, delegation_field: Val(parser_value(state, field)), assoc_type_impls: [NamedType]{}, constants: [ImplConstValue]{}, is_generated_serde: false, os_target: None}}
     }
     parser_expect(&state, TOKEN_LBRACE, "`{{` to open the `impl` body")
     methods := [Func]{}
     assoc_types := [NamedType]{}
+    constants := [ImplConstValue]{}
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF && !parser_aborting(&state) {
         token :: parser_current(&state)
         if token.kind == TOKEN_SEMI {
@@ -2491,15 +2531,19 @@ fn parser_parse_impl(state: &JetParserState) -> Item {
             &assoc_types.push(NamedType{name: parser_value(state, assoc), span: parser_cover(token.span, assoc.span), ty: ty.ty})
             next
         }
+        if token.kind == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON_COLON {
+            &constants.push(parser_parse_impl_constant(&state))
+            next
+        }
         if token.kind != TOKEN_KW_FN && token.kind != TOKEN_KW_PUB && token.kind != TOKEN_HASH && !parser_prep_fn_ahead(&state) {
             found :: parser_describe_token(state, token)
-            parser_add_error(&state, token.span, "expected the keyword `fn` to start a method, found {found}", "an impl body holds methods and associated types", "write a method with `fn`")
+            parser_add_error(&state, token.span, "expected the keyword `fn` to start a method, found {found}", "an impl body holds methods, associated types and trait constants", "write a method with `fn`, or a trait constant as `name :: value`")
             break
         }
         &methods.push(parser_parse_type_method(&state))
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after implementation methods")
-    Item.Impl{value: ImplDef{span: parser_cover(start.span, close.span), type_name: type_name, type_span: type_span, trait_name: trait_name, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: methods, delegation_field: None, assoc_type_impls: assoc_types, is_generated_serde: false, os_target: None}}
+    Item.Impl{value: ImplDef{span: parser_cover(start.span, close.span), type_name: type_name, type_span: type_span, trait_name: trait_name, trait_span: trait_span, operator_rhs: operator_rhs, operator_marker: operator_marker, methods: methods, delegation_field: None, assoc_type_impls: assoc_types, constants: constants, is_generated_serde: false, os_target: None}}
 }
 
 fn parser_parse_effect_decl(state: &JetParserState) -> EffectDecl {

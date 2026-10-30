@@ -34,7 +34,7 @@ env: PATH={work}/tools:{env:PATH|}
 exit: 0
 file: configuration.nix ~ "programs.bash.promptInit = lib.mkAfter" # generated shell-init product
 capture: prompt = text file.trim_lines.filter(^= "PS1=") configuration.nix
-cap:prompt: lines = 1
+cap:prompt: lines = 1 # original single prompt line
 write: bashrc = "{cap:prompt}\nexport PS1\n"
 step: bash --noprofile --rcfile {work}/bashrc -i -c "printf '%s' \"$PS1\""
 exit: 0

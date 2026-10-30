@@ -8,10 +8,10 @@ copy: {root}/tests/cases/pkg/fixtures/sources/hi.txt run.jet
 copy: {root}/tests/cases/pkg/fixtures/dependency/mylib/package.jet mylib/package.jet
 step fetch: jet fetch
 exit: nonzero
-stderr: first-line ^= "Error [E1206]:" # original predicate: none fails
+stderr: line ^= "Error [E1206]:" # original predicate: some line starts with "Error [E1206]:"
 step: jet build run.jet
 exit: nonzero
-stderr: first-line ^= "Error [E1206]:" == fetch # original predicate
+stderr.filter(^= "Error [E1206]:").line(0): == fetch # original predicate: first line starting with "Error [E1206]:" equals fetch's
 step: jet add mylib --path ./mylib
 exit: nonzero
-stderr: first-line ^= "Error [E1206]:" == fetch # original predicate
+stderr.filter(^= "Error [E1206]:").line(0): == fetch # original predicate: first line starting with "Error [E1206]:" equals fetch's

@@ -560,7 +560,29 @@ struct TraitDef {
     // `trait T: [A, B]`).
     supertraits: [String]
     assoc_types: [NamedSpan]
+    // The compile-time constants an implementation supplies: `sides: Int`,
+    // or `severity: Severity{.Error}` with a default.
+    constants: [TraitConstDecl]
     methods: [TraitMethodSig]
+}
+
+// One trait constant requirement. `ty` is written in the trait's module;
+// `default` is the value an implementation that writes none takes.
+struct TraitConstDecl {
+    name: String
+    name_span: Span
+    ty: Type
+    ty_span: Span
+    default: Expr?
+    span: Span
+}
+
+// One trait constant an implementation supplies: `sides :: 4`.
+struct ImplConstValue {
+    name: String
+    name_span: Span
+    value: Expr
+    span: Span
 }
 
 struct TagDef {
@@ -647,6 +669,7 @@ struct TraitImplBlock {
     methods: [Func]
     compiler_generated: Bool
     assoc_type_impls: [NamedType]
+    constants: [ImplConstValue]
 }
 
 enum OperatorMarker {
@@ -1157,6 +1180,7 @@ struct ImplDef {
     methods: [Func]
     delegation_field: String?
     assoc_type_impls: [NamedType]
+    constants: [ImplConstValue]
     is_generated_serde: Bool
     os_target: String?
 }

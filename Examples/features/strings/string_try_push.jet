@@ -1,0 +1,17 @@
+// `&s.try_push(text)` appends to a String place and reports a refused
+// allocation as an `AllocError` value, which `??` handles at the call.
+struct Note { text: String }
+
+fn run() {
+    s := "ab"
+    &s.try_push("c") ?? panic("no memory")
+    print(s)
+    loop part in ["d", "", "ef"] {
+        &s.try_push(part) ?? panic("no memory")
+    }
+    print(s)
+    print(s.len())
+    note := Note{text: "x"}
+    &note.text.try_push("yz") ?? panic("no memory")
+    print(note.text)
+}

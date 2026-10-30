@@ -31,12 +31,18 @@ fn kit_steps_subject_valid(selector: String) -> Bool {
     known && kit_steps_transform_valid(kit_steps_subject_transform(selector))
 }
 
+// Stream assertions expand tokens in their subject transform at run time, so a
+// `{cap:name}` transform argument validates as an integer placeholder.
+fn kit_steps_assertion_subject_valid(selector: String) -> Bool {
+    kit_steps_subject_valid(kit_steps_json_preview(selector))
+}
+
 fn kit_steps_stream_assertion(key: String, original: String) -> KitAssertion? {
     value :: kit_steps_body(original)
     tokens :: kit_steps_tokens(value) ?? return None
     subject :: kit_steps_subject(key)
     transform :: kit_steps_subject_transform(key)
-    if !kit_steps_subject_valid(key) || (transform != "" && !kit_steps_reason(original)) -> return None
+    if !kit_steps_assertion_subject_valid(key) || (transform != "" && !kit_steps_reason(original)) -> return None
     offset :: if subject == "file" || subject == "file?" -> 1 else -> 0
     if tokens.len() <= offset -> return None
     stream :: if offset == 1 -> "file" else -> subject
@@ -82,7 +88,7 @@ fn kit_steps_stream_assertion(key: String, original: String) -> KitAssertion? {
             if extra != "=" || (!token_value && mode == "mode" && kit_steps_octal(data) == None) -> return None
         } else if mode == "sha256" {
             if extra != "=" || (!token_value && data.len() != 64) -> return None
-        } else if !token_value && (Int.parse(data) ?? -1) < 0 -> return None
+        } else if !token_value && (Int.parse(data) ?? -1) < 0 && kit_steps_arithmetic(kit_steps_json_preview(data)) == None -> return None
         return Val(KitAssertion{stream: stream, path: path, mode: mode, value: data, extra: extra, optional_file: subject == "file?"})
     }
     if kit_expect_named(["empty", "nonempty", "exists", "absent", "is-file", "is-dir", "!is-file", "!is-dir", "is-symlink", "not-symlink"], mode) {

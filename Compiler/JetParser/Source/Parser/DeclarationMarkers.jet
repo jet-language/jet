@@ -106,13 +106,17 @@ fn parser_layout_marker_fact(state: &JetParserState, markers: [Marker], grouped:
     kind_expr :: values[0] ?? return None
     if kind_expr == .Ident(variant, variant_span, _) {
         tag_width := false
+        tag_name := ""
+        tag_span := marker.span
         alignment := Int?{None}
         alignment_span := Span?{None}
         alignment_target := false
         has_alignment := false
         if values[1] == .Val(value) {
-            if value == .Ident(_, _, _) {
+            if value == .Ident(name, name_span, _) {
                 tag_width = true
+                tag_name = name.copy()
+                tag_span = name_span
             } else if parser_layout_align_call(value) == .Val(call) {
                 has_alignment = true
                 alignment_target = call.args.len() == 2
@@ -155,12 +159,8 @@ fn parser_layout_marker_fact(state: &JetParserState, markers: [Marker], grouped:
                 }
                 layout = Val(StructLayout.Columnar)
             }
-            "packed" | "align" -> {
-                parser_add_fatal_code(&state, "E1105", variant_span, "`#Layout({variant})` is reserved and not yet supported", "the supported variants are `c`, `columnar`, and `c, align(N)` or `c, align(target, N)`", "use `#Layout(c)`, `#Layout(c, align(64))`, `#Layout(c, align(target, 2097152))`, or `#Layout(columnar)`")
-                return None
-            }
             else -> {
-                parser_add_fatal_code(&state, "E1105", variant_span, "`#Layout({variant})` isn't a known layout variant", "the supported variants are `c`, `columnar`, and `c, align(N)` or `c, align(target, N)`", "write `#Layout(c)`, `#Layout(c, align(64))`, `#Layout(c, align(target, 2097152))`, or `#Layout(columnar)`")
+                parser_layout_variant_refusal(&state, variant, variant_span, true)
                 return None
             }
         }
@@ -171,7 +171,7 @@ fn parser_layout_marker_fact(state: &JetParserState, markers: [Marker], grouped:
             return None
         }
         if tag_width {
-            parser_add_fatal_code(&state, "E1105", marker.span, "A tag width applies only to enums.", "Structs have fields and padding but no discriminant tag.", "Remove `tag: …`, or put this layout on an enum.")
+            parser_layout_struct_bare_argument(&state, tag_name, tag_span, marker.span, true)
             return None
         }
         return layout
@@ -179,6 +179,40 @@ fn parser_layout_marker_fact(state: &JetParserState, markers: [Marker], grouped:
     parser_marker_shape_error(&state, marker)
     state.abort_mark = state.diagnostics.len()
     None
+}
+
+fn parser_layout_refusal(state: &JetParserState, fatal: Bool, span: Span, what: String, why: String, fix: String) {
+    if fatal {
+        parser_add_fatal_code(&state, "E1105", span, what, why, fix)
+    } else {
+        parser_add_error_code(&state, "E1105", span, what, why, fix)
+    }
+}
+
+// A first `#Layout` argument that names no supported layout: `packed` and
+// a first-argument `align` are reserved, anything else is unknown.
+fn parser_layout_variant_refusal(state: &JetParserState, variant: String, span: Span, fatal: Bool) {
+    if variant == "packed" || variant == "align" {
+        parser_layout_refusal(&state, fatal, span, "`#Layout({variant})` is reserved and not yet supported", "the supported variants are `c`, `columnar`, and `c, align(N)` or `c, align(target, N)`", "use `#Layout(c)`, `#Layout(c, align(64))`, `#Layout(c, align(target, 2097152))`, or `#Layout(columnar)`")
+        return
+    }
+    parser_layout_refusal(&state, fatal, span, "`#Layout({variant})` isn't a known layout variant", "the supported variants are `c`, `columnar`, and `c, align(N)` or `c, align(target, N)`", "write `#Layout(c)`, `#Layout(c, align(64))`, `#Layout(c, align(target, 2097152))`, or `#Layout(columnar)`")
+}
+
+// A bare name after a struct's layout kind (`#Layout(c, name)`), refused for
+// what the name is: an integer type is an enum's tag width, `packed` is the
+// reserved packed layout, and any other name is no layout argument. Only
+// `align(N)` or `align(target, N)` may follow on a struct.
+fn parser_layout_struct_bare_argument(state: &JetParserState, name: String, span: Span, marker_span: Span, fatal: Bool) {
+    if jet_layout_integer_backing_name(name) {
+        parser_layout_refusal(&state, fatal, marker_span, "A tag width applies only to enums.", "Structs have fields and padding but no discriminant tag.", "Remove `tag: …`, or put this layout on an enum.")
+        return
+    }
+    if name == "packed" {
+        parser_layout_refusal(&state, fatal, span, "`packed` is reserved and not yet supported as a layout argument", "removing a struct's padding has no defined layout contract yet; after `c`, a struct takes only `align(N)` or `align(target, N)`", "remove `packed`; `#Layout(c)` keeps the written field order, so listing the widest fields first leaves the least padding")
+        return
+    }
+    parser_layout_refusal(&state, fatal, span, "`{name}` isn't a `#Layout` argument for a struct", "after the layout kind, a struct takes only `align(N)` or `align(target, N)`; a bare type name there is an enum's tag width", "write `#Layout(c, align(64))`, or remove `{name}`")
 }
 
 // Rust `marker_groups.rs`: `#Layout(…)` inside a `#[…]` list. Its arguments
@@ -192,7 +226,7 @@ fn parser_layout_grouped_fact(state: &JetParserState, marker: Marker, is_enum: B
         return None
     }
     first :: parser_marker_expression(marker, 0) ?? return None
-    if first == .Ident(variant, _, _) {
+    if first == .Ident(variant, variant_span, _) {
         has_alignment := false
         alignment_target := false
         alignment := Int?{None}
@@ -207,6 +241,8 @@ fn parser_layout_grouped_fact(state: &JetParserState, marker: Marker, is_enum: B
                 } else {
                     parser_add_error_code(&state, "E1105", expr_span(argument), "`align` requires one integer byte value (or `align(target, N)`)", "`#Layout(c, align(N))` is compiler-owned ABI metadata", "write `align(64)` or `align(target, 2097152)`")
                 }
+            } else if value == .Ident(name, name_span, _) {
+                parser_layout_struct_bare_argument(&state, name, name_span, marker.span, false)
             } else {
                 parser_add_error_code(&state, "E1105", expr_span(value), "the second `#Layout` argument must be `align(N)` or `align(target, N)`", "struct alignment is a positive power-of-two integer", "write `#Layout(c, align(64))` or `#Layout(c, align(target, 2097152))`")
             }
@@ -218,7 +254,11 @@ fn parser_layout_grouped_fact(state: &JetParserState, marker: Marker, is_enum: B
                 return Val(StructLayout.Columnar)
             }
             else -> {
-                if jet_layout_integer_backing_name(variant) -> parser_add_error_code(&state, "E1105", marker.span, "`#Layout({variant})` backs only an enum", "an integer backing sets the number type of a payload-free enum's cases; a struct has fields, not case numbers", "use `#Layout(c)` on the struct, or put `#Layout({variant})` on a payload-free enum")
+                if jet_layout_integer_backing_name(variant) {
+                    parser_add_error_code(&state, "E1105", marker.span, "`#Layout({variant})` backs only an enum", "an integer backing sets the number type of a payload-free enum's cases; a struct has fields, not case numbers", "use `#Layout(c)` on the struct, or put `#Layout({variant})` on a payload-free enum")
+                } else {
+                    parser_layout_variant_refusal(&state, variant, variant_span, false)
+                }
                 return None
             }
         }

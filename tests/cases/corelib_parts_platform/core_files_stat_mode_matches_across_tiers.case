@@ -5,39 +5,39 @@ mkdir: directory
 when os unix: chmod: executable.sh 755
 step default: jet run main.jet  -- {work}/regular.txt {work}/executable.sh {work}/directory {work}/regular.link
 exit: 0
-when os unix: stdout.line(0).strip_prefix("family:"): = "unix"
-when os windows: stdout.line(0).strip_prefix("family:"): = "windows"
-stdout.line(1).strip_prefix("absolute:"): = "{work}/regular.txt"
-stdout.line(2).trim.split(",", 0): is-i64
-stdout.line(2).trim.split(",", 1): is-i64
-stdout.line(2).trim.split(",", 2): is-i64
-stdout.line(2).trim.split(",", 3): is-i64
-stdout.line(2).trim.split(",", 4): is-i64
-stdout.line(2).trim.split(",", 5): is-i64
-stdout.line(2).trim.replace(",", "\n"): lines = 6
-stdout.line(2).trim.split(",", 0).bit_and(0o170000): numeric-lines = [32768]
-stdout.line(2).trim.split(",", 0).bit_and(0o777): numeric-lines = [420]
-stdout.line(2).trim.split(",", 1).bit_and(0o170000): numeric-lines = [32768]
-stdout.line(2).trim.split(",", 1).bit_and(0o777): numeric-lines = [493]
-stdout.line(2).trim.split(",", 2).bit_and(0o170000): numeric-lines = [16384]
-stdout.line(2).trim.split(",", 2).bit_and(0o777): numeric-lines = [493]
-stdout.line(2).trim.split(",", 4).bit_and(0o170000): numeric-lines = [32768]
-stdout.line(2).trim.split(",", 4).bit_and(0o777): numeric-lines = [384]
-stdout.line(2).trim.split(",", 5).bit_and(0o170000): numeric-lines = [16384]
-stdout.line(2).trim.split(",", 5).bit_and(0o777): numeric-lines = [448]
-stdout.line(2).trim.split(",", 3).bit_and(0o170000): numeric-lines = [40960]
-stdout.line(2).trim.split(",", 3).bit_and(0o111): each-line !^= "0"
+when os unix: stdout.line(0).strip_prefix("family:"): = "unix" # original observations(): line.strip_prefix("family:")
+when os windows: stdout.line(0).strip_prefix("family:"): = "windows" # original observations(): line.strip_prefix("family:")
+stdout.line(1).strip_prefix("absolute:"): = "{work}/regular.txt" # original observations(): line.strip_prefix("absolute:")
+stdout.line(2).trim.split(",", 0): is-i64 # original observations(): mode.parse::<i64>()
+stdout.line(2).trim.split(",", 1): is-i64 # original observations(): mode.parse::<i64>()
+stdout.line(2).trim.split(",", 2): is-i64 # original observations(): mode.parse::<i64>()
+stdout.line(2).trim.split(",", 3): is-i64 # original observations(): mode.parse::<i64>()
+stdout.line(2).trim.split(",", 4): is-i64 # original observations(): mode.parse::<i64>()
+stdout.line(2).trim.split(",", 5): is-i64 # original observations(): mode.parse::<i64>()
+stdout.line(2).trim.replace(",", "\n"): lines = 6 # original default_modes.len() == 6
+stdout.line(2).trim.split(",", 0).bit_and(0o170000): numeric-lines = [32768] # original mode bit mask assertion
+stdout.line(2).trim.split(",", 0).bit_and(0o777): numeric-lines = [420] # original mode bit mask assertion
+stdout.line(2).trim.split(",", 1).bit_and(0o170000): numeric-lines = [32768] # original mode bit mask assertion
+stdout.line(2).trim.split(",", 1).bit_and(0o777): numeric-lines = [493] # original mode bit mask assertion
+stdout.line(2).trim.split(",", 2).bit_and(0o170000): numeric-lines = [16384] # original mode bit mask assertion
+stdout.line(2).trim.split(",", 2).bit_and(0o777): numeric-lines = [493] # original mode bit mask assertion
+stdout.line(2).trim.split(",", 4).bit_and(0o170000): numeric-lines = [32768] # original mode bit mask assertion
+stdout.line(2).trim.split(",", 4).bit_and(0o777): numeric-lines = [384] # original mode bit mask assertion
+stdout.line(2).trim.split(",", 5).bit_and(0o170000): numeric-lines = [16384] # original mode bit mask assertion
+stdout.line(2).trim.split(",", 5).bit_and(0o777): numeric-lines = [448] # original mode bit mask assertion
+stdout.line(2).trim.split(",", 3).bit_and(0o170000): numeric-lines = [40960] # original mode bit mask assertion
+stdout.line(2).trim.split(",", 3).bit_and(0o111): each-line !^= "0" # original assert_ne!(mode & 0o111, 0)
 remove: regular.link
 step interpreted: jet run main.jet -- {work}/regular.txt {work}/executable.sh {work}/directory {work}/regular.link
 exit: 0
-when os unix: stdout.line(0).strip_prefix("family:"): = "unix"
-when os windows: stdout.line(0).strip_prefix("family:"): = "windows"
-stdout.line(1).strip_prefix("absolute:"): = "{work}/regular.txt"
-stdout.line(2).trim.replace(",", "\n"): numeric-lines == default
+when os unix: stdout.line(0).strip_prefix("family:"): = "unix" # original observations(): line.strip_prefix("family:")
+when os windows: stdout.line(0).strip_prefix("family:"): = "windows" # original observations(): line.strip_prefix("family:")
+stdout.line(1).strip_prefix("absolute:"): = "{work}/regular.txt" # original observations(): line.strip_prefix("absolute:")
+stdout.line(2).trim.replace(",", "\n"): numeric-lines == default # original release_modes == default_modes
 remove: regular.link
 step release: jet run main.jet --release -- {work}/regular.txt {work}/executable.sh {work}/directory {work}/regular.link
 exit: 0
-when os unix: stdout.line(0).strip_prefix("family:"): = "unix"
-when os windows: stdout.line(0).strip_prefix("family:"): = "windows"
-stdout.line(1).strip_prefix("absolute:"): = "{work}/regular.txt"
-stdout.line(2).trim.replace(",", "\n"): numeric-lines == default
+when os unix: stdout.line(0).strip_prefix("family:"): = "unix" # original observations(): line.strip_prefix("family:")
+when os windows: stdout.line(0).strip_prefix("family:"): = "windows" # original observations(): line.strip_prefix("family:")
+stdout.line(1).strip_prefix("absolute:"): = "{work}/regular.txt" # original observations(): line.strip_prefix("absolute:")
+stdout.line(2).trim.replace(",", "\n"): numeric-lines == default # original release_modes == default_modes

@@ -772,6 +772,10 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
             else -> None
         }
         if element == .Val(item) {
+            // L0501 (Rust `infer` Index arm): a list window copies its range,
+            // so one taken on every loop pass copies every pass. A `View`
+            // subrange reborrows instead and is not reported.
+            if scopes.loop_depth > 0 -> &diagnostics.push(sema_lint("L0501", span, "slicing inside a loop copies every time", "each slice makes a fresh copy of the range — that adds up in a loop", "build indices outside the loop, or collect into one list"))
             zero :: sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
             value :: sema_tree_node(Type.List{element: item}, TExprKind.Slice{base: checked_base, start: zero, end: zero, range: Val(checked_index), location: sema_expression_panic_location(environment, program, scopes, span)}, span)
             return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
@@ -961,6 +965,9 @@ fn sema_expression_rows_index(table: TExpr, row: TExpr, element: Type, row_span:
 
 fn sema_expression_slice(base: Expr, start: Expr, end: Expr, range: Expr?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     checked_base :: sema_check_expression(base, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    // L0501 (Rust `infer_slice`): an owned slice taken inside a loop copies on
+    // every pass; a `View` subrange reborrows its owner and is not reported.
+    if scopes.loop_depth > 0 && sema_expression_view_subrange_type(checked_base.ty) == None -> &diagnostics.push(sema_lint("L0501", span, "slicing inside a loop copies every time", "each slice makes a fresh copy of the range — that adds up in a loop", "build indices outside the loop, or collect into one list"))
     result_ty := Type?{None}
     range_value := TExpr?{None}
     checked_start := TExpr?{None}

@@ -44,7 +44,14 @@ fn tree(pid_file: String) {
     loop { time.sleep(1s) }
 }
 
+// The original spawned this child with std::process::Command, which keeps it in
+// the tree's process group; core.process gives every child a group of its own,
+// so the descendant rejoins its parent's group before it reports its pid.
 fn descendant(pid_file: String) {
+    #Unsafe("the fixture's descendant rejoins the process group of the tree that spawned it") {
+        group :: sys.getpgid(sys.getppid()) ?? panic("read the tree's process group")
+        sys.setpgid(0, group) ?? panic("join the tree's process group")
+    }
     files.write(pid_file, "{process.current_pid()}") ?? panic("write descendant pid")
     loop { time.sleep(1s) }
 }

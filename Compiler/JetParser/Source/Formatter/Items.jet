@@ -22,6 +22,7 @@ use jet_foundation.[
     Func,
     GenericModuleDef,
     GenericModuleParam,
+    ImplConstValue,
     ImplDef,
     ImportDecl,
     Item,
@@ -80,6 +81,7 @@ JFMT_MEMBER_VALIDATE :: 5
 JFMT_MEMBER_ASSOC_TYPE :: 6
 JFMT_MEMBER_IMPORT :: 7
 JFMT_MEMBER_ITEM :: 8
+JFMT_MEMBER_CONSTANT :: 9
 
 struct JetFmtMember {
     kind: Int
@@ -101,7 +103,7 @@ struct JetFmtTypeBody {
 // declarations stack on adjacent lines; anything carrying a body is set off
 // from its neighbour by a blank line.
 fn jfmt_member_is_compact(member: JetFmtMember) -> Bool Never! {
-    member.kind == JFMT_MEMBER_FIELD || member.kind == JFMT_MEMBER_ASSOC_TYPE
+    member.kind == JFMT_MEMBER_FIELD || member.kind == JFMT_MEMBER_ASSOC_TYPE || member.kind == JFMT_MEMBER_CONSTANT
 }
 
 // Rust `sort_by_key(start)`: a stable sort on the authored offset.
@@ -1124,16 +1126,30 @@ fn jfmt_fmt_trait(f: &JetFmt, t: TraitDef) {
     jfmt_write(&f, "{{")
     jfmt_newline(&f)
     f.indent += 1
-    // `type Name` associated-type declarations live in `assoc_types`
-    // and signatures in `methods`, so printing one vector and then the other
-    // moves a signature the author wrote before a row.
+    // `type Name` associated-type declarations live in `assoc_types`,
+    // constants in `constants` and signatures in `methods`, so printing one
+    // vector and then another moves a signature the author wrote before a row.
     members := [JetFmtMember]{}
     loop index in 0..<t.assoc_types.len() -> &members.push(JetFmtMember{kind: JFMT_MEMBER_ASSOC_TYPE, index: index, start: t.assoc_types[index].span.start})
+    loop index in 0..<t.constants.len() -> &members.push(JetFmtMember{kind: JFMT_MEMBER_CONSTANT, index: index, start: t.constants[index].span.start})
     loop index in 0..<t.methods.len() -> &members.push(JetFmtMember{kind: JFMT_MEMBER_METHOD, index: index, start: t.methods[index].span.start})
     loop member in jfmt_sort_members(members) {
         if member.kind == JFMT_MEMBER_ASSOC_TYPE {
             jfmt_write(&f, "type ")
             jfmt_write(&f, t.assoc_types[member.index].name)
+            jfmt_newline(&f)
+            next
+        }
+        if member.kind == JFMT_MEMBER_CONSTANT {
+            constant :: t.constants[member.index]
+            jfmt_write(&f, constant.name)
+            jfmt_write(&f, ": ")
+            jfmt_fmt_type(&f, constant.ty)
+            if constant.default == .Val(expr) {
+                jfmt_write(&f, "{{")
+                jfmt_fmt_expr(&f, expr, jfmt_prec_add_rhs(JFMT_PREC_OR_FALLBACK))
+                jfmt_write(&f, "}}")
+            }
             jfmt_newline(&f)
             next
         }
@@ -1441,17 +1457,19 @@ fn jfmt_fmt_trait_impl_block(f: &JetFmt, block: TraitImplBlock) {
     jfmt_write(&f, " {{")
     jfmt_newline(&f)
     f.indent += 1
-    jfmt_fmt_impl_body(&f, block.assoc_type_impls, block.methods)
+    jfmt_fmt_impl_body(&f, block.assoc_type_impls, block.constants, block.methods)
     f.indent -= 1
     jfmt_end_block(&f)
 }
 
 // Emit an `impl` body in authored order (Rust `ImplBodyMember`).
-// `type Name = Concrete` rows and methods arrive in two vectors, so printing
-// one vector and then the other moves a row the author wrote after a method.
-fn jfmt_fmt_impl_body(f: &JetFmt, assoc_types: [NamedType], methods: [Func]) {
+// `type Name = Concrete` rows, `name :: value` constants and methods arrive
+// in three vectors, so printing one vector and then another moves a row the
+// author wrote after a method.
+fn jfmt_fmt_impl_body(f: &JetFmt, assoc_types: [NamedType], constants: [ImplConstValue], methods: [Func]) {
     members := [JetFmtMember]{}
     loop index in 0..<assoc_types.len() -> &members.push(JetFmtMember{kind: JFMT_MEMBER_ASSOC_TYPE, index: index, start: assoc_types[index].span.start})
+    loop index in 0..<constants.len() -> &members.push(JetFmtMember{kind: JFMT_MEMBER_CONSTANT, index: index, start: constants[index].span.start})
     loop index in 0..<methods.len() -> &members.push(JetFmtMember{kind: JFMT_MEMBER_METHOD, index: index, start: methods[index].span.start})
     sorted :: jfmt_sort_members(members)
     loop position in 0..<sorted.len() {
@@ -1467,6 +1485,12 @@ fn jfmt_fmt_impl_body(f: &JetFmt, assoc_types: [NamedType], methods: [Func]) {
             jfmt_write(&f, row.name)
             jfmt_write(&f, " = ")
             jfmt_fmt_type(&f, row.ty)
+        } else if member.kind == JFMT_MEMBER_CONSTANT {
+            constant :: constants[member.index]
+            jfmt_emit_leading(&f, constant.span.start)
+            jfmt_write(&f, constant.name)
+            jfmt_write(&f, " :: ")
+            jfmt_fmt_expr(&f, constant.value, JFMT_PREC_OR_FALLBACK)
         } else {
             method :: methods[member.index]
             jfmt_emit_leading(&f, method.name_span.start)
@@ -2079,7 +2103,7 @@ fn jfmt_fmt_impl(f: &JetFmt, i: ImplDef) {
     jfmt_write(&f, " {{")
     jfmt_newline(&f)
     f.indent += 1
-    jfmt_fmt_impl_body(&f, i.assoc_type_impls, i.methods)
+    jfmt_fmt_impl_body(&f, i.assoc_type_impls, i.constants, i.methods)
     f.indent -= 1
     jfmt_end_block(&f)
 }

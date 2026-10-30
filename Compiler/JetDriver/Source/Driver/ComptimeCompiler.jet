@@ -1,0 +1,172 @@
+// `core.compiler` queries in compile-time code (D-FRONTENDAPI1): the driver's
+// answer to the evaluator's compiler query route (JetEvalCompilerQueryHost).
+// `lex` and `parse` run the compiler's own lexer and parser over the query's
+// source; `check` runs the same check query `jet inspect compiler check`
+// runs (jet_driver_compiler_check) over the syntax tree's source, under this
+// compile's Core sources, host facts and evaluator. Every query reads only
+// its argument: no path, package or sibling source.
+use jet_foundation.[
+    CompilerThreads,
+    Span,
+    TComptimeField,
+    TComptimeReport,
+    TComptimeValue,
+    Type,
+    diagnostic_from_registry,
+]
+use jet_eval.[
+    JET_COMPILER_SERVICES_SCHEMA_VERSION,
+    JetCompilerServicesSourceInput,
+    JetCompilerServicesSourcePreparation,
+    JetEvalBuildReply,
+    JetEvalCompilerQueryHost,
+    JetEvalConfig,
+    jet_eval_compiler_services_diagnostic_values,
+    jet_eval_compiler_services_int,
+    jet_eval_compiler_services_lex,
+    jet_eval_compiler_services_parse,
+    jet_eval_compiler_services_span,
+    jet_eval_compiler_services_string,
+]
+
+JET_DRIVER_COMPILER_SOURCE_IDENTITY :: "compiler-eval-source"
+JET_DRIVER_COMPILER_SOURCE_FILE :: "core.compiler.jet"
+
+// What a check query compiles under: the requesting compile's facts.
+struct JetDriverComptimeCompilerContext {
+    root: String
+    canonical_effect_source: String
+    core_sources: [JetDriverCoreSource]
+    host_facts: JetDriverHostFacts
+    eval_config: JetEvalConfig
+    compiler_threads: CompilerThreads
+}
+
+struct JetDriverComptimeCompiler {
+    context: Shared<JetDriverComptimeCompilerContext>
+}
+
+// A compiler query's source input: its inline `package { }` carrier masked
+// (a malformed carrier is the only diagnostic), as the loader masks it.
+fn jet_driver_compiler_source_input(source: String) -> JetCompilerServicesSourceInput {
+    carrier :: jet_driver_inline_package(source)
+    masked :: jet_driver_mask_inline_package(source, carrier)
+    preparation :: if carrier.error == .Val(error) -> JetCompilerServicesSourcePreparation.Rejected{diagnostic: error} else -> JetCompilerServicesSourcePreparation.Masked{source: masked}
+    JetCompilerServicesSourceInput{source: source, preparation: Val(preparation)}
+}
+
+// The one-file source snapshot a check query compiles: `source` as
+// `core.compiler.jet` under `root` (metadata only; imports resolve there).
+fn jet_driver_compiler_source_snapshot(root: String, source: String) -> JetDriverAuthorizedSourceSnapshot {
+    path :: if root == "/" -> "/{JET_DRIVER_COMPILER_SOURCE_FILE}" else -> "{root}/{JET_DRIVER_COMPILER_SOURCE_FILE}"
+    JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: root, identity: JET_DRIVER_COMPILER_SOURCE_IDENTITY, allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: path, relative_path: JET_DRIVER_COMPILER_SOURCE_FILE, identity: JET_DRIVER_COMPILER_SOURCE_IDENTITY, source: source}}, foreign_cache_files: []}},
+        entry_root_identity: JET_DRIVER_COMPILER_SOURCE_IDENTITY,
+        entry_path: path,
+    }
+}
+
+// The compiler query host of `request`'s compile-time code.
+fn jet_driver_comptime_compiler_for(request: JetDriverCompileRequest) -> JetEvalCompilerQueryHost {
+    // copy: the host keeps the facts a check query compiles under; the request keeps its own.
+    context :: shared JetDriverComptimeCompilerContext{
+        root: jet_driver_entry_root_path(request.authorized_sources),
+        canonical_effect_source: request.canonical_effect_source.copy(),
+        core_sources: request.core_sources.copy(),
+        host_facts: request.host_facts.copy(),
+        eval_config: jet_driver_comptime_eval_config(request.eval_config, None, None),
+        compiler_threads: request.compiler_threads.copy(),
+    }
+    JetDriverComptimeCompiler{context: context}
+}
+
+impl JetDriverComptimeCompiler.JetEvalCompilerQueryHost {
+    fn clone_compiler_host(self) -[]> JetEvalCompilerQueryHost {
+        // copy: the evaluator forks the host for each machine; the forks share one context.
+        JetDriverComptimeCompiler{context: self.context.copy()}
+    }
+    fn compiler_query(self, query: String, args: [TComptimeValue], span: Span) -[Env, FFI.Asm, FS, Net]> JetEvalBuildReply? {
+        if query == "lex" {
+            source :: jet_driver_compiler_query_text(args) ?? return Val(jet_driver_compiler_query_lost(query, span))
+            lexed :: jet_eval_compiler_services_lex(jet_driver_compiler_source_input(source)) ?? return Val(jet_driver_compiler_query_lost(query, span))
+            return Val(JetEvalBuildReply.Value{value: TComptimeValue.Present{value: lexed.value}})
+        }
+        if query == "parse" {
+            source :: jet_driver_compiler_query_text(args) ?? return Val(jet_driver_compiler_query_lost(query, span))
+            parsed :: jet_eval_compiler_services_parse(jet_driver_compiler_source_input(source)) ?? return Val(jet_driver_compiler_query_lost(query, span))
+            return Val(JetEvalBuildReply.Value{value: TComptimeValue.Present{value: parsed.value}})
+        }
+        if query == "check" -> return Val(jet_driver_compiler_query_check(self.context, args, span))
+        None
+    }
+}
+
+// The String argument of `lex(source)` / `parse(source)`.
+fn jet_driver_compiler_query_text(args: [TComptimeValue]) -> String? {
+    if args.len() != 1 -> return None
+    if args[0] == .String(text) -> return Val(text)
+    None
+}
+
+fn jet_driver_compiler_query_lost(query: String, span: Span) -> JetEvalBuildReply Never! {
+    JetEvalBuildReply.Failure{diagnostic: diagnostic_from_registry("E0003", Val(span), "`compiler.{query}` has no answer", "the compiler couldn't read the query's checked argument or project its result", "report this compiler bug")}
+}
+
+// `check(syntax)`: the check query over the syntax tree's source. A source
+// whose load stops before checking keeps its syntax and diagnostics, with no
+// effects or semantic index (Compiler.rs's no-bundle path).
+fn jet_driver_compiler_query_check(context: Shared<JetDriverComptimeCompilerContext>, args: [TComptimeValue], span: Span) -[Env, FFI.Asm, FS, Net]> JetEvalBuildReply Never! {
+    source := String?{None}
+    if args.len() == 1 && args[0] == .Struct(_, fields) {
+        loop field in fields {
+            if field.name == "source" && field.value == .String(text) -> source = Val(text)
+        }
+    }
+    text :: source ?? return jet_driver_compiler_query_lost("check", span)
+    parsed :: jet_eval_compiler_services_parse(jet_driver_compiler_source_input(text)) ?? return jet_driver_compiler_query_lost("check", span)
+    permit :: context.guard_read()
+    request :: JetDriverCompileRequest{
+        authorized_sources: jet_driver_compiler_source_snapshot(permit.value.root, text),
+        canonical_effect_source: permit.value.canonical_effect_source.copy(),
+        core_sources: permit.value.core_sources.copy(),
+        host_facts: permit.value.host_facts.copy(),
+        eval_config: jet_driver_comptime_eval_config(permit.value.eval_config, None, None),
+        record_store: None,
+        trace_sink: None,
+        compiler_threads: permit.value.compiler_threads.copy(),
+        mode: JetDriverCompileMode.Doc,
+    }
+    result :: jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed.copy(), request: request, sema_session: None, retain_projection: false}) ?? return JetEvalBuildReply.Failure{diagnostic: diagnostic_from_registry("E0003", Val(span), "`compiler.check` failed inside the compiler", "the check query failed before returning its diagnostics", "report this compiler bug")}
+    if result.internal_problem == .Val(problem) -> return JetEvalBuildReply.Failure{diagnostic: diagnostic_from_registry("E0003", Val(span), "`compiler.check` failed inside the compiler", problem, "report this compiler bug")}
+    if result.product == {
+        .CheckedCompilerValue(checked) -> JetEvalBuildReply.Value{value: TComptimeValue.Present{value: checked.value}}
+        .RetainedCheckedProjection(_) -> JetEvalBuildReply.Failure{diagnostic: diagnostic_from_registry("E0003", Val(span), "`compiler.check` returned a retained projection", "a compile-time check query asks for its compiler value", "report this compiler bug")}
+        .Failed -> {
+            functions := [TComptimeValue]{}
+            loop item in parsed.parsed.program.items {
+                if item == .Func(function) && function.name != "build" {
+                    &functions.push(TComptimeValue.Struct{type_name: "FunctionInfo", fields: [TComptimeField]{
+                        TComptimeField{name: "name", value: jet_eval_compiler_services_string(function.name)},
+                        TComptimeField{name: "module", value: jet_eval_compiler_services_string("core.compiler")},
+                        TComptimeField{name: "identity", value: jet_eval_compiler_services_string("core.compiler::{function.name}")},
+                        TComptimeField{name: "params", value: TComptimeValue.List{values: []}},
+                        TComptimeField{name: "span", value: jet_eval_compiler_services_span(function.name_span)},
+                        TComptimeField{name: "effects", value: TComptimeValue.Struct{type_name: "EffectInfo", fields: [TComptimeField]{TComptimeField{name: "values", value: TComptimeValue.List{values: []}}}}},
+                        TComptimeField{name: "reaches_panic", value: TComptimeValue.Bool{value: false}},
+                        TComptimeField{name: "arithmetic", value: TComptimeValue.List{values: []}},
+                        TComptimeField{name: "facts", value: TComptimeValue.List{values: []}},
+                    }})
+                }
+            }
+            JetEvalBuildReply.Value{value: TComptimeValue.Present{value: TComptimeValue.Struct{type_name: "CompilerChecked", fields: [TComptimeField]{
+                TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
+                TComptimeField{name: "source", value: jet_eval_compiler_services_string(text)},
+                TComptimeField{name: "syntax", value: parsed.value},
+                TComptimeField{name: "diagnostics", value: jet_eval_compiler_services_diagnostic_values(result.diagnostics)},
+                TComptimeField{name: "functions", value: TComptimeValue.List{values: functions}},
+                TComptimeField{name: "effects", value: TComptimeValue.List{values: []}},
+                TComptimeField{name: "semantic_index", value: TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Named{name: "CompilerSemanticIndex"}}}},
+            }}}}
+        }
+    }
+}

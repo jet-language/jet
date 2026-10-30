@@ -30,6 +30,7 @@ use jet_backend.[
     X64_COMPTIME_CALL,
     X64_COMPTIME_DONE,
     X64_COMPTIME_HOST,
+    X64_COMPTIME_HOST_CONSTANT,
     X64_COMPTIME_HOST_FIELD,
     X64_COMPTIME_HOST_INPUT,
     X64_COMPTIME_HOST_METHOD,
@@ -155,6 +156,8 @@ struct JetEvalIRState {
     exit_code: Int?
     // The compiler's answer to `embed_file` / `embed_bytes` / `find`.
     inputs: JetEvalComptimeInputAdapter?
+    // The compiler's answer to a `core.compiler` query.
+    compiler: JetEvalCompilerQueryHost?{None}
     // The batch's type rows and layouts host values are read and written
     // by, the build host of a fn-build or fn-dev invocation, and the
     // compiler values its code holds (a host word is index + 1).
@@ -515,6 +518,7 @@ fn jet_eval_native_run(program: &JetEvalNativeProgram, item: Int, args: [TCompti
         stdout: "", stderr: "", max_depth: config.max_call_depth, runtime_execution: program.runtime_execution, eval_entry: config.eval_entry, span: span,
         failure: None, internal_problem: None, exit_code: None,
         inputs: if config.comptime_input_adapter == .Val(adapter) -> Val(adapter.clone_input_adapter()) else -> None,
+        compiler: if config.compiler_query_host == .Val(host) -> Val(host.clone_compiler_host()) else -> None,
         host_types: Val(program.types.copy()), host_layouts: Val(program.layouts.copy()),
         host_adapter: if config.build_host_adapter == .Val(installed) -> Val(installed.clone_adapter()) else -> None,
     }
@@ -799,6 +803,7 @@ fn jet_eval_native_host(s: &JetEvalIRState, kind: Int, operands: Int, count: Int
         X64_COMPTIME_HOST_METHOD -> jet_eval_ir_host_method_route(&s, args, row, result)
         X64_COMPTIME_HOST_FIELD -> jet_eval_ir_host_field_route(&s, args, row, result)
         X64_COMPTIME_HOST_INPUT -> jet_eval_ir_comptime_input_route(&s, args, row)
+        X64_COMPTIME_HOST_CONSTANT -> jet_eval_ir_host_constant_route(&s, args, row, result)
         else -> jet_eval_ir_primitive_shape(&s, "jet_comptime_host")
     } ?? return None
     reads :: types_cell.guard_read()

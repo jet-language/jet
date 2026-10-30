@@ -192,6 +192,21 @@ digests, the checked export inventory, the content-addressed identity and the
 existing no-Rust-symbol check. Native compiler staging uses the same receipt
 reader. This cache does not bypass semantic checks on user programs.
 
+Runtime services start on use (D-EFF-CORE-INIT1 A). A lifecycle hook written
+`// runtime-init: N when <storage>,...` names the module storage its service
+sets up; `lifecycle.list` carries the names and the library build
+(`JetIR/BuildLibrary.jet`) rejects one the hook (or code it calls or installs)
+does not set up. Per guard the object writer emits an `.init_array.NNNNN` or
+`.fini_array.NNNNN` section flagged `SHF_INFO_LINK` whose `sh_info` is that
+storage's data section; the pack keeps the link. Jet's linker
+(`Image/StaticLink.jet` `link_collect`) keeps such a hook exactly when it keeps
+one of its guards, so a program that touches no service state runs and links
+none of its startup. A guarded hook may run once per kept guard and therefore
+starts idempotently. System linkers ignore the flag and keep every hook, as
+does the runtime image, whose exports are all live. Code a service runs only
+when used is installed by its hook as a code word (`rt_*_address()`), never
+called from always-live startup or exit paths.
+
 `RuntimeRoutes.jet` is the native lowering table of runtime C-ABI routes and
 its only home: its route, record and import rows are edited by hand, sorted,
 together with the runtime `#Export(c)` they name. After provider admission

@@ -9,7 +9,6 @@ when os unix: chmod: project/jet-pkgs/pkgs/systemd/bin/systemd 0755
 step diagnostic: jet os build box --no-color --offline
 cwd: project
 exit: 2
-capture: diagnostic = text stderr
-when diagnostic.stderr ~ "\n  error[E1288]": capture: diagnostic = text stderr.after_first("\n  error[E1288]").prepend("\n  error[E1288]")
+capture: diagnostic = text stderr.from_or_all("\n  error[E1288]")
 cap:diagnostic: = os_default_gnome_desktop_requires_first_party_packages.fixture/expected.stderr
 

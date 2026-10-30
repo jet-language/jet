@@ -187,9 +187,9 @@ fn jet_cli_runtime_pack(result: ^JetDriverCompileResult, prefix: String, object:
             &names.push(path)
             &bytes.push(input)
         }
-        // Preserve the hosted backend's direct memory/unwind imports (the
-        // same explicit C roots as LinkRuntime.jet), never archive-wide roots.
-        roots :: [String]{"memcpy", "memmove", "memset", "memcmp", "_Unwind_Backtrace"}
+        // Preserve the hosted backend's direct memory imports (the same
+        // explicit C roots as LinkRuntime.jet), never archive-wide roots.
+        roots :: [String]{"memcpy", "memmove", "memset", "memcmp"}
         linked :: x64_link_runtime_pack(names, ^bytes, roots)
         if linked.errors.len() > 0 {
             cli_files.write("{prefix}.pack-issues", linked.errors.join("\n")) ?? return jet_driver_compile_escaped_failure("cannot write runtime pack findings: {err}")

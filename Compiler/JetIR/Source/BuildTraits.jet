@@ -69,6 +69,24 @@ fn ir_trait_head_identity(p: IRProgram, ty: Type) -> String? Never! {
     None
 }
 
+// The constant key of trait constant `name` of the implementation of trait
+// `trait_short` (its short name) for the type of identity `owner`.
+fn ir_trait_constant_key(trait_short: String, owner: String, name: String) -> String Never! {
+    "trait-constant:{trait_short}|{owner}|{name}"
+}
+
+// `T.name` over a type parameter: the constant of the implementation of
+// `trait_short` the instance's concrete `owner` has; an implementation for
+// the exact type wins, else the generic owner's (`impl Box.Shape` for a
+// `Box<Int>`).
+fn ir_trait_constant(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: Type, trait_short: String, name: String, span: Span) -> Int Never! {
+    concrete :: ir_fact(p, &b, owner, span)
+    exact :: ir_trait_constant_key(trait_short, ir_trait_identity(p, concrete), name)
+    if p.constants.get(exact) != None -> return ir_constant(&m, p, &b, ty, exact, span)
+    head :: ir_trait_head_identity(p, concrete) ?? return ir_fail_slot(&b, span, "no `{trait_short}` constant `{name}` for {ir_type_name(concrete)}")
+    ir_constant(&m, p, &b, ty, ir_trait_constant_key(trait_short, head, name), span)
+}
+
 // The concrete owner of function `row` when it implements a method of the
 // trait `owner` (p.trait_methods lists it under the trait's name): a
 // TraitMethod of that very trait, or a plain Method of an implementation

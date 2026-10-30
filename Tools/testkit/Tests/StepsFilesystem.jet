@@ -122,6 +122,8 @@ use core.files as files
     assert_eq(cases_test_advanced(root, "missing-lstat", "file: missing is-symlink\n").verdict.status, "FAIL")
     wrong :: "write: unicode = \"é\"\ncapture: broken = replace-range file unicode 1 2 \"x\"\n"
     assert_eq(cases_test_advanced(root, "boundary", wrong).verdict.status, "FAIL")
+    captured :: "write: original = \"ABCDE\"\nwrite: start.txt = \"1\"\nwrite: end.txt = \"3\"\nwrite: insert.txt = \"xy\"\ncapture: start_at = text file start.txt\ncapture: end_at = text file end.txt\ncapture: insert = text file insert.txt\ncapture: replaced = replace-range file original {{cap:start_at}} {{cap:end_at}} {{cap:insert}}\ncap:replaced: = \"AxyDE\"\n"
+    assert_eq(cases_test_advanced(root, "captured-span", captured).verdict.status, "PASS")
     files.remove_all(root) ?? panic("remove metadata capture scratch")
 }
 

@@ -527,6 +527,13 @@ fn sema_process_child_field(base: TExpr, member: String, span: Span, expected: T
 }
 
 fn sema_call_try_process_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    // A child's `terminal` is optional: its session methods need the handle
+    // unwrapped first.
+    if method == "resize" && receiver_value.ty == .Option(inner) && sema_process_handle_receiver_name(inner) == "TerminalSession" {
+        &diagnostics.push(sema_error("E0311", span, "`.resize()` needs `TerminalSession`, not `TerminalSession?`", "a child has a terminal session only when a terminal-backed launch succeeds", "unwrap the optional handle first, then call `session.resize(size)`"))
+        sema_process_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
     receiver_name :: sema_process_handle_receiver_name(receiver_value.ty)
     // Core/Args/Args.jet declares both; a user type of the same leaf name is
     // not them.

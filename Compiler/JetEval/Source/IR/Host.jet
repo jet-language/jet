@@ -64,11 +64,12 @@ fn jet_eval_ir_host_arguments(s: &JetEvalIRState, params: [Int], args: [TComptim
 }
 
 // jet_comptime_host_method(member, impure, start, end, (row key, word)...):
-// method `member` (`Owner.method`) on the receiver and arguments, each a word
-// of the type row its key names; `impure` when the call sits in an `#Impure`
-// block; `start` and `end` the call's span (ir_host_method).
+// method `member` (`Owner.method`, or `compiler.query` for a `core.compiler`
+// query) on the receiver and arguments, each a word of the type row its key
+// names; `impure` when the call sits in an `#Impure` block; `start` and
+// `end` the call's span (ir_host_method).
 fn jet_eval_ir_host_method_route(s: &JetEvalIRState, args: [Int], dst_row: Int, area: Int) -> Int? {
-    if args.len() < 6 || args.len() % 2 != 0 -> return jet_eval_ir_primitive_shape(&s, "jet_comptime_host_method")
+    if args.len() < 4 || args.len() % 2 != 0 -> return jet_eval_ir_primitive_shape(&s, "jet_comptime_host_method")
     member :: jet_eval_ir_text(&s, args[0]) ?? return None
     parts :: jet_eval_compiler_value_method_owner(member) ?? return jet_eval_ir_primitive_shape(&s, "jet_comptime_host_method")
     types_cell :: jet_eval_ir_host_types(&s) ?? return None
@@ -108,6 +109,23 @@ fn jet_eval_ir_host_field_route(s: &JetEvalIRState, args: [Int], dst_row: Int, a
     jet_eval_ir_host_store(&types.value, layouts.value[0], &s, value, dst_row, area)
 }
 
+// jet_comptime_host_constant(key): comptime constant `key`, whose value
+// holds a compiler value: its computed value, from the constant row the
+// batch was built over (ir_host_constant).
+fn jet_eval_ir_host_constant_route(s: &JetEvalIRState, args: [Int], dst_row: Int, area: Int) -> Int? {
+    if args.len() != 1 || dst_row < 0 -> return jet_eval_ir_primitive_shape(&s, "jet_comptime_host_constant")
+    key :: jet_eval_ir_text(&s, args[0]) ?? return None
+    types_cell :: jet_eval_ir_host_types(&s) ?? return None
+    layouts_cell :: jet_eval_ir_host_layouts(&s) ?? return None
+    types := types_cell.guard_edit()
+    layouts :: layouts_cell.guard_read()
+    at :: layouts.value[0].constants.get(key) ?? {
+        jet_eval_ir_problem(&s, "compiler value constant {key} has no constant row")
+        return None
+    }
+    jet_eval_ir_host_store(&types.value, layouts.value[0], &s, layouts.value[0].constant_defs[at].value, dst_row, area)
+}
+
 // The type row of `types` whose intern key is the String at `key` (the
 // builder's ir_host_row_key).
 fn jet_eval_ir_host_row(types: IRModule, s: &JetEvalIRState, key: Int) -> Int? Never! {
@@ -118,9 +136,12 @@ fn jet_eval_ir_host_row(types: IRModule, s: &JetEvalIRState, key: Int) -> Int? N
 }
 
 // The answer of `owner.method` (`member`) on `values`, the receiver first:
-// a reflection predicate or compiler value projection, or the build host's,
-// which places its record or failure at the call's `span`.
+// a reflection predicate or compiler value projection, a `core.compiler`
+// query (owner `compiler`, no receiver) the compiler's query host answers,
+// or the build host's, which places its record or failure at the call's
+// `span`.
 fn jet_eval_ir_host_answer(s: &JetEvalIRState, owner: String, method: String, member: String, values: [TComptimeValue], fallible: Bool, impure: Bool, span: Span) -> TComptimeValue? {
+    if owner == "compiler" -> return jet_eval_ir_compiler_query(&s, method, values, span)
     if jet_eval_reflection_metadata_supported(owner, method) -> return jet_eval_ir_host_projection(&s, jet_eval_reflection_answer(owner, method, values))
     if jet_eval_compiler_value_method_supported(owner, method, values.len() - 1) -> return jet_eval_ir_host_projection(&s, jet_eval_compiler_value_answer(owner, method, values))
     adapter :: if s.host_adapter == {
@@ -134,6 +155,28 @@ fn jet_eval_ir_host_answer(s: &JetEvalIRState, owner: String, method: String, me
         jet_eval_ir_unsupported(&s, "compiler host method {member}")
         return None
     }
+    jet_eval_ir_host_reply(&s, reply)
+}
+
+// `core.compiler` query `query` on `values`: the compiler's query host
+// answers it, the typed result (a CompilerError failure included) or the
+// diagnostic that stops the evaluation.
+fn jet_eval_ir_compiler_query(s: &JetEvalIRState, query: String, values: [TComptimeValue], span: Span) -> TComptimeValue? {
+    host :: if s.compiler == {
+        .Val(installed) -> installed.clone_compiler_host()
+        .None -> {
+            if s.failure == None -> s.failure = Val(jet_eval_diagnostic(JetEvalErrorKind.Effect, span, "`compiler.{query}` can't run here", "this evaluation has no compiler query host", "call `core.compiler` from a comptime item or fn build that `jet build` or `jet run` compiles"))
+            return None
+        }
+    }
+    reply :: host.compiler_query(query, values, span) ?? {
+        jet_eval_ir_unsupported(&s, "compiler query compiler.{query}")
+        return None
+    }
+    jet_eval_ir_host_reply(&s, reply)
+}
+
+fn jet_eval_ir_host_reply(s: &JetEvalIRState, reply: JetEvalBuildReply) -> TComptimeValue? Never! {
     if reply == {
         .Value(value) -> Val(value)
         .Failure(diagnostic) -> {

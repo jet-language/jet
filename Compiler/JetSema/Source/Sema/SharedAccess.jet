@@ -8,6 +8,7 @@ use jet_foundation.[
     AccessConvention,
     BinOp,
     CallArg,
+    Diagnostic,
     EffectRowEntry,
     Expr,
     LValue,
@@ -22,6 +23,8 @@ use jet_foundation.[
     ast_binding,
     ast_empty_call_arg_flags,
     ast_empty_lambda_meta,
+    ast_visit_body,
+    ast_visit_expr,
     expr_span,
 ]
 
@@ -437,4 +440,126 @@ fn sema_shared_access_place_call_transaction(expr: Expr, environment: SemaScopeE
         return Val(Stmt.Transact{name: None, name_span: None, body: body, implicit: true, span: Span{start: found.span.start, end: expr_span(expr).end}})
     }
     None
+}
+
+// L0207 (Rust SharedAccess.rs lint_shared_busy_wait, D-CONC-SHARE2): an
+// unbounded conditional loop that polls a field of a `Shared` handle, with no
+// wait point, sleep, channel receive, or write to the polled field in its body,
+// spins a core. Runs on the parsed condition and body before they are checked.
+fn sema_shared_access_lint_busy_wait(condition: Expr, body: [Stmt], scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
+    handles := [String]{}
+    members := [String]{}
+    ast_visit_expr(condition, (expression: Expr) -> sema_shared_access_note_field_read(&handles, &members, expression))
+    poll := -1
+    loop index in 0..<handles.len() {
+        if sema_shared_access_name_is_shared(handles[index], scopes) {
+            poll = index
+            break
+        }
+    }
+    if poll < 0 -> return
+    blocking := false
+    ast_visit_body(body, (expression: Expr) -> sema_shared_access_note_blocking_call(&blocking, expression), true)
+    if blocking || sema_shared_access_statements_write_field(body, handles[poll], members[poll]) -> return
+    &diagnostics.push(sema_lint("L0207", sema_shared_access_condition_span(condition), "this unbounded loop polls `Shared` state without waiting", "an empty or non-blocking body reads a lock-backed value repeatedly and can consume a core while another task makes progress", "wait on a `Condition` through an edit guard, or receive from a channel; an empty plain-field predicate can use that wait directly"))
+}
+
+// The Rust checker reported the condition from its leftmost operand's own
+// span: a field operand (`flag.ready == false`) starts at its member name.
+fn sema_shared_access_condition_span(condition: Expr) -> Span Never! {
+    if condition == .Binary(_, left, _, span, _) -> return Span{start: sema_shared_access_condition_span(left).start, end: span.end}
+    expr_span(condition)
+}
+
+fn sema_shared_access_name_is_shared(name: String, scopes: SemaScopeTable) -> Bool Never! {
+    index :: sema_scope_resolve_index(scopes, name) ?? return false
+    ty :: scopes.bindings[index].symbol.ty ?? return false
+    sema_shared_access_is_shared_type(ty)
+}
+
+// A `handle.field` read whose base is a plain name: a poll candidate.
+fn sema_shared_access_note_field_read(handles: &[String], members: &[String], expression: Expr) Never! {
+    if expression == .Field(base, member, _, _) {
+        if sema_shared_access_without_parens_name(base) == .Val(name) {
+            &handles.push(name)
+            // copy: `member` is a payload of the visited expression, which the walk keeps
+            &members.push(member.copy())
+        }
+    }
+}
+
+fn sema_shared_access_without_parens_name(value: Expr) -> String? Never! {
+    if value == {
+        // copy: `name` is a payload of read parameter `value`; the Val carrier owns this one
+        .Ident(name, _, _) -> Val(name.copy())
+        .Paren(inner, _, _) -> sema_shared_access_without_parens_name(inner)
+        else -> None
+    }
+}
+
+// Rust body_has_blocking_call: a call that can park the loop. A module or
+// receiver call (`time.sleep`, `rx.receive`) counts by its last segment.
+fn sema_shared_access_note_blocking_call(found: &Bool, expression: Expr) Never! {
+    if expression == {
+        .Call(call, _) -> {
+            parts :: call.name.split(".").to_list()
+            if sema_shared_access_is_blocking_name(parts[parts.len() - 1]) -> found = true
+        }
+        .MethodCall(_, method, _, _, _, _, _) | .OptMethodCall(_, method, _, _, _, _, _) -> {
+            if sema_shared_access_is_blocking_name(method) -> found = true
+        }
+        else -> {}
+    }
+}
+
+fn sema_shared_access_is_blocking_name(name: String) -> Bool Never! {
+    name == "join" || name == "read" || name == "read_line" || name == "receive" || name == "recv" || name == "sleep" || name == "sleep_until" || name == "wait" || name == "yield_now"
+}
+
+// Rust body_writes_shared_field: an assignment to the polled field, or to any
+// element under the handle, in the body or a nested statement block.
+fn sema_shared_access_statements_write_field(body: [Stmt], handle: String, field: String) -> Bool Never! {
+    loop statement in body {
+        if sema_shared_access_statement_writes_field(statement, handle, field) -> return true
+    }
+    false
+}
+
+fn sema_shared_access_statement_writes_field(statement: Stmt, handle: String, field: String) -> Bool Never! {
+    if statement == {
+        .Assign(target, _, _, _) -> {
+            if target == {
+                .Local(_, _) -> return false
+                .Index(base, _, _, _) -> return sema_shared_access_expr_root_is(base, handle)
+                .Field(base, name, _) -> return name == field && sema_shared_access_expr_root_is(base, handle)
+            }
+        }
+        .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> return sema_shared_access_statements_write_field(body, handle, field)
+        .CountedLoop(_, _, step, body, _, _, _) -> {
+            if step == .Val(inner) && sema_shared_access_statement_writes_field(inner, handle, field) -> return true
+            return sema_shared_access_statements_write_field(body, handle, field)
+        }
+        .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
+            loop arm in arms {
+                if sema_shared_access_statements_write_field(arm.body, handle, field) -> return true
+            }
+            if else_body == .Val(rest) -> return sema_shared_access_statements_write_field(rest, handle, field)
+            return false
+        }
+        .ComptimeIf(_, _, then_body, else_body, _, _) -> {
+            if sema_shared_access_statements_write_field(then_body, handle, field) -> return true
+            if else_body == .Val(rest) -> return sema_shared_access_statements_write_field(rest, handle, field)
+            return false
+        }
+        else -> return false
+    }
+}
+
+fn sema_shared_access_expr_root_is(value: Expr, name: String) -> Bool Never! {
+    if value == {
+        .Ident(candidate, _, _) -> candidate == name
+        .Paren(inner, _, _) -> sema_shared_access_expr_root_is(inner, name)
+        .Field(base, _, _, _) | .OptField(base, _, _, _, _, _) | .Index(base, _, _, _, _) | .Slice(base, _, _, _, _, _) -> sema_shared_access_expr_root_is(base, name)
+        else -> false
+    }
 }

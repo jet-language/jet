@@ -21,6 +21,14 @@ fn kit_steps_numeric(text: String) -> Int? {
     Val(number)
 }
 
+// An integer right-hand side written `N*{cap:x}` or `{cap:x}+N` (after token
+// expansion) evaluates to its decimal text; any other text is not arithmetic.
+fn kit_steps_arithmetic(text: String) -> String? {
+    if !text.contains("+") && !text.contains("*") -> return None
+    number :: kit_steps_numeric(text) ?? return None
+    Val("{number}")
+}
+
 fn kit_steps_batch_form(mode: String) -> Bool {
     kit_expect_named(["lines", "count", "count-lines", "each-line", "sorted-lines", "numeric-lines", "len", "each", "unique-after", "$=", "is-i64", "is-u32", "word", "has-line", "in-order-of", "any-line", "machine-output", "delta"], mode)
 }

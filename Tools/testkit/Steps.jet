@@ -157,7 +157,9 @@ fn kit_steps_parse(source: String) -> KitPlan {
             modifier_adjacent = true
             process_seen = true
         } else if !modifier -> modifier_adjacent = false
-        if !(key == "normalize" && value.starts_with("replace ")) && !kit_steps_capture_tokens(value, captures) {
+        // A guarded line resolves its capture tokens only when selected.
+        guarded :: conditions.len() > 0 || kit_expect_named(blocks, "when")
+        if !guarded && !(key == "normalize" && value.starts_with("replace ")) && !kit_steps_capture_tokens(value, captures) {
             plan.error = "line {line_number}: undefined capture token"
             return plan
         }
@@ -542,7 +544,7 @@ fn kit_steps_parse(source: String) -> KitPlan {
             next
         }
         independent :: kit_steps_independent_assertion(key, original)
-        if !process_seen && (key == "exit" || key == "elapsed" || ((key == "json" || kit_steps_subject_valid(key)) && !independent)) {
+        if !process_seen && (key == "exit" || key == "elapsed" || ((key == "json" || kit_steps_assertion_subject_valid(key)) && !independent)) {
             plan.error = "line {line_number}: assertion without process step"
             return plan
         }
@@ -792,7 +794,7 @@ fn kit_steps_parse(source: String) -> KitPlan {
             plan.steps[i].exit_explicit = true
             next
         }
-        if !kit_steps_subject_valid(key) {
+        if !kit_steps_assertion_subject_valid(key) {
             plan.error = "line {line_number}: unknown key {key}"
             return plan
         }
@@ -922,13 +924,13 @@ fn kit_steps_step_environment(step: KitStep, env: KitEnv, work: String, scratch:
     result
 }
 
-fn kit_steps_invoke_step(step: KitStep, env: KitEnv, work: String, scratch: String, snapshots: String, built: String, overlay: [KitEnvVar]) -> KitRun {
+fn kit_steps_invoke_step(step: KitStep, env: KitEnv, work: String, scratch: String, snapshots: String, fixture: String, built: String, overlay: [KitEnvVar]) -> KitRun {
     if step.action == "copy" || step.action == "remove" || step.action == "concat" || step.action == "write" -> return kit_steps_file_action(step, env, work, scratch, built, snapshots)
-    prepared :: kit_steps_prepare(step, env, work, scratch, snapshots, built, overlay) ?? return kit_exec_failed("{err}")
+    prepared :: kit_steps_prepare(step, env, work, scratch, snapshots, fixture, built, overlay) ?? return kit_exec_failed("{err}")
     kit_exec_invoke_with_env(prepared.env, prepared.argv, prepared.cwd, scratch, prepared.stdin, prepared.overlay)
 }
 
-fn kit_steps_prepare(step: KitStep, env: KitEnv, work: String, scratch: String, snapshots: String, built: String, overlay: [KitEnvVar]) -> KitProcessInput Err! {
+fn kit_steps_prepare(step: KitStep, env: KitEnv, work: String, scratch: String, snapshots: String, fixture: String, built: String, overlay: [KitEnvVar]) -> KitProcessInput Err! {
     files.create_dir_all(files.join(scratch, "tmp")) ?? return Err("create child temp directory: {err}")
     policy :: kit_steps_policy(step, env) ?? return Err("time limit outside Duration range")
     environment :: kit_steps_step_environment(step, policy, work, scratch, built, overlay)
@@ -952,7 +954,7 @@ fn kit_steps_prepare(step: KitStep, env: KitEnv, work: String, scratch: String, 
         if built == "" -> return Err("built step has no artifact")
         argv[0] = built
     }
-    stdin :: if step.stdin == "" || step.stdin == "null" -> "" else -> files.read(files.join(snapshots, step.stdin)) ?? return Err("stdin snapshot: {err}")
+    stdin :: if step.stdin == "" || step.stdin == "null" -> "" else -> files.read(kit_steps_snapshot_path(snapshots, fixture, step.stdin)) ?? return Err("stdin snapshot: {err}")
     cwd :: if step.cwd == "" -> work else -> kit_steps_work_path(step.cwd, env, work, scratch, built) ?? return Err("cwd escapes work directory")
     if step.isolate == "no-nix" {
         bootstrap :: if step.action == "spawn" -> files.join(scratch, "child-{step.label}") else -> scratch
@@ -1023,22 +1025,52 @@ fn kit_steps_one_of(id: String, directory: String, snapshots: String, actual: St
 }
 
 
+// A failed step carries its command's streams as the row's diff, so a suite report shows why it failed.
+fn kit_steps_streams_verdict(verdict: ^KitVerdict, context: KitStepCtx, step: KitStep, result: KitRun) -> KitVerdict {
+    if (verdict.status != "FAIL" && verdict.status != "ERROR") || verdict.diff != "" || (result.stderr == "" && result.stdout == "") -> return verdict
+    out := "--- streams/{context.id}: `{step.argv.join(" ")}` exit {result.code}\n"
+    count := 0
+    loop line in result.stderr.split("\n") {
+        if count >= 24 -> break
+        if line != "" {
+            out = "{out}stderr| {line}\n"
+            count += 1
+        }
+    }
+    loop line in result.stdout.split("\n") {
+        if count >= 32 -> break
+        if line != "" {
+            out = "{out}stdout| {line}\n"
+            count += 1
+        }
+    }
+    KitVerdict{status: verdict.status, detail: verdict.detail, diff: out}
+}
+
 fn kit_steps_check(step: KitStep, context: KitStepCtx, state: KitStepState, source_name: String) -> KitVerdict {
     result :: state.last
-    failure :: kit_steps_failure(step, result)
-    if failure == {
-        .Val(value) -> return value
-        .None -> {}
+    // An assert or capture step runs no process: the process step before it
+    // already judged its own run, and before the first process there is none.
+    // Only an `exit:` written after it still judges that run's status.
+    process :: step.action != "assert" && step.action != "capture"
+    if process {
+        failure :: kit_steps_failure(step, result)
+        if failure == {
+            .Val(value) -> return kit_steps_streams_verdict(^value, context, step, result)
+            .None -> {}
+        }
     }
-    if step.exit == "nonzero" {
-        if result.code == 0 -> return kit_expect_verdict("FAIL", "exit 0; expected nonzero")
-    } else if step.exit == "any" {} else if step.exit.starts_with("!=") {
-        forbidden :: Int.parse(kit_steps_byte_slice(step.exit, 2, step.exit.count_bytes()).trim().copy()) ?? 0
-        if result.code == forbidden -> return kit_expect_verdict("FAIL", "exit equals forbidden status {forbidden}")
-    } else if result.code != (Int.parse(step.exit) ?? 0) -> return kit_expect_verdict("FAIL", "exit {result.code}; expected {step.exit}")
+    if process || step.exit_explicit {
+        if step.exit == "nonzero" {
+            if result.code == 0 -> return kit_steps_streams_verdict(kit_expect_verdict("FAIL", "exit 0; expected nonzero"), context, step, result)
+        } else if step.exit == "any" {} else if step.exit.starts_with("!=") {
+            forbidden :: Int.parse(kit_steps_byte_slice(step.exit, 2, step.exit.count_bytes()).trim().copy()) ?? 0
+            if result.code == forbidden -> return kit_steps_streams_verdict(kit_expect_verdict("FAIL", "exit equals forbidden status {forbidden}"), context, step, result)
+        } else if result.code != (Int.parse(step.exit) ?? 0) -> return kit_steps_streams_verdict(kit_expect_verdict("FAIL", "exit {result.code}; expected {step.exit}"), context, step, result)
+    }
     loop assertion in step.assertions {
         verdict :: kit_steps_check_assertion(assertion, context, state, source_name, true)
-        if verdict.status != "PASS" -> return verdict
+        if verdict.status != "PASS" -> return kit_steps_streams_verdict(^verdict, context, step, result)
     }
     kit_expect_verdict("PASS", "")
 }
@@ -1085,7 +1117,7 @@ fn kit_steps_invoke(step: KitStep, index: Int, context: KitStepCtx, previous: Ki
     if step.argv[0] == "built" && !state.built_once -> return KitStepResult{state: state, verdict: kit_expect_verdict("ERROR", "built step has no preceding successful build")}
     policy :: kit_steps_policy(step, context.env) ?? return kit_steps_action_error(state, "invalid process policy")
     overlay :: kit_steps_environment(context.plan, policy, context.work, context.scratch, state.built)
-    state.last = kit_steps_invoke_step(step, context.env, context.work, context.scratch, context.snapshots, state.built, overlay)
+    state.last = kit_steps_invoke_step(step, context.env, context.work, context.scratch, context.snapshots, context.plan.fixture, state.built, overlay)
     if step.argv.len() > 1 && step.argv[0] == "jet" && step.argv[1] == "build" && state.last.code == 0 && kit_exec_process_failure(state.last) == None {
         cwd :: if step.cwd == "" -> context.work else -> files.join(context.work, kit_steps_expand(step.cwd, context.env, context.work, context.scratch, state.built))
         entry := kit_steps_build_entry(step)

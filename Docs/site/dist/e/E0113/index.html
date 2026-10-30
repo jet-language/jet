@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Convert or reshape the value into the declared type (for example `/%` for whole-number division, `[value]` for a list, `&quot;{value}&quot;` for text); the declared return type stays as written</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0113</code>: <code>tests/ui/callback_return_expected_row.stderr</code>.</p>
-<pre class="diag">Error [E0113]: This value is String (text), but `line_starts` returns [Int]
-  --&gt; tests/ui/callback_return_expected_row.jet:9:16
+<p>First UI snapshot mentioning <code>E0113</code>: <code>tests/ui/E0113_int_narrowing_result.stderr</code>.</p>
+<pre class="diag">Error [E0113]: This value is Int (a whole number), but `low_byte` returns U8
+  --&gt; tests/ui/E0113_int_narrowing_result.jet:2:5
     |
-  9 |         return &quot;built&quot;
-    |                ^^^^^^^
- Why: `line_starts` declares [Int] as its result, so the value it hands back must be [Int]
- Fix: Hand back a [Int] value: convert this value to [Int], or return the value you meant
+  2 |     n
+    |     ^
+ Why: `low_byte` declares U8 as its result, so the value it hands back must be U8
+ Fix: Convert it with `U8.from_int(value) ?? fallback`; the conversion is `None` when the value doesn&#39;t fit in U8
 More: jet-lang.dev/e/E0113
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

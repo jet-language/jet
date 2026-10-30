@@ -10,24 +10,24 @@ file: starter_cli/run.jet is-file
 file: starter_cli/build.jet absent
 step: jet run
 cwd: {work}/starter_cli
-stdout: ~ "hello, world"
-stderr: !~ "Core/"
+stdout: ~ "hello, world" # original starts_with predicate
+stderr: !~ "Core/" # original negative contains predicate
 step: jet test --capture=all
 cwd: {work}/starter_cli
-stdout: ~ "1 passed"
-stderr: !~ "Core/"
+stdout: ~ "1 passed" # original contains predicate
+stderr: !~ "Core/" # original negative contains predicate
 step: jet new starter_ui --template ui
 cwd: {work}/
 file: starter_ui/run.jet is-file
 file: starter_ui/build.jet absent
 step: jet run
 cwd: {work}/starter_ui
-stdout: ~ "hello, world"
-stderr: !~ "Core/"
+stdout: ~ "hello, world" # original starts_with predicate
+stderr: !~ "Core/" # original negative contains predicate
 step: jet test --capture=all
 cwd: {work}/starter_ui
-stdout: ~ "1 passed"
-stderr: !~ "Core/"
+stdout: ~ "1 passed" # original contains predicate
+stderr: !~ "Core/" # original negative contains predicate
 step: jet new starter_overrides --template overrides
 cwd: {work}/
 file: starter_overrides/run.jet is-file
@@ -36,21 +36,21 @@ file: starter_overrides/dev.jet is-file
 file: starter_overrides/test.jet is-file
 step: jet run
 cwd: {work}/starter_overrides
-stdout: ~ "hello, world"
-stderr: !~ "Core/"
+stdout: ~ "hello, world" # original starts_with predicate
+stderr: !~ "Core/" # original negative contains predicate
 step: jet test --capture=all
 cwd: {work}/starter_overrides
-stdout: ~ "1 passed"
-stderr: !~ "Core/"
+stdout: ~ "1 passed" # original contains predicate
+stderr: !~ "Core/" # original negative contains predicate
 step: jet new starter_web --template web
 cwd: {work}/
 file: starter_web/run.jet is-file
 file: starter_web/build.jet absent
 step: jet test --capture=all
 cwd: {work}/starter_web
-stdout: ~ "1 passed"
-stderr: !~ "Core/"
+stdout: ~ "1 passed" # original contains predicate
+stderr: !~ "Core/" # original negative contains predicate
 step: jet build --target web
 cwd: {work}/starter_web
-stderr: !~ "Core/"
+stderr: !~ "Core/" # original negative contains predicate
 file: starter_web/.jet/build/index.html is-file

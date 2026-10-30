@@ -8,13 +8,11 @@ use jet_foundation.[
     ast_comptime_memo_storage_name,
 ]
 use jet_driver.[
-    JetDriverVerbOutput, JetDriverCompileMode, JetDriverAuthorizedSourceFile,
-    JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot, JetDriverCompilerCheckInput,
-    jet_driver_compiler_check, JET_DRIVER_EXIT_OK, jet_driver_inline_package,
-    jet_driver_mask_inline_package,
+    JetDriverVerbOutput, JetDriverCompileMode, JetDriverCompilerCheckInput,
+    jet_driver_compiler_check, JET_DRIVER_EXIT_OK, jet_driver_compiler_source_input,
+    jet_driver_compiler_source_snapshot,
 ]
 use jet_eval.[
-    JetCompilerServicesSourceInput, JetCompilerServicesSourcePreparation,
     jet_eval_compiler_services_parse, jet_eval_format_char_text,
 ]
 
@@ -87,18 +85,8 @@ fn jet_cli_inspect_compiler_check(file: String, source: String) -> JetDriverVerb
 
         }
     }
-    carrier :: jet_driver_inline_package(source)
-    masked :: jet_driver_mask_inline_package(source, carrier)
-    preparation :: if carrier.error == .Val(error) -> JetCompilerServicesSourcePreparation.Rejected{diagnostic: error} else -> JetCompilerServicesSourcePreparation.Masked{source: masked}
-    parsed :: jet_eval_compiler_services_parse(JetCompilerServicesSourceInput{source: source, preparation: Val(preparation)}) ?? return jet_cli_ice("the compiler source query could not parse its source input")
-    cwd :: cli_files.cwd() ?? "."
-    path :: jet_cli_authority_path(cwd, "core.compiler.jet")
-    identity :: "compiler-eval-source"
-    snapshot :: JetDriverAuthorizedSourceSnapshot{
-        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: cwd, identity: identity, allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: path, relative_path: "core.compiler.jet", identity: identity, source: source}}, foreign_cache_files: []}},
-        entry_root_identity: identity,
-        entry_path: path,
-    }
+    parsed :: jet_eval_compiler_services_parse(jet_driver_compiler_source_input(source)) ?? return jet_cli_ice("the compiler source query could not parse its source input")
+    snapshot :: jet_driver_compiler_source_snapshot(cli_files.cwd() ?? ".", source)
     result :: jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: jet_cli_driver_request(snapshot, core_sources, None, JetDriverCompileMode.Doc), sema_session: None, retain_projection: false}) ?? return jet_cli_ice("the compiler check query failed before returning its diagnostics")
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
     value := JetCLIStatusValue.Null

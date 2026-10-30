@@ -1459,11 +1459,17 @@ fn ir_x64_word_division(e: &IRX64Emitter, f: IRFunction, tables: IRX64Tables, at
     ir_x64_land(&e, done)
 }
 
-// Fixed-width Shl, Shr of rax by rcx (cl) into rax.
-fn ir_x64_word_shift(e: &IRX64Emitter, f: IRFunction, at: Int, ty: IRX64Shape) Never! {
+// Fixed-width Shl, Shr of rax by rcx (cl) into rax. A constant count inside
+// 0..<bits cannot stop, so only another count gets the checked slow path
+// (and links jet_rt_fixed_shift_stop).
+fn ir_x64_word_shift(e: &IRX64Emitter, f: IRFunction, al: IRX64Allocation, at: Int, ty: IRX64Shape) Never! {
     op :: f.op[at]
     bits :: ir_x64_bits(ty)
-    if f.c[at] != IR_OVERFLOW_WRAP {
+    checked := f.c[at] != IR_OVERFLOW_WRAP
+    if ir_x64_imm(al, f.b[at]) == .Val(count) {
+        if count >= 0 && count < bits -> checked = false
+    }
+    if checked {
         // A count outside 0..<bits stops, as a checked shift does.
         x64_alu_ri(&e.code, X64Alu.Cmp, X64_RCX, bits)
         cold := ir_x64_cold(IRX64ColdKind.ShiftStop, [Int]{x64_jcc_rel32(&e.code, X64Cond.AE)})
@@ -1536,7 +1542,7 @@ fn ir_x64_word_binary(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
     if op == {
         .Add | .Sub | .Mul -> ir_x64_word_arithmetic(&e, f, tables, at, ty, other, imm)
         .Div | .Rem | .FloorDiv | .Mod -> ir_x64_word_division(&e, f, tables, at, ty, ir_x64_type(m, f, f.a[at]).kind == .Int)
-        .Shl | .Shr -> ir_x64_word_shift(&e, f, at, ty)
+        .Shl | .Shr -> ir_x64_word_shift(&e, f, al, at, ty)
         .BitAnd | .BitOr | .BitXor -> {
             alu :: if op == .BitAnd -> X64Alu.And else if op == .BitOr -> X64Alu.Or else -> X64Alu.Xor
             if imm == .Val(value) -> x64_alu_ri(&e.code, alu, X64_RAX, value) else -> x64_alu_rr(&e.code, alu, X64_RAX, other)

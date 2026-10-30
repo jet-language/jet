@@ -14,7 +14,7 @@ fn kit_steps_capture_valid(words: [String], original: String) -> Bool {
             }
             return words.len() % 2 == 1
         }
-        if kind == "replace-range" -> return words.len() == 8 && words[3] == "file" && kit_steps_relative_path(words[4]) && (Int.parse(words[5]) ?? -1) >= 0 && (Int.parse(words[6]) ?? -1) >= 0
+        if kind == "replace-range" -> return words.len() == 8 && words[3] == "file" && kit_steps_relative_path(words[4]) && kit_steps_range_bound_valid(words[5]) && kit_steps_range_bound_valid(words[6])
         if kind == "tree-contents" -> return (words.len() == 4 || (words.len() == 5 && words[4] == "recursive")) && kit_steps_relative_path(words[3])
         if kind == "concat-files" -> return words.len() == 5 && words[4] == "sorted" && kit_steps_relative_path(words[3])
         if kind == "entries" || kind == "sole-entry" || kind == "first-entry" || kind == "tree-bytes" {
@@ -180,6 +180,23 @@ fn kit_steps_captured_subject(name: String, captures: [KitCapture]) -> String? {
     None
 }
 
+fn kit_steps_range_capture_name(word: String) -> String? {
+    if !word.starts_with("{{cap:") || !word.ends_with("}}") -> return None
+    name :: kit_steps_byte_slice(word, 5, word.count_bytes() - 1)
+    if !kit_steps_env_name(name) -> return None
+    Val(name)
+}
+
+fn kit_steps_range_bound_valid(word: String) -> Bool {
+    kit_steps_range_capture_name(word) != None || (Int.parse(word) ?? -1) >= 0
+}
+
+// A whole `{cap:name}` word reads that capture; any other word is literal.
+fn kit_steps_range_word(word: String, captures: [KitCapture]) -> String? {
+    name :: kit_steps_range_capture_name(word) ?? return Val(word)
+    kit_steps_captured_subject(name, captures)
+}
+
 fn kit_steps_capture_value(words: [String], context: KitStepCtx, state: KitStepState) -> KitSubjectResult {
     if words[1] == "=" {
         kind :: words[2]
@@ -241,12 +258,13 @@ fn kit_steps_capture_value(words: [String], context: KitStepCtx, state: KitStepS
         }
         if kind == "replace-range" {
             text :: files.read(directory) ?? return kit_steps_capture_failure("ERROR", "replace-range read: {err}")
-            start :: Int.parse(words[5]) ?? -1
-            end :: Int.parse(words[6]) ?? -1
-            if start < 0 || end < start || end > text.len() -> return kit_steps_capture_failure("FAIL", "replace-range invalid span")
+            start :: Int.parse(kit_steps_range_word(words[5], state.captures) ?? return kit_steps_capture_failure("ERROR", "replace-range start capture unavailable")) ?? -1
+            end :: Int.parse(kit_steps_range_word(words[6], state.captures) ?? return kit_steps_capture_failure("ERROR", "replace-range end capture unavailable")) ?? -1
+            replacement :: kit_steps_range_word(words[7], state.captures) ?? return kit_steps_capture_failure("ERROR", "replace-range text capture unavailable")
             bytes :: text.bytes()
+            if start < 0 || end < start || end > bytes.len() -> return kit_steps_capture_failure("FAIL", "replace-range invalid span")
             if (start < bytes.len() && Int.from_u8(bytes[start]) >= 128 && Int.from_u8(bytes[start]) < 192) || (end < bytes.len() && Int.from_u8(bytes[end]) >= 128 && Int.from_u8(bytes[end]) < 192) -> return kit_steps_capture_failure("FAIL", "replace-range not on UTF-8 boundaries")
-            return kit_steps_capture_result("{kit_steps_byte_slice(text, 0, start)}{words[7]}{kit_steps_byte_slice(text, end, text.count_bytes())}")
+            return kit_steps_capture_result("{kit_steps_byte_slice(text, 0, start)}{replacement}{kit_steps_byte_slice(text, end, text.count_bytes())}")
         }
         if kind == "tree-contents" {
             items :: kit_steps_tree_contents(directory, directory, words.len() == 5) ?? return kit_steps_capture_failure("ERROR", "{err}")

@@ -60,6 +60,9 @@ fn trap_write_word(word: I64, count: I64) {
 }
 
 // Canonical host-defect rows can write without a GS probe or capture lookup.
+// The allocator's GS failure reaches this from every program, so its
+// arithmetic cannot stop: the count stays in 1..=8 and each shift is constant
+// (Alloc.jet alloc_write_word), linking no numeric or shift-stop report.
 fn trap_write_word_raw(word: I64, count: I64) {
     remaining := word
     length := count
@@ -70,8 +73,12 @@ fn trap_write_word_raw(word: I64, count: I64) {
         }
         if (written == I64{-4}) -> next
         if (written <= I64{0} || written >= length) -> return
-        remaining >>= written * I64{8}
-        length -= written
+        length = wrapping(length - written)
+        dropped := I64{0}
+        loop dropped < written {
+            remaining = remaining >> I64{8}
+            dropped = wrapping(dropped + I64{1})
+        }
     }
 }
 

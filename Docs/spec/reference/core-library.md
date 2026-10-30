@@ -293,6 +293,12 @@ provide a runtime path-loading fallback. A runtime call is E0956.
 
 The source declarations supply the public typed vocabulary; calls retain the
 compiler-owned compile-time provider route even when that source package is loaded.
+In a `comptime` binding or `fn build`, the evaluator hands each `lex`, `parse`,
+or `check` call to the compiler, which answers with its own lexer, parser, and
+check query over the call's argument (the same check `jet inspect compiler
+check` runs). A comptime constant that holds one of these values is read back
+as the compiler's value for that constant, so `PARSED :: comptime { … }` can
+feed `compiler.check(PARSED)`.
 
 The package-view field matrix is versioned by
 `PACKAGE_MODEL_SCHEMA_VERSION = 1` (D-PACKAGE-MODEL1). The four views have

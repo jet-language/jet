@@ -184,6 +184,7 @@ fn sema_casing_item(item: Item, diagnostics: &[Diagnostic]) {
         .Trait(definition) -> {
             sema_casing_pascal(definition.name, definition.name_span, "trait", &diagnostics)
             loop associated in definition.assoc_types -> sema_casing_pascal(associated.name, associated.span, "associated type", &diagnostics)
+            loop constant in definition.constants -> sema_casing_snake(constant.name, constant.name_span, "trait constant", &diagnostics)
             loop method in definition.methods -> sema_casing_trait_method(method, &diagnostics)
         }
         .Tag(definition) -> sema_casing_pascal(definition.name, definition.name_span, "tag", &diagnostics)

@@ -4,8 +4,8 @@ fixture: datetime_accuracy_differential_and_properties.fixture
 env: NO_COLOR=1
 env: JETPACK_ENV=1
 env: JET_TZDB_DIR={root}/Core/Time/tzdb
-file: vectors.tsv ^= "# datetime-accuracy-v1\n"
-file.filter(where != "" && !^= "#"): vectors.tsv nonempty
+file: vectors.tsv ^= "# datetime-accuracy-v1\n" # original VECTOR_TABLE.starts_with predicate
+file.filter(where != "" && !^= "#"): vectors.tsv nonempty # original vector table has data rows
 write: keys.txt empty.template
 write: batches.txt empty.template
 write: families.txt empty.template
@@ -14,19 +14,19 @@ write: operations.txt empty.template
 write: metadata.txt empty.template
 for line file.filter(where != "" && !^= "#") vectors.tsv as r
 cap:r: count "\t" = 5 # original fields.len == 6
-cap:r.split("\t", 0): nonempty
+cap:r.split("\t", 0): nonempty # original vector row field is present
 capture: batch = text cap:r.split("\t", 0)
-cap:r.split("\t", 1): nonempty
+cap:r.split("\t", 1): nonempty # original vector row field is present
 capture: family = text cap:r.split("\t", 1)
-cap:r.split("\t", 2): nonempty
+cap:r.split("\t", 2): nonempty # original vector row field is present
 capture: ident = text cap:r.split("\t", 2)
-cap:r.split("\t", 3): nonempty
+cap:r.split("\t", 3): nonempty # original vector row field is present
 capture: operation = text cap:r.split("\t", 3)
-cap:r.split("\t", 4): nonempty
+cap:r.split("\t", 4): nonempty # original vector row field is present
 capture: metadata = text cap:r.split("\t", 4)
-cap:r.split("\t", 5): nonempty
+cap:r.split("\t", 5): nonempty # original vector row field is present
 capture: oracle = text cap:r.split("\t", 5)
-cap:batch: each-line where = "epoch_parse" || = "civil_arithmetic" || = "zones"
+cap:batch: each-line where = "epoch_parse" || = "civil_arithmetic" || = "zones" # original batch name membership
 append: keys.txt "{cap:batch}\t{cap:family}\t{cap:ident}\t{cap:operation}\n"
 append: batches.txt "{cap:batch}\n"
 append: families.txt "{cap:family}\n"
@@ -67,16 +67,16 @@ file: operations.txt has-line "parse_format_round_trip"
 file: operations.txt has-line "diff_days_antisymmetry"
 file: operations.txt has-line "add_days_composition"
 file: operations.txt has-line "add_months_clamping"
-file: metadata.txt ~ "zone=Australia/Lord_Howe"
-file: metadata.txt ~ "zone=Asia/Kathmandu"
-file: metadata.txt ~ "zone=Pacific/Apia"
-file: metadata.txt ~ "zone=Pacific/Chatham"
-file: metadata.txt ~ "zone=Africa/Casablanca"
-file: metadata.txt ~ "zone=America/Sao_Paulo"
-file: metadata.txt ~ "zone=Asia/Tehran"
-file: metadata.txt ~ "zone=Europe/London"
-file: metadata.txt ~ "zone=America/New_York"
-file: metadata.txt ~ "zone=UTC"
+file: metadata.txt ~ "zone=Australia/Lord_Howe" # original contains predicate on committed metadata
+file: metadata.txt ~ "zone=Asia/Kathmandu" # original contains predicate on committed metadata
+file: metadata.txt ~ "zone=Pacific/Apia" # original contains predicate on committed metadata
+file: metadata.txt ~ "zone=Pacific/Chatham" # original contains predicate on committed metadata
+file: metadata.txt ~ "zone=Africa/Casablanca" # original contains predicate on committed metadata
+file: metadata.txt ~ "zone=America/Sao_Paulo" # original contains predicate on committed metadata
+file: metadata.txt ~ "zone=Asia/Tehran" # original contains predicate on committed metadata
+file: metadata.txt ~ "zone=Europe/London" # original contains predicate on committed metadata
+file: metadata.txt ~ "zone=America/New_York" # original contains predicate on committed metadata
+file: metadata.txt ~ "zone=UTC" # original contains predicate on committed metadata
 file: datetime_accuracy_epoch_parse.jet is-file
 write: epoch_parse.expected empty.template
 for line file.filter(^= "epoch_parse\t") vectors.tsv as r

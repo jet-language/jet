@@ -2583,6 +2583,9 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     // Trait-bounded variadics become one closed function per called arity.
     sema_variadic_bounds_expand(&module_row.program)
     sema_policy_materialize(&module_row.program, policies, module_row.module_identity, module_row.source_file, module_row.source_origin, module_row.source_segments, &diagnostics)
+    // Every `#allow` names its reason (L3103) and never `allow_reason`
+    // (E0355), as check_program does for one file.
+    sema_marker_rules_validate_allow(module_row.program, &diagnostics)
     // Root `comptime loop` declarations expand first, so every
     // generated impl, conversion, and test registers as a written item.
     sema_derive_expand_template_loops(&module_row.program.items, &diagnostics)
@@ -2626,6 +2629,8 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     sema_trait_impls_synthesize(&module_row.program.items)
     // A return type naming a fallible alias is written as its expansion.
     sema_registration_expand_fallible_aliases(&module_row.program.items)
+    // A `Self` written in an impl method's signature names the impl's type.
+    sema_registration_expand_impl_self(&module_row.program.items)
     row_source_file :: module_row.source_file.copy()
     row_source_origin :: module_row.source_origin.copy()
     row_source_segments :: module_row.source_segments.copy()
@@ -2728,6 +2733,82 @@ fn sema_registration_expand_fallible_aliases(items: &[Item]) Never! {
         }
         if replacement == .Val(item) -> items[index] = item
     }
+}
+
+// A method of an impl (`impl T`, `impl T.Trait`, or a declaration's own
+// method or trait block) that writes `Self` in a parameter or its return
+// means the implemented type: `fn origin() -> Self` returns a `T`. A type
+// with type parameters is `Self` applied to its own (`Pair<T>`); a built-in
+// scalar's operator impl (`impl Int.Mul`) has that scalar.
+fn sema_registration_expand_impl_self(items: &[Item]) {
+    type_params := [String:[TypeParam]]{}
+    loop item in items {
+        if item == {
+            .Struct(definition) -> type_params[definition.name] = definition.type_params
+            .Enum(definition) -> type_params[definition.name] = definition.type_params
+            else -> {}
+        }
+    }
+    loop index in 0..<items.len() {
+        replacement := Item?{None}
+        if items[index] == {
+            .Impl(definition) -> {
+                updated := definition
+                if sema_registration_impl_self_methods(sema_registration_impl_self_type(definition.type_name, type_params), &updated.methods) -> replacement = Val(Item.Impl{value: updated})
+            }
+            .Struct(definition) -> {
+                updated := definition
+                self_type :: sema_registration_impl_self_type(definition.name, type_params)
+                changed := sema_registration_impl_self_methods(self_type, &updated.methods)
+                loop block_index in 0..<updated.trait_impls.len() {
+                    if sema_registration_impl_self_methods(self_type, &updated.trait_impls[block_index].methods) -> changed = true
+                }
+                if changed -> replacement = Val(Item.Struct{value: updated})
+            }
+            .Enum(definition) -> {
+                updated := definition
+                self_type :: sema_registration_impl_self_type(definition.name, type_params)
+                changed := sema_registration_impl_self_methods(self_type, &updated.methods)
+                loop block_index in 0..<updated.trait_impls.len() {
+                    if sema_registration_impl_self_methods(self_type, &updated.trait_impls[block_index].methods) -> changed = true
+                }
+                if changed -> replacement = Val(Item.Enum{value: updated})
+            }
+            else -> {}
+        }
+        if replacement == .Val(item) -> items[index] = item
+    }
+}
+
+fn sema_registration_impl_self_type(name: String, type_params: [String:[TypeParam]]) -> Type {
+    if sema_registration_builtin_scalar(name) == .Val(scalar) -> return scalar
+    params :: type_params.get(name) ?? return Type.Named{name: name}
+    if params.len() == 0 -> return Type.Named{name: name}
+    Type.Apply{name: name, args: loop param in params -> Type.Named{name: param.name}}
+}
+
+fn sema_registration_impl_self_methods(self_type: Type, methods: &[Func]) -> Bool Never! {
+    names :: [String]{"Self"}
+    actuals :: [Type]{self_type}
+    changed := false
+    loop index in 0..<methods.len() {
+        loop param_index in 0..<methods[index].params.len() {
+            written :: methods[index].params[param_index].ty
+            substituted :: sema_inference_substitute_type(written, names, actuals)
+            if substituted != written {
+                methods[index].params[param_index].ty = substituted
+                changed = true
+            }
+        }
+        if methods[index].return_type == .Val(written) {
+            substituted :: sema_inference_substitute_type(written, names, actuals)
+            if substituted != written {
+                methods[index].return_type = Val(substituted)
+                changed = true
+            }
+        }
+    }
+    changed
 }
 
 fn sema_registration_fallible_alias_methods(aliases: [TypeAliasDef], methods: &[Func]) -> Bool Never! {

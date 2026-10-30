@@ -9,6 +9,7 @@ use jet_foundation.[
     Diagnostic,
     Expr,
     Func,
+    ImplConstValue,
     ImplDef,
     ImportKind,
     Item,
@@ -42,6 +43,7 @@ fn sema_function_header_normalize_external_method(function: Func) -> Item Never!
         methods: [Func]{method},
         delegation_field: None,
         assoc_type_impls: [NamedType]{},
+        constants: [ImplConstValue]{},
         is_generated_serde: false,
         os_target: None,
     }}
@@ -129,6 +131,19 @@ fn sema_function_header_check_root_params(function: Func, is_method: Bool, diagn
 fn sema_function_header_lint_err_params(function: Func, diagnostics: &[Diagnostic]) {
     loop parameter in function.params {
         if parameter.name == "err" -> &diagnostics.push(sema_err_shadow_lint(parameter.name_span))
+    }
+}
+
+// L2401 (D-NARG1, Rust `Bundle/Validation.rs` and `Registration/Items.rs`): a
+// public function or method with a positional `Bool` parameter and no default
+// invites transposed `true`/`false` arguments at the call site.
+fn sema_function_header_lint_positional_bools(function: Func, is_method: Bool, diagnostics: &[Diagnostic]) {
+    if !function.is_pub || function.compiler_generated -> return
+    noun :: if is_method -> "method" else -> "function"
+    name :: sema_inline_member_source_name(function.name)
+    loop parameter in function.params {
+        if parameter.ty != Type.Bool || parameter.name == "self" || parameter.default != None -> next
+        &diagnostics.push(sema_lint("L2401", parameter.name_span, "Public {noun} `{name}` has a positional `Bool` parameter `{parameter.name}`", "Positional booleans are easy to transpose at the call site", "Callers can write `{parameter.name}: true` to make the intent clear (S61 labels)"))
     }
 }
 

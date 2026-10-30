@@ -344,11 +344,30 @@ fn x64_object_functions_threads(program: ^X64ObjectModule, functions: ^[X64Compi
         &export_names.add(entry_row.symbol, true).drop("checked absent above")
         exported[id + 1] = true
     }
+    // Per export, the header indices of its hook's guard data sections
+    // (none: an unconditional hook).
+    guard_sections := [[Int]]{}
+    loop entry_row in exports {
+        sections := [Int]{}
+        if entry_row.guards.len() > 0 && (!own_sections || (entry_row.init_priority < 0 && entry_row.fini_priority < 0)) {
+            return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"export {entry_row.symbol}: a hook guard needs a lifecycle hook in a library object"}}
+        }
+        loop guard in entry_row.guards {
+            at := -1
+            loop (index, object) in program.data {
+                if object.id.value == guard -> at = index
+            }
+            if at < 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"export {entry_row.symbol}: hook guard data {guard} is not in the object"}}
+            &sections.push(ELF64_OBJECT_FIRST_OWN + 2 * (functions.len() + at))
+        }
+        &guard_sections.push(^sections)
+    }
     if own_sections {
         hooks := 0
-        loop entry_row in exports {
-            if entry_row.init_priority >= 0 -> hooks += 1
-            if entry_row.fini_priority >= 0 -> hooks += 1
+        loop (index, entry_row) in exports {
+            arrays :: if guard_sections[index].len() > 0 -> guard_sections[index].len() else -> 1
+            if entry_row.init_priority >= 0 -> hooks += arrays
+            if entry_row.fini_priority >= 0 -> hooks += arrays
         }
         count :: ELF64_OBJECT_FIRST_OWN + 2 * (functions.len() + program.data.len() + hooks)
         if count >= ELF64_OBJECT_SECTION_LIMIT -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"a section per function and data object makes {count} sections; ELF reserves the indices from {ELF64_OBJECT_SECTION_LIMIT}, and the object writer writes no extended section numbering"}}
@@ -538,7 +557,7 @@ fn x64_object_functions_threads(program: ^X64ObjectModule, functions: ^[X64Compi
     files := [[U8]]{}
     task.group x64_object_release_group {
         dropped :: task x64_object_release(released)
-        &files.push(x64_object_file(dwarf, text, rodata, rodata_align, ^rela_text, symtab, strtab, first_global, data_relas, exports, ^own))
+        &files.push(x64_object_file(dwarf, text, rodata, rodata_align, ^rela_text, symtab, strtab, first_global, data_relas, exports, guard_sections, ^own))
         _ :: dropped.join() ?? panic(compiler_threads_failure_text(err))
     }
     X64ExecutableResult{bytes: &files.pop() ?? panic("the object writer lost its file"), errors: [String]{}}
@@ -592,8 +611,9 @@ fn x64_object_release_programs(released: Shared<X64ObjectReleased>) -> [X64Objec
 
 // The object file of the sections x64_object_functions_threads built: the
 // ELF header, the section contents and the section header table. `own`
-// holds the sections from ELF64_OBJECT_FIRST_OWN (empty: none).
-fn x64_object_file(dwarf: X64DwarfSections, text: [U8], rodata: [U8], rodata_align: Int, rela_text: ^[U8], symtab: [U8], strtab: [U8], first_global: Int, data_relas: [X64ObjectRela], exports: [X64RuntimeExport], own: ^[X64ObjectSection]) -> [U8] Never! {
+// holds the sections from ELF64_OBJECT_FIRST_OWN (empty: none);
+// `guard_sections` per export the header indices of its hook's guards.
+fn x64_object_file(dwarf: X64DwarfSections, text: [U8], rodata: [U8], rodata_align: Int, rela_text: ^[U8], symtab: [U8], strtab: [U8], first_global: Int, data_relas: [X64ObjectRela], exports: [X64RuntimeExport], guard_sections: [[Int]], own: ^[X64ObjectSection]) -> [U8] Never! {
     // Header order is the ELF64_OBJECT_* indices; .shstrtab is filled below.
     sections := [X64ObjectSection]{
         // .text: PROGBITS, ALLOC | EXECINSTR
@@ -624,7 +644,11 @@ fn x64_object_file(dwarf: X64DwarfSections, text: [U8], rodata: [U8], rodata_ali
         &sections.extend(^own)
     }
     // Lifecycle priority is carried by the section name; equal priorities use
-    // lexical export symbols, never declaration order.
+    // lexical export symbols, never declaration order. A guarded hook has
+    // one SHF_INFO_LINK array section per guard, its sh_info that guard's
+    // data section: the Jet linker keeps each exactly when it keeps that
+    // data (StaticLink.jet cond_roots), so a service no live code touches
+    // never starts or stops; a system linker keeps every hook.
     lifecycle_order := [Int]{}
     loop (index, entry_row) in exports {
         if entry_row.init_priority < 0 && entry_row.fini_priority < 0 -> next
@@ -639,11 +663,15 @@ fn x64_object_file(dwarf: X64DwarfSections, text: [U8], rodata: [U8], rodata_ali
             digits := "{priority}"
             loop digits.len() < 5 -> digits = "0{digits}"
             name :: if kind == 0 -> ".init_array.{digits}" else -> ".fini_array.{digits}"
-            target :: sections.len() + 1
-            pointer := [U8]{}
-            elf64_u64(&pointer, 0)
-            &sections.push(X64ObjectSection{name: name, kind: if kind == 0 -> 14 else -> 15, flags: 3, bytes: pointer, link: 0, info: 0, align: 8, entry_size: 8})
-            &sections.push(x64_object_rela_section(".rela{name}", [X64ObjectRela]{X64ObjectRela{at: 0, symbol: first_global + index, kind: ELF64_R_X86_64_64, addend: 0}}, target))
+            guards :: if guard_sections[index].len() > 0 -> guard_sections[index].copy() else -> [Int]{0}
+            loop guard in guards {
+                target :: sections.len() + 1
+                pointer := [U8]{}
+                elf64_u64(&pointer, 0)
+                flags :: if guard > 0 -> 3 + 0x40 else -> 3
+                &sections.push(X64ObjectSection{name: name, kind: if kind == 0 -> 14 else -> 15, flags: flags, bytes: pointer, link: 0, info: guard, align: 8, entry_size: 8})
+                &sections.push(x64_object_rela_section(".rela{name}", [X64ObjectRela]{X64ObjectRela{at: 0, symbol: first_global + index, kind: ELF64_R_X86_64_64, addend: 0}}, target))
+            }
         }
     }
     // Section names, each written once (own sections share theirs).

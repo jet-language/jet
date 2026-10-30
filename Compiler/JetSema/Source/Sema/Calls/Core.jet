@@ -1440,7 +1440,8 @@ fn sema_call_core_shared_success(ty: Type) -> Type? Never! {
 fn sema_call_core_check_source_owned(target: SemaCallDirectTarget, qualified_name: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if target.symbol.name == "graph" && sema_call_core_module_identity(environment, program, "core.build") == (Val(target.symbol.module_name)) {
         if !sema_call_core_check_type_args("core.build", "graph", 0, false, type_args, span, &diagnostics) -> return None
-        check :: sema_compiler_services_check_call("core.build", "graph", args, span, environment.function_name == "build", environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        // A body checked on a compiler thread keeps its name in location_function (Control.jet).
+        check :: sema_compiler_services_check_call("core.build", "graph", args, span, (scopes.location_function ?? environment.function_name) == "build", environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return sema_compiler_services_lower_core_call(check, span, expected, environment, program, &scopes, &context, &diagnostics)
     }
     web_openapi := sema_call_http_web_openapi_mux(target, qualified_name, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -1456,6 +1457,8 @@ fn sema_call_core_check_source_owned(target: SemaCallDirectTarget, qualified_nam
     // publishes them like a direct call, so a binding keeps the view's owner.
     &context.call_return_views.push(SemaCallReturnView{span: span, facts: checked.return_view_facts})
     if !sema_expr_record_call_fact(environment, program, &scopes, &context, span, checked, &diagnostics) -> return None
+    // `table.column("name", …)` checks its literal column against the row schema (E2475).
+    if target.symbol.name == "column" && sema_call_core_module_identity(environment, program, "core.web.table") == (Val(target.symbol.module_name)) -> sema_call_web_table_column_schema(args, checked.value, environment, program, &diagnostics)
     Val(checked.value)
 }
 

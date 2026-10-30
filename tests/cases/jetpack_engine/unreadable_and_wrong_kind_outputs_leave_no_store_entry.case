@@ -11,8 +11,8 @@ mkdir: root/unreadable
 chmod: root/unreadable 000
 when !dir-readable root/unreadable: write: fixtures/nixpkgs-greet.json unreadable.template
 when !dir-readable root/unreadable: step: jetpack build greet@nixpkgs --no-color --offline
-when !dir-readable root/unreadable: exit: nonzero
 when !dir-readable root/unreadable: env: JETPACK_FIXTURES={work}/fixtures
+when !dir-readable root/unreadable: exit: nonzero
 when !dir-readable root/unreadable: stderr: ~ "Error [E1315]:" # original contains predicate
 when !dir-readable root/unreadable: stderr: ~ "Permission denied" # original contains predicate
 when !dir-readable root/unreadable: when dir-readable root/hangar: entries: root/hangar name ^= "greet-" = 0

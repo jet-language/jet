@@ -15,11 +15,18 @@ fn kit_steps_f64_assertion(stream: String, path: String, transform: String, orig
     Val(KitAssertion{stream: stream, path: path, transform: transform, mode: mode, value: rhs, extra: op})
 }
 
+// `Float.parse` trims its input; a float here is the exact text, so spaces
+// around the number make it not a float.
+fn kit_steps_f64_parse(text: String) -> Float? {
+    if text.trim() != text -> return None
+    Val(Float.parse(text) ?? return None)
+}
+
 fn kit_steps_f64_test(actual: String, mode: String, value: String, op: String) -> KitVerdict? {
     if mode != "is-f64" && mode != "f64" -> return None
-    left :: Float.parse(actual) ?? return Val(kit_expect_verdict("FAIL", "f64 subject is not a float"))
+    left :: kit_steps_f64_parse(actual) ?? return Val(kit_expect_verdict("FAIL", "f64 subject is not a float"))
     if mode == "is-f64" -> return Val(kit_expect_verdict("PASS", ""))
-    right :: Float.parse(value) ?? return Val(kit_expect_verdict("FAIL", "f64 reference is not a float"))
+    right :: kit_steps_f64_parse(value) ?? return Val(kit_expect_verdict("FAIL", "f64 reference is not a float"))
     // Use IEEE comparisons directly: NaN is unordered, including with itself.
     matches :: if op == ">" -> left > right else if op == ">=" -> left >= right else if op == "<" -> left < right else if op == "<=" -> left <= right else if op == "==" -> left == right else -> left != right
     Val(if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "f64 comparison failed: {op}"))

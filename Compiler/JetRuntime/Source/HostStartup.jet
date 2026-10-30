@@ -15,6 +15,22 @@ host_env_rows := I64{0}
 
 host_env_length := I64{0}
 
+// jet_rt_host_env_capture, installed by jet_rt_host_env_init: the
+// before-user-code environment snapshot (D-EFF-ENV-SNAPSHOT1 A) is taken
+// exactly when the program links a reader of it; a program with none cannot
+// tell the copy was never made (D-EFF-CORE-INIT1 A).
+host_env_capture_code := I64{0}
+
+// runtime-init: 4 when host_env_rows,host_env_length,logical_env_root
+#Export(c) fn jet_rt_host_env_init() {
+    host_env_capture_code = rt_host_env_capture_address()
+}
+
+fn rt_host_env_capture_address() -> I64 {
+    // Native-approved RuntimeLibrary FunctionAddress intrinsic (arity 1).
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
 // Rust 1.90.0 library/std/src/sys/env/unix.rs, env()::parse:
 // search '=' AFTER byte zero, permit names starting '=', skip malformed rows.
 // https://github.com/rust-lang/rust/blob/1.90.0/library/std/src/sys/env/unix.rs
@@ -41,6 +57,16 @@ fn host_environment_split(bytes: I64) -> I64 {
         }
         return
     }
+    host_argv = argv
+    host_envp = envp
+    capture :: host_env_capture_code
+    if (capture != I64{0}) -> _ := coll_call1(capture, envp)
+    host_argc = count
+}
+
+// Copies the startup environment `envp` into the owned index host_env_rows /
+// host_env_length and seeds the logical environment from it.
+#Export(c) fn jet_rt_host_env_capture(envp: I64) -> I64 {
     raw_count := I64{0}
     #Unsafe("startup lends the immutable, null-terminated envp pointer array") {
         if (envp != I64{0}) {
@@ -90,10 +116,8 @@ fn host_environment_split(bytes: I64) -> I64 {
     }
     host_env_rows = rows
     host_env_length = valid
-    host_argv = argv
-    host_envp = envp
     logical_environment_startup()
-    host_argc = count
+    I64{0}
 }
 
 fn host_arguments_require() {

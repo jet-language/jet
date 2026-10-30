@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // The runtime export set is exactly the sources' #Export(c) functions (U3).
 // lifecycle.list only orders the hooks those sources mark with a
-// `// runtime-init: N` or `// runtime-fini: N` comment; regenerate it from them.
+// `// runtime-init: N [when guard,...]` or `// runtime-fini: N [when
+// guard,...]` comment and names their guards; regenerate it from them.
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";

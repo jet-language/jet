@@ -30,7 +30,7 @@ reactive_next_observer := I64{1}
 fn reactive_word(address: I64) -> I64 { trap_word(address) }
 fn reactive_store(address: I64, value: I64) { trap_store(address, value) }
 
-// runtime-init: 3
+// runtime-init: 3 when reactive_thread_key
 #Export(c) fn jet_rt_reactive_init() {
     if (reactive_thread_key != I64{0}) -> return
     reactive_thread_key = jet_rt_tls_key_new(I64{0})

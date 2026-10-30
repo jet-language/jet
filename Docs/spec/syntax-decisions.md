@@ -65,6 +65,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, recordin
 | `[first, ..rest]` | list pattern with a read-only zero-copy rest window; exact without the rest marker | `D-PAT-RECORD1=A` |
 | `[key: pattern, key?: optional, ..]` | map pattern; required and optional keys, exact unless it ends with rest | `D-PAT-MAP1=A` |
 | `if T == { Int -> … else -> … }` | type table: a generic function branches on its type parameter; each arm reads `T` as its type, `else` is required, each instance keeps one arm; `if T == Int { … }` is the one-arm test; `.Int -> …` names a union member without binding it | `D-TYPESWITCH1=A` |
+| `trait T { name: Type } / name: Type{default} / impl X.T { name :: value } / T.name` | trait constant: a compile-time literal, enum case or list each implementation supplies (or takes the default), read from the type | `D-DECL-TYPES1=A` |
 | `r"…", raw"…", $"…"` | unclaimed raw-string prefixes | — |
 | `;` | retired explicit statement terminator | `D-SEMI1` |
 | `_name` | ordinary identifier | — |
@@ -571,9 +572,12 @@ No top type; general `Any` rejected.
 `A | B` is closed structural enum sugar. Nested unions flatten, duplicates
 disappear, and identity is order-insensitive. `T !(E1 | E2)` places the union on
 the error side. Members widen into the union only at binding, argument, return,
-Codable field, and `?` error boundaries. Match arms name member types; Codable
-decode rejects ambiguous wire shapes (E2415). Named enums remain the documenting
-form; crossings use ordinary match conversion. Does not reopen D-ANY-JAI1.
+Codable field, and `?` error boundaries. Match arms name member types with the
+leading dot every arm pattern takes (D-ENUMDOT1; D-TYPESWITCH1=A writes the
+bare-member arm `.Int -> …`): `if v == { .Int(n) -> … .String(s) -> … }`, and
+an undotted `Int(n) ->` is E0367. Codable decode rejects ambiguous wire shapes
+(E2415). Named enums remain the documenting form; crossings use ordinary match
+conversion. Does not reopen D-ANY-JAI1.
 
 **D-TYPESWITCH1=A — Type tables** *(ratified 2026-10-29, card #6180)*: a
 generic function branches on a type parameter with an ordinary `if` table,

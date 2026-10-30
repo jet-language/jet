@@ -53,6 +53,7 @@ use jet_foundation.[
     TField,
     TGenericParam,
     TImplDef,
+    TTraitConstantValue,
     TIntegerRange,
     TOperatorMarker,
     TSerdeAttribute,
@@ -2086,6 +2087,42 @@ fn sema_checked_validate_struct_field(definition: StructDef, field: Field, diagn
     if sema_checked_layout_is_c(definition.layout) && sema_checked_type_is_growable(field.ty) {
         &diagnostics.push(sema_error("E1104", definition.layout_span ?? field.name_span, "`#Layout(c)` struct `{definition.name}` has a growable field `{field.name}` ({type_name(field.ty)})", "growable types (`[T]`, `Map`, `String`) don't have a stable C layout", "use a fixed-size array `[T#N]` instead, or remove `#Layout(c)`"))
     }
+    if sema_checked_type_is_float(field.ty) && sema_checked_money_like_name(field.name) && !sema_checked_allows_float_money(field.serde_markers) && !sema_checked_allows_float_money(definition.serde_markers) {
+        &diagnostics.push(sema_lint("L0504", field.name_span, "field `{field.name}` looks like money but has type `Float`", "floating-point money loses cents on common values like `0.1 + 0.2`", "use `Decimal` for exact money, or suppress with `#[allow(float_money)]` on the field"))
+    }
+}
+
+// D-DECIMAL1 float-money lint (Rust Registration/Items.rs:1821 and
+// Numeric.rs `is_money_like_name`/`allows_float_money` @ 6083377777).
+SEMA_CHECKED_MONEY_WORDS :: [String]{"price", "cost", "amount", "fee", "balance", "tax"}
+
+fn sema_checked_type_is_float(ty: Type) -> Bool Never! {
+    if ty == {
+        .Float | .Float32 -> true
+        .Tagged(_, inner) -> sema_checked_type_is_float(inner)
+        .Quantity(base, _) -> sema_checked_type_is_float(base)
+        else -> false
+    }
+}
+
+fn sema_checked_money_like_name(name: String) -> Bool Never! {
+    lower :: sema_checked_ascii_lower(name)
+    loop word in SEMA_CHECKED_MONEY_WORDS {
+        if lower.contains(word) -> return true
+    }
+    false
+}
+
+fn sema_checked_allows_float_money(markers: [Marker]) -> Bool Never! {
+    loop marker in markers {
+        if marker.name != "allow" -> next
+        loop argument in marker.args {
+            if argument == .Expr(value) {
+                if value == .Ident(name, _, _) && name == "float_money" -> return true
+            }
+        }
+    }
+    false
 }
 
 fn sema_checked_validate_layout(definition: StructDef, diagnostics: &[Diagnostic]) {
@@ -2838,7 +2875,7 @@ fn sema_checked_operator_marker(marker: OperatorMarker?) -> TOperatorMarker? {
     }
 }
 
-fn sema_checked_impl_row(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, registered: SemaRegistrationImpl) -> TImplDef Never! {
+fn sema_checked_impl_row(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, registered: SemaRegistrationImpl, constants: [TTraitConstantValue]) -> TImplDef Never! {
     definition :: registered.declaration
     methods :: loop method in definition.methods -> sema_checked_impl_method_key(module_row, definition, method)
     associated :: loop value in registered.associated_types -> TAssociatedTypeValue{name: value.symbol.name, ty: sema_checked_qualify_type(graph, value.ty, module_row.module_identity), span: value.symbol.span}
@@ -2850,6 +2887,7 @@ fn sema_checked_impl_row(graph: SemaRegistrationGraph, module_row: SemaRegistrat
         trait_name: definition.trait_name,
         trait_ref: definition.trait_name,
         associated_types: associated,
+        constants: constants,
         methods: methods,
         delegation_field: definition.delegation_field,
         compiler_generated: definition.is_generated_serde,
@@ -2902,10 +2940,13 @@ fn sema_checked_validate_impl(graph: SemaRegistrationGraph, module_row: SemaRegi
             &diagnostics.push(sema_error("E0906", implementation.declaration.type_span, "`impl …: {trait_name}` is missing {listed}", "every `{trait_name}` method must appear in the impl block", "add the missing method signatures and bodies"))
         }
     }
-    // The trait writes its associated types abstractly (`-> Elem`); the impl
-    // writes the concrete types it binds (`type Elem = Int`, `-> Int`).
-    associated_names :: loop associated in implementation.associated_types -> associated.symbol.name
-    associated_types :: loop associated in implementation.associated_types -> associated.ty.copy()
+    // The trait writes its associated types abstractly (`-> Elem`) and its
+    // implementer as `Self`; the impl writes the concrete types it binds
+    // (`type Elem = Int`, `-> Int`) and its own type.
+    associated_names := loop associated in implementation.associated_types -> associated.symbol.name
+    associated_types := loop associated in implementation.associated_types -> associated.ty.copy()
+    &associated_names.push("Self")
+    &associated_types.push(implementation.target_type.copy())
     loop expected_index in 0..<graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods.len() {
         found := SemaRegistrationFunction?{None}
         loop actual in implementation.methods {
@@ -2916,7 +2957,7 @@ fn sema_checked_validate_impl(graph: SemaRegistrationGraph, module_row: SemaRegi
         }
         actual :: found ?? next
         declared_signature :: graph.modules[trait_ref.module_index].nominals[trait_ref.row].trait_methods[expected_index].signature
-        expected_signature :: if associated_names.len() > 0 -> sema_inference_substitute_type(declared_signature, associated_names, associated_types) else -> declared_signature.copy()
+        expected_signature :: sema_inference_substitute_type(declared_signature, associated_names, associated_types)
         compatible :: sema_type_assignable_in_graph(graph, expected_signature, sema_checked_impl_signature(expected_signature, actual.signature), module_row.module_identity)
         mismatch :: if compatible == {
             .Val(value) -> !value
@@ -3278,7 +3319,7 @@ fn sema_checked_impl_coherence(graph: SemaRegistrationGraph, module_row: SemaReg
     loop implementation_index in 0..<module_row.impls.len() -> sema_checked_validate_delegation(graph, module_row, module_row.impls[implementation_index], &diagnostics)
 }
 
-fn sema_checked_nested_impl_row(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, owner_name: String, block: TraitImplBlock) -> TImplDef Never! {
+fn sema_checked_nested_impl_row(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, owner_name: String, block: TraitImplBlock, constants: [TTraitConstantValue]) -> TImplDef Never! {
     methods := [String]{}
     loop method in block.methods {
         if {
@@ -3300,6 +3341,7 @@ fn sema_checked_nested_impl_row(graph: SemaRegistrationGraph, module_row: SemaRe
         trait_name: Val(block.trait_name),
         trait_ref: Val(block.trait_name),
         associated_types: associated,
+        constants: constants,
         methods: methods,
         delegation_field: None,
         compiler_generated: block.compiler_generated,
@@ -3673,16 +3715,20 @@ fn sema_checked_qualify_type_with_generics(graph: SemaRegistrationGraph, ty: Typ
     sema_type_resolve_declared_with_generics(graph, ty, caller_module, generic_params)
 }
 
-fn sema_checked_add_nested_impls(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, definition: Item, impls: &[TImplDef]) Never! {
+// The implementation blocks a struct or enum writes inside its body, each
+// with its checked trait constants.
+fn sema_checked_add_nested_impls(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, definition: Item, impls: &[TImplDef], diagnostics: &[Diagnostic]) Never! {
     if definition == {
         .Struct(value) -> {
             loop block in value.trait_impls {
-                &impls.push(sema_checked_nested_impl_row(graph, module_row, value.name, block))
+                constants :: sema_trait_constants_check_impl(graph, module_row.module_identity, Val(block.trait_name), value.name, block.constants, block.trait_span, &diagnostics)
+                &impls.push(sema_checked_nested_impl_row(graph, module_row, value.name, block, constants))
             }
         }
         .Enum(value) -> {
             loop block in value.trait_impls {
-                &impls.push(sema_checked_nested_impl_row(graph, module_row, value.name, block))
+                constants :: sema_trait_constants_check_impl(graph, module_row.module_identity, Val(block.trait_name), value.name, block.constants, block.trait_span, &diagnostics)
+                &impls.push(sema_checked_nested_impl_row(graph, module_row, value.name, block, constants))
             }
         }
         else -> {}
@@ -3790,13 +3836,15 @@ fn sema_checked_declaration_facts(graph: SemaRegistrationGraph, module_index: In
         if definition == .Val(value) -> &type_defs.push(value)
         if source_item == .Val(item) {
             if item == .UnitFamily(value) -> sema_checked_standard_unit_defs(module_row, value, &type_defs)
-            sema_checked_add_nested_impls(graph, module_row, item, &impls)
+            if item == .Trait(value) -> sema_trait_constants_check_trait(graph, module_row.module_identity, value, &diagnostics)
+            sema_checked_add_nested_impls(graph, module_row, item, &impls, &diagnostics)
         }
     }
     sema_checked_impl_coherence(graph, module_row, &diagnostics)
     loop implementation in module_row.impls {
         sema_checked_validate_impl(graph, module_row, implementation, &diagnostics)
-        &impls.push(sema_checked_impl_row(graph, module_row, implementation))
+        impl_constants :: sema_trait_constants_check_impl(graph, module_row.module_identity, implementation.declaration.trait_name, implementation.declaration.type_name, implementation.declaration.constants, implementation.declaration.type_span, &diagnostics)
+        &impls.push(sema_checked_impl_row(graph, module_row, implementation, impl_constants))
     }
     // The module's staged constant values by key, first row winning: one
     // pass over the values rather than one per constant.

@@ -47,8 +47,12 @@ fn kit_steps_file_action(step: KitStep, env: KitEnv, work: String, scratch: Stri
         files.remove_all(source) ?? return kit_exec_failed("remove {source}: {err}")
     } else {
         destination :: kit_steps_work_path(step.argv[2], env, work, scratch, built) ?? return kit_exec_failed("copy destination escapes work directory")
-        bytes :: files.read_bytes(source) ?? return kit_exec_failed("read copy {source}: {err}")
         info :: files.stat(source) ?? return kit_exec_failed("stat copy {source}: {err}")
+        if info.is_dir {
+            kit_exec_copy_tree(source, destination, false)
+            return kit_steps_action_run()
+        }
+        bytes :: files.read_bytes(source) ?? return kit_exec_failed("read copy {source}: {err}")
         files.create_dir_all(files.dirname(destination)) ?? return kit_exec_failed("mkdir copy {destination}: {err}")
         files.write_bytes(destination, bytes) ?? return kit_exec_failed("write copy {destination}: {err}")
         files.chmod(destination, info.mode % 512) ?? return kit_exec_failed("copy mode {destination}: {err}")

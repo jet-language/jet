@@ -58,7 +58,7 @@ fn sema_value_method_argument(argument: CallArg, method: String, index: Int, req
     sema_value_method_replace_mismatch(argument.expr, method, index, required, reported, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     value :: checked ?? return None
     if sema_call_type_assignable(required, value.ty, environment, program) == (Val(true)) -> return Val(value)
-    if sema_expr_numeric_widening_to(value.ty, required) == (Val(true)) {
+    if sema_expr_numeric_value_widening(value, required) == (Val(true)) {
         line :: sema_source_line_at(environment.source_segments, value.span) ?? 0
         return sema_expr_numeric_literal_conversion(value, required, value.span, line, &diagnostics)
     }

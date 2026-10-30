@@ -25,7 +25,7 @@ env: S5_SOURCE={work}/original.source
 env: S5_RESPONSE={work}/response.json
 send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file:///tmp/lsp_semantic_highlight_stage4.jet\",\"version\":2},\"contentChanges\":[{\"range\":{\"start\":{\"line\":15,\"character\":13},\"end\":{\"line\":15,\"character\":17}},\"rangeLength\":4,\"text\":\"view\"}]}}"
 send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/semanticTokens/full\",\"params\":{\"textDocument\":{\"uri\":\"file:///tmp/lsp_semantic_highlight_stage4.jet\"}}}"
-recv lsp until stdout: ~ "\"id\":3"
+recv lsp until $.id = 3
 capture: response = text stdout
 write: response.json lsp_semantic_tokens_classify_ownership_markers_and_skip_retired_words.response.template
 step: jet test claims

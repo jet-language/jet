@@ -61,7 +61,8 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
         if (context.bless.all || kit_expect_named(context.bless.ids, context.id)) && (assertion.mode == "=" || assertion.mode == "from") -> return kit_expect_verdict("REFUSED", "OR subjects do not choose which stream to bless")
         return left
     }
-    raw_match := assertion.mode == "^=" || assertion.json_mode != "" || (assertion.rhs_literal && (kit_steps_path_tokens(assertion.value) || assertion.value.contains("{{cap:")))
+    // Captured transform arguments are byte offsets into the raw subject, so normalization must not shift them.
+    raw_match := assertion.mode == "^=" || assertion.json_mode != "" || assertion.transform.contains("{{cap:") || (assertion.rhs_literal && (kit_steps_path_tokens(assertion.value) || assertion.value.contains("{{cap:")))
     if kit_expect_named(["~", "!~", "~i", "!~i", "~any", "line"], assertion.mode) {
         raw_match = raw_match || kit_steps_path_tokens(assertion.value) || kit_steps_path_tokens(assertion.extra)
         loop value in assertion.alternatives {
@@ -139,7 +140,7 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
             if !exists -> return kit_expect_verdict("FAIL", "missing file: {assertion.path}")
             info :: files.stat(path) ?? return kit_expect_verdict("ERROR", "file metadata: {err}")
             matches := false
-            if assertion.mode == "size" -> matches = kit_steps_compare(info.size, extra, Int.parse(value) ?? -1)
+            if assertion.mode == "size" -> matches = kit_steps_compare(info.size, extra, Int.parse(kit_steps_arithmetic(value) ?? value) ?? -1)
             else if assertion.mode == "mode" -> matches = info.mode % 4096 == (kit_steps_octal(value) ?? -1)
             else if assertion.mode == "permissions" -> matches = if sys.family() == "windows" -> "{info.readonly}" == value else -> kit_steps_octal_text(info.mode % 4096) == value
             else {

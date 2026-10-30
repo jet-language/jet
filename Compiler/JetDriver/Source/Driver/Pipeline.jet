@@ -151,6 +151,7 @@ use jet_pkg_model.[LockedBuildContribution]
 use jet_ir.[IRProgram, ir_first_function_rows, ir_precise_helper_names, ir_named_function_keys, ir_reachable_core_rows]
 use jet_eval.[
     JetEvalConfig,
+    JetEvalCompilerQueryHost,
     JetEvalIRResult,
     jet_eval_compiler_services_program_info,
     jet_eval_native_load,
@@ -1033,7 +1034,8 @@ fn jet_driver_comptime_dependency_cycle(rows: [JetDriverComptimeWaitRow]) -> Jet
 
 // The run's evaluator configuration for one evaluation. An IR evaluation
 // reads constants from the build's constant rows, never from globals.
-fn jet_driver_comptime_eval_config(original: JetEvalConfig, inputs: ^JetEvalComptimeInputAdapter?) -> JetEvalConfig {
+// `compiler` answers its `core.compiler` queries.
+fn jet_driver_comptime_eval_config(original: JetEvalConfig, inputs: ^JetEvalComptimeInputAdapter?, compiler: JetEvalCompilerQueryHost?) -> JetEvalConfig {
     build_host_adapter :: if original.build_host_adapter == {
         None -> None
         Val(adapter) -> Val(adapter.clone_adapter())
@@ -1046,6 +1048,7 @@ fn jet_driver_comptime_eval_config(original: JetEvalConfig, inputs: ^JetEvalComp
         runtime_execution: false,
         build_host_adapter: build_host_adapter,
         comptime_input_adapter: ^inputs,
+        compiler_query_host: if compiler == .Val(host) -> Val(host.clone_compiler_host()) else -> None,
         host_hooks: original.host_hooks,
         native: original.native,
     }
@@ -1535,7 +1538,8 @@ fn jet_driver_comptime_flush(
         return flushed
     }
     if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.load", batch.entries[start].source.source_file, jet_driver_comptime_batch_names(batch, start))
-    native := jet_eval_native_load(^built, jet_driver_comptime_eval_config(request.eval_config, None))
+    native := jet_eval_native_load(^built, jet_driver_comptime_eval_config(request.eval_config, None, None))
+    compiler_queries :: jet_driver_comptime_compiler_for(request)
     if request.trace_sink == .Val(sink) -> sink.end("comptime.load", 1)
     evaluated_index := 0
     loop index in start..<batch.entries.len() {
@@ -1551,7 +1555,7 @@ fn jet_driver_comptime_flush(
         source :: entry.source
         comptime_request :: entry.request
         if request.trace_sink == .Val(sink) -> sink.begin_item("comptime.eval", source.source_file, source.name)
-        eval_result :: jet_eval_native_run(&native, item, [TComptimeValue]{}, jet_driver_comptime_eval_config(request.eval_config, jet_driver_comptime_inputs_for(request, source.source_file)), comptime_request.span)
+        eval_result :: jet_eval_native_run(&native, item, [TComptimeValue]{}, jet_driver_comptime_eval_config(request.eval_config, jet_driver_comptime_inputs_for(request, source.source_file), Val(compiler_queries)), comptime_request.span)
         if request.trace_sink == .Val(sink) -> sink.end("comptime.eval", 1)
         jet_driver_record_eval_result(&trace, eval_result)
         if source.kind == SemaComptimeItemKind.FieldDefault && eval_result.error != None && eval_result.internal_problem == None {

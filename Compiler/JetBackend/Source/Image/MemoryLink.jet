@@ -24,7 +24,8 @@
 // The image registers only its own unwind tables, the first time libgcc's
 // unwinder asks for them (StaticLink.jet link_eh_shims): `__jet_bind_main`, the
 // target of the image's `main` places, registers the program's with
-// libgcc's `__register_frame_info` and tail-calls `main` with its arguments.
+// libgcc's `__register_frame_info` when the image links that unwinder, and
+// tail-calls `main` with its arguments.
 // A program this cannot bind gets errors, and the caller links it in full:
 // thread-local data, init/fini arrays, or an import the image does not define.
 
@@ -187,26 +188,45 @@ fn link_image_export(c: LinkContext, view: LinkImageView, name: String) -> Int N
     -1
 }
 
-// `__jet_bind_main(argc, argv, envp)`: register the program's unwind tables
-// (`__jet_bind_eh`, defined at their address) with libgcc, then tail-call
-// `main` with the arguments.
-fn link_bind_startup() -> LinkSynth Never! {
+// Whether the image defines global `name`: by its export index, or by its
+// global symbols for an image packed before the index.
+fn link_image_defines(c: LinkContext, view: LinkImageView, name: String) -> Bool Never! {
+    if view.exports_slots > 0 -> return link_image_export(c, view, name) >= 0
+    loop k in view.first_global..<view.symtab_count {
+        at :: view.symtab_at + 24 * k
+        if link_u16(c.bufs, 1, at + 6) != 0 && link_name_has(c.bufs, 1, view.strtab_at + link_u32(c.bufs, 1, at), name, true) -> return true
+    }
+    false
+}
+
+// `__jet_bind_main(argc, argv, envp)`: when `frames`, register the
+// program's unwind tables (`__jet_bind_eh`, defined at their address) with
+// libgcc, then tail-call `main` with the arguments. An image without
+// libgcc's unwinder has nothing that walks them, so its startup is the
+// tail call alone.
+fn link_bind_startup(frames: Bool) -> LinkSynth Never! {
     s := link_synth()
     link_synth_function(&s, "__jet_bind_main")
-    // push rdi; push rsi; push rdx; lea rdi, [rip + __jet_bind_eh]
-    link_synth_code(&s, [Int]{0x57, 0x56, 0x52, 0x48, 0x8d, 0x3d})
-    link_synth_rel32(&s, "__jet_bind_eh", LINK_R_PC32)
-    // lea rsi, [rip + __jet_bind_object]; call __register_frame_info
-    link_synth_code(&s, [Int]{0x48, 0x8d, 0x35})
-    link_synth_rel32(&s, "__jet_bind_object", LINK_R_PC32)
-    link_synth_code(&s, [Int]{0xe8})
-    link_synth_rel32(&s, "__register_frame_info", LINK_R_PLT32)
-    // pop rdx; pop rsi; pop rdi; jmp main
-    link_synth_code(&s, [Int]{0x5a, 0x5e, 0x5f, 0xe9})
+    if frames {
+        // push rdi; push rsi; push rdx; lea rdi, [rip + __jet_bind_eh]
+        link_synth_code(&s, [Int]{0x57, 0x56, 0x52, 0x48, 0x8d, 0x3d})
+        link_synth_rel32(&s, "__jet_bind_eh", LINK_R_PC32)
+        // lea rsi, [rip + __jet_bind_object]; call __register_frame_info
+        link_synth_code(&s, [Int]{0x48, 0x8d, 0x35})
+        link_synth_rel32(&s, "__jet_bind_object", LINK_R_PC32)
+        link_synth_code(&s, [Int]{0xe8})
+        link_synth_rel32(&s, "__register_frame_info", LINK_R_PLT32)
+        // pop rdx; pop rsi; pop rdi
+        link_synth_code(&s, [Int]{0x5a, 0x5e, 0x5f})
+    }
+    // jmp main
+    link_synth_code(&s, [Int]{0xe9})
     link_synth_rel32(&s, "main", LINK_R_PLT32)
-    // libgcc's `struct object` for the registered tables (at most 8 words).
-    link_synth_define(&s, "__jet_bind_object", 3, 0)
-    s.bss = 128
+    if frames {
+        // libgcc's `struct object` for the registered tables (at most 8 words).
+        link_synth_define(&s, "__jet_bind_object", 3, 0)
+        s.bss = 128
+    }
     s
 }
 
@@ -493,8 +513,10 @@ fn link_bind_image(name: String, program: ^[U8], image: ^[U8], gap_at: Int, gap:
         return link_bind_failure(c)
     }
     // The program's imports, and the binding startup's
-    // `__register_frame_info`, resolve to the image's definitions.
-    link_load_synth(&c, link_bind_startup(), "<runtime image binding>")
+    // `__register_frame_info` when the image links libgcc's unwinder,
+    // resolve to the image's definitions.
+    frames :: link_image_defines(c, view, "__register_frame_info")
+    link_load_synth(&c, link_bind_startup(frames), "<runtime image binding>")
     // Each import is looked up in the image's export index; an image packed
     // by a compiler before the index has its global symbols scanned instead.
     if {
@@ -522,9 +544,8 @@ fn link_bind_image(name: String, program: ^[U8], image: ^[U8], gap_at: Int, gap:
         }
     }
     start_g :: c.g_index.get("__jet_bind_main") ?? -1
-    frames_g :: c.g_index.get("__register_frame_info") ?? -1
-    if start_g < 0 || frames_g < 0 || !link_defined(c, frames_g) {
-        link_error(&c, "runtime image: no `__register_frame_info` for the program's unwind tables")
+    if start_g < 0 {
+        link_error(&c, "runtime image binding: no `__jet_bind_main`")
         return link_bind_failure(c)
     }
     linker_names := [String:Bool]{}
@@ -541,8 +562,10 @@ fn link_bind_image(name: String, program: ^[U8], image: ^[U8], gap_at: Int, gap:
     }
     layout :: link_bind_layout(&c, view)
     eh_g :: c.g_index.get("__jet_bind_eh") ?? -1
-    c.g_kind[eh_g] = LINK_G_LINKER
-    c.g_addr[eh_g] = c.eh_start
+    if eh_g >= 0 {
+        c.g_kind[eh_g] = LINK_G_LINKER
+        c.g_addr[eh_g] = c.eh_start
+    }
     debug :: link_debug_sections(&c)
     target :: link_global_addr(c, start_g)
     origin :: view.program_base - c.base

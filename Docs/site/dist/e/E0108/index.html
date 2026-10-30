@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Put the value in text with interpolation: &quot;{x}&quot;</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0108</code>: <code>tests/ui/E0108_live_push_value_type.stderr</code>.</p>
-<pre class="diag">Error [E0108]: This needs Int, but the value is String
-  --&gt; tests/ui/E0108_live_push_value_type.jet:10:37
+<p>First UI snapshot mentioning <code>E0108</code>: <code>tests/ui/E0108_int_narrowing_lambda_return.stderr</code>.</p>
+<pre class="diag">Error [E0108]: This needs U8, but the value is Int
+  --&gt; tests/ui/E0108_int_narrowing_lambda_return.jet:4:24
     |
- 10 |     app.push(reading, &quot;cpu&quot;, value: &quot;high&quot;)
-    |                                     ^^^^^^
+  4 |     print(apply((n) -&gt; n * 2, 5))
+    |                        ^^^^^
  Why: The value here does not have the type required by this declaration
- Fix: Use a value of the required type or convert it explicitly
+ Fix: Convert it with `U8.from_int(value) ?? fallback`; the conversion is `None` when the value doesn&#39;t fit in U8
 More: jet-lang.dev/e/E0108
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

@@ -176,6 +176,7 @@ fn sema_fact_node(tree: &BodyTree, kind: NodeKind) Never! {
         }
         .PtrFromAddr(_, element) -> sema_fact_type(&tree, element)
         .TypeTest(subject, _) -> sema_fact_type(&tree, subject)
+        .TraitConst(owner, _, _) -> sema_fact_type(&tree, owner)
         .Field(_, field) -> sema_fact_type(&tree, field.ty)
         .StructLit(fields) -> {
             loop field in fields -> sema_fact_type(&tree, field.field.ty)

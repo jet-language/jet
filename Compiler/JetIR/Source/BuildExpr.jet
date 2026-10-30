@@ -1688,7 +1688,11 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
                 if ir_cell_value_type(ir_ty(p, b, receiver)) != None -> return ir_cell_method(&m, p, &b, expression_ty, receiver, method, args, span)
                 host_receiver_ty :: ir_ty(p, b, receiver)
                 receiver_row :: ir_value_type(&m, p, host_receiver_ty) ?? return ir_type_fail(&b, span, host_receiver_ty)
-                if ir_host_value_row(m, p, receiver_row) == .Val(owner) -> return ir_host_method(&m, p, &b, expression_ty, owner, method, receiver, args, span)
+                if ir_host_value_row(m, p, receiver_row) == .Val(owner) {
+                    values := [Int]{receiver}
+                    loop argument in args -> &values.push(argument)
+                    return ir_host_method(&m, p, &b, expression_ty, "{owner}.{method}", values, span)
+                }
             }
             if call == .CellGuardProject(receiver, paths, _, _, _) -> return ir_cell_guard_project(&m, p, &b, expression_ty, receiver, paths, span)
             if call == .YieldSend(value) -> return ir_generator_yield(&m, p, &b, value, span)
@@ -1720,6 +1724,7 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
         }
         .OrFallback(value, fallback, ambient) -> return ir_or_fallback(&m, p, &b, expression_ty, value, fallback, ambient, span)
         .ConstRef(symbol) -> return ir_constant(&m, p, &b, expression_ty, symbol.key, span)
+        .TraitConst(owner, trait_short, name) -> return ir_trait_constant(&m, p, &b, expression_ty, owner, trait_short, name, span)
         .CtLit(value) -> return ir_comptime(&m, p, &b, expression_ty, value, span)
         .ListLit(values) -> return ir_list_literal(&m, p, &b, expression_ty, values, span)
         .List(values, coercion) -> {
@@ -5745,8 +5750,9 @@ fn ir_indirect_call(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, args
 }
 
 // A checked constant read: a borrow of its static object (BuildStatic.jet)
-// when its value freezes, else its compile-time value built in place. A
-// read of module storage loads its cell, and a read of a constant computed
+// when its value freezes, else its compile-time value built in place; a
+// value holding a compiler value, the compiler answers (ir_host_constant).
+// A read of module storage loads its cell, and a read of a constant computed
 // at startup borrows the value its cell holds (ir_startup_read).
 fn ir_constant(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: String, span: Span) -> Int Never! {
     if ir_function_row(p, key) != None -> return ir_function_value(&m, p, &b, ty, key, span)
@@ -5759,6 +5765,7 @@ fn ir_constant(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: String,
         row :: ir_value_type(&m, p, definition.ty) ?? return ir_type_fail(&b, span, definition.ty)
         return ir_load_at(&m, &b, address, 0, row)
     }
+    if ir_host_value_held(p, definition.ty) -> return ir_host_constant(&m, p, &b, ty, key, span)
     borrowed :: ir_static_read(&m, p, &b, ty, key, definition.value)
     if borrowed >= 0 -> return borrowed
     ir_comptime(&m, p, &b, ty, definition.value, span)

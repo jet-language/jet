@@ -61,8 +61,11 @@ fn sema_expression_zip_cloneable(ty: Type, span: Span, message: String, environm
     if facts.complete && !facts.accepted -> sema_expression_zip_type_error(message, span, &diagnostics)
 }
 
-fn sema_expression_zip_numeric_fill(fill: Type, element: Type, common: Bool, field: String, index: Int, span: Span, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) {
+// `literal` is the fill's value when it is an untyped whole-number literal,
+// which takes any fixed-width column it fits (a fill of `0` on a `[U8]`).
+fn sema_expression_zip_numeric_fill(fill: Type, literal: Int?, element: Type, common: Bool, field: String, index: Int, span: Span, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) {
     if fill == element -> return
+    if literal == .Val(number) && element == .IntN(signed, bits) && sema_expr_integer_fits(number, signed, bits) -> return
     if {
         sema_expr_numeric_widening_to(fill, element) == None -> {
             if {
@@ -138,7 +141,7 @@ fn sema_expression_zip_family(method: String, inputs: [TExpr], fields: [String],
         }
         if common_fill == .Val(fill) {
             sema_expression_zip_cloneable(fill.ty, span, "zip fill type `{type_name(fill.ty)}` is not cloneable", environment, program, &diagnostics)
-            loop element in elements -> sema_expression_zip_numeric_fill(fill.ty, element, true, "", 0, span, &scopes, &diagnostics)
+            loop element in elements -> sema_expression_zip_numeric_fill(fill.ty, sema_expr_integer_literal_value(fill), element, true, "", 0, span, &scopes, &diagnostics)
         }
         if column_fills == .Val(fills) {
             if fills.ty == {
@@ -158,7 +161,13 @@ fn sema_expression_zip_family(method: String, inputs: [TExpr], fields: [String],
                         }
                         if field == .Val(fill_type) {
                             sema_expression_zip_cloneable(fill_type, span, "zip fill `{field_name}` has non-cloneable type `{type_name(fill_type)}`", environment, program, &diagnostics)
-                            sema_expression_zip_numeric_fill(fill_type, element, false, field_name, index, span, &scopes, &diagnostics)
+                            literal := Int?{None}
+                            if fills.kind == .Tuple(values) {
+                                loop (position, candidate) in fill_fields {
+                                    if candidate.name == field_name && position < values.len() -> literal = sema_expr_integer_literal_value(values[position])
+                                }
+                            }
+                            sema_expression_zip_numeric_fill(fill_type, literal, element, false, field_name, index, span, &scopes, &diagnostics)
                         }
                     }
                 }

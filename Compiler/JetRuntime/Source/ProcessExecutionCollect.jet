@@ -311,6 +311,18 @@ fn process_stdin_failure(errno: I64, err: I64) -> I64 {
 // the receipt keeps every byte and the child never blocks on an unread pipe.
 #Export(c) fn jet_rt_handle_field_process_child_stdout(child: I64) -> I64 { process_execution_pipe(child, I64{1}) }
 #Export(c) fn jet_rt_handle_field_process_child_stderr(child: I64) -> I64 { process_execution_pipe(child, I64{2}) }
+// Some only for a child spawned on a terminal, whose Child72 holds the master
+// at 56. The session retains that Child72, so it outlives every alias of the
+// child; `some` receives it and the selector says whether it was written.
+#Export(c) fn jet_rt_handle_field_process_child_terminal(child: I64, some: I64) -> I64 {
+    native :: process_execution_native(child)
+    sync_mutex_lock(native)
+    master :: fd_word(native, I64{56})
+    sync_mutex_unlock(native)
+    if (master < I64{0}) -> return I64{0}
+    fd_put(some, I64{0}, jet_terminal_session_from_child_raw(native))
+    I64{1}
+}
 fn process_execution_pipe(child: I64, stream: I64) -> I64 {
     slot :: if (stream == I64{1}) -> PROCESS_EXECUTION_STDOUT else -> PROCESS_EXECUTION_STDERR
     sync_mutex_lock(child)

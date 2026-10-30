@@ -545,6 +545,52 @@ fn ir_list_try_reserve(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list
     result
 }
 
+// `&s.try_push(text)`: `text` appended to the String at the write place `s`
+// (jet_rt_string_append, as `s += text`), or `Err(AllocError)` naming the
+// requested bytes with `s` untouched when the allocation is refused. The
+// value comes first, then the place (as ir_assign_place).
+fn ir_string_try_push(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
+    if args.len() != 1 -> return ir_fail_slot(&b, span, "try_push without a text")
+    err_ty :: if ir_untag(ty) == .Result(_, err) -> err else -> { return ir_fail_slot(&b, span, "try_push without its checked Result") }
+    result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    text :: ir_expr(&m, p, &b, args[0])
+    if ir_failed(b) || text < 0 -> return -1
+    backs := [IRWriteBack]{}
+    address :: ir_place_address(&m, p, &b, receiver, &backs, span)
+    if ir_failed(b) || address < 0 -> return -1
+    string_row :: ir_string_row(&m)
+    word_row :: ir_word_row(&m)
+    int_row :: ir_type_row(&m, Type.Int) ?? 0
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    pointer_row :: ir_pointer_row(&m)
+    result :: ir_fresh_temp(&m, &b, result_row)
+    refused :: ir_runtime(&m, &b, "jet_fault_should_fail_allocation", [Int]{}, bool_row)
+    ir_open_if(&b.f, refused, b.line)
+    bytes :: ir_runtime(&m, &b, "jet_rt_string_byte_len", [Int]{text}, word_row)
+    requested :: ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{bytes}, int_row)
+    string_text :: ir_static_text(&m, &b, "String")
+    allocator :: ir_runtime(&m, &b, "jet_rt_string_from_static", string_text, string_row)
+    record :: ir_runtime(&m, &b, "jet_rt_record_new_alloc_error", [Int]{requested, allocator}, pointer_row)
+    ir_release(&m, &b, requested)
+    ir_release(&m, &b, allocator)
+    failed :: ir_result_box(&m, p, &b, ty, false, -1)
+    ir_record_in(&m, p, &b, err_ty, record, failed, 8, span)
+    ir_emit(&b.f, IROp.Copy, result, failed, -1, -1, b.line)
+    b.fresh[failed] = false
+    ir_else(&b.f, b.line)
+    // The place's owner is consumed and the joined text stored back.
+    current :: ir_load_at(&m, &b, address, 0, string_row)
+    appended :: ir_runtime(&m, &b, "jet_rt_string_append", [Int]{current, text}, string_row)
+    ir_emit(&b.f, IROp.Store, -1, address, 0, appended, b.line)
+    pushed :: ir_result_box(&m, p, &b, ty, true, -1)
+    ir_emit(&b.f, IROp.Copy, result, pushed, -1, -1, b.line)
+    b.fresh[pushed] = false
+    ir_end(&b.f, b.line)
+    loop back in backs -> ir_emit(&b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
+    ir_release(&m, &b, text)
+    result
+}
+
 // `alloc.alloc(value)` / `alloc.try_alloc(value)` / `alloc.reset()` on a
 // core.mem Arena/Bump/Pool/Fixed (Sema Memory.jet
 // sema_call_memory_allocator_method): the runtime storage reserves the
@@ -738,6 +784,7 @@ fn ir_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int
         if ir_failed(b) || value < 0 -> return -1
         return ir_render(&m, p, &b, receiver_ty, value, IRRender.Display, span)
     }
+    if operation == .TryStringPush -> return ir_string_try_push(&m, p, &b, ty, receiver, args, span)
     // A write through the receiver reaches it as a write place: each List or
     // Map on a path through an element (`&rows[0].cells.push(x)`) is made its
     // own first, so the write never lands in a buffer another holder shares.
@@ -4849,6 +4896,9 @@ fn ir_core_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: Cor
     if canonical.module_name == "core.mem" && (canonical.member == "volatile_read" || canonical.member == "volatile_write") {
         return ir_core_volatile(&m, p, &b, canonical.member, args, type_args, span)
     }
+    // A `core.compiler` query (`compiler.lex(source)`, ...): compile-time
+    // only, the compiler answers it (ir_host_method `compiler.member`).
+    if canonical.module_name == "core.compiler" -> return ir_host_method(&m, p, &b, ty, "compiler.{canonical.member}", args, span)
     if canonical.symbol == .Prelude(name) {
         if name == "jet_std::channel" || name == "jet_std::channel_bounded" -> return ir_channel_new(&m, p, &b, ty, name == "jet_std::channel_bounded", args, span)
         if name == "jet_std::JetEvent::with_policy" -> return ir_event_with_policy(&m, p, &b, ty, args, span)

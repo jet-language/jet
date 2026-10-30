@@ -5,7 +5,7 @@ env: S5_ROOT={work}
 session app raw: jet dev app.jet --target=web --json
 env: NO_COLOR=1
 stderr: null
-recv app line until ~ "App preview: " timeout 120s
+recv app line until ~ "App preview: " timeout 120s # original waits for the dev server readiness line
 capture: port = text stdout.strip_prefix_lines("App preview: ").line(0).split("://",1).split("/",0).after_last(":")
 cap:port: is-u32
 json: cap:port doc $ <= 65535

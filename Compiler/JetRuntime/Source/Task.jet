@@ -492,18 +492,29 @@ fn scheduler_task_completion_end(frame: I64) {
 
 // One thread-confined queue, drained in registration order after scope
 // cleanup. Pre-stop late registrations are owed in subsequent FIFO batches.
+// The first registration creates the key and installs the drain as the
+// process exit's handler step (Main.jet main_exit_handlers_code), so a
+// program that registers no exit handler links neither the queue's TLS
+// destructor nor its drain.
 task_exit_key := I64{0}
-// runtime-init: 3
 #Export(c) fn jet_rt_task_exit_init() {
     if (task_exit_key != I64{0}) -> return
-    destructor :: jet_rt_alloc(I64{24}, I64{8})
-    sync_store(destructor, I64{1})
-    sync_store(destructor + I64{8}, rt_task_exit_destructor_address())
-    sync_store(destructor + I64{16}, I64{0})
-    task_exit_key = jet_rt_tls_key_new(destructor)
+    sync_mutex_lock(thread_tls_registry)
+    if (task_exit_key == I64{0}) {
+        destructor :: jet_rt_alloc(I64{24}, I64{8})
+        sync_store(destructor, I64{1})
+        sync_store(destructor + I64{8}, rt_task_exit_destructor_address())
+        sync_store(destructor + I64{16}, I64{0})
+        main_exit_handlers_install(rt_task_exit_run_address())
+        task_exit_key = thread_tls_key_new_locked(destructor, I64{0})
+    }
+    sync_mutex_unlock(thread_tls_registry)
 }
-// RuntimeLower resolves this checked address through its sole intrinsic table.
+// RuntimeLower resolves these checked addresses through its sole intrinsic table.
 fn rt_task_exit_destructor_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+fn rt_task_exit_run_address() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
 #Export(c) fn jet_rt_task_exit_destructor(_header: I64, queue: I64) -> I64 {
@@ -520,6 +531,7 @@ fn rt_task_exit_destructor_address() -> I64 {
     I64{0}
 }
 fn task_exit_queue() -> I64 {
+    jet_rt_task_exit_init()
     queue := jet_rt_tls_get(task_exit_key)
     if (queue == I64{0}) {
         queue = jet_rt_alloc(I64{24}, I64{8})
@@ -550,4 +562,9 @@ fn task_exit_queue() -> I64 {
         }
         if (capacity != I64{0}) -> jet_rt_free(data, capacity * I64{8}, I64{8})
     }
+}
+// jet_rt_task_exit_handlers as main_exit_handlers_code calls it.
+#Export(c) fn jet_rt_task_exit_run(_unused: I64) -> I64 {
+    jet_rt_task_exit_handlers()
+    I64{0}
 }

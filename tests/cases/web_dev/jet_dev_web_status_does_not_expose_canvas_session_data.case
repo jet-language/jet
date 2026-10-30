@@ -4,7 +4,7 @@ env: S5_ROOT={work}
 copy: {root}/tests/cases/web_dev/support.fixture/HTTP.jet claims/HTTP.jet
 session app raw: jet dev app.jet --target=web --canvas
 stderr: null
-recv app line until ^= "Canvas: " timeout 60s
+recv app line until ^= "Canvas: " timeout 60s # original waits for the dev server readiness line
 capture: canvas = text stdout.strip_prefix_lines("Canvas: ").line(0)
 capture: port = text stdout.strip_prefix_lines("Canvas: ").line(0).split("://",1).split("/",0).after_last(":")
 cap:port: is-u32

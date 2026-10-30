@@ -690,6 +690,7 @@ fn sema_core_collect_trait_method(method: TraitMethodSig, imports: [SemaCoreImpo
 fn sema_core_collect_trait_impl(block: TraitImplBlock, imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
     loop method in block.methods -> sema_core_collect_func(method, imports, registered, &used, &spans, &callbacks)
     loop associated in block.assoc_type_impls -> sema_core_collect_type(associated.ty, registered, &used, &spans, Val(associated.span))
+    loop constant in block.constants -> sema_core_collect_expr(constant.value, imports, registered, &used, &spans, &callbacks)
 }
 
 fn sema_core_collect_extern(function: ExternFn, imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
@@ -760,6 +761,7 @@ fn sema_core_collect_item(item: Item, owner: String, unshared: [String], imports
         .Impl(definition) -> {
             loop method in definition.methods -> sema_core_collect_func(method, imports, registered, &used, &spans, &callbacks)
             loop associated in definition.assoc_type_impls -> sema_core_collect_type(associated.ty, registered, &used, &spans, Val(associated.span))
+            loop constant in definition.constants -> sema_core_collect_expr(constant.value, imports, registered, &used, &spans, &callbacks)
         }
         .Test(definition) -> {
             sema_core_collect_params(definition.params, imports, registered, &used, &spans, &callbacks)
@@ -769,7 +771,13 @@ fn sema_core_collect_item(item: Item, owner: String, unshared: [String], imports
             if definition.ty != None -> sema_core_collect_type(definition.ty ?? Type.Named{name: "Unit"}, registered, &used, &spans, Val(definition.name_span))
             sema_core_collect_expr(definition.value, imports, registered, &used, &spans, &callbacks)
         }
-        .Trait(definition) -> loop method in definition.methods -> sema_core_collect_trait_method(method, imports, registered, &used, &spans, &callbacks)
+        .Trait(definition) -> {
+            loop constant in definition.constants {
+                sema_core_collect_type(constant.ty, registered, &used, &spans, Val(constant.ty_span))
+                if constant.default == .Val(value) -> sema_core_collect_expr(value, imports, registered, &used, &spans, &callbacks)
+            }
+            loop method in definition.methods -> sema_core_collect_trait_method(method, imports, registered, &used, &spans, &callbacks)
+        }
         .ExternRust(block) -> loop function in block.functions -> sema_core_collect_extern(function, imports, registered, &used, &spans, &callbacks)
         .TypeAlias(definition) -> sema_core_collect_type(definition.target, registered, &used, &spans, Val(definition.target_span))
         .Distinct(definition) -> sema_core_collect_type(definition.base, registered, &used, &spans, Val(definition.base_span))

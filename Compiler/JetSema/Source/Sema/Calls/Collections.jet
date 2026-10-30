@@ -84,7 +84,7 @@ fn sema_call_collections_check_argument(argument: CallArg, method: String, index
         else -> sema_call_type_assignable(required, value.ty, environment, program)
     }
     if compatible == (Val(true)) -> return Val(value)
-    if !callback && sema_expr_numeric_widening_to(value.ty, required) == (Val(true)) {
+    if !callback && sema_expr_numeric_value_widening(value, required) == (Val(true)) {
         line :: sema_source_line_at(environment.source_segments, value.span) ?? 0
         return sema_expr_numeric_literal_conversion(value, required, value.span, line, &diagnostics)
     }

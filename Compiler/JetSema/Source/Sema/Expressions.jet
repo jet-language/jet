@@ -234,8 +234,15 @@ fn sema_expr_numeric_widening_to(source: Type, target: Type) -> Bool? {
         .IntN(_, _) -> {
             if target_base == Type.Int -> return Val(false)
         }
+        // `Int` holds every 64-bit signed value, so only `I64` holds all of
+        // it; any narrower width never takes an `Int` implicitly. A
+        // whole-number literal still adopts a width it fits
+        // (`sema_expr_numeric_value_widening`).
         .Int -> {
-            if target_base == .IntN(_, _) -> return Val(true)
+            if target_base == .IntN(signed, bits) {
+                if signed && bits >= 64 -> return Val(true)
+                return None
+            }
         }
         .Float32 -> {
             if target_base == Type.Float -> return Val(false)
@@ -293,6 +300,17 @@ fn sema_expr_numeric_join_values(left: TExpr, right: TExpr) -> Type? {
         }
     }
     sema_expr_numeric_join(left.ty, right.ty)
+}
+
+// `sema_expr_numeric_widening_to` for a checked value: an untyped
+// whole-number literal also takes any fixed width it fits, so `byte += 1`
+// stays a `U8` update while `byte += count` with `count: Int` is refused.
+fn sema_expr_numeric_value_widening(value: TExpr, target: Type) -> Bool? {
+    widening :: sema_expr_numeric_widening_to(value.ty, target)
+    if widening != None -> return widening
+    literal :: sema_expr_integer_literal_value(value) ?? return None
+    if target == .IntN(signed, bits) && sema_expr_integer_fits(literal, signed, bits) -> return Val(true)
+    None
 }
 
 fn sema_expr_numeric_rust_type(ty: Type) -> String? {
@@ -861,6 +879,9 @@ fn sema_expr_binary_type(op: BinOp, lhs: Type, rhs: Type, span: Span, diagnostic
             &diagnostics.push(sema_error("E0109", span, "both sides of this comparison must have the same type", "equality compares values of one type", "convert one side or compare values with matching types"))
             return None
         }
+        // Rust `infer_binary` Eq/Ne (binary.rs:2736 @ 6083377777): float `==`
+        // is almost always a bug (D-SMELLLINT1, L0502).
+        if lhs == Type.Float || lhs == Type.Float32 -> &diagnostics.push(sema_lint("L0502", span, "Comparing floats with `{sema_expr_binary_name(op)}` is unreliable", "Floating-point arithmetic is inexact; two values computed differently may not be bit-identical even when mathematically equal", "Compare within a tolerance: `(a - b).abs() < 1e-9`"))
         if (lhs == Type.Int || lhs == Type.Float || lhs == Type.Float32 || lhs == Type.Bool || lhs == Type.String || lhs == Type.Char) || sema_expr_is_integer(lhs) || sema_expr_precise_name(lhs) != None -> return Val(Type.Bool)
         return None
     }
@@ -5028,15 +5049,99 @@ fn sema_expr_check_method_call_expr(receiver: Expr, method: String, method_span:
         receiver_last_use = !sema_ownership_name_live_after(name, &tail_store, &context)
     }
     sema_receiver_mark_finish(&state, unmarked, scopes, receiver_last_use, context.compiler_generated, &diagnostics)
+    if checked == .Val(value) {
+        if sema_expr_process_args_view(receiver, method, args, value.ty, environment, program, scopes) -> &diagnostics.push(sema_lint("L0515", method_span, "the direct process.argv().skip(1) projection repeats the process argument view", "process.args() owns the program argument view after argv[0], so the boundary stays in one Core API", "replace process.argv().skip(1) with process.args()"))
+    }
     if written_place {
         if receiver == .Place(value, _, _, _) -> sema_shared_cycle_check_call(value, args, environment, program, &scopes, state, &diagnostics)
     }
     checked
 }
 
+// L0515 (Rust CheckerInfer/expr.rs process_args_view_edit): `process.argv().skip(1)`
+// on the `core.process` import spelled `process` restates `process.args()`.
+fn sema_expr_process_args_view(receiver: Expr, method: String, args: [CallArg], ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool {
+    if method != "skip" || args.len() != 1 || args[0].label != None || args[0].spread -> return false
+    one :: if sema_registration_cli_without_parens(args[0].expr) == {
+        .Int(value, _, _, _, _) -> value == 1
+        else -> false
+    }
+    if !one -> return false
+    strings :: if ty == {
+        .Apply(name, type_args) -> name == "Iter" && type_args.len() == 1 && type_args[0] == Type.String
+        .List(element) -> element == Type.String
+        else -> false
+    }
+    if !strings -> return false
+    argv_call := sema_registration_cli_without_parens(receiver)
+    if argv_call == .Try(inner, _, _, try_context, _) {
+        if try_context == None -> argv_call = sema_registration_cli_without_parens(inner)
+    }
+    if argv_call == .MethodCall(argv_receiver, argv_method, _, _, _, argv_args, _) {
+        if argv_method != "argv" || argv_args.len() != 0 -> return false
+        if argv_receiver == .Ident(alias, _, _) {
+            if alias != "process" || !sema_expr_core_module_alias_visible(alias, scopes) -> return false
+            return sema_call_core_import_module(environment, program, alias) == (Val("core.process"))
+        }
+    }
+    false
+}
+
 fn sema_expr_check_list_literal(elements: [Expr], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     expanded := sema_expression_list_member_spreads(elements)
-    sema_expression_list(Expr.ListLit{elements: expanded, span: span, id: AST_NODE_GENERATED}, expanded, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    checked := sema_expression_list(Expr.ListLit{elements: expanded, span: span, id: AST_NODE_GENERATED}, expanded, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if checked != None && sema_expr_repeated_list_head(elements) == .Val(head) {
+        &diagnostics.push(sema_lint("L0523", span, "this list repeats `{head}` on every element", "a typed list head states the shared element type once and leaves each record body focused on its fields", "write `[{head}]{{{{…}}, {{…}}}}` and remove the repeated element heads"))
+    }
+    checked
+}
+
+// L0523 (Rust CheckerInfer/expr.rs repeated_struct_list_edit): two or more
+// elements that each spell the same struct head (`[Point{…}, Point{…}]`,
+// parsed as typed literals with field bodies, or `alias.Type{…}`).
+// The head named in the message is the written one.
+fn sema_expr_repeated_list_head(elements: [Expr]) -> String? Never! {
+    if elements.len() < 2 -> return None
+    head := ""
+    loop element in elements {
+        written :: sema_expr_struct_literal_head(element) ?? return None
+        if head == "" {
+            head = written
+        } else if head != written {
+            return None
+        }
+    }
+    Val(head)
+}
+
+// The written head of a struct literal element with a field body.
+fn sema_expr_struct_literal_head(element: Expr) -> String? Never! {
+    if element == {
+        .StructLit(type_name, type_args, import_ns, as_trait, _, inferred, _, _) -> {
+            if inferred || as_trait != None -> return None
+            return Val(sema_expr_struct_head_text(type_name, type_args, import_ns))
+        }
+        .TypedLit(head, body, _, _) -> {
+            if body == {
+                .Fields(_) -> {}
+                else -> return None
+            }
+            if head == .Val(ty) {
+                if ty == {
+                    .Named(_) | .Apply(_, _) -> return Val(type_name(ty))
+                    else -> return None
+                }
+            }
+            return None
+        }
+        else -> return None
+    }
+}
+
+fn sema_expr_struct_head_text(head_name: String, type_args: [Type], import_ns: String?) -> String Never! {
+    text := if import_ns == .Val(namespace) -> "{namespace}.{head_name}" else -> head_name.copy()
+    if type_args.len() == 0 -> return text
+    "{text}<{(loop arg in type_args -> type_name(arg)).join(", ")}>"
 }
 
 // `expr` is the place expression itself (`.Place(value, access, span, _)`).

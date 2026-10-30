@@ -18,6 +18,6 @@ step: jet check main.jet
 step interface: jet inspect explain-build main.jet --json
 env: JET_STORE_DIR={work}/store
 json: stdout doc $.nodes[?kind="package"][?subject~="dep_b"][*].why_ran = "red:source" # Original find-first lookup has a unique match.
-json: stdout doc $.nodes[?kind="package"][?subject="pkg:."][*].why_ran ^= "red:dependency:"
+json: stdout doc $.nodes[?kind="package"][?subject="pkg:."][*].why_ran ^= "red:dependency:" # original why_ran starts_with predicate
 step: jet inspect explain-build main.jet
 stdout: line ^= "package\t" ~ "red:dependency:" # Original same-line prefix and reason; build log includes volatile duration_ms.

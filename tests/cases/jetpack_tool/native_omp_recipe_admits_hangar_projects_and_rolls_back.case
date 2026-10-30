@@ -13,9 +13,9 @@ cwd: project
 exit: 0
 step: {work}/home/.jet/bin/omp
 exit: any # original invocation status was not asserted
-stdout.trim: = fixtures/native_omp_recipe_admits_hangar_projects_and_rolls_back/omp_version_one.out
+stdout.trim: = fixtures/native_omp_recipe_admits_hangar_projects_and_rolls_back/omp_version_one.out # original compares trimmed output
 file: home/.jet/tools/manifest.json ~ "\"provider\":\"jetpackage\"" # original contains predicate
-file: home/.jet/tools/manifest.json ~ "github:can1357/oh-my-pi" | ~ "can1357/oh-my-pi" # original disjunction
+file: home/.jet/tools/manifest.json ~any "github:can1357/oh-my-pi" "can1357/oh-my-pi" # original disjunction
 file: home/.jet/tools/manifest.json ~ "\"tier\":\"#auto\"" # original contains predicate
 capture: store = text file.after_first("\"store_root\": \"").split("\"", 0) home/.jet/tools/generations/1/meta.json
 cap:store: ^= "{work}/root" # original prefix
@@ -31,10 +31,10 @@ cwd: project
 exit: 0
 step: {work}/home/.jet/bin/omp
 exit: any # original invocation status was not asserted
-stdout.trim: = fixtures/native_omp_recipe_admits_hangar_projects_and_rolls_back/omp_version_two.out
+stdout.trim: = fixtures/native_omp_recipe_admits_hangar_projects_and_rolls_back/omp_version_two.out # original compares trimmed output
 step: jetpack profile rollback tools --no-color
 cwd: project
 exit: 0
 step: {work}/home/.jet/bin/omp
 exit: any # original invocation status was not asserted
-stdout.trim: = fixtures/native_omp_recipe_admits_hangar_projects_and_rolls_back/omp_version_one.out
+stdout.trim: = fixtures/native_omp_recipe_admits_hangar_projects_and_rolls_back/omp_version_one.out # original compares trimmed output

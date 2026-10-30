@@ -754,7 +754,7 @@ fn sema_incremental_trait_impl_headers(blocks: [TraitImplBlock]) -> [TraitImplBl
         trait_name: block.trait_name, trait_span: block.trait_span,
         operator_rhs: block.operator_rhs, operator_marker: block.operator_marker,
         methods: sema_incremental_function_headers(block.methods),
-        compiler_generated: block.compiler_generated, assoc_type_impls: block.assoc_type_impls,
+        compiler_generated: block.compiler_generated, assoc_type_impls: block.assoc_type_impls, constants: block.constants,
     }
 }
 
@@ -766,7 +766,7 @@ fn sema_incremental_impl_header(implementation: ImplDef) -> ImplDef Never! {
         operator_marker: implementation.operator_marker,
         methods: sema_incremental_function_headers(implementation.methods),
         delegation_field: implementation.delegation_field,
-        assoc_type_impls: implementation.assoc_type_impls,
+        assoc_type_impls: implementation.assoc_type_impls, constants: implementation.constants,
         is_generated_serde: implementation.is_generated_serde, os_target: implementation.os_target,
     }
 }
@@ -1864,6 +1864,54 @@ fn sema_function_resolve_declared(environment: SemaScopeEnvironment, program: Se
     ty.copy()
 }
 
+// Whether written type `ty` mentions a type name that names nothing (E0119,
+// reported by the signature walk sema_check_failure_contract_type). A
+// parameter of such a type is in scope untyped, so its reads in the body
+// check to nothing and add no follow-on report.
+fn sema_function_type_names_nothing(ty: Type, generic_names: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    if ty == {
+        .Named(name) -> sema_failure_written_name_unknown(name, generic_names, environment, program)
+        .Apply(name, args) -> {
+            if sema_failure_written_name_unknown(name, generic_names, environment, program) -> return true
+            loop arg in args {
+                if sema_function_type_names_nothing(arg, generic_names, environment, program) -> return true
+            }
+            false
+        }
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> sema_function_type_names_nothing(inner, generic_names, environment, program)
+        .Map(key, _, value) -> sema_function_type_names_nothing(key, generic_names, environment, program) || sema_function_type_names_nothing(value, generic_names, environment, program)
+        .Result(ok, error) -> sema_function_type_names_nothing(ok, generic_names, environment, program) || sema_function_type_names_nothing(error, generic_names, environment, program)
+        .Union(members) -> {
+            loop member in members {
+                if sema_function_type_names_nothing(member, generic_names, environment, program) -> return true
+            }
+            false
+        }
+        .Tuple(fields) -> {
+            loop field in fields {
+                if sema_function_type_names_nothing(field.ty, generic_names, environment, program) -> return true
+            }
+            false
+        }
+        .Fn(params, ret, _, _, _, _) -> {
+            loop param in params {
+                if sema_function_type_names_nothing(param, generic_names, environment, program) -> return true
+            }
+            if ret == .Val(value) -> return sema_function_type_names_nothing(value, generic_names, environment, program)
+            false
+        }
+        else -> false
+    }
+}
+
+// The scope row of a parameter: untyped when its written type names nothing
+// (sema_function_type_names_nothing), else `symbol` as declared.
+fn sema_function_param_scope_symbol(symbol: Symbol, written: Type, generic_names: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Symbol {
+    scoped := symbol.copy()
+    if sema_function_type_names_nothing(written, generic_names, environment, program) -> scoped.ty = None
+    scoped
+}
+
 // Rust `is_consuming_close_body`: `func` is a method of a `Close` impl block,
 // matched by the written trait leaf (`impl Secret.Close`), so a builtin
 // `Close` that no module declares counts too.
@@ -1950,6 +1998,9 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     // E0939/E0940: the `#Memo` cache contract (Rust
     // `check_memoized_function`), also proven from the declared signature.
     sema_check_memoized_function(func, updated, program, generic_params, &diagnostics)
+    // E1410/E1411: a `#DevPanel` function's panel contract (Rust
+    // `check_devtools_panels`), also read from the declared signature.
+    sema_check_devtools_panel(func, updated, program, &diagnostics)
     if !sema_function_header_check_default_forward_refs(func, &diagnostics) -> complete = false
     sema_function_header_lint_err_params(func, &diagnostics)
     if !sema_function_header_check_variadic_bound_shape(func, updated, program, &diagnostics) -> complete = false
@@ -1967,6 +2018,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         else -> false
     }
     if !sema_function_header_check_root_params(func, is_method, &diagnostics) -> complete = false
+    sema_function_header_lint_positional_bools(func, is_method, &diagnostics)
     if !sema_function_header_supported(func, &context) -> complete = false
     if func.is_reactive {
         if func.is_pure {
@@ -2038,7 +2090,7 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
             visibility: 0,
         }
         if {
-            !sema_scope_declare_local(&scopes, param_symbol, param_mutable, func.params[param_index].convention, None, false) -> {
+            !sema_scope_declare_local(&scopes, sema_function_param_scope_symbol(param_symbol, func.params[param_index].ty, generic_names, updated, program), param_mutable, func.params[param_index].convention, None, false) -> {
                 &diagnostics.push(sema_already_defined(func.params[param_index].name, func.params[param_index].name_span))
                 complete = false
             }
@@ -2100,6 +2152,8 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
     if returns_value && func.body.len() > 0 && func.body[func.body.len() - 1] == .Unsafe(_, _, unsafe_body, _) {
         context.value_tail_span = sema_stmt_value_tail_marker(unsafe_body)
     }
+    // Imported Core bodies and generated functions have no user source to fix.
+    if returns_value && !func.compiler_generated && !updated.module_identity.starts_with("<corelib>/") -> sema_stmt_value_block_tail_lints(func.body, &diagnostics)
     statements := sema_check_statements(func.body, Val(effective_return), updated, program, &scopes, &state, &tail_store, &context, &diagnostics, 0)
     context.lost_tail_span = None
     context.value_tail_span = None

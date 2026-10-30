@@ -64,9 +64,12 @@ use jet_foundation.[
     ViewSourceProjection,
     ast_binding,
     ast_empty_call_arg_flags,
+    ast_visit_statement,
+    ast_visit_expr,
     ast_empty_lambda_meta,
     diagnostic_registry_row,
     expr_source_span,
+    expr_source_start,
     expr_span,
     foundation_named_type,
     integer_bounds_exact,
@@ -257,7 +260,7 @@ fn sema_stmt_check_yield(value: Expr, span: Span, return_type: Type?, environmen
     yielded := checked
     if !type_identity_equal(checked.ty, elem_type) {
         if {
-            sema_expr_numeric_widening_to(checked.ty, elem_type) == (Val(true)) -> {
+            sema_expr_numeric_value_widening(checked, elem_type) == (Val(true)) -> {
                 line :: sema_source_line_at(environment.source_segments, checked.span) ?? 0
                 yielded = sema_expr_numeric_literal_conversion(checked, elem_type, checked.span, line, &diagnostics) ?? return None
             }
@@ -354,6 +357,223 @@ fn sema_stmt_value_tail_marker(statements: [Stmt]) -> Span? {
         }
     }
     None
+}
+
+// L0521 (Rust CheckerInfer/stdlib_lints.rs ascii_ladder): a binding followed
+// by the 26 assignments `name = name.replace("A", "a")` through `("Z", "z")`,
+// all lowering or all raising, spells out `name.to_ascii_lower()` (or upper)
+// by hand. Reported at the binding name when the binding is a `String`.
+fn sema_stmt_ascii_case_ladder(statements: [Stmt], index: Int, binding: Binding) -> Bool Never! {
+    if binding.name == "" || binding.pattern != None || binding.is_comptime -> return false
+    if index + 26 >= statements.len() -> return false
+    direction := 0
+    loop offset in 0..<26 {
+        pair :: sema_stmt_ascii_replace(statements[index + offset + 1], binding.name) ?? return false
+        // ASCII `A` is 65 and `a` is 97.
+        this_direction := 0
+        if pair[0] == 65 + offset && pair[1] == 97 + offset -> this_direction = 1
+        if pair[0] == 97 + offset && pair[1] == 65 + offset -> this_direction = 2
+        if this_direction == 0 || (direction != 0 && direction != this_direction) -> return false
+        direction = this_direction
+    }
+    true
+}
+
+// `name = name.replace("X", "y")` with two one-byte literals: their bytes.
+fn sema_stmt_ascii_replace(statement: Stmt, name: String) -> [Int]? Never! {
+    if statement == .Assign(target, op, _, value) {
+        if op != None -> return None
+        if target == {
+            .Local(local_name, _) -> {
+                if local_name != name -> return None
+            }
+            else -> return None
+        }
+        if sema_registration_cli_without_parens(value) == .MethodCall(receiver, method, _, _, _, args, _) {
+            if method != "replace" || args.len() != 2 || sema_stmt_ident_name(receiver) != (Val(name)) -> return None
+            from :: sema_stmt_single_byte_literal(args[0]) ?? return None
+            to :: sema_stmt_single_byte_literal(args[1]) ?? return None
+            return Val([Int]{from, to})
+        }
+    }
+    None
+}
+
+// The name of a plain (possibly parenthesized) identifier.
+fn sema_stmt_ident_name(expression: Expr) -> String? Never! {
+    if sema_registration_cli_without_parens(expression) == .Ident(name, _, _) -> return Val(name)
+    None
+}
+
+// A plain one-byte string literal argument; the ladder only matches ASCII
+// letters, so a longer (multi-byte) character never matches either.
+fn sema_stmt_single_byte_literal(arg: CallArg) -> Int? Never! {
+    if arg.label != None || arg.spread -> return None
+    if sema_registration_cli_without_parens(arg.expr) == .Str(parts, _, _) {
+        if parts.len() == 1 && parts[0] == .Lit(text) {
+            bytes :: text.bytes()
+            if bytes.len() == 1 -> return Val(Int.from_u8(bytes[0]))
+        }
+    }
+    None
+}
+
+// L0522 (Rust CheckerInfer/stdlib_lints.rs check_stdlib_walk_filter): a loop
+// over `fs.walk(root)` whose first line only skips directories
+// (`if entry.is_dir { next }`) and whose other lines read the entry only as
+// `entry.path`, with no exit or fallback route, restates `fs.walk_files(root)`.
+fn sema_stmt_lint_walk_filter(var: String, collection: Expr, body: [Stmt], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
+    walk :: sema_stmt_direct_fs_walk(collection, environment, program, scopes) ?? return
+    if body.len() == 0 || !sema_stmt_is_directory_filter(body[0], var) -> return
+    path_uses := 0
+    loop index in 1..<body.len() {
+        if sema_stmt_has_structural_control_flow(body[index]) -> return
+        facts := SemaStmtWalkFacts{path_uses: 0, path_bases: [Int]{}, variable_uses: [Int]{}, fallback_exit: false}
+        ast_visit_statement(body[index], (expression: Expr) -> sema_stmt_note_walk_use(&facts, var, expression), true)
+        if facts.fallback_exit -> return
+        loop start in facts.variable_uses {
+            if !sema_stmt_int_listed(facts.path_bases, start) -> return
+        }
+        path_uses += facts.path_uses
+    }
+    if path_uses == 0 -> return
+    &diagnostics.push(sema_lint("L0522", walk, "a direct fs.walk loop filters directories by hand", "fs.walk_files() already returns only file entries; the direct API keeps this control flow and intent together", "replace fs.walk with fs.walk_files"))
+}
+
+struct SemaStmtWalkFacts {
+    path_uses: Int
+    path_bases: [Int]
+    variable_uses: [Int]
+    fallback_exit: Bool
+}
+
+fn sema_stmt_note_walk_use(facts: &SemaStmtWalkFacts, var: String, expression: Expr) Never! {
+    if expression == {
+        .Field(base, member, _, _) -> {
+            if member == "path" && sema_registration_cli_without_parens(base) == .Ident(name, span, _) {
+                if name == var {
+                    &facts.path_bases.push(span.start)
+                    facts.path_uses += 1
+                }
+            }
+        }
+        .Ident(name, span, _) -> {
+            if name == var -> &facts.variable_uses.push(span.start)
+        }
+        .OrFallback(_, _, _, _, _) | .Try(_, _, _, _, _) | .Todo(_, _, _) -> {
+            facts.fallback_exit = true
+        }
+        .Call(call, _) -> {
+            if call.name == "panic" -> facts.fallback_exit = true
+        }
+        else -> {}
+    }
+}
+
+fn sema_stmt_int_listed(values: [Int], wanted: Int) -> Bool Never! {
+    loop value in values {
+        if value == wanted -> return true
+    }
+    false
+}
+
+// `fs.walk(root)` (optionally `ignore:`), behind `??` or `?`, on the
+// `core.files` import spelled `fs`: the span from `fs` through the call's `)`.
+fn sema_stmt_direct_fs_walk(collection: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Span? {
+    expression := sema_registration_cli_without_parens(collection)
+    if expression == .OrFallback(value, _, _, _, _) -> expression = sema_registration_cli_without_parens(value)
+    if expression == .Try(value, _, _, _, _) -> expression = sema_registration_cli_without_parens(value)
+    if expression == .MethodCall(receiver, method, _, _, _, args, _) {
+        if method != "walk" || args.len() < 1 || args.len() > 2 -> return None
+        loop (index, arg) in args {
+            if arg.spread -> return None
+            if arg.label == .Val(label) {
+                if index == 0 || label.name != "ignore" -> return None
+            }
+        }
+        if sema_stmt_ident_name(receiver) != (Val("fs")) || !sema_expr_core_module_alias_visible("fs", scopes) -> return None
+        if sema_call_core_import_module(environment, program, "fs") != (Val("core.files")) -> return None
+        return Val(Span{start: expr_source_start(receiver), end: args[args.len() - 1].span.end + 1})
+    }
+    None
+}
+
+// `if entry.is_dir { next }` with no `else`.
+fn sema_stmt_is_directory_filter(statement: Stmt, var: String) -> Bool Never! {
+    if statement == .Switch(subject, arms, else_body, span) {
+        if else_body != None || arms.len() != 1 || !sema_stmt_refutable_is_subjectless_guard(subject, span) -> return false
+        if arms[0].body.len() != 1 -> return false
+        if arms[0].body[0] == {
+            .Continue(_) -> {}
+            else -> return false
+        }
+        if sema_registration_cli_without_parens(arms[0].cond) == .Field(base, member, _, _) -> return member == "is_dir" && sema_stmt_ident_name(base) == (Val(var))
+    }
+    false
+}
+
+// Rust stmt_has_structural_control_flow: an exit, a loop, a table or a task
+// group, here or inside a plain nested block.
+fn sema_stmt_has_structural_control_flow(statement: Stmt) -> Bool Never! {
+    if statement == {
+        .Return(_, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Yield(_, _) -> return true
+        .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) -> return true
+        .Switch(_, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .TaskGroup(_, _, _, _, _) -> return true
+        .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .AuthorityScope(_, _, _, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) | .Layout(_, _, body, _) -> {
+            loop nested in body {
+                if sema_stmt_has_structural_control_flow(nested) -> return true
+            }
+            return false
+        }
+        else -> return false
+    }
+}
+
+// Rust check_block_inner's value-tail lints (CheckerCore/blocks.rs) for a
+// value block: L0513 when a fallback-free arm table of direct returns is
+// followed by a default return, and L0530 (D-TAIL-RETURN1) when the last line
+// is `return value`, which only repeats the implicit return. A last-line table
+// hands its arms the value, and a last-line `#Unsafe` region its body.
+fn sema_stmt_value_block_tail_lints(statements: [Stmt], diagnostics: &[Diagnostic]) {
+    count :: statements.len()
+    if count == 0 -> return
+    if count >= 2 && sema_stmt_redundant_arm_table_span(statements[count - 2], statements[count - 1]) == .Val(table_span) {
+        &diagnostics.push(sema_lint("L0513", table_span, "this arm table is followed by a default return that can be its explicit `else` arm", "the value-table form keeps all outcomes together and lets the block return its final expression", "replace the table and fallback with an explicit `else` arm"))
+    }
+    if statements[count - 1] == {
+        .Return(value, span) -> {
+            if value != None -> &diagnostics.push(sema_lint("L0530", Span{start: span.start, end: span.start + "return".len()}, "an explicit `return` is used on the final value line", "an unadorned expression on the final value line is Jet's implicit return; `return` is for early exits", "remove the final `return` and leave the expression as the block tail"))
+        }
+        .Switch(_, arms, else_body, _) -> {
+            loop arm in arms -> sema_stmt_value_block_tail_lints(arm.body, &diagnostics)
+            if else_body == .Val(rest) -> sema_stmt_value_block_tail_lints(rest, &diagnostics)
+        }
+        .Unsafe(_, _, body, _) -> sema_stmt_value_block_tail_lints(body, &diagnostics)
+        else -> {}
+    }
+}
+
+// Rust redundant_arm_table_parts: a value-dispatch table (not a subjectless
+// guard or readiness table) with no `else`, whose arms each only return a
+// value, then a default `return value`. The table's span when it matches.
+fn sema_stmt_redundant_arm_table_span(table: Stmt, fallback: Stmt) -> Span? Never! {
+    if !sema_stmt_is_value_return(fallback) -> return None
+    if table == .Switch(subject, arms, else_body, span) {
+        if else_body != None || arms.len() == 0 || sema_stmt_refutable_is_subjectless_guard(subject, span) -> return None
+        loop arm in arms {
+            if sema_readiness_head(arm.cond) != None -> return None
+            if arm.body.len() != 1 || !sema_stmt_is_value_return(arm.body[0]) -> return None
+        }
+        return Val(span)
+    }
+    None
+}
+
+fn sema_stmt_is_value_return(statement: Stmt) -> Bool Never! {
+    if statement == {
+        .Return(value, _) -> value != None
+        else -> false
+    }
 }
 
 // Rust `check_value_tail` (CheckerCore/blocks.rs:256-350) for the end of a
@@ -2945,6 +3165,177 @@ fn sema_stmt_refutable_loop_labels(nested_labels: [String], label: NamedSpan?) -
     labels
 }
 
+// L0529 (Rust CheckerInfer/stdlib_lints/loop_lints.rs emit_state_loop_unchanged_lint
+// @ 6083377777): a `loop i := start, cond { … }` whose condition reads the
+// mutable header binding while neither the body nor the step writes it, and
+// whose body can return to the condition, re-tests unchanged state.
+fn sema_stmt_lint_state_loop_unchanged(init: Binding, cond: Expr, step: Stmt?, body: [Stmt], label: NamedSpan?, diagnostics: &[Diagnostic]) Never! {
+    if !init.mutable || init.name.is_empty() || !sema_stmt_expr_mentions(cond, init.name) || sema_stmt_state_body_writes(body, init.name) -> return
+    if step == .Val(step_statement) {
+        if sema_stmt_state_writes(step_statement, init.name) -> return
+    }
+    label_name := String?{None}
+    if label == .Val(value) -> label_name = Val(value.name)
+    if !sema_stmt_state_loop_reaches_next_turn(body, label_name) -> return
+    row :: diagnostic_registry_row("L0529") ?? panic("L0529 has no registry row")
+    &diagnostics.push(sema_lint("L0529", init.name_span, row.what, row.why, row.fix))
+}
+
+struct SemaStmtNameScan {
+    name: String
+    found: Bool
+}
+
+fn sema_stmt_expr_mentions(expression: Expr, name: String) -> Bool Never! {
+    scan := SemaStmtNameScan{name: name, found: false}
+    ast_visit_expr(expression, (value: Expr) -> sema_stmt_note_name_mention(&scan, value))
+    scan.found
+}
+
+fn sema_stmt_note_name_mention(scan: &SemaStmtNameScan, value: Expr) Never! {
+    if value == .Ident(candidate, _, _) {
+        if candidate == scan.name -> scan.found = true
+    }
+}
+
+fn sema_stmt_state_body_writes(body: [Stmt], name: String) -> Bool Never! {
+    loop statement in body {
+        if sema_stmt_state_writes(statement, name) -> return true
+    }
+    false
+}
+
+// Rust statement_writes_name: an assignment rooted at `name` anywhere in the
+// statement, or an expression that writes it (a write place or argument, a
+// method call on it, or an assignment inside a lambda, `if` or fallback body).
+fn sema_stmt_state_writes(statement: Stmt, name: String) -> Bool Never! {
+    if statement == .Assign(target, _, _, _) {
+        if sema_stmt_lvalue_root_is(target, name) -> return true
+    }
+    if sema_stmt_state_nested_writes(statement, name) -> return true
+    scan := SemaStmtNameScan{name: name, found: false}
+    ast_visit_statement(statement, (value: Expr) -> sema_stmt_note_state_write(&scan, value), true)
+    scan.found
+}
+
+fn sema_stmt_lvalue_root_is(target: LValue, name: String) -> Bool Never! {
+    if target == {
+        .Local(candidate, _) -> return candidate == name
+        .Field(base, _, _) -> return sema_shared_access_expr_root_is(base, name)
+        .Index(base, _, _, _) -> return sema_shared_access_expr_root_is(base, name)
+    }
+}
+
+fn sema_stmt_state_nested_writes(statement: Stmt, name: String) -> Bool Never! {
+    if statement == {
+        .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> return sema_stmt_state_body_writes(body, name)
+        .CountedLoop(_, _, step, body, _, _, _) -> {
+            if step == .Val(step_statement) {
+                if sema_stmt_state_writes(step_statement, name) -> return true
+            }
+            return sema_stmt_state_body_writes(body, name)
+        }
+        .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
+            loop arm in arms {
+                if sema_stmt_state_body_writes(arm.body, name) -> return true
+            }
+            if else_body == .Val(fallback) -> return sema_stmt_state_body_writes(fallback, name)
+            return false
+        }
+        .ComptimeIf(_, _, then_body, else_body, _, _) -> {
+            if sema_stmt_state_body_writes(then_body, name) -> return true
+            if else_body == .Val(fallback) -> return sema_stmt_state_body_writes(fallback, name)
+            return false
+        }
+        else -> return false
+    }
+}
+
+fn sema_stmt_note_state_write(scan: &SemaStmtNameScan, value: Expr) Never! {
+    if scan.found -> return
+    if value == {
+        .Place(inner, access, _, _) -> {
+            if access == PlaceAccess.Write && sema_shared_access_expr_root_is(inner, scan.name) -> scan.found = true
+        }
+        .Call(call, _) -> {
+            if sema_stmt_args_write_name(call.args, scan.name) -> scan.found = true
+        }
+        .CallValue(_, args, _, _) -> {
+            if sema_stmt_args_write_name(args, scan.name) -> scan.found = true
+        }
+        .MethodCall(receiver, _, _, _, _, args, _) -> {
+            if sema_shared_access_expr_root_is(receiver, scan.name) || sema_stmt_args_write_name(args, scan.name) -> scan.found = true
+        }
+        .Lambda(lambda, _) -> {
+            if lambda.body == .Block(body) {
+                if sema_stmt_state_body_writes(body, scan.name) -> scan.found = true
+            }
+        }
+        .If(_, then_body, _, else_body, _, _, _) -> {
+            if sema_stmt_state_body_writes(then_body, scan.name) || sema_stmt_state_body_writes(else_body, scan.name) -> scan.found = true
+        }
+        .OrFallback(_, fallback, _, _, _) -> {
+            if fallback == {
+                .Block(body, _, _) -> {
+                    if sema_stmt_state_body_writes(body, scan.name) -> scan.found = true
+                }
+                .Panic(_, args) -> {
+                    if sema_stmt_args_write_name(args, scan.name) -> scan.found = true
+                }
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+}
+
+fn sema_stmt_args_write_name(args: [CallArg], name: String) -> Bool Never! {
+    loop arg in args {
+        if arg.convention == AccessConvention.Write && sema_shared_access_expr_root_is(arg.expr, name) -> return true
+    }
+    false
+}
+
+// Rust state_loop_can_reach_next_turn: a body that does not always exit
+// reaches the condition again; one that does reaches it only through a
+// `continue` of this loop before its first exiting statement.
+fn sema_stmt_state_loop_reaches_next_turn(body: [Stmt], label: String?) -> Bool Never! {
+    if !sema_stmt_refutable_block_exits(body) -> return true
+    loop statement in body {
+        if sema_stmt_contains_current_continue(statement, label) -> return true
+        if sema_stmt_refutable_statement_exits(statement) -> return false
+    }
+    false
+}
+
+fn sema_stmt_body_contains_current_continue(body: [Stmt], label: String?) -> Bool Never! {
+    loop statement in body {
+        if sema_stmt_contains_current_continue(statement, label) -> return true
+    }
+    false
+}
+
+fn sema_stmt_contains_current_continue(statement: Stmt, label: String?) -> Bool Never! {
+    if statement == {
+        .Continue(_) -> return true
+        .ContinueLabel(name, _) -> return label == (Val(name))
+        .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
+            loop arm in arms {
+                if sema_stmt_body_contains_current_continue(arm.body, label) -> return true
+            }
+            if else_body == .Val(fallback) -> return sema_stmt_body_contains_current_continue(fallback, label)
+            return false
+        }
+        .ComptimeIf(_, _, then_body, else_body, _, _) -> {
+            if sema_stmt_body_contains_current_continue(then_body, label) -> return true
+            if else_body == .Val(fallback) -> return sema_stmt_body_contains_current_continue(fallback, label)
+            return false
+        }
+        .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .Transact(_, _, body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> return sema_stmt_body_contains_current_continue(body, label)
+        else -> return false
+    }
+}
+
 fn sema_stmt_refutable_block_exits(statements: [Stmt]) -> Bool Never! {
     loop statement in statements {
         if sema_stmt_refutable_statement_exits(statement) -> return true
@@ -3674,6 +4065,9 @@ fn sema_stmt_declare_unchecked_binding(binding: Binding, environment: SemaScopeE
 }
 
 fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
+    loop marker in binding.markers {
+        if marker.name == "Meta" && !marker.negated -> sema_marker_rules_check_local_meta(marker, &diagnostics)
+    }
     if binding.name == "err" -> &diagnostics.push(sema_err_shadow_lint(binding.name_span))
     if sema_ownership_report_lending_view_escape(binding.init, "be stored in a binding", scopes, context, &diagnostics) -> return None
     if binding.uninit -> return sema_stmt_check_uninit_binding(binding, environment, program, &scopes, &state, &context, &diagnostics)
@@ -3775,7 +4169,21 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
         if init.kind == .Lambda(viewing_lambda) -> sema_ownership_bind_closure_captures(&state, symbol.id.key, captured_lambda.span, viewing_lambda.captures, viewing_lambda.capture_facts, scopes)
     }
     sema_single_use_note_binding(&state, symbol, environment, program)
-    if binding.name == "_" -> sema_single_use_check_discard(init.ty, binding.name_span, context.taskgroups.in_spawn, environment, program, &diagnostics)
+    if binding.name == "_" {
+        sema_single_use_check_discard(init.ty, binding.name_span, context.taskgroups.in_spawn, environment, program, &diagnostics)
+        // Rust `check_binding` (bindings.rs:2305 @ 6083377777): an ordinary
+        // fallible call already propagates its failure in statement position,
+        // so its Unit success has nothing to bind.
+        if !binding.is_comptime && sema_expr_unwrap_tag(init.ty) == (Type.Named{name: "Unit"}) && sema_stmt_is_propagated_call(init) {
+            row :: diagnostic_registry_row("L0531") ?? panic("L0531 has no registry row")
+            &diagnostics.push(sema_lint("L0531", binding.name_span, row.what, row.why, row.fix))
+        }
+    }
+    // D-DECIMAL1 (Rust check_binding, bindings.rs:2214 @ 6083377777): a
+    // money-like binding whose final type is `Float`.
+    if sema_checked_type_is_float(init.ty) && sema_checked_money_like_name(binding.name) {
+        &diagnostics.push(sema_lint("L0504", binding.name_span, "binding `{binding.name}` looks like money but has type `Float`", "floating-point money loses cents on common values like `0.1 + 0.2`", "use `Decimal` for exact money: `price: Decimal := Decimal(\"9.99\")`"))
+    }
     sema_stmt_track_origin(binding, environment, program, &scopes)
     sema_stmt_note_normalized_path_text(binding, init, &scopes)
     _ := sema_hardware_bind_pending_dma_transfer(binding_expr, symbol, &scopes)
@@ -4119,7 +4527,7 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
     checked := checked_value
     // A compound operand widens into the place's numeric type first
     // (`total += byte`), as Rust `widen_numeric_expr` does after inference.
-    if op != None && sema_stmt_compound_widens(checked.ty, required) {
+    if op != None && sema_stmt_compound_widens(checked, required) {
         widen_line :: sema_source_line_at(environment.source_segments, checked.span) ?? 0
         checked = sema_expr_numeric_literal_conversion(checked, required, checked.span, widen_line, &diagnostics) ?? return None
     }
@@ -4200,7 +4608,7 @@ fn sema_stmt_check_module_storage_assignment(symbol: Symbol, name: String, name_
     if op != None && sema_expr_decimal_literal_operand(expr, true) && sema_expr_expects_machine_float(Val(required)) -> expected = Val(required)
     checked_value :: sema_check_expression(expr, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     checked := checked_value
-    if op != None && sema_stmt_compound_widens(checked.ty, required) {
+    if op != None && sema_stmt_compound_widens(checked, required) {
         widen_line :: sema_source_line_at(environment.source_segments, checked.span) ?? 0
         checked = sema_expr_numeric_literal_conversion(checked, required, checked.span, widen_line, &diagnostics) ?? return None
     }
@@ -4235,13 +4643,15 @@ fn sema_stmt_check_module_storage_assignment(symbol: Symbol, name: String, name_
     Val(TStmt.Assign{place: TPlace.Expr{value: place}, op: tree_op, value: value, line: line, span: span})
 }
 
-// Rust `source != target && source.numeric_widening_to(target).is_some()`.
-// The port helper reports a contained fixed-width range as `Val(true)` and an
-// uncontained one as `Val(false)`, so ranged pairs widen only on `Val(true)`.
-fn sema_stmt_compound_widens(source: Type, target: Type) -> Bool {
-    if type_identity_equal(source, target) -> return false
-    widening :: sema_expr_numeric_widening_to(source, target)
-    if sema_expr_integer_range_for_type(source) != None && sema_expr_integer_range_for_type(target) != None -> return widening == (Val(true))
+// Rust `source != target && source.numeric_widening_to(target).is_some()`,
+// read through `sema_expr_numeric_value_widening` so a literal operand takes
+// the place's width. The port helper reports a contained fixed-width range as
+// `Val(true)` and an uncontained one as `Val(false)`, so ranged pairs widen
+// only on `Val(true)`.
+fn sema_stmt_compound_widens(value: TExpr, target: Type) -> Bool {
+    if type_identity_equal(value.ty, target) -> return false
+    widening :: sema_expr_numeric_value_widening(value, target)
+    if sema_expr_integer_range_for_type(value.ty) != None && sema_expr_integer_range_for_type(target) != None -> return widening == (Val(true))
     widening != None
 }
 
@@ -4269,7 +4679,7 @@ fn sema_stmt_numeric_slot_self_typed(expr: Expr, required: Type) -> Bool Never! 
 // when its numeric type widens into the slot, else the ordinary expected-type
 // check.
 fn sema_stmt_numeric_slot_value(value: TExpr, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
-    if sema_expr_is_numeric(value.ty) && sema_stmt_compound_widens(value.ty, required) {
+    if sema_expr_is_numeric(value.ty) && sema_stmt_compound_widens(value, required) {
         line :: sema_source_line_at(environment.source_segments, value.span) ?? 0
         return sema_expr_numeric_literal_conversion(value, required, value.span, line, &diagnostics)
     }
@@ -5330,7 +5740,7 @@ fn sema_stmt_check_place_assignment(target: LValue, checked_place: ^TExpr, op: B
     if !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, context, &diagnostics, false) -> return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 4")
     if op == None && !sema_copy_site_refuse_borrowed_copy(expr, "the assignment", environment, program, scopes, context, &diagnostics) -> return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 4")
     checked := checked_value
-    if op != None && sema_stmt_compound_widens(checked.ty, place.ty) {
+    if op != None && sema_stmt_compound_widens(checked, place.ty) {
         widen_line :: sema_source_line_at(environment.source_segments, checked.span) ?? 0
         checked = sema_expr_numeric_literal_conversion(checked, place.ty, checked.span, widen_line, &diagnostics) ?? return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 9")
     }
@@ -6160,6 +6570,21 @@ fn sema_stmt_type_is_fallible(ty: Type) -> Bool Never! {
     }
 }
 
+// Rust `Expr::Try` over a call or method call: the checked form of a
+// fallible call whose failure propagates, explicitly (`?`) or implicitly.
+fn sema_stmt_is_propagated_call(init: TExpr) -> Bool Never! {
+    value := init
+    if init.kind == {
+        .Try(inner, _, _) -> value = inner
+        .TryWithContext(inner, _, _, _, _, _) -> value = inner
+        else -> return false
+    }
+    if value.kind == {
+        .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .StaticCall(_, _, _, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) -> return true
+        else -> return false
+    }
+}
+
 // A statement value that carries nothing: `Unit`, `Never`, or the success of
 // a unit `Never!` call.
 fn sema_stmt_type_is_unit_success(ty: Type) -> Bool Never! {
@@ -6387,6 +6812,11 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                 checked :: sema_stmt_check_binding(binding, lambda_escapes, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 if checked == {
                     .Val(value) -> {
+                        if value == .Let(local, _, _, _, _, _) {
+                            if local.ty == Type.String && sema_stmt_ascii_case_ladder(statements, index, binding) {
+                                &diagnostics.push(sema_lint("L0521", binding.name_span, "a complete ASCII case ladder repeats a direct case conversion", "all 26 constant ASCII branches inspect the same value and only change its case", "replace the complete ladder with value.to_ascii_lower() or value.to_ascii_upper()"))
+                            }
+                        }
                         &output.push(value)
                         if !binding.mutable && binding.pattern == None && sema_shared_cycle_cell_init(binding.init) -> sema_scope_mark_fresh_cell(&scopes, binding.name, binding.init)
                     }
@@ -6518,6 +6948,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                     .In(collection_expr, step_expr) -> {
                         collection_value := sema_check_expression(collection_expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                         collection :: collection_value ?? sema_node(&context, Type.Named{name: "Unit"}, NodeKind.Unit, expr_span(collection_expr))
+                        if collection_value != None && var2 == None -> sema_stmt_lint_walk_filter(var, collection_expr, body, environment, program, scopes, &diagnostics)
                         step_value := TExpr?{None}
                         if step_expr != None {
                             step_value = sema_stmt_check_source_stride(step_expr, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -6692,6 +7123,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                     }
                 }
                 init_tree := sema_stmt_check_binding(init, init_lambda_escapes, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                sema_shared_access_lint_busy_wait(cond, body, scopes, &diagnostics)
                 cond_tree := sema_check_expression(cond, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 cond_valid := cond_tree != None
                 if cond_tree != None && sema_stmt_condition_type(cond_tree) != Type.Bool {
@@ -6717,6 +7149,8 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                 if label != None -> sema_scope_pop_loop_label(&scopes)
                 sema_single_use_leave_scope(&scopes, &state, &diagnostics)
                 if !sema_stmt_close_loop_value_frame(&context, loop_frame_index, &nested.value, &state, loop_fork, true, true, environment, program, &diagnostics) -> loop_scope_valid = false
+                // Rust emit_loop_liveness_lints_for_stmt runs after the statement is checked.
+                sema_stmt_lint_state_loop_unchanged(init, cond, step, body, label, &diagnostics)
                 if {
                     init_tree == None || !cond_valid || !nested.complete || !step_valid || !loop_scope_valid -> complete = false
                     else -> {
@@ -6735,6 +7169,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                 }
             }
             .While(condition, body, span, arrow_body, label) -> {
+                sema_shared_access_lint_busy_wait(condition, body, scopes, &diagnostics)
                 cond :: sema_check_expression(condition, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 if {
                     cond == None -> {

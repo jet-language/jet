@@ -12,8 +12,9 @@ fn rt_journey_destructor_address() -> I64 {
 // exports.list: allocator init 0 -> Host init 1 -> Thread init 2 (publishes
 // thread_tls_registry and attaches main) -> Journey init 3. Thus key/alloc
 // operations here cannot precede their actual providers' initialization.
-// runtime-init: 3
+// runtime-init: 3 when journey_tls_key,journey_report_wire_word
 #Export(c) fn jet_rt_journey_init() {
+    if (journey_tls_key != I64{0}) -> return
     closure :: jet_rt_alloc(I64{24}, I64{8})
     rt_text_store(closure, I64{1})
     rt_text_store(closure + I64{8}, rt_journey_destructor_address())

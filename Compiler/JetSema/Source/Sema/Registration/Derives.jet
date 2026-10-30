@@ -34,6 +34,7 @@ use jet_foundation.[
     Field,
     ForKind,
     Func,
+    ImplConstValue,
     ImplDef,
     Item,
     LValue,
@@ -1279,6 +1280,10 @@ fn sema_derive_expand_named_types(expansion: &SemaDeriveExpansion, types: [Named
     expanded
 }
 
+fn sema_derive_expand_impl_constants(expansion: &SemaDeriveExpansion, constants: [ImplConstValue]) -> [ImplConstValue] Never! {
+    loop constant in constants -> ImplConstValue{name: constant.name, name_span: constant.name_span, value: sema_derive_expand_expr(&expansion, constant.value), span: constant.span}
+}
+
 fn sema_derive_expand_trait_blocks(expansion: &SemaDeriveExpansion, blocks: [TraitImplBlock]) -> [TraitImplBlock] Never! {
     expanded := [TraitImplBlock]{}
     loop block in blocks {
@@ -1286,6 +1291,7 @@ fn sema_derive_expand_trait_blocks(expansion: &SemaDeriveExpansion, blocks: [Tra
         updated.trait_name = sema_derive_expand_name(&expansion, block.trait_name, block.trait_span)
         updated.methods = sema_derive_expand_funcs(&expansion, block.methods)
         updated.assoc_type_impls = sema_derive_expand_named_types(&expansion, block.assoc_type_impls)
+        updated.constants = sema_derive_expand_impl_constants(&expansion, block.constants)
         &expanded.push(updated)
     }
     expanded
@@ -1300,6 +1306,7 @@ fn sema_derive_expand_item(expansion: &SemaDeriveExpansion, item: Item) -> Item 
             if definition.trait_name == .Val(trait_name) -> updated.trait_name = Val(sema_derive_expand_name(&expansion, trait_name, definition.trait_span ?? definition.type_span))
             updated.methods = sema_derive_expand_funcs(&expansion, definition.methods)
             updated.assoc_type_impls = sema_derive_expand_named_types(&expansion, definition.assoc_type_impls)
+            updated.constants = sema_derive_expand_impl_constants(&expansion, definition.constants)
             Item.Impl{value: updated}
         }
         .ErrorConv(definition) -> {
@@ -1812,7 +1819,7 @@ fn sema_derive_expand_builtin_provider(providers: [DeriveDef], trait_name: Strin
         }
     }
     if methods.len() == 0 -> return None
-    Val(TraitImplBlock{trait_name: trait_name, trait_span: target_span, operator_rhs: None, operator_marker: None, methods: methods, compiler_generated: true, assoc_type_impls: [NamedType]{}})
+    Val(TraitImplBlock{trait_name: trait_name, trait_span: target_span, operator_rhs: None, operator_marker: None, methods: methods, compiler_generated: true, assoc_type_impls: [NamedType]{}, constants: [ImplConstValue]{}})
 }
 
 fn sema_derive_has_name(derives: [NamedSpan], name: String) -> Bool {
@@ -2242,7 +2249,7 @@ fn sema_derive_builtin_blocks(item: Item, facts: SemaDeriveItemIndex, auto_equat
                 if trait_name == "Comparable" && !sema_derive_has_name(definition.derives, "Comparable") -> next
                 if sema_derive_has_trait_impl(facts, definition.name, trait_name) -> next
                 block := sema_derive_expand_builtin_provider(available, trait_name, definition.name, definition.name_span, owner_type, type_info, &diagnostics) ?? next
-                &generated.push(Item.Impl{value: ImplDef{span: definition.name_span, type_name: definition.name, type_span: definition.name_span, trait_name: Val(trait_name), trait_span: Val(definition.name_span), operator_rhs: None, operator_marker: None, methods: ^block.methods, delegation_field: None, assoc_type_impls: [NamedType]{}, is_generated_serde: false, os_target: None}})
+                &generated.push(Item.Impl{value: ImplDef{span: definition.name_span, type_name: definition.name, type_span: definition.name_span, trait_name: Val(trait_name), trait_span: Val(definition.name_span), operator_rhs: None, operator_marker: None, methods: ^block.methods, delegation_field: None, assoc_type_impls: [NamedType]{}, constants: [ImplConstValue]{}, is_generated_serde: false, os_target: None}})
             }
         }
         else -> {}

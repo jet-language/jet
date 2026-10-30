@@ -45,7 +45,7 @@ file: run.jet sha256 = "{cap:source_sha}"
 capture: package_before_install = opt-bytes file package.jet
 capture: lock_before_install = opt-bytes file .jet/lock
 step install: jetpack tool install ./ --as pulse --trust --no-color
-exit: != 0
+exit: != 0 # original predicate: !status.success()
 stdout|stderr: ~ "E1272" # original compiler_text predicate; needle cannot span labeled stream boundary
 stdout|stderr: ~ "need a pinned compatibility output" # original compiler_text predicate
 stdout|stderr: ~ "does not invoke an installed Nix executable" # original compiler_text predicate
@@ -82,7 +82,7 @@ capture: pre_library_exe = opt-bytes file .jet/build/run{sys:exe-suffix}
 capture: pre_library_exe_sha = sha256 file .jet/build/run{sys:exe-suffix}
 capture: package_before_library = text file package.jet
 capture: package_with_library = text file.replace("    api: .Service{ name: \"pulse-api\", entry: serve },\n}\n", "    api: .Service{ name: \"pulse-api\", entry: serve },\n    core: .Library{\n        name: \"pulse\",\n        native: true,\n        loadable: true,\n        bindings: [c],\n    },\n}\n") package.jet
-cap:package_with_library: != "{cap:package_before_library}"
+cap:package_with_library: != "{cap:package_before_library}" # original identity changes with the library
 write: package.jet = "{cap:package_with_library}"
 file: .jet/lock same-as {cap:initial_lock}
 file: .jet/lock sha256 = "{cap:initial_lock_sha}"
@@ -156,11 +156,11 @@ capture: split_after = prefixed stdout "package graph unchanged: " | "package gr
 cap:split_before: = "{cap:split_after}"
 capture: journal = prefixed stdout "Transition journal: "
 file: {cap:journal} is-file
-file: {cap:journal} first-line = "jet-package-transition-v1"
+file: {cap:journal} first-line = "jet-package-transition-v1" # original journal header line
 capture: journal_before = prefixed file {cap:journal} "before="
 capture: journal_after = prefixed file {cap:journal} "after="
-cap:journal_before: nonempty
-cap:journal_after: nonempty
+cap:journal_before: nonempty # original journal is present
+cap:journal_after: nonempty # original journal is present
 cap:journal_before: = "{cap:split_before}"
 cap:journal_after: = "{cap:split_after}"
 file: package/env.jet is-file

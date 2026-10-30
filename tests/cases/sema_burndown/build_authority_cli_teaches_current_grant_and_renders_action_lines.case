@@ -4,12 +4,12 @@ fixture: build_authority_cli_teaches_current_grant_and_renders_action_lines.fixt
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/store
 step: jet build {work}/build_action_failed.jet
-exit: != 0
-stderr: ~ "E3503"
-stderr: ~ "--allow=Exec"
-stderr: !~ "--allow-exec"
+exit: != 0 # original predicate: !status.success()
+stderr: ~ "E3503" # original contains predicate
+stderr: ~ "--allow=Exec" # original contains predicate
+stderr: !~ "--allow-exec" # original negative contains predicate
 step: jet build {work}/build_action_failed.jet --allow=Exec
-exit: != 0
-stderr: ~ "E3505"
-stderr: ~ "first\nsecond\n"
-stderr: !~ "first\\nsecond"
+exit: != 0 # original predicate: !status.success()
+stderr: ~ "E3505" # original contains predicate
+stderr: ~ "first\nsecond\n" # original contains predicate
+stderr: !~ "first\\nsecond" # original negative contains predicate

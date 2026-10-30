@@ -371,6 +371,11 @@ fn link_pack_write(c: &LinkContext, exports: [Int]) -> [U8] Never! {
     shstr_seen := [String:Int]{}
     link_pack_header(&h, 0, 0, 0, 0, if shnum >= 0xff00 -> shnum else -> 0, if shstrtab_index >= 0xff00 -> shstrtab_index else -> 0, 0, 0, 0)
     rela_name :: link_pack_shstr(&shstrtab, &shstr_seen, ".rela")
+    // A kept conditional init/fini array (StaticLink.jet cond_roots) names
+    // its guard section's output header, so a program link keeps it exactly
+    // when that section is live there too.
+    cond_guard := [Int:Int]{}
+    loop (index, s) in c.cond_roots -> cond_guard[s] = c.cond_guards[index]
     loop (ord, row) in p.ord_row {
         s :: c.live_secs[row]
         obj :: link_obj_of(c, s)
@@ -385,8 +390,9 @@ fn link_pack_write(c: &LinkContext, exports: [Int]) -> [U8] Never! {
         }
         name_at :: link_pack_shstr(&shstrtab, &shstr_seen, link_pack_section_name(c, c.live_class[row], s))
         flags :: link_sec_flags(c, obj, s)
+        info :: if cond_guard.get(s) == .Val(guard) -> link_pack_out(c, p, guard) else -> 0
         // SHF_GROUP: the groups are settled.
-        link_pack_header(&h, name_at, kind, flags - (flags.bit_and(0x200)), offset, size, 0, 0, align, 0)
+        link_pack_header(&h, name_at, kind, flags - (flags.bit_and(0x200)), offset, size, 0, info, align, 0)
         if rela_out[ord] >= 0 {
             elf64_pad(&bytes, 8)
             rela_at :: bytes.len()
@@ -477,8 +483,9 @@ fn x64_link_runtime_pack(names: [String], bufs: ^[[U8]], extra_roots: [String]) 
     // Exported too: the entry, the startup marker (StaticLink.jet
     // link_has_startup), `__tls_get_addr`, which a linker checks a TLS
     // general/local-dynamic call sequence against by name, and libgcc's
-    // `__register_frame_info`, with which a program bound to the runtime image
-    // (Image/MemoryLink.jet) registers its own unwind tables.
+    // `__register_frame_info` when some root pulls in its unwinder, with
+    // which a program bound to the runtime image (Image/MemoryLink.jet)
+    // registers its own unwind tables.
     optional :: [String]{"__jet_link_main", "__tls_get_addr", "__register_frame_info"}
     &root_names.push("_start")
     loop name in optional -> &root_names.push(name)

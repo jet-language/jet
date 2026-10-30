@@ -15,9 +15,10 @@ use jet_sema.[SemaCheckedForeignFunction]
 // its C symbol.
 struct IRLibraryExportRow { key: String, symbol: String }
 
-// One global symbol of the library object: IR function `function`, and its
-// constructor/destructor priority (-1: not a hook).
-struct IRLibraryExport { function: Int, symbol: String, init_priority: Int, fini_priority: Int }
+// One global symbol of the library object: IR function `function`, its
+// constructor/destructor priority (-1: not a hook), and the data rows of
+// its hook's guards (none: an unconditional hook; ir_lifecycle_rows).
+struct IRLibraryExport { function: Int, symbol: String, init_priority: Int, fini_priority: Int, guards: [Int] }
 
 // The C ABI of an export: the layout of each parameter and of its result
 // (None: void), as the runtime ABI receipt records it.
@@ -54,7 +55,7 @@ enum IRIntrinsicShape {
 
 struct IRIntrinsicSpec { name: String, shape: IRIntrinsicShape }
 
-struct IRLifecycle { init_priority: Int, fini_priority: Int }
+struct IRLifecycle { init_priority: Int, fini_priority: Int, guards: [String] }
 
 // The one reviewed recognizer table; every address row uses the same
 // I64-only target validation.
@@ -70,6 +71,14 @@ fn ir_runtime_intrinsic_specs() -> [IRIntrinsicSpec] Never! {
         {name: "rt_async_entry_invoke_address", shape: .FunctionAddress{symbol: "jet_async_entry_invoke", arity: 2}},
         {name: "rt_async_entry_release_address", shape: .FunctionAddress{symbol: "jet_async_entry_release", arity: 1}},
         {name: "rt_scheduler_timer_address", shape: .FunctionAddress{symbol: "jet_rt_scheduler_timer", arity: 1}},
+        {name: "rt_scheduler_compensate_address", shape: .FunctionAddress{symbol: "jet_rt_scheduler_compensate", arity: 1}},
+        {name: "rt_comptime_serve_stop_address", shape: .FunctionAddress{symbol: "jet_rt_comptime_serve_stop", arity: 5}},
+        {name: "rt_task_exit_run_address", shape: .FunctionAddress{symbol: "jet_rt_task_exit_run", arity: 1}},
+        {name: "rt_observe_parked_tasks_report_address", shape: .FunctionAddress{symbol: "jet_rt_observe_parked_tasks_report", arity: 2}},
+        {name: "rt_test_capture_print_address", shape: .FunctionAddress{symbol: "jet_rt_test_capture_print_hook", arity: 1}},
+        {name: "rt_main_stopped_address", shape: .FunctionAddress{symbol: "jet_rt_main_stopped", arity: 2}},
+        {name: "rt_host_env_capture_address", shape: .FunctionAddress{symbol: "jet_rt_host_env_capture", arity: 1}},
+        {name: "rt_secret_scrub_address", shape: .FunctionAddress{symbol: "jet_rt_secret_scrub", arity: 1}},
         {name: "rt_observe_writer_address", shape: .FunctionAddress{symbol: "jet_rt_observe_writer", arity: 1}},
         {name: "rt_parallel_worker_address", shape: .FunctionAddress{symbol: "jet_rt_native_para_worker", arity: 1}},
         {name: "rt_task_exit_destructor_address", shape: .FunctionAddress{symbol: "jet_rt_task_exit_destructor", arity: 2}},
@@ -207,11 +216,24 @@ fn ir_build_library(functions: ^[FnBody], decls: DeclTable, type_defs: ^[TTypeDe
     if recursive.len() > 0 -> return ir_library_failed(recursive)
     globals := [IRLibraryExport]{}
     abis := [IRExportABI]{}
+    guard_problems := [String]{}
     loop (index, row) in exports {
-        hook :: lifecycle.get(row.symbol) ?? IRLifecycle{init_priority: -1, fini_priority: -1}
-        &globals.push(IRLibraryExport{function: roots[index], symbol: row.symbol, init_priority: hook.init_priority, fini_priority: hook.fini_priority})
+        hook :: lifecycle.get(row.symbol) ?? IRLifecycle{init_priority: -1, fini_priority: -1, guards: [String]{}}
+        guards := [Int]{}
+        loop name in hook.guards {
+            guard :: ir_lifecycle_guard(m, p, name)
+            if guard < 0 {
+                &guard_problems.push("runtime lifecycle export {row.symbol}: guard `{name}` is no module storage the library reads")
+            } else if !ir_names_data(m, roots[index], guard) {
+                &guard_problems.push("runtime lifecycle export {row.symbol}: guard `{name}` is no state the hook sets up")
+            } else {
+                &guards.push(guard)
+            }
+        }
+        &globals.push(IRLibraryExport{function: roots[index], symbol: row.symbol, init_priority: hook.init_priority, fini_priority: hook.fini_priority, guards: ^guards})
         &abis.push(ir_export_abi(m, roots[index], row.symbol))
     }
+    if guard_problems.len() > 0 -> return ir_library_failed(guard_problems)
     &abis.sort_by((left: IRExportABI, right: IRExportABI) -> left.symbol <=> right.symbol)
     IRLibraryResult{program: m, failures: failures, errors: [String]{}, exports: globals, abis: abis}
 }
@@ -261,10 +283,14 @@ fn ir_export_abi_json(rows: [IRExportABI]) -> String Never! {
 }
 
 // Ordered process-lifecycle hooks of the library object. Each row is
-// `<symbol> init <priority>` or `<symbol> fini <priority>`; the symbol must
-// be one of the `#Export(c)` rows and take no parameters and return
-// nothing. The rows order constructors/destructors; they never select
-// exports. Returns the first problem, else "".
+// `<symbol> init <priority> [<guards>]` or `<symbol> fini <priority>
+// [<guards>]`; the symbol must be one of the `#Export(c)` rows and take no
+// parameters and return nothing. The rows order constructors/destructors;
+// they never select exports. Guards (comma-separated) name the module
+// storage the hook sets up its service's state in: a linked program runs
+// the hook exactly when it keeps one of them (D-EFF-CORE-INIT1), once per
+// kept guard, so a guarded hook starts idempotently. Returns the first
+// problem, else "".
 fn ir_lifecycle_rows(lines: [String], lifecycle: &[String:IRLifecycle]) -> String Never! {
     loop line in lines {
         text :: line.trim()
@@ -273,13 +299,56 @@ fn ir_lifecycle_rows(lines: [String], lifecycle: &[String:IRLifecycle]) -> Strin
         loop field in text.split(" ").to_list() {
             if field != "" -> &fields.push(field)
         }
-        if fields.len() != 3 || (fields[1] != "init" && fields[1] != "fini") -> return "invalid runtime lifecycle row `{text}`"
+        if (fields.len() != 3 && fields.len() != 4) || (fields[1] != "init" && fields[1] != "fini") -> return "invalid runtime lifecycle row `{text}`"
         priority :: Int.parse(fields[2]) ?? return "invalid runtime lifecycle priority in `{text}`"
         if priority < 0 || priority > 65535 -> return "runtime lifecycle priority must be in 0..65535 in `{text}`"
         if lifecycle.get(fields[0]) != None -> return "duplicate runtime lifecycle row `{fields[0]}`"
-        lifecycle[fields[0]] = if fields[1] == "init" -> IRLifecycle{init_priority: priority, fini_priority: -1} else -> IRLifecycle{init_priority: -1, fini_priority: priority}
+        guards := [String]{}
+        if fields.len() == 4 {
+            loop name in fields[3].split(",").to_list() {
+                if name == "" || guards.contains(name) -> return "invalid runtime lifecycle guards in `{text}`"
+                &guards.push(name)
+            }
+        }
+        lifecycle[fields[0]] = if fields[1] == "init" -> IRLifecycle{init_priority: priority, fini_priority: -1, guards: guards} else -> IRLifecycle{init_priority: -1, fini_priority: priority, guards: guards}
     }
     ""
+}
+
+// The data row of the library's module storage named `name` (one 8-byte
+// cell, BuildStatic.jet ir_storage_address), or -1 when no storage has that
+// name, more than one does, or no built function reads or writes it.
+fn ir_lifecycle_guard(m: IRModule, p: IRProgram, name: String) -> Int Never! {
+    found := -1
+    loop definition in p.constant_defs {
+        if !definition.is_storage || definition.name != name -> next
+        if found != -1 -> return -1
+        found = name_rows_value(m.constant_rows, "storage:{definition.key}") ?? -2
+    }
+    if found < 0 -> return -1
+    found
+}
+
+// Whether IR function `id`, or a function it calls or takes the address of
+// (code it installs), takes the address of data row `row`: the hook sets
+// that state up.
+fn ir_names_data(m: IRModule, id: Int, row: Int) -> Bool Never! {
+    seen := [Int:Bool]{}
+    seen[id] = true
+    work := [Int]{id}
+    loop work.len() > 0 {
+        next_id :: &work.pop() ?? break
+        f :: m.functions[next_id]
+        loop at in 0..<f.op.len() {
+            if f.op[at] == .DataAddress && f.a[at] == row -> return true
+            callee :: f.a[at]
+            if (f.op[at] == .Call || f.op[at] == .FunctionAddress) && callee >= 0 && callee < m.functions.len() && seen.get(callee) == None {
+                seen[callee] = true
+                &work.push(callee)
+            }
+        }
+    }
+    false
 }
 
 // The C primitive `ty` is: "Int", "Float", "Bool",

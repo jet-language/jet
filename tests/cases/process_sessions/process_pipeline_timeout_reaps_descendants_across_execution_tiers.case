@@ -18,12 +18,12 @@ exit: == default
 stdout: == default
 stderr: == default
 # The original pid_file writer emits decimal PID bytes without a newline; trim is an identity here.
-capture: pid = text file aot.pid
-repeat while process {cap:pid} alive timeout 2s every 10ms fail "pipeline descendant {cap:pid} survived timeout"
+capture: aot_pid = text file aot.pid
+repeat while process {cap:aot_pid} alive timeout 2s every 10ms fail "pipeline descendant {cap:aot_pid} survived timeout"
 end repeat
-capture: pid = text file jit.pid
-repeat while process {cap:pid} alive timeout 2s every 10ms fail "pipeline descendant {cap:pid} survived timeout"
+capture: jit_pid = text file jit.pid
+repeat while process {cap:jit_pid} alive timeout 2s every 10ms fail "pipeline descendant {cap:jit_pid} survived timeout"
 end repeat
-capture: pid = text file interp.pid
-repeat while process {cap:pid} alive timeout 2s every 10ms fail "pipeline descendant {cap:pid} survived timeout"
+capture: interp_pid = text file interp.pid
+repeat while process {cap:interp_pid} alive timeout 2s every 10ms fail "pipeline descendant {cap:interp_pid} survived timeout"
 end repeat

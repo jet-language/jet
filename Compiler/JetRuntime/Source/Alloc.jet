@@ -1607,20 +1607,32 @@ fn alloc_write_word(word: I64, count: I64) {
                 return
             }
             remaining = wrapping(remaining - written)
-            if (remaining > I64{0}) { bytes = bytes >> wrapping(written * I64{8}) }
+            // Byte by byte: a constant shift cannot stop, so this raw path
+            // links no shift-stop report.
+            dropped := I64{0}
+            loop dropped < written {
+                bytes = bytes >> I64{8}
+                dropped = wrapping(dropped + I64{1})
+            }
         }
     }
 }
 
 // Emit decimal digits most-significant first without allocating a buffer.
+// Digits come from subtraction and constant divisors only: a variable divisor
+// could stop, and its stop report would link the whole program-stop path
+// into every allocating program.
 fn alloc_write_size(size: I64) {
     scale := I64{1}
     loop scale <= size /% (I64{10}) -> scale = wrapping(scale * I64{10})
     remaining := size
     loop scale > (I64{0}) {
-        digit :: remaining /% scale
+        digit := I64{0}
+        loop remaining >= scale {
+            remaining = wrapping(remaining - scale)
+            digit = wrapping(digit + I64{1})
+        }
         alloc_write_word(wrapping(I64{48} + digit), I64{1})
-        remaining = wrapping(remaining - wrapping(digit * scale))
         scale = scale /% I64{10}
     }
 }

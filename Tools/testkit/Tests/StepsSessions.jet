@@ -12,17 +12,27 @@ use core.files as files
     files.remove_all(root) ?? panic("remove session scratch")
 }
 
-#Test("bounded receive forms parse fully and refuse the precise missing read_bytes capability") {
-    root :: cases_test_root("session-read-seam")
-    loop receive in ["recv peer", "recv peer until $.id = 1", "recv peer line until ~ \"ok\" timeout 1s # original predicate", "recv peer collect until ndjson $ #>= 2 timeout 1s", "recv peer collect until ndjson $[?id=1] #>= 1 && ndjson $[?id=2] #>= 1 timeout 1s", "recv peer until ~ \"ok\" within 1s every 10ms optional # original predicate", "recv peer line until = \"timeout\" timeout 1s"] {
-        result :: cases_test_advanced(root, "read", "session peer line: cat\n{receive}\nclose peer\n")
-        assert_eq(result.verdict.status, "REFUSED")
-        assert_eq(result.verdict.detail, "read_bytes")
-    }
+#Test("recv reads lines, frames and raw bytes and close reports only the unread remainder") {
+    root :: cases_test_root("session-recv")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "one.json"), "{{\"id\":1}}")
+    kit_exec_write(files.join(directory, "two.json"), "{{\"id\":2}}")
+    lines :: "session peer line: cat\nsend peer: \"one\"\nsend peer: \"two\"\nrecv peer line until = \"two\" timeout 5s\nstdout: = \"one\\ntwo\\n\"\nsend peer: \"three\"\nrecv peer timeout 5s\nstdout: = \"three\\n\"\nsend peer: \"rest\"\nclose peer\nstdout: = \"rest\\n\"\n"
+    assert_eq(cases_test_advanced(root, "lines", lines).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "lines-wrong", "session peer line: cat\nsend peer: \"one\"\nrecv peer until ~ \"one\" timeout 5s # waits for the echo\nstdout: = \"two\\n\"\nclose peer\n").verdict.status, "FAIL")
+    frames :: "session peer content-length: cat\nsend peer: one.json\nsend peer: two.json\nrecv peer until $.id = 2 timeout 5s\njson: stdout doc $.id = 2\nsend peer: one.json\nsend peer: two.json\nrecv peer collect until ndjson $ #>= 2 timeout 5s\njson: stdout ndjson $ #= 2\nclose peer\nstdout: empty\n"
+    assert_eq(cases_test_advanced(root, "frames", frames).verdict.status, "PASS")
+    raw :: "session peer raw: cat\nsend peer: \"ready\\n\"\nrecv peer until = \"ready\\n\" timeout 5s\nstdout: = \"ready\\n\"\nsend peer: \"rest\"\nclose peer\nstdout: = \"rest\"\n"
+    assert_eq(cases_test_advanced(root, "raw", raw).verdict.status, "PASS")
+    late :: cases_test_advanced(root, "deadline", "session peer raw: cat\nrecv peer until ~ \"never\" timeout 100ms # waits for absent output\nclose peer\n")
+    assert_eq(late.verdict.status, "FAIL")
+    assert(late.verdict.detail.starts_with("recv deadline exceeded"))
+    assert_eq(cases_test_advanced(root, "optional", "session peer raw: cat\nrecv peer until ~ \"never\" within 100ms every 10ms optional # startup output is not asserted\nclose peer\n").verdict.status, "PASS")
+    ended :: cases_test_advanced(root, "ended", "session peer raw: printf done\nrecv peer until = \"other\" timeout 5s\nclose peer\n")
+    assert_eq(ended.verdict.status, "FAIL")
+    assert(ended.verdict.detail.starts_with("stdout ended"))
     loop source in ["recv missing\n", "session peer strange: cat\nclose peer\n", "session peer raw: cat\nrecv peer timeout nope\nclose peer\n", "session peer raw: cat\nrecv peer until $.id = invalid-json\nclose peer\n", "session peer raw: cat\nrecv peer collect until ndjson $ #>= 2 && timeout 1s\nclose peer\n", "session peer raw: cat\nrecv peer timeout 1s within 1s\nclose peer\n", "spawn peer: cat\nrecv peer\nwait: peer\n"] {
-        result :: cases_test_advanced(root, "invalid", source)
-        assert_eq(result.verdict.status, "REFUSED")
-        assert(result.verdict.detail != "read_bytes")
+        assert_eq(cases_test_advanced(root, "invalid", source).verdict.status, "REFUSED")
     }
     files.remove_all(root) ?? panic("remove receive scratch")
 }

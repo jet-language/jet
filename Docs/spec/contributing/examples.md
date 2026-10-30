@@ -98,6 +98,25 @@ Shared kit record types, the step sequencer and the gate entry are colocated in
 constructors.
 Fixture copies preserve file permission bits, including executable tools nested
 under `state/` when that directory is staged as `.jet/` in the case workspace.
+Integer right-hand sides of `file: P size`, `stdout: lines` and numeric
+`json:` comparisons (`=`, `!=`, `<`, `<=`, `>`, `>=`) may be `{cap:x}+N` or
+`N*{cap:x}`: non-negative integer `+` and `*` only, no other operators.
+Integer transform arguments on an assertion subject, such as
+`file.slice({cap:a},{cap:b}): P ~ "text" # reason`, may be whole `{cap:x}`
+tokens; such a subject is matched raw, without normalization, so captured
+byte offsets stay exact.
+`recv LABEL [line] [collect] [until PREDICATES] [timeout|within D] [every D]
+[optional]` reads a live session's stdout. Content-Length sessions read
+frame bodies, `line` sessions and the `line` keyword read lines, and other
+sessions read raw bytes. Without `until` the step's stdout is the next unit
+(raw: whatever has arrived). With `until`, raw output accumulates until the
+predicates hold, lines accumulate through the first line that holds, and
+frames before the first matching frame are discarded; `collect` tests the
+newline-joined units gathered so far. Predicates are `$PATH = JSON`,
+`ndjson …` or stdout assertion forms joined by `&&`. Without a deadline the
+run's step timeout applies; `optional` passes with partial output at the
+deadline instead of failing. A later `close` or `wait` reports only the stdout
+no `recv` consumed.
 
 Use `--list`, `--cases FILE` (exact repository-relative IDs), or `--filter TEXT`
 to select cases. `--shard I/N` partitions the sorted corpus deterministically.

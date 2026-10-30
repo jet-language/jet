@@ -159,6 +159,7 @@ fn comptime_serve_loop(frame: I64) -> I64 {
 #Export(c) fn jet_rt_comptime_serve(table: I64, count: I64) {
     frame :: jet_rt_alloc(I64{64}, I64{8})
     comptime_serve_root = frame
+    comptime_serve_stop_code = rt_comptime_serve_stop_address()
     comptime_serve_reply(frame, I64{0}, count, I64{0}, I64{0}, I64{0})
     comptime_serve_send(table, count * I64{8})
     _ := comptime_serve_loop(frame)
@@ -189,12 +190,28 @@ fn comptime_serve_request(kind: I64, operands: I64, count: I64, result: I64) -> 
     result
 }
 
+fn rt_comptime_serve_stop_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
+// jet_rt_comptime_serve_stop while the image serves the compiler, else 0:
+// every runtime stop asks it first, so only the serve entry installs it and
+// a program that never serves links no serve loop.
+comptime_serve_stop_code := I64{0}
+
+fn comptime_serve_stop(kind: I64, a: I64, b: I64, c: I64, d: I64) {
+    code :: comptime_serve_stop_code
+    if (code == I64{0}) -> return
+    #Unsafe("the serve entry installed this runtime export, whose System V signature takes these five words") {
+        _ := os_call5_i64(code, kind, a, b, c, d)
+    }
+}
+
 // A runtime stop of served code (Trap.jet): its kind and words go to the
 // compiler, which reads their texts. The child then serves on above the
 // stopped call's frames, which never resume, so one child serves a whole
 // compile. Buffered output is flushed first, as the stop's own report would.
-fn comptime_serve_stop(kind: I64, a: I64, b: I64, c: I64, d: I64) {
-    if !comptime_serving() -> return
+#Export(c) fn jet_rt_comptime_serve_stop(kind: I64, a: I64, b: I64, c: I64, d: I64) -> I64 {
     jet_rt_stdout_flush()
     frame :: jet_rt_alloc(I64{64}, I64{8})
     comptime_serve_fill(frame, I64{3}, kind, a, b, c)
@@ -202,6 +219,7 @@ fn comptime_serve_stop(kind: I64, a: I64, b: I64, c: I64, d: I64) {
     comptime_serve_send(frame, I64{64})
     _ := comptime_serve_loop(frame)
     trap_defect_exit(I64{0})
+    I64{0}
 }
 
 // The SIGSYS handler's body: system call `si_syscall` (siginfo + 24) with

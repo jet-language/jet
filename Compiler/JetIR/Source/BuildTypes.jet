@@ -567,15 +567,37 @@ fn ir_handle_row_laid(m: &IRModule, p: IRProgram, ty: Type, name: String) -> Int
 
 // A compiler value with no declaration that build and comptime code hold
 // (the build context and its handles, `Dev`, the ProgramInfo snapshot and
-// its reflection records): a word naming the value in the evaluator's host
-// table, whose methods and fields the evaluator answers (ir_host_method).
+// its reflection records, the `core.compiler` query results and their
+// records): a word naming the value in the evaluator's host table, whose
+// methods and fields the evaluator answers (ir_host_method).
 fn ir_host_value_name(name: String) -> Bool Never! {
     if name == {
         "Build" | "BuildPlan" | "BuildTarget" | "BuildAction" | "BuildToolchain" | "BuildProbe" | "BuildSigningIdentity" | "BuildError" | "Dev" | "SourceSpan" -> true
         "ProgramInfo" | "TypeInfo" | "FunctionInfo" | "PackageInfo" | "CompilerDefinition" | "CompilerReference" | "CompilerCall" | "CompilerStructuralNode" -> true
         "LayoutInfo" | "FieldInfo" | "MethodInfo" | "TypeParamInfo" | "MarkerInfo" | "StateInfo" | "TransitionInfo" | "FactInfo" | "DimensionInfo" | "DimensionAxis" | "EffectInfo" | "ArithmeticOperationInfo" -> true
+        "CompilerError" | "CompilerDiagnostic" | "CompilerLexed" | "CompilerToken" | "CompilerSyntaxTree" | "CompilerNode" | "CompilerChecked" | "CompilerSemanticIndex" | "CompilerSourceMap" | "CompilerGeneratedLine" -> true
+        "CompilerManifest" | "CompilerPackage" | "CompilerPackageError" | "CompilerDependency" | "CompilerPackageTarget" | "CompilerPackageOutput" | "CompilerBuildProfile" -> true
+        "CompilerLock" | "CompilerLockedPackage" | "CompilerProfileSet" | "CompilerProfile" | "CompilerKeyValue" -> true
         else -> false
     }
+}
+
+// Whether a value of `ty` holds a compiler value host word (ir_host_value_name)
+// anywhere: itself, or an element, payload or member of it.
+fn ir_host_value_held(p: IRProgram, ty: Type) -> Bool Never! {
+    if ir_untag(ty) == {
+        .Named(name) -> return ir_host_value_name(name) && ir_type_def(p, name) == None
+        .List(element) -> return ir_host_value_held(p, element)
+        .Option(inner) -> return ir_host_value_held(p, inner)
+        .Result(ok, err) -> return ir_host_value_held(p, ok) || ir_host_value_held(p, err)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if ir_host_value_held(p, field.ty) -> return true
+            }
+        }
+        else -> {}
+    }
+    false
 }
 
 // The compiler value name type row `row` holds as a host word, if any.
@@ -587,33 +609,46 @@ fn ir_host_value_row(m: IRModule, p: IRProgram, row: Int) -> String? Never! {
     None
 }
 
-// Method `method` of compiler value `owner`, which the compiler answers
-// (ir_host_route kind 1): `{owner}.{method}`, impure, the call's span start
-// and end, (row, word)... over the receiver and the arguments, `impure`
-// inside an `#Impure` block. The span places a build host call's record and
-// failure at the call, not at the invocation.
-fn ir_host_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: String, method: String, receiver: Int, args: [Int], span: Span) -> Int Never! {
+// Method `member` (`Owner.method`) of a compiler value, or `compiler.query`
+// for a `core.compiler` query, which the compiler answers (ir_host_route
+// kind 1): `member`, impure, the call's span start and end, (row, word)...
+// over `values` (the receiver first, then the arguments), `impure` inside an
+// `#Impure` block. The span places a build host call's record and failure
+// at the call, not at the invocation.
+fn ir_host_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, member: String, values: [Int], span: Span) -> Int Never! {
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     string_row :: ir_string_row(&m)
-    member :: ir_temp(&m, &b, string_row)
-    ir_emit(&b.f, IROp.ConstText, member, ir_intern_text(&m, "{owner}.{method}"), -1, -1, b.line)
+    member_text :: ir_temp(&m, &b, string_row)
+    ir_emit(&b.f, IROp.ConstText, member_text, ir_intern_text(&m, member), -1, -1, b.line)
     impure :: if b.impure > 0 -> 1 else -> 0
-    operands := [Int]{member, ir_word_const(&m, &b, impure), ir_word_const(&m, &b, span.start), ir_word_const(&m, &b, span.end)}
+    operands := [Int]{member_text, ir_word_const(&m, &b, impure), ir_word_const(&m, &b, span.start), ir_word_const(&m, &b, span.end)}
     words := [Int]{}
-    if !ir_host_operand(&m, p, &b, receiver, &operands, &words) -> return -1
-    loop argument in args {
-        if !ir_host_operand(&m, p, &b, argument, &operands, &words) -> return -1
+    loop value in values {
+        if !ir_host_operand(&m, p, &b, value, &operands, &words) -> return -1
     }
     answer :: ir_host_route(&m, &b, 1, row, operands)
     loop word in words -> ir_release(&m, &b, word)
     answer
 }
 
+// Comptime constant `key`, whose value holds a compiler value
+// (ir_host_value_held): the compiler answers its computed value
+// (ir_host_route kind 5) from the constant row the batch was built over, as
+// it answered the item that computed it.
+fn ir_host_constant(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: String, span: Span) -> Int Never! {
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    string_row :: ir_string_row(&m)
+    key_text :: ir_temp(&m, &b, string_row)
+    ir_emit(&b.f, IROp.ConstText, key_text, ir_intern_text(&m, key), -1, -1, b.line)
+    ir_host_route(&m, &b, 5, row, [Int]{key_text})
+}
+
 // A host route of compile-time code: the comptime child hands its compiler
 // (JetRuntime ComptimeServe.jet) route `kind` (1 method, 2 field, 3 comptime
-// input) and a stack area of words, the answer's row key and then
-// `operands`; the compiler reads them and answers a value of row `row`, in
-// place when it is an aggregate (or a float, which a word cell carries).
+// input, 5 compiler value constant) and a stack area of words, the answer's
+// row key and then `operands`; the compiler reads them and answers a value
+// of row `row`, in place when it is an aggregate (or a float, which a word
+// cell carries).
 fn ir_host_route(m: &IRModule, b: &IRBuilder, kind: Int, row: Int, operands: [Int]) -> Int Never! {
     pointer_row :: ir_pointer_row(&m)
     area :: ir_temp(&m, &b, pointer_row)
@@ -708,7 +743,8 @@ fn ir_process_member(m: &IRModule, p: IRProgram, ty: Type, name: String) -> IRMe
 // Field `name` a runtime handle lends (RuntimeRoutes.jet IR_HANDLE_FIELDS),
 // read through the runtime's field export: a Float or Bool through the
 // address it returns, a String or converted carrier through the header it
-// writes into a frame slot, a nested handle as the word it returns. The
+// writes into a frame slot, a nested handle as the word it returns, an
+// optional handle as a selector with a retained payload it writes. The
 // handle keeps the field, so the read is copied out before a fresh `base` is
 // released. -2 when the handle lends no such field.
 fn ir_handle_field(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: Int, name: String, field_ty: Type, span: Span) -> Int Never! {
@@ -723,12 +759,19 @@ fn ir_handle_field(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: In
         "Float" -> kind == .Float
         "Flag" -> kind == .Bool
         "List.Byte" -> kind == .Aggregate && lent.header_bytes > 0
-        else -> lent.kind.starts_with("Handle.")
+        else -> lent.kind.starts_with("Handle.") || (lent.kind.starts_with("Option.Handle.") && ir_untag(field_ty) == .Option(_))
     }
     if !matches -> return -2
     symbol :: "jet_rt_handle_field_{runtime_abi_atom(handle.runtime)}_{runtime_abi_atom(name)}"
     pointer_row :: ir_pointer_row(&m)
     view := -1
+    if lent.kind.starts_with("Option.Handle.") {
+        // The payload is a fresh retain of the handle, so the Option owns it.
+        carrier :: IRRouteCarrier.Handle{name: lent.kind.remove_prefix("Option.Handle.")}
+        value :: ir_route_option(&m, p, &b, symbol, [Int]{base}, carrier, field_ty, span)
+        ir_release(&m, &b, base)
+        return value
+    }
     if lent.kind == "Text" {
         // The lent header shares the handle's buffer and has no count word
         // in front of it, so the read is a fresh copy of its bytes rather

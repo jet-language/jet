@@ -263,6 +263,9 @@ struct TImplDef {
     trait_name: String?
     trait_ref: String?
     associated_types: [TAssociatedTypeValue]
+    // Every constant of the implemented trait: the value the implementation
+    // writes, else the trait's default.
+    constants: [TTraitConstantValue]
     methods: [String]
     delegation_field: String?
     compiler_generated: Bool
@@ -270,6 +273,13 @@ struct TImplDef {
     operator_rhs: Type?
     operator_marker: TOperatorMarker?
     target_os: TTargetOS?
+}
+
+struct TTraitConstantValue {
+    name: String
+    ty: Type
+    value: TComptimeValue
+    span: Span
 }
 
 struct TConstantDef {

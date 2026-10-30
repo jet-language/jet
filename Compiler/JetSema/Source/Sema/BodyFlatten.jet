@@ -1271,6 +1271,7 @@ fn body_copy_expr_kind(value: NodeKind, flat: &BodyFlat) -> NodeKind Never! {
         .Uninit -> NodeKind.Uninit
         .CtLit(f_value) -> NodeKind.CtLit{value: f_value}
         .ConstRef(f_symbol) -> NodeKind.ConstRef{symbol: f_symbol}
+        .TraitConst(f_owner, f_trait_name, f_name) -> NodeKind.TraitConst{owner: f_owner, trait_name: f_trait_name, name: f_name}
         .GlobalShared(f_initializer, f_lifetime) -> NodeKind.GlobalShared{initializer: f_initializer, lifetime: f_lifetime}
         .Call(f_callee, f_type_args, f_args) -> NodeKind.Call{callee: f_callee, type_args: f_type_args, args: body_copy_list_call_arg(f_args, &flat)}
         .IndirectCall(f_callee, f_type_args, f_args, f_signature) -> NodeKind.IndirectCall{callee: body_copy_expr(f_callee, &flat), type_args: f_type_args, args: body_copy_list_call_arg(f_args, &flat), signature: f_signature}

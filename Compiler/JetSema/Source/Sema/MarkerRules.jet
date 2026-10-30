@@ -1013,6 +1013,66 @@ fn sema_marker_rules_validate_argument_signature(marker: Marker, signature: TApp
     true
 }
 
+// Rust `check_binding` → `check_meta_attr` → `check_meta_attr_fields`
+// (CheckerCore/bindings.rs:1231/1446/1658 @ 6083377777): a local binding's
+// `#Meta(...)` repeats a field (E0346) or has an empty (E0348) or not plain
+// (E0347) category. No rule-signature pass binds local marker arguments, so
+// only a written literal decides: a non-literal category that may name a
+// comptime constant is left alone, and only an interpolated string is
+// certainly not plain text.
+fn sema_marker_rules_check_local_meta(marker: Marker, diagnostics: &[Diagnostic]) {
+    seen := [String:Bool]{}
+    loop index in 0..<marker.args.len() {
+        expression :: sema_marker_rules_marker_expression(marker, index) ?? next
+        value_span :: expr_span(expression)
+        name := ""
+        field_span := value_span
+        if index < marker.arg_labels.len() && marker.arg_labels[index] == .Val(label) {
+            name = label.name
+            field_span = Span{start: label.span.start, end: value_span.end}
+        } else if expression == .Ident(word, _, _) && word == "tunable" {
+            name = word
+        }
+        if name != "category" && name != "tunable" && name != "maturity" -> next
+        if name == "tunable" && expression == .Bool(flag, _, _) && !flag -> next
+        category :: if name == "category" -> sema_marker_rules_meta_literal_text(expression) else -> None
+        sema_marker_rules_note_meta_field(name, expression, field_span, category, expression == .Str(_, _, _), &seen, &diagnostics)
+    }
+}
+
+// The text of a plain quoted literal (`""` included), or None.
+fn sema_marker_rules_meta_literal_text(expression: Expr) -> String? Never! {
+    if expression == .Str(parts, _, _) {
+        if parts.len() == 0 -> return Val("")
+        if parts.len() == 1 && parts[0] == .Lit(text) -> return Val(text)
+    }
+    None
+}
+
+// Rust `check_meta_attr_fields` for one field: a repeat is E0346; a category
+// is E0348 when its text is empty and E0347 when `plain_required` and it has
+// no plain text.
+fn sema_marker_rules_note_meta_field(name: String, expression: Expr, field_span: Span, category: String?, plain_required: Bool, seen: &[String:Bool], diagnostics: &[Diagnostic]) {
+    if seen.get(name) != None {
+        if name == {
+            "category" -> &diagnostics.push(sema_error("E0346", field_span, "`#Meta` repeats `category`", "`category` has one value; writing it twice would make tooling choose between two labels", "keep one `category: \"...\"` field"))
+            "tunable" -> &diagnostics.push(sema_error("E0346", field_span, "`#Meta` repeats `tunable`", "`tunable` is a flag; writing it twice does not add meaning", "keep one `tunable` field"))
+            "maturity" -> &diagnostics.push(sema_error("E0346", field_span, "`#Meta` repeats `maturity`", "a declaration has one maturity value", "keep one `maturity: .Experimental`, `.Tested`, or `.Hardened` field"))
+            else -> {}
+        }
+    }
+    seen[name] = true
+    if name != "category" -> return
+    value_span :: expr_span(expression)
+    if category == .Val(text) {
+        if text.len() == 0 -> &diagnostics.push(sema_error("E0348", value_span, "`#Meta` category cannot be empty", "Canvas groups use this text as a visible label", "write a non-empty category, e.g. `category: \"Movement\"`"))
+        return
+    }
+    if !plain_required -> return
+    why :: if expression == .Str(_, _, _) -> "`category` is compile-time tooling data, not a runtime string" else -> "`category` is compile-time tooling data, not a runtime value"
+    &diagnostics.push(sema_error("E0347", value_span, "`#Meta` category needs plain quoted text", why, "write a string literal, e.g. `category: \"Movement\"`"))
+}
+
 fn sema_marker_rules_declared_signature(rule: SemaScopeMembersMarkerRule) -> (signature: TAppliedRuleSignature, expected_types: [Type?], variadic_expected_type: Type?) Never! {
     params := [TAppliedRuleParameter]{}
     expected_types := [Type?]{}

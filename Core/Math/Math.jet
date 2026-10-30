@@ -1575,13 +1575,14 @@ fn exact_bit_length(value: Int) -> Int Never! {
 }
 fn __decimal_to_float(value: Decimal) -> Float Never! {
     if value.magnitude == 0 -> return 0.0
-    if value.scale == 0 -> return Float{__decimal_signed(value)}
-    // Match CtDecimal: preserve its small-carrier projection, then the exact
-    // ratio rounding used by the arbitrary-precision carrier.
-    if value.magnitude <= 170141183460469231731687303715884105727 {
-        approximate :: Float{value.magnitude} / (Float{10.0}).pow(Float{value.scale})
-        if value.negative -> return -approximate
-        return approximate
+    // The one Decimal-to-Float conversion (math functions, `to_float`): the
+    // nearest Float, ties to even. A magnitude and power of ten that are both
+    // exact Floats round once in the division; any other value rounds the
+    // exact ratio below.
+    if value.magnitude <= 9007199254740992 && value.scale <= 22 {
+        quotient :: Float{value.magnitude} / Float{exact_power(10, value.scale)}
+        if value.negative -> return -quotient
+        return quotient
     }
     denominator :: exact_power(10, value.scale)
     exponent := exact_bit_length(value.magnitude) - exact_bit_length(denominator)

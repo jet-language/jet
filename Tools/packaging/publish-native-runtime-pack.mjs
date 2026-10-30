@@ -159,25 +159,26 @@ function lifecycle(wt, manifest, subject, blob, directory) {
   const declarations = new Map();
   for (const file of readFileSync(manifest.artifacts.runtime_sources, 'utf8').split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#'))) {
     const path = resolve(wt, file);
-    for (const match of readFileSync(path, 'utf8').matchAll(/^\/\/ runtime-(init|fini): (\d+)\n#Export\(c\)\s+(?:pub\s+)?fn\s+([A-Za-z_]\w*)\s*\(/gm)) {
-      insist(!declarations.has(match[3]), `duplicate lifecycle declaration ${match[3]}`);
+    for (const match of readFileSync(path, 'utf8').matchAll(/^\/\/ runtime-(init|fini): (\d+)(?: when ([A-Za-z_]\w*(?:,[A-Za-z_]\w*)*))?\n#Export\(c\)\s+(?:pub\s+)?fn\s+([A-Za-z_]\w*)\s*\(/gm)) {
+      insist(!declarations.has(match[4]), `duplicate lifecycle declaration ${match[4]}`);
       insist(providers.has(path), `lifecycle provider missing from admitted subject: ${file}`);
-      declarations.set(match[3], { phase: match[1], priority: match[2], provider: providers.get(path) });
+      declarations.set(match[4], { phase: match[1], priority: match[2], guard: match[3] ?? '', provider: providers.get(path) });
     }
   }
   const entries = [];
   for (const line of readFileSync(manifest.artifacts.runtime_exports, 'utf8').split(/\r?\n/).filter(Boolean)) {
     const fields = line.trim().split(/\s+/);
     if (fields.length === 1 || (fields.length === 2 && fields[1] === 'int-index-seam')) continue;
-    insist(fields.length === 3 && ['init', 'fini'].includes(fields[1]) && /^(0|[1-9][0-9]*)$/.test(fields[2]) && BigInt(fields[2]) <= 65535n, `invalid lifecycle export ${line}`);
-    const [symbol, phase, priority] = fields;
+    insist((fields.length === 3 || fields.length === 4) && ['init', 'fini'].includes(fields[1]) && /^(0|[1-9][0-9]*)$/.test(fields[2]) && BigInt(fields[2]) <= 65535n, `invalid lifecycle export ${line}`);
+    const [symbol, phase, priority, guard = ''] = fields;
     const actual = declarations.get(symbol);
-    insist(actual && actual.phase === phase && actual.priority === priority, `lifecycle annotation differs for ${symbol}`);
+    insist(actual && actual.phase === phase && actual.priority === priority && actual.guard === guard, `lifecycle annotation differs for ${symbol}`);
     const section = lifecycleSection(phase, priority);
     insist(sectionNames.has(section), `pack lost lifecycle section ${section}`);
     const relocationSection = `.rela${section}`;
-    const block = relocText.split(/(?=Relocation section ')/).find(part => part.startsWith(`Relocation section '${relocationSection}'`));
-    insist(block && block.split('\n').some(row => row.includes('R_X86_64_64') && row.split(/\s+/).includes(symbol)), `pack lost lifecycle relocation ${symbol}`);
+    // A guarded hook has one array section per guard: any may carry it.
+    const blocks = relocText.split(/(?=Relocation section ')/).filter(part => part.startsWith(`Relocation section '${relocationSection}'`));
+    insist(blocks.some(block => block.split('\n').some(row => row.includes('R_X86_64_64') && row.split(/\s+/).includes(symbol))), `pack lost lifecycle relocation ${symbol}`);
     entries.push({ symbol, phase, priority, provider: actual.provider, section });
     declarations.delete(symbol);
   }

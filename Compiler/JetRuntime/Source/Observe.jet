@@ -9,7 +9,7 @@
 observe_root := I64{0}
 observe_task_key := I64{0}
 
-// runtime-init: 4
+// runtime-init: 4 when observe_root,observe_task_key
 #Export(c) fn jet_rt_observe_init() {
     if (observe_root != I64{0}) -> return
     observe_root = jet_rt_alloc(I64{136}, I64{8})
@@ -129,7 +129,18 @@ fn observe_task_node_drop(node: I64) {
     jet_rt_free(node, I64{88}, I64{8})
 }
 
+// The parked-task report as the process exit's last step (Main.jet
+// main_parked_report_code): only a program with an observed task or an
+// observe writer can have anything to report.
+fn observe_exit_report_install() {
+    if (main_parked_report_code == I64{0}) -> main_parked_report_install(rt_observe_parked_tasks_report_address())
+}
+fn rt_observe_parked_tasks_report_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
 #Export(c) fn jet_rt_observe_task_register(control: I64, site: I64, label: I64) -> I64 {
+    observe_exit_report_install()
     parent :: observe_current_task()
     id :: sync_add(observe_root + I64{8}, I64{1})
     sync_mutex_lock(observe_root)

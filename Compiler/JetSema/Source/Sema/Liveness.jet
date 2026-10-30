@@ -110,13 +110,15 @@ fn sema_liveness_inline_asm_gate_aliases(module_row: SemaRegistrationModule, ali
 }
 
 // ---------------------------------------------------------------------------
-// (Rust `Bundle/Liveness.rs`): L0104 reports a private
-// top-level function that no reference reaches from outside its own body (a
-// namespace package's sibling files count as callers); L0105 reports a
-// `pub(package)` function or constant, or a `pub(package)` re-export, that no
-// other module of its package consumes. Roots (the entry `run`, the build
-// entry, jobs, wasm exports) are never reported. Only snapshot (user) modules
-// are judged; every module's references count.
+// (Rust `Bundle/Liveness.rs`): L0104 reports a function of a `priv module`
+// that no reference reaches from outside its own body (a namespace package's
+// sibling files count as callers); L0105 reports a function or constant of a
+// `priv(package) module`, or a `pub(package)` re-export, that no other module
+// of its package consumes. An inline module's members are lifted under
+// generated `__jet_` names, so they are judged and reported by their source
+// names. Roots (the entry `run`, the build entry, jobs, wasm exports) are never
+// reported. Only snapshot (user) modules are judged; every module's references
+// count.
 
 struct SemaLivenessCandidate {
     module_index: Int
@@ -145,6 +147,8 @@ fn sema_liveness_add_candidate(candidates: &SemaLivenessCandidates, key: String,
     &candidates.reached.push(false)
 }
 
+// `name` is the source name: an inline module member's lifted `__jet_` name
+// is decoded first, so only truly compiler-generated names stay ignored.
 fn sema_liveness_ignored(name: String) -> Bool Never! {
     name == "" || name.starts_with("_") || name.starts_with("__jet_")
 }
@@ -199,13 +203,13 @@ fn sema_liveness_structure(graph: SemaRegistrationGraph, modules: [SemaGraphModu
         is_entry :: module_row.module_identity == graph.entry_module_identity
         loop function in module_row.functions {
             symbol :: function.symbol
-            if symbol.visibility > 1 || sema_liveness_ignored(symbol.name) || symbol.span.start >= symbol.span.end -> next
+            if symbol.visibility > 1 || sema_liveness_ignored(sema_inline_member_source_name(symbol.name)) || symbol.span.start >= symbol.span.end -> next
             if sema_liveness_is_root(function.declaration, is_entry) -> next
             sema_liveness_add_candidate(&candidates, symbol.id.key, SemaLivenessCandidate{module_index: module_index, body: function.declaration.span, package_identity: module_row.package_identity, private: symbol.visibility == 0})
         }
         loop constant in module_row.constants {
             symbol :: constant.symbol
-            if symbol.visibility != 1 || sema_liveness_ignored(symbol.name) || symbol.span.start >= symbol.span.end -> next
+            if symbol.visibility != 1 || sema_liveness_ignored(sema_inline_member_source_name(symbol.name)) || symbol.span.start >= symbol.span.end -> next
             sema_liveness_add_candidate(&candidates, symbol.id.key, SemaLivenessCandidate{module_index: module_index, body: symbol.span, package_identity: module_row.package_identity, private: false})
         }
     }
@@ -231,19 +235,20 @@ fn sema_liveness_structure(graph: SemaRegistrationGraph, modules: [SemaGraphModu
             row :: name_rows_get_text(candidates.keys, symbol.id.key) ?? next
             candidate :: candidates.rows[row]
             if candidate.module_index != module_index || candidates.reached[row] -> next
+            name :: sema_inline_member_source_name(symbol.name)
             if candidate.private {
-                edit :: if sema_liveness_removable(function.declaration) -> TextEdit{span: function.declaration.span, new_text: ""} else -> TextEdit{span: symbol.span, new_text: "_{symbol.name}"}
-                diagnostic :: sema_lint("L0104", symbol.span, "Private function `{symbol.name}` is never called or used as a value.", "A private function with no reachable reference is dead code; public functions stay exempt because other modules may use them.", "Remove the function, or rename `{symbol.name}` to `_{symbol.name}` when it is intentional.")
-                sema_liveness_verdict("L0104", symbol.name, module_row.module_path, symbol.span, "private function is never reached", diagnostic_with_edit(diagnostic, edit), &verdicts)
+                edit :: if sema_liveness_removable(function.declaration) -> TextEdit{span: function.declaration.span, new_text: ""} else -> TextEdit{span: symbol.span, new_text: "_{name}"}
+                diagnostic :: sema_lint("L0104", symbol.span, "Private function `{name}` is never called or used as a value.", "A private function with no reachable reference is dead code; public functions stay exempt because other modules may use them.", "Remove the function, or rename `{name}` to `_{name}` when it is intentional.")
+                sema_liveness_verdict("L0104", name, module_row.module_path, symbol.span, "private function is never reached", diagnostic_with_edit(diagnostic, edit), &verdicts)
             } else {
-                sema_liveness_unreachable_export(symbol.name, module_row.module_path, symbol.span, &verdicts)
+                sema_liveness_unreachable_export(name, module_row.module_path, symbol.span, &verdicts)
             }
         }
         loop constant in module_row.constants {
             symbol :: constant.symbol
             row :: name_rows_get_text(candidates.keys, symbol.id.key) ?? next
             if candidates.rows[row].module_index != module_index || candidates.reached[row] -> next
-            sema_liveness_unreachable_export(symbol.name, module_row.module_path, symbol.span, &verdicts)
+            sema_liveness_unreachable_export(sema_inline_member_source_name(symbol.name), module_row.module_path, symbol.span, &verdicts)
         }
         sema_liveness_unreachable_reexports(graph, module_index, &verdicts)
         loop position in start..<verdicts.len() {

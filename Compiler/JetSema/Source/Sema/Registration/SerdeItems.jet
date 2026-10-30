@@ -29,6 +29,7 @@ use jet_foundation.[
     Field,
     ForKind,
     Func,
+    ImplConstValue,
     ImplDef,
     IndexKind,
     Item,
@@ -373,7 +374,7 @@ fn sema_serde_items_codec_body(items: [Item], position: Int, trait_name: String,
 }
 
 fn sema_serde_items_impl(type_name: String, trait_name: String, method: Func, span: Span) -> Item Never! {
-    Item.Impl{value: ImplDef{span: span, type_name: type_name, type_span: span, trait_name: Val(trait_name), trait_span: Val(span), operator_rhs: None, operator_marker: None, methods: [Func]{method}, delegation_field: None, assoc_type_impls: [NamedType]{}, is_generated_serde: true, os_target: None}}
+    Item.Impl{value: ImplDef{span: span, type_name: type_name, type_span: span, trait_name: Val(trait_name), trait_span: Val(span), operator_rhs: None, operator_marker: None, methods: [Func]{method}, delegation_field: None, assoc_type_impls: [NamedType]{}, constants: [ImplConstValue]{}, is_generated_serde: true, os_target: None}}
 }
 
 fn sema_serde_items_method(name: String, type_params: [TypeParam], params: [Param], return_type: Type, span: Span) -> Func Never! {

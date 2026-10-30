@@ -37,6 +37,8 @@ stderr: ~ "Runtime fault [R0803]" # original predicate
 stderr: ~ "unsafe_sentries_alignment.jet:" # original predicate
 stderr: ~ "misaligned raw `read`" # original predicate
 stderr: ~ "obligation `valid_ptr` was not met on this run" # original predicate
+stderr: ~ "This raw `read` needs an aligned pointer, but address 0x"
+stderr: ~ "is not aligned to 8 bytes."
 step: jet build unsafe_sentries_alignment/unsafe_sentries_alignment.jet
 step: built
 exit: 70
@@ -45,6 +47,30 @@ stderr: ~ "Runtime fault [R0803]" # original predicate
 stderr: ~ "unsafe_sentries_alignment.jet:" # original predicate
 stderr: ~ "misaligned raw `read`" # original predicate
 stderr: ~ "obligation `valid_ptr` was not met on this run" # original predicate
+stderr: ~ "This raw `read` needs an aligned pointer, but address 0x"
+stderr: ~ "is not aligned to 8 bytes."
+step: jet run unsafe_sentries_misaligned_list/unsafe_sentries_misaligned_list.jet
+exit: 70
+stdout: empty
+stderr: ~ "Runtime fault [R0803]"
+stderr: ~ "unsafe_sentries_misaligned_list.jet:5"
+stderr: ~ "This raw `read` needs an aligned pointer, but address 0x"
+stderr: ~ "is not aligned to 8 bytes."
+stderr: !~ "R0801"
+step: jet build unsafe_sentries_misaligned_list/unsafe_sentries_misaligned_list.jet
+step: built
+exit: 70
+stdout: empty
+stderr: ~ "Runtime fault [R0803]"
+stderr: ~ "is not aligned to 8 bytes."
+stderr: !~ "R0801"
+step: jet build --release unsafe_sentries_misaligned_list/unsafe_sentries_misaligned_list.jet
+step: built
+exit: 70
+stdout: empty
+stderr: ~ "Runtime fault [R0803]"
+stderr: ~ "is not aligned to 8 bytes."
+stderr: !~ "R0801"
 step: jet run unsafe_sentries_expired_stack/unsafe_sentries_expired_stack.jet
 exit: 70
 stdout: empty

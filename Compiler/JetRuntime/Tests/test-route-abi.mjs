@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { parseRuntimeExports, validateRuntimeRoute } from "../../../Tools/agent/runtime-route-abi.mjs";
+import { parseRuntimeExports, runtimeLifecycleList, validateRuntimeRoute } from "../../../Tools/agent/runtime-route-abi.mjs";
 
 function definition(params, suffix = "") {
   return { params, suffix, path: "Source/Test.jet", lifecycle: "" };
@@ -94,6 +94,10 @@ const lifecycle = parseRuntimeExports("// runtime-init: 3\n#Export(c) fn jet_ini
 assert.equal(lifecycle.get("jet_init").lifecycle, "init 3");
 assert.equal(lifecycle.get("jet_fini").lifecycle, "fini 1");
 assert.throws(() => parseRuntimeExports("// runtime-init: 65536\n#Export(c) fn jet_init() { }\n", "Source/Test.jet"), /exceeds 65535/);
+const guarded = parseRuntimeExports("// runtime-init: 3 when jet_root\n#Export(c) fn jet_start() { }\n// runtime-fini: 1 when jet_a,jet_b\n#Export(c) fn jet_stop() { }\n", "Source/Test.jet");
+assert.equal(guarded.get("jet_start").lifecycle, "init 3 jet_root");
+assert.equal(guarded.get("jet_stop").lifecycle, "fini 1 jet_a,jet_b");
+assert.match(runtimeLifecycleList(guarded), /^jet_start init 3 jet_root$/m);
 // Record Lists cross every route as handle buffers (the IR's route calls),
 // whatever the provider's ownership. The census
 // below freezes the routes whose carriers hold a List of a schema record, so

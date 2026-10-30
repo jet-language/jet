@@ -8,7 +8,6 @@ when os unix: chmod: project/jet-pkgs/pkgs/cachyos-kernel/source/build.sh 0755
 step diagnostic: jet os build box --no-color --offline
 cwd: project
 exit: 2
-capture: diagnostic = text stderr
-when diagnostic.stderr ~ "\n  error[E1281]": capture: diagnostic = text stderr.after_first("\n  error[E1281]").prepend("\n  error[E1281]")
+capture: diagnostic = text stderr.from_or_all("\n  error[E1281]")
 cap:diagnostic: = os_systemd_init_requires_first_party_source.fixture/expected.stderr
 

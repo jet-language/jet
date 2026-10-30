@@ -43,6 +43,7 @@ use jet_foundation.[
     Field,
     ForKind,
     Func,
+    ImplConstValue,
     ImplDef,
     ImportDecl,
     Item,
@@ -66,6 +67,7 @@ use jet_foundation.[
     StructDef,
     SwitchArm,
     SymbolKind,
+    TraitConstDecl,
     TraitDef,
     TraitImplBlock,
     TraitMethodSig,
@@ -235,21 +237,22 @@ fn sema_inline_member_name(module_path: String, name: String) -> String Never! {
 }
 
 // The source name of a lifted member function (`__jet_bank_dopen` -> `open`),
-// so its own body diagnostics name it as written. Any other name is returned
-// unchanged.
+// so its own body diagnostics name it as written. Only the member segment must
+// be an identifier: a module path whose `_s` reads back as `/` (Rust
+// `member_name` decodes an unprefixed module path too) still names its member.
+// Any other name is returned unchanged.
 fn sema_inline_member_source_name(name: String) -> String Never! {
     if !name.starts_with("__jet_") -> return name.copy()
     decoded :: sema_inline_decode_generated_suffix(String.from_bytes(name.bytes()[6..<name.bytes().len()]) ?? "") ?? return name.copy()
     if !decoded.contains(".") || sema_inline_generated_path(decoded) != name -> return name.copy()
     segments :: decoded.split(".").to_list()
-    loop segment in segments {
-        if segment == "" -> return name.copy()
-        loop byte in segment.bytes() {
-            code :: Int.from_u8(byte)
-            if !sema_inline_is_alphanumeric(code) && code != 95 -> return name.copy()
-        }
+    member :: segments[segments.len() - 1]
+    if member == "" -> return name.copy()
+    loop byte in member.bytes() {
+        code :: Int.from_u8(byte)
+        if !sema_inline_is_alphanumeric(code) && code != 95 -> return name.copy()
     }
-    segments[segments.len() - 1]
+    member
 }
 
 fn sema_inline_trim_leading_underscores(name: String) -> String Never! {
@@ -1005,9 +1008,14 @@ fn sema_inline_rewrite_trait_blocks(rewrite: &SemaInlineRewrite, blocks: [TraitI
         updated.methods = sema_inline_rewrite_funcs(&rewrite, block.methods)
         updated.operator_rhs = sema_inline_rewrite_optional_type(rewrite, block.operator_rhs)
         updated.assoc_type_impls = sema_inline_rewrite_named_types(rewrite, block.assoc_type_impls)
+        updated.constants = sema_inline_rewrite_impl_constants(&rewrite, block.constants)
         &mapped.push(updated)
     }
     mapped
+}
+
+fn sema_inline_rewrite_impl_constants(rewrite: &SemaInlineRewrite, constants: [ImplConstValue]) -> [ImplConstValue] Never! {
+    loop constant in constants -> ImplConstValue{name: constant.name, name_span: constant.name_span, value: sema_inline_rewrite_expr(&rewrite, constant.value), span: constant.span}
 }
 
 // Rust `specialize_struct` with the module alias.
@@ -1077,6 +1085,7 @@ fn sema_inline_rewrite_trait(rewrite: &SemaInlineRewrite, definition: TraitDef) 
         &methods.push(mapped)
     }
     updated.methods = methods
+    updated.constants = loop constant in definition.constants -> TraitConstDecl{name: constant.name, name_span: constant.name_span, ty: sema_inline_rewrite_type(rewrite, constant.ty), ty_span: constant.ty_span, default: sema_inline_rewrite_optional_expr(&rewrite, constant.default), span: constant.span}
     updated
 }
 
@@ -1096,6 +1105,7 @@ fn sema_inline_rewrite_impl(rewrite: &SemaInlineRewrite, definition: ImplDef) ->
     if definition.trait_name == .Val(trait_name) -> updated.trait_name = Val(sema_inline_mapped_name(rewrite, trait_name))
     updated.methods = sema_inline_rewrite_funcs(&rewrite, definition.methods)
     updated.assoc_type_impls = sema_inline_rewrite_named_types(rewrite, definition.assoc_type_impls)
+    updated.constants = sema_inline_rewrite_impl_constants(&rewrite, definition.constants)
     updated
 }
 

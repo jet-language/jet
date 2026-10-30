@@ -245,6 +245,11 @@ struct KitPendingChild {
     joined: Bool
     input_error: String
     signalled: Bool{false}
+    // Stdout bytes recv steps consumed; wait and close report only what follows.
+    taken: Int{0}
+    // Bytes a recv read past its last whole unit, kept for the next recv.
+    buffer: [U8]{[U8]{}}
+    ended: Bool{false}
 }
 
 struct KitLinePredicate {
@@ -918,6 +923,7 @@ fn kit_execute_entry(index: Int, item: KitSelected, options: KitOptions, env: Ki
     loop outcome in kit_suite_run(item.suite, entry, context) {
         &run.results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: outcome.tier, status: outcome.verdict.status, detail: outcome.verdict.detail, exit: outcome.run.code, diff: outcome.verdict.diff})
     }
+    kit_exec_stop_strays(scratch)
     if env.trace_node == "" {
         kit_exec_remove_tree(scratch) ?? {
             &run.results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: "-", status: "ERROR", detail: "remove case scratch: {err}", exit: -1})

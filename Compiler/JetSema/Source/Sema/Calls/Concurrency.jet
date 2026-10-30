@@ -67,7 +67,7 @@ fn sema_call_concurrency_check_value(argument: CallArg, required: Type, environm
     if type_identity_equal(checked.ty, required) -> return Val(checked)
     compatible :: sema_call_type_assignable(required, checked.ty, environment, program) ?? return None
     if compatible -> return Val(checked)
-    if sema_expr_numeric_widening_to(checked.ty, required) == (Val(true)) {
+    if sema_expr_numeric_value_widening(checked, required) == (Val(true)) {
         line :: sema_source_line_at(environment.source_segments, checked.span) ?? 0
         return sema_expr_numeric_literal_conversion(checked, required, checked.span, line, &diagnostics)
     }

@@ -416,6 +416,17 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
             complete = false
             next
         }
+        // E3211 (Rust direct_calls.rs:2216 @ 6083377777): a written String
+        // literal with a NUL byte can never reach a C-boundary `String`
+        // parameter intact, since C strings end at the first NUL. The slot is
+        // the declaration slot the binder chose, so a labelled call is
+        // checked against the parameter it actually reaches.
+        if abi == .Val(callable_abi) {
+            if callable_abi.is_c_abi && required == Type.String && sema_call_literal_has_nul(args[index].expr) {
+                row :: diagnostic_registry_row("E3211") ?? panic("E3211 must have a registry row")
+                &diagnostics.push(sema_error("E3211", expr_span(args[index].expr), row.what, row.why, row.fix))
+            }
+        }
         // The ownership check that follows moves an
         // eligible unmarked take argument at its last use.
         if !report_conventions && decision == SemaCallConventionDecision.NeedsImplicitClone && binder_refs.len() == 0 && !default_in_owner {
@@ -477,6 +488,24 @@ fn sema_call_note_route_implicit_takes(params: [SemaCallParam], args: [CallArg],
         }
         if twice -> sema_ownership_note_implicit_take_twice(&state, expr_span(args[index].expr))
     }
+}
+
+// A string literal with no interpolation whose written text holds a NUL byte.
+fn sema_call_literal_has_nul(value: Expr) -> Bool Never! {
+    if value == .Str(parts, _, _) {
+        nul :: String.from_bytes([U8{0}]) ?? panic("NUL is UTF-8")
+        found := false
+        loop part in parts {
+            if part == {
+                .Lit(text) -> {
+                    if text.contains(nul) -> found = true
+                }
+                else -> return false
+            }
+        }
+        return found
+    }
+    false
 }
 
 // (Rust `check_call_args`): an argument that does not fit its parameter is

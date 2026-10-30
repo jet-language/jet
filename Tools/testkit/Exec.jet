@@ -116,6 +116,20 @@ fn kit_exec_receipt(receipt: ProcessReceipt, elapsed_ns: Int, input_error: Strin
         elapsed_ns: elapsed_ns, limit_hit: limit_hit}
 }
 
+// A child that exits before reading its input breaks the pipe; name its exit
+// and first stderr line so the row shows why it stopped reading.
+fn kit_exec_input_detail(error: String, code: Int, errors: String) -> String {
+    first := ""
+    loop line in errors.lines() {
+        if line.trim() == "" -> next
+        first = line.trim().copy()
+        break
+    }
+    if first.count_bytes() > 160 -> first = kit_steps_byte_slice(first, 0, 160)
+    if first == "" -> return "{error}; child exited {code} without reading it"
+    "{error}; child exited {code} without reading it: {first}"
+}
+
 fn kit_exec_invoke_with_env(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String, overlay: [KitEnvVar]) -> KitRun {
     files.create_dir_all(files.join(scratch, "tmp")) ?? return kit_exec_failed("create child temp directory: {err}")
     started :: time.instant()
@@ -139,7 +153,7 @@ fn kit_exec_invoke_with_env(env: KitEnv, argv: [String], cwd: String, scratch: S
     }
     done.send(0)
     killed :: ^watcher.join() ?? false
-    run := kit_exec_receipt(receipt, started.elapsed().ns, input_error)
+    run := kit_exec_receipt(receipt, started.elapsed().ns, if input_error == "" -> "" else -> kit_exec_input_detail(input_error, receipt.code, receipt.errors))
     if killed -> run.limit_hit = "memory"
     run
 }
@@ -254,6 +268,27 @@ fn kit_exec_remove_tree(path: String) -> Bool Err! {
     kit_exec_make_writable(path)
     files.remove_all(path) ?? return Err("{err}")
     Ok(true)
+}
+
+// A case's descendants that moved to a process group of their own outlive the
+// step that started them. Before its scratch goes, stop every process still
+// running an executable from that scratch or working inside it.
+fn kit_exec_stop_strays(scratch: String) {
+    if sys.name() != "linux" -> return
+    root :: files.canonicalize(scratch) ?? return
+    inside :: "{root}/"
+    own :: process.current_pid()
+    entries :: files.list_dir("/proc") ?? return
+    loop entry in entries {
+        pid :: Int.parse(files.basename(entry.path)) ?? next
+        if pid == own -> next
+        executable :: files.read_link("/proc/{pid}/exe") ?? ""
+        directory :: files.read_link("/proc/{pid}/cwd") ?? ""
+        if !executable.starts_with(inside) && !directory.starts_with(inside) && directory != root -> next
+        #Unsafe("the testkit stops a process its own case left running in the case scratch") {
+            sys.kill(pid, 9).drop("a stray may exit before its signal")
+        }
+    }
 }
 
 fn kit_exec_make_writable(path: String) {

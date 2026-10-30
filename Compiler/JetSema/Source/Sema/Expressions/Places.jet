@@ -505,8 +505,11 @@ fn sema_expression_field(field: Expr, base: Expr, member: String, span: Span, ex
     }
     // Rust `infer_field` (static-owner arm): `Type.member` on a declared
     // struct reads no value. A typestate label is a compile-time fact, and
-    // any other member is not a static member of the struct.
+    // any other member is not a static member of the struct. A trait
+    // constant (`Type.name`, `T.name`) is the one static member a type has.
     if base == .Ident(type_name, _, _) {
+        trait_constant :: sema_expression_trait_constant(type_name, member, member_span, span, expected, environment, program, &scopes, &context, &diagnostics)
+        if trait_constant.handled -> return trait_constant.value
         owner :: sema_expression_type_symbol(&scopes, environment, program, type_name)
         if owner == .Val(symbol) {
             if sema_scope_declaration_struct_states(environment, program, symbol.id) == .Val(states) {

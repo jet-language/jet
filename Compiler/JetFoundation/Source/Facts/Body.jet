@@ -253,6 +253,10 @@ enum NodeKind {
     Uninit
     CtLit(value: TComptimeValue)
     ConstRef(symbol: SymbolID)
+    // `T.name` for a trait constant over a type parameter: the build reads
+    // the constant of the implementation of `trait_name` (its short name)
+    // that the concrete `owner` has.
+    TraitConst(owner: Type, trait_name: String, name: String)
     GlobalShared(initializer: DeclID, lifetime: SharedLifetime)
     Call(callee: DeclID, type_args: [Type], args: [BodyCallArg])
     IndirectCall(callee: Int, type_args: [Type], args: [BodyCallArg], signature: Type)

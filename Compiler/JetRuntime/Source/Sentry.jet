@@ -8,7 +8,7 @@
 SENTRY_RUNTIME_EXIT_CODE :: I64{70}
 sentry_root := I64{0}
 
-// runtime-init: 4
+// runtime-init: 4 when sentry_root
 #Export(c) fn jet_rt_sentry_init() {
     if (sentry_root != I64{0}) -> return
     sentry_root = jet_rt_alloc(I64{112}, I64{8})
@@ -243,7 +243,9 @@ fn sentry_range_end(start: I64, length: I64) -> I64 {
     if world_unsigned_before(end, start) -> I64{-1} else -> end
 }
 // Return raw facts: 0 valid, 1 provenance, 2 heap expired, 3 alignment,
-// 4 stack expired, 5 live-range boundary. Provenance precedes alignment.
+// 4 stack expired, 5 live-range boundary. Provenance precedes alignment, and
+// a misaligned access that starts in live storage reports its alignment: the
+// aligned access it stands for would not run past the storage.
 #Export(c) fn jet_rt_sentry_check(start: I64, bytes: I64, alignment: I64, strict: I64) -> I64 {
     if (sync_load(thread_base() + I64{128}) == I64{0}) -> return I64{0}
     length :: if (bytes == I64{0}) -> I64{1} else -> bytes
@@ -311,7 +313,7 @@ fn sentry_range_end(start: I64, length: I64) -> I64 {
     fault :: if {
         live -> (if (sentry_remainder(start, align) != I64{0}) -> I64{3} else -> I64{0})
         (expired != I64{0}) -> expired
-        starts_live -> I64{5}
+        starts_live -> (if (sentry_remainder(start, align) != I64{0}) -> I64{3} else -> I64{5})
         (strict != I64{0} || start == I64{0} || overflow) -> I64{1}
         else -> (if (sentry_remainder(start, align) != I64{0}) -> I64{3} else -> I64{0})
     }
@@ -439,7 +441,9 @@ fn sentry_gate_name() -> I64 {
     sentry_append_number(text, sync_load(base + I64{152}))
     text
 }
-fn sentry_template(text: I64, template: I64, operation: I64, gate: I64, obligation: I64) {
+// `{gate}`, `{operation}`, `{detail}` and `{obligation}` fill a registry
+// template; only R0803 names `{detail}` (address and required alignment).
+fn sentry_template(text: I64, template: I64, operation: I64, gate: I64, obligation: I64, detail: I64) {
     data :: rt_text_data(template)
     end :: rt_text_len(template)
     at := I64{0}
@@ -449,7 +453,7 @@ fn sentry_template(text: I64, template: I64, operation: I64, gate: I64, obligati
             loop finish < end && trap_byte(data + finish) != (I64{125}) -> finish += I64{1}
             if finish < end {
                 size :: finish - at - I64{1}
-                value :: if (size == I64{4}) -> gate else -> if (size == I64{9}) -> operation else -> obligation
+                value :: if (size == I64{4}) -> gate else -> if (size == I64{9}) -> operation else -> if (size == I64{6} && detail != I64{0}) -> detail else -> obligation
                 jet_rt_string_builder_push(text, value)
                 at = finish + I64{1}
                 next
@@ -479,7 +483,7 @@ fn sentry_detail(fault: I64, start: I64, alignment: I64) -> I64 {
         else -> services_msg_sentry_provenance()
     }
 }
-fn sentry_report(fault: I64, operation: I64, obligation: I64, component: I64, fenced: Bool, gate: I64) -> I64 {
+fn sentry_report(fault: I64, operation: I64, obligation: I64, component: I64, fenced: Bool, gate: I64, detail: I64) -> I64 {
     code :: sentry_code(fault)
     report :: jet_rt_string_builder_new()
     what :: if {
@@ -487,7 +491,7 @@ fn sentry_report(fault: I64, operation: I64, obligation: I64, component: I64, fe
         (code == I64{3}) -> services_msg_sentry_r0803_what()
         else -> services_msg_sentry_r0801_what()
     }
-    sentry_template(report, what, operation, gate, obligation)
+    sentry_template(report, what, operation, gate, obligation, detail)
     rt_text_push_scalar(report, I64{10})
     base :: thread_base()
     if (sync_load(base + I64{144}) != I64{0}) {
@@ -505,14 +509,14 @@ fn sentry_report(fault: I64, operation: I64, obligation: I64, component: I64, fe
         (code == I64{3}) -> services_msg_sentry_r0803_why()
         else -> services_msg_sentry_r0801_why()
     }
-    sentry_template(report, why, operation, gate, obligation)
+    sentry_template(report, why, operation, gate, obligation, detail)
     sentry_append_owned(report, services_msg_sentry_fix())
     fix :: if {
         (code == I64{2}) -> services_msg_sentry_r0802_fix()
         (code == I64{3}) -> services_msg_sentry_r0803_fix()
         else -> services_msg_sentry_r0801_fix()
     }
-    sentry_template(report, fix, operation, gate, obligation)
+    sentry_template(report, fix, operation, gate, obligation, detail)
     // This seam's obligation is the native read's canonical valid_ptr fact.
     sentry_append_owned(report, services_msg_sentry_obligation())
     if (component != I64{0} && rt_text_len(component) != I64{0}) {
@@ -542,12 +546,12 @@ fn sentry_stop(fault: I64, start: I64, alignment: I64, component: I64, fenced: B
         else -> TEST_SCOPE_R0801
     }
     test_scope_record_raw_stop(code, I64{5}, trap_word(detail), trap_word(detail + I64{8}))
-    jet_rt_string_drop(detail)
     domain :: jet_rt_stop_domain()
     if (domain != I64{0}) -> _ := scheduler_panic_check()
     obligation :: services_msg_sentry_valid_ptr()
     gate :: sentry_gate_name()
-    report :: sentry_report(fault, operation, obligation, component, fenced, gate)
+    report :: sentry_report(fault, operation, obligation, component, fenced, gate, detail)
+    jet_rt_string_drop(detail)
     jet_rt_string_drop(operation)
     jet_rt_string_drop(obligation)
     jet_rt_string_drop(gate)

@@ -34,6 +34,7 @@ use jet_foundation.[
     core_call,
     core_module_has_member,
     core_module_has_type,
+    diagnostic_registry_row,
     expr_span,
     jet_target_layout_atomic_scalar_type,
     symbol_id,
@@ -484,7 +485,7 @@ fn sema_call_builtin_static_coerce(value: TExpr, required: Type, span: Span, env
         return None
     }
     if sema_call_builtin_static_accepts(required, value.ty, environment, program) -> return Val(value)
-    if sema_expr_numeric_widening_to(value.ty, required) == (.Val(true)) {
+    if sema_expr_numeric_value_widening(value, required) == (.Val(true)) {
         line :: sema_source_line_at(environment.source_segments, value.span) ?? 0
         return sema_expr_numeric_literal_conversion(value, required, value.span, line, &diagnostics)
     }
@@ -947,6 +948,11 @@ fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span
     if method == "new" && args.len() == 3 && type_name == "ExpiringSecret" && sema_module_is_core_source(owner_symbol.module_name) {
         if !sema_call_expiring_secret_new_accepts(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     }
+    // E2938 (D-FOUND-PLATFORM1=A, Rust method_calls.rs `UIShortcut.cmd`): the
+    // command-key constructor fixes its key before code generation.
+    if method == "cmd" && args.len() == 1 && type_name == "UIShortcut" && sema_module_is_core_source(owner_symbol.module_name) {
+        sema_call_ui_shortcut_cmd_key(args[0], &diagnostics)
+    }
 
     diagnostics_before := diagnostics.len()
     targets := [SemaStaticMethodTarget]{}
@@ -1205,4 +1211,23 @@ fn sema_call_try_inline_range_conversion(descriptor: Call, method: String, args:
 // fallible conversion's failure handled.
 fn sema_range_runtime_conversion(head: String, method: String, span: Span) -> Diagnostic {
     sema_error("E0136", span, "making a `{head}` from a runtime value can fail", "only a literal is checked at compile time; a runtime number needs the fallible form so a bad value is handled", "write `{head}.{method}(raw)?` and handle the failure")
+}
+
+// E2938: `UIShortcut.cmd` takes one positional, non-empty plain string
+// literal; a dynamic key goes through `core.ui.host.shortcut`.
+fn sema_call_ui_shortcut_cmd_key(argument: CallArg, diagnostics: &[Diagnostic]) {
+    literal := String?{None}
+    if sema_registration_cli_without_parens(argument.expr) == .Str(parts, _, _) {
+        if parts.len() == 1 && parts[0] == .Lit(text) -> literal = Val(text.copy())
+    }
+    labelled :: argument.label != None
+    if !labelled && literal == .Val(key) {
+        if key.trim() != "" -> return
+    }
+    reason := "the key must not be empty"
+    if literal == None -> reason = "the key must be one plain string literal"
+    if labelled -> reason = "the key must be positional"
+    shortcut :: literal ?? "<expression>"
+    row :: diagnostic_registry_row("E2938") ?? panic("E2938 must have a registry row")
+    &diagnostics.push(sema_error("E2938", argument.span, "Invalid UI shortcut literal `{shortcut}`: {reason}", row.why, row.fix))
 }

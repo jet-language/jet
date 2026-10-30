@@ -132,7 +132,7 @@ fn kit_steps_setup_run(step: KitStep, env: KitEnv, work: String, scratch: String
             else {
                 a :: Int.from_u8(bytes[offset + index])
                 b :: Int.from_u8(byte)
-                bytes[offset + index] = U8{a + b - 2 * kit_steps_bit_and(a, b)}
+                bytes[offset + index] = U8{a + b - 2 * a.bit_and(b)}
             }
         }
         files.write_bytes(path, bytes) ?? return kit_expect_verdict("ERROR", "poke write: {err}")

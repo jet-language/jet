@@ -6,7 +6,7 @@
 // big-integer decimals); the debug files and types; and per IR function its
 // name, file, line and debug variables.
 
-use jet_foundation.[CompilerThreads, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first]
+use jet_foundation.[CompilerThreads, compiler_apply_order, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_heaviest_first, compiler_transfer_rows]
 use jet_backend.[
     X64CompiledFunction, X64Data, X64DataID, X64DataReloc, X64DebugEncoding, X64DebugType, X64DebugTypeKind, X64DebugVariable, X64ExecutableResult,
     X64FunctionDebug, X64FunctionID, X64FunctionSource, X64LineRow, X64ModuleDebug, X64ObjectModule, X64Reloc, X64RuntimeExport, X64VariableRange,
@@ -339,6 +339,7 @@ fn ir_x64_object(compiled: ^IRX64Result, debug_info: Bool) -> X64ExecutableResul
     &debug.extend(compiler_take_rows<X64FunctionDebug>(&owned.debug))
     functions := [X64CompiledFunction]{^main}
     &functions.extend(compiler_take_rows<X64CompiledFunction>(&owned.functions))
+    ir_x64_reached_only(&functions, &debug)
     threads :: CompilerThreads{cap: owned.threads.cap, cores: owned.threads.cores, memory_available: owned.threads.memory_available}
     // What is left of the compile (its IR module above all) is read no more:
     // it drops on tasks of their own while the object is written.
@@ -353,6 +354,63 @@ fn ir_x64_object(compiled: ^IRX64Result, debug_info: Bool) -> X64ExecutableResul
         _ :: dropped.join() ?? panic(compiler_threads_failure_text(err))
     }
     &objects.pop() ?? panic("the object writer lost its object")
+}
+
+// Keeps the rows of `functions` (with their `debug` rows) whose function the
+// first row, `main`, reaches through function relocations. The optimizer
+// keeps every body it inlined (ir_optimize_module), so a function whose
+// calls were all inlined has none left; a program object is one `.text`,
+// which the static link keeps whole, so its dead functions go here.
+fn ir_x64_reached_only(functions: &[X64CompiledFunction], debug: &[X64FunctionDebug]) Never! {
+    if functions.len() != debug.len() -> panic("the object writer has {functions.len()} functions and {debug.len()} debug rows")
+    max_id := -1
+    loop function in functions {
+        if function.id.value > max_id -> max_id = function.id.value
+    }
+    // Per function id + 1 its rows, and whether it is reached.
+    id_rows := [[Int]]{}
+    reached := [Bool]{}
+    loop _ in 0..<(max_id + 2) {
+        &id_rows.push([Int]{})
+        &reached.push(false)
+    }
+    loop (index, function) in functions {
+        if function.id.value >= -1 -> &id_rows[function.id.value + 1].push(index)
+    }
+    work := [Int]{functions[0].id.value}
+    reached[functions[0].id.value + 1] = true
+    loop work.len() > 0 {
+        id :: &work.pop() ?? { break }
+        loop row in id_rows[id + 1] {
+            loop reloc in functions[row].relocs {
+                if reloc.target == {
+                    .Function(target) -> {
+                        at :: target.value + 1
+                        if at >= 0 && at < reached.len() && !reached[at] {
+                            reached[at] = true
+                            &work.push(target.value)
+                        }
+                    }
+                    else -> {}
+                }
+            }
+        }
+    }
+    kept := [X64CompiledFunction]{}
+    kept_debug := [X64FunctionDebug]{}
+    loop functions.len() > 0 {
+        function := &functions.pop() ?? { break }
+        facts := &debug.pop() ?? panic("the object writer lost a debug row")
+        at :: function.id.value + 1
+        if at >= 0 && reached[at] {
+            &kept.push(^function)
+            &kept_debug.push(^facts)
+        }
+    }
+    &kept.reverse()
+    &kept_debug.reverse()
+    compiler_transfer_rows<X64CompiledFunction>(&functions, &kept)
+    compiler_transfer_rows<X64FunctionDebug>(&debug, &kept_debug)
 }
 
 // What ir_x64_object releases: the compile's IR functions in runs, each
@@ -492,7 +550,7 @@ fn ir_x64_library_object(compiled: ^IRX64Result, exports: [IRLibraryExport], deb
     program := ir_x64_object_module(&owned)
     debug := compiler_take_rows<X64FunctionDebug>(&owned.debug)
     functions := compiler_take_rows<X64CompiledFunction>(&owned.functions)
-    globals :: loop row in exports -> X64RuntimeExport{function: X64FunctionID{value: row.function}, symbol: row.symbol, init_priority: row.init_priority, fini_priority: row.fini_priority}
+    globals :: loop row in exports -> X64RuntimeExport{function: X64FunctionID{value: row.function}, symbol: row.symbol, init_priority: row.init_priority, fini_priority: row.fini_priority, guards: row.guards.copy()}
     x64_object_functions_threads(^program, ^functions, ^debug, globals, owned.threads, debug_info, true)
 }
 
