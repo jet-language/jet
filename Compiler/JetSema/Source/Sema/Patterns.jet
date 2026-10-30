@@ -548,6 +548,9 @@ fn sema_pattern_validate_variant(subject_ty: Type, variant: String, written_slot
         return SemaPatternValidation{shape: TPatternShape.Variant{variant: variant, bindings: tree_bindings, leading_dot: leading_dot, span: span}, enum_type: payload.owner, bindings: facts, complete: false}
     }
     slots := written_slots
+    // D-TYPESWITCH1: a union arm may name its member without binding it
+    // (`.Int -> …`); it tests the member exactly as `.Int(_)` does.
+    if written_slots.len() == 0 && payload.types.len() == 1 && carrier == .Union(_) -> slots = [PatSlot]{PatSlot.Wildcard}
     if named && !payload.group {
         if payload.payload == {
             .Val(declared) -> if declared == {

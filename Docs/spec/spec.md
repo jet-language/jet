@@ -417,6 +417,18 @@ When the subject of `if subject == { … }` is not a plain name — a call or a
 field access, for example — the arms refer to it as `it`, as in
 `it == .Ok(n)`.
 
+Inside a generic function the subject may be a type parameter, making a
+type table: `if T == { Int -> … Point -> … else -> … }`. Each arm names one
+type and is checked with `T` read as that type, including in its result and
+its `return`s. `else` sees only `T`'s bounds and is required (E0003), because
+types are an open set. Matching is exact identity (a bare `2.5` is a
+`Decimal`, not a `Float`): a repeated type is an unreachable arm (E0365) and
+an unknown or non-type head is E0119. `if T == Int { … }` is the one-arm test,
+and `comptime` on either form changes nothing. Each instance keeps only its
+own arm, so no run-time test remains. Over a union value, an arm may name a
+member without binding it, as in `.Int -> …` (the same test as `.Int(_)`); a
+union table stays exhaustive and needs no `else` (D-TYPESWITCH1=A).
+
 `loop` supports infinite, conditional, source, map-pair, and explicit-state
 forms:
 

@@ -67,11 +67,13 @@ use jet_foundation.[
     diagnostic_registry_row,
     expr_source_span,
     expr_span,
+    foundation_named_type,
     integer_bounds_exact,
     measure_literal_value,
     symbol_id,
     checked_generated_local,
     checked_symbol_local,
+    type_carrier_identity,
     type_identity_equal,
     type_identity_key,
     type_name,
@@ -636,7 +638,17 @@ fn sema_stmt_check_unit_if_parts(condition: Expr, then_body: [Stmt], then_value:
     // E1403: each level of the chain is one source
     // nesting level, as an `if` expression is in the Rust checker.
     if !sema_enter_source_nesting(&context, span, &diagnostics) -> return SemaStatementResult{value: [TStmt]{}, complete: false}
-    condition_check := sema_expression_check_condition(condition, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    // D-TYPESWITCH1: `if T == Int { … }` is the one-arm type test, checked
+    // as a type-table arm: its body reads `T` as the named type.
+    type_param :: sema_expression_type_table_param(condition, environment, scopes)
+    type_target := Type?{None}
+    condition_check := SemaConditionCheck{checked: None, bindings: [SemaConditionBinding]{}}
+    if type_param == .Val(param) {
+        type_target = sema_stmt_type_switch_target(param, condition, [Type]{}, environment, program, scopes, &diagnostics)
+        if type_target == .Val(target) -> condition_check = sema_expression_condition_checked(sema_stmt_type_test_condition(param, target, expr_span(condition), &context))
+    } else {
+        condition_check = sema_expression_check_condition(condition, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    }
     checked_condition :: condition_check.checked
     condition_bindings :: condition_check.bindings
     // Both arms check in place on the live ownership state, each rolled back
@@ -644,7 +656,15 @@ fn sema_stmt_check_unit_if_parts(condition: Expr, then_body: [Stmt], then_value:
     fork :: sema_ownership_fork(&state)
     before_hardware :: sema_scope_hardware_facts(scopes)
     then_mark :: sema_scope_mark(&scopes)
-    then_result :: sema_stmt_check_unit_branch(then_body, then_value, condition_bindings, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, "if.then@{span.start}", loop_depth)
+    then_return := return_type.copy()
+    if type_param == .Val(param) && type_target == .Val(target) {
+        names :: [String]{param.copy()}
+        actuals :: [Type]{target.copy()}
+        if return_type == .Val(declared) -> then_return = Val(sema_inference_substitute_type(declared, names, actuals))
+        // After the mark, so the rollback below puts the rebound rows back.
+        sema_stmt_type_switch_rebind(&scopes, param, target)
+    }
+    then_result :: sema_stmt_check_unit_branch(then_body, then_value, condition_bindings, then_return, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, "if.then@{span.start}", loop_depth)
     then_path :: sema_ownership_fork_path(state, fork)
     sema_ownership_fork_rollback(&state, fork)
     then_hardware :: sema_scope_hardware_facts(scopes)
@@ -735,6 +755,11 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
         .Ident(name, _, _) -> name == "__jet_multi_head_subject"
         else -> false
     }
+    // D-TYPESWITCH1: `if T == { Int -> … else -> … }` over a type parameter
+    // is a type table (sema_stmt_type_switch_param).
+    type_param := String?{None}
+    if !(subject_is_true || multi_head) -> type_param = sema_stmt_type_switch_param(subject, environment, scopes)
+    type_arms := [Type]{}
     // Rust `check_switch` (switches.rs:2277-2308): the arms of `if subject OP
     // { … }` over a plain name test that name directly; any other subject is
     // read once as the `it` the pattern heads test.
@@ -784,9 +809,28 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
         // The arm is read in place (`arms[arm_index]`): binding it copied the
         // whole arm, its body included.
         arm_bindings := [SemaConditionBinding]{}
+        // A type-table arm checks its body with `T` read as the arm's type
+        // (sema_stmt_type_switch_rebind after the branch mark below).
+        arm_target := Type?{None}
+        arm_return := Type?{None}
+        // A guard arm `T == Int` (the one-arm `if T == Int { … }`, or an
+        // `else if` link) is the same type test.
+        arm_param := type_param.copy()
+        if subject_is_true && !readiness -> arm_param = sema_expression_type_table_param(arms[arm_index].cond, environment, scopes)
         if readiness {
             if sema_readiness_check_head(arms[arm_index].cond, &readiness_table, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) == .Val(binding) -> &arm_bindings.push(binding)
             if readiness_table.arms[arm_index] == None -> complete = false
+        } else if arm_param == .Val(param) {
+            target := sema_stmt_type_switch_target(param, arms[arm_index].cond, type_arms, environment, program, scopes, &diagnostics)
+            if target == .Val(arm_type) {
+                if return_type == .Val(declared) -> arm_return = Val(sema_inference_substitute_type(declared, [String]{param}, [Type]{arm_type}))
+                &type_arms.push(arm_type)
+                arm_target = Val(arm_type)
+                &conditions.push(Val(sema_stmt_type_test_condition(param, arm_type, expr_span(arms[arm_index].cond), &context)))
+            } else {
+                complete = false
+                &conditions.push(None)
+            }
         } else {
             condition_result := sema_expression_check_condition(arms[arm_index].cond, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             if condition_result.checked == None -> complete = false
@@ -794,17 +838,20 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
             &conditions.push(condition_result.checked)
         }
         branch_mark :: sema_scope_mark(&scopes)
+        // After the mark, so the rollback below puts the rebound rows back.
+        if arm_param == .Val(param) && arm_target == .Val(arm_type) -> sema_stmt_type_switch_rebind(&scopes, param, arm_type)
         branch_fork :: sema_ownership_fork(&state)
         sema_scope_enter(&scopes, &state, "if.arm@{arms[arm_index].span.start}")
         sema_expression_declare_condition_bindings(arm_bindings, &scopes, &state, true, &diagnostics)
         if value_tail -> context.value_tail_span = sema_stmt_value_tail_marker(arms[arm_index].body)
-        branch := sema_check_statements(arms[arm_index].body, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
+        branch := if arm_return != None -> sema_check_statements(arms[arm_index].body, arm_return, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth) else -> sema_check_statements(arms[arm_index].body, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
         // An arm whose body did not check leaves no complete checked tree for it; the
         // table must not lower that arm as an empty fall-through.
         if !branch.complete -> complete = false
         if value_tail {
             context.value_tail_span = Val(span)
-            if !sema_stmt_check_value_block_end(arms[arm_index].body, branch.value, return_type, arms[arm_index].span, context.function_name, &diagnostics) -> complete = false
+            ends :: if arm_return != None -> sema_stmt_check_value_block_end(arms[arm_index].body, branch.value, arm_return, arms[arm_index].span, context.function_name, &diagnostics) else -> sema_stmt_check_value_block_end(arms[arm_index].body, branch.value, return_type, arms[arm_index].span, context.function_name, &diagnostics)
+            if !ends -> complete = false
         }
         sema_single_use_leave_scope(&scopes, &state, &diagnostics)
         branch_path := sema_ownership_fork_path(state, fork)
@@ -881,14 +928,20 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
     loop site in arm_found -> sema_ownership_note_share_found(&state, site)
     loop site in else_path.share_found -> sema_ownership_note_share_found(&state, site)
     sema_scope_join_hardware_paths(&scopes, before_hardware, hardware_merged, else_hardware, true)
+    // D-TYPESWITCH1: types are an open set, so a type table ends in `else`.
+    if type_param != None && else_body == None {
+        &diagnostics.push(sema_error("E0003", span, "a type table needs an `else` arm", "types are an open set, so no list of type arms covers every `{type_param ?? ""}`", "add `else -> {{ ... }}` after the last arm"))
+        return SemaStatementResult{value: [TStmt]{}, complete: false}
+    }
     if !complete -> return SemaStatementResult{value: [TStmt]{}, complete: false}
     if readiness {
         table_tree :: sema_readiness_tree(^readiness_table, ^branches, ^else_result, span, &context) ?? return SemaStatementResult{value: [TStmt]{}, complete: false}
         return SemaStatementResult{value: [TStmt]{table_tree}, complete: true}
     }
     // Rust `check_switch` notes each all-pattern arm's coverage (E0365/L0301),
-    // with or without an `else`, before the E0307 completeness proof.
-    if !subjectless_guard {
+    // with or without an `else`, before the E0307 completeness proof. A type
+    // table noted its repeated arms itself (sema_stmt_type_switch_target).
+    if !subjectless_guard && type_param == None {
         noted_conditions := [TExpr]{}
         loop condition in conditions {
             if condition == .Val(noted) -> &noted_conditions.push(noted.value)
@@ -920,6 +973,120 @@ fn sema_stmt_check_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, 
         if condition == None -> return SemaStatementResult{value: [TStmt]{}, complete: false}
     }
     SemaStatementResult{value: sema_stmt_switch_chain(^conditions, ^branches, arms, ^else_result, span) ?? [TStmt]{}, complete: true}
+}
+
+// D-TYPESWITCH1: the subject of `if T == { … }` when it names a type
+// parameter of the function being checked that no value binding shadows.
+fn sema_stmt_type_switch_param(subject: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> String? {
+    if subject == {
+        .Ident(name, _, _) -> {
+            if sema_scope_resolve_index(scopes, name) != None -> return None
+            loop parameter in environment.generic_params {
+                if parameter.name == name -> return Val(name.copy())
+            }
+        }
+        else -> {}
+    }
+    None
+}
+
+// The type an arm head names. `Int -> …` arrives as the value-head test
+// `T == Int`; a head may be a plain name or an alias-qualified one. None for
+// any other head.
+fn sema_stmt_type_switch_head(param: String, condition: Expr) -> NamedSpan? {
+    if condition == {
+        .Binary(op, left, right, _, _) -> {
+            if op != BinOp.Eq -> return None
+            if left == {
+                .Ident(name, _, _) -> {
+                    if name != param -> return None
+                }
+                else -> return None
+            }
+            if right == {
+                .Ident(name, span, _) -> return Val(NamedSpan{name: name.copy(), span: span})
+                .Field(base, member, span, _) -> {
+                    if base == .Ident(alias, _, _) -> return Val(NamedSpan{name: "{alias}.{member}", span: span})
+                }
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+    None
+}
+
+// The type a written arm name means here: a primitive spelling, or a
+// declared or imported type resolved as a signature resolves it, so an
+// alias is its target.
+fn sema_stmt_type_switch_resolve(name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
+    primitive :: foundation_named_type(name)
+    if primitive == {
+        .Named(_) -> {}
+        else -> return Val(primitive)
+    }
+    graph :: program.registration_graph ?? return None
+    resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return None
+    if sema_resolved_kind(graph, resolved) != SymbolKind.Type -> return None
+    Val(sema_type_resolve_declared(graph, Type.Named{name: name}, environment.module_identity))
+}
+
+// One arm of a type table: the type it tests, or None after its error. Each
+// arm names one known type (E0119), and no type twice (E0365): matching is
+// exact type identity of the resolved type.
+fn sema_stmt_type_switch_target(param: String, condition: Expr, earlier: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Type? {
+    head :: sema_stmt_type_switch_head(param, condition) ?? {
+        &diagnostics.push(sema_error("E0119", sema_stmt_type_switch_head_span(condition), "a type-table arm must name a type", "`if {param} == {{ … }}` compares the type `{param}`, not a value", "write a type such as `Int`, or `else`"))
+        return None
+    }
+    target :: sema_stmt_type_switch_resolve(head.name, environment, program) ?? {
+        &diagnostics.push(sema_error("E0119", head.span, "`{head.name}` isn't a known type", "a type-table arm names one type: a primitive, a declared type, or an imported one", "check the spelling, or import the type"))
+        return None
+    }
+    identity :: type_carrier_identity(target)
+    loop seen in earlier {
+        if type_carrier_identity(seen) == identity {
+            &diagnostics.push(sema_error("E0365", head.span, "arm `{head.name}` is unreachable — that type is already handled", "an earlier arm already names the same type", "remove this arm or merge it with the one above"))
+            return None
+        }
+    }
+    Val(target)
+}
+
+// The written head of a type-table arm, `0` in `T == 0`, for its error.
+fn sema_stmt_type_switch_head_span(condition: Expr) -> Span {
+    if condition == {
+        .Binary(_, _, right, _, _) -> expr_span(right)
+        .PatternTest(_, pattern, _, _) -> sema_pattern_span(pattern)
+        else -> expr_span(condition)
+    }
+}
+
+// The checked condition of a type-table arm: a TypeTest of `T` against the
+// arm's type, which the IR folds per instance (ir_folded_type_test).
+fn sema_stmt_type_test_condition(param: String, target: Type, span: Span, context: &SemaCheckContext) -> SemaCheckedCondition {
+    test :: sema_node(&context, Type.Bool, NodeKind.TypeTest{subject: Type.Named{name: param.copy()}, target: target.copy()}, span)
+    SemaCheckedCondition{condition: TIfCond.Plain{value: test.copy()}, value: test, bindings: [SemaConditionBinding]{}}
+}
+
+// Inside a type-table arm `T` reads as the arm's type: each local and
+// parameter whose type names `T` takes the substituted type. The caller's
+// branch rollback puts the rows back.
+fn sema_stmt_type_switch_rebind(scopes: &SemaScopeTable, param: String, target: Type) Never! {
+    names :: [String]{param.copy()}
+    actuals :: [Type]{target.copy()}
+    loop index in 0..<scopes.bindings.len() {
+        rebound :: sema_stmt_type_switch_rebound(scopes.bindings[index].symbol, names, actuals) ?? next
+        sema_scope_note_binding_edit(&scopes, index)
+        scopes.bindings[index].symbol.ty = Val(rebound)
+    }
+}
+
+fn sema_stmt_type_switch_rebound(symbol: Symbol, names: [String], actuals: [Type]) -> Type? Never! {
+    if symbol.kind != SymbolKind.Local && symbol.kind != SymbolKind.Parameter -> return None
+    declared :: symbol.ty ?? return None
+    if !sema_checked_type_contains_name(declared, names) -> return None
+    Val(sema_inference_substitute_type(declared, names, actuals))
 }
 
 // The checked switch as the else-if chain codegen lowers, built from the
@@ -6961,6 +7128,12 @@ fn sema_stmt_context_allocator_type(ty: Type) -> Bool Never! {
 // reports and everything it did to the scope, the context and the ownership
 // state are rolled back). False while the arm is unselected or incomplete.
 fn sema_stmt_check_prep_if(cond: Expr, cond_span: Span, then_body: [Stmt], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {
+    // D-TYPESWITCH1: `comptime if T == Int { … }` is the one-arm type test,
+    // which already keeps its arm only in the `Int` instance.
+    if sema_expression_type_table_param(cond, environment, scopes) != None {
+        arm :: SwitchArm{cond: cond, body: then_body, span: cond_span}
+        return sema_stmt_check_prep_type_table(Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, [SwitchArm]{arm}, else_body, span, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth, &output)
+    }
     scopes.comptime_execution_depth += 1
     checked :: sema_check_expression(cond, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     scopes.comptime_execution_depth -= 1
@@ -7079,6 +7252,14 @@ fn sema_stmt_check_dropped_prep_arm(body: [Stmt], return_type: Type?, environmen
     }
 }
 
+// `comptime` on a type table or type test changes nothing: it is checked
+// as the plain form (sema_stmt_check_switch).
+fn sema_stmt_check_prep_type_table(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {
+    table := sema_stmt_check_switch(subject, arms, else_body, span, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth)
+    loop statement in table.value -> &output.push(statement)
+    table.complete
+}
+
 // Rust OSTarget `fold_switch` `comptime if
 // $build.os == { .Linux -> … }` folds to the chain of `comptime if` arms whose
 // conditions are this build's `$build.os == .OS` as Bool literals, so the
@@ -7087,6 +7268,9 @@ fn sema_stmt_check_dropped_prep_arm(body: [Stmt], return_type: Type?, environmen
 // target. A `$build.settings.<key>` dispatch folds against the declared
 // setting's value (sema_stmt_check_setting_switch).
 fn sema_stmt_check_prep_switch(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {
+    // D-TYPESWITCH1: `comptime if T == { … }` over a type parameter is the
+    // type table, which already keeps one arm per instance.
+    if sema_stmt_type_switch_param(subject, environment, scopes) != None -> return sema_stmt_check_prep_type_table(subject, arms, else_body, span, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth, &output)
     subject_span :: expr_span(subject)
     path :: sema_fact_expr_path(subject)
     if path != (Val("$build.os")) {

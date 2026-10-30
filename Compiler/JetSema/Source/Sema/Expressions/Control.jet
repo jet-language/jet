@@ -2020,6 +2020,8 @@ fn sema_expression_if_absent_test_swaps(else_value: Expr, name: String) -> Bool 
 }
 
 fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    type_param :: sema_expression_type_table_param(condition, environment, scopes)
+    if type_param == .Val(param) -> return sema_expression_type_table(param, condition, then_body, then_value, else_body, else_value, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     dispatch_subject :: sema_expression_if_dispatch_subject(condition, else_value)
     if dispatch_subject == .Val(subject) -> return sema_expression_if_hoisted(subject, condition, then_body, then_value, else_body, else_value, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     // A stable `x == None` test reads as the presence test
@@ -2204,6 +2206,144 @@ fn sema_expression_if(condition: Expr, then_body: [Stmt], then_value: Expr, else
     if else_table_head -> sema_coverage_check_redundant_else(sema_coverage_else_chain_conditions(checked_condition, else_checked, span), span, environment, program, &diagnostics)
     value :: sema_tree_node(result_ty, TExprKind.IfExpr{cond: checked.condition, then_body: then_result.value, then_value: joined_then, else_body: else_result.value, else_value: joined_else}, span)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
+}
+
+// D-TYPESWITCH1: `if T == …` in value position, where `T` is a type
+// parameter (sema_stmt_type_switch_param).
+fn sema_expression_type_table_param(condition: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> String? {
+    if condition == {
+        .Binary(op, left, _, _, _) -> {
+            if op == BinOp.Eq -> return sema_stmt_type_switch_param(left, environment, scopes)
+        }
+        else -> {}
+    }
+    None
+}
+
+// D-TYPESWITCH1: a type table in value position. The parser lowers
+// `if T == { Int -> a  else -> b }` to `if T == Int` levels that share the
+// table's span; the whole chain is checked here as the statement table is
+// (sema_stmt_check_switch): each arm with `T` read as its type, then rebuilt
+// as the same IfExpr levels on TypeTest conditions the IR folds per instance.
+fn sema_expression_type_table(param: String, condition: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    heads := [Expr]{condition.copy()}
+    bodies := [[Stmt]]{then_body.copy()}
+    values := [Expr]{then_value.copy()}
+    rest_body := else_body.copy()
+    rest_value := else_value.copy()
+    loop rest_body.len() == 0 {
+        next_body := [Stmt]{}
+        next_value := Expr?{None}
+        if rest_value == {
+            .If(level_condition, level_body, level_value, level_else_body, level_else_value, level_span, _) -> {
+                if level_span == span {
+                    &heads.push(level_condition.copy())
+                    &bodies.push(level_body.copy())
+                    &values.push(level_value.copy())
+                    next_body = level_else_body.copy()
+                    next_value = Val(level_else_value.copy())
+                }
+            }
+            else -> {}
+        }
+        level_next :: next_value ?? break
+        rest_body = next_body
+        rest_value = level_next
+    }
+    no_else :: rest_body.len() == 0 && rest_value == .NoElse(_, _)
+    names :: [String]{param.copy()}
+    fork :: sema_ownership_fork(&state)
+    targets := [Type]{}
+    tests := [TExpr]{}
+    arm_bodies := [[TStmt]]{}
+    arm_values := [TExpr]{}
+    paths := [SemaOwnershipPath]{}
+    reaching := [SemaOwnershipPath]{}
+    complete := true
+    // The type arms, then `else` (index heads.len()), which sees only
+    // `T`'s bounds.
+    loop index in 0..<(heads.len() + 1) {
+        is_else :: index == heads.len()
+        if is_else && no_else -> break
+        target := Type?{None}
+        if !is_else {
+            target = sema_stmt_type_switch_target(param, heads[index], targets, environment, program, scopes, &diagnostics)
+            if target == None {
+                complete = false
+                next
+            }
+        }
+        mark :: sema_scope_mark(&scopes)
+        arm_expected := expected.copy()
+        arm_return := mark.saved.return_type.copy()
+        if target == .Val(arm_type) {
+            actuals :: [Type]{arm_type.copy()}
+            if expected == .Val(declared) -> arm_expected = Val(sema_inference_substitute_type(declared, names, actuals))
+            if mark.saved.return_type == .Val(declared) -> arm_return = Val(sema_inference_substitute_type(declared, names, actuals))
+            // After the mark, so the rollback below puts the rebound rows back.
+            sema_stmt_type_switch_rebind(&scopes, param, arm_type)
+            &targets.push(arm_type.copy())
+            &tests.push(sema_stmt_type_test_condition(param, arm_type, expr_span(heads[index]), &context).value)
+        }
+        branch_fork :: sema_ownership_fork(&state)
+        arm_span :: if is_else -> span else -> expr_span(heads[index])
+        sema_scope_enter(&scopes, &state, "if.arm@{arm_span.start}")
+        arm_body :: if is_else -> rest_body else -> bodies[index]
+        arm_value :: if is_else -> rest_value else -> values[index]
+        body := sema_check_statements(arm_body, arm_return, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, mark.saved.loop_depth)
+        value := TExpr?{None}
+        if body.complete -> value = sema_check_expression(arm_value, arm_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        sema_single_use_leave_scope(&scopes, &state, &diagnostics)
+        path :: sema_ownership_fork_path(state, fork)
+        sema_ownership_fork_rollback(&state, branch_fork)
+        sema_ownership_fork_close(&state, branch_fork)
+        sema_scope_rollback(&scopes, mark)
+        checked :: value ?? {
+            complete = false
+            &paths.push(path)
+            next
+        }
+        never :: Type.Named{name: "Never"}
+        if !sema_stmt_block_has_no_fallthrough(arm_body) && checked.ty != never -> &reaching.push(path.copy())
+        &paths.push(path)
+        body_value := ^body.value
+        body.value = [TStmt]{}
+        &arm_bodies.push(^body_value)
+        &arm_values.push(checked)
+    }
+    sema_ownership_fork_rollback(&state, fork)
+    sema_single_use_check_paths(state, reaching, &diagnostics)
+    joined := sema_ownership_fork_base(fork)
+    if reaching.len() == 0 {
+        joined = sema_ownership_path_join(state, fork, joined, joined, false, state.share_found)
+    } else {
+        joined = reaching[0].copy()
+        loop index in 1..<reaching.len() -> joined = sema_ownership_path_join(state, fork, joined, reaching[index], true, joined.share_found)
+        joined = sema_ownership_path_join(state, fork, joined, joined, true, state.share_found)
+    }
+    sema_ownership_fork_apply(&state, joined)
+    sema_ownership_fork_close(&state, fork)
+    loop path in paths {
+        loop site in path.share_found -> sema_ownership_note_share_found(&state, site)
+    }
+    // Types are an open set, so a type table ends in `else`.
+    if no_else {
+        &diagnostics.push(sema_error("E0003", span, "a type table needs an `else` arm", "types are an open set, so no list of type arms covers every `{param}`", "add `else -> {{ ... }}` after the last arm"))
+        return None
+    }
+    if !complete -> return None
+    // Built from `else` back: the last checked value is `else`'s.
+    chain_value := &arm_values.pop() ?? return None
+    chain_body := &arm_bodies.pop() ?? return None
+    result_ty :: expected ?? chain_value.ty.copy()
+    loop tests.len() > 0 {
+        level_test :: &tests.pop() ?? return None
+        level_value :: &arm_values.pop() ?? return None
+        level_body :: &arm_bodies.pop() ?? return None
+        chain_value = sema_tree_node(result_ty, TExprKind.IfExpr{cond: TIfCond.Plain{value: level_test}, then_body: level_body, then_value: level_value, else_body: chain_body, else_value: chain_value}, span)
+        chain_body = [TStmt]{}
+    }
+    sema_expr_expected(chain_value, expected, environment, program, &diagnostics)
 }
 
 // Rust `nominal_type_identity`: two spellings of one declared type (the

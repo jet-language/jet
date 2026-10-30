@@ -64,6 +64,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, recordin
 | `Type{field: pattern, ..}` | named struct pattern; fields bind or test nested shapes | `D-PAT-RECORD1=A` |
 | `[first, ..rest]` | list pattern with a read-only zero-copy rest window; exact without the rest marker | `D-PAT-RECORD1=A` |
 | `[key: pattern, key?: optional, ..]` | map pattern; required and optional keys, exact unless it ends with rest | `D-PAT-MAP1=A` |
+| `if T == { Int -> … else -> … }` | type table: a generic function branches on its type parameter; each arm reads `T` as its type, `else` is required, each instance keeps one arm; `if T == Int { … }` is the one-arm test; `.Int -> …` names a union member without binding it | `D-TYPESWITCH1=A` |
 | `r"…", raw"…", $"…"` | unclaimed raw-string prefixes | — |
 | `;` | retired explicit statement terminator | `D-SEMI1` |
 | `_name` | ordinary identifier | — |
@@ -573,6 +574,19 @@ the error side. Members widen into the union only at binding, argument, return,
 Codable field, and `?` error boundaries. Match arms name member types; Codable
 decode rejects ambiguous wire shapes (E2415). Named enums remain the documenting
 form; crossings use ordinary match conversion. Does not reopen D-ANY-JAI1.
+
+**D-TYPESWITCH1=A — Type tables** *(ratified 2026-10-29, card #6180)*: a
+generic function branches on a type parameter with an ordinary `if` table,
+`if T == { Int -> … Point -> … else -> … }`. Each arm names one type (E0119
+otherwise) and is checked where it is written, with `T` read as that type in
+the arm's body and result. `else` sees only `T`'s bounds and is required,
+because types are an open set (E0003). Matching is exact type identity: an
+alias is its target, a repeated type is an unreachable arm (E0365), and a
+distinct type, `F32` or `Float?` is not `Float`. Each instance keeps only its
+arm, with no run-time test. A union arm may name a member without binding it
+(`.Int -> …`, the same test as `.Int(_)`); union matches stay exhaustive with
+no `else`. Run-time dispatch over mixed values uses unions; no `Any` type
+(D-ANY-JAI1 stands).
 
 **D-ENUM-EVOLUTION1=A — Caller-selected enum fallback** *(ratified 2026-09-12, card #3145)*: named enums remain closed. Adding a case can make downstream exhaustive matches fail until they handle it. Callers may add an explicit `else` when they choose future-case tolerance; publishers cannot require it with a marker, so that tolerance is the caller's choice rather than a publisher-enforced compatibility promise. The same completeness rule applies inside and outside the defining module. This policy adds no enum constructor, integer conversion, or unknown-case fallback; foreign and wire ingress remain separate contracts (D-ENUM-UNKNOWN1).
 
@@ -9819,6 +9833,7 @@ user-typeable syntax; a row here with no prose above it is still binding.
 | `D-TYPE2-UNCERT1` | A | `c0a9ulca` |
 | `D-TYPECHECK-BOUND1` | A | `c0x6ysg8` |
 | `D-TYPEDSQL-SINK1` | A | `c0gsgsir` |
+| `D-TYPESWITCH1` | A | `c0m3dv36` |
 | `D-UI-EVT-DISP1` | E | `c0indi4b` |
 | `D-UI-EVT-SET1` | D | `c0indi4b` |
 | `D-UI-MOUNT1` | A | `c0avjyq6` |
