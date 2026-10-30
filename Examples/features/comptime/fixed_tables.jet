@@ -1,0 +1,26 @@
+// Compile-time lookup tables are baked into the program as constant data: a
+// tree stored as fixed-length [Int#4] child columns indexed by a typed node
+// index, a [String] column of names, and an [Int#5] table read by a loop.
+NodeIx :: distinct Int(0..3)
+
+LEFT :: comptime { [Int#4]{1, -1, -1, -1} }
+RIGHT :: comptime { [Int#4]{2, -1, 3, -1} }
+ROOT :: comptime { NodeIx.from_int(0) }
+NAMES :: comptime { [String]{"root", "left", "right", "leaf"} }
+SQUARES :: comptime { [Int#5]{0, 1, 4, 9, 16} }
+
+fn walk(at: Int, depth: Int) {
+    print("{depth}: {NAMES[at]}")
+    if LEFT[at] >= 0 -> walk(LEFT[at], depth + 1)
+    if RIGHT[at] >= 0 -> walk(RIGHT[at], depth + 1)
+}
+
+fn run() {
+    print(ROOT.raw())
+    print(LEFT[ROOT.raw()])
+    print(RIGHT[2])
+    walk(ROOT.raw(), 0)
+    total := 0
+    loop square in SQUARES -> total += square
+    print("squares {total}, {NAMES.len()} names")
+}
