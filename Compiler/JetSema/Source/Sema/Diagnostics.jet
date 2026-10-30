@@ -210,6 +210,19 @@ fn sema_unknown_module_alias(module_alias: String, span: Span) -> Diagnostic {
     sema_error("E0610", span, row.what.replace("{{alias}}", module_alias), row.why.replace("{{alias}}", module_alias), row.fix.replace("{{alias}}", module_alias))
 }
 
+// E0628: `name.member` where `name` is the item this module takes from its
+// file module `name` (`module wrap` with `pub use wrap.wrap`).
+fn sema_taken_over_file_member(name: String, member: String, span: Span) -> Diagnostic {
+    row :: diagnostic_registry_row("E0628") ?? panic("E0628 has no registry row")
+    sema_error("E0628", span, row.what.replace("{{name}}", name).replace("{{member}}", member), row.why.replace("{{name}}", name).replace("{{member}}", member), row.fix.replace("{{name}}", name).replace("{{member}}", member))
+}
+
+// E0629: a module (`text`, `lib.inner`) read where a value is expected.
+fn sema_module_used_as_value(name: String, span: Span) -> Diagnostic {
+    row :: diagnostic_registry_row("E0629") ?? panic("E0629 has no registry row")
+    sema_error("E0629", span, row.what.replace("{{name}}", name), row.why, row.fix.replace("{{name}}", name))
+}
+
 fn sema_defined_twice_optional(name: String, why: String, span: Span?) -> Diagnostic {
     sema_error_optional("E0105", span, "`{name}` is defined twice", why, "rename or remove one of the definitions")
 }

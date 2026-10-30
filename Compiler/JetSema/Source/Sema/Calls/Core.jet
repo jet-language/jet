@@ -116,6 +116,23 @@ fn sema_call_source_import_target(environment: SemaScopeEnvironment, program: Se
     }
 }
 
+// E0628 for `alias.member` in a module that lists the file module `alias`
+// and takes the file's item `alias` with a `use`: while that item is the
+// visible binding of `alias`, the dot reaches no file member.
+fn sema_call_taken_over_file_member(alias: String, member: String, member_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Diagnostic? Never! {
+    graph :: program.registration_graph ?? return None
+    module_index :: sema_scope_caller_index(environment, graph) ?? return None
+    if !sema_registration_file_name_taken_over(graph.modules[module_index], alias) -> return None
+    visible_index :: sema_scope_resolve_index(scopes, alias) ?? return None
+    visible_key :: scopes.bindings[visible_index].symbol.id.key
+    loop import in graph.modules[module_index].imports {
+        loop binding in import.bindings {
+            if binding.local == alias && binding.symbol.id.key == visible_key -> return Val(sema_taken_over_file_member(alias, member, member_span))
+        }
+    }
+    None
+}
+
 // Resolve through Registration identity, not source spelling alone.
 fn sema_call_core_import_module(environment: SemaScopeEnvironment, program: SemaProgramTables, alias: String) -> String? {
     target :: sema_call_core_import_target(environment, program, alias) ?? return None
@@ -371,6 +388,24 @@ fn sema_call_source_import_inline_module(environment: SemaScopeEnvironment, prog
         }
     }
     false
+}
+
+// Whether `alias.name` names a function that the module `alias` publishes
+// (`text.wrap` for `pub use wrap.wrap` in `text`).
+fn sema_call_module_member_is_function(environment: SemaScopeEnvironment, program: SemaProgramTables, alias: String, name: String) -> Bool Never! {
+    graph :: program.registration_graph ?? return false
+    resolved :: sema_registration_lookup_qualified(graph, environment.module_identity, alias, name) ?? return false
+    sema_resolved_kind(graph, resolved) == SymbolKind.Function
+}
+
+// Whether `alias.name` names a module: an inline module the file module
+// `alias` declares (`module inner {…}`), or a module that `alias` publishes.
+fn sema_call_module_member_is_module(environment: SemaScopeEnvironment, program: SemaProgramTables, alias: String, name: String) -> Bool Never! {
+    if sema_call_source_import_inline_module(environment, program, alias, name) -> return true
+    graph :: program.registration_graph ?? return false
+    resolved :: sema_registration_lookup_qualified(graph, environment.module_identity, alias, name) ?? return false
+    kind :: sema_resolved_kind(graph, resolved)
+    kind == SymbolKind.Module || kind == SymbolKind.Import
 }
 
 // The direct-call target for an exported foreign (`#Import module c.lib`)

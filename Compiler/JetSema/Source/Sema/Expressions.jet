@@ -3291,12 +3291,24 @@ fn sema_expr_try_method_static_routes(receiver: Expr, method: String, method_spa
     if core.handled -> return core
     if receiver == .Ident(alias_name, alias_span, _) {
         if sema_expr_core_module_alias_visible(alias_name, scopes) -> return sema_call_try_source_module_call(alias_name, alias_span, method, method, type_args, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        if sema_call_taken_over_file_member(alias_name, method, method_span, environment, program, scopes) == .Val(taken) {
+            &diagnostics.push(taken)
+            loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
     }
     // `helper.internal.secret()`: a member of an inline module of an imported
     // file module, lifted beside it under its member identity.
     if receiver == .Field(base, submodule, _, _) && base == .Ident(alias_name, alias_span, _) {
         if sema_expr_core_module_alias_visible(alias_name, scopes) && sema_call_source_import_inline_module(environment, program, alias_name, submodule) {
             return sema_call_try_source_module_call(alias_name, alias_span, sema_inline_member_name(submodule, method), "{submodule}.{method}", type_args, args, method_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        }
+        // `text.wrap.decorate()`: `text.wrap` is a function the module
+        // publishes, and a function has no methods.
+        if sema_expr_core_module_alias_visible(alias_name, scopes) && sema_call_module_member_is_function(environment, program, alias_name, submodule) {
+            &diagnostics.push(sema_error("E0311", method_span, "`{method}` isn't a method on this value", "`{alias_name}.{submodule}` is a function, and a function has no methods", "call `{alias_name}.{submodule}(…)` itself, or call an item that `{alias_name}` publishes"))
+            loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }
     SemaMethodSpecialCheck{handled: false, value: None}
@@ -3766,7 +3778,9 @@ fn sema_expr_check_identifier(name: String, span: Span, expected: Type?, environ
         &diagnostics.push(sema_error("E0420", span, "`{name}` may be read before it is given a value", "`{name}` was declared with `Type{{ uninit }}`, so no value is available until you write to it — this read could see garbage", "write to `{name}` on every path before reading it (e.g. fill it via `mut {name}`)"))
     }
     value :: sema_expr_check_ident(name, span, expected, environment, program, &scopes, &context, &diagnostics) ?? {
-        if !sema_has_error_since(diagnostics, diagnostics_before) -> sema_check_unsupported(&context, "`{name}` (read at offset {span.start}) has no checked type")
+        if !sema_has_error_since(diagnostics, diagnostics_before) {
+            if sema_expr_core_module_alias_visible(name, scopes) -> &diagnostics.push(sema_module_used_as_value(name, span)) else -> sema_check_unsupported(&context, "`{name}` (read at offset {span.start}) has no checked type")
+        }
         return None
     }
     expr := Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}

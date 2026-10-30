@@ -2002,6 +2002,42 @@ fn sema_registration_module_has_import_name(module_row: SemaRegistrationModule, 
     name_rows_get_text(module_row.import_binding_rows, name) != None
 }
 
+// A body-less `module name` binds its file as a file import aliased `name`.
+// When the same module also takes `name` from that file with a top-level
+// `use` (`pub use wrap.wrap`), that item owns the name: the file import binds
+// nothing and exports nothing, and the file stays reachable only where a
+// module is expected (a `use` root), which the loader resolves.
+fn sema_registration_file_import_taken_over(module_row: SemaRegistrationModule, import: SemaRegistrationImport) -> Bool Never! {
+    listed := false
+    if import.declaration.kind == .File(_, _) -> listed = true
+    if !listed -> return false
+    name :: import.declaration.alias
+    declared := false
+    loop declaration in module_row.declarations {
+        if declaration == .CodeModule(definition) && definition.name == name && definition.body == None -> declared = true
+    }
+    if !declared -> return false
+    loop other in module_row.imports {
+        if other.target_module_identity != import.target_module_identity -> next
+        if other.declaration.kind == .Unqualified(_, _, items, _, _) {
+            loop item in items {
+                if sema_registration_import_local(item) == name -> return true
+            }
+        }
+    }
+    false
+}
+
+// Whether `module_row` lists the file module `name` and also takes the file's
+// item `name` with a `use`, so `name` is that item and not the file (see
+// sema_registration_file_import_taken_over).
+fn sema_registration_file_name_taken_over(module_row: SemaRegistrationModule, name: String) -> Bool Never! {
+    loop import in module_row.imports {
+        if import.declaration.alias == name && sema_registration_file_import_taken_over(module_row, import) -> return true
+    }
+    false
+}
+
 // The `symbols` row of `name` (whose name_rows_hash is `hash`) in `module_row`.
 fn sema_registration_symbol_position(module_row: SemaRegistrationModule, name: String, hash: Int) -> Int? Never! {
     name_rows_get(module_row.symbol_positions, name, hash)
@@ -3496,7 +3532,7 @@ fn sema_registration_resolve_export(graph: SemaRegistrationGraph, module_index: 
                 }
             }
             .File(_, _) | .Module(_, _) -> {
-                if import.declaration.alias != name -> next
+                if import.declaration.alias != name || sema_registration_file_import_taken_over(module_row, import) -> next
                 visibility :: if import.declaration.is_pub -> 2 else -> 1
                 if !sema_registration_visible(visibility, requester_module, requester_package, module_row.module_identity, module_row.package_identity) -> return None
                 symbol :: Symbol{id: symbol_id(SymbolKind.Import, module_row.module_identity, import.target_module_identity, name), kind: SymbolKind.Import, name: name.copy(), module_name: module_row.module_identity.copy(), owner: None, span: import.declaration.alias_span, ty: None, visibility: visibility}
@@ -3702,7 +3738,8 @@ fn sema_registration_populate_imports(graph: &SemaRegistrationGraph, module_inde
                     }
                 }
             }
-            else -> {
+            // A file whose same-named item this module takes binds no name.
+            else -> if !sema_registration_file_import_taken_over(graph.modules[module_index], graph.modules[module_index].imports[import_index]) {
                 duplicate :: sema_registration_module_has_name(graph.modules[module_index], declaration.alias) || sema_registration_module_has_import_name(graph.modules[module_index], declaration.alias)
                 if {
                     duplicate -> sema_registration_push_graph_diagnostic(&graph, module_index, sema_defined_twice(declaration.alias, "imported names share the module namespace", declaration.alias_span))
@@ -4288,7 +4325,7 @@ fn sema_registration_lookup_qualified(graph: SemaRegistrationGraph, module_ident
     module_index :: sema_registration_module_index(graph, module_identity) ?? return None
     module_row :: graph.modules[module_index]
     loop import in module_row.imports {
-        if import.declaration.alias != alias -> next
+        if import.declaration.alias != alias || sema_registration_file_import_taken_over(module_row, import) -> next
         target_index :: sema_registration_module_index(graph, import.target_module_identity) ?? return None
         resolved :: sema_registration_resolve_export(graph, target_index, name, module_identity, module_row.package_identity, [String]{}) ?? return None
         return Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: resolved.symbol}, source_module_identity: resolved.source_module_identity, target_module_identity: import.target_module_identity, visibility: resolved.visibility})

@@ -2224,6 +2224,11 @@ trait, tag, protocol, or constant. A constant is declared like any other item,
 `use limits.[MAX_ITEMS]` (3A). A `use` inside an inline-module body follows the
 same rule.
 
+A module is not a value. Binding, passing, returning, storing or interpolating
+a module, such as `m :: text` or `show(lib.inner)`, reports **E0629**. A
+function the module offers is a value: `f :: text.shout` is the function, as
+`shout` is after `use text.shout`.
+
 An `impl` head that names a declaration through a module alias binds the alias
 to the segment after it: `impl types.Span { ... }` extends `types.Span`, and
 `impl Local.types.Named { ... }` implements `types.Named` for `Local`
@@ -2237,8 +2242,19 @@ pub use wrap.wrap
 ```
 
 A public declaration that is not re-exported does not become part of the
-parent directory's surface, and neither does the child module itself:
-reaching it from outside, as `text.wrap.wrap("hi")`, reports **E0605**.
+parent directory's surface, and neither does the child module itself: when
+`text/module.jet` re-exports only `wrap.[wrap as shout]`, reaching the file
+from outside, as `text.wrap.wrap("hi")`, reports **E0605**.
+
+A file and the item it re-exports may share a name, as `wrap` does above. The
+re-exported item then owns the name in the parent (D-MOD-NAMESPACE1):
+`text.wrap("hi")` calls the function, and inside `text/module.jet` the plain
+name `wrap` is the function too. The file is still reached where a module is
+expected, at the start of a `use` path such as `use wrap.decorate`. Any other
+`wrap.member` in the parent reports **E0628**, whose fix brings the member in
+with its own `use` line. This holds for `use` and `pub use` alike; every other
+pair of equal names stays **E0105**.
+
 Re-exported calls retain the defining function's borrow and move rules.
 Examples covering file modules, inline modules,
 qualified and grouped imports, and re-exports are in

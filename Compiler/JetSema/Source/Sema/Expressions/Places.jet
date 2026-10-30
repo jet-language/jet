@@ -487,6 +487,15 @@ fn sema_expression_field(field: Expr, base: Expr, member: String, span: Span, ex
     if base == .Ident(alias, _, _) {
         module_constant :: sema_expression_module_constant(alias, member, member_span, span, expected, environment, program, &scopes, &context, &diagnostics)
         if module_constant.handled -> return module_constant.value
+        if sema_call_taken_over_file_member(alias, member, member_span, environment, program, scopes) == .Val(taken) {
+            &diagnostics.push(taken)
+            return None
+        }
+        // `m :: lib.inner`: a module named through its parent is not a value.
+        if sema_expr_core_module_alias_visible(alias, scopes) && sema_call_module_member_is_module(environment, program, alias, member) {
+            &diagnostics.push(sema_module_used_as_value("{alias}.{member}", span))
+            return None
+        }
     }
     if base == .Field(root, nested, _, _) {
         if root == .Ident(alias, _, _) {
@@ -643,12 +652,14 @@ fn sema_expression_module_constant(alias: String, member: String, member_span: S
 }
 
 // E0605 for `alias.child` where `child` is a file module that the imported
-// source module declares (`module child` with no body). A folder module offers
-// only what it re-exports, so its file modules are never reachable through it.
+// source module declares (`module child` with no body) and `alias.child`
+// still names that file. A folder module offers only what it re-exports, so
+// its file modules are never reachable through it; when the folder takes the
+// file's same-named item (`pub use child.child`), `alias.child` is that item.
 // Core module paths such as `core.text.wrap` name published modules and keep
 // their own route.
 fn sema_expression_module_file_child(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol, alias: String, member: String, member_span: Span) -> Diagnostic? {
-    if resolved.target_module_identity.starts_with("<corelib>/") -> return None
+    if resolved.target_module_identity.starts_with("<corelib>/") || sema_resolved_kind(graph, resolved) != SymbolKind.Import -> return None
     owner_index :: sema_registration_module_index(graph, resolved.target_module_identity) ?? return None
     loop declaration in graph.modules[owner_index].declarations {
         if declaration == .CodeModule(definition) && definition.name == member && definition.body == None {
@@ -683,10 +694,20 @@ fn sema_expression_core_nested_constant(alias: String, nested: String, member: S
 // The read of a resolved module member: a constant is a ConstRef typed by its
 // staged value. A constant whose value has not landed is a dependency wait
 // (the reference names it) and, after the comptime run, a recorded
-// incomplete reason. Any other member kind is not a constant read.
+// incomplete reason. A source function member (`f :: text.shout`) reads as
+// the function value, as the bare name does once imported; Core functions
+// keep their own value route. Any other member kind is not a value read here.
 fn sema_expression_module_constant_read(graph: SemaRegistrationGraph, resolved: SemaRegistrationResolvedSymbol, label: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    if sema_resolved_kind(graph, resolved) != SymbolKind.Constant -> return SemaMethodSpecialCheck{handled: false, value: None}
+    kind :: sema_resolved_kind(graph, resolved)
+    source_function :: kind == SymbolKind.Function && !resolved.source_module_identity.starts_with("<corelib>/")
+    if kind != SymbolKind.Constant && !source_function -> return SemaMethodSpecialCheck{handled: false, value: None}
     symbol :: sema_resolved_symbol(graph, resolved)
+    if source_function {
+        signature :: symbol.ty ?? return SemaMethodSpecialCheck{handled: false, value: None}
+        &context.name_references.push(SemaNameReferenceFact{span: span, symbol: symbol, kind: "function"})
+        function :: sema_node(&context, sema_function_value_type(program, signature, symbol.module_name), NodeKind.ConstRef{symbol: symbol.id}, span)
+        return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(function, expected, environment, program, &diagnostics)}
+    }
     &context.name_references.push(SemaNameReferenceFact{span: span, symbol: symbol, kind: "const"})
     ty :: symbol.ty ?? {
         sema_check_unsupported(&context, "constant `{label}` (read at offset {span.start}) has no staged compile-time value")
