@@ -44,6 +44,9 @@ REPORT_FILES=(identity.tsv samples.tsv statistics.tsv outcomes.tsv measurements.
 METRICS=(source_effort build_time edit_time runtime memory artifact_size diagnostics debugging deployment unsafe_burden)
 LANGUAGES=(rust cxx go swift zig domain)
 TOWER_CLI="$ROOT/Tools/tower/tower.mjs"
+# Owners are checked against this tree's own board. Without TOWER_DATA, Tower
+# follows a linked worktree to the main checkout's live board.
+TOWER_BOARD="$ROOT/Tools/tower/.tower/tower.json"
 declare -A live_tower_owner_cache=()
 declare -gA policy_tolerance=() policy_rust_tolerance=()
 declare -gA policy_samples=()
@@ -285,7 +288,7 @@ live_tower_card() {
     return
   fi
   # `card show` is read-only; reject its history fallback as stale ownership.
-  if ! card="$(node "$TOWER_CLI" card show "$owner" --json 2>/dev/null)"; then
+  if ! card="$(TOWER_DATA="$TOWER_BOARD" node "$TOWER_CLI" card show "$owner" --json 2>/dev/null)"; then
     live_tower_owner_cache[$owner]=0
     return 1
   fi
@@ -308,7 +311,7 @@ ratified_non_goal() {
   owner_ok "$owner" && [[ "$owner" == non-goal:* ]] || return 1
   decision="${owner#non-goal:}"
   local ruling
-  if ! ruling="$(node "$TOWER_CLI" decision show "$decision" --json 2>/dev/null)"; then
+  if ! ruling="$(TOWER_DATA="$TOWER_BOARD" node "$TOWER_CLI" decision show "$decision" --json 2>/dev/null)"; then
     return 1
   fi
   node -e '

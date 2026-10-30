@@ -26,21 +26,10 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const RUNTIME_LEDGER_PATH = ".jet/reports/core-surface-ledger.json";
 const LEDGER_PATH = join(ROOT, RUNTIME_LEDGER_PATH);
 const PYTHON_SURFACE_PATH = join(ROOT, "Docs/spec/reference/python-surface.json");
-// The canonical board lives in the main checkout. A worktree carries its own
-// committed copy, which goes stale the moment a card is minted, and reading it
-// reported every new owner as missing. Resolve the main checkout through git
-// and fall back to this tree only when that fails. Read-only either way.
-const TOWER_PATH = (function () {
-  try {
-    const commonDir = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"],
-      { cwd: ROOT, encoding: "utf8" }).trim();
-    const candidate = join(dirname(commonDir), "Tools/tower/.tower/tower.json");
-    if (existsSync(candidate)) return candidate;
-  } catch (error) {
-    // Not a git checkout, or git is unavailable; use the in-tree copy.
-  }
-  return join(ROOT, "Tools/tower/.tower/tower.json");
-})();
+// Decisions and card owners come only from the board of the tree under check,
+// never from another checkout's live board, so the same tree checks the same
+// way in a git worktree and in a plain export. Read-only.
+const TOWER_PATH = join(ROOT, "Tools/tower/.tower/tower.json");
 const CORE_SOURCE_PATH = "Compiler/Prelude/Core.jet";
 // The Core rows with no Core.jet declaration: typed fixed-signature members,
 // built-in receiver methods, and the lowering-owned extension calls.
