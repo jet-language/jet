@@ -2162,6 +2162,17 @@ Arithmetic results are ordinary math values: lane reads, swizzles, and methods
 operate directly on them, including temporary receivers such as `(a + a).dot(a)`.
 See [`vector_result_values.jet`](../../../Examples/features/lowlevel/vector_result_values.jet).
 
+Swizzles (D-SWIZZLE1) name lanes with `x`, `y`, `z`, and `w` on `Vec2`,
+`Vec3`, `Vec4`, `F32x4`, and `F64x2`. A read of one lane is `lane`; a read of
+N lanes is the declaration's `__swizzleN` and yields `Vec2`/`Vec3`/`Vec4`
+(`F64x2` for an `F64x2` pair, `F32x4` for four `F32x4` lanes). A write
+`v.zx = e` — on a local or any field path — is the declaration's
+`__swizzle_setN` and takes the type the read yields; `v.zx += e` writes
+`v.zx + e`. An `F32x4` write narrows each `Float` with `F32.from_float` and
+stops when a value is outside the F32 range. A lane the type does not have is
+E3110, and a write that names a lane twice (`v.xx = …`) is E3111. See
+[`swizzle.jet`](../../../Examples/features/lowlevel/swizzle.jet).
+
 ```jet
 fn rotate(v: Vec3, transform: Mat3) -> Vec3 {
     unit :: v.normalize()

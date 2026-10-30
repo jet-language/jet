@@ -303,7 +303,6 @@ enum NodeKind {
     ListSpread(parts: [BodyListSpreadPart])
     MapLit(entries: [BodyMapEntry])
     PoolSlot(pool: Int, id: Int, mutable: Bool, field: String?, line: Int, source_line: String)
-    MathSwizzleRead(type_name: String, receiver: Int, lanes: [Int])
     // #4318: `fact` is the sema decision behind the copy.
     Clone(value: Int, fact: CopyFact)
     ExplicitCopy(value: Int)
@@ -1402,9 +1401,6 @@ fn body_each_node_kind_child(tree: BodyTree, value: NodeKind, visit: fn(Int) -[M
         }
         .PoolSlot(f0, f1, _, _, _, _) -> {
             visit(f0)
-            visit(f1)
-        }
-        .MathSwizzleRead(_, f1, _) -> {
             visit(f1)
         }
         .Clone(f0, _) -> {

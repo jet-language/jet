@@ -665,6 +665,12 @@ impl Vec2 {
     fn __swizzle2(self, a: Int, b: Int) -> Vec2 Never! { Vec2.new(self.lanes[a], self.lanes[b]) }
     fn __swizzle3(self, a: Int, b: Int, c: Int) -> Vec3 Never! { Vec3.new(self.lanes[a], self.lanes[b], self.lanes[c]) }
     fn __swizzle4(self, a: Int, b: Int, c: Int, d: Int) -> Vec4 Never! { Vec4.new(self.lanes[a], self.lanes[b], self.lanes[c], self.lanes[d]) }
+    // A swizzle write (`v.yx = w`) stores each lane it names from the value.
+    fn __swizzle_set1(&self, a: Int, value: Float) Never! { self.lanes[a] = value }
+    fn __swizzle_set2(&self, a: Int, b: Int, value: Vec2) Never! {
+        self.lanes[a] = value.lanes[0]
+        self.lanes[b] = value.lanes[1]
+    }
     fn dot(self, other: Vec2) -> Float Never! {
         self.lanes[0] * other.lanes[0] + self.lanes[1] * other.lanes[1]
     }
@@ -724,6 +730,17 @@ impl Vec3 {
     fn __swizzle2(self, a: Int, b: Int) -> Vec2 Never! { Vec2.new(self.lanes[a], self.lanes[b]) }
     fn __swizzle3(self, a: Int, b: Int, c: Int) -> Vec3 Never! { Vec3.new(self.lanes[a], self.lanes[b], self.lanes[c]) }
     fn __swizzle4(self, a: Int, b: Int, c: Int, d: Int) -> Vec4 Never! { Vec4.new(self.lanes[a], self.lanes[b], self.lanes[c], self.lanes[d]) }
+    // A swizzle write (`v.xy = w`) stores each lane it names from the value.
+    fn __swizzle_set1(&self, a: Int, value: Float) Never! { self.lanes[a] = value }
+    fn __swizzle_set2(&self, a: Int, b: Int, value: Vec2) Never! {
+        self.lanes[a] = value.lanes[0]
+        self.lanes[b] = value.lanes[1]
+    }
+    fn __swizzle_set3(&self, a: Int, b: Int, c: Int, value: Vec3) Never! {
+        self.lanes[a] = value.lanes[0]
+        self.lanes[b] = value.lanes[1]
+        self.lanes[c] = value.lanes[2]
+    }
     fn dot(self, other: Vec3) -> Float Never! {
         self.lanes[0] * other.lanes[0] + self.lanes[1] * other.lanes[1] + self.lanes[2] * other.lanes[2]
     }
@@ -819,6 +836,23 @@ impl Vec4 {
     fn __swizzle2(self, a: Int, b: Int) -> Vec2 Never! { Vec2.new(self.lanes[a], self.lanes[b]) }
     fn __swizzle3(self, a: Int, b: Int, c: Int) -> Vec3 Never! { Vec3.new(self.lanes[a], self.lanes[b], self.lanes[c]) }
     fn __swizzle4(self, a: Int, b: Int, c: Int, d: Int) -> Vec4 Never! { Vec4.new(self.lanes[a], self.lanes[b], self.lanes[c], self.lanes[d]) }
+    // A swizzle write (`v.xyz = w`) stores each lane it names from the value.
+    fn __swizzle_set1(&self, a: Int, value: Float) Never! { self.lanes[a] = value }
+    fn __swizzle_set2(&self, a: Int, b: Int, value: Vec2) Never! {
+        self.lanes[a] = value.lanes[0]
+        self.lanes[b] = value.lanes[1]
+    }
+    fn __swizzle_set3(&self, a: Int, b: Int, c: Int, value: Vec3) Never! {
+        self.lanes[a] = value.lanes[0]
+        self.lanes[b] = value.lanes[1]
+        self.lanes[c] = value.lanes[2]
+    }
+    fn __swizzle_set4(&self, a: Int, b: Int, c: Int, d: Int, value: Vec4) Never! {
+        self.lanes[a] = value.lanes[0]
+        self.lanes[b] = value.lanes[1]
+        self.lanes[c] = value.lanes[2]
+        self.lanes[d] = value.lanes[3]
+    }
     fn dot(self, other: Vec4) -> Float Never! {
         total := Float{0.0}
         loop i in 0..<4 -> total = total + self.lanes[i] * other.lanes[i]
@@ -1749,6 +1783,12 @@ impl F64x4.Div {
     assert_eq((value / value).lane(2), F64{1.0})
 }
 
+// An F32x4 swizzle write takes the Float vector its read gives; each lane
+// narrows as `F32.from_float` does and stops outside the F32 range.
+fn __f32_swizzle_lane(value: Float) -> F32 Never! {
+    F32.from_float(value) ?? core.math.__numeric_stop("swizzle write value {value} is outside the F32 range")
+}
+
 // The other SIMD lane types follow F64x4: a fixed array of scalar lanes, with
 // every operation the scalar spelling applied lane by lane and every reduction
 // the left-to-right scalar fold (D-SIMD1/D-SIMD2/D-SIMD3). Float `min` and
@@ -1765,6 +1805,27 @@ impl F32x4 {
     fn lane(self, index: Int) -> F32 Never! {
         if index < 0 || index >= 4 -> core.math.__numeric_stop("lane index {index} out of range for F32x4 (4 lanes)")
         self.lanes[index]
+    }
+    // Swizzles (D-SWIZZLE1): two or three lanes read as the Float vector of
+    // that width and all four as an F32x4; a write takes the type its read has.
+    fn __swizzle2(self, a: Int, b: Int) -> Vec2 Never! { Vec2.new(Float.from_f32(self.lanes[a]), Float.from_f32(self.lanes[b])) }
+    fn __swizzle3(self, a: Int, b: Int, c: Int) -> Vec3 Never! { Vec3.new(Float.from_f32(self.lanes[a]), Float.from_f32(self.lanes[b]), Float.from_f32(self.lanes[c])) }
+    fn __swizzle4(self, a: Int, b: Int, c: Int, d: Int) -> F32x4 Never! { F32x4.new(self.lanes[a], self.lanes[b], self.lanes[c], self.lanes[d]) }
+    fn __swizzle_set1(&self, a: Int, value: F32) Never! { self.lanes[a] = value }
+    fn __swizzle_set2(&self, a: Int, b: Int, value: Vec2) Never! {
+        self.lanes[a] = __f32_swizzle_lane(value.lanes[0])
+        self.lanes[b] = __f32_swizzle_lane(value.lanes[1])
+    }
+    fn __swizzle_set3(&self, a: Int, b: Int, c: Int, value: Vec3) Never! {
+        self.lanes[a] = __f32_swizzle_lane(value.lanes[0])
+        self.lanes[b] = __f32_swizzle_lane(value.lanes[1])
+        self.lanes[c] = __f32_swizzle_lane(value.lanes[2])
+    }
+    fn __swizzle_set4(&self, a: Int, b: Int, c: Int, d: Int, value: F32x4) Never! {
+        self.lanes[a] = value.lanes[0]
+        self.lanes[b] = value.lanes[1]
+        self.lanes[c] = value.lanes[2]
+        self.lanes[d] = value.lanes[3]
     }
     fn sum(self) -> F32 Never! {
         value := F32{0.0}
@@ -1925,6 +1986,13 @@ impl F64x2 {
     fn lane(self, index: Int) -> F64 Never! {
         if index < 0 || index >= 2 -> core.math.__numeric_stop("lane index {index} out of range for F64x2 (2 lanes)")
         self.lanes[index]
+    }
+    // Swizzles (D-SWIZZLE1): both lanes read and write as an F64x2.
+    fn __swizzle2(self, a: Int, b: Int) -> F64x2 Never! { F64x2.new(self.lanes[a], self.lanes[b]) }
+    fn __swizzle_set1(&self, a: Int, value: F64) Never! { self.lanes[a] = value }
+    fn __swizzle_set2(&self, a: Int, b: Int, value: F64x2) Never! {
+        self.lanes[a] = value.lanes[0]
+        self.lanes[b] = value.lanes[1]
     }
     fn sum(self) -> F64 Never! {
         value := F64{0.0}

@@ -3045,7 +3045,6 @@ fn sema_effect_walk_expr_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode]
             sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, pool)
             sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, id)
         }
-        .MathSwizzleRead(_, receiver, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, receiver)
         .Clone(value, _) | .ExplicitCopy(value) | .MaterializeView(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, value)
         .StaticCall(_, _, _, _, args) -> loop argument in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, argument.value)
         .DecodeUnder(segment, inner) -> {
