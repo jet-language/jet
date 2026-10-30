@@ -764,10 +764,17 @@ fn sema_call_perf_static(method: String, type_args: [Type], args: [CallArg], spa
     }
 }
 
+// The owner whose statics a static call runs, after aliases, with the type
+// arguments it receives.
+struct SemaStaticOwner {
+    symbol: Symbol
+    owner_type_args: [Type]
+}
+
 // Resolve associated methods through the declaration graph before trying an
 // intrinsic row. Core source carriers use the same SymbolId as imported user
 // carriers; a qualified owner is not a runtime field access.
-fn sema_call_static_source_owner(receiver: Expr, method: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Symbol? Never! {
+fn sema_call_static_source_owner(receiver: Expr, method: String, owner_type_args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaStaticOwner? Never! {
     owner_name :: if receiver == {
         .Ident(name, _, _) -> {
             if sema_scope_resolve_index(scopes, name) == .Val(index) {
@@ -777,10 +784,10 @@ fn sema_call_static_source_owner(receiver: Expr, method: String, environment: Se
                 // target's, as for the qualified spelling below.
                 if symbol.kind == SymbolKind.Type && program.registration_graph == .Val(graph) {
                     if sema_type_graph_nominal_row(graph, symbol.id.key) == .Val(row) {
-                        if sema_call_static_alias_target(graph, row) == .Val(target) -> return Val(sema_resolved_symbol(graph, target))
+                        if sema_call_static_alias_target(graph, row, owner_type_args) == .Val(target) -> return Val(SemaStaticOwner{symbol: sema_resolved_symbol(graph, target.symbol), owner_type_args: target.owner_type_args})
                     }
                 }
-                return Val(symbol)
+                return Val(SemaStaticOwner{symbol: symbol, owner_type_args: owner_type_args})
             }
             name
         }
@@ -795,29 +802,60 @@ fn sema_call_static_source_owner(receiver: Expr, method: String, environment: Se
         found :: sema_type_graph_lookup_symbol(graph, environment.module_identity, owner_name) ?? return None
         if sema_resolved_kind(graph, found) != SymbolKind.Type -> return None
         resolved := found
+        args := owner_type_args
         row := sema_type_graph_resolved_nominal_row(graph, found) ?? return None
-        if sema_call_static_alias_target(graph, row) == .Val(target) {
-            row = sema_type_graph_resolved_nominal_row(graph, target) ?? return None
-            resolved = target
+        if sema_call_static_alias_target(graph, row, owner_type_args) == .Val(target) {
+            row = sema_type_graph_resolved_nominal_row(graph, target.symbol) ?? return None
+            resolved = target.symbol
+            args = target.owner_type_args
         }
         nominal :: graph.modules[row.module_index].nominals[row.row]
         if !sema_call_static_registered_method_exists(graph, nominal, method, environment, program) -> return None
-        return Val(sema_resolved_symbol(graph, resolved))
+        return Val(SemaStaticOwner{symbol: sema_resolved_symbol(graph, resolved), owner_type_args: args})
     } else {
         return None
     }
 }
 
-// A plain alias (`Spot :: Point`) names its target's statics: the
-// target type of the nominal at `row` when that nominal is one.
-fn sema_call_static_alias_target(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef) -> SemaRegistrationResolvedSymbol? {
+struct SemaStaticAliasTarget {
+    symbol: SemaRegistrationResolvedSymbol
+    owner_type_args: [Type]
+}
+
+// An alias names its target's statics: the target type of the nominal at
+// `row` when that nominal is an alias of a named or applied type, with the
+// target's owner type arguments. A plain alias (`Spot :: Point`) passes the
+// call's owner arguments on. A generic alias (`Pair<A, B> :: Pair2<Float, A,
+// B>`) substitutes them into its target's arguments; without them the
+// target's arguments are left to inference.
+fn sema_call_static_alias_target(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef, owner_type_args: [Type]) -> SemaStaticAliasTarget? {
     alias_row :: graph.modules[row.module_index].nominals[row.row]
-    if alias_row.kind == SemaRegistrationNominalKind.TypeAlias && alias_row.generic_params.len() == 0 && alias_row.source == .SourceAST(item) && item == .TypeAlias(definition) && definition.target == .Named(target_name) {
-        target :: sema_type_graph_lookup_symbol(graph, graph.modules[row.module_index].module_identity, target_name) ?? return None
-        if sema_resolved_kind(graph, target) != SymbolKind.Type -> return None
-        return Val(target)
+    if alias_row.kind != SemaRegistrationNominalKind.TypeAlias -> return None
+    definition :: if alias_row.source == .SourceAST(item) && item == .TypeAlias(found) -> found else -> { return None }
+    target_name := ""
+    target_args := [Type]{}
+    if definition.target == {
+        .Named(name) -> target_name = name
+        .Apply(name, args) -> {
+            target_name = name
+            target_args = args
+        }
+        else -> return None
     }
-    None
+    target :: sema_type_graph_lookup_symbol(graph, graph.modules[row.module_index].module_identity, target_name) ?? return None
+    if sema_resolved_kind(graph, target) != SymbolKind.Type -> return None
+    if definition.type_params.len() == 0 {
+        if definition.target == .Named(_) -> return Val(SemaStaticAliasTarget{symbol: target, owner_type_args: owner_type_args})
+        if owner_type_args.len() > 0 -> return None
+        return Val(SemaStaticAliasTarget{symbol: target, owner_type_args: target_args})
+    }
+    if owner_type_args.len() == 0 -> return Val(SemaStaticAliasTarget{symbol: target, owner_type_args: [Type]{}})
+    if owner_type_args.len() != definition.type_params.len() -> return None
+    names := [String]{}
+    loop parameter in definition.type_params -> &names.push(parameter.name)
+    args := [Type]{}
+    loop arg in target_args -> &args.push(sema_inference_substitute_type(arg, names, owner_type_args))
+    Val(SemaStaticAliasTarget{symbol: target, owner_type_args: args})
 }
 
 // Rust options_rng.rs:19-135 check_option_lift2 (method_calls.rs:3559):
@@ -882,7 +920,7 @@ fn sema_call_option_lift2(args: [CallArg], span: Span, expected: Type?, environm
 
 fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if receiver == .Call(descriptor, _) -> return sema_call_try_inline_range_conversion(descriptor, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    owner_symbol :: sema_call_static_source_owner(receiver, method, environment, program, scopes) ?? {
+    static_owner :: sema_call_static_source_owner(receiver, method, owner_type_args, environment, program, scopes) ?? {
         if receiver == .Field(base, owner_leaf, _, _) -> return sema_call_try_builtin_static_field(base, owner_leaf, method, owner_type_args, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if receiver == .Ident(name, _, _) {
             if name == "Perf" && sema_scope_resolve_index(scopes, name) == None -> return sema_call_perf_static(method, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -900,6 +938,8 @@ fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span
         }
         return SemaMethodSpecialCheck{handled: false, value: None}
     }
+    owner_symbol :: static_owner.symbol
+    static_args :: static_owner.owner_type_args
     type_name :: owner_symbol.name
     if owner_symbol.kind != SymbolKind.Type -> return SemaMethodSpecialCheck{handled: false, value: None}
     if method == "new" && args.len() == 3 && type_name == "ExpiringSecret" && sema_module_is_core_source(owner_symbol.module_name) {
@@ -913,13 +953,13 @@ fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span
         owner_row :: sema_type_graph_nominal_row(graph, owner_symbol.id.key)
         if owner_row == .Val(row) {
             owner :: graph.modules[row.module_index].nominals[row.row]
-            targets = sema_call_static_registered_targets(graph, owner, method, owner_type_args, type_args, args, expected, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics)
-            generic_owner_method = owner.generic_params.len() > 0 && owner_type_args.len() == 0 && sema_call_static_registered_method_exists(graph, owner, method, environment, program)
+            targets = sema_call_static_registered_targets(graph, owner, method, static_args, type_args, args, expected, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics)
+            generic_owner_method = owner.generic_params.len() > 0 && static_args.len() == 0 && sema_call_static_registered_method_exists(graph, owner, method, environment, program)
         }
     }
     if targets.len() == 0 && program.registration_graph == None {
-        targets = sema_call_static_local_targets(owner_symbol, method, owner_type_args, type_args, args, expected, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics)
-        generic_owner_method = owner_type_args.len() == 0 && sema_call_static_local_generic_method_exists(owner_symbol, method, environment, program)
+        targets = sema_call_static_local_targets(owner_symbol, method, static_args, type_args, args, expected, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics)
+        generic_owner_method = static_args.len() == 0 && sema_call_static_local_generic_method_exists(owner_symbol, method, environment, program)
     }
     if targets.len() == 0 {
         if diagnostics.len() > diagnostics_before -> return SemaMethodSpecialCheck{handled: true, value: None}
@@ -927,7 +967,7 @@ fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span
         if distinct.handled -> return distinct
         // Declared statics win; a canonical Core or compiler owner then falls back to its built-in rows.
         if !generic_owner_method && sema_expr_canonical_type_binding(type_name, scopes) {
-            builtin := sema_call_try_builtin_static(type_name, owner_symbol.module_name, method, owner_type_args, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            builtin := sema_call_try_builtin_static(type_name, owner_symbol.module_name, method, static_args, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             if builtin.handled -> return builtin
         }
         if {

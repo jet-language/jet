@@ -1,0 +1,39 @@
+// An alias names its target's static methods: a generic alias puts its own
+// arguments into the target's (`Pair<Screen, World>` is
+// `Pair2<Float, Screen, World>`, `Fixed<World>` is
+// `Pair2<Int, Screen, World>`). Either spelling is one type, and a type
+// fact read through an alias reflects its target.
+struct Pair2<T, A, B> {
+    left: Int
+    right: Int
+}
+
+impl Pair2 {
+    fn make(left: Int, right: Int) -> Pair2<T, A, B> {
+        Pair2<T, A, B>{left: left, right: right}
+    }
+
+    fn sum(self) -> Int { self.left + self.right }
+}
+
+Pair<A, B> :: Pair2<Float, A, B>
+
+Fixed<B> :: Pair2<Int, Screen, B>
+
+PAIR_NAME :: comptime { Pair.$name }
+PAIR2_NAME :: comptime { Pair2.$name }
+FIXED_NAME :: comptime { Fixed.$name }
+
+fn keep(value: Pair<Screen, World>) -> Int { value.sum() }
+
+fn run() {
+    p :: Pair<Screen, World>.make(2, 3)
+    q :: Pair2<Float, Screen, World>.make(4, 5)
+    s :: Fixed<World>.make(6, 7)
+    print(keep(p))
+    print(keep(q))
+    print(s.sum())
+    print(PAIR_NAME == PAIR2_NAME)
+    print(FIXED_NAME == PAIR2_NAME)
+    print(PAIR_NAME)
+}

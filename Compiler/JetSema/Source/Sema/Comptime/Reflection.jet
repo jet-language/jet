@@ -1592,6 +1592,14 @@ fn sema_comptime_reflection_type_info(
         }
     }
     declaration :: item ?? return None
+    // An alias names the same type as its target, so it reflects the target.
+    if declaration == .TypeAlias(definition) {
+        row :: sema_type_resolve_nominal_row_at(graph, definition.target, index) ?? return None
+        target_module :: graph.modules[row.module_index]
+        target_name :: target_module.nominals[row.row].symbol.name
+        if row.module_index == index && target_name == type_name -> return None
+        return sema_comptime_reflection_type_info(graph, target_module.module_identity, target_name, catalog)
+    }
     registry :: sema_scope_members_build_marker_registry(graph, module_identity, registered_module.program, catalog) ?? return None
     engine :: sema_comptime_reflection_layout_engine(graph)
     identity := "{module_identity}::{type_name}"

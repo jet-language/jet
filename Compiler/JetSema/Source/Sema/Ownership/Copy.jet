@@ -848,22 +848,39 @@ fn sema_copy_apply_nested_facts(
     generic_params: [TGenericParam],
     walk: &SemaCopyWalk,
 ) -> SemaCopyTypeFacts Never! {
-    nested_cloneable := true
-    nested_heap := false
-    nested_clock := false
-    nested_dynamic_loan := false
-    nested_complete := true
-    nested_holds := false
-    loop arg in args {
-        facts :: sema_copy_type_facts(arg, graph, table, caller, generic_params, &walk)
-        nested_cloneable = nested_cloneable && facts.cloneable
-        nested_heap = nested_heap || facts.heap
-        nested_clock = nested_clock || facts.observable_clock
-        nested_dynamic_loan = nested_dynamic_loan || facts.dynamic_loan
-        nested_complete = nested_complete && facts.complete
-        nested_holds = nested_holds || facts.holds_resource
+    nested := sema_copy_type_facts_known(false, true, false, false, false, false, true)
+    loop arg in args -> nested = sema_copy_nested_join(nested, sema_copy_type_facts(arg, graph, table, caller, generic_params, &walk))
+    nested
+}
+
+// The facts of the arguments a struct or enum stores in its parts. A phantom
+// argument (a coordinate-space tag such as `Screen`) is never a value, so it
+// does not decide how the value copies, as with structural derives
+// (sema_comparability_equatable_arguments).
+fn sema_copy_stored_nested_facts(
+    nominal: SemaRegistrationNominal,
+    args: [Type],
+    graph: SemaRegistrationGraph?,
+    table: SemaCopyFactsTable,
+    caller: Int,
+    generic_params: [TGenericParam],
+    walk: &SemaCopyWalk,
+) -> SemaCopyTypeFacts Never! {
+    if nominal.source == .SourceAST(item) {
+        if (item == .Struct(_) || item == .Enum(_)) && nominal.generic_params.len() == args.len() {
+            nested := sema_copy_type_facts_known(false, true, false, false, false, false, true)
+            loop (index, parameter) in nominal.generic_params {
+                if sema_comparability_stored_parameter(item, parameter.name) -> nested = sema_copy_nested_join(nested, sema_copy_type_facts(args[index], graph, table, caller, generic_params, &walk))
+            }
+            return nested
+        }
     }
-    sema_copy_facts_holding(sema_copy_type_facts_known(false, nested_cloneable, nested_heap, nested_clock, false, nested_dynamic_loan, nested_complete), nested_holds)
+    sema_copy_apply_nested_facts(args, graph, table, caller, generic_params, &walk)
+}
+
+// Arguments' facts so far, joined with one more argument's.
+fn sema_copy_nested_join(nested: SemaCopyTypeFacts, facts: SemaCopyTypeFacts) -> SemaCopyTypeFacts Never! {
+    sema_copy_facts_holding(sema_copy_type_facts_known(false, nested.cloneable && facts.cloneable, nested.heap || facts.heap, nested.observable_clock || facts.observable_clock, false, nested.dynamic_loan || facts.dynamic_loan, nested.complete && facts.complete), nested.holds_resource || facts.holds_resource)
 }
 
 fn sema_copy_apply_facts(
@@ -877,14 +894,15 @@ fn sema_copy_apply_facts(
     walk: &SemaCopyWalk,
 ) -> SemaCopyTypeFacts Never! {
     dynamic_loan :: sema_copy_apply_is_dynamic_loan(name)
-    nested :: sema_copy_apply_nested_facts(args, graph, table, caller, generic_params, &walk)
     if core_source_owns_type(name) && core_identity_is(name, "core.crypto.vault", "ExpiringSecret") {
+        nested :: sema_copy_apply_nested_facts(args, graph, table, caller, generic_params, &walk)
         return sema_copy_facts_holding(sema_copy_type_facts_known(false, false, nested.heap, nested.observable_clock, false, dynamic_loan || nested.dynamic_loan, true), nested.holds_resource)
     }
     if graph == .Val(registered) {
         // A bare head taints a query, not the table's walk (sema_copy_named_facts).
         if !walk.table && !name.contains("::") -> walk.tainted = true
         if sema_type_resolve_nominal_row_at(registered, ty, caller) == .Val(row) {
+            nested :: sema_copy_stored_nested_facts(registered.modules[row.module_index].nominals[row.row], args, graph, table, caller, generic_params, &walk)
             nominal_facts :: sema_copy_nominal_facts(registered.modules[row.module_index].nominals[row.row], row, ty, graph, table, caller, generic_params, &walk)
             return SemaCopyTypeFacts{
                 copyable: sema_copy_copyable_scalar(ty),
@@ -899,6 +917,7 @@ fn sema_copy_apply_facts(
         }
         if !walk.table -> walk.tainted = true
     }
+    nested :: sema_copy_apply_nested_facts(args, graph, table, caller, generic_params, &walk)
     if sema_copy_apply_is_noncloneable(name) || sema_copy_apply_is_canonical_task(ty, name, graph, caller) {
         return sema_copy_facts_holding(sema_copy_type_facts_known(false, false, nested.heap, nested.observable_clock, false, dynamic_loan || nested.dynamic_loan, true), nested.holds_resource)
     }
