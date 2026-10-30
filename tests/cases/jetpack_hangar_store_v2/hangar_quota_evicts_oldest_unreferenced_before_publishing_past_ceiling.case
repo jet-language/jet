@@ -1,0 +1,26 @@
+# tests/jetpack_hangar_store_v2.rs::hangar_quota_evicts_oldest_unreferenced_before_publishing_past_ceiling at tests/jetpack_hangar_store_v2.rs:1714; hand-port
+# Claim: with a ceiling 2 MiB under the current logical footprint, admitting a new object evicts the oldest
+# unreferenced object first, keeps the newer one, and leaves the Hangar at or under the ceiling (rs:1757-1785)
+# Migrated: the Rust API Store::ingest_tree is `jetpack hangar ingest`. The Rust test backdated last_used_at to 1
+# and 2 through a test seam with no CLI; here the two ingests run one second apart (step-3.sh), so the oldest
+# object has the older last_used_at, which is the order the eviction reads. step-5.sh writes the ceiling and
+# step-7.sh checks the result with the Rust logical_bytes rule (rs:1715-1726: lstat size of every non-directory).
+requires: os:unix
+fixture: hangar_quota_evicts_oldest_unreferenced_before_publishing_past_ceiling.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/root
+step: sh {work}/step-1.sh
+exit: 0 # rs:1733-1734 4 MiB, 4 MiB and 64 KiB payloads
+step: jetpack hangar ingest quota-source-oldest --name quota-oldest --ref quota@fixture#oldest --no-color
+exit: 0 # rs:1759
+step: sh {work}/step-3.sh
+exit: 0 # rs:1761-1762 the oldest object is used first
+step: jetpack hangar ingest quota-source-newer --name quota-newer --ref quota@fixture#newer --no-color
+exit: 0 # rs:1760
+step: sh {work}/step-5.sh
+exit: 0 # rs:1764-1772 ceiling = footprint - 2 MiB, below the footprint
+step: jetpack hangar ingest quota-source-admitted --name quota-admitted --ref quota@fixture#admitted --no-color
+exit: 0 # rs:1774
+step: sh {work}/step-7.sh
+exit: 0 # rs:1775-1782 at or under the ceiling; oldest evicted, newer and admitted kept

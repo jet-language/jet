@@ -182,6 +182,7 @@ fn dc_report_codes(text: String) -> [String] {
 
 // tests/diagnostics_coverage.rs:1698 (I4a): every code the compiler sources
 // emit has a typed registry row.
+// Known failing: #6187 (E2231-E2239 emitted by JetDebug without registry rows).
 #Test("every_emitted_code_has_typed_row") {
     registered :: dc_registered_codes()
     missing := [String]{}
@@ -195,6 +196,7 @@ fn dc_report_codes(text: String) -> [String] {
 // tests/diagnostics_coverage.rs:2003: a registered, non-reserved row that no
 // source emits is listed with a `retired` or `staged #<card>` reason, and a
 // listed code that is now emitted must leave the list.
+// Known failing: #6187 (registered codes no Jet source emits).
 #Test("registered_unimplemented_codes_are_expected") {
     loop row in DC_SPEC_AHEAD_OF_IMPL {
         valid :: row.reason == "retired" || (row.reason.starts_with("staged #") && row.reason.count_bytes() > 8 && dc_slice(row.reason, 8, row.reason.count_bytes()).bytes().all(byte -> byte >= (U8{48}) && byte <= (U8{57})))
@@ -261,6 +263,7 @@ fn dc_report_codes(text: String) -> [String] {
 
 // tests/diagnostics_coverage.rs:1614 (#3715, #3719): placeholder consumer text,
 // raw byte offsets, and the lexer's synthetic terminator never render.
+// Known failing: #3715 (UI snapshots render `source bytes N..M`).
 #Test("diagnostic_snapshots_never_render_placeholders_offsets_or_synthetic_terminators") {
     failures := [String]{}
     loop snapshot in dc_snapshot_texts() {
@@ -287,6 +290,7 @@ fn dc_raw_code_panic(line: String) -> Bool {
 // tests/diagnostics_coverage.rs:1636: the runtime library reports Jet error
 // codes through Jet-owned report helpers, never a raw panic carrying the code.
 // The Rust gate scanned the Rust Prelude; its replacement is Jet source.
+// Known failing: #6187 (Core/Http/Server.jet raises panic("E2805: ...")).
 #Test("runtime_user_error_codes_use_jet_panic_voice") {
     paths := [String]{}
     dc_walk("Compiler/Prelude", &paths)
@@ -335,6 +339,7 @@ fn dc_marker_names() -> [String] {
 // tests/marker_registry_coverage.rs:713 (D-VERDICT-1455-1): the lexer, parser
 // and checker ask the registry about markers; they grow no second string
 // vocabulary of marker names.
+// Known failing: #6188 (marker-name literals in front-end sources).
 #Test("marker_name_literals_stay_in_the_registry") {
     names :: dc_marker_names()
     paths := [String]{}

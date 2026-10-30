@@ -5653,7 +5653,19 @@ fn ir_function_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: S
         ir_emit(&a.f, IROp.Call, dst, target, operands, arguments.len(), a.line)
         ir_stop_check(&m, &a)
         result := -1
-        if result_row >= 0 && dst >= 0 -> result = ir_adapt(&m, p, &a, dst, result_row, span)
+        if result_row >= 0 {
+            result_ty :: m.types[result_row].ty.copy()
+            if dst >= 0 {
+                result = ir_adapt(&m, p, &a, dst, result_row, span)
+            } else if ir_is_result(result_ty) {
+                // A Unit function as a `fn(..) E!` value: the caller of a
+                // fallible function value reads a Result box, so the adapter
+                // returns Ok(()).
+                result = ir_result_box(&m, p, &a, result_ty, true, -1)
+            } else {
+                ir_fail(&a, span, "named function {function.name} returns nothing as a value of {ir_type_name(ty)}")
+            }
+        }
         if a.error != "" {
             ir_emit(&a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
             m.functions[adapter] = ^a.f

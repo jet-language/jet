@@ -821,10 +821,10 @@ fn kit_execute_suites(options: KitOptions, root: String) -> KitExecution {
     loop result in results -> kit_report_row(result)
     if options.bless.ids.len() > 0 || options.bless.all -> print("bless: ids={options.bless.ids} all={options.bless.all} reason={options.bless.reason}")
     if env.trace_node == "" {
-        files.remove_all(run_scratch) ?? {
+        kit_exec_remove_tree(run_scratch) ?? {
             &results.push(KitCaseResult{suite: "kit", case: "cleanup", tier: "-", status: "ERROR", detail: "{err}", exit: -1})
             kit_report_row(results[results.len() - 1])
-            ()
+            false
         }
     }
     failures := [String]{}
@@ -913,9 +913,9 @@ fn kit_execute_entry(index: Int, item: KitSelected, options: KitOptions, env: Ki
         &run.results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: outcome.tier, status: outcome.verdict.status, detail: outcome.verdict.detail, exit: outcome.run.code, diff: outcome.verdict.diff})
     }
     if env.trace_node == "" {
-        files.remove_all(scratch) ?? {
+        kit_exec_remove_tree(scratch) ?? {
             &run.results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: "-", status: "ERROR", detail: "remove case scratch: {err}", exit: -1})
-            ()
+            false
         }
     }
     run

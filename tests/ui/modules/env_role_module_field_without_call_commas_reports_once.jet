@@ -1,0 +1,10 @@
+// #6143: a role-module field whose value stops at a stray closer is reported
+// and parsing ends; the field loop used to retry the same token forever.
+module env.ci {
+    secrets: {
+        DB_URL: compose(
+            template: url
+            from: [DB_HOST]
+        )
+    }
+}

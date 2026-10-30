@@ -214,6 +214,24 @@ fn kit_exec_copy_file(source: String, destination: String) {
     files.chmod(destination, info.mode % 512) ?? panic("copy mode {source}: {err}")
 }
 
+// Case scratch may hold trees a tool made read-only on purpose (Hangar objects
+// and seals). Removal restores owner access on directories, never following a
+// link, then retries.
+fn kit_exec_remove_tree(path: String) -> Bool Err! {
+    if files.remove_all(path) == .Ok(_) -> return Ok(true)
+    kit_exec_make_writable(path)
+    files.remove_all(path) ?? return Err("{err}")
+    Ok(true)
+}
+
+fn kit_exec_make_writable(path: String) {
+    info :: files.stat(path) ?? return
+    if info.is_symlink || !info.is_dir -> return
+    files.chmod(path, info.mode % 64 + 448) ?? return
+    entries :: files.list_dir(path) ?? return
+    loop entry in entries -> kit_exec_make_writable(entry.path)
+}
+
 
 fn kit_exec_optional(path: String) -> String? {
     if !files.exists(path) -> return None

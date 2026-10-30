@@ -120,6 +120,7 @@ fn mrc_rejected_the_marker(source: String) -> [String] {
 // tests/marker_registry_coverage.rs:224 (law zero, the reachable half): every
 // active row can be written at one of its own declared sites and is
 // recognized there.
+// Known failing: #6192 (#Commutative declares only the Impl site).
 #Test("every_active_row_is_reachable_at_a_declared_site") {
     catalog :: mrc_catalog()
     assert(catalog.rows.len() > 20, "the marker catalog must hold the active rows")
@@ -155,6 +156,8 @@ fn mrc_rejected_the_marker(source: String) -> [String] {
 // through the comptime reflection registry. The highlight half is
 // tests/guards/grammar_highlight.jet `every_highlight_token_is_in_each_generated_section`,
 // which checks every active marker row in each generated editor grammar.
+// Known failing: #6192 (#Commutative), #6190 (fmt duplicates #Redact),
+// #6191 (#Local/#Shared declarations fail to parse).
 #Test("every_active_row_walks_parse_validate_format_highlight_reflect") {
     catalog :: mrc_catalog()
     registry := SemaScopeMembersMarkerRegistry{applied_rules: catalog.rows, argument_menus: catalog.argument_menus, marker_rules: [SemaScopeMembersMarkerRule]{}, known_marker_names: [String]{}, function_allowed_markers: [String]{}, block_allowed_markers: [String]{}, derive_provider_names: [String]{}}

@@ -609,6 +609,7 @@ fn parser_parse_role_module(state: &JetParserState, modifiers: ParsedItemModifie
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
         parser_skip_semicolons(&state)
         if parser_current_kind(&state) == TOKEN_RBRACE -> break
+        before := state.position
         if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "sources" && parser_kind_at(&state, 1) == TOKEN_COLON {
             parsed_sources :: parser_module_sources(&state)
             loop source in parsed_sources -> &sources.push(source)
@@ -667,6 +668,10 @@ fn parser_parse_role_module(state: &JetParserState, modifiers: ParsedItemModifie
             }
         }
         if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
+        if state.position == before {
+            parser_add_error_here(&state, "the role-module body parser could not advance", "one malformed role-module field must not trap the enclosing parser", "complete the role-module field or remove it")
+            parser_bump(&state)
+        }
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after a role-module body")
     body_span :: parser_cover(namespace_head.span, close.span)
