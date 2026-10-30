@@ -2115,6 +2115,16 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     escapes = escape_fact ?? false
     lambda_work.meta.escapes = escapes
     if !sema_ownership_check_lambda_captures(&lambda_state, lambda_work, lambda_scopes, &diagnostics) -> return None
+    // The explicit `^name` captures moved their names into the lambda; the
+    // enclosing body has lost them too, so a later use there is E0121.
+    loop moved in lambda_state.moved {
+        if sema_ownership_place_moved(&lambda_parent_state, moved.place) != None -> next
+        taken := false
+        loop capture in lambda.take_names {
+            if capture.name == moved.place.root -> taken = true
+        }
+        if taken -> &state.moved.push(moved)
+    }
 
     found_capture_keys := [String]{}
     index = 0

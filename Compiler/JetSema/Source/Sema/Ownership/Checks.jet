@@ -43,6 +43,7 @@ use jet_foundation.[
     diagnostic_with_edit,
     diagnostic_with_edit_grade,
     diagnostic_with_label,
+    diagnostic_with_detail,
     expr_span,
     type_identity_equal,
     type_name,
@@ -127,6 +128,9 @@ struct SemaOwnershipMoveOrigin {
     // value leaves when that scope exits: until then later statements still
     // read it and only another move is refused.
     deferred_depth: Int?{None}
+    // The moved binding's type when the move names a plain binding, so the
+    // later use can say why a one-pass source has no copy to give.
+    moved_ty: Type?{None}
 }
 
 // A lambda whose body takes a captured name with `^`.
@@ -2259,7 +2263,8 @@ fn sema_ownership_move_origin(expr: Expr, ty: Type, consumer: String, unmarked: 
         else -> false
     }
     share_ty :: if unmarked && plain_name && sema_ownership_type_cloneable(ty) != (Val(false)) -> Val(ty) else -> None
-    SemaOwnershipMoveOrigin{span: expr_span(expr), consumer: consumer, share_ty: share_ty}
+    moved_ty :: if plain_name -> Val(ty) else -> None
+    SemaOwnershipMoveOrigin{span: expr_span(expr), consumer: consumer, share_ty: share_ty, moved_ty: moved_ty}
 }
 
 // A use after a move stays E0121 in this check. When the move was
@@ -2316,7 +2321,8 @@ fn sema_ownership_keep_share_found(state: &SemaOwnershipState, branch: SemaOwner
 
 // E0121 names the consumer every move recorder supplies and points a labelled
 // caret at the move site, so the reader sees both where the value went and
-// the later use. The reuse stays the primary span.
+// the later use. The reuse stays the primary span. A one-pass source has no
+// copy to give, so a note names its materializer or a fresh source instead.
 fn sema_ownership_diag_moved(place: String, origin: SemaOwnershipMoveOrigin, span: Span) -> Diagnostic {
     consumer :: origin.consumer
     same_site :: origin.span.start == span.start && origin.span.end == span.end
@@ -2328,7 +2334,28 @@ fn sema_ownership_diag_moved(place: String, origin: SemaOwnershipMoveOrigin, spa
         "After a value moves somewhere else, its old name no longer gives access to it",
         "Stop using `{place}` after the move, or give {consumer} a copy with `{place}.copy()` where it moved.",
     )
-    diagnostic_with_label(^diagnostic, origin.span, label)
+    labeled :: diagnostic_with_label(^diagnostic, origin.span, label)
+    if origin.moved_ty == .Val(ty) && sema_call_reflection_one_pass(ty) -> return diagnostic_with_detail(^labeled, sema_ownership_one_pass_note(place, ty))
+    labeled
+}
+
+// Rust `one_pass_materializer`: an Iter or ViewIter materializes with
+// `.to_list()` and a Body with `.text(limit)`; a Stream or HTTPBodyChunks has
+// no materializer and is drained with a loop.
+fn sema_ownership_one_pass_note(place: String, ty: Type) -> String Never! {
+    materializer := ""
+    if ty == {
+        .Apply(name, _) -> {
+            leaf :: sema_call_reflection_leaf_name(name)
+            if leaf == "Iter" || leaf == "ViewIter" -> materializer = ".to_list()"
+        }
+        .Named(name) -> {
+            if sema_call_reflection_leaf_name(name) == "Body" -> materializer = ".text(limit)"
+        }
+        else -> {}
+    }
+    if materializer == "" -> return " Note: `{place}` is one-pass and cannot be copied — create a fresh source for the second drive"
+    " Note: `{place}` is one-pass — materialize it first with `{place}{materializer}`, or create a fresh source for the second drive"
 }
 
 // Rust Diagnostics.rs aliasing_while_mut (the conflicting access writes) and
@@ -3644,6 +3671,12 @@ fn sema_ownership_argument_name(arg: CallArg) -> String Never! {
 // call and therefore cannot leak a Rust-style borrow into later statements.
 fn sema_ownership_check_call_receiver(state: &SemaOwnershipState, receiver: Expr, convention: AccessConvention, scopes: SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     sema_ownership_check_call_receiver_as(&state, receiver, convention, true, "", "", scopes, span, expr_span(receiver), &diagnostics)
+}
+
+// A built-in method's receiver check: a consuming receiver names the method
+// it moved into (`t` was consumed by `.join()`), never a generic phrase.
+fn sema_ownership_check_method_receiver(state: &SemaOwnershipState, receiver: Expr, convention: AccessConvention, method: String, scopes: SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    sema_ownership_check_call_receiver_as(&state, receiver, convention, true, "", "`.{method}()`", scopes, span, expr_span(receiver), &diagnostics)
 }
 
 // `change_span` anchors the missing write-capability report: the receiver for

@@ -3,16 +3,11 @@ Error [E0121]: `s` was consumed by `.loop()`, so it can't be used here
     |
  12 |     loop x in s -> print("{x}")
     |               ^
- Why: After a value moves to another name, the old name no longer gives access to it
- Fix: `s` is one-pass and cannot be copied — create a fresh source for the second drive
-move site: source bytes 145..146; reuse site: source bytes 177..178; consuming callee: .loop()
-More: jet-lang.dev/e/E0121
-
-Error [E0107]: Nothing named `x` exists here
-  --> tests/ui/loop_stream_reuse.jet:12:28
+  --> tests/ui/loop_stream_reuse.jet:11:15
     |
- 12 |     loop x in s -> print("{x}")
-    |                            ^
- Why: A name must be declared before it's used
- Fix: Did you mean `s`?
-More: jet-lang.dev/e/E0107
+ 11 |     loop x in s -> print("{x}")
+    |               ^ `s` moved to `.loop()` here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `s` after the move, or give `.loop()` a copy with `s.copy()` where it moved.
+ Note: `s` is one-pass and cannot be copied — create a fresh source for the second drive
+More: jet-lang.dev/e/E0121

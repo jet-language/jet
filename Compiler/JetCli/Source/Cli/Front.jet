@@ -1520,8 +1520,9 @@ fn jet_cli_front(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
 }
 
 fn jet_cli_plan(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]> JetCLIPlan Never! {
-    // The engine compiler aliases own every raw argument
-    // (Source/main.rs `dispatch_alias`), before Jet's output/flag parsing.
+    // The compiler verbs own every raw argument, before Jet's output/flag
+    // parsing; the `jet-cc`/`jet-cxx`/`jet-c++` aliases arrive here as these
+    // verbs (Host.jet `jet_cli_alias_args`).
     if raw.len() > 0 && (raw[0] == "cc" || raw[0] == "c++") -> return jet_cli_foreign_compile_plan(raw)
     // The internal compiler service owns its raw arguments, as the engine
     // aliases do: `jet __jetpack <op>`, nothing else.

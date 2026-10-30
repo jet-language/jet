@@ -307,7 +307,7 @@ fn sema_call_cell_guard_map(receiver: Expr, receiver_value: TExpr, editable: Boo
     }
     callback :: sema_call_cell_closure("map", inner, args[0], editable, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     path :: projection ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Move, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_ownership_check_method_receiver(&state, receiver, AccessConvention.Move, "map", scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     projected :: sema_call_signature_return(callback.ty) ?? Type.Named{name: "Unit"}
     result :: sema_call_cell_guard_type(editable, projected)
     value := sema_tree_node(result, TExprKind.HostCall{call: THostCall.CellGuardProject{receiver: receiver_value, paths: [[String]]{path}, result_type: result, editable: editable, edit_paths_disjoint: false}}, span)
@@ -340,7 +340,7 @@ fn sema_call_cell_guard_split(receiver: Expr, receiver_value: TExpr, editable: B
     first_callback :: first ?? return SemaMethodSpecialCheck{handled: true, value: None}
     second_callback :: second ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !complete -> return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Move, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_ownership_check_method_receiver(&state, receiver, AccessConvention.Move, "split", scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     first_guard :: sema_call_cell_guard_type(editable, sema_call_signature_return(first_callback.ty) ?? Type.Named{name: "Unit"})
     second_guard :: sema_call_cell_guard_type(editable, sema_call_signature_return(second_callback.ty) ?? Type.Named{name: "Unit"})
     result :: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "first", ty: first_guard}, TypeTupleField{name: "second", ty: second_guard}}}

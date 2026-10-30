@@ -44,7 +44,7 @@ import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import {
     chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, openSync, closeSync, readFileSync, readdirSync,
-    realpathSync, renameSync, rmSync, statSync, writeFileSync, appendFileSync, lstatSync,
+    realpathSync, renameSync, rmSync, statSync, writeFileSync, appendFileSync, lstatSync, linkSync,
 } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -89,9 +89,19 @@ export function nextReleaseName(names) {
     return `a0_${String(next).padStart(3, '0')}`;
 }
 
-// The release asset holding one host's seed: jet, jetpack, jet-runtime/, IDENTITY and SHA256SUMS.
+// The release asset holding one host's seed: jet, its compiler aliases, jetpack, jet-runtime/,
+// IDENTITY and SHA256SUMS.
 export function seedAssetName(release, platform = process.platform, arch = process.arch) {
     return `jet-${release}-${platform}-${arch}.tar.gz`;
+}
+
+// Docs/spec/reference/cc-driver.md: `jet-cc` runs `jet cc`, `jet-cxx` and `jet-c++` run
+// `jet c++`. They are hard links of `jet` (a real binary, not a wrapper); the CLI reads
+// argv[0] (JetCli Host.jet `jet_cli_alias_args`).
+export const COMPILER_ALIASES = ['jet-cc', 'jet-cxx', 'jet-c++'];
+
+export function linkCompilerAliases(dir) {
+    for (const alias of COMPILER_ALIASES) linkSync(join(dir, 'jet'), join(dir, alias));
 }
 
 // Disposition lines: suite TAB case TAB tier|* TAB #card TAB reason. A line starting with `#` is a comment.
@@ -586,6 +596,7 @@ function assemble(ctx, gate, plan) {
     mkdirSync(temp);
     copyFileSync(candidate.jet, join(temp, 'jet'));
     chmodSync(join(temp, 'jet'), 0o755);
+    linkCompilerAliases(temp);
     cpSync(candidate.runtime, join(temp, 'jet-runtime'), { recursive: true, verbatimSymlinks: true });
     if (candidate.jetpack) { copyFileSync(candidate.jetpack, join(temp, 'jetpack')); chmodSync(join(temp, 'jetpack'), 0o755); }
     exportCommit(sha, join(temp, 'toolchain'));
@@ -609,10 +620,10 @@ function assemble(ctx, gate, plan) {
         merge: plan,
     }, null, 2)}\n`);
     writeFileSync(join(temp, 'RELEASE.md'), report(ctx, gate, 'PASS', plan));
-    writeFileSync(join(temp, 'SHA256SUMS'), sumsOf(temp, ['jet', 'jetpack', 'jet-runtime', 'IDENTITY']));
+    writeFileSync(join(temp, 'SHA256SUMS'), sumsOf(temp, ['jet', ...COMPILER_ALIASES, 'jetpack', 'jet-runtime', 'IDENTITY']));
     const asset = seedAssetName(next);
     const packed = spawnSync('tar', ['--sort=name', '--owner=0', '--group=0', '--numeric-owner', '--mtime=@0', '--use-compress-program=gzip -n', '-cf', asset,
-        ...['jet', 'jetpack', 'jet-runtime', 'IDENTITY', 'SHA256SUMS'].filter(name => existsSync(join(temp, name)))], { cwd: temp, encoding: 'utf8' });
+        ...['jet', ...COMPILER_ALIASES, 'jetpack', 'jet-runtime', 'IDENTITY', 'SHA256SUMS'].filter(name => existsSync(join(temp, name)))], { cwd: temp, encoding: 'utf8' });
     if (packed.status !== 0) throw Error(`packing ${asset} failed: ${packed.stderr}`);
     writeFileSync(join(temp, `${asset}.sha256`), `${sha256File(join(temp, asset))}  ${asset}\n`);
     if (existsSync(dest)) throw Error(`${dest} appeared while assembling; ${temp} is left for inspection`);

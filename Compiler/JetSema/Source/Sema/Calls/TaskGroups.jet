@@ -856,7 +856,7 @@ fn sema_taskgroup_check_task_method(receiver: Expr, receiver_value: TExpr, metho
             &diagnostics.push(sema_error("E1103", span, "can't detach task `{name}` — it captured a value that can't cross a thread boundary", "a detached task runs unsupervised; it must only hold values it owns cleanly", "fix the E1102 error at the spawn site first, then `.detach()` is safe"))
         }
     }
-    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Move, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_ownership_check_method_receiver(&state, receiver, AccessConvention.Move, method, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     join := method == "join"
     result_type := if join -> sema_taskgroup_failure_result(payload) else -> Type.Named{name: "Unit"}
     operation := if join -> THandleOp.TaskJoin else -> THandleOp.TaskDetach

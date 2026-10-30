@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
-import { compareSuites, jetpackKeys, mergeTreeConflicts, nextReleaseName, parseArgs, parseChainResult, parseDispositions, seedAssetName } from './release-compiler.mjs';
+import { COMPILER_ALIASES, compareSuites, jetpackKeys, linkCompilerAliases, mergeTreeConflicts, nextReleaseName, parseArgs, parseChainResult, parseDispositions, seedAssetName } from './release-compiler.mjs';
 
 const row = (id, tier, status, suite = 'ui') => ({ suite, case: id, tier, status, detail: '' });
 
@@ -11,6 +14,20 @@ test('the next release name follows the highest a0_NNN', () => {
 
 test('the seed asset names the release and the host it runs on', () => {
     assert.equal(seedAssetName('a0_022', 'linux', 'x64'), 'jet-a0_022-linux-x64.tar.gz');
+});
+
+test('the release ships jet-cc, jet-cxx and jet-c++ as hard links of jet', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'release-aliases-'));
+    try {
+        writeFileSync(join(dir, 'jet'), 'binary');
+        linkCompilerAliases(dir);
+        assert.deepEqual(COMPILER_ALIASES, ['jet-cc', 'jet-cxx', 'jet-c++']);
+        const jet = statSync(join(dir, 'jet'));
+        for (const alias of COMPILER_ALIASES) assert.equal(statSync(join(dir, alias)).ino, jet.ino, alias);
+        assert.equal(jet.nlink, 4);
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
 });
 
 test('options collect every problem at once', () => {

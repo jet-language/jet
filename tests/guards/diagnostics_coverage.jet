@@ -10,25 +10,16 @@ use core.files as dc_files
 DC_RUSTC_CODES :: [String]{"E0061", "E0277", "E0425"}
 DC_EXCLUDED_CODES :: [String]{"E0061", "E0277", "E0425", "E0000", "E0019"}
 
-// The rows the compiler emits nothing for yet, each retired or staged on its
-// owning card (tests/diagnostics_coverage.rs:2005-2055).
+// The active rows the compiler emits nothing for yet, each staged on its
+// owning card (tests/diagnostics_coverage.rs:2005-2055). Rows the registry
+// marks `retired` stay explainable without an emitter and are not listed.
 DC_SPEC_AHEAD_OF_IMPL :: [(code: String, reason: String)]{
-    (code: "E0004", reason: "retired"), (code: "E0005", reason: "retired"), (code: "E0006", reason: "retired"),
-    (code: "E0007", reason: "retired"), (code: "E0062", reason: "retired"), (code: "E0071", reason: "retired"),
-    (code: "E0010", reason: "retired"), (code: "E0011", reason: "retired"), (code: "E0020", reason: "retired"),
-    (code: "E0058", reason: "retired"), (code: "E0206", reason: "retired"), (code: "E0207", reason: "retired"),
-    (code: "E0745", reason: "retired"), (code: "E0427", reason: "retired"), (code: "E0912", reason: "retired"),
-    (code: "E0990", reason: "retired"), (code: "E2301", reason: "retired"), (code: "E2302", reason: "retired"),
-    (code: "E2303", reason: "retired"), (code: "E2304", reason: "retired"), (code: "E2306", reason: "retired"),
     (code: "E2403", reason: "staged #1542"), (code: "E2410", reason: "staged #1830"), (code: "E2412", reason: "staged #1830"),
-    (code: "E2413", reason: "retired"), (code: "E2701", reason: "staged #1495"), (code: "E2801", reason: "staged #17"),
+    (code: "E2701", reason: "staged #1495"), (code: "E2801", reason: "staged #17"),
     (code: "E2802", reason: "staged #17"), (code: "E2803", reason: "staged #17"),
-    (code: "E2902", reason: "staged #1530"), (code: "E2940", reason: "staged #240"), (code: "E3104", reason: "retired"),
-    (code: "E0958", reason: "retired"), (code: "E0951", reason: "retired"), (code: "E0993", reason: "retired"),
-    (code: "E0328", reason: "retired"), (code: "E0342", reason: "staged #1606"), (code: "E0954", reason: "retired"),
-    (code: "E0920", reason: "retired"), (code: "E1109", reason: "staged #1220"), (code: "E1111", reason: "retired"),
-    (code: "E1229", reason: "retired"), (code: "E0410", reason: "retired"), (code: "E0859", reason: "staged #521"),
-    (code: "E0416", reason: "retired"), (code: "E0428", reason: "retired"), (code: "E2407", reason: "staged #1330"),
+    (code: "E2902", reason: "staged #1530"), (code: "E2940", reason: "staged #240"),
+    (code: "E0342", reason: "staged #1606"), (code: "E1109", reason: "staged #1220"),
+    (code: "E0859", reason: "staged #521"), (code: "E2407", reason: "staged #1330"),
     (code: "E3626", reason: "staged #521"),
 }
 
@@ -193,14 +184,15 @@ fn dc_report_codes(text: String) -> [String] {
     assert_eq(missing.join(" "), "")
 }
 
-// tests/diagnostics_coverage.rs:2003: a registered, non-reserved row that no
-// source emits is listed with a `retired` or `staged #<card>` reason, and a
-// listed code that is now emitted must leave the list.
+// tests/diagnostics_coverage.rs:2003: a registered row that is neither
+// reserved nor retired in the registry and that no source emits is listed
+// with a `staged #<card>` reason, and a listed code that is now emitted must
+// leave the list.
 // Known failing: #6187 (registered codes no Jet source emits).
 #Test("registered_unimplemented_codes_are_expected") {
     loop row in DC_SPEC_AHEAD_OF_IMPL {
-        valid :: row.reason == "retired" || (row.reason.starts_with("staged #") && row.reason.count_bytes() > 8 && dc_slice(row.reason, 8, row.reason.count_bytes()).bytes().all(byte -> byte >= (U8{48}) && byte <= (U8{57})))
-        assert(valid, "{row.code} reason must be `retired` or `staged #<card>`, got `{row.reason}`")
+        valid :: row.reason.starts_with("staged #") && row.reason.count_bytes() > 8 && dc_slice(row.reason, 8, row.reason.count_bytes()).bytes().all(byte -> byte >= (U8{48}) && byte <= (U8{57}))
+        assert(valid, "{row.code} reason must be `staged #<card>`, got `{row.reason}`")
     }
     rows :: dc_registered_rows()
     registered :: rows.map(row -> row.code)
@@ -218,7 +210,7 @@ fn dc_report_codes(text: String) -> [String] {
     }
     unlisted := [String]{}
     loop row in rows {
-        if row.status != "reserved" && !dc_has(DC_EXCLUDED_CODES, row.code) && !dc_has(emitted, row.code) && !dc_has(listed, row.code) -> &unlisted.push(row.code)
+        if row.status != "reserved" && row.status != "retired" && !dc_has(DC_EXCLUDED_CODES, row.code) && !dc_has(emitted, row.code) && !dc_has(listed, row.code) -> &unlisted.push(row.code)
     }
     &now_emitted.sort()
     &unlisted.sort()
@@ -263,7 +255,6 @@ fn dc_report_codes(text: String) -> [String] {
 
 // tests/diagnostics_coverage.rs:1614 (#3715, #3719): placeholder consumer text,
 // raw byte offsets, and the lexer's synthetic terminator never render.
-// Known failing: #3715 (UI snapshots render `source bytes N..M`).
 #Test("diagnostic_snapshots_never_render_placeholders_offsets_or_synthetic_terminators") {
     failures := [String]{}
     loop snapshot in dc_snapshot_texts() {

@@ -507,7 +507,7 @@ fn sema_call_memory_shared_guard_method(receiver: Expr, receiver_value: TExpr, g
     first_callback :: values[0] ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if method == "map" {
         projection :: paths[0] ?? return SemaMethodSpecialCheck{handled: true, value: None}
-        if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Move, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        if !sema_ownership_check_method_receiver(&state, receiver, AccessConvention.Move, method, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         mapped_type :: sema_call_signature_return(first_callback.ty) ?? Type.Named{name: "Unit"}
         mapped_guard := Type.Tagged{marker: guard.marker, inner: Type.Apply{name: "SharedGuard", args: [Type]{mapped_type}}}
         guard_row :: sema_arena_adopt(&context, receiver_value)
@@ -517,7 +517,7 @@ fn sema_call_memory_shared_guard_method(receiver: Expr, receiver_value: TExpr, g
     second_callback :: values[1] ?? return SemaMethodSpecialCheck{handled: true, value: None}
     first_path :: paths[0] ?? return SemaMethodSpecialCheck{handled: true, value: None}
     second_path :: paths[1] ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Move, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_ownership_check_method_receiver(&state, receiver, AccessConvention.Move, method, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     first_type :: sema_call_signature_return(first_callback.ty) ?? Type.Named{name: "Unit"}
     second_type :: sema_call_signature_return(second_callback.ty) ?? Type.Named{name: "Unit"}
     first_guard := Type.Tagged{marker: guard.marker, inner: Type.Apply{name: "SharedGuard", args: [Type]{first_type}}}

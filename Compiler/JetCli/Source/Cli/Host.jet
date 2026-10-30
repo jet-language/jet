@@ -2366,6 +2366,24 @@ fn jet_cli_maintenance_host(action: String, args: [String], color: Bool, json: B
     }
 }
 
+// The process arguments after argv[0], with the installed compiler aliases
+// (Docs/spec/reference/cc-driver.md) turned into their verbs: a `jet` binary
+// invoked as `jet-cc` runs `jet cc`, and as `jet-cxx` or `jet-c++` runs
+// `jet c++`. Every other name passes the arguments through unchanged.
+fn jet_cli_alias_args(argv: [String]) -> [String] Never! {
+    if argv.len() == 0 -> return [String]{}
+    rest :: argv[1..<argv.len()]
+    name :: jet_cli_file_name(argv[0].replace("\\", "/"))
+    stem :: if name.ends_with(".exe") -> name.slice(0..<(name.len() - 4)) else -> name
+    verb := ""
+    if stem == "jet-cc" -> verb = "cc"
+    if stem == "jet-cxx" || stem == "jet-c++" -> verb = "c++"
+    if verb == "" -> return rest
+    args := [String]{verb}
+    loop argument in rest -> &args.push(argument)
+    args
+}
+
 // Unannotated because the compile verbs are (Request.jet `jet_cli_compile_file`).
 // A compiling verb's compile traces through the process's one sink: the
 // target of `--trace[=FILE]` (which the front door admits only on those

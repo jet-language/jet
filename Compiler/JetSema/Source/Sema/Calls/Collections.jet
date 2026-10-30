@@ -211,7 +211,7 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
     if updated_args.len() < contract.minimum_arity || updated_args.len() > contract.maximum_arity {
         loop argument in updated_args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         &diagnostics.push(sema_call_builtin_method_arity(receiver_value.ty, method, updated_args.len(), span) ?? sema_call_collections_arity_error(method, contract, updated_args.len(), span))
-        _ := sema_ownership_check_call_receiver(&state, receiver, contract.receiver_access, scopes, span, &diagnostics)
+        _ := sema_ownership_check_method_receiver(&state, receiver, contract.receiver_access, method, scopes, span, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     copies_receiver := if contract.row.op == {.Copy -> true else -> false}

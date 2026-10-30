@@ -257,7 +257,7 @@ fn sema_expression_zip_consume_receiver(receiver: Expr, receiver_type: Type, met
                 &diagnostics.push(sema_error("E0120", receiver_span, "`{name}` was not moved here, so `.{method}()` can't take it", "this function has read access only and does not own the value", "call it on a copy, or take ownership with the move marker `^`: `{name}: ^{type_name(receiver_type)}`"))
                 return false
             }
-            return sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Move, scopes, receiver_span, &diagnostics)
+            return sema_ownership_check_method_receiver(&state, receiver, AccessConvention.Move, method, scopes, receiver_span, &diagnostics)
         }
         else -> {}
     }
