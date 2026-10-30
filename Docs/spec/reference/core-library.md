@@ -1085,7 +1085,8 @@ belongs to the listener's TLS setup, not to construction.
 `HTTPServer`, panicking when the address cannot be bound.
 
 An `HTTPServer` answers connections from `serve()` (alias `wait()`) until
-`shutdown(grace)`. Each request is answered before the next is accepted, so a
+`shutdown(grace)`, where `grace` defaults to zero. Each request is answered
+before the next is accepted, so a
 shutdown has no in-flight request to cancel. Every caller of `serve` and
 `shutdown` receives the same `HTTPShutdownReport{accepted, overloaded,
 completed, cancelled}`; a second `serve` is an `HTTPError.IO`. The connection

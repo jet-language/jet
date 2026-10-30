@@ -9,7 +9,9 @@ import {
   nativeRunIsWebTarget,
   parseArgs,
   runArgs,
+  runCwd,
   runProcess,
+  untilExpected,
   warningOnlyStderr,
   withoutWarningDiagnostics,
 } from "./run-feature-examples.mjs";
@@ -95,14 +97,22 @@ test("a single `jet run` or `built` case step supplies the run flags or program 
   const entry = { stem: "effects/authority_allow_flag", shown: "Examples/features/effects/authority_allow_flag.jet", path: "/repo/Examples/features/effects/authority_allow_flag.jet" };
   const shown = entry.shown;
   assert.deepEqual(runArgs(entry, null), ["run", shown]);
-  assert.deepEqual(runArgs(entry, "step: jet run --allow=Env,Time authority_allow_flag.jet\n"), ["run", "--allow=Env,Time", shown]);
+  assert.deepEqual(runArgs(entry, "step: jet run --allow=Env,Time authority_allow_flag.jet\n"), ["run", "--allow=Env,Time", "authority_allow_flag.jet"]);
   assert.deepEqual(runArgs(entry, "normalize: argv0\n"), ["run", shown]);
   assert.deepEqual(runArgs(entry, "step: built alpha beta\n"), ["run", shown, "--", "alpha", "beta"]);
   assert.deepEqual(runArgs(entry, "step: build\nstep: built alpha\n"), ["run", shown, "--", "alpha"]);
   assert.deepEqual(runArgs(entry, "step: built\n"), ["run", shown]);
   assert.deepEqual(runArgs(entry, "step: jet run --allow=Env other.jet\n"), ["run", shown]);
-  assert.deepEqual(runArgs(entry, "step: build\nstep: jet run -A authority_allow_flag.jet\n"), ["run", "-A", shown]);
+  assert.deepEqual(runArgs(entry, "step: build\nstep: jet run -A authority_allow_flag.jet\n"), ["run", "-A", "authority_allow_flag.jet"]);
   assert.deepEqual(runArgs(entry, "step: built a\nstep: built b\n"), ["run", shown]);
+});
+
+test("a case's own `jet run` step runs from the example's directory", () => {
+  const entry = { stem: "effects/authority_core_method", shown: "Examples/features/effects/authority_core_method.jet", path: "/repo/Examples/features/effects/authority_core_method.jet" };
+  assert.equal(runCwd(entry, "step: jet run authority_core_method.jet\n", "/stage"), "/stage/Examples/features/effects");
+  assert.equal(runCwd(entry, "step: built\n", "/stage"), "/stage");
+  assert.equal(runCwd(entry, null, "/stage"), "/stage");
+  assert.ok(runCwd(entry, "step: jet run authority_core_method.jet\n", undefined).endsWith("/Examples/features/effects"));
 });
 
 test("the build tier builds with the case's run flags", () => {
@@ -137,4 +147,17 @@ test("an exited program is not held by a background child that keeps the pipes o
   assert.equal(run.code, 0);
   assert.equal(run.stdout, "done\n");
   assert.ok(Date.now() - started < 5000, "the finished step settled within the drain window");
+});
+
+test("a `run: none` example passes once its output is the expected output", async () => {
+  const expected = { out: "true\n", err: null, stderrOut: null };
+  assert.equal(untilExpected("step: build\n", expected), null);
+  assert.equal(untilExpected("run: none\n", { ...expected, out: null }), null);
+  const until = untilExpected("# serves\nrun: none\n", expected);
+  const started = Date.now();
+  const run = await runProcess("sh", ["-c", "echo true; sleep 30"], { cwd: process.cwd(), timeoutMs: 20000, scratch: process.cwd(), until });
+  assert.equal(run.timedOut, false);
+  assert.equal(run.stopped, true);
+  assert.equal(classifyRun({ stem: "net/serve", path: "serve.jet" }, run, expected).status, "passed");
+  assert.ok(Date.now() - started < 5000, "the serving example was stopped at its expected output");
 });

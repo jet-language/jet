@@ -2,6 +2,7 @@
 use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
+    CallArg,
     Binding,
     CallContractRow,
     Diagnostic,
@@ -26,8 +27,10 @@ use jet_foundation.[
     TEffectSpan,
     TFailureCarrier,
     TLocal,
+    TTryConvert,
     Type,
     ViewProvenanceMap,
+    ast_empty_call_arg_flags,
     expr_span,
     symbol_id,
     checked_symbol_local,
@@ -1393,7 +1396,46 @@ fn sema_expression_lambda_apply_capture_facts(state: &SemaOwnershipState, lambda
 }
 
 fn sema_expression_lambda(lambda: Lambda, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if sema_expression_lambda_expects_http_handler(expected, environment, program) -> return sema_expression_lambda_http_handler(lambda, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     sema_expression_lambda_with_host(lambda, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, false, false, false, false)
+}
+
+// The canonical `core.http.server` request handler, never a same-named user
+// type.
+fn sema_expression_lambda_expects_http_handler(expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    wanted :: expected ?? return false
+    if sema_call_resolved_type(wanted, environment, program) == {
+        .Named(name) -> name == "<corelib>/core.http.server::HTTPHandler"
+        else -> false
+    }
+}
+
+// A lambda where an `HTTPHandler` is expected (a middleware returning the
+// handler that wraps `next`) is that handler: it checks and runs as
+// `core.http.server.__handler(^lambda)`, the constructor every route uses.
+fn sema_expression_lambda_http_handler(lambda: Lambda, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    span :: lambda.span
+    identity :: sema_call_core_module_identity(environment, program, "core.http.server") ?? {
+        &diagnostics.push(sema_error("E0003", span, "the HTTP server source module is not loaded", "a lambda used as an `HTTPHandler` runs as `core.http.server` builds every handler", "load the registered Core HTTP server source module"))
+        return None
+    }
+    target :: sema_call_core_source_target(environment, program, identity, "__handler", [Type]{}, span, true, &diagnostics) ?? {
+        &diagnostics.push(sema_error("E0003", span, "the HTTP handler constructor is not available", "a lambda used as an `HTTPHandler` runs as `core.http.server` builds every handler", "load the registered Core HTTP server source function"))
+        return None
+    }
+    handler := Expr.Lambda{lambda: lambda, id: AST_NODE_GENERATED}
+    source_args :: [CallArg]{CallArg{convention: AccessConvention.Move, expr: handler, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}
+    // `__handler` is `HTTPHandler Never!`: its proven `Never` rail unwraps
+    // to the handler the slot expects.
+    built :: sema_call_core_check_source_owned(target, "HTTPHandler", [Type]{}, source_args, span, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    if !sema_expression_lambda_never_rail(built.ty) -> return sema_expr_expected(built, expected, environment, program, &diagnostics)
+    handler_value :: sema_expression_propagated(built, TTryConvert.NoConversion, span) ?? return None
+    sema_expr_expected(handler_value, expected, environment, program, &diagnostics)
+}
+
+fn sema_expression_lambda_never_rail(ty: Type) -> Bool Never! {
+    if sema_expr_unwrap_tag(ty) == .Result(_, error) -> return sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"})
+    false
 }
 
 // Rust builtin_methods.rs collection callbacks: an expected `Fn` whose result

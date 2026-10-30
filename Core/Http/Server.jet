@@ -192,8 +192,8 @@ impl HTTPServer {
     }
 
     // Requests are answered one at a time, so the grace period never has an
-    // in-flight request left to cancel.
-    fn shutdown(self, grace: Duration) -[Net]> HTTPShutdownReport HTTPError! {
+    // in-flight request left to cancel; it defaults to none.
+    fn shutdown(self, grace: Duration{0ms}) -[Net]> HTTPShutdownReport HTTPError! {
         phase :: __server_request_stop(self)
         if phase == 0 -> return Ok(HTTPShutdownReport{accepted: 0, overloaded: 0, completed: 0, cancelled: 0})
         if phase == 1 {

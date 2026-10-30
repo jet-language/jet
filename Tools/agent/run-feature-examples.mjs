@@ -120,26 +120,51 @@ function readExpected(stem) {
 
 // The run flags and program arguments of an example's `<stem>.case`, as
 // testkit Golden.jet's direct tier runs it. A case whose only run step is
-// `step: jet run [FLAGS...] <file>` supplies those flags; one whose only run
-// step (after any `step: build`) is `step: built [ARGS...]` supplies the
-// program arguments. Without a case, or for any other case, neither.
+// `step: jet run [FLAGS...] <file>` supplies those flags and runs as written
+// (`step`); one whose only run step (after any `step: build`) is
+// `step: built [ARGS...]` supplies the program arguments. Without a case, or
+// for any other case, neither.
 export function caseInvocation(entry, caseText) {
-  const none = { flags: [], args: [] };
+  const none = { flags: [], args: [], step: false };
   if (caseText === null) return none;
   const steps = caseText.split("\n").map((line) => line.trim()).filter((line) => line.startsWith("step:"))
     .map((line) => line.slice("step:".length).trim().split(/\s+/u))
     .filter((words) => !(words.length === 1 && words[0] === "build"));
   if (steps.length !== 1) return none;
   const words = steps[0];
-  if (words[0] === "built") return { flags: [], args: words.slice(1) };
+  if (words[0] === "built") return { flags: [], args: words.slice(1), step: false };
   if (words.length < 3 || words[0] !== "jet" || words[1] !== "run" || words.at(-1) !== basename(entry.path)) return none;
-  return { flags: words.slice(2, -1), args: [] };
+  return { flags: words.slice(2, -1), args: [], step: true };
 }
 
-// The run tier's argv: `jet run [FLAGS...] <example> [-- ARGS...]`.
+// The run tier's argv: `jet run [FLAGS...] <example> [-- ARGS...]`. A case's
+// own `jet run` step names the file as it spells it, from the example's
+// directory (runCwd), so a diagnostic that echoes the path matches testkit.
 export function runArgs(entry, caseText) {
-  const { flags, args } = caseInvocation(entry, caseText);
-  return ["run", ...flags, entry.shown, ...(args.length ? ["--", ...args] : [])];
+  const { flags, args, step } = caseInvocation(entry, caseText);
+  return ["run", ...flags, step ? basename(entry.path) : entry.shown, ...(args.length ? ["--", ...args] : [])];
+}
+
+// The run tier's working directory: the staged project root (or the
+// repository root), and for a case's own `jet run` step the example's
+// directory under it, where testkit Golden.jet runs that step.
+export function runCwd(entry, caseText, stagedCwd) {
+  const root = stagedCwd ?? ROOT;
+  return caseInvocation(entry, caseText).step ? join(root, dirname(entry.shown)) : root;
+}
+
+// `run: none` in a case: the example serves until stopped (testkit Golden.jet
+// only compiles it). Its run passes once its output is the expected `.out`,
+// and the process group is stopped there (`until`). Without an expected
+// stream skipReason already skips it.
+export function caseRunsNone(caseText) {
+  return caseText !== null && caseText.split("\n").some((line) => line.trim() === "run: none");
+}
+
+export function untilExpected(caseText, expected) {
+  if (!caseRunsNone(caseText) || expected.out === null) return null;
+  const want = normalize(expected.out);
+  return (stdout) => normalize(stdout) === want;
 }
 
 // The build tier's argv: `jet build [FLAGS...] <example>`; the built binary
@@ -316,7 +341,7 @@ function builtArtifact(entryPath, stageRoot) {
 // wrote with the run tier's stdin, arguments and working directory. A
 // failed build is the verdict's run (its compile-time diagnostics).
 async function runBuilt(entry, caseText, staged, programCwd, options) {
-  const built = await runJet(buildArgs(entry, caseText), { ...options, cwd: staged.cwd, stdin: null });
+  const built = await runJet(buildArgs(entry, caseText), { ...options, cwd: staged.cwd, stdin: null, until: null });
   if (built.timedOut || built.code !== 0) return built;
   const artifact = builtArtifact(join(staged.cwd, entry.shown), staged.cwd);
   if (!existsSync(artifact)) {
@@ -372,7 +397,15 @@ export function runProcess(command, args, options) {
       child.stderr.destroy();
       resolveRun(result);
     };
-    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      // A `run: none` example serves until stopped: it is done once its
+      // output is the expected output.
+      if (options.until && options.until(stdout)) {
+        killGroup();
+        finish({ code: 0, stdout, stderr, timedOut, timeoutSec, stopped: true });
+      }
+    });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
     // A process killed in uninterruptible sleep (a whole-system sync, say)
     // exits only when that call returns, so a timeout does not wait for it.
@@ -490,6 +523,7 @@ async function main() {
         scratch,
         timeoutMs: options.timeoutSec * 1000,
         stdin: readStdin(entry.stem),
+        until: untilExpected(caseText, expected),
       };
       if (options.tier === "build") {
         const project = stageFeatureProject(entry, scratch, slot);
@@ -502,12 +536,12 @@ async function main() {
         }
       }
       const staged = stageFeatureProject(entry, scratch, slot);
-      const run = await runJet(runArgs(entry, caseText), { ...runOptions, cwd: staged?.cwd });
+      const run = await runJet(runArgs(entry, caseText), { ...runOptions, cwd: runCwd(entry, caseText, staged?.cwd) });
       const result = { stem: entry.stem, shown: entry.shown, ...classifyRun(entry, run, expected), stderr: run.stderr, stdout: run.stdout };
       if (result.status !== "passed") return result;
       for (const emitTier of EMIT_TIERS) {
         if (expected.emit[emitTier] === null) continue;
-        const emitted = await runJet(["emit", `--${emitTier}`, entry.shown], { ...runOptions, cwd: staged?.cwd, stdin: null });
+        const emitted = await runJet(["emit", `--${emitTier}`, entry.shown], { ...runOptions, cwd: staged?.cwd, stdin: null, until: null });
         const verdict = classifyEmit(emitTier, emitted, expected.emit[emitTier]);
         if (verdict) return { stem: entry.stem, shown: entry.shown, ...verdict, stderr: emitted.stderr, stdout: emitted.stdout };
       }
