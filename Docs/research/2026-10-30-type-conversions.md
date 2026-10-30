@@ -142,3 +142,50 @@ today.
   (`m6313p/p13`).
 - The E3010 text for an Int that has no exact Float says "cannot cross into the
   decimal", although the destination is `Float`, not `Decimal`.
+
+## A generic `From` and `To` trait
+
+The owner asked whether conversion could be a generic trait, written
+`impl Int.From(Float)` and `impl Int.To(Float)`. Probes `m6313q` and `m6313r`
+ran with the base compiler at bd83fe6361 and printed the same on o0, o1 and o2.
+
+| Case | Probe | Result |
+| --- | --- | --- |
+| User trait on `Float` (`impl Float.Describe`) | q01 | E0301 "The impl target `Float` is not a registered type" |
+| `fn Float.from_celsius(...)` from a user module | q02 | E0301, then E0107 |
+| `impl Float { fn from_celsius(...) }` | q03 | E0301 |
+| User trait with a static method on `Int` | q10 | E0301 |
+| Core trait `Display` on a user type | q07 | works, prints `2.5 C` |
+| Static `Celsius.from_float` on a user type | q08 | works |
+| Two traits that each declare `from`, on one type | q04 | E0105 "Method `from` is defined twice" |
+| Two static methods named `make` with different parameter types | q05 | E0105 |
+| Trait static method returning `Self` | r01, r02 | E0913, or E0113 "returns Self" |
+| `prep T: FromFloat` bound | q09, r03 | E0357 "Parameter `T` must be snake_case" |
+| Failure rail `impl Celsius -> Float` between non-error types | q06 | E0113 "This value is Float ... but `errconv_Celsius_to_Float` returns Float" |
+
+A built-in type cannot be an impl target, so no module can add a conversion
+into `Float` today. Jet has no overloading by parameter type. The E0357 on
+`prep T` contradicts the ratified spelling `prep T: Comparable`
+(D-GENERIC-TYPEFN1). The q06 message names an internal function and contradicts
+itself.
+
+Jet already has one conversion declaration: the failure rail
+`impl FileErr -> AppErr { … }` (D-ERR-CONV, `Docs/spec/spec.md:961-976`). Its
+ownership rule lets the module that owns either end write it, and reports a
+duplicate as E2405 and an unowned pair as E2406.
+
+Census in the dev worktree at abc19f121d (`b2/census-from.mjs`):
+
+- 2,889 calls of `Type.from_<built-in type>(`: Core 562, Compiler 723,
+  Examples 88, Jetpack 687, Tools 239, tests 590.
+- 3,361 other `Type.from_<name>(` calls. The largest are `from_bytes` (2,377),
+  `from_bytes_lossy` (149), `from_utf8_lossy` (118) and `from_text` (64). Some
+  name a user or unit type, such as `Centimeter.from_meter`.
+- 156 failure-rail lines `impl Source -> Target`.
+
+Prior art on which side is written. Rust has the destination write `From`;
+`Into` comes free, and a local type on either side satisfies the orphan rule. C#
+lets either the source or the target type declare a user conversion, and two
+declarations for one pair are ambiguous. Swift lets any module add an
+initializer to `Double`, with no ownership rule. Kotlin conversions are
+source-side `toX()` functions, often extension functions.
