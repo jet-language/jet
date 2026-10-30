@@ -630,8 +630,9 @@ fn sema_inline_rewrite_expr(rewrite: &SemaInlineRewrite, expression: Expr) -> Ex
         .Ident(name, span, node) -> {
             if !sema_inline_is_local(rewrite, name) && rewrite.values.get(name) == .Val(value) -> return sema_inline_value_at(value, span)
             // Rust `rewrite_inline_calls_expr`: a sibling named as a value
-            // becomes the module name, which name lookup then rejects.
-            if rewrite.siblings.get(name) != None -> return Expr.Ident{name: rewrite.sibling_module, span: span, id: node}
+            // becomes the module name, which name lookup then rejects. A
+            // local or parameter of the same name shadows the sibling.
+            if !sema_inline_is_local(rewrite, name) && rewrite.siblings.get(name) != None -> return Expr.Ident{name: rewrite.sibling_module, span: span, id: node}
             if !sema_inline_is_local(rewrite, name) {
                 if rewrite.qualified.get(name) == .Val(target) -> return Expr.Field{base: Expr.Ident{name: target.module_alias, span: span, id: node}, member: target.member, span: span, id: AST_NODE_GENERATED}
                 // A module is no value: Rust's name lookup has no `bank`.

@@ -1242,6 +1242,24 @@ fn ir_word_record(m: IRModule, p: IRProgram, row: Int) -> IRWordRecord? Never! {
     None
 }
 
+// A word record the program lays out itself (Core's source `Instant {
+// start_ns: Int }`, under any spelling of its name): its one exact-Int field,
+// at byte 0, is its whole layout, so a Word route answers the field.
+fn ir_laid_word_record(m: &IRModule, p: IRProgram, ty: Type) -> Bool Never! {
+    name :: ir_nominal_name(ir_untag(ty)) ?? return false
+    definition :: ir_type_def(p, name) ?? return false
+    handle :: ir_handle_runtime(p, p.types[definition].key) ?? return false
+    row :: ir_value_type(&m, p, ty) ?? return false
+    if ir_is_handle(m, row) || m.types[row].kind != .Aggregate || m.types[row].size != 8 -> return false
+    loop record in IR_WORD_RECORDS {
+        if record.runtime == handle.runtime {
+            schema :: ir_record_schema_row(handle) ?? return false
+            return schema.variants == "" && schema.fields == "{record.field}=Int"
+        }
+    }
+    false
+}
+
 // A Core struct carried as its runtime handle whose one String field is
 // the handle's text: its field name, the export that renders the text and
 // the export that builds the handle from it. The checked program names

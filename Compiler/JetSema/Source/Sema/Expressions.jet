@@ -676,7 +676,11 @@ fn sema_expr_operator_nominal_candidates(graph: SemaRegistrationGraph, nominal: 
     owner_module :: graph.modules[module_index].module_identity
     inference_ty := nominal.ty
     if receiver_canonical -> inference_ty = sema_type_resolve_declared(graph, nominal.ty, owner_module)
-    owner_inference :: sema_infer_registered_nominal(nominal, inference_ty, program.registration_graph, caller_module, caller_package, environment.generic_params, receiver_type, [Type]{}, None, span, &diagnostics) ?? return
+    // Every registered nominal of the receiver's name is a candidate owner
+    // (a user `Transform` beside `core.math`'s `Transform<From, To>`); one
+    // whose declaration cannot own the receiver is skipped, not reported.
+    probe_diagnostics := [Diagnostic]{}
+    owner_inference :: sema_infer_registered_nominal(nominal, inference_ty, program.registration_graph, caller_module, caller_package, environment.generic_params, receiver_type, [Type]{}, None, span, &probe_diagnostics) ?? return
     if !owner_inference.complete || !owner_inference.compatible -> return
     owner_type :: sema_inference_substitute_type_bindings(nominal.ty, owner_inference.substitutions)
     receiver_owner :: sema_inference_substitute_type_bindings(sema_expr_operator_reader_type(graph, nominal.ty, owner_module, nominal.generic_params, [SemaRegistrationGenericParam]{}), owner_inference.substitutions)
@@ -2634,7 +2638,10 @@ fn sema_expr_registration_method_candidates(graph: SemaRegistrationGraph, receiv
         found_owner = true
         inference_ty := nominal.ty
         if receiver_canonical -> inference_ty = sema_type_resolve_declared(graph, nominal.ty, graph.modules[owner_index].module_identity)
-        owner_inference :: sema_infer_registered_nominal(nominal, inference_ty, program.registration_graph, caller_module, caller_package, environment.generic_params, lookup_type, owner_type_args, None, span, &diagnostics) ?? next
+        // A same-named nominal that cannot own the receiver is skipped, not
+        // reported (see sema_expr_operator_nominal_candidates).
+        probe_diagnostics := [Diagnostic]{}
+        owner_inference :: sema_infer_registered_nominal(nominal, inference_ty, program.registration_graph, caller_module, caller_package, environment.generic_params, lookup_type, owner_type_args, None, span, &probe_diagnostics) ?? next
         if !owner_inference.complete || !owner_inference.compatible -> next
         // A canonical receiver meets its owner by identity (Rust
         // `struct_owner_module` names the owner; the receiver is never

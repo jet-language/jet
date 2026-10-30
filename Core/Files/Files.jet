@@ -1125,9 +1125,10 @@ fn dirname_impl(path: String) -> String Never! {
 fn dirname(path: String) -> String Never! { dirname_impl(path) }
 
 
-fn create_dir_all(path: String) IOError! -[FS]> {
-    file_fault("FS.Write", .Write, path)
-    core.files.__create_dirs_os(path)
+fn create_dir_all(path: String | Path) IOError! -[FS]> {
+    target :: path_text(path)
+    file_fault("FS.Write", .Write, target)
+    core.files.__create_dirs_os(target)
 }
 
 

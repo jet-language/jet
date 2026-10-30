@@ -229,6 +229,14 @@ fn realtime_join(stream: I64) {
     sync_store(scratch + RT_THREAD, handle)
     stream
 }
+// Checked FunctionAddress intrinsic in the canonical RuntimeLibrary table.
+fn rt_realtime_worker_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+// core.rt.__callback(rate, frames, callback), Realtime.rs callback: the IR
+// hands the callback's closure box over with its lazy.callback invoke and
+// lazy.release helpers; the stream skips through its own internal cell.
+#Export(c) fn jet_rt_callback(rate_word: I64, frames_word: I64, env: I64, invoke: I64, release: I64) -> I64 {
+    jet_rt_native_realtime_start(rate_word, frames_word, env, invoke, release, rt_realtime_worker_address(), I64{0})
+}
 #Export(c) fn jet_rt_native_realtime_worker(stream: I64) -> I64 {
     // Thread.jet attaches a fresh TCB, matching Realtime.rs:406-408. Never copy
     // caller provider, World or deadline TLS. Callback panic uses this control.

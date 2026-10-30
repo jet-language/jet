@@ -8,7 +8,6 @@ use core.log as log
 use core.testing as testing
 use core.process as process
 use core.time as time
-use core.tasks as tasks
 
 struct Metrics {
     requests: Int
@@ -23,7 +22,7 @@ fn health(req: HTTPRequest, metrics: Shared<Metrics>) -> HTTPResponse HTTPError!
 fn create_order(req: HTTPRequest, session_id: String, queue_path: String, metrics: Shared<Metrics>) -> HTTPResponse HTTPError! {
     metrics.guard_edit().value.requests += 1
     request_id :: backend.request_id(req.header("x-request-id") ?? "")
-    if !backend.role_allowed(req, session_id, "writer", time.now()) {
+    if !backend.role_allowed(req, session_id, "writer", time.now().to_unix_ms()) {
         metrics.guard_edit().value.errors += 1
         return backend.error_response(req, 401, "unauthorized", "writer role required")
     }
@@ -63,7 +62,7 @@ fn run() {
     queue_report :: backend.durable_queue(queue_path, "order:bootstrap", "order-1")
 
     auth.register_user("ada", "argon2id:demo") ?? panic("auth register")
-    session_id :: backend.issue_session("ada", "argon2id:demo", time.now(), 600000)
+    session_id :: backend.issue_session("ada", "argon2id:demo", time.now().to_unix_ms(), 600000)
     policy :: backend.session_policy()
     print("session-policy:{policy.session_header}/{policy.role_header}/{policy.cookie_name}")
     if session_id == "" -> panic("auth login")
@@ -144,6 +143,5 @@ fn run() {
 
     shutdown_report :: bound.shutdown(100ms) ?? panic("server shutdown")
     print("shutdown-cancelled:{shutdown_report.cancelled}")
-    completed :: serving.join() ?? panic("server join")
-    completed ?? panic("server join")
+    _completed :: serving.join() ?? panic("server join")
 }

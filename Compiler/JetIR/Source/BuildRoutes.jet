@@ -2943,6 +2943,24 @@ fn ir_route_inline(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inpu
         b.fresh[handler] = false
         return Val(-1)
     }
+    // `core.rt.__callback(rate, frames, callback)`: the runtime stream takes
+    // the callback's closure box over with its lazy.callback invoke (one
+    // borrowed List24<Float> slot) and lazy.release helpers (Realtime.jet
+    // jet_rt_callback).
+    if name == "jet_rt_callback" {
+        if inputs.len() != 3 || inputs[0] < 0 || inputs[1] < 0 || inputs[2] < 0 -> return Val(ir_fail_slot(&b, span, "rt.callback with {inputs.len()} arguments"))
+        stream_row :: ir_value_type(&m, p, result) ?? return Val(ir_type_fail(&b, span, result))
+        closure_ty :: m.types[b.f.slot_type[inputs[2]]].ty.copy()
+        invoke_id :: ir_lazy_helper(&m, p, &b, "callback", closure_ty, span)
+        if invoke_id < 0 -> return Val(-1)
+        invoke :: ir_lazy_address(&m, &b, invoke_id)
+        handed :: ir_closure_handover(&m, p, &b, inputs[2], span)
+        if handed.held < 0 -> return Val(-1)
+        stream :: ir_runtime(&m, &b, "jet_rt_callback", [Int]{inputs[0], inputs[1], handed.held, invoke, handed.release}, stream_row)
+        ir_release(&m, &b, inputs[0])
+        ir_release(&m, &b, inputs[1])
+        return Val(stream)
+    }
     // `math.sqrt(x)`: the IEEE square root, one instruction.
     if name == "jet_std_math_sqrt" {
         if inputs.len() != 1 || inputs[0] < 0 -> return Val(ir_fail_slot(&b, span, "sqrt with {inputs.len()} arguments"))
@@ -3841,7 +3859,7 @@ fn ir_route_symbol(symbol: String) -> String Never! {
 IR_ROUTES_INLINE :: comptime { [String]{
     "std::collections::BinaryHeap::new", "std::collections::HashSet::new", "std::collections::BTreeSet::new", "std::collections::VecDeque::new", "std::collections::HashMap::new", "jet_deque_from",
     "jet_eq", "jet_map_from_keys_kernel", "jet_map_from_keys_int", "jet_map_from_keys_composite",
-    "jet_ordering_then", "jet_ordering_reverse", "jet_std::JetShared::new", "jet_std::JetCell::new", "jet_std::JetPool::new", "jet_std_os_atexit", "jet_std_math_sqrt",
+    "jet_ordering_then", "jet_ordering_reverse", "jet_std::JetShared::new", "jet_std::JetCell::new", "jet_std::JetPool::new", "jet_std_os_atexit", "jet_rt_callback", "jet_std_math_sqrt",
     "jet_unicode_split_once", "jet_unicode_cut_last",
     "jet_list_get_opt", "jet_list_first", "jet_list_last", "jet_list_slice", "jet_list_index_of", "jet_list_sum",
     "jet_list_sum_fixed_f64", "jet_list_product", "jet_list_contains", "jet_list_equal", "jet_list_replace",
@@ -3960,6 +3978,14 @@ fn ir_route_plain(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, arg
         int_row :: ir_type_row(&m, Type.Int) ?? 0
         exact :: ir_runtime(&m, &b, export, args, int_row)
         return ir_word_record_new(&m, &b, record, exact, row)
+    }
+    if carrier == .Word && ir_laid_word_record(&m, p, result) {
+        int_row :: ir_type_row(&m, Type.Int) ?? 0
+        exact :: ir_runtime(&m, &b, export, args, int_row)
+        storage :: ir_fresh_temp(&m, &b, row)
+        ir_emit(&b.f, IROp.StackAddress, storage, m.types[row].size, 8, -1, b.line)
+        ir_store_at(&m, p, &b, storage, 0, exact)
+        return storage
     }
     if ir_option_inline(m, row) {
         // The runtime answers its generic Option box (ir_option_unbox).
