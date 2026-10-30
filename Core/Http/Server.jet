@@ -2,6 +2,8 @@ use core as core
 use core.http as http
 use core.http.[Body, Header, Headers, HTTPError, HTTPRequest, HTTPResponse]
 use core.encoding.json as json_codec
+use core.net.url as route_url
+use core.encoding.[Dyn]
 
 // core.http.server — HTTP/1.1 serving over core.net TCP.
 //
@@ -96,6 +98,10 @@ struct __HTTPRoute {
     pattern: String
     segments: [__HTTPSegment]
     handler: HTTPHandler
+    // The compiler-checked endpoint contract a `mux.get(…)`-style
+    // registration carries ("" for Core's own static and app routes);
+    // `web.openapi(mux)` renders it.
+    contract: String
 }
 
 struct __HTTPParsedRoute {
@@ -119,16 +125,18 @@ struct HTTPMux {
 }
 
 impl HTTPMux {
-    // `mux.get(pattern, handler)` and its sibling verbs land here.
-    fn __route(self, method: String, pattern: String, handler: ^fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!) Never! -[Net]> {
+    // `mux.get(pattern, handler)` and its sibling verbs land here with the
+    // route's checked contract.
+    fn __route(self, method: String, pattern: String, handler: ^fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String) Never! -[Net]> {
         parsed :: __route_parse(pattern)
         if parsed.problem != "" -> panic("E2805: invalid HTTP route `{pattern}`: {parsed.problem}")
+        checked :: if contract == "" -> "" else -> __route_contract(method, pattern, parsed.segments, contract)
         shape :: __route_shape(parsed.segments)
         loop existing in __mux_routes(self) {
             if existing.method == method && __route_shape(existing.segments) == shape -> panic("E2804: duplicate route `{method} {pattern}`")
         }
         guard := self.__state.guard_edit()
-        &guard.value.routes.push(__HTTPRoute{method: method, pattern: pattern, segments: parsed.segments, handler: __handler(^handler)})
+        &guard.value.routes.push(__HTTPRoute{method: method, pattern: pattern, segments: parsed.segments, handler: __handler(^handler), contract: checked})
     }
 
     // `mux.middleware(layer)`: the first registered layer is the outermost.
@@ -288,7 +296,7 @@ fn __http_serve_entry(mux: HTTPMux, deadline: Duration) -[Net]> HTTPServer Never
 fn __static_files_entry(mux: HTTPMux, prefix: String, root: String, index: Bool?, dotfiles: Bool?, follow_links: Bool?) Never! -[Net, FS.Read]> {
     mount :: __HTTPStaticMount{root: root, index: index ?? true, dotfiles: dotfiles ?? false, follow_links: follow_links ?? false}
     base :: __trim_trailing_slashes(prefix)
-    mux.__route("GET", "{base}/*jet_static_path", (request: HTTPRequest) -> Ok(__static_serve(mount, request)))
+    mux.__route("GET", "{base}/*jet_static_path", (request: HTTPRequest) -> Ok(__static_serve(mount, request)), "")
 }
 
 fn response(status: Int, body: String) -> HTTPResponse Never! {
@@ -696,6 +704,156 @@ fn __route_shape(segments: [__HTTPSegment]) -> String Never! {
         out = "{out}/{piece}"
     }
     out
+}
+
+// The OpenAPI path of a parsed route: static segments percent-encoded,
+// parameters as `{name}` (HTTPRoute.rs jet_http_route_openapi_path).
+fn __route_openapi_path(segments: [__HTTPSegment]) -> String Never! {
+    path := "/"
+    loop (index, segment) in segments {
+        if index > 0 -> path = "{path}/"
+        piece :: if segment == {
+            .Static(text) -> route_url.percent_encode(text)
+            .Param(name) | .CatchAll(name) -> "{{{name}}}"
+        }
+        path = "{path}{piece}"
+    }
+    path
+}
+
+// A registration's checked contract, completed and checked once
+// (HTTPServer.rs jet_http_mux_register): a dynamic pattern's contract
+// (`"pattern":""`) gets its path inputs from the pattern registered.
+fn __route_contract(method: String, pattern: String, segments: [__HTTPSegment], contract: String) -> String Never! {
+    completed :: if contract.contains("\"pattern\":\"\"") -> __route_complete_contract(method, pattern, segments, contract) else -> contract
+    __route_require_contract(method, pattern, completed)
+    completed
+}
+
+fn __contract_member(fields: [(key: String, value: Dyn)], name: String) -> Dyn? {
+    loop pair in fields {
+        if pair.key == name -> return Val(pair.value)
+    }
+    None
+}
+
+fn __contract_text(fields: [(key: String, value: Dyn)], name: String) -> String? {
+    value :: __contract_member(fields, name) ?? return None
+    if value == {
+        .Text(text) -> return Val(text)
+        else -> return None
+    }
+}
+
+// `fields` with member `name` replaced (it must be present).
+fn __contract_set(fields: [(key: String, value: Dyn)], name: String, value: Dyn) -> [(key: String, value: Dyn)] Never! {
+    out := [(key: String, value: Dyn)]{}
+    found := false
+    loop pair in fields {
+        if pair.key == name {
+            &out.push((key: name.copy(), value: value.copy()))
+            found = true
+        } else {
+            &out.push(pair)
+        }
+    }
+    if !found -> panic("checked HTTP route descriptor has no `{name}`")
+    out
+}
+
+// HTTPServer.rs jet_http_route_complete_contract.
+fn __route_complete_contract(method: String, pattern: String, segments: [__HTTPSegment], contract: String) -> String Never! {
+    parsed :: json_codec.parse(contract) ?? panic("invalid checked HTTP route descriptor")
+    fields := if parsed == {
+        .Object(members) -> members
+        else -> panic("checked HTTP route descriptor is not an object")
+    }
+    inputs :: __contract_member(fields, "parameters") ?? panic("checked HTTP route descriptor has no inputs")
+    parameters :: if inputs == {
+        .Array(items) -> items
+        else -> panic("checked HTTP route descriptor inputs are not an array")
+    }
+    loop segment in segments {
+        name :: if segment == {
+            .Param(found) | .CatchAll(found) -> found
+            .Static(_) -> { next }
+        }
+        bound := false
+        loop parameter in parameters {
+            if parameter == .Object(members) {
+                if (__contract_text(members, "name") ?? "") == name -> bound = true
+            }
+        }
+        if !bound -> panic("HTTP route `{pattern}` path field `{name}` has no typed handler input")
+    }
+    completed := [Dyn]{}
+    loop parameter in parameters {
+        members := if parameter == {
+            .Object(entries) -> entries
+            else -> panic("checked HTTP route input is not an object")
+        }
+        name :: __contract_text(members, "name") ?? panic("checked HTTP route input has no name")
+        catch_all := Bool?{None}
+        loop segment in segments {
+            if segment == {
+                .Param(candidate) -> { if candidate == name -> catch_all = Val(false) }
+                .CatchAll(candidate) -> { if candidate == name -> catch_all = Val(true) }
+                .Static(_) -> {}
+            }
+        }
+        if catch_all == .Val(wildcard) {
+            members = __contract_set(members, "in", Dyn.Text("path"))
+            members = __contract_set(members, "required", Dyn.Bool(true))
+            members = __contract_set(members, "catch_all", Dyn.Bool(wildcard))
+        } else if method != "GET" && method != "HEAD" {
+            panic("HTTP route `{pattern}` has unbound non-GET handler input `{name}`")
+        }
+        &completed.push(Dyn.Object(members))
+    }
+    fields = __contract_set(fields, "parameters", Dyn.Array(completed))
+    fields = __contract_set(fields, "pattern", Dyn.Text(pattern.copy()))
+    fields = __contract_set(fields, "path", Dyn.Text(__route_openapi_path(segments)))
+    fields = __contract_set(fields, "operation_id", Dyn.Text(""))
+    json_codec.dump(Dyn.Object(fields)) ?? panic("checked HTTP route descriptor does not render: {err.reason}")
+}
+
+// HTTPServer.rs jet_http_require_route_contract, for a mux route: its
+// responses may be empty at registration; `web.openapi` refuses that later.
+fn __route_require_contract(method: String, pattern: String, contract: String) Never! {
+    route :: "route `{method} {pattern}`"
+    parsed :: json_codec.parse(contract) ?? panic("E2805: {route} has an invalid checked endpoint contract")
+    fields :: if parsed == {
+        .Object(members) -> members
+        else -> panic("E2805: {route} has a non-object endpoint contract")
+    }
+    names :: [String]{"method", "pattern", "path", "operation_id", "summary", "parameters", "request_body", "responses", "security", "provenance"}
+    loop field in names {
+        if __contract_kind(fields, field) == "" -> panic("E2805: {route} has an incomplete endpoint contract")
+    }
+    if (__contract_text(fields, "method") ?? "") != method || (__contract_text(fields, "pattern") ?? "") != pattern -> panic("E2805: {route} does not match its endpoint contract")
+    if __contract_kind(fields, "responses") != "array" -> panic("E2805: {route} has invalid endpoint responses")
+    if __contract_kind(fields, "parameters") != "array" -> panic("E2805: {route} has invalid endpoint parameters")
+    if __contract_kind(fields, "security") != "array" -> panic("E2805: {route} has invalid endpoint security policy")
+    body :: __contract_member(fields, "request_body") ?? panic("E2805: {route} has an invalid endpoint request body")
+    valid :: if body == {
+        .Null -> true
+        .Object(members) -> __contract_kind(members, "required") == "bool" && (__contract_text(members, "content_type") ?? "") != "" && __contract_kind(members, "schema") == "object"
+        else -> false
+    }
+    if !valid -> panic("E2805: {route} has an invalid endpoint request body")
+}
+
+// The JSON kind of member `name`; "" when it is absent.
+fn __contract_kind(fields: [(key: String, value: Dyn)], name: String) -> String Never! {
+    value :: __contract_member(fields, name) ?? return ""
+    if value == {
+        .Null -> "null"
+        .Bool(_) -> "bool"
+        .Array(_) -> "array"
+        .Object(_) -> "object"
+        .Text(_) -> "text"
+        else -> "number"
+    }
 }
 
 // A path's decoded segments; `None` for a target the router refuses.

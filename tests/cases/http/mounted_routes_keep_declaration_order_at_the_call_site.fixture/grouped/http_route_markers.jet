@@ -1,4 +1,9 @@
 // D-HTTP-ROUTE-EXPOSE1=A: tags expose only this explicitly mounted value.
+package {
+    name: "http_route_markers"
+    authority: { allow: [FS.Read, Net, Time] }
+}
+
 use core.http.client as client
 use core.http.server as server
 use core.net as net
@@ -23,7 +28,7 @@ struct Jokes {
 
     #Server.Post("/jokes")
     fn add(self, request: HTTPRequest) -> HTTPResponse HTTPError! {
-        input :: request.json<NewJoke>() ?? return
+        input :: request.json<NewJoke>()
         self.state.guard_edit().value.added += 1
         Ok(server.response(201, "{self.prefix}: {input.text}"))
     }

@@ -1412,6 +1412,8 @@ fn sema_call_core_check_source_owned(target: SemaCallDirectTarget, qualified_nam
         check :: sema_compiler_services_check_call("core.build", "graph", args, span, environment.function_name == "build", environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return sema_compiler_services_lower_core_call(check, span, expected, environment, program, &scopes, &context, &diagnostics)
     }
+    web_openapi := sema_call_http_web_openapi_mux(target, qualified_name, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if web_openapi.handled -> return web_openapi.value
     call_args := args
     if sema_call_devtools_is_publish(target, environment, program) {
         call_args = sema_call_devtools_publish_args(args, span, environment, program, &diagnostics) ?? return None
