@@ -1403,6 +1403,7 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
                 if ir_tag_order_test(&m, p, &b, op == .Ne, lhs, rhs) == .Val(tested) -> return tested
                 if ir_absent_test(&m, p, &b, op == .Ne, lhs, rhs) == .Val(tested) -> return tested
             }
+            if ir_binary_chain_level(p, b, lhs) -> return ir_binary_chain(&m, p, &b, expression)
             left :: ir_expr(&m, p, &b, lhs)
             right :: ir_expr(&m, p, &b, rhs)
             if ir_failed(b) -> return -1
@@ -1817,6 +1818,52 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
             return ir_fail_slot(&b, span, "expression {kind_name}")
         }
     }
+}
+
+// Whether node `expression` is an inner level of a left-leaning operator
+// chain (ir_binary_chain): a binary operator lowered as its two operands and
+// the operator, not a layout value, a short circuit or a tag/absence test.
+fn ir_binary_chain_level(p: IRProgram, b: IRBuilder, expression: Int) -> Bool Never! {
+    if ir_body_node(p, b, expression).kind == .Binary(op, _, _, _, _) -> return op != .And && op != .Or && op != .Eq && op != .Ne && !ir_layout_value_type(ir_ty(p, b, expression))
+    false
+}
+
+// A binary operator whose left operand is a chain level, as ir_expr's
+// `.Binary` lowers it, by a loop rather than one ir_expr frame per level
+// (#6072): each level's line is set on the way down, the innermost left
+// operand is lowered, then each level's right operand and operator from the
+// innermost out.
+fn ir_binary_chain(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Never! {
+    levels := [Int]{expression}
+    current := expression
+    loop {
+        if ir_body_node(p, b, current).kind == .Binary(_, _, line, lhs, _) {
+            if line > 0 -> b.line = line
+            if !ir_binary_chain_level(p, b, lhs) -> break
+            &levels.push(lhs)
+            current = lhs
+        } else {
+            break
+        }
+    }
+    innermost :: levels[levels.len() - 1]
+    left := if ir_body_node(p, b, innermost).kind == .Binary(_, _, _, lhs, _) -> ir_expr(&m, p, &b, lhs) else -> -1
+    index := levels.len() - 1
+    loop index >= 0 {
+        node :: ir_body_node(p, b, levels[index])
+        if node.kind == .Binary(op, overflow, line, lhs, rhs) {
+            right :: ir_expr(&m, p, &b, rhs)
+            if ir_failed(b) -> return -1
+            lhs_ty :: ir_ty(p, b, lhs)
+            rhs_ty :: ir_ty(p, b, rhs)
+            result :: ir_binary(&m, p, &b, op, overflow, line, lhs_ty, left, right, rhs_ty, node.span)
+            ir_release(&m, &b, left)
+            ir_release(&m, &b, right)
+            left = result
+        }
+        index -= 1
+    }
+    left
 }
 
 // `*x`: the address of variable `x`'s value. An aggregate variable is its

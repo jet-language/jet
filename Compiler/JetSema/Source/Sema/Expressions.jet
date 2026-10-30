@@ -3994,14 +3994,25 @@ fn sema_dyn_float_literal_value(expr: Expr) -> Float? Never! {
 // left operand also inherits the surrounding expectation in Rust, so
 // `through_binary` follows it for an operand that is itself checked under
 // that expectation.
+// A loop, not recursion: a left operand chain is as long as its source
+// (#6072).
 fn sema_expr_decimal_literal_operand(expr: Expr, through_binary: Bool) -> Bool Never! {
-    if expr == {
-        .Float(_, _, _, _, _) -> true
-        .Paren(inner, _, _) -> sema_expr_decimal_literal_operand(inner, through_binary)
-        .Unary(op, inner, _, _) -> op == UnOp.Neg && sema_expr_decimal_literal_operand(inner, through_binary)
-        .Binary(_, left, _, _, _) -> through_binary && sema_expr_decimal_literal_operand(left, true)
-        else -> false
+    current := expr
+    loop {
+        if current == {
+            .Paren(inner, _, _) -> current = inner
+            .Unary(op, inner, _, _) -> {
+                if op != UnOp.Neg -> return false
+                current = inner
+            }
+            .Binary(_, left, _, _, _) -> {
+                if !through_binary -> return false
+                current = left
+            }
+            else -> break
+        }
     }
+    current == .Float(_, _, _, _, _)
 }
 
 fn sema_expr_measurement_type(ty: Type) -> Bool Never! {
@@ -4029,8 +4040,10 @@ fn sema_expr_unit_probe_shape(expr: Expr) -> Bool Never! {
 
 // Rust `infer_binary`: the left operand keeps the surrounding expectation,
 // and a literal before a measurement (or a unit under `*` or `/`) is Float.
-fn sema_expr_decimal_lhs_expected(op: BinOp, left: Expr, right: Expr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Type? {
-    if !sema_expr_decimal_literal_operand(left, true) -> return None
+// `decimal`: the left operand is a decimal literal operand
+// (sema_expr_decimal_literal_operand through binaries).
+fn sema_expr_decimal_lhs_expected(op: BinOp, decimal: Bool, right: Expr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Type? {
+    if !decimal -> return None
     // copy: the left-hand expectation is a new owned Type equal to `expected`, the caller's
     // expectation (a read parameter), which the caller keeps for the right side.
     if sema_expr_expects_machine_float(expected) -> return expected.copy()
@@ -4246,8 +4259,63 @@ fn sema_expr_lint_zero_divisor(op: BinOp, right: Expr, dividend: Type, divisor: 
 }
 
 fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if left == .Binary(_, _, _, _, _) -> return sema_expr_check_binary_chain(op, left, right, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     sema_expr_lint_path_prefix(op, left, right, span, scopes, &diagnostics)
-    checked_lhs := sema_check_expression(left, sema_expr_decimal_lhs_expected(op, left, right, expected, environment, program, &scopes, &state, &tail_store, &context), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    checked_lhs := sema_check_expression(left, sema_expr_decimal_lhs_expected(op, sema_expr_decimal_literal_operand(left, true), right, expected, environment, program, &scopes, &state, &tail_store, &context), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    sema_expr_check_binary_operands(op, left, right, span, expected, ^checked_lhs, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+}
+
+// One inner operator of a left-leaning chain (`a + b + c …`): its Binary
+// node and the expectation its value is checked under.
+struct SemaBinaryLevel {
+    expr: Expr
+    expected: Type?
+}
+
+// A left-leaning chain checks in this one frame, not one checking frame per
+// operator, so its length is no source nesting and costs no stack (#6072).
+// Going down, each level runs its lint and computes its left operand's
+// expectation; the innermost left operand is checked; going up, each level
+// checks its right operand and operator and files its node as
+// sema_check_expression does. That is the order checking level by level
+// runs them. Every left operand on the chain shares its innermost one's
+// decimal-literal shape, so that walk runs once.
+fn sema_expr_check_binary_chain(op: BinOp, left: Expr, right: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    decimal :: sema_expr_decimal_literal_operand(left, true)
+    sema_expr_lint_path_prefix(op, left, right, span, scopes, &diagnostics)
+    levels := [SemaBinaryLevel]{}
+    operand_expected := sema_expr_decimal_lhs_expected(op, decimal, right, expected, environment, program, &scopes, &state, &tail_store, &context)
+    operand := left
+    loop {
+        if operand == .Binary(level_op, level_left, level_right, level_span, _) {
+            sema_expr_lint_path_prefix(level_op, level_left, level_right, level_span, scopes, &diagnostics)
+            inner_expected :: sema_expr_decimal_lhs_expected(level_op, decimal, level_right, operand_expected, environment, program, &scopes, &state, &tail_store, &context)
+            &levels.push(SemaBinaryLevel{expr: operand, expected: operand_expected})
+            operand_expected = inner_expected
+            operand = level_left
+        } else {
+            break
+        }
+    }
+    checked := sema_check_expression(operand, operand_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    index := levels.len() - 1
+    loop index >= 0 {
+        if levels[index].expr == .Binary(level_op, level_left, level_right, level_span, _) {
+            value := sema_expr_check_binary_operands(level_op, level_left, level_right, level_span, levels[index].expected, ^checked, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+            if sema_core_type_uses_default_int(value.ty) -> context.exact_int_reachable = true
+            sema_cell_guard_check_construct(levels[index].expr, value.ty, &diagnostics)
+            sema_check_record_expr_id(levels[index].expr, &value, &context)
+            checked = ^value
+        }
+        index -= 1
+    }
+    sema_expr_check_binary_operands(op, left, right, span, expected, ^checked, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+}
+
+// A binary operator whose left operand `left` is checked (`checked_left`):
+// its right operand and the operator.
+fn sema_expr_check_binary_operands(op: BinOp, left: Expr, right: Expr, span: Span, expected: Type?, checked_left: ^TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    checked_lhs := ^checked_left
     rhs_expected := Type?{None}
     if {
         sema_expr_layout_compare_literal(op, checked_lhs.ty, right) -> rhs_expected = Val(Type.Float)
