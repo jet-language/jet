@@ -772,6 +772,24 @@ fn ir_close_method(m: IRModule, p: IRProgram, row: Int) -> Int Never! {
     p.close_methods.get(key) ?? -1
 }
 
+// Whether type row `row` is a value that only moves and has a drop (a
+// ScopeGuard, a Task, a file or socket handle). A tuple or struct holding one
+// does not drop it with its glue (ir_glue_drops): the holder's variable ends
+// it as one of its closing parts instead, where moves out of it are tracked.
+fn ir_close_handle(m: IRModule, row: Int) -> Bool Never! {
+    m.types[row].kind == .Pointer && m.types[row].drop != "" && m.types[row].clone == "" && !ir_box_row(m, row)
+}
+
+// Whether the tuple or struct row `row` holds a move-only handle inline.
+fn ir_close_holds_handle(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
+    if m.types[row].kind != .Aggregate || ir_buffer_element(&m, p, row) != None -> return false
+    members :: ir_inline_members(&m, p, row) ?? return false
+    loop member in members {
+        if !member.boxed && ir_close_handle(m, member.ty) -> return true
+    }
+    false
+}
+
 // The type rows a value of type row `row` holds directly: tuple and struct
 // members, buffer elements, an Option's payload, a Result's two sides and
 // every enum variant's payload members.
@@ -810,11 +828,13 @@ fn ir_close_part_rows(m: &IRModule, p: IRProgram, row: Int) -> [Int] Never! {
 }
 
 // Whether some part of a value of type row `row`, at any depth, has a Close
-// method; `row`'s own method does not count. A walk that finds none from a
-// row without a method proves every row it visited free of Close at any depth
-// (m.close_free), and a later walk does not enter a free row again.
+// method or is a move-only handle a tuple or struct holds; `row`'s own method
+// does not count. A walk that finds none from a row without a method proves
+// every row it visited free of Close at any depth (m.close_free), and a later
+// walk does not enter a free row again.
 fn ir_close_parts_reach(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
     if m.close_free.get(row) != None -> return false
+    if ir_close_holds_handle(&m, p, row) -> return true
     seen := [Int:Bool]{}
     seen[row] = true
     visited := [Int]{}
@@ -824,7 +844,7 @@ fn ir_close_parts_reach(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
         if seen.get(part) != None -> next
         seen[part] = true
         if m.close_free.get(part) != None -> next
-        if ir_close_method(m, p, part) >= 0 -> return true
+        if ir_close_method(m, p, part) >= 0 || ir_close_holds_handle(&m, p, part) -> return true
         &visited.push(part)
         loop next_row in ir_close_part_rows(&m, p, part) -> &pending.push(next_row)
     }
@@ -917,10 +937,15 @@ fn ir_close_parts(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, value: In
         }
         members :: ir_inline_members(&m, p, row) ?? return
         loop member in members {
+            under :: ir_parts_under(parts, depth, IRPartStep{selector: -1, offset: member.offset})
+            if !member.boxed && ir_close_handle(m, member.ty) {
+                ir_close_handle_member(&m, &b, value, member, under, armed)
+                next
+            }
             glue :: ir_close_glue(&m, p, &b, member.ty, false, span)
             if glue < 0 -> next
             item :: ir_member_value(&m, &b, value, member)
-            ir_close_member(&m, p, &b, glue, member.ty, item, ir_parts_under(parts, depth, IRPartStep{selector: -1, offset: member.offset}), depth, armed, span)
+            ir_close_member(&m, p, &b, glue, member.ty, item, under, depth, armed, span)
         }
         return
     }
@@ -989,6 +1014,24 @@ fn ir_close_parts(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, value: In
 fn ir_close_member(m: &IRModule, p: IRProgram, b: &IRBuilder, glue: Int, row: Int, item: Int, parts: [IRMovedPart], depth: Int, armed: Int, span: Span) Never! {
     if parts.len() == 0 -> return ir_close_call(&b, glue, item)
     ir_close_partial(&m, p, &b, row, item, armed, parts, depth + 1, false, span)
+}
+
+// Ends the move-only handle `member` of the tuple or struct at `value`
+// (ir_close_handle) unless it moved out: `parts` are its moves, by the bits
+// of `armed`.
+fn ir_close_handle_member(m: &IRModule, b: &IRBuilder, value: Int, member: IRMember, parts: [IRMovedPart], armed: Int) Never! {
+    moved := 0
+    loop part in parts -> moved += ir_part_bit(part.bit)
+    if moved != 0 {
+        mask :: ir_word_const(&m, &b, moved)
+        taken :: ir_word_op(&m, &b, IROp.BitAnd, armed, mask)
+        zero :: ir_word_const(&m, &b, 0)
+        intact :: ir_bool_op(&m, &b, IROp.Eq, taken, zero)
+        ir_open_if(&b.f, intact, b.line)
+    }
+    item :: ir_member_value(&m, &b, value, member)
+    ir_emit(&b.f, IROp.Drop, -1, item, -1, -1, b.line)
+    if moved != 0 -> ir_end(&b.f, b.line)
 }
 
 // The parts among `parts` under `step` from a value at `depth`.
@@ -1124,13 +1167,15 @@ fn ir_close_arm(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, members_on
 }
 
 // `slot` holds the part `step` of the value in `parent`. When that value is
-// (part of) a closing variable's value and something in the part closes,
-// a move out of `slot` moves the part out of the variable (ir_close_disarm).
+// (part of) a closing variable's value and something in the part closes, or
+// the part is a move-only handle of a tuple or struct, a move out of `slot`
+// moves the part out of the variable (ir_close_disarm).
 fn ir_close_note(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, parent: Int, step: IRPartStep) Never! {
     if slot < 0 || parent < 0 || b.closes.len() == 0 -> return
     if !ir_closes(b, parent) && ir_place_index(b, parent) < 0 -> return
     row :: b.f.slot_type[slot]
-    if ir_close_glue(&m, p, &b, row, false, Span{start: 0, end: 0}) < 0 -> return
+    held :: ir_close_handle(m, row) && ir_kind_of(m, b, parent) == .Aggregate && step.selector == -1
+    if !held && ir_close_glue(&m, p, &b, row, false, Span{start: 0, end: 0}) < 0 -> return
     &b.places.push(IRPlace{slot: slot, parent: parent, step: step})
 }
 

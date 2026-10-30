@@ -2236,12 +2236,15 @@ fn jet_driver_imports_bind_alias(imports: [ImportDecl], alias: String) -> Bool N
 // `use dep.[names]` names members of a dependency package
 // directly; it binds the package itself, as `use dep` would. The binding is a
 // compiler-owned module import with a zero-width span at the package name.
+// A foreign provider import (`use c.[lib]` with a `c@system` dependency)
+// binds its generated cache instead, never the dependency.
 fn jet_driver_bind_dependency_imports(program: &Program, unit: JetDriverSourceUnit, packages: [JetDriverPackageInfo]) {
     package_index :: jet_driver_find_package_by_root(packages, unit.root_index) ?? return
     bindings := [ImportDecl]{}
     loop declaration in program.imports {
         if declaration.kind == {
             .Unqualified(module_alias, module_alias_span, _, _, _) -> {
+                if jet_driver_is_foreign_provider_import(declaration) -> next
                 if jet_driver_imports_bind_alias(program.imports, module_alias) || jet_driver_imports_bind_alias(bindings, module_alias) -> next
                 if jet_driver_find_dependency(packages[package_index], module_alias) == None -> next
                 span :: Span{start: module_alias_span.start, end: module_alias_span.start}

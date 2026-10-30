@@ -225,12 +225,19 @@ fn x64_asm_line(s: &X64AsmState, line: String) -> String? Never! {
             byte_reg :: x64_asm_byte_register(second)
             x64_store_u8(&s.code, mem.base, mem.disp, byte_reg)
         } else { return Val("unsupported mov operands or stale placeholder") }
-    } else if mnemonic == "or" {
+    } else if mnemonic == "add" || mnemonic == "sub" || mnemonic == "and" || mnemonic == "or" || mnemonic == "xor" {
         if operands.len() != 2 -> return Val("expected two register operands")
         dst :: x64_asm_reg(s, first, true)
         src :: x64_asm_reg(s, second, true)
         if dst < 0 || src < 0 -> return Val("unsupported register or stale placeholder")
-        x64_alu_rr(&s.code, X64Alu.Or, dst, src)
+        alu :: if mnemonic == {
+            "add" -> X64Alu.Add
+            "sub" -> X64Alu.Sub
+            "and" -> X64Alu.And
+            "or" -> X64Alu.Or
+            else -> X64Alu.Xor
+        }
+        x64_alu_rr(&s.code, alu, dst, src)
         written = dst
     } else if mnemonic == "cmpxchg" || mnemonic == "xchg" || mnemonic == "xadd" {
         if operands.len() != 2 -> return Val("expected memory and register operands")

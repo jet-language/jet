@@ -6282,6 +6282,10 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
             index += 1
             next
         }
+        if sema_unsafe_is_assertion(statements[index]) {
+            index += 1
+            next
+        }
         sema_ownership_release_dead_views(&state, statements[index], &tail_store, &context)
         output_start := output.len()
         statement_diagnostics :: diagnostics.len()
