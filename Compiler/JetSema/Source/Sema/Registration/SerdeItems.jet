@@ -405,8 +405,7 @@ fn sema_serde_items_type_args(params: [TypeParam]) -> [Type] Never! {
 }
 
 // ---------------------------------------------------------------------------
-// Struct bodies (Rust `struct_encode_body`, `ordered_encode_fields`,
-// `struct_decode_body`).
+// Struct bodies (Rust `struct_encode_body`, `struct_decode_body`).
 
 // Rust `serde_field_key`: the field's JSON shape name.
 fn sema_serde_items_field_key(definition: StructDef, field: Field) -> String Never! {
@@ -419,46 +418,25 @@ fn sema_serde_items_field_value(field: Field, span: Span) -> Expr Never! {
     sema_serde_items_field_read("self", field.name, span)
 }
 
-fn sema_serde_items_struct_encode_body(definition: StructDef, span: Span) -> [Stmt] Never! {
-    fields := [Field]{}
-    has_flatten := false
-    loop field in definition.fields {
-        if field.computed != None || sema_serde_items_has_marker(field.serde_markers, "Skip") -> next
-        if sema_serde_items_has_marker(field.serde_markers, "Flatten") -> has_flatten = true
-        &fields.push(field.copy())
-    }
-    if !has_flatten -> return sema_serde_items_ordered_encode_fields(definition, fields, span)
-    body := [Stmt]{sema_serde_items_binding("out", Val(Type.Map{key: Type.String, key_span: None, value: sema_dyn_type()}), Expr.MapLit{entries: [ExprPair]{}, span: span, id: AST_NODE_GENERATED}, true, span)}
-    loop field in fields {
-        key :: sema_serde_items_field_key(definition, field)
-        if sema_serde_items_has_marker(field.serde_markers, "Flatten") {
-            nested :: "jet_serde_nested_{field.name}"
-            &body.push(sema_serde_items_binding(nested, None, sema_serde_items_method_call(sema_serde_items_field_value(field, span), "encode", [Expr]{}, span), false, span))
-            pair_loop :: sema_serde_items_for_each("jet_serde_pair", sema_serde_items_ident("entries", span), [Stmt]{sema_serde_items_assign_index("out", sema_serde_items_copy(sema_serde_items_field_read("jet_serde_pair", "key", span), span), sema_serde_items_copy(sema_serde_items_field_read("jet_serde_pair", "value", span), span), span)}, span)
-            &body.push(sema_serde_items_pattern_switch(sema_serde_items_copy(sema_serde_items_ident(nested, span), span), "Object", [String]{"entries"}, [Stmt]{pair_loop}, Val([Stmt]{}), span))
-        } else if field.ty == .Option(_) {
-            binding_name :: "jet_serde_option_value_{field.name.replace(".", "_")}"
-            store :: sema_serde_items_assign_index("out", sema_serde_items_string(key, span), sema_serde_items_method_call(sema_serde_items_ident(binding_name, span), "encode", [Expr]{}, span), span)
-            &body.push(sema_serde_items_pattern_switch(sema_serde_items_copy(sema_serde_items_field_value(field, span), span), "Val", [String]{binding_name}, [Stmt]{store}, Val([Stmt]{}), span))
-        } else {
-            &body.push(sema_serde_items_assign_index("out", sema_serde_items_string(key, span), sema_serde_items_method_call(sema_serde_items_field_value(field, span), "encode", [Expr]{}, span), span))
-        }
-    }
-    &body.push(sema_serde_items_return(sema_serde_items_dyn_variant("Object", [Expr]{sema_serde_items_ident("out", span)}, span), span))
-    body
-}
-
 // One `(key, value)` row per emitted field, in declaration order, handed to
-// `Dyn.Object`; an absent optional field appends nothing. Linear in the
-// field count.
-fn sema_serde_items_ordered_encode_fields(definition: StructDef, fields: [Field], span: Span) -> [Stmt] Never! {
+// `Dyn.Object`; an absent optional field appends nothing, and a `#Flatten`
+// field's encoded entries are inlined at its position. Linear in the field
+// count.
+fn sema_serde_items_struct_encode_body(definition: StructDef, span: Span) -> [Stmt] Never! {
     pairs :: "jet_serde_pairs"
     pairs_type :: sema_data_object_pairs_type()
     pair_type :: if pairs_type == .List(element) -> element.copy() else -> panic("the ordered Object payload is a list")
     body := [Stmt]{sema_serde_items_binding(pairs, Val(pairs_type), Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}, true, span)}
-    loop field in fields {
+    loop field in definition.fields {
+        if field.computed != None || sema_serde_items_has_marker(field.serde_markers, "Skip") -> next
         key :: sema_serde_items_field_key(definition, field)
-        if field.ty == .Option(_) {
+        if sema_serde_items_has_marker(field.serde_markers, "Flatten") {
+            nested :: "jet_serde_nested_{field.name}"
+            &body.push(sema_serde_items_binding(nested, None, sema_serde_items_method_call(sema_serde_items_field_value(field, span), "encode", [Expr]{}, span), false, span))
+            row :: sema_serde_items_push_row(pairs, sema_serde_items_copy(sema_serde_items_field_read("jet_serde_pair", "key", span), span), sema_serde_items_copy(sema_serde_items_field_read("jet_serde_pair", "value", span), span), pair_type, span)
+            pair_loop :: sema_serde_items_for_each("jet_serde_pair", sema_serde_items_ident("entries", span), [Stmt]{row}, span)
+            &body.push(sema_serde_items_pattern_switch(sema_serde_items_copy(sema_serde_items_ident(nested, span), span), "Object", [String]{"entries"}, [Stmt]{pair_loop}, Val([Stmt]{}), span))
+        } else if field.ty == .Option(_) {
             binding_name :: "jet_serde_option_value_{field.name.replace(".", "_")}"
             present :: sema_serde_items_push_pair(pairs, key, sema_serde_items_method_call(sema_serde_items_ident(binding_name, span), "encode", [Expr]{}, span), pair_type, span)
             &body.push(sema_serde_items_pattern_switch(sema_serde_items_copy(sema_serde_items_field_value(field, span), span), "Val", [String]{binding_name}, [Stmt]{present}, Val([Stmt]{}), span))
@@ -1248,10 +1226,6 @@ fn sema_serde_items_binding(name: String, ty: Type?, init: Expr, mutable: Bool, 
 
 fn sema_serde_items_assign_local(name: String, value: Expr, span: Span) -> Stmt Never! {
     Stmt.Assign{target: LValue.Local{name: name, name_span: span}, op: None, op_span: span, value: value}
-}
-
-fn sema_serde_items_assign_index(base: String, index: Expr, value: Expr, span: Span) -> Stmt Never! {
-    Stmt.Assign{target: LValue.Index{base: sema_serde_items_ident(base, span), index: index, span: span, kind: IndexKind.Unknown}, op: None, op_span: span, value: value}
 }
 
 fn sema_serde_items_return(value: Expr, span: Span) -> Stmt Never! {
