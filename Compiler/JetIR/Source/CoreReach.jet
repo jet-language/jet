@@ -35,6 +35,15 @@ fn ir_core_reach_is_top_level(kind: TFuncKind) -> Bool Never! {
     }
 }
 
+// Whether a function is a derived Encode/Decode method: a compiler-generated
+// `encode`/`decode` method. Sema checks one only when a codec requirement
+// demands it, and its callers reach it through an owner-type lookup during
+// instance lowering (`value.encode()` inside `json.to_string<T>`), never by a
+// key in a body, so a checked one is rooted.
+fn ir_core_reach_generated_codec(function: FnBody) -> Bool Never! {
+    function.synthetic && !ir_core_reach_is_top_level(function.kind) && (function.name == "encode" || function.name == "decode")
+}
+
 // Source-owned selector policy. Both reachability and expression lowering
 // use this map, so the exact helper emitted by a selector is rooted.
 fn ir_string_format_member(ty: Type, format: TStrFormat) -> String? Never! {
@@ -499,7 +508,10 @@ fn ir_core_reach_template_key(key: String) -> String Never! {
 // is not a root: it is kept only when a kept body names it (sema rewrites
 // `==`/`<` on its owner into a keyed method call). An unreached derive then
 // loses its impl row, so no impl is emitted for a runtime-backed Core carrier
-// (`Cursor` -> `JetCursor`, `URL`/`MIME` -> `jet_std`).
+// (`Cursor` -> `JetCursor`, `URL`/`MIME` -> `jet_std`). A derived
+// Encode/Decode body is the exception: sema checks it only on demand, and
+// lowering finds it by owner type (ir_core_reach_generated_codec), so it is
+// rooted.
 //
 // The roots' bodies, nearly every kept body, are read on the threads
 // `threads` admits (ir_core_reach_root_targets); the rows they
@@ -533,7 +545,7 @@ fn ir_reachable_core_rows(functions: &[FnBody], decls: DeclTable, candidates: ^[
         }
         if ir_string_format_source(function.module_identity, function.source_file, function.kind) || ir_codec_decode_source(function.module_identity, function.source_file, function.kind, function.name) || ir_args_source(function.module_identity, function.source_file, function.kind, function.name) -> source_keys[function.name] = function.key
         // A startup function runs before the entry (ir_entry_function), read or not.
-        rooted :: !core_modules.has_key(function.module_identity) || (!ir_core_reach_is_top_level(function.kind) && !function.synthetic) || ir_precise_source_target(function) || function.name.starts_with(IR_STARTUP_FUNCTION_PREFIX)
+        rooted :: !core_modules.has_key(function.module_identity) || (!ir_core_reach_is_top_level(function.kind) && !function.synthetic) || ir_core_reach_generated_codec(function) || ir_precise_source_target(function) || function.name.starts_with(IR_STARTUP_FUNCTION_PREFIX)
         &reachable.push(rooted)
         if rooted {
             &roots.push(index)
