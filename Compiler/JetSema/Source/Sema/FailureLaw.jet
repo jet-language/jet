@@ -569,8 +569,9 @@ fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, gener
                 if environment.registration_graph == .Val(graph) {
                     declared = sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) != None
                 }
-                if !declared -> &diagnostics.push(sema_error("E0119", span, "there's no type called `{name}`", "the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)", "check the spelling, or define the struct or enum first"))
+                if !declared -> &diagnostics.push(sema_unknown_type_name(name, span))
             }
+            if !unresolved && sema_failure_written_name_unknown(name, generic_names, environment, program) -> &diagnostics.push(sema_unknown_type_name(name, span))
         }
         // An alias can hide a second optional layer: `Maybe<Int>?` where
         // `Maybe<T> :: T?` is `Int??`, which has no meaning.
@@ -609,6 +610,7 @@ fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, gener
         }
         .Apply(name, args) -> {
             if name == "Any" -> &diagnostics.push(sema_no_any_type(span))
+            if sema_failure_written_name_unknown(name, generic_names, environment, program) -> sema_unknown_generic_type_name(name, span, &diagnostics)
             sema_check_expiring_secret_declared_type(ty, span, generic_names, environment, &diagnostics)
             loop arg in args -> sema_check_failure_contract_type(arg, span, false, generic_names, environment, program, &diagnostics)
         }
@@ -641,6 +643,27 @@ fn sema_check_expiring_secret_declared_type(ty: Type, span: Span, generic_names:
 // the same E0119 from its declared-type walk.
 fn sema_type_hole(span: Span) -> Diagnostic {
     sema_error("E0119", span, "`_` isn't a type", "a signature names every type; `_` is only a pattern wildcard", "write the type out; in a `T _!` return, name the error domain the body fails with, such as `Int ParseError!`")
+}
+
+// E0119: a written type name that names nothing.
+fn sema_unknown_type_name(name: String, span: Span) -> Diagnostic {
+    sema_error("E0119", span, "there's no type called `{name}`", "the types are `Int`, `Float`, `Bool`, and `String` (plus types you define)", "check the spelling, or define the struct or enum first")
+}
+
+// E0119 twice for `Name<…>` where `Name` names nothing: the missing type,
+// then the type arguments it cannot take.
+fn sema_unknown_generic_type_name(name: String, span: Span, diagnostics: &[Diagnostic]) {
+    &diagnostics.push(sema_error("E0119", span, "there's no type called `{name}`", "generic types must name a struct or enum you defined", "check the spelling, or define the type first"))
+    &diagnostics.push(sema_error("E0119", span, "`{name}` isn't generic", "only types declared with type parameters accept `<…>`", "use `{name}` without type arguments"))
+}
+
+// Whether signature type name `name` names nothing (#6294), judged on the
+// pass's registration graph: the program tables carry it in the module check,
+// the environment in the comptime passes.
+fn sema_failure_written_name_unknown(name: String, generic_names: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    if program.registration_graph == .Val(graph) -> return sema_type_written_name_unknown(graph, sema_scope_caller_row(environment, graph), name, generic_names)
+    if environment.registration_graph == .Val(graph) -> return sema_type_written_name_unknown(graph, sema_scope_caller_row(environment, graph), name, generic_names)
+    false
 }
 
 fn sema_no_any_type(span: Span) -> Diagnostic {

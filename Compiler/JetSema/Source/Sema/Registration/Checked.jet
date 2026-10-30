@@ -1963,9 +1963,18 @@ fn sema_checked_cli_bindings(module_row: SemaRegistrationModule, definition: Str
     result
 }
 
+// E0119 at a struct field or enum payload type that names nothing (#6294):
+// a misspelled member type is reported at its declaration, not its first use.
+fn sema_checked_member_type_names(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, ty: Type, span: Span, generic_params: [TGenericParam], diagnostics: &[Diagnostic]) {
+    module_index :: sema_registration_module_index(graph, module_row.module_identity) ?? return
+    generic_names :: loop parameter in generic_params -> parameter.name
+    sema_type_unknown_written_names(graph, module_index, ty, span, generic_names, &diagnostics)
+}
+
 fn sema_checked_struct_fields(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, definition: StructDef, generic_params: [TGenericParam], diagnostics: &[Diagnostic]) -> [TField] {
     fields := [TField]{}
     loop source_index in 0..<definition.fields.len() {
+        sema_checked_member_type_names(graph, module_row, definition.fields[source_index].ty, definition.fields[source_index].ty_span, generic_params, &diagnostics)
         ty :: sema_checked_qualify_type_with_generics(graph, definition.fields[source_index].ty, module_row.module_identity, generic_params)
         if sema_type_has_forbidden_never(definition.fields[source_index].ty, false) {
             &diagnostics.push(sema_error("E0109", definition.fields[source_index].ty_span, "a stored field cannot contain Never", "Never may not appear in a value position", "use an optional or fallible value instead"))
@@ -2194,6 +2203,11 @@ fn sema_checked_variants(graph: SemaRegistrationGraph, module_row: SemaRegistrat
             }
         }
         sema_checked_variant_cell_guards(variant, &diagnostics)
+        if variant.payload == {
+            .Single(ty, span) -> sema_checked_member_type_names(graph, module_row, ty, span, generic_params, &diagnostics)
+            .Named(fields) -> loop field in fields -> sema_checked_member_type_names(graph, module_row, field.ty, field.ty_span, generic_params, &diagnostics)
+            else -> {}
+        }
         &variants.push(TVariant{name: variant.name, wire_name: wire_name, span: variant.name_span, payload: sema_checked_variant_payload(graph, variant.payload, module_row.module_identity, generic_params), discriminant: variant.discriminant})
     }
     variants

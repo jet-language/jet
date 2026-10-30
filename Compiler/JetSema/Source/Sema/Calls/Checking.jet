@@ -371,13 +371,19 @@ fn sema_call_typecheck_bound_arguments(callee: String, params: [SemaCallParam], 
             }
         }
         checked_value :: checked_argument ?? {
-            if !default_in_owner && binder_refs.len() == 0 -> sema_call_argument_replace_mismatch(callee, index, required, args[index].expr, diagnostic_start, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            if !default_in_owner && binder_refs.len() == 0 {
+                if sema_call_parameter_type_undeclared(required, environment, program) -> sema_call_argument_drop_mismatch(args[index].expr, diagnostic_start, &diagnostics) else -> sema_call_argument_replace_mismatch(callee, index, required, args[index].expr, diagnostic_start, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            }
             complete = false
             next
         }
         if parameter.convention == AccessConvention.Move && !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, context, &diagnostics, args[index].convention == AccessConvention.Move) -> return None
         value := if self_typed -> sema_stmt_numeric_slot_value(checked_value, required, environment, program, &diagnostics) ?? return None else -> checked_value
         compatible := if trait_parameter && parameter.convention == AccessConvention.Write -> type_identity_equal(required, sema_call_resolved_type(value.ty, environment, program)) else -> sema_call_type_assignable(required_declared, value.ty, environment, program) ?? return None
+        // A parameter whose written type names nothing reported E0119 at its
+        // declaration; it takes any argument, so the call's own checks (the
+        // move marker, E0201) still run without a cascade E0112 (#6294).
+        if !compatible && sema_call_parameter_type_undeclared(required, environment, program) -> compatible = true
         if !compatible && sema_expr_unit_implicit_applies(required, value.ty, environment, program) {
             converted :: sema_expr_unit_implicit_conversion(value, required, environment, program, &scopes, context, &diagnostics) ?? {
                 complete = false
@@ -489,6 +495,24 @@ fn sema_call_argument_mismatch(callee: String, index: Int, required: Type, offer
         }
     }
     sema_error("E0112", span, "`{sema_call_reflection_leaf_name(callee)}` wants {sema_type_show(required)} for argument {index + 1}, but this is {sema_type_show(offered)}", "every argument must match its parameter's type", sema_type_fix_hint(required, offered))
+}
+
+// A parameter type that names nothing already has its E0119 where the
+// declaration wrote it; an argument's mismatch against it is that same error
+// again (#6294).
+fn sema_call_parameter_type_undeclared(required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    generic_names :: loop param in environment.generic_params -> param.name
+    if program.registration_graph == .Val(graph) -> return sema_type_names_undeclared(graph, sema_scope_caller_row(environment, graph), required, generic_names)
+    if environment.registration_graph == .Val(graph) -> return sema_type_names_undeclared(graph, sema_scope_caller_row(environment, graph), required, generic_names)
+    false
+}
+
+// Drops the generic E0108 the argument's own check reported against an
+// undeclared parameter type, keeping every other report of the argument.
+fn sema_call_argument_drop_mismatch(value: Expr, diagnostic_start: Int, diagnostics: &[Diagnostic]) {
+    mismatch_index :: sema_value_mismatch_index(diagnostics, diagnostic_start, expr_span(value)) ?? return
+    loop index in mismatch_index..<diagnostics.len() - 1 -> diagnostics[index] = diagnostics[index + 1]
+    _ :: &diagnostics.pop()
 }
 
 // The argument's own check rejected it against its parameter with the generic

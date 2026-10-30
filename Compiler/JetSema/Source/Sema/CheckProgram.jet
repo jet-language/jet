@@ -3107,6 +3107,7 @@ fn sema_check_registration_module_start(environment: SemaScopeEnvironment, progr
         if sema_has_error_since(diagnostics, declarations_diagnostic_count) {
             complete = false
             &incomplete_reasons.push("declaration checking reported errors")
+            sema_type_signature_unknown_names(graph, module_index, &diagnostics)
         }
         return SemaGraphModuleResult{
             package_identity: graph.modules[module_index].package_identity,
