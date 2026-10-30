@@ -89,21 +89,13 @@ enum JetCLIEntryFound {
     Refused(plan: JetCLIPlan)
 }
 
-// What a workspace check compiles: the entry of every member, or the
-// refusal that stopped the scan. Absent when the directory is not a
-// workspace index.
+// What a workspace check compiles: the entry of each member no other member
+// depends on, or the refusal that stopped the scan. Absent when the
+// directory is not a workspace index.
 enum JetCLIWorkspaceCheck {
     Absent
-    Members(rows: [JetCLIWorkspaceCheckMember])
+    Members(entries: [String])
     Refused(plan: JetCLIPlan)
-}
-
-// One member of a workspace check: its name, its entry file, and whether no
-// other member depends on it.
-struct JetCLIWorkspaceCheckMember {
-    name: String
-    path: String
-    root: Bool
 }
 
 // No package, workspace, or stock entry applies.
@@ -1211,11 +1203,10 @@ fn jet_cli_resolve_bare_entry(command: String, cwd: String, member_flag: String?
     JetCLIEntryFound.Absent
 }
 
-// `jet check` of a workspace root checks code instead of picking an entry.
-// Each member's entry, in index order; `root` marks the members no other
-// member depends on. Their compiles load every other member through their
-// dependency closures, and a member they find failing (E0626) is checked on
-// its own afterwards so its errors are reported.
+// `jet check` of a workspace root checks code instead of picking an entry:
+// the entries, in index order, of the members no other member depends on.
+// Their compiles load every other member through their dependency closures,
+// and a failing member's errors are reported inline before its E0626.
 fn jet_cli_workspace_check_entries(dir: String, color: Bool, notices: &[String]) -[FS, Env]> JetCLIWorkspaceCheck Never! {
     root :: cli_files.realpath(dir) ?? return JetCLIWorkspaceCheck.Absent
     source :: jet_cli_workspace_source(root, color)
@@ -1246,18 +1237,21 @@ fn jet_cli_workspace_check_entries(dir: String, color: Bool, notices: &[String])
             }
         }
     }
-    rows := [JetCLIWorkspaceCheckMember]{}
-    loop (index, directory) in directories {
+    entries := [String]{}
+    found := false
+    loop directory in directories {
         if jet_cli_find_project_entry_at(directory, "check", color, &notices, true) == {
             .Entry(entry) -> {
-                if cli_files.is_file(entry.path) -> &rows.push(JetCLIWorkspaceCheckMember{name: members[index].name.copy(), path: entry.path.copy(), root: !depended.contains(directory)})
+                if !cli_files.is_file(entry.path) -> next
+                found = true
+                if !depended.contains(directory) -> &entries.push(entry.path.copy())
             }
             .Refused(plan) -> return JetCLIWorkspaceCheck.Refused{plan: plan}
             .Absent -> {}
         }
     }
-    if rows.len() == 0 -> return JetCLIWorkspaceCheck.Absent
-    JetCLIWorkspaceCheck.Members{rows: rows}
+    if !found -> return JetCLIWorkspaceCheck.Absent
+    JetCLIWorkspaceCheck.Members{entries: entries}
 }
 
 // main.rs `missing_bare_entry`: no file and no project (E2104).

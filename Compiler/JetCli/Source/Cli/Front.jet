@@ -64,10 +64,9 @@ enum JetCLIPlan {
     // entry resolution wrote. The host compiles it and renders the outcome,
     // as machine reports when `json`.
     Check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, notice: String, json: Bool)
-    // `jet check` of a workspace root (no `-p`): every member's name, entry
-    // and bytes; `roots` marks the members no other member depends on, the
-    // ones checked first (Host.jet `jet_cli_check_workspace`).
-    CheckWorkspace(names: [String], files: [String], sources: [String], roots: [Bool], color: Bool, quiet: Bool, threads: Int?, notice: String, json: Bool)
+    // `jet check` of a workspace root (no `-p`): the entry and bytes of each
+    // member no other member depends on (Host.jet `jet_cli_check_workspace`).
+    CheckWorkspace(files: [String], sources: [String], color: Bool, quiet: Bool, threads: Int?, notice: String, json: Bool)
     // `jet build <file>`: the entry and its bytes; `options` are the build
     // options it compiles under (jet_cli_build_options: stock, profile, flags);
     // `invocation` holds the `--allow`/`--deny` rows.
@@ -685,30 +684,26 @@ fn jet_cli_check(jet_argv: [String], args: [String], command: String, color: Boo
 // None when the directory is not a workspace index.
 fn jet_cli_check_workspace_plan(directory: String, color: Bool, quiet: Bool, threads: Int?, status: String, json: Bool) -[FS, Env]> JetCLIPlan? Never! {
     notices := [String]{}
-    rows := [JetCLIWorkspaceCheckMember]{}
+    entries := [String]{}
     if jet_cli_workspace_check_entries(directory, color, &notices) == {
         .Absent -> return None
         .Refused(plan) -> return Val(jet_cli_with_notices(notices, ^plan))
-        .Members(found) -> rows = found
+        .Members(found) -> entries = found
     }
     notice :: "{notices.join("")}{status}"
-    names := [String]{}
     files := [String]{}
     sources := [String]{}
-    roots := [Bool]{}
-    loop row in rows {
-        planned :: jet_cli_read_entry(row.path, "check", color, quiet, threads, true, notice, json)
+    loop entry in entries {
+        planned :: jet_cli_read_entry(entry, "check", color, quiet, threads, true, notice, json)
         if planned == .Check(file, source, _, _, _, _, _, _) {
-            &names.push(row.name.copy())
             &files.push(file)
             &sources.push(source)
-            &roots.push(row.root)
         } else {
             return Val(planned)
         }
     }
     if files.len() == 1 -> return Val(JetCLIPlan.Check{file: files[0], source: sources[0], color: color, quiet: quiet, threads: threads, project: true, notice: notice, json: json})
-    Val(JetCLIPlan.CheckWorkspace{names: names, files: files, sources: sources, roots: roots, color: color, quiet: quiet, threads: threads, notice: notice, json: json})
+    Val(JetCLIPlan.CheckWorkspace{files: files, sources: sources, color: color, quiet: quiet, threads: threads, notice: notice, json: json})
 }
 
 // Read the entry `jet_cli_check` chose (CmdCompile.rs `run_native_execution`

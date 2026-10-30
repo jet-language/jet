@@ -249,16 +249,18 @@ fn jet_driver_find_graph_import(imports: [SemaRegistrationImport], source_identi
     }
     found
 }
-// A dependency package is checked as its own package, so an
-// importer never repeats its reports. A dependency with errors still fails
-// the importer, once per dependency package (E0626), naming the check that
-// owns those errors.
+// A dependency package is checked as its own package. A dependency with
+// errors fails the importer once per dependency package: its own errors are
+// reported inline, followed by one E0626 naming the package and the check
+// that owns it. A dependency's warnings stay with its own check.
 fn jet_driver_summarize_dependency_reports(load: JetDriverLoadResult, diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
     entry_root := ""
     loop package in load.packages {
         if package.identity == load.package_identity -> entry_root = package.root_path
     }
     kept := [Diagnostic]{}
+    held := [Diagnostic]{}
+    held_owners := [Int]{}
     failing := [Bool]{}
     loop package in load.packages -> &failing.push(false)
     loop diagnostic in diagnostics {
@@ -276,13 +278,19 @@ fn jet_driver_summarize_dependency_reports(load: JetDriverLoadResult, diagnostic
             &kept.push(diagnostic)
             next
         }
-        if diagnostic.severity == DIAGNOSTIC_ERROR -> failing[owner] = true
+        if diagnostic.severity != DIAGNOSTIC_ERROR -> next
+        failing[owner] = true
+        &held.push(diagnostic)
+        &held_owners.push(owner)
     }
     loop index in 0..<load.packages.len() {
         if !failing[index] -> next
+        loop (position, diagnostic) in held {
+            if held_owners[position] == index -> &kept.push(diagnostic)
+        }
         package :: load.packages[index]
         root :: jet_driver_display_path(entry_root, package.root_path)
-        &kept.push(jet_driver_diagnostic_without_span("E0626", "Dependency package `{package.name}` has errors", "a dependency package is checked as its own package, so its errors are reported by its own check and never repeated by the packages that import it", "run `jet check {root}` and fix the errors there"))
+        &kept.push(jet_driver_diagnostic_without_span("E0626", "Dependency package `{package.name}` has errors", "a dependency package is checked as its own package; its errors, shown above, fail every package that imports it", "fix the errors shown above; `jet check {root}` checks that package on its own"))
     }
     kept
 }

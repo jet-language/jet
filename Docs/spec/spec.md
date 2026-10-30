@@ -2104,13 +2104,13 @@ kind takes precedence. A single-file `jet run` or `jet build` still requires
 an executable entry point and reports **E0101** when it has no `run` function
 (U10, U17, D-LIB-USE, D-ILE1).
 
-A dependency package is checked as its own package. An importing check never
-repeats a dependency's reports; when the dependency has errors, the importer
-reports one **E0626** naming the dependency and the `jet check` that owns
-them. A path dependency declared by a dependency must stay below that
-dependency's directory (**E1206**) unless the root package declares the same
-directory itself, or reaches its sibling directory through an explicit
-out-of-tree path dependency. This lets sibling packages such as
+A dependency package is checked as its own package. When the dependency has
+errors, the importer reports them inline, followed by one **E0626** naming the
+dependency and the `jet check` that checks it on its own; the dependency's
+warnings stay with its own check. A path dependency declared by a dependency
+must stay below that dependency's directory (**E1206**) unless the root
+package declares the same directory itself, or reaches its sibling directory
+through an explicit out-of-tree path dependency. This lets sibling packages such as
 `Compiler/JetLexer` and `Compiler/JetFoundation` share a dependency
 (D-MOD-CYCLE1). The host reads only the declared, reachable path-dependency
 closure; opening that closure never fetches a source or contacts the network.

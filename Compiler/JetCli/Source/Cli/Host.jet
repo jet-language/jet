@@ -166,9 +166,8 @@ fn jet_cli_errors(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
 // program, not a library, runs in Run mode, so an entry with no `fn run` is
 // E0101 (CmdInspect.rs `check_projection_with_options_and_preflight`,
 // Completion.rs). `finish` ends the process with the outcome once the compile
-// ran, skipping the teardown of its result. `failing` gains the name of each
-// dependency package the compile found failing (E0626).
-fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, json: Bool, trace_sink: JetCLITraceSink?, finish: Bool, failing: &[String]) -> JetDriverVerbOutput {
+// ran, skipping the teardown of its result.
+fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, json: Bool, trace_sink: JetCLITraceSink?, finish: Bool) -> JetDriverVerbOutput {
     watch :: cli_time.start()
     if !project {
         if jet_cli_missing_project_context(file, source) == .Val(missing) {
@@ -183,11 +182,6 @@ fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool,
         .Refused(refusal) -> output = ^refusal
         .Compiled(result, snapshot) -> {
             diagnostics := jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
-            loop diagnostic in diagnostics {
-                if diagnostic.code != "E0626" -> next
-                parts :: diagnostic.what.split("`").to_list()
-                if parts.len() > 2 -> &failing.push(parts[1].copy())
-            }
             if lacks_run && !jet_cli_package_is_library_only(file, result) -> &diagnostics.push(jet_cli_no_run_diagnostic())
             if jet_cli_errors(diagnostics).len() == 0 && result.internal_problem == None && result.rust_foreign.entries.len() > 0 {
                 if jet_cli_rust_foreign_realize(result.rust_foreign, result.foreign_link) == .Err(error) -> &diagnostics.push(jet_cli_rust_foreign_diagnostic(error))
@@ -202,33 +196,16 @@ fn jet_cli_compile_check(file: String, source: String, color: Bool, quiet: Bool,
     output
 }
 
-// `jet check` of a workspace root: the members no other member depends on
-// check first, each in project scope; their compiles load every other
-// member. A member one of them finds failing (E0626) then checks on its own,
-// so its errors are reported. Each outcome is written as it finishes; the
-// exit status is the most severe one.
-fn jet_cli_check_workspace(names: [String], files: [String], sources: [String], roots: [Bool], color: Bool, quiet: Bool, threads: Int?, json: Bool, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+// `jet check` of a workspace root: each member no other member depends on
+// checks in project scope; its compile loads every other member, and a
+// failing member's errors are reported inline before its E0626. Each outcome
+// is written as it finishes; the exit status is the most severe one.
+fn jet_cli_check_workspace(files: [String], sources: [String], color: Bool, quiet: Bool, threads: Int?, json: Bool, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     exit_code := JET_DRIVER_EXIT_OK
-    failing := [String]{}
-    checked := [Bool]{}
-    loop root in roots -> &checked.push(root)
     loop index in 0..<files.len() {
-        if !roots[index] -> next
-        output :: jet_cli_compile_check(files[index], sources[index], color, quiet, threads, true, json, trace_sink, false, &failing)
+        output :: jet_cli_compile_check(files[index], sources[index], color, quiet, threads, true, json, trace_sink, false)
         jet_cli_write_output(output)
         if output.exit_code > exit_code -> exit_code = output.exit_code
-    }
-    next_failing := 0
-    loop next_failing < failing.len() {
-        name :: failing[next_failing].copy()
-        next_failing += 1
-        loop index in 0..<names.len() {
-            if names[index] != name || checked[index] -> next
-            checked[index] = true
-            output :: jet_cli_compile_check(files[index], sources[index], color, quiet, threads, true, json, trace_sink, false, &failing)
-            jet_cli_write_output(output)
-            if output.exit_code > exit_code -> exit_code = output.exit_code
-        }
     }
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: exit_code}
 }
@@ -2420,7 +2397,7 @@ fn jet_cli_write_output(output: JetDriverVerbOutput) {
 // The plans whose compile `--trace` and JET_TRACE_FILE trace.
 fn jet_cli_plan_compiles(plan: JetCLIPlan) -> Bool Never! {
     if plan == {
-        .Check(_, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _) | .Build(_, _, _, _, _, _, _) | .BuildPackage(_, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
+        .Check(_, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _) | .Build(_, _, _, _, _, _, _) | .BuildPackage(_, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
         else -> false
     }
 }
@@ -2435,12 +2412,11 @@ fn jet_cli_execute(plan: ^JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> Jet
         .Diagnostics(file, source, report, color, notice) -> output = jet_cli_diagnostics_output(file, source, report, color, false, notice)
         .Check(file, source, color, quiet, threads, project, notice, json) -> {
             jet_cli_write_notice(notice)
-            failing := [String]{}
-            output = jet_cli_compile_check(file, source, color, quiet, threads, project, json, trace_sink, true, &failing)
+            output = jet_cli_compile_check(file, source, color, quiet, threads, project, json, trace_sink, true)
         }
-        .CheckWorkspace(names, files, sources, roots, color, quiet, threads, notice, json) -> {
+        .CheckWorkspace(files, sources, color, quiet, threads, notice, json) -> {
             jet_cli_write_notice(notice)
-            output = jet_cli_check_workspace(names, files, sources, roots, color, quiet, threads, json, trace_sink)
+            output = jet_cli_check_workspace(files, sources, color, quiet, threads, json, trace_sink)
         }
         .Build(file, source, color, options, threads, invocation, notice) -> {
             jet_cli_write_notice(notice)
