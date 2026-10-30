@@ -172,12 +172,6 @@ shared collection kernel so both embeddings use the same bounds check and
 E3010 stop. Recursive mkdir dispatch names the single no-fault-probe raw leaf;
 the source caller, not a second evaluator arm, owns the FS.Write preflight.
 
-Email's secret-bearing native carriers retain the checked `core.crypto.Secret`
-declaration as their hidden Rust type argument; they never substitute a host
-secret with the same leaf spelling. The SMTP provider adapter supplies the
-runtime's TLS, wiping, signing, cancellation, and deadline callbacks. Optional
-native fields cross the checked `JetOutcome` boundary on both value and place
-reads, including borrowed payload projections.
 The generated registry tables are projections, not a second API catalog. Never
 hand-edit them. The main generated view is
 [`CoreCallRows.jet`](../../Compiler/JetFoundation/Source/Registry/CoreCallRows.jet),
@@ -274,13 +268,6 @@ Native record-sequence provider symbols use `jet_rt_record_seq_` followed by
 the checked sequence kind with dots replaced by underscores. The lowering
 computes that suffix before interpolating the symbol, preserving the same
 typed carrier name without escaped string literals inside interpolation.
-
-`core.email` decodes DKIM key material into a fixed, zero-filled Secret buffer.
-It validates every encoded quartet before applying the final 32-byte length
-rule; a late alphabet or padding error still takes precedence over length.
-Borrowed Secret bytes may be read or written by index inside audited Core
-code, but their storage must never grow, shrink, or be freed through ordinary
-List operations without the Secret owner's zeroization.
 
 The `core.http.client` transport entries `get`, `post`, and `request` remain
 native rows. String-only source forwarders narrow the existing typed-URL
@@ -855,22 +842,6 @@ children use `data_u8_list_copy_into` and `data_u8_list_drop_fields` from the
 same provider. The shared sequence index and capacity failure
 providers still require composition before native caller admission.
 
-Native mail attachment data uses `MailAttachment.jet`'s 40-byte carrier:
-two owned E4 text pointers followed by an inline native U8 list header.
-Construction clones borrowed filename/MIME text and transfers the consumed
-byte-list buffer without copying it, releasing only the donor list shell.
-Text projections return independent owned clones; the bytes projection borrows
-the parent's inline header. Cloning uses the shared `DataSequences.jet` U8
-ownership helpers and the packed `RT_HOST_U8_STRIDE`; equality compares text
-and initialized bytes, ignoring capacity. Null drops are harmless. The
-`AttachmentWitness.c` composed-object client pins binary text/bytes, ownership,
-capacity-sized frees, mutation independence, and projection lifetimes. These
-data operations make no claim about SMTP transport or MIME serialization.
-`attachment_copy_into` and `attachment_drop_fields` in that same provider
-single-source field ownership for both heap handles and inline sequence slots;
-callers own their respective shells, so inline children never allocate a
-temporary attachment shell or free their enclosing sequence slot.
-
 Native network readiness snapshots use two normalized Bool words in
 `NetReadiness.jet`. Getters, clone and equality interpret the low byte of each
 slot, not unrelated upper-byte padding; constructors normalize C U8 inputs.
@@ -912,17 +883,6 @@ lifetime; logical close and shutdown remain visible through those aliases.
 `TCPStreamFieldsWitness.c` uses real canonical owners and tests pointer
 identity, low-byte reads, live shutdown/close updates and parent-only release.
 
-Mail addresses, messages, attachments and mailers are Core records that
-`Core/Email/Email.jet` builds and reads itself, including
-`Message.envelope()`/`with_envelope`; no native carrier or `*_parts`
-constructor stands between the source validation and the value. `EmailError`
-keeps its native layout and renders through `jet_rt_handle_show_error`.
-`MailAddress.jet`, `MailEnvelope.jet` and `MailAttachment.jet` keep only the
-record glue a route crosses with: canonical inline copying, destruction and
-equality for Address16, Envelope40 and Attachment40. Clones allocate only
-initialized list elements, without temporary child or list shells;
-destruction releases buffers by their actual capacities.
-
 Service workflow start, step, activity, retry and completion decisions live in
 `Core/Service/Service.jet`. They retain the exclusive tree borrow across durable
 synchronization, validation, replay checks and cursor updates. The existing
@@ -954,7 +914,7 @@ order, not a progress ledger:
    encoding, regex, args, files and path contracts, memory and I/O foundations,
    and portable cryptographic primitives.
 2. **System:** archives, networking, process, tasks, events, watchers, terminal,
-   logging, email, and database.
+   logging and database.
 3. **Data and web:** data loaders and transformations, HTTP, web/router/forms,
    reactive, synchronization, services/jobs, storage, and browser.
 4. **Specialized:** compute/models, UI/TUI/font, games/raylib, plugin/mod,

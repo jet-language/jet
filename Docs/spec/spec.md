@@ -2833,21 +2833,11 @@ These helpers do not emulate POSIX semantics on Windows. Examples are
 
 `core.archive.gzip` and `core.archive.zstd` are the byte-stream codec homes;
 `core.archive` owns ZIP and tar container operations and does not re-export a
-codec (D-CORE-COMPRESS1=A). `core.email` uses typed `Message` values with a
-separate envelope, so Bcc is never serialized. Mail transport verifies TLS,
-authenticates only after verified TLS and post-upgrade EHLO, never retries, and
-reports `DeliveryUnknown` when cancellation or a deadline interrupts after
-DATA.
-Optional DKIM configuration signs final MIME bytes with one Ed25519 identity;
-invalid or missing requested headers fail before connecting, with no unsigned
-fallback. Passwords use move-only `Secret` values and are zeroized on failure
-and drop (D-EMAIL1, D-EMAIL-SMTP-SURFACE1, D-EMAIL-SMTP-CONFIG1,
-D-EMAIL-DKIM-CONFIG1).
+codec (D-CORE-COMPRESS1=A).
 
 Core source boundaries preserve their ownership and failure contracts:
-email builders borrow caller values and move explicit owned copies into the
-private carriers; HTTP response construction moves each selected `Body` and
-`Headers` owner once, without flattening streaming bodies. The module loader
+HTTP response construction moves each selected `Body` and `Headers` owner
+once, without flattening streaming bodies. The module loader
 catches provider refusal text at each loading stage and maps it to `ModError`;
 its lexical context still owns cleanup on every early return. Cryptographic
 envelopes reuse the private fixed-limb primitives without exposing new expert

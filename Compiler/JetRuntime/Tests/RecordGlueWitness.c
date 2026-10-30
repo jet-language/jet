@@ -7,10 +7,8 @@
 #include <string.h>
 typedef struct { unsigned char *data; int64_t length, capacity; } Text;
 typedef struct { int64_t hits, misses, size; Text *bound; } Memo;
-typedef struct { int64_t fields[6]; } Limits;
 typedef struct { int64_t domain, kind; Text *path, *detail; int64_t pid, port; } Event;
 _Static_assert(sizeof(Memo)==32 && offsetof(Memo,bound)==24,"MemoABI");
-_Static_assert(sizeof(Limits)==48,"MailLimitsABI");
 _Static_assert(sizeof(Event)==48 && offsetof(Event,path)==16 && offsetof(Event,pid)==32,"WatchABI");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
@@ -28,16 +26,6 @@ extern int64_t jet_rt_record_get_jet_memo_stats_hits(Memo *);
 extern int64_t jet_rt_record_get_jet_memo_stats_misses(Memo *);
 extern int64_t jet_rt_record_get_jet_memo_stats_size(Memo *);
 extern Text *jet_rt_record_get_jet_memo_stats_bound(Memo *);
-extern Limits *jet_rt_record_new_limits(int64_t,int64_t,int64_t,int64_t,int64_t,int64_t);
-extern Limits *jet_rt_handle_clone_limits(Limits *);
-extern void jet_rt_handle_drop_limits(Limits *);
-extern bool jet_rt_handle_eq_limits(Limits *,Limits *);
-extern int64_t jet_rt_record_get_limits_max_reply_line_bytes(Limits *);
-extern int64_t jet_rt_record_get_limits_max_reply_lines(Limits *);
-extern int64_t jet_rt_record_get_limits_max_capabilities(Limits *);
-extern int64_t jet_rt_record_get_limits_max_recipients(Limits *);
-extern int64_t jet_rt_record_get_limits_max_message_bytes(Limits *);
-extern int64_t jet_rt_record_get_limits_max_auth_challenge_bytes(Limits *);
 extern Event *jet_rt_record_new_watch_event(int64_t,int64_t,Text *,Text *,int64_t,int64_t);
 extern Event *jet_rt_handle_clone_watch_event(Event *);
 extern void jet_rt_handle_drop_watch_event(Event *);
@@ -96,15 +84,6 @@ static void memo_cases(void) {
     unsigned before=intercepted;jet_rt_handle_drop_jet_memo_stats(a);jet_rt_handle_drop_jet_memo_stats(b);freed(before);
     jet_rt_handle_drop_jet_memo_stats(NULL);
 }
-static void limits_cases(void) {
-    int64_t hi=jet_int_owned_from_i64(INT64_MAX),lo=jet_int_owned_from_i64(INT64_MIN);
-    Limits *a=jet_rt_record_new_limits(hi,lo,3,4,5,6),*b=jet_rt_handle_clone_limits(a);
-    jet_rt_int_drop(hi);jet_rt_int_drop(lo);assert(a!=b && a->fields[0]==INT64_MAX && a->fields[1]==INT64_MIN);
-    int64_t (*getters[])(Limits *)={jet_rt_record_get_limits_max_reply_line_bytes,jet_rt_record_get_limits_max_reply_lines,jet_rt_record_get_limits_max_capabilities,jet_rt_record_get_limits_max_recipients,jet_rt_record_get_limits_max_message_bytes,jet_rt_record_get_limits_max_auth_challenge_bytes};
-    assert(jet_rt_handle_eq_limits(a,a) && jet_rt_handle_eq_limits(a,b));
-    for(size_t i=0;i<6;++i) { integer(getters[i](a),a->fields[i]); b->fields[i]^=1;assert(!jet_rt_handle_eq_limits(a,b));b->fields[i]^=1; }
-    watch(a,48,8);watch(b,48,8);unsigned before=intercepted;jet_rt_handle_drop_limits(a);jet_rt_handle_drop_limits(b);freed(before);jet_rt_handle_drop_limits(NULL);
-}
 static void event_cases(void) {
     const char *domains[]={"File","Process","Port"},*kinds[]={"Created","Modified","Removed","Error","Exited","Ready"};
     for(int64_t d=0;d<3;++d) for(int64_t k=0;k<6;++k) {
@@ -152,5 +131,5 @@ int main(int argc,char **argv) {
         } else return 2;
         assert(!"stop returned");
     }
-    memo_cases();limits_cases();event_cases();puts("record-glue witness OK");return 0;
+    memo_cases();event_cases();puts("record-glue witness OK");return 0;
 }

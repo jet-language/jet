@@ -1995,7 +1995,6 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.data line renderers need options` | Kernel | `Core/Data/Plot.jet` owns line-renderer option validation. |
   | `core.data: argument must be `[DataGroup]`` | Kernel | `Core/Data/Plot.jet` owns `DataGroup` validation. |
   | `core.data: argument must be `[Float]`` | Kernel | `Core/Math/Stats.jet` owns numeric input validation. |
-  | `core.email` | Kernel | `Core/Email/Email.jet`; comptime marshals values. |
   | `core.encoding` | Kernel | Encoding dispatch and value validation use the shared encoding Prelude/Core kernels. |
   | `core.encoding.jsonl.to_string: expected a list` | Kernel | JSONL value validation stays with the encoding kernel. |
   | `core.encoding.base32` | Kernel | `Core/Encoding/Base32.jet` owns encode and edition-aware decode; comptime marshals values. |

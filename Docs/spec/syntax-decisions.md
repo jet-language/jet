@@ -4587,65 +4587,11 @@ index, not a substitute for that law.
   percent-encoding, IDNA host handling, and `file:`/`data:` URLs. `Mime` owns
   extension mapping plus `type/subtype; param=value` parsing. `core.http` and
   `core.web` consume typed values instead of re-solving string escaping.
-- **D-EMAIL1=A**: `core.email` is the one provider-neutral email mechanism.
-  `Address`, `Message`, `Attachment`, `Envelope`, `Mailer`, `SMTPConfig`,
-  `SMTPSecurity`, `SMTPAuth`, `DkimConfig`, `SendReport`, `RecipientReport`,
-  and `EmailError` cover construction, transport, signing, and honest relay
-  acceptance. `smtp_from_env` supplies verified STARTTLS beginner defaults;
-  `smtp(config)` exposes the same Mailer with expert policy. Port 587 requires
-  verified STARTTLS; port 465 TLS is explicit; STARTTLS never downgrades and
-  password AUTH never crosses plaintext. MIME uses CRLF, bounded safe folding,
-  Unicode encodings, content-derived collision-resistant boundaries, bounded
-  attachments, and Bcc only in the SMTP envelope. RequireAll rejects before
-  DATA when any recipient is rejected; DeliverAccepted is explicit. SendReport
-  means relay acceptance, never inbox delivery. EmailError distinguishes
-  configuration, DNS, connect, TLS, auth, protocol, rejection, transient,
-  timeout, cancellation, and DeliveryUnknown. No hidden retry, thread-per-send,
-  raw transport error, credential disclosure, external dependency, or duplicate
-  async API exists. DKIM signs final bytes; SPF and DMARC remain DNS policy.
-- **D-EMAIL-SMTP-SURFACE1=A**: SMTP uses closed records and enums plus one
-  `Mailer.send(message)` mechanism. `Envelope` contains `from:Address` and
-  `recipients:[Address]`; `email.envelope` validates it, and
-  `message.with_envelope(envelope)` replaces only SMTP routing. MIME headers
-  remain unchanged, so Bcc stays envelope-only. `SMTPConfig` contains host,
-  port, `.StartTls`/`.TLS` security, `.None`/`.Password` auth,
-  `.RequireAll`/`.DeliverAccepted` recipient policy, verified system or
-  system-plus-CA trust, and bounded `Limits`. Ambient `#Context` alone owns
-  deadline and cancellation. `SendReport` records server, accepted and rejected
-  recipient reports, final response, and acceptance time; acceptance never
-  claims inbox delivery. `EmailError` is the closed Configuration, DNS, Connect,
-  TLS, Auth, Protocol, Rejected, Transient, TimedOut, Cancelled, and
-  DeliveryUnknown set, each with operation, optional server/code, and reason.
-  No trust-all mode, TLS downgrade, plaintext password auth, or automatic retry
-  exists.
-- **D-EMAIL-SMTP-CONFIG1=A**: SMTP passwords use the existing move-only,
-  redacted `Secret`. `Limits` has `max_reply_line_bytes`, `max_reply_lines`,
-  `max_capabilities`, `max_recipients`, `max_message_bytes`, and
-  `max_auth_challenge_bytes`; `Limits.safe()` returns 512, 100, 100, 100,
-  33554432, and 4096. Valid ranges, checked in that field order, are
-  64..65536, 1..1000, 1..1000, 1..10000, 1..1073741824, and 1..65536; the
-  first failure is `EmailError.Configuration`. `.SystemPlusCa(pem:[U8])`
-  extends system roots with parsed PEM certificates while retaining DNS-name
-  verification. Empty, malformed, or certificate-free PEM is rejected before
-  credentials can be sent. There is no trust-all mode. SMTP interprets secret
-  bytes as UTF-8 only inside authentication and rejects invalid UTF-8 as
-  configuration.
-- **D-EMAIL-DKIM-CONFIG1=A**: optional DKIM policy is the
-  `dkim:?DkimConfig` field on `SMTPConfig`; `None` sends unsigned and `Val(dkim)`
-  signs every message through that `Mailer`. `DkimConfig` contains exactly
-  `domain:String`, `selector:String`, `private_key:Secret`, and
-  `signed_headers:[String]`. Signing is fixed to `ed25519-sha256` with
-  relaxed/relaxed canonicalization over final MIME bytes. `from` is mandatory;
-  names match case-insensitively; duplicates, absent requested headers, hop
-  headers, invalid DNS names/selectors, and non-32-byte Ed25519 seeds fail as
-  `EmailError.Configuration` before connecting. Mailer owns and zeroizes the
-  extracted key; no signing failure falls back to unsigned delivery.
-  `smtp_from_env` accepts DKIM only when `SMTP_DKIM_DOMAIN`,
-  `SMTP_DKIM_SELECTOR`, and `SMTP_DKIM_PRIVATE_KEY_BASE64` are all present;
-  `SMTP_DKIM_SIGNED_HEADERS` optionally replaces the safe header set. DNS must
-  publish `v=DKIM1; k=ed25519; p=<base64 public key>` at
-  `<selector>._domainkey.<domain>`. SPF and DMARC remain DNS policy. Multiple
-  identities use separate named Mailers; there is no per-message override.
+- **D-EMAIL1, D-EMAIL-SMTP-SURFACE1, D-EMAIL-SMTP-CONFIG1,
+  D-EMAIL-DKIM-CONFIG1** *(retired 2026-10-30, owner decision)*: Jet ships no
+  email support. `core.email` is not a Core module, so `use core.email` is the
+  ordinary unknown-module error, and neither Core nor the runtime provides SMTP
+  submission, MIME message composition, or DKIM signing.
 - **D-ENCSTREAM1=A**: each `core.encoding` codec has one adapter identity with
   whole-value and reader/writer modes over the shared `Dyn`
   and `Codable` machinery. Reader/writer access is a mode of that adapter, never a second
@@ -4901,7 +4847,7 @@ the checked join semantics; they do not reintroduce a table carrier.
 
 - **D-AUTH1=A**: `core.auth` batteries — sessions (signed rotating
   cookies; httponly/secure/samesite defaults), password login (argon2id
-  via the crypto suite), OAuth/OIDC client, email magic links, JWT/PASETO
+  via the crypto suite), OAuth/OIDC client, magic links, JWT/PASETO
   verification. `app.auth(users: db)` is the magic default; every knob
   expert-overridable; secrets carry `#Credential`; policy
   may require stronger factors.

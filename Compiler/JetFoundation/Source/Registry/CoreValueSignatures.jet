@@ -619,39 +619,6 @@ fn core_value_fixed_signature(module_name: String, member: String) -> CoreTypedC
         }
     }
 
-    if module_name == "core.email" {
-        email_error :: core_sig_named("EmailError")
-        address :: core_sig_named("Address")
-        attachment :: core_sig_named("Attachment")
-        if member == "address" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(core_sig_result(address, email_error))))
-        }
-        if member == "attachment" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(Type.String, read), core_sig_positional(Type.String, read), core_sig_positional(list_u8, read),
-            }, Val(core_sig_result(attachment, email_error))))
-        }
-        if member == "message" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(address, read), core_sig_positional(Type.List{element: address}, read),
-                core_sig_positional(Type.List{element: address}, read), core_sig_positional(Type.String, read),
-                core_sig_positional(Type.String, read), core_sig_positional(core_sig_named("HTML"), read),
-                core_sig_positional(Type.List{element: attachment}, read),
-            }, Val(core_sig_result(core_sig_named("Message"), email_error))))
-        }
-        if member == "envelope" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(address, read), core_sig_positional(Type.List{element: address}, read),
-            }, Val(core_sig_result(core_sig_named("Envelope"), email_error))))
-        }
-        if member == "serialize" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("Message"), read)}, Val(core_sig_result(list_u8, email_error))))
-        }
-        if member == "smtp" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("SMTPConfig"), read)}, Val(core_sig_result(core_sig_named("Mailer"), email_error))))
-        }
-    }
-
     if module_name == "core.text" {
         if core_sig_one_of(member, [String]{"scalar_count", "byte_count"}) {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.Int)))

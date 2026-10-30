@@ -140,7 +140,7 @@ fn sema_web_host_check_core_usage(target_name: String, used_core: [String], diag
 // Reuses TargetSurface from 371361c3e against current registration facts.
 fn sema_target_is_socket_surface(path: String) -> Bool Never! {
     if path == {
-        "core.net" | "core.net.tls" | "core.net.ws" | "core.http" | "core.http.client" | "core.http.server" | "core.email" -> true
+        "core.net" | "core.net.tls" | "core.net.ws" | "core.http" | "core.http.client" | "core.http.server" -> true
         else -> false
     }
 }
@@ -168,7 +168,7 @@ fn sema_target_wasip2_unsupported_operations(used_core: [String]) -> [String] Ne
             }
             "core.http" -> member == "get" || member == "post" || member == "request"
             "core.http.server" -> member == "tls"
-            "core.net.tls" | "core.http.client" | "core.email" -> true
+            "core.net.tls" | "core.http.client" -> true
             else -> false
         }
         if unsupported -> sema_core_string_add(&operations, "{module_name}.{member}")
@@ -201,7 +201,7 @@ fn sema_target_check_socket_surfaces(graph: SemaRegistrationGraph, used_core: [S
                 complete = false
             }
             if !wasip2 -> next
-            unsupported_surface :: surface == "core.net.tls" || surface == "core.net.ws" || surface == "core.http.client" || surface == "core.email"
+            unsupported_surface :: surface == "core.net.tls" || surface == "core.net.ws" || surface == "core.http.client"
             if unsupported_surface {
                 operation_key :: "{graph.modules[module_row_index].module_identity}:{span.start}:{span.end}:E3305:{surface}"
                 if seen.get(operation_key) == None {

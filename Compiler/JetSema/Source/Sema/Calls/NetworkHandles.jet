@@ -41,11 +41,6 @@ fn sema_network_handle_parameter(name: String, label: String, ty: Type, zone: Pa
 fn sema_network_handle_argument(name: String, ty: Type) -> SemaCallParam Never! {
     sema_network_handle_parameter(name, name, ty, ParamZone.Either)
 }
-fn sema_network_handle_argument_move(name: String, ty: Type) -> SemaCallParam Never! {
-    parameter := sema_network_handle_argument(name, ty)
-    parameter.convention = AccessConvention.Move
-    parameter
-}
 
 fn sema_network_handle_deadline() -> SemaCallParam Never! {
     sema_network_handle_parameter("deadline", "deadline", Type.Named{name: "Duration"}, ParamZone.LabelOnly)

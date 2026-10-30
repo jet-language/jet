@@ -136,16 +136,6 @@ never escapes a raw operation. Ordinary Close first unloads any opened native
 library, then removes its staged payload, matching the verification provider's
 error path. Successful finish transfers those resources into the existing Mod.
 
-Email address, attachment, envelope, and message construction validates in
-`Core/Email/Email.jet`: control-character refusal precedes address parsing,
-mailbox grammar is ASCII dot-atom or quoted local, MIME and physical-header
-limits precede attachment size, and envelopes require 1–100 recipients.
-The same source computes the native conservative wire bound and assembles MIME:
-UTF-8 encoded words never split a scalar, transfer base64 folds at 76 bytes,
-and native-order SHA-256 absorption determines mixed/alternative boundaries.
-BCC participates in envelope and boundary generation, never visible headers.
-Private whole-carrier views and builders only marshal native storage; refusal
-errors retain the original Configuration operation strings.
 The canonical `core.files.__create_dir_all_raw` leaf calls the shared recursive
 directory-creation host operation without a second fault probe; source callers
 retain their own FS.Write preflight and the host's Write/path error context.
@@ -924,67 +914,6 @@ fn run() {
 
 `uuid1` and an unqualified `uuid4` spelling are not Core APIs; use `v7` or
 `v4` respectively.
-
-### `core.email` — bounded messages and SMTP submission
-
-`core.email` separates checked address/message construction from SMTP
-transport. It rejects controls before serialization and bounds recipients,
-attachments, headers, body, and total message size before producing wire bytes.
-
-```jet
-use core.email as email
-
-fn run() {
-    from :: email.address("Mara <mara@example.com>") ?? return
-    to :: email.address("Ada <ada@example.net>") ?? return
-    message :: email.message(from, [to], [Address]{}, "Welcome", "Hello", HTML{""}, [Attachment]{}) ?? return
-    bytes :: email.serialize(message) ?? return
-    print(bytes.len())
-}
-```
-
-`HTML{...}` is checked text; interpolation values are escaped. Use `HTML{""}`
-for a plain-text-only message. Bcc recipients enter the default `Envelope` but
-are not emitted as message headers. Serialization uses CRLF, bounded Base64
-lines, and deterministic content-derived multipart boundaries.
-
-| API | Result | Description |
-| --- | --- | --- |
-| `limits()` | `Limits` | Return the checked reply, capability, recipient, message, and challenge limits. |
-| `smtp_auth(user, password)` | `SMTPAuth` | Build password authentication from a nominal `Secret`. |
-| `dkim(domain, selector, key, signed_headers)` | `DKIMConfig` | Configure one signing identity and its signed-header list. |
-| `address(text)` | `Address !EmailError` | Parse and validate a mailbox or display-name address. |
-| `attachment(name, mime, bytes)` | `Attachment !EmailError` | Validate an attachment name/type/size and normalize its MIME spelling. |
-| `message(from, to, bcc, subject, text, html, attachments)` | `Message !EmailError` | Validate fields, create the default envelope, and compute a wire bound. |
-| `envelope(from, recipients)` | `Envelope !EmailError` | Validate SMTP recipients independently of message headers. |
-| `serialize(message)` | `[U8] !EmailError` | Render bounded MIME bytes without Bcc headers. |
-| `smtp(config)` | `Mailer !EmailError` | Validate configuration and create a transport handle. |
-| `smtp_from_env()` | `Mailer !EmailError` | Read the checked SMTP configuration from environment variables. |
-
-`smtp_from_env` requires `SMTP_HOST`. `SMTP_SECURITY` accepts `starttls` (the
-default) or `tls`; the corresponding default ports are 587 and 465.
-`SMTP_PORT`, `SMTP_CA_PEM`, `SMTP_RECIPIENT_POLICY`, and paired
-`SMTP_USERNAME`/`SMTP_PASSWORD` are optional. Recipient policy is
-`require_all` by default or `deliver_accepted`. DKIM configuration uses
-`SMTP_DKIM_DOMAIN`, `SMTP_DKIM_SELECTOR`, `SMTP_DKIM_PRIVATE_KEY_BASE64`, and
-optional `SMTP_DKIM_SIGNED_HEADERS`; partial configuration fails before
-connecting.
-
-The safe limits, environment configuration, and private configuration predicates
-live in `Core/Email`. Before creating a mailer, `smtp_from_env` checks limits,
-host, port/security pairing, authentication name, CA PEM, and DKIM header policy,
-in that order. The first invalid limit is reported in field declaration order.
-`Limits.safe()` supplies the same six bounds used by `smtp_from_env`; DKIM
-environment keys require canonical standard base64 independently of edition.
-The decoder borrows the encoded `Secret`, uses whole four-byte groups, and
-keeps partial decoded output in a `Secret` so malformed input follows the same
-zeroizing ownership path as successful decoding.
-
-`Mailer.send(message)` reports relay acceptance in `SendReport`, not inbox
-delivery. A cancellation after message submission is `DeliveryUnknown`; Core
-does not retry an uncertain submission. Use separate mailers for separate DKIM
-identities. Custom CA material extends system roots without disabling hostname
-verification.
 
 ### `core.http` — bounded HTTP values and one-shot calls
 
@@ -4691,7 +4620,6 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.data.sketch.tdigest`
 - `core.db`
 - `core.db.sql`
-- `core.email`
 - `core.encoding`
 - `core.encoding.base32`
 - `core.encoding.base64`

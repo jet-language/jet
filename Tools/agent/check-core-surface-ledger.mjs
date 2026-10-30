@@ -193,7 +193,6 @@ const PYTHON_SOURCE_CONTAINER = {
   "mod:threading": "core.sync",
   "mod:queue": "core.sync",
   "mod:argparse": "core.args",
-  "mod:email": "core.email",
   "mod:inspect": "core.reflect",
   "mod:mimetypes": "core.net.mime",
   "mod:xml.etree.ElementTree": "core.encoding.xml",
@@ -213,6 +212,7 @@ const PYTHON_SOURCE_CONTAINER = {
 // countable; dropping it silently would hide a whole workflow.
 const PYTHON_UNASSIGNED = {
   "type:bool": "bool mirrors int, which is recorded under core.math",
+  "mod:email": "Jet ships no email support",
 };
 
 const PYTHON_ABSENT = {

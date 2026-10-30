@@ -188,42 +188,6 @@ minio)
     : > "$data/.service-running"
     exec sleep 30
     ;;
-mailpit)
-    database=
-    listen=
-    smtp=
-    while [ "$#" -gt 0 ]; do
-        case "$1" in
-            --database) shift; database=$1 ;;
-            --listen) shift; listen=$1 ;;
-            --smtp) shift; smtp=$1 ;;
-        esac
-        shift
-    done
-    [ -n "$database" ]
-    [ "$listen" = "127.0.0.1:${JETPACK_SERVICE_PORT}" ]
-    [ "$smtp" = "127.0.0.1:1025" ]
-    : > "$(dirname "$database")/.service-running"
-    exec sleep 30
-    ;;
-MailHog)
-    ui=
-    api=
-    smtp=
-    while [ "$#" -gt 0 ]; do
-        case "$1" in
-            -ui-bind-addr) shift; ui=$1 ;;
-            -api-bind-addr) shift; api=$1 ;;
-            -smtp-bind-addr) shift; smtp=$1 ;;
-        esac
-        shift
-    done
-    [ "$ui" = "127.0.0.1:${JETPACK_SERVICE_PORT}" ]
-    [ "$api" = "127.0.0.1:${JETPACK_SERVICE_PORT}" ]
-    [ "$smtp" = "127.0.0.1:1025" ]
-    : > .service-running
-    exec sleep 30
-    ;;
 blackfire)
     [ "${1:-}" = "agent:start" ]
     : > .service-running
@@ -297,16 +261,6 @@ curl)
             port=$(cat .jet/services/minio/ports)
             [ "$url" = "http://127.0.0.1:${port}/minio/health/live" ]
             [ -f .jet/services/minio/data/.service-running ]
-            ;;
-        */api/v1/info)
-            port=$(cat .jet/services/mailpit/ports)
-            [ "$url" = "http://127.0.0.1:${port}/api/v1/info" ]
-            [ -f .jet/services/mailpit/data/.service-running ]
-            ;;
-        */api/v2/messages)
-            port=$(cat .jet/services/mailhog/ports)
-            [ "$url" = "http://127.0.0.1:${port}/api/v2/messages" ]
-            [ -f .jet/services/mailhog/data/.service-running ]
             ;;
         *)
             healthy=1

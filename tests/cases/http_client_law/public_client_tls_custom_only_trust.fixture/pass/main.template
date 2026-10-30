@@ -3,7 +3,7 @@ use core.http.client as http
 use core.net.tls as tls
 use core.files as fs
 fn run() {
-    pem :: fs.read_bytes("{work}/tls/smtp.ca.cert.pem") ?? panic("ca")
+    pem :: fs.read_bytes("{work}/tls/custom-root.ca.cert.pem") ?? panic("ca")
     roots :: tls.RootCertificates.from_pem(pem) ?? panic("roots")
     cfg :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("cfg")
     client :: http.Client.new().tls(cfg).protocols(false, true, false)

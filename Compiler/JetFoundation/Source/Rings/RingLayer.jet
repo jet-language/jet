@@ -41,7 +41,6 @@ fn jet_ring_dependency_rows() -> [JetRingDependencyRow] Never! {
         {module_name: "core.data.sketch.reservoir", dependencies: [String]{"core.data"}},
         {module_name: "core.data.sketch.tdigest", dependencies: [String]{"core.data", "core.math"}},
         {module_name: "core.db", dependencies: [String]{"core.encoding"}},
-        {module_name: "core.email", dependencies: [String]{"core.crypto", "core.crypto.expert", "core.encoding.base64", "core.encoding.hex", "core.net", "core.sys", "core.text"}},
         {module_name: "core.encoding", dependencies: [String]{"core"}},
         {module_name: "core.encoding.base32", dependencies: [String]{"core.encoding"}},
         {module_name: "core.encoding.base64", dependencies: [String]{"core.encoding", "core.encoding.hex", "core.encoding.base32"}},
@@ -195,10 +194,6 @@ fn jet_ring_helper_layer(module_name: String, helper: String) -> RuntimeLayer? {
         }
         "core.archive" -> if helper == {
             "zip_decompress" | "crc32" | "adler32" | "deflate" | "inflate" | "zip_names_json" | "tar_names_json" -> Val(RuntimeLayer.Alloc)
-            else -> None
-        }
-        "core.email" -> if helper == {
-            "Address" | "Message" | "Attachment" | "Envelope" | "RecipientPolicy" | "Limits" | "address" | "attachment" | "message" | "envelope" | "serialize" -> Val(RuntimeLayer.Alloc)
             else -> None
         }
         else -> None

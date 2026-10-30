@@ -19,6 +19,16 @@ fn font_error(err: I64, message: I64) -> I64 {
     I64{0}
 }
 
+// Allocate only the run's inline glyph buffer, never a temporary List shell.
+fn font_glyph_list_init(length: I64, target: I64) -> I64 {
+    if (length > I64{9223372036854775807} /% FONT_GLYPH_BYTES) -> rt_seq_capacity_overflow_stop()
+    data :: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * FONT_GLYPH_BYTES, I64{8})
+    rt_text_store(target + DATA_SEQUENCE_LENGTH, length)
+    rt_text_store(target + DATA_SEQUENCE_CAPACITY, length)
+    rt_text_store(target + DATA_SEQUENCE_DATA, data)
+    data
+}
+
 #Export(c) fn jet_font_shape_raw(text: I64, face: I64, ok: I64, err: I64) -> I64 {
     size :: rt_f64_from_bits(rt_text_word(face + I64{8}))
     if !(size > Float{0.0} && size - size == Float{0.0}) -> return font_error(err, rt_static_text("InvalidRequest(\"font size must be finite and positive\")"))
@@ -33,7 +43,7 @@ fn font_error(err: I64, message: I64) -> I64 {
     }
     run :: jet_rt_alloc(FONT_RUN_BYTES, I64{8})
     thread_zero(run, FONT_RUN_BYTES)
-    glyphs :: mail_list_init(count, FONT_GLYPH_BYTES, run)
+    glyphs :: font_glyph_list_init(count, run)
     advance_x := Float{0.0}
     index := I64{0}
     at = I64{0}
@@ -164,7 +174,7 @@ fn font_glyph_eq(left: I64, right: I64) -> Bool {
     result :: jet_rt_alloc(FONT_RUN_BYTES, I64{8})
     coll_copy(value, result, FONT_RUN_BYTES)
     length :: rt_text_word(value + DATA_SEQUENCE_LENGTH)
-    glyphs :: mail_list_init(length, FONT_GLYPH_BYTES, result)
+    glyphs :: font_glyph_list_init(length, result)
     coll_copy(rt_text_word(value + DATA_SEQUENCE_DATA), glyphs, length * FONT_GLYPH_BYTES)
     result
 }

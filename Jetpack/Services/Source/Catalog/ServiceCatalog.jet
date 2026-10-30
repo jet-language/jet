@@ -35,7 +35,6 @@ enum ServicePresetKind {
     Mariadb
     Nginx
     Minio
-    Mailpit
     Adminer
     Blackfire
     Caddy
@@ -52,7 +51,6 @@ enum ServicePresetKind {
     KafkaConnect
     Kafka
     Keycloak
-    Mailhog
     Meilisearch
     Memcached
     Mongodb
@@ -82,7 +80,6 @@ enum ServicePresetKind {
             .Mariadb -> [String]{"mariadb"}
             .Nginx -> [String]{"nginx"}
             .Minio -> [String]{"minio"}
-            .Mailpit -> [String]{"mailpit", "mail"}
             .Adminer -> [String]{"adminer"}
             .Blackfire -> [String]{"blackfire"}
             .Caddy -> [String]{"caddy"}
@@ -99,7 +96,6 @@ enum ServicePresetKind {
             .KafkaConnect -> [String]{"kafka-connect"}
             .Kafka -> [String]{"kafka"}
             .Keycloak -> [String]{"keycloak"}
-            .Mailhog -> [String]{"mailhog"}
             .Meilisearch -> [String]{"meilisearch"}
             .Memcached -> [String]{"memcached"}
             .Mongodb -> [String]{"mongodb"}
@@ -135,7 +131,6 @@ enum ServicePresetKind {
             .Mariadb -> "mariadb@nixpkgs"
             .Nginx -> "nginx@nixpkgs"
             .Minio -> "minio@nixpkgs"
-            .Mailpit -> "mailpit@nixpkgs"
             .Adminer -> "adminer@nixpkgs"
             .Blackfire -> "blackfire@nixpkgs"
             .Caddy -> "caddy@nixpkgs"
@@ -151,7 +146,6 @@ enum ServicePresetKind {
             .Influxdb -> "influxdb2-server@nixpkgs"
             .KafkaConnect | .Kafka -> "apacheKafka@nixpkgs"
             .Keycloak -> "keycloak@nixpkgs"
-            .Mailhog -> "mailhog@nixpkgs"
             .Meilisearch -> "meilisearch@nixpkgs"
             .Memcached -> "memcached@nixpkgs"
             .Mongodb -> "mongodb-ce@nixpkgs"
@@ -185,7 +179,6 @@ enum ServicePresetKind {
             .Mariadb -> "mariadbd"
             .Nginx -> "nginx"
             .Minio -> "minio"
-            .Mailpit -> "mailpit"
             .Adminer -> ""
             .Blackfire -> "blackfire"
             .Caddy -> "caddy"
@@ -202,7 +195,6 @@ enum ServicePresetKind {
             .KafkaConnect -> "connect-standalone.sh"
             .Kafka -> "kafka-server-start.sh"
             .Keycloak -> "kc.sh"
-            .Mailhog -> "MailHog"
             .Meilisearch -> "meilisearch"
             .Memcached -> "memcached"
             .Mongodb -> "mongod"
@@ -232,7 +224,6 @@ enum ServicePresetKind {
             .Mysql | .Mariadb -> 3306
             .Nginx | .Caddy | .Httpbin | .Keycloak | .Sqld | .Wiremock -> 8080
             .Minio | .Clickhouse | .Rustfs -> 9000
-            .Mailpit | .Mailhog -> 8025
             .Adminer -> 8081
             .Blackfire -> 8307
             .Cassandra -> 9042
@@ -287,7 +278,6 @@ enum ServicePresetKind {
                 return [String]{"nginx", "-p", prefix, "-c", files.join(prefix, "conf/nginx.conf"), "-g", "daemon off;"}
             }
             .Minio -> [String]{"minio", "server", data, "--address", "127.0.0.1:{port}"}
-            .Mailpit -> [String]{"mailpit", "--database", files.join(data, "mailpit.db"), "--listen", "127.0.0.1:{port}", "--smtp", "127.0.0.1:1025"}
             .Adminer -> [String]{"adminer", "--port", "{port}", "--root", data}
             .Blackfire -> [String]{"blackfire", "agent:start"}
             .Caddy -> [String]{"caddy", "file-server", "--root", data, "--listen", "127.0.0.1:{port}"}
@@ -304,7 +294,6 @@ enum ServicePresetKind {
             .KafkaConnect -> [String]{"connect-standalone.sh", files.join(data, "connect-standalone.properties"), files.join(data, "connector.properties")}
             .Kafka -> [String]{"kafka-server-start.sh", files.join(data, "server.properties")}
             .Keycloak -> [String]{"kc.sh", "start-dev", "--http-port={port}"}
-            .Mailhog -> [String]{"MailHog", "-ui-bind-addr", "127.0.0.1:{port}", "-api-bind-addr", "127.0.0.1:{port}", "-smtp-bind-addr", "127.0.0.1:1025"}
             .Meilisearch -> [String]{"meilisearch", "--db-path", data, "--http-addr", "127.0.0.1:{port}", "--no-analytics"}
             .Memcached -> [String]{"memcached", "-l", "127.0.0.1", "-p", "{port}"}
             .Mongodb -> [String]{"mongod", "--dbpath", data, "--bind_ip", "127.0.0.1", "--port", "{port}"}
@@ -336,8 +325,6 @@ enum ServicePresetKind {
             .Mariadb -> ReadyProbe.Exec{command: "mariadb-admin ping -h 127.0.0.1 -P {port} -u root"}
             .Nginx | .Adminer -> ReadyProbe.Exec{command: "curl -fsS http://127.0.0.1:{port}/"}
             .Minio -> ReadyProbe.Exec{command: "curl -fsS http://127.0.0.1:{port}/minio/health/live"}
-            .Mailpit -> ReadyProbe.Exec{command: "curl -fsS http://127.0.0.1:{port}/api/v1/info"}
-            .Mailhog -> ReadyProbe.Exec{command: "curl -fsS http://127.0.0.1:{port}/api/v2/messages"}
             .Blackfire | .Tailscale -> ReadyProbe.Exec{command: "true"}
             else -> services_tcp_readiness(port)
         }
@@ -375,9 +362,9 @@ enum ServicePresetKind {
 // Every preset in catalog order.
 fn services_catalog_kinds() -> [ServicePresetKind] Never! {
     [ServicePresetKind]{
-        .Redis, .Postgres, .Mysql, .Mariadb, .Nginx, .Minio, .Mailpit, .Adminer, .Blackfire, .Caddy,
+        .Redis, .Postgres, .Mysql, .Mariadb, .Nginx, .Minio, .Adminer, .Blackfire, .Caddy,
         .Cassandra, .Clickhouse, .Cockroachdb, .Couchdb, .DynamodbLocal, .Elasticmq, .Elasticsearch,
-        .Garage, .Httpbin, .Influxdb, .KafkaConnect, .Kafka, .Keycloak, .Mailhog, .Meilisearch,
+        .Garage, .Httpbin, .Influxdb, .KafkaConnect, .Kafka, .Keycloak, .Meilisearch,
         .Memcached, .Mongodb, .Mosquitto, .Nats, .Nixseparatedebuginfod, .Opensearch,
         .OpentelemetryCollector, .Prometheus, .Rabbitmq, .Rustfs, .Sqld, .Tailscale, .Temporal,
         .Tideways, .Typesense, .Varnish, .Vault, .Wiremock

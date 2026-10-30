@@ -115,7 +115,6 @@ fn sema_expression_core_enum_name(name: String) -> Bool Never! {
         "WatchDomain" | "WatchKind" | "DurationUnit" | "LateEventDisposition" |
         "Overflow" | "FailurePolicy" | "DispatchState" | "HookPolicy" | "HookDecision" | "HookOutcome" |
         "NetShutdown" | "NetReadyInterest" | "NetError" | "NetDNSError" |
-        "SMTPSecurity" | "RecipientPolicy" | "EmailError" |
         "DeliveryState" | "ServiceError" | "TaskOutcome" | "TaskStatus" -> true
         else -> false
     }
@@ -1020,7 +1019,7 @@ fn sema_expression_core_enum_positional_literal(enum_name: String, display_name:
 }
 
 // A named-payload case of a Core enum without a source declaration
-// (`EmailError.Configuration{...}`), checked like a declared enum's named
+// (`PluginError.Budget{...}`), checked like a declared enum's named
 // payload (Rust `check_enum_lit`): fields keep their written order and every
 // declared field gets exactly one value.
 fn sema_expression_core_enum_named_literal(enum_name: String, display_name: String, variant: String, labels: [String], payload_types: [Type], args: [EnumLitArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -1954,7 +1953,7 @@ fn sema_expression_variant_head(head: Type, environment: SemaScopeEnvironment, p
         if sema_scope_declaration_enum_declares(environment, program, symbol.id, parts.after) -> return Val(head_value)
         if sema_expression_core_export_variants(environment, program, symbol) == None -> return None
     }
-    // A compiler-owned Core enum (`EmailError`) has no declaration; its
+    // A compiler-owned Core enum (`PluginError`) has no declaration; its
     // named-payload case comes from the generated Core enum payload rows.
     if core_enum_variant_labels(parts.before, parts.after) != None -> Val(head_value) else -> None
 }

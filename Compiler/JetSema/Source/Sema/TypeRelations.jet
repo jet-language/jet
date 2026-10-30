@@ -1079,8 +1079,7 @@ fn sema_type_graph_bare_rename(graph: SemaRegistrationGraph, declared: String, o
 // loaded modules, that the caller can see. Two owners leave it unresolved. A
 // built-in typed head names its Core carrier record (`URL` in `core.net.url`,
 // `HTML` in `core.text.html`, …; boundary_head_carrier_module) when that
-// module is loaded, and no other owner;
-// `Limits` is `core.email`'s, and a parameterless Core alias outside the
+// module is loaded, and no other owner; a parameterless Core alias outside the
 // bare-owner and root-type sets is skipped; an alias that re-exports a
 // namespaced type of the same leaf names that type's owner.
 fn sema_type_graph_unique_type_owner(graph: SemaRegistrationGraph, caller_index: Int, name: String) -> SemaRegistrationResolvedSymbol? {
@@ -1104,7 +1103,6 @@ fn sema_type_graph_unique_type_owner(graph: SemaRegistrationGraph, caller_index:
         owner := row
         alias_row :: graph.modules[row.module_index]
         alias :: alias_row.nominals[row.row]
-        if name == "Limits" && (alias_row.module_name != "core.email" || !alias_row.module_identity.starts_with("<corelib>/")) -> next
         if alias.kind == SemaRegistrationNominalKind.TypeAlias && alias.generic_params.len() == 0 {
             if alias_row.module_identity.starts_with("<corelib>/") && core_bare_source_module(name) == None && !core_root_type(name) -> next
             item :: sema_registration_nominal_source_item(alias.source) ?? next
