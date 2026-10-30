@@ -94,6 +94,7 @@ use jet_foundation.[
     ImplDef,
     StructDef,
     TraitImplBlock,
+    FactDecl,
     compiler_threads_heaviest_first,
 ]
 
@@ -3151,7 +3152,7 @@ fn sema_check_registration_module_start(environment: SemaScopeEnvironment, progr
 fn sema_check_registration_module_started(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, values: [SemaComptimeItemValue], started: ^SemaDeclarationCheck?, scopes: &SemaScopeTable, count_work: Bool, items_scanned: &Int) -> SemaGraphModuleResult {
     check := ^started ?? {
         module_result := sema_check_registration_module_start(environment, program, module_index, values, &scopes)
-        sema_check_registration_module_program(environment, program, module_index, scopes, &module_result, count_work, &items_scanned)
+        sema_check_registration_module_program(environment, program, module_index, &module_result, count_work, &items_scanned)
         return module_result
     }
     if count_work -> items_scanned += check.items_scanned
@@ -3172,7 +3173,7 @@ fn sema_check_registration_module_scopes(program: SemaProgramTables, module_inde
 
 // Retarget the actual module environment after declaration checking and
 // before this ordinary program/header phase, exactly as in the old checker.
-fn sema_check_registration_module_program(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, scopes: SemaScopeTable, module_result: &SemaGraphModuleResult, count_work: Bool, items_scanned: &Int) {
+fn sema_check_registration_module_program(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, module_result: &SemaGraphModuleResult, count_work: Bool, items_scanned: &Int) {
     if program.registration_graph == .Val(graph) {
         test_names := [String:Bool]{}
         unsupported_forms := sema_check_unsupported_program_forms(graph.modules[module_index].program)
@@ -3219,9 +3220,12 @@ fn sema_check_registration_module_program(environment: SemaScopeEnvironment, pro
                 // derived decode of its published-schema struct replays it
                 // (Registration/SerdeItems.jet, D-MIGRATE4).
                 .Migration(_) -> {}
+                // A #Test name is a label string, not an item name: it shares
+                // no namespace with functions or types (#6288), only with the
+                // module's other test names.
                 .Test(test) -> {
                     if test.name == .Val(test_name) {
-                        if test_names.get(test_name) != None || sema_scope_resolve_index(scopes, test_name) != None {
+                        if test_names.get(test_name) != None {
                             &module_result.diagnostics.push(sema_defined_twice(test_name, "every test needs a unique name so failures are easy to find", test.name_span))
                         } else {
                             test_names[test_name] = true
@@ -3234,12 +3238,17 @@ fn sema_check_registration_module_program(environment: SemaScopeEnvironment, pro
                         &module_result.incomplete_reasons.push("inline module `{definition.name}` is not lowered")
                     }
                 }
-                // A ratified `fact` declaration has no Jet implementation
-                // yet: E2104 at the declaration, card #6079.
+                // A `fact` declaration has no checked body: its rows are
+                // compile-time-only and lowering erases them. One fact identity
+                // names one declaration in the loaded bundle (Rust
+                // Pipeline.rs `register_fact_declaration`).
                 .FactDecl(definition) -> {
-                    module_result.complete = false
-                    &module_result.diagnostics.push(sema_error("E2104", definition.name_span, "`fact {definition.name}` is not built yet", "This `jet` has no implementation of `fact` declarations yet, and no other `jet` can check or run them.", "Remove the `fact` declaration for now; `fact` declarations need their Jet implementation first (card #6079)."))
-                    &module_result.incomplete_reasons.push("`fact {definition.name}` is not built yet (card #6079)")
+                    identity :: sema_fact_identity(definition)
+                    if sema_fact_first_declaration(graph, module_index, item_index, identity) == .Val(first) {
+                        diagnostic := sema_error("E0105", definition.name_span, "fact `{identity}` is declared twice (spans {first.span.start}..{first.span.end} and {definition.name_span.start}..{definition.name_span.end})", "one fact name must resolve to one declaration in the loaded bundle", "rename or remove one of the fact declarations")
+                        diagnostic.detail = Val("first declaration `{first.name}`: module {first.module_index}, span {first.span.start}..{first.span.end}\nsecond declaration `{definition.name}`: module {module_index}, span {definition.name_span.start}..{definition.name_span.end}")
+                        &module_result.diagnostics.push(diagnostic)
+                    }
                 }
                 else -> {
                     module_result.complete = false
@@ -3252,6 +3261,42 @@ fn sema_check_registration_module_program(environment: SemaScopeEnvironment, pro
         return
     }
     panic("an owning registered-module pass lost its registration graph")
+}
+
+// Rust Pipeline.rs `fact_identity`: `$name` when it is a plain string,
+// otherwise the declaration's source name.
+fn sema_fact_identity(definition: FactDecl) -> String {
+    loop parameter in definition.params {
+        if parameter.name != "$name" -> next
+        value :: parameter.value ?? break
+        if value == .Str(parts, _, _) {
+            identity := ""
+            loop part in parts {
+                if part == .Lit(text) -> identity = "{identity}{text}" else -> return definition.name.copy()
+            }
+            return identity
+        }
+        break
+    }
+    definition.name.copy()
+}
+
+struct SemaFactFirstDeclaration {
+    module_index: Int
+    span: Span
+    name: String
+}
+
+// The bundle's earlier declaration of fact `identity`, in module order and
+// then source order, before item `item_index` of module `module_index`.
+fn sema_fact_first_declaration(graph: SemaRegistrationGraph, module_index: Int, item_index: Int, identity: String) -> SemaFactFirstDeclaration? {
+    loop earlier_module in 0..module_index {
+        end :: if earlier_module == module_index -> item_index else -> graph.modules[earlier_module].program.items.len()
+        loop earlier_item in 0..<end {
+            if graph.modules[earlier_module].program.items[earlier_item] == .FactDecl(other) && sema_fact_identity(other) == identity -> return Val(SemaFactFirstDeclaration{module_index: earlier_module, span: other.name_span, name: other.name.copy()})
+        }
+    }
+    None
 }
 
 // Finish only after the original ordered body/method/conversion phase. The
@@ -7201,7 +7246,7 @@ fn sema_comptime_modules_with_values(program: SemaProgramTables, values: [SemaCo
         body_values := environment.comptime_body_publication.copy()
         sema_scope_environment_enter_module(&environment, program, module_index, ^body_values)
         items_scanned := 0
-        sema_check_registration_module_program(environment, program, module_index, scopes, &checked, false, &items_scanned)
+        sema_check_registration_module_program(environment, program, module_index, &checked, false, &items_scanned)
         sema_check_registration_module_foreign(environment, program, module_index, &checked)
         &modules.push(^checked)
     }
@@ -7248,7 +7293,7 @@ fn sema_check_declaration_module(environment: SemaScopeEnvironment, program: Sem
     scopes := sema_scope_init(sema_check_registered_module_identity(environment, program, module_index))
     module_result := sema_check_registration_module_start(environment, program, module_index, values, &scopes)
     items_scanned := 0
-    sema_check_registration_module_program(environment, program, module_index, scopes, &module_result, true, &items_scanned)
+    sema_check_registration_module_program(environment, program, module_index, &module_result, true, &items_scanned)
     if foreign -> sema_check_registration_module_foreign(environment, program, module_index, &module_result)
     view_summary_jobs := [Int]?{None}
     if !foreign -> view_summary_jobs = Val(sema_check_sorted_view_summary_jobs(environment, program, module_index))

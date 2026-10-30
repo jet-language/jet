@@ -199,9 +199,12 @@ fn kit_ui_test_run(code: Int, stderr: String) -> KitRun {
     assert_eq(kit_ui_plane_coverage([row, other], "jet 0 1 1\nsema 0 1 1\n").status, "FAIL")
     uncovered :: KitUIRegistryRow{code: "E9999", plane: "sema", active: true, edit: false, reason: false}
     assert_eq(kit_ui_plane_coverage([row, other, uncovered], baseline).status, "FAIL")
-    parsed :: kit_ui_registry("    DiagnosticRegistryRow{{\n        code: \"E0109\",\n        stage: \"sema\",\n        status: DiagnosticRegistryStatus.Active,\n        structured_fix: Val(DiagnosticRegistryFix.CryptoMisuse),\n        no_fix_reason: Val(DiagnosticNoFixReason{{kind: DiagnosticNoFixReasonKind.Design}}),\n    }},\n")
-    assert_eq(parsed.len(), 1)
+    parsed :: kit_ui_registry("// header\ndiagnostic\tE0109\tsema\terror\tcompile\tactive\tm\tw\ty\tf\tfalse\tcrypto_misuse\ndiagnostic\tE0001\tjet\terror\tcompile\tactive\tm\tw\ty\tf\tfalse\tsource_edit\ndiagnostic\tE0004\tparse\terror\tcompile\tretired\tm\tw\ty\tf\tfalse\t-\n")
+    assert_eq(parsed.len(), 3)
     assert_eq(parsed[0].code, "E0109")
+    assert_eq(parsed[0].plane, "sema")
     assert(!parsed[0].edit)
     assert(parsed[0].reason)
+    assert(parsed[1].edit && !parsed[1].reason)
+    assert(!parsed[2].active && !parsed[2].edit && !parsed[2].reason)
 }

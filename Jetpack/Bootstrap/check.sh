@@ -280,11 +280,21 @@ if (( with_tests == 1 && overall == 0 )); then
   # after its predecessors' `pass` lines; it is recorded as failed and the
   # driver resumes at the next claim (JETPACK_CLAIM_FROM). Any other stop
   # (ICE, timeout, memory cap) can't be attributed to a claim and ends the tier.
+  # The default-tier image (`jet run`'s options: `--optimize=none`) is built
+  # once and every segment runs it, so a failing claim costs one restart, not
+  # one recompile (#6293).
   expected="$(node -e 'console.log(require(process.argv[1]).tests.length)' "$scratch/run/jetpack.map.json")"
   from=0 label=run run_failed=0 run_passed=0
-  while :; do
+  run_binary="$scratch/run/project/.jet/build/jetpack" run_built=0
+  if bounded run-build "$check_mem" 1800 "$scratch/run/project" "$jet" build --optimize=none src/jetpack.jet && [[ -x "$run_binary" ]]; then
+    run_built=1
+  else
+    echo "jetpack-bootstrap: default tier stopped: the default-tier image did not build" >&2
+    run_failed=1
+  fi
+  while (( run_built == 1 )); do
     run_status=0
-    JETPACK_CLAIM_FROM="$from" bounded "$label" "$check_mem" 1800 "$scratch/run/project" "$jet" run src/jetpack.jet || run_status=$?
+    JETPACK_CLAIM_FROM="$from" bounded "$label" "$check_mem" 1800 "$scratch/run/project" "$run_binary" || run_status=$?
     segment="$(grep -c '^pass ' "$scratch/$label.log" || true)"
     run_passed=$(( run_passed + segment ))
     if (( run_status == 0 )) && grep -qx 'jetpack-bootstrap: claims done' "$scratch/$label.log"; then break; fi

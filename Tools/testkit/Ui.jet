@@ -278,28 +278,22 @@ fn kit_ui_run(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
 
 
 
-fn kit_ui_field(body: String, key: String) -> String {
-    loop raw in body.split("\n") {
-        line :: raw.trim().copy()
-        if line.starts_with("{key}: ") -> return kit_steps_byte_slice(line, key.count_bytes() + 2, line.count_bytes())
-    }
-    ""
-}
-
-fn kit_ui_quoted_field(body: String, key: String) -> String {
-    parts :: kit_ui_field(body, key).split("\"").to_list()
-    if parts.len() >= 3 -> parts[1] else -> ""
-}
-
+// The typed rows from their one home, Compiler/Prelude/Diagnostics.jet
+// (D-REPORT-HOME1=A): tab-separated `diagnostic CODE stage severity moment
+// status meaning what why fix detail structured-fix …`. Field 11 is `-`, a
+// structured-fix marker, or `reason:<kind>|<next action>`. A crypto misuse row
+// carries typed evidence and a reviewed next action, not a source edit, so it
+// counts as reason-covered.
 fn kit_ui_registry(text: String) -> [KitUIRegistryRow] {
     rows := [KitUIRegistryRow]{}
-    loop (index, body) in text.split("    DiagnosticRegistryRow{{\n").to_list() {
-        if index == 0 -> next
-        fix :: kit_ui_field(body, "structured_fix")
-        &rows.push(KitUIRegistryRow{code: kit_ui_quoted_field(body, "code"), plane: kit_ui_quoted_field(body, "stage"),
-            active: kit_ui_field(body, "status") == "DiagnosticRegistryStatus.Active,",
-            edit: fix.starts_with("Val(") && !fix.contains("DiagnosticRegistryFix.CryptoMisuse"),
-            reason: kit_ui_field(body, "no_fix_reason").starts_with("Val(")})
+    loop line in text.split("\n") {
+        if !line.starts_with("diagnostic\t") -> next
+        fields :: line.split("\t").to_list()
+        if fields.len() < 12 -> next
+        fix :: fields[11]
+        &rows.push(KitUIRegistryRow{code: fields[1].copy(), plane: fields[2].copy(), active: fields[5] == "active",
+            edit: fix != "-" && !fix.starts_with("reason:") && fix != "crypto_misuse",
+            reason: fix.starts_with("reason:") || fix == "crypto_misuse"})
     }
     rows
 }
@@ -349,11 +343,21 @@ fn kit_ui_extract_source(text: String) -> [String] {
     codes
 }
 
-fn kit_ui_emitted(directory: String, codes: &[String]) {
-    if !files.exists(directory) -> return
-    loop child in (files.list_dir(directory) ?? panic("coverage source scan: {err}")) {
-        if child.is_dir -> kit_ui_emitted(child.path, &codes)
-        else if child.name.ends_with(".rs") {
+// The registry rows and their Prelude source list every code by construction;
+// they are the registry, not an emission site.
+KIT_UI_REGISTRY_FILES :: [String]{"Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet", "Compiler/Prelude/Diagnostics.jet"}
+
+// The codes a `.jet` implementation source under `directory` names, skipping
+// test packages and fixtures (#6193; tests/guards/diagnostics_coverage.jet
+// scans the same sources).
+fn kit_ui_emitted(root: String, directory: String, codes: &[String]) {
+    path :: files.join(root, directory)
+    if !files.exists(path) -> return
+    loop child in (files.list_dir(path) ?? panic("coverage source scan: {err}")) {
+        relative :: "{directory}/{child.name}"
+        if child.is_dir {
+            if child.name != "Tests" && child.name != "Fixtures" && child.name != "fixtures" -> kit_ui_emitted(root, relative, &codes)
+        } else if child.name.ends_with(".jet") && !kit_expect_named(KIT_UI_REGISTRY_FILES, relative) {
             text :: files.read(child.path) ?? next
             loop code in kit_ui_extract_source(text) -> kit_ui_add_code(&codes, code)
         }
@@ -470,14 +474,13 @@ fn kit_ui_plane_coverage(rows: [KitUIRegistryRow], baseline: String) -> KitVerdi
 }
 
 fn kit_ui_coverage(root: String) -> KitVerdict {
-    registry :: files.read(files.join(root, "Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet")) ?? return kit_expect_verdict("ERROR", "read diagnostic registry: {err}")
+    registry :: files.read(files.join(root, "Compiler/Prelude/Diagnostics.jet")) ?? return kit_expect_verdict("ERROR", "read diagnostic registry: {err}")
     baseline :: files.read(files.join(root, "tests/diagnostics_coverage_baseline.txt")) ?? return kit_expect_verdict("ERROR", "read coverage baseline: {err}")
     allowance :: files.read(files.join(root, "tests/diagnostics_coverage_allowlist.tsv")) ?? return kit_expect_verdict("ERROR", "read coverage allowlist: {err}")
     rows :: kit_ui_registry(registry)
     if rows.len() == 0 -> return kit_expect_verdict("ERROR", "diagnostic registry contains no rows")
     emitted := [String]{}
-    kit_ui_emitted(files.join(root, "Source"), &emitted)
-    kit_ui_emitted(files.join(root, "crates"), &emitted)
+    loop directory in ["Compiler", "Jetpack", "Core"] -> kit_ui_emitted(root, directory, &emitted)
     snapshots := [String]{}
     loop entry in kit_ui_collect(root, "tests/ui", false) -> &snapshots.push(files.join(root, entry.expected))
     loop entry in kit_ui_collect(root, "tests/ui_lint", true) -> &snapshots.push(files.join(root, entry.expected))
