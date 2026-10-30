@@ -542,7 +542,7 @@ generated C/C++ binding caches. The Core library bodies are read from the Jet
 toolchain source tree named by `JET_TOOLCHAIN_ROOT` (the directory that holds
 `Core/`); the Core row table and the canonical effect source are generated
 into [`CoreSources.jet`](../../../Compiler/JetCli/Source/Cli/CoreSources.jet)
-by `node Compiler/Bootstrap/generate-core-sources.mjs`, which
+by `jet Tools/agent/CoreSourceRows.jet`, which
 `node Tools/agent/check-core-surface-ledger.mjs --write` runs and `--check`
 holds current.
 

@@ -13,8 +13,8 @@ for (const script of [
   'Tools/agent/gen-runtime-trap-messages.mjs', 'Tools/agent/gen-runtime-lifecycle.mjs', 'Tools/agent/gen-runtime-stop-exports.mjs',
   'Tools/agent/gen-runtime-host-carriers.mjs', 'Tools/agent/gen-runtime-host-errors.mjs', 'Tools/agent/gen-runtime-scheduler-messages.mjs',
   'Tools/agent/gen-runtime-services-messages.mjs', 'Tools/agent/gen-runtime-test-messages.mjs', 'Tools/agent/lexer-keyword-rows.mjs',
-  'Compiler/Bootstrap/generate-core-sources.mjs',
 ]) cheap.push(start('check-' + script.split('/').pop().replace(/\.mjs$/, ''), [node, script, '--check']));
+cheap.push(start('check-core-source-rows', ['Tools/agent/jet-env', 'jet', 'Tools/agent/CoreSourceRows.jet', '--check']));
 cheap.push(start('stop-exports-test', [node, '--test', 'Tools/agent/gen-runtime-stop-exports.test.mjs']));
 cheap.push(start('trap-messages-test', [node, '--test', 'Tools/agent/gen-runtime-trap-messages.test.mjs']));
 cheap.push(start('lexer-keyword-rows-test', [node, '--test', 'Tools/agent/lexer-keyword-rows.test.mjs']));

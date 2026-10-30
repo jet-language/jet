@@ -50,7 +50,9 @@ const CORE_CALL_ROWS_PATH = "Compiler/JetFoundation/Source/Registry/CoreCallRows
 const CORE_CALL_ROWS_BEGIN = "// BEGIN GENERATED CORE CALL ROWS";
 const CORE_CALL_ROWS_END = "// END GENERATED CORE CALL ROWS";
 const CORE_ENUM_ROWS_PATH = "Compiler/JetFoundation/Source/Registry/CoreEnumRows.jet";
-const CORE_ROWS_GENERATOR_PATH = "Compiler/Bootstrap/generate-core-sources.mjs";
+// The Core source-ownership views' Jet generator, run by $JET through jet-env.
+const CORE_ROWS_GENERATOR_PATH = "Tools/agent/CoreSourceRows.jet";
+const JET_ENV_PATH = "Tools/agent/jet-env";
 // The owner-controlled syntax registry: every Syntax string constant a Core.jet
 // dispatcher row or the core.mem tier map names.
 const SYNTAX_DIR = "Compiler/JetFoundation/Data/Syntax";
@@ -2512,54 +2514,6 @@ function coreSourceFacts() {
   return parseCoreSource(read(CORE_SOURCE_PATH));
 }
 
-// Compiler-private runtime units come straight from the directory: every
-// `Core/<area>/runtime/**/<unit>.jet` except a `// PORT-PENDING` packet, whose
-// body is still the Rust it replaces. A nested directory is one more path
-// segment (`Core/Text/Runtime/Assets/x.jet` is `core.text.runtime.assets.x`).
-// One list, no hand-kept table.
-// The snake_case module segment of a PascalCase Core path segment.
-function snakeSegment(segment) {
-  return segment.replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2").replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
-}
-
-function coreRuntimeParts() {
-  const parts = [];
-  const aliases = new Set();
-  const coreRoot = join(ROOT, "Core");
-  const walk = function (directory, segments) {
-    for (const entry of readdirSync(directory).sort()) {
-      const full = join(directory, entry);
-      if (statSync(full).isDirectory()) {
-        walk(full, segments.concat([entry]));
-        continue;
-      }
-      if (!entry.endsWith(".jet") || !statSync(full).isFile()) continue;
-      const path = "Core/" + segments.join("/") + "/" + entry;
-      if (/^\/\/ PORT-PENDING\b/m.test(read(path))) continue;
-      // Core source directories and files are PascalCase; the module path is
-      // their snake_case names (`Core/Text/Runtime/Assets/UnicodeCcc.jet` is
-      // `core.text.runtime.assets.unicode_ccc`).
-      const unitSegments = segments.concat([entry.slice(0, -".jet".length)]).map(snakeSegment);
-      for (const segment of unitSegments) {
-        if (!/^[a-z][a-z0-9_]*$/.test(segment)) {
-          throw new Error("runtime unit path segment `" + segment + "` is not a lowercase identifier: " + path);
-        }
-      }
-      const alias = "__core_" + unitSegments.join("_");
-      if (aliases.has(alias)) {
-        throw new Error("runtime unit alias `" + alias + "` is claimed twice; rename " + path);
-      }
-      aliases.add(alias);
-      parts.push({ module: "core." + unitSegments.join("."), alias: alias, path: path });
-    }
-  };
-  for (const area of readdirSync(coreRoot).sort()) {
-    const directory = join(coreRoot, area, "Runtime");
-    if (existsSync(directory) && statSync(directory).isDirectory()) walk(directory, [area, "Runtime"]);
-  }
-  return parts;
-}
-
 // The extension rows of CoreCallExtensions.jet's CORE_CALL_EXTENSIONS list:
 // one CoreCallRecord literal per line, already in the CoreCallRows.jet spelling.
 const CORE_CALL_EXTENSIONS_HEAD = "CORE_CALL_EXTENSIONS :: [CoreCallRecord]{";
@@ -2788,7 +2742,7 @@ function validateCoreCallRegistry(source, declarations) {
 
 function validateGeneratedViews(source, declarations) {
   // The Jet-hosted CLI's Core row table is generated from the same declarations.
-  execFileSync(process.execPath, [join(ROOT, CORE_ROWS_GENERATOR_PATH), "--check"], { cwd: ROOT, stdio: "inherit" });
+  execFileSync(join(ROOT, JET_ENV_PATH), ["jet", CORE_ROWS_GENERATOR_PATH, "--check"], { cwd: ROOT, stdio: "inherit" });
   if (!existsSync(join(ROOT, CORE_ENUM_ROWS_PATH)) ||
       read(CORE_ENUM_ROWS_PATH) !== generatedCoreEnumRows(source, declarations)) {
     throw new Error("CoreEnumRows.jet is stale; run --write to regenerate from Core.jet");
@@ -2802,7 +2756,7 @@ function validateGeneratedViews(source, declarations) {
 function writeCoreViews() {
   const source = read(CORE_SOURCE_PATH);
   const declarations = coreSourceFacts();
-  execFileSync(process.execPath, [join(ROOT, CORE_ROWS_GENERATOR_PATH)], { cwd: ROOT, stdio: "inherit" });
+  execFileSync(join(ROOT, JET_ENV_PATH), ["jet", CORE_ROWS_GENERATOR_PATH], { cwd: ROOT, stdio: "inherit" });
   writeCoreCallRegistry(source, declarations);
   writeCoreEnumRows(source, declarations);
   writeCoreEnumPayloadRows();
@@ -5587,7 +5541,6 @@ export {
   buildLedger,
   parseCoreSource,
   coreSourceFacts,
-  coreRuntimeParts,
   ownedWrapperRuntimeUnit,
   publicDispatcherRows,
   validatePublicDispatcher,
