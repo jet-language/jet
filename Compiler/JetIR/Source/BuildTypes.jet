@@ -673,7 +673,8 @@ fn ir_host_field(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, base: Int,
 
 // A field of a Jet-owned process carrier behind its handle: ProcessReceipt
 // and ProcessPlan hold one word per field at fixed offsets, the Test snapshot
-// (JetTestSuite) its exact-Int iteration and result. A List field's word
+// (JetTestSuite) its exact-Int iteration and result, and the game scene and
+// frame (JetRuntime Game.jet) their leading field words. A List field's word
 // points at its header, so it reads like a boxed member. None for any other
 // handle or field.
 fn ir_process_member(m: &IRModule, p: IRProgram, ty: Type, name: String) -> IRMember? Never! {
@@ -683,6 +684,8 @@ fn ir_process_member(m: &IRModule, p: IRProgram, ty: Type, name: String) -> IRMe
         "ProcessReceipt" -> [String]{"code", "output", "errors", "success", "signal", "timed_out", "executable_identity", "argv", "input_digest", "policy_digest", "backend", "authority", "descendants", "limits", "outputs", "redacted", "pid", "limit_hit"}
         "ProcessPlan" -> [String]{"executable_identity", "argv", "input_digest", "policy_digest", "backend", "authority", "descendants", "limits", "outputs"}
         "JetTestSuite" -> [String]{"iteration", "result"}
+        "JetGameScene" -> [String]{"assets", "input"}
+        "JetGameFrame" -> [String]{"index", "input"}
         else -> { return None }
     }
     declared :: ir_declared_field_type(m, p, ty, name) ?? return None

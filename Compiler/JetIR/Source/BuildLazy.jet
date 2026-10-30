@@ -384,6 +384,17 @@ fn ir_lazy_callback_body(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, le
     ir_emit(&a.f, IROp.Return, -1, mask, -1, -1, a.line)
 }
 
+// A host write callback's parameter is a write parameter (its lambda's
+// host_param_conventions, ir_build_lambda): its checked call metadata, which
+// lazy.callback_write needs to lend the parameter the host's own slot. None
+// for a callback with read parameters.
+fn ir_host_write_metadata(p: IRProgram, b: IRBuilder, callback: Int) -> FunctionCallMetadata? Never! {
+    if ir_body_node(p, b, callback).kind == .Lambda(lambda) && lambda.host_param_conventions != None {
+        if ir_lambda_function_type(lambda) == .Fn(_, _, _, _, metadata, _) -> return metadata
+    }
+    None
+}
+
 // ---------------------------------------------------------------------------
 // Descriptors.
 
@@ -1418,13 +1429,7 @@ fn ir_shared_read(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, re
     // result from a Shared callback's type (SharedAccess.jet
     // sema_shared_access_host_callback_type); lazy.callback stores into `out`
     // only for a callback type with a result, so the helper takes it back.
-    // A host write callback's parameter is a write parameter (its
-    // host_param_conventions, ir_build_lambda): lazy.callback_write lends it
-    // the value's own slot, which the callback edits in place.
-    write_metadata := FunctionCallMetadata?{None}
-    if ir_body_node(p, b, args[0]).kind == .Lambda(lambda) && lambda.host_param_conventions != None {
-        if ir_lambda_function_type(lambda) == .Fn(_, _, _, _, lambda_metadata, _) -> write_metadata = lambda_metadata
-    }
+    write_metadata :: ir_host_write_metadata(p, b, args[0])
     callback_ty := closure_ty
     if ir_untag(closure_ty) == .Fn(fn_params, fn_ret, effect_bound, param_contract, call_metadata, return_view_provenance) {
         callback_ty = Type.Fn{params: fn_params, ret: if unit -> fn_ret else -> Val(result_ty.copy()), effect_bound: effect_bound, param_contract: param_contract, call_metadata: if write_metadata != None -> write_metadata else -> call_metadata, return_view_provenance: return_view_provenance}

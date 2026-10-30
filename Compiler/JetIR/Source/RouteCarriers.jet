@@ -45,10 +45,11 @@ fn ir_tls_transport_message() -> String Never! {
 
 // ProcessReceipt144/ProcessPlan72 are Jet-owned carriers, never hosted Rust
 // records, in pack and program builds alike (the IR makes the
-// compiler-owned process records handles), and the compiler-owned `Test` is
-// the runtime's JetTestSuite snapshot (TestSuite.jet). Validate canonical
-// identity and actual member types before lending their storage to the typed
-// read/clone glue.
+// compiler-owned process records handles), the compiler-owned `Test` is
+// the runtime's JetTestSuite snapshot (TestSuite.jet), and the compiler-owned
+// `GameScene`/`GameFrame` are the runtime's game carriers (Game.jet).
+// Validate canonical identity and actual member types before lending their
+// storage to the typed read/clone glue.
 fn ir_native_runtime_carrier(handle: IRRuntimeHandle, name: String) -> Bool Never! {
-    (handle.runtime == "ProcessReceipt" || handle.runtime == "ProcessPlan" || handle.runtime == "ProcessChild" || handle.runtime == "JetTestSuite") && name == handle.jet_name
+    (handle.runtime == "ProcessReceipt" || handle.runtime == "ProcessPlan" || handle.runtime == "ProcessChild" || handle.runtime == "JetTestSuite" || handle.runtime == "JetGameScene" || handle.runtime == "JetGameFrame") && name == handle.jet_name
 }

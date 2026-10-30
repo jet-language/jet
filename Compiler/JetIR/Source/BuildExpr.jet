@@ -2031,6 +2031,7 @@ fn ir_handle_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     if ir_dyn_method(&m, p, &b, ty, receiver, operation, args, span) == .Val(result) -> return result
     if ir_channel_method(&m, p, &b, ty, receiver, operation, args, span) == .Val(result) -> return result
     if ir_event_method(&m, p, &b, ty, receiver, operation, args, span) == .Val(result) -> return result
+    if operation == .GameSceneOnFrame(_, _) -> return ir_game_on_frame(&m, p, &b, receiver, args, span)
     if ir_reactive_method(&m, p, &b, ty, receiver, operation, args, span) == .Val(result) -> return result
     if operation == .SerdeEncode -> return ir_serde_encode(&m, p, &b, ty, receiver, span)
     if operation == .CursorTakePattern(text_parts, canonical) -> return ir_take_pattern(&m, p, &b, ty, receiver, false, text_parts, [BinMatchPart]{}, canonical, span)
@@ -2045,7 +2046,7 @@ fn ir_handle_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
         // the canonical Dyn; another receiver of them has no route here.
         .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat -> true
         .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat -> true
-        .GameSceneOnFrame(_, _) | .TaskJoin | .TaskDetach -> true
+        .TaskJoin | .TaskDetach -> true
         else -> false
     }
     if dedicated -> return ir_fail_slot(&b, span, "handle method {ir_handle_op_name(operation)}")
@@ -2096,7 +2097,7 @@ fn ir_handle_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     special :: ir_nominal_name(ir_untag(ir_ty(p, b, receiver))) ?? ""
     if special == "Task" || special == "Sender" || special == "Receiver" || special == "Transaction" -> return ir_fail_slot(&b, span, "{special} handle method {route.member}")
     static_call :: if operation == {
-        .HTTPClientNew | .PathFrom | .PathHome | .CursorOver | .ReaderOver(_) -> true
+        .HTTPClientNew | .PathFrom | .PathHome | .CursorOver | .ReaderOver(_) | .GameBackendHeadless -> true
         else -> false
     }
     inputs := [Int]{}

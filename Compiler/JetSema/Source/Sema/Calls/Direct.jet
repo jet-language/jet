@@ -125,6 +125,9 @@ fn sema_call_debug_traceable(ty: Type, environment: SemaScopeEnvironment, progra
         .Result(ok, err) | .Map(ok, _, err) -> sema_call_debug_traceable(ok, environment, program) && sema_call_debug_traceable(err, environment, program)
         .Named(name) -> {
             if sema_call_reflection_leaf_name(name) == "Unit" || sema_call_reflection_core_shown(name) || sema_call_reflection_leaf_name(name) == "Err" -> return true
+            // The game asset handles carry a Debug form (Rust Game.rs
+            // `JetDebug for GameImage`/`GameSound`: `GameImage(<path>)`).
+            if name == "GameImage" || name == "GameSound" -> return true
             if program.registration_graph == .Val(graph) && sema_registration_unit_fact_for_type(graph, ty) != None -> return true
             sema_call_debug_implemented(ty, environment, program)
         }

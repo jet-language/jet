@@ -1,0 +1,34 @@
+// core.game frame callbacks: `scene.on_frame(callback)` hands the runtime
+// scene (JetRuntime Game.jet) the moved closure box, invoked once per issued
+// frame through the typed lazy helper with the frame's handle slot lent for
+// the call, and released once by the release helper when the scene is
+// dropped. The frame is the callback's write parameter (Sema Calls/Game.jet),
+// so lazy.callback_write lends it that slot itself. The checked schedule and
+// derivation stay compile-time facts.
+
+use jet_foundation.[Span, Type]
+
+fn ir_game_on_frame(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, args: [Int], span: Span) -> Int Never! {
+    if args.len() != 1 -> return ir_fail_slot(&b, span, "GameScene.on_frame with {args.len()} arguments")
+    closure_ty :: ir_ty(p, b, args[0])
+    write_metadata :: ir_host_write_metadata(p, b, args[0])
+    callback_ty := closure_ty
+    if ir_untag(closure_ty) == .Fn(params, ret, effect_bound, param_contract, _, return_view_provenance) {
+        if params.len() != 1 -> return ir_fail_slot(&b, span, "GameScene.on_frame callback taking {params.len()} parameters")
+        if write_metadata != None -> callback_ty = Type.Fn{params: params, ret: ret, effect_bound: effect_bound, param_contract: param_contract, call_metadata: write_metadata, return_view_provenance: return_view_provenance}
+    } else {
+        return ir_fail_slot(&b, span, "GameScene.on_frame callback of {ir_type_name(closure_ty)}")
+    }
+    scene :: ir_expr(&m, p, &b, receiver)
+    if ir_failed(b) || scene < 0 -> return -1
+    closure :: ir_expr(&m, p, &b, args[0])
+    if ir_failed(b) || closure < 0 -> return -1
+    handed :: ir_closure_handover(&m, p, &b, closure, span)
+    if handed.held < 0 -> return -1
+    invoke_id :: ir_lazy_helper(&m, p, &b, if write_metadata != None -> "callback_write" else -> "callback", callback_ty, span)
+    if invoke_id < 0 -> return -1
+    invoke :: ir_lazy_address(&m, &b, invoke_id)
+    _ :: ir_runtime(&m, &b, "jet_game_scene_on_frame", [Int]{scene, handed.held, invoke, handed.release}, -1)
+    ir_release(&m, &b, scene)
+    return -1
+}
