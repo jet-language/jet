@@ -64,15 +64,28 @@ fn kit_golden_failure_exit(expected: String, report: String) -> Int? {
     None
 }
 
-fn kit_golden_stream_verdict(id: String, expected: String, result: KitRun, bless: KitBless, argv0: String, source_name: String) -> KitVerdict {
+// A tier whose observable output legitimately differs spells its own
+// `<stem>.<tier>.out`/`.err.out`/`.stderr.out` set (o2 is `--release`, so a
+// program that reads the build profile prints the release value there); a
+// tier with no such file compares against the stem's shared set.
+fn kit_golden_tier_expected(expected: String, tier: String) -> String {
+    tiered :: "{expected}.{tier}"
+    if kit_golden_exists("{tiered}.out") || kit_golden_exists("{tiered}.err.out") || kit_golden_exists("{tiered}.stderr.out") -> return tiered
+    expected.copy()
+}
+
+// `front_end` marks the streams of a build the front end rejected; a
+// rejected program exits 1, so its `.err.out` needs no runtime exit oracle.
+fn kit_golden_stream_verdict(id: String, stem: String, tier: String, result: KitRun, bless: KitBless, argv0: String, source_name: String, front_end: Bool) -> KitVerdict {
     failure :: kit_exec_process_failure(result)
     if failure == {
         .Val(value) -> return value
         .None -> {}
     }
+    expected :: kit_golden_tier_expected(stem, tier)
     error :: kit_exec_optional("{expected}.err.out")
     if error == .Val(report) {
-        code :: kit_golden_failure_exit(expected, report) ?? return kit_expect_verdict("FAIL", "failure report has no exact exit oracle")
+        code :: if front_end -> 1 else -> kit_golden_failure_exit(stem, report) ?? return kit_expect_verdict("FAIL", "failure report has no exact exit oracle")
         if result.code != code -> return kit_expect_verdict("FAIL", "exit {result.code}; expected {code}")
         stdout :: kit_exec_optional("{expected}.out") ?? ""
         output :: kit_expect_exact(id, "{expected}.out", Val(stdout), result.stdout, bless, false)
@@ -175,7 +188,17 @@ fn kit_golden_step_invoke(step: KitStep, index: Int, context: KitStepCtx, previo
         if command == "build" && step.argv.len() != 1 -> return KitStepResult{state: state, verdict: kit_expect_verdict("REFUSED", "build step takes no arguments")}
         compiled :: kit_golden_build(golden.entry, golden.tier, plan, context.env, golden.source, context.work, context.scratch, step)
         state.last = compiled.run
-        if compiled.verdict.status != "PASS" -> return KitStepResult{state: state, verdict: compiled.verdict}
+        if compiled.verdict.status != "PASS" {
+            // A default case whose expected streams (the stem's or this
+            // tier's) spell `.err.out` compares a rejected build like a failing
+            // run, and that comparison settles the case.
+            expected_failure :: compiled.verdict.status == "FAIL" && compiled.run.code != 0 && !plan.compile_only && !golden.last_explicit && kit_golden_exists("{kit_golden_tier_expected(golden.expected, golden.tier.name)}.err.out")
+            if !expected_failure -> return KitStepResult{state: state, verdict: compiled.verdict}
+            streams := compiled.run
+            streams.stderr = streams.stderr.replace("{golden.source}/", "")
+            state.settled = true
+            return KitStepResult{state: state, verdict: kit_golden_stream_verdict(context.id, golden.expected, golden.tier.name, streams, context.bless, "", kit_golden_source_name(golden.entry), true)}
+        }
         state.built = if golden.tier.direct -> context.env.jet else -> kit_steps_artifact(golden.entry.path, golden.source, plan.artifact)
         if !files.exists(state.built) -> return KitStepResult{state: state, verdict: kit_expect_verdict("ERROR", "CLI build artifact missing: {state.built}")}
         state.built_once = true
@@ -209,7 +232,7 @@ fn kit_golden_step_check(step: KitStep, index: Int, context: KitStepCtx, state: 
         // The direct tier runs the staged entry by its absolute path; a report
         // that echoes the path compares repo-relative, as the snapshot spells it.
         streams.stderr = streams.stderr.replace("{golden.source}/", "")
-        verdict :: kit_golden_stream_verdict(context.id, golden.expected, streams, context.bless, name, kit_golden_source_name(golden.entry))
+        verdict :: kit_golden_stream_verdict(context.id, golden.expected, golden.tier.name, streams, context.bless, name, kit_golden_source_name(golden.entry), false)
         if verdict.status != "PASS" -> return verdict
         // Default stream comparison owns its expected failure exit. Explicit
         // non-default exits and file assertions remain enforceable.

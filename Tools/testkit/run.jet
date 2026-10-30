@@ -435,6 +435,8 @@ struct KitStepState {
     inventories: [KitInventory]{[KitInventory]{}}
     replacements: [KitReplacement]{[KitReplacement]{}}
     free_ports: [KitFreePort]{[KitFreePort]{}}
+    // A step that already compared the case's expected streams ends it.
+    settled: Bool{false}
 }
 
 struct KitStepResult {
@@ -621,7 +623,7 @@ fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOu
         invoked :: if step.action == "poll" -> kit_steps_poll(step, index, context, state, hooks) else if kit_steps_setup_kind(step.action) || kit_expect_named(["assert", "apply-edits", "await", "session", "send", "recv", "signal", "close", "spawn", "wait", "capture", "write", "inventory"], step.action) ->
             kit_steps_action(step, context, state) else -> kit_steps_hook_invoke(hooks, step, index, context, state)
         state = invoked.state
-        if invoked.verdict.status != "PASS" -> return kit_steps_finish(state, invoked.verdict)
+        if invoked.verdict.status != "PASS" || state.settled -> return kit_steps_finish(state, invoked.verdict)
         if kit_expect_named(["spawn", "session", "send", "signal"], step.action) -> next
         if kit_expect_named(["", "wait", "close", "poll"], step.action) {
             wired :: kit_steps_wiring_finish(step, context, state)

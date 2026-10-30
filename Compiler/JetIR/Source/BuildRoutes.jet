@@ -2975,6 +2975,16 @@ fn ir_route_inline(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inpu
         ir_emit(&b.f, IROp.Sqrt, root, inputs[0], -1, -1, b.line)
         return Val(root)
     }
+    // `core.devtools.__publish_payload(source, entity, fields, field, value)`:
+    // DevtoolsPanel.rs:111-137 builds a JetDevtoolsEvent and hands it to
+    // jet_devtools_publish_event, which reaches only installed event sinks;
+    // the native runtime installs none (RouteACore.jet
+    // jet_job_queue_publish_parts), so the publication has no observer to
+    // build for and the fresh arguments it consumed end here.
+    if name == "jet_devtools_publish_payload" {
+        loop slot in inputs -> ir_release(&m, &b, slot)
+        return Val(-1)
+    }
     strings :: name == "jet_unicode_split_once" || name == "jet_unicode_cut_last"
     lists :: name == "jet_list_get_opt" || name == "jet_list_first" || name == "jet_list_last" || name == "jet_list_slice" || name == "jet_list_index_of" || name == "jet_list_sum" || name == "jet_list_sum_fixed_f64" || name == "jet_list_product" || name == "jet_list_contains" || name == "jet_list_equal" || name == "jet_list_replace" || name == "jet_list_starts_with" || name == "jet_list_ends_with" || name == "jet_list_min" || name == "jet_list_max" || name == "jet_list_flatten" || name == "jet_list_count" || name == "jet_list_counts" || name == "jet_list_union" || name == "jet_list_intersection" || name == "jet_list_difference" || name == "jet_list_random"
     if !strings && !lists -> return None
@@ -3864,7 +3874,7 @@ fn ir_route_symbol(symbol: String) -> String Never! {
 IR_ROUTES_INLINE :: comptime { [String]{
     "std::collections::BinaryHeap::new", "std::collections::HashSet::new", "std::collections::BTreeSet::new", "std::collections::VecDeque::new", "std::collections::HashMap::new", "jet_deque_from",
     "jet_eq", "jet_map_from_keys_kernel", "jet_map_from_keys_int", "jet_map_from_keys_composite",
-    "jet_ordering_then", "jet_ordering_reverse", "jet_std::JetShared::new", "jet_std::JetCell::new", "jet_std::JetPool::new", "jet_std_os_atexit", "jet_rt_callback", "jet_std_math_sqrt",
+    "jet_ordering_then", "jet_ordering_reverse", "jet_std::JetShared::new", "jet_std::JetCell::new", "jet_std::JetPool::new", "jet_std_os_atexit", "jet_rt_callback", "jet_std_math_sqrt", "jet_devtools_publish_payload",
     "jet_unicode_split_once", "jet_unicode_cut_last",
     "jet_list_get_opt", "jet_list_first", "jet_list_last", "jet_list_slice", "jet_list_index_of", "jet_list_sum",
     "jet_list_sum_fixed_f64", "jet_list_product", "jet_list_contains", "jet_list_equal", "jet_list_replace",

@@ -59,7 +59,11 @@ test lists every failing case row. `TESTKIT_ARGS` carries the kit flags below, s
 `.case` step words.
 
 `o0` runs through `jet run`; `o1` builds an ordinary artifact; `o2`
-builds with `--release`. Every tier compares against the same expected bytes.
+builds with `--release`. Every tier compares against the same expected bytes,
+except that `<stem>.<tier>.out`, `.err.out` or `.stderr.out` replaces the stem's
+streams for that tier alone, for a program whose output follows its build
+profile. A rejected build compares its stderr against the tier's `.err.out`
+with exit 1, and no run follows it.
 A PASS/FAIL disagreement is reported as `tier-split`, not blessed separately.
 An E2104 build refusal is `UNSUPPORTED` only on a native tier.
 

@@ -29,17 +29,17 @@ fn kit_test_golden_env(root: String) -> KitEnv {
     hello :: kit_test_golden_fixture("hello")
     error :: kit_test_golden_fixture("error")
     stderr :: kit_test_golden_fixture("stderr")
-    assert_eq(kit_golden_stream_verdict("case", hello, kit_test_golden_run("hello\n", "", 0), kit_test_golden_bless(), "", "").status, "PASS")
-    mismatch :: kit_golden_stream_verdict("case", hello, kit_test_golden_run("wrong\n", "", 0), kit_test_golden_bless(), "", "")
+    assert_eq(kit_golden_stream_verdict("case", hello, "o0", kit_test_golden_run("hello\n", "", 0), kit_test_golden_bless(), "", "", false).status, "PASS")
+    mismatch :: kit_golden_stream_verdict("case", hello, "o0", kit_test_golden_run("wrong\n", "", 0), kit_test_golden_bless(), "", "", false)
     assert_eq(mismatch.status, "FAIL")
     assert(mismatch.diff.contains("--- expected/"))
-    assert_eq(kit_golden_stream_verdict("case", error, kit_test_golden_run("", "Stop [E3003]: expected stop\n", 70), kit_test_golden_bless(), "", "").status, "PASS")
-    assert_eq(kit_golden_stream_verdict("case", error, kit_test_golden_run("", "Stop [E3003]: expected stop\n", 0), kit_test_golden_bless(), "", "").status, "FAIL")
-    assert_eq(kit_golden_stream_verdict("case", error, kit_test_golden_run("", "Stop [E3003]: expected stop\n", 1), kit_test_golden_bless(), "", "").status, "FAIL")
-    assert_eq(kit_golden_stream_verdict("case", error, kit_test_golden_run("unexpected\n", "Stop [E3003]: expected stop\n", 70), kit_test_golden_bless(), "", "").status, "FAIL")
-    assert_eq(kit_golden_stream_verdict("case", stderr, kit_test_golden_run("hello\n", "notice\n", 0), kit_test_golden_bless(), "", "").status, "PASS")
-    assert_eq(kit_golden_stream_verdict("case", stderr, kit_test_golden_run("hello\n", "wrong\n", 0), kit_test_golden_bless(), "", "").status, "FAIL")
-    assert_eq(kit_golden_stream_verdict("case", kit_test_golden_fixture("missing"), kit_test_golden_run("", "", 0), kit_test_golden_bless(), "", "").status, "FAIL")
+    assert_eq(kit_golden_stream_verdict("case", error, "o0", kit_test_golden_run("", "Stop [E3003]: expected stop\n", 70), kit_test_golden_bless(), "", "", false).status, "PASS")
+    assert_eq(kit_golden_stream_verdict("case", error, "o0", kit_test_golden_run("", "Stop [E3003]: expected stop\n", 0), kit_test_golden_bless(), "", "", false).status, "FAIL")
+    assert_eq(kit_golden_stream_verdict("case", error, "o0", kit_test_golden_run("", "Stop [E3003]: expected stop\n", 1), kit_test_golden_bless(), "", "", false).status, "FAIL")
+    assert_eq(kit_golden_stream_verdict("case", error, "o0", kit_test_golden_run("unexpected\n", "Stop [E3003]: expected stop\n", 70), kit_test_golden_bless(), "", "", false).status, "FAIL")
+    assert_eq(kit_golden_stream_verdict("case", stderr, "o0", kit_test_golden_run("hello\n", "notice\n", 0), kit_test_golden_bless(), "", "", false).status, "PASS")
+    assert_eq(kit_golden_stream_verdict("case", stderr, "o0", kit_test_golden_run("hello\n", "wrong\n", 0), kit_test_golden_bless(), "", "", false).status, "FAIL")
+    assert_eq(kit_golden_stream_verdict("case", kit_test_golden_fixture("missing"), "o0", kit_test_golden_run("", "", 0), kit_test_golden_bless(), "", "", false).status, "FAIL")
 }
 
 #Test("golden failure reports require the exact registered exit oracle") {
@@ -99,6 +99,30 @@ fn kit_test_golden_env(root: String) -> KitEnv {
     assert(results[0].detail.contains("tier-split"))
     assert(results[1].detail.contains("tier-split"))
     files.remove_all(root) ?? panic("remove driver scratch")
+}
+
+#Test("golden tier expected files and expected front-end rejections") {
+    root :: kit_test_golden_scratch("tier-expected")
+    project :: "Examples/features/topic"
+    entry :: KitEntry{path: "{project}/hello.jet", expected: "Examples/features/expected/topic/hello", project: project, suite: "golden", mode: ""}
+    kit_exec_write(files.join(root, entry.path), "fn run() {{ print(\"hello\") }}\n")
+    kit_exec_write(files.join(root, "{entry.expected}.out"), "hello\n")
+    options := kit_exec_defaults()
+    options.tiers = ["o1", "o2"]
+    context :: KitCtx{options: options, env: kit_test_golden_env(root), root: root, scratch: files.join(root, "tiers"), bless: kit_test_golden_bless()}
+    // o2 (`--release`) prints the release value; its own file pins it.
+    kit_exec_write(files.join(root, "{entry.expected}.o2.out"), "wrong tier\n")
+    loop outcome in kit_golden_run_suite(entry, context) -> assert_eq(outcome.verdict.status, "PASS")
+    // A rejected build fails until a `.err.out` expects the rejection.
+    kit_exec_write(files.join(root, "{entry.expected}.case"), "env: JET_TESTKIT_REJECT=1\n")
+    loop outcome in kit_golden_run_suite(entry, context) -> assert_eq(outcome.verdict.status, "FAIL")
+    kit_exec_write(files.join(root, "{entry.expected}.o1.err.out"), "Error [E0001]: rejected\n")
+    rejected :: kit_golden_run_suite(entry, context)
+    assert_eq(rejected[0].verdict.status, "PASS")
+    assert_eq(rejected[1].verdict.status, "FAIL")
+    kit_exec_write(files.join(root, "{entry.expected}.o1.err.out"), "Error [E0001]: other\n")
+    assert_eq(kit_golden_run_suite(entry, context)[0].verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove tier-expected scratch")
 }
 
 #Test("feature discovery stops at projects and package workspace boundaries") {
