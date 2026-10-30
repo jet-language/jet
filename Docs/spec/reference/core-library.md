@@ -1540,7 +1540,16 @@ values, and replica names escape `\`, `,`, `=`, `|`, `:`, and `/`.
 
 A mutation on an invalid carrier, or one with a malformed replica, key, index,
 or size, returns the carrier unchanged. `app.sync(doc, over: session)` carries
-a shown document over the live-query channel. This module is not an
+a shown document over the live-query channel and returns the session's receipt
+`SyncOver(session=…, generation=…, doc=…)`. A session keeps its merged
+document in the process-wide live registry; a publication that changes it
+advances the generation, and a duplicate delivery returns the same receipt.
+Map keys with equal values, list members, and counter components merge; a
+conflicting map value, a differing `SyncText`, or a mixed pair answers
+`SyncError(document merge denied)`. A blank or over-long session is
+`SyncError(invalid session)`, and a display that is not canonical (sorted,
+escaped, no duplicates) is `SyncError(document is not a canonical CRDT
+value)`. This module is not an
 authenticated remote transport or
 a general thread-lock API; use the typed transport and task modules for those
 contracts. The thread-lock ledger names (`broadcast`, `clear`, `lock`, `rlock`,

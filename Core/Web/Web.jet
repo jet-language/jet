@@ -797,7 +797,16 @@ fn state<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> Loada
 // differed from the one before.
 fn live_stats() -> String Never! {
     registry :: live_decode(live_cell_load()) ?? return "LiveStats(error=live registry unavailable)"
-    "LiveStats(queries={registry.records.len()}, limit={LIVE_MAX_QUERIES}, evictions={registry.evictions}, invalidations={registry.invalidations}, changes={registry.changes}, ws_pushes=0)"
+    "LiveStats(queries={live_query_count(registry)}, limit={LIVE_MAX_QUERIES}, evictions={registry.evictions}, invalidations={registry.invalidations}, changes={registry.changes}, ws_pushes=0)"
+}
+
+// The live bindings of `registry`; app.sync's session records are not queries.
+fn live_query_count(registry: LiveRegistry) -> Int {
+    count := 0
+    loop record in registry.records {
+        if record.source != LIVE_SYNC_SOURCE -> count += 1
+    }
+    count
 }
 
 // `live(source, args...)`: `args` are the encoded arguments.
@@ -836,6 +845,9 @@ fn sync(key: String, data: String) -> String Never! {
 
 LIVE_MAX_QUERIES :: 1024
 LIVE_MAX_PAYLOAD :: 4194304
+// The registry source of app.sync's session records (Core/App/App.jet): a
+// session keeps its generation and document as the record's value.
+LIVE_SYNC_SOURCE :: "app.sync"
 
 fn live_cell_load() -> [U8] { core.web.__live_load() }
 
@@ -861,9 +873,16 @@ fn live_register(source: String, key: String, every_ns: Int) -> Int {
         if found == 0 {
             found = registry.next_id + 1
             registry.next_id = found
-            if registry.records.len() >= LIVE_MAX_QUERIES {
+            if live_query_count(registry) >= LIVE_MAX_QUERIES {
                 kept := [LiveRecord]{}
-                loop index in 1..<registry.records.len() -> &kept.push(registry.records[index])
+                evicted := false
+                loop record in registry.records {
+                    if !evicted && record.source != LIVE_SYNC_SOURCE {
+                        evicted = true
+                        next
+                    }
+                    &kept.push(record)
+                }
                 registry.records = kept
                 registry.evictions += 1
             }
