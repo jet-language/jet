@@ -3537,6 +3537,8 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
     if root_call.handled -> return root_call.value
     missing := sema_call_static_missing_member(receiver, method, method_span, args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if missing.handled -> return missing.value
+    outcome_read := sema_value_method_outcome_read(receiver, method, method_span, args, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if outcome_read.handled -> return outcome_read.value
     scopes.ownership_call_depth += 1
     // Chaining `.trim()`/`.after()`/`.before()` onto a string view
     // reads it as the `&str` those methods take, so the view read is allowed.
@@ -5248,6 +5250,31 @@ fn sema_check_expression_carrier(expr: Expr, expected: Type?, environment: SemaS
     checked := sema_check_expression(expr, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     context.failure_carrier_root = false
     checked
+}
+
+// The type `expr` would check to, learned without keeping the check: a local
+// answers from its binding; any other expression is checked, and that check
+// is rolled back. `carrier` probes as a carrier consumer's subject does, so a
+// call root keeps its Result carrier.
+fn sema_expr_probe_type(expr: Expr, carrier: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Type? {
+    if expr == .Ident(_, _, _) -> return sema_stmt_return_known_type(expr, environment, scopes)
+    scope_mark :: sema_scope_mark(&scopes)
+    context_mark :: sema_check_context_save(context)
+    // copy: the probe's ownership state is restored after the check.
+    saved_state :: state.copy()
+    diagnostic_count :: diagnostics.len()
+    tail_body_count :: tail_store.bodies.len()
+    previous_root_read :: context.suppress_partial_move_root_read
+    context.suppress_partial_move_root_read = true
+    probed :: if carrier -> sema_check_expression_carrier(expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    context.suppress_partial_move_root_read = previous_root_read
+    sema_check_context_rollback(&context, context_mark)
+    sema_scope_rollback(&scopes, scope_mark)
+    sema_ownership_state_restore(&state, saved_state)
+    loop diagnostics.len() > diagnostic_count -> _ := &diagnostics.pop()
+    loop tail_store.bodies.len() > tail_body_count -> _ := &tail_store.bodies.pop()
+    checked :: probed ?? return None
+    Val(checked.ty)
 }
 fn sema_check_expression_with_lambda_escapes(expr: Expr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, lambda_escapes: Bool?, diagnostics: &[Diagnostic]) -> TExpr? {
     previous_lambda_escapes := context.lambda_escapes

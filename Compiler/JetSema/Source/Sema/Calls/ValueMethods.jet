@@ -7,6 +7,7 @@
 // owned operations here; a `::` binding of one of them becomes a zero-copy
 // view in Ownership/StringViews.jet.
 use jet_foundation.[
+    AST_NODE_GENERATED,
     AccessConvention,
     BuiltinMethodLowering,
     BuiltinMethodRow,
@@ -15,7 +16,10 @@ use jet_foundation.[
     EffectRowEntry,
     Expr,
     ParamZone,
+    Pattern,
+    PlaceAccess,
     Span,
+    Stmt,
     SymbolID,
     TBuiltinOp,
     TClosureOp,
@@ -208,6 +212,37 @@ fn sema_value_method_option_or_err(receiver: Expr, receiver_value: TExpr, inner:
     // carrier the way any fallible call does: the caller propagates it.
     if expected == .Val(want) && !(sema_expr_unwrap_tag(want) == .Result(_, _)) -> return SemaMethodSpecialCheck{handled: true, value: Val(value)}
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+}
+
+// D-FAIL-CARRIER1=A: `.partial()` and `.notes()` read the middle states a
+// failure's report carries under `partial` and `notes`. Each is one in-place
+// test of the outcome, so the outcome is read and never consumed, and a
+// success answers a clean absence or an empty list on every tier. A report
+// without the field answers the ordinary E0302 at the method name. The
+// receiver's `&` mark (`&outcome.partial()`) names the outcome it reads. The
+// names are Syntax's METHOD_OUTCOME_PARTIAL/NOTES and FIELD_OUTCOME_PARTIAL/NOTES.
+fn sema_value_method_outcome_read(receiver: Expr, method: String, method_span: Span, args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    partial :: method == "partial"
+    if args.len() != 0 || (!partial && method != "notes") -> return SemaMethodSpecialCheck{handled: false, value: None}
+    subject :: if receiver == {
+        // copy: `inner` is a payload of read parameter `receiver`, which keeps the original; the pattern test owns this one
+        .Place(inner, access, _, _) -> if access == PlaceAccess.Take -> receiver.copy() else -> inner.copy()
+        // copy: `receiver` is a read parameter; the pattern test owns this one
+        else -> receiver.copy()
+    }
+    probed :: sema_expr_probe_type(subject, true, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    if !(sema_expr_unwrap_tag(probed) == .Result(_, _)) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    report :: "__outcome_report"
+    span :: Span{start: expr_span(receiver).start, end: method_span.end}
+    field :: if partial -> "partial" else -> "notes"
+    read :: Expr.Field{base: Expr.Ident{name: report, span: method_span, id: AST_NODE_GENERATED}, member: field, span: method_span, id: AST_NODE_GENERATED}
+    kept :: if partial -> Expr.Present{value: read, span: method_span, id: AST_NODE_GENERATED} else -> read
+    clean :: if partial -> Expr.Absent{span: method_span, id: AST_NODE_GENERATED} else -> Expr.ListLit{elements: [Expr]{}, span: method_span, id: AST_NODE_GENERATED}
+    test :: Expr.PatternTest{subject: subject, pattern: Pattern.Err{binding: report, binding_span: method_span, inner: None, span: method_span}, span: span, id: AST_NODE_GENERATED}
+    rewritten :: Expr.If{cond: test, then_body: [Stmt]{}, then_value: kept, else_body: [Stmt]{}, else_value: clean, span: span, id: AST_NODE_GENERATED}
+    if partial -> return SemaMethodSpecialCheck{handled: true, value: sema_check_expression(rewritten, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)}
+    notes :: sema_check_expression(rewritten, Val(Type.List{element: Type.String}), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(notes, expected, environment, program, &diagnostics)}
 }
 
 // Rust `decimal_method_return` / `fraction_method_return` (jet-foundation

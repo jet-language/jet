@@ -5246,30 +5246,10 @@ fn sema_stmt_swizzle_member(member: String) -> Bool Never! {
 }
 
 // The Core vector or swizzleable lane type (`Vec3`, `F64x2`) a swizzle
-// write's base is. A local answers from its binding; any other base is
-// checked only to learn its type, and that check is rolled back.
+// write's base is, probed without keeping the check.
 fn sema_stmt_swizzle_base_vector(base: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> String? {
-    if base == .Ident(_, _, _) {
-        known :: sema_stmt_return_known_type(base, environment, scopes) ?? return None
-        return sema_expression_core_vector_name(known, environment, program)
-    }
-    scope_mark :: sema_scope_mark(&scopes)
-    context_mark :: sema_check_context_save(context)
-    // copy: the probe's ownership state is restored after the base check.
-    saved_state :: state.copy()
-    diagnostic_count :: diagnostics.len()
-    tail_body_count :: tail_store.bodies.len()
-    previous_root_read :: context.suppress_partial_move_root_read
-    context.suppress_partial_move_root_read = true
-    probed :: sema_check_expression(base, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    context.suppress_partial_move_root_read = previous_root_read
-    sema_check_context_rollback(&context, context_mark)
-    sema_scope_rollback(&scopes, scope_mark)
-    sema_ownership_state_restore(&state, saved_state)
-    loop diagnostics.len() > diagnostic_count -> _ := &diagnostics.pop()
-    loop tail_store.bodies.len() > tail_body_count -> _ := &tail_store.bodies.pop()
-    checked :: probed ?? return None
-    sema_expression_core_vector_name(checked.ty, environment, program)
+    probed :: sema_expr_probe_type(base, false, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    sema_expression_core_vector_name(probed, environment, program)
 }
 
 // An index or field write whose path passes through a `ViewMut` value edits
