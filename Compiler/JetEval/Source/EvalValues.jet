@@ -61,15 +61,18 @@ trait JetEvalComptimeInputAdapter {
 }
 
 // The compiler's answer to a `core.compiler` query (`compiler.lex(source)`,
-// `compiler.parse`, `compiler.check(syntax)`) in compile-time code: the
-// compiler's own lexer, parser and checker over the query's source. The
+// `compiler.parse`, `compiler.check(syntax)`, `compiler.profiles()`) in
+// compile-time code: the compiler's own lexer, parser and checker over the
+// query's source, and its package model over the pinned package root. The
 // driver installs it for comptime evaluation and fn-build invocations; a
-// check is a whole compile of its source, with that compile's effects.
+// check is a whole compile of its source, with that compile's effects, and
+// the profile view evaluates `env.jet`, whose compile-time expressions run
+// through the compiler service (Exec, Time.Wait).
 trait JetEvalCompilerQueryHost {
     fn clone_compiler_host(self) -[]> JetEvalCompilerQueryHost
     // Query `query` on `args`: its typed Result (Present, or a told Failed
     // CompilerError). None: no query of this host.
-    fn compiler_query(self, query: String, args: [TComptimeValue], span: Span) -[Env, FFI.Asm, FS, Net]> JetEvalBuildReply?
+    fn compiler_query(self, query: String, args: [TComptimeValue], span: Span) -[Env, Exec, FFI.Asm, FS, Net, Time.Wait]> JetEvalBuildReply?
 }
 
 struct JetEvalConfig {

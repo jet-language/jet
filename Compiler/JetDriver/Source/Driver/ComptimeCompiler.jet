@@ -3,8 +3,11 @@
 // `lex` and `parse` run the compiler's own lexer and parser over the query's
 // source; `check` runs the same check query `jet inspect compiler check`
 // runs (jet_driver_compiler_check) over the syntax tree's source, under this
-// compile's Core sources, host facts and evaluator. Every query reads only
-// its argument: no path, package or sibling source.
+// compile's Core sources, host facts and evaluator; `source_map` reads the
+// generated-Rust markers `jet inspect compiler source-map` reads. These read
+// only their argument: no path, package or sibling source. The package views
+// (`manifest`, `package`, `lock`, `profiles`) read the compile's pinned
+// package root (ComptimePackageViews.jet).
 use jet_foundation.[
     CompilerThreads,
     Span,
@@ -22,6 +25,8 @@ use jet_eval.[
     JetEvalCompilerQueryHost,
     JetEvalConfig,
     jet_eval_compiler_services_diagnostic_values,
+    jet_eval_compiler_services_source_map,
+    jet_eval_compiler_services_source_map_value,
     jet_eval_compiler_services_int,
     jet_eval_compiler_services_lex,
     jet_eval_compiler_services_parse,
@@ -85,7 +90,7 @@ impl JetDriverComptimeCompiler.JetEvalCompilerQueryHost {
         // copy: the evaluator forks the host for each machine; the forks share one context.
         JetDriverComptimeCompiler{context: self.context.copy()}
     }
-    fn compiler_query(self, query: String, args: [TComptimeValue], span: Span) -[Env, FFI.Asm, FS, Net]> JetEvalBuildReply? {
+    fn compiler_query(self, query: String, args: [TComptimeValue], span: Span) -[Env, Exec, FFI.Asm, FS, Net, Time.Wait]> JetEvalBuildReply? {
         if query == "lex" {
             source :: jet_driver_compiler_query_text(args) ?? return Val(jet_driver_compiler_query_lost(query, span))
             lexed :: jet_eval_compiler_services_lex(jet_driver_compiler_source_input(source)) ?? return Val(jet_driver_compiler_query_lost(query, span))
@@ -97,6 +102,15 @@ impl JetDriverComptimeCompiler.JetEvalCompilerQueryHost {
             return Val(JetEvalBuildReply.Value{value: TComptimeValue.Present{value: parsed.value}})
         }
         if query == "check" -> return Val(jet_driver_compiler_query_check(self.context, args, span))
+        if query == "source_map" {
+            source :: jet_driver_compiler_query_text(args) ?? return Val(jet_driver_compiler_query_lost(query, span))
+            map :: jet_eval_compiler_services_source_map_value(jet_eval_compiler_services_source_map(source))
+            return Val(JetEvalBuildReply.Value{value: TComptimeValue.Present{value: map}})
+        }
+        if query == "manifest" || query == "package" || query == "lock" || query == "profiles" {
+            permit :: self.context.guard_read()
+            return Val(JetEvalBuildReply.Value{value: jet_driver_compiler_package_view(query, args, permit.value.root)})
+        }
         None
     }
 }
@@ -115,7 +129,7 @@ fn jet_driver_compiler_query_lost(query: String, span: Span) -> JetEvalBuildRepl
 // `check(syntax)`: the check query over the syntax tree's source. A source
 // whose load stops before checking keeps its syntax and diagnostics, with no
 // effects or semantic index (Compiler.rs's no-bundle path).
-fn jet_driver_compiler_query_check(context: Shared<JetDriverComptimeCompilerContext>, args: [TComptimeValue], span: Span) -[Env, FFI.Asm, FS, Net]> JetEvalBuildReply Never! {
+fn jet_driver_compiler_query_check(context: Shared<JetDriverComptimeCompilerContext>, args: [TComptimeValue], span: Span) -[Env, Exec, FFI.Asm, FS, Net, Time.Wait]> JetEvalBuildReply Never! {
     source := String?{None}
     if args.len() == 1 && args[0] == .Struct(_, fields) {
         loop field in fields {

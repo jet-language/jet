@@ -41,6 +41,7 @@ use jet_foundation.[
     type_name,
     DIAGNOSTIC_ERROR,
 ]
+use jet_eval.[jet_eval_compiler_services_source_map]
 use jet_lexer.[
     lex,
 ]
@@ -757,53 +758,22 @@ fn jet_cli_inspect_compiler(args: [String], color: Bool) -[FS, Env, Exec, IO, FF
     jet_cli_done("{jet_cli_status_render("inspect.compiler.{name}", true, [JetCLIStatusField]{jet_cli_status_field("compiler", payload)})}\n", "", JET_DRIVER_EXIT_OK)
 }
 
-// Rust `str::trim_start` over ASCII whitespace.
-fn jet_cli_compiler_trim_start(line: String) -> String Never! {
-    bytes :: line.bytes()
-    start := 0
-    loop start < bytes.len() {
-        code :: Int.from_u8(bytes[start])
-        if code != 32 && code != 9 && code != 10 && code != 11 && code != 12 && code != 13 -> break
-        start += 1
-    }
-    line.slice(start..<line.len())
-}
-
-// Compiler.rs `source_map_from_generated_rust` + `status_source_map`: each
-// `// jet:source-map source=<path>` line opens a source (listed once), and
-// each `// jet:line <n>` line maps its generated line to the open source.
+// Compiler.rs `status_source_map` over the shared marker reader
+// (jet_eval_compiler_services_source_map).
 fn jet_cli_compiler_source_map(rust_source: String) -> JetCLIStatusValue Never! {
-    sources := [String]{}
-    current := String?{None}
+    map :: jet_eval_compiler_services_source_map(rust_source)
     lines := [JetCLIStatusValue]{}
-    raw_lines := rust_source.split("\n").to_list()
-    if rust_source.ends_with("\n") -> _ := &raw_lines.pop()
-    loop (index, raw) in raw_lines {
-        raw_bytes :: raw.bytes()
-        carriage :: raw_bytes.len() > 0 && Int.from_u8(raw_bytes[raw_bytes.len() - 1]) == 13
-        line :: if carriage -> raw.slice(0..<(raw.len() - 1)) else -> raw
-        trimmed :: jet_cli_compiler_trim_start(line)
-        source_marker :: "// jet:source-map source="
-        if trimmed.starts_with(source_marker) {
-            source :: trimmed.slice(source_marker.len()..<trimmed.len())
-            current = Val(source)
-            if !sources.contains(source) -> &sources.push(source)
-            next
-        }
-        line_marker :: "// jet:line "
-        if trimmed.starts_with(line_marker) {
-            number :: jet_cli_inspect_count(trimmed.slice(line_marker.len()..<trimmed.len()).trim()) ?? next
-            &lines.push(jet_cli_status_object([JetCLIStatusField]{
-                jet_cli_status_field("generated_line", jet_cli_status_int(index + 1)),
-                jet_cli_status_field("source", jet_cli_status_optional_text(current)),
-                jet_cli_status_field("source_line", jet_cli_status_int(number)),
-            }))
-        }
+    loop line in map.generated_lines {
+        &lines.push(jet_cli_status_object([JetCLIStatusField]{
+            jet_cli_status_field("generated_line", jet_cli_status_int(line.generated_line)),
+            jet_cli_status_field("source", jet_cli_status_optional_text(line.source)),
+            jet_cli_status_field("source_line", jet_cli_status_int(line.source_line)),
+        }))
     }
     jet_cli_status_object([JetCLIStatusField]{
         jet_cli_status_field("schema_version", jet_cli_status_int(1)),
         jet_cli_status_field("api_version", jet_cli_status_int(1)),
-        jet_cli_status_field("sources", jet_cli_status_texts(sources)),
+        jet_cli_status_field("sources", jet_cli_status_texts(map.sources)),
         jet_cli_status_field("generated_lines", jet_cli_status_array(lines)),
     })
 }

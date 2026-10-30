@@ -711,3 +711,92 @@ fn jet_eval_compiler_services_program_info(registration: SemaRegistrationGraph, 
 // accept only a BuildPlan handle from the active build session and return the
 // canonical checked BuildGraph projection; receipt_diff stays source-owned by
 // Core/Build and must consume those exact typed graph values.
+
+// One `// jet:line <n>` marker of generated Rust: its 1-based line, the
+// source the nearest `// jet:source-map source=` marker above it opened, and
+// the source line it names.
+struct JetCompilerServicesGeneratedLine {
+    generated_line: Int
+    source: String?
+    source_line: Int
+}
+
+// Compiler.rs `SourceMap`: every opened source once, in first-seen order.
+struct JetCompilerServicesSourceMap {
+    sources: [String]
+    generated_lines: [JetCompilerServicesGeneratedLine]
+}
+
+// Rust `str::trim_start` over ASCII whitespace.
+fn jet_eval_compiler_services_trim_start(line: String) -> String Never! {
+    bytes :: line.bytes()
+    start := 0
+    loop start < bytes.len() {
+        code :: Int.from_u8(bytes[start])
+        if code != 32 && code != 9 && code != 10 && code != 11 && code != 12 && code != 13 -> break
+        start += 1
+    }
+    line.slice(start..<line.len())
+}
+
+// A Rust `usize` parse: ASCII digits after an optional `+`.
+fn jet_eval_compiler_services_count(text: String) -> Int? Never! {
+    bytes :: text.bytes()
+    start := 0
+    if bytes.len() > 0 && bytes[0] == (U8{43}) -> start = 1
+    if start >= bytes.len() -> return None
+    value := 0
+    loop index in start..<bytes.len() {
+        digit :: Int.from_u8(bytes[index]) - 48
+        if digit < 0 || digit > 9 -> return None
+        value = value * 10 + digit
+    }
+    Val(value)
+}
+
+// Compiler.rs `source_map_from_generated_rust`: the one reader of generated
+// Rust markers, for `jet inspect compiler source-map` and
+// `core.compiler.source_map`. Lines split as Rust `str::lines` does.
+fn jet_eval_compiler_services_source_map(rust_source: String) -> JetCompilerServicesSourceMap Never! {
+    sources := [String]{}
+    current := String?{None}
+    lines := [JetCompilerServicesGeneratedLine]{}
+    raw_lines := rust_source.split("\n").to_list()
+    if rust_source.ends_with("\n") -> _ := &raw_lines.pop()
+    loop (index, raw) in raw_lines {
+        raw_bytes :: raw.bytes()
+        carriage :: raw_bytes.len() > 0 && Int.from_u8(raw_bytes[raw_bytes.len() - 1]) == 13
+        line :: if carriage -> raw.slice(0..<(raw.len() - 1)) else -> raw
+        trimmed :: jet_eval_compiler_services_trim_start(line)
+        source_marker :: "// jet:source-map source="
+        if trimmed.starts_with(source_marker) {
+            source :: trimmed.slice(source_marker.len()..<trimmed.len())
+            current = Val(source)
+            if !sources.contains(source) -> &sources.push(source)
+            next
+        }
+        line_marker :: "// jet:line "
+        if trimmed.starts_with(line_marker) {
+            number :: jet_eval_compiler_services_count(trimmed.slice(line_marker.len()..<trimmed.len()).trim()) ?? next
+            &lines.push(JetCompilerServicesGeneratedLine{generated_line: index + 1, source: current.copy(), source_line: number})
+        }
+    }
+    JetCompilerServicesSourceMap{sources: sources, generated_lines: lines}
+}
+
+// Compiler.rs `source_map_value`: the `CompilerSourceMap` comptime value.
+fn jet_eval_compiler_services_source_map_value(map: JetCompilerServicesSourceMap) -> TComptimeValue Never! {
+    lines := [TComptimeValue]{}
+    loop line in map.generated_lines {
+        &lines.push(TComptimeValue.Struct{type_name: "CompilerGeneratedLine", fields: [TComptimeField]{
+            TComptimeField{name: "generated_line", value: jet_eval_compiler_services_int(line.generated_line)},
+            TComptimeField{name: "source", value: jet_eval_compiler_services_option_string(line.source)},
+            TComptimeField{name: "source_line", value: jet_eval_compiler_services_int(line.source_line)},
+        }})
+    }
+    TComptimeValue.Struct{type_name: "CompilerSourceMap", fields: [TComptimeField]{
+        TComptimeField{name: "schema_version", value: jet_eval_compiler_services_int(JET_COMPILER_SERVICES_SCHEMA_VERSION)},
+        TComptimeField{name: "sources", value: jet_eval_compiler_services_string_values(map.sources)},
+        TComptimeField{name: "generated_lines", value: TComptimeValue.List{values: lines}},
+    }}
+}
