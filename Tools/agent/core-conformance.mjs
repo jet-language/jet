@@ -360,6 +360,10 @@ const UNIT_RESULT_KEYS = new Set([
   "core.sys.set",
   "core.sys.stop",
   "core.tasks.yield_now",
+  "app.invalidate",
+  "app.push",
+  "core.web.invalidate",
+  "core.web.push",
 ]);
 // Never-returning Core effects terminate the witness instead of yielding a
 // value. Their standalone call is the observable contract.

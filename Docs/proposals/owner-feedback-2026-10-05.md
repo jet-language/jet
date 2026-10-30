@@ -628,7 +628,7 @@ change the list before or after the call (`&nums.push(4)` between two
 is what makes the no-alias fact sound: Rust gives a `&T` without interior
 mutability LLVM `noalias readonly`. The memory proposal (§4.3, class Z0)
 classifies read parameters as zero-copy. Its §4.6 says the native backend may
-emit the no-alias fact only after the independent MIR Lint re-proof (card
+emit the no-alias fact only after the independent IR Lint re-proof (card
 #4619), because one wrong `noalias` is silent corruption.
 
 **Is a deeper "immutable value" guarantee needed?** It already exists as

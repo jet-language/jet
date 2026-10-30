@@ -28,8 +28,8 @@ test("function source proof requires every registry label and a current body", (
   assert.equal(sourceOwnedAdapterProofs([adapter], ledger, "", () => "// fn parse(text: String) { }\n").size, 0);
   assert.equal(sourceOwnedAdapterProofs([adapter], ledger, "", () => "fn parse(text: String)\nfn other() { }\n").size, 0);
 });
-test("method proof requires the exact TIR arm and an owned declaration", () => {
-  const adapter = {name: "legacy_inspect", symbol: "LegacyValue::inspect", rows: ["TIR/routes.rs"], params: []};
+test("method proof requires the exact route arm and an owned declaration", () => {
+  const adapter = {name: "legacy_inspect", symbol: "LegacyValue::inspect", rows: ["routes.rs"], params: []};
   const tir = '("Value", "inspect") => ("LegacyValue::inspect", 1, &[true])';
   const proof = sourceOwnedAdapterProofs([adapter], ledger, tir, () => source).get(adapter.name);
   assert.deepEqual(proof, {kind: "source-method", declarations: [{path: "Core/example/example.jet", type: "Value", member: "inspect"}]});

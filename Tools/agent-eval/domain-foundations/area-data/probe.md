@@ -51,7 +51,7 @@ Files:
 
 - Tags: `defect`
 - Primitive capability: default evaluator execution for the documented typed `core.data.inner_join` operation.
-- Evidence: `Tools/agent/jet-env jet run Examples/features/tooling/data_pipeline.jet` exits `1` with `Error [E0956]: core.data.inner_join() isn't supported by the current evaluator yet`; the diagnostic says the canonical TIR evaluator does not cover this construct and suggests `jet build`.
+- Evidence: `Tools/agent/jet-env jet run Examples/features/tooling/data_pipeline.jet` exits `1` with `Error [E0956]: core.data.inner_join() isn't supported by the current evaluator yet`; the diagnostic says the canonical evaluator does not cover this construct and suggests `jet build`.
 - Areas: data analysis, backend services, web apps, AI/ML apps.
 - Severity: `blocks`
 - Workaround: use a user-written nested-loop join (`pkg/manual_join_probe.jet` succeeds for two rows), but it is quadratic and not a general table primitive.
@@ -60,7 +60,7 @@ Files:
 
 - Tags: `defect`
 - Primitive capability: store a `core.compute.Tensor` in a user-defined struct, needed for a labeled tensor/table value object.
-- Evidence: `Tools/agent/jet-env jet run .../pkg/tensor_struct_probe.jet` exits `101` with `internal compiler error: whole-program TIR lowering produced no program for the dev interpreter`; `jet build .../pkg/tensor_struct_probe.jet` independently exits `101` with `compiler bug (I2/R7)` at `TensorBox{values: values}`. Plain Tensor operations and a labeled nested-list array both run.
+- Evidence: `Tools/agent/jet-env jet run .../pkg/tensor_struct_probe.jet` exits `101` with `internal compiler error: whole-program IR lowering produced no program for the dev interpreter`; `jet build .../pkg/tensor_struct_probe.jet` independently exits `101` with `compiler bug (I2/R7)` at `TensorBox{values: values}`. Plain Tensor operations and a labeled nested-list array both run.
 - Areas: data analysis, numerical computing, AI/ML apps, GUI apps.
 - Severity: `hurts`
 - Workaround: keep labels and Tensor in separate bindings, or use nested `[[Float]]` plus user-written coordinate lookup.

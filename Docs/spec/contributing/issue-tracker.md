@@ -65,7 +65,7 @@ tower card update '#N' --add-tag wontfix --phase frozen --by owner
 ## Goals
 
 A goal is a long-term aim, such as "self-compile in about 50 ms", "remove
-Rust", "port all scripts to Jet", "remove TIR/MIR/LIR", or "typed IR with a
+Rust", "port all scripts to Jet", "one typed IR", or "typed IR with a
 Core lint". A goal is not a card. It has no phase, criteria, or closure gate,
 and it never blocks the backlog. Cards point at goals; a goal never points at
 cards.

@@ -9,8 +9,8 @@ package {
     }
 }
 AUTH_MAX_PROVIDERS :: 64
-// Live queries are core.web's process-wide registry: `app` names the same
-// queries. Sync sessions retain runtime-owned identity.
+// Live bindings are core.web's process-wide registry: `app` names the same
+// bindings. Sync sessions retain runtime-owned identity.
 use app as provider
 use core.web as web
 
@@ -32,7 +32,8 @@ struct Session {
     expires_at: Int
 }
 
-use core.web.[LiveQuery]
+use core.web.[Live]
+use core.reactive.loadable.[Loadable]
 fn auth(users_table: String) -> Auth Never! {
     Auth{users_table: canonical_table(users_table), providers: [String]{}}
 }
@@ -86,21 +87,21 @@ fn canonical_providers(values: [String]) -> [String] {
     providers
 }
 
-fn live(key: String, data: String) -> LiveQuery Never! { web.live(key, data) }
-
-fn live_get(q: LiveQuery) -> String Never! { web.live_get(q) }
-
-fn live_show(q: LiveQuery) -> String Never! { web.live_show(q) }
+fn state<T: [Encode, Decode], E: [Encode, Decode]>(binding: Live<T, E>) -> Loadable<T, E> Never! { web.state<T, E>(binding) }
 
 fn live_stats() -> String Never! { web.live_stats() }
 
-fn subscribe(source: String) -> LiveQuery Never! { web.subscribe(source) }
+fn __live_bind<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], run: ^fn() -> T E!) -> Live<T, E> Never! { web.__live_bind<T, E>(source, args, ^run) }
 
-fn invalidate(footprint: String) -> Int Never! { web.invalidate(footprint) }
+fn __live_poll<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], every: Duration?, run: ^fn() -> T E!) -> Live<T, E> Never! { web.__live_poll<T, E>(source, args, every, ^run) }
 
-fn transact_invalidate(write_set: String) -> Int Never! { web.transact_invalidate(write_set) }
+fn __live_push<T: Encode>(source: String, args: [String], value: T) Never! { web.__live_push<T>(source, args, value) }
 
-fn signal_push(q: LiveQuery, payload: String) -> LiveQuery Never! { web.signal_push(q, payload) }
+fn __live_invalidate(source: String, args: [String]) Never! { web.__live_invalidate(source, args) }
+
+fn __live_invalidate_all(source: String) Never! { web.__live_invalidate_all(source) }
+
+fn __live_arg<A: Encode>(value: A) -> String Never! { web.__live_arg<A>(value) }
 
 fn sync(doc_show: String, over: String) -> String Never! { provider.sync(doc_show, over: over) }
 

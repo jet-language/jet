@@ -518,7 +518,7 @@ function jet_task_detach(task) {
   task.detach();
 }
 // D-CONC-CHAN1 / D-CONC-CHAN2 / I9: the JS adapter for the canonical channel
-// and readiness Prelude. Web.rs only marshals TIR values to these doors.
+// and readiness Prelude. Web.rs only marshals IR values to these doors.
 
 function jet_web_closed_result() {
   return { tag: "Err", values: [{ tag: "Closed", values: [] }] };
@@ -1058,7 +1058,7 @@ function jet_decimal_to_string(value) {
 }
 
 // D-WRAP-SCOPE1=A / I9: the web fixed-width arithmetic rule lives in the
-// embedded numeric Prelude. Web.rs only marshals TIR operands to this door.
+// embedded numeric Prelude. Web.rs only marshals IR operands to this door.
 function jet_fixed_policy_step(raw, bits, signed, mode, file, line) {
   const min = signed ? -(1n << BigInt(bits - 1)) : 0n;
   const max = signed ? (1n << BigInt(bits - 1)) - 1n : (1n << BigInt(bits)) - 1n;

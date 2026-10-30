@@ -105,7 +105,7 @@ else {
     }
   } catch (error) { failures.push(`raw: ${error.message}`); }
 }
-const receipt = { object, pack, tiers, retired: ["live Rust reference", "Rust MIR evaluator"], failures };
+const receipt = { object, pack, tiers, retired: ["live Rust reference", "Rust evaluator"], failures };
 writeFileSync(join(out, "scan-receipt.json"), `${JSON.stringify(receipt, null, 2)}\n`);
 console.log(JSON.stringify(receipt, null, 2));
 if (failures.length) process.exitCode = 1;

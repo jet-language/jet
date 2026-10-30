@@ -2,6 +2,7 @@
 // of the canonical router, query, form, table, virtual-window, and store APIs;
 // no browser adapter or second state model is introduced.
 use core.http as http
+use core.time as time
 use core.web as web
 use core.web.devserver as devserver
 use core.web.forms as forms
@@ -57,16 +58,17 @@ fn load_table_page(state: WebTableState) -> WebTablePage<Row> WebTableError! {
 fn store_select(value: Int) -> Int { value + 1 }
 fn store_selected(value: Int) { print(value) }
 
+fn user_count(role: String) -[DB.Read]> Int StateError! { role.len() }
+
 fn app_surface() {
-    live :: web.live("users", "[alice,bob]")
-    _live_show :: web.live_show(live)
-    _live_get :: web.live_get(live)
-    _invalidated :: web.invalidate("users")
+    live :: web.live(user_count, "admin")
+    _live_state :: web.state(live)
+    web.invalidate(user_count, "admin")
+    web.invalidate(user_count)
     _live_stats :: web.live_stats()
-    subscriber :: web.subscribe("metrics")
-    pushed :: web.signal_push(subscriber, "signal:metrics")
-    _pushed_value :: web.live_get(pushed)
-    _transact_invalidated :: web.transact_invalidate("users,orders")
+    subscriber :: web.subscribe(user_count, "guest", every: time.duration_seconds(5))
+    web.push(user_count, "guest", value: 3)
+    _pushed_state :: web.state(subscriber)
     auth :: web.auth("session")
     _auth_routes :: web.auth_routes(auth)
     _auth_show :: web.auth_show(auth)

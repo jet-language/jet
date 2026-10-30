@@ -3681,18 +3681,24 @@ boundary. The renderer consumes those facts instead of copying the route list.
 | `auth_oauth(auth: Auth, client_id: String) -> Auth` | auth | Add OAuth client identity to an auth carrier. |
 | `auth_routes(auth: Auth) -> [String]` | paths | Return authentication route paths. |
 | `auth_show(auth: Auth) -> String` | text | Render the source auth summary. |
-| `live(key: String, data: String) -> LiveQuery` | query | Register the live query for footprint `key` (its `,`/`;`/space-separated dependency paths) with initial value `data`; a footprint already registered returns its query. |
-| `subscribe(key: String) -> LiveQuery` | query | Register the live query for the external source `key` (footprint `ext:{key}`). |
-| `invalidate(key: String) -> Int` / `transact_invalidate(key: String) -> Int` | count | Mark every live query whose footprint meets `key`'s paths (equal, or a dotted ancestor or descendant) dirty with a new generation and return how many; `transact_invalidate` does so for each path of a committed write set. -1 when `key` is not a valid footprint. |
-| `live_get(q: LiveQuery) -> String` / `live_show(q: LiveQuery) -> String` | text | Read the query's current value, or display its id, footprint, generation and dirty state. |
-| `live_stats() -> String` | text | Report the registry's query count, its 1024-query limit, evictions and invalidations. |
-| `signal_push(q: LiveQuery, payload: String) -> LiveQuery` | query | Publish `payload` as the query's value: a new, clean generation. |
+| `live(query, args...) -> Live<T, E>` | binding | Bind `query: fn(args...) -[DB.Read]> T E!` to one argument list. The arguments are checked as a call to `query`, evaluated once and kept by the binding; the same source and arguments return the existing binding. |
+| `subscribe(source, args..., every: Duration? = None) -> Live<T, E>` | binding | Bind any named `source: fn(args...) -> T E!` to one argument list; with `every`, a read re-runs the source once the interval has passed since its last run. |
+| `state(binding: Live<T, E>) -> Loadable<T, E>` | state | Read the binding's snapshot: `Loaded(value)` or `Failed(reason)`, running the source first when the binding is new, invalidated, or due to poll. |
+| `push(source, args..., value: T)` | — | Publish `value` as the result of that source and argument list without running the source. |
+| `invalidate(source)` / `invalidate(source, args...)` | — | Re-run every binding of `source` on its next read, or exactly the binding for that argument list. |
+| `live_stats() -> String` | text | Report the registry's binding count, its 1024-binding limit, evictions, invalidations and value changes. |
 | `sync(key: String, data: String) -> String` | text | Format a synchronized key/value update. |
 
-`app` and `core.web` live-query operations share one process-wide registry.
-`LiveQuery` is an identity, not a snapshot of the record: reads, invalidation,
-generations and statistics always inspect or mutate that one registry. A full
-registry evicts its oldest query.
+`app` and `core.web` live bindings share one process-wide registry. A source
+must be a named function, not a closure: its module path and name identify it
+on the wire. `T` and `E` must be `Encode` and `Decode`, and the encoded
+arguments tell bindings of one source apart (an argument type without
+`Encode`, such as a database scope, does not). A stored value that equals the
+previous one is not a change, so readers wake only when the value changed.
+`Live<T, E>` is an identity, not a snapshot: reads, invalidation and
+statistics always use the one registry. A full registry evicts its oldest
+binding. The type is `core.web.Live`; `app` returns the same type and does
+not declare its own, so a signature names it after `use core.web.[Live]`.
 
 `core.web` delegates HTTP transport to `core.http`; route handlers should use
 that typed request/response contract rather than opening sockets directly.
