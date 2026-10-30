@@ -2,7 +2,7 @@
 // loops, calls, switches and patterns, carriers (`?`, `??`, returns),
 // closures, constants and program stops (Build.jet holds the shared state).
 
-use jet_foundation.[AccessConvention, BinEndian, BinMatchPart, DeclID, Span, StrMatchPart, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, BodyCallArg, TCanonicalField, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, BodyEnumArg, BodyEnumPayload, NodeKind, TForInMethod, FnBody, TFuncKind, BodyHandleOp, BodyIfCond, BodyLambda, BodyListSpreadPart, TLocal, BodyMatchArm, TMethodRef, BodyMixedArm, BodyNestedPattern, TNumericOp, BodyOrFallback, TPanicLoc, BodyPattern, BodyPatternBinding, BodyPatternShape, BodyRangeArm, BodyRequireKind, TStaticOwner, BodyStrPart, BodyStructFieldValue, TTextPatternPart, TTryConvert, TypeTupleField, measure_literal_value, body_each_expr_child, body_each_stmt_child, body_stmt, checked_generated_local, checked_user_local, name_rows_set, name_rows_value, type_carrier_identity, StmtKind]
+use jet_foundation.[AccessConvention, BinEndian, BinMatchPart, DeclID, Span, StrMatchPart, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, BodyCallArg, TCanonicalField, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, BodyEnumArg, BodyEnumPayload, NodeKind, TForInMethod, FnBody, TFuncKind, BodyHandleOp, BodyIfCond, BodyLambda, BodyListSpreadPart, TLocal, BodyMapPatternEntry, BodyMatchArm, TMethodRef, BodyMixedArm, BodyNestedPattern, TNumericOp, BodyOrFallback, TPanicLoc, BodyPattern, BodyPatternBinding, BodyPatternShape, BodyRangeArm, BodyRequireKind, TStaticOwner, BodyStrPart, BodyStructFieldValue, TTextPatternPart, TTryConvert, TypeTupleField, measure_literal_value, body_each_expr_child, body_each_stmt_child, body_stmt, checked_generated_local, checked_user_local, name_rows_set, name_rows_value, type_carrier_identity, StmtKind]
 
 use jet_foundation.[AutoVectorizationFacts]
 use jet_foundation.[ComponentSignatureDescriptor, ComponentTypeDescriptor]
@@ -3761,6 +3761,7 @@ fn ir_pattern_test(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, shap
         .Text(parts, _) -> return ir_text_pattern_test(&m, p, &b, subject, parts, span)
         .Binary(parts, _) -> return ir_binary_pattern_test(&m, p, &b, subject, parts, span)
         .List(items, rest, _) -> return ir_list_pattern_test(&m, p, &b, subject, items, rest, span)
+        .Map(entries, rest, _) -> return ir_map_pattern_test(&m, p, &b, subject, entries, rest, span)
         else -> return ir_fail_slot(&b, span, "pattern {ir_shape_name(shape)}")
     }
 }
@@ -3812,6 +3813,133 @@ fn ir_list_pattern_test(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int,
         }
     }
     result
+}
+
+// `["k": p, "j"?: q, ..]` on a Map, or on a Dyn object's pair list
+// `[(key: String, value: Dyn)]`: each key's entry is found once (the Map's
+// map.find, the pair list's first pair with that key). A required key must be
+// present and its value match `p`; an optional key hands `q` its `V?`, a
+// window onto the entry's value (absent when the key is). Without `..` the
+// subject holds no other key: its length is the number of keys found. Names
+// bind to the values in place, borrowing the subject.
+fn ir_map_pattern_test(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, entries: [BodyMapPatternEntry], rest: Bool, span: Span) -> Int Never! {
+    subject_row :: b.f.slot_type[subject]
+    map_shape :: ir_map_shape(&m, p, subject_row)
+    entry_row := -1
+    members := [IRMember]{}
+    value_ty := Type.Bool
+    if {
+        map_shape == .Val(shape) -> {
+            entry_row = shape.entry
+            members = [IRMember]{shape.key, shape.value}
+            value_ty = shape.value_ty
+        }
+        ir_list_item(&m, p, b, subject) == .Val(element) -> {
+            if ir_untag(m.types[element].ty) == .Tuple(fields) && fields.len() == 2 {
+                entry_row = element
+                members = ir_tuple_members(&m, p, fields) ?? [IRMember]{}
+                value_ty = fields[1].ty
+            }
+        }
+        else -> {}
+    }
+    if members.len() != 2 || members[0].name != "key" || members[1].name != "value" -> return ir_fail_slot(&b, span, "map pattern on {ir_type_name(m.types[subject_row].ty)}")
+    key_member :: members[0]
+    value_member :: members[1]
+    bool_row :: ir_type_row(&m, Type.Bool) ?? 0
+    word_row :: ir_word_row(&m)
+    stride :: ir_list_stride(m, entry_row)
+    data :: ir_list_data(&m, &b, subject)
+    length :: ir_list_length(&m, &b, subject)
+    zero :: ir_word_const(&m, &b, 0)
+    one :: ir_word_const(&m, &b, 1)
+    found :: ir_word_const(&m, &b, 0)
+    result :: ir_temp(&m, &b, bool_row)
+    ir_emit(&b.f, IROp.Const, result, 1, -1, -1, b.line)
+    loop entry in entries {
+        key :: ir_value_as(&m, p, &b, entry.key, key_member.ty, span)
+        if ir_failed(b) -> return -1
+        index :: if map_shape != None -> ir_map_call(&m, p, &b, subject_row, "map.find", [Int]{subject, key}, word_row) else -> ir_pair_find(&m, p, &b, subject, entry_row, key_member, key, span)
+        if ir_failed(b) -> return -1
+        ir_release(&m, &b, key)
+        present :: ir_bool_op(&m, &b, IROp.Ge, index, zero)
+        ir_open_if(&b.f, present, b.line)
+        ir_emit(&b.f, IROp.Add, found, found, one, IR_OVERFLOW_WRAP, b.line)
+        ir_end(&b.f, b.line)
+        address :: ir_element_address(&m, &b, data, index, stride)
+        if entry.optional {
+            option_ty :: Type.Option{inner: value_ty}
+            option_row :: ir_value_type(&m, p, option_ty) ?? return ir_type_fail(&b, span, option_ty)
+            window :: ir_temp(&m, &b, option_row)
+            ir_option_none(&m, &b, window)
+            // A boxed Option is the address of its payload; an inline Int?
+            // is the Int's own word.
+            ir_open_if(&b.f, present, b.line)
+            ir_emit(&b.f, if ir_option_inline(m, option_row) -> IROp.Load else -> IROp.Offset, window, address, value_member.offset, -1, b.line)
+            ir_end(&b.f, b.line)
+            if entry.slot == {
+                .Wildcard -> {}
+                .Bind(name, _) -> {
+                    if name != "_" {
+                        slot :: ir_new_slot(&b, option_row, IRSlotKind.Local, ir_intern_name(&m, name))
+                        ir_emit(&b.f, IROp.Move, slot, window, -1, -1, b.line)
+                        &b.pending.push(IRPending{name: name, slot: slot, subject: window, offset: 0, loaded: true})
+                    }
+                }
+                else -> {
+                    ir_open_if(&b.f, result, b.line)
+                    test :: ir_binding_test(&m, p, &b, window, entry.slot, span)
+                    if ir_failed(b) -> return -1
+                    ir_emit(&b.f, IROp.Copy, result, test, -1, -1, b.line)
+                    ir_end(&b.f, b.line)
+                }
+            }
+            next
+        }
+        ir_open_if(&b.f, result, b.line)
+        ir_emit(&b.f, IROp.Copy, result, present, -1, -1, b.line)
+        ir_end(&b.f, b.line)
+        if entry.slot == {
+            .Wildcard -> {}
+            .Bind(name, _) -> {
+                if name != "_" && m.types[value_member.ty].kind != .Unit {
+                    slot :: ir_new_slot(&b, value_member.ty, IRSlotKind.Local, ir_intern_name(&m, name))
+                    &b.pending.push(IRPending{name: name, slot: slot, subject: address, offset: value_member.offset, boxed: value_member.boxed})
+                }
+            }
+            else -> {
+                ir_open_if(&b.f, result, b.line)
+                value :: ir_member_value(&m, &b, address, value_member)
+                test :: ir_binding_test(&m, p, &b, value, entry.slot, span)
+                if ir_failed(b) -> return -1
+                ir_emit(&b.f, IROp.Copy, result, test, -1, -1, b.line)
+                ir_end(&b.f, b.line)
+            }
+        }
+    }
+    if !rest {
+        exact :: ir_bool_op(&m, &b, IROp.Eq, length, found)
+        ir_open_if(&b.f, result, b.line)
+        ir_emit(&b.f, IROp.Copy, result, exact, -1, -1, b.line)
+        ir_end(&b.f, b.line)
+    }
+    result
+}
+
+// The index of the first pair of the pair list `list` (rows `entry_row`)
+// whose key equals `key`, -1 when none does.
+fn ir_pair_find(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, entry_row: Int, key_member: IRMember, key: Int, span: Span) -> Int Never! {
+    index :: ir_word_const(&m, &b, -1)
+    walk :: ir_walk_open(&m, &b, list, entry_row)
+    candidate :: ir_load_at(&m, &b, walk.item, key_member.offset, key_member.ty)
+    same :: ir_route_equal(&m, p, &b, candidate, key, span)
+    if ir_failed(b) -> return -1
+    ir_open_if(&b.f, same, b.line)
+    ir_emit(&b.f, IROp.Copy, index, walk.index, -1, -1, b.line)
+    ir_emit(&b.f, IROp.Br, -1, 2, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_walk_close(&m, &b, walk)
+    index
 }
 
 // The 64-byte descriptor rows of a binary pattern's parts, one per part

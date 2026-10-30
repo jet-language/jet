@@ -763,10 +763,18 @@ fn sema_pattern_map(subject_ty: Type, entries: [MapPatEntry], rest: Span?, span:
     key_ty := Type.Named{name: "Never"}
     value_ty := Type.Named{name: "Never"}
     complete := true
-    if sema_pattern_unwrap_tags(subject_ty) == {
-        .Map(key, _, value) -> {
+    // A Dyn object's payload is its pair list `[(key: String, value: Dyn)]`
+    // in arrival order (sema_pattern_core_payload): `.Object(["type": t, ..])`
+    // looks its keys up there as in a Map.
+    unwrapped :: sema_pattern_unwrap_tags(subject_ty)
+    if {
+        unwrapped == .Map(key, _, value) -> {
             key_ty = key
             value_ty = value
+        }
+        unwrapped == sema_data_object_pairs_type() -> {
+            key_ty = Type.String
+            value_ty = sema_dyn_type()
         }
         else -> {
             &diagnostics.push(sema_error("E0305", span, "a map pattern cannot match `{type_name(subject_ty)}`", "map patterns match map values", "match a map value"))
