@@ -1216,7 +1216,7 @@ export function projectBoard(s, config = null) {
   return {
     meta: s.meta, config: publicConfig(config) || undefined, epochs: s.epochs, milestones,
     phases: PHASES, lanes: LANES, cards, decisions: openDecisions,
-    questions: s.questions.filter(q => activeIds.has(q.cardId)), ideas: s.ideas,
+    questions: s.questions.filter(q => activeIds.has(q.cardId) || (q.decisionId && openDecisions.some(d => d.id === q.decisionId))), ideas: s.ideas,
     papercuts: s.papercuts, events: s.events.slice(0, 300), counts, recentlyDecided,
     goals: s.goals.map(g => ({ ...g, cards: goalCards(g, s.cards) })),
     briefings: s.briefings || [], statusSnapshot: s.statusSnapshot || null,
@@ -1707,6 +1707,12 @@ function applyDoneGate(s, c, targetPhase, by, criteria = c.criteria, needsAccept
     fail('E_CRITERIA', `card #${c.num} needs at least one exit criterion before an agent can close it`);
   if (by !== 'owner' && unsettled.length)
     fail('E_CRITERIA', `${unsettled.length} of ${items.length} criteria not met or verified (${unsettled.map(i => i.n).join(',')})`);
+  // A closed card leaves the board view, which strands any ballot still open on
+  // it: the owner can no longer ask about it from the ballot deck. The card's own
+  // acceptance ballot is the closing handoff itself, so it does not count.
+  const openBallots = by === 'owner' ? [] : (s.decisions || []).filter(d => d.cardId === c.id && d.status === 'open' && !d.draft && d.group !== 'acceptance');
+  if (openBallots.length)
+    fail('E_CRITERIA', `card #${c.num} still has open ballots (${openBallots.map(d => d.id).join(', ')}); close it after the owner decides them`);
   if (by === 'owner' && (!items.length || unsettled.length)) {
     logEvent(s, { by, action: 'card.criteria-bypass', ref: c.id, note: 'owner bypass' });
     return null;

@@ -1773,7 +1773,7 @@ function renderFocus() {
   const pickedIds = focusIds.filter(id => pick[id]);
   const facets = availFacets(d);
   if (!focusFacet || !facets.some(([fk]) => fk === focusFacet)) focusFacet = facets.length ? facets[0][0] : null;
-  const qs = c ? questionsFor(c.id).filter(q => q.decisionId === d.id) : [];
+  const qs = questionsFor(d.cardId).filter(q => q.decisionId === d.id);
   const surfaceHtml = d.surface ? surfaceDeck(d, c, chosen) : '';
 
   f.innerHTML = `
@@ -1855,8 +1855,11 @@ function renderFocus() {
   $('#f-clear', f)?.addEventListener('click', () => { delete pick[d.id]; updateChoice(); });
   $('#f-ask', f).onclick = () => { askOpen = !askOpen; redrawKeeping(f, renderFocus); };
   $('#f-asksend', f)?.addEventListener('click', async () => {
-    const t = $('#f-askt', f).value.trim(); if (!t || !c) return; askOpen = false;
-    await api('question/add', { cardId: c.id, decisionId: d.id, text: t, kind: 'question', by: 'owner' });
+    // The board view omits done cards, so a ballot whose card is closed has no
+    // `c` here; the store still holds that card, so ask through the ballot's own
+    // cardId instead of dropping the question silently.
+    const t = $('#f-askt', f).value.trim(); if (!t) return; askOpen = false;
+    await api('question/add', { cardId: d.cardId, decisionId: d.id, text: t, kind: 'question', by: 'owner' });
   });
   $('#f-record', f)?.addEventListener('click', recordBatch);
   focusShown = focusSignature();
