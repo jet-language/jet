@@ -348,7 +348,7 @@ fn ir_x64_object(compiled: ^IRX64Result, debug_info: Bool) -> X64ExecutableResul
     task.group ir_x64_object_release {
         rest :: task ir_x64_release_rest(released)
         dropped :: task ir_x64_release_runs(released, -1)
-        &objects.push(x64_object_functions_threads(^program, ^functions, ^debug, [X64RuntimeExport]{X64RuntimeExport{function: X64FunctionID{value: -1}, symbol: "main"}}, threads, debug_info))
+        &objects.push(x64_object_functions_threads(^program, ^functions, ^debug, [X64RuntimeExport]{X64RuntimeExport{function: X64FunctionID{value: -1}, symbol: "main"}}, threads, debug_info, false))
         _ :: rest.join() ?? panic(compiler_threads_failure_text(err))
         _ :: dropped.join() ?? panic(compiler_threads_failure_text(err))
     }
@@ -484,7 +484,8 @@ fn ir_x64_hot_order(compiled: &IRX64Result, hot: [String]) -> Int Never! {
 // The relocatable object of a library module (moved in, every row moved
 // on): its functions with no `main`, each of `exports` (ir_build_library)
 // a global symbol of its IR function and, with a priority, a constructor or
-// destructor hook. `debug_info` as ir_x64_object.
+// destructor hook. `debug_info` as ir_x64_object. Every function and data
+// object is in a section of its own, so a link keeps only what it reaches.
 fn ir_x64_library_object(compiled: ^IRX64Result, exports: [IRLibraryExport], debug_info: Bool) -> X64ExecutableResult Never! {
     owned := ^compiled
     if owned.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: ^owned.errors}
@@ -492,7 +493,7 @@ fn ir_x64_library_object(compiled: ^IRX64Result, exports: [IRLibraryExport], deb
     debug := compiler_take_rows<X64FunctionDebug>(&owned.debug)
     functions := compiler_take_rows<X64CompiledFunction>(&owned.functions)
     globals :: loop row in exports -> X64RuntimeExport{function: X64FunctionID{value: row.function}, symbol: row.symbol, init_priority: row.init_priority, fini_priority: row.fini_priority}
-    x64_object_functions_threads(^program, ^functions, ^debug, globals, owned.threads, debug_info)
+    x64_object_functions_threads(^program, ^functions, ^debug, globals, owned.threads, debug_info, true)
 }
 
 // The object writer's module of `owned`: its data, debug files and types
