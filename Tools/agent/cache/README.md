@@ -9,7 +9,6 @@ cache script copies remain temporarily for running agents, not as new tooling ho
 Tools/agent/cache/laneS.sh node your-small-job.mjs
 Tools/agent/cache/laneB.sh 8 command args
 Tools/agent/cache/safe-jet.sh check path/to/program.jet
-node Tools/agent/cache/cache-cutover.mjs
 node Tools/agent/cache/purge-bulk.mjs
 ```
 

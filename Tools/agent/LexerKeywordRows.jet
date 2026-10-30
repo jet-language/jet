@@ -2,13 +2,30 @@
 // Project the canonical Jet lexer keyword table into borrowed Jet byte checks.
 // Spellings remain Jet Syntax constants; Jet token tags own the kinds.
 // Usage: jet Tools/agent/LexerKeywordRows.jet [--check|--write]
+use core.encoding.json as json
 use core.files as files
 use core.process as process
+use core.regex as regex
 use core.term as term
 
 SCAN_PATH :: "Compiler/JetLexer/Source/Lexer/Scan.jet"
 OPEN :: "// BEGIN GENERATED LEXER KEYWORD SPANS"
 CLOSE :: "// END GENERATED LEXER KEYWORD SPANS"
+
+LINE_COMMENT :: Regex{"//[^\n]*"}
+// The LEXER_KEYWORDS body: from its opening line to the first line that
+// starts with `}`. Matched against the text after a leading newline, so a
+// newline marks every line start.
+KEYWORD_TABLE :: Regex{"\nLEXER_KEYWORDS :: \[LexerKeyword\]\{{([\s\S]*?)\n\}}"}
+KEYWORD_ARM :: Regex{"^(?:LexerKeyword)?\{{constant: \x22(\w+)\x22, kind: \x22(Kw\w+)\x22, tag: \x22(K_\w+)\x22\}},$"}
+// One line each: `NAME :: "literal"` with an optional trailing comment, a
+// keyword token number, and a token tag.
+SYNTAX_CONSTANT :: Regex{"^\s*(\w+)\s*::\s*(\x22(?:[^\x22\\]|\\.)*\x22)[^\S\n]*(?://[^\n]*)?$"}
+KEYWORD_TOKEN :: Regex{"^TOKEN_(KW_\w+|TRUE|FALSE|SELF|NULL|BREAK|RETURN) :: \d+\s*$"}
+TOKEN_TAG :: Regex{"^(K_\w+) ::"}
+SPELLING :: Regex{"^[A-Za-z][A-Za-z0-9_]*$"}
+WORD_BREAK :: Regex{"([a-z0-9])([A-Z])"}
+SPAN_BLOCK :: Regex{"// BEGIN GENERATED LEXER KEYWORD SPANS\n[\s\S]*?// END GENERATED LEXER KEYWORD SPANS"}
 
 #Error
 struct KeywordRowsError {
@@ -27,184 +44,33 @@ fn rows_fail(message: String) -> KeywordRowsError Never! {
     KeywordRowsError{message: "lexer keyword rows: {message}"}
 }
 
-// Every `//` comment removed, to the end of its line.
-fn uncomment(text: String) -> String Never! {
-    lines := [String]{}
-    loop line in text.split("\n") {
-        at :: line.find("//")
-        &lines.push(if at < 0 -> line else -> byte_slice(line, 0, at))
-    }
-    lines.join("\n")
-}
-
-// The text of bytes `start..<end` of `text` (indexes from text.bytes()).
-fn byte_slice(text: String, start: Int, end: Int) -> String Never! {
-    String.from_bytes_lossy(text.bytes()[start..<end])
-}
-
-fn byte_len(text: String) -> Int Never! { text.bytes().len() }
-
-// Bytes `start` to the end of `text`.
-fn byte_tail(text: String, start: Int) -> String Never! { byte_slice(text, start, byte_len(text)) }
-
-fn is_word_byte(code: Int) -> Bool Never! {
-    (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
-}
-
-// The leading run of word characters of `text`.
-fn leading_word(text: String) -> String Never! {
-    bytes :: text.bytes()
-    end := 0
-    loop end < bytes.len() && is_word_byte(Int.from_u8(bytes[end])) -> end += 1
-    byte_slice(text, 0, end)
-}
-
-fn is_blank(text: String) -> Bool Never! {
-    loop byte in text.bytes() {
-        code :: Int.from_u8(byte)
-        if code != 32 && code != 9 -> return false
-    }
-    true
-}
-
-// `NAME :: "literal"` with an optional trailing comment: the name and the
-// literal's quoted source text.
-struct SyntaxConstant {
-    name: String
-    literal: String
-}
-
-fn syntax_constant(line: String) -> SyntaxConstant? Never! {
-    rest := line.trim_start()
-    name :: leading_word(rest)
-    if name == "" -> return None
-    rest = byte_tail(rest, byte_len(name)).trim_start()
-    if !rest.starts_with("::") -> return None
-    rest = byte_tail(rest, 2).trim_start()
-    if !rest.starts_with("\"") -> return None
-    bytes :: rest.bytes()
-    index := 1
-    closed := -1
-    loop index < bytes.len() {
-        code :: Int.from_u8(bytes[index])
-        if code == 92 {
-            index += 2
-            next
-        }
-        if code == 34 {
-            closed = index
-            break
-        }
-        index += 1
-    }
-    if closed < 0 -> return None
-    literal :: byte_slice(rest, 0, closed + 1)
-    tail :: byte_slice(rest, closed + 1, bytes.len())
-    comment :: tail.find("//")
-    if !is_blank(if comment < 0 -> tail else -> byte_slice(tail, 0, comment)) -> return None
-    Val(SyntaxConstant{name: name, literal: literal})
-}
-
-// The value of a quoted literal with no escapes (keyword spellings have none).
+// The value of a Jet string literal, read as the JSON string it also is.
 fn literal_value(literal: String) -> String? Never! {
-    inner :: byte_slice(literal, 1, byte_len(literal) - 1)
-    if inner.contains("\\") -> return None
-    Val(inner)
-}
-
-fn is_spelling(text: String) -> Bool Never! {
-    bytes :: text.bytes()
-    if bytes.len() == 0 -> return false
-    first :: Int.from_u8(bytes[0])
-    if !((first >= 65 && first <= 90) || (first >= 97 && first <= 122)) -> return false
-    loop byte in bytes {
-        if !is_word_byte(Int.from_u8(byte)) -> return false
+    parsed :: json.parse(literal) ?? return None
+    if parsed == {
+        .Text(text) -> Val(text)
+        else -> None
     }
-    true
 }
 
 // `KwSelfType` -> `K_SELF_TYPE`.
 fn kind_tag(kind: String) -> String Never! {
-    bytes :: kind.bytes()
-    out := ""
-    loop index in 2..<bytes.len() {
-        code :: Int.from_u8(bytes[index])
-        if index > 2 && code >= 65 && code <= 90 {
-            previous :: Int.from_u8(bytes[index - 1])
-            if (previous >= 97 && previous <= 122) || (previous >= 48 && previous <= 57) -> out = "{out}_"
-        }
-        out = "{out}{byte_slice(kind, index, index + 1)}"
-    }
-    "K_{out.upper()}"
-}
-
-// `{constant: "X", kind: "KwY", tag: "K_Z"},`, optionally `LexerKeyword{…},`.
-struct KeywordArm {
-    constant: String
-    kind: String
-    tag: String
-}
-
-fn keyword_arm(line: String) -> KeywordArm? Never! {
-    rest := line
-    if rest.starts_with("LexerKeyword") -> rest = byte_tail(rest, byte_len("LexerKeyword"))
-    if !rest.starts_with("{{constant: \"") || !rest.ends_with("\"}},") -> return None
-    rest = byte_slice(rest, byte_len("{{constant: \""), byte_len(rest) - byte_len("\"}},"))
-    first :: rest.split_once("\", kind: \"") ?? return None
-    second :: first.after.split_once("\", tag: \"") ?? return None
-    constant :: first.before
-    kind :: second.before
-    tag_name :: second.after
-    if constant == "" || leading_word(constant) != constant -> return None
-    if !kind.starts_with("Kw") || kind.len() < 3 || leading_word(kind) != kind -> return None
-    if !tag_name.starts_with("K_") || tag_name.len() < 3 || leading_word(tag_name) != tag_name -> return None
-    Val(KeywordArm{constant: constant, kind: kind, tag: tag_name})
+    "K_{WORD_BREAK.replace(kind.remove_prefix("Kw"), "$1_$2").upper()}"
 }
 
 fn keyword_rows(mapping: String, syntax: String, tokens: String, tags: String) -> [KeywordRow] KeywordRowsError! {
-    // The LEXER_KEYWORDS table body: the lines after its opening line, up to
-    // the first line that starts with `}`.
-    table := [String]{}
-    found := false
-    in_table := false
-    loop line in uncomment(mapping).split("\n") {
-        if in_table {
-            if line.starts_with("}}") {
-                in_table = false
-                next
-            }
-            &table.push(line)
-            next
-        }
-        if !found && line.starts_with("LEXER_KEYWORDS :: [LexerKeyword]{{") {
-            found = true
-            in_table = true
-        }
-    }
-    if !found -> return Err(rows_fail("unrecognized LEXER_KEYWORDS table"))
+    table :: KEYWORD_TABLE.match("\n{LINE_COMMENT.replace(mapping, "")}") ?? return Err(rows_fail("unrecognized LEXER_KEYWORDS table"))
     constants := [String: [String]]{}
     loop line in syntax.split("\n") {
-        row :: syntax_constant(line) ?? next
-        values := constants.get(row.name) ?? [String]{}
-        &values.push(row.literal)
-        constants[row.name] = values
+        row :: SYNTAX_CONSTANT.match(line) ?? next
+        values := constants.get(row.groups[0]) ?? [String]{}
+        &values.push(row.groups[1])
+        constants[row.groups[0].copy()] = values
     }
     token_tags := [String]{}
     loop line in tokens.split("\n") {
-        if !line.starts_with("TOKEN_") -> next
-        name :: leading_word(line)
-        rest :: byte_tail(line, byte_len(name))
-        if !rest.starts_with(" :: ") -> next
-        number :: byte_tail(rest, 4).trim_end()
-        if number == "" -> next
-        if Int.parse(number) == {
-            .Ok(_) -> {}
-            .Err(_) -> next
-        }
-        short :: byte_tail(name, byte_len("TOKEN_"))
-        keyword :: short.starts_with("KW_") && short.len() > 3
-        if keyword -> &token_tags.push("K_{byte_tail(short, 3)}")
-        else if short == "TRUE" || short == "FALSE" || short == "SELF" || short == "NULL" || short == "BREAK" || short == "RETURN" -> &token_tags.push("K_{short}")
+        token :: KEYWORD_TOKEN.match(line) ?? next
+        &token_tags.push("K_{token.groups[0].remove_prefix("KW_")}")
     }
     distinct := [String]{}
     loop token_tag in token_tags {
@@ -213,33 +79,35 @@ fn keyword_rows(mapping: String, syntax: String, tokens: String, tags: String) -
     if token_tags.len() == 0 || distinct.len() != token_tags.len() -> return Err(rows_fail("unparsed/ambiguous keyword token kinds"))
     tag_names := [String]{}
     loop line in tags.split("\n") {
-        if !line.starts_with("K_") -> next
-        name :: leading_word(line)
-        if byte_tail(line, byte_len(name)).starts_with(" ::") -> &tag_names.push(name)
+        tag_line :: TOKEN_TAG.match(line) ?? next
+        &tag_names.push(tag_line.groups[0])
     }
     rows := [KeywordRow]{}
     spellings := [String]{}
     kinds := [String]{}
     mapped := [String]{}
-    loop raw in table {
+    loop raw in table.groups[0].split("\n") {
         line :: raw.trim()
         if line == "" -> next
-        arm :: keyword_arm(line) ?? return Err(rows_fail("unparsed keyword row: {line}"))
-        values :: constants.get(arm.constant) ?? [String]{}
-        if values.len() != 1 -> return Err(rows_fail("unresolved/ambiguous literal Syntax::{arm.constant}"))
-        spelling :: literal_value(values[0]) ?? return Err(rows_fail("unsupported Jet literal Syntax::{arm.constant}"))
-        if !is_spelling(spelling) -> return Err(rows_fail("unsupported keyword spelling Syntax::{arm.constant}"))
+        arm :: KEYWORD_ARM.match(line) ?? return Err(rows_fail("unparsed keyword row: {line}"))
+        constant :: arm.groups[0]
+        kind :: arm.groups[1]
+        token_tag :: arm.groups[2]
+        values :: constants.get(constant) ?? [String]{}
+        if values.len() != 1 -> return Err(rows_fail("unresolved/ambiguous literal Syntax::{constant}"))
+        spelling :: literal_value(values[0]) ?? return Err(rows_fail("unsupported Jet literal Syntax::{constant}"))
+        if !SPELLING.is_match(spelling) -> return Err(rows_fail("unsupported keyword spelling Syntax::{constant}"))
         tag_count := 0
         loop name in tag_names {
-            if name == arm.tag -> tag_count += 1
+            if name == token_tag -> tag_count += 1
         }
-        if kind_tag(arm.kind) != arm.tag || !token_tags.contains(arm.tag) || tag_count != 1 -> return Err(rows_fail("unresolved token kind {arm.kind}/{arm.tag}"))
-        if spellings.contains(spelling) || kinds.contains(arm.kind) || mapped.contains(arm.tag) -> return Err(rows_fail("duplicate keyword spelling/kind {arm.constant}/{arm.kind}"))
+        if kind_tag(kind) != token_tag || !token_tags.contains(token_tag) || tag_count != 1 -> return Err(rows_fail("unresolved token kind {kind}/{token_tag}"))
+        if spellings.contains(spelling) || kinds.contains(kind) || mapped.contains(token_tag) -> return Err(rows_fail("duplicate keyword spelling/kind {constant}/{kind}"))
         &spellings.push(spelling)
-        &kinds.push(arm.kind)
-        &mapped.push(arm.tag)
+        &kinds.push(kind)
+        &mapped.push(token_tag)
         bytes :: loop byte in spelling.bytes() -> Int.from_u8(byte)
-        &rows.push(KeywordRow{constant: arm.constant, kind: arm.kind, tag: arm.tag, spelling: spelling, bytes: bytes})
+        &rows.push(KeywordRow{constant: constant, kind: kind, tag: token_tag, spelling: spelling, bytes: bytes})
     }
     if rows.len() == 0 -> return Err(rows_fail("incomplete keyword mapping/token coverage"))
     loop token_tag in token_tags {
@@ -318,14 +186,9 @@ fn render_keyword_spans(rows: [KeywordRow]) -> String Never! {
 }
 
 fn replace_keyword_spans(source: String, generated: String) -> String KeywordRowsError! {
-    begin :: source.find("{OPEN}\n")
-    if begin < 0 -> return Err(rows_fail("expected exactly one generated keyword span block"))
-    after_begin :: byte_tail(source, begin + byte_len(OPEN))
-    end_offset :: after_begin.find(CLOSE)
-    if end_offset < 0 -> return Err(rows_fail("expected exactly one generated keyword span block"))
-    end :: begin + byte_len(OPEN) + end_offset + byte_len(CLOSE)
-    if byte_tail(source, end).contains("{OPEN}\n") -> return Err(rows_fail("expected exactly one generated keyword span block"))
-    Ok("{byte_slice(source, 0, begin)}{generated}{byte_tail(source, end)}")
+    blocks :: SPAN_BLOCK.matches(source)
+    if blocks.len() != 1 -> return Err(rows_fail("expected exactly one generated keyword span block"))
+    Ok("{source.slice(0, blocks[0].start)}{generated}{source.slice(blocks[0].end, source.len())}")
 }
 
 fn keyword_rows_main(args: [String]) -[FS]> String KeywordRowsError! {

@@ -2592,8 +2592,9 @@ The standing O0/O1/O2 gate and producer-admission contract are described in
 [`safety.md`](../spec/safety.md#standing-native-safety-gate); absent tier/runtime
 coverage is explicitly non-green.
 
-Fuzz corpus (#4619): `Tools/agent/safety-fuzz.mjs <outdir> --seed N --count K`
-writes K type-directed generated programs and their expected stdout in the
+Fuzz corpus (#4619): `Tools/agent/safety-gate.mjs <outdir> <artifacts.json> N K`
+has the `safety-fuzz.mjs` generator write K type-directed generated programs
+per kind from seed N, and their expected stdout, in the
 Examples/features layout (`<outdir>/corpus/Examples/features/fuzz/`), then runs
 run-goldens, run-differential and run-lint-corpus over it through
 `JET_GOLDEN_FEATURES`. The expected output comes from a model evaluator with
