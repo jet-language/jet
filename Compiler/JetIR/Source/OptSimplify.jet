@@ -18,6 +18,10 @@
 //               ways)
 //   propagate   a slot written once by a Move/Copy of a slot written once
 //               reads its source directly
+//   address     an address written once by `p = offset t k` folds into its
+//               readers: an Offset, Load or Store through p adds k to its own
+//               byte offset and reads t, a CopyBytes operand p with k = 0
+//               reads t
 //   coalesce    `t = <op>; ...; x = move/copy t` writes x directly when t is a
 //               temporary read only there and nothing between touches x
 //   dead        an instruction without effects whose result nobody reads; the
@@ -45,6 +49,9 @@ fn ir_opt_simplify(m: IRModule, f: &IRFunction, report: &IROptReport) Never! {
         if step > 0 -> facts = ir_opt_facts(f)
         changed += step
         step = ir_opt_propagate(m, &f, facts, &report)
+        if step > 0 -> facts = ir_opt_facts(f)
+        changed += step
+        step = ir_opt_addresses(&f, facts)
         if step > 0 -> facts = ir_opt_facts(f)
         changed += step
         step = ir_opt_coalesce(&f, facts, &report)
@@ -497,6 +504,50 @@ fn ir_opt_rename_reads(f: &IRFunction, at: Int, replace: [Int]) Never! {
 fn ir_opt_renamed(replace: [Int], slot: Int) -> Int Never! {
     if slot < 0 || slot >= replace.len() || replace[slot] < 0 -> return slot
     replace[slot]
+}
+
+// ---------------------------------------------------------------------------
+// Address folding. The readers keep reading the same bytes: t holds at each
+// reader the value it had at the Offset (a parameter written only at entry,
+// or its one write reaches the reader), and p is then dead.
+
+fn ir_opt_addresses(f: &IRFunction, facts: OptFacts) -> Int Never! {
+    changed := 0
+    loop at in 0..<f.op.len() {
+        op :: f.op[at]
+        if op == .Offset || op == .Load || op == .Store {
+            def :: ir_opt_address_def(f, facts, f.a[at], at)
+            if def < 0 -> next
+            f.b[at] = f.b[at] + f.b[def]
+            f.a[at] = f.a[def]
+            changed += 1
+        } else if op == .CopyBytes {
+            target :: ir_opt_address_def(f, facts, f.a[at], at)
+            if target >= 0 && f.b[target] == 0 {
+                f.a[at] = f.a[target]
+                changed += 1
+            }
+            source :: ir_opt_address_def(f, facts, f.b[at], at)
+            if source >= 0 && f.b[source] == 0 {
+                f.b[at] = f.a[source]
+                changed += 1
+            }
+        }
+    }
+    changed
+}
+
+// The `offset slot <- t k` that gives address `slot` its value at `at`,
+// when t holds there the value it had at that Offset; -1 otherwise.
+fn ir_opt_address_def(f: IRFunction, facts: OptFacts, slot: Int, at: Int) -> Int Never! {
+    if slot < 0 -> return -1
+    def :: ir_opt_reaching_def(f, facts, slot, at)
+    if def < 0 || f.op[def] != .Offset -> return -1
+    base :: f.a[def]
+    if base < 0 || base == slot -> return -1
+    if base < f.param_count -> return if facts.defs[base] == 1 -> def else -> -1
+    if ir_opt_reaching_def(f, facts, base, at) < 0 -> return -1
+    def
 }
 
 // ---------------------------------------------------------------------------

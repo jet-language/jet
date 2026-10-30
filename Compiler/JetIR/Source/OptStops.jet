@@ -78,15 +78,16 @@ fn ir_opt_stops_drops(code: &IROptCode, f: IRFunction, start: Int, end: Int) Nev
     loop k in start..<end -> ir_opt_code_put(&code, f.op[k], f.dst[k], f.a[k], f.b[k], f.c[k], f.code_line[k])
 }
 
-// Polls folded into a later one (O1, O2, after inlining, before the stop
-// points move after their calls). A poll that checks no call (since the
-// last check only an inlined body, arithmetic or other stop points, and no
-// stop edge of the constructs just closed lands on it) can observe only a
-// stop another task asked for, which a later poll observes as well. When
-// every path from it reaches such a poll, with no Loop, Return or branch
-// on the way that could skip it, the earlier one goes: a stop asked for
-// meanwhile is delivered a little later, at the later stop point, while
-// every stop a call or a trap publishes is still taken where it was.
+// Polls folded into a later one (O1, O2, after inlining and again after the
+// other passes, before the stop points move after their calls). A poll
+// that checks no call (since the last check only an inlined body,
+// arithmetic or other stop points, and no stop edge of the constructs just
+// closed lands on it) can observe only a stop another task asked for, which
+// a later poll observes as well. When every path from it reaches such a
+// poll, with no Loop, Return or branch on the way that could skip it, the
+// earlier one goes: a stop asked for meanwhile is delivered a little later,
+// at the later stop point, while every stop a call or a trap publishes is
+// still taken where it was.
 fn ir_opt_fold_polls(f: &IRFunction, keys: [String]) Never! {
     folded := false
     loop at in 0..<f.op.len() {
