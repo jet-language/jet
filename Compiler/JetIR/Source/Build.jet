@@ -158,6 +158,9 @@ struct IRBuilder {
     // whose later reads follow from those failures.
     failures: [IRFailureRow]{[IRFailureRow]{}}
     poisoned: [String]{[String]{}}
+    // A generator's producer body (BuildGenerator.jet): the slot holding its
+    // runtime state, which each `yield` hands its value to (-1: no producer).
+    generator: Int{-1}
 }
 
 // One failure of a body: its message and the span it names.
@@ -1350,6 +1353,11 @@ fn ir_bind_pending(m: &IRModule, p: IRProgram, b: &IRBuilder) Never! {
         // the name binds the payload's storage, the wrapper's for an edge.
         row_type :: b.f.slot_type[row.slot]
         subject_row :: b.f.slot_type[row.subject]
+        // A view Result's Ok names a view of its allocator's storage.
+        if row.selector == 1 && ir_view_result(m.types[subject_row].ty) {
+            ir_bind_view_result(&m, p, &b, row.name, row.subject, row_type)
+            next
+        }
         if row.window && ir_option_inline(m, subject_row) {
             // An inline Int?'s payload is its word: the name binds the
             // word's storage at the window's place.
@@ -2217,7 +2225,9 @@ fn ir_load_at(m: &IRModule, b: &IRBuilder, base: Int, offset: Int, row: Int) -> 
 }
 
 // A new Result box of type `ty` holding `payload` (-1: Unit) as Ok or Err
-// (an Ok(()) payload word is 0).
+// (an Ok(()) payload word is 0). A view Result's Ok is an allocator view,
+// held without an owner (ir_view_result_store); its Err box keeps a 0
+// storage address.
 fn ir_result_box(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, success: Bool, payload: Int) -> Int Never! {
     line :: b.line
     row :: ir_value_type(&m, p, ty) ?? ir_pointer_row(&m)
@@ -2227,14 +2237,23 @@ fn ir_result_box(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, success: B
         err_size :: ir_type_size(&m, p, err_ty)
         widest = ir_align8(if ok_size > err_size -> ok_size else -> err_size)
     }
-    boxed :: ir_box_alloc(&m, &b, 8 + ir_align8(widest), row)
+    tail :: if ir_view_result(ty) -> ir_view_result_tail(&m, p, ty) else -> -1
+    boxed :: ir_box_alloc(&m, &b, if tail >= 0 -> tail + 8 else -> 8 + ir_align8(widest), row)
     selector :: ir_word_const(&m, &b, if success -> 1 else -> 0)
     ir_emit(&b.f, IROp.Store, -1, boxed, 0, selector, line)
+    if payload >= 0 && success && tail >= 0 {
+        ir_view_result_store(&m, &b, boxed, payload, tail)
+        return boxed
+    }
     if payload >= 0 {
         ir_store_at(&m, p, &b, boxed, 8, payload)
     } else {
         zero :: ir_word_const(&m, &b, 0)
         ir_emit(&b.f, IROp.Store, -1, boxed, 8, zero, line)
+    }
+    if tail >= 0 {
+        none :: ir_word_const(&m, &b, 0)
+        ir_emit(&b.f, IROp.Store, -1, boxed, tail, none, line)
     }
     boxed
 }
@@ -2271,6 +2290,8 @@ fn ir_adapt(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, span
         return ir_result_box(&m, p, &b, target, true, slot)
     }
     if have_box && !want_box {
+        // A view Result's Ok is a view of its allocator's storage.
+        if ir_view_result(m.types[have].ty) -> return ir_view_result_payload(&m, p, &b, slot, row)
         // A fresh Result box hands its payload over (ir_box_take).
         if b.fresh[slot] -> return ir_box_take(&m, p, &b, slot, 8, row)
         return ir_load_at(&m, &b, slot, 8, row)
@@ -2310,6 +2331,9 @@ fn ir_result_rebox(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: In
     if have_ty == .Result(ok, err) -> from = [Type]{ok.copy(), err.copy()}
     if want_ty == .Result(ok, err) -> to = [Type]{ok.copy(), err.copy()}
     if from.len() != 2 || to.len() != 2 -> return ir_fail_slot(&b, span, "a value of {ir_type_name(have_raw)} where {ir_type_name(want_raw)} is expected")
+    // A view Result's Ok is its allocator's: no other box takes it, and a
+    // view Result holds no other Ok; only an Err moves between them.
+    if (ir_view_result(have_raw) || ir_view_result(want_raw)) && !ir_never_type(from[0]) -> return ir_fail_slot(&b, span, "a value of {ir_type_name(have_raw)} where {ir_type_name(want_raw)} is expected")
     boxed :: ir_result_box(&m, p, &b, want_raw, true, -1)
     selector :: ir_load_word(&m, &b, slot, 0)
     ir_emit(&b.f, IROp.Store, -1, boxed, 0, selector, b.line)

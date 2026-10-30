@@ -238,9 +238,13 @@ fn ir_value_type_laid(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) ->
         return Val(ir_mark_box(&m, boxed))
     }
     if ty == .Result(ok, err) {
-        // A box pointer: selector word at 0 (Ok 1, Err 0), payload at 8.
+        // A box pointer: selector word at 0 (Ok 1, Err 0), payload at 8. A
+        // view Result (an allocator view's Ok) is a row of its own: its box
+        // owns no Ok payload and keeps the storage's address after the
+        // payloads (ir_view_result_tail).
         if !ir_pointee_lays_out(&m, p, ok, laying) || !ir_pointee_lays_out(&m, p, err, laying) -> return None
-        boxed :: ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, ""))
+        key :: if ir_allocator_view_type(ok) -> "view:{type_carrier_identity(ty)}" else -> type_carrier_identity(ty)
+        boxed :: ir_intern_type(&m, key, ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, ""))
         return Val(ir_mark_box(&m, boxed))
     }
     if ty == .List(element) {
@@ -3390,10 +3394,11 @@ fn ir_view_element(ty: Type) -> Type? Never! {
     None
 }
 
-// The element of an `Iter<T>`.
+// The element of an `Iter<T>`, or of a `Stream<T>`, a generator's native
+// iterator (BuildGenerator.jet).
 fn ir_iter_element(ty: Type) -> Type? Never! {
     if ir_untag(ty) == .Apply(name, args) {
-        if name == "Iter" && args.len() == 1 -> return Val(args[0].copy())
+        if (name == "Iter" || name == "Stream") && args.len() == 1 -> return Val(args[0].copy())
     }
     None
 }

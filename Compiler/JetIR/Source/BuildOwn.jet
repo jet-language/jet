@@ -247,7 +247,9 @@ fn ir_box_shapes(m: &IRModule, p: IRProgram, row: Int) -> [IRBoxShape]? Never! {
     if ty == .Result(ok, err) {
         ok_row :: ir_value_type(&m, p, ok) ?? return None
         err_row :: ir_value_type(&m, p, err) ?? return None
-        &shapes.push(IRBoxShape{selector: 1, members: ir_box_payload(m, ok_row, 8)})
+        // A view Result's Ok is its allocator's (ir_view_result).
+        ok_members :: if ir_allocator_view_type(ok) -> [IRMember]{} else -> ir_box_payload(m, ok_row, 8)
+        &shapes.push(IRBoxShape{selector: 1, members: ok_members})
         &shapes.push(IRBoxShape{selector: 0, members: ir_box_payload(m, err_row, 8)})
         return Val(shapes)
     }
@@ -273,6 +275,7 @@ fn ir_box_bytes(m: &IRModule, p: IRProgram, row: Int) -> Int Never! {
     ty :: ir_untag(m.types[row].ty)
     if ty == .Option(inner) -> return ir_align8(ir_type_size(&m, p, inner))
     if ty == .Result(ok, err) {
+        if ir_view_result(ty) -> return ir_view_result_tail(&m, p, ty) + 8
         ok_size :: ir_type_size(&m, p, ok)
         err_size :: ir_type_size(&m, p, err)
         return 8 + ir_align8(if ok_size > err_size -> ok_size else -> err_size)
@@ -812,7 +815,7 @@ fn ir_close_part_rows(m: &IRModule, p: IRProgram, row: Int) -> [Int] Never! {
         return parts
     }
     if ty == .Result(ok, err) {
-        if ir_value_type(&m, p, ok) == .Val(ok_row) -> &parts.push(ok_row)
+        if !ir_allocator_view_type(ok) && ir_value_type(&m, p, ok) == .Val(ok_row) -> &parts.push(ok_row)
         if ir_value_type(&m, p, err) == .Val(err_row) -> &parts.push(err_row)
         return parts
     }
@@ -964,7 +967,8 @@ fn ir_close_parts(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, value: In
     if ty == .Result(ok, err) {
         ok_row :: ir_value_type(&m, p, ok) ?? return
         err_row :: ir_value_type(&m, p, err) ?? return
-        ok_glue :: ir_close_glue(&m, p, &b, ok_row, false, span)
+        // A view Result's Ok closes with its allocator (ir_view_result).
+        ok_glue :: if ir_allocator_view_type(ok) -> -1 else -> ir_close_glue(&m, p, &b, ok_row, false, span)
         err_glue :: ir_close_glue(&m, p, &b, err_row, false, span)
         if ok_glue < 0 && err_glue < 0 -> return
         is_ok :: ir_result_is_ok(&m, &b, value)

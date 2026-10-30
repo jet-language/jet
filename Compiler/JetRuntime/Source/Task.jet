@@ -138,6 +138,14 @@ fn task_drop(child: I64) {
 }
 
 fn task_spawn_state(site: I64, label: I64, env: I64, invoke: I64, release: I64, meta: I64, group: I64, permit: I64) -> I64 {
+    child :: task_state_new(site, label, env, invoke, release, meta, group, permit)
+    scheduler_submit(I64{0}, child, true)
+    child
+}
+
+// A task's state, registered but not yet submitted: a generator
+// (Generator.jet) records its producer before the producer can run.
+fn task_state_new(site: I64, label: I64, env: I64, invoke: I64, release: I64, meta: I64, group: I64, permit: I64) -> I64 {
     if (site < I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
     child :: jet_rt_alloc(task_state_bytes(), I64{8})
     thread_zero(child, task_state_bytes())
@@ -165,7 +173,6 @@ fn task_spawn_state(site: I64, label: I64, env: I64, invoke: I64, release: I64, 
         sync_store(child + I64{192}, jet_rt_world_clone(world))
         world_task_spawned(world)
     }
-    scheduler_submit(I64{0}, child, true)
     child
 }
 

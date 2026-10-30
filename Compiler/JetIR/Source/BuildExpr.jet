@@ -33,6 +33,8 @@ fn ir_build_function(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody
         if ir_failed(b) -> return
         if ir_param_slot(&m, p, &b, param_ty, param.convention == .Write, param.convention == .Move, param.local.name) == None -> return ir_fail(&b, param.span, "parameter type {ir_type_name(param_ty)}")
     }
+    if ir_generator_element(p, &b, function) == .Val(element) -> return ir_build_generator(&m, p, &b, function, element)
+    if ir_failed(b) -> return
     ir_arm_params(&m, p, &b, function)
     b.plain = ir_plain_return(function) != None
     declared :: if function.ret == .Val(written) -> Val(ir_fact(p, &b, written, function.source_span)) else -> Type?{None}
@@ -1689,6 +1691,7 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
                 if ir_host_value_row(m, p, receiver_row) == .Val(owner) -> return ir_host_method(&m, p, &b, expression_ty, owner, method, receiver, args, span)
             }
             if call == .CellGuardProject(receiver, paths, _, _, _) -> return ir_cell_guard_project(&m, p, &b, expression_ty, receiver, paths, span)
+            if call == .YieldSend(value) -> return ir_generator_yield(&m, p, &b, value, span)
             return ir_fail_slot(&b, span, "host call {ir_host_call_name(call)}")
         }
         .PreciseBuiltin(type_name, function, args) -> return ir_precise_builtin(&m, p, &b, expression_ty, type_name, function, args, span)
@@ -4411,6 +4414,8 @@ fn ir_try_slot(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, carrier:
         if ir_failed(b) -> return -1
         b.fresh[subject] = was_fresh
         ok_row :: ir_value_type(&m, p, ok_ty) ?? return ir_type_fail(&b, span, ok_ty)
+        // A view Result's Ok is a view of its allocator's storage.
+        if ir_view_result(held) -> return ir_view_result_payload(&m, p, &b, subject, ok_row)
         if owned_subject -> return ir_box_take(&m, p, &b, subject, 8, ok_row)
         return ir_load_at(&m, &b, subject, 8, ok_row)
     }
@@ -4622,7 +4627,10 @@ fn ir_comptime_item_failure(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: 
     ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
 }
 
-// `value ?? fallback`.
+// `value ?? fallback`. On a view Result (ir_view_result) the Ok is a view: a
+// view-typed result whose fallback is a view too (or does not return) holds
+// the storage address of either view and is read as a view of it; with a
+// plain fallback value the result takes a copy of the Ok.
 fn ir_or_fallback(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, fallback: BodyOrFallback, ambient: TLocal?, span: Span) -> Int Never! {
     value_ty :: ir_ty(p, b, value)
     subject :: ir_expr(&m, p, &b, value)
@@ -4648,25 +4656,50 @@ fn ir_or_fallback(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: In
     } else {
         return ir_fail_slot(&b, span, "`??` on {ir_type_name(value_ty)}")
     }
+    view_box :: is_result && ir_view_result(held)
+    fallback_view := false
+    fallback_plain := false
+    if fallback == .Value(alternative) {
+        alternative_ty :: ir_ty(p, b, alternative)
+        fallback_view = ir_allocator_view_type(alternative_ty)
+        fallback_plain = !fallback_view && !ir_never_type(alternative_ty)
+    }
+    view :: view_box && ir_allocator_view_type(ty) && !fallback_plain
     result := -1
+    row := -1
     if !ir_unit_type(ty) && !ir_never_type(ty) {
-        row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-        result = ir_temp(&m, &b, row)
+        row = ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+        slot_row :: if view -> ir_pointer_row(&m) else -> row
+        result = ir_temp(&m, &b, slot_row)
     }
     payload_row :: ir_value_type(&m, p, payload_ty) ?? return ir_type_fail(&b, span, payload_ty)
+    // A plain result copies the Ok view's value. One that closes, or a handle
+    // with no clone, has a single owner, its allocator: no copy may close it.
+    if view_box && !view && result >= 0 {
+        closes :: ir_close_glue(&m, p, &b, payload_row, false, span) >= 0
+        if ir_failed(b) -> return -1
+        handle :: m.types[payload_row].drop != "" && m.types[payload_row].clone == "" && m.types[payload_row].kind != .Aggregate
+        if closes || handle -> return ir_fail_slot(&b, span, "`??` with a fallback that is no allocator view, on a view of {ir_type_name(payload_ty)}, which only its allocator closes")
+    }
     // A fresh carrier hands a present payload over (ir_box_take) and is
     // dropped once the fallback has run.
     owned_subject :: b.fresh[subject] && (ir_box_row(m, b.f.slot_type[subject]) || ir_option_inline(m, b.f.slot_type[subject]))
     test :: if is_result -> ir_result_is_ok(&m, &b, subject) else -> ir_option_is_some(&m, &b, subject)
     ir_open_if(&b.f, test, b.line)
-    payload :: if owned_subject -> ir_box_take(&m, p, &b, subject, offset, payload_row) else if is_result -> ir_load_at(&m, &b, subject, offset, payload_row) else -> ir_option_payload(&m, &b, subject, payload_row)
-    if result >= 0 && payload >= 0 {
-        target_row :: b.f.slot_type[result]
-        adapted :: ir_adapt(&m, p, &b, payload, target_row, span)
-        if ir_failed(b) -> return -1
-        ir_store(&m, p, &b, result, adapted)
+    if view {
+        address :: ir_view_result_address(&m, p, &b, subject)
+        if result >= 0 -> ir_emit(&b.f, IROp.Move, result, address, -1, -1, b.line)
+        ir_release(&m, &b, subject)
     } else {
-        ir_release(&m, &b, payload)
+        payload :: if view_box -> ir_view_result_payload(&m, p, &b, subject, payload_row) else if owned_subject -> ir_box_take(&m, p, &b, subject, offset, payload_row) else if is_result -> ir_load_at(&m, &b, subject, offset, payload_row) else -> ir_option_payload(&m, &b, subject, payload_row)
+        if result >= 0 && payload >= 0 {
+            target_row :: b.f.slot_type[result]
+            adapted :: ir_adapt(&m, p, &b, payload, target_row, span)
+            if ir_failed(b) -> return -1
+            ir_store(&m, p, &b, result, adapted)
+        } else {
+            ir_release(&m, &b, payload)
+        }
     }
     ir_else(&b.f, b.line)
     // A failure handled here ends its journey: drop it before the fallback
@@ -4685,7 +4718,14 @@ fn ir_or_fallback(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: In
             &b.bindings.push(IRBinding{name: local.name, slot: error})
         }
     }
-    ir_fallback_route(&m, p, &b, fallback, result, span)
+    if view && fallback_view && result >= 0 && fallback == .Value(alternative) {
+        // The fallback is a view too: the result takes its storage address.
+        address :: ir_view_address(&m, p, &b, alternative, span)
+        if ir_failed(b) -> return -1
+        ir_emit(&b.f, IROp.Move, result, address, -1, -1, b.line)
+    } else {
+        ir_fallback_route(&m, p, &b, fallback, result, span)
+    }
     ir_truncate_bindings(&b, mark)
     // An absent inline Option holds no Int to drop.
     if owned_subject && !ir_option_inline(m, b.f.slot_type[subject]) {
@@ -4693,6 +4733,11 @@ fn ir_or_fallback(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: In
         ir_release(&m, &b, subject)
     }
     ir_end(&b.f, b.line)
+    if view && result >= 0 {
+        viewed :: ir_allocator_view(&m, &b, result, row)
+        if viewed >= 0 -> b.fresh[viewed] = false
+        return viewed
+    }
     if result >= 0 -> b.fresh[result] = ir_has_drop(m, b, result)
     result
 }

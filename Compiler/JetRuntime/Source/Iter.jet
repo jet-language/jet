@@ -92,6 +92,7 @@ fn iter_pull_kernel(node: I64, output: I64) -> Bool {
     index :: trap_word(node + I64{40})
     count :: trap_word(node + I64{32})
     if (kind == I64{29}) { return iter_source_pull(node, output) }
+    if (kind == I64{30}) { return generator_pull(node, output) }
     if (kind == I64{0}) {
         header :: trap_word(node + I64{112})
         if (index >= trap_word(header)) { return false }
@@ -387,6 +388,11 @@ fn iter_list_release(source: I64, meta: I64) {
         jet_rt_free(context, I64{56}, I64{8})
     }
     if (kind == I64{27}) { jet_rt_progress_state_drop(context) }
+    if (kind == I64{30}) {
+        jet_rt_session_shield_enter()
+        generator_drop(context)
+        jet_rt_session_shield_leave()
+    }
     if (kind == I64{20}) { jet_rt_free(trap_word(node + I64{120}), I64{8}, I64{8}) }
     if (kind == I64{26} && trap_word(node + I64{120}) != I64{0}) {
         jet_rt_free(trap_word(node + I64{120}), coll_size(trap_word(trap_word(node + I64{72}) + I64{64})), I64{8})

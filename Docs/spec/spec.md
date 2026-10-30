@@ -2047,7 +2047,9 @@ The fallible allocation family is separate from plain abort-on-failure calls:
 `AllocError { requested_bytes, allocator }`. A plain `new`, `alloc`, or
 mutation retains its abort-on-failure behavior. The AOT emitter and the
 interpreter carry the same fallible result; they do not choose a
-different allocation policy. See
+different allocation policy. A value `try_alloc` accepts belongs to its
+allocator as an `alloc` value does: it closes and drops once, at reset or
+close, and the Result carrying its view owns none of it. See
 [`Examples/features/memory/try_allocation.jet`](../../Examples/features/memory/try_allocation.jet). (D-ALLOCFAIL1=A)
 
 ### Arena regions and scope-bound views

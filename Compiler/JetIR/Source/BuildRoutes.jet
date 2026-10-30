@@ -549,13 +549,13 @@ fn ir_list_try_reserve(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list
 // core.mem Arena/Bump/Pool/Fixed (Sema Memory.jet
 // sema_call_memory_allocator_method): the runtime storage reserves the
 // payload's bytes and records its address-based thunk, which it runs at reset
-// or close, latest allocation first. An `alloc` value's thunk is lazy.retire:
-// it closes and drops there, as a variable's does at its scope end. A
-// `try_alloc` value's is lazy.drop, as the Result box that carries its view
-// closes it. The owned value moves into the reservation and the checked
-// AllocatorView reads it there without owning it. A refused try_alloc drops
-// the payload and answers `Err(AllocError)` naming the requested bytes and the
-// allocator.
+// or close, latest allocation first. The thunk is lazy.retire: the value
+// closes and drops there, as a variable's does at its scope end. The owned
+// value moves into the reservation and the checked AllocatorView reads it
+// there without owning it; a `try_alloc`'s Ok carries that view in a view
+// Result (ir_view_result), which owns it no more than the view does. A
+// refused try_alloc drops the payload and answers `Err(AllocError)` naming
+// the requested bytes and the allocator.
 fn ir_allocator_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int Never! {
     receiver_ty :: ir_ty(p, b, receiver)
     allocator :: ir_handle_allocator_name(receiver_ty) ?? return ir_fail_slot(&b, span, "allocator method on {ir_type_name(receiver_ty)}")
@@ -588,10 +588,10 @@ fn ir_allocator_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rece
     align :: if m.types[payload_row].align < 1 -> 1 else -> m.types[payload_row].align
     pointer_row :: ir_pointer_row(&m)
     drop := ir_word_const(&m, &b, 0)
-    closes :: !fallible && ir_close_glue(&m, p, &b, payload_row, false, span) >= 0
+    closes :: ir_close_glue(&m, p, &b, payload_row, false, span) >= 0
     if ir_failed(b) -> return -1
     if closes || m.types[payload_row].drop != "" {
-        id :: ir_lazy_helper(&m, p, &b, if fallible -> "drop" else -> "retire", payload_ty, span)
+        id :: ir_lazy_helper(&m, p, &b, "retire", payload_ty, span)
         if id < 0 -> return -1
         drop = ir_lazy_address(&m, &b, id)
     }
