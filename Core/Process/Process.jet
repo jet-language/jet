@@ -200,6 +200,15 @@ fn run_spec(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! {
     spec.run()
 }
 
+// D-PROCESS-SESSION2=D: `ProcessSpec.abilities()`, the open keyed report of
+// what a terminal-backed launch can use. Stable keys are the checked
+// TerminalFact names; a preview fact is any other string key. Every host the
+// runtime launches on opens a PTY (HostSpawn spawn_pty), so the report holds
+// the three stable facts whatever the spec asks for.
+fn __spec_abilities(_spec: ProcessSpec) -> Set<String> Never! {
+    Set.from([String]{"terminal", "resize", "raw"})
+}
+
 fn status_ok(receipt: ProcessReceipt) -> Bool Never! {
     receipt.success
 }

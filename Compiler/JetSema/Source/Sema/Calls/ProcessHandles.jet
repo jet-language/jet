@@ -393,6 +393,20 @@ fn sema_process_spec_method(receiver: Expr, receiver_value: TExpr, method: Strin
     if known_mutating && receiver == .Ident(_, _, _) {
         if !sema_ownership_mark_unmarked_move(&state, receiver, scopes, "`ProcessSpec.{method}`", &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     }
+    // D-PROCESS-SESSION2=D: the report is the ordinary Core source body
+    // `core.process.__spec_abilities`, typed as the checked TerminalFact set,
+    // so every tier runs the same Jet code.
+    if method == "abilities" {
+        if !sema_process_record_intrinsic(result, "", "ProcessSpec.abilities", span, environment, program, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        route :: sema_call_core_resolve_route(environment, program, "core.process", "__spec_abilities", [Type]{}, 1, false, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        target :: if route == {
+            .Source(source) -> source
+            .Core(_) | .SharedSite(_) -> panic("ProcessSpec.abilities must resolve its canonical Jet source body")
+        }
+        callee :: sema_call_callee_decl(program, target.symbol.id, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        value := sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{sema_value_method_source_arg(receiver_value)}}, span)
+        return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics)}
+    }
     effect_name :: if method == "run" || method == "run_checked" || method == "spawn" -> "Exec" else -> ""
     sema_process_finish(receiver_value, THandleOp.ProcessSpecMethod{method: method, args_len: args.len()}, values, result, effect_name, "ProcessSpec.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
 }
