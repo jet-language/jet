@@ -869,6 +869,9 @@ fn sema_contract_check_call(func: Func, args: &[TCallArg], slots: [Int], call_sp
     }
     contracts := [TContract]{}
     complete := true
+    // Every call site checks its own copy of the callee's clauses.
+    fresh_expr_ids :: context.fresh_expr_ids
+    context.fresh_expr_ids = true
     loop clause in func.pre {
         condition :: sema_contract_check_expr(clause.cond, Type.Bool, "Pre", false, true, environment, program, checked_scopes, checked_state, &tail_store, &context, &diagnostics)
         if condition == None -> complete = false
@@ -878,6 +881,7 @@ fn sema_contract_check_call(func: Func, args: &[TCallArg], slots: [Int], call_sp
             &contracts.push(sema_contract_make(TContractKind.Pre, condition_value, message_value, environment, program, call_span, call_span, context))
         }
     }
+    context.fresh_expr_ids = fresh_expr_ids
     sema_scope_leave(&checked_scopes, &checked_state)
     if !complete -> return None
     Val(SemaContractCall{bindings: bindings, contracts: contracts})

@@ -50,6 +50,13 @@ struct SemaStaticMethodTarget {
 }
 
 fn sema_call_static_registered_method_exists(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, method: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    sema_call_registered_method_names(graph, nominal, true, environment, program).contains(method)
+}
+
+// The visible associated methods of `nominal`, in declaration order: its
+// statics (no `self` receiver) when `statics`, else its instance methods.
+fn sema_call_registered_method_names(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, statics: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables) -> [String] Never! {
+    names := [String]{}
     owner_module := nominal.symbol.module_name
     owner_package := ""
     if sema_type_graph_nominal_row(graph, nominal.symbol.id.key) == .Val(owner_row) {
@@ -57,9 +64,8 @@ fn sema_call_static_registered_method_exists(graph: SemaRegistrationGraph, nomin
         owner_package = graph.modules[owner_row.module_index].package_identity
     }
     loop function in nominal.methods {
-        if function.symbol.name == method && (function.parameters.len() == 0 || function.parameters[0].symbol.name != "self") {
-            if sema_registration_visible(function.symbol.visibility, environment.module_identity, environment.package_identity, owner_module, owner_package) -> return true
-        }
+        is_static :: function.parameters.len() == 0 || function.parameters[0].symbol.name != "self"
+        if is_static == statics && !names.contains(function.symbol.name) && sema_registration_visible(function.symbol.visibility, environment.module_identity, environment.package_identity, owner_module, owner_package) -> &names.push(function.symbol.name.copy())
     }
     // Only impls registered under the owner's name can target it (Rust
     // `registry.method` on the resolved owner), in module/row order.
@@ -68,12 +74,40 @@ fn sema_call_static_registered_method_exists(graph: SemaRegistrationGraph, nomin
         if implementation.trait_name != None -> next
         if implementation.target_identity_key != nominal.identity_key && (implementation.target_module_identity != (Val(nominal.symbol.module_name)) || implementation.target_type_name != nominal.symbol.name) -> next
         loop function in implementation.methods {
-            if function.symbol.name == method && (function.parameters.len() == 0 || function.parameters[0].symbol.name != "self") {
-                if sema_registration_visible(function.symbol.visibility, environment.module_identity, environment.package_identity, graph.modules[impl_row.module_index].module_identity, graph.modules[impl_row.module_index].package_identity) -> return true
-            }
+            is_static :: function.parameters.len() == 0 || function.parameters[0].symbol.name != "self"
+            if is_static == statics && !names.contains(function.symbol.name) && sema_registration_visible(function.symbol.visibility, environment.module_identity, environment.package_identity, graph.modules[impl_row.module_index].module_identity, graph.modules[impl_row.module_index].package_identity) -> &names.push(function.symbol.name.copy())
         }
     }
-    false
+    names
+}
+
+// `Owner.method(...)` where `Owner` is a registered type no scope binding
+// shadows and no static route resolved: the type exists, so the missing
+// member is reported, never the owner (E0311).
+fn sema_call_static_missing_member(receiver: Expr, method: String, method_span: Span, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    unhandled :: SemaMethodSpecialCheck{handled: false, value: None}
+    owner :: if receiver == {
+        .Ident(name, _, _) -> name
+        else -> { return unhandled }
+    }
+    if sema_scope_resolve_index(scopes, owner) != None -> return unhandled
+    if program.registration_graph == .Val(graph) {
+        found :: sema_type_graph_lookup_symbol(graph, environment.module_identity, owner) ?? return unhandled
+        if sema_resolved_kind(graph, found) != SymbolKind.Type -> return unhandled
+        row :: sema_type_graph_resolved_nominal_row(graph, found) ?? return unhandled
+        nominal :: graph.modules[row.module_index].nominals[row.row]
+        if sema_call_registered_method_names(graph, nominal, false, environment, program).contains(method) {
+            &diagnostics.push(sema_error("E0311", method_span, "`{method}` is an instance method on `{owner}`", "instance methods need a value before the dot", "call it on a `{owner}` value: `x.{method}(...)`"))
+        } else {
+            statics :: sema_call_registered_method_names(graph, nominal, true, environment, program)
+            shown :: loop name in statics -> "`{name}`"
+            fix :: if sema_suggest_field(method, statics) == .Val(near) -> "did you mean `{owner}.{near}`?" else if statics.len() > 0 -> "call a static method `{owner}` declares: {shown.join(", ")}" else -> "call `{method}` on a `{owner}` value, or declare a static `{method}` for `{owner}`"
+            &diagnostics.push(sema_error("E0311", method_span, "`{owner}` has no static method `{method}`", "static lookup finds an associated method of `{owner}` with no `self` receiver, and `{owner}` declares none named `{method}`", fix))
+        }
+        sema_call_builtin_static_discard(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    unhandled
 }
 
 fn sema_call_static_local_generic_method_exists(symbol: Symbol, method: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {

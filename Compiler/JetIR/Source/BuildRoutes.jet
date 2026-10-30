@@ -4119,12 +4119,14 @@ fn ir_dyn_def(p: IRProgram, ty: Type) -> Int? Never! {
 // The read-only storage descriptor of the Dyn enum `row` the runtime walks:
 // two header words [box bytes, row count], then per runtime variant, in the
 // runtime's order, [tag, payload offset, boxed, payload bytes, element
-// stride, key offset, value offset, element bytes]. The pointer slot of its
-// data row, or -1 after a failure.
+// stride, key offset, value offset, element bytes], then the ZonedDateTime
+// facts of ir_dyn_datetime_facts. The pointer slot of its data row, or -1
+// after a failure.
 fn ir_dyn_schema(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, span: Span) -> Int Never! {
     box_size :: ir_enum_box_size(&m, p, row, [Type]{}) ?? return ir_fail_slot(&b, span, "Dyn marshaling has no box layout")
     names :: [String]{"Null", "Bool", "Int", "Float", "Number", "Text", "Bytes", "DateTime", "Array", "Object"}
     words := [Int]{box_size, names.len()}
+    zoned := -1
     loop name in names {
         index :: ir_variant_index(p, row, name) ?? return ir_fail_slot(&b, span, "Dyn marshaling has no {name} variant")
         schema := [Int]{index, 0, 0, 0, 0, 0, 0, 0}
@@ -4135,6 +4137,7 @@ fn ir_dyn_schema(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, span: Span
             schema[1] = members[0].offset
             schema[2] = if members[0].boxed -> 1 else -> 0
             schema[3] = m.types[payload].size
+            if name == "DateTime" -> zoned = payload
             if name == "Bytes" || name == "Array" || name == "Object" {
                 element_ty :: if ir_untag(m.types[payload].ty) == .List(element) -> element else -> { return ir_fail_slot(&b, span, "Dyn.{name} marshaling requires a List payload") }
                 element :: ir_value_type(&m, p, element_ty) ?? return ir_type_fail(&b, span, element_ty)
@@ -4150,6 +4153,10 @@ fn ir_dyn_schema(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, span: Span
         }
         loop word in schema -> &words.push(word)
     }
+    // A program that never loads core.time has no ZonedDateTime layout: its
+    // twelve facts are -1 and the runtime stops on any DateTime it would bridge.
+    facts :: ir_dyn_datetime_facts(&m, p, zoned) ?? [Int]{-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1}
+    loop word in facts -> &words.push(word)
     bytes := [U8]{}
     loop word in words {
         rest := word
@@ -4162,6 +4169,40 @@ fn ir_dyn_schema(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, span: Span
     address :: ir_temp(&m, &b, pointer_row)
     ir_emit(&b.f, IROp.DataAddress, address, ir_intern_bytes(&m, bytes), -1, -1, b.line)
     address
+}
+
+// The byte offsets the runtime reads and writes a Dyn.DateTime payload
+// through, relative to the ZonedDateTime of type row `zoned`: [instant secs,
+// instant nanos, instant leap_second, zone name, zone transitions List,
+// transition stride, transition at, transition info, zone infos List, info
+// stride, info offset, info is_dst]. None unless every member is stored
+// inline in the shape Core/Time/Time.jet declares.
+fn ir_dyn_datetime_facts(m: &IRModule, p: IRProgram, zoned: Int) -> [Int]? Never! {
+    if zoned < 0 -> return None
+    instant :: ir_dyn_inline_member(&m, p, zoned, "instant") ?? return None
+    zone :: ir_dyn_inline_member(&m, p, zoned, "zone_value") ?? return None
+    secs :: ir_dyn_inline_member(&m, p, instant.ty, "secs") ?? return None
+    nanos :: ir_dyn_inline_member(&m, p, instant.ty, "nanos") ?? return None
+    leap :: ir_dyn_inline_member(&m, p, instant.ty, "leap_second") ?? return None
+    name :: ir_dyn_inline_member(&m, p, zone.ty, "name_value") ?? return None
+    data :: ir_dyn_inline_member(&m, p, zone.ty, "data") ?? return None
+    transitions :: ir_dyn_inline_member(&m, p, data.ty, "transitions") ?? return None
+    infos :: ir_dyn_inline_member(&m, p, data.ty, "infos") ?? return None
+    transition :: ir_list_element_of(&m, p, transitions.ty) ?? return None
+    at :: ir_dyn_inline_member(&m, p, transition, "at") ?? return None
+    index :: ir_dyn_inline_member(&m, p, transition, "info") ?? return None
+    info :: ir_list_element_of(&m, p, infos.ty) ?? return None
+    offset :: ir_dyn_inline_member(&m, p, info, "offset") ?? return None
+    dst :: ir_dyn_inline_member(&m, p, info, "is_dst") ?? return None
+    tables :: zone.offset + data.offset
+    Val([Int]{instant.offset + secs.offset, instant.offset + nanos.offset, instant.offset + leap.offset, zone.offset + name.offset, tables + transitions.offset, ir_list_stride(m, transition), at.offset, index.offset, tables + infos.offset, ir_list_stride(m, info), offset.offset, dst.offset})
+}
+
+// The member `name` of the struct of type row `row` when it is stored inline.
+fn ir_dyn_inline_member(m: &IRModule, p: IRProgram, row: Int, name: String) -> IRMember? Never! {
+    member :: ir_member_of_row(&m, p, row, name) ?? return None
+    if member.boxed -> return None
+    Val(member)
 }
 
 // A runtime tree of the native Dyn `value`; the caller drops it with

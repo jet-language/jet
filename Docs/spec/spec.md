@@ -963,6 +963,13 @@ compiler reports an undeclared conversion as E2402, a duplicate as E2405, and a
 violation of the typed-target rule as E2406. (D-ERR-CONV, D-FAIL-CONV1,
 D-FAIL-CONV2)
 
+A failure whose error type is a member of the enclosing error union widens
+into that union without a declared conversion. So does a failure whose error
+type is itself a union, when every one of its members is a member of the
+enclosing union: each member keeps its own variant in the wider union. A
+failure with any member outside the enclosing union needs a conversion.
+(D-UNIONTYPE1=A)
+
 A fallible call propagates its failure automatically: success continues with
 its payload and failure returns from the current fallible context. A missing
 value never leaves a function by itself: it stays an ordinary `T?` value until

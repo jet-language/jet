@@ -449,7 +449,16 @@ fn ir_serde_encode(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
         if ir_untag(concrete) == .Map(map_key, _, _) {
             if ir_untag(map_key) == Type.String -> return ir_dyn_object_encode(&m, p, &b, ty, typed, span)
         }
-        if ir_untag(concrete) == .List(element) -> return ir_dyn_array_encode(&m, p, &b, ty, typed, element, span)
+        if ir_untag(concrete) == .List(element) {
+            // A byte List encodes as Dyn.Bytes, the inverse of __decode_bytes
+            // (encoding-decisions.md: Codable `[U8]` is never an integer array).
+            if ir_untag(element) == (Type.IntN{signed: false, bits: 8}) {
+                bytes :: ir_expr(&m, p, &b, receiver)
+                if ir_failed(b) || bytes < 0 -> return -1
+                return ir_dyn_box(&m, p, &b, ty, "Bytes", bytes, span)
+            }
+            return ir_dyn_array_encode(&m, p, &b, ty, typed, element, span)
+        }
         if ir_untag(concrete) == .Option(inner) -> return ir_dyn_option_encode(&m, p, &b, ty, typed, inner, span)
         if ir_untag(concrete) == .Union(members) -> return ir_dyn_union_encode(&m, p, &b, ty, typed, concrete, members, span)
     }

@@ -3461,14 +3461,16 @@ Error reasons and the JSON/Syntax, offset-zero, line-present, column-absent
 adapter remain unchanged. This is not Core's separate policy parser.
 
 `DynNative.jet` marshals the compiler's checked enum through the descriptor
-in `Lower/Dyn.jet`, rather than assuming source/runtime tags or element
-offsets coincide. Both directions clone borrowed owners; packed byte lists,
-padded Object entries and recursive payload wrappers follow descriptor facts.
-Compiler JSON does not construct DateTime. Main explicitly scoped that
-bridge variant out of cutover: it raises the registered E3001 panic
-`Dyn DateTime is not yet bridged natively`, never a silent ZonedDateTime
-reinterpretation. The complete ZonedDateTime projection requires a separate
-schema extension after cutover.
+`ir_dyn_schema` (JetIR `BuildRoutes.jet`) emits, rather than assuming
+source/runtime tags or element offsets coincide. Both directions clone
+borrowed owners; packed byte lists, padded Object entries and recursive
+payload wrappers follow descriptor facts. DateTime (#6280) follows the
+descriptor's ZonedDateTime facts: native to runtime keeps the instant and the
+zone's offset at that instant (Core's `civil_zone_info` lookup); runtime to
+native builds Core's fixed-offset zone (`UTC`, or `±HH:MM` with one info).
+A program that never loads core.time has no ZonedDateTime layout; its facts
+are -1, and bridging a DateTime there is the registered E3001 stop. A tag
+absent from the descriptor is the same stop.
 
 `JetRuntime/Tests/DataTreeWitness.c` retains its existing filename but uses
 only canonical Dyn exports. It requires a real Jet object and

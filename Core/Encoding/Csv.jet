@@ -1,6 +1,7 @@
 use core as core
 use core.encoding.[Dyn, EncodingCause, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
 use core.encoding.json as json
+use core.encoding.base64 as base64
 use __core_encoding_stream as stream
 use core.encoding as encoding
 use core.files.[FileReader, FileWriter]
@@ -287,6 +288,8 @@ fn to_string<T: Encode>(rows: [T]) -> String Never! {
     out
 }
 
+// A cell is text: Bytes and DateTime carry the base64 and RFC 3339 texts JSON
+// writes for them, and any other tree is its JSON text.
 fn csv_cell(value: Dyn) -> String Never! {
     if value == {
         .Text(text) -> text
@@ -294,6 +297,8 @@ fn csv_cell(value: Dyn) -> String Never! {
         .Float(n) -> "{n:Debug}"
         .Bool(b) -> "{b}"
         .Null -> ""
+        .Bytes(bytes) -> base64.encode(bytes)
+        .DateTime(_) -> value.to_text() ?? ""
         else -> json.to_string(value) ?? panic("CSV cell cannot be represented as JSON")
     }
 }
@@ -965,4 +970,8 @@ fn reader(source: ^FileReader, limits: EncodingLimits{EncodingLimits.safe()}, de
 
 #Test("CSV structured cells retain compact JSON text") {
     assert_eq(csv_cell(Dyn.Array([Dyn]{Dyn.Int(1), Dyn.Bool(true)})), "[1,true]")
+}
+
+#Test("CSV Bytes cells are base64 text") {
+    assert_eq(csv_cell(Dyn.Bytes([U8]{104, 105})), "aGk=")
 }

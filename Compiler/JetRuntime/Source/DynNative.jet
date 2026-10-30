@@ -1,24 +1,134 @@
 // Canonical Dyn bridge for the native compiler's JSON values. Descriptor is
-// Lower/Dyn.jet lower_dyn_schema: [node bytes,row count] then semantic rows
-// [native tag,payload offset,boxed,payload bytes,element stride,key offset,
-// value offset,element bytes], ordered Null Bool Int Float Number Text Bytes
-// DateTime Array Object. Source declaration order and recursive wrappers need
+// JetIR BuildRoutes.jet ir_dyn_schema: [node bytes,row count] then semantic
+// rows [native tag,payload offset,boxed,payload bytes,element stride,key
+// offset,value offset,element bytes], ordered Null Bool Int Float Number Text
+// Bytes DateTime Array Object, then the ZonedDateTime facts of
+// ir_dyn_datetime_facts. Source declaration order and recursive wrappers need
 // not equal runtime tags/layout. Both directions borrow input and clone owners.
 // A native List payload is its inline [len, cap, data] header at the payload
 // address (in the node, or in its wrapper box); a runtime tree's sequence is
 // a pointer to a separately allocated header.
-// Main's cutover ruling excludes DateTime: compiler JSON never produces it;
-// its ZonedDateTime projection requires richer schema facts, not reinterpretation.
-// This is the registered E3001 panic route, with an explicit stable message.
-fn compiler_dyn_datetime_unbridged() {
-    panic("Dyn DateTime is not yet bridged natively")
-}
 fn compiler_dyn_row(schema: I64, kind: I64) -> I64 { schema + I64{16} + kind * I64{64} }
+// The ZonedDateTime fact `index` (ir_dyn_datetime_facts order) after the rows.
+fn compiler_dyn_datetime_fact(schema: I64, index: I64) -> I64 {
+    data_tree_word(compiler_dyn_row(schema, data_tree_word(schema + I64{8})) + index * I64{8})
+}
+// Whether this program carries Core's ZonedDateTime layout; a program that
+// never loads core.time has facts of -1 and stops here instead of bridging.
+fn compiler_dyn_datetime_bridged(schema: I64) -> Bool {
+    if (compiler_dyn_datetime_fact(schema, I64{0}) >= I64{0}) -> return true
+    compiler_dyn_stop(rt_static_text("Dyn.DateTime needs core.time, which this program does not load"))
+    false
+}
+// The runtime DateTime glue [secs, nanos, leap, offset] of the native
+// ZonedDateTime at `address`: its instant and the zone's UTC offset at that
+// instant, looked up exactly as Core/Time/Time.jet civil_zone_info does.
+fn compiler_dyn_datetime_from_native(schema: I64, address: I64) -> I64 {
+    if !compiler_dyn_datetime_bridged(schema) -> return I64{0}
+    secs_word :: data_tree_word(address + compiler_dyn_datetime_fact(schema, I64{0}))
+    secs :: jet_int_owned_to_i64(secs_word)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    nanos :: jet_int_owned_to_i64(data_tree_word(address + compiler_dyn_datetime_fact(schema, I64{1})))
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    leap :: if (rt_text_byte(address + compiler_dyn_datetime_fact(schema, I64{2})) != I64{0}) -> I64{1} else -> I64{0}
+    transitions :: address + compiler_dyn_datetime_fact(schema, I64{4})
+    transition_data :: data_tree_word(transitions + DATA_SEQUENCE_DATA)
+    transition_stride :: compiler_dyn_datetime_fact(schema, I64{5})
+    lo := I64{0}
+    hi := data_tree_word(transitions + DATA_SEQUENCE_LENGTH)
+    loop lo < hi {
+        mid :: (lo + hi) /% I64{2}
+        at :: data_tree_word(transition_data + mid * transition_stride + compiler_dyn_datetime_fact(schema, I64{6}))
+        if (jet_int_compare(at, secs_word) <= I64{0}) { lo = mid + I64{1} } else { hi = mid }
+    }
+    index := I64{0}
+    if (lo > I64{0}) {
+        index = jet_int_owned_to_i64(data_tree_word(transition_data + (lo - I64{1}) * transition_stride + compiler_dyn_datetime_fact(schema, I64{7})))
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
+    infos :: address + compiler_dyn_datetime_fact(schema, I64{8})
+    if (index < I64{0} || index >= data_tree_word(infos + DATA_SEQUENCE_LENGTH)) {
+        compiler_dyn_stop(rt_static_text("native ZonedDateTime names a zone info outside its table"))
+        return I64{0}
+    }
+    info :: data_tree_word(infos + DATA_SEQUENCE_DATA) + index * compiler_dyn_datetime_fact(schema, I64{9})
+    offset :: jet_int_owned_to_i64(data_tree_word(info + compiler_dyn_datetime_fact(schema, I64{10})))
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    glue :: jet_rt_alloc(DYN_DATETIME_BYTES, I64{8})
+    data_tree_store(glue + DYN_DATETIME_SECS, secs)
+    data_tree_store(glue + DYN_DATETIME_NANOS, nanos)
+    data_tree_store(glue + DYN_DATETIME_LEAP, leap)
+    data_tree_store(glue + DYN_DATETIME_OFFSET, offset)
+    glue
+}
+// Fills the zeroed native ZonedDateTime at `address` from the runtime glue:
+// its instant in the fixed-offset zone Core/Time/Time.jet civil_fixed_zone
+// builds ("UTC" for a zero offset, else "±HH:MM", one info, no transitions).
+fn compiler_dyn_datetime_to_native(schema: I64, glue: I64, address: I64) {
+    offset :: data_tree_word(glue + DYN_DATETIME_OFFSET)
+    data_tree_store(address + compiler_dyn_datetime_fact(schema, I64{0}), jet_int_owned_from_i64(data_tree_word(glue + DYN_DATETIME_SECS)))
+    data_tree_store(address + compiler_dyn_datetime_fact(schema, I64{1}), jet_int_owned_from_i64(data_tree_word(glue + DYN_DATETIME_NANOS)))
+    rt_text_put(address + compiler_dyn_datetime_fact(schema, I64{2}), if (data_tree_word(glue + DYN_DATETIME_LEAP) != I64{0}) -> I64{1} else -> I64{0})
+    name :: jet_rt_string_builder_new()
+    if (offset == I64{0}) {
+        rt_text_push_scalar(name, I64{85})
+        rt_text_push_scalar(name, I64{84})
+        rt_text_push_scalar(name, I64{67})
+    } else {
+        magnitude :: if (offset < I64{0}) -> -offset else -> offset
+        rt_text_push_scalar(name, if (offset < I64{0}) -> I64{45} else -> I64{43})
+        time_glue_pad(name, magnitude /% I64{3600}, I64{2})
+        rt_text_push_scalar(name, I64{58})
+        time_glue_pad(name, magnitude /% I64{60} %% I64{60}, I64{2})
+    }
+    data_tree_store(address + compiler_dyn_datetime_fact(schema, I64{3}), jet_rt_string_builder_finish(name))
+    transitions :: data_sequence_new(I64{0}, compiler_dyn_datetime_fact(schema, I64{5}))
+    coll_copy(transitions, address + compiler_dyn_datetime_fact(schema, I64{4}), DATA_SEQUENCE_BYTES)
+    jet_rt_free(transitions, DATA_SEQUENCE_BYTES, I64{8})
+    info_stride :: compiler_dyn_datetime_fact(schema, I64{9})
+    infos :: data_sequence_new(I64{1}, info_stride)
+    info :: data_tree_word(infos + DATA_SEQUENCE_DATA)
+    coll_zero(info, info_stride)
+    data_tree_store(info + compiler_dyn_datetime_fact(schema, I64{10}), jet_int_owned_from_i64(offset))
+    data_tree_store(infos + DATA_SEQUENCE_LENGTH, I64{1})
+    coll_copy(infos, address + compiler_dyn_datetime_fact(schema, I64{8}), DATA_SEQUENCE_BYTES)
+    jet_rt_free(infos, DATA_SEQUENCE_BYTES, I64{8})
+}
+// Private cleanup of a native ZonedDateTime this bridge built.
+fn compiler_dyn_datetime_native_drop(schema: I64, address: I64) {
+    jet_rt_int_drop(data_tree_word(address + compiler_dyn_datetime_fact(schema, I64{0})))
+    jet_rt_int_drop(data_tree_word(address + compiler_dyn_datetime_fact(schema, I64{1})))
+    jet_rt_string_drop(data_tree_word(address + compiler_dyn_datetime_fact(schema, I64{3})))
+    transitions :: address + compiler_dyn_datetime_fact(schema, I64{4})
+    transition_capacity :: data_tree_word(transitions + DATA_SEQUENCE_CAPACITY)
+    transition_stride :: compiler_dyn_datetime_fact(schema, I64{5})
+    at := I64{0}
+    loop at < data_tree_word(transitions + DATA_SEQUENCE_LENGTH) {
+        slot :: data_tree_word(transitions + DATA_SEQUENCE_DATA) + at * transition_stride
+        jet_rt_int_drop(data_tree_word(slot + compiler_dyn_datetime_fact(schema, I64{6})))
+        jet_rt_int_drop(data_tree_word(slot + compiler_dyn_datetime_fact(schema, I64{7})))
+        at += I64{1}
+    }
+    if (transition_capacity != I64{0}) -> jet_rt_free(data_tree_word(transitions + DATA_SEQUENCE_DATA), transition_capacity * transition_stride, I64{8})
+    infos :: address + compiler_dyn_datetime_fact(schema, I64{8})
+    info_capacity :: data_tree_word(infos + DATA_SEQUENCE_CAPACITY)
+    info_stride :: compiler_dyn_datetime_fact(schema, I64{9})
+    at = I64{0}
+    loop at < data_tree_word(infos + DATA_SEQUENCE_LENGTH) {
+        jet_rt_int_drop(data_tree_word(data_tree_word(infos + DATA_SEQUENCE_DATA) + at * info_stride + compiler_dyn_datetime_fact(schema, I64{10})))
+        at += I64{1}
+    }
+    if (info_capacity != I64{0}) -> jet_rt_free(data_tree_word(infos + DATA_SEQUENCE_DATA), info_capacity * info_stride, I64{8})
+}
 fn compiler_dyn_native_payload(row: I64, native: I64) -> I64 {
     address :: native + data_tree_word(row + I64{8})
     if (data_tree_word(row + I64{16}) != I64{0}) -> return data_tree_word(address)
     address
 }
+// The registered E3001 stop for a native value its checked schema cannot
+// carry; a task body propagates it to the caller.
+fn compiler_dyn_stop(message: I64) { jet_rt_panic_message(rt_text_data(message), rt_text_len(message)) }
+// The semantic row of `native`'s tag; -1 after a stop for an absent tag.
 fn compiler_dyn_semantic_kind(schema: I64, native: I64) -> I64 {
     native_tag :: data_tree_word(native)
     kind := I64{0}
@@ -26,7 +136,8 @@ fn compiler_dyn_semantic_kind(schema: I64, native: I64) -> I64 {
         if (data_tree_word(compiler_dyn_row(schema, kind)) == native_tag) -> return kind
         kind += I64{1}
     }
-    panic("native Dyn tag is absent from its checked schema")
+    compiler_dyn_stop(rt_static_text("native Dyn tag is absent from its checked schema"))
+    I64{-1}
 }
 fn compiler_dyn_sequence_from_native(schema: I64, row: I64, native: I64, kind: I64) -> I64 {
     length :: data_tree_word(native + DATA_SEQUENCE_LENGTH)
@@ -61,13 +172,15 @@ fn compiler_dyn_sequence_from_native(schema: I64, row: I64, native: I64, kind: I
 }
 #Export(c) fn jet_rt_dyn_from_native(schema: I64, native: I64) -> I64 {
     kind :: compiler_dyn_semantic_kind(schema, native)
-    if (kind == DATA_TREE_DATETIME) {
-        compiler_dyn_datetime_unbridged()
-        return I64{0}
-    }
+    if (kind < I64{0}) -> return I64{0}
     if (kind == DATA_TREE_NULL) -> return data_tree_new(kind, I64{0})
     row :: compiler_dyn_row(schema, kind)
     address :: compiler_dyn_native_payload(row, native)
+    if (kind == DATA_TREE_DATETIME) {
+        glue :: compiler_dyn_datetime_from_native(schema, address)
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+        return data_tree_new(kind, glue)
+    }
     if (kind == DATA_TREE_BOOL) -> return data_tree_new(kind, if (rt_text_byte(address) != I64{0}) -> I64{1} else -> I64{0})
     if (kind == DATA_TREE_BYTE_LIST || kind >= DATA_TREE_ARRAY) {
         sequence :: compiler_dyn_sequence_from_native(schema, row, address, kind)
@@ -112,10 +225,6 @@ fn compiler_dyn_sequence_to_native(schema: I64, row: I64, sequence: I64, kind: I
 }
 #Export(c) fn jet_rt_dyn_to_native(schema: I64, tree: I64) -> I64 {
     kind :: data_tree_word(tree + DATA_TREE_TAG)
-    if (kind == DATA_TREE_DATETIME) {
-        compiler_dyn_datetime_unbridged()
-        return I64{0}
-    }
     row :: compiler_dyn_row(schema, kind)
     bytes :: data_tree_word(schema)
     native :: jet_rt_alloc(bytes, I64{8})
@@ -139,6 +248,13 @@ fn compiler_dyn_sequence_to_native(schema: I64, row: I64, sequence: I64, kind: I
         data_tree_store(address, payload)
     } else if (kind == DATA_TREE_NUMBER || kind == DATA_TREE_TEXT) {
         data_tree_store(address, jet_rt_string_clone(payload))
+    } else if (kind == DATA_TREE_DATETIME) {
+        if !compiler_dyn_datetime_bridged(schema) {
+            if (data_tree_word(row + I64{16}) != I64{0}) -> jet_rt_free(address, data_tree_word(row + I64{24}), I64{8})
+            jet_rt_free(native, bytes, I64{8})
+            return I64{0}
+        }
+        compiler_dyn_datetime_to_native(schema, payload, address)
     } else {
         converted :: compiler_dyn_sequence_to_native(schema, row, payload, kind)
         if (jet_scheduler_native_propagate() != I64{0}) {
@@ -179,12 +295,14 @@ fn compiler_dyn_native_drop(schema: I64, native: I64) {
     if (native == I64{0}) -> return
     kind :: compiler_dyn_semantic_kind(schema, native)
     row :: compiler_dyn_row(schema, kind)
-    if (kind != DATA_TREE_NULL) {
+    if (kind > DATA_TREE_NULL) {
         address :: compiler_dyn_native_payload(row, native)
         if (kind == DATA_TREE_INT) {
             jet_rt_int_drop(data_tree_word(address))
         } else if (kind == DATA_TREE_NUMBER || kind == DATA_TREE_TEXT) {
             jet_rt_string_drop(data_tree_word(address))
+        } else if (kind == DATA_TREE_DATETIME) {
+            compiler_dyn_datetime_native_drop(schema, address)
         } else if (kind == DATA_TREE_BYTE_LIST || kind >= DATA_TREE_ARRAY) {
             compiler_dyn_native_sequence_drop(schema, row, address, kind, false)
         }

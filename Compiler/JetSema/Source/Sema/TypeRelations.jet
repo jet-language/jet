@@ -738,6 +738,23 @@ fn sema_type_resolve_measure(graph: SemaRegistrationGraph, measure: Measure, cal
     }
 }
 
+// The first name in fixed length `measure` that names a type of module
+// `module_identity`: a size slot takes a compile-time integer, never a type.
+fn sema_type_measure_type_name(graph: SemaRegistrationGraph, module_identity: String, measure: Measure) -> String? Never! {
+    if measure == {
+        .Symbol(_, name) -> {
+            found :: sema_type_graph_lookup_symbol(graph, module_identity, name) ?? return None
+            if sema_resolved_kind(graph, found) == SymbolKind.Type -> Val(name.copy()) else -> None
+        }
+        .Combined(_, _, left, right) -> {
+            found :: sema_type_measure_type_name(graph, module_identity, left)
+            if found != None -> return found
+            sema_type_measure_type_name(graph, module_identity, right)
+        }
+        else -> None
+    }
+}
+
 // The integer of constant `name` of module row `caller`: its staged value,
 // or its declared expression folded (an integer literal, `comptime { … }`
 // holding one, other such constants, `+ - * /`). Chains stop at 32 links.

@@ -996,6 +996,17 @@ fn sema_expr_optional_lift(value: TExpr, required: Type, offered: Type, environm
     Val(sema_tree_node(lifted_type, TExprKind.Present{value: value.copy()}, value.span))
 }
 
+// Whether a value of `ty` can never be None: a built-in value type that is
+// not optional. A named or applied type (an alias, a type parameter, `Dyn`),
+// a trait object and a union stay open, since they may hold None.
+fn sema_expr_never_none(ty: Type) -> Bool Never! {
+    if sema_expr_unwrap_tag(ty) == {
+        .Int | .Float | .Float32 | .Bool | .String | .Char | .IntN(_, _) | .InlineRange(_, _, _) | .Quantity(_, _) | .Measure(_) -> true
+        .List(_) | .Map(_, _, _) | .Shared(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Tuple(_) | .FixedList(_, _) -> true
+        else -> false
+    }
+}
+
 // The optional type a value of type `offered` lifts to under `required`, or
 // None when it does not lift. Decided from the types alone, so an owning
 // caller moves its value into the lift.
@@ -3515,6 +3526,8 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
     if memo_stats.handled -> return memo_stats.value
     root_call := sema_root_call_try(receiver, method, method_span, type_args, args, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if root_call.handled -> return root_call.value
+    missing := sema_call_static_missing_member(receiver, method, method_span, args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if missing.handled -> return missing.value
     scopes.ownership_call_depth += 1
     // Chaining `.trim()`/`.after()`/`.before()` onto a string view
     // reads it as the `&str` those methods take, so the view read is allowed.
@@ -4241,6 +4254,23 @@ fn sema_expr_check_binary(op: BinOp, left: Expr, right: Expr, span: Span, expect
     // A fractional literal before a Dyn operand is a Float, not a Decimal.
     if sema_dyn_is_type(sema_expr_expected_type(checked_rhs.ty, environment, program)) && sema_dyn_float_literal_value(left) == .Val(number) {
         checked_lhs = sema_node(&context, Type.Float, NodeKind.FloatLit{value: number}, checked_lhs.span)
+    }
+    // A value whose type is not optional is never None, so `x == None` /
+    // `x != None` would answer the same every time: refused here, before
+    // the lift below turns it into an optional comparison (#6122).
+    if op == BinOp.Eq || op == BinOp.Ne {
+        compared :: if {
+            sema_expression_absent_none(right) -> Val(checked_lhs.ty)
+            sema_expression_absent_none(left) -> Val(checked_rhs.ty)
+            else -> Type?{None}
+        }
+        if compared == .Val(value_ty) {
+            if sema_expr_never_none(value_ty) {
+                answer :: if op == BinOp.Eq -> "false" else -> "true"
+                &diagnostics.push(sema_error("E0109", span, "only an optional value can be compared with `None`, but this is {sema_type_show(value_ty)}", "a value whose type isn't optional is never None, so this comparison is always {answer}", "remove the comparison, or give the value an optional type such as `{type_name(value_ty)}?` if it can be missing"))
+                return None
+            }
+        }
     }
     // `x == 5` holds only when the optional `x` holds 5, and
     // `x != 5` is its opposite. The plain side lifts once, so the comparison

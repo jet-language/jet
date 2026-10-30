@@ -469,6 +469,12 @@ fn sema_expression_list(expr: Expr, elements: [Expr], span: Span, expected: Type
                 result_ty = Val(normalized)
             }
             .FixedList(element, len) -> {
+                if program.registration_graph == .Val(graph) {
+                    if sema_type_measure_type_name(graph, environment.module_identity, len) == .Val(named) {
+                        &diagnostics.push(sema_error("E0963", span, "`{named}` is a type, not a fixed-size list length", "a fixed-size list `[T#N]` takes a compile-time integer length: a literal or an integer constant", "write the length as an integer, like `[T#{elements.len()}]`"))
+                        return None
+                    }
+                }
                 if has_spread {
                     &diagnostics.push(sema_error("E1311", span, "list spread can't build a fixed-size `[T#N]` list", "spread expands a growable list — a `[T#N]` has a fixed compile-time length", "use a growable `[T]` binding (`::`/`:=`) instead of `[T#N]`"))
                     return None

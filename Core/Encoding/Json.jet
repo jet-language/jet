@@ -844,7 +844,9 @@ fn write_canonical(out: &[U8], value: Dyn, path: &[String], depth: Int) -> Bool 
     }
     if value == {
         .Null -> write_ascii(&out, "null")
-        .Bytes(_) -> return Err(value_error(EncodingErrorKind.Unsupported, pointer_text(path, path.len()), "JSON cannot encode Bytes; encode bytes as Text explicitly"))
+        // Bytes render as standard padded base64 text, as in write_json
+        // (encoding-decisions.md: canonical and compact JSON share the rule).
+        .Bytes(bytes) -> write_json_string(&out, base64.encode(bytes))
         .Bool(v) -> {
             if v -> write_ascii(&out, "true")
             else -> write_ascii(&out, "false")

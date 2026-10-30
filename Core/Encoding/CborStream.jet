@@ -512,6 +512,9 @@ struct CBORPush {
             .Float(value) -> payload = float_width(value)
             .Int(value) -> header = length_size(if value >= 0 -> value else -> -(value + 1))
             .Null | .Bool(_) -> {}
+            // A Number lexeme may hold more precision than CBOR Int or float64,
+            // so the writer refuses it instead of rounding; write Int or Float.
+            .Number(_) -> return Err(error(.Unsupported, self.total, "$", "CBOR writer cannot write a DataEvent.Number lexeme exactly; write Int or Float"))
             else -> return Err(error(.State, self.total, "$", "CBOR container event reached scalar encoder"))
         }
         size :: header + payload

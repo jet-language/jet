@@ -1,10 +1,13 @@
 // Real initialized runtime plus DynNative.jet. A synthetic checked descriptor
 // deliberately permutes native tags, moves payloads, boxes recursive members,
 // packs bytes and pads object entries. List payloads are inline 24-byte
-// [len, cap, data] headers, as the native backend lays them out.
+// [len, cap, data] headers, as the native backend lays them out. The boxed
+// 80-byte ZonedDateTime is permuted too: [name 0, transitions 8, infos 32,
+// secs 56, nanos 64, leap 72], transitions [info 0, at 8] and infos
+// [offset 0, is_dst 8] at stride 16.
 fn compiler_dyn_fixture_schema() -> I64 {
-    schema :: jet_rt_alloc(I64{656}, I64{8})
-    coll_zero(schema, I64{656})
+    schema :: jet_rt_alloc(I64{752}, I64{8})
+    coll_zero(schema, I64{752})
     data_tree_store(schema, I64{40})
     data_tree_store(schema + I64{8}, I64{10})
     kind := I64{0}
@@ -12,15 +15,85 @@ fn compiler_dyn_fixture_schema() -> I64 {
         row :: compiler_dyn_row(schema, kind)
         data_tree_store(row, I64{100} + (I64{9} - kind) * I64{3})
         data_tree_store(row + I64{8}, I64{16})
-        data_tree_store(row + I64{16}, if (kind == DATA_TREE_NUMBER || kind == DATA_TREE_ARRAY) -> I64{1} else -> I64{0})
-        data_tree_store(row + I64{24}, if (kind == DATA_TREE_BYTE_LIST || kind >= DATA_TREE_ARRAY) -> DATA_SEQUENCE_BYTES else -> I64{8})
+        data_tree_store(row + I64{16}, if (kind == DATA_TREE_NUMBER || kind == DATA_TREE_DATETIME || kind == DATA_TREE_ARRAY) -> I64{1} else -> I64{0})
+        data_tree_store(row + I64{24}, if (kind == DATA_TREE_BYTE_LIST || kind >= DATA_TREE_ARRAY) -> DATA_SEQUENCE_BYTES else if (kind == DATA_TREE_DATETIME) -> I64{80} else -> I64{8})
         data_tree_store(row + I64{32}, if (kind == DATA_TREE_BYTE_LIST) -> I64{1} else if (kind == DATA_TREE_OBJECT) -> I64{32} else -> I64{8})
         data_tree_store(row + I64{40}, I64{8})
         data_tree_store(row + I64{48}, I64{24})
         data_tree_store(row + I64{56}, if (kind == DATA_TREE_OBJECT) -> I64{32} else -> I64{8})
         kind += I64{1}
     }
+    facts :: compiler_dyn_row(schema, I64{10})
+    data_tree_store(facts, I64{56})
+    data_tree_store(facts + I64{8}, I64{64})
+    data_tree_store(facts + I64{16}, I64{72})
+    data_tree_store(facts + I64{24}, I64{0})
+    data_tree_store(facts + I64{32}, I64{8})
+    data_tree_store(facts + I64{40}, I64{16})
+    data_tree_store(facts + I64{48}, I64{8})
+    data_tree_store(facts + I64{56}, I64{0})
+    data_tree_store(facts + I64{64}, I64{32})
+    data_tree_store(facts + I64{72}, I64{16})
+    data_tree_store(facts + I64{80}, I64{0})
+    data_tree_store(facts + I64{88}, I64{8})
     schema
+}
+fn compiler_dyn_fixture_datetime(secs: I64, nanos: I64, leap: I64, offset: I64) -> I64 {
+    glue :: jet_rt_alloc(DYN_DATETIME_BYTES, I64{8})
+    data_tree_store(glue + DYN_DATETIME_SECS, secs)
+    data_tree_store(glue + DYN_DATETIME_NANOS, nanos)
+    data_tree_store(glue + DYN_DATETIME_LEAP, leap)
+    data_tree_store(glue + DYN_DATETIME_OFFSET, offset)
+    data_tree_new(DATA_TREE_DATETIME, glue)
+}
+// The fixed-offset zone the native ZonedDateTime of `tree` receives: the
+// `expected` name, no transitions and one info holding the offset.
+fn compiler_dyn_fixture_zone(schema: I64, tree: I64, expected: I64, offset: I64) -> Bool {
+    native :: jet_rt_dyn_to_native(schema, tree)
+    zoned :: data_tree_word(native + I64{16})
+    named :: jet_rt_string_eq(data_tree_word(zoned), expected)
+    infos :: zoned + I64{32}
+    tables :: data_tree_word(zoned + I64{8} + DATA_SEQUENCE_LENGTH) == I64{0} && data_tree_word(infos + DATA_SEQUENCE_LENGTH) == I64{1}
+    info :: tables && jet_int_owned_to_i64(data_tree_word(data_tree_word(infos + DATA_SEQUENCE_DATA))) == offset && rt_text_byte(data_tree_word(infos + DATA_SEQUENCE_DATA) + I64{8}) == I64{0}
+    compiler_dyn_native_drop(schema, native)
+    jet_rt_handle_drop_dyn(tree)
+    named && info
+}
+// A native zone with transitions resolves the offset of the transition at or
+// before the instant: [at 0 -> info 1, at 100 -> info 0] at secs 50 is 7200.
+fn compiler_dyn_fixture_transitions(schema: I64) -> Bool {
+    native :: jet_rt_alloc(I64{40}, I64{8})
+    coll_zero(native, I64{40})
+    data_tree_store(native, data_tree_word(compiler_dyn_row(schema, DATA_TREE_DATETIME)))
+    zoned :: jet_rt_alloc(I64{80}, I64{8})
+    coll_zero(zoned, I64{80})
+    data_tree_store(native + I64{16}, zoned)
+    data_tree_store(zoned, jet_rt_string_builder_finish(jet_rt_string_builder_new()))
+    transitions :: data_sequence_new(I64{2}, I64{16})
+    moves :: data_tree_word(transitions + DATA_SEQUENCE_DATA)
+    data_tree_store(moves, jet_int_owned_from_i64(I64{1}))
+    data_tree_store(moves + I64{8}, jet_int_owned_from_i64(I64{0}))
+    data_tree_store(moves + I64{16}, jet_int_owned_from_i64(I64{0}))
+    data_tree_store(moves + I64{24}, jet_int_owned_from_i64(I64{100}))
+    data_tree_store(transitions + DATA_SEQUENCE_LENGTH, I64{2})
+    coll_copy(transitions, zoned + I64{8}, DATA_SEQUENCE_BYTES)
+    jet_rt_free(transitions, DATA_SEQUENCE_BYTES, I64{8})
+    infos :: data_sequence_new(I64{2}, I64{16})
+    rows :: data_tree_word(infos + DATA_SEQUENCE_DATA)
+    coll_zero(rows, I64{32})
+    data_tree_store(rows, jet_int_owned_from_i64(I64{3600}))
+    data_tree_store(rows + I64{16}, jet_int_owned_from_i64(I64{7200}))
+    data_tree_store(infos + DATA_SEQUENCE_LENGTH, I64{2})
+    coll_copy(infos, zoned + I64{32}, DATA_SEQUENCE_BYTES)
+    jet_rt_free(infos, DATA_SEQUENCE_BYTES, I64{8})
+    data_tree_store(zoned + I64{56}, jet_int_owned_from_i64(I64{50}))
+    data_tree_store(zoned + I64{64}, jet_int_owned_from_i64(I64{0}))
+    tree :: jet_rt_dyn_from_native(schema, native)
+    glue :: data_tree_word(tree + DATA_TREE_PAYLOAD)
+    resolved :: data_tree_word(glue + DYN_DATETIME_SECS) == I64{50} && data_tree_word(glue + DYN_DATETIME_OFFSET) == I64{7200}
+    compiler_dyn_native_drop(schema, native)
+    jet_rt_handle_drop_dyn(tree)
+    resolved
 }
 fn compiler_dyn_fixture_roundtrip(schema: I64, tree: I64) -> Bool {
     native :: jet_rt_dyn_to_native(schema, tree)
@@ -51,11 +124,11 @@ fn compiler_dyn_fixture_roundtrip(schema: I64, tree: I64) -> Bool {
     host_u8_put(data, I64{2}, I64{255})
     data_tree_store(bytes + DATA_SEQUENCE_LENGTH, I64{3})
     if !compiler_dyn_fixture_roundtrip(schema, jet_rt_record_new_dyn_bytes(bytes)) -> return I64{5}
-    jet_rt_free(schema, I64{656}, I64{8})
+    if !compiler_dyn_fixture_roundtrip(schema, compiler_dyn_fixture_datetime(I64{-1}, I64{5}, I64{1}, I64{-18000})) -> return I64{6}
+    if !compiler_dyn_fixture_roundtrip(schema, compiler_dyn_fixture_datetime(I64{1363896240}, I64{0}, I64{0}, I64{0})) -> return I64{7}
+    if !compiler_dyn_fixture_zone(schema, compiler_dyn_fixture_datetime(I64{0}, I64{0}, I64{0}, I64{-19800}), rt_static_text("-05:30"), I64{-19800}) -> return I64{8}
+    if !compiler_dyn_fixture_zone(schema, compiler_dyn_fixture_datetime(I64{0}, I64{0}, I64{0}, I64{0}), rt_static_text("UTC"), I64{0}) -> return I64{9}
+    if !compiler_dyn_fixture_transitions(schema) -> return I64{10}
+    jet_rt_free(schema, I64{752}, I64{8})
     I64{0}
-}
-// Separate trap case: the process/session must report registered E3001 and
-// this exact message; it must never return a reinterpreted ZonedDateTime.
-#Export(c) fn jet_rt_dyn_native_datetime_trap_fixture() {
-    compiler_dyn_datetime_unbridged()
 }

@@ -1,0 +1,18 @@
+// `#Pre` conditions may join tests with `&&` and `||`, and a function's
+// precondition is checked at each call, including two calls to the same
+// function in one expression (#6274).
+#Pre(n == 4 || n == 8, "need 4 or 8")
+fn lanes(n: Int) -> Int { n }
+
+#Pre(n >= 1 && n <= 9, "need 1 to 9")
+fn digit(n: Int) -> Int { n }
+
+#Pre(n != 3, "not three")
+fn pick(n: Int) -> Int { n }
+
+fn run() {
+    print(lanes(4))
+    print(lanes(8))
+    print(digit(1) + digit(9))
+    print(pick(4) + pick(5))
+}

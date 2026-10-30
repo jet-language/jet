@@ -370,6 +370,19 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
         .Apply(_, args) -> args
         else -> [Type]{}
     }
+    // A Core `SocketAddr` keeps the provider's native address, so its
+    // declared `host` and `port` are read through their core.net accessors
+    // (`addr.port` is `net.socket_port(addr)`, #6121), never as stored fields.
+    if owner_name.ends_with("/core.net::SocketAddr") && (member == "host" || member == "port") {
+        if sema_call_core_module_identity(environment, program, "core.net") == .Val(net_identity) {
+            target :: sema_call_core_source_target(environment, program, net_identity, "socket_{member}", [Type]{}, span, true, &diagnostics) ?? return None
+            callee :: sema_call_callee_decl(program, target.symbol.id, span, &diagnostics) ?? return None
+            argument :: TCallArg{value: base, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+            accessor_ty :: if member == "port" -> Type.Int else -> Type.String
+            accessor :: sema_tree_node(accessor_ty, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{argument}}, span)
+            return sema_expr_expected_owned(^accessor, expected, environment, program, &diagnostics)
+        }
+    }
     if owner_name != "" {
         owner := sema_expression_type_symbol(&scopes, environment, program, owner_name)
         if owner == None -> owner = sema_expression_carrier_type_symbol(environment, program, owner_name)

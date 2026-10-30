@@ -1,0 +1,9 @@
+// `close(^value)` runs the value's nominal `Close` implementation. A Core
+// native carrier such as `TCPListener` has none, so the call is refused at
+// check instead of stopping the compiler later (#6120).
+use core.net
+
+fn run() -[Net]> {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    close(^listener)
+}

@@ -670,6 +670,10 @@ struct SemaCheckContext {
     filed_expr_ids: [Int]{[Int]{}}
     filed_expr_id_set: [Int:Bool]{[Int:Bool]{}}
     next_expr_id: Int{TEXPR_FIRST_LOCAL_ID}
+    // True while this check reads a copy of another declaration's source (a
+    // callee's `#Pre` clause at one of its call sites): that source's ids are
+    // filed by every copy, so each copy's nodes take fresh function-local ids.
+    fresh_expr_ids: Bool{false}
     // The host callbacks this check may call (SemaHostHookAccess); every
     // context derived from it reaches the same ones.
     host_hooks: SemaHostHookAccess?{None}
@@ -1125,6 +1129,7 @@ fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext Nev
         // them there after the check (sema_arena_take_back).
         arena: BodyFlat{tree: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}, node_base: source.arena.tree.node_base + source.arena.tree.nodes.len(), stmt_base: source.arena.tree.stmt_base + source.arena.tree.stmts.len()}, arena: BodyTree{nodes: [BodyNode]{}, stmts: [StmtKind]{}, expr_types: [TExprType]{}}, into_arena: true},
         next_expr_id: source.next_expr_id,
+        fresh_expr_ids: source.fresh_expr_ids,
     }
     sema_comptime_body_sources_index(&snapshot)
     sema_comptime_body_work_count(source.comptime_body_values, SemaComptimeBodyWorkOperation.ContextSnapshot)
@@ -1370,7 +1375,7 @@ fn sema_check_unsupported(context: &SemaCheckContext, reason: String) Never! {
 fn sema_check_record_expr_id(expr: Expr, value: &TExpr, context: &SemaCheckContext) Never! {
     if value.id != AST_NODE_GENERATED -> return
     id := expr_node_id(expr)
-    if id == AST_NODE_GENERATED || context.filed_expr_id_set.get(id) != None {
+    if id == AST_NODE_GENERATED || context.fresh_expr_ids || context.filed_expr_id_set.get(id) != None {
         id = context.next_expr_id
         context.next_expr_id -= 1
     } else {

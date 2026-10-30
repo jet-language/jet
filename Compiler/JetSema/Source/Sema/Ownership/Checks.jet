@@ -3868,6 +3868,15 @@ fn sema_ownership_check_method_call_as(state: &SemaOwnershipState, callee: Strin
     sema_ownership_check_call_arguments_with_accesses(&state, callee, params, &args, scopes, &diagnostics, ^accesses, accepted, true, borrowed_read, false)
 }
 
+// A Read receiver the call materializes into its own value before any
+// argument runs (`Option.or_err`, whose canonical body takes it by move)
+// keeps no loan on its place, so an argument may still change that place.
+fn sema_ownership_check_snapshot_receiver_call(state: &SemaOwnershipState, callee: String, receiver: Expr, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaOwnershipCheckResult {
+    accepted :: sema_ownership_check_call_receiver_as(&state, receiver, AccessConvention.Read, true, sema_window_plain_name(callee), sema_ownership_receiver_consumer(callee), scopes, span, expr_span(receiver), &diagnostics)
+    state.receiver_accesses[sema_ownership_span_key(expr_span(receiver))] = SemaOwnershipReceiverAccess{convention: AccessConvention.Read, reserved: false}
+    sema_ownership_check_call_arguments_with_accesses(&state, callee, params, &args, scopes, &diagnostics, [SemaOwnershipCallAccess]{}, accepted, true, true, false)
+}
+
 fn sema_ownership_check_lambda_captures(state: &SemaOwnershipState, lambda: Lambda, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     valid := true
     loop capture in lambda.take_names {

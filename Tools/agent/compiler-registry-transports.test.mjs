@@ -17,8 +17,7 @@ test('compiler runtime route plans run the complete C witness variants', () => {
         const plan = planTransport(entry, options);
         assert.ok(plan.steps.some(step => step.args?.includes('--test') && step.args.at(-1) === name));
         const runs = plan.steps.filter(step => step.command === join(entry.cwd, 'driver'));
-        assert.deepEqual(runs.map(step => step.args), name === 'CompilerEnv' ? [[], ['empty']] : name === 'CompilerRoutes' ? [[entry.cwd]] : name === 'DynNative' ? [[], ['datetime']] : [[]]);
-        if (name === 'DynNative') assert.equal(runs[1].expected.code, 70);
+        assert.deepEqual(runs.map(step => step.args), name === 'CompilerEnv' ? [[], ['empty']] : name === 'CompilerRoutes' ? [[entry.cwd]] : [[]]);
         if (name === 'CompilerEnv' || name === 'CompilerRoutes') assert.ok(entry.sources.includes(`Compiler/JetRuntime/Tests/${name}Tests.c`));
     }
 });

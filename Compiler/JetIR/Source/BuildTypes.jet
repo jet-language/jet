@@ -1998,6 +1998,18 @@ fn ir_binary(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, overflow:
             ir_emit(&b.f, IROp.Div, quotient, left, right, -1, site)
             return ir_runtime(&m, &b, "jet_std_math_floor", [Int]{quotient}, row)
         }
+        // F32 `**` widens both operands to Float exactly, raises through the
+        // same libm export Float uses, and rounds the power back to F32; the
+        // comptime builder lowers it here too, so both tiers agree (#6276).
+        if op == .Pow {
+            narrow_row :: b.f.slot_type[left]
+            wide_row :: ir_type_row(&m, Type.Float) ?? return ir_fail_slot(&b, span, "F32 power without a Float row")
+            wide_left :: ir_numeric_cast(&m, p, &b, left, wide_row, span)
+            wide_right :: ir_numeric_cast(&m, p, &b, right, wide_row, span)
+            if ir_failed(b) -> return -1
+            power :: ir_runtime(&m, &b, "jet_std_math_pow", [Int]{wide_left, wide_right}, wide_row)
+            return ir_numeric_cast(&m, p, &b, power, narrow_row, span)
+        }
         if op != .Add && op != .Sub && op != .Mul && op != .Div -> return ir_fail_slot(&b, span, "Float operator {op}")
         dst :: ir_temp_like(&m, &b, left)
         ir_emit(&b.f, ir_binary_op(op) ?? IROp.Add, dst, left, right, -1, site)
@@ -2740,6 +2752,43 @@ fn ir_union_box(m: &IRModule, p: IRProgram, b: &IRBuilder, payload: Int, member_
     boxed
 }
 
+// The union box `value` (of union `source_ty`) re-tagged into the wider union
+// `union_ty`: the member its variant holds, boxed as that member's variant of
+// `union_ty`. Releases `value`.
+fn ir_union_rewiden(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, source_ty: Type, union_ty: Type, span: Span) -> Int Never! {
+    source :: ir_untag(source_ty)
+    members := [Type]{}
+    if source == .Union(found) -> members = found.copy()
+    if members.len() == 0 -> return ir_fail_slot(&b, span, "{ir_type_name(source_ty)} is no union with members")
+    row :: ir_type_def(p, ir_union_key(source)) ?? return ir_fail_slot(&b, span, "union {ir_type_name(source_ty)} without a definition")
+    target :: ir_untag(union_ty)
+    slot_type :: ir_value_type(&m, p, target) ?? return ir_type_fail(&b, span, target)
+    out :: ir_temp(&m, &b, slot_type)
+    selector :: ir_load_word(&m, &b, value, 0)
+    loop (index, member) in members {
+        last :: index + 1 == members.len()
+        if !last {
+            expected :: ir_word_const(&m, &b, index)
+            held :: ir_bool_op(&m, &b, IROp.Eq, selector, expected)
+            ir_open_if(&b.f, held, b.line)
+        }
+        fields :: ir_variant_members(&m, p, row, [Type]{}, index) ?? return ir_fail_slot(&b, span, "layout of {ir_type_name(source_ty)}")
+        payload := -1
+        if fields.len() == 1 {
+            loaded :: ir_load_at(&m, &b, value, fields[0].offset, fields[0].ty)
+            payload = ir_own(&m, p, &b, loaded)
+        }
+        boxed :: ir_union_box(&m, p, &b, payload, member, union_ty, span)
+        if ir_failed(b) -> return -1
+        ir_emit(&b.f, IROp.Copy, out, boxed, -1, -1, b.line)
+        b.fresh[boxed] = false
+        if !last -> ir_else(&b.f, b.line)
+    }
+    loop _ in 1..<members.len() -> ir_end(&b.f, b.line)
+    ir_release(&m, &b, value)
+    out
+}
+
 // The spelling an error conversion reports for `ty`: a nominal type's
 // declared name (`StoreErr`, `IOError`), never the owner-qualified key
 // (`module:…::StoreErr`, `<corelib>/…::IOError`) that identifies it; any
@@ -2830,6 +2879,11 @@ fn ir_try_reraise(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, conve
         }
         .WidenUnion(_, _) -> {
             converted = ir_union_box(&m, p, &b, payload, source, error, span)
+            if ir_failed(b) -> return -1
+            b.fresh[converted] = true
+        }
+        .RewidenUnion(_) -> {
+            converted = ir_union_rewiden(&m, p, &b, payload, source, error, span)
             if ir_failed(b) -> return -1
             b.fresh[converted] = true
         }

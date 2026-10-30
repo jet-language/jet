@@ -447,14 +447,8 @@ fn yaml_leaf(value: Dyn) -> String Never! {
             .Text(s) -> yaml_scalar(s)
             // A YAML timestamp is its plain RFC 3339 scalar, as the parser reads one.
             .DateTime(_) -> value.to_text() ?? panic("DateTime always has an RFC 3339 representation")
-            .Bytes(bytes) -> {
-                out := "["
-                loop i in 0..<bytes.len() {
-                    if i > 0 -> out = "{out}, "
-                    out = "{out}{Int.from_u8(bytes[i])}"
-                }
-                "{out}]"
-            }
+            // Bytes are a `!!binary` base64 scalar, as the parser reads one.
+            .Bytes(bytes) -> "!!binary {base64.encode(bytes)}"
             .Array(items) -> {
                 out := "["
                 loop i in 0..<items.len() {

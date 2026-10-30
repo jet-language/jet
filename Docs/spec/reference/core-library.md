@@ -2767,8 +2767,8 @@ The reader enforces depth `256` and a maximum item size of `16,777,216` bytes.
 | --- | --- | --- |
 | `json.parse(text)` / `decode(text)` | `Dyn !EncodingError` | Parse one strict JSON value. |
 | `json.loads(text)` / `load(text)` | `Dyn !EncodingError` | Compatibility aliases for parsing text. |
-| `json.dumps(value)` / `dump(value)` / `to_string(value)` | `String` | Emit compact JSON. |
-| `json.to_string_pretty(value)` | `String` | Emit two-space pretty JSON. |
+| `json.dumps(value)` / `dump(value)` / `to_string(value)` | `String !EncodingError` | Emit compact JSON; a non-finite `Float` is an `EncodingError`. |
+| `json.to_string_pretty(value)` | `String !EncodingError` | Emit two-space pretty JSON; a non-finite `Float` is an `EncodingError`. |
 | `json.canonical(value)` | `String !EncodingError` | Emit RFC 8785 JCS bytes: UTF-16 key order, ECMAScript numbers; reject NaN, infinities, and an `Int` that binary64 cannot hold exactly. |
 | `json.parse_allow_duplicates(text)` | `Dyn !EncodingError` | Parse like `parse`, but keep the later value of a repeated object name. |
 | `json.pointer(tree, path)` | `Dyn !EncodingError` | Select by RFC 6901 JSON Pointer; a missing member or bad step is a located error, JSON `null` is a value. |

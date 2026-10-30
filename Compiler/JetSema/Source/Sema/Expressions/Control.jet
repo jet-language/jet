@@ -351,15 +351,28 @@ fn sema_expression_result_payload(value: Expr, success: Bool, take_field: Bool, 
     sema_expr_expected_owned(sema_tree_expr(result_ty, kind, span), expected, environment, program, &diagnostics)
 }
 
+// How a `source` failure widens into the `target` error union: one member
+// boxes into its variant; a union whose every member is a target member
+// re-tags each member into the wider union.
 fn sema_expression_try_union_conversion(target: Type, source: Type) -> TTryConvert? {
     if target == {
         .Union(members) -> {
+            tags :: loop member in members -> type_name(member)
+            enum_name :: "__JetUnion_{tags.join("_")}"
+            if sema_expr_unwrap_tag(source) == .Union(source_members) {
+                loop source_member in source_members {
+                    covered :: loop member in members {
+                        if type_identity_equal(member, source_member) -> break true
+                    } ?? false
+                    if !covered -> return None
+                }
+                return Val(TTryConvert.RewidenUnion{enum_name: enum_name})
+            }
             found :: loop member in members {
                 if type_identity_equal(member, source) -> break true
             } ?? false
             if !found -> return None
-            tags :: loop member in members -> type_name(member)
-            Val(TTryConvert.WidenUnion{enum_name: "__JetUnion_{tags.join("_")}", tag: type_name(source)})
+            Val(TTryConvert.WidenUnion{enum_name: enum_name, tag: type_name(source)})
         }
         else -> None
     }
