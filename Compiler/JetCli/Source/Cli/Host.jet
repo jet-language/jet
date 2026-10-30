@@ -270,7 +270,7 @@ fn jet_cli_compile_eval(file: String, pure: Bool, color: Bool, json: Bool) -> Je
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     mode :: if pure -> JetDriverCompileMode.Eval else -> JetDriverCompileMode.Interpreter
     prepared :: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, None, mode)
-    compiled := jet_cli_compile_executable(^prepared, None, build_options_stock("run"), None, None)
+    compiled := jet_cli_compile_executable(^prepared, None, build_options_stock("run"), None, None, color)
     if ^compiled == {
         .Refused(refusal) -> output = refusal
         .Checked(result, inputs, snapshot) -> jet_cli_eval_result(file, source, color, json, result, ^inputs, snapshot)
@@ -394,6 +394,14 @@ fn jet_cli_runtime_key(runtime_dir: String) -[FS]> String? Never! {
     key :: text.trim()
     if key.len() == 0 || key == "." || key == ".." || key.split("/").to_list().len() != 1 -> return None
     Val(key)
+}
+
+// JET_CHECKED_ALLOC=1 (Docs/spec/reference/environment.md) when jet builds a
+// program: only such a build links the runtime's checked heap
+// (D-SIZE-PAYUSE1 A), so the variable is part of the build key
+// (jet_cli_script_toolchain).
+fn jet_cli_checked_alloc() -[Env]> Bool Never! {
+    (cli_sys.get("JET_CHECKED_ALLOC") ?? "") == "1"
 }
 
 // Why the one native executable route stopped; each caller reports it.
@@ -734,7 +742,8 @@ fn jet_cli_native_object(result: JetDriverCompileResult, inputs: ^JetDriverLower
     trace_sink :: result.trace_sink
     level :: jet_cli_native_level(options)
     checked := ^inputs
-    checks :: jet_cli_ir_checks(result, checked, options)
+    checks := jet_cli_ir_checks(result, checked, options)
+    checks.checked_alloc = jet_cli_checked_alloc()
     declarations := jet_driver_checked_declarations(&checked)
     // The program's C closure defines its foreign functions' symbols.
     closure_symbols := [String:Bool]{}
@@ -1303,7 +1312,7 @@ fn jet_cli_compile_kept(file: String, source: String, color: Bool, options: Buil
         .Held(snapshot) -> jet_cli_prepare_request(snapshot, color, threads, JetDriverCompileMode.Program, jet_cli_script_core_files(keep))
         .Refused(refusal) -> JetCLIPrepared.Refused{output: refusal}
     }
-    compiled := jet_cli_compile_executable(^prepared, None, options, jet_cli_script_input_log(keep), None)
+    compiled := jet_cli_compile_executable(^prepared, None, options, jet_cli_script_input_log(keep), None, color)
     if ^compiled == {
         .Refused(refusal) -> output = refusal
         .Checked(result, inputs, snapshot) -> jet_cli_finish(jet_cli_script_build_and_run(file, source, color, options, program_args, invocation, result, ^inputs, snapshot, keep))
@@ -1488,7 +1497,7 @@ fn jet_cli_compile_test(file: String, source: String, color: Bool, verbose: Bool
         }
     }
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
-    compiled := jet_cli_compile_executable(^prepared, None, options.build, None, trace_sink)
+    compiled := jet_cli_compile_executable(^prepared, None, options.build, None, trace_sink, color)
     if ^compiled == {
         .Refused(refusal) -> output = refusal
         .Checked(result, inputs, snapshot) -> jet_cli_finish(jet_cli_test_result(file, tested, doctests, measure, color, verbose, options, result, ^inputs, snapshot))

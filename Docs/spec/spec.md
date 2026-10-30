@@ -3811,7 +3811,8 @@ obligation (I1), and a conversion is total or returns an Optional
 The `debug_info` and `small` rows hold a Bool: a profile field writes
 `debug_info: false`, `fn build` writes `b.debug_info(false)`, and the flag
 writes `--debug-info=false`; a bare `--small` or `--debug-info` means `true`.
-`debug_info` (stock `true`) says whether the image carries DWARF debug info.
+`debug_info` (stock `true`) says whether the image carries DWARF debug info
+and the location table crash reports read (`.debug_jetline`).
 With `false` the image has no `.debug_*` section; `.eh_frame` stays, and a
 crash report prints the faulting address and the return addresses of its
 frames instead of function names and lines.
@@ -4758,10 +4759,11 @@ Example:
 `b.contribute(name, value)` gives a value to a setting the package declares in
 `package.jet` (`settings: { cache_slots: Int = 1 }`). The manifest lists every
 setting and its type, and `fn build` only computes a value (D-CONF-SPLIT1).
-The project lock records each contribution as a `[[build.contribution]]` row,
-and every compile of the package reads those rows: `$build.settings.cache_slots`
-folds to the contributed value over the declared default and the selected
-profile's value. Example:
+Before a package that declares settings compiles (`jet build`, `jet run`,
+`jet test`), its `fn build` runs, and the project lock records each
+contribution as a `[[build.contribution]]` row. Every compile of the package
+reads those rows: `$build.settings.cache_slots` folds to the contributed value
+over the declared default and the selected profile's value. Example:
 [`Examples/features/packages/build_contribution`](../../Examples/features/packages/build_contribution/run.jet).
 
 Generation is additive with one owner per managed path. Generated modules are

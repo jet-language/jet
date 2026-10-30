@@ -18,6 +18,11 @@
 //   Generated functions (glue, helpers, `main`) are artificial subprograms.
 // - `.debug_line`: one sequence per function with source lines; the row at
 //   the end of the prologue carries `prologue_end`.
+// - `.debug_jetline`: not DWARF. The location table the runtime's fault
+//   handler reads (JetRuntime Fault.jet) instead of parsing the DWARF
+//   (D-SIZE-PAYUSE1 A): per Jet function its address range, name, file,
+//   declaration line and the `.debug_line` rows, delta coded
+//   (dwarf_jet_line).
 // - `.debug_loclists`: offset pairs from the compile unit's base (the start
 //   of `.text`), so the lists need no relocations. With one section per
 //   function, which a linker places apart or drops, the entries are start
@@ -51,6 +56,8 @@ struct X64DwarfSections {
     info_relas: [X64ObjectRela]
     line: [U8]
     line_relas: [X64ObjectRela]
+    jet_line: [U8]
+    jet_line_relas: [X64ObjectRela]
     loclists: [U8]
     loclists_relas: [X64ObjectRela]
 }
@@ -860,20 +867,92 @@ fn dwarf_line(sections: &X64DwarfSections, program: X64ObjectModule, functions: 
     sections.line_relas = relas
 }
 
+// The `.debug_jetline` table of the Jet functions (those with a source file
+// and a declaration line: fault reports name no other), the facts
+// `.debug_info` and `.debug_line` hold, in one block the fault handler scans
+// without a DWARF reader:
+//   u32 length of the block after this word, u32 function count, u32 offset
+//   of the strings and u32 of the rows (from the block's start), then per
+//   function 32 bytes: u64 start address (a relocation), u32 code length,
+//   u32 name and u32 file path (string offsets), u32 declaration line,
+//   u32 offset of its rows (in the rows) and u32 row count.
+//   Strings: the compilation directory (`.` when none) at 0, then the names
+//   and the paths (each path once), NUL terminated.
+//   Rows: per function, per `.debug_line` row the uleb address and sleb
+//   line advance from the previous row (the first from address 0, line 1).
+// A linker concatenates the blocks of its objects; a dropped function's
+// start relocates to its offset, below any code address.
+fn dwarf_jet_line(sections: &X64DwarfSections, program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], symbols: X64DwarfSymbols) Never! {
+    table := [U8]{}
+    relas := [X64ObjectRela]{}
+    strings := [U8]{}
+    rows := [U8]{}
+    dwarf_string(&strings, if program.debug.directory == "" -> "." else -> program.debug.directory)
+    paths := [Int]{}
+    loop _ in program.debug.files -> &paths.push(-1)
+    kept := [Int]{}
+    loop (index, function) in functions {
+        facts :: dwarf_function_debug(program, function)
+        if facts.file >= 0 && facts.line > 0 -> &kept.push(index)
+    }
+    elf64_u32(&table, 0)
+    elf64_u32(&table, kept.len())
+    strings_at :: table.len()
+    elf64_u32(&table, 0)
+    rows_at :: table.len()
+    elf64_u32(&table, 0)
+    loop index in kept {
+        function :: functions[index]
+        facts :: dwarf_function_debug(program, function)
+        dwarf_address(&table, &relas, dwarf_function_symbol(symbols, index), offsets[index])
+        elf64_u32(&table, function.code.len())
+        elf64_u32(&table, strings.len())
+        dwarf_string(&strings, facts.name)
+        if paths[facts.file] < 0 {
+            paths[facts.file] = strings.len()
+            dwarf_string(&strings, program.debug.files[facts.file])
+        }
+        elf64_u32(&table, paths[facts.file])
+        elf64_u32(&table, facts.line)
+        elf64_u32(&table, rows.len())
+        elf64_u32(&table, debug[index].lines.len())
+        current_line := 1
+        current_at := 0
+        loop row in debug[index].lines {
+            dwarf_uleb(&rows, row.at - current_at)
+            dwarf_sleb(&rows, row.line - current_line)
+            current_at = row.at
+            current_line = row.line
+        }
+    }
+    strings_start :: table.len()
+    dwarf_patch_u32(&table, strings_at, strings_start)
+    &table.extend(strings)
+    rows_start :: table.len()
+    dwarf_patch_u32(&table, rows_at, rows_start)
+    &table.extend(rows)
+    dwarf_patch_length(&table, 0)
+    sections.jet_line = table
+    sections.jet_line_relas = relas
+}
+
 // The debug and unwind sections for `functions` (placed at `offsets` in a
 // `.text` of `text_size` bytes, or with `symbols.functions` each at offset 0
 // of its own section; debug[i] belongs to functions[i]); the subprograms of
 // `.debug_info` on the threads `threads` admits. With `debug_info` false
-// only `.eh_frame` is built; the DWARF sections stay empty.
+// only `.eh_frame` is built; the DWARF sections and `.debug_jetline` stay
+// empty.
 fn x64_dwarf_sections(program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], text_size: Int, symbols: X64DwarfSymbols, threads: CompilerThreads, debug_info: Bool) -> X64DwarfSections Never! {
     sections := X64DwarfSections{
         eh_frame: [U8]{}, eh_relas: [X64ObjectRela]{}, abbrev: [U8]{}, info: [U8]{}, info_relas: [X64ObjectRela]{},
-        line: [U8]{}, line_relas: [X64ObjectRela]{}, loclists: [U8]{}, loclists_relas: [X64ObjectRela]{},
+        line: [U8]{}, line_relas: [X64ObjectRela]{}, jet_line: [U8]{}, jet_line_relas: [X64ObjectRela]{},
+        loclists: [U8]{}, loclists_relas: [X64ObjectRela]{},
     }
     dwarf_eh_frame(&sections, functions, debug, offsets, symbols)
     if !debug_info -> return sections
     sections.abbrev = dwarf_abbrevs(symbols.functions.len() > 0)
     dwarf_info(&sections, program, functions, debug, offsets, text_size, symbols, threads)
     dwarf_line(&sections, program, functions, debug, offsets, symbols)
+    dwarf_jet_line(&sections, program, functions, debug, offsets, symbols)
     sections
 }

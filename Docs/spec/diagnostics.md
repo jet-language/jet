@@ -116,7 +116,8 @@ pointer is a stack overflow: `Stop [E3012]` names the Jet function and its
 source line and exits 70. Any other SIGSEGV, SIGBUS, SIGILL or SIGFPE prints
 `Fault [SIGNAME]: invalid memory access at address 0x…` (or the signal's own
 reason) and a backtrace of the Jet frames (`name at file:line`, from the
-image's DWARF). It then re-raises the signal with its default action, so the
+image's location table, `.debug_jetline`, which the compiler writes beside
+the DWARF from the same rows). It then re-raises the signal with its default action, so the
 status is the signal's (128 + number in a shell). Addresses other than the
 faulting one are not printed, because they differ between the two tiers.
 

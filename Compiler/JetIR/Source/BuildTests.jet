@@ -540,6 +540,7 @@ fn ir_test_main(m: &IRModule, p: IRProgram, harness: IRTestHarness, bodies: [Int
     id :: ir_test_function(&m, "main", -1, "main")
     b := ir_builder_new(m.functions[id].copy())
     pointer_row :: ir_pointer_row(&m)
+    ir_checked_alloc_link(&m, p, &b)
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
     report_path :: ir_test_env(&m, &b, "JET_NATIVE_TEST_REPORT_PATH")
     reporting :: ir_test_present(&m, &b, report_path)

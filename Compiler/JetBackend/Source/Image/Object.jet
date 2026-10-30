@@ -44,11 +44,13 @@ ELF64_OBJECT_DEBUG_ABBREV :: 11
 ELF64_OBJECT_DEBUG_INFO :: 12
 ELF64_OBJECT_DEBUG_LINE :: 14
 ELF64_OBJECT_DEBUG_LOCLISTS :: 16
+// The fault handler's location table (Dwarf.jet dwarf_jet_line).
+ELF64_OBJECT_DEBUG_JETLINE :: 17
 // With a section per function and data object: the location lists'
 // relocations, then from ELF64_OBJECT_FIRST_OWN per function its section and
 // that section's relocations, then the same per data object.
-ELF64_OBJECT_DEBUG_LOCLISTS_RELA :: 17
-ELF64_OBJECT_FIRST_OWN :: 18
+ELF64_OBJECT_DEBUG_LOCLISTS_RELA :: 19
+ELF64_OBJECT_FIRST_OWN :: 20
 // The first index ELF reserves (SHN_LORESERVE): the object writes no
 // extended section numbering, so its sections stay below it.
 ELF64_OBJECT_SECTION_LIMIT :: 0xff00
@@ -638,6 +640,8 @@ fn x64_object_file(dwarf: X64DwarfSections, text: [U8], rodata: [U8], rodata_ali
         x64_object_debug_section(".debug_line", dwarf.line),
         x64_object_rela_section(".rela.debug_line", dwarf.line_relas, ELF64_OBJECT_DEBUG_LINE),
         x64_object_debug_section(".debug_loclists", dwarf.loclists),
+        x64_object_debug_section(".debug_jetline", dwarf.jet_line),
+        x64_object_rela_section(".rela.debug_jetline", dwarf.jet_line_relas, ELF64_OBJECT_DEBUG_JETLINE),
     }
     if own.len() > 0 {
         &sections.push(x64_object_rela_section(".rela.debug_loclists", dwarf.loclists_relas, ELF64_OBJECT_DEBUG_LOCLISTS))

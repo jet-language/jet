@@ -68,14 +68,30 @@ function jet_compute_web_numel(shape) {
   }, 1);
 }
 
-function jet_compute_web_placement(device, profile, reason) {
-  if (device === "webgpu") {
-    return `Placement(requested=WebGPU, selected=WebGPU, backend=webgpu, version=browser, profile=${profile}, cache=runtime, abilities=[${JET_WEBGPU_CAPABILITIES.map((ability) => `\"${ability}\"`).join(", ")}], reason=${reason})`;
-  }
-  return `Placement(requested=CPU, selected=CPU, backend=cpu-oracle, version=builtin, profile=${profile}, cache=none, abilities=[\"ranked-storage\"], reason=${reason})`;
+// The CPU oracle's F64 abilities are the native host's, so an `.Auto`
+// placement that selects the CPU reports the native receipt exactly.
+const JET_COMPUTE_CPU_F64_ABILITIES = Object.freeze([
+  "ranked-storage",
+  "strided-view",
+  "checked-bounds",
+  "reproducible-reduction",
+  "differential-oracle",
+]);
+
+function jet_compute_web_abilities(abilities) {
+  return abilities.map((ability) => `\"${ability}\"`).join(", ");
 }
 
-function jet_compute_web_tensor(shape, values, device = "cpu", profile = JET_WEBGPU_CPU_PROFILE, reason = "policy=explicit") {
+function jet_compute_web_placement(requested, device, profile, reason) {
+  const asked = jet_compute_web_device_show(requested);
+  if (device === "webgpu") {
+    return `Placement(requested=${asked}, selected=WebGPU, backend=webgpu, version=browser, profile=${profile}, cache=runtime, abilities=[${jet_compute_web_abilities(JET_WEBGPU_CAPABILITIES)}], reason=${reason})`;
+  }
+  const abilities = profile === JET_WEBGPU_CPU_PROFILE ? JET_COMPUTE_CPU_F64_ABILITIES : ["ranked-storage"];
+  return `Placement(requested=${asked}, selected=CPU, backend=cpu-oracle, version=builtin, profile=${profile}, cache=none, abilities=[${jet_compute_web_abilities(abilities)}], reason=${reason})`;
+}
+
+function jet_compute_web_tensor(shape, values, device, profile, reason, requested = device) {
   return {
     shape: shape.slice(),
     values: values == null ? null : profile === JET_WEBGPU_PROFILE
@@ -84,17 +100,35 @@ function jet_compute_web_tensor(shape, values, device = "cpu", profile = JET_WEB
     buffer: null,
     device,
     profile,
-    placement: jet_compute_web_placement(device, profile, reason),
+    requested,
+    placement: jet_compute_web_placement(requested, device, profile, reason),
     last_transfer: null,
   };
 }
 
+// Constructors place under the `.Auto` policy, as on the native host. Their
+// F64 storage has no WebGPU form, so they select the CPU oracle and say so.
+function jet_compute_web_constructed(shape, values) {
+  return jet_compute_web_tensor(shape, values, "cpu", JET_WEBGPU_CPU_PROFILE, "policy=auto; selected=cpu; ability=cpu-oracle.f64", "auto");
+}
+
 function jet_compute_web_device_show(kind) {
-  return { cpu: "CPU", metal: "Metal", cuda: "CUDA", vulkan: "Vulkan", webgpu: "WebGPU" }[kind] || kind;
+  return { auto: "Auto", cpu: "CPU", metal: "Metal", cuda: "CUDA", vulkan: "Vulkan", webgpu: "WebGPU" }[kind] || kind;
 }
 
 function jet_compute_web_device(kind) {
   return { kind, profile: kind === "webgpu" ? JET_WEBGPU_PROFILE : JET_WEBGPU_CPU_PROFILE };
+}
+
+// `.Auto` selects WebGPU when the browser grants a device, and the CPU
+// oracle otherwise; the placement receipt names which one it chose.
+async function jet_compute_web_auto_selects_webgpu() {
+  try {
+    await jet_compute_webgpu_device();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function jet_compute_web_same_device(left, right, operation) {
@@ -419,12 +453,20 @@ async function jet_compute_web_matmul(left, right, f32_tile = false) {
   return jet_compute_web_tensor([rows, cols], f32_tile ? jet_compute_web_f32_values(out, "matmul output") : out, "cpu", f32_tile ? JET_WEBGPU_PROFILE : left.profile, f32_tile ? "algorithm=blocked-matmul;arithmetic=f32;reduction=ordered;dispatch=scalar" : "policy=explicit;selected=cpu;ability=cpu-oracle");
 }
 
+// `.Auto` never changes precision: only F32 storage has a WebGPU form, so an
+// F64 tensor stays on the CPU oracle whatever the browser offers.
 async function jet_compute_web_upload(tensor, device) {
-  if (device.kind === "cpu") return jet_compute_web_tensor(tensor.shape, await jet_compute_web_values(tensor), "cpu", tensor.profile, "policy=explicit;selected=cpu;ability=cpu-oracle");
-  if (device.kind !== "webgpu") throw new Error(`${device.kind} backend is unavailable in the browser WebGPU provider`);
+  const policy = device.kind === "auto" ? "auto" : "explicit";
+  const selected = device.kind !== "auto" ? device.kind
+    : tensor.profile === JET_WEBGPU_PROFILE && await jet_compute_web_auto_selects_webgpu() ? "webgpu" : "cpu";
+  if (selected === "cpu") {
+    const arithmetic = tensor.profile === JET_WEBGPU_PROFILE ? "f32" : "f64";
+    return jet_compute_web_tensor(tensor.shape, await jet_compute_web_values(tensor), "cpu", tensor.profile, `policy=${policy}; selected=cpu; ability=cpu-oracle.${arithmetic}`, device.kind);
+  }
+  if (selected !== "webgpu") throw new Error(`${device.kind} backend is unavailable in the browser WebGPU provider`);
   if (tensor.profile !== JET_WEBGPU_PROFILE) throw new Error("WebGPU backend supports only F32Strict+Reproducible; create an F32 Tensor first");
   await jet_compute_webgpu_device();
-  const result = jet_compute_web_tensor(tensor.shape, null, "webgpu", JET_WEBGPU_PROFILE, "policy=explicit;selected=webgpu;ability=webgpu.f32");
+  const result = jet_compute_web_tensor(tensor.shape, null, "webgpu", JET_WEBGPU_PROFILE, `policy=${policy}; selected=webgpu; ability=webgpu.f32`, device.kind);
   result.buffer = jet_compute_webgpu_buffer(await jet_compute_webgpu_device(), jet_compute_web_f32_values(await jet_compute_web_values(tensor), "WebGPU transfer"));
   return result;
 }
@@ -494,7 +536,7 @@ async function jet_compute_web_set(tensor, indices, value) {
 }
 
 function jet_compute_web_shape_result(tensor, shape, reason = "algorithm=reshape;metadata-only") {
-  const result = jet_compute_web_tensor(shape, tensor.values, tensor.device, tensor.profile, reason);
+  const result = jet_compute_web_tensor(shape, tensor.values, tensor.device, tensor.profile, reason, tensor.requested);
   result.buffer = tensor.buffer;
   return result;
 }
@@ -502,12 +544,12 @@ function jet_compute_web_shape_result(tensor, shape, reason = "algorithm=reshape
 async function jet_compute_web_call(method, args) {
   try {
     switch (method) {
-      case "zeros": return jet_compute_web_ok(jet_compute_web_tensor(jet_compute_web_shape(args[0]), new Array(jet_compute_web_numel(jet_compute_web_shape(args[0]))).fill(0)));
-      case "ones": return jet_compute_web_ok(jet_compute_web_tensor(jet_compute_web_shape(args[0]), new Array(jet_compute_web_numel(jet_compute_web_shape(args[0]))).fill(1)));
-      case "full": { const shape = jet_compute_web_shape(args[0]); return jet_compute_web_ok(jet_compute_web_tensor(shape, new Array(jet_compute_web_numel(shape)).fill(jet_compute_web_float(args[1], "Tensor value")))); }
-      case "from_list": return jet_compute_web_ok(jet_compute_web_tensor([args[0].length], args[0].map((value) => jet_compute_web_float(value, "Tensor value"))));
-      case "matrix": { const rows = jet_compute_web_num(args[0], "Matrix rows"); const cols = jet_compute_web_num(args[1], "Matrix cols"); return jet_compute_web_ok(jet_compute_web_tensor([rows, cols], new Array(rows * cols).fill(jet_compute_web_float(args[2], "Tensor value")))); }
-      case "vec": { const len = jet_compute_web_num(args[0], "Vec length"); return jet_compute_web_ok(jet_compute_web_tensor([len], new Array(len).fill(jet_compute_web_float(args[1], "Tensor value")))); }
+      case "zeros": return jet_compute_web_ok(jet_compute_web_constructed(jet_compute_web_shape(args[0]), new Array(jet_compute_web_numel(jet_compute_web_shape(args[0]))).fill(0)));
+      case "ones": return jet_compute_web_ok(jet_compute_web_constructed(jet_compute_web_shape(args[0]), new Array(jet_compute_web_numel(jet_compute_web_shape(args[0]))).fill(1)));
+      case "full": { const shape = jet_compute_web_shape(args[0]); return jet_compute_web_ok(jet_compute_web_constructed(shape, new Array(jet_compute_web_numel(shape)).fill(jet_compute_web_float(args[1], "Tensor value")))); }
+      case "from_list": return jet_compute_web_ok(jet_compute_web_constructed([args[0].length], args[0].map((value) => jet_compute_web_float(value, "Tensor value"))));
+      case "matrix": { const rows = jet_compute_web_num(args[0], "Matrix rows"); const cols = jet_compute_web_num(args[1], "Matrix cols"); return jet_compute_web_ok(jet_compute_web_constructed([rows, cols], new Array(rows * cols).fill(jet_compute_web_float(args[2], "Tensor value")))); }
+      case "vec": { const len = jet_compute_web_num(args[0], "Vec length"); return jet_compute_web_ok(jet_compute_web_constructed([len], new Array(len).fill(jet_compute_web_float(args[1], "Tensor value")))); }
       case "add": case "mul": case "sub": case "div": case "maximum": case "minimum": return jet_compute_web_ok(await jet_compute_web_binary(method, args[0], args[1]));
       case "negate": case "abs": case "exp": case "log": case "sqrt": return jet_compute_web_ok(await jet_compute_web_unary(method, args[0]));
       case "matmul": return jet_compute_web_ok(await jet_compute_web_matmul(args[0], args[1]));
@@ -522,7 +564,7 @@ async function jet_compute_web_call(method, args) {
       case "device": return jet_compute_web_device_show(args[0].device);
       case "placement": return args[0].placement;
       case "device_cpu": return jet_compute_web_device("cpu");
-      case "device_auto": return jet_compute_web_device("cpu");
+      case "device_auto": return jet_compute_web_device("auto");
       case "device_webgpu": return jet_compute_web_device("webgpu");
       case "device_metal": return jet_compute_web_device("metal");
       case "device_cuda": return jet_compute_web_device("cuda");
@@ -531,7 +573,7 @@ async function jet_compute_web_call(method, args) {
       case "transfer": return jet_compute_web_ok(await jet_compute_web_transfer(args[0], args[1]));
       case "sum_axis": { const axis = jet_compute_web_num(args[1], "reduction axis"); if (args[0].shape.length !== 1 || axis !== 0) throw new Error("WebGPU sum_axis currently supports ranked vector reduction only"); return jet_compute_web_ok(await jet_compute_web_sum(args[0])); }
       case "stream_new": return { device: "cpu", profile: JET_WEBGPU_CPU_PROFILE, id: "cpu-stream" };
-      case "stream_new_on": { const device = args[0]; if (device.kind !== "cpu" && device.kind !== "webgpu") throw new Error(`${device.kind} stream is unavailable in the browser WebGPU provider`); if (device.kind === "webgpu") await jet_compute_webgpu_device(); return jet_compute_web_ok({ device: device.kind, profile: device.profile, id: `${device.kind}-stream` }); }
+      case "stream_new_on": { const device = args[0]; const selected = device.kind === "auto" ? (await jet_compute_web_auto_selects_webgpu() ? "webgpu" : "cpu") : device.kind; if (selected !== "cpu" && selected !== "webgpu") throw new Error(`${device.kind} stream is unavailable in the browser WebGPU provider`); if (selected === "webgpu") await jet_compute_webgpu_device(); return jet_compute_web_ok({ device: selected, profile: jet_compute_web_device(selected).profile, id: `${selected}-stream` }); }
       case "stream_sync": if (args[0].device === "webgpu") await (await jet_compute_webgpu_device()).queue.onSubmittedWorkDone(); return jet_compute_web_ok(undefined);
       case "stream_show": return `ComputeStream(device=${jet_compute_web_device_show(args[0].device)})`;
       case "profile_f32_strict": return JET_WEBGPU_PROFILE_RECEIPT;

@@ -924,19 +924,24 @@ the aliasing, early-exit, effect and cross-iteration verdicts, how many list
 accesses sema proved in bounds and how many of them the build lowered with no
 bounds check. Each loop lowers one scalar round per index.
 
-Live inspection consumes only the runtime's private `jet.live.v1` snapshot.
-Its no-follow read retains one file descriptor, checks its regular-file type,
-owner and private permissions, and bounds the bytes to 1 MiB. Linux start identity
-and the two-second publication age bind it to the requested process. The closed
-snapshot schema bounds values, tasks and channels to 4096 rows; event observations
-retain exactly fifteen payload-free fields, at most 256 records, strictly
+Live inspection consumes only the runtime's private snapshot. The runtime writes
+raw records: little-endian words, and texts as a byte length then the bytes.
+The reader decodes and checks them; the running program does not encode.
+The reader's no-follow read keeps one file descriptor open and checks the file
+type, owner and private permissions. It reads at most 1 MiB.
+The snapshot binds to the requested process by pid and by a publication age
+under two seconds. On Linux it also binds by start time: a process that started
+after the writer's clock start is a reused pid. On Linux the reader takes the
+process CPU time from `/proc`. The record has a magic number, sections that
+appear at most once, no unknown sections and no trailing bytes. Tasks and
+values are limited to 4096 rows each, and the view shows at most 4096 channels.
+Event observations
+keep exactly fifteen payload-free fields, at most 256 records, strictly
 increasing sequences, and the runtime's closed enums and unavailable-count sentinel.
-Text and JSON share this validated snapshot, including published rendered values
-and sorted shape identities. The snapshot's `decisions` slot carries no compiler
-decision and is not read. No process memory is read.
-Duplicate keys anywhere in a snapshot are rejected as corrupt or forged runtime
-transport by the strict Core JSON parser. This intentionally does not preserve
-the retired host's first-scalar/last-container duplicate-key behavior.
+The reader derives the id order and the effect and resource counters from the
+records. Each Unicode control character in a text is shown as one space.
+Text and JSON output share the same validated snapshot, including published
+rendered values and sorted shape identities. No process memory is read.
 
 The CLI's `inspect.decisions` status carries the optimizer report's counts as
 fields, and the unbuilt functions and the loop proofs (`loop_proofs`) as text

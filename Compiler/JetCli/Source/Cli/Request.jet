@@ -1283,14 +1283,16 @@ fn jet_cli_compile_executable_file(file: String, entry: String?, color: Bool, th
     if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
     prepared :: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Program)
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
-    jet_cli_compile_executable(^prepared, entry, options, None, trace_sink)
+    jet_cli_compile_executable(^prepared, entry, options, None, trace_sink, color)
 }
 
 // jet_cli_compile_prepared for the native executable route under the build
 // `options`: their selected profile is the front end's (`$build.profile`, its
 // package.jet settings); `entry` selects the function the program starts at
-// (None: the package's own entry); `input_log` as there.
-fn jet_cli_compile_executable(prepared: ^JetCLIPrepared, entry: String?, options: BuildOptions, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?) -> JetCLIExecutableCompiled {
+// (None: the package's own entry); `input_log` as there. The settings the
+// package's `fn build` contributes are recorded and folded first
+// (jet_cli_contributed_request); `color` renders that step's refusal.
+fn jet_cli_compile_executable(prepared: ^JetCLIPrepared, entry: String?, options: BuildOptions, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, color: Bool) -> JetCLIExecutableCompiled {
     if ^prepared == {
         .Refused(output) -> JetCLIExecutableCompiled.Refused{output: output}
         .Prepared(request, snapshot) -> {
@@ -1298,11 +1300,15 @@ fn jet_cli_compile_executable(prepared: ^JetCLIPrepared, entry: String?, options
             selected.trace_sink = jet_cli_trace_boxed(trace_sink)
             // copy: the caller keeps its handle on the one shared log.
             selected.comptime_input_log = input_log.copy()
-            if entry != None -> selected.selected_entry = entry.copy()
             if options.profile != "" -> selected.profile = options.profile
+            contributed := jet_cli_contributed_request(^selected, color)
+            // copy: `refusal` is a payload view of `contributed`.
+            if contributed.refusal == .Val(refusal) -> return JetCLIExecutableCompiled.Refused{output: refusal.copy()}
+            compiled_request := ^contributed.request
+            if entry != None -> compiled_request.selected_entry = entry.copy()
             // copy: a three-field row; the request moves into the compiler below.
-            compiler_threads :: selected.compiler_threads.copy()
-            front := jet_cli_lowering_inputs(^selected, trace_sink)
+            compiler_threads :: compiled_request.compiler_threads.copy()
+            front := jet_cli_lowering_inputs(^compiled_request, trace_sink)
             // The native route traces through the same sink and builds on the
             // request's threads (Host.jet jet_cli_native_executable).
             front.compile.trace_sink = jet_cli_trace_boxed(trace_sink)

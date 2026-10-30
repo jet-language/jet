@@ -5,6 +5,7 @@ use jet_foundation.Devtools.[JetDevtoolsEnvelope, JET_DEVTOOLS_MAX_ENVELOPE_BYTE
 use jet_foundation.DevtoolsControl.[JetDevtoolsDecodedEnvelope]
 use jet_foundation.Dyn.[Dyn]
 use jet_foundation.JSON.[json_get, json_int, json_str, parse_json]
+use jet_foundation.[foundation_json_quote]
 use jet_devserver.WebHost.[decode_devtools_envelope]
 use jet_debug.[render_event_observations]
 use std.fs as fs
@@ -301,6 +302,160 @@ fn validate_devtools_relay_identity(envelope: &JetDevtoolsEnvelope, expected_ses
     }
     return ()
 }
+// The runtime publishes raw little-endian records (JetRuntime ObserveLive.jet,
+// D-SIZE-PAYUSE1 A): words, and texts as a byte length (all ones when absent)
+// then the bytes. The canvas and every projection here consume the
+// jet.live.v1 JSON view, so `read` decodes the record into that view, deriving
+// record order and the effect/resource counters and binding the /proc facts.
+RAW_SNAPSHOT_MAGIC :: U64{3550338754064696650}
+struct RawCursor { bytes: [U8]; at: Usize }
+fn raw_word(cursor: &RawCursor) -> U64 Err! {
+    end :: cursor.at.checked_add(8) ?? return .Err("live runtime snapshot is truncated")
+    if end > cursor.bytes.len() -> return .Err("live runtime snapshot is truncated")
+    word :: U64.from_le_bytes(cursor.bytes[cursor.at..end].try_into().unwrap())
+    cursor.at = end
+    return word
+}
+// Unsigned words above I64's range saturate.
+fn raw_unsigned(cursor: &RawCursor) -> I64 Err! { return I64.try_from(raw_word(cursor)?).unwrap_or(I64.MAX) }
+fn raw_signed(cursor: &RawCursor) -> I64 Err! { return I64.from_le_bytes(raw_word(cursor)?.to_le_bytes()) }
+fn raw_bytes(cursor: &RawCursor) -> [U8]? Err! {
+    length :: raw_word(cursor)?
+    if length == U64.MAX -> return .None
+    end :: Usize.try_from(length).ok().and_then((length) -> cursor.at.checked_add(length)) ?? return .Err("live runtime snapshot is truncated")
+    if end > cursor.bytes.len() -> return .Err("live runtime snapshot is truncated")
+    raw :: cursor.bytes[cursor.at..end].to_vec()
+    cursor.at = end
+    return .Val(raw)
+}
+// Observe's text contract: every Unicode Cc control shows as one space.
+fn raw_shown(raw: [U8]) -> String Err! {
+    text :: std.str.from_utf8(raw) ?? return .Err("live runtime snapshot text is not UTF-8")
+    return text.chars().map((c) -> if c.is_control() -> ' ' else -> c).collect()
+}
+fn raw_text(cursor: &RawCursor) -> String Err! { return raw_shown(raw_bytes(cursor)?.unwrap_or_default()) }
+fn raw_quoted(cursor: &RawCursor) -> String Err! { return foundation_json_quote(raw_text(cursor)?) }
+// /proc/<pid>/stat fields after the comm's last ") ": 19 is the start time,
+// 11 and 12 are utime and stime, all in clock ticks.
+fn raw_stat_field(stat: String, index: Usize) -> U64? {
+    return stat.rsplit_once(") ").and_then(((_0: _, _1: tail)) -> tail.split_whitespace().nth(index)).and_then((value) -> value.parse<U64>().ok())
+}
+fn decode_raw_snapshot(bytes: [U8], stat: String?) -> String Err! {
+    cursor := RawCursor { bytes, at: 0 }
+    if raw_word(&cursor)? != RAW_SNAPSHOT_MAGIC -> return .Err("live runtime snapshot has an unsupported schema version")
+    _ :: raw_word(&cursor)?
+    pid :: raw_unsigned(&cursor)?
+    captured_ms :: raw_unsigned(&cursor)?
+    elapsed_ns :: raw_unsigned(&cursor)?
+    boot_ns :: raw_word(&cursor)?
+    start_ticks :: raw_word(&cursor)?
+    hz :: raw_signed(&cursor)?
+    exit :: raw_word(&cursor)? != 0
+    arenas :: raw_unsigned(&cursor)?
+    arena_allocations :: raw_unsigned(&cursor)?
+    arena_bytes :: raw_unsigned(&cursor)?
+    workers :: raw_unsigned(&cursor)?
+    queued :: raw_unsigned(&cursor)?
+    identity :: "\"protocol\":\"jet.live.v1\",\"session_id\":{raw_quoted(&cursor)?},\"source_id\":{raw_quoted(&cursor)?},\"build_id\":{raw_quoted(&cursor)?},\"revision\":{raw_quoted(&cursor)?},\"world_id\":{raw_quoted(&cursor)?}"
+    tasks := [(_0: I64, _1: String)]{}
+    channels := [(_0: I64, _1: String)]{}
+    values := [String]{}
+    events := [String]{}
+    (waiting, channel, time, io, running, cancelled) := (0, 0, 0, 0, 0, 0)
+    seen := [I64]{}
+    loop {
+        section :: raw_unsigned(&cursor)?
+        if section == 0 -> break
+        if seen.contains(section) -> return .Err("live runtime snapshot repeats a section")
+        seen.push(section)
+        count :: raw_unsigned(&cursor)?
+        if section == 1 {
+            if count > MAX_SNAPSHOT_ITEMS -> return .Err("live runtime snapshot has too many tasks")
+            loop _ in 0..count {
+                id :: raw_unsigned(&cursor)?
+                parent :: raw_unsigned(&cursor)?
+                _ :: raw_word(&cursor)?
+                state :: raw_word(&cursor)?
+                deadline_present :: raw_word(&cursor)? != 0
+                deadline :: raw_signed(&cursor)?
+                task_cancelled :: raw_word(&cursor)? != 0
+                _ :: raw_bytes(&cursor)?
+                wait_raw :: raw_bytes(&cursor)?.unwrap_or_default()
+                // The counters read the recorded wait, before display.
+                if state == 2 {
+                    waiting += 1
+                    if wait_raw.starts_with(b"channel ") -> channel += 1
+                    if wait_raw.starts_with(b"time ") -> time += 1
+                    if wait_raw.windows(3).any((w) -> w == b"tcp") || wait_raw.windows(7).any((w) -> w == b"network") || wait_raw.starts_with(b"io ") -> io += 1
+                }
+                if task_cancelled -> cancelled += 1
+                if state == 1 -> running += 1
+                state_name :: if state == 0 -> "queued" else if state == 1 -> "running" else if state == 2 -> "blocked" else -> "paused"
+                deadline_ms :: if deadline_present -> deadline.to_string() else -> "null"
+                tasks.push((_0: id, _1: "{{\"id\":{id},\"parent\":{parent},\"state\":\"{state_name}\",\"wait\":{foundation_json_quote(raw_shown(wait_raw)?)},\"deadline_ms\":{deadline_ms},\"cancelled\":{task_cancelled}}}"))
+            }
+        } else if section == 2 {
+            loop _ in 0..count {
+                id :: raw_unsigned(&cursor)?
+                depth :: raw_unsigned(&cursor)?
+                bounded :: raw_word(&cursor)? != 0
+                capacity :: raw_unsigned(&cursor)?
+                send_waiters :: raw_unsigned(&cursor)?
+                recv_waiters :: raw_unsigned(&cursor)?
+                closed :: raw_word(&cursor)? != 0
+                capacity_json :: if bounded -> capacity.to_string() else -> "null"
+                channels.push((_0: id, _1: "{{\"id\":{id},\"depth\":{depth},\"capacity\":{capacity_json},\"send_waiters\":{send_waiters},\"recv_waiters\":{recv_waiters},\"closed\":{closed}}}"))
+            }
+        } else if section == 3 {
+            if count > MAX_SNAPSHOT_ITEMS -> return .Err("live runtime snapshot has too many values")
+            loop _ in 0..count {
+                head :: "\"value_id\":{raw_quoted(&cursor)?},\"type_identity\":{raw_quoted(&cursor)?},\"disposition\":{raw_quoted(&cursor)?},\"reason\":{raw_quoted(&cursor)?}"
+                rendered :: if raw_bytes(&cursor)? == {
+                    .Val(raw) -> ",\"rendered_value\":{foundation_json_quote(raw_shown(raw)?)}"
+                    .None -> ""
+                }
+                values.push("{{{head}{rendered}}}")
+            }
+        } else if section == 4 {
+            loop _ in 0..count {
+                sequence :: raw_unsigned(&cursor)?
+                source :: raw_quoted(&cursor)?
+                ids :: "\"event_id\":{raw_unsigned(&cursor)?},\"owner_id\":{raw_unsigned(&cursor)?},\"subscription_id\":{raw_unsigned(&cursor)?},\"dispatch_id\":{raw_unsigned(&cursor)?}"
+                lifecycle :: raw_quoted(&cursor)?
+                counts :: "\"queued\":{raw_signed(&cursor)?},\"blocked\":{raw_signed(&cursor)?},\"running\":{raw_signed(&cursor)?},\"capacity\":{raw_signed(&cursor)?}"
+                overflow :: raw_quoted(&cursor)?
+                priority :: raw_signed(&cursor)?
+                failure :: raw_quoted(&cursor)?
+                terminal :: raw_quoted(&cursor)?
+                events.push("{{\"sequence\":{sequence},\"source\":{source},{ids},\"lifecycle\":{lifecycle},{counts},\"overflow\":{overflow},\"priority\":{priority},\"failure\":{failure},\"terminal\":{terminal}}}")
+            }
+        } else {
+            return .Err("live runtime snapshot has an unknown section")
+        }
+    }
+    if cursor.at != cursor.bytes.len() -> return .Err("live runtime snapshot has trailing bytes")
+    // The registries are id-ordered views; at most 4096 channels are shown.
+    tasks.sort_by_key(((_0: id, _1: _)) -> *id)
+    channels.sort_by_key(((_0: id, _1: _)) -> *id)
+    channels.truncate(MAX_SNAPSHOT_ITEMS)
+    // The process start time binds the snapshot: a process that started after
+    // the writer's boot-clock start is a reused pid. CPU is since the run start.
+    start_id := "unbound"
+    cpu_ns := "null"
+    if stat == .Val(stat) {
+        started :: raw_stat_field(stat, 19) ?? return .Err("cannot verify process {pid} identity")
+        if hz <= 0 || hz > 1_000_000_000 || started > boot_ns / (1_000_000_000 / U64{hz}) -> return .Err("live runtime snapshot does not belong to process {pid}")
+        start_id = started.to_string()
+        ticks_ns :: (ticks: U64) -> if ticks > 18_446_744_073 -> .None else -> .Val(ticks * 1_000_000_000 / U64{hz})
+        if (raw_stat_field(stat, 11), raw_stat_field(stat, 12)) == (.Val(user), .Val(system)) {
+            if user.checked_add(system).and_then(ticks_ns) == .Val(now) && ticks_ns(start_ticks) == .Val(start) -> cpu_ns = I64.try_from(now.saturating_sub(start)).unwrap_or(I64.MAX).to_string()
+        }
+    }
+    compute :: I64{tasks.len()} - waiting
+    task_json :: tasks.iter().map(((_0: _, _1: json)) -> json).join(",")
+    channel_json :: channels.iter().map(((_0: _, _1: json)) -> json).join(",")
+    return "{{{identity},\"values\":[{values.join(",")}],\"schema_version\":1,\"pid\":{pid},\"start_id\":{foundation_json_quote(start_id)},\"captured_ms\":{captured_ms},\"tasks\":[{task_json}],\"channels\":[{channel_json}],\"effects\":{{\"compute\":{compute},\"waiting\":{waiting},\"channel\":{channel},\"time\":{time},\"io\":{io}}},\"resources\":{{\"workers\":{workers},\"running\":{running},\"queued\":{queued},\"cancelled\":{cancelled},\"arenas\":{arenas},\"arena_allocations\":{arena_allocations},\"arena_bytes\":{arena_bytes}}},\"event_observations\":[{events.join(",")}],\"runtime\":{{\"elapsed_ns\":{elapsed_ns},\"cpu_ns\":{cpu_ns},\"exit\":{exit}}}}}"
+}
 // Rust: crates/jet-devserver/src/LiveInspect.rs:650
 fn read(pid: U32) -> String Err! {
     // GATE #4494: native descriptor/metadata, bounded IO, process identity and clock.
@@ -324,22 +479,21 @@ fn read(pid: U32) -> String Err! {
         }
     }
     if metadata.len() > MAX_SNAPSHOT_BYTES -> return .Err("live runtime snapshot exceeds the 1 MiB safety limit")
-    snapshot := ""
-    file.take(MAX_SNAPSHOT_BYTES + 1).read_to_string(&snapshot) ?? return .Err("cannot read live runtime snapshot: {err}")
-    if (U64{snapshot.len()}) > MAX_SNAPSHOT_BYTES -> return .Err("live runtime snapshot exceeds the 1 MiB safety limit")
+    bytes := [U8]{}
+    file.take(MAX_SNAPSHOT_BYTES + 1).read_to_end(&bytes) ?? return .Err("cannot read live runtime snapshot: {err}")
+    if (U64{bytes.len()}) > MAX_SNAPSHOT_BYTES -> return .Err("live runtime snapshot exceeds the 1 MiB safety limit")
+    linux :: selected_os() == "linux" || selected_os() == "android"
+    stat :: if linux {
+        proc_path :: OSPath.from("/proc/{pid}")
+        if !proc_path.is_dir() -> return .Err("process {pid} is no longer running")
+        .Val(fs.read_to_string(proc_path.join("stat")) ?? return .Err("cannot verify process {pid} identity"))
+    } else -> .None
+    snapshot :: decode_raw_snapshot(bytes, stat) ?? return .Err(if err.contains("does not belong") || err.contains("cannot verify") -> err else -> "live runtime snapshot has an invalid or unsafe schema: {err}")
     parsed :: parse_live_snapshot(snapshot) ?? return .Err("live runtime snapshot has an invalid or unsafe schema: {err}")
     if parsed.pid != I64.from(pid) -> return .Err("live runtime snapshot does not belong to process {pid}")
     _ :: render_event_observations(snapshot) ?? return .Err("live runtime event observations are invalid: {err}")
     now_ms :: SystemTime.now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis()
     if now_ms.saturating_sub(parsed.captured_ms) > MAX_SNAPSHOT_AGE_MS -> return .Err("process {pid} is not publishing a live runtime snapshot")
-    if selected_os() == "linux" || selected_os() == "android" {
-        proc_path :: OSPath.from("/proc/{pid}")
-        if !proc_path.is_dir() -> return .Err("process {pid} is no longer running")
-        expected_start_id :: fs.read_to_string(proc_path.join("stat")).ok().and_then((stat) -> {
-            return stat.rsplit_once(") ").and_then(((_0: _, _1: tail)) -> tail.split_whitespace().nth(19)).map((value) -> value.to_string())
-        }) ?? return .Err("cannot verify process {pid} identity")
-        if parsed.start_id != expected_start_id -> return .Err("live runtime snapshot does not belong to process {pid}")
-    }
     return snapshot
 }
 // Rust: crates/jet-devserver/src/LiveInspect.rs:742

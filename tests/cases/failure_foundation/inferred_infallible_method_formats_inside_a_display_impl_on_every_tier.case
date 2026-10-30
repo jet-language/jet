@@ -1,0 +1,33 @@
+# A Display body interpolates an inherent method the failure solve proves
+# infallible; every tier lowers the call as a plain return. `reduced.jet` is
+# the smallest such program; `run.jet` adds a printing generic Display, a
+# callback-taking method and a file read that falls back when notes.md is
+# absent.
+fixture: inferred_infallible_method_formats_inside_a_display_impl_on_every_tier
+env: NO_COLOR=1
+step: jet run reduced.jet
+exit: 0
+stdout: = "Parser of 3 words\n"
+step: jet build reduced.jet
+exit: 0
+step: {work}/.jet/build/reduced
+exit: 0
+stdout: = "Parser of 3 words\n"
+step: jet build --release reduced.jet
+exit: 0
+step: {work}/.jet/build/reduced
+exit: 0
+stdout: = "Parser of 3 words\n"
+step: jet run -A run.jet
+exit: 0
+stdout: = "3\na\nb\nc\ntrace: display\nParser of 3 words\n"
+step: jet build -A run.jet
+exit: 0
+step: {work}/.jet/build/run
+exit: 0
+stdout: = "3\na\nb\nc\ntrace: display\nParser of 3 words\n"
+step: jet build -A --release run.jet
+exit: 0
+step: {work}/.jet/build/run
+exit: 0
+stdout: = "3\na\nb\nc\ntrace: display\nParser of 3 words\n"

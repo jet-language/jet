@@ -263,6 +263,25 @@ fn jet_driver_query_build_plan(owned_request: ^JetDriverCompileRequest, scope: &
     graph :: build_plan_graph(plan)
     return JetDriverBuildQueryResponse{request: ^request, query: JetDriverBuildQueryResult{plan: Val(^plan), graph: Val(graph), generated: ^generated, nodes: ^nodes, diagnostics: ^errors, complete: true, internal_problem: None}}
 }
+// Whether the entry package declares a `fn build`, the build entry
+// jet_driver_query_build_plan evaluates, read from the loaded sources alone.
+// False when the sources don't load: the compile reports why.
+fn jet_driver_entry_package_has_build(request: JetDriverCompileRequest) -> Bool {
+    load :: jet_driver_load(request)
+    if !load.complete -> return false
+    package := String?{None}
+    loop loaded_module in load.modules {
+        if loaded_module.module_identity == load.entry_module_identity -> package = Val(loaded_module.package_identity.copy())
+    }
+    entry_package :: package ?? return false
+    loop loaded_module in load.modules {
+        if loaded_module.package_identity != entry_package -> next
+        loop item in loaded_module.program.items {
+            if item == .Func(function) && function.name == "build" -> return true
+        }
+    }
+    false
+}
 fn jet_driver_query_build_nodes(request: ^JetDriverCompileRequest, scope: &JetDriverBuildQueryScope) -> JetDriverBuildQueryResponse {
     // Nodes are the checked graph's exact compiler facts, never a projection
     // reconstructed from emitted source, action names or a receipt.

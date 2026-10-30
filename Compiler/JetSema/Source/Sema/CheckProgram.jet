@@ -3573,7 +3573,7 @@ fn sema_check_registration_top_level(module_index: Int, item_index: Int, memory_
     }
 }
 
-fn sema_check_registration_method(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, ready: &[SemaPreparedBody], queries: &[Int:SemaBodyMemoQuery], memo: SemaModuleMemo?, ordinal: Int, scopes: &SemaScopeTable, environment: &SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], diagnostics: &[Diagnostic], functions: &[FnBody], prelude_demands: &[Int:[SemaPreludeConversionDemand]], call_facts: &[SemaCallSiteFact], hardware_use: &TargetHardwareUse, comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], comptime_body_sources: &[SemaComptimeBodySource], compute_facts: &[SemaComputeFunctionFacts], exact_int_reachable: &Bool, copy_events: &[SemaCopyEvent], reasons: &[String], keep_going: Bool, pending_obligations: Bool) -> Bool {
+fn sema_check_registration_method(job: SemaBodyJob, module_index: Int, memory_plan: SemaFunctionMemoryPlan, ready: &[SemaPreparedBody], queries: &[Int:SemaBodyMemoQuery], memo: SemaModuleMemo?, ordinal: Int, scopes: &SemaScopeTable, environment: &SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], diagnostics: &[Diagnostic], functions: &[FnBody], prelude_demands: &[Int:[SemaPreludeConversionDemand]], call_facts: &[SemaCallSiteFact], hardware_use: &TargetHardwareUse, comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], comptime_body_sources: &[SemaComptimeBodySource], compute_facts: &[SemaComputeFunctionFacts], failure_facts: &[SemaFunctionFailureFacts], exact_int_reachable: &Bool, copy_events: &[SemaCopyEvent], reasons: &[String], keep_going: Bool, pending_obligations: Bool) -> Bool {
     label :: sema_check_registered_method_label(job, module_index, environment, program)
     owner_id :: sema_check_registered_function_id(job, module_index, environment, program)
     raw_protocol_return :: sema_check_registered_raw_protocol_return(job, module_index, environment, program)
@@ -3585,6 +3585,9 @@ fn sema_check_registration_method(job: SemaBodyJob, module_index: Int, memory_pl
             loop event in checked_function.copy_events -> &copy_events.push(event)
             loop source in checked_function.comptime_body_sources -> &comptime_body_sources.push(source)
             &compute_facts.push(checked_function.compute_facts)
+            // The reused method body joins the bundle failure solve like one
+            // checked here, as a reused top-level body does.
+            if checked_function.failure == .Val(facts) -> &failure_facts.push(facts)
             sema_comptime_push_obligations(checked_function, &diagnostics)
             if sema_comptime_append_checked_function(checked_function, &functions, &call_facts, &comptime_requests, &name_references) -> return true
             if keep_going {
@@ -3695,6 +3698,9 @@ fn sema_check_registration_method(job: SemaBodyJob, module_index: Int, memory_pl
     &comptime_requests.extend(^function_comptime_requests)
     loop source in checked.comptime_body_sources -> &comptime_body_sources.push(source)
     &compute_facts.push(checked.compute_facts)
+    // A method's failure row joins the bundle failure solve, which infers
+    // the contract of an inherent method as it does a top-level function's.
+    if checked.failure == .Val(facts) -> &failure_facts.push(facts)
     &name_references.extend(^function_name_references)
     if !memory_complete || !owner_generic_complete {
         causes := [String]{}
@@ -4576,7 +4582,7 @@ fn sema_check_generated_method_author_span(job: SemaBodyJob, module_index: Int, 
     panic("a registered Jet method lost its owning graph")
 }
 
-fn sema_check_apply_method_job(module_index: Int, memory_plan: SemaFunctionMemoryPlan, job: SemaBodyJob, ready: &[SemaPreparedBody], queries: &[Int:SemaBodyMemoQuery], memo: SemaModuleMemo?, scopes: &SemaScopeTable, environment: &SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], diagnostics: &[Diagnostic], functions: &[FnBody], prelude_demands: &[Int:[SemaPreludeConversionDemand]], call_facts: &[SemaCallSiteFact], hardware_use: &TargetHardwareUse, comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], comptime_body_sources: &[SemaComptimeBodySource], compute_facts: &[SemaComputeFunctionFacts], exact_int_reachable: &Bool, copy_events: &[SemaCopyEvent], reasons: &[String], keep_going: Bool, pending_obligations: Bool) -> Bool {
+fn sema_check_apply_method_job(module_index: Int, memory_plan: SemaFunctionMemoryPlan, job: SemaBodyJob, ready: &[SemaPreparedBody], queries: &[Int:SemaBodyMemoQuery], memo: SemaModuleMemo?, scopes: &SemaScopeTable, environment: &SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], diagnostics: &[Diagnostic], functions: &[FnBody], prelude_demands: &[Int:[SemaPreludeConversionDemand]], call_facts: &[SemaCallSiteFact], hardware_use: &TargetHardwareUse, comptime_requests: &[SemaComptimeRequest], name_references: &[SemaNameReferenceFact], comptime_body_sources: &[SemaComptimeBodySource], compute_facts: &[SemaComputeFunctionFacts], failure_facts: &[SemaFunctionFailureFacts], exact_int_reachable: &Bool, copy_events: &[SemaCopyEvent], reasons: &[String], keep_going: Bool, pending_obligations: Bool) -> Bool {
     ordinal :: if job == {
         .NominalMethod(position, _, _) -> position
         .ImplMethod(position, _, _) -> position
@@ -4585,11 +4591,11 @@ fn sema_check_apply_method_job(module_index: Int, memory_plan: SemaFunctionMemor
     author_span :: sema_check_generated_method_author_span(job, module_index, environment, program)
     if author_span == .Val(span) {
         generated_diagnostics := [Diagnostic]{}
-        complete := sema_check_registration_method(job, module_index, memory_plan, &ready, &queries, memo, ordinal, &scopes, &environment, program, host_hooks, comptime_functions, comptime_rows, &generated_diagnostics, &functions, &prelude_demands, &call_facts, &hardware_use, &comptime_requests, &name_references, &comptime_body_sources, &compute_facts, &exact_int_reachable, &copy_events, &reasons, keep_going, pending_obligations)
+        complete := sema_check_registration_method(job, module_index, memory_plan, &ready, &queries, memo, ordinal, &scopes, &environment, program, host_hooks, comptime_functions, comptime_rows, &generated_diagnostics, &functions, &prelude_demands, &call_facts, &hardware_use, &comptime_requests, &name_references, &comptime_body_sources, &compute_facts, &failure_facts, &exact_int_reachable, &copy_events, &reasons, keep_going, pending_obligations)
         sema_author_facing_diagnostics(span, generated_diagnostics, &diagnostics)
         return complete
     }
-    sema_check_registration_method(job, module_index, memory_plan, &ready, &queries, memo, ordinal, &scopes, &environment, program, host_hooks, comptime_functions, comptime_rows, &diagnostics, &functions, &prelude_demands, &call_facts, &hardware_use, &comptime_requests, &name_references, &comptime_body_sources, &compute_facts, &exact_int_reachable, &copy_events, &reasons, keep_going, pending_obligations)
+    sema_check_registration_method(job, module_index, memory_plan, &ready, &queries, memo, ordinal, &scopes, &environment, program, host_hooks, comptime_functions, comptime_rows, &diagnostics, &functions, &prelude_demands, &call_facts, &hardware_use, &comptime_requests, &name_references, &comptime_body_sources, &compute_facts, &failure_facts, &exact_int_reachable, &copy_events, &reasons, keep_going, pending_obligations)
 }
 
 // The module scope the body loop of module `module_index` checks against:
@@ -5081,7 +5087,7 @@ fn sema_check_registration_module_tail(owned_run: ^SemaModuleCheckRun, environme
     if run.check_bodies {
         loop job in all_method_jobs {
             if run.count_work -> method_jobs += 1
-            if !sema_check_apply_method_job(module_index, memory_plan, job, &method_ready.bodies, &method_ready.queries, memo, &scopes, &environment, program, host_hooks, comptime_functions, comptime_rows, &module_result.diagnostics, &module_result.functions, &prelude_demands, &module_result.call_facts, &module_result.hardware_use, &module_result.comptime_requests, &module_result.name_references, &module_result.comptime_body_sources, &module_result.compute_facts, &module_result.exact_int_reachable, &module_result.copy_events, &module_result.incomplete_reasons, run.keep_going, pending_obligations) -> module_result.complete = false
+            if !sema_check_apply_method_job(module_index, memory_plan, job, &method_ready.bodies, &method_ready.queries, memo, &scopes, &environment, program, host_hooks, comptime_functions, comptime_rows, &module_result.diagnostics, &module_result.functions, &prelude_demands, &module_result.call_facts, &module_result.hardware_use, &module_result.comptime_requests, &module_result.name_references, &module_result.comptime_body_sources, &module_result.compute_facts, &module_result.failure_facts, &module_result.exact_int_reachable, &module_result.copy_events, &module_result.incomplete_reasons, run.keep_going, pending_obligations) -> module_result.complete = false
         }
         injected_from := module_result.functions.len()
         if !sema_inject_prelude_error_conversions(run.module_identity, &environment, program, &scopes, host_hooks, &module_result.functions, prelude_demands, &module_result.diagnostics, &module_result.call_facts, &module_result.comptime_requests, &module_result.name_references, &module_result.incomplete_reasons, run.keep_going) -> module_result.complete = false
@@ -5919,6 +5925,8 @@ enum SemaGraphUndo {
     ItemType(module_index: Int, position: Int)
     GraphImportType(import_index: Int, binding: Int)
     FunctionRow(module_index: Int, row: Int, old: SemaRegistrationFunction)
+    NominalMethodRow(module_index: Int, owner: Int, row: Int, old: SemaRegistrationFunction)
+    ImplMethodRow(module_index: Int, owner: Int, row: Int, old: SemaRegistrationFunction)
     SymbolRow(module_index: Int, position: Int, old: Symbol)
     DeclarationRow(module_index: Int, position: Int, old: Item)
     ProgramItemRow(module_index: Int, position: Int, old: Item)
@@ -6006,6 +6014,8 @@ fn sema_graph_trail_undo(graph: &SemaRegistrationGraph, trail: &SemaGraphTrail) 
             }
             .GraphImportType(import_index, binding) -> graph.imports[import_index].bindings[binding].symbol.ty = None
             .FunctionRow(module_index, row, old) -> graph.modules[module_index].functions[row] = old
+            .NominalMethodRow(module_index, owner, row, old) -> graph.modules[module_index].nominals[owner].methods[row] = old
+            .ImplMethodRow(module_index, owner, row, old) -> graph.modules[module_index].impls[owner].methods[row] = old
             .SymbolRow(module_index, position, old) -> graph.modules[module_index].symbols[position] = old
             .DeclarationRow(module_index, position, old) -> graph.modules[module_index].declarations[position] = old
             .ProgramItemRow(module_index, position, old) -> graph.modules[module_index].program.items[position] = old
@@ -7784,9 +7794,10 @@ fn sema_failure_inference_candidate(func: Func) -> Bool Never! {
 // #3708 "Every function has the structured Error
 // route by default. Sema removes it when impossible." After every body is
 // checked, a greatest fixpoint over the bundle's propagation edges finds the
-// unannotated top-level functions whose failure set is empty. A function used
-// as a value keeps its declared callable type, and a body with a failure
-// source of its own stays fallible. Returns the inferred-infallible keys.
+// unannotated top-level functions and inherent methods whose failure set is
+// empty. A function used as a value keeps its declared callable type, and a
+// body with a failure source of its own stays fallible. Returns the
+// inferred-infallible keys.
 fn sema_failure_solve(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> [String] Never! {
     address_taken := [String:Bool]{}
     loop module_result in modules {
@@ -7821,10 +7832,101 @@ fn sema_failure_solve(graph: SemaRegistrationGraph, modules: [SemaGraphModuleRes
 // it is not used as a value, and it is an inference candidate.
 fn sema_failure_add_candidate(graph: SemaRegistrationGraph, source_index: Int, facts: SemaFunctionFailureFacts, address_taken: [String:Bool], candidates: &[SemaFunctionFailureFacts], inferred: &[String:Bool]) Never! {
     if facts.direct || address_taken.get(facts.function_key) != None -> return
-    row :: sema_failure_function_row(graph, source_index, facts.function_key)
-    if row < 0 || !sema_failure_inference_candidate(graph.modules[source_index].functions[row].declaration) -> return
+    row :: sema_registration_callable_row(graph, facts.function_key) ?? return
+    if !sema_failure_row_in_module(graph, row, source_index) || !sema_failure_row_candidate(graph, row) -> return
     &candidates.push(facts)
     inferred[facts.function_key] = true
+}
+
+// Whether module `source_index` registers the callable at `row`; a method
+// is registered on its impl's module and on its type's.
+fn sema_failure_row_in_module(graph: SemaRegistrationGraph, row: SemaRegistrationCallableRow, source_index: Int) -> Bool Never! {
+    if row == {
+        .Function(module_index, _) -> return module_index == source_index
+        .Foreign(module_index, _) -> return module_index == source_index
+        else -> {}
+    }
+    loop site in sema_failure_method_rows(graph, row) {
+        declaring :: if site == {
+            .NominalMethod(module_index, _, _) -> module_index
+            .ImplMethod(module_index, _, _) -> module_index
+            else -> -1
+        }
+        if declaring == source_index -> return true
+    }
+    false
+}
+
+// Whether the solve may infer the failure contract of the callable at `row`:
+// a top-level function, or an inherent method (one in its type's body or in
+// an `impl T { … }` block) that is an inference candidate. A trait-impl
+// method's return is its trait's, so it keeps the route it declares.
+fn sema_failure_row_candidate(graph: SemaRegistrationGraph, row: SemaRegistrationCallableRow) -> Bool Never! {
+    if row == {
+        .Function(module_index, index) -> return sema_failure_inference_candidate(graph.modules[module_index].functions[index].declaration)
+        .NominalMethod(module_index, owner, index) -> {
+            if !sema_failure_inference_candidate(graph.modules[module_index].nominals[owner].methods[index].declaration) -> return false
+        }
+        .ImplMethod(module_index, owner, index) -> {
+            if !sema_failure_inference_candidate(graph.modules[module_index].impls[owner].methods[index].declaration) -> return false
+        }
+        .Foreign(_, _) -> return false
+    }
+    loop site in sema_failure_method_rows(graph, row) {
+        if site == {
+            .NominalMethod(module_index, owner, index) -> {
+                if index < sema_failure_inherent_method_count(graph.modules[module_index].nominals[owner]) -> return true
+            }
+            .ImplMethod(module_index, owner, _) -> {
+                if graph.modules[module_index].impls[owner].trait_name == None && !graph.modules[module_index].impls[owner].compiler_generated -> return true
+            }
+            else -> {}
+        }
+    }
+    false
+}
+
+// Every registered row of the method at `row`. A method of an `impl T` block
+// is registered on the impl and again on the nominal `T`
+// (sema_registration_add_impl), under one key.
+fn sema_failure_method_rows(graph: SemaRegistrationGraph, row: SemaRegistrationCallableRow) -> [SemaRegistrationCallableRow] Never! {
+    rows := [SemaRegistrationCallableRow]{}
+    if row == {
+        .NominalMethod(module_index, owner, index) -> {
+            &rows.push(SemaRegistrationCallableRow.NominalMethod{module_index: module_index, owner: owner, row: index})
+            key :: graph.modules[module_index].nominals[owner].methods[index].symbol.id.key
+            loop reference in sema_registration_impl_rows_named(graph, graph.modules[module_index].nominals[owner].symbol.name) {
+                loop method in 0..<graph.modules[reference.module_index].impls[reference.row].methods.len() {
+                    if graph.modules[reference.module_index].impls[reference.row].methods[method].symbol.id.key == key -> &rows.push(SemaRegistrationCallableRow.ImplMethod{module_index: reference.module_index, owner: reference.row, row: method})
+                }
+            }
+        }
+        .ImplMethod(module_index, owner, index) -> {
+            &rows.push(SemaRegistrationCallableRow.ImplMethod{module_index: module_index, owner: owner, row: index})
+            key :: graph.modules[module_index].impls[owner].methods[index].symbol.id.key
+            loop reference in sema_registration_nominal_rows_named(graph, graph.modules[module_index].impls[owner].target_type_name) {
+                loop method in 0..<graph.modules[reference.module_index].nominals[reference.row].methods.len() {
+                    if graph.modules[reference.module_index].nominals[reference.row].methods[method].symbol.id.key == key -> &rows.push(SemaRegistrationCallableRow.NominalMethod{module_index: reference.module_index, owner: reference.row, row: method})
+                }
+            }
+        }
+        else -> {}
+    }
+    rows
+}
+
+// A nominal registers the methods of its own body first, then those of its
+// trait-impl blocks (sema_registration_nominal), then those of each `impl`
+// block (sema_registration_add_impl); this counts the first.
+fn sema_failure_inherent_method_count(nominal: SemaRegistrationNominal) -> Int Never! {
+    if nominal.source == .SourceAST(item) {
+        if item == {
+            .Struct(definition) -> return definition.methods.len()
+            .Enum(definition) -> return definition.methods.len()
+            else -> {}
+        }
+    }
+    0
 }
 
 // The greatest fixpoint over `candidates`, each of which starts inferred;
@@ -8324,7 +8426,7 @@ fn sema_check_codec_module_in_shared(shared_state: Shared<SemaCheckShared>, host
     prelude_demands := [Int:[SemaPreludeConversionDemand]]{}
     before :: result.functions.len()
     loop job in jobs {
-        if !sema_check_apply_method_job(module_index, memory_plan, job, &ready, &queries, None, &scopes, &environment, program, host_hooks, comptime_functions, comptime_rows, &result.diagnostics, &result.functions, &prelude_demands, &result.call_facts, &result.hardware_use, &result.comptime_requests, &result.name_references, &result.comptime_body_sources, &result.compute_facts, &result.exact_int_reachable, &result.copy_events, &result.incomplete_reasons, keep_going, pending_obligations) -> result.complete = false
+        if !sema_check_apply_method_job(module_index, memory_plan, job, &ready, &queries, None, &scopes, &environment, program, host_hooks, comptime_functions, comptime_rows, &result.diagnostics, &result.functions, &prelude_demands, &result.call_facts, &result.hardware_use, &result.comptime_requests, &result.name_references, &result.comptime_body_sources, &result.compute_facts, &result.failure_facts, &result.exact_int_reachable, &result.copy_events, &result.incomplete_reasons, keep_going, pending_obligations) -> result.complete = false
     }
     sema_check_shared_fill(shared_state, ^environment, ^program, ^memory_plan)
     result.functions.len() - before

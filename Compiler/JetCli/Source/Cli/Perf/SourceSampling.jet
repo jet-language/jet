@@ -55,11 +55,9 @@ fn jet_cli_perf_source_profile(source: JetCLIPerfSource, wall_samples: U64, cpu_
     reason :: if rows.len() == 0 -> "no supported observations were captured" else -> "only the checked top-level entrypoint is source-attributed; invocation counts are not inferred"
     Ok(TraceProfile{method: "sampling", status: status, coverage: coverage, rows: rows, row_limit: U64{4096}, rows_truncated: limited, overhead_ns: None, overhead_status: "not_measured", overhead_reason: "a matched unprofiled run was not captured", reason: reason, window_status: "unavailable", window_wall_ns: None, window_cpu_ns: None, window_reason: "the runtime published no run window"})
 }
-fn jet_cli_perf_window(profile: &TraceProfile, window: JetCLIPerfRuntimeWindow?) Never! {
-    if window == .Val(observed) {
-        profile.window_status = if observed.exit -> "exit" else -> "live"
-        profile.window_wall_ns = Val(observed.elapsed_ns)
-        profile.window_cpu_ns = observed.cpu_ns
-        profile.window_reason = "runtime-published monotonic run window"
-    }
+fn jet_cli_perf_window(profile: &TraceProfile, window: JetCLIPerfRuntimeWindow) Never! {
+    profile.window_status = if window.exit -> "exit" else -> "live"
+    profile.window_wall_ns = Val(window.elapsed_ns)
+    profile.window_cpu_ns = window.cpu_ns
+    profile.window_reason = "runtime-published monotonic run window"
 }

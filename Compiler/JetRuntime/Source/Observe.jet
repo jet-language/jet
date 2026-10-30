@@ -1,19 +1,22 @@
 // Observe.rs native task/channel registry. It records only identities and
 // wait/resource facts, never a task payload, channel element or environment.
-// Root136: mutex0/next-task8/next-channel16/tasks24/task-count32/channels40/
+// Root128: mutex0/next-task8/next-channel16/tasks24/task-count32/channels40/
 // workers48/queued56/exit-reported64/writer72/event-sequence80/events88/
-// event-tail96/event-count104/values112/value-count120/ledger128.
+// event-tail96/event-count104/values112/value-count120.
 // Task88: next0/id8/parent16/site24/label32/state40/wait48/deadline-present56/
 // deadline64/cancelled72/control80. Channel64: next0/id8/depth16/bounded24/
 // capacity32/send40/recv48/closed56.
 observe_root := I64{0}
 observe_task_key := I64{0}
+// The live snapshot's channel section (ObserveLive.jet), installed by the
+// first channel.
+observe_channels_code := I64{0}
 
 // runtime-init: 4 when observe_root,observe_task_key
 #Export(c) fn jet_rt_observe_init() {
     if (observe_root != I64{0}) -> return
-    observe_root = jet_rt_alloc(I64{136}, I64{8})
-    thread_zero(observe_root, I64{136})
+    observe_root = jet_rt_alloc(I64{128}, I64{8})
+    thread_zero(observe_root, I64{128})
     sync_store(observe_root + I64{8}, I64{2})
     sync_store(observe_root + I64{16}, I64{1})
     sync_store(observe_root + I64{80}, I64{1})
@@ -60,15 +63,6 @@ fn observe_decimal_unsigned(builder: I64, word: I64) {
     }
     if (quotient != I64{0}) -> observe_decimal_unsigned(builder, quotient)
     rt_text_push_scalar(builder, I64{48} + remainder)
-}
-
-fn observe_decimal_signed(builder: I64, word: I64) {
-    if (word < I64{0}) {
-        rt_text_push_scalar(builder, I64{45})
-        observe_decimal_unsigned(builder, wrapping(I64{0} - word))
-    } else {
-        observe_decimal_unsigned(builder, word)
-    }
 }
 
 // Rust chars().take(160), including multibyte scalars, not a byte truncation.
@@ -442,6 +436,7 @@ fn observe_cancel_live_tasks() {
 }
 
 #Export(c) fn jet_rt_observe_channel_new(bounded: I64, capacity: I64) -> I64 {
+    if (observe_channels_code == I64{0}) -> observe_channels_code = rt_observe_raw_channels_address()
     id :: sync_add(observe_root + I64{16}, I64{1})
     node :: jet_rt_alloc(I64{64}, I64{8})
     thread_zero(node, I64{64})

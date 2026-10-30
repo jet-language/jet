@@ -621,6 +621,55 @@ fn sema_failure_callee(expr: Expr?, environment: SemaScopeEnvironment, program: 
     }
 }
 
+// The failing call's callee: the declared function `expr` names, else the
+// method a checked method call resolved (`checked`, sema_failure_method_callee).
+fn sema_failure_callee_of(expr: Expr?, checked: SemaFailureCallee?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaFailureCallee? {
+    named :: sema_failure_callee(expr, environment, program, scopes)
+    if named != None -> return named
+    // copy: the checked call's callee stays with the caller.
+    checked.copy()
+}
+
+// The registered method a checked method call names; the bundle failure
+// solve may infer an inherent method's contract (sema_failure_row_candidate).
+// A trait method's return is its trait's, so it names no inferable callee.
+fn sema_failure_method_callee(checked: TExpr, program: SemaProgramTables) -> SemaFailureCallee? {
+    if checked.kind == .MethodCall(_, reference, _, _) {
+        if reference.trait_owner != None -> return None
+        if program.registration_graph == .Val(graph) {
+            key :: sema_failure_method_key(graph, reference.symbol.key) ?? return None
+            row :: sema_registration_callable_row(graph, key) ?? return None
+            if row == .Foreign(_, _) -> return None
+            return Val(SemaFailureCallee{key: key, inferable: sema_failure_row_candidate(graph, row)})
+        }
+    }
+    None
+}
+
+// The registered key of method `key`. A call resolved from the caller's own
+// declarations names its method by the owner's type name
+// (sema_call_method_candidate_from_func), not by the registered owner key.
+fn sema_failure_method_key(graph: SemaRegistrationGraph, key: String) -> String? {
+    // copy: the call keeps its reference.
+    if sema_registration_callable_row(graph, key) != None -> return Val(key.copy())
+    loop module_index in 0..<graph.modules.len() {
+        module_identity :: graph.modules[module_index].module_identity
+        if !key.starts_with("function:{module_identity}:") -> next
+        loop owner in 0..<graph.modules[module_index].nominals.len() {
+            loop row in 0..<graph.modules[module_index].nominals[owner].methods.len() {
+                if symbol_id(SymbolKind.Function, module_identity, graph.modules[module_index].nominals[owner].symbol.name, graph.modules[module_index].nominals[owner].methods[row].declaration.name).key == key -> return Val(graph.modules[module_index].nominals[owner].methods[row].symbol.id.key)
+            }
+        }
+        loop owner in 0..<graph.modules[module_index].impls.len() {
+            if graph.modules[module_index].impls[owner].trait_name != None -> next
+            loop row in 0..<graph.modules[module_index].impls[owner].methods.len() {
+                if symbol_id(SymbolKind.Function, module_identity, graph.modules[module_index].impls[owner].declaration.type_name, graph.modules[module_index].impls[owner].methods[row].declaration.name).key == key -> return Val(graph.modules[module_index].impls[owner].methods[row].symbol.id.key)
+            }
+        }
+    }
+    None
+}
+
 // For a declared function `id`: whether it is an ordinary body with no failure
 // contract written (sema_failure_callee); None when `id` declares no function.
 // A graph function is read at its row: resolving the declaration copied the
@@ -719,18 +768,25 @@ fn sema_failure_defer_obligation(callee: SemaFailureCallee?, diagnostics: &[Diag
     Val(TTryConvert.Never)
 }
 
-// #3708: whether `callee` is an unannotated function the bundle failure solve
-// projected onto its span-less `T Never!` contract ("inferred: none").
+// Whether `callee` is an unannotated function or inherent method the bundle
+// failure solve projected onto its span-less `T Never!` contract ("inferred:
+// none").
 fn sema_failure_callee_inferred_never(callee: SemaFailureCallee?, program: SemaProgramTables) -> Bool Never! {
     found :: callee ?? return false
     if program.registration_graph == .Val(graph) {
         row :: sema_registration_callable_row(graph, found.key) ?? return false
-        if row == .Function(module_index, index) {
-            declaration :: graph.modules[module_index].functions[index].declaration
-            if failure_contract_of_function(declaration.return_type, declaration.return_type_span) == .InferredNever(_) -> return true
+        if row == {
+            .Function(module_index, index) -> return sema_failure_declaration_inferred_never(graph.modules[module_index].functions[index].declaration)
+            .NominalMethod(module_index, owner, index) -> return sema_failure_declaration_inferred_never(graph.modules[module_index].nominals[owner].methods[index].declaration)
+            .ImplMethod(module_index, owner, index) -> return sema_failure_declaration_inferred_never(graph.modules[module_index].impls[owner].methods[index].declaration)
+            .Foreign(_, _) -> return false
         }
     }
     false
+}
+
+fn sema_failure_declaration_inferred_never(declaration: Func) -> Bool Never! {
+    failure_contract_of_function(declaration.return_type, declaration.return_type_span) == .InferredNever(_)
 }
 
 // A generator's declared `Stream<T>` is its protocol, not a failure carrier:
@@ -797,7 +853,7 @@ fn sema_failure_parent_error(operand_error: Type, scopes: SemaScopeTable, contex
 
 // 2 and the one conversion law shared by
 // explicit `?` and automatic call propagation. `implicit` selects wording only.
-fn sema_expression_propagation_conversion(operand_ty: Type, source_expr: Expr?, span: Span, implicit: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TTryConvert? {
+fn sema_expression_propagation_conversion(operand_ty: Type, source_expr: Expr?, checked_callee: SemaFailureCallee?, span: Span, implicit: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TTryConvert? {
     operand :: sema_expr_unwrap_tag(operand_ty)
     if operand == {
         .Result(_, error) -> {
@@ -807,10 +863,10 @@ fn sema_expression_propagation_conversion(operand_ty: Type, source_expr: Expr?, 
             // precedes that projection; a spawned task body records it so a
             // recheck keeps the task element it was first checked with.
             if sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) {
-                if context.taskgroups.in_spawn && sema_failure_callee_inferred_never(sema_failure_callee(source_expr, environment, program, scopes), program) -> context.task_body_propagates = true
+                if context.taskgroups.in_spawn && sema_failure_callee_inferred_never(sema_failure_callee_of(source_expr, checked_callee, environment, program, scopes), program) -> context.task_body_propagates = true
                 return Val(TTryConvert.Never)
             }
-            callee :: sema_failure_callee(source_expr, environment, program, scopes)
+            callee :: sema_failure_callee_of(source_expr, checked_callee, environment, program, scopes)
             if sema_failure_callee_is_generator(callee, program) -> return Val(TTryConvert.Never)
             sema_failure_record_edge(callee, &context)
             // A callback whose expected return row is a plain value has no
@@ -968,7 +1024,7 @@ fn sema_expression_auto_propagate(expr: Expr, value: ^TExpr, expected: Type?, en
     // and conversion reads finish before its owner enters the replacement.
     if !sema_expression_auto_propagates(value.ty, expected, context) -> return Val(^value)
     span :: expr_span(expr)
-    conversion :: sema_expression_propagation_conversion(value.ty, Val(expr), span, true, environment, program, &scopes, &context, &diagnostics) ?? return None
+    conversion :: sema_expression_propagation_conversion(value.ty, Val(expr), sema_failure_method_callee(value, program), span, true, environment, program, &scopes, &context, &diagnostics) ?? return None
     payload :: sema_expression_carrier_payload(value.ty) ?? return None
     location :: sema_expression_panic_location(environment, program, scopes, span)
     propagated :: sema_tree_node(payload, TExprKind.TryWithContext{inner: ^value, note: None, convert: conversion, file: location.file, line: location.line, function: location.function}, span)
@@ -996,7 +1052,7 @@ fn sema_expression_auto_propagates(ty: Type, expected: Type?, context: SemaCheck
 // as for an accepted call.
 fn sema_expression_rejected_call_propagation(result_type: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
     if !context.failure_success_view || !sema_expression_auto_propagates(result_type, expected, context) -> return
-    _ := sema_expression_propagation_conversion(result_type, None, span, true, environment, program, &scopes, &context, &diagnostics)
+    _ := sema_expression_propagation_conversion(result_type, None, None, span, true, environment, program, &scopes, &context, &diagnostics)
 }
 
 fn sema_expression_try(value: Expr, span: Span, conversion: TryConvert, context_expr: Expr?, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, check_context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -1004,13 +1060,13 @@ fn sema_expression_try(value: Expr, span: Span, conversion: TryConvert, context_
     // propagate a second time before this check sees it.
     inner :: sema_check_expression_carrier(value, None, environment, program, &scopes, &state, &tail_store, &check_context, &diagnostics) ?? return None
     try_conversion :: if conversion == {
-        .NoConversion -> sema_expression_propagation_conversion(inner.ty, Val(value), span, false, environment, program, &scopes, &check_context, &diagnostics) ?? return None
+        .NoConversion -> sema_expression_propagation_conversion(inner.ty, Val(value), sema_failure_method_callee(inner, program), span, false, environment, program, &scopes, &check_context, &diagnostics) ?? return None
         else -> {
             unreachable_route :: if conversion == {
                 .Never -> true
                 else -> false
             }
-            if !unreachable_route -> sema_failure_record_edge(sema_failure_callee(Val(value), environment, program, scopes), &check_context)
+            if !unreachable_route -> sema_failure_record_edge(sema_failure_callee_of(Val(value), sema_failure_method_callee(inner, program), environment, program, scopes), &check_context)
             sema_expression_try_declared_conversion(inner, conversion, span, environment, &scopes, &check_context, &diagnostics) ?? return None
         }
     }
