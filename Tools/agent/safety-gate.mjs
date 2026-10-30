@@ -89,17 +89,20 @@ export function runGate({ out, artifacts, seed = 4, count = 50, prepareOnly = fa
   summary.corpus_features = corpus.features;
   if (prepareOnly) return summary;
 
-  // Ratchet's lower-count mode rewrites its baseline. Use a private baseline copy.
-  const baseline = join(out, "safety-baseline.md");
-  writeFileSync(baseline, readFileSync(join(repo, "Docs/spec/safety.md")));
-  const audit = command("core-audit", process.execPath, [join(repo, "Tools/agent/check-unsafe-ratchet.mjs"), "--baseline", baseline]);
-  add("core-unsafe-audit", audit.status === 0 ? "pass" : "fail", `exit ${audit.status ?? audit.signal ?? audit.error?.code}; core-audit.log`);
   // The registry can retain an older release binary while the current head's
   // debug compiler is admitted. Core source is embedded; stale release output
   // cannot prove the audited wrappers. Native admission may bind a checker.
   const checker = manifest.native_safety?.checker ?? { path: manifest.debug_jet ?? manifest.release_jet, head: manifest.dev_head };
   const jet = checker.path;
   summary.checker = checker;
+  // Ratchet's lower-count mode rewrites its baseline. Use a private baseline copy.
+  const baseline = join(out, "safety-baseline.md");
+  writeFileSync(baseline, readFileSync(join(repo, "Docs/spec/safety.md")));
+  if (!jet || !existsSync(jet)) add("core-unsafe-audit", "gap", "no admitted checker to run Tools/agent/UnsafeRatchet.jet");
+  else {
+    const audit = command("core-audit", jet, [join(repo, "Tools/agent/UnsafeRatchet.jet"), "--baseline", baseline]);
+    add("core-unsafe-audit", audit.status === 0 ? "pass" : "fail", `exit ${audit.status ?? audit.signal ?? audit.error?.code}; core-audit.log`);
+  }
   for (const [fixture, expectedDiagnostics] of [["lowlevel_mem_direct_import_without_unsafe", 3], ["sys_posix_wrapper_without_unsafe", 2]]) {
     if (!jet || !existsSync(jet) || checker.head !== manifest.dev_head) { add(fixture, "gap", "no exact-head admitted checker"); continue; }
     const check = command(fixture, jet, ["check", join(repo, "tests/ui", `${fixture}.jet`)]);

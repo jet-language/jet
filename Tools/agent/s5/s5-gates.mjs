@@ -18,7 +18,7 @@ cheap.push(start('check-core-source-rows', ['Tools/agent/jet-env', 'jet', 'Tools
 cheap.push(start('check-lexer-keyword-rows', ['Tools/agent/jet-env', 'jet', 'Tools/agent/LexerKeywordRows.jet', '--check']));
 cheap.push(start('stop-exports-test', [node, '--test', 'Tools/agent/gen-runtime-stop-exports.test.mjs']));
 cheap.push(start('trap-messages-test', [node, '--test', 'Tools/agent/gen-runtime-trap-messages.test.mjs']));
-for (const tool of ['LexerKeywordRows', 'UnicodeNameAsset', 'AgentDocFlags', 'DecisionIndex']) {
+for (const tool of ['LexerKeywordRows', 'UnicodeNameAsset', 'AgentDocFlags', 'DecisionIndex', 'UnsafeRatchet']) {
   cheap.push(start(`${tool}-test`, ['Tools/agent/jet-env', 'jet', 'test', `Tools/agent/${tool}.jet`]));
 }
 cheap.push(start('compiler-packages', [node, '--test', 'Tools/agent/compiler-packages.test.mjs']));

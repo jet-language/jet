@@ -9,7 +9,7 @@ export function nativeSuiteCommands({ root, jet, head, scratch, evidence, node =
     if (!suites.length || new Set(suites).size !== suites.length || suites.some(suite => !nativeSuiteNames.includes(suite))) throw Error('invalid or empty native suite selection');
     // Node gates run under `node`; Jet gates run under the compiler being verified.
     const definitions = [
-        ['unsafe-ratchet', node, 'check-unsafe-ratchet.mjs', []],
+        ['unsafe-ratchet', jet, 'UnsafeRatchet.jet', []],
         ['agent-doc-flags', jet, 'AgentDocFlags.jet', []],
         ['decision-index', jet, 'DecisionIndex.jet', ['--check']],
         ['core-coverage', node, 'core-coverage-census.mjs', ['--check']],

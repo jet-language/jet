@@ -6,7 +6,7 @@ executable spelling lives in the [syntax registry](../../Compiler/JetFoundation/
 sema checks the gate and its obligations in
 [`UnsafeObligations.jet`](../../Compiler/JetSema/Source/Sema/UnsafeObligations.jet).
 The focused [`unsafe_ratchet` cases](../../tests/cases/guard_selftest/) and the
-[`ratchet checker`](../../Tools/agent/check-unsafe-ratchet.mjs) provide the
+[`ratchet checker`](../../Tools/agent/UnsafeRatchet.jet) provide the
 repository proof; gated examples live under
 [`Examples/features/`](../../Examples/features/). Terms such as stream and
 reader follow the [Jet vocabulary](vocabulary.md).
@@ -174,7 +174,7 @@ reason. The owner is the region's top-level repository directory (`Compiler`,
 what the ratchet compares. The JSON data and Markdown tables are one generated
 registry; do not edit either representation by hand.
 
-[`check-unsafe-ratchet.mjs`](../../Tools/agent/check-unsafe-ratchet.mjs)
+[`UnsafeRatchet.jet`](../../Tools/agent/UnsafeRatchet.jet)
 recursively scans `.jet` files while excluding its configured generated and
 build directories. It recognizes block and whole-function
 `#Unsafe("reason")` gates and grouped
@@ -188,7 +188,7 @@ larger count fails and reports each unmatched semantic region. When a new
 region is approved, refresh the baseline in the same change with:
 
 ```sh
-node Tools/agent/check-unsafe-ratchet.mjs --update
+jet Tools/agent/UnsafeRatchet.jet --update
 ```
 
 If source removes only recorded regions, the checker lowers and rewrites the
@@ -8816,7 +8816,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 79:5 | "storage exclusively owns total_bytes; each source row lends its NUL string for this capture call, and published rows point only into the owned block" |
 | Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 111:5 | "bytes lends one live NUL-terminated startup string" |
 | Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 125:5 | "startup lends length bytes; data exclusively owns length initialized packed bytes" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 138:5 | "output lends a 24-byte native List&lt;U8&gt; header and receives ownership of data" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 138:5 | "output lends a 24-byte native [U8] header and receives ownership of data" |
 | Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 152:5 | "row borrows a complete immutable startup index record" |
 | Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 167:5 | "row borrows its immutable record; data_out lends one writable pointer word" |
 | Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 176:5 | "row borrows its immutable record; data_out lends one writable pointer word" |
@@ -8881,7 +8881,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 11:5 | "address names the caller-owned live Secret buffer; effectful asm stores wipe every byte including spare capacity before release" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 90:17 | "secret is a registered live Secret header (Close unregisters before it clears); its buffer holds capacity bytes" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 107:5 | "start..start+length covers the Secret buffer's mapped pages; madvise and mlock change only their dump and residency attributes" |
-| Compiler | Compiler/JetRuntime/Source/Secret.jet | 124:5 | "bytes is the moved native List&lt;U8&gt; header; secret is fresh aligned24B storage and takes over its buffer reference without copying secret material" |
+| Compiler | Compiler/JetRuntime/Source/Secret.jet | 124:5 | "bytes is the moved native [U8] header; secret is fresh aligned24B storage and takes over its buffer reference without copying secret material" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 143:5 | "secret is fresh aligned24B storage this call owns exclusively" |
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 162:5 | "secret is a live exclusively borrowed native24B Secret header; len/cap/data follow the native List layout and all byte owners remain inside its buffer" |
 | Compiler | Compiler/JetRuntime/Source/Shared.jet | 62:5 | "x86 pause only hints that this thread is waiting in a spin loop; no memory is touched" |

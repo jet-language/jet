@@ -294,7 +294,7 @@ in one pass:
 ## Environment and proof
 
 Run repository commands through `Tools/agent/jet-env`; `JET` names the admitted
-native compiler (the stage-2 output of `Tools/agent/native-compiler.mjs`) for
+native compiler (the stage-2 output of `jet build Compiler`) for
 every tool and gate. Keep scratch and logs on disk and build output outside the
 repository. Follow the orchestration resource reference for bounded,
 checkout-owned targets and shared artifacts; respect `JET_TARGET_CAP_GB=120`.

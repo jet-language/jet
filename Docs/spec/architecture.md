@@ -1855,7 +1855,7 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   unlocked by `use core.mem` — plus vetted std/mem internals. Ordinary,
   memory-safe Jet still emits **zero** `unsafe`; the boundary is enforced by
   sema (E3101/E3102/E3103), and every gated region is counted, positioned and
-  reasoned in the unsafe ratchet (`Tools/agent/check-unsafe-ratchet.mjs`).
+  reasoned in the unsafe ratchet (`Tools/agent/UnsafeRatchet.jet`).
   Codegen stays dumb: it lowers an already-checked `#Unsafe` region straight to
   an unsafe region and makes no safety decision of its own.
 - **R2 — Sema is the gatekeeper.** Any program that passes sema must lower to

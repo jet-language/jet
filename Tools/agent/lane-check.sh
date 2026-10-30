@@ -60,6 +60,8 @@ scratch="${JET_TEST_SCRATCH:-$HOME/.cache/jet-dev/scratch}"
 mkdir -p "$scratch"
 export TMPDIR="$scratch" TMP="$scratch" TEMP="$scratch"
 export JET_NIX_TMP_CLEANED=1
+# The checkout under review supplies Core and the toolchain sources the compiler reads.
+export JET_TOOLCHAIN_ROOT="${JET_TOOLCHAIN_ROOT:-$repo}"
 tmp="$(mktemp "$scratch/jet-lane-check.XXXXXX")"
 
 if [ "$#" -eq 1 ]; then
