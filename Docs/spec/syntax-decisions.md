@@ -1080,6 +1080,10 @@ code may opt in per operation with `wrapping(…)` / `saturating(…)` /
 `value.wrapping_add(other)`, `value.saturating_add(other)`, and
 `value.checked_add(other)`. Per-type `MIN`/`MAX`, float
 `INFINITY`/`NAN`/`EPSILON`, bit ops. **D-FLOATW1**: `core.math` is width-generic.
+A math call whose every argument is `F32` computes at `F32` width on every tier:
+the Float function runs on the exactly widened arguments and its result rounds
+once to `F32`; `to_bits` returns the binary32 bits, and `is_finite`/`cmp`
+classify the `F32` value.
 
 **D-WRAP-SCOPE1=A** *(owner outcome, card #2171)*: `#Arithmetic(.Checked | .Wrapping |
 .Saturating)` is the one lexical policy for fixed-width `+`, `-`, `*`, unary

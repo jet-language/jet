@@ -725,6 +725,46 @@ fn sema_call_try_core_math_float_class(module_name: String, member: String, type
     SemaDirectSpecialCheck{handled: true, value: None}
 }
 
+// D-FLOATW1: `core.math` is width-generic. A math function whose every
+// argument is F32 computes at F32 width: its Float source runs on the exactly
+// widened arguments and the Float result rounds once back to F32, and
+// `to_bits` packs the binary32 bits (`__to_bits_f32`). Any other argument
+// list keeps the ordinary source call.
+fn sema_call_try_core_math_f32(module_name: String, member: String, type_args: [Type], args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    unhandled :: SemaDirectSpecialCheck{handled: false, value: None}
+    if module_name != "core.math" || type_args.len() != 0 || args.len() == 0 -> return unhandled
+    to_bits :: member == "to_bits"
+    if !to_bits && !sema_call_core_math_f32_member(member) -> return unhandled
+    loop argument in args {
+        if argument.label != None || argument.spread -> return unhandled
+        probe_diagnostics := [Diagnostic]{}
+        probed :: sema_probe_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return unhandled
+        if probed.ty != Type.Float32 -> return unhandled
+    }
+    failed :: SemaDirectSpecialCheck{handled: true, value: None}
+    values := [TExpr]{}
+    loop argument in args {
+        value :: sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return failed
+        &values.push(if to_bits -> value else -> sema_expr_numeric_conversion(value, Type.Float, span, 0) ?? return failed)
+    }
+    if to_bits {
+        bits :: sema_call_core_math_source("__to_bits_f32", values, Type.Int, true, span, environment, program, &diagnostics) ?? return failed
+        return SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(^bits, expected, environment, program, &diagnostics)}
+    }
+    wide :: sema_call_core_math_source(member, values, Type.Float, false, span, environment, program, &diagnostics) ?? return failed
+    narrow :: sema_expr_numeric_conversion(wide, Type.Float32, span, 0) ?? return failed
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(^narrow, expected, environment, program, &diagnostics)}
+}
+
+// The core.math functions of Float arguments with a Float result that an
+// all-F32 call computes at F32 width (sqrt keeps its own record rule).
+fn sema_call_core_math_f32_member(member: String) -> Bool Never! {
+    if member == {
+        "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sinh" | "cosh" | "tanh" | "exp" | "ln" | "log2" | "log10" | "acosh" | "asinh" | "atanh" | "cbrt" | "exp2" | "exp_m1" | "ln_1p" | "degrees" | "radians" | "atan2" | "hypot" | "copysign" | "log" | "floor" | "ceil" | "trunc" | "fract" | "lerp" | "fma" | "muladd" -> true
+        else -> false
+    }
+}
+
 // Rust core_call.rs `exact_rational_math_approx`: a core.math function whose
 // result leaves the rationals takes an exact Fraction or Decimal argument
 // across its one boundary into Float, as `value.to_float()`. The other math
@@ -763,15 +803,17 @@ fn sema_call_core_math_exact_crossing(module_name: String, member: String, args:
 }
 
 // Width selection is the existing checked mathematical normalization; it is
-// separate from source forwarding and never widens F32 values. A typed
-// `json.decode<T>` / `toml.decode<T>` / `yaml.decode<T>` runs its module's
-// typed source (`__decode_typed`).
+// separate from source forwarding and never widens F32 values: an F32
+// `math.cmp` / `math.is_finite` runs its `__<member>_f32` source in place of
+// the Float row. A typed `json.decode<T>` / `toml.decode<T>` /
+// `yaml.decode<T>` runs its module's typed source (`__decode_typed`).
 fn sema_call_core_normalized_source_record(record: CoreCallRecord, args: [TExpr], type_args: [Type]) -> CoreCallRecord Never! {
     normalized := record
     if record.symbol == CoreCallSymbol.SourceOwned && sema_call_core_typed_decode_module(record.module_name) && record.member == "decode" && type_args.len() != 0 {
         normalized.source_target = Val("__decode_typed")
     }
-    if record.symbol == CoreCallSymbol.SourceOwned && record.module_name == "core.math" && (record.member == "cmp" || record.member == "is_finite") && args.len() > 0 && args[0].ty == Type.Float32 {
+    if record.module_name == "core.math" && (record.member == "cmp" || record.member == "is_finite") && args.len() > 0 && args[0].ty == Type.Float32 {
+        normalized.symbol = CoreCallSymbol.SourceOwned
         normalized.source_target = Val("__{record.member}_f32")
     }
     if record.symbol == CoreCallSymbol.SourceOwned && record.module_name == "core.net" && record.member == "unix_connect" {
@@ -844,12 +886,12 @@ fn sema_call_core_tree_checked(record: CoreCallRecord, args: [TExpr], span: Span
         if {
             source == Type.Float -> widened = Val(args[0].copy())
             source == Type.Float32 -> widened = sema_expr_numeric_conversion(args[0].copy(), Type.Float, span, 0)
-            nominal == "Fraction" || nominal.ends_with("::Fraction") -> widened = sema_call_core_math_source("__fraction_to_float", args[0].copy(), true, span, environment, program, &diagnostics)
-            nominal == "Decimal" || nominal.ends_with("::Decimal") -> widened = sema_call_core_math_source("__decimal_to_float", args[0].copy(), true, span, environment, program, &diagnostics)
+            nominal == "Fraction" || nominal.ends_with("::Fraction") -> widened = sema_call_core_math_source("__fraction_to_float", [TExpr]{args[0].copy()}, Type.Float, true, span, environment, program, &diagnostics)
+            nominal == "Decimal" || nominal.ends_with("::Decimal") -> widened = sema_call_core_math_source("__decimal_to_float", [TExpr]{args[0].copy()}, Type.Float, true, span, environment, program, &diagnostics)
             else -> widened = None
         }
         if widened == .Val(argument) {
-            if sema_call_core_math_source("sqrt", argument, false, span, environment, program, &diagnostics) == .Val(root) {
+            if sema_call_core_math_source("sqrt", [TExpr]{argument}, Type.Float, false, span, environment, program, &diagnostics) == .Val(root) {
                 value := root.copy()
                 if source == Type.Float32 -> value = sema_expr_numeric_conversion(root, Type.Float32, span, 0) ?? return None
                 return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
@@ -891,15 +933,19 @@ fn sema_call_core_tree_checked(record: CoreCallRecord, args: [TExpr], span: Span
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
 
-// A call of the core.math source function `member` on one argument, typed
-// Float (sqrt's Float root and the exact types' crossing to Float).
-// `registered` resolves a module-private member such as `__fraction_to_float`.
-fn sema_call_core_math_source(member: String, value: TExpr, registered: Bool, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
+// A call of the core.math source function `member` on checked arguments,
+// typed `result` (sqrt's Float root, the exact types' crossing to Float, and
+// the F32-width math calls). `registered` resolves a module-private member
+// such as `__fraction_to_float`.
+fn sema_call_core_math_source(member: String, values: [TExpr], result: Type, registered: Bool, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
     identity :: sema_call_core_module_identity(environment, program, "core.math") ?? return None
     target :: sema_call_core_source_target(environment, program, identity, member, [Type]{}, span, registered, &diagnostics) ?? return None
     callee :: sema_call_callee_decl(program, target.symbol.id, span, &diagnostics) ?? return None
-    argument :: TCallArg{value: value, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
-    Val(sema_tree_node(Type.Float, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{argument}}, span))
+    arguments := [TCallArg]{}
+    loop value in values {
+        &arguments.push(TCallArg{value: value.copy(), template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false})
+    }
+    Val(sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: arguments}, span))
 }
 
 fn sema_call_core_effect_name(effect_kind: Effect) -> String Never! {

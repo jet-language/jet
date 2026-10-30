@@ -267,6 +267,21 @@ fn round(n: Float) -> Int Never! {
     Int.from_float(whole) ?? panic("bounded rounded Float fits Int")
 }
 fn to_bits(n: Float) -> Int Never! { core.math.to_bits(n) }
+// `math.to_bits` on F32 (D-FLOATW1): the binary32 bits as a non-negative Int.
+// Widening to Float is exact, so the binary64 fields repack without rounding:
+// the top 23 fraction bits, the rebiased exponent, and a binary32 subnormal
+// (a binary64 normal below 2^-126) shifted into the fraction.
+fn __to_bits_f32(n: F32) -> Int Never! {
+    bits :: to_bits(Float.from_f32(n))
+    sign :: (bits >> 32).bit_and(2147483648)
+    exponent :: (bits >> 52).bit_and(2047)
+    fraction :: bits.bit_and(4503599627370495)
+    if exponent == 2047 -> return sign.bit_or(2139095040).bit_or(fraction >> 29)
+    if exponent == 0 -> return sign
+    power :: exponent - 1023
+    if power < -126 -> return sign.bit_or(fraction.bit_or(4503599627370496) >> (-power - 97))
+    sign.bit_or((power + 127) << 23).bit_or(fraction >> 29)
+}
 fn from_bits(bits: Int) -> Float Never! { core.math.from_bits(bits) }
 fn sin_cos(n: Float) -> (cos: Float, sin: Float) Never! {
     pair :: core.math.sin_cos(n)
@@ -577,6 +592,10 @@ fn copy(n: Float) -> Float Never! { n }
     assert_eq(__cmp_f32(F32{NAN}, F32{1.0}), 1)
     assert(__is_finite_f32(F32{1.0}))
     assert(!__is_finite_f32(F32{INFINITY}))
+    assert_eq(__to_bits_f32(F32{16777217.0}), 1266679808)
+    assert_eq(__to_bits_f32(F32{-0.0}), 2147483648)
+    assert_eq(__to_bits_f32(F32{1.0}), 1065353216)
+    assert_eq(__to_bits_f32(F32{INFINITY}), 2139095040)
     assert_eq(radix(0.0), 2)
 }
 

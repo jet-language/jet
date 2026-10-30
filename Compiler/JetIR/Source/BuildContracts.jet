@@ -11,14 +11,16 @@ use jet_foundation.[Span, BodyContract, TContractResult, TPanicLoc, TPanicLocal,
 struct IRContractFrame { result: TContractResult, post: [BodyContract] }
 
 // One checked clause: a proven or stripped clause emits nothing. Its report
-// quotes the clause's source line.
+// quotes the clause's source line with the caret under its span: the callee
+// name of a `#Pre` call site, the clause of a `#Post`.
 fn ir_contract(m: &IRModule, p: IRProgram, b: &IRBuilder, contract: BodyContract) Never! {
     if contract.disposition != .Check -> return
     if contract.file != b.f.source_file -> return ir_fail(&b, contract.span, "contract source differs from its function source")
     source_line :: ir_source_line_text(p, contract.file, contract.line) ?? return ir_fail(&b, contract.span, "contract line {contract.line} is outside its source")
+    column :: ir_source_column(p, contract.file, contract.span.start) ?? return ir_fail(&b, contract.span, "contract span falls outside its source")
     site :: b.line
     b.line = contract.line
-    location :: TPanicLoc{file: contract.file, source_line: source_line, line: contract.line, column: 0, caret: 0, function: "", locals: [TPanicLocal]{}}
+    location :: TPanicLoc{file: contract.file, source_line: source_line, line: contract.line, column: column, caret: contract.span.end - contract.span.start, function: "", locals: [TPanicLocal]{}}
     _ :: ir_require_stop(&m, p, &b, BodyRequireKind.Require{cond: contract.condition, msg: Val(contract.message)}, location, false, contract.span)
     b.line = site
 }

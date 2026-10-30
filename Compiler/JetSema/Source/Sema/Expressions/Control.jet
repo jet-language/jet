@@ -353,8 +353,10 @@ fn sema_expression_result_payload(value: Expr, success: Bool, take_field: Bool, 
 
 // How a `source` failure widens into the `target` error union: one member
 // boxes into its variant; a union whose every member is a target member
-// re-tags each member into the wider union.
-fn sema_expression_try_union_conversion(target: Type, source: Type) -> TTryConvert? {
+// re-tags each member into the wider union. A member matches by nominal
+// identity, so a callee's declared spelling (`NetError`) finds the caller's
+// module-qualified member (`net.NetError`) and boxes under that member's tag.
+fn sema_expression_try_union_conversion(target: Type, source: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TTryConvert? {
     if target == {
         .Union(members) -> {
             tags :: loop member in members -> type_name(member)
@@ -368,11 +370,11 @@ fn sema_expression_try_union_conversion(target: Type, source: Type) -> TTryConve
                 }
                 return Val(TTryConvert.RewidenUnion{enum_name: enum_name})
             }
+            resolved :: sema_expr_expected_type(source, environment, program)
             found :: loop member in members {
-                if type_identity_equal(member, source) -> break true
-            } ?? false
-            if !found -> return None
-            Val(TTryConvert.WidenUnion{enum_name: enum_name, tag: type_name(source)})
+                if type_identity_equal(member, source) || type_identity_equal(sema_expr_expected_type(member, environment, program), resolved) -> break member.copy()
+            } ?? return None
+            Val(TTryConvert.WidenUnion{enum_name: enum_name, tag: type_name(found)})
         }
         else -> None
     }
@@ -840,7 +842,7 @@ fn sema_expression_propagation_conversion(operand_ty: Type, source_expr: Expr?, 
             // identity; both name one nominal type in this module.
             if type_identity_equal(error, target) || type_identity_equal(sema_expr_expected_type(error, environment, program), sema_expr_expected_type(target, environment, program)) -> return sema_expression_propagation_taken(&context, TTryConvert.NoConversion)
             if normalized_target == (Type.Named{name: "Err"}) && sema_expr_unwrap_tag(error) == Type.String -> return sema_expression_propagation_taken(&context, TTryConvert.DefaultErr)
-            widened :: sema_expression_try_union_conversion(normalized_target, error)
+            widened :: sema_expression_try_union_conversion(normalized_target, error, environment, program)
             if widened == .Val(widening) -> return sema_expression_propagation_taken(&context, widening)
             if sema_failure_declared_conversion(error, target, environment, program, scopes) == .Val(key) -> return sema_expression_propagation_taken(&context, TTryConvert.Typed{fn_name: key, source: error, target: target})
             if sema_prelude_error_conversion_key(error, target, environment, program) == .Val(key) -> return sema_expression_propagation_taken(&context, TTryConvert.Typed{fn_name: key, source: error, target: target})
