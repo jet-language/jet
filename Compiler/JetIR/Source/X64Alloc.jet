@@ -25,6 +25,8 @@
 // of calls that return an aggregate, rounded so rsp stays 16-byte aligned
 // at every call.
 
+use jet_foundation.[Type, compiler_threads_single, name_rows_set]
+
 // Callee-saved registers handed to General slots, in preference order.
 IR_X64_SLOT_REGISTERS :: [Int]{3, 12, 13, 14, 15}
 // The xmm registers handed to Float slots.
@@ -106,6 +108,10 @@ struct IRX64Allocation {
     // rbp displacement of the hidden result pointer of a function that
     // returns an aggregate, 0 for none.
     result_home: Int
+    // The slot whose StackAddress storage is the caller's result storage
+    // (ir_x64_result_storage), -1 for none: its StackAddress loads the
+    // hidden result pointer and a Return of it copies nothing.
+    result_storage: Int
 }
 
 // Which operands of an instruction are slots it reads: none; `a`; `a` and
@@ -254,6 +260,9 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
         &values.push(if constant -> f.a[at] else -> 0)
         &addressed.push(slot >= f.param_count && f.slot_kind[slot] == .Temp && writes[slot] == 1 && f.op[at] == .StackAddress && classes[slot] == .General)
     }
+    result_storage :: ir_x64_result_storage(m, f, last_write, writes)
+    // It holds the hidden pointer, so no address derives from rbp.
+    if result_storage >= 0 -> addressed[result_storage] = false
     // Frame addresses derived from one: per slot the StackAddress slot it
     // points into (-1: none) and how far. Each derived slot is written once,
     // so it holds that address wherever it is read.
@@ -392,7 +401,7 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     loop at in 0..<f.op.len() {
         disp := 0
         op :: f.op[at]
-        if op == .StackAddress {
+        if op == .StackAddress && (result_storage < 0 || at != last_write[result_storage]) {
             size :: ir_x64_storage_size(f, at)
             align :: if f.b[at] > 16 -> 16 else if f.b[at] < 1 -> 1 else -> f.b[at]
             depth = ir_x64_align(depth + size, align)
@@ -414,7 +423,31 @@ fn ir_x64_allocate(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     loop slot in 0..<count -> &frames.push(if roots[slot] >= 0 -> stack[last_write[roots[slot]]] + shifts[slot] else -> 0)
     total :: ir_x64_align(depth, 16)
     frame_bytes :: total - 8 * kept.len()
-    IRX64Allocation{regs: ^regs, xmms: ^xmms, xmm_slots: ^xmm_slots, homes: ^homes, consts: ^consts, values: ^values, frames: ^frames, starts: ^starts, ends: ^ends, stack: ^stack, saved: ^kept, frame_bytes: frame_bytes, result_home: result_home}
+    IRX64Allocation{regs: ^regs, xmms: ^xmms, xmm_slots: ^xmm_slots, homes: ^homes, consts: ^consts, values: ^values, frames: ^frames, starts: ^starts, ends: ^ends, stack: ^stack, saved: ^kept, frame_bytes: frame_bytes, result_home: result_home, result_storage: result_storage}
+}
+
+// The slot an aggregate-returning function builds its result in, when the
+// caller's result storage can take that place: every Return with a value
+// returns it, its only write is a StackAddress of exactly the result's size
+// and no stricter alignment than 8, and no parameter can carry an address
+// (an aggregate, pointer or String), so no argument can point into the
+// caller's storage the result overwrites. -1 otherwise.
+fn ir_x64_result_storage(m: IRModule, f: IRFunction, last_write: [Int], writes: [Int]) -> Int Never! {
+    if f.result < 0 || m.types[f.result].kind != .Aggregate -> return -1
+    loop slot in 0..<f.param_count {
+        kind :: m.types[f.slot_type[slot]].kind
+        if kind == .Aggregate || kind == .Pointer || kind == .String -> return -1
+    }
+    found := -1
+    loop at in 0..<f.op.len() {
+        if f.op[at] != .Return || f.a[at] < 0 -> next
+        if found >= 0 && f.a[at] != found -> return -1
+        found = f.a[at]
+    }
+    if found < f.param_count || f.slot_kind[found] != .Temp || writes[found] != 1 -> return -1
+    at :: last_write[found]
+    if at < 0 || f.op[at] != .StackAddress || ir_x64_storage_size(f, at) != m.types[f.result].size || f.b[at] > 8 -> return -1
+    found
 }
 
 // The bytes of the storage the StackAddress at `at` reserves.
@@ -468,4 +501,63 @@ fn ir_x64_scan(starts: [Int], ends: [Int], weights: [Int], eligible: [Bool], poo
         }
     }
     regs
+}
+
+// make(x) builds a Pair from a scalar: in the caller's storage. swap(p)
+// reads a Pair parameter, which may point into that storage: in its own.
+// Callees stay out of line, so each is checked as selection sees it after
+// the level's passes.
+#Test("A function builds its aggregate result in the caller's storage only when no argument can alias it") {
+    loop level in 0..<3 {
+        m := ir_module_new()
+        word :: ir_type_row(&m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+        pair :: ir_intern_type(&m, "Pair", IRType{ty: Type.Named{name: "Pair"}, kind: IRTypeKind.Aggregate, size: 16, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: ""})
+        make := ir_function_new("make", "test:pair.jet::make", "", "pair.jet", 1)
+        x :: ir_slot(&make, word, IRSlotKind.Param, ir_intern_name(&m, "x"), 1)
+        make.result = pair
+        built :: ir_slot(&make, pair, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(&make, IROp.StackAddress, built, 16, 8, -1, 2)
+        _ := ir_emit(&make, IROp.Store, -1, built, 0, x, 2)
+        _ := ir_emit(&make, IROp.Store, -1, built, 8, x, 2)
+        _ := ir_emit(&make, IROp.Return, -1, built, -1, -1, 2)
+        make_row :: m.functions.len()
+        name_rows_set(&m.function_rows, make.key, make_row)
+        &m.functions.push(make)
+        swap := ir_function_new("swap", "test:pair.jet::swap", "", "pair.jet", 4)
+        p :: ir_slot(&swap, pair, IRSlotKind.Param, ir_intern_name(&m, "p"), 4)
+        swap.result = pair
+        left :: ir_slot(&swap, word, IRSlotKind.Temp, -1, 0)
+        right :: ir_slot(&swap, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(&swap, IROp.Load, left, p, 0, -1, 5)
+        _ := ir_emit(&swap, IROp.Load, right, p, 8, -1, 5)
+        swapped :: ir_slot(&swap, pair, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(&swap, IROp.StackAddress, swapped, 16, 8, -1, 5)
+        _ := ir_emit(&swap, IROp.Store, -1, swapped, 0, right, 5)
+        _ := ir_emit(&swap, IROp.Store, -1, swapped, 8, left, 5)
+        _ := ir_emit(&swap, IROp.Return, -1, swapped, -1, -1, 5)
+        swap_row :: m.functions.len()
+        name_rows_set(&m.function_rows, swap.key, swap_row)
+        &m.functions.push(swap)
+        run := ir_function_new("run", "test:pair.jet::run", "", "pair.jet", 7)
+        seed :: ir_slot(&run, word, IRSlotKind.Temp, -1, 0)
+        _ := ir_emit(&run, IROp.Const, seed, 3, -1, -1, 8)
+        made :: ir_slot(&run, pair, IRSlotKind.Local, ir_intern_name(&m, "a"), 8)
+        make_args :: ir_args(&run, [Int]{seed})
+        _ := ir_emit(&run, IROp.Call, made, make_row, make_args, 1, 8)
+        turned :: ir_slot(&run, pair, IRSlotKind.Local, ir_intern_name(&m, "b"), 9)
+        swap_args :: ir_args(&run, [Int]{made})
+        _ := ir_emit(&run, IROp.Call, turned, swap_row, swap_args, 1, 9)
+        _ := ir_emit(&run, IROp.Return, -1, -1, -1, -1, 10)
+        m.entry = m.functions.len()
+        name_rows_set(&m.function_rows, run.key, m.entry)
+        &m.functions.push(run)
+        if level > 0 {
+            options := ir_opt_options(level)
+            options.inline = IROptInline.Off
+            _ := ir_optimize_module(&m, options, compiler_threads_single())
+        }
+        made_in_place :: ir_x64_allocate(m, m.functions[make_row])
+        assert(made_in_place.result_storage >= 0)
+        assert_eq(ir_x64_allocate(m, m.functions[swap_row]).result_storage, -1)
+    }
 }

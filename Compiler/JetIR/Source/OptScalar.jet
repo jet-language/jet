@@ -1,11 +1,14 @@
-// Scalar replacement of frame aggregates (O2): frame storage
+// Scalar replacement of frame aggregates (O1 and O2): frame storage
 // (StackAddress, written once) whose address is the base of Loads and
 // Stores at constant offsets becomes one slot per field, so its fields live
 // in registers instead of memory. A Store becomes a move into the field's
 // slot and a Load a move out of it: the bytes a Store writes and a Load of
-// the same type reads back are exactly the slot's value.
+// the same type reads back are exactly the slot's value. The address may
+// pass through aliases (slots written once by a Move of it, such as an
+// inlined call's result); their Loads and Stores are the storage's own and
+// their Moves go with it.
 //
-// With `promote`, the address may also be lent out: to a Drop, or to a call
+// With `promote` (O2), the address may also be lent out: to a Drop, or to a call
 // or CopyBytes outside every Loop. The storage then stays, and the fields
 // go back to it before each such use (every field: the stored bytes are
 // what the memory form would hold) and, unless it is a Drop, come back from
@@ -37,6 +40,22 @@ fn ir_opt_scalar_replace(m: IRModule, f: &IRFunction, promote: Bool) -> Int Neve
     loop slot in 0..<count {
         def :: if slot >= f.param_count && facts.defs[slot] == 1 -> facts.def_at[slot] else -> -1
         &candidate.push(def >= 0 && f.op[def] == .StackAddress)
+    }
+    // Aliases: a slot written once, by a Move of a candidate's address or of
+    // another alias (an inlined call's result, a variable bound to it). Its
+    // Loads and Stores are the storage's own; any other use refuses it.
+    root := [Int]{}
+    loop _ in 0..<count -> &root.push(-1)
+    loop at in 0..<f.op.len() {
+        if f.op[at] != .Move -> next
+        dst :: f.dst[at]
+        source :: f.a[at]
+        if dst < f.param_count || dst >= count || source < 0 || facts.defs[dst] != 1 || candidate[dst] -> next
+        if candidate[source] {
+            root[dst] = source
+        } else if root[source] >= 0 {
+            root[dst] = root[source]
+        }
     }
     offsets := [[Int]]{}
     rows := [[Int]]{}
@@ -76,7 +95,8 @@ fn ir_opt_scalar_replace(m: IRModule, f: &IRFunction, promote: Bool) -> Int Neve
             view_offset[f.dst[at]] = f.b[at]
             next
         }
-        if op == .CopyBytes && f.a[at] != f.b[at] {
+        // A copy through an alias is a use of its storage like any other.
+        if op == .CopyBytes && f.a[at] != f.b[at] && (f.a[at] < 0 || root[f.a[at]] < 0) && (f.b[at] < 0 || root[f.b[at]] < 0) {
             target :: ir_opt_copy_side(f, facts, candidate, view_slot, view_offset, f.a[at], f.c[at])
             source :: ir_opt_copy_side(f, facts, candidate, view_slot, view_offset, f.b[at], f.c[at])
             // A copy within one storage could overwrite fields it still reads.
@@ -89,20 +109,23 @@ fn ir_opt_scalar_replace(m: IRModule, f: &IRFunction, promote: Bool) -> Int Neve
             }
         }
         ir_x64_reads_into(f, at, &reads)
-        loop slot in reads {
-            if slot < 0 -> next
-            if view_slot[slot] >= 0 {
-                candidate[view_slot[slot]] = false
+        loop read in reads {
+            if read < 0 -> next
+            // The Move that makes an alias is no use of the storage.
+            if op == .Move && f.dst[at] >= 0 && root[f.dst[at]] >= 0 -> next
+            if view_slot[read] >= 0 {
+                candidate[view_slot[read]] = false
                 next
             }
+            slot :: if root[read] >= 0 -> root[read] else -> read
             if !candidate[slot] -> next
-            if op == .Load && f.a[at] == slot {
+            if op == .Load && f.a[at] == read {
                 &offsets[slot].push(f.b[at])
                 &rows[slot].push(f.slot_type[f.dst[at]])
-            } else if op == .Store && f.a[at] == slot && f.c[at] != slot {
+            } else if op == .Store && f.a[at] == read && f.c[at] != read {
                 &offsets[slot].push(f.b[at])
                 &rows[slot].push(f.slot_type[f.c[at]])
-            } else if promote && ir_opt_lends(f, at, slot, depth) {
+            } else if promote && read == slot && ir_opt_lends(f, at, slot, depth) {
                 lent[slot] = true
             } else {
                 candidate[slot] = false
@@ -183,8 +206,11 @@ fn ir_opt_scalar_replace(m: IRModule, f: &IRFunction, promote: Bool) -> Int Neve
         // A view of replaced storage: every copy through it was rewritten.
         if op == .Offset && f.dst[at] >= 0 && view_slot[f.dst[at]] >= 0 && candidate[view_slot[f.dst[at]]] -> next
         if op == .StackAddress && f.dst[at] >= 0 && candidate[f.dst[at]] && offsets[f.dst[at]].len() > 0 && !lent[f.dst[at]] -> next
-        if (op == .Load || op == .Store) && f.a[at] >= 0 && candidate[f.a[at]] && !(op == .Store && f.c[at] == f.a[at]) {
-            base :: f.a[at]
+        // An alias of storage that is gone has nothing left to name.
+        if op == .Move && f.dst[at] >= 0 && root[f.dst[at]] >= 0 && candidate[root[f.dst[at]]] && offsets[root[f.dst[at]]].len() > 0 && !lent[root[f.dst[at]]] -> next
+        access :: if (op == .Load || op == .Store) && f.a[at] >= 0 && root[f.a[at]] >= 0 -> root[f.a[at]] else -> f.a[at]
+        if (op == .Load || op == .Store) && access >= 0 && candidate[access] && !(op == .Store && f.c[at] == f.a[at]) {
+            base :: access
             field :: fields[base][cursor[base]]
             cursor[base] = cursor[base] + 1
             if op == .Load {

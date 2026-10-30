@@ -1800,7 +1800,10 @@ fn ir_x64_truth(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocatio
 fn ir_x64_return(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) Never! {
     slot :: f.a[at]
     if slot >= 0 {
-        if al.result_home != 0 {
+        if slot == al.result_storage {
+            // Built in place: the hidden pointer is the result.
+            x64_load(&e.code, X64_RAX, X64_RBP, al.result_home)
+        } else if al.result_home != 0 {
             // An aggregate result: its bytes go through the hidden pointer.
             ir_x64_load(&e, m, f, al, slot, X64_RDX)
             x64_load(&e.code, X64_RAX, X64_RBP, al.result_home)
@@ -1897,7 +1900,11 @@ fn ir_x64_select(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
         .Offset -> ir_x64_offset(&e, m, f, al, at)
         .CopyBytes -> ir_x64_copy(&e, m, f, al, at)
         .StackAddress -> {
-            x64_lea(&e.code, X64_RAX, X64_RBP, al.stack[at])
+            if dst == al.result_storage {
+                x64_load(&e.code, X64_RAX, X64_RBP, al.result_home)
+            } else {
+                x64_lea(&e.code, X64_RAX, X64_RBP, al.stack[at])
+            }
             ir_x64_store(&e, m, f, al, dst, X64_RAX)
         }
         .Block -> ir_x64_open(&e, at, -1, -1)

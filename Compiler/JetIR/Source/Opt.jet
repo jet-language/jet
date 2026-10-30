@@ -1,12 +1,12 @@
 // Optimization levels over the slot IR: IR in, IR out, between the builder
 // and x86-64 selection. Level 0 (`jet run`, `jet dev`, compile-time code)
 // leaves the module as built; level 1 (`jet build`) inlines small direct
-// callees bottom-up over the call graph (drop glue too, `glue`) and
-// simplifies every function;
+// callees bottom-up over the call graph (drop glue too, `glue`), simplifies
+// every function, replaces frame aggregates by their fields (`scalar`) and
+// simplifies again;
 // level 2 (`--release`) first hoists calls making a list's buffer its own
-// out of Loops (`unique`), and after Simplify adds scalar replacement of
-// frame aggregates (also of ones whose address is only lent out,
-// `promote`), simplifies again, and runs each function through SSA
+// out of Loops (`unique`), also replaces frame aggregates whose address is
+// only lent out (`promote`), and runs each function through SSA
 // (Ssa.jet, SsaOut.jet). Both levels fold polls into later ones before
 // Simplify and again at the end, then move stop points right after their
 // calls (`stops`, OptStops.jet).
@@ -408,7 +408,7 @@ fn ir_opt_calls_route(m: IRModule, f: IRFunction, at: Int, route: String) -> Boo
 // One function's passes: at level 2 uniqueness hoisting, then inlining its
 // callees' final bodies (`bodies`; the drop glue it calls, OptGlue.jet, and
 // a glue call left is a Drop again), then the polls folded into the next
-// stop point, Simplify, at level 2 scalar replacement, Simplify again and
+// stop point, Simplify, scalar replacement, Simplify again, at level 2
 // the SSA round trip, and last the polls folded again and the stop points
 // moved after their calls.
 // Hoisting, glue and stops match callees by `keys` (every function's key),
@@ -442,13 +442,15 @@ fn ir_opt_function(m: IRModule, bodies: [[IRFunction]], keys: [String], f: ^IRFu
     }
     ir_opt_simplify(m, &out, &report)
     if checking -> checking = ir_opt_lint(m, lint, out, "simplify", &report)
+    // Scalar replacement runs from O1 (an aggregate an inlined call returns
+    // lives in registers there too); its loans (`promote`) wait for O2.
+    if level >= 1 && ir_opt_enabled(options, "scalar") {
+        replaced :: ir_opt_scalar_replace(m, &out, level >= 2 && ir_opt_enabled(options, "promote"))
+        report.aggregates_replaced += replaced
+        if replaced > 0 -> ir_opt_simplify(m, &out, &report)
+        if checking -> checking = ir_opt_lint(m, lint, out, "scalar", &report)
+    }
     if level >= 2 {
-        if ir_opt_enabled(options, "scalar") {
-            replaced :: ir_opt_scalar_replace(m, &out, ir_opt_enabled(options, "promote"))
-            report.aggregates_replaced += replaced
-            if replaced > 0 -> ir_opt_simplify(m, &out, &report)
-            if checking -> checking = ir_opt_lint(m, lint, out, "scalar", &report)
-        }
         // The SSA form is built only from a body IR Lint passed.
         if ir_opt_enabled(options, "ssa") && (checking || !options.verify) {
             before :: report.lint.len()
