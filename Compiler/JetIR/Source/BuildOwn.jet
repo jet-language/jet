@@ -1154,9 +1154,11 @@ fn ir_close_call(b: &IRBuilder, glue: Int, value: Int) Never! {
     ir_emit(&b.f, IROp.Call, -1, glue, start, 1, b.line)
 }
 
-// Arms the close of the variable in `slot` when its value closes.
+// Arms the close of the variable in `slot` when its value closes. An
+// allocator view owns nothing: its allocator closes the value at reset or
+// close (ir_allocator_method).
 fn ir_close_arm(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, members_only: Bool, span: Span) Never! {
-    if slot < 0 -> return
+    if slot < 0 || b.views.get(slot) != None -> return
     row :: b.f.slot_type[slot]
     glue :: ir_close_glue(&m, p, &b, row, members_only, span)
     if glue < 0 -> return

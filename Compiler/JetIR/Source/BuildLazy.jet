@@ -218,8 +218,9 @@ fn ir_lazy_drop_body(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: 
 
 // lazy.retire(slot): closes the stored value, then drops it, as a variable's
 // scope end does (Build.jet ir_drop_bindings: ir_close_now, then the drop). The
-// owner of the last reference to a value with no variable of its own (the
-// cell of a Shared) runs it; lazy.drop alone never runs a Close method.
+// owner of a value with no variable of its own (the cell of a Shared, the
+// storage of a core.mem allocator) runs it; lazy.drop alone never runs a Close
+// method.
 fn ir_lazy_retire_body(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, span: Span) Never! {
     pointer_row :: ir_pointer_row(&m)
     source :: ir_new_slot(&a, pointer_row, IRSlotKind.Param, ir_intern_name(&m, "slot"))
