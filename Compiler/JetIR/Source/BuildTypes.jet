@@ -254,11 +254,12 @@ fn ir_value_type_laid(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) ->
         interned :: ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Aggregate, ty, 24, 8, IRClass.Pointer, false, 64, ""))
         return Val(ir_mark_counted(&m, interned))
     }
-    // A Queue is its List (the elements front to back) and a Tally the
-    // ordered Map from each element to its count; both share their carrier's
-    // row.
+    // A Queue is its List (the elements front to back), a Tally the ordered
+    // Map from each element to its count and a Cache its capacity with its
+    // entries (ir_cache_carrier); each shares its carrier's row.
     if ir_queue_element(ty) == .Val(element) -> return ir_value_type_in(&m, p, Type.List{element: element}, laying)
     if ir_tally_element(ty) == .Val(element) -> return ir_value_type_in(&m, p, Type.Map{key: element, key_span: None, value: Type.Int}, laying)
+    if ir_cache_carrier(ty) == .Val(carrier) -> return ir_value_type_in(&m, p, carrier, laying)
     if ty == .Map(_, _, _) -> return ir_map_row(&m, p, ty, laying)
     // A counted closure box pointer (BuildCoreClosures.jet ir_closure_row).
     if ty == .Fn(_, _, _, _, _, _) -> return Val(ir_closure_row(&m, ty))
@@ -3427,11 +3428,26 @@ fn ir_tally_element(ty: Type) -> Type? Never! {
     None
 }
 
+// The (key, value) entry of a `Cache<K, V>`.
+fn ir_cache_entry(ty: Type) -> Type? Never! {
+    if ir_untag(ty) == .Apply(name, args) {
+        if name == "Cache" && args.len() == 2 -> return Val(Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: args[0].copy()}, TypeTupleField{name: "value", ty: args[1].copy()}}})
+    }
+    None
+}
+
+// The carrier of a `Cache<K, V>`: its capacity as a native word and its
+// entries, least recently used first.
+fn ir_cache_carrier(ty: Type) -> Type? Never! {
+    entry :: ir_cache_entry(ty) ?? return None
+    Val(Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "capacity", ty: Type.IntN{signed: true, bits: 64}}, TypeTupleField{name: "entries", ty: Type.List{element: entry}}}})
+}
+
 // Whether `ty` is a native carrier the builder lays out itself (a Set, Rank,
-// PriorityQueue, Queue, Tally, Iter, Task, channel endpoint, Event,
+// PriorityQueue, Queue, Tally, Cache, Iter, Task, channel endpoint, Event,
 // ScopeGuard or Shared handle), not as its declared fields.
 fn ir_native_carrier(ty: Type) -> Bool Never! {
-    ir_set_element(ty) != None || ir_priority_queue_element(ty) != None || ir_queue_element(ty) != None || ir_tally_element(ty) != None || ir_iter_element(ty) != None || ir_task_element(ty) != None || ir_channel_element(ty, "Sender") != None || ir_channel_element(ty, "Receiver") != None || ir_event_type(ty) || ir_scope_guard_type(ty) || ir_untag(ty) == .Shared(_)
+    ir_set_element(ty) != None || ir_priority_queue_element(ty) != None || ir_queue_element(ty) != None || ir_tally_element(ty) != None || ir_cache_carrier(ty) != None || ir_iter_element(ty) != None || ir_task_element(ty) != None || ir_channel_element(ty, "Sender") != None || ir_channel_element(ty, "Receiver") != None || ir_event_type(ty) || ir_scope_guard_type(ty) || ir_untag(ty) == .Shared(_)
 }
 
 // The 64-byte descriptor rows of a text pattern's parts, one per part

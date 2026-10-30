@@ -794,6 +794,7 @@ fn ir_builtin_on(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver_t
         return ir_priority_queue_builtin(&m, p, &b, ty, operation, subject, operands, span)
     }
     if ir_tally_element(receiver_ty) != None -> return ir_tally_builtin(&m, p, &b, ty, operation, subject, operands, span)
+    if ir_cache_carrier(receiver_ty) != None -> return ir_cache_builtin(&m, p, &b, ty, receiver_ty, operation, subject, operands, span)
     if ir_map_entry_type(receiver_ty) != None {
         map_route :: ir_builtin_route_plan(operation, receiver_ty, ty, ir_failure_carrier_for_type(ty))
         if ir_map_builtin(&m, p, &b, ty, map_route.symbol, subject, operands, span) == .Val(result) -> return result
@@ -1092,6 +1093,280 @@ fn ir_tally_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, operati
     ir_release(&m, &b, key)
     if operation == .BagCount -> ir_release(&m, &b, tally)
     result
+}
+
+// A Cache carrier's layout (ir_cache_carrier): the byte offsets of its
+// capacity word and entries List, the List's row, the entry row with its key
+// and value members, and the entry stride.
+struct IRCacheShape { capacity: Int, entries: Int, list: Int, entry: Int, key: IRMember, value: IRMember, stride: Int }
+
+fn ir_cache_shape(m: &IRModule, p: IRProgram, ty: Type) -> IRCacheShape? Never! {
+    carrier :: ir_cache_carrier(ty) ?? return None
+    entry_ty :: ir_cache_entry(ty) ?? return None
+    shape := IRCacheShape{capacity: -1, entries: -1, list: -1, entry: -1, key: IRMember{name: "", offset: 0, ty: -1}, value: IRMember{name: "", offset: 0, ty: -1}, stride: 0}
+    if carrier == .Tuple(fields) {
+        members :: ir_tuple_members(&m, p, fields) ?? return None
+        loop member in members {
+            if member.name == "capacity" -> shape.capacity = member.offset
+            if member.name == "entries" {
+                shape.entries = member.offset
+                shape.list = member.ty
+            }
+        }
+    }
+    if entry_ty == .Tuple(fields) {
+        shape.entry = ir_value_type(&m, p, entry_ty) ?? return None
+        members :: ir_tuple_members(&m, p, fields) ?? return None
+        loop member in members {
+            if member.name == "key" -> shape.key = member
+            if member.name == "value" -> shape.value = member
+        }
+    }
+    if shape.capacity < 0 || shape.list < 0 || shape.entry < 0 || shape.key.ty < 0 || shape.value.ty < 0 -> return None
+    shape.stride = ir_list_stride(m, shape.entry)
+    Val(shape)
+}
+
+// A Cache builtin over its carrier (ir_cache_carrier), whose entries run from
+// least to most recently used. `add(k, v)` replaces a held key's value and
+// returns the old one, or adds the key, first evicting the least recently
+// used entry at capacity; `add_new(k, v)` adds only an absent key; `get(k)`
+// copies a held key's value out; each makes `k` the most recently used.
+// `remove(k)` moves a held key's value out, `has_key(k)` leaves the order as
+// is and `keys()` lists the most recently used first. A capacity below 1
+// holds nothing.
+fn ir_cache_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver_ty: Type, operation: TBuiltinOp, cache: Int, operands: [Int], span: Span) -> Int Never! {
+    shape :: ir_cache_shape(&m, p, receiver_ty) ?? return ir_fail_slot(&b, span, "Cache builtin {ir_builtin_name(operation)} on {ir_type_name(receiver_ty)}")
+    int_row :: ir_type_row(&m, Type.Int) ?? 0
+    entries :: ir_load_at(&m, &b, cache, shape.entries, shape.list)
+    zero :: ir_word_const(&m, &b, 0)
+    one :: ir_word_const(&m, &b, 1)
+    width :: ir_word_const(&m, &b, shape.stride)
+    if operation == .LenList || operation == .IsEmpty || operation == .LRUCapacity || operation == .LRUKeys {
+        result := -1
+        if {
+            operation == .LenList -> result = ir_load_at(&m, &b, entries, 0, int_row)
+            operation == .IsEmpty -> {
+                length :: ir_load_word(&m, &b, entries, 0)
+                result = ir_bool_op(&m, &b, IROp.Eq, length, zero)
+            }
+            operation == .LRUCapacity -> {
+                capacity :: ir_load_word(&m, &b, cache, shape.capacity)
+                result = ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{capacity}, int_row)
+            }
+            else -> result = ir_cache_keys(&m, p, &b, ty, shape, entries, span)
+        }
+        ir_release(&m, &b, cache)
+        return result
+    }
+    if operation == .Clear {
+        ir_emit(&b.f, IROp.Drop, -1, entries, -1, -1, b.line)
+        ir_emit(&b.f, IROp.Store, -1, entries, 0, zero, b.line)
+        ir_emit(&b.f, IROp.Store, -1, entries, 8, zero, b.line)
+        ir_emit(&b.f, IROp.Store, -1, entries, 16, zero, b.line)
+        return -1
+    }
+    keyed :: operation == .ContainsKey || operation == .LRUGet || operation == .LRURemove || operation == .LRUPut || operation == .LRUAddNew
+    if !keyed || operands.len() < 2 || operands[1] < 0 -> return ir_fail_slot(&b, span, "Cache builtin {ir_builtin_name(operation)}")
+    key :: ir_adapt(&m, p, &b, operands[1], shape.key.ty, span)
+    if ir_failed(b) -> return -1
+    if operation == .ContainsKey {
+        found :: ir_pair_find(&m, p, &b, entries, shape.entry, shape.key, key, span)
+        ir_release(&m, &b, key)
+        ir_release(&m, &b, cache)
+        return ir_bool_op(&m, &b, IROp.Ge, found, zero)
+    }
+    ir_make_unique(&m, p, &b, entries)
+    found :: ir_pair_find(&m, p, &b, entries, shape.entry, shape.key, key, span)
+    if ir_failed(b) -> return -1
+    present :: ir_bool_op(&m, &b, IROp.Ge, found, zero)
+    if operation == .LRUAddNew || operation == .LRUPut {
+        if operands.len() != 3 || operands[2] < 0 -> return ir_fail_slot(&b, span, "Cache {ir_builtin_name(operation)} without a value")
+        value :: ir_adapt(&m, p, &b, operands[2], shape.value.ty, span)
+        if ir_failed(b) -> return -1
+        // Both go in on an add; a held key's value replaces the old one, and
+        // what stays out is dropped.
+        owned_key :: ir_own(&m, p, &b, key)
+        owned_value :: ir_own(&m, p, &b, value)
+        result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+        result :: ir_fresh_temp(&m, &b, result_row)
+        if {
+            operation == .LRUPut -> ir_option_none(&m, &b, result)
+            else -> ir_emit(&b.f, IROp.Const, result, 0, -1, -1, b.line)
+        }
+        ir_open_if(&b.f, present, b.line)
+        if {
+            operation == .LRUPut -> {
+                address :: ir_cache_touch(&m, &b, shape, entries, found)
+                ir_cache_take_value(&m, &b, shape, address, result)
+                b.fresh[owned_value] = true
+                ir_store_at(&m, p, &b, address, shape.value.offset, owned_value)
+            }
+            else -> ir_cache_drop(&m, &b, owned_value)
+        }
+        ir_cache_drop(&m, &b, owned_key)
+        ir_else(&b.f, b.line)
+        ir_cache_add(&m, p, &b, shape, cache, entries, owned_key, owned_value, if operation == .LRUAddNew -> result else -> -1)
+        ir_end(&b.f, b.line)
+        if owned_key >= 0 -> b.fresh[owned_key] = false
+        if owned_value >= 0 -> b.fresh[owned_value] = false
+        return result
+    }
+    option_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    result :: ir_fresh_temp(&m, &b, option_row)
+    ir_option_none(&m, &b, result)
+    ir_open_if(&b.f, present, b.line)
+    if {
+        operation == .LRUGet -> {
+            address :: ir_cache_touch(&m, &b, shape, entries, found)
+            stored :: ir_load_at(&m, &b, address, shape.value.offset, shape.value.ty)
+            copied :: ir_copy_value(&m, p, &b, stored, span)
+            ir_cache_option(&m, p, &b, result, copied)
+        }
+        else -> {
+            data :: ir_load_word(&m, &b, entries, 16)
+            address :: ir_element_address(&m, &b, data, found, shape.stride)
+            ir_cache_take_value(&m, &b, shape, address, result)
+            if m.types[shape.key.ty].drop != "" {
+                removed_key :: ir_load_at(&m, &b, address, shape.key.offset, shape.key.ty)
+                ir_emit(&b.f, IROp.Drop, -1, removed_key, -1, -1, b.line)
+            }
+            length :: ir_load_word(&m, &b, entries, 0)
+            last :: ir_word_op(&m, &b, IROp.Sub, length, one)
+            after :: ir_word_op(&m, &b, IROp.Add, found, one)
+            from :: ir_element_address(&m, &b, data, after, shape.stride)
+            moved :: ir_word_op(&m, &b, IROp.Sub, last, found)
+            bytes :: ir_word_op(&m, &b, IROp.Mul, moved, width)
+            _ :: ir_runtime(&m, &b, "jet_rt_mem_move", [Int]{address, from, bytes}, -1)
+            ir_emit(&b.f, IROp.Store, -1, entries, 0, last, b.line)
+        }
+    }
+    ir_end(&b.f, b.line)
+    ir_release(&m, &b, key)
+    result
+}
+
+// `cache.keys()`: copies of the keys of the Cache entries List at `entries`,
+// the most recently used first.
+fn ir_cache_keys(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRCacheShape, entries: Int, span: Span) -> Int Never! {
+    result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    result :: ir_list_empty(&m, &b, result_row)
+    zero :: ir_word_const(&m, &b, 0)
+    one :: ir_word_const(&m, &b, 1)
+    data :: ir_load_word(&m, &b, entries, 16)
+    position :: ir_load_word(&m, &b, entries, 0)
+    exit :: ir_open(&b.f, IROp.Block, b.line)
+    _ :: ir_open(&b.f, IROp.Loop, b.line)
+    more :: ir_bool_op(&m, &b, IROp.Gt, position, zero)
+    ir_exit_unless(&m, &b, more, exit)
+    ir_emit(&b.f, IROp.Sub, position, position, one, IR_OVERFLOW_WRAP, b.line)
+    address :: ir_element_address(&m, &b, data, position, shape.stride)
+    held :: ir_load_at(&m, &b, address, shape.key.offset, shape.key.ty)
+    copied :: ir_copy_value(&m, p, &b, held, span)
+    ir_list_push(&m, p, &b, result, shape.key.ty, copied)
+    ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+    result
+}
+
+// Puts the owned `value` into the Option `result` (an inline Int? is the
+// Int's own word, any other a box).
+fn ir_cache_option(m: &IRModule, p: IRProgram, b: &IRBuilder, result: Int, value: Int) Never! {
+    option_row :: b.f.slot_type[result]
+    if ir_option_inline(m, option_row) {
+        ir_emit(&b.f, IROp.Move, result, value, -1, -1, b.line)
+        return
+    }
+    size :: m.types[b.f.slot_type[value]].size
+    boxed :: ir_box_alloc(&m, &b, size, option_row)
+    ir_store_at(&m, p, &b, boxed, 0, value)
+    ir_emit(&b.f, IROp.Move, result, boxed, -1, -1, b.line)
+    b.fresh[boxed] = false
+}
+
+// Moves entry `index` of the Cache entries List at `entries` to the most
+// recently used end; returns its address there.
+fn ir_cache_touch(m: &IRModule, b: &IRBuilder, shape: IRCacheShape, entries: Int, index: Int) -> Int Never! {
+    data :: ir_load_word(&m, &b, entries, 16)
+    length :: ir_load_word(&m, &b, entries, 0)
+    one :: ir_word_const(&m, &b, 1)
+    last :: ir_word_op(&m, &b, IROp.Sub, length, one)
+    width :: ir_word_const(&m, &b, shape.stride)
+    entry :: ir_element_address(&m, &b, data, index, shape.stride)
+    held :: ir_out_slot(&m, &b, ir_align8(shape.stride) >> 3)
+    _ :: ir_runtime(&m, &b, "jet_rt_mem_move", [Int]{held, entry, width}, -1)
+    after :: ir_word_op(&m, &b, IROp.Add, index, one)
+    from :: ir_element_address(&m, &b, data, after, shape.stride)
+    moved :: ir_word_op(&m, &b, IROp.Sub, last, index)
+    bytes :: ir_word_op(&m, &b, IROp.Mul, moved, width)
+    _ :: ir_runtime(&m, &b, "jet_rt_mem_move", [Int]{entry, from, bytes}, -1)
+    end :: ir_element_address(&m, &b, data, last, shape.stride)
+    _ :: ir_runtime(&m, &b, "jet_rt_mem_move", [Int]{end, held, width}, -1)
+    end
+}
+
+// Moves the value of the Cache entry at `address` out into the Option
+// `result` (an inline Int? is the Int's own word, any other a box).
+fn ir_cache_take_value(m: &IRModule, b: &IRBuilder, shape: IRCacheShape, address: Int, result: Int) Never! {
+    option_row :: b.f.slot_type[result]
+    if ir_option_inline(m, option_row) {
+        taken :: ir_load_at(&m, &b, address, shape.value.offset, shape.value.ty)
+        ir_emit(&b.f, IROp.Move, result, taken, -1, -1, b.line)
+        return
+    }
+    value_size :: m.types[shape.value.ty].size
+    boxed :: ir_box_alloc(&m, &b, value_size, option_row)
+    source :: ir_address_at(&m, &b, address, shape.value.offset)
+    ir_emit(&b.f, IROp.CopyBytes, -1, boxed, source, ir_align8(value_size), b.line)
+    ir_emit(&b.f, IROp.Move, result, boxed, -1, -1, b.line)
+    b.fresh[boxed] = false
+}
+
+// Drops the owned value in `slot` (-1: Unit) whose type has a drop.
+fn ir_cache_drop(m: &IRModule, b: &IRBuilder, slot: Int) Never! {
+    if slot >= 0 && ir_has_drop(m, b, slot) -> ir_emit(&b.f, IROp.Drop, -1, slot, -1, -1, b.line)
+}
+
+// Moves the owned `key` and `value` of an absent key in as the most recently
+// used entry of the Cache at `cache`, first evicting its least recently used
+// entry when it is full; a capacity below 1 drops both. `added` (-1: none)
+// records whether the entry went in.
+fn ir_cache_add(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRCacheShape, cache: Int, entries: Int, key: Int, value: Int, added: Int) Never! {
+    zero :: ir_word_const(&m, &b, 0)
+    one :: ir_word_const(&m, &b, 1)
+    capacity :: ir_load_word(&m, &b, cache, shape.capacity)
+    holds :: ir_bool_op(&m, &b, IROp.Gt, capacity, zero)
+    if added >= 0 -> ir_emit(&b.f, IROp.Copy, added, holds, -1, -1, b.line)
+    ir_open_if(&b.f, holds, b.line)
+    length :: ir_load_word(&m, &b, entries, 0)
+    full :: ir_bool_op(&m, &b, IROp.Ge, length, capacity)
+    ir_open_if(&b.f, full, b.line)
+    data :: ir_load_word(&m, &b, entries, 16)
+    if ir_glue_drops(m, shape.entry) {
+        oldest :: ir_load_at(&m, &b, data, 0, shape.entry)
+        ir_emit(&b.f, IROp.Drop, -1, oldest, -1, -1, b.line)
+    }
+    rest :: ir_word_op(&m, &b, IROp.Sub, length, one)
+    from :: ir_element_address(&m, &b, data, one, shape.stride)
+    width :: ir_word_const(&m, &b, shape.stride)
+    bytes :: ir_word_op(&m, &b, IROp.Mul, rest, width)
+    _ :: ir_runtime(&m, &b, "jet_rt_mem_move", [Int]{data, from, bytes}, -1)
+    ir_emit(&b.f, IROp.Store, -1, entries, 0, rest, b.line)
+    ir_end(&b.f, b.line)
+    point :: ir_list_reserve(&m, &b, entries, shape.entry)
+    room :: ir_load_word(&m, &b, entries, 16)
+    target :: ir_element_address(&m, &b, room, point, shape.stride)
+    if key >= 0 -> b.fresh[key] = true
+    ir_store_at(&m, p, &b, target, shape.key.offset, key)
+    if value >= 0 -> b.fresh[value] = true
+    ir_store_at(&m, p, &b, target, shape.value.offset, value)
+    grown :: ir_word_op(&m, &b, IROp.Add, point, one)
+    ir_emit(&b.f, IROp.Store, -1, entries, 0, grown, b.line)
+    ir_else(&b.f, b.line)
+    ir_cache_drop(&m, &b, key)
+    ir_cache_drop(&m, &b, value)
+    ir_end(&b.f, b.line)
 }
 
 // `list.indexed()`: an Iter over the (index, item) pair of each element, in
@@ -2916,6 +3191,29 @@ fn ir_route_inline(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inpu
     if name == "std::collections::HashSet::new" || name == "std::collections::BTreeSet::new" {
         return Val(ir_set_new(&m, p, &b, inputs, result, span))
     }
+    // `Cache.new(capacity)`: no entries, the capacity a native word (a
+    // negative one is 0).
+    if name == "JetCache::new" {
+        if inputs.len() != 1 || inputs[0] < 0 -> return Val(ir_fail_slot(&b, span, "Cache.new with {inputs.len()} arguments"))
+        shape :: ir_cache_shape(&m, p, result) ?? return Val(ir_type_fail(&b, span, result))
+        row :: ir_value_type(&m, p, result) ?? return Val(ir_type_fail(&b, span, result))
+        requested :: ir_native_index(&m, &b, inputs[0], span)
+        if ir_failed(b) -> return Val(-1)
+        ir_release(&m, &b, inputs[0])
+        zero :: ir_word_const(&m, &b, 0)
+        capacity :: ir_word_op(&m, &b, IROp.Add, requested, zero)
+        negative :: ir_bool_op(&m, &b, IROp.Lt, capacity, zero)
+        ir_open_if(&b.f, negative, b.line)
+        ir_emit(&b.f, IROp.Copy, capacity, zero, -1, -1, b.line)
+        ir_end(&b.f, b.line)
+        cache :: ir_fresh_temp(&m, &b, row)
+        ir_emit(&b.f, IROp.StackAddress, cache, m.types[row].size, 8, -1, b.line)
+        ir_emit(&b.f, IROp.Store, -1, cache, shape.capacity, capacity, b.line)
+        ir_emit(&b.f, IROp.Store, -1, cache, shape.entries, zero, b.line)
+        ir_emit(&b.f, IROp.Store, -1, cache, shape.entries + 8, zero, b.line)
+        ir_emit(&b.f, IROp.Store, -1, cache, shape.entries + 16, zero, b.line)
+        return Val(cache)
+    }
     // `a.equal(b)` (core.compare eq): the values' structural equality, both
     // borrowed.
     if name == "jet_eq" {
@@ -3872,7 +4170,7 @@ fn ir_route_symbol(symbol: String) -> String Never! {
 // The routes ir_route_inline builds in place instead of calling the runtime;
 // ir_route_labeled reaches it only for these.
 IR_ROUTES_INLINE :: comptime { [String]{
-    "std::collections::BinaryHeap::new", "std::collections::HashSet::new", "std::collections::BTreeSet::new", "std::collections::VecDeque::new", "std::collections::HashMap::new", "jet_deque_from",
+    "std::collections::BinaryHeap::new", "std::collections::HashSet::new", "std::collections::BTreeSet::new", "std::collections::VecDeque::new", "std::collections::HashMap::new", "jet_deque_from", "JetCache::new",
     "jet_eq", "jet_map_from_keys_kernel", "jet_map_from_keys_int", "jet_map_from_keys_composite",
     "jet_ordering_then", "jet_ordering_reverse", "jet_std::JetShared::new", "jet_std::JetCell::new", "jet_std::JetPool::new", "jet_std_os_atexit", "jet_rt_callback", "jet_std_math_sqrt", "jet_devtools_publish_payload",
     "jet_unicode_split_once", "jet_unicode_cut_last",

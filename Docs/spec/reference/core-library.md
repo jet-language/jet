@@ -448,7 +448,7 @@ records the shipped surface without adding aliases:
 | `Rank<T>` | `Rank.new()`, `Rank.from(xs)` | Ordered set insertion, removal, membership, first/last, set algebra, and list conversion. |
 | `Queue<T>` | `Queue.new()`, `Queue.init(xs)` | Double-ended push/pop and peek, capacity, lookup/delete, list conversion, join, reverse, split, and size/clear operations. |
 | `PriorityQueue<T>` | `PriorityQueue.new()`, `PriorityQueue.from(xs)` | `push`, `pop`, `peek`, `to_sorted_list`, `remove`, and size/clear operations. |
-| `Cache<K,V>` | `Cache.new(capacity)` | Bounded `add`, `add_new`, `get`, `remove`, `has_key`, `keys`, and size/clear operations. |
+| `Cache<K,V>` | `Cache<K,V>.new(capacity)` | Bounded least-recently-used `add`, `add_new`, `get`, `remove`, `has_key`, `keys`, `capacity`, and size/clear operations. The constructor names its key and value types (`Cache<String, Int>.new(2)`): no argument carries them, and a later line never settles them (D-INFER-LEVEL1). `add` and `get` make a key the most recent; `add` returns a held key's old value, and a new key into a full cache evicts the least recent entry. `add_new` on a held key and `has_key` leave the order alone. `keys` lists the most recent first. A negative capacity is 0, which keeps nothing. |
 | `Tally<T>` | `Tally.new()`, `Tally.from(xs)` | Counting `add`, `remove`, `has`, `count`, list conversion, and size/clear operations. |
 | `Bits` | `Bits.new()` | Integer-set `add`, `remove`, `has`, `count`, list conversion, copying, and size/clear operations. |
 | `Bytes` | `Bytes.new()`, `Bytes.with_capacity(n)`, `Bytes.from(bytes)` | Byte-buffer reads/writes, cursor movement, text conversion, splitting/joining, comparison, copying, flushing, and closing. |
