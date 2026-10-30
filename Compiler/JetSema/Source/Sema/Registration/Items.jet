@@ -2461,7 +2461,7 @@ fn sema_registration_prepare_module(input: SemaRegistrationModuleInput) -> SemaR
 fn sema_registration_prepare_module_with(input: SemaRegistrationModuleInput, templates: [SemaGenericModuleSource]) -> SemaRegistrationModuleResult {
     diagnostics := [Diagnostic]{}
     policies :: sema_policy_declarations_checked(input.program.user_policy_declarations, &diagnostics)
-    module_row := sema_registration_prepare_module_row(input.copy(), templates, policies, &diagnostics)
+    module_row := sema_registration_prepare_module_row(input.copy(), templates, policies, [SemaBuildSetting]{}, &diagnostics)
     SemaRegistrationModuleResult{module_row: module_row, diagnostics: diagnostics, complete: !sema_has_error_since(diagnostics, 0)}
 }
 
@@ -2471,7 +2471,8 @@ fn sema_registration_prepare_module_with(input: SemaRegistrationModuleInput, tem
 // `templates` are the generic-module templates the module imports; its own
 // templates come from its program. `policies` are its package's checked user
 // policy declarations (Rust Registration: one policy set per package).
-fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, templates: [SemaGenericModuleSource], policies: [UserPolicyDecl], reported: &[Diagnostic]) -> SemaRegistrationModule {
+// `settings` are the build's declared settings, which module arguments may read.
+fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, templates: [SemaGenericModuleSource], policies: [UserPolicyDecl], settings: [SemaBuildSetting], reported: &[Diagnostic]) -> SemaRegistrationModule {
     diagnostics := [Diagnostic]{}
     owned := ^input
     module_row := SemaRegistrationModule{
@@ -2535,7 +2536,7 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     // sibling mangling and registration).
     // Each rewrite below updates the program in place and leaves it
     // untouched (uncopied) when it has nothing to rewrite.
-    sema_generic_modules_expand(&module_row.program, module_row.module_identity, templates)
+    sema_generic_modules_expand(&module_row.program, module_row.module_identity, templates, settings)
     // Ordered multi-head declarations fold into one ordinary enum pattern
     // table before inline lifting and registration see the items.
     sema_head_patterns_fold_items(&module_row.program.items, &diagnostics)
@@ -2733,6 +2734,7 @@ struct SemaRegistrationPrepareJob {
     input: SemaRegistrationModuleInput
     templates: [SemaGenericModuleSource]
     policies: [UserPolicyDecl]
+    settings: [SemaBuildSetting]
 }
 
 // A prepared module row and the diagnostics its preparation reported.
@@ -2746,8 +2748,9 @@ fn sema_registration_prepare_job(job: ^SemaRegistrationPrepareJob) -> SemaRegist
     input := ^owned.input
     templates := ^owned.templates
     policies := ^owned.policies
+    settings := ^owned.settings
     diagnostics := [Diagnostic]{}
-    module_row := sema_registration_prepare_module_row(^input, templates, policies, &diagnostics)
+    module_row := sema_registration_prepare_module_row(^input, templates, policies, settings, &diagnostics)
     SemaRegistrationPreparedRow{module_row: ^module_row, diagnostics: ^diagnostics}
 }
 
@@ -3884,7 +3887,7 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
         input := &prepared_inputs.pop() ?? break
         templates := &imported_templates.pop() ?? break
         policies :: package_policies.get(input.package_identity) ?? [UserPolicyDecl]{}
-        &jobs.push(SemaRegistrationPrepareJob{input: ^input, templates: ^templates, policies: policies})
+        &jobs.push(SemaRegistrationPrepareJob{input: ^input, templates: ^templates, policies: policies, settings: build_facts.settings})
     }
     prepared := sema_registration_prepare_rows(^jobs, threads)
     // Each prepared row moves out (front to back) into its module row, after

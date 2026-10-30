@@ -14,12 +14,16 @@
 // undone duty is L1101 rather than E0140.
 use jet_foundation.[
     AccessConvention,
+    BinOp,
     Call,
     Diagnostic,
     Expr,
     Span,
+    Stmt,
     Symbol,
     Type,
+    UnOp,
+    ast_visit_statement,
     expr_span,
 ]
 
@@ -124,6 +128,82 @@ fn sema_single_use_check_scope_end(state: SemaOwnershipState, diagnostics: &[Dia
 fn sema_single_use_leave_scope(scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) {
     sema_single_use_check_scope_end(state, &diagnostics)
     sema_scope_leave(&scopes, &state)
+}
+
+// A drain loop discharges a list's consume duty: `loop xs.len() > 0 { … }`
+// (or `xs.len() != 0`, `0 < xs.len()`, `!xs.is_empty()`) whose body names
+// `xs` only to pop it or ask its length, and never breaks out, ends only once
+// `xs` is empty. Each popped element's duty passed to the binding that popped
+// it, so `xs` owes nothing. A body that refills `xs`, hands it elsewhere or
+// may break keeps the duty (E0140 at scope end).
+fn sema_single_use_note_drain(state: &SemaOwnershipState, condition: Expr, body: [Stmt], scopes: SemaScopeTable) {
+    receiver :: sema_single_use_drained_receiver(condition) ?? return
+    if receiver == .Ident(name, span, _) {
+        if sema_stmt_refutable_loop_body_can_break(body) -> return
+        drain := SemaSingleUseDrain{name: name, mentions: 0, reads: 0, pops: 0}
+        loop statement in body -> ast_visit_statement(statement, (expression: Expr) -> &drain.visit(expression), true)
+        if drain.pops == 0 || drain.mentions != drain.reads -> return
+        index :: sema_scope_resolve_index_at(scopes, name, span) ?? return
+        row :: sema_ownership_last_row(state, scopes.bindings[index].symbol.id.key)
+        if row < 0 || !state.declarations[row].single_use -> return
+        sema_ownership_note_undo(&state, row)
+        state.declarations[row].single_use = false
+    }
+}
+
+// The list a loop condition waits to empty: `xs` in `xs.len() > 0`,
+// `xs.len() != 0`, `0 < xs.len()` or `!xs.is_empty()`.
+fn sema_single_use_drained_receiver(condition: Expr) -> Expr? Never! {
+    if condition == {
+        .Binary(op, left, right, _, _) -> {
+            if (op == BinOp.Gt || op == BinOp.Ne) && right == .Int(value, _, _, _, _) && value == 0 -> return sema_single_use_query_receiver(left, "len")
+            if op == BinOp.Lt && left == .Int(value, _, _, _, _) && value == 0 -> return sema_single_use_query_receiver(right, "len")
+            None
+        }
+        .Unary(op, operand, _, _) -> if op == UnOp.Not -> sema_single_use_query_receiver(operand, "is_empty") else -> None
+        else -> None
+    }
+}
+
+fn sema_single_use_query_receiver(expression: Expr, query: String) -> Expr? Never! {
+    if expression == .MethodCall(receiver, method, _, _, _, args, _) && method == query && args.len() == 0 -> return Val(receiver)
+    None
+}
+
+// The local a method receiver names, through any `&` place marker.
+fn sema_single_use_receiver_name(expression: Expr) -> String? Never! {
+    if expression == {
+        .Ident(name, _, _) -> Val(name)
+        .Place(value, _, _, _) -> sema_single_use_receiver_name(value)
+        else -> None
+    }
+}
+
+// Counts a drain body's mentions of the drained list `name`: every mention
+// must be a read (the receiver of `pop`, `len` or `is_empty`), and at least
+// one a `pop`.
+struct SemaSingleUseDrain {
+    name: String
+    mentions: Int
+    reads: Int
+    pops: Int
+
+    fn visit(&self, expression: Expr) Never! {
+        if expression == {
+            .Ident(mentioned, _, _) -> if mentioned == self.name -> self.mentions += 1
+            .MethodCall(receiver, method, _, _, _, args, _) -> {
+                if sema_single_use_receiver_name(receiver) == .Val(owner) && owner == self.name && args.len() == 0 {
+                    if method == "pop" {
+                        self.reads += 1
+                        self.pops += 1
+                    } else if method == "len" || method == "is_empty" {
+                        self.reads += 1
+                    }
+                }
+            }
+            else -> {}
+        }
+    }
 }
 
 // E0141. The merged move store is a union, so a value

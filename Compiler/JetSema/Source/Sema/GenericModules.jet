@@ -153,7 +153,7 @@ fn sema_genmod_collect_templates(written: [Item], check: &SemaGenericModuleCheck
 fn sema_genmod_check_module(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, items: [Item], templates_by_module: [[SemaGenericModuleTemplate]], check: &SemaGenericModuleCheck) {
     if sema_genmod_report_cycles(items, &check) -> return
     enums :: sema_genmod_enums(items, [GenericModuleDef]{})
-    values :: sema_genmod_const_values(items, [String:Type]{}, enums)
+    values :: sema_genmod_const_values(items, sema_genmod_setting_types(graph.build_facts.settings, enums), enums)
     templates := [SemaGenericModuleTemplate]{}
     module_index :: sema_registration_module_index(graph, module_row.module_identity) ?? return
     loop template in templates_by_module[module_index] -> &templates.push(template)
@@ -361,7 +361,8 @@ fn sema_genmod_value_type(expression: Expr, values: [String:Type], enums: [Strin
                 else -> None
             }
         }
-        .Field(base, _, _, _) -> {
+        .Field(base, member, _, _) -> {
+            if sema_fact_build_rooted(base) -> return values.get(sema_fact_path_text(base, member) ?? return None)
             if base == .Ident(enum_name, _, _) {
                 if enums.get(enum_name) != None -> return Val(Type.Named{name: enum_name})
             }
@@ -899,14 +900,14 @@ fn sema_genmod_definition_items(items: [Item]) -> [Item] {
 
 // Expands `program`'s module aliases in place; a program without one is left
 // untouched (not copied).
-fn sema_generic_modules_expand(program: &Program, module_identity: String, imported: [SemaGenericModuleSource]) {
-    rewritten :: sema_generic_modules_rewritten_items(program, module_identity, imported) ?? return
+fn sema_generic_modules_expand(program: &Program, module_identity: String, imported: [SemaGenericModuleSource], settings: [SemaBuildSetting]) {
+    rewritten :: sema_generic_modules_rewritten_items(program, module_identity, imported, settings) ?? return
     program.items = rewritten
 }
 
 // The expanded item list of `program`, or None when it has no module alias to
 // expand (or its aliases form a cycle).
-fn sema_generic_modules_rewritten_items(program: Program, module_identity: String, imported: [SemaGenericModuleSource]) -> [Item]? {
+fn sema_generic_modules_rewritten_items(program: Program, module_identity: String, imported: [SemaGenericModuleSource], settings: [SemaBuildSetting]) -> [Item]? {
     items :: program.items
     aliases := [ModuleAliasDef]{}
     loop item in items {
@@ -916,7 +917,7 @@ fn sema_generic_modules_rewritten_items(program: Program, module_identity: Strin
     silent := SemaGenericModuleCheck{module_identity: module_identity, diagnostics: [Diagnostic]{}, seen: [String:Bool]{}}
     if sema_genmod_report_cycles(items, &silent) -> return None
     enums :: sema_genmod_enums(items, [GenericModuleDef]{})
-    values :: sema_genmod_folded_consts(items, [String:Expr]{}, enums)
+    values :: sema_genmod_folded_consts(items, sema_genmod_setting_literals(settings, enums), enums)
     sources := [SemaGenericModuleSource]{}
     loop item in items {
         if item == .GenericModule(definition) -> &sources.push(SemaGenericModuleSource{local: definition.name, key: "{module_identity}:{definition.name}", definition: definition, source_items: [Item]{}, source_values: values})
@@ -1295,6 +1296,72 @@ fn sema_genmod_folded_consts(items: [Item], inherited: [String:Expr], enums: [St
     values
 }
 
+// D-CONF-MODULE1: a declared `$build.settings.<key>` is one closed Tier-0
+// value of its declared type, so a module argument may name it. Each setting
+// joins the closed values under its full path; one whose value its type
+// cannot read stays out, and an argument naming it is not known (E0857).
+fn sema_genmod_setting_literals(settings: [SemaBuildSetting], enums: [String:Bool]) -> [String:Expr] {
+    values := [String:Expr]{}
+    loop setting in settings {
+        literal :: sema_genmod_setting_literal(setting, enums) ?? next
+        values["$build.settings.{setting.name}"] = literal
+    }
+    values
+}
+
+// The Tier-0 type of each readable setting, under its full path.
+fn sema_genmod_setting_types(settings: [SemaBuildSetting], enums: [String:Bool]) -> [String:Type] {
+    values := [String:Type]{}
+    loop setting in settings {
+        literal :: sema_genmod_setting_literal(setting, enums) ?? next
+        value_type :: sema_genmod_value_type(literal, [String:Type]{}, enums) ?? next
+        values["$build.settings.{setting.name}"] = value_type
+    }
+    values
+}
+
+// The literal a setting's value text reads as under its declared type, as
+// sema_fact_build_setting_value reads it: `Bool`, `Int`, `Char`, `String`, or
+// a fieldless enum of this module written `.Variant` or `Variant`.
+fn sema_genmod_setting_literal(setting: SemaBuildSetting, enums: [String:Bool]) -> Expr? {
+    raw :: setting.value.trim()
+    ty :: setting.ty.trim()
+    span :: Span{start: 0, end: 0}
+    if ty == "Int" {
+        number :: Int.parse(raw) ?? return None
+        return Val(Expr.Int{value: number, span: span, width: None, raw: None, id: AST_NODE_GENERATED})
+    }
+    if ty == "Bool" {
+        if raw != "true" && raw != "false" -> return None
+        return Val(Expr.Bool{value: raw == "true", span: span, id: AST_NODE_GENERATED})
+    }
+    if ty == "String" -> return Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: sema_fact_build_setting_unquote(raw)}}, span: span, id: AST_NODE_GENERATED})
+    if ty == "Char" {
+        text := raw
+        if raw.count_bytes() >= 2 && raw.starts_with("'") && raw.ends_with("'") -> text = sema_fact_build_setting_unquote(raw.slice(1, raw.len() - 1))
+        count := 0
+        loop _ in text.chars() -> count += 1
+        if count != 1 -> return None
+        return Val(Expr.Char{value: text, span: span, id: AST_NODE_GENERATED})
+    }
+    fieldless :: enums.get(ty) ?? false
+    if !fieldless -> return None
+    variant :: if raw.starts_with(".") -> raw.slice(1, raw.len()).trim() else -> raw
+    Val(Expr.EnumLit{type_name: ty, variant: variant, variant_span: None, args: [EnumLitArg]{}, leading_dot: false, span: span, id: AST_NODE_GENERATED})
+}
+
+// A setting's literal spanned at the path that reads it.
+fn sema_genmod_setting_at(literal: Expr, span: Span) -> Expr {
+    if literal == {
+        .Int(number, _, _, _, _) -> Expr.Int{value: number, span: span, width: None, raw: None, id: AST_NODE_GENERATED}
+        .Bool(flag, _, _) -> Expr.Bool{value: flag, span: span, id: AST_NODE_GENERATED}
+        .Char(text, _, _) -> Expr.Char{value: text, span: span, id: AST_NODE_GENERATED}
+        .Str(parts, _, _) -> Expr.Str{parts: parts, span: span, id: AST_NODE_GENERATED}
+        .EnumLit(type_name, variant, _, _, _, _, _) -> Expr.EnumLit{type_name: type_name, variant: variant, variant_span: None, args: [EnumLitArg]{}, leading_dot: false, span: span, id: AST_NODE_GENERATED}
+        else -> literal
+    }
+}
+
 // Rust `evaluate_closed_value` over the closed domain the checks accept
 // (`sema_genmod_value_type`): the literal the expression folds to.
 fn sema_genmod_fold(expression: Expr, values: [String:Expr], enums: [String:Bool]) -> Expr? {
@@ -1340,6 +1407,7 @@ fn sema_genmod_fold(expression: Expr, values: [String:Expr], enums: [String:Bool
             Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: "{left_text}{right_text}"}}, span: span, id: AST_NODE_GENERATED})
         }
         .Field(base, member, span, _) -> {
+            if sema_fact_build_rooted(base) -> return Val(sema_genmod_setting_at(values.get(sema_fact_path_text(base, member) ?? return None) ?? return None, span))
             if base == .Ident(enum_name, _, _) {
                 fieldless :: enums.get(enum_name) ?? false
                 if fieldless -> return Val(Expr.EnumLit{type_name: enum_name, variant: member, variant_span: None, args: [EnumLitArg]{}, leading_dot: false, span: span, id: AST_NODE_GENERATED})

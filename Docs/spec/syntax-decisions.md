@@ -3329,7 +3329,11 @@ Hoisting the foreign call out of the transaction remains the beginner fix.
 **D-LIN1 — Single-use values** *(D-LIN1-DROP)*: `#SingleUse` values must be
 consumed exactly once on every path — `^` param, return,
 or `consume(x)` inside `#Unsafe("reason")` (respelled by D-DROP-WORD1, 2026-07-12; else E0143). Unconsumed E0140;
-one-branch-only E0141; lending instead E0142.
+one-branch-only E0141; lending instead E0142. A list of single-use values
+(`[Task<T>]`) is also consumed by a drain loop: `loop xs.len() > 0` (or
+`xs.len() != 0`, `!xs.is_empty()`) whose body names `xs` only to `pop` it or
+ask its length and never breaks out. Each popped value owes its own consume;
+a body that refills or lends `xs` leaves the list's duty (E0140).
 
 **D-PREPOST1 — Contracts** *(amended by D-FAIL-TIER1)*:
 `#Pre(cond, "msg")` / `#Post(cond, "msg")` on a signature (`result` in Post);

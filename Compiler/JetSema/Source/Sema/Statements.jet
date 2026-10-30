@@ -6740,6 +6740,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         // Rust `check_stmt` (statements.rs:233-266): a literal
                         // `true` condition never skips the body, as `loop`.
                         if !sema_stmt_close_loop_value_frame(&context, loop_frame_index, &nested.value, &state, loop_fork, false, !sema_stmt_refutable_expr_is_true(condition), environment, program, &diagnostics) -> loop_scope_valid = false
+                        if nested.complete && loop_scope_valid -> sema_single_use_note_drain(&state, condition, body, scopes)
                         if {
                             !nested.complete || !loop_scope_valid -> complete = false
                             else -> &output.push(TStmt.While{label: label_name, condition: cond, body: nested.value, span: span})

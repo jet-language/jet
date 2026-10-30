@@ -2588,6 +2588,23 @@ function coreCallExtensionRows(source) {
   return rows;
 }
 
+// core_call_key (CoreCalls.jet) of one CoreCallRecord literal row.
+function coreCallRowKey(row) {
+  const match = row.match(/module_name: (.+?), member: (.+?), receiver_types: \[String\]\{(.*?)\}, signature:/);
+  if (!match) throw new Error("CoreCallRecord row has no module_name/member/receiver_types prefix: " + row.slice(0, 120));
+  const receivers = [...match[3].matchAll(/"[^"]*"|String\.from_bytes\(\[U8\]\{[^\]]*?\}\)/g)].map((item) => coreCallRowText(item[0]));
+  const member = coreCallRowText(match[2]);
+  return receivers.length ? "receiver(" + receivers.join("|") + ")." + member : coreCallRowText(match[1]) + "." + member;
+}
+
+// The text of a row's string literal: `"text"` or `String.from_bytes([U8]{U8{n}, …})`.
+function coreCallRowText(expression) {
+  const quoted = expression.match(/^"([^"]*)"$/);
+  if (quoted) return quoted[1];
+  if (!expression.startsWith("String.from_bytes(")) throw new Error("CoreCallRecord row string is neither quoted nor from_bytes: " + expression.slice(0, 120));
+  return Buffer.from([...expression.matchAll(/U8\{(\d+)\}/g)].map((item) => Number(item[1]))).toString("utf8");
+}
+
 function generatedCoreCallRegistry(coreSource, extensionSource, declarations) {
   const ambientKeys = new Set(
     declarations.ambientRoutes.map(function (route) {
@@ -2612,7 +2629,18 @@ function generatedCoreCallRegistry(coreSource, extensionSource, declarations) {
       "    " + translateCoreCallExpression(expression, "Core.jet line " + row.sourceLine) + ",",
     );
   }
-  for (const row of coreCallExtensionRows(extensionSource)) lines.push("    " + row + ",");
+  // core_call_key: lookups take the first row per key and IR canonicalization
+  // refuses a duplicate, so an extension row may not repeat a dispatcher key.
+  const keys = new Map();
+  for (const line of lines) {
+    if (line.startsWith("    CoreCallRecord{")) keys.set(coreCallRowKey(line), "Core.jet");
+  }
+  for (const row of coreCallExtensionRows(extensionSource)) {
+    const key = coreCallRowKey(row);
+    if (keys.has(key)) throw new Error(CORE_CALL_EXTENSIONS_PATH + " row `" + key + "` repeats a " + keys.get(key) + " row; drop the extension row");
+    keys.set(key, CORE_CALL_EXTENSIONS_PATH);
+    lines.push("    " + row + ",");
+  }
   lines.push(
     "} }",
     "",
