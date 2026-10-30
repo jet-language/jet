@@ -26,10 +26,6 @@ VAULT_ORIGIN_NAME :: I64{16}
 VAULT_ORIGIN_GENERATION :: I64{24}
 VAULT_ORIGIN_OPAQUE :: I64{32}
 VAULT_ORIGIN_HASH :: I64{48}
-#Import(c) fn vault_secret_adopt(bytes: I64) -> I64 = "jet_rt_secret_from_bytes"
-#Import(c) fn vault_secret_bytes(secret: I64) -> I64 = "jet_rt_secret_bytes"
-#Import(c) fn vault_secret_drop(secret: I64) = "jet_rt_secret_drop"
-#Import(c) fn vault_native_nfc(text: I64) -> I64 = "jet_text_nfc"
 fn vault_unsigned_less(left: I64, right: I64) -> Bool {
     (left.bit_xor(I64{-9223372036854775808})) < (right.bit_xor(I64{-9223372036854775808}))
 }
@@ -58,7 +54,7 @@ fn vault_validate_text(text: I64, reason: Bool) -> Bool {
     data :: rt_text_data(text)
     if !vault_utf8_valid(data, length) -> return false
     if !reason && (rt_text_byte(data) == I64{46}) && (length == I64{1} || (length == I64{2} && rt_text_byte(data + I64{1}) == I64{46})) -> return false
-    normalized :: vault_native_nfc(text)
+    normalized :: jet_text_nfc(text)
     same :: jet_rt_string_eq(text, normalized)
     jet_rt_string_drop(normalized)
     if !same -> return false
@@ -115,8 +111,8 @@ fn vault_record_clone(record: I64) -> I64 {
     rt_text_bytes_copy(result, record, VAULT_RECORD_BYTES)
     rt_text_store(result + VAULT_RECORD_NAME, jet_rt_string_clone(rt_text_word(record + VAULT_RECORD_NAME)))
     rt_text_store(result + VAULT_RECORD_ORIGIN, vault_origin_clone(rt_text_word(record + VAULT_RECORD_ORIGIN)))
-    bytes :: data_sequence_clone(vault_secret_bytes(rt_text_word(record + VAULT_RECORD_SECRET)), DATA_TREE_BYTE_LIST)
-    rt_text_store(result + VAULT_RECORD_SECRET, vault_secret_adopt(bytes))
+    bytes :: data_sequence_clone(jet_rt_secret_bytes(rt_text_word(record + VAULT_RECORD_SECRET)), DATA_TREE_BYTE_LIST)
+    rt_text_store(result + VAULT_RECORD_SECRET, jet_rt_secret_from_bytes(bytes))
     // Secret adopts the buffer and clears, but does not free, the donor shell.
     jet_rt_free(bytes, DATA_SEQUENCE_BYTES, I64{8})
     result
@@ -125,7 +121,7 @@ fn vault_record_drop(record: I64) {
     if (record == I64{0}) -> return
     jet_rt_string_drop(rt_text_word(record + VAULT_RECORD_NAME))
     vault_origin_drop(rt_text_word(record + VAULT_RECORD_ORIGIN))
-    vault_secret_drop(rt_text_word(record + VAULT_RECORD_SECRET))
+    jet_rt_secret_drop(rt_text_word(record + VAULT_RECORD_SECRET))
     jet_rt_free(record, VAULT_RECORD_BYTES, I64{8})
 }
 // Rust derive compares key bytes too; immutable hashes never replace equality.
@@ -137,8 +133,8 @@ fn vault_record_equal(left: I64, right: I64) -> Bool {
         at += I64{8}
     }
     if !vault_origin_equal(rt_text_word(left + VAULT_RECORD_ORIGIN), rt_text_word(right + VAULT_RECORD_ORIGIN)) -> return false
-    a :: vault_secret_bytes(rt_text_word(left + VAULT_RECORD_SECRET))
-    b :: vault_secret_bytes(rt_text_word(right + VAULT_RECORD_SECRET))
+    a :: jet_rt_secret_bytes(rt_text_word(left + VAULT_RECORD_SECRET))
+    b :: jet_rt_secret_bytes(rt_text_word(right + VAULT_RECORD_SECRET))
     count :: rt_text_word(a + DATA_SEQUENCE_LENGTH)
     if count != rt_text_word(b + DATA_SEQUENCE_LENGTH) -> return false
     ad :: rt_text_word(a + DATA_SEQUENCE_DATA)
@@ -371,7 +367,7 @@ fn vault_public_hash_bytes(key_type: I64, key: I64, count: I64, digest: I64, scr
     true
 }
 fn vault_public_hash(key_type: I64, secret: I64, digest: I64, scratch: I64) -> Bool {
-    bytes :: vault_secret_bytes(secret)
+    bytes :: jet_rt_secret_bytes(secret)
     vault_public_hash_bytes(key_type, rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_word(bytes + DATA_SEQUENCE_LENGTH), digest, scratch)
 }
 // Internal to the immutable-record hash: its digest lives in the same scratch,
@@ -386,7 +382,7 @@ fn vault_key_digest_bytes(key_type: I64, key: I64, count: I64, digest: I64, scra
     rt_text_store(domain + I64{8}, I64{0})
 }
 fn vault_key_digest(record: I64, digest: I64, scratch: I64) {
-    bytes :: vault_secret_bytes(rt_text_word(record + VAULT_RECORD_SECRET))
+    bytes :: jet_rt_secret_bytes(rt_text_word(record + VAULT_RECORD_SECRET))
     vault_key_digest_bytes(rt_text_word(record + VAULT_RECORD_TYPE), rt_text_word(bytes + DATA_SEQUENCE_DATA), I64{32}, digest, scratch)
 }
 // SecretsCrypto.rs:830-861. Caller has validated the record name <=128/key32.
@@ -1096,13 +1092,13 @@ fn vault_key_access_at_root(root: I64, reference: I64, key_type: I64, load: Bool
     } else if (status == I64{3}) {
         result = vault_error_new(I64{3}, I64{0}, I64{0})
     } else {
-        bytes :: data_sequence_clone(vault_secret_bytes(rt_text_word(record + VAULT_RECORD_SECRET)), DATA_TREE_BYTE_LIST)
+        bytes :: data_sequence_clone(jet_rt_secret_bytes(rt_text_word(record + VAULT_RECORD_SECRET)), DATA_TREE_BYTE_LIST)
         if (rt_text_word(bytes + DATA_SEQUENCE_LENGTH) != I64{32}) {
             thread_zero(rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_word(bytes + DATA_SEQUENCE_CAPACITY))
             data_sequence_drop(bytes, DATA_TREE_BYTE_LIST)
             result = vault_error_new(I64{8}, I64{0}, I64{0})
         } else {
-            secret :: vault_secret_adopt(bytes)
+            secret :: jet_rt_secret_from_bytes(bytes)
             jet_rt_free(bytes, DATA_SEQUENCE_BYTES, I64{8})
             rt_text_store(out, secret)
         }
@@ -1314,11 +1310,10 @@ fn vault_prepare_at_root(root: I64, name: I64, key_type: I64, action: I64, targe
 }
 
 // fb3361756's ONE shared host monotonic provider, never a second raw clock.
-#Import(c) fn vault_host_monotonic_ns() -> I64 = "jet_time_raw_host_monotonic_ns"
 // The 1:1 seed Instant slot keeps its position; only ordering/deadline semantics
 // are observable. Native stores ns in word0 and zero in the reserved word1.
 fn vault_instant_now(out: I64) {
-    rt_text_store(out, vault_host_monotonic_ns())
+    rt_text_store(out, jet_time_raw_host_monotonic_ns())
     rt_text_store(out + I64{8}, I64{0})
 }
 
@@ -1432,7 +1427,7 @@ fn vault_write_debug(_write: I64) -> I64 {
 // and authority identity have succeeded. The borrowed plan/reason stay live.
 fn vault_authorize_write(plan: I64, key_type: I64, reason: I64, out: I64) -> I64 {
     if !vault_validate_text(reason, true) -> return vault_error_new(I64{0}, I64{0}, I64{0})
-    now :: vault_host_monotonic_ns()
+    now :: jet_time_raw_host_monotonic_ns()
     issued :: rt_text_word(plan + VAULT_PLAN_ISSUED)
     if (now > rt_text_word(plan + VAULT_PLAN_DEADLINE) || (now > issued && now - issued > I64{300000000000})) -> return vault_error_new(I64{6}, I64{0}, I64{0})
     scratch :: jet_rt_alloc(I64{1632}, I64{8})
@@ -1491,7 +1486,7 @@ fn vault_reason_hash(status: I64, reason: I64, out: I64, scratch: I64) -> I64 {
 // Seed2550-2719. The final 208 bytes of scratch hold owners/output slots;
 // the first8192 are exclusively crypto scratch and can be wiped by hashing.
 fn vault_commit_inner(root: I64, plan: I64, write: I64, expected: I64, key_type: I64, scratch: I64) -> I64 {
-    now :: vault_host_monotonic_ns()
+    now :: jet_time_raw_host_monotonic_ns()
     user :: trap_syscall(I64{107}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     session :: trap_syscall(I64{124}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     if (session < I64{0}) -> return vault_error_new(I64{7}, I64{0}, I64{0})
@@ -1573,11 +1568,11 @@ fn vault_commit_inner(root: I64, plan: I64, write: I64, expected: I64, key_type:
                 return vault_error_new(I64{10}, VAULT_CRYPTO_UNAVAILABLE, I64{0})
             }
         }
-        secret :: vault_secret_adopt(bytes)
+        secret :: jet_rt_secret_from_bytes(bytes)
         jet_rt_free(bytes, DATA_SEQUENCE_BYTES, I64{8})
         rt_text_store(scratch + I64{8224}, secret)
         if !vault_public_hash(key_type, secret, scratch + I64{8304}, scratch) -> return vault_error_new(I64{8}, I64{0}, I64{0})
-        key :: vault_secret_bytes(secret)
+        key :: jet_rt_secret_bytes(secret)
         vault_key_digest_bytes(key_type, rt_text_word(key + DATA_SEQUENCE_DATA), I64{32}, scratch + I64{8336}, scratch)
         if (action != I64{1} && action != I64{3}
             && (!rt_text_equal_bytes(scratch + I64{8304}, plan + VAULT_PLAN_PUBLIC_HASH, I64{32})
@@ -1658,7 +1653,7 @@ fn vault_commit_at_root(root: I64, plan: I64, write: I64, expected: I64, key_typ
     }
     vault_record_drop(rt_text_word(scratch + I64{8392}))
     secret :: rt_text_word(scratch + I64{8224})
-    if (secret != I64{0}) -> vault_secret_drop(secret)
+    if (secret != I64{0}) -> jet_rt_secret_drop(secret)
     vault_store_drop(rt_text_word(scratch + I64{8192}))
     vault_lock_drop(rt_text_word(scratch + I64{8200}))
     vault_write_drop(write)

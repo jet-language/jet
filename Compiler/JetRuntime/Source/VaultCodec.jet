@@ -585,7 +585,7 @@ fn vault_write_record(buffer: I64, cursor: I64, record: I64) -> I64 {
     at = vault_write_origin(buffer, at, rt_text_word(record + VAULT_RECORD_ORIGIN))
     vault_put_u16(buffer + at, I64{32})
     at += I64{2}
-    bytes :: vault_secret_bytes(rt_text_word(record + VAULT_RECORD_SECRET))
+    bytes :: jet_rt_secret_bytes(rt_text_word(record + VAULT_RECORD_SECRET))
     rt_text_bytes_copy(buffer + at, rt_text_word(bytes + DATA_SEQUENCE_DATA), I64{32})
     at + I64{32}
 }
@@ -644,7 +644,7 @@ fn vault_encode_v2_inner(store: I64, strings: I64, string_count: I64, records: I
     at = I64{0}
     loop at < record_count {
         record :: rt_text_word(records + at * DATA_TREE_ELEMENT_BYTES)
-        bytes :: vault_secret_bytes(rt_text_word(record + VAULT_RECORD_SECRET))
+        bytes :: jet_rt_secret_bytes(rt_text_word(record + VAULT_RECORD_SECRET))
         if (rt_text_word(record + VAULT_RECORD_GENERATION) == I64{0} ||
             rt_text_word(bytes + DATA_SEQUENCE_LENGTH) != I64{32} ||
             vault_bytes_zero(record + VAULT_RECORD_OPAQUE, I64{16})) -> return I64{8}
@@ -980,7 +980,7 @@ fn vault_decode_record(cursor: I64, previous: I64) -> I64 {
     bytes :: data_sequence_new(I64{32}, RT_HOST_U8_STRIDE)
     rt_text_bytes_copy(rt_text_word(bytes + DATA_SEQUENCE_DATA), key, I64{32})
     rt_text_store(bytes + DATA_SEQUENCE_LENGTH, I64{32})
-    secret :: vault_secret_adopt(bytes)
+    secret :: jet_rt_secret_from_bytes(bytes)
     jet_rt_free(bytes, DATA_SEQUENCE_BYTES, I64{8})
     record :: vault_record_allocate_owned(name, key_type, generation, status, provenance, secret)
     rt_text_bytes_copy(record + VAULT_RECORD_OPAQUE, opaque, I64{16})
