@@ -2175,9 +2175,22 @@ The SIMD-like lane types have fixed-array semantics independent of whether a
 backend selects vector instructions. Floating types are `F32x4`, `F64x2`,
 `F32x8`, and `F64x4`. Signed integer types are `I8x16`, `I16x8`, `I32x4`,
 `I64x2`, `I8x32`, `I16x16`, `I32x8`, and `I64x4`; unsigned types use the
-corresponding `U` prefixes. Every lane type supports `splat`,
-`from_array`, `to_array`, checked indexing, and `+`, `-`, `*`, and `/` with
+corresponding `U` prefixes. Each is a `core.math` struct over its `lanes`
+fixed array, declared once in Core source, so every tier runs the same
+implementation. Every lane type supports a positional constructor, `splat`,
+`from_array`, `to_array`, checked indexing (`v[i]` or `v.lane(i)`; a literal
+index outside the lanes is a compile error), and `+`, `-`, `*`, and `/` with
 matching lane types (D-SIMD1/D-SIMD2/D-SIMD3).
+
+Each lane operator is the scalar operator applied lane by lane, so integer
+lanes overflow and divide (truncating toward zero) as their scalar type does. The reductions `sum`, `product`,
+`min`, `max`, and `reduce(op)` with a `ReduceOp` (`.Add`, `.Mul`, `.Min`,
+`.Max`, `.Avg`) are the scalar left-to-right fold over the lanes, so a float
+reduction is bit-exact with writing `((l0 + l1) + l2) + l3`. Float `min` and
+`max` skip NaN lanes as `min_float`/`max_float` do; `.Avg` is `sum` divided
+by the lane count, an integer division for integer lanes. Operands of
+different lane types are error E2511, and a `reduce` argument that is not a
+`ReduceOp` value is error E2510.
 
 ### `core.units` — measured quantities
 

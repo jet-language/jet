@@ -731,14 +731,14 @@ fn sema_expression_char(text: String, span: Span, expected: Type?, environment: 
 }
 
 fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    checked_base :: sema_check_expression(base, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    base_ty :: sema_expr_unwrap_tag(checked_base.ty)
+    checked_base := sema_check_expression(base, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    base_ty := sema_expr_unwrap_tag(checked_base.ty)
     index_expected :: if base_ty == {
         .List(_) -> Val(Type.Int)
         .FixedList(_, _) -> Val(Type.Int)
         .Map(key, _, _) -> Val(key)
         .Apply(name, args) -> if (name == "View" || name == "ViewMut") && args.len() == 1 -> Val(Type.Int) else if name == "Pool" && args.len() == 1 -> Val(Type.Apply{name: "ID", args: [Type]{args[0]}}) else -> None
-        .Named(name) -> if sema_call_math_is_lane(name) -> Val(Type.Int) else -> None
+        .Named(_) -> if sema_call_math_lane_name(base_ty) != None -> Val(Type.Int) else -> None
         else -> None
     }
     // Rust `infer_with_expected`: the positional `Int` is only a hint, so a
@@ -777,9 +777,19 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
             return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
         }
     }
-    if sema_call_math_builtin_name(base_ty, environment, program) == .Val(lane) && sema_call_math_is_lane(lane) {
-        read :: sema_call_math_lane_index(lane, checked_base, index, checked_index, span, environment, &context, &diagnostics) ?? return None
-        return sema_expr_expected_owned(^read, expected, environment, program, &diagnostics)
+    // D-SIMD2: `v[i]` on a Core SIMD lane type reads its `lanes` fixed array,
+    // so the read is the fixed-list index; a written literal must name a lane.
+    if sema_call_math_lane_name(base_ty) == .Val(lane) {
+        lanes :: sema_call_math_arity(lane)
+        if index == .Int(number, _, _, _, _) {
+            if number < 0 || number >= lanes {
+                &diagnostics.push(sema_error("E0965", expr_span(index), "lane {number} is out of range for `{lane}` ({lanes} lanes)", "the valid lanes for `{lane}` are 0 through {lanes - 1}", "use a lane index between 0 and {lanes - 1}"))
+                return None
+            }
+        }
+        lane_array :: sema_expression_field_checked(checked_base, "lanes", span, None, environment, program, &scopes, &context, &diagnostics) ?? return None
+        base_ty = lane_array.ty
+        checked_base = lane_array
     }
     result_ty := Type?{None}
     resolved_kind := ast_kind

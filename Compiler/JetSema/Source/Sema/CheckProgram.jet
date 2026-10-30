@@ -84,7 +84,6 @@ use jet_foundation.[
     compiler_transfer_rows,
     expr_span,
     symbol_id,
-    type_simd_lane_arity,
     checked_symbol_local,
     checked_test_artifact_fact,
     type_name,
@@ -5133,10 +5132,6 @@ fn sema_unbuilt_core_source_call(key: String) -> (name: String, feature: String,
 // that needs porting, and its card.
 fn sema_unbuilt_runtime_use(kind: NodeKind) -> (name: String, feature: String, card: Int)? Never! {
     bytes :: (name: "`Bytes`", feature: "the `Bytes` buffer runtime", card: 5991)
-    if kind == .MathBuiltin(type_name, _, _) {
-        if type_simd_lane_arity(type_name) != None -> return Val((name: "SIMD lane vectors (`{type_name}`)", feature: "the SIMD lane runtime", card: 5984))
-        return None
-    }
     if kind == {
         .BuiltinMethod(_, operation, _) -> if sema_unbuilt_byte_buffer_op(operation) -> return Val(bytes)
         .StaticCall(owner, _, _, _, _) -> if owner == .Prelude(_, path, _) && path == "JetByteBuffer" -> return Val(bytes)

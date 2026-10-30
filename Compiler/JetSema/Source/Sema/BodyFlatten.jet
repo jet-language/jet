@@ -755,7 +755,7 @@ fn body_flat_handle_op_1(value: THandleOp, flat: &BodyFlat) -> BodyHandleOp Neve
         .ChannelClose -> BodyHandleOp.ChannelClose
         .SenderSend -> BodyHandleOp.SenderSend
         .HTTPRouterRegister(f_verb, f_handler, f_file, f_line, f_handler_param_names, f_contract_json) -> BodyHandleOp.HTTPRouterRegister{verb: f_verb, handler: body_flat_expr(f_handler, &flat), file: f_file, line: f_line, handler_param_names: f_handler_param_names, contract_json: f_contract_json}
-        .MathMethod(f_type_name, f_method, f_reduce_op) -> BodyHandleOp.MathMethod{type_name: f_type_name, method: f_method, reduce_op: f_reduce_op}
+        .MathMethod(f_type_name, f_method) -> BodyHandleOp.MathMethod{type_name: f_type_name, method: f_method}
         .ReactiveGet -> BodyHandleOp.ReactiveGet
         .ReactiveSet -> BodyHandleOp.ReactiveSet
         .ReactiveEffectMethod -> BodyHandleOp.ReactiveEffectMethod
@@ -1321,7 +1321,6 @@ fn body_copy_expr_kind(value: NodeKind, flat: &BodyFlat) -> NodeKind Never! {
         .ListSpread(f_parts) -> NodeKind.ListSpread{parts: body_copy_list_list_spread_part(f_parts, &flat)}
         .MapLit(f_entries) -> NodeKind.MapLit{entries: body_copy_list_map_entry(f_entries, &flat)}
         .PoolSlot(f_pool, f_id, f_mutable, f_field, f_line, f_source_line) -> NodeKind.PoolSlot{pool: body_copy_expr(f_pool, &flat), id: body_copy_expr(f_id, &flat), mutable: f_mutable, field: f_field, line: f_line, source_line: f_source_line}
-        .MathLaneIndex(f_lane_type, f_base, f_index, f_line) -> NodeKind.MathLaneIndex{lane_type: f_lane_type, base: body_copy_expr(f_base, &flat), index: body_copy_expr(f_index, &flat), line: f_line}
         .MathSwizzleRead(f_type_name, f_receiver, f_lanes) -> NodeKind.MathSwizzleRead{type_name: f_type_name, receiver: body_copy_expr(f_receiver, &flat), lanes: f_lanes}
         .Clone(f_value, f_fact) -> NodeKind.Clone{value: body_copy_expr(f_value, &flat), fact: f_fact}
         .ExplicitCopy(f_value) -> NodeKind.ExplicitCopy{value: body_copy_expr(f_value, &flat)}
@@ -1632,7 +1631,7 @@ fn body_copy_handle_op_1(value: BodyHandleOp, flat: &BodyFlat) -> BodyHandleOp N
         .ChannelClose -> BodyHandleOp.ChannelClose
         .SenderSend -> BodyHandleOp.SenderSend
         .HTTPRouterRegister(f_verb, f_handler, f_file, f_line, f_handler_param_names, f_contract_json) -> BodyHandleOp.HTTPRouterRegister{verb: f_verb, handler: body_copy_expr(f_handler, &flat), file: f_file, line: f_line, handler_param_names: f_handler_param_names, contract_json: f_contract_json}
-        .MathMethod(f_type_name, f_method, f_reduce_op) -> BodyHandleOp.MathMethod{type_name: f_type_name, method: f_method, reduce_op: f_reduce_op}
+        .MathMethod(f_type_name, f_method) -> BodyHandleOp.MathMethod{type_name: f_type_name, method: f_method}
         .ReactiveGet -> BodyHandleOp.ReactiveGet
         .ReactiveSet -> BodyHandleOp.ReactiveSet
         .ReactiveEffectMethod -> BodyHandleOp.ReactiveEffectMethod

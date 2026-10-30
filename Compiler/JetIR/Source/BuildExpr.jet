@@ -2089,7 +2089,7 @@ fn ir_handle_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     if operation == .ReaderTakePattern(binary_parts, canonical) -> return ir_take_pattern(&m, p, &b, ty, receiver, true, [StrMatchPart]{}, binary_parts, canonical, span)
     if operation == .PluginInvoke(export_name, signature) -> return ir_plugin_invoke(&m, p, &b, ty, receiver, export_name, signature, args, span)
     dedicated :: if operation == {
-        .Hardware(_) | .MathMethod(_, _, _) -> true
+        .Hardware(_) | .MathMethod(_, _) -> true
         .HTTPClientMethod(_, _) | .HTTPRouterRegister(_, _, _, _, _, _) | .HTTPServerMethod(_, _) -> true
         .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .DynDecode(_) -> true
         // ir_dyn_method lowered key lookups, indexing, keys, path writes,

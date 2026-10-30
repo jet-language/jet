@@ -3593,6 +3593,7 @@ fn sema_expr_check_method_call(receiver: Expr, method: String, method_span: Span
         }
         return sema_expr_check_declared_method(receiver, receiver_value, method, routed_method, method_span, owner_type_args, type_args, rule, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
+    if sema_call_math_lane_reduce_rejected(receiver_value.ty, method, args, &diagnostics) -> return None
     // A declared nominal owns the methods it declares, even when its leaf
     // spells a builtin carrier such as Core's `URL` or `MIME`; builtin handle
     // routes apply only when no declared method matches.
@@ -4135,6 +4136,13 @@ fn sema_expr_missing_operator_hook(op: BinOp, owner: Type, span: Span) -> Diagno
     sema_error("E0360", span, "no `{sema_expr_binary_name(op)}` operator is defined for `{name}`", "user arithmetic dispatches only through one `impl {name}.{trait_name}` hook", "implement `{name}.{trait_name}`, or call a named method")
 }
 
+// E2511: a lane or linalg operator outside its fixed operand shapes.
+fn sema_expr_math_shape_mismatch(op: BinOp, left: Type, right: Type, span: Span) -> Diagnostic Never! {
+    left_name :: sema_expr_math_leaf_name(left) ?? type_name(left)
+    right_name :: sema_expr_math_leaf_name(right) ?? type_name(right)
+    sema_error("E2511", span, "`{sema_expr_binary_name(op)}` isn't defined between `{left_name}` and `{right_name}`", "built-in lane and linalg operators keep fixed shapes: one lane/vector type on both sides, or a matrix and its matching vector; any other pair needs an operator hook", "match the operand types (`T.splat(x)` lifts a scalar into every lane), call a named method like `.dot()`/`.matmul()`, or implement the operator's hook trait on your own type for this pair")
+}
+
 // L0516 (D-HTTP-TEXT1=A): `request.body().text(limit)` with the default
 // limit repeats what `request.text()` / `response.text()` already do.
 // The default is Core/Http/Http.jet `C_MAX_BODY_BYTES`.
@@ -4488,12 +4496,16 @@ fn sema_expr_check_binary_operands(op: BinOp, left: Expr, right: Expr, span: Spa
     // integer literal (Rust `infer_binary`); the exact type's own `Sub(Self)`
     // hook does not name the plain operand's type.
     source_operator := false
+    core_math_operand := false
     if program.registration_graph == .Val(graph) {
         if (sema_expr_precise_name(lhs.ty) == None) == (sema_expr_precise_name(rhs.ty) == None) {
             left_name :: sema_expr_type_base_name(lhs.ty) ?? ""
             right_name :: sema_expr_type_base_name(rhs.ty) ?? ""
             caller :: sema_scope_caller_row(environment, graph)
-            source_operator = sema_type_source_owns_nominal(graph, left_name, caller) || sema_type_source_owns_nominal(graph, right_name, caller)
+            left_core :: sema_type_source_owns_nominal(graph, left_name, caller)
+            right_core :: sema_type_source_owns_nominal(graph, right_name, caller)
+            source_operator = left_core || right_core
+            core_math_operand = (left_core && sema_expr_math_leaf_name(lhs.ty) != None) || (right_core && sema_expr_math_leaf_name(rhs.ty) != None)
         }
     }
     if source_operator && sema_expr_operator_trait(op) != None {
@@ -4503,6 +4515,11 @@ fn sema_expr_check_binary_operands(op: BinOp, left: Expr, right: Expr, span: Spa
         // An exact number with no source hook keeps its built-in exact
         // operations (the precise route below).
         if (op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div) && sema_expr_precise_name(lhs.ty) == None {
+            // A Core lane or linalg type keeps its fixed operand shapes.
+            if core_math_operand {
+                &diagnostics.push(sema_expr_math_shape_mismatch(op, lhs.ty, rhs.ty, span))
+                return None
+            }
             &diagnostics.push(sema_expr_missing_operator_hook(op, lhs.ty, span))
             return None
         }
@@ -4531,7 +4548,7 @@ fn sema_expr_check_binary_operands(op: BinOp, left: Expr, right: Expr, span: Spa
     math_left := sema_expr_type_base_name(lhs.ty)
     math_right := sema_expr_type_base_name(rhs.ty)
     if (math_left != None && sema_expr_is_math_type_name(math_left ?? "")) || (math_right != None && sema_expr_is_math_type_name(math_right ?? "")) {
-        &diagnostics.push(sema_error("E2511", span, "`{sema_expr_binary_name(op)}` isn't defined between `{type_name(lhs.ty)}` and `{type_name(rhs.ty)}`", "built-in lane and linalg operators keep fixed shapes: one lane/vector type on both sides, or a matrix and its matching vector; any other pair needs an operator hook", "match the operand types (`T.splat(x)` lifts a scalar into every lane), call a named method like `.dot()`/`.matmul()`, or implement the operator's hook trait on your own type for this pair"))
+        &diagnostics.push(sema_expr_math_shape_mismatch(op, lhs.ty, rhs.ty, span))
         return None
     }
     if sema_expr_has_numeric_overload(lhs.ty) || sema_expr_has_numeric_overload(rhs.ty) {

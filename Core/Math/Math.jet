@@ -1667,13 +1667,11 @@ impl Mat4.Mul(Vec4) {
 }
 
 impl F64x4 {
+    // D-SIMD3: every lane reduction is the scalar left-to-right fold.
     fn sum(self) -> F64 Never! {
-        // Rust four occupied lanes of the eight-lane reduction tree.
-        a :: F64{0.0} + self.lanes[0]
-        b :: F64{0.0} + self.lanes[1]
-        c :: F64{0.0} + self.lanes[2]
-        d :: F64{0.0} + self.lanes[3]
-        ((a + b) + (c + d)) + F64{0.0}
+        value := F64{0.0}
+        loop i in 0..<4 -> value = value + self.lanes[i]
+        value
     }
     fn product(self) -> F64 Never! {
         value := F64{1.0}
@@ -1726,7 +1724,7 @@ impl F64x4.Div {
         F64x4.new(self.lanes[0] / rhs.lanes[0], self.lanes[1] / rhs.lanes[1], self.lanes[2] / rhs.lanes[2], self.lanes[3] / rhs.lanes[3])
     }
 }
-#Test("F64x4 source reduction identities and eight-lane tree") {
+#Test("F64x4 source reduction identities and left-to-right fold") {
     value :: F64x4.new(F64{1.0}, F64{2.0}, F64{3.0}, F64{4.0})
     assert_eq(value.sum(), F64{10.0})
     assert_eq(value.product(), F64{24.0})
@@ -1749,6 +1747,1515 @@ impl F64x4.Div {
     assert_eq((value - value).lane(2), F64{0.0})
     assert_eq((value * value).lane(2), F64{9.0})
     assert_eq((value / value).lane(2), F64{1.0})
+}
+
+// The other SIMD lane types follow F64x4: a fixed array of scalar lanes, with
+// every operation the scalar spelling applied lane by lane and every reduction
+// the left-to-right scalar fold (D-SIMD1/D-SIMD2/D-SIMD3). Float `min` and
+// `max` skip NaN lanes like `min_float` and `max_float`; integer `min` and
+// `max` fold from lane 0.
+struct F32x4 {
+    lanes: [F32#4]
+}
+impl F32x4 {
+    fn new(l0: F32, l1: F32, l2: F32, l3: F32) -> F32x4 Never! { F32x4{lanes: [F32#4]{l0, l1, l2, l3}} }
+    fn splat(value: F32) -> F32x4 Never! { F32x4{lanes: [F32#4]{value, value, value, value}} }
+    fn from_array(lanes: [F32#4]) -> F32x4 Never! { F32x4{lanes: lanes} }
+    fn to_array(self) -> [F32#4] Never! { self.lanes.copy() }
+    fn lane(self, index: Int) -> F32 Never! {
+        if index < 0 || index >= 4 -> core.math.__numeric_stop("lane index {index} out of range for F32x4 (4 lanes)")
+        self.lanes[index]
+    }
+    fn sum(self) -> F32 Never! {
+        value := F32{0.0}
+        loop i in 0..<4 -> value = value + self.lanes[i]
+        value
+    }
+    fn product(self) -> F32 Never! {
+        value := F32{1.0}
+        loop i in 0..<4 -> value = value * self.lanes[i]
+        value
+    }
+    fn min(self) -> F32 Never! {
+        value := F32{1.0} / F32{0.0}
+        loop i in 0..<4 {
+            lane :: self.lanes[i]
+            if lane == lane && !(value < lane) -> value = lane
+        }
+        value
+    }
+    fn max(self) -> F32 Never! {
+        value := -F32{1.0} / F32{0.0}
+        loop i in 0..<4 {
+            lane :: self.lanes[i]
+            if lane == lane && !(value > lane) -> value = lane
+        }
+        value
+    }
+    fn reduce_add(self) -> F32 Never! { self.sum() }
+    fn reduce_mul(self) -> F32 Never! { self.product() }
+    fn reduce_min(self) -> F32 Never! { self.min() }
+    fn reduce_max(self) -> F32 Never! { self.max() }
+    fn reduce_avg(self) -> F32 Never! { self.sum() / F32{4.0} }
+    fn reduce(self, op: ReduceOp) -> F32 Never! {
+        if op == .Add -> return self.reduce_add()
+        if op == .Mul -> return self.reduce_mul()
+        if op == .Min -> return self.reduce_min()
+        if op == .Max -> return self.reduce_max()
+        self.reduce_avg()
+    }
+}
+impl F32x4.Add {
+    fn add(self, rhs: F32x4) -> F32x4 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<4 -> lanes[i] = lanes[i] + rhs.lanes[i]
+        F32x4{lanes: lanes}
+    }
+}
+impl F32x4.Sub {
+    fn sub(self, rhs: F32x4) -> F32x4 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<4 -> lanes[i] = lanes[i] - rhs.lanes[i]
+        F32x4{lanes: lanes}
+    }
+}
+impl F32x4.Mul {
+    fn mul(self, rhs: F32x4) -> F32x4 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<4 -> lanes[i] = lanes[i] * rhs.lanes[i]
+        F32x4{lanes: lanes}
+    }
+}
+impl F32x4.Div {
+    fn div(self, rhs: F32x4) -> F32x4 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<4 -> lanes[i] = lanes[i] / rhs.lanes[i]
+        F32x4{lanes: lanes}
+    }
+}
+
+struct F32x8 {
+    lanes: [F32#8]
+}
+impl F32x8 {
+    fn new(l0: F32, l1: F32, l2: F32, l3: F32, l4: F32, l5: F32, l6: F32, l7: F32) -> F32x8 Never! { F32x8{lanes: [F32#8]{l0, l1, l2, l3, l4, l5, l6, l7}} }
+    fn splat(value: F32) -> F32x8 Never! { F32x8{lanes: [F32#8]{value, value, value, value, value, value, value, value}} }
+    fn from_array(lanes: [F32#8]) -> F32x8 Never! { F32x8{lanes: lanes} }
+    fn to_array(self) -> [F32#8] Never! { self.lanes.copy() }
+    fn lane(self, index: Int) -> F32 Never! {
+        if index < 0 || index >= 8 -> core.math.__numeric_stop("lane index {index} out of range for F32x8 (8 lanes)")
+        self.lanes[index]
+    }
+    fn sum(self) -> F32 Never! {
+        value := F32{0.0}
+        loop i in 0..<8 -> value = value + self.lanes[i]
+        value
+    }
+    fn product(self) -> F32 Never! {
+        value := F32{1.0}
+        loop i in 0..<8 -> value = value * self.lanes[i]
+        value
+    }
+    fn min(self) -> F32 Never! {
+        value := F32{1.0} / F32{0.0}
+        loop i in 0..<8 {
+            lane :: self.lanes[i]
+            if lane == lane && !(value < lane) -> value = lane
+        }
+        value
+    }
+    fn max(self) -> F32 Never! {
+        value := -F32{1.0} / F32{0.0}
+        loop i in 0..<8 {
+            lane :: self.lanes[i]
+            if lane == lane && !(value > lane) -> value = lane
+        }
+        value
+    }
+    fn reduce_add(self) -> F32 Never! { self.sum() }
+    fn reduce_mul(self) -> F32 Never! { self.product() }
+    fn reduce_min(self) -> F32 Never! { self.min() }
+    fn reduce_max(self) -> F32 Never! { self.max() }
+    fn reduce_avg(self) -> F32 Never! { self.sum() / F32{8.0} }
+    fn reduce(self, op: ReduceOp) -> F32 Never! {
+        if op == .Add -> return self.reduce_add()
+        if op == .Mul -> return self.reduce_mul()
+        if op == .Min -> return self.reduce_min()
+        if op == .Max -> return self.reduce_max()
+        self.reduce_avg()
+    }
+}
+impl F32x8.Add {
+    fn add(self, rhs: F32x8) -> F32x8 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<8 -> lanes[i] = lanes[i] + rhs.lanes[i]
+        F32x8{lanes: lanes}
+    }
+}
+impl F32x8.Sub {
+    fn sub(self, rhs: F32x8) -> F32x8 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<8 -> lanes[i] = lanes[i] - rhs.lanes[i]
+        F32x8{lanes: lanes}
+    }
+}
+impl F32x8.Mul {
+    fn mul(self, rhs: F32x8) -> F32x8 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<8 -> lanes[i] = lanes[i] * rhs.lanes[i]
+        F32x8{lanes: lanes}
+    }
+}
+impl F32x8.Div {
+    fn div(self, rhs: F32x8) -> F32x8 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<8 -> lanes[i] = lanes[i] / rhs.lanes[i]
+        F32x8{lanes: lanes}
+    }
+}
+
+struct F64x2 {
+    lanes: [F64#2]
+}
+impl F64x2 {
+    fn new(l0: F64, l1: F64) -> F64x2 Never! { F64x2{lanes: [F64#2]{l0, l1}} }
+    fn splat(value: F64) -> F64x2 Never! { F64x2{lanes: [F64#2]{value, value}} }
+    fn from_array(lanes: [F64#2]) -> F64x2 Never! { F64x2{lanes: lanes} }
+    fn to_array(self) -> [F64#2] Never! { self.lanes.copy() }
+    fn lane(self, index: Int) -> F64 Never! {
+        if index < 0 || index >= 2 -> core.math.__numeric_stop("lane index {index} out of range for F64x2 (2 lanes)")
+        self.lanes[index]
+    }
+    fn sum(self) -> F64 Never! {
+        value := F64{0.0}
+        loop i in 0..<2 -> value = value + self.lanes[i]
+        value
+    }
+    fn product(self) -> F64 Never! {
+        value := F64{1.0}
+        loop i in 0..<2 -> value = value * self.lanes[i]
+        value
+    }
+    fn min(self) -> F64 Never! {
+        value := F64{1.0} / F64{0.0}
+        loop i in 0..<2 -> value = min_float(value, self.lanes[i])
+        value
+    }
+    fn max(self) -> F64 Never! {
+        value := -F64{1.0} / F64{0.0}
+        loop i in 0..<2 -> value = max_float(value, self.lanes[i])
+        value
+    }
+    fn reduce_add(self) -> F64 Never! { self.sum() }
+    fn reduce_mul(self) -> F64 Never! { self.product() }
+    fn reduce_min(self) -> F64 Never! { self.min() }
+    fn reduce_max(self) -> F64 Never! { self.max() }
+    fn reduce_avg(self) -> F64 Never! { self.sum() / F64{2.0} }
+    fn reduce(self, op: ReduceOp) -> F64 Never! {
+        if op == .Add -> return self.reduce_add()
+        if op == .Mul -> return self.reduce_mul()
+        if op == .Min -> return self.reduce_min()
+        if op == .Max -> return self.reduce_max()
+        self.reduce_avg()
+    }
+}
+impl F64x2.Add {
+    fn add(self, rhs: F64x2) -> F64x2 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<2 -> lanes[i] = lanes[i] + rhs.lanes[i]
+        F64x2{lanes: lanes}
+    }
+}
+impl F64x2.Sub {
+    fn sub(self, rhs: F64x2) -> F64x2 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<2 -> lanes[i] = lanes[i] - rhs.lanes[i]
+        F64x2{lanes: lanes}
+    }
+}
+impl F64x2.Mul {
+    fn mul(self, rhs: F64x2) -> F64x2 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<2 -> lanes[i] = lanes[i] * rhs.lanes[i]
+        F64x2{lanes: lanes}
+    }
+}
+impl F64x2.Div {
+    fn div(self, rhs: F64x2) -> F64x2 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<2 -> lanes[i] = lanes[i] / rhs.lanes[i]
+        F64x2{lanes: lanes}
+    }
+}
+
+struct I8x16 {
+    lanes: [I8#16]
+}
+impl I8x16 {
+    fn new(l0: I8, l1: I8, l2: I8, l3: I8, l4: I8, l5: I8, l6: I8, l7: I8, l8: I8, l9: I8, l10: I8, l11: I8, l12: I8, l13: I8, l14: I8, l15: I8) -> I8x16 Never! { I8x16{lanes: [I8#16]{l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15}} }
+    fn splat(value: I8) -> I8x16 Never! { I8x16{lanes: [I8#16]{value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value}} }
+    fn from_array(lanes: [I8#16]) -> I8x16 Never! { I8x16{lanes: lanes} }
+    fn to_array(self) -> [I8#16] Never! { self.lanes.copy() }
+    fn lane(self, index: Int) -> I8 Never! {
+        if index < 0 || index >= 16 -> core.math.__numeric_stop("lane index {index} out of range for I8x16 (16 lanes)")
+        self.lanes[index]
+    }
+    fn sum(self) -> I8 Never! {
+        value := I8{0}
+        loop i in 0..<16 -> value = value + self.lanes[i]
+        value
+    }
+    fn product(self) -> I8 Never! {
+        value := I8{1}
+        loop i in 0..<16 -> value = value * self.lanes[i]
+        value
+    }
+    fn min(self) -> I8 Never! {
+        value := self.lanes[0]
+        loop i in 1..<16 {
+            if self.lanes[i] < value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn max(self) -> I8 Never! {
+        value := self.lanes[0]
+        loop i in 1..<16 {
+            if self.lanes[i] > value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn reduce_add(self) -> I8 Never! { self.sum() }
+    fn reduce_mul(self) -> I8 Never! { self.product() }
+    fn reduce_min(self) -> I8 Never! { self.min() }
+    fn reduce_max(self) -> I8 Never! { self.max() }
+    fn reduce_avg(self) -> I8 Never! { self.sum() / I8{16} }
+    fn reduce(self, op: ReduceOp) -> I8 Never! {
+        if op == .Add -> return self.reduce_add()
+        if op == .Mul -> return self.reduce_mul()
+        if op == .Min -> return self.reduce_min()
+        if op == .Max -> return self.reduce_max()
+        self.reduce_avg()
+    }
+}
+impl I8x16.Add {
+    fn add(self, rhs: I8x16) -> I8x16 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<16 -> lanes[i] = lanes[i] + rhs.lanes[i]
+        I8x16{lanes: lanes}
+    }
+}
+impl I8x16.Sub {
+    fn sub(self, rhs: I8x16) -> I8x16 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<16 -> lanes[i] = lanes[i] - rhs.lanes[i]
+        I8x16{lanes: lanes}
+    }
+}
+impl I8x16.Mul {
+    fn mul(self, rhs: I8x16) -> I8x16 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<16 -> lanes[i] = lanes[i] * rhs.lanes[i]
+        I8x16{lanes: lanes}
+    }
+}
+impl I8x16.Div {
+    fn div(self, rhs: I8x16) -> I8x16 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<16 -> lanes[i] = lanes[i] / rhs.lanes[i]
+        I8x16{lanes: lanes}
+    }
+}
+
+struct U8x16 {
+    lanes: [U8#16]
+}
+impl U8x16 {
+    fn new(l0: U8, l1: U8, l2: U8, l3: U8, l4: U8, l5: U8, l6: U8, l7: U8, l8: U8, l9: U8, l10: U8, l11: U8, l12: U8, l13: U8, l14: U8, l15: U8) -> U8x16 Never! { U8x16{lanes: [U8#16]{l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15}} }
+    fn splat(value: U8) -> U8x16 Never! { U8x16{lanes: [U8#16]{value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value}} }
+    fn from_array(lanes: [U8#16]) -> U8x16 Never! { U8x16{lanes: lanes} }
+    fn to_array(self) -> [U8#16] Never! { self.lanes.copy() }
+    fn lane(self, index: Int) -> U8 Never! {
+        if index < 0 || index >= 16 -> core.math.__numeric_stop("lane index {index} out of range for U8x16 (16 lanes)")
+        self.lanes[index]
+    }
+    fn sum(self) -> U8 Never! {
+        value := U8{0}
+        loop i in 0..<16 -> value = value + self.lanes[i]
+        value
+    }
+    fn product(self) -> U8 Never! {
+        value := U8{1}
+        loop i in 0..<16 -> value = value * self.lanes[i]
+        value
+    }
+    fn min(self) -> U8 Never! {
+        value := self.lanes[0]
+        loop i in 1..<16 {
+            if self.lanes[i] < value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn max(self) -> U8 Never! {
+        value := self.lanes[0]
+        loop i in 1..<16 {
+            if self.lanes[i] > value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn reduce_add(self) -> U8 Never! { self.sum() }
+    fn reduce_mul(self) -> U8 Never! { self.product() }
+    fn reduce_min(self) -> U8 Never! { self.min() }
+    fn reduce_max(self) -> U8 Never! { self.max() }
+    fn reduce_avg(self) -> U8 Never! { self.sum() / U8{16} }
+    fn reduce(self, op: ReduceOp) -> U8 Never! {
+        if op == .Add -> return self.reduce_add()
+        if op == .Mul -> return self.reduce_mul()
+        if op == .Min -> return self.reduce_min()
+        if op == .Max -> return self.reduce_max()
+        self.reduce_avg()
+    }
+}
+impl U8x16.Add {
+    fn add(self, rhs: U8x16) -> U8x16 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<16 -> lanes[i] = lanes[i] + rhs.lanes[i]
+        U8x16{lanes: lanes}
+    }
+}
+impl U8x16.Sub {
+    fn sub(self, rhs: U8x16) -> U8x16 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<16 -> lanes[i] = lanes[i] - rhs.lanes[i]
+        U8x16{lanes: lanes}
+    }
+}
+impl U8x16.Mul {
+    fn mul(self, rhs: U8x16) -> U8x16 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<16 -> lanes[i] = lanes[i] * rhs.lanes[i]
+        U8x16{lanes: lanes}
+    }
+}
+impl U8x16.Div {
+    fn div(self, rhs: U8x16) -> U8x16 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<16 -> lanes[i] = lanes[i] / rhs.lanes[i]
+        U8x16{lanes: lanes}
+    }
+}
+
+struct I16x8 {
+    lanes: [I16#8]
+}
+impl I16x8 {
+    fn new(l0: I16, l1: I16, l2: I16, l3: I16, l4: I16, l5: I16, l6: I16, l7: I16) -> I16x8 Never! { I16x8{lanes: [I16#8]{l0, l1, l2, l3, l4, l5, l6, l7}} }
+    fn splat(value: I16) -> I16x8 Never! { I16x8{lanes: [I16#8]{value, value, value, value, value, value, value, value}} }
+    fn from_array(lanes: [I16#8]) -> I16x8 Never! { I16x8{lanes: lanes} }
+    fn to_array(self) -> [I16#8] Never! { self.lanes.copy() }
+    fn lane(self, index: Int) -> I16 Never! {
+        if index < 0 || index >= 8 -> core.math.__numeric_stop("lane index {index} out of range for I16x8 (8 lanes)")
+        self.lanes[index]
+    }
+    fn sum(self) -> I16 Never! {
+        value := I16{0}
+        loop i in 0..<8 -> value = value + self.lanes[i]
+        value
+    }
+    fn product(self) -> I16 Never! {
+        value := I16{1}
+        loop i in 0..<8 -> value = value * self.lanes[i]
+        value
+    }
+    fn min(self) -> I16 Never! {
+        value := self.lanes[0]
+        loop i in 1..<8 {
+            if self.lanes[i] < value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn max(self) -> I16 Never! {
+        value := self.lanes[0]
+        loop i in 1..<8 {
+            if self.lanes[i] > value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn reduce_add(self) -> I16 Never! { self.sum() }
+    fn reduce_mul(self) -> I16 Never! { self.product() }
+    fn reduce_min(self) -> I16 Never! { self.min() }
+    fn reduce_max(self) -> I16 Never! { self.max() }
+    fn reduce_avg(self) -> I16 Never! { self.sum() / I16{8} }
+    fn reduce(self, op: ReduceOp) -> I16 Never! {
+        if op == .Add -> return self.reduce_add()
+        if op == .Mul -> return self.reduce_mul()
+        if op == .Min -> return self.reduce_min()
+        if op == .Max -> return self.reduce_max()
+        self.reduce_avg()
+    }
+}
+impl I16x8.Add {
+    fn add(self, rhs: I16x8) -> I16x8 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<8 -> lanes[i] = lanes[i] + rhs.lanes[i]
+        I16x8{lanes: lanes}
+    }
+}
+impl I16x8.Sub {
+    fn sub(self, rhs: I16x8) -> I16x8 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<8 -> lanes[i] = lanes[i] - rhs.lanes[i]
+        I16x8{lanes: lanes}
+    }
+}
+impl I16x8.Mul {
+    fn mul(self, rhs: I16x8) -> I16x8 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<8 -> lanes[i] = lanes[i] * rhs.lanes[i]
+        I16x8{lanes: lanes}
+    }
+}
+impl I16x8.Div {
+    fn div(self, rhs: I16x8) -> I16x8 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<8 -> lanes[i] = lanes[i] / rhs.lanes[i]
+        I16x8{lanes: lanes}
+    }
+}
+
+struct U16x8 {
+    lanes: [U16#8]
+}
+impl U16x8 {
+    fn new(l0: U16, l1: U16, l2: U16, l3: U16, l4: U16, l5: U16, l6: U16, l7: U16) -> U16x8 Never! { U16x8{lanes: [U16#8]{l0, l1, l2, l3, l4, l5, l6, l7}} }
+    fn splat(value: U16) -> U16x8 Never! { U16x8{lanes: [U16#8]{value, value, value, value, value, value, value, value}} }
+    fn from_array(lanes: [U16#8]) -> U16x8 Never! { U16x8{lanes: lanes} }
+    fn to_array(self) -> [U16#8] Never! { self.lanes.copy() }
+    fn lane(self, index: Int) -> U16 Never! {
+        if index < 0 || index >= 8 -> core.math.__numeric_stop("lane index {index} out of range for U16x8 (8 lanes)")
+        self.lanes[index]
+    }
+    fn sum(self) -> U16 Never! {
+        value := U16{0}
+        loop i in 0..<8 -> value = value + self.lanes[i]
+        value
+    }
+    fn product(self) -> U16 Never! {
+        value := U16{1}
+        loop i in 0..<8 -> value = value * self.lanes[i]
+        value
+    }
+    fn min(self) -> U16 Never! {
+        value := self.lanes[0]
+        loop i in 1..<8 {
+            if self.lanes[i] < value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn max(self) -> U16 Never! {
+        value := self.lanes[0]
+        loop i in 1..<8 {
+            if self.lanes[i] > value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn reduce_add(self) -> U16 Never! { self.sum() }
+    fn reduce_mul(self) -> U16 Never! { self.product() }
+    fn reduce_min(self) -> U16 Never! { self.min() }
+    fn reduce_max(self) -> U16 Never! { self.max() }
+    fn reduce_avg(self) -> U16 Never! { self.sum() / U16{8} }
+    fn reduce(self, op: ReduceOp) -> U16 Never! {
+        if op == .Add -> return self.reduce_add()
+        if op == .Mul -> return self.reduce_mul()
+        if op == .Min -> return self.reduce_min()
+        if op == .Max -> return self.reduce_max()
+        self.reduce_avg()
+    }
+}
+impl U16x8.Add {
+    fn add(self, rhs: U16x8) -> U16x8 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<8 -> lanes[i] = lanes[i] + rhs.lanes[i]
+        U16x8{lanes: lanes}
+    }
+}
+impl U16x8.Sub {
+    fn sub(self, rhs: U16x8) -> U16x8 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<8 -> lanes[i] = lanes[i] - rhs.lanes[i]
+        U16x8{lanes: lanes}
+    }
+}
+impl U16x8.Mul {
+    fn mul(self, rhs: U16x8) -> U16x8 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<8 -> lanes[i] = lanes[i] * rhs.lanes[i]
+        U16x8{lanes: lanes}
+    }
+}
+impl U16x8.Div {
+    fn div(self, rhs: U16x8) -> U16x8 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<8 -> lanes[i] = lanes[i] / rhs.lanes[i]
+        U16x8{lanes: lanes}
+    }
+}
+
+struct I32x4 {
+    lanes: [I32#4]
+}
+impl I32x4 {
+    fn new(l0: I32, l1: I32, l2: I32, l3: I32) -> I32x4 Never! { I32x4{lanes: [I32#4]{l0, l1, l2, l3}} }
+    fn splat(value: I32) -> I32x4 Never! { I32x4{lanes: [I32#4]{value, value, value, value}} }
+    fn from_array(lanes: [I32#4]) -> I32x4 Never! { I32x4{lanes: lanes} }
+    fn to_array(self) -> [I32#4] Never! { self.lanes.copy() }
+    fn lane(self, index: Int) -> I32 Never! {
+        if index < 0 || index >= 4 -> core.math.__numeric_stop("lane index {index} out of range for I32x4 (4 lanes)")
+        self.lanes[index]
+    }
+    fn sum(self) -> I32 Never! {
+        value := I32{0}
+        loop i in 0..<4 -> value = value + self.lanes[i]
+        value
+    }
+    fn product(self) -> I32 Never! {
+        value := I32{1}
+        loop i in 0..<4 -> value = value * self.lanes[i]
+        value
+    }
+    fn min(self) -> I32 Never! {
+        value := self.lanes[0]
+        loop i in 1..<4 {
+            if self.lanes[i] < value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn max(self) -> I32 Never! {
+        value := self.lanes[0]
+        loop i in 1..<4 {
+            if self.lanes[i] > value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn reduce_add(self) -> I32 Never! { self.sum() }
+    fn reduce_mul(self) -> I32 Never! { self.product() }
+    fn reduce_min(self) -> I32 Never! { self.min() }
+    fn reduce_max(self) -> I32 Never! { self.max() }
+    fn reduce_avg(self) -> I32 Never! { self.sum() / I32{4} }
+    fn reduce(self, op: ReduceOp) -> I32 Never! {
+        if op == .Add -> return self.reduce_add()
+        if op == .Mul -> return self.reduce_mul()
+        if op == .Min -> return self.reduce_min()
+        if op == .Max -> return self.reduce_max()
+        self.reduce_avg()
+    }
+}
+impl I32x4.Add {
+    fn add(self, rhs: I32x4) -> I32x4 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<4 -> lanes[i] = lanes[i] + rhs.lanes[i]
+        I32x4{lanes: lanes}
+    }
+}
+impl I32x4.Sub {
+    fn sub(self, rhs: I32x4) -> I32x4 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<4 -> lanes[i] = lanes[i] - rhs.lanes[i]
+        I32x4{lanes: lanes}
+    }
+}
+impl I32x4.Mul {
+    fn mul(self, rhs: I32x4) -> I32x4 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<4 -> lanes[i] = lanes[i] * rhs.lanes[i]
+        I32x4{lanes: lanes}
+    }
+}
+impl I32x4.Div {
+    fn div(self, rhs: I32x4) -> I32x4 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<4 -> lanes[i] = lanes[i] / rhs.lanes[i]
+        I32x4{lanes: lanes}
+    }
+}
+
+struct U32x4 {
+    lanes: [U32#4]
+}
+impl U32x4 {
+    fn new(l0: U32, l1: U32, l2: U32, l3: U32) -> U32x4 Never! { U32x4{lanes: [U32#4]{l0, l1, l2, l3}} }
+    fn splat(value: U32) -> U32x4 Never! { U32x4{lanes: [U32#4]{value, value, value, value}} }
+    fn from_array(lanes: [U32#4]) -> U32x4 Never! { U32x4{lanes: lanes} }
+    fn to_array(self) -> [U32#4] Never! { self.lanes.copy() }
+    fn lane(self, index: Int) -> U32 Never! {
+        if index < 0 || index >= 4 -> core.math.__numeric_stop("lane index {index} out of range for U32x4 (4 lanes)")
+        self.lanes[index]
+    }
+    fn sum(self) -> U32 Never! {
+        value := U32{0}
+        loop i in 0..<4 -> value = value + self.lanes[i]
+        value
+    }
+    fn product(self) -> U32 Never! {
+        value := U32{1}
+        loop i in 0..<4 -> value = value * self.lanes[i]
+        value
+    }
+    fn min(self) -> U32 Never! {
+        value := self.lanes[0]
+        loop i in 1..<4 {
+            if self.lanes[i] < value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn max(self) -> U32 Never! {
+        value := self.lanes[0]
+        loop i in 1..<4 {
+            if self.lanes[i] > value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn reduce_add(self) -> U32 Never! { self.sum() }
+    fn reduce_mul(self) -> U32 Never! { self.product() }
+    fn reduce_min(self) -> U32 Never! { self.min() }
+    fn reduce_max(self) -> U32 Never! { self.max() }
+    fn reduce_avg(self) -> U32 Never! { self.sum() / U32{4} }
+    fn reduce(self, op: ReduceOp) -> U32 Never! {
+        if op == .Add -> return self.reduce_add()
+        if op == .Mul -> return self.reduce_mul()
+        if op == .Min -> return self.reduce_min()
+        if op == .Max -> return self.reduce_max()
+        self.reduce_avg()
+    }
+}
+impl U32x4.Add {
+    fn add(self, rhs: U32x4) -> U32x4 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<4 -> lanes[i] = lanes[i] + rhs.lanes[i]
+        U32x4{lanes: lanes}
+    }
+}
+impl U32x4.Sub {
+    fn sub(self, rhs: U32x4) -> U32x4 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<4 -> lanes[i] = lanes[i] - rhs.lanes[i]
+        U32x4{lanes: lanes}
+    }
+}
+impl U32x4.Mul {
+    fn mul(self, rhs: U32x4) -> U32x4 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<4 -> lanes[i] = lanes[i] * rhs.lanes[i]
+        U32x4{lanes: lanes}
+    }
+}
+impl U32x4.Div {
+    fn div(self, rhs: U32x4) -> U32x4 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<4 -> lanes[i] = lanes[i] / rhs.lanes[i]
+        U32x4{lanes: lanes}
+    }
+}
+
+struct I64x2 {
+    lanes: [I64#2]
+}
+impl I64x2 {
+    fn new(l0: I64, l1: I64) -> I64x2 Never! { I64x2{lanes: [I64#2]{l0, l1}} }
+    fn splat(value: I64) -> I64x2 Never! { I64x2{lanes: [I64#2]{value, value}} }
+    fn from_array(lanes: [I64#2]) -> I64x2 Never! { I64x2{lanes: lanes} }
+    fn to_array(self) -> [I64#2] Never! { self.lanes.copy() }
+    fn lane(self, index: Int) -> I64 Never! {
+        if index < 0 || index >= 2 -> core.math.__numeric_stop("lane index {index} out of range for I64x2 (2 lanes)")
+        self.lanes[index]
+    }
+    fn sum(self) -> I64 Never! {
+        value := I64{0}
+        loop i in 0..<2 -> value = value + self.lanes[i]
+        value
+    }
+    fn product(self) -> I64 Never! {
+        value := I64{1}
+        loop i in 0..<2 -> value = value * self.lanes[i]
+        value
+    }
+    fn min(self) -> I64 Never! {
+        value := self.lanes[0]
+        loop i in 1..<2 {
+            if self.lanes[i] < value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn max(self) -> I64 Never! {
+        value := self.lanes[0]
+        loop i in 1..<2 {
+            if self.lanes[i] > value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn reduce_add(self) -> I64 Never! { self.sum() }
+    fn reduce_mul(self) -> I64 Never! { self.product() }
+    fn reduce_min(self) -> I64 Never! { self.min() }
+    fn reduce_max(self) -> I64 Never! { self.max() }
+    fn reduce_avg(self) -> I64 Never! { self.sum() / I64{2} }
+    fn reduce(self, op: ReduceOp) -> I64 Never! {
+        if op == .Add -> return self.reduce_add()
+        if op == .Mul -> return self.reduce_mul()
+        if op == .Min -> return self.reduce_min()
+        if op == .Max -> return self.reduce_max()
+        self.reduce_avg()
+    }
+}
+impl I64x2.Add {
+    fn add(self, rhs: I64x2) -> I64x2 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<2 -> lanes[i] = lanes[i] + rhs.lanes[i]
+        I64x2{lanes: lanes}
+    }
+}
+impl I64x2.Sub {
+    fn sub(self, rhs: I64x2) -> I64x2 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<2 -> lanes[i] = lanes[i] - rhs.lanes[i]
+        I64x2{lanes: lanes}
+    }
+}
+impl I64x2.Mul {
+    fn mul(self, rhs: I64x2) -> I64x2 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<2 -> lanes[i] = lanes[i] * rhs.lanes[i]
+        I64x2{lanes: lanes}
+    }
+}
+impl I64x2.Div {
+    fn div(self, rhs: I64x2) -> I64x2 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<2 -> lanes[i] = lanes[i] / rhs.lanes[i]
+        I64x2{lanes: lanes}
+    }
+}
+
+struct U64x2 {
+    lanes: [U64#2]
+}
+impl U64x2 {
+    fn new(l0: U64, l1: U64) -> U64x2 Never! { U64x2{lanes: [U64#2]{l0, l1}} }
+    fn splat(value: U64) -> U64x2 Never! { U64x2{lanes: [U64#2]{value, value}} }
+    fn from_array(lanes: [U64#2]) -> U64x2 Never! { U64x2{lanes: lanes} }
+    fn to_array(self) -> [U64#2] Never! { self.lanes.copy() }
+    fn lane(self, index: Int) -> U64 Never! {
+        if index < 0 || index >= 2 -> core.math.__numeric_stop("lane index {index} out of range for U64x2 (2 lanes)")
+        self.lanes[index]
+    }
+    fn sum(self) -> U64 Never! {
+        value := U64{0}
+        loop i in 0..<2 -> value = value + self.lanes[i]
+        value
+    }
+    fn product(self) -> U64 Never! {
+        value := U64{1}
+        loop i in 0..<2 -> value = value * self.lanes[i]
+        value
+    }
+    fn min(self) -> U64 Never! {
+        value := self.lanes[0]
+        loop i in 1..<2 {
+            if self.lanes[i] < value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn max(self) -> U64 Never! {
+        value := self.lanes[0]
+        loop i in 1..<2 {
+            if self.lanes[i] > value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn reduce_add(self) -> U64 Never! { self.sum() }
+    fn reduce_mul(self) -> U64 Never! { self.product() }
+    fn reduce_min(self) -> U64 Never! { self.min() }
+    fn reduce_max(self) -> U64 Never! { self.max() }
+    fn reduce_avg(self) -> U64 Never! { self.sum() / U64{2} }
+    fn reduce(self, op: ReduceOp) -> U64 Never! {
+        if op == .Add -> return self.reduce_add()
+        if op == .Mul -> return self.reduce_mul()
+        if op == .Min -> return self.reduce_min()
+        if op == .Max -> return self.reduce_max()
+        self.reduce_avg()
+    }
+}
+impl U64x2.Add {
+    fn add(self, rhs: U64x2) -> U64x2 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<2 -> lanes[i] = lanes[i] + rhs.lanes[i]
+        U64x2{lanes: lanes}
+    }
+}
+impl U64x2.Sub {
+    fn sub(self, rhs: U64x2) -> U64x2 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<2 -> lanes[i] = lanes[i] - rhs.lanes[i]
+        U64x2{lanes: lanes}
+    }
+}
+impl U64x2.Mul {
+    fn mul(self, rhs: U64x2) -> U64x2 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<2 -> lanes[i] = lanes[i] * rhs.lanes[i]
+        U64x2{lanes: lanes}
+    }
+}
+impl U64x2.Div {
+    fn div(self, rhs: U64x2) -> U64x2 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<2 -> lanes[i] = lanes[i] / rhs.lanes[i]
+        U64x2{lanes: lanes}
+    }
+}
+
+struct I8x32 {
+    lanes: [I8#32]
+}
+impl I8x32 {
+    fn new(l0: I8, l1: I8, l2: I8, l3: I8, l4: I8, l5: I8, l6: I8, l7: I8, l8: I8, l9: I8, l10: I8, l11: I8, l12: I8, l13: I8, l14: I8, l15: I8, l16: I8, l17: I8, l18: I8, l19: I8, l20: I8, l21: I8, l22: I8, l23: I8, l24: I8, l25: I8, l26: I8, l27: I8, l28: I8, l29: I8, l30: I8, l31: I8) -> I8x32 Never! {
+        I8x32{lanes: [I8#32]{l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15, l16, l17, l18, l19, l20, l21, l22, l23, l24, l25, l26, l27, l28, l29, l30, l31}}
+    }
+    fn splat(value: I8) -> I8x32 Never! {
+        I8x32{lanes: [I8#32]{value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value}}
+    }
+    fn from_array(lanes: [I8#32]) -> I8x32 Never! { I8x32{lanes: lanes} }
+    fn to_array(self) -> [I8#32] Never! { self.lanes.copy() }
+    fn lane(self, index: Int) -> I8 Never! {
+        if index < 0 || index >= 32 -> core.math.__numeric_stop("lane index {index} out of range for I8x32 (32 lanes)")
+        self.lanes[index]
+    }
+    fn sum(self) -> I8 Never! {
+        value := I8{0}
+        loop i in 0..<32 -> value = value + self.lanes[i]
+        value
+    }
+    fn product(self) -> I8 Never! {
+        value := I8{1}
+        loop i in 0..<32 -> value = value * self.lanes[i]
+        value
+    }
+    fn min(self) -> I8 Never! {
+        value := self.lanes[0]
+        loop i in 1..<32 {
+            if self.lanes[i] < value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn max(self) -> I8 Never! {
+        value := self.lanes[0]
+        loop i in 1..<32 {
+            if self.lanes[i] > value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn reduce_add(self) -> I8 Never! { self.sum() }
+    fn reduce_mul(self) -> I8 Never! { self.product() }
+    fn reduce_min(self) -> I8 Never! { self.min() }
+    fn reduce_max(self) -> I8 Never! { self.max() }
+    fn reduce_avg(self) -> I8 Never! { self.sum() / I8{32} }
+    fn reduce(self, op: ReduceOp) -> I8 Never! {
+        if op == .Add -> return self.reduce_add()
+        if op == .Mul -> return self.reduce_mul()
+        if op == .Min -> return self.reduce_min()
+        if op == .Max -> return self.reduce_max()
+        self.reduce_avg()
+    }
+}
+impl I8x32.Add {
+    fn add(self, rhs: I8x32) -> I8x32 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<32 -> lanes[i] = lanes[i] + rhs.lanes[i]
+        I8x32{lanes: lanes}
+    }
+}
+impl I8x32.Sub {
+    fn sub(self, rhs: I8x32) -> I8x32 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<32 -> lanes[i] = lanes[i] - rhs.lanes[i]
+        I8x32{lanes: lanes}
+    }
+}
+impl I8x32.Mul {
+    fn mul(self, rhs: I8x32) -> I8x32 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<32 -> lanes[i] = lanes[i] * rhs.lanes[i]
+        I8x32{lanes: lanes}
+    }
+}
+impl I8x32.Div {
+    fn div(self, rhs: I8x32) -> I8x32 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<32 -> lanes[i] = lanes[i] / rhs.lanes[i]
+        I8x32{lanes: lanes}
+    }
+}
+
+struct U8x32 {
+    lanes: [U8#32]
+}
+impl U8x32 {
+    fn new(l0: U8, l1: U8, l2: U8, l3: U8, l4: U8, l5: U8, l6: U8, l7: U8, l8: U8, l9: U8, l10: U8, l11: U8, l12: U8, l13: U8, l14: U8, l15: U8, l16: U8, l17: U8, l18: U8, l19: U8, l20: U8, l21: U8, l22: U8, l23: U8, l24: U8, l25: U8, l26: U8, l27: U8, l28: U8, l29: U8, l30: U8, l31: U8) -> U8x32 Never! {
+        U8x32{lanes: [U8#32]{l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15, l16, l17, l18, l19, l20, l21, l22, l23, l24, l25, l26, l27, l28, l29, l30, l31}}
+    }
+    fn splat(value: U8) -> U8x32 Never! {
+        U8x32{lanes: [U8#32]{value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value}}
+    }
+    fn from_array(lanes: [U8#32]) -> U8x32 Never! { U8x32{lanes: lanes} }
+    fn to_array(self) -> [U8#32] Never! { self.lanes.copy() }
+    fn lane(self, index: Int) -> U8 Never! {
+        if index < 0 || index >= 32 -> core.math.__numeric_stop("lane index {index} out of range for U8x32 (32 lanes)")
+        self.lanes[index]
+    }
+    fn sum(self) -> U8 Never! {
+        value := U8{0}
+        loop i in 0..<32 -> value = value + self.lanes[i]
+        value
+    }
+    fn product(self) -> U8 Never! {
+        value := U8{1}
+        loop i in 0..<32 -> value = value * self.lanes[i]
+        value
+    }
+    fn min(self) -> U8 Never! {
+        value := self.lanes[0]
+        loop i in 1..<32 {
+            if self.lanes[i] < value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn max(self) -> U8 Never! {
+        value := self.lanes[0]
+        loop i in 1..<32 {
+            if self.lanes[i] > value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn reduce_add(self) -> U8 Never! { self.sum() }
+    fn reduce_mul(self) -> U8 Never! { self.product() }
+    fn reduce_min(self) -> U8 Never! { self.min() }
+    fn reduce_max(self) -> U8 Never! { self.max() }
+    fn reduce_avg(self) -> U8 Never! { self.sum() / U8{32} }
+    fn reduce(self, op: ReduceOp) -> U8 Never! {
+        if op == .Add -> return self.reduce_add()
+        if op == .Mul -> return self.reduce_mul()
+        if op == .Min -> return self.reduce_min()
+        if op == .Max -> return self.reduce_max()
+        self.reduce_avg()
+    }
+}
+impl U8x32.Add {
+    fn add(self, rhs: U8x32) -> U8x32 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<32 -> lanes[i] = lanes[i] + rhs.lanes[i]
+        U8x32{lanes: lanes}
+    }
+}
+impl U8x32.Sub {
+    fn sub(self, rhs: U8x32) -> U8x32 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<32 -> lanes[i] = lanes[i] - rhs.lanes[i]
+        U8x32{lanes: lanes}
+    }
+}
+impl U8x32.Mul {
+    fn mul(self, rhs: U8x32) -> U8x32 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<32 -> lanes[i] = lanes[i] * rhs.lanes[i]
+        U8x32{lanes: lanes}
+    }
+}
+impl U8x32.Div {
+    fn div(self, rhs: U8x32) -> U8x32 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<32 -> lanes[i] = lanes[i] / rhs.lanes[i]
+        U8x32{lanes: lanes}
+    }
+}
+
+struct I16x16 {
+    lanes: [I16#16]
+}
+impl I16x16 {
+    fn new(l0: I16, l1: I16, l2: I16, l3: I16, l4: I16, l5: I16, l6: I16, l7: I16, l8: I16, l9: I16, l10: I16, l11: I16, l12: I16, l13: I16, l14: I16, l15: I16) -> I16x16 Never! { I16x16{lanes: [I16#16]{l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15}} }
+    fn splat(value: I16) -> I16x16 Never! { I16x16{lanes: [I16#16]{value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value}} }
+    fn from_array(lanes: [I16#16]) -> I16x16 Never! { I16x16{lanes: lanes} }
+    fn to_array(self) -> [I16#16] Never! { self.lanes.copy() }
+    fn lane(self, index: Int) -> I16 Never! {
+        if index < 0 || index >= 16 -> core.math.__numeric_stop("lane index {index} out of range for I16x16 (16 lanes)")
+        self.lanes[index]
+    }
+    fn sum(self) -> I16 Never! {
+        value := I16{0}
+        loop i in 0..<16 -> value = value + self.lanes[i]
+        value
+    }
+    fn product(self) -> I16 Never! {
+        value := I16{1}
+        loop i in 0..<16 -> value = value * self.lanes[i]
+        value
+    }
+    fn min(self) -> I16 Never! {
+        value := self.lanes[0]
+        loop i in 1..<16 {
+            if self.lanes[i] < value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn max(self) -> I16 Never! {
+        value := self.lanes[0]
+        loop i in 1..<16 {
+            if self.lanes[i] > value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn reduce_add(self) -> I16 Never! { self.sum() }
+    fn reduce_mul(self) -> I16 Never! { self.product() }
+    fn reduce_min(self) -> I16 Never! { self.min() }
+    fn reduce_max(self) -> I16 Never! { self.max() }
+    fn reduce_avg(self) -> I16 Never! { self.sum() / I16{16} }
+    fn reduce(self, op: ReduceOp) -> I16 Never! {
+        if op == .Add -> return self.reduce_add()
+        if op == .Mul -> return self.reduce_mul()
+        if op == .Min -> return self.reduce_min()
+        if op == .Max -> return self.reduce_max()
+        self.reduce_avg()
+    }
+}
+impl I16x16.Add {
+    fn add(self, rhs: I16x16) -> I16x16 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<16 -> lanes[i] = lanes[i] + rhs.lanes[i]
+        I16x16{lanes: lanes}
+    }
+}
+impl I16x16.Sub {
+    fn sub(self, rhs: I16x16) -> I16x16 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<16 -> lanes[i] = lanes[i] - rhs.lanes[i]
+        I16x16{lanes: lanes}
+    }
+}
+impl I16x16.Mul {
+    fn mul(self, rhs: I16x16) -> I16x16 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<16 -> lanes[i] = lanes[i] * rhs.lanes[i]
+        I16x16{lanes: lanes}
+    }
+}
+impl I16x16.Div {
+    fn div(self, rhs: I16x16) -> I16x16 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<16 -> lanes[i] = lanes[i] / rhs.lanes[i]
+        I16x16{lanes: lanes}
+    }
+}
+
+struct U16x16 {
+    lanes: [U16#16]
+}
+impl U16x16 {
+    fn new(l0: U16, l1: U16, l2: U16, l3: U16, l4: U16, l5: U16, l6: U16, l7: U16, l8: U16, l9: U16, l10: U16, l11: U16, l12: U16, l13: U16, l14: U16, l15: U16) -> U16x16 Never! { U16x16{lanes: [U16#16]{l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15}} }
+    fn splat(value: U16) -> U16x16 Never! { U16x16{lanes: [U16#16]{value, value, value, value, value, value, value, value, value, value, value, value, value, value, value, value}} }
+    fn from_array(lanes: [U16#16]) -> U16x16 Never! { U16x16{lanes: lanes} }
+    fn to_array(self) -> [U16#16] Never! { self.lanes.copy() }
+    fn lane(self, index: Int) -> U16 Never! {
+        if index < 0 || index >= 16 -> core.math.__numeric_stop("lane index {index} out of range for U16x16 (16 lanes)")
+        self.lanes[index]
+    }
+    fn sum(self) -> U16 Never! {
+        value := U16{0}
+        loop i in 0..<16 -> value = value + self.lanes[i]
+        value
+    }
+    fn product(self) -> U16 Never! {
+        value := U16{1}
+        loop i in 0..<16 -> value = value * self.lanes[i]
+        value
+    }
+    fn min(self) -> U16 Never! {
+        value := self.lanes[0]
+        loop i in 1..<16 {
+            if self.lanes[i] < value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn max(self) -> U16 Never! {
+        value := self.lanes[0]
+        loop i in 1..<16 {
+            if self.lanes[i] > value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn reduce_add(self) -> U16 Never! { self.sum() }
+    fn reduce_mul(self) -> U16 Never! { self.product() }
+    fn reduce_min(self) -> U16 Never! { self.min() }
+    fn reduce_max(self) -> U16 Never! { self.max() }
+    fn reduce_avg(self) -> U16 Never! { self.sum() / U16{16} }
+    fn reduce(self, op: ReduceOp) -> U16 Never! {
+        if op == .Add -> return self.reduce_add()
+        if op == .Mul -> return self.reduce_mul()
+        if op == .Min -> return self.reduce_min()
+        if op == .Max -> return self.reduce_max()
+        self.reduce_avg()
+    }
+}
+impl U16x16.Add {
+    fn add(self, rhs: U16x16) -> U16x16 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<16 -> lanes[i] = lanes[i] + rhs.lanes[i]
+        U16x16{lanes: lanes}
+    }
+}
+impl U16x16.Sub {
+    fn sub(self, rhs: U16x16) -> U16x16 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<16 -> lanes[i] = lanes[i] - rhs.lanes[i]
+        U16x16{lanes: lanes}
+    }
+}
+impl U16x16.Mul {
+    fn mul(self, rhs: U16x16) -> U16x16 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<16 -> lanes[i] = lanes[i] * rhs.lanes[i]
+        U16x16{lanes: lanes}
+    }
+}
+impl U16x16.Div {
+    fn div(self, rhs: U16x16) -> U16x16 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<16 -> lanes[i] = lanes[i] / rhs.lanes[i]
+        U16x16{lanes: lanes}
+    }
+}
+
+struct I32x8 {
+    lanes: [I32#8]
+}
+impl I32x8 {
+    fn new(l0: I32, l1: I32, l2: I32, l3: I32, l4: I32, l5: I32, l6: I32, l7: I32) -> I32x8 Never! { I32x8{lanes: [I32#8]{l0, l1, l2, l3, l4, l5, l6, l7}} }
+    fn splat(value: I32) -> I32x8 Never! { I32x8{lanes: [I32#8]{value, value, value, value, value, value, value, value}} }
+    fn from_array(lanes: [I32#8]) -> I32x8 Never! { I32x8{lanes: lanes} }
+    fn to_array(self) -> [I32#8] Never! { self.lanes.copy() }
+    fn lane(self, index: Int) -> I32 Never! {
+        if index < 0 || index >= 8 -> core.math.__numeric_stop("lane index {index} out of range for I32x8 (8 lanes)")
+        self.lanes[index]
+    }
+    fn sum(self) -> I32 Never! {
+        value := I32{0}
+        loop i in 0..<8 -> value = value + self.lanes[i]
+        value
+    }
+    fn product(self) -> I32 Never! {
+        value := I32{1}
+        loop i in 0..<8 -> value = value * self.lanes[i]
+        value
+    }
+    fn min(self) -> I32 Never! {
+        value := self.lanes[0]
+        loop i in 1..<8 {
+            if self.lanes[i] < value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn max(self) -> I32 Never! {
+        value := self.lanes[0]
+        loop i in 1..<8 {
+            if self.lanes[i] > value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn reduce_add(self) -> I32 Never! { self.sum() }
+    fn reduce_mul(self) -> I32 Never! { self.product() }
+    fn reduce_min(self) -> I32 Never! { self.min() }
+    fn reduce_max(self) -> I32 Never! { self.max() }
+    fn reduce_avg(self) -> I32 Never! { self.sum() / I32{8} }
+    fn reduce(self, op: ReduceOp) -> I32 Never! {
+        if op == .Add -> return self.reduce_add()
+        if op == .Mul -> return self.reduce_mul()
+        if op == .Min -> return self.reduce_min()
+        if op == .Max -> return self.reduce_max()
+        self.reduce_avg()
+    }
+}
+impl I32x8.Add {
+    fn add(self, rhs: I32x8) -> I32x8 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<8 -> lanes[i] = lanes[i] + rhs.lanes[i]
+        I32x8{lanes: lanes}
+    }
+}
+impl I32x8.Sub {
+    fn sub(self, rhs: I32x8) -> I32x8 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<8 -> lanes[i] = lanes[i] - rhs.lanes[i]
+        I32x8{lanes: lanes}
+    }
+}
+impl I32x8.Mul {
+    fn mul(self, rhs: I32x8) -> I32x8 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<8 -> lanes[i] = lanes[i] * rhs.lanes[i]
+        I32x8{lanes: lanes}
+    }
+}
+impl I32x8.Div {
+    fn div(self, rhs: I32x8) -> I32x8 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<8 -> lanes[i] = lanes[i] / rhs.lanes[i]
+        I32x8{lanes: lanes}
+    }
+}
+
+struct U32x8 {
+    lanes: [U32#8]
+}
+impl U32x8 {
+    fn new(l0: U32, l1: U32, l2: U32, l3: U32, l4: U32, l5: U32, l6: U32, l7: U32) -> U32x8 Never! { U32x8{lanes: [U32#8]{l0, l1, l2, l3, l4, l5, l6, l7}} }
+    fn splat(value: U32) -> U32x8 Never! { U32x8{lanes: [U32#8]{value, value, value, value, value, value, value, value}} }
+    fn from_array(lanes: [U32#8]) -> U32x8 Never! { U32x8{lanes: lanes} }
+    fn to_array(self) -> [U32#8] Never! { self.lanes.copy() }
+    fn lane(self, index: Int) -> U32 Never! {
+        if index < 0 || index >= 8 -> core.math.__numeric_stop("lane index {index} out of range for U32x8 (8 lanes)")
+        self.lanes[index]
+    }
+    fn sum(self) -> U32 Never! {
+        value := U32{0}
+        loop i in 0..<8 -> value = value + self.lanes[i]
+        value
+    }
+    fn product(self) -> U32 Never! {
+        value := U32{1}
+        loop i in 0..<8 -> value = value * self.lanes[i]
+        value
+    }
+    fn min(self) -> U32 Never! {
+        value := self.lanes[0]
+        loop i in 1..<8 {
+            if self.lanes[i] < value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn max(self) -> U32 Never! {
+        value := self.lanes[0]
+        loop i in 1..<8 {
+            if self.lanes[i] > value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn reduce_add(self) -> U32 Never! { self.sum() }
+    fn reduce_mul(self) -> U32 Never! { self.product() }
+    fn reduce_min(self) -> U32 Never! { self.min() }
+    fn reduce_max(self) -> U32 Never! { self.max() }
+    fn reduce_avg(self) -> U32 Never! { self.sum() / U32{8} }
+    fn reduce(self, op: ReduceOp) -> U32 Never! {
+        if op == .Add -> return self.reduce_add()
+        if op == .Mul -> return self.reduce_mul()
+        if op == .Min -> return self.reduce_min()
+        if op == .Max -> return self.reduce_max()
+        self.reduce_avg()
+    }
+}
+impl U32x8.Add {
+    fn add(self, rhs: U32x8) -> U32x8 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<8 -> lanes[i] = lanes[i] + rhs.lanes[i]
+        U32x8{lanes: lanes}
+    }
+}
+impl U32x8.Sub {
+    fn sub(self, rhs: U32x8) -> U32x8 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<8 -> lanes[i] = lanes[i] - rhs.lanes[i]
+        U32x8{lanes: lanes}
+    }
+}
+impl U32x8.Mul {
+    fn mul(self, rhs: U32x8) -> U32x8 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<8 -> lanes[i] = lanes[i] * rhs.lanes[i]
+        U32x8{lanes: lanes}
+    }
+}
+impl U32x8.Div {
+    fn div(self, rhs: U32x8) -> U32x8 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<8 -> lanes[i] = lanes[i] / rhs.lanes[i]
+        U32x8{lanes: lanes}
+    }
+}
+
+struct I64x4 {
+    lanes: [I64#4]
+}
+impl I64x4 {
+    fn new(l0: I64, l1: I64, l2: I64, l3: I64) -> I64x4 Never! { I64x4{lanes: [I64#4]{l0, l1, l2, l3}} }
+    fn splat(value: I64) -> I64x4 Never! { I64x4{lanes: [I64#4]{value, value, value, value}} }
+    fn from_array(lanes: [I64#4]) -> I64x4 Never! { I64x4{lanes: lanes} }
+    fn to_array(self) -> [I64#4] Never! { self.lanes.copy() }
+    fn lane(self, index: Int) -> I64 Never! {
+        if index < 0 || index >= 4 -> core.math.__numeric_stop("lane index {index} out of range for I64x4 (4 lanes)")
+        self.lanes[index]
+    }
+    fn sum(self) -> I64 Never! {
+        value := I64{0}
+        loop i in 0..<4 -> value = value + self.lanes[i]
+        value
+    }
+    fn product(self) -> I64 Never! {
+        value := I64{1}
+        loop i in 0..<4 -> value = value * self.lanes[i]
+        value
+    }
+    fn min(self) -> I64 Never! {
+        value := self.lanes[0]
+        loop i in 1..<4 {
+            if self.lanes[i] < value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn max(self) -> I64 Never! {
+        value := self.lanes[0]
+        loop i in 1..<4 {
+            if self.lanes[i] > value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn reduce_add(self) -> I64 Never! { self.sum() }
+    fn reduce_mul(self) -> I64 Never! { self.product() }
+    fn reduce_min(self) -> I64 Never! { self.min() }
+    fn reduce_max(self) -> I64 Never! { self.max() }
+    fn reduce_avg(self) -> I64 Never! { self.sum() / I64{4} }
+    fn reduce(self, op: ReduceOp) -> I64 Never! {
+        if op == .Add -> return self.reduce_add()
+        if op == .Mul -> return self.reduce_mul()
+        if op == .Min -> return self.reduce_min()
+        if op == .Max -> return self.reduce_max()
+        self.reduce_avg()
+    }
+}
+impl I64x4.Add {
+    fn add(self, rhs: I64x4) -> I64x4 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<4 -> lanes[i] = lanes[i] + rhs.lanes[i]
+        I64x4{lanes: lanes}
+    }
+}
+impl I64x4.Sub {
+    fn sub(self, rhs: I64x4) -> I64x4 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<4 -> lanes[i] = lanes[i] - rhs.lanes[i]
+        I64x4{lanes: lanes}
+    }
+}
+impl I64x4.Mul {
+    fn mul(self, rhs: I64x4) -> I64x4 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<4 -> lanes[i] = lanes[i] * rhs.lanes[i]
+        I64x4{lanes: lanes}
+    }
+}
+impl I64x4.Div {
+    fn div(self, rhs: I64x4) -> I64x4 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<4 -> lanes[i] = lanes[i] / rhs.lanes[i]
+        I64x4{lanes: lanes}
+    }
+}
+
+struct U64x4 {
+    lanes: [U64#4]
+}
+impl U64x4 {
+    fn new(l0: U64, l1: U64, l2: U64, l3: U64) -> U64x4 Never! { U64x4{lanes: [U64#4]{l0, l1, l2, l3}} }
+    fn splat(value: U64) -> U64x4 Never! { U64x4{lanes: [U64#4]{value, value, value, value}} }
+    fn from_array(lanes: [U64#4]) -> U64x4 Never! { U64x4{lanes: lanes} }
+    fn to_array(self) -> [U64#4] Never! { self.lanes.copy() }
+    fn lane(self, index: Int) -> U64 Never! {
+        if index < 0 || index >= 4 -> core.math.__numeric_stop("lane index {index} out of range for U64x4 (4 lanes)")
+        self.lanes[index]
+    }
+    fn sum(self) -> U64 Never! {
+        value := U64{0}
+        loop i in 0..<4 -> value = value + self.lanes[i]
+        value
+    }
+    fn product(self) -> U64 Never! {
+        value := U64{1}
+        loop i in 0..<4 -> value = value * self.lanes[i]
+        value
+    }
+    fn min(self) -> U64 Never! {
+        value := self.lanes[0]
+        loop i in 1..<4 {
+            if self.lanes[i] < value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn max(self) -> U64 Never! {
+        value := self.lanes[0]
+        loop i in 1..<4 {
+            if self.lanes[i] > value -> value = self.lanes[i]
+        }
+        value
+    }
+    fn reduce_add(self) -> U64 Never! { self.sum() }
+    fn reduce_mul(self) -> U64 Never! { self.product() }
+    fn reduce_min(self) -> U64 Never! { self.min() }
+    fn reduce_max(self) -> U64 Never! { self.max() }
+    fn reduce_avg(self) -> U64 Never! { self.sum() / U64{4} }
+    fn reduce(self, op: ReduceOp) -> U64 Never! {
+        if op == .Add -> return self.reduce_add()
+        if op == .Mul -> return self.reduce_mul()
+        if op == .Min -> return self.reduce_min()
+        if op == .Max -> return self.reduce_max()
+        self.reduce_avg()
+    }
+}
+impl U64x4.Add {
+    fn add(self, rhs: U64x4) -> U64x4 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<4 -> lanes[i] = lanes[i] + rhs.lanes[i]
+        U64x4{lanes: lanes}
+    }
+}
+impl U64x4.Sub {
+    fn sub(self, rhs: U64x4) -> U64x4 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<4 -> lanes[i] = lanes[i] - rhs.lanes[i]
+        U64x4{lanes: lanes}
+    }
+}
+impl U64x4.Mul {
+    fn mul(self, rhs: U64x4) -> U64x4 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<4 -> lanes[i] = lanes[i] * rhs.lanes[i]
+        U64x4{lanes: lanes}
+    }
+}
+impl U64x4.Div {
+    fn div(self, rhs: U64x4) -> U64x4 Never! {
+        lanes := self.lanes.copy()
+        loop i in 0..<4 -> lanes[i] = lanes[i] / rhs.lanes[i]
+        U64x4{lanes: lanes}
+    }
+}
+
+#Test("SIMD lane types fold left to right and act lane by lane") {
+    floats :: F32x4.new(F32{1.0}, F32{2.0}, F32{3.0}, F32{4.0})
+    assert_eq(floats.sum(), F32{10.0})
+    assert_eq(floats.reduce(.Avg), F32{2.5})
+    assert_eq((floats * floats).lane(3), F32{16.0})
+    assert_eq(F32x8.splat(F32{0.5}).sum(), F32{4.0})
+    assert_eq(F64x2.new(F64{NAN}, F64{2.0}).min(), F64{2.0})
+    ints :: I32x8.new(I32{1}, I32{2}, I32{3}, I32{4}, I32{5}, I32{6}, I32{7}, I32{8})
+    assert_eq(ints.reduce(.Add), I32{36})
+    assert_eq(ints.min(), I32{1})
+    assert_eq((ints / I32x8.splat(I32{-2})).lane(2), I32{-1})
+    assert_eq(U8x16.splat(U8{3}).sum(), U8{48})
 }
 
 // Stock coordinates retain the seed's frame-zero constructors and left frame.

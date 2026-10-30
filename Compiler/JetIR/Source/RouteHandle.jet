@@ -249,19 +249,6 @@ fn ir_handle_precise_route(type_name: String, method: String) -> IRHandleRoute? 
     Val(ir_handle_route(false, type_name, method, "jet_{type_key}_{method}", mask, None))
 }
 
-fn ir_handle_is_simd_lane_type(name: String) -> Bool Never! {
-    if name == {
-        "F32x4" | "F64x2" | "F32x8" | "F64x4" | "I8x16" | "I16x8" | "I32x4" | "I64x2" |
-        "U8x16" | "U16x8" | "U32x4" | "U64x2" | "I8x32" | "I16x16" | "I32x8" | "I64x4" |
-        "U8x32" | "U16x16" | "U32x8" | "U64x4" -> {
-            true
-        }
-        else -> {
-            false
-        }
-    }
-}
-
 fn ir_handle_is_geometry_type(name: String) -> Bool Never! {
     if name == {
         "Point2" | "Delta2" | "Transform" | "Transform2" | "Ray2" | "ScreenPoint" | "WorldPoint" | "ViewPoint" |
@@ -274,33 +261,12 @@ fn ir_handle_is_geometry_type(name: String) -> Bool Never! {
     }
 }
 
-fn ir_handle_math_route(type_name: String, method: String, reduce_op: String?) -> IRHandleRoute? {
+fn ir_handle_math_route(type_name: String, method: String) -> IRHandleRoute? {
     suffix := ""
     if {
-        method == "reduce" -> {
-            suffix = if reduce_op == {
-                (Val("Add")) -> "reduce_add"
-                (Val("Mul")) -> "reduce_mul"
-                (Val("Min")) -> "reduce_min"
-                (Val("Max")) -> "reduce_max"
-                (Val("Avg")) -> "reduce_avg"
-                else -> {
-                    return None
-                }
-            }
-        }
-        reduce_op != None -> {
-            return None
-        }
         ir_handle_is_geometry_type(type_name) -> {
             if method == {
                 "add" | "sub" | "then" | "ray" | "inverse" | "point" | "point_at_depth" -> suffix = method
-                else -> return None
-            }
-        }
-        ir_handle_is_simd_lane_type(type_name) -> {
-            if method == {
-                "to_array" | "sum" | "product" | "min" | "max" -> suffix = method
                 else -> return None
             }
         }
@@ -635,7 +601,7 @@ fn ir_handle_dynamic_route(operation: BodyHandleOp, receiver: Type, argument_cou
         .ReactiveSet -> return ir_handle_reactive_route(receiver, "set")
         .TaskJoin -> return Val(ir_handle_task_route(receiver, carrier))
         .PreciseMethod(type_name, method) -> return ir_handle_precise_route(type_name, method)
-        .MathMethod(type_name, method, reduce_op) -> return ir_handle_math_route(type_name, method, reduce_op)
+        .MathMethod(type_name, method) -> return ir_handle_math_route(type_name, method)
         .EventMethod(method) -> return ir_handle_event_route(receiver, method, carrier)
         .LoadableMethod(method) -> return ir_handle_loadable_route(method)
         .UIBackendMethod(method) -> return ir_handle_ui_route(receiver, method)

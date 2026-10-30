@@ -303,7 +303,6 @@ enum NodeKind {
     ListSpread(parts: [BodyListSpreadPart])
     MapLit(entries: [BodyMapEntry])
     PoolSlot(pool: Int, id: Int, mutable: Bool, field: String?, line: Int, source_line: String)
-    MathLaneIndex(lane_type: String, base: Int, index: Int, line: Int)
     MathSwizzleRead(type_name: String, receiver: Int, lanes: [Int])
     // #4318: `fact` is the sema decision behind the copy.
     Clone(value: Int, fact: CopyFact)
@@ -599,7 +598,7 @@ enum BodyHandleOp {
     ChannelClose
     SenderSend
     HTTPRouterRegister(verb: HTTPRouteMethod, handler: Int, file: String, line: Int, handler_param_names: [String], contract_json: String)
-    MathMethod(type_name: String, method: String, reduce_op: String?)
+    MathMethod(type_name: String, method: String)
     ReactiveGet
     ReactiveSet
     ReactiveEffectMethod
@@ -1404,10 +1403,6 @@ fn body_each_node_kind_child(tree: BodyTree, value: NodeKind, visit: fn(Int) -[M
         .PoolSlot(f0, f1, _, _, _, _) -> {
             visit(f0)
             visit(f1)
-        }
-        .MathLaneIndex(_, f1, f2, _) -> {
-            visit(f1)
-            visit(f2)
         }
         .MathSwizzleRead(_, f1, _) -> {
             visit(f1)
