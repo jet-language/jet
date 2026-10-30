@@ -15,7 +15,7 @@ fn engine_independent_root_fixture() -> (base: String, roots: HangarRoots, repo:
     greet :: files.join(bin, "hello")
     files.write(greet, "#!/bin/sh\necho hello from jet-pkgs\n") ?? panic("hello executable")
     if sys.is_unix() -> files.chmod(greet, 0o755) ?? panic("hello mode")
-    files.write(files.join(project, "env.jet"), "use jetpack as pkg\npub fn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"{repo}\", \"core\"),\n        pkg.packages([\"hello@mine\"])\n    ]\n}}\n") ?? panic("env source")
+    files.write(files.join(project, "env.jet"), "use jetpack as pkg\nfn shell() -> [JSON] {{\n    return [\n        pkg.source(\"mine\", \"{repo}\", \"core\"),\n        pkg.packages([\"hello@mine\"])\n    ]\n}}\n") ?? panic("env source")
     roots :: HangarRoots.at(root)
     table :: SourceTable.from_decls([NamedSourceDecl]{NamedSourceDecl{name: "mine", upstream: "path:{repo}", via: ProviderKind.Core}})
     spec :: RefSpec.classify_in("hello@mine", table) ?? panic("reference")

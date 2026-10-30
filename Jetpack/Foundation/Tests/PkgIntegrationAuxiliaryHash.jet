@@ -8,7 +8,7 @@ use core.files as files
     files.remove_all(root).drop("fixture may be absent")
     source :: files.join(root, "src")
     files.create_dir_all(source) ?? panic("mkdir source")
-    files.write(files.join(source, "lib.jet"), "pub fn x() {{}}\n") ?? panic("source fixture")
+    files.write(files.join(source, "lib.jet"), "fn x() {{}}\n") ?? panic("source fixture")
     files.write(files.join(source, "package.jet"), "name: \"mylib\"\nversion: \"0.1.0\"\njet: \">=0.1.0\"\ndescription: \"\"\nlicense: \"MIT\"\nrepository: \"\"\n") ?? panic("manifest fixture")
     files.write_bytes(files.join(source, "runtime.data"), "trusted bytes\n".bytes()) ?? panic("trusted auxiliary")
     source_hash :: foundation_tree_hash(source)

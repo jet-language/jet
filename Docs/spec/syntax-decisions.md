@@ -2111,7 +2111,6 @@ on any other declaration (E0413), `pub:`/`priv:` section labels (E0415),
 `priv(package)` on a field (E0417), and `#PubFile` (E0418). Reaching into a
 `priv module` or a `priv` field from outside is E0605/E0609. There is no
 package-level privacy yet (it will come through the manifest).
-`Tools/agent/vis-cutover.mjs` migrates source written for the retired model.
 
 Re-export (`pub use`) is not decided: it stays the only `pub` form until the
 re-export ballot is ratified (the owner leans toward imports being public by
