@@ -39,6 +39,15 @@ fn layout_marker_refusal(source: String, code: String, spelled: String) {
     if default.layout != None || default.layout_span != None -> panic("an unmarked struct gained a layout fact")
     tagged :: parse_source("#Layout(c, I32)\nenum E {{ A }}".bytes())
     if tagged.diagnostics.len() != 0 -> panic("an enum C tag width was refused")
+    backed :: parse_source("#Layout(U8)\nenum E {{\n    A = 1\n    B\n}}".bytes())
+    if backed.diagnostics.len() != 0 -> panic("an enum integer backing was refused")
+    if backed.program.items[0] == .Enum(definition) {
+        if definition.type_markers.len() != 1 -> panic("an enum integer backing lost its marker")
+    } else {
+        panic("the backed enum was not parsed")
+    }
+    layout_marker_refusal("#Layout(U8)\nstruct P {{ x: Int }}", "E1105", "U8")
+    layout_marker_refusal("#[Layout(U8), Codable]\nstruct P {{ x: Int }}", "E1105", "Layout(U8)")
     layout_marker_refusal("#Layout(packed)\nstruct P {{ x: Int }}", "E1105", "packed")
     layout_marker_refusal("#Layout(sparse)\nstruct P {{ x: Int }}", "E1105", "sparse")
     layout_marker_refusal("#Layout(columnar, align(64))\nstruct P {{ x: Int }}", "E1105", "64")

@@ -2568,6 +2568,9 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
     // Each struct's `validate { … }` block becomes its
     // generated `T.validate(value)` before any declaration is registered.
     sema_validate_blocks(&module_row.program.items, &diagnostics)
+    // A `#Layout(U8)` enum gains its `to_int` and `from_int` methods
+    // (EnumNumbers.jet, D-ENUM-BACKING1).
+    sema_enum_numbers_expand(&module_row.program.items, &diagnostics)
     // Each computed field becomes its generated getter method, which a
     // read of the field calls.
     sema_derive_computed_getters(&module_row.program.items)

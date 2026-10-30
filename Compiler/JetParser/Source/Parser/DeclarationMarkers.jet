@@ -24,6 +24,7 @@ use jet_foundation.[
     UnOp,
     ast_job_metadata,
     expr_span,
+    jet_layout_integer_backing_name,
     marker_registered_signature,
 ]
 
@@ -131,6 +132,19 @@ fn parser_layout_marker_fact(state: &JetParserState, markers: [Marker], grouped:
                 return None
             }
         }
+        // `#Layout(U8)`: a payload-free enum's integer backing (D-ENUM-BACKING1).
+        // It is no struct layout; sema reads it from the enum's markers.
+        if jet_layout_integer_backing_name(variant) {
+            if !is_enum {
+                parser_add_fatal_code(&state, "E1105", variant_span, "`#Layout({variant})` backs only an enum", "an integer backing sets the number type of a payload-free enum's cases; a struct has fields, not case numbers", "use `#Layout(c)` on the struct, or put `#Layout({variant})` on a payload-free enum")
+                return None
+            }
+            if values[1] != None {
+                parser_marker_shape_error(&state, marker)
+                state.abort_mark = state.diagnostics.len()
+            }
+            return None
+        }
         layout := StructLayout?{None}
         if variant == {
             "c" -> layout = Val(if alignment == .Val(bytes) -> StructLayout.CAligned{alignment: bytes, target: alignment_target} else -> StructLayout.C)
@@ -152,7 +166,7 @@ fn parser_layout_marker_fact(state: &JetParserState, markers: [Marker], grouped:
         }
         if is_enum {
             if has_alignment || layout != Val(StructLayout.C) {
-                parser_add_fatal_code(&state, "E1105", variant_span, "Only plain C layout applies to enums.", "alignment is a struct ABI override; enum tags use the second bare layout argument.", "use `#Layout(c, I32)` or another enum tag width")
+                parser_add_fatal_code(&state, "E1105", variant_span, "Only plain C layout applies to enums.", "alignment is a struct ABI override; enum tags use the second bare layout argument, and an integer backing is the only argument.", "use `#Layout(c, I32)` or another enum tag width, or an integer backing such as `#Layout(U8)`")
             }
             return None
         }
@@ -203,7 +217,10 @@ fn parser_layout_grouped_fact(state: &JetParserState, marker: Marker, is_enum: B
                 if has_alignment -> parser_add_error_code(&state, "E1105", marker.span, "`align` is only valid with `#Layout(c)`", "columnar layout has no C ABI alignment override", "write `#Layout(c, align(64))`")
                 return Val(StructLayout.Columnar)
             }
-            else -> return None
+            else -> {
+                if jet_layout_integer_backing_name(variant) -> parser_add_error_code(&state, "E1105", marker.span, "`#Layout({variant})` backs only an enum", "an integer backing sets the number type of a payload-free enum's cases; a struct has fields, not case numbers", "use `#Layout(c)` on the struct, or put `#Layout({variant})` on a payload-free enum")
+                return None
+            }
         }
     }
     None

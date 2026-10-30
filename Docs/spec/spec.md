@@ -742,6 +742,34 @@ E1104 because they have no stable C layout; fixed arrays `[T#N]` are allowed.
 Reserved `packed`, `align(N)`, and `columnar` forms parse but report E1105 until
 their contracts are defined (D-REPRC1).
 
+### Enum backing
+
+`#Layout(U8)` before a payload-free enum names the integer type that backs its
+case numbers: `U8`, `I8`, `U16`, `I16`, `U32`, `I32`, `U64`, or `I64`
+(D-ENUM-BACKING1=A). A case's number is its written integer literal
+(`Load = 16`, `Low = -1`), or one more than the case before it; the first
+case counts from 0. The enum gains `case.to_int() -> Int` and
+`E.from_int(value: Int) -> E Err!`, which returns the case with that number
+or an error naming the number (D-ENUM-INGRESS1=A). An enum that declares its
+own `to_int` or `from_int` keeps it.
+
+```jet
+#Layout(U8)
+enum Opcode {
+    Nop
+    Load = 16
+    Store
+}
+
+op :: Opcode.from_int(17) ?? return
+print(op.to_int())
+```
+
+A case with a payload is E1120, a number the backing type can't hold is E1121,
+two cases with one number are E1122, and a case number that is not an integer
+literal is E0035. `#Layout(U8)` on a struct is E1105; `#Layout(c, U8)` remains
+the C ABI tag width of a `#Layout(c)` enum.
+
 ## Fixed-size lists
 
 `[T#N]` refines a list to exactly `N` elements of type `T`. Destructuring must

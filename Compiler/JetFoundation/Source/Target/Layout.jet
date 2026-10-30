@@ -493,6 +493,28 @@ fn jet_target_layout_checked_struct_facts(engine: TargetLayoutEngine, definition
     JetCheckedLayoutResult.Accepted{value: CheckedLayoutFacts{physical: physical, alignment: None}}
 }
 
+// D-ENUM-BACKING1: `#Layout(U8)` names the integer type that backs a
+// payload-free enum; these are the accepted backing types.
+fn jet_layout_integer_backing_name(name: String) -> Bool Never! {
+    jet_layout_integer_backing_tag(name) != None
+}
+
+fn jet_layout_integer_backing_tag(name: String) -> CEnumTag? {
+    if name == {
+        "U8" -> Val(CEnumTag.U8)
+        "I8" -> Val(CEnumTag.I8)
+        "U16" -> Val(CEnumTag.U16)
+        "I16" -> Val(CEnumTag.I16)
+        "U32" -> Val(CEnumTag.U32)
+        "I32" -> Val(CEnumTag.I32)
+        "U64" -> Val(CEnumTag.U64)
+        "I64" -> Val(CEnumTag.I64)
+        else -> None
+    }
+}
+
+// The C ABI tag of `#Layout(c)` / `#Layout(c, U8)`. An integer backing
+// `#Layout(U8)` is no C layout: see jet_target_layout_enum_backing.
 fn jet_target_layout_enum_c_tag(definition: EnumDef) -> CEnumTag? {
     marker :: loop candidate in definition.type_markers {
         if candidate.name == "Layout" -> break candidate
@@ -502,18 +524,46 @@ fn jet_target_layout_enum_c_tag(definition: EnumDef) -> CEnumTag? {
     if jet_target_layout_ascii_lower(layout_name) != "c" -> return None
     enum_tag :: jet_target_layout_marker_expression(marker, 1) ?? return Val(CEnumTag.CInt)
     if enum_tag == {
-        .Ident(name, _, _) -> if name == {
-            "U8" -> Val(CEnumTag.U8)
-            "I8" -> Val(CEnumTag.I8)
-            "U16" -> Val(CEnumTag.U16)
-            "I16" -> Val(CEnumTag.I16)
-            "U32" -> Val(CEnumTag.U32)
-            "I32" -> Val(CEnumTag.I32)
-            "U64" -> Val(CEnumTag.U64)
-            "I64" -> Val(CEnumTag.I64)
-            else -> None
-        }
+        .Ident(name, _, _) -> jet_layout_integer_backing_tag(name)
         else -> None
+    }
+}
+
+// The integer backing of `#Layout(U8) enum E { … }`: its type name, None for
+// every other enum.
+fn jet_target_layout_enum_backing(definition: EnumDef) -> String? {
+    marker :: loop candidate in definition.type_markers {
+        if candidate.name == "Layout" -> break candidate
+    } ?? return None
+    if marker.args.len() != 1 -> return None
+    layout_expr :: jet_target_layout_marker_expression(marker, 0) ?? return None
+    if layout_expr == {
+        .Ident(name, _, _) -> if jet_layout_integer_backing_name(name) -> Val(name) else -> None
+        else -> None
+    }
+}
+
+// The least and greatest case number a backing type holds (U64 stops at the
+// greatest Int, the type of a case number).
+fn jet_layout_integer_backing_min(name: String) -> Int Never! {
+    if name == {
+        "I8" -> -128
+        "I16" -> -32768
+        "I32" -> -2147483648
+        "I64" -> -9223372036854775807 - 1
+        else -> 0
+    }
+}
+
+fn jet_layout_integer_backing_max(name: String) -> Int Never! {
+    if name == {
+        "U8" -> 255
+        "I8" -> 127
+        "U16" -> 65535
+        "I16" -> 32767
+        "U32" -> 4294967295
+        "I32" -> 2147483647
+        else -> 9223372036854775807
     }
 }
 

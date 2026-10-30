@@ -1,0 +1,44 @@
+Error [E1120]: `#Layout(U8)` backs only a payload-free enum, and case `Circle` of `Shape` carries a payload
+  --> tests/ui/enum_backing_refusals.jet:1:1
+    |
+  1 | #Layout(U8)
+    | ^^^^^^^^^^^
+ Why: A backing type gives each case one number; a case with fields is more than a number
+ Fix: Remove the payload from `Circle`, or remove `#Layout(U8)` and convert with your own methods
+More: jet-lang.dev/e/E1120
+
+Error [E1121]: Case `Large` is 256, which `U8` can't hold
+  --> tests/ui/enum_backing_refusals.jet:10:13
+    |
+ 10 |     Large = 256
+    |             ^^^
+ Why: `#Layout(U8)` stores every case number of `Wide` as a `U8` (0 to 255)
+ Fix: Use a number from 0 to 255, or a wider backing type
+More: jet-lang.dev/e/E1121
+
+Error [E1121]: Case `Over` counts up to 128, which `I8` can't hold
+  --> tests/ui/enum_backing_refusals.jet:16:5
+    |
+ 16 |     Over
+    |     ^^^^
+ Why: A case without a number is one more than the case before it, and `#Layout(I8)` stores numbers from -128 to 127
+ Fix: Give `Over` a number from -128 to 127, or use a wider backing type
+More: jet-lang.dev/e/E1121
+
+Error [E1122]: Cases `First` and `Third` of `Twice` are both 3
+  --> tests/ui/enum_backing_refusals.jet:23:5
+    |
+ 23 |     Third
+    |     ^^^^^
+ Why: `Twice.from_int(3)` has to name one case
+ Fix: Give `Third` a number no other case uses
+More: jet-lang.dev/e/E1122
+
+Error [E0035]: Case `Base` of `Computed` needs a literal number
+  --> tests/ui/enum_backing_refusals.jet:30:12
+    |
+ 30 |     Base = LIMIT
+    |            ^^^^^
+ Why: `#Layout(U8)` case numbers are checked against `U8` and against each other where the enum is declared
+ Fix: Write the number as an integer literal, such as `Base = 0`
+More: jet-lang.dev/e/E0035
