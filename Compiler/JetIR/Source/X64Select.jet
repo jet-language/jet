@@ -80,6 +80,7 @@ use jet_backend.[
     x64_float_store,
     x64_idiv,
     x64_imul_rr,
+    x64_imul_wide,
     x64_jcc_rel32,
     x64_jmp_rel32,
     x64_lea,
@@ -1151,6 +1152,56 @@ fn ir_x64_power_division(e: &IRX64Emitter, op: IROp, signed: Bool, k: Int) Never
     x64_alu_rr(&e.code, X64Alu.Sub, X64_RAX, X64_RDX)
 }
 
+// Signed division of a word by a constant d (3 <= d < 2^62, not a power of
+// two) as a multiply (Hacker's Delight 10-1): the truncated quotient of n
+// is the high word of n * multiplier (plus n when the multiplier needs 65
+// bits, `add`), shifted right by `shift`, plus 1 when n is negative.
+struct IRX64Magic {
+    multiplier: Int
+    add: Bool
+    shift: Int
+}
+
+// The smallest p >= 64 with 2^p > nc * (d - 2^p mod d), where nc is the
+// largest word n with n mod d == d - 1; the multiplier is ceil(2^p / d).
+fn ir_x64_magic(d: Int) -> IRX64Magic Never! {
+    half :: 1 << 63
+    nc :: half - 1 - half % d
+    p := 64
+    loop nc * (d - (1 << p) % d) >= (1 << p) -> p += 1
+    multiplier :: (1 << p) /% d + 1
+    if multiplier >= half -> return IRX64Magic{multiplier: multiplier - (1 << 64), add: true, shift: p - 64}
+    IRX64Magic{multiplier: multiplier, add: false, shift: p - 64}
+}
+
+// The divisor of a constant `slot` that divides by a multiply
+// (ir_x64_magic), else 0.
+fn ir_x64_magic_divisor(al: IRX64Allocation, slot: Int) -> Int Never! {
+    if slot < 0 || !al.consts[slot] -> return 0
+    d :: al.values[slot]
+    if d < 3 || d >= (1 << 62) || ir_x64_power_of_two(al, slot) > 0 -> return 0
+    d
+}
+
+// rax divided by the constant d (ir_x64_magic_divisor) as idiv leaves it:
+// the truncated quotient in rax, the remainder in rdx, d in rcx. Uses r11.
+fn ir_x64_magic_division(e: &IRX64Emitter, d: Int) Never! {
+    magic :: ir_x64_magic(d)
+    x64_mov_rr(&e.code, X64_R11, X64_RAX)
+    x64_mov_ri(&e.code, X64_RCX, magic.multiplier)
+    x64_imul_wide(&e.code, X64_RCX)
+    if magic.add -> x64_alu_rr(&e.code, X64Alu.Add, X64_RDX, X64_R11)
+    if magic.shift > 0 -> x64_shift_ri(&e.code, X64Shift.Sar, X64_RDX, magic.shift)
+    x64_mov_rr(&e.code, X64_RAX, X64_R11)
+    x64_shift_ri(&e.code, X64Shift.Shr, X64_RAX, 63)
+    x64_alu_rr(&e.code, X64Alu.Add, X64_RAX, X64_RDX)
+    x64_mov_ri(&e.code, X64_RCX, d)
+    x64_mov_rr(&e.code, X64_RDX, X64_RAX)
+    x64_imul_rr(&e.code, X64_RDX, X64_RCX)
+    x64_alu_rr(&e.code, X64Alu.Sub, X64_R11, X64_RDX)
+    x64_mov_rr(&e.code, X64_RDX, X64_R11)
+}
+
 fn ir_x64_division_symbol(op: IROp) -> String Never! {
     if op == {
         .Div -> "jet_int_div"
@@ -1160,12 +1211,97 @@ fn ir_x64_division_symbol(op: IROp) -> String Never! {
     }
 }
 
+// How far back a remainder looks for its quotient (ir_x64_paired_quotient).
+IR_X64_PAIR_REACH :: 48
+
+// The slot holding the quotient a Mod (Rem) at `at` can reuse: that of the
+// nearest FloorDiv (Div) of the same operands before it in its own region,
+// with neither operand written in between, or a copy of it, with the
+// holder not written since and its live range reaching past `at` (so its
+// place still holds it); -1 when there is none. Only nested regions lie
+// between them, so every path to `at` runs that division first.
+fn ir_x64_paired_quotient(f: IRFunction, al: IRX64Allocation, at: Int) -> Int Never! {
+    pair :: if f.op[at] == .Mod -> IROp.FloorDiv else -> IROp.Div
+    a :: f.a[at]
+    b :: f.b[at]
+    depth := 0
+    j := at - 1
+    loop j >= 0 && at - j <= IR_X64_PAIR_REACH {
+        op :: f.op[j]
+        if op == .End -> depth += 1
+        if op == .Block || op == .Loop || op == .If {
+            if depth == 0 -> return -1
+            depth -= 1
+        }
+        if op == .Else && depth == 0 -> return -1
+        written :: ir_x64_write(f, j)
+        if depth == 0 && op == pair && f.a[j] == a && f.b[j] == b {
+            if written < 0 || written == a || written == b -> return -1
+            holder := written
+            nested := 0
+            loop k in (j + 1)..<at {
+                if f.op[k] == .Block || f.op[k] == .Loop || f.op[k] == .If -> nested += 1
+                if f.op[k] == .End -> nested -= 1
+                moved :: nested == 0 && (f.op[k] == .Copy || f.op[k] == .Move) && f.a[k] == holder && f.dst[k] != a && f.dst[k] != b
+                if moved -> holder = f.dst[k]
+                if !moved && ir_x64_write(f, k) == holder -> return -1
+            }
+            return if al.ends[holder] > at -> holder else -> -1
+        }
+        if written >= 0 && (written == a || written == b) -> return -1
+        j -= 1
+    }
+    -1
+}
+
+// A Mod (Rem) whose quotient q an earlier division left
+// (ir_x64_paired_quotient): a - q * b with all three inline and b nonzero,
+// which cannot overflow a word; otherwise the located runtime route.
+fn ir_x64_paired_remainder(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, quotient: Int) Never! {
+    sites := [Int]{}
+    divisor :: f.b[at]
+    ir_x64_load(&e, m, f, al, quotient, X64_RAX)
+    ir_x64_load(&e, m, f, al, divisor, X64_RCX)
+    ir_x64_load(&e, m, f, al, f.a[at], X64_R11)
+    ir_x64_operand_test(&e, al, quotient, X64_RAX, &sites)
+    ir_x64_operand_test(&e, al, divisor, X64_RCX, &sites)
+    ir_x64_operand_test(&e, al, f.a[at], X64_R11, &sites)
+    if !al.consts[divisor] || al.values[divisor] == 0 {
+        x64_test_rr(&e.code, X64_RCX, X64_RCX)
+        &sites.push(x64_jcc_rel32(&e.code, X64Cond.E))
+    }
+    x64_imul_rr(&e.code, X64_RAX, X64_RCX)
+    x64_alu_rr(&e.code, X64Alu.Sub, X64_R11, X64_RAX)
+    ir_x64_store(&e, m, f, al, f.dst[at], X64_R11)
+    ir_x64_located_cold(&e, f, at, ir_x64_division_symbol(f.op[at]), sites)
+}
+
+// The fixed-width (or proven-inline Int) form of ir_x64_paired_remainder:
+// a - q * b is exact in 64 bits, so the remainder needs no narrowing; a
+// zero divisor stops as the division's own would, unless it is an Int one
+// OptRange proved positive or a nonzero constant.
+fn ir_x64_word_paired_remainder(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64Tables, at: Int, quotient: Int) Never! {
+    divisor :: f.b[at]
+    ir_x64_load(&e, m, f, al, quotient, X64_RAX)
+    ir_x64_load(&e, m, f, al, divisor, X64_RCX)
+    ir_x64_load(&e, m, f, al, f.a[at], X64_R11)
+    positive :: ir_x64_type(m, f, f.a[at]).kind == .Int
+    if !positive && (!al.consts[divisor] || al.values[divisor] == 0) {
+        x64_test_rr(&e.code, X64_RCX, X64_RCX)
+        ir_x64_stop_if(&e, f, tables, at, X64Cond.E, IR_X64_DIVIDED_BY_ZERO)
+    }
+    x64_imul_rr(&e.code, X64_RAX, X64_RCX)
+    x64_alu_rr(&e.code, X64Alu.Sub, X64_R11, X64_RAX)
+    ir_x64_store(&e, m, f, al, f.dst[at], X64_R11)
+}
+
 // Exact Int Div, Rem (truncating), FloorDiv, Mod (Int.jet int_division):
 // two inline operands and a divisor other than 0 and -1 divide natively
 // (the quotient and remainder of such words are inline), a constant 2^k
-// divisor by shifts and masks; otherwise the located runtime route, which
-// keeps the division-by-zero stop and the big quotient of the smallest
-// inline word by -1.
+// divisor by shifts and masks, another constant one by a multiply, and a
+// remainder after the quotient of the same operands from that quotient;
+// otherwise the located runtime route, which keeps the division-by-zero
+// stop and the big quotient of the smallest inline word by -1.
 fn ir_x64_exact_division(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) Never! {
     op :: f.op[at]
     sites := [Int]{}
@@ -1174,6 +1310,20 @@ fn ir_x64_exact_division(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64
         ir_x64_load(&e, m, f, al, f.a[at], X64_RAX)
         ir_x64_operand_test(&e, al, f.a[at], X64_RAX, &sites)
         ir_x64_power_division(&e, op, true, k)
+        ir_x64_store(&e, m, f, al, f.dst[at], X64_RAX)
+        return ir_x64_located_cold(&e, f, at, ir_x64_division_symbol(op), sites)
+    }
+    if op == .Mod || op == .Rem {
+        quotient :: ir_x64_paired_quotient(f, al, at)
+        if quotient >= 0 -> return ir_x64_paired_remainder(&e, m, f, al, at, quotient)
+    }
+    magic :: ir_x64_magic_divisor(al, f.b[at])
+    if magic > 0 {
+        ir_x64_load(&e, m, f, al, f.a[at], X64_RAX)
+        ir_x64_operand_test(&e, al, f.a[at], X64_RAX, &sites)
+        ir_x64_magic_division(&e, magic)
+        if op == .FloorDiv || op == .Mod -> ir_x64_floor_adjust(&e, op)
+        if op == .Rem || op == .Mod -> x64_mov_rr(&e.code, X64_RAX, X64_RDX)
         ir_x64_store(&e, m, f, al, f.dst[at], X64_RAX)
         return ir_x64_located_cold(&e, f, at, ir_x64_division_symbol(op), sites)
     }
@@ -1262,12 +1412,21 @@ fn ir_x64_signed_min(bits: Int) -> Int Never! {
     0 - (1 << (bits - 1))
 }
 
-// Fixed-width Div, Rem, FloorDiv, Mod of rax by rcx into rax.
-fn ir_x64_word_division(e: &IRX64Emitter, f: IRFunction, tables: IRX64Tables, at: Int, ty: IRX64Shape) Never! {
+// Fixed-width Div, Rem, FloorDiv, Mod of rax by rcx into rax. A `positive`
+// divisor (an Int division OptRange proved one of) needs neither the zero
+// stop nor the -1 branch.
+fn ir_x64_word_division(e: &IRX64Emitter, f: IRFunction, tables: IRX64Tables, at: Int, ty: IRX64Shape, positive: Bool) Never! {
     op :: f.op[at]
     bits :: ir_x64_bits(ty)
     trap :: f.c[at] != IR_OVERFLOW_WRAP
     remainder :: op == .Rem || op == .Mod
+    if positive {
+        x64_cqo(&e.code)
+        x64_idiv(&e.code, X64_RCX)
+        if op == .FloorDiv || op == .Mod -> ir_x64_floor_adjust(&e, op)
+        if remainder -> x64_mov_rr(&e.code, X64_RAX, X64_RDX)
+        return
+    }
     x64_test_rr(&e.code, X64_RCX, X64_RCX)
     ir_x64_stop_if(&e, f, tables, at, X64Cond.E, IR_X64_DIVIDED_BY_ZERO)
     if !ty.signed {
@@ -1344,6 +1503,19 @@ fn ir_x64_word_binary(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
         ir_x64_power_division(&e, op, ty.signed, k)
         return ir_x64_store(&e, m, f, al, f.dst[at], X64_RAX)
     }
+    if op == .Rem || op == .Mod {
+        quotient :: ir_x64_paired_quotient(f, al, at)
+        if quotient >= 0 -> return ir_x64_word_paired_remainder(&e, m, f, al, tables, at, quotient)
+    }
+    magic :: if division && ty.signed -> ir_x64_magic_divisor(al, f.b[at]) else -> 0
+    if magic > 0 {
+        // Neither is the divisor 0 or -1.
+        ir_x64_load(&e, m, f, al, f.a[at], X64_RAX)
+        ir_x64_magic_division(&e, magic)
+        if op == .FloorDiv || op == .Mod -> ir_x64_floor_adjust(&e, op)
+        if op == .Rem || op == .Mod -> x64_mov_rr(&e.code, X64_RAX, X64_RDX)
+        return ir_x64_store(&e, m, f, al, f.dst[at], X64_RAX)
+    }
     if op == .Mul && f.c[at] == IR_OVERFLOW_WRAP {
         // A wrapping product by 2^k is a left shift (the same low bits).
         left_k :: ir_x64_power_of_two(al, f.a[at])
@@ -1363,7 +1535,7 @@ fn ir_x64_word_binary(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64All
     if !simple -> ir_x64_load(&e, m, f, al, f.b[at], X64_RCX)
     if op == {
         .Add | .Sub | .Mul -> ir_x64_word_arithmetic(&e, f, tables, at, ty, other, imm)
-        .Div | .Rem | .FloorDiv | .Mod -> ir_x64_word_division(&e, f, tables, at, ty)
+        .Div | .Rem | .FloorDiv | .Mod -> ir_x64_word_division(&e, f, tables, at, ty, ir_x64_type(m, f, f.a[at]).kind == .Int)
         .Shl | .Shr -> ir_x64_word_shift(&e, f, at, ty)
         .BitAnd | .BitOr | .BitXor -> {
             alu :: if op == .BitAnd -> X64Alu.And else if op == .BitOr -> X64Alu.Or else -> X64Alu.Xor
@@ -1946,8 +2118,10 @@ fn ir_x64_select(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
 // is `test edx, edx; jnz edge`: every body returns edx 0 from its epilogue
 // and 1 from its stop exit. Elsewhere it keeps `call poll; test rax, rax;
 // jnz edge`. The edge goes after the epilogue (ir_x64_pads). A trap poll
-// right after slow paths that publish a numeric stop (colds from `traps`
-// on) keeps no hot code: those slow paths take the edge (IRX64Cold.pad).
+// keeps no hot code: the slow paths that publish a numeric stop (colds from
+// `traps` on) take the edge (IRX64Cold.pad), and after an operation
+// selected with no such slow path (a division by a constant, or one the
+// ranges proved safe) the edge is never taken and not laid out.
 // Returns the If's End when `at` is such a stop point, else -1.
 fn ir_x64_stop_point(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, poll: Int, trap: Int, traps: Int) -> Int Never! {
     if f.op[at] != .Call || f.a[at] < 0 || (f.a[at] != poll && f.a[at] != trap) -> return -1
@@ -1964,17 +2138,24 @@ fn ir_x64_stop_point(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
             }
         }
     }
+    if f.a[at] == trap && !wired -> return f.c[branch]
     site := -1
     if !wired {
+        skips := [Int]{}
         if at > 0 && f.op[at - 1] == .Call && ir_x64_reports_stop(m, f.a[at - 1]) {
             // test edx, edx
             &e.code.push(0x85)
             &e.code.push(0xd2)
         } else {
+            // In a loop the poll's own tests of the task control run inline
+            // first, so while no stop is asked for the hot path calls nothing.
+            if ir_x64_in_loop(e, f) -> skips = ir_x64_stop_quiet(&e.code)
             ir_x64_call(&e, m, f, al, X64RelocTarget.Function{id: X64FunctionID{value: f.a[at]}}, -1, f.args, f.b[at], f.c[at], -1, 0)
             x64_test_rr(&e.code, X64_RAX, X64_RAX)
         }
         site = x64_jcc_rel32(&e.code, X64Cond.NE)
+        quiet :: e.code.len()
+        loop skip in skips -> x64_patch_rel32(&e.code, skip, quiet)
     }
     // A branch from the edge to its own If's End resumes here.
     e.end_of[branch] = e.code.len()
@@ -1989,6 +2170,33 @@ fn ir_x64_reports_stop(m: IRModule, id: Int) -> Bool Never! {
     if id < 0 || id >= m.functions.len() || m.functions[id].asm != None -> return false
     key :: m.functions[id].key
     key != IR_STOP_POLL_KEY && key != IR_STOP_TRAP_KEY
+}
+
+// Whether instruction e.at sits in a Loop.
+fn ir_x64_in_loop(e: IRX64Emitter, f: IRFunction) -> Bool Never! {
+    loop opener in e.open {
+        if f.op[opener] == .Loop -> return true
+    }
+    false
+}
+
+// The stop poll's tests that no stop is asked for (ir_x64_stop_poll), into
+// rax: `mov rax, gs:[0]; test rax, rax; jz quiet; mov rax, [rax + 16];
+// test rax, rax; jz quiet; mov rax, [rax + 32]; test rax, rax; jz quiet`.
+// Returns the three rel32 fields to patch to `quiet`.
+fn ir_x64_stop_quiet(code: &[U8]) -> [Int] Never! {
+    gs :: [U8]{0x65, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0}
+    loop byte in gs -> &code.push(byte)
+    sites := [Int]{}
+    x64_test_rr(&code, X64_RAX, X64_RAX)
+    &sites.push(x64_jcc_rel32(&code, X64Cond.E))
+    x64_load(&code, X64_RAX, X64_RAX, 16)
+    x64_test_rr(&code, X64_RAX, X64_RAX)
+    &sites.push(x64_jcc_rel32(&code, X64Cond.E))
+    x64_load(&code, X64_RAX, X64_RAX, 32)
+    x64_test_rr(&code, X64_RAX, X64_RAX)
+    &sites.push(x64_jcc_rel32(&code, X64Cond.E))
+    sites
 }
 
 // Lays out the stop edges after the epilogue, each distinct one once
@@ -2229,16 +2437,8 @@ fn ir_x64_compile_function(m: IRModule, tables: IRX64Tables, row: Int) -> IRX64F
 //   call jet_rt_session_propagate; movups xmm(8 + k), [rsp + 16k];
 //   add rsp, 136; test rax, rax; setne al; movzx eax, al; done: ret
 fn ir_x64_stop_poll(f: IRFunction, row: Int) -> IRX64FunctionResult Never! {
-    code := [U8]{0x65, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0}
-    sites := [Int]{}
-    x64_test_rr(&code, X64_RAX, X64_RAX)
-    &sites.push(x64_jcc_rel32(&code, X64Cond.E))
-    x64_load(&code, X64_RAX, X64_RAX, 16)
-    x64_test_rr(&code, X64_RAX, X64_RAX)
-    &sites.push(x64_jcc_rel32(&code, X64Cond.E))
-    x64_load(&code, X64_RAX, X64_RAX, 32)
-    x64_test_rr(&code, X64_RAX, X64_RAX)
-    &sites.push(x64_jcc_rel32(&code, X64Cond.E))
+    code := [U8]{}
+    sites := ir_x64_stop_quiet(&code)
     // The eight xmm registers below an 8-byte pad keep rsp 16-byte aligned
     // at the call.
     frame :: 8 + 16 * 8

@@ -6,7 +6,8 @@
 // simplifies again;
 // level 2 (`--release`) first hoists calls making a list's buffer its own
 // out of Loops (`unique`), also replaces frame aggregates whose address is
-// only lent out (`promote`), and runs each function through SSA
+// only lent out (`promote`), copies counted loops behind a test of their
+// Int bound (`version`, OptVersion.jet) and runs each function through SSA
 // (Ssa.jet, SsaOut.jet). Both levels fold polls into later ones before
 // Simplify and again at the end, then move stop points right after their
 // calls (`stops`, OptStops.jet).
@@ -28,12 +29,12 @@ use jet_foundation.[CompilerThreads, compiler_take_rows, compiler_threads_admit,
 // What the optimizer runs: the level, whether inlining keeps to the O1
 // limits at any level (`small`, the build option), which callees inlining
 // takes (`inline`, the build option), the passes `disabled` names (to bisect
-// a difference to one pass: "unique", "once", "scalar", "promote", "range",
-// "ssa", "stops", "glue"), whether IR Lint checks each function after every
-// pass and every SSA form is verified (`verify`; tests, CI and the
-// JET_OPT_VERIFY knob), whether every SSA value leaves SSA in a fresh slot
-// (`stress`, which exercises the moves out of SSA), and the name of the
-// functions whose IR before and after the passes the report carries
+// a difference to one pass: "unique", "once", "scalar", "promote",
+// "version", "range", "ssa", "stops", "glue"), whether IR Lint checks each
+// function after every pass and every SSA form is verified (`verify`; tests,
+// CI and the JET_OPT_VERIFY knob), whether every SSA value leaves SSA in a
+// fresh slot (`stress`, which exercises the moves out of SSA), and the name
+// of the functions whose IR before and after the passes the report carries
 // (`dump`, "" for none).
 struct IROptOptions {
     level: Int
@@ -203,7 +204,8 @@ fn ir_optimize_module(m: &IRModule, options: IROptOptions, threads: CompilerThre
 }
 
 // The passes read the module's type rows, moved out of `m` into a module of
-// their own, and the ids of the runtime routes they know (ir_opt_routes).
+// their own, the ids of the runtime routes they know (ir_opt_routes) and
+// the trap poll's (OptRange.jet), by name.
 fn ir_opt_view(m: &IRModule) -> IRModule Never! {
     view := ir_module_new()
     compiler_transfer_rows<IRType>(&view.types, &m.types)
@@ -211,6 +213,8 @@ fn ir_opt_view(m: &IRModule) -> IRModule Never! {
         id :: name_rows_value(m.name_rows, route) ?? -1
         if id >= 0 -> name_rows_set(&view.name_rows, route, id)
     }
+    trap :: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
+    if trap >= 0 -> name_rows_set(&view.name_rows, IR_STOP_TRAP_KEY, trap)
     view
 }
 
@@ -451,6 +455,10 @@ fn ir_opt_function(m: IRModule, bodies: [[IRFunction]], keys: [String], f: ^IRFu
         if checking -> checking = ir_opt_lint(m, lint, out, "scalar", &report)
     }
     if level >= 2 {
+        if ir_opt_enabled(options, "version") && ir_opt_enabled(options, "range") && ir_opt_enabled(options, "ssa") && ir_range_wanted(m, out) {
+            _ := ir_opt_version_loops(m, &out)
+            if checking -> checking = ir_opt_lint(m, lint, out, "version", &report)
+        }
         // The SSA form is built only from a body IR Lint passed.
         if ir_opt_enabled(options, "ssa") && (checking || !options.verify) {
             before :: report.lint.len()
@@ -497,7 +505,20 @@ fn ir_opt_ssa(m: IRModule, f: &IRFunction, options: IROptOptions, report: &IROpt
         loop error in errors -> &report.lint.push(IRLintFinding{function: "{f.name} [{f.key}]", key: f.key.copy(), pass: "ir.opt.ssa", rule: IR_LINT_SSA, message: error})
         if errors.len() > 0 -> return
     }
-    facts :: if ranges -> ir_opt_int_facts(m, &f, &s) else -> 0
+    traps :: if ranges -> ir_range_traps(m, f) else -> 0
+    facts := if ranges -> ir_opt_int_facts(m, &f, &s) else -> 0
+    // The trap polls the ranges dropped leave the form stale, and the values
+    // they kept unbounded at a join bounded now: one more round on a fresh
+    // form.
+    if facts > 0 && ir_range_traps(m, f) < traps {
+        s = ir_ssa_build(f)
+        if options.verify {
+            errors :: ir_ssa_verify(f, s)
+            loop error in errors -> &report.lint.push(IRLintFinding{function: "{f.name} [{f.key}]", key: f.key.copy(), pass: "ir.opt.ssa", rule: IR_LINT_SSA, message: error})
+            if errors.len() > 0 -> return
+        }
+        facts += ir_opt_int_facts(m, &f, &s)
+    }
     report.int_facts += facts
     report.ssa_functions += 1
     if options.verify || options.stress {

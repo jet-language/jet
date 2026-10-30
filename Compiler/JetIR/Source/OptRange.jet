@@ -5,7 +5,7 @@
 //
 // A constant is itself; Copy and Move keep their operand's range; Add, Sub,
 // Mul and Neg are interval arithmetic; FloorDiv, Div, Mod and Rem by a
-// positive constant and BitAnd with a nonnegative constant bound their
+// positive divisor and BitAnd with a nonnegative constant bound their
 // result; a phi is the union of its arguments, each read at the end of its
 // edge's block; anything else (a parameter, a load, a call) is unbounded.
 // A word narrower than 64 bits lies in its type's bounds; only a constant,
@@ -28,9 +28,13 @@
 // it lies inside the fixed-width kind; an Int Add, Sub or Mul whose operands
 // and result are inline, a Div, Rem, FloorDiv or Mod of inline operands by
 // a positive divisor, and an Int comparison of inline operands, are marked
-// IR_OVERFLOW_WRAP (X64Select: the plain i64 instruction). A comparison the
-// ranges decide becomes its constant. Returns the rewritten instructions;
-// `f` and `s` stay one SSA form.
+// IR_OVERFLOW_WRAP (X64Select: the plain i64 instruction, and for such a
+// division no divisor checks; the trap poll after the division, which
+// nothing can reach now, goes). A FloorDiv or Mod of a nonnegative
+// dividend by a positive divisor, inline or not, is the Div or Rem. A
+// comparison the ranges decide becomes its constant. Returns the
+// rewritten instructions; `f` and `s` stay one SSA form but for the trap
+// polls gone (Opt.jet ir_opt_ssa then ranges the function once more).
 
 use jet_foundation.[name_rows_value]
 
@@ -409,15 +413,26 @@ fn ir_range_binary(op: IROp, a: IRRange, b: IRRange) -> IRRange Never! {
             ir_range_make(lo, hi)
         }
         else -> {
-            // By a positive constant only.
-            if b.lo != b.hi || b.lo <= 0 -> return ir_range_top()
-            c :: b.lo
+            // By a positive divisor only.
+            if b.lo <= 0 -> return ir_range_top()
             if op == .Mod || op == .Rem {
+                // A floored remainder takes the divisor's sign.
+                if b.hi >= IR_RANGE_HIGH {
+                    if a.lo >= 0 -> return ir_range_make(0, a.hi)
+                    return if op == .Mod -> ir_range_make(0, IR_RANGE_HIGH) else -> ir_range_top()
+                }
+                c :: b.hi
                 if a.lo >= 0 -> return ir_range_make(0, if a.hi < c - 1 -> a.hi else -> c - 1)
+                if op == .Mod -> return ir_range_make(0, c - 1)
                 return ir_range_make(1 - c, c - 1)
             }
-            lo :: if a.lo <= IR_RANGE_LOW -> IR_RANGE_LOW else if a.lo >= 0 -> a.lo /% c else -> 0 - ((0 - a.lo) /% c) - 1
-            hi :: if a.hi >= IR_RANGE_HIGH -> IR_RANGE_HIGH else if a.hi >= 0 -> a.hi /% c else -> 0
+            least :: b.lo
+            lo :: if {
+                a.lo <= IR_RANGE_LOW -> IR_RANGE_LOW
+                a.lo >= 0 -> if b.hi >= IR_RANGE_HIGH -> 0 else -> a.lo /% b.hi
+                else -> 0 - ((0 - a.lo) /% least) - 1
+            }
+            hi :: if a.hi >= IR_RANGE_HIGH -> IR_RANGE_HIGH else if a.hi >= 0 -> a.hi /% least else -> 0
             ir_range_make(lo, hi)
         }
     }
@@ -480,6 +495,7 @@ fn ir_range_rewrite(m: IRModule, f: &IRFunction, s: &IRSsa, r: IRRanges) -> Int 
     to_i64 :: name_rows_value(m.name_rows, "jet_int_owned_to_i64") ?? -2
     clone :: name_rows_value(m.name_rows, "jet_rt_int_clone") ?? -2
     fixed :: name_rows_value(m.name_rows, "jet_int_checked_fixed") ?? -2
+    trap :: name_rows_value(m.name_rows, IR_STOP_TRAP_KEY) ?? -2
     rewritten := 0
     loop at in 0..<f.op.len() {
         block :: s.block[at]
@@ -508,11 +524,17 @@ fn ir_range_rewrite(m: IRModule, f: &IRFunction, s: &IRSsa, r: IRRanges) -> Int 
         if (op == .Div || op == .Rem || op == .FloorDiv || op == .Mod) && f.c[at] == IR_OVERFLOW_TRAP && ir_range_has(s, r, s.use_a[at]) && ir_range_has(s, r, s.use_b[at]) && r.exact[ir_ssa_find(s, s.use_a[at])] && r.exact[ir_ssa_find(s, s.use_b[at])] {
             a :: ir_range_at(f, s, r, s.use_a[at], block)
             b :: ir_range_at(f, s, r, s.use_b[at], block)
+            // A nonnegative dividend's floored quotient and remainder by a
+            // positive divisor are its truncated ones, big or not.
+            if a.known && b.known && a.lo >= 0 && b.lo > 0 && op == .FloorDiv -> f.op[at] = .Div
+            if a.known && b.known && a.lo >= 0 && b.lo > 0 && op == .Mod -> f.op[at] = .Rem
+            if f.op[at] != op -> rewritten += 1
             // By a positive divisor nothing stops, and the result is no
             // larger than the dividend.
             if !ir_range_inline(a) || !ir_range_inline(b) || b.lo <= 0 -> next
             f.c[at] = IR_OVERFLOW_WRAP
             rewritten += 1
+            ir_range_drop_trap(&f, trap, at + 1)
             next
         }
         if ir_range_is_compare(op) && f.dst[at] >= 0 && ir_range_has(s, r, s.use_a[at]) && ir_range_has(s, r, s.use_b[at]) {
@@ -566,6 +588,26 @@ fn ir_range_rewrite(m: IRModule, f: &IRFunction, s: &IRSsa, r: IRRanges) -> Int 
         }
     }
     rewritten
+}
+
+// The trap poll at `at` (Build.jet ir_stop_trap: the call of `trap`, then
+// the If on what it returned, with no Else), if one is there, becomes Nops.
+fn ir_range_drop_trap(f: &IRFunction, trap: Int, at: Int) Never! {
+    if trap < 0 || at + 1 >= f.op.len() || f.op[at] != .Call || f.a[at] != trap || f.dst[at] < 0 -> return
+    branch :: at + 1
+    if f.op[branch] != .If || f.a[branch] != f.dst[at] || f.b[branch] >= 0 -> return
+    end :: f.c[branch]
+    loop k in at..<(end + 1) -> ir_opt_kill(&f, k)
+}
+
+// How many calls of the trap poll `f` makes.
+fn ir_range_traps(m: IRModule, f: IRFunction) -> Int Never! {
+    trap :: name_rows_value(m.name_rows, IR_STOP_TRAP_KEY) ?? return 0
+    count := 0
+    loop at in 0..<f.op.len() {
+        if f.op[at] == .Call && f.a[at] == trap -> count += 1
+    }
+    count
 }
 
 // The values jet_int_checked_fixed passes for its constant `kind` (value
