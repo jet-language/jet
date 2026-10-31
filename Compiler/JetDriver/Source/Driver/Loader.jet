@@ -1992,10 +1992,15 @@ fn jet_driver_find_source_path(source_units: [JetDriverSourceUnit], root_index: 
     loop relative_path in relative_paths {
         loop (index, unit) in source_units {
             if unit.root_index == root_index && unit.relative_path == relative_path {
+                // A capitalized module (`use Util`) yields the same candidate
+                // path twice ({m}.jet and {P}.jet), so a repeat of the unit
+                // already chosen is that one file, not a second match.
                 if target == .Val(first) {
-                    first_path :: source_units[first].relative_path
-                    &diagnostics.push(jet_driver_diagnostic("E0105", span, "this module path matches both `{first_path}` and `{unit.relative_path}`", "a module path must bind exactly one package-relative source file", "remove or rename `{first_path}` or `{unit.relative_path}` so only one file matches"))
-                    return None
+                    if first != index {
+                        first_path :: source_units[first].relative_path
+                        &diagnostics.push(jet_driver_diagnostic("E0105", span, "this module path matches both `{first_path}` and `{unit.relative_path}`", "a module path must bind exactly one package-relative source file", "remove or rename `{first_path}` or `{unit.relative_path}` so only one file matches"))
+                        return None
+                    }
                 }
                 target = Val(index)
             }
