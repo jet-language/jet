@@ -59,8 +59,10 @@ fn parser_expression_form_result_branch(state: &JetParserState, depth: Int) -> P
     }
 }
 
+// Rust `parse_result_handler_inner` returns each of these as the statement's
+// `Err`, so the rest of the statement adds no further report.
 fn parser_expression_form_result_error(state: &JetParserState, span: Span, what: String, why: String, fix: String) {
-    parser_expression_form_error(&state, "E0003", span, what, why, fix)
+    parser_add_fatal_code(&state, "E0003", span, what, why, fix)
 }
 
 fn parser_expression_form_result_handler_inner(state: &JetParserState, value: ParsedExpr, question: Span, depth: Int, check_duplicate_failure: Bool) -> ParsedExpr {

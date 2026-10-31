@@ -859,12 +859,18 @@ fn parser_parse_bracket_pattern(state: &JetParserState, depth: Int) -> ParsedPat
         if parser_current_kind(&state) == TOKEN_DOT_DOT {
             dots :: parser_bump(&state).span
             name := BindName?{None}
+            rest_span := dots
             if !is_map && parser_current_kind(&state) == TOKEN_IDENT {
                 token :: parser_bump(&state)
                 name = Val(BindName{name: parser_value(state, token), span: token.span, rename: None})
+                rest_span = parser_cover(dots, token.span)
             }
             parser_skip_named_pattern_line_breaks(&state)
-            if parser_current_kind(&state) != TOKEN_RBRACKET -> parser_add_error_code(&state, "E0003", dots, "`..` must be the last entry of a pattern", "the rest marker stands for all remaining entries", "move `..` to the end")
+            if parser_current_kind(&state) != TOKEN_RBRACKET {
+                // Rust `rest_not_last` is the statement's `Err`.
+                form :: if is_map -> "map" else -> "list"
+                parser_add_fatal_code(&state, "E0003", rest_span, "`..` must be the last entry of a {form} pattern", "`..` stands for everything the pattern does not list, so nothing can follow it", "move `..` to the end of the pattern")
+            }
             if is_map -> map_rest = Val(dots) else -> list_rest = Val(ListPatRest{name: name, span: dots})
             break
         }

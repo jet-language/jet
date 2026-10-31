@@ -25,6 +25,7 @@ use jet_lexer.[
     TOKEN_DOT,
     TOKEN_DOT_DOT,
     TOKEN_EOF,
+    TOKEN_FLOAT,
     TOKEN_GT,
     TOKEN_HASH,
     TOKEN_IDENT,
@@ -576,6 +577,19 @@ fn parser_parse_applied_type(state: &JetParserState, name: String, prefix: Span,
 
 fn parser_parse_measure(state: &JetParserState, kind: String, depth: Int) -> Measure {
     token :: parser_current(&state)
+    // Rust `parse_declared_measure`: a fixed-list length is a whole,
+    // non-negative number; either report is the item's `Err`.
+    if kind == "length" && token.kind == TOKEN_MINUS && parser_kind_at(&state, 1) == TOKEN_INT {
+        parser_bump(&state)
+        number :: parser_bump(&state)
+        parser_add_fatal_code(&state, "E0963", parser_cover(token.span, number.span), "a fixed-size list length is outside the supported range", "the list length must fit the target's array-size representation", "use a non-negative comptime integer within the supported range")
+        return Measure.Literal{kind: kind, value: 0}
+    }
+    if kind == "length" && token.kind == TOKEN_FLOAT {
+        parser_bump(&state)
+        parser_add_fatal_code(&state, "E0963", token.span, "a fixed-size list length must be an integer, got Float (an approximate binary number)", "a fixed-size list needs one known number of elements", "use an integer literal or a compile-time expression that produces Int")
+        return Measure.Literal{kind: kind, value: 0}
+    }
     if token.kind == {
         TOKEN_INT -> {
             parser_bump(&state)
