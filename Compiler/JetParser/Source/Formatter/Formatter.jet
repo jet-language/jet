@@ -61,14 +61,11 @@ JFMT_PREC_OR :: 2
 JFMT_PREC_AND :: 3
 JFMT_PREC_CMP :: 4
 JFMT_PREC_BIT_OR :: 5
-JFMT_PREC_BIT_XOR :: 6
 JFMT_PREC_BIT_AND :: 7
 JFMT_PREC_SHIFT :: 8
 JFMT_PREC_ADD :: 9
 JFMT_PREC_MUL :: 10
 JFMT_PREC_UNARY :: 11
-// `^` binds tighter than unary minus and looser than postfix.
-JFMT_PREC_POW :: 12
 JFMT_PREC_POSTFIX :: 13
 JFMT_PREC_PRIMARY :: 14
 
@@ -148,12 +145,12 @@ fn jfmt_prec_of_bin(op: BinOp) -> Int Never! {
         .And -> JFMT_PREC_AND
         .Eq | .Ne | .Lt | .Gt | .Le | .Ge | .Compare -> JFMT_PREC_CMP
         .BitOr -> JFMT_PREC_BIT_OR
-        .BitXor -> JFMT_PREC_BIT_XOR
+        // Exclusive-or and power print as method calls (jfmt_bin_op_method).
+        .BitXor | .Pow -> JFMT_PREC_POSTFIX
         .BitAnd -> JFMT_PREC_BIT_AND
         .Shl | .Shr -> JFMT_PREC_SHIFT
         .Add | .Sub -> JFMT_PREC_ADD
         .Mul | .Div | .FloorDiv | .Mod | .Rem -> JFMT_PREC_MUL
-        .Pow -> JFMT_PREC_POW
     }
 }
 
@@ -165,7 +162,8 @@ fn jfmt_prec_add_rhs(prec: Int) -> Int Never! {
     }
 }
 
-// Rust `BinOp::spell`.
+// Rust `BinOp::spell`. Power and exclusive-or have no infix spelling: they
+// are the `pow` and `bit_xor` methods (jfmt_bin_op_method).
 fn jfmt_bin_op_spell(op: BinOp) -> String Never! {
     if op == {
         .Add -> "+"
@@ -175,10 +173,10 @@ fn jfmt_bin_op_spell(op: BinOp) -> String Never! {
         .FloorDiv -> "/%"
         .Mod -> "%"
         .Rem -> "%%"
-        .Pow -> "^"
+        .Pow -> "pow"
         .BitAnd -> "&"
         .BitOr -> "|"
-        .BitXor -> "~|"
+        .BitXor -> "bit_xor"
         .Shl -> "<<"
         .Shr -> ">>"
         .Eq -> "=="
@@ -193,6 +191,15 @@ fn jfmt_bin_op_spell(op: BinOp) -> String Never! {
     }
 }
 
+// The method that spells an operator with no infix form.
+fn jfmt_bin_op_method(op: BinOp) -> String? Never! {
+    if op == {
+        .Pow -> Val("pow")
+        .BitXor -> Val("bit_xor")
+        else -> None
+    }
+}
+
 fn jfmt_compound_spell(op: BinOp) -> String Never! {
     if op == {
         .Add -> "+="
@@ -202,10 +209,8 @@ fn jfmt_compound_spell(op: BinOp) -> String Never! {
         .FloorDiv -> "/%="
         .Mod -> "%="
         .Rem -> "%%="
-        .Pow -> "^="
         .BitAnd -> "&="
         .BitOr -> "|="
-        .BitXor -> "~|="
         .Shl -> "<<="
         .Shr -> ">>="
         else -> ""

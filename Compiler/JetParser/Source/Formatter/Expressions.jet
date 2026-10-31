@@ -1462,24 +1462,30 @@ fn jfmt_fmt_expr(f: &JetFmt, expr: Expr, prec: Int) {
         }
         .Binary(op, left, right, _, _) -> {
             op_prec :: jfmt_prec_of_bin(op)
-            spelled :: jfmt_bin_op_spell(op)
-            // `^` is right-associative.
-            left_prec := if spelled == "^" -> JFMT_PREC_POSTFIX else -> op_prec
-            right_prec := if spelled == "^" -> JFMT_PREC_UNARY else -> jfmt_prec_add_rhs(op_prec)
-            // E0082 an `&&` operand of `||` always
-            // prints with its grouping parentheses.
-            if spelled == "||" {
-                if left == .Binary(left_op, _, _, _, _) {
-                    if jfmt_bin_op_spell(left_op) == "&&" -> left_prec = jfmt_prec_add_rhs(JFMT_PREC_AND)
-                }
-                if right == .Binary(right_op, _, _, _, _) {
-                    if jfmt_bin_op_spell(right_op) == "&&" -> right_prec = jfmt_prec_add_rhs(JFMT_PREC_AND)
-                }
-            }
             if prec > op_prec -> jfmt_write(&f, "(")
-            jfmt_fmt_expr(&f, left, left_prec)
-            jfmt_write(&f, " {spelled} ")
-            jfmt_fmt_expr(&f, right, right_prec)
+            if jfmt_bin_op_method(op) == .Val(method) {
+                jfmt_fmt_expr(&f, left, JFMT_PREC_POSTFIX)
+                jfmt_write(&f, ".{method}(")
+                jfmt_fmt_expr(&f, right, JFMT_PREC_OR_FALLBACK)
+                jfmt_write(&f, ")")
+            } else {
+                spelled :: jfmt_bin_op_spell(op)
+                left_prec := op_prec
+                right_prec := jfmt_prec_add_rhs(op_prec)
+                // E0082 an `&&` operand of `||` always
+                // prints with its grouping parentheses.
+                if spelled == "||" {
+                    if left == .Binary(left_op, _, _, _, _) {
+                        if jfmt_bin_op_spell(left_op) == "&&" -> left_prec = jfmt_prec_add_rhs(JFMT_PREC_AND)
+                    }
+                    if right == .Binary(right_op, _, _, _, _) {
+                        if jfmt_bin_op_spell(right_op) == "&&" -> right_prec = jfmt_prec_add_rhs(JFMT_PREC_AND)
+                    }
+                }
+                jfmt_fmt_expr(&f, left, left_prec)
+                jfmt_write(&f, " {spelled} ")
+                jfmt_fmt_expr(&f, right, right_prec)
+            }
             if prec > op_prec -> jfmt_write(&f, ")")
         }
         // `0 <= sev < 10` — same-direction relational chain.
