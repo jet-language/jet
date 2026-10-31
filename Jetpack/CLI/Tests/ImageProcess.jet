@@ -279,7 +279,7 @@ fn cli_test_environment_image_index(claim: EnvironmentImageClaim) -[FS, Env, Exe
     out :: claim.build()
     assert(out.code == 2, out.errors)
     assert(out.errors.contains("E1336"), "stderr: {out.errors}")
-    assert(out.errors.contains("managed environment files"), "stderr: {out.errors}")
+    assert(out.errors.contains("Managed environment files are environment inputs"), "stderr: {out.errors}")
     report :: claim.projection()
     assert(report.contains("file:config/generated.txt"), "projection: {report}")
     assert(report.contains("\"rejected\""), "projection: {report}")
@@ -569,7 +569,7 @@ fn cli_test_e1336_block(stderr: String) -> String {
     cli_test_image_project(scratch, "executable", true)
     out :: cli_test_image_jetpack(scratch, [String]{"image", "ghost"}).run() ?? panic("run jetpack image")
     assert_eq(out.code, 2)
-    assert(out.errors.contains("no image `ghost`"), out.errors)
+    assert(out.errors.contains("No image `ghost`"), out.errors)
     assert(out.errors.contains("server"), "lists declared images: {out.errors}")
     files.remove_all(scratch).drop("scratch cleanup is best-effort")
 }
