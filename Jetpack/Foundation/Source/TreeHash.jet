@@ -396,9 +396,11 @@ fn foundation_write_file_nofollow_at_root(root: String, relative: String, conten
         }
         if foundation_stage_and_rename(directories, directories[leaf].handle, writer, candidate, final_name, contents, expected_destination, before_rename, policy) == {
             .Ok(staged) -> {
-                loop directory in directories {
-                    directory.handle.fsync() ?? return Err(FoundationPublicationError{phase: .SyncParent, error: err})
-                }
+                // A rename is durable once the directory holding the renamed
+                // entry is fsynced; every directory this call created was made
+                // durable by its parent's fsync at creation. Unchanged ancestors
+                // need no barrier.
+                directories[leaf].handle.fsync() ?? return Err(FoundationPublicationError{phase: .SyncParent, error: err})
                 foundation_ensure_directories_current(directories) ?? return Err(FoundationPublicationError{phase: .ValidatePublished, error: err})
                 published :: if foundation_inspect_destination(directories[leaf].handle, final_name) == {
                     .Val(identity) -> identity
