@@ -305,6 +305,13 @@ fn sema_expression_result_call_payload(call: Call, state: &SemaOwnershipState, s
     argument.expr.copy()
 }
 
+// `Ok(...)` / `Err(...)` where no fallible result is expected.
+fn sema_result_payload_misplaced(success: Bool, span: Span) -> Diagnostic Never! {
+    fix :: "use it in a `T E!` return type, a `T E!` binding annotation, or a call that expects one"
+    if success -> return sema_error("E0404", span, "`Ok(...)` only fits where a fallible result is expected", "`Ok` builds the success side of a `T E!` result", fix)
+    sema_error("E0404", span, "`Err(...)` only fits where a fallible result is expected", "`Err` builds the failure side of a `T E!` result", fix)
+}
+
 fn sema_expression_result_payload(value: Expr, success: Bool, take_field: Bool, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     expected_ok := Type?{None}
     expected_err := Type?{None}
@@ -317,27 +324,13 @@ fn sema_expression_result_payload(value: Expr, success: Bool, take_field: Bool, 
                     expected_err = Val(err)
                 }
                 else -> {
-                    if {
-                        success -> {
-                            &diagnostics.push(sema_error("E0404", span, "`Ok(...)` only fits where a fallible result is expected", "`Ok` builds the success side of a `T ! E` result", "use it in a `T ! E` return type, a `T ! E` binding annotation, or a call that expects one"))
-                        }
-                        else -> {
-                            &diagnostics.push(sema_error("E0404", span, "`Err(...)` only fits where a fallible result is expected", "`Err` builds the failure side of a `T ! E` result", "use it in a `T ! E` return type, a `T ! E` binding annotation, or a call that expects one"))
-                        }
-                    }
+                    &diagnostics.push(sema_result_payload_misplaced(success, span))
                     return None
                 }
             }
         }
         else -> {
-            if {
-                success -> {
-                    &diagnostics.push(sema_error("E0404", span, "`Ok(...)` only fits where a fallible result is expected", "`Ok` builds the success side of a `T ! E` result", "use it in a `T ! E` return type, a `T ! E` binding annotation, or a call that expects one"))
-                }
-                else -> {
-                    &diagnostics.push(sema_error("E0404", span, "`Err(...)` only fits where a fallible result is expected", "`Err` builds the failure side of a `T ! E` result", "use it in a `T ! E` return type, a `T ! E` binding annotation, or a call that expects one"))
-                }
-            }
+            &diagnostics.push(sema_result_payload_misplaced(success, span))
             return None
         }
     }
@@ -563,13 +556,21 @@ fn sema_failure_definition_location(environment: SemaScopeEnvironment, program: 
         loop segment_index in 0..<graph.modules[module_row_index].source_segments.len() {
             if symbol.span.start >= graph.modules[module_row_index].source_segments[segment_index].generated.start && symbol.span.start < graph.modules[module_row_index].source_segments[segment_index].generated.end && line <= graph.modules[module_row_index].source_segments[segment_index].line_starts.len() {
                 column :: symbol.span.start - graph.modules[module_row_index].source_segments[segment_index].generated.start - graph.modules[module_row_index].source_segments[segment_index].line_starts[line - 1] + 1
-                return Val("{graph.modules[module_row_index].module_path}:{line}:{column}")
+                return Val("{sema_failure_definition_path(graph.modules[module_row_index].module_path, graph.modules[module_row_index].source_file)}:{line}:{column}")
             }
         }
         return None
     }
     }
     None
+}
+
+// The defining file as the package names it: the module's package-relative
+// display path, which drops the extension, plus the file's own `.jet` name.
+fn sema_failure_definition_path(module_path: String, source_file: String) -> String Never! {
+    file :: "{module_path}.jet"
+    if source_file == file || source_file.ends_with("/{file}") -> return file
+    module_path.copy()
 }
 
 fn sema_failure_call_provenance(expr: Expr?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaFailureProvenance Never! {
@@ -1245,6 +1246,11 @@ fn sema_control_value_loop_attach_fallback(value: Expr, fallback: OrFallback, sc
     }
 }
 
+// A `??` fallback value whose type differs from the success payload.
+fn sema_or_fallback_mismatch(payload: Type, offered: Type, span: Span) -> Diagnostic {
+    sema_error("E0405", span, "the fallback is {sema_type_show(offered)}, but the success value is {sema_type_show(payload)}", "both sides of `??` must be the same type", sema_type_fix_hint(payload, offered))
+}
+
 fn sema_expression_or_fallback(value: Expr, fallback: OrFallback, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if sema_control_value_loop_requires_route(value) {
         routed :: sema_control_value_loop_attach_fallback(value, fallback, scopes, &diagnostics) ?? return None
@@ -1384,13 +1390,22 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
     if fallback == {
         .Value(other) -> {
             fallback_expected :: if payload == (Type.Named{name: "Never"}) -> None else -> Val(payload)
-            checked :: sema_check_expression(other, fallback_expected, environment, program, &scopes, &fallback_state, &tail_store, &context, &diagnostics) ?? return None
+            // The success payload is the fallback's hint: its own E0108
+            // against it is the `??` mismatch (Rust `OrFallback::Value`).
+            fallback_start :: diagnostics.len()
+            checked :: sema_check_expression(other, fallback_expected, environment, program, &scopes, &fallback_state, &tail_store, &context, &diagnostics) ?? {
+                if fallback_expected != None && sema_value_mismatch_index(diagnostics, fallback_start, expr_span(other)) == .Val(mismatch_index) {
+                    probe_diagnostics := [Diagnostic]{}
+                    if sema_probe_expression(other, None, environment, program, &scopes, &fallback_state, &tail_store, &context, &probe_diagnostics) == .Val(offered) -> diagnostics[mismatch_index] = sema_or_fallback_mismatch(payload, offered.ty, expr_span(other))
+                }
+                return None
+            }
             fallback_fits := true
             if payload != (Type.Named{name: "Never"}) && checked.ty != (Type.Named{name: "Never"}) -> fallback_fits = sema_expr_expected_assignable(payload, checked.ty, environment, program) ?? return None
             if {
                 payload == (Type.Named{name: "Never"}) -> fallback_payload = checked.ty
                 checked.ty != (Type.Named{name: "Never"}) && !fallback_fits -> {
-                    &diagnostics.push(sema_error("E0405", expr_span(other), "the fallback is {type_name(checked.ty)}, but the success value is {type_name(payload)}", "both sides of `??` must be the same type", "make the fallback produce {type_name(payload)}"))
+                    &diagnostics.push(sema_or_fallback_mismatch(payload, checked.ty, expr_span(other)))
                     return None
                 }
             }
