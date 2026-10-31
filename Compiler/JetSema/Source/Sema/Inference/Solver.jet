@@ -239,6 +239,24 @@ fn sema_inference_unresolved_diagnostic(parameter: SemaInferenceTypeParam, span:
     &diagnostics.push(sema_error("E0904", span, "can't figure out what `{name}` should be here", "generic calls need enough context to pick a concrete type", "pass the type argument explicitly, like `make<Int>()`, or give the value a typed head, like `p :: Pair<Int>{{ … }}`"))
 }
 
+// A bound that resolves to no trait: name the written bound as the cause.
+// A built-in type such as `Int` is a type, not a trait (a union such as
+// `<T: Int | Float>` is no bound either), and an unknown name is not in
+// scope; only a missing graph is an internal ordering fault.
+fn sema_inference_unresolved_bound_diagnostic(has_graph: Bool, bound: String, bounds: [String], param: String, span: Span) -> Diagnostic {
+    if !has_graph -> return sema_error("E0904", span, "cannot resolve bound `{bound}` for `{param}`", "generic checking needs the registered trait or nominal implementation", "make the declaration's Registration graph available before this call")
+    if sema_marker_rules_builtin_type(bound) == None -> return sema_error("E0904", span, "no trait named `{bound}` is in scope for the bound on `{param}`", "a generic bound names a declared or imported trait", "declare or import the trait `{bound}`, or correct the bound's spelling")
+    all_types := bounds.len() > 1
+    loop written_bound in bounds {
+        if sema_marker_rules_builtin_type(written_bound) == None -> all_types = false
+    }
+    if all_types {
+        written :: bounds.join(" | ")
+        return sema_error("E0904", span, "`{written}` is a set of types, not a trait, so it cannot bound `{param}`", "a generic bound names traits that every type argument must implement; a union of types is a value type, not a bound", "use the union `{written}` as the parameter type and match on it, or bound `{param}` by a trait such as `Comparable`")
+    }
+    sema_error("E0904", span, "the bound `{bound}` on `{param}` is a type, not a trait", "a generic bound names a trait that every type argument must implement, and `{bound}` is a concrete type", "bound `{param}` by a trait such as `Comparable`, or drop the type parameter and write `{bound}` directly")
+}
+
 fn sema_inference_validate_bounds(graph: SemaRegistrationGraph?, context: &SemaInferenceContext, bindings: [SemaInferenceBinding], span: Span, diagnostics: &[Diagnostic]) -> [SemaInferenceBoundEvidence]? {
     evidence := [SemaInferenceBoundEvidence]{}
     loop parameter in context.type_params {
@@ -246,7 +264,8 @@ fn sema_inference_validate_bounds(graph: SemaRegistrationGraph?, context: &SemaI
         concrete :: sema_inference_resolve_type_bindings(actual.ty, bindings)
         loop bound in parameter.bounds {
             satisfied :: sema_inference_bound_value(graph, &context, concrete, bound, parameter.bound_module) ?? {
-                &diagnostics.push(sema_error("E0904", span, "cannot resolve bound `{bound}` for `{sema_inference_declared_name(parameter.name)}`", "generic checking needs the registered trait or nominal implementation", "make the declaration's Registration graph available before this call"))
+                has_graph :: if graph == .Val(_) -> true else -> false
+                &diagnostics.push(sema_inference_unresolved_bound_diagnostic(has_graph, bound, parameter.bounds, sema_inference_declared_name(parameter.name), span))
                 return None
             }
             &evidence.push(SemaInferenceBoundEvidence{param: parameter.name, actual: concrete, bound: bound, satisfied: satisfied, source: span})
