@@ -1992,8 +1992,9 @@ fn jet_driver_find_source_path(source_units: [JetDriverSourceUnit], root_index: 
     loop relative_path in relative_paths {
         loop (index, unit) in source_units {
             if unit.root_index == root_index && unit.relative_path == relative_path {
-                if target != None {
-                    &diagnostics.push(jet_driver_diagnostic("E0105", span, "a module path selects more than one checked source unit", "module resolution must bind one package-relative source path", "remove the duplicate module source or select one module path"))
+                if target == .Val(first) {
+                    first_path :: source_units[first].relative_path
+                    &diagnostics.push(jet_driver_diagnostic("E0105", span, "this module path matches both `{first_path}` and `{unit.relative_path}`", "a module path must bind exactly one package-relative source file", "remove or rename `{first_path}` or `{unit.relative_path}` so only one file matches"))
                     return None
                 }
                 target = Val(index)
@@ -2671,7 +2672,7 @@ fn jet_driver_bind_package_namespaces(
                         unit :: source_units[modules[members[position]].source_unit_index]
                         other :: source_units[modules[members[first]].source_unit_index]
                         package_name :: jet_driver_path_leaf(roots[package.root_index].canonical_path)
-                        &diagnostics.push(jet_driver_diagnostic_at_source("E0624", Val(declared.span), unit.path, 0, "`{declared.name}` is declared in two files of package `{package_name}`", "the files of one package share one namespace, so each top-level name belongs to exactly one file; the other declaration is in `{other.relative_path}`", "rename one of the declarations, or keep only one of them"))
+                        &diagnostics.push(jet_driver_diagnostic_at_source("E0624", Val(declared.span), unit.path, 0, "`{declared.name}` is declared in two files of package `{package_name}`", "the files of one package share one namespace, so each top-level name belongs to exactly one file; the other declaration is in `{other.relative_path}`.", "rename one of the declarations, or keep only one of them."))
                         return false
                     }
                     .None -> _ := &owners.add(declared.name, position)
@@ -2684,7 +2685,7 @@ fn jet_driver_bind_package_namespaces(
                 loop declared in jet_driver_namespace_item_names(modules[module_index].program.items) {
                     if declared.name != "run" -> next
                     unit :: source_units[modules[module_index].source_unit_index]
-                    &diagnostics.push(jet_driver_diagnostic_at_source("E0625", Val(declared.span), unit.path, 0, "a library package can't declare `fn run`", "a package is one namespace: an executable package has one `fn run`, or one in each entry file its `outputs` name, and a library package, which other code imports, has none", "move the program into its own package or a loose file that uses this library, or make this package an executable"))
+                    &diagnostics.push(jet_driver_diagnostic_at_source("E0625", Val(declared.span), unit.path, 0, "a library package can't declare `fn run`", "a package is one namespace: an executable package has one `fn run`, or one in each entry file its `outputs` name, and a library package, which other code imports, has none.", "move the program into its own package or a loose file that uses this library, or make this package an executable."))
                     return false
                 }
             }
@@ -4309,7 +4310,7 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
                     // namespace; only loose files import files by path. A
                     // `..` path keeps its more specific E0602.
                     if !path.contains("..") && !jet_driver_unit_is_loose(unit) {
-                        &diagnostics.push(jet_driver_diagnostic("E0623", span, "`use \"{path}\"` imports a file, but this file belongs to a package", "the files of one package share one namespace, so they reach each other's names without imports; only loose files import files by path", "remove the import and use the names directly, or import another package with `use <package>.[names]`"))
+                        &diagnostics.push(jet_driver_diagnostic("E0623", span, "`use \"{path}\"` imports a file, but this file belongs to a package", "the files of one package share one namespace, so they reach each other's names without imports; only loose files import files by path.", "remove the import and use the names directly, or import another package with `use <package>.[names]`."))
                         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
                         next
                     }
