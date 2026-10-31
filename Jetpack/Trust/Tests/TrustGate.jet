@@ -1,5 +1,5 @@
 // Claims ported from crates/jetpack/src/Trust.rs #[cfg(test)]. Each claim
-// uses its own scratch directory from `files.temp_dir`.
+// uses its own scratch directory from `files.tmpdir`.
 use jet_pkg_model.[PackageGateError, RefSource, RefSpec, SourceTable]
 use jet_env_model.[SecretSpec]
 use jetpack_trust.[
@@ -11,9 +11,10 @@ use jetpack_trust.[
 use jetpack_foundation.[PACKAGE_FILE, TRUST_SCOPE_REPO, TRUST_SCOPE_USER, Theme]
 use core.files as files
 
+// The directory outlives this helper, so it is a `tmpdir`: a `temp_dir` would
+// remove it when its `TempDir` drops at return (#6119).
 fn trust_test_gate_dir(label: String) -> String {
-    scratch :: files.temp_dir("jetpack_trust_unit_{label}") ?? panic("scratch directory")
-    scratch.path
+    files.tmpdir("jetpack_trust_unit_{label}") ?? panic("scratch directory")
 }
 
 fn trust_test_ref(raw: String) -> RefSpec {

@@ -518,6 +518,11 @@ struct LockFile {
     build_stamp: BuildStamp?
     // Computed build-fact writers, keyed by package.
     build_contributions: [LockedBuildContribution]
+    // Trust's SemanticLock blocks (`semantic-lock-version` through the
+    // `[[semantic_record]]`/`[[lock_input]]`/`[[source_map]]` tail), kept
+    // verbatim: the unified lock is their sole primary copy, so a
+    // machine-lock rewrite carries them.
+    semantic_text: String
 
     // A version-1 lock with no records.
     fn empty() -> LockFile Never! {
@@ -534,7 +539,8 @@ struct LockFile {
             browsers: [LockedBrowser]{},
             source_channels: [LockedSourceChannel]{},
             build_stamp: None,
-            build_contributions: [LockedBuildContribution]{}
+            build_contributions: [LockedBuildContribution]{},
+            semantic_text: ""
         }
     }
 

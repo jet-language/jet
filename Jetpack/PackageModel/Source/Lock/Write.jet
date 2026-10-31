@@ -96,6 +96,9 @@ fn pkg_lock_write(input: LockFile) -> String Never! {
         &out.push("hash = \"{comptime_input.hash}\"\n")
     }
 
+    // Trust's SemanticLock tail goes back verbatim after the machine
+    // sections, in the shape Trust's lock store writes it.
+    if lock.semantic_text != "" -> &out.push("\n{lock.semantic_text}")
     out.join("")
 }
 

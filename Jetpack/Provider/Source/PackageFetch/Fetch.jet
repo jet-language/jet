@@ -46,9 +46,10 @@ fn pkg_fetch(verification: &StoreVerification, project_root: String, manifest: M
     pkg_fetch_provenance(lock, manifest)
     pkg_lock_ensure_build_stamp(root, &lock)
     semantic :: pkg_fetch_semantic_records(root, lock, manifest, options)
-    machine :: pkg_lock_write(lock)
-    contents :: if semantic.records.len() > 0 || semantic.inputs.len() > 0 || semantic.source_maps.len() > 0 -> "{machine.trim_end()}\n\n{trust_write_semantic_lock(semantic)}" else -> machine
-    pkg_lock_write_atomically(root, contents.bytes()) ?? return Err(pkg_fetch_lock_error(err))
+    // Fetch rebuilds the whole SemanticLock tail, so it replaces the one
+    // `existing` carried instead of appending a second copy.
+    lock.semantic_text = if semantic.records.len() > 0 || semantic.inputs.len() > 0 || semantic.source_maps.len() > 0 -> trust_write_semantic_lock(semantic) else -> ""
+    pkg_lock_write_atomically(root, pkg_lock_write(lock).bytes()) ?? return Err(pkg_fetch_lock_error(err))
     Ok(PackageFetchResult{lock: lock, directories: directories})
 }
 fn pkg_fetch_provenance(lock: LockFile, manifest: Manifest) PackageFetchError! {

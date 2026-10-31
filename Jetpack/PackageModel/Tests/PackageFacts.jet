@@ -5,9 +5,10 @@ use jet_pkg_model.[
     PackageParseError, pkg_format_source, pkg_path_file_name, pkg_path_parent,
 ]
 
+// The directory outlives this helper, so it is a `tmpdir`: a `temp_dir` would
+// remove it when its `TempDir` drops at return (#6119).
 fn pkg_facts_test_dir(label: String) -[FS]> String Never! {
-    scratch :: files.temp_dir("jet-package-{label}") ?? panic("scratch directory")
-    scratch.path
+    files.tmpdir("jet-package-{label}") ?? panic("scratch directory")
 }
 
 fn pkg_facts_test_write(dir: String, relative: String, text: String) Never! -[FS]> {
