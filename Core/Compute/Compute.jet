@@ -977,11 +977,16 @@ fn broadcast_shape(a: [Int], b: [Int]) -> [Int] ComputeError! {
     Ok(out)
 }
 
-// The values of `tensor` broadcast to `target`, row-major.
+// The values of `tensor` broadcast to `target`, row-major. A tensor that
+// already has the target shape is its own expansion, so its data is returned
+// whole instead of being re-indexed element by element. Otherwise the source
+// offset is walked like an odometer over the target axes: the last axis steps
+// by its stride, and a carry rewinds that axis and steps the next one.
 fn expand(tensor: Tensor, target: [Int]) -> [Float] ComputeError! {
     source_rank :: tensor.shape.len()
     rank :: target.len()
     if source_rank == 0 || source_rank > rank -> return Err(ComputeError.RankMismatch)
+    if tensor.shape == target -> return Ok(tensor.data.copy())
     if broadcast_shape(tensor.shape, target) != target -> return Err(ComputeError.Shape)
     n :: storage_len(target)
     lead :: rank - source_rank
@@ -995,16 +1000,20 @@ fn expand(tensor: Tensor, target: [Int]) -> [Float] ComputeError! {
         stride = stride * dim
     }
     out := [Float]{}
-    loop flat in 0..<n {
-        remainder := flat
-        at := 0
-        loop k in 0..<rank {
-            axis :: rank - 1 - k
-            dim :: target[axis]
-            at = at + (remainder % dim) * strides[axis]
-            remainder = remainder /% dim
-        }
+    position := [Int]{}
+    loop _ in 0..<rank -> &position.push(0)
+    at := 0
+    loop _ in 0..<n {
         &out.push(tensor.data[at])
+        axis := rank - 1
+        loop axis >= 0 {
+            position[axis] = position[axis] + 1
+            at = at + strides[axis]
+            if position[axis] < target[axis] -> break
+            at = at - strides[axis] * target[axis]
+            position[axis] = 0
+            axis = axis - 1
+        }
     }
     Ok(out)
 }

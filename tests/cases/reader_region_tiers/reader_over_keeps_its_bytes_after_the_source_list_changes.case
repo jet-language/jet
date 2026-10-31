@@ -1,0 +1,8 @@
+# Reader.over and Reader.take have value semantics: later writes to the source list, or to a taken field, never change what the reader reads.
+fixture: reader_over_keeps_its_bytes_after_the_source_list_changes/input
+step release: jet run --release run.jet
+exit: 0
+stdout: = "1\n[0, 3, 4]\n[5, 6]\n0\n[9, 8, 3, 9, 5, 6, 7]\n"
+step: jet run run.jet
+exit: 0
+stdout: == release

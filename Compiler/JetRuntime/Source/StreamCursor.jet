@@ -6,13 +6,19 @@
 // drop releases (cap,1) only when nonempty, then the (32,8) carrier.
 // This replaces Rust Box<JetCursor/JetReader> in native packs, never mixes it.
 // Reference semantics: Foundation/StreamCursor.rs26-498.
+// Packed input (stride 1) is copied with one bulk move; word-stride input
+// narrows one element per byte.
 fn stream_new(data: I64, len: I64, stride: I64, position: I64) -> I64 {
     handle :: jet_rt_alloc(I64{32}, I64{8})
     target :: if (len == I64{0}) -> I64{1} else -> jet_rt_alloc(len, I64{1})
-    at := I64{0}
-    loop at < len {
-        rt_text_put(wrapping(target + at), scan_byte(data, stride, at))
-        at += I64{1}
+    if (stride == I64{1}) {
+        jet_rt_mem_move(target, data, len)
+    } else {
+        at := I64{0}
+        loop at < len {
+            rt_text_put(wrapping(target + at), scan_byte(data, stride, at))
+            at += I64{1}
+        }
     }
     rt_text_store(handle, target)
     rt_text_store(wrapping(handle + I64{8}), len)
@@ -239,11 +245,15 @@ fn stream_negative_error(method: I64, value: I64) -> I64 {
         return I64{0}
     }
     output :: if (count == I64{0}) -> I64{0} else -> jet_rt_alloc(count * stride, I64{8})
-    at := I64{0}
-    loop at < count {
-        byte :: rt_text_byte(wrapping(wrapping(rt_text_data(handle) + position) + at))
-        if (stride == I64{1}) { rt_text_put(wrapping(output + at), byte) } else { rt_text_store(wrapping(output + at * stride), byte) }
-        at += I64{1}
+    source :: wrapping(rt_text_data(handle) + position)
+    if (stride == I64{1}) {
+        jet_rt_mem_move(output, source, count)
+    } else {
+        at := I64{0}
+        loop at < count {
+            rt_text_store(wrapping(output + at * stride), rt_text_byte(wrapping(source + at)))
+            at += I64{1}
+        }
     }
     rt_text_store(ok_data, output)
     rt_text_store(ok_len, count)
