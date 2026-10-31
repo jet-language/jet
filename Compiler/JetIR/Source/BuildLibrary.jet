@@ -596,12 +596,17 @@ fn ir_address_call(m: &IRModule, p: IRProgram, b: &IRBuilder, key: String, args:
     slot
 }
 
-// The bits of the one argument (of row `input`) as a value of row `output`:
-// stored in a frame word, loaded back.
+// The bits of the one argument (of row `input`) as a value of row `output`.
 fn ir_bitcast(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [BodyCallArg], input: Int, output: Int, span: Span) -> Int Never! {
     if args.len() != 1 -> return ir_fail_slot(&b, span, "a runtime bitcast reads one value")
     value :: ir_value_as(&m, p, &b, args[0].value, input, span)
     if ir_failed(b) -> return -1
+    ir_reinterpret(&m, &b, value, output)
+}
+
+// The bits of scalar slot `value` as a fresh value of row `output`: stored
+// in a frame word, loaded back in the other class.
+fn ir_reinterpret(m: &IRModule, b: &IRBuilder, value: Int, output: Int) -> Int Never! {
     pointer_row :: ir_pointer_row(&m)
     area :: ir_temp(&m, &b, pointer_row)
     ir_emit(&b.f, IROp.StackAddress, area, 8, 8, -1, b.line)
