@@ -79,9 +79,8 @@ fn publication_pkg_integration_entry(name: String, version: String, hash: String
     files.create_dir_all(files.dirname(review)) ?? panic("review dir")
     files.write(review, "jet-registry-core-review-v1\npackage=textkit\nversion=2.0.0\nreviewer=registry-owner\ndecision=approved\n") ?? panic("review")
     if publication_write_index_entry(repo, wrong) == {
-        // The original's lowercase needle stays exact. Existing RegistryVerify
-        // changes it to sentence casing; that is not parity evidence for this row.
-        .Err(error) -> assert("{error}".contains("signature verification failed"))
+        // Diagnostic rows are sentence-cased, so the `what` starts with a capital.
+        .Err(error) -> assert("{error}".contains("Signature verification failed"))
         .Ok(_) -> panic("old signer must refuse takeover")
     }
     publication_write_index_entry(repo, v2) ?? panic("reviewed takeover")

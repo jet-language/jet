@@ -71,7 +71,7 @@ fn publication_oci_test_descriptors() -> [PublicationOCIDescriptor] Never! {
 }
 #Test("OCI digest validation exact ASCII prefix length and case") {
     publication_validate_oci_digest(publication_oci_test_subject()) ?? panic("valid")
-    publication_validate_oci_digest(publication_oci_test_subject().replace("a", "A")) ?? panic("uppercase accepted")
+    publication_validate_oci_digest("sha256-{"A".repeat(64)}") ?? panic("uppercase accepted")
     loop value in ([String]{"sha256-tree", "SHA256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaag", "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaé", "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}) -> assert(publication_validate_oci_digest(value) == .Err(.InvalidInput(_)))
 }
 #Test("OCI parser roundtrip order keys types subject digest size and missing evidence") {

@@ -144,7 +144,7 @@ fn publication_advisory_test_authorization_error(policy: PublicationAdvisoryPoli
 }
 #Test("publication advisory parser boundary and duplicate records") {
     base :: publication_advisory_feed_text(publication_advisory_test_feed(""))
-    loop records in ([String]{"release|pkg#1.0.0|0|third-party\n", "release|pkg#1.0.0|101|third-party\n", "release|pkg#1.0.0|100|unknown\n", "release|pkg#1.0.0|100|workspace\nrelease|pkg#1.0.0|100|workspace\n", "advisory|A|pkg|^1||t|crit\n", "advisory|A|pkg|^1||t|low\nadvisory|A|pkg|^1||t|low\n", "exception|pkg#1|reason|reviewer|100\n", "exception|pkg#1|reason|reviewer|101\nexception|pkg#1.0.0|reason|reviewer|101\n", "exception|pkg#1||reviewer|101\n"}) {
+    loop records in ([String]{"release|pkg#1.0.0|0|third-party\n", "release|pkg#1.0.0|101|third-party\n", "release|pkg#1.0.0|100|unknown\n", "release|pkg#1.0.0|100|workspace\nrelease|pkg#1.0.0|100|workspace\n", "advisory|A|pkg|^1||t|crit\n", "advisory|A|pkg|^1||t|low\nadvisory|A|pkg|^1||t|low\n", "exception|pkg#1.0.0|reason|reviewer|100\n", "exception|pkg#1.0.0|reason|reviewer|101\nexception|pkg#1.0.0|reason|reviewer|101\n", "exception|pkg#1.0.0||reviewer|101\n", "exception|pkg#1|reason|reviewer|101\n"}) {
         assert_eq(publication_advisory_test_parse_error("{base}{records}").code, "E2607")
     }
     loop header in ([String]{"", "wrong", "jet-advisory-feed-v1", "jet-advisory-feed-v1\nfeed|1", base.replace("feed|1|100", "feed|0|100"), base.replace("|200000|", "|100|"), base.replace("feed|1|", "feed|18446744073709551616|")}) -> assert_eq(publication_advisory_test_parse_error(header).code, "E2607")
@@ -161,7 +161,7 @@ fn publication_advisory_test_authorization_error(policy: PublicationAdvisoryPoli
     assert_eq(trust.revoked_keys.len(), 2)
 }
 #Test("publication advisory canonical payload ordering and signature exclusion") {
-    feed :: publication_advisory_test_feed("release|z#1|100|workspace\nrelease|a#2|100|first-party\nrelease|a#1|100|third-party\nadvisory|Z|z|^1||last|low\nadvisory|A|a|^1||first|high\nexception|z#1|r|team|101\nexception|a#1|r|team|101\n")
+    feed :: publication_advisory_test_feed("release|z#1.0.0|100|workspace\nrelease|a#2.0.0|100|first-party\nrelease|a#1.0.0|100|third-party\nadvisory|Z|z|^1||last|low\nadvisory|A|a|^1||first|high\nexception|z#1.0.0|r|team|101\nexception|a#1.0.0|r|team|101\n")
     payload :: publication_advisory_feed_payload(feed)
     key :: "00".repeat(32)
     expected :: "{PUBLICATION_ADVISORY_FEED_MAGIC}\nfeed|1|100|200000|86400|{feed.key_id}|{key}\nrelease|a#1.0.0|100|third-party\nrelease|a#2.0.0|100|first-party\nrelease|z#1.0.0|100|workspace\nadvisory|A|a|^1||first|high\nadvisory|Z|z|^1||last|low\nexception|a#1.0.0|r|team|101\nexception|z#1.0.0|r|team|101\n"
@@ -246,7 +246,7 @@ fn publication_advisory_test_authorization_error(policy: PublicationAdvisoryPoli
     missing :: publication_lock_maturity_diagnostics(lock, feed, 86400, 200, [PackagePolicyException]{}) ?? panic("maturity")
     assert_eq(missing.maturity.len(), 1)
     assert_eq(missing.maturity[0].code, "E2610")
-    feed = publication_advisory_test_feed("release|mylib#1|100|third-party\n")
+    feed = publication_advisory_test_feed("release|mylib#1.0.0|100|third-party\n")
     immature :: publication_lock_maturity_diagnostics(lock, feed, 86400, 200, [PackagePolicyException]{}) ?? panic("maturity")
     assert_eq(immature.maturity[0].code, "E2609")
     exception :: PackagePolicyException{id: "JSA-2026-0001", scope: "mylib#1.0.0", reason: "urgent security fix", expires_at: 1000}
@@ -299,7 +299,7 @@ fn publication_advisory_test_authorization_error(policy: PublicationAdvisoryPoli
 #Test("publication signed advisory audit source and feed exceptions clear only maturity") {
     seed :: hex.decode("01".repeat(32)) ?? panic("seed")
     feed := publication_advisory_test_signed_feed(seed) ?? panic("sign")
-    feed.releases = publication_advisory_test_feed("release|mylib#1|100|third-party\n").releases
+    feed.releases = publication_advisory_test_feed("release|mylib#1.0.0|100|third-party\n").releases
     feed.signature = publication_sign_bytes(seed, publication_advisory_crypto.sha256(publication_advisory_feed_payload(feed).bytes()).hex()) ?? panic("sign release")
     trust :: PublicationAdvisoryTrustRoot{public_key: feed.public_key, min_sequence: 1}
     lock :: publication_advisory_test_lock("mylib", "1.0.0", .Root)
@@ -309,7 +309,7 @@ fn publication_advisory_test_authorization_error(policy: PublicationAdvisoryPoli
     source :: publication_audit_advisory_feed_with_source_exceptions(lock, feed, trust, 200, [PackagePolicyException]{exception}) ?? panic("source exception")
     assert_eq(source.maturity.len(), 0)
     assert_eq(source.source_exceptions[0], exception.summary())
-    feed.exceptions = publication_advisory_test_feed("exception|mylib#1|urgent security fix|security-team|1000\n").exceptions
+    feed.exceptions = publication_advisory_test_feed("exception|mylib#1.0.0|urgent security fix|security-team|1000\n").exceptions
     feed.signature = publication_sign_bytes(seed, publication_advisory_crypto.sha256(publication_advisory_feed_payload(feed).bytes()).hex()) ?? panic("sign exception")
     excepted :: publication_audit_advisory_feed(lock, feed, trust, 200) ?? panic("feed exception")
     assert_eq(excepted.maturity.len(), 0)

@@ -185,7 +185,7 @@ fn publication_index_test_root(label: String) -[FS, Env]> String Never! {
 
 #Test("publication name warning_diagnostic_matches_ui_snapshot") {
     diagnostic :: publication_name_diagnostic(publication_assess_name("cagro", [String]{"cargo"}), "cagro") ?? panic("warning diagnostic")
-    expected :: "Warning [L2608] (registry_name_lookalike): registry package name `cagro` is suspicious: it is edit distance 2 from existing package `cargo`\n Why: A name in the warning band is close enough to an existing registry name to confuse package selection, but this publish remains non-blocking while the owner policy allows it.\n Fix: choose a distinct package name instead of `cargo` before publishing; the closer block band and reserved suffix rules reject stronger matches.\nMore: jet-lang.dev/e/L2608\n"
+    expected :: "Warning [L2608] (registry_name_lookalike): Registry package name `cagro` is suspicious: it is edit distance 2 from existing package `cargo`\n Why: A name in the warning band is close enough to an existing registry name to confuse package selection, but this publish remains non-blocking while the owner policy allows it.\n Fix: Choose a distinct package name instead of `cargo` before publishing; the closer block band and reserved suffix rules reject stronger matches.\nMore: jet-lang.dev/e/L2608\n"
     assert_eq(diagnostic_render(diagnostic, "", "", false), expected)
     assert_eq(publication_name_diagnostic(PublicationNamePolicyDecision.Allow, "cargo"), None)
 }

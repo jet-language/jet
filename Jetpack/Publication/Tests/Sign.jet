@@ -12,6 +12,8 @@ use core.files as files
 use core.encoding.hex as hex
 use core.sys as sys
 
+PUBLICATION_SIGN_E1292_SNAPSHOT :: comptime { embed_file("../../../tests/fixtures/jetpack-diagnostics/keygen_entropy_unavailable.stderr") }
+
 #Test("publication sign hex_roundtrips") {
     data :: [U8]{0, 1, 2, 250, 255, 16, 128}
     encoded :: hex.encode(data)
@@ -38,10 +40,8 @@ use core.sys as sys
     assert_eq(actual, "/tmp/jet_keys_test_dir")
 }
 #Test("publication sign e1292_command_frame_is_exact") {
-    // Original acceptance retained pending Main's canonical-renderer fixture
-    // rebless (Rust hand frame was a defect), not a local lowercase prose fork.
-    golden :: files.read("tests/fixtures/jetpack-diagnostics/keygen_entropy_unavailable.stderr") ?? panic("original fixture")
-    assert_eq(diagnostic_render(publication_e1292(), "", "", false), golden)
+    // The CLI keygen cases compare their stderr with this same fixture.
+    assert_eq(diagnostic_render(publication_e1292(), "", "", false), PUBLICATION_SIGN_E1292_SNAPSHOT)
     assert_eq(publication_e1292().code, "E1292")
 }
 #Test("publication sign entropy diagnostic uses canonical registry and renderer") {
