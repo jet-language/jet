@@ -1031,11 +1031,10 @@ fn parse_request(raw: [U8]) -> HTTPRequest HTTPError! {
         value :: String.from_bytes(slice_b(line.bytes(), col + 1, line.bytes().len())) ?? return Err(.InvalidHeader)
         &fields.fields.push(Header{name: name, value: trim(value)})
     }
+    // The body stays the wire bytes, sliced once after its length check
+    // (#4428). A read as text decodes it then, so a binary upload parses.
     body := Body.Empty
-    if body_raw.len() > 0 {
-        body_text :: String.from_bytes(body_raw) ?? return Err(.UnsupportedEncoding)
-        body = Body.Text(body_text)
-    }
+    if body_raw.len() > 0 -> body = Body.Bytes(^body_raw)
     Ok(__server_request(method_text(method_parse(parts[0])), parts[1], body, fields))
 }
 

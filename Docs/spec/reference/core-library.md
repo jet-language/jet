@@ -950,7 +950,7 @@ rejected without a body allocation.
 | `put(url, body)` / `patch(url, body)` | `HTTPResponse !HTTPError` | Perform one-shot PUT or PATCH calls. |
 | `delete(url)` / `head(url)` | `HTTPResponse !HTTPError` | Perform one-shot DELETE or HEAD calls. |
 | `exchange(method, url, body, header_lines)` | `HTTPResponse !HTTPError` | Validate and perform a request described by a method and header lines. |
-| `parse_request(raw)` / `parse_response(url, raw)` | request/response `!HTTPError` | Parse bounded CRLF-framed messages and reject invalid framing or encoding. |
+| `parse_request(raw)` / `parse_response(url, raw)` | request/response `!HTTPError` | Parse bounded CRLF-framed messages and reject invalid framing or encoding. A parsed request keeps its body as the wire bytes (`Body.Bytes`), sliced once after the length check; a text read decodes it then. |
 | `query()` / `query_get` / `query_all` / `query_set` | query values | Build and inspect repeated query pairs. |
 | `cookie(name, value)` / `cookie_encode` / `cookies_parse` | cookie values | Construct, render, and parse bounded cookie fields. |
 | `basic_auth(user, password)` / `bearer_auth(token)` | `String` | Render authorization header values. |
@@ -3843,6 +3843,13 @@ variants. Values are keyed strings; an adapter owns persistence and scope.
 | `core.web.storage.session.set(key: String, value: String)` | — | Write a session key. |
 | `core.web.storage.session.remove(key: String)` / `clear()` | — | Remove one or all session keys. |
 | `core.web.storage.session.get_or(key, fallback) -> String` / `has(key) -> Bool` | text/Boolean | Read with a fallback or test session presence. |
+
+Outside a browser (`jet run`, a native build), each of `local` and `session`
+is one process-wide in-memory store, and the two stay separate: `set`
+replaces a key's value, `remove` and `clear` touch only their own store,
+and the empty key is an ordinary key. The golden
+`Examples/features/web/storage_local_session.jet` shows this on O0, O1 and O2.
+
 ### `Cell<T>` — local interior mutability
 
 `Cell<T>` stores private mutable state for one task. It is not an operating
