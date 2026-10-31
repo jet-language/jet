@@ -631,7 +631,7 @@ fn sema_call_try_data_method(receiver: Expr, receiver_value: TExpr, method: Stri
                     target := type_args[0]
                     if program.registration_graph == .Val(graph) -> target = sema_type_resolve_declared_with_generics(graph, target, environment.module_identity, environment.generic_params)
                     if !sema_serde_type_is_admissible(environment, program, target, SemaSerdeDirection.Decode) {
-                        &diagnostics.push(sema_error("E0905", span, "`{type_name(target)}` does not implement `Decode`", "`Dyn.decode<T>()` can only call the target type's Decode contract", "derive `Decode` on this type, or write its Decode implementation"))
+                        &diagnostics.push(sema_error("E0905", span, "`{type_name(target)}` does not implement `Decode`", "`Dyn.decode<{type_name(target)}>()` can only call the type's Decode contract", "derive `Decode` on `{type_name(target)}`, or write `impl {type_name(target)}.Decode`"))
                     }
                     if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
                     value := sema_tree_node(sema_data_result(target, sema_data_decode_error()), TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.DynDecode{ty: target}, args: [TExpr]{}}, span)
@@ -1731,7 +1731,7 @@ fn sema_data_check_schema(args: [CallArg], type_args: [Type], span: Span, expect
     row :: if rows.ty == {
         .List(element) -> element
         else -> {
-            &diagnostics.push(sema_error("E0112", args[0].span, "`data.schema` needs a typed row list, not `{type_name(rows.ty)}`", "a schema reads the row type of a typed list", "pass a `[Row]` value"))
+            &diagnostics.push(sema_error("E0112", args[0].span, "`data.schema` needs a typed row list, not {sema_type_show(rows.ty)}", "core.data schema reads column names and types from ordinary rows", "pass a `[T]` value"))
             return SemaDirectSpecialCheck{handled: true, value: None}
         }
     }

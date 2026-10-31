@@ -361,8 +361,7 @@ fn parser_expression_form_parse_loop(state: &JetParserState, depth: Int) -> Pars
         }
     }
     if body.len() == 0 {
-        token :: parser_current(&state)
-        parser_expression_form_error(&state, "E0073", token.span, "this collecting loop path produces no item", "every accepted iteration must contribute one non-unit value unless `next` explicitly omits it", "return a value on this path, or use `next` to omit the item; remove `->` if the loop only performs effects")
+        parser_expression_form_error(&state, "E0073", start.span, "this collecting loop path produces no item", "every accepted iteration must contribute one non-unit value unless `next` explicitly omits it", "return a value on this path, or use `next` to omit the item; remove `->` if the loop only performs effects")
     }
     last :: &body.pop() ?? Stmt.Expr{expr: Expr.Unit{span: start.span, id: parser_node_id(&state)}}
     value :: if last == {

@@ -1150,7 +1150,7 @@ fn sema_control_value_loop_fallback_stmt(fallback: OrFallback, loop_label: Named
                 return None
             }
             if !sema_scope_has_loop_label(scopes, name) {
-                &diagnostics.push(sema_stmt_unknown_loop_label(name, span))
+                &diagnostics.push(sema_stmt_unknown_loop_label(scopes, name, span))
                 return None
             }
             return Val(Stmt.BreakLabel{name: name, span: span})
@@ -1161,7 +1161,7 @@ fn sema_control_value_loop_fallback_stmt(fallback: OrFallback, loop_label: Named
                 return None
             }
             if !sema_scope_has_loop_label(scopes, name) {
-                &diagnostics.push(sema_stmt_unknown_loop_label(name, span))
+                &diagnostics.push(sema_stmt_unknown_loop_label(scopes, name, span))
                 return None
             }
             return Val(Stmt.ContinueLabel{name: name, span: span})
@@ -1465,14 +1465,14 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
             if return_value == {
                 .None -> {
                     if !sema_stmt_return_allows_empty(return_type) {
-                        &diagnostics.push(sema_error("E0405", return_span, "`or return` needs a value here", "the enclosing function returns a value on its success route", "write `or return value`"))
+                        &diagnostics.push(sema_error("E0405", return_span, "`?? return` here needs a value", "a bare `return` needs a value here because the function returns {type_name(sema_stmt_return_success_type(return_type))}", "give a fallback value: `?? return <value>`"))
                         return None
                     }
                     fallback_tree = Val(TOrFallback.Return{value: None})
                 }
                 .Val(returned_expr) -> {
                     if !sema_stmt_return_is_carrier(return_type) && sema_stmt_return_success_type(return_type) == (Type.Named{name: "Unit"}) {
-                        &diagnostics.push(sema_error("E0405", return_span, "`or return value` cannot return a value from a Unit function", "the enclosing function has no return payload", "use bare `or return` or declare a return type"))
+                        &diagnostics.push(sema_error("E0405", return_span, "`?? return` can't return a value here", "this function returns nothing, so `return` can't carry a value", "drop the value, or add a return type before `->`"))
                         return None
                     }
                     checked_return :: sema_stmt_check_return_value(returned_expr, return_type, environment, program, &scopes, &fallback_state, &tail_store, &context, &diagnostics) ?? return None
@@ -1495,14 +1495,14 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
         }
         .Break(route_span) -> {
             if outer_loop_depth <= 0 {
-                &diagnostics.push(sema_error("E0405", route_span, "`or break` is only valid inside a loop", "the fallback route must have an enclosing loop to leave", "move this expression into a loop"))
+                &diagnostics.push(sema_error("E0115", route_span, "`break` only works inside a loop", "`break` and `next` steer the nearest `loop` loop", "move this inside a loop, or remove it"))
                 return None
             }
             fallback_tree = Val(TOrFallback.Break)
         }
         .Continue(route_span) -> {
             if outer_loop_depth <= 0 {
-                &diagnostics.push(sema_error("E0405", route_span, "`or continue` is only valid inside a loop", "the fallback route must have an enclosing loop to continue", "move this expression into a loop"))
+                &diagnostics.push(sema_error("E0115", route_span, "`next` only works inside a loop", "`break` and `next` steer the nearest `loop` loop", "move this inside a loop, or remove it"))
                 return None
             }
             if sema_loop_value_resolve_frame(context, None) == .Val(frame_index) -> sema_ownership_check_loop_move_backedge(&fallback_state, context.loop_value_frames[frame_index], &diagnostics)

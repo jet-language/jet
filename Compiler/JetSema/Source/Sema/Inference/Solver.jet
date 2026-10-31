@@ -231,12 +231,12 @@ fn sema_inference_assignable(graph: SemaRegistrationGraph?, context: SemaInferen
 }
 
 fn sema_inference_conflict_diagnostic(conflict: SemaInferenceConflict, span: Span, diagnostics: &[Diagnostic]) {
-    &diagnostics.push(sema_error("E0904", span, "can't infer `{sema_inference_declared_name(conflict.param)}` from these arguments", "one generic parameter received incompatible concrete types", "make the argument types agree or provide an explicit type argument"))
+    &diagnostics.push(sema_error("E0904", span, "can't figure out what `{sema_inference_declared_name(conflict.param)}` should be here", "one generic type parameter received incompatible concrete types", "make the argument types agree or provide an explicit type argument"))
 }
 
 fn sema_inference_unresolved_diagnostic(parameter: SemaInferenceTypeParam, span: Span, diagnostics: &[Diagnostic]) {
     name :: sema_inference_declared_name(parameter.name)
-    &diagnostics.push(sema_error("E0904", span, "can't infer `{name}`", "this generic parameter has no concrete argument or expected-type evidence", "provide `{name}` explicitly or add an expected type"))
+    &diagnostics.push(sema_error("E0904", span, "can't figure out what `{name}` should be here", "generic calls need enough context to pick a concrete type", "pass the type argument explicitly, like `make<Int>()`, or give the value a typed head, like `p :: Pair<Int>{{ … }}`"))
 }
 
 fn sema_inference_validate_bounds(graph: SemaRegistrationGraph?, context: &SemaInferenceContext, bindings: [SemaInferenceBinding], span: Span, diagnostics: &[Diagnostic]) -> [SemaInferenceBoundEvidence]? {

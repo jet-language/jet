@@ -642,7 +642,7 @@ fn sema_call_try_builtin_static(owner: String, module_name: String, method: Stri
     if owner == "Shared" && method == "new" && values.len() == 1 {
         problem :: sema_ownership_crossing_problem(values[0].ty, SemaSendCrossing.SharedStorage, true, environment, program, scopes, context)
         if problem == .Val(found) && found.kind == .ThreadConfined(_) {
-            &diagnostics.push(sema_error("E1102", expr_span(args[0].expr), "`{type_name(values[0].ty)}` cannot be stored in `Shared<T>`", "a Cell and its guards own one-thread borrow state; wrapping that state does not make it synchronized", "store the value itself in `Shared<T>`, then read and write its fields directly"))
+            &diagnostics.push(sema_error("E1102", expr_span(args[0].expr), "{sema_type_show(values[0].ty)} cannot be stored in `Shared<T>`", "a Cell and its guards own one-thread borrow state; wrapping that state does not make it synchronized", "store the value itself in `Shared<T>`, then read and write its fields directly"))
         }
     }
     // Rust `finish_builtin_method` (and `shared x`'s `Shared.new` arm)

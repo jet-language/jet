@@ -556,7 +556,7 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
         // Rust `check_struct_lit`: a computed field is recomputed on every
         // read, so a struct literal can never give it a value.
         if struct_def.fields[found].computed != None {
-            &diagnostics.push(sema_error("E0339", source.name_span, "`{source.name}` is a computed field on `{type_name(result_ty)}` — it can't be set", "`{source.name}` is declared `{source.name} -> …` — its value always comes from that formula, never from a struct literal", "remove `{source.name}` from this literal"))
+            &diagnostics.push(sema_error("E0339", source.name_span, "`{source.name}` is a computed field on `{type_name(result_ty)}` — it can't be set", "`{source.name}` is declared `{source.name} -> …` — its value always comes from that formula, never from a struct literal", "remove `{source.name}` from this `.{{ … }}`"))
             return None
         }
         if supplied[found] {
@@ -1550,7 +1550,7 @@ fn sema_expression_typed_literal_byte_text(parts: [ByteTextPart], head: Type, sp
             .Lit(text) -> {
                 loop byte in text.bytes() {
                     if Int.from_u8(byte) >= 128 {
-                        &diagnostics.push(sema_error("E0119", span, "this body doesn't match typed-literal head `{type_name(head)}`", "byte-list text is ASCII so every character has one unambiguous byte value", "use ASCII text or numeric elements for a byte list"))
+                        &diagnostics.push(sema_error("E0119", span, "this body doesn't match typed-literal head `{type_name(head)}`", "a typed literal body uses the head type's own literal shape", "use ASCII text or numeric elements for a byte list"))
                         return None
                     }
                     &bytes.push(byte)

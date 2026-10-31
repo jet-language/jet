@@ -2348,8 +2348,29 @@ fn sema_registration_add_impl(module_row: &SemaRegistrationModule, item: Item, r
     }
 }
 
+// A built-in target and an undeclared name share E0301 with different teaching.
 fn sema_registration_unknown_impl_target(definition: ImplDef) -> Diagnostic {
-    sema_error("E0301", definition.type_span, "the impl target `{definition.type_name}` is not a registered type", "an implementation needs one nominal declaration in the resolved module graph", "declare or import the target type before its impl")
+    type_name :: definition.type_name
+    header :: if definition.trait_name == .Val(trait_name) -> "{type_name}.{trait_name}" else -> type_name
+    dot :: type_name.rfind(".")
+    leaf :: type_name.slice(dot + 1, type_name.len())
+    built_in :: dot < 0 && (sema_registration_builtin_scalar(type_name) != None || sema_core_is_math_type(type_name))
+    why := "no struct, enum, or distinct type named `{type_name}` is declared here, and an `impl` only extends a declared type"
+    fix := if dot >= 0 -> "export `{leaf}` from `{type_name.slice(0, dot)}` as a struct, enum, or distinct type, or check the spelling" else -> "declare `struct {leaf}`, `enum {leaf}`, or `{leaf} :: distinct …` first, or check the spelling"
+    if built_in {
+        why = "`{type_name}` is built in, and an `impl` only extends a struct, enum, or distinct type declared by your program"
+        trait_name :: definition.trait_name ?? ""
+        fix = if {
+            trait_name == "" -> "call a named method, or wrap `{type_name}` in a struct or distinct type of your own and implement the methods there"
+            sema_registration_is_operator_trait(trait_name) -> "call a named method, or implement `{trait_name}` on a struct or distinct type of your own (an operator hook on `{type_name}` belongs to the package that declares the other operand type)"
+            else -> "implement `{trait_name}` on a struct or distinct type of your own, or wrap `{type_name}` in one"
+        }
+    }
+    sema_error("E0301", definition.type_span, "`impl {header}` needs a user-defined type", why, fix)
+}
+
+fn sema_registration_is_operator_trait(name: String) -> Bool Never! {
+    name == "Add" || name == "Sub" || name == "Mul" || name == "Div" || name == "Equatable" || name == "Comparable"
 }
 
 // Opaque impl ownership is metadata, not a nominal declaration or public export.

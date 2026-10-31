@@ -111,7 +111,7 @@ fn sema_call_try_transaction_hook(receiver: Expr, receiver_value: TExpr, method:
     scopes.transaction_wall_depth = saved_transaction_wall_depth
     callback :: checked ?? return SemaMethodSpecialCheck{handled: true, value: None}
     executable :: if callback.kind == {.Lambda(value) -> Val(value) else -> None} ?? {
-        &diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` needs a lambda, not {type_name(callback.ty)}", if method == "on_commit" -> "a post-commit hook runs a lambda only after the transaction commits" else -> "a rollback hook runs a lambda only when the transaction rolls back", "write `<handle>.{method}(() -> {{ … }})`"))
+        &diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{method}` needs a lambda, not {sema_type_show(callback.ty)}", if method == "on_commit" -> "a post-commit hook runs a lambda only after the transaction commits" else -> "a rollback hook runs a lambda only when the transaction rolls back", "write `<handle>.{method}(() -> {{ … }})`"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     handle_name :: if receiver == {.Ident(name, _, _) -> name else -> ""}

@@ -686,7 +686,7 @@ fn sema_pattern_list(subject_ty: Type, items: [PatSlot], rest: ListPatRest?, spa
             elem = element
             if measure_literal_value(length) == .Val(count) {
                 if (rest == None && items.len() != count) || items.len() > count {
-                    &diagnostics.push(sema_error("E0305", span, "this list pattern cannot match length {count}", "an exact pattern needs the same length; a rest pattern needs enough items", "adjust the pattern length"))
+                    &diagnostics.push(sema_error("E0305", span, "this list pattern can never match a `{sema_type_show(subject_ty)}` value", "a `{sema_type_show(subject_ty)}` value always holds exactly {count} item{if count == 1 -> "" else -> "s"}", "write a pattern with {count} item{if count == 1 -> "" else -> "s"}, or end it with `..`"))
                     complete = false
                 }
             }
@@ -960,6 +960,12 @@ fn sema_pattern_text(subject_ty: Type, parts: [StrMatchPart], span: Span, diagno
     SemaPatternValidation{shape: TPatternShape.Text{parts: typed_parts, span: span}, enum_type: None, bindings: facts, complete: complete}
 }
 
+// A fixed byte literal or a rest capture must start on a byte boundary: the
+// bit-typed holes before it must sum to a multiple of 8.
+fn sema_binary_alignment_error(span: Span) -> Diagnostic {
+    sema_error("E1011", span, "this part of the binary pattern doesn't start on a byte boundary", "fixed bytes and a `{{rest:...}}` capture are read whole-byte, so every bit-field before them must add up to a multiple of 8 bits", "pad the preceding holes to a byte boundary (e.g. add a reserved `{{_:U4}}`)")
+}
+
 fn sema_pattern_binary(subject_ty: Type, parts: [BinMatchPart], span: Span, diagnostics: &[Diagnostic], mutable: Bool, scopes: SemaScopeTable, introduces_names: Bool) -> SemaPatternValidation {
     normalized :: sema_pattern_unwrap_tags(subject_ty)
     bytes :: if normalized == {
@@ -978,7 +984,7 @@ fn sema_pattern_binary(subject_ty: Type, parts: [BinMatchPart], span: Span, diag
         if part == {
             .Lit(bytes_value) -> {
                 if offset % 8 != 0 {
-                    &diagnostics.push(sema_error("E1011", span, "this binary pattern part is not byte-aligned", "fixed bytes must start on a byte boundary", "pad preceding bit fields to a byte boundary"))
+                    &diagnostics.push(sema_binary_alignment_error(span))
                     complete = false
                 }
                 &typed_parts.push(TBinaryPatternPart.Literal{value: bytes_value})
@@ -996,7 +1002,7 @@ fn sema_pattern_binary(subject_ty: Type, parts: [BinMatchPart], span: Span, diag
                 if spec == {
                     .Rest -> {
                         if offset % 8 != 0 {
-                            &diagnostics.push(sema_error("E1011", hole_span, "this binary pattern part is not byte-aligned", "a rest capture reads whole bytes", "pad preceding bit fields to a byte boundary"))
+                            &diagnostics.push(sema_binary_alignment_error(hole_span))
                             complete = false
                         }
                         rest_ty :: Type.List{element: Type.IntN{signed: false, bits: 8}}
@@ -1009,7 +1015,7 @@ fn sema_pattern_binary(subject_ty: Type, parts: [BinMatchPart], span: Span, diag
                             complete = false
                         }
                         if endian == BinEndian.Little && width % 8 != 0 {
-                            &diagnostics.push(sema_error("E1008", hole_span, "a little-endian binary read must be a whole number of bytes", "byte order only reorders complete bytes", "use a multiple-of-8 width or big-endian order"))
+                            &diagnostics.push(sema_error("E1008", hole_span, "a little-endian read `U{width}le` must be a whole number of bytes", "byte order only reorders whole bytes, so a `le` read's width must be a multiple of 8", "use a multiple-of-8 width (`U16le`, `U32le`) or big-endian `be`"))
                             complete = false
                         }
                         bits :: if {

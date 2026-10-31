@@ -12,6 +12,7 @@ use jet_foundation.[
     ParamZone,
     Span,
     Type,
+    expr_span,
     type_name,
 ]
 
@@ -105,13 +106,13 @@ fn sema_reactive_callback_type(return_type: Type?) -> Type Never! {
 fn sema_reactive_check_retained_lambda(kind: String, argument: CallArg, expected_return: Type?, expected_element: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TLambda? {
     source_arity :: sema_reactive_source_lambda_arity(argument.expr) ?? {
         checked :: sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        actual :: if checked == .Val(value) -> type_name(value.ty) else -> "an invalid value"
-        &diagnostics.push(sema_error("E2910", argument.span, "`reactive.{kind}` needs a lambda, not {actual}", "a reactive {kind} is built from a `() -> …` body so it can re-run when a signal changes", "write `reactive.{kind}(() -> {{ … }})`"))
+        actual :: if checked == .Val(value) -> sema_type_show(value.ty) else -> "an invalid value"
+        &diagnostics.push(sema_error("E2910", expr_span(argument.expr), "`reactive.{kind}` needs a lambda, not {actual}", "a reactive {kind} is built from a `() -> …` body so it can re-run when a signal changes", "write `reactive.{kind}(() -> {{ … }})`"))
         return None
     }
     if source_arity != 0 {
         _ := sema_expression_lambda_host_callback_stored(argument.expr, None, false, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        &diagnostics.push(sema_error("E2911", argument.span, "`reactive.{kind}` needs a zero-parameter lambda, got {source_arity} parameter{if source_arity == 1 -> "" else -> "s"}", "the body takes no arguments — it reads the signals it depends on via `.get()`", "write `reactive.{kind}(() -> {{ … }})` with no parameters"))
+        &diagnostics.push(sema_error("E2911", expr_span(argument.expr), "`reactive.{kind}` needs a zero-parameter lambda, got {source_arity} parameter{if source_arity == 1 -> "" else -> "s"}", "the body takes no arguments — it reads the signals it depends on via `.get()`", "write `reactive.{kind}(() -> {{ … }})` with no parameters"))
         return None
     }
     expected_callback_return := expected_return
@@ -121,7 +122,7 @@ fn sema_reactive_check_retained_lambda(kind: String, argument: CallArg, expected
     if checked.kind == {
         .Lambda(lambda) -> Val(lambda)
         else -> {
-            &diagnostics.push(sema_error("E2910", argument.span, "`reactive.{kind}` needs a lambda, not {type_name(checked.ty)}", "a reactive {kind} is built from a `() -> …` body so it can re-run when a signal changes", "write `reactive.{kind}(() -> {{ … }})`"))
+            &diagnostics.push(sema_error("E2910", expr_span(argument.expr), "`reactive.{kind}` needs a lambda, not {sema_type_show(checked.ty)}", "a reactive {kind} is built from a `() -> …` body so it can re-run when a signal changes", "write `reactive.{kind}(() -> {{ … }})`"))
             return None
         }
     }
@@ -166,7 +167,7 @@ fn sema_reactive_derived_value(member: String, type_args: [Type], span: Span, ex
     lambda :: sema_reactive_check_retained_lambda(member, args[0], None, expected_element, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     result_type :: lambda.ret ?? Type.Named{name: "Unit"}
     if result_type == sema_reactive_unit_type() {
-        &diagnostics.push(sema_error("E2912", args[0].span, "reactive.{member} must return a value", "derived values recompute a data snapshot", "return a non-Unit value from the callback"))
+        &diagnostics.push(sema_error("E2912", expr_span(args[0].expr), "`reactive.{member}` must compute and return a value", "a derived value is recomputed from its signals; its lambda has to return the value", "return a value from the body, or use `reactive.effect(() -> {{ … }})` for a side effect"))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     if !sema_reactive_value_ok(result_type, member, args[0].span, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}

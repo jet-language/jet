@@ -67,6 +67,7 @@ use jet_sema.[
     sema_copy_facts_table_empty,
     sema_finalize_graph,
     sema_cli_entry_output_wrapper,
+    sema_output_legacy_run_contract,
     sema_output_resolve,
     SemaOutputIntent,
     sema_function_memory_plan_from_graph,
@@ -1883,9 +1884,10 @@ fn jet_driver_comptime_run(
     // A soft item whose startup check reported errors does not stop the
     // run: the other items still check, so every real error is reported
     // once, and the run fails at its end. `stop_mark` is where the reports
-    // after the last such failure start.
+    // after the last such failure start; before one, the run's own reports
+    // start where the list stood on entry.
     soft_failed := false
-    stop_mark := 0
+    stop_mark := diagnostics.len()
     // Sema totality (AGENTS.md I2): an item or closure check that stopped
     // with neither a value, a wait set nor a report is one ICE row each; the
     // run goes on, so every such check reports, and stops with them all once
@@ -3498,6 +3500,8 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     output_diagnostics :: sema_output_resolve(&registration_graph, output_intent, request.output_address, jet_driver_entry_selection(load) != None)
     loop diagnostic in output_diagnostics -> &registration_graph.diagnostics.push(diagnostic)
     if jet_driver_has_errors(output_diagnostics) -> registration_graph.complete = false
+    // The legacy `fn run` contract fails the check without stopping it.
+    loop diagnostic in sema_output_legacy_run_contract(registration_graph, output_intent) -> &load.diagnostics.push(diagnostic)
     if request.trace_sink == .Val(sink) -> sink.end("register", registration_graph.modules.len())
     register_lookups :: sema_registration_lookup_counts(registration_graph)
     jet_driver_trace_lookup_counters(request.trace_sink, "register", register_lookups, SemaLookupCounters{module_lookups: 0, name_lookups: 0})

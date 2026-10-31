@@ -508,10 +508,6 @@ fn sema_output_resolve(graph: &SemaRegistrationGraph, intent: SemaOutputIntent, 
     // entry binding, a singular run has no entry, alongside any ambiguity
     // reported above.
     if intent == SemaOutputIntent.Run && explicit_address == None && legacy == None && !selected && !manifest_entry -> &diagnostics.push(sema_no_run_diagnostic())
-    if (intent == SemaOutputIntent.Run || intent == SemaOutputIntent.Check) && legacy != None && !selected {
-        function :: graph.modules[entry_index].functions[legacy ?? 0]
-        _ := sema_output_entry_contract(graph, entry_index, function, "run", OutputKind.Executable, function.symbol.span, "change `fn run` to take zero or one typed CLI parameter and return `()` or `() ?`", &diagnostics)
-    }
     // Drain owned rows from the back, avoiding an indexed move or whole-row
     // clone. Publication writes commute; reverse the reference drain once to
     // retain the original module/item/alias/function order.
@@ -541,6 +537,30 @@ fn sema_output_resolve(graph: &SemaRegistrationGraph, intent: SemaOutputIntent, 
     }
     &references.reverse()
     graph.output_name_references = ^references
+    ^diagnostics
+}
+
+// The legacy `fn run` entry contract (Rust `Bundle/Outputs.rs`), checked once
+// Output resolution published its selection. The driver reports it beside the
+// check rather than stopping there, so the body of `run` still reports its
+// own errors.
+fn sema_output_legacy_run_contract(graph: SemaRegistrationGraph, intent: SemaOutputIntent) -> [Diagnostic] Never! {
+    diagnostics := [Diagnostic]{}
+    if intent != SemaOutputIntent.Run && intent != SemaOutputIntent.Check -> return ^diagnostics
+    entry_index :: sema_registration_module_index(graph, graph.entry_module_identity) ?? return ^diagnostics
+    loop module_row in graph.modules {
+        loop constant in module_row.constants {
+            if constant.declaration.resolved_output == .Val(fact) {
+                if fact.selected -> return ^diagnostics
+            }
+        }
+    }
+    loop function in graph.modules[entry_index].functions {
+        if function.declaration.name == "run" {
+            _ := sema_output_entry_contract(graph, entry_index, function, "run", OutputKind.Executable, function.declaration.span, "declare the entry as `fn run()` or `fn run() ()?`", &diagnostics)
+            break
+        }
+    }
     ^diagnostics
 }
 

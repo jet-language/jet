@@ -213,7 +213,7 @@ fn sema_stmt_loop_value_break_missing_payload(frame: SemaLoopValueFrame, span: S
 
 fn sema_stmt_check_loop_value_break(value: Expr, label: String?, label_span: Span, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     if label == .Val(name) && !sema_scope_has_loop_label(scopes, name) {
-        &diagnostics.push(sema_stmt_unknown_loop_label(name, label_span))
+        &diagnostics.push(sema_stmt_unknown_loop_label(scopes, name, label_span))
         return None
     }
     frame_index :: sema_loop_value_resolve_frame(context, label) ?? {
@@ -227,12 +227,14 @@ fn sema_stmt_check_loop_value_break(value: Expr, label: String?, label_span: Spa
     if frame.ty == .Val(expected_type) && !sema_expr_is_numeric(expected_type) -> payload_expected = Val(expected_type)
     checked :: sema_check_expression(value, payload_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, &diagnostics, false) -> return None
+    // A payload the loop cannot carry is reported on the `break` keyword.
+    keyword_span :: Span{start: span.start, end: span.start + "break".len()}
     if frame.kind == SemaLoopValueKind.Collecting {
-        &diagnostics.push(sema_error("E0075", span, "this collecting loop cannot use a break payload", "its result is already the accumulated List, so a second payload would give one exit two result channels", "write `break` to return the accumulated list"))
+        &diagnostics.push(sema_error("E0075", keyword_span, "this collecting loop cannot use a break payload", "its result is already the accumulated List, so a second payload would give one exit two result channels", "write `break` to return the accumulated list"))
         return None
     }
     if frame.kind == SemaLoopValueKind.Effect {
-        &diagnostics.push(sema_error("E0079", span, "this effect-only loop uses a result exit", "a break payload makes an effect-only loop a value expression", "bind the loop with `::`, or remove the payload"))
+        &diagnostics.push(sema_error("E0079", keyword_span, "this effect-only loop uses a result exit", "a break payload makes an effect-only loop a value expression", "bind the loop with `::`, or remove the payload"))
         return None
     }
     result :: sema_loop_value_check_result_exit(&context, frame_index, checked, environment, program, &diagnostics) ?? return None
@@ -2521,8 +2523,18 @@ fn sema_stmt_check_source_stride(expr: Expr, environment: SemaScopeEnvironment, 
     Val(value)
 }
 
-fn sema_stmt_unknown_loop_label(name: String, span: Span) -> Diagnostic {
-    sema_error("E0987", span, "no loop labeled `{name}` is in scope", "a named `break` or `next` must target an enclosing labeled loop", "label the target loop with `{name} ::` first")
+// The fix names the loop labels that are reachable here.
+fn sema_stmt_unknown_loop_label(scopes: SemaScopeTable, name: String, span: Span) -> Diagnostic {
+    choices := [String]{}
+    seen := [String]{}
+    loop label in scopes.loop_labels {
+        if seen.contains(label.name) -> next
+        &seen.push(label.name)
+        &choices.push("`break({label.name})` or `next({label.name})`")
+    }
+    fix := "label an enclosing loop with `name :: loop {{ … }}` first"
+    if choices.len() > 0 -> fix = "use a label in scope: {choices.join(", ")}"
+    sema_error("E0987", span, "no loop labeled `{name}` is in scope", "a named `break`/`next` must name an enclosing `name :: loop`", fix)
 }
 fn sema_stmt_move_direct(expr: Expr, state: &SemaOwnershipState, scopes: SemaScopeTable, consumer: String, diagnostics: &[Diagnostic]) -> Bool {
     if expr == {
@@ -3679,7 +3691,7 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
         .Break(route_span) -> {
             if {
                 scopes.loop_depth <= 0 -> {
-                    &diagnostics.push(sema_error("E0405", route_span, "`?? break` is only valid inside a loop", "the fallback route must have an enclosing loop to leave", "move this binding into a loop"))
+                    &diagnostics.push(sema_error("E0115", route_span, "`break` only works inside a loop", "`break` and `next` steer the nearest `loop` loop", "move this inside a loop, or remove it"))
                 }
                 else -> {
                     result.or_fallback = Val(TOrFallback.Break)
@@ -3691,7 +3703,7 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
         .Continue(route_span) -> {
             if {
                 scopes.loop_depth <= 0 -> {
-                    &diagnostics.push(sema_error("E0405", route_span, "`?? next` is only valid inside a loop", "the fallback route must have an enclosing loop to continue", "move this binding into a loop"))
+                    &diagnostics.push(sema_error("E0115", route_span, "`next` only works inside a loop", "`break` and `next` steer the nearest `loop` loop", "move this inside a loop, or remove it"))
                 }
                 else -> {
                     if sema_loop_value_resolve_frame(context, None) == .Val(frame_index) -> sema_ownership_check_loop_move_backedge(&state, context.loop_value_frames[frame_index], &diagnostics)
@@ -7369,7 +7381,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         }
                     }
                 } else {
-                    &diagnostics.push(sema_error("E0115", span, "`break` only works inside a loop", "`break` and `next` steer the nearest loop", "move this inside a loop, or remove it"))
+                    &diagnostics.push(sema_error("E0115", span, "`break` only works inside a loop", "`break` and `next` steer the nearest `loop` loop", "move this inside a loop, or remove it"))
                     complete = false
                 }
             }
@@ -7383,7 +7395,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
             .Continue(span) -> {
                 if {
                     loop_depth == 0 -> {
-                        &diagnostics.push(sema_error("E0115", span, "`next` only works inside a loop", "`break` and `next` steer the nearest loop", "move this inside a loop, or remove it"))
+                        &diagnostics.push(sema_error("E0115", span, "`next` only works inside a loop", "`break` and `next` steer the nearest `loop` loop", "move this inside a loop, or remove it"))
                         complete = false
                     }
                     else -> {
@@ -7406,7 +7418,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         }
                     }
                 } else {
-                    &diagnostics.push(sema_stmt_unknown_loop_label(name, span))
+                    &diagnostics.push(sema_stmt_unknown_loop_label(scopes, name, span))
                     complete = false
                 }
             }
@@ -7420,7 +7432,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
             .ContinueLabel(name, span) -> {
                 if {
                     !sema_scope_has_loop_label(scopes, name) -> {
-                        &diagnostics.push(sema_stmt_unknown_loop_label(name, span))
+                        &diagnostics.push(sema_stmt_unknown_loop_label(scopes, name, span))
                         complete = false
                     }
                     else -> {

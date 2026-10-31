@@ -906,7 +906,7 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
             }
         }
         .String -> {
-            &diagnostics.push(sema_error("E0503", span, "strings are not indexed with `[ ]`", "text is counted in characters, while brackets index storage positions", "use `.chars()` or slice the string with a Range"))
+            &diagnostics.push(sema_error("E0503", span, "strings aren't indexed with `[ ]`", "text is counted in characters — walk them with `.chars()` or take a piece with `.slice(start..end)`", "e.g. `loop c in s.chars() {{ }}` or `s.slice(0..2)`"))
             return None
         }
         else -> {}

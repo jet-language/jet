@@ -97,7 +97,7 @@
 // - Exact try human/JSON output, receipt identity and keep/no-keep transaction
 //   behavior use real item-counter deltas. Source approval requires the full
 //   typed input/replay/caller packet; parser success is not semantic proof.
-use jet_sema.[sema_output_resolve]
+use jet_sema.[sema_output_legacy_run_contract, sema_output_resolve]
 use jet_foundation.[
     Diagnostic,
     SourceFile,
@@ -414,6 +414,8 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
     output_diagnostics :: sema_output_resolve(&registration, output_intent, input.request.output_address, jet_driver_entry_selection(load) != None)
     loop diagnostic in output_diagnostics -> &registration.diagnostics.push(diagnostic)
     if jet_driver_has_errors(output_diagnostics) -> registration.complete = false
+    // The legacy `fn run` contract fails the check without stopping it.
+    loop diagnostic in sema_output_legacy_run_contract(registration, output_intent) -> &load.diagnostics.push(diagnostic)
     if registration.internal_problem == .Val(problem) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val(problem))
     // Declaration checking loans the single graph to its stage, then returns it.
     stage := sema_collect_comptime_declarations(^registration, jet_driver_compiler_check_package_policies(load), input.request.compiler_threads, input.request.trace_sink)

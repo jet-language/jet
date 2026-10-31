@@ -215,7 +215,7 @@ fn parser_take_pattern_text_parts(state: &JetParserState, parts: [StringPart]) -
         if first_hole != None && second_hole != None {
             first_span :: first_hole ?? Span{start: 0, end: 0}
             second_span :: second_hole ?? Span{start: 0, end: 0}
-            parser_add_error_code(&state, "E0147", parser_cover(first_span, second_span), "these two text holes have nothing between them to split on", "a text pattern needs fixed literal text between adjacent holes", "put literal text between the holes or give them explicit types")
+            parser_add_error_code(&state, "E0147", parser_cover(first_span, second_span), "these two `{{}}` holes have nothing between them to split on", "a pattern splits the matched text at the fixed characters between holes; back-to-back holes give it nothing to split on", "put literal text between them, or type them so the boundary is unambiguous")
         }
         adjacent_index += 1
     }
@@ -260,11 +260,11 @@ fn parser_take_pattern_binary_bits(state: &JetParserState, spec: String, span: S
     }
     if {
         width > 8 && endian == BinEndian.Unspecified -> {
-            parser_add_error_code(&state, "E1008", span, "`U{width}` spans multiple bytes and needs an endianness", "byte order must be explicit for binary widths greater than 8 bits", "add `be` or `le`, for example `U16be`")
+            parser_add_error_code(&state, "E1008", span, "`{{…:U{width}}}` reads more than one byte, so it needs a byte order", "a read wider than 8 bits spans multiple bytes; Jet won't guess big- vs little-endian", "write `U{width}be` (big-endian / network order) or `U{width}le` (little-endian)")
             endian = BinEndian.Big
         }
         width <= 8 && endian != BinEndian.Unspecified -> {
-            parser_add_error_code(&state, "E1008", span, "`U{width}` reads at most one byte, so an endianness suffix has no meaning", "byte order only matters for multi-byte reads", "drop the `be` or `le` suffix")
+            parser_add_error_code(&state, "E1008", span, "`U{width}` reads a single byte, so a `be`/`le` suffix has no meaning", "byte order only matters when a read spans more than one byte", "drop the suffix — write `U{width}`")
             endian = BinEndian.Unspecified
         }
     }
@@ -334,7 +334,7 @@ fn parser_take_pattern_binary_parts(state: &JetParserState, parts: [StringPart],
             .Hole(_, spec, rest_span) -> {
                 if spec == BinSpec.Rest {
                     if index + 1 < match_parts.len() {
-                        parser_add_error_code(&state, "E1009", rest_span, "a binary rest capture must be the last pattern part", "a rest capture consumes every remaining byte", "move the rest capture to the end")
+                        parser_add_error_code(&state, "E1009", rest_span, "a `{{...}}` rest capture must be the last part of a binary pattern", "the rest capture takes every remaining byte, so nothing can come after it", "move the `{{name:...}}` hole to the end, or give it a fixed width")
                         break
                     }
                 }

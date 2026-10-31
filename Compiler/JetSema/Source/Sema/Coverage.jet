@@ -437,8 +437,8 @@ fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Span, 
         if sema_coverage_ranges_cover(ranges, bounds.lo, bounds.hi) -> return
     }
     if sema_coverage_is_open_scalar(subject_ty) {
-        domain_note :: if interval != None -> "`{type_name(subject_ty)}` has a finite integer interval, but the range arms do not cover every value" else -> "`{type_name(subject_ty)}` has infinitely many values; range arms only cover a subset"
-        &diagnostics.push(sema_error("E0307", span, "this `if` over `{type_name(subject_ty)}` has no `else` arm — range arms can't cover every value", domain_note, "add `else -> {{ … }}` to handle values not matched by any range"))
+        domain_note :: if interval != None -> "`{sema_type_show(subject_ty)}` has a finite integer interval, but the range arms do not cover every value" else -> "`{sema_type_show(subject_ty)}` has infinitely many values; range arms only cover a subset"
+        &diagnostics.push(sema_error("E0307", span, "this `if` over `{sema_type_show(subject_ty)}` has no `else` arm — range arms can't cover every value", domain_note, "add `else -> {{ … }}` to handle values not matched by any range"))
         return
     }
     missing := sema_coverage_missing(subject_ty, keys, environment, program)

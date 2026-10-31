@@ -655,13 +655,19 @@ fn sema_effect_positive_panic(span: Span) -> Diagnostic {
 
 fn sema_effect_check_unsafe_region(reason: String?, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if (reason ?? "").len() > 0 -> return true
-    &diagnostics.push(sema_error("E3112", span, "this `#Unsafe` block has no reason", "every audited region must record why it cannot break memory safety", "add the reason: `#Unsafe(\"why this is safe\") {{ … }}`"))
+    &diagnostics.push(sema_error("E3112", span, "an `#Unsafe` block needs a reason", "every unsafe gate records why its unchecked operations preserve memory safety", "write `#Unsafe(\"why this is safe\") {{ … }}`"))
+    false
+}
+
+fn sema_effect_check_unsafe_function_reason(reason: String?, span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    if (reason ?? "").len() > 0 -> return true
+    &diagnostics.push(sema_error("E3112", span, "an `#Unsafe` function needs a reason", "every unsafe function records why callers can rely on its unchecked contract", "write `#Unsafe(\"why this is safe\") fn …`"))
     false
 }
 
 fn sema_effect_check_unsafe_function(source: SemaEffectFunctionSource, diagnostics: &[Diagnostic]) -> Bool {
     if !source.is_unsafe -> return true
-    sema_effect_check_unsafe_region(source.unsafe_reason, source.unsafe_span ?? source.span, &diagnostics)
+    sema_effect_check_unsafe_function_reason(source.unsafe_reason, source.unsafe_span ?? source.span, &diagnostics)
 }
 
 fn sema_effect_require_unsafe_call(callee: String, callee_is_unsafe: Bool, audited: Bool, span: Span, diagnostics: &[Diagnostic]) -> Bool {
@@ -672,11 +678,11 @@ fn sema_effect_require_unsafe_call(callee: String, callee_is_unsafe: Bool, audit
 
 fn sema_effect_check_tfunc_unsafe(function: FnBody, diagnostics: &[Diagnostic]) -> Bool {
     if !function.is_unsafe -> return true
-    sema_effect_check_unsafe_region(function.unsafe_gate.map((gate) -> gate.reason), function.source_span, &diagnostics)
+    sema_effect_check_unsafe_function_reason(function.unsafe_gate.map((gate) -> gate.reason), function.source_span, &diagnostics)
 }
 
 fn sema_effect_via_unknown_parameter(function: FnBody, parameter: String, span: Span) -> Diagnostic {
-    sema_error("E0748", span, "`-[via {parameter}]>` on `{function.name}` names no such parameter", "`-[via f]>` publishes the effects of a callback parameter, but this function has no parameter named `{parameter}`", "name one of the function's callback parameters after `via`")
+    sema_error("E0748", span, "`-[via {parameter}]>` on `{function.name}` names no such parameter", "`-[via f]>` publishes the effects of a callback parameter `f`; `{function.name}` has no parameter called `{parameter}`", "name one of `{function.name}`'s callback parameters after `via`")
 }
 
 fn sema_effect_via_not_callback(function: FnBody, parameter: String, ty: Type, span: Span) -> Diagnostic {
