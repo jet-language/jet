@@ -110,12 +110,65 @@ fn compiler_process_status_text(status: I64) -> I64 {
 // PlatformFamily.rs:3 std::env::consts::FAMILY of the Linux build target.
 #Export(c) fn jet_std_os_family() -> I64 { jet_rt_string_clone(rt_static_text("unix")) }
 
-// musl's getauxval: an entry of the start stack's auxiliary vector, 0 when
-// it has none. An image Image/Loader.jet runs from memory carries Jet
-// entries: 0x4a455401 the absolute path `os.executable()` reports (the
-// script `jet run` ran), 0x4a455402 a read-only mapping of the whole ELF
-// file and 0x4a455403 its size. A kernel exec carries none.
-#Import(c) fn host_getauxval(kind: I64) -> I64 = "getauxval"
+// An entry of the start stack's auxiliary vector, 0 when it has none, as
+// musl's getauxval reads it: the vector follows the startup environment's
+// terminating null (HostStartup.jet host_envp, which the program's main
+// passes before anything else runs). A host that never passed its startup
+// arguments (an entryless loaded image, or a fault before main) reads the
+// kernel's copy, /proc/self/auxv. An image Image/Loader.jet runs from memory
+// carries Jet entries: 0x4a455401 the absolute path `os.executable()`
+// reports (the script `jet run` ran), 0x4a455402 a read-only mapping of the
+// whole ELF file and 0x4a455403 its size. A kernel exec carries none.
+// No libc: the fault report reads it on the alternate signal stack.
+fn host_getauxval(kind: I64) -> I64 {
+    envp :: host_envp
+    if (envp == I64{0}) -> return host_getauxval_kernel(kind)
+    #Unsafe("startup lends the start stack: the null-terminated envp array, then the auxiliary vector's [type, value] pairs up to AT_NULL") {
+        at := envp
+        loop {
+            if (os_load_i64(at) == I64{0}) -> break
+            at = wrapping(at + I64{8})
+        }
+        at = wrapping(at + I64{8})
+        loop {
+            entry :: os_load_i64(at)
+            if (entry == I64{0}) -> return I64{0}
+            if (entry == kind) -> return os_load_i64(wrapping(at + I64{8}))
+            at = wrapping(at + I64{16})
+        }
+    }
+}
+
+// host_getauxval from /proc/self/auxv, read into a fresh page.
+fn host_getauxval_kernel(kind: I64) -> I64 {
+    page :: alloc_map_try(I64{4096})
+    if (page == I64{0}) -> return I64{0}
+    found := I64{0}
+    #Unsafe("page is a fresh private page: the path, then the [type, value] pairs read into it") {
+        // "/proc/self/auxv\0", little-endian.
+        os_store_i64(page, I64{7310238724270485551})
+        os_store_i64(wrapping(page + I64{8}), I64{33346492788860524})
+        fd :: os_syscall_i64(I64{257}, I64{-100}, page, I64{524288}, I64{0}, I64{0}, I64{0})
+        if (fd >= I64{0}) {
+            length :: os_syscall_i64(I64{0}, fd, wrapping(page + I64{16}), I64{4080}, I64{0}, I64{0}, I64{0})
+            _ := os_syscall_i64(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+            at := I64{16}
+            // The pair at `at` (from 16) is whole when at + 16 <= 16 + length.
+            loop at <= length {
+                entry :: os_load_i64(wrapping(page + at))
+                if (entry == I64{0}) -> break
+                if (entry == kind) {
+                    found = os_load_i64(wrapping(page + wrapping(at + I64{8})))
+                    break
+                }
+                at = wrapping(at + I64{16})
+            }
+        }
+    }
+    alloc_unmap(page, I64{4096})
+    found
+}
+
 HOST_AT_EXECUTABLE :: I64{1246057473}
 HOST_AT_IMAGE :: I64{1246057474}
 

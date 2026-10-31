@@ -29,9 +29,10 @@
 // process can't be quiesced.
 //
 // The auxiliary vector carries Jet entries above the kernel's AT_* range
-// (libc ignores types it doesn't know). The runtime reads them with musl's
-// getauxval (JetRuntime CompilerHost.jet host_getauxval) and falls back to
-// /proc/self when absent, as under a kernel exec.
+// (libc ignores types it doesn't know). The runtime reads them from the
+// start stack after the environment (JetRuntime CompilerHost.jet
+// host_getauxval) and falls back to /proc/self when absent, as under a
+// kernel exec.
 use core.files as loader_files
 
 // The absolute path the program's `os.executable()` reports (a char*);

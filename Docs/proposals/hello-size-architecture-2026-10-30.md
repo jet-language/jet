@@ -194,6 +194,9 @@ keeps paying for.
    reads its arguments. It emits stop polls and the entry-return hook only
    when the program can spawn a task. The musl-style crt (2,856 B:
    `__libc_start_main`, `__init_libc`, `__init_tls`, `__init_ssp`) goes.
+   IrTypes-16 removes the crt: the linker starts a program at its own
+   `__jet_start` (StaticLink.jet link_owned_startup) when nothing it keeps
+   needs libc's startup. **Measured**: hello 112,576 → 102,848 B.
    Hello's `main_run` today calls `jet_ir_stop_poll` three times; that poll
    reads `%gs:0`, so it needs a thread block, which needs the allocator.
 2. **Zero unconditional startup (S2).** Every `.init_array` entry and every

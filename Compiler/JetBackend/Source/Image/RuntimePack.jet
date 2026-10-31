@@ -163,18 +163,43 @@ fn link_pack_relocs(c: &LinkContext, p: &LinkPack, obj: Int, table: Int, first: 
 
 // The name a kept section carries in the pack: what classification and
 // init-array ordering read (Image/StaticLink.jet link_class, link_priority).
-fn link_pack_section_name(c: LinkContext, class: Int, s: Int) -> String Never! {
+// A section that runs without libc's startup (`nolibc`, link_pack_nolibc)
+// carries LINK_NOLIBC_SUFFIX, which a program link reads (link_owned_fits).
+fn link_pack_section_name(c: LinkContext, class: Int, s: Int, nolibc: Bool) -> String Never! {
     if class == LINK_PREINIT || class == LINK_INIT || class == LINK_FINI {
         obj :: link_obj_of(c, s)
         return link_cstr(c.bufs, c.obj_buffer[obj], link_sec_name(c, obj, s))
     }
-    if class == LINK_TEXT -> return ".text"
-    if class == LINK_TDATA -> return ".tdata"
-    if class == LINK_TBSS -> return ".tbss"
-    if class == LINK_RELRO -> return ".data.rel.ro"
-    if class == LINK_DATA -> return ".data"
-    if class == LINK_BSS -> return ".bss"
-    ".rodata"
+    name := ".rodata"
+    if class == LINK_TEXT -> name = ".text"
+    if class == LINK_TDATA -> name = ".tdata"
+    if class == LINK_TBSS -> name = ".tbss"
+    if class == LINK_RELRO -> name = ".data.rel.ro"
+    if class == LINK_DATA -> name = ".data"
+    if class == LINK_BSS -> name = ".bss"
+    if nolibc -> return "{name}{LINK_NOLIBC_SUFFIX}"
+    name
+}
+
+// The sections that run without libc's startup: those of the first input
+// when it is an object (the Jet runtime's; Request.jet jet_cli_runtime_pack
+// passes it first, before the C platform archives), and each C section all
+// of whose globals are freestanding memory functions (musl's memcpy.s also
+// defines `__memcpy_fwd`, which its memmove.s jumps to).
+fn link_pack_nolibc(c: LinkContext) -> [Int:Bool] Never! {
+    out := [Int:Bool]{}
+    if c.obj_name.len() > 0 && c.obj_buffer[0] == 0 && c.obj_base[0] == 0 {
+        loop s in c.obj_first_section[0]..<c.obj_first_section[0] + c.obj_count[0] -> out[s] = true
+    }
+    freestanding :: [String]{"memcpy", "memmove", "memset", "memcmp", "__memcpy_fwd"}
+    other := [Int:Bool]{}
+    loop g in 0..<c.g_name.len() {
+        if c.g_kind[g] == LINK_G_FILE && c.g_section[g] >= 0 && !freestanding.contains(c.g_name[g]) -> other[c.g_section[g]] = true
+    }
+    loop g in 0..<c.g_name.len() {
+        if c.g_kind[g] == LINK_G_FILE && c.g_section[g] >= 0 && freestanding.contains(c.g_name[g]) && other.get(c.g_section[g]) == None -> out[c.g_section[g]] = true
+    }
+    out
 }
 
 // Symbol table entry; every real reserved-range section index crosses through
@@ -237,8 +262,8 @@ fn link_pack_shstr(table: &[U8], seen: &[String:Int], name: String) -> Int Never
 }
 
 // Write the pack for the collected context `c` whose roots are `exports`
-// (final global ids).
-fn link_pack_write(c: &LinkContext, exports: [Int]) -> [U8] Never! {
+// (final global ids); `nolibc` holds the sections link_pack_nolibc finds.
+fn link_pack_write(c: &LinkContext, exports: [Int], nolibc: [Int:Bool]) -> [U8] Never! {
     ord_row :: link_rows_in_order(c)
     row_ord := [Int]{}
     loop _ in ord_row -> &row_ord.push(0)
@@ -388,7 +413,7 @@ fn link_pack_write(c: &LinkContext, exports: [Int]) -> [U8] Never! {
             start :: link_sec_offset(c, obj, s)
             &bytes.extend(c.bufs[c.obj_buffer[obj]][start..<start + size])
         }
-        name_at :: link_pack_shstr(&shstrtab, &shstr_seen, link_pack_section_name(c, c.live_class[row], s))
+        name_at :: link_pack_shstr(&shstrtab, &shstr_seen, link_pack_section_name(c, c.live_class[row], s, nolibc.get(s) != None))
         flags :: link_sec_flags(c, obj, s)
         info :: if cond_guard.get(s) == .Val(guard) -> link_pack_out(c, p, guard) else -> 0
         // SHF_GROUP: the groups are settled.
@@ -510,7 +535,8 @@ fn x64_link_runtime_pack(names: [String], bufs: ^[[U8]], extra_roots: [String]) 
         if link_pack_rust_symbol(name) -> link_error(&c, "runtime pack: Rust symbol `{name}` is not an admissible runtime dependency")
     }
     if c.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
-    bytes :: link_pack_write(&c, exports)
+    nolibc :: link_pack_nolibc(c)
+    bytes :: link_pack_write(&c, exports, nolibc)
     if c.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: c.errors}
     X64ExecutableResult{bytes: bytes, errors: [String]{}}
 }

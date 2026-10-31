@@ -19,6 +19,9 @@
 //    which register the unwind tables only when an unwinder can ask for
 //    them (link_eh_shims); and the two glibc names the gnu-target std's
 //    resolver calls that musl lacks (`__res_init`, `gnu_get_libc_version`).
+//    A program a runtime pack starts whose kept code needs none of libc's
+//    startup gets the program's own `_start` instead (link_owned_startup,
+//    link_owned_fits): init arrays, `main`, fini arrays, `exit_group`.
 // 3. Garbage collection from `_start`, the init/fini arrays and the unwind
 //    tables' personality references, following relocations; an `.eh_frame`
 //    FDE lives exactly when the function it describes does.
@@ -1045,6 +1048,136 @@ fn link_startup(register_frames: Bool) -> LinkSynth Never! {
     link_synth_define(&s, "__jet_eh_state", 3, 128)
     s.bss = 136
     s
+}
+
+// The program's own startup (#6328 S5), for a program none of whose code
+// needs libc's startup: `__jet_start` runs every `.init_array` entry with
+// (argc, argv, envp) from the start stack, calls `main` with them, runs the
+// `.fini_array` entries last to first and exits with `main`'s status. That
+// is what musl's `__libc_start_main` and `exit` do for such a program; its
+// TLS, environment, stack guard and stdio setup have no reader there.
+fn link_owned_startup() -> LinkSynth Never! {
+    s := link_synth()
+    link_synth_function(&s, LINK_OWNED_START)
+    // xor ebp, ebp; mov r12, [rsp]; lea r13, [rsp + 8]; lea r14, [r13 + r12 * 8 + 8]; and rsp, -16
+    link_synth_code(&s, [Int]{0x31, 0xed, 0x4c, 0x8b, 0x24, 0x24, 0x4c, 0x8d, 0x6c, 0x24, 0x08, 0x4f, 0x8d, 0x74, 0xe5, 0x08, 0x48, 0x83, 0xe4, 0xf0})
+    // lea rbx, [rip + __jet_init_array_start]
+    link_synth_code(&s, [Int]{0x48, 0x8d, 0x1d})
+    link_synth_rel32(&s, "__jet_init_array_start", LINK_R_PC32)
+    // next: lea rax, [rip + __jet_init_array_end]; cmp rbx, rax; jae done
+    link_synth_code(&s, [Int]{0x48, 0x8d, 0x05})
+    link_synth_rel32(&s, "__jet_init_array_end", LINK_R_PC32)
+    link_synth_code(&s, [Int]{0x48, 0x39, 0xc3, 0x73, 0x11})
+    // mov edi, r12d; mov rsi, r13; mov rdx, r14; call [rbx]; add rbx, 8; jmp next
+    link_synth_code(&s, [Int]{0x44, 0x89, 0xe7, 0x4c, 0x89, 0xee, 0x4c, 0x89, 0xf2, 0xff, 0x13, 0x48, 0x83, 0xc3, 0x08, 0xeb, 0xe3})
+    // done: mov edi, r12d; mov rsi, r13; mov rdx, r14; call main
+    link_synth_code(&s, [Int]{0x44, 0x89, 0xe7, 0x4c, 0x89, 0xee, 0x4c, 0x89, 0xf2, 0xe8})
+    link_synth_rel32(&s, "main", LINK_R_PLT32)
+    // mov r12d, eax; lea rbx, [rip + __fini_array_end]
+    link_synth_code(&s, [Int]{0x41, 0x89, 0xc4, 0x48, 0x8d, 0x1d})
+    link_synth_rel32(&s, "__fini_array_end", LINK_R_PC32)
+    // back: lea rax, [rip + __fini_array_start]; cmp rbx, rax; jbe exit
+    link_synth_code(&s, [Int]{0x48, 0x8d, 0x05})
+    link_synth_rel32(&s, "__fini_array_start", LINK_R_PC32)
+    link_synth_code(&s, [Int]{0x48, 0x39, 0xc3, 0x76, 0x08})
+    // sub rbx, 8; call [rbx]; jmp back
+    link_synth_code(&s, [Int]{0x48, 0x83, 0xeb, 0x08, 0xff, 0x13, 0xeb, 0xec})
+    // exit: mov edi, r12d; mov eax, 231 (exit_group); syscall; hlt
+    link_synth_code(&s, [Int]{0x44, 0x89, 0xe7, 0xb8, 0xe7, 0x00, 0x00, 0x00, 0x0f, 0x05, 0xf4})
+    s
+}
+
+LINK_OWNED_START :: "__jet_start"
+
+// The suffix a runtime pack gives the name of each section that runs without
+// libc's startup (Image/RuntimePack.jet link_pack_nolibc): the Jet runtime's
+// own code and data, and C's freestanding memory functions.
+LINK_NOLIBC_SUFFIX :: ".nolibc"
+
+// Whether a program the pack starts (`start_g` is the pack's `_start`) can
+// start at its own startup instead: whether everything that startup keeps
+// runs without libc's. Before link_collect, this walks what it will mark
+// from `main` (the startup's one section reference): the init and fini
+// arrays and retained sections, the CIEs' personality routines, each kept
+// section's FDEs, and each conditional array once its guard is kept. Every
+// section kept must be the program object's (the one defining `main`), a
+// pack section marked LINK_NOLIBC_SUFFIX, or an init or fini array. Thread
+// data (musl sets up TLS) and a preinit array fail.
+fn link_owned_fits(c: LinkContext, start_g: Int) -> Bool Never! {
+    main_g :: c.g_index.get("main") ?? return false
+    pack_g :: c.g_index.get("__jet_link_main") ?? return false
+    main_final :: link_final(c, main_g)
+    pack_final :: link_final(c, pack_g)
+    start_final :: link_final(c, start_g)
+    if c.g_kind[main_final] != LINK_G_FILE || c.g_kind[pack_final] != LINK_G_FILE || c.g_kind[start_final] != LINK_G_FILE -> return false
+    pack :: c.g_obj[pack_final]
+    if c.g_obj[start_final] != pack || c.g_section[main_final] < 0 -> return false
+    program :: c.g_obj[main_final]
+    // The first FDE describing each section and the next FDE describing the
+    // same one (link_collect's index; until then `ep_target` is a symbol).
+    fde_first := [Int:Int]{}
+    fde_next := [Int]{}
+    loop piece in 0..<c.ep_sec.len() {
+        &fde_next.push(-1)
+        if c.ep_target[piece] < 0 -> next
+        t :: link_target_section(c, c.ep_obj[piece], c.ep_target[piece])
+        if t < 0 -> next
+        fde_next[piece] = fde_first.get(t) ?? -1
+        fde_first[t] = piece
+    }
+    work := [Int]{c.g_section[main_final]}
+    loop root in c.roots -> &work.push(root)
+    loop piece in 0..<c.ep_sec.len() {
+        if c.ep_cie[piece] < 0 && c.ep_keep[piece] -> link_owned_piece(c, &work, piece, false)
+    }
+    // Each section reached: whether it reaches the image.
+    kept := [Int:Bool]{}
+    head := 0
+    loop {
+        loop head < work.len() {
+            s :: work[head]
+            head += 1
+            if s < 0 || kept.get(s) != None -> next
+            obj :: link_obj_of(c, s)
+            class :: link_class(c, obj, s)
+            &kept.add(s, class >= 0 && class != LINK_EH).drop("checked absent above")
+            if class < 0 || class == LINK_EH -> next
+            if class == LINK_TDATA || class == LINK_TBSS || class == LINK_PREINIT -> return false
+            b :: c.obj_buffer[obj]
+            if obj != program && class != LINK_INIT && class != LINK_FINI {
+                if obj != pack || !link_cstr(c.bufs, b, link_sec_name(c, obj, s)).ends_with(LINK_NOLIBC_SUFFIX) -> return false
+            }
+            r :: link_rela_of(c, obj, s)
+            if r >= 0 {
+                table :: link_sec_offset(c, obj, r)
+                loop k in 0..<link_sec_size(c, obj, r).div_euclid(24) {
+                    &work.push(link_target_section(c, obj, link_u32(c.bufs, b, table + 24 * k + 12)))
+                }
+            }
+            fde := fde_first.get(s) ?? -1
+            loop fde >= 0 {
+                link_owned_piece(c, &work, fde, true)
+                fde = fde_next[fde]
+            }
+        }
+        loop (index, root) in c.cond_roots {
+            if kept.get(root) == None && (kept.get(c.cond_guards[index]) ?? false) -> &work.push(root)
+        }
+        if head == work.len() -> return true
+    }
+}
+
+// Queue the targets of the relocations in `piece` (link_mark_piece's).
+fn link_owned_piece(c: LinkContext, work: &[Int], piece: Int, skip_pc: Bool) Never! {
+    obj :: c.ep_obj[piece]
+    b :: c.obj_buffer[obj]
+    table :: link_rel_table(c, obj, c.ep_sec[piece])
+    pc :: c.ep_start[piece] + 8
+    loop k in c.ep_first_reloc[piece]..<c.ep_first_reloc[piece] + c.ep_reloc_count[piece] {
+        at :: table + 24 * k
+        if skip_pc && link_u64(c.bufs, b, at) == pc -> next
+        &work.push(link_target_section(c, obj, link_u32(c.bufs, b, at + 12)))
+    }
 }
 
 // Write the shims for every strong reference still undefined: LFS64 names
@@ -2407,8 +2540,10 @@ fn link_resident_failure(errors: ^[String]) -> X64ResidentLinkResult Never! {
 // bufs[i] in reports. Every object is loaded; archive members are pulled
 // as resolution needs them. The image starts at `_start`: the linker's own
 // startup object when the archives provide musl's `__libc_start_main` and
-// no object defines `_start`, else the objects' `_start`. The ELF header is
-// loaded at `base` (LINK_BASE, or LINK_RUN_BASE for Image/Loader.jet).
+// no object defines `_start`, else the objects' `_start`; but a program a
+// runtime pack starts, none of whose kept code needs libc's startup, starts
+// at its own (link_owned_fits). The ELF header is loaded at `base`
+// (LINK_BASE, or LINK_RUN_BASE for Image/Loader.jet).
 fn x64_link_executable(names: [String], bufs: ^[[U8]], base: Int, threads: CompilerThreads) -> X64ExecutableResult Never! {
     linked := link_executable_image(names, ^bufs, base, None, threads)
     ^linked.image
@@ -2432,8 +2567,14 @@ fn link_executable_image(names: [String], bufs: ^[[U8]], base: Int, request: ^X6
             link_reference(&c, global, false)
         }
     }
-    entry_g :: link_resolve_program(&c)
-    entry_section :: link_entry_section(&c, entry_g)
+    entry_g := link_resolve_program(&c)
+    entry_section := link_entry_section(&c, entry_g)
+    // A program none of whose code needs libc's startup starts at its own.
+    if entry_section >= 0 && request == .None && link_owned_fits(c, entry_g) {
+        link_load_synth(&c, link_owned_startup(), "<linker owned startup>")
+        entry_g = link_intern(&c, LINK_OWNED_START)
+        entry_section = link_entry_section(&c, entry_g)
+    }
     if entry_section < 0 || (request != .None && c.errors.len() > 0) -> return link_resident_failure(^c.errors)
     entries := [Int]{entry_section}
     if request == .Val(wanted) {
