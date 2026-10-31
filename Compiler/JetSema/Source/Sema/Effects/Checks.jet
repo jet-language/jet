@@ -1756,9 +1756,14 @@ fn sema_effect_check_scope_bounds(marker: String, parsed: SemaEffectScopeBounds,
     valid
 }
 
+// Rust `Effects.rs` `e0747`: the callback's effects against its parameter's
+// invocation row.
 fn sema_effect_callback_diagnostic(over: [String], bounds: [String], span: Span) -> Diagnostic {
-    allowed :: if bounds.len() == 0 -> "the parameter is `fn(…) -[]>`, so the callback must be pure" else -> "the parameter allows only `-[{sema_effect_show(bounds)}]>` effects"
-    sema_error("E0747", span, "this callback uses the effect `{sema_effect_show(over)}`, which the parameter doesn't allow", "{allowed}; `{sema_effect_show(over)}` is outside that bound", "pass a callback within the declared effect bound, or widen the parameter's bound")
+    over_list :: sema_effect_show(over)
+    allowed :: if bounds.len() == 0 -> "the parameter is `fn(…) -[]>`, so the callback must be pure" else -> "the parameter is `fn(…) -[{sema_effect_show(bounds)}]>`, so the callback may use only those effects"
+    fix :: if bounds.len() == 0 -> "pass a `fn(…) -[]>` callback (or a lambda that uses no effects), or widen the parameter's bound" else -> "pass a callback within `-[{sema_effect_show(bounds)}]>`, or add `{over_list}` to the parameter's bound"
+    diagnostic :: sema_error("E0747", span, "this callback uses the effect `{over_list}`, which the parameter doesn't allow", "{allowed}; `{over_list}` is outside that bound", fix)
+    diagnostic_with_rights(^diagnostic, "invocation", [String]{}, [String]{}, None)
 }
 
 fn sema_effect_check_callback_bound(callback_effects: [String], bounds: [String], span: Span, diagnostics: &[Diagnostic]) -> Bool {
