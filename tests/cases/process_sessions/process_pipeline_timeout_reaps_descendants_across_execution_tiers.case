@@ -1,5 +1,11 @@
 # Port of tests/process_sessions.rs:314-371; source verbatim after original format expansion.
 # ORACLE-LITERAL; PENDING-SAME-HEAD; original cfg(unix); have_rustc guard erased.
+# Each tier's descendants are judged right after the step that spawned them, by
+# the fixture's `reaped` mode: gone, a zombie, exiting (PF_EXITING), or holding a
+# pending SIGKILL, within 2s. A killed descendant can linger in state D (wchan
+# rq_qos_wait, block-I/O throttling) for seconds under host I/O load before its
+# /proc entry goes; liveness alone would call that a survivor. `reaped` removes
+# each pid file, so the next step's descendants write fresh ones.
 requires: os:unix
 requires: tool:cat
 requires: tool:kill
@@ -11,19 +17,13 @@ write: run.jet process_pipeline_timeout_reaps_descendants_across_execution_tiers
 step default: jet run run.jet
 exit: 0
 stdout: = process_pipeline_timeout_reaps_descendants_across_execution_tiers.out
+step: {work}/session_fixture reaped {work}/aot.pid {work}/jit.pid {work}/interp.pid
+exit: 0
 step: jet build run.jet
 exit: 0
 step: built
 exit: == default
 stdout: == default
 stderr: == default
-# The original pid_file writer emits decimal PID bytes without a newline; trim is an identity here.
-capture: aot_pid = text file aot.pid
-repeat while process {cap:aot_pid} alive timeout 2s every 10ms fail "pipeline descendant {cap:aot_pid} survived timeout"
-end repeat
-capture: jit_pid = text file jit.pid
-repeat while process {cap:jit_pid} alive timeout 2s every 10ms fail "pipeline descendant {cap:jit_pid} survived timeout"
-end repeat
-capture: interp_pid = text file interp.pid
-repeat while process {cap:interp_pid} alive timeout 2s every 10ms fail "pipeline descendant {cap:interp_pid} survived timeout"
-end repeat
+step: {work}/session_fixture reaped {work}/aot.pid {work}/jit.pid {work}/interp.pid
+exit: 0
