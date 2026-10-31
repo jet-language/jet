@@ -282,6 +282,14 @@ if (( overall != 0 )); then echo "--- errors by source file ($scratch/check-erro
 if (( with_tests == 1 && overall == 0 )); then
   node "$bootstrap/assemble.mjs" run
   unit_record run
+  # Process claims that drive the jet CLI run the admitted compiler this check
+  # pins (JET_BIN, the analog of Cargo's CARGO_BIN_EXE_jet); a caller's own
+  # JET_BIN wins. Absolute, because claims spawn it from their own cwd.
+  if [[ -z "${JET_BIN:-}" ]]; then
+    JET_BIN="$(cd "$(dirname "$jet")" && pwd)/$(basename "$jet")"
+    export JET_BIN
+  fi
+  printf 'jet-bin: %s\njet-bin-sha256: %s\n' "$JET_BIN" "$(sha256sum "$JET_BIN" | cut -d' ' -f1)" >> "$receipt"
   # Process claims (Jetpack/CLI/Tests/JetpackBinSupport.jet) run the hosted
   # engine named by JETPACK_BIN, the analog of Cargo's CARGO_BIN_EXE_jetpack.
   # When the unit has such claims and the caller named no binary, the engine
