@@ -18,6 +18,13 @@ fn store_lifecycle_test_identity(id: String, incarnation: Int, witness: String) 
     RootIdentity.new(RootKind.Manual, RootID.new(id) ?? panic("root id"), ProducerID.new("test-producer") ?? panic("producer"), Incarnation.new(incarnation) ?? panic("incarnation"), RootWitness.new(witness) ?? panic("witness"))
 }
 
+// One writer preparing a replacement of `root` with its own verification
+// state, as a separate writer process would; true when the prepare succeeds.
+fn store_lifecycle_test_prepare_alone(roots: HangarRoots, witness: String, digest_seed: String) -[FS, Env, Time]> Bool Never! {
+    verification := StoreVerification.new()
+    store_lifecycle_prepare(&verification, roots, store_lifecycle_test_identity("root", 2, witness), [String]{store_lifecycle_test_digest(digest_seed)}, store_lifecycle_test_at(3)) == .Ok(_)
+}
+
 // A closure journal delta that knows `targets`, as the lifecycle inputs read.
 fn store_lifecycle_test_install_closure(roots: HangarRoots, targets: [String]) Never! {
     journal :: files.join(files.join(roots.hangar_dir(), "closure-db"), "journal")
@@ -412,8 +419,8 @@ fn store_lifecycle_test_hex64(index: Int) -> String Never! {
     fixture :: store_lifecycle_test_fixture()
     roots :: fixture.roots
     store_lifecycle_test_commit_root(&verification, roots, store_lifecycle_test_identity("root", 1, "w1"), store_lifecycle_test_digest("a"), 1, 2)
-    left :: task { store_lifecycle_prepare(&verification, roots, store_lifecycle_test_identity("root", 2, "w2-left"), [String]{store_lifecycle_test_digest("b")}, store_lifecycle_test_at(3)) == .Ok(_) }
-    right :: task { store_lifecycle_prepare(&verification, roots, store_lifecycle_test_identity("root", 2, "w2-right"), [String]{store_lifecycle_test_digest("c")}, store_lifecycle_test_at(3)) == .Ok(_) }
+    left :: task { store_lifecycle_test_prepare_alone(roots, "w2-left", "b") }
+    right :: task { store_lifecycle_test_prepare_alone(roots, "w2-right", "c") }
     left_ok :: left.join() ?? panic("left task")
     right_ok :: right.join() ?? panic("right task")
     assert(left_ok != right_ok)

@@ -39,9 +39,12 @@ fn store_broker_test_request(identity_name: String, reference: String, source: S
 
 // Serve exactly one connection on `socket` in a task; the task yields the
 // failure text, or "" on success.
-fn store_broker_test_serve_once(verification: &StoreVerification, socket: String, config: SharedStoreConfig) -> Task<String> Never! {
+fn store_broker_test_serve_once(socket: String, config: SharedStoreConfig) -> Task<String> Never! {
     listener :: net.unix_listen(socket) ?? panic("broker listen")
-    task { store_broker_test_serve_result(&verification, listener, config) }
+    task {
+        broker_verification := StoreVerification.new()
+        store_broker_test_serve_result(&broker_verification, listener, config)
+    }
 }
 
 fn store_broker_test_serve_result(verification: &StoreVerification, listener: UnixListener, config: SharedStoreConfig) -> String Never! {
@@ -221,7 +224,7 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
 
     // A wrong credential is refused before any byte is promoted.
     wrong_socket :: files.join(roots.root, "wrong.sock")
-    refusing :: store_broker_test_serve_once(&verification, wrong_socket, config)
+    refusing :: store_broker_test_serve_once(wrong_socket, config)
     client := net.unix_connect(wrong_socket) ?? panic("connect")
     request :: store_broker_encode_write_request(binding, "wrong-credential", archive) ?? panic("encode")
     net.unix_write_all_bytes(&client, request).drop("the broker may close first")
@@ -231,7 +234,7 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
     assert(store_find_by_reference(&verification, shared, entry.reference) == None)
 
     // The private owner promotes through the configured socket.
-    promoting :: store_broker_test_serve_once(&verification, config.socket, config)
+    promoting :: store_broker_test_serve_once(config.socket, config)
     assert(store_promote_shared_entry(&verification, local, entry) ?? panic("promote"))
     assert_eq(promoting.join() ?? panic("broker task"), "")
     published :: store_find_by_reference(&verification, shared, entry.reference) ?? panic("published")
@@ -241,7 +244,7 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
     // A reader imports the signed entry through its own configured socket.
     reader :: HangarRoots.at(files.join(roots.root, "r"))
     reader_config :: store_broker_test_configure(reader)
-    reading :: store_broker_test_serve_once(&verification, reader_config.socket, config)
+    reading :: store_broker_test_serve_once(reader_config.socket, config)
     expectation :: CacheExpectation{identity: entry.cache_identity, owned_output: None, allow_unsigned_local: true}
     reused :: if store_reuse_shared_entry(&verification, reader, entry.reference, expectation) == {
         .Val(found) -> found
@@ -256,7 +259,7 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
     corrupted := archive
     corrupted[0] = corrupted[0].bit_xor(U8{1})
     corrupt_socket :: files.join(roots.root, "corrupt.sock")
-    rejecting :: store_broker_test_serve_once(&verification, corrupt_socket, config)
+    rejecting :: store_broker_test_serve_once(corrupt_socket, config)
     corrupt_client := net.unix_connect(corrupt_socket) ?? panic("connect")
     corrupt_request :: store_broker_encode_write_request(binding, STORE_BROKER_PRIVATE_OWNER, corrupted) ?? panic("encode")
     net.unix_write_all_bytes(&corrupt_client, corrupt_request).drop("the broker may close first")
@@ -289,10 +292,11 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
     config :: store_broker_test_configure(local)
     listener :: net.unix_listen(config.socket) ?? panic("listen")
     broker :: task {
+        broker_verification := StoreVerification.new()
         first := net.unix_accept(listener) ?? panic("accept")
-        store_broker_serve_peer(&verification, ^first, config, store_broker_current_uid() ?? panic("current uid")) ?? panic("serve")
+        store_broker_serve_peer(&broker_verification, ^first, config, store_broker_current_uid() ?? panic("current uid")) ?? panic("serve")
         second := net.unix_accept(listener) ?? panic("accept")
-        store_broker_serve_peer(&verification, ^second, config, store_broker_current_uid() ?? panic("current uid")) ?? panic("serve")
+        store_broker_serve_peer(&broker_verification, ^second, config, store_broker_current_uid() ?? panic("current uid")) ?? panic("serve")
     }
     realized :: store_realize_verified(&verification, local, store_broker_test_ctx(local), RealizeRequest.Package{spec: spec, table: table}) ?? panic("realize")
     assert(realized.source_state() == SourceState.Built)
@@ -310,8 +314,9 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
     store_import_archive(&verification, HangarRoots.at(reader_config.shared_root), exported.bytes, Val(reader_config.trust_key), false) ?? panic("import")
     reader_listener :: net.unix_listen(reader_config.socket) ?? panic("listen")
     reader_broker :: task {
+        broker_verification := StoreVerification.new()
         stream := net.unix_accept(reader_listener) ?? panic("accept")
-        store_broker_serve_peer(&verification, ^stream, reader_config, store_broker_current_uid() ?? panic("current uid")) ?? panic("serve")
+        store_broker_serve_peer(&broker_verification, ^stream, reader_config, store_broker_current_uid() ?? panic("current uid")) ?? panic("serve")
     }
     reused :: store_realize_verified(&verification, reader, store_broker_test_ctx(reader), RealizeRequest.Package{spec: spec, table: table}) ?? panic("reuse")
     assert(reused.source_state() == SourceState.Cached)
@@ -326,7 +331,10 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
     server_config := denied_config
     server_config.socket = STORE_BROKER_ADMIN_SOCKET
     server_config.grants = files.join(roots.root, "missing-grants")
-    denied_broker :: task { store_broker_test_serve_result(&verification, denied_listener, server_config) }
+    denied_broker :: task {
+        broker_verification := StoreVerification.new()
+        store_broker_test_serve_result(&broker_verification, denied_listener, server_config)
+    }
     if store_realize_verified(&verification, denied, store_broker_test_ctx(denied), RealizeRequest.Package{spec: spec, table: table}) == {
         .Ok(_) -> panic("unauthorized broker read must not reach provider realization")
         .Err(error) -> assert(error == .Store(_))
