@@ -1,0 +1,25 @@
+# #6435: hostile JSON numbers must not build a huge Int. The fixture feeds
+# `{"n":1e999999999}` and a 10 MB digit string to json.parse + .int() and to
+# json.decode<Int>. Each one returns an error promptly on O0, O1 and O2. The
+# built binary runs under a 10 s, 256 MiB budget. A 1e999999999 Int would need
+# about 400 MB, and quadratic digit parsing of 10 MB would take far longer.
+fixture: json_huge_integer_is_rejected_without_building_it.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+limit: time=120
+exit: 0
+stdout: = json_huge_integer_is_rejected_without_building_it.out
+step: jet run --optimize=basic main.jet
+limit: time=120
+exit: 0
+stdout: = json_huge_integer_is_rejected_without_building_it.out
+step: jet run --optimize=full main.jet
+limit: time=120
+exit: 0
+stdout: = json_huge_integer_is_rejected_without_building_it.out
+step: jet build --optimize=full main.jet
+exit: 0
+step aot: built
+limit: time=10 resident=262144
+exit: 0
+stdout: = json_huge_integer_is_rejected_without_building_it.out
