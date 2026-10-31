@@ -1081,7 +1081,9 @@ fn sema_type_graph_bare_rename(graph: SemaRegistrationGraph, declared: String, o
 // `HTML` in `core.text.html`, …; boundary_head_carrier_module) when that
 // module is loaded, and no other owner; a parameterless Core alias outside the
 // bare-owner and root-type sets is skipped; an alias that re-exports a
-// namespaced type of the same leaf names that type's owner.
+// namespaced type of the same leaf names that type's owner. Core source never
+// imports user code, so a Core caller sees only Core owners: a user's
+// `struct Task` must not capture the bare `Task` that Core source spells.
 fn sema_type_graph_unique_type_owner(graph: SemaRegistrationGraph, caller_index: Int, name: String) -> SemaRegistrationResolvedSymbol? {
     rows :: sema_registration_nominal_rows_named(graph, name)
     if rows.len() == 0 -> return None
@@ -1098,6 +1100,7 @@ fn sema_type_graph_unique_type_owner(graph: SemaRegistrationGraph, caller_index:
     }
     if caller_index < 0 -> return None
     caller :: graph.modules[caller_index]
+    caller_is_core :: caller.module_identity.starts_with("<corelib>/")
     found := SemaRegistrationRowRef?{None}
     loop row in rows {
         owner := row
@@ -1118,6 +1121,7 @@ fn sema_type_graph_unique_type_owner(graph: SemaRegistrationGraph, caller_index:
             }
         }
         owner_row :: graph.modules[owner.module_index]
+        if caller_is_core && !owner_row.module_identity.starts_with("<corelib>/") -> next
         nominal :: owner_row.nominals[owner.row]
         if nominal.symbol.name != name -> next
         if nominal.kind != SemaRegistrationNominalKind.Struct
