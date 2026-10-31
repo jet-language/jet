@@ -2918,8 +2918,8 @@ is the checked ABI contract. C, C++, and assembly require an enclosing
 `#Unsafe("reason")` gate; assembly also requires `use core.mem`. The checker
 validates scalar signatures, named operands, the `; -> return` anchor, clobbers,
 and the selected target before lowering. Native code is linked by the native
-build path; the in-process evaluator reports the boundary by name rather than
-pretending that the raw body is portable evaluator code. See
+build path. Compile-time code links no foreign functions, so a raw body never
+runs at compile time. See
 [`Examples/features/lowlevel/inline_c.jet`](../../Examples/features/lowlevel/inline_c.jet)
 and [`Examples/features/lowlevel/inline_asm.jet`](../../Examples/features/lowlevel/inline_asm.jet).
 (D-FFI-INLINE1, D-FFI-RAWBODY1, D-FFI-ASM1, D-FFI-CPP1)

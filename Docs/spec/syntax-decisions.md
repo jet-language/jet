@@ -3776,9 +3776,9 @@ intrinsics remain behind `#Unsafe`.
 **D-EXEC2=A — JIT retired** *(ratified, card #4134; supersedes D-JIT1 /
 D-JIT2 / D-JITDEP1)*: the Cranelift JIT and its crate are removed. `jet run`
 and `jet dev` use the normal build path and execute the result; `jet dev`
-rebuilds and restarts on every save. The comptime evaluator stays for
-compile-time code only. Native in-memory O0 replaces the build-and-execute
-loop when it lands. **D-DEVMODE1 hard rule**: dev-runtime output must be
+rebuilds and restarts on every save. Native in-memory O0 has replaced the
+build-and-execute loop: the O0 image runs from memory, and compile-time code
+runs natively at O0 in a child of the compiler. **D-DEVMODE1 hard rule**: dev-runtime output must be
 byte-identical to the release build — divergence is a release blocker.
 
 **D-PLUGIN1 / D-DEP-WASM1**, naming amended by **D-ONCE-SANDBOX1=A**:

@@ -733,7 +733,7 @@ packages live under `Jetpack/`.
 | `JetWeb` | the web target: WebAssembly selection of the lowered slot IR into the runtime partition (at runtime packaging) and the program partition (`jet build --target web`), their manifest and the generated JS host | **never** (a selection finding is an ICE) |
 | `JetPlugin` | the plugin link step: translates each loaded Component into JetIR functions, canonical-ABI thunks and a descriptor | **never** (a failed translation becomes the load fault) |
 | `JetBackend` | native code generation, object and image writing | **never** (a failure is an ICE, R5) |
-| `JetEval` | in-process evaluator for comptime and the REPL | no user-facing surface by itself |
+| `JetEval` | compile-time execution: compiles comptime code to x86-64 at O0 and runs it in a child of the compiler | no user-facing surface by itself |
 | `JetRuntime` | the native runtime linked into every program | no |
 | `JetDriver` | front-end orchestration and compile outputs; depends on `Jetpack/PackageModel` (never Jetpack's engine) for manifest/lock/FFI preparation | front-end and interpreter-boundary diagnostics |
 | `JetBuildSession` | build sessions over the driver | no new diagnostics |
@@ -988,9 +988,9 @@ Core or String APIs or eliminate the copy made by String.bytes(). Declaring thes
 values and including their source files does not activate the host startup path
 or qualify a native supplier.
 
-Compilation keeps the `JetDriverCompileRequest` field `comptime_stop_points`
-false: compile-time code runs in the in-process evaluator, which refuses stop
-points, until native in-memory O0 lands.
+Compile-time code runs natively at O0 in a long-lived child of the compiler
+(JetEval `IR/Native.jet`): a runtime stop there returns to the compiler as a
+report carrying its text, and the child's host effects are refused.
 
 Build-plan queries move their invocation request into one query and return that
 same owner beside the query facts. Staged checks borrow it; only the small
@@ -1656,7 +1656,7 @@ not advertise speculative features.
 
 Compiler-speed evidence stays on the production compiler path. The differential
 gate sends the same checked example to optimized AOT and the default `jet run`
-(normal build path, D-EXEC2=A) and to the forced evaluator, then compares exit
+(O0 image run from memory, D-EXEC2=A) and to the forced evaluator, then compares exit
 status, stdout, and stderr; a refusal, newly broken AOT oracle, missing record,
 or divergent result remains visible as a failure. Named-job parity uses the
 same checked program-argument slice for `jet run`, `jet dev`, and interpreter
@@ -1675,7 +1675,7 @@ hiding cold-cache work. The checked-corpus report is schema version 4 and emits
 six rows for each active corpus row: `jit-clean`, `jit-no-change`,
 `jit-representative-edit`, `aot-release-clean`, `aot-release-no-change`, and
 `aot-release-representative-edit`. The `jit-*` rows measure `jet run`, which
-today runs the transitional build-and-execute path (D-EXEC2); their names
+compiles at O0 and runs the image from memory (D-EXEC2); their names
 predate the Cranelift retirement. The current corpus has five active rows, so
 the matrix has 30 rows. Each row uses one warmup and twenty measured samples.
 Its top-level receipt records verified semantic, diagnostic, effect, and tier

@@ -1,8 +1,8 @@
 # Compiler speed: one build path
 
-Jet has one compiler meaning and one native build path. Until native in-memory
-O0 lands, `jet run` and `jet dev` build through it and execute the result
-(D-EXEC2=A); the release profile produces an optimized artifact. This page is
+Jet has one compiler meaning and one native build path. `jet run` and `jet dev`
+compile at O0 through it and run the linked image from memory, without writing
+an executable (D-EXEC2=A); the release profile produces an optimized artifact. This page is
 for compiler contributors and users reasoning
 about build/run trade-offs. The executable perf schema and gate are in
 [`Tools/perf/ci-perf-check.sh`](../../../Tools/perf/ci-perf-check.sh), with

@@ -140,11 +140,11 @@ A violation stops the affected work until it is fixed at the root.
   (D-EXEC1). Code generators and hosts only marshal values and call the same
   runtime symbols; they never re-encode validation, defaults, policy, or error
   meaning. Never mark a feature as working on one level only, or defer it to a
-  later level. Until native in-memory O0 lands, `jet run` and `jet dev` use the
-  normal build path and execute the result (D-EXEC2=A); the in-process
-  evaluator serves compile-time code (and the Canvas dev host) and must keep
-  that same meaning; do not extend it. An owner-ratified exception must name
-  the tier it excludes.
+  later level. `jet run` and `jet dev` compile at O0 and run the linked image
+  from memory without writing an executable (D-EXEC2=A); compile-time code
+  also runs natively at O0, in a child of the compiler, with the same meaning.
+  No interpreter or second code generator serves any tier. An owner-ratified
+  exception must name the tier it excludes.
 
 ## Performance gate
 
