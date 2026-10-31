@@ -446,7 +446,7 @@ struct EditorHostTransport {
         if root != .Object(_) -> return Err(EditorHostError.InvalidRequest("JSON-RPC request must be an object"))
         if root.field("jsonrpc") != Val(Dyn.Text("2.0")) -> return Err(EditorHostError.InvalidRequest("JSON-RPC version must be `2.0`"))
         id :: root.field("id") ?? return Err(EditorHostError.InvalidRequest("JSON-RPC request requires an id"))
-        if id != .Null && id != .Text(_) && id != .Int(_) && id != .Float(_) -> return Err(EditorHostError.InvalidRequest("JSON-RPC id must be null, a string, or a number"))
+        if id != .Null && id != .Text(_) && id.decode<Float>() == .Err(_) -> return Err(EditorHostError.InvalidRequest("JSON-RPC id must be null, a string, or a number"))
         method_value :: root.field("method") ?? return Err(EditorHostError.InvalidRequest("JSON-RPC request requires a method"))
         method :: if method_value == .Text(value) -> value.copy() else -> return Err(EditorHostError.InvalidRequest("JSON-RPC request requires a method"))
         params :: root.field("params") ?? return Err(EditorHostError.InvalidRequest("JSON-RPC request requires an object params value"))
@@ -634,19 +634,17 @@ fn editor_optional_text(params: Dyn, key: String) -> String? EditorHostError! {
 }
 fn editor_field_u64(params: Dyn, key: String) -> U64 EditorHostError! {
     if params.field(key) == .Val(value) {
-        if value == {
-            .Int(number) -> if number >= 0 { if U64.from_int(number) == .Val(result) -> return Ok(result) }
-            .Float(number) -> {
-                if number.is_finite() && number >= (F64{0.0}) && number <= (F64{18446744073709551616.0}) {
-                    integer :: Int{number}
-                    if (F64{integer}) == number {
-                        // Rust's float-to-u64 cast saturates at the rounded MAX.
-                        if number >= (F64{18446744073709551616.0}) -> return Ok(U64{18446744073709551615})
-                        return Ok(U64.from_int(integer) ?? panic("checked editor unsigned integer"))
-                    }
+        if foundation_json_integer(value) == .Val(number) {
+            if number >= 0 { if U64.from_int(number) == .Val(result) -> return Ok(result) }
+        } else if value.decode<Float>() == .Ok(number) {
+            if number.is_finite() && number >= (F64{0.0}) && number <= (F64{18446744073709551616.0}) {
+                integer :: Int{number}
+                if (F64{integer}) == number {
+                    // Rust's float-to-u64 cast saturates at the rounded MAX.
+                    if number >= (F64{18446744073709551616.0}) -> return Ok(U64{18446744073709551615})
+                    return Ok(U64.from_int(integer) ?? panic("checked editor unsigned integer"))
                 }
             }
-            else -> {}
         }
     }
     Err(EditorHostError.InvalidRequest("editor request field `{key}` must be a nonnegative integer"))

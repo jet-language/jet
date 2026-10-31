@@ -169,18 +169,7 @@ fn compiler_service_text(value: Dyn, name: String) -> String? Never! {
 }
 
 fn compiler_service_int(value: Dyn, name: String) -> Int? Never! {
-    compiler_service_whole(compiler_service_get(value, name) ?? return None)
-}
-
-// A whole wire number. core.encoding.json `parse` keeps every number as its
-// exact `Dyn.Number` lexeme (#4602), so the range check is this typed read;
-// a fraction, an exponent or an out-of-range lexeme is refused.
-fn compiler_service_whole(value: Dyn) -> Int? Never! {
-    if value == {
-        .Int(number) -> Val(number)
-        .Number(lexeme) -> Val(Int.parse(lexeme) ?? return None)
-        else -> None
-    }
+    foundation_json_integer(compiler_service_get(value, name) ?? return None)
 }
 
 fn compiler_service_array(value: Dyn, name: String) -> [Dyn]? Never! {
@@ -278,9 +267,9 @@ fn compiler_service_value_from_wire(value: Dyn) -> CtValue? Never! {
     tagged :: compiler_service_tagged(value) ?? return None
     payload :: tagged.payload
     if tagged.label == {
-        "Int" -> Val(CtValue.Int{value: compiler_service_whole(payload) ?? return None})
-        "F32" -> Val(CtValue.Float{value: CtFloat.F32{value: service_math.from_bits(compiler_service_whole(payload) ?? return None)}})
-        "F64" -> Val(CtValue.Float{value: CtFloat.F64{value: service_math.from_bits(compiler_service_whole(payload) ?? return None)}})
+        "Int" -> Val(CtValue.Int{value: foundation_json_integer(payload) ?? return None})
+        "F32" -> Val(CtValue.Float{value: CtFloat.F32{value: service_math.from_bits(foundation_json_integer(payload) ?? return None)}})
+        "F64" -> Val(CtValue.Float{value: CtFloat.F64{value: service_math.from_bits(foundation_json_integer(payload) ?? return None)}})
         "Bool" -> {
             if payload == .Bool(flag) -> return Val(CtValue.Bool{value: flag})
             return None
@@ -301,7 +290,7 @@ fn compiler_service_value_from_wire(value: Dyn) -> CtValue? Never! {
             items :: compiler_service_rows(payload) ?? return None
             bytes := [U8]{}
             loop item in items {
-                number :: compiler_service_whole(item) ?? return None
+                number :: foundation_json_integer(item) ?? return None
                 if number < 0 || number > 255 -> return None
                 &bytes.push(U8{number})
             }
@@ -382,7 +371,7 @@ fn compiler_service_key_from_wire(value: Dyn) -> CtKey? Never! {
     tagged :: compiler_service_tagged(value) ?? return None
     payload :: tagged.payload
     if tagged.label == {
-        "Int" -> Val(CtKey.Int{value: compiler_service_whole(payload) ?? return None})
+        "Int" -> Val(CtKey.Int{value: foundation_json_integer(payload) ?? return None})
         "BigInt" -> {
             if payload == .Text(text) -> return Val(CtKey.BigInt{decimal: text})
             return None

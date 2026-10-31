@@ -7,6 +7,7 @@ use core.time as perf_time
 use core.encoding.json as perf_json
 use core.text as perf_text
 use core.encoding.[Dyn]
+use jet_foundation.[foundation_json_integer]
 
 struct JetCLIPerfRuntimeWindow { elapsed_ns: U64, cpu_ns: U64?, exit: Bool }
 struct JetCLIPerfLive {
@@ -46,7 +47,7 @@ fn jet_cli_perf_text(value: Dyn) -> String JetCLIReadError! {
     Err(jet_cli_read_error("observation field must be text"))
 }
 fn jet_cli_perf_uint(value: Dyn) -> U64 JetCLIReadError! {
-    if value == .Int(number) { return Ok(U64.from_int(number) ?? return Err(jet_cli_read_error("observation integer must be nonnegative"))) }
+    if foundation_json_integer(value) == .Val(number) { return Ok(U64.from_int(number) ?? return Err(jet_cli_read_error("observation integer must be nonnegative"))) }
     Err(jet_cli_read_error("observation field must be an unsigned integer"))
 }
 fn jet_cli_perf_bool(value: Dyn) -> Bool JetCLIReadError! {

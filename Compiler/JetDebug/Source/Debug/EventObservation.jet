@@ -5,7 +5,7 @@
 // consumer validators (EventObservation.rs:31-114); the runtime producer
 // (Observe/jet_event_observe) has no Jet owner yet, so no real feed runs here.
 use core.encoding.[Dyn]
-use jet_foundation.[foundation_parse_protocol_json]
+use jet_foundation.[foundation_parse_protocol_json, foundation_json_integer]
 
 // Rust MAX_SNAPSHOT_BYTES / MAX_EVENTS.
 DEBUG_EVENT_MAX_SNAPSHOT_BYTES :: 1048576
@@ -124,10 +124,10 @@ fn debug_event_allowed(key: String, value: String) -> Bool Never! {
     }
 }
 
-// Rust `integer`: only a protocol Int (already i64-bounded by the parser).
+// Rust `integer`: a protocol integer.
 fn debug_event_integer(object: [String: Dyn], key: String) -> Int DebugEventObservationError! {
     if object.get(key) == .Val(value) {
-        if value == .Int(number) -> return Ok(number)
+        if foundation_json_integer(value) == .Val(number) -> return Ok(number)
     }
     Err(debug_event_error("runtime event observation has invalid `{key}`"))
 }

@@ -4,6 +4,7 @@ use core.encoding.json as cli_json
 use core.math as status_math
 use core.text as status_text
 use core.encoding.[Dyn]
+use jet_foundation.[foundation_json_integer]
 
 // Rust's `String` refusals from the status readers (StatusValue::parse and
 // the ledgers and manifests read through it).
@@ -38,7 +39,7 @@ fn jet_cli_status_from_tree(tree: Dyn) -> JetCLIStatusValue JetCLIReadError! {
             JetCLIStatusValue.Float{text: "{value}"}
         }
         .Number(lexeme) -> {
-            if Int.parse(lexeme) == .Ok(number) -> return Ok(jet_cli_status_int(number))
+            if foundation_json_integer(tree) == .Val(number) -> return Ok(jet_cli_status_int(number))
             // copy: `lexeme` is a payload view of read parameter `tree`; the status value owns its text.
             JetCLIStatusValue.Float{text: lexeme.copy()}
         }
