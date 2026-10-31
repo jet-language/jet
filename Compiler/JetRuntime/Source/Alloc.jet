@@ -1236,7 +1236,10 @@ fn alloc_check_requested() -> Bool {
         fd :: os_syscall_i64(I64{257}, I64{-100}, path, I64{524288}, I64{0}, I64{0}, I64{0})
         if (fd >= I64{0}) {
             // matched: bytes of the pattern matched since an entry start, or
-            // -1 while skipping to the next entry's NUL.
+            // -1 while skipping to the next entry's NUL. A skip tests eight
+            // bytes at a time for a zero byte ((w - 0x01..01) & ~w &
+            // 0x80..80 is nonzero exactly when w holds one), so only the
+            // heads of entries are compared a byte at a time.
             matched := I64{0}
             loop {
                 count :: os_syscall_i64(I64{0}, fd, buffer, I64{2016}, I64{0}, I64{0}, I64{0})
@@ -1244,8 +1247,24 @@ fn alloc_check_requested() -> Bool {
                 if (count <= I64{0}) { break }
                 at := I64{0}
                 loop at < count {
+                    if (matched < I64{0}) {
+                        loop wrapping(at + I64{8}) <= count {
+                            word :: os_load_i64(wrapping(buffer + at))
+                            if (wrapping(word - I64{72340172838076673}).bit_and(word.bit_not()).bit_and(I64{-9187201950435737472}) != I64{0}) { break }
+                            at = wrapping(at + I64{8})
+                        }
+                        loop at < count {
+                            if (os_load_u8(wrapping(buffer + at)) == I64{0}) { break }
+                            at = wrapping(at + I64{1})
+                        }
+                        if (at < count) {
+                            matched = I64{0}
+                            at = wrapping(at + I64{1})
+                        }
+                        next
+                    }
                     byte :: os_load_u8(wrapping(buffer + at))
-                    if (matched >= I64{0} && byte == os_load_u8(wrapping(pattern + matched))) {
+                    if (byte == os_load_u8(wrapping(pattern + matched))) {
                         matched = wrapping(matched + I64{1})
                         if (matched == I64{20}) {
                             found = true

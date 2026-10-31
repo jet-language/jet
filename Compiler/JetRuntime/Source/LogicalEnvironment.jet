@@ -1,6 +1,7 @@
 // EnvInit.rs:6-35 owns one OnceLock<RwLock<JetEnvEntries>>. Native main
-// captures startup before threads, then seeds this one logical cell. The
-// immutable startup byte index is not changed by logical writes.
+// captures startup before threads and creates this one logical cell; the
+// first reader or writer (each calls jet_rt_logical_env_seed) seeds it, once,
+// from the immutable startup byte index, which logical writes never change.
 // Shared's existing reader/writer protocol occupies bytes 0..79; once is @80.
 // The cell uses @56=head and @64=tail. Each owned entry is
 // [next, compact key bytes, key length, compact value bytes, value length].
@@ -71,10 +72,12 @@ fn logical_environment_seed() {
 
 // Called only by the single-threaded host argument registration, before its
 // published argc lets user code enter. No global-address intrinsic is needed.
+// Seeding waits for the first use: every reader and writer seeds first, and
+// the startup index it reads never changes, so a later seed holds the same
+// pairs, and a program that never reads the environment never copies it.
 fn logical_environment_startup() {
     logical_env_root = jet_rt_alloc(I64{88}, I64{8})
     thread_zero(logical_env_root, I64{88})
-    logical_environment_seed()
 }
 
 #Export(c) fn jet_rt_logical_env_seed() {
