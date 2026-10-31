@@ -175,7 +175,10 @@ struct DashboardLoader {
 
     fn spawn(verification: &StoreVerification) -[IO, FS, Env, Exec, Time, Time.Wait]> DashboardLoader Never! {
         (sender, receiver) :: channel<DashboardLoadResult>(capacity: 1)
-        task sender.send(cli_dashboard_load_snapshot(&verification))
+        // A borrowed owner cannot cross into the detached task; a copy of the
+        // owner shares its locked verification ledger.
+        ledger := verification.copy()
+        task ^ledger { sender.send(cli_dashboard_load_snapshot(&ledger)) }
         DashboardLoader{result: receiver, held: None}
     }
 
