@@ -47,6 +47,7 @@ use jet_foundation.[
     sha256_hex,
     type_name,
 ]
+use jet_parser.[parse_source]
 use jet_sema.[
     SemaNameReferenceFact,
     sema_compiler_index_view_map,
@@ -73,6 +74,8 @@ struct JetCLISemDB {
     slot_boundaries: [JetCLISemSlotBoundary]
     view_provenance: [String: ViewProvenanceMap]
     structural_ordinals: [String: Int]
+    // `module_path:start:end` of each walked free (non-method) call's name.
+    free_calls: [String: Bool]
 }
 
 // Build.rs `WalkCtx`. `display_prefix` is the code-module path the name
@@ -92,6 +95,9 @@ struct JetCLISemWalk {
     block_next: [Int]
     references: [SemaNameReferenceFact]
     module_paths: [String: String]
+    // Top-level function span start -> its written return type span, for a
+    // function whose checked row lost it (jet_cli_sem_written_returns).
+    written_returns: [Int: Span]
 }
 
 struct JetCLISemSlotSave {
@@ -111,6 +117,7 @@ fn jet_cli_sem_db() -> JetCLISemDB Never! {
         slot_boundaries: [JetCLISemSlotBoundary]{},
         view_provenance: [String: ViewProvenanceMap]{},
         structural_ordinals: [String: Int]{},
+        free_calls: [String: Bool]{},
     }
 }
 
@@ -560,7 +567,32 @@ fn jet_cli_sem_func_type_nodes(function: Func, db: &JetCLISemDB, ctx: &JetCLISem
     saved :: jet_cli_sem_slot_enter(&db, &ctx, "params", "list")
     loop parameter in function.params -> _ := jet_cli_sem_record_node(&db, &ctx, "type", "type", parameter.ty_span)
     jet_cli_sem_slot_leave(&ctx, saved)
-    if function.return_type_span == .Val(span) -> jet_cli_sem_type_node(&db, &ctx, "return_type", "scalar", span)
+    if function.return_type_span == .Val(span) {
+        jet_cli_sem_type_node(&db, &ctx, "return_type", "scalar", span)
+    } else if ctx.written_returns.get(function.span.start) == .Val(span) {
+        jet_cli_sem_type_node(&db, &ctx, "return_type", "scalar", span)
+    }
+}
+
+// Sema's failure projection (FailureUnion.jet sema_failure_project_returns)
+// replaces a top-level function's checked row with a written-span-less
+// return type. The written return type is still a source type node, so a
+// module with such a row reads its spans back from its own parse.
+fn jet_cli_sem_written_returns(doc_module: JetDriverDocModule) -> [Int: Span] Never! {
+    written := [Int: Span]{}
+    lost :: (loop item in doc_module.items {
+        if item == .Func(f) {
+            if f.return_type_span == None -> break true
+        }
+    } ?? false)
+    if !lost || doc_module.source == "" -> return written
+    parsed :: parse_source(doc_module.source.bytes())
+    loop item in parsed.program.items {
+        if item == .Func(f) {
+            if f.return_type_span == .Val(span) -> written[f.span.start] = span
+        }
+    }
+    written
 }
 
 // Build.rs `item_span` and `item_shape`.
@@ -1180,6 +1212,7 @@ fn jet_cli_sem_expr(expr: Expr, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: 
                 &db.arithmetic.push(JetCLISemArithmetic{operation: operation, policy: jet_cli_sem_arithmetic_mode(fact), module_path: ctx.module_path, operation_span: fact.operation_span, scope_span: fact.scope_span})
             }
             jet_cli_sem_record_call(&db, ctx, call.name, call.name_span)
+            db.free_calls[jet_cli_sem_site_key(ctx.module_path, call.name_span)] = true
             &db.refs.push(jet_cli_sem_scoped_ref(call.name, call.name_span, ctx))
             jet_cli_sem_args(call.args, &db, &ctx, modules)
         }
@@ -1802,6 +1835,67 @@ fn jet_cli_sem_align_reference_targets(db: &JetCLISemDB) {
     }
 }
 
+// Sema records a direct call's callee in the module's call facts, not in its
+// name references, so the walk leaves a called name without a target. The
+// call fact at the reference's span names the callee's checked key; its
+// function's one definition of that name in the callee's module is the target
+// (Build.rs resolves call names to their definitions the same way). Sema
+// records a fact only for a call it accepted, so a free call inside a body
+// that failed to check (a `fixture` root's unit) has none; its bare name then
+// resolves to its own module's definition of that name when that is the
+// module's only definition so named and it is a function.
+fn jet_cli_sem_call_targets(db: &JetCLISemDB, modules: [JetDriverDocModule]) {
+    loop index in 0..<db.refs.len() {
+        if db.refs[index].target != None -> next
+        target := JetCLISemAnchor?{None}
+        has_fact := false
+        loop doc_module in modules {
+            if doc_module.path != db.refs[index].module_path -> next
+            loop fact in doc_module.call_facts {
+                if fact.span.start != db.refs[index].span.start || fact.span.end != db.refs[index].span.end -> next
+                has_fact = true
+                callee :: fact.callee ?? next
+                target = jet_cli_sem_callee_anchor(db, modules, callee.key)
+                break
+            }
+            break
+        }
+        if !has_fact && db.free_calls.get(jet_cli_sem_site_key(db.refs[index].module_path, db.refs[index].span)) != None -> target = jet_cli_sem_free_call_anchor(db, db.refs[index].module_path, db.refs[index].name)
+        if target != None -> db.refs[index].target = target
+    }
+}
+
+fn jet_cli_sem_site_key(module_path: String, span: Span) -> String Never! {
+    "{module_path}:{span.start}:{span.end}"
+}
+
+fn jet_cli_sem_free_call_anchor(db: JetCLISemDB, module_path: String, name: String) -> JetCLISemAnchor? Never! {
+    found := JetCLISemAnchor?{None}
+    loop definition in db.defs {
+        if definition.module_path != module_path || definition.name != name -> next
+        if found != None || jet_cli_sem_definition_kind(definition.kind) != "function" || !definition.identity.starts_with("fn:") -> return None
+        found = Val(JetCLISemAnchor{module_path: definition.module_path.copy(), kind: "function", def_span: definition.def_span.copy(), semantic_identity: None})
+    }
+    found
+}
+
+fn jet_cli_sem_callee_anchor(db: JetCLISemDB, modules: [JetDriverDocModule], key: String) -> JetCLISemAnchor? Never! {
+    loop doc_module in modules {
+        loop function in doc_module.functions {
+            if function.key != key -> next
+            found := JetCLISemAnchor?{None}
+            loop definition in db.defs {
+                if definition.module_path != doc_module.path || definition.name != function.name -> next
+                if jet_cli_sem_definition_kind(definition.kind) != "function" || !definition.identity.starts_with("fn:") -> next
+                if found != None -> return None
+                found = Val(JetCLISemAnchor{module_path: definition.module_path.copy(), kind: "function", def_span: definition.def_span.copy(), semantic_identity: None})
+            }
+            return found
+        }
+    }
+    None
+}
+
 // Build.rs `definition_kind`.
 fn jet_cli_sem_definition_kind(kind: JetCLISemKind) -> String Never! {
     if kind == {
@@ -2217,6 +2311,7 @@ fn jet_cli_build_semindex(modules: [JetDriverDocModule], effect_projection: JetC
             block_next: loop index in 0..<block_spans.len() + 1 -> index,
             references: doc_module.name_references,
             module_paths: module_paths,
+            written_returns: jet_cli_sem_written_returns(doc_module),
         }
         loop item in doc_module.items -> jet_cli_sem_item(item, &db, &ctx, modules)
         jet_cli_sem_apply_inferred_rows(&db, doc_module, summaries)
@@ -2237,6 +2332,7 @@ fn jet_cli_build_semindex(modules: [JetDriverDocModule], effect_projection: JetC
             }
         }
     }
+    jet_cli_sem_call_targets(&db, modules)
     jet_cli_sem_align_reference_targets(&db)
     definitions :: jet_cli_sem_convert_defs(db, modules)
     definition_facts :: jet_cli_sem_definition_facts(definitions, db.nodes, modules)

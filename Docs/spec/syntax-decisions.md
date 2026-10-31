@@ -6969,6 +6969,18 @@ carried through the checked program into the launch receipt. A reason string, ar
 record is never a proof. With no raw-device provider in the Epoch 3 CPU
 policy, the built-in constructor fails closed; it must not fabricate a token.
 
+**D-COMPUTE-TENSOR-STORE1=A — tensors come only from `core.compute`**
+*(ratified 2026-10-31)*: user code builds a `Tensor` only through
+`core.compute` functions (`zeros`, `ones`, `full`, `from_list`, `vec`,
+`matrix`, `eye`, `reshape`, and the operations) and reads it only through
+them (`shape`, `to_list`, `device`, `placement`). The `Tensor` literal and
+every Tensor field are private to Core, like `ComputeDevice` and
+`ComputeStream`: a literal outside Core is rejected, and so is a field read
+or write. Core keeps the placement reason and the last transfer receipt in
+that private storage, so `placement` and `transfer_show` report what Core
+did and user code cannot forge them. A device the host cannot serve is
+requested through `on_device`, which returns the typed rejection.
+
 **D-SERVICE1=D — sema-known structured service tree**: typed builders promote
 ordinary functions into named workers/groups; sema validates topology, endpoint
 types, effects, cycles, and lifetimes. Each group is a supervisor-owned child
@@ -8666,6 +8678,7 @@ user-typeable syntax; a row here with no prose above it is still binding.
 | `D-COMPUTE-KERNEL1` | D | `c0r5ttg9` |
 | `D-COMPUTE-PLACE1` | D | `c0r5ttg9` |
 | `D-COMPUTE-RAWBOUNDARY1` | A | `c0r5ttg9` |
+| `D-COMPUTE-TENSOR-STORE1` | A | `c06lvend` |
 | `D-COMPUTE-TYPE1` | D | `c0r5ttg9` |
 | `D-COMPUTE-VJP1` | A | `c0fb7yl5` |
 | `D-COMPUTE1` | D | `c0r5ttg9` |

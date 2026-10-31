@@ -451,9 +451,12 @@ fn sema_time_world_method(receiver: Expr, receiver_value: TExpr, method: String,
 }
 
 // Rust `history_rng_method_return` / `builtin_method_arg_types`
-// (Collections.rs:2086, 3856): `next_u64()` and `below(bound: U64)` both
-// advance the stream, so the receiver needs edit access
-// (`builtin_method_mutates`, Collections.rs:2884).
+// (Collections.rs:2086, 3856): `next_u64()` and `below(bound: U64)`. HistoryRNG
+// is a runtime handle (D-TEST-STRATEGY1=A, Docs/spec/syntax-decisions.md:3892,
+// 3896): a draw advances the stream behind the handle and leaves the handle
+// value unchanged, so it is a read call and stays unmarked (D-CAP-RECEIVER1=D,
+// syntax-decisions.md:2885-2886; Main ruling R1 on #6410). Rust's
+// `builtin_method_mutates` (Collections.rs:2884) marked it Write; Jet departs.
 fn sema_time_history_rng_contract(method: String, argc: Int) -> SemaTimeHandleContract? {
     u64 :: Type.IntN{signed: false, bits: 64}
     return if {
@@ -466,7 +469,7 @@ fn sema_time_history_rng_contract(method: String, argc: Int) -> SemaTimeHandleCo
 fn sema_time_history_rng_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     contract :: sema_time_history_rng_contract(method, args.len()) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     values :: sema_time_check_values(args, contract.required, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_time_check_method_ownership(receiver, method, args, contract.required, AccessConvention.Write, span, &scopes, &state, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_time_check_method_ownership(receiver, method, args, contract.required, AccessConvention.Read, span, &scopes, &state, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     sema_time_finish_handle(receiver_value, contract.operation, values, contract.result, "", "HistoryRNG.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
 }
 

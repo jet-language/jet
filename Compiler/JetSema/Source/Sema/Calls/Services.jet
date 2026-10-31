@@ -265,8 +265,8 @@ fn sema_services_contract(member: String, parameters: [Type], result_type: Type,
     SemaServiceCoreMethodContract{member: member, parameters: parameters, result_type: result_type, receiver_access: receiver_access, argument_accesses: [AccessConvention]{}}
 }
 
-// Workflow tree methods read their run argument (`Int | ServiceWorkflow`): the
-// Core source takes `run_id: Int` by read, so a workflow handle stays usable.
+// Workflow tree methods read their run argument (`Int | ServiceWorkflow`), as
+// the Core source declares it, so a workflow handle stays usable.
 fn sema_services_workflow_run_contract(member: String, parameters: [Type], result_type: Type, receiver_access: AccessConvention) -> SemaServiceCoreMethodContract Never! {
     SemaServiceCoreMethodContract{member: member, parameters: parameters, result_type: result_type, receiver_access: receiver_access, argument_accesses: [AccessConvention]{AccessConvention.Read}}
 }
@@ -488,56 +488,19 @@ fn sema_check_delivery_state_method(method: String, receiver: Expr, receiver_val
     Val(sema_services_check_core_method("DeliveryState.show", contract, receiver, receiver_value, args, [String]{}, expected, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics))
 }
 
+// `ServiceRuntime.<method>` is the Core source call
+// `core.service.runtime_<method>(runtime, args…)`.
 fn sema_check_service_runtime_method(method: String, receiver: Expr, receiver_value: TExpr, args: [CallArg], expected: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
     if !sema_services_receiver_is(receiver_value.ty, "ServiceRuntime") -> return None
-    updated_args := args
-    operation := if {
-        method == "send" -> THandleOp.ServiceRuntimeSend
-        method == "retry" -> THandleOp.ServiceRuntimeRetry
-        method == "dead_letter" -> THandleOp.ServiceRuntimeDeadLetter
-        method == "retain" -> THandleOp.ServiceRuntimeRetain
-        method == "commit" -> THandleOp.ServiceRuntimeCommit
+    delivery :: Type.Named{name: "Delivery"}
+    contract :: if {
+        method == "send" -> sema_services_contract("runtime_send", [Type]{Type.Named{name: "ServiceEndpoint"}, Type.String, Type.String}, sema_services_result_type(delivery), AccessConvention.Read)
+        method == "commit" -> sema_services_contract("runtime_commit", [Type]{delivery}, sema_services_result_type(Type.Named{name: "Unit"}), AccessConvention.Read)
+        method == "retry" || method == "dead_letter" || method == "retain" -> sema_services_contract("runtime_{method}", [Type]{delivery}, sema_services_result_type(delivery), AccessConvention.Read)
         else -> { return None }
     }
-    types := if method == "send" -> [Type]{Type.Named{name: "ServiceEndpoint"}, Type.String, Type.String} else -> [Type]{Type.Named{name: "Delivery"}}
-    if updated_args.len() != types.len() {
-        sema_services_report_arity("ServiceRuntime.{method}", updated_args.len(), types.len(), span, &diagnostics)
-        sema_services_check_untyped_args(updated_args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        return Val(SemaMethodSpecialCheck{handled: true, value: None})
-    }
-    if method == "send" && !sema_services_bind_labels("ServiceRuntime.send", &updated_args, [String]{"", "", "key"}, span, &diagnostics) {
-        sema_services_check_untyped_args(updated_args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        return Val(SemaMethodSpecialCheck{handled: true, value: None})
-    }
-    values := [TExpr]{}
-    valid := true
-    index := 0
-    loop index < updated_args.len() {
-        value := sema_check_expression(updated_args[index].expr, Val(types[index]), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        if value == .Val(item) -> &values.push(item) else -> valid = false
-        index += 1
-    }
-    if !valid -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
-    accesses := if method == "send" -> [AccessConvention]{AccessConvention.Read, AccessConvention.Read, AccessConvention.Read} else -> [AccessConvention]{AccessConvention.Move}
-    params := sema_services_method_params(types, accesses)
-    sema_call_note_route_implicit_takes(params, updated_args, values, environment, program, scopes, &state, context)
-    ownership := sema_ownership_check_method_call(&state, "ServiceRuntime.{method}", receiver, AccessConvention.Read, params, &updated_args, scopes, span, &diagnostics)
-    if !ownership.accepted || !ownership.complete -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
-    result_type := if {
-        method == "send" -> sema_services_result_type(Type.Named{name: "Delivery"})
-        method == "commit" -> sema_services_result_type(Type.Named{name: "Unit"})
-        else -> sema_services_result_type(Type.Named{name: "Delivery"})
-    }
-    handle_args := [TExpr]{}
-    index = 0
-    loop index < values.len() {
-        access := accesses[index]
-        &handle_args.push(sema_services_apply_access(values[index], access))
-        index += 1
-    }
-    value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: handle_args}, span)
-    checked := if expected == .Val(target) -> sema_expr_expected(value, target, environment, program, &diagnostics) else -> Val(value)
-    Val(SemaMethodSpecialCheck{handled: true, value: checked})
+    labels :: if method == "send" -> [String]{"", "", "key"} else -> [String]{}
+    Val(sema_services_check_core_method("ServiceRuntime.{method}", contract, receiver, receiver_value, args, labels, expected, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics))
 }
 
 fn sema_call_try_service_core_call(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {

@@ -17,8 +17,10 @@ use jet_foundation.[
     TFailureCarrier,
     TGenericParam,
     TMethodRef,
+    TextEdit,
     Type,
     diagnostic_registry_row,
+    diagnostic_with_edit,
     type_name,
 ]
 
@@ -120,7 +122,32 @@ fn sema_call_facts(signature: Type, type_args: [Type], binding: SemaCallBinding)
 }
 
 fn sema_call_unknown_function(name: String, span: Span) -> Diagnostic {
-    sema_error("E0102", span, "nothing named `{name}` exists here", "only a registered callable can be invoked", "define `{name}` first, or call a name that exists")
+    sema_error("E0102", span, "nothing named `{name}` exists here", "only functions that have been defined (or built in, like `print` / `input`) can be called", "define it first (fn {name}() {{ ... }}), or call one that exists")
+}
+
+// The ambient names the readable prelude (Compiler/Prelude/core/prelude.jet)
+// opens; an unknown call may be a misspelling of one.
+SEMA_CALL_PRELUDE_NAMES :: [String]{"print", "input", "panic", "assert", "assert_eq", "debug", "keep", "min", "max", "clamp", "eprint", "Clock", "Instant", "Date", "Duration", "Path", "read_file", "write_file", "file_exists", "channel", "embed_file", "embed_bytes", "find", "fetch"}
+
+// E0102 for an unknown direct call, suggesting the one nearest visible
+// function or prelude name within two edits and offering the rename as an edit.
+fn sema_call_unknown_function_in(name: String, span: Span, scopes: SemaScopeTable, no_prelude: Bool) -> Diagnostic {
+    candidates := [String]{}
+    frame := scopes.current
+    loop frame >= 0 {
+        loop binding in scopes.bindings {
+            if binding.frame != frame || binding.symbol.kind != SymbolKind.Function -> next
+            if binding.symbol.name.starts_with("__") || binding.symbol.name.starts_with("@") -> next
+            &candidates.push(binding.symbol.name.copy())
+        }
+        frame = scopes.frames[frame].parent
+    }
+    if !no_prelude {
+        loop prelude in SEMA_CALL_PRELUDE_NAMES -> &candidates.push(prelude.copy())
+    }
+    near :: sema_suggest_field(name, candidates) ?? return sema_call_unknown_function(name, span)
+    diagnostic :: sema_error("E0102", span, "nothing named `{name}` exists here", "only functions that have been defined (or built in, like `print` / `input`) can be called", "did you mean `{near}`?")
+    diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: near})
 }
 
 fn sema_call_not_callable(name: String, ty: Type, span: Span) -> Diagnostic {
@@ -239,7 +266,7 @@ fn sema_call_never_type_args_valid(signature: Type, generic_params: [SemaInferen
 // further out.
 fn sema_call_resolve_direct(name: String, type_args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaCallDirectTarget? {
     nearest :: sema_scope_resolve_index(scopes, name) ?? {
-        &diagnostics.push(sema_call_unknown_function(name, span))
+        &diagnostics.push(sema_call_unknown_function_in(name, span, scopes, sema_module_no_prelude(environment, program)))
         return None
     }
     symbol :: sema_scope_binding_symbol(environment, scopes, nearest)

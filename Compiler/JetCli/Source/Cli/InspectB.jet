@@ -639,6 +639,39 @@ fn jet_cli_engine_dispatch(engine: String, verb: String, argv: [String]) -[Env, 
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: exit_code}
 }
 
+// `find_external`: a word that is no jet command names an external
+// `jet-<name>` on `PATH` (cargo/git style). The name must stay one safe path
+// component, so no separator in it can escape the `PATH` entry.
+fn jet_cli_find_external(name: String) -[FS, Env]> String? Never! {
+    if name == "" || name == "." || name == ".." -> return None
+    loop byte in name.bytes() {
+        value :: Int.from_u8(byte)
+        if value < 32 || value == 127 || value == 47 || value == 58 || value == 92 -> return None
+    }
+    path :: cli_sys.get("PATH") ?? return None
+    loop directory in path.split(":") {
+        candidate :: jet_cli_authority_path(if directory == "" -> "." else -> directory, "{JET_CLI_BINARY}-{name}")
+        if !cli_files.is_file(candidate) -> next
+        stat :: cli_files.stat(candidate) ?? next
+        if stat.is_symlink || (stat.mode.bit_and(73)) != 0 -> return Val(candidate)
+    }
+    None
+}
+
+// The external command runs with the words after its name on inherited
+// stdio; its exit code is this run's (a signal-ended one exits 0).
+fn jet_cli_external_run(bin: String, args: [String]) -[Exec, Time.Wait]> JetDriverVerbOutput Never! {
+    command := [String]{bin}
+    loop argument in args -> &command.push(argument)
+    receipt :: cli_process.cmd(command).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? return JetDriverVerbOutput{
+        stdout: "",
+        stderr: jet_cli_report("E2105", "couldn't run `{bin}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "correct the named problem, then run the command again", false),
+        exit_code: JET_DRIVER_EXIT_USER_ERROR,
+    }
+    exit_code :: if receipt.signal != None -> 0 else -> receipt.code
+    JetDriverVerbOutput{stdout: "", stderr: "", exit_code: exit_code}
+}
+
 // Rust `io::Error` Display text of a host I/O failure: the runtime records
 // it as the context's `cause` (CoreLib `IOContext`).
 fn jet_cli_io_error_text(failure: IOError) -> String Never! {
@@ -838,24 +871,21 @@ fn jet_cli_schema(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPla
 }
 
 // `jet inspect codemod <plan.json> --dry-run | apply <plan.json> | undo
-// <log.json>` (CmdCodemod.rs `run_codemod`): planning and replay need the
-// semantic index (jet-semindex), which is not ported.
+// <log.json>` (CmdCodemod.rs `run_codemod`): the host plans, applies, and
+// replays over jet_cli's semantic index (Codemod.jet).
 fn jet_cli_codemod(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     positional :: jet_cli_inspect_positionals(args)
     dry_run :: args.contains("--dry-run")
+    yes :: args.contains("--yes")
     if positional.len() == 2 && positional[0] == "dry-run" {
-        return jet_cli_inspect_b_error("E2105", "`jet inspect codemod dry-run` is not a command; use `jet inspect codemod <plan.json> --dry-run`", color, json, JET_DRIVER_EXIT_USER_ERROR)
+        return jet_cli_inspect_b_error("E2105", "`jet inspect codemod dry-run` is retired; use `jet inspect codemod <plan.json> --dry-run`", color, json, JET_DRIVER_EXIT_USER_ERROR)
     }
-    object := String?{None}
     if {
-        positional.len() == 1 && dry_run -> object = Val(positional[0])
-        positional.len() == 2 && positional[0] == "apply" && !dry_run -> object = Val(positional[1])
-        positional.len() == 2 && positional[0] == "undo" && !dry_run -> return jet_cli_not_ported("inspect codemod undo", color)
+        positional.len() == 1 && dry_run -> return JetCLIPlan.Codemod{action: "plan", path: positional[0], yes: yes, color: color, json: json}
+        positional.len() == 2 && positional[0] == "apply" && !dry_run -> return JetCLIPlan.Codemod{action: "apply", path: positional[1], yes: yes, color: color, json: json}
+        positional.len() == 2 && positional[0] == "undo" && !dry_run -> return JetCLIPlan.Codemod{action: "undo", path: positional[1], yes: yes, color: color, json: json}
         else -> return jet_cli_inspect_b_error("E2105", "`jet inspect codemod` needs `<plan.json> --dry-run`, `apply <plan.json>`, or `undo <log.json>`\n Fix: jet inspect codemod migration.codemod.json --dry-run", color, json, JET_DRIVER_EXIT_USER_ERROR)
     }
-    path :: jet_cli_inspect_absolutize(object ?? "")
-    _ :: cli_files.read(path) ?? return jet_cli_inspect_b_error("E2105", "could not read codemod `{path}`: {jet_cli_io_error_text(err)}", color, json, JET_DRIVER_EXIT_USER_ERROR)
-    jet_cli_not_ported("inspect codemod", color)
 }
 
 // `jet inspect audit [copies|memory|<entry.jet>] [--advisory-db <path>]`

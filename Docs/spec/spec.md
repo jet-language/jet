@@ -1933,9 +1933,11 @@ D-TLSSERVE1).
 `core.game.raylib` provides the typed window, drawing, input, sound, and texture
 operations. Its default path is headless; `JET_RAYLIB_DISPLAY=1` enables the
 native display bridge, and a missing raylib library uses the headless path.
-Drawing is rasterized in Jet on every path: `clear_background`, `draw_rectangle`
-and `draw_text` (a built-in 5x7 bitmap font scaled by whole pixels) paint an
-RGBA canvas the size of the window with src-over blending, and
+Drawing is rasterized in Jet on every path: `clear_background`, `draw_rectangle`,
+`draw_line`, `draw_circle`, `draw_triangle` and `draw_text` (a built-in 5x7
+bitmap font scaled by whole pixels) paint an RGBA canvas the size of the window
+with src-over blending. `load_texture_atlas` decodes the atlas's PNG texture in
+Jet, and `draw_sprite` blits a named region of it onto the canvas.
 `JET_RAYLIB_CAPTURE=PATH` writes each presented frame to PATH as a PAM image.
 `core.game` is scene-first: `game.Scene.new`, `scene.assets.image` and
 `sound`, `scene.input.bind`, `scene.component<T>()`, `scene.query<T...>()`,
@@ -4112,7 +4114,7 @@ Schema 2 is an ordered batch over typed Jet templates. `project` is relative to
 the plan object. Each root is one `.jet` file or directory below `Examples/` or
 `tests/ui/`; absolute, parent, and symlink escapes fail. Rules are
 `symbol_rename` or `ast_rewrite` over `expr`, `stmt`, `item`, or `type` nodes.
-`@value` captures one subtree and `@values...` captures a list. Matching uses
+`$value` captures one subtree and `$values...` captures a list. Matching uses
 compiler-owned AST boundaries and resolved definition anchors, not token
 spelling.
 
@@ -4127,7 +4129,7 @@ overlay containing rule N's output.
   "name": "ReportV2",
   "project": "..",
   "roots": [
-    {"path":"examples/report.jet","validate":"clean"},
+    {"path":"Examples/report.jet","validate":"clean"},
     {"path":"tests/ui/report_type.jet","validate":"fixture"}
   ],
   "rules": [

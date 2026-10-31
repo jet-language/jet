@@ -121,9 +121,10 @@ read-only data; each table's ID equals its index.
   before emitting the template bytes. Allocation treats asm as a call.
   Supported templates contain word-register push/pop, mov (register,
   immediate, qword memory), movzx byte loads, syscall, indirect register
-  calls, lock cmpxchg, xchg, pause, cld/std, and the string moves `rep
-  movsb`/`rep movsq` (they write rcx, rsi and rdi; a template that sets the
-  direction flag clears it again). Memory addresses admit a base register
+  calls, lock cmpxchg, xchg, pause, cld/std, the string moves `rep
+  movsb`/`rep movsq` (they write rcx, rsi and rdi) and the word store `rep
+  stosq` (it repeats rax and writes rcx and rdi); a template that sets the
+  direction flag clears it again. Memory addresses admit a base register
   or named input with an optional signed-32-bit `+ displacement`.
   Callee-saved/frame registers, unsupported syntax, unbalanced stacks,
   misaligned calls, missing/duplicate return anchors, and named input reads

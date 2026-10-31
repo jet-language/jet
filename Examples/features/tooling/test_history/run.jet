@@ -55,16 +55,18 @@ fn booking_operation(
     consumed_handles := [testing.HandleID]{}
     preconditions := [testing.HistoryPrecondition]{}
 
+    // D-FLOWTYPE1=A (Docs/spec/syntax-decisions.md:906-912): `x != None`
+    // refines a direct parameter to its payload in the true branch.
     if argument != None {
-        handle :: argument ?? testing.HandleID{value: 0}
+        handle :: argument
         &arguments.push(testing.HistoryValue.Handle(handle))
     }
     if creates != None {
-        handle :: creates ?? testing.HandleID{value: 0}
+        handle :: creates
         &created_handles.push(handle)
     }
     if consumes != None {
-        handle :: consumes ?? testing.HandleID{value: 0}
+        handle :: consumes
         &consumed_handles.push(handle)
     }
     if index > 0 {
@@ -81,12 +83,12 @@ fn booking_operation(
         )
     }
     if argument != None {
-        handle :: argument ?? testing.HandleID{value: 0}
+        handle :: argument
         if name != "reserve" {
             &preconditions.push(testing.HistoryPrecondition.HandleLive(handle))
         }
         if state != None {
-            expected :: state ?? ""
+            expected :: state
             &preconditions.push(
                 testing.HistoryPrecondition.HandleState{
                     handle: handle,
@@ -142,7 +144,9 @@ fn booking_model(commands: [BookingCommand]) -> Dyn {
             .Timeout(handle) -> states[booking_key(handle)] = "timed_out"
             .Retry(handle, creates) -> {
                 old_key :: booking_key(handle)
-                states.remove(old_key).drop("retry consumes the terminal handle")
+                // D-CAP-RECEIVER1=D (syntax-decisions.md:2878-2890): `remove`
+                // writes `states`, so the written place carries `&`.
+                &states.remove(old_key).drop("retry consumes the terminal handle")
                 states[booking_key(creates)] = "active"
             }
             else -> {}
@@ -163,7 +167,7 @@ fn booking_actual_bug(commands: [BookingCommand]) -> Dyn {
             .Retry(handle, creates) -> {
                 old_key :: booking_key(handle)
                 if states.get(old_key) != Val("timed_out") {
-                    states.remove(old_key).drop("retry consumes the terminal handle")
+                    &states.remove(old_key).drop("retry consumes the terminal handle")
                 }
                 states[booking_key(creates)] = "active"
             }
@@ -183,7 +187,7 @@ fn booking_actual_correct(commands: [BookingCommand]) -> Dyn {
             .Timeout(handle) -> states[booking_key(handle)] = "timed_out"
             .Retry(handle, creates) -> {
                 old_key :: booking_key(handle)
-                states.remove(old_key).drop("retry consumes the terminal handle")
+                &states.remove(old_key).drop("retry consumes the terminal handle")
                 states[booking_key(creates)] = "active"
             }
             else -> {}
@@ -370,7 +374,7 @@ fn booking_valid(candidate: testing.TypedHistoryCase<BookingCommand>) -> Bool {
                     return false
                 }
                 if operation.consumes[0] != handle -> return false
-                states.remove(handle).drop("retry consumes the terminal handle")
+                &states.remove(handle).drop("retry consumes the terminal handle")
                 known[replacement] = true
                 states[replacement] = "active"
                 created_count += 1
@@ -600,31 +604,33 @@ fn counter_actual(commands: [CounterCommand]) -> Dyn {
 
 fn observe(value: Dyn) -> Dyn { value.copy() }
 
+// S7 (syntax-decisions.md:1843-1844): a `::` binding of a fallible call
+// propagates its failure. A `.Ok`/`.Err` table on the direct call keeps the
+// carrier and handles the failure here (syntax-decisions.md:2004-2007;
+// D-OUTCOME-SHAPE1=A, syntax-decisions.md:8282-8284).
 fn run() {
     defect_rules :: booking_strategy()
-    defect :: testing.histories<BookingCommand>(
+    if testing.histories<BookingCommand>(
         seed: 41,
         cases: 32,
         strategy: defect_rules,
         model: booking_model,
         actual: booking_actual_bug,
         observe: observe,
-    )
-    if defect == {
+    ) == {
         .Ok(comparison) -> print("defect campaign: {testing.status(comparison)}")
         .Err(error) -> print("defect campaign: {error}")
     }
 
     valid_rules :: booking_concrete_strategy()
-    valid :: testing.histories<BookingCommand>(
+    if testing.histories<BookingCommand>(
         seed: 73,
         cases: 8,
         strategy: valid_rules,
         model: booking_model,
         actual: booking_actual_correct,
         observe: observe,
-    )
-    if valid == {
+    ) == {
         .Ok(comparison) -> {
             print("valid campaign: {testing.status(comparison)}")
             print(testing.assert_equal(comparison))
@@ -634,14 +640,13 @@ fn run() {
 
     // Omission deliberately keeps the scalar operation type on the compiler-
     // derived strategy path; it must not inherit BookingCommand's rules.
-    derived :: testing.histories<CounterCommand>(
+    if testing.histories<CounterCommand>(
         seed: 7,
         cases: 8,
         model: counter_model,
         actual: counter_actual,
         observe: observe,
-    )
-    if derived == {
+    ) == {
         .Ok(comparison) -> {
             print("derived CounterCommand campaign: {testing.status(comparison)}")
             print(testing.assert_equal(comparison))

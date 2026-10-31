@@ -3,10 +3,14 @@
 // typed carriers, no-input defaults, and sprite transcript shape. Drawing
 // paints the same RGBA canvas as the native runtime (RouteAGame.jet): Core
 // scan-converts each primitive into clipped runs and jet_raylib_fill_rect
-// copies or src-over blends one run.
+// copies or src-over blends one run; sprites blit from the texture Core
+// decoded and bound to the atlas.
 
 const JET_RAYLIB_CANVAS_SIDE_MAX = 16384;
 const jet_raylib_canvas = { width: 0, height: 0, pixels: new Uint8Array(0) };
+// close_window releases every texture, as the native runtime does; textures
+// bound before the latest close carry an older generation and draw nothing.
+let jet_raylib_texture_generation = 0;
 
 const jet_raylib_draw_calls = [];
 
@@ -72,6 +76,7 @@ function jet_raylib_close_window(_window) {
   jet_raylib_canvas.width = 0;
   jet_raylib_canvas.height = 0;
   jet_raylib_canvas.pixels = new Uint8Array(0);
+  jet_raylib_texture_generation += 1;
 }
 
 function jet_raylib_set_target_fps(_fps) {}
@@ -105,6 +110,25 @@ function jet_raylib_load_texture_atlas(path) {
   };
 }
 
+function jet_raylib_atlas_texture_path(atlas) {
+  return String(atlas?.texture_path ?? "");
+}
+
+// Binds Core's decoded RGBA8 pixels (`width` per row) to a copy of the atlas;
+// pixels that do not form whole rows within the canvas side cap bind nothing.
+function jet_raylib_atlas_bind_texture(atlas, pixels, width) {
+  const result = { ...atlas };
+  const bytes = Uint8Array.from(Array.from(pixels ?? [], Number));
+  const columns = Number(width);
+  if (!(columns > 0 && columns <= JET_RAYLIB_CANVAS_SIDE_MAX)) return result;
+  const rows = Math.floor(bytes.length / (columns * 4));
+  if (rows <= 0 || rows > JET_RAYLIB_CANVAS_SIDE_MAX || rows * columns * 4 !== bytes.length) return result;
+  result.texture = { width: columns, height: rows, pixels: bytes, generation: jet_raylib_texture_generation };
+  return result;
+}
+
+// Blits the first region named `region`; the texture, region and canvas
+// clip it and each pixel blends src-over like jet_raylib_fill_rect.
 function jet_raylib_draw_sprite(atlas, region, x, y) {
   const regions = Array.isArray(atlas?.regions) ? atlas.regions : [];
   const found = regions.find((item) => item && item.name === region);
@@ -119,6 +143,29 @@ function jet_raylib_draw_sprite(atlas, region, x, y) {
     width: Number(found.width),
     height: Number(found.height),
   });
+  const texture = atlas.texture;
+  const canvas = jet_raylib_canvas;
+  if (!texture || texture.generation !== jet_raylib_texture_generation || canvas.width === 0) return;
+  const sx = Number(found.x);
+  const sy = Number(found.y);
+  const left = Number(x);
+  const top = Number(y);
+  const firstColumn = Math.max(0, -sx, -left);
+  const endColumn = Math.min(Number(found.width), texture.width - sx, canvas.width - left);
+  const firstRow = Math.max(0, -sy, -top);
+  const endRow = Math.min(Number(found.height), texture.height - sy, canvas.height - top);
+  for (let row = firstRow; row < endRow; row += 1) {
+    for (let column = firstColumn; column < endColumn; column += 1) {
+      const from = ((sy + row) * texture.width + sx + column) * 4;
+      const at = ((top + row) * canvas.width + left + column) * 4;
+      const alpha = texture.pixels[from + 3];
+      if (alpha === 0) continue;
+      for (let channel = 0; channel < 4; channel += 1) {
+        const source = channel === 3 ? alpha : texture.pixels[from + channel];
+        canvas.pixels[at + channel] = alpha === 255 ? source : Math.floor((source * alpha + canvas.pixels[at + channel] * (255 - alpha) + 127) / 255);
+      }
+    }
+  }
 }
 
 function jet_raylib_take_draw_calls() {

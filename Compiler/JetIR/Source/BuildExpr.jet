@@ -1730,6 +1730,7 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
         }
         .OrFallback(value, fallback, ambient) -> return ir_or_fallback(&m, p, &b, expression_ty, value, fallback, ambient, span)
         .ConstRef(symbol) -> return ir_constant(&m, p, &b, expression_ty, symbol.key, span)
+        .GlobalShared(initializer, lifetime) -> return ir_shared_site(&m, p, &b, expression_ty, initializer, lifetime, span)
         .TraitConst(owner, trait_short, name) -> return ir_trait_constant(&m, p, &b, expression_ty, owner, trait_short, name, span)
         .CtLit(value) -> return ir_comptime(&m, p, &b, expression_ty, value, span)
         .ListLit(values) -> return ir_list_literal(&m, p, &b, expression_ty, values, span)

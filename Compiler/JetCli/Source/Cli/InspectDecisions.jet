@@ -1,10 +1,11 @@
 // `jet inspect decisions`: the IR optimizer's report for the checked program,
-// optimized at the level `jet build` compiles it (jet_cli_native_level: O1,
-// O2 under a release profile), plus the functions the IR builder could not
+// optimized at the level and with the inlining `jet build` compiles it with
+// (jet_cli_native_level: O1, O2 under a release profile; the build option
+// flags over the profile), plus the functions the IR builder could not
 // build, each counted loop sema's loop proof covers as it lowered
 // (ir_loop_proof_rows) and the invocation's selected canonical-pass gaps.
 use jet_driver.[JetDriverCompileMode, JetDriverLoweringInputs, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_checked_declarations, jet_driver_present_diagnostics]
-use jet_foundation.[BuildOptions, CanonicalPassBoundaryGap, CanonicalPassOptions, CompilerThreads, build_options_stock, build_options_value, canonical_pass_boundary_gaps]
+use jet_foundation.[BuildOptionChoice, BuildOptions, BuildOptionsResolved, CanonicalPassBoundaryGap, CanonicalPassOptions, CompilerThreads, build_option_flags, build_options_resolve, build_options_stock, build_options_value, canonical_pass_boundary_gaps]
 use jet_ir.[IROptOptions, IROptReport, ir_build_program, ir_checks_stock, ir_loop_proof_rows, ir_optimize_module_measured, ir_opt_inline_of, ir_opt_options_from, ir_opt_report_text]
 use core.sys as decisions_sys
 
@@ -15,6 +16,20 @@ struct JetCLIDecisions {
     unbuilt: [String]
     // ir_loop_proof_rows of the built program.
     loops: [String]
+}
+
+// The build options `jet inspect decisions` optimizes under, as `jet build`
+// resolves them: the stock options, or the stock `release` profile's when
+// `release`, with the build option flags of `options` (`--inline=off`,
+// `--optimize=full`) over them; or the refusal of a flag.
+fn jet_cli_decisions_options(options: [String], release: Bool) -> BuildOptionsResolved Never! {
+    written := [BuildOptionChoice]{}
+    if release -> &written.push(jet_cli_stock_release_choice())
+    if build_option_flags(options) == {
+        .Refused(code, what, fix) -> return BuildOptionsResolved.Refused{code: code, what: what, fix: fix}
+        .Resolved(given, _) -> loop flag in given.written -> &written.push(flag.copy())
+    }
+    build_options_resolve("build", if release -> "release" else -> "", written)
 }
 
 // The optimizer's options at `level` with `build`'s (the build options)
@@ -91,7 +106,8 @@ fn jet_cli_inspect_decisions_host(job: JetCLIInspectJob, source: String) -> JetD
             inputs := ^front.inputs ?? jet_cli_inspect_finish(job, jet_cli_ice("the checked compile of `{job.file}` has no lowering inputs"))
             if inputs.entry_key == None -> jet_cli_inspect_finish(job, jet_cli_build_failed("`{job.file}` has no `fn run` to optimize", "the IR optimizer reports the program reachable from its `fn run`", "add `fn run()` to the file, or check it with `jet check {job.file}`", job.color))
             threads :: CompilerThreads{cap: compiler_threads.cap, cores: compiler_threads.cores, memory_available: jet_cli_memory_available()}
-            build :: if job.release_build -> jet_cli_stock_release_options() else -> build_options_stock("build")
+            build := build_options_stock("build")
+            if job.build == .Val(given) -> build = given.copy()
             decisions :: jet_cli_decisions(^inputs, build, threads)
             report :: jet_cli_decisions_report(decisions, job.scope, job.file, job.profile, canonical_pass_boundary_gaps(options), job.json)
             jet_cli_inspect_finish(job, JetDriverVerbOutput{stdout: report, stderr: "", exit_code: JET_DRIVER_EXIT_OK})

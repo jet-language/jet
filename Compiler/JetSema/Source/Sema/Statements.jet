@@ -4180,6 +4180,7 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     // `name :: root.field` / `name :: root[i]` reads the
     // place through a view; an exact `^name` later would copy it (E0201).
     if !binding.mutable && !string_view && sema_stmt_binding_reads_projection(binding.init, scopes) -> sema_scope_mark_place_alias(&scopes, binding.name)
+    if !binding.mutable && binding.sigil_span == .Val(sigil) -> sema_scope_mark_binding_sigil(&scopes, binding.name, sigil)
     sema_ownership_note_frozen_binding(&state, symbol.id.key, binding.init, scopes)
     // A bound lambda that takes a capture runs once; one that writes a
     // capture changes it at each call.
@@ -4520,7 +4521,9 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
         return sema_stmt_check_module_storage_assignment(binding.symbol, name, name_span, op, op_span, expr, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     if !binding.mutable && !sema_stmt_binding_is_write_window(state, binding.symbol.id.key) {
-        &diagnostics.push(sema_error("E0111", name_span, "`{name}` was made with `::`, so it can't change", "only `:=` bindings and parameters marked with the write-access marker `&` can be changed", "declare it with `{name} := ...` instead"))
+        diagnostic := sema_error("E0111", name_span, "`{name}` was made with `::`, so it can't change", "only `:=` bindings and parameters marked with the write-access marker `&` can be changed", "declare it with `{name} := ...` instead")
+        if binding.binding_sigil == .Val(sigil) -> diagnostic = diagnostic_with_edit(diagnostic, TextEdit{span: sigil, new_text: ":="})
+        &diagnostics.push(diagnostic)
         return None
     }
     if binding.symbol.ty == None {

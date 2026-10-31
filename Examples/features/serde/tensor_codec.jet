@@ -40,11 +40,13 @@ fn elements(tree: Dyn, key: String) -> [Dyn] {
     }
 }
 
-// A JSON number without a fraction reads back as an Int.
+// JSON keeps a parsed number's spelling as `Dyn.Number`; CBOR carries typed
+// floats and integers.
 fn number(item: Dyn) -> Float {
     if item == {
         .Float(value) -> value
         .Int(value) -> Float.from_int(value)
+        .Number(_) -> item.float() ?? panic("element is not a float")
         else -> panic("element is not a number")
     }
 }

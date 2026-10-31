@@ -1,6 +1,7 @@
 use core.encoding.json as json
 
-// Keys, indices, universal selection, filters, and explicit object projection.
+// Keys, indices (a negative index counts from the end), universal selection,
+// filters, and explicit object projection.
 // Filter values and quoted strings are validated by the standard JSON codec.
 fn kit_steps_json_path(path: String) -> [String]? {
     if !path.starts_with("$") -> return None
@@ -59,7 +60,7 @@ fn kit_steps_json_path(path: String) -> [String]? {
                     if kit_steps_json_type(key) != "string" -> return None
                 } else {
                     number :: Int.parse(token) ?? return None
-                    if number < 0 || token != "{number}" -> return None
+                    if token != "{number}" -> return None
                 }
             }
             &parts.push(token)

@@ -73,33 +73,8 @@ fn core_value_fixed_signature(module_name: String, member: String) -> CoreTypedC
         }
     }
 
-    if module_name == "core.compute" {
-        tensor :: core_sig_named("Tensor")
-        compute_error :: core_sig_named("ComputeError")
-        compute_device :: core_sig_named("ComputeDevice")
-        if member == "__simd_lanes" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(Type.Int)))
-        }
-        if member == "transfer_show" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(tensor, read),
-            }, Val(Type.String)))
-        }
-        if member == "transfer" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(tensor, read), core_sig_positional(compute_device, read),
-            }, Val(core_sig_result(tensor, compute_error))))
-        }
-        if member == "serialize" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(tensor, read),
-            }, Val(core_sig_result(Type.String, compute_error))))
-        }
-        if member == "deserialize" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(Type.String, read),
-            }, Val(core_sig_result(tensor, compute_error))))
-        }
+    if module_name == "core.compute" && member == "__simd_lanes" {
+        return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(Type.Int)))
     }
 
     if module_name == "core.service" {

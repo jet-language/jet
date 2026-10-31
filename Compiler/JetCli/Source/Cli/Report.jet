@@ -2,8 +2,7 @@
 // (crates/jet-foundation/src/Diagnostics.rs `to_report_with_clears`,
 // `report_clear_counts`, `render_all_json`, and Report.rs `ReportPath`,
 // `ReportEnvelope::json`; the `build_error` member is Outcome.rs
-// `JetErrorReport::to_json`), plus the `jet.check/v1` success contract
-// (CmdInspect.rs `check_result_json`). Every `--json` surface that carries
+// `JetErrorReport::to_json`). Every `--json` surface that carries
 // diagnostics serializes them here; the status envelope around them is
 // Status.jet.
 use core.files as cli_files
@@ -393,20 +392,4 @@ fn jet_cli_report_status_json(diagnostic: Diagnostic) -> String Never! {
 // machine mode): one failed `cli` status line on stdout.
 fn jet_cli_fail_json(code: String, what: String, why: String, fix: String) -> String Never! {
     jet_cli_report_status_json(diagnostic_from_registry(code, None, what, why, fix))
-}
-
-// CmdInspect.rs `explicit_file_proof_rows`.
-JET_CLI_CHECK_EXPLICIT_FILE_ROWS :: [[String]]{
-    [String]{"entry resolution", "explicit-file checks resolve only the named source file", "E2389"},
-    [String]{"module graph", "explicit-file checks keep semantic scope and do not promise a project graph", "E2390"},
-    [String]{"Core closure", "explicit-file checks keep semantic scope and do not promise project Core closure", "E2391"},
-    [String]{"tier lowering", "explicit-file checks keep semantic scope and do not promise project tier lowering", "E2392"},
-}
-
-// CmdInspect.rs `check_result_json` for an explicit-file check: the
-// `jet.check/v1` contract a clean `jet check --json <file>` prints. `source`
-// is the entry as the user named it and `diagnostics` the checked count.
-fn jet_cli_check_result_json(source: String, profile: String, diagnostics: Int, elapsed_ms: Int) -> String Never! {
-    rows :: loop row in JET_CLI_CHECK_EXPLICIT_FILE_ROWS -> "{{\"output\":\"not-applicable\",\"name\":{jet_cli_json_control_quote(row[0])},\"status\":\"not applicable\",\"detail\":{jet_cli_json_control_quote(row[1])},\"diagnostic\":{jet_cli_json_control_quote(row[2])}}}"
-    "{{\"status\":\"passed\",\"contract\":\"jet.check/v1\",\"schema_version\":1,\"scope\":\"explicit-file\",\"elapsed_ms\":{elapsed_ms},\"provenance\":{{\"source\":{jet_cli_json_control_quote(source)},\"profile\":{jet_cli_json_control_quote(profile)},\"front_end\":\"Driver::check_file_with_effect_facts_profile\",\"programmable_build\":\"not-selected\",\"diagnostics\":{diagnostics}}},\"rows\":[{rows.join(",")}]}}"
 }

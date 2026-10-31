@@ -2403,12 +2403,15 @@ resource loading requires the corresponding file and GPU authority.
 | `raylib.begin_drawing(window)` | `Unit -[GPU]>` | Begin a frame for a window. |
 | `raylib.end_drawing()` | `Unit -[GPU]>` | Finish the active frame; with `JET_RAYLIB_CAPTURE` set, write the canvas to that path as a PAM image. |
 | `raylib.clear_background(color)` | `Unit -[GPU]>` | Set every canvas pixel to the color, alpha included. |
-| `raylib.close_window(window)` | `Unit -[GPU]>` | Close a window and release its display handle. |
+| `raylib.close_window(window)` | `Unit -[GPU]>` | Close a window and release its display handle, its canvas and every decoded texture; as in raylib, atlases loaded before the close draw nothing afterwards. |
 | `raylib.color(r, g, b, a)` | `RaylibColor` | Clamp each component to `0..255` and construct a color. |
 | `raylib.draw_rectangle(x, y, width, height, color)` | `Unit -[GPU]>` | Fill a rectangle, clipped to the canvas and blended src-over. |
+| `raylib.draw_line(start_x, start_y, end_x, end_y, color)` | `Unit -[GPU]>` | Draw a one-pixel line including both endpoints; along the longer axis each step draws one pixel at the line value rounded half up. |
+| `raylib.draw_circle(center_x, center_y, radius, color)` | `Unit -[GPU]>` | Fill every pixel within `radius` (an `Int`) of the center; a radius below 1 draws nothing. |
+| `raylib.draw_triangle(x0, y0, x1, y1, x2, y2, color)` | `Unit -[GPU]>` | Fill the pixels whose centers lie inside the triangle, in either winding; triangles sharing an edge never both cover a pixel. |
 | `raylib.draw_text(text, x, y, size, color)` | `Unit -[GPU]>` | Draw text in the built-in 5x7 font at whole-pixel scale `max(round(size / 10), 1)`; `\n` starts a new line. |
-| `raylib.draw_sprite(atlas, source, x, y)` | `Unit -[GPU]>` | Draw a sprite from a texture atlas. |
-| `raylib.load_texture_atlas(path)` | `RaylibTextureAtlas -[FS, GPU]>` | Load a texture atlas through the authority boundary. |
+| `raylib.draw_sprite(atlas, source, x, y)` | `Unit -[GPU]>` | Copy the atlas's first region named `source` to `(x, y)`, clipped to the texture and the canvas and blended src-over; an unknown region or an atlas without a decoded texture draws nothing. |
+| `raylib.load_texture_atlas(path)` | `RaylibTextureAtlas -[FS, GPU]>` | Load an atlas and decode its PNG texture (every color type, bit depth and Adam7; sixteen-bit samples keep their high byte). A missing or malformed PNG leaves the atlas without a texture. |
 | `raylib.load_sound(path)` | `RaylibSound -[FS, GPU]>` | Load a sound resource. |
 | `raylib.play_sound(sound)` | `Bool -[GPU]>` | Start playback and report whether it was accepted. |
 | `raylib.set_target_fps(fps)` | `Unit -[GPU]>` | Set a target frame rate, clamped to `1..240`. |
@@ -4367,13 +4370,22 @@ structured values, not an untyped supervisor log. The source is
 runtime model is also exercised by the service examples and tests.
 The tree is the single public topology boundary; workers, delivery, and restart policies remain typed rather than string-keyed (`D-SERVICE1=D`).
 
+The whole service runtime is Jet source: no native service runtime, handle or
+route remains. It reaches the host only through the Core-private `__host_*`
+leaves (wall clock, entropy, sleep, and file metadata, read, append, create,
+rename, sync, remove and mode operations). The process-wide endpoint registry,
+pending-delivery registry, durable-store gate and state sequence are Core
+Process Shared sites (`Docs/spec/stdlib-api-laws.md`, "Internal Core Shared
+publication"). Service operations keep their effect-free rows; only
+`state_store` asks for `FS.Read`.
+
 Restart/delivery policy constructors and runtime retention projection are Jet
 policy. `state_store` requires `FS.Read`: it inspects the target and lexical
 ancestors with metadata-only reads, without normalizing away `..`, refusing
-symbolic links and unsuitable file kinds while allowing absent paths. Generation/event/dead-letter getters
-read native storage metadata without reconstructing scheduler state.
-The private metadata carrier does not acquire a Windows identity handle;
-constructor validation therefore adds no identity-open failures.
+symbolic links and unsuitable file kinds while allowing absent paths.
+Generation/event/dead-letter getters read the tree's own fields. The metadata
+read does not acquire a Windows identity handle; constructor validation
+therefore adds no identity-open failures.
 
 `ServiceError` and `DeliveryReceipt` are ordinary Jet enum/record values.
 All ten error cases carry a String; their service display is the message alone.
@@ -4382,82 +4394,61 @@ their service display preserves the existing field order and labels.
 `TaskOutcome` retains Finished, Panicked(String), Cancelled and DeadlineBlown:
 display uses the raw panic reason, while Debug quotes and escapes that String.
 `core.rt.RealtimeReceipt` preserves the eight scalar provider facts in their
-original positional order.
+original positional order. `Delivery` shows exactly `Delivery(` + its ID + `)`.
 
 Restart/delivery/state-empty selection and dead-letter draining enforce their
-original validation order in Jet. Private single-field host leaves only read
-or write the existing service tree storage, under the caller's exclusive borrow.
-The signing key remains the exact 32 bytes decoded from the current `sa-`
-authority token; this port adds no key cache or security-policy change.
+original validation order. The signing key remains the exact 32 bytes decoded
+from the current `sa-` authority token, with no key cache.
 The Core-internal `__authority_signing_key` shares that one decoder with jobs;
-it is source policy, not a second host signer or an additional authority store.
+it is source policy, not a second signer or an additional authority store.
 Endpoint input and authority-status validation also live in that module.
-The reserved `__authority_validate` preserves native check order, including
-partition-before-generation for an exact registry entry, and reads one
-consistent snapshot of the existing endpoint registry for its fallback scans.
-The fresh-tree constructor supplies all initial fields in Jet, in their native
+The reserved `__authority_validate` preserves the original check order,
+including partition-before-generation for an exact registry entry, and reads
+one consistent snapshot of the endpoint registry for its fallback scans.
+The fresh-tree constructor supplies all initial fields in their original
 evaluation order: generation 1, OneForOne restart with a 5/60000ms budget,
 AtMostOnce delivery, no authority/snapshot/upgrade, and empty topology/state
-stores. Its two temporary host leaves only allocate the existing task runtime
-and materialize those supplied fields. Seven private type-name bindings expose
-the existing field types without introducing a new carrier; both compiler
-mappers bind the same names and retire at the Jet-runtime cutover.
-
-Retaining service transports receive copies of borrowed caller values
-(names, policies, messages, and endpoint identities). A `.copy()` result is
-fresh and passes without a `^` receiver mark; `^` moves locally owned
-mailboxes and queues instead, preserving their channel identity.
+stores.
 
 Worker registration, failure/restart selection, restart-window counting and
-mailbox-depth selection are Jet policy. Registration retains the checked
-top-level function item, validates before entropy/allocation/publication, and
-supplies every worker seed. Failure retains declaration-order group scope,
-strict `at > saturating_sub(now, per_ms)` windows, reverse authority rollback,
-escalation, durable-mailbox preservation and partition reassertion in native
-write order (`Services.rs:2917–3078`, restart helper `1983–2012`). The depth and
-count readers deliberately retain native's weaker name/tree match after
+mailbox-depth selection are Jet policy. Registration checks the top-level
+handler function item and keeps only its name (no handler task runs
+in-process), validates before entropy/allocation/publication, and supplies
+every worker seed. Failure retains declaration-order group scope, strict
+`at > saturating_sub(now, per_ms)` windows, reverse authority rollback,
+escalation, durable-mailbox preservation and partition reassertion in the
+original write order (`Services.rs:2917–3078`, restart helper `1983–2012`).
+The restart helper replaces the worker's mailbox, so a restarted worker's new
+channel is the one its registry entry publishes and endpoint sends reach. The
+depth and count readers deliberately retain the weaker name/tree match after
 endpoint validation; they do not substitute the stricter routing predicate.
-
-Worker mechanical transports **die at the Jet-runtime cutover**: one aggregate
-parts leaf supplies only absent worker/group supervision facts; setters write
-the existing fields, and partition status/failure share the original single
-mutex acquisition (`3070–3073`). Seven paired private aliases preserve exact
-native shapes: `__WorkerMailbox` (`JetServiceMailbox`, `758–762`, fields
-endpoint/capacity/channel), `__WorkerChannel` (the Arc channel at `761`),
-`__WorkerHandler` (`JetServiceWorkerHandler = fn()`, `821`), `__WorkerStatus`
-(`JetServiceSupervisorStatus`, `123–130`), `__WorkerTopologyKind`
-(`JetServiceTopologyKind`, `134–137`), `__WorkerTopologyState` and
-`__WorkerRestartReason` (the existing DevtoolsTopologyPanel enums at `62–70`
-and `282–288`). Only the existing checked worker parameter forwards a function
-pointer. Mailboxes move: native `Mailbox::clone` forks its channel and is not
-a valid source transfer. Alias, checked-slot and no-clone fixtures cover these
-seams; they introduce no state, policy cache or replacement runtime carrier.
+Mailboxes move rather than fork their channel.
 
 Snapshot/event-log selection, replay framing, topology/observation text, and
-workflow history/outcome selection are Jet policies. Durable reads retain the
-existing host storage/replay operation during the Rust-seed tier; field
-projections expose only existing facts and retire at the Jet-runtime cutover.
+workflow history/outcome selection are Jet policies.
 Group membership validation and chaos-failure ordering are Jet policies.
 Group reparenting retains its original per-worker order, and chaos increments
 its checked counter before selecting the first running worker.
 Event append and snapshot commit validate their adapter, authority, payload,
-and limits in Jet and frame UTF-8 byte lengths there. Snapshot persistence and
-the snapshot field assignment remain inside the same existing host mutex;
-event persistence retains the existing locked store append before the local
-event record is appended. No lock guard or second authority is exposed.
+and limits and frame UTF-8 byte lengths. Snapshot persistence and the
+snapshot field assignment happen under the durable-store gate; event
+persistence appends to the store before the local event record is appended.
+No lock guard or second authority is exposed.
 Directory resolution owns lookup, generation errors, expiration remapping,
-and running/draining checks in Jet; its proof check calls the existing
-authority operation without adding a registry or signing-key cache.
-Tree sends validate routing and payloads in Jet, preserve the native repeated
-authority checks, remap mailbox-capacity failures to the worker-specific text,
-and update accounting only after successful atomic authority sends.
+and running/draining checks; its proof check calls the authority operation
+without adding a registry or signing-key cache.
+Tree sends validate routing and payloads, preserve the repeated authority
+checks, remap mailbox-capacity failures to the worker-specific text, and
+update accounting only after successful atomic authority sends.
 Durable tree sends and receives own local deduplication, pending-message
-admission, receipt marking, and rollback orchestration in Jet. Each existing
-authority/storage operation retains its internal locks; a failed pending send
+admission, receipt marking, and rollback orchestration. A failed pending send
 requeues the remaining authority suffix before restoring the pre-send mailbox.
 Combined rollback failures preserve the original diagnostic and recovery text.
-Generation rollout and start/stop policies remain native pending a reviewed
-lock-lifetime seam; this source port does not claim those rows are complete.
+Generation rollout, start and stop are Jet policy; each registry change takes
+the registry guard, the one linearization point for drain, partition, handoff
+and endpoint send.
+No job or service invocation runs in-process, so no execution scope binds an
+endpoint and `core.jobs.queue()` reports `ServiceError.NotStarted`.
 
 | Signature | Result | Description |
 |---|---|---|

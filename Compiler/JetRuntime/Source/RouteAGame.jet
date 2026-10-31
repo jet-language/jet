@@ -3,8 +3,8 @@
 // libraylib (HandlesRaylib.rs:664-735), which a static musl executable cannot
 // do, so windows are never native, input is inert and sticks read 0. Drawing
 // is real: Core scan-converts every primitive into clipped runs and this file
-// owns the RGBA canvas they paint. Atlas metadata is the shared
-// Core/Raylib.rs:67-147 parse; no texture is ever loaded. Carriers are
+// owns the RGBA canvas they paint and the decoded textures sprites blit from.
+// Atlas metadata is the shared Core/Raylib.rs:67-147 parse. Carriers are
 // UiRaylibMetadata.jet's RaylibWindow32/RaylibTextureAtlas64/Region40.
 
 // Each leaf narrows its exact-Int words as the C adapter does before the call.
@@ -63,6 +63,8 @@ fn raylib_canvas_side(value: I64) -> I64 {
 // otherwise every channel, alpha included, blends src-over with rounding:
 // (src * a + dst * (255 - a) + 127) / 255, raylib's BLEND_ALPHA. The run is
 // clipped again here; the canvas never trusts its caller with its bounds.
+// A run that spans whole canvas rows is one contiguous span, so a clear is
+// one bulk fill.
 #Export(c) fn jet_raylib_fill_rect(x: I64, y: I64, width: I64, height: I64, rgba: I64, replace: Bool) {
     left :: jet_int_owned_to_i64(x)
     top :: jet_int_owned_to_i64(y)
@@ -78,30 +80,29 @@ fn raylib_canvas_side(value: I64) -> I64 {
     x1 :: if (left >= I64{0} && run_width > raylib_canvas_width - left) -> raylib_canvas_width else -> raylib_canvas_side_min(left + run_width, raylib_canvas_width)
     y1 :: if (top >= I64{0} && run_height > raylib_canvas_height - top) -> raylib_canvas_height else -> raylib_canvas_side_min(top + run_height, raylib_canvas_height)
     if (x1 <= x0 || y1 <= y0) -> return
+    whole_rows :: x0 == I64{0} && x1 == raylib_canvas_width
+    span := x1 - x0
+    rows := y1 - y0
+    if (whole_rows) {
+        span = rows * raylib_canvas_width
+        rows = I64{1}
+    }
+    stride :: raylib_canvas_width * I64{4}
+    at :: raylib_canvas_pixels + (y0 * raylib_canvas_width + x0) * I64{4}
+    stop :: at + rows * stride
+    if (replace || alpha == I64{255}) {
+        word :: raylib_canvas_word(color)
+        raylib_fill_rows(at, stop, stride, span, word.bit_or(word << I64{32}))
+        return
+    }
+    // The blend runs on 16-bit lanes: low lanes carry red and blue, high
+    // lanes green and alpha, each source term premultiplied with its +127.
     red :: (color >> I64{24}).bit_and(I64{255})
     green :: (color >> I64{16}).bit_and(I64{255})
     blue :: (color >> I64{8}).bit_and(I64{255})
-    opaque :: replace || alpha == I64{255}
-    row := y0
-    loop row < y1 {
-        at := raylib_canvas_pixels + (row * raylib_canvas_width + x0) * I64{4}
-        stop :: raylib_canvas_pixels + (row * raylib_canvas_width + x1) * I64{4}
-        loop at < stop {
-            if (opaque) {
-                rt_text_put(at, red)
-                rt_text_put(at + I64{1}, green)
-                rt_text_put(at + I64{2}, blue)
-                rt_text_put(at + I64{3}, alpha)
-            } else {
-                rt_text_put(at, raylib_blend(red, rt_text_byte(at), alpha))
-                rt_text_put(at + I64{1}, raylib_blend(green, rt_text_byte(at + I64{1}), alpha))
-                rt_text_put(at + I64{2}, raylib_blend(blue, rt_text_byte(at + I64{2}), alpha))
-                rt_text_put(at + I64{3}, raylib_blend(alpha, rt_text_byte(at + I64{3}), alpha))
-            }
-            at += I64{4}
-        }
-        row += I64{1}
-    }
+    low :: (red * alpha + I64{127}).bit_or((blue * alpha + I64{127}) << I64{16})
+    high :: (green * alpha + I64{127}).bit_or((alpha * alpha + I64{127}) << I64{16})
+    raylib_blend_rows(at, stop, stride, span, low.bit_or(low << I64{32}), high.bit_or(high << I64{32}), I64{255} - alpha)
 }
 
 fn raylib_canvas_side_min(a: I64, b: I64) -> I64 {
@@ -109,6 +110,102 @@ fn raylib_canvas_side_min(a: I64, b: I64) -> I64 {
     b
 }
 
+// A pixel's bytes R, G, B, A as one little-endian 32-bit word.
+fn raylib_canvas_word(color: I64) -> I64 {
+    (color >> I64{24}).bit_and(I64{255}).bit_or((color >> I64{8}).bit_and(I64{65280})).bit_or((color << I64{8}).bit_and(I64{16711680})).bit_or((color << I64{24}).bit_and(I64{4278190080}))
+}
+
+// Paint count pixels from each row start in [at, stop), stride bytes apart,
+// with one word, two pixels per store. An odd count ends with a store
+// overlapping the previous pair, which writes the same bytes again. A long
+// row is one string store, which outruns the store loop past its startup.
+RAYLIB_STRING_FILL :: I64{256}
+
+fn raylib_fill_rows(at: I64, stop: I64, stride: I64, count: I64, pair: I64) {
+    #Unsafe("each row start in [at, stop) lends count writable canvas pixels of four bytes each, inside the live canvas") {
+        row := at
+        if (count == I64{1}) {
+            loop row < stop {
+                os_store_u8(row, pair.bit_and(I64{255}))
+                os_store_u8(wrapping(row + I64{1}), (pair >> I64{8}).bit_and(I64{255}))
+                os_store_u8(wrapping(row + I64{2}), (pair >> I64{16}).bit_and(I64{255}))
+                os_store_u8(wrapping(row + I64{3}), (pair >> I64{24}).bit_and(I64{255}))
+                row = wrapping(row + stride)
+            }
+            return
+        }
+        tail :: count * I64{4} - I64{8}
+        if (count >= RAYLIB_STRING_FILL) {
+            words :: count >> I64{1}
+            loop row < stop {
+                os_fill_words_i64(row, pair, words)
+                os_store_i64(wrapping(row + tail), pair)
+                row = wrapping(row + stride)
+            }
+            return
+        }
+        loop row < stop {
+            last :: wrapping(row + tail)
+            block_last :: wrapping(last - I64{24})
+            cursor := row
+            loop cursor < block_last {
+                os_store_i64(cursor, pair)
+                os_store_i64(wrapping(cursor + I64{8}), pair)
+                os_store_i64(wrapping(cursor + I64{16}), pair)
+                os_store_i64(wrapping(cursor + I64{24}), pair)
+                cursor = wrapping(cursor + I64{32})
+            }
+            loop cursor < last {
+                os_store_i64(cursor, pair)
+                cursor = wrapping(cursor + I64{8})
+            }
+            os_store_i64(last, pair)
+            row = wrapping(row + stride)
+        }
+    }
+}
+
+RAYLIB_LANES :: I64{0x00FF00FF00FF00FF}
+RAYLIB_LANE_ONES :: I64{0x0001000100010001}
+
+// Blend count pixels in place from each row start in [at, stop), stride
+// bytes apart, two pixels per 64-bit word. Each 16-bit lane holds
+// x = s * a + 127 + d * (255 - a) <= 65152, and (x + 1 + (x >> 8)) >> 8 is
+// exactly x / 255 over that range, so no lane carries into the next.
+fn raylib_blend_rows(at: I64, stop: I64, stride: I64, count: I64, source_low: I64, source_high: I64, keep: I64) {
+    #Unsafe("each row start in [at, stop) lends count readable and writable canvas pixels of four bytes each, inside the live canvas") {
+        pairs :: (count - count.bit_and(I64{1})) * I64{4}
+        odd :: count.bit_and(I64{1}) != I64{0}
+        row := at
+        loop row < stop {
+            last :: wrapping(row + pairs)
+            cursor := row
+            loop cursor < last {
+                os_store_i64(cursor, raylib_blend_word(os_load_i64(cursor), source_low, source_high, keep))
+                cursor = wrapping(cursor + I64{8})
+            }
+            if (odd) {
+                word :: os_load_u8(cursor).bit_or(os_load_u8(wrapping(cursor + I64{1})) << I64{8}).bit_or(os_load_u8(wrapping(cursor + I64{2})) << I64{16}).bit_or(os_load_u8(wrapping(cursor + I64{3})) << I64{24})
+                blended :: raylib_blend_word(word, source_low, source_high, keep)
+                os_store_u8(cursor, blended.bit_and(I64{255}))
+                os_store_u8(wrapping(cursor + I64{1}), (blended >> I64{8}).bit_and(I64{255}))
+                os_store_u8(wrapping(cursor + I64{2}), (blended >> I64{16}).bit_and(I64{255}))
+                os_store_u8(wrapping(cursor + I64{3}), (blended >> I64{24}).bit_and(I64{255}))
+            }
+            row = wrapping(row + stride)
+        }
+    }
+}
+
+fn raylib_blend_word(word: I64, source_low: I64, source_high: I64, keep: I64) -> I64 {
+    low :: wrapping(wrapping(word.bit_and(RAYLIB_LANES) * keep) + source_low)
+    high :: wrapping(wrapping((word >> I64{8}).bit_and(RAYLIB_LANES) * keep) + source_high)
+    low_quotient :: (wrapping(wrapping(low + RAYLIB_LANE_ONES) + (low >> I64{8}).bit_and(RAYLIB_LANES)) >> I64{8}).bit_and(RAYLIB_LANES)
+    high_quotient :: (wrapping(wrapping(high + RAYLIB_LANE_ONES) + (high >> I64{8}).bit_and(RAYLIB_LANES)) >> I64{8}).bit_and(RAYLIB_LANES)
+    low_quotient.bit_or(high_quotient << I64{8})
+}
+
+// One channel src-over with rounding, for sprite pixels whose source varies.
 fn raylib_blend(source: I64, target: I64, alpha: I64) -> I64 {
     (source * alpha + target * (I64{255} - alpha) + I64{127}) /% I64{255}
 }
@@ -144,12 +241,23 @@ fn raylib_blend(source: I64, target: I64, alpha: I64) -> I64 {
 
 fn raylib_push_static(builder: I64, text: I64) { rt_text_append(builder, rt_text_data(text), rt_text_len(text)) }
 
-// CloseWindow releases the canvas; a later begin_drawing allocates afresh.
+// CloseWindow releases the canvas and every texture, as raylib's context
+// takes its GPU memory with it; a later begin_drawing allocates afresh.
 #Export(c) fn jet_raylib_close_window(_window: I64) {
     if (raylib_canvas_pixels != I64{0}) -> jet_rt_free(raylib_canvas_pixels, raylib_canvas_width * raylib_canvas_height * I64{4}, I64{1})
     raylib_canvas_pixels = I64{0}
     raylib_canvas_width = I64{0}
     raylib_canvas_height = I64{0}
+    at := I64{0}
+    loop at < raylib_texture_count {
+        entry :: raylib_textures + at * RAYLIB_TEXTURE_ENTRY_BYTES
+        jet_rt_free(ui_carrier_word(entry + RAYLIB_TEXTURE_PIXELS), ui_carrier_word(entry + RAYLIB_TEXTURE_WIDTH) * ui_carrier_word(entry + RAYLIB_TEXTURE_HEIGHT) * I64{4}, I64{1})
+        at += I64{1}
+    }
+    if (raylib_textures != I64{0}) -> jet_rt_free(raylib_textures, raylib_texture_capacity * RAYLIB_TEXTURE_ENTRY_BYTES, I64{8})
+    raylib_textures = I64{0}
+    raylib_texture_count = I64{0}
+    raylib_texture_capacity = I64{0}
 }
 #Export(c) fn jet_raylib_set_target_fps(fps: I64) { _ := raylib_words(fps, I64{0}, I64{0}, I64{0}) }
 #Export(c) fn jet_raylib_key_down(_name: I64) -> Bool { false }
@@ -162,9 +270,160 @@ fn raylib_push_static(builder: I64, text: I64) { rt_text_append(builder, rt_text
     Float{0.0}
 }
 
-// The sprite's draw-call record (Core/Raylib.rs:38) has no reader on any
-// tier and there is no native texture to draw.
-#Export(c) fn jet_raylib_draw_sprite(_atlas: I64, _region: I64, x: I64, y: I64) { _ := raylib_words(x, y, I64{0}, I64{0}) }
+// The software device's texture memory: one entry per bound texture, holding
+// its id, size and row-major RGBA8 pixels. An atlas names its texture by
+// raylib's Texture2D (id, width, height, mipmaps, format), so atlas clones
+// share one texture as raylib's do. Ids are never reused.
+RAYLIB_TEXTURE_ENTRY_BYTES :: I64{32}
+RAYLIB_TEXTURE_ID :: I64{0}
+RAYLIB_TEXTURE_WIDTH :: I64{8}
+RAYLIB_TEXTURE_HEIGHT :: I64{16}
+RAYLIB_TEXTURE_PIXELS :: I64{24}
+RAYLIB_TEXTURE_ID_MAX :: I64{2147483647}
+// raylib's PIXELFORMAT_UNCOMPRESSED_R8G8B8A8.
+RAYLIB_TEXTURE_FORMAT_RGBA8 :: I64{7}
+raylib_textures := I64{0}
+raylib_texture_count := I64{0}
+raylib_texture_capacity := I64{0}
+raylib_texture_last_id := I64{0}
+
+// The texture path the atlas resolved, or "" when it has none.
+#Export(c) fn jet_raylib_atlas_texture_path(atlas: I64) -> I64 {
+    texture :: ui_carrier_word(atlas + UI_RAYLIB_ATLAS_TEXTURE_PATH)
+    if (texture == I64{0}) -> return jet_rt_string_clone(rt_static_text(""))
+    jet_rt_string_clone(texture)
+}
+
+// Copies Core's decoded RGBA8 pixels (length bytes, `width` per row) into a
+// new texture and returns a clone of the atlas that names it. Pixels that do
+// not form whole rows within the canvas side cap bind nothing.
+#Export(c) fn jet_raylib_atlas_bind_texture(atlas: I64, data: I64, length: I64, width: I64) -> I64 {
+    columns :: jet_int_owned_to_i64(width)
+    result :: jet_rt_handle_clone_raylib_texture_atlas(atlas)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return result
+    if (columns <= I64{0} || columns > RAYLIB_CANVAS_SIDE_MAX || raylib_texture_last_id >= RAYLIB_TEXTURE_ID_MAX) -> return result
+    rows :: length /% (columns * I64{4})
+    if (rows <= I64{0} || rows > RAYLIB_CANVAS_SIDE_MAX || rows * columns * I64{4} != length) -> return result
+    if (raylib_texture_count == raylib_texture_capacity) {
+        capacity :: if (raylib_texture_capacity == I64{0}) -> I64{4} else -> raylib_texture_capacity * I64{2}
+        grown :: jet_rt_alloc(capacity * RAYLIB_TEXTURE_ENTRY_BYTES, I64{8})
+        if (raylib_textures != I64{0}) {
+            coll_copy(raylib_textures, grown, raylib_texture_count * RAYLIB_TEXTURE_ENTRY_BYTES)
+            jet_rt_free(raylib_textures, raylib_texture_capacity * RAYLIB_TEXTURE_ENTRY_BYTES, I64{8})
+        }
+        raylib_textures = grown
+        raylib_texture_capacity = capacity
+    }
+    pixels :: jet_rt_alloc(length, I64{1})
+    rt_text_bytes_copy(pixels, data, length)
+    raylib_texture_last_id += I64{1}
+    id :: raylib_texture_last_id
+    entry :: raylib_textures + raylib_texture_count * RAYLIB_TEXTURE_ENTRY_BYTES
+    ui_carrier_store(entry + RAYLIB_TEXTURE_ID, id)
+    ui_carrier_store(entry + RAYLIB_TEXTURE_WIDTH, columns)
+    ui_carrier_store(entry + RAYLIB_TEXTURE_HEIGHT, rows)
+    ui_carrier_store(entry + RAYLIB_TEXTURE_PIXELS, pixels)
+    raylib_texture_count += I64{1}
+    ui_carrier_store(result + UI_RAYLIB_ATLAS_TEXTURE_PRESENT, I64{1})
+    ui_carrier_store(result + UI_RAYLIB_ATLAS_TEXTURE, id.bit_or(columns << I64{32}))
+    ui_carrier_store(result + UI_RAYLIB_ATLAS_TEXTURE_SECOND, rows.bit_or(I64{1} << I64{32}))
+    ui_carrier_store(result + UI_RAYLIB_ATLAS_TEXTURE_LAST, RAYLIB_TEXTURE_FORMAT_RGBA8)
+    result
+}
+
+// The live texture entry with this id, or 0 once close_window released it.
+fn raylib_texture_find(id: I64) -> I64 {
+    at := I64{0}
+    loop at < raylib_texture_count {
+        entry :: raylib_textures + at * RAYLIB_TEXTURE_ENTRY_BYTES
+        if (ui_carrier_word(entry + RAYLIB_TEXTURE_ID) == id) -> return entry
+        at += I64{1}
+    }
+    I64{0}
+}
+
+// The first region record named `name`, or 0.
+fn raylib_region_find(regions: I64, name: I64) -> I64 {
+    length :: rt_text_len(name)
+    data :: ui_carrier_word(regions + DATA_SEQUENCE_DATA)
+    count :: ui_carrier_word(regions + DATA_SEQUENCE_LENGTH)
+    at := I64{0}
+    loop at < count {
+        region :: data + at * UI_RAYLIB_REGION_BYTES
+        label :: ui_carrier_word(region)
+        if (rt_text_len(label) == length && rt_text_equal_bytes(rt_text_data(label), rt_text_data(name), length)) -> return region
+        at += I64{1}
+    }
+    I64{0}
+}
+
+// a - b, saturated to the i64 range; the blit bounds below compare these
+// against small sizes, where saturation keeps every comparison exact.
+fn raylib_saturating_sub(a: I64, b: I64) -> I64 {
+    most :: I64{9223372036854775807}
+    least :: I64{0} - most - I64{1}
+    if (b < I64{0} && a > most + b) -> return most
+    if (b > I64{0} && a < least + b) -> return least
+    a - b
+}
+
+fn raylib_max3(a: I64, b: I64, c: I64) -> I64 {
+    ab :: if (a > b) -> a else -> b
+    if (ab > c) -> ab else -> c
+}
+
+fn raylib_min3(a: I64, b: I64, c: I64) -> I64 {
+    ab :: if (a < b) -> a else -> b
+    if (ab < c) -> ab else -> c
+}
+
+// Blits region `name` of the atlas's texture with its top-left corner at
+// (x, y). Offset k along a side is drawn when it lies in the region, maps
+// into the texture (start + k) and onto the canvas (x + k); each pixel blends
+// src-over exactly as jet_raylib_fill_rect does, so alpha 0 leaves the canvas
+// unchanged.
+#Export(c) fn jet_raylib_draw_sprite(atlas: I64, name: I64, x: I64, y: I64) {
+    left :: jet_int_owned_to_i64(x)
+    top :: jet_int_owned_to_i64(y)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    if (raylib_canvas_pixels == I64{0} || ui_carrier_bool(atlas + UI_RAYLIB_ATLAS_TEXTURE_PRESENT) == I64{0}) -> return
+    texture :: raylib_texture_find(ui_carrier_word(atlas + UI_RAYLIB_ATLAS_TEXTURE).bit_and(I64{4294967295}))
+    if (texture == I64{0}) -> return
+    region :: raylib_region_find(ui_carrier_word(atlas + UI_RAYLIB_ATLAS_REGIONS), name)
+    if (region == I64{0}) -> return
+    source_x :: ui_carrier_word(region + UI_RAYLIB_REGION_X)
+    source_y :: ui_carrier_word(region + UI_RAYLIB_REGION_X + I64{8})
+    source_width :: ui_carrier_word(region + UI_RAYLIB_REGION_X + I64{16})
+    source_height :: ui_carrier_word(region + UI_RAYLIB_REGION_X + I64{24})
+    texture_width :: ui_carrier_word(texture + RAYLIB_TEXTURE_WIDTH)
+    texture_height :: ui_carrier_word(texture + RAYLIB_TEXTURE_HEIGHT)
+    first_column :: raylib_max3(I64{0}, raylib_saturating_sub(I64{0}, source_x), raylib_saturating_sub(I64{0}, left))
+    end_column :: raylib_min3(source_width, raylib_saturating_sub(texture_width, source_x), raylib_saturating_sub(raylib_canvas_width, left))
+    first_row :: raylib_max3(I64{0}, raylib_saturating_sub(I64{0}, source_y), raylib_saturating_sub(I64{0}, top))
+    end_row :: raylib_min3(source_height, raylib_saturating_sub(texture_height, source_y), raylib_saturating_sub(raylib_canvas_height, top))
+    if (first_column >= end_column || first_row >= end_row) -> return
+    pixels :: ui_carrier_word(texture + RAYLIB_TEXTURE_PIXELS)
+    row := first_row
+    loop row < end_row {
+        from := pixels + ((source_y + row) * texture_width + source_x + first_column) * I64{4}
+        at := raylib_canvas_pixels + ((top + row) * raylib_canvas_width + left + first_column) * I64{4}
+        stop :: at + (end_column - first_column) * I64{4}
+        loop at < stop {
+            alpha :: rt_text_byte(from + I64{3})
+            if (alpha == I64{255}) {
+                coll_copy(from, at, I64{4})
+            } else if (alpha != I64{0}) {
+                rt_text_put(at, raylib_blend(rt_text_byte(from), rt_text_byte(at), alpha))
+                rt_text_put(at + I64{1}, raylib_blend(rt_text_byte(from + I64{1}), rt_text_byte(at + I64{1}), alpha))
+                rt_text_put(at + I64{2}, raylib_blend(rt_text_byte(from + I64{2}), rt_text_byte(at + I64{2}), alpha))
+                rt_text_put(at + I64{3}, raylib_blend(alpha, rt_text_byte(at + I64{3}), alpha))
+            }
+            from += I64{4}
+            at += I64{4}
+        }
+        row += I64{1}
+    }
+}
 
 // `str::parse::<i64>()` of data[start..end): optional sign, decimal digits.
 fn raylib_parse_i64(data: I64, start: I64, end: I64, out: I64) -> Bool {

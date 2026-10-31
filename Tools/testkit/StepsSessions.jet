@@ -312,7 +312,7 @@ fn kit_steps_session_action(step: KitStep, context: KitStepCtx, previous: KitSte
         if state.children[index].label != step.label || state.children[index].joined -> next
         pending := state.children[index]
         if step.action == "send" {
-            payload :: if step.literal_input -> step.argv[0] else -> files.read(files.join(context.snapshots, step.argv[0])) ?? return kit_steps_action_error(state, "send file: {err}")
+            payload :: if step.literal_input -> step.argv[0] else -> files.read(kit_steps_snapshot_path(context.snapshots, context.plan.fixture, step.argv[0])) ?? return kit_steps_action_error(state, "send file: {err}")
             if kit_steps_build_target_text(payload) -> return KitStepResult{state: state, verdict: kit_expect_verdict("REFUSED", "build-target")}
             expanded :: kit_steps_runtime_expand(payload, context, state) ?? return kit_steps_action_error(state, "send token unavailable")
             cr :: String.from_bytes([U8{13}]) ?? panic("CR")

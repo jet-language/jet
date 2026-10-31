@@ -12,11 +12,15 @@ package {
 // core.compute publishes the ranked compute vocabulary, and this source is
 // its CPU oracle (core-library.md `core.compute`). The registered `Tensor`
 // record is the one storage carrier: row-major `data` of `shape`, the
-// selected `device`, its `numeric_profile` and the `requested` device; no
-// second storage record exists. Every operation validates its inputs, builds
-// a fresh row-major tensor and reports a failure as a ComputeError. `Auto`
-// selects the CPU oracle; a tensor on any other device has no provider here
-// and is rejected with ComputeError.Device rather than computed on the CPU.
+// selected `device`, its `numeric_profile`, the `requested` device, the
+// placement `reason` ("" derives it from the placement) and the last
+// `transfer` receipt ("" when none); no second storage record exists. The
+// record is private to Core (core-library.md:4307-4309): user code builds
+// and reads tensors only through the functions here. Every operation
+// validates its inputs, builds a fresh row-major tensor and reports a
+// failure as a ComputeError. `Auto` selects the CPU oracle; a tensor on any
+// other device has no provider here and is rejected with
+// ComputeError.Device rather than computed on the CPU.
 
 use core as core
 use core.compute.[ComputeError, VJPRun]
@@ -39,7 +43,7 @@ fn from_list(values: [Float]) -> Tensor ComputeError! {
     }
     shape :: [Int]{values.len()}
     _ := storage_len(shape)
-    Ok(Tensor{shape: shape, data: values.copy(), device: "CPU", numeric_profile: PROFILE_F64, requested: "Auto"})
+    Ok(Tensor{shape: shape, data: values.copy(), device: "CPU", numeric_profile: PROFILE_F64, requested: "Auto", reason: "", transfer: ""})
 }
 
 // The Vec and Matrix aliases share the Tensor storage law (D-COMPUTE-TYPE1)
@@ -96,7 +100,7 @@ fn __window_copy(tensor: Tensor, range: Range, values: [Float]) -> Tensor Never!
         end :: if range.contains(range.end) -> range.end + 1 else -> range.end
         shape[0] = if slab == 0 -> end - range.start else -> values.len() /% slab
     }
-    Tensor{shape: shape, data: values.copy(), device: tensor.device.copy(), numeric_profile: tensor.numeric_profile.copy(), requested: tensor.requested.copy()}
+    Tensor{shape: shape, data: values.copy(), device: tensor.device.copy(), numeric_profile: tensor.numeric_profile.copy(), requested: tensor.requested.copy(), reason: tensor.reason.copy(), transfer: tensor.transfer.copy()}
 }
 
 // The element count of one first-axis slab: the product of the inner axes.
@@ -109,8 +113,9 @@ fn window_slab(shape: [Int]) -> Int Never! {
 fn device(tensor: Tensor) -> String Never! { tensor.device.copy() }
 
 // The placement receipt: the requested and selected device, the backend
-// that owns the storage, its numeric profile and abilities, and the policy
-// that selected it.
+// that owns the storage, its numeric profile and abilities, and the reason
+// it sits there: the reason a transfer or deserialize recorded, else the
+// policy that selected it.
 fn placement(tensor: Tensor) -> String Never! {
     selected :: tensor.device
     profile :: tensor.numeric_profile
@@ -125,7 +130,7 @@ fn placement(tensor: Tensor) -> String Never! {
     }
     cache :: if accelerator -> "runtime" else -> "none"
     ability :: if accelerator -> "{lower}.f32" else if profile == PROFILE_F32 -> "cpu-oracle.f32" else -> "cpu-oracle.f64"
-    reason :: if !accelerator && profile == PROFILE_F32 -> tile_receipt(simd_lanes()) else if tensor.requested == "Auto" -> "policy=auto; selected=cpu; ability={ability}" else -> "policy=explicit; selected={lower}; ability={ability}"
+    reason :: if tensor.reason != "" -> tensor.reason.copy() else if !accelerator && profile == PROFILE_F32 -> tile_receipt(simd_lanes()) else if tensor.requested == "Auto" -> "policy=auto; selected=cpu; ability={ability}" else -> "policy=explicit; selected={lower}; ability={ability}"
     "Placement(requested={tensor.requested}, selected={selected}, backend={backend}, version={version}, profile={profile}, cache={cache}, abilities={quoted(abilities(accelerator, profile))}, reason={reason})"
 }
 
@@ -292,7 +297,7 @@ fn matmul_f32_tile(a: Tensor, b: Tensor) -> Tensor ComputeError! {
         }
         row_tile += TILE
     }
-    Ok(Tensor{shape: out_shape.copy(), data: data, device: "CPU", numeric_profile: PROFILE_F32, requested: "CPU"})
+    Ok(Tensor{shape: out_shape.copy(), data: data, device: "CPU", numeric_profile: PROFILE_F32, requested: "CPU", reason: "", transfer: ""})
 }
 
 // The f32 dot product of `count` values of `left` from `l` and `right` from
@@ -380,11 +385,104 @@ fn select(target: ComputeDevice) -> String ComputeError! {
 }
 
 // `tensor` placed on `target`: the same values and profile, requested as
-// `target`.
+// `target`, with a fresh placement and no transfer receipt.
 fn on_device(tensor: Tensor, target: ComputeDevice) -> Tensor ComputeError! {
     _ := checked(tensor)
     selected :: select(target)
-    Ok(Tensor{shape: tensor.shape.copy(), data: tensor.data.copy(), device: selected, numeric_profile: tensor.numeric_profile.copy(), requested: target.name.copy()})
+    Ok(Tensor{shape: tensor.shape.copy(), data: tensor.data.copy(), device: selected, numeric_profile: tensor.numeric_profile.copy(), requested: target.name.copy(), reason: "", transfer: ""})
+}
+
+// `tensor` moved to `target` (core-library.md:4330-4331) through
+// on_device, carrying the move's receipt: a move between the same device is
+// a no-op of 0 bytes; any other move copies the values at the profile's
+// element width (4 bytes under F32, else 8) and names no fallback. The
+// receipt is also the moved tensor's placement reason.
+fn transfer(tensor: Tensor, target: ComputeDevice) -> Tensor ComputeError! {
+    from :: tensor.device.copy()
+    width :: if tensor.numeric_profile == PROFILE_F32 -> 4 else -> 8
+    moved := on_device(tensor, target)
+    same :: from == moved.device
+    bytes :: if same -> 0 else -> tensor.data.len() * width
+    kind :: if same -> "no-op; same backend and allocation" else -> "copy; selected backend"
+    fallback :: if same -> "none" else -> "not-applicable"
+    moved.reason = "transfer kind={kind} bytes={bytes} from={from} to={moved.device}"
+    moved.transfer = "Transfer(from={from}, to={moved.device}, bytes={bytes}, fallback={fallback})"
+    Ok(moved)
+}
+
+// The last transfer's receipt, else the placement receipt.
+fn transfer_show(tensor: Tensor) -> String Never! {
+    if tensor.transfer != "" -> return tensor.transfer.copy()
+    placement(tensor)
+}
+
+// The canonical text form (core-library.md:4349, 4355-4357):
+// `shape=<axes>;data=<values>;profile=<profile>;checksum=<hex>`. Axes and
+// values are comma-separated in their shortest round-tripping spelling, and
+// the checksum is the FNV-1a 64 hash of the text before `;checksum=`, as 16
+// lowercase hex digits.
+fn serialize(tensor: Tensor) -> String ComputeError! {
+    _ := checked(tensor)
+    axes :: loop dim in tensor.shape -> "{dim}"
+    values :: loop value in tensor.data -> "{value}"
+    body :: "shape={axes.join(",")};data={values.join(",")};profile={tensor.numeric_profile}"
+    Ok("{body};checksum={wire_checksum(body)}")
+}
+
+// A Tensor from its canonical text form. A payload with fewer than four
+// fields is ComputeError.Shape, as is a shape no storage holds; any other
+// departure from the form serialize writes (extra or misnamed fields, an
+// empty or non-canonical axis or value, a non-finite value, an unknown
+// profile, a value the F32 profile does not hold, a checksum that does not
+// match, or data that does not fill the shape) is ComputeError.Serialization.
+// The result is a CPU tensor whose placement reason records that it was
+// deserialized.
+fn deserialize(payload: String) -> Tensor ComputeError! {
+    fields :: payload.split(";").to_list()
+    if fields.len() < 4 -> return Err(ComputeError.Shape)
+    if fields.len() > 4 || !fields[0].starts_with("shape=") || !fields[1].starts_with("data=") || !fields[2].starts_with("profile=") || !fields[3].starts_with("checksum=") {
+        return Err(ComputeError.Serialization)
+    }
+    axes_text :: fields[0].removeprefix("shape=")
+    if axes_text == "" -> return Err(ComputeError.Serialization)
+    shape := [Int]{}
+    loop axis_text in axes_text.split(",") {
+        axis :: Int.parse(axis_text) ?? return Err(ComputeError.Serialization)
+        if "{axis}" != axis_text -> return Err(ComputeError.Serialization)
+        &shape.push(axis)
+    }
+    values_text :: fields[1].removeprefix("data=")
+    data := [Float]{}
+    if values_text != "" {
+        loop value_text in values_text.split(",") {
+            value :: Float.parse(value_text) ?? return Err(ComputeError.Serialization)
+            if !math.is_finite(value) || "{value}" != value_text -> return Err(ComputeError.Serialization)
+            &data.push(value)
+        }
+    }
+    profile :: fields[2].removeprefix("profile=")
+    if profile != PROFILE_F64 && profile != PROFILE_F32 -> return Err(ComputeError.Serialization)
+    if profile == PROFILE_F32 {
+        loop value in data {
+            if !f32_exact(value) -> return Err(ComputeError.Serialization)
+        }
+    }
+    if fields[3].removeprefix("checksum=") != wire_checksum("{fields[0]};{fields[1]};{fields[2]}") -> return Err(ComputeError.Serialization)
+    if storage_len(shape) != data.len() -> return Err(ComputeError.Serialization)
+    Ok(Tensor{shape: shape, data: data, device: "CPU", numeric_profile: profile.copy(), requested: "CPU", reason: "deserialized canonical Tensor", transfer: ""})
+}
+
+// The FNV-1a 64 hash of `body`'s bytes as 16 lowercase hex digits.
+fn wire_checksum(body: String) -> String Never! {
+    hash := U64{14695981039346656037}
+    loop byte in body.bytes() -> hash = (hash.bit_xor(U64.from_u8(byte))).wrapping_mul(U64{1099511628211})
+    digits :: "0123456789abcdef".bytes()
+    out := [U8]{}
+    loop index in 0..<16 {
+        nibble :: Int.from_u64((hash >> (60 - index * 4)).bit_and(U64{15}))
+        &out.push(digits[nibble])
+    }
+    String.from_bytes(out) ?? ""
 }
 
 // A stream orders work on its device. The CPU oracle runs each operation to
@@ -443,7 +541,7 @@ fn sparse_mv(sparse: SparseTensor, vector: Tensor) -> Tensor ComputeError! {
         }
         &out.push(acc)
     }
-    Ok(Tensor{shape: [Int]{sparse.rows}, data: out, device: "CPU", numeric_profile: PROFILE_F64, requested: "Auto"})
+    Ok(Tensor{shape: [Int]{sparse.rows}, data: out, device: "CPU", numeric_profile: PROFILE_F64, requested: "Auto", reason: "", transfer: ""})
 }
 
 // Linear algebra and the spectrum run on the CPU oracle in f64; eye, inv and
@@ -463,7 +561,7 @@ fn eye(n: Int) -> Tensor ComputeError! {
             &data.push(value)
         }
     }
-    Ok(Tensor{shape: shape, data: data, device: "CPU", numeric_profile: PROFILE_F64, requested: "CPU"})
+    Ok(Tensor{shape: shape, data: data, device: "CPU", numeric_profile: PROFILE_F64, requested: "CPU", reason: "", transfer: ""})
 }
 
 // Gaussian elimination with partial pivoting; each row swap flips the sign.
@@ -552,7 +650,7 @@ fn inv(tensor: Tensor) -> Tensor ComputeError! {
     loop i in 0..<n {
         loop j in 0..<n -> &data.push(a[i * width + n + j])
     }
-    Ok(Tensor{shape: tensor.shape.copy(), data: data, device: "CPU", numeric_profile: PROFILE_F64, requested: "CPU"})
+    Ok(Tensor{shape: tensor.shape.copy(), data: data, device: "CPU", numeric_profile: PROFILE_F64, requested: "CPU", reason: "", transfer: ""})
 }
 
 // Gauss-Jordan elimination of [a | b]; `b` is a length-n vector or an
@@ -611,7 +709,7 @@ fn solve(a: Tensor, b: Tensor) -> Tensor ComputeError! {
     loop row in 0..<n {
         loop col in 0..<rhs -> &data.push(m[row * width + n + col])
     }
-    Ok(Tensor{shape: b.shape.copy(), data: data, device: "CPU", numeric_profile: PROFILE_F64, requested: "CPU"})
+    Ok(Tensor{shape: b.shape.copy(), data: data, device: "CPU", numeric_profile: PROFILE_F64, requested: "CPU", reason: "", transfer: ""})
 }
 
 // The discrete Fourier transform of a rank-one tensor as interleaved
@@ -789,12 +887,13 @@ fn filled(shape: [Int], value: Float, requested: String) -> Tensor ComputeError!
     n :: storage_len(shape)
     data := [Float]{}
     loop _ in 0..<n -> &data.push(value)
-    Ok(Tensor{shape: shape.copy(), data: data, device: "CPU", numeric_profile: PROFILE_F64, requested: requested.copy()})
+    Ok(Tensor{shape: shape.copy(), data: data, device: "CPU", numeric_profile: PROFILE_F64, requested: requested.copy(), reason: "", transfer: ""})
 }
 
-// A result tensor of `shape` and `data` with `source`'s placement.
+// A result tensor of `shape` and `data` with `source`'s placement and no
+// transfer receipt.
 fn like(source: Tensor, shape: ^[Int], data: ^[Float]) -> Tensor Never! {
-    Tensor{shape: shape, data: data, device: source.device.copy(), numeric_profile: source.numeric_profile.copy(), requested: source.requested.copy()}
+    Tensor{shape: shape, data: data, device: source.device.copy(), numeric_profile: source.numeric_profile.copy(), requested: source.requested.copy(), reason: source.reason.copy(), transfer: ""}
 }
 
 // The row-major storage length of `shape`: at least one axis, no negative

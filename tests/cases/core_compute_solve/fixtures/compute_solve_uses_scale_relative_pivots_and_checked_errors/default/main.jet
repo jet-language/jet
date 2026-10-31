@@ -1,16 +1,17 @@
 
-use core.compute.[Tensor, ComputeError]
+use core.compute as compute
+use core.compute.[ComputeError]
 use core.compute.solve as solve
 
 fn run() {
-    scaled :: Tensor{shape: [Int]{1, 1}, data: [Float]{1e-20}, device: "CPU", numeric_profile: "", requested: ""}
-    rhs :: Tensor{shape: [Int]{1}, data: [Float]{2e-20}, device: "CPU", numeric_profile: "", requested: ""}
+    scaled :: compute.full([1, 1], 1e-20) ?? panic("scaled")
+    rhs :: compute.full([1], 2e-20) ?? panic("rhs")
     solution :: solve.dense(scaled, rhs) ?? panic("scaled dense solve")
-    print("dense:{solution.data}")
+    print("dense:{compute.to_list(solution)}")
     factors :: solve.lu(scaled) ?? panic("scaled LU")
     print("lu:{factors.pivots}")
 
-    singular :: Tensor{shape: [Int]{2, 2}, data: [Float]{1.0, 2.0, 2.0, 4.0}, device: "CPU", numeric_profile: "", requested: ""}
+    singular :: compute.reshape(compute.from_list([1.0, 2.0, 2.0, 4.0]) ?? panic("singular"), [2, 2]) ?? panic("singular shape")
     if solve.lu(singular) == {
         .Ok(_) -> print("singular:accepted")
         .Err(error) -> {
@@ -22,7 +23,7 @@ fn run() {
         }
     }
 
-    wrong_rhs :: Tensor{shape: [Int]{2}, data: [Float]{1.0, 2.0}, device: "CPU", numeric_profile: "", requested: ""}
+    wrong_rhs :: compute.from_list([1.0, 2.0]) ?? panic("wrong_rhs")
     if solve.dense(scaled, wrong_rhs) == {
         .Ok(_) -> print("shape:accepted")
         .Err(error) -> {
@@ -34,11 +35,23 @@ fn run() {
         }
     }
 
-    cuda :: Tensor{shape: [Int]{1, 1}, data: [Float]{1.0}, device: "CUDA", numeric_profile: "", requested: ""}
-    if solve.lu(cuda) == {
-        .Ok(_) -> print("device:accepted")
+    // A CUDA tensor exists only through the checked placement path; a host
+    // without the provider rejects the request itself.
+    if compute.on_device(compute.full([1, 1], 1.0) ?? panic("cuda value"), compute.device_cuda()) == {
+        .Ok(cuda) -> {
+            if solve.lu(cuda) == {
+                .Ok(_) -> print("device:accepted")
+                .Err(error) -> {
+                    if error == ComputeError.Unsupported {
+                        print("device:Unsupported")
+                    } else {
+                        print("device:wrong-error")
+                    }
+                }
+            }
+        }
         .Err(error) -> {
-            if error == ComputeError.Unsupported {
+            if error == ComputeError.Device {
                 print("device:Unsupported")
             } else {
                 print("device:wrong-error")

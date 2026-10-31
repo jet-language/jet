@@ -88,3 +88,20 @@ use core.files as files
     assert(kit_steps_parse_case("step: printf x\ncwd: ../outside\n").error != "")
     files.remove_all(root) ?? panic("remove environment scratch")
 }
+
+#Test("expected snapshots resolve beside the case first, then inside the staged fixture") {
+    root :: cases_test_root("relations-snapshots")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "tree/value"), "inside")
+    kit_exec_write(files.join(directory, "tree/inside.out"), "inside")
+    kit_exec_write(files.join(directory, "tree/shadowed.out"), "wrong")
+    kit_exec_write(files.join(directory, "shadowed.out"), "inside")
+    cases_test_source(root, "inside", "fixture: tree\nstep: jet -c 'cat value'\nstdout: = inside.out\n")
+    cases_test_source(root, "beside", "fixture: tree\nstep: jet -c 'cat value'\nstdout: = shadowed.out\n")
+    cases_test_source(root, "absent", "fixture: tree\nstep: jet -c 'cat value'\nstdout: = absent.out\n")
+    context :: cases_test_context(root, files.join(root, "scratch"))
+    assert_eq(kit_cases_run(cases_test_entry("inside"), context)[0].verdict.status, "PASS")
+    assert_eq(kit_cases_run(cases_test_entry("beside"), context)[0].verdict.status, "PASS")
+    assert_eq(kit_cases_run(cases_test_entry("absent"), context)[0].verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove snapshot resolution scratch")
+}

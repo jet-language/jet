@@ -10,11 +10,15 @@ fn kit_steps_action_error(state: KitStepState, message: String) -> KitStepResult
     KitStepResult{state: state, verdict: kit_expect_verdict("ERROR", message)}
 }
 
-// A write template or stdin snapshot is authored beside the case or inside the fixture it stages.
+// A snapshot (write template, stdin, sent payload, or expected bytes) is
+// authored beside the case or inside the fixture it stages. One that exists
+// in neither place resolves beside the case, so a bless creates it there.
 fn kit_steps_snapshot_path(snapshots: String, fixture: String, name: String) -> String {
     beside :: files.join(snapshots, name)
     if files.exists(beside) || fixture == "" -> return beside
-    files.join(files.join(snapshots, fixture), name)
+    inside :: files.join(files.join(snapshots, fixture), name)
+    if files.exists(inside) -> return inside
+    beside
 }
 
 fn kit_steps_inventory(directory: String, root: String) -> [KitInventoryItem] Err! {

@@ -26,6 +26,7 @@ use jet_driver.[
 use jet_foundation.[
     JET_CLI_COMMANDS,
     JET_CLI_HANDLERS,
+    BuildOptions,
     Diagnostic,
     DiagnosticRegistryStatus,
     Func,
@@ -238,7 +239,8 @@ fn jet_cli_inspect_run(request: JetCLIInspectRequest, color: Bool, json: Bool, t
 
 // `jet inspect decisions` up to the projection: the profile name (`--release`
 // wins over `--profile`, default `debug`), which selects the optimization
-// level, the scope name, and the resolved entry.
+// level, the build option flags over it (`--inline=off`), the scope name,
+// and the resolved entry.
 fn jet_cli_inspect_decisions(request: JetCLIInspectRequest, color: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
     plane :: request.plane
     profile := "debug"
@@ -260,6 +262,11 @@ fn jet_cli_inspect_decisions(request: JetCLIInspectRequest, color: Bool, json: B
         "release" | "hardened" -> release_build = true
         "debug" | "ci" -> {}
         else -> return jet_cli_not_ported("inspect {plane} --profile {profile}", color)
+    }
+    build := BuildOptions?{None}
+    if jet_cli_decisions_options(request.options, release_build) == {
+        .Refused(code, what, fix) -> return jet_cli_fail(code, what, jet_cli_why(code), fix, color, JET_DRIVER_EXIT_USAGE)
+        .Resolved(options, _) -> build = Val(options)
     }
     scope := "package"
     target := String?{None}
@@ -283,7 +290,7 @@ fn jet_cli_inspect_decisions(request: JetCLIInspectRequest, color: Bool, json: B
     }
     project := true
     if request.scope == .Target(named) -> project = cli_files.is_dir(named)
-    JetCLIPlan.Inspect{job: JetCLIInspectJob{action: plane, file: file, subject: target, json: json, color: color, threads: threads, notice: notice, project: project, profile: profile, release_build: release_build, scope: scope}}
+    JetCLIPlan.Inspect{job: JetCLIInspectJob{action: plane, file: file, subject: target, json: json, color: color, threads: threads, notice: notice, project: project, profile: profile, build: build, scope: scope}}
 }
 
 // CmdInspect.rs run_inspect_live: one securely retained, validated snapshot
@@ -371,10 +378,11 @@ struct JetCLIInspectJob {
     depth: Int{3}
     // `provenance`: the manifest root whose `.jet/lock` the report reads.
     root: String{""}
-    // `decisions`: the profile name, whether it optimizes at the release
-    // level, and the scope name (`subject` is the named target).
+    // `decisions`: the profile name, the build options it optimizes under
+    // (the profile's, with the build option flags over them), and the scope
+    // name (`subject` is the named target).
     profile: String{"debug"}
-    release_build: Bool{false}
+    build: BuildOptions?{None}
     scope: String{""}
 }
 
@@ -1658,6 +1666,12 @@ fn jet_cli_inspect_impact_report(job: JetCLIInspectJob, result: JetDriverCompile
 // CmdInspect.rs `check_result_value` for a passed explicit-file check: the
 // `jet.check/v1` record impact and expand carry.
 fn jet_cli_inspect_check_value(source: String, elapsed_ms: Int, diagnostics: Int) -> JetCLIStatusValue Never! {
+    jet_cli_status_object(jet_cli_check_result_fields(source, elapsed_ms, diagnostics))
+}
+
+// The `jet.check/v1` fields of a passed explicit-file check: the record impact
+// and expand nest, and the fields a clean `jet check --json <file>` status carries.
+fn jet_cli_check_result_fields(source: String, elapsed_ms: Int, diagnostics: Int) -> [JetCLIStatusField] Never! {
     rows := [JetCLIStatusValue]{}
     loop row in JET_CLI_EXPLICIT_FILE_PROOF_ROWS {
         &rows.push(jet_cli_status_object([JetCLIStatusField]{
@@ -1675,7 +1689,7 @@ fn jet_cli_inspect_check_value(source: String, elapsed_ms: Int, diagnostics: Int
         jet_cli_status_field("programmable_build", jet_cli_status_text("not-selected")),
         jet_cli_status_field("diagnostics", jet_cli_status_int(diagnostics)),
     })
-    jet_cli_status_object([JetCLIStatusField]{
+    [JetCLIStatusField]{
         jet_cli_status_field("status", jet_cli_status_text("passed")),
         jet_cli_status_field("contract", jet_cli_status_text("jet.check/v1")),
         jet_cli_status_field("schema_version", jet_cli_status_int(1)),
@@ -1683,7 +1697,7 @@ fn jet_cli_inspect_check_value(source: String, elapsed_ms: Int, diagnostics: Int
         jet_cli_status_field("elapsed_ms", jet_cli_status_int(elapsed_ms)),
         jet_cli_status_field("provenance", provenance),
         jet_cli_status_field("rows", jet_cli_status_array(rows)),
-    })
+    }
 }
 
 // CmdInspect.rs `check_result_text` for a passed explicit-file check.

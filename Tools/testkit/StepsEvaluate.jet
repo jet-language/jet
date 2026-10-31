@@ -173,7 +173,7 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
             return if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "file byte predicate {assertion.mode} failed")
         }
         if assertion.mode == "=" && assertion.transform == "" && assertion.rhs_transform == "" && !assertion.rhs_literal {
-            snapshot :: files.join(context.snapshots, value)
+            snapshot :: kit_steps_snapshot_path(context.snapshots, context.plan.fixture, value)
             expected :: if files.exists(snapshot) -> Val(files.read_bytes(snapshot) ?? return kit_expect_verdict("ERROR", "read byte snapshot: {err}")) else -> None
             bytes :: if exists -> files.read_bytes(path) ?? return kit_expect_verdict("ERROR", "read assertion bytes: {err}") else -> [U8]{}
             bless :: if allow_bless -> context.bless else -> KitBless{ids: [], all: false, reason: "", allow_shrink: [], first_tier: context.bless.first_tier}
@@ -222,7 +222,7 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
         KitBless{ids: [], all: false, reason: "", allow_shrink: [], first_tier: context.bless.first_tier}
     if assertion.rhs_literal && (assertion.mode == "=" || assertion.mode == "!=") -> return if (actual == value) == (assertion.mode == "=") -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "literal stream differs")
     if assertion.mode == "=" {
-        path :: files.join(context.snapshots, value)
+        path :: kit_steps_snapshot_path(context.snapshots, context.plan.fixture, value)
         expected :: kit_exec_optional(path)
         if assertion.rhs_transform != "" {
             text :: expected ?? return kit_expect_verdict("FAIL", "missing expected snapshot: {value}")
@@ -234,7 +234,8 @@ fn kit_steps_check_assertion(assertion: KitAssertion, context: KitStepCtx, state
     if assertion.mode == "one-of" -> return kit_steps_one_of(context.id, context.snapshots, value, actual, bless)
     if assertion.mode == "from" {
         start :: kit_steps_byte_index(actual, value) ?? return kit_expect_verdict("FAIL", "missing suffix marker")
-        return kit_expect_exact(context.id, files.join(context.snapshots, extra), kit_exec_optional(files.join(context.snapshots, extra)), kit_steps_byte_slice(actual, start, actual.count_bytes()), bless, false)
+        snapshot :: kit_steps_snapshot_path(context.snapshots, context.plan.fixture, extra)
+        return kit_expect_exact(context.id, snapshot, kit_exec_optional(snapshot), kit_steps_byte_slice(actual, start, actual.count_bytes()), bless, false)
     }
     if assertion.mode == "first-line=" || assertion.mode == "first-line==" {
         selected :: kit_steps_first_line(actual, extra) ?? return kit_expect_verdict("FAIL", "no first line contains selector")

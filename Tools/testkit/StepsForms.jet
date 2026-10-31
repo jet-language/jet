@@ -203,12 +203,12 @@ fn kit_steps_batch_test(actual: String, assertion: KitAssertion, value: String, 
         }
         matches = left == right
     } else if mode == "sorted-lines" {
-        expected :: files.read(files.join(context.snapshots, value)) ?? return Val(kit_expect_verdict("ERROR", "sorted-lines snapshot: {err}"))
+        expected :: files.read(kit_steps_snapshot_path(context.snapshots, context.plan.fixture, value)) ?? return Val(kit_expect_verdict("ERROR", "sorted-lines snapshot: {err}"))
         lines := kit_steps_rust_lines(actual)
         &lines.sort()
         matches = lines == kit_steps_rust_lines(expected)
     } else if mode == "$=" {
-        expected :: if extra == "file" -> files.read(files.join(context.snapshots, value)) ?? return Val(kit_expect_verdict("ERROR", "suffix snapshot: {err}")) else -> value
+        expected :: if extra == "file" -> files.read(kit_steps_snapshot_path(context.snapshots, context.plan.fixture, value)) ?? return Val(kit_expect_verdict("ERROR", "suffix snapshot: {err}")) else -> value
         matches = actual.ends_with(expected)
     } else if mode == "len" || mode == "lines" {
         expected :: kit_steps_line_count_target(value, assertion, state.history) ?? return Val(kit_expect_verdict("ERROR", "numeric RHS unavailable"))

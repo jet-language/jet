@@ -105,6 +105,9 @@ struct SemaScopeBinding {
     // L0517: a `::` name bound to `path.normalize().to_string()` holds the
     // text of a typed normalized Path (sema_stmt_note_normalized_path_text).
     normalized_path_text: Bool{false}
+    // The `::` of a `name :: value` binding: assigning the name replaces it
+    // with `:=` as the E0111 machine edit.
+    binding_sigil: Span?{None}
 }
 
 struct SemaOriginFact {
@@ -2103,6 +2106,14 @@ fn sema_scope_mark_fresh_cell(table: &SemaScopeTable, name: String, init: Expr) 
     sema_scope_note_binding_edit(&table, index)
     // copy: `init` is the binding statement's initializer, which the statement keeps.
     table.bindings[index].fresh_cell = Val(init.copy())
+}
+
+// Keeps the `::` span of the binding `name` just declared (see
+// SemaScopeBinding.binding_sigil).
+fn sema_scope_mark_binding_sigil(table: &SemaScopeTable, name: String, sigil: Span) Never! {
+    index :: sema_scope_resolve_index(table, name) ?? return
+    sema_scope_note_binding_edit(&table, index)
+    table.bindings[index].binding_sigil = Val(sigil)
 }
 
 // A proven payload refines a stable Optional name for the rest

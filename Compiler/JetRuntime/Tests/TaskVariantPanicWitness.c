@@ -98,7 +98,6 @@ extern int64_t jet_rt_record_new_jet_browser_locked(int64_t, int64_t, int64_t, i
 extern int64_t jet_rt_record_new_jet_browser_timeout(int64_t);
 extern int64_t jet_rt_record_new_jet_date(int64_t, int64_t, int64_t);
 extern int64_t jet_rt_record_new_jet_period(int64_t, int64_t, int64_t);
-extern int64_t jet_rt_record_new_jet_delivery(int64_t, int64_t, uint8_t, int64_t, int64_t);
 extern int64_t jet_rt_record_new_jet_memo_stats(int64_t, int64_t, int64_t, int64_t);
 extern int64_t jet_rt_record_new_limits(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
 extern int64_t jet_rt_record_new_log_span(int64_t, int64_t);
@@ -263,7 +262,7 @@ static void run_int_stop(int64_t test) {
     else if (test == 42) assert(jet_rt_record_new_jet_browser_timeout(big) == 0);
     else if (test == 43) assert(jet_rt_record_new_jet_date(2026, 10, big) == 0);
     else if (test == 44) assert(jet_rt_record_new_jet_period(1, 1, big) == 0);
-    else if (test == 45) assert(jet_rt_record_new_jet_delivery(WORD(&key), WORD(&key), 0, 0, big) == 0);
+    else if (test == 45) assert(jet_rt_record_new_jet_memo_stats(big, 1, 1, 0) == 0);
     else if (test == 46) assert(jet_rt_record_new_jet_memo_stats(1, 1, big, 0) == 0);
     else if (test == 47) assert(jet_rt_record_new_limits(1, 1, 1, 1, 1, big) == 0);
     else if (test == 48) assert(jet_rt_record_new_log_span(big, WORD(&key)) == 0);

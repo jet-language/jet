@@ -1,0 +1,26 @@
+# #5005: `jet inspect decisions` reports the optimizer as `jet build`
+# compiles the entry: the build option flags apply over the profile, so the
+# report never contradicts the build. Under the stock `inline: auto` the small
+# `bump` is spliced at its calls; `--inline=off` inlines nothing;
+# `--optimize=full` runs the O2 passes; a value outside the row is refused
+# as `jet build` refuses it.
+fixture: fixtures/build_inline
+env: NO_COLOR=1
+step: jet inspect decisions main.jet
+cwd: open
+exit: 0
+stdout: ~ "O1:" # the default build runs the O1 passes
+stdout: !~ "inlined 0," # auto splices `bump` at its calls
+step: jet inspect decisions --inline=off main.jet
+cwd: open
+exit: 0
+stdout: ~ "O1:" # the flag keeps the profile's level
+stdout: ~ "inlined 0," # off inlines nothing
+step: jet inspect decisions --optimize=full main.jet
+cwd: open
+exit: 0
+stdout: ~ "O2:" # optimize: full runs the O2 passes
+step: jet inspect decisions --inline=sometimes main.jet
+cwd: open
+exit: 2
+stderr: ~ "Error [E2104]: `--inline=sometimes` isn't a value of `inline`" # auto, always_marked or off

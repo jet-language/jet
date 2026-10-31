@@ -858,17 +858,12 @@ connection, scope, pool and lease carriers are Jet structs over the vendored
 SQLite C closure (`c.[sqlite3]`), `RowPolicy` and `SQL` are source values, and
 typed `SQL{…}` literals desugar to `core.db.__sql_literal`.
 
-The native delivery handle owns three independent text children in a 40-byte
-carrier, plus normalized duplicate Bool and raw signed generation facts.
-Construction borrows/clones text and range-converts borrowed exact Int before
-allocation; text getters return owned clones and generation returns a fresh
-exact Int. Clone and equality interpret the duplicate slot's low byte.
-Show preserves exactly `Delivery(` plus the raw ID bytes plus `)`, with no
-debug escaping or additional fields. `DeliveryHandleWitness.c` covers all
-equality fields, binary and empty text, independent projections, i64 edges
-and exact-sized deallocation. Its `native-overflow` mode requires the shared
-native-Int range stop (exit 70, empty stdout); process execution is separate
-from parser and C syntax receipts.
+`core.service` trees, endpoints, workflows, upgrade receipts, deliveries and
+delivery events are plain Core source: `Core/Service/Service.jet` declares
+them as Jet structs and reaches the host only through its `__host_*` leaves
+(wall clock, entropy, sleep, pid, current directory and the durable-store
+file operations). A delivery shows exactly `Delivery(` plus the raw ID bytes
+plus `)`, with no debug escaping or additional fields.
 
 The generated musl error-text provider exposes `host_errno_append` and
 `host_errno_cause_append` for callers that already own a text builder.

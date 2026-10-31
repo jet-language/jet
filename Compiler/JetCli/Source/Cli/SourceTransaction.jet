@@ -151,6 +151,7 @@ fn jet_cli_transaction_recover(project: JetCLIRootedDirectory, journal: JetCLIRo
     all_after := true
     loop row in values {
         path :: jet_cli_transaction_text(row, "path")
+        if !path.starts_with(jet_cli_rooted_join(project.path, "")) -> return Err(jet_cli_read_error("recovery destination escapes retained project; journal preserved"))
         temp_path :: jet_cli_transaction_text(row, "temp")
         before :: jet_cli_transaction_bytes(row, "before")
         after :: jet_cli_transaction_bytes(row, "after")
@@ -168,6 +169,18 @@ fn jet_cli_transaction_recover(project: JetCLIRootedDirectory, journal: JetCLIRo
         current :: record.read(project)
         if current != after -> all_after = false
         if current != before && current != after -> return Err(jet_cli_read_error("codemod recovery found concurrent drift; journal preserved: {path}"))
+        // Transaction.rs prepare_recovery_handles: a staged temp that still
+        // exists must be the recorded single-link file holding exactly the
+        // journaled after-image, before any byte is restored or removed.
+        temp_present :: if record.parent == .Val(parent) -> parent.member_present(record.temp) else -> project.member_present(record.temp)
+        if temp_present {
+            temp_info :: record.stat(project, record.temp)
+            staged :: if record.parent == .Val(parent) -> parent.read(record.temp, JET_CLI_TRANSACTION_MAX_BYTES) else -> project.read(record.temp, JET_CLI_TRANSACTION_MAX_BYTES)
+            content_matches :: if staged == .Val(content) -> content == after else -> false
+            temp_identity :: jet_cli_transaction_id_json(temp_info.id)
+            if temp_info.id != record.temp_id || !content_matches || identities.get(temp_identity) != None -> return Err(jet_cli_read_error("recovery temp identity changed, contents differ, or aliases another row; journal preserved"))
+            identities[temp_identity] = true
+        }
         &records.push(record)
     }
     if all_after {

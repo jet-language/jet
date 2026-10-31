@@ -73,10 +73,15 @@ a frame's checksum.
 - Pixels are 8-bit RGBA, straight alpha. Blending is source-over in integers:
   `(src * a + dst * (255 - a) + 127) / 255` per channel.
 - Rectangles clip to the frame, then fill row spans.
-- Lines use Bresenham. Circles use the midpoint algorithm and fill spans.
+- Lines draw both endpoints. The longer axis steps one pixel at a time and the
+  other coordinate is the exact line value rounded half up, which is the
+  pixel set Bresenham's algorithm walks. Circles fill every pixel within the
+  radius, one span per row.
 - Triangles use edge functions with the top-left fill rule, so shared edges
   are drawn exactly once.
-- Textured blits copy or blend source rows, with clipping on both sides.
+- Textured blits copy or blend source rows, with clipping on both sides. PNG
+  decoding is Jet code: zlib through `core.archive`, the five scanline
+  filters, Adam7, palettes, `tRNS` and every bit depth.
 - Text uses a built-in 5x7 bitmap font for ASCII, scaled by whole pixels, until
   `font` lands. Then `draw_text_ex` takes a `font.Face`.
 
@@ -131,3 +136,29 @@ Open owner ballots:
   keys, and headless capture.
 - D-RAYLIB-DRIVER-LOAD1 (revised): speak the display and sound protocols in
   Jet; GPU builds are a later opt-in.
+
+## 7. Where the code stands
+
+`core.game.raylib` already draws through the stage 1 rasterizer and has taken
+the headless parts of stage 2 that need no new names: `draw_line`,
+`draw_circle`, `draw_triangle`, PNG textures for `load_texture_atlas`, and a
+real `draw_sprite` blit. Two goldens pin frame checksums on o0, o1 and o2:
+`game/raylib_sprites` (shapes and sprites from a palette Adam7 PNG and an RGBA
+PNG) and `game/raylib_indexed` (#5035's 320x200 indexed screen with a cycling
+256-entry palette at 35 Hz, steered by a replayed key log).
+
+The rasterizer path makes no foreign calls. Every host call it reaches is a
+raw Linux syscall issued by the runtime:
+
+| Call | Syscalls | Reached from |
+|---|---|---|
+| Canvas and texture memory | the runtime allocator | `begin_drawing`, `load_texture_atlas` |
+| Atlas metadata | `open`, `read`, `close` | `load_texture_atlas` |
+| PNG bytes | `open`, `read`, `close` through `core.files.read_bytes` | `load_texture_atlas` |
+| `JET_RAYLIB_CAPTURE` | the startup environment, then `open`, `write`, `close` | `end_drawing` |
+
+Two of these can still move up into Jet. The atlas metadata parse can become
+Core code over `core.files.read`, since `load_texture_atlas` already carries
+`FS`. The capture writer stays in the runtime until `end_drawing` may carry
+`FS` or `ray` replaces it with `load_image_from_screen`; both are API changes
+that D-RAY-API1 decides.

@@ -135,7 +135,7 @@ fn kit_steps_condition_atom(text: String, context: KitStepCtx, state: KitStepSta
     tokens :: kit_steps_tokens(text) ?? return false
     value := kit_steps_runtime_expand(words[2], context, state) ?? return false
     raw :: kit_steps_byte_slice(text, tokens[2].start, tokens[2].end)
-    if !raw.starts_with("\"") && !raw.starts_with("'") -> value = files.read(files.join(context.snapshots, value)) ?? return false
+    if !raw.starts_with("\"") && !raw.starts_with("'") -> value = files.read(kit_steps_snapshot_path(context.snapshots, context.plan.fixture, value)) ?? return false
     if words[1] == "~" -> return actual.contains(value)
     if words[1] == "!~" -> return !actual.contains(value)
     (actual == value) == (words[1] == "=")

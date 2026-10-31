@@ -213,8 +213,9 @@ fn jet_cli_check_workspace(files: [String], sources: [String], color: Bool, quie
 
 // CmdCompile.rs `emit_check_outcome` under `--json`, on stdout: errors are
 // one failed `diagnostics` status (exit 1); visible warnings alone are a
-// passing one; a clean explicit-file check is the `jet.check/v1` contract,
-// written without a trailing newline as the Rust host writes it.
+// passing one; a clean explicit-file check is one passing `check` status
+// carrying the `jet.check/v1` fields, since every `--json` command answers
+// with the `jet.status/v1` object.
 fn jet_cli_check_json_outcome(file: String, source: String, diagnostics: [Diagnostic], elapsed_ms: Int) -[FS, Env]> JetDriverVerbOutput Never! {
     cwd :: jet_cli_report_cwd()
     errors :: jet_cli_errors(diagnostics)
@@ -228,7 +229,7 @@ fn jet_cli_check_json_outcome(file: String, source: String, diagnostics: [Diagno
     if lints.len() > 0 {
         return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("diagnostics", true, cwd, file, source, lints), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
-    JetDriverVerbOutput{stdout: jet_cli_check_result_json(file, "dev", diagnostics.len(), elapsed_ms), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    JetDriverVerbOutput{stdout: "{jet_cli_status_render("check", true, jet_cli_check_result_fields(file, elapsed_ms, diagnostics.len()))}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
 // Resolution's stderr notices (a migrated retired entry, `--show-default`)
@@ -924,7 +925,7 @@ fn jet_cli_hot_text(root: String) -[FS]> [String] Never! {
 fn jet_cli_native_report(file: String, command: String, failure: JetCLINativeFailure, color: Bool) -> JetDriverVerbOutput Never! {
     if failure == {
         .RustForeign(error) -> JetDriverVerbOutput{stdout: "", stderr: jet_cli_rust_foreign_report(error, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
-        .NoEntry -> jet_cli_build_failed("`{file}` has no `fn run` to build", "an executable starts at the program's `fn run`", "add `fn run()` to the file, or check it with `jet check {file}`", color)
+        .NoEntry -> JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, "", [Diagnostic]{jet_cli_no_run_diagnostic()}, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
         // Every fault is a census row the caller reports first (jet_cli_ice_census).
         .Faulted -> jet_cli_ice("the native route of `jet {command} {file}` stopped on a fault it did not record")
         .Write(what) -> jet_cli_build_failed(what, jet_cli_why("E2105"), "check that the build directory is writable", color)
@@ -1076,14 +1077,15 @@ fn jet_cli_present_shown(result: JetDriverCompileResult, snapshot: JetDriverAuth
 }
 
 // `jet build <file>`: compile through the Jet compiler, report its problems
-// the way the Rust host does, check the application authority, then write
-// the executable.
-fn jet_cli_build_result(file: String, name: String, source: String, color: Bool, options: BuildOptions, invocation: JetCLIInvocationAuthority?, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
+// (under `json`, one failed `diagnostics` status on stderr), check the
+// application authority, then write the executable.
+fn jet_cli_build_result(file: String, name: String, source: String, color: Bool, options: BuildOptions, invocation: JetCLIInvocationAuthority?, json: Bool, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
     // Only the errors are presented (jet_cli_present_shown).
     if result.trace_sink == .Val(sink) -> sink.begin("cli.diagnostics", "", -1, -1)
     errors :: jet_driver_present_diagnostics(jet_cli_errors(result.diagnostics), snapshot, result.generated_source_files)
     if result.trace_sink == .Val(sink) -> sink.end("cli.diagnostics", errors.len())
     if errors.len() > 0 {
+        if json -> return JetDriverVerbOutput{stdout: "", stderr: jet_cli_reports_status_json("diagnostics", false, jet_cli_report_cwd(), file, source, errors), exit_code: JET_DRIVER_EXIT_USER_ERROR}
         return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, errors, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
     if jet_cli_authority_check(file, source, color, false, "build", invocation, result) == .Val(refusal) -> return refusal
@@ -1100,16 +1102,16 @@ fn jet_cli_compile_target(file: String, name: String, source: String, color: Boo
     compiled := jet_cli_compile_executable_file(file, None, color, threads, options, trace_sink)
     if ^compiled == {
         .Refused(refusal) -> refusal
-        .Checked(result, inputs, snapshot) -> jet_cli_build_result(file, name, source, color, options, invocation, result, ^inputs, snapshot)
+        .Checked(result, inputs, snapshot) -> jet_cli_build_result(file, name, source, color, options, invocation, false, result, ^inputs, snapshot)
     }
 }
 
-fn jet_cli_compile_build(file: String, source: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+fn jet_cli_compile_build(file: String, source: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, json: Bool, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled := jet_cli_compile_executable_file(file, None, color, threads, options, trace_sink)
     if ^compiled == {
         .Refused(refusal) -> output = refusal
-        .Checked(result, inputs, snapshot) -> jet_cli_finish(jet_cli_build_result(file, jet_cli_stem(file), source, color, options, invocation, result, ^inputs, snapshot))
+        .Checked(result, inputs, snapshot) -> jet_cli_finish(jet_cli_build_result(file, jet_cli_stem(file), source, color, options, invocation, json, result, ^inputs, snapshot))
     }
     // Reached only by a refusal: a value-returning verb never ends in its
     // Never exit call.
@@ -2501,7 +2503,7 @@ fn jet_cli_write_output(output: JetDriverVerbOutput) {
 // The plans whose compile `--trace` and JET_TRACE_FILE trace.
 fn jet_cli_plan_compiles(plan: JetCLIPlan) -> Bool Never! {
     if plan == {
-        .Check(_, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _) | .Build(_, _, _, _, _, _, _) | .BuildPackage(_, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
+        .Check(_, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _) | .Build(_, _, _, _, _, _, _, _) | .BuildPackage(_, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
         else -> false
     }
 }
@@ -2522,9 +2524,9 @@ fn jet_cli_execute(plan: ^JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> Jet
             jet_cli_write_notice(notice)
             output = jet_cli_check_workspace(files, sources, color, quiet, threads, json, trace_sink)
         }
-        .Build(file, source, color, options, threads, invocation, notice) -> {
+        .Build(file, source, color, options, threads, invocation, notice, json) -> {
             jet_cli_write_notice(notice)
-            output = jet_cli_compile_build(file, source, color, options, threads, invocation, trace_sink)
+            output = jet_cli_compile_build(file, source, color, options, threads, invocation, json, trace_sink)
         }
         .BuildPackage(file, color, options, build_args, threads, invocation, notice) -> {
             jet_cli_write_notice(notice)
@@ -2567,6 +2569,7 @@ fn jet_cli_execute(plan: ^JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> Jet
         .Maintenance(action, maintenance_args, color, json) -> output = jet_cli_maintenance_host(action, maintenance_args, color, json)
         .Completion(shell, program, name) -> output = jet_cli_execute(jet_cli_completion_program(shell, program, name))
         .Schema(action, root, before, color, json) -> output = jet_cli_schema_host(action, root, before, color, json)
+        .Codemod(action, path, yes, color, json) -> output = jet_cli_codemod_host(action, path, yes, color, json)
         .PolicyExplain(key, file, site, line, color, json) -> output = jet_cli_execute(jet_cli_policy_explain_host(key, file, site, line, color, json))
         .Gates(file, gate_args, color, json, notice) -> {
             jet_cli_write_notice(notice)

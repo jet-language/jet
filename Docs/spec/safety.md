@@ -209,10 +209,10 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1174,
+  "total": 1129,
   "counts": {
-    "Compiler": 530,
-    "Core": 203,
+    "Compiler": 529,
+    "Core": 159,
     "Examples": 39,
     "Jetpack": 10,
     "Tools": 8,
@@ -1772,13 +1772,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 65,
       "column": 5,
       "reason": "clock_gettime writes two thread-owned TCB words, not retained after the syscall"
-    },
-    {
-      "package": "Compiler",
-      "file": "Compiler/JetRuntime/Source/DeliveryHandle.jet",
-      "line": 65,
-      "column": 5,
-      "reason": "the C ABI lends exactly one writable bool byte; upper bytes are not part of this output"
     },
     {
       "package": "Compiler",
@@ -4730,317 +4723,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Service/Service.jet",
-      "line": 157,
-      "column": 5,
-      "reason": "one existing registry read snapshots exact and candidate facts; no second authority or resource carrier"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 267,
-      "column": 5,
-      "reason": "read the existing endpoint's tree, worker and generation fields"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 274,
-      "column": 5,
-      "reason": "Services3081: check started before the single delivery-field write"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 281,
-      "column": 5,
-      "reason": "Services1415: root policy write precedes each declared group policy write"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 292,
-      "column": 5,
-      "reason": "Services3220: tree's exclusive write borrow covers count then clear"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 301,
-      "column": 5,
-      "reason": "Services3231: started and record checks precede adapter then authority writes"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 321,
-      "column": 5,
-      "reason": "the source exclusive tree borrow covers the same complete mutation as Rust &mut; no lock or interleaving window"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 352,
-      "column": 5,
-      "reason": "Services4437: authority lookup, durable load, first record, then checked framing"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 366,
-      "column": 5,
-      "reason": "Services4493: replay existing in-memory records without issuing a store read"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 401,
-      "column": 5,
-      "reason": "Services6729: copy the existing optional last-upgrade field"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 407,
-      "column": 5,
-      "reason": "Services1153: plain field projection; rollback store remains omitted from all text views"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 415,
-      "column": 5,
-      "reason": "Services1265: read the existing topology fields, preserve handler insertion order"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 433,
-      "column": 5,
-      "reason": "Services5867: durable replay before lookup; first matching run wins"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 448,
-      "column": 5,
-      "reason": "Services5879: durable replay before lookup; missing or nonterminal run is Policy"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 465,
-      "column": 5,
-      "reason": "Services6978: project existing runtime facts; source owns counts and text"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 550,
-      "column": 5,
-      "reason": "Allocation only: source supplies every Services.rs initializer field at 2d9953adf:1293-1319, in native evaluation order"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 625,
+      "line": 1364,
       "column": 5,
       "reason": "read the final path component's OS metadata kind without opening an identity handle"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 651,
-      "column": 5,
-      "reason": "read the checked service tree's generation field without mutating or copying its scheduler carrier"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 657,
-      "column": 5,
-      "reason": "read event-log storage length on the checked service tree"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 663,
-      "column": 5,
-      "reason": "read dead-letter storage length on the checked service tree"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 865,
-      "column": 5,
-      "reason": "Services5439-5507: synchronize before validation; exact version replay precedes active-version rejection"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 902,
-      "column": 5,
-      "reason": "Services5656-5705: exclusive tree borrow keeps replay and append cursor decisions indivisible"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 933,
-      "column": 5,
-      "reason": "Services5708-5789: first recorded definition wins; replay precedes terminal checks"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 986,
-      "column": 5,
-      "reason": "Services5792-5867: replay consumes recorded attempts, never derives another attempt from replayed state"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 1021,
-      "column": 5,
-      "reason": "Services5870-5950: two replay entries advance together; identical terminal completions are idempotent"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 1197,
-      "column": 5,
-      "reason": "Services1546: exclusive tree write borrow preserves validation, reparent, append ordering"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 1243,
-      "column": 5,
-      "reason": "Services7044: counter write precedes reachable-worker selection and canonical failure policy"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 1259,
-      "column": 5,
-      "reason": "Services4575: source owns adapter/authority/payload/count checks and record framing; store append before field push"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 1279,
-      "column": 5,
-      "reason": "Services4525: host record-write leaf retains existing mutex through store write and field assignment; no guard exposed"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 1329,
-      "column": 5,
-      "reason": "Services2184: identity and pinned-generation checks precede authority validation"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 1355,
-      "column": 5,
-      "reason": "Services6081: exact directory lookup, generation, proof, authority, running, draining order"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 1379,
-      "column": 5,
-      "reason": "Services2558: source owns routing, message checks, worker gate, capacity error text, post-send ordering"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 1478,
-      "column": 5,
-      "reason": "ServiceAuthority2504: one existing locked durable read, then the owned entry's state"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 1493,
-      "column": 5,
-      "reason": "ServiceAuthority2517: same locked read; receipt fields and signature are source policy"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 1507,
-      "column": 5,
-      "reason": "ServiceAuthority2535-2647: one locked read, then exact record filtering, error order and signature validation"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 1556,
-      "column": 5,
-      "reason": "ServiceAuthority2650: validate/read first, then an exact zero-retention runtime and existing retry operation"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 1567,
-      "column": 5,
-      "reason": "ServiceAuthority1297: identity checks, existing two registry reads/captured Arc, conditional depth check, one receive"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 1656,
-      "column": 5,
-      "reason": "Services2864: local queued-message/idempotency matching stays source; existing cryptographic ID leaf"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 1676,
-      "column": 5,
-      "reason": "Services3127: no enclosing lock; source owns local deduplication/admission/rollback orchestration"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 1749,
-      "column": 5,
-      "reason": "Services2629: no enclosing guard; existing atomic authority operations retain their locks"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 1841,
-      "column": 5,
-      "reason": "Services2693-2762: retain authority requeue then mailbox-restore ordering and both failure texts"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 1901,
-      "column": 5,
-      "reason": "Services1464-1544: checked function item is passed through; source owns validation and every seed"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 2043,
-      "column": 5,
-      "reason": "Services2917-3078: exclusive tree borrow; each write follows the native order"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 2158,
-      "column": 5,
-      "reason": "Services3080-3100: pinned validation, group policy, one now, then weak name/tree match"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Service/Service.jet",
-      "line": 2179,
-      "column": 5,
-      "reason": "Services2847-2862: validated endpoint, then deliberately weak name/tree match, channel depth"
     },
     {
       "package": "Core",
@@ -8445,13 +8130,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 530 |
-| Core | 203 |
+| Compiler | 529 |
+| Core | 159 |
 | Examples | 39 |
 | Jetpack | 10 |
 | Tools | 8 |
 | tests | 384 |
-| **total** | **1174** |
+| **total** | **1129** |
 
 ### Regions
 
@@ -8679,7 +8364,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/DataLimits.jet | 6:5 | "address borrows an initialized word in a live native limits carrier" |
 | Compiler | Compiler/JetRuntime/Source/DataLimits.jet | 9:5 | "address owns a writable word in a native limits carrier or getter out slot" |
 | Compiler | Compiler/JetRuntime/Source/Deadline.jet | 65:5 | "clock_gettime writes two thread-owned TCB words, not retained after the syscall" |
-| Compiler | Compiler/JetRuntime/Source/DeliveryHandle.jet | 65:5 | "the C ABI lends exactly one writable bool byte; upper bytes are not part of this output" |
 | Compiler | Compiler/JetRuntime/Source/Display.jet | 8:5 | "borrows an initialized aligned word in an E4 header, exact-Int node or owned formatter workspace" |
 | Compiler | Compiler/JetRuntime/Source/Display.jet | 14:5 | "writes an aligned word in an exclusively owned formatter workspace or fresh E4 header" |
 | Compiler | Compiler/JetRuntime/Source/Display.jet | 20:5 | "reads one initialized byte in an owned formatter digit buffer or borrowed exact-Int limb" |
@@ -9101,51 +8785,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Net/Net.jet | 215:5 | "read native IPv6 socket scope identifier" |
 | Core | Core/Net/Net.jet | 414:5 | "read the native UDP packet's socket-address carrier" |
 | Core | Core/Process/Process.jet | 96:5 | "transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length" |
-| Core | Core/Service/Service.jet | 157:5 | "one existing registry read snapshots exact and candidate facts; no second authority or resource carrier" |
-| Core | Core/Service/Service.jet | 267:5 | "read the existing endpoint's tree, worker and generation fields" |
-| Core | Core/Service/Service.jet | 274:5 | "Services3081: check started before the single delivery-field write" |
-| Core | Core/Service/Service.jet | 281:5 | "Services1415: root policy write precedes each declared group policy write" |
-| Core | Core/Service/Service.jet | 292:5 | "Services3220: tree's exclusive write borrow covers count then clear" |
-| Core | Core/Service/Service.jet | 301:5 | "Services3231: started and record checks precede adapter then authority writes" |
-| Core | Core/Service/Service.jet | 321:5 | "the source exclusive tree borrow covers the same complete mutation as Rust &amp;mut; no lock or interleaving window" |
-| Core | Core/Service/Service.jet | 352:5 | "Services4437: authority lookup, durable load, first record, then checked framing" |
-| Core | Core/Service/Service.jet | 366:5 | "Services4493: replay existing in-memory records without issuing a store read" |
-| Core | Core/Service/Service.jet | 401:5 | "Services6729: copy the existing optional last-upgrade field" |
-| Core | Core/Service/Service.jet | 407:5 | "Services1153: plain field projection; rollback store remains omitted from all text views" |
-| Core | Core/Service/Service.jet | 415:5 | "Services1265: read the existing topology fields, preserve handler insertion order" |
-| Core | Core/Service/Service.jet | 433:5 | "Services5867: durable replay before lookup; first matching run wins" |
-| Core | Core/Service/Service.jet | 448:5 | "Services5879: durable replay before lookup; missing or nonterminal run is Policy" |
-| Core | Core/Service/Service.jet | 465:5 | "Services6978: project existing runtime facts; source owns counts and text" |
-| Core | Core/Service/Service.jet | 550:5 | "Allocation only: source supplies every Services.rs initializer field at 2d9953adf:1293-1319, in native evaluation order" |
-| Core | Core/Service/Service.jet | 625:5 | "read the final path component's OS metadata kind without opening an identity handle" |
-| Core | Core/Service/Service.jet | 651:5 | "read the checked service tree's generation field without mutating or copying its scheduler carrier" |
-| Core | Core/Service/Service.jet | 657:5 | "read event-log storage length on the checked service tree" |
-| Core | Core/Service/Service.jet | 663:5 | "read dead-letter storage length on the checked service tree" |
-| Core | Core/Service/Service.jet | 865:5 | "Services5439-5507: synchronize before validation; exact version replay precedes active-version rejection" |
-| Core | Core/Service/Service.jet | 902:5 | "Services5656-5705: exclusive tree borrow keeps replay and append cursor decisions indivisible" |
-| Core | Core/Service/Service.jet | 933:5 | "Services5708-5789: first recorded definition wins; replay precedes terminal checks" |
-| Core | Core/Service/Service.jet | 986:5 | "Services5792-5867: replay consumes recorded attempts, never derives another attempt from replayed state" |
-| Core | Core/Service/Service.jet | 1021:5 | "Services5870-5950: two replay entries advance together; identical terminal completions are idempotent" |
-| Core | Core/Service/Service.jet | 1197:5 | "Services1546: exclusive tree write borrow preserves validation, reparent, append ordering" |
-| Core | Core/Service/Service.jet | 1243:5 | "Services7044: counter write precedes reachable-worker selection and canonical failure policy" |
-| Core | Core/Service/Service.jet | 1259:5 | "Services4575: source owns adapter/authority/payload/count checks and record framing; store append before field push" |
-| Core | Core/Service/Service.jet | 1279:5 | "Services4525: host record-write leaf retains existing mutex through store write and field assignment; no guard exposed" |
-| Core | Core/Service/Service.jet | 1329:5 | "Services2184: identity and pinned-generation checks precede authority validation" |
-| Core | Core/Service/Service.jet | 1355:5 | "Services6081: exact directory lookup, generation, proof, authority, running, draining order" |
-| Core | Core/Service/Service.jet | 1379:5 | "Services2558: source owns routing, message checks, worker gate, capacity error text, post-send ordering" |
-| Core | Core/Service/Service.jet | 1478:5 | "ServiceAuthority2504: one existing locked durable read, then the owned entry's state" |
-| Core | Core/Service/Service.jet | 1493:5 | "ServiceAuthority2517: same locked read; receipt fields and signature are source policy" |
-| Core | Core/Service/Service.jet | 1507:5 | "ServiceAuthority2535-2647: one locked read, then exact record filtering, error order and signature validation" |
-| Core | Core/Service/Service.jet | 1556:5 | "ServiceAuthority2650: validate/read first, then an exact zero-retention runtime and existing retry operation" |
-| Core | Core/Service/Service.jet | 1567:5 | "ServiceAuthority1297: identity checks, existing two registry reads/captured Arc, conditional depth check, one receive" |
-| Core | Core/Service/Service.jet | 1656:5 | "Services2864: local queued-message/idempotency matching stays source; existing cryptographic ID leaf" |
-| Core | Core/Service/Service.jet | 1676:5 | "Services3127: no enclosing lock; source owns local deduplication/admission/rollback orchestration" |
-| Core | Core/Service/Service.jet | 1749:5 | "Services2629: no enclosing guard; existing atomic authority operations retain their locks" |
-| Core | Core/Service/Service.jet | 1841:5 | "Services2693-2762: retain authority requeue then mailbox-restore ordering and both failure texts" |
-| Core | Core/Service/Service.jet | 1901:5 | "Services1464-1544: checked function item is passed through; source owns validation and every seed" |
-| Core | Core/Service/Service.jet | 2043:5 | "Services2917-3078: exclusive tree borrow; each write follows the native order" |
-| Core | Core/Service/Service.jet | 2158:5 | "Services3080-3100: pinned validation, group policy, one now, then weak name/tree match" |
-| Core | Core/Service/Service.jet | 2179:5 | "Services2847-2862: validated endpoint, then deliberately weak name/tree match, channel depth" |
+| Core | Core/Service/Service.jet | 1364:5 | "read the final path component's OS metadata kind without opening an identity handle" |
 | Core | Core/Sys/Sys.jet | 412:1 | "posix umask: the caller owns the process file-creation mask and restores it when other code relies on it" |
 | Core | Core/Sys/Sys.jet | 458:5 | "posix getpgid: inspect a process group" |
 | Core | Core/Sys/Sys.jet | 464:5 | "posix getsid: inspect a process session" |
@@ -9769,51 +9409,7 @@ the function body; they do not exempt a wrapper from the proof requirement.
   {"file":"Core/Encoding/XmlEngine.jet","function":"byte_text","proof":"__bytes_into_text at xml_engine.jet:174 consumes a copy of source[start..<end]. Every local caller slices bytes of an existing String (DOCTYPE/entity/declaration helpers) or Scanner.source, whose sole construction path parse_document_with(:667-669) takes String.bytes(). Boundaries are zero/end or offsets adjacent to ASCII XML delimiters, quotes and whitespace, which cannot lie inside a UTF-8 continuation sequence. Checked list accesses(:172) prevent out-of-storage copies; the exact copied scalar-aligned allocation moves with no intervening mutation or escaping borrow."},
   {"file":"Core/Encoding/XmlEngine.jet","function":"normalize_attribute_text","proof":"xml_engine.jet:2204 starts with bytes of a valid String. The in-place loop(:2207-2215) replaces only ASCII CR/LF/tab with ASCII space and removes the ASCII LF following CR; all non-ASCII bytes keep their order and membership. write never exceeds read, and :2217 truncates only the finished compacted sequence. Thus __bytes_into_text(:2219) consumes valid complete UTF-8 for every caller text, not an assumed-valid wire allocation."},
   {"file":"Core/Encoding/Yaml.jet","function":"yaml_leaf","proof":"yaml.jet:320 grants private carrier matching. Number/TypedText explicitly panic(:326); Bytes are read only after their matching discriminant over 0..<bytes.len()(:328-333). Object payload views are obtained only in the Object branch(:344-347), retaining the owner; arrays recurse on typed values. The caller receives an owned String and cannot request a mismatched payload or retain native storage references."},
-  {"file":"Core/Service/Service.jet","function":"__authority_validate","proof":"service.jet:155 projects owned identity fields; :156 rejects invalid identity before __endpoint_validation_snapshot(:160). Its native ServiceAuthority.rs:360-368 keeps the registry mutex across exact/candidate lookup and copies only String/scalar facts. No registry guard, endpoint pointer or mutable reference escapes; policy checks operate on owned snapshots, so caller identity cannot extend a native borrow."},
-  {"file":"Core/Service/Service.jet","function":"endpoint_show","proof":"__endpoint_parts at service.jet:265 only clones the initialized endpoint tree/worker Strings and widens generation (Services.rs:3273-3274). Interpolation(:266) returns owned text. Any typed endpoint is valid for this projection; no unchecked index or native reference reaches callers."},
-  {"file":"Core/Service/Service.jet","function":"set_delivery","proof":"service.jet:270 holds an exclusive tree borrow, :272 rejects a started tree, and :273 writes only a typed ServiceDelivery field via __tree_write_delivery. Services.rs:3259-3260 performs a normal field assignment under that borrow; no pointer or secondary tree alias is returned. Callers cannot change the validated tree concurrently with the transfer."},
-  {"file":"Core/Service/Service.jet","function":"set_restart","proof":"service.jet:277 lends the tree exclusively; :279 checks not started before __tree_write_restart. __group_write_restart is indexed only by 0..<__tree_group_count(:281-282), while neither write changes group storage length (Services.rs:3258-3266). Every transferred policy is a typed enum, and no group reference escapes to invalidate that count."},
-  {"file":"Core/Service/Service.jet","function":"drain_dead_letters","proof":"service.jet:286 holds the exclusive tree borrow and :288 checks started before counting and clearing the same dead-letter list(:289-290). Native __tree_dead_letter_count and __tree_clear_dead_letters(Services.rs:3249-3250,3268) return a copied length and clear owned storage without exporting an element borrow. Callers cannot hold a conflicting live list view across the clear."},
-  {"file":"Core/Service/Service.jet","function":"set_state_empty","proof":"service.jet:295 retains an exclusive tree borrow. :297-300 reject a started tree or existing snapshot/events before __tree_write_empty_adapter and __tree_clear_state_authority(:301-302), whose provider(Services.rs:3269-3272) only assigns typed fields. No stored payload reference is returned; callers cannot interleave a state-record insertion between check and replacement."},
-  {"file":"Core/Service/Service.jet","function":"select_state_adapter","proof":"The exclusive tree borrow at service.jet:315 covers :317-326 checks for not-started, no records, recognized migration, bounded visible store/schema and positive version before __tree_write_state_adapter/__tree_write_state_authority(:327-328). Their provider(Services.rs:3277-3284) initializes owning optional fields from typed String/scalars, not raw memory. The caller cannot replace a checked field set or retain an alias into the new authority."},
-  {"file":"Core/Service/Service.jet","function":"restore_snapshot","proof":"__state_load expects a present state authority (Services.rs:3292-3295). service.jet:348 checks that exact option before :349, borrows the live typed tree, and :355 checks nonempty records before reading records[0]. read_state_record(:374-392) checks schema, framing, byte length and UTF-8. Returned snapshot text is owned, not a reference into tree/store storage."},
-  {"file":"Core/Service/Service.jet","function":"replay_events","proof":"service.jet:362-364 call __tree_state_authority/__tree_event_records only as borrowed field projections; native Services.rs:3286-3290,3297 copy optional Strings and the event list. Each copied record passes checked framing(:367) before join. No list-element reference or native store handle is exported, so releasing or later editing the tree cannot invalidate the owned replay text."},
-  {"file":"Core/Service/Service.jet","function":"upgrade_receipt","proof":"__tree_upgrade_receipt at service.jet:397 clones the existing optional typed receipt (Services.rs:3425). Source rejects None before returning the owning value. No native reference, rollback-store pointer or unchecked payload access escapes for any typed tree."},
-  {"file":"Core/Service/Service.jet","function":"__upgrade_receipt_display","proof":"__upgrade_receipt_parts at service.jet:403 projects initialized scalar fields and cloned String/pinned-shard list (Services.rs:3426-3430), omitting rollback storage. :404-405 only format those owned fields. Caller-supplied typed receipts cannot choose a memory address or retain a borrow into the native receipt."},
-  {"file":"Core/Service/Service.jet","function":"tree_show","proof":"__tree_display_parts at service.jet:411 copies the live tree's initialized fields and handler-name pairs (Services.rs:3432-3439); it exports neither worker tasks nor mailbox storage. :413 iterates the returned owned list and matches typed restart/delivery enums for text. No native payload borrow or separately supplied index reaches the caller."},
-  {"file":"Core/Service/Service.jet","function":"workflow_history","proof":"__workflow_replay_parts at service.jet:429 uses the checked native workflow authority/replay and collects owned run-id/history/outcome records (Services.rs:3441-3445), propagating errors. :435-438 only search those copied records and join the matching list. Arbitrary run_id cannot be used as a native vector index or expose a replay guard."},
-  {"file":"Core/Service/Service.jet","function":"workflow_outcome","proof":"service.jet:444 obtains owned records through __workflow_replay_parts, whose provider validates authority and collects owned payloads (Services.rs:3441-3445). :450-455 match run_id and require a present typed outcome rather than indexing with caller input. The result owns its panic text/enum payload and contains no reference into mutable workflow storage."},
-  {"file":"Core/Service/Service.jet","function":"observe","proof":"__tree_observation_parts at service.jet:461 is a read-only projection into copied counts/booleans and typed workflow status codes (Services.rs:3447-3463). The local loop(:470-478) reads that owned list and formats text; no task, channel, mutable view or raw address is exposed. Every typed tree therefore remains valid regardless of caller observation timing."},
-  {"file":"Core/Service/Service.jet","function":"tree","proof":"__tree_allocate at service.jet:542 materializes every native initializer field from typed arguments. :543-566 provide generation1, typed restart/delivery, positive fixed budget, empty initialized worker/group/record collections, false started, Empty state, absent authorities/receipts and a fresh Arc task group from __tree_task_group_new. Services.rs:1327-1352 only allocate/assign those fields. The caller supplies only owned name text, not uninitialized carriers or native pointers."},
-  {"file":"Core/Service/Service.jet","function":"state_path_kind","proof":"__path_kind at service.jet:617 accepts a borrowed valid String path and returns copied metadata kind or owned IOError. It performs a final-component pathname query, not a descriptor/identity ownership transfer; no caller pointer or reference into OS metadata is returned. A path race can alter the metadata result but cannot invalidate a caller memory borrow."},
-  {"file":"Core/Service/Service.jet","function":"directory_generation","proof":"service.jet:643 calls __tree_generation on a borrowed typed tree; Services.rs:6272-6273 only copy its initialized i64 generation into an owned Int. The caller supplies no index/address, and no scheduler or tree reference escapes this scalar projection."},
-  {"file":"Core/Service/Service.jet","function":"event_count","proof":"__tree_event_count at service.jet:649 only reads the live tree's event_log length (Services.rs:4735-4736), returning an owned scalar. No record element, raw backing pointer or mutable borrow is exposed, so callers cannot outlive or invalidate event storage via this query."},
-  {"file":"Core/Service/Service.jet","function":"dead_letter_count","proof":"__tree_dead_letter_count at service.jet:655 borrows the typed tree and reads its initialized owned list length (Services.rs:3249-3250). The result is a copied Int with no native payload reference or caller-controlled address; subsequent clear/drop cannot invalidate it."},
-  {"file":"Core/Service/Service.jet","function":"workflow_start","proof":"service.jet:855 retains an exclusive tree borrow through workflow_prepare(:857), identity/version validation(:861-862), __workflow_count-bounded index loops(:864,872) and cursor/handle updates. __workflow_append receives a framed String only after run-id overflow rejection(:879-881); post-append cursor selection re-reads count(:885). Provider field/index leaves(Services.rs:7244-7258) use normal bounds-checked Vec access and owned projections, never reinterpret an id as a pointer. No mutable workflow view escapes."},
-  {"file":"Core/Service/Service.jet","function":"workflow_step","proof":"The exclusive tree borrow at service.jet:892 covers sync(:894), bounded deterministic step checks(:898-902), and workflow_find(:903), which searches 0..<__workflow_count(:1061-1064). Cursor/history leaves operate only on that selected index; __workflow_event_at uses optional checked history.get (Services.rs:7253). :913-915 reject terminal/oversized history before framed append. No caller run_id becomes an unchecked address or borrowed history reference."},
-  {"file":"Core/Service/Service.jet","function":"workflow_activity","proof":"service.jet:923 exclusively borrows the tree; workflow_prepare and workflow_token checks(:925-935) precede bounded max_attempts(:937) and count-bounded workflow_find(:938). Activity-definition helpers iterate __workflow_steps_len and parse field counts(:1114-1121), not caller indices. Native index leaves use checked Vec access (Services.rs:7244-7258); :965-967 reject terminal state before framed append. Returned TaskStatus is copied, with no workflow/storage borrow escaping."},
-  {"file":"Core/Service/Service.jet","function":"workflow_activity_retry","proof":"service.jet:976 holds the exclusive tree borrow across sync, bounded key checks and workflow_find(:978-986). The selected activity definition is owned; :989-998 validate outcome, replay agreement, terminal state and retry bound before computing the next attempt and __workflow_append(:1000-1002). History lookups are optional checked projections and index leaves use normal Vec bounds (Services.rs:7253-7258). Callers cannot forge a vector pointer or retain mutable activity storage."},
-  {"file":"Core/Service/Service.jet","function":"workflow_activity_complete","proof":"service.jet:1011 exclusively borrows the tree through sync, key/outcome checks and count-bounded workflow_find(:1013-1023). The two replay entries(:1027-1028) use __workflow_event_at's checked optional history.get (Services.rs:7253); only matching initialized events advance the cursor(:1029-1030). :1038-1047 reject conflicting completion before framed append. The return is an owned typed outcome; no raw event reference or unchecked caller index escapes."},
-  {"file":"Core/Service/Service.jet","function":"group","proof":"service.jet:1189 rejects started state and :1190-1194 validate_group against owned topology facts before __group_reparent(:1196). validate_group(:1205-1230) proves every named worker exists and membership is unique, discharging the provider's expect at Services.rs:3310. Reparent and __group_push mutate only typed tree/task storage, with no worker reference escaping to caller code between validation and use."},
-  {"file":"Core/Service/Service.jet","function":"chaos_fail","proof":"service.jet:1235 rejects unstarted trees and :1237 bounds the __tree_write_chaos_count increment before :1239. __first_running_endpoint(:1240) returns an owned optional endpoint (Services.rs:3302-3303), not a vector index or pointer, and fail_worker performs endpoint validation. Only a copied count returns; arbitrary caller state cannot overflow the native counter or obtain a mutable worker borrow."},
-  {"file":"Core/Service/Service.jet","function":"append_event","proof":"__event_store_append requires a present authority (Services.rs:3316-3317). service.jet:1251-1255 establish started EventLog state, present authority, bounded valid payload and record-count bound before constructing the owned framed record(:1256). The durable append(:1257) must succeed before __tree_event_push(:1261); the native leaf owns its inserted String. No reference into storage or independently supplied memory length escapes."},
-  {"file":"Core/Service/Service.jet","function":"commit_snapshot","proof":"service.jet:1267-1270 establish started Snapshot state, present authority and bounded valid payload before framing and __snapshot_store_write(:1271-1272). Native Services.rs:3320-3326 holds the authority mutex across store write and tree.snapshot assignment and owns the record String. Callers cannot bypass the present-option precondition, interpose a write inside the leaf, or receive a reference into replaced snapshot storage."},
-  {"file":"Core/Service/Service.jet","function":"validate_tree_endpoint","proof":"service.jet:1295-1296 borrow typed tree/endpoint only to obtain owned route/identity parts (Services.rs:3328-3336; ServiceAuthority.rs:351-355). :1297-1301 enforce matching authority/tree and permitted generation before locked __authority_validate. Neither caller identity nor generation is interpreted as a pointer/index, and no registry/tree borrow escapes this error/unit result."},
-  {"file":"Core/Service/Service.jet","function":"directory_resolve","proof":"__directory_entry at service.jet:1321 finds by String and clones an optional entry (Services.rs:3338-3339), rejecting absence. :1324-1335 check generation, signed directory proof, authority and live worker before returning its owned endpoint. __worker_route searches typed identity and returns owned facts, not a worker reference. An arbitrary name or stale endpoint cannot turn into an unchecked payload index or escaping native borrow."},
-  {"file":"Core/Service/Service.jet","function":"send","proof":"service.jet:1345-1364 check started state, endpoint authority/generation, bounded message and live nondraining worker before __authority_try_send. That operation receives typed owned text/endpoint, not caller addresses. Post-send __worker_sent_account(:1374) uses only the index returned by a fresh __worker_route on the same tree (Services.rs:3344-3352); native Vec indexing is bounds checked and task writes retain their lock. No mailbox or task reference escapes to the caller."},
-  {"file":"Core/Service/Service.jet","function":"delivery_status","proof":"__delivery_read at service.jet:1444 obtains the checked durable entry and materializes owned __DeliveryFacts (ServiceAuthority.rs:2727-2744). Failure returns before any field use; :1448 returns only the typed state enum. Callers cannot choose a log-memory address or outlive a registry/log lock through this projection."},
-  {"file":"Core/Service/Service.jet","function":"delivery_receipt","proof":"service.jet:1459 first obtains checked owning __DeliveryFacts through __delivery_read(ServiceAuthority.rs:2727-2744). :1463-1465 require successful signature derivation before :1467 constructs a fully initialized source receipt from its owned typed fields. No native entry reference or lock guard is exposed, and invalid delivery identity/authority returns an error before a receipt is emitted."},
-  {"file":"Core/Service/Service.jet","function":"delivery_events","proof":"__delivery_read(true) at service.jet:1473 returns owned record fields, not a borrowed log buffer (ServiceAuthority.rs:2727-2743). Every indexed record access is dominated by the exact fields.len()==10 or ==6 checks(:1480,1494); counters parse through checked workflow_i64, signatures verify before acceptance(:1491-1493,1505-1510), and :1514 guards events[0]. Malformed caller/log data cannot access an absent field or escape a mutable durable-entry borrow."},
-  {"file":"Core/Service/Service.jet","function":"delivery_retry","proof":"service.jet:1522 invokes __delivery_probe, whose native ServiceAuthority.rs:2746-2747 checks the durable entry before success. :1526 materializes a typed runtime from the delivery's cloned store and constant zero retention, then __runtime_retry receives typed carriers only. The returned Delivery owns its identity fields; no log reference, pointer or guard escapes, including on retry errors."},
-  {"file":"Core/Service/Service.jet","function":"endpoint_receive","proof":"service.jet:1533-1537 validate owned endpoint identity before __endpoint_mailbox. Native ServiceAuthority.rs:2751-2776 captures the channel in an owning Arc and returns initialized started/draining facts, so releasing the registry lock cannot dangle the mailbox. :1542 enforces lifecycle/depth policy before one __mailbox_receive; :1544-1547 decode its status into owned message/error. No caller can supply a raw channel address or receive a borrowed queue element."},
-  {"file":"Core/Service/Service.jet","function":"local_delivery_ids","proof":"service.jet:1622 requires successful __worker_route before __mailbox_snapshot(:1623), using only the returned valid worker index. Native Services.rs:3362-3366 copies messages/idempotency records into owned lists; :1627-1634 match initialized identity/message fields before __delivery_id with a fully initialized zero-retention runtime. No pointer or mutable mailbox/record view is exported and arbitrary endpoint text is never used directly as an index."},
-  {"file":"Core/Service/Service.jet","function":"send_durable","proof":"service.jet:1642-1658 check delivery mode, state authority, bounded key/message, started state and endpoint routing before __runtime_send. Mailbox snapshot/restore indices come only from __worker_named_index(:1676,1693), which searches current workers (Services.rs:3368-3369); native restores use checked Vec access(:3378-3379). Each authority operation retains its own locks and returns owning Delivery/String facts; mailbox replacement consumes its owned message list, never exporting channel references. Dead-letter/idempotency pushes are length bounded(:1683,1702)."},
-  {"file":"Core/Service/Service.jet","function":"receive","proof":"service.jet:1715-1726 validate tree lifecycle/endpoint before selecting a worker. Capacity bounds :1728-1729 dominate __take_pending; each mailbox operation(:1751-1752,1774-1783) uses the index returned by a fresh __worker_route, and rollback reselects target(:1787-1790). Native Services.rs:3362-3423 use owned snapshots, checked Vec indexing and locked/Arc channel operations, not unchecked memory. :1780-1782 admit only a successful owned message; no queue element or task guard escapes to callers."},
-  {"file":"Core/Service/Service.jet","function":"pending_delivery_rollback","proof":"The gate at service.jet:1806 passes typed endpoint/owned pending records to __requeue_pending, then an owned prior message snapshot to __mailbox_restore in both result branches(:1809,1815). Its local callers in receive(:1759,1762) pass the index obtained from __worker_route, never caller text as an address; native Services.rs:3378-3379 still bounds-check the Vec access. Both operations own/copy their inputs under existing locks and return errors, not references into restored mailbox storage."},
-  {"file":"Core/Service/Service.jet","function":"worker","proof":"service.jet:1868-1876 reject started state, capacity outside1..1000000, invalid names, excess workers and duplicates before allocation. __endpoint_unchecked receives route fields/issued authority(:1878-1893), and __worker_mailbox_new receives bounded capacity plus an empty owned queue(:1894). :1906-1914 initialize task/topology and every __worker_push field; the mailbox moves rather than cloning its forkable channel. The handler is a typed checked function item, not a raw caller address; native Services.rs:7289-7305 only store initialized owned fields."},
-  {"file":"Core/Service/Service.jet","function":"fail_worker","proof":"service.jet:2008 holds an exclusive tree borrow and :2010-2014 validate lifecycle/endpoint before obtaining owning topology/worker facts. Target indices derive from worker_scope/worker_index(:2019-2031), group/supervisor accesses are explicitly bounded(:2023,2092,2109), and previous/desired lists are constructed for exactly facts.workers.len()(:2059-2067). Native writes(Services.rs:7308-7329) use checked Vec indexing; task partition writes hold one mutex(:7339-7341). Replacement mailboxes own their queues and move at :2103, so close/restart cannot expose dangling channel storage."},
-  {"file":"Core/Service/Service.jet","function":"restarts","proof":"service.jet:2125 validates the endpoint before owned topology/worker facts. :2134 checks supervisor against facts.groups.len() before selecting budget; :2136 iterates worker facts and matches tree/name before reading that worker's owning restart list. Providers preserve worker insertion order (Services.rs:3305-3307,7269-7277), and accesses are normal bounds-checked projections. The result is a copied count, not a restart-list or task reference."},
-  {"file":"Core/Service/Service.jet","function":"mailbox_depth","proof":"service.jet:2146 validates the endpoint, then :2151-2155 iterate owning topology/worker facts and call __worker_mailbox_depth only with the matching in-range worker index. Native Services.rs:7328-7329 bounds-check workers and copies the live Arc channel's depth. No channel pointer/view or mutable mailbox reference reaches caller code, even for stale or unknown endpoints which return errors."},
+  {"file":"Core/Service/Service.jet","function":"state_path_kind","proof":"__path_kind at service.jet:1365 accepts a borrowed valid String path and returns copied metadata kind or owned IOError. It performs a final-component pathname query, not a descriptor/identity ownership transfer; no caller pointer or reference into OS metadata is returned. A path race can alter the metadata result but cannot invalidate a caller memory borrow."},
   {"file":"Core/Ui/Host.jet","function":"transfer_request","proof":"__request_transfer requires kind 0/1 and explicit absent-directory state (Core/HostServices.rs:2135-2152). The local helper's only callers host.jet:172,176 supply exactly those constants, true directory_absent, an empty typed filter list and false multiple. The typed UIFSGrant is borrowed/cloned into an owning request, not interpreted as a memory address; title is valid String text. No current-host scope is accessed by this layout-only leaf and callers cannot supply unchecked tags to the local helper."},
   {"file":"Core/Ui/Host.jet","function":"capabilities","proof":"The host.jet:154-155 __capabilities gate dispatches to jet_ui_host_capabilities (Core/HostServices.rs:1838-1840), which queries capability_facts through jet_ui_with_current_host. In the repaired scope (7ee5e69a8, :1786-1820), only jet_ui_with_host owns the private lifetime-bound guard: TLS stores the address of its live stack-held host reference without transmute, and Drop restores the predecessor before that reference/host borrow ends, including unwinding; safe callers cannot obtain or forget the guard. :1822-1834 hold the mutable TLS borrow across the callback, refusing recursive access and nested installation before another host reference is made; the default host also stays mutably borrowed. No caller address is accepted and the result is copied capability bits (:74-76), not a host reference."},
   {"file":"Core/Ui/Host.jet","function":"open_file","proof":"host.jet:160-161 moves the typed request into __open_file, whose jet_ui_host_open_file provider (Core/HostServices.rs:1841-1845) calls jet_ui_open_file under jet_ui_with_current_host. The private lifetime-bound scope at :1786-1820 is owned only by jet_ui_with_host, keeps its stack-held host reference live without transmute, and restores predecessor TLS before the frame/host borrow ends on return or unwind; safe callers cannot leak its guard. The mutable TLS borrow at :1822-1834 stays held throughout the provider, so re-entry or nested installation fails before minting another host reference (the default host is borrowed too). Ui.rs:217-227 retain a request clone and validate the returned selection against it before success. Caller requests contain typed owned values, not host addresses; the result owns granted paths (:1348-1350) and exports no scoped host borrow."},
