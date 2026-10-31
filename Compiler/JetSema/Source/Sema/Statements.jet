@@ -5825,6 +5825,12 @@ fn sema_stmt_check_place_assignment(target: LValue, checked_place: ^TExpr, op: B
     tree_op := TBinaryOp?{None}
     if op != None {
         operator :: op
+        // (Rust `check_stmt` `compound_missing_struct_hook`) A record place
+        // whose type implements no hook for this operator has no arithmetic.
+        if sema_stmt_compound_missing_struct_hook(operator, place.ty, environment, program) {
+            &diagnostics.push(sema_expr_missing_operator_hook(operator, place.ty, op_span))
+            return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 11")
+        }
         result :: sema_stmt_compound_result(operator, place.ty, checked.ty, expr, op_span, scopes, &diagnostics) ?? return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 11")
         if !sema_type_assignable(place.ty, result) {
             &diagnostics.push(if target == .Field(_, member, _) -> sema_slot_holds_mismatch("field `{member}`", "field", place.ty, result, op_span) else -> sema_type_mismatch(place.ty, result, op_span))
@@ -5931,6 +5937,18 @@ fn sema_stmt_compound_nested_hook(op: BinOp, base: Expr, field_ty: Type, environ
         }
         else -> true
     }
+}
+
+fn sema_stmt_compound_missing_struct_hook(op: BinOp, place: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    if op != BinOp.Add && op != BinOp.Sub && op != BinOp.Mul && op != BinOp.Div -> return false
+    trait_name :: sema_expr_operator_trait(op) ?? return false
+    if !sema_stmt_compound_nominal(place) -> return false
+    if program.registration_graph == .Val(graph) {
+        row :: sema_type_resolve_nominal_row(graph, place, environment.module_identity) ?? return false
+        if graph.modules[row.module_index].nominals[row.row].kind != SemaRegistrationNominalKind.Struct -> return false
+        return !sema_comparability_implements(environment, program, place, trait_name)
+    }
+    false
 }
 
 // (Rust `check_stmt`): compound arithmetic is the same operator as
