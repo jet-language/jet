@@ -2,8 +2,10 @@
 // SPEED-500K budget checker: reads a compiler trace (JET_TRACE_FILE) and the
 // per-phase budget table next to this file (budget.json, the ns/line columns
 // of SPEED-500K.md §1) and prints, per phase, its time, its ns per source
-// line, the budget of the chosen milestone column and the ratio. Exits 1 when
-// any phase is over its budget.
+// line, the budget of the chosen milestone column and the ratio, then the
+// subtotal of the always-on check rows. Exits 1 when any phase is over its
+// budget, or when a full-unit trace (it has a `lower` span) lacks an always-on
+// check span.
 //
 //   node Tools/perf/budget/check.mjs <trace> [--column 225K|500K|1M]
 //        [--clock auto|proc_cpu|cpu|wall] [--lines N] [--budget FILE] [--strict]
@@ -241,6 +243,31 @@ function main() {
   console.log("");
   console.log(table(["row", "phase", "seconds", "ns/line", "budget", "ratio", "status"], out));
 
+  // D-SPEED-CHECKS1=A: the always-on checks (budget.json `always_on` rows) stay
+  // in every default build, each run once, and a missed milestone ships its
+  // measured number. Print their subtotal. A full-unit trace (the compile
+  // reached code generation: it has a `lower` span) must carry every always-on
+  // span, or a check left the build.
+  let missingCheck = false;
+  const alwaysOn = measured.filter(({ row }) => row.always_on);
+  if (alwaysOn.length > 0) {
+    let alwaysNs = 0;
+    let alwaysBudget = 0;
+    for (const { row, ns, present } of alwaysOn) {
+      alwaysNs += present ? ns : 0;
+      alwaysBudget += row.budget[column];
+    }
+    const ids = alwaysOn.map(({ row }) => row.id).join(", ");
+    console.log("");
+    console.log(`always-on checks (${ids}): ${grouped(alwaysNs / lines)} ns/line, budget ${grouped(alwaysBudget)} (${fixed((100 * alwaysBudget) / budgetSum, 1)}% of the ${column} work sum)`);
+    const kinds = new Set(spans.map((span) => span.kind));
+    const missing = alwaysOn.flatMap(({ row }) => row.always_on.spans.filter((kind) => !kinds.has(kind)).map((kind) => `${row.id} ${kind} (${row.always_on.check})`));
+    if (missing.length > 0 && kinds.has("lower")) {
+      console.log(`missing always-on spans in a full-unit trace: ${missing.join("; ")}`);
+      missingCheck = true;
+    }
+  }
+
   // Work counters per natural unit (budgets at the 1M column only).
   const unitRows = [];
   for (const { row, ns, present } of measured) {
@@ -300,8 +327,11 @@ function main() {
     for (const note of [...notes].sort()) console.log(`note: ${note}`);
   }
   console.log("");
-  console.log(failed ? `FAIL: over the ${column} budget` : `PASS: within the ${column} budget`);
-  process.exit(failed ? 1 : 0);
+  const reasons = [];
+  if (failed) reasons.push(`over the ${column} budget`);
+  if (missingCheck) reasons.push("an always-on check did not run");
+  console.log(reasons.length > 0 ? `FAIL: ${reasons.join("; ")}` : `PASS: within the ${column} budget`);
+  process.exit(reasons.length > 0 ? 1 : 0);
 }
 
 main();
