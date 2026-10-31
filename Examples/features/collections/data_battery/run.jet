@@ -142,10 +142,10 @@ fn run() {
     files.write(receipt_path, json.to_string(receipt) ?? panic("JSON encode")) ?? panic("write receipt")
     if !files.exists(receipt_path) -> panic("receipt missing")
 
-    // Unavailable paths stay explicit in source: core.data has no parquet
-    // reader (D-FOUND-HANDLE1), and the default Python foreign-handle bridge
-    // is not bound. Future proof runs must record those exact failures rather
-    // than replacing either path with a provider-shaped value.
+    // Unavailable paths stay explicit in source: the default Python
+    // foreign-handle bridge is not bound. Future proof runs must record that
+    // exact failure rather than replacing the path with a provider-shaped
+    // value.
     print("rows={receipt.rows} columns={receipt.columns} filtered={receipt.filtered} groups={receipt.groups} sums={receipt.grouped_sum_cells} joined={receipt.joined} pivot={receipt.pivot_cells} rolling={receipt.rolling_values} described={receipt.described_values}")
     print("labeled=south/margin:{receipt.labeled_value} tensor_shape={receipt.tensor_shape} ols={receipt.regression_slope}/{receipt.regression_intercept}/{receipt.regression_r_squared}")
     print("svg={receipt.svg_bytes} png={receipt.png_bytes} receipt={receipt.svg_written && receipt.png_written} bridges={receipt.bridge_statuses}")

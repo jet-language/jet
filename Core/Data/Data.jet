@@ -19,6 +19,7 @@ use core.encoding.json as json_codec
 use core.encoding.csv as csv_codec
 use core.encoding.csv.[CSVReader]
 use __core_encoding_stream as encoding_stream
+use __core_data_parquet as parquet
 use core.crypto.[sha256]
 use core.sys as sys
 use core.db.[SQL, DBValue]
@@ -2872,6 +2873,7 @@ fn data_loader_render(out: &[U8], tree: encoding.Dyn) Never! {
             }
             &out.push(U8{125})
         }
+        .DateTime(_) -> data_loader_quote(&out, tree.to_text() ?? panic("DateTime always has an RFC 3339 representation"))
         else -> panic("unknown native Dyn carrier")
     }
 }
@@ -2991,9 +2993,17 @@ fn data_loader_payload<T>(loader: DataLoader<T>) -[FS]> (data: [U8], offline: Bo
 // The payload as one tree, by format (Rust `jet_data_loader_tree`).
 fn data_loader_tree(payload: [U8], format: DataFormat, limits: DataLimits) -> Dyn DataError! {
     if format == DataFormat.Parquet {
-        // Parquet is read only through its provider bridge, which is not
-        // built yet (#6419).
-        return Err(data_loader_error(DataErrorKind.Bridge, "data.loader.parquet", "the Parquet provider bridge is not built"))
+        if parquet.read_rows(payload, limits.max_output_rows, limits.encoding.max_item_bytes) == {
+            .Ok(tree) -> return Ok(tree)
+            .Err(failure) -> {
+                kind :: if failure.kind == {
+                    .Decode -> DataErrorKind.Decode
+                    .Unsupported -> DataErrorKind.Unsupported
+                    .Limit -> DataErrorKind.Limit
+                }
+                return Err(data_loader_error(kind, "data.loader.parquet", failure.reason))
+            }
+        }
     }
     if format == DataFormat.Arrow {
         return Err(data_loader_error(DataErrorKind.Bridge, "data.loader", "Arrow IPC has a separate provider boundary; Parquet is the registered reader"))

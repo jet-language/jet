@@ -6,7 +6,7 @@
 use core.data as data
 
 fn run() {
-    int_loader :: data.file<[Dyn]>(
+    int_loader := data.file<[Dyn]>(
         "tests/fixtures/parquet_reader/int32_with_null_pages.parquet",
         "parquet",
         data.DataLimits.safe()
@@ -20,7 +20,7 @@ fn run() {
     index := 0
     saw_nonnull := false
     loop index < int_rows.len() {
-        row :: int_rows.at(index) ?? panic("int32 row")
+        row :: int_rows[index]
         cell :: &row.field("int32_field") ?? panic("int32 field")
         if !cell.equal_unordered(Dyn.Null) {
             saw_nonnull = true
@@ -28,32 +28,31 @@ fn run() {
         }
         index += 1
     }
-    null_page_row :: int_rows.at(200) ?? panic("int32 null-page row")
+    null_page_row :: int_rows[200]
     null_page_cell :: &null_page_row.field("int32_field") ?? panic("int32 null-page field")
     print("int32 rows={int_rows.len()} nonnull={saw_nonnull} null_page={null_page_cell.equal_unordered(Dyn.Null)}")
 
-    dictionary_loader :: data.file<[Dyn]>(
+    dictionary_loader := data.file<[Dyn]>(
         "tests/fixtures/parquet_reader/alltypes_tiny_pages.parquet",
         "parquet",
         data.DataLimits.safe()
     ) ?? panic("dictionary loader")
     dictionary_snapshot :: data.snapshot<[Dyn]>(&dictionary_loader) ?? panic("dictionary snapshot")
     dictionary_rows :: dictionary_snapshot.value
-    first_dictionary_row :: dictionary_rows.at(0) ?? panic("dictionary first row")
+    first_dictionary_row :: dictionary_rows[0]
     // `string_col` is dictionary encoded in the upstream Impala alltypes file.
     // Accessing it through Dyn keeps this fixture independent of a missing
     // provider-specific typed-row constructor.
     _dictionary_value :: &first_dictionary_row.field("string_col") ?? panic("dictionary string_col")
     print("dictionary: decoded string_col")
 
-    malformed_loader :: data.file<[Dyn]>(
+    malformed_loader := data.file<[Dyn]>(
         "tests/fixtures/parquet_reader/ARROW-RS-GH-6229-DICTHEADER.parquet",
         "parquet",
         data.DataLimits.safe()
     ) ?? panic("malformed loader")
-    malformed :: data.snapshot<[Dyn]>(&malformed_loader)
-    if malformed == {
+    if data.snapshot<[Dyn]>(&malformed_loader) == {
         .Ok(_) -> print("malformed: unexpectedly accepted")
-        .Err(error) -> print("malformed: rejected {error.kind} {error.operation}")
+        .Err(err) -> print("malformed: rejected {err.kind:Debug} {err.operation}")
     }
 }
