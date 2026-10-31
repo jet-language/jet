@@ -134,19 +134,21 @@ fn provider_test_native_entry(verification: &StoreVerification, roots: HangarRoo
     files.remove_all(source) ?? panic("source cleanup")
 }
 
+// Diagnostic What, Why and Fix lines are sentence case (Docs/spec/ui-case-law.md;
+// `diagnostic_from_registry` capitalizes the first ordinary word).
 #Test("provider native build diagnostics match substituted provider contract") {
     cases :: [(error: NativeNixBuildError, code: String, what: String, fix: String)]{
-        (error: NativeNixBuildError.SandboxUnavailable("sandbox detail"), code: "E1275", what: "build sandboxing is required but unavailable", fix: "provide a trusted substitute or approved remote builder, or enable the native sandbox, then retry."),
-        (error: NativeNixBuildError.Invalid("invalid derivation"), code: "E1340", what: "couldn't understand the provider's output", fix: "this is likely a Jetpack bug — please report it."),
-        (error: NativeNixBuildError.Failed("builder detail"), code: "E1273", what: "package build failed at a logged step", fix: "run `jet logs <pkg>` for full output, or rerun with `--shell-on-fail`."),
-        (error: NativeNixBuildError.Store("store detail"), code: "E1315", what: "hangar ingest aborted", fix: "re-run ingest against a stable output, or quarantine and rebuild it from a trusted source."),
+        (error: NativeNixBuildError.SandboxUnavailable("sandbox detail"), code: "E1275", what: "Build sandboxing is required but unavailable", fix: "Provide a trusted substitute or approved remote builder, or enable the native sandbox, then retry."),
+        (error: NativeNixBuildError.Invalid("invalid derivation"), code: "E1340", what: "Couldn't understand the provider's output", fix: "This is likely a Jetpack bug — please report it."),
+        (error: NativeNixBuildError.Failed("builder detail"), code: "E1273", what: "Package build failed at a logged step", fix: "Run `jet logs <pkg>` for full output, or rerun with `--shell-on-fail`."),
+        (error: NativeNixBuildError.Store("store detail"), code: "E1315", what: "Hangar ingest aborted", fix: "Re-run ingest against a stable output, or quarantine and rebuild it from a trusted source."),
     }
     loop case in cases {
         diagnostic :: case.error.diagnostic()
         assert_eq(diagnostic.code, case.code)
         assert_eq(diagnostic.what, case.what)
         assert_eq(diagnostic.fix, case.fix)
-        assert(diagnostic.why.ends_with("detail") || diagnostic.why == "invalid derivation")
+        assert(diagnostic.why.ends_with("detail") || diagnostic.why == "Invalid derivation")
         provider_error :: provider_test_converted(case.error)
         assert_eq(provider_error.code() ?? "E1340", case.code)
     }
