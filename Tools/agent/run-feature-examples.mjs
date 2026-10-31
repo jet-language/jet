@@ -103,8 +103,12 @@ export function collectFeatureExamples(featuresDir = FEATURES) {
 // `jet emit --<tier> <example>`, checked after the example's run passes.
 export const EMIT_TIERS = ["ast", "mir", "lir"];
 
-function readExpected(stem) {
-  const outPath = join(EXPECTED, `${stem}.out`);
+// The example's goldens. A case whose only run step asserts
+// `stdout: = FILE` compares stdout with that file instead of `<stem>.out`,
+// as testkit Golden.jet does for an explicit stdout assertion.
+function readExpected(stem, caseText) {
+  const stdoutFile = caseStdoutFile(caseText);
+  const outPath = stdoutFile === null ? join(EXPECTED, `${stem}.out`) : join(EXPECTED, dirname(stem), stdoutFile);
   const errPath = join(EXPECTED, `${stem}.err.out`);
   const stderrPath = join(EXPECTED, `${stem}.stderr.out`);
   const emit = {};
@@ -118,6 +122,27 @@ function readExpected(stem) {
     stderrOut: existsSync(stderrPath) ? readFileSync(stderrPath, "utf8") : null,
     emit,
   };
+}
+
+// The `FILE` of a `stdout: = FILE` assertion on a case's only run step (the
+// step caseInvocation reads), or null.
+export function caseStdoutFile(caseText) {
+  if (caseText === null) return null;
+  let runSteps = 0;
+  let inRunStep = false;
+  let file = null;
+  for (const raw of caseText.split("\n")) {
+    const line = raw.trim();
+    if (line.startsWith("step:")) {
+      const words = line.slice("step:".length).trim().split(/\s+/u);
+      inRunStep = !(words.length === 1 && words[0] === "build");
+      if (inRunStep) runSteps += 1;
+      continue;
+    }
+    const assertion = inRunStep ? /^stdout:\s*=\s*([^"\s]\S*)$/u.exec(line) : null;
+    if (assertion) file = assertion[1];
+  }
+  return runSteps === 1 ? file : null;
 }
 
 // The run flags and program arguments of an example's `<stem>.case`, as
@@ -575,8 +600,8 @@ async function main() {
   mkdirSync(scratch, { recursive: true });
   try {
     const results = await mapLimit(entries, options.jobs, async (entry, slot) => {
-      const expected = readExpected(entry.stem);
       const caseText = readCase(entry.stem);
+      const expected = readExpected(entry.stem, caseText);
       const skipped = skipReason(entry, expected, caseText);
       if (skipped) return { stem: entry.stem, shown: entry.shown, status: "skipped", detail: skipped };
       const runOptions = {

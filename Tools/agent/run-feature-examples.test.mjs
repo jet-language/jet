@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   asRunCommand,
   buildArgs,
+  caseStdoutFile,
   classifyEmit,
   classifyRun,
   collectFeatureExamples,
@@ -115,6 +116,16 @@ test("a case's own `jet run` step runs from the example's directory", () => {
   assert.equal(runCwd(entry, "step: built\n", "/stage"), "/stage");
   assert.equal(runCwd(entry, null, "/stage"), "/stage");
   assert.ok(runCwd(entry, "step: jet run authority_core_method.jet\n", undefined).endsWith("/Examples/features/effects"));
+});
+
+test("a case's own `stdout: = FILE` assertion names the expected stdout", () => {
+  assert.equal(caseStdoutFile(null), null);
+  assert.equal(caseStdoutFile("step: built greet\nstdout: = job_runner.greet.out\n"), "job_runner.greet.out");
+  assert.equal(caseStdoutFile("step: build\nstep: built\nstdout: = a.out\n"), "a.out");
+  assert.equal(caseStdoutFile("step: built\nstdout: empty\n"), null);
+  assert.equal(caseStdoutFile("step: built\nstdout: = \"literal\\n\"\n"), null);
+  assert.equal(caseStdoutFile("step: built\nstdout: one-of a.out b.out # host\n"), null);
+  assert.equal(caseStdoutFile("step: built a\nstdout: = a.out\nstep: built b\nstdout: = b.out\n"), null);
 });
 
 test("the build tier builds with the case's run flags", () => {

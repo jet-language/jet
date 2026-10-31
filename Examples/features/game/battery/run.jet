@@ -91,7 +91,10 @@ fn run() {
 
     replay :: game.Replay.record(replay_path)
     transcript :: game.run(scene, replay: replay, frames: 600)
-    print(transcript)
+    // Paths print relative to the fixture root, so the output is the same
+    // from a repository checkout and from the package directory.
+    shown_root :: "{root}/"
+    print(transcript.replace(shown_root, ""))
 
     state :: games.SaveState{x: accumulator.current_tick, paused: false}
     paused_state :: games.pause_toggle(state)
@@ -121,5 +124,7 @@ fn run() {
     // prints the requested shape and the joined worker only.
     print("audio_callback=cancelled rate:{receipt.requested_rate_hz} frames:{receipt.requested_frames} cancelled:{stream.is_cancelled()} joined:{receipt.end_identity > 0}")
     print("music_stream=unavailable")
-    print("scene_image={image:Debug} scene_sound={sound:Debug}")
+    image_text :: "{image:Debug}".replace(shown_root, "")
+    sound_text :: "{sound:Debug}".replace(shown_root, "")
+    print("scene_image={image_text} scene_sound={sound_text}")
 }
