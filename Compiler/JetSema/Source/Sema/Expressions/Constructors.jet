@@ -56,6 +56,8 @@ use jet_foundation.[
     TPatternPosition,
     jet_target_layout_atomic_scalar_type,
     checked_generated_local,
+    TextEdit,
+    diagnostic_with_edit,
 ]
 
 // A type named by a local binding, through a module alias
@@ -474,11 +476,13 @@ fn sema_expression_core_record_literal(owner_name: String, fields: [ExprField], 
         }
         supplied[found] = true
     }
+    missing := [String]{}
     loop (index, row) in declared {
-        if !supplied[index] {
-            &diagnostics.push(sema_error("E0108", span, "field `{row.name}` needs a value", "a struct literal must initialize every field without a default", "supply `{row.name}: ...`"))
-            return None
-        }
+        if !supplied[index] -> &missing.push(row.name)
+    }
+    if missing.len() > 0 {
+        &diagnostics.push(sema_expression_missing_fields("struct literal for `{owner_name}`", "every field must appear exactly once", missing, span))
+        return None
     }
     values := [TStructFieldValue]{}
     loop source in fields {
@@ -550,7 +554,12 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
             }
         }
         if found < 0 {
-            &diagnostics.push(sema_error("E0302", source.name_span, "`{type_name(result_ty)}` has no field `{source.name}`", "struct fields must be declared by the type", "use one of the declared field names"))
+            field_names :: loop declared in struct_def.fields -> declared.name
+            suggestion :: sema_suggest_field(source.name, field_names)
+            fix :: if suggestion == .Val(near) -> "did you mean `{near}`?" else -> "remove this field"
+            diagnostic := sema_error("E0303", source.name_span, "struct literal for `{struct_name}` has no field `{source.name}`", "struct literals may only set fields that exist on the type", fix)
+            if suggestion == .Val(near) -> diagnostic = diagnostic_with_edit(diagnostic, TextEdit{span: source.name_span, new_text: near})
+            &diagnostics.push(diagnostic)
             return None
         }
         // Rust `check_struct_lit`: a computed field is recomputed on every
@@ -560,7 +569,7 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
             return None
         }
         if supplied[found] {
-            &diagnostics.push(sema_error("E0105", source.name_span, "field `{source.name}` is supplied more than once", "each struct field receives one value", "remove the duplicate field"))
+            &diagnostics.push(sema_error("E0303", source.name_span, "field `{source.name}` appears more than once", "each field may be written only once in a struct literal", "remove the duplicate field"))
             return None
         }
         supplied[found] = true
@@ -610,14 +619,19 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
         }
         result_ty = Type.Apply{name: head, args: args}
     }
+    missing := [String]{}
     loop (index, field) in struct_def.fields {
         if supplied[index] || field.computed != None -> next
         default_value :: field.default ?? {
-            &diagnostics.push(sema_error("E0108", span, "field `{field.name}` needs a value", "a struct literal must initialize every field without a default", "supply `{field.name}: ...` or declare a field default"))
-            return None
+            &missing.push(field.name)
+            next
         }
         checked :: sema_expression_struct_field_default(field, default_value, span, owner, names, args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         &values.push(checked)
+    }
+    if missing.len() > 0 {
+        &diagnostics.push(sema_expression_missing_fields("struct literal for `{struct_name}`", "every field without a `{{…}}` default must appear exactly once", missing, span))
+        return None
     }
     value := sema_tree_node(result_ty, TExprKind.StructLit{fields: values}, span)
     if as_trait == .Val(trait_name) {
@@ -913,11 +927,13 @@ fn sema_expression_enum_literal(type_name: String, type_args: [Type], variant: S
                 if !sema_copy_site_record_move(payload_expr, "the variant payload", environment, program, scopes, &state, &tail_store, &context, &diagnostics) -> return None
                 &named_values.push(TNamedEnumArg{name: label, value: TEnumArg{value: checked}})
             }
+            missing := [String]{}
             loop (index, was_supplied) in supplied {
-                if !was_supplied {
-                    &diagnostics.push(sema_error("E0108", span, "variant field `{fields[index].name}` needs a value", "named enum payloads initialize every declared field", "supply the missing payload field"))
-                    return None
-                }
+                if !was_supplied -> &missing.push(fields[index].name)
+            }
+            if missing.len() > 0 {
+                &diagnostics.push(sema_expression_missing_fields("variant `{variant}`", "every payload field must appear exactly once", missing, span))
+                return None
             }
             if failed -> return None
             payload = TEnumPayload.Named{fields: named_values}
@@ -1076,15 +1092,24 @@ fn sema_expression_core_enum_named_literal(enum_name: String, display_name: Stri
         if !sema_copy_site_record_move(payload_expr, "the variant payload", environment, program, scopes, &state, &tail_store, &context, &diagnostics) -> return None
         &named_values.push(TNamedEnumArg{name: label, value: TEnumArg{value: checked}})
     }
+    missing := [String]{}
     loop (index, was_supplied) in supplied {
-        if !was_supplied {
-            &diagnostics.push(sema_error("E0108", span, "variant field `{labels[index]}` needs a value", "named enum payloads initialize every declared field", "supply the missing payload field"))
-            return None
-        }
+        if !was_supplied -> &missing.push(labels[index])
+    }
+    if missing.len() > 0 {
+        &diagnostics.push(sema_expression_missing_fields("variant `{variant}`", "every payload field must appear exactly once", missing, span))
+        return None
     }
     if failed -> return None
     value :: sema_tree_node(Type.Named{name: enum_name}, TExprKind.EnumLit{enum_type: enum_name, variant: variant, payload: TEnumPayload.Named{fields: named_values}}, span)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
+}
+
+// Rust `check_struct_lit` / `check_enum_lit`: every field a literal leaves
+// out is named in one E0303 at the literal.
+fn sema_expression_missing_fields(what: String, why: String, missing: [String], span: Span) -> Diagnostic {
+    listed :: missing.join(", ")
+    sema_error("E0303", span, "{what} is missing fields: {listed}", why, "add: {listed}")
 }
 
 // Rust `core_duration_unit_variants`: the closed unit list `duration.in(unit)`
