@@ -34,7 +34,7 @@ fn run(args: WorkloadArgs) {
         .stdin(.Stream)
         .timeout(duration)
         .spawn() ?? panic("MCP server failed to launch")
-    child.stdin.write(payload) ?? panic("MCP request failed to write")
+    child.stdin.write_text(payload) ?? panic("MCP request failed to write")
     result :: child.wait() ?? panic("MCP server failed to wait")
     if !result.success {
         panic("MCP server failed: {result.code} {result.errors}")

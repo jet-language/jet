@@ -55,10 +55,10 @@ use core.files as files
     assert_eq(cases_test_advanced(root, "files", source).verdict.status, "PASS")
     bad :: "step: printf discarded\nstdout: null\nstdout: empty\n"
     assert_eq(cases_test_advanced(root, "nulled-assertion", bad).verdict.status, "REFUSED")
-    loop modifier in ["pty: true size 24x80", "pty: stdout", "stderr-to-stdout: true"] {
+    loop modifier in ["pty: stdout", "stderr-to-stdout: true"] {
         result :: cases_test_advanced(root, "seam", "step: printf unreachable\n{modifier}\n")
         assert_eq(result.verdict.status, "REFUSED")
-        assert_eq(result.verdict.detail, if modifier.starts_with("pty:") -> "pty" else -> "process-merge-stderr")
+        assert_eq(result.verdict.detail, if modifier.starts_with("pty:") -> "pty-stdio" else -> "process-merge-stderr")
     }
     files.remove_all(root) ?? panic("remove wiring scratch")
 }

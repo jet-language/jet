@@ -421,13 +421,22 @@ fn sema_marker_module_argument_menus(graph: SemaRegistrationGraph) -> [TAppliedR
     foundation_core_argument_menus(effect_roots, sema_taint_builtin_tag_names())
 }
 
-fn sema_marker_module_check(graph: SemaRegistrationGraph) -> [Diagnostic]? {
+// The prelude's applied-rule catalog (MARKER_SOURCE) with its argument menus.
+fn sema_marker_module_applied_catalog(graph: SemaRegistrationGraph) -> TAppliedRuleCatalog? {
     parsed :: parse_generated_source(MARKER_SOURCE.bytes())
     if parsed.diagnostics.len() > 0 -> return None
     argument_menus :: sema_marker_module_argument_menus(graph) ?? return None
-    applied :: sema_marker_rules_build_catalog(parsed.program, MARKER_SOURCE, argument_menus) ?? return None
+    sema_marker_rules_build_catalog(parsed.program, MARKER_SOURCE, argument_menus)
+}
+
+// The registry of the builtin applied rules alone, without source-declared markers.
+fn sema_marker_module_catalog_registry(applied: TAppliedRuleCatalog) -> SemaScopeMembersMarkerRegistry? {
     catalog := SemaScopeMembersMarkerRegistry{applied_rules: applied.rows, argument_menus: applied.argument_menus, marker_rules: [SemaScopeMembersMarkerRule]{}, known_marker_names: [String]{}, function_allowed_markers: [String]{}, block_allowed_markers: [String]{}, derive_provider_names: [String]{}}
     if !sema_scope_members_registry_add_applied_catalog(&catalog, applied) -> return None
+    Val(catalog)
+}
+
+fn sema_marker_module_check(graph: SemaRegistrationGraph, applied: TAppliedRuleCatalog, catalog: SemaScopeMembersMarkerRegistry) -> [Diagnostic] {
     diagnostics := [Diagnostic]{}
     loop module_row_index in 0..<graph.modules.len() {
         start :: diagnostics.len()
@@ -484,7 +493,7 @@ fn sema_marker_module_check(graph: SemaRegistrationGraph) -> [Diagnostic]? {
         if !sema_module_is_core_source(graph.modules[module_row_index].module_identity) -> sema_marker_module_check_unbuilt_rules(catalog, graph.modules[module_row_index].program, &diagnostics)
         sema_attach_diagnostic_source_locations(&diagnostics, start, graph.modules[module_row_index].source_segments)
     }
-    Val(diagnostics)
+    diagnostics
 }
 
 // An applied builtin rule the checker has no route for (sema_policy_

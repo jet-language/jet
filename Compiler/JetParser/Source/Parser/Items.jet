@@ -2178,6 +2178,7 @@ fn parser_parse_const(state: &JetParserState, modifiers: ParsedItemModifiers) ->
     }
     result := ast_const(binding_name, name_token.span, parser_cover(modifiers.start_span, terminator_span), parsed_value.expr)
     result.attrs = attrs
+    result.markers = modifiers.markers
     result.is_pub = modifiers.is_pub
     result.is_package_pub = modifiers.is_package_pub
     result.is_comptime = prepared
@@ -2228,6 +2229,7 @@ fn parser_module_binding_def(statement: Stmt, start: Span, end: Int) -> ConstDef
         if binding.pattern != None || binding.name == "" -> return None
         definition := ast_const(binding.name, binding.name_span, Span{start: start.start, end: end}, binding.init)
         definition.meta = binding.meta
+        definition.markers = binding.markers
         definition.is_comptime = binding.is_comptime
         definition.ct = binding.ct
         definition.ty = binding.ty

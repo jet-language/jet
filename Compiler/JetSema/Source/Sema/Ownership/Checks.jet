@@ -2836,21 +2836,26 @@ fn sema_ownership_clear_moved(state: &SemaOwnershipState, place: SemaOwnershipPl
     state.moved = remaining
 }
 
-// Field typing supplies prefix facts; never copy the registration graph into
-// per-function ownership state.
-fn sema_ownership_note_close_owner(state: &SemaOwnershipState, expr: Expr, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) Never! {
-    own_close := false
+// Whether a value of `ty` has its own Close implementation (a nominal Close
+// impl, or a generic parameter bounded by Close).
+fn sema_ownership_type_owns_close(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
         if sema_type_resolve_nominal_row_at(graph, ty, sema_scope_caller_row(environment, graph)) == .Val(row) {
-            own_close = sema_copy_nominal_close(program.registration_graph, program.copy_facts, graph.modules[row.module_index].nominals[row.row], row).value
+            if sema_copy_nominal_close(program.registration_graph, program.copy_facts, graph.modules[row.module_index].nominals[row.row], row).value -> return true
         }
     }
     if ty == .Named(name) {
         loop param in environment.generic_params {
-            if param.name == name && sema_copy_generic_bound(param, "Close") -> own_close = true
+            if param.name == name && sema_copy_generic_bound(param, "Close") -> return true
         }
     }
-    if !own_close -> return
+    false
+}
+
+// Field typing supplies prefix facts; never copy the registration graph into
+// per-function ownership state.
+fn sema_ownership_note_close_owner(state: &SemaOwnershipState, expr: Expr, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) Never! {
+    if !sema_ownership_type_owns_close(ty, environment, program) -> return
     loop place in sema_ownership_places_from_expr_in_state(expr, scopes, &state) {
         known := false
         loop owner in state.close_owners {

@@ -2116,6 +2116,14 @@ fn sema_function_check_pass(func: Func, owner_id: SymbolID, function_kind: TFunc
         }
         param_index += 1
     }
+    // Rust `check_fn` (Registration.rs:803 @ 6083377777): the function's
+    // builtin markers bind their signatures with its parameters in scope. The
+    // markers are written before the parameters, so names resolve position
+    // free, as the contract conditions do (sema_contract_check_expr).
+    marker_position_free :: scopes.position_free
+    scopes.position_free = true
+    _ := sema_marker_rules_check_rule_signatures(func.markers, updated, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    scopes.position_free = marker_position_free
     if func.return_type == .Val(declared_return) {
         resolved_return := declared_return
         resolved_return = sema_function_resolve_declared(updated, program, declared_return, module_identity, generic_params)
@@ -5023,6 +5031,8 @@ fn sema_check_registration_module_head(environment: &SemaScopeEnvironment, progr
             if precomputed -> sema_check_registration_module_scopes(program, module_index, &scopes)
             sema_check_view_summaries(&environment, program, &scopes, module_index, host_hooks, memory_plan, comptime_functions, comptime_rows, view_jobs, counter_phase, trace_sink)
         }
+        // The static-product markers bind their signatures in module scope.
+        sema_marker_rules_check_static_sites(environment, program, module_index, &scopes, &module_result.diagnostics)
         if memo == None -> memo = sema_incremental_module(session, environment, program, &scopes)
         scopes_changed := false
         return_view_rows := [String:Int]{}
@@ -5094,9 +5104,6 @@ fn sema_check_registration_module_tail(owned_run: ^SemaModuleCheckRun, environme
         loop index in injected_from..<module_result.functions.len() -> &module_result.injected_function_keys.push(module_result.functions[index].key)
     }
     sema_check_registration_module_foreign(environment, program, module_index, &module_result)
-    if run.check_bodies {
-        sema_check_unbuilt_runtime_uses(program, module_index, &module_result)
-    }
     if trace_sink == .Val(sink) {
         sink.progress("counters.{counter_phase}.items_scanned", run.items_scanned, -1)
         sink.progress("counters.{counter_phase}.functions_checked", run.functions_checked, -1)
@@ -5112,75 +5119,6 @@ fn sema_check_registration_module_tail(owned_run: ^SemaModuleCheckRun, environme
 fn sema_refuses_unbuilt(program: SemaProgramTables) -> Bool Never! {
     if program.registration_graph == .Val(graph) -> return !graph.check_tests
     true
-}
-
-// E2104 at the first use in a source module of each Core value facility
-// whose Jet runtime is not ported yet (sema_unbuilt_runtime_use,
-// sema_unbuilt_core_source_call), naming its card, once the module has no
-// other error, so its own diagnostics still read as written. An unbuilt Core
-// call is refused at the call instead (sema_call_core_unbuilt_settle).
-fn sema_check_unbuilt_runtime_uses(program: SemaProgramTables, module_index: Int, module_result: &SemaGraphModuleResult) {
-    if !sema_refuses_unbuilt(program) || sema_has_error_since(module_result.diagnostics, 0) -> return
-    if program.registration_graph == .Val(graph) {
-        if sema_module_is_core_source(graph.modules[module_index].module_identity) -> return
-        hits := [Diagnostic]{}
-        reasons := [String]{}
-        loop function in module_result.functions {
-            loop node in function.tree.nodes {
-                unbuilt :: sema_unbuilt_runtime_use(node.kind) ?? next
-                sema_unbuilt_runtime_note(unbuilt, node.span, &hits, &reasons)
-            }
-        }
-        loop fact in module_result.call_facts {
-            callee :: fact.callee ?? next
-            unbuilt :: sema_unbuilt_core_source_call(callee.key) ?? next
-            sema_unbuilt_runtime_note(unbuilt, fact.span, &hits, &reasons)
-        }
-        if hits.len() == 0 -> return
-        module_result.complete = false
-        &module_result.diagnostics.extend(hits)
-        &module_result.incomplete_reasons.extend(reasons)
-    }
-}
-
-// The facility's E2104 at its first use (`reasons` holds one per facility).
-fn sema_unbuilt_runtime_note(unbuilt: (name: String, feature: String, card: Int), span: Span, hits: &[Diagnostic], reasons: &[String]) Never! {
-    reason :: "{unbuilt.name} is not built yet (card #{unbuilt.card})"
-    if reasons.contains(reason) -> return
-    &reasons.push(reason)
-    &hits.push(sema_error("E2104", span, "{unbuilt.name} is not built yet", "This `jet` has no implementation of {unbuilt.feature} yet, and no other `jet` can run it.", "Leave {unbuilt.name} out for now; {unbuilt.feature} needs its Jet implementation first (card #{unbuilt.card})."))
-}
-
-// A call of a source-owned Core function whose runtime no `jet` has yet.
-fn sema_unbuilt_core_source_call(key: String) -> (name: String, feature: String, card: Int)? Never! {
-    if key.ends_with("<corelib>/core.tasks::after") || key.ends_with("<corelib>/core.tasks::interval") -> return Val((name: "`tasks` timer channels", feature: "the typed timer channel runtime (`tasks.after`, `tasks.interval`)", card: 5991))
-    None
-}
-
-// A checked node whose runtime no `jet` has yet: what it uses, the feature
-// that needs porting, and its card.
-fn sema_unbuilt_runtime_use(kind: NodeKind) -> (name: String, feature: String, card: Int)? Never! {
-    bytes :: (name: "`Bytes`", feature: "the `Bytes` buffer runtime", card: 5991)
-    if kind == {
-        .BuiltinMethod(_, operation, _) -> if sema_unbuilt_byte_buffer_op(operation) -> return Val(bytes)
-        .StaticCall(owner, _, _, _, _) -> if owner == .Prelude(_, path, _) && path == "JetByteBuffer" -> return Val(bytes)
-        .HandleMethod(_, operation, _) -> {
-            if operation == .PathWalk -> return Val((name: "`Path.walk`", feature: "the directory walk runtime", card: 5991))
-        }
-        else -> {}
-    }
-    None
-}
-
-fn sema_unbuilt_byte_buffer_op(operation: TBuiltinOp) -> Bool Never! {
-    if operation == {
-        .ByteBufferFrom -> true
-        .ByteBufferWrite(_) -> true
-        .ByteBufferToBytes -> true
-        .ByteBufferMethod(_) -> true
-        .ByteBufferWithCapacity -> true
-        else -> false
-    }
 }
 
 // sema_check_registration_module reports `sema.bodies` progress every this

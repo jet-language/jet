@@ -141,13 +141,46 @@ fn body_tree_finish(tree: &BodyTree) Never! {
 // one per row, so no two such nodes share one.
 fn body_flat_expr(value: TExpr, flat: &BodyFlat) -> Int Never! {
     if value.kind == .Flat(index) -> return body_flat_arena_node(value, index, &flat)
-    kind :: body_flat_expr_kind(value.kind, &flat)
+    if value.kind == .Binary(_, _, _, lhs, _) {
+        if lhs.kind == .Binary(_, _, _, _, _) -> return body_flat_binary_chain(value, &flat)
+    }
+    body_flat_row(value, body_flat_expr_kind(value.kind, &flat), &flat)
+}
+
+// Files `value`'s row of kind `kind` (body_flat_expr).
+fn body_flat_row(value: TExpr, kind: NodeKind, flat: &BodyFlat) -> Int Never! {
     id :: if value.id == AST_NODE_GENERATED && !flat.into_arena -> TEXPR_FIRST_FLAT_ID - flat.tree.nodes.len() else -> value.id
     &flat.tree.nodes.push(BodyNode{id: id, kind: kind, span: value.span})
     ty :: type_table_intern(&flat.tree.types, value.ty)
     &flat.tree.expr_types.push(TExprType{id: id, ty: ty})
     if flat.into_arena -> return flat.tree.node_base + flat.tree.nodes.len() - 1
     id
+}
+
+// A left-leaning chain (`a + b + c …`) files in this one frame, so its
+// length costs no stack: the innermost left operand, then each level's right
+// operand and its own row, innermost first, as body_flat_expr files them.
+fn body_flat_binary_chain(value: TExpr, flat: &BodyFlat) -> Int Never! {
+    levels := [TExpr]{}
+    operand := value
+    loop {
+        if operand.kind == .Binary(_, _, _, lhs, _) {
+            &levels.push(operand)
+            operand = lhs
+        } else {
+            break
+        }
+    }
+    child := body_flat_expr(operand, &flat)
+    index := levels.len() - 1
+    loop index >= 0 {
+        if levels[index].kind == .Binary(op, overflow, line, _, rhs) {
+            right :: body_flat_expr(rhs, &flat)
+            child = body_flat_row(levels[index], NodeKind.Binary{op: op, overflow: overflow, line: line, lhs: child, rhs: right}, &flat)
+        }
+        index -= 1
+    }
+    child
 }
 
 // A Flat node: arena row `index` under the handle's own id and type (a
@@ -184,13 +217,49 @@ fn body_flat_stmt(value: TStmt, flat: &BodyFlat) -> Int Never! {
 // node id there.
 fn body_copy_expr(index: Int, flat: &BodyFlat) -> Int Never! {
     row :: flat.arena.nodes[index]
-    kind :: body_copy_expr_kind(row.kind, &flat)
+    if row.kind == .Binary(_, _, _, lhs, _) {
+        inner :: flat.arena.nodes[lhs]
+        if inner.kind == .Binary(_, _, _, _, _) -> return body_copy_binary_chain(index, &flat)
+    }
+    body_copy_row(index, body_copy_expr_kind(row.kind, &flat), &flat)
+}
+
+// Files arena row `index` into the output tree as kind `kind` (body_copy_expr).
+fn body_copy_row(index: Int, kind: NodeKind, flat: &BodyFlat) -> Int Never! {
+    row :: flat.arena.nodes[index]
     id :: if row.id == AST_NODE_GENERATED -> TEXPR_FIRST_FLAT_ID - flat.tree.nodes.len() else -> row.id
     &flat.tree.nodes.push(BodyNode{id: id, kind: kind, span: row.span})
     arena_type :: flat.arena.types.types[flat.arena.expr_types[index].ty]
     ty :: type_table_intern(&flat.tree.types, arena_type)
     &flat.tree.expr_types.push(TExprType{id: id, ty: ty})
     id
+}
+
+// A left-leaning chain of arena rows copies in this one frame, in
+// body_copy_expr's order (body_flat_binary_chain).
+fn body_copy_binary_chain(index: Int, flat: &BodyFlat) -> Int Never! {
+    levels := [Int]{}
+    operand := index
+    loop {
+        row :: flat.arena.nodes[operand]
+        if row.kind == .Binary(_, _, _, lhs, _) {
+            &levels.push(operand)
+            operand = lhs
+        } else {
+            break
+        }
+    }
+    child := body_copy_expr(operand, &flat)
+    at := levels.len() - 1
+    loop at >= 0 {
+        level :: flat.arena.nodes[levels[at]]
+        if level.kind == .Binary(op, overflow, line, _, rhs) {
+            right :: body_copy_expr(rhs, &flat)
+            child = body_copy_row(levels[at], NodeKind.Binary{op: op, overflow: overflow, line: line, lhs: child, rhs: right}, &flat)
+        }
+        at -= 1
+    }
+    child
 }
 
 // Arena statement `index` copied into the output tree; returns its index there.
@@ -730,6 +799,7 @@ fn body_flat_handle_op_1(value: THandleOp, flat: &BodyFlat) -> BodyHandleOp Neve
         .ProcessChildMethod(f_method) -> BodyHandleOp.ProcessChildMethod{method: f_method}
         .TerminalSessionResize -> BodyHandleOp.TerminalSessionResize
         .ProcessStdinWrite -> BodyHandleOp.ProcessStdinWrite
+        .ProcessStdinWriteText -> BodyHandleOp.ProcessStdinWriteText
         .ProcessStdinClose -> BodyHandleOp.ProcessStdinClose
         .ProcessStdinWriteAll -> BodyHandleOp.ProcessStdinWriteAll
         .ProcessStdoutRead -> BodyHandleOp.ProcessStdoutRead
@@ -1606,6 +1676,7 @@ fn body_copy_handle_op_1(value: BodyHandleOp, flat: &BodyFlat) -> BodyHandleOp N
         .ProcessChildMethod(f_method) -> BodyHandleOp.ProcessChildMethod{method: f_method}
         .TerminalSessionResize -> BodyHandleOp.TerminalSessionResize
         .ProcessStdinWrite -> BodyHandleOp.ProcessStdinWrite
+        .ProcessStdinWriteText -> BodyHandleOp.ProcessStdinWriteText
         .ProcessStdinClose -> BodyHandleOp.ProcessStdinClose
         .ProcessStdinWriteAll -> BodyHandleOp.ProcessStdinWriteAll
         .ProcessStdoutRead -> BodyHandleOp.ProcessStdoutRead

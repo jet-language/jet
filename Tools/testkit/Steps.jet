@@ -143,7 +143,9 @@ fn kit_steps_parse(source: String) -> KitPlan {
         }
         modifier :: kit_expect_named(["env", "unset", "env-clear", "isolate", "pty", "pty-send", "pty-resize", "pty-close", "stderr-to-stdout", "timeout", "cwd", "limit", "stdin"], key) || (key == "normalize" && (value.starts_with("json ") || value.starts_with("replace "))) || (kit_expect_named(["stdout", "stderr"], key) && (value == "null" || value.starts_with("file ")))
         process_line :: key == "step" || key.starts_with("step ") || key.starts_with("spawn ") || key.starts_with("session ") || key.starts_with("poll ")
-        if modifier && !modifier_adjacent && !((key == "env" || key == "normalize") && !process_seen) {
+        // A terminal session's input may follow its recv and send steps.
+        session_input :: (key == "pty-send" || key == "pty-close") && plan.steps.len() > 0 && kit_steps_terminal_session(plan.steps, plan.steps[plan.steps.len() - 1].label, joined)
+        if modifier && !modifier_adjacent && !session_input && !((key == "env" || key == "normalize") && !process_seen) {
             plan.error = "line {line_number}: modifier not adjacent to its step"
             return plan
         }
@@ -569,7 +571,14 @@ fn kit_steps_parse(source: String) -> KitPlan {
                 plan.error = "line {line_number}: invalid process wiring"
                 return plan
             }
-            plan.steps[i].refused_capability = if key == "stderr-to-stdout" -> "process-merge-stderr" else -> "pty"
+            if key == "stderr-to-stdout" {
+                plan.steps[i].refused_capability = "process-merge-stderr"
+                next
+            }
+            plan = kit_steps_terminal_line(plan, key, original, joined) ?? {
+                plan.error = "line {line_number}: {err}"
+                return plan
+            }
             next
         }
         if modifier && kit_expect_named(["stdout", "stderr"], key) {
@@ -927,7 +936,10 @@ fn kit_steps_step_environment(step: KitStep, env: KitEnv, work: String, scratch:
 fn kit_steps_invoke_step(step: KitStep, env: KitEnv, work: String, scratch: String, snapshots: String, fixture: String, built: String, overlay: [KitEnvVar]) -> KitRun {
     if step.action == "copy" || step.action == "remove" || step.action == "concat" || step.action == "write" -> return kit_steps_file_action(step, env, work, scratch, built, snapshots)
     prepared :: kit_steps_prepare(step, env, work, scratch, snapshots, fixture, built, overlay) ?? return kit_exec_failed("{err}")
-    kit_exec_invoke_with_env(prepared.env, prepared.argv, prepared.cwd, scratch, prepared.stdin, prepared.overlay)
+    if step.terminal == {
+        .Val(terminal) -> kit_exec_invoke_terminal(prepared.env, prepared.argv, prepared.cwd, scratch, prepared.stdin, prepared.overlay, terminal)
+        .None -> kit_exec_invoke_with_env(prepared.env, prepared.argv, prepared.cwd, scratch, prepared.stdin, prepared.overlay)
+    }
 }
 
 fn kit_steps_prepare(step: KitStep, env: KitEnv, work: String, scratch: String, snapshots: String, fixture: String, built: String, overlay: [KitEnvVar]) -> KitProcessInput Err! {

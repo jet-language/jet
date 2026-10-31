@@ -1,0 +1,18 @@
+// D-DROP-ASAP1=A (#6392 C2): a value with Close keeps scope-end timing and
+// last-first order. Freeing at last use is for memory-only values, so `a` and
+// `b` close after `end of body`, `b` first.
+struct Res {
+    name: String
+}
+
+impl Res.Close {
+    fn close(^self) { print("close {self.name}") }
+}
+
+fn run() {
+    a :: Res{name: "a"}
+    print("last use of {a.name}")
+    b :: Res{name: "b"}
+    print("last use of {b.name}")
+    print("end of body")
+}

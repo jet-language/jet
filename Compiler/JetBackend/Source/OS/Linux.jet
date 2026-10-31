@@ -370,6 +370,74 @@ fn os_spin_pause() {
     """
 }
 
+// One register of CPUID leaf `leaf`, subleaf `subleaf`: processor
+// identification only, nothing is read or written in memory. cpuid writes
+// ebx, which is callee-saved, so each leaf saves rbx and restores it.
+#[Unsafe("cpuid only reports processor identification; rbx is saved and restored"), FFI(asm)]
+fn os_cpuid_eax_i64(leaf: I64, subleaf: I64) -> I64 {
+    """
+    push rbx
+    mov rax, {leaf}
+    mov rcx, {subleaf}
+    cpuid
+    pop rbx
+    mov rax, rax ; -> return
+    ; clobbers rcx, rdx
+    """
+}
+
+#[Unsafe("cpuid only reports processor identification; rbx is saved and restored"), FFI(asm)]
+fn os_cpuid_ebx_i64(leaf: I64, subleaf: I64) -> I64 {
+    """
+    push rbx
+    mov rax, {leaf}
+    mov rcx, {subleaf}
+    cpuid
+    mov rax, rbx
+    pop rbx
+    mov rax, rax ; -> return
+    ; clobbers rcx, rdx
+    """
+}
+
+#[Unsafe("cpuid only reports processor identification; rbx is saved and restored"), FFI(asm)]
+fn os_cpuid_ecx_i64(leaf: I64, subleaf: I64) -> I64 {
+    """
+    push rbx
+    mov rax, {leaf}
+    mov rcx, {subleaf}
+    cpuid
+    pop rbx
+    mov rax, rcx ; -> return
+    ; clobbers rcx, rdx
+    """
+}
+
+#[Unsafe("cpuid only reports processor identification; rbx is saved and restored"), FFI(asm)]
+fn os_cpuid_edx_i64(leaf: I64, subleaf: I64) -> I64 {
+    """
+    push rbx
+    mov rax, {leaf}
+    mov rcx, {subleaf}
+    cpuid
+    pop rbx
+    mov rax, rdx ; -> return
+    ; clobbers rcx, rdx
+    """
+}
+
+// Extended control register `register` (0 is XCR0, the state the OS saves).
+// xgetbv faults unless CPUID.1:ECX.OSXSAVE is set; callers check it first.
+#[Unsafe("xgetbv only reads an extended control register; the caller has seen CPUID.1:ECX.OSXSAVE"), FFI(asm)]
+fn os_xgetbv_i64(register: I64) -> I64 {
+    """
+    mov rcx, {register}
+    xgetbv
+    mov rax, rax ; -> return
+    ; clobbers rcx, rdx
+    """
+}
+
 // The calling thread's stack pointer. Thread stacks are disjoint mappings, so
 // its high bits tell threads running at the same time apart (the runtime
 // heap's arena choice, Alloc.jet alloc_arena). An rsp read needs a

@@ -766,6 +766,10 @@ struct SemaRegistrationGraph {
     // snapshots (jet_driver_plugin_facts): what `plugin.load("artifact")`
     // and its export calls check against.
     plugin_facts: SemaPluginInterfaceFacts{SemaPluginInterfaceFacts{interfaces: [SemaPluginInterface]{}, artifacts: [SemaPluginArtifactAlias]{}, digest: "", complete: true}}
+    // The registry of the prelude's builtin applied rules (MARKER_SOURCE),
+    // built once with the marker module check; the marker-signature checks
+    // (sema_marker_rules_check_rule_signature) read it at every site.
+    marker_catalog: SemaScopeMembersMarkerRegistry?{None}
 }
 
 // `{module_name}::{name}` of every nominal row registered by the end of graph
@@ -2605,6 +2609,9 @@ fn sema_registration_prepare_module_row(input: ^SemaRegistrationModuleInput, tem
             item_index += 1
         }
     }
+    // Each `#Patchable` struct gains its generated `T.Patch` and
+    // apply/diff/merge methods (Patchable.jet, D-PATCH1).
+    sema_patchable_expand(&module_row.program.items)
     // Each struct's `validate { … }` block becomes its
     // generated `T.validate(value)` before any declaration is registered.
     sema_validate_blocks(&module_row.program.items, &diagnostics)
@@ -4062,9 +4069,14 @@ fn sema_registration_prepare_graph(inputs: ^[SemaRegistrationModuleInput], edges
     // Marker namespace/declaration laws precede import member registration and
     // generated rule bodies. The complete loader edge set detects ambiguous
     // qualified markers even when two imports share their local alias.
-    if sema_marker_module_check(graph) == .Val(marker_diagnostics) {
-        loop diagnostic in marker_diagnostics -> &graph.diagnostics.push(diagnostic)
-        if marker_diagnostics.len() > 0 {
+    marker_diagnostics := [Diagnostic]?{None}
+    if sema_marker_module_applied_catalog(graph) == .Val(applied) {
+        graph.marker_catalog = sema_marker_module_catalog_registry(applied)
+        if graph.marker_catalog == .Val(catalog) -> marker_diagnostics = Val(sema_marker_module_check(graph, applied, catalog))
+    }
+    if marker_diagnostics == .Val(found) {
+        loop diagnostic in found -> &graph.diagnostics.push(diagnostic)
+        if found.len() > 0 {
             graph.complete = false
             return graph
         }

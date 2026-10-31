@@ -1406,6 +1406,12 @@ fn sema_effect_symbol_module(key: String) -> String? Never! {
 
 fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTree, expression: Int, facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller) {
     node :: body_node(tree, expression)
+    if sema_effect_walk_expr_enter(&nodes, node_index, tree, expression, node, facts, &diagnostics, caller) -> sema_effect_walk_expr_children(SemaEffectWalk.Collect{node_index: node_index}, &nodes, facts, &diagnostics, caller, tree, node)
+}
+
+// sema_effect_walk_expr's own work on `node`, the node at `expression`;
+// false when its children aren't walked.
+fn sema_effect_walk_expr_enter(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTree, expression: Int, node: BodyNode, facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller) -> Bool {
     if {
         sema_effect_is_call(node.kind) -> {
             found :: sema_effect_find_fact(facts, caller, node.span)
@@ -1455,7 +1461,7 @@ fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTr
         .Close(value) -> sema_effect_record_close(&nodes, facts, node_index, body_type(tree, value))
         .Lambda(value) -> {
             sema_effect_merge_lambda(&nodes, node_index, value)
-            return
+            return false
         }
         .StrLit(parts) -> {
             interpolated :: loop part in parts {
@@ -1499,7 +1505,7 @@ fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTr
         }
         else -> {}
     }
-    sema_effect_walk_expr_children(SemaEffectWalk.Collect{node_index: node_index}, &nodes, facts, &diagnostics, caller, tree, node)
+    true
 }
 
 fn sema_effect_collect_function(nodes: &[SemaEffectNode], node_index: Int, function: FnBody, facts: SemaEffectCallIndex, module_index: Int, diagnostics: &[Diagnostic]) {
@@ -1511,6 +1517,12 @@ fn sema_effect_collect_function(nodes: &[SemaEffectNode], node_index: Int, funct
 
 fn sema_effect_check_unsafe_expr(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, caller: SemaEffectCaller, tree: BodyTree, expression: Int, audited: Bool, diagnostics: &[Diagnostic]) {
     node :: body_node(tree, expression)
+    if sema_effect_check_unsafe_enter(&nodes, facts, caller, tree, node, audited, &diagnostics) -> sema_effect_walk_expr_children(SemaEffectWalk.Unsafe{audited: audited}, &nodes, facts, &diagnostics, caller, tree, node)
+}
+
+// sema_effect_check_unsafe_expr's own work on `node`; false when its
+// children aren't walked.
+fn sema_effect_check_unsafe_enter(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, caller: SemaEffectCaller, tree: BodyTree, node: BodyNode, audited: Bool, diagnostics: &[Diagnostic]) -> Bool {
     if sema_effect_is_call(node.kind) {
         found :: sema_effect_find_fact(facts, caller, node.span)
         if found == .Val(position) {
@@ -1532,11 +1544,11 @@ fn sema_effect_check_unsafe_expr(nodes: &[SemaEffectNode], facts: SemaEffectCall
                     sema_effect_check_unsafe_statements_tree(&nodes, facts, caller, tree, body, false, &diagnostics)
                 }
             }
-            return
+            return false
         }
         else -> {}
     }
-    sema_effect_walk_expr_children(SemaEffectWalk.Unsafe{audited: audited}, &nodes, facts, &diagnostics, caller, tree, node)
+    true
 }
 
 fn sema_effect_check_unsafe_condition(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, caller: SemaEffectCaller, tree: BodyTree, condition: BodyIfCond, audited: Bool, diagnostics: &[Diagnostic]) {
@@ -2251,12 +2263,20 @@ fn sema_effect_discarded_result_diagnostic(node: SemaEffectNode, span: Span) -> 
 // The part of `expression` inside `region` (a `#FX` block span).
 fn sema_effect_walk_region_expr(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTree, expression: Int, region: Span, facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller) {
     node :: body_node(tree, expression)
+    next :: sema_effect_walk_region_enter(&nodes, node_index, tree, expression, node, region, facts, &diagnostics, caller) ?? return
+    sema_effect_walk_expr_children(next, &nodes, facts, &diagnostics, caller, tree, node)
+}
+
+// sema_effect_walk_region_expr's own work on `node`: the walk its children
+// continue with, the whole walk (Collect) once the region holds the node; None
+// when they aren't walked.
+fn sema_effect_walk_region_enter(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTree, expression: Int, node: BodyNode, region: Span, facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller) -> SemaEffectWalk? {
     if sema_effect_span_contains(region, node.span) {
-        sema_effect_walk_expr(&nodes, node_index, tree, expression, facts, &diagnostics, caller)
-        return
+        if sema_effect_walk_expr_enter(&nodes, node_index, tree, expression, node, facts, &diagnostics, caller) -> return Val(SemaEffectWalk.Collect{node_index: node_index})
+        return None
     }
-    if !sema_effect_span_contains(node.span, region) -> return
-    sema_effect_walk_expr_children(SemaEffectWalk.Region{node_index: node_index, region: region}, &nodes, facts, &diagnostics, caller, tree, node)
+    if !sema_effect_span_contains(node.span, region) -> return None
+    Val(SemaEffectWalk.Region{node_index: node_index, region: region})
 }
 
 // (Rust `check_region_caps`): the effects a `#FX(…)` region reaches:
@@ -2921,7 +2941,7 @@ fn sema_effect_check_unsafe_statements(statements: [Stmt], diagnostics: &[Diagno
 // with, and its own arguments (sema_effect_walk_expr,
 // sema_effect_check_unsafe_expr, sema_effect_walk_region_expr, and
 // FailureLaw's prelude-conversion demand walk
-// sema_prelude_conversion_demands_visit, whose state is its one row).
+// sema_prelude_conversion_demands_enter, whose state is its one row).
 enum SemaEffectWalk {
     Collect(node_index: Int)
     Unsafe(audited: Bool)
@@ -2930,11 +2950,56 @@ enum SemaEffectWalk {
 }
 
 fn sema_effect_walk_visit(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, expression: Int) {
+    node :: body_node(tree, expression)
+    next :: sema_effect_walk_enter(walk, &nodes, facts, &diagnostics, caller, tree, expression, node) ?? return
+    sema_effect_walk_expr_children(next, &nodes, facts, &diagnostics, caller, tree, node)
+}
+
+// A walker's own work on `node`, the node at `expression`, before its
+// children: the walk they continue with, or None when they aren't walked.
+fn sema_effect_walk_enter(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, expression: Int, node: BodyNode) -> SemaEffectWalk? {
     if walk == {
-        .Collect(node_index) -> sema_effect_walk_expr(&nodes, node_index, tree, expression, facts, &diagnostics, caller)
-        .Unsafe(audited) -> sema_effect_check_unsafe_expr(&nodes, facts, caller, tree, expression, audited, &diagnostics)
-        .Region(node_index, region) -> sema_effect_walk_region_expr(&nodes, node_index, tree, expression, region, facts, &diagnostics, caller)
-        .PreludeDemands(state) -> sema_prelude_conversion_demands_visit(walk, state, &nodes, facts, &diagnostics, caller, tree, expression)
+        .Collect(node_index) -> if sema_effect_walk_expr_enter(&nodes, node_index, tree, expression, node, facts, &diagnostics, caller) -> Val(walk) else -> None
+        .Unsafe(audited) -> if sema_effect_check_unsafe_enter(&nodes, facts, caller, tree, node, audited, &diagnostics) -> Val(walk) else -> None
+        .Region(node_index, region) -> sema_effect_walk_region_enter(&nodes, node_index, tree, expression, node, region, facts, &diagnostics, caller)
+        .PreludeDemands(state) -> {
+            sema_prelude_conversion_demands_enter(state, node)
+            Val(walk)
+        }
+    }
+}
+
+// A Binary node's operands. A left-leaning chain (`a + b + c …`) walks its
+// left spine in this frame, so its length costs no stack: each inner level's
+// own work going down, the innermost left operand, then each level's right
+// operand, innermost first, under the walk its level continues with. That is
+// the order visiting level by level runs them.
+fn sema_effect_walk_binary(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, lhs: Int, rhs: Int) {
+    rights := [Int]{rhs}
+    walks := [SemaEffectWalk]{walk}
+    current := walk
+    operand := lhs
+    loop {
+        node :: body_node(tree, operand)
+        if node.kind == .Binary(_, _, _, inner_lhs, inner_rhs) {
+            if sema_effect_walk_enter(current, &nodes, facts, &diagnostics, caller, tree, operand, node) == .Val(next) {
+                &rights.push(inner_rhs)
+                &walks.push(next)
+                current = next
+                operand = inner_lhs
+            } else {
+                operand = -1
+                break
+            }
+        } else {
+            break
+        }
+    }
+    if operand >= 0 -> sema_effect_walk_visit(current, &nodes, facts, &diagnostics, caller, tree, operand)
+    index := rights.len() - 1
+    loop index >= 0 {
+        sema_effect_walk_visit(walks[index], &nodes, facts, &diagnostics, caller, tree, rights[index])
+        index -= 1
     }
 }
 
@@ -2972,10 +3037,7 @@ fn sema_effect_walk_expr_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode]
         .MathBuiltin(_, _, args) | .PreciseBuiltin(_, _, args) -> loop value in args -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, value)
         .Print(value) | .Drop(value) | .Close(value) | .Move(value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, value)
         .RequireStop(kind, _, _) -> sema_effect_walk_require_children(walk, &nodes, facts, &diagnostics, caller, tree, kind)
-        .Binary(_, _, _, lhs, rhs) -> {
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, lhs)
-            sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, rhs)
-        }
+        .Binary(_, _, _, lhs, rhs) -> sema_effect_walk_binary(walk, &nodes, facts, &diagnostics, caller, tree, lhs, rhs)
         .CompareChain(operands, _, _) -> loop value in operands -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, value)
         .Unary(_, operand) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, operand)
         .StructLit(fields) -> loop field in fields -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, field.value)

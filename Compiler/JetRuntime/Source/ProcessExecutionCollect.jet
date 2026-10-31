@@ -418,7 +418,23 @@ fn process_stdin_write_bytes(stdin: I64, data: I64, length: I64, err: I64) -> I6
     if (failure != I64{0}) -> return process_stdin_failure(failure, err)
     I64{1}
 }
-#Export(c) fn jet_process_stdin_write(stdin: I64, text: I64, err: I64) -> I64 {
+// ProcessStdin.write(bytes): one ChildStdin::write of a native U8 list on a
+// private dup; Ok is the count the pipe took, EINTR retries.
+#Export(c) fn jet_process_stdin_write(stdin: I64, data: I64, length: I64, ok: I64, err: I64) -> I64 {
+    packed :: spawn_stream_dup(stdin, I64{0})
+    if (packed == I64{-9}) -> return process_stdin_closed(err)
+    if (packed < I64{0}) -> return process_stdin_failure(-packed, err)
+    native :: packed.bit_and(I64{4294967295})
+    written := host_call(I64{1}, native, data, length)
+    loop written == (I64{-4}) {
+        written = host_call(I64{1}, native, data, length)
+    }
+    spawn_close(native)
+    if (written < I64{0}) -> return process_stdin_failure(-written, err)
+    rt_text_store(ok, jet_int_owned_from_i64(written))
+    I64{1}
+}
+#Export(c) fn jet_process_stdin_write_text(stdin: I64, text: I64, err: I64) -> I64 {
     process_stdin_write_bytes(stdin, rt_text_data(text), rt_text_len(text), err)
 }
 // ProcessStdin.write_all(bytes): ChildStdin::write_all of a native U8 list

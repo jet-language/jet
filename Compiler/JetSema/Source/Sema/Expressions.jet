@@ -3212,6 +3212,7 @@ fn sema_expr_core_module_method_checked(receiver: Expr, method: String, method_s
         return SemaMethodSpecialCheck{handled: reactive.handled, value: reactive.value}
     }
     sema_call_core_crypto_expert_gate(module_name, method, method_span, context, &diagnostics)
+    if sema_call_core_vault_build_time_gate(module_name, method, method_span, scopes, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     sema_call_core_unbuilt_note(module_name, method, method_span, environment, program, &unbuilt)
     if !nested && sema_call_core_variadic_print(environment, program, scopes, alias, method, args.len(), alias_span, &context) {
         printed := sema_call_check_ambient_print(Call{name: "{alias}.{method}", name_span: method_span, type_args: type_args, args: args}, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -4704,6 +4705,8 @@ fn sema_expr_check_copy(value: Expr, span: Span, expected: Type?, environment: S
     context.borrow_ctx = previous_borrow
     context.allow_string_view_read = previous_string_view_read
     checked :: checked_value ?? return None
+    window_copy :: sema_call_compute_window_copy(checked, span, expected, environment, program, &diagnostics)
+    if window_copy.handled -> return window_copy.value
     sema_expr_check_copy_typed(checked, span, expected, environment, program, &context, &diagnostics, sema_expr_copy_string_view(value, &scopes), false)
 }
 

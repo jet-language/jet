@@ -413,6 +413,36 @@ fn encoding_file_read(reader: I64, bytes: I64, length: I64, cause: I64) -> I64 {
     I64{1}
 }
 
+// EncodingStream.rs:4237: one read on the reader's own stream into the empty
+// List<U8> at `header` (len, capacity, data), at most `max` bytes, without
+// growing it. The List's length becomes the count; an error leaves it empty.
+#Export(c) fn jet_raw_encoding_read_into(reader: I64, header: I64, max: I64, value: I64, error: I64) -> I64 {
+    limit :: jet_int_owned_to_i64(max)
+    capacity :: rt_text_word(header + I64{8})
+    if (rt_text_word(header) != I64{0} || limit < I64{0} || limit > capacity) {
+        return encoding_fail(encoding_cause_custom(rt_static_text("InvalidInput"), rt_static_text("read_into requires len == 0 and 0 <= max <= capacity")), error)
+    }
+    data :: rt_text_word(header + I64{16})
+    temporary :: RT_HOST_U8_STRIDE != I64{1} && limit != I64{0}
+    packed :: if temporary -> jet_rt_alloc(limit, I64{8}) else -> data
+    scratch :: jet_rt_alloc(I64{8}, I64{8})
+    count :: encoding_fd_read(reader, packed, limit, scratch)
+    cause :: rt_text_word(scratch)
+    jet_rt_free(scratch, I64{8}, I64{8})
+    if temporary {
+        at := I64{0}
+        loop at < count {
+            host_u8_put(data, at, rt_text_byte(packed + at))
+            at += I64{1}
+        }
+        jet_rt_free(packed, limit, I64{8})
+    }
+    if (count < I64{0}) -> return encoding_fail(cause, error)
+    rt_text_store(header, count)
+    rt_text_store(value, jet_int_owned_from_i64(count))
+    I64{1}
+}
+
 // DataStats.rs:11: std::fs::metadata (stat, following links) of the raw path
 // bytes; a NUL is std's CString refusal.
 #Export(c) fn jet_data_host_path_is_file(data: I64, length: I64, ok: I64, error: I64) -> I64 {

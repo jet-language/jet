@@ -192,7 +192,7 @@ fn repl_history_test_run_process(state: String, input: String, limit: String?) -
     spec := repl_history_test_process_spec(state)
     if limit == .Val(value) -> spec = spec.env("JET_REPL_HISTORY_LIMIT", value)
     child :: spec.spawn() ?? return Err(err)
-    child.stdin.write(input) ?? return Err(err)
+    child.stdin.write_text(input) ?? return Err(err)
     // wait_with_output closes stdin before waiting in the Rust original.
     child.stdin.close() ?? return Err(err)
     child.wait() ?? return Err(err)
@@ -259,7 +259,7 @@ fn repl_history_off_is_session_only_and_visible_storage_failure_falls_back() Nev
     state :: repl_history_test_root("off")
     repl_history_test_remove_root(state)
     child :: repl_history_test_process_spec(state).env("JET_REPL_HISTORY", "off").spawn() ?? panic("off session")
-    child.stdin.write("8 + 9\n:history search 8\n:quit\n") ?? panic("off stdin")
+    child.stdin.write_text("8 + 9\n:history search 8\n:quit\n") ?? panic("off stdin")
     child.stdin.close() ?? panic("off stdin close")
     output :: child.wait() ?? panic("off wait")
     assert(output.output.contains("8 + 9"))
@@ -283,10 +283,10 @@ fn repl_history_two_processes_merge_and_clear_cannot_resurrect() Never! -[Env, E
     first_stdin :: first.stdin
     second_stdin :: second.stdin
     writer_a :: task_ref.bit_xor(first_stdin) {
-        first_stdin.write("left_marker :: 1\n:quit\n") ?? panic("left writer")
+        first_stdin.write_text("left_marker :: 1\n:quit\n") ?? panic("left writer")
     }
     writer_b :: task_ref.bit_xor(second_stdin) {
-        second_stdin.write("right_marker :: 2\n:quit\n") ?? panic("right writer")
+        second_stdin.write_text("right_marker :: 2\n:quit\n") ?? panic("right writer")
     }
     ^writer_a.join() ?? panic("left writer join")
     ^writer_b.join() ?? panic("right writer join")
@@ -298,7 +298,7 @@ fn repl_history_two_processes_merge_and_clear_cannot_resurrect() Never! -[Env, E
     repl_history_test_wait_for_dir(state) ?? panic("stale startup")
     cleared :: repl_history_test_run_process(state, ":history clear\n:quit\n", None) ?? panic("clear session")
     assert(cleared.success)
-    stale.stdin.write("fresh_marker :: 3\n:quit\n") ?? panic("fresh writer")
+    stale.stdin.write_text("fresh_marker :: 3\n:quit\n") ?? panic("fresh writer")
     assert((stale.wait() ?? panic("stale wait")).success)
     after :: repl_history_test_run_process(state, ":history search left_marker\n:history search right_marker\n:history search fresh_marker\n:quit\n", None) ?? panic("after session")
     assert(after.output.contains("fresh_marker :: 3"), "fresh write missing")

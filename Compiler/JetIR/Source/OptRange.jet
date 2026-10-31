@@ -23,8 +23,9 @@
 //
 // An inline Int (bits 63 and 62 agree, X64Select) is the i64 itself and owns
 // nothing. For an Int whose range lies strictly inside the inline Ints: its
-// Drop is nothing (a Nop), its Copy is a Move, and jet_int_owned_to_i64 or
-// jet_rt_int_clone of it is a Move, as is jet_int_checked_fixed of it when
+// Drop is nothing (a Nop), its Copy is a Move, and jet_int_owned_to_i64,
+// jet_int_native_i64_at or jet_rt_int_clone of it is a Move, as is
+// jet_int_checked_fixed of it when
 // it lies inside the fixed-width kind (the stop poll after that call, which
 // nothing can reach now, goes); an Int Add, Sub or Mul whose operands and
 // result are inline, a word Add, Sub or Mul whose operands and result are
@@ -617,6 +618,7 @@ fn ir_range_rewrite(m: IRModule, f: &IRFunction, s: &IRSsa, r: IRRanges) -> Int 
     to_i64 :: name_rows_value(m.name_rows, "jet_int_owned_to_i64") ?? -2
     clone :: name_rows_value(m.name_rows, "jet_rt_int_clone") ?? -2
     fixed :: name_rows_value(m.name_rows, "jet_int_checked_fixed") ?? -2
+    native :: name_rows_value(m.name_rows, "jet_int_native_i64_at") ?? -2
     poll :: name_rows_value(m.name_rows, IR_STOP_POLL_KEY) ?? -2
     trap :: name_rows_value(m.name_rows, IR_STOP_TRAP_KEY) ?? -2
     rewritten := 0
@@ -702,8 +704,9 @@ fn ir_range_rewrite(m: IRModule, f: &IRFunction, s: &IRSsa, r: IRRanges) -> Int 
             }
             next
         }
-        if op == .CallRuntime && f.c[at] == 1 && f.dst[at] >= 0 && (f.a[at] == to_i64 || f.a[at] == clone) {
+        if op == .CallRuntime && f.dst[at] >= 0 && ((f.c[at] == 1 && (f.a[at] == to_i64 || f.a[at] == clone)) || (f.c[at] == 4 && f.a[at] == native)) {
             used :: s.use_args[f.b[at]]
+            native_call :: f.c[at] == 4
             if !ir_range_has(s, r, used) || !r.exact[ir_ssa_find(s, used)] || !ir_range_inline(ir_range_at(f, s, r, used, block)) -> next
             f.op[at] = .Move
             f.a[at] = f.args[f.b[at]]
@@ -711,6 +714,8 @@ fn ir_range_rewrite(m: IRModule, f: &IRFunction, s: &IRSsa, r: IRRanges) -> Int 
             f.c[at] = -1
             s.use_a[at] = used
             rewritten += 1
+            // A native index call that is gone delivers no stop either.
+            if native_call -> ir_range_drop_point(&f, poll, at + 1)
             next
         }
         if op == .CallRuntime && f.a[at] == fixed && f.c[at] == 5 && f.dst[at] >= 0 {

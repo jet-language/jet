@@ -1,0 +1,111 @@
+// D-PATCH1 (Rust CheckerPatchable.rs `inject_patchable_types`): a
+// `#Patchable` struct `T` gains the generated struct `T.Patch`, every stored
+// field wrapped `?` with default `None` (absent = no change), and the methods
+// `t.apply(patch) -> T`, static `T.diff(new, old) -> T.Patch` (the changed
+// fields of `new`, `None` where equal) and `patch.merge(other) -> T.Patch`
+// (`other` fills only the fields `patch` leaves `None`). A computed field
+// holds no "unchanged" sentinel, so it never enters the patch. A struct
+// Checked refuses (E0336 generic, E0337 function-typed field) gains nothing.
+// The fragment lexes as generated code; its field types are the struct's own,
+// written over the parsed placeholders.
+use jet_foundation.[
+    Field,
+    Func,
+    Item,
+    StructDef,
+    Type,
+]
+use jet_parser.[
+    parse_generated_source,
+]
+
+SEMA_PATCHABLE_BASE_METHODS :: "__JetPatchableMethods"
+
+// The generated `T.Patch` items join the module after its declarations.
+fn sema_patchable_expand(items: &[Item]) {
+    generated := [Item]{}
+    loop index in 0..<items.len() {
+        if &items[index] == .Struct(definition) {
+            if !sema_patchable_eligible(definition) -> next
+            fields := [Field]{}
+            loop field in definition.fields {
+                if field.computed == None -> &fields.push(field.copy())
+            }
+            parsed :: parse_generated_source(sema_patchable_source(definition.name, fields).bytes())
+            if parsed.diagnostics.len() > 0 -> next
+            loop item in parsed.program.items {
+                if item == .Struct(fragment) {
+                    methods := fragment.methods.copy()
+                    sema_patchable_mark(&methods, definition)
+                    if fragment.name == SEMA_PATCHABLE_BASE_METHODS {
+                        loop method in methods -> &definition.methods.push(method)
+                    } else {
+                        patch := fragment.copy()
+                        patch.name = "{definition.name}.Patch"
+                        patch.span = definition.span
+                        patch.name_span = definition.name_span
+                        patch.is_pub = definition.is_pub
+                        patch.is_package_pub = definition.is_package_pub
+                        // D-PATCH1: `T.Patch` Encode/Decode is deferred, so it
+                        // takes no package auto-derive default.
+                        patch.auto_derive_default = false
+                        patch.methods = methods
+                        rows :: loop (position, field) in fields -> sema_patchable_field(patch.fields[position], field)
+                        patch.fields = rows
+                        &generated.push(Item.Struct{value: patch})
+                    }
+                }
+            }
+        }
+    }
+    loop item in generated -> &items.push(item)
+}
+
+fn sema_patchable_eligible(definition: StructDef) -> Bool Never! {
+    marked :: loop derived in definition.derives {
+        if derived.name == "Patchable" -> break true
+    } ?? false
+    if !marked || definition.type_params.len() != 0 -> return false
+    loop field in definition.fields {
+        if field.ty == .Fn(_, _, _, _, _, _) -> return false
+    }
+    true
+}
+
+// A patch field: the parsed `name: Unit? = None` row over the stored field's
+// own type, visibility and spans.
+fn sema_patchable_field(parsed: Field, field: Field) -> Field Never! {
+    row := parsed.copy()
+    row.is_pub = field.is_pub
+    row.is_package_pub = field.is_package_pub
+    row.name_span = field.name_span
+    row.ty = Type.Option{inner: field.ty.copy()}
+    row.ty_span = field.ty_span
+    row
+}
+
+// Generated methods report at the struct and share its visibility.
+fn sema_patchable_mark(methods: &[Func], definition: StructDef) Never! {
+    loop index in 0..<methods.len() {
+        methods[index].span = definition.span
+        methods[index].name_span = definition.name_span
+        methods[index].is_pub = definition.is_pub
+        methods[index].is_package_pub = definition.is_package_pub
+        methods[index].compiler_generated = true
+    }
+}
+
+fn sema_patchable_source(base: String, fields: [Field]) -> String Never! {
+    patch :: "{base}.Patch"
+    rows :: loop field in fields -> "    {field.name}: Unit? = None\n"
+    applied :: loop field in fields -> "            {field.name}: patch.{field.name} ?? self.{field.name}"
+    changed :: loop field in fields -> "            {field.name}: if new.{field.name} == old.{field.name} -> None else -> Val(new.{field.name})"
+    merged :: loop field in fields -> "            {field.name}: if self.{field.name} == None -> other.{field.name} else -> self.{field.name}"
+    out := [String]{}
+    &out.push("struct {SEMA_PATCHABLE_BASE_METHODS} {{\n")
+    &out.push("    fn apply(self, patch: {patch}) -> {base} {{\n        return {base}{{\n{applied.join(",\n")}\n        }}\n    }}\n\n")
+    &out.push("    fn diff(^new: {base}, ^old: {base}) -> {patch} {{\n        return {patch}{{\n{changed.join(",\n")}\n        }}\n    }}\n}}\n\n")
+    &out.push("struct Patch {{\n{rows.join("")}\n")
+    &out.push("    fn merge(self, ^other: {patch}) -> {patch} {{\n        return {patch}{{\n{merged.join(",\n")}\n        }}\n    }}\n}}\n")
+    out.join("")
+}

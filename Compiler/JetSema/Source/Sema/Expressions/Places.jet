@@ -27,11 +27,11 @@ use jet_foundation.[
     ast_program,
     core_source_owns_type,
     core_record_field,
+    core_record_field_is_core_only,
     diagnostic_with_edit,
     diagnostic_with_edit_grade,
     expr_optional_method_call_as_call,
     expr_span,
-    is_compute_tensor_family,
     boundary_head_carrier_module,
     symbol_id,
     checked_symbol_local,
@@ -226,9 +226,9 @@ fn sema_expression_place(value: Expr, access: PlaceAccess, span: Span, expected:
             }
         }
     }
-    // Rust `Expr::Place`: a list range is a `View`/`ViewMut` of its element,
-    // a compute tensor range views `Float`, any other ranged value (a
-    // `String`) keeps its own type.
+    // Rust `Expr::Place`: a list range (a compute tensor range is one on the
+    // tensor's `data`) is a `View`/`ViewMut` of its element, any other ranged
+    // value (a `String`) keeps its own type.
     element := Type?{None}
     if checked.kind == .Slice(_, _, _, _, _) {
         if checked.ty == {
@@ -237,9 +237,7 @@ fn sema_expression_place(value: Expr, access: PlaceAccess, span: Span, expected:
             .Apply(view_name, view_args) -> {
                 if view_name == "View" && view_args.len() == 1 -> element = Val(view_args[0])
             }
-            else -> {
-                if is_compute_tensor_family(checked.ty) -> element = Val(Type.Float)
-            }
+            else -> {}
         }
     }
     result_ty :: if element == .Val(item) -> Type.Apply{name: if convention == AccessConvention.Write -> "ViewMut" else -> "View", args: [item]} else -> checked.ty
@@ -361,12 +359,16 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
             return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
         }
     }
-    owner_name :: if base.ty == {
+    // D-PIN2=A / D-PIN3=A: a field reached through `Pin<T>` resolves against
+    // `T`, read or written in the pinned place; the field's own declared type
+    // is the mark (a `Pin<U>` field comes back as `Pin<U>`).
+    owner_ty :: sema_pin_target(base.ty) ?? base.ty.copy()
+    owner_name :: if owner_ty == {
         .Named(name) -> name
         .Apply(name, _) -> name
         else -> ""
     }
-    owner_args :: if base.ty == {
+    owner_args :: if owner_ty == {
         .Apply(_, args) -> args
         else -> [Type]{}
     }
@@ -433,9 +435,12 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
     if reflection == .Val(value) -> return sema_expr_expected(value, expected, environment, program, &diagnostics)
     // A builtin Core record (`ProcessReceipt.success`, `IOContext.operation`)
     // has no Jet declaration; its fields are the generated Core record rows.
+    // A core_only field is private storage: outside Core source it does not
+    // exist, so reads and writes alike get the missing-field error below.
     if owner_name != "" {
         core_field :: core_record_field(owner_name, member)
-        if core_field == .Val(core_field_ty) {
+        visible :: !core_record_field_is_core_only(owner_name, member) || sema_module_is_core_source(environment.module_identity)
+        if visible && core_field == .Val(core_field_ty) {
             core_reference :: TFieldRef{owner: None, field: symbol_id(SymbolKind.Field, "", owner_name, member), name: member, ty: core_field_ty, boxed: false}
             core_value :: sema_tree_node(core_field_ty, TExprKind.Field{receiver: base, field: core_reference}, span)
             return sema_expr_expected_owned(^core_value, expected, environment, program, &diagnostics)
@@ -475,6 +480,12 @@ fn sema_expression_field(field: Expr, base: Expr, member: String, span: Span, ex
         if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "{type_name(bound_type)}.{member}", span, [EffectRowEntry]{}, &diagnostics) -> return None
         bound :: sema_tree_node(bound_type, TExprKind.HostCall{call: THostCall.NumericBounds{ty: bound_type, member: member}}, span)
         return sema_expr_expected_owned(^bound, expected, environment, program, &diagnostics)
+    }
+    // `TerminalFact.resize` is a stable key of the terminal fact report
+    // (`ProcessSpec.abilities()`), read as its key text, unless the program
+    // declares its own `TerminalFact`.
+    if base == .Ident(owner, _, _) && owner == "TerminalFact" && sema_scope_resolve_index(scopes, owner) == None && sema_expression_type_symbol(&scopes, environment, program, owner) == None {
+        return sema_expression_terminal_fact(member, member_span, expected, environment, program, &diagnostics)
     }
     // Rust `infer_field` (`fold_enum_variant_path`, `is_known_enum`):
     // `Enum.Variant`, `Enum.Group.Leaf` or `types.Enum.Variant` builds the variant.
@@ -622,6 +633,20 @@ fn sema_expression_computed_field_read(base: Expr, member: String, span: Span, t
         return Val(Expr.MethodCall{receiver: base.copy(), method: sema_computed_field_getter(member), method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED})
     }
     None
+}
+
+// The stable keys of the terminal fact report; mirrors TERMINAL_FACTS in
+// Compiler/JetFoundation/Data/Syntax/CoreSurface.jet.
+SEMA_TERMINAL_FACTS :: [String]{"terminal", "resize", "raw"}
+
+fn sema_expression_terminal_fact(member: String, member_span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
+    if !SEMA_TERMINAL_FACTS.contains(member) {
+        fix :: if sema_suggest_field(member, SEMA_TERMINAL_FACTS) == .Val(fact) -> "write `TerminalFact.{fact}`" else -> "write `TerminalFact.terminal`, `TerminalFact.resize` or `TerminalFact.raw`"
+        &diagnostics.push(sema_error("E0302", member_span, "`TerminalFact` has no key `{member}`", "the stable terminal facts are {SEMA_TERMINAL_FACTS.join(", ")}; any other fact is a preview string key", fix))
+        return None
+    }
+    key :: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: member}}}, member_span)
+    sema_expr_expected_owned(^key, expected, environment, program, &diagnostics)
 }
 
 fn sema_expression_struct_static_member_error(type_name: String, member: String, states: [String], span: Span) -> Diagnostic Never! {

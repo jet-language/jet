@@ -198,13 +198,31 @@ fn ir_line_reader_owner(ty: Type) -> String Never! {
     parts[parts.len() - 1].copy()
 }
 
-// A line loop has no keyed NodeKind.Call: it roots its handle's line reader
-// (ir_line_reader_key) from the checked function inventory, and the ordinary
-// reachability walk retains the reader's dependencies.
+// The key of encoding reader `reader`'s Core `next` method, which a loop over
+// it calls each step (TForInMethod.EncodingReader), or "".
+fn ir_encoding_reader_next_key(functions: [FnBody], reader: Type) -> String Never! {
+    owner :: ir_line_reader_owner(reader)
+    if owner == "" -> return ""
+    loop function in functions {
+        if function.name != "next" || !function.module_identity.starts_with("<corelib>/") -> next
+        if function.kind == .Method(_, owner_type) {
+            if ir_line_reader_owner(owner_type) == owner -> return function.key.copy()
+        }
+    }
+    ""
+}
+
+// A line or encoding reader loop has no keyed NodeKind.Call: it roots its
+// handle's line reader (ir_line_reader_key) or its reader's `next`
+// (ir_encoding_reader_next_key) from the checked function inventory, and the
+// ordinary reachability walk retains their dependencies.
 fn ir_core_reach_one_stmt_keys(tree: BodyTree, statement: Int, functions: [FnBody], keys: &[String]) Never! {
         if tree.stmts[statement] == {
-            .ForIn(_, _, _, source, _, _, method, _, _, _, body, _) -> {
+            .ForIn(_, _, _, source, collection, _, method, _, _, _, body, _) -> {
                 if method == .Val(kind) && (kind == .LinesFile || kind == .LinesStdin || kind == .LinesProcessStream) -> ir_core_reach_add(&keys, ir_line_reader_key(functions, body_type(tree, source)))
+                if method == .Val(kind) {
+                    if kind == .EncodingReader(_) -> ir_core_reach_add(&keys, ir_encoding_reader_next_key(functions, body_type(tree, collection)))
+                }
                 ir_core_reach_stmt_keys(tree, body, functions, &keys)
             }
             .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Loop(_, body, _) | .While(_, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) -> ir_core_reach_stmt_keys(tree, body, functions, &keys)

@@ -243,7 +243,15 @@ struct WinSize {
     h: Int
 }
 fn progress(label: String) IOError! -[IO, Time.Wait]> {
-    if !core.term.__terminal8_stderr_tty() || core.term.__terminal8_machine_output() -> return Ok()
+    if core.term.__terminal8_machine_output() -> return Ok()
+    // Without a terminal on stderr the label is a plain stdout line, so a
+    // piped run still records its progress.
+    if !core.term.__terminal8_stderr_tty() {
+        terminal_write_preflight("stdout")
+        line_cause :: core.term.__terminal8_write_stdout("{label}\n", true)
+        if line_cause != None -> return Err(terminal_other(.Flush, Val("stdout"), line_cause))
+        return Ok()
+    }
     terminal_write_preflight("stderr")
     carriage_return :: String.from_bytes([U8]{13}) ?? panic("CR is valid UTF-8")
     cause :: core.term.__terminal8_write_stderr("{carriage_return}{label}", true)

@@ -361,7 +361,7 @@ fn store_reuse_create_exec_wrappers(snapshot_root: String, executables: [Snapsho
     if ready.trim() != "ready" -> return Err(store_reuse_wrapper_keeper_error(^child, "creating private executable mount"))
     root :: "/proc/{child.id()}/root{mountpoint}"
     loop executable in executables -> files.symlink("/proc/self/fd/{executable.slot}", files.join(root, executable.relative))
-    child.stdin.write("seal\n")
+    child.stdin.write_all("seal\n".bytes())
     sealed :: store_reuse_keeper_line(&child)
     if sealed.trim() != "sealed" -> return Err(store_reuse_wrapper_keeper_error(^child, "sealing private executable mount"))
     directory :: store_reuse_hold_directory(root)

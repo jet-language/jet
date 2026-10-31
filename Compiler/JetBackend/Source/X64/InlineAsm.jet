@@ -14,6 +14,12 @@ struct X64AsmState {
     written: [Bool]
     depth: Int
     result: Int
+    // The template stack depth of the word `push rbx` saved, -1 for none.
+    // rbx is callee-saved and outside the operand vocabulary; a template
+    // saves it only so `cpuid` may write ebx.
+    rbx_saved: Int
+    // `cpuid` wrote rbx and `pop rbx` has not restored the saved word yet.
+    rbx_dirty: Bool
 }
 
 // The template's operand registers, in binding order: rdi, rsi, rdx, rcx,
@@ -138,7 +144,23 @@ fn x64_asm_line(s: &X64AsmState, line: String) -> String? Never! {
     first :: operands[0].trim()
     second :: if operands.len() == 2 -> operands[1].trim() else -> ""
     written := -1
-    if mnemonic == "push" || mnemonic == "pop" || mnemonic == "call" {
+    if (mnemonic == "push" || mnemonic == "pop") && first == "rbx" {
+        // The one saved rbx word: `push rbx` before `cpuid`, `pop rbx`
+        // restores that same word, and nothing else writes rbx.
+        if operands.len() != 1 -> return Val("expected one register operand")
+        if mnemonic == "push" {
+            if s.rbx_saved >= 0 || s.rbx_dirty -> return Val("rbx is already saved")
+            x64_push(&s.code, X64_RBX)
+            s.rbx_saved = s.depth
+            s.depth += 1
+        } else {
+            if s.depth == 0 || s.depth - 1 != s.rbx_saved -> return Val("pop rbx restores only the word push rbx saved")
+            x64_pop(&s.code, X64_RBX)
+            s.depth -= 1
+            s.rbx_saved = -1
+            s.rbx_dirty = false
+        }
+    } else if mnemonic == "push" || mnemonic == "pop" || mnemonic == "call" {
         if operands.len() != 1 -> return Val("expected one register operand")
         reg :: x64_asm_reg(s, first, mnemonic != "pop")
         if reg < 0 {
@@ -151,6 +173,10 @@ fn x64_asm_line(s: &X64AsmState, line: String) -> String? Never! {
             if s.depth == 0 -> return Val("pop reads outside the template stack")
             x64_pop(&s.code, reg)
             s.depth -= 1
+            if s.depth == s.rbx_saved {
+                if s.rbx_dirty -> return Val("cpuid's rbx must be restored by pop rbx")
+                s.rbx_saved = -1
+            }
             written = reg
         } else {
             if s.depth % 2 != 0 -> return Val("call requires a 16-byte aligned stack")
@@ -168,6 +194,25 @@ fn x64_asm_line(s: &X64AsmState, line: String) -> String? Never! {
             s.written[1] = true
             s.written[11] = true
         }
+    } else if mnemonic == "cpuid" {
+        // eax selects the leaf and ecx the subleaf; eax, ebx, ecx and edx
+        // receive it. ebx is callee-saved, so a saved rbx must exist.
+        if rest != "" -> return Val("instruction takes no operands")
+        if s.rbx_saved < 0 -> return Val("cpuid writes rbx; save it first with push rbx")
+        x64_byte(&s.code, 0x0f)
+        x64_byte(&s.code, 0xa2)
+        s.written[0] = true
+        s.written[1] = true
+        s.written[2] = true
+        s.rbx_dirty = true
+    } else if mnemonic == "xgetbv" {
+        // ecx selects the extended control register; edx:eax receive it.
+        if rest != "" -> return Val("instruction takes no operands")
+        x64_byte(&s.code, 0x0f)
+        x64_byte(&s.code, 0x01)
+        x64_byte(&s.code, 0xd0)
+        s.written[0] = true
+        s.written[2] = true
     } else if mnemonic == "cld" || mnemonic == "std" {
         // The direction flag of a string move; System V requires it clear at
         // every call and return, so a template that sets it clears it again.
@@ -186,7 +231,7 @@ fn x64_asm_line(s: &X64AsmState, line: String) -> String? Never! {
     } else if mnemonic == "mov" || mnemonic == "movzx" {
         if operands.len() != 2 -> return Val("expected two operands")
         dst :: x64_asm_reg(s, first, false)
-        src :: x64_asm_reg(s, second, true)
+        src :: if second == "rbx" -> X64_RBX else -> x64_asm_reg(s, second, true)
         // rsp is read-only here: template-owned pushed words can be passed
         // to syscalls. No other explicit frame-register use is admitted.
         if mnemonic == "mov" && dst >= 0 && second == "rsp" {
@@ -279,7 +324,7 @@ fn x64_assemble_template(template: String, names: [String], returns: Bool) -> X6
         return X64AsmResult{code: [U8]{}, regs: regs, result: -1, error: Val("inline asm: more than seven operands")}
     }
     loop (i, _) in names -> &regs.push(X64_ASM_INPUTS[i])
-    s := X64AsmState{code: [U8]{}, names: names, written: [Bool]{}, depth: 0, result: -1}
+    s := X64AsmState{code: [U8]{}, names: names, written: [Bool]{}, depth: 0, result: -1, rbx_saved: -1, rbx_dirty: false}
     loop _ in 0..<16 -> &s.written.push(false)
     lines :: template.split("\n").to_list()
     i := 0

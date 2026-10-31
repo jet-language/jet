@@ -1,0 +1,12 @@
+// D-TAIL-CALL1=A: compile-time code runs tail calls as jumps too, so a
+// `comptime` walk 10 million deep folds to its value.
+fn walk(n: Int, acc: Int) -> Int {
+    if n == 0 -> return acc
+    walk(n - 1, acc + n)
+}
+
+W :: comptime { walk(10000000, 0) }
+
+fn run() {
+    print(W)
+}

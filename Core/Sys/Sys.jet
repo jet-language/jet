@@ -738,11 +738,27 @@ fn has_nul(value: String) -> Bool {
     assert(has_nul(String.from_bytes([U8]{65, 0, 66}) ?? ""))
 }
 
-// Typed `decode<T>` supplies these four existing Dotenv annotation values,
-// then invokes the existing Decode protocol on the returned tree. Metadata
-// selection and the typed codec remain the compiler's established lowering.
-// Everything between metadata and codec, and error provenance afterwards,
-// is source policy rather than a second codec or host environment writer.
+// Typed `decode<T>(prefix:, file:, allow:)`: sema supplies `names`, the
+// checked env name and decode key of each of T's fields, then the tree
+// decodes through T's Decode protocol inside the text-cell scope (every
+// environment value is text). Everything between metadata and codec, and
+// error provenance afterwards, is source policy rather than a second codec or
+// host environment writer.
+fn decode<Target: Decode>(prefix: String, file: String, allow: [String], names: [(env_name: String, key: String)]) -[FS, Env, Exec]> Target [FieldError]! {
+    found :: __decode_tree(prefix, file, allow, names) ?? return Err(err)
+    previous :: core.encoding.__text_cells_enter()
+    if found.tree.decode<Target>() == {
+        .Ok(value) -> {
+            core.encoding.__text_cells_leave(previous)
+            return Ok(value)
+        }
+        .Err(failures) -> {
+            core.encoding.__text_cells_leave(previous)
+            return Err(__decode_errors(failures, found.origins))
+        }
+    }
+}
+
 fn __decode_tree(prefix: String, file: String, allow: [String], names: [(env_name: String, key: String)]) -[FS, Env, Exec]> (tree: Dyn, origins: [(name: String, path: String)]) [FieldError]! {
     platform :: if core.files.__path_windows() -> PathPlatform.Windows else -> PathPlatform.Unix
     path :: host_path.from_text(file, platform)
@@ -922,7 +938,7 @@ fn config_entries(prefix: String, dotenv: String?, allow: [String], process: [(n
             bytes :: rest.bytes()
             start := 0
             loop start < bytes.len() {
-                found :: config_find(bytes[start..bytes.len()], "__".bytes())
+                found :: config_find(bytes[start..<bytes.len()], "__".bytes())
                 end :: if found == {
                     .Val(relative) -> start + relative
                     .None -> bytes.len()
@@ -973,7 +989,7 @@ fn config_tree(^tree: ConfigTree) -> Dyn Never! {
             loop pair in ^pairs {
                 &encoded.push((key: pair.key, value: config_tree(^pair.value)))
             }
-            core.sys.__config_object(^encoded)
+            Dyn.Object(^encoded)
         }
     }
 }

@@ -909,6 +909,16 @@ CORE_RECORD_FIELD_ROWS :: [CoreRecordFieldRow]{
     CoreRecordFieldRow{owner: "Tensor", field: "device", ty: Type.String},
     CoreRecordFieldRow{owner: "Tensor", field: "numeric_profile", ty: Type.String},
     CoreRecordFieldRow{owner: "Tensor", field: "requested", ty: Type.String},
+    // Core/Compute's private device, stream and CSR storage (core-library.md
+    // `core.compute`: the registered vocabulary owns them; user code sees
+    // opaque values, so every field is core_only).
+    CoreRecordFieldRow{owner: "ComputeDevice", field: "name", ty: Type.String, core_only: true},
+    CoreRecordFieldRow{owner: "ComputeStream", field: "device", ty: Type.String, core_only: true},
+    CoreRecordFieldRow{owner: "SparseTensor", field: "rows", ty: Type.Int, core_only: true},
+    CoreRecordFieldRow{owner: "SparseTensor", field: "cols", ty: Type.Int, core_only: true},
+    CoreRecordFieldRow{owner: "SparseTensor", field: "row_ptr", ty: Type.List{element: Type.Int}, core_only: true},
+    CoreRecordFieldRow{owner: "SparseTensor", field: "col_idx", ty: Type.List{element: Type.Int}, core_only: true},
+    CoreRecordFieldRow{owner: "SparseTensor", field: "values", ty: Type.List{element: Type.Float}, core_only: true},
     CoreRecordFieldRow{owner: "HandleID", field: "value", ty: Type.Named{name: "Count"}},
     CoreRecordFieldRow{owner: "TaskID", field: "value", ty: Type.Named{name: "Count"}},
     CoreRecordFieldRow{owner: "EventID", field: "value", ty: Type.Named{name: "Count"}},
@@ -1013,6 +1023,9 @@ CORE_RECORD_LITERAL_ROWS :: [CoreRecordLiteralRow]{
     CoreRecordLiteralRow{owner: "RangeError", fields: [TypeTupleField]{TypeTupleField{name: "reason", ty: Type.String}}, core_only: true},
     CoreRecordLiteralRow{owner: "Expired", fields: [TypeTupleField]{}, core_only: false},
     CoreRecordLiteralRow{owner: "Tensor", fields: [TypeTupleField]{TypeTupleField{name: "shape", ty: Type.List{element: Type.Int}}, TypeTupleField{name: "data", ty: Type.List{element: Type.Float}}, TypeTupleField{name: "device", ty: Type.String}, TypeTupleField{name: "numeric_profile", ty: Type.String}, TypeTupleField{name: "requested", ty: Type.String}}, core_only: false},
+    CoreRecordLiteralRow{owner: "ComputeDevice", fields: [TypeTupleField]{TypeTupleField{name: "name", ty: Type.String}}, core_only: true},
+    CoreRecordLiteralRow{owner: "ComputeStream", fields: [TypeTupleField]{TypeTupleField{name: "device", ty: Type.String}}, core_only: true},
+    CoreRecordLiteralRow{owner: "SparseTensor", fields: [TypeTupleField]{TypeTupleField{name: "rows", ty: Type.Int}, TypeTupleField{name: "cols", ty: Type.Int}, TypeTupleField{name: "row_ptr", ty: Type.List{element: Type.Int}}, TypeTupleField{name: "col_idx", ty: Type.List{element: Type.Int}}, TypeTupleField{name: "values", ty: Type.List{element: Type.Float}}}, core_only: true},
     CoreRecordLiteralRow{owner: "HandleID", fields: [TypeTupleField]{TypeTupleField{name: "value", ty: Type.Named{name: "Count"}}}, core_only: false},
     CoreRecordLiteralRow{owner: "TaskID", fields: [TypeTupleField]{TypeTupleField{name: "value", ty: Type.Named{name: "Count"}}}, core_only: false},
     CoreRecordLiteralRow{owner: "EventID", fields: [TypeTupleField]{TypeTupleField{name: "value", ty: Type.Named{name: "Count"}}}, core_only: false},

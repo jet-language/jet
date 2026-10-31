@@ -291,11 +291,15 @@ fn kit_steps_session_action(step: KitStep, context: KitStepCtx, previous: KitSte
         overlay :: kit_steps_environment(context.plan, policy, context.work, context.scratch, state.built)
         prepared :: kit_steps_prepare(step, context.env, context.work, context.scratch, context.snapshots, context.plan.fixture, state.built, overlay) ?? return kit_steps_action_error(state, "{err}")
         started :: time.instant()
-        child := kit_exec_spec(prepared.env, prepared.argv, prepared.cwd, context.scratch, prepared.overlay).spawn() ?? return kit_steps_action_error(state, "session spawn: {err}")
+        spec := kit_exec_spec(prepared.env, prepared.argv, prepared.cwd, context.scratch, prepared.overlay)
+        if step.terminal == .Val(shape) {
+            spec = spec.terminal(TerminalPolicy{size: TerminalSize{cols: shape.cols, rows: shape.rows}, mode: .Cooked})
+        }
+        child := spec.spawn() ?? return kit_steps_action_error(state, "session spawn: {err}")
         input_error := ""
         if step.stdin == "null" -> child.stdin.close()
         else if prepared.stdin != "" {
-            child.stdin.write(prepared.stdin) ?? {
+            child.stdin.write_text(prepared.stdin) ?? {
                 input_error = "session stdin: {err}"
                 ()
             }
@@ -312,8 +316,8 @@ fn kit_steps_session_action(step: KitStep, context: KitStepCtx, previous: KitSte
             if kit_steps_build_target_text(payload) -> return KitStepResult{state: state, verdict: kit_expect_verdict("REFUSED", "build-target")}
             expanded :: kit_steps_runtime_expand(payload, context, state) ?? return kit_steps_action_error(state, "send token unavailable")
             cr :: String.from_bytes([U8{13}]) ?? panic("CR")
-            framed :: if pending.step.session_mode == "content-length" -> "Content-Length: {expanded.len()}{cr}\n{cr}\n{expanded}" else if pending.step.session_mode == "line" -> "{expanded}\n" else -> expanded
-            pending.child.stdin.write(framed) ?? return kit_steps_action_error(state, "session send: {err}")
+            framed :: if step.session_mode == "raw" -> expanded else if pending.step.session_mode == "content-length" -> "Content-Length: {expanded.len()}{cr}\n{cr}\n{expanded}" else if pending.step.session_mode == "line" -> "{expanded}\n" else -> expanded
+            pending.child.stdin.write_text(framed) ?? return kit_steps_action_error(state, "session send: {err}")
             return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
         }
         if step.action == "signal" {
@@ -321,7 +325,16 @@ fn kit_steps_session_action(step: KitStep, context: KitStepCtx, previous: KitSte
             state.children[index].signalled = delivered
             return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
         }
-        if step.action == "close" -> pending.child.stdin.close()
+        // Closing a terminal session's input types the end-of-file character;
+        // closing the terminal itself would hang up the child.
+        if step.action == "close" {
+            if kit_steps_has_terminal(pending.step) {
+                eof :: String.from_bytes([U8{4}]) ?? panic("EOF character")
+                pending.child.stdin.write_text(eof).drop("the child may have exited before its input ended")
+            } else {
+                pending.child.stdin.close()
+            }
+        }
         if step.duration > 0 {
             started :: time.instant()
             loop !(pending.child.exited() ?? return kit_steps_action_error(state, "wait status: {err}")) {

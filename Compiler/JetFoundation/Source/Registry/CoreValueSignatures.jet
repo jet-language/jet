@@ -15,7 +15,6 @@ fn core_value_fixed_signature(module_name: String, member: String) -> CoreTypedC
     io_error :: core_sig_named("IOError")
     encoding_error :: core_sig_named("EncodingError")
     list_u8 :: Type.List{element: Type.IntN{signed: false, bits: 8}}
-    list_int :: Type.List{element: Type.Int}
     list_float :: Type.List{element: Type.Float}
     list_string :: Type.List{element: Type.String}
 
@@ -78,58 +77,8 @@ fn core_value_fixed_signature(module_name: String, member: String) -> CoreTypedC
         tensor :: core_sig_named("Tensor")
         compute_error :: core_sig_named("ComputeError")
         compute_device :: core_sig_named("ComputeDevice")
-        compute_stream :: core_sig_named("ComputeStream")
-        sparse_tensor :: core_sig_named("SparseTensor")
-        if core_sig_one_of(member, [String]{"solve", "matmul_f32_tile"}) {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(tensor, read), core_sig_positional(tensor, read),
-            }, Val(core_sig_result(tensor, compute_error))))
-        }
-        if member == "sparse_mv" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(sparse_tensor, read), core_sig_positional(tensor, read),
-            }, Val(core_sig_result(tensor, compute_error))))
-        }
-        if core_sig_one_of(member, [String]{"device_cpu", "device_auto", "device_metal", "device_cuda", "device_vulkan", "device_webgpu"}) {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(compute_device)))
-        }
-        if member == "on_device" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(tensor, read), core_sig_positional(compute_device, read),
-            }, Val(core_sig_result(tensor, compute_error))))
-        }
-        if core_sig_one_of(member, [String]{"inv", "fft"}) {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(tensor, read),
-            }, Val(core_sig_result(tensor, compute_error))))
-        }
-        if member == "eye" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(Type.Int, read),
-            }, Val(core_sig_result(tensor, compute_error))))
-        }
-        if member == "det" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(tensor, read),
-            }, Val(core_sig_result(Type.Float, compute_error))))
-        }
-        if member == "stream_new" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(compute_stream)))
-        }
-        if member == "stream_new_on" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(compute_device, read),
-            }, Val(core_sig_result(compute_stream, compute_error))))
-        }
-        if member == "stream_sync" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(compute_stream, read),
-            }, Val(core_sig_result(unit, compute_error))))
-        }
-        if member == "stream_show" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(compute_stream, read),
-            }, Val(Type.String)))
+        if member == "__simd_lanes" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(Type.Int)))
         }
         if member == "transfer_show" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
@@ -141,16 +90,6 @@ fn core_value_fixed_signature(module_name: String, member: String) -> CoreTypedC
                 core_sig_positional(tensor, read), core_sig_positional(compute_device, read),
             }, Val(core_sig_result(tensor, compute_error))))
         }
-        if member == "kernel_bounds_ok" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(list_int, read), core_sig_positional(list_int, read),
-            }, Val(core_sig_result(Type.Bool, compute_error))))
-        }
-        if member == "sparse_show" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(sparse_tensor, read),
-            }, Val(Type.String)))
-        }
         if member == "serialize" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
                 core_sig_positional(tensor, read),
@@ -160,19 +99,6 @@ fn core_value_fixed_signature(module_name: String, member: String) -> CoreTypedC
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
                 core_sig_positional(Type.String, read),
             }, Val(core_sig_result(tensor, compute_error))))
-        }
-        if member == "to_sparse" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(tensor, read),
-            }, Val(core_sig_result(sparse_tensor, compute_error))))
-        }
-        if member == "sparse_nnz" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(sparse_tensor, read),
-            }, Val(Type.Int)))
-        }
-        if core_sig_one_of(member, [String]{"profile_f32_strict", "profile_show"}) {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(Type.String)))
         }
     }
 

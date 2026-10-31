@@ -23,6 +23,7 @@ use jet_foundation.[
     UnitRatio,
     ast_empty_call_arg_flags,
     expr_span,
+    is_compute_tensor_family,
     measure_expression,
     measure_literal_value,
     symbol_id,
@@ -767,6 +768,10 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
     // Fixed lists refine lists (spec: fixed-size lists), so range selection
     // erases only the length fact. Reuse Slice for read/write window typing.
     if checked_index.ty == (Type.Named{name: "Range"}) {
+        if is_compute_tensor_family(base_ty) {
+            window :: sema_call_compute_tensor_window(base, checked_base, checked_index, span, environment, program, scopes, &diagnostics) ?? return None
+            return sema_expr_expected_owned(^window, expected, environment, program, &diagnostics)
+        }
         element :: if base_ty == {
             .List(item) | .FixedList(item, _) -> Val(item)
             else -> None
@@ -965,6 +970,12 @@ fn sema_expression_rows_index(table: TExpr, row: TExpr, element: Type, row_span:
 
 fn sema_expression_slice(base: Expr, start: Expr, end: Expr, range: Expr?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     checked_base :: sema_check_expression(base, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    if is_compute_tensor_family(checked_base.ty) && range == .Val(tensor_range) {
+        range_checked :: sema_check_expression(tensor_range, Val(Type.Named{name: "Range"}), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+        if range_checked.ty != (Type.Named{name: "Range"}) -> return None
+        window :: sema_call_compute_tensor_window(base, checked_base, range_checked, span, environment, program, scopes, &diagnostics) ?? return None
+        return sema_expr_expected(window, expected, environment, program, &diagnostics)
+    }
     // L0501 (Rust `infer_slice`): an owned slice taken inside a loop copies on
     // every pass; a `View` subrange reborrows its owner and is not reported.
     if scopes.loop_depth > 0 && sema_expression_view_subrange_type(checked_base.ty) == None -> &diagnostics.push(sema_lint("L0501", span, "slicing inside a loop copies every time", "each slice makes a fresh copy of the range — that adds up in a loop", "build indices outside the loop, or collect into one list"))

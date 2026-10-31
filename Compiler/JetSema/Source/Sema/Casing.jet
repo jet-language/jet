@@ -33,6 +33,7 @@ use jet_foundation.[
     sema_casing_canonical,
     sema_casing_has_case,
     diagnostic_with_edit,
+    expr_binary_operands,
 ]
 
 fn sema_casing_check(name: String, span: Span, category: String, case: SemaNameCase, diagnostics: &[Diagnostic]) {
@@ -529,10 +530,7 @@ fn sema_casing_expr(expr: Expr, diagnostics: &[Diagnostic]) {
             sema_casing_expr(subject, &diagnostics)
             sema_casing_pattern(tested, &diagnostics)
         }
-        .Binary(_, left, right, _, _) -> {
-            sema_casing_expr(left, &diagnostics)
-            sema_casing_expr(right, &diagnostics)
-        }
+        .Binary(_, left, right, _, _) -> loop operand in expr_binary_operands(left, right) -> sema_casing_expr(operand, &diagnostics)
         .CompareChain(operands, _, _, _, _) | .ListLit(operands, _, _) -> {
             loop value in operands -> sema_casing_expr(value, &diagnostics)
         }

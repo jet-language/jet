@@ -9,7 +9,7 @@ fn run() -[Exec, IO, Time.Wait]> {
     }
     child :: process.cmd(["sh", "-c", "exit 0"]).stdin(.Capture).spawn() ?? panic("spawn failed")
     child.wait() ?? panic("wait failed")
-    if child.stdin.write("late") == {
+    if child.stdin.write_text("late") == {
         .Ok(_) -> { print("closed:accepted") }
         .Err(_) -> { print("closed:typed-error") }
     }

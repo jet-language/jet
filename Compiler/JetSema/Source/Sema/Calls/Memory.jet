@@ -40,6 +40,37 @@ fn sema_call_memory_address_of(args: [CallArg], span: Span, expected: Type?, env
     sema_expr_expected_owned(sema_tree_node(Type.Int, TExprKind.RawAddressOf{place: TPlace.Expr{value: value}}, span), expected, environment, program, &diagnostics)
 }
 
+// D-PIN1=A: `mem.pin(&place) -> Pin<T>` borrows the place in a write window
+// typed `Pin<T>`; it never copies it. Pinning a place that already is a
+// `Pin<T>` keeps that pin (no `Pin<Pin<T>>`). The binding's no-move view
+// fact is recorded with the binding (sema_pin_record_binding).
+fn sema_call_memory_pin(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if args.len() != 1 {
+        &diagnostics.push(sema_error("E0104", span, "`pin` expects 1 argument, got {args.len()}", "a pin names one storage location", "write `mem.pin(&place)` with the write-access marker `&`"))
+        sema_call_memory_discard_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return None
+    }
+    argument :: args[0]
+    target :: if argument.expr == {
+        .Place(value, _, _, _) -> value
+        else -> argument.expr
+    }
+    previous_root_read :: context.suppress_partial_move_root_read
+    context.suppress_partial_move_root_read = true
+    checked_value :: sema_check_expression(target, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    context.suppress_partial_move_root_read = previous_root_read
+    checked :: checked_value ?? return None
+    if !sema_pin_check_call(args, &diagnostics) -> return None
+    if sema_pin_type(checked.ty) -> return sema_expr_expected_owned(^checked, expected, environment, program, &diagnostics)
+    parameter :: SemaCallParam{label: "place", name: "place", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Write, ty: Val(checked.ty.copy()), variadic: false}
+    call_args := [CallArg]{argument}
+    ownership :: sema_ownership_check_call_arguments(&state, "pin", [SemaCallParam]{parameter}, &call_args, scopes, &diagnostics)
+    if !ownership.accepted -> return None
+    pinned_ty :: Type.Apply{name: "Pin", args: [Type]{checked.ty.copy()}}
+    pinned :: sema_tree_node(pinned_ty, TExprKind.Borrow{place: checked, access: AccessConvention.Write}, span)
+    sema_expr_expected_owned(^pinned, expected, environment, program, &diagnostics)
+}
+
 fn sema_call_memory_allocator_name(ty: Type) -> String? {
     if ty == .Named(name) && (name == "Arena" || name == "Bump" || name == "Pool" || name == "Fixed") -> return Val(name)
     return None
@@ -148,9 +179,10 @@ fn sema_call_memory_check_fixed_buffer(argument: CallArg, value: TExpr, environm
 fn sema_call_try_memory_static(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     return if receiver == {
         .Ident(alias, alias_span, _) -> {
-            if method != "address_of" -> return SemaMethodSpecialCheck{handled: false, value: None}
+            if method != "address_of" && method != "pin" -> return SemaMethodSpecialCheck{handled: false, value: None}
             imported :: sema_call_core_import_target(environment, program, alias) ?? return SemaMethodSpecialCheck{handled: false, value: None}
             if imported.module_name != "core.mem" || !sema_call_core_record_import_reference(environment, program, scopes, imported, alias_span, &context) -> return SemaMethodSpecialCheck{handled: false, value: None}
+            if method == "pin" -> return SemaMethodSpecialCheck{handled: true, value: sema_call_memory_pin(args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)}
             SemaMethodSpecialCheck{handled: true, value: sema_call_memory_address_of(args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)}
         }
         .Field(base, name, _, _) -> {

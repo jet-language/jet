@@ -1,0 +1,28 @@
+# D-DROP-ASAP1=A (#6392 C1): a String is freed after its last use. The String
+# a loop assigns is freed before the next one is built, and a String read
+# once is freed before the next is built. So the peak resident set holds one
+# 50 MB string, not two, on O0, O1, O2, the default run and a built binary.
+fixture: strings_free_at_their_last_use.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none main.jet
+limit: time=120
+exit: 0
+stdout: = strings_free_at_their_last_use.out
+step: jet run --optimize=basic main.jet
+limit: time=120
+exit: 0
+stdout: = strings_free_at_their_last_use.out
+step: jet run --optimize=full main.jet
+limit: time=120
+exit: 0
+stdout: = strings_free_at_their_last_use.out
+step: jet run main.jet
+limit: time=120
+exit: 0
+stdout: = strings_free_at_their_last_use.out
+step: jet build --optimize=full main.jet
+exit: 0
+step aot: built
+limit: time=120
+exit: 0
+stdout: = strings_free_at_their_last_use.out

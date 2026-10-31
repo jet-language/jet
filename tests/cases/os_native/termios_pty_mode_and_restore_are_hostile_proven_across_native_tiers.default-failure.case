@@ -3,14 +3,13 @@
 # Runtime PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four).
 requires: os:unix
 requires: os-name:linux|android|macos|ios|freebsd|openbsd|netbsd
-refused: pty
 fixture: termios_pty_mode_and_restore_are_hostile_proven_across_native_tiers.default-failure.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 session child raw: jet run --quiet main.jet
 pty: true
-recv child until ~ "ready" within 60s
+recv child until ~ "ready" within 60s # original PTY ready marker rs582-587
 pty-send: "x" after 0ms
 close child
 exit: nonzero

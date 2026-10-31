@@ -344,6 +344,26 @@ struct KitProcessInput {
     overlay: [KitEnvVar]
 }
 
+// A step's terminal. A 0x0 size leaves the terminal's size unset. Events run
+// in time order, each `at` nanoseconds after spawn; `clock` is when the
+// latest send or close runs, which the next `after` delay counts from.
+struct KitTerminal {
+    rows: Int
+    cols: Int
+    events: [KitTerminalEvent]{[KitTerminalEvent]{}}
+    clock: Int{0}
+}
+
+// One scheduled terminal input: "send" types `text`, "close" types the
+// terminal's end-of-file character and "resize" sets `rows` x `cols`.
+struct KitTerminalEvent {
+    kind: String
+    text: String{""}
+    at: Int
+    rows: Int{0}
+    cols: Int{0}
+}
+
 struct KitStep {
     argv: [String]
     stdin: String
@@ -366,6 +386,7 @@ struct KitStep {
     isolate_network: String{"disabled"}
     env_clear: Bool{false}
     refused_capability: String{""}
+    terminal: KitTerminal?{None}
     stdout_target: String{""}
     stderr_target: String{""}
     json_normalize: [KitJSONNormalization]{[KitJSONNormalization]{}}

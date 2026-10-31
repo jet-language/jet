@@ -26,6 +26,7 @@ use jet_foundation.[
     compiler_threads_heaviest_first,
     core_call,
     diagnostic_with_edit,
+    expr_binary_operands,
     expr_optional_method_call_as_call,
     expr_span,
     name_find,
@@ -846,7 +847,13 @@ fn sema_taint_tags_of(state: &SemaTaintFlowState, expression: Expr) -> [String] 
             loop argument in args -> sema_taint_union(&tags, sema_taint_tags_of(&state, argument.expr))
             return tags
         }
-        .Binary(_, left, right, _, _) | .Range(left, right, _, _, _) -> {
+        // A left-leaning chain (`a + b + c …`) costs no stack per operator.
+        .Binary(_, left, right, _, _) -> {
+            tags := [String]{}
+            loop operand in expr_binary_operands(left, right) -> sema_taint_union(&tags, sema_taint_tags_of(&state, operand))
+            return tags
+        }
+        .Range(left, right, _, _, _) -> {
             tags := sema_taint_tags_of(&state, left)
             sema_taint_union(&tags, sema_taint_tags_of(&state, right))
             return tags
@@ -1044,10 +1051,8 @@ fn sema_taint_check_expr(graph: SemaRegistrationGraph, state: &SemaTaintFlowStat
             loop argument in args -> sema_taint_check_expr(graph, &state, argument.expr)
         }
         .Tainted(inner, _, _, _) -> sema_taint_check_expr(graph, &state, inner)
-        .Binary(_, left, right, _, _) -> {
-            sema_taint_check_expr(graph, &state, left)
-            sema_taint_check_expr(graph, &state, right)
-        }
+        // A left-leaning chain (`a + b + c …`) costs no stack per operator.
+        .Binary(_, left, right, _, _) -> loop operand in expr_binary_operands(left, right) -> sema_taint_check_expr(graph, &state, operand)
         .CompareChain(operands, _, _, _, _) | .ListLit(operands, _, _) -> loop value in operands -> sema_taint_check_expr(graph, &state, value)
         .Unary(_, inner, _, _) | .Deref(inner, _, _) | .RawOf(inner, _, _) | .Copy(inner, _, _) | .Place(inner, _, _, _) | .Field(inner, _, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .Paren(inner, _, _) | .Spread(inner, _, _) -> sema_taint_check_expr(graph, &state, inner)
         .Try(inner, _, _, note, _) -> {

@@ -4066,7 +4066,7 @@ fn sema_stmt_declare_unchecked_binding(binding: Binding, environment: SemaScopeE
 
 fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     loop marker in binding.markers {
-        if marker.name == "Meta" && !marker.negated -> sema_marker_rules_check_local_meta(marker, &diagnostics)
+        if marker.name == "Meta" && !marker.negated && sema_marker_rules_check_rule_signature(marker, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) -> sema_marker_rules_check_local_meta(marker, &diagnostics)
     }
     if binding.name == "err" -> &diagnostics.push(sema_err_shadow_lint(binding.name_span))
     if sema_ownership_report_lending_view_escape(binding.init, "be stored in a binding", scopes, context, &diagnostics) -> return None
@@ -4107,7 +4107,10 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
     // the binding records its view, naming the binding (Rust `record_view`).
     deferred_before :: state.deferred_view_opens.len()
     if sema_stmt_binding_is_place_view(binding_expr) -> &state.deferred_view_opens.push(expr_span(binding_expr))
-    checked_init := if range_head == .Val(head) -> sema_stmt_check_range_conversion(binding.init, head, binding.ty, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression_with_lambda_escapes(binding_expr, binding.ty, environment, program, &scopes, &state, &tail_store, &context, lambda_escapes, &diagnostics)
+    // A declared type (a generated binding's) resolves in this module's scope,
+    // so an alias-qualified name such as `crypto.Secret` names its nominal.
+    declared :: if binding.ty == .Val(written) -> Val(sema_expr_expected_type(written, environment, program)) else -> None
+    checked_init := if range_head == .Val(head) -> sema_stmt_check_range_conversion(binding.init, head, declared, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression_with_lambda_escapes(binding_expr, declared, environment, program, &scopes, &state, &tail_store, &context, lambda_escapes, &diagnostics)
     loop state.deferred_view_opens.len() > deferred_before -> _ := &state.deferred_view_opens.pop()
     context.binding_initializer = previous_binding_initializer
     context.allow_fixed_constructor = previous_fixed_constructor
@@ -4121,7 +4124,7 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
         sema_stmt_declare_unchecked_binding(binding, environment, program, &scopes)
         return None
     }
-    sema_copy_site_check_conditional(binding.init, binding.ty, environment, program, scopes, context, &diagnostics)
+    sema_copy_site_check_conditional(binding.init, declared, environment, program, scopes, context, &diagnostics)
     // An ExpiringSecret loan lives only while its `.with` callback runs.
     if sema_contains_expiring_secret_loan(init.ty) {
         &diagnostics.push(sema_error("E0201", expr_span(binding.init), "an ExpiringSecret loan cannot be stored", "the callback parameter is a temporary read-only loan that ends when `.with` returns", "use the loan inside the callback and store only a non-secret result"))
@@ -5368,14 +5371,12 @@ fn sema_stmt_check_scope_member(name: String, args: [Expr], args_span: Span?, bo
     // Rust `#Arithmetic(mode) { … }` (D-WRAP-SCOPE1=A): one lexical
     // fixed-width arithmetic mode over the block, read by the operator checks
     // as `context.arithmetic_policy`. An argument that names no mode is the
-    // marker's E0930 shape refusal; the block is still checked.
+    // block application's E0930, reported where every marked statement binds
+    // its signature (sema_marker_rules_check_statement_facts); the block is
+    // still checked.
     if name == "Arithmetic" {
         mode := ArithmeticMode?{None}
         if args.len() == 1 -> mode = sema_function_arithmetic_mode(args[0])
-        if mode == None {
-            expected :: "Arithmetic(mode: ArithmeticMode)"
-            &diagnostics.push(sema_error("E0930", span, "`#Arithmetic` arguments do not match `{expected}`", "marker arguments use the registered parameter kinds, labels, defaults, and variadic slot", "match the registered signature `{expected}`"))
-        }
         outer_policy :: context.arithmetic_policy
         if mode == .Val(value) -> context.arithmetic_policy = Val(ArithmeticPolicyFact{mode: value, scope_span: span, operation_span: span, operation: None})
         nested := sema_stmt_check_block(body, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, "arithmetic@{span.start}", loop_depth)
@@ -5662,12 +5663,14 @@ fn sema_stmt_swizzle_base_vector(base: Expr, environment: SemaScopeEnvironment, 
     sema_expression_core_vector_name(probed, environment, program)
 }
 
-// An index or field write whose path passes through a `ViewMut` value edits
-// the window's owner, not the carrier: `borrowed.values[0] = 3` with
-// `values: ViewMut<Int>` needs no write marker on `borrowed`.
+// An index or field write whose path passes through a `ViewMut` or `Pin`
+// value edits the window's owner, not the carrier: `borrowed.values[0] = 3`
+// with `values: ViewMut<Int>`, or `pinned.hops += 1` with `pinned: Pin<Node>`,
+// needs no write marker on the carrier.
 fn sema_stmt_place_writes_through_view(place: TExpr) -> Bool Never! {
     if place.kind == {
         .Index(base, _, _, _, _, _) | .Field(base, _) -> {
+            if sema_pin_target(base.ty) != None -> return true
             if sema_expr_unwrap_tag(base.ty) == .Apply(name, _) {
                 if name == "ViewMut" -> return true
             }
@@ -6252,6 +6255,53 @@ fn sema_stmt_check_return_value(value: Expr, return_type: Type?, environment: Se
     checked
 }
 
+// L0533 (D-TAIL-CALL1=A): a returned call of a function of this module is a
+// tail call, which reuses the caller's frame (JetIR TailCalls.jet). A value
+// with a Close cleanup that is still open in the function (a live owner, or
+// one a `defer close` takes at scope exit) closes after the call returns, so
+// the call keeps its frame; name each one.
+fn sema_stmt_lint_blocked_tail_call(span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: SemaOwnershipState, diagnostics: &[Diagnostic]) Never! {
+    frames := [Int]{}
+    frame := scopes.current
+    loop frame > 0 && frame < scopes.frames.len() {
+        &frames.push(frame)
+        if scopes.frames[frame].owner.starts_with("lambda@") -> break
+        frame = scopes.frames[frame].parent
+    }
+    named := [String]{}
+    loop binding in scopes.bindings {
+        if !frames.contains(binding.frame) || named.contains(binding.symbol.id.key) || binding.symbol.id.key == state.close_receiver_key -> next
+        owned :: binding.symbol.kind == SymbolKind.Local || (binding.symbol.kind == SymbolKind.Parameter && binding.access == AccessConvention.Move)
+        if !owned -> next
+        if binding.symbol.ty == .Val(ty) {
+            if !sema_ownership_type_owns_close(ty, environment, program) -> next
+            deferred := false
+            moved := false
+            loop entry in state.moved {
+                if entry.place.root_key != binding.symbol.id.key || entry.place.projections.len() != 0 -> next
+                if entry.origin.deferred_depth == None -> moved = true else -> deferred = true
+            }
+            if moved -> next
+            &named.push(binding.symbol.id.key)
+            name :: binding.symbol.name
+            closes :: if deferred -> "its `defer close` runs" else -> "its Close implementation runs"
+            &diagnostics.push(sema_lint("L0533", span, "This tail call can't reuse the frame because `{name}` closes after it returns", "`{name}` is a `{type_name(ty)}` that is still open here, and {closes} when its scope ends, after this call returns; the call keeps its frame, so a chain of such calls grows the stack", "Close `{name}` before the call with `close(^{name})` (bind any argument that reads it first), or open it in a smaller block that ends before the call"))
+        }
+    }
+}
+
+// Whether `value` calls a function of this module by its name.
+fn sema_stmt_returns_module_call(value: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Bool Never! {
+    if value == {
+        .Paren(inner, _, _) -> return sema_stmt_returns_module_call(inner, environment, scopes)
+        .Call(call, _) -> {
+            symbol :: sema_scope_resolve(scopes, call.name) ?? return false
+            return symbol.kind == SymbolKind.Function && symbol.module_name == environment.module_identity
+        }
+        else -> return false
+    }
+}
+
 // A returned value (a `return` or a value tail) with its ownership and view
 // obligations: the value moves out and its views must outlive the call.
 fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -6295,6 +6345,7 @@ fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: 
         }
     }
     checked :: sema_stmt_check_return_value(value, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    if sema_stmt_returns_module_call(value, environment, scopes) -> sema_stmt_lint_blocked_tail_call(expr_span(value), environment, program, scopes, state, &diagnostics)
     if !sema_stmt_return_is_view_boundary(return_type) && !context.return_view_declared && !sema_copy_site_check_guard_owned(checked, environment, program, scopes, context, &diagnostics, false) -> return None
     if return_type != None && sema_contains_expiring_secret_loan(checked.ty) {
         &diagnostics.push(sema_error("E0201", expr_span(value), "an ExpiringSecret loan cannot be returned", "the callback parameter is valid only while `.with` is running", "return a non-secret result computed from the loan"))
@@ -6744,6 +6795,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
         statement_diagnostics :: diagnostics.len()
         statement_reasons :: context.incomplete_reasons.len()
         statement_complete :: complete
+        sema_marker_rules_check_statement_facts(sema_compiler_index_stmt_span(statements[index]), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         // #3708: these statements own a failure route of their own (task
         // groups, transactions, reactive scopes, generators, deferred closes).
         if statements[index] == {
@@ -7547,18 +7599,21 @@ fn sema_stmt_check_expression_statement(expr: Expr, return_type: Type?, environm
 // E0761), then the body is an ordinary nested block. Lowering installs the
 // guards around the body (jet_codegen_lower_context_block).
 fn sema_stmt_check_context_block(fields: [ContextField], body: [Stmt], span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {
-    complete := true
+    // Rust binds the block's `#Context` application first; fields that do
+    // not bind (E0930) get no E0762 of their own.
+    signature_valid :: sema_marker_rules_check_context_fact(span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    complete := signature_valid
     guards := [TContextGuard]{}
     loop field in fields {
         checked :: sema_check_expression(field.value, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
             complete = false
             next
         }
-        if field.name == "deadline" && !sema_stmt_context_deadline_type(checked.ty) {
+        if signature_valid && field.name == "deadline" && !sema_stmt_context_deadline_type(checked.ty) {
             &diagnostics.push(sema_error("E0762", field.span, "`deadline` needs an Int epoch-millis instant, got {sema_type_show(checked.ty)}", "the `deadline` field carries an absolute time budget in milliseconds", "pass an Int, e.g. `time.now() + 200`"))
             complete = false
         }
-        if field.name == "allocator" && !sema_stmt_context_allocator_type(checked.ty) {
+        if signature_valid && field.name == "allocator" && !sema_stmt_context_allocator_type(checked.ty) {
             &diagnostics.push(sema_error("E0762", field.span, "`allocator` needs an allocator, got {sema_type_show(checked.ty)}", "the `allocator` field takes an `Arena`, `Bump`, `Pool`, or `Fixed` value", "pass an allocator, e.g. `mem.Arena.new()`"))
             complete = false
         }

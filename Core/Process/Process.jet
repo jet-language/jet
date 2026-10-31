@@ -110,7 +110,7 @@ fn check(receipt: ProcessReceipt) IOError! {
 
 fn stdin_text(spec: ProcessSpec, text: String) IOError! -[Exec, Time.Wait]> {
     child :: spec.stdin(.Stream).spawn()
-    child.stdin.write(text)
+    child.stdin.write_all(text.bytes())
     child.stdin.close()
     receipt :: child.wait()
     check(receipt)
@@ -510,6 +510,59 @@ fn __stdout_next_line(stream: ProcessStdoutStream) -[Exec, Time.Wait]> String? I
 
 fn __stderr_next_line(stream: ProcessStderrStream) -[Exec, Time.Wait]> String? IOError! {
     pipe_line(core.process.__stderr_line_bytes(stream))
+}
+
+/// A child's output pipe read in pieces: `loop chunk in child.stdout.chunks(size)`
+/// yields each non-empty piece of at most `size` bytes. The loop ends at end of
+/// input or at the first failed read; a size below one fails before any read.
+struct ProcessChunks {
+    __stdout: ProcessStdoutStream?{None}
+    __stderr: ProcessStderrStream?{None}
+    __size: Int
+}
+
+struct __ProcessChunkCursor {
+    stdout: ProcessStdoutStream?
+    stderr: ProcessStderrStream?
+    size: Int
+    done: Bool
+}
+
+impl __ProcessChunkCursor.Iterator {
+    type Item = [U8]
+
+    fn next(&self) -[Exec, Time.Wait]> [U8]? {
+        if self.done -> return None
+        piece := [U8]{}
+        if self.stdout == .Val(stream) {
+            piece = stream.read(self.size) ?? [U8]{}
+        } else if self.stderr == .Val(stream) {
+            piece = stream.read(self.size) ?? [U8]{}
+        }
+        if piece.len() == 0 {
+            self.done = true
+            return None
+        }
+        Val(piece)
+    }
+}
+
+impl ProcessChunks.Iterable {
+    type Iter = __ProcessChunkCursor
+
+    fn iter(^self) -> __ProcessChunkCursor {
+        __ProcessChunkCursor{stdout: self.__stdout, stderr: self.__stderr, size: self.__size, done: false}
+    }
+}
+
+// The loop sources `child.stdout.chunks(size)` and `child.stderr.chunks(size)`
+// check to (Sema ProcessHandles).
+fn __stdout_chunks(stream: ProcessStdoutStream, size: Int) -> ProcessChunks Never! {
+    ProcessChunks{__stdout: Val(stream), __size: size}
+}
+
+fn __stderr_chunks(stream: ProcessStderrStream, size: Int) -> ProcessChunks Never! {
+    ProcessChunks{__stderr: Val(stream), __size: size}
 }
 
 fn pipe_line(^input: [U8]) -> String? IOError! {

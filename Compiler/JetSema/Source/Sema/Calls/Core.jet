@@ -19,6 +19,7 @@ use jet_foundation.[
     CoreCallTypeParameter,
     CoreTypedCallSignature,
     Diagnostic,
+    diagnostic_registry_row,
     Effect,
     InternalTag,
     EffectRowEntry,
@@ -197,6 +198,19 @@ fn sema_call_core_crypto_expert_gate(module_name: String, member: String, span: 
     }
 }
 
+// Rust `vault_comptime_denied` (Comptime/Methods/dispatch.rs:114, raised
+// by eval_method.rs:754 @ 6083377777): a `core.crypto.vault` call in
+// compile-time code (a `comptime` block, a module field, a comptime
+// function) is E1265. No gate unlocks it: a build artifact must never hold a
+// decrypted secret. True when reported; the call then has no value, so no
+// comptime evaluation is staged for it.
+fn sema_call_core_vault_build_time_gate(module_name: String, member: String, span: Span, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool Never! {
+    if scopes.comptime_execution_depth == 0 || module_name != "core.crypto.vault" -> return false
+    row :: diagnostic_registry_row("E1265") ?? panic("E1265 must have a registry row")
+    &diagnostics.push(sema_error("E1265", span, "`{module_name}.{member}()` can't be reached from a build-time context", row.why, row.fix))
+    true
+}
+
 // A Core call whose implementation no `jet` has yet (R2(b)): the feature it
 // needs and the card that ports it. Its runtime is missing, so building the
 // call would stop inside the compiler; sema reports E2104 at the call instead.
@@ -205,7 +219,6 @@ fn sema_call_core_unbuilt(module_name: String, member: String) -> (feature: Stri
     if module_name == "core.net.ws" && (member == "connect" || member == "upgrade") {
         return Val((feature: "the WebSocket runtime (connections and messages)", card: 4957))
     }
-    if module_name == "core.sys" && member == "decode" -> return Val((feature: "typed environment decoding (`core.sys.decode`)", card: 5992))
     if module_name == "core.mod" && member == "load" -> return Val((feature: "the module loader runtime and its grants", card: 5993))
     None
 }
@@ -467,10 +480,16 @@ fn sema_call_core_unknown_item(module_name: String, member: String, span: Span) 
     }
     // #1965: an exact submodule hit outranks this module's own menu.
     if sema_call_core_submodule_path_hint(module_name, member, span) == .Val(hint) -> return hint
-    suggestion :: sema_suggest_field(member, items)
+    // D-SHAPE-DUNDER2=A: a reserved `__` seam is Core-internal and user code
+    // cannot spell it, so it is never offered as a suggestion.
+    menu := [String]{}
+    loop item in items {
+        if !item.starts_with("__") -> &menu.push(item.copy())
+    }
+    suggestion :: sema_suggest_field(member, menu)
     fix :: if suggestion == {
         .Val(candidate) -> "did you mean `{candidate}`?"
-        .None -> if items.len() == 0 -> "import a specific core module, like `import core.files as fs;`" else -> "use one of: {items.join(", ")}"
+        .None -> if menu.len() == 0 -> "import a specific core module, like `import core.files as fs;`" else -> "use one of: {menu.join(", ")}"
     }
     diagnostic :: sema_error("E1004", span, "`{module_name}` has no item `{member}`", "standard library modules expose a fixed set of public items", fix)
     if suggestion == .Val(candidate) -> return diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: candidate})
@@ -773,10 +792,10 @@ fn sema_call_try_core_math_f32(module_name: String, member: String, type_args: [
         &values.push(if to_bits -> value else -> sema_expr_numeric_conversion(value, Type.Float, span, 0) ?? return failed)
     }
     if to_bits {
-        bits :: sema_call_core_math_source("__to_bits_f32", values, Type.Int, true, span, environment, program, &diagnostics) ?? return failed
+        bits :: sema_call_core_source("core.math", "__to_bits_f32", values, Type.Int, true, span, environment, program, &diagnostics) ?? return failed
         return SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(^bits, expected, environment, program, &diagnostics)}
     }
-    wide :: sema_call_core_math_source(member, values, Type.Float, false, span, environment, program, &diagnostics) ?? return failed
+    wide :: sema_call_core_source("core.math", member, values, Type.Float, false, span, environment, program, &diagnostics) ?? return failed
     narrow :: sema_expr_numeric_conversion(wide, Type.Float32, span, 0) ?? return failed
     SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(^narrow, expected, environment, program, &diagnostics)}
 }
@@ -911,12 +930,12 @@ fn sema_call_core_tree_checked(record: CoreCallRecord, args: [TExpr], span: Span
         if {
             source == Type.Float -> widened = Val(args[0].copy())
             source == Type.Float32 -> widened = sema_expr_numeric_conversion(args[0].copy(), Type.Float, span, 0)
-            nominal == "Fraction" || nominal.ends_with("::Fraction") -> widened = sema_call_core_math_source("__fraction_to_float", [TExpr]{args[0].copy()}, Type.Float, true, span, environment, program, &diagnostics)
-            nominal == "Decimal" || nominal.ends_with("::Decimal") -> widened = sema_call_core_math_source("__decimal_to_float", [TExpr]{args[0].copy()}, Type.Float, true, span, environment, program, &diagnostics)
+            nominal == "Fraction" || nominal.ends_with("::Fraction") -> widened = sema_call_core_source("core.math", "__fraction_to_float", [TExpr]{args[0].copy()}, Type.Float, true, span, environment, program, &diagnostics)
+            nominal == "Decimal" || nominal.ends_with("::Decimal") -> widened = sema_call_core_source("core.math", "__decimal_to_float", [TExpr]{args[0].copy()}, Type.Float, true, span, environment, program, &diagnostics)
             else -> widened = None
         }
         if widened == .Val(argument) {
-            if sema_call_core_math_source("sqrt", [TExpr]{argument}, Type.Float, false, span, environment, program, &diagnostics) == .Val(root) {
+            if sema_call_core_source("core.math", "sqrt", [TExpr]{argument}, Type.Float, false, span, environment, program, &diagnostics) == .Val(root) {
                 value := root.copy()
                 if source == Type.Float32 -> value = sema_expr_numeric_conversion(root, Type.Float32, span, 0) ?? return None
                 return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
@@ -958,12 +977,12 @@ fn sema_call_core_tree_checked(record: CoreCallRecord, args: [TExpr], span: Span
     sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
 
-// A call of the core.math source function `member` on checked arguments,
-// typed `result` (sqrt's Float root, the exact types' crossing to Float, and
-// the F32-width math calls). `registered` resolves a module-private member
-// such as `__fraction_to_float`.
-fn sema_call_core_math_source(member: String, values: [TExpr], result: Type, registered: Bool, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
-    identity :: sema_call_core_module_identity(environment, program, "core.math") ?? return None
+// A call of the `module_name` source function `member` on checked arguments,
+// typed `result` (sqrt's Float root, the exact types' crossing to Float, the
+// F32-width math calls, and the Tensor bracket windows). `registered`
+// resolves a module-private member such as `__fraction_to_float`.
+fn sema_call_core_source(module_name: String, member: String, values: [TExpr], result: Type, registered: Bool, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> TExpr? {
+    identity :: sema_call_core_module_identity(environment, program, module_name) ?? return None
     target :: sema_call_core_source_target(environment, program, identity, member, [Type]{}, span, registered, &diagnostics) ?? return None
     callee :: sema_call_callee_decl(program, target.symbol.id, span, &diagnostics) ?? return None
     arguments := [TCallArg]{}
@@ -1232,7 +1251,6 @@ fn sema_call_core_materialize_authority_boundary(record: CoreCallRecord, index: 
 }
 
 fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if !sema_pin_check_call(record.module_name, record.member, args, &diagnostics) -> return None
     if record.module_name == "core.plugin" && record.member == "__authority_to_wire" {
         &diagnostics.push(sema_error("E0510", span, "Authority wire conversion is compiler-private", "only the checked plugin boundary inserts this conversion", "use core.plugin.load with a tightened Authority"))
         return None
@@ -1256,9 +1274,9 @@ fn sema_call_core_check_fixed_record(record: CoreCallRecord, args: [CallArg], ty
         }
     }
     if record.module_name == "core.encoding" && (record.member == "__text_cells_enter" || record.member == "__text_cells_leave") {
-        // Core CSV decode and the typed `core.data.csv_reader` rows share the scope.
-        if !environment.source_file.starts_with("<corelib>/") || (environment.module_name != "core.encoding.csv" && environment.module_name != "core.data") {
-            &diagnostics.push(sema_error("E0510", span, "CSV text-cell leaves are compiler-private", "raw CSV text-cell decode mechanics are restricted to Core CSV and typed data source", "use csv.decode<T>"))
+        // Core CSV decode, the typed `core.data.csv_reader` rows and `core.sys.decode` share the scope.
+        if !environment.source_file.starts_with("<corelib>/") || (environment.module_name != "core.encoding.csv" && environment.module_name != "core.data" && environment.module_name != "core.sys") {
+            &diagnostics.push(sema_error("E0510", span, "CSV text-cell leaves are compiler-private", "raw CSV text-cell decode mechanics are restricted to Core CSV, typed data and environment decode source", "use csv.decode<T>"))
             return None
         }
     }
@@ -1449,6 +1467,9 @@ fn sema_call_core_check_source_owned(target: SemaCallDirectTarget, qualified_nam
     call_args := args
     if sema_call_devtools_is_publish(target, environment, program) {
         call_args = sema_call_devtools_publish_args(args, span, environment, program, &diagnostics) ?? return None
+    }
+    if sema_data_is_sys_decode(target, environment, program) {
+        call_args = sema_data_sys_decode_args(args, type_args, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     }
     call := Call{name: qualified_name, name_span: span, type_args: type_args, args: call_args}
     checked :: sema_call_check_direct_target_owned(&state, target, call, [SemaCallDefaultValue]{}, expected, environment, program, &scopes, &tail_store, &context, &diagnostics) ?? return None

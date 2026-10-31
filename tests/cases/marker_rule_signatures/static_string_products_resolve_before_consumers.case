@@ -1,5 +1,6 @@
 # tests/marker_rule_signatures.rs::static_string_products_resolve_before_consumers at tests/marker_rule_signatures.rs:570; hand-port
-# Claim: LABEL/PAGE comptime strings feeding #HTML(PAGE) and #Test(LABEL) produce no E0930 (tests/marker_rule_signatures.rs:580-583)
+# Claim: the LABEL comptime constant feeding #Test(LABEL), beside #HTML(Path{"index.html"}), produces no E0930 (tests/marker_rule_signatures.rs:580-583)
+# Fixture migrated: `HTML(page: Path)` (D-MARKSIG1, Docs/spec/syntax-decisions.md:10114) rejects the Rust test's String `PAGE :: prep { "index.html" }` with E0930, and a Path-valued module constant is E0956 (no compile-time Path value), so #HTML takes the Path literal directly
 # Not ported: module.html_path == "index.html" and Item::Test/Distinct AST asserts (tests/marker_rule_signatures.rs:584-599): internal AST, no CLI equivalent
 fixture: static_string_products_resolve_before_consumers.fixture
 env: NO_COLOR=1

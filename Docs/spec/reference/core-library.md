@@ -1586,7 +1586,7 @@ fn run() {
 | `terminal_width()` / `terminal_height()` | `Int` | Query terminal dimensions with the provider fallback. |
 | `style(style, text)` / `style_force(style, text)` | `String` | Render known ANSI styles conditionally or unconditionally. |
 | `read_key()` | `Key` | Read a decoded key event. |
-| `progress(label)` | `!IOError` | Write a progress update through the terminal stream. |
+| `progress(label)` | `!IOError` | Write a progress update through the terminal stream: a carriage-return frame on a terminal stderr, otherwise the label as a plain stdout line. |
 
 `style` is a no-op when output is not a TTY unless `style_force` is used.
 `Key` carries `Char(Char)`, `F(Int)`, and `Ctrl(Char)` payloads. Its unit variants
@@ -1915,8 +1915,12 @@ directory; `.env(name, value)`, `.env_remove(name)`, and `.env_clear()` control
 the child environment. `.stdin(mode)`, `.stdout(mode)`, and `.stderr(mode)`
 select one of `.Stream`, `.Inherit`, or `.Capture`. `.terminal()` requests a
 terminal session, while `.terminal(policy)` supplies an explicit
-`TerminalPolicy`. `.detached()` allows the child to outlive the caller, and
-`.abilities(...)` records the requested child abilities.
+`TerminalPolicy`. `.detached()` allows the child to outlive the caller.
+`.abilities()` returns the open `Set<String>` report of what a terminal-backed
+launch can use. Its stable keys are `TerminalFact.terminal`,
+`TerminalFact.resize` and `TerminalFact.raw`; any other string key is a preview
+fact. A string key one or two edits from a stable key is E0302 naming that
+`TerminalFact` key, and an unknown `TerminalFact.name` is E0302 too.
 
 A specification can also carry `.timeout(duration)`, `.cpu_time_limit(value)`,
 `.memory_limit(value)`, `.open_file_limit(value)`, and `.output_limit(value)`.
@@ -2000,7 +2004,11 @@ child to the parent's corresponding stream.
 | `child.wait()` | `ProcessReceipt !IOError` | Wait for completion and return the receipt. |
 | `child.exited()` | `Bool !IOError` | Poll without waiting. |
 | `child.kill()` / `.terminate()` / `.interrupt()` | `Unit !IOError` | Send the corresponding termination request. |
-| `child.stdin.write(text)` / `.close()` | `Unit !IOError` | Write to or close a streamed child input. |
+| `child.stdin.write(bytes)` | `Int !IOError` | Write once to a streamed child input and return how many bytes the pipe took. |
+| `child.stdin.write_all(bytes)` / `.write_text(text)` | `Unit !IOError` | Write every byte, or the UTF-8 bytes of the text. |
+| `child.stdin.close()` | `Unit` | Close a streamed child input; repeated close is harmless. |
+| `child.stdout.read(limit)` / `child.stderr.read(limit)` | `[U8] !IOError` | Read up to `limit` bytes from the shared buffered pipe position; an empty list is end of input, and a limit below one is `IOError.InvalidInput` before any read. |
+| `child.stdout.chunks(size)` / `child.stderr.chunks(size)` | loop source of `[U8]` | Yield each non-empty piece of at most `size` bytes (default 65536) from the shared buffered pipe position. The loop ends at end of input or at the first failed read; a size below one ends it before any read. |
 | `child.stdout.lines()` / `child.stderr.lines()` | line stream | Read from the shared buffered pipe position, removing one LF and its preceding CR only. A final bare CR remains; invalid UTF-8 is `IOError.Other` on `process output`. The parent remains responsible for draining it. |
 
 A terminal session is an opt-in process mode. It supplies terminal-sized input

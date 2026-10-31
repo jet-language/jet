@@ -187,6 +187,9 @@ struct IRX64Emitter {
     // rel32 fields of Returns that jump to the epilogue (a stop edge's: to
     // the stop exit).
     returns: [Int]
+    // The offsets of the tail jumps' `jmp` (ir_x64_tail_jump), whose call
+    // frame rule is the `ret`'s.
+    tails: [Int]
     colds: [IRX64Cold]
     errors: [String]
     // A comparison whose Bool only the next If / BrIf reads leaves its
@@ -522,6 +525,42 @@ fn ir_x64_call(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation
         .Float -> ir_x64_store_xmm(&e, m, f, al, dst, 0)
         else -> {}
     }
+}
+
+// The tail Call at `at` (TailCalls.jet): its arguments into their registers,
+// then the epilogue without `ret` (no edx: the callee's return sets it for
+// this function's caller) and a jump to the callee, which returns to that
+// caller. ir_tail_calls kept every argument in a register and the result out
+// of memory.
+fn ir_x64_tail_jump(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int) Never! {
+    general := 0
+    floats := 0
+    // Sources are callee-saved registers, frame homes and immediates, as
+    // for ir_x64_call.
+    loop position in f.b[at]..<(f.b[at] + f.c[at]) {
+        slot :: f.args[position]
+        class :: ir_x64_slot_class(m, f, slot)
+        if class == .Empty -> next
+        if class == .Float {
+            if floats >= 8 -> return ir_x64_fail(&e, f, at, "tail call with a stack argument")
+            ir_x64_load_xmm(&e, m, f, al, slot, floats)
+            floats += 1
+            next
+        }
+        if general >= IR_X64_ARGUMENT_REGISTERS.len() -> return ir_x64_fail(&e, f, at, "tail call with a stack argument")
+        ir_x64_load(&e, m, f, al, slot, IR_X64_ARGUMENT_REGISTERS[general])
+        general += 1
+    }
+    x64_lea(&e.code, X64_RSP, X64_RBP, 0 - 8 * al.saved.len())
+    index := al.saved.len() - 1
+    loop index >= 0 {
+        x64_pop(&e.code, al.saved[index])
+        index -= 1
+    }
+    x64_pop(&e.code, X64_RBP)
+    &e.tails.push(e.code.len())
+    site :: x64_jmp_rel32(&e.code)
+    &e.relocs.push(X64Reloc{at: site, target: X64RelocTarget.Function{id: X64FunctionID{value: f.a[at]}}})
 }
 
 // A call of an `#FFI(asm)` leaf with general arguments in registers, as its
@@ -889,16 +928,19 @@ fn ir_x64_inline_route(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Al
 
 // jet_int_checked_fixed(value, kind, path, path length, line) of a constant
 // kind (OptRange ir_range_fixed_kind: 0..3 the signed 8..64-bit integers,
-// 4..7 the unsigned ones). An inline value inside the kind's range is its own
-// word, so only a big or out-of-range one takes the call, in a slow path, which
-// stops as before. False when the call is not of that shape.
+// 4..7 the unsigned ones), or jet_int_native_i64_at(value, path, path
+// length, line), the I64 kind. An inline value inside the kind's range is its
+// own word, so only a big or out-of-range one takes the call, in a slow path,
+// which stops as before. False when the call is not of that shape.
 fn ir_x64_checked_fixed(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, symbol: String) -> Bool Never! {
     dst :: f.dst[at]
-    if f.c[at] != 5 || dst < 0 || ir_x64_slot_class(m, f, dst) != .General -> return false
+    native :: symbol == "jet_int_native_i64_at"
+    if f.c[at] != (if native -> 4 else -> 5) || dst < 0 || ir_x64_slot_class(m, f, dst) != .General -> return false
     value :: f.args[f.b[at]]
-    kind_slot :: f.args[f.b[at] + 1]
-    if kind_slot < 0 || !al.consts[kind_slot] || ir_x64_slot_class(m, f, value) != .General -> return false
-    kind :: al.values[kind_slot]
+    if ir_x64_slot_class(m, f, value) != .General -> return false
+    kind_slot :: if native -> -1 else -> f.args[f.b[at] + 1]
+    if !native && (kind_slot < 0 || !al.consts[kind_slot]) -> return false
+    kind :: if native -> 3 else -> al.values[kind_slot]
     if kind < 0 || kind > 7 -> return false
     sites := [Int]{}
     reg :: ir_x64_use(&e, m, f, al, value, X64_RAX)
@@ -2040,6 +2082,7 @@ fn ir_x64_select(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
         .Concat -> ir_x64_helper(&e, m, f, al, "jet_rt_string_concat", [IRX64Arg]{IRX64Arg.Slot{slot: f.a[at]}, IRX64Arg.Slot{slot: f.b[at]}}, dst)
         .Call -> {
             if f.a[at] < 0 || f.a[at] >= m.functions.len() -> return ir_x64_fail(&e, f, at, "function {f.a[at]} is not in the module")
+            if at + 1 < f.op.len() && f.op[at + 1] == .Return && f.b[at + 1] == IR_TAIL_JUMP -> return ir_x64_tail_jump(&e, m, f, al, at)
             // A stop poll's leaf has no template (Build.jet ir_stop_poll): one
             // apart from its If (ir_x64_stop_point) is a call of its body.
             key :: m.functions[f.a[at]].key
@@ -2059,7 +2102,7 @@ fn ir_x64_select(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
                 leaf && symbol == "jet_rt_block_unique" -> ir_x64_block_unique(&e, m, f, al, at, f.args[f.b[at]])
                 leaf && symbol == "jet_rt_block_release" -> ir_x64_block_release(&e, m, f, al, at, f.args[f.b[at]])
                 f.c[at] == 1 && dst < 0 && symbol == "jet_rt_block_retain" -> ir_x64_block_retain(&e, m, f, al, f.args[f.b[at]])
-                symbol == "jet_int_checked_fixed" && ir_x64_checked_fixed(&e, m, f, al, at, symbol) -> {}
+                (symbol == "jet_int_checked_fixed" || symbol == "jet_int_native_i64_at") && ir_x64_checked_fixed(&e, m, f, al, at, symbol) -> {}
                 entry != "" -> ir_x64_call(&e, m, f, al, X64RelocTarget.Runtime{symbol: entry}, -1, f.args, f.b[at], f.c[at] - 1, dst, al.stack[at])
                 else -> ir_x64_call(&e, m, f, al, X64RelocTarget.Runtime{symbol: symbol}, -1, f.args, f.b[at], f.c[at], dst, al.stack[at])
             }
@@ -2110,7 +2153,10 @@ fn ir_x64_select(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocati
             truth :: ir_x64_truth(&e, m, f, al, f.a[at])
             ir_x64_branch(&e, f, at, f.b[at], true, truth)
         }
-        .Return -> ir_x64_return(&e, m, f, al, at)
+        // A tail jump's Return: the Call before it already left.
+        .Return -> {
+            if f.b[at] != IR_TAIL_JUMP -> ir_x64_return(&e, m, f, al, at)
+        }
         .Unreachable -> x64_ud2(&e.code)
     }
 }
@@ -2547,7 +2593,7 @@ fn ir_x64_debug_line(lines: &[X64LineRow], at: Int, line: Int) Never! {
 // Function row `row` (`f`, borrowed from `m`).
 fn ir_x64_compile_body(m: IRModule, f: IRFunction, tables: IRX64Tables, row: Int) -> IRX64FunctionResult Never! {
     al :: ir_x64_allocate(m, f)
-    e := IRX64Emitter{code: [U8]{}, relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_sites: [Int]{}, end_targets: [Int]{}, returns: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE, end_of: [Int]{}, pad_label: [Int]{}, pads: [IRX64Pad]{}, at: -1}
+    e := IRX64Emitter{code: [U8]{}, relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_sites: [Int]{}, end_targets: [Int]{}, returns: [Int]{}, tails: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE, end_of: [Int]{}, pad_label: [Int]{}, pads: [IRX64Pad]{}, at: -1}
     loop _ in 0..<f.op.len() {
         &e.end_of.push(-1)
         &e.pad_label.push(-1)
@@ -2654,6 +2700,16 @@ fn ir_x64_compile_body(m: IRModule, f: IRFunction, tables: IRX64Tables, row: Int
     x64_pop(&e.code, X64_RBP)
     ret_at :: e.code.len()
     x64_ret(&e.code)
+    // At a tail jump, as at the `ret`, the CFA is rsp + 8; the code between
+    // them keeps the body's frame.
+    loop jump in e.tails {
+        dwarf_cfa_advance(&cfi, cfa_at, jump)
+        dwarf_cfa_remember_state(&cfi)
+        dwarf_cfa_def_cfa(&cfi, x64_dwarf_register(X64_RSP), 8)
+        dwarf_cfa_advance(&cfi, jump, jump + 5)
+        dwarf_cfa_restore_state(&cfi)
+        cfa_at = jump + 5
+    }
     // After `pop rbp` the CFA is rsp + 8 at the `ret`; the slow paths after
     // it keep the body's frame.
     dwarf_cfa_advance(&cfi, cfa_at, ret_at)

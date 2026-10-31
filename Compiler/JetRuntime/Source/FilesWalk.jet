@@ -668,3 +668,161 @@ fn walk_stream_next(stream: I64) -> I64 {
     walk_out_flag(ignore_file, matches_ignore)
     walk_out_error(I64{0}, kind, code_tag, code, cause_tag, cause)
 }
+
+// Path.walk's root rule on raw bytes: no non-empty ancestor (the path
+// itself included) is a symlink, and the path is a directory. An empty path
+// validates as ".".
+fn path_walk_valid(data: I64, length: I64) -> Bool {
+    if (length == I64{0}) {
+        dot :: jet_rt_alloc(I64{2}, I64{1})
+        rt_text_put(dot, I64{46})
+        rt_text_put(dot + I64{1}, I64{0})
+        valid :: path_walk_valid(dot, I64{1})
+        jet_rt_free(dot, I64{2}, I64{1})
+        return valid
+    }
+    if walk_has_nul(data, length) -> return false
+    mode := I64{0}
+    cut := length
+    loop cut >= (I64{0}) {
+        if (cut > I64{0}) {
+            prefix :: walk_bytes_new(data, cut)
+            current :: files_lstat_c(prefix)
+            jet_rt_free(prefix, cut + I64{1}, I64{1})
+            if (current < I64{0} || current.bit_and(I64{61440}) == I64{40960}) -> return false
+            if (cut == length) -> mode = current
+        }
+        cut = walk_parent_length(data, cut)
+    }
+    mode.bit_and(I64{61440}) == I64{16384}
+}
+
+// Adds the canonical bytes (owned, length+1) to the byte-ordered visited
+// set; false, freeing them, when the directory was already walked.
+fn path_walk_visit(seen: I64, sizes: I64, bytes: I64, length: I64) -> Bool {
+    count :: rt_text_word(seen + I64{8})
+    low := I64{0}
+    high := count
+    loop low < high {
+        middle :: (low + high) / I64{2}
+        order :: walk_bytes_compare(rt_text_word(rt_text_word(seen) + middle * I64{8}), rt_text_word(rt_text_word(sizes) + middle * I64{8}), bytes, length)
+        if (order == I64{0}) {
+            jet_rt_free(bytes, length + I64{1}, I64{1})
+            return false
+        }
+        if (order < I64{0}) {
+            low = middle + I64{1}
+        } else {
+            high = middle
+        }
+    }
+    files_words_push(seen, bytes)
+    files_words_push(sizes, length)
+    at := count
+    loop at > low {
+        rt_text_store(rt_text_word(seen) + at * I64{8}, rt_text_word(rt_text_word(seen) + (at - I64{1}) * I64{8}))
+        rt_text_store(rt_text_word(sizes) + at * I64{8}, rt_text_word(rt_text_word(sizes) + (at - I64{1}) * I64{8}))
+        at -= I64{1}
+    }
+    rt_text_store(rt_text_word(seen) + low * I64{8}, bytes)
+    rt_text_store(rt_text_word(sizes) + low * I64{8}, length)
+    true
+}
+
+// The canonical (realpath) bytes of a terminated path as an exact owned
+// copy (length+1) with its length in `size`, or 0 when it does not resolve.
+fn path_walk_canonical(data: I64, size: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{48}, I64{8})
+    resolved :: jet_process_path_canonicalize_raw(data, scratch, scratch + I64{8}, scratch + I64{16})
+    if (resolved == I64{0}) {
+        jet_rt_free(scratch, I64{48}, I64{8})
+        return I64{0}
+    }
+    length :: rt_text_word(scratch)
+    result :: walk_bytes_new(resolved, length)
+    jet_rt_free(resolved, rt_text_word(scratch + I64{8}), I64{1})
+    jet_rt_free(scratch, I64{48}, I64{8})
+    rt_text_store(size, length)
+    result
+}
+
+// Path.walk: every entry below the root, depth first from the last directory
+// found, each directory listed in read_dir order. Symlinks are listed but
+// never followed, a directory reached twice (by its canonical path) is
+// walked once, and an unreadable directory is skipped. A root that fails
+// path_walk_valid walks nothing. Each entry is the lossy rendering of
+// PathBuf::join(directory, name).
+#Export(c) fn jet_path_walk(path: I64, output: I64) -> I64 {
+    results :: files_words_new()
+    root :: path_handle_render(path)
+    root_length :: rt_text_len(root)
+    if !path_walk_valid(rt_text_data(root), root_length) {
+        jet_rt_string_drop(root)
+        return files_words_take(results, output)
+    }
+    stack :: files_words_new()
+    stack_sizes :: files_words_new()
+    files_words_push(stack, walk_bytes_new(rt_text_data(root), root_length))
+    files_words_push(stack_sizes, root_length)
+    jet_rt_string_drop(root)
+    seen :: files_words_new()
+    seen_sizes :: files_words_new()
+    size :: jet_rt_alloc(I64{8}, I64{8})
+    buffer :: jet_rt_alloc(FILES_DIRENT_BYTES, I64{8})
+    loop rt_text_word(stack + I64{8}) > (I64{0}) {
+        top :: rt_text_word(stack + I64{8}) - I64{1}
+        directory :: rt_text_word(rt_text_word(stack) + top * I64{8})
+        directory_length :: rt_text_word(rt_text_word(stack_sizes) + top * I64{8})
+        rt_text_store(stack + I64{8}, top)
+        rt_text_store(stack_sizes + I64{8}, top)
+        fd := I64{-1}
+        if path_walk_valid(directory, directory_length) {
+            canonical :: path_walk_canonical(directory, size)
+            if (canonical != I64{0} && path_walk_visit(seen, seen_sizes, canonical, rt_text_word(size))) {
+                fd = host_call(I64{2}, directory, FILES_O_DIRECTORY_CLOEXEC, I64{0})
+            }
+        }
+        loop fd >= (I64{0}) {
+            count :: host_call(I64{217}, fd, buffer, FILES_DIRENT_BYTES)
+            if (count <= I64{0}) -> break
+            at := I64{0}
+            loop at < count {
+                record :: buffer + at
+                at += rt_text_byte(record + I64{16}).bit_or((rt_text_byte(record + I64{17}) << I64{8}))
+                name :: record + I64{19}
+                if files_dot_entry(name) -> next
+                child_length :: walk_join(directory, directory_length, name, files_c_len(name), size)
+                child :: rt_text_word(size)
+                shown :: rt_text_lossy(child, child_length)
+                files_words_push(results, path_route_from_text(shown))
+                jet_rt_string_drop(shown)
+                entry_type :: rt_text_byte(record + I64{18})
+                is_directory := entry_type == I64{4}
+                if (entry_type == I64{0}) {
+                    mode :: files_lstat_c(child)
+                    is_directory = mode >= I64{0} && mode.bit_and(I64{61440}) == I64{16384}
+                }
+                if is_directory {
+                    files_words_push(stack, child)
+                    files_words_push(stack_sizes, child_length)
+                } else {
+                    jet_rt_free(child, child_length + I64{1}, I64{1})
+                }
+            }
+        }
+        if (fd >= I64{0}) -> _ := host_call(I64{3}, fd, I64{0}, I64{0})
+        jet_rt_free(directory, directory_length + I64{1}, I64{1})
+    }
+    at := I64{0}
+    loop at < rt_text_word(seen + I64{8}) {
+        jet_rt_free(rt_text_word(rt_text_word(seen) + at * I64{8}), rt_text_word(rt_text_word(seen_sizes) + at * I64{8}) + I64{1}, I64{1})
+        at += I64{1}
+    }
+    files_words_free(seen)
+    files_words_free(seen_sizes)
+    files_words_free(stack)
+    files_words_free(stack_sizes)
+    jet_rt_free(buffer, FILES_DIRENT_BYTES, I64{8})
+    jet_rt_free(size, I64{8}, I64{8})
+    files_words_take(results, output)
+}

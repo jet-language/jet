@@ -25,6 +25,13 @@ fn ir_raw_pointer(ty: Type) -> Bool Never! {
     false
 }
 
+// The pinned type `T` of a `Pin<T>` (D-PIN1=A), spelled bare or as the Core
+// nominal `<corelib>/core.mem::Pin`; None for any other type.
+fn ir_pin_target(ty: Type) -> Type? Never! {
+    if ir_untag(ty) == .Apply(name, args) && (name == "Pin" || name == "<corelib>/core.mem::Pin") && args.len() == 1 -> return Val(args[0].copy())
+    None
+}
+
 // Whether `ty` is a `Shared.Weak<T>` (Sema SharedOwner.jet
 // SEMA_SHARED_WEAK_TYPE).
 fn ir_shared_weak(ty: Type) -> Bool Never! {
@@ -340,8 +347,9 @@ fn ir_value_type_laid(m: &IRModule, p: IRProgram, ty: Type, laying: [String]) ->
     if ir_reactive_type(p, ty) -> return Val(ir_reactive_row(&m, p, ty))
     if ir_scope_guard_type(ty) -> return Val(ir_scope_guard_row(&m, ty))
     if ir_atomic_scalar(ty) == .Val(scalar) -> return Val(ir_atomic_row(&m, ty, ir_atomic_lane(scalar) ?? ""))
-    // A raw pointer `*T` is a bare address: no drop and no copy fixup.
-    if ir_raw_pointer(ty) -> return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, "")))
+    // A raw pointer `*T` is a bare address: no drop and no copy fixup. A
+    // `Pin<T>` is the pinned place's address, which it never owns.
+    if ir_raw_pointer(ty) || ir_pin_target(ty) != None -> return Val(ir_intern_type(&m, type_carrier_identity(ty), ir_layout(IRTypeKind.Pointer, ty, 8, 8, IRClass.Pointer, false, 64, "")))
     name :: ir_nominal_name(ty) ?? return None
     args :: ir_type_args(ty)
     // A loaded plugin's handle type carries its interface identity as a

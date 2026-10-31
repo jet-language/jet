@@ -15,7 +15,7 @@ fn cli_test_extension_fixture(name: String) -[FS, Env]> String {
 // Run a hidden host with `input` on stdin and wait for its receipt.
 fn cli_test_host_receipt(spec: ProcessSpec, input: String) -[Exec, Time.Wait]> ProcessReceipt {
     child :: spec.stdin(.Stream).spawn() ?? panic("spawn jetpack host")
-    child.stdin.write(input) ?? panic("write host stdin")
+    child.stdin.write_text(input) ?? panic("write host stdin")
     child.stdin.close()
     child.wait() ?? panic("wait for jetpack host")
 }

@@ -4011,6 +4011,15 @@ fn ir_route_labeled(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, i
         if carrier == {
             .Word -> {
                 if kind == .Int {
+                    // A native index stops at the call site when it does not
+                    // fit, before the route converts it unlocated.
+                    if IR_ROUTES_NATIVE_INDEX.contains(name) {
+                        word_row :: ir_word_row(&m)
+                        checked := [Int]{slot}
+                        site :: b.line
+                        loop arg in ir_location(&m, &b, site) -> &checked.push(arg)
+                        _ :: ir_runtime(&m, &b, "jet_int_native_i64_at", checked, word_row)
+                    }
                     &lowered.push(slot)
                 } else if kind == .Word && !ir_option_inline(m, slot_row) {
                     row :: m.types[slot_row]
@@ -4038,6 +4047,14 @@ fn ir_route_labeled(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, i
                 &lowered.push(slot)
             }
             .Float -> {
+                // A Float32 crosses widened to Float, which holds it exactly.
+                if kind == .Float32 {
+                    float_row :: ir_type_row(&m, Type.Float) ?? return ir_fail_slot(&b, span, "runtime route {name} without a Float row")
+                    widened :: ir_numeric_cast(&m, p, &b, slot, float_row, span)
+                    if widened < 0 -> return -1
+                    &lowered.push(widened)
+                    next
+                }
                 if kind != .Float -> return ir_fail_slot(&b, span, "runtime route {name} Float argument of {shown}")
                 &lowered.push(slot)
             }
@@ -4077,6 +4094,13 @@ fn ir_route_labeled(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String, i
                 }
                 &lowered.push(ir_list_data(&m, &b, slot))
                 &lowered.push(ir_list_length(&m, &b, slot))
+            }
+            .ListMut(_) -> {
+                // A `&` List crosses as its own header, which the route
+                // writes in place: a growable List the caller borrowed.
+                writable :: index < borrowed.len() && borrowed[index]
+                if !writable || kind != .Aggregate || ir_fixed_count(m, slot_row) != None || ir_list_item(&m, p, b, slot) == None -> return ir_fail_slot(&b, span, "runtime route {name} written List argument of {shown}")
+                &lowered.push(slot)
             }
             .Handle(_) | .HandleMut(_) -> {
                 // The checked Dyn enum crosses as a runtime tree built for
@@ -4227,6 +4251,11 @@ IR_ROUTES_INLINE :: comptime { [String]{
     "jet_list_count", "jet_list_counts", "jet_list_union", "jet_list_intersection", "jet_list_difference", "jet_list_random",
 } }
 
+// The routes whose exact Int Word argument is a native index the route
+// converts unlocated: ir_route_labeled checks it at the call site first
+// (jet_int_native_i64_at), so one past the i64 range stops at the user's line.
+IR_ROUTES_NATIVE_INDEX :: comptime { [String]{"jet_bit_set_has", "jet_bitset_add", "jet_bitset_remove"} }
+
 // Whether the builder lowers a Core call of route `name` itself, with no
 // runtime or environment route: an inline route, a special of ir_core_call
 // (the raw List layout leaves, channels, event policy, object entries), or
@@ -4331,7 +4360,9 @@ fn ir_route_plain(m: &IRModule, p: IRProgram, b: &IRBuilder, export: String, arg
             b.fresh[value] = true
             return value
         }
-        if !ir_is_handle(m, row) -> return ir_fail_slot(&b, span, "runtime route {export} handle result as {result}")
+        // A native channel endpoint (a timer's Receiver) crosses as itself.
+        endpoint :: ir_channel_element(m.types[row].ty, "Receiver") != None
+        if !ir_is_handle(m, row) && !endpoint -> return ir_fail_slot(&b, span, "runtime route {export} handle result as {result}")
     }
     if carrier == .Option(_) -> return ir_fail_slot(&b, span, "runtime route {export} result carrier {carrier}")
     if carrier == .Word && ir_word_record(m, p, row) == .Val(record) {
@@ -5059,6 +5090,7 @@ fn ir_comptime_ambient_refusal(symbol: String) -> String? Never! {
         "jet_std_io_args" -> Val("the process arguments")
         "jet_sys_executable_raw" -> Val("the running executable's path")
         "jet_sys_cpu_count_raw" -> Val("the host's processor count")
+        "jet_compute_simd_lanes" -> Val("the host's SIMD dispatch")
         else -> None
     }
 }

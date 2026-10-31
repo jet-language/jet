@@ -1946,11 +1946,20 @@ fn parser_parse_marked_statement(state: &JetParserState) -> Stmt {
     body :: parser_parse_body_block(&state, value_tail)
     state.callable_tail_depth = saved_tail_depth
     span :: parser_cover(hash.span, body.span)
-    // Rust `bind_rule_fact(…, RuleSite::Block)`: every marked block is a
+    // Rust `bind_rule_fact(…, RuleSite::Block)`: a marked block is a
     // Block-site application, so the vocabulary, site, repeatability and
-    // argument checks see it like any other applied rule.
-    // copy: the application row and the statement built below each keep the marker.
-    &state.statement_rules.push(AppliedRuleApplication{marker: marker.copy(), target: Val(span), site: Val(RuleSite.Block)})
+    // argument checks see it like any other applied rule. A bare
+    // `#Transact { … }` binds no handle and records no application
+    // (Rust `at_transact_stmt`, Statements/control.rs:1482 @ 6083377777).
+    if marker.name != "Transact" || args.len() > 0 {
+        // copy: the application row and the statement built below each keep the marker.
+        application := marker.copy()
+        // Rust `#FX(name: Effects…)` (Statements/control.rs:1381 @ 6083377777):
+        // `name:` binds the scoped Authority handle, not a rule parameter, so the
+        // application row carries the effects unlabeled.
+        if marker.name == "FX" -> application.arg_labels = (loop _ in marker.arg_labels -> CallLabel?{None})
+        &state.statement_rules.push(AppliedRuleApplication{marker: application, target: Val(span), site: Val(RuleSite.Block)})
+    }
     if marker.name == {
         "Unsafe" -> {
             reason := String?{None}

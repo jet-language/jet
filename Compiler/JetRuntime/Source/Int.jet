@@ -496,6 +496,21 @@ fn int_stop(file: I64, file_len: I64, line: I64, reason: I64) {
     int_word(value)
 }
 
+// A native index argument checked at its call site before the route that
+// takes it converts it (BuildRoutes IR_ROUTES_NATIVE_INDEX): an exact Int
+// outside the native i64 range stops at the user's file and line. The
+// result is the index's word.
+#Export(c) fn jet_int_native_i64_at(value: I64, file: I64, file_len: I64, line: I64) -> I64 {
+    if int_inline(value) -> return value
+    bound :: if int_negative(value) -> U64{9223372036854775808} else -> U64{9223372036854775807}
+    if !int_fits(value, bound) {
+        reason :: rt_static_text("exact Int does not fit the native i64 ABI")
+        trap_simple(I64{1}, file, file_len, line, rt_text_data(reason), rt_text_len(reason))
+        return I64{0}
+    }
+    int_word(value)
+}
+
 #Export(c) fn jet_int_checked_fixed(value: I64, kind: I64, file: I64, file_len: I64, line: I64) -> I64 {
     if (kind < I64{0} || kind > I64{7}) {
         int_stop(file, file_len, line, I64{3})

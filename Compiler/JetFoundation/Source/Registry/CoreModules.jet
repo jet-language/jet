@@ -372,11 +372,13 @@ fn core_module_enum_variants(module_name: String, name: String) -> [String]? {
 }
 
 // One field of a builtin Core record; rows are authored in CoreRecordRows.jet
-// and the first match wins.
+// and the first match wins. A `core_only` field is private storage: only Core
+// source reads or writes it, and user code sees no such field.
 struct CoreRecordFieldRow {
     owner: String
     field: String
     ty: Type
+    core_only: Bool{false}
 }
 
 // The declared field list of a Core record users can build with a struct
@@ -428,6 +430,15 @@ fn core_record_leaf(owner: String) -> String Never! {
 
 fn core_record_field(owner: String, field: String) -> Type? {
     core_record_field_in(CORE_RECORD_FIELD_ROWS, core_record_leaf(owner), field)
+}
+
+// Whether `owner.field` is private storage only Core source may touch.
+fn core_record_field_is_core_only(owner: String, field: String) -> Bool Never! {
+    leaf :: core_record_leaf(owner)
+    loop row in CORE_RECORD_FIELD_ROWS {
+        if row.owner == leaf && row.field == field -> return row.core_only
+    }
+    false
 }
 
 // The table is a read parameter, so the scan reads its rows in place.

@@ -1010,9 +1010,6 @@ fn sema_data_core_decode_contract(module_name: String, member: String, target: T
     if module_name == "core.db" && member == "decode" {
         return Val(SemaDataCoreDecodeContract{call_member: "decode", argument_types: [Type]{Type.Map{key: Type.String, key_span: None, value: Type.Named{name: "DBValue"}}}, result_type: Type.Result{ok: target, err: Type.List{element: Type.Named{name: "FieldError"}}}, type_args: [Type]{target}, optional_options: false})
     }
-    if module_name == "core.sys" && member == "decode" {
-        return Val(SemaDataCoreDecodeContract{call_member: "decode", argument_types: [Type]{Type.String, Type.String, Type.List{element: Type.String}}, result_type: Type.Result{ok: target, err: Type.List{element: Type.Named{name: "FieldError"}}}, type_args: [Type]{target}, optional_options: false})
-    }
     if module_name == "core.encoding.json" && member == "decode" {
         return Val(SemaDataCoreDecodeContract{call_member: "decode", argument_types: [Type]{Type.String}, result_type: Type.Result{ok: target, err: Type.List{element: Type.Named{name: "FieldError"}}}, type_args: [Type]{target}, optional_options: false})
     }
@@ -1034,9 +1031,47 @@ fn sema_data_core_decode_contract(module_name: String, member: String, target: T
     None
 }
 
+// The checked env name and decode key (its JSON shape name) of every
+// non-skipped stored field of the record `target`, as a list literal.
+fn sema_data_env_names(target: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span) -> Expr Never! {
+    rows := [Expr]{}
+    definition :: sema_http_route_find_struct(environment, program, target, environment.module_identity) ?? return Expr.ListLit{elements: rows, span: span, id: AST_NODE_GENERATED}
+    row_type :: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "env_name", ty: Type.String}, TypeTupleField{name: "key", ty: Type.String}}}
+    loop field in definition.fields {
+        if field.computed != None || sema_checked_marker(field.serde_markers, "Skip") != None || sema_checked_marker(field.serde_markers, "skip") != None -> next
+        names :: sema_checked_field_shape_names(definition, field)
+        env_name :: Expr.Str{parts: [StrPart]{StrPart.Lit{text: names.env}}, span: span, id: AST_NODE_GENERATED}
+        key :: Expr.Str{parts: [StrPart]{StrPart.Lit{text: names.json ?? names.text}}, span: span, id: AST_NODE_GENERATED}
+        &rows.push(Expr.TupleLit{fields: [TupleField]{TupleField{name: "env_name", value: env_name}, TupleField{name: "key", value: key}}, span: span, ty: Val(row_type.copy()), id: AST_NODE_GENERATED})
+    }
+    Expr.ListLit{elements: rows, span: span, id: AST_NODE_GENERATED}
+}
+
+fn sema_data_is_sys_decode(target: SemaCallDirectTarget, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    target.symbol.name == "decode" && sema_call_core_module_identity(environment, program, "core.sys") == (Val(target.symbol.module_name))
+}
+
+// `env.decode<T>()` binds its labeled config fields to their registered
+// defaults, then passes the checked env names of T's fields.
+fn sema_data_sys_decode_args(args: [CallArg], type_args: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [CallArg]? {
+    bound := args
+    params := [SemaCallParam]{
+        sema_data_core_param("prefix", Type.String, AccessConvention.Read, ParamZone.Either, Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: ""}}, span: span, id: AST_NODE_GENERATED})),
+        sema_data_core_param("file", Type.String, AccessConvention.Read, ParamZone.Either, Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: ".env"}}, span: span, id: AST_NODE_GENERATED})),
+        sema_data_core_param("allow", Type.List{element: Type.String}, AccessConvention.Read, ParamZone.Either, Val(Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED})),
+    }
+    if sema_call_bind_args("core.sys.decode", params, &bound, span, &diagnostics) == None {
+        sema_data_check_discarded_arguments(bound, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return None
+    }
+    target :: sema_data_core_target_type(type_args, "decode", span, environment, program, &diagnostics) ?? return None
+    &bound.push(CallArg{convention: AccessConvention.Read, expr: sema_data_env_names(target, environment, program, span), span: span, flags: ast_empty_call_arg_flags(), label: Val(CallLabel{name: "names", span: span}), spread: false})
+    Val(bound)
+}
+
 // The Core calls whose typed decode contract lives here.
 fn sema_data_core_decode_member(module_name: String, member: String) -> Bool Never! {
-    if module_name != "core.db" && module_name != "core.sys" && !module_name.starts_with("core.encoding.") -> return false
+    if module_name != "core.db" && !module_name.starts_with("core.encoding.") -> return false
     member == "decode" || (module_name == "core.encoding.xml" && member == "decode_bytes")
 }
 
@@ -1068,20 +1103,6 @@ fn sema_data_core_try_decode(module_name: String, member: String, args: [CallArg
     argument_types := contract.argument_types
     result_type := contract.result_type
     effective_type_args := contract.type_args
-    // `env.decode<T>()` binds its labeled config fields to their
-    // registered defaults before the shared arity and argument checks.
-    if module_name == "core.sys" {
-        params := [SemaCallParam]{
-            sema_data_core_param("prefix", Type.String, AccessConvention.Read, ParamZone.Either, Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: ""}}, span: span, id: AST_NODE_GENERATED})),
-            sema_data_core_param("file", Type.String, AccessConvention.Read, ParamZone.Either, Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: ".env"}}, span: span, id: AST_NODE_GENERATED})),
-            sema_data_core_param("allow", Type.List{element: Type.String}, AccessConvention.Read, ParamZone.Either, Val(Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED})),
-        }
-        binding :: sema_call_bind_args("{module_name}.{member}", params, &updated_args, span, &diagnostics)
-        if binding == None {
-            sema_data_check_discarded_arguments(updated_args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-            return Val(SemaDirectSpecialCheck{handled: true, value: None})
-        }
-    }
     min_arity := 1
     if updated_args.len() < min_arity || updated_args.len() > argument_types.len() || (!contract.optional_options && updated_args.len() != argument_types.len()) {
         &diagnostics.push(sema_error("E0104", span, "`{module_name}.{member}` expects {if contract.optional_options -> "between 1 and {argument_types.len()}" else -> "{argument_types.len()}"} argument(s), got {updated_args.len()}", "typed decoding uses the format's registered input and optional settings shape", "pass the documented typed decoder arguments"))

@@ -11,7 +11,7 @@
 //
 // The receiver's type comes from the function's checked body: the type of the
 // receiver's node in its expression-type column.
-use jet_foundation.[BodyTree, Diagnostic, EnumLitArg, Expr, ForKind, Func, Item, LValue, OrFallback, Span, Stmt, StrPart, SwitchArm, Type, TypedLitBody, body_tree_new, checked_expr_type_id, expr_span]
+use jet_foundation.[BodyTree, Diagnostic, EnumLitArg, Expr, ForKind, Func, Item, LValue, OrFallback, Span, Stmt, StrPart, SwitchArm, Type, TypedLitBody, body_tree_new, checked_expr_type_id, expr_binary_operands, expr_span]
 
 SEMA_STATE_TASK :: "Task"
 SEMA_STATE_TASK_RUNNING :: "Running"
@@ -619,10 +619,7 @@ fn sema_state_expr(walk: &SemaStateWalk, tree: BodyTree, value: Expr) Never! {
             sema_state_expr(&walk, tree, inner)
             if context == .Val(note) -> sema_state_expr(&walk, tree, note)
         }
-        .Binary(_, left, right, _, _) -> {
-            sema_state_expr(&walk, tree, left)
-            sema_state_expr(&walk, tree, right)
-        }
+        .Binary(_, left, right, _, _) -> loop operand in expr_binary_operands(left, right) -> sema_state_expr(&walk, tree, operand)
         .CompareChain(operands, _, _, _, _) -> sema_state_exprs(&walk, tree, operands)
         .CallValue(callee, args, _, _) -> {
             sema_state_expr(&walk, tree, callee)

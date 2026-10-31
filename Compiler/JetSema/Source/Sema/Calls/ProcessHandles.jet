@@ -454,8 +454,13 @@ fn sema_process_terminal_method(receiver: Expr, receiver_value: TExpr, method: S
 }
 
 fn sema_process_stdin_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    // `write(bytes)` is one partial write that reports the count taken;
+    // `write_all(bytes)` and `write_text(text)` write every byte.
     result :: if method == {
-        "write" | "write_all" -> {
+        "write" -> {
+            if args.len() == 1 -> Val(sema_process_io_result(Type.Int)) else -> None
+        }
+        "write_all" | "write_text" -> {
             if args.len() == 1 -> Val(sema_process_io_result(Type.Named{name: "Unit"})) else -> None
         }
         "close" -> {
@@ -463,7 +468,7 @@ fn sema_process_stdin_method(receiver: Expr, receiver_value: TExpr, method: Stri
         }
         else -> None
     }
-    if method != "write" && method != "write_all" && method != "close" -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if method != "write" && method != "write_all" && method != "write_text" && method != "close" -> return SemaMethodSpecialCheck{handled: false, value: None}
     required_arity :: if method == "close" -> 0 else -> 1
     if args.len() != required_arity {
         sema_process_wrong_arity(method, required_arity, args.len(), span, &diagnostics)
@@ -471,8 +476,8 @@ fn sema_process_stdin_method(receiver: Expr, receiver_value: TExpr, method: Stri
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     required :: if method == {
-        "write" -> [Type]{Type.String}
-        "write_all" -> [Type]{Type.List{element: Type.IntN{signed: false, bits: 8}}}
+        "write_text" -> [Type]{Type.String}
+        "write" | "write_all" -> [Type]{Type.List{element: Type.IntN{signed: false, bits: 8}}}
         else -> [Type]{}
     }
     values :: sema_process_check_args(args, required, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
@@ -480,14 +485,15 @@ fn sema_process_stdin_method(receiver: Expr, receiver_value: TExpr, method: Stri
     operation :: if method == {
         "write" -> THandleOp.ProcessStdinWrite
         "write_all" -> THandleOp.ProcessStdinWriteAll
+        "write_text" -> THandleOp.ProcessStdinWriteText
         else -> THandleOp.ProcessStdinClose
     }
     sema_process_finish(receiver_value, operation, values, result ?? Type.Named{name: "Unit"}, "Exec", "ProcessStdin.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
 }
 
 fn sema_process_stream_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    if method != "lines" && method != "read" -> return SemaMethodSpecialCheck{handled: false, value: None}
-    required_arity :: if method == "read" -> 1 else -> 0
+    if method != "lines" && method != "read" && method != "chunks" -> return SemaMethodSpecialCheck{handled: false, value: None}
+    required_arity :: if method == "lines" -> 0 else if method == "chunks" && args.len() == 0 -> 0 else -> 1
     if args.len() != required_arity {
         sema_process_wrong_arity(method, required_arity, args.len(), span, &diagnostics)
         sema_process_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -495,13 +501,30 @@ fn sema_process_stream_method(receiver: Expr, receiver_value: TExpr, method: Str
     }
     stream_name := sema_process_handle_receiver_name(receiver_value.ty)
     api := "{stream_name}.{method}"
-    required :: if method == "read" -> [Type]{Type.Int} else -> [Type]{}
+    required :: if required_arity == 1 -> [Type]{Type.Int} else -> [Type]{}
     values :: sema_process_check_args(args, required, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     if !sema_process_check_method_ownership(receiver, api, args, required, [Bool]{}, AccessConvention.Read, span, &scopes, &state, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     // `read(max)`: Read::read on the pipe, up to `max` bytes, empty at EOF.
     if method == "read" {
         operation :: if stream_name == "ProcessStderrStream" -> THandleOp.ProcessStderrRead else -> THandleOp.ProcessStdoutRead
         return sema_process_finish(receiver_value, operation, values, sema_process_io_result(Type.List{element: Type.IntN{signed: false, bits: 8}}), "Exec", api, span, expected, environment, program, &scopes, &context, &diagnostics)
+    }
+    // `chunks(size)`: the Core source body `core.process.__stdout_chunks` /
+    // `__stderr_chunks` builds the loop source, whose Iterable reads the pipe
+    // `size` bytes at a time, so every tier runs the same Jet code.
+    if method == "chunks" {
+        result :: Type.Named{name: sema_core_module_nominal(program, "core.process", "ProcessChunks")}
+        if !sema_process_record_intrinsic(result, "Exec", api, span, environment, program, &scopes, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        member :: if stream_name == "ProcessStderrStream" -> "__stderr_chunks" else -> "__stdout_chunks"
+        route :: sema_call_core_resolve_route(environment, program, "core.process", member, [Type]{}, 2, false, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        target :: if route == {
+            .Source(source) -> source
+            .Core(_) | .SharedSite(_) -> panic("{api} must resolve its canonical Jet source body")
+        }
+        callee :: sema_call_callee_decl(program, target.symbol.id, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+        size :: if values.len() == 1 -> values[0].copy() else -> sema_tree_node(Type.Int, TExprKind.IntLit{value: 65536, width: None}, span)
+        value := sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{sema_value_method_source_arg(receiver_value), sema_value_method_source_arg(size)}}, span)
+        return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics)}
     }
     sema_process_finish(receiver_value, THandleOp.ProcessLines, [TExpr]{}, sema_process_named("ProcessLines"), "Exec", api, span, expected, environment, program, &scopes, &context, &diagnostics)
 }
@@ -533,6 +556,17 @@ fn sema_call_try_process_handle_method(receiver: Expr, receiver_value: TExpr, me
         &diagnostics.push(sema_error("E0311", span, "`.resize()` needs `TerminalSession`, not `TerminalSession?`", "a child has a terminal session only when a terminal-backed launch succeeds", "unwrap the optional handle first, then call `session.resize(size)`"))
         sema_process_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    // A string key one or two edits from a stable terminal fact is a typo of
+    // that fact; any other string key stays an open preview fact.
+    if method == "has" && args.len() == 1 && receiver_value.ty == .Tagged(marker, _) && marker == (TagMarker.Internal{internal_tag: InternalTag.TerminalFactSet}) {
+        if args[0].expr == .Str(parts, key_span, _) && parts.len() == 1 && parts[0] == .Lit(key) {
+            if sema_suggest_field(key, SEMA_TERMINAL_FACTS) == .Val(fact) {
+                &diagnostics.push(sema_error("E0302", key_span, "terminal fact key `{key}` looks like `{fact}`", "preview string keys stay open, but a close spelling of a stable fact is a typo", "write `TerminalFact.{fact}`"))
+                sema_process_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+                return SemaMethodSpecialCheck{handled: true, value: None}
+            }
+        }
     }
     receiver_name :: sema_process_handle_receiver_name(receiver_value.ty)
     // Core/Args/Args.jet declares both; a user type of the same leaf name is

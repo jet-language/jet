@@ -127,7 +127,7 @@ fn kit_steps_action(step: KitStep, context: KitStepCtx, previous: KitStepState) 
         child := kit_exec_spec(prepared.env, prepared.argv, prepared.cwd, context.scratch, prepared.overlay).spawn() ?? return kit_steps_action_error(state, "spawn: {err}")
         input_error := ""
         if prepared.stdin != "" {
-            child.stdin.write(prepared.stdin) ?? {
+            child.stdin.write_text(prepared.stdin) ?? {
                 input_error = "stdin: {err}"
                 ()
             }

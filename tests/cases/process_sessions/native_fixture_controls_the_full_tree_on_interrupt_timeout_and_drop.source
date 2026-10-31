@@ -16,7 +16,7 @@ fn run() {
     interrupt.interrupt() ?? panic("interrupt failed")
     interrupt_result :: interrupt.wait() ?? panic("interrupt wait failed")
     print(interrupt_result.success)
-    if interrupt.stdin.write("late") == {
+    if interrupt.stdin.write_text("late") == {
         .Ok(_) -> panic("interrupt cleanup left stdin open")
         .Err(error) -> {
             if error == { .Closed(_) -> {} else -> panic("interrupt cleanup was not typed") }
@@ -29,7 +29,7 @@ fn run() {
     terminate.terminate() ?? panic("terminate failed")
     terminate_result :: terminate.wait() ?? panic("terminate wait failed")
     print(terminate_result.success)
-    if terminate.stdin.write("late") == {
+    if terminate.stdin.write_text("late") == {
         .Ok(_) -> panic("terminate cleanup left stdin open")
         .Err(error) -> {
             if error == { .Closed(_) -> {} else -> panic("terminate cleanup was not typed") }
@@ -42,7 +42,7 @@ fn run() {
     kill.kill() ?? panic("kill failed")
     kill_result :: kill.wait() ?? panic("kill wait failed")
     print(kill_result.success)
-    if kill.stdin.write("late") == {
+    if kill.stdin.write_text("late") == {
         .Ok(_) -> panic("kill cleanup left stdin open")
         .Err(error) -> {
             if error == { .Closed(_) -> {} else -> panic("kill cleanup was not typed") }

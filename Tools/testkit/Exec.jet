@@ -131,21 +131,81 @@ fn kit_exec_input_detail(error: String, code: Int, errors: String) -> String {
 }
 
 fn kit_exec_invoke_with_env(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String, overlay: [KitEnvVar]) -> KitRun {
+    kit_exec_run(env, argv, cwd, scratch, stdin, overlay, None)
+}
+
+// Runs the child on a terminal: its stdin and stdout share the terminal and
+// stdout is the terminal transcript. `stdin` is typed at spawn and each event
+// at its time from spawn. Input never closes the terminal, which would hang
+// up the child; a close event types the end-of-file character instead.
+fn kit_exec_invoke_terminal(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String, overlay: [KitEnvVar], terminal: KitTerminal) -> KitRun {
+    kit_exec_run(env, argv, cwd, scratch, stdin, overlay, Val(terminal))
+}
+
+// Events by time; events at the same time keep their line order.
+fn kit_exec_terminal_order(events: [KitTerminalEvent]) -> [KitTerminalEvent] {
+    ordered := [KitTerminalEvent]{}
+    loop event in events {
+        &ordered.push(event)
+        position := ordered.len() - 1
+        loop position > 0 && ordered[position - 1].at > ordered[position].at {
+            earlier :: ordered[position - 1]
+            ordered[position - 1] = ordered[position]
+            ordered[position] = earlier
+            position -= 1
+        }
+    }
+    ordered
+}
+
+fn kit_exec_run(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String, overlay: [KitEnvVar], terminal: KitTerminal?) -> KitRun {
     files.create_dir_all(files.join(scratch, "tmp")) ?? return kit_exec_failed("create child temp directory: {err}")
     started :: time.instant()
-    child := kit_exec_spec(env, argv, cwd, scratch, overlay).spawn() ?? return kit_exec_failed("spawn: {err}")
+    spec := kit_exec_spec(env, argv, cwd, scratch, overlay)
+    if terminal == .Val(shape) {
+        spec = spec.terminal(TerminalPolicy{size: TerminalSize{cols: shape.cols, rows: shape.rows}, mode: .Cooked})
+    }
+    child := spec.spawn() ?? return kit_exec_failed("spawn: {err}")
     { sender: done, receiver: watching } :: channel<Int>()
     watcher :: task kit_exec_watch_resident(if env.resident_limit > 0 -> child.id() else -> 0, env.resident_limit, env.resident_tree, watching)
     // Empty input writes nothing: a child that exits before the kit reaches its
     // stdin closed the pipe, which is no error when there was nothing to send.
     input_error := ""
     if stdin != "" {
-        child.stdin.write(stdin) ?? {
+        child.stdin.write_text(stdin) ?? {
             input_error = "stdin: {err}"
             ()
         }
     }
-    child.stdin.close()
+    if terminal == {
+        .Val(shape) -> {
+            eof :: String.from_bytes([U8{4}]) ?? panic("EOF character")
+            loop event in kit_exec_terminal_order(shape.events) {
+                remaining :: event.at - started.elapsed().ns
+                if remaining > 0 -> time.sleep(time.duration_ns(remaining))
+                if event.kind == "resize" {
+                    session :: child.terminal ?? {
+                        if input_error == "" -> input_error = "terminal resize: no terminal session"
+                        next
+                    }
+                    session.resize(TerminalSize{cols: event.cols, rows: event.rows}) ?? {
+                        if input_error == "" -> input_error = "terminal resize: {err}"
+                        ()
+                    }
+                } else if event.kind == "close" {
+                    // Like closing a pipe, ending input after the child has
+                    // exited is no error.
+                    child.stdin.write_text(eof).drop("the child may have exited before its input ended")
+                } else {
+                    child.stdin.write_text(event.text) ?? {
+                        if input_error == "" -> input_error = "terminal input: {err}"
+                        ()
+                    }
+                }
+            }
+        }
+        .None -> child.stdin.close()
+    }
     receipt :: child.wait() ?? {
         done.send(0)
         _ :: ^watcher.join() ?? false

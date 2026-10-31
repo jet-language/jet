@@ -511,3 +511,32 @@ fn cpu_available_parallelism(root: I64, root_len: I64) -> I64 {
     if (online <= I64{0}) -> return I64{0}
     cpu_min(online, quota)
 }
+
+// core.compute's f32 SIMD dispatch (core-library.md:4289-4291): the vector
+// width the host executes, decided as Rust std_detect's
+// is_x86_feature_detected decides it (std_detect x86.rs). 8 is AVX2:
+// CPUID.7.0:EBX bit 5 with XSAVE and OSXSAVE (CPUID.1:ECX bits 26 and 27)
+// and the OS saving XMM and YMM state (XCR0 bits 1 and 2). 4 is SSE2
+// (CPUID.1:EDX bit 26). 1 is the scalar loop. The answer is fixed for the
+// process, so the first probe is kept; a racing probe stores the same word.
+compute_simd_lanes_word := I64{0}
+
+#Export(c) fn jet_compute_simd_lanes() -> I64 {
+    if (compute_simd_lanes_word == I64{0}) -> compute_simd_lanes_word = compute_simd_lanes_probe()
+    jet_int_owned_from_i64(compute_simd_lanes_word)
+}
+
+fn compute_simd_lanes_probe() -> I64 {
+    #Unsafe("cpuid and xgetbv only report processor identification and the OS-enabled state") {
+        top :: os_cpuid_eax_i64(I64{0}, I64{0})
+        if (top < I64{1}) -> return I64{1}
+        ecx :: os_cpuid_ecx_i64(I64{1}, I64{0})
+        edx :: os_cpuid_edx_i64(I64{1}, I64{0})
+        xsave :: I64{201326592}
+        if (top >= I64{7} && ecx.bit_and(xsave) == xsave && os_xgetbv_i64(I64{0}).bit_and(I64{6}) == I64{6}) {
+            if (os_cpuid_ebx_i64(I64{7}, I64{0}).bit_and(I64{32}) != I64{0}) -> return I64{8}
+        }
+        if (edx.bit_and(I64{67108864}) != I64{0}) -> return I64{4}
+    }
+    I64{1}
+}

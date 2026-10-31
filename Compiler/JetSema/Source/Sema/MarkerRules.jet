@@ -481,6 +481,9 @@ fn sema_marker_rules_marker_signature_bindings(marker: Marker, signature: TAppli
         return None
     }
     bindings := [SemaMarkerRuleArgumentBinding]{}
+    // Rust `rule_signature_bindings` (CheckerMarkers.rs:90 @ 6083377777): a
+    // bare `#Unsafe` binds nothing; its missing reason is E3112's, not E0930's.
+    if marker.name == "Unsafe" && marker.args.len() == 0 -> return Val(bindings)
     supplied := [Bool]{}
     loop _ in signature.params {
         &supplied.push(false)
@@ -602,11 +605,13 @@ fn sema_marker_rules_signature_text(name: String, signature: TAppliedRuleSignatu
     "{name}({parts.join(", ")})"
 }
 
+// Rust `marker_argument_shape_error` (Policy.rs:1683 @ 6083377777) for a
+// registered rule, the declared-signature form for a source-declared one. The
+// span is Rust's marker span: the name through the closing `)`, without `#`.
 fn sema_marker_rules_signature_error(marker: Marker, signature: TAppliedRuleSignature, declared: Bool) -> Diagnostic {
     expected := sema_marker_rules_signature_text(marker.name, signature)
-    why := if declared -> "marker arguments use the same call grammar and typed signature as function arguments" else -> "marker arguments use the registered parameter kinds, labels, defaults, and variadic slot"
     fix := if declared -> "match the declared signature `{expected}`" else -> "match the registered signature `{expected}`"
-    sema_error("E0930", marker.span, "`#{marker.name}` arguments do not match `{expected}`", why, fix)
+    sema_error("E0930", Span{start: marker.name_span.start, end: marker.span.end}, "`#{marker.name}` arguments do not match `{expected}`", "marker arguments use the same call grammar and typed signature as function arguments", fix)
 }
 
 fn sema_marker_rules_argument_path(expression: Expr) -> String? {
@@ -1013,13 +1018,155 @@ fn sema_marker_rules_validate_argument_signature(marker: Marker, signature: TApp
     true
 }
 
+// Rust `validate_rule_signature` (CheckerMarkers.rs:933 @ 6083377777): a
+// builtin marker binds its arguments against its registered rule signature,
+// each argument checked in the scope of the site that carries it (E0930).
+// Rust's sites, each ported here: a local binding (`check_binding`,
+// bindings.rs:1448), a marked statement or block (statements.rs:1293,
+// sema_marker_rules_check_statement_facts), a `#Context` block
+// (statements.rs:3878, sema_marker_rules_check_context_fact), a function or
+// method (Registration.rs:804), and the static-product sites
+// (`resolve_static_rule_products`, sema_marker_rules_check_static_sites).
+// True when the arguments bind or no registered rule governs the marker.
+fn sema_marker_rules_check_rule_signature(marker: Marker, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    if marker.declaration_module != None -> return true
+    if program.registration_graph == .Val(graph) {
+        if graph.marker_catalog == .Val(registry) {
+            rule_index :: sema_marker_rules_builtin_index(registry, marker) ?? return true
+            expected_types :: (loop _ in registry.applied_rules[rule_index].signature.params -> Type?{None})
+            facts := [SemaMarkerRuleArgumentFact]{}
+            sources := [SemaComptimeItemSource]{}
+            requests := [SemaComptimeRequest]{}
+            return sema_marker_rules_validate_argument_signature(marker, registry.applied_rules[rule_index].signature, expected_types, None, false, registry.applied_rules[rule_index].owns_menu, registry, environment, program, &scopes, &state, &tail_store, &context, [SemaComptimeItemValue]{}, &facts, &sources, &requests, &diagnostics)
+        }
+    }
+    true
+}
+
+// Every marker of `markers` through sema_marker_rules_check_rule_signature;
+// true when all of them bind.
+fn sema_marker_rules_check_rule_signatures(markers: [Marker], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    valid := true
+    loop marker in markers {
+        if !sema_marker_rules_check_rule_signature(marker, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) -> valid = false
+    }
+    valid
+}
+
+// Rust `take_statement_rule_fact` (CheckerMarkers.rs:994 @ 6083377777) then
+// `validate_rule_signature` (statements.rs:1280): the marker of a marked
+// statement or block is the module's Statement- or Block-site application
+// targeting the statement. `#Meta` is its binding's (Statements.jet) and
+// `#Context` its block's (sema_marker_rules_check_context_fact).
+// D-HTML-NAME1=B (syntax-decisions.md, M03 marker ballot): `#HTML` has a
+// site-dependent signature, `HTML(page: Path)` at the file site and bare
+// `#HTML { … }` at the block site (Rust `validate_registered_rule_marker`,
+// Parser/Items/marker_groups.rs @ 6083377777). The block form's header is
+// the checked text block's own law (sema_stmt_check_scope_member, E0617).
+fn sema_marker_rules_check_statement_facts(target: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+    if program.registration_graph == .Val(graph) {
+        if graph.marker_catalog == None -> return
+        row :: sema_scope_caller_row(environment, graph)
+        if row < 0 -> return
+        loop index in 0..<graph.modules[row].program.rule_facts.len() {
+            if graph.modules[row].program.rule_facts[index].target != (Val(target)) -> next
+            if graph.modules[row].program.rule_facts[index].site != (Val(RuleSite.Block)) && graph.modules[row].program.rule_facts[index].site != (Val(RuleSite.Statement)) -> next
+            if graph.modules[row].program.rule_facts[index].marker.name == "Meta" || graph.modules[row].program.rule_facts[index].marker.name == "Context" -> next
+            if graph.modules[row].program.rule_facts[index].site == (Val(RuleSite.Block)) && graph.modules[row].program.rule_facts[index].marker.name == "HTML" -> next
+            _ := sema_marker_rules_check_rule_signature(graph.modules[row].program.rule_facts[index].marker, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        }
+    }
+}
+
+// Rust `Stmt::ContextBlock` (statements.rs:3869 @ 6083377777): the block's
+// `#Context` application binds against `Context(allocator:, logger:,
+// deadline:)`. False when it does not bind; the field checks then stay quiet.
+fn sema_marker_rules_check_context_fact(span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    if program.registration_graph == .Val(graph) {
+        if graph.marker_catalog == None -> return true
+        row :: sema_scope_caller_row(environment, graph)
+        if row < 0 -> return true
+        loop index in 0..<graph.modules[row].program.rule_facts.len() {
+            if graph.modules[row].program.rule_facts[index].marker.name != "Context" || graph.modules[row].program.rule_facts[index].target != (Val(span)) -> next
+            return sema_marker_rules_check_rule_signature(graph.modules[row].program.rule_facts[index].marker, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        }
+    }
+    true
+}
+
+// Rust `resolve_static_rule_products` (CheckerMarkers.rs:438 @ 6083377777):
+// a marker at a static-product site (the file, a type, a constant, a field, a
+// variant, a test) binds its signature in the module's own scope, where its
+// arguments can name only module items. A test's written name, `faults:` and
+// `expected_fail:` are its `#Test` marker's arguments.
+fn sema_marker_rules_check_static_sites(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) {
+    if program.registration_graph == .Val(graph) {
+        if graph.marker_catalog == None -> return
+        context := sema_check_context_init()
+        state := sema_ownership_state_init()
+        tail_store := sema_statement_tail_store_init()
+        loop index in 0..<graph.modules[module_index].program.rule_facts.len() {
+            if graph.modules[module_index].program.rule_facts[index].site != (Val(RuleSite.File)) -> next
+            _ := sema_marker_rules_check_rule_signature(graph.modules[module_index].program.rule_facts[index].marker, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        }
+        loop item_index in 0..<graph.modules[module_index].program.items.len() {
+            sema_marker_rules_check_static_item(graph.modules[module_index].program.items[item_index], environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        }
+    }
+}
+
+fn sema_marker_rules_check_static_item(item: Item, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+    if item == {
+        .Struct(definition) -> {
+            _ := sema_marker_rules_check_rule_signatures(definition.type_markers, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            _ := sema_marker_rules_check_rule_signatures(definition.serde_markers, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            loop field in definition.fields {
+                _ := sema_marker_rules_check_rule_signatures(field.serde_markers, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            }
+        }
+        .Enum(definition) -> {
+            _ := sema_marker_rules_check_rule_signatures(definition.type_markers, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            _ := sema_marker_rules_check_rule_signatures(definition.serde_markers, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            loop variant in definition.variants {
+                _ := sema_marker_rules_check_rule_signatures(variant.serde_markers, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            }
+        }
+        .Distinct(definition) -> {
+            _ := sema_marker_rules_check_rule_signatures(definition.type_markers, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        }
+        .Const(definition) -> {
+            _ := sema_marker_rules_check_rule_signatures(definition.markers, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        }
+        .Test(test) -> {
+            args := [MarkerCallArg]{}
+            labels := [CallLabel?]{}
+            if test.name_expr == .Val(expression) {
+                &args.push(MarkerCallArg.Expr{value: expression})
+                &labels.push(None)
+            }
+            if test.faults_expr == .Val(expression) {
+                &args.push(MarkerCallArg.Expr{value: expression})
+                &labels.push(Val(CallLabel{name: "faults", span: expr_span(expression)}))
+            }
+            if test.expected_fail_expr == .Val(expression) {
+                &args.push(MarkerCallArg.Expr{value: expression})
+                &labels.push(Val(CallLabel{name: "expected_fail", span: expr_span(expression)}))
+            }
+            if args.len() == 0 -> return
+            marker :: Marker{name: "Test", negated: false, name_span: test.span, args: args, arg_labels: labels, span: test.span, ct: None}
+            _ := sema_marker_rules_check_rule_signature(marker, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        }
+        else -> {}
+    }
+}
+
 // Rust `check_binding` → `check_meta_attr` → `check_meta_attr_fields`
 // (CheckerCore/bindings.rs:1231/1446/1658 @ 6083377777): a local binding's
 // `#Meta(...)` repeats a field (E0346) or has an empty (E0348) or not plain
-// (E0347) category. No rule-signature pass binds local marker arguments, so
-// only a written literal decides: a non-literal category that may name a
-// comptime constant is left alone, and only an interpolated string is
-// certainly not plain text.
+// (E0347) category. It runs once the arguments bind to the signature. Rust
+// then rewrites a constant category to its value; here only a written
+// literal decides: a non-literal category that may name a comptime constant
+// is left alone, and only an interpolated string is certainly not plain text.
 fn sema_marker_rules_check_local_meta(marker: Marker, diagnostics: &[Diagnostic]) {
     seen := [String:Bool]{}
     loop index in 0..<marker.args.len() {

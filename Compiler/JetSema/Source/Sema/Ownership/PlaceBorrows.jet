@@ -337,9 +337,32 @@ fn sema_place_borrow_census_expr(value: TExpr, arena: BodyTree, census: &SemaPla
             sema_place_borrow_census_list(else_body, arena, &census)
             return sema_place_borrow_census_expr(else_value, arena, &census)
         }
+        .Binary(_, _, _, lhs, rhs) -> return sema_place_borrow_census_binary(lhs, rhs, arena, &census)
         else -> {}
     }
     tree_each_expr_child(value, (child: TExpr) -> sema_place_borrow_census_expr(child, arena, &census))
+}
+
+// A Binary node's operands, in tree_each_expr_child's order. A left-leaning
+// chain (`a + b + c …`) walks its left spine in this frame, so its length
+// costs no stack: a Binary node is no census site of its own.
+fn sema_place_borrow_census_binary(lhs: TExpr, rhs: TExpr, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
+    rights := [TExpr]{rhs}
+    operand := lhs
+    loop {
+        if operand.kind == .Binary(_, _, _, inner_lhs, inner_rhs) {
+            &rights.push(inner_rhs)
+            operand = inner_lhs
+        } else {
+            break
+        }
+    }
+    sema_place_borrow_census_expr(operand, arena, &census)
+    index := rights.len() - 1
+    loop index >= 0 {
+        sema_place_borrow_census_expr(rights[index], arena, &census)
+        index -= 1
+    }
 }
 
 // A closure captures what it names.

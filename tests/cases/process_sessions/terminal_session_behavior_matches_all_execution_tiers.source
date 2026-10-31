@@ -7,12 +7,12 @@ fn run() {
     session.resize(TerminalSize{ cols: 100, rows: 30 }) ?? panic("resize failed")
     exited :: child.exited() ?? panic("poll failed")
     print(!exited)
-    child.stdin.write("typed\n") ?? panic("write failed")
+    child.stdin.write_text("typed\n") ?? panic("write failed")
     result :: child.wait() ?? panic("wait failed")
     print(result.success)
     print(result.output.contains("input:typed"))
     print(result.output.contains("size:30x100"))
-    if child.stdin.write("late") == {
+    if child.stdin.write_text("late") == {
         .Ok(_) -> {
             print(false)
         }

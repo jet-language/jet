@@ -148,6 +148,8 @@ IR_X64_MIN_INSTRUCTIONS_PER_THREAD :: 20000
 // function gets an error row and fresh threads select the rest.
 fn ir_x64_compile_module(program: ^IRModule, threads: CompilerThreads) -> IRX64Result Never! {
     m := ^program
+    ir_drop_early(&m)
+    ir_tail_calls(&m)
     tables := ir_x64_tables(m)
     count :: m.functions.len()
     weights := [Int]{}

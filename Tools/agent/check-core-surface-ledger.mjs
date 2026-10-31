@@ -1402,6 +1402,9 @@ function coreCallEffectFor(moduleName, member) {
   if ((coreCallOneOf(moduleName, [
     "core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.xml", "core.encoding.cbor",
   ]) && coreCallOneOf(member, ["reader", "writer"])) || (moduleName === "core.encoding.csv" && member === "query")) return "FS";
+  // The host's f32 SIMD dispatch is a fixed CPU fact read without a system
+  // call; comptime refuses it (BuildRoutes.jet ir_comptime_ambient_refusal).
+  if (moduleName === "core.compute" && member === "__simd_lanes") return null;
   if (moduleName === "core.compute" && member !== "device_cpu") return "GPU";
   if (moduleName === "core.data" && member === "__host_path_is_file") return "FS";
   if (moduleName === "core.files") return "FS";

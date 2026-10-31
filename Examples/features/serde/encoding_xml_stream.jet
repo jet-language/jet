@@ -22,8 +22,8 @@ fn xml_name(local: String) -> Dyn {
 
 fn write_catalog(path: Path) -> Bool (EncodingError | IOError)! {
     output :: files.create(path) ?? return Err(err)
-    writer :: xml.writer(^output, encoding.EncodingLimits.safe()) ?? return Err(err)
-    writer.write(Dyn.Object(["$xml_event": Dyn.Text("document_start"), "encoding": Dyn.Null, "bom": Dyn.Array([])])) ?? return Err(err)
+    writer := xml.writer(^output, encoding.EncodingLimits.safe()) ?? return Err(err)
+    &writer.write(Dyn.Object(["$xml_event": Dyn.Text("document_start"), "encoding": Dyn.Null, "bom": Dyn.Array([])])) ?? return Err(err)
     semantic :: Dyn.Object(
     [
         "name": xml_name("r"),
@@ -49,10 +49,10 @@ fn write_catalog(path: Path) -> Bool (EncodingError | IOError)! {
         "open_lexical": open_lexical,
     ],
     )
-    writer.write(root_event) ?? return Err(err)
-    writer.write(Dyn.Object(["$xml_event": Dyn.Text("document_end")])) ?? return Err(err)
+    &writer.write(root_event) ?? return Err(err)
+    &writer.write(Dyn.Object(["$xml_event": Dyn.Text("document_end")])) ?? return Err(err)
     &writer.flush() ?? return Err(err)
-    writer.finish() ?? return Err(err)
+    &writer.finish() ?? return Err(err)
     return Ok(true)
 }
 
@@ -64,6 +64,6 @@ fn run() (EncodingError | IOError)! {
     write_catalog(path) ?? return
     input :: files.open(path) ?? return
     reader :: xml.reader(^input) ?? return
-    loop event in reader -> print("event")
+    loop _event in reader -> print("event")
     print("eof")
 }

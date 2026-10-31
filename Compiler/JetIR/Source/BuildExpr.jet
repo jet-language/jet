@@ -380,8 +380,9 @@ fn ir_stmt_body(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never
             ir_stmt_line(p, &b, span)
             // `name := &place` binds an alias of the place, never a copy: a
             // write borrow's edits reach the owner. A range borrow keeps its
-            // View value below.
-            if local.address_lifetime == None && local.persist_key == None && ir_body_node(p, b, init).kind == .Borrow(borrowed, _) {
+            // View value below, and a `Pin<T>` (`mem.pin(&place)`) the
+            // place's address.
+            if local.address_lifetime == None && local.persist_key == None && ir_body_node(p, b, init).kind == .Borrow(borrowed, _) && ir_pin_target(ir_ty(p, b, init)) == None {
                 if local.deref || !(ir_body_node(p, b, borrowed).kind == .Slice(_, _, _, _, _)) -> return ir_bind_pin(&m, p, &b, local, init, span)
             }
             if local.deref || local.address_lifetime != None || local.persist_key != None -> return ir_fail(&b, span, "addressed or persistent binding")
@@ -652,6 +653,10 @@ fn ir_stmt_body(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never
                 if kind == .Iterable(_, _, iter_symbol, next_symbol, item_type) {
                     if step != None || columnar -> return ir_fail(&b, span, "statement ForIn over an Iterable with a step or columns")
                     return ir_iterable_walk(&m, p, &b, label, variable, collection, iter_symbol, next_symbol, item_type, body, span)
+                }
+                if kind == .EncodingReader(_) {
+                    if step != None || columnar -> return ir_fail(&b, span, "statement ForIn over an encoding reader with a step or columns")
+                    return ir_encoding_reader_walk(&m, p, &b, label, variable, collection, body, span)
                 }
             }
             iter_step :: step != None && method_kind == None && !columnar && ir_iter_element(ir_ty(p, b, collection)) != None
@@ -1602,7 +1607,8 @@ fn ir_expr(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int Ne
         .Field(receiver, field) -> {
             if ir_reactive_type(p, ir_ty(p, b, receiver)) -> return ir_reactive_field(&m, p, &b, expression_ty, receiver, field.name, span)
             if ir_default_err(p, ir_ty(p, b, receiver)) -> return ir_default_err_field(&m, p, &b, expression_ty, receiver, field.name, span)
-            base :: ir_expr(&m, p, &b, receiver)
+            // A field through a `Pin<T>` is read in the pinned storage.
+            base :: if ir_pin_target(ir_ty(p, b, receiver)) != None -> ir_pin_window(&m, p, &b, receiver, span) else -> ir_expr(&m, p, &b, receiver)
             if ir_failed(b) -> return -1
             if base >= 0 && ir_kind_of(m, b, base) == .Pointer {
                 if ir_process_member(&m, p, ir_ty(p, b, receiver), field.name) == .Val(member) -> return ir_member_read(&m, &b, base, member)
@@ -3235,6 +3241,7 @@ fn ir_precise_division(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, func
 // copies would both drop its old member). A scalar or box place's value is then
 // read from its address. Any other place is its value.
 fn ir_write_base(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, span: Span) -> Int Never! {
+    if ir_pin_target(ir_ty(p, b, place)) != None -> return ir_pin_window(&m, p, &b, place, span)
     if !ir_place_needs_address(&m, p, b, place) -> return ir_expr(&m, p, &b, place)
     backs := [IRWriteBack]{}
     address :: ir_place_address(&m, p, &b, place, &backs, span)
@@ -3272,6 +3279,7 @@ fn ir_place_address(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, backs
     place_ty :: ir_ty(p, b, place)
     if ir_body_node(p, b, place).kind == .Borrow(inner, _) -> return ir_place_address(&m, p, &b, inner, &backs, span)
     if ir_body_node(p, b, place).kind == .Move(inner) -> return ir_place_address(&m, p, &b, inner, &backs, span)
+    if ir_pin_target(place_ty) != None -> return ir_pin_window(&m, p, &b, place, span)
     if ir_body_node(p, b, place).kind == .Local(local) {
         binding :: ir_lookup_local(b, local) ?? return ir_fail_slot(&b, span, "write of unknown local {local.name}")
         if binding.indirect >= 0 || ir_kind_of(m, b, binding.slot) == .Aggregate -> return binding.slot
@@ -4529,7 +4537,8 @@ fn ir_return(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int?, span: Span)
     // failure where it is built (the `.Err` arm of ir_expr).
     tail_mark :: b.origins.len()
     if !returns_err -> ir_tail_errs(p, &b, returned)
-    slot :: ir_value_as(&m, p, &b, returned, result_row, span)
+    propagated :: ir_return_propagated(&m, p, b, returned, result_row)
+    slot :: if propagated == .Val(call) -> ir_expr(&m, p, &b, call) else -> ir_value_as(&m, p, &b, returned, result_row, span)
     loop b.origins.len() > tail_mark {
         _ :: &b.origins.pop()
     }
@@ -4545,6 +4554,45 @@ fn ir_return(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int?, span: Span)
     ir_close_disarm(&b, slot)
     owned :: ir_own(&m, p, &b, slot)
     ir_return_slot(&m, p, &b, owned, span)
+}
+
+// D-TAIL-CALL1: in compile-time code a function's failure rail stays (a
+// `-> Int` walk returns a Result box), so its returned call is lowered as
+// `Ok(callee(...)?)`, the callee's box opened and boxed again into the same
+// carrier. When the callee's carrier is the function's own and the `?`
+// converts nothing, the call's box is the return value as it is, and the
+// call becomes a tail call (TailCalls.jet); a failure's journey loses this
+// hop. The call, or None.
+fn ir_return_propagated(m: &IRModule, p: IRProgram, b: IRBuilder, returned: Int, result_row: Int) -> Int? Never! {
+    if !p.comptime_values -> return None
+    tried := returned
+    if ir_body_node(p, b, returned).kind == .Ok(value) -> tried = value
+    inner := -1
+    if ir_body_node(p, b, tried).kind == {
+        .Try(value, conversion, _) -> {
+            if ir_try_converts(conversion) -> return None
+            inner = value
+        }
+        .TryWithContext(value, note, conversion, _, _, _) -> {
+            if note != None || ir_try_converts(conversion) -> return None
+            inner = value
+        }
+        else -> return None
+    }
+    if ir_body_node(p, b, inner).kind == {
+        .Call(_, _, _) -> {}
+        else -> return None
+    }
+    row :: ir_value_type(&m, p, ir_ty(p, b, inner)) ?? return None
+    if row != result_row -> return None
+    Val(inner)
+}
+
+fn ir_try_converts(conversion: TTryConvert) -> Bool Never! {
+    if conversion == {
+        .NoConversion -> false
+        else -> true
+    }
 }
 
 // The `Err(...)` values a returned valued `if` or block hands back from its
@@ -5321,6 +5369,90 @@ fn ir_iterable_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, v
     ir_scope_close(&m, &b)
 }
 
+// `loop item in reader` over an encoding reader (TForInMethod.EncodingReader):
+// each step calls the reader's Core `next(&self)`, an `Item? Error!`. Ok with
+// an item runs the body with it, Ok(None) ends the walk, and an error panics
+// with its display at <core.prelude>:0, as CollectionSources.rs's encoding
+// reader source does. A fresh reader belongs to the loop, which drops it; a
+// kept one is read in place and stays its owner's.
+fn ir_encoding_reader_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, collection: Int, body: [Int], span: Span) Never! {
+    reader_ty :: ir_ty(p, b, collection)
+    next_symbol :: ir_encoding_reader_next_key(p.functions, reader_ty)
+    next_row :: ir_function_row(p, next_symbol) ?? return ir_fail(&b, span, "loop over {ir_type_name(reader_ty)} whose `next` is outside the checked program")
+    next_args :: ir_owner_args(p, p.functions[next_row], reader_ty) ?? return ir_fail(&b, span, "loop over {ir_type_name(reader_ty)}, which does not spell its owner's type arguments")
+    source :: ir_expr(&m, p, &b, collection)
+    if ir_failed(b) || source < 0 -> return
+    ir_scope_open(&b)
+    if b.fresh[source] {
+        b.fresh[source] = false
+        &b.bindings.push(IRBinding{name: "", slot: source, owned: true})
+    }
+    exit :: ir_open(&b.f, IROp.Block, b.line)
+    _ :: ir_open(&b.f, IROp.Loop, b.line)
+    backs := [IRWriteBack]{}
+    receiver := source
+    if ir_kind_of(m, b, source) != .Aggregate {
+        size :: m.types[b.f.slot_type[source]].size
+        pointer_row :: ir_pointer_row(&m)
+        receiver = ir_temp(&m, &b, pointer_row)
+        ir_emit(&b.f, IROp.StackAddress, receiver, if size < 8 -> 8 else -> size, 8, -1, b.line)
+        ir_emit(&b.f, IROp.Store, -1, receiver, 0, source, b.line)
+        &backs.push(IRWriteBack{cell: receiver, slot: source})
+    }
+    outcome :: ir_call(&m, p, &b, next_symbol, next_args, receiver, backs, [BodyCallArg]{}, span)
+    if ir_failed(b) || outcome < 0 -> return
+    outcome_ty :: m.types[b.f.slot_type[outcome]].ty
+    option_ty := Type.Named{name: "Unit"}
+    error_ty := Type.Named{name: "Unit"}
+    if ir_untag(outcome_ty) == .Result(ok, err) {
+        option_ty = ok
+        error_ty = err
+    } else {
+        return ir_fail(&b, span, "encoding reader `next` result {ir_type_name(outcome_ty)}")
+    }
+    item_ty := Type.Named{name: "Unit"}
+    if ir_untag(option_ty) == .Option(inner) {
+        item_ty = inner
+    } else {
+        return ir_fail(&b, span, "encoding reader `next` success {ir_type_name(option_ty)}")
+    }
+    option_row :: ir_value_type(&m, p, option_ty) ?? return ir_fail(&b, span, "type {ir_type_name(option_ty)}")
+    error_row :: ir_value_type(&m, p, error_ty) ?? return ir_fail(&b, span, "type {ir_type_name(error_ty)}")
+    item_row :: ir_value_type(&m, p, item_ty) ?? return ir_fail(&b, span, "type {ir_type_name(item_ty)}")
+    ok :: ir_result_is_ok(&m, &b, outcome)
+    zero :: ir_const_like(&m, &b, ok, 0)
+    failed :: ir_bool_op(&m, &b, IROp.Eq, ok, zero)
+    ir_open_if(&b.f, failed, b.line)
+    error :: ir_box_take(&m, p, &b, outcome, 8, error_row)
+    text :: ir_render(&m, p, &b, error_ty, error, IRRender.Display, span)
+    if ir_failed(b) || text < 0 -> return
+    data :: ir_load_word(&m, &b, text, 0)
+    length :: ir_load_word(&m, &b, text, 8)
+    _ :: ir_runtime(&m, &b, "jet_rt_panic_message", [Int]{data, length}, -1)
+    ir_emit(&b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    option :: ir_box_take(&m, p, &b, outcome, 8, option_row)
+    present :: ir_option_is_some(&m, &b, option)
+    ir_exit_unless(&m, &b, present, exit)
+    step_block :: ir_open(&b.f, IROp.Block, b.line)
+    ir_scope_open(&b)
+    &b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len()})
+    item :: ir_box_take(&m, p, &b, option, 0, item_row)
+    if item >= 0 {
+        b.fresh[item] = false
+        _ :: ir_binder_holds(&m, p, &b, variable, item, span)
+        &b.bindings.push(IRBinding{name: variable.name, slot: item, owned: ir_has_drop(m, b, item)})
+    }
+    ir_stmts(&m, p, &b, body)
+    _ :: &b.loops.pop()
+    ir_scope_close(&m, &b)
+    ir_end(&b.f, b.line)
+    ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
+    ir_end(&b.f, b.line)
+    ir_end(&b.f, b.line)
+    ir_scope_close(&m, &b)
+}
+
 // A tuple value in fresh frame storage: each value at the member of its
 // name, or of its position when the type names it otherwise.
 fn ir_tuple_literal(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, names: [String], values: [Int], span: Span) -> Int Never! {
@@ -5551,8 +5683,10 @@ fn ir_range_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, start: In
 
 // `&place` / `&write place` as a value: a read of a list window is the View
 // over the list's storage; any other read is the place's value, which its
-// holder keeps; a written aggregate is the address of its storage.
+// holder keeps; a written aggregate is the address of its storage, which a
+// `Pin<T>` (`mem.pin(&place)`) holds as a pointer.
 fn ir_borrow(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, access: AccessConvention, span: Span) -> Int Never! {
+    if ir_pin_target(ty) != None -> return ir_pin_address(&m, p, &b, ty, value, span)
     value_ty :: ir_ty(p, b, value)
     if access == .Read {
         if ir_body_node(p, b, value).kind == .Slice(base, start, end, range, location) {
@@ -5603,6 +5737,34 @@ fn ir_borrow(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, ac
         }
     }
     ir_fail_slot(&b, span, "borrow {access} of {ir_type_name(value_ty)}")
+}
+
+// `mem.pin(&place)` (D-PIN1=A): the address of the pinned aggregate's own
+// storage as a `Pin<T>`, which never owns it.
+fn ir_pin_address(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, place: Int, span: Span) -> Int Never! {
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    backs := [IRWriteBack]{}
+    address :: ir_place_address(&m, p, &b, place, &backs, span)
+    if ir_failed(b) || address < 0 -> return -1
+    place_ty :: ir_ty(p, b, place)
+    if backs.len() > 0 || ir_kind_of(m, b, address) != .Aggregate -> return ir_fail_slot(&b, span, "pin of a {ir_type_name(place_ty)} place")
+    pinned :: ir_temp(&m, &b, row)
+    ir_emit(&b.f, IROp.Offset, pinned, address, 0, -1, b.line)
+    pinned
+}
+
+// The storage a `Pin<T>` value names (D-PIN2=A): its address as an alias of
+// `T`'s aggregate row, whose fields are read and written in place.
+fn ir_pin_window(m: &IRModule, p: IRProgram, b: &IRBuilder, pin: Int, span: Span) -> Int Never! {
+    pin_ty :: ir_ty(p, b, pin)
+    target :: ir_pin_target(pin_ty) ?? return ir_fail_slot(&b, span, "pin window of {ir_type_name(pin_ty)}")
+    row :: ir_value_type(&m, p, target) ?? return ir_type_fail(&b, span, target)
+    if m.types[row].kind != .Aggregate -> return ir_fail_slot(&b, span, "pin of {ir_type_name(target)}")
+    pointer :: ir_expr(&m, p, &b, pin)
+    if ir_failed(b) || pointer < 0 -> return -1
+    alias :: ir_temp(&m, &b, row)
+    ir_emit(&b.f, IROp.Offset, alias, pointer, 0, -1, b.line)
+    alias
 }
 
 // Whether `ty` is held in a box (an Option, or an enum with a payload).

@@ -117,6 +117,16 @@ newline-joined units gathered so far. Predicates are `$PATH = JSON`,
 run's step timeout applies; `optional` passes with partial output at the
 deadline instead of failing. A later `close` or `wait` reports only the stdout
 no `recv` consumed.
+`pty: true [size ROWSxCOLS]` runs a step or session on a terminal (0x0 or no
+size leaves the size unset); its stdin and stdout share the terminal, so
+stdout is the transcript, echo and `\r\n` included. On a step,
+`pty-send: "TEXT" after D` and `pty-close: after D` run D after the previous
+send or close (the first after spawn), and `pty-resize: ROWSxCOLS at D` runs D
+after spawn. On a session they may also follow its `recv` and `send` lines and
+run where they stand. A close types the terminal's end-of-file character; a
+session's `close` does the same before waiting, since closing the terminal
+would hang up the child. Partial wiring such as `pty: stdout,stderr` is
+refused as `pty-stdio`.
 
 Use `--list`, `--cases FILE` (exact repository-relative IDs), or `--filter TEXT`
 to select cases. `--shard I/N` partitions the sorted corpus deterministically.

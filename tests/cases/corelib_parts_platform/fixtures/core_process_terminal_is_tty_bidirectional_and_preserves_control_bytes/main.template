@@ -9,11 +9,11 @@ fn run() {
     child :: process.cmd(["{work}/terminal_probe.sh"]).terminal(policy).spawn() ?? panic("terminal spawn failed")
     session :: child.terminal ?? panic("missing terminal session")
     session.resize(TerminalSize{ cols: 100, rows: 30 }) ?? panic("resize failed")
-    child.stdin.write("typed\n") ?? panic("terminal write failed")
+    child.stdin.write_text("typed\n") ?? panic("terminal write failed")
     result :: child.wait() ?? panic("terminal wait failed")
     print(result.success)
     print(result.output)
-    if child.stdin.write("late") == {
+    if child.stdin.write_text("late") == {
         .Ok(_) -> { print("closed:accepted") }
         .Err(error) -> {
             if error == {

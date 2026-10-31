@@ -167,6 +167,32 @@ fn sys_some(some: I64, value: I64) -> I64 {
     I64{1}
 }
 
+// core.sys.decode's Dotenv.file read: std::fs::read_to_string, taking no
+// injected FS checkpoint. The error is (not_found, io::Error's Display); a
+// NUL byte is std's CString refusal.
+#Export(c) fn jet_sys_dotenv_read_raw(path: I64, ok: I64, not_found: I64, cause: I64) -> I64 {
+    rt_text_store(not_found, I64{0})
+    if testing_has_nul(path) {
+        rt_text_store(cause, jet_rt_string_clone(rt_static_text("file name contained an unexpected NUL byte")))
+        return I64{0}
+    }
+    out :: jet_rt_alloc(I64{8}, I64{8})
+    status :: env_read_file(path, out)
+    value :: rt_text_word(out)
+    jet_rt_free(out, I64{8}, I64{8})
+    if (status == I64{1}) {
+        rt_text_store(ok, value)
+        return I64{1}
+    }
+    if (status == I64{0}) {
+        rt_text_store(not_found, I64{1})
+        rt_text_store(cause, host_errno_cause(I64{2}))
+        return I64{0}
+    }
+    rt_text_store(cause, value)
+    I64{0}
+}
+
 // OsExtra.rs:19 std::env::var_os(name).into_encoded_bytes(): the process
 // environment (the logical overlay never writes it). musl getenv finds no
 // name holding '=' (or empty); std refuses an interior NUL as absent.

@@ -18,7 +18,8 @@ package {
 // selects the CPU oracle; a tensor on any other device has no provider here
 // and is rejected with ComputeError.Device rather than computed on the CPU.
 
-use core.compute.[ComputeDevice, ComputeError, ComputeStream, SparseTensor, VJPRun]
+use core as core
+use core.compute.[ComputeError, VJPRun]
 use core.math as math
 
 MAX_ELEMENTS :: 16777216
@@ -71,6 +72,40 @@ fn numel(tensor: Tensor) -> Int Never! {
 
 fn to_list(tensor: Tensor) -> [Float] Never! { tensor.data.copy() }
 
+// Tensor bracket windows (D-SHAPE-PLACE1=A; core-library.md:4293-4295). A
+// range selects whole first-axis slabs of the row-major `data`; sema views
+// `data` through the flat range returned here, so the list window keeps the
+// checked range, its bounds check and the caller's source location. A slab
+// of a rank-0 or rank-1 tensor is one element, so its range is unchanged.
+fn __window(tensor: Tensor, range: Range) -> Range Never! {
+    if tensor.shape.len() <= 1 -> return range.copy()
+    slab :: window_slab(tensor.shape)
+    end :: if range.contains(range.end) -> range.end + 1 else -> range.end
+    if range.start < 0 || range.start > end || end > tensor.shape[0] {
+        panic("Tensor range {range.start}..<{end} is outside first axis of extent {tensor.shape[0]}")
+    }
+    (range.start * slab)..<(end * slab)
+}
+
+// `tensor[range].copy()`: the window `values` (the `data` slabs `range`
+// selected) as an independent Tensor on the owner's device and profile.
+fn __window_copy(tensor: Tensor, range: Range, values: [Float]) -> Tensor Never! {
+    shape := tensor.shape.copy()
+    if shape.len() > 0 {
+        slab :: window_slab(shape)
+        end :: if range.contains(range.end) -> range.end + 1 else -> range.end
+        shape[0] = if slab == 0 -> end - range.start else -> values.len() /% slab
+    }
+    Tensor{shape: shape, data: values.copy(), device: tensor.device.copy(), numeric_profile: tensor.numeric_profile.copy(), requested: tensor.requested.copy()}
+}
+
+// The element count of one first-axis slab: the product of the inner axes.
+fn window_slab(shape: [Int]) -> Int Never! {
+    slab := 1
+    loop index in 1..<shape.len() -> slab = slab * shape[index]
+    slab
+}
+
 fn device(tensor: Tensor) -> String Never! { tensor.device.copy() }
 
 // The placement receipt: the requested and selected device, the backend
@@ -90,7 +125,7 @@ fn placement(tensor: Tensor) -> String Never! {
     }
     cache :: if accelerator -> "runtime" else -> "none"
     ability :: if accelerator -> "{lower}.f32" else if profile == PROFILE_F32 -> "cpu-oracle.f32" else -> "cpu-oracle.f64"
-    reason :: if tensor.requested == "Auto" -> "policy=auto; selected=cpu; ability={ability}" else -> "policy=explicit; selected={lower}; ability={ability}"
+    reason :: if !accelerator && profile == PROFILE_F32 -> tile_receipt(simd_lanes()) else if tensor.requested == "Auto" -> "policy=auto; selected=cpu; ability={ability}" else -> "policy=explicit; selected={lower}; ability={ability}"
     "Placement(requested={tensor.requested}, selected={selected}, backend={backend}, version={version}, profile={profile}, cache={cache}, abilities={quoted(abilities(accelerator, profile))}, reason={reason})"
 }
 
@@ -211,6 +246,542 @@ fn matmul(a: Tensor, b: Tensor) -> Tensor ComputeError! {
         }
     }
     Ok(like(a, out_shape.copy(), data))
+}
+
+// The f32 tile (core-library.md:4289-4292): a blocked matmul in f32
+// arithmetic on the CPU oracle. Each output is the dot product of an `a` row
+// and a packed `b` column, reduced the way the host's SIMD dispatch executes
+// it (Rust jet_compute_f32_dot): `lanes` running sums, combined in lane
+// order, then the scalar tail, so the receipt and the bits agree on every
+// host. Inputs round to F32 and a non-finite partial sum is
+// ComputeError.Arithmetic. The result is a fresh CPU tensor under the F32
+// profile; an F32 CPU tensor's placement reports this tile's dispatch.
+TILE :: 8
+
+fn matmul_f32_tile(a: Tensor, b: Tensor) -> Tensor ComputeError! {
+    if a.shape.len() != 2 || b.shape.len() != 2 -> return Err(ComputeError.RankMismatch)
+    _ := checked(a)
+    _ := checked(b)
+    rows :: a.shape[0]
+    inner :: a.shape[1]
+    cols :: b.shape[1]
+    if inner != b.shape[0] -> return Err(ComputeError.RankMismatch)
+    out_shape :: [Int]{rows, cols}
+    _ := storage_len(out_shape)
+    left := [Float]{}
+    loop value in a.data -> &left.push(narrow(value, true))
+    packed := [Float]{}
+    loop column in 0..<cols {
+        loop row in 0..<inner -> &packed.push(narrow(b.data[row * cols + column], true))
+    }
+    lanes :: simd_lanes()
+    data := [Float]{}
+    loop _ in 0..<rows * cols -> &data.push(0.0)
+    row_tile := 0
+    loop row_tile < rows {
+        row_end :: if row_tile + TILE < rows -> row_tile + TILE else -> rows
+        column_tile := 0
+        loop column_tile < cols {
+            column_end :: if column_tile + TILE < cols -> column_tile + TILE else -> cols
+            loop row in row_tile..<row_end {
+                loop column in column_tile..<column_end {
+                    data[row * cols + column] = dot_f32(left, row * inner, packed, column * inner, inner, lanes)
+                }
+            }
+            column_tile += TILE
+        }
+        row_tile += TILE
+    }
+    Ok(Tensor{shape: out_shape.copy(), data: data, device: "CPU", numeric_profile: PROFILE_F32, requested: "CPU"})
+}
+
+// The f32 dot product of `count` values of `left` from `l` and `right` from
+// `r`: `lanes` sums each take every lanes-th product, the sums add in lane
+// order, then the remaining products add one at a time. One lane is the
+// scalar fold.
+fn dot_f32(left: [Float], l: Int, right: [Float], r: Int, count: Int, lanes: Int) -> Float ComputeError! {
+    acc := [Float]{}
+    loop _ in 0..<lanes -> &acc.push(0.0)
+    limit :: count /% lanes * lanes
+    index := 0
+    loop index < limit {
+        loop lane in 0..<lanes {
+            acc[lane] = narrow(acc[lane] + narrow(left[l + index + lane] * right[r + index + lane], true), true)
+        }
+        index += lanes
+    }
+    sum := Float{0.0}
+    loop lane in acc -> sum = narrow(sum + lane, true)
+    loop index < count {
+        sum = narrow(sum + narrow(left[l + index] * right[r + index], true), true)
+        index += 1
+    }
+    sum
+}
+
+// The f32 lanes the host executes (core-library.md:4289-4291): 8 is avx2, 4
+// is sse2 and 1 the scalar loop, decided by the runtime from cpuid as Rust
+// std_detect decides it.
+fn simd_lanes() -> Int Never! { core.compute.__simd_lanes() }
+
+fn simd_name(lanes: Int) -> String Never! {
+    if lanes == 8 -> return "avx2"
+    if lanes == 4 -> return "sse2"
+    "scalar"
+}
+
+fn tile_receipt(lanes: Int) -> String Never! {
+    "algorithm=blocked-matmul; tile={TILE}; arithmetic=f32; reduction=ordered; dispatch={simd_name(lanes)}; vector_width={lanes}; tail=scalar"
+}
+
+fn profile_f32_strict() -> String Never! {
+    lanes :: simd_lanes()
+    "backend=cpu-oracle;version=builtin;profile={PROFILE_F32};algorithm=blocked-matmul;tile={TILE};dispatch={simd_name(lanes)};vector_width={lanes};tail=scalar;cache=none"
+}
+
+fn profile_show() -> String Never! { profile_f32_strict() }
+
+// The kernel index contract (core-library.md:4311): `index` holds one
+// coordinate per axis of a valid shape, each inside its extent. It checks
+// the contract only; no closure becomes a native kernel here.
+fn kernel_bounds_ok(shape: [Int], index: [Int]) -> Bool ComputeError! {
+    if shape.len() != index.len() -> return Err(ComputeError.RankMismatch)
+    _ := storage_len(shape)
+    loop (axis, coordinate) in index {
+        if coordinate < 0 || coordinate >= shape[axis] -> return Err(ComputeError.OutOfBounds)
+    }
+    Ok(true)
+}
+
+// Devices, streams and CSR matrices are the registered ComputeDevice,
+// ComputeStream and SparseTensor records; their fields are private storage
+// (core_only rows), so user code holds opaque values. A device is its
+// display name. `Auto` and `CPU` select the CPU oracle; an explicit
+// accelerator has no provider here and is refused with ComputeError.Device
+// (core-library.md:4280-4281), never served on the CPU.
+impl ComputeDevice.Display { fn display(self) -> String { self.name.copy() } }
+
+fn device_cpu() -> ComputeDevice Never! { ComputeDevice{name: "CPU"} }
+
+fn device_auto() -> ComputeDevice Never! { ComputeDevice{name: "Auto"} }
+
+fn device_metal() -> ComputeDevice Never! { ComputeDevice{name: "Metal"} }
+
+fn device_cuda() -> ComputeDevice Never! { ComputeDevice{name: "CUDA"} }
+
+fn device_vulkan() -> ComputeDevice Never! { ComputeDevice{name: "Vulkan"} }
+
+fn device_webgpu() -> ComputeDevice Never! { ComputeDevice{name: "WebGPU"} }
+
+// The device a request for `target` selects.
+fn select(target: ComputeDevice) -> String ComputeError! {
+    if target.name == "Auto" || target.name == "CPU" -> return Ok("CPU")
+    Err(ComputeError.Device)
+}
+
+// `tensor` placed on `target`: the same values and profile, requested as
+// `target`.
+fn on_device(tensor: Tensor, target: ComputeDevice) -> Tensor ComputeError! {
+    _ := checked(tensor)
+    selected :: select(target)
+    Ok(Tensor{shape: tensor.shape.copy(), data: tensor.data.copy(), device: selected, numeric_profile: tensor.numeric_profile.copy(), requested: target.name.copy()})
+}
+
+// A stream orders work on its device. The CPU oracle runs each operation to
+// completion, so a CPU stream has nothing queued and synchronizes at once.
+fn stream_new() -> ComputeStream Never! { ComputeStream{device: "CPU"} }
+
+fn stream_new_on(target: ComputeDevice) -> ComputeStream ComputeError! {
+    Ok(ComputeStream{device: select(target)})
+}
+
+fn stream_sync(stream: ComputeStream) ComputeError! {
+    if stream.device != "CPU" -> return Err(ComputeError.Device)
+    return
+}
+
+// The stream's device only: stream identity is runtime-local.
+fn stream_show(stream: ComputeStream) -> String Never! { "ComputeStream(device={stream.device})" }
+
+// The compressed-sparse-row form of a rank-2 tensor: `row_ptr[r]..<row_ptr[r + 1]`
+// indexes row r's nonzero `values` and their `col_idx` columns.
+fn to_sparse(tensor: Tensor) -> SparseTensor ComputeError! {
+    if tensor.shape.len() != 2 -> return Err(ComputeError.RankMismatch)
+    _ := checked(tensor)
+    rows :: tensor.shape[0]
+    cols :: tensor.shape[1]
+    row_ptr := [Int]{0}
+    col_idx := [Int]{}
+    values := [Float]{}
+    loop r in 0..<rows {
+        loop c in 0..<cols {
+            value :: tensor.data[r * cols + c]
+            if value != 0.0 {
+                &col_idx.push(c)
+                &values.push(value)
+            }
+        }
+        &row_ptr.push(values.len())
+    }
+    Ok(SparseTensor{rows: rows, cols: cols, row_ptr: row_ptr, col_idx: col_idx, values: values})
+}
+
+fn sparse_nnz(sparse: SparseTensor) -> Int Never! { sparse.values.len() }
+
+fn sparse_show(sparse: SparseTensor) -> String Never! { "SparseCsr({sparse.rows}x{sparse.cols}, nnz={sparse.values.len()})" }
+
+// `sparse` times a length-`cols` vector: a fresh F64 CPU tensor of `rows`.
+fn sparse_mv(sparse: SparseTensor, vector: Tensor) -> Tensor ComputeError! {
+    _ := checked(vector)
+    if vector.shape.len() != 1 || vector.shape[0] != sparse.cols -> return Err(ComputeError.RankMismatch)
+    out := [Float]{}
+    loop r in 0..<sparse.rows {
+        acc := Float{0.0}
+        loop k in sparse.row_ptr[r]..<sparse.row_ptr[r + 1] {
+            acc = acc + sparse.values[k] * vector.data[sparse.col_idx[k]]
+            if !math.is_finite(acc) -> return Err(ComputeError.Arithmetic)
+        }
+        &out.push(acc)
+    }
+    Ok(Tensor{shape: [Int]{sparse.rows}, data: out, device: "CPU", numeric_profile: PROFILE_F64, requested: "Auto"})
+}
+
+// Linear algebra and the spectrum run on the CPU oracle in f64; eye, inv and
+// solve build a fresh CPU tensor, fft keeps its input's placement. A pivot
+// below PIVOT_EPSILON makes det 0 and inv/solve ComputeError.Singular.
+PIVOT_EPSILON :: Float{0.000000000000001}
+
+fn eye(n: Int) -> Tensor ComputeError! {
+    if n < 0 -> return Err(ComputeError.Shape)
+    shape :: [Int]{n, n}
+    _ := storage_len(shape)
+    data := [Float]{}
+    loop i in 0..<n {
+        loop j in 0..<n {
+            value := Float{0.0}
+            if i == j -> value = Float{1.0}
+            &data.push(value)
+        }
+    }
+    Ok(Tensor{shape: shape, data: data, device: "CPU", numeric_profile: PROFILE_F64, requested: "CPU"})
+}
+
+// Gaussian elimination with partial pivoting; each row swap flips the sign.
+fn det(tensor: Tensor) -> Float ComputeError! {
+    _ := checked(tensor)
+    if tensor.shape.len() != 2 || tensor.shape[0] != tensor.shape[1] -> return Err(ComputeError.RankMismatch)
+    n :: tensor.shape[0]
+    a := tensor.data.copy()
+    product := Float{1.0}
+    loop i in 0..<n {
+        pivot := i
+        loop r in i..<n {
+            if math.fabs(a[r * n + i]) > math.fabs(a[pivot * n + i]) -> pivot = r
+        }
+        if math.fabs(a[pivot * n + i]) < PIVOT_EPSILON -> return Ok(Float{0.0})
+        if pivot != i {
+            loop c in 0..<n {
+                held :: a[i * n + c]
+                a[i * n + c] = a[pivot * n + c]
+                a[pivot * n + c] = held
+            }
+            product = -product
+        }
+        piv :: a[i * n + i]
+        product = product * piv
+        if !math.is_finite(product) -> return Err(ComputeError.Arithmetic)
+        loop r in (i + 1)..<n {
+            factor :: a[r * n + i] / piv
+            if !math.is_finite(factor) -> return Err(ComputeError.Arithmetic)
+            loop c in i..<n {
+                value :: a[r * n + c] - factor * a[i * n + c]
+                if !math.is_finite(value) -> return Err(ComputeError.Arithmetic)
+                a[r * n + c] = value
+            }
+        }
+    }
+    Ok(product)
+}
+
+// Gauss-Jordan elimination of [tensor | I] with partial pivoting.
+fn inv(tensor: Tensor) -> Tensor ComputeError! {
+    if tensor.shape.len() != 2 || tensor.shape[0] != tensor.shape[1] -> return Err(ComputeError.RankMismatch)
+    _ := checked(tensor)
+    n :: tensor.shape[0]
+    width :: n * 2
+    if n * width > MAX_ELEMENTS -> return Err(ComputeError.Shape)
+    a := [Float]{}
+    loop i in 0..<n {
+        loop j in 0..<n -> &a.push(tensor.data[i * n + j])
+        loop j in 0..<n {
+            value := Float{0.0}
+            if i == j -> value = Float{1.0}
+            &a.push(value)
+        }
+    }
+    loop i in 0..<n {
+        pivot := i
+        loop r in i..<n {
+            if math.fabs(a[r * width + i]) > math.fabs(a[pivot * width + i]) -> pivot = r
+        }
+        if math.fabs(a[pivot * width + i]) < PIVOT_EPSILON -> return Err(ComputeError.Singular)
+        if pivot != i {
+            loop c in 0..<width {
+                held :: a[i * width + c]
+                a[i * width + c] = a[pivot * width + c]
+                a[pivot * width + c] = held
+            }
+        }
+        piv :: a[i * width + i]
+        loop c in 0..<width {
+            value :: a[i * width + c] / piv
+            if !math.is_finite(value) -> return Err(ComputeError.Arithmetic)
+            a[i * width + c] = value
+        }
+        loop r in 0..<n {
+            if r == i -> next
+            factor :: a[r * width + i]
+            loop c in 0..<width {
+                value :: a[r * width + c] - factor * a[i * width + c]
+                if !math.is_finite(value) -> return Err(ComputeError.Arithmetic)
+                a[r * width + c] = value
+            }
+        }
+    }
+    data := [Float]{}
+    loop i in 0..<n {
+        loop j in 0..<n -> &data.push(a[i * width + n + j])
+    }
+    Ok(Tensor{shape: tensor.shape.copy(), data: data, device: "CPU", numeric_profile: PROFILE_F64, requested: "CPU"})
+}
+
+// Gauss-Jordan elimination of [a | b]; `b` is a length-n vector or an
+// n-row matrix and the result has b's shape.
+fn solve(a: Tensor, b: Tensor) -> Tensor ComputeError! {
+    if a.shape.len() != 2 || a.shape[0] != a.shape[1] -> return Err(ComputeError.RankMismatch)
+    _ := checked(a)
+    _ := checked(b)
+    n :: a.shape[0]
+    rhs := 0
+    if b.shape.len() == 1 && b.shape[0] == n {
+        rhs = 1
+    } else if b.shape.len() == 2 && b.shape[0] == n && b.shape[1] >= 0 {
+        rhs = b.shape[1]
+    } else {
+        return Err(ComputeError.RankMismatch)
+    }
+    width :: n + rhs
+    if width > MAX_ELEMENTS || n * width > MAX_ELEMENTS -> return Err(ComputeError.Shape)
+    m := [Float]{}
+    loop row in 0..<n {
+        loop col in 0..<n -> &m.push(a.data[row * n + col])
+        loop col in 0..<rhs -> &m.push(b.data[row * rhs + col])
+    }
+    loop pivot in 0..<n {
+        best := pivot
+        loop row in pivot..<n {
+            if math.fabs(m[row * width + pivot]) > math.fabs(m[best * width + pivot]) -> best = row
+        }
+        if math.fabs(m[best * width + pivot]) < PIVOT_EPSILON -> return Err(ComputeError.Singular)
+        if best != pivot {
+            loop col in 0..<width {
+                held :: m[pivot * width + col]
+                m[pivot * width + col] = m[best * width + col]
+                m[best * width + col] = held
+            }
+        }
+        divisor :: m[pivot * width + pivot]
+        loop col in pivot..<width {
+            value :: m[pivot * width + col] / divisor
+            if !math.is_finite(value) -> return Err(ComputeError.Arithmetic)
+            m[pivot * width + col] = value
+        }
+        loop row in 0..<n {
+            if row == pivot -> next
+            factor :: m[row * width + pivot]
+            if !math.is_finite(factor) -> return Err(ComputeError.Arithmetic)
+            loop col in pivot..<width {
+                value :: m[row * width + col] - factor * m[pivot * width + col]
+                if !math.is_finite(value) -> return Err(ComputeError.Arithmetic)
+                m[row * width + col] = value
+            }
+        }
+    }
+    data := [Float]{}
+    loop row in 0..<n {
+        loop col in 0..<rhs -> &data.push(m[row * width + n + col])
+    }
+    Ok(Tensor{shape: b.shape.copy(), data: data, device: "CPU", numeric_profile: PROFILE_F64, requested: "CPU"})
+}
+
+// The discrete Fourier transform of a rank-one tensor as interleaved
+// real/imaginary values, 2n long. A power-of-two length runs radix-2
+// butterflies; any other length runs Bluestein's chirp convolution over a
+// padded power of two. Under the F32 profile every step rounds to F32.
+fn fft(tensor: Tensor) -> Tensor ComputeError! {
+    n :: checked(tensor)
+    if tensor.shape.len() != 1 -> return Err(ComputeError.RankMismatch)
+    shape :: [Int]{n * 2}
+    _ := storage_len(shape)
+    f32 :: tensor.numeric_profile == PROFILE_F32
+    data := [Float]{}
+    if n > 0 {
+        spectrum := Spectrum{real: [Float]{}, imaginary: [Float]{}}
+        if power_of_two(n) {
+            imaginary := [Float]{}
+            loop _ in 0..<n -> &imaginary.push(Float{0.0})
+            spectrum = radix2(tensor.data.copy(), ^imaginary, false, f32)
+        } else {
+            spectrum = bluestein(tensor.data, f32)
+        }
+        loop index in 0..<n {
+            &data.push(spectrum.real[index])
+            &data.push(spectrum.imaginary[index])
+        }
+    }
+    Ok(like(tensor, shape.copy(), data))
+}
+
+struct Spectrum {
+    real: [Float]
+    imaginary: [Float]
+}
+
+fn power_of_two(n: Int) -> Bool Never! {
+    p := 1
+    loop p < n -> p = p * 2
+    p == n
+}
+
+// In-order iterative radix-2 transform of a power-of-two length; `inverse`
+// turns the twiddles and scales by 1/n.
+fn radix2(real_in: ^[Float], imaginary_in: ^[Float], inverse: Bool, f32: Bool) -> Spectrum ComputeError! {
+    real := real_in
+    imaginary := imaginary_in
+    n :: real.len()
+    if n <= 1 -> return Spectrum{real: real, imaginary: imaginary}
+    direction := Float{-2.0}
+    if inverse -> direction = Float{2.0}
+    length :: narrow(Float{n}, f32)
+    phase :: narrow(narrow(direction * narrow(math.PI, f32), f32) / length, f32)
+    sines := [Float]{}
+    cosines := [Float]{}
+    loop index in 0..<(n /% 2) {
+        angle :: narrow(phase * narrow(Float{index}, f32), f32)
+        &sines.push(narrow(math.sin(angle), f32))
+        &cosines.push(narrow(math.cos(angle), f32))
+    }
+    reversed := 0
+    loop index in 1..<n {
+        bit := n /% 2
+        loop bit > 0 && (reversed /% bit) % 2 == 1 {
+            reversed = reversed - bit
+            bit = bit /% 2
+        }
+        reversed = reversed + bit
+        if index < reversed {
+            held_real :: real[index]
+            real[index] = real[reversed]
+            real[reversed] = held_real
+            held_imaginary :: imaginary[index]
+            imaginary[index] = imaginary[reversed]
+            imaginary[reversed] = held_imaginary
+        }
+    }
+    stage := 2
+    loop stage <= n {
+        half :: stage /% 2
+        step :: n /% stage
+        block := 0
+        loop block < n {
+            loop offset in 0..<half {
+                even :: block + offset
+                odd :: even + half
+                sine :: sines[offset * step]
+                cosine :: cosines[offset * step]
+                product_real :: narrow(narrow(cosine * real[odd], f32) - narrow(sine * imaginary[odd], f32), f32)
+                product_imaginary :: narrow(narrow(cosine * imaginary[odd], f32) + narrow(sine * real[odd], f32), f32)
+                even_real :: real[even]
+                even_imaginary :: imaginary[even]
+                real[even] = narrow(even_real + product_real, f32)
+                imaginary[even] = narrow(even_imaginary + product_imaginary, f32)
+                real[odd] = narrow(even_real - product_real, f32)
+                imaginary[odd] = narrow(even_imaginary - product_imaginary, f32)
+            }
+            block = block + stage
+        }
+        if stage == n -> break
+        stage = stage * 2
+    }
+    if inverse {
+        scale :: narrow(Float{1.0} / length, f32)
+        loop index in 0..<n {
+            real[index] = narrow(real[index] * scale, f32)
+            imaginary[index] = narrow(imaginary[index] * scale, f32)
+        }
+    }
+    Ok(Spectrum{real: real, imaginary: imaginary})
+}
+
+// Bluestein: chirp-modulate, convolve with the chirp over a padded power of
+// two, then demodulate the first n outputs.
+fn bluestein(values: [Float], f32: Bool) -> Spectrum ComputeError! {
+    n :: values.len()
+    padded := 1
+    loop padded < 2 * n - 1 -> padded = padded * 2
+    real := [Float]{}
+    imaginary := [Float]{}
+    kernel_real := [Float]{}
+    kernel_imaginary := [Float]{}
+    loop _ in 0..<padded {
+        &real.push(Float{0.0})
+        &imaginary.push(Float{0.0})
+        &kernel_real.push(Float{0.0})
+        &kernel_imaginary.push(Float{0.0})
+    }
+    pi :: narrow(math.PI, f32)
+    length :: narrow(Float{n}, f32)
+    sines := [Float]{}
+    cosines := [Float]{}
+    loop index in 0..<n {
+        square :: (index * index) % (2 * n)
+        angle :: narrow(narrow(pi * narrow(Float{square}, f32), f32) / length, f32)
+        sine :: narrow(math.sin(angle), f32)
+        cosine :: narrow(math.cos(angle), f32)
+        &sines.push(sine)
+        &cosines.push(cosine)
+        value :: values[index]
+        real[index] = narrow(value * cosine, f32)
+        imaginary[index] = narrow(-value * sine, f32)
+        kernel_real[index] = cosine
+        kernel_imaginary[index] = sine
+        if index != 0 {
+            kernel_real[padded - index] = cosine
+            kernel_imaginary[padded - index] = sine
+        }
+    }
+    signal :: radix2(^real, ^imaginary, false, f32)
+    kernel :: radix2(^kernel_real, ^kernel_imaginary, false, f32)
+    convolved_real := [Float]{}
+    convolved_imaginary := [Float]{}
+    loop index in 0..<padded {
+        sr :: signal.real[index]
+        si :: signal.imaginary[index]
+        kr :: kernel.real[index]
+        ki :: kernel.imaginary[index]
+        &convolved_real.push(narrow(narrow(sr * kr, f32) - narrow(si * ki, f32), f32))
+        &convolved_imaginary.push(narrow(narrow(sr * ki, f32) + narrow(si * kr, f32), f32))
+    }
+    convolved :: radix2(^convolved_real, ^convolved_imaginary, true, f32)
+    out_real := [Float]{}
+    out_imaginary := [Float]{}
+    loop index in 0..<n {
+        cr :: convolved.real[index]
+        ci :: convolved.imaginary[index]
+        &out_real.push(narrow(narrow(cr * cosines[index], f32) + narrow(ci * sines[index], f32), f32))
+        &out_imaginary.push(narrow(narrow(ci * cosines[index], f32) - narrow(cr * sines[index], f32), f32))
+    }
+    Ok(Spectrum{real: out_real, imaginary: out_imaginary})
 }
 
 fn filled(shape: [Int], value: Float, requested: String) -> Tensor ComputeError! {
