@@ -978,6 +978,12 @@ fn kit_gate_suite(suite: String) -> String {
     loop word in words -> &args.push(word)
     options := kit_parse_options(args)
     if options.error != "" -> return "REFUSED\tselection\t\t{options.error}"
+    // The compiler under test is $JET, as Tools/agent/jet-env resolves it, or
+    // TESTKIT_ARGS --jet; without one a suite cannot run on this host.
+    if options.jet == "" && !options.list {
+        print("SKIP-HOST\tselection\t\tsuite {suite}: JET is unset; run `JET=<compiler> Tools/agent/jet-env jet test Tools/testkit`")
+        return ""
+    }
     options.opt_in = true
     evidence :: sys.get("JET_CI_EVIDENCE_DIR") ?? ""
     if options.results == "" && evidence != "" -> options.results = files.join(evidence, "{suite}.json")
@@ -987,7 +993,7 @@ fn kit_gate_suite(suite: String) -> String {
 
 // `jet test Tools/testkit [<filter>]`: the repository's fixture gate. Each suite is one test;
 // a failing test lists every failing case.
-//   JET                  the compiler under test (required)
+//   JET                  the compiler under test (unset: each suite test reports SKIP-HOST)
 //   TESTKIT_ARGS         testkit flags for every suite, as `.case` step words: --filter SUBSTR,
 //                        --cases FILE, --tier o0,o1,o2, --timeout SEC, --jobs N, --shard I/N,
 //                        --scratch DIR, --jetpack BIN, --list, --coverage (ui), --bless ID,
