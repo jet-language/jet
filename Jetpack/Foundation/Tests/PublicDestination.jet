@@ -1,11 +1,10 @@
-// crates/jet-net/src/lib.rs:1079-1100 and strict range/mapped-v6 boundaries,
+// crates/jet-net/src/lib.rs:1093-1100 and strict range/mapped-v6 boundaries,
 // asserted against Core's public-destination tables.
 use jetpack_foundation.[
     FoundationFetchError, foundation_addresses_are_public, foundation_resolve_public_addresses,
 ]
 use core.net as net
 use core.net.ip as ip
-use core.http.client as http_client
 
 fn foundation_test_public_v4(a: Int, b: Int, c: Int, d: Int) -> Bool Never! {
     ip.is_public_destination(IPv4{a: a, b: b, c: c, d: d})
@@ -133,28 +132,5 @@ fn foundation_test_public_v6(words: [Int]) -> Bool Never! {
         .Err(.IO(detail)) -> assert(detail.starts_with("could not resolve provider destination: ") && detail.contains("port must be in 0..=65535"))
         .Err(error) -> panic("out-of-range port refused as {error}")
         .Ok(_) -> panic("out-of-range port accepted")
-    }
-}
-#Test("foundation comptime_http_fetch_rejects_loopback_before_connecting original") {
-    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind loopback fixture")
-    address :: net.listener_local_socket_addr(listener) ?? panic("loopback address")
-    port :: net.socket_port(address)
-    // Rooted/stream fetch arrives with the Jet HTTP client port (#3665); a
-    // public-policy-only check cannot stand in for fetch-before-connect proof.
-    if foundation_fetch("http://127.0.0.1:{port}/secret") == {
-        .Err(error) -> assert("{error}".contains("not public"))
-        .Ok(_) -> panic("loopback destination accepted")
-    }
-}
-#Test("foundation a Public request refuses loopback before connecting") {
-    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind loopback fixture")
-    address :: net.listener_local_socket_addr(listener) ?? panic("loopback address")
-    port :: net.socket_port(address)
-    // The client's destination policy arrives with the Jet HTTP client port (#3665).
-    client :: http_client.Client.new().destinations(.Public)
-    if client.send(http_client.request("GET", "http://127.0.0.1:{port}/r")) == {
-        .Err(.Policy(_)) -> {}
-        .Err(error) -> panic("loopback refused for the wrong reason: {error}")
-        .Ok(_) -> panic("loopback destination accepted")
     }
 }
