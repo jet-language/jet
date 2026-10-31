@@ -3243,6 +3243,7 @@ fn sema_check_registration_module_program(environment: SemaScopeEnvironment, pro
             loop form in unsupported_forms -> &module_result.incomplete_reasons.push("unsupported program form `{form}`")
         }
         job_diagnostics := sema_check_job_names(graph.modules[module_index].program.items)
+        loop diagnostic in sema_check_job_schedules(graph.modules[module_index].program.items, environment, program) -> &job_diagnostics.push(diagnostic)
         if job_diagnostics.len() > 0 {
             loop diagnostic in job_diagnostics -> &module_result.diagnostics.push(diagnostic)
             module_result.complete = false
