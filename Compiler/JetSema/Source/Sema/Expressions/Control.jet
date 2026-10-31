@@ -1937,8 +1937,23 @@ fn sema_expression_check_condition_inner(condition: Expr, environment: SemaScope
         }
         else -> {}
     }
-    value :: sema_check_expression(condition, Val(Type.Bool), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return sema_expression_condition_failed([SemaConditionBinding]{})
+    diagnostic_start :: diagnostics.len()
+    value :: sema_check_expression(condition, Val(Type.Bool), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
+        sema_expression_condition_replace_mismatch(condition, diagnostic_start, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return sema_expression_condition_failed([SemaConditionBinding]{})
+    }
     sema_expression_condition_checked(SemaCheckedCondition{condition: TIfCond.Plain{value: value}, value: value, bindings: [SemaConditionBinding]{}})
+}
+
+// Rust `require_bool`: a condition is inferred with Bool as its target, and
+// one of another type is E0110 about the condition, in place of the generic
+// E0108 its check against Bool reported.
+fn sema_expression_condition_replace_mismatch(condition: Expr, diagnostic_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+    value_span :: expr_span(condition)
+    mismatch_index :: sema_value_mismatch_index(diagnostics, diagnostic_start, value_span) ?? return
+    probe_diagnostics := [Diagnostic]{}
+    offered :: sema_probe_expression(condition, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return
+    diagnostics[mismatch_index] = sema_error("E0110", value_span, "a condition must be {sema_type_show(Type.Bool)}, but this is {sema_type_show(offered.ty)}", "the program needs a clear yes or no here", "compare the value to something, e.g. `x > 0` or `name == \"ok\"`")
 }
 
 // Whether `expr` is a bare `None` / `.None`.

@@ -774,8 +774,21 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
     // before.
     named_position :: sema_expression_index_self_typed(index) && index_expected == (Val(Type.Int))
     hint :: if named_position -> Type?{None} else -> index_expected
-    inferred_index :: sema_check_expression(index, hint, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    checked_index := if named_position && inferred_index.ty != (Type.Named{name: "Range"}) && !sema_expr_is_integer(inferred_index.ty) -> sema_expr_expected(inferred_index, index_expected, environment, program, &diagnostics) ?? return None else -> inferred_index
+    index_start :: diagnostics.len()
+    inferred_index :: sema_check_expression(index, hint, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
+        if sema_value_mismatch_index(diagnostics, index_start, expr_span(index)) != None {
+            probe_diagnostics := [Diagnostic]{}
+            if sema_probe_expression(index, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) == .Val(offered) -> sema_expression_index_replace_mismatch(base_ty, offered.ty, expr_span(index), index_start, &diagnostics)
+        }
+        return None
+    }
+    named_mismatch :: named_position && inferred_index.ty != (Type.Named{name: "Range"}) && !sema_expr_is_integer(inferred_index.ty)
+    // copy: the named position keeps its own type for the report below.
+    named_ty :: inferred_index.ty.copy()
+    checked_index := if named_mismatch -> sema_expr_expected(inferred_index, index_expected, environment, program, &diagnostics) ?? {
+        sema_expression_index_replace_mismatch(base_ty, named_ty, expr_span(index), index_start, &diagnostics)
+        return None
+    } else -> inferred_index
     // A fixed-width position is the Int it names; one outside the list fails
     // the bounds check like any other position.
     if index_expected == (Val(Type.Int)) && sema_expr_unwrap_tag(checked_index.ty) == .IntN(_, _) {
@@ -924,6 +937,29 @@ fn sema_expression_index(base: Expr, index: Expr, ast_kind: IndexKind, span: Spa
     kind :: sema_expression_index_kind(resolved_kind, base_ty)
     value :: sema_tree_node(result_ty ?? Type.Named{name: "Unit"}, TExprKind.Index{base: checked_base, index: checked_index, kind: kind, access: AccessConvention.Read, checked_call: None, location: sema_expression_panic_location(environment, program, scopes, span)}, span)
     sema_expr_expected(value, expected, environment, program, &diagnostics)
+}
+
+// Rust `infer` Index arm: an index of the wrong type is reported for the
+// collection it addresses (E0505, or E0112 for a pool), in place of the
+// generic E0108 its check against the index type reported.
+fn sema_expression_index_replace_mismatch(base_ty: Type, offered: Type, index_span: Span, diagnostic_start: Int, diagnostics: &[Diagnostic]) {
+    mismatch_index :: sema_value_mismatch_index(diagnostics, diagnostic_start, index_span) ?? return
+    diagnostics[mismatch_index] = sema_expression_index_mismatch(base_ty, offered, index_span) ?? return
+}
+
+fn sema_expression_index_mismatch(base_ty: Type, offered: Type, span: Span) -> Diagnostic? {
+    list_index :: Val(sema_error("E0505", span, "list indexes must be {sema_type_show(Type.Int)}, not {sema_type_show(offered)}", "count positions with a whole number starting at 0", "use an Int index, like `items[0]`"))
+    if base_ty == {
+        .List(_) | .FixedList(_, _) -> return list_index
+        .Map(key, _, _) -> return Val(sema_error("E0505", span, "this map holds keys of type {sema_type_show(key)}, not {sema_type_show(offered)}", "the key in `map[key]` must match the map's key type", "use a {type_name(key)} key here"))
+        .Apply(name, args) -> {
+            if (name == "View" || name == "ViewMut") && args.len() == 1 -> return list_index
+            if name == "Pool" && args.len() == 1 -> return Val(sema_error("E0112", span, "`Pool` indexes need a matching `ID<T>`, not {sema_type_show(offered)}", "a pool slot is only reached through the `ID<T>` its own `.add()` returned", "index with the `ID<T>` handle from `.add(...)`"))
+        }
+        else -> {}
+    }
+    if sema_call_math_lane_name(base_ty) != None -> return Val(sema_error("E0505", span, "lane indexes must be {sema_type_show(Type.Int)}, not {sema_type_show(offered)}", "a SIMD lane is read by position with a whole-number index starting at 0", "use an Int index, like `v[0]`"))
+    None
 }
 
 // Whether the nominal `ty` has an impl of the index hook trait `trait_name`

@@ -253,11 +253,22 @@ fn sema_stmt_check_yield(value: Expr, span: Span, return_type: Type?, environmen
     stream_return := return_type
     if sema_stmt_stream_element_type(stream_return) == None -> stream_return = scopes.return_type
     elem_type :: sema_stmt_stream_element_type(stream_return) ?? {
-        &diagnostics.push(sema_error("E0805", span, "`yield` outside a generator", "`yield` hands a value to a `Stream<T>` consumer — only a function declared `Stream<T> ->` may use it", "declare `Stream<T> ->` on this function, or remove `yield`"))
+        // Rust reports at the `yield` keyword.
+        keyword :: Span{start: span.start, end: span.start + "yield".count_bytes()}
+        &diagnostics.push(sema_error("E0805", keyword, "`yield` outside a generator", "`yield` hands a value to a `Stream<T>` consumer — only a function declared `Stream<T> ->` may use it", "declare `Stream<T> ->` on this function, or remove the `yield`"))
         _ := sema_check_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return None
     }
-    checked :: sema_check_expression(value, Val(elem_type), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    diagnostic_start :: diagnostics.len()
+    checked :: sema_check_expression(value, Val(elem_type), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
+        // Rust `Stmt::Yield`: the element type is the yielded value's target,
+        // and a value of another type is E0807 about the stream.
+        mismatch_index :: sema_value_mismatch_index(diagnostics, diagnostic_start, expr_span(value)) ?? return None
+        probe_diagnostics := [Diagnostic]{}
+        offered :: sema_probe_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return None
+        diagnostics[mismatch_index] = sema_stmt_yield_mismatch(elem_type, offered.ty, expr_span(value))
+        return None
+    }
     if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, &diagnostics, false) -> return None
     yielded := checked
     if !type_identity_equal(checked.ty, elem_type) {
@@ -267,7 +278,7 @@ fn sema_stmt_check_yield(value: Expr, span: Span, return_type: Type?, environmen
                 yielded = sema_expr_numeric_literal_conversion(checked, elem_type, checked.span, line, &diagnostics) ?? return None
             }
             else -> {
-                &diagnostics.push(sema_error("E0807", checked.span, "this yields `{type_name(checked.ty)}`, but the stream is `Stream<{type_name(elem_type)}>`", "every `yield` in a generator must hand back the stream's element type", "convert the yielded value to the stream element type"))
+                &diagnostics.push(sema_stmt_yield_mismatch(elem_type, checked.ty, checked.span))
                 return None
             }
         }
@@ -275,6 +286,10 @@ fn sema_stmt_check_yield(value: Expr, span: Span, return_type: Type?, environmen
     if !sema_stmt_move_direct(value, &state, scopes, "`yield`", &diagnostics) -> return None
     call := sema_tree_node(Type.Named{name: "Unit"}, TExprKind.HostCall{call: THostCall.YieldSend{value: yielded}}, span)
     Val(TStmt.ExprStmt{value: call, span: span})
+}
+
+fn sema_stmt_yield_mismatch(element: Type, offered: Type, span: Span) -> Diagnostic {
+    sema_error("E0807", span, "this yields {sema_type_show(offered)}, but the stream is `Stream<{sema_type_show(element)}>`", "every `yield` in a generator must hand back the stream's element type", sema_type_fix_hint(element, offered))
 }
 
 // E0806: a generator (`Stream<T> ->`) yields its values;
