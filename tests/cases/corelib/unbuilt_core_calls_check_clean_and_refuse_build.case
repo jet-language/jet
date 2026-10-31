@@ -12,3 +12,26 @@ step: jet build ws_connect.jet
 exit: 1
 stderr: ~ "Error [E2104]: `ws.connect` is not built yet" # build still refuses the unported WebSocket runtime
 stderr: ~ "card #4957" # the refusal names the card that ports it
+
+# The browser automation runtime (sessions and test reports) is unbuilt too:
+# a Core browser function and a `Browser` session method are each refused at
+# their own site, never reaching the backend as a compiler fault.
+step: jet check browser_connect.jet
+exit: 0
+stderr: !~ "E2104" # check mode lowers nothing, so nothing is refused
+
+step: jet build browser_connect.jet
+exit: 1
+stderr: ~ "Error [E2104]: `browser.connect` is not built yet" # the Core function's runtime route is unbuilt
+stderr: ~ "card #4954" # the refusal names the card that ports it
+stderr: !~ "internal compiler error" # sema refuses before codegen
+
+step: jet check browser_session.jet
+exit: 0
+stderr: !~ "E2104" # check mode lowers nothing, so nothing is refused
+
+step: jet build browser_session.jet
+exit: 1
+stderr: ~ "Error [E2104]: `Browser.subscribe` is not built yet" # the session method's runtime route is unbuilt
+stderr: ~ "card #4954" # the refusal names the card that ports it
+stderr: !~ "internal compiler error" # sema refuses before codegen

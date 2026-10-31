@@ -409,6 +409,8 @@ struct KitPlan {
     json_normalize: [KitJSONNormalization]{[KitJSONNormalization]{}}
     replacements: [KitReplacement]{[KitReplacement]{}}
     free_ports: [String]{[String]{}}
+    // A fixed TCP port the case binds; 0 is none.
+    host_port: Int{0}
 }
 
 struct KitOutcome {
@@ -498,6 +500,11 @@ fn kit_steps_hook_check(hooks: KitStepHooks, step: KitStep, index: Int, context:
     }
 }
 
+// The host-wide lock file for a fixed TCP port. Ports are host-wide, so the
+// name is fixed instead of living under a run's scratch, and
+// Tools/agent/run-feature-examples.mjs takes the same flock.
+fn kit_steps_host_port_path(port: Int) -> String { "/tmp/jet-host-port-{port}.lock" }
+
 // All suites share this sequencing loop. Hooks supply only suite-specific
 // invocation and expectations, never an alternative parser or executor.
 fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOutcome {
@@ -548,6 +555,10 @@ fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOu
         ports :: kit_steps_free_ports(context, port_names.len()) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "{err}"))
         loop index in 0..<port_names.len() -> &state.free_ports.push(KitFreePort{name: port_names[index], port: ports[index]})
     }
+    // A case that binds a fixed host port holds its lock until the case ends,
+    // waiting at most one step timeout, so concurrent kit and feature-example
+    // runs on this host take turns.
+    port_lock :: if plan.host_port == 0 -> None else -> Val(files.lock(kit_steps_host_port_path(plan.host_port), timeout: Val(context.env.timeout)) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "host port {plan.host_port} lock: {err}")))
     loop index in 0..<context.plan.environment.len() {
         context.plan.environment[index] = kit_steps_runtime_expand(context.plan.environment[index], context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "case environment token unavailable"))
     }

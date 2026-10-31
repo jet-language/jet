@@ -192,6 +192,15 @@ fn kit_steps_parse(source: String) -> KitPlan {
             plan.opt_in = value
             next
         }
+        if key == "host-port" {
+            port :: Int.parse(value.copy()) ?? 0
+            if port < 1 || port > 65535 || plan.host_port != 0 || plan.steps.len() != 0 {
+                plan.error = "line {line_number}: host-port needs one header port in 1..65535"
+                return plan
+            }
+            plan.host_port = port
+            next
+        }
         if key == "tools-any" || key == "probes-any" {
             &plan.requires.push("{key} {value}")
             next

@@ -3,12 +3,12 @@
 # The guest's original `count++` is written `count += 1`, because `++` is retired.
 fixture: fixtures/xml_stream_drop_and_codec_heap_ceiling_are_enforced
 write: guest.jet fixtures/xml_stream_drop_and_codec_heap_ceiling_are_enforced/fixture.template
-step aot: jet build guest.jet
+step aot: jet build --allow=FS.Read,FS.Write guest.jet
 step aot_run: built
 stdout: = xml_stream_drop_and_codec_heap_ceiling_are_enforced.expected-stream
 stderr: empty
 file: partial.xml = xml_stream_drop_and_codec_heap_ceiling_are_enforced.partial.xml.expected
-step: jet run guest.jet
+step: jet run --allow=FS.Read,FS.Write guest.jet
 stdout: = xml_stream_drop_and_codec_heap_ceiling_are_enforced.expected-stream
 stderr: empty
 file: partial.xml = xml_stream_drop_and_codec_heap_ceiling_are_enforced.partial.xml.expected

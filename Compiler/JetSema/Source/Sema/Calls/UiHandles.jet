@@ -521,6 +521,7 @@ fn sema_ui_browser_method(receiver: Expr, receiver_value: TExpr, owner: String, 
         if value == .Val(checked) -> &typed_args.push(checked) else -> valid = false
     }
     if !valid || !effects_ok -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if sema_call_core_browser_method_unbuilt(owner, method, span, environment, program, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     operation :: if sema_ui_browser_route_server(owner) -> THandleOp.HTTPServerMethod{kind: owner, method: method} else -> THandleOp.HTTPClientMethod{kind: owner, method: method}
     value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: operation, args: typed_args}, span)
     checked :: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}

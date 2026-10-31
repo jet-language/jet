@@ -178,8 +178,10 @@ struct XMLReader {
                 }
             }
             if candidate == .Val(event) {
-                slot :: mem.__type_size<Dyn>()
-                prospective :: (event.raw_bytes.len() + event.bom.len()) * slot
+                // Lexical raw_bytes / BOM project to Array<Int> Dyn slots.
+                // Charge that projection before building so a hostile token
+                // fails closed without retaining the projected tree.
+                prospective :: (event.raw_bytes.len() + event.bom.len()) * dyn_heap_cost()
                 if !self.allocation.charge(prospective) -> return &self.fail(heap_error(self.total))
                 value :: engine.stream_event_value(event)
                 full :: value_heap_cost(value)
@@ -346,17 +348,23 @@ fn io_error(offset: Int, cause: EncodingCause) -> EncodingError Never! {
         path: "", reason: "file IO failed", cause: Val(cause)}
 }
 
+// A Dyn slot is a pointer to a box of its tag word and widest payload, a List
+// header, so every projected Dyn owns both the slot and the box.
+fn dyn_heap_cost() -> Int Never! {
+    mem.__type_size<Dyn>() + mem.__type_size<Int>() + mem.__type_size<[Dyn]>()
+}
+
 fn value_heap_cost(value: Dyn) -> Int Never! {
     if value == {
         .Text(body) -> body.count_bytes()
         .Array(items) -> {
-            cost := items.len() * mem.__type_size<Dyn>()
+            cost := items.len() * dyn_heap_cost()
             loop item in items -> cost += value_heap_cost(item)
             cost
         }
         .Object(_) -> {
             entries :: stream.object_entries(value)
-            cost := entries.len() * mem.__type_size<(key: String, value: Dyn)>()
+            cost := entries.len() * (mem.__type_size<(key: String, value: Dyn)>() + dyn_heap_cost() - mem.__type_size<Dyn>())
             loop entry in entries -> cost += entry.key.count_bytes() + value_heap_cost(entry.value)
             cost
         }

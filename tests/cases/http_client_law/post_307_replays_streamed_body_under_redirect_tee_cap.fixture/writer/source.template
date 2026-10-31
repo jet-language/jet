@@ -8,7 +8,7 @@ fn run() {
     payload := [U8]{}
     loop i in 0..<98304 { &payload.push(U8{112}) }
     child.stdin.write_text(String.from_bytes(payload) ?? panic("ASCII payload")) ?? panic("exact FIFO payload")
-    child.stdin.close() ?? panic("FIFO EOF")
+    child.stdin.close()
     receipt :: child.wait() ?? panic("join FIFO pipe")
     assert(receipt.success)
 }

@@ -76,7 +76,11 @@ streams and sidecars live beside their source or project directory.
 
 Sidecars replace filename-specific harness rules. `requires:` declares GTK,
 foreign tools, or environment requirements; missing hosts report `SKIP-HOST`.
-`run: none` keeps a serves-until-stopped entry compile-only. `normalize: argv0`
+`run: none` keeps a serves-until-stopped entry compile-only. `host-port: N`
+declares a fixed TCP port the program binds; the kit and
+`Tools/agent/run-feature-examples.mjs` hold the host-wide flock
+`/tmp/jet-host-port-N.lock` while the case runs, waiting at most one step
+timeout, so concurrent runs on one host take turns. `normalize: argv0`
 pins CLI usage to the source name. Ordered `step:` commands accept quoted argv,
 `stdin:`, `exit:`, exact `stdout:` / `stderr:`, and `file:` assertions.
 `step: build` invokes the selected tier; `step: built [args…]` runs its artifact

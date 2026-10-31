@@ -3,19 +3,18 @@
 # naming its pass, and one run reports every such function.
 # The fixture carries two independent open backend gaps, so one report counts
 # two fault rows: `nine` calls `ime.poll`, whose Core function `poll` reaches
-# the runtime route jet_ui_host_ime_poll, and `run` calls `browser.connect`,
-# whose Core function `connect_profile` reaches the runtime route
-# jet_browser_from_connection_raw. Both are native UI host / browser provider
-# routes (#4954). When either gap lands, replace it with another open gap in
-# the same position.
+# the runtime route jet_ui_host_ime_poll, and `run` calls `drag_drop.poll`,
+# whose Core function `poll` reaches the runtime route jet_ui_host_drag_poll.
+# Both are native UI host provider routes (#4954). When either gap lands,
+# replace it with another open gap in the same position.
 fixture: fixtures/backend_gap
 step: jet build gap.jet
 exit: 101
 stderr: ~ "internal compiler error: the Jet backend failed on `gap.jet`: 2 compiler faults:" # one report counts every row
-stderr: ~ "ir.build unlowered: connect_profile [" # the entry's gap row names its pass and rule
+stderr: ~ "ir.build unlowered: poll [function:<corelib>/core.ui.host.drag_drop::poll]" # the entry's gap row names its pass and rule
 stderr: ~ "ir.build unlowered: poll [" # the callee's row comes from the same run
 stderr: ~ "runtime route jet_ui_host_ime_poll" # the builder's own message stays in the row
-stderr: ~ "runtime route jet_browser_from_connection_raw" # the builder's own message stays in the row
+stderr: ~ "runtime route jet_ui_host_drag_poll" # the builder's own message stays in the row
 stderr: !~ "E2104" # a backend gap is never a user diagnostic
 step: jet run gap.jet
 exit: 101

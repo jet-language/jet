@@ -1,10 +1,9 @@
 package {
     name: "gap"
-    authority: { allow: [Net] }
 }
 
 use core.ui.host.ime as ime
-use core.web.browser as browser
+use core.ui.host.drag_drop as drag_drop
 
 fn nine() {
     event :: ime.poll() ?? panic("poll")
@@ -17,6 +16,6 @@ fn nine() {
 
 fn run() {
     nine()
-    session :: browser.connect("ws://127.0.0.1:2") ?? panic("connect")
+    dropped :: drag_drop.poll() ?? panic("drop")
     print("made")
 }

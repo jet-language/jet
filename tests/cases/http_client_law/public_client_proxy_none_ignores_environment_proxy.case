@@ -4,11 +4,11 @@
 fixture: public_client_proxy_none_ignores_environment_proxy.fixture
 env: NO_COLOR=1
 write: origin/main.jet origin/source.template
-step: jet build origin/main.jet
+step: jet build --allow=FS.Write,Net origin/main.jet
 exit: 0
 spawn origin: built
 write: proxy/main.jet proxy/source.template
-step: jet build proxy/main.jet
+step: jet build --allow=FS.Write,Net,Time proxy/main.jet
 exit: 0
 spawn proxy: built
 await: file origin.txt timeout 30s

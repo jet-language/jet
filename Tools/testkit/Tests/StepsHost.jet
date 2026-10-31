@@ -107,6 +107,30 @@ use core.sys as sys
     files.remove_all(root) ?? panic("remove template free-port scratch")
 }
 
+#Test("host-port cases hold the port's host-wide lock until they end and refuse malformed ports") {
+    plan :: kit_steps_parse_case("host-port: 8080\nstep: printf ok\n")
+    assert_eq(plan.error, "")
+    assert_eq(plan.host_port, 8080)
+    loop source in ["host-port: 0\nstep: true\n", "host-port: 65536\nstep: true\n", "host-port: http\nstep: true\n", "host-port: 8080\nhost-port: 8081\nstep: true\n", "step: true\nhost-port: 8080\n"] {
+        assert(kit_steps_parse_case(source).error.contains("host-port needs one header port"))
+    }
+    root :: cases_test_root("host-port-lock")
+    port :: 65531
+    cases_test_source(root, "bound", "host-port: {port}\nstep: printf ok\nstdout: = \"ok\"\n")
+    context :: cases_test_context(root, files.join(root, "scratch"))
+    assert_eq(kit_cases_run(cases_test_entry("bound"), context)[0].verdict.status, "PASS")
+    // Its steps run while the lock is held.
+    cases_test_source(root, "held", "host-port: {port}\nrequires: tool:flock\nstep: flock -n {kit_steps_host_port_path(port)} true\nexit: 1\n")
+    assert_eq(kit_cases_run(cases_test_entry("held"), context)[0].verdict.status, "PASS")
+    // The finished case released the lock, and a case waits only one step timeout for a held port.
+    held :: files.lock(kit_steps_host_port_path(port), timeout: Val(1s)) ?? panic("the finished case still holds its host port lock: {err}")
+    waited :: kit_cases_run(cases_test_entry("bound"), context)[0].verdict
+    assert_eq(waited.status, "ERROR")
+    assert(waited.detail.contains("host port {port} lock"))
+    close(^held)
+    files.remove_all(root) ?? panic("remove host port scratch")
+}
+
 #Test("host-triple and capture condition atoms execute setup from real case text") {
     root :: cases_test_root("host-triple-captures")
     source :: "step: printf '%s' {{host-triple}}\nstdout: = \"{kit_steps_host_triple()}\"\ncapture: triple = text stdout\nwhen cap:triple = \"{kit_steps_host_triple()}\" && cap:triple ~ \"{kit_steps_host_arch()}\" && cap:triple ^= \"{kit_steps_host_arch()}\" && cap:triple in [\"wrong\",\"{kit_steps_host_triple()}\"]: mkdir: selected\nfile: selected is-dir\nwhen cap:triple != \"wrong\": file: selected is-dir\n"

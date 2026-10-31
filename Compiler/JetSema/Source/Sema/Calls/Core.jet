@@ -219,7 +219,26 @@ fn sema_call_core_unbuilt(module_name: String, member: String) -> (feature: Stri
         return Val((feature: "the WebSocket runtime (connections and messages)", card: 4957))
     }
     if module_name == "core.mod" && member == "load" -> return Val((feature: "the module loader runtime and its grants", card: 5993))
+    if module_name == "core.web.browser" && sema_call_core_browser_runtime_member(member) -> return Val((feature: SEMA_BROWSER_RUNTIME_FEATURE, card: SEMA_BROWSER_RUNTIME_CARD))
     None
+}
+
+// The browser automation runtime (the live protocol session and the test
+// report renderers) is not in the runtime pack, so the Core members that open
+// a session or render a report, and every Browser handle method, are unbuilt.
+SEMA_BROWSER_RUNTIME_FEATURE :: "the browser automation runtime (sessions and test reports)"
+SEMA_BROWSER_RUNTIME_CARD :: 4954
+
+fn sema_call_core_browser_runtime_member(member: String) -> Bool Never! {
+    member == "connect" || member == "connect_profile" || member == "connect_browser_profile" || member == "report_json" || member == "report_text" || member == "report_html" || member == "write_report"
+}
+
+// E2104 at a checked user call of a Browser handle method: its runtime route
+// is the unbuilt browser automation runtime (sema_call_core_unbuilt).
+fn sema_call_core_browser_method_unbuilt(owner: String, method: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool Never! {
+    if environment.module_identity.starts_with("<corelib>/") || !sema_refuses_unbuilt(program) -> return false
+    &diagnostics.push(sema_error("E2104", span, "`{owner}.{method}` is not built yet", "This `jet` has no implementation of {SEMA_BROWSER_RUNTIME_FEATURE} yet, and no other `jet` can run it.", "Remove the `{owner}.{method}` call for now; {SEMA_BROWSER_RUNTIME_FEATURE} needs its Jet implementation first (card #{SEMA_BROWSER_RUNTIME_CARD})."))
+    true
 }
 
 // A user call of an unbuilt Core feature (sema_call_core_unbuilt): noted
