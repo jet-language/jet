@@ -26,6 +26,7 @@ use jet_foundation.[
     TGenericParam,
     TextEdit,
     Type,
+    UnOp,
     diagnostic_from_registry,
     diagnostic_with_edit,
     expr_span,
@@ -614,6 +615,23 @@ fn sema_marker_rules_signature_error(marker: Marker, signature: TAppliedRuleSign
     sema_error("E0930", Span{start: marker.name_span.start, end: marker.span.end}, "`#{marker.name}` arguments do not match `{expected}`", "marker arguments use the same call grammar and typed signature as function arguments", fix)
 }
 
+// The path an argument names; an `Effect` argument may name it denied, as
+// `#FX(!Net, !FS)` does (`!Net` names `Net`).
+fn sema_marker_rules_effect_path(argument: Expr, source_type: String) -> String? {
+    if source_type == "Effect" && argument == .Unary(op, operand, _, _) {
+        if op == UnOp.Not -> return sema_marker_rules_argument_path(operand)
+    }
+    sema_marker_rules_argument_path(argument)
+}
+
+// Whether an argument names an item; an `Effect` argument may name it denied.
+fn sema_marker_rules_names_item(argument: Expr, source_type: String) -> Bool {
+    if source_type == "Effect" && argument == .Unary(op, operand, _, _) {
+        if op == UnOp.Not -> return sema_marker_rules_names_item(operand, "")
+    }
+    argument == .Ident(_, _, _) || argument == .Field(_, _, _, _) || argument == .EnumLit(_, _, _, _, _, _, _)
+}
+
 fn sema_marker_rules_argument_path(expression: Expr) -> String? {
     if expression == .Ident(name, _, _) {
         return Val(name)
@@ -922,7 +940,7 @@ fn sema_marker_rules_validate_argument_signature(marker: Marker, signature: TApp
                 menu_index :: menu_index_option ?? return false
                 menu := registry.argument_menus[menu_index]
                 if menu.variants.len() > 0 {
-                    path :: sema_marker_rules_argument_path(argument)
+                    path :: sema_marker_rules_effect_path(argument, source_type)
                     if path == .Val(value) {
                         candidate := sema_marker_rules_menu_candidate(value, menu)
                         if candidate != "" && !menu.variants.contains(candidate) {
@@ -984,7 +1002,7 @@ fn sema_marker_rules_validate_argument_signature(marker: Marker, signature: TApp
                     .Any -> true
                     .String -> observation.ty == (Val(Type.String))
                     .Path -> observation.ty == (Val(Type.Named{name: "Path"}))
-                    .Ident -> argument == .Ident(_, _, _) || argument == .Field(_, _, _, _) || argument == .EnumLit(_, _, _, _, _, _, _)
+                    .Ident -> sema_marker_rules_names_item(argument, source_type)
                     .Bool -> observation.ty == (Val(Type.Bool))
                     .Int -> observation.ty == (Val(Type.Int))
                     .DurationOrString -> unit_argument || observation.ty == (Val(Type.String)) || observation.ty == (Val(Type.Named{name: "Duration"}))
