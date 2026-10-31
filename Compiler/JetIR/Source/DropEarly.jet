@@ -165,7 +165,9 @@ fn ir_drop_borrows_only(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
 
 // Whether the If at `opener` is a stop poll's edge:
 //   - it follows `call s <- poll`;
-//   - it holds only Drops (inside the runtime cleanup scope when it has any);
+//   - it holds only Drops (inside the runtime cleanup scope when it has any)
+//     and Moves of words (a Loop's own slot handed back before a Br out of
+//     it, OptSplit.jet), which touch no String;
 //   - it leaves by a Return of nothing, or by a Br when an inlined call's
 //     poll leaves the inlined body.
 fn ir_drop_stop_edge(m: IRModule, f: IRFunction, opener: Int, poll: Int, trap: Int) -> Bool Never! {
@@ -179,9 +181,19 @@ fn ir_drop_stop_edge(m: IRModule, f: IRFunction, opener: Int, poll: Int, trap: I
     loop at in (opener + 1)..<last {
         if f.op[at] == .Drop -> next
         if f.op[at] == .CallRuntime && (m.names[f.a[at]] == "jet_rt_cleanup_enter" || m.names[f.a[at]] == "jet_rt_cleanup_leave") -> next
+        if f.op[at] == .Move && ir_drop_word(m, f, f.dst[at]) && ir_drop_word(m, f, f.a[at]) -> next
         return false
     }
     true
+}
+
+// Whether `slot` holds a word (a Bool, an Int, a Word or a Pointer).
+fn ir_drop_word(m: IRModule, f: IRFunction, slot: Int) -> Bool Never! {
+    if slot < 0 || slot >= f.slot_type.len() -> return false
+    if m.types[f.slot_type[slot]].kind == {
+        .Bool | .Int | .Word | .Pointer -> true
+        else -> false
+    }
 }
 
 // Where the Drop at `at` can go: the instruction it can go before, moving
