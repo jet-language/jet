@@ -19,10 +19,12 @@ fn run() {
     if limit_blocked() -> print("limit=blocked") else -> print("limit=leaked")
     if authority_refused() -> print("authority=refused") else -> print("authority=planned")
 
+    // The shell must record its descendant before the timeout fires; `wait`
+    // on `sleep 30` keeps it alive, so the timeout still always fires.
     child :: process.cmd(["sh", "-c", "sleep 30 & child=$!; echo $child > child.pid; wait"])
         .stdout(.Capture)
         .stderr(.Capture)
-        .timeout(Duration.milliseconds(50) ?? panic("bad timeout"))
+        .timeout(Duration.seconds(2) ?? panic("bad timeout"))
         .run() ?? panic("timeout launch failed")
     if !child.timed_out -> panic("timeout did not fire")
     print("timeout=cancelled")
