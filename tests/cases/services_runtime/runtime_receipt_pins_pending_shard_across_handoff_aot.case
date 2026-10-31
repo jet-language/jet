@@ -1,5 +1,6 @@
 # tests/services_runtime.rs::runtime_receipt_pins_pending_shard_across_handoff_aot: the original's literal expectations.
 fixture: runtime_receipt_pins_pending_shard_across_handoff_aot/input
-step: jet run run.jet
+# D-SERVICE-EFFECTS1=A: the durable service calls reach FS.Read and FS.Write.
+step: jet run --allow=FS.Read,FS.Write run.jet
 exit: 0 # tests/services_runtime.rs:1503 assert_eq!
 stdout: = "sent:accepted\nhandoff:2\nreceipt:ServiceUpgradeReceipt(from=1, to=2, migration=none, rollback_available=false, pinned=api)\nreceived:pending\nnext:3\n" # tests/services_runtime.rs:1504 assert_eq!

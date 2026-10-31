@@ -16,7 +16,7 @@ use jet_foundation.[
     ViewProvenanceMap,
     access_sigil,
     expr_span,
-    failure_contract_effective_type,
+    failure_contract_shown_type,
     failure_contract_source,
     type_name,
 ]
@@ -138,7 +138,7 @@ fn semindex_fn_signature(name: String, params: [SymNameType], param_contract: [S
     if policy_names.len() > 0 -> signature += " ; policies=[{policy_names.join(", ")}]"
     signature += "\nfailure: "
     if failure_contract == {
-        .Checked(failure) -> signature += "{type_name(failure_contract_effective_type(failure))} ({failure_contract_source(failure)}"
+        .Checked(failure) -> signature += "{type_name(failure_contract_shown_type(failure))} ({failure_contract_source(failure)}"
         .Unavailable(unavailable) -> signature += "unavailable ({unavailable.reason}"
     }
     signature += ")"

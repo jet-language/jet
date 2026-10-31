@@ -1,12 +1,14 @@
 # A Core call no `jet` has built yet (E2104 "not built yet") is refused only by
 # a compile that lowers it: `jet check` lowers nothing and passes, while
 # `jet build` refuses the call at its site, citing the card that ports it.
+# The call is `ws.connect`: the service tree runtime is Jet source now and
+# builds, so `service.tree` no longer serves as the unbuilt call.
 fixture: fixtures/unbuilt_core_calls
-step: jet check tree.jet
+step: jet check ws_connect.jet
 exit: 0
 stderr: !~ "E2104" # check mode lowers nothing, so nothing is refused
 
-step: jet build tree.jet
+step: jet build ws_connect.jet
 exit: 1
-stderr: ~ "Error [E2104]: `service.tree` is not built yet" # build still refuses the unported service tree runtime
+stderr: ~ "Error [E2104]: `ws.connect` is not built yet" # build still refuses the unported WebSocket runtime
 stderr: ~ "card #4957" # the refusal names the card that ports it

@@ -8,6 +8,7 @@ fixture: source_worker_slot_keeps_checked_function_item_and_moves_the_mailbox.fi
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
-step: jet run main.jet
+# D-SERVICE-EFFECTS1=A: the durable service calls reach FS.Read and FS.Write.
+step: jet run --allow=FS.Read,FS.Write main.jet
 exit: 0 # tests/services_runtime.rs:2528-2529 build_and_run_full status 0
 stdout: = "" # tests/services_runtime.rs:2528-2529 build_and_run_full status 0

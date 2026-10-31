@@ -16,7 +16,7 @@ use jet_foundation.[
     NameVisibility,
     NamedSpan,
     Span,
-    failure_contract_effective_type,
+    failure_contract_shown_return,
     sha256_hex,
 ]
 use jet_sema.[
@@ -276,7 +276,7 @@ fn semindex_apply_inferred_effect_rows(db: &SymbolDB, module_index: Int, items: 
                 inferred := [EffectRowEntry]{}
                 loop name in row -> &inferred.push(EffectRowEntry{name: name, span: db.defs[index].def_span})
                 display_ret :: if failure == {
-                    .Checked(value) -> Val(failure_contract_effective_type(value))
+                    .Checked(value) -> failure_contract_shown_return(value)
                     .Unavailable(_) -> ret
                 }
                 signature :: semindex_fn_signature(db.defs[index].name, params, contract, variadic, display_ret, failure, Val(inferred), None, db.view_provenance.get(db.defs[index].identity), access, defaults, policies)

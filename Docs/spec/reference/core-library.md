@@ -4457,8 +4457,14 @@ leaves (wall clock, entropy, sleep, and file metadata, read, append, create,
 rename, sync, remove and mode operations). The process-wide endpoint registry,
 pending-delivery registry, durable-store gate and state sequence are Core
 Process Shared sites (`Docs/spec/stdlib-api-laws.md`, "Internal Core Shared
-publication"). Service operations keep their effect-free rows; only
-`state_store` asks for `FS.Read`.
+publication"). Service calls name the file and wait effects they reach
+(`D-SERVICE-EFFECTS1=A`): the `__host_*` file leaves carry `FS.Read` or
+`FS.Write`, the sleep leaves carry `Time.Wait`, and a service call's row is
+inferred from its Core source body like any other call. `service.tree` stays
+`-[]>`; `start` and the workflow waits reach `FS.Read`, `FS.Write` and
+`Time.Wait`. A cancelled or deadline-blown
+`workflow.sleep` ends its wait without unwinding, so the workflow records
+`sleep-cancelled` or `sleep-deadline` before the call fails.
 
 Restart/delivery policy constructors and runtime retention projection are Jet
 policy. `state_store` requires `FS.Read`: it inspects the target and lexical

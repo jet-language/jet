@@ -3,7 +3,7 @@
 // lsp_build_symbol_db is pending canonical retained-bundle projection, not a
 // second symbol walk. No DTO or replacement semantic database is defined here.
 use core.encoding.[Dyn]
-use jet_foundation.[foundation_json_quote, type_name, failure_contract_effective_type, failure_contract_source]
+use jet_foundation.[foundation_json_quote, type_name, failure_contract_shown_type, failure_contract_source]
 use jet_semindex.[SymbolDB, semindex_build_symbol_db]
 use jet_driver.[JetDriverCompilerCheckResult]
 use core.files.runtime.kernel_path_components as lsp_completion_path
@@ -59,7 +59,7 @@ fn lsp_signature_help_response(server: LSPServer, params: Dyn?, id: Dyn) -> Stri
                 label := "fn {def.name}({parts.join(", ")})"
                 return_type := String?{None}
                 if failure == {
-                    .Checked(fact) -> return_type = Val(type_name(failure_contract_effective_type(fact)))
+                    .Checked(fact) -> return_type = Val(type_name(failure_contract_shown_type(fact)))
                     .Unavailable(_) -> { if ret == .Val(ty) -> return_type = Val(type_name(ty)) }
                 }
                 if return_type == .Val(ty) -> label += " {ty}"
@@ -78,7 +78,7 @@ fn lsp_signature_help_response(server: LSPServer, params: Dyn?, id: Dyn) -> Stri
                 }
                 label += "\nfailure: "
                 if failure == {
-                    .Checked(fact) -> label += "{type_name(failure_contract_effective_type(fact))} ({failure_contract_source(fact)})"
+                    .Checked(fact) -> label += "{type_name(failure_contract_shown_type(fact))} ({failure_contract_source(fact)})"
                     .Unavailable(unavailable) -> label += "unavailable ({unavailable.reason})"
                 }
                 rows := [String]{}

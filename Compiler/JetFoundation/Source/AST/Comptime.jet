@@ -166,18 +166,45 @@ fn failure_contract_effective_type(contract: FailureContract) -> Type Never! {
     }
 }
 
-// Stable tooling projection of where the effective failure route came from;
-// consumers read this fact instead of reconstructing it from the rendered type.
-fn failure_contract_source(contract: FailureContract) -> String Never! {
+// The contract a reader is shown: the one the declaration wrote. Sema projects
+// a solved contract onto a declaration that wrote none (InferredNever,
+// Inferred); that declaration still has the implicit default `Err`, so tools
+// show the default and never the solved set.
+fn failure_contract_written(contract: FailureContract) -> FailureContract Never! {
     if contract == {
-        .Default(_, _) -> "implicit default !Err"
+        // copy: `success` is a payload of read parameter `contract`, which keeps the original; the new Default owns this one
+        .InferredNever(success) | .Inferred(success, _) -> FailureContract.Default{success: success.copy(), error: Type.Named{name: "Err"}}
+        // copy: `contract` is a read parameter; the caller keeps it and the result owns this one
+        else -> contract.copy()
+    }
+}
+
+// The failure route tools render for a callable (failure_contract_written).
+fn failure_contract_shown_type(contract: FailureContract) -> Type Never! {
+    failure_contract_effective_type(failure_contract_written(contract))
+}
+
+// The return a signature line shows: the shown failure route, or nothing for
+// a unit-success implicit default, which writes no return type. The failure
+// line still shows that route as `Err!`.
+fn failure_contract_shown_return(contract: FailureContract) -> Type? Never! {
+    written :: failure_contract_written(contract)
+    if written == .Default(success, _) && success == (Type.Named{name: "Unit"}) -> return None
+    Val(failure_contract_effective_type(written))
+}
+
+// Stable tooling projection of where the shown failure route came from;
+// consumers read this fact instead of reconstructing it from the rendered type.
+// Error contracts render in the suffix form only.
+fn failure_contract_source(contract: FailureContract) -> String Never! {
+    if failure_contract_written(contract) == {
+        .Default(_, _) -> "implicit default Err!"
         .Optional(_) -> "optional success"
-        .Explicit(_, error) -> "explicit !{type_name(error)}"
+        .Explicit(_, error) -> "explicit {type_marked_name(error)}!"
         .Converted(_, source, target) -> "converted {type_name(source)} -> {type_name(target)}"
         .DeclaredNever -> "declared Never return"
-        .ProvenUnreachable(_) -> "explicit !Never (proven unreachable)"
-        .InferredNever(_) -> "inferred: none"
-        .Inferred(_, error) -> "inferred: {type_name(error)}"
+        .ProvenUnreachable(_) -> "explicit Never! (proven unreachable)"
+        .InferredNever(_) | .Inferred(_, _) -> "implicit default Err!"
     }
 }
 

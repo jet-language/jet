@@ -1409,6 +1409,10 @@ function coreCallEffectFor(moduleName, member) {
   if (moduleName === "core.data" && member === "__host_path_is_file") return "FS";
   if (moduleName === "core.files") return "FS";
   if (moduleName === "core.service" && member === "state_store") return "FS";
+  // D-SERVICE-EFFECTS1=A: the service runtime's file leaves name FS and its
+  // lock and workflow sleeps name Time; callers infer both upward.
+  if (moduleName === "core.service" && coreCallServiceFileLeaf(member) !== null) return "FS";
+  if (moduleName === "core.service" && coreCallOneOf(member, ["__host_sleep_ns", "__host_sleep_wait_ns"])) return "Time";
   if (moduleName === "core.net" || moduleName === "core.net.tls" || moduleName === "core.http.client" || moduleName === "core.http.server" || moduleName === "core.http.middleware" || (moduleName === "core.http" && coreCallOneOf(member, ["serve", "get"]))) return "Net";
   if (moduleName === "core.game.raylib") return "GPU";
   if (moduleName === "core.time") return "Time";
@@ -1445,10 +1449,24 @@ function coreCallEffectFor(moduleName, member) {
   return null;
 }
 
+// D-SERVICE-EFFECTS1=A: a service file leaf names the one leaf it needs, as
+// core.files does: lstat, stat and reads take FS.Read; appends, lock files,
+// atomic replace steps, removes, fsyncs and modes take FS.Write.
+function coreCallServiceFileLeaf(member) {
+  if (coreCallOneOf(member, ["__host_path_kind", "__host_stat", "__host_read_bytes"])) return "FS.Read";
+  if (coreCallOneOf(member, [
+    "__host_append_bytes", "__host_create_dirs", "__host_reserve", "__host_finish", "__host_rename",
+    "__host_sync_parent", "__host_close", "__host_remove", "__host_fsync", "__host_set_mode",
+  ])) return "FS.Write";
+  return null;
+}
+
 function coreCallEffectLeafFor(moduleName, member) {
   if ((moduleName === "core.net" && member === "gethostname") || (moduleName === "core.sys" && member === "hostname")) return "FS.Read";
   if (moduleName === "core.process" && member === "__with_directory_raw") return "FS.Read";
   if (moduleName === "core.service" && member === "state_store") return "FS.Read";
+  if (moduleName === "core.service" && coreCallServiceFileLeaf(member) !== null) return coreCallServiceFileLeaf(member);
+  if (moduleName === "core.service" && coreCallOneOf(member, ["__host_sleep_ns", "__host_sleep_wait_ns"])) return "Time.Wait";
   if (moduleName === "core.time" && coreCallOneOf(member, ["zone", "parse_zoned", "__zone_file_bytes"])) return "FS.Read";
   if (moduleName === "core.time" && coreCallOneOf(member, ["sleep", "sleep_until", "__sleep_ns"])) return "Time.Wait";
   if (moduleName === "core.tasks" && coreCallOneOf(member, ["yield_now", "__yield_now"])) return "Time.Wait";

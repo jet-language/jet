@@ -41,7 +41,8 @@ use jet_foundation.[
     derivation_identity,
     derivation_record,
     expr_span,
-    failure_contract_effective_type,
+    failure_contract_shown_return,
+    failure_contract_shown_type,
     failure_contract_of_function,
     failure_contract_source,
     sha256_hex,
@@ -245,8 +246,8 @@ fn jet_cli_sem_policy_display(policy: CallablePolicy) -> String Never! {
     "{policy.name}({policy.arguments.join(", ")})"
 }
 
-fn jet_cli_sem_effective_return(function: Func) -> Type Never! {
-    failure_contract_effective_type(failure_contract_of_function(function.return_type, function.return_type_span))
+fn jet_cli_sem_shown_return(function: Func) -> Type? Never! {
+    failure_contract_shown_return(failure_contract_of_function(function.return_type, function.return_type_span))
 }
 
 // Build.rs `callable_kind`.
@@ -338,7 +339,7 @@ fn jet_cli_sem_fn_signature(name: String, callable: JetCLISemCallable, ret: Type
         signature = "{signature} ; policies=[{names.join(", ")}]"
     }
     if callable.failure_contract == .Val(contract) {
-        return "{signature}\nfailure: {type_name(failure_contract_effective_type(contract))} ({failure_contract_source(contract)})"
+        return "{signature}\nfailure: {type_name(failure_contract_shown_type(contract))} ({failure_contract_source(contract)})"
     }
     reason :: if callable.failure_unavailable == .Val(unavailable) -> unavailable.reason else -> ""
     "{signature}\nfailure: unavailable ({reason})"
@@ -349,7 +350,7 @@ fn jet_cli_sem_method_fact(ctx: JetCLISemWalk, owner: String, function: Func, or
     identity :: jet_cli_sem_callable_identity(ctx.scope_identity, Val(owner), function.name)
     kind :: jet_cli_sem_callable_kind(function, ctx.source)
     signature := ""
-    if kind == .Function(callable) -> signature = jet_cli_sem_fn_signature(function.name, callable, Val(jet_cli_sem_effective_return(function)), function.return_view_provenance)
+    if kind == .Function(callable) -> signature = jet_cli_sem_fn_signature(function.name, callable, jet_cli_sem_shown_return(function), function.return_view_provenance)
     jet_cli_sem_member(ctx, owner, function.name, identity, "method", origin, origin_trait, signature, function.name_span)
 }
 
@@ -846,8 +847,8 @@ fn jet_cli_sem_item(item: Item, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: 
                 callable :: jet_cli_sem_trait_callable(sig, ctx.source)
                 identity :: "method:{ctx.scope_identity}::{t.name}.{sig.name}"
                 &db.defs.push(jet_cli_sem_def(ctx, identity, sig.name, jet_cli_sem_display(ctx, Val(t.name), sig.name), sig.name_span, JetCLISemKind.Function{callable: callable}))
-                return_type :: failure_contract_effective_type(failure_contract_of_function(sig.return_type, None))
-                &db.members.push(jet_cli_sem_member(ctx, t.name, sig.name, identity, "method", "trait_requirement", t.name, jet_cli_sem_fn_signature(sig.name, callable, Val(return_type), None), sig.name_span))
+                return_type :: failure_contract_shown_return(failure_contract_of_function(sig.return_type, None))
+                &db.members.push(jet_cli_sem_member(ctx, t.name, sig.name, identity, "method", "trait_requirement", t.name, jet_cli_sem_fn_signature(sig.name, callable, return_type, None), sig.name_span))
             }
         }
         .Tag(t) -> &db.defs.push(jet_cli_sem_def(ctx, jet_cli_sem_type_identity(ctx.scope_identity, t.name), t.name, jet_cli_sem_display(ctx, None, t.name), t.name_span, JetCLISemKind.Tag))
@@ -1417,6 +1418,9 @@ struct JetCLISemSummary {
     direct_spans: [Span]
     edges: [String]
     raw_edges: [String]
+    // The local key of each `raw_edges` entry ("" for an edge that names no
+    // checked function).
+    edge_locals: [String]
     solved: [String]
     maximal: Bool
     maximal_span: Span?
@@ -1439,23 +1443,24 @@ fn jet_cli_sem_sorted_unique(values: [String]) -> [String] Never! {
     output
 }
 
-// sema `symbol_id` keys are `kind:module:owner:name`; the effect graph keys
-// a function as `alias::name` or `alias::Owner::name`.
-fn jet_cli_sem_function_local_key(key: String) -> String? {
+// sema `symbol_id` keys are `kind:{module identity}:{owner}:{name}`; the
+// effect graph keys a function as `alias::name` or `alias::Owner::name`. A
+// module identity holds `:` itself (its source root and path), so the owner
+// and name are the last two fields and the identity is everything between.
+struct JetCLISemFunctionKey {
+    module_identity: String
+    local: String
+}
+
+fn jet_cli_sem_function_key(key: String) -> JetCLISemFunctionKey? Never! {
     parts :: key.split(":").to_list()
     if parts.len() < 4 -> return None
     name :: parts[parts.len() - 1]
-    owner_parts := [String]{}
-    loop index in 2..<parts.len() - 1 -> &owner_parts.push(parts[index])
-    owner :: owner_parts.join(":")
-    if owner == "" -> return Val(name)
-    Val("{owner}::{name}")
-}
-
-fn jet_cli_sem_function_module(key: String) -> String {
-    parts :: key.split(":").to_list()
-    if parts.len() < 4 -> return ""
-    parts[1]
+    owner :: parts[parts.len() - 2]
+    identity_parts := [String]{}
+    loop index in 1..<parts.len() - 2 -> &identity_parts.push(parts[index])
+    local :: if owner == "" -> name else -> "{owner}::{name}"
+    Val(JetCLISemFunctionKey{module_identity: identity_parts.join(":"), local: local})
 }
 
 // Validation.rs `qualified_effect_facts` over the checked user functions:
@@ -1464,12 +1469,12 @@ fn jet_cli_sem_function_module(key: String) -> String {
 fn jet_cli_sem_summaries(modules: [JetDriverDocModule]) -> [JetCLISemSummary] {
     summaries := [JetCLISemSummary]{}
     module_aliases := [String: String]{}
-    loop doc_module in modules -> module_aliases[doc_module.module_name] = jet_cli_sem_module_alias(doc_module)
+    loop doc_module in modules -> module_aliases[doc_module.module_identity] = jet_cli_sem_module_alias(doc_module)
     loop doc_module in modules {
         alias :: jet_cli_sem_module_alias(doc_module)
         loop function in doc_module.functions {
             if function.synthetic -> next
-            local :: jet_cli_sem_function_local_key(function.key) ?? next
+            local :: (jet_cli_sem_function_key(function.key) ?? next).local
             direct :: jet_cli_sem_sorted_unique(function.effects.direct)
             spans := [Span]{}
             loop effect_name in direct {
@@ -1483,24 +1488,28 @@ fn jet_cli_sem_summaries(modules: [JetDriverDocModule]) -> [JetCLISemSummary] {
                 &spans.push(found)
             }
             edges := [String]{}
+            edge_locals := [String]{}
             loop edge in function.effects.call_edges {
                 if edge == "__jet_panic__" {
                     &edges.push(edge)
+                    &edge_locals.push("")
                     next
                 }
-                edge_local :: jet_cli_sem_function_local_key(edge) ?? {
+                edge_key :: jet_cli_sem_function_key(edge) ?? {
                     &edges.push(edge)
+                    &edge_locals.push("")
                     next
                 }
-                edge_alias :: module_aliases.get(jet_cli_sem_function_module(edge)) ?? {
-                    &edges.push(edge_local)
+                &edge_locals.push(edge_key.local)
+                edge_alias :: module_aliases.get(edge_key.module_identity) ?? {
+                    &edges.push(edge_key.local)
                     next
                 }
-                &edges.push("{edge_alias}::{edge_local}")
+                &edges.push("{edge_alias}::{edge_key.local}")
             }
             maximal_span := Span?{None}
             if function.effects.maximal -> maximal_span = Val(function.source_span)
-            &summaries.push(JetCLISemSummary{key: "{alias}::{local}", local: local, raw_key: function.key, direct: direct, direct_spans: spans, edges: jet_cli_sem_sorted_unique(edges), raw_edges: function.effects.call_edges, solved: jet_cli_sem_sorted_unique(function.effects.solved), maximal: function.effects.maximal, maximal_span: maximal_span})
+            &summaries.push(JetCLISemSummary{key: "{alias}::{local}", local: local, raw_key: function.key, direct: direct, direct_spans: spans, edges: jet_cli_sem_sorted_unique(edges), raw_edges: function.effects.call_edges, edge_locals: edge_locals, solved: jet_cli_sem_sorted_unique(function.effects.solved), maximal: function.effects.maximal, maximal_span: maximal_span})
         }
     }
     shorts := [JetCLISemSummary]{}
@@ -1530,8 +1539,9 @@ fn jet_cli_sem_summary(summaries: [JetCLISemSummary], key: String) -> JetCLISemS
 
 fn jet_cli_sem_call_span(summary: JetCLISemSummary, callee: String, modules: [JetDriverDocModule]) -> Span? {
     raw_callee := ""
-    loop edge in summary.raw_edges {
-        local :: jet_cli_sem_function_local_key(edge) ?? next
+    loop (index, edge) in summary.raw_edges {
+        local :: summary.edge_locals[index]
+        if local == "" -> next
         if callee == local || callee.ends_with("::{local}") {
             raw_callee = edge
             break
@@ -1676,8 +1686,9 @@ fn jet_cli_sem_key_order(summaries: [JetCLISemSummary]) -> [Int] Never! {
 // jet_cli_sem_call_span over the index.
 fn jet_cli_sem_indexed_span(summary: JetCLISemSummary, callee: String, index: JetCLISemEffectIndex) -> Span? {
     raw_callee := ""
-    loop edge in summary.raw_edges {
-        local :: jet_cli_sem_function_local_key(edge) ?? next
+    loop (row, edge) in summary.raw_edges {
+        local :: summary.edge_locals[row]
+        if local == "" -> next
         if callee == local || callee.ends_with("::{local}") {
             raw_callee = edge
             break
@@ -1775,7 +1786,7 @@ fn jet_cli_sem_inferred_row(definition: JetCLISemDef, doc_module: JetDriverDocMo
     rows :: loop effect_name in summary.solved -> EffectRowEntry{name: effect_name, span: definition.def_span}
     updated := ^callable
     updated.effects = Val(rows)
-    ret :: if updated.failure_contract == .Val(contract) -> Val(failure_contract_effective_type(contract)) else -> updated.return_type
+    ret :: if updated.failure_contract == .Val(contract) -> failure_contract_shown_return(contract) else -> updated.return_type
     signature :: jet_cli_sem_fn_signature(definition.name, updated, ret, view_provenance.get(definition.identity))
     Val(JetCLISemInferredRow{callable: ^updated, signature: signature})
 }
@@ -1917,7 +1928,7 @@ fn jet_cli_sem_definition_kind(kind: JetCLISemKind) -> String Never! {
 // JSON.rs `convert_kind` `ret`: the effective failure route when checked,
 // else the written return type.
 fn jet_cli_sem_callable_ret(callable: JetCLISemCallable) -> String? Never! {
-    if callable.failure_contract == .Val(contract) -> return Val(type_name(failure_contract_effective_type(contract)))
+    if callable.failure_contract == .Val(contract) -> return Val(type_name(failure_contract_shown_type(contract)))
     ty :: callable.return_type ?? return None
     Val(type_name(ty))
 }
@@ -2130,7 +2141,7 @@ fn jet_cli_sem_outputs(modules: [JetDriverDocModule]) -> [JetCLISemOutput] {
                     reference_span: resolved.reference,
                     params: params,
                     return_type: return_type,
-                    failure_contract: type_name(failure_contract_effective_type(resolved.failure_contract)),
+                    failure_contract: type_name(failure_contract_shown_type(resolved.failure_contract)),
                     failure_source: failure_contract_source(resolved.failure_contract),
                     authority: "safe_jet",
                     effects: resolved.effects,

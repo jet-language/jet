@@ -2673,7 +2673,19 @@ fn workflow_sleep(workflow: ServiceWorkflow, duration: Duration) ServiceError! {
         return Ok()
     }
     workflow_append_handle(workflow, "workflow-wait-sleep:{workflow.run_id}:{nanos}")
-    core.service.__host_sleep_ns(nanos)
+    // The wait ends in a code instead of unwinding, so a cancelled or
+    // deadline-blown sleep is recorded before the workflow fails.
+    if core.service.__host_sleep_wait_ns(nanos) == {
+        1 -> {
+            workflow_append_handle(workflow, "workflow-wait-sleep-cancelled:{workflow.run_id}")
+            Err(ServiceError.Policy("workflow sleep was cancelled"))
+        }
+        2 -> {
+            workflow_append_handle(workflow, "workflow-wait-sleep-deadline:{workflow.run_id}")
+            Err(ServiceError.Policy("workflow sleep deadline expired"))
+        }
+        else -> Ok()
+    }
 }
 
 fn workflow_activity_wait(workflow: ServiceWorkflow, activity: String, argument: String) -> String ServiceError! {

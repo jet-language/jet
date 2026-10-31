@@ -1,8 +1,18 @@
 # PORT
 # PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+# Original tests/effects.rs `callbacks_entry_effects_are_only_io`; predicates
+# migrated. Rust asserted `EffectBudget::summary_line_for_program`, which
+# unions the direct rows reached through call edges and ignores the
+# unknown-callee flag. The stored callback call `w.step(4)` is such an unknown
+# callee (Rust helpers_call_values.rs records it maximal, as sema does here),
+# so the solved `inferred_effects` of `run` is the maximal set. The same walk
+# is asserted on the rows: `run` names only IO directly, and its one callee
+# edge reaches no effect.
 step: jet check {root}/Examples/features/basics/callbacks.jet
 exit: 0
 step: jet inspect rights {root}/Examples/features/basics/callbacks.jet --json
 exit: 0
 json: stdout doc $.callables[?name="run"] #= 1
-json: stdout doc $.callables[?name="run"][*].inferred_effects = ["IO"]
+json: stdout doc $.callables[?name="run"][0].effects.direct = ["IO"]
+json: stdout doc $.callables[?name="run"][0].effects.callees = ["callbacks::apply_twice"]
+json: stdout doc $.callables[?name="apply_twice"][0].inferred_effects = []

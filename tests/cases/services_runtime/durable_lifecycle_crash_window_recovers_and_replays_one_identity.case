@@ -3,12 +3,13 @@
 # Fixture migrated: durable delivery binds its endpoint to the tree's injected state authority, so the source sets an event-log state store at the store path and opens the runtime on that store's `.delivery` log beside it (Core/Service/Service.jet start; Rust Services.rs 4755-4780).
 # Fixture migrated: the original 60-second retention is 3600 seconds. The phases run as separate processes, and on a loaded host the accept-to-recover span passed 60 seconds, so the entry expired and retry answered "cannot retry a dead-lettered delivery". No step tests expiry.
 fixture: durable_lifecycle_crash_window_recovers_and_replays_one_identity.fixture
-step: jet build --allow=Env,FS.Read restart.jet
+# D-SERVICE-EFFECTS1=A: the durable service calls reach FS.Read and FS.Write.
+step: jet build --allow=Env,FS.Read,FS.Write restart.jet
 step: built
 env: JET_SERVICE_AUTH_STORE={work}/crash.log
 env: JET_SERVICE_AUTH_PHASE=accept
 stdout: ^= "accepted:Delivery(svc-" # original predicate
-step: jet run --allow=Env,FS.Read restart.jet
+step: jet run --allow=Env,FS.Read,FS.Write restart.jet
 env: JET_SERVICE_AUTH_STORE={work}/crash.log
 env: JET_SERVICE_AUTH_PHASE=deliver
 stdout: ^= "before:Delivery(svc-" # original predicate

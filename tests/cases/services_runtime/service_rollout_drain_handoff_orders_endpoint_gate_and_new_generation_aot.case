@@ -1,5 +1,6 @@
 # tests/services_runtime.rs::service_rollout_drain_handoff_orders_endpoint_gate_and_new_generation_aot: the original's literal expectations.
 fixture: service_rollout_drain_handoff_orders_endpoint_gate_and_new_generation_aot/input
-step: jet run run.jet
+# D-SERVICE-EFFECTS1=A: the durable service calls reach FS.Read and FS.Write.
+step: jet run --allow=FS.Read,FS.Write run.jet
 exit: 0 # tests/services_runtime.rs:1369 assert_eq!
 stdout: = "late:rejected\ndrained:queued\nhandoff:2:Endpoint(drain-handoff/api@g2)\nafter:after\n" # tests/services_runtime.rs:1370 assert_eq!
