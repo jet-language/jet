@@ -1,6 +1,7 @@
 # tests/cc_cli.rs::c_drivers_are_registered_with_one_flag_surface at tests/cc_cli.rs:4; hand-port
-# jet cc and jet c++ are builtin commands with one shared flag surface, and each validates its own flags, so the
-# front door never rejects an unknown cc/c++ flag with E2102.
+# jet cc and jet c++ are builtin commands with one shared flag surface, and each validates its own flags: the
+# front door's unknown-flag check never sees a cc/c++ flag, and the driver itself refuses one it does not
+# forward, as the usage error E2102 (Docs/spec/architecture.md exit-code table; registry row E2102).
 env: NO_COLOR=1
 step: jet help cc
 exit: 0 # tests/cc_cli.rs:6 `cc` is a builtin command
@@ -26,8 +27,10 @@ stdout: ~ "\n  -print-sysroot " # tests/cc_cli.rs:10-33 `cc` lists -print-sysroo
 stdout: ~ "\n  -dumpversion " # tests/cc_cli.rs:10-33 `cc` lists -dumpversion
 stdout: ~ "\n  -v " # tests/cc_cli.rs:10-33 `cc` lists -v
 step: jet cc --rust-port-unknown-flag main.c
-exit: nonzero # main.c does not exist
-stderr: !~ "E2102" # tests/cc_cli.rs:7 `cc` owns its flag vocabulary
+exit: 2 # Docs/spec/architecture.md: an unknown flag is a usage error (E2102), exit 2
+stderr: !~ "isn't a flag jet understands" # tests/cc_cli.rs:7 the front door leaves `cc` flags to `cc`
+stderr: ~ "Invalid arguments for `jet cc`" # tests/cc_cli.rs:7 `cc` owns its flag vocabulary and refuses the flag itself
+stderr: ~ "Unsupported compiler flag --rust-port-unknown-flag" # Docs/spec/reference/cc-driver.md: the driver forwards only selected compiler flags
 step: jet help c++
 exit: 0 # tests/cc_cli.rs:6 `c++` is a builtin command
 stdout: ~ "jet c++ [options] <sources>\n" # tests/cc_cli.rs:8 the usage line ends with `c++ [options] <sources>`
@@ -52,5 +55,7 @@ stdout: ~ "\n  -print-sysroot " # tests/cc_cli.rs:10-33 `c++` lists -print-sysro
 stdout: ~ "\n  -dumpversion " # tests/cc_cli.rs:10-33 `c++` lists -dumpversion
 stdout: ~ "\n  -v " # tests/cc_cli.rs:10-33 `c++` lists -v
 step: jet c++ --rust-port-unknown-flag main.c
-exit: nonzero # main.c does not exist
-stderr: !~ "E2102" # tests/cc_cli.rs:7 `c++` owns its flag vocabulary
+exit: 2 # Docs/spec/architecture.md: an unknown flag is a usage error (E2102), exit 2
+stderr: !~ "isn't a flag jet understands" # tests/cc_cli.rs:7 the front door leaves `c++` flags to `c++`
+stderr: ~ "Invalid arguments for `jet c++`" # tests/cc_cli.rs:7 `c++` owns its flag vocabulary and refuses the flag itself
+stderr: ~ "Unsupported compiler flag --rust-port-unknown-flag" # Docs/spec/reference/cc-driver.md: the driver forwards only selected compiler flags
