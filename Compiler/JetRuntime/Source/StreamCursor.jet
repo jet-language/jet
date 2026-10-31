@@ -125,24 +125,34 @@ fn stream_bounds_error(handle: I64, need: I64, method: I64, width: I64, little: 
 }
 fn stream_read(handle: I64, width: I64, little: Bool, signed: Bool, floating: Bool, ok: I64, error: I64) -> I64 {
     position :: rt_text_word(wrapping(handle + I64{24}))
-    need :: width /% I64{8}
-    method :: if floating -> I64{6} else if signed -> I64{5} else -> I64{4}
-    if (need > rt_text_len(handle) - position) {
+    need :: width >> I64{3}
+    // 0 <= position <= length (every advance proves it), so `left` cannot
+    // overflow, and every offset below stays inside the owned bytes.
+    left :: wrapping(rt_text_len(handle) - position)
+    if (need > left) {
+        method :: if floating -> I64{6} else if signed -> I64{5} else -> I64{4}
         rt_text_store(error, stream_bounds_error(handle, need, method, width, little))
         return I64{0}
     }
     data :: wrapping(rt_text_data(handle) + position)
     value := I64{0}
-    at := I64{0}
-    loop at < need {
-        byte :: rt_text_byte(wrapping(data + at))
-        if little { value = value.bit_or(byte << (at * I64{8})) } else { value = (value << I64{8}).bit_or(byte) }
-        at += I64{1}
+    if (little && left >= I64{8}) {
+        // Eight owned bytes start at the field, so one unaligned word load
+        // reads them; little-endian, the field is its low `need` bytes.
+        word :: rt_text_word(data)
+        value = if (need == I64{8}) -> word else -> word.bit_and(wrapping((I64{1} << width) - I64{1}))
+    } else {
+        at := I64{0}
+        loop at < need {
+            byte :: rt_text_byte(wrapping(data + at))
+            if little { value = value.bit_or(byte << (at << I64{3})) } else { value = (value << I64{8}).bit_or(byte) }
+            at = wrapping(at + I64{1})
+        }
     }
     if (signed && width < I64{64}) { value = (value << (I64{64} - width)) >> (I64{64} - width) }
     // Fixed IntN and Float outputs carry their raw bits, not exact-Int tags.
     rt_text_store(ok, value)
-    rt_text_store(wrapping(handle + I64{24}), position + need)
+    rt_text_store(wrapping(handle + I64{24}), wrapping(position + need))
     I64{1}
 }
 #Export(c) fn jet_reader_read_u8(handle: I64, ok: I64, error: I64) -> I64 { stream_read(handle, I64{8}, false, false, false, ok, error) }

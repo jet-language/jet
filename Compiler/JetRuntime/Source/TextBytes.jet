@@ -30,9 +30,15 @@ fn text_bytes_push(target: I64, data: I64, start: I64, count: I64) {
 fn text_bytes_utf8_error(data: I64, length: I64) -> I64 {
     at := I64{0}
     loop at < length {
-        // Packed ASCII words (no byte with the high bit) are valid as a whole.
+        // Packed ASCII words (no byte with the high bit) are valid as a whole,
+        // and so is an ASCII byte of the tail: rt_text_valid_width's width 1
+        // for a lead below 128, without the call.
         if (RT_HOST_U8_STRIDE == I64{1} && length - at >= I64{8} && rt_text_word(wrapping(data + at)).bit_and(I64{-9187201950435737472}) == I64{0}) {
             at += I64{8}
+            next
+        }
+        if (host_u8_get(data, at) < I64{128}) {
+            at += I64{1}
             next
         }
         width :: rt_text_valid_width(wrapping(data + at * RT_HOST_U8_STRIDE), length - at, RT_HOST_U8_STRIDE)
