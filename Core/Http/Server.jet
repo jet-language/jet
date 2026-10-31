@@ -53,10 +53,21 @@ struct HTTPCorsPolicy {
     max_age_secs: Int
 }
 
-// Server TLS credentials, kept verbatim until a listener loads them.
+// Server TLS credentials, kept verbatim until a listener loads them. The
+// identity check and handshake are reached through `__ops`, which only
+// `tls(cert, key)` fills, so a server without `tls:` links no TLS.
 struct HTTPServerTLS {
     cert_pem: String
     key_pem: String
+    __ops: Shared<__HTTPTLSOps>
+}
+
+struct __HTTPTLSOps {
+    // The bind-time identity check: "" or the reason the identity is unusable.
+    check: fn(String, String) -[Net]> String Never!
+    // The server handshake over an accepted stream, within the budget; None
+    // drops a failed handshake.
+    accept: fn(TCPStream, String, String, Duration) -[Net, Time.Wait]> __HTTPSecure? Never!
 }
 
 /// What one served lifetime did: connections accepted, refused for load,
@@ -128,17 +139,22 @@ struct HTTPMux {
 
 impl HTTPMux {
     // `mux.get(pattern, handler)` and its sibling verbs land here with the
-    // route's checked contract.
+    // route's checked contract when the pattern is a literal. The compiler
+    // wrote that contract complete, and `web.openapi(mux)` checks it against
+    // the route when it renders, so registration parses no JSON.
     fn __route(self, method: String, pattern: String, handler: ^fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String) Never! -[Net]> {
         parsed :: __route_parse(pattern)
         if parsed.problem != "" -> panic("E2805: invalid HTTP route `{pattern}`: {parsed.problem}")
-        checked :: if contract == "" -> "" else -> __route_contract(method, pattern, parsed.segments, contract)
-        shape :: __route_shape(parsed.segments)
-        loop existing in __mux_routes(self) {
-            if existing.method == method && __route_shape(existing.segments) == shape -> panic("E2804: duplicate route `{method} {pattern}`")
-        }
-        guard := self.__state.guard_edit()
-        &guard.value.routes.push(__HTTPRoute{method: method, pattern: pattern, segments: parsed.segments, handler: __handler(^handler), contract: checked})
+        __mux_register(self, method, pattern, parsed.segments, __handler(^handler), contract)
+    }
+
+    // A route whose pattern is a run-time value: its contract
+    // (`"pattern":""`) gets its path inputs from the pattern registered.
+    fn __route_dynamic(self, method: String, pattern: String, handler: ^fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String) Never! -[Net]> {
+        parsed :: __route_parse(pattern)
+        if parsed.problem != "" -> panic("E2805: invalid HTTP route `{pattern}`: {parsed.problem}")
+        checked :: __route_contract(method, pattern, parsed.segments, contract)
+        __mux_register(self, method, pattern, parsed.segments, __handler(^handler), checked)
     }
 
     // `mux.middleware(layer)`: the first registered layer is the outermost.
@@ -146,6 +162,15 @@ impl HTTPMux {
         guard := self.__state.guard_edit()
         &guard.value.layers.push(shared __HTTPLayerCell{wrap: ^middleware})
     }
+}
+
+fn __mux_register(mux: HTTPMux, method: String, pattern: String, segments: [__HTTPSegment], handler: HTTPHandler, contract: String) Never! {
+    shape :: __route_shape(segments)
+    loop existing in __mux_routes(mux) {
+        if existing.method == method && __route_shape(existing.segments) == shape -> panic("E2804: duplicate route `{method} {pattern}`")
+    }
+    guard := mux.__state.guard_edit()
+    &guard.value.routes.push(__HTTPRoute{method: method, pattern: pattern, segments: segments, handler: handler, contract: contract})
 }
 
 struct __HTTPServerState {
@@ -283,7 +308,9 @@ fn __serve_entry(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Dura
 // unusable certificate or key fails the bind instead of every handshake.
 fn __bind_entry(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Duration?) -[Net]> HTTPServer HTTPError! {
     if tls == .Val(identity) {
-        _ :: server_tls.__server_context(identity.cert_pem, identity.key_pem) ?? return Err(.IO{operation: "{err}"})
+        ops :: identity.__ops.guard_read()
+        problem :: ops.value.check(identity.cert_pem, identity.key_pem)
+        if problem != "" -> return Err(.IO{operation: problem})
     }
     listener :: core.net.tcp_listen(addr) ?? return Err(.IO{operation: "bind on `{addr}` failed: {err}"})
     pair :: core.tasks.__channel_bounded<Int>(1)
@@ -348,7 +375,32 @@ fn static_files(mux: HTTPMux, prefix: String, root: String) Never! -[Net, FS.Rea
 }
 
 fn tls(cert: String, key: String) -> HTTPServerTLS Never! {
-    HTTPServerTLS{cert_pem: cert, key_pem: key}
+    HTTPServerTLS{cert_pem: cert, key_pem: key, __ops: shared __HTTPTLSOps{check: __tls_check, accept: __tls_accept}}
+}
+
+fn __tls_check(cert_pem: String, key_pem: String) -[Net]> String Never! {
+    _ :: server_tls.__server_context(cert_pem, key_pem) ?? return "{err}"
+    ""
+}
+
+fn __tls_accept(stream: TCPStream, cert_pem: String, key_pem: String, budget: Duration) -[Net, Time.Wait]> __HTTPSecure? Never! {
+    tcp := stream
+    secure :: server_tls.__server(^tcp, cert_pem, key_pem, [String]{}, budget) ?? return None
+    Val(__HTTPSecure{
+        read: (max_bytes: Int, deadline: Duration) -> secure.read(max_bytes, deadline: deadline),
+        write_all: (bytes: [U8], deadline: Duration) -> {
+            if secure.write_all(bytes, deadline: deadline) == {
+                .Ok(_) -> true
+                .Err(_) -> false
+            }
+        },
+        close: () -> {
+            if secure.close() == {
+                .Ok(_) -> {}
+                .Err(_) -> {}
+            }
+        },
+    })
 }
 
 fn sse(body: String) -> HTTPResponse Never! {
@@ -988,7 +1040,17 @@ struct __HTTPChunked {
 // (D-TLSSERVE1=A, Docs/spec/syntax-decisions.md:5083).
 struct __HTTPConn {
     tcp: TCPStream?
-    tls: server_tls.TLSStream?
+    tls: __HTTPSecure?
+}
+
+// A TLS connection's stream, held only by these operations; `__tls_accept`
+// builds them, so a server without `tls:` reaches no TLS code.
+struct __HTTPSecure {
+    read: fn(Int, Duration) -[Net, Time.Wait]> [U8] IOError!
+    // Whether every byte was sent within the deadline.
+    write_all: fn([U8], Duration) -[Net, Time.Wait]> Bool
+    // Sends close_notify and closes the socket the stream owns.
+    close: fn() -[Net, Time.Wait]> Unit
 }
 
 // The accepted stream, after the server handshake within the connection
@@ -996,8 +1058,8 @@ struct __HTTPConn {
 fn __accept_conn(stream: TCPStream, tls: HTTPServerTLS?, deadline: Duration?) -[Net, Time.Wait]> __HTTPConn? Never! {
     if tls == .Val(identity) {
         budget :: if deadline == .Val(limit) -> limit.ns else -> C_IO_NS
-        tcp := stream
-        secure := server_tls.__server(^tcp, identity.cert_pem, identity.key_pem, [String]{}, Duration{ns: budget}) ?? return None
+        ops :: identity.__ops.guard_read()
+        secure :: ops.value.accept(stream, identity.cert_pem, identity.key_pem, Duration{ns: budget}) ?? return None
         return Val(__HTTPConn{tcp: None, tls: Val(secure)})
     }
     Val(__HTTPConn{tcp: Val(stream), tls: None})
@@ -1021,12 +1083,7 @@ fn __serve_connection(stream: __HTTPConn, mux: HTTPMux, deadline: Duration?) -[N
         }
     }
     // A TLS stream sends close_notify and closes the socket it owns.
-    if stream.tls == .Val(secure) {
-        if secure.close() == {
-            .Ok(_) -> {}
-            .Err(_) -> {}
-        }
-    }
+    if stream.tls == .Val(secure) -> secure.close()
     if stream.tcp == .Val(plain) {
         if plain.close() == {
             .Ok(_) -> {}
@@ -1039,12 +1096,7 @@ fn __serve_connection(stream: __HTTPConn, mux: HTTPMux, deadline: Duration?) -[N
 fn __send(stream: __HTTPConn, bytes: [U8], end_ns: Int) -[Net, Time.Wait]> Bool Never! {
     remaining :: end_ns - core.time.__clock_mono_ns()
     if remaining <= 0 -> return false
-    if stream.tls == .Val(secure) {
-        return if secure.write_all(bytes, deadline: Duration{ns: remaining}) == {
-            .Ok(_) -> true
-            .Err(_) -> false
-        }
-    }
+    if stream.tls == .Val(secure) -> return secure.write_all(bytes, Duration{ns: remaining})
     if stream.tcp == .Val(plain) {
         return if plain.write_all(bytes, deadline: Duration{ns: remaining}) == {
             .Ok(_) -> true
@@ -1060,7 +1112,7 @@ fn __wire_fill(stream: __HTTPConn, &wire: __HTTPWire) -[Net, Time.Wait]> Bool __
     if remaining <= 0 -> return Err(.Reply(408))
     got := [U8]{}
     if stream.tls == .Val(secure) {
-        if secure.read(C_READ_BYTES, deadline: Duration{ns: remaining}) == {
+        if secure.read(C_READ_BYTES, Duration{ns: remaining}) == {
             .Ok(bytes) -> got = bytes
             .Err(error) -> {
                 if error == .TimedOut(_) -> return Err(.Reply(408))

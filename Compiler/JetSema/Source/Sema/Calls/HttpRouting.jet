@@ -1165,7 +1165,8 @@ fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: Stri
         if receiver_name == "HTTPMux" {
             verb :: sema_check_expression(Expr.Str{parts: [StrPart]{StrPart.Lit{text: sema_http_route_method_name(method)}}, span: span, id: AST_NODE_GENERATED}, Val(Type.String), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
             // The route keeps its checked contract: `web.openapi(mux)` renders
-            // the document from these registrations.
+            // the document from these registrations. A run-time pattern's
+            // contract is completed from that pattern when it registers.
             contract_value :: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: contract}}}, span)
             route_args := [TCallArg]{
                 sema_call_http_static_tree_arg(verb, sema_call_http_core_synthetic_arg(updated_args[0].expr, span)),
@@ -1173,7 +1174,8 @@ fn sema_call_try_http_router(receiver: Expr, receiver_value: TExpr, method: Stri
                 sema_call_http_static_tree_arg(callback, updated_args[1]),
                 sema_call_http_static_tree_arg(contract_value, sema_call_http_core_synthetic_arg(updated_args[0].expr, span)),
             }
-            return sema_call_http_mux_source_call(receiver_value, "__route", route_args, span, expected, environment, program, &scopes, &context, &diagnostics)
+            target :: if dynamic -> "__route_dynamic" else -> "__route"
+            return sema_call_http_mux_source_call(receiver_value, target, route_args, span, expected, environment, program, &scopes, &context, &diagnostics)
         }
         route_handler := sema_tree_node(callback.ty, TExprKind.FnValue{kind: TFnValueKind.Send{value: callback}}, callback.span)
         operation := THandleOp.HTTPRouterRegister{verb: sema_http_route_verb(method), handler: route_handler, file: environment.source_file, line: line, handler_param_names: path_names_for_tree, contract_json: contract}
