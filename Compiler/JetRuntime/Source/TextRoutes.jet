@@ -27,8 +27,10 @@
 // `s.hash()`: the U64 bits of a non-cryptographic hash of the UTF-8 bytes,
 // read in place (no copy). Whole little-endian words, then the tail bytes
 // packed into one last word, are folded by multiply-xorshift; murmur3's
-// fmix64 finishes. Equal strings hash equal; values are stable within one
-// process run only.
+// fmix64 finishes. An 8-aligned tail is one word load masked to its bytes:
+// an aligned word never crosses a page, so the bytes past the end it reads
+// are mapped, and the mask drops them. Equal strings hash equal; values are
+// stable within one process run only.
 #Export(c) fn jet_string_hash(value: I64) -> I64 {
     data :: rt_text_data(value)
     len :: rt_text_len(value)
@@ -41,11 +43,15 @@
     }
     if at < len {
         tail := I64{0}
-        shift := I64{0}
-        loop at < len {
-            tail = tail.bit_or(rt_text_byte(wrapping(data + at)) << shift)
-            shift += I64{8}
-            at += I64{1}
+        if (wrapping(data + at).bit_and(I64{7}) == I64{0}) {
+            tail = rt_text_word(wrapping(data + at)).bit_and((I64{1} << ((len - at) * I64{8})) - I64{1})
+        } else {
+            shift := I64{0}
+            loop at < len {
+                tail = tail.bit_or(rt_text_byte(wrapping(data + at)) << shift)
+                shift += I64{8}
+                at += I64{1}
+            }
         }
         hash = rt_text_hash_fold(hash, tail)
     }
