@@ -3,9 +3,11 @@ use core.http as http
 use core.http.[Body, Header, Headers, HTTPError, HTTPRequest, HTTPResponse]
 use core.encoding.json as json_codec
 use core.net.url as route_url
+use core.net.tls as server_tls
 use core.encoding.[Dyn]
 
-// core.http.server — HTTP/1.1 serving over core.net TCP.
+// core.http.server — HTTP/1.1 serving over core.net TCP, or over core.net.tls
+// when bound with `tls: server.tls(cert, key)`.
 //
 // A mux holds routes and middleware layers; a server owns one listener and
 // answers one request per connection with `Connection: close`. Request
@@ -159,6 +161,7 @@ struct HTTPServer {
     __listener: TCPListener
     __mux: HTTPMux
     __deadline: Duration?
+    __tls: HTTPServerTLS?
     __done: Sender<Int>
     __finished: Receiver<Int>
 }
@@ -178,7 +181,9 @@ impl HTTPServer {
             if self.__listener.accept(deadline: Duration{ns: C_ACCEPT_POLL_NS}) == {
                 .Ok(stream) -> {
                     accepted = accepted + 1
-                    if __serve_connection(stream, self.__mux, self.__deadline) -> completed = completed + 1
+                    if __accept_conn(stream, self.__tls, self.__deadline) == .Val(conn) {
+                        if __serve_connection(conn, self.__mux, self.__deadline) -> completed = completed + 1
+                    }
                 }
                 .Err(error) -> {
                     if !__accept_timed_out(error) {
@@ -263,7 +268,7 @@ fn serve_once_listener(listener: TCPListener, mux: HTTPMux) HTTPError! -[Net, FS
         if __accept_timed_out(err) -> return Err(.IO{operation: "HTTP serve_once accept timed out"})
         return Err(.IO{operation: "accept: {err}"})
     }
-    _ :: __serve_connection(stream, mux, None)
+    _ :: __serve_connection(__HTTPConn{tcp: Val(stream), tls: None}, mux, None)
     Ok(())
 }
 
@@ -273,8 +278,13 @@ fn __serve_entry(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Dura
     Ok(())
 }
 
+// D-TLSSERVE1=A (Docs/spec/syntax-decisions.md:5083, Docs/spec/spec.md:1928-1931):
+// the labelled `tls:` option serves HTTPS. Its identity is checked here, so an
+// unusable certificate or key fails the bind instead of every handshake.
 fn __bind_entry(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Duration?) -[Net]> HTTPServer HTTPError! {
-    if tls == .Val(_) -> return Err(.IO{operation: "TLS server requires the native TLS adapter"})
+    if tls == .Val(identity) {
+        _ :: server_tls.__server_context(identity.cert_pem, identity.key_pem) ?? return Err(.IO{operation: "{err}"})
+    }
     listener :: core.net.tcp_listen(addr) ?? return Err(.IO{operation: "bind on `{addr}` failed: {err}"})
     pair :: core.tasks.__channel_bounded<Int>(1)
     Ok(HTTPServer{
@@ -282,6 +292,7 @@ fn __bind_entry(addr: String, mux: HTTPMux, tls: HTTPServerTLS?, deadline: Durat
         __listener: listener,
         __mux: mux,
         __deadline: deadline,
+        __tls: tls,
         __done: pair.sender,
         __finished: pair.receiver,
     })
@@ -972,8 +983,28 @@ struct __HTTPChunked {
     trailers: Headers
 }
 
+// One accepted connection: exactly one of tcp/tls. A server bound with
+// `tls: server.tls(cert, key)` serves the TCP stream after the TLS handshake
+// (D-TLSSERVE1=A, Docs/spec/syntax-decisions.md:5083).
+struct __HTTPConn {
+    tcp: TCPStream?
+    tls: server_tls.TLSStream?
+}
+
+// The accepted stream, after the server handshake within the connection
+// budget when the server has a TLS identity; None drops a failed handshake.
+fn __accept_conn(stream: TCPStream, tls: HTTPServerTLS?, deadline: Duration?) -[Net, Time.Wait]> __HTTPConn? Never! {
+    if tls == .Val(identity) {
+        budget :: if deadline == .Val(limit) -> limit.ns else -> C_IO_NS
+        tcp := stream
+        secure := server_tls.__server(^tcp, identity.cert_pem, identity.key_pem, [String]{}, Duration{ns: budget}) ?? return None
+        return Val(__HTTPConn{tcp: None, tls: Val(secure)})
+    }
+    Val(__HTTPConn{tcp: Val(stream), tls: None})
+}
+
 // Whether the connection's request was answered by the mux.
-fn __serve_connection(stream: TCPStream, mux: HTTPMux, deadline: Duration?) -[Net, FS.Read, Time]> Bool Never! {
+fn __serve_connection(stream: __HTTPConn, mux: HTTPMux, deadline: Duration?) -[Net, FS.Read, Time]> Bool Never! {
     budget :: if deadline == .Val(limit) -> limit.ns else -> C_IO_NS
     wire := __HTTPWire{buffer: [U8]{}, end_ns: core.time.__clock_mono_ns() + budget}
     answered := false
@@ -989,32 +1020,61 @@ fn __serve_connection(stream: TCPStream, mux: HTTPMux, deadline: Duration?) -[Ne
             }
         }
     }
-    if stream.close() == {
-        .Ok(_) -> {}
-        .Err(_) -> {}
+    // A TLS stream sends close_notify and closes the socket it owns.
+    if stream.tls == .Val(secure) {
+        if secure.close() == {
+            .Ok(_) -> {}
+            .Err(_) -> {}
+        }
+    }
+    if stream.tcp == .Val(plain) {
+        if plain.close() == {
+            .Ok(_) -> {}
+            .Err(_) -> {}
+        }
     }
     answered
 }
 
-fn __send(stream: TCPStream, bytes: [U8], end_ns: Int) -[Net]> Bool Never! {
+fn __send(stream: __HTTPConn, bytes: [U8], end_ns: Int) -[Net, Time.Wait]> Bool Never! {
     remaining :: end_ns - core.time.__clock_mono_ns()
     if remaining <= 0 -> return false
-    if stream.write_all(bytes, deadline: Duration{ns: remaining}) == {
-        .Ok(_) -> true
-        .Err(_) -> false
+    if stream.tls == .Val(secure) {
+        return if secure.write_all(bytes, deadline: Duration{ns: remaining}) == {
+            .Ok(_) -> true
+            .Err(_) -> false
+        }
     }
+    if stream.tcp == .Val(plain) {
+        return if plain.write_all(bytes, deadline: Duration{ns: remaining}) == {
+            .Ok(_) -> true
+            .Err(_) -> false
+        }
+    }
+    false
 }
 
 // Append what the peer sends next; false at end of stream.
-fn __wire_fill(stream: TCPStream, &wire: __HTTPWire) -[Net]> Bool __HTTPFault! {
+fn __wire_fill(stream: __HTTPConn, &wire: __HTTPWire) -[Net, Time.Wait]> Bool __HTTPFault! {
     remaining :: wire.end_ns - core.time.__clock_mono_ns()
     if remaining <= 0 -> return Err(.Reply(408))
     got := [U8]{}
-    if stream.read(C_READ_BYTES, deadline: Duration{ns: remaining}) == {
-        .Ok(bytes) -> got = bytes
-        .Err(error) -> {
-            if __accept_timed_out(error) -> return Err(.Reply(408))
-            return Ok(false)
+    if stream.tls == .Val(secure) {
+        if secure.read(C_READ_BYTES, deadline: Duration{ns: remaining}) == {
+            .Ok(bytes) -> got = bytes
+            .Err(error) -> {
+                if error == .TimedOut(_) -> return Err(.Reply(408))
+                return Ok(false)
+            }
+        }
+    }
+    if stream.tcp == .Val(plain) {
+        if plain.read(C_READ_BYTES, deadline: Duration{ns: remaining}) == {
+            .Ok(bytes) -> got = bytes
+            .Err(error) -> {
+                if __accept_timed_out(error) -> return Err(.Reply(408))
+                return Ok(false)
+            }
         }
     }
     if got.len() == 0 -> return Ok(false)
@@ -1023,7 +1083,7 @@ fn __wire_fill(stream: TCPStream, &wire: __HTTPWire) -[Net]> Bool __HTTPFault! {
 }
 
 // Fill until `need` bytes are buffered; a short stream is a bad request.
-fn __wire_need(stream: TCPStream, &wire: __HTTPWire, need: Int) __HTTPFault! -[Net]> {
+fn __wire_need(stream: __HTTPConn, &wire: __HTTPWire, need: Int) __HTTPFault! -[Net, Time.Wait]> {
     loop wire.buffer.len() < need {
         more :: __wire_fill(stream, &wire) ?? return Err(err)
         if !more -> return Err(.Reply(400))
@@ -1032,7 +1092,7 @@ fn __wire_need(stream: TCPStream, &wire: __HTTPWire, need: Int) __HTTPFault! -[N
 }
 
 // The index of the CRLF ending the line at `from`, filling as needed.
-fn __wire_line(stream: TCPStream, &wire: __HTTPWire, from: Int) -[Net]> Int __HTTPFault! {
+fn __wire_line(stream: __HTTPConn, &wire: __HTTPWire, from: Int) -[Net, Time.Wait]> Int __HTTPFault! {
     at := __crlf_at(wire.buffer, from)
     loop at < 0 {
         if wire.buffer.len() - from > C_MAX_LINE_BYTES -> return Err(.Reply(400))
@@ -1071,7 +1131,7 @@ fn __field_line(raw: [U8]) -> Header? Never! {
     Val(Header{name: name, value: http.trim(value)})
 }
 
-fn __read_request(stream: TCPStream, &wire: __HTTPWire) -[Net]> HTTPRequest __HTTPFault! {
+fn __read_request(stream: __HTTPConn, &wire: __HTTPWire) -[Net, Time.Wait]> HTTPRequest __HTTPFault! {
     split := http.find_double_crlf(wire.buffer)
     loop split < 0 {
         if wire.buffer.len() > C_MAX_HEAD_BYTES -> return Err(.Reply(431))
@@ -1171,7 +1231,7 @@ fn __chunk_size(line: [U8]) -> Int? Never! {
     Val(size)
 }
 
-fn __read_chunked(stream: TCPStream, &wire: __HTTPWire, start: Int, declared: [String]) -[Net]> __HTTPChunked __HTTPFault! {
+fn __read_chunked(stream: __HTTPConn, &wire: __HTTPWire, start: Int, declared: [String]) -[Net, Time.Wait]> __HTTPChunked __HTTPFault! {
     at := start
     body := [U8]{}
     loop {

@@ -141,17 +141,33 @@ fn __client_connect(stream: ^TCPStream, server_name: String, config: ClientConfi
 fn __server(stream: ^TCPStream, cert_pem: String, key_pem: String, alpn: [String], deadline: Duration) -[Net, Time.Wait]> TLSStream NetError! {
     tcp := ^stream
     end_ns :: __deadline_end(deadline, "tls accept") ?? return Err(err)
-    context := __context_new(1) ?? return Err(__net_error("tls accept", err.message))
+    context := __server_context(cert_pem, key_pem) ?? return Err(__net_error("tls accept", err.message))
     raw :: context.raw
-    if __has_nul(cert_pem) || __has_nul(key_pem) -> return Err(__net_error("tls accept", "TLS server identity is invalid: PEM text contains a NUL byte"))
-    identity :: __c_own_pem(raw, cert_pem, key_pem)
-    if identity != 0 -> return Err(__net_error("tls accept", "TLS server identity is invalid: {__mbedtls_text(identity)}"))
     _ :: __add_alpn(raw, alpn) ?? return Err(__net_error("tls accept", err.message))
     __c_authmode(raw, 0)
     status :: __c_setup(raw, core.net.__tcp_fd(tcp), "")
     if status != 0 -> return Err(__net_error("tls accept", "TLS handshake failed: {__mbedtls_text(status)}"))
     _ :: __handshake(context, tcp, "", end_ns) ?? return Err(err)
     Ok(TLSStream{state: Val(shared __TLSState{context: ^context, tcp: ^tcp, peer: None, pending: [U8]{}, read_eof: false, write_closed: false, closed: false})})
+}
+
+// A server context holding the certificate chain and private key. The HTTPS
+// listener (`tls: server.tls(cert, key)`) also builds one at bind to reject an
+// unusable identity before serving (D-TLSSERVE1=A,
+// Docs/spec/syntax-decisions.md:5083). The messages are the Rust oracle's
+// (c9129d174d^ crates/jet-pkg-model/src/Prelude/HTTPServerTLS.rs:37-64): a
+// certificate PEM holds a CERTIFICATE block, and a key PEM holds a PKCS#8,
+// PKCS#1 or SEC1 private key block.
+fn __server_context(cert_pem: String, key_pem: String) -> __TLSContext __TLSFailure! {
+    if !cert_pem.contains("-----BEGIN CERTIFICATE-----") -> return Err(__fail("TLS certificate PEM did not contain a certificate"))
+    if !key_pem.contains("-----BEGIN PRIVATE KEY-----") && !key_pem.contains("-----BEGIN RSA PRIVATE KEY-----") && !key_pem.contains("-----BEGIN EC PRIVATE KEY-----") {
+        return Err(__fail("TLS private key PEM did not contain a private key"))
+    }
+    context := __context_new(1) ?? return Err(err)
+    if __has_nul(cert_pem) || __has_nul(key_pem) -> return Err(__fail("TLS server identity is invalid: PEM text contains a NUL byte"))
+    identity :: __c_own_pem(context.raw, cert_pem, key_pem)
+    if identity != 0 -> return Err(__fail("TLS certificate and private key do not match: {__mbedtls_text(identity)}"))
+    Ok(^context)
 }
 
 impl TLSStream {
