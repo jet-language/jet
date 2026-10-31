@@ -2,7 +2,7 @@
 // JetOS system/fleet/vmtest claims are omitted (mapping-B jetos_detail).
 use jet_env_model.[
     AdapterRecipe, DevServiceExtra, EnvironmentRead, HostOverrideValue, IntegrationKind,
-    ModuleEntryKey, PromptPathMode, PromptStripMode, envmodel_evaluate_env,
+    ModuleEntryKey, PromptPathMode, PromptStripMode, RestartPolicy, ShutdownPolicy, envmodel_evaluate_env,
     envmodel_evaluate_env_with_environment, envmodel_evaluate_env_with_preset,
     envmodel_evaluate_package_profile, envmodel_evaluate_source, envmodel_merge_all,
     envmodel_merge_error_to_diagnostic, envmodel_merged_entry,
@@ -95,7 +95,7 @@ use jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
     assert_eq(facts.reference, "widget@catalog")
     assert_eq(facts.provider, "cran")
     assert_eq(facts.resolved_source, "cran:widget#version=1.2.3")
-    assert_eq(facts.qualified_reference(), "widget#version=1.2.3@catalog")
+    assert_eq(facts.qualified_reference(), "widget@catalog#version=1.2.3")
     assert(facts.is_lossless())
     assert(facts.facts.has_key("provider.resolved_selector"))
 }
@@ -360,7 +360,7 @@ use jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
     src :: "\nmodule env.dev {{\n    imports: [\n        env.platform.android(api: 35, build_tools: \"35.0.0\", ndk: \"27.1\"),\n        env.platform.apple(targets: [.IOS]),\n        env.security.certificates([dev_certificate]),\n        env.cloud.credentials([aws_production]),\n        env.security.vault([database_password]),\n        env.network.hosts([\"api.local\": \"127.0.0.1\"]),\n        env.agent.codex(mcp: [repo_server]),\n        env.editor.vscode()\n    ]\n}}\n"
     plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("the plan evaluates")
     assert_eq(plan.integrations.len(), 8)
-    assert(plan.package_refs.contains("android-sdk@nixpkgs"))
+    assert(plan.package_refs.contains("android-sdk@jetpack"))
     android :: envmodel_test_integration(plan, IntegrationKind.Android)
     assert_eq(android.options.get("api"), Val("35"))
     assert_eq(android.options.get("build_tools"), Val("35.0.0"))
@@ -372,7 +372,7 @@ use jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
     apple :: envmodel_test_integration(plan, IntegrationKind.Apple)
     assert_eq(apple.options.get("targets"), Val("IOS"))
     assert_eq(apple.options.get("license"), Val("policy-required"))
-    assert(apple.packages.contains("apple-sdk@nixpkgs"))
+    assert(apple.packages.contains("apple-sdk@jetpack"))
     assert(apple.validate_target("darwin.aarch64") == .Ok(_))
     assert(apple.validate_target("linux.x64") == .Err(_))
     certs :: envmodel_test_integration(plan, IntegrationKind.Certificates)
@@ -408,7 +408,7 @@ use jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
     assert(agent.grants.contains("mcp.read"))
     editor :: envmodel_test_integration(plan, IntegrationKind.Editor)
     assert_eq(editor.preset, "vscode")
-    assert_eq(editor.packages, [String]{"vscode@nixpkgs"})
+    assert_eq(editor.packages, [String]{"vscode@jetpack"})
     assert_eq(editor.providers, [String]{"nixpkgs"})
 }
 
@@ -497,6 +497,25 @@ use jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
 #Test("dev service without enable is e0975") {
     src :: "module env.dev {{ services: {{ redis: {{ ports: [6379] }} }} }}"
     assert_eq(envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir())).code, "E0975")
+}
+
+// The spec's `restart: .OnFailure{ max: 3, backoff_ms: 250 }` form
+// (jetpack-epoch5.md): a leading-dot enum value, nested values included,
+// reads through the module-value evaluator into the typed policies.
+#Test("dev service restart and shutdown read leading-dot enum values") {
+    src :: "\nmodule env.dev {{\n    services: {{\n        api: {{ run: [\"api\"], restart: .OnFailure{{ max: 1, backoff_ms: 1 }}, shutdown: .Term{{ grace_ms: 500 }} }},\n        worker: {{ run: [\"worker\"], restart: .Always{{ max: 2, backoff: .Exponential }}, shutdown: .Kill }},\n    }}\n}}\n"
+    plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("the plan evaluates")
+    assert_eq(plan.dev_services.len(), 2)
+    api :: plan.dev_services[0]
+    assert_eq(api.name, "api")
+    assert_eq(api.restart, Val(RestartPolicy.OnFailure{max: 1, backoff_ms: 1, exponential: false}))
+    assert_eq(api.shutdown, Val(ShutdownPolicy.Term{grace_ms: 500}))
+    assert_eq(api.extra.len(), 0)
+    worker :: plan.dev_services[1]
+    assert_eq(worker.name, "worker")
+    assert_eq(worker.restart, Val(RestartPolicy.Always{max: 2, backoff_ms: 250, exponential: true}))
+    assert_eq(worker.shutdown, Val(ShutdownPolicy.Kill))
+    assert_eq(worker.extra.len(), 0)
 }
 
 #Test("dev services are captured independently of other tiers") {

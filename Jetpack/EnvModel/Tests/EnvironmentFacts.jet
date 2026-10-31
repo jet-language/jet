@@ -134,8 +134,8 @@ fn envmodel_test_snapshot_refused(root: String, relative: String) -[FS, Env]> Bo
     core_names :: [String]{"Rust", "Python", "Go", "JavaScript"}
     loop name in core_names -> assert(catalog.get(name) != None)
     expanded :: catalog.expand([LanguageSpec]{LanguageSpec{name: "Rust", enable: true}, LanguageSpec{name: "Python", enable: true}}) ?? panic("core languages expand")
-    assert(expanded.packages.contains("rustc@nixpkgs"))
-    assert(expanded.packages.contains("python@nixpkgs"))
+    assert(expanded.packages.contains("rustc@jetpack"))
+    assert(expanded.packages.contains("python@jetpack"))
 }
 
 #Test("catalog covers the extended language families with tool facts") {
@@ -170,9 +170,9 @@ fn envmodel_test_snapshot_refused(root: String, relative: String) -[FS, Env]> Bo
     catalog :: LanguagePackCatalog.builtin()
     expanded :: catalog.expand([LanguageSpec]{LanguageSpec{name: "go", enable: true}, LanguageSpec{name: "javascript", enable: true}}) ?? panic("go and javascript expand")
     assert_eq(expanded.applied, [String]{"Go", "JavaScript"})
-    assert(expanded.packages.contains("go@nixpkgs"))
-    assert(expanded.packages.contains("gopls@nixpkgs"))
-    assert(expanded.packages.contains("nodejs@nixpkgs"))
+    assert(expanded.packages.contains("go@jetpack"))
+    assert(expanded.packages.contains("gopls@jetpack"))
+    assert(expanded.packages.contains("nodejs@jetpack"))
     assert_eq(expanded.commands.get("gofmt"), Val("gofmt"))
     assert_eq(expanded.commands.get("npx"), Val("npx"))
     loop projection in expanded.projections -> assert_eq(projection.missing_tools.len(), 0)
@@ -365,18 +365,18 @@ fn envmodel_test_snapshot_refused(root: String, relative: String) -[FS, Env]> Bo
 
     expansion :: LanguagePackCatalog.builtin().expand(selections) ?? panic("selections expand")
     assert_eq(expansion.applied, [String]{"Rust"})
-    assert(expansion.packages.contains("rustc@nixpkgs#version=1.78"))
+    assert(expansion.packages.contains("rustc@jetpack#version=1.78"))
     assert(expansion.packages.contains("rust-analyzer@nixpkgs"))
     assert_eq(expansion.selections.len(), 2)
     rust_projection :: envmodel_test_projection(expansion, "Rust")
-    assert(rust_projection.included.contains("rustc@nixpkgs#version=1.78"))
+    assert(rust_projection.included.contains("rustc@jetpack#version=1.78"))
     assert(rust_projection.changed.contains("channel=Stable"))
     assert_eq(rust_projection.host, "native")
     assert_eq(rust_projection.platform, pkg_host_key())
     assert_eq(rust_projection.license, "Apache-2.0 OR MIT")
     assert_eq(rust_projection.missing_tools.len(), 0)
     python_projection :: envmodel_test_projection(expansion, "Python")
-    assert(python_projection.omitted.contains("python@nixpkgs"))
+    assert(python_projection.omitted.contains("python@jetpack"))
     assert(python_projection.changed.contains("enable=false"))
 }
 
