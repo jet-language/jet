@@ -205,19 +205,14 @@ function repoSourcePath(relative) {
   return resolved;
 }
 
-test("scoreboard applies the Rust noise band to every Rust rail", () => {
-  assert.equal(ratioVerdict(0.99, "rust"), "win");
-  assert.equal(ratioVerdict(1, "rust"), "parity");
-  assert.equal(ratioVerdict(1.05, "rust"), "parity");
-  assert.equal(ratioVerdict(1.0501, "rust"), "loss");
-  assert.equal(ratioVerdict(0.99, "zig"), "win");
-  assert.equal(ratioVerdict(1, "zig"), "loss");
-  assert.equal(ratioVerdict(1.01, "c"), "loss");
-  assert.equal(ratioVerdict(1.01, "rust-expert"), "parity");
-  assert.equal(ratioVerdict(1.01, "unknown-expert"), "loss");
-  assert.equal(ratioVerdict(Number.NaN, "rust"), null);
-  assert.equal(ratioVerdict(0, "rust"), null);
-  assert.equal(ratioVerdict(-1, "zig"), null);
+test("scoreboard judges every peer, Rust included, by the strict <1 comparator", () => {
+  assert.equal(ratioVerdict(0.99), "win");
+  assert.equal(ratioVerdict(1), "loss");
+  assert.equal(ratioVerdict(1.05), "loss");
+  assert.equal(ratioVerdict(1.01), "loss");
+  assert.equal(ratioVerdict(Number.NaN), null);
+  assert.equal(ratioVerdict(0), null);
+  assert.equal(ratioVerdict(-1), null);
 });
 
 test("expert peer comparisons use the matched Jet expert AOT row", () => {
@@ -373,7 +368,7 @@ test("candidate peer loss is retained in the aggregate cell verdict", () => {
     cards: new Map(),
   });
   const record = scoreboard.cells[0].entries[0];
-  assert.equal(record.peers.find((peer) => peer.language === "rust").verdict, "parity");
+  assert.equal(record.peers.find((peer) => peer.language === "rust").verdict, "loss");
   assert.equal(record.peers.find((peer) => peer.language === "cxx").verdict, "loss");
   assert.equal(record.verdict, "loss");
 });
@@ -612,10 +607,7 @@ test("web-app results omit undeclared Jet tiers", () => {
 
 test("measurement manifest covers every corpus entry and source pair", async () => {
   const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
-  assert.deepEqual(manifest.report_contract.ratio_verdicts, {
-    rust: { win: "<1", parity: "<=1.05", loss: ">1.05" },
-    non_rust: { win: "<1", parity: null, loss: ">=1" },
-  });
+  assert.deepEqual(manifest.report_contract.ratio_verdicts, { win: "<1", loss: ">=1" });
   assert.equal(manifest.report_contract.loss_owner_required_for, "any_comparable_metric_loss");
   assert.deepEqual(manifest.report_contract.peer_measurement, {
     ratio_tiers: ["aot", "run"],

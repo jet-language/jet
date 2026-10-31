@@ -63,12 +63,10 @@ const TIER_POLICY = {
   web: { aot: { required: true }, run: { required: true }, dev: { required: false } },
   "web-app": { aot: { required: true } },
 };
-const RATIO_VERDICTS = {
-  rust: { win: "<1", parity: "<=1.05", loss: ">1.05" },
-  non_rust: { win: "<1", parity: null, loss: ">=1" },
-};
+// One comparator for every peer, Rust included: Jet/peer below 1 wins, anything else loses.
+const RATIO_VERDICTS = { win: "<1", loss: ">=1" };
 const STRICT_PERFORMANCE_POLICY_TEXT = [
-  "Jet targets a strict win for every matched peer on every required cell and metric. Rust permits same-run parity only at a Jet/Rust ratio of 1.05 or lower; that band is measurement noise, not a target or a win. Every non-Rust peer requires Jet/peer below 1.00.",
+  "Jet targets a strict win for every matched peer on every required cell and metric. Rust is judged like every other peer: Jet/peer must be below 1.00. The target is the machine's ceiling: code as good as the best hand-written assembly for the workload; beating peers is the floor, not the goal.",
   "",
   "Required cells cover foundations (numerics, text, files, concurrency, networking, build time, and run time) plus one real workload in each critical area: web, games, CLI and scripts, data analysis, backend services, AI/ML applications, GUI applications, and embedded. A niche becomes required only when Jet ships a first-party battery for it. Do not claim a niche win without that battery.",
   "",
@@ -76,9 +74,9 @@ const STRICT_PERFORMANCE_POLICY_TEXT = [
 ].join("\n");
 
 const STRICT_PERFORMANCE_POLICY = Object.freeze({
-  schema: "jet.strict-performance-policy.v1",
+  schema: "jet.strict-performance-policy.v2",
   id: "AGENTS.md#strict-performance-gate",
-  version: 1,
+  version: 2,
   comparison: "per_cell_and_metric",
   comparators: RATIO_VERDICTS,
   failure_statuses: Object.freeze([
@@ -1673,13 +1671,8 @@ async function startPeer(sourceDir, peer) {
 }
 
 
-function ratioVerdict(ratio, peerLanguage = null) {
+function ratioVerdict(ratio) {
   if (!Number.isFinite(ratio) || ratio <= 0) return null;
-  if (baseLanguage(peerLanguage ?? "") === "rust") {
-    if (ratio < 1) return "win";
-    if (ratio <= 1.05) return "parity";
-    return "loss";
-  }
   return ratio < 1 ? "win" : "loss";
 }
 
@@ -1864,7 +1857,7 @@ function comparisons(entry, languages, rows, tiers = {}) {
           (evidence.jet?.confidence?.status === "available" && evidence.peer?.confidence?.status === "available" &&
             evidence.jet?.noise && evidence.peer?.noise &&
             evidence.jet.raw_samples?.length > 0 && evidence.peer.raw_samples?.length > 0);
-        const verdict = evidenceReady ? ratioVerdict(ratio, language) : null;
+        const verdict = evidenceReady ? ratioVerdict(ratio) : null;
         tierComparison.metrics[metric] = {
           status: verdict === null ? (evidence && !evidenceReady ? "inconclusive" : "unmeasured") : "measured",
           jet: jetValue,
@@ -2396,11 +2389,10 @@ function liveLossOwner(declaredOwners, metric, tower) {
 function cellVerdict(verdicts) {
   const comparable = verdicts.filter((verdict) => verdict !== "not_applicable");
   if (!comparable.length) return "not_applicable";
-  if (comparable.some((verdict) => !["win", "parity", "loss"].includes(verdict))) {
+  if (comparable.some((verdict) => !["win", "loss"].includes(verdict))) {
     return "unmeasured";
   }
   if (comparable.includes("loss")) return "loss";
-  if (comparable.includes("parity")) return "parity";
   return "win";
 }
 
@@ -2478,7 +2470,7 @@ function scoreboardMetricComparison(entry, language, comparison, metric, declare
     }
     const expectedVerdict = positiveMetricValue(metric, item?.jet) && positiveMetricValue(metric, item?.peer) &&
       Number.isFinite(item?.ratio) && item.ratio === item.jet / item.peer
-      ? ratioVerdict(item.ratio, language)
+      ? ratioVerdict(item.ratio)
       : null;
     const valid = item?.status === "measured" &&
       expectedVerdict !== null &&
@@ -2735,7 +2727,7 @@ function validateResultShape(result, matrix = null) {
         }
         if (item?.status !== "measured" || !positiveMetricValue(metric, item?.jet) ||
           !positiveMetricValue(metric, item?.peer) || !Number.isFinite(item?.ratio) ||
-          item.ratio !== item.jet / item.peer || item.verdict !== ratioVerdict(item.ratio, language)) {
+          item.ratio !== item.jet / item.peer || item.verdict !== ratioVerdict(item.ratio)) {
           issues.push(`${name}/${language}/${tier}/${metric}: missing or invalid independently measured cell`);
         }
       }
@@ -2796,7 +2788,7 @@ function buildScoreboard(matrix, results, manifest, tower) {
             primaryComparison?.tiers?.[tier]?.verdict ?? null,
           ]));
           const metricFailures = Object.entries(metricComparisons)
-            .filter(([, item]) => !["win", "parity", "not_applicable"].includes(item.verdict))
+            .filter(([, item]) => !["win", "not_applicable"].includes(item.verdict))
             .map(([item, value]) => {
               const owner = value.verdict === "loss"
                 ? liveLossOwner(declaredOwners[result.entry.name], item, towerState)
@@ -2835,7 +2827,7 @@ function buildScoreboard(matrix, results, manifest, tower) {
         cellVerdict(applicablePeers.map((peer) => peer.metric_verdicts[item] ?? null)),
       ]));
       const metricFailures = Object.entries(metricVerdicts)
-        .filter(([, verdict]) => !["win", "parity", "not_applicable"].includes(verdict))
+        .filter(([, verdict]) => !["win", "not_applicable"].includes(verdict))
         .map(([item, verdict]) => {
           const peerFailures = applicablePeers.flatMap((peer) => peer.metric_failures.filter((failure) => failure.metric === item));
           return {
@@ -2905,19 +2897,17 @@ function buildScoreboard(matrix, results, manifest, tower) {
     strict_performance_policy: STRICT_PERFORMANCE_POLICY,
     contract: "gauntlet-scoreboard-v1",
     primary_metric_by_mode: MODE_PRIMARY_METRIC,
-    verdict_policy: { rust: RATIO_VERDICTS.rust, non_rust: RATIO_VERDICTS.non_rust, unmeasured: "missing row, tier, metric, or byte verification" },
+    verdict_policy: { ...RATIO_VERDICTS, unmeasured: "missing row, tier, metric, or byte verification" },
     validation_issues: [...new Set([...resultValidationIssues, ...policyValidationIssues])],
     cells,
     summary: {
       cells: cells.length,
       win: verdicts.filter((verdict) => verdict === "win").length,
-      parity: verdicts.filter((verdict) => verdict === "parity").length,
       loss: verdicts.filter((verdict) => verdict === "loss").length,
       unmeasured: verdicts.filter((verdict) => verdict === "unmeasured").length,
       unmeasured_allowed: cells.filter((cell) => cell.verdict === "unmeasured" && allowedUncovered.has(cell.id)).length,
       unmeasured_required: cells.filter((cell) => cell.verdict === "unmeasured" && !allowedUncovered.has(cell.id)).length,
       metric_win: metricVerdicts.filter((verdict) => verdict === "win").length,
-      metric_parity: metricVerdicts.filter((verdict) => verdict === "parity").length,
       metric_loss: metricVerdicts.filter((verdict) => verdict === "loss").length,
       metric_unmeasured: metricVerdicts.filter((verdict) => verdict === "unmeasured").length,
       metric_not_applicable: metricVerdicts.filter((verdict) => verdict === "not_applicable").length,

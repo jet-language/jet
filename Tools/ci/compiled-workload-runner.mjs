@@ -845,21 +845,15 @@ const taskById = new Map(manifest.map(row => [row.task_id, row]));
 const metricUnits = new Map(metricContract.map(row => [row.metric, row.unit]));
 const policies = new Map(policyRows.map(row => [row.metric, row]));
 
-function policyTolerance(taskId, metric) {
+// Every peer, Rust included, shares one comparator: Jet loses at or above peer * tolerance.
+function policyComparison(taskId, metric) {
   const policy = policies.get(metric);
   const peerLanguage = selectedPeers.get(taskId)?.language;
   if (!policy || !peerLanguage) fail("measurement policy or peer missing: " + taskId + "/" + metric);
-  return Number(peerLanguage === "rust" ? policy.rust_tolerance_ratio : policy.tolerance_ratio);
-}
-
-function policyComparison(taskId, metric) {
-  const peerLanguage = selectedPeers.get(taskId)?.language;
-  if (!peerLanguage) fail("selected peer missing: " + taskId);
-  const tolerance = policyTolerance(taskId, metric);
   return {
     peerLanguage,
-    tolerance,
-    operator: peerLanguage === "rust" ? ">" : ">=",
+    tolerance: Number(policy.tolerance_ratio),
+    operator: ">=",
   };
 }
 if (toolchainContract.size !== 6) fail("frozen toolchain contract is incomplete");
@@ -871,7 +865,7 @@ if (peers.length < manifest.length || peerAdapterByKey.size !== peers.length) fa
 if (new Set(peers.map(peerKey)).size !== peers.length) fail("peer ledger keys must be unique");
 
 for (const policy of policyRows) {
-  if (policy.tolerance_ratio !== "1.00" || policy.rust_tolerance_ratio !== "1.05") {
+  if (policy.tolerance_ratio !== "1.00") {
     fail("peer ratio law drifted for metric: " + policy.metric);
   }
 }
@@ -2053,10 +2047,7 @@ for (const stat of statistics) {
   const peer = statsByKey.get(stat.task + "\t" + selectedPeers.get(stat.task).language + "\t" + stat.metric);
   if (!peer) fail("peer statistic missing: " + stat.task + "/" + stat.metric);
   const comparison = policyComparison(stat.task, stat.metric);
-  const loss = peer.median === 0 ? stat.median > 0 :
-    comparison.peerLanguage === "rust" ?
-      stat.median > peer.median * comparison.tolerance :
-      stat.median >= peer.median * comparison.tolerance;
+  const loss = peer.median === 0 ? stat.median > 0 : stat.median >= peer.median * comparison.tolerance;
   if (loss) {
     stat.status = "loss";
     stat.owner = manifest.find(task => task.task_id === stat.task).loss_cards;

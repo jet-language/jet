@@ -6,16 +6,13 @@ import { fileURLToPath } from "node:url";
 const harnessDir = path.dirname(fileURLToPath(import.meta.url));
 const repoDir = path.resolve(harnessDir, "../../..");
 const statusPath = path.join(repoDir, "Tools/gauntlet/status.json");
-const VERDICT_ORDER = Object.freeze({ loss: 0, unmeasured: 1, parity: 2, win: 3 });
+const VERDICT_ORDER = Object.freeze({ loss: 0, unmeasured: 1, win: 2 });
 const SUMMARY_KEYS = Object.freeze([
-  "cells", "win", "parity", "loss", "unmeasured", "unmeasured_allowed", "unmeasured_required",
-  "metric_win", "metric_parity", "metric_loss", "metric_unmeasured", "metric_not_applicable",
+  "cells", "win", "loss", "unmeasured", "unmeasured_allowed", "unmeasured_required",
+  "metric_win", "metric_loss", "metric_unmeasured", "metric_not_applicable",
 ]);
 const RATIO_TIERS = Object.freeze(["aot", "run"]);
-const STATUS_RATIO_VERDICTS = Object.freeze({
-  rust: { win: "<1", parity: "<=1.05", loss: ">1.05" },
-  non_rust: { win: "<1", parity: null, loss: ">=1" },
-});
+const STATUS_RATIO_VERDICTS = Object.freeze({ win: "<1", loss: ">=1" });
 const STATUS_TIER_POLICY_BY_MODE = Object.freeze({
   batch: ["aot", "run"],
   "batch-steps": ["aot", "run"],
@@ -61,7 +58,7 @@ const asObject = (value) => isObject(value) ? value : {};
 const asArray = (value) => Array.isArray(value) ? value : [];
 const finiteNumber = (value) => typeof value === "number" && Number.isFinite(value) ? value : null;
 const countValue = (value, fallback) => Number.isInteger(value) && value >= 0 ? value : fallback;
-const recognizedVerdict = (value) => ["win", "parity", "loss", "unmeasured", "not_applicable", "inconclusive"].includes(value);
+const recognizedVerdict = (value) => ["win", "loss", "unmeasured", "not_applicable", "inconclusive"].includes(value);
 
 function normalizeReportPath(value) {
   if (value == null) return null;
@@ -378,22 +375,16 @@ function tierPolicyFor(mode, policyByMode) {
   return ["aot", "run"];
 }
 
-function ratioVerdict(ratio, peer) {
+function ratioVerdict(ratio) {
   if (!Number.isFinite(ratio)) return "unmeasured";
-  if (String(peer ?? "").replace(/-expert$/, "") === "rust") {
-    if (ratio < 1) return "win";
-    if (ratio <= 1.05) return "parity";
-    return "loss";
-  }
   return ratio < 1 ? "win" : "loss";
 }
 
 function reduceVerdicts(values) {
   const comparable = values.filter((value) => value !== "not_applicable");
   if (!comparable.length) return "not_applicable";
-  if (comparable.some((value) => !["win", "parity", "loss"].includes(value))) return "unmeasured";
+  if (comparable.some((value) => !["win", "loss"].includes(value))) return "unmeasured";
   if (comparable.includes("loss")) return "loss";
-  if (comparable.includes("parity")) return "parity";
   return "win";
 }
 
@@ -430,7 +421,7 @@ function metricVerdict(peer, metric, mode, policyByMode) {
     const item = tiers[tier];
     if (!item) return "unmeasured";
     if (item.verdict === "inconclusive") return "unmeasured";
-    if (isMeasured(item)) return ratioVerdict(item.ratio, peer.peer);
+    if (isMeasured(item)) return ratioVerdict(item.ratio);
     return "unmeasured";
   });
   return reduceVerdicts(values);
@@ -459,9 +450,9 @@ function statusPolicyIssues(matrix) {
   const policy = matrix?.strict_performance_policy;
   if (!isObject(policy)) return ["matrix is missing the strict performance policy"];
   const issues = [];
-  if (policy.schema !== "jet.strict-performance-policy.v1" ||
+  if (policy.schema !== "jet.strict-performance-policy.v2" ||
       policy.id !== "AGENTS.md#strict-performance-gate" ||
-      policy.version !== 1 ||
+      policy.version !== 2 ||
       policy.comparison !== "per_cell_and_metric") {
     issues.push("matrix strict performance policy identity is not ratified");
   }
@@ -551,15 +542,15 @@ function statusMetricFailures(cellId, peerName, peer, metric, mode, cellFailures
       values.push("not_applicable");
       continue;
     }
-    if (!isMeasured(item) || item.verdict !== ratioVerdict(item.ratio, peerName)) {
+    if (!isMeasured(item) || item.verdict !== ratioVerdict(item.ratio)) {
       issues.push(`${prefix}: ${tier} tier is missing or has an invalid strict ratio`);
       values.push("unmeasured");
       continue;
     }
-    values.push(ratioVerdict(item.ratio, peerName));
+    values.push(ratioVerdict(item.ratio));
   }
   const verdict = reduceVerdicts(values);
-  if (!["win", "parity", "not_applicable"].includes(verdict)) {
+  if (!["win", "not_applicable"].includes(verdict)) {
     issues.push(`${prefix}: metric ${verdict}`);
   }
   if (verdict === "loss") {
@@ -607,7 +598,7 @@ export function validateStatusGate(status, matrix) {
       for (const metric of metrics) issues.push(...statusMetricFailures(id, peerName, peer, metric, mode, cell?.failures, cell?.loss_owners));
     }
     if (!cell) continue;
-    if (!recognizedVerdict(cell.verdict) || !["win", "parity"].includes(cell.verdict)) {
+    if (cell.verdict !== "win") {
       issues.push(`${id}/peer/metric: cell ${cell.verdict ?? "unmeasured"}`);
     }
   }
@@ -678,13 +669,11 @@ function projectSummary(report, cells, { recomputeMetrics = false } = {}) {
   const fallback = {
     cells: cells.length,
     win: verdicts.filter((value) => value === "win").length,
-    parity: verdicts.filter((value) => value === "parity").length,
     loss: verdicts.filter((value) => value === "loss").length,
     unmeasured: verdicts.filter((value) => value === "unmeasured").length,
     unmeasured_allowed: 0,
     unmeasured_required: verdicts.filter((value) => value === "unmeasured").length,
     metric_win: 0,
-    metric_parity: 0,
     metric_loss: 0,
     metric_unmeasured: 0,
     metric_not_applicable: 0,
@@ -1050,13 +1039,11 @@ export function mergeStatus(input, reportPaths = []) {
   const summary = {
     cells: cells.length,
     win: cells.filter((cell) => cell.verdict === "win").length,
-    parity: cells.filter((cell) => cell.verdict === "parity").length,
     loss: cells.filter((cell) => cell.verdict === "loss").length,
     unmeasured: cells.filter((cell) => cell.verdict === "unmeasured").length,
     unmeasured_allowed: 0,
     unmeasured_required: cells.filter((cell) => cell.verdict === "unmeasured").length,
     metric_win: metricVerdicts.filter((value) => value === "win").length,
-    metric_parity: metricVerdicts.filter((value) => value === "parity").length,
     metric_loss: metricVerdicts.filter((value) => value === "loss").length,
     metric_unmeasured: metricVerdicts.filter((value) => value === "unmeasured").length,
     metric_not_applicable: metricVerdicts.filter((value) => value === "not_applicable").length,
@@ -1178,7 +1165,7 @@ async function writeStatusAndReport(status, matrix) {
   const strictBlockers = applyStatusGate(status, matrix);
   await fs.writeFile(statusPath, `${JSON.stringify(status, null, 2)}\n`);
   console.log(`status\t${path.relative(repoDir, statusPath).split(path.sep).join("/")}`);
-  console.log(`summary\tcells=${status.summary.cells}\twin=${status.summary.win}\tparity=${status.summary.parity}\tloss=${status.summary.loss}\tunmeasured=${status.summary.unmeasured}`);
+  console.log(`summary\tcells=${status.summary.cells}\twin=${status.summary.win}\tloss=${status.summary.loss}\tunmeasured=${status.summary.unmeasured}`);
   console.log(`strict_gate\t${strictBlockers.length ? "blocked" : "complete"}\tblockers=${strictBlockers.length}`);
   for (const blocker of strictBlockers) console.log(`blocker\t${blocker}`);
   if (strictBlockers.length) process.exitCode = 1;

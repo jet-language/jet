@@ -2093,12 +2093,7 @@ check_peer_rows() {
             echo "invalid Jet compiler-speed cell: $peer_program/$peer_state/$peer_metric" >&2
             exit 1
         }
-        if [ "$peer_language" = rust ]; then
-            if ! awk -v jet="$jet_value" -v peer="$peer_value" 'BEGIN { exit !(jet / peer <= 1.05) }'; then
-                echo "compiler-speed peer loss: $peer_name/$peer_program/$peer_state/$peer_metric Jet=$jet_value peer=$peer_value" >&2
-                exit 1
-            fi
-        elif ! awk -v jet="$jet_value" -v peer="$peer_value" 'BEGIN { exit !(jet / peer < 1.00) }'; then
+        if ! awk -v jet="$jet_value" -v peer="$peer_value" 'BEGIN { exit !(jet / peer < 1.00) }'; then
             echo "compiler-speed peer loss: $peer_name/$peer_program/$peer_state/$peer_metric Jet=$jet_value peer=$peer_value" >&2
             exit 1
         fi

@@ -118,8 +118,8 @@ measured deltas, not projections from older or differently configured runs.
 ## Performance gate and dated evidence
 
 The repository gate compares each matched cell and metric independently. Every
-non-Rust peer requires Jet/peer below `1.00`; Rust permits parity only at a
-Jet/Rust ratio of `1.05` or lower, which is a noise band rather than a win.
+peer, Rust included, requires Jet/peer below `1.00`; no peer has a tolerance
+band.
 Missing, wrong, unavailable, uncovered, mismatched, or inconclusive evidence
 cannot be averaged away.
 

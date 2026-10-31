@@ -733,17 +733,10 @@ check_baseline_peer_rows() {
             echo "baseline has invalid Jet compiler-speed cell: $baseline_peer_program/$baseline_peer_state/$baseline_peer_metric" >&2
             exit 1
         }
-        if [ "$baseline_peer_language" = rust ]; then
-            awk -v jet="$baseline_jet_value" -v peer="$baseline_peer_value" 'BEGIN { exit !(jet / peer <= 1.05) }' || {
-                echo "baseline compiler-speed peer loss: $baseline_peer_name/$baseline_peer_program/$baseline_peer_state/$baseline_peer_metric" >&2
-                exit 1
-            }
-        else
-            awk -v jet="$baseline_jet_value" -v peer="$baseline_peer_value" 'BEGIN { exit !(jet / peer < 1.00) }' || {
-                echo "baseline compiler-speed peer loss: $baseline_peer_name/$baseline_peer_program/$baseline_peer_state/$baseline_peer_metric" >&2
-                exit 1
-            }
-        fi
+        awk -v jet="$baseline_jet_value" -v peer="$baseline_peer_value" 'BEGIN { exit !(jet / peer < 1.00) }' || {
+            echo "baseline compiler-speed peer loss: $baseline_peer_name/$baseline_peer_program/$baseline_peer_state/$baseline_peer_metric" >&2
+            exit 1
+        }
     done < "$BASELINE_PEER_ROWS"
     awk -F "$TAB" '
         {
@@ -1081,12 +1074,7 @@ while IFS="$TAB" read -r peer_name peer_language peer_program peer_state peer_me
         }
     done
     printf '%s:%s\t%s\n' "$peer_name" "$peer_language" "$peer_toolchain" >> "$PEER_TOOLCHAINS_FILE"
-    if [ "$peer_language" = rust ]; then
-        if ! awk -v jet="$jet_value" -v peer="$peer_value" 'BEGIN { exit !(jet / peer <= 1.05) }'; then
-            echo "compiler-speed peer loss: $peer_name/$peer_program/$peer_state/$peer_metric Jet=$jet_value peer=$peer_value ratio>1.05" >&2
-            FAIL=1
-        fi
-    elif ! awk -v jet="$jet_value" -v peer="$peer_value" 'BEGIN { exit !(jet / peer < 1.00) }'; then
+    if ! awk -v jet="$jet_value" -v peer="$peer_value" 'BEGIN { exit !(jet / peer < 1.00) }'; then
         echo "compiler-speed peer loss: $peer_name/$peer_program/$peer_state/$peer_metric Jet=$jet_value peer=$peer_value ratio>=1.00" >&2
         FAIL=1
     fi

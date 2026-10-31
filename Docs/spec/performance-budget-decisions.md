@@ -51,10 +51,13 @@ Jet must satisfy the strict comparator in
 and metric. For each cell `c`, metric `m`, and matched peer `p`, compare the
 same workload and tier with `Jet/p`:
 
-| Peer | Strict win | Permitted parity | Loss |
-|---|---:|---:|---:|
-| Rust | `< 1.00` | `<= 1.05` (measurement noise, not a win) | `> 1.05` |
-| Any non-Rust peer | `< 1.00` | none | `>= 1.00` |
+| Peer | Win | Loss |
+|---|---:|---:|
+| Every matched peer, Rust included | `< 1.00` | `>= 1.00` |
+
+Rust gets no tolerance band. Beating every peer is the floor; the target is
+the machine's ceiling, code as good as the best hand-written assembly for the
+workload.
 
 The comparator is per cell and per metric. Averages cannot hide a losing cell;
 a missing, wrong, unavailable, uncovered, mismatched, or inconclusive result

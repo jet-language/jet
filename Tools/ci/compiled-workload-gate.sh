@@ -24,7 +24,7 @@ PEER_HEADER=$'version\ttask_id\tselection\tlanguage\tprogram\tsource_url\tsource
 PEER_ADAPTER_HEADER=$'version\tpeer_key\ttask_id\tselection\tlanguage\tpeer_source\tpeer_hostile\tpeer_commit'
 ADAPTER_HEADER=$'version\ttask_id\tjet_source\tjet_hostile\tpeer_source\tpeer_hostile\tpeer_commit'
 METRIC_HEADER=$'version\tmetric\tunit\tcomparison\tmissing_policy'
-POLICY_HEADER=$'version\tmetric\tsamples\tmin_samples\tmin_value\toutlier_mad_multiplier\tmax_relative_stdev\tmax_outliers\ttolerance_ratio\trust_tolerance_ratio'
+POLICY_HEADER=$'version\tmetric\tsamples\tmin_samples\tmin_value\toutlier_mad_multiplier\tmax_relative_stdev\tmax_outliers\ttolerance_ratio'
 TIER_HEADER=$'version\ttask_id\tplatform\ttarget\ttier\trequirement\tavailability\tavailability_reason\trationale'
 CANARY_HEADER=$'version\tcanary\tmutation\trequired_failure'
 TOOLCHAIN_HEADER=$'version\tlanguage\tcommand\tversion_prefix'
@@ -48,32 +48,18 @@ TOWER_CLI="$ROOT/Tools/tower/tower.mjs"
 # follows a linked worktree to the main checkout's live board.
 TOWER_BOARD="$ROOT/Tools/tower/.tower/tower.json"
 declare -A live_tower_owner_cache=()
-declare -gA policy_tolerance=() policy_rust_tolerance=()
+declare -gA policy_tolerance=()
 declare -gA policy_samples=()
 declare -gA policy_min_value=() policy_outlier_mad_multiplier=() policy_max_relative_stdev=() policy_max_outliers=()
 
-policy_tolerance_for_peer() {
-  local peer_language="$1" metric="$2"
-  if [[ "$peer_language" == rust ]]; then
-    printf '%s' "${policy_rust_tolerance[$metric]}"
-  else
-    printf '%s' "${policy_tolerance[$metric]}"
-  fi
-}
-
+# Every peer, Rust included, shares one comparator: Jet must be strictly below peer * tolerance.
 metric_is_loss() {
-  local peer_language="$1" metric="$2" jet_value="$3" peer_value="$4" tolerance
-  tolerance="$(policy_tolerance_for_peer "$peer_language" "$metric")"
+  local metric="$1" jet_value="$2" peer_value="$3"
   if awk -v jet="$jet_value" -v peer="$peer_value" 'BEGIN { exit !(jet == 0 && peer == 0) }'; then
     fail "zero/zero comparison is not a valid measurement: $metric"
   fi
-  if [[ "$peer_language" == rust ]]; then
-    awk -v jet="$jet_value" -v peer="$peer_value" -v tolerance="$tolerance" \
-      'BEGIN { if (peer == 0) exit !(jet > 0); exit !(jet > peer * tolerance) }'
-  else
-    awk -v jet="$jet_value" -v peer="$peer_value" -v tolerance="$tolerance" \
-      'BEGIN { if (peer == 0) exit !(jet > 0); exit !(jet >= peer * tolerance) }'
-  fi
+  awk -v jet="$jet_value" -v peer="$peer_value" -v tolerance="${policy_tolerance[$metric]}" \
+    'BEGIN { if (peer == 0) exit !(jet > 0); exit !(jet >= peer * tolerance) }'
 }
 
 fail() { echo "compiled workload gate: $*" >&2; exit 1; }
@@ -364,7 +350,7 @@ static_contract() {
   [[ "$(head -n 1 "$CANARIES")" == "$CANARY_HEADER" ]] || fail "removal canary schema drifted"
   [[ "$(head -n 1 "$TOOLCHAINS")" == "$TOOLCHAIN_HEADER" ]] || fail "toolchain contract schema drifted"
   local expected_fields
-  for expected_fields in "$MANIFEST:13" "$DOMAIN_CONTRACT:6" "$PEERS:13" "$PEER_ADAPTERS:8" "$ADAPTERS:7" "$METRIC_CONTRACT:5" "$MEASUREMENT_POLICY:10" "$TIER_MATRIX:9" "$CANARIES:4" "$TOOLCHAINS:4"; do
+  for expected_fields in "$MANIFEST:13" "$DOMAIN_CONTRACT:6" "$PEERS:13" "$PEER_ADAPTERS:8" "$ADAPTERS:7" "$METRIC_CONTRACT:5" "$MEASUREMENT_POLICY:9" "$TIER_MATRIX:9" "$CANARIES:4" "$TOOLCHAINS:4"; do
     file="${expected_fields%:*}"
     header="${expected_fields##*:}"
     awk -F '\t' -v expected="$header" 'NR > 1 && NF != expected { bad = 1; print NR ": expected " expected " fields, got " NF > "/dev/stderr" } END { exit bad }' "$file" || fail "row width drifted: ${file#$ROOT/}"
@@ -505,17 +491,16 @@ static_contract() {
   for metric in "${METRICS[@]}"; do [[ -n "${metric_seen[$metric]+x}" ]] || fail "required metric missing: $metric"; done
 
   declare -A policy_seen=()
-  local policy_version policy_metric samples min_samples min_value outlier_mad_multiplier max_relative_stdev max_outliers tolerance_ratio rust_tolerance_ratio
-  while IFS=$'\t' read -r policy_version policy_metric samples min_samples min_value outlier_mad_multiplier max_relative_stdev max_outliers tolerance_ratio rust_tolerance_ratio; do
+  local policy_version policy_metric samples min_samples min_value outlier_mad_multiplier max_relative_stdev max_outliers tolerance_ratio
+  while IFS=$'\t' read -r policy_version policy_metric samples min_samples min_value outlier_mad_multiplier max_relative_stdev max_outliers tolerance_ratio; do
     [[ -z "$policy_version" || "$policy_version" == version ]] && continue
     [[ "$policy_version" == 1 && -n "${metric_seen[$policy_metric]+x}" ]] || fail "bad measurement policy row: $policy_metric"
     [[ -z "${policy_seen[$policy_metric]+x}" ]] || fail "duplicate measurement policy row: $policy_metric"
-    [[ "$samples" =~ ^[1-9][0-9]*$ && "$min_samples" =~ ^[1-9][0-9]*$ && "$min_value" =~ ^[0-9]+([.][0-9]+)?$ && "$outlier_mad_multiplier" =~ ^[0-9]+([.][0-9]+)?$ && "$max_relative_stdev" =~ ^[0-9]+([.][0-9]+)?$ && "$max_outliers" =~ ^[0-9]+$ && "$tolerance_ratio" =~ ^[0-9]+([.][0-9]+)?$ && "$rust_tolerance_ratio" =~ ^[0-9]+([.][0-9]+)?$ ]] || fail "measurement policy value is invalid: $policy_metric"
-    [[ "$tolerance_ratio" == 1.00 && "$rust_tolerance_ratio" == 1.05 ]] || fail "peer ratio law drifted: $policy_metric"
+    [[ "$samples" =~ ^[1-9][0-9]*$ && "$min_samples" =~ ^[1-9][0-9]*$ && "$min_value" =~ ^[0-9]+([.][0-9]+)?$ && "$outlier_mad_multiplier" =~ ^[0-9]+([.][0-9]+)?$ && "$max_relative_stdev" =~ ^[0-9]+([.][0-9]+)?$ && "$max_outliers" =~ ^[0-9]+$ && "$tolerance_ratio" =~ ^[0-9]+([.][0-9]+)?$ ]] || fail "measurement policy value is invalid: $policy_metric"
+    [[ "$tolerance_ratio" == 1.00 ]] || fail "peer ratio law drifted: $policy_metric"
     ((min_samples <= samples)) || fail "measurement policy minimum exceeds samples: $policy_metric"
     policy_seen[$policy_metric]=1
     policy_tolerance[$policy_metric]="$tolerance_ratio"
-    policy_rust_tolerance[$policy_metric]="$rust_tolerance_ratio"
     policy_samples[$policy_metric]="$samples"
     policy_min_value[$policy_metric]="$min_value"
     policy_outlier_mad_multiplier[$policy_metric]="$outlier_mad_multiplier"
@@ -873,7 +858,7 @@ check_report() {
       jet_value="${metric_value_report[$jet_key]}"
       peer_value="${metric_value_report[$peer_key]}"
       jet_loses=0
-      if metric_is_loss "${selected_language[$id2]}" "$metric2" "$jet_value" "$peer_value"; then
+      if metric_is_loss "$metric2" "$jet_value" "$peer_value"; then
         jet_loses=1
       fi
       if ((jet_loses)); then
@@ -911,7 +896,7 @@ check_report() {
     else
       [[ "$stat_owner" == - ]] || fail "unexpected statistics loss owner: $stat_id/$stat_metric"
     fi
-    expected_stat_tolerance="$(policy_tolerance_for_peer "${selected_language[$stat_id]}" "$stat_metric")"
+    expected_stat_tolerance="${policy_tolerance[$stat_metric]}"
     [[ "$stat_tolerance" == "$expected_stat_tolerance" && -n "$stat_evidence" ]] || fail "statistics policy evidence drifted: $stat_id/$stat_language/$stat_metric"
     sample_group_key="$stat_id|$stat_language|$stat_metric"
     [[ -n "${sample_group_values[$sample_group_key]+x}" ]] || fail "statistics samples are missing: $sample_group_key"
@@ -1086,7 +1071,7 @@ check_report() {
       comparison_peer_value="${peer_measurement_median[$comparison_peer_metric_key]-}"
       [[ -n "$comparison_jet_value" && -n "$comparison_peer_value" ]] \
         || fail "peer comparison is missing a required cell: $peer_key/$metric"
-      if metric_is_loss "$comparison_peer_language" "$metric" "$comparison_jet_value" "$comparison_peer_value"; then
+      if metric_is_loss "$metric" "$comparison_jet_value" "$comparison_peer_value"; then
         fail "peer comparison loss: $peer_key/$metric (Jet=$comparison_jet_value peer=$comparison_peer_value)"
       fi
     done

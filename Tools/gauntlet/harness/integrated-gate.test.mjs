@@ -12,10 +12,7 @@ const COMMIT = "a".repeat(40);
 const TOOLCHAIN_SHA256 = "b".repeat(64);
 const MATRIX_SHA256 = "c".repeat(64);
 const MANIFEST_SHA256 = "d".repeat(64);
-const STRICT_POLICY = {
-  rust: { win: "<1", parity: "<=1.05", loss: ">1.05" },
-  non_rust: { win: "<1", parity: null, loss: ">=1" },
-};
+const STRICT_POLICY = { win: "<1", loss: ">=1" };
 const TIERS = ["aot", "run"];
 const PRIMARY_METRIC = {
   batch: "runtime_wall_seconds",
@@ -106,15 +103,15 @@ function manifest() {
   };
 }
 
-function report(mode) {
+function report(mode, peer = "python", jet = 1, peerValue = 2) {
   const metric = PRIMARY_METRIC[mode];
   const verificationKind = mode === "service" ? "service_probe_sequence" : "byte_exact_stdout";
   const metricValue = {
     status: "measured",
-    jet: 1,
-    peer: 2,
-    ratio: 0.5,
-    verdict: "win",
+    jet,
+    peer: peerValue,
+    ratio: jet / peerValue,
+    verdict: jet / peerValue < 1 ? "win" : "loss",
     measured_iso: NOW,
     source_file: EVIDENCE_FILE,
   };
@@ -136,9 +133,9 @@ function report(mode) {
       toolchain_sha256: TOOLCHAIN_SHA256,
     },
     entries: [{
-      entry: { name: "fixture", mode, cells: [CELL], languages: ["python"] },
+      entry: { name: "fixture", mode, cells: [CELL], languages: [peer] },
       comparisons: {
-        python: {
+        [peer]: {
           primary_metric: metric,
           tiers: Object.fromEntries(TIERS.map((tier) => [tier, { metrics: { [metric]: metricValue } }])),
         },
@@ -191,8 +188,8 @@ function compilerSpeed() {
   };
 }
 
-function gateInputs({ mode = "batch", verificationOverrides = {} } = {}) {
-  const status = projectStatus(report(mode), EVIDENCE_FILE);
+function gateInputs({ mode = "batch", verificationOverrides = {}, peer = "python", jet = 1, peerValue = 2 } = {}) {
+  const status = projectStatus(report(mode, peer, jet, peerValue), EVIDENCE_FILE);
   status.publication = { scope: "full_matrix", status: "complete", complete: true, blockers: [] };
   for (const [tier, verification] of Object.entries(verificationOverrides)) {
     const tierValue = status.cells[0].peers[0].metrics[PRIMARY_METRIC[mode]].tiers[tier];
@@ -220,7 +217,7 @@ function gateInputs({ mode = "batch", verificationOverrides = {} } = {}) {
     status,
     entries: new Map([["fixture", {
       path: "Tools/gauntlet/entries/fixture/entry.json",
-      value: { mode, languages: ["python"], cells: [CELL] },
+      value: { mode, languages: [peer], cells: [CELL] },
     }]]),
     conformanceInventory: ["fixture.public_function"],
     conformanceSummary: "core conformance denominator: 1 public function(s); 1 program(s); 0 carve-out(s); 0 uncovered row(s)",
@@ -256,6 +253,16 @@ test("accepts producer verification projected into byte-exact and service metric
     assert.equal(result.findings.some((finding) => finding.kind === "wrong-output"), false, `${mode} verification should be accepted`);
     assert.equal(tierResult(result, "aot").verdict, "win");
     assert.equal(tierResult(result, "run").verdict, "win");
+  }
+});
+
+test("Rust is judged like every peer: Jet/Rust 1.00 and 1.05 are losses", () => {
+  for (const jet of [100, 105]) {
+    const result = gate(gateInputs({ peer: "rust", jet, peerValue: 100 }));
+    assert.equal(tierResult(result, "aot").verdict, "loss", `Jet/Rust ${jet / 100} must lose`);
+    assert.equal(tierResult(result, "run").verdict, "loss", `Jet/Rust ${jet / 100} must lose`);
+    assert.ok(result.findings.some((finding) => finding.kind === "loss" && finding.peer === "rust" && finding.tier === "aot"));
+    assert.equal(result.checks.gauntlet.cells[0].verdict, "loss");
   }
 });
 

@@ -99,10 +99,10 @@ if [ "$mode" != peer-missing ]; then
         for peer_decl in rustc:rust cxx:cxx; do
             peer=${peer_decl%%:*}
             language=${peer_decl#*:}
-            peer_value=100
-            [ "$language" = cxx ] && peer_value=101
+            peer_value=101
             [ "$mode" = peer-loss ] && [ "$language" = cxx ] && peer_value=100
-            [ "$mode" = peer-rust-loss ] && [ "$language" = rust ] && peer_value=90
+            [ "$mode" = peer-rust-loss ] && [ "$language" = rust ] && peer_value=100
+            [ "$mode" = peer-rust-band ] && [ "$language" = rust ] && peer_value=96
             peer_workload=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
             [ "$mode" = peer-input ] && peer_workload=9999999999999999999999999999999999999999999999999999999999999999
             [ "$mode" = peer-value ] && peer_value=0
@@ -148,8 +148,7 @@ write_baseline() {
         for peer_decl in rustc:rust cxx:cxx; do
             peer=${peer_decl%%:*}
             language=${peer_decl#*:}
-            peer_value=100
-            [ "$language" = cxx ] && peer_value=101
+            peer_value=101
             for metric in latency_ns memory_bytes; do
                 peer_row=$(printf '{"peer":"%s","language":"%s","program":"fixture.jet","state":"%s","metric":"%s","value":%s,"workload_sha256":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","source_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","expected_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","manifest_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","toolchain_sha256":"9999999999999999999999999999999999999999999999999999999999999999"}' "$peer" "$language" "$state" "$metric" "$peer_value")
                 [ -z "$peers" ] || peers="$peers,"
@@ -369,8 +368,12 @@ expect_status 1 'peer contract identity mismatch' 'peer-contract changed'
 fixture_mode=peer-loss
 expect_status 1 'non-Rust peer loss' 'compiler-speed peer loss'
 
+# Rust is judged like every other peer: Jet/Rust 1.00 and 1.04 both lose.
 fixture_mode=peer-rust-loss
-expect_status 1 'Rust peer loss' 'compiler-speed peer loss'
+expect_status 1 'Rust peer ratio 1.00' 'compiler-speed peer loss'
+
+fixture_mode=peer-rust-band
+expect_status 1 'Rust peer ratio 1.04' 'compiler-speed peer loss'
 
 fixture_mode=peer-input
 expect_status 1 'peer input mismatch' 'compiler-speed peer workload identity mismatch'

@@ -2495,7 +2495,7 @@ async function viewGuidance() {
 }
 // ---- Gauntlet tab: one fixed matrix (cell × peer), latest measurement ------
 let gauntletCache = null;
-const GAUNTLET_VERDICTS = Object.freeze(new Set(['win', 'parity', 'loss', 'unmeasured', 'n/a']));
+const GAUNTLET_VERDICTS = Object.freeze(new Set(['win', 'loss', 'unmeasured', 'n/a']));
 const gauntletVerdict = (value) => GAUNTLET_VERDICTS.has(value) ? value : 'unmeasured';
 const gauntletCount = (value) => Number.isFinite(value) ? value : 0;
 const gauntletRowLabel = (row) => row.kind === 'axis' ? `axis · ${String(row.mode).replaceAll('_', ' ')}` : row.id;
@@ -2504,7 +2504,7 @@ const gauntletPeerLabel = (peer) => GAUNTLET_PEER_LABELS[peer] ?? peer;
 
 function gauntletBadge(value) {
   const verdict = gauntletVerdict(value);
-  const modifier = { loss: 'loss', unmeasured: 'open', parity: 'met', win: 'verified', 'n/a': 'open' }[verdict];
+  const modifier = { loss: 'loss', unmeasured: 'open', win: 'verified', 'n/a': 'open' }[verdict];
   return `<span class="critrow__badge critrow__badge--${modifier}">${verdict}</span>`;
 }
 
@@ -2639,7 +2639,7 @@ async function viewGauntlet() {
   const status = gauntletCache || {};
   const matrix = projectGauntletMatrix(status);
   const summary = matrix.summary;
-  const summaryPills = [['win', summary.win], ['parity', summary.parity], ['loss', summary.loss], ['unmeasured', summary.unmeasured]]
+  const summaryPills = [['win', summary.win], ['loss', summary.loss], ['unmeasured', summary.unmeasured]]
     .map(([value, count]) => `<span class="gauntlet__pill">${gauntletBadge(value)} <b>${esc(gauntletCount(count))}</b></span>`)
     .join('');
   const details = [];

@@ -10,18 +10,16 @@ function fixture(scope = "partial_entry") {
     options: { scope },
     scoreboard: {
       primary_metric_by_mode: { batch: "runtime_wall_seconds" },
-      verdict_policy: { rust: { win: "<1", parity: "<=1.05", loss: ">1.05" } },
+      verdict_policy: { win: "<1", loss: ">=1" },
       summary: {
         cells: 4,
         win: 1,
-        parity: 1,
-        loss: 1,
+        loss: 2,
         unmeasured: 1,
         unmeasured_allowed: 0,
         unmeasured_required: 1,
         metric_win: 1,
-        metric_parity: 1,
-        metric_loss: 1,
+        metric_loss: 2,
         metric_unmeasured: 1,
         metric_not_applicable: 0,
       },
@@ -77,18 +75,26 @@ function fixture(scope = "partial_entry") {
         },
         { id: "m.missing", domain: "m", kind: "batch", verdict: "unmeasured", entries: [] },
         {
-          id: "p.parity",
-          domain: "p",
+          id: "r.rust",
+          domain: "r",
           kind: "batch",
-          verdict: "parity",
+          verdict: "loss",
           entries: [{
-            entry: "parity",
+            entry: "rust-band",
             mode: "batch",
             primary_metric: "runtime_wall_seconds",
-            verdict: "parity",
-            peers: [{ language: "rust", verdict: "parity", tier_verdicts: { aot: "parity" }, metric_comparisons: {} }],
-            metric_failures: [],
-            loss_owners: [],
+            verdict: "loss",
+            peers: [{
+              language: "rust",
+              verdict: "loss",
+              metric_comparisons: {
+                runtime_wall_seconds: {
+                  tiers: { aot: { status: "measured", jet: 1.05, peer: 1, ratio: 1.05, verdict: "loss" } },
+                },
+              },
+            }],
+            metric_failures: [{ metric: "runtime_wall_seconds", verdict: "loss" }],
+            loss_owners: [{ entry: "rust-band", peer: "rust", status: "live" }],
           }],
         },
       ],
@@ -105,19 +111,18 @@ test("projects counts, deterministic verdict ordering, and null measurements", (
   assert.deepEqual(status.summary, {
     cells: 4,
     win: 1,
-    parity: 1,
-    loss: 1,
+    loss: 2,
     unmeasured: 1,
     unmeasured_allowed: 0,
     unmeasured_required: 1,
     metric_win: 1,
-    metric_parity: 1,
-    metric_loss: 1,
+    metric_loss: 2,
     metric_unmeasured: 1,
     metric_not_applicable: 0,
   });
-  assert.deepEqual(status.cells.map((cell) => cell.id), ["a.loss", "m.missing", "p.parity", "z.win"]);
-  const loss = status.cells[0];
+  assert.deepEqual(status.cells.map((cell) => cell.id), ["r.rust", "a.loss", "m.missing", "z.win"]);
+  assert.equal(status.cells[0].verdict, "loss", "Jet/Rust 1.05 is a loss");
+  const loss = status.cells.find((cell) => cell.id === "a.loss");
   assert.equal(loss.peers[0].peer, "rust");
   assert.equal(loss.peers[0].tiers.aot.ratio, 7, "projection must use the report ratio, not divide values");
   assert.equal(loss.peers[0].tiers.run.jet, null);
@@ -147,12 +152,12 @@ test("projects live reload comparison rows and axis publication", () => {
       },
       comparisons: {
         vite: {
-          verdict: "parity",
+          verdict: "loss",
           cold: { status: "measured", jet: 100, peer: 90, ratio: 1.111, verdict: "loss" },
-          warm: { status: "measured", jet: 110, peer: 105, ratio: 1.047, verdict: "parity" },
+          warm: { status: "measured", jet: 110, peer: 105, ratio: 1.047, verdict: "loss" },
         },
       },
-      verdicts: { vite: "parity" },
+      verdicts: { vite: "loss" },
       publication: { status: "ready", blockers: [] },
     },
   };
@@ -163,11 +168,11 @@ test("projects live reload comparison rows and axis publication", () => {
     warm_reload_latency_ms: 105,
   });
   assert.deepEqual(status.axes.live_reload.comparisons.vite, {
-    verdict: "parity",
+    verdict: "loss",
     cold: { status: "measured", jet: 100, peer: 90, ratio: 1.111, verdict: "loss" },
-    warm: { status: "measured", jet: 110, peer: 105, ratio: 1.047, verdict: "parity" },
+    warm: { status: "measured", jet: 110, peer: 105, ratio: 1.047, verdict: "loss" },
   });
-  assert.deepEqual(status.axes.live_reload.verdicts, { vite: "parity" });
+  assert.deepEqual(status.axes.live_reload.verdicts, { vite: "loss" });
 });
 
 function mergeReport(date, runId, cells) {
@@ -214,7 +219,7 @@ function measuredCell(id, ratioByPeer) {
 
 test("merges partial reports by cell, tier, and metric without erasing measurements", () => {
   const oldCell = measuredCell("text.kernel", {
-    rust: { aot: { ratio: 1.03, verdict: "parity" }, run: { ratio: 0.99, verdict: "win" } },
+    rust: { aot: { ratio: 1.03, verdict: "loss" }, run: { ratio: 0.99, verdict: "win" } },
     python: { aot: { ratio: 0.8, verdict: "win" }, run: { ratio: 1, verdict: "loss" } },
   });
   const newCell = measuredCell("text.regex", {
@@ -238,7 +243,7 @@ test("merges partial reports by cell, tier, and metric without erasing measureme
   assert.equal(old.measured_at, "2026-09-01");
   assert.equal(old.run_id, "run-old");
   assert.equal(old.peers.find((peer) => peer.peer === "rust").tiers.aot.ratio, 1.03);
-  assert.equal(old.peers.find((peer) => peer.peer === "rust").tiers.aot.verdict, "parity");
+  assert.equal(old.peers.find((peer) => peer.peer === "rust").tiers.aot.verdict, "loss");
   assert.equal(old.peers.find((peer) => peer.peer === "python").tiers.run.verdict, "loss");
   assert.equal(old.verdict, "loss");
   assert.equal(fresh.measured_at, "2026-09-02");
@@ -246,11 +251,11 @@ test("merges partial reports by cell, tier, and metric without erasing measureme
 });
 test("latest explicit unavailable tiers cannot reuse older measured samples", () => {
   const full = mergeReport("2026-09-03", "run-full", [measuredCell("text.kernel", {
-    rust: { aot: { ratio: 1.03, verdict: "parity" }, run: { ratio: 0.99, verdict: "win" } },
+    rust: { aot: { ratio: 1.03, verdict: "loss" }, run: { ratio: 0.99, verdict: "win" } },
   })]);
   full.options = { scope: "full_matrix" };
   const partialCell = measuredCell("text.kernel", {
-    rust: { aot: { ratio: 1.02, verdict: "parity" }, run: { ratio: 0.98, verdict: "win" } },
+    rust: { aot: { ratio: 1.02, verdict: "loss" }, run: { ratio: 0.98, verdict: "win" } },
   });
   partialCell.entries[0].peers[0].metric_comparisons.runtime_wall_seconds.tiers.run = {
     status: "inconclusive",
@@ -280,7 +285,7 @@ test("latest explicit unavailable tiers cannot reuse older measured samples", ()
 
 test("axis-only receipts keep language cells and take the latest axis row", () => {
   const full = mergeReport("2026-09-03", "run-full", [measuredCell("text.kernel", {
-    rust: { aot: { ratio: 1.03, verdict: "parity" }, run: { ratio: 0.99, verdict: "win" } },
+    rust: { aot: { ratio: 1.03, verdict: "loss" }, run: { ratio: 0.99, verdict: "win" } },
     python: { aot: { ratio: 0.8, verdict: "win" }, run: { ratio: 0.9, verdict: "win" } },
   })]);
   full.options = { scope: "full_matrix" };
@@ -323,21 +328,23 @@ test("axis-only receipts keep language cells and take the latest axis row", () =
   assert.equal(merged.axes.live_reload.comparisons.vite.cold.ratio, 10);
 });
 
-test("applies the Rust parity band and non-Rust strict win boundary", () => {
-  const report = mergeReport("2026-09-03", "run-law", [measuredCell("law", {
-    rust: { aot: { ratio: 1.05, verdict: null }, run: { ratio: 0.99, verdict: null } },
-    python: { aot: { ratio: 0.99, verdict: null }, run: { ratio: 1, verdict: null } },
-  })]);
-  const status = projectStatus(report, "Tools/gauntlet/results/2026-09-03.json");
-  const cell = status.cells[0];
-  assert.equal(cell.peers.find((peer) => peer.peer === "rust").tiers.aot.verdict, null);
-  assert.equal(cell.metric_verdicts.runtime_wall_seconds, "loss");
-  const merged = mergeStatus([{ report, reportPath: "Tools/gauntlet/results/2026-09-03.json" }]);
-  const rust = merged.cells[0].peers.find((peer) => peer.peer === "rust");
-  const python = merged.cells[0].peers.find((peer) => peer.peer === "python");
-  assert.equal(rust.metric_comparisons.runtime_wall_seconds.tiers.aot.verdict, null);
-  assert.equal(rust.verdict, "parity");
-  assert.equal(python.verdict, "loss");
+test("applies the strict <1 boundary to Rust exactly as to every other peer", () => {
+  for (const rustRatio of [1, 1.05]) {
+    const report = mergeReport("2026-09-03", "run-law", [measuredCell("law", {
+      rust: { aot: { ratio: rustRatio, verdict: null }, run: { ratio: 0.99, verdict: null } },
+      python: { aot: { ratio: 0.99, verdict: null }, run: { ratio: 1, verdict: null } },
+    })]);
+    const status = projectStatus(report, "Tools/gauntlet/results/2026-09-03.json");
+    const cell = status.cells[0];
+    assert.equal(cell.peers.find((peer) => peer.peer === "rust").tiers.aot.verdict, null);
+    assert.equal(cell.metric_verdicts.runtime_wall_seconds, "loss");
+    const merged = mergeStatus([{ report, reportPath: "Tools/gauntlet/results/2026-09-03.json" }]);
+    const rust = merged.cells[0].peers.find((peer) => peer.peer === "rust");
+    const python = merged.cells[0].peers.find((peer) => peer.peer === "python");
+    assert.equal(rust.metric_comparisons.runtime_wall_seconds.tiers.aot.verdict, null);
+    assert.equal(rust.verdict, "loss", `Jet/Rust ${rustRatio} must lose`);
+    assert.equal(python.verdict, "loss");
+  }
 });
 
 test("status gate treats missing web artifact bytes as a required metric failure", () => {

@@ -74,14 +74,11 @@
     "missing": "unmeasured_and_publication_blocked"
   },
   "strict_performance_policy": {
-    "schema": "jet.strict-performance-policy.v1",
+    "schema": "jet.strict-performance-policy.v2",
     "id": "AGENTS.md#strict-performance-gate",
-    "version": 1,
+    "version": 2,
     "comparison": "per_cell_and_metric",
-    "comparators": {
-      "rust": { "win": "<1", "parity": "<=1.05", "loss": ">1.05" },
-      "non_rust": { "win": "<1", "parity": null, "loss": ">=1" }
-    },
+    "comparators": { "win": "<1", "loss": ">=1" },
     "failure_statuses": [
       "missing",
       "wrong",
@@ -111,6 +108,6 @@
     ],
     "first_party_battery_required": true,
     "historical_receipts": "immutable_recorded_policy",
-    "text": "Jet targets a strict win for every matched peer on every required cell and metric. Rust permits same-run parity only at a Jet/Rust ratio of 1.05 or lower; that band is measurement noise, not a target or a win. Every non-Rust peer requires Jet/peer below 1.00.\n\nRequired cells cover foundations (numerics, text, files, concurrency, networking, build time, and run time) plus one real workload in each critical area: web, games, CLI and scripts, data analysis, backend services, AI/ML applications, GUI applications, and embedded. A niche becomes required only when Jet ships a first-party battery for it. Do not claim a niche win without that battery.\n\nApply the comparator per cell and metric. Never average away a loss, substitute an easier workload or tier, omit a peer, or pass wrong, unavailable, uncovered, mismatched, or inconclusive evidence. A performance card, milestone, dashboard, or release gate stays open while any required cell fails. Never trade semantics, diagnostics, determinism, safety, or I9 parity for a score. Manifests and gates must encode this policy; prose alone is not evidence. Historical receipts remain immutable evidence under their recorded policy and never weaken the current gate."
+    "text": "Jet targets a strict win for every matched peer on every required cell and metric. Rust is judged like every other peer: Jet/peer must be below 1.00. The target is the machine's ceiling: code as good as the best hand-written assembly for the workload; beating peers is the floor, not the goal.\n\nRequired cells cover foundations (numerics, text, files, concurrency, networking, build time, and run time) plus one real workload in each critical area: web, games, CLI and scripts, data analysis, backend services, AI/ML applications, GUI applications, and embedded. A niche becomes required only when Jet ships a first-party battery for it. Do not claim a niche win without that battery.\n\nApply the comparator per cell and metric. Never average away a loss, substitute an easier workload or tier, omit a peer, or pass wrong, unavailable, uncovered, mismatched, or inconclusive evidence. A performance card, milestone, dashboard, or release gate stays open while any required cell fails. Never trade semantics, diagnostics, determinism, safety, or I9 parity for a score. Manifests and gates must encode this policy; prose alone is not evidence. Historical receipts remain immutable evidence under their recorded policy and never weaken the current gate."
   }
 }

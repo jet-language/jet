@@ -149,9 +149,9 @@ A violation stops the affected work until it is fixed at the root.
 ## Performance gate
 
 Jet must strictly beat every matched peer on every required cell and metric.
-Against Rust, a same-run Jet/Rust ratio of `1.05` or lower counts as parity:
-that band is measurement noise, not a target and not a win. Against every other
-peer, Jet/peer must be below `1.00`.
+Rust is judged like every other peer: Jet/peer must be below `1.00`.
+The target is the machine's ceiling: code as good as the best hand-written
+assembly for the workload; beating peers is the floor, not the goal.
 
 Required cells cover the foundations (numerics, text, files, concurrency,
 networking, build time, and run time) plus one real workload in each critical
