@@ -17,37 +17,37 @@ fn memo_put(address: I64, value: I64) {
 
 #Export(c) fn jet_rt_memo_unlock(cell: I64) { sync_mutex_unlock(cell) }
 
-#Export(c) fn jet_rt_memo_len(cell: I64) -> I64 { memo_word(cell + I64{8}) }
+#Export(c) fn jet_rt_memo_len(cell: I64) -> I64 { memo_word(wrapping(cell + I64{8})) }
 
-#Export(c) fn jet_rt_memo_entry(cell: I64, index: I64) -> I64 { memo_word(memo_word(cell + I64{24}) + index * I64{8}) }
+#Export(c) fn jet_rt_memo_entry(cell: I64, index: I64) -> I64 { memo_word(wrapping(memo_word(wrapping(cell + I64{24})) + index * I64{8})) }
 
 // Entry `index` was hit: it is counted and moves to the front.
 #Export(c) fn jet_rt_memo_hit(cell: I64, index: I64) {
-    memo_put(cell + I64{32}, memo_word(cell + I64{32}) + I64{1})
+    memo_put(wrapping(cell + I64{32}), memo_word(wrapping(cell + I64{32})) + I64{1})
     if (index <= I64{0}) -> return
-    entries :: memo_word(cell + I64{24})
-    entry :: memo_word(entries + index * I64{8})
-    jet_rt_mem_move(entries + I64{8}, entries, index * I64{8})
+    entries :: memo_word(wrapping(cell + I64{24}))
+    entry :: memo_word(wrapping(entries + index * I64{8}))
+    jet_rt_mem_move(wrapping(entries + I64{8}), entries, index * I64{8})
     memo_put(entries, entry)
 }
 
 // No entry matched: the lookup is counted as a miss.
-#Export(c) fn jet_rt_memo_miss(cell: I64) { memo_put(cell + I64{40}, memo_word(cell + I64{40}) + I64{1}) }
+#Export(c) fn jet_rt_memo_miss(cell: I64) { memo_put(wrapping(cell + I64{40}), memo_word(wrapping(cell + I64{40})) + I64{1}) }
 
 // `name.cache()`: the store's `MemoStats` record (MemoStats.jet), read under
 // its lock: hits, misses, the entries held, and `bound`, the written bound
 // (a borrowed String the record keeps a copy of).
 #Export(c) fn jet_rt_memo_stats(cell: I64, bound: I64) -> I64 {
     sync_mutex_lock(cell)
-    hits :: memo_word(cell + I64{32})
-    misses :: memo_word(cell + I64{40})
-    size :: memo_word(cell + I64{8})
+    hits :: memo_word(wrapping(cell + I64{32}))
+    misses :: memo_word(wrapping(cell + I64{40}))
+    size :: memo_word(wrapping(cell + I64{8}))
     sync_mutex_unlock(cell)
     value :: jet_rt_alloc(MEMO_STATS_BYTES, I64{8})
-    data_tree_store(value + MEMO_STATS_HITS, hits)
-    data_tree_store(value + MEMO_STATS_MISSES, misses)
-    data_tree_store(value + MEMO_STATS_SIZE, size)
-    data_tree_store(value + MEMO_STATS_BOUND, jet_rt_string_clone(bound))
+    data_tree_store(wrapping(value + MEMO_STATS_HITS), hits)
+    data_tree_store(wrapping(value + MEMO_STATS_MISSES), misses)
+    data_tree_store(wrapping(value + MEMO_STATS_SIZE), size)
+    data_tree_store(wrapping(value + MEMO_STATS_BOUND), jet_rt_string_clone(bound))
     value
 }
 
@@ -56,9 +56,9 @@ fn memo_put(address: I64, value: I64) {
 // `bound` < 0 is unbounded.
 #Export(c) fn jet_rt_memo_file(cell: I64, entry: I64, bound: I64) -> I64 {
     if (bound == I64{0}) -> return entry
-    count :: memo_word(cell + I64{8})
-    capacity :: memo_word(cell + I64{16})
-    entries := memo_word(cell + I64{24})
+    count :: memo_word(wrapping(cell + I64{8}))
+    capacity :: memo_word(wrapping(cell + I64{16}))
+    entries := memo_word(wrapping(cell + I64{24}))
     if (count == capacity) {
         grown :: if (capacity == I64{0}) -> I64{8} else -> capacity * I64{2}
         fresh :: jet_rt_alloc(grown * I64{8}, I64{8})
@@ -66,16 +66,16 @@ fn memo_put(address: I64, value: I64) {
             jet_rt_mem_move(fresh, entries, count * I64{8})
             jet_rt_free(entries, capacity * I64{8}, I64{8})
         }
-        memo_put(cell + I64{16}, grown)
-        memo_put(cell + I64{24}, fresh)
+        memo_put(wrapping(cell + I64{16}), grown)
+        memo_put(wrapping(cell + I64{24}), fresh)
         entries = fresh
     }
-    jet_rt_mem_move(entries + I64{8}, entries, count * I64{8})
+    jet_rt_mem_move(wrapping(entries + I64{8}), entries, count * I64{8})
     memo_put(entries, entry)
     if (bound > I64{0} && count + I64{1} > bound) {
-        memo_put(cell + I64{8}, count)
-        return memo_word(entries + count * I64{8})
+        memo_put(wrapping(cell + I64{8}), count)
+        return memo_word(wrapping(entries + count * I64{8}))
     }
-    memo_put(cell + I64{8}, count + I64{1})
+    memo_put(wrapping(cell + I64{8}), count + I64{1})
     I64{0}
 }

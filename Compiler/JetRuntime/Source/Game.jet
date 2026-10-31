@@ -25,22 +25,22 @@ fn game_store(address: I64, value: I64) { trap_store(address, value) }
 
 fn game_list_push(header: I64, value: I64) {
     length :: game_word(header)
-    capacity :: game_word(header + I64{8})
-    data := game_word(header + I64{16})
+    capacity :: game_word(wrapping(header + I64{8}))
+    data := game_word(wrapping(header + I64{16}))
     if (length == capacity) {
         grown :: if (capacity == I64{0}) -> I64{4} else -> capacity * I64{2}
         buffer :: jet_rt_alloc(grown * I64{8}, I64{8})
         if (length != I64{0}) { coll_copy(data, buffer, length * I64{8}) }
         if (capacity != I64{0}) { jet_rt_free(data, capacity * I64{8}, I64{8}) }
-        game_store(header + I64{8}, grown)
-        game_store(header + I64{16}, buffer)
+        game_store(wrapping(header + I64{8}), grown)
+        game_store(wrapping(header + I64{16}), buffer)
         data = buffer
     }
-    game_store(data + length * I64{8}, value)
+    game_store(wrapping(data + length * I64{8}), value)
     game_store(header, length + I64{1})
 }
 
-fn game_list_text(header: I64, at: I64) -> I64 { game_word(game_word(header + I64{16}) + at * I64{8}) }
+fn game_list_text(header: I64, at: I64) -> I64 { game_word(wrapping(game_word(wrapping(header + I64{16})) + at * I64{8})) }
 
 fn game_list_has_text(header: I64, value: I64) -> Bool {
     at := I64{0}
@@ -70,11 +70,11 @@ fn game_state_retain(state: I64) -> I64 {
 fn game_state_release(state: I64) {
     if (state == I64{0}) -> return
     if (sync_add(state, I64{-1}) != I64{1}) -> return
-    coll_text_list_drop(state + I64{8}, true)
-    coll_text_list_drop(state + I64{32}, true)
-    coll_text_list_drop(state + I64{56}, true)
-    coll_text_list_drop(state + I64{80}, true)
-    coll_text_list_drop(state + I64{104}, true)
+    coll_text_list_drop(wrapping(state + I64{8}), true)
+    coll_text_list_drop(wrapping(state + I64{32}), true)
+    coll_text_list_drop(wrapping(state + I64{56}), true)
+    coll_text_list_drop(wrapping(state + I64{80}), true)
+    coll_text_list_drop(wrapping(state + I64{104}), true)
     jet_rt_free(state, I64{128}, I64{8})
 }
 
@@ -94,38 +94,38 @@ fn game_state_release(state: I64) {
     scene :: jet_rt_alloc(I64{56}, I64{8})
     coll_zero(scene, I64{56})
     game_store(scene, state)
-    game_store(scene + I64{8}, game_state_retain(state))
-    game_store(scene + I64{16}, I64{1})
-    game_store(scene + I64{24}, jet_rt_string_clone(name))
+    game_store(wrapping(scene + I64{8}), game_state_retain(state))
+    game_store(wrapping(scene + I64{16}), I64{1})
+    game_store(wrapping(scene + I64{24}), jet_rt_string_clone(name))
     scene
 }
 
 #Export(c) fn jet_rt_handle_clone_jet_game_scene(scene: I64) -> I64 {
-    _ := sync_add(scene + I64{16}, I64{1})
+    _ := sync_add(wrapping(scene + I64{16}), I64{1})
     scene
 }
 
 #Export(c) fn jet_rt_handle_drop_jet_game_scene(scene: I64) {
     if (scene == I64{0}) -> return
-    if (sync_add(scene + I64{16}, I64{-1}) != I64{1}) -> return
-    callbacks :: scene + I64{32}
-    data :: game_word(callbacks + I64{16})
+    if (sync_add(wrapping(scene + I64{16}), I64{-1}) != I64{1}) -> return
+    callbacks :: wrapping(scene + I64{32})
+    data :: game_word(wrapping(callbacks + I64{16}))
     at := I64{0}
     loop at < game_word(callbacks) {
-        event_release_closure(game_word(data + at * I64{8}), game_word(data + (at + I64{2}) * I64{8}))
+        event_release_closure(game_word(wrapping(data + at * I64{8})), game_word(wrapping(data + (at + I64{2}) * I64{8})))
         at += I64{3}
     }
     coll_text_list_drop(callbacks, false)
-    jet_rt_string_drop(game_word(scene + I64{24}))
+    jet_rt_string_drop(game_word(wrapping(scene + I64{24})))
     game_state_release(game_word(scene))
-    game_state_release(game_word(scene + I64{8}))
+    game_state_release(game_word(wrapping(scene + I64{8})))
     jet_rt_free(scene, I64{56}, I64{8})
 }
 
 #Export(c) fn jet_rt_handle_show_jet_game_scene(scene: I64) -> I64 {
     target :: jet_rt_string_builder_new()
     jet_rt_string_builder_push(target, rt_static_text("GameScene("))
-    jet_rt_string_builder_push(target, game_word(scene + I64{24}))
+    jet_rt_string_builder_push(target, game_word(wrapping(scene + I64{24})))
     jet_rt_string_builder_push(target, rt_static_text(")"))
     jet_rt_string_builder_finish(target)
 }
@@ -133,14 +133,14 @@ fn game_state_release(state: I64) {
 
 // The scene takes the moved closure box; it is released once with the scene.
 #Export(c) fn jet_game_scene_on_frame(scene: I64, env: I64, invoke: I64, release: I64) {
-    callbacks :: scene + I64{32}
+    callbacks :: wrapping(scene + I64{32})
     game_list_push(callbacks, env)
     game_list_push(callbacks, invoke)
     game_list_push(callbacks, release)
 }
 
 #Export(c) fn jet_game_scene_component(scene: I64, name: I64) {
-    components :: game_word(scene) + I64{104}
+    components :: wrapping(game_word(scene) + I64{104})
     if !game_list_has_text(components, name) -> game_list_push(components, jet_rt_string_clone(name))
 }
 
@@ -148,7 +148,7 @@ fn game_state_release(state: I64) {
 // component is registered (Rust jet_game_scene_query: no names is one empty
 // row), else no rows.
 #Export(c) fn jet_game_scene_query(scene: I64, names: I64, out_data: I64) -> I64 {
-    components :: game_word(scene) + I64{104}
+    components :: wrapping(game_word(scene) + I64{104})
     row :: jet_rt_string_builder_new()
     data :: rt_text_data(names)
     length :: rt_text_len(names)
@@ -156,9 +156,9 @@ fn game_state_release(state: I64) {
     start := I64{0}
     at := I64{0}
     loop at <= length {
-        if (at == length || rt_text_byte(data + at) == I64{44}) {
+        if (at == length || rt_text_byte(wrapping(data + at)) == I64{44}) {
             if (at > start) {
-                name :: rt_text_copy(data + start, at - start)
+                name :: rt_text_copy(wrapping(data + start), at - start)
                 registered :: game_list_has_text(components, name)
                 if registered {
                     if (wanted != I64{0}) { rt_text_push_scalar(row, I64{44}) }
@@ -214,30 +214,30 @@ fn game_asset_resolve(path: I64, out: I64, err: I64) -> I64 {
     length :: rt_text_len(path)
     first := I64{0}
     last := length
-    loop first < last && game_asset_space(rt_text_byte(data + first)) -> first += I64{1}
-    loop last > first && game_asset_space(rt_text_byte(data + last - I64{1})) -> last -= I64{1}
+    loop first < last && game_asset_space(rt_text_byte(wrapping(data + first))) -> first += I64{1}
+    loop last > first && game_asset_space(rt_text_byte(wrapping(wrapping(data + last) - I64{1}))) -> last -= I64{1}
     if (first == last) -> return game_asset_error(jet_rt_string_builder_new(), rt_static_text("invalid game asset path `"), path, err)
     if (last - first > GAME_ASSET_MAX_PATH_BYTES) -> return game_asset_fixed_error(rt_static_text("game asset path exceeds the Prelude identity limit"), err)
     at := first
     loop at < last {
-        byte :: rt_text_byte(data + at)
-        c1 :: byte == I64{194} && at + I64{1} < last && rt_text_byte(data + at + I64{1}) >= I64{128} && rt_text_byte(data + at + I64{1}) <= I64{159}
+        byte :: rt_text_byte(wrapping(data + at))
+        c1 :: byte == I64{194} && at + I64{1} < last && rt_text_byte(wrapping(wrapping(data + at) + I64{1})) >= I64{128} && rt_text_byte(wrapping(wrapping(data + at) + I64{1})) <= I64{159}
         if (byte < I64{32} || byte == I64{127} || c1) -> return game_asset_fixed_error(rt_static_text("game asset path contains a control character"), err)
         at += I64{1}
     }
     // Component bounds as (start, end) pairs over the trimmed bytes, where a
     // backslash separates like a slash.
-    absolute :: rt_text_byte(data + first) == I64{47} || rt_text_byte(data + first) == I64{92} || (last - first >= I64{3} && rt_text_byte(data + first + I64{1}) == I64{58} && (rt_text_byte(data + first + I64{2}) == I64{47} || rt_text_byte(data + first + I64{2}) == I64{92}))
+    absolute :: rt_text_byte(wrapping(data + first)) == I64{47} || rt_text_byte(wrapping(data + first)) == I64{92} || (last - first >= I64{3} && rt_text_byte(wrapping(wrapping(data + first) + I64{1})) == I64{58} && (rt_text_byte(wrapping(wrapping(data + first) + I64{2})) == I64{47} || rt_text_byte(wrapping(wrapping(data + first) + I64{2})) == I64{92}))
     bounds :: jet_rt_alloc(I64{24}, I64{8})
     coll_zero(bounds, I64{24})
     start := first
     at = first
     loop at <= last {
-        if (at == last || rt_text_byte(data + at) == I64{47} || rt_text_byte(data + at) == I64{92}) {
+        if (at == last || rt_text_byte(wrapping(data + at)) == I64{47} || rt_text_byte(wrapping(data + at)) == I64{92}) {
             size :: at - start
-            dot :: size == I64{1} && rt_text_byte(data + start) == I64{46}
-            parent :: size == I64{2} && rt_text_byte(data + start) == I64{46} && rt_text_byte(data + start + I64{1}) == I64{46}
-            drive :: absolute && start == first && size == I64{2} && rt_text_byte(data + start + I64{1}) == I64{58}
+            dot :: size == I64{1} && rt_text_byte(wrapping(data + start)) == I64{46}
+            parent :: size == I64{2} && rt_text_byte(wrapping(data + start)) == I64{46} && rt_text_byte(wrapping(wrapping(data + start) + I64{1})) == I64{46}
+            drive :: absolute && start == first && size == I64{2} && rt_text_byte(wrapping(wrapping(data + start) + I64{1})) == I64{58}
             if parent {
                 if (game_word(bounds) == I64{0}) {
                     coll_text_list_drop(bounds, false)
@@ -260,12 +260,12 @@ fn game_asset_resolve(path: I64, out: I64, err: I64) -> I64 {
         return game_asset_error(jet_rt_string_builder_new(), rt_static_text("game asset path is not under a declared root: `"), path, err)
     }
     logical :: jet_rt_string_builder_new()
-    pairs :: game_word(bounds + I64{16})
+    pairs :: game_word(wrapping(bounds + I64{16}))
     at = I64{0}
     loop at < count {
         if (at != I64{0}) { rt_text_push_scalar(logical, I64{47}) }
-        piece :: game_word(pairs + at * I64{8})
-        rt_text_append(logical, data + piece, game_word(pairs + (at + I64{1}) * I64{8}) - piece)
+        piece :: game_word(wrapping(pairs + at * I64{8}))
+        rt_text_append(logical, data + piece, game_word(wrapping(pairs + (at + I64{1}) * I64{8})) - piece)
         at += I64{2}
     }
     coll_text_list_drop(bounds, false)
@@ -282,11 +282,11 @@ fn game_asset_load(assets: I64, kind: I64, path: I64, ok: I64, err: I64) -> I64 
     }
     logical :: game_word(scratch)
     jet_rt_free(scratch, I64{8}, I64{8})
-    game_list_push(assets + I64{8}, game_text(kind))
-    game_list_push(assets + I64{32}, jet_rt_string_clone(logical))
+    game_list_push(wrapping(assets + I64{8}), game_text(kind))
+    game_list_push(wrapping(assets + I64{32}), jet_rt_string_clone(logical))
     asset :: jet_rt_alloc(I64{16}, I64{8})
     game_store(asset, I64{1})
-    game_store(asset + I64{8}, logical)
+    game_store(wrapping(asset + I64{8}), logical)
     game_store(ok, asset)
     I64{1}
 }
@@ -304,14 +304,14 @@ fn game_path_clone(value: I64) -> I64 {
 fn game_path_drop(value: I64) {
     if (value == I64{0}) -> return
     if (sync_add(value, I64{-1}) != I64{1}) -> return
-    jet_rt_string_drop(game_word(value + I64{8}))
+    jet_rt_string_drop(game_word(wrapping(value + I64{8})))
     jet_rt_free(value, I64{16}, I64{8})
 }
 
 fn game_path_show(prefix: I64, value: I64) -> I64 {
     target :: jet_rt_string_builder_new()
     jet_rt_string_builder_push(target, prefix)
-    jet_rt_string_builder_push(target, game_word(value + I64{8}))
+    jet_rt_string_builder_push(target, game_word(wrapping(value + I64{8})))
     rt_text_push_scalar(target, I64{41})
     jet_rt_string_builder_finish(target)
 }
@@ -333,7 +333,7 @@ fn game_path_show(prefix: I64, value: I64) -> I64 {
 #Export(c) fn jet_game_replay_record(path: I64) -> I64 {
     replay :: jet_rt_alloc(I64{16}, I64{8})
     game_store(replay, I64{1})
-    game_store(replay + I64{8}, jet_rt_string_clone(path))
+    game_store(wrapping(replay + I64{8}), jet_rt_string_clone(path))
     replay
 }
 
@@ -345,17 +345,17 @@ fn game_path_show(prefix: I64, value: I64) -> I64 {
 // ---- Input ------------------------------------------------------------------------
 
 #Export(c) fn jet_game_input_bind(input: I64, action: I64, key: I64) {
-    count :: game_word(input + I64{56})
+    count :: game_word(wrapping(input + I64{56}))
     at := I64{0}
     loop at < count {
-        if jet_rt_string_eq(game_list_text(input + I64{56}, at), action) && jet_rt_string_eq(game_list_text(input + I64{80}, at), key) -> return
+        if jet_rt_string_eq(game_list_text(wrapping(input + I64{56}), at), action) && jet_rt_string_eq(game_list_text(wrapping(input + I64{80}), at), key) -> return
         at += I64{1}
     }
-    game_list_push(input + I64{56}, jet_rt_string_clone(action))
-    game_list_push(input + I64{80}, jet_rt_string_clone(key))
+    game_list_push(wrapping(input + I64{56}), jet_rt_string_clone(action))
+    game_list_push(wrapping(input + I64{80}), jet_rt_string_clone(key))
 }
 
-#Export(c) fn jet_game_input_pressed(snapshot: I64, action: I64) -> Bool { game_list_has_text(snapshot + I64{8}, action) }
+#Export(c) fn jet_game_input_pressed(snapshot: I64, action: I64) -> Bool { game_list_has_text(wrapping(snapshot + I64{8}), action) }
 
 #Export(c) fn jet_rt_handle_clone_jet_game_input_snapshot(snapshot: I64) -> I64 {
     _ := sync_add(snapshot, I64{1})
@@ -365,7 +365,7 @@ fn game_path_show(prefix: I64, value: I64) -> I64 {
 #Export(c) fn jet_rt_handle_drop_jet_game_input_snapshot(snapshot: I64) {
     if (snapshot == I64{0}) -> return
     if (sync_add(snapshot, I64{-1}) != I64{1}) -> return
-    coll_text_list_drop(snapshot + I64{8}, true)
+    coll_text_list_drop(wrapping(snapshot + I64{8}), true)
     jet_rt_free(snapshot, I64{32}, I64{8})
 }
 
@@ -381,7 +381,7 @@ fn game_join(target: I64, header: I64, separator: I64) {
 #Export(c) fn jet_rt_handle_show_jet_game_input_snapshot(snapshot: I64) -> I64 {
     target :: jet_rt_string_builder_new()
     jet_rt_string_builder_push(target, rt_static_text("GameInputSnapshot("))
-    game_join(target, snapshot + I64{8}, I64{44})
+    game_join(target, wrapping(snapshot + I64{8}), I64{44})
     rt_text_push_scalar(target, I64{41})
     jet_rt_string_builder_finish(target)
 }
@@ -390,14 +390,14 @@ fn game_join(target: I64, header: I64, separator: I64) {
 // ---- GameFrame --------------------------------------------------------------------
 
 #Export(c) fn jet_rt_handle_clone_jet_game_frame(frame: I64) -> I64 {
-    _ := sync_add(frame + I64{16}, I64{1})
+    _ := sync_add(wrapping(frame + I64{16}), I64{1})
     frame
 }
 
 #Export(c) fn jet_rt_handle_drop_jet_game_frame(frame: I64) {
     if (frame == I64{0}) -> return
-    if (sync_add(frame + I64{16}, I64{-1}) != I64{1}) -> return
-    jet_rt_handle_drop_jet_game_input_snapshot(game_word(frame + I64{8}))
+    if (sync_add(wrapping(frame + I64{16}), I64{-1}) != I64{1}) -> return
+    jet_rt_handle_drop_jet_game_input_snapshot(game_word(wrapping(frame + I64{8})))
     jet_rt_free(frame, I64{24}, I64{8})
 }
 
@@ -415,8 +415,8 @@ fn game_join(target: I64, header: I64, separator: I64) {
 fn game_backend_new(remaining: I64) -> I64 {
     backend :: jet_rt_alloc(I64{24}, I64{8})
     game_store(backend, remaining)
-    game_store(backend + I64{8}, I64{0})
-    game_store(backend + I64{16}, I64{0})
+    game_store(wrapping(backend + I64{8}), I64{0})
+    game_store(wrapping(backend + I64{16}), I64{0})
     backend
 }
 
@@ -438,20 +438,20 @@ fn game_backend_new(remaining: I64) -> I64 {
 
 #Export(c) fn jet_game_backend_should_continue(backend: I64) -> Bool {
     remaining :: game_word(backend)
-    game_word(backend + I64{16}) == I64{0} && (remaining < I64{0} || remaining > I64{0})
+    game_word(wrapping(backend + I64{16})) == I64{0} && (remaining < I64{0} || remaining > I64{0})
 }
 
 // The next issued frame index, or -1 when the budget is spent.
 fn game_backend_next(backend: I64) -> I64 {
     if !jet_game_backend_should_continue(backend) -> return I64{-1}
-    game_store(backend + I64{16}, I64{1})
-    index :: game_word(backend + I64{8})
-    game_store(backend + I64{8}, index + I64{1})
+    game_store(wrapping(backend + I64{16}), I64{1})
+    index :: game_word(wrapping(backend + I64{8}))
+    game_store(wrapping(backend + I64{8}), index + I64{1})
     index
 }
 
 #Export(c) fn jet_game_backend_present(backend: I64) {
-    game_store(backend + I64{16}, I64{0})
+    game_store(wrapping(backend + I64{16}), I64{0})
     remaining :: game_word(backend)
     if (remaining > I64{0}) { game_store(backend, remaining - I64{1}) }
 }
@@ -476,7 +476,7 @@ fn game_hash_text(state: I64, text: I64) -> I64 {
     data :: rt_text_data(text)
     at := I64{0}
     loop at < rt_text_len(text) {
-        hash = game_hash_byte(hash, rt_text_byte(data + at))
+        hash = game_hash_byte(hash, rt_text_byte(wrapping(data + at)))
         at += I64{1}
     }
     hash
@@ -559,25 +559,25 @@ fn game_pairs_line(target: I64, label: I64, left: I64, right: I64, joiner: I64) 
     plan :: if (backend == I64{0}) -> jet_game_backend_headless() else -> jet_rt_handle_clone_jet_game_backend(game_word(backend))
     if requested {
         game_store(plan, count)
-        game_store(plan + I64{8}, I64{0})
-        game_store(plan + I64{16}, I64{0})
+        game_store(wrapping(plan + I64{8}), I64{0})
+        game_store(wrapping(plan + I64{16}), I64{0})
     }
     state :: game_word(scene)
     out :: jet_rt_string_builder_new()
     game_line(out, rt_static_text("scene:"))
-    jet_rt_string_builder_push(out, game_word(scene + I64{24}))
+    jet_rt_string_builder_push(out, game_word(wrapping(scene + I64{24})))
     game_line(out, rt_static_text("backend:headless/none/none"))
     game_line(out, rt_static_text("replay:"))
     if (replay == I64{0}) {
         jet_rt_string_builder_push(out, rt_static_text("<none>"))
     } else {
-        jet_rt_string_builder_push(out, game_word(game_word(replay) + I64{8}))
+        jet_rt_string_builder_push(out, game_word(wrapping(game_word(replay) + I64{8})))
     }
-    game_pairs_line(out, rt_static_text("assets:"), state + I64{8}, state + I64{32}, I64{58})
-    game_pairs_line(out, rt_static_text("input:"), state + I64{56}, state + I64{80}, I64{61})
-    game_list_line(out, rt_static_text("components:"), state + I64{104}, I64{44})
+    game_pairs_line(out, rt_static_text("assets:"), wrapping(state + I64{8}), wrapping(state + I64{32}), I64{58})
+    game_pairs_line(out, rt_static_text("input:"), wrapping(state + I64{56}), wrapping(state + I64{80}), I64{61})
+    game_list_line(out, rt_static_text("components:"), wrapping(state + I64{104}), I64{44})
     hash := game_hash_literal(GAME_TRANSCRIPT_OFFSET, rt_static_text("jet.game.transcript.v1"))
-    callbacks :: scene + I64{32}
+    callbacks :: wrapping(scene + I64{32})
     slot :: jet_rt_alloc(I64{8}, I64{8})
     scratch :: jet_rt_alloc(I64{16}, I64{8})
     loop {
@@ -588,23 +588,23 @@ fn game_pairs_line(target: I64, label: I64, left: I64, right: I64, joiner: I64) 
         game_store(snapshot, I64{1})
         if (replay != I64{0} && index == I64{1}) {
             bound := I64{0}
-            loop bound < game_word(state + I64{56}) {
-                game_list_push(snapshot + I64{8}, jet_rt_string_clone(game_list_text(state + I64{56}, bound)))
+            loop bound < game_word(wrapping(state + I64{56})) {
+                game_list_push(wrapping(snapshot + I64{8}), jet_rt_string_clone(game_list_text(wrapping(state + I64{56}), bound)))
                 bound += I64{1}
             }
         }
-        hash = game_hash_frame(hash, index, snapshot + I64{8})
+        hash = game_hash_frame(hash, index, wrapping(snapshot + I64{8}))
         frame :: jet_rt_alloc(I64{24}, I64{8})
         game_store(frame, jet_int_owned_from_i64(index))
-        game_store(frame + I64{8}, snapshot)
-        game_store(frame + I64{16}, I64{1})
+        game_store(wrapping(frame + I64{8}), snapshot)
+        game_store(wrapping(frame + I64{16}), I64{1})
         game_store(slot, frame)
         stopped := false
-        data :: game_word(callbacks + I64{16})
+        data :: game_word(wrapping(callbacks + I64{16}))
         at := I64{0}
         loop at < game_word(callbacks) {
             coll_zero(scratch, I64{16})
-            _ := coll_call3(game_word(data + (at + I64{1}) * I64{8}), game_word(data + at * I64{8}), slot, scratch)
+            _ := coll_call3(game_word(wrapping(data + (at + I64{1}) * I64{8})), game_word(wrapping(data + at * I64{8})), slot, scratch)
             if (jet_rt_session_propagate() != I64{0}) {
                 stopped = true
                 break
@@ -614,10 +614,10 @@ fn game_pairs_line(target: I64, label: I64, left: I64, right: I64, joiner: I64) 
         game_line(out, rt_static_text("frame:"))
         rt_text_push_number(out, index)
         jet_rt_string_builder_push(out, rt_static_text(" input:"))
-        if (game_word(snapshot + I64{8}) == I64{0}) {
+        if (game_word(wrapping(snapshot + I64{8})) == I64{0}) {
             jet_rt_string_builder_push(out, rt_static_text("none"))
         } else {
-            game_join(out, snapshot + I64{8}, I64{43})
+            game_join(out, wrapping(snapshot + I64{8}), I64{43})
         }
         jet_rt_handle_drop_jet_game_frame(frame)
         if stopped { break }

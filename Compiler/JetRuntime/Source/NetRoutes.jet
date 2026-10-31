@@ -99,15 +99,15 @@ fn net_route_numeric(host: I64, port: I64, rows: I64, length: I64) -> Bool {
     scope := I64{0}
     at := I64{0}
     loop at < size {
-        if (rt_text_byte(rt_text_data(host) + at) == I64{0}) -> return false
-        if (rt_text_byte(rt_text_data(host) + at) == I64{37}) -> scope_at = at
+        if (rt_text_byte(wrapping(rt_text_data(host) + at)) == I64{0}) -> return false
+        if (rt_text_byte(wrapping(rt_text_data(host) + at)) == I64{37}) -> scope_at = at
         at += I64{1}
     }
     if (scope_at < size) {
         at = scope_at + I64{1}
         if (at == size) -> return false
         loop at < size {
-            byte :: rt_text_byte(rt_text_data(host) + at)
+            byte :: rt_text_byte(wrapping(rt_text_data(host) + at))
             if (byte < I64{48} || byte > I64{57}) -> return false
             scope = scope * I64{10} + byte - I64{48}
             if (scope > I64{4294967295}) -> return false
@@ -116,7 +116,7 @@ fn net_route_numeric(host: I64, port: I64, rows: I64, length: I64) -> Bool {
     }
     name :: fd_c_path(host)
     if (scope_at < size) {
-        #Unsafe("the owned terminated host copy truncates at its validated scope suffix") { os_store_u8(name + scope_at, I64{0}) }
+        #Unsafe("the owned terminated host copy truncates at its validated scope suffix") { os_store_u8(wrapping(name + scope_at), I64{0}) }
     }
     address :: jet_rt_alloc(I64{56}, I64{8})
     thread_zero(address, I64{56})
@@ -181,7 +181,7 @@ fn net_route_resolve_text(address: I64, operation: I64, rows: I64, length: I64, 
     at := size
     loop at > (I64{0}) {
         at -= I64{1}
-        if (rt_text_byte(rt_text_data(address) + at) == I64{58}) {
+        if (rt_text_byte(wrapping(rt_text_data(address) + at)) == I64{58}) {
             split = at
             break
         }
@@ -190,10 +190,10 @@ fn net_route_resolve_text(address: I64, operation: I64, rows: I64, length: I64, 
     if (split == size) -> return net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, address, net_route_message(operation, rt_static_text(" failed: invalid socket address")), I64{0}, error)
     valid := split + I64{1} < size
     at = split + I64{1}
-    if (valid && rt_text_byte(rt_text_data(address) + at) == I64{43}) -> at += I64{1}
+    if (valid && rt_text_byte(wrapping(rt_text_data(address) + at)) == I64{43}) -> at += I64{1}
     if (at == size) -> valid = false
     loop valid && at < size {
-        byte :: rt_text_byte(rt_text_data(address) + at)
+        byte :: rt_text_byte(wrapping(rt_text_data(address) + at))
         if (byte < I64{48} || byte > I64{57}) {
             valid = false
             break
@@ -206,9 +206,9 @@ fn net_route_resolve_text(address: I64, operation: I64, rows: I64, length: I64, 
         at += I64{1}
     }
     if !valid -> return net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, address, net_route_message(operation, rt_static_text(" failed: invalid port value")), I64{0}, error)
-    if (split >= I64{2} && rt_text_byte(rt_text_data(address)) == I64{91} && rt_text_byte(rt_text_data(address) + split - I64{1}) == I64{93}
-        && rt_text_byte(rt_text_data(address) + split + I64{1}) != I64{43}) {
-        host :: rt_text_copy(rt_text_data(address) + I64{1}, split - I64{2})
+    if (split >= I64{2} && rt_text_byte(rt_text_data(address)) == I64{91} && rt_text_byte(wrapping(wrapping(rt_text_data(address) + split) - I64{1})) == I64{93}
+        && rt_text_byte(wrapping(wrapping(rt_text_data(address) + split) + I64{1})) != I64{43}) {
+        host :: rt_text_copy(wrapping(rt_text_data(address) + I64{1}), split - I64{2})
         if net_route_numeric(host, port, rows, length) {
             if (net_word(net_word(rows, I64{0}), I64{0}) == I64{6}) {
                 jet_rt_string_drop(host)
@@ -260,7 +260,7 @@ fn net_route_listen_one(address: I64, scratch: I64) -> I64 {
     scratch :: jet_rt_alloc(I64{48}, I64{8})
     thread_zero(scratch, I64{48})
     operation :: rt_static_text("tcp listen")
-    resolved :: net_route_resolve_text(address, operation, scratch, scratch + I64{8}, error)
+    resolved :: net_route_resolve_text(address, operation, scratch, wrapping(scratch + I64{8}), error)
     if (resolved == I64{0}) {
         jet_rt_free(scratch, I64{48}, I64{8})
         return I64{0}
@@ -270,7 +270,7 @@ fn net_route_listen_one(address: I64, scratch: I64) -> I64 {
     state := I64{0}
     at := I64{0}
     loop at < count {
-        state = net_route_listen_one(rows + at * I64{56}, scratch + I64{16})
+        state = net_route_listen_one(wrapping(rows + at * I64{56}), wrapping(scratch + I64{16}))
         if (state != I64{0} || jet_scheduler_native_propagate() != I64{0}) -> break
         at += I64{1}
     }
@@ -337,7 +337,7 @@ fn net_route_connect_one(address: I64, output: I64, error: I64) -> I64 {
             return I64{0}
         }
         if (net_word(scratch, I64{8}) == I64{0}) {
-            if (jet_socket_option_get_raw(state, I64{1}, I64{4}, scratch + I64{32}, scratch) >= I64{0}) -> net_put(scratch, I64{8}, net_word(scratch, I64{32}))
+            if (jet_socket_option_get_raw(state, I64{1}, I64{4}, wrapping(scratch + I64{32}), scratch) >= I64{0}) -> net_put(scratch, I64{8}, net_word(scratch, I64{32}))
         }
     }
     code :: net_word(scratch, I64{8})
@@ -385,7 +385,7 @@ fn net_route_connect_one(address: I64, output: I64, error: I64) -> I64 {
     scratch :: jet_rt_alloc(I64{16}, I64{8})
     thread_zero(scratch, I64{16})
     operation :: rt_static_text("tcp connect")
-    resolved :: net_route_resolve_text(address, operation, scratch, scratch + I64{8}, error)
+    resolved :: net_route_resolve_text(address, operation, scratch, wrapping(scratch + I64{8}), error)
     if (resolved == I64{0}) {
         jet_rt_free(scratch, I64{16}, I64{8})
         return I64{0}
@@ -395,7 +395,7 @@ fn net_route_connect_one(address: I64, output: I64, error: I64) -> I64 {
     at := I64{0}
     result := I64{0}
     loop at < count {
-        result = net_route_connect_one(rows + at * I64{56}, output, error)
+        result = net_route_connect_one(wrapping(rows + at * I64{56}), output, error)
         if (result != I64{0} || jet_scheduler_native_propagate() != I64{0}) -> break
         detail :: net_word(net_word(error, I64{0}), NET_ERROR_PAYLOAD)
         if (net_word(detail, NET_DETAIL_ADDRESS) == I64{0}) -> break
@@ -428,7 +428,7 @@ fn net_route_option_get(stream: I64, operation: I64, level: I64, option: I64, ou
     if !net_route_stream_open(stream, operation, error) -> return I64{0}
     scratch :: jet_rt_alloc(I64{40}, I64{8})
     thread_zero(scratch, I64{40})
-    result :: jet_socket_option_get_raw(jet_socket_stream_fd_raw(stream), level, option, scratch + I64{32}, scratch)
+    result :: jet_socket_option_get_raw(jet_socket_stream_fd_raw(stream), level, option, wrapping(scratch + I64{32}), scratch)
     code :: net_word(scratch, I64{8})
     value :: net_word(scratch, I64{32})
     jet_rt_free(scratch, I64{40}, I64{8})
@@ -479,7 +479,7 @@ fn net_route_socket_address(holder: I64, listener: Bool, peer: Bool, output: I64
     // query that descriptor, unlike read/write/option operations.
     fd_lock(state)
     facts :: jet_rt_alloc(I64{128}, I64{8})
-    size :: facts + I64{32}
+    size :: wrapping(facts + I64{32})
     net_store_uint(size, I64{4}, I64{32})
     result := host_call(if peer -> I64{52} else -> I64{51}, fd_word(state, I64{8}), facts, size)
     if (result >= I64{0} && !net_socket_decode(facts, net_load_uint(size, I64{4}), address)) -> result = I64{-22}
@@ -510,8 +510,8 @@ fn net_route_happy_race(rows: I64, count: I64, output: I64, error: I64) -> I64 {
     v6 := I64{0}
     at := I64{0}
     loop at < count {
-        loop v4 < count && net_word(rows + v4 * I64{56}, I64{0}) != (I64{4}) { v4 += I64{1} }
-        loop v6 < count && net_word(rows + v6 * I64{56}, I64{0}) != (I64{6}) { v6 += I64{1} }
+        loop v4 < count && net_word(wrapping(rows + v4 * I64{56}), I64{0}) != (I64{4}) { v4 += I64{1} }
+        loop v6 < count && net_word(wrapping(rows + v6 * I64{56}), I64{0}) != (I64{6}) { v6 += I64{1} }
         want_v6 :: if (at % I64{2} == I64{0}) -> first == I64{6} else -> first != I64{6}
         index := I64{0}
         if ((want_v6 && v6 < count) || v4 == count) {
@@ -567,15 +567,15 @@ fn net_route_happy_race(rows: I64, count: I64, output: I64, error: I64) -> I64 {
             if (state != I64{0}) {
                 // pollfd is int fd, short events, short revents. The race owns
                 // every descriptor exclusively until it chooses a winner.
-                net_store_uint(scratch + I64{40}, I64{4}, fd_word(state, I64{8}))
-                net_store_uint(scratch + I64{44}, I64{2}, I64{4})
-                net_store_uint(scratch + I64{46}, I64{2}, I64{0})
+                net_store_uint(wrapping(scratch + I64{40}), I64{4}, fd_word(state, I64{8}))
+                net_store_uint(wrapping(scratch + I64{44}), I64{2}, I64{4})
+                net_store_uint(wrapping(scratch + I64{46}), I64{2}, I64{0})
                 polled :: host_call(I64{7}, scratch + I64{40}, I64{1}, I64{0})
                 if (polled > I64{0} || (polled < I64{0} && polled != I64{-4})) {
                     net_put(scratch, I64{8}, I64{0})
                     if (polled < I64{0}) {
                         net_put(scratch, I64{8}, -polled)
-                    } else if (jet_socket_option_get_raw(state, I64{1}, I64{4}, scratch + I64{32}, scratch) >= I64{0}) {
+                    } else if (jet_socket_option_get_raw(state, I64{1}, I64{4}, wrapping(scratch + I64{32}), scratch) >= I64{0}) {
                         net_put(scratch, I64{8}, net_word(scratch, I64{32}))
                     }
                     code :: net_word(scratch, I64{8})
@@ -634,11 +634,11 @@ fn net_route_happy_race(rows: I64, count: I64, output: I64, error: I64) -> I64 {
     if (milliseconds < I64{0}) -> return net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, host, jet_rt_string_clone(rt_static_text("network timeout must be non-negative")), I64{0}, error)
     scratch :: jet_rt_alloc(I64{32}, I64{8})
     thread_zero(scratch, I64{32})
-    net_route_deadline_push(milliseconds, scratch + I64{16})
+    net_route_deadline_push(milliseconds, wrapping(scratch + I64{16}))
     result := I64{0}
     if (jet_deadline_remaining_ms() <= I64{0}) {
         result = net_route_timeout(operation, error)
-    } else if (net_route_resolve(host, port, rt_static_text("resolve socket address"), operation, host, scratch, scratch + I64{8}, error) != I64{0}) {
+    } else if (net_route_resolve(host, port, rt_static_text("resolve socket address"), operation, host, scratch, wrapping(scratch + I64{8}), error) != I64{0}) {
         rows :: net_word(scratch, I64{0})
         count :: net_word(scratch, I64{8})
         if (count == I64{0}) {
@@ -650,7 +650,7 @@ fn net_route_happy_race(rows: I64, count: I64, output: I64, error: I64) -> I64 {
         } else { result = net_route_happy_race(rows, count, output, error) }
         if (rows != I64{0}) -> jet_rt_free(rows, count * I64{56}, I64{8})
     }
-    jet_ctx_pop_deadline(scratch + I64{16})
+    jet_ctx_pop_deadline(wrapping(scratch + I64{16}))
     jet_rt_free(scratch, I64{32}, I64{8})
     result
 }

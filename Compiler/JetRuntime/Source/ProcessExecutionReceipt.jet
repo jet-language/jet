@@ -39,12 +39,12 @@ fn process_execution_join(list: I64) -> I64 {
 }
 fn process_execution_hash(text: I64) -> I64 {
     scratch :: jet_rt_alloc(I64{608}, I64{8})
-    jet_rt_native_sha256(rt_text_data(text), rt_text_len(text), scratch, scratch + I64{32})
+    jet_rt_native_sha256(rt_text_data(text), rt_text_len(text), scratch, wrapping(scratch + I64{32}))
     result :: jet_rt_string_builder_new()
     digits :: rt_static_text("0123456789abcdef")
     at := I64{0}
     loop at < (I64{32}) {
-        byte :: rt_text_byte(scratch + at)
+        byte :: rt_text_byte(wrapping(scratch + at))
         rt_text_append(result, rt_text_data(digits) + (byte >> I64{4}), I64{1})
         rt_text_append(result, rt_text_data(digits) + byte.bit_and(I64{15}), I64{1})
         at += I64{1}
@@ -170,7 +170,7 @@ fn process_execution_secrets(spec: I64) -> I64 {
     sets :: fd_word(spec, PROCESS_SPEC_ENV_SET)
     at := I64{0}
     loop at < fd_word(sets, I64{0}) {
-        row :: fd_word(sets, I64{16}) + at * I64{16}
+        row :: wrapping(fd_word(sets, I64{16}) + at * I64{16})
         name :: jet_text_ascii_lower(fd_word(row, I64{0}))
         secret :: jet_string_contains(name, rt_static_text("secret")) || jet_string_contains(name, rt_static_text("token")) || jet_string_contains(name, rt_static_text("password")) || jet_string_contains(name, rt_static_text("passwd")) || jet_string_contains(name, rt_static_text("credential")) || jet_string_contains(name, rt_static_text("key"))
         if (secret && rt_text_len(fd_word(row, I64{8})) != I64{0}) -> process_text_list_push(secrets, fd_word(row, I64{8}))
@@ -219,7 +219,7 @@ fn process_execution_identity(spec: I64) -> I64 {
     // into a Resolve failure. Snapshot PATH is independent of child overrides.
     blank :: jet_std_process_cmd(I64{0}, I64{0})
     scratch :: jet_rt_alloc(I64{176}, I64{8})
-    env :: process_execution_environment(blank, scratch + I64{128})
+    env :: process_execution_environment(blank, wrapping(scratch + I64{128}))
     jet_rt_handle_drop_process_spec(blank)
     command :: process_execution_first(spec)
     direct :: process_execution_has(command, I64{47}) || process_execution_has(command, I64{92})
@@ -231,9 +231,9 @@ fn process_execution_identity(spec: I64) -> I64 {
     loop at < fd_word(candidates, I64{0}) {
         candidate :: fd_word(fd_word(candidates, I64{16}), at * I64{8})
         name :: fd_c_path(candidate)
-        jet_process_path_stat_raw(name, scratch, scratch + I64{128})
+        jet_process_path_stat_raw(name, scratch, wrapping(scratch + I64{128}))
         if (fd_word(scratch, I64{128}) == I64{0} && fd_word(scratch, I64{16}).bit_and(I64{61440}) == I64{32768}) {
-            bytes :: jet_process_path_canonicalize_raw(name, scratch + I64{160}, scratch + I64{168}, scratch + I64{128})
+            bytes :: jet_process_path_canonicalize_raw(name, wrapping(scratch + I64{160}), wrapping(scratch + I64{168}), wrapping(scratch + I64{128}))
             if (bytes != I64{0}) {
                 found = rt_text_lossy(bytes, fd_word(scratch, I64{160}))
                 jet_rt_free(bytes, fd_word(scratch, I64{168}), I64{1})
@@ -334,9 +334,9 @@ fn process_execution_validate_text(text: I64, label: I64, err: I64) -> Bool {
     data :: rt_text_data(text)
     at := I64{0}
     loop at < length {
-        width :: rt_text_valid_width(data + at, length - at, I64{1})
+        width :: rt_text_valid_width(wrapping(data + at), length - at, I64{1})
         if (width < I64{0}) {
-            lead :: rt_text_byte(data + at)
+            lead :: rt_text_byte(wrapping(data + at))
             expected :: if (lead >= I64{194} && lead <= I64{223}) -> { I64{2} } else -> { if (lead >= I64{224} && lead <= I64{239}) -> { I64{3} } else -> { if (lead >= I64{240} && lead <= I64{244}) -> { I64{4} } else -> { I64{1} } } }
             cause :: jet_rt_string_builder_new()
             if (expected > I64{1} && at - width == length) {

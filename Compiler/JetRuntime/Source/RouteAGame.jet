@@ -23,7 +23,7 @@ fn raylib_words(a: I64, b: I64, c: I64, d: I64) -> Bool {
     ui_raylib_window_new(native_width, native_height, title, I64{0})
 }
 #Export(c) fn jet_raylib_window_should_close(_window: I64) -> Bool { true }
-#Export(c) fn jet_raylib_window_ready(window: I64) -> Bool { ui_carrier_bool(window + UI_RAYLIB_WINDOW_NATIVE) != I64{0} }
+#Export(c) fn jet_raylib_window_ready(window: I64) -> Bool { ui_carrier_bool(wrapping(window + UI_RAYLIB_WINDOW_NATIVE)) != I64{0} }
 
 // The software canvas: row-major RGBA8, width * height * 4 bytes, zeroed when
 // begin_drawing (re)sizes it to the window and kept across same-size frames.
@@ -40,8 +40,8 @@ fn raylib_canvas_side(value: I64) -> I64 {
 }
 
 #Export(c) fn jet_raylib_begin_drawing(window: I64) {
-    width :: raylib_canvas_side(ui_carrier_word(window + UI_RAYLIB_WINDOW_WIDTH))
-    height :: raylib_canvas_side(ui_carrier_word(window + UI_RAYLIB_WINDOW_HEIGHT))
+    width :: raylib_canvas_side(ui_carrier_word(wrapping(window + UI_RAYLIB_WINDOW_WIDTH)))
+    height :: raylib_canvas_side(ui_carrier_word(wrapping(window + UI_RAYLIB_WINDOW_HEIGHT)))
     if (width == raylib_canvas_width && height == raylib_canvas_height) -> return
     if (raylib_canvas_pixels != I64{0}) -> jet_rt_free(raylib_canvas_pixels, raylib_canvas_width * raylib_canvas_height * I64{4}, I64{1})
     raylib_canvas_pixels = I64{0}
@@ -390,8 +390,8 @@ fn raylib_push_static(builder: I64, text: I64) { rt_text_append(builder, rt_text
     raylib_canvas_height = I64{0}
     at := I64{0}
     loop at < raylib_texture_count {
-        entry :: raylib_textures + at * RAYLIB_TEXTURE_ENTRY_BYTES
-        jet_rt_free(ui_carrier_word(entry + RAYLIB_TEXTURE_PIXELS), ui_carrier_word(entry + RAYLIB_TEXTURE_WIDTH) * ui_carrier_word(entry + RAYLIB_TEXTURE_HEIGHT) * I64{4}, I64{1})
+        entry :: wrapping(raylib_textures + at * RAYLIB_TEXTURE_ENTRY_BYTES)
+        jet_rt_free(ui_carrier_word(wrapping(entry + RAYLIB_TEXTURE_PIXELS)), ui_carrier_word(wrapping(entry + RAYLIB_TEXTURE_WIDTH)) * ui_carrier_word(wrapping(entry + RAYLIB_TEXTURE_HEIGHT)) * I64{4}, I64{1})
         at += I64{1}
     }
     if (raylib_textures != I64{0}) -> jet_rt_free(raylib_textures, raylib_texture_capacity * RAYLIB_TEXTURE_ENTRY_BYTES, I64{8})
@@ -429,7 +429,7 @@ raylib_texture_last_id := I64{0}
 
 // The texture path the atlas resolved, or "" when it has none.
 #Export(c) fn jet_raylib_atlas_texture_path(atlas: I64) -> I64 {
-    texture :: ui_carrier_word(atlas + UI_RAYLIB_ATLAS_TEXTURE_PATH)
+    texture :: ui_carrier_word(wrapping(atlas + UI_RAYLIB_ATLAS_TEXTURE_PATH))
     if (texture == I64{0}) -> return jet_rt_string_clone(rt_static_text(""))
     jet_rt_string_clone(texture)
 }
@@ -458,16 +458,16 @@ raylib_texture_last_id := I64{0}
     rt_text_bytes_copy(pixels, data, length)
     raylib_texture_last_id += I64{1}
     id :: raylib_texture_last_id
-    entry :: raylib_textures + raylib_texture_count * RAYLIB_TEXTURE_ENTRY_BYTES
-    ui_carrier_store(entry + RAYLIB_TEXTURE_ID, id)
-    ui_carrier_store(entry + RAYLIB_TEXTURE_WIDTH, columns)
-    ui_carrier_store(entry + RAYLIB_TEXTURE_HEIGHT, rows)
-    ui_carrier_store(entry + RAYLIB_TEXTURE_PIXELS, pixels)
+    entry :: wrapping(raylib_textures + raylib_texture_count * RAYLIB_TEXTURE_ENTRY_BYTES)
+    ui_carrier_store(wrapping(entry + RAYLIB_TEXTURE_ID), id)
+    ui_carrier_store(wrapping(entry + RAYLIB_TEXTURE_WIDTH), columns)
+    ui_carrier_store(wrapping(entry + RAYLIB_TEXTURE_HEIGHT), rows)
+    ui_carrier_store(wrapping(entry + RAYLIB_TEXTURE_PIXELS), pixels)
     raylib_texture_count += I64{1}
-    ui_carrier_store(result + UI_RAYLIB_ATLAS_TEXTURE_PRESENT, I64{1})
-    ui_carrier_store(result + UI_RAYLIB_ATLAS_TEXTURE, id.bit_or(columns << I64{32}))
-    ui_carrier_store(result + UI_RAYLIB_ATLAS_TEXTURE_SECOND, rows.bit_or(I64{1} << I64{32}))
-    ui_carrier_store(result + UI_RAYLIB_ATLAS_TEXTURE_LAST, RAYLIB_TEXTURE_FORMAT_RGBA8)
+    ui_carrier_store(wrapping(result + UI_RAYLIB_ATLAS_TEXTURE_PRESENT), I64{1})
+    ui_carrier_store(wrapping(result + UI_RAYLIB_ATLAS_TEXTURE), id.bit_or(columns << I64{32}))
+    ui_carrier_store(wrapping(result + UI_RAYLIB_ATLAS_TEXTURE_SECOND), rows.bit_or(I64{1} << I64{32}))
+    ui_carrier_store(wrapping(result + UI_RAYLIB_ATLAS_TEXTURE_LAST), RAYLIB_TEXTURE_FORMAT_RGBA8)
     result
 }
 
@@ -475,8 +475,8 @@ raylib_texture_last_id := I64{0}
 fn raylib_texture_find(id: I64) -> I64 {
     at := I64{0}
     loop at < raylib_texture_count {
-        entry :: raylib_textures + at * RAYLIB_TEXTURE_ENTRY_BYTES
-        if (ui_carrier_word(entry + RAYLIB_TEXTURE_ID) == id) -> return entry
+        entry :: wrapping(raylib_textures + at * RAYLIB_TEXTURE_ENTRY_BYTES)
+        if (ui_carrier_word(wrapping(entry + RAYLIB_TEXTURE_ID)) == id) -> return entry
         at += I64{1}
     }
     I64{0}
@@ -485,11 +485,11 @@ fn raylib_texture_find(id: I64) -> I64 {
 // The first region record named `name`, or 0.
 fn raylib_region_find(regions: I64, name: I64) -> I64 {
     length :: rt_text_len(name)
-    data :: ui_carrier_word(regions + DATA_SEQUENCE_DATA)
-    count :: ui_carrier_word(regions + DATA_SEQUENCE_LENGTH)
+    data :: ui_carrier_word(wrapping(regions + DATA_SEQUENCE_DATA))
+    count :: ui_carrier_word(wrapping(regions + DATA_SEQUENCE_LENGTH))
     at := I64{0}
     loop at < count {
-        region :: data + at * UI_RAYLIB_REGION_BYTES
+        region :: wrapping(data + at * UI_RAYLIB_REGION_BYTES)
         label :: ui_carrier_word(region)
         if (rt_text_len(label) == length && rt_text_equal_bytes(rt_text_data(label), rt_text_data(name), length)) -> return region
         at += I64{1}
@@ -526,37 +526,37 @@ fn raylib_min3(a: I64, b: I64, c: I64) -> I64 {
     left :: jet_int_owned_to_i64(x)
     top :: jet_int_owned_to_i64(y)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
-    if (raylib_canvas_pixels == I64{0} || ui_carrier_bool(atlas + UI_RAYLIB_ATLAS_TEXTURE_PRESENT) == I64{0}) -> return
-    texture :: raylib_texture_find(ui_carrier_word(atlas + UI_RAYLIB_ATLAS_TEXTURE).bit_and(I64{4294967295}))
+    if (raylib_canvas_pixels == I64{0} || ui_carrier_bool(wrapping(atlas + UI_RAYLIB_ATLAS_TEXTURE_PRESENT)) == I64{0}) -> return
+    texture :: raylib_texture_find(ui_carrier_word(wrapping(atlas + UI_RAYLIB_ATLAS_TEXTURE)).bit_and(I64{4294967295}))
     if (texture == I64{0}) -> return
-    region :: raylib_region_find(ui_carrier_word(atlas + UI_RAYLIB_ATLAS_REGIONS), name)
+    region :: raylib_region_find(ui_carrier_word(wrapping(atlas + UI_RAYLIB_ATLAS_REGIONS)), name)
     if (region == I64{0}) -> return
-    source_x :: ui_carrier_word(region + UI_RAYLIB_REGION_X)
-    source_y :: ui_carrier_word(region + UI_RAYLIB_REGION_X + I64{8})
-    source_width :: ui_carrier_word(region + UI_RAYLIB_REGION_X + I64{16})
-    source_height :: ui_carrier_word(region + UI_RAYLIB_REGION_X + I64{24})
-    texture_width :: ui_carrier_word(texture + RAYLIB_TEXTURE_WIDTH)
-    texture_height :: ui_carrier_word(texture + RAYLIB_TEXTURE_HEIGHT)
+    source_x :: ui_carrier_word(wrapping(region + UI_RAYLIB_REGION_X))
+    source_y :: ui_carrier_word(wrapping(wrapping(region + UI_RAYLIB_REGION_X) + I64{8}))
+    source_width :: ui_carrier_word(wrapping(wrapping(region + UI_RAYLIB_REGION_X) + I64{16}))
+    source_height :: ui_carrier_word(wrapping(wrapping(region + UI_RAYLIB_REGION_X) + I64{24}))
+    texture_width :: ui_carrier_word(wrapping(texture + RAYLIB_TEXTURE_WIDTH))
+    texture_height :: ui_carrier_word(wrapping(texture + RAYLIB_TEXTURE_HEIGHT))
     first_column :: raylib_max3(I64{0}, raylib_saturating_sub(I64{0}, source_x), raylib_saturating_sub(I64{0}, left))
     end_column :: raylib_min3(source_width, raylib_saturating_sub(texture_width, source_x), raylib_saturating_sub(raylib_canvas_width, left))
     first_row :: raylib_max3(I64{0}, raylib_saturating_sub(I64{0}, source_y), raylib_saturating_sub(I64{0}, top))
     end_row :: raylib_min3(source_height, raylib_saturating_sub(texture_height, source_y), raylib_saturating_sub(raylib_canvas_height, top))
     if (first_column >= end_column || first_row >= end_row) -> return
-    pixels :: ui_carrier_word(texture + RAYLIB_TEXTURE_PIXELS)
+    pixels :: ui_carrier_word(wrapping(texture + RAYLIB_TEXTURE_PIXELS))
     row := first_row
     loop row < end_row {
         from := pixels + ((source_y + row) * texture_width + source_x + first_column) * I64{4}
         at := raylib_canvas_pixels + ((top + row) * raylib_canvas_width + left + first_column) * I64{4}
         stop :: at + (end_column - first_column) * I64{4}
         loop at < stop {
-            alpha :: rt_text_byte(from + I64{3})
+            alpha :: rt_text_byte(wrapping(from + I64{3}))
             if (alpha == I64{255}) {
                 coll_copy(from, at, I64{4})
             } else if (alpha != I64{0}) {
                 rt_text_put(at, raylib_blend(rt_text_byte(from), rt_text_byte(at), alpha))
-                rt_text_put(at + I64{1}, raylib_blend(rt_text_byte(from + I64{1}), rt_text_byte(at + I64{1}), alpha))
-                rt_text_put(at + I64{2}, raylib_blend(rt_text_byte(from + I64{2}), rt_text_byte(at + I64{2}), alpha))
-                rt_text_put(at + I64{3}, raylib_blend(alpha, rt_text_byte(at + I64{3}), alpha))
+                rt_text_put(wrapping(at + I64{1}), raylib_blend(rt_text_byte(wrapping(from + I64{1})), rt_text_byte(wrapping(at + I64{1})), alpha))
+                rt_text_put(wrapping(at + I64{2}), raylib_blend(rt_text_byte(wrapping(from + I64{2})), rt_text_byte(wrapping(at + I64{2})), alpha))
+                rt_text_put(wrapping(at + I64{3}), raylib_blend(alpha, rt_text_byte(wrapping(at + I64{3})), alpha))
             }
             from += I64{4}
             at += I64{4}
@@ -568,13 +568,13 @@ fn raylib_min3(a: I64, b: I64, c: I64) -> I64 {
 // `str::parse::<i64>()` of data[start..end): optional sign, decimal digits.
 fn raylib_parse_i64(data: I64, start: I64, end: I64, out: I64) -> Bool {
     at := start
-    negative :: at < end && rt_text_byte(data + at) == I64{45}
-    if (at < end && (negative || rt_text_byte(data + at) == I64{43})) -> at += I64{1}
+    negative :: at < end && rt_text_byte(wrapping(data + at)) == I64{45}
+    if (at < end && (negative || rt_text_byte(wrapping(data + at)) == I64{43})) -> at += I64{1}
     if (at >= end) -> return false
     limit :: if negative -> U64{9223372036854775808} else -> U64{9223372036854775807}
     value := U64{0}
     loop at < end {
-        digit :: rt_text_byte(data + at) - I64{48}
+        digit :: rt_text_byte(wrapping(data + at)) - I64{48}
         if (digit < I64{0} || digit > I64{9}) -> return false
         if (value > (limit - U64{digit}) /% U64{10}) -> return false
         value = value * U64{10} + U64{digit}
@@ -588,12 +588,12 @@ fn raylib_parse_i64(data: I64, start: I64, end: I64, out: I64) -> Bool {
 // out and returns the offset after it, or -1 when no field remains.
 fn raylib_field(data: I64, at: I64, end: I64, out: I64) -> I64 {
     from := at
-    loop from < end && encoding_white_space(encoding_scalar_at(data, from)) -> from += rt_text_width(data + from)
+    loop from < end && encoding_white_space(encoding_scalar_at(data, from)) -> from += rt_text_width(wrapping(data + from))
     if (from >= end) -> return I64{-1}
     to := from
-    loop to < end && !encoding_white_space(encoding_scalar_at(data, to)) -> to += rt_text_width(data + to)
+    loop to < end && !encoding_white_space(encoding_scalar_at(data, to)) -> to += rt_text_width(wrapping(data + to))
     rt_text_store(out, from)
-    rt_text_store(out + I64{8}, to)
+    rt_text_store(wrapping(out + I64{8}), to)
     to
 }
 
@@ -602,7 +602,7 @@ fn raylib_has_prefix(data: I64, start: I64, end: I64, prefix: I64) -> Bool {
     if (end - start < length) -> return false
     at := I64{0}
     loop at < length {
-        if (rt_text_byte(data + start + at) != rt_text_byte(rt_text_data(prefix) + at)) -> return false
+        if (rt_text_byte(wrapping(wrapping(data + start) + at)) != rt_text_byte(wrapping(rt_text_data(prefix) + at))) -> return false
         at += I64{1}
     }
     true
@@ -621,18 +621,18 @@ fn raylib_region_push(regions: I64, data: I64, start: I64, end: I64, scratch: I6
     at := raylib_field(data, rest, end, scratch)
     if (at < I64{0}) -> return
     name_start :: rt_text_word(scratch)
-    name_end :: rt_text_word(scratch + I64{8})
+    name_end :: rt_text_word(wrapping(scratch + I64{8}))
     index := I64{0}
     loop index < (I64{4}) {
         at = raylib_field(data, at, end, scratch)
         if (at < I64{0}) -> return
-        if !raylib_parse_i64(data, rt_text_word(scratch), rt_text_word(scratch + I64{8}), scratch + I64{16} + index * I64{8}) -> return
+        if !raylib_parse_i64(data, rt_text_word(scratch), rt_text_word(wrapping(scratch + I64{8})), wrapping(wrapping(scratch + I64{16}) + index * I64{8})) -> return
         index += I64{1}
     }
     slot :: data_sequence_reserve(regions, UI_RAYLIB_REGION_BYTES)
-    ui_carrier_store(slot, rt_text_copy(data + name_start, name_end - name_start))
-    coll_copy(scratch + I64{16}, slot + UI_RAYLIB_REGION_X, I64{32})
-    ui_carrier_store(regions + DATA_SEQUENCE_LENGTH, ui_carrier_word(regions + DATA_SEQUENCE_LENGTH) + I64{1})
+    ui_carrier_store(slot, rt_text_copy(wrapping(data + name_start), name_end - name_start))
+    coll_copy(wrapping(scratch + I64{16}), wrapping(slot + UI_RAYLIB_REGION_X), I64{32})
+    ui_carrier_store(wrapping(regions + DATA_SEQUENCE_LENGTH), ui_carrier_word(wrapping(regions + DATA_SEQUENCE_LENGTH)) + I64{1})
 }
 
 // The end of data[0..end) without the trailing separators and "." components
@@ -640,8 +640,8 @@ fn raylib_region_push(regions: I64, data: I64, start: I64, end: I64, scratch: I6
 fn raylib_trim_end(data: I64, end: I64) -> I64 {
     at := end
     loop {
-        loop at > (I64{0}) && rt_text_byte(data + at - I64{1}) == (I64{47}) -> at -= I64{1}
-        if (at >= I64{2} && rt_text_byte(data + at - I64{1}) == I64{46} && rt_text_byte(data + at - I64{2}) == I64{47}) {
+        loop at > (I64{0}) && rt_text_byte(wrapping(wrapping(data + at) - I64{1})) == (I64{47}) -> at -= I64{1}
+        if (at >= I64{2} && rt_text_byte(wrapping(wrapping(data + at) - I64{1})) == I64{46} && rt_text_byte(wrapping(wrapping(data + at) - I64{2})) == I64{47}) {
             at -= I64{2}
             next
         }
@@ -655,17 +655,17 @@ fn raylib_trim_end(data: I64, end: I64) -> I64 {
 fn raylib_file_name(data: I64, length: I64, out: I64) {
     end :: raylib_trim_end(data, length)
     start := end
-    loop start > (I64{0}) && rt_text_byte(data + start - I64{1}) != (I64{47}) -> start -= I64{1}
-    dot :: end - start == I64{1} && rt_text_byte(data + start) == I64{46}
-    dotdot :: end - start == I64{2} && rt_text_byte(data + start) == I64{46} && rt_text_byte(data + start + I64{1}) == I64{46}
+    loop start > (I64{0}) && rt_text_byte(wrapping(wrapping(data + start) - I64{1})) != (I64{47}) -> start -= I64{1}
+    dot :: end - start == I64{1} && rt_text_byte(wrapping(data + start)) == I64{46}
+    dotdot :: end - start == I64{2} && rt_text_byte(wrapping(data + start)) == I64{46} && rt_text_byte(wrapping(wrapping(data + start) + I64{1})) == I64{46}
     rt_text_store(out, if (end == start || dot || dotdot) -> I64{-1} else -> start)
-    rt_text_store(out + I64{8}, end)
+    rt_text_store(wrapping(out + I64{8}), end)
 }
 
 // Path::file_stem: the name before its last '.', unless that dot leads it.
 fn raylib_stem_end(data: I64, start: I64, end: I64) -> I64 {
     dot := end - I64{1}
-    loop dot > start && rt_text_byte(data + dot) != (I64{46}) -> dot -= I64{1}
+    loop dot > start && rt_text_byte(wrapping(data + dot)) != (I64{46}) -> dot -= I64{1}
     if (dot <= start) -> return end
     dot
 }
@@ -675,7 +675,7 @@ fn raylib_stem_end(data: I64, start: I64, end: I64) -> I64 {
 fn raylib_parent_end(data: I64, length: I64) -> I64 {
     end := raylib_trim_end(data, length)
     if (end == I64{0}) -> return I64{-1}
-    loop end > (I64{0}) && rt_text_byte(data + end - I64{1}) != (I64{47}) -> end -= I64{1}
+    loop end > (I64{0}) && rt_text_byte(wrapping(wrapping(data + end) - I64{1})) != (I64{47}) -> end -= I64{1}
     stop :: raylib_trim_end(data, end)
     if (stop == I64{0} && end > I64{0}) -> return I64{1}
     stop
@@ -684,7 +684,7 @@ fn raylib_parent_end(data: I64, length: I64) -> I64 {
 // jet_raylib_atlas_texture_path: an absolute texture stays; otherwise it
 // joins the atlas's parent ("." for none).
 fn raylib_texture_path(path: I64, data: I64, start: I64, end: I64) -> I64 {
-    if (rt_text_byte(data + start) == I64{47}) -> return rt_text_copy(data + start, end - start)
+    if (rt_text_byte(wrapping(data + start)) == I64{47}) -> return rt_text_copy(wrapping(data + start), end - start)
     base :: rt_text_data(path)
     parent :: raylib_parent_end(base, rt_text_len(path))
     result :: rt_text_builder_with_capacity(I64{0})
@@ -694,7 +694,7 @@ fn raylib_texture_path(path: I64, data: I64, start: I64, end: I64) -> I64 {
         rt_text_append(result, base, parent)
     }
     length :: rt_text_len(result)
-    if (length != I64{0} && rt_text_byte(rt_text_data(result) + length - I64{1}) != I64{47}) -> rt_text_push_word(result, I64{47}, I64{1})
+    if (length != I64{0} && rt_text_byte(wrapping(wrapping(rt_text_data(result) + length) - I64{1})) != I64{47}) -> rt_text_push_word(result, I64{47}, I64{1})
     rt_text_append(result, data + start, end - start)
     jet_rt_string_builder_finish(result)
 }
@@ -706,7 +706,7 @@ fn raylib_png_path(path: I64, scratch: I64) -> I64 {
     raylib_file_name(data, rt_text_len(path), scratch)
     start :: rt_text_word(scratch)
     if (start < I64{0}) -> return jet_rt_string_clone(path)
-    stem :: raylib_stem_end(data, start, rt_text_word(scratch + I64{8}))
+    stem :: raylib_stem_end(data, start, rt_text_word(wrapping(scratch + I64{8})))
     result :: rt_text_builder_with_capacity(stem + I64{4})
     rt_text_append(result, data, stem)
     rt_text_push_word(result, I64{1735290926}, I64{4}) // .png
@@ -721,8 +721,8 @@ fn raylib_png_path(path: I64, scratch: I64) -> I64 {
     name := I64{0}
     file_start :: rt_text_word(scratch)
     if (file_start >= I64{0}) {
-        file_end :: rt_text_word(scratch + I64{8})
-        name = rt_text_copy(data + file_start, raylib_stem_end(data, file_start, file_end) - file_start)
+        file_end :: rt_text_word(wrapping(scratch + I64{8}))
+        name = rt_text_copy(wrapping(data + file_start), raylib_stem_end(data, file_start, file_end) - file_start)
     } else {
         name = jet_rt_string_clone(rt_static_text("atlas"))
     }
@@ -733,10 +733,10 @@ fn raylib_png_path(path: I64, scratch: I64) -> I64 {
     if !walk_has_nul(data, length) {
         c_path :: fd_c_path(path)
         if (walk_read_file(c_path, scratch) == I64{0}) {
-            if files_utf8_valid(rt_text_word(scratch), rt_text_word(scratch + I64{8})) {
-                text = rt_text_copy(rt_text_word(scratch), rt_text_word(scratch + I64{8}))
+            if files_utf8_valid(rt_text_word(scratch), rt_text_word(wrapping(scratch + I64{8}))) {
+                text = rt_text_copy(rt_text_word(scratch), rt_text_word(wrapping(scratch + I64{8})))
             }
-            jet_rt_free(rt_text_word(scratch), rt_text_word(scratch + I64{16}), I64{1})
+            jet_rt_free(rt_text_word(scratch), rt_text_word(wrapping(scratch + I64{16})), I64{1})
         }
         fd_c_path_drop(c_path, path)
     }
@@ -746,24 +746,24 @@ fn raylib_png_path(path: I64, scratch: I64) -> I64 {
         line := I64{0}
         loop line < total {
             stop := line
-            loop stop < total && rt_text_byte(bytes + stop) != (I64{10}) -> stop += I64{1}
+            loop stop < total && rt_text_byte(wrapping(bytes + stop)) != (I64{10}) -> stop += I64{1}
             next_line :: stop + I64{1}
-            if (stop > line && rt_text_byte(bytes + stop - I64{1}) == I64{13}) -> stop -= I64{1}
+            if (stop > line && rt_text_byte(wrapping(wrapping(bytes + stop) - I64{1})) == I64{13}) -> stop -= I64{1}
             encoding_trim(bytes, line, stop, scratch)
             from :: rt_text_word(scratch)
-            to :: rt_text_word(scratch + I64{8})
+            to :: rt_text_word(wrapping(scratch + I64{8}))
             if (to > from) {
                 if raylib_has_prefix(bytes, from, to, rt_static_text("atlas:")) {
                     encoding_trim(bytes, from + I64{6}, to, scratch)
-                    if (rt_text_word(scratch + I64{8}) > rt_text_word(scratch)) {
+                    if (rt_text_word(wrapping(scratch + I64{8})) > rt_text_word(scratch)) {
                         jet_rt_string_drop(name)
-                        name = rt_text_copy(bytes + rt_text_word(scratch), rt_text_word(scratch + I64{8}) - rt_text_word(scratch))
+                        name = rt_text_copy(wrapping(bytes + rt_text_word(scratch)), rt_text_word(wrapping(scratch + I64{8})) - rt_text_word(scratch))
                     }
                 } else if raylib_has_prefix(bytes, from, to, rt_static_text("texture:")) {
                     encoding_trim(bytes, from + I64{8}, to, scratch)
-                    if (rt_text_word(scratch + I64{8}) > rt_text_word(scratch)) {
+                    if (rt_text_word(wrapping(scratch + I64{8})) > rt_text_word(scratch)) {
                         if (texture != I64{0}) -> jet_rt_string_drop(texture)
-                        texture = raylib_texture_path(path, bytes, rt_text_word(scratch), rt_text_word(scratch + I64{8}))
+                        texture = raylib_texture_path(path, bytes, rt_text_word(scratch), rt_text_word(wrapping(scratch + I64{8})))
                     }
                 } else {
                     raylib_region_push(regions, bytes, from, to, scratch)
@@ -777,10 +777,10 @@ fn raylib_png_path(path: I64, scratch: I64) -> I64 {
     jet_rt_free(scratch, I64{48}, I64{8})
     result :: jet_rt_alloc(UI_RAYLIB_ATLAS_BYTES, I64{8})
     thread_zero(result, UI_RAYLIB_ATLAS_BYTES)
-    ui_carrier_store(result + UI_RAYLIB_ATLAS_PATH, jet_rt_string_clone(path))
-    ui_carrier_store(result + UI_RAYLIB_ATLAS_NAME, name)
-    ui_carrier_store(result + UI_RAYLIB_ATLAS_TEXTURE_PATH, texture)
-    ui_carrier_store(result + UI_RAYLIB_ATLAS_REGIONS, regions)
+    ui_carrier_store(wrapping(result + UI_RAYLIB_ATLAS_PATH), jet_rt_string_clone(path))
+    ui_carrier_store(wrapping(result + UI_RAYLIB_ATLAS_NAME), name)
+    ui_carrier_store(wrapping(result + UI_RAYLIB_ATLAS_TEXTURE_PATH), texture)
+    ui_carrier_store(wrapping(result + UI_RAYLIB_ATLAS_REGIONS), regions)
     result
 }
 
@@ -789,9 +789,9 @@ RAYLIB_COLOR_BYTES :: I64{32}
 #Export(c) fn jet_rt_record_new_raylib_color(r: I64, g: I64, b: I64, a: I64) -> I64 {
     words :: jet_rt_alloc(RAYLIB_COLOR_BYTES, I64{8})
     ui_carrier_store(words, jet_int_owned_to_i64(r))
-    ui_carrier_store(words + I64{8}, jet_int_owned_to_i64(g))
-    ui_carrier_store(words + I64{16}, jet_int_owned_to_i64(b))
-    ui_carrier_store(words + I64{24}, jet_int_owned_to_i64(a))
+    ui_carrier_store(wrapping(words + I64{8}), jet_int_owned_to_i64(g))
+    ui_carrier_store(wrapping(words + I64{16}), jet_int_owned_to_i64(b))
+    ui_carrier_store(wrapping(words + I64{24}), jet_int_owned_to_i64(a))
     if (jet_scheduler_native_propagate() != I64{0}) {
         jet_rt_free(words, RAYLIB_COLOR_BYTES, I64{8})
         return I64{0}
@@ -799,9 +799,9 @@ RAYLIB_COLOR_BYTES :: I64{32}
     words
 }
 #Export(c) fn jet_rt_record_get_raylib_color_r(value: I64) -> I64 { jet_int_owned_from_i64(ui_carrier_word(value)) }
-#Export(c) fn jet_rt_record_get_raylib_color_g(value: I64) -> I64 { jet_int_owned_from_i64(ui_carrier_word(value + I64{8})) }
-#Export(c) fn jet_rt_record_get_raylib_color_b(value: I64) -> I64 { jet_int_owned_from_i64(ui_carrier_word(value + I64{16})) }
-#Export(c) fn jet_rt_record_get_raylib_color_a(value: I64) -> I64 { jet_int_owned_from_i64(ui_carrier_word(value + I64{24})) }
+#Export(c) fn jet_rt_record_get_raylib_color_g(value: I64) -> I64 { jet_int_owned_from_i64(ui_carrier_word(wrapping(value + I64{8}))) }
+#Export(c) fn jet_rt_record_get_raylib_color_b(value: I64) -> I64 { jet_int_owned_from_i64(ui_carrier_word(wrapping(value + I64{16}))) }
+#Export(c) fn jet_rt_record_get_raylib_color_a(value: I64) -> I64 { jet_int_owned_from_i64(ui_carrier_word(wrapping(value + I64{24}))) }
 #Export(c) fn jet_rt_handle_clone_raylib_color(value: I64) -> I64 {
     result :: jet_rt_alloc(RAYLIB_COLOR_BYTES, I64{8})
     coll_copy(value, result, RAYLIB_COLOR_BYTES)

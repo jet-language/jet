@@ -36,8 +36,8 @@ fn observe_text_cmp(a: I64, b: I64) -> I64 {
     bl :: rt_text_len(b)
     at := I64{0}
     loop at < al && at < bl {
-        av :: trap_byte(rt_text_data(a) + at)
-        bv :: trap_byte(rt_text_data(b) + at)
+        av :: trap_byte(wrapping(rt_text_data(a) + at))
+        bv :: trap_byte(wrapping(rt_text_data(b) + at))
         if av != bv -> return av - bv
         at += I64{1}
     }
@@ -47,16 +47,16 @@ fn observe_text_controls(value: I64) -> Bool {
     if value == (I64{0}) -> return false
     at := I64{0}
     loop at < rt_text_len(value) {
-        cp :: rt_text_decode(rt_text_data(value) + at)
+        cp :: rt_text_decode(wrapping(rt_text_data(value) + at))
         if cp < (I64{32}) || (cp >= I64{127} && cp <= I64{159}) -> return true
-        at += rt_text_width(rt_text_data(value) + at)
+        at += rt_text_width(wrapping(rt_text_data(value) + at))
     }
     false
 }
 fn observe_value_drop(node: I64) {
     at := I64{8}
     loop at <= (I64{40}) {
-        text :: sync_load(node + at)
+        text :: sync_load(wrapping(node + at))
         if text != (I64{0}) -> jet_rt_string_drop(text)
         at += I64{8}
     }
@@ -73,14 +73,14 @@ fn observe_value_drop(node: I64) {
     previous := I64{0}
     loop sync_load(link) != (I64{0}) {
         node :: sync_load(link)
-        order :: observe_text_cmp(sync_load(node + I64{8}), id)
+        order :: observe_text_cmp(sync_load(wrapping(node + I64{8})), id)
         if order >= (I64{0}) {
             if order == (I64{0}) -> previous = node
             break
         }
         link = node
     }
-    if previous == (I64{0}) && sync_load(observe_root + I64{120}) >= (I64{4096}) {
+    if previous == (I64{0}) && sync_load(wrapping(observe_root + I64{120})) >= (I64{4096}) {
         sync_mutex_unlock(observe_root)
         return
     }
@@ -88,11 +88,11 @@ fn observe_value_drop(node: I64) {
     sync_store(node, if previous == (I64{0}) -> sync_load(link) else -> sync_load(previous))
     at := I64{0}
     loop at < (I64{40}) {
-        sync_store(node + at + I64{8}, observe_text_clone(sync_load(source + at)))
+        sync_store(wrapping(wrapping(node + at) + I64{8}), observe_text_clone(sync_load(wrapping(source + at))))
         at += I64{8}
     }
     sync_store(link, node)
-    if previous == (I64{0}) -> _ := sync_add(observe_root + I64{120}, I64{1})
+    if previous == (I64{0}) -> _ := sync_add(wrapping(observe_root + I64{120}), I64{1})
     sync_mutex_unlock(observe_root)
     if previous != (I64{0}) -> observe_value_drop(previous)
 }
@@ -102,7 +102,7 @@ fn observe_event_text_field(offset: I64) -> Bool {
 fn observe_event_drop(node: I64) {
     at := I64{0}
     loop at < (I64{120}) {
-        if observe_event_text_field(at) -> jet_rt_string_drop(sync_load(node + at + I64{8}))
+        if observe_event_text_field(at) -> jet_rt_string_drop(sync_load(wrapping(wrapping(node + at) + I64{8})))
         at += I64{8}
     }
     jet_rt_free(node, I64{128}, I64{8})
@@ -115,22 +115,22 @@ fn observe_event_drop(node: I64) {
     sync_store(node, I64{0})
     at := I64{8}
     loop at < (I64{120}) {
-        word :: sync_load(source + at)
-        sync_store(node + at + I64{8}, if observe_event_text_field(at) -> observe_text_clone(word) else -> word)
+        word :: sync_load(wrapping(source + at))
+        sync_store(wrapping(wrapping(node + at) + I64{8}), if observe_event_text_field(at) -> observe_text_clone(word) else -> word)
         at += I64{8}
     }
     sync_mutex_lock(observe_root)
-    sync_store(node + I64{8}, sync_add(observe_root + I64{80}, I64{1}))
-    tail :: sync_load(observe_root + I64{96})
-    if tail == (I64{0}) -> sync_store(observe_root + I64{88}, node) else -> sync_store(tail, node)
-    sync_store(observe_root + I64{96}, node)
+    sync_store(wrapping(node + I64{8}), sync_add(wrapping(observe_root + I64{80}), I64{1}))
+    tail :: sync_load(wrapping(observe_root + I64{96}))
+    if tail == (I64{0}) -> sync_store(wrapping(observe_root + I64{88}), node) else -> sync_store(tail, node)
+    sync_store(wrapping(observe_root + I64{96}), node)
     retired := I64{0}
     if {
-        sync_load(observe_root + I64{104}) == (I64{256}) -> {
-            retired = sync_load(observe_root + I64{88})
-            sync_store(observe_root + I64{88}, sync_load(retired))
+        sync_load(wrapping(observe_root + I64{104})) == (I64{256}) -> {
+            retired = sync_load(wrapping(observe_root + I64{88}))
+            sync_store(wrapping(observe_root + I64{88}), sync_load(retired))
         }
-        else -> _ := sync_add(observe_root + I64{104}, I64{1})
+        else -> _ := sync_add(wrapping(observe_root + I64{104}), I64{1})
     }
     sync_mutex_unlock(observe_root)
     if retired != (I64{0}) -> observe_event_drop(retired)
@@ -148,7 +148,7 @@ fn observe_raw_text(builder: I64, value: I64) {
     at := I64{0}
     scalars := I64{0}
     loop at < length && scalars < (I64{160}) {
-        at += rt_text_width(data + at)
+        at += rt_text_width(wrapping(data + at))
         scalars += I64{1}
     }
     observe_raw_word(builder, at)
@@ -157,16 +157,16 @@ fn observe_raw_text(builder: I64, value: I64) {
 // The section writers run with the registry mutex held (observe_snapshot).
 fn observe_raw_tasks(builder: I64) {
     observe_raw_word(builder, I64{1})
-    observe_raw_word(builder, sync_load(observe_root + I64{32}))
-    node := sync_load(observe_root + I64{24})
+    observe_raw_word(builder, sync_load(wrapping(observe_root + I64{32})))
+    node := sync_load(wrapping(observe_root + I64{24}))
     loop node != (I64{0}) {
         at := I64{8}
         loop at <= (I64{72}) {
-            if at != (I64{32}) && at != (I64{48}) -> observe_raw_word(builder, sync_load(node + at))
+            if at != (I64{32}) && at != (I64{48}) -> observe_raw_word(builder, sync_load(wrapping(node + at)))
             at += I64{8}
         }
-        observe_raw_text(builder, sync_load(node + I64{32}))
-        observe_raw_text(builder, sync_load(node + I64{48}))
+        observe_raw_text(builder, sync_load(wrapping(node + I64{32})))
+        observe_raw_text(builder, sync_load(wrapping(node + I64{48})))
         node = sync_load(node)
     }
 }
@@ -182,18 +182,18 @@ fn rt_observe_raw_events_address() -> I64 {
 }
 #Export(c) fn jet_rt_observe_raw_channels(builder: I64) -> I64 {
     count := I64{0}
-    node := sync_load(observe_root + I64{40})
+    node := sync_load(wrapping(observe_root + I64{40}))
     loop node != (I64{0}) {
         count += I64{1}
         node = sync_load(node)
     }
     observe_raw_word(builder, I64{2})
     observe_raw_word(builder, count)
-    node = sync_load(observe_root + I64{40})
+    node = sync_load(wrapping(observe_root + I64{40}))
     loop node != (I64{0}) {
         at := I64{8}
         loop at <= (I64{56}) {
-            observe_raw_word(builder, sync_load(node + at))
+            observe_raw_word(builder, sync_load(wrapping(node + at)))
             at += I64{8}
         }
         node = sync_load(node)
@@ -202,12 +202,12 @@ fn rt_observe_raw_events_address() -> I64 {
 }
 #Export(c) fn jet_rt_observe_raw_values(builder: I64) -> I64 {
     observe_raw_word(builder, I64{3})
-    observe_raw_word(builder, sync_load(observe_root + I64{120}))
-    node := sync_load(observe_root + I64{112})
+    observe_raw_word(builder, sync_load(wrapping(observe_root + I64{120})))
+    node := sync_load(wrapping(observe_root + I64{112}))
     loop node != (I64{0}) {
         at := I64{8}
         loop at <= (I64{40}) {
-            observe_raw_text(builder, sync_load(node + at))
+            observe_raw_text(builder, sync_load(wrapping(node + at)))
             at += I64{8}
         }
         node = sync_load(node)
@@ -216,12 +216,12 @@ fn rt_observe_raw_events_address() -> I64 {
 }
 #Export(c) fn jet_rt_observe_raw_events(builder: I64) -> I64 {
     observe_raw_word(builder, I64{4})
-    observe_raw_word(builder, sync_load(observe_root + I64{104}))
-    node := sync_load(observe_root + I64{88})
+    observe_raw_word(builder, sync_load(wrapping(observe_root + I64{104})))
+    node := sync_load(wrapping(observe_root + I64{88}))
     loop node != (I64{0}) {
         at := I64{8}
         loop at <= (I64{120}) {
-            if at != (I64{8}) && observe_event_text_field(at - I64{8}) -> observe_raw_text(builder, sync_load(node + at)) else -> observe_raw_word(builder, sync_load(node + at))
+            if at != (I64{8}) && observe_event_text_field(at - I64{8}) -> observe_raw_text(builder, sync_load(wrapping(node + at))) else -> observe_raw_word(builder, sync_load(wrapping(node + at)))
             at += I64{8}
         }
         node = sync_load(node)
@@ -232,7 +232,7 @@ fn observe_cstring(text: I64) -> I64 {
     length :: rt_text_len(text)
     buffer :: jet_rt_alloc(length + I64{1}, I64{1})
     rt_text_bytes_copy(buffer, rt_text_data(text), length)
-    trap_put(buffer + length, I64{0})
+    trap_put(wrapping(buffer + length), I64{0})
     buffer
 }
 fn observe_syscall(number: I64, a: I64, b: I64, c: I64, d: I64) -> I64 {
@@ -246,29 +246,29 @@ fn observe_snapshot(writer: I64, exit: I64) -> I64 {
     text :: jet_rt_string_builder_new()
     scratch :: jet_rt_alloc(I64{24}, I64{8})
     observe_raw_word(text, OBSERVE_RAW_MAGIC)
-    observe_raw_word(text, sync_load(writer + I64{16}))
+    observe_raw_word(text, sync_load(wrapping(writer + I64{16})))
     observe_raw_word(text, observe_syscall(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}))
     captured := I64{0}
-    if observe_syscall(I64{228}, I64{0}, scratch, I64{0}, I64{0}) == (I64{0}) -> captured = sync_load(scratch) * I64{1000} + sync_load(scratch + I64{8}) /% I64{1000000}
+    if observe_syscall(I64{228}, I64{0}, scratch, I64{0}, I64{0}) == (I64{0}) -> captured = sync_load(scratch) * I64{1000} + sync_load(wrapping(scratch + I64{8})) /% I64{1000000}
     observe_raw_word(text, captured)
-    observe_raw_word(text, sync_now_ns() - sync_load(writer + I64{24}))
-    observe_raw_word(text, sync_load(writer + I64{48}))
-    observe_raw_word(text, sync_load(writer + I64{32}))
-    observe_raw_word(text, sync_load(writer + I64{40}))
+    observe_raw_word(text, sync_now_ns() - sync_load(wrapping(writer + I64{24})))
+    observe_raw_word(text, sync_load(wrapping(writer + I64{48})))
+    observe_raw_word(text, sync_load(wrapping(writer + I64{32})))
+    observe_raw_word(text, sync_load(wrapping(writer + I64{40})))
     observe_raw_word(text, exit)
     // These are the canonical Mem/Arena producer's three actual counters,
     // not program allocation counts or inferred registry cardinalities.
     jet_rt_mem_resources(scratch)
     observe_raw_word(text, sync_load(scratch))
-    observe_raw_word(text, sync_load(scratch + I64{8}))
-    observe_raw_word(text, sync_load(scratch + I64{16}))
+    observe_raw_word(text, sync_load(wrapping(scratch + I64{8})))
+    observe_raw_word(text, sync_load(wrapping(scratch + I64{16})))
     jet_rt_free(scratch, I64{24}, I64{8})
     sync_mutex_lock(observe_root)
-    observe_raw_word(text, sync_load(observe_root + I64{48}))
-    observe_raw_word(text, sync_load(observe_root + I64{56}))
+    observe_raw_word(text, sync_load(wrapping(observe_root + I64{48})))
+    observe_raw_word(text, sync_load(wrapping(observe_root + I64{56})))
     at := I64{56}
     loop at <= (I64{88}) {
-        observe_raw_text(text, sync_load(writer + at))
+        observe_raw_text(text, sync_load(wrapping(writer + at)))
         at += I64{8}
     }
     observe_raw_tasks(text)
@@ -282,7 +282,7 @@ fn observe_snapshot(writer: I64, exit: I64) -> I64 {
 fn observe_append_directory(target: I64, directory: I64) {
     length :: rt_text_len(directory)
     rt_text_append(target, rt_text_data(directory), length)
-    if length != (I64{0}) && trap_byte(rt_text_data(directory) + length - I64{1}) != (I64{47}) -> rt_text_push_scalar(target, I64{47})
+    if length != (I64{0}) && trap_byte(wrapping(wrapping(rt_text_data(directory) + length) - I64{1})) != (I64{47}) -> rt_text_push_scalar(target, I64{47})
 }
 
 // Holds the run mutex through staging+rename. A periodic publication that
@@ -290,20 +290,20 @@ fn observe_append_directory(target: I64, directory: I64) {
 // closes this run, matching Observe.rs:525-533.
 fn observe_publish(writer: I64, exit: I64) {
     sync_mutex_lock(writer)
-    if sync_load(writer + I64{8}) != (I64{0}) {
+    if sync_load(wrapping(writer + I64{8})) != (I64{0}) {
         sync_mutex_unlock(writer)
         return
     }
-    sequence :: wrapping(sync_load(writer + I64{16}) + I64{1})
-    sync_store(writer + I64{16}, sequence)
+    sequence :: wrapping(sync_load(wrapping(writer + I64{16})) + I64{1})
+    sync_store(wrapping(writer + I64{16}), sequence)
     snapshot :: observe_snapshot(writer, exit)
     stage :: jet_rt_string_builder_new()
-    directory :: sync_load(writer + I64{96})
+    directory :: sync_load(wrapping(writer + I64{96}))
     observe_append_directory(stage, directory)
     observe_msg_stage_head(stage)
     observe_decimal_unsigned(stage, observe_syscall(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}))
     rt_text_push_scalar(stage, I64{45})
-    observe_decimal_unsigned(stage, sync_load(writer + I64{48}))
+    observe_decimal_unsigned(stage, sync_load(wrapping(writer + I64{48})))
     rt_text_push_scalar(stage, I64{45})
     observe_decimal_unsigned(stage, sequence)
     observe_msg_stage_tail(stage)
@@ -319,9 +319,9 @@ fn observe_publish(writer: I64, exit: I64) {
                 at += written
             }
             if at == rt_text_len(snapshot) && observe_syscall(I64{74}, fd, I64{0}, I64{0}, I64{0}) == (I64{0}) {
-                target :: observe_cstring(sync_load(writer + I64{104}))
+                target :: observe_cstring(sync_load(wrapping(writer + I64{104})))
                 _ := observe_syscall(I64{82}, name, target, I64{0}, I64{0})
-                jet_rt_free(target, rt_text_len(sync_load(writer + I64{104})) + I64{1}, I64{1})
+                jet_rt_free(target, rt_text_len(sync_load(wrapping(writer + I64{104}))) + I64{1}, I64{1})
             }
             _ := observe_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0})
         }
@@ -330,11 +330,11 @@ fn observe_publish(writer: I64, exit: I64) {
     jet_rt_free(name, rt_text_len(stage) + I64{1}, I64{1})
     jet_rt_string_drop(stage)
     jet_rt_string_drop(snapshot)
-    sync_store(writer + I64{8}, exit)
+    sync_store(wrapping(writer + I64{8}), exit)
     sync_mutex_unlock(writer)
 }
 fn observe_publish_exit() {
-    writer :: sync_load(observe_root + I64{72})
+    writer :: sync_load(wrapping(observe_root + I64{72}))
     if writer != (I64{0}) -> observe_publish(writer, I64{1})
 }
 // Accepted startup identity is the five canonical nonempty control-free E4
@@ -343,7 +343,7 @@ fn observe_publish_exit() {
 fn observe_live_start(identity: I64, directory: I64) -> I64 {
     at := I64{0}
     loop at < (I64{40}) {
-        value :: sync_load(identity + at)
+        value :: sync_load(wrapping(identity + at))
         if value == (I64{0}) || rt_text_len(value) == (I64{0}) || observe_text_controls(value) -> return I64{0}
         at += I64{8}
     }
@@ -352,51 +352,51 @@ fn observe_live_start(identity: I64, directory: I64) -> I64 {
     // below) and the boot clock, which bounds the process start time.
     facts :: jet_rt_alloc(I64{32}, I64{8})
     _ := observe_syscall(I64{100}, facts, I64{0}, I64{0}, I64{0})
-    cpu :: wrapping(sync_load(facts) + sync_load(facts + I64{8}))
-    boot :: if observe_syscall(I64{228}, I64{7}, facts, I64{0}, I64{0}) == (I64{0}) -> wrapping(sync_load(facts) * I64{1000000000} + sync_load(facts + I64{8})) else -> I64{0}
+    cpu :: wrapping(sync_load(facts) + sync_load(wrapping(facts + I64{8})))
+    boot :: if observe_syscall(I64{228}, I64{7}, facts, I64{0}, I64{0}) == (I64{0}) -> wrapping(sync_load(facts) * I64{1000000000} + sync_load(wrapping(facts + I64{8}))) else -> I64{0}
     sync_mutex_lock(observe_root)
-    writer := sync_load(observe_root + I64{72})
+    writer := sync_load(wrapping(observe_root + I64{72}))
     fresh :: writer == I64{0}
     if fresh {
         writer = jet_rt_alloc(I64{120}, I64{8})
         thread_zero(writer, I64{120})
         at = I64{0}
         loop at < (I64{40}) {
-            sync_store(writer + I64{56} + at, observe_text_clone(sync_load(identity + at)))
+            sync_store(wrapping(wrapping(writer + I64{56}) + at), observe_text_clone(sync_load(wrapping(identity + at))))
             at += I64{8}
         }
-        sync_store(writer + I64{96}, observe_text_clone(directory))
-        sync_store(writer + I64{48}, boot)
+        sync_store(wrapping(writer + I64{96}), observe_text_clone(directory))
+        sync_store(wrapping(writer + I64{48}), boot)
         path :: jet_rt_string_builder_new()
         observe_append_directory(path, directory)
         observe_msg_path_head(path)
         observe_decimal_unsigned(path, observe_syscall(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}))
         observe_msg_path_tail(path)
-        sync_store(writer + I64{104}, path)
+        sync_store(wrapping(writer + I64{104}), path)
         root := observe_task_find(I64{1})
         if root == (I64{0}) {
             root = jet_rt_alloc(I64{88}, I64{8})
             thread_zero(root, I64{88})
-            sync_store(root, sync_load(observe_root + I64{24}))
-            sync_store(root + I64{8}, I64{1})
+            sync_store(root, sync_load(wrapping(observe_root + I64{24})))
+            sync_store(wrapping(root + I64{8}), I64{1})
             label :: jet_rt_string_builder_new()
             observe_msg_root_label(label)
-            sync_store(root + I64{32}, label)
-            sync_store(root + I64{40}, I64{1})
-            sync_store(observe_root + I64{24}, root)
-            _ := sync_add(observe_root + I64{32}, I64{1})
+            sync_store(wrapping(root + I64{32}), label)
+            sync_store(wrapping(root + I64{40}), I64{1})
+            sync_store(wrapping(observe_root + I64{24}), root)
+            _ := sync_add(wrapping(observe_root + I64{32}), I64{1})
         }
-        sync_store(observe_root + I64{72}, writer)
+        sync_store(wrapping(observe_root + I64{72}), writer)
         observe_exit_report_install()
     }
     sync_mutex_unlock(observe_root)
     sync_mutex_lock(writer)
-    sync_store(writer + I64{24}, sync_now_ns())
-    sync_store(writer + I64{32}, cpu)
-    sync_store(writer + I64{40}, host_getauxval(I64{17}))
-    sync_store(writer + I64{8}, I64{0})
+    sync_store(wrapping(writer + I64{24}), sync_now_ns())
+    sync_store(wrapping(writer + I64{32}), cpu)
+    sync_store(wrapping(writer + I64{40}), host_getauxval(I64{17}))
+    sync_store(wrapping(writer + I64{8}), I64{0})
     jet_rt_free(facts, I64{32}, I64{8})
-    sync_store(observe_root + I64{64}, I64{0})
+    sync_store(wrapping(observe_root + I64{64}), I64{0})
     sync_mutex_unlock(writer)
     writer
 }
@@ -449,7 +449,7 @@ fn observe_env_key(index: I64) -> I64 {
         name :: observe_env_key(at)
         value :: jet_rt_logical_env_get(name)
         jet_rt_string_drop(name)
-        sync_store(inputs + at * I64{8}, value)
+        sync_store(wrapping(inputs + at * I64{8}), value)
         if {
             value == (I64{0}) -> valid = false
             else -> {
@@ -461,7 +461,7 @@ fn observe_env_key(index: I64) -> I64 {
     if valid {
         name :: jet_rt_string_builder_new()
         observe_msg_env_tmpdir(name)
-        present :: jet_rt_logical_env_get_os(name, inputs + I64{40}, inputs + I64{48})
+        present :: jet_rt_logical_env_get_os(name, wrapping(inputs + I64{40}), wrapping(inputs + I64{48}))
         jet_rt_string_drop(name)
         directory := I64{0}
         if {
@@ -472,15 +472,15 @@ fn observe_env_key(index: I64) -> I64 {
             else -> {
                 // OS path bytes can be non-UTF8. This private buffer is used
                 // only for Linux path syscalls, never as a public String.
-                data :: sync_load(inputs + I64{40})
-                length :: sync_load(inputs + I64{48})
+                data :: sync_load(wrapping(inputs + I64{40}))
+                length :: sync_load(wrapping(inputs + I64{48}))
                 directory = rt_text_copy(data, length)
                 if length != (I64{0}) -> jet_rt_free(data, length, I64{1})
             }
         }
         writer :: observe_live_start(inputs, directory)
         jet_rt_string_drop(directory)
-        if writer != (I64{0}) && sync_cas(writer + I64{112}, I64{0}, I64{1}) == (I64{0}) {
+        if writer != (I64{0}) && sync_cas(wrapping(writer + I64{112}), I64{0}, I64{1}) == (I64{0}) {
             handle :: thread_spawn(rt_observe_writer_address(), writer)
             if handle < (I64{0}) -> scheduler_start_failed()
             _ := thread_detach(handle)
@@ -488,7 +488,7 @@ fn observe_env_key(index: I64) -> I64 {
     }
     at = I64{0}
     loop at < (I64{5}) {
-        value :: sync_load(inputs + at * I64{8})
+        value :: sync_load(wrapping(inputs + at * I64{8}))
         if value != (I64{0}) -> jet_rt_string_drop(value)
         at += I64{1}
     }

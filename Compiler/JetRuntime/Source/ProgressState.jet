@@ -9,7 +9,7 @@ fn progress_bound(text: I64) -> I64 {
     count := I64{0}
     loop at < length {
         if (count >= I64{256}) -> break
-        at += rt_text_width(data + at)
+        at += rt_text_width(wrapping(data + at))
         count += I64{1}
     }
     rt_text_copy(data, at)
@@ -21,8 +21,8 @@ fn progress_strip_ansi(text: I64) -> I64 {
     at := I64{0}
     state := I64{0}
     loop at < rt_text_len(text) {
-        width :: rt_text_width(data + at)
-        character :: rt_text_decode(data + at)
+        width :: rt_text_width(wrapping(data + at))
+        character :: rt_text_decode(wrapping(data + at))
         if {
             (state == I64{0}) -> {
                 if {
@@ -176,7 +176,7 @@ fn progress_enabled() -> Bool {
     value :: host_environment_value(rt_static_text("JET_MACHINE_OUTPUT"))
     if (value == I64{0}) -> return true
     // Raw var_os equality: invalid UTF-8 never aliases the ASCII value "1".
-    rt_text_byte(value) != I64{49} || rt_text_byte(value + I64{1}) != I64{0}
+    rt_text_byte(value) != I64{49} || rt_text_byte(wrapping(value + I64{1})) != I64{0}
 }
 
 fn progress_fail(error: I64) {
@@ -227,46 +227,46 @@ fn progress_write(text: I64, newline: Bool) -> Bool {
     state :: jet_rt_alloc(I64{64}, I64{8})
     thread_zero(state, I64{64})
     rt_text_store(state, if (total < I64{0}) -> I64{-1} else -> total)
-    rt_text_store(state + I64{8}, jet_rt_string_clone(description))
-    rt_text_store(state + I64{16}, jet_rt_string_clone(format))
+    rt_text_store(wrapping(state + I64{8}), jet_rt_string_clone(description))
+    rt_text_store(wrapping(state + I64{16}), jet_rt_string_clone(format))
     instant :: time_clock_read(I64{1})
-    rt_text_store(state + I64{24}, sync_load(instant))
-    rt_text_store(state + I64{32}, sync_load(instant + I64{8}))
+    rt_text_store(wrapping(state + I64{24}), sync_load(instant))
+    rt_text_store(wrapping(state + I64{32}), sync_load(wrapping(instant + I64{8})))
     state
 }
 
 #Export(c) fn jet_rt_progress_state_finish(state: I64) {
-    if (rt_text_word(state + I64{56}) != I64{0}) -> return
-    rt_text_store(state + I64{56}, I64{1})
-    if (rt_text_word(state + I64{48}) != I64{0}) -> _ := progress_write(rt_static_text(""), true)
+    if (rt_text_word(wrapping(state + I64{56})) != I64{0}) -> return
+    rt_text_store(wrapping(state + I64{56}), I64{1})
+    if (rt_text_word(wrapping(state + I64{48})) != I64{0}) -> _ := progress_write(rt_static_text(""), true)
 }
 
 #Export(c) fn jet_rt_progress_state_advance(state: I64) {
-    if (rt_text_word(state + I64{56}) != I64{0}) -> return
-    previous :: rt_text_word(state + I64{40})
+    if (rt_text_word(wrapping(state + I64{56})) != I64{0}) -> return
+    previous :: rt_text_word(wrapping(state + I64{40}))
     count := if (previous == I64{-1}) -> previous else -> wrapping(previous + I64{1})
     total :: rt_text_word(state)
     if (total >= I64{0} && world_unsigned_before(total, count)) -> count = total
-    rt_text_store(state + I64{40}, count)
+    rt_text_store(wrapping(state + I64{40}), count)
     instant :: time_clock_read(I64{1})
-    seconds := sync_load(instant) - rt_text_word(state + I64{24})
-    nanos := sync_load(instant + I64{8}) - rt_text_word(state + I64{32})
+    seconds := sync_load(instant) - rt_text_word(wrapping(state + I64{24}))
+    nanos := sync_load(wrapping(instant + I64{8})) - rt_text_word(wrapping(state + I64{32}))
     if (nanos < I64{0}) {
         seconds -= I64{1}
         nanos += I64{1000000000}
     }
     elapsed :: if (seconds < I64{0}) -> Float{0.0} else -> Float{seconds} + Float{nanos} / Float{1000000000}
-    text :: progress_render(rt_text_word(state + I64{8}), rt_text_word(state + I64{16}), count, total, elapsed, terminal_color_enabled())
+    text :: progress_render(rt_text_word(wrapping(state + I64{8})), rt_text_word(wrapping(state + I64{16})), count, total, elapsed, terminal_color_enabled())
     emitted :: progress_write(text, false)
     jet_rt_string_drop(text)
     if !emitted -> return
-    rt_text_store(state + I64{48}, I64{1})
+    rt_text_store(wrapping(state + I64{48}), I64{1})
     if (total >= I64{0} && count == total) -> jet_rt_progress_state_finish(state)
 }
 
 #Export(c) fn jet_rt_progress_state_drop(state: I64) {
     jet_rt_progress_state_finish(state)
-    jet_rt_string_drop(rt_text_word(state + I64{8}))
-    jet_rt_string_drop(rt_text_word(state + I64{16}))
+    jet_rt_string_drop(rt_text_word(wrapping(state + I64{8})))
+    jet_rt_string_drop(rt_text_word(wrapping(state + I64{16})))
     jet_rt_free(state, I64{64}, I64{8})
 }

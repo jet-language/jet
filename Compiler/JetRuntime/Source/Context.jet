@@ -17,29 +17,29 @@ CONTEXT_RECORD_BYTES :: I64{16}
 CONTEXT_DEADLINE_PRESENT :: I64{0}
 CONTEXT_DEADLINE_MS :: I64{8}
 
-fn context_current() -> I64 { sync_load(thread_base() + CONTEXT_TCB_SLOT) }
+fn context_current() -> I64 { sync_load(wrapping(thread_base() + CONTEXT_TCB_SLOT)) }
 
 // TCB bytes including the appended root record (Thread.jet).
 fn context_tcb_bytes() -> I64 { CONTEXT_TCB_ROOT + CONTEXT_RECORD_BYTES }
 
 // A zeroed root record is the empty root context.
-fn context_tcb_install_root(tcb: I64) { sync_store(tcb + CONTEXT_TCB_SLOT, tcb + CONTEXT_TCB_ROOT) }
+fn context_tcb_install_root(tcb: I64) { sync_store(wrapping(tcb + CONTEXT_TCB_SLOT), tcb + CONTEXT_TCB_ROOT) }
 
 fn context_inherit(record: I64) {
     current :: context_current()
     at := I64{0}
     loop at < CONTEXT_RECORD_BYTES {
-        sync_store(record + at, sync_load(current + at))
+        sync_store(wrapping(record + at), sync_load(wrapping(current + at)))
         at += I64{8}
     }
 }
 
 // Points TCB@48 at record and returns the pointer it replaced.
 fn context_enter(record: I64) -> I64 {
-    slot :: thread_base() + CONTEXT_TCB_SLOT
+    slot :: wrapping(thread_base() + CONTEXT_TCB_SLOT)
     previous :: sync_load(slot)
     sync_store(slot, record)
     previous
 }
 
-fn context_leave(previous: I64) { sync_store(thread_base() + CONTEXT_TCB_SLOT, previous) }
+fn context_leave(previous: I64) { sync_store(wrapping(thread_base() + CONTEXT_TCB_SLOT), previous) }

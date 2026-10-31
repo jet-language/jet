@@ -12,15 +12,15 @@ fs_held_root := I64{0}
     if (fs_held_root != I64{0}) -> return
     root :: jet_rt_alloc(I64{24}, I64{8})
     thread_zero(root, I64{24})
-    sync_store(root + I64{8}, I64{1})
+    sync_store(wrapping(root + I64{8}), I64{1})
     fs_held_root = root
 }
 
 // Only the root lock reads the list.
 fn fs_held_find(key: I64) -> I64 {
-    node := rt_text_word(fs_held_root + I64{16})
+    node := rt_text_word(wrapping(fs_held_root + I64{16}))
     loop node != (I64{0}) {
-        if (rt_text_word(node + I64{8}) == key) -> return node
+        if (rt_text_word(wrapping(node + I64{8})) == key) -> return node
         node = rt_text_word(node)
     }
     I64{0}
@@ -35,8 +35,8 @@ fn fs_held_lookup(key: I64, path_out: I64) -> I64 {
     node :: fs_held_find(key)
     state := I64{0}
     if (node != I64{0}) {
-        state = jet_fd_retain_raw(rt_text_word(node + I64{16}))
-        if (path_out != I64{0}) -> rt_text_store(path_out, jet_rt_string_clone(rt_text_word(node + I64{24})))
+        state = jet_fd_retain_raw(rt_text_word(wrapping(node + I64{16})))
+        if (path_out != I64{0}) -> rt_text_store(path_out, jet_rt_string_clone(rt_text_word(wrapping(node + I64{24}))))
     }
     sync_mutex_unlock(root)
     state
@@ -70,7 +70,7 @@ fn fs_held_shown_name(key: I64, name: I64) -> I64 {
     if (name_length == I64{0}) -> return base
     // base shares the table's stored path (fs_held_lookup clones it), so the
     // join is built in a fresh unique text, never appended to base in place.
-    separator :: if (rt_text_byte(rt_text_data(base) + length - I64{1}) != I64{47}) -> I64{1} else -> I64{0}
+    separator :: if (rt_text_byte(wrapping(wrapping(rt_text_data(base) + length) - I64{1})) != I64{47}) -> I64{1} else -> I64{0}
     joined :: rt_text_builder_with_capacity(length + separator + name_length)
     if (joined == I64{0}) {
         jet_rt_string_drop(base)
@@ -88,13 +88,13 @@ fn fs_held_hold_state(state: I64, shown: I64) -> I64 {
     node :: jet_rt_alloc(I64{32}, I64{8})
     root :: fs_held_root
     sync_mutex_lock(root)
-    key :: rt_text_word(root + I64{8})
-    rt_text_store(root + I64{8}, key + I64{1})
-    rt_text_store(node, rt_text_word(root + I64{16}))
-    rt_text_store(node + I64{8}, key)
-    rt_text_store(node + I64{16}, state)
-    rt_text_store(node + I64{24}, shown)
-    rt_text_store(root + I64{16}, node)
+    key :: rt_text_word(wrapping(root + I64{8}))
+    rt_text_store(wrapping(root + I64{8}), key + I64{1})
+    rt_text_store(node, rt_text_word(wrapping(root + I64{16})))
+    rt_text_store(wrapping(node + I64{8}), key)
+    rt_text_store(wrapping(node + I64{16}), state)
+    rt_text_store(wrapping(node + I64{24}), shown)
+    rt_text_store(wrapping(root + I64{16}), node)
     sync_mutex_unlock(root)
     key
 }
@@ -105,12 +105,12 @@ fn fs_held_hold(number: I64, shown: I64) -> I64 { fs_held_hold_state(fd_new(numb
 fn fs_held_closed(operation: I64, error: I64) -> I64 {
     value :: jet_rt_alloc(I64{56}, I64{8})
     rt_text_store(value, HOST_IO_KIND_CLOSED)
-    rt_text_store(value + I64{8}, operation)
-    rt_text_store(value + I64{16}, I64{0})
-    rt_text_store(value + I64{24}, I64{0})
-    rt_text_store(value + I64{32}, I64{0})
-    rt_text_store(value + I64{40}, jet_rt_string_clone(rt_static_text("the directory handle is already closed")))
-    rt_text_store(value + I64{48}, I64{0})
+    rt_text_store(wrapping(value + I64{8}), operation)
+    rt_text_store(wrapping(value + I64{16}), I64{0})
+    rt_text_store(wrapping(value + I64{24}), I64{0})
+    rt_text_store(wrapping(value + I64{32}), I64{0})
+    rt_text_store(wrapping(value + I64{40}), jet_rt_string_clone(rt_static_text("the directory handle is already closed")))
+    rt_text_store(wrapping(value + I64{48}), I64{0})
     rt_text_store(error, value)
     I64{0}
 }
@@ -125,15 +125,15 @@ fn fs_held_cpart(name: I64, start: I64, end: I64, operation: I64, shown: I64, er
     data :: rt_text_data(name)
     at := start
     loop at < end {
-        if (rt_text_byte(data + at) == I64{0}) {
+        if (rt_text_byte(wrapping(data + at)) == I64{0}) {
             _ := compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, operation, shown, I64{0}, jet_rt_string_clone(rt_static_text("the name contains a NUL byte")), error)
             return I64{0}
         }
         at += I64{1}
     }
     part :: jet_rt_alloc(end - start + I64{1}, I64{1})
-    rt_text_bytes_copy(part, data + start, end - start)
-    rt_text_put(part + end - start, I64{0})
+    rt_text_bytes_copy(part, wrapping(data + start), end - start)
+    rt_text_put(wrapping(wrapping(part + end) - start), I64{0})
     part
 }
 
@@ -146,7 +146,7 @@ fn fs_held_cpart_drop(part: I64, start: I64, end: I64) { jet_rt_free(part, end -
 // The walk starts from a duplicate, so the held descriptor stays the table's.
 fn fs_held_parent(key: I64, name: I64, operation: I64, shown: I64, out: I64, error: I64) -> Bool {
     rt_text_store(out, I64{-1})
-    rt_text_store(out + I64{8}, I64{0})
+    rt_text_store(wrapping(out + I64{8}), I64{0})
     if (key < I64{0}) {
         rt_text_store(out, I64{-100})
         return true
@@ -167,7 +167,7 @@ fn fs_held_parent(key: I64, name: I64, operation: I64, shown: I64, out: I64, err
     start := I64{0}
     at := I64{0}
     loop at < length {
-        if (rt_text_byte(data + at) == I64{47}) {
+        if (rt_text_byte(wrapping(data + at)) == I64{47}) {
             part :: fs_held_cpart(name, start, at, operation, shown, error)
             if (part == I64{0}) {
                 fs_held_release(current)
@@ -197,7 +197,7 @@ fn fs_held_parent(key: I64, name: I64, operation: I64, shown: I64, out: I64, err
         at += I64{1}
     }
     rt_text_store(out, current)
-    rt_text_store(out + I64{8}, start)
+    rt_text_store(wrapping(out + I64{8}), start)
     true
 }
 
@@ -216,7 +216,7 @@ fn fs_open_at(key: I64, name: I64, access: I64, if_exists: I64, mode: I64, links
     result := I64{-1}
     if fs_held_parent(key, name, operation, shown, scratch, error) {
         directory :: rt_text_word(scratch)
-        start :: rt_text_word(scratch + I64{8})
+        start :: rt_text_word(wrapping(scratch + I64{8}))
         end :: rt_text_len(name)
         part :: fs_held_cpart(name, start, end, operation, shown, error)
         if (part != I64{0}) {
@@ -278,7 +278,7 @@ fn fs_open_at(key: I64, name: I64, access: I64, if_exists: I64, mode: I64, links
     node := I64{0}
     loop rt_text_word(link) != (I64{0}) {
         candidate :: rt_text_word(link)
-        if (rt_text_word(candidate + I64{8}) == key) {
+        if (rt_text_word(wrapping(candidate + I64{8})) == key) {
             rt_text_store(link, rt_text_word(candidate))
             node = candidate
             break
@@ -287,8 +287,8 @@ fn fs_open_at(key: I64, name: I64, access: I64, if_exists: I64, mode: I64, links
     }
     sync_mutex_unlock(root)
     if (node == I64{0}) -> return
-    jet_fd_drop_raw(rt_text_word(node + I64{16}))
-    jet_rt_string_drop(rt_text_word(node + I64{24}))
+    jet_fd_drop_raw(rt_text_word(wrapping(node + I64{16})))
+    jet_rt_string_drop(rt_text_word(wrapping(node + I64{24})))
     jet_rt_free(node, I64{32}, I64{8})
 }
 
@@ -303,10 +303,10 @@ fn fs_open_at(key: I64, name: I64, access: I64, if_exists: I64, mode: I64, links
         return fs_held_closed(HOST_IO_OP_FLUSH, error)
     }
     path :: rt_text_word(scratch)
-    jet_fd_sync_raw(state, false, scratch + I64{8})
+    jet_fd_sync_raw(state, false, wrapping(scratch + I64{8}))
     jet_fd_drop_raw(state)
-    failed :: rt_text_word(scratch + I64{8}) != I64{0}
-    code :: rt_text_word(scratch + I64{16})
+    failed :: rt_text_word(wrapping(scratch + I64{8})) != I64{0}
+    code :: rt_text_word(wrapping(scratch + I64{16}))
     jet_rt_free(scratch, I64{40}, I64{8})
     result :: if failed -> compiler_fs_errno(HOST_IO_OP_FLUSH, path, code, error) else -> I64{1}
     jet_rt_string_drop(path)
@@ -325,7 +325,7 @@ fn fs_open_at(key: I64, name: I64, access: I64, if_exists: I64, mode: I64, links
     result := I64{0}
     if fs_held_parent(key, name, HOST_IO_OP_WRITE, shown, scratch, error) {
         directory :: rt_text_word(scratch)
-        start :: rt_text_word(scratch + I64{8})
+        start :: rt_text_word(wrapping(scratch + I64{8}))
         end :: rt_text_len(name)
         part :: fs_held_cpart(name, start, end, HOST_IO_OP_WRITE, shown, error)
         if (part != I64{0}) {
@@ -369,10 +369,10 @@ fn fs_open_at(key: I64, name: I64, access: I64, if_exists: I64, mode: I64, links
         return fs_held_closed(HOST_IO_OP_WRITE, error)
     }
     path :: rt_text_word(scratch)
-    fd_operation(state, I64{73}, operation, I64{0}, scratch + I64{8})
+    fd_operation(state, I64{73}, operation, I64{0}, wrapping(scratch + I64{8}))
     jet_fd_drop_raw(state)
-    failed :: rt_text_word(scratch + I64{8}) != I64{0}
-    code :: rt_text_word(scratch + I64{16})
+    failed :: rt_text_word(wrapping(scratch + I64{8})) != I64{0}
+    code :: rt_text_word(wrapping(scratch + I64{16}))
     jet_rt_free(scratch, I64{40}, I64{8})
     result :: if failed -> compiler_fs_errno(HOST_IO_OP_WRITE, path, code, error) else -> I64{1}
     jet_rt_string_drop(path)
@@ -411,7 +411,7 @@ fn fs_open_at(key: I64, name: I64, access: I64, if_exists: I64, mode: I64, links
     jet_fd_link_at_raw(reader, state, name, scratch)
     jet_fd_drop_raw(state)
     failed :: rt_text_word(scratch) != I64{0}
-    code :: if failed -> rt_text_word(scratch + I64{8}) else -> I64{0}
+    code :: if failed -> rt_text_word(wrapping(scratch + I64{8})) else -> I64{0}
     jet_rt_free(scratch, I64{32}, I64{8})
     rt_text_put(held, I64{1})
     rt_text_store(value, jet_int_owned_from_i64(if failed -> I64{-1} else -> I64{0}))
@@ -446,25 +446,25 @@ fn fs_statx_facts(path: I64, follow: Bool, facts: I64, birth: I64, errno: I64) -
     // gid u32 24, mode u16 28, ino 32, size 40, blocks 48, atime 64, btime
     // 80, ctime 96, mtime 112 (seconds, then u32 nanoseconds), rdev
     // major/minor u32 128/132, dev major/minor u32 136/140.
-    rt_text_store(facts, fs_statx_device(rt_text_word(buffer + I64{136})))
-    rt_text_store(facts + I64{8}, rt_text_word(buffer + I64{32}))
-    rt_text_store(facts + I64{16}, (rt_text_word(buffer + I64{24}) >> I64{32}).bit_and(I64{65535}))
-    rt_text_store(facts + I64{24}, rt_text_word(buffer + I64{16}).bit_and(low))
-    rt_text_store(facts + I64{32}, (rt_text_word(buffer + I64{16}) >> I64{32}).bit_and(low))
-    rt_text_store(facts + I64{40}, rt_text_word(buffer + I64{24}).bit_and(low))
-    rt_text_store(facts + I64{48}, fs_statx_device(rt_text_word(buffer + I64{128})))
-    rt_text_store(facts + I64{56}, rt_text_word(buffer + I64{40}))
-    rt_text_store(facts + I64{64}, rt_text_word(buffer + I64{64}))
-    rt_text_store(facts + I64{72}, rt_text_word(buffer + I64{72}).bit_and(low))
-    rt_text_store(facts + I64{80}, rt_text_word(buffer + I64{112}))
-    rt_text_store(facts + I64{88}, rt_text_word(buffer + I64{120}).bit_and(low))
-    rt_text_store(facts + I64{96}, rt_text_word(buffer + I64{96}))
-    rt_text_store(facts + I64{104}, rt_text_word(buffer + I64{104}).bit_and(low))
-    rt_text_store(facts + I64{112}, rt_text_word(buffer + I64{48}))
-    rt_text_store(facts + I64{120}, (rt_text_word(buffer) >> I64{32}).bit_and(low))
+    rt_text_store(facts, fs_statx_device(rt_text_word(wrapping(buffer + I64{136}))))
+    rt_text_store(wrapping(facts + I64{8}), rt_text_word(wrapping(buffer + I64{32})))
+    rt_text_store(wrapping(facts + I64{16}), (rt_text_word(wrapping(buffer + I64{24})) >> I64{32}).bit_and(I64{65535}))
+    rt_text_store(wrapping(facts + I64{24}), rt_text_word(wrapping(buffer + I64{16})).bit_and(low))
+    rt_text_store(wrapping(facts + I64{32}), (rt_text_word(wrapping(buffer + I64{16})) >> I64{32}).bit_and(low))
+    rt_text_store(wrapping(facts + I64{40}), rt_text_word(wrapping(buffer + I64{24})).bit_and(low))
+    rt_text_store(wrapping(facts + I64{48}), fs_statx_device(rt_text_word(wrapping(buffer + I64{128}))))
+    rt_text_store(wrapping(facts + I64{56}), rt_text_word(wrapping(buffer + I64{40})))
+    rt_text_store(wrapping(facts + I64{64}), rt_text_word(wrapping(buffer + I64{64})))
+    rt_text_store(wrapping(facts + I64{72}), rt_text_word(wrapping(buffer + I64{72})).bit_and(low))
+    rt_text_store(wrapping(facts + I64{80}), rt_text_word(wrapping(buffer + I64{112})))
+    rt_text_store(wrapping(facts + I64{88}), rt_text_word(wrapping(buffer + I64{120})).bit_and(low))
+    rt_text_store(wrapping(facts + I64{96}), rt_text_word(wrapping(buffer + I64{96})))
+    rt_text_store(wrapping(facts + I64{104}), rt_text_word(wrapping(buffer + I64{104})).bit_and(low))
+    rt_text_store(wrapping(facts + I64{112}), rt_text_word(wrapping(buffer + I64{48})))
+    rt_text_store(wrapping(facts + I64{120}), (rt_text_word(buffer) >> I64{32}).bit_and(low))
     rt_text_store(birth, if (mask.bit_and(I64{2048}) != I64{0}) -> I64{1} else -> I64{0})
-    rt_text_store(birth + I64{8}, rt_text_word(buffer + I64{80}))
-    rt_text_store(birth + I64{16}, rt_text_word(buffer + I64{88}).bit_and(low))
+    rt_text_store(wrapping(birth + I64{8}), rt_text_word(wrapping(buffer + I64{80})))
+    rt_text_store(wrapping(birth + I64{16}), rt_text_word(wrapping(buffer + I64{88})).bit_and(low))
     _ := fd_error(I64{0}, errno)
     jet_rt_free(buffer, I64{256}, I64{8})
     I64{1}
@@ -484,15 +484,15 @@ fn fs_statx_device(pair: I64) -> I64 {
 // StatFacts128@0, BirthTime24@128 and ErrorOut32@152. False writes the IOError.
 fn fs_stat_facts_at(key: I64, name: I64, follow: Bool, scratch: I64, error: I64) -> Bool {
     facts :: scratch
-    birth :: scratch + I64{128}
-    errno :: scratch + I64{152}
+    birth :: wrapping(scratch + I64{128})
+    errno :: wrapping(scratch + I64{152})
     if (key < I64{0}) {
         if !compiler_fs_path(name, HOST_IO_OP_READ, error) -> return false
         statx :: fs_statx_facts(name, follow, facts, birth, errno)
         if (statx > I64{0}) -> return true
         if (statx == I64{0}) -> jet_fs_stat_raw(name, follow, facts, errno)
         if (rt_text_word(errno) != I64{0}) {
-            _ := compiler_fs_errno(HOST_IO_OP_READ, name, rt_text_word(errno + I64{8}), error)
+            _ := compiler_fs_errno(HOST_IO_OP_READ, name, rt_text_word(wrapping(errno + I64{8})), error)
             return false
         }
         if (statx == I64{0}) -> jet_fs_created_raw(name, follow, birth, errno)
@@ -510,7 +510,7 @@ fn fs_stat_facts_at(key: I64, name: I64, follow: Bool, scratch: I64, error: I64)
         jet_fd_stat_raw(state, facts, errno)
         failed :: rt_text_word(errno) != I64{0}
         if failed {
-            _ := compiler_fs_errno(HOST_IO_OP_READ, path, rt_text_word(errno + I64{8}), error)
+            _ := compiler_fs_errno(HOST_IO_OP_READ, path, rt_text_word(wrapping(errno + I64{8})), error)
         } else {
             jet_fd_created_raw(state, birth, errno)
         }
@@ -526,7 +526,7 @@ fn fs_stat_facts_at(key: I64, name: I64, follow: Bool, scratch: I64, error: I64)
     ok := false
     if fs_held_parent(key, name, HOST_IO_OP_READ, shown, errno, error) {
         directory :: rt_text_word(errno)
-        start :: rt_text_word(errno + I64{8})
+        start :: rt_text_word(wrapping(errno + I64{8}))
         end :: rt_text_len(name)
         part :: fs_held_cpart(name, start, end, HOST_IO_OP_READ, shown, error)
         if (part != I64{0}) {
@@ -566,7 +566,7 @@ fn fs_stat_facts_at(key: I64, name: I64, follow: Bool, scratch: I64, error: I64)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     scratch :: jet_rt_alloc(I64{184}, I64{8})
     ok :: fs_stat_facts_at(key, name, follow, scratch, error)
-    if ok -> compiler_fs_stat_row(scratch, scratch + I64{128}, output, len)
+    if ok -> compiler_fs_stat_row(scratch, wrapping(scratch + I64{128}), output, len)
     jet_rt_free(scratch, I64{184}, I64{8})
     if ok -> I64{1} else -> I64{0}
 }
@@ -581,7 +581,7 @@ fn fs_stat_facts_at(key: I64, name: I64, follow: Bool, scratch: I64, error: I64)
     result := I64{0}
     if fs_held_parent(key, name, HOST_IO_OP_WRITE, shown, scratch, error) {
         parent :: rt_text_word(scratch)
-        start :: rt_text_word(scratch + I64{8})
+        start :: rt_text_word(wrapping(scratch + I64{8}))
         end :: rt_text_len(name)
         part :: fs_held_cpart(name, start, end, HOST_IO_OP_WRITE, shown, error)
         if (part != I64{0}) {
@@ -603,10 +603,10 @@ fn fs_rename_refused(shown: I64, error: I64) -> I64 {
 // Whether from names a directory, without following it; any error is false.
 fn fs_rename_source_is_directory(key: I64, name: I64) -> Bool {
     scratch :: jet_rt_alloc(I64{192}, I64{8})
-    rt_text_store(scratch + I64{184}, I64{0})
-    found :: fs_stat_facts_at(key, name, false, scratch, scratch + I64{184})
-    directory :: found && (rt_text_word(scratch + I64{16}).bit_and(I64{61440})) == I64{16384}
-    if !found -> jet_rt_handle_drop_io_error(rt_text_word(scratch + I64{184}))
+    rt_text_store(wrapping(scratch + I64{184}), I64{0})
+    found :: fs_stat_facts_at(key, name, false, scratch, wrapping(scratch + I64{184}))
+    directory :: found && (rt_text_word(wrapping(scratch + I64{16})).bit_and(I64{61440})) == I64{16384}
+    if !found -> jet_rt_handle_drop_io_error(rt_text_word(wrapping(scratch + I64{184})))
     jet_rt_free(scratch, I64{192}, I64{8})
     directory
 }
@@ -656,7 +656,7 @@ fn fs_rename_parts(from_key: I64, from: I64, from_dir: I64, from_part: I64, from
     if (from_shown == I64{0}) -> return fs_held_closed(HOST_IO_OP_WRITE, error)
     // Walk32: from directory0, from start8, to directory16, to start24.
     scratch :: jet_rt_alloc(I64{32}, I64{8})
-    rt_text_store(scratch + I64{16}, I64{-1})
+    rt_text_store(wrapping(scratch + I64{16}), I64{-1})
     to_shown := I64{0}
     result := I64{0}
     walked := fs_held_parent(from_key, from, HOST_IO_OP_WRITE, from_shown, scratch, error)
@@ -667,24 +667,24 @@ fn fs_rename_parts(from_key: I64, from: I64, from_dir: I64, from_part: I64, from
             walked = false
         }
     }
-    if walked -> walked = fs_held_parent(to_key, to, HOST_IO_OP_WRITE, to_shown, scratch + I64{16}, error)
+    if walked -> walked = fs_held_parent(to_key, to, HOST_IO_OP_WRITE, to_shown, wrapping(scratch + I64{16}), error)
     if walked {
-        from_start :: rt_text_word(scratch + I64{8})
+        from_start :: rt_text_word(wrapping(scratch + I64{8}))
         from_end :: rt_text_len(from)
-        to_start :: rt_text_word(scratch + I64{24})
+        to_start :: rt_text_word(wrapping(scratch + I64{24}))
         to_end :: rt_text_len(to)
         from_part :: fs_held_cpart(from, from_start, from_end, HOST_IO_OP_WRITE, from_shown, error)
         if (from_part != I64{0}) {
             to_part :: fs_held_cpart(to, to_start, to_end, HOST_IO_OP_WRITE, to_shown, error)
             if (to_part != I64{0}) {
-                result = fs_rename_parts(from_key, from, rt_text_word(scratch), from_part, from_shown, rt_text_word(scratch + I64{16}), to_part, to_shown, policy, error)
+                result = fs_rename_parts(from_key, from, rt_text_word(scratch), from_part, from_shown, rt_text_word(wrapping(scratch + I64{16})), to_part, to_shown, policy, error)
                 fs_held_cpart_drop(to_part, to_start, to_end)
             }
             fs_held_cpart_drop(from_part, from_start, from_end)
         }
     }
     fs_held_release(rt_text_word(scratch))
-    fs_held_release(rt_text_word(scratch + I64{16}))
+    fs_held_release(rt_text_word(wrapping(scratch + I64{16})))
     jet_rt_free(scratch, I64{32}, I64{8})
     if (to_shown != I64{0}) -> jet_rt_string_drop(to_shown)
     jet_rt_string_drop(from_shown)

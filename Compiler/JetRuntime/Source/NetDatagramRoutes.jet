@@ -15,13 +15,13 @@ fn net_udp_open(value: I64, operation: I64, error: I64) -> Bool {
 }
 fn net_udp_deadline(value: I64, save: I64) {
     state :: net_word(value, I64{0})
-    sync_mutex_lock(state + I64{8})
+    sync_mutex_lock(wrapping(state + I64{8}))
     milliseconds :: net_word(state, I64{24})
-    sync_mutex_unlock(state + I64{8})
+    sync_mutex_unlock(wrapping(state + I64{8}))
     if (milliseconds < I64{0}) {
         // An unset socket timeout does not create an artificial deadline.
         sync_store(save, if jet_ctx_deadline_present() -> I64{1} else -> I64{0})
-        sync_store(save + I64{8}, jet_ctx_deadline_ms())
+        sync_store(wrapping(save + I64{8}), jet_ctx_deadline_ms())
     } else { net_route_deadline_push(milliseconds, save) }
 }
 fn net_udp_wait(state: I64, reading: Bool, operation: I64, scratch: I64, error: I64) -> Bool {
@@ -88,16 +88,16 @@ fn net_udp_wait(state: I64, reading: Bool, operation: I64, scratch: I64, error: 
     // Private Rust i64 parameters are raw milliseconds, unlike Int fields.
     if (milliseconds < I64{0}) -> return net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_clone(rt_static_text("network timeout must be non-negative")), I64{0}, error)
     state :: net_word(value, I64{0})
-    sync_mutex_lock(state + I64{8})
+    sync_mutex_lock(wrapping(state + I64{8}))
     net_put(state, I64{24}, milliseconds)
-    sync_mutex_unlock(state + I64{8})
+    sync_mutex_unlock(wrapping(state + I64{8}))
     I64{1}
 }
 // UdpSocket::close: idempotent. The shared FD72 is marked closed (failing
 // any poller waiting on it); later operations report "socket is closed".
 #Export(c) fn jet_net_udp_close(value: I64, error: I64) -> I64 {
     scratch :: jet_rt_alloc(I64{40}, I64{8})
-    jet_fd_close_raw(jet_udp_socket_fd_raw(value), scratch, scratch + I64{32})
+    jet_fd_close_raw(jet_udp_socket_fd_raw(value), scratch, wrapping(scratch + I64{32}))
     code :: net_word(scratch, I64{8})
     jet_rt_free(scratch, I64{40}, I64{8})
     if (code != I64{0}) -> return net_route_errno(rt_static_text("udp close"), I64{0}, code, error)
@@ -116,10 +116,10 @@ fn net_udp_wait(state: I64, reading: Bool, operation: I64, scratch: I64, error: 
     if !net_udp_open(value, operation, error) -> return I64{0}
     if !net_tcp_timeout_valid(milliseconds, operation, error) -> return I64{0}
     scratch :: jet_rt_alloc(I64{48}, I64{8})
-    net_route_deadline_push(milliseconds, scratch + I64{32})
+    net_route_deadline_push(milliseconds, wrapping(scratch + I64{32}))
     mask :: if (interest == I64{0}) -> I64{1} else if (interest == I64{1}) -> I64{4} else -> I64{5}
     ready :: net_tcp_wait(jet_udp_socket_fd_raw(value), mask, operation, scratch, error)
-    jet_ctx_pop_deadline(scratch + I64{32})
+    jet_ctx_pop_deadline(wrapping(scratch + I64{32}))
     jet_rt_free(scratch, I64{48}, I64{8})
     if (ready == I64{0}) -> return I64{0}
     result :: jet_rt_alloc(I64{16}, I64{8})
@@ -132,7 +132,7 @@ fn net_udp_send(value: I64, data: I64, length: I64, address: I64, output: I64, e
     operation :: rt_static_text("udp send")
     if !net_udp_open(value, operation, error) -> return I64{0}
     scratch :: jet_rt_alloc(I64{48}, I64{8})
-    net_udp_deadline(value, scratch + I64{32})
+    net_udp_deadline(value, wrapping(scratch + I64{32}))
     result := I64{0}
     loop {
         written :: jet_socket_send_to_raw(jet_udp_socket_fd_raw(value), data, length, address, scratch)
@@ -163,7 +163,7 @@ fn net_udp_send(value: I64, data: I64, length: I64, address: I64, output: I64, e
             break
         }
     }
-    jet_ctx_pop_deadline(scratch + I64{32})
+    jet_ctx_pop_deadline(wrapping(scratch + I64{32}))
     jet_rt_free(scratch, I64{48}, I64{8})
     result
 }
@@ -176,7 +176,7 @@ fn net_udp_send(value: I64, data: I64, length: I64, address: I64, output: I64, e
     bytes :: jet_rt_alloc(length * RT_HOST_U8_STRIDE, I64{8})
     at := I64{0}
     loop at < length {
-        host_u8_put(bytes, at, rt_text_byte(rt_text_data(text) + at))
+        host_u8_put(bytes, at, rt_text_byte(wrapping(rt_text_data(text) + at)))
         at += I64{1}
     }
     result :: net_udp_send(value, bytes, length, address, output, error)
@@ -189,7 +189,7 @@ fn net_udp_send(value: I64, data: I64, length: I64, address: I64, output: I64, e
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     operation :: rt_static_text("udp bind")
     scratch :: jet_rt_alloc(I64{48}, I64{8})
-    if (net_route_resolve_text(address, operation, scratch + I64{32}, scratch + I64{40}, error) == I64{0}) {
+    if (net_route_resolve_text(address, operation, wrapping(scratch + I64{32}), wrapping(scratch + I64{40}), error) == I64{0}) {
         jet_rt_free(scratch, I64{48}, I64{8})
         return I64{0}
     }
@@ -199,7 +199,7 @@ fn net_udp_send(value: I64, data: I64, length: I64, address: I64, output: I64, e
     code := I64{0}
     at := I64{0}
     loop at < count {
-        row :: rows + at * I64{56}
+        row :: wrapping(rows + at * I64{56})
         state :: jet_socket_create_raw(net_word(row, I64{0}), I64{2}, I64{0}, scratch)
         if (state != I64{0}) {
             if (jet_socket_bind_raw(state, row, scratch) >= I64{0}) {

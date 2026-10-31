@@ -3,19 +3,19 @@
 // cloning never owns that view, and dropping frees only the Error8 carrier.
 fn ui_browser_error_new(kind: I64) -> I64 {
     result :: jet_rt_alloc(UI_CARRIER_BROWSER_ERROR_BYTES, I64{8})
-    ui_carrier_store(result + UI_CARRIER_BROWSER_ERROR_KIND, kind)
+    ui_carrier_store(wrapping(result + UI_CARRIER_BROWSER_ERROR_KIND), kind)
     result
 }
 
 #Export(c) fn jet_rt_handle_clone_jet_browser_error(value: I64) -> I64 {
-    ui_browser_error_new(ui_carrier_word(value + UI_CARRIER_BROWSER_ERROR_KIND))
+    ui_browser_error_new(ui_carrier_word(wrapping(value + UI_CARRIER_BROWSER_ERROR_KIND)))
 }
 #Export(c) fn jet_rt_handle_drop_jet_browser_error(value: I64) {
     if (value == I64{0}) -> return
     jet_rt_free(value, UI_CARRIER_BROWSER_ERROR_BYTES, I64{8})
 }
 #Export(c) fn jet_rt_handle_eq_jet_browser_error(a: I64, b: I64) -> Bool {
-    jet_rt_string_eq(ui_carrier_word(a + UI_CARRIER_BROWSER_ERROR_KIND), ui_carrier_word(b + UI_CARRIER_BROWSER_ERROR_KIND))
+    jet_rt_string_eq(ui_carrier_word(wrapping(a + UI_CARRIER_BROWSER_ERROR_KIND)), ui_carrier_word(wrapping(b + UI_CARRIER_BROWSER_ERROR_KIND)))
 }
 
 fn ui_browser_error_message(kind: I64) -> I64 {
@@ -35,7 +35,7 @@ fn ui_browser_error_message(kind: I64) -> I64 {
     }
 }
 #Export(c) fn jet_rt_handle_show_jet_browser_error(value: I64) -> I64 {
-    jet_rt_string_clone(ui_browser_error_message(ui_carrier_word(value + UI_CARRIER_BROWSER_ERROR_KIND)))
+    jet_rt_string_clone(ui_browser_error_message(ui_carrier_word(wrapping(value + UI_CARRIER_BROWSER_ERROR_KIND))))
 }
 #Export(c) fn jet_rt_handle_debug_jet_browser_error(value: I64) -> I64 { jet_rt_handle_show_jet_browser_error(value) }
 #Export(c) fn jet_rt_handle_display_jet_browser_error(value: I64) -> I64 { jet_rt_handle_show_jet_browser_error(value) }

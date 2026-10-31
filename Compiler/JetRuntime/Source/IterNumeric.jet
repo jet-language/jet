@@ -55,13 +55,13 @@ fn iter_wide_float(high: I64, low: U64) -> Float {
 #Export(c) fn jet_rt_native_iter_average_float(source: I64) -> Float {
     node :: iter_collect_node(source)
     if (node == I64{0}) { return Float{0.0} }
-    header :: trap_word(node + I64{112})
-    data :: trap_word(header + I64{16})
+    header :: trap_word(wrapping(node + I64{112}))
+    data :: trap_word(wrapping(header + I64{16}))
     length :: trap_word(header)
     at := I64{0}
     sum := Float{-0.0}
     loop at < length {
-        sum += rt_f64_from_bits(trap_word(data + at * I64{8}))
+        sum += rt_f64_from_bits(trap_word(wrapping(data + at * I64{8})))
         at += I64{1}
     }
     jet_rt_native_iter_drop(node)
@@ -72,10 +72,10 @@ fn iter_wide_float(high: I64, low: U64) -> Float {
     node :: iter_collect_node(source)
     if (node == I64{0}) { return Float{0.0} }
     meta :: iter_meta(node)
-    kind :: trap_word(meta + I64{48}).bit_and(I64{4294967295})
-    width :: trap_word(meta + I64{48}) >> I64{32}
-    header :: trap_word(node + I64{112})
-    data :: trap_word(header + I64{16})
+    kind :: trap_word(wrapping(meta + I64{48})).bit_and(I64{4294967295})
+    width :: trap_word(wrapping(meta + I64{48})) >> I64{32}
+    header :: trap_word(wrapping(node + I64{112}))
+    data :: trap_word(wrapping(header + I64{16}))
     length :: trap_word(header)
     at := I64{0}
     sum := Float{0.0}
@@ -83,7 +83,7 @@ fn iter_wide_float(high: I64, low: U64) -> Float {
         accumulator :: coll_slot_new(meta)
         trap_store(accumulator, jet_int_owned_from_i64(I64{0}))
         loop at < length {
-            next_sum :: jet_int_add(trap_word(accumulator), trap_word(data + at * trap_word(meta)))
+            next_sum :: jet_int_add(trap_word(accumulator), trap_word(wrapping(data + at * trap_word(meta))))
             int_discard(trap_word(accumulator))
             trap_store(accumulator, next_sum)
             at += I64{1}
@@ -95,7 +95,7 @@ fn iter_wide_float(high: I64, low: U64) -> Float {
         hi := I64{0}
         lo := U64{0}
         loop at < length {
-            word := trap_word(data + at * trap_word(meta))
+            word := trap_word(wrapping(data + at * trap_word(meta)))
             if (width < I64{64} && kind == I64{2}) {
                 word = (word << (I64{64} - width)) >> (I64{64} - width)
             }
@@ -126,23 +126,23 @@ fn coll_f64_fixed(data: I64, length: I64, seed: Float) -> Float {
     a7 := Float{0.0}
     at := I64{0}
     loop length - at >= (I64{8}) {
-        a0 += rt_f64_from_bits(trap_word(data + at * I64{8}))
-        a1 += rt_f64_from_bits(trap_word(data + (at + I64{1}) * I64{8}))
-        a2 += rt_f64_from_bits(trap_word(data + (at + I64{2}) * I64{8}))
-        a3 += rt_f64_from_bits(trap_word(data + (at + I64{3}) * I64{8}))
-        a4 += rt_f64_from_bits(trap_word(data + (at + I64{4}) * I64{8}))
-        a5 += rt_f64_from_bits(trap_word(data + (at + I64{5}) * I64{8}))
-        a6 += rt_f64_from_bits(trap_word(data + (at + I64{6}) * I64{8}))
-        a7 += rt_f64_from_bits(trap_word(data + (at + I64{7}) * I64{8}))
+        a0 += rt_f64_from_bits(trap_word(wrapping(data + at * I64{8})))
+        a1 += rt_f64_from_bits(trap_word(wrapping(data + (at + I64{1}) * I64{8})))
+        a2 += rt_f64_from_bits(trap_word(wrapping(data + (at + I64{2}) * I64{8})))
+        a3 += rt_f64_from_bits(trap_word(wrapping(data + (at + I64{3}) * I64{8})))
+        a4 += rt_f64_from_bits(trap_word(wrapping(data + (at + I64{4}) * I64{8})))
+        a5 += rt_f64_from_bits(trap_word(wrapping(data + (at + I64{5}) * I64{8})))
+        a6 += rt_f64_from_bits(trap_word(wrapping(data + (at + I64{6}) * I64{8})))
+        a7 += rt_f64_from_bits(trap_word(wrapping(data + (at + I64{7}) * I64{8})))
         at += I64{8}
     }
-    if (at < length) { a0 += rt_f64_from_bits(trap_word(data + at * I64{8})) }
-    if (at + I64{1} < length) { a1 += rt_f64_from_bits(trap_word(data + (at + I64{1}) * I64{8})) }
-    if (at + I64{2} < length) { a2 += rt_f64_from_bits(trap_word(data + (at + I64{2}) * I64{8})) }
-    if (at + I64{3} < length) { a3 += rt_f64_from_bits(trap_word(data + (at + I64{3}) * I64{8})) }
-    if (at + I64{4} < length) { a4 += rt_f64_from_bits(trap_word(data + (at + I64{4}) * I64{8})) }
-    if (at + I64{5} < length) { a5 += rt_f64_from_bits(trap_word(data + (at + I64{5}) * I64{8})) }
-    if (at + I64{6} < length) { a6 += rt_f64_from_bits(trap_word(data + (at + I64{6}) * I64{8})) }
+    if (at < length) { a0 += rt_f64_from_bits(trap_word(wrapping(data + at * I64{8}))) }
+    if (at + I64{1} < length) { a1 += rt_f64_from_bits(trap_word(wrapping(data + (at + I64{1}) * I64{8}))) }
+    if (at + I64{2} < length) { a2 += rt_f64_from_bits(trap_word(wrapping(data + (at + I64{2}) * I64{8}))) }
+    if (at + I64{3} < length) { a3 += rt_f64_from_bits(trap_word(wrapping(data + (at + I64{3}) * I64{8}))) }
+    if (at + I64{4} < length) { a4 += rt_f64_from_bits(trap_word(wrapping(data + (at + I64{4}) * I64{8}))) }
+    if (at + I64{5} < length) { a5 += rt_f64_from_bits(trap_word(wrapping(data + (at + I64{5}) * I64{8}))) }
+    if (at + I64{6} < length) { a6 += rt_f64_from_bits(trap_word(wrapping(data + (at + I64{6}) * I64{8}))) }
     left :: (a0 + a1) + (a2 + a3)
     right :: (a4 + a5) + (a6 + a7)
     left + right
@@ -162,8 +162,8 @@ fn coll_f64_fixed(data: I64, length: I64, seed: Float) -> Float {
         start :: chunk * I64{64}
         remaining :: length - start
         width :: if (remaining < I64{64}) -> remaining else -> I64{64}
-        value :: coll_f64_fixed(data + start * I64{8}, width, seed)
-        trap_store(partials + chunk * I64{8}, rt_f64_bits(value))
+        value :: coll_f64_fixed(wrapping(data + start * I64{8}), width, seed)
+        trap_store(wrapping(partials + chunk * I64{8}), rt_f64_bits(value))
         chunk += I64{1}
     }
     active := count
@@ -172,9 +172,9 @@ fn coll_f64_fixed(data: I64, length: I64, seed: Float) -> Float {
         write := I64{0}
         loop read < active {
             if (read + I64{1} < active) {
-                value :: coll_f64_fixed(partials + read * I64{8}, I64{2}, Float{0.0})
-                trap_store(partials + write * I64{8}, rt_f64_bits(value))
-            } else { trap_store(partials + write * I64{8}, trap_word(partials + read * I64{8})) }
+                value :: coll_f64_fixed(wrapping(partials + read * I64{8}), I64{2}, Float{0.0})
+                trap_store(wrapping(partials + write * I64{8}), rt_f64_bits(value))
+            } else { trap_store(wrapping(partials + write * I64{8}), trap_word(wrapping(partials + read * I64{8}))) }
             read += I64{2}
             write += I64{1}
         }

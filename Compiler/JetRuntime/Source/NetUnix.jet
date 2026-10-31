@@ -54,7 +54,7 @@ fn net_unix_read_result(stream: I64, word: I64, output: I64, length: I64, text: 
     if (limit <= I64{0}) -> return net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_clone(rt_static_text("unix read limit must be positive")), I64{0}, error)
     cap :: if (limit < I64{16777216}) -> limit else -> I64{16777216}
     scratch :: jet_rt_alloc(I64{48}, I64{8})
-    net_tcp_deadline(stream, true, scratch + I64{32})
+    net_tcp_deadline(stream, true, wrapping(scratch + I64{32}))
     bytes := jet_rt_alloc(cap * RT_HOST_U8_STRIDE, I64{8})
     result := I64{0}
     loop {
@@ -81,7 +81,7 @@ fn net_unix_read_result(stream: I64, word: I64, output: I64, length: I64, text: 
         if (net_tcp_wait(jet_socket_stream_fd_raw(stream), I64{1}, operation, scratch, error) == I64{0}) -> break
     }
     if (bytes != I64{0}) -> jet_rt_free(bytes, cap * RT_HOST_U8_STRIDE, I64{8})
-    jet_ctx_pop_deadline(scratch + I64{32})
+    jet_ctx_pop_deadline(wrapping(scratch + I64{32}))
     jet_rt_free(scratch, I64{48}, I64{8})
     result
 }
@@ -117,11 +117,11 @@ fn net_unix_write_slice(stream: I64, data: I64, length: I64, scratch: I64, error
 }
 fn net_unix_write_all(stream: I64, data: I64, length: I64, error: I64) -> I64 {
     scratch :: jet_rt_alloc(I64{48}, I64{8})
-    net_tcp_deadline(stream, false, scratch + I64{32})
+    net_tcp_deadline(stream, false, wrapping(scratch + I64{32}))
     result := I64{1}
     offset := I64{0}
     loop offset < length {
-        count :: net_unix_write_slice(stream, data + offset * RT_HOST_U8_STRIDE, length - offset, scratch, error)
+        count :: net_unix_write_slice(stream, wrapping(data + offset * RT_HOST_U8_STRIDE), length - offset, scratch, error)
         if (count < I64{0}) {
             result = I64{0}
             break
@@ -132,7 +132,7 @@ fn net_unix_write_all(stream: I64, data: I64, length: I64, error: I64) -> I64 {
         }
         offset += count
     }
-    jet_ctx_pop_deadline(scratch + I64{32})
+    jet_ctx_pop_deadline(wrapping(scratch + I64{32}))
     jet_rt_free(scratch, I64{48}, I64{8})
     result
 }
@@ -154,7 +154,7 @@ fn net_unix_write_all(stream: I64, data: I64, length: I64, error: I64) -> I64 {
     if (RT_HOST_U8_STRIDE != I64{1} && length != I64{0}) {
         at := I64{0}
         loop at < length {
-            host_u8_put(bytes, at, rt_text_byte(rt_text_data(text) + at))
+            host_u8_put(bytes, at, rt_text_byte(wrapping(rt_text_data(text) + at)))
             at += I64{1}
         }
     }
@@ -185,7 +185,7 @@ fn net_unix_write_all(stream: I64, data: I64, length: I64, error: I64) -> I64 {
 fn net_unix_fd_option(descriptor: I64, option: I64) -> I64 {
     scratch :: jet_rt_alloc(I64{16}, I64{8})
     thread_zero(scratch, I64{16})
-    net_store_uint(scratch + I64{8}, I64{4}, I64{4})
+    net_store_uint(wrapping(scratch + I64{8}), I64{4}, I64{4})
     result := I64{0}
     #Unsafe("private scratch lends one native int and its 4B socklen; getsockopt retains neither pointer") {
         result = os_syscall_i64(I64{55}, descriptor, I64{1}, option, scratch, scratch + I64{8}, I64{0})
@@ -230,9 +230,9 @@ fn net_unix_peer_field(stream: I64, offset: I64, output: I64, error: I64) -> I64
     if !net_route_stream_open(stream, operation, error) -> return I64{0}
     scratch :: jet_rt_alloc(I64{24}, I64{8})
     thread_zero(scratch, I64{24})
-    net_store_uint(scratch + I64{16}, I64{4}, I64{12})
+    net_store_uint(wrapping(scratch + I64{16}), I64{4}, I64{12})
     result :: net_socket_call(jet_socket_stream_fd_raw(stream), I64{55}, I64{1}, I64{17}, scratch, scratch + I64{16}, I64{0})
-    value :: net_load_uint(scratch + offset, I64{4})
+    value :: net_load_uint(wrapping(scratch + offset), I64{4})
     jet_rt_free(scratch, I64{24}, I64{8})
     if (result < I64{0}) -> return net_route_errno(operation, I64{0}, -result, error)
     net_put(output, I64{0}, value)

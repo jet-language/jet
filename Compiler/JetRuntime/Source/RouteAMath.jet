@@ -20,9 +20,9 @@ fn random_thread_store(value: I64) { jet_rt_tls_set(random_state_key, value.bit_
 #Export(c) fn jet_random_state_raw() -> I64 {
     world :: world_current()
     if (world == I64{0}) -> return random_thread_state()
-    sync_mutex_lock(world + I64{8})
-    value :: sync_load(world + I64{40})
-    sync_mutex_unlock(world + I64{8})
+    sync_mutex_lock(wrapping(world + I64{8}))
+    value :: sync_load(wrapping(world + I64{40}))
+    sync_mutex_unlock(wrapping(world + I64{8}))
     value
 }
 
@@ -39,14 +39,14 @@ fn random_thread_store(value: I64) { jet_rt_tls_set(random_state_key, value.bit_
         random_thread_store(new)
         return true
     }
-    sync_mutex_lock(world + I64{8})
-    if (sync_load(world + I64{40}) != old) {
-        sync_mutex_unlock(world + I64{8})
+    sync_mutex_lock(wrapping(world + I64{8}))
+    if (sync_load(wrapping(world + I64{40})) != old) {
+        sync_mutex_unlock(wrapping(world + I64{8}))
         return false
     }
-    sync_store(world + I64{40}, new)
+    sync_store(wrapping(world + I64{40}), new)
     world_event(world, services_msg_rng(), new, I64{0}, I64{1})
-    sync_mutex_unlock(world + I64{8})
+    sync_mutex_unlock(wrapping(world + I64{8}))
     true
 }
 

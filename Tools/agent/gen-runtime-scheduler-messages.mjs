@@ -28,7 +28,7 @@ for (const [name, text] of Object.entries(literals)) {
   for (let i = 0; i < bytes.length; i += 8) {
     let word = 0n;
     for (let j = i; j < Math.min(i + 8, bytes.length); j++) word |= BigInt(bytes[j]) << BigInt((j - i) * 8);
-    source += `    sync_store(data + I64{${i}}, I64{${BigInt.asIntN(64, word)}})\n`;
+    source += `    sync_store(wrapping(data + I64{${i}}), I64{${BigInt.asIntN(64, word)}})\n`;
   }
   source += '    text\n}\n';
 }

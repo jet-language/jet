@@ -49,10 +49,10 @@ fn comptime_serve_send(address: I64, count: I64) { comptime_serve_move(I64{4}, I
 fn comptime_serve_fill(frame: I64, kind: I64, a: I64, b: I64, c: I64, d: I64) {
     thread_zero(frame, I64{64})
     trap_store(frame, kind)
-    trap_store(frame + I64{8}, a)
-    trap_store(frame + I64{16}, b)
-    trap_store(frame + I64{24}, c)
-    trap_store(frame + I64{32}, d)
+    trap_store(wrapping(frame + I64{8}), a)
+    trap_store(wrapping(frame + I64{16}), b)
+    trap_store(wrapping(frame + I64{24}), c)
+    trap_store(wrapping(frame + I64{32}), d)
 }
 
 fn comptime_serve_reply(frame: I64, kind: I64, a: I64, b: I64, c: I64, d: I64) {
@@ -81,14 +81,14 @@ fn comptime_serve_filter(frame: I64, handler: I64, length: I64) {
     action :: jet_rt_alloc(I64{32}, I64{8})
     // SA_SIGINFO | SA_RESTORER; the handler never returns, so its restorer never runs.
     trap_store(action, handler)
-    trap_store(action + I64{8}, I64{67108868})
-    trap_store(action + I64{16}, handler)
-    trap_store(action + I64{24}, I64{0})
+    trap_store(wrapping(action + I64{8}), I64{67108868})
+    trap_store(wrapping(action + I64{16}), handler)
+    trap_store(wrapping(action + I64{24}), I64{0})
     installed :: trap_syscall(I64{13}, I64{31}, action, I64{0}, I64{8}, I64{0}, I64{0})
     private :: trap_syscall(I64{157}, I64{38}, I64{1}, I64{0}, I64{0}, I64{0}, I64{0})
     fprog :: jet_rt_alloc(I64{16}, I64{8})
     trap_store(fprog, length /% I64{8})
-    trap_store(fprog + I64{8}, program)
+    trap_store(wrapping(fprog + I64{8}), program)
     // SECCOMP_FILTER_FLAG_TSYNC: the runtime's own threads are refused too.
     filtered :: trap_syscall(I64{317}, I64{1}, I64{1}, fprog, I64{0}, I64{0}, I64{0})
     jet_rt_free(fprog, I64{16}, I64{8})
@@ -102,12 +102,12 @@ fn comptime_serve_loop(frame: I64) -> I64 {
     loop {
         comptime_serve_receive(frame, I64{64})
         kind :: trap_word(frame)
-        a :: trap_word(frame + I64{8})
-        b :: trap_word(frame + I64{16})
-        c :: trap_word(frame + I64{24})
-        d :: trap_word(frame + I64{32})
-        e :: trap_word(frame + I64{40})
-        f :: trap_word(frame + I64{48})
+        a :: trap_word(wrapping(frame + I64{8}))
+        b :: trap_word(wrapping(frame + I64{16}))
+        c :: trap_word(wrapping(frame + I64{24}))
+        d :: trap_word(wrapping(frame + I64{32}))
+        e :: trap_word(wrapping(frame + I64{40}))
+        f :: trap_word(wrapping(frame + I64{48}))
         if (kind == I64{1}) {
             result := I64{0}
             #Unsafe("the compiler calls an entry of this image's table, or a runtime export it resolved, on the word arguments that entry's System V signature takes") {
@@ -215,7 +215,7 @@ fn comptime_serve_stop(kind: I64, a: I64, b: I64, c: I64, d: I64) {
     jet_rt_stdout_flush()
     frame :: jet_rt_alloc(I64{64}, I64{8})
     comptime_serve_fill(frame, I64{3}, kind, a, b, c)
-    trap_store(frame + I64{40}, d)
+    trap_store(wrapping(frame + I64{40}), d)
     comptime_serve_send(frame, I64{64})
     _ := comptime_serve_loop(frame)
     trap_defect_exit(I64{0})
@@ -226,8 +226,8 @@ fn comptime_serve_stop(kind: I64, a: I64, b: I64, c: I64, d: I64) {
 // first argument rdi (ucontext gregs[8], + 104) is refused. Allocation may
 // be mid-flight, so the frame is a fresh mapping.
 #Export(c) fn jet_rt_comptime_refused(info: I64, context: I64) {
-    number :: trap_word(info + I64{24}).bit_and(I64{4294967295})
-    first :: trap_word(context + I64{104})
+    number :: trap_word(wrapping(info + I64{24})).bit_and(I64{4294967295})
+    first :: trap_word(wrapping(context + I64{104}))
     frame :: trap_syscall(I64{9}, I64{0}, I64{4096}, I64{3}, I64{34}, I64{-1}, I64{0})
     if (frame > I64{0}) -> comptime_serve_reply(frame, I64{4}, number, first, I64{0}, I64{0})
     trap_defect_exit(I64{0})

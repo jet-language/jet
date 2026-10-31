@@ -44,14 +44,14 @@ fn text_fmt_push_big(target: I64, value: I64) {
     chunks :: jet_rt_alloc(I64{320}, I64{8})
     count := I64{0}
     loop display_word(value) > (I64{0}) {
-        rt_text_store(chunks + count * I64{8}, text_fmt_big_divide(value, I64{1000000000}))
+        rt_text_store(wrapping(chunks + count * I64{8}), text_fmt_big_divide(value, I64{1000000000}))
         count += I64{1}
     }
     count -= I64{1}
-    rt_text_push_number(target, rt_text_word(chunks + count * I64{8}))
+    rt_text_push_number(target, rt_text_word(wrapping(chunks + count * I64{8})))
     loop count > (I64{0}) {
         count -= I64{1}
-        text_fmt_push_padded(target, rt_text_word(chunks + count * I64{8}), I64{9})
+        text_fmt_push_padded(target, rt_text_word(wrapping(chunks + count * I64{8})), I64{9})
     }
     jet_rt_free(chunks, I64{320}, I64{8})
 }
@@ -113,19 +113,19 @@ fn text_fmt_exact(bits: I64, precision: I64) -> I64 {
         return body
     }
     // The dropped digit decides; an exact expansion makes >=5 the half-away tie.
-    if (precision == I64{0}) -> rt_text_store(body + I64{8}, rt_text_len(body) - I64{1})
+    if (precision == I64{0}) -> rt_text_store(wrapping(body + I64{8}), rt_text_len(body) - I64{1})
     if (digit < I64{5}) -> return body
     data :: rt_text_data(body)
     index := rt_text_len(body)
     loop index > (I64{0}) {
         index -= I64{1}
-        byte :: rt_text_byte(data + index)
+        byte :: rt_text_byte(wrapping(data + index))
         if (byte == I64{46}) -> next
         if (byte != I64{57}) {
-            rt_text_put(data + index, byte + I64{1})
+            rt_text_put(wrapping(data + index), byte + I64{1})
             return body
         }
-        rt_text_put(data + index, I64{48})
+        rt_text_put(wrapping(data + index), I64{48})
     }
     carried :: rt_text_builder_with_capacity(rt_text_len(body) + I64{1})
     rt_text_push_scalar(carried, I64{49})
@@ -185,7 +185,7 @@ fn text_fmt_exact(bits: I64, precision: I64) -> I64 {
     length :: rt_text_len(body)
     index := I64{0}
     loop index < length {
-        byte :: rt_text_byte(data + index)
+        byte :: rt_text_byte(wrapping(data + index))
         if (byte >= I64{49} && byte <= I64{57}) {
             signed :: rt_text_builder_with_capacity(length + I64{1})
             rt_text_push_scalar(signed, I64{45})
@@ -207,7 +207,7 @@ fn text_fmt_exact(bits: I64, precision: I64) -> I64 {
     start :: if (length > I64{0} && rt_text_byte(data) == I64{45}) -> I64{1} else -> I64{0}
     digits_end := start
     loop digits_end < length {
-        byte :: rt_text_byte(data + digits_end)
+        byte :: rt_text_byte(wrapping(data + digits_end))
         if (byte < I64{48} || byte > I64{57}) { break }
         digits_end += I64{1}
     }
@@ -217,7 +217,7 @@ fn text_fmt_exact(bits: I64, precision: I64) -> I64 {
     at := start
     loop at < digits_end {
         if (at > start && (digits_end - at) % I64{3} == I64{0}) -> rt_text_push_scalar(grouped, I64{44})
-        rt_text_push_scalar(grouped, rt_text_byte(data + at))
+        rt_text_push_scalar(grouped, rt_text_byte(wrapping(data + at)))
         at += I64{1}
     }
     rt_text_append(grouped, data + digits_end, length - digits_end)

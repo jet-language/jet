@@ -7,8 +7,8 @@ fn numeric_trim_start(text: I64) -> I64 {
     length :: rt_text_len(text)
     at := I64{0}
     loop at < length {
-        if !unicode_is_white_space(rt_text_decode(data + at)) -> break
-        at += rt_text_width(data + at)
+        if !unicode_is_white_space(rt_text_decode(wrapping(data + at))) -> break
+        at += rt_text_width(wrapping(data + at))
     }
     at
 }
@@ -18,8 +18,8 @@ fn numeric_trim_end(text: I64, start: I64) -> I64 {
     end := rt_text_len(text)
     loop end > start {
         at := end - I64{1}
-        loop at > start && (rt_text_byte(data + at).bit_and(I64{192})) == (I64{128}) -> at -= I64{1}
-        if !unicode_is_white_space(rt_text_decode(data + at)) -> break
+        loop at > start && (rt_text_byte(wrapping(data + at)).bit_and(I64{192})) == (I64{128}) -> at -= I64{1}
+        if !unicode_is_white_space(rt_text_decode(wrapping(data + at))) -> break
         end = at
     }
     end
@@ -108,7 +108,7 @@ fn numeric_int_parse(text: I64, radix: I64, decimal: Bool, ok: I64, err: I64) ->
     at := start
     negative := false
     if (at < end) {
-        sign :: rt_text_byte(data + at)
+        sign :: rt_text_byte(wrapping(data + at))
         if (sign == I64{43} || sign == I64{45}) {
             negative = sign == I64{45}
             at += I64{1}
@@ -121,7 +121,7 @@ fn numeric_int_parse(text: I64, radix: I64, decimal: Bool, ok: I64, err: I64) ->
     }
     // Validate first: invalid text never allocates an arithmetic workspace.
     loop at < end {
-        digit :: numeric_digit(rt_text_byte(data + at))
+        digit :: numeric_digit(rt_text_byte(wrapping(data + at)))
         if (digit < I64{0} || digit >= radix) {
             sync_store(err, if decimal -> numeric_parse_error(text, true) else -> numeric_radix_text_error(text, start, end, radix))
             return I64{0}
@@ -135,7 +135,7 @@ fn numeric_int_parse(text: I64, radix: I64, decimal: Bool, ok: I64, err: I64) ->
     // inputs allocate nothing; widening creates exactly one limb workspace.
     capacity :: (end - digits) /% I64{5} + I64{1}
     loop at < end {
-        digit :: numeric_digit(rt_text_byte(data + at))
+        digit :: numeric_digit(rt_text_byte(wrapping(data + at)))
         if (node == I64{0}) {
             if (small <= (I64{4611686018427387903} - digit) /% radix) {
                 small = small * radix + digit
@@ -151,7 +151,7 @@ fn numeric_int_parse(text: I64, radix: I64, decimal: Bool, ok: I64, err: I64) ->
     if (node == I64{0}) {
         sync_store(ok, if negative -> -small else -> small)
     } else {
-        if negative -> int_store(node + I64{16}, I64{1})
+        if negative -> int_store(wrapping(node + I64{16}), I64{1})
         sync_store(ok, int_pack(node))
     }
     I64{1}
@@ -179,7 +179,7 @@ fn numeric_int_parse(text: I64, radix: I64, decimal: Bool, ok: I64, err: I64) ->
     result :: rt_text_builder_with_capacity(capacity)
     data :: rt_text_data(result)
     length := I64{0}
-    more := if small_carrier -> small != I64{0} else -> !(int_load(node + I64{32}) == I64{1} && int_get(node, I64{0}) == I64{0})
+    more := if small_carrier -> small != I64{0} else -> !(int_load(wrapping(node + I64{32})) == I64{1} && int_get(node, I64{0}) == I64{0})
     loop more {
         digit := I64{0}
         if small_carrier {
@@ -188,9 +188,9 @@ fn numeric_int_parse(text: I64, radix: I64, decimal: Bool, ok: I64, err: I64) ->
             more = small != I64{0}
         } else {
             digit = int_div_small(node, base)
-            more = !(int_load(node + I64{32}) == I64{1} && int_get(node, I64{0}) == I64{0})
+            more = !(int_load(wrapping(node + I64{32})) == I64{1} && int_get(node, I64{0}) == I64{0})
         }
-        rt_text_put(data + length, if (digit < I64{10}) -> digit + I64{48} else -> digit + I64{87})
+        rt_text_put(wrapping(data + length), if (digit < I64{10}) -> digit + I64{48} else -> digit + I64{87})
         length += I64{1}
     }
     if !small_carrier -> int_free_node(node)
@@ -199,19 +199,19 @@ fn numeric_int_parse(text: I64, radix: I64, decimal: Bool, ok: I64, err: I64) ->
         length = I64{1}
     }
     if int_negative(value) {
-        rt_text_put(data + length, I64{45})
+        rt_text_put(wrapping(data + length), I64{45})
         length += I64{1}
     }
     left := I64{0}
     right := length - I64{1}
     loop left < right {
-        byte :: rt_text_byte(data + left)
-        rt_text_put(data + left, rt_text_byte(data + right))
-        rt_text_put(data + right, byte)
+        byte :: rt_text_byte(wrapping(data + left))
+        rt_text_put(wrapping(data + left), rt_text_byte(wrapping(data + right)))
+        rt_text_put(wrapping(data + right), byte)
         left += I64{1}
         right -= I64{1}
     }
-    rt_text_store(result + I64{8}, length)
+    rt_text_store(wrapping(result + I64{8}), length)
     sync_store(ok, result)
     I64{1}
 }

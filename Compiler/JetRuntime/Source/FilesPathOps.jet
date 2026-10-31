@@ -13,15 +13,15 @@ FILES_AT_FDCWD :: I64{-100}
 // ErrorOut32 POSIX code, or 0 for success.
 fn files_out_errno(out: I64) -> I64 {
     if (rt_text_word(out) == I64{0}) -> return I64{0}
-    rt_text_word(out + I64{8})
+    rt_text_word(wrapping(out + I64{8}))
 }
 
 // symlink_metadata st_mode (>= 0) or -errno, through the shared stat leaf.
 fn files_lstat_mode(path: I64) -> I64 {
     scratch :: jet_rt_alloc(I64{160}, I64{8})
-    jet_fs_stat_raw(path, false, scratch, scratch + I64{128})
-    code :: files_out_errno(scratch + I64{128})
-    mode :: rt_text_word(scratch + I64{16})
+    jet_fs_stat_raw(path, false, scratch, wrapping(scratch + I64{128}))
+    code :: files_out_errno(wrapping(scratch + I64{128}))
+    mode :: rt_text_word(wrapping(scratch + I64{16}))
     jet_rt_free(scratch, I64{160}, I64{8})
     if (code != I64{0}) -> return -code
     mode
@@ -34,7 +34,7 @@ fn files_lstat_c(name: I64) -> I64 {
     #Unsafe("the terminated raw path and the 128-byte stat fact row are live for the syscall") {
         result = os_stat_facts_i64(I64{6}, name, scratch)
     }
-    mode :: rt_text_word(scratch + I64{16})
+    mode :: rt_text_word(wrapping(scratch + I64{16}))
     jet_rt_free(scratch, I64{128}, I64{8})
     if (result < I64{0}) -> return result
     mode
@@ -43,14 +43,14 @@ fn files_lstat_c(name: I64) -> I64 {
 // A getdents64 record name is "." or "..".
 fn files_dot_entry(name: I64) -> Bool {
     if (rt_text_byte(name) != I64{46}) -> return false
-    second :: rt_text_byte(name + I64{1})
+    second :: rt_text_byte(wrapping(name + I64{1}))
     if (second == I64{0}) -> return true
-    second == I64{46} && rt_text_byte(name + I64{2}) == I64{0}
+    second == I64{46} && rt_text_byte(wrapping(name + I64{2})) == I64{0}
 }
 
 fn files_c_len(name: I64) -> I64 {
     length := I64{0}
-    loop rt_text_byte(name + length) != (I64{0}) -> length += I64{1}
+    loop rt_text_byte(wrapping(name + length)) != (I64{0}) -> length += I64{1}
     length
 }
 
@@ -60,15 +60,15 @@ fn files_c_len(name: I64) -> I64 {
     if !compiler_fs_path(path, HOST_IO_OP_RESOLVE, error) -> return I64{0}
     name :: fd_c_path(path)
     scratch :: jet_rt_alloc(I64{48}, I64{8})
-    bytes :: jet_process_path_canonicalize_raw(name, scratch, scratch + I64{8}, scratch + I64{16})
+    bytes :: jet_process_path_canonicalize_raw(name, scratch, wrapping(scratch + I64{8}), wrapping(scratch + I64{16}))
     fd_c_path_drop(name, path)
     if (bytes == I64{0}) {
-        code :: rt_text_word(scratch + I64{24})
+        code :: rt_text_word(wrapping(scratch + I64{24}))
         jet_rt_free(scratch, I64{48}, I64{8})
         return compiler_fs_errno(HOST_IO_OP_RESOLVE, path, code, error)
     }
     rt_text_store(output, rt_text_lossy(bytes, rt_text_word(scratch)))
-    jet_rt_free(bytes, rt_text_word(scratch + I64{8}), I64{1})
+    jet_rt_free(bytes, rt_text_word(wrapping(scratch + I64{8})), I64{1})
     jet_rt_free(scratch, I64{48}, I64{8})
     I64{1}
 }
@@ -162,11 +162,11 @@ fn files_remove_tree(parent: I64, name: I64, root: Bool) -> I64 {
         }
         at := I64{0}
         loop at < count {
-            record :: buffer + at
-            at += rt_text_byte(record + I64{16}).bit_or((rt_text_byte(record + I64{17}) << I64{8}))
-            entry :: record + I64{19}
+            record :: wrapping(buffer + at)
+            at += rt_text_byte(wrapping(record + I64{16})).bit_or((rt_text_byte(wrapping(record + I64{17})) << I64{8}))
+            entry :: wrapping(record + I64{19})
             if files_dot_entry(entry) -> next
-            kind :: rt_text_byte(record + I64{18})
+            kind :: rt_text_byte(wrapping(record + I64{18}))
             result :: if (kind == I64{4} || kind == I64{0}) -> files_remove_tree(fd, entry, false) else -> host_call(I64{263}, fd, entry, I64{0})
             if (result < I64{0} && result != I64{-2}) {
                 failure = result
@@ -213,27 +213,27 @@ fn files_remove_dir_all(path: I64) -> I64 {
 fn files_dir_entry_new(name: I64, path: I64, is_dir: Bool) -> I64 {
     entry :: jet_rt_alloc(I64{24}, I64{8})
     rt_text_store(entry, name)
-    rt_text_store(entry + I64{8}, path)
-    rt_text_store(entry + I64{16}, if is_dir -> I64{1} else -> I64{0})
+    rt_text_store(wrapping(entry + I64{8}), path)
+    rt_text_store(wrapping(entry + I64{16}), if is_dir -> I64{1} else -> I64{0})
     entry
 }
 #Export(c) fn jet_rt_record_new_dir_entry(name: I64, path: I64, is_dir: Bool) -> I64 {
     files_dir_entry_new(jet_rt_string_clone(name), jet_rt_string_clone(path), is_dir)
 }
 #Export(c) fn jet_rt_record_get_dir_entry_name(entry: I64) -> I64 { jet_rt_string_clone(rt_text_word(entry)) }
-#Export(c) fn jet_rt_record_get_dir_entry_path(entry: I64) -> I64 { jet_rt_string_clone(rt_text_word(entry + I64{8})) }
-#Export(c) fn jet_rt_record_get_dir_entry_is_dir(entry: I64) -> Bool { rt_text_word(entry + I64{16}) != I64{0} }
+#Export(c) fn jet_rt_record_get_dir_entry_path(entry: I64) -> I64 { jet_rt_string_clone(rt_text_word(wrapping(entry + I64{8}))) }
+#Export(c) fn jet_rt_record_get_dir_entry_is_dir(entry: I64) -> Bool { rt_text_word(wrapping(entry + I64{16})) != I64{0} }
 #Export(c) fn jet_rt_handle_clone_dir_entry(entry: I64) -> I64 {
-    files_dir_entry_new(jet_rt_string_clone(rt_text_word(entry)), jet_rt_string_clone(rt_text_word(entry + I64{8})), rt_text_word(entry + I64{16}) != I64{0})
+    files_dir_entry_new(jet_rt_string_clone(rt_text_word(entry)), jet_rt_string_clone(rt_text_word(wrapping(entry + I64{8}))), rt_text_word(wrapping(entry + I64{16})) != I64{0})
 }
 #Export(c) fn jet_rt_handle_drop_dir_entry(entry: I64) {
     if (entry == I64{0}) -> return
     jet_rt_string_drop(rt_text_word(entry))
-    jet_rt_string_drop(rt_text_word(entry + I64{8}))
+    jet_rt_string_drop(rt_text_word(wrapping(entry + I64{8})))
     jet_rt_free(entry, I64{24}, I64{8})
 }
 #Export(c) fn jet_rt_handle_eq_dir_entry(left: I64, right: I64) -> Bool {
-    jet_rt_string_eq(rt_text_word(left), rt_text_word(right)) && jet_rt_string_eq(rt_text_word(left + I64{8}), rt_text_word(right + I64{8})) && rt_text_word(left + I64{16}) == rt_text_word(right + I64{16})
+    jet_rt_string_eq(rt_text_word(left), rt_text_word(right)) && jet_rt_string_eq(rt_text_word(wrapping(left + I64{8})), rt_text_word(wrapping(right + I64{8}))) && rt_text_word(wrapping(left + I64{16})) == rt_text_word(wrapping(right + I64{16}))
 }
 // CommonTypes.rs:6897: "DirEntry { name: {:?}, path: {:?}, is_dir: {} }".
 #Export(c) fn jet_rt_handle_show_dir_entry(entry: I64) -> I64 {
@@ -241,9 +241,9 @@ fn files_dir_entry_new(name: I64, path: I64, is_dir: Bool) -> I64 {
     jet_rt_string_builder_push(result, rt_static_text("DirEntry {{ name: "))
     rt_text_push_debug_str(result, rt_text_word(entry), true)
     jet_rt_string_builder_push(result, rt_static_text(", path: "))
-    rt_text_push_debug_str(result, rt_text_word(entry + I64{8}), true)
+    rt_text_push_debug_str(result, rt_text_word(wrapping(entry + I64{8})), true)
     jet_rt_string_builder_push(result, rt_static_text(", is_dir: "))
-    jet_rt_string_builder_push(result, if (rt_text_word(entry + I64{16}) != I64{0}) -> rt_static_text("true") else -> rt_static_text("false"))
+    jet_rt_string_builder_push(result, if (rt_text_word(wrapping(entry + I64{16})) != I64{0}) -> rt_static_text("true") else -> rt_static_text("false"))
     jet_rt_string_builder_push(result, rt_static_text(" }}"))
     jet_rt_string_builder_finish(result)
 }
@@ -252,41 +252,41 @@ fn files_dir_entry_new(name: I64, path: I64, is_dir: Bool) -> I64 {
 fn files_words_new() -> I64 {
     words :: jet_rt_alloc(I64{24}, I64{8})
     rt_text_store(words, I64{0})
-    rt_text_store(words + I64{8}, I64{0})
-    rt_text_store(words + I64{16}, I64{0})
+    rt_text_store(wrapping(words + I64{8}), I64{0})
+    rt_text_store(wrapping(words + I64{16}), I64{0})
     words
 }
 fn files_words_push(words: I64, value: I64) {
-    length :: rt_text_word(words + I64{8})
-    capacity :: rt_text_word(words + I64{16})
+    length :: rt_text_word(wrapping(words + I64{8}))
+    capacity :: rt_text_word(wrapping(words + I64{16}))
     if (length == capacity) {
         grown :: if (capacity == I64{0}) -> I64{8} else -> capacity * I64{2}
         data :: jet_rt_alloc(grown * I64{8}, I64{8})
         old :: rt_text_word(words)
         at := I64{0}
         loop at < length {
-            rt_text_store(data + at * I64{8}, rt_text_word(old + at * I64{8}))
+            rt_text_store(wrapping(data + at * I64{8}), rt_text_word(wrapping(old + at * I64{8})))
             at += I64{1}
         }
         if (capacity != I64{0}) -> jet_rt_free(old, capacity * I64{8}, I64{8})
         rt_text_store(words, data)
-        rt_text_store(words + I64{16}, grown)
+        rt_text_store(wrapping(words + I64{16}), grown)
     }
-    rt_text_store(rt_text_word(words) + length * I64{8}, value)
-    rt_text_store(words + I64{8}, length + I64{1})
+    rt_text_store(wrapping(rt_text_word(words) + length * I64{8}), value)
+    rt_text_store(wrapping(words + I64{8}), length + I64{1})
 }
 fn files_words_free(words: I64) {
-    capacity :: rt_text_word(words + I64{16})
+    capacity :: rt_text_word(wrapping(words + I64{16}))
     if (capacity != I64{0}) -> jet_rt_free(rt_text_word(words), capacity * I64{8}, I64{8})
     jet_rt_free(words, I64{24}, I64{8})
 }
 // Hand the words to a List result: an exact length*8 buffer (0 when empty).
 fn files_words_take(words: I64, output: I64) -> I64 {
-    length :: rt_text_word(words + I64{8})
+    length :: rt_text_word(wrapping(words + I64{8}))
     data :: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * I64{8}, I64{8})
     at := I64{0}
     loop at < length {
-        rt_text_store(data + at * I64{8}, rt_text_word(rt_text_word(words) + at * I64{8}))
+        rt_text_store(wrapping(data + at * I64{8}), rt_text_word(wrapping(rt_text_word(words) + at * I64{8})))
         at += I64{1}
     }
     files_words_free(words)
@@ -313,13 +313,13 @@ fn files_entries_sort(data: I64, count: I64) {
             loop at < end {
                 take_left := right >= end
                 if (!take_left && left < middle) {
-                    take_left = jet_rt_string_compare(rt_text_word(rt_text_word(source + left * I64{8})), rt_text_word(rt_text_word(source + right * I64{8}))) <= I64{0}
+                    take_left = jet_rt_string_compare(rt_text_word(rt_text_word(wrapping(source + left * I64{8}))), rt_text_word(rt_text_word(wrapping(source + right * I64{8})))) <= I64{0}
                 }
                 if take_left {
-                    rt_text_store(target + at * I64{8}, rt_text_word(source + left * I64{8}))
+                    rt_text_store(wrapping(target + at * I64{8}), rt_text_word(wrapping(source + left * I64{8})))
                     left += I64{1}
                 } else {
-                    rt_text_store(target + at * I64{8}, rt_text_word(source + right * I64{8}))
+                    rt_text_store(wrapping(target + at * I64{8}), rt_text_word(wrapping(source + right * I64{8})))
                     right += I64{1}
                 }
                 at += I64{1}
@@ -334,7 +334,7 @@ fn files_entries_sort(data: I64, count: I64) {
     if (source != data) {
         at := I64{0}
         loop at < count {
-            rt_text_store(data + at * I64{8}, rt_text_word(source + at * I64{8}))
+            rt_text_store(wrapping(data + at * I64{8}), rt_text_word(wrapping(source + at * I64{8})))
             at += I64{1}
         }
     }
@@ -352,7 +352,7 @@ fn files_entries_sort(data: I64, count: I64) {
     if (fd < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_READ, path, -fd, error)
     base :: rt_text_data(path)
     base_len :: rt_text_len(path)
-    separator :: base_len != I64{0} && rt_text_byte(base + base_len - I64{1}) != I64{47}
+    separator :: base_len != I64{0} && rt_text_byte(wrapping(wrapping(base + base_len) - I64{1})) != I64{47}
     entries :: files_words_new()
     buffer :: jet_rt_alloc(FILES_DIRENT_BYTES, I64{8})
     failure := I64{0}
@@ -365,9 +365,9 @@ fn files_entries_sort(data: I64, count: I64) {
         }
         at := I64{0}
         loop at < count {
-            record :: buffer + at
-            at += rt_text_byte(record + I64{16}).bit_or((rt_text_byte(record + I64{17}) << I64{8}))
-            raw :: record + I64{19}
+            record :: wrapping(buffer + at)
+            at += rt_text_byte(wrapping(record + I64{16})).bit_or((rt_text_byte(wrapping(record + I64{17})) << I64{8}))
+            raw :: wrapping(record + I64{19})
             if files_dot_entry(raw) -> next
             raw_len :: files_c_len(raw)
             entry_name :: rt_text_lossy(raw, raw_len)
@@ -375,7 +375,7 @@ fn files_entries_sort(data: I64, count: I64) {
             jet_rt_string_builder_push(full, path)
             if separator -> rt_text_push_word(full, I64{47}, I64{1})
             jet_rt_string_builder_push(full, entry_name)
-            kind :: rt_text_byte(record + I64{18})
+            kind :: rt_text_byte(wrapping(record + I64{18}))
             is_dir := kind == I64{4}
             if (kind == I64{0}) {
                 stat_len :: base_len + I64{1} + raw_len + I64{1}
@@ -383,11 +383,11 @@ fn files_entries_sort(data: I64, count: I64) {
                 rt_text_bytes_copy(target, base, base_len)
                 cursor := base_len
                 if separator {
-                    rt_text_put(target + cursor, I64{47})
+                    rt_text_put(wrapping(target + cursor), I64{47})
                     cursor += I64{1}
                 }
-                rt_text_bytes_copy(target + cursor, raw, raw_len)
-                rt_text_put(target + cursor + raw_len, I64{0})
+                rt_text_bytes_copy(wrapping(target + cursor), raw, raw_len)
+                rt_text_put(wrapping(wrapping(target + cursor) + raw_len), I64{0})
                 mode :: files_lstat_c(target)
                 jet_rt_free(target, stat_len, I64{1})
                 is_dir = mode >= I64{0} && (mode.bit_and(I64{61440})) == I64{16384}
@@ -399,14 +399,14 @@ fn files_entries_sort(data: I64, count: I64) {
     _ := host_call(I64{3}, fd, I64{0}, I64{0})
     if (failure < I64{0}) {
         at := I64{0}
-        loop at < rt_text_word(entries + I64{8}) {
-            jet_rt_handle_drop_dir_entry(rt_text_word(rt_text_word(entries) + at * I64{8}))
+        loop at < rt_text_word(wrapping(entries + I64{8})) {
+            jet_rt_handle_drop_dir_entry(rt_text_word(wrapping(rt_text_word(entries) + at * I64{8})))
             at += I64{1}
         }
         files_words_free(entries)
         return compiler_fs_errno(HOST_IO_OP_READ, path, -failure, error)
     }
-    files_entries_sort(rt_text_word(entries), rt_text_word(entries + I64{8}))
+    files_entries_sort(rt_text_word(entries), rt_text_word(wrapping(entries + I64{8})))
     rt_text_store(length, files_words_take(entries, output))
     I64{1}
 }
@@ -422,7 +422,7 @@ fn files_entries_sort(data: I64, count: I64) {
     if (result < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, path, -result, error)
     owner :: jet_rt_alloc(I64{16}, I64{8})
     sync_store(owner, I64{1})
-    rt_text_store(owner + I64{8}, jet_rt_string_clone(path))
+    rt_text_store(wrapping(owner + I64{8}), jet_rt_string_clone(path))
     rt_text_store(output, owner)
     I64{1}
 }
@@ -433,13 +433,13 @@ fn files_entries_sort(data: I64, count: I64) {
 #Export(c) fn jet_rt_handle_drop_jet_temp_dir_owner(owner: I64) {
     if (owner == I64{0}) -> return
     if (sync_add(owner, I64{-1}) != I64{1}) -> return
-    path :: rt_text_word(owner + I64{8})
+    path :: rt_text_word(wrapping(owner + I64{8}))
     _ := files_remove_dir_all(path)
     jet_rt_string_drop(path)
     jet_rt_free(owner, I64{16}, I64{8})
 }
 // CAbiRoutes.rs:17724: out is a borrowed read/clone-only stack Text header.
-#Export(c) fn jet_rt_handle_field_jet_temp_dir_owner_path(owner: I64, out: I64) { coll_copy(rt_text_word(owner + I64{8}), out, I64{24}) }
+#Export(c) fn jet_rt_handle_field_jet_temp_dir_owner_path(owner: I64, out: I64) { coll_copy(rt_text_word(wrapping(owner + I64{8})), out, I64{24}) }
 
 // PathFiles.rs:27: Path.to_string is its Display text.
 #Export(c) fn jet_path_to_string(path: I64) -> I64 { path_handle_render(path) }
@@ -448,7 +448,7 @@ fn files_entries_sort(data: I64, count: I64) {
 fn files_fd_mode(fd: I64) -> I64 {
     buffer :: jet_rt_alloc(I64{144}, I64{8})
     result :: host_call(I64{5}, fd, buffer, I64{0})
-    mode :: rt_text_word(buffer + I64{24}).bit_and(I64{4294967295})
+    mode :: rt_text_word(wrapping(buffer + I64{24})).bit_and(I64{4294967295})
     jet_rt_free(buffer, I64{144}, I64{8})
     if (result < I64{0}) -> return result
     mode
@@ -550,9 +550,9 @@ fn files_two_path_call(number: I64, first: I64, second: I64, shown: I64, operati
 #Export(c) fn jet_std_fs_symlink_directory_raw(from: I64, ok: I64, error: I64) -> I64 {
     if !compiler_fs_path(from, HOST_IO_OP_READ, error) -> return I64{0}
     scratch :: jet_rt_alloc(I64{160}, I64{8})
-    jet_fs_stat_raw(from, true, scratch, scratch + I64{128})
-    code :: files_out_errno(scratch + I64{128})
-    mode :: rt_text_word(scratch + I64{16})
+    jet_fs_stat_raw(from, true, scratch, wrapping(scratch + I64{128}))
+    code :: files_out_errno(wrapping(scratch + I64{128}))
+    mode :: rt_text_word(wrapping(scratch + I64{16}))
     jet_rt_free(scratch, I64{160}, I64{8})
     if (code != I64{0}) -> return compiler_fs_errno(HOST_IO_OP_READ, from, code, error)
     rt_text_put(ok, if ((mode.bit_and(I64{61440})) == I64{16384}) -> I64{1} else -> I64{0})
@@ -603,8 +603,8 @@ fn files_two_path_call(number: I64, first: I64, second: I64, shown: I64, operati
     mode := I64{-1}
     if !fs_text_has_nul(target) {
         scratch :: jet_rt_alloc(I64{160}, I64{8})
-        jet_fs_stat_raw(target, true, scratch, scratch + I64{128})
-        if (files_out_errno(scratch + I64{128}) == I64{0}) -> mode = (rt_text_word(scratch + I64{16})).bit_and(I64{4095})
+        jet_fs_stat_raw(target, true, scratch, wrapping(scratch + I64{128}))
+        if (files_out_errno(wrapping(scratch + I64{128})) == I64{0}) -> mode = (rt_text_word(wrapping(scratch + I64{16}))).bit_and(I64{4095})
         jet_rt_free(scratch, I64{160}, I64{8})
     }
     state :: fs_held_state(key)

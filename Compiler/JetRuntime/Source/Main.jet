@@ -4,13 +4,13 @@
 // Both flush results are ignored; raw facts avoid creating an
 // unused IOError owner. Scratch is one live 16-byte runtime allocation.
 fn main_flush(scratch: I64) {
-    jet_stdio_stdout_flush_raw(scratch, scratch + I64{8})
-    jet_stdio_stderr_flush_raw(scratch, scratch + I64{8})
+    jet_stdio_stdout_flush_raw(scratch, wrapping(scratch + I64{8}))
+    jet_stdio_stderr_flush_raw(scratch, wrapping(scratch + I64{8}))
 }
 
 fn main_write_report(text: I64, scratch: I64) {
     // The real stream policy flushes pending stdout BEFORE stderr output.
-    jet_stdio_stderr_write_raw(text, false, scratch, scratch + I64{8})
+    jet_stdio_stderr_write_raw(text, false, scratch, wrapping(scratch + I64{8}))
 }
 
 // Process32: atomic winning Linux tid@0, winning signed32 code@8, distinct
@@ -67,14 +67,14 @@ fn main_exit_claim(code: I64) {
     tid :: thread_tid()
     owner :: sync_cas(main_exit_root, I64{0}, tid)
     if (owner == I64{0}) {
-        sync_store(main_exit_root + I64{8}, (code << I64{32}) >> I64{32})
+        sync_store(wrapping(main_exit_root + I64{8}), (code << I64{32}) >> I64{32})
         return
     }
     if (owner == tid) {
         // A cleanup callback can itself stop. Do not recurse into callbacks
         // or issue another report; preserve the first claimed exit status.
-        main_flush(main_exit_root + I64{16})
-        trap_exit(sync_load(main_exit_root + I64{8}))
+        main_flush(wrapping(main_exit_root + I64{16}))
+        trap_exit(sync_load(wrapping(main_exit_root + I64{8})))
     }
     // A concurrent loser must not race exit_group or emit a second report.
     // pause parks independently of the normal-return claim's later reset;
@@ -101,11 +101,11 @@ fn main_exit_cleanup() -> I64 {
     if (handlers != I64{0}) -> _ := coll_call1(handlers, I64{0})
     parked :: main_parked_report_code
     if (parked == I64{0}) -> return I64{0}
-    scratch :: main_exit_root + I64{16}
+    scratch :: wrapping(main_exit_root + I64{16})
     present :: coll_call2(parked, scratch, scratch + I64{8})
     if (present == I64{0}) -> return I64{0}
     rendered :: trap_word(scratch)
-    code :: trap_word(scratch + I64{8})
+    code :: trap_word(wrapping(scratch + I64{8}))
     main_write_report(rendered, scratch)
     jet_rt_string_drop(rendered)
     code
@@ -120,13 +120,13 @@ fn main_exit_cleanup() -> I64 {
     _ := main_exit_cleanup()
     // Fatal/explicit process::exit does not join other threads. Never drain
     // here: the winner may be a live scheduler worker counted as in-flight.
-    main_flush(main_exit_root + I64{16})
+    main_flush(wrapping(main_exit_root + I64{16}))
 }
 
 #Export(c) fn jet_rt_process_exit_finish() {
     // Only the claimant's footer can reach this function.
-    main_flush(main_exit_root + I64{16})
-    trap_exit(sync_load(main_exit_root + I64{8}))
+    main_flush(wrapping(main_exit_root + I64{16}))
+    trap_exit(sync_load(wrapping(main_exit_root + I64{8})))
 }
 
 #Export(c) fn jet_rt_process_exit(code: I64) {
@@ -143,17 +143,17 @@ fn rt_main_stopped_address() -> I64 {
 // handlers, write the captured report and exit with the stop's code.
 // Returns 0, the root still entered, when the root holds no stop.
 #Export(c) fn jet_rt_main_stopped(root: I64, save: I64) -> I64 {
-    record :: jet_rt_root_take_stop(root, save + I64{32})
+    record :: jet_rt_root_take_stop(root, wrapping(save + I64{32}))
     if (record == I64{0}) -> return I64{0}
     jet_rt_root_leave(root, save)
     main_root_control = I64{0}
-    code :: trap_word(save + I64{32})
+    code :: trap_word(wrapping(save + I64{32}))
     report :: scheduler_stop_take_message(record)
     scheduler_stop_drop(record)
     jet_rt_free(save, I64{40}, I64{8})
     main_exit_claim(code)
     _ := main_exit_cleanup()
-    main_flush(main_exit_root + I64{16})
+    main_flush(wrapping(main_exit_root + I64{16}))
     if (report != I64{0}) {
         trap_write_handle(report)
         jet_rt_string_drop(report)
@@ -226,10 +226,10 @@ fn rt_main_stopped_address() -> I64 {
     // JET_CHECKED_ALLOC=1 (Alloc.jet): a write after one of the last frees
     // traps here rather than going unseen.
     alloc_check_sweep()
-    main_flush(main_exit_root + I64{16})
+    main_flush(wrapping(main_exit_root + I64{16}))
     if (parked_code != I64{0}) {
         // A parked-task stop exits rather than returning to a loaded-image host.
-        sync_store(main_exit_root + I64{8}, parked_code)
+        sync_store(wrapping(main_exit_root + I64{8}), parked_code)
         jet_rt_process_exit_finish()
     }
     // Loaded-image hosts can run another normal entry in this same process,

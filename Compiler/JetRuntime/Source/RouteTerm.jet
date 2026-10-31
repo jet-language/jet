@@ -37,7 +37,7 @@ fn term_read_line(value: I64) -> I64 {
         run :: rt_line_run(start, buffered)
         rt_text_append(value, start, run)
         term_input_consume(run)
-        if (rt_text_byte(start + run - I64{1}) == I64{10}) -> break
+        if (rt_text_byte(wrapping(wrapping(start + run) - I64{1})) == I64{10}) -> break
     }
     sync_mutex_unlock(terminal_input_root)
     failure
@@ -103,7 +103,7 @@ fn term_read_line(value: I64) -> I64 {
         if (last != I64{10} && last != I64{13}) { break }
         end = wrapping(end - I64{1})
     }
-    rt_text_store(value + I64{8}, end)
+    rt_text_store(wrapping(value + I64{8}), end)
     rt_text_store(some, I64{1})
     rt_text_store(line, value)
     I64{1}
@@ -132,8 +132,8 @@ fn term_read_line(value: I64) -> I64 {
         rt_text_append(value, term_input_next(), I64{1})
         term_input_consume(I64{1})
         length :: rt_text_len(value)
-        if (length >= width && rt_text_equal_bytes(rt_text_data(value) + length - width, needle, width)) {
-            rt_text_store(value + I64{8}, length - width)
+        if (length >= width && rt_text_equal_bytes(wrapping(wrapping(rt_text_data(value) + length) - width), needle, width)) {
+            rt_text_store(wrapping(value + I64{8}), length - width)
             break
         }
     }
@@ -233,7 +233,7 @@ fn term_read_line(value: I64) -> I64 {
 #Export(c) fn jet_term_machine_output() -> Bool {
     value :: host_environment_value(rt_static_text("JET_MACHINE_OUTPUT"))
     if (value == I64{0}) -> return false
-    rt_text_byte(value) == I64{49} && rt_text_byte(value + I64{1}) == I64{0}
+    rt_text_byte(value) == I64{49} && rt_text_byte(wrapping(value + I64{1})) == I64{0}
 }
 
 // Term.rs:713-760 (Linux termios): the per-thread stack of saved stdin modes.
@@ -254,19 +254,19 @@ fn term_mode_saved_key() -> I64 {
 #Export(c) fn jet_term_mode_enter(raw: Bool) -> Bool {
     node :: jet_rt_alloc(I64{72}, I64{8})
     thread_zero(node, I64{72})
-    mode :: node + I64{8}
+    mode :: wrapping(node + I64{8})
     if (net_i32(term_tcgetattr(I64{0}, mode)) != I64{0}) {
         jet_rt_free(node, I64{72}, I64{8})
         return false
     }
     next :: jet_rt_alloc(I64{64}, I64{8})
     rt_text_bytes_copy(next, mode, I64{64})
-    flags :: net_load_uint(next + I64{12}, I64{4})
+    flags :: net_load_uint(wrapping(next + I64{12}), I64{4})
     cleared :: if raw -> flags.bit_and(I64{4294967285}) else -> flags.bit_and(I64{4294967287})
-    net_store_uint(next + I64{12}, I64{4}, cleared)
+    net_store_uint(wrapping(next + I64{12}), I64{4}, cleared)
     if raw {
-        net_store_uint(next + I64{17} + I64{6}, I64{1}, I64{1})
-        net_store_uint(next + I64{17} + I64{5}, I64{1}, I64{0})
+        net_store_uint(wrapping(wrapping(next + I64{17}) + I64{6}), I64{1}, I64{1})
+        net_store_uint(wrapping(wrapping(next + I64{17}) + I64{5}), I64{1}, I64{0})
     }
     status :: net_i32(term_tcsetattr(I64{0}, I64{0}, next))
     jet_rt_free(next, I64{64}, I64{8})

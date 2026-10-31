@@ -5,8 +5,8 @@ fn authority_sift(data: I64, start: I64, count: I64) {
     root := start
     loop root < (count /% I64{2}) {
         child := root * I64{2} + I64{1}
-        if (child + I64{1} < count && jet_rt_string_compare(rt_text_word(data + child * I64{8}), rt_text_word(data + (child + I64{1}) * I64{8})) < I64{0}) -> child += I64{1}
-        if (jet_rt_string_compare(rt_text_word(data + root * I64{8}), rt_text_word(data + child * I64{8})) >= I64{0}) -> return
+        if (child + I64{1} < count && jet_rt_string_compare(rt_text_word(wrapping(data + child * I64{8})), rt_text_word(wrapping(data + (child + I64{1}) * I64{8}))) < I64{0}) -> child += I64{1}
+        if (jet_rt_string_compare(rt_text_word(wrapping(data + root * I64{8})), rt_text_word(wrapping(data + child * I64{8}))) >= I64{0}) -> return
         coll_i64_swap(data, root, child)
         root = child
     }
@@ -28,7 +28,7 @@ fn authority_sort(data: I64, count: I64) {
     // Match list_in: a null pointer or nonpositive length denotes an empty list.
     length :: if (slots == I64{0} || count <= I64{0}) -> I64{0} else -> count
     result :: data_sequence_new(length, I64{8})
-    data :: rt_text_word(result + DATA_SEQUENCE_DATA)
+    data :: rt_text_word(wrapping(result + DATA_SEQUENCE_DATA))
     coll_copy(slots, data, length * I64{8})
     authority_sort(data, length)
     // Sort borrowed pointers in the final buffer, then clone only unique rights.
@@ -37,15 +37,15 @@ fn authority_sort(data: I64, count: I64) {
     unique := I64{0}
     previous := I64{0}
     loop at < length {
-        right :: rt_text_word(data + at * I64{8})
+        right :: rt_text_word(wrapping(data + at * I64{8}))
         if (at == I64{0} || !jet_rt_string_eq(previous, right)) {
-            rt_text_store(data + unique * I64{8}, jet_rt_string_clone(right))
+            rt_text_store(wrapping(data + unique * I64{8}), jet_rt_string_clone(right))
             unique += I64{1}
         }
         previous = right
         at += I64{1}
     }
-    rt_text_store(result + DATA_SEQUENCE_LENGTH, unique)
+    rt_text_store(wrapping(result + DATA_SEQUENCE_LENGTH), unique)
     result
 }
 #Export(c) fn jet_rt_handle_clone_jet_authority(value: I64) -> I64 {
@@ -59,13 +59,13 @@ fn authority_sort(data: I64, count: I64) {
     jet_rt_free(value, DATA_SEQUENCE_BYTES, I64{8})
 }
 #Export(c) fn jet_rt_handle_eq_jet_authority(left: I64, right: I64) -> Bool {
-    length :: rt_text_word(left + DATA_SEQUENCE_LENGTH)
-    if (length != rt_text_word(right + DATA_SEQUENCE_LENGTH)) -> return false
-    a :: rt_text_word(left + DATA_SEQUENCE_DATA)
-    b :: rt_text_word(right + DATA_SEQUENCE_DATA)
+    length :: rt_text_word(wrapping(left + DATA_SEQUENCE_LENGTH))
+    if (length != rt_text_word(wrapping(right + DATA_SEQUENCE_LENGTH))) -> return false
+    a :: rt_text_word(wrapping(left + DATA_SEQUENCE_DATA))
+    b :: rt_text_word(wrapping(right + DATA_SEQUENCE_DATA))
     at := I64{0}
     loop at < length {
-        if (!jet_rt_string_eq(rt_text_word(a + at * I64{8}), rt_text_word(b + at * I64{8}))) -> return false
+        if (!jet_rt_string_eq(rt_text_word(wrapping(a + at * I64{8})), rt_text_word(wrapping(b + at * I64{8})))) -> return false
         at += I64{1}
     }
     true
@@ -76,7 +76,7 @@ fn authority_covers(held: I64, requested: I64) -> Bool {
     if (length > other) -> return false
     if (!rt_text_equal_bytes(rt_text_data(held), rt_text_data(requested), length)) -> return false
     if (length == other) -> return true
-    boundary :: rt_text_byte(rt_text_data(requested) + length)
+    boundary :: rt_text_byte(wrapping(rt_text_data(requested) + length))
     boundary == I64{46} || boundary == I64{58} || boundary == I64{47}
 }
 fn authority_narrow_failure(requested: I64) -> I64 {
@@ -101,14 +101,14 @@ fn authority_narrow_failure(requested: I64) -> I64 {
     I64{0} // canonical stopped handle if the scheduler published the failure
 }
 #Export(c) fn jet_authority_with(value: I64, requested: I64) -> I64 {
-    length :: rt_text_word(value + DATA_SEQUENCE_LENGTH)
-    data :: rt_text_word(value + DATA_SEQUENCE_DATA)
+    length :: rt_text_word(wrapping(value + DATA_SEQUENCE_LENGTH))
+    data :: rt_text_word(wrapping(value + DATA_SEQUENCE_DATA))
     at := I64{0}
     loop at < length {
-        if (authority_covers(rt_text_word(data + at * I64{8}), requested)) {
+        if (authority_covers(rt_text_word(wrapping(data + at * I64{8})), requested)) {
             result :: data_sequence_new(I64{1}, I64{8})
-            rt_text_store(rt_text_word(result + DATA_SEQUENCE_DATA), jet_rt_string_clone(requested))
-            rt_text_store(result + DATA_SEQUENCE_LENGTH, I64{1})
+            rt_text_store(rt_text_word(wrapping(result + DATA_SEQUENCE_DATA)), jet_rt_string_clone(requested))
+            rt_text_store(wrapping(result + DATA_SEQUENCE_LENGTH), I64{1})
             return result
         }
         at += I64{1}
@@ -116,27 +116,27 @@ fn authority_narrow_failure(requested: I64) -> I64 {
     authority_narrow_failure(requested)
 }
 #Export(c) fn jet_authority_without(value: I64, requested: I64) -> I64 {
-    length :: rt_text_word(value + DATA_SEQUENCE_LENGTH)
-    data :: rt_text_word(value + DATA_SEQUENCE_DATA)
+    length :: rt_text_word(wrapping(value + DATA_SEQUENCE_LENGTH))
+    data :: rt_text_word(wrapping(value + DATA_SEQUENCE_DATA))
     at := I64{0}
     kept := I64{0}
     loop at < length {
-        if (!authority_covers(requested, rt_text_word(data + at * I64{8}))) -> kept += I64{1}
+        if (!authority_covers(requested, rt_text_word(wrapping(data + at * I64{8})))) -> kept += I64{1}
         at += I64{1}
     }
     result :: data_sequence_new(kept, I64{8})
-    target :: rt_text_word(result + DATA_SEQUENCE_DATA)
+    target :: rt_text_word(wrapping(result + DATA_SEQUENCE_DATA))
     at = I64{0}
     kept = I64{0}
     loop at < length {
-        right :: rt_text_word(data + at * I64{8})
+        right :: rt_text_word(wrapping(data + at * I64{8}))
         if (!authority_covers(requested, right)) {
-            rt_text_store(target + kept * I64{8}, jet_rt_string_clone(right))
+            rt_text_store(wrapping(target + kept * I64{8}), jet_rt_string_clone(right))
             kept += I64{1}
         }
         at += I64{1}
     }
-    rt_text_store(result + DATA_SEQUENCE_LENGTH, kept)
+    rt_text_store(wrapping(result + DATA_SEQUENCE_LENGTH), kept)
     result
 }
 // The one Authority wire encoder: the sorted rights joined with LF, with no
@@ -144,12 +144,12 @@ fn authority_narrow_failure(requested: I64) -> I64 {
 // boundary both send this text.
 #Export(c) fn jet_authority_to_wire(value: I64) -> I64 {
     result :: jet_rt_string_builder_new()
-    length :: rt_text_word(value + DATA_SEQUENCE_LENGTH)
-    data :: rt_text_word(value + DATA_SEQUENCE_DATA)
+    length :: rt_text_word(wrapping(value + DATA_SEQUENCE_LENGTH))
+    data :: rt_text_word(wrapping(value + DATA_SEQUENCE_DATA))
     at := I64{0}
     loop at < length {
         if at != (I64{0}) -> rt_text_push_word(result, I64{10}, I64{1})
-        right :: rt_text_word(data + at * I64{8})
+        right :: rt_text_word(wrapping(data + at * I64{8}))
         rt_text_append(result, rt_text_data(right), rt_text_len(right))
         at += I64{1}
     }
@@ -170,9 +170,9 @@ fn authority_workspace_right(write: Bool) -> I64 {
 }
 #Export(c) fn jet_authority_workspace() -> I64 {
     result :: data_sequence_new(I64{2}, I64{8})
-    data :: rt_text_word(result + DATA_SEQUENCE_DATA)
+    data :: rt_text_word(wrapping(result + DATA_SEQUENCE_DATA))
     rt_text_store(data, authority_workspace_right(false))
-    rt_text_store(data + I64{8}, authority_workspace_right(true))
-    rt_text_store(result + DATA_SEQUENCE_LENGTH, I64{2})
+    rt_text_store(wrapping(data + I64{8}), authority_workspace_right(true))
+    rt_text_store(wrapping(result + DATA_SEQUENCE_LENGTH), I64{2})
     result
 }

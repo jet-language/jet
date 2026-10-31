@@ -6,18 +6,18 @@ HTTP_SERVER_TLS_CERT :: I64{0}
 HTTP_SERVER_TLS_KEY :: I64{8}
 #Export(c) fn jet_rt_record_new_jet_http_server_tls(cert_pem: I64, key_pem: I64) -> I64 {
     result :: jet_rt_alloc(HTTP_SERVER_TLS_BYTES, I64{8})
-    encoding_store(result + HTTP_SERVER_TLS_CERT, jet_rt_string_clone(cert_pem))
-    encoding_store(result + HTTP_SERVER_TLS_KEY, jet_rt_string_clone(key_pem))
+    encoding_store(wrapping(result + HTTP_SERVER_TLS_CERT), jet_rt_string_clone(cert_pem))
+    encoding_store(wrapping(result + HTTP_SERVER_TLS_KEY), jet_rt_string_clone(key_pem))
     result
 }
 #Export(c) fn jet_rt_handle_clone_jet_http_server_tls(value: I64) -> I64 {
-    jet_rt_record_new_jet_http_server_tls(encoding_word(value + HTTP_SERVER_TLS_CERT), encoding_word(value + HTTP_SERVER_TLS_KEY))
+    jet_rt_record_new_jet_http_server_tls(encoding_word(wrapping(value + HTTP_SERVER_TLS_CERT)), encoding_word(wrapping(value + HTTP_SERVER_TLS_KEY)))
 }
 #Export(c) fn jet_rt_handle_drop_jet_http_server_tls(value: I64) {
     if (value == I64{0}) -> return
-    jet_rt_string_drop(encoding_word(value + HTTP_SERVER_TLS_CERT))
-    jet_rt_string_drop(encoding_word(value + HTTP_SERVER_TLS_KEY))
+    jet_rt_string_drop(encoding_word(wrapping(value + HTTP_SERVER_TLS_CERT)))
+    jet_rt_string_drop(encoding_word(wrapping(value + HTTP_SERVER_TLS_KEY)))
     jet_rt_free(value, HTTP_SERVER_TLS_BYTES, I64{8})
 }
-#Export(c) fn jet_rt_record_get_jet_http_server_tls_cert_pem(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + HTTP_SERVER_TLS_CERT)) }
-#Export(c) fn jet_rt_record_get_jet_http_server_tls_key_pem(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + HTTP_SERVER_TLS_KEY)) }
+#Export(c) fn jet_rt_record_get_jet_http_server_tls_cert_pem(value: I64) -> I64 { jet_rt_string_clone(encoding_word(wrapping(value + HTTP_SERVER_TLS_CERT))) }
+#Export(c) fn jet_rt_record_get_jet_http_server_tls_key_pem(value: I64) -> I64 { jet_rt_string_clone(encoding_word(wrapping(value + HTTP_SERVER_TLS_KEY))) }

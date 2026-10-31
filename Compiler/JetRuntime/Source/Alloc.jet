@@ -278,12 +278,12 @@ fn alloc_live_blocks(width: I64) -> I64 {
     if (thread_tls_registry == I64{0}) { return total }
     count_offset :: wrapping(I64{312} + wrapping(alloc_head(I64{0}, width) * I64{2}))
     sync_mutex_lock(thread_tls_registry)
-    live :: thread_tls_registry + I64{64}
+    live :: wrapping(thread_tls_registry + I64{64})
     count :: sync_load(live)
-    data :: sync_load(live + I64{16})
+    data :: sync_load(wrapping(live + I64{16}))
     at := I64{0}
     loop at < count {
-        total = wrapping(total - sync_load(sync_load(data + (at + I64{1}) * I64{8}) + count_offset))
+        total = wrapping(total - sync_load(wrapping(sync_load(wrapping(data + (at + I64{1}) * I64{8})) + count_offset)))
         at += I64{2}
     }
     sync_mutex_unlock(thread_tls_registry)

@@ -74,9 +74,9 @@ fn fault_stack_start() -> I64 {
     status := I64{0}
     #Unsafe("stack is a fresh private mapping; sigaltstack copies its first three words (ss_sp, ss_flags, ss_size)") {
         os_store_i64(stack, stack)
-        os_store_i64(stack + I64{8}, I64{0})
-        os_store_i64(stack + I64{16}, I64{262144})
-        os_store_i64(stack + I64{24}, I64{0})
+        os_store_i64(wrapping(stack + I64{8}), I64{0})
+        os_store_i64(wrapping(stack + I64{16}), I64{262144})
+        os_store_i64(wrapping(stack + I64{24}), I64{0})
         status = os_syscall_i64(I64{131}, stack, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     if (status < I64{0}) {
@@ -91,7 +91,7 @@ fn fault_stack_start() -> I64 {
 fn fault_stack_end(stack: I64) {
     if (stack == I64{0}) -> return
     #Unsafe("stack is this thread's registered alternate stack, unused outside a handler; sigaltstack copies its first three words") {
-        os_store_i64(stack + I64{8}, I64{2})
+        os_store_i64(wrapping(stack + I64{8}), I64{2})
         _ := os_syscall_i64(I64{131}, stack, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     alloc_unmap(stack, I64{262144})
@@ -105,7 +105,7 @@ fn fault_stack_end(stack: I64) {
 // handler. It never returns; the I64 result is the address-target shape.
 #Export(c) fn jet_rt_fault_signal(signal: I64, info: I64, context: I64) -> I64 {
     // One report per process: a second faulting thread waits for the exit.
-    if (fault_main_stack != I64{0} && sync_cas(fault_main_stack + I64{24}, I64{0}, I64{1}) != I64{0}) {
+    if (fault_main_stack != I64{0} && sync_cas(wrapping(fault_main_stack + I64{24}), I64{0}, I64{1}) != I64{0}) {
         loop { _ := trap_syscall(I64{34}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) }
     }
     // No Secret outlives the process in its memory or its core (#5478),

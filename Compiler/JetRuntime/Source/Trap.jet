@@ -105,7 +105,7 @@ fn rt_trap_invalid_box_layout() {
 }
 
 fn trap_write_handle(handle: I64) {
-    trap_write(trap_word(handle), trap_word(handle + I64{8}))
+    trap_write(trap_word(handle), trap_word(wrapping(handle + I64{8})))
 }
 
 // A stop under the process root is published to it (the root half returns
@@ -348,10 +348,10 @@ fn trap_process_stop(code: I64, message: I64, message_len: I64) {
 fn trap_native_index_range_stop() {
     message :: jet_rt_alloc(I64{40}, I64{8})
     trap_store(message, I64{5269323123273261422})
-    trap_store(message + I64{8}, I64{7887324063362741358})
-    trap_store(message + I64{16}, I64{7305815396256607845})
-    trap_store(message + I64{24}, I64{8391173023733081189})
-    trap_store(message + I64{32}, I64{111494907916832})
+    trap_store(wrapping(message + I64{8}), I64{7887324063362741358})
+    trap_store(wrapping(message + I64{16}), I64{7305815396256607845})
+    trap_store(wrapping(message + I64{24}), I64{8391173023733081189})
+    trap_store(wrapping(message + I64{32}), I64{111494907916832})
     published :: rt_task_panic_publish(message, I64{38}, I64{1})
     jet_rt_free(message, I64{40}, I64{8})
     if published -> return
@@ -370,15 +370,15 @@ fn trap_native_index_range_root() {
 #Export(c) fn jet_rt_panic_overflow() {
     message :: jet_rt_alloc(I64{80}, I64{8})
     trap_store(message, I64{7598242313330583636})
-    trap_store(message + I64{8}, I64{2333824980546840692})
-    trap_store(message + I64{16}, I64{8606216600190023279})
-    trap_store(message + I64{24}, I64{7022836288847093875})
-    trap_store(message + I64{32}, I64{8751655654842004844})
-    trap_store(message + I64{40}, I64{2334386829960177008})
-    trap_store(message + I64{48}, I64{7575182582412961138})
-    trap_store(message + I64{56}, I64{7235441220371030131})
-    trap_store(message + I64{64}, I64{7021710449270399077})
-    trap_store(message + I64{72}, I64{694511470})
+    trap_store(wrapping(message + I64{8}), I64{2333824980546840692})
+    trap_store(wrapping(message + I64{16}), I64{8606216600190023279})
+    trap_store(wrapping(message + I64{24}), I64{7022836288847093875})
+    trap_store(wrapping(message + I64{32}), I64{8751655654842004844})
+    trap_store(wrapping(message + I64{40}), I64{2334386829960177008})
+    trap_store(wrapping(message + I64{48}), I64{7575182582412961138})
+    trap_store(wrapping(message + I64{56}), I64{7235441220371030131})
+    trap_store(wrapping(message + I64{64}), I64{7021710449270399077})
+    trap_store(wrapping(message + I64{72}), I64{694511470})
     published :: rt_task_panic_publish(message, I64{76}, I64{1})
     jet_rt_free(message, I64{80}, I64{8})
     if published -> return
@@ -549,7 +549,7 @@ fn rt_seq_index_oob_stop(length: I64, index: I64) {
 }
 
 #Export(c) fn jet_panic(file: I64, line: I64, message: I64) {
-    trap_simple(I64{0}, trap_word(file), trap_word(file + I64{8}), trap_line(line), trap_word(message), trap_word(message + I64{8}))
+    trap_simple(I64{0}, trap_word(file), trap_word(wrapping(file + I64{8})), trap_line(line), trap_word(message), trap_word(wrapping(message + I64{8})))
 }
 
 // Core/CAbi.rs record_index_stop publishes this exact seed reason:
@@ -559,10 +559,10 @@ fn rt_seq_index_oob_stop(length: I64, index: I64) {
 fn rt_record_variant_panic() {
     message :: jet_rt_alloc(I64{33}, I64{8})
     trap_store(message, I64{8511913738388071794})
-    trap_store(message + I64{8}, I64{7575182590666699361})
-    trap_store(message + I64{16}, I64{8391735665924334702})
-    trap_store(message + I64{24}, I64{7453001576142499616})
-    trap_put(message + I64{32}, I64{101})
+    trap_store(wrapping(message + I64{8}), I64{7575182590666699361})
+    trap_store(wrapping(message + I64{16}), I64{8391735665924334702})
+    trap_store(wrapping(message + I64{24}), I64{7453001576142499616})
+    trap_put(wrapping(message + I64{32}), I64{101})
     jet_rt_panic_message(message, I64{33})
     jet_rt_free(message, I64{33}, I64{8})
 }
@@ -570,13 +570,13 @@ fn rt_record_variant_panic() {
 fn trap_rich(file: I64, line: I64, function: I64, source: I64, column: I64, caret: I64, message: I64, locals: I64) {
     // Task bodies receive the original message, never the rendered report
     // (architecture.md TaskFailure.Panicked; Core.rs jet_runtime_stop_unwind).
-    if rt_task_panic_publish(trap_word(message), trap_word(message + I64{8}), I64{0}) -> return
+    if rt_task_panic_publish(trap_word(message), trap_word(wrapping(message + I64{8})), I64{0}) -> return
     trap_header(I64{0})
     trap_write_handle(message)
     trap_msg_message_end()
-    trap_context(trap_word(file), trap_word(file + I64{8}), trap_line(line), trap_word(function), trap_word(function + I64{8}), trap_word(source), trap_word(source + I64{8}), trap_line(column), trap_line(caret))
+    trap_context(trap_word(file), trap_word(wrapping(file + I64{8})), trap_line(line), trap_word(function), trap_word(wrapping(function + I64{8})), trap_word(source), trap_word(wrapping(source + I64{8})), trap_line(column), trap_line(caret))
     if (locals != I64{0}) {
-        if (trap_word(locals + I64{8}) > I64{0}) {
+        if (trap_word(wrapping(locals + I64{8})) > I64{0}) {
             trap_msg_locals()
             trap_write_handle(locals)
             trap_msg_newline()
@@ -598,7 +598,7 @@ fn trap_rich(file: I64, line: I64, function: I64, source: I64, column: I64, care
     trap_msg_todo_expected()
     trap_write_handle(expected_type)
     trap_msg_message_end()
-    trap_context(trap_word(file), trap_word(file + I64{8}), trap_line(line), I64{0}, I64{0}, I64{0}, I64{0}, I64{1}, I64{1})
+    trap_context(trap_word(file), trap_word(wrapping(file + I64{8})), trap_line(line), I64{0}, I64{0}, I64{0}, I64{0}, I64{1}, I64{1})
     trap_footer(I64{2})
 }
 
@@ -613,7 +613,7 @@ fn trap_rich(file: I64, line: I64, function: I64, source: I64, column: I64, care
         trap_require_stop(kind, descriptor, message, left, right, locals)
         return
     }
-    trap_require_stop(I64{0}, descriptor, trap_word(state + I64{120}), I64{0}, I64{0}, trap_word(state + I64{128}))
+    trap_require_stop(I64{0}, descriptor, trap_word(wrapping(state + I64{120})), I64{0}, I64{0}, trap_word(wrapping(state + I64{128})))
 }
 
 fn trap_require_stop(kind: I64, descriptor: I64, message: I64, left: I64, right: I64, locals: I64) {
@@ -631,7 +631,7 @@ fn trap_require_stop(kind: I64, descriptor: I64, message: I64, left: I64, right:
         trap_build_msg_got(raw)
         jet_rt_string_builder_push(raw, left)
     }
-    published :: rt_task_panic_publish(trap_word(raw), trap_word(raw + I64{8}), I64{0})
+    published :: rt_task_panic_publish(trap_word(raw), trap_word(wrapping(raw + I64{8})), I64{0})
     if (kind == I64{1}) -> jet_rt_string_drop(raw)
     if published -> return
     trap_header(I64{0})
@@ -645,9 +645,9 @@ fn trap_require_stop(kind: I64, descriptor: I64, message: I64, left: I64, right:
         else -> trap_write_handle(message)
     }
     trap_msg_message_end()
-    trap_context(trap_word(descriptor), trap_word(descriptor + I64{8}), trap_line(trap_word(descriptor + I64{16})), trap_word(descriptor + I64{24}), trap_word(descriptor + I64{32}), trap_word(descriptor + I64{40}), trap_word(descriptor + I64{48}), trap_line(trap_word(descriptor + I64{56})), trap_line(trap_word(descriptor + I64{64})))
+    trap_context(trap_word(descriptor), trap_word(wrapping(descriptor + I64{8})), trap_line(trap_word(wrapping(descriptor + I64{16}))), trap_word(wrapping(descriptor + I64{24})), trap_word(wrapping(descriptor + I64{32})), trap_word(wrapping(descriptor + I64{40})), trap_word(wrapping(descriptor + I64{48})), trap_line(trap_word(wrapping(descriptor + I64{56}))), trap_line(trap_word(wrapping(descriptor + I64{64}))))
     if (locals != I64{0}) {
-        if (trap_word(locals + I64{8}) > I64{0}) {
+        if (trap_word(wrapping(locals + I64{8})) > I64{0}) {
             trap_msg_locals()
             trap_write_handle(locals)
             trap_msg_newline()
@@ -723,11 +723,11 @@ struct TrapScalar { code: I64, width: I64 }
 fn trap_scalar(address: I64) -> TrapScalar {
     first :: trap_byte(address)
     if (first < I64{128}) -> return TrapScalar{code: first, width: I64{1}}
-    second :: trap_byte(address + I64{1}).bit_and(I64{63})
+    second :: trap_byte(wrapping(address + I64{1})).bit_and(I64{63})
     if (first < I64{224}) -> return TrapScalar{code: (first.bit_and(I64{31})) * I64{64} + second, width: I64{2}}
-    third :: trap_byte(address + I64{2}).bit_and(I64{63})
+    third :: trap_byte(wrapping(address + I64{2})).bit_and(I64{63})
     if (first < I64{240}) -> return TrapScalar{code: (first.bit_and(I64{15})) * I64{4096} + second * I64{64} + third, width: I64{3}}
-    fourth :: trap_byte(address + I64{3}).bit_and(I64{63})
+    fourth :: trap_byte(wrapping(address + I64{3})).bit_and(I64{63})
     TrapScalar{code: (first.bit_and(I64{7})) * I64{262144} + second * I64{4096} + third * I64{64} + fourth, width: I64{4}}
 }
 

@@ -2,29 +2,29 @@
 // CAbiRoutes.rs:11191-11303: ctors borrow Text, getters clone after variant check.
 fn service_error_new(ordinal: I64, payload: I64) -> I64 {
     result :: jet_rt_alloc(SERVICE_ERROR_BYTES, I64{8})
-    encoding_store(result + SERVICE_ERROR_TAG, ordinal)
-    encoding_store(result + SERVICE_ERROR_PAYLOAD, jet_rt_string_clone(payload))
+    encoding_store(wrapping(result + SERVICE_ERROR_TAG), ordinal)
+    encoding_store(wrapping(result + SERVICE_ERROR_PAYLOAD), jet_rt_string_clone(payload))
     result
 }
 fn service_error_get(value: I64, ordinal: I64) -> I64 {
-    if encoding_word(value + SERVICE_ERROR_TAG) != ordinal -> rt_record_variant_panic()
-    jet_rt_string_clone(encoding_word(value + SERVICE_ERROR_PAYLOAD))
+    if encoding_word(wrapping(value + SERVICE_ERROR_TAG)) != ordinal -> rt_record_variant_panic()
+    jet_rt_string_clone(encoding_word(wrapping(value + SERVICE_ERROR_PAYLOAD)))
 }
 #Export(c) fn jet_rt_handle_clone_jet_service_error(value: I64) -> I64 {
-    service_error_new(encoding_word(value + SERVICE_ERROR_TAG), encoding_word(value + SERVICE_ERROR_PAYLOAD))
+    service_error_new(encoding_word(wrapping(value + SERVICE_ERROR_TAG)), encoding_word(wrapping(value + SERVICE_ERROR_PAYLOAD)))
 }
 #Export(c) fn jet_rt_handle_drop_jet_service_error(value: I64) {
     if (value == I64{0}) -> return
-    jet_rt_string_drop(encoding_word(value + SERVICE_ERROR_PAYLOAD))
+    jet_rt_string_drop(encoding_word(wrapping(value + SERVICE_ERROR_PAYLOAD)))
     jet_rt_free(value, SERVICE_ERROR_BYTES, I64{8})
 }
 #Export(c) fn jet_rt_handle_eq_jet_service_error(a: I64, b: I64) -> Bool {
-    encoding_word(a + SERVICE_ERROR_TAG) == encoding_word(b + SERVICE_ERROR_TAG)
-        && jet_rt_string_eq(encoding_word(a + SERVICE_ERROR_PAYLOAD), encoding_word(b + SERVICE_ERROR_PAYLOAD))
+    encoding_word(wrapping(a + SERVICE_ERROR_TAG)) == encoding_word(wrapping(b + SERVICE_ERROR_TAG))
+        && jet_rt_string_eq(encoding_word(wrapping(a + SERVICE_ERROR_PAYLOAD)), encoding_word(wrapping(b + SERVICE_ERROR_PAYLOAD)))
 }
 // Services.rs:1248-1263: ALL ten variants return m.clone(), no label/quoting.
-#Export(c) fn jet_rt_handle_show_jet_service_error(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + SERVICE_ERROR_PAYLOAD)) }
-#Export(c) fn jet_rt_record_tag_jet_service_error(value: I64) -> I64 { encoding_word(value + SERVICE_ERROR_TAG) }
+#Export(c) fn jet_rt_handle_show_jet_service_error(value: I64) -> I64 { jet_rt_string_clone(encoding_word(wrapping(value + SERVICE_ERROR_PAYLOAD))) }
+#Export(c) fn jet_rt_record_tag_jet_service_error(value: I64) -> I64 { encoding_word(wrapping(value + SERVICE_ERROR_TAG)) }
 #Export(c) fn jet_rt_record_new_jet_service_error_full(payload: I64) -> I64 { service_error_new(I64{0}, payload) }
 #Export(c) fn jet_rt_record_new_jet_service_error_ambiguous(payload: I64) -> I64 { service_error_new(I64{1}, payload) }
 #Export(c) fn jet_rt_record_new_jet_service_error_unknown(payload: I64) -> I64 { service_error_new(I64{2}, payload) }

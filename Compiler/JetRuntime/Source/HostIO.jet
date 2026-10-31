@@ -214,12 +214,12 @@ fn host_error_with_context(context: I64, kind: I64) -> I64 {
 // CAbiHost.rs:220 interprets the entire presence word, not a C Bool byte.
 fn host_context_equal(left: I64, right: I64) -> Bool {
     if (rt_text_word(left) != rt_text_word(right)) -> return false
-    left_present :: rt_text_word(left + I64{16}) != I64{0}
-    right_present :: rt_text_word(right + I64{16}) != I64{0}
+    left_present :: rt_text_word(wrapping(left + I64{16})) != I64{0}
+    right_present :: rt_text_word(wrapping(right + I64{16})) != I64{0}
     if (left_present != right_present) -> return false
-    if (left_present && rt_text_word(left + I64{24}) != rt_text_word(right + I64{24})) -> return false
-    return host_optional_text_equal(rt_text_word(left + I64{8}), rt_text_word(right + I64{8})) &&
-        host_optional_text_equal(rt_text_word(left + I64{32}), rt_text_word(right + I64{32}))
+    if (left_present && rt_text_word(wrapping(left + I64{24})) != rt_text_word(wrapping(right + I64{24}))) -> return false
+    return host_optional_text_equal(rt_text_word(wrapping(left + I64{8})), rt_text_word(wrapping(right + I64{8}))) &&
+        host_optional_text_equal(rt_text_word(wrapping(left + I64{32})), rt_text_word(wrapping(right + I64{32})))
 }
 
 fn host_optional_text_equal(left: I64, right: I64) -> Bool {
@@ -232,8 +232,8 @@ fn host_optional_text_equal(left: I64, right: I64) -> Bool {
 #Export(c) fn jet_rt_handle_eq_io_error(left: I64, right: I64) -> Bool {
     kind :: rt_text_word(left)
     if (kind != rt_text_word(right)) -> return false
-    if (kind == HOST_IO_KIND_RESOURCE_LIMIT) -> return rt_text_word(left + I64{48}) == rt_text_word(right + I64{48})
-    host_context_equal(left + I64{8}, right + I64{8})
+    if (kind == HOST_IO_KIND_RESOURCE_LIMIT) -> return rt_text_word(wrapping(left + I64{48})) == rt_text_word(wrapping(right + I64{48}))
+    host_context_equal(wrapping(left + I64{8}), wrapping(right + I64{8}))
 }
 
 #Export(c) fn jet_rt_handle_clone_io_operation(value: I64) -> I64 { encoding_enum_clone(value) }
@@ -380,19 +380,19 @@ fn host_context_debug_into(target: I64, value: I64) {
     host_io_operation_label(target, rt_text_word(value), true)
     rt_text_push_word(target, I64{8247620834012831788}, I64{8})
     rt_text_push_word(target, I64{540697955}, I64{4})
-    host_io_optional_debug(target, rt_text_word(value + I64{8}))
+    host_io_optional_debug(target, rt_text_word(wrapping(value + I64{8})))
     rt_text_push_word(target, I64{7237112387817381932}, I64{8})
     rt_text_push_word(target, I64{2112101}, I64{3})
-    if (rt_text_word(value + I64{16}) == I64{0}) {
+    if (rt_text_word(wrapping(value + I64{16})) == I64{0}) {
         rt_text_push_word(target, I64{1701736270}, I64{4})
     } else {
         rt_text_push_word(target, I64{678191446}, I64{4})
-        rt_text_push_number(target, rt_text_word(value + I64{24}))
+        rt_text_push_number(target, rt_text_word(wrapping(value + I64{24})))
         rt_text_push_word(target, I64{41}, I64{1})
     }
     rt_text_push_word(target, I64{4207896374829850668}, I64{8})
     rt_text_push_word(target, I64{32}, I64{1})
-    host_io_optional_debug(target, rt_text_word(value + I64{32}))
+    host_io_optional_debug(target, rt_text_word(wrapping(value + I64{32})))
     rt_text_push_word(target, I64{32032}, I64{2}) // " }"
 }
 
@@ -407,8 +407,8 @@ fn host_context_debug_into(target: I64, value: I64) {
     kind :: rt_text_word(value)
     host_io_kind_debug(result, kind)
     rt_text_push_word(result, I64{40}, I64{1})
-    if (kind == HOST_IO_KIND_RESOURCE_LIMIT) -> host_io_limit_label(result, rt_text_word(value + I64{48}), true)
-    else -> host_context_debug_into(result, value + I64{8})
+    if (kind == HOST_IO_KIND_RESOURCE_LIMIT) -> host_io_limit_label(result, rt_text_word(wrapping(value + I64{48})), true)
+    else -> host_context_debug_into(result, wrapping(value + I64{8}))
     rt_text_push_word(result, I64{41}, I64{1})
     jet_rt_string_builder_finish(result)
 }
@@ -422,18 +422,18 @@ fn host_context_debug_into(target: I64, value: I64) {
         rt_text_push_word(result, I64{7286952193241476128}, I64{8})
         rt_text_push_word(result, I64{4207599433743164280}, I64{8})
         rt_text_push_word(result, I64{32}, I64{1})
-        host_io_limit_label(result, rt_text_word(value + I64{48}), false)
+        host_io_limit_label(result, rt_text_word(wrapping(value + I64{48})), false)
     } else {
         host_io_kind_show(result, kind)
         rt_text_push_word(result, I64{2334956330985808928}, I64{8})
-        host_io_operation_label(result, rt_text_word(value + I64{8}), false)
-        resource :: rt_text_word(value + I64{16})
+        host_io_operation_label(result, rt_text_word(wrapping(value + I64{8})), false)
+        resource :: rt_text_word(wrapping(value + I64{16}))
         if (resource != I64{0}) {
             rt_text_push_word(result, I64{24608}, I64{2}) // " `"
             rt_text_append(result, rt_text_data(resource), rt_text_len(resource))
             rt_text_push_word(result, I64{96}, I64{1})
         }
-        cause :: rt_text_word(value + I64{40})
+        cause :: rt_text_word(wrapping(value + I64{40}))
         if (cause != I64{0}) {
             rt_text_push_word(result, I64{8250}, I64{2}) // ": "
             rt_text_append(result, rt_text_data(cause), rt_text_len(cause))

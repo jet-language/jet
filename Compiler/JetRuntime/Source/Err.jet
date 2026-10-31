@@ -3,7 +3,7 @@
 fn err_zero(value: I64, bytes: I64) {
     at := I64{0}
     loop at < bytes {
-        rt_text_store(value + at, I64{0})
+        rt_text_store(wrapping(value + at), I64{0})
         at += I64{8}
     }
 }
@@ -20,44 +20,44 @@ fn err_rows_clone(source: I64, target: I64, stride: I64) {
     count :: rt_text_word(source)
     data :: if (count == I64{0}) -> I64{0} else -> jet_rt_alloc(count * stride, I64{8})
     rt_text_store(target, count)
-    rt_text_store(target + I64{8}, count)
-    rt_text_store(target + I64{16}, data)
+    rt_text_store(wrapping(target + I64{8}), count)
+    rt_text_store(wrapping(target + I64{16}), data)
     row := I64{0}
     loop row < count {
-        old :: rt_text_word(source + I64{16}) + row * stride
-        fresh :: data + row * stride
+        old :: wrapping(rt_text_word(wrapping(source + I64{16})) + row * stride)
+        fresh :: wrapping(data + row * stride)
         rt_text_store(fresh, err_text_clone(rt_text_word(old)))
-        rt_text_store(fresh + I64{8}, err_text_clone(rt_text_word(old + I64{8})))
+        rt_text_store(wrapping(fresh + I64{8}), err_text_clone(rt_text_word(wrapping(old + I64{8}))))
         at := I64{16}
         loop at < stride {
-            rt_text_store(fresh + at, rt_text_word(old + at))
+            rt_text_store(wrapping(fresh + at), rt_text_word(wrapping(old + at)))
             at += I64{8}
         }
         row += I64{1}
     }
 }
 fn err_rows_drop(list: I64, stride: I64) {
-    data :: rt_text_word(list + I64{16})
+    data :: rt_text_word(wrapping(list + I64{16}))
     count :: rt_text_word(list)
     row := I64{0}
     loop row < count {
-        jet_rt_string_drop(rt_text_word(data + row * stride))
-        jet_rt_string_drop(rt_text_word(data + row * stride + I64{8}))
+        jet_rt_string_drop(rt_text_word(wrapping(data + row * stride)))
+        jet_rt_string_drop(rt_text_word(wrapping(wrapping(data + row * stride) + I64{8})))
         row += I64{1}
     }
-    if (data != I64{0}) -> jet_rt_free(data, rt_text_word(list + I64{8}) * stride, I64{8})
+    if (data != I64{0}) -> jet_rt_free(data, rt_text_word(wrapping(list + I64{8})) * stride, I64{8})
 }
 fn err_rows_eq(left: I64, right: I64, stride: I64) -> Bool {
     count :: rt_text_word(left)
     if count != rt_text_word(right) -> return false
     row := I64{0}
     loop row < count {
-        a :: rt_text_word(left + I64{16}) + row * stride
-        b :: rt_text_word(right + I64{16}) + row * stride
-        if !err_text_eq(rt_text_word(a), rt_text_word(b)) || !err_text_eq(rt_text_word(a + I64{8}), rt_text_word(b + I64{8})) -> return false
+        a :: wrapping(rt_text_word(wrapping(left + I64{16})) + row * stride)
+        b :: wrapping(rt_text_word(wrapping(right + I64{16})) + row * stride)
+        if !err_text_eq(rt_text_word(a), rt_text_word(b)) || !err_text_eq(rt_text_word(wrapping(a + I64{8})), rt_text_word(wrapping(b + I64{8}))) -> return false
         at := I64{16}
         loop at < stride {
-            if rt_text_word(a + at) != rt_text_word(b + at) -> return false
+            if rt_text_word(wrapping(a + at)) != rt_text_word(wrapping(b + at)) -> return false
             at += I64{8}
         }
         row += I64{1}
@@ -66,8 +66,8 @@ fn err_rows_eq(left: I64, right: I64, stride: I64) -> Bool {
 }
 fn err_rows_append(list: I64, stride: I64) -> I64 {
     count :: rt_text_word(list)
-    capacity :: rt_text_word(list + I64{8})
-    data := rt_text_word(list + I64{16})
+    capacity :: rt_text_word(wrapping(list + I64{8}))
+    data := rt_text_word(wrapping(list + I64{16}))
     if count == capacity {
         next_capacity :: if (capacity == I64{0}) -> I64{4} else -> capacity * I64{2}
         if (next_capacity < capacity || next_capacity > I64{9223372036854775807} /% stride) { rt_text_capacity_stop() }
@@ -75,8 +75,8 @@ fn err_rows_append(list: I64, stride: I64) -> I64 {
         rt_text_bytes_copy(fresh, data, count * stride)
         if (data != I64{0}) -> jet_rt_free(data, capacity * stride, I64{8})
         data = fresh
-        rt_text_store(list + I64{8}, next_capacity)
-        rt_text_store(list + I64{16}, data)
+        rt_text_store(wrapping(list + I64{8}), next_capacity)
+        rt_text_store(wrapping(list + I64{16}), data)
     }
     rt_text_store(list, count + I64{1})
     data + count * stride
@@ -84,9 +84,9 @@ fn err_rows_append(list: I64, stride: I64) -> I64 {
 fn err_new_take(message: I64, code: I64, cause: I64) -> I64 {
     result :: jet_rt_alloc(ERR_BYTES, I64{8})
     err_zero(result, ERR_BYTES)
-    rt_text_store(result + ERR_MESSAGE, message)
-    rt_text_store(result + ERR_CODE, code)
-    rt_text_store(result + ERR_CAUSE, cause)
+    rt_text_store(wrapping(result + ERR_MESSAGE), message)
+    rt_text_store(wrapping(result + ERR_CODE), code)
+    rt_text_store(wrapping(result + ERR_CAUSE), cause)
     result
 }
 // CAbi.rs:372-377: borrow+clone message/code, TAKE cause, borrow option box.
@@ -96,15 +96,15 @@ fn err_new_take(message: I64, code: I64, cause: I64) -> I64 {
 #Export(c) fn jet_err_from_message(message: I64) -> I64 {
     err_new_take(jet_rt_string_clone(message), I64{0}, I64{0})
 }
-#Export(c) fn jet_rt_record_get_jet_err_message(error: I64) -> I64 { jet_rt_string_clone(rt_text_word(error + ERR_MESSAGE)) }
+#Export(c) fn jet_rt_record_get_jet_err_message(error: I64) -> I64 { jet_rt_string_clone(rt_text_word(wrapping(error + ERR_MESSAGE))) }
 #Export(c) fn jet_rt_record_get_jet_err_code(error: I64, some: I64) -> I64 {
-    code :: rt_text_word(error + ERR_CODE)
+    code :: rt_text_word(wrapping(error + ERR_CODE))
     if (code == I64{0}) -> return I64{0}
     rt_text_store(some, jet_rt_string_clone(code))
     I64{1}
 }
 #Export(c) fn jet_rt_record_get_jet_err_cause(error: I64, some: I64) -> I64 {
-    cause :: rt_text_word(error + ERR_CAUSE)
+    cause :: rt_text_word(wrapping(error + ERR_CAUSE))
     if (cause == I64{0}) -> return I64{0}
     rt_text_store(some, jet_rt_handle_clone_jet_err(cause))
     I64{1}
@@ -112,50 +112,50 @@ fn err_new_take(message: I64, code: I64, cause: I64) -> I64 {
 fn err_details_clone(value: I64) -> I64 {
     if (value == I64{0}) -> return I64{0}
     result :: jet_rt_alloc(ERR_DETAILS_BYTES, I64{8})
-    rt_text_store(result + ERR_DETAILS_VARIANT, jet_rt_string_clone(rt_text_word(value + ERR_DETAILS_VARIANT)))
-    err_rows_clone(value + ERR_DETAILS_FIELDS, result + ERR_DETAILS_FIELDS, ERR_FIELD_BYTES)
-    rt_text_store(result + ERR_DETAILS_HAS_SPAN, rt_text_word(value + ERR_DETAILS_HAS_SPAN))
-    rt_text_store(result + ERR_DETAILS_START, rt_text_word(value + ERR_DETAILS_START))
-    rt_text_store(result + ERR_DETAILS_END, rt_text_word(value + ERR_DETAILS_END))
+    rt_text_store(wrapping(result + ERR_DETAILS_VARIANT), jet_rt_string_clone(rt_text_word(wrapping(value + ERR_DETAILS_VARIANT))))
+    err_rows_clone(wrapping(value + ERR_DETAILS_FIELDS), wrapping(result + ERR_DETAILS_FIELDS), ERR_FIELD_BYTES)
+    rt_text_store(wrapping(result + ERR_DETAILS_HAS_SPAN), rt_text_word(wrapping(value + ERR_DETAILS_HAS_SPAN)))
+    rt_text_store(wrapping(result + ERR_DETAILS_START), rt_text_word(wrapping(value + ERR_DETAILS_START)))
+    rt_text_store(wrapping(result + ERR_DETAILS_END), rt_text_word(wrapping(value + ERR_DETAILS_END)))
     result
 }
 #Export(c) fn jet_rt_handle_clone_jet_err(value: I64) -> I64 {
     if (value == I64{0}) -> return I64{0}
-    result :: err_new_take(err_text_clone(rt_text_word(value + ERR_MESSAGE)), err_text_clone(rt_text_word(value + ERR_CODE)), jet_rt_handle_clone_jet_err(rt_text_word(value + ERR_CAUSE)))
-    rt_text_store(result + ERR_IDENTITY, err_text_clone(rt_text_word(value + ERR_IDENTITY)))
-    err_rows_clone(value + ERR_CONTEXT, result + ERR_CONTEXT, ERR_CONTEXT_BYTES)
-    err_rows_clone(value + ERR_CONVERSIONS, result + ERR_CONVERSIONS, ERR_CONVERSION_BYTES)
-    rt_text_store(result + ERR_DETAILS, err_details_clone(rt_text_word(value + ERR_DETAILS)))
+    result :: err_new_take(err_text_clone(rt_text_word(wrapping(value + ERR_MESSAGE))), err_text_clone(rt_text_word(wrapping(value + ERR_CODE))), jet_rt_handle_clone_jet_err(rt_text_word(wrapping(value + ERR_CAUSE))))
+    rt_text_store(wrapping(result + ERR_IDENTITY), err_text_clone(rt_text_word(wrapping(value + ERR_IDENTITY))))
+    err_rows_clone(wrapping(value + ERR_CONTEXT), wrapping(result + ERR_CONTEXT), ERR_CONTEXT_BYTES)
+    err_rows_clone(wrapping(value + ERR_CONVERSIONS), wrapping(result + ERR_CONVERSIONS), ERR_CONVERSION_BYTES)
+    rt_text_store(wrapping(result + ERR_DETAILS), err_details_clone(rt_text_word(wrapping(value + ERR_DETAILS))))
     result
 }
 #Export(c) fn jet_rt_handle_drop_jet_err(value: I64) {
     if (value == I64{0}) -> return
-    jet_rt_string_drop(rt_text_word(value + ERR_MESSAGE))
-    jet_rt_string_drop(rt_text_word(value + ERR_CODE))
-    jet_rt_handle_drop_jet_err(rt_text_word(value + ERR_CAUSE))
-    jet_rt_string_drop(rt_text_word(value + ERR_IDENTITY))
-    err_rows_drop(value + ERR_CONTEXT, ERR_CONTEXT_BYTES)
-    err_rows_drop(value + ERR_CONVERSIONS, ERR_CONVERSION_BYTES)
-    details :: rt_text_word(value + ERR_DETAILS)
+    jet_rt_string_drop(rt_text_word(wrapping(value + ERR_MESSAGE)))
+    jet_rt_string_drop(rt_text_word(wrapping(value + ERR_CODE)))
+    jet_rt_handle_drop_jet_err(rt_text_word(wrapping(value + ERR_CAUSE)))
+    jet_rt_string_drop(rt_text_word(wrapping(value + ERR_IDENTITY)))
+    err_rows_drop(wrapping(value + ERR_CONTEXT), ERR_CONTEXT_BYTES)
+    err_rows_drop(wrapping(value + ERR_CONVERSIONS), ERR_CONVERSION_BYTES)
+    details :: rt_text_word(wrapping(value + ERR_DETAILS))
     if (details != I64{0}) {
-        jet_rt_string_drop(rt_text_word(details + ERR_DETAILS_VARIANT))
-        err_rows_drop(details + ERR_DETAILS_FIELDS, ERR_FIELD_BYTES)
+        jet_rt_string_drop(rt_text_word(wrapping(details + ERR_DETAILS_VARIANT)))
+        err_rows_drop(wrapping(details + ERR_DETAILS_FIELDS), ERR_FIELD_BYTES)
         jet_rt_free(details, ERR_DETAILS_BYTES, I64{8})
     }
     jet_rt_free(value, ERR_BYTES, I64{8})
 }
 #Export(c) fn jet_rt_handle_eq_jet_err(left: I64, right: I64) -> Bool {
     if (left == I64{0} || right == I64{0}) -> return left == right
-    if !err_text_eq(rt_text_word(left + ERR_MESSAGE), rt_text_word(right + ERR_MESSAGE)) || !err_text_eq(rt_text_word(left + ERR_CODE), rt_text_word(right + ERR_CODE)) || !err_text_eq(rt_text_word(left + ERR_IDENTITY), rt_text_word(right + ERR_IDENTITY)) -> return false
-    if !jet_rt_handle_eq_jet_err(rt_text_word(left + ERR_CAUSE), rt_text_word(right + ERR_CAUSE)) -> return false
-    if !err_rows_eq(left + ERR_CONTEXT, right + ERR_CONTEXT, ERR_CONTEXT_BYTES) || !err_rows_eq(left + ERR_CONVERSIONS, right + ERR_CONVERSIONS, ERR_CONVERSION_BYTES) -> return false
-    a :: rt_text_word(left + ERR_DETAILS)
-    b :: rt_text_word(right + ERR_DETAILS)
+    if !err_text_eq(rt_text_word(wrapping(left + ERR_MESSAGE)), rt_text_word(wrapping(right + ERR_MESSAGE))) || !err_text_eq(rt_text_word(wrapping(left + ERR_CODE)), rt_text_word(wrapping(right + ERR_CODE))) || !err_text_eq(rt_text_word(wrapping(left + ERR_IDENTITY)), rt_text_word(wrapping(right + ERR_IDENTITY))) -> return false
+    if !jet_rt_handle_eq_jet_err(rt_text_word(wrapping(left + ERR_CAUSE)), rt_text_word(wrapping(right + ERR_CAUSE))) -> return false
+    if !err_rows_eq(wrapping(left + ERR_CONTEXT), wrapping(right + ERR_CONTEXT), ERR_CONTEXT_BYTES) || !err_rows_eq(wrapping(left + ERR_CONVERSIONS), wrapping(right + ERR_CONVERSIONS), ERR_CONVERSION_BYTES) -> return false
+    a :: rt_text_word(wrapping(left + ERR_DETAILS))
+    b :: rt_text_word(wrapping(right + ERR_DETAILS))
     if (a == I64{0} || b == I64{0}) -> return a == b
-    if !err_text_eq(rt_text_word(a + ERR_DETAILS_VARIANT), rt_text_word(b + ERR_DETAILS_VARIANT)) || !err_rows_eq(a + ERR_DETAILS_FIELDS, b + ERR_DETAILS_FIELDS, ERR_FIELD_BYTES) -> return false
-    if rt_text_word(a + ERR_DETAILS_HAS_SPAN) != rt_text_word(b + ERR_DETAILS_HAS_SPAN) -> return false
-    if (rt_text_word(a + ERR_DETAILS_HAS_SPAN) == I64{0}) -> return true
-    rt_text_word(a + ERR_DETAILS_START) == rt_text_word(b + ERR_DETAILS_START) && rt_text_word(a + ERR_DETAILS_END) == rt_text_word(b + ERR_DETAILS_END)
+    if !err_text_eq(rt_text_word(wrapping(a + ERR_DETAILS_VARIANT)), rt_text_word(wrapping(b + ERR_DETAILS_VARIANT))) || !err_rows_eq(wrapping(a + ERR_DETAILS_FIELDS), wrapping(b + ERR_DETAILS_FIELDS), ERR_FIELD_BYTES) -> return false
+    if rt_text_word(wrapping(a + ERR_DETAILS_HAS_SPAN)) != rt_text_word(wrapping(b + ERR_DETAILS_HAS_SPAN)) -> return false
+    if (rt_text_word(wrapping(a + ERR_DETAILS_HAS_SPAN)) == I64{0}) -> return true
+    rt_text_word(wrapping(a + ERR_DETAILS_START)) == rt_text_word(wrapping(b + ERR_DETAILS_START)) && rt_text_word(wrapping(a + ERR_DETAILS_END)) == rt_text_word(wrapping(b + ERR_DETAILS_END))
 }
 // Values.rs:317-330: JetDisplay, JetShow and JetDebug all return message only;
 // Outcome's root report is a separate operation, never these trait adapters.
@@ -164,9 +164,9 @@ fn err_details_clone(value: I64) -> I64 {
 #Export(c) fn jet_rt_handle_debug_jet_err(value: I64) -> I64 { jet_rt_record_get_jet_err_message(value) }
 #Export(c) fn jet_err_apply_conversion(value: I64, source: I64, target: I64) -> I64 {
     result :: jet_rt_handle_clone_jet_err(value)
-    if (rt_text_word(result + ERR_IDENTITY) == I64{0}) -> rt_text_store(result + ERR_IDENTITY, jet_rt_string_clone(source))
-    row :: err_rows_append(result + ERR_CONVERSIONS, ERR_CONVERSION_BYTES)
+    if (rt_text_word(wrapping(result + ERR_IDENTITY)) == I64{0}) -> rt_text_store(wrapping(result + ERR_IDENTITY), jet_rt_string_clone(source))
+    row :: err_rows_append(wrapping(result + ERR_CONVERSIONS), ERR_CONVERSION_BYTES)
     rt_text_store(row, jet_rt_string_clone(source))
-    rt_text_store(row + I64{8}, jet_rt_string_clone(target))
+    rt_text_store(wrapping(row + I64{8}), jet_rt_string_clone(target))
     result
 }

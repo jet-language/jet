@@ -166,7 +166,7 @@ fn host_sample_fields(result: I64, error: I64, available: I64, value: I64, errno
         result :: os_syscall_i64(I64{302}, I64{0}, native, I64{0}, buffer, I64{0}, I64{0})
         os_store_u8(available, I64{1})
         os_store_i64(soft, jet_int_owned_from_i64(if (result < I64{0}) -> I64{0} else -> os_load_i64(buffer)))
-        os_store_i64(hard, jet_int_owned_from_i64(if (result < I64{0}) -> I64{0} else -> os_load_i64(buffer + I64{8})))
+        os_store_i64(hard, jet_int_owned_from_i64(if (result < I64{0}) -> I64{0} else -> os_load_i64(wrapping(buffer + I64{8}))))
         os_store_i64(errno, if (result < I64{0}) -> wrapping(I64{0} - result) else -> I64{0})
     }
     jet_rt_free(buffer, I64{16}, I64{8})
@@ -184,7 +184,7 @@ fn host_sample_fields(result: I64, error: I64, available: I64, value: I64, errno
     buffer :: jet_rt_alloc(I64{16}, I64{8})
     #Unsafe("buffer owns the sixteen-byte struct rlimit64 the kernel reads and does not retain") {
         os_store_i64(buffer, low)
-        os_store_i64(buffer + I64{8}, high)
+        os_store_i64(wrapping(buffer + I64{8}), high)
         host_sample_out(os_syscall_i64(I64{302}, I64{0}, native, buffer, I64{0}, I64{0}, I64{0}), available, value, errno)
     }
     jet_rt_free(buffer, I64{16}, I64{8})
@@ -200,9 +200,9 @@ fn host_sample_fields(result: I64, error: I64, available: I64, value: I64, errno
     result :: host_call(I64{98}, native, buffer, I64{0})
     #Unsafe("buffer owns the 144-byte struct rusage the kernel writes; the caller lends the tuple's Bool byte and four Int words") {
         os_store_u8(available, I64{1})
-        os_store_i64(user, jet_int_owned_from_i64(os_load_i64(buffer) * I64{1000000} + os_load_i64(buffer + I64{8})))
-        os_store_i64(system, jet_int_owned_from_i64(os_load_i64(buffer + I64{16}) * I64{1000000} + os_load_i64(buffer + I64{24})))
-        os_store_i64(peak, jet_int_owned_from_i64(os_load_i64(buffer + I64{32}) * I64{1024}))
+        os_store_i64(user, jet_int_owned_from_i64(os_load_i64(buffer) * I64{1000000} + os_load_i64(wrapping(buffer + I64{8}))))
+        os_store_i64(system, jet_int_owned_from_i64(os_load_i64(wrapping(buffer + I64{16})) * I64{1000000} + os_load_i64(wrapping(buffer + I64{24}))))
+        os_store_i64(peak, jet_int_owned_from_i64(os_load_i64(wrapping(buffer + I64{32})) * I64{1024}))
         os_store_i64(errno, if (result < I64{0}) -> wrapping(I64{0} - result) else -> I64{0})
     }
     jet_rt_free(buffer, I64{144}, I64{8})

@@ -24,7 +24,7 @@ fn files_writer_path(writer: I64) -> I64 { fd_word(writer, I64{24}) }
         #Unsafe("the freshly opened owned descriptor and the 128-byte stat fact row are live for fstat") {
             result = os_stat_facts_i64(I64{5}, fd, facts)
         }
-        mode :: rt_text_word(facts + I64{16})
+        mode :: rt_text_word(wrapping(facts + I64{16}))
         jet_rt_free(facts, I64{128}, I64{8})
         if (result < I64{0}) {
             _ := host_call(I64{3}, fd, I64{0}, I64{0})
@@ -67,10 +67,10 @@ fn files_writer_write(writer: I64, bytes: I64, length: I64) -> I64 {
     at := I64{0}
     failure := I64{0}
     loop at < length {
-        rt_text_put(scratch + I64{32}, I64{0})
-        count :: jet_fd_write_raw(writer, bytes + at, length - at, scratch, scratch + I64{32})
+        rt_text_put(wrapping(scratch + I64{32}), I64{0})
+        count :: jet_fd_write_raw(writer, wrapping(bytes + at), length - at, scratch, wrapping(scratch + I64{32}))
         if (count < I64{0}) {
-            if (rt_text_byte(scratch + I64{32}) != I64{0}) {
+            if (rt_text_byte(wrapping(scratch + I64{32})) != I64{0}) {
                 failure = FILES_WRITE_BUFFERED_ZERO
                 break
             }
@@ -128,9 +128,9 @@ fn files_writer_write_list(writer: I64, data: I64, length: I64) -> I64 {
 // are Flush. Returns 0, -errno or FILES_WRITE_BUFFERED_ZERO.
 fn files_writer_flush(writer: I64) -> I64 {
     scratch :: jet_rt_alloc(I64{40}, I64{8})
-    rt_text_put(scratch + I64{32}, I64{0})
-    jet_fd_flush_raw(writer, scratch, scratch + I64{32})
-    zero :: rt_text_byte(scratch + I64{32}) != I64{0}
+    rt_text_put(wrapping(scratch + I64{32}), I64{0})
+    jet_fd_flush_raw(writer, scratch, wrapping(scratch + I64{32}))
+    zero :: rt_text_byte(wrapping(scratch + I64{32})) != I64{0}
     code :: files_out_errno(scratch)
     jet_rt_free(scratch, I64{40}, I64{8})
     if zero -> FILES_WRITE_BUFFERED_ZERO else -> I64{0} - code
@@ -197,13 +197,13 @@ fn files_push_octal(target: I64, value: I64) {
         return compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_WRITE, path, I64{0}, jet_rt_string_builder_finish(cause), error)
     }
     scratch :: jet_rt_alloc(I64{160}, I64{8})
-    jet_fd_stat_raw(writer, scratch, scratch + I64{128})
-    code := files_out_errno(scratch + I64{128})
+    jet_fd_stat_raw(writer, scratch, wrapping(scratch + I64{128}))
+    code := files_out_errno(wrapping(scratch + I64{128}))
     if (code == I64{0}) {
         code = I64{4}
         loop code == (I64{4}) {
-            jet_fd_chmod_raw(writer, mode, scratch + I64{128})
-            code = files_out_errno(scratch + I64{128})
+            jet_fd_chmod_raw(writer, mode, wrapping(scratch + I64{128}))
+            code = files_out_errno(wrapping(scratch + I64{128}))
         }
     }
     jet_rt_free(scratch, I64{160}, I64{8})

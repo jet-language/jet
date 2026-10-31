@@ -18,7 +18,7 @@ fn process_execution_invalid(spec: I64, cause: I64, err: I64) -> I64 {
 fn process_execution_has(text: I64, byte: I64) -> Bool {
     at := I64{0}
     loop at < rt_text_len(text) {
-        if (rt_text_byte(rt_text_data(text) + at) == byte) -> return true
+        if (rt_text_byte(wrapping(rt_text_data(text) + at)) == byte) -> return true
         at += I64{1}
     }
     false
@@ -29,13 +29,13 @@ fn process_execution_env_remove(env: I64, key: I64) {
     read := I64{0}
     write := I64{0}
     loop read < length {
-        row :: data + read * I64{16}
+        row :: wrapping(data + read * I64{16})
         if jet_rt_string_eq(fd_word(row, I64{0}), key) {
             jet_rt_string_drop(fd_word(row, I64{0}))
             jet_rt_string_drop(fd_word(row, I64{8}))
         } else {
-            fd_put(data + write * I64{16}, I64{0}, fd_word(row, I64{0}))
-            fd_put(data + write * I64{16}, I64{8}, fd_word(row, I64{8}))
+            fd_put(wrapping(data + write * I64{16}), I64{0}, fd_word(row, I64{0}))
+            fd_put(wrapping(data + write * I64{16}), I64{8}, fd_word(row, I64{8}))
             write += I64{1}
         }
         read += I64{1}
@@ -90,7 +90,7 @@ fn process_execution_environment(spec: I64, err: I64) -> I64 {
 fn process_execution_env_get(env: I64, key: I64) -> I64 {
     at := I64{0}
     loop at < fd_word(env, I64{0}) {
-        row :: fd_word(env, I64{16}) + at * I64{16}
+        row :: wrapping(fd_word(env, I64{16}) + at * I64{16})
         if jet_rt_string_eq(fd_word(row, I64{0}), key) -> return fd_word(row, I64{8})
         at += I64{1}
     }
@@ -107,7 +107,7 @@ fn process_execution_candidates(command: I64, env: I64) -> I64 {
     start := I64{0}
     at := I64{0}
     loop at <= rt_text_len(search) {
-        if (at == rt_text_len(search) || rt_text_byte(rt_text_data(search) + at) == I64{58}) {
+        if (at == rt_text_len(search) || rt_text_byte(wrapping(rt_text_data(search) + at)) == I64{58}) {
             name :: jet_rt_string_builder_new()
             if (at != start) {
                 rt_text_append(name, rt_text_data(search) + start, at - start)
@@ -194,7 +194,7 @@ fn process_execution_relaunch(cmd: I64) -> I64 {
     if (rt_text_len(first) != length) -> return I64{0}
     at := I64{0}
     loop at < length {
-        if (rt_text_byte(rt_text_data(first) + at) != rt_text_byte(loaded + at)) -> return I64{0}
+        if (rt_text_byte(wrapping(rt_text_data(first) + at)) != rt_text_byte(wrapping(loaded + at))) -> return I64{0}
         at += I64{1}
     }
     list :: data_sequence_new(I64{0}, I64{8})
@@ -242,7 +242,7 @@ fn process_execution_launch_native(spec: I64, err: I64) -> I64 {
     env_list :: data_sequence_new(I64{0}, I64{8})
     at = I64{0}
     loop at < fd_word(env, I64{0}) {
-        row :: fd_word(env, I64{16}) + at * I64{16}
+        row :: wrapping(fd_word(env, I64{16}) + at * I64{16})
         text :: jet_rt_string_builder_new()
         jet_rt_string_builder_push(text, fd_word(row, I64{0}))
         jet_rt_string_builder_push(text, rt_static_text("="))
@@ -266,7 +266,7 @@ fn process_execution_launch_native(spec: I64, err: I64) -> I64 {
     fd_put(facts, I64{16}, I64{0}) // Rust Command does not run ENOEXEC scripts.
     fd_put(facts, I64{24}, if (process_execution_has(first, I64{47})) -> { I64{0} } else -> { I64{1} })
     mechanical :: process_execution_pack(spec)
-    child :: jet_process_spawn_raw(mechanical, facts, argv, envp, I64{0}, facts + I64{32})
+    child :: jet_process_spawn_raw(mechanical, facts, argv, envp, I64{0}, wrapping(facts + I64{32}))
     // The child reports a failed launch (exec, cwd, descriptor, limit) as its
     // errno through HostSpawn's CLOEXEC pipe; the kind follows that errno as
     // file I/O's does (ENOENT NotFound, EACCES PermissionDenied, ...).

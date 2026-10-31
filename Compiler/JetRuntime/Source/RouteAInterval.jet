@@ -25,8 +25,8 @@ fn timer_meta() -> I64 {
     meta :: jet_rt_alloc(I64{72}, I64{8})
     thread_zero(meta, I64{72})
     sync_store(meta, I64{8})
-    sync_store(meta + I64{16}, rt_timer_int_drop_address())
-    sync_store(meta + I64{48}, I64{1})
+    sync_store(wrapping(meta + I64{16}), rt_timer_int_drop_address())
+    sync_store(wrapping(meta + I64{48}), I64{1})
     meta
 }
 
@@ -35,17 +35,17 @@ fn timer_meta() -> I64 {
 // receiver left.
 fn timer_send(channel: I64, value: I64) -> Bool {
     sync_mutex_lock(channel)
-    if (sync_load(channel + I64{88}) != I64{0} || sync_load(channel + I64{128}) == I64{0}) {
+    if (sync_load(wrapping(channel + I64{88})) != I64{0} || sync_load(wrapping(channel + I64{128})) == I64{0}) {
         channel_update(channel)
         sync_mutex_unlock(channel)
         return false
     }
-    if (sync_load(channel + I64{56}) == I64{0}) -> sync_store(channel + I64{56}, timer_meta())
-    length :: sync_load(channel + I64{16})
-    channel_grow(channel, length + sync_load(channel + I64{80}) + I64{1})
-    target :: sync_load(channel + I64{32}) + ((sync_load(channel + I64{40}) + length) % sync_load(channel + I64{24})) * I64{8}
+    if (sync_load(wrapping(channel + I64{56})) == I64{0}) -> sync_store(wrapping(channel + I64{56}), timer_meta())
+    length :: sync_load(wrapping(channel + I64{16}))
+    channel_grow(channel, length + sync_load(wrapping(channel + I64{80})) + I64{1})
+    target :: wrapping(sync_load(wrapping(channel + I64{32})) + ((sync_load(wrapping(channel + I64{40})) + length) % sync_load(wrapping(channel + I64{24}))) * I64{8})
     sync_store(target, value)
-    sync_store(channel + I64{16}, length + I64{1})
+    sync_store(wrapping(channel + I64{16}), length + I64{1})
     channel_wake_one(channel, false)
     channel_update(channel)
     sync_mutex_unlock(channel)
@@ -57,14 +57,14 @@ fn timer_send(channel: I64, value: I64) -> Bool {
 // or 0 at 16, owned value at 24) runs `worker` on a detached host thread.
 fn timer_start(kind: I64, delay: I64, value: I64, worker: I64) -> I64 {
     channel :: channel_new(I64{-1}, kind, delay)
-    sync_store(channel + I64{120}, I64{1})
+    sync_store(wrapping(channel + I64{120}), I64{1})
     channel_retain(channel)
     job :: jet_rt_alloc(I64{32}, I64{8})
     sync_store(job, channel)
-    sync_store(job + I64{8}, delay)
+    sync_store(wrapping(job + I64{8}), delay)
     world :: world_current()
-    sync_store(job + I64{16}, if (world == I64{0}) -> I64{0} else -> jet_rt_world_clone(world))
-    sync_store(job + I64{24}, value)
+    sync_store(wrapping(job + I64{16}), if (world == I64{0}) -> I64{0} else -> jet_rt_world_clone(world))
+    sync_store(wrapping(job + I64{24}), value)
     if (world != I64{0}) -> world_task_spawned(world)
     handle :: thread_spawn(worker, job)
     if (handle < I64{0}) {
@@ -76,13 +76,13 @@ fn timer_start(kind: I64, delay: I64, value: I64, worker: I64) -> I64 {
 }
 
 fn timer_worker_enter(job: I64, save: I64) {
-    world :: sync_load(job + I64{16})
+    world :: sync_load(wrapping(job + I64{16}))
     if (world != I64{0}) -> world_scope_enter(world, save, true)
 }
 
 fn timer_worker_leave(job: I64, save: I64) {
     channel :: sync_load(job)
-    world :: sync_load(job + I64{16})
+    world :: sync_load(wrapping(job + I64{16}))
     jet_rt_free(job, I64{32}, I64{8})
     if (world != I64{0}) {
         world_task_finished(world)
@@ -97,7 +97,7 @@ fn timer_worker_leave(job: I64, save: I64) {
     save :: jet_rt_alloc(I64{32}, I64{8})
     timer_worker_enter(job, save)
     channel :: sync_load(job)
-    delay :: sync_load(job + I64{8})
+    delay :: sync_load(wrapping(job + I64{8}))
     tick := I64{1}
     loop {
         jet_scheduler_sleep_ms(delay)
@@ -111,8 +111,8 @@ fn timer_worker_leave(job: I64, save: I64) {
 #Export(c) fn jet_rt_after_worker(job: I64) -> I64 {
     save :: jet_rt_alloc(I64{32}, I64{8})
     timer_worker_enter(job, save)
-    jet_scheduler_sleep_ms(sync_load(job + I64{8}))
-    value :: sync_load(job + I64{24})
+    jet_scheduler_sleep_ms(sync_load(wrapping(job + I64{8})))
+    value :: sync_load(wrapping(job + I64{24}))
     if !timer_send(sync_load(job), value) -> jet_rt_int_drop(value)
     timer_worker_leave(job, save)
     I64{0}

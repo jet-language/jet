@@ -125,7 +125,7 @@ fn rt_text_writable(target: I64) -> Bool {
 }
 
 fn rt_text_slice(value: I64, start: I64, end: I64) -> I64 {
-    rt_text_copy(rt_text_data(value) + start, end - start)
+    rt_text_copy(wrapping(rt_text_data(value) + start), end - start)
 }
 
 fn rt_text_width(ptr: I64) -> I64 {
@@ -149,7 +149,7 @@ fn rt_text_decode(ptr: I64) -> I64 {
     scalar := rt_text_byte(ptr).bit_and(mask)
     at := I64{1}
     loop at < width {
-        scalar = (scalar << I64{6}).bit_or((rt_text_byte(ptr + at).bit_and(I64{63})))
+        scalar = (scalar << I64{6}).bit_or((rt_text_byte(wrapping(ptr + at)).bit_and(I64{63})))
         at += I64{1}
     }
     scalar
@@ -312,7 +312,7 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
     // Valid static text uses a single buffer allocation and no builder growth.
     at := I64{0}
     loop at < len {
-        width :: rt_text_valid_width(ptr + at, len - at, I64{1})
+        width :: rt_text_valid_width(wrapping(ptr + at), len - at, I64{1})
         if (width < I64{0}) { break }
         at += width
     }
@@ -324,7 +324,7 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
         return I64{0}
     }
     loop at < len {
-        width :: rt_text_valid_width(ptr + at, len - at, I64{1})
+        width :: rt_text_valid_width(wrapping(ptr + at), len - at, I64{1})
         if {
             (width < I64{0}) -> {
                 rt_text_push_scalar(result, I64{65533})
@@ -334,7 +334,7 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
                 start :: at
                 at += width
                 loop at < len {
-                    next_width :: rt_text_valid_width(ptr + at, len - at, I64{1})
+                    next_width :: rt_text_valid_width(wrapping(ptr + at), len - at, I64{1})
                     if (next_width < I64{0}) { break }
                     at += next_width
                 }
@@ -390,7 +390,7 @@ fn rt_text_lossy(ptr: I64, len: I64) -> I64 {
 // jet_rt_string_concat) and this owner of `left` is released. On a stop
 // `left` is still owned by the variable and the result is 0.
 #Export(c) fn jet_rt_string_append(left: I64, right: I64) -> I64 {
-    if (rt_text_immortal(left) || !jet_rt_rc_unique(left - I64{8})) {
+    if (rt_text_immortal(left) || !jet_rt_rc_unique(wrapping(left - I64{8}))) {
         joined :: jet_rt_string_concat(left, right)
         if (joined == I64{0}) -> return I64{0}
         jet_rt_string_drop(left)
@@ -529,8 +529,8 @@ fn rt_text_scalars(data: I64, len: I64) -> I64 {
     stop :: data + len
     loop {
         if (at >= blocks) -> break
-        if (rt_text_word(at).bit_or(rt_text_word(at + I64{8})).bit_or(rt_text_word(at + I64{16})).bit_or(rt_text_word(at + I64{24})).bit_and(I64{-9187201950435737472}) != I64{0}) {
-            continuations += rt_text_continuations(at) + rt_text_continuations(at + I64{8}) + rt_text_continuations(at + I64{16}) + rt_text_continuations(at + I64{24})
+        if (rt_text_word(at).bit_or(rt_text_word(wrapping(at + I64{8}))).bit_or(rt_text_word(wrapping(at + I64{16}))).bit_or(rt_text_word(wrapping(at + I64{24}))).bit_and(I64{-9187201950435737472}) != I64{0}) {
+            continuations += rt_text_continuations(at) + rt_text_continuations(wrapping(at + I64{8})) + rt_text_continuations(wrapping(at + I64{16})) + rt_text_continuations(wrapping(at + I64{24}))
         }
         at += I64{32}
     }
@@ -568,7 +568,7 @@ fn rt_text_skip(data: I64, len: I64, from: I64, scalars: I64) -> I64 {
     left := scalars
     loop {
         if (left <= I64{0}) -> break
-        if (left >= I64{32} && stop - at >= I64{32} && rt_text_word(at).bit_or(rt_text_word(at + I64{8})).bit_or(rt_text_word(at + I64{16})).bit_or(rt_text_word(at + I64{24})).bit_and(I64{-9187201950435737472}) == I64{0}) {
+        if (left >= I64{32} && stop - at >= I64{32} && rt_text_word(at).bit_or(rt_text_word(wrapping(at + I64{8}))).bit_or(rt_text_word(wrapping(at + I64{16}))).bit_or(rt_text_word(wrapping(at + I64{24}))).bit_and(I64{-9187201950435737472}) == I64{0}) {
             at += I64{32}
             left -= I64{32}
             next
@@ -592,7 +592,7 @@ fn rt_text_find(value: I64, needle: I64, start: I64, last: Bool) -> I64 {
 // Reused d696178e1 Core/Text/Runtime/KernelUnicodeString.jet's constant-
 // storage two-way search. Reversed accessors share one linear-time algorithm.
 fn rt_text_search_byte(data: I64, len: I64, at: I64, reverse: Bool) -> I64 {
-    rt_text_byte(data + (if reverse -> len - I64{1} - at else -> at))
+    rt_text_byte(wrapping(data + (if reverse -> len - I64{1} - at else -> at)))
 }
 
 fn rt_text_maximal_suffix(pattern: I64, len: I64, reverse: Bool, order: Bool) -> (period: I64, split: I64) {
@@ -655,7 +655,7 @@ fn rt_text_find_bytes(data: I64, len: I64, pattern: I64, n: I64, start: I64, las
         period = if split > n - split -> split else -> n - split
         period += I64{1}
     }
-    hay :: data + start
+    hay :: wrapping(data + start)
     available :: len - start
     position := I64{0}
     memory := I64{0}
@@ -694,7 +694,7 @@ fn rt_text_find_bytes(data: I64, len: I64, pattern: I64, n: I64, start: I64, las
 #Export(c) fn jet_string_ends_with(value: I64, needle: I64) -> Bool {
     len :: rt_text_len(value)
     n :: rt_text_len(needle)
-    n <= len && rt_text_equal_bytes(rt_text_data(value) + len - n, rt_text_data(needle), n)
+    n <= len && rt_text_equal_bytes(wrapping(wrapping(rt_text_data(value) + len) - n), rt_text_data(needle), n)
 }
 
 fn rt_text_builder_with_capacity(cap: I64) -> I64 {
@@ -739,7 +739,7 @@ fn rt_text_take_unique_buffer(value: I64) -> I64 {
 #Export(c) fn jet_rt_string_builder_push_static(target: I64, ptr: I64, len: I64) {
     at := I64{0}
     loop at < len {
-        width :: rt_text_valid_width(ptr + at, len - at, I64{1})
+        width :: rt_text_valid_width(wrapping(ptr + at), len - at, I64{1})
         if (width < I64{0}) { break }
         at += width
     }
@@ -773,13 +773,13 @@ fn rt_text_trim(value: I64) -> I64 {
     start := I64{0}
     end := len
     loop start < end {
-        if !unicode_is_white_space(rt_text_decode(data + start)) -> break
-        start += rt_text_width(data + start)
+        if !unicode_is_white_space(rt_text_decode(wrapping(data + start))) -> break
+        start += rt_text_width(wrapping(data + start))
     }
     loop end > start {
         at := end - I64{1}
-        loop at > start && (rt_text_byte(data + at).bit_and(I64{192})) == (I64{128}) -> at -= I64{1}
-        if !unicode_is_white_space(rt_text_decode(data + at)) -> break
+        loop at > start && (rt_text_byte(wrapping(data + at)).bit_and(I64{192})) == (I64{128}) -> at -= I64{1}
+        if !unicode_is_white_space(rt_text_decode(wrapping(data + at))) -> break
         end = at
     }
     // Nothing to trim: the text is its own result, shared, not copied.
@@ -853,7 +853,7 @@ fn rt_text_slice_range(value: I64, start: I64, end: I64, exclusive: U8, file: I6
         first = if (start <= prefix) -> start else -> rt_text_skip(data, len, prefix, start - prefix)
         if (first >= I64{0}) -> at = rt_text_skip(data, len, first, end - start)
         if (at >= I64{0} && exclusive == U8{0}) {
-            at = if at < len -> at + rt_text_width(data + at) else -> I64{-1}
+            at = if at < len -> at + rt_text_width(wrapping(data + at)) else -> I64{-1}
         }
     }
     if (at < I64{0}) {
@@ -892,31 +892,31 @@ fn rt_text_slice_range(value: I64, start: I64, end: I64, exclusive: U8, file: I6
 fn text_iter_state(text: I64, separator: I64) -> I64 {
     state :: jet_rt_alloc(I64{40}, I64{8})
     rt_text_store(state, jet_rt_string_clone(text))
-    rt_text_store(state + I64{8}, jet_rt_string_clone(separator))
-    rt_text_store(state + I64{16}, I64{0})
-    rt_text_store(state + I64{24}, I64{0})
-    rt_text_store(state + I64{32}, I64{0})
+    rt_text_store(wrapping(state + I64{8}), jet_rt_string_clone(separator))
+    rt_text_store(wrapping(state + I64{16}), I64{0})
+    rt_text_store(wrapping(state + I64{24}), I64{0})
+    rt_text_store(wrapping(state + I64{32}), I64{0})
     state
 }
 
 fn text_iter_pull(state: I64) -> I64 {
-    if (rt_text_word(state + I64{32}) != I64{0}) { return I64{0} }
+    if (rt_text_word(wrapping(state + I64{32})) != I64{0}) { return I64{0} }
     text :: rt_text_word(state)
-    sep :: rt_text_word(state + I64{8})
+    sep :: rt_text_word(wrapping(state + I64{8}))
     len :: rt_text_len(text)
     n :: rt_text_len(sep)
-    start :: rt_text_word(state + I64{16})
+    start :: rt_text_word(wrapping(state + I64{16}))
     end := start
     if {
         (n == I64{0}) -> {
-            phase :: rt_text_word(state + I64{24})
+            phase :: rt_text_word(wrapping(state + I64{24}))
             if {
-                (phase == I64{0}) -> rt_text_store(state + I64{24}, I64{1})
+                (phase == I64{0}) -> rt_text_store(wrapping(state + I64{24}), I64{1})
                 start < len -> {
-                    end = start + rt_text_width(rt_text_data(text) + start)
-                    rt_text_store(state + I64{16}, end)
+                    end = start + rt_text_width(wrapping(rt_text_data(text) + start))
+                    rt_text_store(wrapping(state + I64{16}), end)
                 }
-                else -> rt_text_store(state + I64{32}, I64{1})
+                else -> rt_text_store(wrapping(state + I64{32}), I64{1})
             }
         }
         else -> {
@@ -924,11 +924,11 @@ fn text_iter_pull(state: I64) -> I64 {
             if {
                 (found < I64{0}) -> {
                     end = len
-                    rt_text_store(state + I64{32}, I64{1})
+                    rt_text_store(wrapping(state + I64{32}), I64{1})
                 }
                 else -> {
                     end = found
-                    rt_text_store(state + I64{16}, found + n)
+                    rt_text_store(wrapping(state + I64{16}), found + n)
                 }
             }
         }
@@ -940,13 +940,13 @@ fn text_iter_pull(state: I64) -> I64 {
 
 fn text_iter_drop(state: I64) {
     jet_rt_string_drop(rt_text_word(state))
-    jet_rt_string_drop(rt_text_word(state + I64{8}))
+    jet_rt_string_drop(rt_text_word(wrapping(state + I64{8})))
     jet_rt_free(state, I64{40}, I64{8})
 }
 
 #Export(c) fn jet_rt_native_iter_string_split(text: I64, separator: I64, meta: I64) -> I64 {
     iter :: iter_new(I64{25}, meta)
-    rt_text_store(iter + I64{16}, text_iter_state(text, separator))
+    rt_text_store(wrapping(iter + I64{16}), text_iter_state(text, separator))
     iter
 }
 
@@ -967,12 +967,12 @@ fn text_iter_drop(state: I64) {
         end = found
     }
     jet_rt_free(slot, I64{8}, I64{8})
-    data :: rt_text_word(list + I64{16})
+    data :: rt_text_word(wrapping(list + I64{16}))
     left := I64{0}
     right := rt_text_word(list) - I64{1}
     loop left < right {
-        a :: data + left * I64{8}
-        b :: data + right * I64{8}
+        a :: wrapping(data + left * I64{8})
+        b :: wrapping(data + right * I64{8})
         word :: rt_text_word(a)
         rt_text_store(a, rt_text_word(b))
         rt_text_store(b, word)
@@ -1012,7 +1012,7 @@ fn rt_c_string_stop(kind: I64) {
     len :: rt_text_len(text)
     at := I64{0}
     loop at < len {
-        if (rt_text_byte(source + at) == I64{0}) {
+        if (rt_text_byte(wrapping(source + at)) == I64{0}) {
             rt_c_string_stop(I64{0})
             return I64{0}
         }
@@ -1031,10 +1031,10 @@ fn rt_c_string_stop(kind: I64) {
         return I64{0}
     }
     len := I64{0}
-    loop rt_text_byte(ptr + len) != (I64{0}) {
+    loop rt_text_byte(wrapping(ptr + len)) != (I64{0}) {
         // UTF-8 is at most four bytes. The validator rejects NUL as a
         // continuation before reading any byte beyond that terminator.
-        width :: rt_text_valid_width(ptr + len, I64{4}, I64{1})
+        width :: rt_text_valid_width(wrapping(ptr + len), I64{4}, I64{1})
         if (width < I64{0}) {
             rt_c_string_stop(I64{2})
             return I64{0}

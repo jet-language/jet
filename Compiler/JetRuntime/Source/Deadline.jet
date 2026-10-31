@@ -5,25 +5,25 @@ fn deadline_ms_to_ns(ms: I64) -> I64 {
     if (ms > I64{9223372036854}) -> I64{9223372036854775807} else -> ms * I64{1000000}
 }
 
-fn jet_ctx_deadline_present() -> Bool { sync_load(context_current() + CONTEXT_DEADLINE_PRESENT) != I64{0} }
-fn jet_ctx_deadline_ms() -> I64 { sync_load(context_current() + CONTEXT_DEADLINE_MS) }
+fn jet_ctx_deadline_present() -> Bool { sync_load(wrapping(context_current() + CONTEXT_DEADLINE_PRESENT)) != I64{0} }
+fn jet_ctx_deadline_ms() -> I64 { sync_load(wrapping(context_current() + CONTEXT_DEADLINE_MS)) }
 
 #Export(c) fn jet_ctx_push_deadline(deadline_ms: I64, save: I64) {
     record :: context_current()
-    sync_store(save, sync_load(record + CONTEXT_DEADLINE_PRESENT))
-    sync_store(save + I64{8}, sync_load(record + CONTEXT_DEADLINE_MS))
-    sync_store(record + CONTEXT_DEADLINE_PRESENT, I64{1})
-    sync_store(record + CONTEXT_DEADLINE_MS, deadline_ms)
+    sync_store(save, sync_load(wrapping(record + CONTEXT_DEADLINE_PRESENT)))
+    sync_store(wrapping(save + I64{8}), sync_load(wrapping(record + CONTEXT_DEADLINE_MS)))
+    sync_store(wrapping(record + CONTEXT_DEADLINE_PRESENT), I64{1})
+    sync_store(wrapping(record + CONTEXT_DEADLINE_MS), deadline_ms)
 }
 #Export(c) fn jet_ctx_pop_deadline(save: I64) {
     record :: context_current()
-    sync_store(record + CONTEXT_DEADLINE_PRESENT, sync_load(save))
-    sync_store(record + CONTEXT_DEADLINE_MS, sync_load(save + I64{8}))
+    sync_store(wrapping(record + CONTEXT_DEADLINE_PRESENT), sync_load(save))
+    sync_store(wrapping(record + CONTEXT_DEADLINE_MS), sync_load(wrapping(save + I64{8})))
 }
 #Export(c) fn jet_ctx_set_deadline_min(deadline_ms: I64) {
     if !jet_ctx_deadline_present() || deadline_ms < jet_ctx_deadline_ms() {
-        sync_store(context_current() + CONTEXT_DEADLINE_PRESENT, I64{1})
-        sync_store(context_current() + CONTEXT_DEADLINE_MS, deadline_ms)
+        sync_store(wrapping(context_current() + CONTEXT_DEADLINE_PRESENT), I64{1})
+        sync_store(wrapping(context_current() + CONTEXT_DEADLINE_MS), deadline_ms)
     }
 }
 // D-TYPE2-TIME1=A `task.timeout(duration)`: the task deadline becomes the
@@ -41,7 +41,7 @@ fn jet_ctx_deadline_ms() -> I64 { sync_load(context_current() + CONTEXT_DEADLINE
 // accumulation admits i64::MIN without negation overflow.
 fn deadline_parse_i64(text: I64, out: I64) -> Bool {
     if (text == I64{0}) -> return false
-    length :: sync_load(text + I64{8})
+    length :: sync_load(wrapping(text + I64{8}))
     if (length == I64{0}) -> return false
     data :: sync_load(text)
     at := I64{0}
@@ -55,7 +55,7 @@ fn deadline_parse_i64(text: I64, out: I64) -> Bool {
     value := I64{0}
     limit :: if negative -> I64{-9223372036854775808} else -> I64{-9223372036854775807}
     loop at < length {
-        byte :: trap_byte(data + at)
+        byte :: trap_byte(wrapping(data + at))
         if (byte < I64{48} || byte > I64{57}) -> return false
         digit :: byte - I64{48}
         // /% floors negative values; the multiply guard needs truncation.
@@ -70,14 +70,14 @@ fn deadline_parse_i64(text: I64, out: I64) -> Bool {
 }
 
 fn deadline_wall_now_ms() -> I64 {
-    scratch :: thread_base() + I64{232}
+    scratch :: wrapping(thread_base() + I64{232})
     #Unsafe("clock_gettime writes two thread-owned TCB words, not retained after the syscall") {
         result :: os_syscall_i64(I64{228}, I64{0}, scratch, I64{0}, I64{0}, I64{0}, I64{0})
         if (result != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
     }
     seconds :: sync_load(scratch)
     if (seconds < I64{0}) -> return I64{0}
-    wrapping(seconds * I64{1000} + sync_load(scratch + I64{8}) /% I64{1000000})
+    wrapping(seconds * I64{1000} + sync_load(wrapping(scratch + I64{8})) /% I64{1000000})
 }
 
 // CoreReview2 #49 Rust's std::env reads the immutable host
@@ -88,7 +88,7 @@ fn jet_std_time_now() -> I64 {
     key :: scheduler_msg_replay()
     replay :: rt_env_get(key)
     jet_rt_string_drop(key)
-    scratch :: thread_base() + I64{248}
+    scratch :: wrapping(thread_base() + I64{248})
     accepted :: deadline_parse_i64(replay, scratch)
     jet_rt_string_drop(replay)
     if accepted -> return sync_load(scratch)

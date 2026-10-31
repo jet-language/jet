@@ -45,8 +45,8 @@ fn process_signal_bit(signal: I64) -> I64 {
     bit :: process_signal_bit(number)
     if (bit == I64{0}) -> return I64{0}
     loop {
-        pending :: sync_load(state + I64{8})
-        if (sync_cas(state + I64{8}, pending, pending.bit_or(bit)) == pending) -> break
+        pending :: sync_load(wrapping(state + I64{8}))
+        if (sync_cas(wrapping(state + I64{8}), pending, pending.bit_or(bit)) == pending) -> break
     }
     I64{0}
 }
@@ -59,8 +59,8 @@ fn process_signal_error(error: I64, text: I64) -> I64 {
 // Interrupt.rs:143 arm_mask (unix): install the handler once per bit.
 fn process_signal_arm_mask(state: I64, mask: I64, error: I64) -> I64 {
     if (mask.bit_and(I64{-8}) != I64{0}) -> return process_signal_error(error, jet_rt_string_clone(rt_static_text("invalid process signal")))
-    sync_mutex_lock(state + I64{24})
-    installed := sync_load(state + I64{16})
+    sync_mutex_lock(wrapping(state + I64{24}))
+    installed := sync_load(wrapping(state + I64{16}))
     at := I64{0}
     loop at < (I64{3}) {
         bit :: I64{1} << at
@@ -68,24 +68,24 @@ fn process_signal_arm_mask(state: I64, mask: I64, error: I64) -> I64 {
             number :: if (at == I64{0}) -> I64{2} else if (at == I64{1}) -> I64{1} else -> I64{15}
             previous :: process_signal_install(number, rt_process_signal_mark_address())
             if (previous == I64{-1}) {
-                sync_mutex_unlock(state + I64{24})
+                sync_mutex_unlock(wrapping(state + I64{24}))
                 name :: if (at == I64{0}) -> rt_static_text("could not install the SIGINT handler") else if (at == I64{1}) -> rt_static_text("could not install the SIGHUP handler") else -> rt_static_text("could not install the SIGTERM handler")
                 return process_signal_error(error, jet_rt_string_clone(name))
             }
             installed = installed.bit_or(bit)
-            sync_store(state + I64{16}, installed)
+            sync_store(wrapping(state + I64{16}), installed)
         }
         at += I64{1}
     }
-    sync_mutex_unlock(state + I64{24})
+    sync_mutex_unlock(wrapping(state + I64{24}))
     I64{1}
 }
 
 // Interrupt.rs:245 JET_PROCESS_SIGNAL_DISPATCHER: started once; a start
 // failure is cached and reported on every later arm.
 fn process_signal_dispatcher_start(state: I64, error: I64) -> I64 {
-    sync_mutex_lock(state + I64{24})
-    status := sync_load(state + I64{72})
+    sync_mutex_lock(wrapping(state + I64{24}))
+    status := sync_load(wrapping(state + I64{72}))
     if (status == I64{0}) {
         worker :: thread_spawn(rt_process_signal_dispatcher_address(), state)
         if (worker < I64{0}) {
@@ -99,9 +99,9 @@ fn process_signal_dispatcher_start(state: I64, error: I64) -> I64 {
             _ := thread_detach(worker)
             status = I64{1}
         }
-        sync_store(state + I64{72}, status)
+        sync_store(wrapping(state + I64{72}), status)
     }
-    sync_mutex_unlock(state + I64{24})
+    sync_mutex_unlock(wrapping(state + I64{24}))
     if (status == I64{1}) -> return I64{1}
     process_signal_error(error, jet_rt_string_clone(status))
 }
@@ -117,20 +117,20 @@ fn process_signal_cancel_root() {
 // have a registered callback (TERM, HUP, INT order), keep the rest pending,
 // then run one callback per delivered signal under the dispatch lock.
 fn process_signal_dispatch(state: I64) {
-    sync_mutex_lock(state + I64{32})
+    sync_mutex_lock(wrapping(state + I64{32}))
     deliverable := I64{0}
     loop {
-        pending :: sync_load(state + I64{8})
+        pending :: sync_load(wrapping(state + I64{8}))
         if (pending == I64{0}) -> break
-        sync_mutex_lock(state + I64{40})
+        sync_mutex_lock(wrapping(state + I64{40}))
         registered := I64{0}
-        if (pending.bit_and(I64{4}) != I64{0} && sync_load(state + I64{64}) != I64{0}) -> registered = registered.bit_or(I64{4})
-        if (pending.bit_and(I64{2}) != I64{0} && sync_load(state + I64{56}) != I64{0}) -> registered = registered.bit_or(I64{2})
-        if (pending.bit_and(I64{1}) != I64{0} && sync_load(state + I64{48}) != I64{0}) -> registered = registered.bit_or(I64{1})
-        sync_mutex_unlock(state + I64{40})
+        if (pending.bit_and(I64{4}) != I64{0} && sync_load(wrapping(state + I64{64})) != I64{0}) -> registered = registered.bit_or(I64{4})
+        if (pending.bit_and(I64{2}) != I64{0} && sync_load(wrapping(state + I64{56})) != I64{0}) -> registered = registered.bit_or(I64{2})
+        if (pending.bit_and(I64{1}) != I64{0} && sync_load(wrapping(state + I64{48})) != I64{0}) -> registered = registered.bit_or(I64{1})
+        sync_mutex_unlock(wrapping(state + I64{40}))
         candidate :: pending.bit_and(registered)
         if (candidate == I64{0}) -> break
-        if (sync_cas(state + I64{8}, pending, pending.bit_and(candidate.bit_xor(I64{-1}))) == pending) {
+        if (sync_cas(wrapping(state + I64{8}), pending, pending.bit_and(candidate.bit_xor(I64{-1}))) == pending) {
             deliverable = candidate
             break
         }
@@ -138,7 +138,7 @@ fn process_signal_dispatch(state: I64) {
     if (deliverable.bit_and(I64{4}) != I64{0}) -> process_signal_cancel_root()
     if (deliverable.bit_and(I64{2}) != I64{0}) -> process_signal_cancel_root()
     if (deliverable.bit_and(I64{1}) != I64{0}) -> process_signal_cancel_root()
-    sync_mutex_unlock(state + I64{32})
+    sync_mutex_unlock(wrapping(state + I64{32}))
 }
 
 // The "jet-process-signal" thread: sleep 10 ms, dispatch, forever.
@@ -146,7 +146,7 @@ fn process_signal_dispatch(state: I64) {
     interval :: jet_rt_alloc(I64{16}, I64{8})
     loop {
         trap_store(interval, I64{0})
-        trap_store(interval + I64{8}, I64{10000000})
+        trap_store(wrapping(interval + I64{8}), I64{10000000})
         loop {
             slept :: host_call(I64{35}, interval, interval, I64{0})
             if (slept != I64{-4}) -> break
@@ -167,8 +167,8 @@ fn process_signal_dispatch(state: I64) {
     state :: process_signal_state_ensure()
     if (process_signal_arm_mask(state, native, error) == I64{0}) -> return I64{0}
     if (process_signal_dispatcher_start(state, error) == I64{0}) -> return I64{0}
-    sync_mutex_lock(state + I64{40})
-    sync_store(state + I64{48} + index * I64{8}, I64{1})
-    sync_mutex_unlock(state + I64{40})
+    sync_mutex_lock(wrapping(state + I64{40}))
+    sync_store(wrapping(wrapping(state + I64{48}) + index * I64{8}), I64{1})
+    sync_mutex_unlock(wrapping(state + I64{40}))
     I64{1}
 }

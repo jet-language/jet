@@ -5,25 +5,25 @@
 // Int operands arrive as borrowed exact Int carriers; fixed-width writer
 // operands are the exact Int of the checked fixed-width value.
 
-fn byte_buffer_sequence(buffer: I64) -> I64 { data_tree_word(buffer + BYTE_BUFFER_SEQUENCE) }
-fn byte_buffer_len(buffer: I64) -> I64 { data_tree_word(byte_buffer_sequence(buffer) + DATA_SEQUENCE_LENGTH) }
-fn byte_buffer_data(buffer: I64) -> I64 { data_tree_word(byte_buffer_sequence(buffer) + DATA_SEQUENCE_DATA) }
-fn byte_buffer_position(buffer: I64) -> I64 { data_tree_word(buffer + BYTE_BUFFER_POSITION) }
-fn byte_buffer_set_position(buffer: I64, position: I64) { data_tree_store(buffer + BYTE_BUFFER_POSITION, position) }
+fn byte_buffer_sequence(buffer: I64) -> I64 { data_tree_word(wrapping(buffer + BYTE_BUFFER_SEQUENCE)) }
+fn byte_buffer_len(buffer: I64) -> I64 { data_tree_word(wrapping(byte_buffer_sequence(buffer) + DATA_SEQUENCE_LENGTH)) }
+fn byte_buffer_data(buffer: I64) -> I64 { data_tree_word(wrapping(byte_buffer_sequence(buffer) + DATA_SEQUENCE_DATA)) }
+fn byte_buffer_position(buffer: I64) -> I64 { data_tree_word(wrapping(buffer + BYTE_BUFFER_POSITION)) }
+fn byte_buffer_set_position(buffer: I64, position: I64) { data_tree_store(wrapping(buffer + BYTE_BUFFER_POSITION), position) }
 
 // A fresh buffer holding a copy of `length` bytes at `data`, cursor at 0.
 fn byte_buffer_of(data: I64, length: I64, capacity: I64) -> I64 {
     sequence :: data_sequence_new(if capacity < length -> length else -> capacity, RT_HOST_U8_STRIDE)
-    target :: data_tree_word(sequence + DATA_SEQUENCE_DATA)
+    target :: data_tree_word(wrapping(sequence + DATA_SEQUENCE_DATA))
     at := I64{0}
     loop at < length {
         host_u8_put(target, at, host_u8_get(data, at))
         at += I64{1}
     }
-    data_tree_store(sequence + DATA_SEQUENCE_LENGTH, length)
+    data_tree_store(wrapping(sequence + DATA_SEQUENCE_LENGTH), length)
     result :: jet_rt_alloc(BYTE_BUFFER_BYTES, I64{8})
-    data_tree_store(result + BYTE_BUFFER_SEQUENCE, sequence)
-    data_tree_store(result + BYTE_BUFFER_POSITION, I64{0})
+    data_tree_store(wrapping(result + BYTE_BUFFER_SEQUENCE), sequence)
+    data_tree_store(wrapping(result + BYTE_BUFFER_POSITION), I64{0})
     result
 }
 
@@ -41,9 +41,9 @@ fn byte_buffer_text(buffer: I64) -> I64 { jet_string_from_bytes_lossy(byte_buffe
 // geometrically; the caller stores them and then byte_buffer_commit.
 fn byte_buffer_reserve(buffer: I64, extra: I64) -> I64 {
     sequence :: byte_buffer_sequence(buffer)
-    length :: data_tree_word(sequence + DATA_SEQUENCE_LENGTH)
-    capacity :: data_tree_word(sequence + DATA_SEQUENCE_CAPACITY)
-    old :: data_tree_word(sequence + DATA_SEQUENCE_DATA)
+    length :: data_tree_word(wrapping(sequence + DATA_SEQUENCE_LENGTH))
+    capacity :: data_tree_word(wrapping(sequence + DATA_SEQUENCE_CAPACITY))
+    old :: data_tree_word(wrapping(sequence + DATA_SEQUENCE_DATA))
     if extra <= capacity - length -> return old + length * RT_HOST_U8_STRIDE
     limit :: I64{9223372036854775807} /% RT_HOST_U8_STRIDE
     if extra > limit - length {
@@ -58,14 +58,14 @@ fn byte_buffer_reserve(buffer: I64, extra: I64) -> I64 {
     data :: jet_rt_alloc(grown * RT_HOST_U8_STRIDE, I64{8})
     coll_copy(old, data, length * RT_HOST_U8_STRIDE)
     if (capacity != I64{0}) -> jet_rt_free(old, capacity * RT_HOST_U8_STRIDE, I64{8})
-    data_tree_store(sequence + DATA_SEQUENCE_CAPACITY, grown)
-    data_tree_store(sequence + DATA_SEQUENCE_DATA, data)
+    data_tree_store(wrapping(sequence + DATA_SEQUENCE_CAPACITY), grown)
+    data_tree_store(wrapping(sequence + DATA_SEQUENCE_DATA), data)
     data + length * RT_HOST_U8_STRIDE
 }
 
 fn byte_buffer_commit(buffer: I64, extra: I64) {
     sequence :: byte_buffer_sequence(buffer)
-    data_tree_store(sequence + DATA_SEQUENCE_LENGTH, data_tree_word(sequence + DATA_SEQUENCE_LENGTH) + extra)
+    data_tree_store(wrapping(sequence + DATA_SEQUENCE_LENGTH), data_tree_word(wrapping(sequence + DATA_SEQUENCE_LENGTH)) + extra)
 }
 
 // Appends the low `width` bytes of `bits`, least significant first when
@@ -153,7 +153,7 @@ fn byte_buffer_list(data: I64, length: I64, output: I64) -> I64 {
 fn byte_buffer_take(buffer: I64, count: I64, data_out: I64, len_out: I64) -> I64 {
     position :: byte_buffer_position(buffer)
     if (count < I64{0} || count > byte_buffer_len(buffer) - position) -> return I64{0}
-    data_tree_store(len_out, byte_buffer_list(byte_buffer_data(buffer) + position * RT_HOST_U8_STRIDE, count, data_out))
+    data_tree_store(len_out, byte_buffer_list(wrapping(byte_buffer_data(buffer) + position * RT_HOST_U8_STRIDE), count, data_out))
     byte_buffer_set_position(buffer, position + count)
     I64{1}
 }
@@ -182,8 +182,8 @@ fn byte_buffer_title(text: I64) -> I64 {
     start := true
     at := I64{0}
     loop at < length {
-        step :: rt_text_width(data + at)
-        cp :: rt_text_decode(data + at)
+        step :: rt_text_width(wrapping(data + at))
+        cp :: rt_text_decode(wrapping(data + at))
         if unicode_is_white_space(cp) {
             rt_text_append(result, data + at, step)
             start = true
@@ -249,7 +249,7 @@ fn byte_buffer_order(left: I64, right: I64) -> I64 {
 // Replaces the bytes of `target` with a copy of `source`'s, cursor at 0.
 fn byte_buffer_assign(target: I64, source: I64) {
     sequence :: byte_buffer_sequence(target)
-    data_tree_store(sequence + DATA_SEQUENCE_LENGTH, I64{0})
+    data_tree_store(wrapping(sequence + DATA_SEQUENCE_LENGTH), I64{0})
     byte_buffer_put_bytes(target, byte_buffer_data(source), byte_buffer_len(source))
     byte_buffer_set_position(target, I64{0})
 }
@@ -269,7 +269,7 @@ fn byte_buffer_assign(target: I64, source: I64) {
 #Export(c) fn jet_byte_buffer_buffer(buffer: I64, output: I64) -> I64 { jet_byte_buffer_to_bytes(buffer, output) }
 #Export(c) fn jet_byte_buffer_get_buffer(buffer: I64, output: I64) -> I64 { jet_byte_buffer_to_bytes(buffer, output) }
 
-#Export(c) fn jet_byte_buffer_capacity(buffer: I64) -> I64 { jet_int_owned_from_i64(data_tree_word(byte_buffer_sequence(buffer) + DATA_SEQUENCE_CAPACITY)) }
+#Export(c) fn jet_byte_buffer_capacity(buffer: I64) -> I64 { jet_int_owned_from_i64(data_tree_word(wrapping(byte_buffer_sequence(buffer) + DATA_SEQUENCE_CAPACITY))) }
 #Export(c) fn jet_byte_buffer_len(buffer: I64) -> I64 { jet_int_owned_from_i64(byte_buffer_len(buffer)) }
 #Export(c) fn jet_byte_buffer_position(buffer: I64) -> I64 { jet_int_owned_from_i64(byte_buffer_position(buffer)) }
 #Export(c) fn jet_byte_buffer_is_empty(buffer: I64) -> Bool { byte_buffer_len(buffer) == I64{0} }
@@ -287,7 +287,7 @@ fn byte_buffer_assign(target: I64, source: I64) {
 }
 
 #Export(c) fn jet_byte_buffer_clear(buffer: I64) {
-    data_tree_store(byte_buffer_sequence(buffer) + DATA_SEQUENCE_LENGTH, I64{0})
+    data_tree_store(wrapping(byte_buffer_sequence(buffer) + DATA_SEQUENCE_LENGTH), I64{0})
     byte_buffer_set_position(buffer, I64{0})
 }
 #Export(c) fn jet_byte_buffer_close(buffer: I64) { jet_byte_buffer_clear(buffer) }
@@ -324,7 +324,7 @@ fn byte_buffer_assign(target: I64, source: I64) {
     wanted :: byte_buffer_index(count)
     position :: byte_buffer_position(buffer)
     if (wanted < I64{0} || wanted > byte_buffer_len(buffer) - position) -> return I64{0}
-    data_tree_store(some, jet_string_from_bytes_lossy(byte_buffer_data(buffer) + position * RT_HOST_U8_STRIDE, wanted))
+    data_tree_store(some, jet_string_from_bytes_lossy(wrapping(byte_buffer_data(buffer) + position * RT_HOST_U8_STRIDE), wanted))
     byte_buffer_set_position(buffer, position + wanted)
     I64{1}
 }
@@ -378,12 +378,12 @@ fn byte_buffer_assign(target: I64, source: I64) {
         index := I64{1}
         at := I64{0}
         loop at < length {
-            step :: rt_text_width(data + at)
-            data_tree_store(words + index * I64{8}, rt_text_slice(text, at, at + step))
+            step :: rt_text_width(wrapping(data + at))
+            data_tree_store(wrapping(words + index * I64{8}), rt_text_slice(text, at, at + step))
             index += I64{1}
             at += step
         }
-        data_tree_store(words + index * I64{8}, rt_text_copy(I64{1}, I64{0}))
+        data_tree_store(wrapping(words + index * I64{8}), rt_text_copy(I64{1}, I64{0}))
         jet_rt_string_drop(text)
         return count
     }
@@ -404,11 +404,11 @@ fn byte_buffer_assign(target: I64, source: I64) {
     at = I64{0}
     loop index + (I64{1}) < count {
         found :: rt_text_find(text, separator, at, false)
-        data_tree_store(words + index * I64{8}, rt_text_slice(text, at, found))
+        data_tree_store(wrapping(words + index * I64{8}), rt_text_slice(text, at, found))
         index += I64{1}
         at = found + width
     }
-    data_tree_store(words + index * I64{8}, rt_text_slice(text, at, length))
+    data_tree_store(wrapping(words + index * I64{8}), rt_text_slice(text, at, length))
     jet_rt_string_drop(text)
     count
 }
@@ -420,7 +420,7 @@ fn byte_buffer_assign(target: I64, source: I64) {
     at := I64{0}
     loop at < count {
         if (at != I64{0}) -> rt_text_append(result, rt_text_data(separator), rt_text_len(separator))
-        part :: data_tree_word(parts + at * I64{8})
+        part :: data_tree_word(wrapping(parts + at * I64{8}))
         rt_text_append(result, rt_text_data(part), rt_text_len(part))
         at += I64{1}
     }
@@ -454,12 +454,12 @@ fn byte_buffer_assign(target: I64, source: I64) {
     parts :: jet_rt_alloc(I64{24}, I64{8})
     if (found < I64{0}) {
         data_tree_store(parts, jet_rt_handle_clone_jet_byte_buffer(buffer))
-        data_tree_store(parts + I64{8}, jet_byte_buffer_new())
-        data_tree_store(parts + I64{16}, jet_byte_buffer_new())
+        data_tree_store(wrapping(parts + I64{8}), jet_byte_buffer_new())
+        data_tree_store(wrapping(parts + I64{16}), jet_byte_buffer_new())
     } else {
         data_tree_store(parts, byte_buffer_of(data, found, I64{0}))
-        data_tree_store(parts + I64{8}, jet_rt_handle_clone_jet_byte_buffer(separator))
-        data_tree_store(parts + I64{16}, byte_buffer_of(data + (found + width) * RT_HOST_U8_STRIDE, length - found - width, I64{0}))
+        data_tree_store(wrapping(parts + I64{8}), jet_rt_handle_clone_jet_byte_buffer(separator))
+        data_tree_store(wrapping(parts + I64{16}), byte_buffer_of(wrapping(data + (found + width) * RT_HOST_U8_STRIDE), length - found - width, I64{0}))
     }
     data_tree_store(data_out, parts)
     data_tree_store(len_out, I64{3})
@@ -496,7 +496,7 @@ fn byte_buffer_assign(target: I64, source: I64) {
     value := I64{0}
     overflow := false
     loop at < length {
-        digit :: rt_text_byte(data + at) - I64{48}
+        digit :: rt_text_byte(wrapping(data + at)) - I64{48}
         if (digit < I64{0} || digit > I64{9}) {
             jet_rt_string_drop(text)
             data_tree_store(err, rt_static_text("invalid digit found in string"))

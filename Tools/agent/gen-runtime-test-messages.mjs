@@ -37,7 +37,7 @@ for (const [name, text] of Object.entries(literals)) {
 for (const [name, text] of Object.entries({json: "JET_TEST_JSON", capture: "JET_TEST_CAPTURE", shuffle: "JET_TEST_SHUFFLE_SEED"})) {
   const bytes = Buffer.from(text);
   source += `fn test_key_${name}() -> I64 {\n    text :: test_text_new(I64{${bytes.length}})\n    data :: trap_word(text)\n`;
-  for (let i = 0; i < bytes.length; i++) source += `    trap_put(data + I64{${i}}, I64{${bytes[i]}})\n`;
+  for (let i = 0; i < bytes.length; i++) source += `    trap_put(wrapping(data + I64{${i}}), I64{${bytes[i]}})\n`;
   source += "    text\n}\n\n";
 }
 // Core.rs:678-860 / Outcome.rs:2502-2528 test-scope diagnostics use owned E4
@@ -59,8 +59,8 @@ for (const [name, text] of Object.entries({
   source += "}\n\n";
 }
 const ordinary = Buffer.from("__jet_test_ordinary_failure__");
-source += `fn test_scope_ordinary(text: I64) -> Bool {\n    if (text == I64{0}) { return false }\n    if (trap_word(text + I64{8}) != I64{${ordinary.length}}) { return false }\n    data :: trap_word(text)\n`;
-for (let i = 0; i < ordinary.length; i++) source += `    if (trap_byte(data + I64{${i}}) != I64{${ordinary[i]}}) { return false }\n`;
+source += `fn test_scope_ordinary(text: I64) -> Bool {\n    if (text == I64{0}) { return false }\n    if (trap_word(wrapping(text + I64{8})) != I64{${ordinary.length}}) { return false }\n    data :: trap_word(text)\n`;
+for (let i = 0; i < ordinary.length; i++) source += `    if (trap_byte(wrapping(data + I64{${i}})) != I64{${ordinary[i]}}) { return false }\n`;
 source += "    true\n}\n\n";
 const target = resolve(root, "Compiler/JetRuntime/Source/TestMessages.jet");
 if (args.includes("--check")) {

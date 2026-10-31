@@ -18,52 +18,52 @@ fn layout_float_put(address: I64, value: Float) { layout_put(address, rt_f64_bit
 fn layout_abs(value: Float) -> Float { if (value < Float{0.0}) -> -value else -> value }
 fn layout_list_init(header: I64) {
     layout_put(header, I64{0})
-    layout_put(header + I64{8}, I64{0})
-    layout_put(header + I64{16}, I64{8})
+    layout_put(wrapping(header + I64{8}), I64{0})
+    layout_put(wrapping(header + I64{16}), I64{8})
 }
 fn layout_list_clear(header: I64, stride: I64) {
-    capacity :: layout_word(header + I64{8})
-    if (capacity != I64{0}) { jet_rt_free(layout_word(header + I64{16}), capacity * stride, I64{8}) }
+    capacity :: layout_word(wrapping(header + I64{8}))
+    if (capacity != I64{0}) { jet_rt_free(layout_word(wrapping(header + I64{16})), capacity * stride, I64{8}) }
     layout_list_init(header)
 }
 fn layout_list_publish(header: I64) { layout_put(header, layout_word(header) + I64{1}) }
 fn layout_inner_retain(inner: I64) { layout_put(inner, layout_word(inner) + I64{1}) }
 fn layout_conflicts_clear(inner: I64) {
-    header :: inner + I64{112}
+    header :: wrapping(inner + I64{112})
     at := I64{0}
     loop at < layout_word(header) {
-        jet_rt_string_drop(layout_word(layout_word(header + I64{16}) + at * I64{8}))
+        jet_rt_string_drop(layout_word(wrapping(layout_word(wrapping(header + I64{16})) + at * I64{8})))
         at += I64{1}
     }
     layout_put(header, I64{0})
-    layout_put(inner + I64{144}, I64{0})
+    layout_put(wrapping(inner + I64{144}), I64{0})
 }
 fn layout_inner_release(inner: I64) {
     references :: layout_word(inner) - I64{1}
     layout_put(inner, references)
     if (references != I64{0}) -> return
-    jet_rt_string_drop(layout_word(inner + I64{8}))
-    variables :: inner + I64{16}
+    jet_rt_string_drop(layout_word(wrapping(inner + I64{8})))
+    variables :: wrapping(inner + I64{16})
     at := I64{0}
     loop at < layout_word(variables) {
-        slot :: layout_word(variables + I64{16}) + at * I64{24}
+        slot :: wrapping(layout_word(wrapping(variables + I64{16})) + at * I64{24})
         jet_rt_string_drop(layout_word(slot))
-        jet_rt_string_drop(layout_word(slot + I64{8}))
-        jet_rt_string_drop(layout_word(slot + I64{16}))
+        jet_rt_string_drop(layout_word(wrapping(slot + I64{8})))
+        jet_rt_string_drop(layout_word(wrapping(slot + I64{16})))
         at += I64{1}
     }
-    rows :: inner + I64{40}
+    rows :: wrapping(inner + I64{40})
     at = I64{0}
     loop at < layout_word(rows) {
-        jet_rt_string_drop(layout_word(layout_word(rows + I64{16}) + at * LAYOUT_ROW_BYTES + I64{288}))
+        jet_rt_string_drop(layout_word(wrapping(wrapping(layout_word(wrapping(rows + I64{16})) + at * LAYOUT_ROW_BYTES) + I64{288})))
         at += I64{1}
     }
     layout_conflicts_clear(inner)
     layout_list_clear(variables, I64{24})
     layout_list_clear(rows, LAYOUT_ROW_BYTES)
-    layout_list_clear(inner + I64{64}, I64{16})
-    layout_list_clear(inner + I64{88}, I64{8})
-    layout_list_clear(inner + I64{112}, I64{8})
+    layout_list_clear(wrapping(inner + I64{64}), I64{16})
+    layout_list_clear(wrapping(inner + I64{88}), I64{8})
+    layout_list_clear(wrapping(inner + I64{112}), I64{8})
     jet_rt_free(inner, LAYOUT_INNER_BYTES, I64{8})
 }
 // runtime-init: 3 when layout_registry_root,layout_literal_root
@@ -73,8 +73,8 @@ fn layout_inner_release(inner: I64) {
     // site8 + immutable initial List24 + descriptor72. Child descriptors zero.
     root :: jet_rt_alloc(I64{104}, I64{8})
     coll_zero(root, I64{104})
-    layout_list_init(root + I64{8})
-    layout_put(root + I64{32}, I64{24})
+    layout_list_init(wrapping(root + I64{8}))
+    layout_put(wrapping(root + I64{32}), I64{24})
     layout_registry_root = root
 }
 fn rt_layout_registry_drop_address() -> I64 {
@@ -85,15 +85,15 @@ fn layout_registry() -> I64 {
     key :: jet_rt_tls_shared_key(layout_registry_root, I64{0})
     shared := jet_rt_tls_get(key)
     if (shared == I64{0}) {
-        shared = jet_rt_native_shared_new(layout_registry_root + I64{8}, layout_registry_root + I64{32}, rt_layout_registry_drop_address())
+        shared = jet_rt_native_shared_new(wrapping(layout_registry_root + I64{8}), wrapping(layout_registry_root + I64{32}), rt_layout_registry_drop_address())
         jet_rt_tls_set(key, shared)
     }
-    layout_word(shared + I64{64})
+    layout_word(wrapping(shared + I64{64}))
 }
 #Export(c) fn jet_rt_layout_registry_drop(slot: I64) -> I64 {
     at := I64{0}
     loop at < layout_word(slot) {
-        layout_inner_release(layout_word(layout_word(slot + I64{16}) + at * I64{8}))
+        layout_inner_release(layout_word(wrapping(layout_word(wrapping(slot + I64{16})) + at * I64{8})))
         at += I64{1}
     }
     layout_list_clear(slot, I64{8})
@@ -113,7 +113,7 @@ fn layout_handle_copy(value: I64) -> I64 {
     inner :: layout_word(value)
     layout_inner_retain(inner)
     layout_put(result, inner)
-    layout_put(result + I64{8}, layout_word(value + I64{8}))
+    layout_put(wrapping(result + I64{8}), layout_word(wrapping(value + I64{8})))
     result
 }
 fn layout_handle_drop(value: I64) {

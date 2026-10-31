@@ -26,31 +26,31 @@ stm_key := I64{0}
 // held from begin through commit/rollback, including all body execution.
 // Nested scopes join their parent's authority rather than reacquiring it.
 fn stm_gate_enter() {
-    me :: sync_load(thread_base() + I64{8})
+    me :: sync_load(wrapping(thread_base() + I64{8}))
     sync_mutex_lock(stm_root)
-    loop sync_load(stm_root + I64{8}) != (I64{0}) && sync_load(stm_root + I64{8}) != me {
+    loop sync_load(wrapping(stm_root + I64{8})) != (I64{0}) && sync_load(wrapping(stm_root + I64{8})) != me {
         scheduler_blocking_wait_enter()
-        _ := sync_cond_wait(stm_root + I64{24}, stm_root, I64{-1})
+        _ := sync_cond_wait(wrapping(stm_root + I64{24}), stm_root, I64{-1})
         scheduler_blocking_wait_leave()
     }
-    sync_store(stm_root + I64{8}, me)
-    _ := sync_add(stm_root + I64{16}, I64{1})
+    sync_store(wrapping(stm_root + I64{8}), me)
+    _ := sync_add(wrapping(stm_root + I64{16}), I64{1})
     sync_mutex_unlock(stm_root)
 }
 
 fn stm_gate_leave() {
     sync_mutex_lock(stm_root)
-    if sync_add(stm_root + I64{16}, I64{-1}) == (I64{1}) {
-        sync_store(stm_root + I64{8}, I64{0})
-        sync_cond_notify_all(stm_root + I64{24})
+    if sync_add(wrapping(stm_root + I64{16}), I64{-1}) == (I64{1}) {
+        sync_store(wrapping(stm_root + I64{8}), I64{0})
+        sync_cond_notify_all(wrapping(stm_root + I64{24}))
     }
     sync_mutex_unlock(stm_root)
 }
 
 fn stm_state_drop(state: I64) {
     if state == (I64{0}) -> return
-    if sync_add(state + I64{40}, I64{-1}) != (I64{1}) -> return
-    parent :: sync_load(state + I64{8})
+    if sync_add(wrapping(state + I64{40}), I64{-1}) != (I64{1}) -> return
+    parent :: sync_load(wrapping(state + I64{8}))
     jet_rt_free(state, I64{48}, I64{8})
     stm_state_drop(parent)
 }
@@ -79,11 +79,11 @@ fn stm_pop(state: I64) {
     state :: jet_rt_alloc(I64{48}, I64{8})
     thread_zero(state, I64{48})
     sync_store(state, parent)
-    sync_store(state + I64{8}, parent)
-    sync_store(state + I64{24}, I64{1})
-    sync_store(state + I64{32}, if gate -> I64{1} else -> I64{0})
-    sync_store(state + I64{40}, I64{1})
-    if parent != (I64{0}) -> _ := sync_add(parent + I64{40}, I64{1})
+    sync_store(wrapping(state + I64{8}), parent)
+    sync_store(wrapping(state + I64{24}), I64{1})
+    sync_store(wrapping(state + I64{32}), if gate -> I64{1} else -> I64{0})
+    sync_store(wrapping(state + I64{40}), I64{1})
+    if parent != (I64{0}) -> _ := sync_add(wrapping(parent + I64{40}), I64{1})
     jet_rt_tls_set(stm_key, state)
     state
 }
@@ -92,7 +92,7 @@ fn stm_part(state: I64, cell: I64) -> I64 {
     link := state + I64{16}
     loop sync_load(link) != (I64{0}) {
         part :: sync_load(link)
-        owner :: sync_load(part + I64{8})
+        owner :: sync_load(wrapping(part + I64{8}))
         if owner == cell -> return part
         if owner > cell -> break
         link = part
@@ -101,24 +101,24 @@ fn stm_part(state: I64, cell: I64) -> I64 {
     thread_zero(part, I64{72})
     shared_retain(cell)
     sync_store(part, sync_load(link))
-    sync_store(part + I64{8}, cell)
-    sync_store(part + I64{64}, sync_load(cell + I64{56}))
+    sync_store(wrapping(part + I64{8}), cell)
+    sync_store(wrapping(part + I64{64}), sync_load(wrapping(cell + I64{56})))
     sync_store(link, part)
     part
 }
 
 fn stm_staged(state: I64, cell: I64) -> I64 {
-    if state == (I64{0}) || sync_load(state + I64{24}) == (I64{0}) -> return I64{0}
-    part := sync_load(state + I64{16})
+    if state == (I64{0}) || sync_load(wrapping(state + I64{24})) == (I64{0}) -> return I64{0}
+    part := sync_load(wrapping(state + I64{16}))
     loop part != (I64{0}) {
-        if sync_load(part + I64{8}) == cell {
-            staged :: sync_load(part + I64{16})
+        if sync_load(wrapping(part + I64{8})) == cell {
+            staged :: sync_load(wrapping(part + I64{16}))
             if staged != (I64{0}) -> return staged
             break
         }
         part = sync_load(part)
     }
-    stm_staged(sync_load(state + I64{8}), cell)
+    stm_staged(sync_load(wrapping(state + I64{8})), cell)
 }
 
 fn stm_clone(source: I64, meta: I64) -> I64 {
@@ -141,50 +141,50 @@ fn stm_clone(source: I64, meta: I64) -> I64 {
         return
     }
     shared_acquire(cell, false)
-    _ := coll_call3(invoke, env, sync_load(cell + I64{64}), out)
+    _ := coll_call3(invoke, env, sync_load(wrapping(cell + I64{64})), out)
     shared_release(cell, false)
 }
 
 #Export(c) fn jet_rt_native_shared_edit_txn(cell: I64, state: I64, env: I64, invoke: I64, out: I64) {
     part :: stm_part(state, cell)
-    staged := sync_load(part + I64{16})
+    staged := sync_load(wrapping(part + I64{16}))
     if staged == (I64{0}) {
-        meta :: sync_load(part + I64{64})
-        inherited :: stm_staged(sync_load(state + I64{8}), cell)
+        meta :: sync_load(wrapping(part + I64{64}))
+        inherited :: stm_staged(sync_load(wrapping(state + I64{8})), cell)
         if {
             inherited != (I64{0}) -> staged = stm_clone(inherited, meta)
             else -> {
                 shared_acquire(cell, false)
-                staged = stm_clone(sync_load(cell + I64{64}), meta)
+                staged = stm_clone(sync_load(wrapping(cell + I64{64})), meta)
                 shared_release(cell, false)
             }
         }
         if staged == (I64{0}) -> return
-        sync_store(part + I64{16}, staged)
+        sync_store(wrapping(part + I64{16}), staged)
     }
-    sync_store(part + I64{24}, I64{1})
+    sync_store(wrapping(part + I64{24}), I64{1})
     _ := coll_call3(invoke, env, staged, out)
     // Rust installs its commit hook only after the synchronous body returns.
-    if jet_rt_session_propagate() == (I64{0}) -> sync_store(part + I64{32}, I64{1})
+    if jet_rt_session_propagate() == (I64{0}) -> sync_store(wrapping(part + I64{32}), I64{1})
 }
 
 fn stm_parts_drop(first: I64) {
     part := first
     loop part != (I64{0}) {
         following :: sync_load(part)
-        meta :: sync_load(part + I64{64})
-        coll_slot_free(sync_load(part + I64{16}), meta)
-        coll_slot_free(sync_load(part + I64{40}), meta)
-        coll_slot_free(sync_load(part + I64{48}), meta)
-        jet_rt_native_shared_drop(sync_load(part + I64{8}))
+        meta :: sync_load(wrapping(part + I64{64}))
+        coll_slot_free(sync_load(wrapping(part + I64{16})), meta)
+        coll_slot_free(sync_load(wrapping(part + I64{40})), meta)
+        coll_slot_free(sync_load(wrapping(part + I64{48})), meta)
+        jet_rt_native_shared_drop(sync_load(wrapping(part + I64{8})))
         jet_rt_free(part, I64{72}, I64{8})
         part = following
     }
 }
 
 fn stm_finish(state: I64) {
-    if sync_load(state + I64{32}) != (I64{0}) {
-        sync_store(state + I64{32}, I64{0})
+    if sync_load(wrapping(state + I64{32})) != (I64{0}) {
+        sync_store(wrapping(state + I64{32}), I64{0})
         stm_gate_leave()
     }
     stm_state_drop(state)
@@ -192,9 +192,9 @@ fn stm_finish(state: I64) {
 
 #Export(c) fn jet_rt_native_stm_rollback(state: I64) {
     if state == (I64{0}) -> return
-    if sync_swap(state + I64{24}, I64{0}) != (I64{0}) {
+    if sync_swap(wrapping(state + I64{24}), I64{0}) != (I64{0}) {
         stm_pop(state)
-        parts :: sync_swap(state + I64{16}, I64{0})
+        parts :: sync_swap(wrapping(state + I64{16}), I64{0})
         stm_parts_drop(parts)
     }
     stm_finish(state)
@@ -203,32 +203,32 @@ fn stm_finish(state: I64) {
 fn stm_merge(parent: I64, first: I64) {
     child := first
     loop child != (I64{0}) {
-        target :: stm_part(parent, sync_load(child + I64{8}))
-        staged :: sync_load(child + I64{16})
+        target :: stm_part(parent, sync_load(wrapping(child + I64{8})))
+        staged :: sync_load(wrapping(child + I64{16}))
         if staged != (I64{0}) {
-            previous :: sync_load(target + I64{16})
+            previous :: sync_load(wrapping(target + I64{16}))
             // Transfer the child's initialized owner, as nested merge moves
             // its staged authority. No clone or partial-merge failure path.
-            sync_store(target + I64{16}, staged)
-            sync_store(child + I64{16}, I64{0})
-            coll_slot_free(previous, sync_load(target + I64{64}))
+            sync_store(wrapping(target + I64{16}), staged)
+            sync_store(wrapping(child + I64{16}), I64{0})
+            coll_slot_free(previous, sync_load(wrapping(target + I64{64})))
         }
-        if sync_load(child + I64{24}) != (I64{0}) -> sync_store(target + I64{24}, I64{1})
-        if sync_load(child + I64{32}) != (I64{0}) -> sync_store(target + I64{32}, I64{1})
+        if sync_load(wrapping(child + I64{24})) != (I64{0}) -> sync_store(wrapping(target + I64{24}), I64{1})
+        if sync_load(wrapping(child + I64{32})) != (I64{0}) -> sync_store(wrapping(target + I64{32}), I64{1})
         child = sync_load(child)
     }
 }
 
 #Export(c) fn jet_rt_native_stm_commit(state: I64) {
     if state == (I64{0}) -> return
-    if sync_swap(state + I64{24}, I64{0}) == (I64{0}) {
+    if sync_swap(wrapping(state + I64{24}), I64{0}) == (I64{0}) {
         stm_finish(state)
         return
     }
     stm_pop(state)
-    parts :: sync_swap(state + I64{16}, I64{0})
-    parent :: sync_load(state + I64{8})
-    if parent != (I64{0}) && sync_load(parent + I64{24}) != (I64{0}) {
+    parts :: sync_swap(wrapping(state + I64{16}), I64{0})
+    parent :: sync_load(wrapping(state + I64{8}))
+    if parent != (I64{0}) && sync_load(wrapping(parent + I64{24})) != (I64{0}) {
         stm_merge(parent, parts)
         stm_parts_drop(parts)
         stm_finish(state)
@@ -238,15 +238,15 @@ fn stm_merge(parent: I64, first: I64) {
     // Even read-only participants acquire editable permits, as Rust934-975.
     part := parts
     loop part != (I64{0}) {
-        shared_acquire(sync_load(part + I64{8}), true)
+        shared_acquire(sync_load(wrapping(part + I64{8})), true)
         part = sync_load(part)
     }
     prepared := true
     exhausted := false
     part = parts
     loop part != (I64{0}) && prepared {
-        if sync_load(part + I64{32}) != (I64{0}) {
-            revision :: sync_load(sync_load(part + I64{8}) + I64{48})
+        if sync_load(wrapping(part + I64{32})) != (I64{0}) {
+            revision :: sync_load(wrapping(sync_load(wrapping(part + I64{8})) + I64{48}))
             if {
                 revision == (I64{-1}) -> {
                     exhausted = true
@@ -256,12 +256,12 @@ fn stm_merge(parent: I64, first: I64) {
                     // MathTaskMem.rs:1911-1912 clones the working value in
                     // the commit hook. Preserve observable clone-count parity;
                     // prepare all copies before any participant publishes.
-                    value :: stm_clone(sync_load(part + I64{16}), sync_load(part + I64{64}))
+                    value :: stm_clone(sync_load(wrapping(part + I64{16})), sync_load(wrapping(part + I64{64})))
                     if {
                         value == (I64{0}) -> prepared = false
                         else -> {
-                            sync_store(part + I64{40}, value)
-                            sync_store(part + I64{56}, wrapping(revision + I64{1}))
+                            sync_store(wrapping(part + I64{40}), value)
+                            sync_store(wrapping(part + I64{56}), wrapping(revision + I64{1}))
                         }
                     }
                 }
@@ -273,19 +273,19 @@ fn stm_merge(parent: I64, first: I64) {
     if prepared {
         part = parts
         loop part != (I64{0}) {
-            value :: sync_load(part + I64{40})
+            value :: sync_load(wrapping(part + I64{40}))
             if value != (I64{0}) {
-                cell :: sync_load(part + I64{8})
-                sync_store(part + I64{48}, sync_swap(cell + I64{64}, value))
-                sync_store(part + I64{40}, I64{0})
-                sync_store(cell + I64{48}, sync_load(part + I64{56}))
+                cell :: sync_load(wrapping(part + I64{8}))
+                sync_store(wrapping(part + I64{48}), sync_swap(wrapping(cell + I64{64}), value))
+                sync_store(wrapping(part + I64{40}), I64{0})
+                sync_store(wrapping(cell + I64{48}), sync_load(wrapping(part + I64{56})))
             }
             part = sync_load(part)
         }
     }
     part = parts
     loop part != (I64{0}) {
-        shared_release(sync_load(part + I64{8}), true)
+        shared_release(sync_load(wrapping(part + I64{8})), true)
         part = sync_load(part)
     }
     // Disposing old/staged values may call arbitrary glue: no permits remain.
@@ -310,17 +310,17 @@ TRANSACTION_HOOK_DEADLINE_MS :: I64{5000}
     control :: scheduler_control_new()
     // No SCHEDULER_SCOPE_INHERITED_STOP: a panic in the hook while a stop
     // unwinds the frame is the hook's own failure, not a double panic.
-    sync_store(control + I64{104}, SCHEDULER_SCOPE_ROOT)
+    sync_store(wrapping(control + I64{104}), SCHEDULER_SCOPE_ROOT)
     scheduler_control_enter(control, frame)
-    sync_store(thread_base() + I64{64}, I64{0})
-    jet_ctx_push_deadline(wrapping(jet_std_time_now() + TRANSACTION_HOOK_DEADLINE_MS), frame + I64{32})
-    sync_store(frame + I64{48}, control)
+    sync_store(wrapping(thread_base() + I64{64}), I64{0})
+    jet_ctx_push_deadline(wrapping(jet_std_time_now() + TRANSACTION_HOOK_DEADLINE_MS), wrapping(frame + I64{32}))
+    sync_store(wrapping(frame + I64{48}), control)
     frame
 }
 
 #Export(c) fn jet_rt_transaction_hook_leave(frame: I64) {
-    control :: sync_load(frame + I64{48})
-    jet_ctx_pop_deadline(frame + I64{32})
+    control :: sync_load(wrapping(frame + I64{48}))
+    jet_ctx_pop_deadline(wrapping(frame + I64{32}))
     record :: scheduler_control_take_stop(control)
     scheduler_control_leave(frame)
     scheduler_control_drop(control)
@@ -333,7 +333,7 @@ TRANSACTION_HOOK_DEADLINE_MS :: I64{5000}
 // after that report's own text), else written to stderr now and the program
 // goes on (a propagated error or an early return has no report).
 fn transaction_hook_failed(record: I64) {
-    rendered :: sync_load(record + I64{48}) != I64{0}
+    rendered :: sync_load(wrapping(record + I64{48})) != I64{0}
     report := scheduler_stop_take_message(record)
     scheduler_stop_drop(record)
     if (report == I64{0}) -> report = scheduler_text_empty()
@@ -346,29 +346,29 @@ fn transaction_hook_failed(record: I64) {
     jet_rt_string_drop(report)
     control :: scheduler_control_current()
     if (control != I64{0}) {
-        sync_mutex_lock(control + I64{72})
-        primary :: sync_load(control + I64{40})
+        sync_mutex_lock(wrapping(control + I64{72}))
+        primary :: sync_load(wrapping(control + I64{40}))
         if (primary != I64{0}) {
-            old :: sync_load(primary + I64{40})
+            old :: sync_load(wrapping(primary + I64{40}))
             joined := I64{0}
             if {
                 (old == I64{0}) -> joined = text
-                (sync_load(primary + I64{48}) != I64{0}) -> joined = scheduler_text_concat(old, text)
+                (sync_load(wrapping(primary + I64{48})) != I64{0}) -> joined = scheduler_text_concat(old, text)
                 else -> {
                     separated :: scheduler_text_concat(old, rt_static_text("\n"))
                     joined = scheduler_text_concat(separated, text)
                     jet_rt_string_drop(separated)
                 }
             }
-            sync_store(primary + I64{40}, joined)
-            sync_mutex_unlock(control + I64{72})
+            sync_store(wrapping(primary + I64{40}), joined)
+            sync_mutex_unlock(wrapping(control + I64{72}))
             if (old != I64{0}) {
                 jet_rt_string_drop(old)
                 jet_rt_string_drop(text)
             }
             return
         }
-        sync_mutex_unlock(control + I64{72})
+        sync_mutex_unlock(wrapping(control + I64{72}))
     }
     jet_rt_stdout_flush()
     trap_write_handle(text)

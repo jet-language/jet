@@ -3,8 +3,8 @@
 fn data_public_trim_start(data: I64, start: I64, end: I64) -> I64 {
     at := start
     loop at < end {
-        if !unicode_is_white_space(rt_text_decode(data + at)) -> break
-        at += rt_text_width(data + at)
+        if !unicode_is_white_space(rt_text_decode(wrapping(data + at))) -> break
+        at += rt_text_width(wrapping(data + at))
     }
     at
 }
@@ -13,10 +13,10 @@ fn data_public_trim_end(data: I64, start: I64, end: I64) -> I64 {
     loop last > start {
         at := last - I64{1}
         loop {
-            if (at <= start || (rt_text_byte(data + at).bit_and(I64{192})) != I64{128}) -> break
+            if (at <= start || (rt_text_byte(wrapping(data + at)).bit_and(I64{192})) != I64{128}) -> break
             at -= I64{1}
         }
-        if !unicode_is_white_space(rt_text_decode(data + at)) -> break
+        if !unicode_is_white_space(rt_text_decode(wrapping(data + at))) -> break
         last = at
     }
     last
@@ -25,7 +25,7 @@ fn data_public_match(data: I64, length: I64, at: I64, first: I64, tail: I64, wid
     if width > length - at -> return false
     i := I64{0}
     loop i < width {
-        byte := rt_text_byte(data + at + i)
+        byte := rt_text_byte(wrapping(wrapping(data + at) + i))
         if (byte >= I64{65} && byte <= I64{90}) -> byte += I64{32}
         word :: if (i < I64{8}) -> first else -> tail
         if byte != ((word >> ((i % I64{8}) * I64{8})).bit_and(I64{255})) -> return false
@@ -36,7 +36,7 @@ fn data_public_match(data: I64, length: I64, at: I64, first: I64, tail: I64, wid
 fn data_public_sensitive_value(data: I64, length: I64) -> Bool {
     at :: data_public_trim_start(data, I64{0}, length)
     end :: data_public_trim_end(data, at, length)
-    span :: data + at
+    span :: wrapping(data + at)
     size :: end - at
     data_public_match(span, size, I64{0}, I64{9132979290989922}, I64{0}, I64{7})
         || data_public_match(span, size, I64{0}, I64{35611343020386}, I64{0}, I64{6})
@@ -80,7 +80,7 @@ fn data_public_bounded(target: I64, data: I64, length: I64) {
     // The 14-byte ASCII suffix leaves 4082 bytes, ending at a UTF-8 boundary.
     end := I64{4082}
     loop {
-        if ((rt_text_byte(data + end).bit_and(I64{192})) != I64{128}) -> break
+        if ((rt_text_byte(wrapping(data + end)).bit_and(I64{192})) != I64{128}) -> break
         end -= I64{1}
     }
     rt_text_append(target, data, end)
@@ -100,14 +100,14 @@ fn data_public_authority_part(target: I64, value: I64) {
 fn data_public_digest(target: I64, data: I64, length: I64) {
     // Shared Sha256.jet; caller owns one scratch block, never a copied input.
     workspace :: jet_rt_alloc(I64{608}, I64{8})
-    digest :: workspace + I64{576}
+    digest :: wrapping(workspace + I64{576})
     jet_rt_native_sha256(data, length, digest, workspace)
     rt_text_push_word(target, I64{7526409316051214710}, I64{8})
     rt_text_push_word(target, I64{194182984289}, I64{5})
     at := I64{0}
     loop {
         if (at >= I64{32}) -> break
-        byte :: rt_text_byte(digest + at)
+        byte :: rt_text_byte(wrapping(digest + at))
         hi :: byte >> I64{4}
         lo :: byte.bit_and(I64{15})
         rt_text_push_scalar(target, if (hi < I64{10}) -> hi + I64{48} else -> hi + I64{87})
@@ -119,7 +119,7 @@ fn data_public_digest(target: I64, data: I64, length: I64) {
 fn data_public_find(data: I64, start: I64, end: I64, byte: I64) -> I64 {
     at := start
     loop at < end {
-        if rt_text_byte(data + at) == byte -> return at
+        if rt_text_byte(wrapping(data + at)) == byte -> return at
         at += I64{1}
     }
     end
@@ -131,13 +131,13 @@ fn data_public_parameter(target: I64, data: I64, length: I64) {
     key_start :: data_public_trim_start(data, start, equal)
     key_end :: data_public_trim_end(data, key_start, equal)
     if (equal == end || key_start == key_end) {
-        data_public_digest(target, data + start, end - start)
-    } else if (data_public_sensitive_key(data + key_start, key_end - key_start) || data_public_sensitive_value(data + equal + I64{1}, end - equal - I64{1})) {
-        data_public_bounded(target, data + key_start, key_end - key_start)
+        data_public_digest(target, wrapping(data + start), end - start)
+    } else if (data_public_sensitive_key(wrapping(data + key_start), key_end - key_start) || data_public_sensitive_value(wrapping(wrapping(data + equal) + I64{1}), end - equal - I64{1})) {
+        data_public_bounded(target, wrapping(data + key_start), key_end - key_start)
         rt_text_push_scalar(target, I64{61})
         data_public_redacted(target)
     } else {
-        data_public_bounded(target, data + start, end - start)
+        data_public_bounded(target, wrapping(data + start), end - start)
     }
 }
 fn data_public_locator(target: I64, value: I64) {
@@ -147,7 +147,7 @@ fn data_public_locator(target: I64, value: I64) {
     scheme := I64{0}
     loop {
         if (scheme + I64{2} >= query) -> break
-        if (rt_text_byte(data + scheme) == I64{58} && rt_text_byte(data + scheme + I64{1}) == I64{47} && rt_text_byte(data + scheme + I64{2}) == I64{47}) -> break
+        if (rt_text_byte(wrapping(data + scheme)) == I64{58} && rt_text_byte(wrapping(wrapping(data + scheme) + I64{1})) == I64{47} && rt_text_byte(wrapping(wrapping(data + scheme) + I64{2})) == I64{47}) -> break
         scheme += I64{1}
     }
     if (scheme + I64{2} < query) {
@@ -164,7 +164,7 @@ fn data_public_locator(target: I64, value: I64) {
     start := query + I64{1}
     loop {
         next :: data_public_find(data, start, end, I64{38})
-        data_public_parameter(target, data + start, next - start)
+        data_public_parameter(target, wrapping(data + start), next - start)
         if (next == end) -> break
         rt_text_push_scalar(target, I64{38})
         start = next + I64{1}

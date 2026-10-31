@@ -24,17 +24,17 @@ TERM_INPUT_CAPACITY :: I64{65536}
 
 // Caller holds the stdin lock: the number of buffered unread bytes.
 fn term_input_buffered() -> I64 {
-    rt_text_word(terminal_input_root + I64{24}) - rt_text_word(terminal_input_root + I64{16})
+    rt_text_word(wrapping(terminal_input_root + I64{24})) - rt_text_word(wrapping(terminal_input_root + I64{16}))
 }
 
 // Caller holds the stdin lock: the address of the next unread byte.
 fn term_input_next() -> I64 {
-    rt_text_word(terminal_input_root + I64{8}) + rt_text_word(terminal_input_root + I64{16})
+    rt_text_word(wrapping(terminal_input_root + I64{8})) + rt_text_word(wrapping(terminal_input_root + I64{16}))
 }
 
 // Caller holds the stdin lock: marks `count` buffered bytes read.
 fn term_input_consume(count: I64) {
-    rt_text_store(terminal_input_root + I64{16}, rt_text_word(terminal_input_root + I64{16}) + count)
+    rt_text_store(wrapping(terminal_input_root + I64{16}), rt_text_word(wrapping(terminal_input_root + I64{16})) + count)
 }
 
 // The length of the `count` bytes at `start` through their first LF, or
@@ -45,12 +45,12 @@ fn rt_line_run(start: I64, count: I64) -> I64 {
     at := I64{0}
     words :: count - count % I64{8}
     loop at < words {
-        word :: rt_text_word(start + at).bit_xor(I64{723401728380766730})
+        word :: rt_text_word(wrapping(start + at)).bit_xor(I64{723401728380766730})
         if (wrapping(word - I64{72340172838076673}).bit_and(word.bit_xor(I64{-1})).bit_and(I64{-9187201950435737472}) != I64{0}) -> break
         at += I64{8}
     }
     loop at < count {
-        if (rt_text_byte(start + at) == I64{10}) -> return at + I64{1}
+        if (rt_text_byte(wrapping(start + at)) == I64{10}) -> return at + I64{1}
         at += I64{1}
     }
     count
@@ -62,13 +62,13 @@ fn rt_line_run(start: I64, count: I64) -> I64 {
 // (std's stdin handle_ebadf).
 fn term_input_fill(retry: Bool, ebadf_eof: Bool) -> I64 {
     root :: terminal_input_root
-    buffer := rt_text_word(root + I64{8})
+    buffer := rt_text_word(wrapping(root + I64{8}))
     if (buffer == I64{0}) {
         buffer = jet_rt_alloc(TERM_INPUT_CAPACITY, I64{8})
-        rt_text_store(root + I64{8}, buffer)
+        rt_text_store(wrapping(root + I64{8}), buffer)
     }
-    rt_text_store(root + I64{16}, I64{0})
-    rt_text_store(root + I64{24}, I64{0})
+    rt_text_store(wrapping(root + I64{16}), I64{0})
+    rt_text_store(wrapping(root + I64{24}), I64{0})
     jet_rt_stdout_flush()
     loop {
         got := I64{0}
@@ -77,7 +77,7 @@ fn term_input_fill(retry: Bool, ebadf_eof: Bool) -> I64 {
         }
         if (got == I64{-4} && retry) -> next
         if (got == I64{-9} && ebadf_eof) -> return I64{0}
-        if (got > I64{0}) -> rt_text_store(root + I64{24}, got)
+        if (got > I64{0}) -> rt_text_store(wrapping(root + I64{24}), got)
         return got
     }
 }

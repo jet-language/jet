@@ -4,10 +4,10 @@
 // Each Big32x40 slot has size@0 and forty zero-extended u32 limbs@8.
 // Products by <=1e9 fit signed I64, so digit generation needs no U128,
 // unsigned casts, allocator recursion or additional temporary allocations.
-fn float_big_limb(value: I64, index: I64) -> I64 { display_word(value + I64{8} + index * I64{8}) }
+fn float_big_limb(value: I64, index: I64) -> I64 { display_word(wrapping(wrapping(value + I64{8}) + index * I64{8})) }
 
 fn float_big_put(value: I64, index: I64, limb: I64) {
-    display_store(value + I64{8} + index * I64{8}, limb)
+    display_store(wrapping(wrapping(value + I64{8}) + index * I64{8}), limb)
 }
 
 fn float_big_init(value: I64, word: I64) {
@@ -205,12 +205,12 @@ fn float_round_up(digits: I64, length: I64) -> Bool {
     i := length
     loop i > (I64{0}) {
         i -= I64{1}
-        digit :: display_byte(digits + i)
+        digit :: display_byte(wrapping(digits + i))
         if (digit != I64{57}) {
-            display_put(digits + i, digit + I64{1})
+            display_put(wrapping(digits + i), digit + I64{1})
             i += I64{1}
             loop i < length {
-                display_put(digits + i, I64{48})
+                display_put(wrapping(digits + i), I64{48})
                 i += I64{1}
             }
             return false
@@ -219,7 +219,7 @@ fn float_round_up(digits: I64, length: I64) -> Bool {
     display_put(digits, I64{49})
     i = I64{1}
     loop i <= length {
-        display_put(digits + i, I64{48})
+        display_put(wrapping(digits + i), I64{48})
         i += I64{1}
     }
     true
@@ -284,14 +284,14 @@ fn float_shortest_decoded(scratch: I64, mantissa: I64, exp: I64, upper: I64, inc
     nbits :: I64{64} - float_leading_zeros(mantissa + upper - I64{1})
     k := ((nbits + exp) * I64{1292913986}) >> I64{32}
     mant :: scratch
-    minus :: scratch + I64{328}
-    plus :: scratch + I64{656}
-    scale :: scratch + I64{984}
-    sum :: scratch + I64{1312}
-    s2 :: scratch + I64{1640}
-    s4 :: scratch + I64{1968}
-    s8 :: scratch + I64{2296}
-    digits :: scratch + I64{2624}
+    minus :: wrapping(scratch + I64{328})
+    plus :: wrapping(scratch + I64{656})
+    scale :: wrapping(scratch + I64{984})
+    sum :: wrapping(scratch + I64{1312})
+    s2 :: wrapping(scratch + I64{1640})
+    s4 :: wrapping(scratch + I64{1968})
+    s8 :: wrapping(scratch + I64{2296})
+    digits :: wrapping(scratch + I64{2624})
     float_big_init(mant, mantissa)
     float_big_init(minus, I64{1})
     float_big_init(plus, upper)
@@ -321,7 +321,7 @@ fn float_shortest_decoded(scratch: I64, mantissa: I64, exp: I64, upper: I64, inc
     float_big_shift(s8, I64{3})
     length := I64{0}
     loop {
-        display_put(digits + length, float_digit(mant, scale, s2, s4, s8))
+        display_put(wrapping(digits + length), float_digit(mant, scale, s2, s4, s8))
         length += I64{1}
         down :: float_big_less(mant, minus, inclusive)
         float_big_copy(sum, mant)
@@ -337,8 +337,8 @@ fn float_shortest_decoded(scratch: I64, mantissa: I64, exp: I64, upper: I64, inc
                     }
                 }
             }
-            display_store(scratch + I64{2656}, length)
-            display_store(scratch + I64{2664}, k)
+            display_store(wrapping(scratch + I64{2656}), length)
+            display_store(wrapping(scratch + I64{2664}), k)
             return
         }
         float_big_mul(mant, I64{10})

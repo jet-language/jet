@@ -13,13 +13,13 @@
 // inline Int? word, not a box (JetIR IR_LAZY_INLINE_OPTION).
 ITER_INLINE_OPTION :: I64{4294967296}
 
-fn iter_meta(iter: I64) -> I64 { trap_word(iter + I64{8}) }
+fn iter_meta(iter: I64) -> I64 { trap_word(wrapping(iter + I64{8})) }
 
 fn iter_new(kind: I64, meta: I64) -> I64 {
     node :: jet_rt_alloc(I64{160}, I64{8})
     coll_zero(node, I64{160})
     trap_store(node, kind)
-    trap_store(node + I64{8}, coll_meta_copy(meta))
+    trap_store(wrapping(node + I64{8}), coll_meta_copy(meta))
     node
 }
 
@@ -34,13 +34,13 @@ fn iter_channel_new(receiver: I64, meta: I64) -> I64 {
 fn iter_hooked(kind: I64) -> Bool { kind == I64{27} || kind == I64{28} || kind == I64{30} }
 
 fn iter_hook(node: I64, state: I64, pull: I64, release: I64) {
-    trap_store(node + I64{48}, state)
-    trap_store(node + I64{56}, pull)
-    trap_store(node + I64{64}, release)
+    trap_store(wrapping(node + I64{48}), state)
+    trap_store(wrapping(node + I64{56}), pull)
+    trap_store(wrapping(node + I64{64}), release)
 }
 
 #Export(c) fn jet_rt_native_iter_channel_pull(node: I64, output: I64) -> I64 {
-    if channel_iter_pull(trap_word(node + I64{48}), output) -> I64{1} else -> I64{0}
+    if channel_iter_pull(trap_word(wrapping(node + I64{48})), output) -> I64{1} else -> I64{0}
 }
 
 #Export(c) fn jet_rt_native_iter_channel_release(receiver: I64) -> I64 {
@@ -64,36 +64,36 @@ fn rt_iter_progress_release_address() -> I64 {
 
 fn iter_wrap(kind: I64, source: I64, meta: I64) -> I64 {
     node :: iter_new(kind, meta)
-    trap_store(node + I64{16}, source)
-    trap_store(node + I64{80}, coll_slot_new(iter_meta(source)))
+    trap_store(wrapping(node + I64{16}), source)
+    trap_store(wrapping(node + I64{80}), coll_slot_new(iter_meta(source)))
     node
 }
 
 fn iter_callback(kind: I64, source: I64, env: I64, invoke: I64, release: I64, callback_meta: I64, output_meta: I64) -> I64 {
     node :: iter_wrap(kind, source, output_meta)
-    trap_store(node + I64{48}, env)
-    trap_store(node + I64{56}, invoke)
-    trap_store(node + I64{64}, release)
-    trap_store(node + I64{72}, coll_meta_copy(callback_meta))
-    trap_store(node + I64{88}, coll_slot_new(callback_meta))
-    trap_store(node + I64{136}, coll_size(callback_meta))
+    trap_store(wrapping(node + I64{48}), env)
+    trap_store(wrapping(node + I64{56}), invoke)
+    trap_store(wrapping(node + I64{64}), release)
+    trap_store(wrapping(node + I64{72}), coll_meta_copy(callback_meta))
+    trap_store(wrapping(node + I64{88}), coll_slot_new(callback_meta))
+    trap_store(wrapping(node + I64{136}), coll_size(callback_meta))
     node
 }
 
 fn iter_unary(node: I64, input: I64, output: I64) -> Bool {
-    _ := coll_call3(trap_word(node + I64{56}), trap_word(node + I64{48}), input, output)
+    _ := coll_call3(trap_word(wrapping(node + I64{56})), trap_word(wrapping(node + I64{48})), input, output)
     jet_rt_session_propagate() == I64{0}
 }
 
 fn iter_binary(node: I64, a: I64, b: I64, output: I64) -> I64 {
-    coll_call4(trap_word(node + I64{56}), trap_word(node + I64{48}), a, b, output)
+    coll_call4(trap_word(wrapping(node + I64{56})), trap_word(wrapping(node + I64{48})), a, b, output)
 }
 
 fn iter_equal(meta: I64, a: I64, b: I64) -> Bool {
-    coll_call2(trap_word(meta + I64{32}), a, b) != I64{0}
+    coll_call2(trap_word(wrapping(meta + I64{32})), a, b) != I64{0}
 }
 
-fn iter_order(meta: I64, a: I64, b: I64) -> I64 { coll_call2(trap_word(meta + I64{40}), a, b) }
+fn iter_order(meta: I64, a: I64, b: I64) -> I64 { coll_call2(trap_word(wrapping(meta + I64{40})), a, b) }
 
 fn iter_drain(source: I64, header: I64) {
     coll_zero(header, I64{24})
@@ -105,42 +105,42 @@ fn iter_drain(source: I64, header: I64) {
 }
 
 fn iter_saved_clear(node: I64) {
-    saved :: trap_word(node + I64{96})
-    if (saved != I64{0}) { coll_slot_free(saved, trap_word(node + I64{104})) }
-    trap_store(node + I64{96}, I64{0})
+    saved :: trap_word(wrapping(node + I64{96}))
+    if (saved != I64{0}) { coll_slot_free(saved, trap_word(wrapping(node + I64{104}))) }
+    trap_store(wrapping(node + I64{96}), I64{0})
 }
 
 fn iter_save(node: I64, slot: I64, meta: I64) {
     iter_saved_clear(node)
     held :: coll_slot_new(meta)
     coll_slot_clone(slot, held, meta)
-    trap_store(node + I64{96}, held)
-    if (trap_word(node + I64{104}) == I64{0}) { trap_store(node + I64{104}, coll_meta_copy(meta)) }
+    trap_store(wrapping(node + I64{96}), held)
+    if (trap_word(wrapping(node + I64{104})) == I64{0}) { trap_store(wrapping(node + I64{104}), coll_meta_copy(meta)) }
 }
 
 fn iter_pull_kernel(node: I64, output: I64) -> Bool {
-    if (trap_word(node + I64{144}) != I64{0}) { return false }
+    if (trap_word(wrapping(node + I64{144})) != I64{0}) { return false }
     kind :: trap_word(node)
     meta :: iter_meta(node)
-    source :: trap_word(node + I64{16})
-    scratch :: trap_word(node + I64{80})
-    second :: trap_word(node + I64{88})
-    index :: trap_word(node + I64{40})
-    count :: trap_word(node + I64{32})
+    source :: trap_word(wrapping(node + I64{16}))
+    scratch :: trap_word(wrapping(node + I64{80}))
+    second :: trap_word(wrapping(node + I64{88}))
+    index :: trap_word(wrapping(node + I64{40}))
+    count :: trap_word(wrapping(node + I64{32}))
     if (kind == I64{29}) { return iter_source_pull(node, output) }
-    if iter_hooked(kind) { return coll_call2(trap_word(node + I64{56}), node, output) != I64{0} }
+    if iter_hooked(kind) { return coll_call2(trap_word(wrapping(node + I64{56})), node, output) != I64{0} }
     if (kind == I64{0}) {
-        header :: trap_word(node + I64{112})
+        header :: trap_word(wrapping(node + I64{112}))
         if (index >= trap_word(header)) { return false }
-        coll_copy(trap_word(header + I64{16}) + index * trap_word(meta), output, coll_payload(meta))
-        trap_store(node + I64{40}, index + I64{1})
+        coll_copy(wrapping(trap_word(wrapping(header + I64{16})) + index * trap_word(meta)), output, coll_payload(meta))
+        trap_store(wrapping(node + I64{40}), index + I64{1})
         return true
     }
     if (kind == I64{1}) { return false }
     if (kind == I64{2}) {
         if (index >= count) { return false }
         trap_store(output, jet_int_owned_from_i64(index))
-        trap_store(node + I64{40}, index + I64{1})
+        trap_store(wrapping(node + I64{40}), index + I64{1})
         return true
     }
     if (kind == I64{25}) {
@@ -152,7 +152,7 @@ fn iter_pull_kernel(node: I64, output: I64) -> Bool {
     }
     if (kind == I64{3}) {
         if (count <= I64{0}) { return false }
-        trap_store(node + I64{32}, count - I64{1})
+        trap_store(wrapping(node + I64{32}), count - I64{1})
         return iter_pull(source, output)
     }
     if (kind == I64{4} || kind == I64{5}) {
@@ -163,8 +163,8 @@ fn iter_pull_kernel(node: I64, output: I64) -> Bool {
             coll_slot_drop(scratch, iter_meta(source))
             remaining -= I64{1}
         }
-        trap_store(node + I64{40}, I64{1})
-        if (kind == I64{4}) { trap_store(node + I64{32}, I64{0}) }
+        trap_store(wrapping(node + I64{40}), I64{1})
+        if (kind == I64{4}) { trap_store(wrapping(node + I64{32}), I64{0}) }
         return iter_pull(source, output)
     }
     if (kind == I64{6}) {
@@ -184,15 +184,15 @@ fn iter_pull_kernel(node: I64, output: I64) -> Bool {
                 return false
             }
             keep :: trap_byte(second) != I64{0}
-            coll_slot_drop(second, trap_word(node + I64{72}))
+            coll_slot_drop(second, trap_word(wrapping(node + I64{72})))
             if ((kind != I64{9} && keep) || (kind == I64{9} && !keep)) {
-                trap_store(node + I64{40}, I64{1})
+                trap_store(wrapping(node + I64{40}), I64{1})
                 coll_copy(scratch, output, coll_payload(meta))
                 return true
             }
             coll_slot_drop(scratch, iter_meta(source))
             if (kind == I64{8}) {
-                trap_store(node + I64{144}, I64{1})
+                trap_store(wrapping(node + I64{144}), I64{1})
                 return false
             }
         }
@@ -200,7 +200,7 @@ fn iter_pull_kernel(node: I64, output: I64) -> Bool {
     }
     if (kind == I64{10}) {
         loop iter_pull(source, scratch) {
-            previous :: trap_word(node + I64{96})
+            previous :: trap_word(wrapping(node + I64{96}))
             if (previous == I64{0} || !iter_equal(meta, previous, scratch)) {
                 iter_save(node, scratch, meta)
                 coll_copy(scratch, output, coll_payload(meta))
@@ -212,38 +212,38 @@ fn iter_pull_kernel(node: I64, output: I64) -> Bool {
     }
     if (kind == I64{11}) {
         if (index == I64{0}) {
-            trap_store(node + I64{40}, I64{1})
+            trap_store(wrapping(node + I64{40}), I64{1})
             return iter_pull(source, output)
         }
-        if (trap_word(node + I64{128}) != I64{0}) {
-            trap_store(node + I64{128}, I64{0})
+        if (trap_word(wrapping(node + I64{128})) != I64{0}) {
+            trap_store(wrapping(node + I64{128}), I64{0})
             coll_copy(scratch, output, coll_payload(meta))
             return true
         }
         if !iter_pull(source, scratch) -> return false
-        trap_store(node + I64{128}, I64{1})
-        coll_slot_clone(trap_word(node + I64{96}), output, meta)
+        trap_store(wrapping(node + I64{128}), I64{1})
+        coll_slot_clone(trap_word(wrapping(node + I64{96})), output, meta)
         return true
     }
     if (kind == I64{12} || kind == I64{13}) { return iter_pull_nested(node, output) }
     if (kind == I64{14}) {
         loop {
-            inner :: trap_word(node + I64{24})
+            inner :: trap_word(wrapping(node + I64{24}))
             if (inner != I64{0}) {
                 if iter_pull(inner, output) -> return true
                 jet_rt_native_iter_drop(inner)
-                trap_store(node + I64{24}, I64{0})
+                trap_store(wrapping(node + I64{24}), I64{0})
             }
             if !iter_pull(source, scratch) -> return false
             nested_meta :: iter_meta(source)
-            inner_meta :: trap_word(nested_meta + I64{56})
+            inner_meta :: trap_word(wrapping(nested_meta + I64{56}))
             nested :: jet_rt_native_iter_from_list(scratch, inner_meta, I64{1})
-            trap_store(nested + I64{128}, I64{1})
-            trap_store(node + I64{24}, nested)
+            trap_store(wrapping(nested + I64{128}), I64{1})
+            trap_store(wrapping(node + I64{24}), nested)
         }
     }
     if (kind == I64{15}) {
-        child :: trap_word(meta + I64{56})
+        child :: trap_word(wrapping(meta + I64{56}))
         slot :: coll_slot_new(child)
         if !iter_pull(source, slot) {
             jet_rt_free(slot, coll_size(child), I64{8})
@@ -254,7 +254,7 @@ fn iter_pull_kernel(node: I64, output: I64) -> Bool {
     }
     if (kind == I64{16}) {
         if !iter_pull(source, scratch) -> return false
-        old :: trap_word(node + I64{96})
+        old :: trap_word(wrapping(node + I64{96}))
         _ := iter_binary(node, old, scratch, second)
         coll_slot_drop(scratch, iter_meta(source))
         if (jet_rt_session_propagate() != I64{0}) { return false }
@@ -268,20 +268,20 @@ fn iter_pull_kernel(node: I64, output: I64) -> Bool {
     }
     if (kind == I64{20}) {
         if !iter_pull(source, scratch) -> return false
-        word :: trap_word(node + I64{120})
+        word :: trap_word(wrapping(node + I64{120}))
         trap_store(word, jet_int_owned_from_i64(index))
         _ := iter_binary(node, word, scratch, output)
         int_discard(trap_word(word))
         coll_slot_drop(scratch, iter_meta(source))
-        trap_store(node + I64{40}, index + I64{1})
+        trap_store(wrapping(node + I64{40}), index + I64{1})
         return jet_rt_session_propagate() == I64{0}
     }
     if (kind == I64{21}) {
-        header :: trap_word(node + I64{112})
+        header :: trap_word(wrapping(node + I64{112}))
         length :: trap_word(header)
         if (index >= count || length == I64{0}) { return false }
-        coll_slot_clone(trap_word(header + I64{16}) + (index % length) * trap_word(meta), output, meta)
-        trap_store(node + I64{40}, index + I64{1})
+        coll_slot_clone(trap_word(wrapping(header + I64{16})) + (index % length) * trap_word(meta), output, meta)
+        trap_store(wrapping(node + I64{40}), index + I64{1})
         return true
     }
     if (kind == I64{26}) { return iter_pull_filter_map(node, output) }
@@ -295,7 +295,7 @@ fn iter_pull(node: I64, output: I64) -> Bool {
     if !iter_pull_kernel(node, output) -> return false
     // Internal map/list nodes implement one public flat-map/flatten adapter;
     // they are not additional inspected handles in the reference runtime.
-    if ((trap_word(node) == I64{0} || trap_word(node) == I64{6}) && trap_word(node + I64{128}) != I64{0}) {
+    if ((trap_word(node) == I64{0} || trap_word(node) == I64{6}) && trap_word(wrapping(node + I64{128})) != I64{0}) {
         return true
     }
     if (jet_rt_iter_charge() != I64{0}) {
@@ -306,11 +306,11 @@ fn iter_pull(node: I64, output: I64) -> Bool {
 }
 
 fn iter_pull_nested(node: I64, output: I64) -> Bool {
-    source :: trap_word(node + I64{16})
-    scratch :: trap_word(node + I64{80})
+    source :: trap_word(wrapping(node + I64{16}))
+    scratch :: trap_word(wrapping(node + I64{80}))
     element :: iter_meta(source)
-    count :: trap_word(node + I64{32})
-    header :: trap_word(node + I64{112})
+    count :: trap_word(wrapping(node + I64{32}))
+    header :: trap_word(wrapping(node + I64{112}))
     windows :: trap_word(node) == I64{13}
     if !windows -> coll_zero(header, I64{24})
     loop trap_word(header) < count {
@@ -330,7 +330,7 @@ fn iter_pull_nested(node: I64, output: I64) -> Bool {
     }
     coll_zero(output, I64{24})
     at := I64{0}
-    data :: trap_word(header + I64{16})
+    data :: trap_word(wrapping(header + I64{16}))
     stride :: trap_word(element)
     loop at < length {
         coll_slot_clone(data + at * stride, scratch, element)
@@ -340,7 +340,7 @@ fn iter_pull_nested(node: I64, output: I64) -> Bool {
     coll_slot_drop(data, element)
     at = I64{1}
     loop at < length {
-        coll_copy(data + at * stride, data + (at - I64{1}) * stride, coll_payload(element))
+        coll_copy(wrapping(data + at * stride), wrapping(data + (at - I64{1}) * stride), coll_payload(element))
         at += I64{1}
     }
     trap_store(header, length - I64{1})
@@ -356,7 +356,7 @@ fn iter_pull_nested(node: I64, output: I64) -> Bool {
 #Export(c) fn jet_rt_native_iter_from_list(source: I64, meta: I64, by_value: I64) -> I64 {
     node :: iter_new(I64{0}, meta)
     header :: coll_list_new()
-    trap_store(node + I64{112}, header)
+    trap_store(wrapping(node + I64{112}), header)
     if (by_value != I64{0} && iter_list_sole(source)) {
         coll_copy(source, header, I64{24})
         coll_zero(source, I64{24})
@@ -365,7 +365,7 @@ fn iter_pull_nested(node: I64, output: I64) -> Bool {
     scratch :: coll_slot_new(meta)
     at := I64{0}
     loop at < trap_word(source) {
-        coll_slot_clone(trap_word(source + I64{16}) + at * trap_word(meta), scratch, meta)
+        coll_slot_clone(trap_word(wrapping(source + I64{16})) + at * trap_word(meta), scratch, meta)
         coll_list_push(header, scratch, meta)
         at += I64{1}
     }
@@ -377,14 +377,14 @@ fn iter_pull_nested(node: I64, output: I64) -> Bool {
 // Whether the List header at `source` may give its elements away: its owned
 // buffer has no other owner, or it holds nothing (an empty frozen header).
 fn iter_list_sole(source: I64) -> Bool {
-    if (trap_word(source + I64{8}) == I64{0}) -> return trap_word(source) == I64{0}
-    jet_rt_block_unique(trap_word(source + I64{16}))
+    if (trap_word(wrapping(source + I64{8})) == I64{0}) -> return trap_word(source) == I64{0}
+    jet_rt_block_unique(trap_word(wrapping(source + I64{16})))
 }
 
 // The header at `source` gives up its reference to the buffer it shares: the
 // last owner drops the elements and frees it; a frozen buffer is never released.
 fn iter_list_release(source: I64, meta: I64) {
-    if (trap_word(source + I64{8}) != I64{0} && jet_rt_block_release(trap_word(source + I64{16}))) {
+    if (trap_word(wrapping(source + I64{8})) != I64{0} && jet_rt_block_release(trap_word(wrapping(source + I64{16})))) {
         coll_list_drop(source, meta, I64{0})
     }
     coll_zero(source, I64{24})
@@ -396,54 +396,54 @@ fn iter_list_release(source: I64, meta: I64) {
     }
     kind :: trap_word(node)
     meta :: iter_meta(node)
-    source :: trap_word(node + I64{16})
-    context :: trap_word(node + I64{152})
+    source :: trap_word(wrapping(node + I64{16}))
+    context :: trap_word(wrapping(node + I64{152}))
     if (kind == I64{18}) {
         coll_slot_free(trap_word(context), iter_meta(source))
-        coll_slot_free(trap_word(context + I64{8}), iter_meta(trap_word(node + I64{24})))
+        coll_slot_free(trap_word(wrapping(context + I64{8})), iter_meta(trap_word(wrapping(node + I64{24}))))
         jet_rt_free(context, I64{16}, I64{8})
     }
     if (kind == I64{19}) {
         jet_rt_string_drop(trap_word(context))
-        jet_rt_string_drop(trap_word(context + I64{8}))
-        jet_rt_string_drop(trap_word(context + I64{24}))
-        jet_rt_string_drop(trap_word(context + I64{32}))
+        jet_rt_string_drop(trap_word(wrapping(context + I64{8})))
+        jet_rt_string_drop(trap_word(wrapping(context + I64{24})))
+        jet_rt_string_drop(trap_word(wrapping(context + I64{32})))
         jet_rt_free(context, I64{56}, I64{8})
     }
     // A hooked kind's state is released here, where its kernel ran before,
     // under Shield (a generator's producer is cancelled and joined).
     if iter_hooked(kind) -> iter_release_callback(node)
-    if (kind == I64{20}) { jet_rt_free(trap_word(node + I64{120}), I64{8}, I64{8}) }
-    if (kind == I64{26} && trap_word(node + I64{120}) != I64{0}) {
-        jet_rt_free(trap_word(node + I64{120}), coll_size(trap_word(trap_word(node + I64{72}) + I64{64})), I64{8})
+    if (kind == I64{20}) { jet_rt_free(trap_word(wrapping(node + I64{120})), I64{8}, I64{8}) }
+    if (kind == I64{26} && trap_word(wrapping(node + I64{120})) != I64{0}) {
+        jet_rt_free(trap_word(wrapping(node + I64{120})), coll_size(trap_word(wrapping(trap_word(wrapping(node + I64{72})) + I64{64}))), I64{8})
     }
     if (kind == I64{25}) { text_iter_drop(source) } else if (source != I64{0}) {
-        scratch :: trap_word(node + I64{80})
+        scratch :: trap_word(wrapping(node + I64{80}))
         if (scratch != I64{0}) {
-            if (kind == I64{11} && trap_word(node + I64{128}) != I64{0}) {
+            if (kind == I64{11} && trap_word(wrapping(node + I64{128})) != I64{0}) {
                 coll_slot_drop(scratch, iter_meta(source))
             }
             jet_rt_free(scratch, coll_size(iter_meta(source)), I64{8})
         }
         jet_rt_native_iter_drop(source)
     }
-    other :: trap_word(node + I64{24})
+    other :: trap_word(wrapping(node + I64{24}))
     if (other != I64{0}) { jet_rt_native_iter_drop(other) }
-    second :: trap_word(node + I64{88})
-    callback_meta :: trap_word(node + I64{72})
-    if (second != I64{0}) { jet_rt_free(second, trap_word(node + I64{136}), I64{8}) }
+    second :: trap_word(wrapping(node + I64{88}))
+    callback_meta :: trap_word(wrapping(node + I64{72}))
+    if (second != I64{0}) { jet_rt_free(second, trap_word(wrapping(node + I64{136})), I64{8}) }
     iter_saved_clear(node)
-    coll_meta_drop(trap_word(node + I64{104}))
-    header :: trap_word(node + I64{112})
+    coll_meta_drop(trap_word(wrapping(node + I64{104})))
+    header :: trap_word(wrapping(node + I64{112}))
     if (header != I64{0}) {
-        element :: if (kind == I64{12} || kind == I64{13}) -> trap_word(meta + I64{56}) else -> meta
-        coll_list_drop(header, element, if (kind == I64{0}) -> trap_word(node + I64{40}) else -> I64{0})
+        element :: if (kind == I64{12} || kind == I64{13}) -> trap_word(wrapping(meta + I64{56})) else -> meta
+        coll_list_drop(header, element, if (kind == I64{0}) -> trap_word(wrapping(node + I64{40})) else -> I64{0})
         jet_rt_free(header, I64{24}, I64{8})
     }
-    release :: trap_word(node + I64{64})
+    release :: trap_word(wrapping(node + I64{64}))
     if (release != I64{0}) {
         jet_rt_session_shield_enter()
-        coll_call1_unit(release, trap_word(node + I64{48}))
+        coll_call1_unit(release, trap_word(wrapping(node + I64{48})))
         jet_rt_session_shield_leave()
     }
     coll_meta_drop(callback_meta)
@@ -498,7 +498,7 @@ fn iter_list_release(source: I64, meta: I64) {
 
 #Export(c) fn jet_rt_native_iter_indexes(count: I64, meta: I64) -> I64 {
     node :: iter_new(I64{2}, meta)
-    trap_store(node + I64{32}, count)
+    trap_store(wrapping(node + I64{32}), count)
     node
 }
 
@@ -518,7 +518,7 @@ fn iter_discard_stopped_source(source: I64) {
         return I64{0}
     }
     node :: iter_wrap(I64{3}, source, iter_meta(source))
-    trap_store(node + I64{32}, count)
+    trap_store(wrapping(node + I64{32}), count)
     node
 }
 
@@ -529,7 +529,7 @@ fn iter_discard_stopped_source(source: I64) {
         return I64{0}
     }
     node :: iter_wrap(I64{4}, source, iter_meta(source))
-    trap_store(node + I64{32}, count)
+    trap_store(wrapping(node + I64{32}), count)
     node
 }
 
@@ -540,7 +540,7 @@ fn iter_discard_stopped_source(source: I64) {
         return I64{0}
     }
     node :: iter_wrap(I64{5}, source, iter_meta(source))
-    trap_store(node + I64{32}, count)
+    trap_store(wrapping(node + I64{32}), count)
     node
 }
 
@@ -574,8 +574,8 @@ fn iter_discard_stopped_source(source: I64) {
     if (by_value != I64{0}) { coll_copy(separator, saved, coll_payload(meta)) } else {
         coll_slot_clone(separator, saved, meta)
     }
-    trap_store(node + I64{96}, saved)
-    trap_store(node + I64{104}, coll_meta_copy(meta))
+    trap_store(wrapping(node + I64{96}), saved)
+    trap_store(wrapping(node + I64{104}), coll_meta_copy(meta))
     node
 }
 
@@ -586,8 +586,8 @@ fn iter_nested(kind: I64, source: I64, count: I64, meta: I64) -> I64 {
         return I64{0}
     }
     node :: iter_wrap(kind, source, meta)
-    trap_store(node + I64{32}, count)
-    trap_store(node + I64{112}, coll_list_new())
+    trap_store(wrapping(node + I64{32}), count)
+    trap_store(wrapping(node + I64{112}), coll_list_new())
     node
 }
 
@@ -605,13 +605,13 @@ fn iter_nested(kind: I64, source: I64, count: I64, meta: I64) -> I64 {
 
 #Export(c) fn jet_rt_native_iter_some(source: I64, meta: I64) -> I64 {
     node :: iter_new(I64{15}, meta)
-    trap_store(node + I64{16}, source)
+    trap_store(wrapping(node + I64{16}), source)
     node
 }
 
 #Export(c) fn jet_rt_native_iter_enumerate(source: I64, env: I64, invoke: I64, release: I64, meta: I64) -> I64 {
     node :: iter_callback(I64{20}, source, env, invoke, release, meta, meta)
-    trap_store(node + I64{120}, jet_rt_alloc(I64{8}, I64{8}))
+    trap_store(wrapping(node + I64{120}), jet_rt_alloc(I64{8}, I64{8}))
     node
 }
 
@@ -621,8 +621,8 @@ fn iter_nested(kind: I64, source: I64, count: I64, meta: I64) -> I64 {
     if (seed_by_value != I64{0}) { coll_copy(seed, saved, coll_payload(seed_meta)) } else {
         coll_slot_clone(seed, saved, seed_meta)
     }
-    trap_store(node + I64{96}, saved)
-    trap_store(node + I64{104}, coll_meta_copy(seed_meta))
+    trap_store(wrapping(node + I64{96}), saved)
+    trap_store(wrapping(node + I64{104}), coll_meta_copy(seed_meta))
     node
 }
 
@@ -631,7 +631,7 @@ fn iter_collect_node(source: I64) -> I64 {
     node :: iter_new(I64{0}, meta)
     header :: coll_list_new()
     iter_drain(source, header)
-    trap_store(node + I64{112}, header)
+    trap_store(wrapping(node + I64{112}), header)
     jet_rt_native_iter_drop(source)
     if (jet_rt_session_propagate() != I64{0}) {
         jet_rt_native_iter_drop(node)
@@ -643,11 +643,11 @@ fn iter_collect_node(source: I64) -> I64 {
 fn iter_repeat(source: I64, count: I64, loops: Bool) -> I64 {
     node :: iter_collect_node(source)
     if (node == I64{0}) { return I64{0} }
-    length :: trap_word(trap_word(node + I64{112}))
+    length :: trap_word(trap_word(wrapping(node + I64{112})))
     times :: if (count < I64{0}) -> I64{0} else -> count
     trap_store(node, I64{21})
-    trap_store(node + I64{32}, if (length == I64{0}) -> I64{0} else if loops -> length * times else -> times)
-    trap_store(node + I64{128}, if loops -> I64{1} else -> I64{0})
+    trap_store(wrapping(node + I64{32}), if (length == I64{0}) -> I64{0} else if loops -> length * times else -> times)
+    trap_store(wrapping(node + I64{128}), if loops -> I64{1} else -> I64{0})
     node
 }
 
@@ -662,14 +662,14 @@ fn iter_repeat(source: I64, count: I64, loops: Bool) -> I64 {
 #Export(c) fn jet_rt_native_iter_drop_last(source: I64, count: I64) -> I64 {
     node :: iter_collect_node(source)
     if (node == I64{0}) { return I64{0} }
-    header :: trap_word(node + I64{112})
+    header :: trap_word(wrapping(node + I64{112}))
     length :: trap_word(header)
     removed :: if (count < I64{0}) -> I64{0} else if count > length -> length else -> count
     kept :: length - removed
     meta :: iter_meta(node)
     at := kept
     loop at < length {
-        coll_slot_drop(trap_word(header + I64{16}) + at * trap_word(meta), meta)
+        coll_slot_drop(trap_word(wrapping(header + I64{16})) + at * trap_word(meta), meta)
         at += I64{1}
     }
     trap_store(header, kept)
@@ -679,11 +679,11 @@ fn iter_repeat(source: I64, count: I64, loops: Bool) -> I64 {
 #Export(c) fn jet_rt_native_iter_shuffle(source: I64) -> I64 {
     node :: iter_collect_node(source)
     if (node == I64{0}) { return I64{0} }
-    header :: trap_word(node + I64{112})
+    header :: trap_word(wrapping(node + I64{112}))
     meta :: iter_meta(node)
     scratch :: coll_slot_new(meta)
     stride :: trap_word(meta)
-    data :: trap_word(header + I64{16})
+    data :: trap_word(wrapping(header + I64{16}))
     state := U64{3237998146}
     at := trap_word(header) - I64{1}
     loop at > (I64{0}) {
@@ -691,9 +691,9 @@ fn iter_repeat(source: I64, count: I64, loops: Bool) -> I64 {
         // each wrap (Rust wrapping_mul(..).wrapping_add(1)).
         state = wrapping(wrapping(state * U64{6364136223846793005}) + U64{1})
         other :: I64{(state >> U64{33}) % U64{at + I64{1}}}
-        coll_copy(data + at * stride, scratch, coll_payload(meta))
-        coll_copy(data + other * stride, data + at * stride, coll_payload(meta))
-        coll_copy(scratch, data + other * stride, coll_payload(meta))
+        coll_copy(wrapping(data + at * stride), scratch, coll_payload(meta))
+        coll_copy(wrapping(data + other * stride), wrapping(data + at * stride), coll_payload(meta))
+        coll_copy(scratch, wrapping(data + other * stride), coll_payload(meta))
         at -= I64{1}
     }
     jet_rt_free(scratch, coll_size(meta), I64{8})
@@ -703,16 +703,16 @@ fn iter_repeat(source: I64, count: I64, loops: Bool) -> I64 {
 #Export(c) fn jet_rt_native_iter_split_at(source: I64, count: I64, target: I64, left: I64, right: I64) {
     meta :: iter_meta(source)
     slot :: coll_slot_new(meta)
-    coll_zero(target + left, I64{24})
-    coll_zero(target + right, I64{24})
+    coll_zero(wrapping(target + left), I64{24})
+    coll_zero(wrapping(target + right), I64{24})
     at := I64{0}
     loop iter_pull(source, slot) {
         coll_list_push(if at < count -> target + left else -> target + right, slot, meta)
         at += I64{1}
     }
     if (jet_rt_session_propagate() != I64{0}) {
-        coll_list_drop(target + left, meta, I64{0})
-        coll_list_drop(target + right, meta, I64{0})
+        coll_list_drop(wrapping(target + left), meta, I64{0})
+        coll_list_drop(wrapping(target + right), meta, I64{0})
     }
     jet_rt_free(slot, coll_size(meta), I64{8})
     jet_rt_native_iter_drop(source)
@@ -724,7 +724,7 @@ fn iter_repeat(source: I64, count: I64, loops: Bool) -> I64 {
     at := I64{0}
     loop iter_pull(source, slot) {
         if (at != I64{0}) { jet_rt_string_builder_push(builder, separator) }
-        text :: coll_call1(trap_word(meta + I64{24}), slot)
+        text :: coll_call1(trap_word(wrapping(meta + I64{24})), slot)
         if (jet_rt_session_propagate() != I64{0}) {
             coll_slot_drop(slot, iter_meta(source))
             break
@@ -787,12 +787,12 @@ fn iter_repeat(source: I64, count: I64, loops: Bool) -> I64 {
     if (by_value != I64{0}) { coll_copy(needle, slot, coll_payload(meta)) } else {
         coll_slot_clone(needle, slot, meta)
     }
-    header :: trap_word(node + I64{112})
+    header :: trap_word(wrapping(node + I64{112}))
     at := trap_word(header)
     found := I64{-1}
     loop at > (I64{0}) {
         at -= I64{1}
-        if iter_equal(meta, trap_word(header + I64{16}) + at * trap_word(meta), slot) {
+        if iter_equal(meta, trap_word(wrapping(header + I64{16})) + at * trap_word(meta), slot) {
             found = at
             break
         }
@@ -808,8 +808,8 @@ fn iter_repeat(source: I64, count: I64, loops: Bool) -> I64 {
 #Export(c) fn jet_rt_native_iter_is_sorted(source: I64, meta: I64) -> I64 {
     node :: iter_collect_node(source)
     if (node == I64{0}) { return I64{0} }
-    header :: trap_word(node + I64{112})
-    data :: trap_word(header + I64{16})
+    header :: trap_word(wrapping(node + I64{112}))
+    data :: trap_word(wrapping(header + I64{16}))
     stride :: trap_word(meta)
     at := I64{1}
     sorted := I64{1}
@@ -835,36 +835,36 @@ fn iter_eager_callback(source: I64, env: I64, invoke: I64, release: I64, meta: I
         }
         return I64{0}
     }
-    trap_store(node + I64{48}, env)
-    trap_store(node + I64{56}, invoke)
-    trap_store(node + I64{64}, release)
-    trap_store(node + I64{72}, coll_meta_copy(meta))
-    trap_store(node + I64{88}, coll_slot_new(meta))
-    trap_store(node + I64{136}, coll_size(meta))
+    trap_store(wrapping(node + I64{48}), env)
+    trap_store(wrapping(node + I64{56}), invoke)
+    trap_store(wrapping(node + I64{64}), release)
+    trap_store(wrapping(node + I64{72}), coll_meta_copy(meta))
+    trap_store(wrapping(node + I64{88}), coll_slot_new(meta))
+    trap_store(wrapping(node + I64{136}), coll_size(meta))
     node
 }
 
 #Export(c) fn jet_rt_native_iter_dedup_by(source: I64, env: I64, invoke: I64, release: I64, meta: I64) -> I64 {
     node :: iter_eager_callback(source, env, invoke, release, meta)
     if (node == I64{0}) { return I64{0} }
-    header :: trap_word(node + I64{112})
-    data :: trap_word(header + I64{16})
+    header :: trap_word(wrapping(node + I64{112}))
+    data :: trap_word(wrapping(header + I64{16}))
     element :: iter_meta(node)
     stride :: trap_word(element)
-    key :: trap_word(node + I64{88})
+    key :: trap_word(wrapping(node + I64{88}))
     previous :: coll_slot_new(meta)
     at := I64{0}
     used := I64{0}
     have_previous := false
     loop at < trap_word(header) && jet_rt_session_propagate() == (I64{0}) {
-        slot :: data + at * stride
+        slot :: wrapping(data + at * stride)
         if !iter_unary(node, slot, key) -> break
         same :: have_previous && iter_equal(meta, previous, key)
         if !same {
             if have_previous -> coll_slot_drop(previous, meta)
             coll_copy(key, previous, coll_payload(meta))
             have_previous = true
-            coll_copy(slot, data + used * stride, coll_payload(element))
+            coll_copy(slot, wrapping(data + used * stride), coll_payload(element))
             used += I64{1}
         } else {
             coll_slot_drop(key, meta)
@@ -891,10 +891,10 @@ fn iter_eager_callback(source: I64, env: I64, invoke: I64, release: I64, meta: I
 #Export(c) fn jet_rt_native_iter_is_sorted_by(source: I64, env: I64, invoke: I64, release: I64, meta: I64) -> I64 {
     node :: iter_eager_callback(source, env, invoke, release, meta)
     if (node == I64{0}) { return I64{0} }
-    header :: trap_word(node + I64{112})
-    data :: trap_word(header + I64{16})
+    header :: trap_word(wrapping(node + I64{112}))
+    data :: trap_word(wrapping(header + I64{16}))
     stride :: trap_word(iter_meta(node))
-    a :: trap_word(node + I64{88})
+    a :: trap_word(wrapping(node + I64{88}))
     b :: coll_slot_new(meta)
     at := I64{1}
     result := I64{1}
@@ -923,25 +923,25 @@ fn iter_eager_callback(source: I64, env: I64, invoke: I64, release: I64, meta: I
 }
 
 fn iter_release_callback(node: I64) {
-    release :: trap_word(node + I64{64})
+    release :: trap_word(wrapping(node + I64{64}))
     if (release != I64{0}) {
         jet_rt_session_shield_enter()
-        coll_call1_unit(release, trap_word(node + I64{48}))
+        coll_call1_unit(release, trap_word(wrapping(node + I64{48})))
         jet_rt_session_shield_leave()
-        trap_store(node + I64{64}, I64{0})
+        trap_store(wrapping(node + I64{64}), I64{0})
     }
 }
 
 #Export(c) fn jet_rt_native_iter_flat_map(source: I64, env: I64, invoke: I64, release: I64, meta: I64) -> I64 {
     mapped :: jet_rt_native_iter_map(source, env, invoke, release, meta)
-    trap_store(mapped + I64{128}, I64{1})
-    jet_rt_native_iter_flatten(mapped, trap_word(meta + I64{56}))
+    trap_store(wrapping(mapped + I64{128}), I64{1})
+    jet_rt_native_iter_flatten(mapped, trap_word(wrapping(meta + I64{56})))
 }
 
 #Export(c) fn jet_rt_native_iter_filter_map(source: I64, env: I64, invoke: I64, release: I64, meta: I64) -> I64 {
-    node :: iter_callback(I64{26}, source, env, invoke, release, meta, trap_word(meta + I64{56}))
-    if ((trap_word(meta + I64{48}).bit_and(I64{4294967295})) != I64{7}) {
-        trap_store(node + I64{120}, coll_slot_new(trap_word(meta + I64{64})))
+    node :: iter_callback(I64{26}, source, env, invoke, release, meta, trap_word(wrapping(meta + I64{56})))
+    if ((trap_word(wrapping(meta + I64{48})).bit_and(I64{4294967295})) != I64{7}) {
+        trap_store(wrapping(node + I64{120}), coll_slot_new(trap_word(wrapping(meta + I64{64}))))
     }
     node
 }
@@ -952,9 +952,9 @@ fn iter_release_callback(node: I64) {
 // ir_lazy_meta): the word is the Int, INT_OPTION_NONE its None.
 fn iter_unbox(carrier_slot: I64, carrier: I64, target: I64, error: I64) -> Bool {
     raw :: trap_word(carrier_slot)
-    kind :: trap_word(carrier + I64{48})
+    kind :: trap_word(wrapping(carrier + I64{48}))
     optional :: kind.bit_and(I64{4294967295}) == I64{7}
-    ok :: trap_word(carrier + I64{56})
+    ok :: trap_word(wrapping(carrier + I64{56}))
     if optional {
         if (kind.bit_and(ITER_INLINE_OPTION) != I64{0}) {
             if (raw == INT_OPTION_NONE) { return false }
@@ -965,7 +965,7 @@ fn iter_unbox(carrier_slot: I64, carrier: I64, target: I64, error: I64) -> Bool 
         iter_box_take(raw, I64{0}, coll_size(ok), target, ok)
         return true
     }
-    err :: trap_word(carrier + I64{64})
+    err :: trap_word(wrapping(carrier + I64{64}))
     success :: trap_word(raw) != I64{0}
     iter_box_take(raw, I64{8}, coll_result_size(ok, err), if success -> target else -> error, if success -> ok else -> err)
     success
@@ -979,7 +979,7 @@ fn iter_unbox(carrier_slot: I64, carrier: I64, target: I64, error: I64) -> Bool 
 // loses this owner; the last owner drops the payload and frees it.
 fn iter_box_take(raw: I64, offset: I64, size: I64, target: I64, meta: I64) {
     if jet_rt_block_unique(raw) {
-        coll_copy(raw + offset, target, coll_payload(meta))
+        coll_copy(wrapping(raw + offset), target, coll_payload(meta))
         jet_rt_free(raw, size, I64{8})
         return
     }
@@ -991,13 +991,13 @@ fn iter_box_take(raw: I64, offset: I64, size: I64, target: I64, meta: I64) {
 }
 
 fn iter_pull_filter_map(node: I64, output: I64) -> Bool {
-    source :: trap_word(node + I64{16})
-    input :: trap_word(node + I64{80})
-    result :: trap_word(node + I64{88})
-    carrier :: trap_word(node + I64{72})
-    optional :: (trap_word(carrier + I64{48}).bit_and(I64{4294967295})) == I64{7}
-    error_meta :: trap_word(carrier + I64{64})
-    error :: trap_word(node + I64{120})
+    source :: trap_word(wrapping(node + I64{16}))
+    input :: trap_word(wrapping(node + I64{80}))
+    result :: trap_word(wrapping(node + I64{88}))
+    carrier :: trap_word(wrapping(node + I64{72}))
+    optional :: (trap_word(wrapping(carrier + I64{48})).bit_and(I64{4294967295})) == I64{7}
+    error_meta :: trap_word(wrapping(carrier + I64{64}))
+    error :: trap_word(wrapping(node + I64{120}))
     loop iter_pull(source, input) {
         ready :: iter_unary(node, input, result)
         coll_slot_drop(input, iter_meta(source))
@@ -1010,20 +1010,20 @@ fn iter_pull_filter_map(node: I64, output: I64) -> Bool {
 
 fn iter_zip(kind: I64, a: I64, b: I64, env: I64, invoke: I64, release: I64, meta: I64) -> I64 {
     node :: iter_callback(kind, a, env, invoke, release, meta, meta)
-    trap_store(node + I64{24}, b)
+    trap_store(wrapping(node + I64{24}), b)
     // Binary adapters write the result directly; second scratch holds B.
-    jet_rt_free(trap_word(node + I64{88}), coll_size(meta), I64{8})
-    trap_store(node + I64{88}, coll_slot_new(iter_meta(b)))
-    trap_store(node + I64{136}, coll_size(iter_meta(b)))
+    jet_rt_free(trap_word(wrapping(node + I64{88})), coll_size(meta), I64{8})
+    trap_store(wrapping(node + I64{88}), coll_slot_new(iter_meta(b)))
+    trap_store(wrapping(node + I64{136}), coll_size(iter_meta(b)))
     node
 }
 
 fn iter_pull_zip(node: I64, output: I64) -> Bool {
     kind :: trap_word(node)
-    a :: trap_word(node + I64{16})
-    b :: trap_word(node + I64{24})
-    x :: trap_word(node + I64{80})
-    y :: trap_word(node + I64{88})
+    a :: trap_word(wrapping(node + I64{16}))
+    b :: trap_word(wrapping(node + I64{24}))
+    x :: trap_word(wrapping(node + I64{80}))
+    y :: trap_word(wrapping(node + I64{88}))
     a_present :: iter_pull(a, x)
     if (jet_rt_session_propagate() != I64{0}) {
         if a_present -> coll_slot_drop(x, iter_meta(a))
@@ -1037,7 +1037,7 @@ fn iter_pull_zip(node: I64, output: I64) -> Bool {
         return false
     }
     if (kind == I64{19} && a_present != b_present) {
-        iter_zip_stop(trap_word(node + I64{152}))
+        iter_zip_stop(trap_word(wrapping(node + I64{152})))
         saved :: jet_rt_session_cleanup_enter(jet_rt_session_status())
         if a_present -> coll_slot_drop(x, iter_meta(a))
         if b_present -> coll_slot_drop(y, iter_meta(b))
@@ -1050,9 +1050,9 @@ fn iter_pull_zip(node: I64, output: I64) -> Bool {
         return false
     }
     if (kind == I64{18}) {
-        context :: trap_word(node + I64{152})
+        context :: trap_word(wrapping(node + I64{152}))
         if !a_present -> coll_slot_clone(trap_word(context), x, iter_meta(a))
-        if !b_present -> coll_slot_clone(trap_word(context + I64{8}), y, iter_meta(b))
+        if !b_present -> coll_slot_clone(trap_word(wrapping(context + I64{8})), y, iter_meta(b))
     }
     moved :: iter_binary(node, x, y, output)
     if ((moved.bit_and(I64{1})) == I64{0}) { coll_slot_drop(x, iter_meta(a)) }
@@ -1076,8 +1076,8 @@ fn iter_pull_zip(node: I64, output: I64) -> Bool {
         coll_slot_clone(fill_b, y, b_meta)
     }
     trap_store(context, x)
-    trap_store(context + I64{8}, y)
-    trap_store(node + I64{152}, context)
+    trap_store(wrapping(context + I64{8}), y)
+    trap_store(wrapping(node + I64{152}), context)
     node
 }
 
@@ -1085,25 +1085,25 @@ fn iter_pull_zip(node: I64, output: I64) -> Bool {
     node :: iter_zip(I64{19}, a, b, env, invoke, release, meta)
     context :: jet_rt_alloc(I64{56}, I64{8})
     trap_store(context, jet_rt_string_clone(policy))
-    trap_store(context + I64{8}, jet_rt_string_clone(file))
-    trap_store(context + I64{16}, line)
-    trap_store(context + I64{24}, jet_rt_string_clone(function))
-    trap_store(context + I64{32}, jet_rt_string_clone(source_line))
-    trap_store(context + I64{40}, col)
-    trap_store(context + I64{48}, caret)
-    trap_store(node + I64{152}, context)
+    trap_store(wrapping(context + I64{8}), jet_rt_string_clone(file))
+    trap_store(wrapping(context + I64{16}), line)
+    trap_store(wrapping(context + I64{24}), jet_rt_string_clone(function))
+    trap_store(wrapping(context + I64{32}), jet_rt_string_clone(source_line))
+    trap_store(wrapping(context + I64{40}), col)
+    trap_store(wrapping(context + I64{48}), caret)
+    trap_store(wrapping(node + I64{152}), context)
     node
 }
 
 fn iter_try_callback(source: I64, env: I64, invoke: I64, release: I64, carrier: I64, filter: Bool) -> I64 {
     node :: iter_callback(I64{6}, source, env, invoke, release, carrier, carrier)
     input_meta :: iter_meta(source)
-    output_meta :: if filter -> input_meta else -> trap_word(carrier + I64{56})
-    optional :: (trap_word(carrier + I64{48}).bit_and(I64{4294967295})) == I64{7}
-    error_meta :: trap_word(carrier + I64{64})
-    input :: trap_word(node + I64{80})
-    raw_result :: trap_word(node + I64{88})
-    value :: coll_slot_new(trap_word(carrier + I64{56}))
+    output_meta :: if filter -> input_meta else -> trap_word(wrapping(carrier + I64{56}))
+    optional :: (trap_word(wrapping(carrier + I64{48})).bit_and(I64{4294967295})) == I64{7}
+    error_meta :: trap_word(wrapping(carrier + I64{64}))
+    input :: trap_word(wrapping(node + I64{80}))
+    raw_result :: trap_word(wrapping(node + I64{88}))
+    value :: coll_slot_new(trap_word(wrapping(carrier + I64{56})))
     error :: if optional -> I64{0} else -> coll_slot_new(error_meta)
     header :: coll_list_new()
     success := true
@@ -1123,14 +1123,14 @@ fn iter_try_callback(source: I64, env: I64, invoke: I64, release: I64, carrier: 
             if (trap_byte(value) != I64{0}) { coll_list_push(header, input, input_meta) } else {
                 coll_slot_drop(input, input_meta)
             }
-            coll_slot_drop(value, trap_word(carrier + I64{56}))
+            coll_slot_drop(value, trap_word(wrapping(carrier + I64{56})))
         } else {
             coll_slot_drop(input, input_meta)
             coll_list_push(header, value, output_meta)
         }
     }
     stopped = stopped || jet_rt_session_propagate() != I64{0}
-    jet_rt_free(value, coll_size(trap_word(carrier + I64{56})), I64{8})
+    jet_rt_free(value, coll_size(trap_word(wrapping(carrier + I64{56}))), I64{8})
     result := I64{0}
     if (success && !stopped) {
         result_iter :: jet_rt_native_iter_from_list(header, output_meta, I64{1})
@@ -1138,16 +1138,16 @@ fn iter_try_callback(source: I64, env: I64, invoke: I64, release: I64, carrier: 
             result = jet_rt_alloc(I64{8}, I64{8})
             trap_store(result, result_iter)
         } else {
-            result = jet_rt_alloc(coll_result_size(trap_word(carrier + I64{56}), error_meta), I64{8})
+            result = jet_rt_alloc(coll_result_size(trap_word(wrapping(carrier + I64{56})), error_meta), I64{8})
             trap_store(result, I64{1})
-            trap_store(result + I64{8}, result_iter)
+            trap_store(wrapping(result + I64{8}), result_iter)
         }
     } else {
         coll_list_drop(header, output_meta, I64{0})
         if (!optional && !stopped) {
-            result = jet_rt_alloc(coll_result_size(trap_word(carrier + I64{56}), error_meta), I64{8})
+            result = jet_rt_alloc(coll_result_size(trap_word(wrapping(carrier + I64{56})), error_meta), I64{8})
             trap_store(result, I64{0})
-            coll_copy(error, result + I64{8}, coll_payload(error_meta))
+            coll_copy(error, wrapping(result + I64{8}), coll_payload(error_meta))
         }
         if (!optional && !success && stopped) { coll_slot_drop(error, error_meta) }
     }
@@ -1167,7 +1167,7 @@ fn iter_try_callback(source: I64, env: I64, invoke: I64, release: I64, carrier: 
 
 #Export(c) fn jet_rt_native_iter_try_collect(source: I64, list_meta: I64, error_meta: I64) -> I64 {
     carrier :: iter_meta(source)
-    element :: trap_word(list_meta + I64{56})
+    element :: trap_word(wrapping(list_meta + I64{56}))
     slot :: coll_slot_new(carrier)
     value :: coll_slot_new(element)
     optional :: error_meta == I64{0}
@@ -1192,7 +1192,7 @@ fn iter_try_callback(source: I64, env: I64, invoke: I64, release: I64, carrier: 
         } else {
             result = jet_rt_alloc(coll_result_size(list_meta, error_meta), I64{8})
             trap_store(result, if success -> I64{1} else -> I64{0})
-            coll_copy(if success -> header else -> error, result + I64{8}, coll_payload(if success -> list_meta else -> error_meta))
+            coll_copy(if success -> header else -> error, wrapping(result + I64{8}), coll_payload(if success -> list_meta else -> error_meta))
         }
     }
     if (!optional && !success && stopped) { coll_slot_drop(error, error_meta) }
@@ -1208,25 +1208,25 @@ fn iter_try_callback(source: I64, env: I64, invoke: I64, release: I64, carrier: 
 #Export(c) fn jet_rt_native_iter_chunk_while(source: I64, env: I64, invoke: I64, release: I64, meta: I64, list_meta: I64) -> I64 {
     node :: iter_eager_callback(source, env, invoke, release, meta)
     if (node == I64{0}) { return I64{0} }
-    source_header :: trap_word(node + I64{112})
+    source_header :: trap_word(wrapping(node + I64{112}))
     element :: iter_meta(node)
-    data :: trap_word(source_header + I64{16})
+    data :: trap_word(wrapping(source_header + I64{16}))
     stride :: trap_word(element)
     chunks :: coll_list_new()
     chunk :: coll_list_new()
     at := I64{0}
     loop at < trap_word(source_header) && jet_rt_session_propagate() == (I64{0}) {
         if (at != I64{0}) {
-            _ := iter_binary(node, data + (at - I64{1}) * stride, data + at * stride, trap_word(node + I64{88}))
+            _ := iter_binary(node, data + (at - I64{1}) * stride, data + at * stride, trap_word(wrapping(node + I64{88})))
             if (jet_rt_session_propagate() != I64{0}) { break }
-            keep :: trap_byte(trap_word(node + I64{88})) != I64{0}
-            coll_slot_drop(trap_word(node + I64{88}), meta)
+            keep :: trap_byte(trap_word(wrapping(node + I64{88}))) != I64{0}
+            coll_slot_drop(trap_word(wrapping(node + I64{88})), meta)
             if !keep {
                 coll_list_push(chunks, chunk, list_meta)
                 coll_zero(chunk, I64{24})
             }
         }
-        coll_list_push(chunk, data + at * stride, element)
+        coll_list_push(chunk, wrapping(data + at * stride), element)
         at += I64{1}
     }
     stopped :: jet_rt_session_propagate() != I64{0}
@@ -1235,7 +1235,7 @@ fn iter_try_callback(source: I64, env: I64, invoke: I64, release: I64, carrier: 
         else -> coll_list_drop(chunk, element, I64{0})
     }
     // Only the unprocessed tail remains owned by the source list.
-    trap_store(node + I64{40}, at)
+    trap_store(wrapping(node + I64{40}), at)
     result := I64{0}
     if stopped -> coll_list_drop(chunks, list_meta, I64{0}) else {
         result = jet_rt_native_iter_from_list(chunks, list_meta, I64{1})
@@ -1259,11 +1259,11 @@ fn iter_try_callback(source: I64, env: I64, invoke: I64, release: I64, carrier: 
     cursor :: jet_rt_alloc(I64{40}, I64{8})
     slot :: coll_slot_new(iter_meta(source))
     trap_store(cursor, source)
-    trap_store(cursor + I64{8}, slot)
-    trap_store(cursor + I64{16}, stride)
+    trap_store(wrapping(cursor + I64{8}), slot)
+    trap_store(wrapping(cursor + I64{16}), stride)
     present :: iter_pull(source, slot)
-    trap_store(cursor + I64{24}, if present -> I64{1} else -> I64{0})
-    trap_store(cursor + I64{32}, if present -> I64{0} else -> I64{1})
+    trap_store(wrapping(cursor + I64{24}), if present -> I64{1} else -> I64{0})
+    trap_store(wrapping(cursor + I64{32}), if present -> I64{0} else -> I64{1})
     if (jet_rt_session_propagate() != I64{0}) {
         jet_rt_native_iter_cursor_drop(cursor)
         return I64{0}
@@ -1271,39 +1271,39 @@ fn iter_try_callback(source: I64, env: I64, invoke: I64, release: I64, carrier: 
     cursor
 }
 
-#Export(c) fn jet_rt_native_iter_cursor_test(cursor: I64) -> I64 { trap_word(cursor + I64{24}) }
+#Export(c) fn jet_rt_native_iter_cursor_test(cursor: I64) -> I64 { trap_word(wrapping(cursor + I64{24})) }
 
 #Export(c) fn jet_rt_native_iter_cursor_value(cursor: I64, target: I64, by_value: I64) {
-    if (trap_word(cursor + I64{24}) == I64{0}) {
+    if (trap_word(wrapping(cursor + I64{24})) == I64{0}) {
         iter_argument_stop(I64{5})
         return
     }
     source :: trap_word(cursor)
-    coll_copy(trap_word(cursor + I64{8}), target, coll_payload(iter_meta(source)))
-    if (by_value != I64{0}) { trap_store(cursor + I64{24}, I64{0}) }
+    coll_copy(trap_word(wrapping(cursor + I64{8})), target, coll_payload(iter_meta(source)))
+    if (by_value != I64{0}) { trap_store(wrapping(cursor + I64{24}), I64{0}) }
 }
 
 #Export(c) fn jet_rt_native_iter_cursor_advance(cursor: I64) {
-    if (trap_word(cursor + I64{32}) != I64{0}) {
+    if (trap_word(wrapping(cursor + I64{32})) != I64{0}) {
         return
     }
     source :: trap_word(cursor)
-    slot :: trap_word(cursor + I64{8})
+    slot :: trap_word(wrapping(cursor + I64{8}))
     meta :: iter_meta(source)
-    if (trap_word(cursor + I64{24}) != I64{0}) { coll_slot_drop(slot, meta) }
-    trap_store(cursor + I64{24}, I64{0})
-    skip := trap_word(cursor + I64{16}) - I64{1}
+    if (trap_word(wrapping(cursor + I64{24})) != I64{0}) { coll_slot_drop(slot, meta) }
+    trap_store(wrapping(cursor + I64{24}), I64{0})
+    skip := trap_word(wrapping(cursor + I64{16})) - I64{1}
     loop skip > (I64{0}) {
         if !iter_pull(source, slot) {
-            trap_store(cursor + I64{32}, I64{1})
+            trap_store(wrapping(cursor + I64{32}), I64{1})
             return
         }
         coll_slot_drop(slot, meta)
         skip -= I64{1}
     }
     present :: iter_pull(source, slot)
-    trap_store(cursor + I64{24}, if present -> I64{1} else -> I64{0})
-    trap_store(cursor + I64{32}, if present -> I64{0} else -> I64{1})
+    trap_store(wrapping(cursor + I64{24}), if present -> I64{1} else -> I64{0})
+    trap_store(wrapping(cursor + I64{32}), if present -> I64{0} else -> I64{1})
 }
 
 #Export(c) fn jet_rt_native_iter_cursor_drop(cursor: I64) {
@@ -1312,8 +1312,8 @@ fn iter_try_callback(source: I64, env: I64, invoke: I64, release: I64, carrier: 
     }
     source :: trap_word(cursor)
     meta :: iter_meta(source)
-    slot :: trap_word(cursor + I64{8})
-    if (trap_word(cursor + I64{24}) != I64{0}) { coll_slot_drop(slot, meta) }
+    slot :: trap_word(wrapping(cursor + I64{8}))
+    if (trap_word(wrapping(cursor + I64{24})) != I64{0}) { coll_slot_drop(slot, meta) }
     jet_rt_free(slot, coll_size(meta), I64{8})
     jet_rt_native_iter_drop(source)
     jet_rt_free(cursor, I64{40}, I64{8})
@@ -1338,10 +1338,10 @@ fn iter_zip_stop(context: I64) {
     trap_msg_header_zip()
     trap_write_handle(trap_word(context))
     trap_msg_zip_end()
-    file :: trap_word(context + I64{8})
-    function :: trap_word(context + I64{24})
-    source :: trap_word(context + I64{32})
-    trap_context(trap_word(file), trap_word(file + I64{8}), trap_word(context + I64{16}).bit_and(I64{4294967295}), trap_word(function), trap_word(function + I64{8}), trap_word(source), trap_word(source + I64{8}), trap_word(context + I64{40}).bit_and(I64{4294967295}), trap_word(context + I64{48}).bit_and(I64{4294967295}))
+    file :: trap_word(wrapping(context + I64{8}))
+    function :: trap_word(wrapping(context + I64{24}))
+    source :: trap_word(wrapping(context + I64{32}))
+    trap_context(trap_word(file), trap_word(wrapping(file + I64{8})), trap_word(wrapping(context + I64{16})).bit_and(I64{4294967295}), trap_word(function), trap_word(wrapping(function + I64{8})), trap_word(source), trap_word(wrapping(source + I64{8})), trap_word(wrapping(context + I64{40})).bit_and(I64{4294967295}), trap_word(wrapping(context + I64{48})).bit_and(I64{4294967295}))
     trap_footer_e0128()
     trap_exit(I64{70})
 }
@@ -1350,19 +1350,19 @@ fn iter_zip_stop(context: I64) {
 // Custom chunks/windows/dedup/zip/split iterators intentionally have no hint.
 fn iter_exact_length(node: I64) -> I64 {
     kind :: trap_word(node)
-    index :: trap_word(node + I64{40})
-    count :: trap_word(node + I64{32})
+    index :: trap_word(wrapping(node + I64{40}))
+    count :: trap_word(wrapping(node + I64{32}))
     if (kind == I64{3} && count == I64{0}) { return I64{0} }
-    if (kind == I64{0}) { return trap_word(trap_word(node + I64{112})) - index }
+    if (kind == I64{0}) { return trap_word(trap_word(wrapping(node + I64{112}))) - index }
     if (kind == I64{1}) { return I64{0} }
     if (kind == I64{2}) { return if count > index -> count - index else -> I64{0} }
     if (kind == I64{21}) {
-        return if (trap_word(node + I64{128}) == I64{0} || count == I64{0}) -> count - index else -> I64{-1}
+        return if (trap_word(wrapping(node + I64{128})) == I64{0} || count == I64{0}) -> count - index else -> I64{-1}
     }
     if (kind != I64{3} && kind != I64{4} && kind != I64{5} && kind != I64{6} && kind != I64{15} && kind != I64{16} && kind != I64{20} && kind != I64{27}) {
         return I64{-1}
     }
-    length :: iter_exact_length(trap_word(node + I64{16}))
+    length :: iter_exact_length(trap_word(wrapping(node + I64{16})))
     if (length < I64{0}) { return I64{-1} }
     if (kind == I64{3}) { return if count < length -> count else -> length }
     if (kind == I64{4}) { return if length > count -> length - count else -> I64{0} }
@@ -1380,8 +1380,8 @@ fn iter_exact_length(node: I64) -> I64 {
 }
 
 #Export(c) fn jet_rt_native_iter_progress_pull(node: I64, output: I64) -> I64 {
-    state :: trap_word(node + I64{48})
-    if !iter_pull(trap_word(node + I64{16}), output) {
+    state :: trap_word(wrapping(node + I64{48}))
+    if !iter_pull(trap_word(wrapping(node + I64{16})), output) {
         jet_rt_progress_state_finish(state)
         return I64{0}
     }

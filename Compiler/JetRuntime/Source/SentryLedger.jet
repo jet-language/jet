@@ -10,29 +10,29 @@ fn sentry_ledger_parent(path: I64, scratch: I64) -> Bool {
     end := I64{-1}
     at := I64{0}
     loop at < length {
-        if (trap_byte(data + at) == I64{47}) -> end = at
+        if (trap_byte(wrapping(data + at)) == I64{47}) -> end = at
         at += I64{1}
     }
     if (end < I64{0}) -> return true
     parent_len :: if (end == I64{0}) -> I64{1} else -> end
     parent :: jet_rt_alloc(parent_len + I64{1}, I64{1})
     coll_copy(data, parent, parent_len)
-    trap_put(parent + parent_len, I64{0})
+    trap_put(wrapping(parent + parent_len), I64{0})
     status :: sentry_ledger_stat(parent, scratch)
     valid := false
     if {
-        (status == I64{0}) -> valid = ((sync_load(scratch + I64{24})).bit_and(I64{61440})) == I64{16384}
+        (status == I64{0}) -> valid = ((sync_load(wrapping(scratch + I64{24}))).bit_and(I64{61440})) == I64{16384}
         (status == I64{-2}) -> {
             valid = true
             at = I64{1}
             // create_dir_all's mkdir succeeds over existing parents; inspect
             // the final directory nofollow before granting its 0700 mode.
             loop at <= parent_len {
-                if (at == parent_len || trap_byte(parent + at) == I64{47}) {
-                    saved :: trap_byte(parent + at)
-                    trap_put(parent + at, I64{0})
+                if (at == parent_len || trap_byte(wrapping(parent + at)) == I64{47}) {
+                    saved :: trap_byte(wrapping(parent + at))
+                    trap_put(wrapping(parent + at), I64{0})
                     created :: trap_syscall(I64{83}, parent, I64{511}, I64{0}, I64{0}, I64{0}, I64{0})
-                    trap_put(parent + at, saved)
+                    trap_put(wrapping(parent + at), saved)
                     if (created != I64{0} && created != I64{-17}) {
                         valid = false
                         break
@@ -41,7 +41,7 @@ fn sentry_ledger_parent(path: I64, scratch: I64) -> Bool {
                 at += I64{1}
             }
             if valid {
-                valid = sentry_ledger_stat(parent, scratch) == I64{0} && (sync_load(scratch + I64{24}).bit_and(I64{61440})) == I64{16384}
+                valid = sentry_ledger_stat(parent, scratch) == I64{0} && (sync_load(wrapping(scratch + I64{24})).bit_and(I64{61440})) == I64{16384}
                 if valid -> valid = trap_syscall(I64{90}, parent, I64{448}, I64{0}, I64{0}, I64{0}, I64{0}) == I64{0}
             }
         }
@@ -54,19 +54,19 @@ fn sentry_ledger_write(path: I64, row: I64) {
     data :: rt_text_data(path)
     at := I64{0}
     loop at < length {
-        if (trap_byte(data + at) == I64{0}) -> return
+        if (trap_byte(wrapping(data + at)) == I64{0}) -> return
         at += I64{1}
     }
     name :: jet_rt_alloc(length + I64{1}, I64{1})
     coll_copy(data, name, length)
-    trap_put(name + length, I64{0})
+    trap_put(wrapping(name + length), I64{0})
     scratch :: jet_rt_alloc(I64{144}, I64{8})
     sync_mutex_lock(sentry_root)
     allowed := rt_text_len(row) <= I64{4194304} && sentry_ledger_parent(path, scratch)
     if allowed {
         status :: sentry_ledger_stat(name, scratch)
         if {
-            (status == I64{0}) -> allowed = ((sync_load(scratch + I64{24})).bit_and(I64{61440})) == I64{32768} && sync_load(scratch + I64{48}) <= I64{4194304} - rt_text_len(row)
+            (status == I64{0}) -> allowed = ((sync_load(wrapping(scratch + I64{24}))).bit_and(I64{61440})) == I64{32768} && sync_load(wrapping(scratch + I64{48})) <= I64{4194304} - rt_text_len(row)
             (status != I64{-2}) -> allowed = false
         }
     }
@@ -101,13 +101,13 @@ fn sentry_ledger(fault: I64, gate: I64, detail: I64) {
     rt_text_push_scalar(row, I64{48} + code)
     sentry_append_owned(row, services_msg_ledger_source())
     base :: thread_base()
-    file :: rt_text_copy(sync_load(base + I64{136}), sync_load(base + I64{144}))
+    file :: rt_text_copy(sync_load(wrapping(base + I64{136})), sync_load(wrapping(base + I64{144})))
     sentry_quote(row, file, true)
     jet_rt_string_drop(file)
     sentry_append_owned(row, services_msg_ledger_start())
-    sentry_append_number(row, sync_load(base + I64{152}))
+    sentry_append_number(row, sync_load(wrapping(base + I64{152})))
     sentry_append_owned(row, services_msg_ledger_end())
-    sentry_append_number(row, sync_load(base + I64{152}))
+    sentry_append_number(row, sync_load(wrapping(base + I64{152})))
     sentry_append_owned(row, services_msg_ledger_scope())
     sentry_quote(row, gate, true)
     sentry_append_owned(row, services_msg_ledger_provenance())

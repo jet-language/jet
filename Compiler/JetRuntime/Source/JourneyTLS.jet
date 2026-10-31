@@ -17,8 +17,8 @@ fn rt_journey_destructor_address() -> I64 {
     if (journey_tls_key != I64{0}) -> return
     closure :: jet_rt_alloc(I64{24}, I64{8})
     rt_text_store(closure, I64{1})
-    rt_text_store(closure + I64{8}, rt_journey_destructor_address())
-    rt_text_store(closure + I64{16}, I64{0})
+    rt_text_store(wrapping(closure + I64{8}), rt_journey_destructor_address())
+    rt_text_store(wrapping(closure + I64{16}), I64{0})
     journey_tls_key = jet_rt_tls_key_new(closure)
     journey_report_wire_word = jet_rt_alloc(I64{8}, I64{8})
     sync_store(journey_report_wire_word, I64{0})
@@ -96,7 +96,7 @@ fn journey_stderr_columns(tty: Bool) -> I64 {
     if (length != I64{0} && rt_text_byte(data) == I64{43}) -> at = I64{1}
     if (at == length) -> valid = false
     loop at < length {
-        digit :: rt_text_byte(data + at) - I64{48}
+        digit :: rt_text_byte(wrapping(data + at)) - I64{48}
         if (digit < I64{0} || digit > I64{9} || columns < I64{0} || columns > I64{1844674407370955161} || (columns == I64{1844674407370955161} && digit > I64{5})) {
             valid = false
             break
@@ -115,7 +115,7 @@ fn journey_trim_newlines(text: I64) -> I64 {
     length := rt_text_len(text)
     loop {
         if (length == I64{0}) -> break
-        if (rt_text_byte(data + length - I64{1}) != I64{10}) -> break
+        if (rt_text_byte(wrapping(wrapping(data + length) - I64{1})) != I64{10}) -> break
         length -= I64{1}
     }
     rt_text_copy(data, length)

@@ -8,9 +8,9 @@ fn net_tcp_direction_open(stream: I64, reading: Bool, operation: I64, error: I64
     false
 }
 fn net_tcp_deadline(stream: I64, reading: Bool, save: I64) {
-    sync_mutex_lock(stream + I64{48})
+    sync_mutex_lock(wrapping(stream + I64{48}))
     milliseconds :: net_word(stream, if reading -> I64{32} else -> I64{40})
-    sync_mutex_unlock(stream + I64{48})
+    sync_mutex_unlock(wrapping(stream + I64{48}))
     if (milliseconds < I64{0}) {
         net_put(save, I64{0}, if jet_ctx_deadline_present() -> I64{1} else -> I64{0})
         net_put(save, I64{8}, jet_ctx_deadline_ms())
@@ -74,7 +74,7 @@ fn net_tcp_read_result(stream: I64, limit: I64, output: I64, length: I64, text: 
         return I64{1}
     }
     scratch :: jet_rt_alloc(I64{48}, I64{8})
-    net_tcp_deadline(stream, true, scratch + I64{32})
+    net_tcp_deadline(stream, true, wrapping(scratch + I64{32}))
     result := I64{0}
     if net_tcp_apply_deadlines(stream, operation, scratch, error) {
         bytes := jet_rt_alloc(cap * RT_HOST_U8_STRIDE, I64{8})
@@ -104,7 +104,7 @@ fn net_tcp_read_result(stream: I64, limit: I64, output: I64, length: I64, text: 
         }
         if (bytes != I64{0}) -> jet_rt_free(bytes, cap * RT_HOST_U8_STRIDE, I64{8})
     }
-    jet_ctx_pop_deadline(scratch + I64{32})
+    jet_ctx_pop_deadline(wrapping(scratch + I64{32}))
     jet_rt_free(scratch, I64{48}, I64{8})
     result
 }
@@ -112,7 +112,7 @@ fn net_tcp_read_result(stream: I64, limit: I64, output: I64, length: I64, text: 
 fn net_read_decode_text(bytes: I64, count: I64, explicit: Bool, operation: I64, output: I64, error: I64) -> I64 {
     at := I64{0}
     loop at < count {
-        width :: rt_text_valid_width(bytes + at * RT_HOST_U8_STRIDE, count - at, RT_HOST_U8_STRIDE)
+        width :: rt_text_valid_width(wrapping(bytes + at * RT_HOST_U8_STRIDE), count - at, RT_HOST_U8_STRIDE)
         if (width < I64{0}) {
             message :: jet_rt_string_builder_new()
             jet_rt_string_builder_push(message, operation)
@@ -178,11 +178,11 @@ fn net_tcp_write_current(stream: I64, data: I64, length: I64, scratch: I64, erro
 fn net_tcp_write_result(stream: I64, data: I64, length: I64, all: Bool, output: I64, error: I64) -> I64 {
     if (all && length == I64{0}) -> return I64{1}
     scratch :: jet_rt_alloc(I64{48}, I64{8})
-    net_tcp_deadline(stream, false, scratch + I64{32})
+    net_tcp_deadline(stream, false, wrapping(scratch + I64{32}))
     result := I64{1}
     offset := I64{0}
     loop !all || offset < length {
-        count :: net_tcp_write_current(stream, data + offset * RT_HOST_U8_STRIDE, length - offset, scratch, error)
+        count :: net_tcp_write_current(stream, wrapping(data + offset * RT_HOST_U8_STRIDE), length - offset, scratch, error)
         if (count < I64{0}) {
             result = I64{0}
             break
@@ -197,7 +197,7 @@ fn net_tcp_write_result(stream: I64, data: I64, length: I64, all: Bool, output: 
         }
         offset += count
     }
-    jet_ctx_pop_deadline(scratch + I64{32})
+    jet_ctx_pop_deadline(wrapping(scratch + I64{32}))
     jet_rt_free(scratch, I64{48}, I64{8})
     result
 }
@@ -222,7 +222,7 @@ fn net_tcp_write_text_result(stream: I64, text: I64, explicit: Bool, millisecond
     if (RT_HOST_U8_STRIDE != I64{1} && length != I64{0}) {
         at := I64{0}
         loop at < length {
-            host_u8_put(bytes, at, rt_text_byte(rt_text_data(text) + at))
+            host_u8_put(bytes, at, rt_text_byte(wrapping(rt_text_data(text) + at)))
             at += I64{1}
         }
     }
@@ -270,10 +270,10 @@ fn net_stream_ready(stream: I64, interest: I64, deadline: I64, operation: I64, o
     if !net_route_stream_open(stream, operation, error) -> return I64{0}
     if !net_tcp_timeout_valid(milliseconds, operation, error) -> return I64{0}
     scratch :: jet_rt_alloc(I64{48}, I64{8})
-    net_route_deadline_push(milliseconds, scratch + I64{32})
+    net_route_deadline_push(milliseconds, wrapping(scratch + I64{32}))
     mask :: if (interest == I64{0}) -> I64{1} else if (interest == I64{1}) -> I64{4} else -> I64{5}
     ready :: net_tcp_wait(jet_socket_stream_fd_raw(stream), mask, operation, scratch, error)
-    jet_ctx_pop_deadline(scratch + I64{32})
+    jet_ctx_pop_deadline(wrapping(scratch + I64{32}))
     jet_rt_free(scratch, I64{48}, I64{8})
     if (ready == I64{0}) -> return I64{0}
     value :: jet_rt_alloc(I64{16}, I64{8})
@@ -325,7 +325,7 @@ fn net_tcp_show(holder: I64, listener: Bool) -> I64 {
     thread_zero(scratch, I64{16})
     builder :: jet_rt_string_builder_new()
     jet_rt_string_builder_push(builder, if listener -> rt_static_text("TcpListener(") else -> rt_static_text("TcpStream("))
-    if (net_tcp_address_text(holder, listener, !listener, scratch, scratch + I64{8}) != I64{0}) {
+    if (net_tcp_address_text(holder, listener, !listener, scratch, wrapping(scratch + I64{8})) != I64{0}) {
         address :: net_word(scratch, I64{0})
         jet_rt_string_builder_push(builder, address)
         jet_rt_string_drop(address)
@@ -364,7 +364,7 @@ fn net_tcp_show(holder: I64, listener: Bool) -> I64 {
         jet_rt_free(scratch, I64{48}, I64{8})
         return result
     }
-    net_tcp_deadline(stream, false, scratch + I64{32})
+    net_tcp_deadline(stream, false, wrapping(scratch + I64{32}))
     bytes :: jet_rt_alloc(I64{8192} * RT_HOST_U8_STRIDE, I64{8})
     written := I64{0}
     result := I64{1}
@@ -381,7 +381,7 @@ fn net_tcp_show(holder: I64, listener: Bool) -> I64 {
             at := count
             loop at > (I64{0}) {
                 at -= I64{1}
-                host_u8_put(bytes, at, rt_text_byte(bytes + at))
+                host_u8_put(bytes, at, rt_text_byte(wrapping(bytes + at)))
             }
         }
         if (jet_net_tcp_write_all_bytes(stream, bytes, count, error) == I64{0}) {
@@ -391,7 +391,7 @@ fn net_tcp_show(holder: I64, listener: Bool) -> I64 {
         written = if (written > I64{9223372036854775807} - count) -> I64{9223372036854775807} else -> written + count
     }
     jet_rt_free(bytes, I64{8192} * RT_HOST_U8_STRIDE, I64{8})
-    jet_ctx_pop_deadline(scratch + I64{32})
+    jet_ctx_pop_deadline(wrapping(scratch + I64{32}))
     jet_fd_drop_raw(file)
     jet_rt_free(scratch, I64{48}, I64{8})
     if (result != I64{0}) -> net_put(output, I64{0}, written)

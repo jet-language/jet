@@ -5,18 +5,18 @@
 // active word without the mutex: a request that starts concurrently with the
 // pull orders after it, as it would after the pull's locked section.
 #Export(c) fn jet_rt_iter_charge() -> I64 {
-    if (sync_load(comptime_root + I64{8}) == I64{0}) -> return I64{0}
+    if (sync_load(wrapping(comptime_root + I64{8})) == I64{0}) -> return I64{0}
     exhausted := false
     sync_mutex_lock(comptime_root)
-    if (sync_load(comptime_root + I64{8}) != I64{0}) {
-        remaining :: sync_load(comptime_root + I64{16})
+    if (sync_load(wrapping(comptime_root + I64{8})) != I64{0}) {
+        remaining :: sync_load(wrapping(comptime_root + I64{16}))
         if {
             (remaining == I64{0}) -> {
                 comptime_publish_locked(I64{3}, I64{2})
                 exhausted = true
             }
             else -> {
-                sync_store(comptime_root + I64{16}, wrapping(remaining - I64{1}))
+                sync_store(wrapping(comptime_root + I64{16}), wrapping(remaining - I64{1}))
             }
         }
     }

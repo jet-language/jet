@@ -6,19 +6,19 @@
 fn normal_buffer_new() -> I64 {
     header :: jet_rt_alloc(I64{24}, I64{8})
     rt_text_store(header, I64{8})
-    rt_text_store(header + I64{8}, I64{0})
-    rt_text_store(header + I64{16}, I64{0})
+    rt_text_store(wrapping(header + I64{8}), I64{0})
+    rt_text_store(wrapping(header + I64{16}), I64{0})
     header
 }
 fn normal_buffer_get(buffer: I64, index: I64) -> I64 {
-    rt_text_word(rt_text_data(buffer) + index * I64{8})
+    rt_text_word(wrapping(rt_text_data(buffer) + index * I64{8}))
 }
 fn normal_buffer_set(buffer: I64, index: I64, value: I64) {
-    rt_text_store(rt_text_data(buffer) + index * I64{8}, value)
+    rt_text_store(wrapping(rt_text_data(buffer) + index * I64{8}), value)
 }
 fn normal_buffer_push(buffer: I64, value: I64) {
     length :: rt_text_len(buffer)
-    capacity :: rt_text_word(buffer + I64{16})
+    capacity :: rt_text_word(wrapping(buffer + I64{16}))
     if length == capacity {
         if (capacity > I64{576460752303423487}) -> rt_text_capacity_stop()
         grown :: if (capacity == I64{0}) -> I64{16} else -> capacity * I64{2}
@@ -26,13 +26,13 @@ fn normal_buffer_push(buffer: I64, value: I64) {
         rt_text_bytes_copy(data, rt_text_data(buffer), length * I64{8})
         if (capacity != I64{0}) -> jet_rt_free(rt_text_data(buffer), capacity * I64{8}, I64{8})
         rt_text_store(buffer, data)
-        rt_text_store(buffer + I64{16}, grown)
+        rt_text_store(wrapping(buffer + I64{16}), grown)
     }
     normal_buffer_set(buffer, length, value)
-    rt_text_store(buffer + I64{8}, length + I64{1})
+    rt_text_store(wrapping(buffer + I64{8}), length + I64{1})
 }
 fn normal_buffer_drop(buffer: I64) {
-    capacity :: rt_text_word(buffer + I64{16})
+    capacity :: rt_text_word(wrapping(buffer + I64{16}))
     if (capacity != I64{0}) -> jet_rt_free(rt_text_data(buffer), capacity * I64{8}, I64{8})
     jet_rt_free(buffer, I64{24}, I64{8})
 }
@@ -81,7 +81,7 @@ fn normal_canon_order(buffer: I64) {
         }
         class := I64{1}
         loop class < (I64{256}) {
-            rt_text_store(positions + class * I64{8}, I64{0})
+            rt_text_store(wrapping(positions + class * I64{8}), I64{0})
             class += I64{1}
         }
         i := start
@@ -163,13 +163,13 @@ fn native_text_normalize_nfc(value: I64) -> I64 {
     data :: rt_text_data(value)
     bytes :: rt_text_len(value)
     at := I64{0}
-    loop at < bytes && rt_text_byte(data + at) < (I64{128}) -> at += I64{1}
+    loop at < bytes && rt_text_byte(wrapping(data + at)) < (I64{128}) -> at += I64{1}
     if at == bytes -> return jet_rt_string_clone(value)
     buffer :: normal_buffer_new()
     at = I64{0}
     loop at < bytes {
-        normal_decompose_cp(buffer, rt_text_decode(data + at))
-        at += rt_text_width(data + at)
+        normal_decompose_cp(buffer, rt_text_decode(wrapping(data + at)))
+        at += rt_text_width(wrapping(data + at))
     }
     normal_canon_order(buffer)
     length :: normal_compose(buffer)

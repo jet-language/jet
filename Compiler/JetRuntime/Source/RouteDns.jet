@@ -70,7 +70,7 @@ fn dns_lookup_deadline(milliseconds: I64, name: I64, error: I64) -> I64 {
 fn dns_poll(state: I64, events: I64, milliseconds: I64) -> I64 {
     pollfd :: jet_rt_alloc(I64{8}, I64{8})
     net_store_uint(pollfd, I64{4}, fd_word(state, I64{8}))
-    net_store_uint(pollfd + I64{4}, I64{4}, events)
+    net_store_uint(wrapping(pollfd + I64{4}), I64{4}, events)
     result :: host_call(I64{7}, pollfd, I64{1}, milliseconds)
     jet_rt_free(pollfd, I64{8}, I64{8})
     result
@@ -78,7 +78,7 @@ fn dns_poll(state: I64, events: I64, milliseconds: I64) -> I64 {
 
 fn dns_trim_dots_length(name: I64) -> I64 {
     length := rt_text_len(name)
-    loop length > (I64{0}) && rt_text_byte(rt_text_data(name) + length - I64{1}) == (I64{46}) -> length -= I64{1}
+    loop length > (I64{0}) && rt_text_byte(wrapping(wrapping(rt_text_data(name) + length) - I64{1})) == (I64{46}) -> length -= I64{1}
     length
 }
 
@@ -87,8 +87,8 @@ fn dns_caseless_equal(left: I64, left_length: I64, right: I64, right_length: I64
     if (left_length != right_length) -> return false
     at := I64{0}
     loop at < left_length {
-        a := rt_text_byte(left + at)
-        b := rt_text_byte(right + at)
+        a := rt_text_byte(wrapping(left + at))
+        b := rt_text_byte(wrapping(right + at))
         if (a >= I64{65} && a <= I64{90}) -> a += I64{32}
         if (b >= I64{65} && b <= I64{90}) -> b += I64{32}
         if a != b -> return false
@@ -111,12 +111,12 @@ fn dns_encode_name(out: I64, name: I64, error: I64) -> Bool {
     start := I64{0}
     at := I64{0}
     loop at <= length {
-        if (at == length || rt_text_byte(data + at) == I64{46}) {
+        if (at == length || rt_text_byte(wrapping(data + at)) == I64{46}) {
             label :: at - start
             ascii := true
             scan := start
             loop scan < at {
-                if (rt_text_byte(data + scan) >= I64{128}) -> ascii = false
+                if (rt_text_byte(wrapping(data + scan)) >= I64{128}) -> ascii = false
                 scan += I64{1}
             }
             if (label == I64{0} || label > I64{63} || !ascii) {
@@ -141,7 +141,7 @@ fn dns_encode_name(out: I64, name: I64, error: I64) -> Bool {
     true
 }
 
-fn dns_u8(packet: I64, at: I64) -> I64 { rt_text_byte(rt_text_data(packet) + at) }
+fn dns_u8(packet: I64, at: I64) -> I64 { rt_text_byte(wrapping(rt_text_data(packet) + at)) }
 
 // jet_net_dns_read_u16: -1 with "truncated DNS {what}".
 fn dns_u16(packet: I64, at: I64, what: I64, error: I64) -> I64 {
@@ -176,11 +176,11 @@ fn dns_read_name(packet: I64, position: I64, error: I64) -> I64 {
             failure = dns_protocol(error, rt_static_text("truncated DNS name")) + I64{1}
             break
         }
-        if (rt_text_byte(seen + p) != I64{0}) {
+        if (rt_text_byte(wrapping(seen + p)) != I64{0}) {
             failure = dns_protocol(error, rt_static_text("cyclic DNS compression pointer")) + I64{1}
             break
         }
-        rt_text_put(seen + p, I64{1})
+        rt_text_put(wrapping(seen + p), I64{1})
         length :: dns_u8(packet, p)
         if (length.bit_and(I64{192}) == I64{192}) {
             if (p + I64{1} >= size) {
@@ -224,7 +224,7 @@ fn dns_read_name(packet: I64, position: I64, error: I64) -> I64 {
             failure = dns_protocol(error, rt_static_text("DNS name exceeds 255 bytes")) + I64{1}
             break
         }
-        if !env_utf8(rt_text_data(packet) + p, length) {
+        if !env_utf8(wrapping(rt_text_data(packet) + p), length) {
             failure = dns_protocol(error, rt_static_text("DNS label is not valid UTF-8")) + I64{1}
             break
         }
@@ -246,7 +246,7 @@ fn dns_read_name(packet: I64, position: I64, error: I64) -> I64 {
 fn dns_records_drop(records: I64, count: I64) {
     at := I64{0}
     loop at < count {
-        jet_rt_string_drop(trap_word(records + at * DNS_RECORD_BYTES))
+        jet_rt_string_drop(trap_word(wrapping(records + at * DNS_RECORD_BYTES)))
         at += I64{1}
     }
     if (count != I64{0}) -> jet_rt_free(records, count * DNS_RECORD_BYTES, I64{8})
@@ -334,12 +334,12 @@ fn dns_parse_response(packet: I64, txid: I64, name: I64, qtype: I64, records_out
             failed = true
             break
         }
-        row :: records + parsed * DNS_RECORD_BYTES
+        row :: wrapping(records + parsed * DNS_RECORD_BYTES)
         trap_store(row, owner)
-        trap_store(row + I64{8}, kind)
-        trap_store(row + I64{16}, class)
-        trap_store(row + I64{24}, at)
-        trap_store(row + I64{32}, length)
+        trap_store(wrapping(row + I64{8}), kind)
+        trap_store(wrapping(row + I64{16}), class)
+        trap_store(wrapping(row + I64{24}), at)
+        trap_store(wrapping(row + I64{32}), length)
         parsed += I64{1}
         at += length
     }
@@ -351,7 +351,7 @@ fn dns_parse_response(packet: I64, txid: I64, name: I64, qtype: I64, records_out
     if failed {
         at = I64{0}
         loop at < parsed {
-            jet_rt_string_drop(trap_word(records + at * DNS_RECORD_BYTES))
+            jet_rt_string_drop(trap_word(wrapping(records + at * DNS_RECORD_BYTES)))
             at += I64{1}
         }
         if (total != I64{0}) -> jet_rt_free(records, total * DNS_RECORD_BYTES, I64{8})
@@ -372,7 +372,7 @@ fn dns_parse_socket(text: I64) -> I64 {
     at := size
     loop at > (I64{0}) {
         at -= I64{1}
-        if (rt_text_byte(data + at) == I64{58}) {
+        if (rt_text_byte(wrapping(data + at)) == I64{58}) {
             split = at
             break
         }
@@ -381,14 +381,14 @@ fn dns_parse_socket(text: I64) -> I64 {
     port := I64{0}
     at = split + I64{1}
     loop at < size {
-        byte :: rt_text_byte(data + at)
+        byte :: rt_text_byte(wrapping(data + at))
         if (byte < I64{48} || byte > I64{57}) -> return I64{0}
         port = port * I64{10} + byte - I64{48}
         if (port > I64{65535}) -> return I64{0}
         at += I64{1}
     }
-    bracketed :: split >= I64{2} && rt_text_byte(data) == I64{91} && rt_text_byte(data + split - I64{1}) == I64{93}
-    host :: if bracketed -> rt_text_copy(data + I64{1}, split - I64{2}) else -> rt_text_copy(data, split)
+    bracketed :: split >= I64{2} && rt_text_byte(data) == I64{91} && rt_text_byte(wrapping(wrapping(data + split) - I64{1})) == I64{93}
+    host :: if bracketed -> rt_text_copy(wrapping(data + I64{1}), split - I64{2}) else -> rt_text_copy(data, split)
     family :: if bracketed -> I64{10} else -> I64{2}
     name :: fd_c_path(host)
     address :: jet_rt_alloc(I64{56}, I64{8})
@@ -464,7 +464,7 @@ fn dns_tcp_exchange(server: I64, request: I64, deadline: I64, name: I64, error: 
     framed :: jet_rt_string_builder_new()
     prefix :: jet_rt_alloc(I64{8}, I64{8})
     rt_text_put(prefix, length >> I64{8})
-    rt_text_put(prefix + I64{1}, length.bit_and(I64{255}))
+    rt_text_put(wrapping(prefix + I64{1}), length.bit_and(I64{255}))
     rt_text_append(framed, prefix, I64{2})
     rt_text_append(framed, rt_text_data(request), length)
     written := I64{0}
@@ -478,7 +478,7 @@ fn dns_tcp_exchange(server: I64, request: I64, deadline: I64, name: I64, error: 
             break
         }
         if (ready <= I64{0}) -> next
-        sent :: jet_socket_write_raw(state, rt_text_data(framed) + written, rt_text_len(framed) - written, scratch)
+        sent :: jet_socket_write_raw(state, wrapping(rt_text_data(framed) + written), rt_text_len(framed) - written, scratch)
         if (sent == I64{0}) {
             _ := dns_protocol(error, rt_static_text("DNS TCP connection closed while sending query"))
             break
@@ -513,7 +513,7 @@ fn dns_tcp_fill(state: I64, target: I64, length: I64, deadline: I64, name: I64, 
             return false
         }
         if (ready <= I64{0}) -> next
-        got :: jet_socket_read_raw(state, target + have, length - have, scratch)
+        got :: jet_socket_read_raw(state, wrapping(target + have), length - have, scratch)
         if (got == I64{0}) {
             _ := dns_protocol(error, closed)
             return false
@@ -531,7 +531,7 @@ fn dns_tcp_fill(state: I64, target: I64, length: I64, deadline: I64, name: I64, 
 
 fn dns_tcp_read(state: I64, deadline: I64, name: I64, prefix: I64, scratch: I64, error: I64) -> I64 {
     if !dns_tcp_fill(state, prefix, I64{2}, deadline, name, scratch, rt_static_text("DNS TCP connection closed before response length"), rt_static_text("DNS TCP response length failed: "), error) -> return I64{0}
-    length :: (rt_text_byte(prefix) << I64{8}).bit_or(rt_text_byte(prefix + I64{1}))
+    length :: (rt_text_byte(prefix) << I64{8}).bit_or(rt_text_byte(wrapping(prefix + I64{1})))
     if (length < I64{12}) -> return dns_protocol(error, rt_static_text("invalid DNS TCP response length"))
     buffer :: jet_rt_alloc(length, I64{8})
     if !dns_tcp_fill(state, buffer, length, deadline, name, scratch, rt_static_text("DNS TCP response is truncated"), rt_static_text("DNS TCP response truncated: "), error) {
@@ -573,13 +573,13 @@ fn dns_query(server: I64, name: I64, qtype: I64, milliseconds: I64, packet_out: 
         if (rt_crypto_entropy_fill(random, I64{2}) != I64{0}) {
             failure = jet_rt_string_clone(rt_static_text("DNS transaction ID needs operating-system cryptographic randomness"))
         } else {
-            txid = (rt_text_byte(random) << I64{8}).bit_or(rt_text_byte(random + I64{1}))
+            txid = (rt_text_byte(random) << I64{8}).bit_or(rt_text_byte(wrapping(random + I64{1})))
             header :: jet_rt_alloc(I64{16}, I64{8})
             thread_zero(header, I64{16})
             rt_text_put(header, txid >> I64{8})
-            rt_text_put(header + I64{1}, txid.bit_and(I64{255}))
-            rt_text_put(header + I64{2}, I64{1})
-            rt_text_put(header + I64{5}, I64{1})
+            rt_text_put(wrapping(header + I64{1}), txid.bit_and(I64{255}))
+            rt_text_put(wrapping(header + I64{2}), I64{1})
+            rt_text_put(wrapping(header + I64{5}), I64{1})
             rt_text_append(request, header, I64{12})
             jet_rt_free(header, I64{16}, I64{8})
         }
@@ -602,8 +602,8 @@ fn dns_query(server: I64, name: I64, qtype: I64, milliseconds: I64, packet_out: 
     tail :: jet_rt_alloc(I64{8}, I64{8})
     thread_zero(tail, I64{8})
     rt_text_put(tail, qtype >> I64{8})
-    rt_text_put(tail + I64{1}, qtype.bit_and(I64{255}))
-    rt_text_put(tail + I64{3}, I64{1})
+    rt_text_put(wrapping(tail + I64{1}), qtype.bit_and(I64{255}))
+    rt_text_put(wrapping(tail + I64{3}), I64{1})
     rt_text_append(request, tail, I64{4})
     jet_rt_free(tail, I64{8}, I64{8})
     status := I64{0}
@@ -664,12 +664,12 @@ fn dns_query(server: I64, name: I64, qtype: I64, milliseconds: I64, packet_out: 
 // jet_net_dns_record_name: the rdata name, which must fill the rdata.
 fn dns_record_name(packet: I64, record: I64, error: I64) -> I64 {
     position :: jet_rt_alloc(I64{8}, I64{8})
-    trap_store(position, trap_word(record + I64{24}))
+    trap_store(position, trap_word(wrapping(record + I64{24})))
     name :: dns_read_name(packet, position, error)
     end :: trap_word(position)
     jet_rt_free(position, I64{8}, I64{8})
     if (name == I64{0}) -> return I64{0}
-    if (end != trap_word(record + I64{24}) + trap_word(record + I64{32})) {
+    if (end != trap_word(wrapping(record + I64{24})) + trap_word(wrapping(record + I64{32}))) {
         jet_rt_string_drop(name)
         return dns_protocol(error, rt_static_text("DNS name record length mismatch"))
     }
@@ -691,7 +691,7 @@ fn dns_matching(packet: I64, records: I64, count: I64, name: I64, qtype: I64, in
         seen := false
         at := I64{0}
         loop at < visits {
-            prior :: trap_word(visited + at * I64{8})
+            prior :: trap_word(wrapping(visited + at * I64{8}))
             if dns_caseless_equal(rt_text_data(prior), rt_text_len(prior), rt_text_data(current), rt_text_len(current)) -> seen = true
             at += I64{1}
         }
@@ -699,14 +699,14 @@ fn dns_matching(packet: I64, records: I64, count: I64, name: I64, qtype: I64, in
             _ := dns_protocol(error, rt_static_text("cyclic DNS CNAME chain"))
             break
         }
-        trap_store(visited + visits * I64{8}, jet_rt_string_clone(current))
+        trap_store(wrapping(visited + visits * I64{8}), jet_rt_string_clone(current))
         visits += I64{1}
         found := I64{0}
         at = I64{0}
         loop at < count {
             row :: records + at * DNS_RECORD_BYTES
             owner :: trap_word(row)
-            if (trap_word(row + I64{16}) == I64{1} && trap_word(row + I64{8}) == qtype && dns_caseless_equal(rt_text_data(owner), rt_text_len(owner), rt_text_data(current), rt_text_len(current))) -> found += I64{1}
+            if (trap_word(wrapping(row + I64{16})) == I64{1} && trap_word(wrapping(row + I64{8})) == qtype && dns_caseless_equal(rt_text_data(owner), rt_text_len(owner), rt_text_data(current), rt_text_len(current))) -> found += I64{1}
             at += I64{1}
         }
         if (found > I64{0}) {
@@ -716,8 +716,8 @@ fn dns_matching(packet: I64, records: I64, count: I64, name: I64, qtype: I64, in
             loop at < count {
                 row :: records + at * DNS_RECORD_BYTES
                 owner :: trap_word(row)
-                if (trap_word(row + I64{16}) == I64{1} && trap_word(row + I64{8}) == qtype && dns_caseless_equal(rt_text_data(owner), rt_text_len(owner), rt_text_data(current), rt_text_len(current))) {
-                    trap_store(indices + kept * I64{8}, at)
+                if (trap_word(wrapping(row + I64{16})) == I64{1} && trap_word(wrapping(row + I64{8})) == qtype && dns_caseless_equal(rt_text_data(owner), rt_text_len(owner), rt_text_data(current), rt_text_len(current))) {
+                    trap_store(wrapping(indices + kept * I64{8}), at)
                     kept += I64{1}
                 }
                 at += I64{1}
@@ -732,14 +732,14 @@ fn dns_matching(packet: I64, records: I64, count: I64, name: I64, qtype: I64, in
         loop at < count {
             row :: records + at * DNS_RECORD_BYTES
             owner :: trap_word(row)
-            if (alias < I64{0} && trap_word(row + I64{16}) == I64{1} && trap_word(row + I64{8}) == I64{5} && dns_caseless_equal(rt_text_data(owner), rt_text_len(owner), rt_text_data(current), rt_text_len(current))) -> alias = at
+            if (alias < I64{0} && trap_word(wrapping(row + I64{16})) == I64{1} && trap_word(wrapping(row + I64{8})) == I64{5} && dns_caseless_equal(rt_text_data(owner), rt_text_len(owner), rt_text_data(current), rt_text_len(current))) -> alias = at
             at += I64{1}
         }
         if (alias < I64{0}) {
             result = true
             break
         }
-        target :: dns_record_name(packet, records + alias * DNS_RECORD_BYTES, error)
+        target :: dns_record_name(packet, wrapping(records + alias * DNS_RECORD_BYTES), error)
         if (target == I64{0}) -> break
         jet_rt_string_drop(current)
         current = rt_text_copy(rt_text_data(target), dns_trim_dots_length(target))
@@ -749,7 +749,7 @@ fn dns_matching(packet: I64, records: I64, count: I64, name: I64, qtype: I64, in
     if (hops == I64{16} && !result) -> _ := dns_protocol(error, rt_static_text("DNS CNAME chain exceeds 16 records"))
     loop visits > (I64{0}) {
         visits -= I64{1}
-        jet_rt_string_drop(trap_word(visited + visits * I64{8}))
+        jet_rt_string_drop(trap_word(wrapping(visited + visits * I64{8})))
     }
     jet_rt_free(visited, I64{17} * I64{8}, I64{8})
     jet_rt_string_drop(current)
@@ -764,17 +764,17 @@ fn dns_answer(server: I64, name: I64, qtype: I64, milliseconds: I64, error: I64)
     missing :: DNSAnswer{found: false, packet: I64{0}, records: I64{0}, count: I64{0}, indices: I64{0}, matches: I64{0}}
     out :: jet_rt_alloc(I64{40}, I64{8})
     thread_zero(out, I64{40})
-    if (dns_query(server, name, qtype, milliseconds, out, out + I64{8}, out + I64{16}, error) == I64{0}) {
+    if (dns_query(server, name, qtype, milliseconds, out, wrapping(out + I64{8}), wrapping(out + I64{16}), error) == I64{0}) {
         jet_rt_free(out, I64{40}, I64{8})
         return missing
     }
-    if !dns_matching(trap_word(out), trap_word(out + I64{8}), trap_word(out + I64{16}), name, qtype, out + I64{24}, out + I64{32}, error) {
-        dns_records_drop(trap_word(out + I64{8}), trap_word(out + I64{16}))
+    if !dns_matching(trap_word(out), trap_word(wrapping(out + I64{8})), trap_word(wrapping(out + I64{16})), name, qtype, wrapping(out + I64{24}), wrapping(out + I64{32}), error) {
+        dns_records_drop(trap_word(wrapping(out + I64{8})), trap_word(wrapping(out + I64{16})))
         jet_rt_string_drop(trap_word(out))
         jet_rt_free(out, I64{40}, I64{8})
         return missing
     }
-    answer :: DNSAnswer{found: true, packet: trap_word(out), records: trap_word(out + I64{8}), count: trap_word(out + I64{16}), indices: trap_word(out + I64{24}), matches: trap_word(out + I64{32})}
+    answer :: DNSAnswer{found: true, packet: trap_word(out), records: trap_word(wrapping(out + I64{8})), count: trap_word(wrapping(out + I64{16})), indices: trap_word(wrapping(out + I64{24})), matches: trap_word(wrapping(out + I64{32}))}
     jet_rt_free(out, I64{40}, I64{8})
     answer
 }
@@ -785,7 +785,7 @@ fn dns_answer_drop(answer: DNSAnswer) {
     jet_rt_string_drop(answer.packet)
 }
 
-fn dns_row(answer: DNSAnswer, at: I64) -> I64 { answer.records + trap_word(answer.indices + at * I64{8}) * DNS_RECORD_BYTES }
+fn dns_row(answer: DNSAnswer, at: I64) -> I64 { answer.records + trap_word(wrapping(answer.indices + at * I64{8})) * DNS_RECORD_BYTES }
 
 // The Result<List, Text> carrier: ok writes (data, length), error writes the
 // message into the shared payload slot.
@@ -807,10 +807,10 @@ fn dns_ip_lookup(server: I64, name: I64, milliseconds: I64, qtype: I64, width: I
     at := I64{0}
     loop at < answer.matches {
         row :: dns_row(answer, at)
-        if (trap_word(row + I64{32}) != width) {
+        if (trap_word(wrapping(row + I64{32})) != width) {
             loop at > (I64{0}) {
                 at -= I64{1}
-                jet_rt_handle_drop_jet_ip_addr(trap_word(handles + at * I64{8}))
+                jet_rt_handle_drop_jet_ip_addr(trap_word(wrapping(handles + at * I64{8})))
             }
             if (handles != I64{0}) -> jet_rt_free(handles, answer.matches * I64{8}, I64{8})
             dns_answer_drop(answer)
@@ -819,8 +819,8 @@ fn dns_ip_lookup(server: I64, name: I64, milliseconds: I64, qtype: I64, width: I
         address :: jet_rt_alloc(I64{24}, I64{8})
         thread_zero(address, I64{24})
         net_put(address, I64{0}, if (width == I64{4}) -> I64{4} else -> I64{6})
-        rt_text_bytes_copy(address + I64{8}, rt_text_data(answer.packet) + trap_word(row + I64{24}), width)
-        trap_store(handles + at * I64{8}, address)
+        rt_text_bytes_copy(wrapping(address + I64{8}), wrapping(rt_text_data(answer.packet) + trap_word(wrapping(row + I64{24}))), width)
+        trap_store(wrapping(handles + at * I64{8}), address)
         at += I64{1}
     }
     count :: answer.matches
@@ -844,19 +844,19 @@ fn dns_txt_at(server: I64, name: I64, milliseconds: I64, data_out: I64, length_o
     failed := false
     loop built < answer.matches && !failed {
         row :: dns_row(answer, built)
-        start :: rt_text_data(answer.packet) + trap_word(row + I64{24})
-        length :: trap_word(row + I64{32})
+        start :: wrapping(rt_text_data(answer.packet) + trap_word(wrapping(row + I64{24})))
+        length :: trap_word(wrapping(row + I64{32}))
         text :: jet_rt_string_builder_new()
         p := I64{0}
         loop p < length {
-            part :: rt_text_byte(start + p)
+            part :: rt_text_byte(wrapping(start + p))
             p += I64{1}
             if (p + part > length) {
                 _ := dns_protocol(error, rt_static_text("truncated DNS TXT record"))
                 failed = true
                 break
             }
-            if !env_utf8(start + p, part) {
+            if !env_utf8(wrapping(start + p), part) {
                 _ := dns_protocol(error, rt_static_text("DNS TXT record is not valid UTF-8"))
                 failed = true
                 break
@@ -867,7 +867,7 @@ fn dns_txt_at(server: I64, name: I64, milliseconds: I64, data_out: I64, length_o
         if failed {
             jet_rt_string_drop(text)
         } else {
-            trap_store(texts + built * I64{8}, text)
+            trap_store(wrapping(texts + built * I64{8}), text)
             built += I64{1}
         }
     }
@@ -876,7 +876,7 @@ fn dns_txt_at(server: I64, name: I64, milliseconds: I64, data_out: I64, length_o
     if failed {
         loop built > (I64{0}) {
             built -= I64{1}
-            jet_rt_string_drop(trap_word(texts + built * I64{8}))
+            jet_rt_string_drop(trap_word(wrapping(texts + built * I64{8})))
         }
         if (texts != I64{0}) -> jet_rt_free(texts, count * I64{8}, I64{8})
         return I64{0}
@@ -899,7 +899,7 @@ fn dns_ptr_at(server: I64, name: I64, milliseconds: I64, data_out: I64, length_o
     loop built < answer.matches {
         target :: dns_record_name(answer.packet, dns_row(answer, built), error)
         if (target == I64{0}) -> break
-        trap_store(texts + built * I64{8}, target)
+        trap_store(wrapping(texts + built * I64{8}), target)
         built += I64{1}
     }
     count :: answer.matches
@@ -907,7 +907,7 @@ fn dns_ptr_at(server: I64, name: I64, milliseconds: I64, data_out: I64, length_o
     if (built < count) {
         loop built > (I64{0}) {
             built -= I64{1}
-            jet_rt_string_drop(trap_word(texts + built * I64{8}))
+            jet_rt_string_drop(trap_word(wrapping(texts + built * I64{8})))
         }
         if (texts != I64{0}) -> jet_rt_free(texts, count * I64{8}, I64{8})
         return I64{0}
@@ -919,22 +919,22 @@ fn dns_ptr_at(server: I64, name: I64, milliseconds: I64, data_out: I64, length_o
 fn dns_srv_new(priority: I64, weight: I64, port: I64, target: I64) -> I64 {
     value :: jet_rt_alloc(I64{32}, I64{8})
     trap_store(value, priority)
-    trap_store(value + I64{8}, weight)
-    trap_store(value + I64{16}, port)
-    trap_store(value + I64{24}, target)
+    trap_store(wrapping(value + I64{8}), weight)
+    trap_store(wrapping(value + I64{16}), port)
+    trap_store(wrapping(value + I64{24}), target)
     value
 }
 #Export(c) fn jet_rt_record_new_jet_dns_srv(priority: I64, weight: I64, port: I64, target: I64) -> I64 {
     dns_srv_new(jet_int_owned_to_i64(priority), jet_int_owned_to_i64(weight), jet_int_owned_to_i64(port), jet_rt_string_clone(target))
 }
 #Export(c) fn jet_rt_record_get_jet_dns_srv_priority(value: I64) -> I64 { jet_int_owned_from_i64(trap_word(value)) }
-#Export(c) fn jet_rt_record_get_jet_dns_srv_weight(value: I64) -> I64 { jet_int_owned_from_i64(trap_word(value + I64{8})) }
-#Export(c) fn jet_rt_record_get_jet_dns_srv_port(value: I64) -> I64 { jet_int_owned_from_i64(trap_word(value + I64{16})) }
-#Export(c) fn jet_rt_record_get_jet_dns_srv_target(value: I64) -> I64 { jet_rt_string_clone(trap_word(value + I64{24})) }
-#Export(c) fn jet_rt_handle_clone_jet_dns_srv(value: I64) -> I64 { dns_srv_new(trap_word(value), trap_word(value + I64{8}), trap_word(value + I64{16}), jet_rt_string_clone(trap_word(value + I64{24}))) }
+#Export(c) fn jet_rt_record_get_jet_dns_srv_weight(value: I64) -> I64 { jet_int_owned_from_i64(trap_word(wrapping(value + I64{8}))) }
+#Export(c) fn jet_rt_record_get_jet_dns_srv_port(value: I64) -> I64 { jet_int_owned_from_i64(trap_word(wrapping(value + I64{16}))) }
+#Export(c) fn jet_rt_record_get_jet_dns_srv_target(value: I64) -> I64 { jet_rt_string_clone(trap_word(wrapping(value + I64{24}))) }
+#Export(c) fn jet_rt_handle_clone_jet_dns_srv(value: I64) -> I64 { dns_srv_new(trap_word(value), trap_word(wrapping(value + I64{8})), trap_word(wrapping(value + I64{16})), jet_rt_string_clone(trap_word(wrapping(value + I64{24})))) }
 #Export(c) fn jet_rt_handle_drop_jet_dns_srv(value: I64) {
     if (value == I64{0}) -> return
-    jet_rt_string_drop(trap_word(value + I64{24}))
+    jet_rt_string_drop(trap_word(wrapping(value + I64{24})))
     jet_rt_free(value, I64{32}, I64{8})
 }
 // NetHTTP.rs:603 "DNSSRV(priority=, weight=, port=, target=)".
@@ -943,11 +943,11 @@ fn dns_srv_new(priority: I64, weight: I64, port: I64, target: I64) -> I64 {
     jet_rt_string_builder_push(text, rt_static_text("DNSSRV(priority="))
     rt_text_push_number(text, trap_word(value))
     jet_rt_string_builder_push(text, rt_static_text(", weight="))
-    rt_text_push_number(text, trap_word(value + I64{8}))
+    rt_text_push_number(text, trap_word(wrapping(value + I64{8})))
     jet_rt_string_builder_push(text, rt_static_text(", port="))
-    rt_text_push_number(text, trap_word(value + I64{16}))
+    rt_text_push_number(text, trap_word(wrapping(value + I64{16})))
     jet_rt_string_builder_push(text, rt_static_text(", target="))
-    jet_rt_string_builder_push(text, trap_word(value + I64{24}))
+    jet_rt_string_builder_push(text, trap_word(wrapping(value + I64{24})))
     jet_rt_string_builder_push(text, rt_static_text(")"))
     text
 }
@@ -961,8 +961,8 @@ fn dns_srv_at(server: I64, name: I64, milliseconds: I64, data_out: I64, length_o
     position :: jet_rt_alloc(I64{8}, I64{8})
     loop built < answer.matches {
         row :: dns_row(answer, built)
-        start :: trap_word(row + I64{24})
-        length :: trap_word(row + I64{32})
+        start :: trap_word(wrapping(row + I64{24}))
+        length :: trap_word(wrapping(row + I64{32}))
         if (length < I64{7}) {
             _ := dns_protocol(error, rt_static_text("truncated DNS SRV record"))
             break
@@ -978,7 +978,7 @@ fn dns_srv_at(server: I64, name: I64, milliseconds: I64, data_out: I64, length_o
             _ := dns_protocol(error, rt_static_text("DNS SRV record length mismatch"))
             break
         }
-        trap_store(handles + built * I64{8}, dns_srv_new(priority, weight, port, target))
+        trap_store(wrapping(handles + built * I64{8}), dns_srv_new(priority, weight, port, target))
         built += I64{1}
     }
     jet_rt_free(position, I64{8}, I64{8})
@@ -987,7 +987,7 @@ fn dns_srv_at(server: I64, name: I64, milliseconds: I64, data_out: I64, length_o
     if (built < count) {
         loop built > (I64{0}) {
             built -= I64{1}
-            jet_rt_handle_drop_jet_dns_srv(trap_word(handles + built * I64{8}))
+            jet_rt_handle_drop_jet_dns_srv(trap_word(wrapping(handles + built * I64{8})))
         }
         if (handles != I64{0}) -> jet_rt_free(handles, count * I64{8}, I64{8})
         return I64{0}
@@ -1024,9 +1024,9 @@ fn dns_system_servers(servers_out: I64) -> I64 {
     start := I64{0}
     loop start < size {
         end := start
-        loop end < size && rt_text_byte(data + end) != (I64{10}) -> end += I64{1}
+        loop end < size && rt_text_byte(wrapping(data + end)) != (I64{10}) -> end += I64{1}
         line_end := start
-        loop line_end < end && rt_text_byte(data + line_end) != (I64{35}) -> line_end += I64{1}
+        loop line_end < end && rt_text_byte(wrapping(data + line_end)) != (I64{35}) -> line_end += I64{1}
         // Up to two whitespace-separated fields.
         fields := I64{0}
         first_start := I64{0}
@@ -1035,10 +1035,10 @@ fn dns_system_servers(servers_out: I64) -> I64 {
         second_end := I64{0}
         at := start
         loop at < line_end && fields < (I64{2}) {
-            loop at < line_end && dns_space_width(data + at) > (I64{0}) -> at += dns_space_width(data + at)
+            loop at < line_end && dns_space_width(wrapping(data + at)) > (I64{0}) -> at += dns_space_width(wrapping(data + at))
             if (at == line_end) -> break
             field :: at
-            loop at < line_end && dns_space_width(data + at) == (I64{0}) -> at += rt_text_width(data + at)
+            loop at < line_end && dns_space_width(wrapping(data + at)) == (I64{0}) -> at += rt_text_width(wrapping(data + at))
             if (fields == I64{0}) {
                 first_start = field
                 first_end = at
@@ -1048,12 +1048,12 @@ fn dns_system_servers(servers_out: I64) -> I64 {
             }
             fields += I64{1}
         }
-        if (fields == I64{2} && first_end - first_start == I64{10} && rt_text_equal_bytes(data + first_start, rt_text_data(rt_static_text("nameserver")), I64{10})) {
+        if (fields == I64{2} && first_end - first_start == I64{10} && rt_text_equal_bytes(wrapping(data + first_start), rt_text_data(rt_static_text("nameserver")), I64{10})) {
             host_start := second_start
             host_end := second_end
-            loop host_start < host_end && (rt_text_byte(data + host_start) == I64{91} || rt_text_byte(data + host_start) == I64{93}) -> host_start += I64{1}
-            loop host_end > host_start && (rt_text_byte(data + host_end - I64{1}) == I64{91} || rt_text_byte(data + host_end - I64{1}) == I64{93}) -> host_end -= I64{1}
-            host :: rt_text_copy(data + host_start, host_end - host_start)
+            loop host_start < host_end && (rt_text_byte(wrapping(data + host_start)) == I64{91} || rt_text_byte(wrapping(data + host_start)) == I64{93}) -> host_start += I64{1}
+            loop host_end > host_start && (rt_text_byte(wrapping(wrapping(data + host_end) - I64{1})) == I64{91} || rt_text_byte(wrapping(wrapping(data + host_end) - I64{1})) == I64{93}) -> host_end -= I64{1}
+            host :: rt_text_copy(wrapping(data + host_start), host_end - host_start)
             shown :: dns_server_text(host)
             jet_rt_string_drop(host)
             if (shown != I64{0}) {
@@ -1064,7 +1064,7 @@ fn dns_system_servers(servers_out: I64) -> I64 {
                     servers = grown
                     capacity = capacity * I64{2}
                 }
-                trap_store(servers + count * I64{8}, shown)
+                trap_store(wrapping(servers + count * I64{8}), shown)
                 count += I64{1}
             }
         }
@@ -1074,30 +1074,30 @@ fn dns_system_servers(servers_out: I64) -> I64 {
     // Sort (byte order) and drop adjacent duplicates.
     i := I64{1}
     loop i < count {
-        item :: trap_word(servers + i * I64{8})
+        item :: trap_word(wrapping(servers + i * I64{8}))
         j := i
-        loop j > (I64{0}) && jet_rt_string_compare(trap_word(servers + (j - I64{1}) * I64{8}), item) > (I64{0}) {
-            trap_store(servers + j * I64{8}, trap_word(servers + (j - I64{1}) * I64{8}))
+        loop j > (I64{0}) && jet_rt_string_compare(trap_word(wrapping(servers + (j - I64{1}) * I64{8})), item) > (I64{0}) {
+            trap_store(wrapping(servers + j * I64{8}), trap_word(wrapping(servers + (j - I64{1}) * I64{8})))
             j -= I64{1}
         }
-        trap_store(servers + j * I64{8}, item)
+        trap_store(wrapping(servers + j * I64{8}), item)
         i += I64{1}
     }
     kept := I64{0}
     i = I64{0}
     loop i < count {
-        item :: trap_word(servers + i * I64{8})
-        if (kept > I64{0} && jet_rt_string_eq(trap_word(servers + (kept - I64{1}) * I64{8}), item)) {
+        item :: trap_word(wrapping(servers + i * I64{8}))
+        if (kept > I64{0} && jet_rt_string_eq(trap_word(wrapping(servers + (kept - I64{1}) * I64{8})), item)) {
             jet_rt_string_drop(item)
         } else {
-            trap_store(servers + kept * I64{8}, item)
+            trap_store(wrapping(servers + kept * I64{8}), item)
             kept += I64{1}
         }
         i += I64{1}
     }
     // The buffer keeps its full capacity; callers free capacity words.
     trap_store(servers_out, servers)
-    trap_store(servers_out + I64{8}, capacity)
+    trap_store(wrapping(servers_out + I64{8}), capacity)
     kept
 }
 
@@ -1133,7 +1133,7 @@ fn dns_server_text(host: I64) -> I64 {
 fn dns_servers_drop(servers: I64, count: I64, capacity: I64) {
     at := I64{0}
     loop at < count {
-        jet_rt_string_drop(trap_word(servers + at * I64{8}))
+        jet_rt_string_drop(trap_word(wrapping(servers + at * I64{8})))
         at += I64{1}
     }
     jet_rt_free(servers, capacity * I64{8}, I64{8})
@@ -1150,18 +1150,18 @@ fn dns_system_lookup_kind(name: I64, milliseconds: I64, kind: I64, data_out: I64
     list :: jet_rt_alloc(I64{16}, I64{8})
     count :: dns_system_servers(list)
     if (jet_scheduler_native_propagate() != I64{0}) {
-        if (trap_word(list) != I64{0}) -> dns_servers_drop(trap_word(list), count, trap_word(list + I64{8}))
+        if (trap_word(list) != I64{0}) -> dns_servers_drop(trap_word(list), count, trap_word(wrapping(list + I64{8})))
         jet_rt_free(list, I64{16}, I64{8})
         return I64{0}
     }
     if (count == I64{0}) {
-        if (trap_word(list) != I64{0}) -> jet_rt_free(trap_word(list), trap_word(list + I64{8}) * I64{8}, I64{8})
+        if (trap_word(list) != I64{0}) -> jet_rt_free(trap_word(list), trap_word(wrapping(list + I64{8})) * I64{8}, I64{8})
         jet_rt_free(list, I64{16}, I64{8})
         message :: if (kind == I64{0}) -> rt_static_text("host DNS configuration has no resolver for TXT lookup") else if (kind == I64{1}) -> rt_static_text("host DNS configuration has no resolver for PTR lookup") else -> rt_static_text("host DNS configuration has no resolver for SRV lookup")
         return dns_fail(error, jet_rt_string_clone(message))
     }
     servers :: trap_word(list)
-    capacity :: trap_word(list + I64{8})
+    capacity :: trap_word(wrapping(list + I64{8}))
     jet_rt_free(list, I64{16}, I64{8})
     last := jet_rt_string_builder_new()
     result := I64{0}
@@ -1175,7 +1175,7 @@ fn dns_system_lookup_kind(name: I64, milliseconds: I64, kind: I64, data_out: I64
         }
         // Duration::as_millis truncates.
         budget :: remaining /% I64{1000000}
-        server :: trap_word(servers + at * I64{8})
+        server :: trap_word(wrapping(servers + at * I64{8}))
         status :: if (kind == I64{0}) -> dns_txt_at(server, name, budget, data_out, length_out, error) else if (kind == I64{1}) -> dns_ptr_at(server, name, budget, data_out, length_out, error) else -> dns_srv_at(server, name, budget, data_out, length_out, error)
         if (status == I64{1}) {
             result = I64{1}
@@ -1215,12 +1215,12 @@ fn dns_system_addresses(name: I64, milliseconds: I64, rows_out: I64, count_out: 
     net_put(job, I64{0}, I64{2})
     host :: jet_rt_alloc(length + I64{1}, I64{1})
     rt_text_bytes_copy(host, rt_text_data(name), length)
-    rt_text_put(host + length, I64{0})
+    rt_text_put(wrapping(host + length), I64{0})
     net_put(job, I64{24}, host)
     net_put(job, I64{32}, length)
     net_put(job, I64{40}, I64{0})
     net_put(job, I64{72}, sync_park_new())
-    net_store_uint(job + I64{88}, I64{4}, I64{1})
+    net_store_uint(wrapping(job + I64{88}), I64{4}, I64{1})
     worker :: thread_spawn(rt_net_resolver_worker_address(), job)
     if (worker < I64{0}) {
         net_resolver_job_drop(job)
@@ -1232,8 +1232,8 @@ fn dns_system_addresses(name: I64, milliseconds: I64, rows_out: I64, count_out: 
     loop {
         slice :: dns_slice_ms(deadline, name, error)
         if (slice == I64{0}) -> break
-        if (sync_load(job + I64{16}) != I64{0}) {
-            sync_mutex_lock(job + I64{8})
+        if (sync_load(wrapping(job + I64{16})) != I64{0}) {
+            sync_mutex_lock(wrapping(job + I64{8}))
             failure :: net_word(job, I64{64})
             if (failure != I64{0}) {
                 _ := dns_fail(error, dns_named(rt_static_text("DNS lookup for `"), name, rt_static_text("` failed: ")))
@@ -1244,7 +1244,7 @@ fn dns_system_addresses(name: I64, milliseconds: I64, rows_out: I64, count_out: 
                 net_put(job, I64{48}, I64{0})
                 result = I64{1}
             }
-            sync_mutex_unlock(job + I64{8})
+            sync_mutex_unlock(wrapping(job + I64{8}))
             break
         }
         _ := sync_park(net_word(job, I64{72}), slice * I64{1000000})
@@ -1260,31 +1260,31 @@ fn dns_system_ip(name: I64, milliseconds: I64, family: I64, data_out: I64, lengt
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
     scratch :: jet_rt_alloc(I64{16}, I64{8})
     thread_zero(scratch, I64{16})
-    if (dns_system_addresses(name, native, scratch, scratch + I64{8}, error) == I64{0}) {
+    if (dns_system_addresses(name, native, scratch, wrapping(scratch + I64{8}), error) == I64{0}) {
         jet_rt_free(scratch, I64{16}, I64{8})
         return I64{0}
     }
     rows :: trap_word(scratch)
-    count :: trap_word(scratch + I64{8})
+    count :: trap_word(wrapping(scratch + I64{8}))
     jet_rt_free(scratch, I64{16}, I64{8})
     width :: if (family == I64{4}) -> I64{4} else -> I64{16}
     handles := if (count == I64{0}) -> I64{0} else -> jet_rt_alloc(count * I64{8}, I64{8})
     kept := I64{0}
     at := I64{0}
     loop at < count {
-        row :: rows + at * I64{56}
+        row :: wrapping(rows + at * I64{56})
         if (net_word(row, I64{0}) == family) {
             // Insertion position by address bytes; equal bytes are dropped.
             position := kept
             duplicate := false
             scan := I64{0}
             loop scan < kept {
-                order :: rt_text_first_difference(row + I64{8}, trap_word(handles + scan * I64{8}) + I64{8}, width)
+                order :: rt_text_first_difference(wrapping(row + I64{8}), wrapping(trap_word(wrapping(handles + scan * I64{8})) + I64{8}), width)
                 if (order == width) {
                     duplicate = true
                     break
                 }
-                if (rt_text_byte(row + I64{8} + order) < rt_text_byte(trap_word(handles + scan * I64{8}) + I64{8} + order)) {
+                if (rt_text_byte(wrapping(wrapping(row + I64{8}) + order)) < rt_text_byte(wrapping(wrapping(trap_word(wrapping(handles + scan * I64{8})) + I64{8}) + order))) {
                     position = scan
                     break
                 }
@@ -1293,12 +1293,12 @@ fn dns_system_ip(name: I64, milliseconds: I64, family: I64, data_out: I64, lengt
             if !duplicate {
                 move := kept
                 loop move > position {
-                    trap_store(handles + move * I64{8}, trap_word(handles + (move - I64{1}) * I64{8}))
+                    trap_store(wrapping(handles + move * I64{8}), trap_word(wrapping(handles + (move - I64{1}) * I64{8})))
                     move -= I64{1}
                 }
                 address :: jet_rt_alloc(I64{24}, I64{8})
                 coll_copy(row, address, I64{24})
-                trap_store(handles + position * I64{8}, address)
+                trap_store(wrapping(handles + position * I64{8}), address)
                 kept += I64{1}
             }
         }
@@ -1377,6 +1377,6 @@ fn dns_net_result(status: I64, name: I64, error: I64) -> I64 {
 
 // NetHTTP.rs:4297-4311 and CAbiRoutes.rs:22469-22495: SRV field reads.
 #Export(c) fn jet_net_dns_srv_priority(value: I64) -> I64 { jet_int_owned_from_i64(trap_word(value)) }
-#Export(c) fn jet_net_dns_srv_weight(value: I64) -> I64 { jet_int_owned_from_i64(trap_word(value + I64{8})) }
-#Export(c) fn jet_net_dns_srv_port(value: I64) -> I64 { jet_int_owned_from_i64(trap_word(value + I64{16})) }
-#Export(c) fn jet_net_dns_srv_target(value: I64) -> I64 { jet_rt_string_clone(trap_word(value + I64{24})) }
+#Export(c) fn jet_net_dns_srv_weight(value: I64) -> I64 { jet_int_owned_from_i64(trap_word(wrapping(value + I64{8}))) }
+#Export(c) fn jet_net_dns_srv_port(value: I64) -> I64 { jet_int_owned_from_i64(trap_word(wrapping(value + I64{16}))) }
+#Export(c) fn jet_net_dns_srv_target(value: I64) -> I64 { jet_rt_string_clone(trap_word(wrapping(value + I64{24}))) }

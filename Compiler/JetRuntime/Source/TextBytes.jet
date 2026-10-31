@@ -13,15 +13,15 @@ fn text_bytes_push(target: I64, data: I64, start: I64, count: I64) {
     buffer :: rt_text_reserve_extra(target, rt_text_data(target), used, count)
     if (buffer == I64{0}) -> return
     if (RT_HOST_U8_STRIDE == I64{1}) {
-        rt_text_bytes_copy(buffer + used, data + start, count)
+        rt_text_bytes_copy(wrapping(buffer + used), wrapping(data + start), count)
     } else {
         at := I64{0}
         loop at < count {
-            rt_text_put(buffer + used + at, host_u8_get(data, start + at))
+            rt_text_put(wrapping(wrapping(buffer + used) + at), host_u8_get(data, start + at))
             at += I64{1}
         }
     }
-    rt_text_store(target + I64{8}, used + count)
+    rt_text_store(wrapping(target + I64{8}), used + count)
 }
 
 // Rust Utf8Error Display of the first invalid sequence, or 0 when the native
@@ -31,11 +31,11 @@ fn text_bytes_utf8_error(data: I64, length: I64) -> I64 {
     at := I64{0}
     loop at < length {
         // Packed ASCII words (no byte with the high bit) are valid as a whole.
-        if (RT_HOST_U8_STRIDE == I64{1} && length - at >= I64{8} && rt_text_word(data + at).bit_and(I64{-9187201950435737472}) == I64{0}) {
+        if (RT_HOST_U8_STRIDE == I64{1} && length - at >= I64{8} && rt_text_word(wrapping(data + at)).bit_and(I64{-9187201950435737472}) == I64{0}) {
             at += I64{8}
             next
         }
-        width :: rt_text_valid_width(data + at * RT_HOST_U8_STRIDE, length - at, RT_HOST_U8_STRIDE)
+        width :: rt_text_valid_width(wrapping(data + at * RT_HOST_U8_STRIDE), length - at, RT_HOST_U8_STRIDE)
         if (width < I64{0}) {
             message :: jet_rt_string_builder_new()
             lead :: host_u8_get(data, at)
@@ -90,7 +90,7 @@ fn text_bytes_owned(data: I64, length: I64) -> I64 {
     result :: rt_text_builder_with_capacity(length)
     at := I64{0}
     loop at < length {
-        width :: rt_text_valid_width(data + at * RT_HOST_U8_STRIDE, length - at, RT_HOST_U8_STRIDE)
+        width :: rt_text_valid_width(wrapping(data + at * RT_HOST_U8_STRIDE), length - at, RT_HOST_U8_STRIDE)
         if (width < I64{0}) {
             rt_text_push_scalar(result, I64{65533})
             at -= width
@@ -125,7 +125,7 @@ fn text_bytes_owned(data: I64, length: I64) -> I64 {
     } else {
         at := I64{0}
         loop at < length {
-            host_u8_put(bytes, at, rt_text_byte(data + at))
+            host_u8_put(bytes, at, rt_text_byte(wrapping(data + at)))
             at += I64{1}
         }
     }
@@ -142,5 +142,5 @@ fn text_bytes_owned(data: I64, length: I64) -> I64 {
         trap_native_index_range_stop()
         return I64{0}
     }
-    rt_text_byte(rt_text_data(value) + at)
+    rt_text_byte(wrapping(rt_text_data(value) + at))
 }

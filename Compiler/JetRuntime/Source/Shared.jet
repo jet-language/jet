@@ -28,16 +28,16 @@ fn shared_retain(shared: I64) {
 // Reserve a physical borrow while a logical owner is still live. Mutex
 // serialization with retirement closes the last-owner/acquire race.
 fn shared_borrow_pin(cell: I64) -> Bool {
-    sync_mutex_lock(cell + I64{8})
+    sync_mutex_lock(wrapping(cell + I64{8}))
     retained :: shared_count_retain(cell, true)
-    if retained -> _ := sync_add(cell + I64{72}, I64{1})
-    sync_mutex_unlock(cell + I64{8})
+    if retained -> _ := sync_add(wrapping(cell + I64{72}), I64{1})
+    sync_mutex_unlock(wrapping(cell + I64{8}))
     retained
 }
 fn shared_borrow_unpin(cell: I64) {
-    sync_mutex_lock(cell + I64{8})
-    _ := sync_add(cell + I64{72}, I64{-1})
-    sync_mutex_unlock(cell + I64{8})
+    sync_mutex_lock(wrapping(cell + I64{8}))
+    _ := sync_add(wrapping(cell + I64{72}), I64{-1})
+    sync_mutex_unlock(wrapping(cell + I64{8}))
     shared_count_release(cell, true)
 }
 
@@ -70,19 +70,19 @@ fn shared_spin(mutex: I64, round: I64) -> Bool {
 }
 
 fn shared_acquire(shared: I64, editable: Bool) {
-    mutex :: shared + I64{8}
+    mutex :: wrapping(shared + I64{8})
     sync_mutex_lock(mutex)
-    if editable -> _ := sync_add(shared + I64{40}, I64{1})
+    if editable -> _ := sync_add(wrapping(shared + I64{40}), I64{1})
     round := I64{0}
     loop {
-        available :: sync_load(shared + I64{32}) == I64{0} && (if editable -> sync_load(shared + I64{24}) == I64{0} else -> sync_load(shared + I64{40}) == I64{0})
+        available :: sync_load(wrapping(shared + I64{32})) == I64{0} && (if editable -> sync_load(wrapping(shared + I64{24})) == I64{0} else -> sync_load(wrapping(shared + I64{40})) == I64{0})
         if available {
             if {
                 editable -> {
-                    _ := sync_add(shared + I64{40}, I64{-1})
-                    sync_store(shared + I64{32}, I64{1})
+                    _ := sync_add(wrapping(shared + I64{40}), I64{-1})
+                    sync_store(wrapping(shared + I64{32}), I64{1})
                 }
-                else -> { _ := sync_add(shared + I64{24}, I64{1}) }
+                else -> { _ := sync_add(wrapping(shared + I64{24}), I64{1}) }
             }
             sync_mutex_unlock(mutex)
             return
@@ -94,24 +94,24 @@ fn shared_acquire(shared: I64, editable: Bool) {
         // These callback doors never observe cancellation.
         // Compensation is required, but cancellation must not change meaning.
         scheduler_blocking_wait_enter()
-        _ := sync_cond_wait(shared + I64{16}, mutex, sync_deadline(I64{10000000}))
+        _ := sync_cond_wait(wrapping(shared + I64{16}), mutex, sync_deadline(I64{10000000}))
         scheduler_blocking_wait_leave()
     }
 }
 
 fn shared_release(shared: I64, editable: Bool) {
-    sync_mutex_lock(shared + I64{8})
+    sync_mutex_lock(wrapping(shared + I64{8}))
     if {
-        editable -> sync_store(shared + I64{32}, I64{0})
-        else -> { _ := sync_add(shared + I64{24}, I64{-1}) }
+        editable -> sync_store(wrapping(shared + I64{32}), I64{0})
+        else -> { _ := sync_add(wrapping(shared + I64{24}), I64{-1}) }
     }
-    sync_cond_notify_all(shared + I64{16})
-    sync_mutex_unlock(shared + I64{8})
+    sync_cond_notify_all(wrapping(shared + I64{16}))
+    sync_mutex_unlock(wrapping(shared + I64{8}))
 }
 
 fn shared_revision_stop() {
     message :: channel_text(I64{3})
-    if !rt_task_panic_publish(sync_load(message), sync_load(message + I64{8}), I64{0}) {
+    if !rt_task_panic_publish(sync_load(message), sync_load(wrapping(message + I64{8})), I64{0}) {
         scheduler_fatal(message)
         return
     }
@@ -125,17 +125,17 @@ fn shared_revision_stop() {
     payload :: coll_slot_new(owned_meta)
     coll_copy(slot, payload, coll_payload(owned_meta))
     sync_store(shared, I64{1})
-    sync_store(shared + I64{56}, owned_meta)
-    sync_store(shared + I64{64}, payload)
-    sync_store(shared + I64{80}, drop_code)
-    sync_store(shared + I64{88}, I64{1})
+    sync_store(wrapping(shared + I64{56}), owned_meta)
+    sync_store(wrapping(shared + I64{64}), payload)
+    sync_store(wrapping(shared + I64{80}), drop_code)
+    sync_store(wrapping(shared + I64{88}), I64{1})
     shared
 }
 
 #Export(c) fn jet_rt_native_shared_read(shared: I64, env: I64, invoke: I64, out: I64) {
     if !shared_borrow_pin(shared) -> return
     shared_acquire(shared, false)
-    _ := coll_call3(invoke, env, sync_load(shared + I64{64}), out)
+    _ := coll_call3(invoke, env, sync_load(wrapping(shared + I64{64})), out)
     // No output is inspected here: a stopped callback leaves it uninitialized.
     shared_release(shared, false)
     shared_borrow_unpin(shared)
@@ -148,7 +148,7 @@ fn shared_revision_begin(shared: I64, revision: I64) -> Bool {
     shared_release(shared, true)
     jet_rt_native_shared_drop(shared)
     message :: channel_text(I64{3})
-    if !rt_task_panic_publish(sync_load(message), sync_load(message + I64{8}), I64{0}) {
+    if !rt_task_panic_publish(sync_load(message), sync_load(wrapping(message + I64{8})), I64{0}) {
         scheduler_fatal(message)
         return false
     }
@@ -159,16 +159,16 @@ fn shared_revision_begin(shared: I64, revision: I64) -> Bool {
 #Export(c) fn jet_rt_native_shared_edit(shared: I64, env: I64, invoke: I64, out: I64) {
     if !shared_borrow_pin(shared) -> return
     shared_acquire(shared, true)
-    revision :: sync_load(shared + I64{48})
+    revision :: sync_load(wrapping(shared + I64{48}))
     if (revision == I64{-1}) {
         shared_release(shared, true)
         shared_borrow_unpin(shared)
         shared_revision_stop()
         return
     }
-    _ := coll_call3(invoke, env, sync_load(shared + I64{64}), out)
+    _ := coll_call3(invoke, env, sync_load(wrapping(shared + I64{64})), out)
     if (jet_rt_session_propagate() == I64{0}) {
-        sync_store(shared + I64{48}, wrapping(revision + I64{1}))
+        sync_store(wrapping(shared + I64{48}), wrapping(revision + I64{1}))
     }
     shared_release(shared, true)
     shared_borrow_unpin(shared)
@@ -182,7 +182,7 @@ fn shared_revision_begin(shared: I64, revision: I64) -> Bool {
 #Export(c) fn jet_rt_native_shared_try_replace(shared: I64, owner: I64, revision: I64, slot: I64) -> I64 {
     if !shared_borrow_pin(shared) -> return I64{0}
     shared_acquire(shared, true)
-    current :: sync_load(shared + I64{48})
+    current :: sync_load(wrapping(shared + I64{48}))
     if (current == I64{-1}) {
         shared_release(shared, true)
         shared_borrow_unpin(shared)
@@ -191,11 +191,11 @@ fn shared_revision_begin(shared: I64, revision: I64) -> Bool {
     }
     published := I64{0}
     if owner == shared && current == revision {
-        payload :: sync_load(shared + I64{64})
-        drop_code :: sync_load(shared + I64{80})
+        payload :: sync_load(wrapping(shared + I64{64}))
+        drop_code :: sync_load(wrapping(shared + I64{80}))
         if drop_code != (I64{0}) -> _ := coll_call1(drop_code, payload)
-        coll_copy(slot, payload, coll_payload(sync_load(shared + I64{56})))
-        sync_store(shared + I64{48}, wrapping(revision + I64{1}))
+        coll_copy(slot, payload, coll_payload(sync_load(wrapping(shared + I64{56}))))
+        sync_store(wrapping(shared + I64{48}), wrapping(revision + I64{1}))
         published = I64{1}
     }
     shared_release(shared, true)
@@ -236,7 +236,7 @@ fn shared_guard_unproject(guard: I64) -> I64 {
     current := guard
     loop shared_guard_projected(current) {
         token :: shared_guard_token(current)
-        if (sync_add(token + I64{16}, I64{-1}) != I64{1}) -> return I64{0}
+        if (sync_add(wrapping(token + I64{16}), I64{-1}) != I64{1}) -> return I64{0}
         current = sync_load(token)
         jet_rt_free(token, I64{24}, I64{8})
     }
@@ -247,10 +247,10 @@ fn shared_guard_invalid() {
     text :: scheduler_text_new(I64{34})
     buffer :: sync_load(text)
     sync_store(buffer, I64{8450833612657485907})
-    sync_store(buffer + I64{8}, I64{7575181468589388385})
-    sync_store(buffer + I64{16}, I64{8007510541417412206})
-    sync_store(buffer + I64{24}, I64{8314037903335497842})
-    sync_store(buffer + I64{32}, I64{25701})
+    sync_store(wrapping(buffer + I64{8}), I64{7575181468589388385})
+    sync_store(wrapping(buffer + I64{16}), I64{8007510541417412206})
+    sync_store(wrapping(buffer + I64{24}), I64{8314037903335497842})
+    sync_store(wrapping(buffer + I64{32}), I64{25701})
     if !rt_task_panic_publish(buffer, I64{34}, I64{0}) -> scheduler_fatal(text)
     jet_rt_string_drop(text)
 }
@@ -260,14 +260,14 @@ fn shared_guard_payload(guard: I64) -> I64 {
     root := guard
     loop shared_guard_projected(root) {
         token :: shared_guard_token(root)
-        offset = wrapping(offset + sync_load(token + I64{8}))
+        offset = wrapping(offset + sync_load(wrapping(token + I64{8})))
         root = sync_load(token)
     }
     if !shared_guard_held(root) {
         shared_guard_invalid()
         return I64{0}
     }
-    wrapping(sync_load(shared_guard_cell(root) + I64{64}) + offset)
+    wrapping(sync_load(wrapping(shared_guard_cell(root) + I64{64})) + offset)
 }
 
 // `guard.map(value -> value.field)`: a guard lending the stored field at
@@ -275,8 +275,8 @@ fn shared_guard_payload(guard: I64) -> I64 {
 #Export(c) fn jet_rt_native_shared_guard_project(guard: I64, offset: I64) -> I64 {
     token :: jet_rt_alloc(I64{24}, I64{8})
     sync_store(token, guard)
-    sync_store(token + I64{8}, offset)
-    sync_store(token + I64{16}, I64{1})
+    sync_store(wrapping(token + I64{8}), offset)
+    sync_store(wrapping(token + I64{16}), I64{1})
     token.bit_or(I64{2})
 }
 
@@ -286,8 +286,8 @@ fn shared_guard_payload(guard: I64) -> I64 {
 #Export(c) fn jet_rt_native_shared_guard_share(guard: I64) -> I64 {
     token :: jet_rt_alloc(I64{24}, I64{8})
     sync_store(token, guard)
-    sync_store(token + I64{8}, I64{0})
-    sync_store(token + I64{16}, I64{2})
+    sync_store(wrapping(token + I64{8}), I64{0})
+    sync_store(wrapping(token + I64{16}), I64{2})
     token.bit_or(I64{2})
 }
 
@@ -317,7 +317,7 @@ fn shared_guard_payload(guard: I64) -> I64 {
         shared_guard_invalid()
         return I64{0}
     }
-    sync_load(shared_guard_cell(root) + I64{48})
+    sync_load(wrapping(shared_guard_cell(root) + I64{48}))
 }
 
 #Export(c) fn jet_rt_native_shared_read_guard_drop(guard: I64) {
@@ -336,11 +336,11 @@ fn shared_guard_payload(guard: I64) -> I64 {
         jet_rt_native_shared_drop(cell)
         return
     }
-    revision :: sync_load(cell + I64{48})
+    revision :: sync_load(wrapping(cell + I64{48}))
     exhausted :: revision == I64{-1}
     // An edit guard is dirty from acquisition: even a
     // read-only edit guard, or a drop on a delivered stop rail, commits once.
-    if !exhausted -> sync_store(cell + I64{48}, wrapping(revision + I64{1}))
+    if !exhausted -> sync_store(wrapping(cell + I64{48}), wrapping(revision + I64{1}))
     shared_release(cell, true)
     jet_rt_native_shared_drop(cell)
     // The payload's final drop glue may reenter Shared. The permit and guard
@@ -356,13 +356,13 @@ fn shared_guard_payload(guard: I64) -> I64 {
 // A cell retires when it has no logical owners AND no
 // lifetime physical borrowers. A passive pin retains only the cell allocation.
 fn shared_count_release(shared: I64, pin: Bool) {
-    sync_mutex_lock(shared + I64{8})
+    sync_mutex_lock(wrapping(shared + I64{8}))
     refs := sync_load(shared)
     next := refs
     loop {
         count :: if pin -> refs >> I64{32} else -> refs.bit_and(I64{4294967295})
         if count == (I64{0}) {
-            sync_mutex_unlock(shared + I64{8})
+            sync_mutex_unlock(wrapping(shared + I64{8}))
             shared_guard_invalid()
             return
         }
@@ -374,18 +374,18 @@ fn shared_count_release(shared: I64, pin: Bool) {
     meta := I64{0}
     payload := I64{0}
     drop_code := I64{0}
-    if (next.bit_and(I64{4294967295})) == (I64{0}) && sync_load(shared + I64{72}) == (I64{0}) {
-        meta = sync_load(shared + I64{56})
-        payload = sync_load(shared + I64{64})
-        drop_code = sync_load(shared + I64{80})
-        sync_store(shared + I64{56}, I64{0})
-        sync_store(shared + I64{64}, I64{0})
+    if (next.bit_and(I64{4294967295})) == (I64{0}) && sync_load(wrapping(shared + I64{72})) == (I64{0}) {
+        meta = sync_load(wrapping(shared + I64{56}))
+        payload = sync_load(wrapping(shared + I64{64}))
+        drop_code = sync_load(wrapping(shared + I64{80}))
+        sync_store(wrapping(shared + I64{56}), I64{0})
+        sync_store(wrapping(shared + I64{64}), I64{0})
     }
     // Keep the cell alive across out-of-lock finalizer reentry even if another
     // releasing pin wins the whole-word-zero transition meanwhile.
     temporary_weak :: meta != I64{0} || next == I64{0}
-    if temporary_weak -> _ := sync_add(shared + I64{88}, I64{1})
-    sync_mutex_unlock(shared + I64{8})
+    if temporary_weak -> _ := sync_add(wrapping(shared + I64{88}), I64{1})
+    sync_mutex_unlock(wrapping(shared + I64{8}))
     if meta != (I64{0}) {
         if drop_code != (I64{0}) -> _ := coll_call1(drop_code, payload)
         jet_rt_free(payload, coll_size(meta), I64{8})
@@ -401,14 +401,14 @@ fn shared_count_release(shared: I64, pin: Bool) {
 fn shared_weak_release(weak: I64) {
     // sync_add is Linux's lock xadd; its full fence releases prior destruction
     // and acquires preceding weak retirements before the last cell free.
-    if (sync_add(weak + I64{88}, I64{-1}) == I64{1}) {
+    if (sync_add(wrapping(weak + I64{88}), I64{-1}) == I64{1}) {
         jet_rt_free(weak, I64{96}, I64{8})
     }
 }
 
 #Export(c) fn jet_rt_native_shared_downgrade(shared: I64) -> I64 {
     // The caller borrows a live strong owner, hence the implicit weak is live.
-    _ := sync_add(shared + I64{88}, I64{1})
+    _ := sync_add(wrapping(shared + I64{88}), I64{1})
     shared
 }
 
@@ -436,7 +436,7 @@ shared_registered := I64{0}
     if (shared_registered == I64{0}) {
         shared_registered = jet_rt_alloc(I64{16}, I64{8})
         sync_store(shared_registered, I64{0})
-        sync_store(shared_registered + I64{8}, I64{1})
+        sync_store(wrapping(shared_registered + I64{8}), I64{1})
     }
 }
 
@@ -448,11 +448,11 @@ shared_registered := I64{0}
             if (sync_load(node) == cell) {
                 return
             }
-            node = sync_load(node + I64{8})
+            node = sync_load(wrapping(node + I64{8}))
         }
         candidate :: jet_rt_alloc(I64{16}, I64{8})
         sync_store(candidate, cell)
-        sync_store(candidate + I64{8}, first)
+        sync_store(wrapping(candidate + I64{8}), first)
         // Global publication uses the one IR .Global address mechanism.
         if shared_registry_publish(first, candidate) {
             return
@@ -479,7 +479,7 @@ fn shared_registry_publish(expected: I64, candidate: I64) -> Bool {
     node := sync_load(shared_registered)
     loop node != (I64{0}) {
         jet_rt_native_shared_drop(sync_swap(sync_load(node), I64{0}))
-        node = sync_load(node + I64{8})
+        node = sync_load(wrapping(node + I64{8}))
     }
 }
 
@@ -497,13 +497,13 @@ fn shared_registry_publish(expected: I64, candidate: I64) -> Bool {
     if pin != (I64{0}) -> shared_count_release(pin, true)
 }
 fn shared_alias_next() -> I64 {
-    next := sync_load(shared_registered + I64{8})
+    next := sync_load(wrapping(shared_registered + I64{8}))
     loop {
         if next == (I64{9223372036854775807}) {
             jet_rt_panic_overflow()
             return I64{0}
         }
-        previous :: sync_cas(shared_registered + I64{8}, next, next + I64{1})
+        previous :: sync_cas(wrapping(shared_registered + I64{8}), next, next + I64{1})
         if previous == next -> return next
         next = previous
     }
@@ -520,20 +520,20 @@ fn shared_alias_next() -> I64 {
         jet_rt_free(alias, I64{24}, I64{8})
         return false
     }
-    sync_store(alias + I64{8}, token)
-    sync_store(alias + I64{16}, I64{1})
+    sync_store(wrapping(alias + I64{8}), token)
+    sync_store(wrapping(alias + I64{16}), I64{1})
     sync_store(out, alias)
     true
 }
 #Export(c) fn jet_rt_shared_alias_token(alias: I64) -> I64 {
-    sync_load(alias + I64{8})
+    sync_load(wrapping(alias + I64{8}))
 }
 #Export(c) fn jet_rt_shared_alias_drop(owned_slot: I64) {
     alias :: sync_load(owned_slot)
     if alias == (I64{0}) -> return
     sync_store(owned_slot, I64{0})
-    if sync_load(alias + I64{16}) != (I64{0}) {
-        sync_store(alias + I64{16}, I64{0})
+    if sync_load(wrapping(alias + I64{16})) != (I64{0}) {
+        sync_store(wrapping(alias + I64{16}), I64{0})
         jet_rt_native_shared_drop(sync_load(alias))
     }
     jet_rt_free(alias, I64{24}, I64{8})
@@ -546,62 +546,62 @@ fn shared_alias_next() -> I64 {
     guard :: jet_rt_alloc(I64{40}, I64{8})
     shared_acquire(owner, editable != I64{0})
     sync_store(guard, owner)
-    sync_store(guard + I64{8}, editable)
-    sync_store(guard + I64{16}, I64{1})
-    sync_store(guard + I64{24}, I64{0})
-    sync_store(guard + I64{32}, I64{1})
+    sync_store(wrapping(guard + I64{8}), editable)
+    sync_store(wrapping(guard + I64{16}), I64{1})
+    sync_store(wrapping(guard + I64{24}), I64{0})
+    sync_store(wrapping(guard + I64{32}), I64{1})
     guard
 }
 #Export(c) fn jet_rt_shared_guard_clone(guard: I64) -> I64 {
-    refs :: sync_load(guard + I64{32})
+    refs :: sync_load(wrapping(guard + I64{32}))
     if refs == (I64{2147483647}) {
         jet_rt_panic_overflow()
         return I64{0}
     }
-    sync_store(guard + I64{32}, refs + I64{1})
+    sync_store(wrapping(guard + I64{32}), refs + I64{1})
     guard
 }
 #Export(c) fn jet_rt_shared_guard_held(guard: I64) -> Bool {
-    sync_load(guard + I64{16}) != I64{0}
+    sync_load(wrapping(guard + I64{16})) != I64{0}
 }
 #Export(c) fn jet_rt_shared_guard_root_ptr(guard: I64) -> I64 {
     if !jet_rt_shared_guard_held(guard) {
         shared_guard_invalid()
         return I64{0}
     }
-    sync_load(sync_load(guard) + I64{64})
+    sync_load(wrapping(sync_load(guard) + I64{64}))
 }
 #Export(c) fn jet_rt_shared_guard_revision(guard: I64) -> I64 {
     if !jet_rt_shared_guard_held(guard) {
         shared_guard_invalid()
         return I64{0}
     }
-    sync_load(sync_load(guard) + I64{48})
+    sync_load(wrapping(sync_load(guard) + I64{48}))
 }
 #Export(c) fn jet_rt_shared_guard_mark_dirty(guard: I64) {
-    if !jet_rt_shared_guard_held(guard) || sync_load(guard + I64{8}) == (I64{0}) {
+    if !jet_rt_shared_guard_held(guard) || sync_load(wrapping(guard + I64{8})) == (I64{0}) {
         shared_guard_invalid()
         return
     }
-    sync_store(guard + I64{24}, I64{1})
+    sync_store(wrapping(guard + I64{24}), I64{1})
 }
 fn shared_physical_guard_release(guard: I64, commit: Bool) {
     if !jet_rt_shared_guard_held(guard) -> return
     cell :: sync_load(guard)
-    editable :: sync_load(guard + I64{8}) != I64{0}
+    editable :: sync_load(wrapping(guard + I64{8})) != I64{0}
     exhausted := false
-    if editable && commit && sync_load(guard + I64{24}) != (I64{0}) {
-        revision :: sync_load(cell + I64{48})
+    if editable && commit && sync_load(wrapping(guard + I64{24})) != (I64{0}) {
+        revision :: sync_load(wrapping(cell + I64{48}))
         exhausted = revision == I64{-1}
-        if !exhausted -> sync_store(cell + I64{48}, wrapping(revision + I64{1}))
+        if !exhausted -> sync_store(wrapping(cell + I64{48}), wrapping(revision + I64{1}))
     }
-    sync_store(guard + I64{24}, I64{0})
-    sync_store(guard + I64{16}, I64{0})
+    sync_store(wrapping(guard + I64{24}), I64{0})
+    sync_store(wrapping(guard + I64{16}), I64{0})
     shared_release(cell, editable)
     if exhausted -> shared_revision_stop()
 }
 #Export(c) fn jet_rt_shared_guard_publish_and_release(guard: I64) {
-    if !jet_rt_shared_guard_held(guard) || sync_load(guard + I64{8}) == (I64{0}) {
+    if !jet_rt_shared_guard_held(guard) || sync_load(wrapping(guard + I64{8})) == (I64{0}) {
         shared_guard_invalid()
         return
     }
@@ -616,26 +616,26 @@ fn shared_physical_guard_release(guard: I64, commit: Bool) {
         return false
     }
     cell :: sync_load(guard)
-    editable :: sync_load(guard + I64{8}) != I64{0}
-    mutex :: cell + I64{8}
+    editable :: sync_load(wrapping(guard + I64{8})) != I64{0}
+    mutex :: wrapping(cell + I64{8})
     sync_mutex_lock(mutex)
-    if editable -> _ := sync_add(cell + I64{40}, I64{1})
+    if editable -> _ := sync_add(wrapping(cell + I64{40}), I64{1})
     round := I64{0}
     loop {
         if (cancel_flag != I64{0} && sync_load(cancel_flag) != I64{0}) || condition_interrupted() {
-            if editable -> _ := sync_add(cell + I64{40}, I64{-1})
-            sync_cond_notify_all(cell + I64{16})
+            if editable -> _ := sync_add(wrapping(cell + I64{40}), I64{-1})
+            sync_cond_notify_all(wrapping(cell + I64{16}))
             sync_mutex_unlock(mutex)
             return false
         }
-        available :: sync_load(cell + I64{32}) == I64{0} && (if editable -> sync_load(cell + I64{24}) == I64{0} else -> sync_load(cell + I64{40}) == I64{0})
+        available :: sync_load(wrapping(cell + I64{32})) == I64{0} && (if editable -> sync_load(wrapping(cell + I64{24})) == I64{0} else -> sync_load(wrapping(cell + I64{40})) == I64{0})
         if available {
             if editable {
-                _ := sync_add(cell + I64{40}, I64{-1})
-                sync_store(cell + I64{32}, I64{1})
-            } else { _ := sync_add(cell + I64{24}, I64{1}) }
+                _ := sync_add(wrapping(cell + I64{40}), I64{-1})
+                sync_store(wrapping(cell + I64{32}), I64{1})
+            } else { _ := sync_add(wrapping(cell + I64{24}), I64{1}) }
             // Native payloads are already canonical; refreshing means read the live slot after reacquisition.
-            sync_store(guard + I64{16}, I64{1})
+            sync_store(wrapping(guard + I64{16}), I64{1})
             sync_mutex_unlock(mutex)
             return true
         }
@@ -644,13 +644,13 @@ fn shared_physical_guard_release(guard: I64, commit: Bool) {
             next
         }
         scheduler_blocking_wait_enter()
-        _ := sync_cond_wait(cell + I64{16}, mutex, sync_deadline(I64{10000000}))
+        _ := sync_cond_wait(wrapping(cell + I64{16}), mutex, sync_deadline(I64{10000000}))
         scheduler_blocking_wait_leave()
     }
 }
 #Export(c) fn jet_rt_shared_guard_drop(guard: I64) {
-    refs :: sync_load(guard + I64{32})
-    sync_store(guard + I64{32}, refs - I64{1})
+    refs :: sync_load(wrapping(guard + I64{32}))
+    sync_store(wrapping(guard + I64{32}), refs - I64{1})
     if refs != (I64{1}) -> return
     // Release protocol before user drop glue can reenter Shared. A suspended
     // guard has no permit to release, but still owns its pin/lifetime borrow.
@@ -667,7 +667,7 @@ fn shared_physical_guard_release(guard: I64, commit: Bool) {
 fn cell_guard_token(guard: I64, address: I64) -> I64 {
     token :: jet_rt_alloc(I64{16}, I64{8})
     sync_store(token, guard)
-    sync_store(token + I64{8}, address)
+    sync_store(wrapping(token + I64{8}), address)
     token
 }
 
@@ -677,7 +677,7 @@ fn cell_guard_token(guard: I64, address: I64) -> I64 {
         shared_guard_invalid()
         return I64{0}
     }
-    cell_guard_token(guard, sync_load(cell + I64{64}))
+    cell_guard_token(guard, sync_load(wrapping(cell + I64{64})))
 }
 
 #Export(c) fn jet_rt_native_cell_guard_address(token: I64) -> I64 {
@@ -685,7 +685,7 @@ fn cell_guard_token(guard: I64, address: I64) -> I64 {
         shared_guard_invalid()
         return I64{0}
     }
-    sync_load(token + I64{8})
+    sync_load(wrapping(token + I64{8}))
 }
 
 #Export(c) fn jet_rt_native_cell_guard_project(token: I64, address: I64) -> I64 {

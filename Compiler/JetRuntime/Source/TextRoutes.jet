@@ -13,8 +13,8 @@
     common :: if left_len < right_len -> left_len else -> right_len
     at := I64{0}
     loop at < common {
-        mine :: rt_text_byte(left_data + at)
-        theirs :: rt_text_byte(right_data + at)
+        mine :: rt_text_byte(wrapping(left_data + at))
+        theirs :: rt_text_byte(wrapping(right_data + at))
         if mine < theirs -> return jet_int_owned_from_i64(I64{-1})
         if mine > theirs -> return jet_int_owned_from_i64(I64{1})
         at += I64{1}
@@ -36,14 +36,14 @@
     words :: len - len % I64{8}
     at := I64{0}
     loop at < words {
-        hash = rt_text_hash_fold(hash, rt_text_word(data + at))
+        hash = rt_text_hash_fold(hash, rt_text_word(wrapping(data + at)))
         at += I64{8}
     }
     if at < len {
         tail := I64{0}
         shift := I64{0}
         loop at < len {
-            tail = tail.bit_or(rt_text_byte(data + at) << shift)
+            tail = tail.bit_or(rt_text_byte(wrapping(data + at)) << shift)
             shift += I64{8}
             at += I64{1}
         }
@@ -74,8 +74,8 @@ fn rt_text_hash_fold(hash: I64, word: I64) -> I64 {
     at := I64{0}
     index := I64{0}
     loop at < length {
-        rt_text_store(words + index * I64{8}, rt_text_decode(bytes + at))
-        at += rt_text_width(bytes + at)
+        rt_text_store(wrapping(words + index * I64{8}), rt_text_decode(wrapping(bytes + at)))
+        at += rt_text_width(wrapping(bytes + at))
         index += I64{1}
     }
     count
@@ -89,10 +89,10 @@ fn rt_text_hash_fold(hash: I64, word: I64) -> I64 {
     count := I64{0}
     at := I64{0}
     loop at < length {
-        if (rt_text_byte(bytes + at) == I64{10}) { count += I64{1} }
+        if (rt_text_byte(wrapping(bytes + at)) == I64{10}) { count += I64{1} }
         at += I64{1}
     }
-    if (length != I64{0} && rt_text_byte(bytes + length - I64{1}) != I64{10}) { count += I64{1} }
+    if (length != I64{0} && rt_text_byte(wrapping(wrapping(bytes + length) - I64{1})) != I64{10}) { count += I64{1} }
     if (count > I64{1152921504606846975}) {
         rt_text_capacity_stop()
         return I64{0}
@@ -103,15 +103,15 @@ fn rt_text_hash_fold(hash: I64, word: I64) -> I64 {
     index := I64{0}
     at = I64{0}
     loop at < length {
-        if (rt_text_byte(bytes + at) == I64{10}) {
-            end :: if (at > start && rt_text_byte(bytes + at - I64{1}) == I64{13}) -> at - I64{1} else -> at
-            rt_text_store(words + index * I64{8}, rt_text_slice(value, start, end))
+        if (rt_text_byte(wrapping(bytes + at)) == I64{10}) {
+            end :: if (at > start && rt_text_byte(wrapping(wrapping(bytes + at) - I64{1})) == I64{13}) -> at - I64{1} else -> at
+            rt_text_store(wrapping(words + index * I64{8}), rt_text_slice(value, start, end))
             index += I64{1}
             start = at + I64{1}
         }
         at += I64{1}
     }
-    if (start < length) { rt_text_store(words + index * I64{8}, rt_text_slice(value, start, length)) }
+    if (start < length) { rt_text_store(wrapping(words + index * I64{8}), rt_text_slice(value, start, length)) }
     count
 }
 
@@ -133,10 +133,10 @@ fn rt_text_hash_fold(hash: I64, word: I64) -> I64 {
     // Doubling copies already initialized bytes, avoiding per-repeat dispatch.
     loop filled < total {
         chunk :: if (filled < total - filled) -> filled else -> total - filled
-        rt_text_bytes_copy(data + filled, data, chunk)
+        rt_text_bytes_copy(wrapping(data + filled), data, chunk)
         filled += chunk
     }
-    rt_text_store(result + I64{8}, total)
+    rt_text_store(wrapping(result + I64{8}), total)
     result
 }
 
@@ -167,7 +167,7 @@ fn rt_text_hash_fold(hash: I64, word: I64) -> I64 {
     if (width == I64{0}) {
         rt_text_append(result, rt_text_data(to), replacement)
         loop at < length {
-            scalar :: rt_text_width(rt_text_data(value) + at)
+            scalar :: rt_text_width(wrapping(rt_text_data(value) + at))
             rt_text_append(result, rt_text_data(value) + at, scalar)
             rt_text_append(result, rt_text_data(to), replacement)
             at += scalar
@@ -192,9 +192,9 @@ fn rt_text_ascii(value: I64, upper: Bool) -> I64 {
     length :: rt_text_len(result)
     at := I64{0}
     loop at < length {
-        byte :: rt_text_byte(data + at)
-        if (upper && byte >= I64{97} && byte <= I64{122}) { rt_text_put(data + at, byte - I64{32}) }
-        if (!upper && byte >= I64{65} && byte <= I64{90}) { rt_text_put(data + at, byte + I64{32}) }
+        byte :: rt_text_byte(wrapping(data + at))
+        if (upper && byte >= I64{97} && byte <= I64{122}) { rt_text_put(wrapping(data + at), byte - I64{32}) }
+        if (!upper && byte >= I64{65} && byte <= I64{90}) { rt_text_put(wrapping(data + at), byte + I64{32}) }
         at += I64{1}
     }
     result

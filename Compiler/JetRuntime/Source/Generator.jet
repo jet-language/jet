@@ -21,12 +21,12 @@ GENERATOR_BYTES :: I64{88}
     unit :: jet_rt_alloc(I64{72}, I64{8})
     coll_zero(unit, I64{72})
     sync_store(state, env)
-    sync_store(state + I64{8}, invoke)
-    sync_store(state + I64{16}, release)
-    sync_store(state + I64{24}, unit)
-    sync_store(state + I64{64}, sync_park_new())
-    sync_store(state + I64{72}, iter_meta(node))
-    sync_store(state + I64{80}, label)
+    sync_store(wrapping(state + I64{8}), invoke)
+    sync_store(wrapping(state + I64{16}), release)
+    sync_store(wrapping(state + I64{24}), unit)
+    sync_store(wrapping(state + I64{64}), sync_park_new())
+    sync_store(wrapping(state + I64{72}), iter_meta(node))
+    sync_store(wrapping(state + I64{80}), label)
     sync_store(env, state)
     iter_hook(node, state, rt_generator_pull_address(), rt_generator_release_address())
     node
@@ -45,30 +45,30 @@ fn rt_generator_release_address() -> I64 {
 // finishes (0); a finished producer marks the node done. A producer panic is
 // raised again here.
 #Export(c) fn jet_rt_native_generator_pull(node: I64, output: I64) -> I64 {
-    state :: trap_word(node + I64{48})
-    sync_store(state + I64{40}, output)
-    sync_store(state + I64{48}, I64{1})
-    child := sync_load(state + I64{32})
+    state :: trap_word(wrapping(node + I64{48}))
+    sync_store(wrapping(state + I64{40}), output)
+    sync_store(wrapping(state + I64{48}), I64{1})
+    child := sync_load(wrapping(state + I64{32}))
     if (child == I64{0}) {
-        child = task_state_new(I64{0}, sync_load(state + I64{80}), sync_load(state), sync_load(state + I64{8}), sync_load(state + I64{16}), sync_load(state + I64{24}), I64{0}, I64{0})
-        sync_store(state + I64{32}, child)
+        child = task_state_new(I64{0}, sync_load(wrapping(state + I64{80})), sync_load(state), sync_load(wrapping(state + I64{8})), sync_load(wrapping(state + I64{16})), sync_load(wrapping(state + I64{24})), I64{0}, I64{0})
+        sync_store(wrapping(state + I64{32}), child)
         scheduler_submit(I64{0}, child, true)
     } else {
-        sync_park_wake(sync_load(state + I64{64}))
+        sync_park_wake(sync_load(wrapping(state + I64{64})))
     }
     scheduler_blocking_wait_enter()
-    loop sync_load(state + I64{48}) != (I64{0}) && sync_load(child + I64{24}) == (I64{0}) -> sync_park(sync_load(child + I64{104}), I64{-1})
+    loop sync_load(wrapping(state + I64{48})) != (I64{0}) && sync_load(wrapping(child + I64{24})) == (I64{0}) -> sync_park(sync_load(wrapping(child + I64{104})), I64{-1})
     scheduler_blocking_wait_leave()
-    if (sync_load(state + I64{48}) == I64{0}) -> return I64{1}
-    trap_store(node + I64{144}, I64{1})
-    if (sync_load(child + I64{32}) == I64{5}) -> generator_raise(child)
+    if (sync_load(wrapping(state + I64{48})) == I64{0}) -> return I64{1}
+    trap_store(wrapping(node + I64{144}), I64{1})
+    if (sync_load(wrapping(child + I64{32})) == I64{5}) -> generator_raise(child)
     I64{0}
 }
 
 fn generator_raise(child: I64) {
-    record :: sync_load(sync_load(child + I64{8}) + I64{40})
-    message :: task_panic_message(sync_load(record + I64{40}))
-    jet_rt_panic_message(sync_load(message), sync_load(message + I64{8}))
+    record :: sync_load(wrapping(sync_load(wrapping(child + I64{8})) + I64{40}))
+    message :: task_panic_message(sync_load(wrapping(record + I64{40})))
+    jet_rt_panic_message(sync_load(message), sync_load(wrapping(message + I64{8})))
     jet_rt_string_drop(message)
 }
 
@@ -76,19 +76,19 @@ fn generator_raise(child: I64) {
 // waits for the next pull. Once the consumer dropped the stream the value
 // is dropped and the cancel is delivered here, unless a shield holds it.
 #Export(c) fn jet_rt_native_generator_yield(state: I64, value: I64) {
-    if (sync_load(state + I64{56}) != I64{0}) {
-        coll_slot_drop(value, sync_load(state + I64{72}))
+    if (sync_load(wrapping(state + I64{56})) != I64{0}) {
+        coll_slot_drop(value, sync_load(wrapping(state + I64{72})))
         _ := scheduler_wait_point_cancel_check()
         return
     }
-    coll_copy(value, sync_load(state + I64{40}), coll_payload(sync_load(state + I64{72})))
-    sync_store(state + I64{48}, I64{0})
-    sync_park_wake(sync_load(sync_load(state + I64{32}) + I64{104}))
+    coll_copy(value, sync_load(wrapping(state + I64{40})), coll_payload(sync_load(wrapping(state + I64{72}))))
+    sync_store(wrapping(state + I64{48}), I64{0})
+    sync_park_wake(sync_load(wrapping(sync_load(wrapping(state + I64{32})) + I64{104})))
     kind :: scheduler_msg_yield()
     loop jet_scheduler_native_propagate() == (I64{0}) {
         if (scheduler_wait_point_cancel_check() != I64{0}) -> break
-        if (sync_load(state + I64{48}) != I64{0} || sync_load(state + I64{56}) != I64{0}) -> break
-        _ := scheduler_yield(kind, sync_load(state + I64{64}), I64{-1})
+        if (sync_load(wrapping(state + I64{48})) != I64{0} || sync_load(wrapping(state + I64{56})) != I64{0}) -> break
+        _ := scheduler_yield(kind, sync_load(wrapping(state + I64{64})), I64{-1})
     }
     jet_rt_string_drop(kind)
 }
@@ -98,20 +98,20 @@ fn generator_raise(child: I64) {
 // running one is cancelled and waited for, so its cleanup has run when the
 // drop returns.
 #Export(c) fn jet_rt_native_generator_release(state: I64) -> I64 {
-    child :: sync_load(state + I64{32})
+    child :: sync_load(wrapping(state + I64{32}))
     if (child == I64{0}) {
-        coll_call1_unit(sync_load(state + I64{16}), sync_load(state))
+        coll_call1_unit(sync_load(wrapping(state + I64{16})), sync_load(state))
     } else {
-        if (sync_load(child + I64{24}) == I64{0}) {
-            sync_store(state + I64{56}, I64{1})
-            scheduler_control_cancel(sync_load(child + I64{8}))
-            sync_park_wake(sync_load(state + I64{64}))
+        if (sync_load(wrapping(child + I64{24})) == I64{0}) {
+            sync_store(wrapping(state + I64{56}), I64{1})
+            scheduler_control_cancel(sync_load(wrapping(child + I64{8})))
+            sync_park_wake(sync_load(wrapping(state + I64{64})))
             task_drain(child)
         }
         task_drop(child)
     }
-    sync_park_drop(sync_load(state + I64{64}))
-    coll_meta_drop(sync_load(state + I64{24}))
+    sync_park_drop(sync_load(wrapping(state + I64{64})))
+    coll_meta_drop(sync_load(wrapping(state + I64{24})))
     jet_rt_free(state, GENERATOR_BYTES, I64{8})
     I64{0}
 }

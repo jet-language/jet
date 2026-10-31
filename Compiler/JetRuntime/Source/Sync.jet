@@ -43,19 +43,19 @@ fn sync_wait(address: I64, expected: I64, deadline_ns: I64) -> I64 {
         if (deadline_ns < I64{0}) {
             return os_syscall_i64(I64{202}, address, I64{128}, expected, I64{0}, I64{0}, I64{0})
         }
-        timeout :: os_tls_base_i64() + I64{216}
+        timeout :: wrapping(os_tls_base_i64() + I64{216})
         os_store_i64(timeout, deadline_ns /% I64{1000000000})
-        os_store_i64(timeout + I64{8}, deadline_ns % I64{1000000000})
+        os_store_i64(wrapping(timeout + I64{8}), deadline_ns % I64{1000000000})
         return os_syscall_i64(I64{202}, address, I64{137}, expected, timeout, I64{0}, I64{4294967295})
     }
 }
 
 fn sync_now_ns() -> I64 {
     #Unsafe("clock_gettime writes two words of thread-owned TCB scratch; no pointer escapes") {
-        scratch :: os_tls_base_i64() + I64{232}
+        scratch :: wrapping(os_tls_base_i64() + I64{232})
         result :: os_syscall_i64(I64{228}, I64{1}, scratch, I64{0}, I64{0}, I64{0}, I64{0})
         if (result != I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
-        return wrapping(os_load_i64(scratch) * I64{1000000000} + os_load_i64(scratch + I64{8}))
+        return wrapping(os_load_i64(scratch) * I64{1000000000} + os_load_i64(wrapping(scratch + I64{8})))
     }
 }
 
@@ -109,22 +109,22 @@ fn sync_cond_notify_all(sequence: I64) {
 fn sync_park_new() -> I64 {
     slot :: jet_rt_alloc(I64{32}, I64{8})
     sync_store(slot, I64{0})
-    sync_store(slot + I64{8}, I64{0})
-    sync_store(slot + I64{16}, I64{0})
-    sync_store(slot + I64{24}, I64{1})
+    sync_store(wrapping(slot + I64{8}), I64{0})
+    sync_store(wrapping(slot + I64{16}), I64{0})
+    sync_store(wrapping(slot + I64{24}), I64{1})
     slot
 }
 
-fn sync_park_retain(slot: I64) { _ := sync_add(slot + I64{24}, I64{1}) }
+fn sync_park_retain(slot: I64) { _ := sync_add(wrapping(slot + I64{24}), I64{1}) }
 fn sync_park_drop(slot: I64) {
-    if (sync_add(slot + I64{24}, I64{-1}) == I64{1}) -> jet_rt_free(slot, I64{32}, I64{8})
+    if (sync_add(wrapping(slot + I64{24}), I64{-1}) == I64{1}) -> jet_rt_free(slot, I64{32}, I64{8})
 }
 
 fn sync_park(slot: I64, timeout_ns: I64) {
     if (sync_swap(slot, I64{0}) != I64{0}) {
         return
     }
-    mutex :: slot + I64{8}
+    mutex :: wrapping(slot + I64{8})
     sync_mutex_lock(mutex)
     if (sync_swap(slot, I64{0}) != I64{0}) {
         sync_mutex_unlock(mutex)
@@ -133,17 +133,17 @@ fn sync_park(slot: I64, timeout_ns: I64) {
     deadline :: sync_deadline(timeout_ns)
     loop {
         if (deadline >= I64{0} && sync_now_ns() >= deadline) { break }
-        woke :: sync_cond_wait(slot + I64{16}, mutex, deadline)
+        woke :: sync_cond_wait(wrapping(slot + I64{16}), mutex, deadline)
         if (sync_swap(slot, I64{0}) != I64{0} || !woke) { break }
     }
     sync_mutex_unlock(mutex)
 }
 
 fn sync_park_wake(slot: I64) {
-    sync_mutex_lock(slot + I64{8})
+    sync_mutex_lock(wrapping(slot + I64{8}))
     sync_store(slot, I64{1})
-    sync_cond_notify_one(slot + I64{16})
-    sync_mutex_unlock(slot + I64{8})
+    sync_cond_notify_one(wrapping(slot + I64{16}))
+    sync_mutex_unlock(wrapping(slot + I64{8}))
 }
 
 // Once: 0 empty, 1 initializer running, 2 published. The initializer must not
