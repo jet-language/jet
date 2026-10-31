@@ -4592,7 +4592,7 @@ index, not a substitute for that law.
   `core.web` consume typed values instead of re-solving string escaping.
 - **D-EMAIL1, D-EMAIL-SMTP-SURFACE1, D-EMAIL-SMTP-CONFIG1,
   D-EMAIL-DKIM-CONFIG1** *(retired 2026-10-30, owner decision)*: Jet ships no
-  email support. `core.email` is not a Core module, so `use core.email` is the
+  email support. Core has no email module, so importing one is the
   ordinary unknown-module error, and neither Core nor the runtime provides SMTP
   submission, MIME message composition, or DKIM signing.
 - **D-ENCSTREAM1=A**: each `core.encoding` codec has one adapter identity with

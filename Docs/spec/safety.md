@@ -209,10 +209,10 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1129,
+  "total": 1127,
   "counts": {
     "Compiler": 529,
-    "Core": 159,
+    "Core": 157,
     "Examples": 39,
     "Jetpack": 10,
     "Tools": 8,
@@ -4323,20 +4323,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "Core",
-      "file": "Core/Email/Email.jet",
-      "line": 77,
-      "column": 5,
-      "reason": "DKIM decoding: borrow encoded bytes and keep partial output in a zeroizing Secret"
-    },
-    {
-      "package": "Core",
-      "file": "Core/Email/Email.jet",
-      "line": 417,
-      "column": 5,
-      "reason": "DKIM known-answer fixture reads only synthetic key bytes"
-    },
-    {
-      "package": "Core",
       "file": "Core/Encoding/Cbor.jet",
       "line": 95,
       "column": 5,
@@ -8131,12 +8117,12 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | crate/package | regions |
 | --- | ---: |
 | Compiler | 529 |
-| Core | 159 |
+| Core | 157 |
 | Examples | 39 |
 | Jetpack | 10 |
 | Tools | 8 |
 | tests | 384 |
-| **total** | **1129** |
+| **total** | **1127** |
 
 ### Regions
 
@@ -8728,8 +8714,6 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Db/Db.jet | 63:5 | "borrow the live unique queue handle for ROLLBACK" |
 | Core | Core/Db/Db.jet | 66:5 | "execute bound queue SQL on the exclusively borrowed SQLite handle; host only marshals its existing wire" |
 | Core | Core/Db/Db.jet | 71:5 | "query bound queue SQL on the exclusively borrowed SQLite handle; host only marshals its existing wire" |
-| Core | Core/Email/Email.jet | 77:5 | "DKIM decoding: borrow encoded bytes and keep partial output in a zeroizing Secret" |
-| Core | Core/Email/Email.jet | 417:5 | "DKIM known-answer fixture reads only synthetic key bytes" |
 | Core | Core/Encoding/Cbor.jet | 95:5 | "inspect private typed carriers without changing public Dyn variants" |
 | Core | Core/Encoding/Cbor.jet | 156:5 | "validated private carriers retain byte strings for typed Encode" |
 | Core | Core/Encoding/CborStream.jet | 216:9 | "the retained key copies exactly the already validated text bytes" |
@@ -9350,7 +9334,6 @@ the function body; they do not exempt a wrapper from the proof requirement.
   {"file": "Core/Crypto/Vault.jet", "function": "commit_revoke", "proof": "The write token and plan are validated and both move into the provider, so each is used once; nothing is returned but the error."},
   {"file": "Core/Crypto/Vault.jet", "function": "export_to_passphrase", "proof": "`validate_key` runs first and the passphrase is lent read-only; the result is passphrase-encrypted wrapped bytes, never the plain key."},
   {"file": "Core/Crypto/Vault.jet", "function": "export_to_recipients", "proof": "`validate_key` runs and the recipient list is bounded to 1..16; the result is recipient-encrypted wrapped bytes, never the plain key."},
-  {"file":"Core/Email/Email.jet","function":"decode_dkim","proof":"The gate reads and writes Secret.bytes, not arbitrary memory. At email.jet:78-95 a nonempty length divisible by four bounds every quartet access and canonical padding/alphabet checks reject malformed input. The only decoded allocation is the fixed 32-byte Secret at :82; :96-104 guard every write with written < 32, never grow a secret-bearing List, and :107 rejects any non-32-byte result. Errors drop the zeroizing Secret; success moves it at :108. Callers supply only a borrowed Secret and cannot choose unchecked indices or receive a plain decoded byte list."},
   {"file":"Core/Data/Data.jet","function":"bridge_tool_on_path","proof":"__host_path_is_file invokes OsStr::from_encoded_bytes_unchecked (Top/DataStats.rs:11-13), so its input must retain native encoded-byte provenance. data.jet:1090 obtains PATH from the current host's encoded environment; :1092-1108 split only at ASCII colon/semicolon and remove Windows ASCII quotes. :1111-1117 append only ASCII separators and valid UTF-8 tool text, preserving that host encoding. The metadata leaf borrows the owned list and returns Bool/error, not a pointer; the caller cannot supply an unrelated byte allocation to this helper or retain a host borrow."},
   {"file":"Core/Data/Data.jet","function":"data_loader_render","proof":"The gate at data.jet:1729 only matches the compiler-private Dyn Number, TypedText and Bytes variants. Each payload is accessed after its matching discriminant at :1730, :1734 or :1738, then read through ordinary String/List operations into the caller's exclusively borrowed output; no unchecked memory, forged carrier or raw pointer is created. Other variants leave the gate for normal recursive rendering. Any typed Dyn input remains a valid enum; callers cannot select a mismatched native payload."},
   {"file":"Core/Process/Process.jet","function":"cmd","proof":"The __spec_fields leaf is layout transfer into ProcessSpec, not process execution (Top/ProcessSpec.rs:6-37). process.jet:92 takes all fields from default_fields(:419-428): paired environment columns are both empty; optional cwd, stdin, timeout, resource limits, terminal and policy are accompanied by their actual presence flags at :95-104, with valid typed placeholders. The sole present numeric limit is 67108864. argv is a typed owned String list; even empty argv is deferred to checked spawn, not indexed here. No descriptor or memory address is supplied or returned, and callers cannot alter the hidden initialized field set."},
