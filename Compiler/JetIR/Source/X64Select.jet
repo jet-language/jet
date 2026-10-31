@@ -208,6 +208,9 @@ struct IRX64Emitter {
     // The offsets of the tail jumps' `jmp` (ir_x64_tail_jump), whose call
     // frame rule is the `ret`'s.
     tails: [Int]
+    // The rel32 fields of the branches inside the function, each patched
+    // to its target (ir_x64_patch), for ir_x64_relax.
+    branches: [Int]
     colds: [IRX64Cold]
     errors: [String]
     // A comparison whose Bool only the next If / BrIf reads leaves its
@@ -773,7 +776,7 @@ fn ir_x64_emit_colds(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
     loop cold in e.colds {
         e.at = cold.at
         here :: e.code.len()
-        loop site in cold.sites -> x64_patch_rel32(&e.code, site, here)
+        loop site in cold.sites -> ir_x64_patch(&e, site, here)
         if cold.kind == {
             .Route -> {
                 ir_x64_operand(&e, m, f, al, cold.left, cold.left_imm, X64_RDI)
@@ -804,7 +807,7 @@ fn ir_x64_emit_colds(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
                     x64_pop(&e.code, X64_RAX)
                     stopped :: x64_jcc_rel32(&e.code, X64Cond.NE)
                     target :: ir_x64_stop_target(e, cold, exit)
-                    x64_patch_rel32(&e.code, stopped, target)
+                    ir_x64_patch(&e, stopped, target)
                 }
                 ir_x64_store(&e, m, f, al, cold.dst, X64_RAX)
                 ir_x64_jump_to(&e, cold.resume)
@@ -2500,8 +2503,8 @@ fn ir_x64_branch(e: &IRX64Emitter, f: IRFunction, at: Int, depth: Int, condition
     row :: ir_x64_target(e, depth)
     if row < 0 -> return ir_x64_fail(&e, f, at, "branch depth {depth} leaves the function")
     site :: if conditional -> x64_jcc_rel32(&e.code, cond) else -> x64_jmp_rel32(&e.code)
-    if e.heads[row] >= 0 -> return x64_patch_rel32(&e.code, site, e.heads[row])
-    if e.end_of[e.open[row]] >= 0 -> return x64_patch_rel32(&e.code, site, e.end_of[e.open[row]])
+    if e.heads[row] >= 0 -> return ir_x64_patch(&e, site, e.heads[row])
+    if e.end_of[e.open[row]] >= 0 -> return ir_x64_patch(&e, site, e.end_of[e.open[row]])
     &e.end_sites.push(site)
     &e.end_targets.push(e.open[row])
 }
@@ -2509,13 +2512,20 @@ fn ir_x64_branch(e: &IRX64Emitter, f: IRFunction, at: Int, depth: Int, condition
 // Points the rel32 field at `site` to the end of the code so far.
 fn ir_x64_land(e: &IRX64Emitter, site: Int) Never! {
     here :: e.code.len()
-    x64_patch_rel32(&e.code, site, here)
+    ir_x64_patch(&e, site, here)
 }
 
 // A jmp to `target`, an offset already in the code.
 fn ir_x64_jump_to(e: &IRX64Emitter, target: Int) Never! {
     site :: x64_jmp_rel32(&e.code)
+    ir_x64_patch(&e, site, target)
+}
+
+// Points the branch whose rel32 field is at `site` to `target`, an offset
+// in the code, and lists it for ir_x64_relax.
+fn ir_x64_patch(e: &IRX64Emitter, site: Int, target: Int) Never! {
     x64_patch_rel32(&e.code, site, target)
+    &e.branches.push(site)
 }
 
 fn ir_x64_open(e: &IRX64Emitter, at: Int, head: Int, false_site: Int) Never! {
@@ -2530,11 +2540,11 @@ fn ir_x64_end(e: &IRX64Emitter, f: IRFunction, at: Int) Never! {
     row :: e.open.len() - 1
     opener :: e.open[row]
     e.end_of[opener] = here
-    if e.falses[row] >= 0 -> x64_patch_rel32(&e.code, e.falses[row], here)
+    if e.falses[row] >= 0 -> ir_x64_patch(&e, e.falses[row], here)
     kept := 0
     loop index in 0..<e.end_sites.len() {
         if e.end_targets[index] == opener {
-            x64_patch_rel32(&e.code, e.end_sites[index], here)
+            ir_x64_patch(&e, e.end_sites[index], here)
         } else {
             e.end_sites[kept] = e.end_sites[index]
             e.end_targets[kept] = e.end_targets[index]
@@ -2776,7 +2786,7 @@ fn ir_x64_stop_point(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
         }
         site = x64_jcc_rel32(&e.code, X64Cond.NE)
         quiet :: e.code.len()
-        loop skip in skips -> x64_patch_rel32(&e.code, skip, quiet)
+        loop skip in skips -> ir_x64_patch(&e, skip, quiet)
     }
     // A branch from the edge to its own If's End resumes here.
     e.end_of[branch] = e.code.len()
@@ -2825,17 +2835,36 @@ fn ir_x64_stop_quiet(code: &[U8]) -> [Int] Never! {
 // the stop `exit` itself, and every Return in an edge leaves by it. An edge
 // runs in the body's frame with the open constructs of its If (every one
 // already laid out); one that falls off its end resumes after the If.
+//
+// A cleanup edge (ir_x64_pad_token) drops the variables live at its stop
+// point latest first, so edges of later points end in the drops of earlier
+// ones: an edge whose tail (ir_x64_tail_entry) equals a tail already laid
+// out runs only its own instructions before it, moves its cleanup token
+// into the place the laid-out tail reads it from, and jumps into that tail
+// (a whole edge equal to a laid-out tail is that tail). Every drop still
+// runs, in the same order. A tail that leaves by a branch into the body (an
+// inlined callee's stop edge) is shared only where it disturbs no value
+// the body keeps past the other edge (ir_x64_share_safe).
 fn ir_x64_pads(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, tables: IRX64Tables, exit: Int, lines: &[X64LineRow]) Never! {
     // Keys by hash (ir_x64_key_hash) -> their indexes in `keys`, compared
     // in full.
     seen := [Int:[Int]]{}
     keys := [[Int]]{}
     labels := [Int]{}
-    loop pad in e.pads {
+    // The laid-out tails of cleanup edges, the same way: each tail's code
+    // offset, the token slot its code reads, its edge (an index in e.pads)
+    // and its first instruction.
+    tail_seen := [Int:[Int]]{}
+    tail_keys := [[Int]]{}
+    tail_labels := [Int]{}
+    tail_tokens := [Int]{}
+    tail_pads := [Int]{}
+    tail_froms := [Int]{}
+    loop (nth, pad) in e.pads {
         label := exit
         bare :: pad.end == pad.at + 2 && f.op[pad.at + 1] == .Return && f.a[pad.at + 1] < 0
         if !bare {
-            key :: ir_x64_pad_key(f, al, pad)
+            key :: ir_x64_pad_key(f, al, pad, pad.at + 1, -1)
             hash :: ir_x64_key_hash(key)
             known :: seen.get(hash) ?? [Int]{}
             label = -1
@@ -2843,34 +2872,179 @@ fn ir_x64_pads(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation
                 if label < 0 && ir_x64_same_key(keys[index], key) -> label = labels[index]
             }
             if label < 0 {
-                label = e.code.len()
-                grown := known.copy()
-                &grown.push(keys.len())
-                seen[hash] = ^grown
-                &keys.push(key.copy())
-                &labels.push(label)
-                e.open = pad.open
-                e.heads = pad.heads
-                &e.open.push(pad.at)
-                &e.heads.push(-1)
-                e.falses = [Int]{}
-                loop _ in 0..<e.open.len() -> &e.falses.push(-1)
-                e.fused = -1
-                loop at in (pad.at + 1)..<pad.end {
-                    ir_x64_debug_line(&lines, e.code.len(), f.code_line[at])
-                    ir_x64_select_at(&e, m, f, al, tables, at)
+                token :: ir_x64_pad_token(e, m, f, al, pad)
+                // The longest laid-out tail this edge ends in.
+                share := -1
+                share_label := -1
+                share_token := -1
+                if token >= 0 {
+                    loop from in (pad.at + 1)..<(pad.end - 2) {
+                        if share < 0 && ir_x64_tail_entry(f, al, pad, from, token) {
+                            tail :: ir_x64_pad_key(f, al, pad, from, token)
+                            listed :: tail_seen.get(ir_x64_key_hash(tail)) ?? [Int]{}
+                            loop index in listed {
+                                if share < 0 && ir_x64_same_key(tail_keys[index], tail) && ir_x64_share_safe(f, al, e.pads[tail_pads[index]], tail_froms[index], pad) {
+                                    share = from
+                                    share_label = tail_labels[index]
+                                    share_token = tail_tokens[index]
+                                }
+                            }
+                        }
+                    }
                 }
-                last :: f.op[pad.end - 1]
-                resume :: e.end_of[pad.at]
-                if pad.end == pad.at + 1 || (last != .Return && last != .Br && last != .Unreachable) -> ir_x64_jump_to(&e, resume)
+                if share == pad.at + 1 {
+                    label = share_label
+                } else {
+                    label = e.code.len()
+                    grown := known.copy()
+                    &grown.push(keys.len())
+                    seen[hash] = ^grown
+                    &keys.push(key.copy())
+                    &labels.push(label)
+                    e.open = pad.open
+                    e.heads = pad.heads
+                    &e.open.push(pad.at)
+                    &e.heads.push(-1)
+                    e.falses = [Int]{}
+                    loop _ in 0..<e.open.len() -> &e.falses.push(-1)
+                    e.fused = -1
+                    stop :: if share >= 0 -> share else -> pad.end
+                    offsets := [Int]{}
+                    loop at in (pad.at + 1)..<stop {
+                        &offsets.push(e.code.len())
+                        ir_x64_debug_line(&lines, e.code.len(), f.code_line[at])
+                        ir_x64_select_at(&e, m, f, al, tables, at)
+                    }
+                    if share >= 0 {
+                        if al.regs[token] < 0 || al.regs[token] != al.regs[share_token] {
+                            ir_x64_load(&e, m, f, al, token, X64_RAX)
+                            ir_x64_store(&e, m, f, al, share_token, X64_RAX)
+                        }
+                        ir_x64_jump_to(&e, share_label)
+                    } else {
+                        last :: f.op[pad.end - 1]
+                        resume :: e.end_of[pad.at]
+                        if pad.end == pad.at + 1 || (last != .Return && last != .Br && last != .Unreachable) -> ir_x64_jump_to(&e, resume)
+                    }
+                    if token >= 0 {
+                        loop from in (pad.at + 1)..<stop {
+                            if ir_x64_tail_entry(f, al, pad, from, token) {
+                                tail :: ir_x64_pad_key(f, al, pad, from, token)
+                                tail_hash :: ir_x64_key_hash(tail)
+                                listed :: tail_seen.get(tail_hash) ?? [Int]{}
+                                extended := listed.copy()
+                                &extended.push(tail_keys.len())
+                                tail_seen[tail_hash] = ^extended
+                                &tail_keys.push(tail.copy())
+                                &tail_labels.push(offsets[from - pad.at - 1])
+                                &tail_tokens.push(token)
+                                &tail_pads.push(nth)
+                                &tail_froms.push(from)
+                            }
+                        }
+                    }
+                }
             }
         }
         e.pad_label[pad.at] = label
-        if pad.site >= 0 -> x64_patch_rel32(&e.code, pad.site, label)
+        if pad.site >= 0 -> ir_x64_patch(&e, pad.site, label)
     }
     e.open = [Int]{}
     e.heads = [Int]{}
     e.falses = [Int]{}
+}
+
+// The cleanup token of stop edge `pad` (ir_stop_return's, or an inlined
+// callee's: OptInline's branch out of the callee for its Return): the edge
+// is `jet_rt_cleanup_enter` into a temp it alone reads, drops, closes and
+// their live-flag Ifs, `jet_rt_cleanup_leave` of the temp, and a bare
+// Return or a branch past the edge's own If. -1 for any other edge.
+fn ir_x64_pad_token(e: IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, pad: IRX64Pad) -> Int Never! {
+    first :: pad.at + 1
+    leave :: pad.end - 2
+    if leave <= first -> return -1
+    last :: pad.end - 1
+    if !((f.op[last] == .Return && f.a[last] < 0) || (f.op[last] == .Br && f.a[last] >= 1 && f.a[last] <= pad.open.len())) -> return -1
+    if f.op[first] != .CallRuntime || f.op[leave] != .CallRuntime -> return -1
+    if m.names[f.a[first]] != "jet_rt_cleanup_enter" || m.names[f.a[leave]] != "jet_rt_cleanup_leave" -> return -1
+    token :: f.dst[first]
+    if token < 0 || f.slot_kind[token] != .Temp || al.starts[token] != first || al.ends[token] != leave -> return -1
+    depth := 0
+    loop at in first..<last {
+        if e.absorbed[at] -> return -1
+        op :: f.op[at]
+        if op == {
+            .If -> depth += 1
+            .End -> {
+                depth -= 1
+                if depth < 0 -> return -1
+            }
+            .Drop | .Close | .Load | .Const | .Copy | .Move | .CallRuntime -> {}
+            else -> return -1
+        }
+    }
+    if depth != 0 -> return -1
+    token
+}
+
+// Whether another cleanup edge may enter `pad`'s code at instruction
+// `from`: its `jet_rt_cleanup_enter` (the whole edge), or a Drop, Close,
+// Load or live-flag If outside every If the edge opens, after which no
+// temp of the edge but `token` is read that was written before `from`.
+fn ir_x64_tail_entry(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad, from: Int, token: Int) -> Bool Never! {
+    if from == pad.at + 1 -> return true
+    op :: f.op[from]
+    if op != .Drop && op != .Close && op != .Load && op != .If -> return false
+    depth := 0
+    loop at in (pad.at + 1)..<from {
+        if f.op[at] == .If -> depth += 1
+        if f.op[at] == .End -> depth -= 1
+    }
+    if depth != 0 -> return false
+    reads := [Int]{}
+    loop at in from..<pad.end {
+        ir_x64_reads_into(f, at, &reads)
+        if f.op[at] == .If -> &reads.push(f.a[at])
+        loop slot in reads {
+            if slot >= 0 && slot != token && ir_x64_pad_local(f, al, pad, slot) && al.starts[slot] < from -> return false
+        }
+    }
+    true
+}
+
+// Whether `slot` is a temp that lives only inside stop edge `pad`.
+fn ir_x64_pad_local(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad, slot: Int) -> Bool Never! {
+    f.slot_kind[slot] == .Temp && al.starts[slot] > pad.at && al.ends[slot] < pad.end
+}
+
+// Whether edge `other` may run the tail of edge `pad` from `from`. A tail
+// that ends in a Return may always: nothing is read after it. One that
+// branches into the body runs on there for `other` too, so it must keep
+// every value the body holds over `other`: no temp of the tail may hold the
+// register of such a value, and no such value may be in an xmm register
+// (a call in the tail keeps only the xmm values live over `pad`).
+fn ir_x64_share_safe(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad, from: Int, other: IRX64Pad) -> Bool Never! {
+    if f.op[pad.end - 1] == .Return -> return true
+    taken := [Int]{}
+    reads := [Int]{}
+    loop at in from..<pad.end {
+        ir_x64_reads_into(f, at, &reads)
+        written :: ir_x64_write(f, at)
+        if written >= 0 -> &reads.push(written)
+        loop slot in reads {
+            if slot >= 0 && ir_x64_pad_local(f, al, pad, slot) && al.regs[slot] >= 0 -> &taken.push(al.regs[slot])
+        }
+    }
+    loop slot in 0..<al.starts.len() {
+        if al.starts[slot] > other.end || al.ends[slot] < other.at || ir_x64_pad_local(f, al, other, slot) -> next
+        if al.xmms[slot] >= 0 -> return false
+        if al.regs[slot] >= 0 {
+            loop reg in taken {
+                if reg == al.regs[slot] -> return false
+            }
+        }
+    }
+    true
 }
 
 // What laying out stop edge `pad` depends on, lines aside: each
@@ -2883,16 +3057,23 @@ fn ir_x64_pads(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation
 // another edge's temporaries may share a live register: its key is its own.
 // Each instruction is its op code, then fields that op's code fixes the
 // number of (a slot is ir_x64_key_slot's tagged form, reads come counted),
-// so equal keys are equal edges.
-fn ir_x64_pad_key(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad) -> [Int] Never! {
+// so equal keys are equal edges. From instruction `from` on: a cleanup
+// edge's tail (ir_x64_pads), whose cleanup token `token` (-1 for none) is
+// the edge's slot number 0, as if written before `from`, and whose branch
+// out of its own If names the construct it leaves to.
+fn ir_x64_pad_key(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad, from: Int, token: Int) -> [Int] Never! {
     names := [Int:Int]{}
     order := [Int]{}
     reads := [Int]{}
     out := [Int]{}
+    if token >= 0 {
+        &order.push(token)
+        names[token] = 0
+    }
     depth := 0
     last :: f.op[pad.end - 1]
-    escapes := pad.end == pad.at + 1 || (last != .Return && last != .Unreachable)
-    loop at in (pad.at + 1)..<pad.end {
+    escapes := pad.end == pad.at + 1 || (last != .Return && last != .Unreachable && (token < 0 || last != .Br))
+    loop at in from..<pad.end {
         op :: f.op[at]
         a :: f.a[at]
         b :: f.b[at]
@@ -2916,8 +3097,15 @@ fn ir_x64_pad_key(f: IRFunction, al: IRX64Allocation, pad: IRX64Pad) -> [Int] Ne
             }
             .Br | .BrIf -> {
                 level :: if op == .Br -> a else -> b
-                if level >= depth -> escapes = true
-                &out.push(level)
+                if token >= 0 && level > depth {
+                    // The construct past the edge's own If: one place for
+                    // every edge it is open around.
+                    &out.push(-2)
+                    &out.push(pad.open[pad.open.len() - (level - depth)])
+                } else {
+                    if level >= depth -> escapes = true
+                    &out.push(level)
+                }
                 if op == .BrIf -> ir_x64_key_slot(f, al, pad, &names, &order, &out, a)
             }
             else -> {
@@ -3162,7 +3350,7 @@ fn ir_x64_debug_line(lines: &[X64LineRow], at: Int, line: Int) Never! {
 // Function row `row` (`f`, borrowed from `m`).
 fn ir_x64_compile_body(m: IRModule, f: IRFunction, tables: IRX64Tables, row: Int) -> IRX64FunctionResult Never! {
     al :: ir_x64_allocate(m, f)
-    e := IRX64Emitter{code: [U8]{}, relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_sites: [Int]{}, end_targets: [Int]{}, returns: [Int]{}, tails: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE, end_of: [Int]{}, pad_label: [Int]{}, pads: [IRX64Pad]{}, at: -1, absorbed: [Bool]{}, picks: [Int]{}, select: -1}
+    e := IRX64Emitter{code: [U8]{}, relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_sites: [Int]{}, end_targets: [Int]{}, returns: [Int]{}, tails: [Int]{}, branches: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE, end_of: [Int]{}, pad_label: [Int]{}, pads: [IRX64Pad]{}, at: -1, absorbed: [Bool]{}, picks: [Int]{}, select: -1}
     loop _ in 0..<f.op.len() {
         &e.end_of.push(-1)
         &e.pad_label.push(-1)
@@ -3275,25 +3463,8 @@ fn ir_x64_compile_body(m: IRModule, f: IRFunction, tables: IRX64Tables, row: Int
         index -= 1
     }
     x64_pop(&e.code, X64_RBP)
-    ret_at :: e.code.len()
+    ret :: e.code.len()
     x64_ret(&e.code)
-    // At a tail jump, as at the `ret`, the CFA is rsp + 8; the code between
-    // them keeps the body's frame.
-    loop jump in e.tails {
-        dwarf_cfa_advance(&cfi, cfa_at, jump)
-        dwarf_cfa_remember_state(&cfi)
-        dwarf_cfa_def_cfa(&cfi, x64_dwarf_register(X64_RSP), 8)
-        dwarf_cfa_advance(&cfi, jump, jump + 5)
-        dwarf_cfa_restore_state(&cfi)
-        cfa_at = jump + 5
-    }
-    // After `pop rbp` the CFA is rsp + 8 at the `ret`; the slow paths after
-    // it keep the body's frame.
-    dwarf_cfa_advance(&cfi, cfa_at, ret_at)
-    dwarf_cfa_remember_state(&cfi)
-    dwarf_cfa_def_cfa(&cfi, x64_dwarf_register(X64_RSP), 8)
-    dwarf_cfa_advance(&cfi, ret_at, ret_at + 1)
-    dwarf_cfa_restore_state(&cfi)
     // The stop exit: the epilogue with edx 1 (a stop edge was taken), for
     // the stop edges and the slow paths that published a stop.
     exit := epilogue
@@ -3311,13 +3482,40 @@ fn ir_x64_compile_body(m: IRModule, f: IRFunction, tables: IRX64Tables, row: Int
     body_returns :: e.returns.len()
     ir_x64_pads(&e, m, f, al, tables, exit, &lines)
     loop (nth, site) in e.returns {
-        x64_patch_rel32(&e.code, site, if nth < body_returns -> epilogue else -> exit)
+        ir_x64_patch(&e, site, if nth < body_returns -> epilogue else -> exit)
     }
     ir_x64_emit_colds(&e, m, f, al, tables, exit)
+    // Rel8 branches where they reach (X64Relax.jet): every offset taken so
+    // far moves with the code. The prologue has no branch, so the frame
+    // rules up to `cfa_at` and `body` stay.
+    relax :: ir_x64_relax(&e.code, e.branches)
+    loop k in 0..<e.relocs.len() -> e.relocs[k].at = ir_x64_relaxed_at(relax, e.relocs[k].at)
+    loop k in 0..<lines.len() -> lines[k].at = ir_x64_relaxed_at(relax, lines[k].at)
+    loop k in 0..<positions.len() -> positions[k] = ir_x64_relaxed_at(relax, positions[k])
+    loop k in 0..<e.tails.len() -> e.tails[k] = ir_x64_relaxed_at(relax, e.tails[k])
+    ret_at :: ir_x64_relaxed_at(relax, ret)
+    ends :: ir_x64_relaxed_at(relax, epilogue)
+    // At a tail jump, as at the `ret`, the CFA is rsp + 8; the code between
+    // them keeps the body's frame.
+    loop jump in e.tails {
+        dwarf_cfa_advance(&cfi, cfa_at, jump)
+        dwarf_cfa_remember_state(&cfi)
+        dwarf_cfa_def_cfa(&cfi, x64_dwarf_register(X64_RSP), 8)
+        dwarf_cfa_advance(&cfi, jump, jump + 5)
+        dwarf_cfa_restore_state(&cfi)
+        cfa_at = jump + 5
+    }
+    // After `pop rbp` the CFA is rsp + 8 at the `ret`; the slow paths after
+    // it keep the body's frame.
+    dwarf_cfa_advance(&cfi, cfa_at, ret_at)
+    dwarf_cfa_remember_state(&cfi)
+    dwarf_cfa_def_cfa(&cfi, x64_dwarf_register(X64_RSP), 8)
+    dwarf_cfa_advance(&cfi, ret_at, ret_at + 1)
+    dwarf_cfa_restore_state(&cfi)
 
     variables := [X64DebugVariable]{}
     ranges := [X64VariableRange]{}
-    ir_x64_variables(m, f, al, tables, positions, body, epilogue, &variables, &ranges)
+    ir_x64_variables(m, f, al, tables, positions, body, ends, &variables, &ranges)
     name :: if f.symbol != "" -> f.symbol else if f.key != "" -> f.key else -> f.name
     IRX64FunctionResult{
         function: X64CompiledFunction{id: X64FunctionID{value: row}, name: name, code: ^e.code, relocs: ^e.relocs},
