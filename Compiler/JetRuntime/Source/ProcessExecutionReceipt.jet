@@ -251,8 +251,8 @@ fn process_execution_receipt(child: I64, status: I64) -> I64 {
     spec :: fd_word(child, I64{24})
     signal :: status.bit_and(I64{127})
     code :: if (signal == I64{0}) -> { (status >> I64{8}).bit_and(I64{255}) } else -> { I64{-1} }
-    output :: rt_text_copy(rt_text_data(fd_word(child, I64{80})), rt_text_len(fd_word(child, I64{80})))
-    errors :: rt_text_copy(rt_text_data(fd_word(child, I64{88})), rt_text_len(fd_word(child, I64{88})))
+    output :: process_execution_receipt_text(fd_word(child, I64{80}), fd_word(spec, PROCESS_SPEC_STDOUT))
+    errors :: process_execution_receipt_text(fd_word(child, I64{88}), fd_word(spec, PROCESS_SPEC_STDERR))
     secrets :: process_execution_secrets(spec)
     receipt :: process_receipt_build(spec, fd_word(process_execution_native(child), I64{8}), code, status == I64{0}, signal, fd_word(child, I64{104}) != I64{0}, output, errors, secrets)
     jet_rt_string_drop(output)
@@ -314,9 +314,19 @@ fn process_receipt_build(spec: I64, pid: I64, code: I64, success: Bool, signal: 
 }
 // String::from_utf8 is strict in both Rust collection lanes. The scanner's
 // negative width is Utf8Error.error_len; a truncated valid prefix has None.
+// Only a text capture is decoded strictly: a streamed output's bytes were
+// already handed to its reader as bytes, so its receipt text is lossy
+// (process_execution_receipt_text) and wait does not fail on them.
 fn process_execution_validate_output(child: I64, err: I64) -> Bool {
-    process_execution_validate_text(fd_word(child, I64{80}), rt_static_text("process stdout"), err) &&
-        process_execution_validate_text(fd_word(child, I64{88}), rt_static_text("process stderr"), err)
+    spec :: fd_word(child, I64{24})
+    (fd_word(spec, PROCESS_SPEC_STDOUT) != PROCESS_STREAM_CAPTURE || process_execution_validate_text(fd_word(child, I64{80}), rt_static_text("process stdout"), err)) &&
+        (fd_word(spec, PROCESS_SPEC_STDERR) != PROCESS_STREAM_CAPTURE || process_execution_validate_text(fd_word(child, I64{88}), rt_static_text("process stderr"), err))
+}
+// The receipt's copy of one output (`text` borrowed): exact for a text
+// capture, which process_execution_validate_output already decoded, and
+// lossy for a streamed output, whose bytes need not be UTF-8.
+fn process_execution_receipt_text(text: I64, mode: I64) -> I64 {
+    if (mode == PROCESS_STREAM_CAPTURE) -> rt_text_copy(rt_text_data(text), rt_text_len(text)) else -> rt_text_lossy(rt_text_data(text), rt_text_len(text))
 }
 // `label` (borrowed) names the reader in the Read error.
 fn process_execution_validate_text(text: I64, label: I64, err: I64) -> Bool {

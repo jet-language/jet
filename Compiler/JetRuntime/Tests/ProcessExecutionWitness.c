@@ -303,6 +303,26 @@ int main(int argc, char **argv, char **envp) {
         jet_rt_handle_drop_process_stdout_stream(held);
         jet_rt_handle_drop_process_spec(s);
     }
+    // 6c. A streamed output need not be UTF-8: its reader gets the raw bytes,
+    // wait still returns a receipt, and the receipt text is lossy. (18/19
+    // below keep a text capture strict.)
+    {
+        Spec *s = SPEC("/bin/sh", "-c", "printf 'a\\377\\n'");
+        s = replace(s, jet_process_spec_stdout(s, 0));
+        ProcessChild *child = NULL;
+        IOError *e = NULL;
+        check(jet_process_spec_spawn(s, &child, &e) == 1 && e == NULL && child != NULL, "binary stream spawn ok");
+        int64_t pipe = jet_rt_handle_field_process_child_stdout(child);
+        int64_t data = 0, len = 0, error = 0;
+        check(jet_process_stream_line_bytes_raw(pipe, &data, &len, &error) == 1 && error == 0 && len == 3 && memcmp((const void *)(intptr_t)data, "a\377\n", 3) == 0, "streamed raw bytes");
+        jet_rt_free(data, len, 1);
+        ProcessReceipt *r = NULL;
+        check(jet_process_child_wait(child, &r, &e) == 1 && e == NULL && r != NULL, "binary stream wait ok");
+        check(eq(receipt_output(r), "a\357\277\275\n"), "streamed receipt text is lossy");
+        drop_receipt(r);
+        jet_rt_handle_drop_process_child(child);
+        jet_rt_handle_drop_process_spec(s);
+    }
 
     // 7. Timeout kills the child process group and reports timed_out with SIGKILL.
     {
