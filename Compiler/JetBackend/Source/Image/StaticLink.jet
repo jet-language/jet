@@ -1447,6 +1447,59 @@ fn link_collect(c: &LinkContext, entries: [Int], linker_names: [String:Bool]) Ne
     loop piece in 0..<c.ep_sec.len() {
         if c.ep_cie[piece] >= 0 -> c.ep_keep[piece] = link_live_row(c, c.ep_target[piece]) >= 0
     }
+    link_share_cies(&c)
+}
+
+// One CIE per distinct record, written only when a kept FDE names it. A kept
+// FDE whose CIE has no relocations and repeats the bytes of a CIE already in
+// use names that CIE instead; a CIE that no kept FDE names is dropped. Every
+// input's `.eh_frame` brings its own CIEs (the runtime pack one per Jet
+// function group), so without this an image carried several CIEs per live
+// function. FDEs are visited in output order and the first FDE to use a
+// record decides which CIE stays, so each CIE is still written before every
+// FDE that names it (link_emit_eh's CIE pointer stays positive).
+fn link_share_cies(c: &LinkContext) Never! {
+    loop piece in 0..<c.ep_sec.len() {
+        if c.ep_cie[piece] < 0 -> c.ep_keep[piece] = false
+    }
+    chosen := [Int:Int]{}
+    by_bytes := [String:Int]{}
+    loop piece in 0..<c.ep_sec.len() {
+        cie :: c.ep_cie[piece].copy()
+        if cie < 0 || !c.ep_keep[piece] -> next
+        shared := chosen.get(cie) ?? -1
+        if shared < 0 {
+            shared = cie
+            if c.ep_reloc_count[cie] == 0 {
+                key :: link_eh_record_key(c, cie)
+                shared = by_bytes.get(key) ?? cie
+                if shared == cie -> &by_bytes.add(key, cie).drop("a new record")
+            }
+            &chosen.add(cie, shared).drop("each CIE is chosen once")
+            c.ep_keep[shared] = true
+        }
+        c.ep_cie[piece] = shared
+    }
+}
+
+// The bytes of one `.eh_frame` record as text: its 32-bit words, then any
+// trailing bytes.
+fn link_eh_record_key(c: LinkContext, piece: Int) -> String Never! {
+    obj :: c.ep_obj[piece].copy()
+    b :: c.obj_buffer[obj].copy()
+    start :: link_sec_offset(c, obj, c.ep_sec[piece].copy()) + c.ep_start[piece]
+    length :: c.ep_len[piece].copy()
+    words := [String]{}
+    at := 0
+    loop at + 4 <= length {
+        &words.push("{link_u32(c.bufs, b, start + at)}")
+        at += 4
+    }
+    loop at < length {
+        &words.push("b{link_u8(c.bufs, b, start + at)}")
+        at += 1
+    }
+    words.join(",")
 }
 
 // ---------------------------------------------------------------------------
