@@ -273,6 +273,23 @@ fn x64_store_indexed(code: &[U8], base: Int, index: Int, scale: Int, disp: Int, 
     x64_modrm_indexed(&code, src, base, index, scale, disp)
 }
 
+// mov [base + index * scale + disp], imm writes exactly `size` bytes: C6 /0
+// ib for one, the 66 prefix and C7 /0 iw for two, C7 /0 id for four and
+// REX.W C7 /0 id (sign-extended) for eight, whose immediate must fit i32.
+fn x64_store_indexed_imm(code: &[U8], base: Int, index: Int, scale: Int, disp: Int, value: Int, size: Int) Never! {
+    wide :: size == 8
+    if size == 2 -> x64_byte(&code, 0x66)
+    if wide || base >= 8 || index >= 8 -> x64_rex_indexed(&code, wide, 0, base, index)
+    x64_byte(&code, if size == 1 -> 0xc6 else -> 0xc7)
+    x64_modrm_indexed(&code, 0, base, index, scale, disp)
+    if size == 1 -> return x64_byte(&code, value)
+    if size == 2 {
+        x64_byte(&code, value)
+        return x64_byte(&code, value >> 8)
+    }
+    x64_u32(&code, value)
+}
+
 // lea dst, [base + disp] (REX.W 8D /r)
 fn x64_lea(code: &[U8], dst: Int, base: Int, disp: Int) Never! {
     x64_rex(&code, true, dst, base)
