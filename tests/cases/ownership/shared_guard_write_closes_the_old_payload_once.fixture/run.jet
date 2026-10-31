@@ -1,0 +1,41 @@
+// A value with Close stored in shared storage is owned by the storage. A
+// write through an edit guard replaces it in place: the old value closes
+// once, at the write, and the new value closes once, when the storage ends.
+
+struct Res { name: String }
+impl Res.Close {
+    fn close(^self) { print("close {self.name}") }
+}
+
+struct Slot { res: Res?, tag: Int }
+
+// The whole payload replaced through the guard.
+fn clear_whole(storage: Shared<Res?>) {
+    guard := storage.guard_edit()
+    guard.value = None
+    print("cleared whole")
+}
+
+// One field of the payload replaced through the guard.
+fn clear_field(storage: Shared<Slot>) {
+    guard := storage.guard_edit()
+    guard.value.res = None
+    print("cleared field")
+}
+
+// The whole payload replaced by a new value, which the storage then owns.
+fn refill(storage: Shared<Res?>) {
+    guard := storage.guard_edit()
+    guard.value = Val(Res{name: "new"})
+    print("refilled")
+}
+
+fn run() {
+    whole :: shared (Res?{Val(Res{name: "whole"})})
+    clear_whole(whole)
+    field :: shared Slot{res: Val(Res{name: "field"}), tag: 1}
+    clear_field(field)
+    again :: shared (Res?{Val(Res{name: "old"})})
+    refill(again)
+    print("end")
+}

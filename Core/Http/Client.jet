@@ -1321,13 +1321,13 @@ fn __client_once(method: String, url: __ClientURL, fields: [http.Header], body: 
     if url.scheme == "https" {
         tls_end :: __client_until(phases.tls_ns, phases.end_ns)
         if proxy != None {
-            wire.tcp = Val(tcp)
+            wire.tcp = Val(^tcp)
             wire.idle_ns = phases.tls_ns
             _ :: __client_tunnel(&wire, url) ?? {
                 __client_close(&wire)
                 return Err(err)
             }
-            tcp = wire.tcp ?? return Err(.Proxy{stage: "transport"})
+            tcp = ^wire.tcp ?? return Err(.Proxy{stage: "transport"})
             wire.tcp = None
         }
         remaining :: tls_end - core.time.__clock_mono_ns()
@@ -1338,7 +1338,7 @@ fn __client_once(method: String, url: __ClientURL, fields: [http.Header], body: 
         }
         wire.tls = Val(stream)
     } else {
-        wire.tcp = Val(tcp)
+        wire.tcp = Val(^tcp)
     }
     result := __client_exchange(&wire, method, url, fields, body, phases, proxy != None)
     __client_close(&wire)

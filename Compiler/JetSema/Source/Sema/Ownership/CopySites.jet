@@ -143,14 +143,19 @@ struct SemaCopySiteWalk {
 
 fn sema_copy_site_check_owned_walk(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, state: SemaOwnershipState, context: SemaCheckContext, diagnostics: &[Diagnostic], walk: SemaCopySiteWalk) -> Bool {
     if sema_copy_site_guard_projection(value) {
-        // Rust `note_exact_move` has no guard rule: `^guard.value` takes the
-        // payload out of the edit guard (the owner then refills it), so only
-        // an unmarked owning position asks for the explicit copy.
         // A `::` view binding over `guard.value.f ?? fallback` reads the
         // payload where the guard holds it; nothing is copied out.
-        if walk.exact_move || (walk.binds_view && walk.forwarded) -> return true
+        if walk.binds_view && walk.forwarded -> return true
         facts :: sema_copy_classify(value.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
         if facts.copyable -> return true
+        // The payload stays owned by the shared storage, which has no hole
+        // to leave behind: its other guards and its own cleanup still see
+        // the value, so a `^` out of the guard would close or free it twice
+        // (#6450). Assigning through the guard replaces it in place.
+        if walk.exact_move || walk.taken {
+            &diagnostics.push(sema_error("E0120", value.span, "the move marker `^` cannot take a value out of a guard", "the shared storage keeps owning the guard's payload; a move would leave it without that value while its other guards and its cleanup still use it", "copy the value with `.copy()` when it supports copying, or assign a new value through the guard to replace it in place"))
+            return false
+        }
         // Under `??` or an arm tail the guard read is judged only when its
         // type is fully known; a type that failed to resolve has already
         // been reported where it is declared.

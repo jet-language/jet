@@ -66,8 +66,11 @@ struct __HTTPTLSOps {
     // The bind-time identity check: "" or the reason the identity is unusable.
     check: fn(String, String) -[Net]> String Never!
     // The server handshake over an accepted stream, within the budget; None
-    // drops a failed handshake.
-    accept: fn(TCPStream, String, String, Duration) -[Net, Time.Wait]> __HTTPSecure? Never!
+    // drops a failed handshake. A function value's parameters only read, so
+    // the stream arrives as the one item of a shared list the handshake pops
+    // it from: the TLS stream is then its one owner, and the caller, whose
+    // list is empty, does not close it again.
+    accept: fn(Shared<[TCPStream]>, String, String, Duration) -[Net, Time.Wait]> __HTTPSecure? Never!
 }
 
 /// What one served lifetime did: connections accepted, refused for load,
@@ -206,7 +209,7 @@ impl HTTPServer {
             if self.__listener.accept(deadline: Duration{ns: C_ACCEPT_POLL_NS}) == {
                 .Ok(stream) -> {
                     accepted = accepted + 1
-                    if __accept_conn(stream, self.__tls, self.__deadline) == .Val(conn) {
+                    if __accept_conn(^stream, self.__tls, self.__deadline) == .Val(conn) {
                         if __serve_connection(conn, self.__mux, self.__deadline) -> completed = completed + 1
                     }
                 }
@@ -293,7 +296,7 @@ fn serve_once_listener(listener: TCPListener, mux: HTTPMux) HTTPError! -[Net, FS
         if __accept_timed_out(err) -> return Err(.IO{operation: "HTTP serve_once accept timed out"})
         return Err(.IO{operation: "accept: {err}"})
     }
-    _ :: __serve_connection(__HTTPConn{tcp: Val(stream), tls: None}, mux, None)
+    _ :: __serve_connection(__HTTPConn{tcp: Val(^stream), tls: None}, mux, None)
     Ok(())
 }
 
@@ -383,8 +386,14 @@ fn __tls_check(cert_pem: String, key_pem: String) -[Net]> String Never! {
     ""
 }
 
-fn __tls_accept(stream: TCPStream, cert_pem: String, key_pem: String, budget: Duration) -[Net, Time.Wait]> __HTTPSecure? Never! {
-    tcp := stream
+// The accepted stream, out of the list `__accept_conn` handed over.
+fn __tls_accepted(accepted: Shared<[TCPStream]>) -> TCPStream? Never! {
+    guard := accepted.guard_edit()
+    &guard.value.pop()
+}
+
+fn __tls_accept(accepted: Shared<[TCPStream]>, cert_pem: String, key_pem: String, budget: Duration) -[Net, Time.Wait]> __HTTPSecure? Never! {
+    tcp :: __tls_accepted(accepted) ?? return None
     secure :: server_tls.__server(^tcp, cert_pem, key_pem, [String]{}, budget) ?? return None
     Val(__HTTPSecure{
         read: (max_bytes: Int, deadline: Duration) -> secure.read(max_bytes, deadline: deadline),
@@ -1053,16 +1062,18 @@ struct __HTTPSecure {
     close: fn() -[Net, Time.Wait]> Unit
 }
 
-// The accepted stream, after the server handshake within the connection
-// budget when the server has a TLS identity; None drops a failed handshake.
-fn __accept_conn(stream: TCPStream, tls: HTTPServerTLS?, deadline: Duration?) -[Net, Time.Wait]> __HTTPConn? Never! {
+// The accepted stream, which the connection now owns, after the server
+// handshake within the connection budget when the server has a TLS identity;
+// None drops a failed handshake.
+fn __accept_conn(stream: ^TCPStream, tls: HTTPServerTLS?, deadline: Duration?) -[Net, Time.Wait]> __HTTPConn? Never! {
     if tls == .Val(identity) {
         budget :: if deadline == .Val(limit) -> limit.ns else -> C_IO_NS
         ops :: identity.__ops.guard_read()
-        secure :: ops.value.accept(stream, identity.cert_pem, identity.key_pem, Duration{ns: budget}) ?? return None
+        accepted :: shared [TCPStream]{^stream}
+        secure :: ops.value.accept(accepted, identity.cert_pem, identity.key_pem, Duration{ns: budget}) ?? return None
         return Val(__HTTPConn{tcp: None, tls: Val(secure)})
     }
-    Val(__HTTPConn{tcp: Val(stream), tls: None})
+    Val(__HTTPConn{tcp: Val(^stream), tls: None})
 }
 
 // Whether the connection's request was answered by the mux.

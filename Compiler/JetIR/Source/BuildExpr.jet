@@ -1130,13 +1130,23 @@ fn ir_assign_place(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, op: TB
     }
     if ir_body_node(p, b, place).kind == .SharedGuardValue(guard) {
         // `guard.value (op)= value`: the value first, then the cell's slot
-        // (the write place `&guard.value`), written in place.
+        // (the write place `&guard.value`), written in place. A plain write
+        // closes the old payload first, as a field write does: nothing moves
+        // out of a guard (E0120), so the old payload is whole.
         place_ty :: ir_ty(p, b, place)
         row :: ir_value_type(&m, p, place_ty) ?? return ir_fail(&b, span, "assignment to a Shared guard value of {ir_type_name(place_ty)}")
         slot :: ir_value_as(&m, p, &b, value, row, span)
         if ir_failed(b) -> return
         payload :: ir_shared_guard_payload(&m, p, &b, guard, span)
         if ir_failed(b) || payload < 0 || slot < 0 -> return
+        if op == None {
+            glue :: ir_close_glue(&m, p, &b, row, false, span)
+            if ir_failed(b) -> return
+            if glue >= 0 {
+                old :: ir_load_at(&m, &b, payload, 0, row)
+                ir_close_call(&b, glue, old)
+            }
+        }
         return ir_assign_at(&m, p, &b, payload, row, op, slot, value_ty, false, span)
     }
     place_kind :: ir_expr_kind_name(ir_body_node(p, b, place).kind)

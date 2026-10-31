@@ -72,14 +72,13 @@ fn __close_secret_storage<T>(value: ^Shared<T?>) Never! {
     __take_expired<T>(owner)
 }
 
-// Acquire the guard here: removal consumes an owned local, never a borrowed
-// guard parameter. Reinitialize the slot before dropping its moved payload.
+// Acquire the guard here: removal edits an owned guard, never a borrowed
+// guard parameter. Assigning `None` through the guard drops the stored
+// payload in place; a `^` cannot take it out of the guard (E0120, #6450).
 // The approved general mono-time Close drop glue (#4792) owns cleanup.
 fn __take_expired<T>(storage: Shared<T?>) Never! {
     guard := storage.guard_edit()
-    removed :: ^guard.value
     guard.value = None
-    _ :: ^removed
 }
 
 // A read parameter's pattern payload is an existing non-owning read window.
