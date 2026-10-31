@@ -634,7 +634,10 @@ fn ir_lazy_scalar(m: &IRModule, p: IRProgram, ty: Type) -> Bool Never! {
 // `xs.cycle(n).to_list()`: the first max(n, 0) elements of xs repeated, none
 // when xs is empty, copied into one buffer of exactly that many elements. A
 // count past what memory holds asks for 2^62 bytes, which fails as the
-// Iter's growing buffer would.
+// Iter's growing buffer would. A one-element xs fills the buffer with that
+// element, read once: the buffer is a fresh allocation, so no store to it
+// changes xs. Each store has the one value (OptReduce.jet's fill), and a
+// List whose length is a constant keeps only its own arm.
 fn ir_lazy_cycle_list(m: &IRModule, p: IRProgram, b: &IRBuilder, list_value: Int, count_value: Int, element: Type, ty: Type, span: Span) -> Int Never! {
     result_row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
     row :: ir_value_type(&m, p, element) ?? return ir_type_fail(&b, span, element)
@@ -679,19 +682,29 @@ fn ir_lazy_cycle_list(m: &IRModule, p: IRProgram, b: &IRBuilder, list_value: Int
     ir_route_list_header(&m, &b, out, 0, data, total)
     at :: ir_temp(&m, &b, word_row)
     ir_emit(&b.f, IROp.Const, at, 0, -1, -1, b.line)
+    one :: ir_word_const(&m, &b, 1)
+    single :: ir_bool_op(&m, &b, IROp.Eq, length, one)
+    ir_open_if(&b.f, single, b.line)
+    only :: ir_load_at(&m, &b, source, 0, row)
+    fill :: ir_count_open(&m, &b, total)
+    copied :: ir_copy_value(&m, p, &b, only, span)
+    target :: ir_element_address(&m, &b, data, fill, stride)
+    ir_store_at(&m, p, &b, target, 0, copied)
+    ir_count_close(&m, &b, fill)
+    ir_else(&b.f, b.line)
     index :: ir_count_open(&m, &b, total)
     from :: ir_element_address(&m, &b, source, at, stride)
     item :: ir_load_at(&m, &b, from, 0, row)
     duplicate :: ir_copy_value(&m, p, &b, item, span)
     to :: ir_element_address(&m, &b, data, index, stride)
     ir_store_at(&m, p, &b, to, 0, duplicate)
-    one :: ir_word_const(&m, &b, 1)
     ir_emit(&b.f, IROp.Add, at, at, one, IR_OVERFLOW_WRAP, b.line)
     wrapped :: ir_bool_op(&m, &b, IROp.Eq, at, length)
     ir_open_if(&b.f, wrapped, b.line)
     ir_emit(&b.f, IROp.Const, at, 0, -1, -1, b.line)
     ir_end(&b.f, b.line)
     ir_count_close(&m, &b, index)
+    ir_end(&b.f, b.line)
     ir_release(&m, &b, list)
     out
 }

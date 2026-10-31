@@ -1,0 +1,52 @@
+// One value stored into every element of a run, as an asm leaf's body
+// (JetIR OptReduce.jet): x64_fill_code's bytes run in place, with
+//
+//   rdi  the address of element 0 of the List's data
+//   rsi  the run's first index, as a raw word
+//   rdx  the index it ends before, as a raw word
+//   rcx  the value, as a raw word (its low `width` bytes are stored)
+//
+// and the result in rax: 0 once elements first..<end each hold the value,
+// or X64_INT_SUM_DECLINED (2^62) when the leaf declines. The elements are
+// `width` bytes (1, 2, 4 or 8). The leaf declines unless 0 <= first < end
+// and end is an inline Int, and, with `exact` (Int elements), the value is
+// an inline Int too. On a decline it has written no memory and changed
+// nothing the caller sees.
+//
+// `rep stos` stores upward from rdi: the leaf clears the direction flag
+// first rather than trust its caller's. Only caller-saved registers are
+// written (rax, rcx, rdx, rsi, rdi, r8, r11), rsp is untouched, and the code
+// falls through its last byte.
+
+fn x64_fill_code(width: Int, exact: Bool) -> [U8] Never! {
+    code := [U8]{}
+    declines := [Int]{}
+    x64_mov_ri(&code, X64_RAX, X64_INT_SUM_DECLINED)
+    // 0 <= first < end, end (and an exact value) inline.
+    x64_test_rr(&code, X64_RSI, X64_RSI)
+    &declines.push(x64_jcc_rel32(&code, X64Cond.S))
+    x64_alu_rr(&code, X64Alu.Cmp, X64_RSI, X64_RDX)
+    &declines.push(x64_jcc_rel32(&code, X64Cond.GE))
+    x64_int_sum_test(&code, X64_RDX, &declines)
+    if exact -> x64_int_sum_test(&code, X64_RCX, &declines)
+    // rdi the first element, rcx the count, rax the value.
+    x64_mov_rr(&code, X64_R8, X64_RDX)
+    x64_alu_rr(&code, X64Alu.Sub, X64_R8, X64_RSI)
+    if width == 2 -> x64_shift_ri(&code, X64Shift.Shl, X64_RSI, 1)
+    if width == 4 -> x64_shift_ri(&code, X64Shift.Shl, X64_RSI, 2)
+    if width == 8 -> x64_shift_ri(&code, X64Shift.Shl, X64_RSI, 3)
+    x64_alu_rr(&code, X64Alu.Add, X64_RDI, X64_RSI)
+    x64_mov_rr(&code, X64_RAX, X64_RCX)
+    x64_mov_rr(&code, X64_RCX, X64_R8)
+    // cld; rep stosb (f3 aa), stosw (66 f3 ab), stosd (f3 ab) or stosq
+    // (f3 48 ab).
+    x64_byte(&code, 0xfc)
+    if width == 2 -> x64_byte(&code, 0x66)
+    x64_byte(&code, 0xf3)
+    if width == 8 -> x64_byte(&code, 0x48)
+    x64_byte(&code, if width == 1 -> 0xaa else -> 0xab)
+    x64_mov_ri(&code, X64_RAX, 0)
+    end :: code.len()
+    loop site in declines -> x64_patch_rel32(&code, site, end)
+    code
+}

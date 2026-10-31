@@ -206,6 +206,9 @@ fn web_leaf(e: &WebEmitter, st: &WebState, name: String, args: [Int], result: Bo
         // delivers no signals (a fault is a wasm trap the host reports), so
         // reaching it is a trap.
         "rt_fault_print" -> web_op(&e, 0x00)
+        // The reduce leaves (JetIR OptReduce.jet) decline every run here
+        // (2^62, never an inline Int), so the Loop after the call runs every pass.
+        "rt_int_sum" | "rt_count_bytes" | "rt_count_ints" | "rt_count_words" | "rt_count_widened" | "rt_fill_1" | "rt_fill_2" | "rt_fill_4" | "rt_fill_8" | "rt_fill_ints" -> web_i64(&e, 4611686018427387904)
         "os_tls_base_i64" -> {
             web_global_get(&e, WEB_GLOBAL_TLS)
             web_wrap(&e)

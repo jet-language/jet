@@ -12,12 +12,15 @@
 // only lent out (`promote`), copies counted loops behind a test of their
 // Int bound, and other Int loops and small loopless functions behind
 // IntBig guards (`version`, OptVersion.jet), runs each function through
-// SSA (Ssa.jet, SsaOut.jet) and, once every body is optimized, gives a
-// word slot a Loop shares with the code around it a slot of its own in
-// the Loop (`split`, OptSplit.jet). Both levels fold polls into later ones
-// before Simplify and again at the end, then move stop points right after
-// their calls, and once every body is optimized drop the stop points after
-// calls of bodies that never report a stop (`stops`, OptStops.jet).
+// SSA (Ssa.jet, SsaOut.jet) and, once every body is optimized, hands a
+// Loop that sums a List's Int elements, counts its elements equal to a
+// value, or stores one value into each, to an asm leaf (`reduce`,
+// OptReduce.jet) and gives a word slot a
+// Loop shares with the code around it a slot of its own in the Loop
+// (`split`, OptSplit.jet). Both levels fold polls into later ones before
+// Simplify and again at the end, then move stop points right after their
+// calls, and once every body is optimized drop the stop points after calls
+// of bodies that never report a stop (`stops`, OptStops.jet).
 //
 // Every pass keeps the program's meaning exactly, on every level: runtime
 // calls, drops, stores and stops stay in order (but Int and word drops,
@@ -37,11 +40,11 @@ use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_
 // limits at any level (`small`, the build option), which callees inlining
 // takes (`inline`, the build option), the passes `disabled` names (to bisect
 // a difference to one pass: "unique", "entry", "once", "scalar", "promote",
-// "version", "range", "ssa", "stops", "glue", "split"), whether IR Lint
-// checks each function after every pass and every SSA form is verified
-// (`verify`; tests, CI and the JET_OPT_VERIFY knob), whether every SSA
-// value leaves SSA in a fresh slot (`stress`, which exercises the moves out
-// of SSA), and the name of the functions whose IR before and after the
+// "version", "range", "ssa", "stops", "glue", "split", "reduce"), whether
+// IR Lint checks each function after every pass and every SSA form is
+// verified (`verify`; tests, CI and the JET_OPT_VERIFY knob), whether every
+// SSA value leaves SSA in a fresh slot (`stress`, which exercises the moves
+// out of SSA), and the name of the functions whose IR before and after the
 // passes the report carries (`dump`, "" for none).
 struct IROptOptions {
     level: Int
@@ -120,17 +123,25 @@ struct IROptReport {
     ssa_fresh: Int
     instructions_before: Int
     instructions_after: Int
+    // Loops `reduce` handed to a leaf, and Loops with an Int total fed by
+    // a load (a sum) or by an equality test of a loaded element (a count),
+    // or with one Store of a value they do not change (a fill), that it did
+    // not (`reductions`: one note per such Loop).
+    reduced: Int
+    reductions_declined: Int
+    reductions: [String]
     // IROptOptions.dump: each dumped function's IR before and after its passes.
     dumps: [String]
     lint: [IRLintFinding]
 }
 
 fn ir_opt_report(level: Int) -> IROptReport Never! {
-    IROptReport{level: level, inlined_calls: 0, direct_calls: 0, folded: 0, branches_folded: 0, compares_fused: 0, copies_coalesced: 0, dead_removed: 0, unreachable_removed: 0, aggregates_replaced: 0, unique_hoisted: 0, int_facts: 0, ssa_functions: 0, ssa_changed: 0, ssa_moves: 0, ssa_fresh: 0, instructions_before: 0, instructions_after: 0, dumps: [String]{}, lint: [IRLintFinding]{}}
+    IROptReport{level: level, inlined_calls: 0, direct_calls: 0, folded: 0, branches_folded: 0, compares_fused: 0, copies_coalesced: 0, dead_removed: 0, unreachable_removed: 0, aggregates_replaced: 0, unique_hoisted: 0, int_facts: 0, ssa_functions: 0, ssa_changed: 0, ssa_moves: 0, ssa_fresh: 0, instructions_before: 0, instructions_after: 0, reduced: 0, reductions_declined: 0, reductions: [String]{}, dumps: [String]{}, lint: [IRLintFinding]{}}
 }
 
 fn ir_opt_report_text(r: IROptReport) -> String Never! {
-    text := "O{r.level}: instructions {r.instructions_before} -> {r.instructions_after}, inlined {r.inlined_calls}, direct calls {r.direct_calls}, folded {r.folded}, branches {r.branches_folded}, fused compares {r.compares_fused}, coalesced {r.copies_coalesced}, dead {r.dead_removed}, unreachable {r.unreachable_removed}, scalar-replaced {r.aggregates_replaced}, unique hoisted {r.unique_hoisted}, inline Int facts {r.int_facts}, ssa {r.ssa_functions} (rewritten {r.ssa_changed}, moves {r.ssa_moves}, fresh slots {r.ssa_fresh})"
+    text := "O{r.level}: instructions {r.instructions_before} -> {r.instructions_after}, inlined {r.inlined_calls}, direct calls {r.direct_calls}, folded {r.folded}, branches {r.branches_folded}, fused compares {r.compares_fused}, coalesced {r.copies_coalesced}, dead {r.dead_removed}, unreachable {r.unreachable_removed}, scalar-replaced {r.aggregates_replaced}, unique hoisted {r.unique_hoisted}, inline Int facts {r.int_facts}, ssa {r.ssa_functions} (rewritten {r.ssa_changed}, moves {r.ssa_moves}, fresh slots {r.ssa_fresh}), reductions {r.reduced} (declined {r.reductions_declined})"
+    loop note in r.reductions -> text = "{text}\n{note}"
     loop dump in r.dumps -> text = "{text}\n{dump}"
     text
 }
@@ -151,6 +162,9 @@ fn ir_opt_report_add(total: &IROptReport, part: IROptReport) Never! {
     total.ssa_changed += part.ssa_changed
     total.ssa_moves += part.ssa_moves
     total.ssa_fresh += part.ssa_fresh
+    total.reduced += part.reduced
+    total.reductions_declined += part.reductions_declined
+    loop note in part.reductions -> &total.reductions.push(note)
     loop dump in part.dumps -> &total.dumps.push(dump)
     loop finding in part.lint -> &total.lint.push(finding)
 }
@@ -178,7 +192,7 @@ fn ir_optimize_module(m: &IRModule, options: IROptOptions, threads: CompilerThre
     }
     // IR Lint reads every callee's signature while the bodies are out.
     lint :: if options.verify -> ir_lint_context(m) else -> ir_lint_context_none()
-    entry_lint :: if options.verify -> ir_lint_context(m) else -> ir_lint_context_none()
+    entry_lint := if options.verify -> ir_lint_context(m) else -> ir_lint_context_none()
     functions := [IRFunction]{}
     compiler_transfer_rows<IRFunction>(&functions, &m.functions)
     keys := [String]{}
@@ -208,6 +222,17 @@ fn ir_optimize_module(m: &IRModule, options: IROptOptions, threads: CompilerThre
         ir_opt_unrows(&functions, &bodies)
     }
     if level >= 2 && ir_opt_enabled(options, "version") && ir_opt_enabled(options, "range") && ir_opt_enabled(options, "ssa") -> ir_opt_version_entries(m, &functions, options, entry_lint, &report)
+    if level >= 2 && ir_opt_enabled(options, "reduce") {
+        reduced :: ir_opt_reduce_module(&m, &functions, &report)
+        if options.verify && reduced.len() > 0 {
+            // The leaf is new: IR Lint reads its signature from the module,
+            // for these bodies and every later pass.
+            compiler_transfer_rows<IRFunction>(&m.functions, &functions)
+            entry_lint = ir_lint_context(m)
+            compiler_transfer_rows<IRFunction>(&functions, &m.functions)
+            loop id in reduced -> _ := ir_opt_lint(m, entry_lint, functions[id], "reduce", &report)
+        }
+    }
     if level >= 2 && ir_opt_enabled(options, "split") {
         loop id in 0..<functions.len() {
             if ir_opt_split_loops(m, &functions[id]) > 0 && options.verify -> _ := ir_opt_lint(m, entry_lint, functions[id], "split", &report)
