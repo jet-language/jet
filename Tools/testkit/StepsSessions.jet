@@ -316,8 +316,10 @@ fn kit_steps_session_action(step: KitStep, context: KitStepCtx, previous: KitSte
             if kit_steps_build_target_text(payload) -> return KitStepResult{state: state, verdict: kit_expect_verdict("REFUSED", "build-target")}
             expanded :: kit_steps_runtime_expand(payload, context, state) ?? return kit_steps_action_error(state, "send token unavailable")
             cr :: String.from_bytes([U8{13}]) ?? panic("CR")
-            framed :: if step.session_mode == "raw" -> expanded else if pending.step.session_mode == "content-length" -> "Content-Length: {expanded.len()}{cr}\n{cr}\n{expanded}" else if pending.step.session_mode == "line" -> "{expanded}\n" else -> expanded
-            pending.child.stdin.write_text(framed) ?? return kit_steps_action_error(state, "session send: {err}")
+            framed :: if step.session_mode == "raw" -> expanded else if pending.step.session_mode == "content-length" -> "Content-Length: {expanded.count_bytes()}{cr}\n{cr}\n{expanded}" else if pending.step.session_mode == "line" -> "{expanded}\n" else -> expanded
+            // A child that has closed its input fails the step, as a child
+            // whose output ended before a recv was satisfied does.
+            pending.child.stdin.write_text(framed) ?? return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "session send: {err}")}
             return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
         }
         if step.action == "signal" {

@@ -73,7 +73,7 @@ use core.sys as sys
 
 #Test("when boolean expressions preserve precedence short-circuit and reject unknown atoms") {
     root :: cases_test_root("host-boolean")
-    source :: "step named: printf ok\nwhen exit == 0 && (stdout ~ \"ok\" || stdout ~ \"wrong\"): stdout: ~ ok # original predicate\nwhen ! (exit != 0 || named.stdout !~ \"ok\"): mkdir: selected\nfile: selected is-dir\nwhen stdout ~any \"ok\" \"other\": stdout: ~ ok # original predicate\nwhen exit == 0 || probe false: stdout: ~ ok # original predicate\n"
+    source :: "step named: printf ok\nwhen exit == 0 && (stdout ~ \"ok\" || stdout ~ \"wrong\"): stdout: ~ ok # original predicate\nwhen stdout ~any \"ok\" \"other\": stdout: ~ ok # original predicate\nwhen exit == 0 || probe false: stdout: ~ ok # original predicate\nwhen ! (exit != 0 || named.stdout !~ \"ok\"): mkdir: selected\nfile: selected is-dir\n"
     assert_eq(cases_test_advanced(root, "precedence", source).verdict.status, "PASS")
     failed :: "step: printf ok\nwhen exit == 0 && stdout ~ \"ok\": stdout: ~ wrong # original predicate\n"
     assert_eq(cases_test_advanced(root, "selected-failure", failed).verdict.status, "FAIL")

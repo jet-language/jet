@@ -95,7 +95,7 @@ fn kit_steps_median_test(assertion: KitAssertion, history: [KitCapturedStep]) ->
 fn kit_steps_elapsed_absolute(original: String, plan: KitPlan, before: Int) -> KitAssertion? {
     words :: kit_steps_words(kit_steps_body(original)) ?? return None
     if words.len() != 3 || !kit_expect_named(["<", "<=", ">", ">=", "="], words[1]) || !kit_steps_known_label(plan, words[0], before) -> return None
-    if kit_steps_duration_ns(words[2]) == None -> return None
+    if kit_steps_offset_ns(words[2]) == None -> return None
     Val(KitAssertion{stream: "elapsed", path: words[0], mode: "absolute", value: words[2], extra: words[1]})
 }
 
@@ -109,7 +109,7 @@ fn kit_steps_elapsed_unit(text: String) -> Int {
 
 fn kit_steps_elapsed_absolute_test(assertion: KitAssertion, history: [KitCapturedStep]) -> KitVerdict {
     unit :: kit_steps_elapsed_unit(assertion.value)
-    expected :: (kit_steps_duration_ns(assertion.value) ?? return kit_expect_verdict("ERROR", "invalid elapsed duration")) /% unit
+    expected :: (kit_steps_offset_ns(assertion.value) ?? return kit_expect_verdict("ERROR", "invalid elapsed duration")) /% unit
     index := history.len()
     loop index > 0 {
         index -= 1

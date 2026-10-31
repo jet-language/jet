@@ -33,7 +33,10 @@ fn kit_steps_host_triple() -> String {
 
 fn kit_steps_runtime_expand(text: String, context: KitStepCtx, state: KitStepState) -> String? {
     expanded := kit_steps_expand(text, context.env, context.work, context.scratch, state.built)
-    loop binding in state.bindings {
+    // Inner loop bindings shadow outer ones: the newest binding of a name wins.
+    count :: state.bindings.len()
+    loop offset in 0..<count {
+        binding :: state.bindings[count - 1 - offset]
         if binding.value == {
             .Text(value) -> expanded = expanded.replace("{{{binding.name}}}", value)
             else -> {}

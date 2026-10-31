@@ -31,6 +31,9 @@ use core.files as files
     ended :: cases_test_advanced(root, "ended", "session peer raw: printf done\nrecv peer until = \"other\" timeout 5s\nclose peer\n")
     assert_eq(ended.verdict.status, "FAIL")
     assert(ended.verdict.detail.starts_with("stdout ended"))
+    closed :: cases_test_advanced(root, "closed-input", "requires: os:unix\nsession peer raw: jet -c 'exec 0<&-; printf ready; exec sleep 1'\nrecv peer until = \"ready\" timeout 5s\nsend peer: \"late\"\nclose peer\n")
+    assert_eq(closed.verdict.status, "FAIL")
+    assert(closed.verdict.detail.starts_with("session send: "))
     loop source in ["recv missing\n", "session peer strange: cat\nclose peer\n", "session peer raw: cat\nrecv peer timeout nope\nclose peer\n", "session peer raw: cat\nrecv peer until $.id = invalid-json\nclose peer\n", "session peer raw: cat\nrecv peer collect until ndjson $ #>= 2 && timeout 1s\nclose peer\n", "session peer raw: cat\nrecv peer timeout 1s within 1s\nclose peer\n", "spawn peer: cat\nrecv peer\nwait: peer\n"] {
         assert_eq(cases_test_advanced(root, "invalid", source).verdict.status, "REFUSED")
     }

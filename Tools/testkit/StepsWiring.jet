@@ -58,10 +58,10 @@ fn kit_steps_terminal_line(plan: KitPlan, key: String, original: String, joined:
         terminal := result.steps[i].terminal ?? return Err("{key} needs a terminal step")
         if key == "pty-resize" {
             size :: kit_steps_terminal_dimensions(words[0]) ?? return Err("invalid terminal size")
-            at :: kit_steps_duration_ns(words[2]) ?? return Err("invalid terminal event time")
+            at :: kit_steps_offset_ns(words[2]) ?? return Err("invalid terminal event time")
             &terminal.events.push(KitTerminalEvent{kind: "resize", at: at, rows: size[0], cols: size[1]})
         } else {
-            delay :: kit_steps_duration_ns(words[words.len() - 1]) ?? return Err("invalid terminal event delay")
+            delay :: kit_steps_offset_ns(words[words.len() - 1]) ?? return Err("invalid terminal event delay")
             terminal.clock += delay
             sending :: key == "pty-send"
             &terminal.events.push(KitTerminalEvent{kind: if sending -> "send" else -> "close", text: if sending -> words[0] else -> "", at: terminal.clock})
@@ -72,7 +72,7 @@ fn kit_steps_terminal_line(plan: KitPlan, key: String, original: String, joined:
     label :: result.steps[i].label
     if key == "pty-resize" || !kit_steps_terminal_session(result.steps, label, joined) -> return Err("{key} needs a terminal step or a live terminal session")
     delay_word :: words[words.len() - 1]
-    delay :: kit_steps_duration_ns(delay_word) ?? return Err("invalid terminal event delay")
+    delay :: kit_steps_offset_ns(delay_word) ?? return Err("invalid terminal event delay")
     if delay > 0 -> &result.steps.push(KitStep{argv: ["sleep", delay_word], stdin: "", exit: "0", assertions: [], action: "sleep"})
     eof :: String.from_bytes([U8{4}]) ?? panic("EOF character")
     text :: if key == "pty-send" -> words[0] else -> eof
@@ -94,9 +94,9 @@ fn kit_steps_wiring_valid(key: String, original: String) -> Bool {
         }
         return words.len() == 1 || (words.len() == 3 && words[1] == "size" && kit_steps_terminal_size(words[2]))
     }
-    if key == "pty-send" -> return words.len() == 3 && words[1] == "after" && original.starts_with("\"") && kit_steps_duration_ns(words[2]) != None
-    if key == "pty-close" -> return words.len() == 2 && words[0] == "after" && kit_steps_duration_ns(words[1]) != None
-    words.len() == 3 && kit_steps_terminal_size(words[0]) && words[1] == "at" && kit_steps_duration_ns(words[2]) != None
+    if key == "pty-send" -> return words.len() == 3 && words[1] == "after" && original.starts_with("\"") && kit_steps_offset_ns(words[2]) != None
+    if key == "pty-close" -> return words.len() == 2 && words[0] == "after" && kit_steps_offset_ns(words[1]) != None
+    words.len() == 3 && kit_steps_terminal_size(words[0]) && words[1] == "at" && kit_steps_offset_ns(words[2]) != None
 }
 
 // Core Capture drains concurrently. Null discards at this boundary; its fd-type

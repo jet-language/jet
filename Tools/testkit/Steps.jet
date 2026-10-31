@@ -555,7 +555,7 @@ fn kit_steps_parse(source: String) -> KitPlan {
                 &plan.steps.push(KitStep{argv: [], stdin: "", exit: "any", assertions: [], action: "assert"})
             } else {
                 owner :: plan.steps[plan.steps.len() - 1]
-                if kit_expect_named(["when", "end when", "for", "repeat", "end for", "end repeat", "parallel", "end parallel"], owner.action) || (owner.action != "" && owner.conditions.len() > 0) {
+                if kit_expect_named(["when", "end when", "for", "repeat", "end for", "end repeat", "parallel", "end parallel"], owner.action) || owner.conditions.len() > 0 {
                     &plan.steps.push(KitStep{argv: [], stdin: "", exit: "any", assertions: [], action: "assert"})
                 }
             }
@@ -980,7 +980,8 @@ fn kit_steps_policy(step: KitStep, env: KitEnv) -> KitEnv? {
     policy.env_clear = step.env_clear
     if step.duration > 0 -> policy.timeout = time.duration_ns(step.duration)
     if step.limit_time > 0 -> policy.timeout = Duration.seconds(step.limit_time) ?? return None
-    if step.limit_memory > 0 -> policy.memory_limit = step.limit_memory
+    // `limit: memory=` is KiB; Core's process memory limit is bytes.
+    if step.limit_memory > 0 -> policy.memory_limit = step.limit_memory * 1024
     // `limit: resident=` (KiB) bounds the step's whole process tree: the
     // programs a `jet run`/`jet test` step builds run as its grandchildren.
     if step.limit_resident > 0 {

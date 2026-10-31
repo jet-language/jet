@@ -118,7 +118,7 @@ use core.sys as sys
     loop mode in ["alive-nonzombie", "proc-readable-nonzombie"] {
         stopped :: "requires: os-name:linux\nspawn peer: jet -c 'exec sleep 20'\nrepeat while process {{pid:peer}} {mode} timeout 1s every 1ms fail \"process remained alive\"\nsignal peer: KILL\nwait peer timeout 1s\nexit: any # explicit signal is an expected stop\nend repeat\n"
         assert_eq(cases_test_advanced(root, "stopped", stopped).verdict.status, "PASS")
-        timeout :: "requires: os-name:linux\nspawn peer: jet -c 'exec sleep 20'\nrepeat while process {{pid:peer}} {mode} timeout 2ms every 1ms fail \"process remained alive\"\nend repeat\n"
+        timeout :: "requires: os-name:linux\nspawn peer: jet -c 'exec sleep 20'\nrepeat while process {{pid:peer}} {mode} timeout 2ms every 1ms fail \"process remained alive\"\nend repeat\nwait peer\n"
         failed :: cases_test_advanced(root, "deadline", timeout)
         assert_eq(failed.verdict.status, "FAIL")
         assert_eq(failed.verdict.detail, "process remained alive")
@@ -137,10 +137,10 @@ use core.sys as sys
 #Test("non-zombie repeat platform refusal follows conditions and precedes PID expansion") {
     root :: cases_test_root("control-nonzombie-host")
     loop mode in ["alive-nonzombie", "proc-readable-nonzombie"] {
-        skipped :: "when os-name !{sys.name()}\nrepeat while process {{cap:unknown}} {mode} timeout 1s every 1ms fail \"unreachable\"\ncapture: joined += text stdout\nend repeat\nend when\nwhen captured joined: step: false\nstep: printf done\nstdout: = \"done\"\n"
+        skipped :: "when os-name !{sys.name()}\nrepeat while process {{cap:unknown}} {mode} timeout 1s every 1ms fail \"unreachable\"\ncapture: joined += text file state\nend repeat\nend when\nwhen captured joined: step: false\nstep: printf done\nstdout: = \"done\"\n"
         assert_eq(cases_test_advanced(root, "skipped", skipped).verdict.status, "PASS")
         if sys.name() != "linux" {
-            selected :: cases_test_advanced(root, "selected", "repeat while process {{cap:unknown}} {mode} timeout 1s every 1ms fail \"unreachable\"\ncapture: joined += text stdout\nend repeat\n")
+            selected :: cases_test_advanced(root, "selected", "repeat while process {{cap:unknown}} {mode} timeout 1s every 1ms fail \"unreachable\"\ncapture: joined += text file state\nend repeat\n")
             assert_eq(selected.verdict.status, "REFUSED")
             assert_eq(selected.verdict.detail, "process-state")
         }

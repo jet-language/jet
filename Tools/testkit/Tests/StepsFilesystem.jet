@@ -34,7 +34,8 @@ use core.files as files
     assert_eq(cases_test_advanced(root, "ready", source).verdict.status, "PASS")
     assert_eq(cases_test_advanced(root, "deadline", "await: file absent timeout 20ms\n").verdict.status, "FAIL")
     assert_eq(cases_test_advanced(root, "resize", "resize: sparse 100000000000\n").verdict.status, "REFUSED")
-    loop invalid in ["mkdir: ../escape", "hardlink: a ../escape", "rename: a ../escape", "chmod: a 0800", "poke: a at -1 hex \"ff\"", "poke: a at 0 hex \"f\"", "await: file a timeout 0s", "await: file a timeout -1s", "resize: a -1"] {
+    // Malformed poke hex is a run-time ERROR (StepsGapForms), not refused grammar.
+    loop invalid in ["mkdir: ../escape", "hardlink: a ../escape", "rename: a ../escape", "chmod: a 0800", "poke: a at -1 hex \"ff\"", "await: file a timeout 0s", "await: file a timeout -1s", "resize: a -1"] {
         assert_eq(cases_test_advanced(root, "invalid", "{invalid}\n").verdict.status, "REFUSED")
     }
     files.remove_all(root) ?? panic("remove readiness scratch")
