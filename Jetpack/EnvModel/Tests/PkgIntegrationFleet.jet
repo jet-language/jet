@@ -1,7 +1,7 @@
 // Port tests/fleet.rs exact reachable predicates; no invented override API.
 // Full override predicates remain jetos-fleet-model ledger-only, not passing claims.
 // PENDING-SAME-HEAD nested package-test admission.
-use jet_env_model.[envmodel_evaluate_env]
+use jet_env_model.[envmodel_evaluate_env, envmodel_evaluate_source]
 
 #Test("fleet_host_unknown_system_is_e1242") {
     source :: "module fleet.prod {{ hosts: {{ web1: system.ghost }} }}"
@@ -39,12 +39,18 @@ fn s5_fleet_committed_claim(root: String) {
     plan :: envmodel_evaluate_env(source, base) ?? panic("committed fleet evaluates")
     assert_eq(plan.systems.len(), 1)
     assert_eq(plan.systems[0].name, "web")
-    assert_eq(plan.fleets.len(), 1)
-    assert_eq(plan.fleets[0].name, "prod")
+    // EnvPlan carries no fleet captures; the evaluated modules keep them.
+    modules :: envmodel_evaluate_source(source, base) ?? panic("committed fleet source evaluates")
+    fleets := [FleetPlan]{}
+    loop evaluated in modules {
+        loop group in evaluated.fleets -> &fleets.push(group)
+    }
+    assert_eq(fleets.len(), 1)
+    assert_eq(fleets[0].name, "prod")
     names := [String]{}
-    loop host in plan.fleets[0].hosts -> &names.push(host.name)
+    loop host in fleets[0].hosts -> &names.push(host.name)
     assert_eq(names, [String]{"web1", "web2", "web3"})
-    loop host in plan.fleets[0].hosts -> assert_eq(host.system, "web")
+    loop host in fleets[0].hosts -> assert_eq(host.system, "web")
 }
 
 #Test("committed_fleet_example_field_checks_clean") {

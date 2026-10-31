@@ -79,14 +79,14 @@ fn envmodel_test_normalize_paths(code: String, rendered: String) -> String {
     slug :: if code == {
         "E0970" -> "find-missing"
         "E0971" -> "find-liftability"
-        else -> { return rendered }
+        else -> { return rendered.copy() }
     }
-    halves :: rendered.split_once("modeval-{slug}-") ?? return rendered
+    halves :: rendered.split_once("modeval-{slug}-") ?? return rendered.copy()
     head :: if halves.before.cut_last("`") == {
         .Val(parts) -> "{parts.before}`"
         .None -> halves.before
     }
-    rest :: halves.after.split_once("/") ?? return rendered
+    rest :: halves.after.split_once("/") ?? return rendered.copy()
     "{head}<TMP>/modeval-{slug}/{rest.after}"
 }
 
