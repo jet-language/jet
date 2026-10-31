@@ -494,3 +494,29 @@ fn observe_env_key(index: I64) -> I64 {
     }
     jet_rt_free(inputs, I64{56}, I64{8})
 }
+
+// The observation start jet_rt_main runs before the entry (D-SIZE-PAYUSE1 A).
+// Its hook is kept only in a program that links something to observe: a
+// task (Observe.jet observe_task_linked), a channel, a live value or an
+// event (the snapshot's section code words). Any other program links no
+// writer, no thread spawn and no environment read for it.
+observe_start_code := I64{0}
+
+// runtime-init: 4 when observe_task_linked,observe_channels_code,observe_values_code,observe_events_code
+#Export(c) fn jet_rt_observe_start_init() {
+    observe_start_code = rt_observe_start_address()
+}
+
+// jet_rt_observe_runtime_start_from_env as a code word's target. Returns
+// whether a task registered before this start (Observe.jet
+// observe_task_linked): 0 at a process start, 1 when a resident host starts
+// another run after one that spawned tasks.
+#Export(c) fn jet_rt_observe_start(argument: I64) -> I64 {
+    jet_rt_observe_runtime_start_from_env()
+    observe_task_linked
+}
+
+// RuntimeLower resolves this checked function-address entry, never the body.
+fn rt_observe_start_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}

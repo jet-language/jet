@@ -1,4 +1,4 @@
-// Spec136 is a native private value carrier, not Rust or HostSpawn Spec216.
+// Spec144 is a native private value carrier, not Rust or HostSpawn Spec224.
 // CAbiRoutes builders BORROW parent/inputs and return an independent clone.
 // DataABI owns offsets; TextDebug and UiCarriersBasic own nested codecs.
 fn process_raw_box(value: I64) -> I64 {
@@ -135,6 +135,7 @@ fn process_text_list_push(list: I64, text: I64) {
         field += DATA_TREE_ELEMENT_BYTES
     }
     if (encoding_word(a + PROCESS_SPEC_DETACHED).bit_and(I64{255})) != (encoding_word(b + PROCESS_SPEC_DETACHED).bit_and(I64{255})) -> return false
+    if encoding_word(a + PROCESS_SPEC_PARENT_DEATH) != encoding_word(b + PROCESS_SPEC_PARENT_DEATH) -> return false
     left :: encoding_word(a + PROCESS_SPEC_TERMINAL)
     right :: encoding_word(b + PROCESS_SPEC_TERMINAL)
     if (left == I64{0} || right == I64{0}) {
@@ -268,6 +269,13 @@ fn process_spec_env_forget(list: I64, stride: I64, name: I64) {
 #Export(c) fn jet_process_spec_detached(value: I64) -> I64 {
     result :: jet_rt_handle_clone_process_spec(value)
     encoding_store(result + PROCESS_SPEC_DETACHED, I64{1})
+    result
+}
+// core.process.__spec_parent_death (process.run_all): the child gets SIGKILL
+// when this process dies (PR_SET_PDEATHSIG); a detached spec ignores it.
+#Export(c) fn jet_process_spec_parent_death(value: I64) -> I64 {
+    result :: jet_rt_handle_clone_process_spec(value)
+    encoding_store(result + PROCESS_SPEC_PARENT_DEATH, I64{1})
     result
 }
 fn process_spec_raw_replace(value: I64, field: I64, raw: I64) -> I64 {

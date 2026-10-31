@@ -190,6 +190,31 @@ size is set by the design: unconditional startup, unconditional exit, and
 gates that are checked at run time. Removing individual symbols cannot fix
 it.
 
+## After C2 (D-SIZE-PAYUSE1 A)
+
+Hello is 134,064 B at every level (default, o0, o1, o2, `--release`), from
+437,416 B. The cuts are by liveness and lazy installation, none specific to
+hello:
+
+- The observation start is a code word that `jet_rt_main` calls. Its hook
+  (ObserveLive.jet `jet_rt_observe_start_init`) is kept only when the program
+  links a task, a channel, a live value or an event. The task registry's
+  init is no longer called from `jet_rt_main`, so its hook is kept only by
+  code that reads the registry.
+- The task-stop publication is a code word installed by the first task,
+  parallel or realtime body (Scheduler.jet `scheduler_body_enter`); stop
+  domain 2 exists only inside one. The test-scope stop recorder is installed
+  with the test capture (TestCapture.jet `jet_rt_test_capture_init`).
+- The stdout flush's buffer shift no longer checks an address sum, so
+  allocator init no longer reaches a numeric stop through it.
+
+What hello still links: no task spawn, worker, observation writer,
+environment read or formatter. The 108,763 live pack bytes are the
+allocator, the stop reports (`trap_*`, number rendering for them) with the
+process root's control (`jet_rt_root_*`, `scheduler_control_*`,
+`scheduler_root_publish_owned`), which every program's stop goes through
+(D-FAIL-EXIT1), and the fault handler (29,207 B held).
+
 ## Data objects
 
 No runtime data object reaches 1 KB. The largest is musl's

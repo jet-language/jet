@@ -480,7 +480,13 @@ fn scheduler_shield_leave_finished() {
 #Export(c) fn jet_rt_session_shield_enter() { jet_scheduler_shield_enter() }
 #Export(c) fn jet_rt_session_shield_leave() { jet_scheduler_shield_leave() }
 
-fn scheduler_body_enter() -> I64 { sync_swap(thread_base() + I64{64}, I64{1}) }
+// jet_rt_task_panic_publish's code word: 0 until the first body enters.
+task_panic_code := I64{0}
+
+fn scheduler_body_enter() -> I64 {
+    if (task_panic_code == I64{0}) -> task_panic_code = rt_task_panic_publish_address()
+    sync_swap(thread_base() + I64{64}, I64{1})
+}
 fn scheduler_body_leave(saved: I64) { sync_store(thread_base() + I64{64}, saved) }
 // Lower.jet lower_poll_call_enter/leave bracket a checked operation whose
 // immediate terminator is a Propagate poll: inside a body (bit 1) the call
@@ -1449,16 +1455,32 @@ fn rt_task_panic_publish(message: I64, length: I64, code: I64) -> Bool {
     rt_task_panic_publish_recorded(message, length)
 }
 // The publication rail once the caller has recorded its own stop code
-// (Trap.jet jet_rt_coded_stop).
+// (Trap.jet jet_rt_coded_stop). Stop domain 2 exists only inside a task,
+// parallel or realtime body, whose first entry installs the rail
+// (scheduler_body_enter): a program that runs none links no publication.
 fn rt_task_panic_publish_recorded(message: I64, length: I64) -> Bool {
-    if (jet_rt_stop_domain() != I64{2}) -> return false
-    if !scheduler_panic_check() -> return false
+    code :: task_panic_code
+    if (code == I64{0}) -> return false
+    coll_call2(code, message, length) != I64{0}
+}
+
+// rt_task_panic_publish_recorded's rail as a code word's target: 1 when
+// the stop is published to the task, 0 when the caller reports it.
+#Export(c) fn jet_rt_task_panic_publish(message: I64, length: I64) -> I64 {
+    if (jet_rt_stop_domain() != I64{2}) -> return I64{0}
+    if !scheduler_panic_check() -> return I64{0}
     text :: scheduler_text_new(length)
-    if (text == I64{0} && jet_rt_session_propagate() != I64{0}) -> return true
+    if (text == I64{0} && jet_rt_session_propagate() != I64{0}) -> return I64{1}
     coll_copy(message, sync_load(text), length)
     rt_task_panic_publish_owned(text, I64{0})
-    true
+    I64{1}
 }
+
+// RuntimeLower resolves this checked function-address entry, never the body.
+fn rt_task_panic_publish_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
 // Takes an owned, already checked report (or builder): the same publication
 // rail as rt_task_panic_publish, without a second allocation/copy.
 fn rt_task_panic_publish_owned(message: I64, form: I64) {

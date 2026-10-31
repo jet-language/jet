@@ -850,7 +850,9 @@ fn ir_record_runtime(m: &IRModule, p: IRProgram, ty: Type) -> IRRuntimeHandle? N
     if !is_struct && !is_enum -> return None
     if is_struct && kind != .Aggregate -> return None
     if is_enum && kind != .Pointer -> return None
-    handle :: ir_handle_runtime(p, name) ?? return None
+    // A bare spelling of a Core declaration (a Core signature's own
+    // `VaultError`) is that declaration: its key names the runtime row.
+    handle :: ir_handle_runtime(p, name) ?? ir_handle_runtime(p, p.types[definition].key) ?? return None
     if !ir_record_schema(handle) -> return None
     Val(handle)
 }

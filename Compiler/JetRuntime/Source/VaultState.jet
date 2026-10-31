@@ -1061,6 +1061,52 @@ fn vault_current_at_root(root: I64, name: I64, key_type: I64, out: I64) -> I64 {
 fn vault_versions_at_root(root: I64, name: I64, key_type: I64, out: I64) -> I64 {
     vault_key_query_at_root(root, name, key_type, true, out)
 }
+// The Core `KeyRef<T>` a runtime ref crosses as (Core/Crypto/Vault.jet): a
+// 40-byte shell of its declared fields, name String @0, version exact Int @8
+// and the private `identity: [U8]` List header @16 holding the store uuid,
+// record opaque id and record hash (64 bytes). With the provider word 0 and
+// the generation, that is every word of the runtime ref, so a later vault
+// call rebuilds the exact ref and vault_find re-verifies it.
+VAULT_KEY_REF_SHELL_BYTES :: I64{40}
+VAULT_KEY_REF_IDENTITY_BYTES :: I64{64}
+fn vault_key_ref_shell(reference: I64) -> I64 {
+    shell :: jet_rt_alloc(VAULT_KEY_REF_SHELL_BYTES, I64{8})
+    rt_text_store(shell, jet_rt_string_clone(rt_text_word(reference + VAULT_REF_NAME)))
+    rt_text_store(shell + I64{8}, jet_int_owned_from_i64(rt_text_word(reference + VAULT_REF_GENERATION)))
+    identity :: jet_rt_alloc(VAULT_KEY_REF_IDENTITY_BYTES * RT_HOST_U8_STRIDE, I64{8})
+    rt_text_bytes_copy(identity, reference + VAULT_REF_UUID, I64{16})
+    rt_text_bytes_copy(identity + I64{16}, reference + VAULT_REF_OPAQUE, I64{16})
+    rt_text_bytes_copy(identity + I64{32}, reference + VAULT_REF_HASH, I64{32})
+    rt_text_store(shell + I64{16} + DATA_SEQUENCE_LENGTH, VAULT_KEY_REF_IDENTITY_BYTES)
+    rt_text_store(shell + I64{16} + DATA_SEQUENCE_CAPACITY, VAULT_KEY_REF_IDENTITY_BYTES)
+    rt_text_store(shell + I64{16} + DATA_SEQUENCE_DATA, identity)
+    shell
+}
+// `vault.current<T>(name)` over the repository at the working directory
+// (IR route jet_vault_current_impl). `key_type` is the exact Int tag of T
+// (1 SigningKey, 2 X25519SecretKey). Ok answers 1 and writes the Option tag
+// at `some` and, when present, the KeyRef<T> shell at `value`, whose shell
+// (not its fields) the caller frees. Err answers 0 and writes the
+// VaultError record at `err`.
+#Export(c) fn jet_vault_current_impl(name: I64, key_type: I64, some: I64, value: I64, err: I64) -> I64 {
+    slot :: jet_rt_alloc(I64{8}, I64{8})
+    rt_text_store(slot, I64{0})
+    error :: vault_current_at_root(rt_static_text("."), name, jet_int_owned_to_i64(key_type), slot)
+    reference :: rt_text_word(slot)
+    jet_rt_free(slot, I64{8}, I64{8})
+    if (error != I64{0}) {
+        rt_text_store(err, error)
+        return I64{0}
+    }
+    if (reference == I64{0}) {
+        rt_text_store(some, I64{0})
+        return I64{1}
+    }
+    rt_text_store(some, I64{1})
+    rt_text_store(value, vault_key_ref_shell(reference))
+    vault_ref_drop(reference)
+    I64{1}
+}
 // Status uses wire1/2/3 internally. Only this boundary projects by variant name
 // into Core KeyStatus Active0/Retired1/Revoked2; no runtime enum carrier.
 fn vault_status_core(wire: I64) -> I64 {

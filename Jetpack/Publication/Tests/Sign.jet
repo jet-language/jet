@@ -1,7 +1,5 @@
 // Original Sign.rs tests are retained, including provider-gated native cases.
 // Pure codec/env/frame proof does not claim entropy or protected publication.
-use core.mem as publication_sign_test_mem
-
 #Test("publication sign hex_roundtrips") {
     data :: [U8]{0, 1, 2, 250, 255, 16, 128}
     encoded :: hex.encode(data)
@@ -153,8 +151,9 @@ fn publication_sign_test_root(label: String) -[FS, Env]> String Never! {
 
 // Original Sign.rs :499 (#6117). Rust's private volatile_zeroize wiped only the
 // retired helper-process stdout and seed temporaries; Core secret owners now
-// wipe on Close, so the in-place erase is Core's volatile write path with its
-// provenance sentry (#6107). Plain zero assignments would not prove it.
+// wipe on Close. `crypto.wipe` is Core's public in-place erase: every element
+// and the spare capacity take stores the optimizer cannot drop, and the length
+// stays. Plain zero assignments would not prove it.
 #Test("publication sign secret_temporary_zeroization_clears_every_byte") {
     secret := [U8]{}
     expected := [U8]{}
@@ -162,11 +161,6 @@ fn publication_sign_test_root(label: String) -[FS, Env]> String Never! {
         &secret.push(U8{165})
         &expected.push(U8{0})
     }
-    #Unsafe("each address names a live element of the owned secret buffer for its one volatile store (#6117)") {
-        loop index in 0..<secret.len() {
-            pointer :: publication_sign_test_mem.Ptr<U8>.from_addr(publication_sign_test_mem.address_of(secret[index]))
-            publication_sign_test_mem.volatile_write(pointer, U8{0})
-        }
-    }
+    crypto.wipe(&secret)
     assert_eq(secret, expected)
 }

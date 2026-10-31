@@ -7,8 +7,9 @@
 // and a last row without a newline is not a row). Emits the items assigned to
 // SHARD_INDEX: rows heaviest first, ties by item, each given to the currently
 // lightest shard. Standard error reports the predicted load and spread.
-// Items order by bytes; the shell original orders them with `sort`'s locale
-// collation, which agrees for items without punctuation or case differences.
+// Items order by bytes (String `<=>`), which is the order `LC_COLLATE=C`
+// gives; the shell original sorts with `LC_ALL=C`, so both assign the same
+// shards on every machine whatever its locale.
 use core.process as process
 use core.term as term
 
@@ -165,6 +166,11 @@ fn plan_text(args: [String], input: String) -> String Never! {
     assert_eq(plan_text([String]{"1", "3"}, input), "golden | weighted-shards: shard 1/3 selected 1 of 4 items, predicted 30s (shard loads: 60 30 30; spread 60s/30s = 2.00x)")
     assert_eq(plan_text([String]{"0", "2"}, "5\ta\n\t9\t\tb\tc\t\n7\tz"), "b\tc | weighted-shards: shard 0/2 selected 1 of 2 items, predicted 9s (shard loads: 9 5; spread 9s/5s = 1.80x)")
     assert_eq(plan_text([String]{"0", "1"}, ""), " | weighted-shards: shard 0/1 selected 0 of 0 items, predicted 0s (shard loads: 0; spread 0s/0s = n/a)")
+}
+
+#Test("ties order by bytes, as LC_COLLATE=C does, not by dictionary order") {
+    input :: "5\tapple\n5\t_x\n5\tZulu\n5\ta-b\n"
+    assert_eq(plan_text([String]{"0", "1"}, input), "Zulu,_x,a-b,apple | weighted-shards: shard 0/1 selected 4 of 4 items, predicted 20s (shard loads: 20; spread 20s/20s = 1.00x)")
 }
 
 #Test("malformed rows and arguments are refused") {

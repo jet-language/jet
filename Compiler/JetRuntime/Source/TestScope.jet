@@ -180,11 +180,27 @@ fn test_scope_pending_failure() -> I64 {
     }
 }
 
+// Installed with the test capture (TestCapture.jet jet_rt_test_capture_init):
+// only a thread with test state records stops into its frames, so a program
+// that never runs a test links no recorder.
+test_scope_stop_code := I64{0}
+
+// RuntimeLower resolves this checked function-address entry, never the body.
+fn rt_test_scope_record_stop_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
+fn test_scope_record_raw_stop(code_word: I64, code_length: I64, message: I64, length: I64) {
+    code :: test_scope_stop_code
+    if (code == I64{0}) -> return
+    _ := coll_call4(code, code_word, code_length, message, length)
+}
+
 // Raw publication paths already own code/message bytes. Copy once into each
 // unstopped frame rather than constructing temporary text just to clone it.
-fn test_scope_record_raw_stop(code_word: I64, code_length: I64, message: I64, length: I64) {
+#Export(c) fn jet_rt_test_scope_record_stop(code_word: I64, code_length: I64, message: I64, length: I64) -> I64 {
     state :: test_capture_state()
-    if (state == I64{0}) -> return
+    if (state == I64{0}) -> return I64{0}
     frames :: state + I64{32}
     at := I64{0}
     loop at < trap_word(frames) {
@@ -197,6 +213,7 @@ fn test_scope_record_raw_stop(code_word: I64, code_length: I64, message: I64, le
         }
         at += I64{5}
     }
+    I64{0}
 }
 
 // trap_header numbering: 0 E3001, 1 E3010, 2 E3011; 3 is the host stop

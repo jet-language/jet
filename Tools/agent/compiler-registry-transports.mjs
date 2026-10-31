@@ -16,7 +16,7 @@ function suiteLibrary(spec, out) {
     const folder = spec.name === 'CollectionsStop' ? out : join(out, spec.runner.endsWith('run-channel-fixtures.mjs') || spec.name === 'SharedSource' ? 'fixture' : 'unit');
     return { file: join(folder, 'Source/Fixture.jet'), prefix: join(folder, 'fixture'), lifecycle: join(folder, 'lifecycle.list'), exports: spec.crypto ? join(folder, 'exports.list') : null };
 }
-const crypto = new Set(['AgeCodec', 'AgeV1', 'CryptoAead', 'CryptoArgon', 'CryptoBlake3', 'CryptoChaCha', 'CryptoEd25519', 'CryptoEd25519Signature', 'CryptoEntropy', 'CryptoHash', 'CryptoHkdf', 'CryptoOsEntropy', 'CryptoPbkdf2', 'CryptoSha3', 'CryptoX25519', 'CryptoZeroize', 'Sha256']);
+const crypto = new Set(['AgeCodec', 'AgeV1', 'CryptoAead', 'CryptoArgon', 'CryptoBlake3', 'CryptoChaCha', 'CryptoEd25519', 'CryptoEd25519Signature', 'CryptoEntropy', 'CryptoHash', 'CryptoHkdf', 'CryptoOsEntropy', 'CryptoPbkdf2', 'CryptoSha3', 'CryptoWipe', 'CryptoX25519', 'Sha256']);
 const plain = { Alloc: ['alloc_tests', 'alloc tests: ok\n'], Collections: ['collections_tests', ''], Scan: ['scan_tests', ''], Text: ['text_tests', ''], Unicode: ['unicode_tests', ''], Secret: [null, 'secret tests: ok\n'] };
 const suites = {
     AllocationPolicy: ['run-world-sentry-fixtures.mjs', ['assemble', 'lower', 'link', 'run']],

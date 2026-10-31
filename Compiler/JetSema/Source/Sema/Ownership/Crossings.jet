@@ -9,6 +9,9 @@ use jet_foundation.[
     TDeclarationOwnership,
     TGenericParam,
     Type,
+    core_enum_payload_variants,
+    core_enum_variant_payload,
+    core_record_literal_fields,
     type_name,
 ]
 
@@ -224,7 +227,35 @@ fn sema_ownership_crossing_named_type(ty: Type, name: String, crossing: SemaSend
         }
         if sema_copy_named_is_core(name) -> return None
     }
-    Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.UnknownType{name: name}))
+    parts :: sema_ownership_crossing_core_row_parts(name) ?? return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.UnknownType{name: name}))
+    key :: "<core-row>::{name}"
+    if walk.active.contains(key) || walk.finished.get(key) != None -> return None
+    &walk.active.push(key)
+    found := SemaSendabilityProblem?{None}
+    loop part in parts {
+        problem :: sema_ownership_crossing_type_inner(part.ty, crossing, true, strict_callable, cell_only, environment, program, context, &walk) ?? next
+        found = Val(sema_ownership_crossing_prepend(name, part.name, problem))
+        break
+    }
+    _ := &walk.active.pop()
+    walk.finished[key] = true
+    found
+}
+
+// A compiler-owned Core enum family or record without a module export or a
+// nominal row (`IOError`, `IOContext`, `ProcessResourceLimit`) is declared by
+// its generated payload/field rows, so it crosses exactly when its parts do
+// (the copy facts walk the same rows: `sema_copy_core_row_facts`).
+fn sema_ownership_crossing_core_row_parts(name: String) -> [TypeTupleField]? Never! {
+    if core_enum_payload_variants(name) == .Val(variants) {
+        parts := [TypeTupleField]{}
+        loop variant in variants {
+            payload :: core_enum_variant_payload(name, variant) ?? next
+            loop part in payload -> &parts.push(TypeTupleField{name: variant, ty: part})
+        }
+        return Val(parts)
+    }
+    core_record_literal_fields(name)
 }
 
 fn sema_ownership_crossing_type_inner(ty: Type, crossing: SemaSendCrossing, closure_taken: Bool, strict_callable: Bool, cell_only: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext, walk: &SemaCrossingWalk) -> SemaSendabilityProblem? {

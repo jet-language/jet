@@ -11,9 +11,9 @@ typedef struct { int64_t cols, rows, mode; } Policy;
 typedef struct {
     List *cmd; Text *cwd; int64_t env_clear; List *env_set, *env_remove;
     int64_t *in; int64_t out, err; int64_t *timeout, *output, *cpu, *memory, *files;
-    int64_t detached; Policy *terminal; Text *wire; List *directories;
+    int64_t detached; Policy *terminal; Text *wire; List *directories; int64_t parent_death;
 } Spec;
-_Static_assert(sizeof(Spec)==136 && offsetof(Spec,terminal)==112 && offsetof(Spec,wire)==120 && offsetof(Spec,directories)==128, "native Spec136");
+_Static_assert(sizeof(Spec)==144 && offsetof(Spec,terminal)==112 && offsetof(Spec,wire)==120 && offsetof(Spec,directories)==128 && offsetof(Spec,parent_death)==136, "native Spec144");
 _Static_assert(sizeof(List)==24 && sizeof(Policy)==24, "canonical nested carriers");
 extern void jet_rt_alloc_init(void);
 extern void __real_jet_rt_free(void *,int64_t,int64_t);
@@ -70,7 +70,7 @@ static void watch_list(List *list,bool pairs) {
     for(int64_t i=0;i<list->len*(pairs?2:1);++i) watch_text(list->data[i]);
 }
 static void watch_spec(Spec *s) {
-    watch(s,136,8); watch_list(s->cmd,false); watch_text(s->cwd);
+    watch(s,144,8); watch_list(s->cmd,false); watch_text(s->cwd);
     watch_list(s->env_set,true); watch_list(s->env_remove,false);
     if(s->in) watch(s->in,8,8);
     int64_t *limits[]={s->timeout,s->output,s->cpu,s->memory,s->files};

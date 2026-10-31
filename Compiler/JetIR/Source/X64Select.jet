@@ -133,6 +133,9 @@ enum IRX64ColdKind {
     ShiftStop
     // The runtime call of CallRuntime instruction `left`, as written, then back.
     Call
+    // jet_rt_block_release(left): its Bool compared with 1, so a fused
+    // branch reads E as true, and into `dst`, then back.
+    Release
 }
 
 struct IRX64Cold {
@@ -713,6 +716,19 @@ fn ir_x64_emit_colds(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allo
                 }
                 ir_x64_jump_to(&e, cold.resume)
             }
+            .Release -> {
+                ir_x64_operand(&e, m, f, al, cold.left, cold.left_imm, X64_RDI)
+                ir_x64_call_out(&e, m, f, al, X64RelocTarget.Runtime{symbol: "jet_rt_block_release"}, false)
+                x64_movzx_r8(&e.code, X64_RAX, X64_RAX)
+                x64_alu_ri(&e.code, X64Alu.Cmp, X64_RAX, 1)
+                // A fused release resumes at its branch with these flags.
+                if cold.dst >= 0 {
+                    x64_setcc(&e.code, X64Cond.E, X64_RAX)
+                    x64_movzx_r8(&e.code, X64_RAX, X64_RAX)
+                    ir_x64_store(&e, m, f, al, cold.dst, X64_RAX)
+                }
+                ir_x64_jump_to(&e, cold.resume)
+            }
             .Stop -> {
                 path :: tables.texts.get(cold.symbol) ?? -1
                 ir_x64_lea_data(&e, X64_RDI, path)
@@ -975,12 +991,19 @@ fn ir_x64_checked_fixed(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64A
 }
 
 // jet_rt_block_unique(block) inline (Refcount.jet): the count word 24
-// bytes before the payload is 1. The Bool is fused into a following branch
-// like a comparison's.
+// bytes before the payload is not immortal (negative) and its owner bits are
+// 1, whatever the zero-at-free mark (bit 62). The Bool is fused into a
+// following branch like a comparison's.
 fn ir_x64_block_unique(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, block: Int) Never! {
     ir_x64_load(&e, m, f, al, block, X64_RAX)
     x64_load(&e.code, X64_RCX, X64_RAX, -24)
-    x64_alu_ri(&e.code, X64Alu.Cmp, X64_RCX, 1)
+    x64_test_rr(&e.code, X64_RCX, X64_RCX)
+    // A negative count leaves ZF clear: false.
+    immortal :: x64_jcc_rel32(&e.code, X64Cond.S)
+    // Shifting the mark out leaves four times the owner count.
+    x64_shift_ri(&e.code, X64Shift.Shl, X64_RCX, 2)
+    x64_alu_ri(&e.code, X64Alu.Cmp, X64_RCX, 4)
+    ir_x64_land(&e, immortal)
     ir_x64_compare_result(&e, m, f, al, at, X64Cond.E)
 }
 
@@ -1016,8 +1039,10 @@ fn ir_x64_alloc_entry(f: IRFunction, al: IRX64Allocation, at: Int, symbol: Strin
 // jet_rt_block_release(block) inline: true when the caller's reference was
 // the last one. A count of 1 is the caller's alone (no other owner can
 // retain it meanwhile), so it is true without a write; an immortal count is
-// false; any other takes one `lock dec`, true when it reaches zero. The
-// Bool is fused into a following branch like jet_rt_block_unique's.
+// false; a count carrying the zero-at-free mark (bit 62, Refcount.jet
+// RC_ZERO_MARK) takes the routine in a slow path, which masks the mark off;
+// any other takes one `lock dec`, true when it reaches zero. The Bool is
+// fused into a following branch like jet_rt_block_unique's.
 fn ir_x64_block_release(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, block: Int) Never! {
     reg :: ir_x64_use(&e, m, f, al, block, X64_RAX)
     x64_load(&e.code, X64_RCX, reg, -24)
@@ -1027,10 +1052,19 @@ fn ir_x64_block_release(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64A
     x64_test_rr(&e.code, X64_RCX, X64_RCX)
     // A negative count leaves ZF clear: false.
     immortal :: x64_jcc_rel32(&e.code, X64Cond.S)
+    // The sign bit is clear here, so the shift leaves bit 62 alone.
+    x64_shift_ri(&e.code, X64Shift.Shr, X64_RCX, 62)
+    marked :: x64_jcc_rel32(&e.code, X64Cond.NE)
     x64_lock_step(&e.code, reg, -24, false)
     ir_x64_land(&e, last)
     ir_x64_land(&e, immortal)
+    fused :: ir_x64_fusable(f, al, at)
     ir_x64_compare_result(&e, m, f, al, at, X64Cond.E)
+    slow := ir_x64_cold(IRX64ColdKind.Release, [Int]{marked})
+    slow.resume = e.code.len()
+    slow.left = block
+    slow.dst = if fused -> -1 else -> f.dst[at]
+    &e.colds.push(slow)
 }
 
 // jet_rt_string_clone(src) inline (Text.jet): a header with a buffer (a

@@ -248,6 +248,69 @@ fn alloc_test_counts() {
     jet_rt_free(over, I64{40}, I64{64})
 }
 
+// A block marked zero-at-free keeps its owner count in the low bits, is
+// unique once one owner remains, keeps its bytes while an owner remains, and
+// is zeroed by the free after its last release. A cached free reuses only the
+// header words, so the payload stays readable here.
+fn alloc_test_zero_mark(size: I64, entry_8: Bool) {
+    pointer :: jet_rt_alloc(size, I64{8})
+    at := I64{0}
+    #Unsafe("the test owns this fresh align-8 block of size bytes") {
+        loop at < size {
+            os_store_u8(wrapping(pointer + at), I64{165})
+            at = wrapping(at + I64{1})
+        }
+    }
+    jet_rt_block_retain(pointer)
+    jet_rt_block_mark_zero(pointer)
+    jet_rt_block_mark_zero(pointer)
+    #Unsafe("the test holds both owners of this block and its count word") {
+        alloc_test_require(os_load_i64(wrapping(pointer - I64{24})) == RC_ZERO_MARK.bit_or(I64{2}))
+    }
+    alloc_test_require(!jet_rt_block_unique(pointer))
+    alloc_test_require(!jet_rt_block_release(pointer))
+    alloc_test_require(jet_rt_block_unique(pointer))
+    #Unsafe("the test still owns this block") {
+        alloc_test_require(os_load_u8(pointer) == I64{165} && os_load_u8(wrapping(pointer + size - I64{1})) == I64{165})
+    }
+    alloc_test_require(jet_rt_block_release(pointer))
+    if entry_8 { jet_rt_free_8(pointer, size) } else { jet_rt_free(pointer, size, I64{8}) }
+    at = I64{0}
+    #Unsafe("a cached small block stays mapped; its payload bytes are not cache links") {
+        loop at < size {
+            alloc_test_require(os_load_u8(wrapping(pointer + at)) == I64{0})
+            at = wrapping(at + I64{1})
+        }
+    }
+}
+
+// A copy of a marked block is marked; a copy of an unmarked one is not.
+fn alloc_test_zero_inherit() {
+    marked :: jet_rt_alloc(I64{40}, I64{8})
+    plain :: jet_rt_alloc(I64{40}, I64{8})
+    jet_rt_block_mark_zero(marked)
+    copy :: jet_rt_alloc(I64{40}, I64{8})
+    jet_rt_block_inherit_zero(plain, copy)
+    #Unsafe("the test owns these fresh align-8 blocks and their count words") {
+        alloc_test_require(os_load_i64(wrapping(copy - I64{24})) == I64{1})
+    }
+    jet_rt_block_inherit_zero(marked, copy)
+    #Unsafe("the test owns these fresh align-8 blocks and their count words") {
+        alloc_test_require(os_load_i64(wrapping(copy - I64{24})) == RC_ZERO_MARK.bit_or(I64{1}))
+    }
+    alloc_test_require(jet_rt_block_unique(copy) && jet_rt_block_release(copy))
+    jet_rt_free(copy, I64{40}, I64{8})
+    jet_rt_free(plain, I64{40}, I64{8})
+    jet_rt_free(marked, I64{40}, I64{8})
+}
+
+fn alloc_test_zero_marks() {
+    alloc_test_zero_mark(I64{40}, true)
+    alloc_test_zero_mark(I64{40}, false)
+    alloc_test_zero_mark(I64{1000}, true)
+    alloc_test_zero_inherit()
+}
+
 // The thread cache: refills arrive 32 blocks at a time, a row holds at most
 // 64 blocks, a full row returns 32 of them before taking one more, every
 // cached block still counts as live in its slab, the witness nets the cached
@@ -385,6 +448,7 @@ fn alloc_tests() {
     alloc_test_full_slabs()
     alloc_test_slab_stack()
     alloc_test_counts()
+    alloc_test_zero_marks()
     alloc_test_cache()
     alloc_test_rows()
     #Unsafe("the exact success line is two bounded stack words written to stdout") {

@@ -133,7 +133,14 @@ fn rt_observe_parked_tasks_report_address() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
 
+// 1 once a task registered. Its storage is a guard of the observation start
+// (ObserveLive.jet jet_rt_observe_start_init), which reads it: a program that
+// registers tasks links the start, one that never does links no writer for
+// them.
+observe_task_linked := I64{0}
+
 #Export(c) fn jet_rt_observe_task_register(control: I64, site: I64, label: I64) -> I64 {
+    observe_task_linked = I64{1}
     observe_exit_report_install()
     parent :: observe_current_task()
     id :: sync_add(observe_root + I64{8}, I64{1})

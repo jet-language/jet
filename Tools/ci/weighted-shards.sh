@@ -5,6 +5,8 @@
 # SHARD_INDEX. The item may contain tabs; the last read field keeps the rest.
 # Keeping assignment here gives cargo targets and corpus stems one sharding
 # mechanism instead of two subtly different copies.
+# Ties sort by bytes (LC_ALL=C), so every machine assigns the same shards
+# whatever its locale; Tools/ci/WeightedShards.jet gives the same output.
 set -euo pipefail
 
 if [ "$#" -ne 2 ]; then
@@ -40,7 +42,7 @@ ordered="$(
     esac
     weight=$((10#$raw_weight))
     printf '%012d\t%s\n' "$weight" "$item"
-  done | sort -t$'\t' -k1,1nr -k2,99
+  done | LC_ALL=C sort -t$'\t' -k1,1nr -k2,99
 )"
 
 loads=()

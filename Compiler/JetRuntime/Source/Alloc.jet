@@ -138,6 +138,15 @@ fn alloc_count_init(pointer: I64, align: I64) {
     }
 }
 
+// A block whose count word carries the zero-at-free mark (Refcount.jet
+// RC_ZERO_MARK) is wiped before the allocator may hand its bytes out again.
+fn alloc_zero_marked(pointer: I64, size: I64) {
+    #Unsafe("pointer is an align >= 8 payload being freed with its allocated size; its block reserved the count word 24 bytes before it") {
+        if (os_load_i64(wrapping(pointer - I64{24})).bit_and(RC_ZERO_MARK) == I64{0}) -> return
+    }
+    rt_wipe_bytes(pointer, size)
+}
+
 // The class's available-slab head word in an arena: classes 32..4096 are
 // words 8..64 of the arena row; their retained-empty cells follow 64 bytes on.
 fn alloc_head(root: I64, slot: I64) -> I64 Never! {
@@ -971,6 +980,7 @@ fn alloc_try(size: I64, align: I64) -> I64 {
     if (pointer == I64{0}) {
         return
     }
+    if (align >= I64{8}) -> alloc_zero_marked(pointer, size)
     if (size >= I64{0} && size < alloc_class_limit && align > I64{0} && align <= I64{8} && align.bit_and(wrapping(align - I64{1})) == I64{0}) {
         // An ending process leaves its heap to the kernel (#5478, Main.jet).
         if (main_process_ending != I64{0}) -> return
@@ -1066,6 +1076,7 @@ fn alloc_try(size: I64, align: I64) -> I64 {
                                 row :: wrapping(base + offset)
                                 count :: os_load_i64(wrapping(row + I64{8}))
                                 if (count < I64{64}) {
+                                    alloc_zero_marked(pointer, size)
                                     block :: os_load_i64(wrapping(pointer - I64{8}))
                                     os_store_i64(block, os_load_i64(row))
                                     os_store_i64(row, block)

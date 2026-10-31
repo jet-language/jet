@@ -139,6 +139,9 @@ core.sys __umask Int Int?
 core.sys __groups_fill Int [Int]
 core.sys __loadavg - (available:Bool,count:Int,first:Float,second:Float,third:Float)
 core.sys __times - (available:Bool,user:Int,system:Int,child_user:Int,child_system:Int,elapsed:Int,ticks:Int)
+core.sys __rlimit Int (available:Bool,soft:Int,hard:Int,errno:Int)
+core.sys __set_rlimit Int,Int,Int (available:Bool,value:Int,errno:Int)
+core.sys __rusage Int (available:Bool,user:Int,system:Int,peak:Int,errno:Int)
 core.sys __getpgid|__getsid|__getpriority|__setuid|__setgid Int (available:Bool,value:Int,errno:Int)
 core.sys __setpriority|__setpgid|__kill Int,Int (available:Bool,value:Int,errno:Int)
 core.sys __fork|__setsid|__setpgrp - (available:Bool,value:Int,errno:Int)
@@ -149,6 +152,7 @@ core.sys __waitpid Int,Int (available:Bool,value:Int,errno:Int,status:Int)
 core.sys __pipe - (available:Bool,value:Int,errno:Int,read_fd:Int,write_fd:Int)
 core.sys __errno_text Int String
 core.process __spec_fields [String],Bool,String,Bool,[String],[String],[String],Bool,ProcessStreamMode,ProcessStreamMode,ProcessStreamMode,Bool,Int,Bool,Int,Bool,Int,Bool,Int,Bool,Int,Bool,Bool,TerminalPolicy,Bool,String ProcessSpec
+core.process __spec_parent_death ProcessSpec ProcessSpec
 core.files jet_files_link_reader_at_raw FileReader,Int,String (available:Bool,held:Bool,value:Int,errno:Int)
 core.files __metadata_directory String Result<Bool,String>
 core.files __host_path_is_absolute String Bool
@@ -340,7 +344,7 @@ core.math.random gammavariate|betavariate|lognormvariate|weibullvariate|vonmises
 core.math.random paretovariate Float Float
 core.math.random rng|split Int RNG
 core.crypto.random __os_entropy Int [u8]?
-core.crypto __zeroize &[u8] -
+core.crypto wipe|__zeroize &[u8] -
 core.time __wall_sample - (seconds:Int,nanoseconds:Int,before_epoch:Bool)
 core.time __world_wall_ms|__wall_override_ms|__controlled_monotonic_ns|__world_monotonic_ns - Int?
 core.time __host_monotonic_ns|__clock_mono_ns - Int

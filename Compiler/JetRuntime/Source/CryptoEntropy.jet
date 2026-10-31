@@ -75,12 +75,33 @@ fn rt_crypto_entropy_fill(out: I64, count: I64) -> I64 {
     return I64{0}
 }
 
-// Core.__zeroize consumes the bytes; this C ABI borrows the marshaller's live
-// initialized payload. Wipe that payload itself, not a staging copy. The
-// marshaller retains ownership and is solely responsible for later release.
-// Capacity slack is not represented by (ptr,len) and belongs to its owner.
-#Export(c) fn jet_crypto_zeroize(bytes: I64, length: I64) {
-    rt_crypto_wipe(bytes, wrapping(length * RT_HOST_U8_STRIDE))
+// crypto.wipe(&bytes) (BuildRoutes.jet ir_core_crypto_wipe) over the written
+// native [U8] header [len, cap, data]. The length never changes. A buffer
+// this List alone owns is wiped in place, spare capacity included. A buffer
+// another List shares keeps its bytes for that List: this List takes a fresh
+// zeroed buffer of the same capacity, and the shared one is marked
+// zero-at-free (Refcount.jet RC_ZERO_MARK) before this List's reference is
+// released, so its last owner's release wipes it. Frozen static bytes
+// (capacity 0) cannot be written; this List takes fresh zeroes of its length.
+#Export(c) fn jet_rt_crypto_wipe(header: I64) {
+    length :: trap_word(header)
+    capacity :: trap_word(header + I64{8})
+    data :: trap_word(header + I64{16})
+    if (capacity != I64{0} && jet_rt_block_unique(data)) {
+        rt_wipe_bytes(data, rt_secret_buffer_bytes(capacity))
+        return
+    }
+    if (capacity == I64{0} && length == I64{0}) -> return
+    fresh_capacity :: if (capacity == I64{0}) -> length else -> capacity
+    bytes :: rt_secret_buffer_bytes(fresh_capacity)
+    fresh :: jet_rt_alloc(bytes, I64{8})
+    rt_wipe_bytes(fresh, bytes)
+    if (capacity != I64{0}) {
+        jet_rt_block_mark_zero(data)
+        if (jet_rt_block_release(data)) -> jet_rt_free(data, rt_secret_buffer_bytes(capacity), I64{8})
+    }
+    trap_store(header + I64{8}, fresh_capacity)
+    trap_store(header + I64{16}, fresh)
 }
 
 // CAbiRoutes:15924 Option<List<U8>> transfers payload pointer/count on Some;

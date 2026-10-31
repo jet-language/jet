@@ -1212,6 +1212,7 @@ fn run() {
 | `pbkdf2_hmac(password, salt, iterations, key_len)` | `[U8] !CryptoError` | Derive a bounded PBKDF2-HMAC-SHA256 byte sequence. |
 | `new()` / `update(hasher, bytes)` / `digest(hasher)` | hasher operations | Use the incremental SHA-256 hasher. |
 | `constant_time_equal(a, b)` / `constant_time_equal_bytes(a, b)` | `Bool` | Compare nominal secrets or byte lists without early equality branching. |
+| `wipe(&bytes)` | unit | Zero every element of a `[U8]` and its spare capacity with stores the optimizer cannot drop; the length is unchanged. |
 | `generatekey()` | `X25519SecretKey !CryptoError` | Generate an X25519 secret through the random provider. |
 | `x25519(secret, public)` / `x25519_shared(secret, public)` | `SharedSecret !CryptoError` | Perform typed X25519 agreement and reject invalid keys. |
 | `x25519_public(secret)` | `X25519PublicKey !CryptoError` | Derive the public key. |
@@ -1229,6 +1230,16 @@ boundary and use `FS` plus `Rand` where indicated.
 only a text data-tree value is accepted, and its UTF-8 bytes become the secret.
 There is no corresponding `Encode` implementation. A user-defined type named
 `Secret` does not inherit this codec by name.
+
+`wipe(&bytes)` erases key bytes that must stay a plain `[U8]`, such as a seed
+handed to a C library. A buffer the List alone owns is zeroed in place,
+including its spare capacity. A buffer another List still shares keeps its
+bytes for that List: the wiped List takes a fresh zeroed buffer of the same
+capacity, and the shared buffer is marked to be zeroed when its last owner
+releases it. A copy a writer makes of a marked buffer, before a write or when
+it grows, is marked too. Frozen literal bytes cannot be written, so a List
+over them takes fresh zeroes of its length. Buffers a List gave up while
+growing before the wipe are not reached; reserve the capacity first.
 
 The native `Secret` carrier owns the canonical List header `[len, cap, data]`
 (three words, 24 bytes); `U8` elements use the canonical host U8 stride. Creating
@@ -1319,8 +1330,11 @@ provider failure and a bounded rejection-sampling exhaustion fail with
 
 `core.crypto.vault` keeps the untyped `get(name) -> ?String` repository-secret
 lookup separate from typed `KeyRef<T>` generations. Every vault operation
-carries the `Secret` effect. A `KeyRef<T>` contains name/version identity, not
-key bytes; the provider owns persistence and key-material lifetimes.
+carries the `Secret` effect. A `KeyRef<T>` contains its public name/version and
+the private repository identity it was issued under (store, record and record
+hash), not key bytes; every operation on it re-verifies that identity, so a
+same-named generation in a restored or re-imported repository never answers
+for it. The provider owns persistence and key-material lifetimes.
 Its `Display` is `repo:{name}@v{version}` for every key type `T`; rendering never
 reads key material or private provider metadata and imposes no `Display` bound
 on `T`.
@@ -1395,7 +1409,7 @@ It samples that observer under the storage guard, and expires only when
 `now > deadline`; at equality the credential remains available. Expiry takes
 the payload out of its slot and ends the owned payload's scope, so its
 `Close` follows the same zeroization path as dropping still-live storage.
-The sole wipe host operation is the existing plain-byte `__zeroize` leaf.
+The sole wipe host operation is the plain-byte `crypto.wipe` kernel.
 No observer or loan callback crosses that host boundary.
 Fields are private; `expires_at_ms()` reads the deadline and `.with(...)`
 is the fallible credential accessor. This is Main's owner-approved, veto-able

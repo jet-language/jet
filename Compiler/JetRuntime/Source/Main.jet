@@ -175,13 +175,20 @@ fn rt_main_stopped_address() -> I64 {
     alloc_check_require()
     jet_rt_thread_init()
     jet_rt_scheduler_init()
-    jet_rt_observe_init()
+    // No jet_rt_observe_init here: its hook (Observe.jet) is kept exactly
+    // when the program links code that reads the task registry, and runs
+    // before this; a program with none links no registry.
     jet_rt_process_exit_init()
     // Fatal signals print the fault report (Fault.jet), stack overflow too.
     fault_start()
     // Exactly once, after TLS/registry initialization and before
     // the checked no-argument entry. Object main must not start Observe itself.
-    jet_rt_observe_runtime_start_from_env()
+    // The start is a code word: only a program that links something to observe
+    // (a task, a channel, a live value or an event) has it installed
+    // (ObserveLive.jet jet_rt_observe_start_init); any other program links no
+    // observation writer, and JET_OBSERVE=1 has nothing to publish there.
+    observe :: observe_start_code
+    if (observe != I64{0}) -> _ := coll_call1(observe, I64{0})
     // The entry runs under the process root control: a stop (a panic, a
     // numeric stop, process.exit, os.stop) is published there and every
     // generated frame leaves by its stop edge, running its closes, drops

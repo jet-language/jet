@@ -11,11 +11,20 @@ use core.time as time
 struct KeyRef<T> {
     name: String
     version: Int
+    // The repository identity the vault issued this reference under: store
+    // uuid (16 bytes), record opaque id (16), record hash (32). The provider
+    // re-verifies all of it, so a same-named generation in a restored or
+    // re-imported repository never answers for this reference.
+    priv identity: [U8]
 
     // A reference renders only its public repository name and generation.
     // Its phantom key type never needs Display and never exposes key bytes.
     impl Display {
         fn display(self) -> String { "repo:{self.name}@v{self.version}" }
+    }
+    // Debug shows the public fields only; the identity stays private.
+    impl Debug {
+        fn debug(^self) -> String { "KeyRef {{ name: {self.name.debug()}, version: {self.version} }}" }
     }
 }
 

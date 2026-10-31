@@ -25,7 +25,7 @@ fn ir_list_push(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, 
     old_data :: ir_load_word(&m, &b, list, 16)
     old_bytes :: ir_word_op(&m, &b, IROp.Mul, length, width)
     _ :: ir_runtime(&m, &b, "jet_rt_mem_move", [Int]{data, old_data, old_bytes}, -1)
-    ir_release_moved_buffer(&m, &b, old_data, capacity, stride)
+    ir_release_moved_buffer(&m, &b, old_data, data, capacity, stride)
     ir_emit(&b.f, IROp.Store, -1, list, 16, data, b.line)
     ir_emit(&b.f, IROp.Store, -1, list, 8, grown, b.line)
     ir_end(&b.f, b.line)
@@ -416,7 +416,7 @@ fn ir_list_append(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int
     // The source may window the old buffer: it is copied before that goes.
     grown_end :: ir_word_op(&m, &b, IROp.Add, data, kept)
     _ :: ir_runtime(&m, &b, "jet_rt_mem_move", [Int]{grown_end, from, added}, -1)
-    ir_release_moved_buffer(&m, &b, old_data, capacity, stride)
+    ir_release_moved_buffer(&m, &b, old_data, data, capacity, stride)
     ir_emit(&b.f, IROp.Store, -1, list, 16, data, b.line)
     ir_emit(&b.f, IROp.Store, -1, list, 8, grown, b.line)
     ir_else(&b.f, b.line)
@@ -505,7 +505,7 @@ fn ir_list_try_reserve(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list
     old_data :: ir_load_word(&m, &b, list, 16)
     old_bytes :: ir_word_op(&m, &b, IROp.Mul, length, width)
     _ :: ir_runtime(&m, &b, "jet_rt_mem_move", [Int]{data, old_data, old_bytes}, -1)
-    ir_release_moved_buffer(&m, &b, old_data, capacity, stride)
+    ir_release_moved_buffer(&m, &b, old_data, data, capacity, stride)
     ir_emit(&b.f, IROp.Store, -1, list, 8, grown, b.line)
     ir_emit(&b.f, IROp.Store, -1, list, 16, data, b.line)
     ir_end(&b.f, b.line)
@@ -4258,12 +4258,12 @@ IR_ROUTES_NATIVE_INDEX :: comptime { [String]{"jet_bit_set_has", "jet_bitset_add
 
 // Whether the builder lowers a Core call of route `name` itself, with no
 // runtime or environment route: an inline route, a special of ir_core_call
-// (the raw List layout leaves, channels, event policy, object entries), or
-// an Iter route (BuildLazy.jet ir_lazy_symbol). IR Lint's registry check
-// (Lint.jet ir_lint_core_routes) reads it.
+// (the raw List layout leaves, crypto.wipe, channels, event policy, object
+// entries), or an Iter route (BuildLazy.jet ir_lazy_symbol). IR Lint's
+// registry check (Lint.jet ir_lint_core_routes) reads it.
 fn ir_route_builder_lowered(name: String) -> Bool Never! {
     if IR_ROUTES_INLINE.contains(name) -> return true
-    if name == "jet_raw_list_capacity" || name == "jet_raw_list_reserve_exact" || name == "jet_raw_type_size" -> return true
+    if name == "jet_raw_list_capacity" || name == "jet_raw_list_reserve_exact" || name == "jet_raw_type_size" || name == "jet_raw_crypto_wipe" -> return true
     if name == "jet_std::channel" || name == "jet_std::channel_bounded" || name == "jet_std::JetEvent::with_policy" -> return true
     if name == "jet_raw_object_from_entries" || name == "jet_raw_object_entries_view" -> return true
     ir_lazy_symbol(name, Type.Apply{name: "Iter", args: [Type]{Type.Int}})
@@ -4924,6 +4924,7 @@ fn ir_core_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: Cor
     if canonical.module_name == "core.mem" && (canonical.member == "__list_capacity" || canonical.member == "__list_reserve_exact" || canonical.member == "__type_size") {
         return ir_core_list_leaf(&m, p, &b, ty, canonical.member, args, type_args, span)
     }
+    if canonical.module_name == "core.crypto" && (canonical.member == "wipe" || canonical.member == "__zeroize") -> return ir_core_crypto_wipe(&m, p, &b, args, span)
     if canonical.module_name == "core.mem" && (canonical.member == "volatile_read" || canonical.member == "volatile_write") {
         return ir_core_volatile(&m, p, &b, canonical.member, args, type_args, span)
     }
@@ -4938,6 +4939,7 @@ fn ir_core_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: Cor
         if name == "jet_std::JetAsyncEvent::new" -> return ir_async_event_new(&m, p, &b, ty, args, span)
         if name == "jet_std::JetSignal::new" -> return ir_reactive_signal(&m, p, &b, ty, args, span)
     }
+    if canonical.module_name == "core.crypto.vault" && canonical.member == "current" -> return ir_core_vault_current(&m, p, &b, ty, args, type_args, span)
     if type_args.len() > 0 -> return ir_fail_slot(&b, span, "generic Core call {canonical.module_name}.{canonical.member}")
     loop flag in widen {
         if flag -> return ir_fail_slot(&b, span, "Core call {canonical.module_name}.{canonical.member} widening a fixed list")
@@ -4980,6 +4982,24 @@ fn ir_core_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: Cor
     result :: if ir_unit_type(ty) || ir_never_type(ty) -> Type.Named{name: "Unit"} else -> ty
     labels :: core_call_native_return_labels(canonical.module_name, canonical.member)
     ir_route_labeled(&m, p, &b, symbol, slots, borrow_mask, result, labels, span)
+}
+
+// `vault.current<T>(name)`: route jet_vault_current_impl takes the concrete
+// key type T as its runtime tag (1 SigningKey, 2 X25519SecretKey, the
+// provider's closed key family); the found KeyRef<T> crosses as a shell of
+// its declared bytes.
+fn ir_core_vault_current(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [Int], type_args: [Type], span: Span) -> Int Never! {
+    if args.len() != 1 || type_args.len() != 1 -> return ir_fail_slot(&b, span, "vault.current with {args.len()} arguments and {type_args.len()} type arguments")
+    key :: ir_nominal_name(ir_untag(type_args[0])) ?? ""
+    key_type :: if {
+        key == "SigningKey" || key.ends_with("::SigningKey") -> 1
+        key == "X25519SecretKey" || key.ends_with("::X25519SecretKey") -> 2
+        else -> { return ir_fail_slot(&b, span, "vault.current of key type {ir_type_name(type_args[0])}") }
+    }
+    name :: ir_expr(&m, p, &b, args[0])
+    if ir_failed(b) -> return -1
+    key_tag :: ir_word_const(&m, &b, key_type)
+    ir_route(&m, p, &b, "jet_vault_current_impl", [Int]{name, key_tag}, [Bool]{true, true}, ty, span)
 }
 
 // The guest entry of a literal plugin artifact: `#plugin.guest<artifact>`,
@@ -5129,6 +5149,20 @@ fn ir_core_list_leaf(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, member
     loop back in backs -> ir_emit(&b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
     ir_release(&m, &b, list)
     reserved
+}
+
+// `crypto.wipe(&bytes)`: the runtime wipes the written List header's buffer
+// (jet_rt_crypto_wipe), so it reaches spare capacity and the buffer's owner
+// count, which a pointer and length would not.
+fn ir_core_crypto_wipe(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], span: Span) -> Int Never! {
+    if args.len() != 1 -> return ir_fail_slot(&b, span, "crypto.wipe has invalid checked arity")
+    backs := [IRWriteBack]{}
+    list :: ir_place_address(&m, p, &b, args[0], &backs, span)
+    if ir_failed(b) || list < 0 -> return -1
+    _ :: ir_runtime(&m, &b, "jet_rt_crypto_wipe", [Int]{list}, -1)
+    loop back in backs -> ir_emit(&b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
+    ir_release(&m, &b, list)
+    return -1
 }
 
 // `encoding.from_entries(entries)`: the canonical Dyn's Object over the

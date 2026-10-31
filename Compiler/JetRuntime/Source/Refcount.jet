@@ -5,6 +5,15 @@
 // sign bit) marks an immortal static or process-lifetime block: retain and
 // release never write it, and a writer must copy it before any store.
 //
+// Bit 62 (RC_ZERO_MARK) marks a block whose bytes must be zeroed when it is
+// freed: crypto.wipe of a List whose buffer another List still shares gives
+// the wiped List fresh zeroes and marks the shared buffer, and so does a
+// Secret adopting a shared buffer. The low 62 bits stay the owner count, so a
+// marked block with one owner is unique and its owner writes in place. A
+// writer that copies a marked block (a copy before a write, a growth) marks
+// the copy too (jet_rt_block_inherit_zero); the allocator's free entries zero
+// a marked block before reuse (Alloc.jet alloc_zero_marked).
+//
 // Protocol (the caller owns a live reference throughout):
 // - retain publishes one more owner;
 // - release consumes one owner; only a true result authorizes freeing the
@@ -13,6 +22,9 @@
 // - unique is true when the caller's reference is the only one. A writer has
 //   exclusive access to its own reference, so a count of 1 it observes stays
 //   1 until that writer itself clones.
+
+RC_ZERO_MARK :: I64{4611686018427387904}
+RC_OWNER_BITS :: I64{4611686018427387903}
 
 fn rc_load(count: I64) -> I64 {
     #Unsafe("count addresses the aligned prefix word of a live refcounted block the caller holds") {
@@ -46,10 +58,26 @@ fn rc_init(count: I64) { rc_store(count, I64{1}) }
 // false and its writer copies, as for any other shared block.
 #Export(c) fn jet_rt_rc_release(count: I64) -> Bool {
     if (rc_load(count) < I64{0} || main_process_ending != I64{0}) -> return false
-    rc_add(count, I64{-1}) == I64{1}
+    rc_add(count, I64{-1}).bit_and(RC_OWNER_BITS) == I64{1}
 }
 
-#Export(c) fn jet_rt_rc_unique(count: I64) -> Bool { rc_load(count) == I64{1} }
+#Export(c) fn jet_rt_rc_unique(count: I64) -> Bool {
+    word :: rc_load(count)
+    word >= I64{0} && word.bit_and(RC_OWNER_BITS) == I64{1}
+}
+
+// Sets the zero-at-free mark of a live non-immortal block the caller holds a
+// reference to. Other owners may retain or release meanwhile; the exchange
+// keeps their count changes.
+fn rc_mark_zero(count: I64) {
+    loop {
+        word :: rc_load(count)
+        if (word < I64{0} || word.bit_and(RC_ZERO_MARK) != I64{0}) -> return
+        #Unsafe("LOCK CMPXCHG on the aligned prefix word of a live refcounted block; the caller's reference keeps it live") {
+            if (os_cas_i64(count, word, word.bit_or(RC_ZERO_MARK)) == word) -> return
+        }
+    }
+}
 
 // Heap blocks allocated with align >= 8 carry their count in the allocator's
 // block header, 24 bytes before the payload (Alloc.jet alloc_count_init), so
@@ -62,3 +90,11 @@ fn rc_init(count: I64) { rc_store(count, I64{1}) }
 #Export(c) fn jet_rt_block_release(block: I64) -> Bool { jet_rt_rc_release(wrapping(block - I64{24})) }
 
 #Export(c) fn jet_rt_block_unique(block: I64) -> Bool { jet_rt_rc_unique(wrapping(block - I64{24})) }
+
+#Export(c) fn jet_rt_block_mark_zero(block: I64) { rc_mark_zero(wrapping(block - I64{24})) }
+
+// `replica` is a fresh block the caller owns holding bytes of `block`: a copy
+// of a block marked zero-at-free carries the mark too.
+#Export(c) fn jet_rt_block_inherit_zero(block: I64, replica: I64) {
+    if (rc_load(wrapping(block - I64{24})).bit_and(RC_ZERO_MARK) != I64{0}) -> rc_mark_zero(wrapping(replica - I64{24}))
+}

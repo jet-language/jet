@@ -71,6 +71,15 @@ fn vault_error_drop(error: I64) {
     if (kind == I64{11}) -> jet_rt_string_drop(rt_text_word(error + VAULT_ERROR_SECOND))
     jet_rt_free(error, VAULT_ERROR_BYTES, I64{8})
 }
+// The Core VaultError record ABI (IR_GENERATED_RECORDS): its variant index,
+// owned member getters (Crypto as its CryptoError index), clone and drop.
+#Export(c) fn jet_rt_record_tag_jet_x3ccorelib_x3e_score_dcrypto_dvault_c_c_vault_error(value: I64) -> I64 { vault_error_tag(value) }
+#Export(c) fn jet_rt_record_get_jet_x3ccorelib_x3e_score_dcrypto_dvault_c_c_vault_error_crypto(value: I64) -> I64 { rt_text_word(value + VAULT_ERROR_FIRST) }
+#Export(c) fn jet_rt_record_get_jet_x3ccorelib_x3e_score_dcrypto_dvault_c_c_vault_error_io_operation(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + VAULT_ERROR_FIRST)) }
+#Export(c) fn jet_rt_record_get_jet_x3ccorelib_x3e_score_dcrypto_dvault_c_c_vault_error_io_redacted_path(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + VAULT_ERROR_SECOND)) }
+#Export(c) fn jet_rt_record_get_jet_x3ccorelib_x3e_score_dcrypto_dvault_c_c_vault_error_internal_incident_id(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + VAULT_ERROR_FIRST)) }
+#Export(c) fn jet_rt_handle_clone_jet_x3ccorelib_x3e_score_dcrypto_dvault_c_c_vault_error(value: I64) -> I64 { vault_error_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_x3ccorelib_x3e_score_dcrypto_dvault_c_c_vault_error(value: I64) { vault_error_drop(value) }
 fn vault_error_equal(left: I64, right: I64) -> Bool {
     kind :: vault_error_tag(left)
     if kind != vault_error_tag(right) -> return false

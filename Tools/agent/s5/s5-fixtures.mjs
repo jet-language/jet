@@ -124,7 +124,7 @@ add('test-unit-runtime',[]);
 async function pool(tasks,width) {const queue=[...tasks];await Promise.all(Array.from({length:width},async()=>{while(queue.length)await queue.shift()();}));}
 const width=Number(process.env.S5_FIXTURE_WIDTH??6);
 if(!Number.isInteger(width)||width<2||width>6)throw Error('fixture width must be2..6 within declared20G');
-const cryptoWitnesses=['Sha256','CryptoX25519','CryptoEd25519','CryptoChaCha','CryptoAead','CryptoHkdf','CryptoArgon','AgeCodec','AgeV1','CryptoEntropy','CryptoHash','CryptoPbkdf2','CryptoSha3','CryptoBlake3','CryptoEd25519Signature','CryptoZeroize','CryptoOsEntropy'].map(name=>`${name}Witness`);
+const cryptoWitnesses=['Sha256','CryptoX25519','CryptoEd25519','CryptoChaCha','CryptoAead','CryptoHkdf','CryptoArgon','AgeCodec','AgeV1','CryptoEntropy','CryptoHash','CryptoPbkdf2','CryptoSha3','CryptoBlake3','CryptoEd25519Signature','CryptoWipe','CryptoOsEntropy'].map(name=>`${name}Witness`);
 const ownedWitness=new Set(['CAbiDriver','DisplayWitness','RootStdioWitness','HostFilesTests','HostSpawnTests',...cryptoWitnesses]);
 const dedicated=new Set([...Object.values(ui),'RootCleanupWitness','DataTreeWitness','ScalarReflectWitness','DataEventWitness','TaskVariantPanicWitness','IOWitness']);
 const witnesses=fs.readdirSync(path.join(W,T)).filter(file=>/Witness\.c$/.test(file)).map(file=>file.slice(0,-2)).filter(name=>!ownedWitness.has(name));

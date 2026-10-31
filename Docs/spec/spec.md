@@ -3536,7 +3536,10 @@ for Event, AsyncEvent, and DecisionHook transitions. `jet inspect live` and a
 Canvas session attached to the live Jet identity consume that validated source;
 a source-call match alone is not a runtime observation. The observation writer
 bounds event history and does not include channel values, task locals,
-environment, or credentials. The executable event example is covered by
+environment, or credentials. Observation is pay-for-use (D-SIZE-PAYUSE1): a
+program built without tasks, channels, live values or events links no writer,
+so `JET_OBSERVE=1` publishes nothing for it. The executable
+event example is covered by
 [`Compiler/JetLSP/Tests/Integration`](../../Compiler/JetLSP/Tests/Integration/) (`Canvas*.jet`) and the public API by
 [`Core/Event/Event.jet`](../../Core/Event/Event.jet). (D-OBSERVE-LIVE1, D-OBSERVE-TASK1)
 

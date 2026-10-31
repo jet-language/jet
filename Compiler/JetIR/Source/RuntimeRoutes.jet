@@ -143,7 +143,6 @@ IR_RUNTIME_ROUTES :: comptime { [IRRoute]{
     IRRoute{symbol: "jet_crypto_jetc_stat", export: "jet_crypto_jetc_stat", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Word}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetCryptoJetcStat"}}},
     IRRoute{symbol: "jet_crypto_jetc_tmpfile", export: "jet_crypto_jetc_tmpfile", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Word}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetCryptoJetcRaw"}}},
     IRRoute{symbol: "jet_crypto_jetc_write", export: "jet_crypto_jetc_write", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Word, IRRouteCarrier.List{elem: IRRouteCarrier.Word}, IRRouteCarrier.Word, IRRouteCarrier.Word}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetCryptoJetcRaw"}}},
-    IRRoute{symbol: "jet_crypto_zeroize", export: "jet_crypto_zeroize", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.List{elem: IRRouteCarrier.Word}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Unit}},
     IRRoute{symbol: "jet_cursor_over", export: "jet_cursor_over", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Text}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "JetCursor"}}},
     IRRoute{symbol: "jet_cursor_skip_ws", export: "jet_cursor_skip_ws", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.HandleMut{name: "JetCursor"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Unit}},
     IRRoute{symbol: "jet_cursor_take_until", export: "jet_cursor_take_until", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.HandleMut{name: "JetCursor"}, IRRouteCarrier.Text}, result: IRRouteResult.Result{ok: IRRouteCarrier.Text, err: IRRouteCarrier.Text}},
@@ -556,6 +555,7 @@ IR_RUNTIME_ROUTES :: comptime { [IRRoute]{
     IRRoute{symbol: "jet_process_spec_memory_limit", export: "jet_process_spec_memory_limit", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "ProcessSpec"}, IRRouteCarrier.Word}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "ProcessSpec"}}},
     IRRoute{symbol: "jet_process_spec_open_file_limit", export: "jet_process_spec_open_file_limit", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "ProcessSpec"}, IRRouteCarrier.Word}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "ProcessSpec"}}},
     IRRoute{symbol: "jet_process_spec_output_limit", export: "jet_process_spec_output_limit", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "ProcessSpec"}, IRRouteCarrier.Word}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "ProcessSpec"}}},
+    IRRoute{symbol: "jet_process_spec_parent_death", export: "jet_process_spec_parent_death", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "ProcessSpec"}}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Handle{name: "ProcessSpec"}}},
     IRRoute{symbol: "jet_process_spec_plan", export: "jet_process_spec_plan", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "ProcessSpec"}}, result: IRRouteResult.Result{ok: IRRouteCarrier.Handle{name: "ProcessPlan"}, err: IRRouteCarrier.Handle{name: "IOError"}}},
     IRRoute{symbol: "jet_process_spec_run", export: "jet_process_spec_run", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "ProcessSpec"}}, result: IRRouteResult.Result{ok: IRRouteCarrier.Handle{name: "ProcessReceipt"}, err: IRRouteCarrier.Handle{name: "IOError"}}},
     IRRoute{symbol: "jet_process_spec_run_checked", export: "jet_process_spec_run_checked", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Handle{name: "ProcessSpec"}}, result: IRRouteResult.Result{ok: IRRouteCarrier.Handle{name: "ProcessReceipt"}, err: IRRouteCarrier.Handle{name: "IOError"}}},
@@ -1090,7 +1090,10 @@ IR_RUNTIME_ROUTES :: comptime { [IRRoute]{
     IRRoute{symbol: "jet_sys_loadavg_raw", export: "jet_sys_loadavg_raw", native_lists: false, params: [IRRouteCarrier]{}, result: IRRouteResult.Tuple{items: [IRRouteCarrier]{IRRouteCarrier.Flag, IRRouteCarrier.Word, IRRouteCarrier.Float, IRRouteCarrier.Float, IRRouteCarrier.Float}}},
     IRRoute{symbol: "jet_sys_mkfifo_raw", export: "jet_sys_mkfifo_raw", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Text, IRRouteCarrier.Word}, result: IRRouteResult.Tuple{items: [IRRouteCarrier]{IRRouteCarrier.Flag, IRRouteCarrier.Word, IRRouteCarrier.Word}}},
     IRRoute{symbol: "jet_sys_pipe_raw", export: "jet_sys_pipe_raw", native_lists: true, params: [IRRouteCarrier]{}, result: IRRouteResult.Tuple{items: [IRRouteCarrier]{IRRouteCarrier.Flag, IRRouteCarrier.Word, IRRouteCarrier.Word, IRRouteCarrier.Word, IRRouteCarrier.Word}}},
+    IRRoute{symbol: "jet_sys_rlimit_raw", export: "jet_sys_rlimit_raw", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Word}, result: IRRouteResult.Tuple{items: [IRRouteCarrier]{IRRouteCarrier.Flag, IRRouteCarrier.Word, IRRouteCarrier.Word, IRRouteCarrier.Word}}},
+    IRRoute{symbol: "jet_sys_rusage_raw", export: "jet_sys_rusage_raw", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Word}, result: IRRouteResult.Tuple{items: [IRRouteCarrier]{IRRouteCarrier.Flag, IRRouteCarrier.Word, IRRouteCarrier.Word, IRRouteCarrier.Word, IRRouteCarrier.Word}}},
     IRRoute{symbol: "jet_sys_set_current_dir_raw", export: "jet_sys_set_current_dir_raw", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Text}, result: IRRouteResult.Result{ok: IRRouteCarrier.Unit, err: IRRouteCarrier.Text}},
+    IRRoute{symbol: "jet_sys_set_rlimit_raw", export: "jet_sys_set_rlimit_raw", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Word, IRRouteCarrier.Word, IRRouteCarrier.Word}, result: IRRouteResult.Tuple{items: [IRRouteCarrier]{IRRouteCarrier.Flag, IRRouteCarrier.Word, IRRouteCarrier.Word}}},
     IRRoute{symbol: "jet_sys_setgid_raw", export: "jet_sys_setgid_raw", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Word}, result: IRRouteResult.Tuple{items: [IRRouteCarrier]{IRRouteCarrier.Flag, IRRouteCarrier.Word, IRRouteCarrier.Word}}},
     IRRoute{symbol: "jet_sys_setpgid_raw", export: "jet_sys_setpgid_raw", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Word, IRRouteCarrier.Word}, result: IRRouteResult.Tuple{items: [IRRouteCarrier]{IRRouteCarrier.Flag, IRRouteCarrier.Word, IRRouteCarrier.Word}}},
     IRRoute{symbol: "jet_sys_setpgrp_raw", export: "jet_sys_setpgrp_raw", native_lists: true, params: [IRRouteCarrier]{}, result: IRRouteResult.Tuple{items: [IRRouteCarrier]{IRRouteCarrier.Flag, IRRouteCarrier.Word, IRRouteCarrier.Word}}},
@@ -1303,6 +1306,7 @@ IR_RUNTIME_ROUTES :: comptime { [IRRoute]{
     IRRoute{symbol: "jet_unicode_upper", export: "jet_unicode_upper", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Text}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Text}},
     IRRoute{symbol: "jet_unit_conversion_exact", export: "jet_unit_conversion_exact", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Float, IRRouteCarrier.Text, IRRouteCarrier.Text, IRRouteCarrier.Text, IRRouteCarrier.Text}, result: IRRouteResult.Option{some: IRRouteCarrier.Float}},
     IRRoute{symbol: "jet_unit_conversion_rounded", export: "jet_unit_conversion_rounded", native_lists: false, params: [IRRouteCarrier]{IRRouteCarrier.Float, IRRouteCarrier.Text, IRRouteCarrier.Text, IRRouteCarrier.Text, IRRouteCarrier.Text, IRRouteCarrier.Tag{name: "UnitRoundingMode", variants: "TowardZero,Floor,Ceiling,NearestEven"}, IRRouteCarrier.Word}, result: IRRouteResult.Result{ok: IRRouteCarrier.Float, err: IRRouteCarrier.Text}},
+    IRRoute{symbol: "jet_vault_current_impl", export: "jet_vault_current_impl", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Text, IRRouteCarrier.Word}, result: IRRouteResult.Result{ok: IRRouteCarrier.Option{some: IRRouteCarrier.Handle{name: "JetVaultKeyRef"}}, err: IRRouteCarrier.Handle{name: "VaultError"}}},
     IRRoute{symbol: "jet_vault_get_impl", export: "jet_vault_get_impl", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Text}, result: IRRouteResult.Option{some: IRRouteCarrier.Text}},
     IRRoute{symbol: "jet_walk8_ancestors", export: "jet_walk8_ancestors", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Word, IRRouteCarrier.Word}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.List{elem: IRRouteCarrier.Word}}},
     IRRoute{symbol: "jet_walk8_before", export: "jet_walk8_before", native_lists: true, params: [IRRouteCarrier]{IRRouteCarrier.Word, IRRouteCarrier.Word, IRRouteCarrier.Word}, result: IRRouteResult.Plain{carrier: IRRouteCarrier.Flag}},
@@ -2364,8 +2368,11 @@ IR_RUNTIME_HANDLES :: comptime { [IRRuntimeHandle]{
     IRRuntimeHandle{jet_name: "GtkBackend", runtime: "JetGtkBackend", clone: true, display: false, show: false, debug: false, eq: false},
 } }
 
-// Opaque native providers: physical ownership ABI only, no Rust schema.
+// Opaque native providers: physical ownership ABI only, no Rust schema. A
+// Core-declared shape here crosses a route as a heap shell of its declared
+// bytes (ir_route_shell): `KeyRef<T>` from jet_vault_current_impl.
 IR_NATIVE_PROVIDER_HANDLES :: comptime { [IRRuntimeHandle]{
+    IRRuntimeHandle{jet_name: "<corelib>/core.crypto.vault::KeyRef", runtime: "JetVaultKeyRef", clone: false, display: false, show: false, debug: false, eq: false},
     IRRuntimeHandle{jet_name: "<corelib>/core.process::ProcessStdoutStream", runtime: "ProcessStdoutStream", clone: true, display: false, show: false, debug: false, eq: false},
     IRRuntimeHandle{jet_name: "ProcessStdoutStream", runtime: "ProcessStdoutStream", clone: true, display: false, show: false, debug: false, eq: false},
     IRRuntimeHandle{jet_name: "<corelib>/core.process::ProcessStdin", runtime: "ProcessStdin", clone: true, display: false, show: false, debug: false, eq: false},
@@ -2399,9 +2406,11 @@ fn ir_runtime_handle(name: String) -> IRRuntimeHandle? {
 // Core records the runtime's generated record exports carry (Records.jet),
 // keyed by runtime type: a struct's fields in constructor order or an enum's
 // variants in index order, each `name=kind` when it carries a member (Text,
-// Int, U64, Flag, Float, Tag.<enum>, Rec.<record>, Opt<kind>).
+// Int, U64, Flag, Float, Tag.<enum>, Rec.<record>, Opt<kind>; a variant's
+// named members joined by `+`).
 IR_GENERATED_RECORDS :: comptime { [IRRecordSchema]{
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dcrypto_dvault_c_cKeyStatus", variants: "Active,Retired,Revoked", fields: ""},
+    IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dcrypto_dvault_c_cVaultError", variants: "InvalidName,NotFound,WrongType,Revoked,Locked,AuthorityDenied,Conflict,UnsupportedProvider,InvalidEncoding,DurabilityUnknown,Crypto=Tag.CryptoError,IO=Text+Text,Internal=Text", fields: ""},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_dcrypto_dvault_c_cWrappedVaultKey", variants: "", fields: "encoded=List.Byte,mode=Int,key_type=Int,origin_name=Text,origin_generation=Int,header_len=Int"},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_ddata_c_cDataError", variants: "", fields: "kind=Tag.DataErrorKind,operation=Text,row=OptInt,column=OptInt,index=OptInt,reason=Text,cause=OptRec.__jet__x3ccorelib_x3e_score_dencoding_c_cEncodingError"},
     IRRecordSchema{jet_name: "__jet__x3ccorelib_x3e_score_ddata_c_cDataLoaderStatus", variants: "", fields: "identity=Text,freshness=Tag.DataFreshness,invalidated_by=Tag.DataInvalidationCause,error=Text,cleanup=Text,buffered_bytes=Int,backpressure=Flag,last_good=Flag"},
@@ -2938,6 +2947,7 @@ fn ir_environment_route(symbol: String) -> IREnvironmentRoute? {
 struct IRNativeType { jet_name: String, declaration: String, arguments: String }
 IR_NATIVE_TYPES :: comptime { [IRNativeType]{
     IRNativeType{jet_name: "<corelib>/core.crypto.vault::ExpiryCloseProbe", declaration: "<corelib>/core.crypto.vault::ExpiryCloseProbe", arguments: ""},
+    IRNativeType{jet_name: "<corelib>/core.crypto.vault::KeyRef", declaration: "<corelib>/core.crypto.vault::KeyRef", arguments: "T"},
     IRNativeType{jet_name: "<corelib>/core.crypto.vault::KeyStatus", declaration: "<corelib>/core.crypto.vault::KeyStatus", arguments: ""},
     IRNativeType{jet_name: "<corelib>/core.crypto.vault::VaultError", declaration: "<corelib>/core.crypto.vault::VaultError", arguments: ""},
     IRNativeType{jet_name: "<corelib>/core.crypto.vault::WrappedVaultKey", declaration: "<corelib>/core.crypto.vault::WrappedVaultKey", arguments: ""},

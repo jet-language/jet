@@ -294,7 +294,7 @@ fn ir_list_reserve(m: &IRModule, b: &IRBuilder, list: Int, row: Int) -> Int Neve
     old_data :: ir_load_word(&m, &b, list, 16)
     used :: ir_word_op(&m, &b, IROp.Mul, length, width)
     _ :: ir_runtime(&m, &b, "jet_rt_mem_move", [Int]{data, old_data, used}, -1)
-    ir_release_moved_buffer(&m, &b, old_data, capacity, stride)
+    ir_release_moved_buffer(&m, &b, old_data, data, capacity, stride)
     ir_emit(&b.f, IROp.Store, -1, list, 16, data, b.line)
     ir_emit(&b.f, IROp.Store, -1, list, 8, grown, b.line)
     ir_end(&b.f, b.line)

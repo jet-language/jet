@@ -344,6 +344,7 @@ const UNIT_RESULT_KEYS = new Set([
   "core.files.hard_link",
   "core.files.write_bytes",
   "core.mem.volatile_write",
+  "core.crypto.wipe",
   "core.log.fatal",
   "core.http.server.static_files",
   "core.http.server.cors",
