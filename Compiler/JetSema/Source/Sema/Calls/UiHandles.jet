@@ -394,8 +394,18 @@ fn sema_call_try_ui_handle_method(receiver: Expr, receiver_value: TExpr, method:
         checked :: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         return SemaMethodSpecialCheck{handled: true, value: Val(checked)}
     }
-    if sema_ui_browser_known_owner(owner) -> return sema_ui_browser_method(receiver, receiver_value, owner, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    browser_owner :: sema_ui_browser_owner(owner)
+    if sema_ui_browser_known_owner(browser_owner) -> return sema_ui_browser_method(receiver, receiver_value, browser_owner, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     SemaMethodSpecialCheck{handled: false, value: None}
+}
+
+// The Browser handle owner a receiver names: the bare runtime handle, or the
+// leaf of its `core.web.browser` declaration (`<corelib>/core.web.browser::Browser`,
+// Core/Web/Browser.jet). Any other module's same-named type is not a Browser handle.
+fn sema_ui_browser_owner(owner: String) -> String Never! {
+    prefix :: "<corelib>/core.web.browser::"
+    if owner.starts_with(prefix) -> return owner.slice(prefix.len(), owner.len())
+    owner.copy()
 }
 
 fn sema_ui_browser_known_owner(owner: String) -> Bool Never! {
@@ -403,7 +413,7 @@ fn sema_ui_browser_known_owner(owner: String) -> Bool Never! {
 }
 
 fn sema_ui_browser_arg_types(owner: String, method: String) -> [Type]? {
-    if (owner == "Browser" && (method == "abilities" || method == "context" || method == "close" || method == "trace" || method == "privacy" || method == "receipt")) || (owner == "BrowserContext" && (method == "page" || method == "tab" || method == "close" || method == "isolated" || method == "user_hash")) || (owner == "BrowserPage" && (method == "close" || method == "main_frame" || method == "frames" || method == "screenshot" || method == "pdf" || method == "clear_cookies")) || (owner == "BrowserFrame" && method == "close") || (owner == "BrowserLocator" && (method == "click" || method == "hover")) || (owner == "BrowserIntercept" && method == "remove") || (owner == "BrowserEvent" && (method == "kind" || method == "request_id" || method == "request_method" || method == "url_hash" || method == "is_blocked" || method == "status_code" || method == "download_id" || method == "suggested_filename_hash")) || (owner == "BrowserAbilities" && (method == "bidi" || method == "cdp" || method == "profile")) || (owner == "BrowserTrace" && (method == "entry_count" || method == "redacted" || method == "summary")) || (owner == "BrowserReceipt" && (method == "entry_count" || method == "redacted" || method == "summary" || method == "isolated" || method == "cleaned")) || (owner == "BrowserPrivacy" && (method == "isolated_profiles" || method == "redact_receipts" || method == "shared_profiles")) || (owner == "BrowserLocked" && (method == "engine" || method == "version" || method == "binary" || method == "protocol" || method == "verify")) || (owner == "BrowserTestServer" && (method == "stop" || method == "url" || method == "logs")) || (owner == "BrowserTestReport" && (method == "json" || method == "text" || method == "html" || method == "exit_code")) || (owner == "BrowserTestConfig" && (method == "engines" || method == "retries" || method == "filter" || method == "reporter" || method == "server_url" || method == "artifact_dir" || method == "report_path" || method == "ui" || method == "visual" || method == "watch")) -> return Val([Type]{})
+    if (owner == "Browser" && (method == "abilities" || method == "context" || method == "close" || method == "trace" || method == "privacy" || method == "receipt")) || (owner == "BrowserContext" && (method == "page" || method == "tab" || method == "close" || method == "isolated" || method == "user_hash")) || (owner == "BrowserPage" && (method == "close" || method == "main_frame" || method == "frames" || method == "screenshot" || method == "pdf" || method == "clear_cookies" || method == "url" || method == "title" || method == "text" || method == "dom")) || (owner == "BrowserFrame" && method == "close") || (owner == "BrowserLocator" && (method == "click" || method == "hover" || method == "resolve")) || (owner == "BrowserIntercept" && method == "remove") || (owner == "BrowserEvent" && (method == "kind" || method == "request_id" || method == "request_method" || method == "url_hash" || method == "is_blocked" || method == "status_code" || method == "download_id" || method == "suggested_filename_hash")) || (owner == "BrowserAbilities" && (method == "bidi" || method == "cdp" || method == "profile")) || (owner == "BrowserTrace" && (method == "entry_count" || method == "redacted" || method == "summary")) || (owner == "BrowserReceipt" && (method == "entry_count" || method == "redacted" || method == "summary" || method == "isolated" || method == "cleaned")) || (owner == "BrowserPrivacy" && (method == "isolated_profiles" || method == "redact_receipts" || method == "shared_profiles")) || (owner == "BrowserLocked" && (method == "engine" || method == "version" || method == "binary" || method == "protocol" || method == "verify")) || (owner == "BrowserTestServer" && (method == "stop" || method == "url" || method == "logs")) || (owner == "BrowserTestReport" && (method == "json" || method == "text" || method == "html" || method == "exit_code")) || (owner == "BrowserTestConfig" && (method == "engines" || method == "retries" || method == "filter" || method == "reporter" || method == "server_url" || method == "artifact_dir" || method == "report_path" || method == "ui" || method == "visual" || method == "watch")) -> return Val([Type]{})
     if (owner == "Browser" && (method == "subscribe" || method == "protocol" || method == "add_intercept" || method == "continue_request" || method == "fail_request" || method == "allow_downloads")) || (owner == "BrowserPage" && (method == "goto" || method == "get_by_text" || method == "get_by_label" || method == "get_by_placeholder" || method == "get_by_test_id" || method == "get_by_css" || method == "cookie" || method == "storage_clear")) || (owner == "BrowserLocator" && (method == "fill" || method == "press" || method == "set_files")) -> return Val([Type]{Type.String})
     if (owner == "Browser" && method == "next_event") || (owner == "BrowserLocator" && (method == "wait" || method == "wait_gone")) -> return Val([Type]{Type.Named{name: "BrowserTimeout"}})
     if (owner == "Browser" && method == "add_intercept_url") || (owner == "BrowserPage" && (method == "get_by_role" || method == "storage_get")) || (owner == "BrowserProtocol" && method == "send") -> return Val([Type]{Type.String, Type.String})
@@ -435,7 +445,8 @@ fn sema_ui_browser_result(owner: String, method: String) -> Type? {
     }
     if owner == "BrowserPage" {
         if method == "goto" || method == "close" || method == "clear_cookies" || method == "set_cookie" || method == "storage_set" || method == "storage_clear" -> return Val(sema_ui_handle_browser_result(unit))
-        if method == "screenshot" || method == "pdf" -> return Val(sema_ui_handle_browser_result(string))
+        // Browser.rs:1415-1433: the page reads evaluate in the page and return its text.
+        if method == "screenshot" || method == "pdf" || method == "url" || method == "title" || method == "text" || method == "dom" -> return Val(sema_ui_handle_browser_result(string))
         if method == "cookie" || method == "storage_get" -> return Val(sema_ui_handle_browser_result(Type.Option{inner: string}))
         if method == "main_frame" -> return Val(sema_ui_handle_browser_result(Type.Named{name: "BrowserFrame"}))
         if method == "frames" -> return Val(sema_ui_handle_browser_result(Type.List{element: Type.Named{name: "BrowserFrame"}}))
@@ -444,6 +455,8 @@ fn sema_ui_browser_result(owner: String, method: String) -> Type? {
     if owner == "BrowserFrame" && method == "close" -> return Val(sema_ui_handle_browser_result(unit))
     if owner == "BrowserLocator" {
         if method == "wait" || method == "wait_gone" || method == "click" || method == "hover" || method == "fill" || method == "press" || method == "set_files" -> return Val(sema_ui_handle_browser_result(unit))
+        // Browser.rs:1850: the locator's resolved shared element id.
+        if method == "resolve" -> return Val(sema_ui_handle_browser_result(string))
     }
     if owner == "BrowserIntercept" && method == "remove" -> return Val(sema_ui_handle_browser_result(unit))
     if owner == "BrowserEvent" {
@@ -485,7 +498,7 @@ fn sema_ui_browser_result(owner: String, method: String) -> Type? {
 }
 
 fn sema_ui_browser_effect(owner: String, method: String) -> String Never! {
-    if (owner == "Browser" && (method == "context" || method == "subscribe" || method == "close" || method == "next_event" || method == "protocol" || method == "add_intercept" || method == "add_intercept_url" || method == "continue_request" || method == "fail_request" || method == "fulfill_request" || method == "allow_downloads")) || (owner == "BrowserContext" && (method == "page" || method == "tab" || method == "close")) || (owner == "BrowserPage" && (method == "goto" || method == "close" || method == "frames" || method == "screenshot" || method == "pdf" || method == "set_cookie" || method == "cookie" || method == "clear_cookies" || method == "storage_get" || method == "storage_set" || method == "storage_clear")) || (owner == "BrowserFrame" && method == "close") || (owner == "BrowserLocator" && (method == "wait" || method == "wait_gone" || method == "click" || method == "hover" || method == "fill" || method == "press" || method == "set_files")) || (owner == "BrowserIntercept" && method == "remove") || (owner == "BrowserProtocol" && method == "send") -> return "Net"
+    if (owner == "Browser" && (method == "context" || method == "subscribe" || method == "close" || method == "next_event" || method == "protocol" || method == "add_intercept" || method == "add_intercept_url" || method == "continue_request" || method == "fail_request" || method == "fulfill_request" || method == "allow_downloads")) || (owner == "BrowserContext" && (method == "page" || method == "tab" || method == "close")) || (owner == "BrowserPage" && (method == "goto" || method == "close" || method == "frames" || method == "screenshot" || method == "pdf" || method == "set_cookie" || method == "cookie" || method == "clear_cookies" || method == "storage_get" || method == "storage_set" || method == "storage_clear" || method == "url" || method == "title" || method == "text" || method == "dom")) || (owner == "BrowserFrame" && method == "close") || (owner == "BrowserLocator" && (method == "wait" || method == "wait_gone" || method == "click" || method == "hover" || method == "fill" || method == "press" || method == "set_files" || method == "resolve")) || (owner == "BrowserIntercept" && method == "remove") || (owner == "BrowserProtocol" && method == "send") -> return "Net"
     if owner == "BrowserLocked" && method == "verify" -> return "FS"
     ""
 }
