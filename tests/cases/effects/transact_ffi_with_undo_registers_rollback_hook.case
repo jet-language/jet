@@ -1,4 +1,14 @@
-# the original's literal expectations; Jet does not meet them yet (assert not satisfied, Tools/testkit/known-failing.tsv).
+# Port of effects.rs:1416-1439. The original asserted the emitted Rust rollback
+# hook (`.on_rollback(Box::new(`, `__jet_undo_arg_`); RETIRED emitted-Rust text).
+# The public claim, D-BOUND-UNDO1=A (Docs/spec/syntax-decisions.md:3291-3297):
+# the declared inverse is registered on the rollback path, so a block that fails
+# after the foreign call runs it with the call's arguments.
 fixture: transact_ffi_with_undo_registers_rollback_hook/input
 step: jet check run.jet
-exit: 0 # expect
+exit: 0 # original: FFI with #Undo should compile
+step: jet run run.jet
+exit: 0 # committed transaction: the inverse does not run
+stdout: empty
+step: jet run rollback.jet
+exit: nonzero # the block panics
+stdout: ~ "undo 3" # the registered inverse ran with the captured arguments (1, 2)
