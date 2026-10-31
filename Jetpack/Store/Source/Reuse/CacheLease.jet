@@ -53,6 +53,18 @@ struct LeasedDirectory {
     fn holds_handle(self) -> Bool Never! {
         self.directory != None
     }
+
+    // Each entry as `name\ttarget`, read through the held handle. The path
+    // can die first: a wrapper's is the mount keeper's /proc root.
+    fn link_entries(self) -> [String] IOError! {
+        directory :: self.directory ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("leased directory `{self.path}` lost its handle")}))
+        out := [String]{}
+        loop entry in directory.list() {
+            target :: directory.read_link(entry.name)
+            &out.push("{entry.name}\t{target}")
+        }
+        Ok(out)
+    }
 }
 
 // A held Nix projection source: its directory or regular file.
@@ -561,13 +573,10 @@ fn store_lease_output_for(roots: [LeasedOutputRoot], path: String) -> LeasedOutp
 }
 
 // The protected wrapper directory still holds exactly one link per
-// executable, each naming that executable's descriptor path.
+// executable, each naming that executable's descriptor path. It is read
+// through the held handle: the keeper that exposed its path has exited.
 fn store_lease_validate_wrappers(wrapper: LeasedDirectory, executables: [SnapshotFile]) IOError! {
-    actual := [String]{}
-    loop entry in files.list_dir(wrapper.path) {
-        target :: files.read_link(entry.path)
-        &actual.push("{entry.name}\t{target}")
-    }
+    actual := wrapper.link_entries()
     &actual.sort()
     expected := [String]{}
     loop executable in executables -> &expected.push("{executable.relative}\t/proc/self/fd/{executable.slot}")
