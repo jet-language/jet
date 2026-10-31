@@ -131,6 +131,7 @@ fn envmodel_evaluate_integration_call(name: String, args: [CallArg], kind: Integ
 }
 
 fn envmodel_integration_arg_value(expr: Expr, scope: ModuleEvalScope, globals: [String: CtValue]) -> CtValue EnvModelEvalError! {
+    if envmodel_record_literal(expr) == .Val(record) -> return Ok(envmodel_integration_arg_value(record, scope, globals))
     if expr == {
         .Ident(name, _, _) -> Ok(CtValue.Str{value: name})
         .Field(base, member, _, _) -> Ok(CtValue.Str{value: "{envmodel_expression_name(base)}.{member}"})

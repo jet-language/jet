@@ -24,6 +24,7 @@ enum ProfileField {
 
 // A `profile.<name>: Profile{ … }` contribution written as an expression.
 fn envmodel_evaluate_package_profile_expr(name: String, value: Expr, src: String, scope: ModuleEvalScope, globals: [String: CtValue], module_name: String) -> PackageProfileSpec EnvModelEvalError! {
+    if envmodel_record_literal(value) == .Val(record) -> return Ok(envmodel_evaluate_package_profile_expr(name, record, src, scope, globals, module_name))
     if value == {
         .StructLit(type_name, _, _, _, fields, _, _, _) -> {
             if type_name != "" && type_name != TYPE_PROFILE -> return Err(envmodel_wrong_namespace_type(TYPE_PROFILE, type_name, expr_span(value)))
