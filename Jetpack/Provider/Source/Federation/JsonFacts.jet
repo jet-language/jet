@@ -41,17 +41,10 @@ fn provider_graph_json_string(object: [String: Dyn], key: String) -> String? Nev
     Val(text)
 }
 
-// Rust `as_i64`: a JSON whole number. Strict `json.parse` keeps every number
-// as its exact `Dyn.Number` lexeme (#4602), so the lexeme must read as an Int.
+// Rust `as_i64`: a JSON whole number (no fraction or exponent). Strict
+// `json.parse` keeps every number as its exact lexeme (#4602).
 fn provider_graph_json_int(value: Dyn) -> Int? Never! {
-    if value == {
-        .Int(number) -> return Val(number)
-        .Number(lexeme) -> {
-            if Int.parse(lexeme) == .Ok(number) -> return Val(number)
-        }
-        else -> {}
-    }
-    None
+    foundation_json_integer(value)
 }
 
 // The first non-blank string among `keys`.

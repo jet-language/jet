@@ -2364,7 +2364,7 @@ through the same store and lock path as other packages. `jetpack add <ref>
 --adapt` writes a draft adapter and does not execute upstream code (U20).
 
 Direct providers verify their source and closure before projection. For example,
-the LuaRocks reference has the exact `<name>#version=<version>@luarocks` shape;
+the LuaRocks reference has the exact `<name>@luarocks#version=<version>` shape;
 source SHA-256 values, dependency closure, and the qualified reference are
 recorded in `.jet/lock`. Mutable refs, unsupported native-build metadata,
 cycles, unsafe archive paths, source drift, and cache tampering fail closed.
@@ -3827,7 +3827,9 @@ The `debug_info` and `small` rows hold a Bool: a profile field writes
 `debug_info: false`, `fn build` writes `b.debug_info(false)`, and the flag
 writes `--debug-info=false`; a bare `--small` or `--debug-info` means `true`.
 `debug_info` (stock `true`) says whether the image carries DWARF debug info
-and the location table crash reports read (`.debug_jetline`).
+and the location table crash reports read (`.debug_jetline`). Both describe
+only the functions the image holds: the link drops the debug records of the
+functions nothing reaches.
 With `false` the image has no `.debug_*` section; `.eh_frame` stays, and a
 crash report prints the faulting address and the return addresses of its
 frames instead of function names and lines.

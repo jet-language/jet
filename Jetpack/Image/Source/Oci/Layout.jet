@@ -558,14 +558,9 @@ fn image_string_field(object: [String: Dyn], field_name: String) -> String Image
 fn image_number_field(object: [String: Dyn], field_name: String) -> Int ImageError! {
     refusal :: image_invalid("OCI object field `{field_name}` is not a non-negative integer")
     value :: object.get(field_name) ?? return Err(refusal)
-    if value == .Int(whole) {
-        if whole >= 0 -> return Ok(whole)
-    }
-    if value == .Float(number) {
-        whole :: Int.from_float(number) ?? return Err(refusal)
-        if whole >= 0 && Float.from_int(whole) == number -> return Ok(whole)
-    }
-    Err(refusal)
+    whole :: value.decode<Int>() ?? return Err(refusal)
+    if whole < 0 -> return Err(refusal)
+    Ok(whole)
 }
 
 // The 64 lowercase-or-uppercase hex digits of a `sha256:` digest.

@@ -37,9 +37,6 @@ fn foundation_parse_protocol_json_with_limit(text: String, max_bytes: Int) -> Dy
 // The first integer outside i64, refused as the protocol parser refuses it.
 fn foundation_protocol_json_integer_error(value: Dyn) -> String? Never! {
     if value == {
-        .Int(number) -> {
-            if number < -9223372036854775808 || number > 9223372036854775807 -> return Val("invalid number `{number}`")
-        }
         .Array(values) -> {
             loop child in values {
                 error :: foundation_protocol_json_integer_error(child)
@@ -52,14 +49,31 @@ fn foundation_protocol_json_integer_error(value: Dyn) -> String? Never! {
                 if error != None -> return error
             }
         }
-        else -> {}
+        else -> {
+            number :: foundation_json_integer(value) ?? return None
+            if number < -9223372036854775808 || number > 9223372036854775807 -> return Val("invalid number `{number}`")
+        }
     }
     None
 }
 
+// An integer JSON number as Rust's parser reads one (`as_i64`): a lexeme with
+// no fraction or exponent, valued through Core's typed decode, or a built
+// `Dyn.Int`. None for a float-spelled number and for every other value.
+fn foundation_json_integer(value: Dyn) -> Int? Never! {
+    if value == {
+        .Int(number) -> Val(number)
+        .Number(lexeme) -> {
+            if lexeme.contains(".") || lexeme.contains("e") || lexeme.contains("E") -> return None
+            number :: value.decode<Int>() ?? return None
+            Val(number)
+        }
+        else -> None
+    }
+}
+
 fn foundation_protocol_json_valid(value: Dyn, depth: Int) -> Bool Never! {
     if value == {
-        .Int(number) -> number >= -9223372036854775808 && number <= 9223372036854775807
         .Array(values) -> {
             if depth >= 64 -> return false
             loop child in values {
@@ -74,6 +88,9 @@ fn foundation_protocol_json_valid(value: Dyn, depth: Int) -> Bool Never! {
             }
             true
         }
-        else -> true
+        else -> {
+            number :: foundation_json_integer(value) ?? return true
+            number >= -9223372036854775808 && number <= 9223372036854775807
+        }
     }
 }

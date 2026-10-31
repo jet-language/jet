@@ -880,8 +880,9 @@ fn dwarf_line(sections: &X64DwarfSections, program: X64ObjectModule, functions: 
 //   and the paths (each path once), NUL terminated.
 //   Rows: per function, per `.debug_line` row the uleb address and sleb
 //   line advance from the previous row (the first from address 0, line 1).
-// A linker concatenates the blocks of its objects; a dropped function's
-// start relocates to its offset, below any code address.
+// This is the object form: the linker (Image/DebugPrune.jet) drops the
+// records of the functions it dropped and writes the linked form the fault
+// report reads, varint records in address order.
 fn dwarf_jet_line(sections: &X64DwarfSections, program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], symbols: X64DwarfSymbols) Never! {
     table := [U8]{}
     relas := [X64ObjectRela]{}

@@ -96,8 +96,8 @@ fn pkg_integration_package_error(raw: String) -> PackageParseError Never! {
 
 // Ported from pkg.rs:1884-1899.
 #Test("pkg integration manifest_parse_foreign_package_dep") {
-    mf :: Manifest.parse("package.jet", pkg_integration_manifest_with_deps("root", "0.1.0", "    plotly: js@\"plotly#version=2.35.0@npm\",")) ?? panic("foreign package dep should parse")
-    assert_eq(mf.dependencies.get("plotly"), Val(DepSpec.Foreign{language: ForeignLanguage.JS, reference: "plotly#version=2.35.0@npm"}))
+    mf :: Manifest.parse("package.jet", pkg_integration_manifest_with_deps("root", "0.1.0", "    plotly: js@\"plotly@npm#version=2.35.0\",")) ?? panic("foreign package dep should parse")
+    assert_eq(mf.dependencies.get("plotly"), Val(DepSpec.Foreign{language: ForeignLanguage.JS, reference: "plotly@npm#version=2.35.0"}))
 }
 
 // Ported from pkg.rs:2058-2065.

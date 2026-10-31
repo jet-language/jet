@@ -570,10 +570,9 @@ fn build_report_field(fields: [String: Dyn], name: String) -> Dyn BuildIOError! 
 }
 
 fn build_report_u32(value: Dyn, name: String) -> Int BuildIOError! {
-    if value == {
-        .Int(number) -> if number >= 0 && number <= 4294967295 -> Ok(number) else -> Err(build_report_invalid("error report {name} is not a u32"))
-        else -> Err(build_report_invalid("error report {name} is not an integer"))
-    }
+    number :: foundation_json_integer(value) ?? return Err(build_report_invalid("error report {name} is not an integer"))
+    if number < 0 || number > 4294967295 -> return Err(build_report_invalid("error report {name} is not a u32"))
+    Ok(number)
 }
 
 fn build_report_from_tree(value: Dyn) -> DiagnosticBuildError BuildIOError! {

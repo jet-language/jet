@@ -18,9 +18,9 @@
 # relocated: every reference is relative and inside the run.
 #
 # Frames come from the frame-pointer chain and the location table
-# (.debug_jetline, Image/Dwarf.jet dwarf_jet_line) of the image's section
-# headers. Every byte goes through one 4 KiB buffer on the stack, from
-# templates with seven field codes: no allocation, no unwinder.
+# (.debug_jetline as the linker writes it, Image/DebugPrune.jet) of the
+# image's section headers. Every byte goes through one 4 KiB buffer on the
+# stack, from templates with seven field codes: no allocation, no unwinder.
     .intel_syntax noprefix
 
     # The frame: these words below rbp, the report buffer from rbp, then
@@ -34,8 +34,8 @@
     .set V_FILE, -56
     .set V_DIR, -64
     .set V_DECL, -72
-    .set V_REC, -80
-    .set V_BLK, -88
+    .set V_ROWS, -80            # the function find matched: its rows and
+    .set V_ROWEND, -88          # their end
     .set V_LINE, -96
     .set V_SRC, -104
     .set V_SRCLEN, -112
@@ -47,7 +47,9 @@
     .set V_BIAS, -160
     .set V_TAB, -168            # .debug_jetline: start (0: none) and end
     .set V_TABEND, -176
-    .set WORDS, 176
+    .set V_LOW, -184            # the function find matched: its link-time
+    .set V_HIGH, -192           # start and end
+    .set WORDS, 192
     .set OUT_SIZE, 4096
     .set PATH, OUT_SIZE
     .set FRAME, WORDS + OUT_SIZE + 8192
@@ -306,49 +308,67 @@ frame_at:
     ret
 
 # The Jet function holding run-time pc rax: eax 1 and its name, file,
-# directory, declaration line, record and block in the frame words, else
+# directory, declaration line, bounds and rows in the frame words, else
 # eax 0. Table blocks: u32 length (after this word), u32 count, u32
-# strings, u32 rows; then count records of 32 bytes: u64 low, u32 size,
-# u32 name, u32 file, u32 declaration line, u32 rows, u32 row count.
+# strings (from the block's start), u64 base; then count records in
+# address order: an sleb, the start's distance from the previous record's
+# end (the first's from the base), then five ulebs, size, name, file,
+# declaration line and the byte length of the rows that follow.
 find:
     sub rax, [rbp + V_BIAS]
     mov rsi, [rbp + V_TAB]
-    mov r8, [rbp + V_TABEND]
-1:  lea rdx, [rsi + 16]
-    cmp rdx, r8
+1:  lea rdx, [rsi + 20]
+    cmp rdx, [rbp + V_TABEND]
     ja 4f
     mov ecx, [rsi]
     lea rdi, [rsi + rcx + 4]
     cmp rdi, rdx
     jb 4f
-    cmp rdi, r8
+    cmp rdi, [rbp + V_TABEND]
     ja 4f
-    mov ecx, [rsi + 4]
-2:  jrcxz 3f
-    mov r9, rax
-    sub r9, [rdx]
-    mov r10d, [rdx + 8]
-    cmp r9, r10
+    mov r9d, [rsi + 4]
+    mov r11d, [rsi + 8]
+    add r11, rsi
+    mov r10, [rsi + 12]
+    mov rsi, rdx
+    push rax
+2:  test r9d, r9d
+    jz 3f
+    cmp rsi, rdi
+    jae 3f
+    call sleb
+    add r10, rax
+    mov [rbp + V_LOW], r10
+    call uleb
+    add r10, rax
+    mov [rbp + V_HIGH], r10
+    call uleb
+    mov [rbp + V_NAME], rax
+    call uleb
+    mov [rbp + V_FILE], rax
+    call uleb
+    mov [rbp + V_DECL], rax
+    call uleb
+    mov [rbp + V_ROWS], rsi
+    add rsi, rax
+    mov [rbp + V_ROWEND], rsi
+    mov rax, [rsp]
+    sub rax, [rbp + V_LOW]
+    mov rcx, r10
+    sub rcx, [rbp + V_LOW]
+    cmp rax, rcx
     jb 5f
-    add rdx, 32
-    loop 2b
-3:  mov rsi, rdi
+    dec r9d
+    jmp 2b
+3:  pop rax
+    mov rsi, rdi
     jmp 1b
 4:  xor eax, eax
     ret
-5:  mov ecx, [rsi + 8]
-    add rcx, rsi
-    mov [rbp + V_DIR], rcx
-    mov eax, [rdx + 12]
-    add rax, rcx
-    mov [rbp + V_NAME], rax
-    mov eax, [rdx + 16]
-    add rax, rcx
-    mov [rbp + V_FILE], rax
-    mov eax, [rdx + 20]
-    mov [rbp + V_DECL], rax
-    mov [rbp + V_REC], rdx
-    mov [rbp + V_BLK], rsi
+5:  pop rax
+    mov [rbp + V_DIR], r11
+    add [rbp + V_NAME], r11
+    add [rbp + V_FILE], r11
     push 1
     pop rax
     ret
@@ -361,32 +381,19 @@ line:
     push r12
     push r13
     mov rbx, rdi
-    mov rdx, [rbp + V_REC]
-    mov rsi, [rbp + V_BLK]
-    mov ecx, [rsi + 12]
-    add rsi, rcx
-    mov ecx, [rdx + 24]
-    add rsi, rcx
-    mov r12d, [rdx + 28]
-    mov r9, [rdx]
-    mov r13d, [rdx + 8]
-    add r13, r9
+    mov rsi, [rbp + V_ROWS]
+    mov r12, [rbp + V_ROWEND]
+    mov r9, [rbp + V_LOW]
+    mov r13, [rbp + V_HIGH]
     push 1
     pop r10
     or r11, -1
-1:  test r12d, r12d
-    jz 3f
+1:  cmp rsi, r12
+    jae 3f
     call uleb
     add r9, rax
-    call uleb
-    cmp ecx, 64
-    jae 11f
-    test dl, 64
-    jz 11f
-    or r8, -1
-    shl r8, cl
-    or rax, r8
-11: add r10, rax
+    call sleb
+    add r10, rax
     test r11, r11
     js 2f
     cmp rbx, r11
@@ -395,7 +402,6 @@ line:
     jl 4f
 2:  mov r11, r9
     mov rdi, r10
-    dec r12d
     jmp 1b
 3:  test r11, r11
     js 5f
@@ -412,6 +418,18 @@ line:
     pop r12
     pop rbx
     ret
+
+# Signed LEB128 at rsi (advanced) into rax. Clobbers rcx, rdx, r8.
+sleb:
+    call uleb
+    cmp ecx, 64
+    jae 1f
+    test dl, 64
+    jz 1f
+    or r8, -1
+    shl r8, cl
+    or rax, r8
+1:  ret
 
 # LEB128 at rsi (advanced) into rax; cl ends as the shift, dl as the last
 # byte. Clobbers rcx, rdx, r8.

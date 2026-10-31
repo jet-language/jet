@@ -197,10 +197,10 @@ fn engine_cache_clear_negative(mirror: String) {
     root :: files.tmpdir("engine-explain-failed-") ?? panic("root")
     roots :: HangarRoots{root, dev_mode: false}
     verification := StoreVerification.new()
-    attempt := BuildAttempt.new("left-pad", "left-pad#version=2.0.17@npm", "npm", "sha256-recipe", "sha256-source")
+    attempt := BuildAttempt.new("left-pad", "left-pad@npm#version=2.0.17", "npm", "sha256-recipe", "sha256-source")
     &attempt.push_step(StepLog{index: 1, total: 1, name: "fetch", command: "fetch left-pad", cwd: root, status: "failed", stdout: "", stderr: "network unavailable"})
     &attempt.persist(roots.hangar_dir()) ?? panic("persist")
-    explanation :: if store_explain_package(&verification, roots, "left-pad#version=2.0.17@npm", ExplainLens.Rebuild) == {
+    explanation :: if store_explain_package(&verification, roots, "left-pad@npm#version=2.0.17", ExplainLens.Rebuild) == {
         .Val(found) -> found
         .None -> panic("failed provider explanation")
         .Err(_) -> panic("explain")

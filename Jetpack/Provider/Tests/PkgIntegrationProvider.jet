@@ -44,12 +44,12 @@ fn provider_pkg_integration_report_error(report: ProviderFactReport) -> Provider
     report :: provider_normalize_document(ProviderFamily.Npm, native)
     provider_test_valid(report, "lossless npm report")
     shared :: report.shared_facts()
-    assert_eq(shared.qualified_reference(), "web#version=1.0.0@npm")
+    assert_eq(shared.qualified_reference(), "web@npm#version=1.0.0")
     assert_eq(shared.native_document, native)
     assert(shared.explain_lines().contains("native json: retained"))
     assert_eq(ProviderFacts.from_json(report.export_json()) ?? panic("shared provider facts JSON"), shared)
     lock :: report.lock_record("app", "web@npm#1.0.0", "any") ?? panic("provider semantic lock")
-    assert_eq(lock.identity.exact, "web#version=1.0.0@npm")
+    assert_eq(lock.identity.exact, "web@npm#version=1.0.0")
     assert_eq(lock.future_fields.get("provider-facts-digest"), Val(shared.digest()))
 }
 
@@ -73,12 +73,12 @@ fn provider_pkg_integration_report_error(report: ProviderFactReport) -> Provider
     report :: provider_normalize_document(ProviderFamily.Npm, native)
     shared :: report.shared_facts_for("web@catalog")
     shared.validate() ?? panic("catalog alias remains lossless")
-    assert_eq(shared.qualified_reference(), "web#version=1.0.0@catalog")
+    assert_eq(shared.qualified_reference(), "web@catalog#version=1.0.0")
     assert_eq(shared.native_document, native)
     assert_eq(shared.facts.get("provider.resolved_selector"), Val(ProviderFactValue.Text("#version=1.0.0")))
     assert_eq(shared.facts.get("provider.npm.native.yanked"), Val(ProviderFactValue.List([ProviderFactValue]{ProviderFactValue.Bool(false)})))
     lock :: report.lock_record("app", "web@catalog", "any") ?? panic("alias lock retains source authority")
-    assert_eq(lock.identity.exact, "web#version=1.0.0@catalog")
+    assert_eq(lock.identity.exact, "web@catalog#version=1.0.0")
     locked :: provider_test_locked_facts(lock)
     locked.validate() ?? panic("locked alias facts")
     assert_eq(locked.reference, "web@catalog")
@@ -93,7 +93,7 @@ fn provider_pkg_integration_report_error(report: ProviderFactReport) -> Provider
     report :: provider_normalize_document(ProviderFamily.SwiftPM, native)
     provider_test_valid(report, "SwiftPM v2 pin is lossless")
     shared :: report.shared_facts()
-    assert_eq(shared.qualified_reference(), "swift-log#revision={revision}@swiftpm")
+    assert_eq(shared.qualified_reference(), "swift-log@swiftpm#revision={revision}")
     assert_eq(shared.native_document, native)
     value :: shared.facts.get("provider.revision") ?? panic("revision fact")
     assert(value.debug().contains(revision))
@@ -184,7 +184,7 @@ fn provider_pkg_integration_report_error(report: ProviderFactReport) -> Provider
     native :: "{{\"name\":\"tool\",\"hash\":\"{digest}\",\"platforms\":[\"linux\"]}}"
     report :: provider_normalize_document(ProviderFamily.Binary, native)
     provider_test_valid(report, "binary digest is an exact identity")
-    assert_eq(report.shared_facts().qualified_reference(), "tool#digest={digest}@binary")
+    assert_eq(report.shared_facts().qualified_reference(), "tool@binary#digest={digest}")
     assert_eq(report.shared_facts().native_document, native)
 }
 

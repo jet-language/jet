@@ -354,14 +354,12 @@ fn recipe_debug_str_field(object: [String: Dyn], key: String) -> String StoreErr
     Ok(text)
 }
 
-// A non-negative count, or 0 when absent or not a count.
+// A non-negative count (a fraction truncates), or 0 when absent or not a count.
 fn recipe_debug_num_field(object: [String: Dyn], key: String) -> Int Never! {
     value :: object.get(key) ?? return 0
-    if value == {
-        .Int(number) -> if number >= 0 -> number else -> 0
-        .Float(number) -> if number - number == 0.0 && number >= 0.0 -> (Int.from_float(math.trunc(number)) ?? 0) else -> 0
-        else -> 0
-    }
+    if value.decode<Int>() == .Ok(number) -> return if number >= 0 -> number else -> 0
+    fraction :: value.decode<Float>() ?? return 0
+    if fraction >= 0.0 -> Int.from_float(math.trunc(fraction)) ?? 0 else -> 0
 }
 
 // Copy a real directory tree; links and special entries are refused.

@@ -13,8 +13,6 @@ TOOL_PROFILE_MAX_TOOLS :: 256
 TOOL_PROFILE_MAX_BINS :: 1024
 TOOL_PROFILE_MAX_STRING :: 4096
 TOOL_PROFILE_MAX_BIN_NAME :: 255
-// 2^53 - 1: the largest float JSON number that is still an exact integer.
-CLI_JSON_MAX_EXACT_FLOAT :: 9007199254740991.0
 CLI_INT_MAX :: 9223372036854775807
 
 // The checked `current` pointer: which generation is live, bound to its
@@ -334,16 +332,11 @@ fn cli_json_string_field(object: [String: Dyn], key: String) -> String CLIError!
     Ok(text)
 }
 
-// A non-negative exact integer; a float counts only when it is integral and
-// no larger than 2^53 - 1.
+// A non-negative exact integer, read through Core's typed Int decode.
 fn cli_json_integer_field(object: [String: Dyn], key: String) -> Int CLIError! {
     value :: object.get(key) ?? return Err(CLIError.InvalidData("profile field `{key}` is not a number"))
-    exact :: if value == {
-        .Int(number) -> if number >= 0 -> Val(number) else -> None
-        .Float(number) -> if math.is_finite(number) && number >= 0.0 && math.fract(number) == 0.0 && number <= CLI_JSON_MAX_EXACT_FLOAT -> Val(math.round(number)) else -> None
-        else -> None
-    }
-    number :: exact ?? return Err(CLIError.InvalidData("profile field `{key}` is not an exact integer"))
+    number :: value.decode<Int>() ?? return Err(CLIError.InvalidData("profile field `{key}` is not an exact integer"))
+    if number < 0 -> return Err(CLIError.InvalidData("profile field `{key}` is not an exact integer"))
     Ok(number)
 }
 

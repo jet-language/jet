@@ -62,8 +62,10 @@ enum ProviderFactValue {
                 loop pair in fields -> values[pair.key] = ProviderFactValue.from_json_tree(pair.value)
                 ProviderFactValue.Map(values)
             }
+            // A strict-JSON number keeps its exact lexeme, which Core's typed
+            // Float decode recognizes and the JSON writer renders verbatim.
             // Native byte/date carriers expose text through the public accessor.
-            else -> ProviderFactValue.Text(value.to_text() ?? "")
+            else -> if value.decode<Float>() == .Ok(_) -> ProviderFactValue.Number(pkg_json_render(value)) else -> ProviderFactValue.Text(value.to_text() ?? "")
         }
     }
 }
@@ -399,14 +401,12 @@ struct ProviderFacts {
         }
     }
 
-    // The canonical direct-root spelling used by locks and generated output;
-    // the original source spelling stays in `reference`.
+    // The canonical `target@provider#selector` spelling used by locks and
+    // generated output; the original source spelling stays in `reference`.
     fn qualified_reference(self) -> String Never! {
         root :: pkg_provider_split_reference_selector(self.reference).root
         selector :: self.effective_selector().canonical()
         if selector == "" -> return root
-        authority :: pkg_provider_split_reference_authority(root)
-        if authority.provider != "" -> return "{authority.target}#{selector}@{authority.provider}"
         "{root}#{selector}"
     }
 
@@ -554,14 +554,10 @@ fn pkg_provider_sorted_keys(keys: [String]) -> [String] Never! {
     out
 }
 
-// Accept both Jet refs (`target@provider#selector`) and provider records in
-// the normalized form (`target#selector@provider`).
+// `target@provider#selector`: the selector follows the source authority.
 fn pkg_provider_split_reference_selector(reference: String) -> (root: String, selector: String?) Never! {
     halves :: reference.split_once("#") ?? return (root: reference, selector: None)
-    if halves.after.cut_last("@") == {
-        .Val(inner) -> (root: "{halves.before}@{inner.after}", selector: Val(inner.before))
-        .None -> (root: halves.before, selector: Val(halves.after))
-    }
+    (root: halves.before, selector: Val(halves.after))
 }
 
 // `target@authority`; a leading or trailing `@` names no authority.

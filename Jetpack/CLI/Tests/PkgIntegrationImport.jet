@@ -67,7 +67,7 @@ fn cli_pkg_integration_loss(facts: ProviderFacts, needle: String) -> Bool Never!
     assert_eq(plan.deps[0].locked_version, "1.0.200")
     assert_eq(plan.deps[0].provider_ref, "serde@cargo#version=1.0.200")
     assert(plan.emit_pkg_jet().contains("serde: serde@cargo#version=1.0.200"))
-    plan.provider_facts["serde#version=1.0.200@cargo"].validate() ?? panic("exact Cargo facts")
+    plan.provider_facts["serde@cargo#version=1.0.200"].validate() ?? panic("exact Cargo facts")
     found := false
     loop stub in plan.ffi_stubs {
         if stub.symbol == "serde" -> found = true
@@ -121,9 +121,9 @@ fn cli_pkg_integration_loss(facts: ProviderFacts, needle: String) -> Bool Never!
 // Ported from pkg.rs:844-854.
 #Test("pkg integration swiftpm_import_emits_provider_refs") {
     plan :: cli_import_swiftpm("swift-log", "abc123")
-    assert_eq(plan.deps[0].provider_ref, "swift-log#revision=abc123@swiftpm")
+    assert_eq(plan.deps[0].provider_ref, "swift-log@swiftpm#revision=abc123")
     assert_eq(plan.deps[0].locked_version, "abc123")
-    plan.provider_facts["swift-log#revision=abc123@swiftpm"].validate() ?? panic("exact SwiftPM facts")
+    plan.provider_facts["swift-log@swiftpm#revision=abc123"].validate() ?? panic("exact SwiftPM facts")
 }
 
 // Ported from pkg.rs:857-866.

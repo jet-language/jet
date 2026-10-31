@@ -43,11 +43,11 @@ fn provider_test_locked_facts(record: SemanticRecord) -> ProviderFacts {
     report :: provider_normalize_document(ProviderFamily.Npm, "{{\"name\":\"web\",\"version\":\"1.0.0\",\"yanked\":false}}")
     shared :: report.shared_facts_for("web@catalog")
     shared.validate() ?? panic("provider alias remains lossless")
-    assert_eq(shared.qualified_reference(), "web#version=1.0.0@catalog")
+    assert_eq(shared.qualified_reference(), "web@catalog#version=1.0.0")
     assert_eq(shared.facts.get("provider.resolved_selector"), Val(ProviderFactValue.Text("#version=1.0.0")))
     assert_eq(shared.facts.get("provider.npm.native.yanked"), Val(ProviderFactValue.List([ProviderFactValue]{ProviderFactValue.Bool(false)})))
     lock :: report.lock_record("app", "web@catalog", "any") ?? panic("provider alias lock")
-    assert_eq(lock.identity.exact, "web#version=1.0.0@catalog")
+    assert_eq(lock.identity.exact, "web@catalog#version=1.0.0")
     locked :: provider_test_locked_facts(lock)
     locked.validate() ?? panic("locked alias provider facts")
     assert_eq(locked.reference, "web@catalog")
@@ -244,9 +244,9 @@ fn provider_test_locked_facts(record: SemanticRecord) -> ProviderFacts {
     conan :: "from conan import ConanFile\nclass Widget(ConanFile):\n    name = \"widget\"\n    version = \"1.2.3\"\n    license = \"MIT\"\n    settings = \"os\", \"arch\", \"compiler\", \"build_type\"\n    options = {{\"shared\": [True, False]}}\n    generators = \"CMakeDeps\"\n    def requirements(self):\n        self.requires(\"zlib/1.3.1\")\n"
     vcpkg :: "{{\n  \"name\": \"widget\",\n  \"version-string\": \"1.2.3\",\n  \"license\": \"MIT\",\n  \"builtin-baseline\": \"0123456789abcdef0123456789abcdef01234567\",\n  \"supports\": \"!uwp\",\n  \"dependencies\": [{{\"name\":\"zlib\",\"version>=\":\"1.3.0\",\"features\":[\"core\"]}}],\n  \"features\": {{\"tools\": [\"fmt\"]}}\n}}"
     cases :: [(family: ProviderFamily, document: String, reference: String)]{
-        (family: ProviderFamily.NuGet, document: nuget, reference: "widget#version=1.2.3@nuget"),
-        (family: ProviderFamily.Conan, document: conan, reference: "widget#version=1.2.3@conan"),
-        (family: ProviderFamily.Vcpkg, document: vcpkg, reference: "widget#version=1.2.3@vcpkg")
+        (family: ProviderFamily.NuGet, document: nuget, reference: "widget@nuget#version=1.2.3"),
+        (family: ProviderFamily.Conan, document: conan, reference: "widget@conan#version=1.2.3"),
+        (family: ProviderFamily.Vcpkg, document: vcpkg, reference: "widget@vcpkg#version=1.2.3")
     }
     loop entry in cases {
         report :: provider_normalize_document(entry.family, entry.document)

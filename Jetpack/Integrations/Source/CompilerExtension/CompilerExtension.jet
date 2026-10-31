@@ -14,7 +14,6 @@
 // stays final), and close hands the guest handle to the host's closer.
 use jet_foundation.[HostImportFact, authority_parse_right]
 use core.encoding.json as json
-use core.math as math
 use jet_pkg_model.[
     PKG_JSON_NOT_ARRAY, PKG_JSON_NOT_OBJECT, PKG_JSON_NOT_STRING,
     pkg_json_array, pkg_json_object, pkg_json_parse_protocol, pkg_json_text, pkg_json_texts,
@@ -680,22 +679,12 @@ fn pkg_extension_require_keys(object: [String: Dyn], required: [String], optiona
     }
 }
 
-// A non-negative integer no larger than `maximum`; a float with no fraction
-// counts.
+// A non-negative integer no larger than `maximum`, read through Core's typed
+// Int decode (an integral float counts).
 fn pkg_extension_json_bounded(value: Dyn, maximum: Int) -> Int? Never! {
-    if value == {
-        .Int(number) -> {
-            if number >= 0 && number <= maximum -> return Val(number)
-            return None
-        }
-        .Float(number) -> {
-            if math.fract(number) != 0.0 || number < 0.0 -> return None
-            whole :: Int.from_float(number) ?? return None
-            if whole <= maximum -> return Val(whole)
-            return None
-        }
-        else -> return None
-    }
+    number :: value.decode<Int>() ?? return None
+    if number >= 0 && number <= maximum -> return Val(number)
+    None
 }
 
 fn pkg_extension_json_u32(value: Dyn, name: String) -> Int ExtensionProtocolError! {
