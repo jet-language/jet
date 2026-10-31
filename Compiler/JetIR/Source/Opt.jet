@@ -1,6 +1,9 @@
 // Optimization levels over the slot IR: IR in, IR out, between the builder
 // and x86-64 selection. Level 0 (`jet run`, `jet dev`, compile-time code)
-// leaves the module as built; level 1 (`jet build`) puts each call of a
+// leaves the module as built; level 1 (`jet build`) first has a program's
+// functions that return a small fresh box (a `T E!` Result) write it into
+// frame storage their callers pass (`retslot`,
+// OptReturnSlot.jet), puts each call of a
 // recursive function that starts by testing its parameters and returning
 // behind that test (`entry`, OptEntry.jet), inlines small direct
 // callees bottom-up over the call graph (drop glue too, `glue`), simplifies
@@ -41,8 +44,8 @@ use jet_foundation.[CompilerThreads, Type, compiler_take_rows, compiler_threads_
 // What the optimizer runs: the level, whether inlining keeps to the O1
 // limits at any level (`small`, the build option), which callees inlining
 // takes (`inline`, the build option), the passes `disabled` names (to bisect
-// a difference to one pass: "unique", "entry", "once", "scalar", "promote",
-// "version", "range", "ssa", "stops", "glue", "split", "reduce", "sink"), whether
+// a difference to one pass: "retslot", "unique", "entry", "once", "scalar",
+// "promote", "version", "range", "ssa", "stops", "glue", "split", "reduce", "sink"), whether
 // IR Lint checks each function after every pass and every SSA form is
 // verified (`verify`; tests, CI and the JET_OPT_VERIFY knob), whether every
 // SSA value leaves SSA in a fresh slot (`stress`, which exercises the moves
@@ -211,6 +214,8 @@ fn ir_optimize_module(m: &IRModule, options: IROptOptions, threads: CompilerThre
             if f.name == options.dump -> &report.dumps.push("before {ir_function_text(m, f)}")
         }
     }
+    // Before IR Lint reads the signatures: a return slot is a parameter.
+    if ir_opt_enabled(options, "retslot") -> _ := ir_opt_return_slots(&m)
     // IR Lint reads every callee's signature while the bodies are out.
     lint :: if options.verify -> ir_lint_context(m) else -> ir_lint_context_none()
     entry_lint := if options.verify -> ir_lint_context(m) else -> ir_lint_context_none()

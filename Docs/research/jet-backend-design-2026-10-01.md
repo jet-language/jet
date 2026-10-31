@@ -369,6 +369,18 @@ Result boxes reserve at least one eight-byte payload word after the tag,
 including zero-sized payloads. Runtime marshaling uses the same minimum,
 alignment and size as native construction and drop glue.
 
+At O1 and O2 a program function whose every value return is a fresh box of
+at most 16 bytes stored only with drop-free payloads (a `T E!` of a Float,
+word, Bool or payload-free error enum; an Option's None is null, not a box)
+takes the box's storage as a
+hidden last parameter instead (`retslot`, JetIR `OptReturnSlot.jet`): each
+direct call passes frame storage of that size, and the caller's unique test,
+free and Drop of the box disappear, so an `Ok` costs no allocation. The
+convention changes in place for the whole image; a function keeps its boxes
+when any caller lets the box outlive the call (returns, stores, moves or
+passes it) or anything but a direct call reaches it (a function value, a
+glue or runtime symbol, the entry). Libraries keep every export's ABI.
+
 `Compiler/JetRuntime/Source/Text.jet` owns the native text exports. Headers are
 24-byte allocations aligned to 8; buffers are allocated with alignment 1 and
 freed with their recorded capacity. Empty buffers have pointer 1 and capacity
