@@ -19,7 +19,10 @@ package {
 // recursion and no budget. Matching is leftmost-first, as in RE2 and Rust:
 // the leftmost match wins, and among matches starting there alternation
 // prefers its earlier arm and a repetition its greedy (or, with a trailing
-// `?`, lazy) count.
+// `?`, lazy) count. Compile also derives search accelerators that never
+// change the answer: a DFA over ASCII bytes that decides whether a match
+// exists (is_match, full_match), and literals every match contains or
+// starts with, which let the scan skip text no match can touch.
 // - captures numbered by their `(`, `(?:…)`, `(?<name>…)`/`(?P<name>…)`,
 //   `*` `+` `?` `{n}` `{n,}` `{n,m}` (counts up to MAX_REPEAT), each with a
 //   lazy `?` form, `.`, `^`, `$` and `\z` (end of text), `\A`, `\b`/`\B`
@@ -69,6 +72,8 @@ struct RegexFlags {
 
 /// A compiled program: one row per instruction in `ops`/`args`/`ends`/
 /// `negs`/`xs`/`ys`, and one row per class member in `kinds`/`los`/`his`.
+/// `needle`, `prefix` and `dfa` are search accelerators derived from the
+/// program; they never change which match is reported.
 struct Regex {
     pattern: String
     flags: RegexFlags
@@ -85,6 +90,9 @@ struct Regex {
     priv anchored_start: Bool
     priv groups: Int
     priv names: [String]
+    priv needle: [U8]
+    priv prefix: [U8]
+    priv dfa: Dfa
 }
 
 /// `start` and `end` are character (Unicode scalar) positions in the text.
@@ -187,7 +195,11 @@ fn escape(text: String) -> String Never! {
 
 fn compile(pattern: String) -> Regex RegexError! { compile_with(pattern, flags(false, false, false)) }
 
-fn compile_with(pattern: String, flags: RegexFlags) -> Regex RegexError! {
+fn compile_with(pattern: String, flags: RegexFlags) -> Regex RegexError! { compile_program(pattern, flags, true) }
+
+/// `with_dfa` is false for a pattern used once, where building the DFA would
+/// cost more than the one scan it could speed up.
+fn compile_program(pattern: String, flags: RegexFlags, with_dfa: Bool) -> Regex RegexError! {
     p := PatternParser{
     cps: decode_all(pattern.bytes()),
     i: 0,
@@ -202,6 +214,9 @@ fn compile_with(pattern: String, flags: RegexFlags) -> Regex RegexError! {
     }
     root :: &p.parse_alt(-1)
     if p.i != p.cps.len() -> return Err(fail(p.i, "this `)` has no matching `(`"))
+    // Case folding lets other scalars stand for a literal, so the literal
+    // pre-checks only run on case-sensitive patterns.
+    facts :: if flags.ignore_case -> no_facts() else -> literal_facts(p.nodes, p.kids, root)
     c := Compiler{
     nodes: p.nodes,
     kids: p.kids,
@@ -220,7 +235,7 @@ fn compile_with(pattern: String, flags: RegexFlags) -> Regex RegexError! {
     first :: frag.start
     // Only an absolute start anchor pins every match to position 0.
     anchored :: c.ops[first] == OP_ASSERT && (c.args[first] == A_TEXT_START || (c.args[first] == A_LINE_START && !flags.multiline))
-    Ok(Regex{
+    re := Regex{
     pattern: pattern,
     flags: flags,
     ops: c.ops,
@@ -236,15 +251,23 @@ fn compile_with(pattern: String, flags: RegexFlags) -> Regex RegexError! {
     anchored_start: anchored,
     groups: p.groups,
     names: p.names,
-    })
+    needle: scalars_utf8(facts.best),
+    prefix: scalars_utf8(facts.prefix),
+    dfa: no_dfa(),
+    }
+    if with_dfa -> re.dfa = build_dfa(re)
+    Ok(re)
 }
 
-fn is_match(pattern: Regex, text: String) -> Bool Never! {
-    scan(pattern, text.bytes(), false, false, false, true, 1).len() > 0
-}
+fn is_match(pattern: Regex, text: String) -> Bool Never! { exists(pattern, text.bytes(), false, false) }
 
-fn full_match(pattern: Regex, text: String) -> Bool Never! {
-    scan(pattern, text.bytes(), true, true, false, true, 1).len() > 0
+fn full_match(pattern: Regex, text: String) -> Bool Never! { exists(pattern, text.bytes(), true, true) }
+
+/// Whether any match exists: the DFA answers when it can, else the scan.
+fn exists(re: Regex, text: [U8], anchored: Bool, full: Bool) -> Bool Never! {
+    verdict :: dfa_verdict(re, text, anchored, full)
+    if verdict >= 0 -> return verdict == 1
+    scan(re, text, anchored, full, false, true, 1).len() > 0
 }
 
 fn match(pattern: Regex, text: String) -> Match? Never! { find_match(pattern, text) }
@@ -268,12 +291,12 @@ fn find(pattern: Regex, text: String) -> String? Never! {
 // `is_match`/`find`; a pattern that does not compile fails with compile's
 // RegexError.
 fn __string_matches(text: String, pattern: String) -> Bool RegexError! {
-    compiled :: compile(pattern)
+    compiled :: compile_program(pattern, flags(false, false, false), false)
     is_match(compiled, text)
 }
 
 fn __string_match(text: String, pattern: String) -> String? RegexError! {
-    compiled :: compile(pattern)
+    compiled :: compile_program(pattern, flags(false, false, false), false)
     find(compiled, text)
 }
 
@@ -1046,6 +1069,367 @@ impl Compiler {
     }
 }
 
+// Literal pre-checks. Over the parse tree, `literal_facts` finds scalars
+// every match contains (`best`, the longest such run) and scalars every
+// match starts with (`prefix`); `exact` marks a node that always consumes
+// exactly `text`. Assertions consume nothing, so they are exact and empty.
+// The scan looks for `needle` (the UTF-8 of `best`) once before it builds
+// its VM, and while no thread is live it jumps to the next `prefix`.
+struct LitFacts {
+    exact: Bool
+    text: [Int]
+    prefix: [Int]
+    best: [Int]
+}
+
+fn no_facts() -> LitFacts Never! { LitFacts{exact: false, text: [Int]{}, prefix: [Int]{}, best: [Int]{}} }
+
+fn exact_facts(text: [Int]) -> LitFacts Never! { LitFacts{exact: true, text: text.copy(), prefix: text.copy(), best: text.copy()} }
+
+// Recursion follows group and quantifier nesting, as `Compiler.compile` does.
+fn literal_facts(nodes: [Node], kids: [Int], node: Int) -> LitFacts Never! {
+    n :: nodes[node].copy()
+    if n.kind == N_LIT -> return exact_facts([Int]{n.a})
+    if n.kind == N_EMPTY || n.kind == N_ASSERT -> return exact_facts([Int]{})
+    if n.kind == N_GROUP -> return literal_facts(nodes, kids, n.left)
+    if n.kind == N_PLUS || (n.kind == N_RANGE && n.a > 0) {
+        // At least one copy: its facts hold, but not its exact text.
+        inner :: literal_facts(nodes, kids, n.left)
+        return LitFacts{exact: false, text: [Int]{}, prefix: inner.prefix.copy(), best: inner.best.copy()}
+    }
+    if n.kind == N_SEQ {
+        // `run` holds the exact parts since the last inexact one; the run
+        // and the next part's prefix are contiguous in every match.
+        run := [Int]{}
+        prefix := [Int]{}
+        all_exact := true
+        best := [Int]{}
+        k := n.lo
+        loop k < n.hi {
+            part :: literal_facts(nodes, kids, kids[k])
+            k = k + 1
+            if part.exact {
+                loop c in part.text -> &run.push(c)
+                next
+            }
+            joined := run.copy()
+            loop c in part.prefix -> &joined.push(c)
+            if all_exact {
+                prefix = joined.copy()
+                all_exact = false
+            }
+            if joined.len() > best.len() -> best = joined.copy()
+            if part.best.len() > best.len() -> best = part.best.copy()
+            run = [Int]{}
+        }
+        if all_exact -> return exact_facts(run)
+        if run.len() > best.len() -> best = run.copy()
+        return LitFacts{exact: false, text: [Int]{}, prefix: prefix, best: best}
+    }
+    if n.kind == N_ALT {
+        // Every match starts with the arms' common prefix.
+        common := literal_facts(nodes, kids, kids[n.lo]).prefix.copy()
+        k := n.lo + 1
+        loop k < n.hi {
+            other :: literal_facts(nodes, kids, kids[k])
+            keep := [Int]{}
+            loop keep.len() < common.len() && keep.len() < other.prefix.len() && common[keep.len()] == other.prefix[keep.len()] {
+                &keep.push(common[keep.len()])
+            }
+            common = keep
+            k = k + 1
+        }
+        return LitFacts{exact: false, text: [Int]{}, prefix: common.copy(), best: common.copy()}
+    }
+    // A star, an optional part, `.` or a class may match many ways or none.
+    no_facts()
+}
+
+fn scalars_utf8(cps: [Int]) -> [U8] Never! {
+    out := [U8]{}
+    loop cp in cps {
+        loop b in scalar_text(cp).bytes() -> &out.push(b)
+    }
+    out
+}
+
+/// The first byte offset at or after `from` where `needle` (not empty)
+/// occurs in `text`, or -1: a scan for its first byte, then a compare.
+fn find_bytes(text: [U8], needle: [U8], from: Int) -> Int Never! {
+    n :: needle.len()
+    last :: text.len() - n
+    lead :: needle[0]
+    i := from
+    loop i <= last {
+        if text[i] == lead {
+            k := 1
+            loop k < n && text[i + k] == needle[k] -> k = k + 1
+            if k == n -> return i
+        }
+        i = i + 1
+    }
+    -1
+}
+
+// The DFA. For a program without `\b`/`\B`, compile also builds a DFA over
+// ASCII bytes that answers whether any match exists; is_match, full_match
+// and the scan's first check use it. Existence does not depend on thread
+// priority, so a state is the sorted set of consuming instructions live
+// after a byte, plus whether a search restarts a thread at each position.
+// `match_now` marks a Match reached before the text ends and `match_end`
+// one reached at its end, where `$` also holds. Bytes 0-127 fall into
+// columns that every instruction treats alike. The subset construction runs
+// once at compile time over at most DFA_MAX_STATES states and a work budget
+// of DFA_WORK_PER_OP steps per instruction, so its cost stays proportional
+// to the program; past either, the pattern has no DFA (`width` 0). A text
+// byte above 127 hands the question to the VM, which reads scalars.
+struct Dfa {
+    class: [Int]
+    width: Int
+    next: [Int]
+    match_now: [Bool]
+    match_end: [Bool]
+    dead: [Bool]
+    search: Int
+    pinned: Int
+}
+
+DFA_MAX_STATES :: 256
+DFA_WORK_PER_OP :: 400
+
+fn no_dfa() -> Dfa Never! {
+    Dfa{class: [Int]{}, width: 0, next: [Int]{}, match_now: [Bool]{}, match_end: [Bool]{}, dead: [Bool]{}, search: -1, pinned: -1}
+}
+
+/// The subset construction's working set: state `s` holds the consuming
+/// pcs `pcs[los[s]..<his[s]]`; `buckets` maps a state's hash to its first
+/// state and `chain` links states that share a hash. `seeds`, `out` and
+/// `ends` are scratch rows reused by every closure, and `work` counts
+/// closure steps and comparisons against `budget`.
+struct DfaBuilder {
+    buckets: [Int:Int]
+    chain: [Int]
+    pcs: [Int]
+    los: [Int]
+    his: [Int]
+    restarts: [Bool]
+    match_now: [Bool]
+    match_end: [Bool]
+    mark: [Int]
+    epoch: Int
+    stack: [Int]
+    seeds: [Int]
+    out: [Int]
+    ends: [Int]
+    work: Int
+    budget: Int
+    too_big: Bool
+}
+
+impl DfaBuilder {
+    /// Walks epsilon edges from `stack`, appending consuming pcs to `out`
+    /// and the targets of `$` to `ends` (only `at_end`, which walks them
+    /// too); returns whether a Match was reached.
+    fn walk(&self, re: Regex, text_start: Bool, line_start: Bool, at_end: Bool) -> Bool Never! {
+        matched := false
+        loop {
+            p :: &self.stack.pop() ?? break
+            if self.mark[p] == self.epoch -> next
+            self.mark[p] = self.epoch
+            self.work = self.work + 1
+            op :: re.ops[p]
+            if op == OP_SAVE {
+                &self.stack.push(re.xs[p])
+            } else if op == OP_SPLIT {
+                &self.stack.push(re.ys[p])
+                &self.stack.push(re.xs[p])
+            } else if op == OP_ASSERT {
+                kind :: re.args[p]
+                if kind == A_TEXT_END {
+                    if at_end {
+                        &self.stack.push(re.xs[p])
+                    } else {
+                        &self.ends.push(re.xs[p])
+                    }
+                } else if (kind == A_TEXT_START && text_start) || (kind == A_LINE_START && line_start) {
+                    &self.stack.push(re.xs[p])
+                }
+            } else if op == OP_MATCH {
+                matched = true
+            } else if !at_end {
+                &self.out.push(p)
+            }
+        }
+        matched
+    }
+
+    /// The state whose threads start from `seeds` at one position. The
+    /// threads that also pass a `$` are walked after the others in the same
+    /// epoch: whatever the first walk reached, the end reaches as well.
+    fn state(&self, re: Regex, text_start: Bool, line_start: Bool, restart: Bool) -> Int Never! {
+        if self.work > self.budget {
+            self.too_big = true
+            return 0
+        }
+        self.epoch = self.epoch + 1
+        &self.out.clear()
+        &self.ends.clear()
+        &self.stack.clear()
+        loop s in self.seeds -> &self.stack.push(s)
+        now :: &self.walk(re, text_start, line_start, false)
+        loop s in self.ends -> &self.stack.push(s)
+        later :: &self.walk(re, text_start, line_start, true)
+        end :: now || later
+        &self.out.sort()
+        hash := 1
+        if restart -> hash = 2
+        if now -> hash = hash + 4
+        if end -> hash = hash + 8
+        loop pc in self.out -> hash = (hash * 31 + pc + 1) % 1000000007
+        id := self.buckets.get(hash) ?? -1
+        loop id >= 0 {
+            lo :: self.los[id]
+            n :: self.his[id] - lo
+            if self.restarts[id] == restart && self.match_now[id] == now && self.match_end[id] == end && n == self.out.len() {
+                k := 0
+                loop k < n && self.pcs[lo + k] == self.out[k] -> k = k + 1
+                self.work = self.work + k
+                if k == n -> return id
+            }
+            id = self.chain[id]
+        }
+        fresh :: self.restarts.len()
+        if fresh >= DFA_MAX_STATES || self.work > self.budget {
+            self.too_big = true
+            return 0
+        }
+        &self.chain.push(self.buckets.get(hash) ?? -1)
+        self.buckets[hash] = fresh
+        &self.los.push(self.pcs.len())
+        loop pc in self.out -> &self.pcs.push(pc)
+        &self.his.push(self.pcs.len())
+        &self.restarts.push(restart)
+        &self.match_now.push(now)
+        &self.match_end.push(end)
+        fresh
+    }
+}
+
+fn build_dfa(re: Regex) -> Dfa Never! {
+    budget :: DFA_WORK_PER_OP * re.ops.len()
+    consuming := [Int]{}
+    pc := 0
+    loop pc < re.ops.len() {
+        op :: re.ops[pc]
+        if op == OP_ASSERT && (re.args[pc] == A_WORD || re.args[pc] == A_NOT_WORD) -> return no_dfa()
+        if op == OP_LIT || op == OP_ANY || op == OP_CLASS -> &consuming.push(pc)
+        pc = pc + 1
+    }
+    // Bytes that every consuming instruction takes or refuses alike share a
+    // column: each instruction splits the columns by what it accepts. Under
+    // multiline `\n` gets its own, since `^` holds after it.
+    class := filled(128, 0)
+    width := 1
+    loop at in consuming {
+        split := filled(2 * width, -1)
+        grown := 0
+        byte := 0
+        loop byte < 128 {
+            slot := 2 * class[byte]
+            if consumes(re, at, byte) -> slot = slot + 1
+            if split[slot] < 0 {
+                split[slot] = grown
+                grown = grown + 1
+            }
+            class[byte] = split[slot]
+            byte = byte + 1
+        }
+        width = grown
+    }
+    if re.flags.multiline {
+        class[10] = width
+        width = width + 1
+    }
+    reps := filled(width, -1)
+    byte := 127
+    loop byte >= 0 {
+        reps[class[byte]] = byte
+        byte = byte - 1
+    }
+    builder := DfaBuilder{
+    buckets: [Int:Int]{},
+    chain: [Int]{},
+    pcs: [Int]{},
+    los: [Int]{},
+    his: [Int]{},
+    restarts: [Bool]{},
+    match_now: [Bool]{},
+    match_end: [Bool]{},
+    mark: filled(re.ops.len(), -1),
+    epoch: 0,
+    stack: [Int]{},
+    seeds: [Int]{re.start},
+    out: [Int]{},
+    ends: [Int]{},
+    work: 128 * consuming.len(),
+    budget: budget,
+    too_big: false,
+    }
+    search :: &builder.state(re, true, true, !re.anchored_start)
+    pinned :: &builder.state(re, true, true, false)
+    next := [Int]{}
+    from := 0
+    loop from < builder.restarts.len() && !builder.too_big {
+        restart :: builder.restarts[from]
+        column := 0
+        loop column < width && !builder.too_big {
+            input :: reps[column]
+            &builder.seeds.clear()
+            k := builder.los[from]
+            loop k < builder.his[from] {
+                live :: builder.pcs[k]
+                if consumes(re, live, input) -> &builder.seeds.push(re.xs[live])
+                k = k + 1
+            }
+            builder.work = builder.work + builder.his[from] - builder.los[from]
+            if restart -> &builder.seeds.push(re.start)
+            to :: &builder.state(re, false, re.flags.multiline && input == 10, restart)
+            &next.push(to)
+            column = column + 1
+        }
+        from = from + 1
+    }
+    if builder.too_big -> return no_dfa()
+    dead := [Bool]{}
+    s := 0
+    loop s < builder.restarts.len() {
+        &dead.push(builder.los[s] == builder.his[s] && !builder.restarts[s])
+        s = s + 1
+    }
+    Dfa{class: class, width: width, next: next, match_now: builder.match_now, match_end: builder.match_end, dead: dead, search: search, pinned: pinned}
+}
+
+/// 1 when a match exists in `text`, 0 when none does, -1 when the DFA cannot
+/// tell: the pattern has none, or the text has a byte above 127. `anchored`
+/// pins the match to position 0 and `full` to the text's end.
+fn dfa_verdict(re: Regex, text: [U8], anchored: Bool, full: Bool) -> Int Never! {
+    if re.dfa.width == 0 -> return -1
+    state := re.dfa.search
+    if anchored -> state = re.dfa.pinned
+    hi :: text.len()
+    i := 0
+    loop i < hi {
+        if !full && re.dfa.match_now[state] -> return 1
+        if re.dfa.dead[state] -> return 0
+        byte :: Int.from_u8(text[i])
+        if byte >= 128 -> return -1
+        state = re.dfa.next[state * re.dfa.width + re.dfa.class[byte]]
+        i = i + 1
+    }
+    if re.dfa.match_end[state] -> return 1
+    0
+}
+
 /// The scan's working set, allocated once per call and reused at every
 /// scalar: threads are parallel Int rows in priority order (current threads
 /// first, the next step's appended, then moved down), `seen` marks the pcs
@@ -1251,9 +1635,15 @@ fn next_search_pos(text: [U8], start: Int, end: Int, hi: Int) -> Int Never! {
 /// early, alternation prefers its first arm), and the scan resumes at the
 /// non-overlap boundary. `anchored` starts only at 0; `full` also requires
 /// the match to end at the text's end. Collects at most `limit` runs (all
-/// when `limit` < 0).
+/// when `limit` < 0). Text where the DFA or the needle rules out every
+/// match returns before the VM is built; while no thread is live, the
+/// start skips to the next place the required prefix occurs.
 fn scan(re: Regex, text: [U8], anchored: Bool, full: Bool, capture: Bool, stop_on_match: Bool, limit: Int) -> [Run] Never! {
     out := [Run]{}
+    // `exists` asks the DFA before it falls back to a stop_on_match scan.
+    verdict :: if stop_on_match -> -1 else -> dfa_verdict(re, text, anchored, full)
+    if verdict == 0 -> return out
+    if verdict < 0 && re.needle.len() > 0 && find_bytes(text, re.needle, 0) < 0 -> return out
     hi :: text.len()
     vm := new_vm(re.ops.len(), hi, full)
     pos := 0
@@ -1273,7 +1663,16 @@ fn scan(re: Regex, text: [U8], anchored: Bool, full: Bool, capture: Bool, stop_o
             // With no live thread and no recorded match, no capture record
             // is reachable, so the list restarts empty instead of growing
             // with the text.
-            if vm.nt == 0 -> &vm.drop_captures()
+            if vm.nt == 0 {
+                &vm.drop_captures()
+                // Every match starts with `prefix`, so no start before its
+                // next occurrence can match.
+                if re.prefix.len() > 0 && !single_start {
+                    found :: find_bytes(text, re.prefix, pos)
+                    if found < 0 -> return out
+                    pos = found
+                }
+            }
             &vm.add(re, text, re.start, pos, -1, pos, capture)
             if vm.m_pc >= 0 {
                 has_last = true
