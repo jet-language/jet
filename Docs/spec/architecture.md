@@ -1655,12 +1655,15 @@ not advertise speculative features.
 ### Compiler-speed evidence boundary (#666)
 
 Compiler-speed evidence stays on the production compiler path. The differential
-gate sends the same checked example to optimized AOT and the default `jet run`
-(O0 image run from memory, D-EXEC2=A) and to the forced evaluator, then compares exit
-status, stdout, and stderr; a refusal, newly broken AOT oracle, missing record,
-or divergent result remains visible as a failure. Named-job parity uses the
-same checked program-argument slice for `jet run`, `jet dev`, and interpreter
-execution; an unknown job remains an E1294 failure.
+gate (the golden suite, Tools/testkit/Golden.jet) runs the same checked example
+at three tiers: o0 is the default `jet run` (O0 image run from memory,
+D-EXEC2=A), o1 is the `jet build` executable, and o2 is the
+`jet build --release` executable. It compares each tier's exit status, stdout
+and stderr with one expected record. A refusal, a newly broken AOT oracle, a
+missing record or a divergent result stays visible as a failure. No evaluator
+tier exists: JetEval runs only native O0 compile-time code. Named-job parity
+gives `jet run` and `jet dev` the same checked program-argument slice, and an
+unknown job stays an E1294 failure.
 
 The timing path uses `PhaseTiming` and the typed `CompilerProbe` provider. A
 checked corpus pins source and expected-output digests. A measurement records
@@ -1672,11 +1675,12 @@ edit runs are distinct. Partial timing, changed inputs, incompatible
 identities, nondeterminism, pathological inputs, and unstable samples are
 unavailable/failure; they cannot be made green by changing the workload or
 hiding cold-cache work. The checked-corpus report is schema version 4 and emits
-six rows for each active corpus row: `jit-clean`, `jit-no-change`,
-`jit-representative-edit`, `aot-release-clean`, `aot-release-no-change`, and
-`aot-release-representative-edit`. The `jit-*` rows measure `jet run`, which
-compiles at O0 and runs the image from memory (D-EXEC2); their names
-predate the Cranelift retirement. The current corpus has five active rows, so
+six rows for each active corpus row: `run-clean`, `run-no-change`,
+`run-representative-edit`, `aot-release-clean`, `aot-release-no-change`, and
+`aot-release-representative-edit`. The `run-*` rows (stage `run-o0`, backend
+`native-o0`) measure `jet run`, which compiles at O0 and runs the image from
+memory (D-EXEC2). The `aot-release-*` rows (backend `native-release`) measure
+`jet build --profile=release`. The current corpus has five active rows, so
 the matrix has 30 rows. Each row uses one warmup and twenty measured samples.
 Its top-level receipt records verified semantic, diagnostic, effect, and tier
 parity. Its pinned baseline allows at most 15% latency or peak-RSS regression,

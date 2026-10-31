@@ -54,7 +54,7 @@ manifest_identity=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 toolchain_identity=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
 [ "$mode" = toolchain ] && toolchain_identity=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 [ "$mode" = outliers ] && {
-    echo "bimodal compiler-speed benchmark: fixture.jet/jit-clean outliers=6 of 20 budget=5" >&2
+    echo "bimodal compiler-speed benchmark: fixture.jet/run-clean outliers=6 of 20 budget=5" >&2
     exit 1
 }
 
@@ -76,10 +76,10 @@ if [ "$mode" = row-format ]; then
 else
     printf "program\\tstate\\tstage\\tlatency_ns\\tmemory_bytes\\tvariance_pct\\toutput_sha256:stderr_sha256\\tphases\\n"
 fi
-for state in jit-clean jit-no-change jit-representative-edit aot-release-clean aot-release-no-change aot-release-representative-edit; do
+for state in run-clean run-no-change run-representative-edit aot-release-clean aot-release-no-change aot-release-representative-edit; do
     case "$state" in
-        jit-*) stage=jit-fast; profile=fast; backend=cranelift; linker=none; linker_identity=none; cache_state=Clean; cache_policy=fresh-cache-per-sample ;;
-        *) stage=aot-release; profile=release; backend=rustc-llvm; linker=ld; linker_identity=7777777777777777777777777777777777777777777777777777777777777777; cache_state=Clean; cache_policy=fresh-cache-per-sample ;;
+        run-*) stage=run-o0; profile=fast; backend=native-o0; linker=none; linker_identity=none; cache_state=Clean; cache_policy=fresh-cache-per-sample ;;
+        *) stage=aot-release; profile=release; backend=native-release; linker=ld; linker_identity=7777777777777777777777777777777777777777777777777777777777777777; cache_state=Clean; cache_policy=fresh-cache-per-sample ;;
     esac
     case "$state" in
         *no-change) cache_state=NoChange; cache_policy=shared-cache-after-warmup ;;
@@ -95,7 +95,7 @@ done
 if [ "$mode" != peer-missing ]; then
     printf "%s\\n" "compiler-speed-peer version=1 run_id=fixture-run corpus_sha256=$corpus_identity manifest_sha256=$manifest_identity target=target machine=Linux/x86_64/cpus=2/host=$machine_identity peers=$peer_keys metrics=latency_ns,memory_bytes contract_sha256=$peer_contract peer_count=2 rows=24"
     printf "peer\\tlanguage\\tprogram\\tstate\\tmetric\\tvalue\\tworkload_sha256\\tsource_sha256\\texpected_sha256\\tmanifest_sha256\\ttoolchain_sha256\\n"
-    for state in jit-clean jit-no-change jit-representative-edit aot-release-clean aot-release-no-change aot-release-representative-edit; do
+    for state in run-clean run-no-change run-representative-edit aot-release-clean aot-release-no-change aot-release-representative-edit; do
         for peer_decl in rustc:rust cxx:cxx; do
             peer=${peer_decl%%:*}
             language=${peer_decl#*:}
@@ -120,8 +120,8 @@ chmod +x "$fixture_dashboard"
 phase_for_state() {
     state=$1
     case "$state" in
-        jit-*) stage=jit-fast; profile=fast; backend=cranelift; linker=none; linker_identity=none; cache_state=Clean; cache_policy=fresh-cache-per-sample ;;
-        *) stage=aot-release; profile=release; backend=rustc-llvm; linker=ld; linker_identity=7777777777777777777777777777777777777777777777777777777777777777; cache_state=Clean; cache_policy=fresh-cache-per-sample ;;
+        run-*) stage=run-o0; profile=fast; backend=native-o0; linker=none; linker_identity=none; cache_state=Clean; cache_policy=fresh-cache-per-sample ;;
+        *) stage=aot-release; profile=release; backend=native-release; linker=ld; linker_identity=7777777777777777777777777777777777777777777777777777777777777777; cache_state=Clean; cache_policy=fresh-cache-per-sample ;;
     esac
     case "$state" in
         *no-change) cache_state=NoChange; cache_policy=shared-cache-after-warmup ;;
@@ -137,9 +137,9 @@ write_baseline() {
     [ "${2:-present}" = missing ] && compiler_identity=
     runs=
     peers=
-    for state in jit-clean jit-no-change jit-representative-edit aot-release-clean aot-release-no-change aot-release-representative-edit; do
+    for state in run-clean run-no-change run-representative-edit aot-release-clean aot-release-no-change aot-release-representative-edit; do
         case "$state" in
-            jit-*) stage=jit-fast ;;
+            run-*) stage=run-o0 ;;
             *) stage=aot-release ;;
         esac
         phase=$(phase_for_state "$state")
@@ -256,7 +256,7 @@ assert_checker_source 'current report has no unique compiler-speed peer contract
 assert_checker_source 'compiler-speed peer loss'
 assert_checker_source 'current_peer_keys'
 assert_dashboard_source "printf '%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s:%s\\tphases=%s\\n'"
-assert_dashboard_source 'parity_run_dev_case "edit-$(safe_id "$parity_edit")" "$parity_edit" "$parity_edit_expected" "$parity_program-jit-representative-edit"'
+assert_dashboard_source 'parity_run_dev_case "edit-$(safe_id "$parity_edit")" "$parity_edit" "$parity_edit_expected" "$parity_program-run-representative-edit"'
 assert_dashboard_source 'job_argument_for_program()'
 assert_dashboard_source 'Examples/features/devloop/job_runner.jet|Tools/perf/edits/job_runner.jet'
 assert_dashboard_source '"$JET_BIN" run run.jet -- seed_data'
@@ -427,7 +427,7 @@ expect_status 1 'missing identity' 'baseline has incomplete corpus/stage/machine
 
 write_baseline 4
 fixture_mode=variance
-expect_status 1 'excessive IQR' 'UNSTABLE fixture.jet/jit-clean interquartile spread=101% budget=100%'
+expect_status 1 'excessive IQR' 'UNSTABLE fixture.jet/run-clean interquartile spread=101% budget=100%'
 
 fixture_mode=outliers
 expect_status 1 'excessive Tukey outliers' 'bimodal compiler-speed benchmark'

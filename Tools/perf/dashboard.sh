@@ -2,7 +2,7 @@
 # Compiler-speed corpus dashboard.
 #
 # One checked corpus, six production rows per program:
-#   jit-clean, jit-no-change, jit-representative-edit,
+#   run-clean, run-no-change, run-representative-edit,
 #   aot-release-clean, aot-release-no-change, aot-release-representative-edit.
 # Every row records process CPU latency, peak compiler RSS, deterministic
 # output, CPU-time variance, and the phase report emitted by that production
@@ -1227,7 +1227,7 @@ check_cache_state() {
     cache_state=$2
     cache_kind=$3
     cache_stage=$4
-    if [ "$cache_stage" = "jit-fast" ]; then
+    if [ "$cache_stage" = "run-o0" ]; then
         cache_hits=$TRIAL_CACHE_HIT
     else
         cache_hits=$TRIAL_CACHE_HITS
@@ -1512,9 +1512,9 @@ run_parity_checks() {
         case "$parity_program" in
             ""|\#*) continue ;;
         esac
-        parity_run_dev_case "corpus-$(safe_id "$parity_program")" "$parity_program" "$parity_expected" "$parity_program-jit-clean"
+        parity_run_dev_case "corpus-$(safe_id "$parity_program")" "$parity_program" "$parity_expected" "$parity_program-run-clean"
         # Edit receipts use the base corpus program as their state key.
-        parity_run_dev_case "edit-$(safe_id "$parity_edit")" "$parity_edit" "$parity_edit_expected" "$parity_program-jit-representative-edit"
+        parity_run_dev_case "edit-$(safe_id "$parity_edit")" "$parity_edit" "$parity_edit_expected" "$parity_program-run-representative-edit"
     done < "$CORPUS"
     parity_check_job_runner
     parity_run_case trait-object Examples/features/types/traits.jet Examples/features/expected/types/traits.out
@@ -1572,7 +1572,7 @@ measure_state() {
         state_work="$state_root/warmup"
         state_cache="$state_work/cache"
         prepare_fixture "$state_work" "$state_program" "$state_expected"
-        if [ "$state_stage" = "jit-fast" ]; then
+        if [ "$state_stage" = "run-o0" ]; then
             run_jit_trial "$state_work" "$state_cache" "$state_root/warmup" "$state_root/warmup.stats" "$state_phases" "$state_program"
         else
             run_aot_trial "$state_work" "$state_cache" "$state_root/warmup" "$state_root/warmup.stats" "$state_phases" "$state_program"
@@ -1581,7 +1581,7 @@ measure_state() {
         state_work="$state_root/seeded"
         state_cache="$state_work/cache"
         prepare_fixture "$state_work" "$state_program" "$state_expected"
-        if [ "$state_stage" = "jit-fast" ]; then
+        if [ "$state_stage" = "run-o0" ]; then
             run_jit_trial "$state_work" "$state_cache" "$state_root/warmup" "$state_root/warmup.stats" "$state_phases" "$state_program"
         else
             run_aot_trial "$state_work" "$state_cache" "$state_root/warmup" "$state_root/warmup.stats" "$state_phases" "$state_program"
@@ -1610,7 +1610,7 @@ measure_state() {
         fi
         sample_output="$state_root/sample-$sample_index"
         sample_stats="$state_root/sample-$sample_index.stats"
-        if [ "$state_stage" = "jit-fast" ]; then
+        if [ "$state_stage" = "run-o0" ]; then
             run_jit_trial "$sample_work" "$sample_cache" "$sample_output" "$sample_stats" "$state_phases" "$state_program"
         else
             run_aot_trial "$sample_work" "$sample_cache" "$sample_output" "$sample_stats" "$state_phases" "$state_program"
@@ -1648,8 +1648,8 @@ measure_state() {
     validate_sample_file "$state_memory"
     state_memory_max=$(sort -n "$state_memory" | tail -n1)
     OUTLIER_TOTAL=$((OUTLIER_TOTAL + state_outliers))
-    if [ "$state_stage" = "jit-fast" ]; then
-        state_backend="cranelift"
+    if [ "$state_stage" = "run-o0" ]; then
+        state_backend="native-o0"
         state_linker="none"
         state_linker_path="none"
         state_linker_sha256="none"
@@ -1660,7 +1660,7 @@ measure_state() {
         state_artifact_bytes=0
         state_phase_text="check_us=$(phase_average "$state_phases" check_us);compile_us=$(phase_average "$state_phases" compile_us);link_us=$(phase_average "$state_phases" link_us);frontend_us=$(phase_average "$state_phases" frontend);jit_us=$(phase_average "$state_phases" jit);jit_cache_hit=$(phase_average "$state_phases" jit_cache_hit)"
     else
-        state_backend="rustc-llvm"
+        state_backend="native-release"
         state_linker="$TRIAL_LINKER"
         state_linker_path="$TRIAL_LINKER_PATH"
         state_linker_sha256="$TRIAL_LINKER_SHA256"
@@ -1985,14 +1985,14 @@ while IFS="$TAB" read -r program expected source_hash expected_hash edit_program
     case "$program" in
         ""|\#*) continue ;;
     esac
-    measure_state "$program" "$expected" "$edit_program" "$edit_expected" "jit-clean" "jit-fast" "clean"
-    measure_state "$program" "$expected" "$edit_program" "$edit_expected" "jit-no-change" "jit-fast" "no-change"
-    measure_state "$program" "$expected" "$edit_program" "$edit_expected" "jit-representative-edit" "jit-fast" "edit"
+    measure_state "$program" "$expected" "$edit_program" "$edit_expected" "run-clean" "run-o0" "clean"
+    measure_state "$program" "$expected" "$edit_program" "$edit_expected" "run-no-change" "run-o0" "no-change"
+    measure_state "$program" "$expected" "$edit_program" "$edit_expected" "run-representative-edit" "run-o0" "edit"
     measure_state "$program" "$expected" "$edit_program" "$edit_expected" "aot-release-clean" "aot-release" "clean"
     measure_state "$program" "$expected" "$edit_program" "$edit_expected" "aot-release-no-change" "aot-release" "no-change"
     measure_state "$program" "$expected" "$edit_program" "$edit_expected" "aot-release-representative-edit" "aot-release" "edit"
-    jit_clean_latency=$(row_field "$program" "jit-clean" 4)
-    jit_no_change_latency=$(row_field "$program" "jit-no-change" 4)
+    jit_clean_latency=$(row_field "$program" "run-clean" 4)
+    jit_no_change_latency=$(row_field "$program" "run-no-change" 4)
     aot_clean_latency=$(row_field "$program" "aot-release-clean" 4)
     aot_no_change_latency=$(row_field "$program" "aot-release-no-change" 4)
     if [ "$jit_no_change_latency" -gt "$jit_clean_latency" ]; then
@@ -2004,7 +2004,7 @@ while IFS="$TAB" read -r program expected source_hash expected_hash edit_program
         exit 1
     fi
     for scenario in clean no-change representative-edit; do
-        jit_state="jit-$scenario"
+        jit_state="run-$scenario"
         aot_state="aot-release-$scenario"
         jit_output_id="$(safe_id "$program-$jit_state")"
         aot_output_id="$(safe_id "$program-$aot_state")"
