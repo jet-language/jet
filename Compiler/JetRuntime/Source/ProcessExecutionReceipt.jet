@@ -110,10 +110,12 @@ fn process_execution_policy_digest(spec: I64) -> I64 {
     }
     process_execution_sort_unique(envkeys)
     names :: process_execution_join(envkeys)
+    rights :: process_authority_digest_rights(spec)
     text :: jet_rt_string_builder_new()
     jet_rt_string_builder_push(text, rt_static_text("jet-process-policy-v1\n"))
-    process_execution_material_field(text, rt_static_text("authority.rights"), rt_static_text(""))
-    process_execution_material_field(text, rt_static_text("network"), rt_static_text("deny"))
+    process_execution_material_field(text, rt_static_text("authority.rights"), rights)
+    process_execution_material_field(text, rt_static_text("network"), if process_authority_network(spec) -> rt_static_text("allow") else -> rt_static_text("deny"))
+    jet_rt_string_drop(rights)
     process_execution_material_field(text, rt_static_text("home"), rt_static_text("deny"))
     process_execution_material_field(text, rt_static_text("secrets"), rt_static_text("deny"))
     process_execution_material_field(text, rt_static_text("devices"), rt_static_text("deny"))
@@ -165,8 +167,10 @@ fn process_execution_limits(spec: I64) -> I64 {
     process_text_list_drop(keys, false)
     list
 }
+// Policy secret values first, then secret-named environment values.
 fn process_execution_secrets(spec: I64) -> I64 {
     secrets :: data_sequence_new(I64{0}, I64{8})
+    process_authority_secret_values(spec, secrets)
     sets :: fd_word(spec, PROCESS_SPEC_ENV_SET)
     at := I64{0}
     loop at < fd_word(sets, I64{0}) {
@@ -214,18 +218,10 @@ fn process_execution_redact(text: I64, secrets: I64) -> I64 {
     }
     result
 }
-fn process_execution_identity(spec: I64) -> I64 {
-    // Receipt resolution is best-effort and never turns successful execution
-    // into a Resolve failure. Snapshot PATH is independent of child overrides.
-    blank :: jet_std_process_cmd(I64{0}, I64{0})
+// The canonical path of the first regular file among `candidates`, or 0.
+fn process_execution_first_file(candidates: I64) -> I64 {
     scratch :: jet_rt_alloc(I64{176}, I64{8})
-    env :: process_execution_environment(blank, wrapping(scratch + I64{128}))
-    jet_rt_handle_drop_process_spec(blank)
-    command :: process_execution_first(spec)
-    direct :: process_execution_has(command, I64{47}) || process_execution_has(command, I64{92})
-    candidates :: if (direct || process_execution_env_get(env, rt_static_text("PATH")) == I64{0}) -> data_sequence_new(I64{0}, I64{8}) else -> process_execution_candidates(command, env)
-    if direct -> process_text_list_push(candidates, command)
-    process_text_list_drop(env, true)
+
     found := I64{0}
     at := I64{0}
     loop at < fd_word(candidates, I64{0}) {
@@ -244,6 +240,22 @@ fn process_execution_identity(spec: I64) -> I64 {
         at += I64{1}
     }
     jet_rt_free(scratch, I64{176}, I64{8})
+    found
+}
+fn process_execution_identity(spec: I64) -> I64 {
+    // Receipt resolution is best-effort and never turns successful execution
+    // into a Resolve failure. Snapshot PATH is independent of child overrides.
+    blank :: jet_std_process_cmd(I64{0}, I64{0})
+    scratch :: jet_rt_alloc(I64{24}, I64{8})
+    env :: process_execution_environment(blank, scratch)
+    jet_rt_free(scratch, I64{24}, I64{8})
+    jet_rt_handle_drop_process_spec(blank)
+    command :: process_execution_first(spec)
+    direct :: process_execution_has(command, I64{47}) || process_execution_has(command, I64{92})
+    candidates :: if (direct || process_execution_env_get(env, rt_static_text("PATH")) == I64{0}) -> data_sequence_new(I64{0}, I64{8}) else -> process_execution_candidates(command, env)
+    if direct -> process_text_list_push(candidates, command)
+    process_text_list_drop(env, true)
+    found :: process_execution_first_file(candidates)
     process_text_list_drop(candidates, false)
     if (found == I64{0}) -> jet_rt_string_clone(process_execution_first(spec)) else -> found
 }
@@ -260,10 +272,11 @@ fn process_execution_receipt(child: I64, status: I64) -> I64 {
     process_text_list_drop(secrets, false)
     receipt
 }
-// Process.rs:451-532 jet_process_receipt without a launch plan. `output` and
-// `errors` are borrowed raw texts; `secrets` (borrowed) redacts them and sets
-// `redacted`, while argv redacts with the spec's own environment secrets.
-// signal 0 is Absent.
+// Process.rs:451-532 jet_process_receipt. `output` and `errors` are borrowed
+// raw texts; `secrets` (borrowed) redacts them, while argv and the authority
+// redact with the spec's own policy and environment secrets. An
+// authority-bound receipt names the backend that ran it and is always
+// redacted. signal 0 is Absent.
 fn process_receipt_build(spec: I64, pid: I64, code: I64, success: Bool, signal: I64, timed_out: Bool, output: I64, errors: I64, secrets: I64) -> I64 {
     receipt :: jet_rt_alloc(I64{144}, I64{8})
     coll_zero(receipt, I64{144})
@@ -284,22 +297,17 @@ fn process_receipt_build(spec: I64, pid: I64, code: I64, success: Bool, signal: 
         jet_rt_string_drop(word)
         at += I64{1}
     }
+    authority :: process_authority_receipt_rights(spec, own_secrets)
     process_text_list_drop(own_secrets, false)
     fd_put(receipt, I64{56}, argv)
     fd_put(receipt, I64{64}, process_execution_input_digest(spec))
     fd_put(receipt, I64{72}, process_execution_policy_digest(spec))
-    fd_put(receipt, I64{80}, jet_rt_string_clone(rt_static_text("ambient")))
-    fd_put(receipt, I64{88}, data_sequence_new(I64{0}, I64{8}))
-    fd_put(receipt, I64{96}, jet_rt_string_clone(if (fd_word(spec, PROCESS_SPEC_DETACHED).bit_and(I64{255}) != I64{0}) -> rt_static_text("detached") else -> rt_static_text("contained")))
+    bound :: process_authority_bound(spec)
+    fd_put(receipt, I64{80}, jet_rt_string_clone(if bound -> process_authority_backend_name() else -> rt_static_text("ambient")))
+    fd_put(receipt, I64{88}, authority)
+    fd_put(receipt, I64{96}, jet_rt_string_clone(if process_authority_detached(spec) -> rt_static_text("detached") else -> rt_static_text("contained")))
     fd_put(receipt, I64{104}, process_execution_limits(spec))
-    outputs :: data_sequence_new(I64{3}, I64{8})
-    detached :: fd_word(spec, PROCESS_SPEC_DETACHED).bit_and(I64{255}) != I64{0}
-    a :: scheduler_text_concat(rt_static_text("stdout="), if detached -> rt_static_text("discarded") else -> process_execution_mode(fd_word(spec, PROCESS_SPEC_STDOUT)))
-    b :: scheduler_text_concat(rt_static_text("stderr="), if detached -> rt_static_text("discarded") else -> process_execution_mode(fd_word(spec, PROCESS_SPEC_STDERR)))
-    process_text_list_push(outputs, a)
-    process_text_list_push(outputs, b)
-    jet_rt_string_drop(a)
-    jet_rt_string_drop(b)
+    outputs :: process_authority_outputs(spec)
     captured :: jet_rt_string_builder_new()
     jet_rt_string_builder_push(captured, rt_static_text("captured-bytes="))
     rt_text_push_number(captured, rt_text_len(output) + rt_text_len(errors))
@@ -307,7 +315,7 @@ fn process_receipt_build(spec: I64, pid: I64, code: I64, success: Bool, signal: 
     process_text_list_push(outputs, entry)
     jet_rt_string_drop(entry)
     fd_put(receipt, I64{112}, outputs)
-    fd_put(receipt, I64{120}, if (fd_word(secrets, I64{0}) != I64{0}) -> { I64{1} } else -> { I64{0} })
+    fd_put(receipt, I64{120}, if (bound || fd_word(secrets, I64{0}) != I64{0}) -> { I64{1} } else -> { I64{0} })
     fd_put(receipt, I64{128}, jet_int_owned_from_i64(pid))
     fd_put(receipt, I64{136}, if timed_out -> { process_raw_box(PROCESS_RESOURCE_WALL_TIME) } else -> { I64{0} })
     receipt

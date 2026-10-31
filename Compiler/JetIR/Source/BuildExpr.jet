@@ -362,12 +362,23 @@ fn ir_stmts_leave(p: IRProgram, b: IRBuilder, body: [Int]) -> Bool Never! {
 
 fn ir_stmt(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never! {
     mark :: b.statement_guards.len()
+    depth :: b.statement_depth
+    b.statement_depth = b.f.open.len()
     ir_stmt_body(&m, p, &b, statement)
+    b.statement_depth = depth
+    ir_release_statement_guards(&m, &b, mark)
+}
+
+// Ends the guards and temporaries taken since `mark`, latest first: at the
+// end of a statement, or of an arm of a valued `if`, whose value is stored.
+// A temporary that closes closes before its drop.
+fn ir_release_statement_guards(m: &IRModule, b: &IRBuilder, mark: Int) Never! {
     loop b.statement_guards.len() > mark {
-        held :: &b.statement_guards.pop() ?? -1
-        if held >= 0 && !ir_failed(b) {
-            b.fresh[held] = true
-            ir_release(&m, &b, held)
+        guard :: &b.statement_guards.pop() ?? break
+        if !ir_failed(b) {
+            if guard.glue >= 0 -> ir_close_call(&b, guard.glue, guard.slot)
+            b.fresh[guard.slot] = true
+            ir_release(&m, &b, guard.slot)
         }
     }
 }
@@ -556,7 +567,7 @@ fn ir_stmt_body(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never
         .Loop(label, body, _) -> {
             exit :: ir_open(&b.f, IROp.Block, b.line)
             top :: ir_open(&b.f, IROp.Loop, b.line)
-            &b.loops.push(IRLoopFrame{label: label, exit: exit, next: top, mark: b.bindings.len()})
+            &b.loops.push(IRLoopFrame{label: label, exit: exit, next: top, mark: b.bindings.len(), guards: b.statement_guards.len()})
             ir_stmts(&m, p, &b, body)
             _ :: &b.loops.pop()
             ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
@@ -569,7 +580,7 @@ fn ir_stmt_body(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never
             test :: ir_expr(&m, p, &b, condition)
             if ir_failed(b) -> return
             ir_exit_unless(&m, &b, test, exit)
-            &b.loops.push(IRLoopFrame{label: label, exit: exit, next: top, mark: b.bindings.len()})
+            &b.loops.push(IRLoopFrame{label: label, exit: exit, next: top, mark: b.bindings.len(), guards: b.statement_guards.len()})
             ir_stmts(&m, p, &b, body)
             _ :: &b.loops.pop()
             ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
@@ -584,6 +595,7 @@ fn ir_stmt_body(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never
         .Break(label, span) -> {
             frame :: ir_loop_frame(b, label) ?? return ir_fail(&b, span, "break outside a loop")
             ir_tx_unwind_loop(&m, p, &b, frame.exit, span)
+            ir_exit_statement_guards(&b, frame.guards)
             ir_drop_bindings(&m, &b, frame.mark)
             depth :: ir_depth(b.f, frame.exit)
             ir_emit(&b.f, IROp.Br, -1, depth, -1, -1, b.line)
@@ -591,6 +603,7 @@ fn ir_stmt_body(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never
         .Continue(label, span) -> {
             frame :: ir_loop_frame(b, label) ?? return ir_fail(&b, span, "next outside a loop")
             ir_tx_unwind_loop(&m, p, &b, frame.exit, span)
+            ir_exit_statement_guards(&b, frame.guards)
             ir_drop_bindings(&m, &b, frame.mark)
             depth :: ir_depth(b.f, frame.next)
             ir_emit(&b.f, IROp.Br, -1, depth, -1, -1, b.line)
@@ -614,7 +627,7 @@ fn ir_stmt_body(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never
             if ir_failed(b) -> return
             ir_exit_unless(&m, &b, test, exit)
             step_block :: ir_open(&b.f, IROp.Block, b.line)
-            &b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len()})
+            &b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len(), guards: b.statement_guards.len()})
             ir_stmts(&m, p, &b, body)
             _ :: &b.loops.pop()
             ir_end(&b.f, b.line)
@@ -634,6 +647,7 @@ fn ir_stmt_body(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never
             if ir_failed(b) -> return
             if slot >= 0 -> ir_store(&m, p, &b, frame.value, slot)
             ir_tx_unwind_loop(&m, p, &b, frame.exit, span)
+            ir_exit_statement_guards(&b, frame.guards)
             ir_drop_bindings(&m, &b, frame.mark)
             depth :: ir_depth(b.f, frame.exit)
             ir_emit(&b.f, IROp.Br, -1, depth, -1, -1, b.line)
@@ -756,6 +770,8 @@ fn ir_bind_local(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, value
     ty :: b.f.slot_type[value]
     slot :: ir_new_slot(&b, ty, IRSlotKind.Local, ir_intern_name(&m, local.name))
     ir_store(&m, p, &b, slot, value)
+    // A `::` variable bound to a lent value only borrows it.
+    if !local.mutable && ir_lent(b, value) -> b.lent[slot] = true
     symbol :: if local.symbol_id == .Val(id) -> id.key else -> ""
     &b.bindings.push(IRBinding{name: local.name, slot: slot, owned: ir_has_drop(m, b, slot), symbol: symbol})
     if b.cells.contains(local.name) && ir_kind_of(m, b, slot) != .Aggregate {
@@ -1261,7 +1277,7 @@ fn ir_range_loop(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, loca
     }
     ir_exit_unless(&m, &b, test, exit)
     step_block :: ir_open(&b.f, IROp.Block, b.line)
-    &b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len()})
+    &b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len(), guards: b.statement_guards.len()})
     if vectorization == .Val(facts) {
         proof :: b.f.loop_proofs.len()
         line :: ir_source_line_of(p, b.f.source_file, span.start) ?? b.line
@@ -1316,7 +1332,7 @@ fn ir_range_value_loop(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?
     more :: ir_bool_op(&m, &b, IROp.Lt, counter, bound)
     ir_exit_unless(&m, &b, more, exit)
     step_block :: ir_open(&b.f, IROp.Block, b.line)
-    &b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len()})
+    &b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len(), guards: b.statement_guards.len()})
     ir_stmts(&m, p, &b, body)
     _ :: &b.loops.pop()
     ir_end(&b.f, b.line)
@@ -2011,8 +2027,13 @@ fn ir_drop_value(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, span: Sp
         if !ir_has_drop(m, b, binding.slot) && binding.indirect < 0 -> return -1
         if !binding.owned && binding.indirect < 0 && ir_payload_binding(m, b, binding.carrier) {
             // The carrier box drops a payload it holds with its last owner;
-            // one only a reader drops (a handle) moves out and ends here.
-            if !ir_glue_drops(m, b.f.slot_type[binding.slot]) -> ir_emit(&b.f, IROp.Drop, -1, binding.slot, -1, -1, b.line)
+            // one only a reader drops (a handle) moves out and ends here, so
+            // a closing variable holding the carrier (ir_close_note) no
+            // longer ends it.
+            if !ir_glue_drops(m, b.f.slot_type[binding.slot]) {
+                ir_close_disarm(&b, binding.slot)
+                ir_emit(&b.f, IROp.Drop, -1, binding.slot, -1, -1, b.line)
+            }
             return -1
         }
         if !binding.owned || binding.indirect >= 0 -> return ir_fail_slot(&b, span, "drop of {local.name}, which the function does not own")
@@ -2130,7 +2151,7 @@ fn ir_handle_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     if operation == .PluginInvoke(export_name, signature) -> return ir_plugin_invoke(&m, p, &b, ty, receiver, export_name, signature, args, span)
     dedicated :: if operation == {
         .Hardware(_) | .MathMethod(_, _) -> true
-        .HTTPClientMethod(_, _) | .HTTPRouterRegister(_, _, _, _, _, _) | .HTTPServerMethod(_, _) -> true
+        .HTTPClientMethod(_, _) | .HTTPRouterRegister(_, _, _, _, _, _) -> true
         .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .DynDecode(_) -> true
         // ir_dyn_method lowered key lookups, indexing, keys, path writes,
         // remove, decode, the operators and the scalar, Field and At reads on
@@ -2649,17 +2670,21 @@ fn ir_static_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, owner: TS
 }
 
 // The arm of a valued `if`: its statements, then its value into `result`.
+// A guard the value's temporaries take ends with the arm, once its value is
+// stored: the other arm's path never holds it.
 fn ir_branch_value(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int], value: Int, result: Int) Never! {
     ir_scope_open(&b)
     loop statement in body {
         if ir_failed(b) -> break
         ir_stmt(&m, p, &b, statement)
     }
+    guards :: b.statement_guards.len()
     target_row :: if result >= 0 -> b.f.slot_type[result] else -> -1
     value_span :: ir_body_node(p, b, value).span
     slot :: if result >= 0 -> ir_value_as(&m, p, &b, value, target_row, value_span) else -> ir_expr(&m, p, &b, value)
     if !ir_failed(b) && result >= 0 && slot >= 0 -> ir_store(&m, p, &b, result, slot)
     if !ir_failed(b) && result < 0 -> ir_release(&m, &b, slot)
+    ir_release_statement_guards(&m, &b, guards)
     ir_scope_close(&m, &b)
 }
 
@@ -2670,7 +2695,7 @@ fn ir_loop_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, label: Str
     result :: ir_temp(&m, &b, row)
     exit :: ir_open(&b.f, IROp.Block, b.line)
     top :: ir_open(&b.f, IROp.Loop, b.line)
-    &b.loops.push(IRLoopFrame{label: label, exit: exit, next: top, mark: b.bindings.len(), value: result})
+    &b.loops.push(IRLoopFrame{label: label, exit: exit, next: top, mark: b.bindings.len(), guards: b.statement_guards.len(), value: result})
     ir_stmts(&m, p, &b, body)
     _ :: &b.loops.pop()
     ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
@@ -3076,6 +3101,9 @@ fn ir_call_row_emit(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_ar
     if !ir_unit_type(returned) {
         result :: ir_value_type(&m, p, returned) ?? return ir_type_fail(&b, span, returned)
         dst = ir_fresh_temp(&m, &b, result)
+        // A call that returns a view (`-> T from self | x`) lends the value
+        // it borrows from its receiver or an argument (IRBuilder.lent).
+        if p.functions[row].return_view_provenance != None -> b.lent[dst] = true
     }
     start :: ir_args(&b.f, slots)
     ir_emit(&b.f, IROp.Call, dst, callee, start, slots.len(), b.line)
@@ -3085,6 +3113,7 @@ fn ir_call_row_emit(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_ar
         if moves[index] {
             b.fresh[slot] = false
         } else {
+            ir_close_temporary(&m, p, &b, slot, span)
             ir_release(&m, &b, slot)
         }
     }
@@ -4554,11 +4583,31 @@ fn ir_present(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, s
     if inner_row < 0 -> return ir_fail_slot(&b, span, "Present of {ir_type_name(ty)}")
     slot :: ir_value_as(&m, p, &b, value, inner_row, span)
     if ir_failed(b) -> return -1
-    if ir_option_inline(m, row) -> return ir_option_inline_wrap(&m, p, &b, row, slot)
+    lent :: ir_carrier_lends(p, b, value, slot)
+    if ir_option_inline(m, row) {
+        wrapped :: ir_option_inline_wrap(&m, p, &b, row, slot)
+        return ir_note_lent(&b, wrapped, lent)
+    }
     inner_size :: m.types[inner_row].size
     boxed :: ir_box_alloc(&m, &b, inner_size, row)
     ir_store_at(&m, p, &b, boxed, 0, slot)
-    boxed
+    ir_note_lent(&b, boxed, lent)
+}
+
+// Whether a carrier built around `payload`, the value of expression `value`,
+// only lends it: the expression names a place someone else owns (a variable,
+// a parameter, a field or element of one, a guard's value), or the payload
+// is itself such a carrier. A temporary or a `^` move hands it over.
+fn ir_carrier_lends(p: IRProgram, b: IRBuilder, value: Int, payload: Int) -> Bool Never! {
+    payload >= 0 && (ir_names_place(p, b, value) || ir_lent(b, payload))
+}
+
+fn ir_names_place(p: IRProgram, b: IRBuilder, value: Int) -> Bool Never! {
+    if ir_body_node(p, b, value).kind == {
+        .Borrow(inner, _) -> return ir_names_place(p, b, inner)
+        .Local(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .SharedGuardValue(_) -> return true
+        else -> return false
+    }
 }
 
 fn ir_result_ctor(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, success: Bool, span: Span) -> Int Never! {
@@ -4569,7 +4618,9 @@ fn ir_result_ctor(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: In
     if payload_row < 0 -> return ir_fail_slot(&b, span, "Result constructor of {ir_type_name(ty)}")
     slot :: ir_value_as(&m, p, &b, value, payload_row, span)
     if ir_failed(b) -> return -1
-    ir_result_box(&m, p, &b, ty, success, slot)
+    lent :: ir_carrier_lends(p, b, value, slot)
+    boxed :: ir_result_box(&m, p, &b, ty, success, slot)
+    ir_note_lent(&b, boxed, lent)
 }
 
 // `return value`: a Unit executable return only evaluates it; any other
@@ -4707,6 +4758,8 @@ fn ir_try_slot(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, carrier:
     expected :: ir_untag(carrier)
     was_fresh :: b.fresh[subject]
     owned_subject :: was_fresh && (ir_box_row(m, b.f.slot_type[subject]) || ir_option_inline(m, b.f.slot_type[subject]))
+    // The payload of a lent carrier is lent too.
+    lent :: ir_lent(b, subject)
     if expected == .Result(ok_ty, err_ty) {
         if !ir_is_result(held) -> return subject
         bool_row :: ir_type_row(&m, Type.Bool) ?? 0
@@ -4721,8 +4774,8 @@ fn ir_try_slot(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, carrier:
         ok_row :: ir_value_type(&m, p, ok_ty) ?? return ir_type_fail(&b, span, ok_ty)
         // A view Result's Ok is a view of its allocator's storage.
         if ir_view_result(held) -> return ir_view_result_payload(&m, p, &b, subject, ok_row)
-        if owned_subject -> return ir_box_take(&m, p, &b, subject, 8, ok_row)
-        return ir_load_at(&m, &b, subject, 8, ok_row)
+        payload :: if owned_subject -> ir_box_take(&m, p, &b, subject, 8, ok_row) else -> ir_load_at(&m, &b, subject, 8, ok_row)
+        return ir_note_lent(&b, payload, lent)
     }
     if expected == .Option(inner) {
         if !ir_is_option(held) -> return subject
@@ -4736,8 +4789,8 @@ fn ir_try_slot(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, carrier:
         if ir_failed(b) -> return -1
         b.fresh[subject] = was_fresh
         inner_row :: ir_value_type(&m, p, inner) ?? return ir_type_fail(&b, span, inner)
-        if owned_subject -> return ir_box_take(&m, p, &b, subject, 0, inner_row)
-        return ir_option_payload(&m, &b, subject, inner_row)
+        payload :: if owned_subject -> ir_box_take(&m, p, &b, subject, 0, inner_row) else -> ir_option_payload(&m, &b, subject, inner_row)
+        return ir_note_lent(&b, payload, lent)
     }
     subject
 }
@@ -5170,6 +5223,7 @@ fn ir_fallback_route(m: &IRModule, p: IRProgram, b: &IRBuilder, fallback: BodyOr
 fn ir_loop_jump(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, exit: Bool, span: Span) Never! {
     frame :: ir_loop_frame(b, label) ?? return ir_fail(&b, span, "break or next outside a loop")
     ir_tx_unwind_loop(&m, p, &b, frame.exit, span)
+    ir_exit_statement_guards(&b, frame.guards)
     ir_drop_bindings(&m, &b, frame.mark)
     depth :: ir_depth(b.f, if exit -> frame.exit else -> frame.next)
     ir_emit(&b.f, IROp.Br, -1, depth, -1, -1, b.line)
@@ -5311,7 +5365,7 @@ fn ir_list_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, varia
     more :: ir_bool_op(&m, &b, IROp.Lt, index, length)
     ir_exit_unless(&m, &b, more, exit)
     step_block :: ir_open(&b.f, IROp.Block, b.line)
-    &b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len()})
+    &b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len(), guards: b.statement_guards.len()})
     address :: ir_element_address(&m, &b, data, index, stride)
     item :: ir_load_at(&m, &b, address, 0, row)
     map_shape := IRMapShape?{None}
@@ -5420,7 +5474,7 @@ fn ir_iterable_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, v
     ir_exit_unless(&m, &b, present, exit)
     step_block :: ir_open(&b.f, IROp.Block, b.line)
     ir_scope_open(&b)
-    &b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len()})
+    &b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len(), guards: b.statement_guards.len()})
     item :: ir_box_take(&m, p, &b, option, 0, item_row)
     if item >= 0 {
         b.fresh[item] = false
@@ -5504,7 +5558,7 @@ fn ir_encoding_reader_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: Str
     ir_exit_unless(&m, &b, present, exit)
     step_block :: ir_open(&b.f, IROp.Block, b.line)
     ir_scope_open(&b)
-    &b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len()})
+    &b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: b.bindings.len(), guards: b.statement_guards.len()})
     item :: ir_box_take(&m, p, &b, option, 0, item_row)
     if item >= 0 {
         b.fresh[item] = false
@@ -5531,6 +5585,7 @@ fn ir_tuple_literal(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, names: 
     }
     if members.len() != values.len() -> return ir_fail_slot(&b, span, "tuple literal of {ir_type_name(ty)}")
     slots := [Int]{}
+    lent := false
     loop (index, value) in values {
         member := members[index]
         loop candidate in members {
@@ -5538,6 +5593,7 @@ fn ir_tuple_literal(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, names: 
         }
         slot :: ir_value_as(&m, p, &b, value, member.ty, span)
         if ir_failed(b) -> return -1
+        if ir_carrier_lends(p, b, value, slot) && ir_close_glue(&m, p, &b, member.ty, false, span) >= 0 -> lent = true
         &slots.push(slot)
     }
     storage :: ir_fresh_temp(&m, &b, row)
@@ -5549,7 +5605,9 @@ fn ir_tuple_literal(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, names: 
         }
         ir_store_at(&m, p, &b, storage, member.offset, slot)
     }
-    storage
+    // A tuple around a value it does not own (`peek((res: env, n: 1))`)
+    // views it, like an Option or Result carrier (ir_carrier_lends).
+    ir_note_lent(&b, storage, lent)
 }
 
 // `base[start..end]`: the runtime checks the bounds and picks the stop; a

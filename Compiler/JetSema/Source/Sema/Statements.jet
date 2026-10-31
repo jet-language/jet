@@ -3934,7 +3934,7 @@ fn sema_stmt_check_destructure(binding: Binding, pattern: BindPattern, environme
                                     &context.name_references.push(SemaNameReferenceFact{span: selected_field.span, symbol: field.symbol, kind: "field"})
                                 }
                                 else -> {
-                                    &diagnostics.push(sema_error("E0605", selected_field.span, "`{selected_field.name}` is private to its module", "a `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module", "use `{selected_field.name}` from inside its module, or remove `priv` from its module or field"))
+                                    &diagnostics.push(sema_expression_private_field_error(selected_field.name, selected_field.span))
                                     field_type = Val(Type.Int)
                                 }
                             }

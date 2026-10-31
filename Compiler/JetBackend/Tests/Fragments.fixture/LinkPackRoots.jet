@@ -81,8 +81,8 @@ fn run() {
     broken :: x64_link_runtime_pack([String]{"runtime.o", "missing.o", "runtime.a"}, ^[[U8]]{object, missing, archive}, [String]{})
     found_missing := false
     loop error in broken.errors {
-        if error.contains("undefined symbol `jet_ws_connect`") -> found_missing = true
+        if error.contains("undefined symbol `jet_rt_fixture_absent_provider`") -> found_missing = true
     }
-    if !found_missing || broken.bytes.len() != 0 -> panic("pack accepted a non-native WebSocket member without its provider")
+    if !found_missing || broken.bytes.len() != 0 -> panic("pack accepted a member without its provider")
     print("runtime pack object roots: pass")
 }

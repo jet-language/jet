@@ -941,7 +941,7 @@ fn sema_never_module_call_diverges(receiver: Expr, method: String, arity: Int, e
     if !sema_call_core_import_is_unshadowed(environment, program, scopes, imported) -> return false
     member :: sema_call_core_import_member(imported, method) ?? return false
     module_name := imported.module_name
-    module_identity := imported.module_identity
+    module_identity := sema_call_core_import_source_identity(environment, program, imported) ?? ""
     if nested {
         if imported.item != None -> return false
         loop leaf in path.leaves {

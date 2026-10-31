@@ -197,11 +197,11 @@ struct TempDir {
 }
 
 struct TempFile {
-    priv path: String
+    path: String
 }
 
 struct FileLock {
-    priv path: String
+    path: String
 }
 
 
@@ -239,7 +239,7 @@ struct __LockWait {
 /// An exclusive advisory lock on a held directory. Closing this owner releases
 /// the OS lock without removing any filesystem name.
 struct AdvisoryLock {
-    handle: Int
+    priv handle: Int
 }
 
 impl AdvisoryLock.Close {
@@ -346,7 +346,7 @@ fn rename_code(if_exists: RenameIfExists) -> Int Never! {
 /// leaves scope or at `close(^directory)`.
 struct Directory {
     path: String
-    handle: Int
+    priv handle: Int
 
     /// Open the regular file `name` for reading.
     fn open(self, name: String) -[FS.Read]> FileReader IOError! {

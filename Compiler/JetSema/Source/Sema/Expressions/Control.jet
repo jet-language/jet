@@ -627,7 +627,8 @@ fn sema_failure_callee(expr: Expr?, environment: SemaScopeEnvironment, program: 
             imported :: sema_call_core_import_target(environment, program, alias) ?? sema_call_source_import_target(environment, program, alias) ?? return None
             if imported.item != None -> return None
             if program.registration_graph == .Val(graph) {
-                module_index :: sema_registration_module_index(graph, imported.module_identity) ?? return None
+                identity :: sema_call_core_import_source_identity(environment, program, imported) ?? return None
+                module_index :: sema_registration_module_index(graph, identity) ?? return None
                 loop index in 0..<graph.modules[module_index].functions.len() {
                     if graph.modules[module_index].functions[index].symbol.name != method -> next
                     return Val(SemaFailureCallee{key: graph.modules[module_index].functions[index].symbol.id.key, inferable: sema_failure_function_inferable(graph.modules[module_index].functions[index].declaration)})

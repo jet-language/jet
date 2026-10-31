@@ -1,0 +1,14 @@
+# Claim: a variable holding an aggregate with no clone (a List of records holding a file handle, a struct or tuple holding that List, a List of such Lists) moves to its new owner at its last use, whether it is returned, rebound with `:=`, sorted in place and returned, or stored in a struct or tuple; it lowers on o0, o1 and o2 and each handle closes exactly once (#6460: Jetpack's pkg_sorted_checked_files was an ir.build ICE "a shared [CheckedFile], whose items have no clone").
+# Hand-derived: gathered() opens 3 handles in the order b, c, a; sorting by name gives abc; nested() opens 2 more after the first 3 closed. "open"/"leaked" is the process's open descriptor count minus the count before the first open, so the counts are 3 while the list lives and 0 after its last owner ends.
+fixture: aggregate_without_clone_moves_at_its_last_use.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run --allow=FS.Read --optimize=none run.jet
+exit: 0 # o0
+stdout: = aggregate_without_clone_moves_at_its_last_use.out # o0
+step: jet run --allow=FS.Read --optimize=basic run.jet
+exit: 0 # o1
+stdout: = aggregate_without_clone_moves_at_its_last_use.out # o1
+step: jet run --allow=FS.Read --optimize=full run.jet
+exit: 0 # o2
+stdout: = aggregate_without_clone_moves_at_its_last_use.out # o2

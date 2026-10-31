@@ -568,6 +568,12 @@ fn sema_expression_struct_literal(struct_name: String, type_args: [Type], fields
             &diagnostics.push(sema_error("E0339", source.name_span, "`{source.name}` is a computed field on `{type_name(result_ty)}` — it can't be set", "`{source.name}` is declared `{source.name} -> …` — its value always comes from that formula, never from a struct literal", "remove `{source.name}` from this `.{{ … }}`"))
             return None
         }
+        // Only the type's own module writes a `priv` field, so a literal
+        // elsewhere cannot forge a value whose invariant that field carries.
+        if !sema_expression_field_visible(struct_def.fields[found].is_pub, struct_def.fields[found].is_package_pub, owner.module_name, environment, program) {
+            &diagnostics.push(sema_expression_private_field_error(source.name, source.name_span))
+            return None
+        }
         if supplied[found] {
             &diagnostics.push(sema_error("E0303", source.name_span, "field `{source.name}` appears more than once", "each field may be written only once in a struct literal", "remove the duplicate field"))
             return None

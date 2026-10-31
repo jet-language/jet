@@ -1201,7 +1201,13 @@ it through another is E0204. `^x` on a captured name inside a lambda body moves
 `x` into the lambda: `x` is gone after the lambda is made, and a second call
 of the lambda binding on any path is E0121.
 A literal, `x.copy()`, or call result is a temporary and
-may enter a take parameter without another marker. `x.copy()` is the one copy spelling
+may enter a take parameter without another marker. A temporary with cleanup
+lent to a read parameter (`show(open_log("x"))`) closes exactly once, when its
+statement ends; one made in a branch or a loop condition of the statement
+closes right after the call that reads it. The result of a call that returns a
+view (`-> Directory from self | picked`) is borrowed, not owned: passed on,
+bound with `::`, wrapped in a carrier, or taken apart, it closes nothing, and
+its owner closes it. `x.copy()` is the one copy spelling
 (D-COPY-WORD1=A); it is a compiler-owned method that no type can redefine, and
 it creates an independent owned value. `.clone()` is not user-typable Jet
 syntax; the retired prefix `~x` teaches E0941 (whose Safe fix writes `x.copy()`)

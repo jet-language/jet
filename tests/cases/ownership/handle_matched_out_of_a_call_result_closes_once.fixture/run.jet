@@ -1,0 +1,76 @@
+use core.files as files
+
+// A handle a pattern binds out of a call's Result or Option, then closes
+// with `close(^name)` inside the arm, has exactly one owner: the arm's close
+// ends it and the matched carrier no longer does. The artifact store's lock
+// (`if files.create(path, if_exists: .Refuse) == { .Ok(writer) -> { ...;
+// close(^writer) } }`) is this shape; a second close of the same handle
+// hung `jet self doctor`. Every round leaves no descriptor open, and the
+// file written in the arm holds exactly what the arm wrote.
+
+fn open_fds() -> Int {
+    entries :: files.list_dir("/proc/self/fd") ?? panic("list fds")
+    entries.len()
+}
+
+fn maybe_reader(path: String) -> FileReader? {
+    files.open(path) ? reader -> Val(reader) ! error -> None
+}
+
+// The arm closes the writer and falls through to the match's end.
+fn write_in_arm(path: String, round: Int) -> Bool {
+    wrote := false
+    if files.create(path, if_exists: .Refuse) == {
+        .Ok(writer) -> {
+            writer.write_all("round {round}".bytes())
+            close(^writer)
+            wrote = true
+        }
+        .Err(_) -> {}
+    }
+    wrote
+}
+
+// The arm closes the writer and returns out of the loop around the match.
+fn write_and_return(path: String) -> Int {
+    loop {
+        if files.create(path, if_exists: .Refuse) == {
+            .Ok(writer) -> {
+                writer.write_all("returned".bytes())
+                close(^writer)
+                return 1
+            }
+            .Err(_) -> return 0
+        }
+    }
+    0
+}
+
+// An Option payload consumed in the arm.
+fn read_in_arm(path: String) -> Int {
+    count := 0
+    if maybe_reader(path) == {
+        .Val(reader) -> {
+            count = reader.read(64).len()
+            consume(^reader)
+        }
+        None -> {}
+    }
+    count
+}
+
+fn run() {
+    path :: "written.txt"
+    before :: open_fds()
+    loop round in 1..<4 {
+        files.remove(path).drop("start empty")
+        print("arm {round} wrote {write_in_arm(path, round)}")
+        print("arm {round} reads {read_in_arm(path)}")
+        print("arm {round} leaked {open_fds() - before}")
+    }
+    files.remove(path).drop("start empty")
+    print("return wrote {write_and_return(path)}")
+    print("return text {files.read(path) ?? panic("read back")}")
+    print("return leaked {open_fds() - before}")
+    files.remove(path).drop("cleanup")
+}

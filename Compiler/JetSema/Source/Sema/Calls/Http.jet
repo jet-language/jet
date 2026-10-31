@@ -282,6 +282,7 @@ fn sema_call_try_http_static(
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     if target.type_name == "HTTPClientType" {
+        if sema_call_core_handle_unbuilt("HTTPClient", method, span, environment, program, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         value := sema_tree_node(Type.Named{name: "HTTPClient"}, TExprKind.HandleMethod{receiver: sema_call_http_unit_receiver(span, &context), operation: THandleOp.HTTPClientNew, args: [TExpr]{}}, span)
         sema_call_http_record_effect("Net", "HTTPClient.new", value.ty, span, environment, program, &scopes, &context, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
@@ -555,6 +556,7 @@ fn sema_call_try_http_method(
     // mark has nothing to be compared with.
     if name == "Headers" -> sema_receiver_mark_forget(&state, receiver)
     if !checked -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if sema_call_core_handle_unbuilt(name, method, span, environment, program, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     built := sema_call_http_emit_method(receiver_value, name, method, values, result, span)
     if sema_call_http_method_effect(name, method, args.len()) == .Val(effect_name) -> sema_call_http_record_effect(effect_name, "{name}.{method}", built.ty, span, environment, program, &scopes, &context, &diagnostics)
     // A call checker finishes through the call's success view, so a

@@ -441,10 +441,13 @@ int main(int argc, char **argv, char **envp) {
         jet_rt_handle_drop_process_spec(s);
     }
 
-    // 15. Authority-bound spec is refused before spawn: Other/Resolve.
+    // 15. An authority grant the native boundary cannot enforce is refused
+    //     before spawn: Other/Resolve, on any host.
     {
-        static const uint64_t rights[1] = { 0 };
-        JetAuthority *auth = jet_authority_from_rights(rights, 0);
+        Text *grant = txt("Env");
+        const uint64_t rights[1] = { (uint64_t)(uintptr_t)grant };
+        JetAuthority *auth = jet_authority_from_rights(rights, 1);
+        jet_rt_string_drop(grant);
         Spec *s = SPEC("/bin/sh", "-c", "exit 0");
         s = replace(s, jet_std_process_spec_under(s, auth));
         jet_rt_handle_drop_jet_authority(auth);
@@ -452,7 +455,7 @@ int main(int argc, char **argv, char **envp) {
         IOError *e = NULL;
         int64_t ok = jet_process_spec_run(s, &r, &e);
         expect_error(ok, e, KIND_OTHER, OP_RESOLVE,
-            "authority-bound process execution requires the #398/#893 isolation backend; refusing before spawn");
+            "authority grant `Env` cannot be enforced by the native process boundary; refusing before spawn");
         jet_rt_handle_drop_process_spec(s);
     }
 

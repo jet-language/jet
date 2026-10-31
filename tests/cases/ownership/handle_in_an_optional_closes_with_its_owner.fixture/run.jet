@@ -1,0 +1,100 @@
+use core.files as files
+
+// Each owner below holds an open file handle somewhere other than its own
+// direct field: in an Option field, an Option local, an Option of a struct, a
+// list of Options, a list and an enum payload. When the owner ends, the
+// handle closes with it, so the process's open descriptors return to the
+// count it had before. A handle moved out of an Option payload has exactly
+// one owner: it stays readable after the Option's owner ends, then closes once.
+
+struct Holder {
+    file: FileReader?
+}
+
+struct Inner {
+    file: FileReader
+}
+
+struct Nest {
+    inner: Inner?
+}
+
+struct Shelf {
+    maybe: [FileReader?]
+    plain: [FileReader]
+}
+
+enum Slot {
+    Open(FileReader)
+    Shut
+}
+
+struct Tagged {
+    slot: Slot
+}
+
+fn open_fds() -> Int {
+    entries :: files.list_dir("/proc/self/fd") ?? panic("list fds")
+    entries.len()
+}
+
+fn reader(path: String) -> FileReader {
+    files.open(path) ?? panic("open {path}")
+}
+
+fn hold_field(path: String) {
+    holder :: Holder{file: Val(reader(path))}
+    print("field held {holder.file != None}")
+}
+
+fn hold_local(path: String) {
+    file :: FileReader?{Val(reader(path))}
+    print("local held {file != None}")
+}
+
+fn hold_nested(path: String) {
+    nest :: Nest{inner: Val(Inner{file: reader(path)})}
+    print("nested held {nest.inner != None}")
+}
+
+fn hold_lists(path: String) {
+    shelf :: Shelf{maybe: [FileReader?]{Val(reader(path)), None, Val(reader(path))}, plain: [FileReader]{reader(path), reader(path)}}
+    print("lists held {shelf.maybe.len() + shelf.plain.len()}")
+}
+
+fn hold_enum(path: String) {
+    tagged :: Tagged{slot: Slot.Open(reader(path))}
+    print("enum held {tagged.slot == .Open(_)}")
+}
+
+fn take_payload(path: String) -> FileReader {
+    holder := Holder{file: Val(reader(path))}
+    if holder.file == {
+        .Val(file) -> ^file
+        None -> panic("no file")
+    }
+}
+
+fn run() {
+    path :: "run.jet"
+    before :: open_fds()
+    hold_field(path)
+    print("field leaked {open_fds() - before}")
+    hold_local(path)
+    print("local leaked {open_fds() - before}")
+    hold_nested(path)
+    print("nested leaked {open_fds() - before}")
+    hold_lists(path)
+    print("lists leaked {open_fds() - before}")
+    hold_enum(path)
+    print("enum leaked {open_fds() - before}")
+    moved := take_payload(path)
+    print("moved open {open_fds() - before}")
+    print("moved reads {moved.read(3).len()}")
+    drop_reader(^moved)
+    print("moved leaked {open_fds() - before}")
+}
+
+fn drop_reader(file: ^FileReader) {
+    print("dropping {file.read(2).len()}")
+}

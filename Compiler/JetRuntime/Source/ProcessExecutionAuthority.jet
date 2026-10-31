@@ -1,0 +1,553 @@
+// Authority-bound execution (`.under(authority)`). The policy wire's rights
+// are checked against the small vocabulary the native boundary enforces, the
+// plan fixes the resolved executable and the policy digest, and the child runs
+// only inside the Linux bubblewrap backend; otherwise the launch is refused
+// before spawn. The receipt repeats the plan's digest (ProcessExecutionReceipt).
+fn process_authority_backend_name() -> I64 { rt_static_text("linux-bwrap") }
+fn process_authority_at(list: I64, at: I64) -> I64 { fd_word(fd_word(list, I64{16}), at * I64{8}) }
+fn process_authority_bound(spec: I64) -> Bool { fd_word(spec, PROCESS_SPEC_POLICY_WIRE) != I64{0} }
+fn process_authority_detached(spec: I64) -> Bool { fd_word(spec, PROCESS_SPEC_DETACHED).bit_and(I64{255}) != I64{0} }
+// The policy's rights, sorted and deduplicated; the caller drops the list.
+fn process_authority_rights(spec: I64) -> I64 {
+    list :: data_sequence_new(I64{0}, I64{8})
+    wire :: fd_word(spec, PROCESS_SPEC_POLICY_WIRE)
+    if (wire == I64{0}) -> return list
+    start := I64{0}
+    at := I64{0}
+    loop at <= rt_text_len(wire) {
+        if (at == rt_text_len(wire) || rt_text_byte(wrapping(rt_text_data(wire) + at)) == I64{10}) {
+            if (at > start) {
+                right :: rt_text_copy(wrapping(rt_text_data(wire) + start), at - start)
+                process_text_list_push(list, right)
+                jet_rt_string_drop(right)
+            }
+            start = at + I64{1}
+        }
+        at += I64{1}
+    }
+    process_execution_sort_unique(list)
+    list
+}
+fn process_authority_has(rights: I64, right: I64) -> Bool {
+    at := I64{0}
+    loop at < fd_word(rights, I64{0}) {
+        if jet_rt_string_eq(process_authority_at(rights, at), right) -> return true
+        at += I64{1}
+    }
+    false
+}
+// `Secret=value` (any case) carries a value that is never policy identity.
+fn process_authority_is_secret(right: I64) -> Bool {
+    lower :: jet_text_ascii_lower(right)
+    secret :: jet_string_starts_with(lower, rt_static_text("secret="))
+    jet_rt_string_drop(lower)
+    secret
+}
+// The digest spelling of one right: a secret keeps its name, never its value.
+fn process_authority_digest_right(right: I64) -> I64 {
+    if !process_authority_is_secret(right) -> return jet_rt_string_clone(right)
+    text :: jet_rt_string_builder_new()
+    rt_text_append(text, rt_text_data(right), I64{6})
+    jet_rt_string_builder_push(text, rt_static_text("=<redacted>"))
+    jet_rt_string_builder_finish(text)
+}
+// The nonempty values of the policy's secret rights, in rights order.
+fn process_authority_secret_values(spec: I64, values: I64) {
+    rights :: process_authority_rights(spec)
+    at := I64{0}
+    loop at < fd_word(rights, I64{0}) {
+        right :: process_authority_at(rights, at)
+        if (process_authority_is_secret(right) && rt_text_len(right) > I64{7}) {
+            value :: rt_text_copy(wrapping(rt_text_data(right) + I64{7}), rt_text_len(right) - I64{7})
+            process_text_list_push(values, value)
+            jet_rt_string_drop(value)
+        }
+        at += I64{1}
+    }
+    process_text_list_drop(rights, false)
+}
+// The rights in digest spelling, joined by LF (the policy material field).
+fn process_authority_digest_rights(spec: I64) -> I64 {
+    rights :: process_authority_rights(spec)
+    spelled :: data_sequence_new(I64{0}, I64{8})
+    at := I64{0}
+    loop at < fd_word(rights, I64{0}) {
+        right :: process_authority_digest_right(process_authority_at(rights, at))
+        process_text_list_push(spelled, right)
+        jet_rt_string_drop(right)
+        at += I64{1}
+    }
+    joined :: process_execution_join(spelled)
+    process_text_list_drop(spelled, false)
+    process_text_list_drop(rights, false)
+    joined
+}
+// The receipt and plan spelling of the rights: digest spelling with every
+// secret value redacted.
+fn process_authority_receipt_rights(spec: I64, secrets: I64) -> I64 {
+    rights :: process_authority_rights(spec)
+    result :: data_sequence_new(I64{0}, I64{8})
+    at := I64{0}
+    loop at < fd_word(rights, I64{0}) {
+        spelled :: process_authority_digest_right(process_authority_at(rights, at))
+        redacted :: process_execution_redact(spelled, secrets)
+        process_text_list_push(result, redacted)
+        jet_rt_string_drop(redacted)
+        jet_rt_string_drop(spelled)
+        at += I64{1}
+    }
+    process_text_list_drop(rights, false)
+    result
+}
+fn process_authority_network(spec: I64) -> Bool {
+    rights :: process_authority_rights(spec)
+    shared :: process_authority_has(rights, rt_static_text("Net"))
+    process_text_list_drop(rights, false)
+    shared
+}
+fn process_authority_refuse(spec: I64, cause: I64, err: I64) -> I64 { process_execution_error(spec, HOST_IO_OP_RESOLVE, jet_rt_string_clone(cause), err) }
+// A grant the boundary would only record, never enforce, is refused, and so is
+// any live or inherited output that would bypass receipt redaction.
+fn process_authority_check(spec: I64, err: I64) -> Bool {
+    rights :: process_authority_rights(spec)
+    at := I64{0}
+    loop at < fd_word(rights, I64{0}) {
+        right :: process_authority_at(rights, at)
+        supported :: jet_rt_string_eq(right, rt_static_text("FS.Read:repo")) || jet_rt_string_eq(right, rt_static_text("FS.Write:.jet/build")) || jet_rt_string_eq(right, rt_static_text("Net")) || jet_rt_string_eq(right, rt_static_text("Exec")) || jet_rt_string_eq(right, rt_static_text("IO")) || jet_rt_string_eq(right, rt_static_text("Time.Wait")) || (jet_string_starts_with(right, rt_static_text("Exec:")) && rt_text_len(right) > I64{5})
+        if !supported {
+            name := I64{0}
+            loop name < rt_text_len(right) && rt_text_byte(wrapping(rt_text_data(right) + name)) != (I64{58}) && rt_text_byte(wrapping(rt_text_data(right) + name)) != (I64{61}) { name += I64{1} }
+            cause :: jet_rt_string_builder_new()
+            jet_rt_string_builder_push(cause, rt_static_text("authority grant `"))
+            rt_text_append(cause, rt_text_data(right), name)
+            jet_rt_string_builder_push(cause, rt_static_text("` cannot be enforced by the native process boundary; refusing before spawn"))
+            process_text_list_drop(rights, false)
+            _ := process_execution_error(spec, HOST_IO_OP_RESOLVE, jet_rt_string_builder_finish(cause), err)
+            return false
+        }
+        at += I64{1}
+    }
+    process_text_list_drop(rights, false)
+    live :: fd_word(spec, PROCESS_SPEC_STDOUT) != PROCESS_STREAM_CAPTURE || fd_word(spec, PROCESS_SPEC_STDERR) != PROCESS_STREAM_CAPTURE
+    if (fd_word(spec, PROCESS_SPEC_TERMINAL) != I64{0} || (!process_authority_detached(spec) && live)) {
+        _ := process_authority_refuse(spec, rt_static_text("authority-bound process receipts require captured stdout and stderr without a terminal; live terminal, streaming, or inherited output would bypass redaction, refusing before spawn"), err)
+        return false
+    }
+    true
+}
+// The working directory the sandbox exposes: an explicit absolute cwd, or `/`
+// (a private sandbox root) for an effect-only authority. Path grants need the
+// explicit cwd. Returns a borrowed text, or 0 with `err` set.
+fn process_authority_cwd(spec: I64, err: I64) -> I64 {
+    cwd :: fd_word(spec, PROCESS_SPEC_CWD)
+    rights :: process_authority_rights(spec)
+    paths := false
+    at := I64{0}
+    loop at < fd_word(rights, I64{0}) {
+        if jet_string_starts_with(process_authority_at(rights, at), rt_static_text("FS.")) -> paths = true
+        at += I64{1}
+    }
+    process_text_list_drop(rights, false)
+    if ((cwd == I64{0} && paths) || (cwd != I64{0} && (rt_text_len(cwd) == I64{0} || rt_text_byte(rt_text_data(cwd)) != I64{47}))) {
+        _ := compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_RESOLVE, rt_static_text("cwd"), I64{0}, jet_rt_string_clone(rt_static_text("authority-bound process execution requires an explicit absolute cwd/PathAuthority")), err)
+        return I64{0}
+    }
+    if (cwd == I64{0}) -> rt_static_text("/") else -> cwd
+}
+// The canonical path of `command` on this process's PATH, or 0.
+fn process_authority_on_path(command: I64, path: I64) -> I64 {
+    env :: data_sequence_new(I64{0}, I64{16})
+    process_execution_env_set(env, rt_static_text("PATH"), path)
+    candidates :: process_execution_candidates(command, env)
+    process_text_list_drop(env, true)
+    found :: process_execution_first_file(candidates)
+    process_text_list_drop(candidates, false)
+    found
+}
+// The executable the plan names: a pathed command canonicalized, else the
+// first regular file on this process's PATH. Owned, or 0 with `err` set.
+fn process_authority_executable(spec: I64, err: I64) -> I64 {
+    command :: process_execution_first(spec)
+    if (command == I64{0}) {
+        _ := process_execution_invalid(spec, rt_static_text("process command needs at least one word"), err)
+        return I64{0}
+    }
+    if (process_execution_has(command, I64{47}) || process_execution_has(command, I64{92})) {
+        scratch :: jet_rt_alloc(I64{48}, I64{8})
+        name :: fd_c_path(command)
+        bytes :: jet_process_path_canonicalize_raw(name, scratch, wrapping(scratch + I64{8}), wrapping(scratch + I64{16}))
+        jet_rt_free(name, rt_text_len(command) + I64{1}, I64{1})
+        found := I64{0}
+        if (bytes == I64{0}) {
+            _ := process_execution_error(spec, HOST_IO_OP_RESOLVE, host_errno_cause(fd_word(scratch, I64{24})), err)
+        } else {
+            found = rt_text_lossy(bytes, fd_word(scratch, I64{0}))
+            jet_rt_free(bytes, fd_word(scratch, I64{8}), I64{1})
+        }
+        jet_rt_free(scratch, I64{48}, I64{8})
+        return found
+    }
+    path :: jet_rt_logical_env_get(rt_static_text("PATH"))
+    if (path == I64{0}) -> return process_authority_refuse(spec, rt_static_text("cannot resolve executable without a PATH snapshot"), err)
+    found :: process_authority_on_path(command, path)
+    jet_rt_string_drop(path)
+    if (found == I64{0}) -> return process_authority_refuse(spec, rt_static_text("executable was not found in the captured PATH"), err)
+    found
+}
+// `Exec:<path>` grants, when present, must name the resolved executable.
+fn process_authority_check_executable(spec: I64, identity: I64, err: I64) -> Bool {
+    rights :: process_authority_rights(spec)
+    named := false
+    granted := false
+    at := I64{0}
+    loop at < fd_word(rights, I64{0}) {
+        right :: process_authority_at(rights, at)
+        if jet_string_starts_with(right, rt_static_text("Exec:")) {
+            named = true
+            if (rt_text_len(right) == rt_text_len(identity) + I64{5} && rt_text_equal_bytes(wrapping(rt_text_data(right) + I64{5}), rt_text_data(identity), rt_text_len(identity))) -> granted = true
+        }
+        at += I64{1}
+    }
+    process_text_list_drop(rights, false)
+    if (named && !granted) {
+        _ := process_authority_refuse(spec, rt_static_text("authority policy does not grant the resolved executable"), err)
+        return false
+    }
+    true
+}
+// The bubblewrap argv up to and including `--`; the caller appends the
+// executable and its arguments. `source`, `output`, `env` (sorted name/value
+// rows) and `argv0` may be 0.
+fn process_authority_bwrap_argv(bwrap: I64, source: I64, output: I64, env: I64, share_network: Bool, source_readable: Bool, argv0: I64) -> I64 {
+    argv :: data_sequence_new(I64{0}, I64{8})
+    process_text_list_push(argv, bwrap)
+    process_text_list_push(argv, rt_static_text("--die-with-parent"))
+    process_text_list_push(argv, rt_static_text("--new-session"))
+    process_text_list_push(argv, rt_static_text("--unshare-all"))
+    process_text_list_push(argv, rt_static_text("--unshare-user"))
+    process_text_list_push(argv, rt_static_text("--disable-userns"))
+    process_text_list_push(argv, rt_static_text("--assert-userns-disabled"))
+    process_text_list_push(argv, rt_static_text("--cap-drop"))
+    process_text_list_push(argv, rt_static_text("ALL"))
+    process_text_list_push(argv, rt_static_text("--ro-bind-try"))
+    process_text_list_push(argv, rt_static_text("/nix/store"))
+    process_text_list_push(argv, rt_static_text("/nix/store"))
+    process_text_list_push(argv, rt_static_text("--proc"))
+    process_text_list_push(argv, rt_static_text("/proc"))
+    process_text_list_push(argv, rt_static_text("--dev"))
+    process_text_list_push(argv, rt_static_text("/dev"))
+    process_text_list_push(argv, rt_static_text("--size"))
+    process_text_list_push(argv, rt_static_text("67108864"))
+    process_text_list_push(argv, rt_static_text("--tmpfs"))
+    process_text_list_push(argv, rt_static_text("/tmp"))
+    process_text_list_push(argv, rt_static_text("--dir"))
+    process_text_list_push(argv, rt_static_text("/homeless-shelter"))
+    process_text_list_push(argv, rt_static_text("--clearenv"))
+    process_text_list_push(argv, rt_static_text("--setenv"))
+    process_text_list_push(argv, rt_static_text("PATH"))
+    process_text_list_push(argv, rt_static_text("/nix/store"))
+    process_text_list_push(argv, rt_static_text("--setenv"))
+    process_text_list_push(argv, rt_static_text("HOME"))
+    process_text_list_push(argv, rt_static_text("/homeless-shelter"))
+    if (output != I64{0}) {
+        process_text_list_push(argv, rt_static_text("--dir"))
+        process_text_list_push(argv, rt_static_text("/work"))
+        if (source != I64{0} && source_readable) {
+            process_text_list_push(argv, rt_static_text("--ro-bind"))
+            process_text_list_push(argv, source)
+        } else {
+            process_text_list_push(argv, rt_static_text("--dir"))
+        }
+        process_text_list_push(argv, rt_static_text("/work/source"))
+        process_text_list_push(argv, rt_static_text("--bind"))
+        process_text_list_push(argv, output)
+        process_text_list_push(argv, rt_static_text("/work/output"))
+        process_text_list_push(argv, rt_static_text("--chdir"))
+        process_text_list_push(argv, rt_static_text("/work/source"))
+        process_text_list_push(argv, rt_static_text("--setenv"))
+        process_text_list_push(argv, rt_static_text("JET_BUILD_OUTPUT"))
+        process_text_list_push(argv, rt_static_text("/work/output"))
+    } else {
+        if (source != I64{0} && source_readable) {
+            process_text_list_push(argv, rt_static_text("--ro-bind"))
+            process_text_list_push(argv, source)
+        } else {
+            process_text_list_push(argv, rt_static_text("--dir"))
+        }
+        process_text_list_push(argv, rt_static_text("/work"))
+        process_text_list_push(argv, rt_static_text("--chdir"))
+        process_text_list_push(argv, rt_static_text("/work"))
+    }
+    if share_network -> process_text_list_push(argv, rt_static_text("--share-net"))
+    if (env != I64{0}) {
+        at := I64{0}
+        loop at < fd_word(env, I64{0}) {
+            row :: wrapping(fd_word(env, I64{16}) + at * I64{16})
+            process_text_list_push(argv, rt_static_text("--setenv"))
+            process_text_list_push(argv, fd_word(row, I64{0}))
+            process_text_list_push(argv, fd_word(row, I64{8}))
+            at += I64{1}
+        }
+    }
+    if (argv0 != I64{0}) {
+        process_text_list_push(argv, rt_static_text("--argv0"))
+        process_text_list_push(argv, argv0)
+    }
+    process_text_list_push(argv, rt_static_text("--"))
+    argv
+}
+// The backend is available when bubblewrap on PATH completes an isolated
+// `sh -c "exit 0"` probe. JETPACK_FAKE_SANDBOX forces it unavailable. Returns
+// the owned bubblewrap path, or 0.
+fn process_authority_backend() -> I64 {
+    fake :: jet_rt_logical_env_get(rt_static_text("JETPACK_FAKE_SANDBOX"))
+    if (fake != I64{0}) {
+        jet_rt_string_drop(fake)
+        return I64{0}
+    }
+    path :: jet_rt_logical_env_get(rt_static_text("PATH"))
+    if (path == I64{0}) -> return I64{0}
+    bwrap :: process_authority_on_path(rt_static_text("bwrap"), path)
+    shell :: process_authority_on_path(rt_static_text("sh"), path)
+    jet_rt_string_drop(path)
+    if (bwrap == I64{0} || shell == I64{0}) {
+        jet_rt_string_drop(bwrap)
+        jet_rt_string_drop(shell)
+        return I64{0}
+    }
+    argv :: process_authority_bwrap_argv(bwrap, I64{0}, I64{0}, I64{0}, false, false, I64{0})
+    process_text_list_push(argv, shell)
+    process_text_list_push(argv, rt_static_text("-c"))
+    process_text_list_push(argv, rt_static_text("exit 0"))
+    jet_rt_string_drop(shell)
+    probe :: jet_std_process_cmd_owned(argv)
+    scratch :: jet_rt_alloc(I64{16}, I64{8})
+    coll_zero(scratch, I64{16})
+    passed := false
+    child :: process_execution_launch(probe, true, wrapping(scratch + I64{8}))
+    if (child != I64{0}) {
+        if (process_execution_wait(child, scratch, wrapping(scratch + I64{8})) != I64{0}) {
+            receipt :: fd_word(scratch, I64{0})
+            passed = fd_word(receipt, I64{24}) != I64{0}
+            jet_rt_handle_drop_process_receipt(receipt)
+        }
+        jet_rt_handle_drop_process_child(child)
+    }
+    jet_rt_handle_drop_io_error(fd_word(scratch, I64{8}))
+    jet_rt_free(scratch, I64{16}, I64{8})
+    jet_rt_handle_drop_process_spec(probe)
+    if passed -> return bwrap
+    jet_rt_string_drop(bwrap)
+    I64{0}
+}
+fn process_authority_outputs(spec: I64) -> I64 {
+    outputs :: data_sequence_new(I64{2}, I64{8})
+    detached :: process_authority_detached(spec)
+    a :: scheduler_text_concat(rt_static_text("stdout="), if detached -> rt_static_text("discarded") else -> process_execution_mode(fd_word(spec, PROCESS_SPEC_STDOUT)))
+    b :: scheduler_text_concat(rt_static_text("stderr="), if detached -> rt_static_text("discarded") else -> process_execution_mode(fd_word(spec, PROCESS_SPEC_STDERR)))
+    process_text_list_push(outputs, a)
+    process_text_list_push(outputs, b)
+    jet_rt_string_drop(a)
+    jet_rt_string_drop(b)
+    outputs
+}
+// ProcessPlan72 for a bound spec, after every check that refuses before
+// spawn. `bwrap_out` (8 bytes, may be 0) receives the owned bubblewrap path.
+fn process_authority_plan(spec: I64, bwrap_out: I64, err: I64) -> I64 {
+    if (process_authority_cwd(spec, err) == I64{0}) -> return I64{0}
+    identity :: process_authority_executable(spec, err)
+    if (identity == I64{0}) -> return I64{0}
+    if (!process_authority_check(spec, err) || !process_authority_check_executable(spec, identity, err)) {
+        jet_rt_string_drop(identity)
+        return I64{0}
+    }
+    bwrap :: process_authority_backend()
+    digest :: process_execution_policy_digest(spec)
+    if (bwrap == I64{0}) {
+        jet_rt_string_drop(identity)
+        cause :: jet_rt_string_builder_new()
+        jet_rt_string_builder_push(cause, rt_static_text("authority-bound process plan refused before spawn: isolation backend unavailable (policy digest "))
+        jet_rt_string_builder_push(cause, digest)
+        jet_rt_string_builder_push(cause, rt_static_text(")"))
+        jet_rt_string_drop(digest)
+        return process_execution_error(spec, HOST_IO_OP_RESOLVE, jet_rt_string_builder_finish(cause), err)
+    }
+    if (bwrap_out != I64{0}) { fd_put(bwrap_out, I64{0}, bwrap) } else { jet_rt_string_drop(bwrap) }
+    secrets :: process_execution_secrets(spec)
+    argv :: data_sequence_new(I64{0}, I64{8})
+    cmd :: fd_word(spec, PROCESS_SPEC_CMD)
+    at := I64{0}
+    loop at < fd_word(cmd, I64{0}) {
+        word :: process_execution_redact(process_authority_at(cmd, at), secrets)
+        process_text_list_push(argv, word)
+        jet_rt_string_drop(word)
+        at += I64{1}
+    }
+    plan :: jet_rt_alloc(I64{72}, I64{8})
+    fd_put(plan, I64{0}, identity)
+    fd_put(plan, I64{8}, argv)
+    fd_put(plan, I64{16}, process_execution_input_digest(spec))
+    fd_put(plan, I64{24}, digest)
+    fd_put(plan, I64{32}, jet_rt_string_clone(process_authority_backend_name()))
+    fd_put(plan, I64{40}, process_authority_receipt_rights(spec, secrets))
+    fd_put(plan, I64{48}, jet_rt_string_clone(if process_authority_detached(spec) -> rt_static_text("detached") else -> rt_static_text("contained")))
+    fd_put(plan, I64{56}, process_execution_limits(spec))
+    fd_put(plan, I64{64}, process_authority_outputs(spec))
+    process_text_list_drop(secrets, false)
+    plan
+}
+// A real directory's canonical path (owned), or 0 with a Resolve error.
+fn process_authority_real_directory(spec: I64, path: I64, err: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{176}, I64{8})
+    name :: fd_c_path(path)
+    bytes :: jet_process_path_canonicalize_raw(name, wrapping(scratch + I64{160}), wrapping(scratch + I64{168}), wrapping(scratch + I64{128}))
+    jet_rt_free(name, rt_text_len(path) + I64{1}, I64{1})
+    if (bytes == I64{0}) {
+        cause :: jet_rt_string_builder_new()
+        jet_rt_string_builder_push(cause, rt_static_text("sandbox directory `"))
+        jet_rt_string_builder_push(cause, path)
+        jet_rt_string_builder_push(cause, rt_static_text("`: "))
+        host_errno_cause_append(cause, fd_word(scratch, I64{136}))
+        jet_rt_free(scratch, I64{176}, I64{8})
+        return process_execution_error(spec, HOST_IO_OP_RESOLVE, jet_rt_string_builder_finish(cause), err)
+    }
+    real :: rt_text_lossy(bytes, fd_word(scratch, I64{160}))
+    jet_rt_free(bytes, fd_word(scratch, I64{168}), I64{1})
+    jet_fs_stat_raw(real, true, scratch, wrapping(scratch + I64{128}))
+    directory :: fd_word(scratch, I64{128}) == I64{0} && fd_word(scratch, I64{16}).bit_and(I64{61440}) == I64{16384}
+    jet_rt_free(scratch, I64{176}, I64{8})
+    if directory -> return real
+    jet_rt_string_drop(real)
+    cause :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(cause, rt_static_text("sandbox path `"))
+    jet_rt_string_builder_push(cause, path)
+    jet_rt_string_builder_push(cause, rt_static_text("` is not a directory"))
+    process_execution_error(spec, HOST_IO_OP_RESOLVE, jet_rt_string_builder_finish(cause), err)
+}
+// `parent/name` as a real directory, created when missing; a symlink or a
+// non-directory there is refused. Owned canonical path, or 0 with `err` set.
+fn process_authority_child_directory(spec: I64, parent: I64, name: I64, err: I64) -> I64 {
+    joined :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(joined, parent)
+    if (rt_text_len(parent) == I64{0} || rt_text_byte(wrapping(wrapping(rt_text_data(parent) + rt_text_len(parent)) - I64{1})) != I64{47}) -> jet_rt_string_builder_push(joined, rt_static_text("/"))
+    jet_rt_string_builder_push(joined, name)
+    path :: jet_rt_string_builder_finish(joined)
+    scratch :: jet_rt_alloc(I64{160}, I64{8})
+    jet_fs_stat_raw(path, false, scratch, wrapping(scratch + I64{128}))
+    errno := if (fd_word(scratch, I64{128}) == I64{0}) -> { I64{0} } else -> { fd_word(scratch, I64{136}) }
+    mode :: fd_word(scratch, I64{16}).bit_and(I64{61440})
+    jet_rt_free(scratch, I64{160}, I64{8})
+    refusal := I64{0}
+    if (errno == I64{0} && mode == I64{40960}) {
+        refusal = rt_static_text("` is a symlink")
+    } else if (errno == I64{0} && mode != I64{16384}) {
+        refusal = rt_static_text("` is not a directory")
+    } else if (errno == I64{2}) {
+        name_c :: fd_c_path(path)
+        made :: host_call(I64{83}, name_c, I64{511}, I64{0})
+        jet_rt_free(name_c, rt_text_len(path) + I64{1}, I64{1})
+        errno = if (made < I64{0}) -> { -made } else -> { I64{0} }
+    }
+    if (refusal != I64{0}) {
+        cause :: jet_rt_string_builder_new()
+        jet_rt_string_builder_push(cause, rt_static_text("sandbox directory `"))
+        jet_rt_string_builder_push(cause, path)
+        jet_rt_string_builder_push(cause, refusal)
+        jet_rt_string_drop(path)
+        return process_execution_error(spec, HOST_IO_OP_RESOLVE, jet_rt_string_builder_finish(cause), err)
+    }
+    if (errno != I64{0}) {
+        jet_rt_string_drop(path)
+        return process_execution_error(spec, HOST_IO_OP_RESOLVE, host_errno_cause(errno), err)
+    }
+    real :: process_authority_real_directory(spec, path, err)
+    jet_rt_string_drop(path)
+    real
+}
+// `FS.Write:.jet/build` exposes `<cwd>/.jet/build` as the writable output.
+fn process_authority_output_directory(spec: I64, source: I64, err: I64) -> I64 {
+    jet :: process_authority_child_directory(spec, source, rt_static_text(".jet"), err)
+    if (jet == I64{0}) -> return I64{0}
+    output :: process_authority_child_directory(spec, jet, rt_static_text("build"), err)
+    jet_rt_string_drop(jet)
+    if (output == I64{0}) -> return I64{0}
+    if jet_string_starts_with(output, source) -> return output
+    jet_rt_string_drop(output)
+    process_authority_refuse(spec, rt_static_text("authority-bound process output escaped its workspace"), err)
+}
+// The explicit child environment (env set minus env remove), sorted by name.
+fn process_authority_environment(spec: I64, err: I64) -> I64 {
+    env :: process_execution_environment(spec, err)
+    if (env == I64{0}) -> return I64{0}
+    data :: fd_word(env, I64{16})
+    i := I64{1}
+    loop i < fd_word(env, I64{0}) {
+        j := i
+        loop j > (I64{0}) && jet_rt_string_compare(fd_word(data, (j - I64{1}) * I64{16}), fd_word(data, j * I64{16})) > (I64{0}) {
+            key :: fd_word(data, j * I64{16})
+            value :: fd_word(data, j * I64{16} + I64{8})
+            fd_put(data, j * I64{16}, fd_word(data, (j - I64{1}) * I64{16}))
+            fd_put(data, j * I64{16} + I64{8}, fd_word(data, (j - I64{1}) * I64{16} + I64{8}))
+            fd_put(data, (j - I64{1}) * I64{16}, key)
+            fd_put(data, (j - I64{1}) * I64{16} + I64{8}, value)
+            j -= I64{1}
+        }
+        i += I64{1}
+    }
+    env
+}
+// The plain spec that runs a bound spec inside bubblewrap: same streams,
+// limits and inherited descriptors; the command becomes the bubblewrap argv
+// around the planned executable, and the bound cwd, environment and policy
+// move inside the sandbox. Owned, or 0 with `err` set.
+fn process_authority_sandbox(spec: I64, err: I64) -> I64 {
+    slot :: jet_rt_alloc(I64{8}, I64{8})
+    fd_put(slot, I64{0}, I64{0})
+    plan :: process_authority_plan(spec, slot, err)
+    bwrap :: fd_word(slot, I64{0})
+    jet_rt_free(slot, I64{8}, I64{8})
+    if (plan == I64{0}) -> return I64{0}
+    rights :: process_authority_rights(spec)
+    readable :: process_authority_has(rights, rt_static_text("FS.Read:repo"))
+    writable :: process_authority_has(rights, rt_static_text("FS.Write:.jet/build"))
+    shared :: process_authority_has(rights, rt_static_text("Net"))
+    process_text_list_drop(rights, false)
+    source :: process_authority_real_directory(spec, process_authority_cwd(spec, err), err)
+    output := I64{0}
+    if (source != I64{0} && writable) -> output = process_authority_output_directory(spec, source, err)
+    env := I64{0}
+    if (source != I64{0} && (!writable || output != I64{0})) -> env = process_authority_environment(spec, err)
+    if (env == I64{0}) {
+        jet_rt_string_drop(source)
+        jet_rt_string_drop(output)
+        jet_rt_string_drop(bwrap)
+        jet_rt_handle_drop_process_plan(plan)
+        return I64{0}
+    }
+    argv :: process_authority_bwrap_argv(bwrap, source, output, env, shared, readable, process_execution_first(spec))
+    process_text_list_push(argv, fd_word(plan, I64{0}))
+    cmd :: fd_word(spec, PROCESS_SPEC_CMD)
+    at := I64{1}
+    loop at < fd_word(cmd, I64{0}) {
+        process_text_list_push(argv, process_authority_at(cmd, at))
+        at += I64{1}
+    }
+    process_text_list_drop(env, true)
+    jet_rt_string_drop(source)
+    jet_rt_string_drop(output)
+    jet_rt_string_drop(bwrap)
+    jet_rt_handle_drop_process_plan(plan)
+    sandboxed :: jet_rt_handle_clone_process_spec(spec)
+    process_text_list_drop(fd_word(sandboxed, PROCESS_SPEC_CMD), false)
+    fd_put(sandboxed, PROCESS_SPEC_CMD, argv)
+    jet_rt_string_drop(fd_word(sandboxed, PROCESS_SPEC_CWD))
+    fd_put(sandboxed, PROCESS_SPEC_CWD, I64{0})
+    process_text_list_drop(fd_word(sandboxed, PROCESS_SPEC_ENV_SET), true)
+    fd_put(sandboxed, PROCESS_SPEC_ENV_SET, data_sequence_new(I64{0}, I64{16}))
+    process_text_list_drop(fd_word(sandboxed, PROCESS_SPEC_ENV_REMOVE), false)
+    fd_put(sandboxed, PROCESS_SPEC_ENV_REMOVE, data_sequence_new(I64{0}, I64{8}))
+    fd_put(sandboxed, PROCESS_SPEC_ENV_CLEAR, I64{0})
+    jet_rt_string_drop(fd_word(sandboxed, PROCESS_SPEC_POLICY_WIRE))
+    fd_put(sandboxed, PROCESS_SPEC_POLICY_WIRE, I64{0})
+    sandboxed
+}

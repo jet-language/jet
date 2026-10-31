@@ -546,6 +546,13 @@ fn ir_list_items_lack_clone(m: &IRModule, p: IRProgram, row: Int) -> Bool Never!
     }
 }
 
+// Whether the type of `row` has no clone glue: a handle without a clone, a
+// single-use value, an Iter, or a List, struct or tuple holding one.
+fn ir_row_lacks_clone(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
+    ty :: ir_untag(m.types[row].ty)
+    !ir_lazy_type_can_clone(&m, p, ty)
+}
+
 // An Iter over `list` (jet_rt_native_iter_from_list), `meta` its element
 // descriptor: a fresh List's header moves in; any other's items are cloned.
 // Items without clone glue have no clone path: their List is uniquely owned
@@ -1382,7 +1389,7 @@ fn ir_lazy_walk_source(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?
     step_block :: ir_open(&b.f, IROp.Block, b.line)
     ir_scope_open(&b)
     mark :: b.bindings.len()
-    &b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: mark})
+    &b.loops.push(IRLoopFrame{label: label, exit: exit, next: step_block, mark: mark, guards: b.statement_guards.len()})
     if countdown >= 0 {
         between :: ir_bool_op(&m, &b, IROp.Ne, countdown, zero)
         ir_open_if(&b.f, between, b.line)
@@ -1724,7 +1731,7 @@ fn ir_shared_guard_payload(m: &IRModule, p: IRProgram, b: &IRBuilder, guard: Int
     payload :: ir_runtime(&m, &b, if editable -> "jet_rt_native_shared_edit_guard_edit" else -> "jet_rt_native_shared_read_guard_deref", [Int]{held}, pointer_row)
     if b.fresh[held] {
         b.fresh[held] = false
-        &b.statement_guards.push(held)
+        ir_hold_statement_guard(&b, held, -1, true)
     }
     b.fresh[payload] = false
     payload

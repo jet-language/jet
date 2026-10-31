@@ -70,7 +70,6 @@ tests/ui/import_ambiguous	#6425	check not ported: E0606
 tests/ui/import_boundary	#6425	check not ported: E0619
 tests/ui/import_boundary_invalid	#6425	check not ported: E1206
 tests/ui/import_boundary_unused	#6006	check not ported: L0619
-tests/ui/import_private_field	#6425	check not ported: E0605
 tests/ui/impure_no_reason	#6425	check not ported: E0999
 tests/ui/impure_tier2_no_gate	#4926	E3410 names the effect class (`opening a file`), not the call `core.files.read()` (#4926 C4)
 tests/ui/index_non_collection_reported_once	#6425	check not ported: E0505
@@ -465,6 +464,7 @@ tests/cases/local_cell_tiers/local_cell_full_surface_runs_through_default_tier.c
 tests/cases/local_cell_tiers/local_cell_generic_shapes_run_through_default_tier.case	#5454	`jet run` rejects `Cell.new(value)` on a `^(Int CellResultError!)` parameter with E0209 (implicit clone) (#5502)
 tests/cases/core_files_opaque_handles/file_handle_paths_are_read_only_provider_views_across_tiers.case	#5454	`jet run` is E2104: the Jet runtime exports no `jet_rt_handle_field_jet_file_reader_path` route for `FileReader.path`
 tests/cases/core_files_opaque_handles/owned_file_replacement_releases_only_the_displaced_live_owner.case	#5454	`jet run` is E2104: the Jet backend can't lower the drop of a held TempFile when an aggregate field is reassigned (`holder.owner = ...`)
+tests/cases/core_files_opaque_handles/file_handles_have_no_fd_fields_and_cannot_be_written_or_forged.case	#6462	no E0339/E0605: `.path` of TempFile/TempDir/FileLock is readable by spec (core-library.md:635,701) and `priv` is read-private too; refusing the write and the forged literal waits on an owner ballot for a read-only field form
 tests/cases/measurement_tiers/measurement_observations_are_methods_not_public_fields.case	#5454	ICE: semantic body rechecking did not return a complete resolved package graph (`m := measurement(..)` checked incomplete without a report) (#5507)
 tests/cases/build_entry_epoch4/workspace_build_observes_dependency_order_and_execution_chain.case	#5454	`jet build workspace.jet` reports E2105 (no `fn run` to build) instead of running the workspace and member `fn build` entries (#5496)
 tests/cases/compute_cuda/cuda_f32_backend_runs_or_fails_closed_across_all_tiers.case	#5454	E0112: the checker types `compute.matrix(..)` as `Matrix<1, 1>`, and `matmul_f32_tile` then rejects it as not a `Tensor` (#5494)
@@ -930,14 +930,7 @@ tests/cases/web_build/web_wasm_map_string_int_export_hostile_roundtrip.case	#520
 tests/cases/web_build/web_wasm_range_loop_bridge_roundtrip.case	#5201	pins the retired JS emitter's build (manifest `"status": "m2"`, JS output and exports); the wasm build writes none of it
 tests/cases/web_build/web_wasm_string_export_hostile_roundtrip.case	#5201	pins the retired JS emitter's build (manifest `"status": "m2"`, JS output and exports); the wasm build writes none of it
 tests/cases/web_build/web_wasm_string_param_export_hostile_roundtrip.case	#5201	pins the retired JS emitter's build (manifest `"status": "m2"`, JS output and exports); the wasm build writes none of it
-tests/cases/ws_law/accept_key_matches_rfc6455_example.case	#4957	`ws.upgrade` is not built yet (E2104)
-tests/cases/ws_law/client_and_server_echo_text_over_live_sockets.case	#4957	`ws.upgrade` is not built yet (E2104)
-tests/cases/ws_law/hostile_handshake_missing_version_fails_closed.case	#4957	`ws.upgrade` is not built yet (E2104)
-tests/cases/ws_law/hostile_url_controls_are_rejected_before_handshake_serialization.case	#4957	`ws.connect` is not built yet (E2104)
-Examples/features/net/ws_echo	#4957	`ws.upgrade` is not built yet (E2104)
 Examples/features/packages/mod_load_errors	#4599	`mod.load` is not built yet (E2104)
-Examples/features/io/agent_executor	#4268	the authority-bound process launch (sandbox, plan digest, redaction) is not ported to the Jet runtime yet
-Examples/features/types/authority	#4268	the authority-bound process launch (sandbox, plan digest, redaction) is not ported to the Jet runtime yet
 Examples/features/lowlevel/polyglot_go	#6418	`jet inspect bind` reports E2104 not built yet; `use go.handles` reports E1002 (foreign root `go` reserved)
 Examples/features/lowlevel/ffi	#6366	ir.build unlowered: foreign import requires a checked direct C scalar signature (BuildForeign.jet:35); extern rust slot trampoline jet_ffi_<name>_cabi has no IR call lowering
 Examples/features/tooling/compute_autodiff	#4599	E0112 `compute.jvp` needs a function returning `Tensor`; jvp/VJPRun storage is not in the registered compute vocabulary
@@ -1361,12 +1354,14 @@ tests/cases/http_client_law/follow_same_origin_credentials_strips_authorization_
 tests/cases/http_client_law/public_client_proxy_none_ignores_environment_proxy.case	#3665	configured client proxy selection not ported: Client.proxy(.None) is E0330
 tests/cases/http_client_law/public_client_proxy_url_sends_absolute_form.case	#3665	configured client proxy selection not ported: Client.proxy(.URL(...)) is E0330
 tests/cases/http_client_law/explicit_h2c_negotiates_hpack_and_reuses_one_session.case	#3665	h2c client not ported: HTTPResponse.protocol() is E0102, no h2/hpack in Core
-tests/cases/http_client_law/gzip_decoding_streams_before_the_response_finishes.case	#3665	configured client not ported; HTTPClientNew/Method have no runtime export or IR builder (ICE ir.build unlowered)
-tests/cases/http_client_law/unreplayable_307_closes_redirect_body.case	#3665	configured client not ported; HTTPClientNew/Method have no runtime export or IR builder (ICE ir.build unlowered)
-tests/cases/http_client_law/h2_bounds_queued_frames_for_another_active_stream.case	#3665	h2 client not ported; HTTPClientMethod has no runtime export or IR builder (ICE ir.build unlowered)
-tests/cases/http_client_law/h2_rejects_idle_stream_flood_before_queue_growth.case	#3665	h2 client not ported; HTTPClientMethod has no runtime export or IR builder (ICE ir.build unlowered)
-tests/cases/http_client_law/h2_rejects_invalid_hpack_names_padding_and_body_lengths.case	#3665	h2 client and hpack decoder not ported; HTTPClientMethod has no runtime export or IR builder (ICE ir.build unlowered)
-tests/cases/http_client_law/h2_response_body_overrun_is_rejected_at_64_mib.case	#3665	h2 client not ported; HTTPClientMethod has no runtime export or IR builder (ICE ir.build unlowered)
+tests/cases/http_client_law/gzip_decoding_streams_before_the_response_finishes.case	#3665	configured client not ported: HTTPClient.new has no runtime route and HTTPClient methods no IR builder, so build refuses `HTTPClient.new` with E2104
+tests/cases/http_client_law/unreplayable_307_closes_redirect_body.case	#3665	configured client not ported: HTTPClient.new has no runtime route and HTTPClient methods no IR builder, so build refuses `HTTPClient.new` with E2104
+tests/cases/http_client_law/h2_bounds_queued_frames_for_another_active_stream.case	#3665	h2 client not ported: HTTPClient.new has no runtime route and HTTPClient methods no IR builder, so build refuses `HTTPClient.new` with E2104
+tests/cases/http_client_law/h2_rejects_idle_stream_flood_before_queue_growth.case	#3665	h2 client not ported: HTTPClient.new has no runtime route and HTTPClient methods no IR builder, so build refuses `HTTPClient.new` with E2104
+tests/cases/http_client_law/h2_rejects_invalid_hpack_names_padding_and_body_lengths.case	#3665	h2 client and hpack decoder not ported: HTTPClient.new has no runtime route and HTTPClient methods no IR builder, so build refuses `HTTPClient.new` with E2104
+tests/cases/http_client_law/h2_response_body_overrun_is_rejected_at_64_mib.case	#3665	h2 client not ported: HTTPClient.new has no runtime route and HTTPClient methods no IR builder, so build refuses `HTTPClient.new` with E2104
+tests/cases/http_client_law/public_client_tls_custom_only_trust.case	#3665	configured client TLS policy not ported: HTTPClient.new has no runtime route and HTTPClient methods no IR builder, so build refuses `HTTPClient.new` with E2104
+tests/cases/http_client_law/public_client_tls_identity_and_version_bounds.case	#3665	configured client TLS policy not ported: HTTPClient.new has no runtime route and HTTPClient methods no IR builder, so build refuses `HTTPClient.new` with E2104
 tests/cases/http_client_law/h2_upload_streams_data_frames_before_body_eof.case	#3665	streaming upload body not ported: Body.reader is typed Body, not Result<Body, HTTPError> as before the Rust removal (E0405), and its runtime route JetHTTPBody::from_reader[_with_length] has no IR builder (ICE)
 tests/cases/http_client_law/post_307_replays_streamed_body_under_redirect_tee_cap.case	#3665	streaming upload body and redirect tee not ported: Body.reader is typed Body, not Result<Body, HTTPError> as before the Rust removal (E0405), and its runtime route JetHTTPBody::from_reader[_with_length] has no IR builder (ICE)
 tests/cases/http_client_law/unknown_length_upload_uses_h1_chunked_transfer_encoding.case	#3665	streaming upload body not ported: Body.reader is typed Body, not Result<Body, HTTPError> as before the Rust removal (E0405), and its runtime route JetHTTPBody::from_reader[_with_length] has no IR builder (ICE)
