@@ -764,7 +764,7 @@ fn cli_realize_tool_manifest(verification: &StoreVerification, theme: Theme, par
         live := LiveRegion?{None}
         outcome :: cli_realize_ref_outcome(&verification, theme, roots, parsed.flags, table, spec, name_w, RowStyle.Ledger, &live, RealizeScope.UserProfile)
         lease :: if outcome == {
-            .Realized(_, _, _, realized) -> realized
+            .Realized(_, _, _, realized) -> ^realized
             .NeedsNix(need) -> {
                 cli_report_nix_bridge_required(theme, parsed.flags, [NixBridgeNeed]{need}, [String]{})
                 return Err(CLIError.Other("user-tools entry needs a Nix compatibility output"))

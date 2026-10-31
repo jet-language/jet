@@ -126,6 +126,24 @@ fn jet_eval_ir_host_constant_route(s: &JetEvalIRState, args: [Int], dst_row: Int
     jet_eval_ir_host_store(&types.value, layouts.value[0], &s, layouts.value[0].constant_defs[at].value, dst_row, area)
 }
 
+// jet_comptime_host_literal(key): a compile-time literal that is a compiler
+// value, which the built module keeps under `key` (ir_host_literal).
+fn jet_eval_ir_host_literal_route(s: &JetEvalIRState, args: [Int], dst_row: Int, area: Int) -> Int? {
+    if args.len() != 1 || dst_row < 0 -> return jet_eval_ir_primitive_shape(&s, "jet_comptime_host_literal")
+    key :: jet_eval_ir_text(&s, args[0]) ?? return None
+    types_cell :: jet_eval_ir_host_types(&s) ?? return None
+    layouts_cell :: jet_eval_ir_host_layouts(&s) ?? return None
+    types := types_cell.guard_edit()
+    layouts :: layouts_cell.guard_read()
+    found :: types.value.host_literals.get(key) ?? {
+        jet_eval_ir_problem(&s, "compiler value literal {key} is not in the built module")
+        return None
+    }
+    // copy: the store below edits the module `found` reads
+    value :: found.copy()
+    jet_eval_ir_host_store(&types.value, layouts.value[0], &s, value, dst_row, area)
+}
+
 // The type row of `types` whose intern key is the String at `key` (the
 // builder's ir_host_row_key).
 fn jet_eval_ir_host_row(types: IRModule, s: &JetEvalIRState, key: Int) -> Int? Never! {

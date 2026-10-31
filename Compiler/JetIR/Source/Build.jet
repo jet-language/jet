@@ -1592,6 +1592,11 @@ fn ir_own(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) -> Int Never! {
             b.fresh[slot] = true
             return slot
         }
+        // A List whose items have no clone glue is never shared: a by-value
+        // walk of a shared buffer clones each item (jet_rt_native_iter_from_list),
+        // and there is no clone to call. Sema keeps such a List uniquely
+        // owned, so meeting one here is an internal error (I2).
+        if ir_list_items_lack_clone(&m, p, row) -> return ir_fail_slot(&b, Span{start: 0, end: 0}, "a shared {ir_type_name(m.types[row].ty)}, whose items have no clone")
         return ir_copy_value(&m, p, &b, slot, Span{start: 0, end: 0})
     }
     symbol :: m.types[row].clone
@@ -1916,6 +1921,7 @@ fn ir_route_can_stop(symbol: String) -> Bool Never! {
         "jet_rt_string_from_static" | "jet_rt_string_byte_len" | "jet_rt_string_compare" | "jet_rt_string_clear" | "jet_journey_reset" -> false
         "jet_rt_cleanup_enter" | "jet_rt_cleanup_leave" | "jet_rt_session_propagate" | "jet_rt_session_status" -> false
         "jet_ctx_push_deadline" | "jet_ctx_pop_deadline" -> false
+        "jet_term_mode_enter" | "jet_term_mode_leave" -> false
         "jet_rt_sentry_scope_enter" | "jet_rt_sentry_policy_enter" | "jet_rt_sentry_scope_leave" | "jet_rt_sentry_frame_enter" | "jet_rt_sentry_frame_leave" | "jet_rt_sentry_register_stack_allocation" -> false
         "jet_rt_native_closure_retain" | "jet_rt_native_closure_unref" -> false
         "jet_rt_native_shared_downgrade" | "jet_rt_native_shared_weak_upgrade" | "jet_rt_shared_owner_strong_count" -> false

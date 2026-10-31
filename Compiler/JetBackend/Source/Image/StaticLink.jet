@@ -36,7 +36,8 @@
 //    general/local-dynamic to local-exec, initial-exec to local-exec, and
 //    GOT loads/calls to direct `lea`/`call`/`jmp` when the instruction allows.
 // 6. Debug tail: after the loaded image, the relocated `.debug_*` sections
-//    of the directly linked objects, a `.symtab` and section headers.
+//    of the directly linked objects (none without `debug_info`), a `.symtab`
+//    and section headers.
 //
 // Inputs are read in place. Section headers and local symbols are not copied
 // into tables (a runtime codegen unit has ~63k sections): they are read from
@@ -2241,10 +2242,13 @@ struct LinkSectionHeader {
 // Give every unloaded, uncompressed, non-empty `.debug_*` section of a
 // directly linked object a row (with no GOT slots) whose address is its
 // offset in the output section of its name, so relocations against it yield
-// DWARF section offsets. An empty one (every one under `debug_info: false`)
-// names no output section.
-fn link_debug_sections(c: &LinkContext) -> LinkDebug Never! {
+// DWARF section offsets. An empty one names no output section. Without
+// `debug_info` (the build's option) no input's debug section gets a row, so
+// the image has no `.debug_*` section whatever the directly linked objects
+// carry: the program object's, the Jet runtime object's and C objects' alike.
+fn link_debug_sections(c: &LinkContext, debug_info: Bool) -> LinkDebug Never! {
     debug := LinkDebug{names: [String]{}, rows: [[Int]]{}, sizes: [Int]{}}
+    if !debug_info -> return debug
     groups := [String:Int]{}
     loop obj in 0..<c.obj_name.len() {
         if c.obj_base[obj] != 0 -> next
@@ -2541,14 +2545,14 @@ fn link_resident_failure(errors: ^[String]) -> X64ResidentLinkResult Never! {
 // runtime pack starts, none of whose kept code needs libc's startup, starts
 // at its own (link_owned_fits). The ELF header is loaded at `base`
 // (LINK_BASE, or LINK_RUN_BASE for Image/Loader.jet).
-fn x64_link_executable(names: [String], bufs: ^[[U8]], base: Int, threads: CompilerThreads) -> X64ExecutableResult Never! {
-    linked := link_executable_image(names, ^bufs, base, None, threads)
+fn x64_link_executable(names: [String], bufs: ^[[U8]], base: Int, threads: CompilerThreads, debug_info: Bool) -> X64ExecutableResult Never! {
+    linked := link_executable_image(names, ^bufs, base, None, threads, debug_info)
     ^linked.image
 }
 
 // The single canonical executable engine. No request means no export census,
 // extra roots, descriptor arrays or image copy for ordinary executable links.
-fn link_executable_image(names: [String], bufs: ^[[U8]], base: Int, request: ^X64ResidentLinkRequest?, threads: CompilerThreads) -> X64ResidentLinkResult Never! {
+fn link_executable_image(names: [String], bufs: ^[[U8]], base: Int, request: ^X64ResidentLinkRequest?, threads: CompilerThreads, debug_info: Bool) -> X64ResidentLinkResult Never! {
     c := link_context(^bufs, base)
     if request == .Val(wanted) {
         if names.len() != c.bufs.len() || wanted.runtime_input < 0 || wanted.runtime_input >= names.len() -> return link_resident_failure(^[String]{"resident runtime input is outside the actual link inputs"})
@@ -2601,9 +2605,10 @@ fn link_executable_image(names: [String], bufs: ^[[U8]], base: Int, request: ^X6
     startup :: link_has_startup(c)
     link_define_names(&c, layout, startup)
     entry :: link_global_addr(c, entry_g)
-    // The unloaded debug tail (`.debug_*`, `.symtab`, section headers) follows
-    // the loaded image, so profilers and debuggers name the code.
-    debug :: link_debug_sections(&c)
+    // The unloaded debug tail (`.debug_*` under `debug_info`, `.symtab`,
+    // section headers) follows the loaded image, so profilers and debuggers
+    // name the code.
+    debug :: link_debug_sections(&c, debug_info)
     // The sections' bytes, relocated on the threads, then written in order.
     emitted := link_emit_pieces(^c, link_emitted_rows(layout, debug), threads)
     c = ^emitted.context

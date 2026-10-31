@@ -1,7 +1,7 @@
 // 2: checked Output links and tool selection, ported from
 // Sema/Bundle/Outputs.rs. Resolve against the existing registration graph;
 // collect owned facts before publishing so no graph read survives a write.
-use jet_foundation.[ConstDef, Diagnostic, EnumLitArg, Expr, ExprMember, Item, OutputCallableAuthority, OutputKind, OutputParam, ResolvedOutput, Span, Symbol, SymbolKind, TGenericParam, Type, expr_span, failure_contract_of_function, name_mangle, symbol_id]
+use jet_foundation.[ConstDef, Diagnostic, EnumLitArg, Expr, ExprMember, Item, OutputCallableAuthority, OutputKind, OutputParam, ResolvedOutput, Span, Symbol, SymbolKind, TGenericParam, Type, diagnostic_from_registry, expr_span, failure_contract_of_function, name_mangle, symbol_id]
 
 enum SemaOutputIntent {
     Check
@@ -33,6 +33,12 @@ struct SemaOutputRow {
 
 fn sema_output_error(span: Span, what: String, why: String, fix: String) -> Diagnostic {
     sema_error("E1321", span, what, why, fix)
+}
+
+// E0101: a run or build of a program whose entry file selects nothing to
+// start at (spec.md:2115-2117).
+fn sema_no_run_diagnostic() -> Diagnostic Never! {
+    diagnostic_from_registry("E0101", None, "this program has no `run` function", "running a program starts at `fn run`, and the entry file doesn't define one", "add `fn run() {{ ... }}` to the entry file")
 }
 
 fn sema_output_kind(name: String) -> OutputKind? Never! {
@@ -367,7 +373,9 @@ fn sema_output_entry_span(graph: SemaRegistrationGraph, entry_index: Int) -> Spa
 
 // All modules/Outputs are diagnosed independently. Selection is an entry-file
 // projection of these same checked facts, never another load/check/resolver.
-fn sema_output_resolve(graph: &SemaRegistrationGraph, intent: SemaOutputIntent, explicit_address: String?) -> [Diagnostic] Never! {
+// `manifest_entry`: the entry package's manifest binds an `outputs.*.entry`
+// function, which the driver starts at when no source Output is selected.
+fn sema_output_resolve(graph: &SemaRegistrationGraph, intent: SemaOutputIntent, explicit_address: String?, manifest_entry: Bool) -> [Diagnostic] Never! {
     diagnostics := [Diagnostic]{}
     rows := [SemaOutputRow]{}
     loop (module_index, module_row) in graph.modules {
@@ -496,6 +504,10 @@ fn sema_output_resolve(graph: &SemaRegistrationGraph, intent: SemaOutputIntent, 
     }
     selected := false
     loop row in rows { if row.fact.selected -> selected = true }
+    // With no address, no legacy `fn run`, no selected Output and no manifest
+    // entry binding, a singular run has no entry, alongside any ambiguity
+    // reported above.
+    if intent == SemaOutputIntent.Run && explicit_address == None && legacy == None && !selected && !manifest_entry -> &diagnostics.push(sema_no_run_diagnostic())
     if (intent == SemaOutputIntent.Run || intent == SemaOutputIntent.Check) && legacy != None && !selected {
         function :: graph.modules[entry_index].functions[legacy ?? 0]
         _ := sema_output_entry_contract(graph, entry_index, function, "run", OutputKind.Executable, function.symbol.span, "change `fn run` to take zero or one typed CLI parameter and return `()` or `() ?`", &diagnostics)

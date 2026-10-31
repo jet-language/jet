@@ -677,9 +677,10 @@ fn ir_stmt_body(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Never
             if ir_iter_element(ir_ty(p, b, collection)) != None -> return ir_lazy_walk(&m, p, &b, label, variable, variable_two, collection, step, body, span)
             ir_list_walk(&m, p, &b, label, variable, variable_two, collection, body, span)
         }
-        // Scopes whose markers lower to nothing: their body runs as a plain
+        // A scope whose marker lowers to nothing: its body runs as a plain
         // scope.
-        .DebugOnly(body, _) | .Live(body, _) -> ir_stmts(&m, p, &b, body)
+        .DebugOnly(body, _) -> ir_stmts(&m, p, &b, body)
+        .Live(body, _) -> ir_live(&m, p, &b, body)
         .Unsafe(gate, body) -> ir_unsafe_scope(&m, p, &b, gate, body)
         .UnsafeBlock(gate, body, _) -> ir_unsafe_scope(&m, p, &b, gate, body)
         .SentryPolicy(enabled, body, _) -> ir_sentry_policy(&m, p, &b, enabled, body)
@@ -2913,10 +2914,12 @@ fn ir_note_binder_mention(p: IRProgram, b: IRBuilder, expression: Int, id: Symbo
     }
 }
 
-// `print(value)`: its shown text to stdout with a line end and a flush
-// (jet_term_write_stdout_line(text, flush 1)). A value whose type selects a
-// Display implementation prints that rendering: an explicit Display before
-// the Printable show.
+// `print(value)`: its shown text to stdout with a line end
+// (jet_term_write_stdout_line(text, flush 0)), buffered by the runtime's
+// stdout: a terminal's flushes at each line end, a pipe's or file's when its
+// buffer fills, before stderr, any read of stdin, a child and the
+// process stop. A value whose type selects a Display implementation prints
+// that rendering: an explicit Display before the Printable show.
 fn ir_print(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, span: Span) Never! {
     value_ty :: ir_ty(p, b, value)
     slot :: ir_expr(&m, p, &b, value)
@@ -2926,7 +2929,7 @@ fn ir_print(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, span: Span) N
     if ir_failed(b) -> return
     bool_row :: ir_type_row(&m, Type.Bool) ?? 0
     flush :: ir_temp(&m, &b, bool_row)
-    ir_emit(&b.f, IROp.Const, flush, 1, -1, -1, b.line)
+    ir_emit(&b.f, IROp.Const, flush, 0, -1, -1, b.line)
     _ :: ir_runtime(&m, &b, "jet_term_write_stdout_line", [Int]{text, flush}, -1)
     if text != slot -> ir_release(&m, &b, text)
     ir_release(&m, &b, slot)
@@ -4817,11 +4820,13 @@ fn ir_core_function(b: IRBuilder) -> Bool Never! {
     b.f.key.starts_with("<corelib>/") || b.f.source_file.starts_with("<corelib>/")
 }
 
-// Whether the function being built is the generated typed-CLI entry
-// (`__jet_cli_run`, D-SHAPE-CLI1): its dispatch to the user's `run` or command
-// hands the user's failure on unchanged, so, like Core, it is no journey hop.
+// Whether the function being built is a generated typed-CLI entry
+// (`__jet_cli_run`, or `__jet_cli_run_<binding>` of an Executable Output; see
+// JetSema Registration/CliEntry.jet): its dispatch to the user's entry or
+// command hands the user's failure on unchanged, so, like Core, it is no
+// journey hop.
 fn ir_cli_entry_function(b: IRBuilder) -> Bool Never! {
-    b.f.key.ends_with("::__jet_cli_run")
+    b.f.key.ends_with("::__jet_cli_run") || b.f.key.contains("::__jet_cli_run_")
 }
 
 // Whether `Err(error)` in the function being built is Core library code
@@ -6230,6 +6235,7 @@ fn ir_function_value(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: S
 fn ir_comptime(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: TComptimeValue, span: Span) -> Int Never! {
     if value == .Unit -> return -1
     row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    if ir_host_value_row(m, p, row) != None -> return ir_host_literal(&m, &b, row, value)
     if value == {
         .Int(number) -> return ir_int_constant(&m, &b, row, number)
         .Bool(flag) -> return ir_int_constant(&m, &b, row, if flag -> 1 else -> 0)

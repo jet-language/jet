@@ -335,7 +335,7 @@
     }
     hit :: store_find_verified_by_reference(&verification, roots, "typed@mine", store_test_expectation(out)) ? found -> found ! error -> panic("lookup")
     verified :: hit ?? panic("record must verify")
-    cached :: VerifiedRealization{entry: verified.entry, source_state_value: SourceState.Cached, lease: verified.lease}
+    cached :: VerifiedRealization{entry: verified.entry, source_state_value: SourceState.Cached, lease: ^verified.lease}
     assert(cached.consumption_status() == ConsumptionStatus.Consumable)
     assert_eq(cached.source_state(), SourceState.Cached)
 

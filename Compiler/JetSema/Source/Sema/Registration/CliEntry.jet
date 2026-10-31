@@ -3,11 +3,18 @@
 // D-ARGS1 spec of `T` with the `core.args` `__cli_*` helpers, parses
 // `process.argv()` and then calls `run` (or, when `T` declares commands, the
 // selected command). The driver picks `__jet_cli_run` as the entry of such a
-// program. A `T` of the entry file expands right after that file parses; an
-// imported `T` gets the entry's imports then and its wrapper once every module
-// has loaded. The spec follows Rust `command_schema_with_items` (CLISchema.rs)
-// and the entry follows Rust `jet_cli_entry` (MIRRust.rs). A program the
-// `#CLI` checks refuse (E1305/E1345) gets no wrapper; the checks report it.
+// program. An Executable Output of the entry file whose `entry:` takes one
+// typed CLI parameter (syntax-decisions.md:7416-7419) gets the same wrapper,
+// named for its binding (sema_cli_entry_output_wrapper), and the driver picks
+// it when sema selects that Output. A wrapper whose function and `T` are in
+// the entry file expands right after that file parses; one over an imported
+// `T` or a qualified `entry: module.function` gets the entry's imports then
+// and its wrapper once every module has loaded. The spec follows Rust
+// `command_schema_with_items` (CLISchema.rs) and the entry follows Rust
+// `jet_cli_entry` (MIRRust.rs). A program the `#CLI` checks refuse
+// (E1305/E1345) gets no wrapper; the checks report it. Every `#CLI` struct
+// also gets the decoder behind `args.decode<T>()` and a `T.merge` from the
+// same spec (sema_cli_entry_projections).
 use core.text as unicode
 use jet_foundation.[
     Expr,
@@ -23,54 +30,156 @@ use jet_parser.[
 ]
 
 SEMA_CLI_ENTRY_NAME :: "__jet_cli_run"
+SEMA_CLI_DECODE_METHOD :: "__jet_cli_decode"
 SEMA_CLI_ENTRY_IMPORTS :: "use core.args as __jet_cli_args\nuse core.process as __jet_cli_process\nuse core.term as __jet_cli_term\n"
 
-// Parse-time step for the entry file. The fragment lexes as generated code:
-// its `__` names are the compiler's.
+// One typed entry of the entry file that has no wrapper yet: `wrapper` calls
+// `function`, through `module_alias` when the entry is `module.function`.
+struct SemaCLIEntryTarget {
+    wrapper: String
+    function: String
+    module_alias: String?
+}
+
+// The generated entry of the Executable Output bound to `address`.
+fn sema_cli_entry_output_wrapper(address: String) -> String {
+    "{SEMA_CLI_ENTRY_NAME}_{unicode.lower(address)}"
+}
+
+// Parse-time step for each user file: the entry file's typed entries and
+// every file's `#CLI` projections. The fragment lexes as generated code: its
+// `__` names are the compiler's.
 fn sema_cli_entry_expand(program: &Program) {
-    type_name :: sema_cli_entry_run_type(program.items) ?? return
-    entry := ""
-    local := false
-    if sema_cli_entry_struct(program.items, type_name) == .Val(definition) {
-        entry = sema_cli_entry_source(definition, program.items) ?? return
-        local = true
+    targets :: sema_cli_entry_pending(program.items)
+    entries := sema_cli_entry_projections(program.items)
+    if targets.len() == 0 && entries.len() == 0 -> return
+    // A qualified entry or an imported `T` waits for every module to load.
+    later := false
+    loop target in targets {
+        if target.module_alias != None {
+            later = true
+            next
+        }
+        ty :: sema_cli_entry_param(program.items, target.function) ?? next
+        type_name :: sema_registration_cli_named_leaf(ty) ?? next
+        definition :: sema_cli_entry_struct(program.items, type_name) ?? {
+            later = true
+            next
+        }
+        entry :: sema_cli_entry_source(definition, program.items, type_name, target) ?? next
+        &entries.push(entry)
     }
-    parsed :: parse_generated_source("{SEMA_CLI_ENTRY_IMPORTS}\n{entry}".bytes())
+    if entries.len() == 0 && !later -> return
+    parsed :: parse_generated_source("{SEMA_CLI_ENTRY_IMPORTS}\n{entries.join("\n")}".bytes())
     if parsed.diagnostics.len() > 0 -> return
     loop declaration in parsed.program.imports -> &program.imports.push(declaration)
     loop item in parsed.program.items -> &program.items.push(item)
     loop name in parsed.program.used_import_names -> &program.used_import_names.push(name)
-    // An imported `T` uses these aliases from the wrapper added after loading.
-    if !local {
+    // A wrapper added after loading uses these aliases.
+    if later {
         aliases :: [String]{"__jet_cli_args", "__jet_cli_process", "__jet_cli_term"}
         loop name in aliases -> &program.used_import_names.push(name)
     }
 }
 
-// Post-load step for a `T` imported into the entry file: `imported` holds the
-// items of the other loaded user modules.
+// Post-load step for the entries that waited: `imported` holds the items of
+// the other loaded user modules sema_cli_entry_module_needed kept.
 fn sema_cli_entry_expand_imported(program: &Program, imported: [Item]) {
-    type_name :: sema_cli_entry_run_type(program.items) ?? return
-    if sema_cli_entry_struct(program.items, type_name) == .Val(_) -> return
-    definition :: sema_cli_entry_struct(imported, type_name) ?? return
-    bindings := imported.copy()
-    loop item in program.items -> &bindings.push(item.copy())
-    entry :: sema_cli_entry_source(definition, bindings) ?? return
-    parsed :: parse_generated_source(entry.bytes())
-    if parsed.diagnostics.len() > 0 -> return
-    loop item in parsed.program.items -> &program.items.push(item)
+    loop target in sema_cli_entry_pending(program.items) {
+        // A qualified entry's parameter type is the defining module's own
+        // `T`, so the wrapper names it through the same alias.
+        qualifier := ""
+        type_name := ""
+        if target.module_alias == .Val(alias) {
+            ty :: sema_cli_entry_param(imported, target.function) ?? next
+            if ty == .Named(name) {
+                if name.contains(".") -> next
+                type_name = name.copy()
+            } else {
+                next
+            }
+            qualifier = "{alias}."
+        } else {
+            ty :: sema_cli_entry_param(program.items, target.function) ?? next
+            type_name = sema_registration_cli_named_leaf(ty) ?? next
+        }
+        definition :: sema_cli_entry_struct(imported, type_name) ?? next
+        bindings := imported.copy()
+        loop item in program.items -> &bindings.push(item.copy())
+        entry :: sema_cli_entry_source(definition, bindings, "{qualifier}{type_name}", target) ?? next
+        parsed :: parse_generated_source(entry.bytes())
+        if parsed.diagnostics.len() > 0 -> next
+        loop item in parsed.program.items -> &program.items.push(item)
+    }
 }
 
-// The parameter type name of a one-parameter `run` without a wrapper yet.
-fn sema_cli_entry_run_type(items: [Item]) -> String? {
-    entry_type := String?{None}
+// The typed entries of the entry file's `items` that still need a wrapper: a
+// one-parameter `fn run`, and every Executable Output whose `entry:` names a
+// local one-parameter function or a `module.function`.
+fn sema_cli_entry_pending(items: [Item]) -> [SemaCLIEntryTarget] {
+    targets := [SemaCLIEntryTarget]{}
+    if sema_cli_entry_param(items, "run") != None -> &targets.push(SemaCLIEntryTarget{wrapper: SEMA_CLI_ENTRY_NAME, function: "run", module_alias: None})
     loop item in items {
-        if item == .Func(function) {
-            if function.name == SEMA_CLI_ENTRY_NAME -> return None
-            if function.name == "run" && function.params.len() == 1 -> entry_type = sema_registration_cli_named_leaf(function.params[0].ty)
+        if item == .Const(definition) {
+            if definition.ty != (Val(Type.Named{name: "Output"})) -> next
+            if definition.value == .EnumLit(_, variant, _, args, _, _, _) {
+                if variant != "Executable" -> next
+                loop arg in args {
+                    if arg == .Named(label, value) {
+                        if label != "entry" -> next
+                        wrapper :: sema_cli_entry_output_wrapper(definition.name)
+                        if value == .Ident(name, _, _) {
+                            if sema_cli_entry_param(items, name) != None -> &targets.push(SemaCLIEntryTarget{wrapper: wrapper, function: name.copy(), module_alias: None})
+                        } else if sema_output_path(value) == .Val(path) {
+                            if path.members.len() == 1 -> &targets.push(SemaCLIEntryTarget{wrapper: wrapper, function: path.members[0].name.copy(), module_alias: Val(path.root.copy())})
+                        }
+                    }
+                }
+            }
         }
     }
-    entry_type
+    pending := [SemaCLIEntryTarget]{}
+    loop target in targets {
+        if sema_cli_entry_declared(items, target.wrapper) -> next
+        &pending.push(target)
+    }
+    pending
+}
+
+// Whether a loaded user module's `items` can complete one of `targets`: it
+// declares a `#CLI` struct, or the function a qualified entry names.
+fn sema_cli_entry_module_needed(targets: [SemaCLIEntryTarget], items: [Item]) -> Bool {
+    loop item in items {
+        if item == .Struct(definition) {
+            loop derive_item in definition.derives {
+                if derive_item.name == "CLI" -> return true
+            }
+        }
+        if item == .Func(function) {
+            loop target in targets {
+                if target.module_alias != None && target.function == function.name -> return true
+            }
+        }
+    }
+    false
+}
+
+// Whether `items` declare the function `name`.
+fn sema_cli_entry_declared(items: [Item], name: String) -> Bool {
+    loop item in items {
+        if item == .Func(function) && function.name == name -> return true
+    }
+    false
+}
+
+// The parameter type of the one-parameter function `name` among `items`.
+fn sema_cli_entry_param(items: [Item], name: String) -> Type? {
+    loop item in items {
+        if item == .Func(function) {
+            if function.name == name && function.params.len() == 1 -> return Val(function.params[0].ty.copy())
+        }
+    }
+    None
 }
 
 // The `#CLI` struct `type_name` among `items`.
@@ -85,14 +194,26 @@ fn sema_cli_entry_struct(items: [Item], type_name: String) -> StructDef? {
     None
 }
 
-// The wrapper function of `definition`; `items` hold its bound functions.
-fn sema_cli_entry_source(definition: StructDef, items: [Item]) -> String? {
+// The spec of `definition`, which the generated code names `type_ref`;
+// `items` hold its bound functions. `lines` build `__spec`; `literal` and
+// `assigned` build the value `__parsed` decodes; `inputs` pair each stored
+// field with its quoted input name; `commands` dispatch the selected command.
+struct SemaCLIEntrySpec {
+    lines: [String]
+    literal: [String]
+    assigned: [String]
+    inputs: [(field: String, name: String)]
+    commands: [String]
+}
+
+fn sema_cli_entry_spec(definition: StructDef, items: [Item], type_ref: String) -> SemaCLIEntrySpec? {
     standard :: sema_registration_cli_standard(definition.type_markers)
     description :: sema_cli_entry_doc(definition.type_markers)
     version :: if standard -> "$package.version" else -> "\"\""
     lines := [String]{"    __spec := __jet_cli_args.__cli_spec({sema_cli_entry_text(description ?? "")}, {description != None}, {version}, {standard})"}
     literal := [String]{}
     assigned := [String]{}
+    inputs := [(field: String, name: String)]{}
     loop field in definition.fields {
         if field.computed != None -> next
         kind :: sema_registration_cli_field_kind(field) ?? return None
@@ -102,6 +223,7 @@ fn sema_cli_entry_source(definition: StructDef, items: [Item]) -> String? {
         short :: sema_cli_entry_marker_text(field.serde_markers, "Short") ?? ""
         env :: sema_cli_entry_marker_text(field.serde_markers, "Env") ?? ""
         flag_only :: sema_registration_cli_marker(field.serde_markers, "Flag") != None
+        &inputs.push((field: field.name.copy(), name: name.copy()))
         if kind == {
             .Flag -> {
                 &lines.push("    __jet_cli_args.__cli_input(&__spec, {sema_cli_entry_input(flag, short, help, true, Type.Bool, None, env, false, false)})")
@@ -136,7 +258,7 @@ fn sema_cli_entry_source(definition: StructDef, items: [Item]) -> String? {
         has_self :: loop param in function.params {
             if param.name == "self" -> break true
         } ?? false
-        callee :: if has_self -> "__args.{function.name}" else -> "{definition.name}.{function.name}"
+        callee :: if has_self -> "__args.{function.name}" else -> "{type_ref}.{function.name}"
         command :: sema_cli_entry_command(unicode.lower(function.name), sema_cli_entry_doc(function.markers), function.params, "", callee) ?? return None
         loop line in command.spec -> &lines.push(line)
         &commands.push(command.call)
@@ -147,26 +269,96 @@ fn sema_cli_entry_source(definition: StructDef, items: [Item]) -> String? {
         loop line in command.spec -> &lines.push(line)
         &commands.push(command.call)
     }
+    Val(SemaCLIEntrySpec{lines: lines, literal: literal, assigned: assigned, inputs: inputs, commands: commands})
+}
+
+// Parses `process.argv()` against `__spec`. Help and version print and end
+// the program; a refusal runs `refuse`, the entry's stderr-and-exit or a
+// projection's `FieldError`.
+fn sema_cli_entry_parse(lines: &[String], help_end: String, refuse: [String]) {
     &lines.push("    __parsed :: __jet_cli_args.__cli_parse(__spec, __jet_cli_process.argv())")
     &lines.push("    __status :: __jet_cli_args.__cli_status(__parsed)")
     &lines.push("    if __status == 0 {{")
     &lines.push("        print(__jet_cli_args.__cli_message(__parsed))")
-    &lines.push("        return")
+    &lines.push("        {help_end}")
     &lines.push("    }}")
     &lines.push("    if __status > 0 {{")
-    &lines.push("        __jet_cli_term.eprint(__jet_cli_args.__cli_message(__parsed))")
-    &lines.push("        __jet_cli_process.exit(__status)")
+    loop line in refuse -> &lines.push(line)
     &lines.push("    }}")
-    binder :: if assigned.len() > 0 -> ":=" else -> "::"
-    &lines.push("    __args {binder} {definition.name}{{{literal.join(", ")}}}")
-    loop line in assigned -> &lines.push(line)
-    if commands.len() == 0 {
-        &lines.push("    run(__args)")
+}
+
+// The `__args` binding of the decoded value.
+fn sema_cli_entry_bind(lines: &[String], spec: SemaCLIEntrySpec, type_ref: String) {
+    binder :: if spec.assigned.len() > 0 -> ":=" else -> "::"
+    &lines.push("    __args {binder} {type_ref}{{{spec.literal.join(", ")}}}")
+    loop line in spec.assigned -> &lines.push(line)
+}
+
+// The wrapper of `wrapped` over `definition`, which the entry file names
+// `type_ref`; `items` hold its bound functions.
+fn sema_cli_entry_source(definition: StructDef, items: [Item], type_ref: String, wrapped: SemaCLIEntryTarget) -> String? {
+    spec :: sema_cli_entry_spec(definition, items, type_ref) ?? return None
+    lines := spec.lines.copy()
+    sema_cli_entry_parse(&lines, "return", [String]{"        __jet_cli_term.eprint(__jet_cli_args.__cli_message(__parsed))", "        __jet_cli_process.exit(__status)"})
+    sema_cli_entry_bind(&lines, spec, type_ref)
+    if spec.commands.len() == 0 {
+        callee :: if wrapped.module_alias == .Val(alias) -> "{alias}.{wrapped.function}" else -> wrapped.function.copy()
+        &lines.push("    {callee}(__args)")
     } else {
         &lines.push("    __command :: __jet_cli_args.__cli_command_name(__parsed)")
-        loop call in commands -> &lines.push(call)
+        loop call in spec.commands -> &lines.push(call)
     }
-    Val("fn {SEMA_CLI_ENTRY_NAME}() {{\n{lines.join("\n")}\n}}\n")
+    Val("fn {wrapped.wrapper}() {{\n{lines.join("\n")}\n}}\n")
+}
+
+// `args.decode<T>()` and `T.merge(args, settings)` for each `#CLI` struct
+// `T` of `items`. Both parse `process.argv()` through the entry's spec, so
+// help and refusals match `fn run(args: T)`; a refusal is a `FieldError`.
+// `merge` takes each field from `args` when its input was given explicitly,
+// otherwise from `settings`, which already holds the environment value or
+// the field default. A `merge` the struct declares itself is kept.
+fn sema_cli_entry_projections(items: [Item]) -> [String] {
+    sources := [String]{}
+    loop item in items {
+        if item == .Struct(definition) {
+            cli :: loop derive_item in definition.derives {
+                if derive_item.name == "CLI" -> break true
+            } ?? false
+            if !cli || definition.type_params.len() > 0 -> next
+            if sema_cli_entry_member_declared(items, definition, SEMA_CLI_DECODE_METHOD) -> next
+            spec :: sema_cli_entry_spec(definition, items, definition.name) ?? next
+            refuse :: [String]{"        return Err([FieldError]{{FieldError{{path: \"\", reason: __jet_cli_args.__cli_message(__parsed)}}}})"}
+            decode := spec.lines.copy()
+            sema_cli_entry_parse(&decode, "__jet_cli_process.exit(0)", refuse)
+            sema_cli_entry_bind(&decode, spec, definition.name)
+            &decode.push("    Ok(__args)")
+            &sources.push("fn {definition.name}.{SEMA_CLI_DECODE_METHOD}() -> {definition.name} [FieldError]! {{\n{decode.join("\n")}\n}}\n")
+            if sema_cli_entry_member_declared(items, definition, "merge") -> next
+            merge := spec.lines.copy()
+            sema_cli_entry_parse(&merge, "__jet_cli_process.exit(0)", refuse)
+            fields :: loop input in spec.inputs -> "{input.field}: if __parsed.explicit.get({input.name}) != None -> args.{input.field} else -> settings.{input.field}"
+            &merge.push("    Ok({definition.name}{{{fields.join(", ")}}})")
+            &sources.push("fn {definition.name}.merge(args: {definition.name}, settings: {definition.name}) -> {definition.name} [FieldError]! {{\n{merge.join("\n")}\n}}\n")
+        }
+    }
+    sources
+}
+
+// Whether `definition` already has the member `name`: a method, a command
+// binding, or an external method among `items`.
+fn sema_cli_entry_member_declared(items: [Item], definition: StructDef, name: String) -> Bool {
+    loop function in definition.methods {
+        if function.name == name -> return true
+    }
+    loop binding in definition.cli_bindings {
+        if binding.name == name -> return true
+    }
+    loop item in items {
+        if item == .Func(function) && function.name == name && function.external_type == .Val(target) {
+            if target.name == definition.name -> return true
+        }
+    }
+    false
 }
 
 // One command: its spec lines and its dispatch arm. A bound function's first

@@ -87,9 +87,9 @@ use jet_sema.[
     SemaSourceSegment,
     sema_cli_entry_expand,
     sema_cli_entry_expand_imported,
-    sema_cli_entry_run_type,
-    sema_cli_entry_struct,
-    sema_effect_builtin_leaf_unknown,
+    sema_cli_entry_module_needed,
+    sema_cli_entry_pending,
+    sema_effect_builtin_leaf_diagnostic,
     sema_effect_parse_name,
     sema_effect_root,
     sema_registration_unit_family_type_names,
@@ -98,7 +98,7 @@ use jet_sema.[
     sema_unknown_module_alias,
 ]
 use jet_pkg_model.[
-    PackageParseError, pkg_inline_deps_collect, pkg_inline_deps_is_pinned,
+    PackageGrant, PackageParseError, pkg_inline_deps_collect, pkg_inline_deps_is_pinned,
     pkg_inline_deps_l0203_unpinned, pkg_inline_deps_valid_package_name,
     pkg_inline_deps_version_matches, pkg_lex_workspace_declaration, pkg_manifest_parse_diagnostic,
 ]
@@ -277,6 +277,7 @@ fn jet_driver_parse_authority_needs(source: String, tokens: [Token], tables: Tok
 struct JetDriverAuthorityBound {
     allow: [String]?
     deny: [String]?
+    grants: [PackageGrant]
 }
 
 struct JetDriverParsedAuthorityList {
@@ -319,7 +320,7 @@ fn jet_driver_parse_authority_effect_list(source: String, tokens: [Token], table
         if {
             name.len() == 0 -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`{field}:` must be a list like `[DB, Net]`"))
             sema_effect_parse_name(sema_effect_root(name)) == None -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` isn't a known effect (see the closed vocabulary in Prelude/Effects.jet)"))
-            sema_effect_builtin_leaf_unknown(name) -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` isn't a declared leaf of `{sema_effect_root(name)}` (see the closed vocabulary in Prelude/Effects.jet)"))
+            sema_effect_builtin_leaf_diagnostic(name, jet_driver_manifest_item_span(tokens, item_index, item.next_index)) == .Val(leaf_diagnostic) -> &diagnostics.push(leaf_diagnostic)
             !field.ends_with("deny") && sema_effect_root(name) == "Panic" -> &diagnostics.push(jet_driver_manifest_panic_grant(field, jet_driver_manifest_item_span(tokens, item_index, item.next_index)))
             name.contains("(") && !field.ends_with("deny") -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` is a parameterized memory denial and belongs only in an `authority.deny` list - use `Mem.Alloc(above: 65536)` there"))
             name.contains("(") && sema_effect_parse_name(name) == None -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`{name}` has an invalid parameterized rights entry - use `Mem.Alloc(above: 65536)`"))
@@ -338,9 +339,10 @@ fn jet_driver_parse_authority_effect_list(source: String, tokens: [Token], table
     JetDriverParsedAuthorityList{values: Val(names), next_index: list_close + 1}
 }
 
-// `allow:` and `deny:` sit directly in the `authority:` record.
+// `allow:`, `deny:` and `grants:` sit directly in the `authority:` record.
 fn jet_driver_parse_authority_bound(source: String, tokens: [Token], tables: TokenTables, open_index: Int, close_index: Int, span: Span, diagnostics: &[Diagnostic]) -> JetDriverAuthorityBound {
-    result := JetDriverAuthorityBound{allow: None, deny: None}
+    result := JetDriverAuthorityBound{allow: None, deny: None, grants: [PackageGrant]{}}
+    grants_seen := false
     allow_seen := false
     deny_seen := false
     nesting := 0
@@ -349,6 +351,12 @@ fn jet_driver_parse_authority_bound(source: String, tokens: [Token], tables: Tok
         token :: tokens[index]
         if nesting == 0 && token.kind == TOKEN_IDENT && index + 1 < close_index && tokens[index + 1].kind == TOKEN_COLON {
             field :: token_decoded(tables, token)
+            if field == "grants" {
+                if grants_seen -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.grants` is declared more than once"))
+                grants_seen = true
+                index = jet_driver_parse_authority_grants(source, tokens, tables, index + 2, close_index, span, &result.grants, &diagnostics)
+                next
+            }
             if field == "allow" || field == "deny" {
                 if field == "allow" {
                     if allow_seen -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.allow` is declared more than once"))
@@ -372,25 +380,54 @@ fn jet_driver_parse_authority_bound(source: String, tokens: [Token], tables: Tok
     result
 }
 
+// `grants: { "dep": [FS.Read] }`: one audited right list per dependency
+// name, each validated exactly like `allow:`. Returns the index after the
+// record.
+fn jet_driver_parse_authority_grants(source: String, tokens: [Token], tables: TokenTables, start_index: Int, close_index: Int, span: Span, grants: &[PackageGrant], diagnostics: &[Diagnostic]) -> Int {
+    open_index := start_index
+    if open_index < close_index && tokens[open_index].kind == TOKEN_DOT -> open_index += 1
+    record_close :: jet_driver_manifest_matching_brace(tokens, open_index) ?? {
+        &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.grants:` must be a record like `{{ \"image-codec\": [FS.Read] }}`"))
+        return open_index + 1
+    }
+    index := open_index + 1
+    loop index < record_close {
+        token :: tokens[index]
+        if token.kind == TOKEN_COMMA || token.kind == TOKEN_SEMI || token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT {
+            index += 1
+            next
+        }
+        if !(jet_driver_is_manifest_string(token.kind) || token.kind == TOKEN_IDENT) || index + 1 >= record_close || tokens[index + 1].kind != TOKEN_COLON {
+            &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.grants:` must be a record like `{{ \"image-codec\": [FS.Read] }}`"))
+            return record_close + 1
+        }
+        package :: token_decoded(tables, token)
+        repeated := false
+        loop grant in grants {
+            if grant.package == package -> repeated = true
+        }
+        if repeated -> &diagnostics.push(jet_driver_authority_diagnostic(span, "grant `{package}` is declared more than once"))
+        parsed :: jet_driver_parse_authority_effect_list(source, tokens, tables, index + 2, record_close, span, "authority.grants", &diagnostics)
+        if !repeated && parsed.values == .Val(rights) -> &grants.push(PackageGrant{package: package, rights: rights})
+        index = parsed.next_index
+    }
+    record_close + 1
+}
+
 fn jet_driver_validate_authority_fields(tokens: [Token], tables: TokenTables, open_index: Int, close_index: Int, span: Span, diagnostics: &[Diagnostic]) {
     nesting := 0
     loop index in open_index + 1..<close_index {
         token :: tokens[index]
         if nesting == 0 && token.kind == TOKEN_IDENT && index + 1 < close_index && tokens[index + 1].kind == TOKEN_COLON {
             field :: token_decoded(tables, token)
-            // `trust` (D-AUTHORITY-MANIFEST1, `require:` from D-BOUND-PROV1) is
-            // Jetpack's: fetch, verified reuse and the lock enforce it, so the
-            // compiler accepts the record. `grants` and `providers` have no
-            // enforcing consumer yet and stay refused rather than silently inert;
-            // an empty `grants: {}` excepts nothing, so it is enforced as written.
+            // `trust` (with its `require:` posture) and `providers` are
+            // Jetpack's: fetch, verified reuse and the lock enforce them, so
+            // the compiler accepts the records. `grants` feeds the dependency
+            // effect budget.
             if field == {
-                "allow" | "deny" | "needs" | "trust" -> {}
-                "grants" -> {
-                    if !jet_driver_authority_empty_record(tokens, index + 2, close_index) -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.grants` is not supported by the current compiler package-policy boundary"))
-                }
-                "providers" -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.providers` is not supported by the current compiler package-policy boundary"))
+                "allow" | "deny" | "needs" | "grants" | "trust" | "providers" -> {}
                 "holds" -> &diagnostics.push(jet_driver_authority_diagnostic(span, "`authority.holds` is gone: write `allow:` and `deny:` directly inside `authority:`"))
-                else -> &diagnostics.push(jet_driver_authority_diagnostic(span, "unknown `authority` field `{field}` - allowed: `allow`, `deny`, `needs`, `trust`"))
+                else -> &diagnostics.push(jet_driver_authority_diagnostic(span, "unknown `authority` field `{field}` - allowed: `allow`, `deny`, `needs`, `grants`, `trust`, `providers`"))
             }
         }
         if token.kind == TOKEN_LBRACE || token.kind == TOKEN_LBRACKET || token.kind == TOKEN_LPAREN -> nesting += 1
@@ -398,14 +435,6 @@ fn jet_driver_validate_authority_fields(tokens: [Token], tables: TokenTables, op
             if nesting > 0 -> nesting -= 1
         }
     }
-}
-
-// `{` at `start`, then only comments, then its `}` before `limit`.
-fn jet_driver_authority_empty_record(tokens: [Token], start: Int, limit: Int) -> Bool Never! {
-    if start >= limit || tokens[start].kind != TOKEN_LBRACE -> return false
-    index := start + 1
-    loop index < limit && (tokens[index].kind == TOKEN_LINE_COMMENT || tokens[index].kind == TOKEN_BLOCK_COMMENT) -> index += 1
-    index < limit && tokens[index].kind == TOKEN_RBRACE
 }
 
 fn jet_driver_valid_dependency_name(name: String) -> Bool Never! {
@@ -1030,6 +1059,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
     allocator_policy := AllocatorPolicy.HostedDefault
     authority_allow := [String]?{None}
     authority_deny := [String]?{None}
+    authority_grants := [PackageGrant]{}
     authority_needs := [String]{}
     policy_declarations := [PolicyDeclaration]{}
     entry := JetDriverPackageEntry?{None}
@@ -1120,6 +1150,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
                                     authority_bound :: jet_driver_parse_authority_bound(source, tokens, lexed.tables, authority_open_index, authority_close, token.span, &diagnostics)
                                     authority_allow = authority_bound.allow
                                     authority_deny = authority_bound.deny
+                                    authority_grants = authority_bound.grants
                                     index = authority_close
                                 }
                             }
@@ -1253,7 +1284,7 @@ fn jet_driver_parse_package_root(snapshot: JetDriverAuthorizedSourceSnapshot, ro
         diagnostic_index += 1
     }
     identity :: jet_driver_package_identity(name, version ?? "")
-    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, entry: entry, manifest_path: Val(manifest_path), policy_declarations: ^policy_declarations, policy_unsafe_paths: ^policy_unsafe_paths, policy_expert: policy_expert, inline_package: inline_carrier != None, configs: ^configs, dependencies: dependencies, outputs: outputs, settings: ^settings, profile_settings: ^profile_settings}
+    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, authority_grants: ^authority_grants, entry: entry, manifest_path: Val(manifest_path), policy_declarations: ^policy_declarations, policy_unsafe_paths: ^policy_unsafe_paths, policy_expert: policy_expert, inline_package: inline_carrier != None, configs: ^configs, dependencies: dependencies, outputs: outputs, settings: ^settings, profile_settings: ^profile_settings}
 }
 
 // The source text of tokens `start..<end` (comments dropped), and a lone
@@ -3474,7 +3505,7 @@ fn jet_driver_parse_user_unit_threads(text: String, retain_demand: Bool, threads
     scanned := jet_driver_collect_core_identifier_demand_threads(^lexed.lexed, lexed.runs, retain_demand, true, threads)
     demand := ^scanned.demand
     parsed := parse_lexed_with_source_threads(^scanned.lexed, source, lexed.line_starts, lexed.runs, threads)
-    // D-SHAPE-CLI1: a typed `fn run(args: T)` gets its generated argv entry.
+    // A typed `fn run(args: T)` or typed Output entry gets its generated argv entry.
     if !jet_driver_has_errors(parsed.diagnostics) -> sema_cli_entry_expand(&parsed.program)
     JetDriverParsedUnit{parsed: ^parsed, demand: ^demand, lines: lines, tokens: tokens, line_starts: ^lexed.line_starts}
 }
@@ -4597,20 +4628,22 @@ fn jet_driver_load(request: JetDriverCompileRequest) -> JetDriverLoadResult {
     }
 }
 
-// D-SHAPE-CLI1: a typed entry `fn run(args: T)` whose `#CLI` struct `T`
-// another loaded user module declares gets its generated entry once every
-// module has loaded (sema_cli_entry_expand_imported).
+// A typed entry of the entry file whose `#CLI` struct `T`
+// another loaded user module declares, or a qualified Output entry
+// `module.function`, gets its generated entry once every module has loaded
+// (sema_cli_entry_expand_imported).
 fn jet_driver_expand_imported_cli_entry(modules: &[JetDriverLoadedModule], source_units: [JetDriverSourceUnit], entry_module_identity: String) {
     entry := -1
     loop index in 0..<modules.len() {
         if modules[index].module_identity == entry_module_identity -> entry = index
     }
     if entry < 0 -> return
-    type_name :: sema_cli_entry_run_type(modules[entry].program.items) ?? return
+    targets :: sema_cli_entry_pending(modules[entry].program.items)
+    if targets.len() == 0 -> return
     imported := [Item]{}
     loop index in 0..<modules.len() {
         if index == entry || jet_driver_unit_is_core(source_units[modules[index].source_unit_index]) -> next
-        if sema_cli_entry_struct(modules[index].program.items, type_name) == .Val(_) {
+        if sema_cli_entry_module_needed(targets, modules[index].program.items) {
             loop item in modules[index].program.items -> &imported.push(item.copy())
         }
     }

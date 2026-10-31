@@ -78,7 +78,7 @@
 // selector; runtime symbols are the old backend's, so a program behaves the
 // same on both paths.
 
-use jet_foundation.[NameRows, Type, TypeTable, name_rows, name_rows_get, name_rows_hash, name_rows_set, name_rows_set_hashed, name_rows_value, sha256_bytes, sha256_hex, sha256_hex_bytes, stable_id]
+use jet_foundation.[NameRows, TComptimeValue, Type, TypeTable, name_rows, name_rows_get, name_rows_hash, name_rows_set, name_rows_set_hashed, name_rows_value, sha256_bytes, sha256_hex, sha256_hex_bytes, stable_id]
 
 enum IROp {
     Nop
@@ -315,7 +315,9 @@ struct IRDataReloc { offset: Int, target: Int, addend: Int, text: Bool }
 // that main attaches its thread first (IR_OWNED_ATTACH_ROUTES).
 // `debug_directory`: the compilation directory the image's DWARF records
 // ("": the working directory), which relative source paths (a fault
-// report's) resolve from.
+// report's) resolve from. `host_literals`: the compile-time literals that are
+// compiler values (BuildTypes.jet ir_host_literal), by the key their host
+// route names, which the compiler answers from the built module.
 struct IRModule {
     types: [IRType]
     type_keys: [String]
@@ -354,6 +356,7 @@ struct IRModule {
     owned_main: Bool{false}
     owned_attach: Bool{false}
     debug_directory: String{""}
+    host_literals: [String:TComptimeValue]{[String:TComptimeValue]{}}
 }
 
 fn ir_module_new() -> IRModule Never! {

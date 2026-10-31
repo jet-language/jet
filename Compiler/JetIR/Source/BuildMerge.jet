@@ -174,6 +174,13 @@ fn ir_merge(built: ^[IRModule], prepared: ^[IRMergePrep], roots: [IRMergeRoot], 
             name_rows_set(&out.trait_keys, identity, key)
         }
     }
+    // A host literal's key names its function and a slot of its body, so the
+    // parts that built one function hold the one value under it.
+    loop part in 0..<parts.len() {
+        loop (key, value) in parts[part].host_literals {
+            if out.host_literals.get(key) == None -> out.host_literals[key.copy()] = value.copy()
+        }
+    }
     // The parts are read no more: they drop on threads of their own while
     // this one fills the merged key maps. A task's arguments stay shared with
     // the thread that spawns it, which drops them after the join, so each

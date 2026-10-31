@@ -1,0 +1,30 @@
+// E0121: a resource declared before the loop and moved inside it would be
+// given away again (and closed again) by the next iteration. The `next` route
+// reaches the back edge too.
+struct Res { name: String }
+impl Res.Close {
+    fn close(^self) { print("close {self.name}") }
+}
+
+fn keep(r: ^Res) { print("keep {r.name}") }
+
+fn run() {
+    r := Res{name: "r1"}
+    loop round in 0..<3 {
+        keep(^r)
+    }
+    s := Res{name: "s1"}
+    loop round in 0..<3 {
+        if round == 1 {
+            keep(^s)
+            next
+        }
+        print("round {round}")
+    }
+    t := Res{name: "t1"}
+    loop round in 0..<3 {
+        keep(^t)
+        t = Res{name: "t{round}"}
+    }
+    print("done")
+}

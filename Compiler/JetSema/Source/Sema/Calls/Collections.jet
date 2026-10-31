@@ -335,7 +335,7 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
     // resource read in place is refused (CopySites.jet).
     if (contract.row.law == CollectionLaw.Mutate || contract.row.law == CollectionLaw.TryMutate) && contract.row.name != "remove" {
         loop index in 0..<updated_args.len() {
-            if !marked[index] && index < typed.len() && !sema_copy_site_check_guard_owned(typed[index], environment, program, scopes, context, &diagnostics, false) -> return SemaMethodSpecialCheck{handled: true, value: None}
+            if !marked[index] && index < typed.len() && !sema_copy_site_check_guard_owned(typed[index], environment, program, scopes, state, context, &diagnostics, false) -> return SemaMethodSpecialCheck{handled: true, value: None}
             if !marked[index] && !sema_copy_site_record_stored(updated_args[index].expr, "`.{method}()`", environment, program, scopes, &state, context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
         }
     }

@@ -249,7 +249,7 @@ fn store_find_verified_user_profile_by_reference(verification: &StoreVerificatio
     expectation :: CacheExpectation{identity: candidate.cache_identity, owned_output: None, allow_unsigned_local: true}
     found :: store_find_verified_by_reference(&verification, roots, reference, expectation)
     hit :: found ?? return Ok(None)
-    Ok(Val(VerifiedRealization{entry: hit.entry, source_state_value: SourceState.Cached, lease: hit.lease}))
+    Ok(Val(VerifiedRealization{entry: hit.entry, source_state_value: SourceState.Cached, lease: ^hit.lease}))
 }
 
 // Reuse independently valid user-profile entries with one Hangar lock,

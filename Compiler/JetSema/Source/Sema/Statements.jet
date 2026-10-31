@@ -226,7 +226,7 @@ fn sema_stmt_check_loop_value_break(value: Expr, label: String?, label_span: Spa
     payload_expected := Type?{None}
     if frame.ty == .Val(expected_type) && !sema_expr_is_numeric(expected_type) -> payload_expected = Val(expected_type)
     checked :: sema_check_expression(value, payload_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, context, &diagnostics, false) -> return None
+    if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, &diagnostics, false) -> return None
     if frame.kind == SemaLoopValueKind.Collecting {
         &diagnostics.push(sema_error("E0075", span, "this collecting loop cannot use a break payload", "its result is already the accumulated List, so a second payload would give one exit two result channels", "write `break` to return the accumulated list"))
         return None
@@ -244,7 +244,7 @@ fn sema_stmt_check_loop_value_break(value: Expr, label: String?, label_span: Spa
 fn sema_stmt_check_yield(value: Expr, span: Span, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     if span.start == span.end && context.collect_item_types.len() > 0 {
         item :: sema_loop_value_check_collecting_item(value, expr_span(value), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-        if !sema_copy_site_check_guard_owned(item, environment, program, scopes, context, &diagnostics, false) -> return None
+        if !sema_copy_site_check_guard_owned(item, environment, program, scopes, state, context, &diagnostics, false) -> return None
         if !sema_stmt_move_direct(value, &state, scopes, "the collecting loop", &diagnostics) -> return None
         return Val(TStmt.ExprStmt{value: item, span: span})
     }
@@ -256,7 +256,7 @@ fn sema_stmt_check_yield(value: Expr, span: Span, return_type: Type?, environmen
         return None
     }
     checked :: sema_check_expression(value, Val(elem_type), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, context, &diagnostics, false) -> return None
+    if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, &diagnostics, false) -> return None
     yielded := checked
     if !type_identity_equal(checked.ty, elem_type) {
         if {
@@ -297,6 +297,7 @@ fn sema_stmt_close_loop_value_frame(context: &SemaCheckContext, frame_index: Int
         if !sema_loop_value_widen_result_breaks(&body, value.label, result_type, environment, program, &diagnostics) -> valid = false
     }
     body_falls_through := sema_stmt_tree_block_can_fall_through(body)
+    if body_falls_through && frame != None -> sema_ownership_check_loop_move_backedge(&state, context.loop_value_frames[frame_index], &diagnostics)
     _ := sema_ownership_join_loop_value_paths(&state, context, frame_index, fork, outer, body_falls_through, may_skip)
     sema_loop_value_pop_frame(&context)
     valid
@@ -805,6 +806,9 @@ fn sema_stmt_check_subject_switch(subject: Expr, arms: [SwitchArm], else_body: [
     bounds :: checked_cost_integer_bounds(init)
     sema_scope_push_binding(&scopes, SemaScopeBinding{frame: it_frame, symbol: symbol, mutable: false, access: AccessConvention.Read, integer_bounds: bounds, string_view: false, compiler_builtin: false})
     sema_ownership_declare_binding(&state, symbol, false)
+    // The arms' payload sources are rooted at `it`; the subject it holds
+    // decides whether a payload moves out of a named place.
+    sema_copy_site_note_subject(&state, "it", subject_span, subject)
     it_local := checked_symbol_local("it", subject_span, id, init.ty)
     it_local.generated = true
     it_local.integer_bounds = bounds
@@ -1704,6 +1708,22 @@ fn sema_stmt_for_in_borrowed_elements(expression: Expr, scopes: SemaScopeTable) 
     index :: sema_scope_resolve_index(scopes, root) ?? return false
     binding :: scopes.bindings[index]
     sema_ownership_binding_is_borrowed_param(binding) || binding.place_alias
+}
+
+// `loop x in xs` over a list read in place (no `^xs` drive) whose items hold a
+// resource (#6429): each loop name reads an element the list keeps, whoever
+// owns the list, so taking it (`^x`) or copying it into an owning position
+// (`&out.push(x)`, `-> x`) would leave two owners closing one resource.
+fn sema_stmt_for_in_resource_elements(expression: Expr, collection_type: Type, item_type: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, context: SemaCheckContext) -> Bool {
+    if expression == .Place(_, access, _, _) {
+        if access == PlaceAccess.Take -> return false
+    }
+    if !sema_stmt_for_in_columnar_list_type(collection_type) -> return false
+    source :: if expression == .Place(inner, _, _, _) -> inner else -> expression
+    if !sema_stmt_for_in_plain_place(source) -> return false
+    if sema_ownership_type_is_copy(item_type) || item_type == .String -> return false
+    facts :: sema_copy_classify(item_type, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
+    facts.complete && facts.holds_resource
 }
 
 fn sema_stmt_for_in_plain_place(expression: Expr) -> Bool Never! {
@@ -3674,6 +3694,7 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
                     &diagnostics.push(sema_error("E0405", route_span, "`?? next` is only valid inside a loop", "the fallback route must have an enclosing loop to continue", "move this binding into a loop"))
                 }
                 else -> {
+                    if sema_loop_value_resolve_frame(context, None) == .Val(frame_index) -> sema_ownership_check_loop_move_backedge(&state, context.loop_value_frames[frame_index], &diagnostics)
                     result.or_fallback = Val(TOrFallback.Continue)
                     &result.statements.push(TStmt.Continue{label: None, span: route_span})
                     result.complete = true
@@ -3698,6 +3719,7 @@ fn sema_stmt_check_refutable_fallback(fallback: OrFallback, subject_ty: Type, sp
                     &diagnostics.push(sema_error("E0405", route_span, "the `?? next` label is not an enclosing loop", "the fallback route must name an active loop label", "use an enclosing loop label"))
                 }
                 else -> {
+                    if sema_loop_value_resolve_frame(context, Val(label)) == .Val(frame_index) -> sema_ownership_check_loop_move_backedge(&state, context.loop_value_frames[frame_index], &diagnostics)
                     result.or_fallback = Val(TOrFallback.ContinueLabel{label: label})
                     &result.statements.push(TStmt.Continue{label: Val(label), span: route_span})
                     result.complete = true
@@ -4155,7 +4177,8 @@ fn sema_stmt_check_binding(binding: Binding, lambda_escapes: Bool?, environment:
         return None
     }
     init :: sema_stmt_owning_view_init(^checked_value, binding, environment, program, scopes, &context)
-    if !sema_copy_site_check_guard_owned(init, environment, program, scopes, context, &diagnostics, false) || (binding.mutable && !sema_copy_site_refuse_borrowed_copy(binding.init, "the binding `{binding.name}`", environment, program, scopes, context, &diagnostics)) {
+    owned :: if !binding.mutable && sema_stmt_binding_reads_projection(binding.init, scopes) -> sema_copy_site_check_view_binding(init, environment, program, scopes, state, context, &diagnostics) else -> sema_copy_site_check_guard_owned(init, environment, program, scopes, state, context, &diagnostics, false)
+    if !owned || (binding.mutable && !sema_copy_site_refuse_borrowed_copy(binding.init, "the binding `{binding.name}`", environment, program, scopes, context, &diagnostics)) {
         sema_stmt_declare_unchecked_binding(binding, environment, program, &scopes)
         return None
     }
@@ -4563,7 +4586,7 @@ fn sema_stmt_check_local_assignment(name: String, name_span: Span, op: BinOp?, o
     // reads the literal as Float rather than exact Decimal.
     if op != None && sema_expr_decimal_literal_operand(expr, true) && sema_expr_expects_machine_float(Val(required)) -> expected = Val(required)
     checked_value :: sema_check_expression(expr, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    if !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, context, &diagnostics, false) -> return None
+    if !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, state, context, &diagnostics, false) -> return None
     if op == None && !sema_copy_site_refuse_borrowed_copy(expr, "the assignment to `{name}`", environment, program, scopes, context, &diagnostics) -> return None
     checked := checked_value
     // A compound operand widens into the place's numeric type first
@@ -4663,7 +4686,7 @@ fn sema_stmt_check_module_storage_assignment(symbol: Symbol, name: String, name_
         }
         tree_op = Val(sema_stmt_binary_type(operator))
     }
-    if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, context, &diagnostics, false) -> return None
+    if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, &diagnostics, false) -> return None
     if op == None && !sema_copy_site_refuse_borrowed_copy(expr, "the assignment to `{name}`", environment, program, scopes, context, &diagnostics) -> return None
     if !sema_stmt_move_direct(expr, &state, scopes, "the assignment to `{name}`", &diagnostics) -> return None
     line :: sema_source_line_at(environment.source_segments, name_span) ?? return None
@@ -5778,7 +5801,7 @@ fn sema_stmt_check_place_assignment(target: LValue, checked_place: ^TExpr, op: B
         if !sema_has_error_since(diagnostics, value_diagnostics) && context.incomplete_reasons.len() == value_reasons -> sema_check_unsupported(&context, "the assigned value at offset {expr_span(expr).start} checked to no value without a report")
         return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 15")
     }
-    if !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, context, &diagnostics, false) -> return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 4")
+    if !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, state, context, &diagnostics, false) -> return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 4")
     if op == None && !sema_copy_site_refuse_borrowed_copy(expr, "the assignment", environment, program, scopes, context, &diagnostics) -> return sema_stmt_assign_exit(&context, diagnostics, exit_diagnostics, exit_reasons, "place_assignment exit 4")
     checked := checked_value
     if op != None && sema_stmt_compound_widens(checked, place.ty) {
@@ -6384,7 +6407,7 @@ fn sema_stmt_check_returned_value(value: Expr, return_type: Type?, environment: 
     }
     checked :: sema_stmt_check_return_value(value, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if sema_stmt_returns_module_call(value, environment, scopes) -> sema_stmt_lint_blocked_tail_call(expr_span(value), environment, program, scopes, state, &diagnostics)
-    if !sema_stmt_return_is_view_boundary(return_type) && !context.return_view_declared && !sema_copy_site_check_guard_owned(checked, environment, program, scopes, context, &diagnostics, false) -> return None
+    if !sema_stmt_return_is_view_boundary(return_type) && !context.return_view_declared && !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, &diagnostics, false) -> return None
     if return_type != None && sema_contains_expiring_secret_loan(checked.ty) {
         &diagnostics.push(sema_error("E0201", expr_span(value), "an ExpiringSecret loan cannot be returned", "the callback parameter is valid only while `.with` is running", "return a non-secret result computed from the loan"))
     }
@@ -7004,7 +7027,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                             }
                         }
                         loop_frame_index := context.loop_value_frames.len()
-                        sema_loop_value_push_frame(&context, label_name)
+                        sema_loop_value_push_frame(&context, label_name, loop_fork)
                         previous_arrow_loop_body := context.arrow_loop_body
                         context.arrow_loop_body = arrow_body
                         nested := sema_check_statements(body, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, loop_depth + 1)
@@ -7098,10 +7121,11 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         // #4318 §4: the source's root, resolved before the loop
                         // names can shadow it.
                         stable_root_key := sema_stmt_for_in_stable_root_key(collection_expr, scopes, state)
-                        // The loop names over a collection a
-                        // read or write parameter owns read each element through
-                        // a view (resolved before the names can shadow the root).
-                        borrowed_elements :: !consumes_collection && !range_source && sema_stmt_for_in_borrowed_elements(collection_expr, scopes)
+                        // The loop names over a collection a read or write
+                        // parameter owns, or over a list of resources read in
+                        // place, read each element through a view (resolved
+                        // before the names can shadow the root).
+                        borrowed_elements :: !consumes_collection && !range_source && (sema_stmt_for_in_borrowed_elements(collection_expr, scopes) || sema_stmt_for_in_resource_elements(collection_expr, collection.ty, item_type, environment, program, context))
                         sema_scope_enter(&scopes, &state, "for.in@{span.start}")
                         label_name := String?{None}
                         if label != None {
@@ -7140,7 +7164,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         sema_stmt_for_in_lend_view_item(first_local, first_type, collection_expr, scopes, &state, &context)
                         sema_stmt_for_in_lend_view_item(variable_two, second_type ?? item_type, collection_expr, scopes, &state, &context)
                         loop_frame_index := context.loop_value_frames.len()
-                        sema_loop_value_push_frame(&context, label_name)
+                        sema_loop_value_push_frame(&context, label_name, loop_fork)
                         previous_arrow_loop_body := context.arrow_loop_body
                         context.arrow_loop_body = arrow_body
                         iter_borrowed_depth := context.iter_borrowed.len()
@@ -7226,7 +7250,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                 // counted loop's own scope left (`outer`).
                 loop_fork :: sema_ownership_mark(&state)
                 loop_frame_index := context.loop_value_frames.len()
-                sema_loop_value_push_frame(&context, label_name)
+                sema_loop_value_push_frame(&context, label_name, loop_fork)
                 previous_arrow_loop_body := context.arrow_loop_body
                 context.arrow_loop_body = arrow_body
                 nested := sema_stmt_check_block(body, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, "counted.body@{span.start}", loop_depth + 1)
@@ -7284,7 +7308,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                             }
                         }
                         loop_frame_index := context.loop_value_frames.len()
-                        sema_loop_value_push_frame(&context, label_name)
+                        sema_loop_value_push_frame(&context, label_name, loop_fork)
                         previous_arrow_loop_body := context.arrow_loop_body
                         context.arrow_loop_body = arrow_body
                         nested := sema_stmt_check_block(body, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, "while.body@{span.start}", loop_depth + 1)
@@ -7315,7 +7339,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                     }
                 }
                 loop_frame_index := context.loop_value_frames.len()
-                sema_loop_value_push_frame(&context, label_name)
+                sema_loop_value_push_frame(&context, label_name, loop_fork)
                 previous_arrow_loop_body := context.arrow_loop_body
                 context.arrow_loop_body = arrow_body
                 nested := sema_stmt_check_block(body, return_type, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, "loop.body@{span.start}", loop_depth + 1)
@@ -7363,6 +7387,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         complete = false
                     }
                     else -> {
+                        if sema_loop_value_resolve_frame(context, None) == .Val(frame_index) -> sema_ownership_check_loop_move_backedge(&state, context.loop_value_frames[frame_index], &diagnostics)
                         &output.push(TStmt.Continue{label: None, span: span})
                     }
                 }
@@ -7399,6 +7424,7 @@ fn sema_check_statements(statements: [Stmt], return_type: Type?, environment: Se
                         complete = false
                     }
                     else -> {
+                        if sema_loop_value_resolve_frame(context, Val(name)) == .Val(frame_index) -> sema_ownership_check_loop_move_backedge(&state, context.loop_value_frames[frame_index], &diagnostics)
                         &output.push(TStmt.Continue{label: Val(name), span: span})
                     }
                 }

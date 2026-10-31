@@ -63,11 +63,18 @@ fn core_sig_row_lookup(rows: String, module_name: String, member: String) -> Cor
     None
 }
 
-// A `(name:T,…)` return's labels in row (kernel declaration) order; the
-// parsed Type sorts them canonically. Empty for any other return field.
+// A `(name:T,…)` return's labels, or a `Result<T,(name:T,…)>` return's error
+// labels, in row (kernel declaration) order; the parsed Type sorts them
+// canonically. Empty for any other return field.
 fn core_sig_row_tuple_labels(field: String) -> [String] Never! {
     bytes :: field.bytes()
     labels := [String]{}
+    if field.starts_with("Result<") && field.ends_with(">") {
+        result_args :: String.from_bytes(bytes.slice(7, bytes.len() - 1)) ?? return labels
+        sides :: core_sig_row_parameters(result_args)
+        if sides.len() != 2 -> return labels
+        return core_sig_row_tuple_labels(sides[1])
+    }
     if bytes.len() < 2 || core_sig_row_code(bytes, 0) != 40 || core_sig_row_code(bytes, bytes.len() - 1) != 41 -> return labels
     inner :: String.from_bytes(bytes.slice(1, bytes.len() - 1)) ?? return labels
     if inner == "" -> return labels

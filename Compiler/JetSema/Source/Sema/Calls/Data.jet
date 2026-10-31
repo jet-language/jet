@@ -2,6 +2,7 @@ use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
     CallArg,
+    CallLabel,
     CoreCallRecord,
     Diagnostic,
     Expr,
@@ -1047,8 +1048,45 @@ fn sema_data_env_names(target: Type, environment: SemaScopeEnvironment, program:
     Expr.ListLit{elements: rows, span: span, id: AST_NODE_GENERATED}
 }
 
+fn sema_data_db_names_row_type() -> Type Never! {
+    Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "db_name", ty: Type.String}, TypeTupleField{name: "key", ty: Type.String}}}
+}
+
+// `db.decode<T>(row)`'s column renames: the checked column name (its `db`
+// shape name, else its shared name) and decode key (its JSON shape name, else
+// its shared name) of every non-skipped stored field of the record `target`
+// whose column differs from its key, as a list literal.
+fn sema_data_db_names(target: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span) -> Expr Never! {
+    rows := [Expr]{}
+    definition :: sema_http_route_find_struct(environment, program, target, environment.module_identity) ?? return Expr.ListLit{elements: rows, span: span, id: AST_NODE_GENERATED}
+    loop field in definition.fields {
+        if field.computed != None || sema_checked_marker(field.serde_markers, "Skip") != None || sema_checked_marker(field.serde_markers, "skip") != None -> next
+        names :: sema_checked_field_shape_names(definition, field)
+        column :: names.db ?? names.text
+        key :: names.json ?? names.text
+        if column == key -> next
+        db_name :: Expr.Str{parts: [StrPart]{StrPart.Lit{text: column}}, span: span, id: AST_NODE_GENERATED}
+        key_text :: Expr.Str{parts: [StrPart]{StrPart.Lit{text: key}}, span: span, id: AST_NODE_GENERATED}
+        &rows.push(Expr.TupleLit{fields: [TupleField]{TupleField{name: "db_name", value: db_name}, TupleField{name: "key", value: key_text}}, span: span, ty: Val(sema_data_db_names_row_type()), id: AST_NODE_GENERATED})
+    }
+    Expr.ListLit{elements: rows, span: span, id: AST_NODE_GENERATED}
+}
+
 fn sema_data_is_sys_decode(target: SemaCallDirectTarget, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     target.symbol.name == "decode" && sema_call_core_module_identity(environment, program, "core.sys") == (Val(target.symbol.module_name))
+}
+
+fn sema_data_is_db_decode(target: SemaCallDirectTarget, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    target.symbol.name == "decode" && sema_call_core_module_identity(environment, program, "core.db") == (Val(target.symbol.module_name))
+}
+
+// `db.decode<T>(row)` passes the column renames of T's fields after the row
+// (sema_data_db_names).
+fn sema_data_db_decode_args(args: [CallArg], type_args: [Type], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> [CallArg]? {
+    target :: sema_data_core_target_type(type_args, "decode", span, environment, program, &diagnostics) ?? return None
+    bound := args
+    &bound.push(CallArg{convention: AccessConvention.Read, expr: sema_data_db_names(target, environment, program, span), span: span, flags: ast_empty_call_arg_flags(), label: Val(CallLabel{name: "names", span: span}), spread: false})
+    Val(bound)
 }
 
 // `env.decode<T>()` binds its labeled config fields to their registered
@@ -1065,8 +1103,52 @@ fn sema_data_sys_decode_args(args: [CallArg], type_args: [Type], span: Span, env
         return None
     }
     target :: sema_data_core_target_type(type_args, "decode", span, environment, program, &diagnostics) ?? return None
-    &bound.push(CallArg{convention: AccessConvention.Read, expr: sema_data_env_names(target, environment, program, span), span: span, flags: ast_empty_call_arg_flags(), label: Val(CallLabel{name: "names", span: span}), spread: false})
+    // The bound arguments are in parameter order, with omitted ones filled as
+    // unlabelled defaults; a written label before them would leave a bare
+    // argument after a labelled one, so every argument passes by position.
+    loop index in 0..<bound.len() {
+        bound[index].label = None
+    }
+    &bound.push(CallArg{convention: AccessConvention.Read, expr: sema_data_env_names(target, environment, program, span), span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
     Val(bound)
+}
+
+// `args.decode<T>()` calls the decoder the `#CLI` expansion gives `T`
+// (sema_cli_entry_projections): it parses the process arguments through the
+// same spec as `fn run(args: T)`.
+fn sema_data_args_decode(args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if args.len() != 0 {
+        sema_data_arity_diagnostic("core.args.decode", 0, args.len(), span, &diagnostics)
+        sema_data_check_discarded_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    target :: sema_data_core_target_type(type_args, "decode", span, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    definition :: sema_http_route_find_struct(environment, program, target, environment.module_identity)
+    cli := false
+    if definition == .Val(found) {
+        loop derive_item in found.derives {
+            if derive_item.name == "CLI" -> cli = true
+        }
+    }
+    if !cli {
+        &diagnostics.push(sema_error("E0905", span, "`{type_name(target)}` is not a `#CLI` struct", "`args.decode<T>` decodes the process arguments through the command-line shape of a `#CLI` struct", "mark the struct `#CLI`"))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    receiver := Expr?{None}
+    if type_args[0] == .Named(name) {
+        loop part in name.split(".") {
+            receiver = if receiver == {
+                .Val(base) -> Val(Expr.Field{base: base, member: part.copy(), span: span, id: AST_NODE_GENERATED})
+                .None -> Val(Expr.Ident{name: part.copy(), span: span, id: AST_NODE_GENERATED})
+            }
+        }
+    }
+    owner :: receiver ?? {
+        &diagnostics.push(sema_error("E0905", span, "`{type_name(target)}` is not a `#CLI` struct", "`args.decode<T>` decodes the process arguments through the command-line shape of a `#CLI` struct", "name the `#CLI` struct as the type argument"))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    call :: Expr.MethodCall{receiver: owner, method: SEMA_CLI_DECODE_METHOD, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
+    SemaDirectSpecialCheck{handled: true, value: sema_check_expression(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)}
 }
 
 // The Core calls whose typed decode contract lives here.
@@ -1127,6 +1209,14 @@ fn sema_data_core_try_decode(module_name: String, member: String, args: [CallArg
         value :: sema_check_expression(argument.expr, Val(expected_arg), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return Val(SemaDirectSpecialCheck{handled: true, value: None})
         &typed.push(value)
         &checked_types.push(expected_arg)
+    }
+    if module_name == "core.db" {
+        names_type :: Type.List{element: sema_data_db_names_row_type()}
+        names :: sema_data_db_names(target, environment, program, span)
+        value :: sema_check_expression(names, Val(names_type), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return Val(SemaDirectSpecialCheck{handled: true, value: None})
+        &updated_args.push(CallArg{convention: AccessConvention.Read, expr: names, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
+        &typed.push(value)
+        &checked_types.push(names_type)
     }
     record :: sema_call_core_record(module_name, call_member, updated_args.len(), span, &diagnostics) ?? return Val(SemaDirectSpecialCheck{handled: true, value: None})
     result :: sema_data_core_emit(record, "{module_name}.{member}", updated_args, checked_types, typed, effective_type_args, result_type, span, expected, environment, program, &scopes, &state, &context, &diagnostics) ?? return Val(SemaDirectSpecialCheck{handled: true, value: None})
@@ -1493,6 +1583,7 @@ fn sema_data_core_check_typed(module_name: String, member: String, args: [CallAr
 }
 
 fn sema_call_try_data_core_call(module_name: String, member: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if module_name == "core.args" && member == "decode" && type_args.len() == 1 -> return sema_data_args_decode(args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if module_name == "core.data.stream" -> return sema_call_try_data_stream_core_call(module_name, member, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     reader_writer :: sema_data_core_try_reader_writer(module_name, member, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if reader_writer == .Val(result) -> return result

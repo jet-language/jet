@@ -456,9 +456,10 @@ struct X64BindResult {
 // runtime image `image`, read from the file `image_path` with identity
 // `image_stamp` ("" and empty when it came from elsewhere) and without its
 // bytes [gap_at, gap_at + gap) (Image/Loader.jet x64_image_file_read): a
-// static executable at the image's base, in parts.
-fn x64_bind_runtime_image(name: String, program: ^[U8], image: ^[U8], image_path: String, image_stamp: [Int], gap_at: Int, gap: Int) -> X64BindResult Never! {
-    bound := link_bind_image(name, ^program, ^image, gap_at, gap, None)
+// static executable at the image's base, in parts, whose debug tail holds
+// `.debug_*` sections only under `debug_info` (link_debug_sections).
+fn x64_bind_runtime_image(name: String, program: ^[U8], image: ^[U8], image_path: String, image_stamp: [Int], gap_at: Int, gap: Int, debug_info: Bool) -> X64BindResult Never! {
+    bound := link_bind_image(name, ^program, ^image, gap_at, gap, None, debug_info)
     if bound.errors.len() == 0 {
         bound.executable.image_path = image_path
         bound.executable.image_stamp = image_stamp
@@ -469,7 +470,7 @@ fn x64_bind_runtime_image(name: String, program: ^[U8], image: ^[U8], image_path
 // Link the program object `program` (named `name` in reports) against the
 // runtime image `image` into a static executable at the image's base.
 fn x64_link_with_runtime_image(name: String, program: ^[U8], image: ^[U8]) -> X64ExecutableResult Never! {
-    link_bind_bytes(link_bind_image(name, ^program, ^image, 0, 0, None))
+    link_bind_bytes(link_bind_image(name, ^program, ^image, 0, 0, None, true))
 }
 
 // The same with the program's part at `program_base`, a page boundary at or
@@ -478,7 +479,7 @@ fn x64_link_with_runtime_image(name: String, program: ^[U8], image: ^[U8]) -> X6
 // `program_base` up. File offsets stay address - image base, so the bytes
 // grow with `program_base`.
 fn x64_link_with_runtime_image_at(name: String, program: ^[U8], image: ^[U8], program_base: Int) -> X64ExecutableResult Never! {
-    link_bind_bytes(link_bind_image(name, ^program, ^image, 0, 0, Val(program_base)))
+    link_bind_bytes(link_bind_image(name, ^program, ^image, 0, 0, Val(program_base), true))
 }
 
 fn link_bind_bytes(bound: ^X64BindResult) -> X64ExecutableResult Never! {
@@ -490,7 +491,7 @@ fn link_bind_failure(c: LinkContext) -> X64BindResult Never! {
     X64BindResult{executable: x64_executable_whole([U8]{}), errors: c.errors.copy()}
 }
 
-fn link_bind_image(name: String, program: ^[U8], image: ^[U8], gap_at: Int, gap: Int, program_base: Int?) -> X64BindResult Never! {
+fn link_bind_image(name: String, program: ^[U8], image: ^[U8], gap_at: Int, gap: Int, program_base: Int?, debug_info: Bool) -> X64BindResult Never! {
     c := link_context(^[[U8]]{^program, ^image}, LINK_RUN_BASE)
     view := link_image_view(&c, 1, gap_at, gap)
     if c.errors.len() > 0 -> return link_bind_failure(c)
@@ -563,7 +564,7 @@ fn link_bind_image(name: String, program: ^[U8], image: ^[U8], gap_at: Int, gap:
         c.g_kind[eh_g] = LINK_G_LINKER
         c.g_addr[eh_g] = c.eh_start
     }
-    debug :: link_debug_sections(&c)
+    debug :: link_debug_sections(&c, debug_info)
     target :: link_global_addr(c, start_g)
     origin :: view.program_base - c.base
     exe := x64_executable_whole([U8]{})

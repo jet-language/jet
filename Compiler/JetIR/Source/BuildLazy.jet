@@ -536,6 +536,27 @@ fn ir_lazy_moved(m: &IRModule, b: &IRBuilder, value: Int) -> Int Never! {
     flag
 }
 
+// Whether the type of `row` is a List whose items have no clone glue (a
+// handle without a clone, a single-use value, an Iter, or a value holding
+// one): such a List is uniquely owned by construction.
+fn ir_list_items_lack_clone(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
+    if ir_untag(m.types[row].ty) == {
+        .List(inner) -> !ir_lazy_type_can_clone(&m, p, inner)
+        else -> false
+    }
+}
+
+// An Iter over `list` (jet_rt_native_iter_from_list), `meta` its element
+// descriptor: a fresh List's header moves in; any other's items are cloned.
+// Items without clone glue have no clone path: their List is uniquely owned
+// by construction (sema), so lowering one that is not fresh is an internal
+// error (I2), never a runtime call through a null clone.
+fn ir_lazy_iter_from_list(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, element: Type, meta: Int, row: Int, span: Span) -> Int Never! {
+    if !(list >= 0 && b.fresh[list]) && !ir_lazy_type_can_clone(&m, p, element) -> return ir_fail_slot(&b, span, "an Iter over a shared [{ir_type_name(element)}], whose items have no clone")
+    moved :: ir_lazy_moved(&m, &b, list)
+    ir_runtime(&m, &b, "jet_rt_native_iter_from_list", [Int]{list, meta, moved}, row)
+}
+
 fn ir_lazy_slot_type(m: IRModule, b: IRBuilder, slot: Int) -> Type Never! {
     if slot < 0 -> return Type.Named{name: "Unit"}
     m.types[b.f.slot_type[slot]].ty.copy()
@@ -552,8 +573,7 @@ fn ir_lazy_from_list(m: &IRModule, p: IRProgram, b: &IRBuilder, lent: Int, row: 
     elem :: element ?? return ir_fail_slot(&b, span, "Iter source {ir_type_name(list_ty)} is not a List")
     meta :: ir_lazy_meta(&m, p, &b, elem, span)
     if meta < 0 -> return -1
-    moved :: ir_lazy_moved(&m, &b, list)
-    ir_runtime(&m, &b, "jet_rt_native_iter_from_list", [Int]{list, meta, moved}, row)
+    ir_lazy_iter_from_list(&m, p, &b, list, elem, meta, row, span)
 }
 
 // ---------------------------------------------------------------------------
@@ -1186,8 +1206,8 @@ fn ir_list_walk_taken(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?,
     }
     iter_ty :: Type.Apply{name: "Iter", args: [Type]{element}}
     iter_row :: ir_value_type(&m, p, iter_ty) ?? return ir_fail(&b, span, "loop over {ir_type_name(collection_ty)}")
-    moved :: ir_lazy_moved(&m, &b, owned)
-    source :: ir_runtime(&m, &b, "jet_rt_native_iter_from_list", [Int]{owned, meta, moved}, iter_row)
+    source :: ir_lazy_iter_from_list(&m, p, &b, owned, element, meta, iter_row, span)
+    if source < 0 -> return
     ir_lazy_walk_source(&m, p, &b, label, variable, variable_two, source, row, -1, body, span)
 }
 

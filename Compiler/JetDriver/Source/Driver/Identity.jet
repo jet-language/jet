@@ -1,7 +1,7 @@
 use core.build.[BuildGraphNode]
 // Source, module, and package identities remain separate at the driver boundary.
 use jet_sema.[SemaOutputIntent]
-use jet_pkg_model.[BuildStamp, LockedBuildContribution]
+use jet_pkg_model.[BuildStamp, LockedBuildContribution, PackageGrant]
 use jet_foundation.[
     AppAuthorizedDirectory,
     CompilerThreads,
@@ -442,6 +442,9 @@ struct JetDriverPackageInfo {
     authority_allow: [String]?
     authority_deny: [String]?
     authority_needs: [String]
+    // `authority.grants`: per-dependency rights the effect budget adds to
+    // `allow` for that dependency's code.
+    authority_grants: [PackageGrant]{[PackageGrant]{}}
     entry: JetDriverPackageEntry?
     manifest_path: String?
     // The canonical Package policy reader's declarations; their source is the

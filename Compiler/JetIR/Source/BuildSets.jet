@@ -321,8 +321,8 @@ fn ir_set_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: St
         items :: ir_set_list(&m, p, &b, shape, subject, list_row)
         meta :: ir_lazy_meta(&m, p, &b, shape.entry_ty, span)
         if meta < 0 -> return Val(-1)
-        moved :: ir_lazy_moved(&m, &b, items)
-        source :: ir_runtime(&m, &b, "jet_rt_native_iter_from_list", [Int]{items, meta, moved}, iter_row)
+        source :: ir_lazy_iter_from_list(&m, p, &b, items, shape.entry_ty, meta, iter_row, span)
+        if source < 0 -> return Val(-1)
         shuffled :: ir_runtime(&m, &b, "jet_rt_native_iter_shuffle", [Int]{source}, iter_row)
         ir_lazy_consumed(&m, &b, source)
         out :: ir_list_empty(&m, &b, list_row)
@@ -339,8 +339,7 @@ fn ir_set_builtin(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: St
         items :: ir_set_list(&m, p, &b, shape, subject, list_row)
         meta :: ir_lazy_meta(&m, p, &b, shape.entry_ty, span)
         if meta < 0 -> return Val(-1)
-        moved :: ir_lazy_moved(&m, &b, items)
-        return Val(ir_runtime(&m, &b, "jet_rt_native_iter_from_list", [Int]{items, meta, moved}, result_row))
+        return Val(ir_lazy_iter_from_list(&m, p, &b, items, shape.entry_ty, meta, result_row, span))
     }
     if symbol == "jet_set_equal" {
         if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(&b, span, "Set equal without an operand"))

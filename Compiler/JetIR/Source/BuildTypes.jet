@@ -2,7 +2,7 @@
 // (structs, enums, carriers, handles), operators and comparisons, value
 // rendering (Display/Show/Debug) and numeric conversions.
 
-use jet_foundation.[CORE_ENUM_ROWS, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TDeclarationOwnership, TField, FnBody, TGenericParam, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_source_owns_type, jet_target_layout_member_order, measure_literal_value, name_rows_set, name_rows_value, type_carrier_identity, type_name, type_table_intern, type_union_member_tag]
+use jet_foundation.[CORE_ENUM_ROWS, Span, SymbolID, Type, TypeTupleField, TBinaryOp, TCLIBinding, TCompilerBuiltin, TComptimeValue, TDeclarationOwnership, TField, FnBody, TGenericParam, TNumericOp, TSerdeAttribute, TShapeFieldNames, TTextPatternPart, TTryConvert, TTypeDef, TTypeDefKind, TVariant, TVariantPayload, core_source_owns_type, jet_target_layout_member_order, measure_literal_value, name_rows_set, name_rows_value, type_carrier_identity, type_name, type_table_intern, type_union_member_tag]
 use jet_sema.[sema_type_def_instance_type]
 
 // A rendered type's identity: its declaration key when it names one (every
@@ -651,12 +651,26 @@ fn ir_host_constant(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: St
     ir_host_route(&m, &b, 5, row, [Int]{key_text})
 }
 
+// Compile-time literal `value` of compiler value type row `row`
+// (ir_host_value_row), such as a prepared local's read: the module keeps it
+// (IRModule.host_literals) under its function and the slot of its key text,
+// which no other literal of the function shares, and the compiler answers it
+// from there (ir_host_route kind 6).
+fn ir_host_literal(m: &IRModule, b: &IRBuilder, row: Int, value: TComptimeValue) -> Int Never! {
+    string_row :: ir_string_row(&m)
+    key_text :: ir_temp(&m, &b, string_row)
+    key :: "{b.f.key}#{key_text}"
+    m.host_literals[key.copy()] = value.copy()
+    ir_emit(&b.f, IROp.ConstText, key_text, ir_intern_text(&m, key), -1, -1, b.line)
+    ir_host_route(&m, &b, 6, row, [Int]{key_text})
+}
+
 // A host route of compile-time code: the comptime child hands its compiler
 // (JetRuntime ComptimeServe.jet) route `kind` (1 method, 2 field, 3 comptime
-// input, 5 compiler value constant) and a stack area of words, the answer's
-// row key and then `operands`; the compiler reads them and answers a value
-// of row `row`, in place when it is an aggregate (or a float, which a word
-// cell carries).
+// input, 5 compiler value constant, 6 compiler value literal) and a stack
+// area of words, the answer's row key and then `operands`; the compiler reads
+// them and answers a value of row `row`, in place when it is an aggregate (or
+// a float, which a word cell carries).
 fn ir_host_route(m: &IRModule, b: &IRBuilder, kind: Int, row: Int, operands: [Int]) -> Int Never! {
     pointer_row :: ir_pointer_row(&m)
     area :: ir_temp(&m, &b, pointer_row)

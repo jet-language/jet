@@ -411,7 +411,7 @@ fn jet_driver_compiler_check(input: JetDriverCompilerCheckInput) -> JetDriverCom
     if input.request.mode == JetDriverCompileMode.Test -> registration.test_mode = true
     if input.request.mode == JetDriverCompileMode.Check -> registration.check_tests = true
     output_intent :: if input.request.mode == JetDriverCompileMode.Test -> SemaOutputIntent.Test else -> input.request.output_intent
-    output_diagnostics :: sema_output_resolve(&registration, output_intent, input.request.output_address)
+    output_diagnostics :: sema_output_resolve(&registration, output_intent, input.request.output_address, jet_driver_entry_selection(load) != None)
     loop diagnostic in output_diagnostics -> &registration.diagnostics.push(diagnostic)
     if jet_driver_has_errors(output_diagnostics) -> registration.complete = false
     if registration.internal_problem == .Val(problem) -> return jet_driver_compiler_check_failure(load, JetDriverStage.Check, Val(problem))

@@ -180,10 +180,17 @@ enum SemaLoopValueKind {
     Result
 }
 
+// `moved_before` and `scope_depth` are the ownership state where the loop
+// opened its mark (`entry`, sema_ownership_mark): a move the body makes of a
+// binding declared at or above `scope_depth`, still standing where the body
+// reaches its back edge, repeats on the next iteration
+// (sema_ownership_check_loop_move_backedge).
 struct SemaLoopValueFrame {
     label: String?
     kind: SemaLoopValueKind
     ty: Type?
+    moved_before: [SemaOwnershipMovedPlace]
+    scope_depth: Int
 }
 
 struct SemaPendingLoopValue {
@@ -216,7 +223,7 @@ fn sema_loop_value_set_pending_type(context: &SemaCheckContext, kind: SemaLoopVa
     context.pending_loop_value = Val(SemaPendingLoopValue{kind: kind, label: label, ty: ty})
 }
 
-fn sema_loop_value_push_frame(context: &SemaCheckContext, label: String?) Never! {
+fn sema_loop_value_push_frame(context: &SemaCheckContext, label: String?, entry: SemaOwnershipFork) Never! {
     pending := context.pending_loop_value
     context.pending_loop_value = None
     kind := SemaLoopValueKind.Effect
@@ -227,7 +234,7 @@ fn sema_loop_value_push_frame(context: &SemaCheckContext, label: String?) Never!
         if value.label != None -> resolved_label = value.label
         result_type = value.ty
     }
-    &context.loop_value_frames.push(SemaLoopValueFrame{kind: kind, label: resolved_label, ty: result_type})
+    &context.loop_value_frames.push(SemaLoopValueFrame{kind: kind, label: resolved_label, ty: result_type, moved_before: entry.moved.copy(), scope_depth: entry.scope_depth})
     &context.loop_break_flows.push(SemaLoopBreakFlows{paths: [SemaOwnershipState]{}})
 }
 

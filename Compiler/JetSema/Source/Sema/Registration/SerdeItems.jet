@@ -654,10 +654,10 @@ fn sema_serde_items_struct_decode_body(definition: StructDef, items: [Item], spa
             error_name :: "jet_serde_field_errors_{index}"
             &body.push(sema_serde_items_binding(slot, Val(Type.Option{inner: field.ty.copy()}), Expr.Absent{span: span, id: AST_NODE_GENERATED}, true, span))
             &body.push(sema_serde_items_binding(result, None, sema_serde_items_decode_call(sema_serde_items_ident("tree", span), field.ty, span), false, span))
-            &body.push(sema_serde_items_result_switch(sema_serde_items_ident(result, span), ok_value, [Stmt]{sema_serde_items_assign_local(slot, Expr.Present{value: sema_serde_items_ident(ok_value, span), span: span, id: AST_NODE_GENERATED}, span)}, error_name, sema_serde_items_decode_error_body(error_name, None, None, span), span))
+            &body.push(sema_serde_items_result_switch(sema_serde_items_ident(result, span), ok_value, [Stmt]{sema_serde_items_assign_local(slot, Expr.Present{value: sema_serde_items_take(ok_value, span), span: span, id: AST_NODE_GENERATED}, span)}, error_name, sema_serde_items_decode_error_body(error_name, None, None, span), span))
             &decoded_slots.push(slot)
             &decoded_values.push(value_name)
-            value = sema_serde_items_ident(value_name, span)
+            value = sema_serde_items_take(value_name, span)
         } else {
             key :: sema_serde_items_field_key(definition, field)
             optional :: field.ty == .Option(_)
@@ -676,14 +676,14 @@ fn sema_serde_items_struct_decode_body(definition: StructDef, items: [Item], spa
             slot_type :: if optional -> field.ty.copy() else -> Type.Option{inner: field.ty.copy()}
             &body.push(sema_serde_items_binding(slot, Val(slot_type), Expr.Absent{span: span, id: AST_NODE_GENERATED}, true, span))
             &body.push(sema_serde_items_binding(result, None, sema_serde_items_under(key, sema_serde_items_decode_call(subtree, field.ty, span), span), false, span))
-            stored :: if optional -> sema_serde_items_ident(ok_value, span) else -> Expr.Present{value: sema_serde_items_ident(ok_value, span), span: span, id: AST_NODE_GENERATED}
+            stored :: if optional -> sema_serde_items_take(ok_value, span) else -> Expr.Present{value: sema_serde_items_take(ok_value, span), span: span, id: AST_NODE_GENERATED}
             &body.push(sema_serde_items_result_switch(sema_serde_items_ident(result, span), ok_value, [Stmt]{sema_serde_items_assign_local(slot, stored, span)}, error_name, sema_serde_items_decode_error_body(error_name, missing, Val(key), span), span))
             if optional {
                 value = sema_serde_items_ident(slot, span)
             } else {
                 &decoded_slots.push(slot)
                 &decoded_values.push(value_name)
-                value = sema_serde_items_ident(value_name, span)
+                value = sema_serde_items_take(value_name, span)
             }
         }
         &field_values.push(ExprField{name: field.name, name_span: span, value: value})
@@ -812,7 +812,7 @@ fn sema_serde_items_migration_decode_body(definition: StructDef, span: Span) -> 
     }
     [Stmt]{
         sema_serde_items_binding("jet_serde_current", None, sema_serde_items_free_call(current, [Expr]{sema_serde_items_ident("tree", span)}, span), false, span),
-        sema_serde_items_result_switch(sema_serde_items_ident("jet_serde_current", span), "jet_serde_value", [Stmt]{sema_serde_items_return(Expr.Ok{value: sema_serde_items_ident("jet_serde_value", span), span: span, id: AST_NODE_GENERATED}, span)}, "jet_serde_current_errors", failed, span),
+        sema_serde_items_result_switch(sema_serde_items_ident("jet_serde_current", span), "jet_serde_value", [Stmt]{sema_serde_items_return(Expr.Ok{value: sema_serde_items_take("jet_serde_value", span), span: span, id: AST_NODE_GENERATED}, span)}, "jet_serde_current_errors", failed, span),
         sema_serde_items_return(Expr.Err{value: Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}, span: span, id: AST_NODE_GENERATED}, span),
     }
 }
@@ -1157,6 +1157,13 @@ fn sema_serde_items_enum_from_binding(variant: Variant, binding: String, type_na
 
 fn sema_serde_items_ident(name: String, span: Span) -> Expr Never! {
     Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}
+}
+
+// `^name`: a decoded value moves out of the generated binding (or match
+// payload) that holds it into its one new owner, as the move rule requires of
+// any value with cleanup (E0209).
+fn sema_serde_items_take(name: String, span: Span) -> Expr Never! {
+    Expr.Place{value: sema_serde_items_ident(name, span), access: PlaceAccess.Take, span: span, id: AST_NODE_GENERATED}
 }
 
 fn sema_serde_items_string(value: String, span: Span) -> Expr Never! {

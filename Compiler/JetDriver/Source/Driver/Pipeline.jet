@@ -66,6 +66,7 @@ use jet_sema.[
     sema_comptime_value_sites_empty,
     sema_copy_facts_table_empty,
     sema_finalize_graph,
+    sema_cli_entry_output_wrapper,
     sema_output_resolve,
     SemaOutputIntent,
     sema_function_memory_plan_from_graph,
@@ -82,9 +83,12 @@ use jet_sema.[
     SEMA_PRELUDE_ERROR_SOURCE_PATH,
     sema_marker_is_guest_export,
     sema_source_location_at,
+    sema_effect_chain_name,
     SemaCompilerModuleSource,
 ]
 use jet_foundation.[
+    AUTHORITY_AMBIENT_BASIC_EFFECTS,
+    AUTHORITY_PANIC_ROOT,
     CompilerThreads,
     CompilerTraceSink,
     DIAGNOSTIC_ERROR,
@@ -147,7 +151,21 @@ use jet_parser.[
 ]
 
 use jet_eval.[JetEvalComptimeInputAdapter]
-use jet_pkg_model.[LockedBuildContribution]
+use jet_pkg_model.[
+    EFFECT_PANIC_EDGE,
+    EFFECT_ROOT_PACKAGE,
+    EffectBudgetImport,
+    EffectBudgetModule,
+    EffectBudgetOutput,
+    EffectBudgetProgram,
+    LockedBuildContribution,
+    PackageEffectSummary,
+    PackageEffects,
+    PackageFacts,
+    pkg_compute_package_effects,
+    pkg_effect_enforce,
+    pkg_effect_module_owner,
+]
 use jet_ir.[IRProgram, ir_first_function_rows, ir_precise_helper_names, ir_named_function_keys, ir_reachable_core_rows]
 use jet_eval.[
     JetEvalConfig,
@@ -474,6 +492,12 @@ fn jet_driver_resolve_entry_key(load: JetDriverLoadResult, semantic_graph: SemaG
                 if jet_driver_function_key_count(functions, function_key) != 1 {
                     &diagnostics.push(jet_driver_diagnostic_at_loaded_site(load, owner_identity, "E0003", output.definition, "the selected Output entry has no unique checked function identity", "Output entry identity is retained from its registered callable", "retain the canonical function key through checking"))
                     return None
+                }
+                // An entry with its typed CLI parameter starts at the
+                // generated wrapper of its Output (Registration/CliEntry.jet).
+                if output.params.len() == 1 {
+                    wrapper_key :: symbol_id(SymbolKind.Function, source_module.module_identity, "", sema_cli_entry_output_wrapper(output.address)).key
+                    if jet_driver_function_key_count(functions, wrapper_key) == 1 -> return Val(wrapper_key)
                 }
                 return Val(function_key)
             }
@@ -3471,7 +3495,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         request.compiler_threads,
     )
     output_intent :: if request.mode == JetDriverCompileMode.Test -> SemaOutputIntent.Test else -> request.output_intent
-    output_diagnostics :: sema_output_resolve(&registration_graph, output_intent, request.output_address)
+    output_diagnostics :: sema_output_resolve(&registration_graph, output_intent, request.output_address, jet_driver_entry_selection(load) != None)
     loop diagnostic in output_diagnostics -> &registration_graph.diagnostics.push(diagnostic)
     if jet_driver_has_errors(output_diagnostics) -> registration_graph.complete = false
     if request.trace_sink == .Val(sink) -> sink.end("register", registration_graph.modules.len())
@@ -3848,10 +3872,14 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
         jet_driver_trace_step_begin(request.trace_sink, "driver.check.entry")
         entry_diagnostics := load.diagnostics
         load.diagnostics = [Diagnostic]{}
-        _ := jet_driver_resolve_entry_key(load, checked_graph, checked_functions, runtime_semantic_modules, &entry_diagnostics)
+        check_entry :: jet_driver_resolve_entry_key(load, checked_graph, checked_functions, runtime_semantic_modules, &entry_diagnostics)
         load.diagnostics = entry_diagnostics
         jet_driver_trace_step_end(request.trace_sink, "driver.check.entry", -1)
         if jet_driver_has_errors(load.diagnostics) -> return jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Assemble), false, trace)
+        if check_entry == .Val(budget_entry) {
+            budget :: jet_driver_effect_budget_diagnostics(load, checked_functions, budget_entry, jet_driver_effect_budget_name_spans(load, registration_graph))
+            if jet_driver_has_errors(budget) -> return jet_driver_effect_budget_failure(load, budget, trace)
+        }
         result := jet_driver_compile_result(load, load.diagnostics, None, true, trace)
         result.rust_foreign = if jet_driver_rust_foreign_present(registration_graph) -> jet_driver_rust_foreign_facts(registration_graph) else -> jet_driver_rust_foreign_empty()
         result.foreign_link = jet_driver_foreign_link_facts(runtime_semantic_modules, load.source_files)
@@ -3864,6 +3892,7 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     jet_driver_trace_step_begin(request.trace_sink, "driver.prelower.registration")
     c_export_rows :: jet_driver_c_export_rows(registration_graph, load.entry_module_identity)
     job_rows :: jet_driver_job_rows(registration_graph, load.entry_module_identity)
+    budget_spans :: jet_driver_effect_budget_name_spans(load, registration_graph)
     decls := ^registration_graph.decls
     registration_graph.decls = DeclTable{}
     late_registration := SemaRegistrationGraph?{None}
@@ -3917,6 +3946,13 @@ fn jet_driver_compile_loaded_stages(request: JetDriverCompileRequest, kg: &JetDr
     jet_driver_trace_step_end(request.trace_sink, "driver.preassemble.entry", -1)
     if kg.enabled -> jet_driver_keep_going_diagnostics(&kg, "assemble", load.diagnostics)
     if jet_driver_has_errors(load.diagnostics) && !kg.enabled -> return jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Assemble), false, trace)
+    // A test run or an evaluation runs no package entry, so only a build or
+    // a run spends the package effect budget.
+    if request.mode != JetDriverCompileMode.Test && request.mode != JetDriverCompileMode.Eval && entry_key == .Val(budget_entry) {
+        budget :: jet_driver_effect_budget_diagnostics(load, sema_functions, budget_entry, budget_spans)
+        if kg.enabled -> jet_driver_keep_going_diagnostics(&kg, "assemble", budget)
+        if jet_driver_has_errors(budget) && !kg.enabled -> return jet_driver_effect_budget_failure(load, budget, trace)
+    }
     entry_effects := [String]{}
     if entry_key == .Val(key) -> entry_effects = jet_driver_required_effects(sema_functions, key, startup_keys)
     foreign_link :: jet_driver_foreign_link_facts(runtime_semantic_modules, load.source_files)
@@ -3958,7 +3994,7 @@ fn jet_driver_required_effects(functions: [FnBody], entry_key: String, startup_k
         index :: &pending.pop() ?? break
         if seen[index] -> next
         seen[index] = true
-        cli_entry :: functions[index].name == "__jet_cli_run" && functions[index].key == entry_key
+        cli_entry :: functions[index].name.starts_with("__jet_cli_run") && functions[index].key == entry_key
         if !cli_entry {
             loop effect_name in functions[index].effects.direct -> &required.push(effect_name)
         }
@@ -3969,6 +4005,225 @@ fn jet_driver_required_effects(functions: [FnBody], entry_key: String, startup_k
         }
     }
     required
+}
+
+// The root package's row when its `authority` writes an `allow` or `deny`
+// row, the opt-in of the package effect budget.
+fn jet_driver_effect_budget_root(load: JetDriverLoadResult) -> Int? Never! {
+    loop (index, package) in load.packages {
+        if package.identity != load.package_identity -> next
+        if package.authority_allow == None && package.authority_deny == None -> return None
+        return Val(index)
+    }
+    None
+}
+
+// The name span of each function and method the build's packages register,
+// by function key; empty when no budget is written.
+fn jet_driver_effect_budget_name_spans(load: JetDriverLoadResult, graph: SemaRegistrationGraph) -> [String: Span] Never! {
+    spans := [String: Span]{}
+    if jet_driver_effect_budget_root(load) == None -> return spans
+    loop registered in graph.modules {
+        built := false
+        loop package in load.packages {
+            if package.identity == registered.package_identity -> built = true
+        }
+        if !built -> next
+        loop function in registered.functions -> spans[function.symbol.id.key] = function.symbol.span
+        loop nominal in registered.nominals {
+            loop method in nominal.methods -> spans[method.symbol.id.key] = method.symbol.span
+        }
+    }
+    spans
+}
+
+// The package effect budget (syntax-decisions.md:3362-3366): an `authority`
+// `allow` or `deny` row holds every package of the build, and
+// `authority.grants` widens it for one named dependency. A dependency that
+// reaches an effect outside the budget is E1220. The root package's own code
+// answers to the same row as application authority: an undecided right is
+// E1803, with its `--allow` and confirmation exits, and a denied right is
+// E0749 (spec.md:1771-1784). So the budget charges the dependencies, and
+// charging the root as well would preempt those diagnostics and their exits.
+// The checked functions feed the one Jetpack enforcer
+// (pkg_compute_package_effects, pkg_effect_enforce) through its
+// EffectBudgetProgram view.
+//
+// A function's budgeted effects are what its own package's code reaches: its
+// direct effects, a stop, and the effects of the same-package and Core
+// functions it calls. A call into a dependency leaves that dependency's
+// effects with the dependency, so a grant to it is not undone at its caller.
+// As for the application's required effects (jet_driver_required_effects), an
+// open-world call's maximal row is a ceiling fact, not a reached effect. The
+// written `allow` row adds to the beginner floor every program holds
+// (spec.md:1764-1769).
+fn jet_driver_effect_budget_diagnostics(load: JetDriverLoadResult, functions: [FnBody], entry_key: String, name_spans: [String: Span]) -> [Diagnostic] {
+    root :: load.packages[jet_driver_effect_budget_root(load) ?? return [Diagnostic]{}]
+    // Each dependency's name, by its source root and by its package identity.
+    dep_roots := [String: String]{}
+    dep_names := [String: String]{}
+    loop package in load.packages {
+        loop dependency in package.dependencies {
+            if dep_roots.has_key(dependency.name) -> next
+            loop target in load.packages {
+                if target.root_index != dependency.target_root_index || target.identity == load.package_identity -> next
+                dep_roots[dependency.name] = target.root_path
+                if !dep_names.has_key(target.identity) -> dep_names[target.identity] = dependency.name
+                break
+            }
+        }
+    }
+    // The program's modules: the package sources the build authorized. Core
+    // and generated modules have none; their effects count where they are
+    // called.
+    program := EffectBudgetProgram{entry: -1, modules: [EffectBudgetModule]{}, dep_roots: ^dep_roots, selected_output: None}
+    module_identities := [String]{}
+    module_rows := [String: Int]{}
+    aliases := [String: Bool]{}
+    loop loaded in load.modules {
+        if loaded.source_unit_index < 0 || loaded.source_unit_index >= load.source_units.len() || module_rows.has_key(loaded.module_identity) -> next
+        unit :: load.source_units[loaded.source_unit_index]
+        if unit.root_index < 0 || unit.path.starts_with("<build-generated>/") -> next
+        // A site reads `module::function`; a module name another module
+        // already shows keeps its full identity.
+        segments :: loaded.module_name.split(".").to_list()
+        alias := if segments.len() > 0 -> segments[segments.len() - 1].copy() else -> loaded.module_name.copy()
+        if alias.len() == 0 || aliases.has_key(alias) -> alias = loaded.module_identity.copy()
+        aliases[alias] = true
+        module_rows[loaded.module_identity] = program.modules.len()
+        &module_identities.push(loaded.module_identity.copy())
+        &program.modules.push(EffectBudgetModule{path: jet_driver_physical_path(root.root_path, unit.path), alias: alias, function_keys: [String]{}, function_spans: [String: Span]{}, imports: [EffectBudgetImport]{}, has_build_entry: false})
+    }
+    owners := [String]{}
+    loop loaded in program.modules -> &owners.push(pkg_effect_module_owner(program, loaded.path))
+    by_key :: ir_first_function_rows(functions)
+    entry_row :: name_rows_get_text(by_key, entry_key) ?? return [Diagnostic]{}
+    rows := [Int]{}
+    loop function in functions -> &rows.push(module_rows.get(function.module_identity) ?? -1)
+    if rows[entry_row] < 0 -> return [Diagnostic]{}
+    // The functions the entry reaches, in discovery order.
+    reached := (loop _ in functions -> false)
+    order := [Int]{}
+    pending := [Int]{entry_row}
+    loop pending.len() > 0 {
+        index :: &pending.pop() ?? break
+        if reached[index] -> next
+        reached[index] = true
+        &order.push(index)
+        loop edge in functions[index].effects.call_edges {
+            callee :: name_rows_get_text(by_key, edge) ?? next
+            &pending.push(callee)
+        }
+    }
+    // Each reached function's own-package effects, to a fixpoint over the
+    // same-package and Core call edges.
+    local := (loop _ in functions -> [String]{})
+    loop index in order {
+        loop effect_name in functions[index].effects.direct {
+            if !local[index].contains(effect_name) -> &local[index].push(effect_name)
+        }
+        if functions[index].effects.call_edges.contains(EFFECT_PANIC_EDGE) && !local[index].contains(AUTHORITY_PANIC_ROOT) -> &local[index].push(AUTHORITY_PANIC_ROOT)
+    }
+    changed := true
+    loop changed {
+        changed = false
+        loop index in order {
+            owner :: if rows[index] < 0 -> "" else -> owners[rows[index]]
+            loop edge in functions[index].effects.call_edges {
+                callee :: name_rows_get_text(by_key, edge) ?? next
+                if rows[callee] >= 0 && owners[rows[callee]] != owner -> next
+                reached_effects :: local[callee].copy()
+                loop effect_name in reached_effects {
+                    if local[index].contains(effect_name) -> next
+                    &local[index].push(effect_name)
+                    changed = true
+                }
+            }
+        }
+    }
+    // The enforcer's keys: `module::function`, a method `module::Type::name`.
+    sites := (loop _ in functions -> "")
+    loop (index, function) in functions {
+        row :: rows[index]
+        if row < 0 -> next
+        effect_key :: sema_effect_chain_name(function)
+        sites[index] = "{program.modules[row].alias}::{effect_key}"
+        &program.modules[row].function_keys.push(effect_key.copy())
+        // A witness is the function's name; a function registration does not
+        // name (a lambda, a generated body) is its declaration.
+        program.modules[row].function_spans[effect_key] = name_spans.get(function.key) ?? function.source_span
+    }
+    summaries := [String: PackageEffectSummary]{}
+    solved := [String: [String]]{}
+    loop (index, function) in functions {
+        if sites[index] == "" -> next
+        edges := [String]{}
+        loop edge in function.effects.call_edges {
+            if name_rows_get_text(by_key, edge) == .Val(callee) {
+                if sites[callee] != "" -> &edges.push(sites[callee].copy())
+            } else {
+                &edges.push(edge.copy())
+            }
+        }
+        summaries[sites[index]] = PackageEffectSummary{direct: function.effects.direct.copy(), edges: ^edges, maximal: false}
+        solved[sites[index]] = if reached[index] -> local[index].copy() else -> function.effects.direct.copy()
+    }
+    entry_module :: module_rows.get(load.entry_module_identity) ?? rows[entry_row]
+    program.entry = entry_module
+    loop edge in load.imports {
+        if edge.source_module_identity != load.entry_module_identity -> next
+        name :: dep_names.get(edge.target_package_identity) ?? next
+        span :: if edge.declaration.kind == {
+            .Module(_, module_span) -> module_span
+            .Unqualified(_, alias_span, _, _, _) -> alias_span
+            .File(_, file_span) -> file_span
+        }
+        &program.modules[entry_module].imports.push(EffectBudgetImport{name: name.copy(), span: span})
+    }
+    program.selected_output = Val(EffectBudgetOutput{module_index: rows[entry_row], semantic_name: sema_effect_chain_name(functions[entry_row])})
+    manifest := PackageFacts.default()
+    manifest.effects_enabled = true
+    if root.authority_allow == .Val(allow) {
+        row := [String]{}
+        loop name in AUTHORITY_AMBIENT_BASIC_EFFECTS -> &row.push(name)
+        loop name in allow -> &row.push(name.copy())
+        manifest.authority.allow = Val(^row)
+    }
+    manifest.authority.deny = root.authority_deny
+    manifest.authority.grants = root.authority_grants
+    dependencies := [PackageEffects]{}
+    loop entry in pkg_compute_package_effects(program, solved, summaries) {
+        if entry.name != EFFECT_ROOT_PACKAGE -> &dependencies.push(entry)
+    }
+    out := [Diagnostic]{}
+    loop diagnostic in pkg_effect_enforce(dependencies, manifest) -> &out.push(jet_driver_effect_budget_located(load, program, module_identities, diagnostic))
+    out
+}
+
+// A failed budget's result. An E1220 at a dependency's function is the root's
+// budget refusing that dependency, not an error of the dependency's own
+// check, so it joins the diagnostics after the dependency summary.
+fn jet_driver_effect_budget_failure(load: JetDriverLoadResult, budget: [Diagnostic], trace: JetDriverCompileTrace) -> JetDriverCompileResult Never! {
+    result := jet_driver_compile_result(load, load.diagnostics, Val(JetDriverStage.Assemble), false, trace)
+    loop diagnostic in budget -> &result.diagnostics.push(diagnostic)
+    result
+}
+
+// An E1220 at its source: a witness names its module's path, a dependency
+// boundary sits in the entry module.
+fn jet_driver_effect_budget_located(load: JetDriverLoadResult, program: EffectBudgetProgram, module_identities: [String], diagnostic: Diagnostic) -> Diagnostic Never! {
+    // copy: the located diagnostic is a new owned row; unlocated it equals
+    // `diagnostic`, a read parameter the enforcer's list keeps.
+    span :: diagnostic.span ?? return diagnostic.copy()
+    identity := load.entry_module_identity.copy()
+    if diagnostic.source_path == .Val(path) {
+        identity = ""
+        loop (index, loaded) in program.modules {
+            if loaded.path == path -> identity = module_identities[index].copy()
+        }
+    }
+    location :: jet_driver_source_location_for_load_module(load, identity, span) ?? return diagnostic.copy()
+    diagnostic_with_source_mapping(diagnostic.copy(), location.source_path, location.aggregate_start, location.source_start)
 }
 
 // Closes `driver.release` after jet_driver_compile_loaded_stages returns, and

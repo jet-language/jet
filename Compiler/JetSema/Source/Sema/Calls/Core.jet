@@ -1464,6 +1464,9 @@ fn sema_call_core_check_source_owned(target: SemaCallDirectTarget, qualified_nam
     if sema_data_is_sys_decode(target, environment, program) {
         call_args = sema_data_sys_decode_args(args, type_args, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     }
+    if sema_data_is_db_decode(target, environment, program) {
+        call_args = sema_data_db_decode_args(args, type_args, span, environment, program, &diagnostics) ?? return None
+    }
     if sema_call_histories_is_call(target, environment, program) -> call_args = sema_call_histories_args(args, type_args, span, environment, program)
     call := Call{name: qualified_name, name_span: span, type_args: type_args, args: call_args}
     checked :: sema_call_check_direct_target_owned(&state, target, call, [SemaCallDefaultValue]{}, expected, environment, program, &scopes, &tail_store, &context, &diagnostics) ?? return None

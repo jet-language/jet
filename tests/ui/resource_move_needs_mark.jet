@@ -1,0 +1,92 @@
+// Fields and values with cleanup still need `^` (spec "Copies, moves, and
+// owned destinations"): an owning position takes a resource out of an owned
+// variable's field or a live match payload only where `^` writes the move,
+// and once it is written a later use of the original is rejected.
+struct Res { name: String }
+impl Res.Close {
+    fn close(^self) { print("close {self.name}") }
+}
+
+struct Holder {
+    res: Res
+    label: String
+}
+
+fn holder(name: String) -> Holder {
+    Holder{res: Res{name: name}, label: name}
+}
+
+fn present(carrier: Holder?) -> Bool {
+    carrier != None
+}
+
+fn field_unmarked() -> Res? {
+    h :: holder("field")
+    out := Res?{None}
+    out = Val(h.res)
+    out
+}
+
+fn payload_unmarked() -> Res? {
+    carrier :: Val(holder("payload"))
+    out := Holder?{None}
+    if carrier == {
+        .Val(found) -> out = Val(found)
+        .None -> {}
+    }
+    if out == {
+        .Val(moved) -> Val(^moved.res)
+        .None -> None
+    }
+}
+
+fn payload_field_unmarked() -> Res? {
+    carrier :: Val(holder("payload field"))
+    if carrier == {
+        .Val(found) -> Val(found.res)
+        .None -> None
+    }
+}
+
+fn arm_tail_unmarked() -> Holder {
+    carrier :: Val(holder("arm"))
+    found :: if carrier == {
+        .Val(held) -> held
+        .None -> panic("no holder")
+    }
+    found
+}
+
+fn field_marked_then_used() -> Res {
+    h :: holder("marked")
+    out :: Val(^h.res)
+    print(h.res.name)
+    out ?? panic("none")
+}
+
+fn payload_marked_then_used() -> Res? {
+    carrier :: Val(holder("payload marked"))
+    if carrier == {
+        .Val(found) -> {
+            out :: Val(^found.res)
+            print(found.res.name)
+            out
+        }
+        .None -> None
+    }
+}
+
+fn subject_used_after_payload_move() -> Holder? {
+    carrier :: Val(holder("subject"))
+    out := Holder?{None}
+    if carrier == {
+        .Val(found) -> out = Val(^found)
+        .None -> {}
+    }
+    print(present(carrier))
+    out
+}
+
+fn run() {
+    print("unreached")
+}

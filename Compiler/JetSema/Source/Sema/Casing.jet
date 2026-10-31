@@ -26,6 +26,7 @@ use jet_foundation.[
     TextEdit,
     TraitImplBlock,
     TraitMethodSig,
+    Type,
     TypeParam,
     TypedLitBody,
     SemaNameCase,
@@ -193,9 +194,14 @@ fn sema_casing_item(item: Item, diagnostics: &[Diagnostic]) {
             loop method in definition.methods -> sema_casing_function(method, "method", &diagnostics)
         }
         .Const(definition) -> {
+            // `defaults: { run: … }` is the Output defaults record
+            // (syntax-decisions.md:7425), not a user binding: its fixed
+            // lowercase name has no casing to check.
+            output_defaults :: definition.ty == (Val(Type.Named{name: "__OutputDefaults"}))
             // Owner ruling (2026-09-30): an immutable module binding is
             // ALL_CAPS; a mutable one is never ALL_CAPS.
             if {
+                output_defaults -> {}
                 definition.mutable -> sema_casing_snake(definition.name, definition.name_span, "module variable", &diagnostics)
                 else -> sema_casing_screaming(definition.name, definition.name_span, "constant", &diagnostics)
             }

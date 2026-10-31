@@ -1318,9 +1318,21 @@ fn __dyn_value(value: DBValue) -> Dyn Never! {
     }
 }
 
-fn decode<T: Decode>(row: [String: DBValue]) -> T [FieldError]! {
+// Typed `decode<T>(row)`: sema supplies `names`, the column name and decode
+// key of each of T's fields whose column differs from its key; every other
+// column decodes under its own name.
+fn decode<T: Decode>(row: [String: DBValue], names: [(db_name: String, key: String)]) -> T [FieldError]! {
     entries := [(key: String, value: Dyn)]{}
-    loop (key, value) in row -> &entries.push((key: key.copy(), value: __dyn_value(value)))
+    loop (column, value) in row {
+        key := column.copy()
+        loop rename in names {
+            if rename.db_name == column {
+                key = rename.key.copy()
+                break
+            }
+        }
+        &entries.push((key: ^key, value: __dyn_value(value)))
+    }
     tree :: stream.object_from_entries(^entries)
     if tree.decode<T>() == {
         .Ok(value) -> Ok(value)

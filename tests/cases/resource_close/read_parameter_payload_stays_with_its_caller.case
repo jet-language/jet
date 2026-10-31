@@ -1,0 +1,21 @@
+# Claim: `got :: warm ?? return …` on a read parameter holding a Close value (`Res?`, `[Res]?`) would copy the caller's resource into an owned binding that closes it, so the caller closed it a second time; sema refuses it (E0201), and the in-place match form reads the caller's value without closing it, each resource closing once at the caller's scope end on o0, o1 and o2.
+# Hand-derived: main.jet is the double-close repro; fixed.jet reads each payload in its arm.
+fixture: read_parameter_payload_stays_with_its_caller.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check main.jet --json
+exit: 1 # the copy out of a read parameter is rejected
+json: stdout doc $.reports[?severity="error"] #= 2 # the errors are exactly E0201, E0201
+json: stdout doc $.reports[?code="E0201"] #= 2 # one E0201 per read parameter `??`
+step: jet check main.jet
+exit: 1 # the copy out of a read parameter is rejected
+stderr: ~ "`warm` cannot be moved from borrowed storage" # rendered diagnostic text
+step: jet run --optimize=none fixed.jet
+exit: 0 # o0
+stdout: = read_parameter_payload_stays_with_its_caller.out # o0
+step: jet run --optimize=basic fixed.jet
+exit: 0 # o1
+stdout: = read_parameter_payload_stays_with_its_caller.out # o1
+step: jet run --optimize=full fixed.jet
+exit: 0 # o2
+stdout: = read_parameter_payload_stays_with_its_caller.out # o2

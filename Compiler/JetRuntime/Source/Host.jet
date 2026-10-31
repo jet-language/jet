@@ -101,31 +101,35 @@ fn host_stdout_byte_locked(byte: I64) -> I64 {
     I64{0}
 }
 
-// Bytes are borrowed, never copied into an intermediate String/line allocation.
+// Bytes are borrowed, never copied into an intermediate String/line
+// allocation. They go into the 8192-byte buffer a run at a time (a word copy):
+// a full buffer is written out, and on a terminal so is each run that ends in
+// an LF (line buffering).
 fn host_stdout_write(bytes: I64, length: I64, line: Bool, flush: Bool) -> I64 {
     host_lock()
     failure := I64{0}
     #Unsafe("the caller lends length bytes; the output lock owns the destination buffer") {
         index := I64{0}
-        source := bytes
         pending := os_load_i64(wrapping(host_root + I64{8}))
         tty :: os_load_i64(wrapping(host_root + I64{16})) != I64{0}
         loop index < length {
-            if (pending == I64{8192}) {
-                failure = host_stdout_flush_locked()
-                if (failure != I64{0}) { break }
-                pending = I64{0}
+            room :: wrapping(I64{8192} - pending)
+            left :: wrapping(length - index)
+            run := if (left < room) -> left else -> room
+            ends_line := false
+            if (tty && run > I64{0}) {
+                lf :: rt_line_run(wrapping(bytes + index), run)
+                ends_line = rt_text_byte(wrapping(bytes + index + lf - I64{1})) == I64{10}
+                run = lf
             }
-            byte :: os_load_u8(source)
-            os_store_u8(wrapping(host_root + I64{128} + pending), byte)
-            pending = wrapping(pending + I64{1})
-            index = wrapping(index + I64{1})
-            source = wrapping(source + I64{1})
-            if (pending == I64{8192} || (tty && byte == I64{10})) {
+            rt_text_bytes_copy(wrapping(host_root + I64{128} + pending), wrapping(bytes + index), run)
+            pending = wrapping(pending + run)
+            index = wrapping(index + run)
+            if (pending == I64{8192} || ends_line) {
                 os_store_i64(wrapping(host_root + I64{8}), pending)
                 failure = host_stdout_flush_locked()
                 if (failure != I64{0}) { break }
-                pending = I64{0}
+                pending = os_load_i64(wrapping(host_root + I64{8}))
             }
         }
         if (failure == I64{0}) { os_store_i64(wrapping(host_root + I64{8}), pending) }
@@ -220,11 +224,11 @@ fn host_print_capture_install(code: I64) { host_print_capture_code = code }
 }
 
 // print in a program that owns its main (JetIR EntryOwned.jet): such a
-// program links no other stdout writer and runs no test capture, and print
-// flushes after every line, so nothing is ever buffered. The line and its
-// newline go straight to fd 1, with no buffer and no lock: the same bytes,
-// in the same order, as jet_term_write_stdout_line's flush writes. A failed
-// write is dropped, as there.
+// program links no other stdout writer, no runtime root to hold a buffer,
+// and runs no test capture. The line and its newline go straight to fd 1,
+// with no buffer and no lock: the same bytes, in the same order, as
+// jet_term_write_stdout_line's buffered writes. A failed write is dropped,
+// as there.
 #Export(c) fn jet_term_write_stdout_line_direct(value: I64, flush: U8) {
     #Unsafe("value is a borrowed E4 JetCText header; writev borrows its bytes and its own LF until return") {
         bytes :: os_load_i64(value)

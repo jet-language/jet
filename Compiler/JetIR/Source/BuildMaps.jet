@@ -688,8 +688,7 @@ fn ir_map_view(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMap
     ir_walk_close(&m, &b, walk)
     meta :: ir_lazy_meta(&m, p, &b, item_ty, span)
     if meta < 0 -> return -1
-    moved :: ir_lazy_moved(&m, &b, items)
-    ir_runtime(&m, &b, "jet_rt_native_iter_from_list", [Int]{items, meta, moved}, result_row)
+    ir_lazy_iter_from_list(&m, p, &b, items, item_ty, meta, result_row, span)
 }
 
 // `map.first_key()` / `map.min_value()` / `map.max_value()`: a copy of the

@@ -318,7 +318,7 @@ fn sema_expression_list_elements(elements: [Expr], expected_element: Type?, envi
         if element == {
             .Spread(value, spread_span, _) -> {
                 checked :: sema_check_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-                if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, context, &diagnostics, false) -> return None
+                if !sema_copy_site_check_guard_owned(checked, environment, program, scopes, state, context, &diagnostics, false) -> return None
                 if !sema_expression_list_mark_owned_value(value, &state, &scopes, &diagnostics) -> return None
                 normalized :: sema_expr_expected_type(sema_expr_unwrap_tag(checked.ty), environment, program)
                 spread_element := if normalized == {
@@ -348,7 +348,7 @@ fn sema_expression_list_elements(elements: [Expr], expected_element: Type?, envi
                     if expected_element == .Val(required) -> sema_expression_list_item_replace_mismatch(required, element, checked_start, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                     return None
                 }
-                if !sema_copy_site_check_guard_owned(value, environment, program, scopes, context, &diagnostics, false) -> return None
+                if !sema_copy_site_check_guard_owned(value, environment, program, scopes, state, context, &diagnostics, false) -> return None
                 if !sema_copy_site_refuse_borrowed_copy(element, "the list literal", environment, program, scopes, context, &diagnostics) -> return None
                 if !sema_expression_list_mark_owned_value(element, &state, &scopes, &diagnostics) -> return None
                 if expected_element == .Val(required) {
@@ -382,7 +382,7 @@ fn sema_expression_list_elements(elements: [Expr], expected_element: Type?, envi
                 }
                 checked :: sema_check_expression(element, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 if checked == .Val(value) {
-                    if !sema_copy_site_check_guard_owned(value, environment, program, scopes, context, &diagnostics, false) -> return None
+                    if !sema_copy_site_check_guard_owned(value, environment, program, scopes, state, context, &diagnostics, false) -> return None
                     if !sema_copy_site_refuse_borrowed_copy(element, "the list literal", environment, program, scopes, context, &diagnostics) -> return None
                     if !sema_expression_list_mark_owned_value(element, &state, &scopes, &diagnostics) -> return None
                     checked_parts[deferred_index] = Val(TListSpreadPart.Element{value: value})
@@ -396,7 +396,7 @@ fn sema_expression_list_elements(elements: [Expr], expected_element: Type?, envi
             if checked_parts[deferred_index] != None -> next
             element := elements[deferred_index]
             value :: sema_check_expression(element, Val(first_type), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-            if !sema_copy_site_check_guard_owned(value, environment, program, scopes, context, &diagnostics, false) -> return None
+            if !sema_copy_site_check_guard_owned(value, environment, program, scopes, state, context, &diagnostics, false) -> return None
             if !sema_copy_site_refuse_borrowed_copy(element, "the list literal", environment, program, scopes, context, &diagnostics) -> return None
             if !sema_expression_list_mark_owned_value(element, &state, &scopes, &diagnostics) -> return None
             checked_parts[deferred_index] = Val(TListSpreadPart.Element{value: value})
@@ -606,8 +606,8 @@ fn sema_expression_map(expr: Expr, entries: [ExprPair], span: Span, expected: Ty
         value :: if expected_value != None -> sema_check_expression(entry.value, expected_value, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(entry.value, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         checked_key :: key ?? return None
         checked_value :: value ?? return None
-        if !sema_copy_site_check_guard_owned(checked_key, environment, program, scopes, context, &diagnostics, false) -> return None
-        if !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, context, &diagnostics, false) -> return None
+        if !sema_copy_site_check_guard_owned(checked_key, environment, program, scopes, state, context, &diagnostics, false) -> return None
+        if !sema_copy_site_check_guard_owned(checked_value, environment, program, scopes, state, context, &diagnostics, false) -> return None
         if !sema_type_map_key_eligible(environment, program, checked_key.ty) -> &diagnostics.push(sema_map_key_error("`{type_name(checked_key.ty)}` can't be a map key", expr_span(entry.key)))
         if expected_key == .Val(key_ty) {
             compatible_key :: sema_expr_expected_assignable(key_ty, checked_key.ty, environment, program) ?? return None
@@ -682,7 +682,7 @@ fn sema_expression_tuple(fields: [TupleField], span: Span, expected: Type?, envi
             }
         }
         value :: sema_check_expression(field.value, field_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-        if !sema_copy_site_check_guard_owned(value, environment, program, scopes, context, &diagnostics, false) -> return None
+        if !sema_copy_site_check_guard_owned(value, environment, program, scopes, state, context, &diagnostics, false) -> return None
         if field_expected == .Val(field_ty) {
             compatible :: sema_expr_expected_assignable(field_ty, value.ty, environment, program) ?? return None
             if !compatible -> return None

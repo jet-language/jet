@@ -1,0 +1,105 @@
+// A form that hands on its operand's value (`x ?? fallback`, an `if` or match
+// arm tail, a block tail, parentheses) reads a place it does not own the same
+// way a bare place read does: a resource it would copy out of a borrowed
+// holder or parameter into an owned position is refused, so the holder stays
+// its one owner. A loop name over a list of resources read in place (no `^`
+// drive) is such a place read too, whoever owns the list.
+struct Res { name: String }
+impl Res.Close {
+    fn close(^self) { print("close {self.name}") }
+}
+
+struct Holder {
+    first: Res?
+    second: Res?
+}
+
+fn or_field(h: Holder) -> Int {
+    r :: h.first ?? return 0
+    r.name.len()
+}
+
+fn or_param(env: Res?) -> Int {
+    r :: env ?? return 0
+    r.name.len()
+}
+
+fn or_fallback_value(h: Holder) -> Int {
+    r :: h.first ?? h.second ?? return 0
+    r.name.len()
+}
+
+fn or_fallback_block(h: Holder) -> Int {
+    r :: h.first ?? {
+        print("fallback")
+        h.second ?? return 0
+    }
+    r.name.len()
+}
+
+fn paren(h: Holder) -> Int {
+    r :: (h.first ?? return 0)
+    r.name.len()
+}
+
+fn if_arms(flag: Bool, left: Res, right: Res) -> Int {
+    r :: if flag -> left else -> right
+    r.name.len()
+}
+
+fn match_arm(h: Holder) -> Int {
+    r :: if h.first == {
+        .Val(found) -> found
+        .None -> panic("none")
+    }
+    r.name.len()
+}
+
+fn assign_or(h: Holder) -> Int {
+    out := Holder{first: None, second: None}
+    out.first = Val(h.first ?? return 0)
+    0
+}
+
+fn return_or(h: Holder) -> Res? {
+    Val(h.first ?? return None)
+}
+
+fn keep(r: ^Res) -> Int { r.name.len() }
+
+fn loop_push() -> Int {
+    list :: [Res{name: "push"}]
+    out := [Res]{}
+    loop item in list {
+        &out.push(item)
+    }
+    out.len()
+}
+
+fn loop_collect() -> Int {
+    list :: [Res{name: "collect"}]
+    out :: loop item in list -> item
+    out.len()
+}
+
+fn loop_take() -> Int {
+    list :: [Res{name: "take"}]
+    total := 0
+    loop item in list {
+        total = total + keep(^item)
+    }
+    total
+}
+
+fn loop_drive_moves() -> Int {
+    list :: [Res{name: "drive"}]
+    out := [Res]{}
+    loop item in ^list {
+        &out.push(item)
+    }
+    out.len()
+}
+
+fn run() {
+    print("unreached")
+}

@@ -1,6 +1,5 @@
 # repo-relative case or golden example ID	card	reason
 Examples/features/io/terminal_parity	#4599	terminal parity golden mismatch
-Examples/features/tooling/compiler_api	#4599	compiler API example mismatch
 tests/ui/ioerror_display_migration	#4717	the Jet checker has no L0520 display_migration lint yet
 tests/ui/app_capability_target	#5990	Jet sema ICEs on #Target(Web) program forms
 tests/ui/web_app_dynamic_route	#5990	Jet sema ICEs on #Target(Web) program forms
@@ -12,7 +11,6 @@ tests/ui/web_app_routes_stray	#5990	Jet sema ICEs on #Target(Web) program forms
 tests/ui/mem_use_after_free	#4599	Jet ownership has no Rust is_resource_type E0121 Note (acquire a new resource; closed resources cannot be copied or reused)
 tests/ui/mem_use_after_reset	#4599	Jet ownership has no Rust is_resource_type E0121 Note (acquire a new resource; closed resources cannot be copied or reused)
 tests/ui/assignment_move_use_after_move	#4599	Jet ownership doesn't move a one-pass binding into an assignment (Rust statements.rs:1627 note_move_if_direct_ident "the assignment"); no E0121
-tests/ui/loop_move_reuse_next_iteration	#4599	Jet ownership doesn't report a loop-carried receiver move (Rust CheckerOwnership.rs:4803 "here on an earlier loop iteration"); no E0121
 tests/ui/E0927_unknown_marker_block	#4260	follow-on error; owner question q0rhnu0g
 tests/ui/E0927_unknown_marker_parameter	#6425	check not ported: E0927
 tests/ui/E3405_debug_trace_left_in_build	#6425	check not ported: E3405
@@ -235,7 +233,6 @@ tests/cases/ownership/edit_disjoint_callback_views_reject_every_retaining_bounda
 tests/cases/ownership/enum_pattern_payload_keeps_its_original_owner_live.case	#5454	assert not satisfied: original expect_err not satisfied
 tests/cases/ownership/evaluated_statement_accesses_are_scoped_and_mode_aware.case	#5454	assert not satisfied: original expect not satisfied
 tests/cases/ownership/function_value_call_rejects_move_and_tracks_aliases_per_call.case	#5454	assert not satisfied: original assert_eq! not satisfied: [0,1]
-tests/cases/ownership/lambda_taking_a_capture_runs_once.case	#5454	assert not satisfied: original expect_err not satisfied
 tests/cases/ownership/local_cell_guard_mapping_and_splitting_keep_projected_types.case	#5454	assert not satisfied: original expect not satisfied
 tests/cases/ownership/local_cell_surface_uses_read_receivers_and_host_borrows.case	#5454	assert not satisfied: original expect not satisfied
 tests/cases/ownership/move_non_clonable_is_hard_error.case	#5454	assert not satisfied: original assert! not satisfied: [false]
@@ -260,7 +257,6 @@ tests/cases/ownership/shared_read_guard_cannot_enter_write_helper.case	#5454	ass
 tests/cases/ownership/stored_lambda_returning_view_is_rejected_before_codegen.case	#5454	assert not satisfied: original expect_err not satisfied
 tests/cases/ownership/stored_view_field_cannot_be_rebound_to_different_owner.case	#5454	assert not satisfied: original expect_err not satisfied
 tests/cases/ownership/trait_object_mut_self_calls_use_receiver_change_rules_inside_callbacks.case	#5454	assert not satisfied: original expect not satisfied
-tests/cases/ownership/unmarked_take_argument_in_loop_is_not_last_use.case	#5454	assert not satisfied: original expect_err not satisfied
 tests/cases/ownership/wrapper_returned_view_aggregates_render_lifetimes_on_named_leaves.case	#5454	assert not satisfied: original expect not satisfied
 tests/cases/ownership/write_window_cannot_be_stored.case	#5454	assert not satisfied: original assert! not satisfied: [false]
 tests/cases/ownership/write_window_cannot_cross_task_boundary.case	#5454	assert not satisfied: original assert! not satisfied: [false]
@@ -373,7 +369,6 @@ tests/cases/jetpack_tasks/jet_top_job_runs_by_name_and_unknown_suggests_jobs.cas
 tests/cases/same_subject_dispatch/rewrite_compiles_formats_and_preserves_parser_dispatch_behavior.case	#5454	jet check --json reports no suggested L0514 for the witness (#5518)
 tests/cases/redundant_final_return/final_return_fix_removes_keyword.case	#5454	jet check --json reports 0 diagnostics (no L0530) for tests/ui_lint/redundant_final_return.jet; jet fix makes no changes
 tests/cases/arena/alloc_and_use_compiles_and_runs.case	#5454	E0111: the original writes through the arena view with `x = 43` after `x :: arena.alloc(42)`; Jet treats `x` as an immutable binding
-tests/cases/authority_manifest/i9_web_consumes_the_authority_project.case	#5454	`jet build --target web run.jet` exits 1: Error [E1221]: The package's `authority:` block is malformed (#5201)
 tests/cases/auto_derive_policy/generic_deny_list_refuses_auto_derive.case	#5454	E0112: a manual `impl Manual.Debug` under policy deny auto_derive is not accepted for :Debug interpolation
 tests/cases/auto_derive_policy/rejected_auto_traits_fail_in_sema_before_codegen.case	#5454	check reports E0112 only for FileReader plus E0104 for Hidden<Int>; the original E0112 rows for the refused-trait wrappers and E0312 are missing
 tests/cases/auto_derive_policy/same_named_dependency_type_keeps_its_own_auto_derive_policy.case	#5454	check accepts print(vendor.Token) from a deny-auto_derive dependency; the original requires exactly one E0112
@@ -948,10 +943,10 @@ Examples/features/packages/mod_load_errors	#4599	`mod.load` is not built yet (E2
 Examples/features/io/agent_executor	#4268	the authority-bound process launch (sandbox, plan digest, redaction) is not ported to the Jet runtime yet
 Examples/features/types/authority	#4268	the authority-bound process launch (sandbox, plan digest, redaction) is not ported to the Jet runtime yet
 Examples/features/crypto/vault_keys	#4599	ir.build unlowered: generic Core type core.crypto.vault::KeyRef<Int> (BuildTypes.jet:374); keyed-vault runtime and IR routes are not ported
-Examples/features/serde/shape_projection	#4599	E0904 core.args.decode has no fixed typed contract (Sema/Calls/Core.jet:1310); polymorphic args.decode<T> is not ported
 Examples/features/lowlevel/polyglot_go	#6418	`jet inspect bind` reports E2104 not built yet; `use go.handles` reports E1002 (foreign root `go` reserved)
 Examples/features/lowlevel/ffi	#6366	ir.build unlowered: foreign import requires a checked direct C scalar signature (BuildForeign.jet:35); extern rust slot trampoline jet_ffi_<name>_cabi has no IR call lowering
 Examples/features/tooling/compute_autodiff	#6408	E0112 `compute.jvp` needs a function returning `Tensor`; jvp/VJPRun storage is not in the registered compute vocabulary
+Examples/features/serde/field_metadata_edges	#3236	unbuilt: owner ruling on None-field encoding pending
 tests/cases/authority_manifest/default_run_records_source_linked_authority_delegation.case	#6419	unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1004)
 tests/cases/build_entry/action_generated_jet_reenters_frontend_before_runtime_codegen.case	#6418	unbuilt: E2101/E2102 command or flag not built (E2102)
 tests/cases/build_entry/bare_build_plan_entry_uses_implicit_default_error_route.case	#6418	unbuilt: E2101/E2102 command or flag not built (E2102)
@@ -1211,6 +1206,8 @@ tests/cases/polyglot_systems/mixed_repo_edit_test_debug_profile_and_recovery_wor
 tests/cases/polyglot_systems/mixed_repo_edit_test_debug_profile_and_recovery_workflows.jvm.case	#6419	unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1001)
 tests/cases/polyglot_systems/mixed_repo_edit_test_debug_profile_and_recovery_workflows.python.case	#6419	unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E1001)
 tests/cases/prove/unknown_lens_is_exact_e2941_in_human_and_json_modes.case	#6418	unbuilt: E2104 command form not built (E2941)
+tests/cases/reflect/arithmetic_policy_is_visible_in_function_reflection.case	#6419	unbuilt: Build reflection has no `program.functions` (E0302 on `b.program.functions`); the verbatim original source also draws L0530 (redundant_final_return) against the Rust-era `$.reports #= 0` predicate
+tests/cases/reflect/checked_text_contract_is_reflected_on_the_nominal_type.case	#6419	unbuilt: `Pattern.reflect()` has no static method (E0311); the verbatim original source also draws L0530 and two L0102 (unused_parameter) against the Rust-era `$.reports #= 0` predicate
 tests/cases/reflect/direct_layout_fact_feeds_top_level_binding.case	#6419	unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0107)
 tests/cases/reflect/distinct_capability_marker_is_visible_in_reflection.case	#6419	unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0311)
 tests/cases/reflect/field_info_carries_visibility.case	#6419	unbuilt: core API surface missing (E1001/E1004/E0102/E0107/E0302/E0311/E0313/E0304) (E0311)
@@ -1330,8 +1327,10 @@ tests/cases/never_return/declared_never_example_is_byte_identical_on_aot_jit_and
 tests/cases/onboarding_recovery/entry_recovery_covers_missing_ambiguous_legacy_and_stale_layouts.case	#6068	unbuilt: jet run does not migrate retired entry layouts (main.jet to run.jet)
 tests/cases/onboarding_recovery/first_hour_scaffold_edit_check_test_and_run_recover.case	#4260	no doc fixes the scaffold manifest layout: `jet new` writes `authority:` as a multi-line block, the case wants `authority: { allow: [IO, Mem.Alloc] }` on one line
 tests/cases/output_callable/check_outputs_are_plural_real_test_harness_entries_without_test_blocks.case	#6035	unbuilt: Check outputs are not real test harness entries
-tests/cases/output_callable/compiled_imported_typed_fallible_entry_uses_its_defining_module.case	#6439	unbuilt: a typed Output entry (`launch(args: Args)` over a `#CLI` struct) gets no generated typed-CLI wrapper: sema_cli_entry_expand (JetSema Registration/CliEntry.jet:30-74) wraps only `fn run(args: T)`, so the selected entry reaches the backend with a parameter (internal compiler error "entry function launch must take no parameters")
+tests/cases/output_callable/qualified_entry_follows_nested_quoted_import_graph.case	#4260	owner question: the nested entry `app.cli.command.run` and the re-export `app.cli_run` reach through plain `use` imports of loose files, and whether a plain `use` re-exports is undecided (syntax-decisions.md:2119-2121, the re-export ballot), so sema reports E1321 "is private" for both Outputs
 tests/cases/output_callable/qualified_entry_keeps_one_definition_and_effect_identity.case	#4260	no doc decides the inspect output authority label (Rust `safe-jet`, Jet `application default`)
+tests/cases/output_callable/renamed_entry_is_not_recovered_from_a_stale_lock.case	#5454	verify-intent: the fixture's package file imports `use "helper"`, which E0623 rejects (package files share one namespace, Diagnostics.jet E0623 row), so the stale-lock E1321 the case asserts is never reached; the Rust-era fixture needs an owner-approved rewrite
+tests/cases/output_callable/runnable_contracts_and_selection_fail_in_sema.case	#6418	unbuilt: `jet run --output` is not built yet (E2104) for the probe7 step; every other probe reports its E1321/E0101 from sema
 tests/cases/package_outputs/computed_build_contribution_records_lock_and_matches_explain_golden.case	#5454	unbuilt: explain-build JSON has no build.contribution rows for computed Build.Settings
 tests/cases/package_root_single_home/nested_entry_points_share_root_and_stale_diagnostic.case	#5454	port bug: the case asserts `file: jet.toml = ""` where the original wrote an empty jet.toml
 tests/cases/pkg/cli_build_lint_never_blocks_by_default.case	#6006	unbuilt: jet build does not print lint advisories (L0504) with the effects summary

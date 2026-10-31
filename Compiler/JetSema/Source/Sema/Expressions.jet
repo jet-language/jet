@@ -4962,8 +4962,7 @@ fn sema_check_expression_cold(expr: Expr, expected: Type?, environment: SemaScop
         .Binary(op, left, right, span, _) -> sema_expr_check_binary(op, left, right, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         .Call(call, _) -> {
             if sema_expression_contextual_result_call(call, expected, scopes) == .Val(success) {
-                payload := Expr.Unit{span: call.name_span, id: AST_NODE_GENERATED}
-                if call.args.len() == 1 -> payload = call.args[0].expr
+                payload :: sema_expression_result_call_payload(call, &state, scopes)
                 span :: Span{start: call.name_span.start, end: expr_span(payload).end}
                 if !success -> &context.failure_edges.push("")
                 return sema_expression_result_payload(payload, success, sema_expression_result_call_takes_field(call, &state, scopes), span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -5043,8 +5042,7 @@ fn sema_expr_check_paren(value: Expr, span: Span, expected: Type?, environment: 
 
 fn sema_expr_check_call_expr(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if sema_expression_contextual_result_call(call, expected, scopes) == .Val(success) {
-        payload := Expr.Unit{span: call.name_span, id: AST_NODE_GENERATED}
-        if call.args.len() == 1 -> payload = call.args[0].expr
+        payload :: sema_expression_result_call_payload(call, &state, scopes)
         span :: Span{start: call.name_span.start, end: expr_span(payload).end}
         if !success -> &context.failure_edges.push("")
         return sema_expression_result_payload(payload, success, sema_expression_result_call_takes_field(call, &state, scopes), span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)

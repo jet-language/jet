@@ -316,7 +316,14 @@ execution tier.
 
 `print` is an ambient prelude operation. It accepts one or more printable
 arguments and writes one line per argument with a trailing newline. `eprint` is
-the ambient stderr twin.
+the ambient stderr twin. Stdout is buffered by the one runtime, the same on
+every tier: a terminal stdout is written at each line end, a pipe or file when
+its buffer fills. Pending stdout is written before any stderr write, before
+every read of stdin (so all that was printed is out before the program waits
+for input), before a child process starts, and when the process stops. Stdin
+is read through one shared buffer (a read of up to 64 KiB), so lines,
+delimiters, byte counts, keys and whole-input reads may be mixed and see each
+byte once.
 The explicit `core.term.print` and `core.term.eprint` operations each take one
 `String`; use them for a qualified call rather than relying on ambient aliases.
 `Float` prints a decimal part, so a negative whole-valued float is `-5.0`, not

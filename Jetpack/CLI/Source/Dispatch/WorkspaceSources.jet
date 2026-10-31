@@ -195,20 +195,23 @@ fn cli_render_workspace_error(error: CLIError) -[IO, Time.Wait]> CLIError Never!
 // Write the evaluated workspace into `.jet/lock`. None when no source
 // declares a workspace.
 fn cli_finish_workspace_load(cache: &WorkspaceDeclarationCache, dir: String, found: WorkspaceSnapshot?) -[IO, FS, Env, Exec, Time, Time.Wait]> WorkspacePlan? CLIError! {
-    snapshot :: found ?? return Ok(None)
-    if env_workspace_lock_write(&cache, dir, snapshot.plan) == {
-        .Ok(_) -> Ok(Val(snapshot.plan))
-        .Err(error) -> {
-            if error == .Gate(gate) {
-                terminal_write_output(diagnostic_render_all(WORKSPACE_FILE, "", gate.diagnostics, false))
+    // The snapshot stays the caller's: read it in place.
+    if found == .Val(snapshot) {
+        if env_workspace_lock_write(&cache, dir, snapshot.plan) == {
+            .Ok(_) -> return Ok(Val(snapshot.plan))
+            .Err(error) -> {
+                if error == .Gate(gate) {
+                    terminal_write_output(diagnostic_render_all(WORKSPACE_FILE, "", gate.diagnostics, false))
+                    return Err(CLIError.Reported(EXIT_USAGE))
+                }
+                lock_path :: files.join(dir, UNIFIED_LOCK_FILE)
+                diagnostic :: pkg_lock_e1202_workspace_write(lock_path, error.message())
+                terminal_write_output(diagnostic_render_all(WORKSPACE_FILE, "", [Diagnostic]{diagnostic}, false))
                 return Err(CLIError.Reported(EXIT_USAGE))
             }
-            lock_path :: files.join(dir, UNIFIED_LOCK_FILE)
-            diagnostic :: pkg_lock_e1202_workspace_write(lock_path, error.message())
-            terminal_write_output(diagnostic_render_all(WORKSPACE_FILE, "", [Diagnostic]{diagnostic}, false))
-            Err(CLIError.Reported(EXIT_USAGE))
         }
     }
+    Ok(None)
 }
 
 // The named-source table the current project's env file declares, plus the

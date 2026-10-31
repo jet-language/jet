@@ -1622,7 +1622,7 @@ they do not require a bespoke Rust test or direct `rustc` invocation.
 ### `core.args` — declarative command-line parsing (D-ARGS1)
 
 `core.args` provides an `ArgsSpec` builder, explicit `decode_argv` tree parsing,
-and typed `decode<T>` / `merge<T>` using the target's checked `#CLI` shape.
+and typed `decode<T>()` / `T.merge` using the target's checked `#CLI` shape.
 `ArgsSpec` is the checked builder handle, not a record containing only flag
 names. The builder consumes a spec and returns a new value at each method call;
 parsing is separate from process execution so tests can pass an explicit
@@ -1668,6 +1668,15 @@ whose message is the refusal text rather than exiting; `parse_or_exit` prints he
 `--help`, or prints usage and exits two for invalid arguments. The decoder also
 handles `--key=value`, `--key value`, `--flag`, `--no-flag`, clustered short
 flags, negative numeric values, and `--` as the end-of-options marker.
+
+`args.decode<T>()` parses the process arguments into the `#CLI` struct `T`
+through the same spec as `fn run(args: T)`, so help and refusal text are
+identical. `--help` and `--version` print and exit zero; a refused argument
+returns `[FieldError]`. Every `#CLI` struct also gets
+`T.merge(args, settings) -> T ![FieldError]`, unless it declares its own
+`merge`. A field given explicitly on the command line takes its `args` value.
+Every other field takes its `settings` value, which is the environment value
+or the field default when `settings` comes from `env.decode<T>()`.
 
 The direct functions are useful when a typed builder is unnecessary:
 
@@ -4320,7 +4329,7 @@ subquery from another table) is refused.
 | `row_value(row: [String: DBValue], column: String) -[DB]> DBValue DBError!` | value | Read an untyped row value. |
 | `row_int(row: [String: DBValue], column: String) -[DB]> Int DBError!` / `row_float(row, column) -[DB]> Float DBError!` | scalar | Read numeric row values. |
 | `row_text(row: [String: DBValue], column: String) -[DB]> String DBError!` / `row_bool(row, column) -[DB]> Bool DBError!` | scalar | Read text or Boolean row values. |
-| `decode<T: Decode>(row: [String: DBValue]) -[DB]> T [FieldError]!` | `T` | Decode a row into a typed value. |
+| `decode<T: Decode>(row: [String: DBValue]) -[DB]> T [FieldError]!` | `T` | Decode a row into a typed value. A field's column is its `Rename(db:)` name, else its shared name. |
 | `transaction(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError!` | count | Execute a checked transaction. |
 | `migrate(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError!` | count | Apply a migration under its checksum. |
 

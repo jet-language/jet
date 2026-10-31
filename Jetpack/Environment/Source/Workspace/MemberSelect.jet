@@ -206,11 +206,14 @@ fn env_members_affected_vs_cache(root: String, plan: WorkspacePlan) -[FS, Env]> 
 }
 
 fn env_member_current_hash(resolver: AuthorityResolver?, member: WorkspacePlanMember) -[FS, Env]> String? Never! {
-    held :: resolver ?? return None
-    checked :: held.checked_member(member.path) ?? return None
-    hash :: held.source_tree_hash(checked.directory) ?? return None
-    held.revalidate_member(checked) ?? return None
-    Val(hash)
+    // The resolver stays the caller's: read it in place.
+    if resolver == .Val(held) {
+        checked :: held.checked_member(member.path) ?? return None
+        hash :: held.source_tree_hash(checked.directory) ?? return None
+        held.revalidate_member(checked) ?? return None
+        return Val(hash)
+    }
+    None
 }
 
 fn env_members_changed_since(root: String, plan: WorkspacePlan, git_ref: String) -[FS, Exec, Time.Wait]> [String] MemberSelectError! {

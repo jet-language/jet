@@ -139,6 +139,12 @@ struct SemaOwnershipMoveOrigin {
     // The whole `^place` of an exact move: the E0121 label covers the mark
     // that moved the value, not only the place after it.
     label_span: Span?{None}
+    // The move does not repeat at a loop's back edge because each pass gets
+    // its own copy: a lambda capture of a value whose clone is structurally
+    // known (spec "copyable captures are copied at closure creation"), or an
+    // owned field filled from a value whose copy facts are undecided here,
+    // which a later use copies (sema_copy_site_refuse_copy).
+    copies_each_pass: Bool{false}
 }
 
 // A lambda whose body takes a captured name with `^`.
@@ -750,14 +756,15 @@ fn sema_ownership_diag_read_shared_guard_write(span: Span) -> Diagnostic {
     sema_error("E0205", span, "cannot edit through this read-only `SharedGuard` view", "a public guard type outside its acquisition site preserves read access unless a helper explicitly receives it with write access", "keep the edit at the acquisition site, or pass the guard to a helper with the write-access marker `&`, such as `&guard: SharedGuard<T>`")
 }
 
-// Structural cloneability is known for the core value constructors. A
+// Structural cloneability is known for the core value constructors; a
+// `Shared` handle clones by its count, whatever it holds. A
 // nominal, trait, or function part is registry-owned: it leaves the whole
 // answer unresolved (None) for the registry check, never a conservative
 // `false` for a composite that holds it (`Effect?`, `[Row]`).
 fn sema_ownership_type_cloneable(ty: Type) -> Bool? {
     if sema_ownership_type_is_copy(ty) -> return Val(true)
     if ty == {
-        .String -> Val(true)
+        .String | .Shared(_) -> Val(true)
         .List(inner) | .Option(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .Quantity(inner, _) -> sema_ownership_type_cloneable(inner)
         .Map(key, _, value) | .Result(key, value) -> sema_ownership_types_cloneable([Type]{key, value})
         .Tuple(fields) -> sema_ownership_types_cloneable(loop field in fields -> field.ty)
@@ -5053,7 +5060,7 @@ fn sema_ownership_check_argument_captures(state: &SemaOwnershipState, accesses: 
         if event.through_call {
             &accesses.push(SemaOwnershipCallAccess{place: sema_ownership_place_snapshot(event.place), access: event.access, span: expr_span(event.site), reserved: false, retained: true})
         } else if event.moves_owner {
-            sema_ownership_mark_capture_move(&state, event.place, expr_span(event.site))
+            sema_ownership_mark_capture_move(&state, event.place, event.capture_ty, expr_span(event.site))
         }
     }
     if !sema_ownership_record_call_result_views(state, &accesses, arg.expr, &diagnostics) -> accepted = false
@@ -5061,11 +5068,14 @@ fn sema_ownership_check_argument_captures(state: &SemaOwnershipState, accesses: 
 }
 
 // Rust `mark_moved_place_exact(place, span, "a lambda that captures it")`.
-fn sema_ownership_mark_capture_move(state: &SemaOwnershipState, place: SemaOwnershipPlace, span: Span) Never! {
+// `ty` is the captured root's type.
+fn sema_ownership_mark_capture_move(state: &SemaOwnershipState, place: SemaOwnershipPlace, ty: Type?, span: Span) Never! {
     loop moved in state.moved {
         if sema_ownership_place_exact(moved.place, place) -> return
     }
-    &state.moved.push(SemaOwnershipMovedPlace{place: sema_ownership_place_snapshot(place), origin: SemaOwnershipMoveOrigin{span: span, consumer: "a lambda that captures it", share_ty: None}})
+    copied := false
+    if ty == .Val(captured) -> copied = sema_ownership_type_cloneable(captured) == (Val(true))
+    &state.moved.push(SemaOwnershipMovedPlace{place: sema_ownership_place_snapshot(place), origin: SemaOwnershipMoveOrigin{span: span, consumer: "a lambda that captures it", share_ty: None, copies_each_pass: copied}})
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -5861,6 +5871,55 @@ fn sema_ownership_loop_path_to_depth(path: SemaOwnershipState, target_depth: Int
     normalized := sema_ownership_state_snapshot(path)
     loop normalized.scope_depth > target_depth -> sema_ownership_leave_scope(&normalized)
     normalized
+}
+
+// Rust `check_loop_move_backedge`: only a path that reaches the loop's back
+// edge (the end of a body that falls through, or a `next`) can repeat a move.
+// A move this pass of the body made of a binding declared outside the loop
+// (at or below `frame.scope_depth`), still standing here and not already
+// standing at loop entry, gives the value away again on the next iteration:
+// E0121 at the move, labelled as the earlier iteration's, or E0209 for an
+// unmarked take argument. Reinitializing the place in the body clears the
+// move before this point. A move that may become a share (an unmarked move of
+// a whole binding, an unmarked take argument) is reported once and dropped,
+// as a later use would; the next pass checks that site as the copy.
+fn sema_ownership_check_loop_move_backedge(state: &SemaOwnershipState, frame: SemaLoopValueFrame, diagnostics: &[Diagnostic]) Never! {
+    remaining := [SemaOwnershipMovedPlace]{}
+    repeated := [SemaOwnershipMovedPlace]{}
+    loop moved in state.moved {
+        if !sema_ownership_loop_move_repeats(state, frame, moved) {
+            &remaining.push(moved)
+            next
+        }
+        &repeated.push(moved)
+        if moved.origin.share_ty == None && moved.origin.implicit_take == None -> &remaining.push(moved)
+    }
+    state.moved = remaining
+    loop moved in repeated {
+        if !sema_ownership_moved_reported(diagnostics, moved.origin.span) -> sema_ownership_report_moved(&state, moved, moved.place, moved.origin.span, &diagnostics)
+    }
+}
+
+fn sema_ownership_loop_move_repeats(state: SemaOwnershipState, frame: SemaLoopValueFrame, moved: SemaOwnershipMovedPlace) -> Bool Never! {
+    // A pass that copies the value moves nothing the next pass reads.
+    if moved.origin.copies_each_pass -> return false
+    loop before in frame.moved_before {
+        if before.place.root_key == moved.place.root_key && sema_ownership_place_name(before.place) == sema_ownership_place_name(moved.place) && sema_ownership_span_same(before.origin.span, moved.origin.span) -> return false
+    }
+    row :: sema_ownership_last_row(state, moved.place.root_key)
+    if row < 0 -> return false
+    state.declarations[row].scope_depth <= frame.scope_depth
+}
+
+// An E0121 or E0209 already reported at this move site.
+fn sema_ownership_moved_reported(diagnostics: [Diagnostic], site: Span) -> Bool Never! {
+    loop existing in diagnostics {
+        if existing.code != "E0121" && existing.code != "E0209" -> next
+        if existing.span == .Val(known) {
+            if sema_ownership_span_same(known, site) -> return true
+        }
+    }
+    false
 }
 
 // The join after a loop (Rust `FlowFacts::after_loop_value`). `fork` is the

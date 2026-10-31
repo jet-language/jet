@@ -289,6 +289,22 @@ fn sema_expression_result_call_takes_field(call: Call, state: &SemaOwnershipStat
     !sema_ownership_binding_is_borrowed_param(root)
 }
 
+// The payload of a contextual `Ok(…)`/`Err(…)` call. The parser stores
+// `Ok(^x)`'s move mark on the CallArg; a marked name this scope owns is the
+// exact move `^x` is anywhere else (Expressions/Places.jet), so the move is
+// recorded and a match payload is taken out of its subject. A read or write
+// parameter keeps its copy, as a field of one does.
+fn sema_expression_result_call_payload(call: Call, state: &SemaOwnershipState, scopes: SemaScopeTable) -> Expr {
+    if call.args.len() != 1 -> return Expr.Unit{span: call.name_span, id: AST_NODE_GENERATED}
+    argument :: call.args[0]
+    if argument.convention == AccessConvention.Move && argument.expr == .Ident(_, _, _) {
+        if sema_ownership_binding_for_expr(&state, argument.expr, scopes) == .Val(root) {
+            if !sema_ownership_binding_is_borrowed_param(root) -> return Expr.Place{value: argument.expr.copy(), access: PlaceAccess.Take, span: argument.span, id: AST_NODE_GENERATED}
+        }
+    }
+    argument.expr.copy()
+}
+
 fn sema_expression_result_payload(value: Expr, success: Bool, take_field: Bool, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     expected_ok := Type?{None}
     expected_err := Type?{None}
@@ -1489,6 +1505,7 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
                 &diagnostics.push(sema_error("E0405", route_span, "`or continue` is only valid inside a loop", "the fallback route must have an enclosing loop to continue", "move this expression into a loop"))
                 return None
             }
+            if sema_loop_value_resolve_frame(context, None) == .Val(frame_index) -> sema_ownership_check_loop_move_backedge(&fallback_state, context.loop_value_frames[frame_index], &diagnostics)
             fallback_tree = Val(TOrFallback.Continue)
         }
         .BreakLabel(label, route_span) -> {
@@ -1502,6 +1519,7 @@ fn sema_expression_or_fallback_route(fallback: OrFallback, span: Span, subject_t
             if outer_loop_depth <= 0 || !sema_scope_has_loop_label(scopes, label) {
                 return None
             }
+            if sema_loop_value_resolve_frame(context, Val(label)) == .Val(frame_index) -> sema_ownership_check_loop_move_backedge(&fallback_state, context.loop_value_frames[frame_index], &diagnostics)
             fallback_tree = Val(TOrFallback.ContinueLabel{label: label})
         }
     }
@@ -1637,6 +1655,9 @@ fn sema_expression_if_bind_subject(subject: Expr, condition: Expr, else_value: E
     _ := sema_scope_declare_local(&scopes, symbol, window, if window -> AccessConvention.Write else -> AccessConvention.Read, bounds, false)
     if in_place -> sema_scope_mark_place_alias(&scopes, name)
     sema_ownership_declare_binding(&state, symbol, false)
+    // The arms' payload sources are rooted at this local; the subject it
+    // stands for decides whether a payload moves out of a named place.
+    sema_copy_site_note_subject(&state, name, subject_span, subject)
     _ := sema_ownership_record_pattern_views(&state, name, subject_span, [Expr]{subject}, if window -> AccessConvention.Write else -> AccessConvention.Read, scopes)
     local := checked_symbol_local(name, subject_span, id, init.ty)
     local.generated = true

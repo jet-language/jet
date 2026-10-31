@@ -33,6 +33,7 @@ use jet_backend.[
     X64_COMPTIME_HOST_CONSTANT,
     X64_COMPTIME_HOST_FIELD,
     X64_COMPTIME_HOST_INPUT,
+    X64_COMPTIME_HOST_LITERAL,
     X64_COMPTIME_HOST_METHOD,
     X64_COMPTIME_HOST_MISSING,
     X64_COMPTIME_INT,
@@ -804,6 +805,7 @@ fn jet_eval_native_host(s: &JetEvalIRState, kind: Int, operands: Int, count: Int
         X64_COMPTIME_HOST_FIELD -> jet_eval_ir_host_field_route(&s, args, row, result)
         X64_COMPTIME_HOST_INPUT -> jet_eval_ir_comptime_input_route(&s, args, row)
         X64_COMPTIME_HOST_CONSTANT -> jet_eval_ir_host_constant_route(&s, args, row, result)
+        X64_COMPTIME_HOST_LITERAL -> jet_eval_ir_host_literal_route(&s, args, row, result)
         else -> jet_eval_ir_primitive_shape(&s, "jet_comptime_host")
     } ?? return None
     reads :: types_cell.guard_read()
