@@ -133,18 +133,26 @@ struct IROptReport {
     reduced: Int
     reductions_declined: Int
     reductions: [String]
+    // Indices a versioned Loop writes (OptVersion.jet ir_version_step):
+    // those guarded once before it (`stepped`), those guarded at its head
+    // (`steps_declined`), one note each (`steps`).
+    stepped: Int
+    steps_declined: Int
+    steps: [String]
     // IROptOptions.dump: each dumped function's IR before and after its passes.
     dumps: [String]
     lint: [IRLintFinding]
 }
 
 fn ir_opt_report(level: Int) -> IROptReport Never! {
-    IROptReport{level: level, inlined_calls: 0, direct_calls: 0, folded: 0, branches_folded: 0, compares_fused: 0, short_circuits: 0, copies_coalesced: 0, dead_removed: 0, unreachable_removed: 0, aggregates_replaced: 0, unique_hoisted: 0, int_facts: 0, ssa_functions: 0, ssa_changed: 0, ssa_moves: 0, ssa_fresh: 0, instructions_before: 0, instructions_after: 0, reduced: 0, reductions_declined: 0, reductions: [String]{}, dumps: [String]{}, lint: [IRLintFinding]{}}
+    IROptReport{level: level, inlined_calls: 0, direct_calls: 0, folded: 0, branches_folded: 0, compares_fused: 0, short_circuits: 0, copies_coalesced: 0, dead_removed: 0, unreachable_removed: 0, aggregates_replaced: 0, unique_hoisted: 0, int_facts: 0, ssa_functions: 0, ssa_changed: 0, ssa_moves: 0, ssa_fresh: 0, instructions_before: 0, instructions_after: 0, reduced: 0, reductions_declined: 0, reductions: [String]{}, stepped: 0, steps_declined: 0, steps: [String]{}, dumps: [String]{}, lint: [IRLintFinding]{}}
 }
 
 fn ir_opt_report_text(r: IROptReport) -> String Never! {
     text := "O{r.level}: instructions {r.instructions_before} -> {r.instructions_after}, inlined {r.inlined_calls}, direct calls {r.direct_calls}, folded {r.folded}, branches {r.branches_folded}, fused compares {r.compares_fused}, short circuits {r.short_circuits}, coalesced {r.copies_coalesced}, dead {r.dead_removed}, unreachable {r.unreachable_removed}, scalar-replaced {r.aggregates_replaced}, unique hoisted {r.unique_hoisted}, inline Int facts {r.int_facts}, ssa {r.ssa_functions} (rewritten {r.ssa_changed}, moves {r.ssa_moves}, fresh slots {r.ssa_fresh}), reductions {r.reduced} (declined {r.reductions_declined})"
+    text = "{text}, stepped indices {r.stepped} (declined {r.steps_declined})"
     loop note in r.reductions -> text = "{text}\n{note}"
+    loop note in r.steps -> text = "{text}\n{note}"
     loop dump in r.dumps -> text = "{text}\n{dump}"
     text
 }
@@ -169,6 +177,9 @@ fn ir_opt_report_add(total: &IROptReport, part: IROptReport) Never! {
     total.reduced += part.reduced
     total.reductions_declined += part.reductions_declined
     loop note in part.reductions -> &total.reductions.push(note)
+    total.stepped += part.stepped
+    total.steps_declined += part.steps_declined
+    loop note in part.steps -> &total.steps.push(note)
     loop dump in part.dumps -> &total.dumps.push(dump)
     loop finding in part.lint -> &total.lint.push(finding)
 }
@@ -530,7 +541,7 @@ fn ir_opt_function(m: IRModule, bodies: [[IRFunction]], keys: [String], f: ^IRFu
     }
     if level >= 2 {
         if ir_opt_enabled(options, "version") && ir_opt_enabled(options, "range") && ir_opt_enabled(options, "ssa") && ir_range_wanted(m, out) {
-            _ := ir_opt_version_loops(m, &out)
+            _ := ir_opt_version_loops(m, &out, &report)
             if checking -> checking = ir_opt_lint(m, lint, out, "version", &report)
         }
         // The SSA form is built only from a body IR Lint passed.
@@ -1202,7 +1213,8 @@ fn ir_opt_tarjan_visit(t: &OptTarjan, calls: OptCalls, root: Int) Never! {
     ir_end(&g, 5)
     _ := ir_emit(&g, IROp.Return, -1, -1, -1, -1, 6)
     versioned := g.copy()
-    assert_eq(ir_opt_version_loops(m, &versioned), 1)
+    notes := ir_opt_report(2)
+    assert_eq(ir_opt_version_loops(m, &versioned, &notes), 1)
     loops := 0
     loop op in versioned.op {
         if op == .Loop -> loops += 1

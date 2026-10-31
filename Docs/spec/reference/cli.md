@@ -992,6 +992,11 @@ under `--release` or the `release`/`hardened` profiles. It reports what the
 passes changed (instructions before and after, inlined and direct calls, folds,
 fused compares, short circuits branched, coalesced copies, removed dead and unreachable code, scalar
 replaced aggregates) and names each function the IR builder could not build.
+At O2 it adds one row per sum, count or fill Loop the `reduce` pass handed to
+an asm leaf or declined (`<form> reduction <function>: vectorized` or
+`declined (<why>)`), and one row per index a versioned Loop writes
+(`stepped index <function>: guarded before the Loop`, or `declined (<why>)`
+when that index is tested at the head of every pass).
 It also lists, as built before any pass, each counted loop sema's loop proof
 covers (`loop <function> <file>:<line>`): the proved extent and element type,
 the aliasing, early-exit, effect and cross-iteration verdicts, how many list
