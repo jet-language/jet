@@ -148,6 +148,9 @@
             # The https/TLS cases' loopback peer is `openssl s_server`
             # (`requires: tool:openssl`), so the testkit runs them here.
             pkgs.openssl
+            # Jetpack script-registry claims run `php` on hostile archives; the
+            # `jet` wrapper's runtime path already carries it.
+            pkgs.php
           ]
           ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
             # D-BUILDENTRY1 / #95: core verification executes typed build actions.
