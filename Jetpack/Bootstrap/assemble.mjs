@@ -278,7 +278,7 @@ if (skipped.length > 0) {
 // print the identical claim ledger.
 const claimHead = /^#Test\("([^"\\{}]+)"\)\s*\{\s*$/;
 const testNames = [];
-function renderTests(text, sourcePath) {
+function renderTests(text, sourcePath, section) {
   // `check` type-checks test claims exactly as the AOT harness will see them.
   const lines = text.split("\n");
   let claims = 0;
@@ -294,7 +294,7 @@ function renderTests(text, sourcePath) {
     claims += 1;
     if (testNames.some((claim) => claim.name === match[1])) fail(`${sourcePath}:${index + 1}: duplicate test claim "${match[1]}"`);
     const fnName = `jetpack_test_claim_${testNames.length}`;
-    testNames.push({ name: match[1], fnName });
+    testNames.push({ name: match[1], fnName, section });
     if (mode === "run") lines[index] = `fn ${fnName}() {`;
   }
   // Shared test helpers live in `*Support.jet` files: helpers only, never claims.
@@ -375,7 +375,7 @@ function blankPackageImports(text) {
 for (const entry of units) {
   append(`// [jet-bootstrap source: ${entry.sourcePath}]\n`);
   const text = blankPackageImports(entry.text);
-  const rendered = testPaths.has(entry.sourcePath) ? renderTests(text, entry.sourcePath) : text;
+  const rendered = testPaths.has(entry.sourcePath) ? renderTests(text, entry.sourcePath, entry.section) : text;
   const body = rendered ?? text;
   const bytes = Buffer.from(body, "utf8");
   const startByte = generatedByte;
@@ -436,6 +436,8 @@ await writeFile(mapPath, `${JSON.stringify({
   // Each staged embed_file copy and the repository file it came from.
   embedded_files: [...embeddedFiles].map(([copy, target]) => ({ copy: `src/${copy}`, source_file: relative(sourceRootDir, target).split(sep).join("/") })),
   tests: testNames.map(({ name }) => name),
+  // Each claim's tests.list area, for known-failing `jetpack-claim:<Area>/<claim>` rows.
+  test_areas: testNames.map(({ section }) => section),
 }, null, 2)}\n`, "utf8");
 console.log(`assembled ${units.length} Jet sources (${mode}, ${testNames.length} test claims) into ${unitPath}`);
 console.log(`source provenance: ${mapPath}`);

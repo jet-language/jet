@@ -24,6 +24,9 @@ async function fixture(run) {
     await put("Jetpack/Bootstrap/areas.list", "Foundation:\nEngine: Foundation\nCLI: Foundation\n");
     await put("Jetpack/Bootstrap/sources.list", manifest);
     await put("Jetpack/Bootstrap/tests.list", "# == Engine (folders: Store) ==\nJetpack/Store/Tests/Fixture.jet\n");
+    // The compiler-slice check walks the compiler packages from Compiler/JetCli;
+    // an empty entry package keeps the slice (and its drift) empty.
+    await put("Compiler/JetCli/package.jet", 'name: "jet-cli"\n');
     await put(paths[0], "fn foundation_fixture() {}\n");
     await put(paths[1], "fn store_fixture() {}\n");
     await put(entry, "fn native_runtime_pack_publisher() NativeRuntimePackError! {}\n");
@@ -44,11 +47,11 @@ test("publication emits only the canonical Engine closure plus one fixed forward
   await fixture(async ({ root, invoke }) => {
     const result = invoke("publication", { JETPACK_BOOTSTRAP_AREAS: "CLI", JETPACK_BOOTSTRAP_OWN_AREA: "CLI" });
     assert.equal(result.status, 0, result.stderr);
-    const map = JSON.parse(await readFile(resolve(root, "scratch/jetpack.map.json"), "utf8"));
+    const map = JSON.parse(await readFile(resolve(root, "scratch/publication/jetpack.map.json"), "utf8"));
     assert.equal(map.mode, "publication");
     assert.deepEqual(map.files.map(({ path }) => path), paths.slice(0, 3));
     assert.deepEqual(map.tests, []);
-    const source = await readFile(resolve(root, "scratch/project/src/jetpack.jet"), "utf8");
+    const source = await readFile(resolve(root, "scratch/publication/project/src/jetpack.jet"), "utf8");
     assert.equal(source.includes("#Test"), false);
     assert.equal(source.includes("cli_fixture"), false);
     assert.equal((source.match(/\bfn run\(\)/g) ?? []).length, 1);
@@ -61,10 +64,11 @@ test("ordinary modes retain test semantics without emitting the fixed Tools entr
     for (const mode of ["check", "aot", "run"]) {
       const result = invoke(mode, { JETPACK_BOOTSTRAP_OWN_AREA: "Engine" });
       assert.equal(result.status, 0, result.stderr);
-      const map = JSON.parse(await readFile(resolve(root, "scratch/jetpack.map.json"), "utf8"));
+      const map = JSON.parse(await readFile(resolve(root, `scratch/${mode}/jetpack.map.json`), "utf8"));
       assert.deepEqual(map.files.map(({ path }) => path), [paths[0], paths[1], paths[3], "Jetpack/Store/Tests/Fixture.jet"]);
       assert.deepEqual(map.tests, ["store fixture"]);
-      const source = await readFile(resolve(root, "scratch/project/src/jetpack.jet"), "utf8");
+      assert.deepEqual(map.test_areas, ["Engine"]);
+      const source = await readFile(resolve(root, `scratch/${mode}/project/src/jetpack.jet`), "utf8");
       assert.equal(source.includes("native_runtime_pack_publisher"), false);
       assert.equal(source.includes('#Test("store fixture")'), mode !== "run");
       assert.equal((source.match(/\bfn run\(\)/g) ?? []).length, mode === "run" ? 1 : 0);
