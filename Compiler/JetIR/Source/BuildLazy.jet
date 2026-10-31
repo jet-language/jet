@@ -1041,6 +1041,47 @@ fn ir_lazy_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, varia
     ir_lazy_walk_source(&m, p, &b, label, variable, variable_two, source, row, stride, body, span)
 }
 
+// Whether `loop x in ^xs` (or a walk of a fresh List) takes the List's
+// items over: the List is moved or fresh, and its items close (a Close
+// method or a move-only handle at any depth) or are move-only handles. A
+// step's item can't share such a value with the List (a byte copy shares the
+// handle uncounted, so both would close it, #6415); the walk moves each item
+// out instead (ir_list_walk_taken).
+fn ir_list_walk_takes(m: &IRModule, p: IRProgram, b: &IRBuilder, collection_ty: Type, list: Int, row: Int, span: Span) -> Bool Never! {
+    listed :: ir_untag(collection_ty) == .List(_)
+    if !listed -> return false
+    if !b.fresh[list] && !ir_movable_binding(b, list) -> return false
+    if ir_close_handle(m, row) -> return true
+    ir_close_glue(&m, p, &b, row, false, span) >= 0
+}
+
+// The walk of a List whose items it takes over (ir_list_walk_takes): the
+// List moves into an Iter (jet_rt_native_iter_from_list), walked as any
+// other, whose item each step owns: the body may move it out (`^x`), and the
+// step's scope closes and drops what is left. The items a `break`, `return`
+// or stop leaves in the Iter close as a scope end would close them (the
+// descriptor's drop is lazy.retire), when the cursor drops.
+fn ir_list_walk_taken(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, variable: TLocal, variable_two: TLocal?, collection_ty: Type, list: Int, row: Int, body: [Int], span: Span) Never! {
+    element :: m.types[row].ty.copy()
+    ir_close_disarm(&b, list)
+    owned :: ir_own(&m, p, &b, list)
+    meta :: ir_lazy_meta(&m, p, &b, element, span)
+    if meta < 0 -> return
+    glue :: ir_close_glue(&m, p, &b, row, false, span)
+    if ir_failed(b) -> return
+    if glue >= 0 {
+        retire :: ir_lazy_helper(&m, p, &b, "retire", element, span)
+        if retire < 0 -> return
+        address :: ir_lazy_address(&m, &b, retire)
+        ir_emit(&b.f, IROp.Store, -1, meta, 16, address, b.line)
+    }
+    iter_ty :: Type.Apply{name: "Iter", args: [Type]{element}}
+    iter_row :: ir_value_type(&m, p, iter_ty) ?? return ir_fail(&b, span, "loop over {ir_type_name(collection_ty)}")
+    moved :: ir_lazy_moved(&m, &b, owned)
+    source :: ir_runtime(&m, &b, "jet_rt_native_iter_from_list", [Int]{owned, meta, moved}, iter_row)
+    ir_lazy_walk_source(&m, p, &b, label, variable, variable_two, source, row, -1, body, span)
+}
+
 // `loop line in reader.lines()` / `loop line in io.stdin().lines()` /
 // `loop line in child.stdout.lines()`: the runtime line source `export`
 // (jet_rt_native_iter_{file,stdin,process}_lines) wraps the FileReader,

@@ -5233,6 +5233,8 @@ fn ir_list_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, varia
     if list < 0 -> list = ir_expr(&m, p, &b, collection)
     if ir_failed(b) || list < 0 -> return
     row :: ir_list_item(&m, p, b, list) ?? return ir_fail(&b, span, "loop over {ir_type_name(collection_ty)}")
+    if ir_list_walk_takes(&m, p, &b, collection_ty, list, row, span) -> return ir_list_walk_taken(&m, p, &b, label, variable, variable_two, collection_ty, list, row, body, span)
+    if ir_failed(b) -> return
     stride :: ir_list_stride(m, row)
     ir_scope_open(&b)
     length :: ir_list_length(&m, &b, list)
