@@ -4,11 +4,11 @@ Cards: #6328 (hello size; C6: every program within 1.5–2x of optimized
 hand-written assembly in size) and #6414 (default codegen within 1.10x of
 hand-written assembly in cycles, with identical output).
 
-This is a plan. Nothing here changes the compiler yet. Every number is either
-measured (marked **measured**, with the command) or modelled (marked
-**model**, with the basis). One part changes what a Jet program prints when
-Jet itself has a bug; that part is an owner ballot, D-RT-DEFECT-REPORT1, at
-the end.
+This is a plan. IrTypes-12 makes its first compiler change, the compact
+fault report (S3). Every number is either measured (marked **measured**, with
+the command) or modelled (marked **model**, with the basis). Where the
+report's location table lives is an owner ballot, D-RT-DEFECT-REPORT1, at the
+end; no printed text depends on it.
 
 Related: Docs/research/2026-10-30-speed-of-light.md (#6343) measures Jet
 against Rust and lists the codegen criteria (P-RANGE, P-BCE, P-LICM, P-VEC,
@@ -104,10 +104,12 @@ Every byte, and why hello needs it:
 | 56 | `PT_GNU_STACK` | **kept.** On kernel 7.2 the stack is `rw-p` without it (**measured**, `/proc/PID/maps` of `floor-pause`). Kernels before 5.8 make the stack executable when it is missing [INFERENCE from the kernel's `elf_read_implies_exec`]. Jet states no minimum kernel, so W^X needs these 56 bytes. |
 | **253** | **floor with a non-executable stack** | |
 
-Jet's hello must also keep a Fault line if a Jet bug ever crashes it
-(D-RT-DEFECT-REPORT1 A, section 8). The hello target therefore adds a fixed
-fault handler. `floor/target.S` is the hand-written target, wrapped by
-`asm-floor.mjs`. **Measured**: 504 B, 1.99x the 253 B floor.
+Jet's hello must also keep its fault report if a Jet bug ever crashes it
+(D-RT-DEFECT-REPORT1 A, section 8): with the compact report the **model**
+target is 2,599 B (section 3, S6). The 504 B target below is the fixed
+one-line handler of option B, kept as the floor for comparison.
+`floor/target.S` is that hand-written target, wrapped by `asm-floor.mjs`.
+**Measured**: 504 B, 1.99x the 253 B floor.
 
 | bytes | what | reason |
 |---:|---|---|
@@ -120,7 +122,7 @@ fault handler. `floor/target.S` is the hand-written target, wrapped by
 | 109 | fault handler | writes `Fault [SIG<name>]: Jet internal defect; rebuild with --backtrace=full`; then `getpid` + `kill` with the default action back (SA_RESETHAND, SA_NODEFER), as Fault.jet `fault_raise` does; `exit_group(128 + signal)` if the signal is not delivered |
 | 32 | the `sigaction` record | handler, flags, restorer, mask |
 | 85 | handler text | `Fault [SIG`, the four names with an offset table, the rest of the line |
-| **504** | **hello target** | |
+| **504** | **hello target, option B** | |
 
 **Measured** (`floor/build-target.sh`), with deliberate faults assembled in
 for testing:
@@ -170,10 +172,15 @@ adds. S0 reproduces the real binary to the byte.
 | S0 | today (IrTypes-8) | 134,064 | 108,763 |
 | S1 | linker output: no `.eh_frame`; symbols and debug sections go to a sidecar file; segments packed with no page padding | 113,528 | 108,762 |
 | S2 | zero unconditional startup: no constructor runs; each subsystem starts on first use | 104,408 | 99,667 |
-| S3 | the full fault report only when the program can fault; a fixed handler (257 B) otherwise | 74,768 | 70,934 |
-| S4 | runtime defects use an allocation-free reporter; static main thread block; startup arithmetic proved bounded | 59,960 | 55,703 |
-| S5 | the compiler emits the program's own entry: no crt, no `jet_rt_main`, no argument capture, no stop polls | 4,327 | 2,242 |
-| S6 | direct print; one read+execute segment | **504** | 0 |
+| S3 | the compact fault report (D-RT-DEFECT-REPORT1 A): the same text, with no stop rail or allocator behind it | 76,808 | 70,934 |
+| S4 | runtime defects use an allocation-free reporter; static main thread block; startup arithmetic proved bounded | 62,000 | 55,703 |
+| S5 | the compiler emits the program's own entry: no crt, no `jet_rt_main`, no argument capture, no stop polls | 6,366 | 2,242 |
+| S6 | direct print; the report's data is the only writable part | **2,599** | 0 |
+
+The S3–S6 allowances count the compact report as the 2,197 B prototype plus
+32 B of data (`report/report.S`). Under option B the same steps end at the
+504 B target of section 2; keeping today's 30 KB report ends at 79,281 B
+(`model-stages.mjs --report=today`).
 
 S5 and S6 do most of the work, because they remove the roots that hold
 everything else. S1–S4 still matter: they are what every larger program
@@ -205,9 +212,10 @@ keeps paying for.
    writable code. Two runtime readers need care:
    - The fault report reads `.debug_jetline` from the image to name Jet
      frames, and stack overflow is a user-program stop (E3012) that names the
-     function and line. When the fault report is linked, the location table
-     stays in the binary as an allocated section that the handler reaches by
-     symbol, so no section headers are needed.
+     function and line. Under D-RT-DEFECT-REPORT1 A the location table
+     becomes an allocated section that the report reaches by two link
+     symbols, so no section headers are needed. Until the vote, IrTypes-12
+     keeps the non-loaded table and the section-header walk.
    - The checked allocator (`JET_CHECKED_ALLOC=1`) names frames from
      `.symtab`. It reads the sidecar file instead.
 4. **Direct print (S6).** `print` lowers to one write loop when no buffered
@@ -217,12 +225,24 @@ keeps paying for.
    print keeps today's path so output order holds. Test builds keep capture.
    **Measured**: today's print alone holds 65,998 B of runtime, because its
    checked arithmetic reaches the stop rail.
-5. **Fault handler by need (S3; ballot).** The compiler knows when a program
-   can fault: recursion or a stack bound it cannot compute (the worst-case
-   stack per entry point, D-STACKBOUND1 A), unsafe code, or foreign calls.
-   Only then is the 30 KB report linked, and it is unchanged. A program that
-   cannot fault gets the fixed 257-byte handler from section 2. A fault there
-   can only be a Jet bug; see the ballot.
+5. **Compact fault report (S3; IrTypes-12).** The report becomes one
+   position-independent machine-code leaf,
+   `Compiler/JetRuntime/Assets/FaultReport/report.S`, which the generator
+   `Tools/agent/gen-runtime-fault-report.mjs` turns into
+   `X64/FaultReport.jet`. JetIR emits it as the runtime intrinsic
+   `rt_fault_print`. It writes the E3012 stop or the Fault line and the Jet
+   frames through one stack buffer, walking frame pointers. Fault.jet keeps
+   only the claim, the secret scrub, the stdout flush, the image and bias,
+   the exit 70 and the re-raise. The text is unchanged. **Measured**: the
+   leaf is 2,115 B, and in the 16 parity cases (`fr/check.mjs`) it prints
+   the text the old Fault.jet report wrote, byte for byte. On dev
+   ab1f72dbee it takes hello from 138,152 B to 112,568 B (−25,584 B, the
+   same under `jet build` and `jet build --release`; the stage-1 compiler
+   of the change against the published one). The two fault probes
+   (`fr/probe/probe.mjs`) lose the same 25,584 B and print the same stderr
+   with the same status in all 24 rows. Hello's 138,152 B on ab1f72dbee is
+   4,088 B more than the IrTypes-8 build in the table above, which was
+   measured on an earlier base; the difference is not broken down here.
 6. **Allocation-free defect reporter and static main thread block (S4).**
    Runtime-internal defects (out of memory, GS failure, invalid layout,
    internal overflow) write their exact text with stack-only code and exit
@@ -307,8 +327,8 @@ stops), the arguments, and the expected output.
 
 ### Harness
 
-`c6328/kern/build.sh` and `kern/perf.sh` are the prototype. As a tool
-(`Tools/perf/asm-parity/`):
+`Tools/perf/asm-parity/asm-parity.mjs` (from IrTypes-12; `c6328/kern/` was
+its prototype) runs the corpus cells in `cells.json`:
 
 - build each Jet program at default and `--release`, and each reference;
 - check that the output is byte-identical to the reference's on every
@@ -324,14 +344,14 @@ stops), the arguments, and the expected output.
 
 | order | work | est. days | gain |
 |---|---|---:|---|
-| 1 | Program-owned entry, lazy startup, direct print (S2, S5, S6) | 4 | hello 134 KB → under 1 KB; every program loses ~100 KB of runtime it does not use |
+| 1 | Program-owned entry, lazy startup, direct print (S2, S5, S6) | 4 | hello 134 KB → about 2.6 KB with the compact report; every program loses ~100 KB of runtime it does not use |
 | 2 | Linker output: no `.eh_frame`, sidecar symbols, packed segments, location table by symbol (S1) | 2 | 25–35 KB from every program |
 | 3 | Small-Int facts and drop elision | 5 | fib 1.97x → ~1.5x; collatz 4x → ~2x; smaller code everywhere |
 | 4 | Generated `#CLI` parsers | 2 | ~98 KB from every CLI program |
 | 5 | Inline and fuse library loops, batch `iter_charge` | 8 | sieve 35x → ~3x; isum 18x → ~3x |
 | 6 | Bounds-check elimination | 4 | sieve → ~1.2x; isum → ~1.3x |
 | 7 | Stop facts and register allocation | 8 | fib → ~1.3x; every call |
-| 8 | Fault handler by need, defect reporter (S3, S4; after the ballot) | 3 | 30–45 KB from every program that cannot fault |
+| 8 | Compact fault report (S3; IrTypes-12), loaded location table (after the ballot), defect reporter (S4) | 3 | about 27 KB from every program |
 | 9 | Overflow check placement, small-Int calling convention | 4 | collatz → ~1.2x; fib → ~1.15x |
 | 10 | Unrolling, reductions, vector loops | 10 | isum → ~1.05x; numeric cells |
 | 11 | Corpus completion: the remaining kernels and gauntlet references | 6 | the gates cover every cell |
@@ -349,36 +369,50 @@ All under `/mnt/jetscratch/lanes/IR/IrTypes/c6328/`:
 - `kern/`: kernel sources, asm references, `build.sh`, `perf.sh`, and
   `perf-today.tsv`.
 - `ballot-ev/`: allocator failure witness outputs and the Go hello build.
+- `fr/check.mjs`: the 16 parity cases for the generated report leaf, run
+  under a hand-written signal shim (`fr/test.S`).
+- `fr/probe/probe.mjs LABEL JET ROOT`: a stack overflow and a store to
+  address 0, written in Jet, at O0, O1 and O2 under each backtrace setting;
+  `fr/probe/compare.mjs OLD NEW` compares two runs row by row.
 
 ## 8. Owner ballot: D-RT-DEFECT-REPORT1
 
-The JSON is in `/mnt/jetscratch/lanes/IrTypes/ballot/D-RT-DEFECT-REPORT1.json`.
+The revised JSON is in
+`/mnt/jetscratch/lanes/Main/q/ballot/overnight/rev/D-RT-DEFECT-REPORT1.json`.
+The owner asked to keep the full report and make it small instead of cutting
+it, so the vote now recommends keeping it in every program, and we expect to
+withdraw it.
 
-**Question.** When a program cannot crash on its own, may Jet carry a
-one-line crash note instead of the full crash report?
+**Question.** Should every program keep Jet's full crash report, now rebuilt
+about 13 times smaller with the same text?
 
-**Today.** Every program carries a fault reporter of about 30 KB. If a program
-crashes, it prints a `Fault [SIGSEGV]: invalid memory access` report with the
-Jet frames, then the system ends it with status 128 + signal. A stack
-overflow is a stop (E3012, exit 70).
+**Before IrTypes-12.** Every program carried a fault reporter of about 30 KB.
+If a program crashes, it prints a `Fault [SIGSEGV]: invalid memory access`
+report with the Jet frames, then the system ends it with status 128 + signal.
+A stack overflow is a stop (E3012, exit 70).
 
-**A (recommended): the full fault report only where a fault can happen.**
-The compiler proves that a program cannot fault: no recursion, no unbounded
-stack frame, no unsafe code, no foreign calls. Such a program gets the fixed
-257-byte handler from section 2 instead of the full report. A crash there can
-only come from a Jet bug. It prints `Fault [SIGSEGV]: Jet internal defect;
-rebuild with --backtrace=full`, and the process ends with the same status and
-core dump as today. A build that writes the `backtrace` option links the full
-report. Programs that can fault keep today's report byte for byte, including
-E3012. Runtime defects (out of memory, invalid layout, GS failure) keep their
-text and exit codes.
+**A (recommended): keep the full report in every program, rebuilt small.**
+The report is a position-independent machine-code leaf
+(`Compiler/JetRuntime/Assets/FaultReport/report.S`, 2,115 B, generated into
+`X64/FaultReport.jet` by `Tools/agent/gen-runtime-fault-report.mjs`) that
+prints the same text: the E3012 stop with the source line, or the Fault line
+and the Jet frames. A thin Jet shell in Fault.jet keeps the claim, the secret
+scrub, the stdout flush, the exit 70 and the re-raise. No stop, panic or error
+message changes. The only part that waits for the vote is where the location
+table lives: a loaded table found by two link symbols survives `strip`
+(hello's table is 67 B). Until then the table stays `.debug_jetline`, found
+through the section headers as before.
 
-**B: keep the full fault report in every program.** Nothing changes, and
-every program pays about 30 KB.
+**B: a one-line note in programs that cannot crash.** The compiler proves
+that a program cannot fault (no recursion, no unbounded stack frame, no
+unsafe code, no foreign calls) and installs the fixed 257-byte handler from
+section 2. A crash there prints `Fault [SIGSEGV]: Jet internal defect;
+rebuild with --backtrace=full`.
 
-**Why A.** User programs see no change, and every crash still prints a Fault
-line with the signal. Recommendation losses are empty. A gets hello to 504
-bytes and gives C6 a chance on every small program.
+**Why A.** Every crash keeps every line of today's report, including the Jet
+frames of a Jet bug. B saves about 2 KB more in hello (504 B against about
+2.6 KB) and hides those frames. No drop ships B's note unless the owner
+chooses B.
 
 ### Measured runtime defect text, today and under A
 

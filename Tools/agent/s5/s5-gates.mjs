@@ -14,6 +14,7 @@ for (const script of [
   'Tools/agent/gen-runtime-host-carriers.mjs', 'Tools/agent/gen-runtime-host-errors.mjs', 'Tools/agent/gen-runtime-scheduler-messages.mjs',
   'Tools/agent/gen-runtime-services-messages.mjs', 'Tools/agent/gen-runtime-test-messages.mjs',
 ]) cheap.push(start('check-' + script.split('/').pop().replace(/\.mjs$/, ''), [node, script, '--check']));
+cheap.push(start('check-gen-runtime-fault-report', ['Tools/agent/jet-env', 'node', 'Tools/agent/gen-runtime-fault-report.mjs', '--check']));
 cheap.push(start('check-core-source-rows', ['Tools/agent/jet-env', 'jet', 'Tools/agent/CoreSourceRows.jet', '--check']));
 cheap.push(start('check-lexer-keyword-rows', ['Tools/agent/jet-env', 'jet', 'Tools/agent/LexerKeywordRows.jet', '--check']));
 cheap.push(start('stop-exports-test', [node, '--test', 'Tools/agent/gen-runtime-stop-exports.test.mjs']));
