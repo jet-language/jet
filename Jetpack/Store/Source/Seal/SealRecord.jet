@@ -28,6 +28,7 @@ struct StoreVerification {
             verified_digests: [String: VerifiedDigestMemo]{},
             verified_digest_hash_counts: [String: Int]{},
             proven_members: [String: Bool]{},
+            planned_narinfos: [String: [String: FetchedInfo]]{},
         }}
     }
 }
@@ -42,6 +43,9 @@ struct StoreVerificationState {
     // Closure members proven against their seals, keyed by
     // `store_proven_member_key(hangar, digest)` (Rust `PROVEN_MEMBERS`).
     proven_members: [String: Bool]
+    // The signed narinfos the last Nix download plan verified, keyed by
+    // `store_nix_planned_key(roots, endpoint)` (Rust `PLANNED_NARINFOS`).
+    planned_narinfos: [String: [String: FetchedInfo]]
 }
 
 enum SealRootKind {

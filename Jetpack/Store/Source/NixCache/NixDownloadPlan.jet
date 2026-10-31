@@ -67,6 +67,7 @@ fn store_plan_nix_downloads(verification: &StoreVerification, roots: HangarRoots
     scheduled := queue.copy()
     checked := 0
     plan := NixDownloadPlan.empty()
+    planned := [String: FetchedInfo]{}
     store_nix_progress_phase(progress, "Planning")
     store_nix_progress_objects(progress, 0, scheduled.len())
 
@@ -117,6 +118,7 @@ fn store_plan_nix_downloads(verification: &StoreVerification, roots: HangarRoots
         &names.sort()
         loop store_path in names {
             info :: fetched[store_path]
+            planned[store_path] = info.copy()
             file_size :: info.info.file_size ?? return Err(NixCacheError.new(.Metadata, "Nix narinfo has no signed FileSize for download planning"))
             plan.download_bytes = store_nix_checked_add(plan.download_bytes, file_size, "Nix closure download size overflowed")
             plan.disk_bytes = store_nix_checked_add(plan.disk_bytes, info.info.nar_size, "Nix closure on-disk size overflowed")
@@ -142,7 +144,50 @@ fn store_plan_nix_downloads(verification: &StoreVerification, roots: HangarRoots
     }
     &plan.items.sort_by((item: NixPlanItem) -> item.package)
     plan.estimated_seconds = store_nix_estimated_seconds(plan.download_bytes, store_nix_recent_throughput(roots))
+    store_nix_remember_planned_narinfos(&verification, roots, endpoint, planned)
     Ok(plan)
+}
+
+// The verified signed narinfos of the last plan for this Hangar root and cache
+// endpoint (Rust thread-local `PLANNED_NARINFOS`), carried by the verification
+// owner like the proven-member memo. An endpoint URL never holds a tab, so the
+// joined key is unambiguous.
+fn store_nix_planned_key(roots: HangarRoots, endpoint: NixCacheEndpoint) -> String Never! {
+    "{endpoint.endpoint}\t{roots.root}"
+}
+
+fn store_nix_remember_planned_narinfos(verification: &StoreVerification, roots: HangarRoots, endpoint: NixCacheEndpoint, infos: [String: FetchedInfo]) Never! {
+    state :: verification.state
+    permit := state.guard_edit()
+    permit.value.planned_narinfos[store_nix_planned_key(roots, endpoint)] = infos
+}
+
+fn store_nix_planned_narinfos(verification: &StoreVerification, roots: HangarRoots, endpoint: NixCacheEndpoint) -> [String: FetchedInfo] Never! {
+    state :: verification.state
+    permit :: state.guard_read()
+    if permit.value.planned_narinfos.get(store_nix_planned_key(roots, endpoint)) == {
+        .Val(infos) -> infos.copy()
+        .None -> [String: FetchedInfo]{}
+    }
+}
+
+// Schedule every reference reachable through planned narinfos up front, so
+// admission opens the planned dependency frontier without refetching it.
+fn store_nix_expand_planned_closure(queue: &Rank<String>, scheduled: &Rank<String>, infos: [String: FetchedInfo], store_dir: String) NixCacheError! {
+    frontier := queue.to_list()
+    loop frontier.len() > 0 {
+        store_path :: &frontier.pop() ?? break
+        info :: infos.get(store_path) ?? next
+        loop name in info.info.references {
+            reference :: "{store_dir}/{name}"
+            store_nix_validate_store_path(reference, store_dir)
+            if !scheduled.has(reference) {
+                &scheduled.add(reference)
+                &queue.add(reference)
+                &frontier.push(reference)
+            }
+        }
+    }
 }
 
 // Whole seconds to download `bytes` at `rate` bytes/second, rounded up.

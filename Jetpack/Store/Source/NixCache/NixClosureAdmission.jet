@@ -98,6 +98,8 @@ struct NixAdmission {
         queue := Rank<String>.new()
         loop request in requests.values() -> &queue.add(request.store_path)
         scheduled := queue.copy()
+        planned :: store_nix_planned_narinfos(&self.verification, self.roots, endpoint)
+        store_nix_expand_planned_closure(&queue, &scheduled, planned, store_dir)
         fetched := [String: FetchedObject]{}
         store_nix_progress_phase(progress, "Downloading")
         store_nix_progress_objects(progress, 0, scheduled.len())
@@ -129,7 +131,7 @@ struct NixAdmission {
             objects := [String: FetchedObject]{}
             first_error := NixCacheError?{None}
             loop store_path in pending {
-                if self.fetch_pending(endpoint, store_path, store_dir, progress) == {
+                if self.fetch_pending(endpoint, planned, store_path, store_dir, progress) == {
                     .Ok(object) -> objects[store_path] = object
                     .Err(error) -> if first_error == None -> first_error = Val(error)
                 }
@@ -185,10 +187,16 @@ struct NixAdmission {
         Ok(AdmittedNixClosure{outputs: selected, objects, closure_receipt_sha256: closure_receipt})
     }
 
-    // A fresh signed narinfo lookup, then fetch.
-    fn fetch_pending(self, endpoint: NixCacheEndpoint, store_path: String, store_dir: String, progress: ProgressHandle?) -[IO, FS, Net, Env, Time.Wait]> FetchedObject NixCacheError! {
-        looked :: endpoint.narinfo(store_path, store_dir)
-        info :: looked ?? return Err(NixCacheError.new(.MissingReference, "a requested Nix reference returned no narinfo"))
+    // The planned signed narinfo when this closure was planned (Rust
+    // `planned_infos`), else a fresh signed lookup; then fetch.
+    fn fetch_pending(self, endpoint: NixCacheEndpoint, planned: [String: FetchedInfo], store_path: String, store_dir: String, progress: ProgressHandle?) -[IO, FS, Net, Env, Time.Wait]> FetchedObject NixCacheError! {
+        info :: if planned.get(store_path) == {
+            .Val(known) -> known.copy()
+            .None -> {
+                looked :: endpoint.narinfo(store_path, store_dir)
+                looked ?? return Err(NixCacheError.new(.MissingReference, "a requested Nix reference returned no narinfo"))
+            }
+        }
         self.fetch_object(endpoint, info, store_dir, progress)
     }
 
