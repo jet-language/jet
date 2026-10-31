@@ -1,21 +1,23 @@
 package {
     name: "gap"
-    authority: { allow: [GPU] }
+    authority: { allow: [GPU, Net] }
 }
 
 use core.compute as compute
+use core.web.browser as browser
 
 fn nine() {
     row :: compute.vec(9, 1.0) ?? panic("vec")
+    wire :: compute.serialize(row) ?? panic("serialize")
     print("made")
 }
 
-#Test("nine makes its vector") {
+#Test("nine serializes its vector") {
     nine()
 }
 
 fn run() {
     nine()
-    row :: compute.vec(2, 1.0) ?? panic("vec")
+    session :: browser.connect("ws://127.0.0.1:2") ?? panic("connect")
     print("made")
 }

@@ -1,15 +1,20 @@
 # AGENTS.md I2 (#6065): a construct the IR builder can't lower is a compiler
 # fault, never a user diagnostic. Each faulty function is one census row
 # naming its pass, and one run reports every such function.
-# A `compute.vec` call (the `core.compute` runtime route jet_compute_vec) is a
-# known backend gap; when it lands, point this case at another open gap.
+# The fixture carries two independent open backend gaps, so one report counts
+# two fault rows: `nine` calls `compute.serialize` (the `core.compute` runtime
+# route jet_compute_serialize, R1), and `run` calls `browser.connect`, whose
+# Core function `connect_profile` reaches the runtime route
+# jet_browser_from_connection_raw (#6407). When either gap lands, replace it
+# with another open gap in the same position.
 fixture: fixtures/backend_gap
 step: jet build gap.jet
 exit: 101
 stderr: ~ "internal compiler error: the Jet backend failed on `gap.jet`: 2 compiler faults:" # one report counts every row
-stderr: ~ "ir.build unlowered: run [" # the entry's row names its pass and rule
+stderr: ~ "ir.build unlowered: connect_profile [" # the entry's gap row names its pass and rule
 stderr: ~ "ir.build unlowered: nine [" # the callee's row comes from the same run
-stderr: ~ "runtime route jet_compute_vec" # the builder's own message stays in the row
+stderr: ~ "runtime route jet_compute_serialize" # the builder's own message stays in the row
+stderr: ~ "runtime route jet_browser_from_connection_raw" # the builder's own message stays in the row
 stderr: !~ "E2104" # a backend gap is never a user diagnostic
 step: jet run gap.jet
 exit: 101
