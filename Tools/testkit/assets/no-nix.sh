@@ -56,9 +56,12 @@ emit_store_root() {
             ;;
     esac
 }
+# Root discovery is best effort: `ldd` reports "not a dynamic executable" for
+# scripts (ldd itself is one) and static binaries, and that report must not
+# reach the subject's stderr.
 store_roots() {
     if [ -f "$1" ]; then
-        for token in $("$ldd" "$1"); do emit_store_root "$token"; done
+        for token in $("$ldd" "$1" 2>/dev/null); do emit_store_root "$token"; done
     fi
     emit_store_root "$("$readlink" -f "$1")"
 }

@@ -30,7 +30,7 @@ use core.process as process
     pid :: process.current_pid()
     loop name in ["enabled", "disabled"] {
         relation :: if name == "enabled" -> "test" else -> "! test"
-        cases_test_source(root, name, "env: CASE_VALUE=value\nstep: jetpack -c 'set -eu; test ! -e /nix/store; {relation} /proc/self/ns/net -ef /proc/{pid}/ns/net; read line; echo \"$line|$CASE_VALUE|$1\"' scenario 'argument with spaces'\nisolate: no-nix network={name}\nstdin: input.stdin\nstdout: = expected.out\nstderr: empty\n")
+        cases_test_source(root, name, "env: CASE_VALUE=value\nstep: jetpack -c 'set -eu; test ! -e /nix/store; {relation} /proc/self/net/dev -ef /proc/{pid}/net/dev; read line; echo \"$line|$CASE_VALUE|$1\"' scenario 'argument with spaces'\nisolate: no-nix network={name}\nstdin: input.stdin\nstdout: = expected.out\nstderr: empty\n")
         context :: cases_test_context(root, files.join(root, "scratch-{name}"))
         outcome :: kit_cases_run(cases_test_entry(name), context)[0]
         assert_eq(outcome.verdict.status, "PASS")
