@@ -153,7 +153,8 @@ export function compareSuites(release, candidate, retry = [], dispositions = [])
 export function jetpackKeys(text) {
     const keys = new Set();
     for (const line of text.split('\n')) {
-        if (line.startsWith('errors per file:')) break;
+        // The summary starts at `errors per file:`; a clean check prints only `total errors: 0`.
+        if (line.startsWith('errors per file:') || line.startsWith('total errors:')) break;
         const fields = line.split(': ');
         if (fields.length > 1) keys.add(`${fields[0].split(':')[0]}\t${fields[1]}`);
     }

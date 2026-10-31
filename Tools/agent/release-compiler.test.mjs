@@ -60,6 +60,7 @@ test('a disposition names a card and matches a tier or every tier', () => {
 test('Jetpack census keys drop line numbers and stop at the per-file summary', () => {
     const text = 'Jetpack/A.jet:10:2: error[E1]: bad\nJetpack/A.jet:99:1: error[E1]: bad\nJetpack/B.jet:3:4: error[E2]: worse\nerrors per file:\nJetpack/C.jet:1:1: x: y\n';
     assert.deepEqual(jetpackKeys(text), ['Jetpack/A.jet\terror[E1]', 'Jetpack/B.jet\terror[E2]']);
+    assert.deepEqual(jetpackKeys('total errors: 0\n'), []);
 });
 
 test('chain RESULT rows and merge-tree conflicts parse', () => {
