@@ -13,10 +13,12 @@ fn envmodel_test_base_dir() -[Env]> String {
     sys.temp_dir()
 }
 
-// The repository root the committed fixtures are read from (the test
-// driver's working directory, Rust `CARGO_MANIFEST_DIR/../..`).
-fn envmodel_test_repo_root() -[FS, Env]> String {
-    files.cwd() ?? panic("the test driver has a working directory")
+// The repository root the committed fixtures are read from (Rust
+// `CARGO_MANIFEST_DIR/../..`): JET_TOOLCHAIN_ROOT, which check.sh exports as
+// the Jet tree it runs from. The claims run inside an assembled scratch
+// project, so the working directory is never that tree.
+fn envmodel_test_repo_root() -[Env]> String {
+    sys.get("JET_TOOLCHAIN_ROOT") ?? panic("JET_TOOLCHAIN_ROOT must name the Jet repository whose committed fixtures the claims read")
 }
 
 // A fresh, empty directory under the system temp dir, unique per call.
@@ -73,27 +75,16 @@ fn envmodel_test_render(file: String, src: String, diagnostic: Diagnostic) -> St
     diagnostic_render_all(file, src, [Diagnostic]{diagnostic}, false)
 }
 
-// Replace a temp-directory path under `modeval-<slug>-…/` with `<TMP>` so the
-// pinned snapshot does not depend on the fresh directory's name.
-fn envmodel_test_normalize_paths(code: String, rendered: String) -> String {
-    slug :: if code == {
-        "E0970" -> "find-missing"
-        "E0971" -> "find-liftability"
-        else -> { return rendered.copy() }
-    }
-    halves :: rendered.split_once("modeval-{slug}-") ?? return rendered.copy()
-    head :: if halves.before.cut_last("`") == {
-        .Val(parts) -> "{parts.before}`"
-        .None -> halves.before
-    }
-    rest :: halves.after.split_once("/") ?? return rendered.copy()
-    "{head}<TMP>/modeval-{slug}/{rest.after}"
+// `rendered` with the fresh directory `dir` (envmodel_test_fresh_dir(slug))
+// spelled `<TMP>/modeval-<slug>`, so the pinned snapshot does not depend on
+// the generated directory name.
+fn envmodel_test_redact_dir(rendered: String, dir: String, slug: String) -> String {
+    rendered.replace(dir, "<TMP>/modeval-{slug}")
 }
 
 // Compare a rendered diagnostic with its pinned snapshot; `UPDATE_EXPECT`
 // rewrites the snapshot first.
-fn envmodel_test_check_snapshot(code: String, rendered_raw: String) -[FS, Env]> {
-    rendered :: envmodel_test_normalize_paths(code, rendered_raw)
+fn envmodel_test_check_snapshot(code: String, rendered: String) -[FS, Env]> {
     assert(rendered.starts_with("Error [{code}]:"))
     assert(rendered.contains("\n Why: "))
     assert(rendered.contains("\n Fix: "))

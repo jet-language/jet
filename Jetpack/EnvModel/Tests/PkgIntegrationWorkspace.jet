@@ -1,6 +1,5 @@
 // Exact behavioral ports of tests/workspace.rs; package tests, no public entry point.
 // Existing helpers in Tests/WorkspaceFile.jet own fixture I/O and plan projections.
-use core.sys as s2_workspace_sys
 use jet_pkg_model.[
     RefSource, RefSpec, SourceTable, WorkspaceDeclarationCache, WorkspaceIndex, WorkspaceMember,
     pkg_sha256_hex,
@@ -26,7 +25,7 @@ use jet_env_model.[envmodel_workspace_evaluate, envmodel_workspace_load]
 }
 
 #Test("committed_monorepo_example_indexes_and_addresses_members") {
-    root :: s2_workspace_sys.get("JET_TEST_ROOT") ?? "."
+    root :: envmodel_test_repo_root()
     dir :: files.join(root, "Examples/features/packages/monorepo")
     source :: files.read(files.join(dir, "workspace.jet")) ?? panic("committed workspace source")
     plan :: envmodel_workspace_evaluate(source, dir) ?? panic("committed workspace evaluation")

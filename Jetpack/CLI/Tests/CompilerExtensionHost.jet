@@ -5,11 +5,9 @@
 // any guest code runs. The real-guest round-trip claims that need the loader
 // are listed in the U7 Core-gap ledger.
 
-// A fixture guest, resolved from the test driver's working directory (the
-// repository root).
+// A fixture guest under the repository root (cli_test_repo_root).
 fn cli_test_extension_fixture(name: String) -[FS, Env]> String {
-    root :: files.cwd() ?? panic("the test driver has a working directory")
-    files.join(root, "tests/fixtures/compiler_extension/{name}")
+    files.join(cli_test_repo_root(), "tests/fixtures/compiler_extension/{name}")
 }
 
 // Run a hidden host with `input` on stdin and wait for its receipt.

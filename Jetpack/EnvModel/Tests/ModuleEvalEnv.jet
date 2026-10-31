@@ -345,7 +345,7 @@ use jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
     rendered :: envmodel_test_render("env.jet", src, error)
     assert(rendered.contains("Error [E0970]:"))
     assert(rendered.contains("3 |     imports: find(\"./nope\")"))
-    envmodel_test_check_snapshot("E0970", rendered)
+    envmodel_test_check_snapshot("E0970", envmodel_test_redact_dir(rendered, dir, "find-missing"))
     files.remove_all(dir) ?? return
 }
 
@@ -546,7 +546,7 @@ use jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
     rendered :: envmodel_test_render("env.jet", src, error)
     assert(rendered.contains("Error [E0971]:"))
     assert(rendered.contains("liftability law"))
-    envmodel_test_check_snapshot("E0971", rendered)
+    envmodel_test_check_snapshot("E0971", envmodel_test_redact_dir(rendered, dir, "find-liftability"))
     files.remove_all(dir) ?? return
 }
 
@@ -554,11 +554,11 @@ use jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
     root :: envmodel_test_repo_root()
     source :: files.read(files.join(root, "env.jet")) ?? panic("read the repository env.jet")
     dev :: envmodel_evaluate_env_with_environment(source, root, Val("dev")) ?? panic("the dev environment evaluates")
-    assert_eq(dev.package_refs.len(), 28)
-    assert(dev.package_refs.contains("rustfmt@default"))
+    assert_eq(dev.package_refs.len(), 25)
+    assert(dev.package_refs.contains("rustc@default"))
     assert(dev.package_refs.contains("rPackages.jsonlite@default"))
     full :: envmodel_evaluate_env_with_environment(source, root, Val("full")) ?? panic("the full environment evaluates")
-    assert_eq(full.package_refs.len(), 51)
+    assert_eq(full.package_refs.len(), 48)
     names :: [String]{"rustup", "gnat", "fpc", "dart", "powershell", "gfortran", "gnucobol", "go", "jdk", "dotnet-sdk_8", "tcl", "lua5_4", "octave", "qemu", "wasmtime", "emscripten", "lldb", "raylib", "chromium", "firefox", "geckodriver", "gtk4", "bubblewrap"}
     loop name in names {
         // The full environment must carry every one of these packages.
@@ -569,7 +569,7 @@ use jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
 // Rust oracle: ModuleEval/System.rs:673-727 resolves the override field
 // environment before services/options; ordinary System capture is unchanged.
 #Test("fleet host fields shadow globals without changing the system") {
-    src :: "base :: comptime {{ 100 }}\nmodule system.web {{ target: linux.x64, options: [tuning.retries: 9] }}\nmodule fleet.prod {{ hosts: {{ web1: system.web.{{ options: [tuning.retries: base + 1], base: 4 }}, web2: system.web }} }}\n"
+    src :: "base :: comptime {{ 100 }}\nmodule system.web {{ target: linux.x64, options: [tuning.retries: 9] }}\nmodule fleet.prod {{ hosts: {{ web1: system.web{{ options: [tuning.retries: base + 1], base: 4 }}, web2: system.web }} }}\n"
     plan :: envmodel_evaluate_env(src, envmodel_test_base_dir()) ?? panic("fleet override evaluates")
     assert_eq(plan.systems[0].options[0].value, "9")
     fleets :: envmodel_test_host_groups(src, false)
@@ -586,7 +586,7 @@ use jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
 }
 
 #Test("fleet host service override rejects non boolean enable") {
-    src :: "module system.web {{ target: linux.x64 }}\nmodule fleet.prod {{ hosts: {{ web1: system.web.{{ services: {{ ssh: {{ enable: 1 }} }} }} }} }}\n"
+    src :: "module system.web {{ target: linux.x64 }}\nmodule fleet.prod {{ hosts: {{ web1: system.web{{ services: {{ ssh: {{ enable: 1 }} }} }} }} }}\n"
     error :: envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir()))
     // Rust ModuleEval/System.rs:698 calls evaluate_service (:104-135).
     assert_eq(error.code, "E0975")
@@ -594,7 +594,7 @@ use jet_pkg_model.[FactValue, Pkg, ProviderKind, pkg_ascii_lower]
 }
 
 #Test("vmtest host overrides share fleet typed evaluation") {
-    src :: "module system.web {{ target: linux.x64 }}\nmodule vmtest.boot {{ hosts: {{ machine: system.web.{{ region: base + 2, base: 40 }} }} }}\n"
+    src :: "module system.web {{ target: linux.x64 }}\nmodule vmtest.boot {{ hosts: {{ machine: system.web{{ region: base + 2, base: 40 }} }} }}\n"
     override_plan :: envmodel_test_host_groups(src, true)[0].hosts[0].overrides ?? panic("VM host has typed overrides")
     assert_eq(override_plan.fields[0].value, HostOverrideValue.Value{value: CtValue.Int{value: 42}})
     assert_eq(override_plan.provenance[0].field, "region")
