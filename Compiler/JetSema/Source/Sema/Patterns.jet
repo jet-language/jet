@@ -37,6 +37,7 @@ use jet_foundation.[
     type_identity_equal,
     type_name,
     type_union_member_tag,
+    expr_span,
 ]
 
 struct SemaCheckedPattern {
@@ -786,7 +787,7 @@ fn sema_pattern_map(subject_ty: Type, entries: [MapPatEntry], rest: Span?, span:
     keys := [String]{}
     loop entry in entries {
         if !sema_pattern_map_key_written(entry.key) {
-            &diagnostics.push(sema_error("E0305", entry.span, "a map-pattern key must be written out", "keys must be literals, enum cases or ALL_CAPS constants", "write the key's value or an ALL_CAPS constant"))
+            &diagnostics.push(sema_error("E0305", expr_span(entry.key), "a map-pattern key must be written out", "each arm looks its keys up directly, so a key is a literal, an enum case or an ALL_CAPS constant", "write the key as a literal or a constant, or test a computed key with a guard: `m.get(key) == .Val(v)`"))
             complete = false
         }
         checked :: sema_check_expression(entry.key, Val(key_ty), env, program, &writes, &state, &tail_store, &context, &diagnostics)
@@ -796,7 +797,7 @@ fn sema_pattern_map(subject_ty: Type, entries: [MapPatEntry], rest: Span?, span:
         }, env, program, context)
         if tree_pattern_key_identity(key, context) == .Val(identity) {
             if keys.contains(identity) {
-                &diagnostics.push(sema_error("E0117", entry.span, "this map pattern repeats a key", "each key can appear only once in a pattern", "remove the repeated key"))
+                &diagnostics.push(sema_error("E0117", expr_span(entry.key), "key {identity} appears twice in this map pattern", "each key of a map pattern is looked up once", "remove the repeated entry, or merge its pattern into the first one"))
                 complete = false
             }
             &keys.push(identity)
