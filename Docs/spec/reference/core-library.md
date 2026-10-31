@@ -2401,12 +2401,12 @@ resource loading requires the corresponding file and GPU authority.
 | `core.game.raylib.window_open(width, height, title)` | `RaylibWindow -[GPU]>` | Open a window; dimensions are clamped to `1..2,147,483,647`. |
 | `raylib.window_ready(window)` / `window_should_close(window)` | `Bool -[GPU]>` | Query window readiness or close state. |
 | `raylib.begin_drawing(window)` | `Unit -[GPU]>` | Begin a frame for a window. |
-| `raylib.end_drawing()` | `Unit -[GPU]>` | Finish the active frame. |
-| `raylib.clear_background(color)` | `Unit -[GPU]>` | Clear the active frame. |
+| `raylib.end_drawing()` | `Unit -[GPU]>` | Finish the active frame; with `JET_RAYLIB_CAPTURE` set, write the canvas to that path as a PAM image. |
+| `raylib.clear_background(color)` | `Unit -[GPU]>` | Set every canvas pixel to the color, alpha included. |
 | `raylib.close_window(window)` | `Unit -[GPU]>` | Close a window and release its display handle. |
 | `raylib.color(r, g, b, a)` | `RaylibColor` | Clamp each component to `0..255` and construct a color. |
-| `raylib.draw_rectangle(x, y, width, height, color)` | `Unit -[GPU]>` | Draw a rectangle. |
-| `raylib.draw_text(text, x, y, size, color)` | `Unit -[GPU]>` | Draw text. |
+| `raylib.draw_rectangle(x, y, width, height, color)` | `Unit -[GPU]>` | Fill a rectangle, clipped to the canvas and blended src-over. |
+| `raylib.draw_text(text, x, y, size, color)` | `Unit -[GPU]>` | Draw text in the built-in 5x7 font at whole-pixel scale `max(round(size / 10), 1)`; `\n` starts a new line. |
 | `raylib.draw_sprite(atlas, source, x, y)` | `Unit -[GPU]>` | Draw a sprite from a texture atlas. |
 | `raylib.load_texture_atlas(path)` | `RaylibTextureAtlas -[FS, GPU]>` | Load a texture atlas through the authority boundary. |
 | `raylib.load_sound(path)` | `RaylibSound -[FS, GPU]>` | Load a sound resource. |

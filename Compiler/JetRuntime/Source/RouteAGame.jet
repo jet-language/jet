@@ -1,9 +1,10 @@
 // core.game.raylib on the static native runtime: CoreLib/Top/HandlesRaylib.rs
 // :744-1065 with jet_raylib_api() == None. The display bridge dlopens
 // libraylib (HandlesRaylib.rs:664-735), which a static musl executable cannot
-// do, so every leaf takes the bridge's no-library path: windows are never
-// native, drawing and input are inert, sticks read 0. Atlas metadata is the
-// shared Core/Raylib.rs:67-147 parse; no texture is ever loaded. Carriers are
+// do, so windows are never native, input is inert and sticks read 0. Drawing
+// is real: Core scan-converts every primitive into clipped runs and this file
+// owns the RGBA canvas they paint. Atlas metadata is the shared
+// Core/Raylib.rs:67-147 parse; no texture is ever loaded. Carriers are
 // UiRaylibMetadata.jet's RaylibWindow32/RaylibTextureAtlas64/Region40.
 
 // Each leaf narrows its exact-Int words as the C adapter does before the call.
@@ -23,12 +24,133 @@ fn raylib_words(a: I64, b: I64, c: I64, d: I64) -> Bool {
 }
 #Export(c) fn jet_raylib_window_should_close(_window: I64) -> Bool { true }
 #Export(c) fn jet_raylib_window_ready(window: I64) -> Bool { ui_carrier_bool(window + UI_RAYLIB_WINDOW_NATIVE) != I64{0} }
-#Export(c) fn jet_raylib_begin_drawing(_window: I64) {}
-#Export(c) fn jet_raylib_clear_background(_color: I64) {}
-#Export(c) fn jet_raylib_draw_text(_text: I64, x: I64, y: I64, size: I64, _color: I64) { _ := raylib_words(x, y, size, I64{0}) }
-#Export(c) fn jet_raylib_draw_rectangle(x: I64, y: I64, width: I64, height: I64, _color: I64) { _ := raylib_words(x, y, width, height) }
-#Export(c) fn jet_raylib_end_drawing() {}
-#Export(c) fn jet_raylib_close_window(_window: I64) {}
+
+// The software canvas: row-major RGBA8, width * height * 4 bytes, zeroed when
+// begin_drawing (re)sizes it to the window and kept across same-size frames.
+// Drawing is single-threaded, as in raylib's own context.
+RAYLIB_CANVAS_SIDE_MAX :: I64{16384}
+raylib_canvas_pixels := I64{0}
+raylib_canvas_width := I64{0}
+raylib_canvas_height := I64{0}
+
+fn raylib_canvas_side(value: I64) -> I64 {
+    if (value < I64{0}) -> return I64{0}
+    if (value > RAYLIB_CANVAS_SIDE_MAX) -> return RAYLIB_CANVAS_SIDE_MAX
+    value
+}
+
+#Export(c) fn jet_raylib_begin_drawing(window: I64) {
+    width :: raylib_canvas_side(ui_carrier_word(window + UI_RAYLIB_WINDOW_WIDTH))
+    height :: raylib_canvas_side(ui_carrier_word(window + UI_RAYLIB_WINDOW_HEIGHT))
+    if (width == raylib_canvas_width && height == raylib_canvas_height) -> return
+    if (raylib_canvas_pixels != I64{0}) -> jet_rt_free(raylib_canvas_pixels, raylib_canvas_width * raylib_canvas_height * I64{4}, I64{1})
+    raylib_canvas_pixels = I64{0}
+    bytes :: width * height * I64{4}
+    if (bytes != I64{0}) {
+        raylib_canvas_pixels = jet_rt_alloc(bytes, I64{1})
+        coll_zero(raylib_canvas_pixels, bytes)
+    }
+    raylib_canvas_width = width
+    raylib_canvas_height = height
+}
+
+// Both sides fit 16 bits, so one word carries width << 16 | height.
+#Export(c) fn jet_raylib_canvas_extent() -> I64 {
+    jet_int_owned_from_i64((raylib_canvas_width << I64{16}).bit_or(raylib_canvas_height))
+}
+
+// One run of 0xRRGGBBAA. A replace copies the color (ClearBackground);
+// otherwise every channel, alpha included, blends src-over with rounding:
+// (src * a + dst * (255 - a) + 127) / 255, raylib's BLEND_ALPHA. The run is
+// clipped again here; the canvas never trusts its caller with its bounds.
+#Export(c) fn jet_raylib_fill_rect(x: I64, y: I64, width: I64, height: I64, rgba: I64, replace: Bool) {
+    left :: jet_int_owned_to_i64(x)
+    top :: jet_int_owned_to_i64(y)
+    run_width :: jet_int_owned_to_i64(width)
+    run_height :: jet_int_owned_to_i64(height)
+    color :: jet_int_owned_to_i64(rgba)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    alpha :: color.bit_and(I64{255})
+    if (raylib_canvas_pixels == I64{0} || run_width <= I64{0} || run_height <= I64{0} || (!replace && alpha == I64{0})) -> return
+    x0 :: if (left < I64{0}) -> I64{0} else -> left
+    y0 :: if (top < I64{0}) -> I64{0} else -> top
+    if (x0 >= raylib_canvas_width || y0 >= raylib_canvas_height) -> return
+    x1 :: if (left >= I64{0} && run_width > raylib_canvas_width - left) -> raylib_canvas_width else -> raylib_canvas_side_min(left + run_width, raylib_canvas_width)
+    y1 :: if (top >= I64{0} && run_height > raylib_canvas_height - top) -> raylib_canvas_height else -> raylib_canvas_side_min(top + run_height, raylib_canvas_height)
+    if (x1 <= x0 || y1 <= y0) -> return
+    red :: (color >> I64{24}).bit_and(I64{255})
+    green :: (color >> I64{16}).bit_and(I64{255})
+    blue :: (color >> I64{8}).bit_and(I64{255})
+    opaque :: replace || alpha == I64{255}
+    row := y0
+    loop row < y1 {
+        at := raylib_canvas_pixels + (row * raylib_canvas_width + x0) * I64{4}
+        stop :: raylib_canvas_pixels + (row * raylib_canvas_width + x1) * I64{4}
+        loop at < stop {
+            if (opaque) {
+                rt_text_put(at, red)
+                rt_text_put(at + I64{1}, green)
+                rt_text_put(at + I64{2}, blue)
+                rt_text_put(at + I64{3}, alpha)
+            } else {
+                rt_text_put(at, raylib_blend(red, rt_text_byte(at), alpha))
+                rt_text_put(at + I64{1}, raylib_blend(green, rt_text_byte(at + I64{1}), alpha))
+                rt_text_put(at + I64{2}, raylib_blend(blue, rt_text_byte(at + I64{2}), alpha))
+                rt_text_put(at + I64{3}, raylib_blend(alpha, rt_text_byte(at + I64{3}), alpha))
+            }
+            at += I64{4}
+        }
+        row += I64{1}
+    }
+}
+
+fn raylib_canvas_side_min(a: I64, b: I64) -> I64 {
+    if (a < b) -> return a
+    b
+}
+
+fn raylib_blend(source: I64, target: I64, alpha: I64) -> I64 {
+    (source * alpha + target * (I64{255} - alpha) + I64{127}) /% I64{255}
+}
+
+// With $JET_RAYLIB_CAPTURE set to a path, each presented frame overwrites that
+// file with the canvas as a PAM image (P7, RGB_ALPHA). The startup environment
+// value is NUL-terminated, so it is the open path as is. A capture that cannot
+// be written is skipped; the frame itself is unaffected.
+#Export(c) fn jet_raylib_end_drawing() {
+    if (raylib_canvas_pixels == I64{0}) -> return
+    path :: host_environment_value(rt_static_text("JET_RAYLIB_CAPTURE"))
+    if (path == I64{0} || rt_text_byte(path) == I64{0}) -> return
+    fd := I64{-4}
+    loop {
+        // O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, mode 0644.
+        fd = host_call(I64{2}, path, I64{524865}, I64{420})
+        if (fd != I64{-4}) -> break
+    }
+    if (fd < I64{0}) -> return
+    header :: jet_rt_string_builder_new()
+    raylib_push_static(header, rt_static_text("P7\nWIDTH "))
+    rt_text_push_number(header, raylib_canvas_width)
+    raylib_push_static(header, rt_static_text("\nHEIGHT "))
+    rt_text_push_number(header, raylib_canvas_height)
+    raylib_push_static(header, rt_static_text("\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n"))
+    text :: jet_rt_string_builder_finish(header)
+    if (host_write_all(fd, rt_text_data(text), rt_text_len(text)) == I64{0}) {
+        _ := host_write_all(fd, raylib_canvas_pixels, raylib_canvas_width * raylib_canvas_height * I64{4})
+    }
+    jet_rt_string_drop(text)
+    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+}
+
+fn raylib_push_static(builder: I64, text: I64) { rt_text_append(builder, rt_text_data(text), rt_text_len(text)) }
+
+// CloseWindow releases the canvas; a later begin_drawing allocates afresh.
+#Export(c) fn jet_raylib_close_window(_window: I64) {
+    if (raylib_canvas_pixels != I64{0}) -> jet_rt_free(raylib_canvas_pixels, raylib_canvas_width * raylib_canvas_height * I64{4}, I64{1})
+    raylib_canvas_pixels = I64{0}
+    raylib_canvas_width = I64{0}
+    raylib_canvas_height = I64{0}
+}
 #Export(c) fn jet_raylib_set_target_fps(fps: I64) { _ := raylib_words(fps, I64{0}, I64{0}, I64{0}) }
 #Export(c) fn jet_raylib_key_down(_name: I64) -> Bool { false }
 #Export(c) fn jet_raylib_gamepad_down(gamepad: I64, _button: I64) -> Bool {

@@ -1933,6 +1933,10 @@ D-TLSSERVE1).
 `core.game.raylib` provides the typed window, drawing, input, sound, and texture
 operations. Its default path is headless; `JET_RAYLIB_DISPLAY=1` enables the
 native display bridge, and a missing raylib library uses the headless path.
+Drawing is rasterized in Jet on every path: `clear_background`, `draw_rectangle`
+and `draw_text` (a built-in 5x7 bitmap font scaled by whole pixels) paint an
+RGBA canvas the size of the window with src-over blending, and
+`JET_RAYLIB_CAPTURE=PATH` writes each presented frame to PATH as a PAM image.
 `core.game` is scene-first: `game.Scene.new`, `scene.assets.image` and
 `sound`, `scene.input.bind`, `scene.component<T>()`, `scene.query<T...>()`,
 `game.Replay.record`, `game.Backend.headless`, and `game.run` provide
